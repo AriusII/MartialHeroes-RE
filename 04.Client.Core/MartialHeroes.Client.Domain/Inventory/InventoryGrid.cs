@@ -266,6 +266,22 @@ public sealed class InventoryGrid
         return true;
     }
 
+    /// <summary>
+    /// Overwrites the slot at <paramref name="index"/> with <paramref name="slot"/>. A low-level
+    /// primitive used by the pure stack operations in <see cref="ItemStackOps"/>; the caller is
+    /// responsible for any stack-size invariant beyond the per-slot normalisation in
+    /// <see cref="InventorySlot"/>.
+    /// </summary>
+    public void SetSlot(int index, InventorySlot slot)
+    {
+        if ((uint)index >= (uint)_slots.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        _slots[index] = slot;
+    }
+
     /// <summary>Clears every slot.</summary>
     public void Clear() => Array.Clear(_slots);
 }
