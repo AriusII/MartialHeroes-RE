@@ -191,7 +191,8 @@ public static class SessionHandshake
     /// </param>
     /// <returns>The whitened reply body, ready for the standard cipher + LZ4 send path.</returns>
     /// <exception cref="ArgumentException">If the credential is too long to leave PS ≥ 8 bytes (§6.3).</exception>
-    public static byte[] BuildAuthReply(in KeyExchange keyExchange, ReadOnlySpan<byte> credential, IPaddingRandom paddingRng)
+    public static byte[] BuildAuthReply(in KeyExchange keyExchange, ReadOnlySpan<byte> credential,
+        IPaddingRandom paddingRng)
     {
         ArgumentNullException.ThrowIfNull(paddingRng);
 

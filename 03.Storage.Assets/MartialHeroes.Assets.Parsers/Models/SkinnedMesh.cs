@@ -7,7 +7,7 @@ namespace MartialHeroes.Assets.Parsers.Models;
 /// spec: Docs/RE/formats/mesh.md §Face record — 36 bytes (3 corners × 12 bytes each)
 /// </remarks>
 public readonly record struct SknCorner(
-    uint  VertexIndex,
+    uint VertexIndex,
     float UvU,
     /// <summary>
     /// V-flipped relative to the on-disk value: stored as <c>1.0f - uv_v_on_disk</c>.
@@ -22,8 +22,8 @@ public readonly record struct SknCorner(
 /// spec: Docs/RE/formats/mesh.md §Weight record — 12 bytes, little-endian
 /// </remarks>
 public readonly record struct SknWeight(
-    uint  VertexIndex,
-    uint  BoneIndex,
+    uint VertexIndex,
+    uint BoneIndex,
     float Weight);
 
 /// <summary>

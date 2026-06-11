@@ -36,10 +36,14 @@ public sealed class VitalFormulaTests
         var s = new PrimaryStats(10, 10, 10, 10, 10);
 
         // Same base 132, different class multipliers.
-        Assert.Equal(39L, VitalFormula.ComputeMaxHp(VitalFormulaInputs.Empty with { Stats = s, ClassId = 1 })); // 0.3 -> 39
-        Assert.Equal(26L, VitalFormula.ComputeMaxHp(VitalFormulaInputs.Empty with { Stats = s, ClassId = 2 })); // 0.2 -> 26.4 -> 26
-        Assert.Equal(19L, VitalFormula.ComputeMaxHp(VitalFormulaInputs.Empty with { Stats = s, ClassId = 3 })); // 0.15 -> 19.8 -> 19
-        Assert.Equal(13L, VitalFormula.ComputeMaxHp(VitalFormulaInputs.Empty with { Stats = s, ClassId = 4 })); // 0.1 -> 13.2 -> 13
+        Assert.Equal(39L,
+            VitalFormula.ComputeMaxHp(VitalFormulaInputs.Empty with { Stats = s, ClassId = 1 })); // 0.3 -> 39
+        Assert.Equal(26L,
+            VitalFormula.ComputeMaxHp(VitalFormulaInputs.Empty with { Stats = s, ClassId = 2 })); // 0.2 -> 26.4 -> 26
+        Assert.Equal(19L,
+            VitalFormula.ComputeMaxHp(VitalFormulaInputs.Empty with { Stats = s, ClassId = 3 })); // 0.15 -> 19.8 -> 19
+        Assert.Equal(13L,
+            VitalFormula.ComputeMaxHp(VitalFormulaInputs.Empty with { Stats = s, ClassId = 4 })); // 0.1 -> 13.2 -> 13
     }
 
     [Fact]
@@ -114,7 +118,7 @@ public sealed class VitalFormulaTests
         var withSlot8 = Stats(10, 10, 10, 10, 10, classId: 1) with { EquipmentHpFlat = 68 + 500 };
 
         long a = VitalFormula.ComputeMaxHp(withoutSlot8); // floor(200*0.3)=60
-        long b = VitalFormula.ComputeMaxHp(withSlot8);    // floor(700*0.3)=210
+        long b = VitalFormula.ComputeMaxHp(withSlot8); // floor(700*0.3)=210
         Assert.Equal(60L, a);
         Assert.Equal(210L, b);
     }
@@ -309,7 +313,7 @@ public sealed class VitalFormulaTests
     [InlineData(2, 0.2)]
     [InlineData(3, 0.15)]
     [InlineData(4, 0.1)]
-    [InlineData(5, 0.0)]   // out of range -> sentinel
+    [InlineData(5, 0.0)] // out of range -> sentinel
     [InlineData(255, 0.0)] // out of range -> sentinel
     public void ClassHpTable_HasRecoveredMultipliers(byte classId, double expected)
     {

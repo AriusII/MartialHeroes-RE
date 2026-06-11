@@ -19,9 +19,9 @@ public sealed class ItemCacheStoreTests
         await store.InitialiseAsync();
 
         var item = new CachedItemDto(
-            Id:           new ItemId(42u),
-            Name:         "Iron Sword",
-            Description:  "A standard iron blade.",
+            Id: new ItemId(42u),
+            Name: "Iron Sword",
+            Description: "A standard iron blade.",
             ItemTypeCode: 1);
 
         await store.UpsertAsync(item);
@@ -30,9 +30,9 @@ public sealed class ItemCacheStoreTests
 
         Assert.NotNull(loaded);
         Assert.Equal(new ItemId(42u), loaded.Id);
-        Assert.Equal("Iron Sword",          loaded.Name);
+        Assert.Equal("Iron Sword", loaded.Name);
         Assert.Equal("A standard iron blade.", loaded.Description);
-        Assert.Equal((byte)1,               loaded.ItemTypeCode);
+        Assert.Equal((byte)1, loaded.ItemTypeCode);
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class ItemCacheStoreTests
         Assert.NotNull(loaded);
         Assert.Equal("New Name", loaded.Name);
         Assert.Equal("New Desc", loaded.Description);
-        Assert.Equal((byte)2,    loaded.ItemTypeCode);
+        Assert.Equal((byte)2, loaded.ItemTypeCode);
     }
 
     [Fact]

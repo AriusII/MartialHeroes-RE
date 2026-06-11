@@ -137,9 +137,9 @@ public sealed class Actor
         Yaw = yaw;
         MoveSpeedRawPerSecond = moveSpeedRawPerSecond;
         TargetRawId = 0;
-        IsAlive = true;            // spec: actor.md alive default 1
-        IsPkEnabled = false;       // spec: actor.md pk_flag default 0
-        IsInCombat = false;        // spec: actor.md combat_flag default 0
+        IsAlive = true; // spec: actor.md alive default 1
+        IsPkEnabled = false; // spec: actor.md pk_flag default 0
+        IsInCombat = false; // spec: actor.md combat_flag default 0
         Lifecycle = LifecycleState.Refreshing;
     }
 

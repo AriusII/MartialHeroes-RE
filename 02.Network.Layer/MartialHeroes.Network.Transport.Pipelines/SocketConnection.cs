@@ -111,7 +111,7 @@ internal sealed class SocketConnection : IConnectionSession
         try
         {
             await _socket.SendAsync(frame, SocketFlags.None, cancellationToken)
-                         .ConfigureAwait(false);
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -235,7 +235,7 @@ internal sealed class SocketConnection : IConnectionSession
         {
             FrameSplitter.FrameLoopResult loopResult =
                 await FrameSplitter.RunAsync(_inboundPipe.Reader, Id, _frameSink, ct)
-                                   .ConfigureAwait(false);
+                    .ConfigureAwait(false);
 
             if (loopResult == FrameSplitter.FrameLoopResult.FramingError)
             {
@@ -274,8 +274,8 @@ internal sealed class SocketConnection : IConnectionSession
         }
 
         ConnectionState finalState = reason is DisconnectReason.FramingError
-                                     or DisconnectReason.NetworkError
-                                     or DisconnectReason.CryptoError
+            or DisconnectReason.NetworkError
+            or DisconnectReason.CryptoError
             ? ConnectionState.Faulted
             : ConnectionState.Disconnected;
 
@@ -289,8 +289,14 @@ internal sealed class SocketConnection : IConnectionSession
         {
             _socket.Shutdown(SocketShutdown.Both);
         }
-        catch (SocketException) { /* already disconnected */ }
-        catch (ObjectDisposedException) { /* already disposed */ }
+        catch (SocketException)
+        {
+            /* already disconnected */
+        }
+        catch (ObjectDisposedException)
+        {
+            /* already disposed */
+        }
 
         _socket.Close();
 
@@ -299,7 +305,10 @@ internal sealed class SocketConnection : IConnectionSession
         {
             await Task.WhenAll(_receiveLoopTask, _frameLoopTask).ConfigureAwait(false);
         }
-        catch { /* exceptions were already captured per-loop */ }
+        catch
+        {
+            /* exceptions were already captured per-loop */
+        }
 
         // Raise the disconnect event on a thread-pool thread to avoid re-entering callers.
         SessionDisconnectedEventArgs args = new(Id, reason, exception);

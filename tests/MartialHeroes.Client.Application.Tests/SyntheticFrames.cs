@@ -16,8 +16,8 @@ internal static class SyntheticFrames
         var frame = new byte[FrameHeader.Size + payload.Length];
         BinaryPrimitives.WriteUInt16LittleEndian(frame.AsSpan(0, 2), (ushort)frame.Length); // size@+0
         // bytes @+2..+3 unused for framing
-        BinaryPrimitives.WriteUInt16LittleEndian(frame.AsSpan(4, 2), major);                 // major@+4
-        BinaryPrimitives.WriteUInt16LittleEndian(frame.AsSpan(6, 2), minor);                 // minor@+6
+        BinaryPrimitives.WriteUInt16LittleEndian(frame.AsSpan(4, 2), major); // major@+4
+        BinaryPrimitives.WriteUInt16LittleEndian(frame.AsSpan(6, 2), minor); // minor@+6
         payload.CopyTo(frame.AsSpan(FrameHeader.Size));
         return frame;
     }
@@ -77,9 +77,9 @@ internal static class SyntheticFrames
         BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x04, 4), actorId);
         p[0x0a] = levelOrState;
         p[0x0b] = stateByte;
-        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x10, 4), currentHp);  // CurrentHp @0x10
-        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x18, 4), stamina);    // Stamina @0x18
-        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x1c, 4), vitalC);     // VitalC (MP) @0x1c
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x10, 4), currentHp); // CurrentHp @0x10
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x18, 4), stamina); // Stamina @0x18
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x1c, 4), vitalC); // VitalC (MP) @0x1c
         return Frame(5, 53, p);
     }
 
@@ -104,13 +104,13 @@ internal static class SyntheticFrames
         byte[] nameBytes = System.Text.Encoding.ASCII.GetBytes(name);
         int nameLen = Math.Min(nameBytes.Length, 16); // spec: spawn_descriptor.md +0x00
         Array.Copy(nameBytes, 0, p, sd + 0x00, nameLen);
-        BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(sd + 0x3A, 2), level);          // +0x3A
-        BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(sd + 0x3C, 4), currentHp);      // +0x3C
-        BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(sd + 0x40, 4), currentMp);      // +0x40
+        BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(sd + 0x3A, 2), level); // +0x3A
+        BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(sd + 0x3C, 4), currentHp); // +0x3C
+        BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(sd + 0x40, 4), currentMp); // +0x40
         BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(sd + 0x44, 4), currentStamina); // +0x44
-        BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(sd + 0x4C, 4), worldX);         // +0x4C
-        BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(sd + 0x50, 4), worldZ);         // +0x50
-        BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(sd + 0x74, 2), serverClass);    // +0x74
+        BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(sd + 0x4C, 4), worldX); // +0x4C
+        BinaryPrimitives.WriteSingleLittleEndian(p.AsSpan(sd + 0x50, 4), worldZ); // +0x50
+        BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(sd + 0x74, 2), serverClass); // +0x74
 
         return Frame(5, 1, p);
     }
@@ -155,7 +155,10 @@ internal static class SyntheticFrames
     public static byte[] KeyExchange(byte[] modulusDigits, byte[] exponentDigits, uint scalar1, uint scalar2)
     {
         var payload = new byte[62];
-        payload[0] = 0xAB; payload[1] = 0xCD; payload[2] = 0xEF; payload[3] = 0x01; // opaque headers
+        payload[0] = 0xAB;
+        payload[1] = 0xCD;
+        payload[2] = 0xEF;
+        payload[3] = 0x01; // opaque headers
         int cursor = 4;
         BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(cursor, 4), (uint)modulusDigits.Length);
         cursor += 4;

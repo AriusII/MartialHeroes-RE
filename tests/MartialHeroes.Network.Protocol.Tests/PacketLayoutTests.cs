@@ -116,17 +116,17 @@ public sealed class PacketLayoutTests
         // Build a 32-byte LE frame body with distinctive per-field values, then reinterpret it as
         // the wire struct and assert each field lands at its specced offset. spec: 5-53.
         Span<byte> body = stackalloc byte[SmsgActorVitalsAndPairState.WireSize];
-        body[0x00] = 2;                                            // Sort
+        body[0x00] = 2; // Sort
         BinaryPrimitives.WriteUInt32LittleEndian(body[0x04..], 0x11223344u); // ActorId
-        body[0x08] = 0xAB;                                         // Byte08
-        body[0x09] = 0xCD;                                         // Byte09
-        body[0x0a] = 42;                                           // LevelOrState
-        body[0x0b] = 7;                                            // StateByte
+        body[0x08] = 0xAB; // Byte08
+        body[0x09] = 0xCD; // Byte09
+        body[0x0a] = 42; // LevelOrState
+        body[0x0b] = 7; // StateByte
         BinaryPrimitives.WriteUInt32LittleEndian(body[0x0c..], 0x55667788u); // PartnerId
-        BinaryPrimitives.WriteUInt32LittleEndian(body[0x10..], 1000u);       // CurrentHp
-        BinaryPrimitives.WriteUInt32LittleEndian(body[0x14..], 2000u);       // VitalB
-        BinaryPrimitives.WriteUInt32LittleEndian(body[0x18..], 3000u);       // Stamina
-        BinaryPrimitives.WriteUInt32LittleEndian(body[0x1c..], 4000u);       // VitalC
+        BinaryPrimitives.WriteUInt32LittleEndian(body[0x10..], 1000u); // CurrentHp
+        BinaryPrimitives.WriteUInt32LittleEndian(body[0x14..], 2000u); // VitalB
+        BinaryPrimitives.WriteUInt32LittleEndian(body[0x18..], 3000u); // Stamina
+        BinaryPrimitives.WriteUInt32LittleEndian(body[0x1c..], 4000u); // VitalC
 
         ref readonly SmsgActorVitalsAndPairState p =
             ref MemoryMarshal.AsRef<SmsgActorVitalsAndPairState>(body);

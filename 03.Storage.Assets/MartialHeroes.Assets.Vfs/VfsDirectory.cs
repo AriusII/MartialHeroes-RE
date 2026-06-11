@@ -26,8 +26,8 @@ namespace MartialHeroes.Assets.Vfs;
 internal sealed class VfsDirectory
 {
     // spec: Docs/RE/formats/pak.md — header constants.
-    private const int HeaderSize        = 24;  // spec: Docs/RE/formats/pak.md — "24-byte header". CONFIRMED.
-    private const int EntryCountOffset  = 12;  // spec: Docs/RE/formats/pak.md — entry_count @ +12. CONFIRMED.
+    private const int HeaderSize = 24; // spec: Docs/RE/formats/pak.md — "24-byte header". CONFIRMED.
+    private const int EntryCountOffset = 12; // spec: Docs/RE/formats/pak.md — entry_count @ +12. CONFIRMED.
 
     /// <summary>Sorted array of entries — the binary-search target.</summary>
     private readonly VfsEntry[] _entries;
@@ -105,8 +105,9 @@ internal sealed class VfsDirectory
             int cmp = string.CompareOrdinal(_entries[mid].Name, normalizedName);
             if (cmp == 0) return _entries[mid];
             if (cmp < 0) lo = mid + 1;
-            else         hi = mid - 1;
+            else hi = mid - 1;
         }
+
         return null;
     }
 

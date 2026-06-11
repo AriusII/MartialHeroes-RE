@@ -94,7 +94,7 @@ public sealed class InboundS2CHandlerTests
         var key = new ActorKey(55, EntitySort.PlayerCharacter);
         Assert.True(world.TryGet(key, out Actor actor));
         Assert.Equal(12, actor.Level);
-        Assert.Equal(320u, actor.CurrentHp);   // not clamped (server-authoritative guard)
+        Assert.Equal(320u, actor.CurrentHp); // not clamped (server-authoritative guard)
         Assert.Equal(140u, actor.CurrentMp);
         Assert.Equal(Vector3Fixed.FromFloat(7.5f, 0f, -2.0f), actor.Position);
 

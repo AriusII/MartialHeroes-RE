@@ -198,11 +198,11 @@ public sealed class Vector3FixedTests
         // 0.5 in Q16.16 = One/2 = 32768
         // 0.5 * 0.5 in Q16.16: ((long)32768 * 32768) >> 16
         //   = 1073741824 >> 16 = 16384 = One/4  =>  0.25 in real units
-        int half = One / 2;      // 32768 — Q16.16 representation of 0.5
-        int quarter = One / 4;   // 16384 — Q16.16 representation of 0.25
+        int half = One / 2; // 32768 — Q16.16 representation of 0.5
+        int quarter = One / 4; // 16384 — Q16.16 representation of 0.25
 
         var v = new Vector3Fixed(half, half, half);
-        var result = v * half;   // 0.5 * 0.5
+        var result = v * half; // 0.5 * 0.5
 
         Assert.Equal(quarter, result.RawX);
         Assert.Equal(quarter, result.RawY);
@@ -220,7 +220,7 @@ public sealed class Vector3FixedTests
         //           = 140737488158720 >> 16
         //           = 2147483646
         int rawX = int.MaxValue / 2; // 1073741823
-        int scalar = 2 * One;        // 131072
+        int scalar = 2 * One; // 131072
 
         long expectedLong = ((long)rawX * scalar) >> 16; // 2147483646
         int expected = (int)expectedLong;

@@ -1,38 +1,42 @@
 <Solution>
-  <Folder Name="/01.Infrastructure.Shared/">
-    <Project Path="01.Infrastructure.Shared/MartialHeroes.Shared.Diagnostics/MartialHeroes.Shared.Diagnostics.csproj" />
-    <Project Path="01.Infrastructure.Shared/MartialHeroes.Shared.Kernel/MartialHeroes.Shared.Kernel.csproj" />
-  </Folder>
-  <Folder Name="/02.Network.Layer/">
-    <Project Path="02.Network.Layer/MartialHeroes.Network.Abstractions/MartialHeroes.Network.Abstractions.csproj" />
-    <Project Path="02.Network.Layer/MartialHeroes.Network.Crypto/MartialHeroes.Network.Crypto.csproj" />
-    <Project Path="02.Network.Layer/MartialHeroes.Network.Protocol/MartialHeroes.Network.Protocol.csproj" />
-    <Project Path="02.Network.Layer/MartialHeroes.Network.Transport.Pipelines/MartialHeroes.Network.Transport.Pipelines.csproj" />
-  </Folder>
-  <Folder Name="/03.Storage.Assets/">
-    <Project Path="03.Storage.Assets/MartialHeroes.Assets.Mapping/MartialHeroes.Assets.Mapping.csproj" />
-    <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers/MartialHeroes.Assets.Parsers.csproj" />
-    <Project Path="03.Storage.Assets/MartialHeroes.Assets.Vfs/MartialHeroes.Assets.Vfs.csproj" />
-  </Folder>
-  <Folder Name="/04.Client.Core/">
-    <Project Path="04.Client.Core/MartialHeroes.Client.Application/MartialHeroes.Client.Application.csproj" />
-    <Project Path="04.Client.Core/MartialHeroes.Client.Domain/MartialHeroes.Client.Domain.csproj" />
-    <Project Path="04.Client.Core/MartialHeroes.Client.Infrastructure/MartialHeroes.Client.Infrastructure.csproj" />
-  </Folder>
-  <Folder Name="/05.Presentation/">
-    <Project Path="05.Presentation/MartialHeroes.Client.Godot/MartialHeroes.Client.Godot.csproj" />
-  </Folder>
-  <Folder Name="/Docs/" />
-  <Folder Name="/Tests/">
-    <Project Path="tests/MartialHeroes.Assets.Mapping.Tests/MartialHeroes.Assets.Mapping.Tests.csproj" />
-    <Project Path="tests/MartialHeroes.Assets.Parsers.Tests/MartialHeroes.Assets.Parsers.Tests.csproj" />
-    <Project Path="tests/MartialHeroes.Assets.Vfs.Tests/MartialHeroes.Assets.Vfs.Tests.csproj" />
-    <Project Path="tests/MartialHeroes.Client.Application.Tests/MartialHeroes.Client.Application.Tests.csproj" />
-    <Project Path="tests/MartialHeroes.Client.Domain.Tests/MartialHeroes.Client.Domain.Tests.csproj" />
-    <Project Path="tests/MartialHeroes.Client.Infrastructure.Tests/MartialHeroes.Client.Infrastructure.Tests.csproj" />
-    <Project Path="tests/MartialHeroes.Network.Crypto.Tests/MartialHeroes.Network.Crypto.Tests.csproj" />
-    <Project Path="tests/MartialHeroes.Network.Protocol.Tests/MartialHeroes.Network.Protocol.Tests.csproj" />
-    <Project Path="tests/MartialHeroes.Network.Transport.Pipelines.Tests/MartialHeroes.Network.Transport.Pipelines.Tests.csproj" />
-    <Project Path="tests/MartialHeroes.Shared.Kernel.Tests/MartialHeroes.Shared.Kernel.Tests.csproj" />
-  </Folder>
+    <Folder Name="/01.Infrastructure.Shared/">
+        <Project
+                Path="01.Infrastructure.Shared/MartialHeroes.Shared.Diagnostics/MartialHeroes.Shared.Diagnostics.csproj"/>
+        <Project Path="01.Infrastructure.Shared/MartialHeroes.Shared.Kernel/MartialHeroes.Shared.Kernel.csproj"/>
+    </Folder>
+    <Folder Name="/02.Network.Layer/">
+        <Project Path="02.Network.Layer/MartialHeroes.Network.Abstractions/MartialHeroes.Network.Abstractions.csproj"/>
+        <Project Path="02.Network.Layer/MartialHeroes.Network.Crypto/MartialHeroes.Network.Crypto.csproj"/>
+        <Project Path="02.Network.Layer/MartialHeroes.Network.Protocol/MartialHeroes.Network.Protocol.csproj"/>
+        <Project
+                Path="02.Network.Layer/MartialHeroes.Network.Transport.Pipelines/MartialHeroes.Network.Transport.Pipelines.csproj"/>
+    </Folder>
+    <Folder Name="/03.Storage.Assets/">
+        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Mapping/MartialHeroes.Assets.Mapping.csproj"/>
+        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers/MartialHeroes.Assets.Parsers.csproj"/>
+        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Vfs/MartialHeroes.Assets.Vfs.csproj"/>
+    </Folder>
+    <Folder Name="/04.Client.Core/">
+        <Project Path="04.Client.Core/MartialHeroes.Client.Application/MartialHeroes.Client.Application.csproj"/>
+        <Project Path="04.Client.Core/MartialHeroes.Client.Domain/MartialHeroes.Client.Domain.csproj"/>
+        <Project Path="04.Client.Core/MartialHeroes.Client.Infrastructure/MartialHeroes.Client.Infrastructure.csproj"/>
+    </Folder>
+    <Folder Name="/05.Presentation/">
+        <Project Path="05.Presentation/MartialHeroes.Client.Godot/MartialHeroes.Client.Godot.csproj"/>
+    </Folder>
+    <Folder Name="/Docs/"/>
+    <Folder Name="/Tests/">
+        <Project Path="tests/MartialHeroes.Assets.Mapping.Tests/MartialHeroes.Assets.Mapping.Tests.csproj"/>
+        <Project Path="tests/MartialHeroes.Assets.Parsers.Tests/MartialHeroes.Assets.Parsers.Tests.csproj"/>
+        <Project Path="tests/MartialHeroes.Assets.Vfs.Tests/MartialHeroes.Assets.Vfs.Tests.csproj"/>
+        <Project Path="tests/MartialHeroes.Client.Application.Tests/MartialHeroes.Client.Application.Tests.csproj"/>
+        <Project Path="tests/MartialHeroes.Client.Domain.Tests/MartialHeroes.Client.Domain.Tests.csproj"/>
+        <Project
+                Path="tests/MartialHeroes.Client.Infrastructure.Tests/MartialHeroes.Client.Infrastructure.Tests.csproj"/>
+        <Project Path="tests/MartialHeroes.Network.Crypto.Tests/MartialHeroes.Network.Crypto.Tests.csproj"/>
+        <Project Path="tests/MartialHeroes.Network.Protocol.Tests/MartialHeroes.Network.Protocol.Tests.csproj"/>
+        <Project
+                Path="tests/MartialHeroes.Network.Transport.Pipelines.Tests/MartialHeroes.Network.Transport.Pipelines.Tests.csproj"/>
+        <Project Path="tests/MartialHeroes.Shared.Kernel.Tests/MartialHeroes.Shared.Kernel.Tests.csproj"/>
+    </Folder>
 </Solution>

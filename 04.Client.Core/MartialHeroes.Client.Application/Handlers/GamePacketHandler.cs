@@ -117,8 +117,8 @@ public sealed class GamePacketHandler : IPacketHandler
         }
         else
         {
-            actor.SnapTo(position);          // seed the current position from the network sample
-            actor.SetMoveTarget(target);     // then interpolate toward the destination
+            actor.SnapTo(position); // seed the current position from the network sample
+            actor.SetMoveTarget(target); // then interpolate toward the destination
         }
 
         actor.SetYaw(yaw);
@@ -228,11 +228,11 @@ public sealed class GamePacketHandler : IPacketHandler
     {
         switch (packedOpcode)
         {
-            case Opcodes.SmsgKeyExchange:                 // 0/0 — login key exchange
+            case Opcodes.SmsgKeyExchange: // 0/0 — login key exchange
                 HandleKeyExchange(payload);
                 return;
 
-            case Opcodes.SmsgActorVitalsAndPairState:     // 5/53 — actor vitals
+            case Opcodes.SmsgActorVitalsAndPairState: // 5/53 — actor vitals
                 if (payload.Length >= SmsgActorVitalsAndPairState.WireSize)
                 {
                     HandleVitals(in MemoryMarshal.AsRef<SmsgActorVitalsAndPairState>(payload));
@@ -241,7 +241,7 @@ public sealed class GamePacketHandler : IPacketHandler
 
                 break;
 
-            case Opcodes.SmsgActorSpawnExtended:          // 5/1 — extended actor spawn
+            case Opcodes.SmsgActorSpawnExtended: // 5/1 — extended actor spawn
                 if (payload.Length >= SmsgActorSpawnExtended.WireSize)
                 {
                     HandleSpawnExtended(in MemoryMarshal.AsRef<SmsgActorSpawnExtended>(payload));
@@ -250,7 +250,7 @@ public sealed class GamePacketHandler : IPacketHandler
 
                 break;
 
-            case Opcodes.SmsgStatUpdate:                  // 4/29 — stat update
+            case Opcodes.SmsgStatUpdate: // 4/29 — stat update
                 if (payload.Length >= SmsgStatUpdate.WireSize)
                 {
                     HandleStatUpdate(in MemoryMarshal.AsRef<SmsgStatUpdate>(payload));
@@ -259,7 +259,7 @@ public sealed class GamePacketHandler : IPacketHandler
 
                 break;
 
-            case Opcodes.SmsgLevelUp:                     // 5/32 — level up
+            case Opcodes.SmsgLevelUp: // 5/32 — level up
                 if (payload.Length >= SmsgLevelUp.WireSize)
                 {
                     HandleLevelUp(in MemoryMarshal.AsRef<SmsgLevelUp>(payload));
@@ -341,12 +341,12 @@ public sealed class GamePacketHandler : IPacketHandler
         ReadOnlySpan<byte> descriptorBytes = packet.SpawnDescriptor;
         var reader = new SpawnDescriptorReader(descriptorBytes);
 
-        string name = reader.ReadName();                 // SD +0x00. spec: spawn_descriptor.md
-        ushort level = reader.ReadLevel();               // SD +0x3A. spec: spawn_descriptor.md
-        uint currentHp = reader.ReadCurrentHp();         // SD +0x3C. spec: spawn_descriptor.md
-        uint currentMp = reader.ReadCurrentMp();         // SD +0x40. spec: spawn_descriptor.md
+        string name = reader.ReadName(); // SD +0x00. spec: spawn_descriptor.md
+        ushort level = reader.ReadLevel(); // SD +0x3A. spec: spawn_descriptor.md
+        uint currentHp = reader.ReadCurrentHp(); // SD +0x3C. spec: spawn_descriptor.md
+        uint currentMp = reader.ReadCurrentMp(); // SD +0x40. spec: spawn_descriptor.md
         uint currentStamina = reader.ReadCurrentStamina(); // SD +0x44. spec: spawn_descriptor.md
-        ushort serverClass = reader.ReadServerClass();   // SD +0x74. spec: spawn_descriptor.md
+        ushort serverClass = reader.ReadServerClass(); // SD +0x74. spec: spawn_descriptor.md
 
         // Float -> fixed at the boundary; world Y forced 0. spec: spawn_descriptor.md (+0x4C/+0x50).
         Vector3Fixed position = Vector3Fixed.FromFloat(reader.ReadWorldX(), 0f, reader.ReadWorldZ());
@@ -402,9 +402,9 @@ public sealed class GamePacketHandler : IPacketHandler
         var key = new ActorKey(packet.ActorId, ToEntitySort(packet.Sort));
 
         // HP = low i32 half, MP = high i32 half of the packed value. spec: 5-32 (HpMpPacked).
-        uint currentHp = unchecked((uint)(packet.HpMpPacked & 0xFFFF_FFFF));        // 0x14 low
+        uint currentHp = unchecked((uint)(packet.HpMpPacked & 0xFFFF_FFFF)); // 0x14 low
         uint currentMp = unchecked((uint)((packet.HpMpPacked >> 32) & 0xFFFF_FFFF)); // 0x14 high
-        uint currentStamina = unchecked((uint)packet.Stamina);                       // 0x1c
+        uint currentStamina = unchecked((uint)packet.Stamina); // 0x1c
 
         if (_world.TryGet(key, out Actor actor))
         {
@@ -424,9 +424,9 @@ public sealed class GamePacketHandler : IPacketHandler
 
     private static EntitySort ToEntitySort(byte sort) => sort switch
     {
-        1 => EntitySort.PlayerCharacter,   // spec: actor.md sort == 1
-        2 => EntitySort.Monster,           // spec: actor.md sort == 2
-        3 => EntitySort.NonPlayerCharacter,// spec: actor.md sort == 3
+        1 => EntitySort.PlayerCharacter, // spec: actor.md sort == 1
+        2 => EntitySort.Monster, // spec: actor.md sort == 2
+        3 => EntitySort.NonPlayerCharacter, // spec: actor.md sort == 3
         _ => EntitySort.None,
     };
 

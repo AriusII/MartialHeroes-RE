@@ -38,6 +38,7 @@ public readonly struct SmsgCharDespawn
 
     /// <summary>0x09 — padding to 12 bytes. spec: packets/5-0_char_despawn.yaml (Pad0: bytes[3]).</summary>
     private readonly byte _pad0;
+
     private readonly byte _pad1;
     private readonly byte _pad2;
 

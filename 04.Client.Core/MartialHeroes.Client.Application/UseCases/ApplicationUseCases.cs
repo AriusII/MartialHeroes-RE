@@ -113,8 +113,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         Span<byte> payload = stackalloc byte[CmsgMoveRequest.WireSize];
         payload.Clear();
         BinaryPrimitives.WriteSingleLittleEndian(payload.Slice(0x00, 4), heading); // 0x00 Heading
-        BinaryPrimitives.WriteSingleLittleEndian(payload.Slice(0x04, 4), tgtX);    // 0x04 TargetX
-        BinaryPrimitives.WriteSingleLittleEndian(payload.Slice(0x08, 4), tgtZ);    // 0x08 TargetZ
+        BinaryPrimitives.WriteSingleLittleEndian(payload.Slice(0x04, 4), tgtX); // 0x04 TargetX
+        BinaryPrimitives.WriteSingleLittleEndian(payload.Slice(0x08, 4), tgtZ); // 0x08 TargetZ
         // 0x0c ModeFlags: low byte is the click-to-move mode selector (1); a run bit packs into the
         // same region. The sub-byte split is UNKNOWN, so we set mode=1 plus a run bit at 0x100.
         // spec: 2-13_move_request.yaml (ModeFlags, byte split unconfirmed -> PROVISIONAL packing).
@@ -139,7 +139,7 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         // Build the fixed 40-byte 1/9 payload. spec: 1-9_enter_game_request.yaml.
         Span<byte> payload = stackalloc byte[CmsgEnterGameRequest.WireSize];
         payload.Clear();
-        payload[0x00] = (byte)slotIndex;                       // 0x00 SlotIndex (HIGH CONFIDENCE)
+        payload[0x00] = (byte)slotIndex; // 0x00 SlotIndex (HIGH CONFIDENCE)
         _versionToken.CopyTo(payload.Slice(0x01, VersionTokenLength)); // 0x01 VersionToken (PROVISIONAL)
         // 0x22 Tail (6 bytes) stays zero. spec: 1-9 (observed zero).
 
@@ -173,7 +173,7 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         p.Clear();
 
         // Fixed 24-byte header at Pack=1 offsets. spec: 2-52 fields.
-        p[0x00] = slot;                                                       // 0x00 SkillSlot (0xFF = basic attack)
+        p[0x00] = slot; // 0x00 SkillSlot (0xFF = basic attack)
         // 0x01..0x03 Pad0 stays zero.
         // 0x04 AimMode / 0x08 AimScale / 0x0c AimX / 0x10 AimZ default to 0 (caller did not supply aim).
         // spec: 2-52 (aim fields; defaults documented).
@@ -226,7 +226,7 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         Span<byte> p = payload;
         p.Clear();
 
-        p[0x00] = (byte)channel;                 // 0x00 ChannelType (channel selector, low byte)
+        p[0x00] = (byte)channel; // 0x00 ChannelType (channel selector, low byte)
         // 0x01 Flag stays zero (meaning UNKNOWN; spec).
         // 0x02 TargetName: NUL-padded into a fixed 16-byte buffer. spec: 2-7 (HIGH CONFIDENCE).
         WriteFixedAscii(recipientName, p.Slice(0x02, 16));

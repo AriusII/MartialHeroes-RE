@@ -130,8 +130,10 @@ public sealed class SessionHandshakeTests
         // Hand-craft a 62-byte payload with L1=20, L2=20 (sum 40 ≠ 42) but otherwise sized to fit.
         byte[] payload = new byte[SessionHandshake.KeyExchangePayloadSize];
         int cursor = 4; // skip headerA + headerB
-        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(cursor), 20); cursor += 4 + 20;
-        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(cursor), 20); cursor += 4 + 20;
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(cursor), 20);
+        cursor += 4 + 20;
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(cursor), 20);
+        cursor += 4 + 20;
         // cursor now = 4 + 4 + 20 + 4 + 20 = 52, leaving 10 bytes — not the 8 scalar bytes, so this
         // throws on the scalar tail check; either way it must reject. spec §6.2.1.
         Assert.Throws<ArgumentException>(() => SessionHandshake.ParseKeyExchange(payload));
@@ -144,7 +146,10 @@ public sealed class SessionHandshakeTests
     {
         byte[] payload = new byte[SessionHandshake.KeyExchangePayloadSize];
         // header A / header B opaque tags — arbitrary bytes; the parser ignores them. §6.2.2.
-        payload[0] = 0xAB; payload[1] = 0xCD; payload[2] = 0xEF; payload[3] = 0x01;
+        payload[0] = 0xAB;
+        payload[1] = 0xCD;
+        payload[2] = 0xEF;
+        payload[3] = 0x01;
 
         int cursor = 4;
         BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(cursor), (uint)nDigits.Length);

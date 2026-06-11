@@ -53,10 +53,10 @@ public readonly struct Bone
 
     public Bone(uint selfId, uint parentId, Vec3 translation, Quat rotation)
     {
-        SelfId      = selfId;
-        ParentId    = parentId;
+        SelfId = selfId;
+        ParentId = parentId;
         Translation = translation;
-        Rotation    = rotation;
+        Rotation = rotation;
     }
 }
 

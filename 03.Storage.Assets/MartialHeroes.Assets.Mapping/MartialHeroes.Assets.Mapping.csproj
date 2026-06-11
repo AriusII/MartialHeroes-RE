@@ -11,7 +11,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\MartialHeroes.Assets.Parsers\MartialHeroes.Assets.Parsers.csproj" />
+        <ProjectReference Include="..\MartialHeroes.Assets.Parsers\MartialHeroes.Assets.Parsers.csproj"/>
     </ItemGroup>
 
 </Project>

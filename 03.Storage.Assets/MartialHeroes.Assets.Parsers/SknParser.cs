@@ -28,7 +28,7 @@ public static class SknParser
     // Per-record sizes in bytes, all CONFIRMED by spec.
     // spec: Docs/RE/formats/mesh.md §Face record — "36 bytes (3 corners × 12 bytes each)": CONFIRMED.
     private const int CornerStride = 12; // u32 vertIdx + f32 u + f32 v = 12 bytes
-    private const int FaceStride   = 36; // 3 corners × 12 bytes = 36 bytes
+    private const int FaceStride = 36; // 3 corners × 12 bytes = 36 bytes
 
     // spec: Docs/RE/formats/mesh.md §Vertex record — "24 bytes (6 floats)": CONFIRMED.
     private const int VertexStride = 24; // 6 × f32 = 24 bytes
@@ -86,12 +86,12 @@ public static class SknParser
             {
                 // Corner sub-record: vertIdx u32 + uv_u f32 + uv_v f32 = 12 bytes.
                 // spec: Docs/RE/formats/mesh.md §Face record — corner sub-record @ each 12 bytes: CONFIRMED.
-                uint  vIdx = ReadU32LE(data, ref offset, $"face[{f}].corner[{c}].vertex_index");
-                float uvU  = ReadF32LE(data, ref offset, $"face[{f}].corner[{c}].uv_u");
+                uint vIdx = ReadU32LE(data, ref offset, $"face[{f}].corner[{c}].vertex_index");
+                float uvU = ReadF32LE(data, ref offset, $"face[{f}].corner[{c}].uv_u");
                 // V-flip: engine applies 1.0 - uv_v when building the render vertex.
                 // spec: Docs/RE/formats/mesh.md §Face record — uv_v: "engine applies 1.0 - uv_v". CONFIRMED.
                 float uvVDisk = ReadF32LE(data, ref offset, $"face[{f}].corner[{c}].uv_v");
-                float uvV     = 1.0f - uvVDisk;
+                float uvV = 1.0f - uvVDisk;
 
                 corners[f * 3 + c] = new SknCorner(vIdx, uvU, uvV);
             }
@@ -108,22 +108,22 @@ public static class SknParser
                 $"at offset {offset}, but buffer length is {data.Length}.");
 
         Vec3[] positions = new Vec3[vertexCount];
-        Vec3[] normals   = new Vec3[vertexCount];
+        Vec3[] normals = new Vec3[vertexCount];
 
         for (int v = 0; v < (int)vertexCount; v++)
         {
             // On-disk layout: normal (sub-offsets 0–11) THEN position (sub-offsets 12–23).
             // IMPORTANT: re-order when building the output.
             // spec: Docs/RE/formats/mesh.md §Vertex record — "normal first, then position": CONFIRMED.
-            float normX = ReadF32LE(data, ref offset, $"vertex[{v}].normal_x");  // sub-offset 0
-            float normY = ReadF32LE(data, ref offset, $"vertex[{v}].normal_y");  // sub-offset 4
-            float normZ = ReadF32LE(data, ref offset, $"vertex[{v}].normal_z");  // sub-offset 8
-            float posX  = ReadF32LE(data, ref offset, $"vertex[{v}].pos_x");     // sub-offset 12
-            float posY  = ReadF32LE(data, ref offset, $"vertex[{v}].pos_y");     // sub-offset 16
-            float posZ  = ReadF32LE(data, ref offset, $"vertex[{v}].pos_z");     // sub-offset 20
+            float normX = ReadF32LE(data, ref offset, $"vertex[{v}].normal_x"); // sub-offset 0
+            float normY = ReadF32LE(data, ref offset, $"vertex[{v}].normal_y"); // sub-offset 4
+            float normZ = ReadF32LE(data, ref offset, $"vertex[{v}].normal_z"); // sub-offset 8
+            float posX = ReadF32LE(data, ref offset, $"vertex[{v}].pos_x"); // sub-offset 12
+            float posY = ReadF32LE(data, ref offset, $"vertex[{v}].pos_y"); // sub-offset 16
+            float posZ = ReadF32LE(data, ref offset, $"vertex[{v}].pos_z"); // sub-offset 20
 
             positions[v] = new Vec3(posX, posY, posZ);
-            normals[v]   = new Vec3(normX, normY, normZ);
+            normals[v] = new Vec3(normX, normY, normZ);
         }
 
         // --- Weight / skin table ---
@@ -140,22 +140,22 @@ public static class SknParser
         for (int w = 0; w < (int)weightCount; w++)
         {
             // spec: Docs/RE/formats/mesh.md §Weight record — vertIdx u32 + boneIdx u32 + weight f32 = 12 bytes: CONFIRMED.
-            uint  wVertIdx  = ReadU32LE(data, ref offset, $"weight[{w}].vertex_index");
-            uint  wBoneIdx  = ReadU32LE(data, ref offset, $"weight[{w}].bone_index");
-            float wVal      = ReadF32LE(data, ref offset, $"weight[{w}].weight");
+            uint wVertIdx = ReadU32LE(data, ref offset, $"weight[{w}].vertex_index");
+            uint wBoneIdx = ReadU32LE(data, ref offset, $"weight[{w}].bone_index");
+            float wVal = ReadF32LE(data, ref offset, $"weight[{w}].weight");
             weights[w] = new SknWeight(wVertIdx, wBoneIdx, wVal);
         }
 
         return new SkinnedMesh
         {
-            IdA        = idA,
-            IdB        = idB,
-            Name       = name,
-            FaceCount  = faceCount,
-            Corners    = corners,
-            Positions  = positions,
-            Normals    = normals,
-            Weights    = weights,
+            IdA = idA,
+            IdB = idB,
+            Name = name,
+            FaceCount = faceCount,
+            Corners = corners,
+            Positions = positions,
+            Normals = normals,
+            Weights = weights,
         };
     }
 

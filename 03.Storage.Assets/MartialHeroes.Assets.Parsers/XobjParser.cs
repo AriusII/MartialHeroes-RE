@@ -76,7 +76,7 @@ public static class XobjParser
         uint numVertices = NextU32(tokens, ref pos, "num_vertices");
 
         Vec3[] positions = new Vec3[numVertices];
-        Vec2[] uvs       = new Vec2[numVertices];
+        Vec2[] uvs = new Vec2[numVertices];
 
         // --- Vertex list: 8 tokens per vertex ---
         // spec: Docs/RE/formats/mesh.md §Vertex list — 8 tokens each.
@@ -100,17 +100,17 @@ public static class XobjParser
             // V-flip: engine stores 1.0 - tex_v in memory.
             // spec: Docs/RE/formats/mesh.md §Vertex list — tex_v: "engine transforms it to 1.0 - tex_v in-memory". CONFIRMED.
             float texVDisk = NextF32(tokens, ref pos, $"vertex[{v}].tex_v");
-            float texV     = 1.0f - texVDisk;
+            float texV = 1.0f - texVDisk;
 
             positions[v] = new Vec3(posX, posY, posZ);
-            uvs[v]       = new Vec2(texU, texV);
+            uvs[v] = new Vec2(texU, texV);
         }
 
         return new StaticMesh
         {
             Positions = positions,
-            Uvs       = uvs,
-            Indices   = indices,
+            Uvs = uvs,
+            Indices = indices,
         };
     }
 

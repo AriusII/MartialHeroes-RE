@@ -45,12 +45,12 @@ internal static class FramingConstants
     /// Once this many bytes are buffered in the receive pipe the socket-read loop pauses
     /// until the consumer catches up (backpressure).
     /// </summary>
-    internal const long PipeResumeThreshold = 64 * 1024;   // 64 KiB
+    internal const long PipeResumeThreshold = 64 * 1024; // 64 KiB
 
     /// <summary>
     /// Default <see cref="System.IO.Pipelines.PipeOptions"/> resume-writer threshold (bytes).
     /// </summary>
-    internal const long PipePauseThreshold = 128 * 1024;   // 128 KiB
+    internal const long PipePauseThreshold = 128 * 1024; // 128 KiB
 
     /// <summary>
     /// Minimum buffer size requested from the <see cref="System.IO.Pipelines.PipeWriter"/>

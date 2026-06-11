@@ -8,7 +8,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\..\01.Infrastructure.Shared\MartialHeroes.Shared.Kernel\MartialHeroes.Shared.Kernel.csproj" />
+        <ProjectReference Include="..\..\01.Infrastructure.Shared\MartialHeroes.Shared.Kernel\MartialHeroes.Shared.Kernel.csproj"/>
     </ItemGroup>
 
     <ItemGroup>
@@ -17,7 +17,7 @@
           LZ4_decompress_safe), NOT the bespoke wire cipher, so a vetted standard codec is appropriate
           here; the cipher itself stays hand-rolled. spec: Docs/RE/specs/crypto.md §3.2, §8.1.
         -->
-        <PackageReference Include="K4os.Compression.LZ4" Version="1.3.8" />
+        <PackageReference Include="K4os.Compression.LZ4" Version="1.3.8"/>
     </ItemGroup>
 
 </Project>

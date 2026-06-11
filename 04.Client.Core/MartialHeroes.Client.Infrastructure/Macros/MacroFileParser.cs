@@ -47,11 +47,11 @@ public sealed class MacroFileParser : IMacroFileParser
             content = content[1..];
 
         var result = new Dictionary<string, MacroDefinition>(StringComparer.Ordinal);
-        var order  = new List<string>(); // tracks insertion order; last-def-wins via dict replace
+        var order = new List<string>(); // tracks insertion order; last-def-wins via dict replace
 
         string? currentName = null;
-        string? currentKey  = null;
-        var    currentCmds  = new List<string>();
+        string? currentKey = null;
+        var currentCmds = new List<string>();
 
         foreach (var rawLine in EnumerateLines(content))
         {
@@ -95,6 +95,7 @@ public sealed class MacroFileParser : IMacroFileParser
             if (seen.Add(name) && result.TryGetValue(name, out var m))
                 macros.Add(m);
         }
+
         return macros;
     }
 
@@ -153,6 +154,7 @@ public sealed class MacroFileParser : IMacroFileParser
                 start = i + 1;
             }
         }
+
         // Emit the last line if content does not end with '\n'.
         if (start < content.Length)
             yield return content[start..];

@@ -33,8 +33,8 @@ public sealed partial class VisualActor : CharacterBody3D
 
     // Visual speed constants for smooth gliding (display only — not game-authoritative speed).
     // These are pure visual interpolation rates; the game server owns actual speed.
-    private const float WalkGlideSpeed  = 5.0f;  // Godot units/second for walk glide
-    private const float RunGlideSpeed   = 10.0f; // Godot units/second for run glide
+    private const float WalkGlideSpeed = 5.0f; // Godot units/second for walk glide
+    private const float RunGlideSpeed = 10.0f; // Godot units/second for run glide
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -109,7 +109,7 @@ public sealed partial class VisualActor : CharacterBody3D
     public void SetMoveTarget(Vector3 target, bool running)
     {
         _moveTarget = target;
-        _isRunning  = running;
-        _hasTarget  = true;
+        _isRunning = running;
+        _hasTarget = true;
     }
 }

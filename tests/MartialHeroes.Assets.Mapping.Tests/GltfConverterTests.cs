@@ -20,13 +20,15 @@ public sealed class GltfConverterTests
     /// <summary>Two-triangle quad (4 vertices, 6 indices).</summary>
     private static StaticMesh MakeQuad() => new StaticMesh
     {
-        Positions = [
+        Positions =
+        [
             new Vec3(0f, 0f, 0f),
             new Vec3(1f, 0f, 0f),
             new Vec3(1f, 1f, 0f),
             new Vec3(0f, 1f, 0f),
         ],
-        Uvs = [
+        Uvs =
+        [
             new Vec2(0f, 0f),
             new Vec2(1f, 0f),
             new Vec2(1f, 1f),
@@ -38,12 +40,14 @@ public sealed class GltfConverterTests
     /// <summary>Single triangle (3 vertices, 3 indices).</summary>
     private static StaticMesh MakeSingleTriangle() => new StaticMesh
     {
-        Positions = [
+        Positions =
+        [
             new Vec3(0f, 0f, 0f),
             new Vec3(2f, 0f, 0f),
             new Vec3(1f, 2f, 0f),
         ],
-        Uvs = [
+        Uvs =
+        [
             new Vec2(0f, 0f),
             new Vec2(1f, 0f),
             new Vec2(0.5f, 1f),
@@ -64,11 +68,11 @@ public sealed class GltfConverterTests
         byte[] glb = ms.ToArray();
 
         Assert.True(glb.Length >= 12, "GLB must be at least 12 bytes (header).");
-        uint magic   = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(0));
+        uint magic = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(0));
         uint version = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(4));
-        uint length  = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(8));
+        uint length = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(8));
 
-        Assert.Equal(0x46546C67u, magic);   // "glTF"
+        Assert.Equal(0x46546C67u, magic); // "glTF"
         Assert.Equal(2u, version);
         Assert.Equal((uint)glb.Length, length);
     }
@@ -202,9 +206,9 @@ public sealed class GltfConverterTests
         float maxY = posAccessor.GetProperty("max")[1].GetSingle();
 
         Assert.Equal(-2f, minX, precision: 5);
-        Assert.Equal( 0f, maxX, precision: 5);
-        Assert.Equal( 0f, minY, precision: 5);
-        Assert.Equal( 2f, maxY, precision: 5);
+        Assert.Equal(0f, maxX, precision: 5);
+        Assert.Equal(0f, minY, precision: 5);
+        Assert.Equal(2f, maxY, precision: 5);
     }
 
     [Fact]
@@ -246,9 +250,9 @@ public sealed class GltfConverterTests
         float v0x = BinaryPrimitives.ReadSingleLittleEndian(binData.AsSpan(byteOffset));
         float v0y = BinaryPrimitives.ReadSingleLittleEndian(binData.AsSpan(byteOffset + 4));
         float v0z = BinaryPrimitives.ReadSingleLittleEndian(binData.AsSpan(byteOffset + 8));
-        Assert.Equal( 0f, v0x, precision: 5);
-        Assert.Equal( 0f, v0y, precision: 5);
-        Assert.Equal( 0f, v0z, precision: 5);
+        Assert.Equal(0f, v0x, precision: 5);
+        Assert.Equal(0f, v0y, precision: 5);
+        Assert.Equal(0f, v0z, precision: 5);
 
         // Vertex 1: (2,0,0) → X-flipped = (−2, 0, 0)
         float v1x = BinaryPrimitives.ReadSingleLittleEndian(binData.AsSpan(byteOffset + 12));
@@ -309,26 +313,29 @@ public sealed class GltfConverterTests
         // SkinnedMesh path uses corner expansion; verify a valid GLB is produced.
         var mesh = new SkinnedMesh
         {
-            IdA       = 1,
-            IdB       = 2,
-            Name      = "TestSkin",
+            IdA = 1,
+            IdB = 2,
+            Name = "TestSkin",
             FaceCount = 1,
-            Corners   = [
+            Corners =
+            [
                 new SknCorner(0, 0f, 0f),
                 new SknCorner(1, 1f, 0f),
                 new SknCorner(2, 0.5f, 1f),
             ],
-            Positions = [
+            Positions =
+            [
                 new Vec3(0f, 0f, 0f),
                 new Vec3(1f, 0f, 0f),
                 new Vec3(0.5f, 1f, 0f),
             ],
-            Normals   = [
+            Normals =
+            [
                 new Vec3(0f, 0f, 1f),
                 new Vec3(0f, 0f, 1f),
                 new Vec3(0f, 0f, 1f),
             ],
-            Weights   = [],
+            Weights = [],
         };
 
         using var ms = new MemoryStream();

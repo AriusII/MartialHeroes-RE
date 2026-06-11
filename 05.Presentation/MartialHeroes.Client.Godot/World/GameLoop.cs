@@ -43,8 +43,8 @@ public sealed partial class GameLoop : Node
 
         // Resolve child nodes.
         _actorRegistry = GetNode<ActorRegistry>("ActorRegistry");
-        _hud           = GetNode<GameHud>("HUD");
-        _inputRouter   = GetNode<InputRouter>("InputRouter");
+        _hud = GetNode<GameHud>("HUD");
+        _inputRouter = GetNode<InputRouter>("InputRouter");
         _syntheticFeeder = GetNode<SyntheticWorldFeeder>("SyntheticWorldFeeder");
 
         // Give subsystems their handles.

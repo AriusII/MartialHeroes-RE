@@ -60,21 +60,21 @@ public sealed class PngConverterTests
 
         // IHDR data starts at chunkOffset + 8.
         int dataStart = chunkOffset + 8;
-        uint storedWidth  = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(dataStart));
+        uint storedWidth = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(dataStart));
         uint storedHeight = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(dataStart + 4));
-        byte bitDepth     = png[dataStart + 8];
-        byte colorType    = png[dataStart + 9];
-        byte compression  = png[dataStart + 10];
-        byte filter       = png[dataStart + 11];
-        byte interlace    = png[dataStart + 12];
+        byte bitDepth = png[dataStart + 8];
+        byte colorType = png[dataStart + 9];
+        byte compression = png[dataStart + 10];
+        byte filter = png[dataStart + 11];
+        byte interlace = png[dataStart + 12];
 
-        Assert.Equal((uint)width,  storedWidth);
+        Assert.Equal((uint)width, storedWidth);
         Assert.Equal((uint)height, storedHeight);
-        Assert.Equal(8,    bitDepth);       // 8-bit channels
-        Assert.Equal(6,    colorType);      // RGBA (color type 6)
-        Assert.Equal(0,    compression);    // Deflate
-        Assert.Equal(0,    filter);         // filter method 0
-        Assert.Equal(0,    interlace);      // no interlace
+        Assert.Equal(8, bitDepth); // 8-bit channels
+        Assert.Equal(6, colorType); // RGBA (color type 6)
+        Assert.Equal(0, compression); // Deflate
+        Assert.Equal(0, filter); // filter method 0
+        Assert.Equal(0, interlace); // no interlace
     }
 
     [Fact]
@@ -136,7 +136,10 @@ public sealed class PngConverterTests
         // DDS layout: 4 magic + 124 header + 8 block data = 136 bytes.
         byte[] dds = new byte[136];
         // Magic: "DDS "
-        dds[0] = 0x44; dds[1] = 0x44; dds[2] = 0x53; dds[3] = 0x20;
+        dds[0] = 0x44;
+        dds[1] = 0x44;
+        dds[2] = 0x53;
+        dds[3] = 0x20;
 
         // DDS_HEADER (124 bytes starting at offset 4)
         // dwSize = 124 at offset 4
@@ -154,7 +157,10 @@ public sealed class PngConverterTests
         // pfFlags @ 84: DDPF_FOURCC = 4
         BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(84), 4u);
         // pfFourCC @ 88: 'DXT1'
-        dds[88] = (byte)'D'; dds[89] = (byte)'X'; dds[90] = (byte)'T'; dds[91] = (byte)'1';
+        dds[88] = (byte)'D';
+        dds[89] = (byte)'X';
+        dds[90] = (byte)'T';
+        dds[91] = (byte)'1';
 
         // Block data starts at offset 128 (4 magic + 124 header).
         // DXT1 block: c0 (2B LE) + c1 (2B LE) + selectors (4B LE)
@@ -177,7 +183,7 @@ public sealed class PngConverterTests
 
         var descriptor = new TextureDescriptor
         {
-            Format  = TextureFormat.Dds,
+            Format = TextureFormat.Dds,
             Payload = new ReadOnlyMemory<byte>(dds),
         };
 
@@ -193,8 +199,8 @@ public sealed class PngConverterTests
         for (int i = 0; i < 16; i++)
         {
             Assert.Equal(255, pixels[i * 4 + 0]); // R
-            Assert.Equal(  0, pixels[i * 4 + 1]); // G
-            Assert.Equal(  0, pixels[i * 4 + 2]); // B
+            Assert.Equal(0, pixels[i * 4 + 1]); // G
+            Assert.Equal(0, pixels[i * 4 + 2]); // B
             Assert.Equal(255, pixels[i * 4 + 3]); // A
         }
     }
@@ -208,7 +214,7 @@ public sealed class PngConverterTests
 
         var descriptor = new TextureDescriptor
         {
-            Format  = TextureFormat.Dds,
+            Format = TextureFormat.Dds,
             Payload = new ReadOnlyMemory<byte>(dds),
         };
 
@@ -218,9 +224,9 @@ public sealed class PngConverterTests
 
         for (int i = 0; i < 16; i++)
         {
-            Assert.Equal(  0, pixels[i * 4 + 0]); // R
+            Assert.Equal(0, pixels[i * 4 + 0]); // R
             Assert.Equal(255, pixels[i * 4 + 1]); // G
-            Assert.Equal(  0, pixels[i * 4 + 2]); // B
+            Assert.Equal(0, pixels[i * 4 + 2]); // B
             Assert.Equal(255, pixels[i * 4 + 3]); // A
         }
     }
@@ -238,7 +244,7 @@ public sealed class PngConverterTests
 
         var descriptor = new TextureDescriptor
         {
-            Format  = TextureFormat.Dds,
+            Format = TextureFormat.Dds,
             Payload = new ReadOnlyMemory<byte>(dds),
         };
 
@@ -248,8 +254,8 @@ public sealed class PngConverterTests
 
         // Check first texel.
         Assert.Equal(170, pixels[0]); // R = (2*255+0+1)/3 = 170
-        Assert.Equal( 85, pixels[1]); // G = (2*0+255+1)/3 = 85
-        Assert.Equal(  0, pixels[2]); // B
+        Assert.Equal(85, pixels[1]); // G = (2*0+255+1)/3 = 85
+        Assert.Equal(0, pixels[2]); // B
         Assert.Equal(255, pixels[3]); // A
     }
 
@@ -262,7 +268,7 @@ public sealed class PngConverterTests
     {
         var descriptor = new TextureDescriptor
         {
-            Format  = TextureFormat.Unknown,
+            Format = TextureFormat.Unknown,
             Payload = new ReadOnlyMemory<byte>(new byte[4]),
         };
 
@@ -275,7 +281,7 @@ public sealed class PngConverterTests
     {
         var descriptor = new TextureDescriptor
         {
-            Format  = TextureFormat.Tga,
+            Format = TextureFormat.Tga,
             Payload = new ReadOnlyMemory<byte>(new byte[32]),
         };
 
@@ -321,6 +327,7 @@ public sealed class PngConverterTests
             for (int k = 0; k < 8; k++)
                 crc = (crc & 1) != 0 ? (crc >> 1) ^ Poly : crc >> 1;
         }
+
         return crc ^ 0xFFFFFFFFu;
     }
 
@@ -335,7 +342,7 @@ public sealed class PngConverterTests
         // Read IHDR
         uint chunkLen = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(8));
         Assert.Equal(13u, chunkLen);
-        width  = (int)BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(16));
+        width = (int)BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(16));
         height = (int)BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(20));
 
         // Collect all IDAT compressed data.
@@ -343,19 +350,20 @@ public sealed class PngConverterTests
         int pos = 8; // start at first chunk
         while (pos < png.Length - 12)
         {
-            uint len  = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(pos));
+            uint len = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(pos));
             string type = System.Text.Encoding.ASCII.GetString(png, pos + 4, 4);
             if (type == "IDAT")
             {
                 idatData.AddRange(png.AsSpan(pos + 8, (int)len).ToArray());
             }
+
             pos += 4 + 4 + (int)len + 4; // length + type + data + crc
         }
 
         // Decompress via ZLib.
         byte[] compressed = idatData.ToArray();
-        using var inputMs  = new MemoryStream(compressed);
-        using var zlib     = new ZLibStream(inputMs, CompressionMode.Decompress);
+        using var inputMs = new MemoryStream(compressed);
+        using var zlib = new ZLibStream(inputMs, CompressionMode.Decompress);
         using var outputMs = new MemoryStream();
         zlib.CopyTo(outputMs);
         byte[] filtered = outputMs.ToArray();

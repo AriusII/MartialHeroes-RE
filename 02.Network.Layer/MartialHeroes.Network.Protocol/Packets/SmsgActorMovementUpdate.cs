@@ -30,6 +30,7 @@ public readonly struct SmsgActorMovementUpdate
 
     /// <summary>0x01 — alignment padding to the next dword. spec: same (Pad0: bytes[3]).</summary>
     private readonly byte _pad0_0;
+
     private readonly byte _pad0_1;
     private readonly byte _pad0_2;
 
@@ -56,6 +57,7 @@ public readonly struct SmsgActorMovementUpdate
 
     /// <summary>0x1d — alignment padding. spec: same (Pad1: bytes[3]).</summary>
     private readonly byte _pad1_0;
+
     private readonly byte _pad1_1;
     private readonly byte _pad1_2;
 

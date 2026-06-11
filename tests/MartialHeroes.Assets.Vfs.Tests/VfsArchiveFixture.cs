@@ -28,9 +28,9 @@ namespace MartialHeroes.Assets.Vfs.Tests;
 internal sealed class SyntheticArchive : IDisposable
 {
     // spec: Docs/RE/formats/pak.md — header and record sizes.
-    private const int HeaderSize   = 24;   // CONFIRMED
-    private const int RecordSize   = 144;  // CONFIRMED (0x90)
-    private const int NameCapacity = 100;  // CONFIRMED
+    private const int HeaderSize = 24; // CONFIRMED
+    private const int RecordSize = 144; // CONFIRMED (0x90)
+    private const int NameCapacity = 100; // CONFIRMED
 
     public string InfPath { get; }
     public string VfsPath { get; }
@@ -46,10 +46,10 @@ internal sealed class SyntheticArchive : IDisposable
         string vfsPath,
         IReadOnlyList<(string Name, byte[] Data)> entries)
     {
-        _tempDir  = tempDir;
-        InfPath   = infPath;
-        VfsPath   = vfsPath;
-        Entries   = entries;
+        _tempDir = tempDir;
+        InfPath = infPath;
+        VfsPath = vfsPath;
+        Entries = entries;
     }
 
     /// <summary>
@@ -130,7 +130,13 @@ internal sealed class SyntheticArchive : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempDir, recursive: true); }
-        catch { /* best-effort cleanup */ }
+        try
+        {
+            Directory.Delete(_tempDir, recursive: true);
+        }
+        catch
+        {
+            /* best-effort cleanup */
+        }
     }
 }

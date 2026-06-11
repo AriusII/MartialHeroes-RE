@@ -31,6 +31,7 @@ public readonly struct SmsgLevelUp
 
     /// <summary>0x01 — alignment padding. spec: same (Pad0: bytes[3]).</summary>
     private readonly byte _pad0_0;
+
     private readonly byte _pad0_1;
     private readonly byte _pad0_2;
 
@@ -42,6 +43,7 @@ public readonly struct SmsgLevelUp
 
     /// <summary>0x0a — alignment padding to the next dword. spec: same (Pad1: bytes[2]).</summary>
     private readonly byte _pad1_0;
+
     private readonly byte _pad1_1;
 
     /// <summary>0x0c — remaining allocatable stat points (local player). spec: same.</summary>

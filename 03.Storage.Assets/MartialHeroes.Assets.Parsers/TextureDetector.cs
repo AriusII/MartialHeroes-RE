@@ -55,7 +55,7 @@ public static class TextureDetector
 
         return new TextureDescriptor
         {
-            Format  = format,
+            Format = format,
             Payload = data,
         };
     }
@@ -75,7 +75,7 @@ public static class TextureDetector
 
         return new TextureDescriptor
         {
-            Format  = format,
+            Format = format,
             Payload = data.ToArray(), // copy required to produce a ReadOnlyMemory<byte>
         };
     }
@@ -132,7 +132,7 @@ public static class TextureDetector
         // Byte[1]: color map type (0 or 1 for standard TGA).
         // Byte[2]: image type (1=color-mapped, 2=true-color, 3=grayscale, 9-11 are RLE variants).
         byte colorMapType = header[1];
-        byte imageType    = header[2];
+        byte imageType = header[2];
 
         if (colorMapType > 1)
             return false; // invalid color map type for TGA

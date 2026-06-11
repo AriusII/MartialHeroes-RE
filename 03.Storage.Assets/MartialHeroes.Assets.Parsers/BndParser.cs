@@ -71,7 +71,7 @@ public static class BndParser
         //   "A previous revision described bone_count as a 1-byte on-disk field. That was
         //    incorrect. The loader reads a full 4-byte u32 in binary mode." CONFIRMED.
         uint boneCountRaw = ReadU32LE(data, ref offset, "bone_count");
-        int  boneCount    = (int)(boneCountRaw & 0xFF); // low byte only
+        int boneCount = (int)(boneCountRaw & 0xFF); // low byte only
 
         // Validate buffer length for bone records.
         // spec: Docs/RE/formats/mesh.md §Bone array — "36 bytes per record": CONFIRMED.
@@ -119,17 +119,17 @@ public static class BndParser
                 $"BndParser: bone[{b}] consumed {offset - boneStart} bytes, expected {BoneRecordStride}.");
 
             bones[b] = new Bone(
-                selfId:      selfId,
-                parentId:    parentId,
+                selfId: selfId,
+                parentId: parentId,
                 translation: new Vec3(tX, tY, tZ),
-                rotation:    new Quat(rX, rY, rZ, rW));
+                rotation: new Quat(rX, rY, rZ, rW));
         }
 
         return new Skeleton
         {
-            ActorId   = actorId,
+            ActorId = actorId,
             ActorName = actorName,
-            Bones     = bones,
+            Bones = bones,
         };
     }
 

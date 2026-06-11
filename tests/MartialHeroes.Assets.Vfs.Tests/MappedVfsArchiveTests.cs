@@ -26,9 +26,9 @@ public sealed class MappedVfsArchiveTests
     {
         // spec: Docs/RE/formats/pak.md — entry_count @ +12 drives directory size. CONFIRMED.
         using var archive = SyntheticArchive.Build(
-            ("textures/stone.dds",  Ascii("STONE")),
-            ("textures/water.dds",  Ascii("WATER")),
-            ("models/hero.msh",     Ascii("HERO_MESH")));
+            ("textures/stone.dds", Ascii("STONE")),
+            ("textures/water.dds", Ascii("WATER")),
+            ("models/hero.msh", Ascii("HERO_MESH")));
 
         using var vfs = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
         Assert.Equal(3, vfs.EntryCount);
@@ -38,7 +38,7 @@ public sealed class MappedVfsArchiveTests
     public void EmptyArchive_EntryCountIsZero()
     {
         using var archive = SyntheticArchive.Build();
-        using var vfs     = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
+        using var vfs = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
         Assert.Equal(0, vfs.EntryCount);
     }
 
@@ -51,20 +51,20 @@ public sealed class MappedVfsArchiveTests
     {
         // Verify the dataOffset + dataSize fields produce the correct slice.
         // spec: Docs/RE/formats/pak.md — dataOffset @ +104 i64 LE, dataSize @ +112 i64 LE. CONFIRMED.
-        byte[] alpha  = Ascii("ALPHA_DATA");
-        byte[] beta   = Ascii("BETA_PAYLOAD_LONGER");
-        byte[] gamma  = new byte[] { 0xDE, 0xAD, 0xBE, 0xEF };
+        byte[] alpha = Ascii("ALPHA_DATA");
+        byte[] beta = Ascii("BETA_PAYLOAD_LONGER");
+        byte[] gamma = new byte[] { 0xDE, 0xAD, 0xBE, 0xEF };
 
         using var archive = SyntheticArchive.Build(
             ("files/alpha.bin", alpha),
-            ("files/beta.bin",  beta),
+            ("files/beta.bin", beta),
             ("files/gamma.bin", gamma));
 
         using var vfs = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
 
-        Assert.Equal(alpha,  vfs.GetFileContent("files/alpha.bin").ToArray());
-        Assert.Equal(beta,   vfs.GetFileContent("files/beta.bin").ToArray());
-        Assert.Equal(gamma,  vfs.GetFileContent("files/gamma.bin").ToArray());
+        Assert.Equal(alpha, vfs.GetFileContent("files/alpha.bin").ToArray());
+        Assert.Equal(beta, vfs.GetFileContent("files/beta.bin").ToArray());
+        Assert.Equal(gamma, vfs.GetFileContent("files/gamma.bin").ToArray());
     }
 
     [Fact]
@@ -84,10 +84,10 @@ public sealed class MappedVfsArchiveTests
     // -----------------------------------------------------------------------
 
     [Theory]
-    [InlineData("textures/Logo.TGA")]          // mixed case
-    [InlineData("TEXTURES/LOGO.TGA")]          // all upper
-    [InlineData("textures/logo.tga")]          // canonical lower
-    [InlineData("TeXtUrEs/lOgO.TgA")]          // random case
+    [InlineData("textures/Logo.TGA")] // mixed case
+    [InlineData("TEXTURES/LOGO.TGA")] // all upper
+    [InlineData("textures/logo.tga")] // canonical lower
+    [InlineData("TeXtUrEs/lOgO.TgA")] // random case
     public void GetFileContent_IsCaseInsensitive(string requestedPath)
     {
         // spec: Docs/RE/formats/pak.md §"Lookup algorithm" step 1: "lowercase the
@@ -114,7 +114,7 @@ public sealed class MappedVfsArchiveTests
         using var vfs = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
 
         Assert.True(vfs.Contains("sound/bgm.ogg"));
-        Assert.True(vfs.Contains("SOUND/BGM.OGG"));   // case-insensitive
+        Assert.True(vfs.Contains("SOUND/BGM.OGG")); // case-insensitive
     }
 
     [Fact]
@@ -165,9 +165,9 @@ public sealed class MappedVfsArchiveTests
         // spec: Docs/RE/formats/pak.md — "TOC must be sorted ascending by lowercased name".
         // CONFIRMED.  We provide entries out of order and verify the parsed TOC is sorted.
         using var archive = SyntheticArchive.Build(
-            ("z_last.dat",  Ascii("Z")),
+            ("z_last.dat", Ascii("Z")),
             ("a_first.dat", Ascii("A")),
-            ("m_middle.dat",Ascii("M")));
+            ("m_middle.dat", Ascii("M")));
 
         using var vfs = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
 
@@ -175,7 +175,7 @@ public sealed class MappedVfsArchiveTests
         for (int i = 1; i < entries.Length; i++)
             Assert.True(
                 string.CompareOrdinal(entries[i - 1].Name, entries[i].Name) < 0,
-                $"Entry [{i-1}] \"{entries[i-1].Name}\" is not before [{i}] \"{entries[i].Name}\"");
+                $"Entry [{i - 1}] \"{entries[i - 1].Name}\" is not before [{i}] \"{entries[i].Name}\"");
     }
 
     // -----------------------------------------------------------------------
@@ -190,7 +190,7 @@ public sealed class MappedVfsArchiveTests
         // We verify this by checking that MemoryMarshal.TryGetArray returns false.
         byte[] payload = Ascii("PAYLOAD");
         using var archive = SyntheticArchive.Build(("asset.dat", payload));
-        using var vfs     = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
+        using var vfs = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
 
         var memory = vfs.GetFileContent("asset.dat");
 
@@ -226,12 +226,15 @@ public sealed class MappedVfsArchiveTests
         {
             try
             {
-                string path  = (i % 2 == 0) ? "concurrent/a.bin" : "concurrent/b.bin";
+                string path = (i % 2 == 0) ? "concurrent/a.bin" : "concurrent/b.bin";
                 byte[] expected = (i % 2 == 0) ? data1 : data2;
                 var result = vfs.GetFileContent(path);
                 Assert.Equal(expected, result.ToArray());
             }
-            catch (Exception ex) { errors.Add(ex); }
+            catch (Exception ex)
+            {
+                errors.Add(ex);
+            }
         });
 
         Assert.Empty(errors);

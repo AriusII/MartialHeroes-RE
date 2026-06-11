@@ -53,7 +53,7 @@ public static class HandshakeWhitening
     {
         byte keyByte = (Selector & XorKeyByte & ComplementMask) == ComplementTriggerValue
             ? unchecked((byte)~XorKeyByte) // complement branch — not taken for this client's recovered values
-            : XorKeyByte;       // used as-is
+            : XorKeyByte; // used as-is
 
         // Little-endian dword pattern "key 00 00 00": the key occupies the low byte of each dword.
         // spec: Docs/RE/specs/crypto.md §6.4 ("little-endian byte pattern 29 00 00 00").

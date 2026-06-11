@@ -8,11 +8,15 @@ namespace MartialHeroes.Client.Infrastructure.Exceptions;
 public class InfrastructureException : Exception
 {
     /// <inheritdoc/>
-    public InfrastructureException(string message) : base(message) { }
+    public InfrastructureException(string message) : base(message)
+    {
+    }
 
     /// <inheritdoc/>
     public InfrastructureException(string message, Exception innerException)
-        : base(message, innerException) { }
+        : base(message, innerException)
+    {
+    }
 }
 
 /// <summary>
@@ -21,11 +25,15 @@ public class InfrastructureException : Exception
 public sealed class LocalStoreException : InfrastructureException
 {
     /// <inheritdoc/>
-    public LocalStoreException(string message) : base(message) { }
+    public LocalStoreException(string message) : base(message)
+    {
+    }
 
     /// <inheritdoc/>
     public LocalStoreException(string message, Exception innerException)
-        : base(message, innerException) { }
+        : base(message, innerException)
+    {
+    }
 }
 
 /// <summary>
@@ -34,9 +42,13 @@ public sealed class LocalStoreException : InfrastructureException
 public sealed class MacroFileException : InfrastructureException
 {
     /// <inheritdoc/>
-    public MacroFileException(string message) : base(message) { }
+    public MacroFileException(string message) : base(message)
+    {
+    }
 
     /// <inheritdoc/>
     public MacroFileException(string message, Exception innerException)
-        : base(message, innerException) { }
+        : base(message, innerException)
+    {
+    }
 }

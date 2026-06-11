@@ -69,7 +69,7 @@ public sealed class TcpTransport : ITransport
         try
         {
             await socket.ConnectAsync(endpoint.EndPoint, cancellationToken)
-                        .ConfigureAwait(false);
+                .ConfigureAwait(false);
         }
         catch
         {

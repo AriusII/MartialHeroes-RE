@@ -17,8 +17,19 @@ public sealed class BndParserTests
     // Fixture builder
     // -----------------------------------------------------------------------
 
-    private static byte[] Le4(uint v)   { var b = new byte[4]; BinaryPrimitives.WriteUInt32LittleEndian(b, v); return b; }
-    private static byte[] Le4f(float v) { var b = new byte[4]; BinaryPrimitives.WriteSingleLittleEndian(b, v); return b; }
+    private static byte[] Le4(uint v)
+    {
+        var b = new byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(b, v);
+        return b;
+    }
+
+    private static byte[] Le4f(float v)
+    {
+        var b = new byte[4];
+        BinaryPrimitives.WriteSingleLittleEndian(b, v);
+        return b;
+    }
 
     /// <summary>
     /// Builds a synthetic .bnd binary buffer using the confirmed on-disk layout.
@@ -69,10 +80,15 @@ public sealed class BndParserTests
             ms.Write(Le4(parentId));
             // local_translation @ sub-offset +8: f32[3] — X, Y, Z
             // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — local_translation @ +8: CONFIRMED.
-            ms.Write(Le4f(tx)); ms.Write(Le4f(ty)); ms.Write(Le4f(tz));
+            ms.Write(Le4f(tx));
+            ms.Write(Le4f(ty));
+            ms.Write(Le4f(tz));
             // local_rotation @ sub-offset +20: f32[4] — XYZW (scalar W last, at +32)
             // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — local_rotation @ +20 (XYZW): CONFIRMED.
-            ms.Write(Le4f(rx)); ms.Write(Le4f(ry)); ms.Write(Le4f(rz)); ms.Write(Le4f(rw));
+            ms.Write(Le4f(rx));
+            ms.Write(Le4f(ry));
+            ms.Write(Le4f(rz));
+            ms.Write(Le4f(rw));
             // Total per bone: 4+4+12+16 = 36 bytes. No trailing block.
         }
 
@@ -123,10 +139,10 @@ public sealed class BndParserTests
         byte[] data = BuildBnd(actorId: 1, actorName: "T",
             bones:
             [
-                (selfId:   1,
-                 parentId: 0,
-                 tx: 10f, ty: 20f, tz: 30f,
-                 rx: 0.1f, ry: 0.2f, rz: 0.3f, rw: 0.9f),
+                (selfId: 1,
+                    parentId: 0,
+                    tx: 10f, ty: 20f, tz: 30f,
+                    rx: 0.1f, ry: 0.2f, rz: 0.3f, rw: 0.9f),
             ]);
 
         Skeleton skel = BndParser.Parse(data.AsSpan());
@@ -155,7 +171,7 @@ public sealed class BndParserTests
 
         Skeleton skel = BndParser.Parse(data.AsSpan());
 
-        Assert.True(skel.Bones[0].IsRoot,  "bone[0] (self_id=0, parent_id=0) must be root");
+        Assert.True(skel.Bones[0].IsRoot, "bone[0] (self_id=0, parent_id=0) must be root");
         Assert.False(skel.Bones[1].IsRoot, "bone[1] (self_id=1) must NOT be root");
         Assert.False(skel.Bones[2].IsRoot, "bone[2] (self_id=2) must NOT be root");
     }
@@ -226,8 +242,8 @@ public sealed class BndParserTests
         // Verify that each bone record contributes exactly 36 bytes to the fixture.
         // This is a structural check: build a zero-bone and one-bone fixture and diff the sizes.
         // spec: Docs/RE/formats/mesh.md §Bone array — "Total on-disk per bone: 36 bytes." CONFIRMED.
-        byte[] zero  = BuildBnd(actorId: 1, actorName: "A", bones: []);
-        byte[] one   = BuildBnd(actorId: 1, actorName: "A", bones: [(0, 0, 0f, 0f, 0f, 0f, 0f, 0f, 1f)]);
+        byte[] zero = BuildBnd(actorId: 1, actorName: "A", bones: []);
+        byte[] one = BuildBnd(actorId: 1, actorName: "A", bones: [(0, 0, 0f, 0f, 0f, 0f, 0f, 0f, 1f)]);
         byte[] three = BuildBnd(actorId: 1, actorName: "A",
             bones:
             [
@@ -251,16 +267,16 @@ public sealed class BndParserTests
             bones:
             [
                 (selfId: 0, parentId: 0,
-                 tx: 0f, ty: 0f, tz: 0f,
-                 rx: 0.5f, ry: -0.5f, rz: 0.5f, rw: 0.5f),
+                    tx: 0f, ty: 0f, tz: 0f,
+                    rx: 0.5f, ry: -0.5f, rz: 0.5f, rw: 0.5f),
             ]);
 
         Skeleton skel = BndParser.Parse(data.AsSpan());
         Quat q = skel.Bones[0].Rotation;
 
-        Assert.Equal( 0.5f, q.X, precision: 6);
+        Assert.Equal(0.5f, q.X, precision: 6);
         Assert.Equal(-0.5f, q.Y, precision: 6);
-        Assert.Equal( 0.5f, q.Z, precision: 6);
-        Assert.Equal( 0.5f, q.W, precision: 6);
+        Assert.Equal(0.5f, q.Z, precision: 6);
+        Assert.Equal(0.5f, q.W, precision: 6);
     }
 }

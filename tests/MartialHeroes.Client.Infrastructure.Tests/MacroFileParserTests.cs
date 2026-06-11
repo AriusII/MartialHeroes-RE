@@ -42,23 +42,23 @@ public sealed class MacroFileParserTests
         Assert.Equal(4, macros.Count);
 
         var skillAttack = macros[0];
-        Assert.Equal("SkillAttack",       skillAttack.Name);
-        Assert.Equal("F1",                skillAttack.TriggerKey);
+        Assert.Equal("SkillAttack", skillAttack.Name);
+        Assert.Equal("F1", skillAttack.TriggerKey);
         Assert.Equal(["UseSkill 101", "PlayAnimation attack_heavy"], skillAttack.Commands);
 
         var openInv = macros[1];
-        Assert.Equal("OpenInventory",     openInv.Name);
-        Assert.Equal("I",                 openInv.TriggerKey);
+        Assert.Equal("OpenInventory", openInv.Name);
+        Assert.Equal("I", openInv.TriggerKey);
         Assert.Equal(["ToggleWindow Inventory"], openInv.Commands);
 
         var greeting = macros[2];
-        Assert.Equal("Greeting",          greeting.Name);
-        Assert.Equal("None",              greeting.TriggerKey);
+        Assert.Equal("Greeting", greeting.Name);
+        Assert.Equal("None", greeting.TriggerKey);
         Assert.Equal(["EmoteChat /wave", "EmoteChat /bow"], greeting.Commands);
 
         var empty = macros[3];
-        Assert.Equal("EmptyMacro",        empty.Name);
-        Assert.Equal("F10",               empty.TriggerKey);
+        Assert.Equal("EmptyMacro", empty.Name);
+        Assert.Equal("F10", empty.TriggerKey);
         Assert.Empty(empty.Commands);
     }
 
@@ -101,8 +101,8 @@ public sealed class MacroFileParserTests
         var macros = Parser.ParseContent(input);
 
         var m = Assert.Single(macros);
-        Assert.Equal("Alpha",   m.Name);
-        Assert.Equal("A",       m.TriggerKey);
+        Assert.Equal("Alpha", m.Name);
+        Assert.Equal("A", m.TriggerKey);
         Assert.Equal(["CmdOne", "CmdTwo"], m.Commands);
     }
 
@@ -160,8 +160,8 @@ public sealed class MacroFileParserTests
 
         // Only one macro should be returned (last definition).
         var m = Assert.Single(macros);
-        Assert.Equal("Attack",       m.Name);
-        Assert.Equal("F2",           m.TriggerKey);
+        Assert.Equal("Attack", m.Name);
+        Assert.Equal("F2", m.TriggerKey);
         Assert.Equal(["NewCommand"], m.Commands);
     }
 
@@ -174,9 +174,9 @@ public sealed class MacroFileParserTests
         var macros = Parser.ParseContent(input);
 
         var m = Assert.Single(macros);
-        Assert.Equal("Move",           m.Name);
-        Assert.Equal("W",              m.TriggerKey);
-        Assert.Equal(["WalkForward"],  m.Commands);
+        Assert.Equal("Move", m.Name);
+        Assert.Equal("W", m.TriggerKey);
+        Assert.Equal(["WalkForward"], m.Commands);
     }
 
     [Fact]
@@ -226,8 +226,8 @@ public sealed class MacroFileParserTests
             var macros = await Parser.ParseFileAsync(path);
 
             var m = Assert.Single(macros);
-            Assert.Equal("Jump",         m.Name);
-            Assert.Equal("Space",        m.TriggerKey);
+            Assert.Equal("Jump", m.Name);
+            Assert.Equal("Space", m.TriggerKey);
             Assert.Equal(["JumpAction"], m.Commands);
         }
         finally

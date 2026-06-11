@@ -103,10 +103,10 @@ public sealed class InventoryGridTests
     public void Move_MergesSameItem_AndCapsAtMaxStack()
     {
         var grid = new InventoryGrid(4, 4, 99);
-        grid.Add(Apple, 60);  // slot0 = 60
+        grid.Add(Apple, 60); // slot0 = 60
         // Force a second separate stack in slot1.
-        grid.Move(0, 1);      // now slot1 = 60
-        grid.Add(Apple, 60);  // tops slot1 to 99 then slot0 = 21
+        grid.Move(0, 1); // now slot1 = 60
+        grid.Add(Apple, 60); // tops slot1 to 99 then slot0 = 21
         // State: slot0 = 21, slot1 = 99. Re-distribute: move 0 -> 1 (full) => swap.
         bool ok = grid.Move(0, 1);
 
@@ -120,14 +120,14 @@ public sealed class InventoryGridTests
     public void Move_MergesSameItem_WithLeftoverStayingInSource()
     {
         var grid = new InventoryGrid(4, 4, 99);
-        grid.Add(Apple, 50);  // slot0 = 50
-        grid.Move(0, 1);      // slot1 = 50
-        grid.Add(Apple, 70);  // slot1 -> 99 (49 used), slot0 = 21
+        grid.Add(Apple, 50); // slot0 = 50
+        grid.Move(0, 1); // slot1 = 50
+        grid.Add(Apple, 70); // slot1 -> 99 (49 used), slot0 = 21
         // Actually distribute manually to a clean scenario:
         grid.Clear();
-        grid.Add(Apple, 50);  // slot0
-        grid.Move(0, 1);      // slot1 = 50
-        grid.Add(Apple, 60);  // slot1 -> 99 (49), slot0 = 11
+        grid.Add(Apple, 50); // slot0
+        grid.Move(0, 1); // slot1 = 50
+        grid.Add(Apple, 60); // slot1 -> 99 (49), slot0 = 11
         // Now move slot1 (99 full) into slot0 (11): dest not full -> merge 88 into... wait dest=slot0=11
         bool ok = grid.Move(1, 0); // source=99, dest=11 same item, room=88 -> dest=99, source=11
 
@@ -141,7 +141,7 @@ public sealed class InventoryGridTests
     {
         var grid = new InventoryGrid(4, 4, 99);
         grid.Add(Apple, 5); // slot0
-        grid.Move(0, 1);    // slot1 = apple 5
+        grid.Move(0, 1); // slot1 = apple 5
         grid.Add(Sword, 1); // slot0 = sword 1
 
         bool ok = grid.Move(0, 1);

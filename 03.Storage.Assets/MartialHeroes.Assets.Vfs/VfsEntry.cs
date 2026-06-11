@@ -26,10 +26,10 @@ namespace MartialHeroes.Assets.Vfs;
 public readonly struct VfsEntry : IComparable<VfsEntry>
 {
     // spec: Docs/RE/formats/pak.md — field sizes and offsets.
-    internal const int RecordSize  = 144; // 0x90 — CONFIRMED
+    internal const int RecordSize = 144; // 0x90 — CONFIRMED
     internal const int NameCapacity = 100; // char[100] at +0 — CONFIRMED
-    private  const int DataOffsetField = 104; // i64 at +104 — CONFIRMED
-    private  const int DataSizeField   = 112; // i64 at +112 — CONFIRMED
+    private const int DataOffsetField = 104; // i64 at +104 — CONFIRMED
+    private const int DataSizeField = 112; // i64 at +112 — CONFIRMED
 
     /// <summary>Lower-cased ASCII virtual path (the binary-search key).</summary>
     public readonly string Name;
@@ -49,9 +49,9 @@ public readonly struct VfsEntry : IComparable<VfsEntry>
 
     private VfsEntry(string name, long dataOffset, long dataSize)
     {
-        Name       = name;
+        Name = name;
         DataOffset = dataOffset;
-        DataSize   = dataSize;
+        DataSize = dataSize;
     }
 
     /// <summary>

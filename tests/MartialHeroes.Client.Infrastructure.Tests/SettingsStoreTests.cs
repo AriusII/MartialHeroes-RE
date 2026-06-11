@@ -22,35 +22,35 @@ public sealed class SettingsStoreTests
 
         var original = new ClientSettingsDto
         {
-            ResolutionWidth  = 1920,
+            ResolutionWidth = 1920,
             ResolutionHeight = 1080,
-            Fullscreen       = true,
-            RenderQuality    = "High",
-            MasterVolume     = 80,
-            MusicVolume      = 50,
-            SfxVolume        = 70,
-            LastServerHost   = "login.mh.local",
-            LastServerPort   = 9000,
-            WindowX          = 100,
-            WindowY          = 200,
-            Language         = "fr-FR",
+            Fullscreen = true,
+            RenderQuality = "High",
+            MasterVolume = 80,
+            MusicVolume = 50,
+            SfxVolume = 70,
+            LastServerHost = "login.mh.local",
+            LastServerPort = 9000,
+            WindowX = 100,
+            WindowY = 200,
+            Language = "fr-FR",
         };
 
         await store.SaveSettingsAsync(original);
         var loaded = await store.LoadSettingsAsync();
 
-        Assert.Equal(1920,             loaded.ResolutionWidth);
-        Assert.Equal(1080,             loaded.ResolutionHeight);
+        Assert.Equal(1920, loaded.ResolutionWidth);
+        Assert.Equal(1080, loaded.ResolutionHeight);
         Assert.True(loaded.Fullscreen);
-        Assert.Equal("High",           loaded.RenderQuality);
-        Assert.Equal(80,               loaded.MasterVolume);
-        Assert.Equal(50,               loaded.MusicVolume);
-        Assert.Equal(70,               loaded.SfxVolume);
+        Assert.Equal("High", loaded.RenderQuality);
+        Assert.Equal(80, loaded.MasterVolume);
+        Assert.Equal(50, loaded.MusicVolume);
+        Assert.Equal(70, loaded.SfxVolume);
         Assert.Equal("login.mh.local", loaded.LastServerHost);
-        Assert.Equal(9000,             loaded.LastServerPort);
-        Assert.Equal(100,              loaded.WindowX);
-        Assert.Equal(200,              loaded.WindowY);
-        Assert.Equal("fr-FR",          loaded.Language);
+        Assert.Equal(9000, loaded.LastServerPort);
+        Assert.Equal(100, loaded.WindowX);
+        Assert.Equal(200, loaded.WindowY);
+        Assert.Equal("fr-FR", loaded.Language);
     }
 
     [Fact]
@@ -62,18 +62,18 @@ public sealed class SettingsStoreTests
         // Write first batch.
         await store.SaveSettingsAsync(new ClientSettingsDto
         {
-            ResolutionWidth  = 1280,
+            ResolutionWidth = 1280,
             ResolutionHeight = 720,
-            Language         = "en-US",
+            Language = "en-US",
         });
 
         // Write second batch — only overrides Language.
         await store.SaveSettingsAsync(new ClientSettingsDto { Language = "de-DE" });
 
         var loaded = await store.LoadSettingsAsync();
-        Assert.Equal(1280,    loaded.ResolutionWidth);   // from first write
-        Assert.Equal(720,     loaded.ResolutionHeight);  // from first write
-        Assert.Equal("de-DE", loaded.Language);           // updated by second write
+        Assert.Equal(1280, loaded.ResolutionWidth); // from first write
+        Assert.Equal(720, loaded.ResolutionHeight); // from first write
+        Assert.Equal("de-DE", loaded.Language); // updated by second write
     }
 
     [Fact]
@@ -98,16 +98,16 @@ public sealed class SettingsStoreTests
         await using var store = new SqliteSettingsStore(InMemoryConnectionString("settings_keybinds"));
         await store.InitialiseAsync();
 
-        await store.SaveKeybindAsync("UseSkill1",      "F1");
-        await store.SaveKeybindAsync("OpenInventory",  "I");
-        await store.SaveKeybindAsync("ToggleMap",      "M");
+        await store.SaveKeybindAsync("UseSkill1", "F1");
+        await store.SaveKeybindAsync("OpenInventory", "I");
+        await store.SaveKeybindAsync("ToggleMap", "M");
 
         var keybinds = await store.LoadKeybindsAsync();
 
         Assert.Equal(3, keybinds.Count);
-        Assert.Contains(keybinds, k => k.ActionName == "UseSkill1"     && k.KeyCode == "F1");
+        Assert.Contains(keybinds, k => k.ActionName == "UseSkill1" && k.KeyCode == "F1");
         Assert.Contains(keybinds, k => k.ActionName == "OpenInventory" && k.KeyCode == "I");
-        Assert.Contains(keybinds, k => k.ActionName == "ToggleMap"     && k.KeyCode == "M");
+        Assert.Contains(keybinds, k => k.ActionName == "ToggleMap" && k.KeyCode == "M");
     }
 
     [Fact]

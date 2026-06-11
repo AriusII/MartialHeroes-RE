@@ -22,7 +22,8 @@ public sealed class TextureDetectorTests
         //   "DDS files begin with ASCII 'DDS ' (four bytes)". CONFIRMED.
         // spec: Docs/RE/formats/texture.md §Implementation guidance:
         //   "If the first four bytes are 44 44 53 20 (ASCII 'DDS '), treat as DDS."
-        byte[] ddsHeader = [(byte)'D', (byte)'D', (byte)'S', (byte)' ', 0x7C, 0x00, 0x00, 0x00]; // DDS + minimal DDS_HEADER magic
+        byte[] ddsHeader =
+            [(byte)'D', (byte)'D', (byte)'S', (byte)' ', 0x7C, 0x00, 0x00, 0x00]; // DDS + minimal DDS_HEADER magic
 
         TextureDescriptor desc = TextureDetector.Detect(ddsHeader.AsSpan());
 
@@ -77,9 +78,9 @@ public sealed class TextureDetectorTests
         // spec: Docs/RE/formats/texture.md §Likely concrete formats — TGA: MEDIUM confidence. UNVERIFIED.
         // Pad to at least 18 bytes so the length check passes.
         byte[] tgaHeader = new byte[18];
-        tgaHeader[0] = 0;  // ID length = 0
-        tgaHeader[1] = 0;  // color map type = 0
-        tgaHeader[2] = 2;  // image type = 2 (true-color, no compression)
+        tgaHeader[0] = 0; // ID length = 0
+        tgaHeader[1] = 0; // color map type = 0
+        tgaHeader[2] = 2; // image type = 2 (true-color, no compression)
 
         TextureDescriptor desc = TextureDetector.Detect(tgaHeader.AsSpan());
 

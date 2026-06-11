@@ -10,10 +10,10 @@ public sealed class HandshakeWhiteningTests
 {
     [Theory]
     [InlineData(0)]
-    [InlineData(1)]  // sub-dword: nothing whitened
-    [InlineData(3)]  // sub-dword
-    [InlineData(4)]  // one dword
-    [InlineData(7)]  // one dword + 3 trailing untouched
+    [InlineData(1)] // sub-dword: nothing whitened
+    [InlineData(3)] // sub-dword
+    [InlineData(4)] // one dword
+    [InlineData(7)] // one dword + 3 trailing untouched
     [InlineData(16)]
     [InlineData(64)]
     [InlineData(1001)]

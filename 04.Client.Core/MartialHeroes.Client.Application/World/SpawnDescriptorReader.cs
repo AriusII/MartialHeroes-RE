@@ -18,15 +18,15 @@ public readonly ref struct SpawnDescriptorReader
 {
     // SpawnDescriptor field offsets, relative to the start of the 880-byte record.
     // spec: Docs/RE/structs/actor.md ("SpawnDescriptor - the 5/3 CharSpawn payload").
-    private const int OffName = 0x00;            // char[17], NUL-terminated. spec: actor.md +0x00
-    private const int NameMaxBytes = 17;         // up to 16 chars + NUL. spec: actor.md +0x00
-    private const int OffLevel = 0x3A;           // u16 (byte boundary unverified). spec: actor.md +0x3A
-    private const int OffCurrentHp = 0x3C;       // u32. spec: actor.md +0x3C
-    private const int OffCurrentMp = 0x40;       // u32. spec: actor.md +0x40
-    private const int OffCurrentStamina = 0x44;  // u32. spec: actor.md +0x44
-    private const int OffWorldX = 0x4C;          // f32 (confirmed float). spec: actor.md +0x4C
-    private const int OffWorldZ = 0x50;          // f32 (confirmed float). spec: actor.md +0x50
-    private const int OffServerClass = 0x74;     // u16. spec: actor.md +0x74
+    private const int OffName = 0x00; // char[17], NUL-terminated. spec: actor.md +0x00
+    private const int NameMaxBytes = 17; // up to 16 chars + NUL. spec: actor.md +0x00
+    private const int OffLevel = 0x3A; // u16 (byte boundary unverified). spec: actor.md +0x3A
+    private const int OffCurrentHp = 0x3C; // u32. spec: actor.md +0x3C
+    private const int OffCurrentMp = 0x40; // u32. spec: actor.md +0x40
+    private const int OffCurrentStamina = 0x44; // u32. spec: actor.md +0x44
+    private const int OffWorldX = 0x4C; // f32 (confirmed float). spec: actor.md +0x4C
+    private const int OffWorldZ = 0x50; // f32 (confirmed float). spec: actor.md +0x50
+    private const int OffServerClass = 0x74; // u16. spec: actor.md +0x74
 
     /// <summary>The declared SpawnDescriptor size in bytes (0x370). spec: Docs/RE/structs/actor.md.</summary>
     public const int Size = 880;

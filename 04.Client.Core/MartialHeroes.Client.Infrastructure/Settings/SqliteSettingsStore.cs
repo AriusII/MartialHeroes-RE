@@ -83,18 +83,18 @@ public sealed class SqliteSettingsStore : ISettingsStore
 
             return new ClientSettingsDto
             {
-                ResolutionWidth  = ParseNullableInt(values, "resolution_width"),
+                ResolutionWidth = ParseNullableInt(values, "resolution_width"),
                 ResolutionHeight = ParseNullableInt(values, "resolution_height"),
-                Fullscreen       = ParseNullableBool(values, "fullscreen"),
-                RenderQuality    = values.GetValueOrDefault("render_quality"),
-                MasterVolume     = ParseNullableInt(values, "master_volume"),
-                MusicVolume      = ParseNullableInt(values, "music_volume"),
-                SfxVolume        = ParseNullableInt(values, "sfx_volume"),
-                LastServerHost   = values.GetValueOrDefault("last_server_host"),
-                LastServerPort   = ParseNullableInt(values, "last_server_port"),
-                WindowX          = ParseNullableInt(values, "window_x"),
-                WindowY          = ParseNullableInt(values, "window_y"),
-                Language         = values.GetValueOrDefault("language"),
+                Fullscreen = ParseNullableBool(values, "fullscreen"),
+                RenderQuality = values.GetValueOrDefault("render_quality"),
+                MasterVolume = ParseNullableInt(values, "master_volume"),
+                MusicVolume = ParseNullableInt(values, "music_volume"),
+                SfxVolume = ParseNullableInt(values, "sfx_volume"),
+                LastServerHost = values.GetValueOrDefault("last_server_host"),
+                LastServerPort = ParseNullableInt(values, "last_server_port"),
+                WindowX = ParseNullableInt(values, "window_x"),
+                WindowY = ParseNullableInt(values, "window_y"),
+                Language = values.GetValueOrDefault("language"),
             };
         }
         catch (SqliteException ex)
@@ -112,18 +112,20 @@ public sealed class SqliteSettingsStore : ISettingsStore
         // Build the list of (key, value) pairs for non-null fields.
         var pairs = new List<(string Key, string Value)>(12);
 
-        if (settings.ResolutionWidth.HasValue)  pairs.Add(("resolution_width",  settings.ResolutionWidth.Value.ToString()));
-        if (settings.ResolutionHeight.HasValue) pairs.Add(("resolution_height", settings.ResolutionHeight.Value.ToString()));
-        if (settings.Fullscreen.HasValue)       pairs.Add(("fullscreen",        settings.Fullscreen.Value ? "1" : "0"));
-        if (settings.RenderQuality is not null) pairs.Add(("render_quality",    settings.RenderQuality));
-        if (settings.MasterVolume.HasValue)     pairs.Add(("master_volume",     settings.MasterVolume.Value.ToString()));
-        if (settings.MusicVolume.HasValue)      pairs.Add(("music_volume",      settings.MusicVolume.Value.ToString()));
-        if (settings.SfxVolume.HasValue)        pairs.Add(("sfx_volume",        settings.SfxVolume.Value.ToString()));
+        if (settings.ResolutionWidth.HasValue)
+            pairs.Add(("resolution_width", settings.ResolutionWidth.Value.ToString()));
+        if (settings.ResolutionHeight.HasValue)
+            pairs.Add(("resolution_height", settings.ResolutionHeight.Value.ToString()));
+        if (settings.Fullscreen.HasValue) pairs.Add(("fullscreen", settings.Fullscreen.Value ? "1" : "0"));
+        if (settings.RenderQuality is not null) pairs.Add(("render_quality", settings.RenderQuality));
+        if (settings.MasterVolume.HasValue) pairs.Add(("master_volume", settings.MasterVolume.Value.ToString()));
+        if (settings.MusicVolume.HasValue) pairs.Add(("music_volume", settings.MusicVolume.Value.ToString()));
+        if (settings.SfxVolume.HasValue) pairs.Add(("sfx_volume", settings.SfxVolume.Value.ToString()));
         if (settings.LastServerHost is not null) pairs.Add(("last_server_host", settings.LastServerHost));
-        if (settings.LastServerPort.HasValue)   pairs.Add(("last_server_port",  settings.LastServerPort.Value.ToString()));
-        if (settings.WindowX.HasValue)          pairs.Add(("window_x",         settings.WindowX.Value.ToString()));
-        if (settings.WindowY.HasValue)          pairs.Add(("window_y",         settings.WindowY.Value.ToString()));
-        if (settings.Language is not null)      pairs.Add(("language",         settings.Language));
+        if (settings.LastServerPort.HasValue) pairs.Add(("last_server_port", settings.LastServerPort.Value.ToString()));
+        if (settings.WindowX.HasValue) pairs.Add(("window_x", settings.WindowX.Value.ToString()));
+        if (settings.WindowY.HasValue) pairs.Add(("window_y", settings.WindowY.Value.ToString()));
+        if (settings.Language is not null) pairs.Add(("language", settings.Language));
 
         if (pairs.Count == 0) return;
 
@@ -139,7 +141,7 @@ public sealed class SqliteSettingsStore : ISettingsStore
                 "INSERT INTO client_settings (key, value) VALUES (@key, @value) " +
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value;";
 
-            var pKey = cmd.Parameters.Add("@key",   SqliteType.Text);
+            var pKey = cmd.Parameters.Add("@key", SqliteType.Text);
             var pVal = cmd.Parameters.Add("@value", SqliteType.Text);
 
             foreach (var (key, value) in pairs)
@@ -174,6 +176,7 @@ public sealed class SqliteSettingsStore : ISettingsStore
             {
                 result.Add(new KeybindDto(reader.GetString(0), reader.GetString(1)));
             }
+
             return result;
         }
         catch (SqliteException ex)
@@ -198,7 +201,7 @@ public sealed class SqliteSettingsStore : ISettingsStore
                 "INSERT INTO keybinds (action_name, key_code) VALUES (@action, @key) " +
                 "ON CONFLICT(action_name) DO UPDATE SET key_code = excluded.key_code;";
             cmd.Parameters.AddWithValue("@action", actionName);
-            cmd.Parameters.AddWithValue("@key",    keyCode);
+            cmd.Parameters.AddWithValue("@key", keyCode);
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
         catch (SqliteException ex)
@@ -208,7 +211,8 @@ public sealed class SqliteSettingsStore : ISettingsStore
     }
 
     /// <inheritdoc/>
-    public async Task ReplaceAllKeybindsAsync(IEnumerable<KeybindDto> keybinds, CancellationToken cancellationToken = default)
+    public async Task ReplaceAllKeybindsAsync(IEnumerable<KeybindDto> keybinds,
+        CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
         ArgumentNullException.ThrowIfNull(keybinds);
@@ -231,12 +235,12 @@ public sealed class SqliteSettingsStore : ISettingsStore
                 ins.Transaction = (SqliteTransaction)tx;
                 ins.CommandText = "INSERT INTO keybinds (action_name, key_code) VALUES (@action, @key);";
                 var pAction = ins.Parameters.Add("@action", SqliteType.Text);
-                var pKey    = ins.Parameters.Add("@key",    SqliteType.Text);
+                var pKey = ins.Parameters.Add("@key", SqliteType.Text);
 
                 foreach (var kb in keybinds)
                 {
                     pAction.Value = kb.ActionName;
-                    pKey.Value    = kb.KeyCode;
+                    pKey.Value = kb.KeyCode;
                     await ins.ExecuteNonQueryAsync(cancellationToken);
                 }
             }

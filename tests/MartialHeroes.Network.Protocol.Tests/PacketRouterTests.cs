@@ -102,9 +102,9 @@ public sealed class PacketRouterTests
         byte[] payload = new byte[40];
         payload[0] = 2; // Sort = Mob
         BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4, 4), 0xCAFEBABE);
-        BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(8, 4), 1.5f);   // Yaw
+        BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(8, 4), 1.5f); // Yaw
         BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(12, 4), 100.25f); // PosX
-        BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(16, 4), -42.5f);  // PosZ
+        BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(16, 4), -42.5f); // PosZ
         byte[] frame = BuildFrame(5, 13, payload);
 
         var handler = new RecordingHandler();
@@ -122,8 +122,8 @@ public sealed class PacketRouterTests
     public void Routes_enter_game_ack_and_decodes_tail_fields()
     {
         byte[] payload = new byte[44];
-        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0x1c, 4), 7);  // BillingState
-        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0x28, 4), 3);  // CharacterCount
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0x1c, 4), 7); // BillingState
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0x28, 4), 3); // CharacterCount
         byte[] frame = BuildFrame(3, 5, payload);
 
         var handler = new RecordingHandler();

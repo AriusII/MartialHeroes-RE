@@ -28,9 +28,9 @@ public sealed partial class GameHud : Control
     // Control handles (built in _Ready)
     // -------------------------------------------------------------------------
 
-    private Label _stateLabel   = null!;
-    private Label _actorCount   = null!;
-    private ProgressBar _hpBar  = null!;
+    private Label _stateLabel = null!;
+    private Label _actorCount = null!;
+    private ProgressBar _hpBar = null!;
 
     // -------------------------------------------------------------------------
     // View state (display only — no domain state)
@@ -59,13 +59,13 @@ public sealed partial class GameHud : Control
     public override void _Ready()
     {
         // Anchor the HUD to the top-left.
-        AnchorLeft   = 0f;
-        AnchorTop    = 0f;
-        AnchorRight  = 0f;
+        AnchorLeft = 0f;
+        AnchorTop = 0f;
+        AnchorRight = 0f;
         AnchorBottom = 0f;
-        OffsetLeft   = 8f;
-        OffsetTop    = 8f;
-        OffsetRight  = 280f;
+        OffsetLeft = 8f;
+        OffsetTop = 8f;
+        OffsetRight = 280f;
         OffsetBottom = 140f;
 
         // Background panel.
@@ -93,7 +93,7 @@ public sealed partial class GameHud : Control
         _hpBar = new ProgressBar();
         _hpBar.MinValue = 0;
         _hpBar.MaxValue = 100;
-        _hpBar.Value    = 100;
+        _hpBar.Value = 100;
         _hpBar.CustomMinimumSize = new Vector2(140, 20);
         hpRow.AddChild(_hpBar);
     }
@@ -116,8 +116,8 @@ public sealed partial class GameHud : Control
         {
             _hasTrackedPlayer = true;
             _trackedPlayerKey = evt.Key;
-            _trackedHp     = evt.CurrentHp;
-            _trackedMaxHp  = evt.MaxHp;
+            _trackedHp = evt.CurrentHp;
+            _trackedMaxHp = evt.MaxHp;
             RefreshHpBar();
         }
     }
@@ -144,6 +144,6 @@ public sealed partial class GameHud : Control
 
         // Display HP as percentage. No formula — just a ratio of the event-reported values.
         _hpBar.MaxValue = _trackedMaxHp;
-        _hpBar.Value    = _trackedHp;
+        _hpBar.Value = _trackedHp;
     }
 }

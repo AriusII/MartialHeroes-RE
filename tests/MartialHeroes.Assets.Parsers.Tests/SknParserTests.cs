@@ -17,8 +17,19 @@ public sealed class SknParserTests
     // Fixture builder
     // -----------------------------------------------------------------------
 
-    private static byte[] Le4(uint v)   { var b = new byte[4]; BinaryPrimitives.WriteUInt32LittleEndian(b, v); return b; }
-    private static byte[] Le4f(float v) { var b = new byte[4]; BinaryPrimitives.WriteSingleLittleEndian(b, v); return b; }
+    private static byte[] Le4(uint v)
+    {
+        var b = new byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(b, v);
+        return b;
+    }
+
+    private static byte[] Le4f(float v)
+    {
+        var b = new byte[4];
+        BinaryPrimitives.WriteSingleLittleEndian(b, v);
+        return b;
+    }
 
     /// <summary>
     /// Builds a minimal synthetic .skn binary buffer using the confirmed on-disk layout.
@@ -34,7 +45,7 @@ public sealed class SknParserTests
     /// </summary>
     private static byte[] BuildSkn(
         uint idA, uint idB, string name,
-        (uint vIdx, float u, float v)[][] faces,          // each face has 3 corners
+        (uint vIdx, float u, float v)[][] faces, // each face has 3 corners
         (float nx, float ny, float nz, float px, float py, float pz)[] vertices,
         (uint vIdx, uint boneIdx, float w)[] weights)
     {
@@ -125,7 +136,10 @@ public sealed class SknParserTests
                 [(0, 0.1f, 0.2f), (1, 0.3f, 0.4f), (2, 0.5f, 0.6f)],
                 [(0, 0.7f, 0.8f), (2, 0.9f, 1.0f), (3, 0.0f, 0.1f)],
             ],
-            vertices: [(0f, 1f, 0f, 0f, 0f, 0f), (0f, 1f, 0f, 1f, 0f, 0f), (0f, 1f, 0f, 2f, 0f, 0f), (0f, 1f, 0f, 3f, 0f, 0f)],
+            vertices:
+            [
+                (0f, 1f, 0f, 0f, 0f, 0f), (0f, 1f, 0f, 1f, 0f, 0f), (0f, 1f, 0f, 2f, 0f, 0f), (0f, 1f, 0f, 3f, 0f, 0f)
+            ],
             weights: [(0, 0, 1.0f)]);
 
         SkinnedMesh mesh = SknParser.Parse(data.AsSpan());
@@ -145,9 +159,9 @@ public sealed class SknParserTests
             faces: [[(0, 0f, 0f), (1, 0f, 0f), (2, 0f, 0f)]],
             vertices:
             [
-                (nx: 0.5f, ny: 0.6f, nz: 0.7f,  px: 10f, py: 20f, pz: 30f),
-                (nx: 0.0f, ny: 1.0f, nz: 0.0f,  px:  1f, py:  2f, pz:  3f),
-                (nx: 0.0f, ny: 0.0f, nz: 1.0f,  px:  4f, py:  5f, pz:  6f),
+                (nx: 0.5f, ny: 0.6f, nz: 0.7f, px: 10f, py: 20f, pz: 30f),
+                (nx: 0.0f, ny: 1.0f, nz: 0.0f, px: 1f, py: 2f, pz: 3f),
+                (nx: 0.0f, ny: 0.0f, nz: 1.0f, px: 4f, py: 5f, pz: 6f),
             ],
             weights: [(0, 0, 1.0f)]);
 
@@ -245,11 +259,12 @@ public sealed class SknParserTests
         // and verifying the total size difference matches the name bytes (not name+3 padding).
         // spec: Docs/RE/formats/mesh.md §String encoding (LenStr):
         //   "The prefix is a 4-byte little-endian u32." CONFIRMED.
-        (uint vIdx, float u, float v)[][] faces   = [[(0, 0f, 0f), (1, 0f, 0f), (2, 0f, 0f)]];
-        (float, float, float, float, float, float)[] verts = [(0f, 1f, 0f, 0f, 0f, 0f), (0f, 1f, 0f, 1f, 0f, 0f), (0f, 1f, 0f, 2f, 0f, 0f)];
+        (uint vIdx, float u, float v)[][] faces = [[(0, 0f, 0f), (1, 0f, 0f), (2, 0f, 0f)]];
+        (float, float, float, float, float, float)[] verts =
+            [(0f, 1f, 0f, 0f, 0f, 0f), (0f, 1f, 0f, 1f, 0f, 0f), (0f, 1f, 0f, 2f, 0f, 0f)];
         (uint, uint, float)[] ws = [(0, 0, 1.0f)];
 
-        byte[] withName1 = BuildSkn(1, 2, "A",   faces, verts, ws); // 1-char name
+        byte[] withName1 = BuildSkn(1, 2, "A", faces, verts, ws); // 1-char name
         byte[] withName5 = BuildSkn(1, 2, "ABCDE", faces, verts, ws); // 5-char name
 
         // The difference must be exactly 4 (5 chars - 1 char) bytes of name body.

@@ -42,17 +42,17 @@ public static class VitalFormula
     // Stored as float literals, widened to double for accumulation, per the spec.
     // -------------------------------------------------------------------------
 
-    private const float HpWeightStr = 2.2f;   // spec: Docs/RE/structs/stats.md (Max HP weights)
-    private const float HpWeightDex = 2.5f;   // spec: Docs/RE/structs/stats.md
-    private const float HpWeightAgi = 2.4f;   // spec: Docs/RE/structs/stats.md
-    private const float HpWeightCon = 1.5f;   // spec: Docs/RE/structs/stats.md
-    private const float HpWeightInt = 1.6f;   // spec: Docs/RE/structs/stats.md
+    private const float HpWeightStr = 2.2f; // spec: Docs/RE/structs/stats.md (Max HP weights)
+    private const float HpWeightDex = 2.5f; // spec: Docs/RE/structs/stats.md
+    private const float HpWeightAgi = 2.4f; // spec: Docs/RE/structs/stats.md
+    private const float HpWeightCon = 1.5f; // spec: Docs/RE/structs/stats.md
+    private const float HpWeightInt = 1.6f; // spec: Docs/RE/structs/stats.md
 
-    private const float MpWeightStr = 1.4f;   // spec: Docs/RE/structs/stats.md (Max MP weights)
-    private const float MpWeightDex = 1.5f;   // spec: Docs/RE/structs/stats.md
-    private const float MpWeightAgi = 1.7f;   // spec: Docs/RE/structs/stats.md
-    private const float MpWeightCon = 1.5f;   // spec: Docs/RE/structs/stats.md
-    private const float MpWeightInt = 3.5f;   // spec: Docs/RE/structs/stats.md
+    private const float MpWeightStr = 1.4f; // spec: Docs/RE/structs/stats.md (Max MP weights)
+    private const float MpWeightDex = 1.5f; // spec: Docs/RE/structs/stats.md
+    private const float MpWeightAgi = 1.7f; // spec: Docs/RE/structs/stats.md
+    private const float MpWeightCon = 1.5f; // spec: Docs/RE/structs/stats.md
+    private const float MpWeightInt = 3.5f; // spec: Docs/RE/structs/stats.md
 
     private const double ScoreConstant = 30.0; // spec: Docs/RE/structs/stats.md (+30.0 constant)
 

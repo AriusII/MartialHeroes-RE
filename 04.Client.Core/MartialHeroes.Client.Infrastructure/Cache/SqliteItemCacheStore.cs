@@ -162,7 +162,7 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
             "  name           = excluded.name, " +
             "  description    = excluded.description, " +
             "  item_type_code = excluded.item_type_code;";
-        cmd.Parameters.AddWithValue("@id",   (long)item.Id.Value);
+        cmd.Parameters.AddWithValue("@id", (long)item.Id.Value);
         cmd.Parameters.AddWithValue("@name", item.Name);
         cmd.Parameters.AddWithValue("@desc", item.Description);
         cmd.Parameters.AddWithValue("@type", (int)item.ItemTypeCode);
@@ -173,9 +173,9 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
     {
         var rawId = (ulong)r.GetInt64(0); // cast back: stored as int64, re-interpret as uint
         return new CachedItemDto(
-            Id:           new ItemId((uint)rawId),
-            Name:         r.GetString(1),
-            Description:  r.GetString(2),
+            Id: new ItemId((uint)rawId),
+            Name: r.GetString(1),
+            Description: r.GetString(2),
             ItemTypeCode: (byte)r.GetInt32(3));
     }
 

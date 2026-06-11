@@ -53,6 +53,7 @@ public sealed class FrameSplitterTests
         {
             await writer.WriteAsync(chunk);
         }
+
         await writer.CompleteAsync();
     }
 

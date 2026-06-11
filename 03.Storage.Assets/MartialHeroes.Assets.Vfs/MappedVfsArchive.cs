@@ -49,10 +49,10 @@ namespace MartialHeroes.Assets.Vfs;
 /// </remarks>
 public sealed class MappedVfsArchive : IDisposable
 {
-    private readonly VfsDirectory              _directory;
-    private readonly MemoryMappedFile?         _mappedFile;     // null iff the .vfs is zero bytes
-    private readonly MemoryMappedViewAccessor? _viewAccessor;   // null iff the .vfs is zero bytes
-    private volatile bool                      _disposed;
+    private readonly VfsDirectory _directory;
+    private readonly MemoryMappedFile? _mappedFile; // null iff the .vfs is zero bytes
+    private readonly MemoryMappedViewAccessor? _viewAccessor; // null iff the .vfs is zero bytes
+    private volatile bool _disposed;
 
     // Private constructor — use the static factory methods.
     private MappedVfsArchive(
@@ -60,8 +60,8 @@ public sealed class MappedVfsArchive : IDisposable
         MemoryMappedFile? mappedFile,
         MemoryMappedViewAccessor? viewAccessor)
     {
-        _directory    = directory;
-        _mappedFile   = mappedFile;
+        _directory = directory;
+        _mappedFile = mappedFile;
         _viewAccessor = viewAccessor;
     }
 
@@ -90,12 +90,12 @@ public sealed class MappedVfsArchive : IDisposable
         // spec: Docs/RE/formats/pak.md §"Opening sequence" steps 1-4. CONFIRMED.
         VfsDirectory directory;
         using (var infStream = new FileStream(
-            infPath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            bufferSize: 4096,
-            useAsync: false))
+                   infPath,
+                   FileMode.Open,
+                   FileAccess.Read,
+                   FileShare.Read,
+                   bufferSize: 4096,
+                   useAsync: false))
         {
             directory = VfsDirectory.Load(infStream);
         }
@@ -119,22 +119,30 @@ public sealed class MappedVfsArchive : IDisposable
         MemoryMappedViewAccessor? view = null;
         try
         {
-            mmf  = MemoryMappedFile.CreateFromFile(
+            mmf = MemoryMappedFile.CreateFromFile(
                 vfsPath,
                 FileMode.Open,
-                mapName: null,          // anonymous — no cross-process sharing needed
-                capacity: 0,            // 0 = use actual file size
+                mapName: null, // anonymous — no cross-process sharing needed
+                capacity: 0, // 0 = use actual file size
                 access: MemoryMappedFileAccess.Read);
 
             view = mmf.CreateViewAccessor(
                 offset: 0,
-                size:   0,              // 0 = map entire file
+                size: 0, // 0 = map entire file
                 access: MemoryMappedFileAccess.Read);
         }
         catch
         {
             // Ensure the MMF is not leaked if view creation fails.
-            try { mmf?.Dispose(); } catch { /* best-effort */ }
+            try
+            {
+                mmf?.Dispose();
+            }
+            catch
+            {
+                /* best-effort */
+            }
+
             throw;
         }
 

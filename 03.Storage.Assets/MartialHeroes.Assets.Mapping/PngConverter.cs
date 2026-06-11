@@ -38,8 +38,8 @@ public static class PngConverter
     private const uint DdsMagic = 0x20534444u;
 
     // DDS pixel format flags (DDPF_*). Public DDS spec §DDPIXELFORMAT.dwFlags.
-    private const uint DdpfFourCC    = 0x00000004u;
-    private const uint DdpfRgb       = 0x00000040u;
+    private const uint DdpfFourCC = 0x00000004u;
+    private const uint DdpfRgb = 0x00000040u;
     private const uint DdpfAlphaPixels = 0x00000001u;
 
     // Common FourCC codes. Public DDS spec §DDPIXELFORMAT.dwFourCC.
@@ -49,6 +49,7 @@ public static class PngConverter
 
     // DDS_HEADER size = 124 bytes. Public DDS spec §DDS_HEADER.dwSize.
     private const int DdsHeaderSize = 124;
+
     // DDS file starts with 4-byte magic, then 124-byte header.
     private const int DdsDataOffset = 4 + DdsHeaderSize; // 128
 
@@ -114,13 +115,13 @@ public static class PngConverter
         // Public DDS spec §DDS_HEADER field offsets.
         ReadOnlySpan<byte> hdr = dds.Slice(4, DdsHeaderSize);
         int height = (int)BinaryPrimitives.ReadUInt32LittleEndian(hdr[8..]);
-        int width  = (int)BinaryPrimitives.ReadUInt32LittleEndian(hdr[12..]);
+        int width = (int)BinaryPrimitives.ReadUInt32LittleEndian(hdr[12..]);
 
         // DDPIXELFORMAT starts at offset 76 within DDS_HEADER.
         // Public DDS spec §DDS_HEADER: ddspf @ dwSize+72 (0-based field offset 76 inside header).
         ReadOnlySpan<byte> pf = hdr[76..]; // DDPIXELFORMAT (32 bytes)
-        uint pfFlags  = BinaryPrimitives.ReadUInt32LittleEndian(pf[4..]);   // dwFlags @ +4
-        uint fourCC   = BinaryPrimitives.ReadUInt32LittleEndian(pf[8..]);   // dwFourCC @ +8
+        uint pfFlags = BinaryPrimitives.ReadUInt32LittleEndian(pf[4..]); // dwFlags @ +4
+        uint fourCC = BinaryPrimitives.ReadUInt32LittleEndian(pf[8..]); // dwFourCC @ +8
         uint rgbBitCount = BinaryPrimitives.ReadUInt32LittleEndian(pf[12..]); // dwRGBBitCount @ +12
 
         ReadOnlySpan<byte> pixels = dds[DdsDataOffset..];
@@ -167,7 +168,7 @@ public static class PngConverter
     private static byte[] DecodeDxt1(ReadOnlySpan<byte> data, int width, int height)
     {
         byte[] rgba = new byte[width * height * 4];
-        int blocksX = (width  + 3) / 4;
+        int blocksX = (width + 3) / 4;
         int blocksY = (height + 3) / 4;
         int src = 0;
 
@@ -235,12 +236,12 @@ public static class PngConverter
     private static byte[] DecodeDxt3(ReadOnlySpan<byte> data, int width, int height)
     {
         byte[] rgba = new byte[width * height * 4];
-        int blocksX = (width  + 3) / 4;
+        int blocksX = (width + 3) / 4;
         int blocksY = (height + 3) / 4;
         int src = 0;
 
         // Allocate per-block working arrays once outside the loop — CA2014 fix.
-        byte[] alphas  = new byte[16];
+        byte[] alphas = new byte[16];
         uint[] palette = new uint[4];
 
         for (int by = 0; by < blocksY; by++)
@@ -252,13 +253,13 @@ public static class PngConverter
                 for (int i = 0; i < 8; i++)
                 {
                     byte ab = data[src + i];
-                    alphas[i * 2]     = (byte)((ab & 0x0F) * 17); // 0x0F → 0xFF, linear scale
-                    alphas[i * 2 + 1] = (byte)((ab >>   4) * 17);
+                    alphas[i * 2] = (byte)((ab & 0x0F) * 17); // 0x0F → 0xFF, linear scale
+                    alphas[i * 2 + 1] = (byte)((ab >> 4) * 17);
                 }
 
                 // Next 8 bytes: BC1 colour block.
-                ushort c0Raw   = BinaryPrimitives.ReadUInt16LittleEndian(data[(src + 8)..]);
-                ushort c1Raw   = BinaryPrimitives.ReadUInt16LittleEndian(data[(src + 10)..]);
+                ushort c0Raw = BinaryPrimitives.ReadUInt16LittleEndian(data[(src + 8)..]);
+                ushort c1Raw = BinaryPrimitives.ReadUInt16LittleEndian(data[(src + 10)..]);
                 uint selectors = BinaryPrimitives.ReadUInt32LittleEndian(data[(src + 12)..]);
                 src += 16;
 
@@ -297,14 +298,14 @@ public static class PngConverter
     private static byte[] DecodeDxt5(ReadOnlySpan<byte> data, int width, int height)
     {
         byte[] rgba = new byte[width * height * 4];
-        int blocksX = (width  + 3) / 4;
+        int blocksX = (width + 3) / 4;
         int blocksY = (height + 3) / 4;
         int src = 0;
 
         // Allocate per-block working arrays once outside the loop — CA2014 fix.
         byte[] alphaPalette = new byte[8];
-        byte[] alphas       = new byte[16];
-        uint[] palette      = new uint[4];
+        byte[] alphas = new byte[16];
+        uint[] palette = new uint[4];
 
         for (int by = 0; by < blocksY; by++)
         {
@@ -342,11 +343,11 @@ public static class PngConverter
                 // 6 bytes of 3-bit alpha selectors (48 bits, 16 × 3-bit).
                 // Pack into a ulong for easy bit extraction.
                 ulong alphaBits = (ulong)data[src + 2]
-                    | ((ulong)data[src + 3] << 8)
-                    | ((ulong)data[src + 4] << 16)
-                    | ((ulong)data[src + 5] << 24)
-                    | ((ulong)data[src + 6] << 32)
-                    | ((ulong)data[src + 7] << 40);
+                                  | ((ulong)data[src + 3] << 8)
+                                  | ((ulong)data[src + 4] << 16)
+                                  | ((ulong)data[src + 5] << 24)
+                                  | ((ulong)data[src + 6] << 32)
+                                  | ((ulong)data[src + 7] << 40);
 
                 for (int i = 0; i < 16; i++)
                 {
@@ -355,8 +356,8 @@ public static class PngConverter
                 }
 
                 // BC1 colour block at src+8.
-                ushort c0Raw   = BinaryPrimitives.ReadUInt16LittleEndian(data[(src + 8)..]);
-                ushort c1Raw   = BinaryPrimitives.ReadUInt16LittleEndian(data[(src + 10)..]);
+                ushort c0Raw = BinaryPrimitives.ReadUInt16LittleEndian(data[(src + 8)..]);
+                ushort c1Raw = BinaryPrimitives.ReadUInt16LittleEndian(data[(src + 10)..]);
                 uint selectors = BinaryPrimitives.ReadUInt32LittleEndian(data[(src + 12)..]);
                 src += 16;
 
@@ -448,7 +449,7 @@ public static class PngConverter
                 uint packed = palette[palIdx];
                 int dst = (py * width + px) * 4;
                 rgba[dst + 0] = (byte)(packed & 0xFF);
-                rgba[dst + 1] = (byte)((packed >>  8) & 0xFF);
+                rgba[dst + 1] = (byte)((packed >> 8) & 0xFF);
                 rgba[dst + 2] = (byte)((packed >> 16) & 0xFF);
                 rgba[dst + 3] = (byte)((packed >> 24) & 0xFF);
             }
@@ -476,7 +477,7 @@ public static class PngConverter
                 uint packed = palette[palIdx];
                 int dst = (py * width + px) * 4;
                 rgba[dst + 0] = (byte)(packed & 0xFF);
-                rgba[dst + 1] = (byte)((packed >>  8) & 0xFF);
+                rgba[dst + 1] = (byte)((packed >> 8) & 0xFF);
                 rgba[dst + 2] = (byte)((packed >> 16) & 0xFF);
                 rgba[dst + 3] = alphas[texelIndex]; // override alpha from block
             }
@@ -494,8 +495,8 @@ public static class PngConverter
         // R: bits 15..11 (5 bits), G: bits 10..5 (6 bits), B: bits 4..0 (5 bits).
         // Scale: 5-bit → 8-bit by (x << 3) | (x >> 2);  6-bit → 8-bit by (x << 2) | (x >> 4).
         int ri = (v >> 11) & 0x1F;
-        int gi = (v >>  5) & 0x3F;
-        int bi = (v >>  0) & 0x1F;
+        int gi = (v >> 5) & 0x3F;
+        int bi = (v >> 0) & 0x1F;
         r = (byte)((ri << 3) | (ri >> 2));
         g = (byte)((gi << 2) | (gi >> 4));
         b = (byte)((bi << 3) | (bi >> 2));
@@ -526,13 +527,13 @@ public static class PngConverter
 
         // IHDR chunk (13 bytes of data)
         Span<byte> ihdrData = stackalloc byte[13];
-        BinaryPrimitives.WriteUInt32BigEndian(ihdrData,       (uint)width);
-        BinaryPrimitives.WriteUInt32BigEndian(ihdrData[4..],  (uint)height);
-        ihdrData[8]  = 8;                // bit depth = 8
-        ihdrData[9]  = PngColorTypeRgba; // color type 6 = RGBA
-        ihdrData[10] = 0;                // compression method 0 (Deflate)
-        ihdrData[11] = 0;                // filter method 0
-        ihdrData[12] = 0;                // interlace method 0 (none)
+        BinaryPrimitives.WriteUInt32BigEndian(ihdrData, (uint)width);
+        BinaryPrimitives.WriteUInt32BigEndian(ihdrData[4..], (uint)height);
+        ihdrData[8] = 8; // bit depth = 8
+        ihdrData[9] = PngColorTypeRgba; // color type 6 = RGBA
+        ihdrData[10] = 0; // compression method 0 (Deflate)
+        ihdrData[11] = 0; // filter method 0
+        ihdrData[12] = 0; // interlace method 0 (none)
         WriteChunk(output, "IHDR"u8, ihdrData);
 
         // IDAT chunk — filter then compress
@@ -571,11 +572,12 @@ public static class PngConverter
     /// </summary>
     private static byte[] ZlibDeflate(byte[] raw)
     {
-        using var ms  = new MemoryStream();
+        using var ms = new MemoryStream();
         using (var zlib = new ZLibStream(ms, CompressionLevel.SmallestSize, leaveOpen: true))
         {
             zlib.Write(raw);
         }
+
         return ms.ToArray();
     }
 
@@ -620,6 +622,7 @@ public static class PngConverter
                 crc = (crc & 1) != 0 ? (crc >> 1) ^ Poly : crc >> 1;
             table[i] = crc;
         }
+
         return table;
     }
 

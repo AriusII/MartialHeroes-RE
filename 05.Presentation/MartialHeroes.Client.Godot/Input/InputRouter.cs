@@ -110,7 +110,7 @@ public sealed partial class InputRouter : Node
         PhysicsDirectSpaceState3D spaceState = world3D.DirectSpaceState;
 
         Vector3 from = _camera.ProjectRayOrigin(screenPos);
-        Vector3 to   = from + _camera.ProjectRayNormal(screenPos) * 1000f;
+        Vector3 to = from + _camera.ProjectRayNormal(screenPos) * 1000f;
 
         var query = PhysicsRayQueryParameters3D.Create(from, to);
         query.CollideWithAreas = false;

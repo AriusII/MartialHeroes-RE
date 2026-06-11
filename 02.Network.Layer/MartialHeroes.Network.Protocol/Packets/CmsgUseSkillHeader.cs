@@ -40,6 +40,7 @@ public readonly struct CmsgUseSkillHeader
 
     /// <summary>0x01 — padding / unused (zeroed in the short form). spec: same (Pad0: bytes[3]).</summary>
     private readonly byte _pad0_0;
+
     private readonly byte _pad0_1;
     private readonly byte _pad0_2;
 

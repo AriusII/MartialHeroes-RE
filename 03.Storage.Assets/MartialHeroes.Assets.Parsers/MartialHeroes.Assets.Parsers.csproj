@@ -8,7 +8,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj" />
+        <ProjectReference Include="..\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj"/>
     </ItemGroup>
 
 </Project>

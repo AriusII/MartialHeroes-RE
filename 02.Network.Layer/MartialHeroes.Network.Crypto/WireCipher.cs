@@ -79,18 +79,18 @@ public static class WireCipher
 
     private static void EncryptForwardSweep(Span<byte> payload)
     {
-        byte acc = 0;                       // feedback accumulator, reset per sweep. §3.1
-        byte p = (byte)payload.Length;      // remaining-length countdown, low 8 bits. §3.1 load-bearing note
+        byte acc = 0; // feedback accumulator, reset per sweep. §3.1
+        byte p = (byte)payload.Length; // remaining-length countdown, low 8 bits. §3.1 load-bearing note
 
         for (int i = 0; i < payload.Length; i++)
         {
             byte t = Rol8(payload[i], ForwardRol); // ROL 3
-            t = (byte)(t + p);                     // ADD8 remaining-length counter
-            t = (byte)(t ^ acc);                   // fold in feedback
-            acc = t;                               // chain pre-whitening intermediate
+            t = (byte)(t + p); // ADD8 remaining-length counter
+            t = (byte)(t ^ acc); // fold in feedback
+            acc = t; // chain pre-whitening intermediate
             // Whitening: 0x48 + NOT8(ROR8(t,1)) ≡ 71 − ROR8(t,1) (mod 256). §3.1
             payload[i] = (byte)(ForwardWhitenAdd + Not8(Ror8(t, ForwardRor)));
-            p = (byte)(p - 1);                     // SUB8 countdown
+            p = (byte)(p - 1); // SUB8 countdown
         }
     }
 
@@ -103,10 +103,10 @@ public static class WireCipher
 
         for (int i = payload.Length - 1; i >= 0; i--)
         {
-            byte t = Rol8(payload[i], BackwardRol);  // ROL 4
-            t = (byte)(t + p);                       // ADD8 countdown
-            t = (byte)(t ^ acc);                     // fold in feedback
-            acc = t;                                 // chain pre-whitening intermediate
+            byte t = Rol8(payload[i], BackwardRol); // ROL 4
+            t = (byte)(t + p); // ADD8 countdown
+            t = (byte)(t ^ acc); // fold in feedback
+            acc = t; // chain pre-whitening intermediate
             payload[i] = Ror8((byte)(t ^ BackwardWhitenXor), BackwardRor); // XOR 0x13 then ROR 3
             p = (byte)(p - 1);
         }
@@ -126,10 +126,10 @@ public static class WireCipher
         {
             // Undo whitening: out = 0x48 + NOT8(ROR8(t,1))  ⇒  ROR8(t,1) = NOT8(out − 0x48).
             byte rored = Not8((byte)(payload[i] - ForwardWhitenAdd));
-            byte t = Rol8(rored, ForwardRor);        // undo ROR8(.,1) → post-feedback intermediate (acc_i)
-            byte input = (byte)((t ^ accPrev) - p);  // undo XOR feedback, then undo ADD8(.,p)
-            payload[i] = Ror8(input, ForwardRol);    // undo ROL8(.,3)
-            accPrev = t;                             // this position's intermediate feeds the next
+            byte t = Rol8(rored, ForwardRor); // undo ROR8(.,1) → post-feedback intermediate (acc_i)
+            byte input = (byte)((t ^ accPrev) - p); // undo XOR feedback, then undo ADD8(.,p)
+            payload[i] = Ror8(input, ForwardRol); // undo ROL8(.,3)
+            accPrev = t; // this position's intermediate feeds the next
             p = (byte)(p - 1);
         }
     }
@@ -143,9 +143,10 @@ public static class WireCipher
 
         for (int i = payload.Length - 1; i >= 0; i--)
         {
-            byte t = (byte)(Rol8(payload[i], BackwardRor) ^ BackwardWhitenXor); // undo ROR8(.,3), then undo XOR 0x13 → acc_i
-            byte input = (byte)((t ^ accPrev) - p);  // undo XOR feedback, then undo ADD8(.,p)
-            payload[i] = Ror8(input, BackwardRol);   // undo ROL8(.,4)
+            byte t = (byte)(Rol8(payload[i], BackwardRor) ^
+                            BackwardWhitenXor); // undo ROR8(.,3), then undo XOR 0x13 → acc_i
+            byte input = (byte)((t ^ accPrev) - p); // undo XOR feedback, then undo ADD8(.,p)
+            payload[i] = Ror8(input, BackwardRol); // undo ROL8(.,4)
             accPrev = t;
             p = (byte)(p - 1);
         }

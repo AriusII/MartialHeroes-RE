@@ -26,20 +26,20 @@ namespace MartialHeroes.Assets.Vfs;
 internal sealed unsafe class MappedMemoryManager : MemoryManager<byte>
 {
     private readonly SafeMemoryMappedViewHandle _handle;
-    private readonly long   _offset;   // byte offset within the mapped view
-    private readonly int    _length;   // byte count for this slice
+    private readonly long _offset; // byte offset within the mapped view
+    private readonly int _length; // byte count for this slice
 
-    private byte* _basePointer;        // acquired via AcquirePointer; released in Dispose
-    private bool  _disposed;
+    private byte* _basePointer; // acquired via AcquirePointer; released in Dispose
+    private bool _disposed;
 
     internal MappedMemoryManager(
         MemoryMappedViewAccessor accessor,
         long offset,
-        int  length)
+        int length)
     {
         ArgumentNullException.ThrowIfNull(accessor);
-        if (offset < 0)  throw new ArgumentOutOfRangeException(nameof(offset));
-        if (length < 0)  throw new ArgumentOutOfRangeException(nameof(length));
+        if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
+        if (length < 0) throw new ArgumentOutOfRangeException(nameof(length));
 
         _handle = accessor.SafeMemoryMappedViewHandle;
         _offset = offset;

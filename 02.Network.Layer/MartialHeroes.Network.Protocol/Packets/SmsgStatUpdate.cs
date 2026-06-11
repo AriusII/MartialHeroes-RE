@@ -38,6 +38,7 @@ public readonly struct SmsgStatUpdate
 
     /// <summary>0x09 — read but not decoded / padding. spec: same (Pad0: bytes[3]).</summary>
     private readonly byte _pad0_0;
+
     private readonly byte _pad0_1;
     private readonly byte _pad0_2;
 

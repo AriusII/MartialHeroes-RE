@@ -86,7 +86,7 @@ public sealed class ApplicationUseCasesTests
 
         // ModeFlags @0x0c: mode 1 + run bit 0x100.
         uint modeFlags = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x0c, 4));
-        Assert.Equal(1u, modeFlags & 0xFFu);     // click-to-move mode
+        Assert.Equal(1u, modeFlags & 0xFFu); // click-to-move mode
         Assert.Equal(0x100u, modeFlags & 0x100u); // run bit set
     }
 
