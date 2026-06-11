@@ -1,0 +1,25 @@
+# names.yaml — project glossary for the legacy Martial Heroes client.
+#
+# Maps original IDA symbols / addresses to canonical project names. This is a GLOSSARY
+# (clean, committed), not decompiler output. The `ida-naming-sync` skill applies this map
+# to the live IDA database and pulls renamed symbols back.
+#
+# Address keys are strings ("0x004A1230") so YAML never coerces them to ints/floats.
+
+binary:
+  # Fill once a reference client is hashed (the analysis is pinned to this exact build).
+  name: "Main.exe"
+  sha256: ""          # e.g. "ab12…" — set by ida-recon
+  notes: ""
+
+functions: {}
+  # "0x004A1230": { name: "RecvPacketDispatch", note: "main opcode switch" }
+
+globals: {}
+  # "0x006F0040": { name: "g_RollingKey", note: "packet cipher rolling key state" }
+
+crypto: {}
+  # "0x0049F800": { name: "DecryptInPlace", note: "rolling-key stream cipher" }
+
+opcodes: {}
+  # 0x0042: { name: "SmsgMovePlayer", direction: "S2C", note: "" }

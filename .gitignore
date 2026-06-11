@@ -404,11 +404,40 @@ FodyWeavers.xsd
 .idea/*
 /.idea/*
 
+# === Godot 4 editor cache (generated, never committed) ===
+.godot/
+
 # === Oracle: Wireshark captures & derived analysis data (kept local, NOT committed) ===
 # Capture binaries are large — the Vasselix combat capture is ~204 MB, over GitHub's 100 MB file limit.
 *.pcapng
-# Derived TSVs are regenerated from the captures via tshark (see CLAUDE.md) — not source, anywhere.
+# Derived TSVs are regenerated from the captures via tshark (see the pcap-extract skill) — not source, anywhere.
 *.tsv
+# Original game archives (user-supplied legacy assets) — never distributed with this repo.
+*.pak
 
+# === Legacy client binaries (user-supplied, never distributed) ===
+# .exe/.dll are NOT otherwise ignored; keep the copyrighted client out of git.
+Main.exe
+*.exe
+*.dll
+# Recommended drop-zone for the user's own legacy client files (bring-your-own-assets).
+/LegacyClient/
+
+# === Clean-room firewall: decompiler-tainted RE material stays local ===
+# Docs/RE/_dirty/ holds raw IDA/Hex-Rays output. It must never enter git — only neutral
+# specs promoted out of it are committed. See Docs/RE/README.md.
+Docs/RE/_dirty/
+
+# === Claude Code tooling: SHARE hooks/skills/agents/settings, keep local state secret ===
 .claude/*
+!.claude/settings.json
+!.claude/hooks/
+!.claude/skills/
+!.claude/agents/
+# Hook runtime journals/breadcrumbs stay local.
+.claude/hooks/state/
+# Personal permission overrides stay local.
+.claude/settings.local.json
+
+# Gemini config stays local (mirrors the IDA MCP registration).
 .gemini/*
