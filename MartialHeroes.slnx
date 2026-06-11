@@ -22,7 +22,9 @@
   <Folder Name="/05.Presentation/" />
   <Folder Name="/Docs/" />
   <Folder Name="/Tests/">
+    <Project Path="tests/MartialHeroes.Assets.Parsers.Tests/MartialHeroes.Assets.Parsers.Tests.csproj" />
     <Project Path="tests/MartialHeroes.Assets.Vfs.Tests/MartialHeroes.Assets.Vfs.Tests.csproj" />
+    <Project Path="tests/MartialHeroes.Client.Application.Tests/MartialHeroes.Client.Application.Tests.csproj" />
     <Project Path="tests/MartialHeroes.Client.Domain.Tests/MartialHeroes.Client.Domain.Tests.csproj" />
     <Project Path="tests/MartialHeroes.Network.Protocol.Tests/MartialHeroes.Network.Protocol.Tests.csproj" />
     <Project Path="tests/MartialHeroes.Shared.Kernel.Tests/MartialHeroes.Shared.Kernel.Tests.csproj" />

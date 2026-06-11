@@ -10,6 +10,9 @@
     <ItemGroup>
         <ProjectReference Include="..\MartialHeroes.Client.Domain\MartialHeroes.Client.Domain.csproj" />
         <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Abstractions\MartialHeroes.Network.Abstractions.csproj" />
+        <!-- 04 -> 02 downward-legal: typed packet structs, FrameHeader, Opcodes, and the
+             Routing.IPacketHandler / PacketRouter dispatch seam this layer wires into. -->
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Protocol\MartialHeroes.Network.Protocol.csproj" />
     </ItemGroup>
 
 </Project>
