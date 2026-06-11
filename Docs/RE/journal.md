@@ -210,3 +210,29 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
   sub_/loc_/dword_, no pseudo-code, no standalone "IDA" editorializing). All game text is CP949/EUC-KR. The
   wave-7/8 "stat curves not extractable" gap is now fully resolved: the curves are client-side .scr + items.csv
   and their real column layouts are documented. Journal + names.yaml authored centrally by the orchestrator.
+
+## 2026-06-12 — gameplay-logic RE wave (10 analysts / 8 spec-authors)
+- binary: doida.exe @ 63fcaf8e (x86 32-bit), IDA Pro 9.3 via MCP, read-only — IDA was the primary evidence here
+  (engine/gameplay logic, no asset samples).
+- analyzed (by canonical subsystem): combat damage/stat model; the stat-aggregation & equipment pipeline; the
+  skill cast/effect system; inventory/equip/trade/shop/enchant; the camera and its five view modes; client
+  movement & terrain collision; the still-undocumented S2C/C2S opcode handlers; the login/character-select/
+  enter-game flow; chat & social (party/guild/friend); and quest/NPC interaction.
+- specs produced (all NEW, neutral, promoted by no-IDA spec-authors):
+  - specs/combat.md — client is server-authoritative for HP deltas; it computes a full derived combat-stat
+    model locally. Pinned formula shapes + coefficients (e.g. attack_base = (STR*2.5 + DEX*2.0 + AGI*2.3 +
+    CON*1.0 + INT*1.0) * 0.2; a parallel secondary base), the PvE/PvP rate split, the weapon-proficiency hit
+    penalty tiers, the buff/equip/set contribution model, and stat-id enumeration.
+  - specs/skills.md — cast pipeline (target/range/cost/cooldown), effect dispatch, buff/debuff model.
+  - specs/inventory_trade.md — inventory grid, equip rules, trade state machine, shop, enchant (+N).
+  - specs/camera_movement.md — five view modes; camera clamps; click-to-move; collision against .sod / .ted.
+  - specs/handlers.md — behavior catalogue for opcode handlers not yet covered by opcodes.md/packets.
+  - specs/login_flow.md — login -> char-select -> enter-game; boundary with the lobby/online server processes.
+  - specs/social.md — chat channels, whisper, party, guild, friend/block; membership state.
+  - specs/quests.md — quest accept/progress/complete, NPC dialog, Lua/npc.arr linkage, rewards.
+- notes: All raw findings (which DO contain addresses and decompiler locals) stayed in the gitignored
+  Docs/RE/_dirty/recon/*.raw.md quarantine. The clean specs were rewritten with neutral formula/behavior prose;
+  orchestrator firewall scan confirmed ZERO leaked addresses / sub_/loc_/dword_ / handler-symbol names in the
+  committed specs (the only `0x..` tokens are packet field offsets and the 0xFFFFFFFF sentinel — format facts).
+  Combat coefficients are bit-exact from the binary but final damage combination is server-authoritative and
+  cannot be confirmed from the client alone (flagged in combat.md). Journal + names authored centrally.

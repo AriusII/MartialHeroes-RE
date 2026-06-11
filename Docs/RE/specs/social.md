@@ -1,0 +1,510 @@
+# Social systems: chat, whisper, party, guild, friend/relation (clean-room spec)
+
+Neutral, data-only model of the legacy *Martial Heroes* client's **social wire protocol** and the
+**membership state** it maintains locally: chat channels, whispers, party/group, guild, and the
+combined friend/block/relation ("FATE") system. Promoted from dirty-room recon and rewritten in our
+own words — no decompiler identifiers, no binary addresses, no pseudo-code.
+
+This document is design input for the **protocol engineer** (the social wire messages in
+`Network.Protocol`) and the **application engineer** (the membership/roster state consumers in
+`Client.Application`). Opcodes are expressed as `(major:minor)` tuples consistent with the
+authoritative `opcodes.md` frame model (8-byte header: `size` @+0, `major` @+4, `minor` @+6,
+payload @+8). **All field offsets in this document are payload-relative** (relative to frame +8).
+
+---
+
+## Status header (read first)
+
+> **Headline finding — one combined "relationship" subsystem, not separate friend/block/party tables.**
+> The client folds friend list, block list, party, and special bond relationships (couple,
+> master-disciple, training — the developers' internal label is "FATE") into a **single relationship
+> model** backed by one flat slot table of fixed-stride entries. "Party" appears to be one *mode*
+> of this relationship system at the submit (C2S) layer, while a genuinely separate party roster
+> exists at the display (S2C) layer. Re-implementations must keep these two views distinct and must
+> not assume a C2S "party-invite" tuple is party-only until a capture proves it.
+
+> **Capture-unverified, prominently.** No live network capture was available during this analysis.
+> Every opcode→routing link below is a hard static fact (read from the client's dispatch/sender
+> installers). Message **sizes** (total byte counts) are likewise hard facts. But field **meanings,
+> signedness, and most field boundaries** are static inferences from sender/handler read order and
+> must be treated as hypotheses until a capture confirms them.
+
+| Area | Confidence |
+|---|---|
+| Frame model and `(major:minor)` opcode tuples for every message listed | HIGH — read from buffer-header writes / dispatch installers |
+| Total payload sizes (the literal byte counts) | HIGH — literal copy/read sizes |
+| Whisper (2:7) field layout | MEDIUM-HIGH — clean header walk; text cap and self-guard observed |
+| Guild full-sync (4:65) 50-member array layout | MEDIUM — offsets walked; field meanings inferred |
+| Guild member roster patch (5:65) and party stats (5:38) layouts | MEDIUM |
+| Party roster event (5:21) and relation slot (5:26) layouts | MEDIUM |
+| Chat context headers for 2:82 / 2:83 / 3:21 (per-field breakdown) | LOW — only channel selector + text trailer decoded |
+| "Party vs relation/FATE" labelling of the C2S 2:35/36/37 and 2:60–2:76 cluster | LOW — flagged UNVERIFIED #2 |
+| 2:122 short-name field width; auto-accept event codes | LOW — flagged UNVERIFIED #6/#7 |
+
+**UNVERIFIED list** is consolidated in Section 9. All Korean text fields referenced here are
+**CP949 / EUC-KR** encoded (no BOM), NUL-padded in fixed buffers; they are never sent as managed
+strings and must be modelled as fixed byte blobs on the wire.
+
+---
+
+## 1. Shared wire idioms (applies to every message below)
+
+All social messages ride the same framing as the rest of the protocol and share a few invariants an
+implementer can rely on:
+
+- **Fixed header, optional text tail.** A message is a fixed-size payload header followed, for the
+  text-bearing chat/whisper messages, by a **length-prefixed text body**: a `u32` byte-length
+  prefix immediately after the fixed header, then that many CP949 bytes. Messages without text are
+  pure fixed-size payloads.
+- **Text length prefix convention.** Where a text tail is present, the prefix is the text length
+  (the client computes it as string length, generally including the terminating NUL — model it as
+  "prefix = number of bytes that follow", and verify the off-by-one NUL inclusion against a capture,
+  UNVERIFIED #5). The body itself is copied with a hard cap (see per-message caps below).
+- **Self-target guard (key invariant).** The relation/guild/party *submit* (C2S) paths resolve the
+  intended **target** actor id from the UI/command arguments and compare it against the **local
+  player's own actor id**. On a self/stale mismatch they display a shared error message
+  (string-table id `862010101`) and **send nothing**. Only a valid, non-self resolved target
+  proceeds to the send. This is a client-side gate, not a wire field; a server re-implementation
+  must still validate targets itself.
+- **Local-player id sentinel.** The local player's actor id starts as the all-ones sentinel
+  `0xFFFFFFFF` (unset) and is assigned the real actor id at enter-world. The self-target guard and
+  all "is this me?" branches compare against it.
+- **Actor resolution.** Inbound social handlers resolve the affected actor by a **(sort, id)** pair
+  before mutating state, and most gate their effect on "the resolved actor is the local player".
+  `sort` is the actor-category discriminator; `id` is the actor id within that category.
+
+---
+
+## 2. Opcode catalog (social subset)
+
+Direction is from the **client's** point of view. Sizes are total payload byte counts (the fixed
+header; `+text` marks an additional length-prefixed CP949 tail). Proposed names are spec-author
+suggestions for `names.yaml`; confirm before committing.
+
+### 2.1 Chat & whisper (C2S)
+
+| Opcode | Proposed name | Dir | Size | Tail | Purpose / confidence |
+|--------|---------------|-----|------|------|----------------------|
+| 2:7  | `CmsgWhisper`        | C2S | 19 | +text | Private whisper to a named target. MEDIUM-HIGH (Section 3). |
+| 2:82 | `CmsgChatContext82`  | C2S | 28 | (caller-appended) | Chat variant; 28-byte context header, no text in the builder itself. Purpose UNVERIFIED #3. |
+| 2:83 | `CmsgChatContextual` | C2S | 24 | +text | Contextual chat (catalog 2:83); text gated `0 < len < 200`. MEDIUM. |
+| 2:84 | `CmsgChatVariant84`  | C2S | 19 | +text | Chat variant; channel/scope UNVERIFIED #4. |
+| 3:21 | `CmsgChannelChat`    | C2S | 56 | +text | General/channel chat (catalog 3:21); channel selector in header (Section 4). MEDIUM. |
+
+### 2.2 Chat & system display (S2C — layouts not re-derived here, cite catalog)
+
+| Opcode | Catalog name | Dir | Notes |
+|--------|--------------|-----|-------|
+| 5:7      | `SmsgChatBroadcast`     | S2C | Broadcast chat display (header + variable text). |
+| 3:50000  | `SmsgGmChatMessage`     | S2C | GM/announcement chat display. |
+| 4:140    | `SmsgColoredSystemText` | S2C | Coloured system/notice line. |
+
+### 2.3 Party (S2C — genuine party roster)
+
+| Opcode | Catalog / proposed name | Dir | Size | Purpose / confidence |
+|--------|-------------------------|-----|------|----------------------|
+| 4:35 | `SmsgPartyInviteState`        | S2C | 56  | Invite/roster state snapshot (Section 6.1). NOTE: catalog labels this "party"; see UNVERIFIED #2. |
+| 4:36 | `SmsgPartyMemberRemoveResult` | S2C | —   | Result of a member-remove action. |
+| 4:37 | `SmsgPartyLeaderActionResult` | S2C | —   | Result of a leader action. |
+| 4:76 | `SmsgPartyAcceptResult`       | S2C | —   | Result of accepting an invite. |
+| 5:21 | `SmsgPartyRosterEvent`        | S2C | 12  | Add/remove/update one member (Section 6.2). MEDIUM. |
+| 5:38 | `SmsgPartyMemberStats`        | S2C | 100 | Full per-member vitals/buffs snapshot (Section 6.3). MEDIUM. |
+| 5:76 | `SmsgPartyMemberJoined`       | S2C | 36  | Member-joined event with name + greeting mode (Section 6.4). MEDIUM. |
+
+### 2.4 Party / relation submits (C2S — combined; see UNVERIFIED #2)
+
+| Opcode | Proposed name | Dir | Size | Payload shape (inferred) |
+|--------|---------------|-----|------|--------------------------|
+| 2:35 | `CmsgPartyOrRelationInvite`   | C2S | 8  | `[u8 sub-op][u32 target id]` |
+| 2:36 | `CmsgPartyOrRelationOpB`      | C2S | 8  | `[u8 sub-op][u32 target id]` |
+| 2:37 | `CmsgPartyOrRelationOpC`      | C2S | 8  | `[u8 sub-op][u32 target id]` |
+
+### 2.5 Guild (C2S submits)
+
+| Opcode | Proposed name | Dir | Size | Notes |
+|--------|---------------|-----|------|-------|
+| 2:8   | `CmsgGuildCreateOrCrest` | C2S | 241 | Large guild blob (likely create / crest). UNVERIFIED #8. |
+| 2:30  | `CmsgGuildAction30`      | C2S | 8   | Two dwords; self-target guarded. |
+| 2:54  | `CmsgGuildToggle54`      | C2S | 1   | 1-byte guild/relation toggle. |
+| 2:55  | `CmsgGuildMemberOp55`    | C2S | 32  | Guild member op (32-byte struct). |
+| 2:56  | `CmsgGuildMemberOp56`    | C2S | 4   | Guild member op. |
+| 2:57  | `CmsgGuildMemberOp57`    | C2S | var | 20-byte header; when `header[0]==1`, a variable `u8` list of `header[16]` entries follows (Section 5.3). |
+| 2:58  | `CmsgGuildMemberOp58`    | C2S | 24  | Guild member op (24-byte struct). |
+| 2:81  | `CmsgGuildDiplomacy`     | C2S | 18  | Diplomacy submit (Section 5.1). MEDIUM. |
+| 2:103 | `CmsgGuildPanelText`     | C2S | 196 | Guild panel text submit (pairs S2C 4:103). |
+
+### 2.6 Guild (S2C results / pushes)
+
+| Opcode | Proposed name | Dir | Size | Notes |
+|--------|---------------|-----|------|-------|
+| 4:54  | `SmsgGuildRankSlotUpdate`     | S2C | —    | Rank-slot update. |
+| 4:55  | `SmsgGuildInfoUpdateResult`   | S2C | —    | Info-update result. |
+| 4:61  | `SmsgGuildStateChangeResult`  | S2C | —    | State-change result. |
+| 4:62  | `SmsgGuildInviteJoinState`    | S2C | 80   | Invite/join-state block. |
+| 4:63  | `SmsgGuildMemberRemoveResult` | S2C | —    | Member-remove result. |
+| 4:64  | `SmsgGuildPositionChangeResult`| S2C | —   | Position-change result. |
+| 4:65  | `SmsgGuildInfoFullSync`       | S2C | 1812 | Full guild record refresh, 50-member arrays (Section 5.4). MEDIUM. |
+| 4:96  | `SmsgActorGuildRosterEntry`   | S2C | —    | Per-actor guild patch. |
+| 4:103 | `SmsgGuildPanelTextUpdate`    | S2C | —    | Panel text update (pairs C2S 2:103). |
+| 5:55  | `SmsgGuildNameDisplayUpdate`  | S2C | —    | Name-display refresh. |
+| 5:65  | `SmsgGuildMemberRosterUpdate` | S2C | 32   | Per-actor guild roster patch (Section 5.5). MEDIUM. |
+
+### 2.7 Friend / block / relation ("FATE") (C2S submits)
+
+| Opcode | Proposed name | Dir | Size | Payload shape (inferred) |
+|--------|---------------|-----|------|--------------------------|
+| 2:47  | `CmsgRelationAckDrain`     | C2S | 8  | Ack-drain; pairs S2C 4:47. |
+| 2:48  | `CmsgRelationOp48`         | C2S | 4  | Relation op. |
+| 2:49  | `CmsgRelationNamedOp`      | C2S | 19 | Relation op carrying a name field. |
+| 2:60  | `CmsgRelationOp60`         | C2S | 8  | Relation/FATE op. |
+| 2:61  | `CmsgRelationSubmit61`     | C2S | 36 | Nine dwords. |
+| 2:62  | `CmsgRelationSubmit62`     | C2S | 19 | Four dwords + `u16` + `u8`. |
+| 2:63  | `CmsgRelationSubmit63`     | C2S | 17 | Relation/FATE submit. |
+| 2:64  | `CmsgRelationOp64`         | C2S | 8  | Relation/FATE op. |
+| 2:65  | `CmsgRelationToggle65`     | C2S | 1  | 1-byte toggle. |
+| 2:66  | `CmsgRelationToggle66`     | C2S | 1  | 1-byte toggle. |
+| 2:74  | `CmsgRelationOp74`         | C2S | 32 | Relation/FATE op (32-byte struct). |
+| 2:76  | `CmsgRelationSubmit76`     | C2S | 20 | Relation/FATE submit (the "FATE state / actor / item-list" path). |
+| 2:122 | `CmsgFriendListSubmit`     | C2S | 12 | `[u32 selector][u8 sub-op][short name tag]` (Section 7.1, UNVERIFIED #6). |
+| 2:123 | `CmsgRelationAccept`       | C2S | 12 | `[u8 sub-op][u32 target id][u8 flag]`; used by the gift-receive confirm path. |
+| 2:124 | `CmsgRelationToggle124`    | C2S | 1  | 1-byte relation toggle. |
+| 2:126 | `CmsgRelationAcceptByte`   | C2S | 1  | 1-byte accept/decline. |
+| 2:128 | `CmsgFriendListById`       | C2S | 4  | `[u32 target id]`; friend/relation list submit by id. |
+
+### 2.8 Friend / relation (S2C)
+
+| Opcode | Proposed name | Dir | Size | Notes |
+|--------|---------------|-----|------|-------|
+| 4:30 | `SmsgSocialPanelTarget`        | S2C | —  | Social-panel target update. |
+| 4:47 | `SmsgRelationAckDrain`         | S2C | —  | Pairs C2S 2:47. |
+| 5:26 | `SmsgLocalPlayerRelationSlot`  | S2C | 28 | Local-player relation-slot update (Section 7.2). MEDIUM. |
+| 5:64 | `SmsgRemoteActorRelationPair`  | S2C | —  | Remote-actor relation pair. |
+
+---
+
+## 3. Whisper — 2:7 (C2S)
+
+A whisper is a **19-byte fixed header followed by a length-prefixed CP949 text body**.
+
+| Off | Size | Type     | Field         | Meaning |
+|-----|------|----------|---------------|---------|
+| 0   | 1    | u8       | `ChannelType` | Channel / sub-type selector (first UI argument). |
+| 1   | 1    | u8       | `Flag`        | Mode flag (second UI argument). |
+| 2   | 16   | bytes[16]| `TargetName`  | Target character name, CP949, NUL-padded to 16 bytes. |
+| 18  | 1    | u8       | `Pad`         | Trailing byte completing the 19-byte header; written as zero. |
+| 19  | 4    | u32      | `TextLength`  | Byte length of the text tail (see Section 1 prefix convention). |
+| 23  | n    | bytes    | `Text`        | Message text, CP949. Body is hard-capped at **119 characters**. |
+
+Behaviour:
+
+- Before sending, the builder resolves the target name to an actor id and applies the **self-target
+  guard** (Section 1): if the resolved id is the local player's own id (a self-whisper), it aborts
+  with error message id `862010101` and **does not send**.
+- Whispers originate from the central chat/command parser (the path that handles `/`-prefixed slash
+  commands and the reply UI). Slash commands observed on this path include `/option`, `/help`, and
+  `/msgchk <n>`; these are parsed client-side and do not all map to wire messages.
+- The client option that toggles whisper-notification is a **local INI/UI preference only** and is
+  **not** carried on the wire. Do not model it as a packet field.
+
+---
+
+## 4. Chat family — 2:82 / 2:83 / 2:84 / 3:21 (C2S)
+
+All four chat messages are emitted from the central chat/command parser, which fills a per-message
+**context header** (sender / target / channel/scope fields) before the builder runs, then appends a
+length-prefixed text body. Only the header *sizes*, the channel-selector dword in 3:21, and the text
+trailer are decoded; the full per-field breakdown of the 24-byte (2:83) and 56-byte (3:21) context
+structs is **not** recovered this pass.
+
+| Opcode | Header size | Text tail | Gating observed |
+|--------|-------------|-----------|-----------------|
+| 2:82 | 28 | appended by caller, not by the builder | none in the builder |
+| 2:83 | 24 | length-prefixed | text length gated `0 < len < 200` |
+| 2:84 | 19 | length-prefixed | none observed |
+| 3:21 | 56 | length-prefixed | text `< 200`, **unless** the channel selector takes the special path below |
+
+**Channel selector (3:21).** The dword at header offset **+4** is a channel/scope selector. When
+`selector mod 10 == 5`, the client takes a special path (a broadcast/shout-style channel) that
+**bypasses the empty/length gate**, allowing empty or longer text. Treat `selector mod 10 == 5` as a
+distinguished broadcast channel; the full enumeration of selector values is UNVERIFIED.
+
+The inbound display counterparts are S2C `5:7` (broadcast), `3:50000` (GM message), and `4:140`
+(coloured system text); their field layouts are not re-derived here — cite the catalog tuples.
+
+---
+
+## 5. Guild subsystem
+
+### 5.1 Guild diplomacy submit — 2:81 (C2S, 18 bytes)
+
+| Off | Size | Type      | Field            | Meaning |
+|-----|------|-----------|------------------|---------|
+| 0   | 1    | u8        | `DiplomacyState` | Diplomacy state code. |
+| 1   | 16   | bytes[16] | `TargetGuildName`| Target guild name, CP949, NUL-padded. |
+| 17  | 1    | u8        | `Trailing`       | Trailing byte. |
+
+The developers' own debug label for this path is "submit diplomacy: state / target guild name",
+which corroborates the field roles. Self-target guarded.
+
+### 5.2 Other guild submits (C2S, fixed sizes)
+
+| Opcode | Size | Inferred shape | Note |
+|--------|------|----------------|------|
+| 2:30 | 8   | two dwords | Guild action; self-target guarded. |
+| 2:54 | 1   | one byte | Guild/relation toggle. |
+| 2:55 | 32  | 32-byte struct | Guild member op. |
+| 2:56 | 4   | one dword | Guild member op. |
+| 2:58 | 24  | 24-byte struct | Guild member op. |
+| 2:8  | 241 | large blob | Likely guild create / crest payload (full breakdown UNVERIFIED #8). |
+| 2:103| 196 | text blob | Guild panel text submit (pairs S2C 4:103). |
+
+### 5.3 Variable guild member op — 2:57 (C2S, variable)
+
+A 20-byte fixed header. When `header[0] == 1`, a **variable-length `u8` list** follows, whose length
+is given by the byte at header offset **+16** (`header[16]` = element count). When `header[0] != 1`,
+no list is appended (pure 20-byte message). Model `size` as `var`; the codegen must read the count
+from offset +16 and then read that many trailing bytes.
+
+### 5.4 Guild full sync — 4:65 (S2C, 1812 bytes)
+
+Full guild-record refresh. The guild is capped at **50 members**, and the member data is laid out as
+parallel fixed-length arrays (struct-of-arrays), not an array-of-structs. Offsets are
+payload-relative.
+
+| Off  | Size | Type           | Field             | Meaning |
+|------|------|----------------|-------------------|---------|
+| 8    | 1    | u8             | `Gate`            | `1` = "left / no guild" path; any other value = full sync. |
+| 10   | 18   | bytes[18]      | `GuildName`       | Guild name, ASCIIZ, CP949. |
+| 28   | 2    | i16            | `GuildId`         | Guild id. |
+| 32   | 4    | i32            | `Gold`            | Guild gold. |
+| 36   | 8    | i64            | `Fund`            | Guild fund. |
+| 44   | 8    | i64            | `Exp`             | Guild experience. |
+| 52   | 4    | i32            | `CrestCode`       | Costume / crest code. |
+| 60   | 200  | i32[50]        | `MemberIds`       | Member actor ids. |
+| 260  | 50   | u8[50]         | `MemberRanks`     | Member ranks. |
+| 310  | 850  | bytes[17][50]  | `MemberNames`     | Member names, CP949, 17 bytes each. |
+| 1160 | 50   | u8[50]         | `MemberOnline`    | Member online flags. |
+| 1212 | 200  | i32[50]        | `MemberPoints`    | Member points. |
+| 1412 | 200  | i32[50]        | `MemberContrib`   | Member contribution. |
+| 1612 | 200  | i32[50]        | `MemberLoginTime` | Member last-login times. |
+
+Notes:
+- Bytes `0..7` and the gap at `9` are header/padding not enumerated above; treat the message as a
+  1812-byte block and read the named fields at the listed offsets. The 50-member arrays fully
+  account for the bulk of the size; the exact use of the leading 8 bytes is UNVERIFIED.
+- The **leave branch** (`Gate != 1` interpreted as "stay", `Gate == 1` as "leave/no-guild") clears
+  the local player's guild fields and surfaces user-facing notices (string ids `10011` "left guild"
+  and `2183` "exp refund"). These are display ids, not wire fields.
+- A separate guild-info display path walks the 50 member-id slots (offset 60, stride 4) and patches
+  each resolved actor's guild rank/flags. This is a local mirror, not a separate message.
+
+### 5.5 Guild member roster patch — 5:65 (S2C, 32 bytes)
+
+An actor-keyed guild roster patch. Resolves the actor by (sort, id) and, when the id matches the
+local player, also mirrors the fields into the local-player guild state.
+
+| Off  | Size | Type      | Field         | Meaning |
+|------|------|-----------|---------------|---------|
+| 0    | 4    | i32       | `Sort`        | Actor category. |
+| 4    | 4    | i32       | `ActorId`     | Actor id. |
+| 8    | 1    | u8        | `GuildFlag`   | Guild membership flag. |
+| 9    | 17   | bytes[17] | `MemberName`  | Member name, CP949, NUL-padded. |
+| 26   | 2    | u16       | `NamePresent` | Non-zero = apply name & add to roster; zero = clear. |
+| 28   | 1    | u8        | `Rank`        | Member rank. |
+| 29   | 1    | u8        | `Grade`       | Title / grade. |
+
+Field widths sum to 30; bytes `30..31` complete the 32-byte block (treat as trailing pad). When
+`NamePresent == 0`, the name is cleared rather than applied.
+
+---
+
+## 6. Party subsystem (genuine party — S2C confirmed)
+
+The S2C side here is a true party roster, distinct from the relation/FATE submit cluster in
+Section 7 (see UNVERIFIED #2).
+
+### 6.1 Party invite state — 4:35 (S2C, 56 bytes)
+
+A roster/invite-state snapshot. Members are a fixed array of up to 8 ids.
+
+| Off | Size | Type    | Field       | Meaning |
+|-----|------|---------|-------------|---------|
+| 8   | 1    | u8      | `Gate`      | Path/branch gate. |
+| 9   | 1    | u8      | `Error`     | Error / result code. |
+| 10  | 1    | u8      | `State`     | Invite/roster state. |
+| 16  | 4    | i32     | `PartyId`   | Party id (mirrored into local-player party state). |
+| 20  | 32   | i32[8]  | `MemberIds` | Up to 8 member actor ids. |
+| 52  | 4    | i32     | `TargetId`  | Target actor id (the subject of the invite/action). |
+
+Bytes `0..7`, `11..15` are header/padding not enumerated; read the named fields at the listed
+offsets within the 56-byte block.
+
+### 6.2 Party roster event — 5:21 (S2C, 12 bytes)
+
+A single add/remove/update for one member.
+
+| Off | Size | Type | Field           | Meaning |
+|-----|------|------|-----------------|---------|
+| 0   | 1    | u8   | `Event`         | Roster event code (add / remove / update). |
+| 4   | 4    | i32  | `MemberActorId` | Affected member's actor id. |
+
+Bytes `1..3` and `8..11` are padding. The handler resolves the actor and gates on "resolved actor is
+the local player" before applying the roster change; it surfaces user notices (string ids
+`2119`–`2122`). Those ids are display-only.
+
+### 6.3 Party member stats — 5:38 (S2C, 100 bytes)
+
+A full per-member vitals/buffs snapshot, keyed by member id, that fills one party-panel entry. The
+wire fields mirror the panel-entry layout in order. Offsets below are the **panel-entry** offsets the
+recon captured; treat them as the wire field order and verify exact wire offsets against a capture
+(UNVERIFIED).
+
+| Field           | Type      | Meaning |
+|-----------------|-----------|---------|
+| `MemberName`    | bytes[16] | Member name, CP949. |
+| `ClassOrPad`    | u16       | Class id or padding. |
+| `LevelOrState`  | u16       | Level or state. |
+| `HpCurrent`     | i32       | Current HP. |
+| `MpCurrent`     | i32       | Current MP. |
+| `Stamina`       | i32       | Current stamina / energy. |
+| `HpMax`         | i32       | Max HP. |
+| `MpMax`         | i32       | Max MP. |
+| `StaminaMax`    | i32       | Max stamina. |
+| `Extra1`        | i32       | Reserved / unknown. |
+| `Extra2`        | i32       | Reserved / unknown. |
+| `BuffCodes`     | u8[30]    | Up to 30 active buff codes (see filter note). |
+
+Notes:
+- **Buff-code filter.** When ingesting `BuffCodes`, the client keeps a code only if it is
+  `<= 0x50` **or** `>= 0x82`; codes in the range `0x51..0x81` are dropped. Re-implementations that
+  mirror the client's buff display should apply the same filter; a server need not.
+- If the member is also a visible player-character actor (`sort == 1`), the client additionally
+  snapshots the member's current HP/MP/stamina into that actor's live vitals. This is a local mirror
+  step, not extra wire data.
+
+### 6.4 Party member joined — 5:76 (S2C, 36 bytes)
+
+| Off | Size | Type      | Field     | Meaning |
+|-----|------|-----------|-----------|---------|
+| 4   | 4    | i32       | `ActorId` | Joining member's actor id. |
+| 8   | 1    | u8        | `Event`   | Greeting mode: `4` = greet, `10` = combat/spar. |
+| 9   | 1    | u8        | `Sort`    | Actor category. |
+| 18  | 17   | bytes[17] | `Name`    | Member name, CP949. |
+
+Bytes `0..3`, `5..7`, `10..17`, and `35` are header/padding. The handler plays a greeting or combat
+motion keyed by `Event` and may surface a rank-progress notice (display id).
+
+### 6.5 Party membership state (local)
+
+- The party roster/stats live in a single party-panel cache on the local-player UI singleton.
+- Roster add/remove/update is applied from 5:21; member stats from 5:38; joins from 5:76.
+- The local player's `PartyId` is mirrored from 4:35.
+
+---
+
+## 7. Friend / block / relation ("FATE") subsystem
+
+The client folds **friend list, block list, and special bond relationships** (couple,
+master-disciple, training) into one relationship model. The developers' UI vocabulary includes
+"FriendPanel", "RelationPanel", and a training-type flag; debug labels include `friend <a> <b>` and
+`cut <name>` (the "cut" command is the block/sever action).
+
+### 7.1 Friend list submit — 2:122 (C2S, 12 bytes)
+
+| Off | Size | Type    | Field      | Meaning |
+|-----|------|---------|------------|---------|
+| 0   | 4    | u32     | `Selector` | Relation/list selector or target id. |
+| 4   | 1    | u8      | `SubOp`    | Sub-operation. |
+| 5   | 4    | bytes[4]| `NameTag`  | Short name source (copy length 4 within a 5-byte buffer). |
+
+The 12-byte block leaves bytes `9..11` as trailing pad. The name field is unusually short (4 bytes),
+implying a short tag rather than a full character name — **UNVERIFIED #6**, verify against a capture.
+
+### 7.2 Local-player relation slot — 5:26 (S2C, 28 bytes)
+
+The canonical client-side relationship membership update. It writes four payload dwords into a flat
+**relation-slot table** indexed by a slot byte.
+
+| Off | Size | Type | Field       | Meaning |
+|-----|------|------|-------------|---------|
+| 0   | 4    | i32  | `Sort`      | Actor category. |
+| 4   | 4    | i32  | `ActorId`   | Actor id (gated == local player). |
+| 8   | 1    | u8   | `SlotIndex` | 0-based slot index (slot stride = 16 bytes). |
+| 12  | 4    | i32  | `Field0`    | Partner / target id. |
+| 16  | 4    | i32  | `Field1`    | Slot payload word 1. |
+| 20  | 4    | i32  | `Field2`    | Slot payload word 2. |
+| 24  | 4    | i32  | `Field3`    | Slot payload word 3. |
+
+Behaviour: the handler gates on "resolved actor is the local player", then writes the four dwords
+(`Field0..Field3`, 16 bytes total) into the relation-slot table at index `16 * SlotIndex`, mirrored
+into the local-player relationship store at the same stride. This flat 16-byte-per-slot table is the
+**canonical client-side relationship membership store**. Bytes `9..11` are padding.
+
+### 7.3 Other relation submits (C2S)
+
+| Opcode | Size | Inferred shape / note |
+|--------|------|-----------------------|
+| 2:123 | 12 | `[u8 sub-op][u32 target id][u8 flag]`; accept/decline of a relation/gift offer (used by the gift-receive confirm path). |
+| 2:124 | 1  | 1-byte relation toggle. |
+| 2:126 | 1  | 1-byte accept/decline. |
+| 2:128 | 4  | `[u32 target id]`; friend/relation submit by id, reached from the chat-command parser. |
+| 2:49  | 19 | Relation op carrying a name field. |
+| 2:60–2:66, 2:74, 2:76 | 8/36/19/17/8/1/1/32/20 | Relation/FATE submit cluster (sizes per Section 2.7). |
+
+### 7.4 Friend/cut command parsing
+
+The `friend <a> <b>` and `cut <name>` text commands are parsed by a dedicated command handler that
+resolves a name and routes to the appropriate relation submit. The `/`-prefixed slash-command parser
+(the same one used by whisper) handles the slash-prefixed entries. These are input-layer details;
+the wire messages are those in Sections 7.1–7.3.
+
+---
+
+## 8. Membership-state model (summary)
+
+| Store | What it holds | Updated by |
+|-------|---------------|------------|
+| Local player id sentinel | Local actor id; `0xFFFFFFFF` until enter-world. Drives the self-target guard. | enter-world |
+| Relation-slot table | Flat array of **16-byte slots** keyed by `SlotIndex`; mirrored on the local player. | 5:26 |
+| Party roster/stats | Single party-panel cache; party id, member ids (≤8), per-member vitals/buffs. | 4:35, 5:21, 5:38, 5:76 |
+| Guild roster/cache | Up to **50 members** (struct-of-arrays); per-actor guild rank/title/flags; local-player guild name/grade. | 4:65 (full), 5:65 (per-actor) |
+
+Caps and gates to model:
+- **Guild members:** 50.
+- **Party members:** ≤ 8 (from the 4:35 id array).
+- **Whisper text:** 119 characters.
+- **Chat text:** `< 200` characters, except the 3:21 broadcast channel (`selector mod 10 == 5`)
+  which bypasses the empty/length gate.
+- **Self-target guard:** relation/guild/party submits refuse a self/stale target with error id
+  `862010101` and send nothing.
+
+---
+
+## 9. UNVERIFIED list (resolve with captures / analyst cross-check)
+
+1. **No network capture cross-check performed.** All field layouts are static inferences from
+   sender/handler read order. Sizes (literal byte counts) are hard facts; field meanings,
+   signedness, and most field boundaries are hypotheses.
+2. **Party vs relation/FATE labelling.** The C2S 2:35/2:36/2:37 and the 2:60–2:76 cluster are
+   relationship/FATE-flavoured at the submit layer, while the catalog labels 4:35 "party". Genuine
+   party is the S2C 5:21 / 5:38 / 5:76 + party panel. Resolve with captures of party-invite vs
+   couple/training vs friend-add to decide whether the C2S cluster is party, relation, or both.
+3. **2:82 (28-byte chat variant) purpose** — party chat? guild chat? trade chat? The builder writes
+   a 28-byte header and no text in the thunk itself; a caller may append text separately.
+4. **2:84 (19-byte + text chat variant) channel/scope** — unknown.
+5. **Text length-prefix off-by-one** — whether the `u32` prefix includes the terminating NUL.
+   Model "prefix = bytes that follow" and confirm against a capture.
+6. **2:122 name field width** — a 4-byte copy into a 5-byte buffer implies a short tag rather than a
+   full 16/17-char character name; unusual, verify.
+7. **2:123 auto-accept event codes** — the inbound relation-event numbering that drives auto-accept
+   (the gift-receive path) is inferred from branch constants, not enumerated.
+8. **2:8 (241-byte guild blob) field breakdown** — likely guild create / crest, but the internal
+   layout is not decoded.
+9. **Relation-slot table length** — slot stride is 16 bytes; the maximum slot count (array length)
+   is not bounded by the apply path. Bound it from the UI or a capture.
+10. **24-byte (2:83) and 56-byte (3:21) chat context headers** — only the channel selector dword
+    (3:21 offset +4) and the text trailer are decoded; the remaining sender/target/scope header
+    fields are not broken out field-by-field.
+11. **String-table message ids** referenced here (`862010101` reject; `2119`–`2122` party roster;
+    `10011`/`2183` guild-leave; `67030` relation) are **display ids**, not wire fields — listed for
+    context only.

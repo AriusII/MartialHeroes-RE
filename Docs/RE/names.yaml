@@ -37,6 +37,20 @@ client_mechanics:
   InputUi:        { note: "WndProc dispatch (IME-first); 20-byte mouse event; UI->world responsibility chain; widget tree", spec: "Docs/RE/specs/input_ui.md" }
   LuaScripting:   { note: "embedded Lua 5.1.2 + lua_tinker; minimal native surface (cpp_load); .lua plaintext in data/script", spec: "Docs/RE/specs/lua_scripting.md" }
 
+gameplay_systems:
+  # Gameplay/engine logic subsystems recovered in the gameplay-logic RE wave.
+  # Keyed by canonical ROLE name; see the referenced specs. Damage resolution is server-authoritative;
+  # the client computes a derived combat-stat model whose coefficients are documented in combat.md.
+  Combat:        { note: "derived combat-stat model (server-authoritative HP deltas); attack/secondary bases, PvE/PvP rates, hit penalty tiers", spec: "Docs/RE/specs/combat.md" }
+  StatEquip:     { note: "lazy per-stat aggregation: server-base + buff(kind) + all-stat(93) + equip-sum + set bonus", spec: "Docs/RE/specs/combat.md" }
+  Skills:        { note: "skill cast pipeline + effect dispatch + buff/debuff model", spec: "Docs/RE/specs/skills.md" }
+  InventoryTrade: { note: "inventory grid, equip rules, trade state machine, shop, enchant (+N)", spec: "Docs/RE/specs/inventory_trade.md" }
+  CameraMovement: { note: "five view modes + camera clamps; click-to-move; .sod/.ted collision", spec: "Docs/RE/specs/camera_movement.md" }
+  Handlers:      { note: "behavior catalogue for opcode handlers beyond opcodes.md", spec: "Docs/RE/specs/handlers.md" }
+  LoginFlow:     { note: "login -> char-select -> enter-game; lobby/online server boundary", spec: "Docs/RE/specs/login_flow.md" }
+  Social:        { note: "chat channels, whisper, party, guild, friend/block", spec: "Docs/RE/specs/social.md" }
+  Quests:        { note: "quest accept/progress/complete, NPC dialog, Lua/npc.arr linkage, rewards", spec: "Docs/RE/specs/quests.md" }
+
 # Canonical client-asset file extensions recovered from the loader routines.
 file_extensions:
   ".map": { note: "terrain cell text descriptor (sections + DATAFILE/TEXTURES directives)", spec: "Docs/RE/formats/terrain.md" }
