@@ -11,4 +11,11 @@
         <ProjectReference Include="..\MartialHeroes.Network.Abstractions\MartialHeroes.Network.Abstractions.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+        <!-- Allow the framing unit-test project to access internal members (FrameSplitter, FramingConstants). -->
+        <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+            <_Parameter1>MartialHeroes.Network.Transport.Pipelines.Tests</_Parameter1>
+        </AssemblyAttribute>
+    </ItemGroup>
+
 </Project>

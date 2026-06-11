@@ -1,6 +1,1 @@
-﻿namespace MartialHeroes.Assets.Mapping;
-
-public class Class1
-{
-
-}
+// Placeholder replaced by GltfConverter.cs and PngConverter.cs.

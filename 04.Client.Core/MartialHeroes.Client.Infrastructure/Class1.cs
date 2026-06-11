@@ -1,6 +1,3 @@
-﻿namespace MartialHeroes.Client.Infrastructure;
-
-public class Class1
-{
-
-}
+// This file is intentionally empty. The placeholder has been replaced by the
+// implementation in the Cache/, Exceptions/, Macros/, Paths/, and Settings/ sub-folders.
+namespace MartialHeroes.Client.Infrastructure;
