@@ -1,10 +1,16 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <LangVersion>14.0</LangVersion>
+        <!--
+            AllowUnsafeBlocks: required for MemoryManager<byte> subclass that pins and
+            returns a pointer into the MemoryMappedViewAccessor's SafeMemoryMappedViewHandle
+            unmanaged backing store.  No unsafe code exists outside MappedMemoryManager.cs.
+        -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
 </Project>
