@@ -1,0 +1,37 @@
+[gd_scene load_steps=8 format=3 uid="uid://world_scene"]
+
+; Root orchestrator: GameLoop — drains the Application event bus each frame.
+[ext_resource type="Script" path="res://World/GameLoop.cs" id="1"]
+
+; ActorRegistry — manages VisualActor nodes (spawned/moved/despawned).
+[ext_resource type="Script" path="res://World/ActorRegistry.cs" id="2"]
+
+; HUD — health bar + state label + actor count.
+[ext_resource type="Script" path="res://HUD/GameHud.cs" id="3"]
+
+; InputRouter — translates Godot input events to IApplicationUseCases calls.
+[ext_resource type="Script" path="res://Input/InputRouter.cs" id="4"]
+
+; SyntheticWorldFeeder — debug event feeder for offline demonstration.
+[ext_resource type="Script" path="res://Debug/SyntheticWorldFeeder.cs" id="5"]
+
+; Minimal DirectionalLight + Camera placeholder.
+[node name="World" type="Node" script=ExtResource("1")]
+
+[node name="ActorRegistry" type="Node" parent="." script=ExtResource("2")]
+
+[node name="HUD" type="Control" parent="." script=ExtResource("3")]
+
+[node name="InputRouter" type="Node" parent="." script=ExtResource("4")]
+
+[node name="SyntheticWorldFeeder" type="Node" parent="." script=ExtResource("5")]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.707107, -0.5, 0.5, 0, 0.707107, 0.707107, -0.707107, -0.5, 0.5, 0, 10, 0)
+light_energy = 1.2
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 20, 20)
+fov = 60.0
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]

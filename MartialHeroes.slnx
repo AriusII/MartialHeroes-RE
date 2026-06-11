@@ -19,7 +19,9 @@
     <Project Path="04.Client.Core/MartialHeroes.Client.Domain/MartialHeroes.Client.Domain.csproj" />
     <Project Path="04.Client.Core/MartialHeroes.Client.Infrastructure/MartialHeroes.Client.Infrastructure.csproj" />
   </Folder>
-  <Folder Name="/05.Presentation/" />
+  <Folder Name="/05.Presentation/">
+    <Project Path="05.Presentation/MartialHeroes.Client.Godot/MartialHeroes.Client.Godot.csproj" />
+  </Folder>
   <Folder Name="/Docs/" />
   <Folder Name="/Tests/">
     <Project Path="tests/MartialHeroes.Assets.Mapping.Tests/MartialHeroes.Assets.Mapping.Tests.csproj" />
@@ -28,6 +30,7 @@
     <Project Path="tests/MartialHeroes.Client.Application.Tests/MartialHeroes.Client.Application.Tests.csproj" />
     <Project Path="tests/MartialHeroes.Client.Domain.Tests/MartialHeroes.Client.Domain.Tests.csproj" />
     <Project Path="tests/MartialHeroes.Client.Infrastructure.Tests/MartialHeroes.Client.Infrastructure.Tests.csproj" />
+    <Project Path="tests/MartialHeroes.Network.Crypto.Tests/MartialHeroes.Network.Crypto.Tests.csproj" />
     <Project Path="tests/MartialHeroes.Network.Protocol.Tests/MartialHeroes.Network.Protocol.Tests.csproj" />
     <Project Path="tests/MartialHeroes.Network.Transport.Pipelines.Tests/MartialHeroes.Network.Transport.Pipelines.Tests.csproj" />
     <Project Path="tests/MartialHeroes.Shared.Kernel.Tests/MartialHeroes.Shared.Kernel.Tests.csproj" />

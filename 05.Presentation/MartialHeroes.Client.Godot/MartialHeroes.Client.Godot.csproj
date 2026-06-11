@@ -1,0 +1,23 @@
+<Project Sdk="Godot.NET.Sdk/4.6.0">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>14.0</LangVersion>
+  </PropertyGroup>
+
+  <!--
+    Layer 05 → Layer 04 (Client.Application) and Layer 03 (Assets.Mapping).
+    These are the ONLY two direct ProjectReferences permitted for this layer.
+    Network.*, Assets.Vfs, Assets.Parsers, and Client.Domain arrive transitively;
+    never reference them directly from this project.
+    spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation dependency rules.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Application\MartialHeroes.Client.Application.csproj" />
+    <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Mapping\MartialHeroes.Assets.Mapping.csproj" />
+  </ItemGroup>
+
+</Project>

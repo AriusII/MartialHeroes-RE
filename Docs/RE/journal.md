@@ -92,3 +92,30 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
 - notes: All field layouts derived from the parser routines only; no archive/asset sample was available,
   so the five unconsumed index dwords and the trailing TOC padding are flagged UNVERIFIED. Promotion of
   the dirty-room asset-format notes; no decompiler output or addresses crossed the firewall.
+
+## 2026-06-11 — protocol-spec-author
+- binary: doida.exe @ 63fcaf8e (analysis pinned to the dirty-room note set; no IDA this session)
+- tool: none (firewall bridge — no IDA; rewrote a neutral analyst note only)
+- analyzed (by canonical name): WireCipher, WireCompression, SecureHandshake
+- specs produced/updated: Docs/RE/specs/crypto.md
+- notes: Promoted the now-recovered wire-cipher numeric constants from the neutral dirty-room note
+  into the clean crypto spec, replacing the former Recovery TODO placeholders with a pinned
+  constants table and weaving the values into the algorithm so Network.Crypto can implement a
+  round-tripping cipher. Pinned: round count R=3; forward sweep rotate-left 3, add the
+  remaining-length counter, XOR the feedback accumulator, then rotate-right 1 with one's-complement
+  plus 0x48 (equivalently 71 minus that rotated value); backward sweep rotate-left 4, add the
+  counter, XOR feedback, then XOR 0x13 and rotate-right 3. Called out as load-bearing that the
+  position counter is a remaining-length countdown initialized to the payload length and decremented
+  per byte (8-bit), NOT the forward index, and that the feedback accumulator is a one-byte value
+  reset to zero at each sweep start. Gave the algebraic inverse for decrypt. Pinned LZ4 as stock
+  raw-block (no frame header/magic/checksum), acceleration 1, inbound max decompressed size 11680
+  with length carried by the 8-byte header. Pinned the 1/4 handshake reply whitening: XOR key 0x29,
+  selector 0x40, complement test (selector & key & 0x1F)==1 evaluating false so the key is used
+  as-is; whitened span is the whole dword-aligned payload — corrected the earlier note that 0x40
+  was a length (it is the selector). Pinned the handshake field layout: 0/0 server->client is a
+  54-byte key blob plus two 4-byte scalars (62 bytes), blob is two 2-byte headers then [u32 len]
+  [digits] twice (modulus then exponent), little-endian lengths, constraint L1+L2=42; reply uses
+  PKCS#1 v1.5 block-type-2 padding with padded block = modulus_bytes-1 and body [u32 len][digits].
+  Kept flagged as unresolved/capture-dependent: the exact L1/L2 split (server wire data), the bit
+  meaning of the two 2-byte per-bignum headers, and whether an inbound decrypt exists (structurally
+  absent, capture-unverified). Spec stays capture_verified: false. No pseudo-code or addresses copied.
