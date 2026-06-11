@@ -109,35 +109,53 @@ public static class TedTerrainParser
                 heights[i] = BinaryPrimitives.ReadSingleLittleEndian(heightRaw[(i * 4)..]);
         }
 
-        // ---- Block 2: Vertex normals (4225 × 3 bytes, RGB) ----
-        // spec: Docs/RE/formats/terrain.md §5.2 Block 2 — offset 16900, size 12675: CONFIRMED.
-        // Encoding convention (0–255 → −1…+1 or 128-bias): UNVERIFIED.
-        byte[] normals = new byte[NormalsSize];
-        data.Slice(NormalsOffset, NormalsSize).CopyTo(normals);
+        // ---- Block 2: Vertex normals (4225 × 3 signed bytes, i8 / 127.0f) ----
+        // spec: Docs/RE/formats/terrain.md §5.5 Block 2 — "each component is i8; decode as N = (sbyte)b / 127.0f": CONFIRMED.
+        // Channel order: R=Nx, G=Ny, B=Nz. spec: §5.5 — "R=Nx, G=Ny, B=Nz": CONFIRMED.
+        var normals = new (float Nx, float Ny, float Nz)[VertexCount];
+        ReadOnlySpan<byte> normalRaw = data.Slice(NormalsOffset, NormalsSize);
+        for (int i = 0; i < VertexCount; i++)
+        {
+            // Divisor 127.0 is a literal constant in the loader.
+            // spec: Docs/RE/formats/terrain.md §5.5 — "divisor 127.0 literal constant in loader": CONFIRMED.
+            float nx = (sbyte)normalRaw[i * 3 + 0] / 127.0f; // R = Nx
+            float ny = (sbyte)normalRaw[i * 3 + 1] / 127.0f; // G = Ny
+            float nz = (sbyte)normalRaw[i * 3 + 2] / 127.0f; // B = Nz
+            normals[i] = (nx, ny, nz);
+        }
 
-        // ---- Block 3: Lookup table (256 bytes) ----
-        // spec: Docs/RE/formats/terrain.md §5.2 Block 3 — offset 29575, size 256: CONFIRMED.
-        // Purpose: UNVERIFIED.
-        byte[] lookupTable = new byte[LookupSize];
-        data.Slice(LookupOffset, LookupSize).CopyTo(lookupTable);
+        // ---- Block 3: Texture index grid (16 × 16 = 256 u8 bytes, 1-based) ----
+        // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — "u8, 1-based, 16×16 grid": CONFIRMED.
+        byte[] textureIndexGrid = new byte[LookupSize];
+        data.Slice(LookupOffset, LookupSize).CopyTo(textureIndexGrid);
 
-        // ---- Block 4: Direction map (256 bytes) ----
-        // spec: Docs/RE/formats/terrain.md §5.2 Block 4 — offset 29831, size 256: CONFIRMED.
-        // Purpose: UNVERIFIED.
-        byte[] directionMap = new byte[DirectionSize];
-        data.Slice(DirectionOffset, DirectionSize).CopyTo(directionMap);
+        // ---- Block 4: Quad split / UV orientation flags (16 × 16 = 256 u8 bytes, values 0-3) ----
+        // spec: Docs/RE/formats/terrain.md §5.7 Block 4 — "u8, observed values 0-3": CONFIRMED.
+        // Exact bit-to-geometry mapping: UNVERIFIED.
+        byte[] directionFlags = new byte[DirectionSize];
+        data.Slice(DirectionOffset, DirectionSize).CopyTo(directionFlags);
 
-        // ---- Block 5: Diffuse colour map (4225 × 4 bytes, RGBA) ----
-        // spec: Docs/RE/formats/terrain.md §5.2 Block 5 — offset 30087, size 16900: CONFIRMED.
-        byte[] diffuseColours = new byte[DiffuseSize];
-        data.Slice(DiffuseOffset, DiffuseSize).CopyTo(diffuseColours);
+        // ---- Block 5: Per-vertex diffuse colour (4225 × 4 bytes, RGBA) ----
+        // Encoding: on-disk byte = 2 × logical_value; decode as logical = byte × 0.5f.
+        // spec: Docs/RE/formats/terrain.md §5.8 Block 5 — "editor ×0.5 storage; loader ×0.5 at runtime": CONFIRMED.
+        // Channel order: R, G, B, A. spec: §5.8 — "RGBA, not ARGB": CONFIRMED.
+        var diffuseColours = new (float R, float G, float B, float A)[VertexCount];
+        ReadOnlySpan<byte> diffuseRaw = data.Slice(DiffuseOffset, DiffuseSize);
+        for (int i = 0; i < VertexCount; i++)
+        {
+            float r = diffuseRaw[i * 4 + 0] * 0.5f;
+            float g = diffuseRaw[i * 4 + 1] * 0.5f;
+            float b = diffuseRaw[i * 4 + 2] * 0.5f;
+            float a = diffuseRaw[i * 4 + 3] * 0.5f;
+            diffuseColours[i] = (r, g, b, a);
+        }
 
         return new TerrainCell
         {
             Heights = heights,
             Normals = normals,
-            LookupTable = lookupTable,
-            DirectionMap = directionMap,
+            TextureIndexGrid = textureIndexGrid,
+            DirectionFlags = directionFlags,
             DiffuseColours = diffuseColours,
         };
     }

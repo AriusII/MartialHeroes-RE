@@ -198,52 +198,55 @@ public sealed class TerrainParserTests
     }
 
     [Fact]
-    public void Ted_Parse_NormalCount_Is12675Bytes()
+    public void Ted_Parse_NormalCount_Is4225Vertices()
     {
-        // spec: Docs/RE/formats/terrain.md §5.2 Block 2 — "u8×3 (RGB), 65×65 = 12675 bytes": CONFIRMED.
+        // Normals are decoded as (float Nx, float Ny, float Nz) per vertex = 4225 tuples.
+        // spec: Docs/RE/formats/terrain.md §5.5 Block 2 — "i8/127.0f, 65×65=4225 vertices": CONFIRMED.
         byte[] data = BuildTed(normalR: 10, normalG: 20, normalB: 30);
         TerrainCell cell = TedTerrainParser.Parse(data.AsSpan());
 
-        Assert.Equal(12675, cell.Normals.Length);
-        Assert.Equal((byte)10, cell.Normals[0]); // R of vertex 0
-        Assert.Equal((byte)20, cell.Normals[1]); // G of vertex 0
-        Assert.Equal((byte)30, cell.Normals[2]); // B of vertex 0
+        Assert.Equal(4225, cell.Normals.Length); // 4225 decoded float tuples
+        // normalR=10 → Nx = (sbyte)10 / 127.0f
+        Assert.Equal((sbyte)10 / 127.0f, cell.Normals[0].Nx, precision: 5);
+        Assert.Equal((sbyte)20 / 127.0f, cell.Normals[0].Ny, precision: 5);
+        Assert.Equal((sbyte)30 / 127.0f, cell.Normals[0].Nz, precision: 5);
     }
 
     [Fact]
-    public void Ted_Parse_LookupTable_Is256Bytes()
+    public void Ted_Parse_TextureIndexGrid_Is256Bytes()
     {
-        // spec: Docs/RE/formats/terrain.md §5.2 Block 3 — "u8, 256 entries": CONFIRMED.
+        // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — "u8, 1-based, 16×16": CONFIRMED.
         byte[] data = BuildTed(lookupByte: 0xAB);
         TerrainCell cell = TedTerrainParser.Parse(data.AsSpan());
 
-        Assert.Equal(256, cell.LookupTable.Length);
-        Assert.Equal((byte)0xAB, cell.LookupTable[0]);
+        Assert.Equal(256, cell.TextureIndexGrid.Length);
+        Assert.Equal((byte)0xAB, cell.TextureIndexGrid[0]);
     }
 
     [Fact]
-    public void Ted_Parse_DirectionMap_Is256Bytes()
+    public void Ted_Parse_DirectionFlags_Is256Bytes()
     {
-        // spec: Docs/RE/formats/terrain.md §5.2 Block 4 — "u8, 256 entries": CONFIRMED.
+        // spec: Docs/RE/formats/terrain.md §5.7 Block 4 — "u8, values 0-3": CONFIRMED.
         byte[] data = BuildTed(directionByte: 0xCD);
         TerrainCell cell = TedTerrainParser.Parse(data.AsSpan());
 
-        Assert.Equal(256, cell.DirectionMap.Length);
-        Assert.Equal((byte)0xCD, cell.DirectionMap[0]);
+        Assert.Equal(256, cell.DirectionFlags.Length);
+        Assert.Equal((byte)0xCD, cell.DirectionFlags[0]);
     }
 
     [Fact]
-    public void Ted_Parse_DiffuseColour_Is16900Bytes()
+    public void Ted_Parse_DiffuseColour_Is4225Tuples()
     {
-        // spec: Docs/RE/formats/terrain.md §5.2 Block 5 — "u8×4 (RGBA), 65×65 = 16900 bytes": CONFIRMED.
+        // Diffuse stored on disk as byte × 0.5f decoding. 4225 tuples (RGBA per vertex).
+        // spec: Docs/RE/formats/terrain.md §5.8 Block 5 — "×0.5 decode: CONFIRMED".
         byte[] data = BuildTed(diffuseR: 255, diffuseG: 0, diffuseB: 128, diffuseA: 200);
         TerrainCell cell = TedTerrainParser.Parse(data.AsSpan());
 
-        Assert.Equal(16900, cell.DiffuseColours.Length);
-        Assert.Equal((byte)255, cell.DiffuseColours[0]); // R of vertex 0
-        Assert.Equal((byte)0, cell.DiffuseColours[1]);   // G of vertex 0
-        Assert.Equal((byte)128, cell.DiffuseColours[2]); // B of vertex 0
-        Assert.Equal((byte)200, cell.DiffuseColours[3]); // A of vertex 0
+        Assert.Equal(4225, cell.DiffuseColours.Length);
+        Assert.Equal(255 * 0.5f, cell.DiffuseColours[0].R, precision: 4); // R of vertex 0
+        Assert.Equal(0 * 0.5f,   cell.DiffuseColours[0].G, precision: 4); // G of vertex 0
+        Assert.Equal(128 * 0.5f, cell.DiffuseColours[0].B, precision: 4); // B of vertex 0
+        Assert.Equal(200 * 0.5f, cell.DiffuseColours[0].A, precision: 4); // A of vertex 0
     }
 
     [Fact]
@@ -270,14 +273,14 @@ public sealed class TerrainParserTests
 
         // Block 1 sample
         Assert.Equal(1.0f, cell.Heights[0], precision: 5);
-        // Block 2 sample
-        Assert.Equal((byte)11, cell.Normals[0]);
-        // Block 3 sample
-        Assert.Equal((byte)0x44, cell.LookupTable[0]);
-        // Block 4 sample
-        Assert.Equal((byte)0x55, cell.DirectionMap[0]);
-        // Block 5 sample
-        Assert.Equal((byte)66, cell.DiffuseColours[0]);
+        // Block 2 sample — decoded Nx = (sbyte)11 / 127.0f
+        Assert.Equal((sbyte)11 / 127.0f, cell.Normals[0].Nx, precision: 5);
+        // Block 3 sample — TextureIndexGrid (renamed from LookupTable)
+        Assert.Equal((byte)0x44, cell.TextureIndexGrid[0]);
+        // Block 4 sample — DirectionFlags (renamed from DirectionMap)
+        Assert.Equal((byte)0x55, cell.DirectionFlags[0]);
+        // Block 5 sample — decoded R = 66 * 0.5f
+        Assert.Equal(66 * 0.5f, cell.DiffuseColours[0].R, precision: 4);
     }
 
     // =========================================================================
@@ -428,7 +431,9 @@ public sealed class TerrainParserTests
         byte[] data = new byte[MudBlob.FixedSize]; // 32768 zeroes
         MudBlob mud = MudBlobParser.Parse(new ReadOnlyMemory<byte>(data));
 
-        Assert.Equal(MudBlob.FixedSize, mud.RawData.Length);
+        // Decoded into 4096 tile records (64×64 grid).
+        // spec: Docs/RE/formats/terrain.md §6.1 — "64×64 grid × 8 bytes = 32768": CONFIRMED.
+        Assert.Equal(MudBlob.GridRows * MudBlob.GridCols, mud.Tiles.Length);
     }
 
     [Fact]
@@ -443,18 +448,36 @@ public sealed class TerrainParserTests
     }
 
     [Fact]
-    public void Mud_Parse_RawDataPreserved()
+    public void Mud_Parse_TileDecoding_Verified()
     {
-        // Internal layout UNVERIFIED; verify the raw bytes are preserved as-is.
-        // spec: Docs/RE/formats/terrain.md §6 — "internal structure UNVERIFIED".
+        // All 8 fields of MudTileRecord are VERIFIED.
+        // spec: Docs/RE/formats/terrain.md §6.2 — "8-byte record layout: VERIFIED (all 3 samples)".
         byte[] data = new byte[MudBlob.FixedSize];
-        data[0] = 0xDE;
-        data[MudBlob.FixedSize - 1] = 0xAD;
+        // Set tile 0 bytes to known values.
+        // Tile 0 occupies bytes 0..7.
+        data[0] = 0x00; // Pad0 — always 0. spec: §6.2 pad0 @ +0: VERIFIED.
+        data[1] = 0x00; // Pad1 — always 0. spec: §6.2 pad1 @ +1: VERIFIED.
+        data[2] = 0x03; // MusicGroup. spec: §6.2 music_group @ +2: VERIFIED.
+        data[3] = 0x05; // AmbientIdx0. spec: §6.2 ambient_idx_0 @ +3: VERIFIED.
+        data[4] = 0x06; // AmbientIdx1. spec: §6.2 ambient_idx_1 @ +4: VERIFIED.
+        data[5] = 0x07; // EffectIdx0. spec: §6.2 effect_idx_0 @ +5: VERIFIED.
+        data[6] = 0x08; // EffectIdx1. spec: §6.2 effect_idx_1 @ +6: VERIFIED.
+        data[7] = 0x09; // EffectIdx2. spec: §6.2 effect_idx_2 @ +7: VERIFIED.
+        // Set last tile (index 4095) bytes too.
+        int lastOffset = (MudBlob.FixedSize - MudBlob.RecordStride);
+        data[lastOffset + 2] = 0x0A; // MusicGroup of last tile.
 
         MudBlob mud = MudBlobParser.Parse(new ReadOnlyMemory<byte>(data));
 
-        Assert.Equal((byte)0xDE, mud.RawData.Span[0]);
-        Assert.Equal((byte)0xAD, mud.RawData.Span[MudBlob.FixedSize - 1]);
+        Assert.Equal((byte)0x00, mud.Tiles[0].Pad0);
+        Assert.Equal((byte)0x00, mud.Tiles[0].Pad1);
+        Assert.Equal((byte)0x03, mud.Tiles[0].MusicGroup);
+        Assert.Equal((byte)0x05, mud.Tiles[0].AmbientIdx0);
+        Assert.Equal((byte)0x06, mud.Tiles[0].AmbientIdx1);
+        Assert.Equal((byte)0x07, mud.Tiles[0].EffectIdx0);
+        Assert.Equal((byte)0x08, mud.Tiles[0].EffectIdx1);
+        Assert.Equal((byte)0x09, mud.Tiles[0].EffectIdx2);
+        Assert.Equal((byte)0x0A, mud.Tiles[4095].MusicGroup);
     }
 
     // =========================================================================

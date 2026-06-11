@@ -223,16 +223,19 @@ public static class TerrainGltfConverter
 
         // ---- Colours (COLOR_0) ----
         // Block 5: RGBA, 4 bytes per vertex, in the same row-major order as the heightmap.
-        // spec: Docs/RE/formats/terrain.md §5.2 Block 5 — "Diffuse colour: u8×4 (R,G,B,A),
-        //   65×65=4225 vertices": CONFIRMED.
+        // DiffuseColours is now (float R, float G, float B, float A)[] decoded from on-disk ×0.5 encoding.
+        // Re-encode to u8 by multiplying each float component by 255 and clamping.
+        // spec: Docs/RE/formats/terrain.md §5.8 Block 5 — "×0.5 decode: CONFIRMED."
+        // The mapping layer (Assets.Mapping) is responsible for converting decoded floats to wire bytes.
         cursor = colOffset;
-        ReadOnlySpan<byte> diffuse = cell.DiffuseColours.AsSpan();
+        var diffuse = cell.DiffuseColours;
         for (int vi = 0; vi < vertexCount; vi++)
         {
-            buf[cursor + 0] = diffuse[vi * 4 + 0]; // R
-            buf[cursor + 1] = diffuse[vi * 4 + 1]; // G
-            buf[cursor + 2] = diffuse[vi * 4 + 2]; // B
-            buf[cursor + 3] = diffuse[vi * 4 + 3]; // A
+            var (dr, dg, db, da) = diffuse[vi];
+            buf[cursor + 0] = (byte)Math.Clamp((int)(dr * 255f + 0.5f), 0, 255); // R
+            buf[cursor + 1] = (byte)Math.Clamp((int)(dg * 255f + 0.5f), 0, 255); // G
+            buf[cursor + 2] = (byte)Math.Clamp((int)(db * 255f + 0.5f), 0, 255); // B
+            buf[cursor + 3] = (byte)Math.Clamp((int)(da * 255f + 0.5f), 0, 255); // A
             cursor += 4;
         }
 

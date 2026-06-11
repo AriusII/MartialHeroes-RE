@@ -3,54 +3,63 @@ using MartialHeroes.Assets.Parsers.Models;
 namespace MartialHeroes.Assets.Parsers;
 
 /// <summary>
-/// Stub parser for <c>.mud</c> ambient/audio tile blobs.
+/// Parser for <c>.mud</c> ambient-sound tile blob files.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/terrain.md §6. Ambient/audio tile blob — .mud
+/// spec: Docs/RE/formats/terrain.md §6. Ambient-sound tile blob — .mud
 /// <para>
-/// The .mud file is a fixed-size opaque binary blob read in a single operation with no
-/// header parsing. Internal structure is UNVERIFIED.
+/// Fixed size: 32 768 bytes (0x8000) = 64 × 64 × 8 B. CONFIRMED (three samples).
+/// Grid: 64 columns (X axis) × 64 rows (Z axis). Row-major (row = Z, col = X). CONFIRMED.
+/// Record stride: 8 bytes. All fields: single bytes. CONFIRMED.
+/// spec: Docs/RE/formats/terrain.md §6.1 Grid dimensions: CONFIRMED.
+/// spec: Docs/RE/formats/terrain.md §6.2 Record layout: VERIFIED (all 3 samples, 12 288 tile observations).
 /// </para>
-/// <para>
-/// Fixed size: 32 768 bytes (0x8000). CONFIRMED (fixed read size).
-/// spec: Docs/RE/formats/terrain.md §6 — "Total file size: exactly 32 768 bytes": CONFIRMED.
-/// </para>
-/// <para>
-/// Internal layout hypothesis: a 64×64 grid of 8-byte records (64×64×8 = 32768).
-/// This hypothesis is UNVERIFIED — not derived from any observed parse loop.
-/// spec: Docs/RE/formats/terrain.md §6 — "hypothesis: 64×64 grid of 8-byte records — UNVERIFIED".
-/// </para>
-/// <para>
-/// This stub validates the fixed size and wraps the raw bytes.
-/// No internal fields are decoded because none are specified.
-/// </para>
-/// <para>
-/// ZERO rendering/engine dependencies.
-/// </para>
+/// <para>ZERO rendering/engine dependencies.</para>
 /// </remarks>
 public static class MudBlobParser
 {
     /// <summary>
-    /// Parses (validates size of) a <c>.mud</c> file and wraps its bytes in a <see cref="MudBlob"/>.
+    /// Parses a <c>.mud</c> file into a decoded <see cref="MudBlob"/> tile grid.
     /// </summary>
-    /// <param name="data">Raw file content from the VFS.</param>
-    /// <returns>Decoded (opaque) mud blob.</returns>
-    /// <exception cref="InvalidDataException">
-    /// Thrown if the buffer is not exactly 32 768 bytes.
-    /// spec: Docs/RE/formats/terrain.md §6 — "Total file size: exactly 32 768 bytes": CONFIRMED.
-    /// </exception>
-    public static MudBlob Parse(ReadOnlyMemory<byte> data)
-    {
-        // Validate fixed size.
-        // spec: Docs/RE/formats/terrain.md §6 — "32 768 bytes (0x8000) — CONFIRMED (fixed read size)".
-        if (data.Length != MudBlob.FixedSize)
-            throw new InvalidDataException(
-                $".mud parse error: expected exactly {MudBlob.FixedSize} bytes, " +
-                $"got {data.Length} bytes. " +
-                $"spec: Docs/RE/formats/terrain.md §6.");
+    /// <param name="data">Raw file content from the VFS (must be exactly 32 768 bytes).</param>
+    /// <returns>Decoded MudBlob with a 64×64 typed tile grid.</returns>
+    /// <exception cref="InvalidDataException">Thrown when the buffer is not exactly 32 768 bytes.</exception>
+    public static MudBlob Parse(ReadOnlyMemory<byte> data) =>
+        Parse(data.Span);
 
-        // Internal structure is UNVERIFIED — expose raw bytes without further parsing.
-        // spec: Docs/RE/formats/terrain.md §6 — "internal structure UNVERIFIED".
-        return new MudBlob { RawData = data };
+    /// <inheritdoc cref="Parse(ReadOnlyMemory{byte})"/>
+    public static MudBlob Parse(ReadOnlySpan<byte> span)
+    {
+        // Validate fixed size: 64 × 64 × 8 = 32768.
+        // spec: Docs/RE/formats/terrain.md §6 — "Total file size: exactly 32 768 bytes (0x8000)": CONFIRMED.
+        if (span.Length != MudBlob.FixedSize)
+            throw new InvalidDataException(
+                $".mud parse error: expected exactly {MudBlob.FixedSize} bytes, got {span.Length}. " +
+                "spec: Docs/RE/formats/terrain.md §6.");
+
+        int totalTiles = MudBlob.GridRows * MudBlob.GridCols; // 4096
+        var tiles = new MudTileRecord[totalTiles];
+
+        for (int t = 0; t < totalTiles; t++)
+        {
+            int offset = t * MudBlob.RecordStride;
+            // spec: Docs/RE/formats/terrain.md §6.2 Record layout (8 bytes):
+            //   pad0 u8 @ +0: VERIFIED. pad1 u8 @ +1: VERIFIED.
+            //   music_group u8 @ +2: VERIFIED. ambient_idx_0 u8 @ +3: VERIFIED.
+            //   ambient_idx_1 u8 @ +4: VERIFIED. effect_idx_0 u8 @ +5: VERIFIED.
+            //   effect_idx_1 u8 @ +6: VERIFIED. effect_idx_2 u8 @ +7: VERIFIED (limited).
+            tiles[t] = new MudTileRecord(
+                span[offset + 0],   // pad0
+                span[offset + 1],   // pad1
+                span[offset + 2],   // music_group
+                span[offset + 3],   // ambient_idx_0
+                span[offset + 4],   // ambient_idx_1
+                span[offset + 5],   // effect_idx_0
+                span[offset + 6],   // effect_idx_1
+                span[offset + 7]    // effect_idx_2
+            );
+        }
+
+        return new MudBlob { Tiles = tiles };
     }
 }

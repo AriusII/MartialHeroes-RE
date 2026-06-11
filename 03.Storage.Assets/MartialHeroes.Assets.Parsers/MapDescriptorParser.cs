@@ -12,7 +12,8 @@ namespace MartialHeroes.Assets.Parsers;
 /// Grammar:
 ///   - Lines beginning with '#' are comments and are ignored.
 ///   - Section blocks are opened with the section keyword followed by '{' and closed with '}'.
-///   - Within a section, two directives are understood: DATAFILE and TEXTURES.
+///   - Within a section, directives are: WIDTH, HEIGHT, GRID, MAX_HEIGHTFILED, MIN_HEIGHTFILED,
+///     ORIGIN, DATAFILE, and TEXTURES.
 /// </para>
 /// <para>
 /// Section keywords: TERRAIN, EXTRA_TERRAIN, UP_TERRAIN, BUILDING, FX1–FX7, SOLID.
@@ -142,6 +143,15 @@ public static class MapDescriptorParser
             string? dataFile = null;
             var textures = new List<(int Flag, int TexId)>();
 
+            // Geometry directives — TERRAIN section. All CONFIRMED.
+            // spec: Docs/RE/formats/terrain.md §3.4 Geometry directives.
+            int? sectionWidth = null;
+            int? sectionHeight = null;
+            int? sectionGrid = null;
+            float? sectionMaxHeightFiled = null;
+            float? sectionMinHeightFiled = null;
+            (float X, float Z)? sectionOrigin = null;
+
             while (!closedOnSameLine && lineIndex < lines.Length)
             {
                 string bodyLine = lines[lineIndex].Trim();
@@ -169,6 +179,75 @@ public static class MapDescriptorParser
                         throw new InvalidDataException(
                             $".map parse error: DATAFILE directive in section '{keyword}' has no path argument.");
                     dataFile = bt[1];
+                }
+                else if (directive == "WIDTH")
+                {
+                    // WIDTH <integer> — quad grid width (quads per row).
+                    // spec: Docs/RE/formats/terrain.md §3.4 — WIDTH integer: CONFIRMED.
+                    if (bt.Length < 2 || !int.TryParse(bt[1], out int w))
+                        throw new InvalidDataException(
+                            $".map parse error: WIDTH directive in section '{keyword}' requires an integer argument.");
+                    sectionWidth = w;
+                }
+                else if (directive == "HEIGHT")
+                {
+                    // HEIGHT <integer> — quad grid height (quads per column).
+                    // spec: Docs/RE/formats/terrain.md §3.4 — HEIGHT integer: CONFIRMED.
+                    if (bt.Length < 2 || !int.TryParse(bt[1], out int h))
+                        throw new InvalidDataException(
+                            $".map parse error: HEIGHT directive in section '{keyword}' requires an integer argument.");
+                    sectionHeight = h;
+                }
+                else if (directive == "GRID")
+                {
+                    // GRID <integer> — world-unit vertex spacing.
+                    // spec: Docs/RE/formats/terrain.md §3.4 — GRID integer: CONFIRMED.
+                    if (bt.Length < 2 || !int.TryParse(bt[1], out int g))
+                        throw new InvalidDataException(
+                            $".map parse error: GRID directive in section '{keyword}' requires an integer argument.");
+                    sectionGrid = g;
+                }
+                else if (directive == "MAX_HEIGHTFILED")
+                {
+                    // MAX_HEIGHTFILED <float> — max world-Y; verbatim dropped-L spelling from original files.
+                    // spec: Docs/RE/formats/terrain.md §3.4 — MAX_HEIGHTFILED float: CONFIRMED.
+                    // Note: "MAX_HEIGHTFILED" is the exact verbatim keyword from the data files.
+                    if (bt.Length < 2 || !float.TryParse(bt[1],
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out float maxH))
+                        throw new InvalidDataException(
+                            $".map parse error: MAX_HEIGHTFILED directive in section '{keyword}' requires a float argument.");
+                    sectionMaxHeightFiled = maxH;
+                }
+                else if (directive == "MIN_HEIGHTFILED")
+                {
+                    // MIN_HEIGHTFILED <float> — min world-Y; verbatim dropped-L spelling from original files.
+                    // spec: Docs/RE/formats/terrain.md §3.4 — MIN_HEIGHTFILED float: CONFIRMED.
+                    // Note: "MIN_HEIGHTFILED" is the exact verbatim keyword from the data files.
+                    if (bt.Length < 2 || !float.TryParse(bt[1],
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out float minH))
+                        throw new InvalidDataException(
+                            $".map parse error: MIN_HEIGHTFILED directive in section '{keyword}' requires a float argument.");
+                    sectionMinHeightFiled = minH;
+                }
+                else if (directive == "ORIGIN")
+                {
+                    // ORIGIN <float>,<float> — world-space XZ cell origin.
+                    // spec: Docs/RE/formats/terrain.md §3.4 — ORIGIN float,float: CONFIRMED.
+                    // The comma may be attached to the first number ("0.000,-1024.000") or separated
+                    // by whitespace ("0.000, -1024.000"). Reconstruct by joining remaining tokens and
+                    // splitting on ','.
+                    string originStr = string.Join("", bt[1..]).Replace(" ", "");
+                    string[] originParts = originStr.Split(',');
+                    if (originParts.Length < 2
+                        || !float.TryParse(originParts[0], System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out float ox)
+                        || !float.TryParse(originParts[1], System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out float oz))
+                        throw new InvalidDataException(
+                            $".map parse error: ORIGIN directive in section '{keyword}' requires two comma-separated floats.");
+                    sectionOrigin = (ox, oz);
                 }
                 else if (directive == "TEXTURES")
                 {
@@ -224,7 +303,7 @@ public static class MapDescriptorParser
                         textures.Add((flag, texId));
                     }
                 }
-                // Other directives within a section body are ignored (no other directives documented).
+                // Other unrecognised directives are silently skipped.
             }
 
             sections.Add(new MapSection
@@ -232,6 +311,12 @@ public static class MapDescriptorParser
                 Keyword = keyword,
                 DataFile = dataFile,
                 Textures = textures.ToArray(),
+                Width = sectionWidth,
+                Height = sectionHeight,
+                Grid = sectionGrid,
+                MaxHeightFiled = sectionMaxHeightFiled,
+                MinHeightFiled = sectionMinHeightFiled,
+                Origin = sectionOrigin,
             });
         }
 

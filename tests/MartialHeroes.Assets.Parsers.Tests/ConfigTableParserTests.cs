@@ -27,11 +27,12 @@ public sealed class ConfigTableParserTests
     // =========================================================================
 
     /// <summary>
-    /// Builds a synthetic exp.scr buffer with <paramref name="count"/> records.
+    /// Builds a synthetic exp.scr buffer.
     /// spec: Docs/RE/formats/config_tables.md §2.3 exp.scr — stride 20 bytes: CONFIRMED.
+    /// Layout: +0 Level u16, +2 Const64 u16, +4 PrimaryExp u32, +8 Reserved u32, +12 SecondaryExp u32, +16 TertiaryExp u32.
     /// </summary>
     private static byte[] BuildExpScr(
-        (ushort level, uint colA, uint colB)[] records)
+        (ushort level, ushort const64, uint primaryExp, uint reserved, uint secondaryExp, uint tertiaryExp)[] records)
     {
         // stride = 20 bytes per record; no header.
         // spec: Docs/RE/formats/config_tables.md §2.1 — "No file header, no record-count prefix": CONFIRMED.
@@ -39,17 +40,18 @@ public sealed class ConfigTableParserTests
         for (int i = 0; i < records.Length; i++)
         {
             int off = i * 20;
-            // Level u16 @ +0. CONFIRMED.
-            // spec: Docs/RE/formats/config_tables.md §2.3 — "Level index u16 @ +0: CONFIRMED".
+            // +0 Level u16. CONFIRMED.
             WriteU16LE(buf, off + 0, records[i].level);
-            // EXP column A u32 @ +2. CONFIRMED.
-            // spec: Docs/RE/formats/config_tables.md §2.3 — "EXP column 0 u32 @ +2: CONFIRMED".
-            WriteU32LE(buf, off + 2, records[i].colA);
-            // EXP column B u32 @ +6. CONFIRMED.
-            // spec: Docs/RE/formats/config_tables.md §2.3 — "EXP column 1 u32 @ +6: CONFIRMED".
-            WriteU32LE(buf, off + 6, records[i].colB);
-            // Bytes +10..+19: leave as zero (UNVERIFIED tail).
-            // spec: Docs/RE/formats/config_tables.md §2.3 — "Remaining fields UNVERIFIED".
+            // +2 Const64 u16 (always 64). CONFIRMED.
+            WriteU16LE(buf, off + 2, records[i].const64);
+            // +4 PrimaryExp u32. CONFIRMED.
+            WriteU32LE(buf, off + 4, records[i].primaryExp);
+            // +8 Reserved u32 (always 0). CONFIRMED.
+            WriteU32LE(buf, off + 8, records[i].reserved);
+            // +12 SecondaryExp u32. CONFIRMED.
+            WriteU32LE(buf, off + 12, records[i].secondaryExp);
+            // +16 TertiaryExp u32. CONFIRMED.
+            WriteU32LE(buf, off + 16, records[i].tertiaryExp);
         }
         return buf;
     }
@@ -58,7 +60,10 @@ public sealed class ConfigTableParserTests
     public void ExpScr_Parse_RecordCount_FromStride()
     {
         // spec: Docs/RE/formats/config_tables.md §2.1 — "record count = file_size / stride": CONFIRMED.
-        byte[] data = BuildExpScr([(1, 100u, 200u), (2, 300u, 400u), (3, 500u, 600u)]);
+        byte[] data = BuildExpScr([
+            (1, 64, 100u, 0u, 200u, 0u),
+            (2, 64, 300u, 0u, 400u, 0u),
+            (3, 64, 500u, 0u, 600u, 0u)]);
         ExpCurveEntry[] entries = ConfigTableParser.ParseExpScr(new ReadOnlyMemory<byte>(data));
         Assert.Equal(3, entries.Length);
     }
@@ -67,7 +72,7 @@ public sealed class ConfigTableParserTests
     public void ExpScr_Parse_LevelField()
     {
         // spec: Docs/RE/formats/config_tables.md §2.3 — "Level index u16 @ +0: CONFIRMED".
-        byte[] data = BuildExpScr([(42, 1000u, 2000u)]);
+        byte[] data = BuildExpScr([(42, 64, 1000u, 0u, 2000u, 0u)]);
         ExpCurveEntry[] entries = ConfigTableParser.ParseExpScr(new ReadOnlyMemory<byte>(data));
 
         Assert.Equal((ushort)42, entries[0].Level);
@@ -76,29 +81,30 @@ public sealed class ConfigTableParserTests
     [Fact]
     public void ExpScr_Parse_ExpColumns()
     {
-        // spec: Docs/RE/formats/config_tables.md §2.3 — column A @ +2, column B @ +6: CONFIRMED.
-        byte[] data = BuildExpScr([(1, 99999u, 88888u)]);
+        // spec: Docs/RE/formats/config_tables.md §2.3 — CONFIRMED field layout.
+        byte[] data = BuildExpScr([(1, 64, 99999u, 0u, 88888u, 12345u)]);
         ExpCurveEntry[] entries = ConfigTableParser.ParseExpScr(new ReadOnlyMemory<byte>(data));
 
-        Assert.Equal(99999u, entries[0].ColumnA);
-        Assert.Equal(88888u, entries[0].ColumnB);
+        Assert.Equal((ushort)64, entries[0].Const64);
+        Assert.Equal(99999u, entries[0].PrimaryExp);
+        Assert.Equal(0u, entries[0].Reserved);
+        Assert.Equal(88888u, entries[0].SecondaryExp);
+        Assert.Equal(12345u, entries[0].TertiaryExp);
     }
 
     [Fact]
-    public void ExpScr_Parse_RawTail_Is10Bytes()
+    public void ExpScr_Parse_AllFields_RoundTrip()
     {
-        // Bytes +10..+19 of each record: UNVERIFIED tail exposed raw.
-        // spec: Docs/RE/formats/config_tables.md §2.3 — "Remaining fields UNVERIFIED".
-        byte[] data = BuildExpScr([(7, 0u, 0u)]);
-        // Set tail bytes to recognisable values.
-        data[10] = 0xDE;
-        data[19] = 0xAD;
-
+        // spec: Docs/RE/formats/config_tables.md §2.3 — full 20-byte record round-trip.
+        byte[] data = BuildExpScr([(7, 64, 112284408u, 0u, 5000u, 263880u)]);
         ExpCurveEntry[] entries = ConfigTableParser.ParseExpScr(new ReadOnlyMemory<byte>(data));
 
-        Assert.Equal(10, entries[0].RawTail.Length);
-        Assert.Equal((byte)0xDE, entries[0].RawTail.Span[0]);
-        Assert.Equal((byte)0xAD, entries[0].RawTail.Span[9]);
+        Assert.Equal((ushort)7, entries[0].Level);
+        Assert.Equal((ushort)64, entries[0].Const64);
+        Assert.Equal(112284408u, entries[0].PrimaryExp);
+        Assert.Equal(0u, entries[0].Reserved);
+        Assert.Equal(5000u, entries[0].SecondaryExp);
+        Assert.Equal(263880u, entries[0].TertiaryExp);
     }
 
     [Fact]
@@ -146,18 +152,22 @@ public sealed class ConfigTableParserTests
     }
 
     [Fact]
-    public void UserLevelScr_Parse_Body_Is58Bytes()
+    public void UserLevelScr_Parse_Body_Is60Bytes()
     {
-        // spec: Docs/RE/formats/config_tables.md §2.4 — "+2: 58 bytes UNVERIFIED".
+        // Body is the full 60-byte raw record (including all individually decoded fields).
+        // spec: Docs/RE/formats/config_tables.md §2.4 — "stride 60 bytes": CONFIRMED.
         var body = new byte[58];
         body[0] = 0xEF;
         body[57] = 0x12;
         byte[] data = BuildUserLevelScr([(1, body)]);
         LevelBaseEntry[] entries = ConfigTableParser.ParseUserLevelScr(new ReadOnlyMemory<byte>(data));
 
-        Assert.Equal(58, entries[0].Body.Length);
-        Assert.Equal((byte)0xEF, entries[0].Body.Span[0]);
-        Assert.Equal((byte)0x12, entries[0].Body.Span[57]);
+        // Body = full 60-byte record (level u16 at [0..1] + 58-byte payload at [2..59]).
+        Assert.Equal(60, entries[0].Body.Length);
+        // Level u16 is at offset 1 (written as LE). Body[0]=level_lo, Body[1]=level_hi.
+        // The 58-byte payload starts at Body.Span[2].
+        Assert.Equal((byte)0xEF, entries[0].Body.Span[2]); // first byte of 58-byte payload
+        Assert.Equal((byte)0x12, entries[0].Body.Span[59]); // last byte of 58-byte payload
     }
 
     // =========================================================================

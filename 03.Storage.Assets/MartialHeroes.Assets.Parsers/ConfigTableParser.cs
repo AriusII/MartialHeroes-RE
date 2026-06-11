@@ -64,25 +64,34 @@ public static class ConfigTableParser
             // spec: Docs/RE/formats/config_tables.md §2.3 — "Level index u16 @ +0: CONFIRMED".
             ushort level = BinaryPrimitives.ReadUInt16LittleEndian(rec[0..]);
 
-            // EXP column A u32 @ +2. CONFIRMED.
-            // spec: Docs/RE/formats/config_tables.md §2.3 — "EXP column 0 u32 @ +2: CONFIRMED".
-            uint columnA = BinaryPrimitives.ReadUInt32LittleEndian(rec[2..]);
+            // Constant 64 u16 @ +2 — identical in all 300 records. CONFIRMED (value); semantic UNVERIFIED.
+            // spec: Docs/RE/formats/config_tables.md §2.3 — "+2 u16 Constant 64 (0x0040): CONFIRMED (value)".
+            ushort const64 = BinaryPrimitives.ReadUInt16LittleEndian(rec[2..]);
 
-            // EXP column B u32 @ +6. CONFIRMED.
-            // spec: Docs/RE/formats/config_tables.md §2.3 — "EXP column 1 u32 @ +6: CONFIRMED".
-            uint columnB = BinaryPrimitives.ReadUInt32LittleEndian(rec[6..]);
+            // Primary EXP required u32 @ +4. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.3 — "+4 u32 Primary EXP required: CONFIRMED".
+            uint primaryExp = BinaryPrimitives.ReadUInt32LittleEndian(rec[4..]);
 
-            // Bytes +10 to +19 (10 bytes): meaning UNVERIFIED — expose raw.
-            // spec: Docs/RE/formats/config_tables.md §2.3 — "Remaining fields UNVERIFIED".
-            // Slice from the backing Memory so it is zero-copy.
-            ReadOnlyMemory<byte> tail = data.Slice(recOffset + 10, 10);
+            // Reserved u32 @ +8 — zero in all 300 records. CONFIRMED (always zero).
+            // spec: Docs/RE/formats/config_tables.md §2.3 — "+8 u32 Reserved (always zero): CONFIRMED".
+            uint reserved = BinaryPrimitives.ReadUInt32LittleEndian(rec[8..]);
+
+            // Secondary EXP curve u32 @ +12. CONFIRMED (present); semantic UNVERIFIED.
+            // spec: Docs/RE/formats/config_tables.md §2.3 — "+12 u32 Secondary EXP curve: CONFIRMED (present)".
+            uint secondaryExp = BinaryPrimitives.ReadUInt32LittleEndian(rec[12..]);
+
+            // Tertiary EXP curve u32 @ +16. CONFIRMED (present); semantic UNVERIFIED.
+            // spec: Docs/RE/formats/config_tables.md §2.3 — "+16 u32 Tertiary EXP curve: CONFIRMED (present)".
+            uint tertiaryExp = BinaryPrimitives.ReadUInt32LittleEndian(rec[16..]);
 
             results[i] = new ExpCurveEntry
             {
                 Level = level,
-                ColumnA = columnA,
-                ColumnB = columnB,
-                RawTail = tail,
+                Const64 = const64,
+                PrimaryExp = primaryExp,
+                Reserved = reserved,
+                SecondaryExp = secondaryExp,
+                TertiaryExp = tertiaryExp,
             };
         }
 
@@ -123,16 +132,50 @@ public static class ConfigTableParser
         for (int i = 0; i < count; i++)
         {
             int recOffset = i * UserLevelScrStride;
+            ReadOnlySpan<byte> rec = span.Slice(recOffset, UserLevelScrStride);
 
             // Level index u16 @ +0. CONFIRMED.
             // spec: Docs/RE/formats/config_tables.md §2.4 — "Level index u16 @ +0: CONFIRMED".
-            ushort level = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(recOffset, 2));
+            ushort level = BinaryPrimitives.ReadUInt16LittleEndian(rec[0..]);
 
-            // Body bytes +2 to +59 (58 bytes). Stat layout: UNVERIFIED.
-            // spec: Docs/RE/formats/config_tables.md §2.4 — "+2: 58 bytes, UNVERIFIED".
-            ReadOnlyMemory<byte> body = data.Slice(recOffset + 2, 58);
+            // Always zero u16 @ +2. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.4 — "+2 u16 always zero: CONFIRMED".
+            // (read and discarded to maintain correct offset arithmetic)
 
-            results[i] = new LevelBaseEntry { Level = level, Body = body };
+            // Step-count field A u32 @ +4. CONFIRMED (transitions); semantic UNVERIFIED.
+            // spec: Docs/RE/formats/config_tables.md §2.4 — "+4 u32 Step-count field A: CONFIRMED (transitions)".
+            uint stepA = BinaryPrimitives.ReadUInt32LittleEndian(rec[4..]);
+
+            // Step-count field B u32 @ +8. CONFIRMED (transitions); semantic UNVERIFIED.
+            // spec: Docs/RE/formats/config_tables.md §2.4 — "+8 u32 Step-count field B: CONFIRMED (transitions)".
+            uint stepB = BinaryPrimitives.ReadUInt32LittleEndian(rec[8..]);
+
+            // Stat-scale positive group [0..3] f32×4 @ +12..+27. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.4 — "+12 4×f32 Stat-scale positive group: CONFIRMED".
+            var statScalePositive = new float[4];
+            for (int s = 0; s < 4; s++)
+                statScalePositive[s] = BinaryPrimitives.ReadSingleLittleEndian(rec[(12 + s * 4)..]);
+
+            // Stat-scale negative group [0..3] f32×4 @ +28..+43. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.4 — "+28 4×f32 Stat-scale negative group: CONFIRMED".
+            var statScaleNegative = new float[4];
+            for (int s = 0; s < 4; s++)
+                statScaleNegative[s] = BinaryPrimitives.ReadSingleLittleEndian(rec[(28 + s * 4)..]);
+
+            // Reserved group 4×f32 @ +44..+59 — all 0.0. CONFIRMED (all zero).
+            // spec: Docs/RE/formats/config_tables.md §2.4 — "+44 4×f32 reserved (all 0.0): CONFIRMED".
+            // (not exposed as named fields; included in RawBody if needed)
+            ReadOnlyMemory<byte> body = data.Slice(recOffset, UserLevelScrStride);
+
+            results[i] = new LevelBaseEntry
+            {
+                Level = level,
+                StepA = stepA,
+                StepB = stepB,
+                StatScalePositive = statScalePositive,
+                StatScaleNegative = statScaleNegative,
+                Body = body,
+            };
         }
 
         return results;
@@ -171,16 +214,76 @@ public static class ConfigTableParser
         for (int i = 0; i < count; i++)
         {
             int recOffset = i * UserPointScrStride;
+            ReadOnlySpan<byte> rec = span.Slice(recOffset, UserPointScrStride);
 
-            // u16 key @ +0. CONFIRMED.
+            // u16 key (0-based, 0..300) @ +0. CONFIRMED.
             // spec: Docs/RE/formats/config_tables.md §2.5 — "u16 key @ +0: CONFIRMED".
-            ushort key = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(recOffset, 2));
+            ushort key = BinaryPrimitives.ReadUInt16LittleEndian(rec[0..]);
 
-            // Body +2 to +31 (30 bytes). UNVERIFIED.
-            // spec: Docs/RE/formats/config_tables.md §2.5 — "+2: 30 bytes, UNVERIFIED".
-            ReadOnlyMemory<byte> body = data.Slice(recOffset + 2, 30);
+            // Constant 25 u16 @ +2. CONFIRMED (value); semantic UNVERIFIED.
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+2 u16 constant=25: CONFIRMED (value)".
+            ushort const25 = BinaryPrimitives.ReadUInt16LittleEndian(rec[2..]);
 
-            results[i] = new UserPointEntry { Key = key, Body = body };
+            // Stat-group-1 gain u16 @ +4. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+4 u16 Stat-group-1 gain: CONFIRMED".
+            ushort statGroup1Gain = BinaryPrimitives.ReadUInt16LittleEndian(rec[4..]);
+
+            // Always zero u16 @ +6. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+6 u16 always zero: CONFIRMED".
+
+            // Stat-group-1 cumulative u16 @ +8. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+8 u16 Stat-group-1 cumulative: CONFIRMED".
+            ushort statGroup1Cumul = BinaryPrimitives.ReadUInt16LittleEndian(rec[8..]);
+
+            // Mostly-zero u16 @ +10. UNVERIFIED (rare value=1).
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+10 u16 mostly zero (rare=1): UNVERIFIED".
+            ushort field10 = BinaryPrimitives.ReadUInt16LittleEndian(rec[10..]);
+
+            // Stat-group-2 gain u16 @ +12. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+12 u16 Stat-group-2 gain: CONFIRMED".
+            ushort statGroup2Gain = BinaryPrimitives.ReadUInt16LittleEndian(rec[12..]);
+
+            // Always zero u16 @ +14. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+14 u16 always zero: CONFIRMED".
+
+            // Stat-group-2 cumulative u16 @ +16. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+16 u16 Stat-group-2 cumulative: CONFIRMED".
+            ushort statGroup2Cumul = BinaryPrimitives.ReadUInt16LittleEndian(rec[16..]);
+
+            // Always zero u16 @ +18. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+18 u16 always zero: CONFIRMED".
+
+            // Secondary curve low u16 @ +20. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+20 u16 secondary curve low: CONFIRMED".
+            ushort secCurveLow = BinaryPrimitives.ReadUInt16LittleEndian(rec[20..]);
+
+            // Secondary curve high u16 @ +22. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+22 u16 secondary curve high: CONFIRMED".
+            ushort secCurveHigh = BinaryPrimitives.ReadUInt16LittleEndian(rec[22..]);
+
+            // Tertiary value 1 u32 @ +24. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+24 u32 Tertiary value 1: CONFIRMED".
+            uint tertiary1 = BinaryPrimitives.ReadUInt32LittleEndian(rec[24..]);
+
+            // Tertiary value 2 u32 @ +28. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+28 u32 Tertiary value 2: CONFIRMED".
+            uint tertiary2 = BinaryPrimitives.ReadUInt32LittleEndian(rec[28..]);
+
+            results[i] = new UserPointEntry
+            {
+                Key = key,
+                Const25 = const25,
+                StatGroup1Gain = statGroup1Gain,
+                StatGroup1Cumulative = statGroup1Cumul,
+                Field10 = field10,
+                StatGroup2Gain = statGroup2Gain,
+                StatGroup2Cumulative = statGroup2Cumul,
+                SecondaryCurveLow = secCurveLow,
+                SecondaryCurveHigh = secCurveHigh,
+                TertiaryValue1 = tertiary1,
+                TertiaryValue2 = tertiary2,
+                Body = data.Slice(recOffset, UserPointScrStride),
+            };
         }
 
         return results;
@@ -205,13 +308,50 @@ public static class ConfigTableParser
     /// </remarks>
     public static UsersBlock ParseUsersScr(ReadOnlyMemory<byte> data)
     {
-        // spec: Docs/RE/formats/config_tables.md §2.6 — "496-byte bulk block": CONFIRMED.
+        // spec: Docs/RE/formats/config_tables.md §2.6 — "496-byte bulk block (4 × 124-byte class blocks)": CONFIRMED.
         if (data.Length != UsersBlock.FixedSize)
             throw new InvalidDataException(
                 $"users.scr parse error: expected exactly {UsersBlock.FixedSize} bytes, " +
                 $"got {data.Length}. spec: Docs/RE/formats/config_tables.md §2.6.");
 
-        return new UsersBlock { RawData = data };
+        ReadOnlySpan<byte> span = data.Span;
+        // spec: Docs/RE/formats/config_tables.md §2.6 — "4 × 124-byte class blocks, one per character class": CONFIRMED.
+        // Each block: ClassId u8 @ +0 (block+0); 3 bytes header tail @ +1..+3 (CONFIRMED present, semantic UNVERIFIED);
+        //   3×f32 Stat group A @ +4..+15 (= 3.0 all classes): CONFIRMED.
+        //   4×f32 Zero group @ +16..+31: CONFIRMED (all zero).
+        //   f32 stat ratio col1 @ +32 (7.0): CONFIRMED. f32 col2 @ +36 (24.0): CONFIRMED.
+        //   f32 zero @ +40: CONFIRMED. 3×f32 repeat @ +44..+56: CONFIRMED.
+        //   8×f32 zero group @ +68..+99: CONFIRMED (all zero).
+        //   8×f32 class-specific ratio group @ +92..+123: CONFIRMED.
+        // spec: Docs/RE/formats/config_tables.md §2.6 per-block layout table: CONFIRMED.
+        var classBlocks = new UsersClassBlock[4];
+        for (int b = 0; b < 4; b++)
+        {
+            int blockStart = b * UsersBlock.ClassBlockSize;
+            ReadOnlySpan<byte> blk = span.Slice(blockStart, UsersBlock.ClassBlockSize);
+
+            byte classId = blk[0]; // Class ID 1-based @ +0. CONFIRMED.
+
+            // Stat group A: 3×f32 @ +4. CONFIRMED (values 3.0, 3.0, 3.0 for all 4 classes).
+            var statGroupA = new float[3];
+            for (int s = 0; s < 3; s++)
+                statGroupA[s] = BinaryPrimitives.ReadSingleLittleEndian(blk[(4 + s * 4)..]);
+
+            // Class-specific ratio group: 8×f32 @ +92. CONFIRMED (class-specific deviations).
+            var classRatios = new float[8];
+            for (int s = 0; s < 8; s++)
+                classRatios[s] = BinaryPrimitives.ReadSingleLittleEndian(blk[(92 + s * 4)..]);
+
+            classBlocks[b] = new UsersClassBlock
+            {
+                ClassId = classId,
+                StatGroupA = statGroupA,
+                ClassSpecificRatios = classRatios,
+                RawBlock = data.Slice(blockStart, UsersBlock.ClassBlockSize),
+            };
+        }
+
+        return new UsersBlock { ClassBlocks = classBlocks, RawData = data };
     }
 
     // =========================================================================
@@ -443,8 +583,10 @@ public static class ConfigTableParser
 
     // Confirmed field offsets within the 488-byte record.
     // spec: Docs/RE/formats/config_tables.md §2.9.
-    private const int MobIdOffset = 0; // u16 mob ID. CONFIRMED.
+    private const int MobIdOffset = 0;    // u16 mob ID. CONFIRMED.
     private const int MobTypeOffset = 324; // u8 mob type (11 = boss). CONFIRMED.
+    private const int MobLevelOffset = 244; // i32 mob level; -1=not set. CONFIRMED (boss validation path).
+    private const int SpawnTimerOffset = 248; // u32 spawn timer in seconds. CONFIRMED (plausible range).
 
     /// <summary>
     /// Parses <c>data/script/mobs.scr</c> — mob catalogue.
@@ -483,6 +625,14 @@ public static class ConfigTableParser
             // spec: Docs/RE/formats/config_tables.md §2.9 — "+324 u8 Mob type (11=boss/elite): CONFIRMED".
             byte mobType = span[recOffset + MobTypeOffset];
 
+            // Mob level i32 @ +244. -1 = not set; boss range 36..46. CONFIRMED (boss validation path).
+            // spec: Docs/RE/formats/config_tables.md §2.9 — "+244 i32 Mob level: CONFIRMED".
+            int mobLevel = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(recOffset + MobLevelOffset, 4));
+
+            // Spawn timer u32 @ +248. Range 33..41006 in sample; boss ~40 s. CONFIRMED (plausible range).
+            // spec: Docs/RE/formats/config_tables.md §2.9 — "+248 u32 Spawn timer (seconds): CONFIRMED".
+            uint spawnTimer = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(recOffset + SpawnTimerOffset, 4));
+
             // Full 488-byte raw record (zero-copy slice).
             ReadOnlyMemory<byte> raw = data.Slice(recOffset, MobScrStride);
 
@@ -490,6 +640,8 @@ public static class ConfigTableParser
             {
                 Id = mobId,
                 Type = mobType,
+                MobLevel = mobLevel,
+                SpawnTimer = spawnTimer,
                 Raw = raw,
             };
         }

@@ -43,25 +43,29 @@ public sealed class TerrainGltfConverterTests
         float[] heights = new float[n];
         for (int i = 0; i < n; i++) heights[i] = i;
 
-        byte[] normals = new byte[n * 3];
-        byte[] lookup = new byte[256];
-        byte[] direction = new byte[256];
+        // Normals: decoded (float Nx, float Ny, float Nz) tuples per vertex.
+        // spec: Docs/RE/formats/terrain.md §5.5 Block 2 — "i8/127.0f decode": CONFIRMED.
+        var normals = new (float Nx, float Ny, float Nz)[n];
+        // All zero (identity normal) for this synthetic fixture.
 
-        byte[] diffuse = new byte[n * 4];
+        byte[] lookup = new byte[256];    // TextureIndexGrid
+        byte[] direction = new byte[256]; // DirectionFlags
+
+        // DiffuseColours: decoded (float R, float G, float B, float A) tuples.
+        // spec: Docs/RE/formats/terrain.md §5.8 Block 5 — "×0.5 decode": CONFIRMED.
+        // Fixture uses R=i%256 / 255f, G=0, B=0, A=1.0f to produce unique vertex colours.
+        var diffuse = new (float R, float G, float B, float A)[n];
         for (int i = 0; i < n; i++)
         {
-            diffuse[i * 4 + 0] = (byte)(i % 256); // R
-            diffuse[i * 4 + 1] = 0;               // G
-            diffuse[i * 4 + 2] = 0;               // B
-            diffuse[i * 4 + 3] = 255;              // A
+            diffuse[i] = ((i % 256) / 255f, 0f, 0f, 1.0f);
         }
 
         return new TerrainCell
         {
             Heights = heights,
             Normals = normals,
-            LookupTable = lookup,
-            DirectionMap = direction,
+            TextureIndexGrid = lookup,
+            DirectionFlags = direction,
             DiffuseColours = diffuse,
         };
     }

@@ -184,14 +184,11 @@ public sealed partial class TerrainNode : Node3D
                         cell.Heights[vi],
                         r * spacing);
 
-                    // Diffuse colour from block 5, RGBA u8 per vertex.
-                    // spec: Docs/RE/formats/terrain.md §5.2 Block 5 — "u8×4 (R,G,B,A)": CONFIRMED.
-                    int bi = vi * 4;
-                    colours[vi] = new Color(
-                        cell.DiffuseColours[bi + 0] / 255f,
-                        cell.DiffuseColours[bi + 1] / 255f,
-                        cell.DiffuseColours[bi + 2] / 255f,
-                        cell.DiffuseColours[bi + 3] / 255f);
+                    // Diffuse colour from block 5. The parser now decodes block 5 into
+                    // normalized (R,G,B,A) floats per vertex (on-disk u8 × 0.5 effective value).
+                    // spec: Docs/RE/formats/terrain.md §5.2 Block 5 — CONFIRMED.
+                    var d = cell.DiffuseColours[vi];
+                    colours[vi] = new Color(d.R, d.G, d.B, d.A);
                 }
             }
 

@@ -11,4 +11,7 @@
         <ProjectReference Include="..\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj"/>
     </ItemGroup>
 
+    <!-- System.Text.Encoding.CodePages is inbox in net10.0 — no PackageReference needed. -->
+    <!-- Encoding.RegisterProvider(CodePagesEncodingProvider.Instance) works without any extra package. -->
+
 </Project>

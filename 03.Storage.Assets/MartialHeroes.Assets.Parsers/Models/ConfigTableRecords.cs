@@ -2,7 +2,7 @@ namespace MartialHeroes.Assets.Parsers.Models;
 
 /// <summary>
 /// One record from <c>data/script/exp.scr</c> — EXP required per level.
-/// Stride: 20 bytes. Only fields at confirmed offsets are typed; remaining 10 bytes are exposed raw.
+/// Stride: 20 bytes.
 /// </summary>
 /// <remarks>
 /// spec: Docs/RE/formats/config_tables.md §2.3 exp.scr — "stride: 20 bytes": CONFIRMED.
@@ -11,29 +11,39 @@ namespace MartialHeroes.Assets.Parsers.Models;
 /// </remarks>
 public sealed class ExpCurveEntry
 {
-    /// <summary>
-    /// Level index, 1-based. Map key.
-    /// spec: Docs/RE/formats/config_tables.md §2.3 — Level index u16 @ +0: CONFIRMED.
-    /// </summary>
+    /// <summary>Level index, 1-based. Map key. spec: §2.3 +0 u16 Level index: CONFIRMED.</summary>
     public required ushort Level { get; init; }
 
     /// <summary>
-    /// EXP column A (feed separate runtime ladder; which column is "to next level" is UNVERIFIED).
-    /// spec: Docs/RE/formats/config_tables.md §2.3 — EXP column 0 u32 @ +2: CONFIRMED.
+    /// Constant 64 (0x0040) in all 300 records. Semantic UNVERIFIED.
+    /// spec: Docs/RE/formats/config_tables.md §2.3 — "+2 u16 Constant 64: CONFIRMED (value); semantic UNVERIFIED".
     /// </summary>
-    public required uint ColumnA { get; init; }
+    public required ushort Const64 { get; init; }
 
     /// <summary>
-    /// EXP column B.
-    /// spec: Docs/RE/formats/config_tables.md §2.3 — EXP column 1 u32 @ +6: CONFIRMED.
+    /// Primary EXP required to reach the next level.
+    /// L1=10; L50=112,284,408; plateaus at 1,999,557,415 from ~L143.
+    /// spec: Docs/RE/formats/config_tables.md §2.3 — "+4 u32 Primary EXP required: CONFIRMED".
     /// </summary>
-    public required uint ColumnB { get; init; }
+    public required uint PrimaryExp { get; init; }
 
     /// <summary>
-    /// Remaining 10 bytes of the 20-byte record (offsets +10 to +19). Internal meaning UNVERIFIED.
-    /// spec: Docs/RE/formats/config_tables.md §2.3 — "Remaining fields UNVERIFIED".
+    /// Reserved / high-word extension. Zero in all 300 records. CONFIRMED.
+    /// spec: Docs/RE/formats/config_tables.md §2.3 — "+8 u32 reserved (always zero): CONFIRMED".
     /// </summary>
-    public required ReadOnlyMemory<byte> RawTail { get; init; }
+    public required uint Reserved { get; init; }
+
+    /// <summary>
+    /// Secondary EXP curve. Zero for L1–L73; grows to ~4.17B at L240; non-monotone at high levels.
+    /// spec: Docs/RE/formats/config_tables.md §2.3 — "+12 u32 Secondary EXP curve: CONFIRMED (present); semantic UNVERIFIED".
+    /// </summary>
+    public required uint SecondaryExp { get; init; }
+
+    /// <summary>
+    /// Tertiary EXP curve. Zero until ~L186; L200=8; L300=263,880.
+    /// spec: Docs/RE/formats/config_tables.md §2.3 — "+16 u32 Tertiary EXP curve: CONFIRMED (present); semantic UNVERIFIED".
+    /// </summary>
+    public required uint TertiaryExp { get; init; }
 }
 
 /// <summary>
@@ -41,64 +51,172 @@ public sealed class ExpCurveEntry
 /// Stride: 60 bytes.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/config_tables.md §2.4 userlevel.scr — "stride: 60 bytes": CONFIRMED.
+/// spec: Docs/RE/formats/config_tables.md §2.4 userlevel.scr — "stride: 60 bytes, 300 records": CONFIRMED.
 /// </remarks>
 public sealed class LevelBaseEntry
 {
-    /// <summary>
-    /// Level index (map key).
-    /// spec: Docs/RE/formats/config_tables.md §2.4 — Level index u16 @ +0: CONFIRMED.
-    /// </summary>
+    /// <summary>Level index 1-based (map key). spec: §2.4 +0 u16: CONFIRMED.</summary>
     public required ushort Level { get; init; }
 
     /// <summary>
-    /// Body bytes at offsets +2 to +59 (58 bytes). Stat field names, types, order: UNVERIFIED.
-    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+2: 58 bytes, stat base values, UNVERIFIED".
+    /// Step-count field A u32 @ +4. Transitions at L12, L24, L36, L145.
+    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+4 u32 Step-count field A: CONFIRMED (transitions); semantic UNVERIFIED".
+    /// </summary>
+    public required uint StepA { get; init; }
+
+    /// <summary>
+    /// Step-count field B u32 @ +8. Transitions at L12, L24, L36, L145.
+    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+8 u32 Step-count field B: CONFIRMED (transitions); semantic UNVERIFIED".
+    /// </summary>
+    public required uint StepB { get; init; }
+
+    /// <summary>
+    /// Stat-scale positive group [0..3] f32×4 @ +12. L1-L35=1.0; L36-L300=3.0.
+    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+12 4×f32 stat-scale positive group: CONFIRMED".
+    /// </summary>
+    public required float[] StatScalePositive { get; init; }
+
+    /// <summary>
+    /// Stat-scale negative group [0..3] f32×4 @ +28. L1-L35=-1.0; L36-L300=-2.0.
+    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+28 4×f32 stat-scale negative group: CONFIRMED".
+    /// </summary>
+    public required float[] StatScaleNegative { get; init; }
+
+    /// <summary>
+    /// Full 60-byte raw record for fields not individually decoded (+44..+59 reserved group).
+    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+44 4×f32 reserved (all zero): CONFIRMED".
     /// </summary>
     public required ReadOnlyMemory<byte> Body { get; init; }
 }
 
 /// <summary>
 /// One record from <c>data/script/userpoint.scr</c> — stat allocation curve.
-/// Stride: 32 bytes.
+/// Stride: 32 bytes. 301 records, keys 0..300.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/config_tables.md §2.5 userpoint.scr — "stride: 32 bytes": CONFIRMED.
+/// spec: Docs/RE/formats/config_tables.md §2.5 userpoint.scr — "stride: 32 bytes, 301 records": CONFIRMED.
 /// </remarks>
 public sealed class UserPointEntry
 {
-    /// <summary>
-    /// Point index (map key).
-    /// spec: Docs/RE/formats/config_tables.md §2.5 — u16 key @ +0: CONFIRMED.
-    /// </summary>
+    /// <summary>Point-allocation index 0-based (0..300). Map key. spec: §2.5 +0 u16: CONFIRMED.</summary>
     public required ushort Key { get; init; }
 
     /// <summary>
-    /// Remaining 30 bytes. Curve values; internal layout UNVERIFIED.
-    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+2: 30 bytes, curve values, UNVERIFIED".
+    /// Constant 25 in all records; semantic UNVERIFIED.
+    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+2 u16 constant=25: CONFIRMED (value); semantic UNVERIFIED".
     /// </summary>
+    public required ushort Const25 { get; init; }
+
+    /// <summary>
+    /// Stat-group-1 gain at this step. key=0→5; key=300→1000.
+    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+4 u16 Stat-group-1 gain: CONFIRMED".
+    /// </summary>
+    public required ushort StatGroup1Gain { get; init; }
+
+    /// <summary>
+    /// Stat-group-1 cumulative total. Verified for first 20 records.
+    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+8 u16 Stat-group-1 cumulative: CONFIRMED".
+    /// </summary>
+    public required ushort StatGroup1Cumulative { get; init; }
+
+    /// <summary>
+    /// Mostly zero; rare value=1 in 2 of 301 records. Purpose UNVERIFIED.
+    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+10 u16 mostly zero (rare=1): UNVERIFIED".
+    /// </summary>
+    public required ushort Field10 { get; init; }
+
+    /// <summary>
+    /// Stat-group-2 gain. key=0→7; key=1→1; grows at high keys.
+    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+12 u16 Stat-group-2 gain: CONFIRMED".
+    /// </summary>
+    public required ushort StatGroup2Gain { get; init; }
+
+    /// <summary>
+    /// Stat-group-2 cumulative total.
+    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+16 u16 Stat-group-2 cumulative: CONFIRMED".
+    /// </summary>
+    public required ushort StatGroup2Cumulative { get; init; }
+
+    /// <summary>
+    /// Secondary curve low word. key=0..5→0; key=6→282; ~+3/step.
+    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+20 u16 secondary curve low: CONFIRMED".
+    /// </summary>
+    public required ushort SecondaryCurveLow { get; init; }
+
+    /// <summary>
+    /// Secondary curve high word. key=0..5→0; key=6..9→20; grows slowly.
+    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+22 u16 secondary curve high: CONFIRMED".
+    /// </summary>
+    public required ushort SecondaryCurveHigh { get; init; }
+
+    /// <summary>
+    /// Tertiary value 1. key=0..295→mostly 0; key=296→235000; key=300→255000.
+    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+24 u32 Tertiary value 1: CONFIRMED".
+    /// </summary>
+    public required uint TertiaryValue1 { get; init; }
+
+    /// <summary>
+    /// Tertiary value 2. Same pattern as TertiaryValue1.
+    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+28 u32 Tertiary value 2: CONFIRMED".
+    /// </summary>
+    public required uint TertiaryValue2 { get; init; }
+
+    /// <summary>Full 32-byte raw record. spec: §2.5 stride 32 B: CONFIRMED.</summary>
     public required ReadOnlyMemory<byte> Body { get; init; }
 }
 
 /// <summary>
-/// Entire <c>data/script/users.scr</c> read as a single 496-byte opaque block.
-/// Internal layout and the (10/A)*B stat-ratio formula offsets are UNVERIFIED.
+/// One 124-byte per-class block from <c>data/script/users.scr</c>.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/config_tables.md §2.6 users.scr — "496-byte bulk block": CONFIRMED (size only).
+/// spec: Docs/RE/formats/config_tables.md §2.6 — "4 × 124-byte class blocks": CONFIRMED.
+/// </remarks>
+public sealed class UsersClassBlock
+{
+    /// <summary>
+    /// Class ID (1..4). Block 0→1, block 1→2, block 2→3, block 3→4.
+    /// spec: §2.6 — ClassId u8 @ block+0: CONFIRMED.
+    /// </summary>
+    public required byte ClassId { get; init; }
+
+    /// <summary>
+    /// Stat group A: 3×f32 @ +4. Values 3.0, 3.0, 3.0 for all classes.
+    /// spec: §2.6 — +4 3×f32 Stat group A (all 3.0): CONFIRMED.
+    /// </summary>
+    public required float[] StatGroupA { get; init; }
+
+    /// <summary>
+    /// Class-specific ratio group: 8×f32 @ +92. Mostly 1.0 with class-specific deviations.
+    /// spec: §2.6 — +92 8×f32 class-specific ratio group: CONFIRMED.
+    /// </summary>
+    public required float[] ClassSpecificRatios { get; init; }
+
+    /// <summary>Full 124-byte raw block. spec: §2.6 block stride 124 B: CONFIRMED.</summary>
+    public required ReadOnlyMemory<byte> RawBlock { get; init; }
+}
+
+/// <summary>
+/// Decoded <c>data/script/users.scr</c> — character class stat grid.
+/// 496 bytes = 4 × 124-byte class blocks.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/config_tables.md §2.6 users.scr — "496-byte bulk block (4 × 124-byte class blocks)": CONFIRMED.
 /// </remarks>
 public sealed class UsersBlock
 {
-    /// <summary>
-    /// Fixed size of the users.scr file.
-    /// spec: Docs/RE/formats/config_tables.md §2.6 — "496-byte bulk block": CONFIRMED.
-    /// </summary>
-    public const int FixedSize = 496;
+    /// <summary>Fixed file size in bytes. spec: §2.6 — "496 bytes": CONFIRMED.</summary>
+    public const int FixedSize = 496; // 4 × 124
+
+    /// <summary>Per-class block size. spec: §2.6 — "124 bytes per block": CONFIRMED.</summary>
+    public const int ClassBlockSize = 124;
 
     /// <summary>
-    /// Raw opaque data. Internal layout UNVERIFIED.
-    /// spec: Docs/RE/formats/config_tables.md §2.6 — "internal layout UNVERIFIED".
+    /// Four class blocks in file order. Class IDs 1-4.
+    /// spec: §2.6 — "4 sequential 124-byte class blocks": CONFIRMED.
     /// </summary>
+    public required UsersClassBlock[] ClassBlocks { get; init; }
+
+    /// <summary>Full 496-byte raw data.</summary>
     public required ReadOnlyMemory<byte> RawData { get; init; }
 }
 
@@ -215,9 +333,296 @@ public sealed class MobCatalogEntry
     public required byte Type { get; init; }
 
     /// <summary>
+    /// Mob level. -1 = not set; 0 = trivial; boss range 36..46 for ID range 14000-14009.
+    /// spec: Docs/RE/formats/config_tables.md §2.9 — "+244 i32 Mob level: CONFIRMED (boss validation path)".
+    /// </summary>
+    public required int MobLevel { get; init; }
+
+    /// <summary>
+    /// Spawn timer in seconds. Range 33..41006 in sample; boss default ~40 s.
+    /// spec: Docs/RE/formats/config_tables.md §2.9 — "+248 u32 Spawn timer (seconds): CONFIRMED (plausible range)".
+    /// </summary>
+    public required uint SpawnTimer { get; init; }
+
+    /// <summary>
     /// Complete raw 488-byte record.
     /// Fields between confirmed offsets are UNVERIFIED; raw record exposed for future analysis.
     /// spec: Docs/RE/formats/config_tables.md §2.9 — "internal layout: majority UNVERIFIED".
     /// </summary>
     public required ReadOnlyMemory<byte> Raw { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  .do file models
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// One record from <c>data/script/textcommand.do</c>. Stride: 52 bytes.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/config_tables.md §3.1: CONFIRMED (all 28 records decoded).
+/// </remarks>
+public sealed class TextCommandRecord
+{
+    /// <summary>Command ID u32 @ +0 (BST key). spec: §3.1 CONFIRMED.</summary>
+    public required uint CommandId { get; init; }
+    /// <summary>Command name CP949 char[36] @ +4. spec: §3.1 CONFIRMED.</summary>
+    public required string CommandName { get; init; }
+    /// <summary>Argument flag u8 @ +44. 0=no arg; 1=player-name arg. spec: §3.1 CONFIRMED (pattern).</summary>
+    public required byte ArgumentFlag { get; init; }
+    /// <summary>Sub-command ID u32 @ +48. Non-zero for emote/action. spec: §3.1 CONFIRMED (pattern).</summary>
+    public required uint SubCommandId { get; init; }
+    /// <summary>Full 52-byte raw record.</summary>
+    public required ReadOnlyMemory<byte> Raw { get; init; }
+}
+
+/// <summary>
+/// One record from <c>data/script/emoticon.do</c>. Stride: 40 bytes.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/config_tables.md §3.2: CONFIRMED (all 21 records).
+/// </remarks>
+public sealed class EmoticonRecord
+{
+    /// <summary>Emote ID u32 @ +0 (primary BST key). spec: §3.2 CONFIRMED.</summary>
+    public required uint EmoteId { get; init; }
+    /// <summary>Category flag u8 @ +4. spec: §3.2 CONFIRMED (pattern); semantic UNVERIFIED.</summary>
+    public required byte CategoryFlag { get; init; }
+    /// <summary>Secondary key u32 @ +8. spec: §3.2 CONFIRMED.</summary>
+    public required uint SecondaryKey { get; init; }
+    /// <summary>Action link u32 @ +12. spec: §3.2 CONFIRMED (pattern); name UNVERIFIED.</summary>
+    public required uint ActionLink { get; init; }
+    /// <summary>Full 40-byte raw record (includes all fields at +16..+36 which are UNVERIFIED).</summary>
+    public required ReadOnlyMemory<byte> Raw { get; init; }
+}
+
+/// <summary>
+/// One record from <c>data/script/msginfo.do</c>. Stride: 128 bytes.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/config_tables.md §3.3: CONFIRMED (all 14 sample records decoded, CP949 confirmed).
+/// </remarks>
+public sealed class MsgInfoRecord
+{
+    /// <summary>Message ID u32 @ +0 (BST key). spec: §3.3 CONFIRMED.</summary>
+    public required uint MessageId { get; init; }
+    /// <summary>Dialog flag u32 @ +4. spec: §3.3 CONFIRMED (pattern); semantic UNVERIFIED.</summary>
+    public required uint DialogFlag { get; init; }
+    /// <summary>Text line 1 CP949 char[60] @ +8. spec: §3.3 CONFIRMED.</summary>
+    public required string TextLine1 { get; init; }
+    /// <summary>Text line 2 CP949 char[60] @ +68. spec: §3.3 CONFIRMED.</summary>
+    public required string TextLine2 { get; init; }
+    /// <summary>Full 128-byte raw record.</summary>
+    public required ReadOnlyMemory<byte> Raw { get; init; }
+}
+
+/// <summary>
+/// One record from <c>data/item/items_extra.do</c>. Stride: 48 bytes.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/config_tables.md §3.4: CONFIRMED (loader attachment code confirmed key fields).
+/// </remarks>
+public sealed class ItemsExtraRecord
+{
+    /// <summary>Item ID u32 @ +0. Top byte encodes category. 0x7FFFFFFF=sentinel. spec: §3.4 CONFIRMED.</summary>
+    public required uint ItemId { get; init; }
+    /// <summary>True if this is a sentinel record (ItemId == 0x7FFFFFFF). spec: §3.4 CONFIRMED.</summary>
+    public required bool IsSentinel { get; init; }
+    /// <summary>Animation speed scale f32 @ +4. 1.0=normal. spec: §3.4 CONFIRMED.</summary>
+    public required float AnimScale { get; init; }
+    /// <summary>Attachment field A i32 @ +8. Range 0..3. spec: §3.4 CONFIRMED (range); name UNVERIFIED.</summary>
+    public required int AttachFieldA { get; init; }
+    /// <summary>Attachment field B i32 @ +12. Range 8..48. spec: §3.4 CONFIRMED (range); name UNVERIFIED.</summary>
+    public required int AttachFieldB { get; init; }
+    /// <summary>Weapon bone attachment X i32 @ +16. Local space. spec: §3.4 CONFIRMED.</summary>
+    public required int AttachX { get; init; }
+    /// <summary>Weapon bone attachment Y i32 @ +20. spec: §3.4 CONFIRMED.</summary>
+    public required int AttachY { get; init; }
+    /// <summary>Weapon bone attachment Z i32 @ +24. spec: §3.4 CONFIRMED.</summary>
+    public required int AttachZ { get; init; }
+    /// <summary>Rotation around X axis in degrees i32 @ +28. spec: §3.4 CONFIRMED.</summary>
+    public required int RotXDeg { get; init; }
+    /// <summary>Rotation around Y axis in degrees i32 @ +32. spec: §3.4 CONFIRMED.</summary>
+    public required int RotYDeg { get; init; }
+    /// <summary>Rotation around Z axis in degrees i32 @ +36. spec: §3.4 CONFIRMED.</summary>
+    public required int RotZDeg { get; init; }
+    /// <summary>Fourth rotation or secondary anim param i32 @ +40. Range -185..+300. spec: §3.4 CONFIRMED (range).</summary>
+    public required int Field40 { get; init; }
+    /// <summary>Rarity tier u32 @ +44. Values 0..5. spec: §3.4 CONFIRMED (range); semantic INFERRED.</summary>
+    public required uint RarityTier { get; init; }
+    /// <summary>Full 48-byte raw record.</summary>
+    public required ReadOnlyMemory<byte> Raw { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  data/script/items.csv — Item catalogue
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// One data row from <c>data/script/items.csv</c>.
+/// 139 columns, CP949 encoding, no header row. RFC 4180 quoting.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/config_tables.md §4 items.csv: CONFIRMED.
+/// Only columns with CONFIRMED or HIGH confidence are exposed as typed properties.
+/// All 139 raw string columns are accessible via <see cref="RawColumns"/>.
+/// <c>\\</c> inside string fields encodes an in-game newline (preserved verbatim).
+/// spec: Docs/RE/formats/config_tables.md §4.1 — "in-game newline escape: \\": CONFIRMED.
+/// </remarks>
+public sealed class ItemCsvRow
+{
+    // ── Identity (cols 0–6) ─────────────────────────────────────────────────
+    // spec: Docs/RE/formats/config_tables.md §4.3 columns 0–6: CONFIRMED.
+
+    /// <summary>Item display name (CP949). col0. CONFIRMED.</summary>
+    public required string NameCp949 { get; init; }
+    /// <summary>Item ID. col1. CONFIRMED.</summary>
+    public required uint ItemId { get; init; }
+    /// <summary>Item description (CP949); <c>\\</c>=in-game newline. col2. CONFIRMED.</summary>
+    public required string DescriptionCp949 { get; init; }
+    /// <summary>Linked/related item ID. col3. HIGH.</summary>
+    public required uint LinkedItemId { get; init; }
+    /// <summary>Base reference ID. col4. HIGH.</summary>
+    public required uint BaseRefId { get; init; }
+    /// <summary>Secondary reference ID. col5. HIGH.</summary>
+    public required uint SecondaryRefId { get; init; }
+    /// <summary>Item subtype / category code. col6. CONFIRMED.</summary>
+    public required uint ItemSubtype { get; init; }
+
+    // ── Flags and meta (cols 7–18) ──────────────────────────────────────────
+    // spec: Docs/RE/formats/config_tables.md §4.3 columns 7–18.
+
+    /// <summary>Bonus flag A. col7. HIGH.</summary>
+    public required byte BonusFlagA { get; init; }
+    /// <summary>Bonus flag B. col8. HIGH.</summary>
+    public required byte BonusFlagB { get; init; }
+    /// <summary>Enhancement slot count. col10. HIGH.</summary>
+    public required byte EnhancementSize { get; init; }
+    /// <summary>NPC sell price (gold). col16. CONFIRMED.</summary>
+    public required uint SellPrice { get; init; }
+    /// <summary>1 = purchaseable from NPC. col17. HIGH.</summary>
+    public required byte NpcPurchaseable { get; init; }
+    /// <summary>1 = item is enabled/active. col18. CONFIRMED.</summary>
+    public required byte Enabled { get; init; }
+
+    // ── Stacking, tier, durability (cols 19–23) ─────────────────────────────
+    // spec: Docs/RE/formats/config_tables.md §4.3 columns 19–23.
+
+    /// <summary>Maximum stack size. col19. CONFIRMED.</summary>
+    public required ushort MaxStack { get; init; }
+    /// <summary>Item tier / quality rank. col22. CONFIRMED.</summary>
+    public required ushort ItemTierRank { get; init; }
+    /// <summary>Maximum durability. col23. HIGH.</summary>
+    public required ushort MaxDurability { get; init; }
+
+    // ── Required stats (cols 24–28) ─────────────────────────────────────────
+    // spec: Docs/RE/formats/config_tables.md §4.3 columns 24–28: CONFIRMED.
+
+    /// <summary>Required Strength. col24. CONFIRMED.</summary>
+    public required ushort ReqStr { get; init; }
+    /// <summary>Required Constitution. col25. CONFIRMED.</summary>
+    public required ushort ReqCon { get; init; }
+    /// <summary>Required Agility. col26. CONFIRMED.</summary>
+    public required ushort ReqAgi { get; init; }
+    /// <summary>Required Intelligence. col27. CONFIRMED.</summary>
+    public required ushort ReqInt { get; init; }
+    /// <summary>Required Chi. col28. CONFIRMED.</summary>
+    public required ushort ReqChi { get; init; }
+
+    // ── Class restriction flags (cols 29–32) ────────────────────────────────
+    // spec: Docs/RE/formats/config_tables.md §4.3 columns 29–32: CONFIRMED.
+
+    /// <summary>Class Yi can equip (1=yes). col29. CONFIRMED.</summary>
+    public required byte ClassYi { get; init; }
+    /// <summary>Class Ye can equip (1=yes). col30. CONFIRMED.</summary>
+    public required byte ClassYe { get; init; }
+    /// <summary>Class In can equip (1=yes). col31. CONFIRMED.</summary>
+    public required byte ClassIn { get; init; }
+    /// <summary>Class Ji can equip (1=yes). col32. CONFIRMED.</summary>
+    public required byte ClassJi { get; init; }
+
+    // ── Enchant and socket block (cols 47–48) ───────────────────────────────
+    // spec: Docs/RE/formats/config_tables.md §4.3 columns 47–48: CONFIRMED.
+
+    /// <summary>Current enchant level. col47. CONFIRMED.</summary>
+    public required byte EnchantLevel { get; init; }
+    /// <summary>Gem / socket power. col48. CONFIRMED.</summary>
+    public required byte GemPower { get; init; }
+
+    // ── Bonus stat block A (cols 64–68) ─────────────────────────────────────
+    // spec: Docs/RE/formats/config_tables.md §4.3 columns 64–68: CONFIRMED.
+
+    /// <summary>Bonus attack. col64. CONFIRMED.</summary>
+    public required uint BonusAtk { get; init; }
+    /// <summary>Bonus HP. col65. CONFIRMED.</summary>
+    public required uint BonusHp { get; init; }
+    /// <summary>Bonus extended attack. col68. CONFIRMED.</summary>
+    public required uint BonusExtAtk { get; init; }
+
+    // ── Float rate block (cols 75, 78) ──────────────────────────────────────
+    // spec: Docs/RE/formats/config_tables.md §4.3 columns 75, 78: CONFIRMED.
+
+    /// <summary>Attack speed multiplier. col75. CONFIRMED.</summary>
+    public required float AttackSpeed { get; init; }
+    /// <summary>Dodge rate. col78. CONFIRMED.</summary>
+    public required float DodgeRate { get; init; }
+
+    // ── Bonus stat block B (cols 84–96) ─────────────────────────────────────
+    // spec: Docs/RE/formats/config_tables.md §4.3 columns 84–96: CONFIRMED.
+
+    /// <summary>Bonus Chi. col84. CONFIRMED.</summary>
+    public required uint BonusChi { get; init; }
+    /// <summary>Weapon stat A. col85. CONFIRMED.</summary>
+    public required uint WeaponStatA { get; init; }
+    /// <summary>Weapon stat B. col86. CONFIRMED.</summary>
+    public required uint WeaponStatB { get; init; }
+    /// <summary>Minimum attack value. col87. CONFIRMED.</summary>
+    public required uint MinAttack { get; init; }
+    /// <summary>Maximum attack value. col90. CONFIRMED.</summary>
+    public required uint MaxAttack { get; init; }
+    /// <summary>Bonus defense A. col93. CONFIRMED.</summary>
+    public required uint BonusDefenseA { get; init; }
+    /// <summary>Physical defense. col94. CONFIRMED.</summary>
+    public required uint PhysDefense { get; init; }
+    /// <summary>Armor defense. col96. CONFIRMED.</summary>
+    public required uint ArmorDefense { get; init; }
+
+    // ── Consumable block (cols 112–131) ─────────────────────────────────────
+    // spec: Docs/RE/formats/config_tables.md §4.3 columns 112–131: CONFIRMED.
+
+    /// <summary>Duration in minutes (consumable). col112. CONFIRMED.</summary>
+    public required uint DurationMinutes { get; init; }
+    /// <summary>Expire mode. col113. CONFIRMED.</summary>
+    public required byte ExpireMode { get; init; }
+    /// <summary>Consumable effect value. col119. CONFIRMED.</summary>
+    public required uint ConsumableValue { get; init; }
+    /// <summary>1 = item is consumable. col120. CONFIRMED.</summary>
+    public required byte IsConsumable { get; init; }
+    /// <summary>Gem category. col127. CONFIRMED.</summary>
+    public required byte GemCategory { get; init; }
+    /// <summary>1 = equippable. col128. CONFIRMED.</summary>
+    public required byte EquippableFlag { get; init; }
+    /// <summary>1 = has attached effect. col129. CONFIRMED.</summary>
+    public required byte HasEffect { get; init; }
+    /// <summary>Effect type code. col130. CONFIRMED.</summary>
+    public required byte EffectType { get; init; }
+    /// <summary>Effect strength. col131. CONFIRMED.</summary>
+    public required ushort EffectStrength { get; init; }
+
+    // ── Model / visual IDs (cols 117–118) ───────────────────────────────────
+    // spec: Docs/RE/formats/config_tables.md §4.3 columns 117–118: CONFIRMED.
+
+    /// <summary>Model set ID (references mesh/texture set). col117. CONFIRMED.</summary>
+    public required ushort ModelSetId { get; init; }
+    /// <summary>Model type / slot code. col118. CONFIRMED.</summary>
+    public required byte ModelType { get; init; }
+
+    // ── Raw access ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// All 139 columns as raw decoded strings (0-indexed), for consumers that need
+    /// columns not yet decoded to typed properties.
+    /// spec: Docs/RE/formats/config_tables.md §4.1 — "139 columns (0-based 0..138)": CONFIRMED.
+    /// </summary>
+    public required string[] RawColumns { get; init; }
 }

@@ -42,49 +42,49 @@ public sealed class TerrainCell
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Packed RGB normal triples, one per vertex, in row-major order.
-    /// Length = 4 225 elements × 3 bytes each; stored here as flat byte array of length 12 675.
-    /// Encoding convention (0–255 → −1…+1 or 128-bias) is UNVERIFIED — see spec §5.3.
-    /// spec: Docs/RE/formats/terrain.md §5.2 Block 2 — "Vertex normals: u8×3 (R,G,B), 65×65": CONFIRMED.
-    /// spec: Docs/RE/formats/terrain.md §5.2 Block 2 — byte offset 16900, size 12675 (0x3183): CONFIRMED.
+    /// Decoded vertex normals, one (Nx, Ny, Nz) float triple per vertex, row-major.
+    /// Length = 4 225. Each component was stored as a signed byte (i8) on disk and decoded
+    /// as <c>component = (sbyte)byte / 127.0f</c>.
+    /// Channel order: R=Nx, G=Ny, B=Nz.
+    /// spec: Docs/RE/formats/terrain.md §5.5 Block 2 — "i8 / 127.0: CONFIRMED. R=Nx, G=Ny, B=Nz: CONFIRMED."
     /// </summary>
-    public required byte[] Normals { get; init; }
+    public required (float Nx, float Ny, float Nz)[] Normals { get; init; }
 
     // -------------------------------------------------------------------------
-    // Block 3 — Lookup table (purpose UNVERIFIED)
+    // Block 3 — Texture index grid
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// 256-byte lookup table. Purpose UNVERIFIED; may be a palette or texture-blend index lookup.
-    /// spec: Docs/RE/formats/terrain.md §5.2 Block 3 — "Lookup table: u8, 256 entries": CONFIRMED (size).
-    /// spec: Docs/RE/formats/terrain.md §5.2 Block 3 — byte offset 29575, size 256 (0x100): CONFIRMED.
-    /// Purpose: UNVERIFIED.
+    /// 16 × 16 texture index grid (row-major, Z=row, X=col).
+    /// Length = 256. Values are 1-based (no zero observed; max observed = 11).
+    /// Each byte selects the background texture for a 4×4-quad region.
+    /// spec: Docs/RE/formats/terrain.md §5.6 Block 3 — "u8, 1-based, 16×16": CONFIRMED.
     /// </summary>
-    public required byte[] LookupTable { get; init; }
+    public required byte[] TextureIndexGrid { get; init; }
 
     // -------------------------------------------------------------------------
-    // Block 4 — Direction map (purpose UNVERIFIED)
+    // Block 4 — Quad split / UV orientation flags
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// 256-byte direction map. Purpose UNVERIFIED; may encode per-quad surface orientation or material flags.
-    /// spec: Docs/RE/formats/terrain.md §5.2 Block 4 — "Direction map: u8, 256 entries": CONFIRMED (size).
-    /// spec: Docs/RE/formats/terrain.md §5.2 Block 4 — byte offset 29831, size 256 (0x100): CONFIRMED.
-    /// Purpose: UNVERIFIED.
+    /// 16 × 16 direction / UV-orientation flags (row-major, Z=row, X=col).
+    /// Length = 256. Observed values: 0, 1, 2, 3 only (2 bits used).
+    /// Exact bit-to-geometry mapping UNVERIFIED.
+    /// spec: Docs/RE/formats/terrain.md §5.7 Block 4 — "u8, values 0-3: CONFIRMED. Bit semantics UNVERIFIED."
     /// </summary>
-    public required byte[] DirectionMap { get; init; }
+    public required byte[] DirectionFlags { get; init; }
 
     // -------------------------------------------------------------------------
-    // Block 5 — Diffuse colour map
+    // Block 5 — Per-vertex diffuse colour
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Diffuse RGBA colour per vertex, packed as flat byte array (4 bytes per vertex = RGBA order).
-    /// Length = 4 225 × 4 = 16 900 bytes.
-    /// spec: Docs/RE/formats/terrain.md §5.2 Block 5 — "Diffuse colour: u8×4 (R,G,B,A), 65×65": CONFIRMED.
-    /// spec: Docs/RE/formats/terrain.md §5.2 Block 5 — byte offset 30087, size 16900 (0x4204): CONFIRMED.
+    /// Per-vertex diffuse colour decoded from the on-disk ×0.5 encoding.
+    /// Length = 4 225. Channel order: R, G, B, A.
+    /// On-disk encoding: each byte = 2 × logical_value. Decode: <c>logical = byte × 0.5f</c>.
+    /// spec: Docs/RE/formats/terrain.md §5.8 Block 5 — "editor ×0.5 storage; loader ×0.5 decode: CONFIRMED."
     /// </summary>
-    public required byte[] DiffuseColours { get; init; }
+    public required (float R, float G, float B, float A)[] DiffuseColours { get; init; }
 }
 
 /// <summary>
@@ -140,6 +140,59 @@ public sealed class MapSection
     /// Semantics of intFlag: UNVERIFIED.
     /// </summary>
     public required (int Flag, int TexId)[] Textures { get; init; }
+
+    // ── Geometry directives (TERRAIN section) ──────────────────────────────
+    // spec: Docs/RE/formats/terrain.md §3.4 Geometry directives (TERRAIN section).
+    // All directives below are CONFIRMED.
+
+    /// <summary>
+    /// Quad grid width (quads per row).
+    /// From the WIDTH directive in TERRAIN sections. Typically 64.
+    /// spec: Docs/RE/formats/terrain.md §3.4 — WIDTH integer: CONFIRMED.
+    /// Null when directive is absent (e.g. non-TERRAIN sections).
+    /// </summary>
+    public int? Width { get; init; }
+
+    /// <summary>
+    /// Quad grid height (quads per column).
+    /// From the HEIGHT directive in TERRAIN sections. Typically 64.
+    /// spec: Docs/RE/formats/terrain.md §3.4 — HEIGHT integer: CONFIRMED.
+    /// Null when directive is absent.
+    /// </summary>
+    public int? Height { get; init; }
+
+    /// <summary>
+    /// World-unit spacing between adjacent vertices (quads per world unit).
+    /// From the GRID directive in TERRAIN sections. Typically 16.
+    /// spec: Docs/RE/formats/terrain.md §3.4 — GRID integer: CONFIRMED.
+    /// Null when directive is absent.
+    /// </summary>
+    public int? Grid { get; init; }
+
+    /// <summary>
+    /// Maximum world-Y height value in this cell; informational only.
+    /// From the MAX_HEIGHTFILED directive (note: verbatim dropped-L spelling from original files).
+    /// spec: Docs/RE/formats/terrain.md §3.4 — MAX_HEIGHTFILED float: CONFIRMED.
+    /// Null when directive is absent.
+    /// </summary>
+    public float? MaxHeightFiled { get; init; }
+
+    /// <summary>
+    /// Minimum world-Y height value in this cell; informational only.
+    /// From the MIN_HEIGHTFILED directive (note: verbatim dropped-L spelling from original files).
+    /// spec: Docs/RE/formats/terrain.md §3.4 — MIN_HEIGHTFILED float: CONFIRMED.
+    /// Null when directive is absent.
+    /// </summary>
+    public float? MinHeightFiled { get; init; }
+
+    /// <summary>
+    /// World-space XZ origin of the cell quad.
+    /// From the ORIGIN directive: two comma-separated floats.
+    /// Equals ((mapX-10000)*1024, (mapZ-10000)*1024).
+    /// spec: Docs/RE/formats/terrain.md §3.4 — ORIGIN float,float: CONFIRMED.
+    /// Null when directive is absent.
+    /// </summary>
+    public (float X, float Z)? Origin { get; init; }
 }
 
 /// <summary>
@@ -158,30 +211,73 @@ public sealed class MapDescriptor
 }
 
 /// <summary>
-/// Stub for a <c>.mud</c> ambient/audio tile blob.
-/// The internal layout of the 32 768-byte body is UNVERIFIED.
-/// Only the fixed size (32 768 bytes) is confirmed.
+/// One tile record from a <c>.mud</c> ambient-sound tile blob.
+/// Stride: 8 bytes. All fields are single bytes; no endianness dependency.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/terrain.md §6. Ambient/audio tile blob — .mud
-/// Fixed size: 32 768 bytes (0x8000). CONFIRMED (fixed read size).
-/// Internal structure: UNVERIFIED.
-/// "A hypothesis present in the analysis notes suggests a 64×64 grid of 8-byte records
-///  (64×64×8=32768) but this was not derived from any observed parse loop." UNVERIFIED.
+/// spec: Docs/RE/formats/terrain.md §6.2 Record layout — 8 bytes per tile: VERIFIED (all 3 samples).
+/// </remarks>
+public readonly record struct MudTileRecord(
+    /// <summary>Always zero. spec: §6.2 pad0 u8 @ +0: VERIFIED.</summary>
+    byte Pad0,
+    /// <summary>Always zero. spec: §6.2 pad1 u8 @ +1: VERIFIED.</summary>
+    byte Pad1,
+    /// <summary>Music BGM group index. 0=no music. spec: §6.2 music_group u8 @ +2: VERIFIED.</summary>
+    byte MusicGroup,
+    /// <summary>Ambient sound index 0. 0=no sound. spec: §6.2 ambient_idx_0 u8 @ +3: VERIFIED.</summary>
+    byte AmbientIdx0,
+    /// <summary>Ambient sound index 1. 0=no sound. spec: §6.2 ambient_idx_1 u8 @ +4: VERIFIED.</summary>
+    byte AmbientIdx1,
+    /// <summary>Effect sound index 0. 0=no sound. spec: §6.2 effect_idx_0 u8 @ +5: VERIFIED.</summary>
+    byte EffectIdx0,
+    /// <summary>Effect sound index 1. 0=no sound. spec: §6.2 effect_idx_1 u8 @ +6: VERIFIED.</summary>
+    byte EffectIdx1,
+    /// <summary>Effect sound index 2. Always zero in known samples. spec: §6.2 effect_idx_2 u8 @ +7: VERIFIED (limited).</summary>
+    byte EffectIdx2
+);
+
+/// <summary>
+/// Decoded result of a <c>.mud</c> ambient-sound tile blob.
+/// Fixed size: 32 768 bytes (0x8000) = 64 × 64 × 8 B.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain.md §6 Ambient-sound tile blob — .mud.
+/// Total size CONFIRMED. Grid 64×64 CONFIRMED. Record stride 8 B CONFIRMED. All fields VERIFIED.
+/// Index formula: col = floor(worldX/16) &amp; 0x3F; row = floor(worldZ/16) &amp; 0x3F.
+/// spec: Docs/RE/formats/terrain.md §6.1 index formula: CONFIRMED.
 /// </remarks>
 public sealed class MudBlob
 {
     /// <summary>
-    /// Expected fixed size of a .mud file in bytes.
-    /// spec: Docs/RE/formats/terrain.md §6 — "32 768 bytes (0x8000)": CONFIRMED.
+    /// Grid width (columns, X axis). 64.
+    /// spec: Docs/RE/formats/terrain.md §6.1 — GridCols = 64: CONFIRMED.
     /// </summary>
-    public const int FixedSize = 32768; // 0x8000
+    public const int GridCols = 64;
 
     /// <summary>
-    /// Raw opaque bytes. Internal layout UNVERIFIED.
-    /// spec: Docs/RE/formats/terrain.md §6 — "internal structure UNVERIFIED".
+    /// Grid height (rows, Z axis). 64.
+    /// spec: Docs/RE/formats/terrain.md §6.1 — GridRows = 64: CONFIRMED.
     /// </summary>
-    public required ReadOnlyMemory<byte> RawData { get; init; }
+    public const int GridRows = 64;
+
+    /// <summary>
+    /// Record stride in bytes. 8.
+    /// spec: Docs/RE/formats/terrain.md §6.1 — RecordStride = 8: CONFIRMED.
+    /// </summary>
+    public const int RecordStride = 8;
+
+    /// <summary>
+    /// Expected fixed size of a .mud file in bytes (64 × 64 × 8 = 32 768).
+    /// spec: Docs/RE/formats/terrain.md §6 — FixedSize = 32 768 bytes (0x8000): CONFIRMED.
+    /// </summary>
+    public const int FixedSize = GridRows * GridCols * RecordStride; // 32768
+
+    /// <summary>
+    /// Decoded tile grid, row-major (row = Z axis, col = X axis).
+    /// Length = 4 096 (64 × 64). Index = row × 64 + col.
+    /// spec: Docs/RE/formats/terrain.md §6.1 — Row-major (Z=row, X=col): CONFIRMED.
+    /// </summary>
+    public required MudTileRecord[] Tiles { get; init; }
 }
 
 /// <summary>
