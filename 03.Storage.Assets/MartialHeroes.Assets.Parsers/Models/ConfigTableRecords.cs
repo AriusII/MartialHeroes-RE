@@ -366,12 +366,16 @@ public sealed class TextCommandRecord
 {
     /// <summary>Command ID u32 @ +0 (BST key). spec: §3.1 CONFIRMED.</summary>
     public required uint CommandId { get; init; }
+
     /// <summary>Command name CP949 char[36] @ +4. spec: §3.1 CONFIRMED.</summary>
     public required string CommandName { get; init; }
+
     /// <summary>Argument flag u8 @ +44. 0=no arg; 1=player-name arg. spec: §3.1 CONFIRMED (pattern).</summary>
     public required byte ArgumentFlag { get; init; }
+
     /// <summary>Sub-command ID u32 @ +48. Non-zero for emote/action. spec: §3.1 CONFIRMED (pattern).</summary>
     public required uint SubCommandId { get; init; }
+
     /// <summary>Full 52-byte raw record.</summary>
     public required ReadOnlyMemory<byte> Raw { get; init; }
 }
@@ -386,12 +390,16 @@ public sealed class EmoticonRecord
 {
     /// <summary>Emote ID u32 @ +0 (primary BST key). spec: §3.2 CONFIRMED.</summary>
     public required uint EmoteId { get; init; }
+
     /// <summary>Category flag u8 @ +4. spec: §3.2 CONFIRMED (pattern); semantic UNVERIFIED.</summary>
     public required byte CategoryFlag { get; init; }
+
     /// <summary>Secondary key u32 @ +8. spec: §3.2 CONFIRMED.</summary>
     public required uint SecondaryKey { get; init; }
+
     /// <summary>Action link u32 @ +12. spec: §3.2 CONFIRMED (pattern); name UNVERIFIED.</summary>
     public required uint ActionLink { get; init; }
+
     /// <summary>Full 40-byte raw record (includes all fields at +16..+36 which are UNVERIFIED).</summary>
     public required ReadOnlyMemory<byte> Raw { get; init; }
 }
@@ -406,12 +414,16 @@ public sealed class MsgInfoRecord
 {
     /// <summary>Message ID u32 @ +0 (BST key). spec: §3.3 CONFIRMED.</summary>
     public required uint MessageId { get; init; }
+
     /// <summary>Dialog flag u32 @ +4. spec: §3.3 CONFIRMED (pattern); semantic UNVERIFIED.</summary>
     public required uint DialogFlag { get; init; }
+
     /// <summary>Text line 1 CP949 char[60] @ +8. spec: §3.3 CONFIRMED.</summary>
     public required string TextLine1 { get; init; }
+
     /// <summary>Text line 2 CP949 char[60] @ +68. spec: §3.3 CONFIRMED.</summary>
     public required string TextLine2 { get; init; }
+
     /// <summary>Full 128-byte raw record.</summary>
     public required ReadOnlyMemory<byte> Raw { get; init; }
 }
@@ -426,30 +438,43 @@ public sealed class ItemsExtraRecord
 {
     /// <summary>Item ID u32 @ +0. Top byte encodes category. 0x7FFFFFFF=sentinel. spec: §3.4 CONFIRMED.</summary>
     public required uint ItemId { get; init; }
+
     /// <summary>True if this is a sentinel record (ItemId == 0x7FFFFFFF). spec: §3.4 CONFIRMED.</summary>
     public required bool IsSentinel { get; init; }
+
     /// <summary>Animation speed scale f32 @ +4. 1.0=normal. spec: §3.4 CONFIRMED.</summary>
     public required float AnimScale { get; init; }
+
     /// <summary>Attachment field A i32 @ +8. Range 0..3. spec: §3.4 CONFIRMED (range); name UNVERIFIED.</summary>
     public required int AttachFieldA { get; init; }
+
     /// <summary>Attachment field B i32 @ +12. Range 8..48. spec: §3.4 CONFIRMED (range); name UNVERIFIED.</summary>
     public required int AttachFieldB { get; init; }
+
     /// <summary>Weapon bone attachment X i32 @ +16. Local space. spec: §3.4 CONFIRMED.</summary>
     public required int AttachX { get; init; }
+
     /// <summary>Weapon bone attachment Y i32 @ +20. spec: §3.4 CONFIRMED.</summary>
     public required int AttachY { get; init; }
+
     /// <summary>Weapon bone attachment Z i32 @ +24. spec: §3.4 CONFIRMED.</summary>
     public required int AttachZ { get; init; }
+
     /// <summary>Rotation around X axis in degrees i32 @ +28. spec: §3.4 CONFIRMED.</summary>
     public required int RotXDeg { get; init; }
+
     /// <summary>Rotation around Y axis in degrees i32 @ +32. spec: §3.4 CONFIRMED.</summary>
     public required int RotYDeg { get; init; }
+
     /// <summary>Rotation around Z axis in degrees i32 @ +36. spec: §3.4 CONFIRMED.</summary>
     public required int RotZDeg { get; init; }
+
     /// <summary>Fourth rotation or secondary anim param i32 @ +40. Range -185..+300. spec: §3.4 CONFIRMED (range).</summary>
     public required int Field40 { get; init; }
+
     /// <summary>Rarity tier u32 @ +44. Values 0..5. spec: §3.4 CONFIRMED (range); semantic INFERRED.</summary>
     public required uint RarityTier { get; init; }
+
     /// <summary>Full 48-byte raw record.</summary>
     public required ReadOnlyMemory<byte> Raw { get; init; }
 }
@@ -476,16 +501,22 @@ public sealed class ItemCsvRow
 
     /// <summary>Item display name (CP949). col0. CONFIRMED.</summary>
     public required string NameCp949 { get; init; }
+
     /// <summary>Item ID. col1. CONFIRMED.</summary>
     public required uint ItemId { get; init; }
+
     /// <summary>Item description (CP949); <c>\\</c>=in-game newline. col2. CONFIRMED.</summary>
     public required string DescriptionCp949 { get; init; }
+
     /// <summary>Linked/related item ID. col3. HIGH.</summary>
     public required uint LinkedItemId { get; init; }
+
     /// <summary>Base reference ID. col4. HIGH.</summary>
     public required uint BaseRefId { get; init; }
+
     /// <summary>Secondary reference ID. col5. HIGH.</summary>
     public required uint SecondaryRefId { get; init; }
+
     /// <summary>Item subtype / category code. col6. CONFIRMED.</summary>
     public required uint ItemSubtype { get; init; }
 
@@ -494,14 +525,19 @@ public sealed class ItemCsvRow
 
     /// <summary>Bonus flag A. col7. HIGH.</summary>
     public required byte BonusFlagA { get; init; }
+
     /// <summary>Bonus flag B. col8. HIGH.</summary>
     public required byte BonusFlagB { get; init; }
+
     /// <summary>Enhancement slot count. col10. HIGH.</summary>
     public required byte EnhancementSize { get; init; }
+
     /// <summary>NPC sell price (gold). col16. CONFIRMED.</summary>
     public required uint SellPrice { get; init; }
+
     /// <summary>1 = purchaseable from NPC. col17. HIGH.</summary>
     public required byte NpcPurchaseable { get; init; }
+
     /// <summary>1 = item is enabled/active. col18. CONFIRMED.</summary>
     public required byte Enabled { get; init; }
 
@@ -510,8 +546,10 @@ public sealed class ItemCsvRow
 
     /// <summary>Maximum stack size. col19. CONFIRMED.</summary>
     public required ushort MaxStack { get; init; }
+
     /// <summary>Item tier / quality rank. col22. CONFIRMED.</summary>
     public required ushort ItemTierRank { get; init; }
+
     /// <summary>Maximum durability. col23. HIGH.</summary>
     public required ushort MaxDurability { get; init; }
 
@@ -520,12 +558,16 @@ public sealed class ItemCsvRow
 
     /// <summary>Required Strength. col24. CONFIRMED.</summary>
     public required ushort ReqStr { get; init; }
+
     /// <summary>Required Constitution. col25. CONFIRMED.</summary>
     public required ushort ReqCon { get; init; }
+
     /// <summary>Required Agility. col26. CONFIRMED.</summary>
     public required ushort ReqAgi { get; init; }
+
     /// <summary>Required Intelligence. col27. CONFIRMED.</summary>
     public required ushort ReqInt { get; init; }
+
     /// <summary>Required Chi. col28. CONFIRMED.</summary>
     public required ushort ReqChi { get; init; }
 
@@ -534,10 +576,13 @@ public sealed class ItemCsvRow
 
     /// <summary>Class Yi can equip (1=yes). col29. CONFIRMED.</summary>
     public required byte ClassYi { get; init; }
+
     /// <summary>Class Ye can equip (1=yes). col30. CONFIRMED.</summary>
     public required byte ClassYe { get; init; }
+
     /// <summary>Class In can equip (1=yes). col31. CONFIRMED.</summary>
     public required byte ClassIn { get; init; }
+
     /// <summary>Class Ji can equip (1=yes). col32. CONFIRMED.</summary>
     public required byte ClassJi { get; init; }
 
@@ -546,6 +591,7 @@ public sealed class ItemCsvRow
 
     /// <summary>Current enchant level. col47. CONFIRMED.</summary>
     public required byte EnchantLevel { get; init; }
+
     /// <summary>Gem / socket power. col48. CONFIRMED.</summary>
     public required byte GemPower { get; init; }
 
@@ -554,8 +600,10 @@ public sealed class ItemCsvRow
 
     /// <summary>Bonus attack. col64. CONFIRMED.</summary>
     public required uint BonusAtk { get; init; }
+
     /// <summary>Bonus HP. col65. CONFIRMED.</summary>
     public required uint BonusHp { get; init; }
+
     /// <summary>Bonus extended attack. col68. CONFIRMED.</summary>
     public required uint BonusExtAtk { get; init; }
 
@@ -564,6 +612,7 @@ public sealed class ItemCsvRow
 
     /// <summary>Attack speed multiplier. col75. CONFIRMED.</summary>
     public required float AttackSpeed { get; init; }
+
     /// <summary>Dodge rate. col78. CONFIRMED.</summary>
     public required float DodgeRate { get; init; }
 
@@ -572,18 +621,25 @@ public sealed class ItemCsvRow
 
     /// <summary>Bonus Chi. col84. CONFIRMED.</summary>
     public required uint BonusChi { get; init; }
+
     /// <summary>Weapon stat A. col85. CONFIRMED.</summary>
     public required uint WeaponStatA { get; init; }
+
     /// <summary>Weapon stat B. col86. CONFIRMED.</summary>
     public required uint WeaponStatB { get; init; }
+
     /// <summary>Minimum attack value. col87. CONFIRMED.</summary>
     public required uint MinAttack { get; init; }
+
     /// <summary>Maximum attack value. col90. CONFIRMED.</summary>
     public required uint MaxAttack { get; init; }
+
     /// <summary>Bonus defense A. col93. CONFIRMED.</summary>
     public required uint BonusDefenseA { get; init; }
+
     /// <summary>Physical defense. col94. CONFIRMED.</summary>
     public required uint PhysDefense { get; init; }
+
     /// <summary>Armor defense. col96. CONFIRMED.</summary>
     public required uint ArmorDefense { get; init; }
 
@@ -592,20 +648,28 @@ public sealed class ItemCsvRow
 
     /// <summary>Duration in minutes (consumable). col112. CONFIRMED.</summary>
     public required uint DurationMinutes { get; init; }
+
     /// <summary>Expire mode. col113. CONFIRMED.</summary>
     public required byte ExpireMode { get; init; }
+
     /// <summary>Consumable effect value. col119. CONFIRMED.</summary>
     public required uint ConsumableValue { get; init; }
+
     /// <summary>1 = item is consumable. col120. CONFIRMED.</summary>
     public required byte IsConsumable { get; init; }
+
     /// <summary>Gem category. col127. CONFIRMED.</summary>
     public required byte GemCategory { get; init; }
+
     /// <summary>1 = equippable. col128. CONFIRMED.</summary>
     public required byte EquippableFlag { get; init; }
+
     /// <summary>1 = has attached effect. col129. CONFIRMED.</summary>
     public required byte HasEffect { get; init; }
+
     /// <summary>Effect type code. col130. CONFIRMED.</summary>
     public required byte EffectType { get; init; }
+
     /// <summary>Effect strength. col131. CONFIRMED.</summary>
     public required ushort EffectStrength { get; init; }
 
@@ -614,6 +678,7 @@ public sealed class ItemCsvRow
 
     /// <summary>Model set ID (references mesh/texture set). col117. CONFIRMED.</summary>
     public required ushort ModelSetId { get; init; }
+
     /// <summary>Model type / slot code. col118. CONFIRMED.</summary>
     public required byte ModelType { get; init; }
 

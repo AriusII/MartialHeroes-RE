@@ -84,8 +84,8 @@ public sealed class SectorGridTests
     }
 
     [Theory]
-    [InlineData(1, 9)]   // 3×3
-    [InlineData(2, 25)]  // 5×5
+    [InlineData(1, 9)] // 3×3
+    [InlineData(2, 25)] // 5×5
     [InlineData(0, 1)]
     public void RequiredSectorCount_IsSquareOfSide(int radius, int expected)
     {
@@ -185,9 +185,9 @@ public sealed class SectorGridTests
     [InlineData(10002, 10000, false)] // exactly 2 in X — retained
     [InlineData(10000, 10002, false)] // exactly 2 in Z — retained
     [InlineData(10002, 10002, false)] // exactly 2 diagonally — retained
-    [InlineData(10003, 10000, true)]  // 3 in X — evict
-    [InlineData(10000, 9997, true)]   // 3 in Z (negative direction) — evict
-    [InlineData(10002, 10003, true)]  // mixed, max is 3 — evict
+    [InlineData(10003, 10000, true)] // 3 in X — evict
+    [InlineData(10000, 9997, true)] // 3 in Z (negative direction) — evict
+    [InlineData(10002, 10003, true)] // mixed, max is 3 — evict
     public void ShouldEvict_StrictlyGreaterThanTwo(int cellX, int cellZ, bool expected)
     {
         // spec: terrain.md §9.3 — evict when Chebyshev distance > 2 (exactly 2 retained).

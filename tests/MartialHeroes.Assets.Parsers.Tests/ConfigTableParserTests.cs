@@ -53,6 +53,7 @@ public sealed class ConfigTableParserTests
             // +16 TertiaryExp u32. CONFIRMED.
             WriteU32LE(buf, off + 16, records[i].tertiaryExp);
         }
+
         return buf;
     }
 
@@ -63,7 +64,8 @@ public sealed class ConfigTableParserTests
         byte[] data = BuildExpScr([
             (1, 64, 100u, 0u, 200u, 0u),
             (2, 64, 300u, 0u, 400u, 0u),
-            (3, 64, 500u, 0u, 600u, 0u)]);
+            (3, 64, 500u, 0u, 600u, 0u)
+        ]);
         ExpCurveEntry[] entries = ConfigTableParser.ParseExpScr(new ReadOnlyMemory<byte>(data));
         Assert.Equal(3, entries.Length);
     }
@@ -136,6 +138,7 @@ public sealed class ConfigTableParserTests
                 throw new ArgumentException("body must be 58 bytes");
             records[i].body58.CopyTo(buf, off + 2);
         }
+
         return buf;
     }
 
@@ -194,6 +197,7 @@ public sealed class ConfigTableParserTests
             buf[off + 324] = mobs[i].type;
             // All other bytes left as zero (UNVERIFIED fields).
         }
+
         return buf;
     }
 
@@ -289,6 +293,7 @@ public sealed class ConfigTableParserTests
             // trailing entries: trailingCount × 8 bytes (zeroed; fields UNVERIFIED).
             ms.Write(new byte[trailingCount * 8]);
         }
+
         return ms.ToArray();
     }
 

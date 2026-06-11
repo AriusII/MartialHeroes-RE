@@ -17,12 +17,16 @@ public sealed class XeffElement
     // ─── Group A — Emitter identity (20 bytes) ──────────────────────────────
     /// <summary>emitter_type u32 @ element+0. Known: 2=directional. spec: §A.3.1 PARSER-CONFIRMED.</summary>
     public required uint EmitterType { get; init; }
+
     /// <summary>emitter_subtype u32 @ element+4. Semantics UNRESOLVED. spec: §A.3.1 PARSER-CONFIRMED.</summary>
     public required uint EmitterSubtype { get; init; }
+
     /// <summary>anim_flag u32 @ element+8. Non-zero enables animated path. spec: §A.3.1 PARSER-CONFIRMED.</summary>
     public required uint AnimFlag { get; init; }
+
     /// <summary>tex_count u32 @ element+12. Drives texture sub-array and keyframe count. spec: §A.3.1 PARSER-CONFIRMED.</summary>
     public required uint TexCount { get; init; }
+
     /// <summary>field_unknown_a u32 @ element+16. Purpose UNRESOLVED. spec: §A.3.1 PARSER-CONFIRMED.</summary>
     public required uint FieldUnknownA { get; init; }
 
@@ -44,16 +48,20 @@ public sealed class XeffElement
     // ─── Group D — Scale channels ───────────────────────────────────────────
     /// <summary>X-scale keyframe values. spec: §A.3.4 PARSER-CONFIRMED.</summary>
     public required float[] ScaleX { get; init; }
+
     /// <summary>Y-scale keyframe values. spec: §A.3.4 PARSER-CONFIRMED.</summary>
     public required float[] ScaleY { get; init; }
+
     /// <summary>Z-scale keyframe values. spec: §A.3.4 PARSER-CONFIRMED.</summary>
     public required float[] ScaleZ { get; init; }
 
     // ─── Group E — Animation timing (9 bytes) ──────────────────────────────
     /// <summary>anim_loop u8 (single byte). Non-zero selects animated keyframe branch. spec: §A.3.5 CONFIRMED.</summary>
     public required byte AnimLoop { get; init; }
+
     /// <summary>anim_stride u32. Per-frame duration; unit UNRESOLVED. spec: §A.3.5 PARSER-CONFIRMED.</summary>
     public required uint AnimStride { get; init; }
+
     /// <summary>anim_base_time u32. Base time offset. spec: §A.3.5 PARSER-CONFIRMED.</summary>
     public required uint AnimBaseTime { get; init; }
 
@@ -85,12 +93,16 @@ public sealed class XeffKeyframe
 {
     /// <summary>kf_index u32. spec: §A.3.6 PARSER-CONFIRMED.</summary>
     public required uint KfIndex { get; init; }
+
     /// <summary>kf_param_0..5 (6 × f32). Purpose UNRESOLVED. spec: §A.3.6 PARSER-CONFIRMED.</summary>
     public required float[] Params { get; init; } // length 6
+
     /// <summary>kf_rot_x_deg, kf_rot_y_deg, kf_rot_z_deg (degrees). spec: §A.3.6 CONFIRMED.</summary>
     public required float RotXDeg { get; init; }
+
     /// <summary>spec: §A.3.6 CONFIRMED.</summary>
     public required float RotYDeg { get; init; }
+
     /// <summary>spec: §A.3.6 CONFIRMED.</summary>
     public required float RotZDeg { get; init; }
 }
@@ -106,13 +118,16 @@ public sealed class XeffStaticState
 {
     /// <summary>static_param_0..5 (6 × f32). Purpose UNRESOLVED. spec: §A.3.6 PARSER-CONFIRMED.</summary>
     public required float[] Params { get; init; } // length 6
+
     /// <summary>
     /// static_rot_x_deg, y_deg, z_deg — only present when emitter_type == 2.
     /// spec: §A.3.6 — emitter_type=2 rotation: CONFIRMED.
     /// </summary>
     public required float? RotXDeg { get; init; }
+
     /// <summary>spec: §A.3.6 CONFIRMED (conditional).</summary>
     public required float? RotYDeg { get; init; }
+
     /// <summary>spec: §A.3.6 CONFIRMED (conditional).</summary>
     public required float? RotZDeg { get; init; }
 }
@@ -158,9 +173,14 @@ public sealed class XeffData
 /// spec: Docs/RE/formats/effects.md §B.5 Normal Encoding Note.
 /// </remarks>
 public readonly record struct EffVertex(
-    float PosX, float PosY, float PosZ,
-    float NormalX, float NormalY, float NormalZ,
-    float TexU, float TexV);
+    float PosX,
+    float PosY,
+    float PosZ,
+    float NormalX,
+    float NormalY,
+    float NormalZ,
+    float TexU,
+    float TexV);
 
 /// <summary>
 /// Decoded result of an <c>.eff</c> effect-object shape file from <c>data/effect/obj/</c>.

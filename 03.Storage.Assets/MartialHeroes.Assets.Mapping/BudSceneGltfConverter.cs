@@ -103,12 +103,12 @@ public static class BudSceneGltfConverter
 
             int posLen = vertexCount * 3 * sizeof(float); // VEC3 f32
             int nrmLen = vertexCount * 3 * sizeof(float); // VEC3 f32
-            int uvLen = vertexCount * 2 * sizeof(float);  // VEC2 f32
-            int idxLen = indexCount * sizeof(ushort);      // u16
+            int uvLen = vertexCount * 2 * sizeof(float); // VEC2 f32
+            int idxLen = indexCount * sizeof(ushort); // u16
 
             int posOff = bufferCursor;
             int nrmOff = Align4(posOff + posLen);
-            int uvOff  = Align4(nrmOff + nrmLen);
+            int uvOff = Align4(nrmOff + nrmLen);
             int idxOff = Align4(uvOff + uvLen);
             bufferCursor = Align4(idxOff + idxLen);
 
@@ -117,7 +117,7 @@ public static class BudSceneGltfConverter
                 IndexCount: indexCount,
                 PosOff: posOff, PosLen: posLen,
                 NrmOff: nrmOff, NrmLen: nrmLen,
-                UvOff: uvOff,   UvLen: uvLen,
+                UvOff: uvOff, UvLen: uvLen,
                 IdxOff: idxOff, IdxLen: idxLen);
         }
 
@@ -154,9 +154,9 @@ public static class BudSceneGltfConverter
         for (int v = 0; v < vertexCount; v++)
         {
             BudVertex vert = obj.Vertices[v];
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor),     -vert.PosX); // X negated
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4),  vert.PosY);
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8),  vert.PosZ);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), -vert.PosX); // X negated
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), vert.PosY);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), vert.PosZ);
             cursor += 12;
         }
 
@@ -167,9 +167,9 @@ public static class BudSceneGltfConverter
         for (int v = 0; v < vertexCount; v++)
         {
             BudVertex vert = obj.Vertices[v];
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor),     -vert.NormalX); // X negated
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4),  vert.NormalY);
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8),  vert.NormalZ);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), -vert.NormalX); // X negated
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), vert.NormalY);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), vert.NormalZ);
             cursor += 12;
         }
 
@@ -181,7 +181,7 @@ public static class BudSceneGltfConverter
         for (int v = 0; v < vertexCount; v++)
         {
             BudVertex vert = obj.Vertices[v];
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor),     vert.UvU);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), vert.UvU);
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), vert.UvV);
             cursor += 8;
         }
@@ -196,7 +196,7 @@ public static class BudSceneGltfConverter
             ushort i0 = obj.Indices[tri * 3 + 0];
             ushort i1 = obj.Indices[tri * 3 + 1];
             ushort i2 = obj.Indices[tri * 3 + 2];
-            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor),     i0);
+            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor), i0);
             BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 2), i2); // swapped
             BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 4), i1); // swapped
             cursor += 6;
@@ -219,7 +219,8 @@ public static class BudSceneGltfConverter
         sb.Append('{');
 
         // asset
-        sb.Append("\"asset\":{\"version\":\"2.0\",\"generator\":\"MartialHeroes.Assets.Mapping.BudSceneGltfConverter\"},");
+        sb.Append(
+            "\"asset\":{\"version\":\"2.0\",\"generator\":\"MartialHeroes.Assets.Mapping.BudSceneGltfConverter\"},");
 
         // scene / nodes / meshes
         sb.Append("\"scene\":0,");
@@ -248,6 +249,7 @@ public static class BudSceneGltfConverter
             sb.Append($",\"extras\":{{\"texId\":{obj.TexId},\"typeByte\":{obj.TypeByte}}}");
             sb.Append('}');
         }
+
         sb.Append("]}],");
 
         // accessors — 4 per object: POSITION(0), NORMAL(1), TEXCOORD_0(2), indices(3)
@@ -309,6 +311,7 @@ public static class BudSceneGltfConverter
             sb.Append("\"type\":\"SCALAR\"");
             sb.Append('}');
         }
+
         sb.Append("],");
 
         // bufferViews — 4 per object: positions, normals, UVs, indices
@@ -355,6 +358,7 @@ public static class BudSceneGltfConverter
             sb.Append($"\"target\":{TargetElementArrayBuffer}");
             sb.Append('}');
         }
+
         sb.Append("],");
 
         // buffer
@@ -373,27 +377,27 @@ public static class BudSceneGltfConverter
     {
         byte[] jsonBytes = Encoding.UTF8.GetBytes(json);
         int jsonPadded = Align4(jsonBytes.Length);
-        int binPadded  = Align4(binaryBuffer.Length);
+        int binPadded = Align4(binaryBuffer.Length);
 
         uint totalLength = (uint)(12 + 8 + jsonPadded + 8 + binPadded);
 
         Span<byte> hdr = stackalloc byte[12];
-        BinaryPrimitives.WriteUInt32LittleEndian(hdr,       GlbMagic);
-        BinaryPrimitives.WriteUInt32LittleEndian(hdr[4..],  GlbVersion);
-        BinaryPrimitives.WriteUInt32LittleEndian(hdr[8..],  totalLength);
+        BinaryPrimitives.WriteUInt32LittleEndian(hdr, GlbMagic);
+        BinaryPrimitives.WriteUInt32LittleEndian(hdr[4..], GlbVersion);
+        BinaryPrimitives.WriteUInt32LittleEndian(hdr[8..], totalLength);
         output.Write(hdr);
 
         // JSON chunk
         Span<byte> jsonHdr = stackalloc byte[8];
-        BinaryPrimitives.WriteUInt32LittleEndian(jsonHdr,       (uint)jsonPadded);
-        BinaryPrimitives.WriteUInt32LittleEndian(jsonHdr[4..],  ChunkTypeJson);
+        BinaryPrimitives.WriteUInt32LittleEndian(jsonHdr, (uint)jsonPadded);
+        BinaryPrimitives.WriteUInt32LittleEndian(jsonHdr[4..], ChunkTypeJson);
         output.Write(jsonHdr);
         output.Write(jsonBytes);
         WritePadding(output, jsonBytes.Length, jsonPadded, 0x20);
 
         // BIN chunk
         Span<byte> binHdr = stackalloc byte[8];
-        BinaryPrimitives.WriteUInt32LittleEndian(binHdr,      (uint)binPadded);
+        BinaryPrimitives.WriteUInt32LittleEndian(binHdr, (uint)binPadded);
         BinaryPrimitives.WriteUInt32LittleEndian(binHdr[4..], ChunkTypeBin);
         output.Write(binHdr);
         output.Write(binaryBuffer);
@@ -492,8 +496,12 @@ public static class BudSceneGltfConverter
     private readonly record struct ObjectSection(
         int VertexCount,
         int IndexCount,
-        int PosOff, int PosLen,
-        int NrmOff, int NrmLen,
-        int UvOff,  int UvLen,
-        int IdxOff, int IdxLen);
+        int PosOff,
+        int PosLen,
+        int NrmOff,
+        int NrmLen,
+        int UvOff,
+        int UvLen,
+        int IdxOff,
+        int IdxLen);
 }

@@ -36,11 +36,11 @@ public static class CombatFormula
     // spec: Docs/RE/specs/combat.md §3.1.
     // -------------------------------------------------------------------------
 
-    private const float AttackWeightStr = 2.5f;                // spec: combat.md §3.1
-    private const float AttackWeightDex = 2.0f;                // spec: combat.md §3.1
-    private const float AttackWeightAgi = 2.299999952316284f;  // spec: combat.md §3.1 (2.3 literal)
-    private const float AttackWeightCon = 1.0f;                // spec: combat.md §3.1
-    private const float AttackWeightInt = 1.0f;                // spec: combat.md §3.1
+    private const float AttackWeightStr = 2.5f; // spec: combat.md §3.1
+    private const float AttackWeightDex = 2.0f; // spec: combat.md §3.1
+    private const float AttackWeightAgi = 2.299999952316284f; // spec: combat.md §3.1 (2.3 literal)
+    private const float AttackWeightCon = 1.0f; // spec: combat.md §3.1
+    private const float AttackWeightInt = 1.0f; // spec: combat.md §3.1
 
     // -------------------------------------------------------------------------
     // §3.2 Secondary base — stat weights (bit-exact 32-bit float literals).
@@ -49,7 +49,7 @@ public static class CombatFormula
 
     private const float SecondaryWeightStr = 1.399999976158142f; // spec: combat.md §3.2 (1.4 literal)
     private const float SecondaryWeightDex = 2.650000095367432f; // spec: combat.md §3.2 (2.65 literal)
-    private const float SecondaryWeightAgi = 1.5f;               // spec: combat.md §3.2
+    private const float SecondaryWeightAgi = 1.5f; // spec: combat.md §3.2
     private const float SecondaryWeightCon = 2.099999904632568f; // spec: combat.md §3.2 (2.1 literal)
     private const float SecondaryWeightInt = 1.100000023841858f; // spec: combat.md §3.2 (1.1 literal)
 
@@ -206,21 +206,21 @@ public static class CombatFormula
             inputs.Slot5;
 
         PrimaryStats stats = inputs.Stats;
-        total += inputs.WeaponTerm;                              // per-weapon integer lookup; spec §3.3
-        total += AttackBase(in stats);                           // spec §3.1
-        total += inputs.WeaponGrade * WeaponGradeScale;          // weapon_grade * 0.1; spec §3.3
-        total += inputs.DamageEquipSum;                          // two-field attack accumulator; spec §2.3/§3.3
-        total += inputs.LevelTerm * LevelTermScale;              // level_term * 0.5; spec §3.3
+        total += inputs.WeaponTerm; // per-weapon integer lookup; spec §3.3
+        total += AttackBase(in stats); // spec §3.1
+        total += inputs.WeaponGrade * WeaponGradeScale; // weapon_grade * 0.1; spec §3.3
+        total += inputs.DamageEquipSum; // two-field attack accumulator; spec §2.3/§3.3
+        total += inputs.LevelTerm * LevelTermScale; // level_term * 0.5; spec §3.3
 
         if (inputs.GradeByte >= GradeBonusThreshold)
         {
-            total += GradeBonus;                                 // +2.0 if grade byte >= 8; spec §3.3
+            total += GradeBonus; // +2.0 if grade byte >= 8; spec §3.3
         }
 
         // Apply (slot[83] − 100) % as a multiplier on the running total. spec: combat.md §3.3 / §2.2.
         total = ApplyHitPercentMultiplier(total, inputs.Slot83);
 
-        total += inputs.Slot61;                                  // final flat add (when present); spec §3.3
+        total += inputs.Slot61; // final flat add (when present); spec §3.3
 
         return FloorToInt(total);
     }
@@ -247,27 +247,27 @@ public static class CombatFormula
         double total = inputs.Slot16 + inputs.Slot20;
 
         PrimaryStats stats = inputs.Stats;
-        total += inputs.WeaponTerm;                              // per-weapon integer lookup; spec §3.4
-        total += SecondaryBase(in stats);                        // spec §3.2
-        total += inputs.WeaponGrade * WeaponGradeScale;          // weapon_grade * 0.1; spec §3.4
-        total += inputs.AccuracyEquipSum;                        // defence-family equip accumulator; spec §2.3/§3.4
-        total += inputs.LevelTerm * LevelTermScale;              // level_term * 0.5; spec §3.4
-        total += HitAccuracyBaseline;                            // +300.0 flat baseline; spec §3.4
+        total += inputs.WeaponTerm; // per-weapon integer lookup; spec §3.4
+        total += SecondaryBase(in stats); // spec §3.2
+        total += inputs.WeaponGrade * WeaponGradeScale; // weapon_grade * 0.1; spec §3.4
+        total += inputs.AccuracyEquipSum; // defence-family equip accumulator; spec §2.3/§3.4
+        total += inputs.LevelTerm * LevelTermScale; // level_term * 0.5; spec §3.4
+        total += HitAccuracyBaseline; // +300.0 flat baseline; spec §3.4
 
         if (inputs.RankProgressGate)
         {
-            total += HitAccuracyBaseline;                        // +300.0 if rank-progress gate set; spec §3.4
+            total += HitAccuracyBaseline; // +300.0 if rank-progress gate set; spec §3.4
         }
 
         if (inputs.GradeByte >= GradeBonusThreshold)
         {
-            total += GradeBonus;                                 // +2.0 if grade byte >= 8; spec §3.4
+            total += GradeBonus; // +2.0 if grade byte >= 8; spec §3.4
         }
 
         // − proficiency_penalty % on the running total. spec: combat.md §3.4 / §4.
         total = ApplyHitPenalty(total, inputs.ProficiencyPenaltyPercent);
 
-        total += HitAccuracyBaseline;                            // second +300.0 flat baseline; spec §3.4
+        total += HitAccuracyBaseline; // second +300.0 flat baseline; spec §3.4
 
         return FloorToInt(total);
     }

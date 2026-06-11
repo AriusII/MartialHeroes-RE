@@ -98,14 +98,14 @@ public static class TerrainSceneParser
                     //   normal_x @ +0x0C, normal_y @ +0x10, normal_z @ +0x14: CONFIRMED.
                     //   uv_u @ +0x18, uv_v @ +0x1C: CONFIRMED.
                     vertices[v] = new BudVertex(
-                        floatBlock[fi],     // pos_x
+                        floatBlock[fi], // pos_x
                         floatBlock[fi + 1], // pos_y
                         floatBlock[fi + 2], // pos_z
                         floatBlock[fi + 3], // normal_x
                         floatBlock[fi + 4], // normal_y
                         floatBlock[fi + 5], // normal_z
                         floatBlock[fi + 6], // uv_u
-                        floatBlock[fi + 7]  // uv_v
+                        floatBlock[fi + 7] // uv_v
                     );
                 }
             }
@@ -126,6 +126,7 @@ public static class TerrainSceneParser
                     );
                 }
             }
+
             offset += (int)vertexBytes;
 
             // ─── Index header (4 bytes) ─────────────────────────────────────────
@@ -150,6 +151,7 @@ public static class TerrainSceneParser
                 for (int idx = 0; idx < (int)indexCount; idx++)
                     indices[idx] = BinaryPrimitives.ReadUInt16LittleEndian(iBlock[(idx * 2)..]);
             }
+
             offset += (int)indexBytes;
 
             objects[i] = new BudObject

@@ -35,14 +35,14 @@ public sealed class BudSceneGltfConverterTests
     {
         BudVertex[] verts =
         [
-            new BudVertex(1000f, 70f, 2000f,  0f, 1f, 0f,  1.0f, 2.0f),
-            new BudVertex(1010f, 70f, 2000f,  0f, 1f, 0f,  2.0f, 2.0f),
-            new BudVertex(1010f, 80f, 2000f,  0f, 1f, 0f,  2.0f, 3.0f),
-            new BudVertex(1000f, 80f, 2000f,  0f, 1f, 0f,  1.0f, 3.0f),
-            new BudVertex(1005f, 90f, 2000f,  0f, 1f, 0f,  1.5f, 4.0f),
+            new BudVertex(1000f, 70f, 2000f, 0f, 1f, 0f, 1.0f, 2.0f),
+            new BudVertex(1010f, 70f, 2000f, 0f, 1f, 0f, 2.0f, 2.0f),
+            new BudVertex(1010f, 80f, 2000f, 0f, 1f, 0f, 2.0f, 3.0f),
+            new BudVertex(1000f, 80f, 2000f, 0f, 1f, 0f, 1.0f, 3.0f),
+            new BudVertex(1005f, 90f, 2000f, 0f, 1f, 0f, 1.5f, 4.0f),
         ];
 
-        ushort[] indices = [0, 1, 2,  0, 2, 3,  0, 3, 4];
+        ushort[] indices = [0, 1, 2, 0, 2, 3, 0, 3, 4];
 
         return new BudScene
         {
@@ -50,10 +50,10 @@ public sealed class BudSceneGltfConverterTests
             [
                 new BudObject
                 {
-                    TypeByte = 0,  // spec: §Object header — type_byte=0: PARTIAL (only value observed)
-                    TexId    = 1,  // spec: §Object header — tex_id=1 (1-based): PARTIAL
+                    TypeByte = 0, // spec: §Object header — type_byte=0: PARTIAL (only value observed)
+                    TexId = 1, // spec: §Object header — tex_id=1 (1-based): PARTIAL
                     Vertices = verts,
-                    Indices  = indices,
+                    Indices = indices,
                 },
             ],
         };
@@ -69,9 +69,9 @@ public sealed class BudSceneGltfConverterTests
         BudObject obj = new()
         {
             TypeByte = 0,
-            TexId    = 1,
+            TexId = 1,
             Vertices = [v, v1, v2],
-            Indices  = [0, 1, 2],
+            Indices = [0, 1, 2],
         };
 
         return new BudScene { Objects = [obj, obj] };
@@ -90,9 +90,9 @@ public sealed class BudSceneGltfConverterTests
         byte[] glb = ms.ToArray();
 
         Assert.True(glb.Length >= 12);
-        uint magic   = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(0));
+        uint magic = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(0));
         uint version = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(4));
-        uint length  = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(8));
+        uint length = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(8));
 
         Assert.Equal(0x46546C67u, magic);
         Assert.Equal(2u, version);
@@ -245,8 +245,8 @@ public sealed class BudSceneGltfConverterTests
         using var doc = JsonDocument.Parse(json);
 
         var extras = doc.RootElement.GetProperty("meshes")[0]
-                                    .GetProperty("primitives")[0]
-                                    .GetProperty("extras");
+            .GetProperty("primitives")[0]
+            .GetProperty("extras");
         Assert.Equal(1, extras.GetProperty("texId").GetInt32());
         Assert.Equal(0, extras.GetProperty("typeByte").GetInt32());
     }
@@ -268,7 +268,7 @@ public sealed class BudSceneGltfConverterTests
                 new BudObject
                 {
                     TypeByte = 0,
-                    TexId    = 1,
+                    TexId = 1,
                     Vertices =
                     [
                         new BudVertex(0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f),
@@ -288,8 +288,8 @@ public sealed class BudSceneGltfConverterTests
         string json = ExtractJsonFromBytes(glb);
         using var doc = JsonDocument.Parse(json);
         var idxAcc = doc.RootElement.GetProperty("accessors")[3];
-        int bvIdx   = idxAcc.GetProperty("bufferView").GetInt32();
-        var bv      = doc.RootElement.GetProperty("bufferViews")[bvIdx];
+        int bvIdx = idxAcc.GetProperty("bufferView").GetInt32();
+        var bv = doc.RootElement.GetProperty("bufferViews")[bvIdx];
         int byteOff = bv.GetProperty("byteOffset").GetInt32();
 
         byte[] bin = ExtractBinChunk(glb);
@@ -393,11 +393,12 @@ public sealed class CollisionLayerGltfConverterTests
         {
             float baseX = i * 10f;
             tris[i] = new CollisionTriangle(
-                V1X: baseX,       V1Y: 100f, V1Z: 0f,
+                V1X: baseX, V1Y: 100f, V1Z: 0f,
                 V2X: baseX + 10f, V2Y: 100f, V2Z: 0f,
-                V3X: baseX + 5f,  V3Y: 100f, V3Z: 10f,
+                V3X: baseX + 5f, V3Y: 100f, V3Z: 10f,
                 PlaneHeight: 100f);
         }
+
         return new CollisionTriangleList { Triangles = tris };
     }
 
@@ -405,8 +406,8 @@ public sealed class CollisionLayerGltfConverterTests
     {
         // 2 triangles (observed .exd sample count).
         // spec: Docs/RE/formats/terrain_layers.md §3.1 — triangle_count=2: CONFIRMED.
-        CollisionTriangle t0 = new(0f, 50f, 0f,   10f, 50f, 0f,   5f, 50f, 10f,   50f);
-        CollisionTriangle t1 = new(20f, 50f, 0f,  30f, 50f, 0f,  25f, 50f, 10f,   50f);
+        CollisionTriangle t0 = new(0f, 50f, 0f, 10f, 50f, 0f, 5f, 50f, 10f, 50f);
+        CollisionTriangle t1 = new(20f, 50f, 0f, 30f, 50f, 0f, 25f, 50f, 10f, 50f);
         return new CollisionTriangleList { Triangles = [t0, t1] };
     }
 
@@ -545,7 +546,7 @@ public sealed class CollisionLayerGltfConverterTests
         string json = ExtractJsonFromBytes(glb);
         using var doc = JsonDocument.Parse(json);
         var idxAcc = doc.RootElement.GetProperty("accessors")[1];
-        int bvIdx   = idxAcc.GetProperty("bufferView").GetInt32();
+        int bvIdx = idxAcc.GetProperty("bufferView").GetInt32();
         int byteOff = doc.RootElement.GetProperty("bufferViews")[bvIdx].GetProperty("byteOffset").GetInt32();
 
         byte[] bin = ExtractBinChunk(glb);
@@ -592,10 +593,10 @@ public sealed class CollisionLayerGltfConverterTests
 
     private static byte[] ExtractBinChunk(byte[] glb)
     {
-        uint jsonLen   = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(12));
-        int  binHdrOff = 12 + 8 + (int)jsonLen;
-        uint binLen    = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(binHdrOff));
-        int  binDataOff = binHdrOff + 8;
+        uint jsonLen = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(12));
+        int binHdrOff = 12 + 8 + (int)jsonLen;
+        uint binLen = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(binHdrOff));
+        int binDataOff = binHdrOff + 8;
         return glb[binDataOff..(binDataOff + (int)binLen)];
     }
 }
@@ -725,12 +726,21 @@ public sealed class AssetPassthroughTests
         // Only width/height fields are used by the passthrough reader.
         byte[] buf = new byte[33];
         // Signature
-        buf[0] = 0x89; buf[1] = 0x50; buf[2] = 0x4E; buf[3] = 0x47;
-        buf[4] = 0x0D; buf[5] = 0x0A; buf[6] = 0x1A; buf[7] = 0x0A;
+        buf[0] = 0x89;
+        buf[1] = 0x50;
+        buf[2] = 0x4E;
+        buf[3] = 0x47;
+        buf[4] = 0x0D;
+        buf[5] = 0x0A;
+        buf[6] = 0x1A;
+        buf[7] = 0x0A;
         // IHDR chunk length (4 bytes, BE) = 13
         BinaryPrimitives.WriteUInt32BigEndian(buf.AsSpan(8), 13);
         // Chunk type "IHDR"
-        buf[12] = 0x49; buf[13] = 0x48; buf[14] = 0x44; buf[15] = 0x52;
+        buf[12] = 0x49;
+        buf[13] = 0x48;
+        buf[14] = 0x44;
+        buf[15] = 0x52;
         // Width and height (BE u32)
         BinaryPrimitives.WriteUInt32BigEndian(buf.AsSpan(16), (uint)w);
         BinaryPrimitives.WriteUInt32BigEndian(buf.AsSpan(20), (uint)h);
@@ -744,13 +754,14 @@ public sealed class AssetPassthroughTests
         // spec: Docs/RE/formats/texture.md §BMP §BITMAPFILEHEADER (14 B) + §BITMAPINFOHEADER (40 B).
         byte[] buf = new byte[54];
         // BITMAPFILEHEADER
-        buf[0] = 0x42; buf[1] = 0x4D; // "BM"
+        buf[0] = 0x42;
+        buf[1] = 0x4D; // "BM"
         BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(2), (uint)buf.Length); // file size
         BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(10), 54u); // pixel data offset
         // BITMAPINFOHEADER
         BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(14), 40u); // header size
-        BinaryPrimitives.WriteInt32LittleEndian(buf.AsSpan(18), w);    // width at 0x12
-        BinaryPrimitives.WriteInt32LittleEndian(buf.AsSpan(22), h);    // height at 0x16
+        BinaryPrimitives.WriteInt32LittleEndian(buf.AsSpan(18), w); // width at 0x12
+        BinaryPrimitives.WriteInt32LittleEndian(buf.AsSpan(22), h); // height at 0x16
         return buf;
     }
 
@@ -759,7 +770,10 @@ public sealed class AssetPassthroughTests
         // Minimal "OggS" magic prefix (actual Ogg content not needed for magic detection).
         // spec: Docs/RE/formats/sound_tables.md §7.1: SAMPLE-VERIFIED.
         byte[] buf = new byte[16];
-        buf[0] = 0x4F; buf[1] = 0x67; buf[2] = 0x67; buf[3] = 0x53; // "OggS"
+        buf[0] = 0x4F;
+        buf[1] = 0x67;
+        buf[2] = 0x67;
+        buf[3] = 0x53; // "OggS"
         return buf;
     }
 
@@ -768,9 +782,15 @@ public sealed class AssetPassthroughTests
         // "RIFF" at 0, size at 4, "WAVE" at 8.
         // spec: Docs/RE/formats/sound_tables.md §7.2: SAMPLE-VERIFIED.
         byte[] buf = new byte[16];
-        buf[0] = 0x52; buf[1] = 0x49; buf[2] = 0x46; buf[3] = 0x46; // "RIFF"
-        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(4), 8u);   // chunk size
-        buf[8]  = 0x57; buf[9]  = 0x41; buf[10] = 0x56; buf[11] = 0x45; // "WAVE"
+        buf[0] = 0x52;
+        buf[1] = 0x49;
+        buf[2] = 0x46;
+        buf[3] = 0x46; // "RIFF"
+        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(4), 8u); // chunk size
+        buf[8] = 0x57;
+        buf[9] = 0x41;
+        buf[10] = 0x56;
+        buf[11] = 0x45; // "WAVE"
         return buf;
     }
 }
@@ -801,28 +821,28 @@ public sealed class XeffJsonConverterTests
                 new XeffElement
                 {
                     // spec: Docs/RE/formats/effects.md §A.3.1 — EmitterType: PARSER-CONFIRMED.
-                    EmitterType    = 2u,  // 2=directional (only known value)
+                    EmitterType = 2u, // 2=directional (only known value)
                     EmitterSubtype = 0u,
-                    AnimFlag       = 0u,
-                    TexCount       = 1u,
-                    FieldUnknownA  = 99u, // UNRESOLVED — emitted raw
-                    TextureNames   = ["fireball"],
+                    AnimFlag = 0u,
+                    TexCount = 1u,
+                    FieldUnknownA = 99u, // UNRESOLVED — emitted raw
+                    TextureNames = ["fireball"],
                     AlphaKeyframes = [0.0f, 0.5f, 1.0f],
-                    ScaleX         = [1.0f, 2.0f],
-                    ScaleY         = [1.0f, 2.0f],
-                    ScaleZ         = [1.0f, 2.0f],
-                    AnimLoop       = 0,
-                    AnimStride     = 0u,
-                    AnimBaseTime   = 0u,
-                    AnimKeyframes  = null,
+                    ScaleX = [1.0f, 2.0f],
+                    ScaleY = [1.0f, 2.0f],
+                    ScaleZ = [1.0f, 2.0f],
+                    AnimLoop = 0,
+                    AnimStride = 0u,
+                    AnimBaseTime = 0u,
+                    AnimKeyframes = null,
                     // Static state path (AnimLoop=0).
                     // spec: Docs/RE/formats/effects.md §A.3.6 Branch B: PARSER-CONFIRMED.
                     StaticState = new XeffStaticState
                     {
-                        Params   = [1f, 2f, 3f, 4f, 5f, 6f],
-                        RotXDeg  = 0f,
-                        RotYDeg  = 45f,
-                        RotZDeg  = 0f,
+                        Params = [1f, 2f, 3f, 4f, 5f, 6f],
+                        RotXDeg = 0f,
+                        RotYDeg = 45f,
+                        RotZDeg = 0f,
                     },
                 },
             ],
@@ -838,28 +858,28 @@ public sealed class XeffJsonConverterTests
             [
                 new XeffElement
                 {
-                    EmitterType    = 0u,
+                    EmitterType = 0u,
                     EmitterSubtype = 0u,
-                    AnimFlag       = 1u, // animated path
-                    TexCount       = 0u,
-                    FieldUnknownA  = 0u,
-                    TextureNames   = [],
+                    AnimFlag = 1u, // animated path
+                    TexCount = 0u,
+                    FieldUnknownA = 0u,
+                    TextureNames = [],
                     AlphaKeyframes = [],
-                    ScaleX         = [],
-                    ScaleY         = [],
-                    ScaleZ         = [],
-                    AnimLoop       = 1, // non-zero → Branch A
-                    AnimStride     = 100u,
-                    AnimBaseTime   = 0u,
-                    AnimKeyframes  =
+                    ScaleX = [],
+                    ScaleY = [],
+                    ScaleZ = [],
+                    AnimLoop = 1, // non-zero → Branch A
+                    AnimStride = 100u,
+                    AnimBaseTime = 0u,
+                    AnimKeyframes =
                     [
                         new XeffKeyframe
                         {
-                            KfIndex  = 0u,
-                            Params   = [1f, 2f, 3f, 4f, 5f, 6f],
-                            RotXDeg  = 0f,
-                            RotYDeg  = 90f,
-                            RotZDeg  = 0f,
+                            KfIndex = 0u,
+                            Params = [1f, 2f, 3f, 4f, 5f, 6f],
+                            RotXDeg = 0f,
+                            RotYDeg = 90f,
+                            RotZDeg = 0f,
                         },
                     ],
                     StaticState = null,

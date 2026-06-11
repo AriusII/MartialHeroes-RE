@@ -62,8 +62,17 @@ public static class ItemsCsvParser
         while (pos < text.Length)
         {
             // Skip empty lines (bare LF after CRLF or lone LF).
-            if (text[pos] == '\n') { pos++; continue; }
-            if (text[pos] == '\r' && pos + 1 < text.Length && text[pos + 1] == '\n') { pos += 2; continue; }
+            if (text[pos] == '\n')
+            {
+                pos++;
+                continue;
+            }
+
+            if (text[pos] == '\r' && pos + 1 < text.Length && text[pos + 1] == '\n')
+            {
+                pos += 2;
+                continue;
+            }
 
             // Parse one RFC 4180 CSV line.
             // spec: Docs/RE/formats/config_tables.md §4.1 — "Quoting: RFC 4180 double-quote quoting": CONFIRMED.
@@ -91,8 +100,18 @@ public static class ItemsCsvParser
         {
             char c = text[pos];
 
-            if (c == '\n') { pos++; return; }
-            if (c == '\r') { if (pos + 1 < len && text[pos + 1] == '\n') pos++; pos++; return; }
+            if (c == '\n')
+            {
+                pos++;
+                return;
+            }
+
+            if (c == '\r')
+            {
+                if (pos + 1 < len && text[pos + 1] == '\n') pos++;
+                pos++;
+                return;
+            }
 
             // RFC 4180 quoted field.
             if (c == '"')
@@ -105,11 +124,20 @@ public static class ItemsCsvParser
                     if (fc == '"')
                     {
                         pos++;
-                        if (pos < len && text[pos] == '"') { sb.Append('"'); pos++; } // escaped ""
+                        if (pos < len && text[pos] == '"')
+                        {
+                            sb.Append('"');
+                            pos++;
+                        } // escaped ""
                         else break; // closing quote
                     }
-                    else { sb.Append(fc); pos++; }
+                    else
+                    {
+                        sb.Append(fc);
+                        pos++;
+                    }
                 }
+
                 fields.Add(sb.ToString());
                 // Expect comma or line-end after closing quote.
                 if (pos < len && text[pos] == ',') pos++;
@@ -238,5 +266,7 @@ public static class ItemsCsvParser
 
     private static float ParseFloat(string s) =>
         float.TryParse(s.Trim(), System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0f;
+            System.Globalization.CultureInfo.InvariantCulture, out var v)
+            ? v
+            : 0f;
 }

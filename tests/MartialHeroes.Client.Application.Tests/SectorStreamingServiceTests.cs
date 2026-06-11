@@ -103,7 +103,7 @@ public sealed class SectorStreamingServiceTests
 
         var events = Drain(bus);
         Assert.Equal(9, events.OfType<SectorUnloadedEvent>().Count()); // all 9 old cells evicted
-        Assert.Equal(9, events.OfType<SectorLoadedEvent>().Count());   // a fresh 3×3 ring loaded
+        Assert.Equal(9, events.OfType<SectorLoadedEvent>().Count()); // a fresh 3×3 ring loaded
         Assert.Equal(9, service.ResidentCount);
     }
 

@@ -40,15 +40,15 @@ public static class CollisionLayerGltfConverter
     // glTF 2.0 spec §binary-gltf §chunks
     // -------------------------------------------------------------------------
 
-    private const uint GlbMagic    = 0x46546C67u; // 'glTF'
-    private const uint GlbVersion  = 2u;
+    private const uint GlbMagic = 0x46546C67u; // 'glTF'
+    private const uint GlbVersion = 2u;
     private const uint ChunkTypeJson = 0x4E4F534Au; // 'JSON'
-    private const uint ChunkTypeBin  = 0x004E4942u; // 'BIN\0'
+    private const uint ChunkTypeBin = 0x004E4942u; // 'BIN\0'
 
     private const int ComponentTypeUnsignedShort = 5123;
-    private const int ComponentTypeFloat         = 5126;
-    private const int TargetArrayBuffer          = 34962;
-    private const int TargetElementArrayBuffer   = 34963;
+    private const int ComponentTypeFloat = 5126;
+    private const int TargetArrayBuffer = 34962;
+    private const int TargetElementArrayBuffer = 34963;
 
     // -------------------------------------------------------------------------
     // Public API
@@ -69,8 +69,8 @@ public static class CollisionLayerGltfConverter
         ArgumentNullException.ThrowIfNull(output);
 
         CollisionTriangle[] tris = triangleList.Triangles;
-        int triCount   = tris.Length;
-        int vertCount  = triCount * 3; // one unique vertex per triangle corner (no index sharing needed)
+        int triCount = tris.Length;
+        int vertCount = triCount * 3; // one unique vertex per triangle corner (no index sharing needed)
         int indexCount = triCount * 3; // indices 0,1,2, 3,4,5, …
 
         // For up to 65535 triangles × 3 vertices the count is at most 65535 * 3 = 196605,
@@ -101,9 +101,12 @@ public static class CollisionLayerGltfConverter
         {
             CollisionTriangle tri = tris[t];
 
-            WriteVertex(buf, ref cursor, -tri.V1X, tri.V1Y, tri.V1Z, ref minX, ref minY, ref minZ, ref maxX, ref maxY, ref maxZ);
-            WriteVertex(buf, ref cursor, -tri.V2X, tri.V2Y, tri.V2Z, ref minX, ref minY, ref minZ, ref maxX, ref maxY, ref maxZ);
-            WriteVertex(buf, ref cursor, -tri.V3X, tri.V3Y, tri.V3Z, ref minX, ref minY, ref minZ, ref maxX, ref maxY, ref maxZ);
+            WriteVertex(buf, ref cursor, -tri.V1X, tri.V1Y, tri.V1Z, ref minX, ref minY, ref minZ, ref maxX, ref maxY,
+                ref maxZ);
+            WriteVertex(buf, ref cursor, -tri.V2X, tri.V2Y, tri.V2Z, ref minX, ref minY, ref minZ, ref maxX, ref maxY,
+                ref maxZ);
+            WriteVertex(buf, ref cursor, -tri.V3X, tri.V3Y, tri.V3Z, ref minX, ref minY, ref minZ, ref maxX, ref maxY,
+                ref maxZ);
         }
 
         // ---- Fill indices ----
@@ -117,14 +120,14 @@ public static class CollisionLayerGltfConverter
             // Winding-swapped: [base3+0, base3+2, base3+1]
             if (use32)
             {
-                BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(cursor),     (uint)(base3 + 0));
+                BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(cursor), (uint)(base3 + 0));
                 BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(cursor + 4), (uint)(base3 + 2)); // swapped
                 BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(cursor + 8), (uint)(base3 + 1)); // swapped
                 cursor += 12;
             }
             else
             {
-                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor),     (ushort)(base3 + 0));
+                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor), (ushort)(base3 + 0));
                 BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 2), (ushort)(base3 + 2)); // swapped
                 BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 4), (ushort)(base3 + 1)); // swapped
                 cursor += 6;
@@ -156,7 +159,8 @@ public static class CollisionLayerGltfConverter
 
         var sb = new StringBuilder(512);
         sb.Append('{');
-        sb.Append("\"asset\":{\"version\":\"2.0\",\"generator\":\"MartialHeroes.Assets.Mapping.CollisionLayerGltfConverter\"},");
+        sb.Append(
+            "\"asset\":{\"version\":\"2.0\",\"generator\":\"MartialHeroes.Assets.Mapping.CollisionLayerGltfConverter\"},");
         sb.Append("\"scene\":0,");
         sb.Append("\"scenes\":[{\"nodes\":[0]}],");
         sb.Append("\"nodes\":[{\"mesh\":0}],");
@@ -226,25 +230,25 @@ public static class CollisionLayerGltfConverter
     {
         byte[] jsonBytes = Encoding.UTF8.GetBytes(json);
         int jsonPadded = Align4(jsonBytes.Length);
-        int binPadded  = Align4(binaryBuffer.Length);
+        int binPadded = Align4(binaryBuffer.Length);
 
         uint totalLength = (uint)(12 + 8 + jsonPadded + 8 + binPadded);
 
         Span<byte> hdr = stackalloc byte[12];
-        BinaryPrimitives.WriteUInt32LittleEndian(hdr,       GlbMagic);
-        BinaryPrimitives.WriteUInt32LittleEndian(hdr[4..],  GlbVersion);
-        BinaryPrimitives.WriteUInt32LittleEndian(hdr[8..],  totalLength);
+        BinaryPrimitives.WriteUInt32LittleEndian(hdr, GlbMagic);
+        BinaryPrimitives.WriteUInt32LittleEndian(hdr[4..], GlbVersion);
+        BinaryPrimitives.WriteUInt32LittleEndian(hdr[8..], totalLength);
         output.Write(hdr);
 
         Span<byte> jsonHdr = stackalloc byte[8];
-        BinaryPrimitives.WriteUInt32LittleEndian(jsonHdr,       (uint)jsonPadded);
-        BinaryPrimitives.WriteUInt32LittleEndian(jsonHdr[4..],  ChunkTypeJson);
+        BinaryPrimitives.WriteUInt32LittleEndian(jsonHdr, (uint)jsonPadded);
+        BinaryPrimitives.WriteUInt32LittleEndian(jsonHdr[4..], ChunkTypeJson);
         output.Write(jsonHdr);
         output.Write(jsonBytes);
         WritePadding(output, jsonBytes.Length, jsonPadded, 0x20);
 
         Span<byte> binHdr = stackalloc byte[8];
-        BinaryPrimitives.WriteUInt32LittleEndian(binHdr,      (uint)binPadded);
+        BinaryPrimitives.WriteUInt32LittleEndian(binHdr, (uint)binPadded);
         BinaryPrimitives.WriteUInt32LittleEndian(binHdr[4..], ChunkTypeBin);
         output.Write(binHdr);
         output.Write(binaryBuffer);
@@ -262,7 +266,7 @@ public static class CollisionLayerGltfConverter
         ref float minX, ref float minY, ref float minZ,
         ref float maxX, ref float maxY, ref float maxZ)
     {
-        BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor),     x);
+        BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), x);
         BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), y);
         BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), z);
         cursor += 12;

@@ -73,16 +73,16 @@ public static class TerrainLayerParsers
         // All 10 × f32le fields confirmed.
         // spec: Docs/RE/formats/terrain_layers.md §2.1 — v1_x @ +0x00 through plane_height @ +0x24: CONFIRMED.
         return new CollisionTriangle(
-            BinaryPrimitives.ReadSingleLittleEndian(rec[0..]),   // v1_x
-            BinaryPrimitives.ReadSingleLittleEndian(rec[4..]),   // v1_y
-            BinaryPrimitives.ReadSingleLittleEndian(rec[8..]),   // v1_z
-            BinaryPrimitives.ReadSingleLittleEndian(rec[12..]),  // v2_x
-            BinaryPrimitives.ReadSingleLittleEndian(rec[16..]),  // v2_y
-            BinaryPrimitives.ReadSingleLittleEndian(rec[20..]),  // v2_z
-            BinaryPrimitives.ReadSingleLittleEndian(rec[24..]),  // v3_x
-            BinaryPrimitives.ReadSingleLittleEndian(rec[28..]),  // v3_y
-            BinaryPrimitives.ReadSingleLittleEndian(rec[32..]),  // v3_z
-            BinaryPrimitives.ReadSingleLittleEndian(rec[36..])   // plane_height @ +0x24: CONFIRMED.
+            BinaryPrimitives.ReadSingleLittleEndian(rec[0..]), // v1_x
+            BinaryPrimitives.ReadSingleLittleEndian(rec[4..]), // v1_y
+            BinaryPrimitives.ReadSingleLittleEndian(rec[8..]), // v1_z
+            BinaryPrimitives.ReadSingleLittleEndian(rec[12..]), // v2_x
+            BinaryPrimitives.ReadSingleLittleEndian(rec[16..]), // v2_y
+            BinaryPrimitives.ReadSingleLittleEndian(rec[20..]), // v2_z
+            BinaryPrimitives.ReadSingleLittleEndian(rec[24..]), // v3_x
+            BinaryPrimitives.ReadSingleLittleEndian(rec[28..]), // v3_y
+            BinaryPrimitives.ReadSingleLittleEndian(rec[32..]), // v3_z
+            BinaryPrimitives.ReadSingleLittleEndian(rec[36..]) // plane_height @ +0x24: CONFIRMED.
         );
     }
 
@@ -191,7 +191,8 @@ public static class TerrainLayerParsers
         );
     }
 
-    private static ushort[] ReadU16Indices(ReadOnlySpan<byte> span, int offset, int count, ReadOnlyMemory<byte>? backing = null)
+    private static ushort[] ReadU16Indices(ReadOnlySpan<byte> span, int offset, int count,
+        ReadOnlyMemory<byte>? backing = null)
     {
         var arr = new ushort[count];
         ReadOnlySpan<byte> raw = span.Slice(offset, count * 2);
@@ -612,6 +613,7 @@ public static class TerrainLayerParsers
                 RawRest = rawRest,
             };
         }
+
         return kf;
     }
 
@@ -664,6 +666,7 @@ public static class TerrainLayerParsers
                 cg2[c] = BinaryPrimitives.ReadSingleLittleEndian(rec[(12 + c * 4)..]);
                 cg3[c] = BinaryPrimitives.ReadSingleLittleEndian(rec[(24 + c * 4)..]);
             }
+
             // Raw positions+range: +0x24..+0x33 (16 bytes). UNVERIFIED.
             ReadOnlyMemory<byte> rawRest = backing.IsEmpty
                 ? rec.Slice(36, 16).ToArray()

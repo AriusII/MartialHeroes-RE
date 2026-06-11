@@ -15,8 +15,10 @@ public sealed class ActorSizeRecord
 {
     /// <summary>spec: §1.2 — actor_class_id u32 @ +0: HIGH.</summary>
     public required uint ActorClassId { get; init; }
+
     /// <summary>XZ-plane scale; range 0.10–2.00 observed. spec: §1.2 — scale_xz f32 @ +4: HIGH.</summary>
     public required float ScaleXz { get; init; }
+
     /// <summary>Y-axis scale; range 1.00–1.50 observed. spec: §1.2 — scale_y f32 @ +8: HIGH.</summary>
     public required float ScaleY { get; init; }
 }
@@ -33,8 +35,10 @@ public sealed class BuffIconPositionRecord
 {
     /// <summary>spec: §1.3 — buff_id u32 @ +0: HIGH.</summary>
     public required uint BuffId { get; init; }
+
     /// <summary>Pixel X of icon top-left corner within atlas. spec: §1.3 — atlas_x u32 @ +4: HIGH.</summary>
     public required uint AtlasX { get; init; }
+
     /// <summary>Pixel Y of icon top-left corner within atlas. spec: §1.3 — atlas_y u32 @ +8: HIGH.</summary>
     public required uint AtlasY { get; init; }
 }
@@ -50,6 +54,7 @@ public sealed class EffectScaleRecord
 {
     /// <summary>spec: §1.4 — object_id u32 @ +0: HIGH.</summary>
     public required uint ObjectId { get; init; }
+
     /// <summary>Float scale multiplier. spec: §1.4 — scale f32 @ +4: HIGH.</summary>
     public required float Scale { get; init; }
 }
@@ -69,16 +74,22 @@ public sealed class MobInfoRecord
 {
     /// <summary>spec: §2 — mob_class_id u32 @ +0: HIGH.</summary>
     public required uint MobClassId { get; init; }
+
     /// <summary>String-table reference for primary display name; 0xFFFFFFFF = none. spec: §2 — PARTIAL.</summary>
     public required uint NameStrId { get; init; }
+
     /// <summary>String-table reference for alternate name; 0xFFFFFFFF = none. spec: §2 — PARTIAL.</summary>
     public required uint AltNameStrId { get; init; }
+
     /// <summary>UI sprite index for mob icon; range 55–173 observed. spec: §2 — icon_index: HIGH.</summary>
     public required uint IconIndex { get; init; }
+
     /// <summary>Portrait resource 1; 0xFFFFFFFF = none. spec: §2 — PARTIAL.</summary>
     public required uint PortraitRes1 { get; init; }
+
     /// <summary>Portrait resource 2; 0xFFFFFFFF = none. spec: §2 — PARTIAL.</summary>
     public required uint PortraitRes2 { get; init; }
+
     /// <summary>Portrait resource 3; 0xFFFFFFFF = none. spec: §2 — PARTIAL.</summary>
     public required uint PortraitRes3 { get; init; }
 }
@@ -105,15 +116,19 @@ public sealed class TolMapData
     /// spec: Docs/RE/formats/misc_data.md §3 — world_origin_x u32 @ +0: PARTIAL.
     /// </summary>
     public required uint WorldOriginX { get; init; }
+
     /// <summary>
     /// World-space Y origin of the grid.
     /// spec: Docs/RE/formats/misc_data.md §3 — world_origin_y u32 @ +4: PARTIAL.
     /// </summary>
     public required uint WorldOriginY { get; init; }
+
     /// <summary>Grid width in tiles; power of two. spec: §3 — width_tiles: HIGH.</summary>
     public required uint WidthTiles { get; init; }
+
     /// <summary>Grid height in tiles; power of two. spec: §3 — height_tiles: HIGH.</summary>
     public required uint HeightTiles { get; init; }
+
     /// <summary>
     /// Flat tile array, row-major (index = y × W + x).
     /// 0 = walkable, 1 = blocked. Length = WidthTiles × HeightTiles.
@@ -139,19 +154,23 @@ public sealed class DescriptorRecord
 {
     /// <summary>Unique integer identifier. spec: §5 — descriptor_id u32 @ +0: HIGH.</summary>
     public required uint DescriptorId { get; init; }
+
     /// <summary>Category code. See known values: 3=party, 102=hotkey, 103=currency, 105=faction. spec: §5 — category u32 @ +4: HIGH.</summary>
     public required uint Category { get; init; }
+
     /// <summary>
     /// Display name (CP949, null-padded to 30 bytes). Decoded to string via CP949.
     /// spec: Docs/RE/formats/misc_data.md §5 — display_name char[30] CP949 @ +8: HIGH.
     /// </summary>
     public required string DisplayName { get; init; }
+
     /// <summary>
     /// Keyboard shortcut (ASCII, null-padded to 3 bytes).
     /// For category=102: "(X)" form. Others: "0" placeholder.
     /// spec: Docs/RE/formats/misc_data.md §5 — keyboard_shortcut char[3] @ +38: HIGH.
     /// </summary>
     public required string KeyboardShortcut { get; init; }
+
     /// <summary>
     /// Reserved 27 bytes at +41. All zero in known sample. Purpose unknown.
     /// spec: Docs/RE/formats/misc_data.md §5 — reserved u8[27] @ +41: LOW.

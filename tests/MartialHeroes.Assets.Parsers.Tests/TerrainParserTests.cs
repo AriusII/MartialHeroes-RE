@@ -244,7 +244,7 @@ public sealed class TerrainParserTests
 
         Assert.Equal(4225, cell.DiffuseColours.Length);
         Assert.Equal(255 * 0.5f, cell.DiffuseColours[0].R, precision: 4); // R of vertex 0
-        Assert.Equal(0 * 0.5f,   cell.DiffuseColours[0].G, precision: 4); // G of vertex 0
+        Assert.Equal(0 * 0.5f, cell.DiffuseColours[0].G, precision: 4); // G of vertex 0
         Assert.Equal(128 * 0.5f, cell.DiffuseColours[0].B, precision: 4); // B of vertex 0
         Assert.Equal(200 * 0.5f, cell.DiffuseColours[0].A, precision: 4); // A of vertex 0
     }
@@ -292,11 +292,11 @@ public sealed class TerrainParserTests
     {
         // spec: Docs/RE/formats/terrain.md §3.1 Sections — all keywords CONFIRMED.
         string mapText = """
-            TERRAIN {
-            }
-            SOLID {
-            }
-            """;
+                         TERRAIN {
+                         }
+                         SOLID {
+                         }
+                         """;
 
         MapDescriptor desc = MapDescriptorParser.ParseText(mapText);
 
@@ -310,10 +310,10 @@ public sealed class TerrainParserTests
     {
         // spec: Docs/RE/formats/terrain.md §3.2 DATAFILE directive: CONFIRMED.
         string mapText = """
-            TERRAIN {
-                DATAFILE data/map001/dat/d001x10000z10000.ted
-            }
-            """;
+                         TERRAIN {
+                             DATAFILE data/map001/dat/d001x10000z10000.ted
+                         }
+                         """;
 
         MapDescriptor desc = MapDescriptorParser.ParseText(mapText);
 
@@ -327,14 +327,14 @@ public sealed class TerrainParserTests
         // spec: Docs/RE/formats/terrain.md §3.3 TEXTURES directive — (intFlag, intTexId) pairs: CONFIRMED.
         // intFlag semantics: UNVERIFIED.
         string mapText = """
-            TERRAIN {
-                TEXTURES {
-                    0 5
-                    1 10
-                    2 15
-                }
-            }
-            """;
+                         TERRAIN {
+                             TEXTURES {
+                                 0 5
+                                 1 10
+                                 2 15
+                             }
+                         }
+                         """;
 
         MapDescriptor desc = MapDescriptorParser.ParseText(mapText);
 
@@ -351,12 +351,12 @@ public sealed class TerrainParserTests
     {
         // spec: Docs/RE/formats/terrain.md §3 — "Lines beginning with '#' are comments": CONFIRMED.
         string mapText = """
-            # This is a comment
-            TERRAIN {
-                # Another comment
-                DATAFILE data/test.ted
-            }
-            """;
+                         # This is a comment
+                         TERRAIN {
+                             # Another comment
+                             DATAFILE data/test.ted
+                         }
+                         """;
 
         MapDescriptor desc = MapDescriptorParser.ParseText(mapText);
 
@@ -369,18 +369,18 @@ public sealed class TerrainParserTests
     {
         // spec: Docs/RE/formats/terrain.md §3.1 — multiple sections: CONFIRMED.
         string mapText = """
-            TERRAIN {
-                DATAFILE primary.ted
-                TEXTURES {
-                    0 1
-                }
-            }
-            EXTRA_TERRAIN {
-                DATAFILE water.ted
-            }
-            BUILDING {
-            }
-            """;
+                         TERRAIN {
+                             DATAFILE primary.ted
+                             TEXTURES {
+                                 0 1
+                             }
+                         }
+                         EXTRA_TERRAIN {
+                             DATAFILE water.ted
+                         }
+                         BUILDING {
+                         }
+                         """;
 
         MapDescriptor desc = MapDescriptorParser.ParseText(mapText);
 

@@ -68,6 +68,11 @@ public sealed class BudObject
 ///   uv_u @ +0x18: CONFIRMED, uv_v @ +0x1C: CONFIRMED.
 /// </remarks>
 public readonly record struct BudVertex(
-    float PosX, float PosY, float PosZ,
-    float NormalX, float NormalY, float NormalZ,
-    float UvU, float UvV);
+    float PosX,
+    float PosY,
+    float PosZ,
+    float NormalX,
+    float NormalY,
+    float NormalZ,
+    float UvU,
+    float UvV);

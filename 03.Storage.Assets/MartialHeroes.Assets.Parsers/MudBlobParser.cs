@@ -49,14 +49,14 @@ public static class MudBlobParser
             //   ambient_idx_1 u8 @ +4: VERIFIED. effect_idx_0 u8 @ +5: VERIFIED.
             //   effect_idx_1 u8 @ +6: VERIFIED. effect_idx_2 u8 @ +7: VERIFIED (limited).
             tiles[t] = new MudTileRecord(
-                span[offset + 0],   // pad0
-                span[offset + 1],   // pad1
-                span[offset + 2],   // music_group
-                span[offset + 3],   // ambient_idx_0
-                span[offset + 4],   // ambient_idx_1
-                span[offset + 5],   // effect_idx_0
-                span[offset + 6],   // effect_idx_1
-                span[offset + 7]    // effect_idx_2
+                span[offset + 0], // pad0
+                span[offset + 1], // pad1
+                span[offset + 2], // music_group
+                span[offset + 3], // ambient_idx_0
+                span[offset + 4], // ambient_idx_1
+                span[offset + 5], // effect_idx_0
+                span[offset + 6], // effect_idx_1
+                span[offset + 7] // effect_idx_2
             );
         }
 

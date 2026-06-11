@@ -41,7 +41,8 @@ public sealed class GameEngineLoopTests
         }
     }
 
-    private static (GameEngineLoop loop, ClientWorld world, ClientEventBus bus, InputBus input, RecordingHandler handler)
+    private static (GameEngineLoop loop, ClientWorld world, ClientEventBus bus, InputBus input, RecordingHandler handler
+        )
         NewHarness(int tickRateHz = GameEngineLoop.DefaultTickRateHz)
     {
         var bus = new ClientEventBus(ClientEventBus.Unbounded);

@@ -106,6 +106,7 @@ public static class XeffParser
             texNames[t] = System.Text.Encoding.ASCII.GetString(
                 nullIdx >= 0 ? nameBytes[..nullIdx] : nameBytes);
         }
+
         offset += (int)texBytes;
 
         // ─── Group C — Alpha keyframes ─────────────────────────────────────────
@@ -122,6 +123,7 @@ public static class XeffParser
             // spec: Docs/RE/formats/effects.md §A.3.3 — alpha stored inverted: HIGH.
             alphaKeys[a] = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + a * 4)..]);
         }
+
         offset += (int)alphaKeyCount * 4;
 
         // ─── Group D — Scale channels (3 passes: X, Y, Z) ─────────────────────
@@ -316,14 +318,14 @@ public static class XeffParser
         {
             int vOff = vertBase + v * EffVertexStride;
             vertices[v] = new EffVertex(
-                BinaryPrimitives.ReadSingleLittleEndian(span[vOff..]),          // pos_x @ +0
-                BinaryPrimitives.ReadSingleLittleEndian(span[(vOff + 4)..]),    // pos_y @ +4
-                BinaryPrimitives.ReadSingleLittleEndian(span[(vOff + 8)..]),    // pos_z @ +8
-                BinaryPrimitives.ReadSingleLittleEndian(span[(vOff + 12)..]),   // normal_x @ +12
-                BinaryPrimitives.ReadSingleLittleEndian(span[(vOff + 16)..]),   // normal_y @ +16
-                BinaryPrimitives.ReadSingleLittleEndian(span[(vOff + 20)..]),   // normal_z @ +20
-                BinaryPrimitives.ReadSingleLittleEndian(span[(vOff + 24)..]),   // tex_u @ +24
-                BinaryPrimitives.ReadSingleLittleEndian(span[(vOff + 28)..])    // tex_v @ +28
+                BinaryPrimitives.ReadSingleLittleEndian(span[vOff..]), // pos_x @ +0
+                BinaryPrimitives.ReadSingleLittleEndian(span[(vOff + 4)..]), // pos_y @ +4
+                BinaryPrimitives.ReadSingleLittleEndian(span[(vOff + 8)..]), // pos_z @ +8
+                BinaryPrimitives.ReadSingleLittleEndian(span[(vOff + 12)..]), // normal_x @ +12
+                BinaryPrimitives.ReadSingleLittleEndian(span[(vOff + 16)..]), // normal_y @ +16
+                BinaryPrimitives.ReadSingleLittleEndian(span[(vOff + 20)..]), // normal_z @ +20
+                BinaryPrimitives.ReadSingleLittleEndian(span[(vOff + 24)..]), // tex_u @ +24
+                BinaryPrimitives.ReadSingleLittleEndian(span[(vOff + 28)..]) // tex_v @ +28
             );
         }
 

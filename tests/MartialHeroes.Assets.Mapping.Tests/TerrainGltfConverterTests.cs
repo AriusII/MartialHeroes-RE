@@ -48,7 +48,7 @@ public sealed class TerrainGltfConverterTests
         var normals = new (float Nx, float Ny, float Nz)[n];
         // All zero (identity normal) for this synthetic fixture.
 
-        byte[] lookup = new byte[256];    // TextureIndexGrid
+        byte[] lookup = new byte[256]; // TextureIndexGrid
         byte[] direction = new byte[256]; // DirectionFlags
 
         // DiffuseColours: decoded (float R, float G, float B, float A) tuples.
@@ -269,7 +269,7 @@ public sealed class TerrainGltfConverterTests
         using var doc = JsonDocument.Parse(json);
 
         var prim = doc.RootElement.GetProperty("meshes")[0]
-                                  .GetProperty("primitives")[0];
+            .GetProperty("primitives")[0];
         var attrs = prim.GetProperty("attributes");
 
         Assert.True(attrs.TryGetProperty("POSITION", out _));

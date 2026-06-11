@@ -10,6 +10,7 @@ public enum ShaderType
 {
     /// <summary>Vertex shader. Version line token: "vs". spec: Docs/RE/formats/shaders.md §Version Declaration Line.</summary>
     Vertex,
+
     /// <summary>Pixel shader. Version line token: "ps". spec: Docs/RE/formats/shaders.md §Version Declaration Line.</summary>
     Pixel,
 }

@@ -85,27 +85,27 @@ public static class XeffJsonConverter
         // spec: Docs/RE/formats/effects.md §A.3.5 Group E — Animation timing: PARSER-CONFIRMED.
         // spec: Docs/RE/formats/effects.md §A.3.6 Group F — Keyframe/static-state: PARSER-CONFIRMED.
         return new XeffJsonElement(
-            EmitterType:    el.EmitterType,
+            EmitterType: el.EmitterType,
             EmitterSubtype: el.EmitterSubtype,
-            AnimFlag:       el.AnimFlag,
-            TexCount:       el.TexCount,
+            AnimFlag: el.AnimFlag,
+            TexCount: el.TexCount,
             // FieldUnknownA — purpose UNRESOLVED; emitted raw.
             // spec: Docs/RE/formats/effects.md §A.3.1 — field_unknown_a: PARSER-CONFIRMED (raw value).
-            FieldUnknownA:  el.FieldUnknownA,
-            TextureNames:   el.TextureNames,
+            FieldUnknownA: el.FieldUnknownA,
+            TextureNames: el.TextureNames,
             AlphaKeyframes: el.AlphaKeyframes,
-            ScaleX:         el.ScaleX,
-            ScaleY:         el.ScaleY,
-            ScaleZ:         el.ScaleZ,
-            AnimLoop:       el.AnimLoop,
-            AnimStride:     el.AnimStride,
-            AnimBaseTime:   el.AnimBaseTime,
-            AnimKeyframes:  el.AnimKeyframes is { Length: > 0 }
-                                ? MapKeyframes(el.AnimKeyframes)
-                                : null,
-            StaticState:    el.StaticState is not null
-                                ? MapStaticState(el.StaticState)
-                                : null);
+            ScaleX: el.ScaleX,
+            ScaleY: el.ScaleY,
+            ScaleZ: el.ScaleZ,
+            AnimLoop: el.AnimLoop,
+            AnimStride: el.AnimStride,
+            AnimBaseTime: el.AnimBaseTime,
+            AnimKeyframes: el.AnimKeyframes is { Length: > 0 }
+                ? MapKeyframes(el.AnimKeyframes)
+                : null,
+            StaticState: el.StaticState is not null
+                ? MapStaticState(el.StaticState)
+                : null);
     }
 
     private static XeffJsonKeyframe[] MapKeyframes(XeffKeyframe[] kfs)
@@ -117,12 +117,13 @@ public static class XeffJsonConverter
             // spec: Docs/RE/formats/effects.md §A.3.6 Branch A — kf_index, params, rot_x/y/z_deg: PARSER-CONFIRMED.
             // Params 0-5 purpose UNRESOLVED — emitted raw.
             result[i] = new XeffJsonKeyframe(
-                KfIndex:  kf.KfIndex,
-                Params:   kf.Params,
-                RotXDeg:  kf.RotXDeg,
-                RotYDeg:  kf.RotYDeg,
-                RotZDeg:  kf.RotZDeg);
+                KfIndex: kf.KfIndex,
+                Params: kf.Params,
+                RotXDeg: kf.RotXDeg,
+                RotYDeg: kf.RotYDeg,
+                RotZDeg: kf.RotZDeg);
         }
+
         return result;
     }
 
@@ -131,7 +132,7 @@ public static class XeffJsonConverter
         // spec: Docs/RE/formats/effects.md §A.3.6 Branch B — 6 params + optional rot (emitter_type==2): PARSER-CONFIRMED.
         // Params purpose UNRESOLVED — emitted raw.
         return new XeffJsonStaticState(
-            Params:  s.Params,
+            Params: s.Params,
             RotXDeg: s.RotXDeg,
             RotYDeg: s.RotYDeg,
             RotZDeg: s.RotZDeg);

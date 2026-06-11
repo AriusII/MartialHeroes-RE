@@ -97,13 +97,13 @@ public sealed class CombatFormulaTests
 
     [Theory]
     [InlineData(0, 0)]
-    [InlineData(3, 0)]   // below the banded range
-    [InlineData(4, 25)]  // 4..10 -> 25
+    [InlineData(3, 0)] // below the banded range
+    [InlineData(4, 25)] // 4..10 -> 25
     [InlineData(7, 25)]
     [InlineData(10, 25)]
     [InlineData(11, 50)] // 11..30 -> 50
     [InlineData(30, 50)]
-    [InlineData(31, 0)]  // 31..74 -> unpenalised path (0) by default
+    [InlineData(31, 0)] // 31..74 -> unpenalised path (0) by default
     [InlineData(74, 0)]
     [InlineData(75, 100)] // 75+ -> 100
     [InlineData(200, 100)]
@@ -206,7 +206,7 @@ public sealed class CombatFormulaTests
     {
         var below = new AttackRatingInputs { Stats = PrimaryStats.Zero, Slot15 = 100, GradeByte = 7 };
         var atThreshold = below with { GradeByte = 8 };
-        Assert.Equal(100, CombatFormula.AttackRating(below));       // no +2
+        Assert.Equal(100, CombatFormula.AttackRating(below)); // no +2
         Assert.Equal(102, CombatFormula.AttackRating(atThreshold)); // +2
     }
 
@@ -274,7 +274,7 @@ public sealed class CombatFormulaTests
         var without = new HitRatingInputs { Stats = PrimaryStats.Zero, RankProgressGate = false };
         var with = without with { RankProgressGate = true };
         Assert.Equal(600, CombatFormula.HitRating(without)); // 300 + 300
-        Assert.Equal(900, CombatFormula.HitRating(with));    // 300 + 300(rank) + 300
+        Assert.Equal(900, CombatFormula.HitRating(with)); // 300 + 300(rank) + 300
     }
 
     [Fact]

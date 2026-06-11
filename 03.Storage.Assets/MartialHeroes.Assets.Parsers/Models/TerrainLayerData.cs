@@ -14,9 +14,15 @@ namespace MartialHeroes.Assets.Parsers.Models;
 /// The last field (plane_height) equals vertex Y in all sampled flat triangles.
 /// </remarks>
 public readonly record struct CollisionTriangle(
-    float V1X, float V1Y, float V1Z,
-    float V2X, float V2Y, float V2Z,
-    float V3X, float V3Y, float V3Z,
+    float V1X,
+    float V1Y,
+    float V1Z,
+    float V2X,
+    float V2Y,
+    float V2Z,
+    float V3X,
+    float V3Y,
+    float V3Z,
     /// <summary>
     /// Extra field at record offset +0x24.
     /// Equals vertex Y in all flat samples; behaviour for non-planar geometry UNVERIFIED.
@@ -85,10 +91,18 @@ public sealed class SodPreCache
 /// RGBA order: R, G, B, A.
 /// </remarks>
 public readonly record struct FxVertex36(
-    float X, float Y, float Z,
-    float NX, float NY, float NZ,
-    byte R, byte G, byte B, byte A,
-    float U0, float V0);
+    float X,
+    float Y,
+    float Z,
+    float NX,
+    float NY,
+    float NZ,
+    byte R,
+    byte G,
+    byte B,
+    byte A,
+    float U0,
+    float V0);
 
 /// <summary>
 /// Extended vertex with two UV sets (VF_44): 44 bytes on disk.
@@ -98,11 +112,20 @@ public readonly record struct FxVertex36(
 /// spec: Docs/RE/formats/terrain_layers.md §1.2 VF_44 (44 B): CONFIRMED.
 /// </remarks>
 public readonly record struct FxVertex44(
-    float X, float Y, float Z,
-    float NX, float NY, float NZ,
-    byte R, byte G, byte B, byte A,
-    float U0, float V0,
-    float U1, float V1);
+    float X,
+    float Y,
+    float Z,
+    float NX,
+    float NY,
+    float NZ,
+    byte R,
+    byte G,
+    byte B,
+    byte A,
+    float U0,
+    float V0,
+    float U1,
+    float V1);
 
 /// <summary>
 /// Compact vertex without colour (VF_32): 32 bytes on disk.
@@ -112,9 +135,14 @@ public readonly record struct FxVertex44(
 /// spec: Docs/RE/formats/terrain_layers.md §1.2 VF_32 (32 B): CONFIRMED (FX6 only).
 /// </remarks>
 public readonly record struct FxVertex32(
-    float X, float Y, float Z,
-    float NX, float NY, float NZ,
-    float U0, float V0);
+    float X,
+    float Y,
+    float Z,
+    float NX,
+    float NY,
+    float NZ,
+    float U0,
+    float V0);
 
 // ─── FX1 ───────────────────────────────────────────────────────────────────
 
@@ -131,14 +159,19 @@ public sealed class Fx1Layer
 {
     /// <summary>type_tag u32 @ 0x00. Observed: 1. spec: §1.5 CONFIRMED (constant=1).</summary>
     public required uint TypeTag { get; init; }
+
     /// <summary>unknown_1 u32 @ 0x04. Observed: 1. spec: §1.5 UNVERIFIED.</summary>
     public required uint Unknown1 { get; init; }
+
     /// <summary>unknown_2 u32 @ 0x08. Observed: 0. spec: §1.5 UNVERIFIED.</summary>
     public required uint Unknown2 { get; init; }
+
     /// <summary>render_state u32 @ 0x0C. Observed: 15. Semantic UNVERIFIED. spec: §1.5 UNVERIFIED.</summary>
     public required uint RenderState { get; init; }
+
     /// <summary>Vertex array (VF_36). spec: §1.5 CONFIRMED.</summary>
     public required FxVertex36[] Vertices { get; init; }
+
     /// <summary>Index array (u16). spec: §1.5 CONFIRMED.</summary>
     public required ushort[] Indices { get; init; }
 }
@@ -156,14 +189,19 @@ public sealed class Fx2Layer
 {
     /// <summary>type_tag u32 @ 0x00. spec: §1.6 CONFIRMED.</summary>
     public required uint TypeTag { get; init; }
+
     /// <summary>unknown_1 u32 @ 0x04. spec: §1.6 UNVERIFIED.</summary>
     public required uint Unknown1 { get; init; }
+
     /// <summary>unknown_2 u32 @ 0x08. spec: §1.6 UNVERIFIED.</summary>
     public required uint Unknown2 { get; init; }
+
     /// <summary>render_state u32 @ 0x0C. Observed: 15. Semantic UNVERIFIED. spec: §1.6 UNVERIFIED.</summary>
     public required uint RenderState { get; init; }
+
     /// <summary>Vertex array (VF_44). spec: §1.6 CONFIRMED.</summary>
     public required FxVertex44[] Vertices { get; init; }
+
     /// <summary>Index array (u16). spec: §1.6 CONFIRMED.</summary>
     public required ushort[] Indices { get; init; }
 }
@@ -182,20 +220,26 @@ public sealed class Fx3Layer
 {
     /// <summary>type_tag u32 @ 0x00. CONFIRMED. spec: §1.7.</summary>
     public required uint TypeTag { get; init; }
+
     /// <summary>unknown_1 u32 @ 0x04. UNVERIFIED. spec: §1.7.</summary>
     public required uint Unknown1 { get; init; }
+
     /// <summary>unknown_2 u32 @ 0x08. UNVERIFIED. spec: §1.7.</summary>
     public required uint Unknown2 { get; init; }
+
     /// <summary>render_state u32 @ 0x0C. Observed: 5. Semantic UNVERIFIED. spec: §1.7.</summary>
     public required uint RenderState { get; init; }
+
     /// <summary>
     /// Raw bytes of the extended header region 0x10–0x27 (32 bytes, 8 u32/f32 fields).
     /// All constant in samples; semantics UNVERIFIED.
     /// spec: Docs/RE/formats/terrain_layers.md §1.7 — unknown_3..unknown_8: UNVERIFIED.
     /// </summary>
     public required ReadOnlyMemory<byte> RawHeaderExtra { get; init; }
+
     /// <summary>Vertex array (VF_36). spec: §1.7 CONFIRMED.</summary>
     public required FxVertex36[] Vertices { get; init; }
+
     /// <summary>Index array (u16). spec: §1.7 CONFIRMED.</summary>
     public required ushort[] Indices { get; init; }
 }
@@ -217,14 +261,17 @@ public sealed class Fx5Section
     /// spec: Docs/RE/formats/terrain_layers.md §1.8 Section_Header (40 bytes): UNVERIFIED (semantic).
     /// </summary>
     public required ReadOnlyMemory<byte> RawSectionHeader { get; init; }
+
     /// <summary>
     /// Raw 12-byte sub-chunk header.
     /// Confirmed for section 0; layout UNVERIFIED for sections > 0.
     /// spec: Docs/RE/formats/terrain_layers.md §1.8 SubChunk_Header (12 bytes): CONFIRMED (section 0).
     /// </summary>
     public required ReadOnlyMemory<byte> RawSubChunkHeader { get; init; }
+
     /// <summary>Vertex array (VF_36). spec: §1.8 CONFIRMED.</summary>
     public required FxVertex36[] Vertices { get; init; }
+
     /// <summary>Index array (u16). spec: §1.8 CONFIRMED.</summary>
     public required ushort[] Indices { get; init; }
 }
@@ -256,8 +303,10 @@ public sealed class Fx6SubChunk
 {
     /// <summary>Vertex array (VF_32). spec: §1.9 CONFIRMED.</summary>
     public required FxVertex32[] Vertices { get; init; }
+
     /// <summary>Index array (u16). spec: §1.9 CONFIRMED.</summary>
     public required ushort[] Indices { get; init; }
+
     /// <summary>
     /// Raw footer bytes (28 bytes), or empty for the final sub-chunk.
     /// All footer fields UNVERIFIED. spec: §1.9 Footer (28 bytes): UNVERIFIED.
@@ -279,11 +328,13 @@ public sealed class Fx6Layer
     /// sub_chunk_count u32 @ GlobalHeader+0x00. Observed: 40. spec: §1.9 CONFIRMED.
     /// </summary>
     public required uint SubChunkCount { get; init; }
+
     /// <summary>
     /// Raw global header bytes 0x04–0x1F (28 bytes). All fields UNVERIFIED.
     /// spec: Docs/RE/formats/terrain_layers.md §1.9 GlobalHeader remaining fields: UNVERIFIED.
     /// </summary>
     public required ReadOnlyMemory<byte> RawGlobalHeaderRest { get; init; }
+
     /// <summary>Sub-chunks in on-disk order. spec: §1.9 CONFIRMED.</summary>
     public required Fx6SubChunk[] SubChunks { get; init; }
 }
@@ -304,10 +355,13 @@ public sealed class LightKeyframe
 {
     /// <summary>sun_colour[0] f32 @ slot+0x00. CONFIRMED.</summary>
     public required float SunColour0 { get; init; }
+
     /// <summary>sun_colour[1] f32 @ slot+0x04. CONFIRMED.</summary>
     public required float SunColour1 { get; init; }
+
     /// <summary>sun_colour[2] f32 @ slot+0x08. CONFIRMED.</summary>
     public required float SunColour2 { get; init; }
+
     /// <summary>Remaining 9 floats (offsets +0x0C..+0x2C) — raw bytes. Partially UNVERIFIED.</summary>
     public required ReadOnlyMemory<byte> RawRest { get; init; }
 }
@@ -360,21 +414,26 @@ public sealed class PointLightRecord
 {
     /// <summary>colour_group_1[0..2] f32×3 @ +0x00. CONFIRMED.</summary>
     public required float[] ColourGroup1 { get; init; } // length 3
+
     /// <summary>colour_group_2[0..2] f32×3 @ +0x0C. CONFIRMED.</summary>
     public required float[] ColourGroup2 { get; init; } // length 3
+
     /// <summary>colour_group_3[0..2] f32×3 @ +0x18. CONFIRMED.</summary>
     public required float[] ColourGroup3 { get; init; } // length 3
+
     /// <summary>
     /// Raw remaining bytes at +0x24..+0x38 (offsets 36–56, 21 bytes — positions+range+enabled).
     /// Positions and range UNVERIFIED.
     /// spec: §7.2 — unknown_0..unknown_3 UNVERIFIED; enabled_flag CONFIRMED.
     /// </summary>
     public required ReadOnlyMemory<byte> RawRest { get; init; }
+
     /// <summary>
     /// enabled_flag u32 @ +0x34. 0 = active; non-zero = skip.
     /// spec: Docs/RE/formats/terrain_layers.md §7.2 — enabled_flag: CONFIRMED.
     /// </summary>
     public required uint EnabledFlag { get; init; }
+
     /// <summary>
     /// unknown_4 u32 @ +0x38. UNVERIFIED.
     /// spec: Docs/RE/formats/terrain_layers.md §7.2 — unknown_4: UNVERIFIED.
@@ -397,6 +456,7 @@ public sealed class PointLightBinData
     /// spec: Docs/RE/formats/terrain_layers.md §7.1 — intensity_scale: CONFIRMED.
     /// </summary>
     public required uint IntensityScale { get; init; }
+
     /// <summary>Point-light records. spec: §7.1 — count: CONFIRMED.</summary>
     public required PointLightRecord[] Records { get; init; }
 }
@@ -413,8 +473,10 @@ public sealed class WindBinData
 {
     /// <summary>count u32 @ +0x00. CONFIRMED.</summary>
     public required uint Count { get; init; }
+
     /// <summary>flag2 u32 @ +0x04. Non-zero enables foliage-sway seeding. CONFIRMED.</summary>
     public required uint Flag2 { get; init; }
+
     /// <summary>
     /// Wind keyframe records (24 bytes each). Fields 0–4 UNVERIFIED; sway_seed at +0x14 MEDIUM.
     /// spec: Docs/RE/formats/terrain_layers.md §8.2 — sway_seed @ +0x14: MEDIUM.

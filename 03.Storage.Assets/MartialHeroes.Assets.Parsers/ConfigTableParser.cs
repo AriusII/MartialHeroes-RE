@@ -583,7 +583,7 @@ public static class ConfigTableParser
 
     // Confirmed field offsets within the 488-byte record.
     // spec: Docs/RE/formats/config_tables.md §2.9.
-    private const int MobIdOffset = 0;    // u16 mob ID. CONFIRMED.
+    private const int MobIdOffset = 0; // u16 mob ID. CONFIRMED.
     private const int MobTypeOffset = 324; // u8 mob type (11 = boss). CONFIRMED.
     private const int MobLevelOffset = 244; // i32 mob level; -1=not set. CONFIRMED (boss validation path).
     private const int SpawnTimerOffset = 248; // u32 spawn timer in seconds. CONFIRMED (plausible range).

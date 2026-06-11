@@ -235,6 +235,7 @@ public static class AssetPassthrough
             if (i > 0) sb.Append(' ');
             sb.Append(span[i].ToString("X2"));
         }
+
         return sb.ToString();
     }
 }

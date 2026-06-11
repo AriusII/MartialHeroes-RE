@@ -12,7 +12,9 @@ public sealed class StatAggregationTests
     private static readonly ReadOnlyMemory<BuffContribution> NoBuffs = ReadOnlyMemory<BuffContribution>.Empty;
     private static readonly ReadOnlyMemory<EquipmentContribution> NoEquip = ReadOnlyMemory<EquipmentContribution>.Empty;
     private static readonly ReadOnlyMemory<SetPieceContribution> NoSets = ReadOnlyMemory<SetPieceContribution>.Empty;
-    private static readonly ReadOnlyMemory<ModifierSlotContribution> NoSlots = ReadOnlyMemory<ModifierSlotContribution>.Empty;
+
+    private static readonly ReadOnlyMemory<ModifierSlotContribution> NoSlots =
+        ReadOnlyMemory<ModifierSlotContribution>.Empty;
 
     // -------------------------------------------------------------------------
     // Single-source contributions.
@@ -105,7 +107,8 @@ public sealed class StatAggregationTests
         BuffContribution[] buffs = [new(StatKey.Str, 2), new(StatKey.AllStats, 1)];
         EquipmentContribution[] equip = [new(StatKey.Str, 4)];
         ModifierSlotContribution[] slots = [new(StatKey.Str, 5)];
-        SetPieceContribution[] sets = [new(SetTypeId: 1, RequiredPieceCount: 1, StatKey.Str, PerPieceBonus: 8, SetCompleteBonus: 16)];
+        SetPieceContribution[] sets =
+            [new(SetTypeId: 1, RequiredPieceCount: 1, StatKey.Str, PerPieceBonus: 8, SetCompleteBonus: 16)];
 
         // serverBase 10 + buff 2 + allStats 1 + equip 4 + slot 5 + set (per-piece 8 + complete 16) + global 3 = 49.
         int v = StatAggregation.Aggregate(StatKey.Str, 10, buffs, equip, sets, slots, globalAddend: 3);

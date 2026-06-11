@@ -82,10 +82,10 @@ public sealed class SkinnedGltfConverterTests
         ],
         Weights =
         [
-            new SknWeight(0, 0, 1.0f),        // vertex 0 → bone 0 (100%)
-            new SknWeight(1, 0, 0.5f),        // vertex 1 → bone 0 (50%)
-            new SknWeight(1, 1, 0.5f),        // vertex 1 → bone 1 (50%)
-            new SknWeight(2, 1, 1.0f),        // vertex 2 → bone 1 (100%)
+            new SknWeight(0, 0, 1.0f), // vertex 0 → bone 0 (100%)
+            new SknWeight(1, 0, 0.5f), // vertex 1 → bone 0 (50%)
+            new SknWeight(1, 1, 0.5f), // vertex 1 → bone 1 (50%)
+            new SknWeight(2, 1, 1.0f), // vertex 2 → bone 1 (100%)
         ],
     };
 
@@ -196,8 +196,8 @@ public sealed class SkinnedGltfConverterTests
         using var doc = JsonDocument.Parse(json);
 
         var attrs = doc.RootElement.GetProperty("meshes")[0]
-                                   .GetProperty("primitives")[0]
-                                   .GetProperty("attributes");
+            .GetProperty("primitives")[0]
+            .GetProperty("attributes");
 
         Assert.True(attrs.TryGetProperty("JOINTS_0", out _));
         Assert.True(attrs.TryGetProperty("WEIGHTS_0", out _));
@@ -211,8 +211,8 @@ public sealed class SkinnedGltfConverterTests
         using var doc = JsonDocument.Parse(json);
 
         var attrs = doc.RootElement.GetProperty("meshes")[0]
-                                   .GetProperty("primitives")[0]
-                                   .GetProperty("attributes");
+            .GetProperty("primitives")[0]
+            .GetProperty("attributes");
         int jntAccIdx = attrs.GetProperty("JOINTS_0").GetInt32();
         var jntAcc = doc.RootElement.GetProperty("accessors")[jntAccIdx];
 
@@ -228,8 +228,8 @@ public sealed class SkinnedGltfConverterTests
         using var doc = JsonDocument.Parse(json);
 
         var attrs = doc.RootElement.GetProperty("meshes")[0]
-                                   .GetProperty("primitives")[0]
-                                   .GetProperty("attributes");
+            .GetProperty("primitives")[0]
+            .GetProperty("attributes");
         int wgtAccIdx = attrs.GetProperty("WEIGHTS_0").GetInt32();
         var wgtAcc = doc.RootElement.GetProperty("accessors")[wgtAccIdx];
 
@@ -306,8 +306,8 @@ public sealed class SkinnedGltfConverterTests
         using var doc = JsonDocument.Parse(json);
 
         var attrs = doc.RootElement.GetProperty("meshes")[0]
-                                   .GetProperty("primitives")[0]
-                                   .GetProperty("attributes");
+            .GetProperty("primitives")[0]
+            .GetProperty("attributes");
         int wgtAccIdx = attrs.GetProperty("WEIGHTS_0").GetInt32();
         var wgtAcc = doc.RootElement.GetProperty("accessors")[wgtAccIdx];
         int wgtBvIdx = wgtAcc.GetProperty("bufferView").GetInt32();

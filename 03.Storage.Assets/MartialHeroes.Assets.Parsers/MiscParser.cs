@@ -59,13 +59,13 @@ public static class MiscParser
             // spec: Docs/RE/formats/misc_data.md §2 — "7 × u32le: HIGH (layout); field semantics PARTIAL".
             results[i] = new MobInfoRecord
             {
-                MobClassId      = BinaryPrimitives.ReadUInt32LittleEndian(rec[0..]),  // mob_class_id @ +0
-                NameStrId       = BinaryPrimitives.ReadUInt32LittleEndian(rec[4..]),  // name_str_id @ +4
-                AltNameStrId    = BinaryPrimitives.ReadUInt32LittleEndian(rec[8..]),  // alt_name_str_id @ +8
-                IconIndex       = BinaryPrimitives.ReadUInt32LittleEndian(rec[12..]), // icon_index @ +12
-                PortraitRes1    = BinaryPrimitives.ReadUInt32LittleEndian(rec[16..]), // portrait_res_1 @ +16
-                PortraitRes2    = BinaryPrimitives.ReadUInt32LittleEndian(rec[20..]), // portrait_res_2 @ +20
-                PortraitRes3    = BinaryPrimitives.ReadUInt32LittleEndian(rec[24..]), // portrait_res_3 @ +24
+                MobClassId = BinaryPrimitives.ReadUInt32LittleEndian(rec[0..]), // mob_class_id @ +0
+                NameStrId = BinaryPrimitives.ReadUInt32LittleEndian(rec[4..]), // name_str_id @ +4
+                AltNameStrId = BinaryPrimitives.ReadUInt32LittleEndian(rec[8..]), // alt_name_str_id @ +8
+                IconIndex = BinaryPrimitives.ReadUInt32LittleEndian(rec[12..]), // icon_index @ +12
+                PortraitRes1 = BinaryPrimitives.ReadUInt32LittleEndian(rec[16..]), // portrait_res_1 @ +16
+                PortraitRes2 = BinaryPrimitives.ReadUInt32LittleEndian(rec[20..]), // portrait_res_2 @ +20
+                PortraitRes3 = BinaryPrimitives.ReadUInt32LittleEndian(rec[24..]), // portrait_res_3 @ +24
             };
         }
 
@@ -187,7 +187,9 @@ public static class MiscParser
             int nameEnd = nameBytes.IndexOf((byte)0);
             string displayName = nameEnd < 0
                 ? cp949.GetString(nameBytes)
-                : nameEnd == 0 ? string.Empty : cp949.GetString(nameBytes[..nameEnd]);
+                : nameEnd == 0
+                    ? string.Empty
+                    : cp949.GetString(nameBytes[..nameEnd]);
 
             // keyboard_shortcut char[3] ASCII @ +38. HIGH.
             // spec: Docs/RE/formats/misc_data.md §5 — "keyboard_shortcut char[3] ASCII @ +38: HIGH".
@@ -195,7 +197,9 @@ public static class MiscParser
             int scEnd = shortcutBytes.IndexOf((byte)0);
             string keyboardShortcut = scEnd < 0
                 ? Encoding.ASCII.GetString(shortcutBytes)
-                : scEnd == 0 ? string.Empty : Encoding.ASCII.GetString(shortcutBytes[..scEnd]);
+                : scEnd == 0
+                    ? string.Empty
+                    : Encoding.ASCII.GetString(shortcutBytes[..scEnd]);
 
             // reserved u8[27] @ +41. LOW.
             // spec: Docs/RE/formats/misc_data.md §5 — "reserved u8[27] @ +41: LOW".
