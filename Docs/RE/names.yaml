@@ -25,6 +25,29 @@ crypto:
   SecureHandshake: { note: "opcode 0/0 bignum public-key session handshake; reply as Auth 1/4; NOT Windows CryptoAPI", spec: "Docs/RE/specs/crypto.md" }
   ConfigCryptoApi: { note: "ADVAPI32 anti-cheat + signed/encrypted config-file loader; OUT OF SCOPE for Network.Crypto", spec: "Docs/RE/specs/crypto.md" }
 
+client_mechanics:
+  # Non-network client subsystems recovered in the client-mechanics RE wave.
+  # Keyed by canonical ROLE name (not address); see the referenced specs.
+  Terrain:        { note: "cell-streamed terrain; .map/.ted/.mud/.sod/.lst per cell; 1024x1024 wu cells, quality rings", spec: "Docs/RE/formats/terrain.md" }
+  Animation:      { note: ".mot skeletal clips, 28-byte keyframes (f32[3] translation + f32[4] quat XYZW), 10 fps fixed", spec: "Docs/RE/formats/animation.md" }
+  AnimationMixer: { note: "layered action/cycle mixer; normalized weighted-average blend per bone; no additive/priority", spec: "Docs/RE/formats/animation.md" }
+  ConfigTables:   { note: "client-side .scr catalogues in VFS data/script (exp/userlevel/userpoint/users/items/skills/mobs)", spec: "Docs/RE/formats/config_tables.md" }
+  SoundTables:    { note: "per-map .wlk/.run/.bgm/.bge/.eff 256x48B tables; .xeff = separate visual-effects format", spec: "Docs/RE/formats/sound_tables.md" }
+  GameLoop:       { note: "Win32 message-pump -> render -> tick; subscriber-interval scheduler; timeGetTime ms clock", spec: "Docs/RE/specs/game_loop.md" }
+  InputUi:        { note: "WndProc dispatch (IME-first); 20-byte mouse event; UI->world responsibility chain; widget tree", spec: "Docs/RE/specs/input_ui.md" }
+  LuaScripting:   { note: "embedded Lua 5.1.2 + lua_tinker; minimal native surface (cpp_load); .lua plaintext in data/script", spec: "Docs/RE/specs/lua_scripting.md" }
+
+# Canonical client-asset file extensions recovered from the loader routines.
+file_extensions:
+  ".map": { note: "terrain cell text descriptor (sections + DATAFILE/TEXTURES directives)", spec: "Docs/RE/formats/terrain.md" }
+  ".ted": { note: "terrain cell binary blob (heightmap/normals/lookup/direction/diffuse)", spec: "Docs/RE/formats/terrain.md" }
+  ".mud": { note: "terrain cell fixed 32768-byte opaque blob (internal layout UNVERIFIED)", spec: "Docs/RE/formats/terrain.md" }
+  ".sod": { note: "terrain cell collision solids + triangles", spec: "Docs/RE/formats/terrain.md" }
+  ".lst": { note: "binary cell-key manifest (u32 count + u32[] keys)", spec: "Docs/RE/formats/terrain.md" }
+  ".mot": { note: "skeletal animation clip (binary, little-endian)", spec: "Docs/RE/formats/animation.md" }
+  ".scr": { note: "client catalogue/stat-curve table (binary records)", spec: "Docs/RE/formats/config_tables.md" }
+  ".xeff": { note: "visual effects (magic XEFF); spec pending", spec: "Docs/RE/formats/sound_tables.md" }
+
 # Opcodes are the (major:minor) wire tuple. The key is the catalog encoding major<<16|minor
 # (see Docs/RE/opcodes.md); `tuple` repeats the human-readable major:minor. Direction is
 # from the client's point of view.

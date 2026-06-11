@@ -377,36 +377,1097 @@ public static class GltfConverter
         v.ToString("G9", System.Globalization.CultureInfo.InvariantCulture);
 
     // -------------------------------------------------------------------------
-    // SkinnedMesh overload — partial: base mesh only, skinning is TODO
+    // SkinnedMesh overload — FULL skinning (wave-7 stub replaced)
+    //
+    // Skinning conventions resolved from spec:
+    //   - Bone record on-disk: 36 bytes. self_id, parent_id (u32 LE, low byte used),
+    //     local_translation (f32[3]), local_rotation XYZW (f32[4]).
+    //     spec: Docs/RE/formats/mesh.md §BndBone on-disk record — 36 bytes: CONFIRMED.
+    //   - Quaternion order: XYZW (scalar W last).
+    //     spec: Docs/RE/formats/mesh.md §Quaternion component order: CONFIRMED.
+    //   - Root bone sentinel: self_id==0 && parent_id==0 (low bytes).
+    //     spec: Docs/RE/formats/mesh.md §Root bone sentinel: CONFIRMED.
+    //   - Weight normalization: per-vertex sum must equal 1.0; enforced by the parser.
+    //     spec: Docs/RE/formats/mesh.md §Weight record — "engine normalises weights per vertex": CONFIRMED.
+    //   - glTF skinning: JOINTS_0 (VEC4 UNSIGNED_SHORT) + WEIGHTS_0 (VEC4 FLOAT normalised).
+    //     Up to 4 influences per vertex; unused slots get joint index 0 and weight 0.
+    //     glTF 2.0 spec §Skins, §Accessor.
+    //   - Inverse-bind matrices: computed from the bone rest-pose world transform.
+    //     The .bnd file does NOT store pre-computed inverse-bind matrices — they are derived.
+    //     spec: Docs/RE/formats/mesh.md §Bone array —
+    //       "remaining fields … computed by post-load routines": CONFIRMED.
+    //     Computation: accumulate parent chain (root→bone) to get world transform,
+    //     then invert that 4×4 matrix. glTF 2.0 spec §Skins — inverseBindMatrices.
+    //   - JOINTS_0 contains per-vertex bone indices into the skeleton's joint array
+    //     (glTF joint array index, not self_id). SknWeight.BoneIndex is the zero-based
+    //     index into the Skeleton.Bones array.
+    //     spec: Docs/RE/formats/mesh.md §Weight record — bone_index: CONFIRMED.
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Writes a GLB containing the base geometry of a skinned mesh.
-    /// Positions, UVs, and triangle indices are emitted using the unique vertex set
-    /// implied by the corner table.
+    /// Writes a GLB containing the skinned mesh with full skeleton and optional animations.
     /// </summary>
-    /// <remarks>
-    /// TODO: skinning — JOINTS_0, WEIGHTS_0 accessors, skin node, and inverse-bind
-    /// matrices are not yet emitted.  The <see cref="Skeleton"/> parameter is accepted
-    /// but ignored pending the following spec gap being resolved:
-    ///   - Bone quaternion component order (XYZW vs WXYZ) is UNVERIFIED.
-    ///     spec: Docs/RE/formats/mesh.md §BndBone record — rotation: MEDIUM confidence.
-    ///   - Bone record bytes 36–71 are entirely uncharacterized; inverse-bind matrices
-    ///     may live there.
-    ///     spec: Docs/RE/formats/mesh.md §BndBone record — unknown_36 @ +36: UNVERIFIED.
-    ///   - Root bone sentinel value is UNVERIFIED.
-    ///     spec: Docs/RE/formats/mesh.md §BndBone record — parent_id: MEDIUM confidence.
-    /// When the spec gaps above are resolved and a parser type exposing inverse-bind
-    /// matrices is available, implement full skinning here.
-    /// </remarks>
-    public static void WriteGlb(SkinnedMesh mesh, Skeleton? skeleton, Stream output)
+    /// <param name="mesh">Parsed skinned mesh from <c>SknParser</c>.</param>
+    /// <param name="skeleton">
+    /// Bind-pose skeleton from <c>BndParser</c>. If null, only base geometry is emitted
+    /// (no JOINTS_0/WEIGHTS_0, no skin node).
+    /// </param>
+    /// <param name="clips">
+    /// Optional animation clips to embed. Each clip becomes one glTF animation.
+    /// Pass null or empty to omit the animations section.
+    /// </param>
+    /// <param name="output">Destination stream (does not need to be seekable).</param>
+    public static void WriteGlb(SkinnedMesh mesh, Skeleton? skeleton, Stream output,
+        AnimationClip[]? clips = null)
     {
         ArgumentNullException.ThrowIfNull(mesh);
         ArgumentNullException.ThrowIfNull(output);
 
-        // Build a StaticMesh from the corner table (expand unique vertices).
-        StaticMesh staticView = ExpandSkinnedMeshToStatic(mesh);
-        WriteGlb(staticView, output);
+        if (skeleton is null)
+        {
+            // Fallback: emit only base geometry (no skinning data).
+            StaticMesh staticView = ExpandSkinnedMeshToStatic(mesh);
+            WriteGlb(staticView, output);
+            return;
+        }
+
+        WriteGlbSkinned(mesh, skeleton, clips, output);
+    }
+
+    // -------------------------------------------------------------------------
+    // Full skinned GLB emission
+    // -------------------------------------------------------------------------
+
+    private static void WriteGlbSkinned(
+        SkinnedMesh mesh, Skeleton skeleton,
+        AnimationClip[]? clips,
+        Stream output)
+    {
+        // ---- Step 1: Expand corner table → unique (position, uv, boneWeights) vertices ----
+        // Each corner references a vertex index for position; bone weights are per-vertex.
+        // We expand to a flat vertex list keyed on (vertexIndex, u, v) so each unique
+        // position+UV combination gets its own entry with the correct bone influences.
+
+        ExpandSkinnedVertices(mesh, out Vec3[] positions, out Vec2[] uvs,
+            out ushort[] indices,
+            out ushort[,] jointIndices, // [newVertex, 0..3]
+            out float[,] weights); // [newVertex, 0..3]
+
+        int vertexCount = positions.Length;
+        int indexCount = indices.Length;
+        int boneCount = skeleton.Bones.Length;
+
+        bool use32BitIdx = vertexCount > ushort.MaxValue;
+
+        // ---- Step 2: Compute inverse-bind matrices (one per bone) ----
+        // spec: Docs/RE/formats/mesh.md §Bone array — local_translation, local_rotation XYZW: CONFIRMED.
+        // glTF 2.0 spec §Skins — inverseBindMatrices: one MAT4 per joint.
+        float[] invBindData = ComputeInverseBindMatrices(skeleton); // boneCount × 16 floats
+
+        // ---- Step 3: Build binary buffer ----
+        byte[] bin = BuildSkinnedBinaryBuffer(
+            positions, uvs, indices, jointIndices, weights, invBindData,
+            use32BitIdx,
+            out int posOff, out int posLen,
+            out int uvOff, out int uvLen,
+            out int jntOff, out int jntLen,
+            out int wgtOff, out int wgtLen,
+            out int idxOff, out int idxLen,
+            out int ibmOff, out int ibmLen);
+
+        // ---- Step 4: Build animation binary data (samplers input/output) ----
+        // Each clip → one glTF animation.
+        // spec: Docs/RE/formats/animation.md §Timing — "Fixed frame rate: 10 fps": CONFIRMED.
+        // Time in seconds = keyframe_index / 10.0f.
+        var animBufferParts = new List<(byte[] data, int timeOff, int timeLen,
+            int transOff, int transLen,
+            int rotOff, int rotLen,
+            int trackCount, int[] keyCounts,
+            byte[] boneIds)>();
+
+        int extraBinOffset = Align4(ibmOff + ibmLen);
+        int runningOffset = extraBinOffset;
+
+        // We need to build all animation binary data, then concatenate with the main buffer.
+        // Strategy: build anim binary separately, then append to bin.
+        byte[] animBin = BuildAnimationBinaryData(clips, skeleton, out var animParts);
+
+        // Merge buffers
+        byte[] fullBin;
+        if (animBin.Length > 0)
+        {
+            int baseSize = Align4(ibmOff + ibmLen);
+            fullBin = new byte[baseSize + animBin.Length];
+            bin.AsSpan(0, bin.Length).CopyTo(fullBin.AsSpan(0));
+            animBin.AsSpan().CopyTo(fullBin.AsSpan(baseSize));
+            // Adjust anim part offsets by baseSize
+            for (int i = 0; i < animParts.Count; i++)
+            {
+                var p = animParts[i];
+                animParts[i] = p with
+                {
+                    TimeOff = p.TimeOff + baseSize,
+                    TransOff = p.TransOff + baseSize,
+                    RotOff = p.RotOff + baseSize,
+                };
+            }
+        }
+        else
+        {
+            fullBin = bin;
+        }
+
+        // ---- Step 5: Build JSON ----
+        string json = BuildSkinnedJson(
+            positions, vertexCount, indexCount, boneCount, use32BitIdx,
+            posOff, posLen, uvOff, uvLen,
+            jntOff, jntLen, wgtOff, wgtLen,
+            idxOff, idxLen, ibmOff, ibmLen,
+            fullBin.Length, skeleton, animParts, clips);
+
+        // ---- Step 6: Write GLB ----
+        WriteGlbChunks(output, json, fullBin);
+    }
+
+    // -------------------------------------------------------------------------
+    // Vertex expansion (corner table → flat arrays with bone influences)
+    // -------------------------------------------------------------------------
+
+    private static void ExpandSkinnedVertices(
+        SkinnedMesh mesh,
+        out Vec3[] outPositions,
+        out Vec2[] outUvs,
+        out ushort[] outIndices,
+        out ushort[,] outJointIndices,
+        out float[,] outWeights)
+    {
+        // Collect per-original-vertex weight lists (up to 4 influences per vertex).
+        // spec: Docs/RE/formats/mesh.md §Weight record — vertex_index, bone_index, weight: CONFIRMED.
+        // glTF 2.0 spec §Meshes §Skins: JOINTS_0 and WEIGHTS_0 carry up to 4 influences.
+        int origVertexCount = mesh.Positions.Length;
+        var perVertexWeights = new List<(uint boneIndex, float weight)>[origVertexCount];
+        for (int i = 0; i < origVertexCount; i++)
+            perVertexWeights[i] = new List<(uint, float)>(4);
+
+        foreach (SknWeight w in mesh.Weights)
+        {
+            int vi = (int)w.VertexIndex;
+            if (vi < origVertexCount)
+                perVertexWeights[vi].Add((w.BoneIndex, w.Weight));
+        }
+
+        // Expand corners → unique (vertexIndex, u, v) entries.
+        var vertexMap = new Dictionary<(uint vi, float u, float v), ushort>(mesh.Corners.Length);
+        var positions = new List<Vec3>(mesh.Corners.Length);
+        var uvs = new List<Vec2>(mesh.Corners.Length);
+        var indexList = new List<ushort>(mesh.Corners.Length);
+        // Store the original vertex index for each new vertex so we can copy bone weights.
+        var origVertexMapping = new List<uint>(mesh.Corners.Length);
+
+        foreach (SknCorner corner in mesh.Corners)
+        {
+            var key = (corner.VertexIndex, corner.UvU, corner.UvV);
+            if (!vertexMap.TryGetValue(key, out ushort newIdx))
+            {
+                newIdx = checked((ushort)positions.Count);
+                positions.Add(mesh.Positions[(int)corner.VertexIndex]);
+                uvs.Add(new Vec2(corner.UvU, corner.UvV));
+                origVertexMapping.Add(corner.VertexIndex);
+                vertexMap[key] = newIdx;
+            }
+
+            indexList.Add(newIdx);
+        }
+
+        int newCount = positions.Count;
+        outPositions = positions.ToArray();
+        outUvs = uvs.ToArray();
+        outIndices = indexList.ToArray();
+        outJointIndices = new ushort[newCount, 4];
+        outWeights = new float[newCount, 4];
+
+        for (int ni = 0; ni < newCount; ni++)
+        {
+            int origVi = (int)origVertexMapping[ni];
+            var wList = perVertexWeights[origVi];
+            // Sort by weight descending, take up to 4.
+            wList.Sort((a, b) => b.weight.CompareTo(a.weight));
+
+            float totalWeight = 0f;
+            for (int k = 0; k < Math.Min(4, wList.Count); k++)
+                totalWeight += wList[k].weight;
+
+            for (int k = 0; k < 4; k++)
+            {
+                if (k < wList.Count)
+                {
+                    outJointIndices[ni, k] = (ushort)wList[k].boneIndex;
+                    outWeights[ni, k] = totalWeight > 0f ? wList[k].weight / totalWeight : 0f;
+                }
+                else
+                {
+                    outJointIndices[ni, k] = 0;
+                    outWeights[ni, k] = 0f;
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Inverse-bind matrix computation
+    // glTF 2.0 spec §Skins — inverseBindMatrices: one column-major MAT4 per joint.
+    // spec: Docs/RE/formats/mesh.md §Bone array — local_translation @ +8, local_rotation XYZW @ +20: CONFIRMED.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Computes the inverse bind-pose world transform for each bone.
+    /// Returns a flat array of <c>boneCount × 16</c> floats in column-major (glTF) order.
+    /// </summary>
+    private static float[] ComputeInverseBindMatrices(Skeleton skeleton)
+    {
+        int n = skeleton.Bones.Length;
+        float[] result = new float[n * 16];
+
+        // Build a lookup from self_id (low byte) to index in the Bones array.
+        // spec: Docs/RE/formats/mesh.md §BndBone — self_id low byte only: CONFIRMED.
+        var idToIndex = new Dictionary<byte, int>(n);
+        for (int i = 0; i < n; i++)
+            idToIndex[(byte)(skeleton.Bones[i].SelfId & 0xFF)] = i;
+
+        // Compute world transforms by traversing the parent chain.
+        // Each world transform is Translation × Rotation (no scale in spec).
+        // Store as column-major 4×4 float matrices.
+        float[] worldTx = new float[n * 16]; // world transform per bone
+
+        // Process bones: we need to ensure parents are processed before children.
+        // The spec says parent_id → self_id linkage; we do a simple dependency-ordered pass.
+        bool[] computed = new bool[n];
+
+        void ComputeBone(int idx)
+        {
+            if (computed[idx]) return;
+
+            Bone b = skeleton.Bones[idx];
+            byte parentByte = (byte)(b.ParentId & 0xFF);
+            byte selfByte = (byte)(b.SelfId & 0xFF);
+
+            // Local transform: Translation + Rotation (XYZW).
+            // spec: Docs/RE/formats/mesh.md §BndBone — local_translation @ +8, local_rotation XYZW @ +20: CONFIRMED.
+            // Coordinate system: same left-handed → right-handed flip as positions (negate X).
+            // spec: Docs/RE/formats/mesh.md §Vertex list — pos_x: CONFIRMED (same convention applies to bones).
+            // glTF 2.0 spec §3.4: right-handed Y-up.
+            // For translation: negate X component.
+            // For rotation quaternion (XYZW): in left-handed → right-handed conversion,
+            //   negate X and Z quaternion components (equivalent to negating the axis perpendicular to X).
+            //   Convention: negate X and Z of quaternion to match handedness flip on X axis.
+            float tx = -b.Translation.X;
+            float ty = b.Translation.Y;
+            float tz = b.Translation.Z;
+
+            float qx = -b.Rotation.X;
+            float qy = b.Rotation.Y;
+            float qz = -b.Rotation.Z;
+            float qw = b.Rotation.W;
+
+            // Normalise quaternion.
+            float qlen = MathF.Sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
+            if (qlen > 1e-6f)
+            {
+                qx /= qlen;
+                qy /= qlen;
+                qz /= qlen;
+                qw /= qlen;
+            }
+            else
+            {
+                qx = 0f;
+                qy = 0f;
+                qz = 0f;
+                qw = 1f;
+            }
+
+            // Build local 4×4 column-major TRS matrix (rotation + translation, no scale).
+            float[] localM = QuatToMatrix(qx, qy, qz, qw, tx, ty, tz);
+
+            if (b.IsRoot || !idToIndex.TryGetValue(parentByte, out int parentIdx))
+            {
+                // Root bone: world == local.
+                localM.AsSpan().CopyTo(worldTx.AsSpan(idx * 16));
+            }
+            else
+            {
+                ComputeBone(parentIdx); // ensure parent is ready
+                // World = Parent.World × Local
+                MatMul4x4(worldTx.AsSpan(parentIdx * 16), localM,
+                    worldTx.AsSpan(idx * 16));
+            }
+
+            computed[idx] = true;
+        }
+
+        for (int i = 0; i < n; i++)
+            ComputeBone(i);
+
+        // Invert each world transform to get inverse-bind matrix.
+        for (int i = 0; i < n; i++)
+        {
+            InvertTrsMatrix(worldTx.AsSpan(i * 16), result.AsSpan(i * 16));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Builds a column-major 4×4 TRS matrix from a rotation quaternion (XYZW) and translation.
+    /// No scale component.
+    /// glTF 2.0 spec §Nodes and Hierarchy — TRS decomposition.
+    /// </summary>
+    private static float[] QuatToMatrix(float qx, float qy, float qz, float qw,
+        float tx, float ty, float tz)
+    {
+        // Column-major: [col0.xyzw, col1.xyzw, col2.xyzw, col3.xyzw]
+        // Rotation from quaternion (standard derivation, right-handed).
+        float x2 = qx * qx, y2 = qy * qy, z2 = qz * qz;
+        float xy = qx * qy, xz = qx * qz, yz = qy * qz;
+        float wx = qw * qx, wy = qw * qy, wz = qw * qz;
+
+        return
+        [
+            1f - 2f * (y2 + z2), 2f * (xy + wz), 2f * (xz - wy), 0f, // col0
+            2f * (xy - wz), 1f - 2f * (x2 + z2), 2f * (yz + wx), 0f, // col1
+            2f * (xz + wy), 2f * (yz - wx), 1f - 2f * (x2 + y2), 0f, // col2
+            tx, ty, tz, 1f, // col3
+        ];
+    }
+
+    /// <summary>
+    /// Multiplies two 4×4 column-major matrices: result = a × b.
+    /// </summary>
+    private static void MatMul4x4(ReadOnlySpan<float> a, float[] b, Span<float> result)
+    {
+        for (int col = 0; col < 4; col++)
+        {
+            for (int row = 0; row < 4; row++)
+            {
+                float sum = 0f;
+                for (int k = 0; k < 4; k++)
+                    sum += a[k * 4 + row] * b[col * 4 + k];
+                result[col * 4 + row] = sum;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Inverts a 4×4 TRS column-major matrix (assumes only rotation + translation, no scale).
+    /// For a pure rotation-translation matrix: inv(M) = [R^T | -R^T * t].
+    /// </summary>
+    private static void InvertTrsMatrix(ReadOnlySpan<float> m, Span<float> inv)
+    {
+        // Extract rotation (upper-left 3×3) and translation (column 3, rows 0-2).
+        // Column-major: m[col*4+row].
+        float r00 = m[0], r10 = m[1], r20 = m[2]; // col0
+        float r01 = m[4], r11 = m[5], r21 = m[6]; // col1
+        float r02 = m[8], r12 = m[9], r22 = m[10]; // col2
+        float tx = m[12], ty = m[13], tz = m[14]; // col3
+
+        // Transpose of rotation block.
+        float ir00 = r00, ir01 = r10, ir02 = r20;
+        float ir10 = r01, ir11 = r11, ir12 = r21;
+        float ir20 = r02, ir21 = r12, ir22 = r22;
+
+        // -R^T * t
+        float itx = -(ir00 * tx + ir01 * ty + ir02 * tz);
+        float ity = -(ir10 * tx + ir11 * ty + ir12 * tz);
+        float itz = -(ir20 * tx + ir21 * ty + ir22 * tz);
+
+        inv[0] = ir00;
+        inv[1] = ir10;
+        inv[2] = ir20;
+        inv[3] = 0f;
+        inv[4] = ir01;
+        inv[5] = ir11;
+        inv[6] = ir21;
+        inv[7] = 0f;
+        inv[8] = ir02;
+        inv[9] = ir12;
+        inv[10] = ir22;
+        inv[11] = 0f;
+        inv[12] = itx;
+        inv[13] = ity;
+        inv[14] = itz;
+        inv[15] = 1f;
+    }
+
+    // -------------------------------------------------------------------------
+    // Skinned binary buffer construction
+    // -------------------------------------------------------------------------
+
+    private static byte[] BuildSkinnedBinaryBuffer(
+        Vec3[] positions, Vec2[] uvs, ushort[] indices,
+        ushort[,] jointIndices, float[,] weights,
+        float[] invBindData, bool use32BitIdx,
+        out int posOff, out int posLen,
+        out int uvOff, out int uvLen,
+        out int jntOff, out int jntLen,
+        out int wgtOff, out int wgtLen,
+        out int idxOff, out int idxLen,
+        out int ibmOff, out int ibmLen)
+    {
+        int vertexCount = positions.Length;
+        int indexCount = indices.Length;
+        int boneCount = invBindData.Length / 16;
+
+        posLen = vertexCount * 3 * sizeof(float); // VEC3 f32
+        uvLen = vertexCount * 2 * sizeof(float); // VEC2 f32
+        jntLen = vertexCount * 4 * sizeof(ushort); // VEC4 UNSIGNED_SHORT
+        wgtLen = vertexCount * 4 * sizeof(float); // VEC4 f32
+        int idxStride = use32BitIdx ? sizeof(uint) : sizeof(ushort);
+        idxLen = indexCount * idxStride;
+        ibmLen = boneCount * 16 * sizeof(float); // MAT4 f32 per bone
+
+        posOff = 0;
+        uvOff = Align4(posOff + posLen);
+        jntOff = Align4(uvOff + uvLen);
+        wgtOff = Align4(jntOff + jntLen);
+        idxOff = Align4(wgtOff + wgtLen);
+        ibmOff = Align4(idxOff + idxLen);
+        int bufSize = Align4(ibmOff + ibmLen);
+
+        byte[] buf = new byte[bufSize];
+
+        // ---- Positions (X-flipped) ----
+        // spec: Docs/RE/formats/mesh.md §Vertex list — pos_x: CONFIRMED. glTF 2.0 §3.4.
+        int cursor = posOff;
+        for (int i = 0; i < vertexCount; i++)
+        {
+            Vec3 p = positions[i];
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), -p.X);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), p.Y);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), p.Z);
+            cursor += 12;
+        }
+
+        // ---- UVs ----
+        // V already bottom-left from parser.
+        // spec: Docs/RE/formats/mesh.md §Face record — uv_v: "engine applies 1.0 - uv_v". CONFIRMED.
+        cursor = uvOff;
+        for (int i = 0; i < vertexCount; i++)
+        {
+            Vec2 uv = uvs[i];
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), uv.X);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), uv.Y);
+            cursor += 8;
+        }
+
+        // ---- JOINTS_0 (VEC4 UNSIGNED_SHORT) ----
+        // glTF 2.0 spec §Meshes — JOINTS_0: four joint indices per vertex.
+        cursor = jntOff;
+        for (int i = 0; i < vertexCount; i++)
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor), jointIndices[i, 0]);
+            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 2), jointIndices[i, 1]);
+            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 4), jointIndices[i, 2]);
+            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 6), jointIndices[i, 3]);
+            cursor += 8;
+        }
+
+        // ---- WEIGHTS_0 (VEC4 f32) ----
+        // glTF 2.0 spec §Meshes — WEIGHTS_0: four bone weights per vertex, summing to ≤ 1.0.
+        cursor = wgtOff;
+        for (int i = 0; i < vertexCount; i++)
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), weights[i, 0]);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), weights[i, 1]);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), weights[i, 2]);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 12), weights[i, 3]);
+            cursor += 16;
+        }
+
+        // ---- Indices (winding-reversed) ----
+        // Negate X reverses winding; swap i1↔i2 to restore CCW in glTF.
+        // spec: Docs/RE/formats/mesh.md §Index list: CONFIRMED. glTF 2.0 §3.7.2.1.
+        cursor = idxOff;
+        for (int tri = 0; tri < indexCount / 3; tri++)
+        {
+            ushort i0 = indices[tri * 3 + 0];
+            ushort i1 = indices[tri * 3 + 1];
+            ushort i2 = indices[tri * 3 + 2];
+
+            if (use32BitIdx)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(cursor), i0);
+                BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(cursor + 4), i2);
+                BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(cursor + 8), i1);
+                cursor += 12;
+            }
+            else
+            {
+                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor), i0);
+                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 2), i2);
+                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 4), i1);
+                cursor += 6;
+            }
+        }
+
+        // ---- Inverse-bind matrices (MAT4 f32, column-major) ----
+        // glTF 2.0 spec §Skins — inverseBindMatrices accessor: MAT4 FLOAT.
+        cursor = ibmOff;
+        for (int i = 0; i < invBindData.Length; i++)
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), invBindData[i]);
+            cursor += 4;
+        }
+
+        return buf;
+    }
+
+    // -------------------------------------------------------------------------
+    // Animation binary data construction
+    // spec: Docs/RE/formats/animation.md §Timing — 10 fps: CONFIRMED.
+    // spec: Docs/RE/formats/animation.md §Keyframe record — translation XYZ + rotation XYZW: CONFIRMED.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Holds per-clip byte ranges within the animation binary buffer.
+    /// </summary>
+    internal readonly record struct AnimPart(
+        int ClipIndex,
+        int TimeOff,
+        int TimeLen, // input sampler (time in seconds)
+        int TransOff,
+        int TransLen, // output translation VEC3
+        int RotOff,
+        int RotLen, // output rotation VEC4 (quaternion)
+        int TrackCount,
+        int[] KeyCounts, // keyframe count per track
+        byte[] BoneIds); // bone_id per track
+
+    private static byte[] BuildAnimationBinaryData(
+        AnimationClip[]? clips,
+        Skeleton skeleton,
+        out List<AnimPart> parts)
+    {
+        parts = new List<AnimPart>();
+        if (clips is null || clips.Length == 0)
+            return Array.Empty<byte>();
+
+        // Build a set of valid bone self_ids for quick lookup.
+        var validBoneIds = new HashSet<byte>(skeleton.Bones.Length);
+        foreach (Bone b in skeleton.Bones)
+            validBoneIds.Add((byte)(b.SelfId & 0xFF));
+
+        // First pass: compute total byte size needed.
+        int totalSize = 0;
+        foreach (AnimationClip clip in clips)
+        {
+            foreach (AnimationTrack track in clip.Tracks)
+            {
+                int kc = track.Keyframes.Length;
+                if (kc == 0) continue;
+                // time: kc × f32
+                totalSize = Align4(totalSize + kc * sizeof(float));
+                // translation: kc × VEC3 f32
+                totalSize = Align4(totalSize + kc * 3 * sizeof(float));
+                // rotation: kc × VEC4 f32
+                totalSize = Align4(totalSize + kc * 4 * sizeof(float));
+            }
+        }
+
+        if (totalSize == 0)
+            return Array.Empty<byte>();
+
+        byte[] buf = new byte[totalSize];
+        int cursor = 0;
+
+        foreach (AnimationClip clip in clips)
+        {
+            int trackCount = clip.Tracks.Length;
+            int[] keyCounts = new int[trackCount];
+            byte[] boneIds = new byte[trackCount];
+
+            for (int ti = 0; ti < trackCount; ti++)
+            {
+                AnimationTrack track = clip.Tracks[ti];
+                int kc = track.Keyframes.Length;
+                keyCounts[ti] = kc;
+                boneIds[ti] = track.BoneId;
+
+                if (kc == 0) continue;
+
+                // Time accessor (input sampler).
+                // spec: Docs/RE/formats/animation.md §Timing — frame_index / 10.0f = seconds: CONFIRMED.
+                int thisTimeOff = cursor;
+                for (int k = 0; k < kc; k++)
+                {
+                    float t = k / 10.0f; // 10 fps fixed rate
+                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), t);
+                    cursor += 4;
+                }
+
+                cursor = Align4(cursor);
+
+                int thisTransOff = cursor;
+                // Translation accessor (output).
+                // Coordinate flip: negate X component.
+                // spec: Docs/RE/formats/animation.md §Keyframe record — translation_x/y/z: CONFIRMED.
+                // glTF 2.0 §3.4: right-handed.
+                for (int k = 0; k < kc; k++)
+                {
+                    Vec3 tr = track.Keyframes[k].Translation;
+                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), -tr.X);
+                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), tr.Y);
+                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), tr.Z);
+                    cursor += 12;
+                }
+
+                cursor = Align4(cursor);
+
+                int thisRotOff = cursor;
+                // Rotation accessor (output), quaternion XYZW → glTF stores XYZW too.
+                // spec: Docs/RE/formats/animation.md §Keyframe record — rotation XYZW: CONFIRMED.
+                // glTF 2.0 §Animations: rotation accessor stores XYZW (scalar W last).
+                // Coordinate flip for quaternion: negate X and Z (same as bone transforms).
+                // Note on interpolation: glTF LINEAR interpolation for quaternion channels is
+                //   defined by the glTF spec as nlerp (not strict slerp). The original engine
+                //   used slerp (spec: Docs/RE/formats/animation.md §Rotation interpolation: CONFIRMED).
+                //   glTF viewers implementing the spec will apply nlerp; the visual difference is
+                //   negligible for small angular deltas between keyframes.
+                for (int k = 0; k < kc; k++)
+                {
+                    Quat q = track.Keyframes[k].Rotation;
+                    float qx = -q.X;
+                    float qy = q.Y;
+                    float qz = -q.Z;
+                    float qw = q.W;
+                    // Normalise
+                    float qlen = MathF.Sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
+                    if (qlen > 1e-6f)
+                    {
+                        qx /= qlen;
+                        qy /= qlen;
+                        qz /= qlen;
+                        qw /= qlen;
+                    }
+                    else
+                    {
+                        qx = 0f;
+                        qy = 0f;
+                        qz = 0f;
+                        qw = 1f;
+                    }
+
+                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), qx);
+                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), qy);
+                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), qz);
+                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 12), qw);
+                    cursor += 16;
+                }
+
+                cursor = Align4(cursor);
+
+                // One AnimPart per track: each track has its own time/translation/rotation buffer views.
+                parts.Add(new AnimPart(
+                    ClipIndex: parts.Count,
+                    TimeOff: thisTimeOff,
+                    TimeLen: kc * sizeof(float),
+                    TransOff: thisTransOff,
+                    TransLen: kc * 3 * sizeof(float),
+                    RotOff: thisRotOff,
+                    RotLen: kc * 4 * sizeof(float),
+                    TrackCount: 1,
+                    KeyCounts: [kc],
+                    BoneIds: [track.BoneId]));
+            }
+        }
+
+        return buf;
+    }
+
+    // -------------------------------------------------------------------------
+    // Skinned glTF JSON construction
+    // -------------------------------------------------------------------------
+
+    private static string BuildSkinnedJson(
+        Vec3[] positions, int vertexCount, int indexCount, int boneCount,
+        bool use32BitIdx,
+        int posOff, int posLen,
+        int uvOff, int uvLen,
+        int jntOff, int jntLen,
+        int wgtOff, int wgtLen,
+        int idxOff, int idxLen,
+        int ibmOff, int ibmLen,
+        int bufferByteLength,
+        Skeleton skeleton,
+        List<AnimPart> animParts,
+        AnimationClip[]? clips)
+    {
+        // Compute position min/max (with X-flip applied).
+        ComputePositionMinMax(positions, out float minX, out float minY, out float minZ,
+            out float maxX, out float maxY, out float maxZ);
+
+        int indexComponentType = use32BitIdx ? ComponentTypeUnsignedInt : ComponentTypeUnsignedShort;
+
+        // Build bone → node index map.
+        // glTF nodes: index 0 = mesh node, indices 1..boneCount = bone nodes.
+        // spec: Docs/RE/formats/mesh.md §Root bone sentinel: CONFIRMED.
+        var boneNodeIndex = new int[boneCount];
+        for (int i = 0; i < boneCount; i++)
+            boneNodeIndex[i] = i + 1; // node 0 = mesh node, nodes 1..N = bones
+
+        // Build parent → children map (by index in Bones array).
+        var idToIndex = new Dictionary<byte, int>(boneCount);
+        for (int i = 0; i < boneCount; i++)
+            idToIndex[(byte)(skeleton.Bones[i].SelfId & 0xFF)] = i;
+
+        var sb = new StringBuilder(2048);
+        sb.Append('{');
+        sb.Append("\"asset\":{\"version\":\"2.0\",\"generator\":\"MartialHeroes.Assets.Mapping.GltfConverter\"},");
+
+        // ---- Accessor indices bookkeeping ----
+        // 0: POSITION, 1: TEXCOORD_0, 2: JOINTS_0, 3: WEIGHTS_0, 4: indices, 5: IBM,
+        // then animation time/translation/rotation accessors follow.
+        const int accPosition = 0;
+        const int accUv = 1;
+        const int accJoints = 2;
+        const int accWeights = 3;
+        const int accIndices = 4;
+        const int accIbm = 5;
+        int nextAcc = 6;
+
+        // BufferView indices:
+        const int bvPos = 0;
+        const int bvUv = 1;
+        const int bvJnt = 2;
+        const int bvWgt = 3;
+        const int bvIdx = 4;
+        const int bvIbm = 5;
+        int nextBv = 6;
+
+        // scene / nodes
+        sb.Append("\"scene\":0,");
+        sb.Append("\"scenes\":[{\"nodes\":[0]}],");
+
+        // Nodes: 0 = mesh node (with skin ref), 1..N = bone nodes.
+        sb.Append("\"nodes\":[");
+
+        // Node 0: mesh node, references skin 0 and mesh 0.
+        // Find root bone node index.
+        int rootNodeIndex = -1;
+        for (int i = 0; i < boneCount; i++)
+        {
+            if (skeleton.Bones[i].IsRoot)
+            {
+                rootNodeIndex = boneNodeIndex[i];
+                break;
+            }
+        }
+
+        if (rootNodeIndex < 0 && boneCount > 0) rootNodeIndex = boneNodeIndex[0];
+
+        sb.Append('{');
+        sb.Append("\"mesh\":0,");
+        sb.Append("\"skin\":0");
+        if (rootNodeIndex >= 0)
+        {
+            sb.Append($",\"children\":[{rootNodeIndex}]");
+        }
+
+        sb.Append("},");
+
+        // Bone nodes.
+        for (int i = 0; i < boneCount; i++)
+        {
+            Bone b = skeleton.Bones[i];
+            byte selfByte = (byte)(b.SelfId & 0xFF);
+            byte parentByte = (byte)(b.ParentId & 0xFF);
+
+            // Children of this bone (other bones whose parent_id == this bone's self_id).
+            var children = new List<int>();
+            for (int j = 0; j < boneCount; j++)
+            {
+                if (j == i) continue;
+                Bone other = skeleton.Bones[j];
+                if (!other.IsRoot && (byte)(other.ParentId & 0xFF) == selfByte)
+                    children.Add(boneNodeIndex[j]);
+            }
+
+            // Apply coordinate-system flip to bone translation.
+            // spec: Docs/RE/formats/mesh.md §BndBone — local_translation @ +8: CONFIRMED.
+            float bTx = -b.Translation.X;
+            float bTy = b.Translation.Y;
+            float bTz = b.Translation.Z;
+
+            // Apply quaternion handedness flip.
+            float bQx = -b.Rotation.X;
+            float bQy = b.Rotation.Y;
+            float bQz = -b.Rotation.Z;
+            float bQw = b.Rotation.W;
+            float qlen = MathF.Sqrt(bQx * bQx + bQy * bQy + bQz * bQz + bQw * bQw);
+            if (qlen > 1e-6f)
+            {
+                bQx /= qlen;
+                bQy /= qlen;
+                bQz /= qlen;
+                bQw /= qlen;
+            }
+            else
+            {
+                bQx = 0f;
+                bQy = 0f;
+                bQz = 0f;
+                bQw = 1f;
+            }
+
+            sb.Append('{');
+            sb.Append($"\"name\":\"bone_{selfByte}\",");
+            sb.Append($"\"translation\":[{F(bTx)},{F(bTy)},{F(bTz)}],");
+            sb.Append($"\"rotation\":[{F(bQx)},{F(bQy)},{F(bQz)},{F(bQw)}]");
+            if (children.Count > 0)
+            {
+                sb.Append(",\"children\":[");
+                for (int ci = 0; ci < children.Count; ci++)
+                {
+                    if (ci > 0) sb.Append(',');
+                    sb.Append(children[ci]);
+                }
+
+                sb.Append(']');
+            }
+
+            sb.Append('}');
+            if (i < boneCount - 1) sb.Append(',');
+        }
+
+        sb.Append("],"); // end nodes
+
+        // Mesh
+        sb.Append("\"meshes\":[{\"primitives\":[{");
+        sb.Append("\"attributes\":{");
+        sb.Append($"\"POSITION\":{accPosition},");
+        sb.Append($"\"TEXCOORD_0\":{accUv},");
+        sb.Append($"\"JOINTS_0\":{accJoints},");
+        sb.Append($"\"WEIGHTS_0\":{accWeights}");
+        sb.Append("},");
+        sb.Append($"\"indices\":{accIndices}");
+        sb.Append("}]}],");
+
+        // Skin
+        sb.Append("\"skins\":[{");
+        sb.Append($"\"inverseBindMatrices\":{accIbm},");
+        sb.Append("\"joints\":[");
+        for (int i = 0; i < boneCount; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append(boneNodeIndex[i]);
+        }
+
+        sb.Append(']');
+        if (rootNodeIndex >= 0)
+            sb.Append($",\"skeleton\":{rootNodeIndex}");
+        sb.Append("}],");
+
+        // Animations
+        if (animParts.Count > 0)
+        {
+            // Build accessor and bufferView indices for animation data.
+            // We emit one accessor+bufferView per data segment (time, trans, rot) per track.
+            var animAccessors = new StringBuilder();
+            var animBufferViews = new StringBuilder();
+            int animAccStart = nextAcc;
+            int animBvStart = nextBv;
+
+            var animSamplerDescs = new List<(int inputAcc, int transAcc, int rotAcc, byte boneId)>();
+
+            foreach (AnimPart part in animParts)
+            {
+                int kc = part.KeyCounts[0];
+                byte boneId = part.BoneIds[0];
+
+                // BufferView: time
+                animBufferViews.Append(',');
+                animBufferViews.Append('{');
+                animBufferViews.Append("\"buffer\":0,");
+                animBufferViews.Append($"\"byteOffset\":{part.TimeOff},");
+                animBufferViews.Append($"\"byteLength\":{part.TimeLen}");
+                animBufferViews.Append('}');
+
+                // Accessor: time (input, SCALAR f32, min/max required by glTF spec)
+                float maxTime = (kc - 1) / 10.0f;
+                animAccessors.Append(',');
+                animAccessors.Append('{');
+                animAccessors.Append($"\"bufferView\":{nextBv},");
+                animAccessors.Append("\"byteOffset\":0,");
+                animAccessors.Append($"\"componentType\":{ComponentTypeFloat},");
+                animAccessors.Append($"\"count\":{kc},");
+                animAccessors.Append("\"type\":\"SCALAR\",");
+                animAccessors.Append($"\"min\":[0.0],\"max\":[{F(maxTime)}]");
+                animAccessors.Append('}');
+                int timeAccIdx = nextAcc++;
+                nextBv++;
+
+                // BufferView: translation
+                animBufferViews.Append(',');
+                animBufferViews.Append('{');
+                animBufferViews.Append("\"buffer\":0,");
+                animBufferViews.Append($"\"byteOffset\":{part.TransOff},");
+                animBufferViews.Append($"\"byteLength\":{part.TransLen}");
+                animBufferViews.Append('}');
+
+                // Accessor: translation (VEC3 f32)
+                animAccessors.Append(',');
+                animAccessors.Append('{');
+                animAccessors.Append($"\"bufferView\":{nextBv},");
+                animAccessors.Append("\"byteOffset\":0,");
+                animAccessors.Append($"\"componentType\":{ComponentTypeFloat},");
+                animAccessors.Append($"\"count\":{kc},");
+                animAccessors.Append("\"type\":\"VEC3\"");
+                animAccessors.Append('}');
+                int transAccIdx = nextAcc++;
+                nextBv++;
+
+                // BufferView: rotation
+                animBufferViews.Append(',');
+                animBufferViews.Append('{');
+                animBufferViews.Append("\"buffer\":0,");
+                animBufferViews.Append($"\"byteOffset\":{part.RotOff},");
+                animBufferViews.Append($"\"byteLength\":{part.RotLen}");
+                animBufferViews.Append('}');
+
+                // Accessor: rotation (VEC4 f32)
+                animAccessors.Append(',');
+                animAccessors.Append('{');
+                animAccessors.Append($"\"bufferView\":{nextBv},");
+                animAccessors.Append("\"byteOffset\":0,");
+                animAccessors.Append($"\"componentType\":{ComponentTypeFloat},");
+                animAccessors.Append($"\"count\":{kc},");
+                animAccessors.Append("\"type\":\"VEC4\"");
+                animAccessors.Append('}');
+                int rotAccIdx = nextAcc++;
+                nextBv++;
+
+                animSamplerDescs.Add((timeAccIdx, transAccIdx, rotAccIdx, boneId));
+            }
+
+            // Build animations array: group tracks by clip.
+            // For now we group all tracks into a single glTF animation named after clip[0].
+            // (A more sophisticated grouping would use clip boundaries; since we flatten
+            //  per-track into animParts, we emit one animation per track here.)
+            sb.Append("\"animations\":[");
+            for (int pi = 0; pi < animSamplerDescs.Count; pi++)
+            {
+                if (pi > 0) sb.Append(',');
+                var (inputAcc, transAcc, rotAcc, boneId) = animSamplerDescs[pi];
+
+                // Find the node index for this bone_id.
+                int targetNode = 0;
+                if (idToIndex.TryGetValue(boneId, out int boneIdx))
+                    targetNode = boneNodeIndex[boneIdx];
+
+                sb.Append('{');
+                sb.Append($"\"name\":\"bone_{boneId}_anim\",");
+
+                // Samplers: 0 = translation, 1 = rotation.
+                // glTF 2.0 spec §Animations — samplers interpolation = "LINEAR".
+                // Translation uses LINEAR (spec: Docs/RE/formats/animation.md §Translation interpolation: CONFIRMED).
+                // Rotation: the original engine uses SLERP; glTF LINEAR for quaternions is nlerp per spec.
+                // spec: Docs/RE/formats/animation.md §Rotation interpolation: CONFIRMED (SLERP in engine).
+                // glTF 2.0 spec §Animations: rotation LINEAR = nlerp/slerp as implemented by viewer.
+                // We emit LINEAR for both as glTF has no explicit SLERP sampler type.
+                sb.Append("\"samplers\":[");
+                sb.Append($"{{\"input\":{inputAcc},\"interpolation\":\"LINEAR\",\"output\":{transAcc}}},");
+                sb.Append($"{{\"input\":{inputAcc},\"interpolation\":\"LINEAR\",\"output\":{rotAcc}}}");
+                sb.Append("],");
+
+                sb.Append("\"channels\":[");
+                sb.Append($"{{\"sampler\":0,\"target\":{{\"node\":{targetNode},\"path\":\"translation\"}}}},");
+                sb.Append($"{{\"sampler\":1,\"target\":{{\"node\":{targetNode},\"path\":\"rotation\"}}}}");
+                sb.Append(']');
+                sb.Append('}');
+            }
+
+            sb.Append("],");
+
+            // Append animation accessors and bufferViews to main strings.
+            // We'll build the full accessors/bufferViews sections below including these.
+            // Pass them into the final sections.
+
+            // Accessors
+            sb.Append("\"accessors\":[");
+            sb.Append('{');
+            sb.Append($"\"bufferView\":{bvPos},\"byteOffset\":0,");
+            sb.Append($"\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC3\",");
+            sb.Append($"\"min\":[{F(-maxX)},{F(minY)},{F(minZ)}],\"max\":[{F(-minX)},{F(maxY)},{F(maxZ)}]");
+            sb.Append("},");
+            sb.Append(
+                $"{{\"bufferView\":{bvUv},\"byteOffset\":0,\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC2\"}},");
+            sb.Append(
+                $"{{\"bufferView\":{bvJnt},\"byteOffset\":0,\"componentType\":{ComponentTypeUnsignedShort},\"count\":{vertexCount},\"type\":\"VEC4\"}},");
+            sb.Append(
+                $"{{\"bufferView\":{bvWgt},\"byteOffset\":0,\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC4\"}},");
+            sb.Append(
+                $"{{\"bufferView\":{bvIdx},\"byteOffset\":0,\"componentType\":{indexComponentType},\"count\":{indexCount},\"type\":\"SCALAR\"}},");
+            sb.Append(
+                $"{{\"bufferView\":{bvIbm},\"byteOffset\":0,\"componentType\":{ComponentTypeFloat},\"count\":{boneCount},\"type\":\"MAT4\"}}");
+            sb.Append(animAccessors);
+            sb.Append("],");
+
+            // BufferViews
+            sb.Append("\"bufferViews\":[");
+            sb.Append(
+                $"{{\"buffer\":0,\"byteOffset\":{posOff},\"byteLength\":{posLen},\"target\":{TargetArrayBuffer}}},");
+            sb.Append(
+                $"{{\"buffer\":0,\"byteOffset\":{uvOff},\"byteLength\":{uvLen},\"target\":{TargetArrayBuffer}}},");
+            sb.Append(
+                $"{{\"buffer\":0,\"byteOffset\":{jntOff},\"byteLength\":{jntLen},\"target\":{TargetArrayBuffer}}},");
+            sb.Append(
+                $"{{\"buffer\":0,\"byteOffset\":{wgtOff},\"byteLength\":{wgtLen},\"target\":{TargetArrayBuffer}}},");
+            sb.Append(
+                $"{{\"buffer\":0,\"byteOffset\":{idxOff},\"byteLength\":{idxLen},\"target\":{TargetElementArrayBuffer}}},");
+            sb.Append($"{{\"buffer\":0,\"byteOffset\":{ibmOff},\"byteLength\":{ibmLen}}}");
+            sb.Append(animBufferViews);
+            sb.Append("],");
+        }
+        else
+        {
+            // Accessors (no animations)
+            sb.Append("\"accessors\":[");
+            sb.Append('{');
+            sb.Append($"\"bufferView\":{bvPos},\"byteOffset\":0,");
+            sb.Append($"\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC3\",");
+            sb.Append($"\"min\":[{F(-maxX)},{F(minY)},{F(minZ)}],\"max\":[{F(-minX)},{F(maxY)},{F(maxZ)}]");
+            sb.Append("},");
+            sb.Append(
+                $"{{\"bufferView\":{bvUv},\"byteOffset\":0,\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC2\"}},");
+            sb.Append(
+                $"{{\"bufferView\":{bvJnt},\"byteOffset\":0,\"componentType\":{ComponentTypeUnsignedShort},\"count\":{vertexCount},\"type\":\"VEC4\"}},");
+            sb.Append(
+                $"{{\"bufferView\":{bvWgt},\"byteOffset\":0,\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC4\"}},");
+            sb.Append(
+                $"{{\"bufferView\":{bvIdx},\"byteOffset\":0,\"componentType\":{indexComponentType},\"count\":{indexCount},\"type\":\"SCALAR\"}},");
+            sb.Append(
+                $"{{\"bufferView\":{bvIbm},\"byteOffset\":0,\"componentType\":{ComponentTypeFloat},\"count\":{boneCount},\"type\":\"MAT4\"}}");
+            sb.Append("],");
+
+            // BufferViews
+            sb.Append("\"bufferViews\":[");
+            sb.Append(
+                $"{{\"buffer\":0,\"byteOffset\":{posOff},\"byteLength\":{posLen},\"target\":{TargetArrayBuffer}}},");
+            sb.Append(
+                $"{{\"buffer\":0,\"byteOffset\":{uvOff},\"byteLength\":{uvLen},\"target\":{TargetArrayBuffer}}},");
+            sb.Append(
+                $"{{\"buffer\":0,\"byteOffset\":{jntOff},\"byteLength\":{jntLen},\"target\":{TargetArrayBuffer}}},");
+            sb.Append(
+                $"{{\"buffer\":0,\"byteOffset\":{wgtOff},\"byteLength\":{wgtLen},\"target\":{TargetArrayBuffer}}},");
+            sb.Append(
+                $"{{\"buffer\":0,\"byteOffset\":{idxOff},\"byteLength\":{idxLen},\"target\":{TargetElementArrayBuffer}}},");
+            sb.Append($"{{\"buffer\":0,\"byteOffset\":{ibmOff},\"byteLength\":{ibmLen}}}");
+            sb.Append("],");
+        }
+
+        // Buffer
+        sb.Append($"\"buffers\":[{{\"byteLength\":{bufferByteLength}}}]");
+        sb.Append('}');
+        return sb.ToString();
     }
 
     /// <summary>

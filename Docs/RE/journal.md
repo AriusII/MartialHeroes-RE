@@ -137,3 +137,42 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
   Assets.Parsers code surfaced (LenStr 4-byte prefix; .bnd 36-byte on-disk record). Handshake reply build,
   cipher constants, and the stat formula are statically pinned; concrete server values (RSA n/e, L1/L2 split,
   level/server stat bases) and field semantics remain capture/catalog-dependent.
+
+## 2026-06-11 — client-mechanics RE wave (terrain / animation / config-catalog / game-loop / input-ui / lua)
+- binary: doida.exe @ 63fcaf8e (x86 32-bit), IDA Pro 9.3 via MCP, read-only (no IDB modification)
+- analyzed (by canonical subsystem): the terrain streaming manager and its .map/.ted/.mud/.sod/.lst cell
+  files; the skeletal-animation .mot clip format and the layered animation mixer; the client-side .scr
+  catalogue tables (exp / userlevel / userpoint / users / items / skills / mobs) plus .ini config and the
+  per-map sound tables (.wlk/.run/.bgm/.bge/.eff) under the VFS; the Win32 message-pump game loop, its
+  subscriber-interval tick scheduler and timeGetTime clock; the WndProc input dispatch and UI→world
+  responsibility chain with its widget tree; and the embedded Lua 5.1.2 scripting subsystem.
+- specs produced/updated (all neutral, sample_verified: false unless noted):
+  - Docs/RE/formats/terrain.md (new) — cell nomenclature + .map text descriptor + .ted 5-block blob
+    (65x65 f32 heightmap, normals, lookup, direction map, RGBA diffuse; 46987B) + .sod collision +
+    streaming policy (1024x1024 cells, origin bias 10000, quality rings 5x5/3x3, background FIFO).
+  - Docs/RE/formats/animation.md (new) — .mot binary clip (header {id_a,id_b,LenStr name,frame_count},
+    tracks of 28-byte keyframes = f32[3] translation + f32[4] quaternion XYZW, 10 fps fixed, Lin/SLERP),
+    bone_id linkage to .bnd self_id, normalized weighted-average mixer (action/cycle lists).
+  - Docs/RE/formats/config_tables.md (new) — WAVE-7 BLOCKER RESOLVED: stat curves and catalogues are
+    CLIENT-SIDE in VFS data/script/*.scr (exp 20B, userlevel 60B, userpoint 32B, users 496B block,
+    items 548B+N*8, skills 1504B+N*8, mobs 488B); no compression; field internals beyond confirmed
+    offsets UNVERIFIED. Plus .ini ([DO_OPTION]).
+  - Docs/RE/formats/sound_tables.md (new) — five per-map extensions sharing one 256x48B layout; .xeff
+    (magic "XEFF") flagged as the separate visual-effects format.
+  - Docs/RE/specs/game_loop.md (new) — message-pump→render→tick loop, subscriber-interval scheduler
+    (interval_ms/last_tick_ms threshold, no accumulator), timeGetTime ms clock with optional time-scale;
+    documents the intentional .NET divergence to a fixed PeriodicTimer tick with Godot interpolating.
+  - Docs/RE/specs/input_ui.md (new) — WndProc dispatch (IME-first, key filters, mouse capture), 20-byte
+    normalized mouse event ring-buffer, UI→world responsibility chain, widget-tree offset table, 5 view modes.
+  - Docs/RE/specs/lua_scripting.md (new) — Lua 5.1.2 (banner-confirmed) + lua_tinker binding, minimal native
+    surface (cpp_load global + stdlib), .lua = config/localization/UI layout loaded plaintext from data/script/;
+    "ANIC" demystified as standard "PANIC" misread; interpreter-vs-direct-parse tradeoff left for checkpoint.
+  - Docs/RE/names.yaml (client-mechanics block: file extensions, Lua version, loop/input concepts).
+- notes: All findings written to the gitignored Docs/RE/_dirty/ quarantine first (terrain.raw.md,
+  animation.raw.md, config_tables.raw.md, recon/game_loop.raw.md, structs/input_ui.raw.md,
+  recon/lua_scripting.raw.md), then rewritten into the clean specs. No pseudo-code or addresses crossed the
+  firewall. Key outcome: the wave-7 "stat curves are server-side, not extractable" gap is overturned — the
+  curves live in client .scr files and become recoverable once a VFS sample is provided. The Lua VM version
+  is confirmed (banner); all asset field internals and .lua roles stay sample-dependent. Journal authored
+  centrally by the orchestrator (spec-authors were barred from journal.md/names.yaml to avoid the
+  parallel-write clobber observed in an earlier wave).

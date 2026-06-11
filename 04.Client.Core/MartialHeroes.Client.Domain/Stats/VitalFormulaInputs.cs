@@ -65,13 +65,45 @@ public readonly record struct VitalFormulaInputs
     /// PROVISIONAL / UNVERIFIED. Externally-supplied HP level base (written on level-up). Defaults to
     /// <c>0</c> until a data file pins it. spec: stats.md ("External inputs (UNVERIFIED)").
     /// </summary>
+    /// <remarks>
+    /// This is a direct flat override. The preferred channel is now <see cref="LevelBaseHpCurve"/>
+    /// looked up by <see cref="Level"/>; this field is summed in addition, so a caller may use
+    /// either or both. Wave-7 unblock — see <see cref="StatBaseCurve"/>.
+    /// </remarks>
     public long LevelBaseHp { get; init; }
 
     /// <summary>
     /// PROVISIONAL / UNVERIFIED. Externally-supplied MP level base. Defaults to <c>0</c>.
     /// spec: stats.md ("External inputs (UNVERIFIED)").
     /// </summary>
+    /// <remarks>
+    /// Preferred channel is <see cref="LevelBaseMpCurve"/> looked up by <see cref="Level"/>; this
+    /// flat field is summed in addition.
+    /// </remarks>
     public long LevelBaseMp { get; init; }
+
+    /// <summary>
+    /// Character level (1-based) used to index the injected level-base curves. Defaults to <c>0</c>;
+    /// combined with an empty curve this preserves the prior all-zero behaviour. When a curve is
+    /// supplied this must be the actor's current level. spec: Docs/RE/formats/config_tables.md §2.4.
+    /// </summary>
+    public int Level { get; init; }
+
+    /// <summary>
+    /// WAVE-7 UNBLOCK. Injected per-level HP base curve (from <c>userlevel.scr</c>), looked up by
+    /// <see cref="Level"/> and added to the Stage-2 HP base. Defaults to the empty (all-zero) curve,
+    /// so an unset curve contributes nothing and matches the previous hard-coded <c>0</c>.
+    /// The Domain does not parse the curve; values are injected by Application. The curve byte
+    /// layout is still UNVERIFIED. spec: Docs/RE/formats/config_tables.md §2.4 / Known unknowns #2.
+    /// </summary>
+    public StatBaseCurve LevelBaseHpCurve { get; init; }
+
+    /// <summary>
+    /// WAVE-7 UNBLOCK. Injected per-level MP base curve (from <c>userlevel.scr</c>), looked up by
+    /// <see cref="Level"/> and added to the Stage-2 MP base. Defaults to the empty (all-zero) curve.
+    /// spec: Docs/RE/formats/config_tables.md §2.4.
+    /// </summary>
+    public StatBaseCurve LevelBaseMpCurve { get; init; }
 
     /// <summary>
     /// PROVISIONAL / UNVERIFIED. Externally-supplied HP server base (server-overridden). Defaults to
@@ -97,12 +129,28 @@ public readonly record struct VitalFormulaInputs
     /// <summary>Second active aura slot (secondary buff source). spec: stats.md ("Aura terms").</summary>
     public AuraTerm Aura1 { get; init; }
 
-    /// <summary>Inputs with all-zero stats/bonuses, no auras, and the sentinel class id (0).</summary>
+    /// <summary>
+    /// Effective HP level base: the curve value at <see cref="Level"/> plus the flat
+    /// <see cref="LevelBaseHp"/> override. With the default empty curve and the default level/flat
+    /// of 0 this returns 0, matching the previous hard-coded behaviour.
+    /// spec: Docs/RE/formats/config_tables.md §2.4.
+    /// </summary>
+    public long ResolveLevelBaseHp() => LevelBaseHpCurve.BaseForLevel(Level) + LevelBaseHp;
+
+    /// <summary>
+    /// Effective MP level base: the curve value at <see cref="Level"/> plus the flat
+    /// <see cref="LevelBaseMp"/> override. spec: Docs/RE/formats/config_tables.md §2.4.
+    /// </summary>
+    public long ResolveLevelBaseMp() => LevelBaseMpCurve.BaseForLevel(Level) + LevelBaseMp;
+
+    /// <summary>Inputs with all-zero stats/bonuses, no auras, empty curves, and the sentinel class id (0).</summary>
     public static VitalFormulaInputs Empty => new()
     {
         Stats = PrimaryStats.Zero,
         ClassId = 0,
         Aura0 = AuraTerm.None,
         Aura1 = AuraTerm.None,
+        LevelBaseHpCurve = StatBaseCurve.Empty,
+        LevelBaseMpCurve = StatBaseCurve.Empty,
     };
 }

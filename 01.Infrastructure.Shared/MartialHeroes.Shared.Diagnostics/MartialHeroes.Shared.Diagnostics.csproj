@@ -9,7 +9,7 @@
 
     <ItemGroup>
         <!-- Zero-allocation [LoggerMessage] source generator host. -->
-        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9"/>
     </ItemGroup>
 
     <ItemGroup>

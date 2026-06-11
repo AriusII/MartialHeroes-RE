@@ -11,14 +11,12 @@ config_version=5
 [application]
 
 config/name="MartialHeroes.Client.Godot"
+run/main_scene="res://Scenes/World.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
-run/main_scene="res://Scenes/World.tscn"
 
 [autoload]
 
-; ClientContext is the composition root that constructs the Application object graph.
-; It must be the first autoload so all other nodes can resolve it in _Ready.
 ClientContext="*res://Autoload/ClientContext.cs"
 
 [physics]

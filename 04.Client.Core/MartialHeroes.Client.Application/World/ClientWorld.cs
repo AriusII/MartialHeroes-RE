@@ -62,4 +62,12 @@ public sealed class ClientWorld
 
     /// <summary>Enumerates the live actors. For diagnostics/tests; avoid on the hot receive path.</summary>
     public IReadOnlyCollection<Actor> Actors => _actors.Values;
+
+    /// <summary>
+    /// The live actors as the concrete <see cref="Dictionary{TKey,TValue}.ValueCollection"/> so the
+    /// per-tick loop can <c>foreach</c> over the <b>struct</b> enumerator without boxing it (iterating
+    /// via the <see cref="IReadOnlyCollection{T}"/> interface would box the enumerator each tick). Use
+    /// this on the hot per-tick path; <see cref="Actors"/> stays for diagnostics/existing callers.
+    /// </summary>
+    public Dictionary<ActorKey, Actor>.ValueCollection ActorValues => _actors.Values;
 }

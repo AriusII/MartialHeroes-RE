@@ -1,4 +1,4 @@
-<Project Sdk="Godot.NET.Sdk/4.6.0">
+<Project Sdk="Godot.NET.Sdk/4.6.3">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
@@ -18,9 +18,6 @@
     <ItemGroup>
         <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Application\MartialHeroes.Client.Application.csproj"/>
         <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Mapping\MartialHeroes.Assets.Mapping.csproj"/>
-    </ItemGroup>
-    <ItemGroup>
-      <PackageReference Update="GodotSharp" Version="4.6.3" />
     </ItemGroup>
 
 </Project>

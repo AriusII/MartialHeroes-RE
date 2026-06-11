@@ -92,7 +92,7 @@ public static class VitalFormula
             (long)Math.Floor(score) +
             inputs.EquipmentHpFlat +
             (inputs.IsSetComplete ? inputs.SetBonusHp : 0) +
-            inputs.LevelBaseHp +
+            inputs.ResolveLevelBaseHp() + // curve(Level) + flat override; spec: config_tables.md §2.4
             inputs.ServerBaseHp;
 
         // Stage 3 — class multiplier + optional %HP buff slot + HP auras.
@@ -125,7 +125,7 @@ public static class VitalFormula
             (long)Math.Floor(score) +
             inputs.EquipmentMpFlat +
             (inputs.IsSetComplete ? inputs.SetBonusMp : 0) +
-            inputs.LevelBaseMp +
+            inputs.ResolveLevelBaseMp() + // curve(Level) + flat override; spec: config_tables.md §2.4
             inputs.ServerBaseMp;
 
         // Stage 3 — MP has no class table; multiplier starts at 1.0 and only auras adjust it.
