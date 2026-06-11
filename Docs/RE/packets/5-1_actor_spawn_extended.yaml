@@ -1,0 +1,54 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgActorSpawnExtended
+opcode: 0x50001           # major 5 (Push), minor 1 -> (5 << 16) | 1
+direction: S2C
+size: 912                # fixed 912-byte payload block
+spec: packets/5-1_actor_spawn_extended.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server pushes an extended actor spawn (player, mob/NPC, or ground item). A 12-byte prefix, an 880-byte SpawnDescriptor record, and a 20-byte trailer of visual/combat flags.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 912.
+# The 880-byte SpawnDescriptor is carried as one fixed buffer here; its internal member map is a
+# struct-cartographer task (see structs/actor.md / the 5/3 CharSpawn family).
+fields:
+  - { name: Sort,            type: u8 }           # 0x00  actor sort: 1=player, 2=mob/NPC, 3=ground item
+  - { name: Pad0,            type: "bytes[3]" }     # 0x01  alignment padding to the next dword
+  - { name: ActorId,         type: u32 }          # 0x04  actor id
+  - { name: TitleState,      type: u8 }           # 0x08  title / state byte
+  - { name: TitleSlot,       type: u8 }           # 0x09  title slot / secondary flag
+  - { name: RelationFlag,    type: u8 }           # 0x0a  guild / relation flag
+  - { name: Pad1,            type: u8 }           # 0x0b  padding byte
+  - { name: SpawnDescriptor, type: "bytes[880]" }  # 0x0c  880-byte SpawnDescriptor record (see notes / structs/actor.md)
+  - { name: Trailer,         type: "bytes[20]" }   # 0x37c trailer: combat flag + visual/stealth bytes
+
+notes: |
+  Static inference only; no capture available. Total = 912 bytes (matches the handler's single
+  912-byte read). The handler switches on Sort to build the right actor kind, inserts it into the
+  actor manager keyed by (ActorId, Sort), and sets name / visual / relation flags.
+
+  PREFIX (12 bytes, 0x00..0x0b):
+    0x00 (1B) Sort          : 1 = player, 2 = mob/NPC, 3 = ground item. HIGH CONFIDENCE.
+    0x04 (4B) ActorId       : actor id (le u32).
+    0x08 (1B) TitleState    : a title/state byte.
+    0x09 (1B) TitleSlot     : a title-slot / secondary flag.
+    0x0a (1B) RelationFlag  : a guild/relation flag.
+    0x0b (1B) Pad1          : padding.
+
+  SPAWNDESCRIPTOR (880 bytes, 0x0c..0x39b): the same descriptor record shared with 5/3 CharSpawn
+  and the 3/1 character-list slot record. Known landmarks inside it (relative to the descriptor
+  start) include a name region, a model id, and current vitals / position fields. Its full member
+  map is a struct-cartographer task; drive the decode from structs/actor.md once that lands.
+
+  TRAILER (20 bytes, 0x37c..0x38f): visual / combat flag bytes consumed individually (a combat flag
+  near the start of the trailer, then visual / stealth state bytes toward the tail).
+
+  The 12 + 880 + 20 split is high confidence from the read size and the field stores; the meanings
+  of individual trailer bytes are not all decoded.
+
+  UNKNOWNS to resolve with a capture of player / mob / item spawns and a struct-cartographer pass:
+    - the internal SpawnDescriptor member map;
+    - the per-byte meaning of the 20-byte trailer.

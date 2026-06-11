@@ -1,0 +1,37 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED and HEADER-NOT-DECODED: see notes. capture_verified: false.
+
+name: CmsgChatContextual
+opcode: 0x20053           # major 2 (GameAction), minor 83 -> (2 << 16) | 83
+direction: C2S
+size: var                 # 24-byte fixed-size context header + length-prefixed text body
+spec: packets/2-83_chat_contextual.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client chat with a 24-byte context header (sender/target/channel metadata), followed by a length-prefixed text body. Used for contextual chat routing distinct from the 2/7 whisper and 3/21 channel forms.
+
+# The 24-byte header is a context/metadata struct whose internal field breakdown was NOT decoded
+# this pass. It is modelled as one opaque fixed buffer so the engineer can frame the packet and the
+# variable text body correctly; do not assume sub-field meanings yet.
+fields:
+  - { name: ContextHeader, type: "bytes[24]" }  # 0x00  24-byte context/metadata struct (fields not yet decoded)
+
+notes: |
+  Static inference only; no capture available. VARIABLE-LENGTH packet.
+
+  Header = 24 bytes (0x00..0x17): a context struct carrying sender / target / channel metadata.
+  Its internal field breakdown was NOT decoded in this analysis pass and is modelled here as a
+  single opaque 24-byte buffer. The text body is gated to a length greater than 0 and less than 200
+  before send.
+
+  BODY (after the 24-byte header): a length-prefixed text block:
+    [u32 textLength][text bytes]
+  where textLength = string length + 1 (includes the terminating NUL).
+
+  UNKNOWNS to resolve with a follow-up send-site analysis and a capture:
+    - the full field layout of the 24-byte context header (sender id / target id / channel selector
+      are the likely contents by analogy with the 2/7 and 5/7 chat headers);
+    - the text charset.
+
+  UNBLOCKS: Client.Application chat-send (contextual) use-case.

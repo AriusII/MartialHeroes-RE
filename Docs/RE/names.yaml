@@ -211,3 +211,11 @@ opcodes:
   0x5008b: { name: "SmsgAttackEffect", direction: "S2C", tuple: "5:139" }
   0x50092: { name: "SmsgPacketResponseAckRequest", direction: "S2C", tuple: "5:146" }
   0x50093: { name: "SmsgActorCombatFlagUpdate", direction: "S2C", tuple: "5:147" }
+  # C2S (client->server) opcodes recovered from the outbound send-sites.
+  0x10004: { name: "CmsgAuthReply",        direction: "C2S", tuple: "1:4" }
+  0x10006: { name: "CmsgLoginRequest",     direction: "C2S", tuple: "1:6" }
+  0x10009: { name: "CmsgEnterGameRequest", direction: "C2S", tuple: "1:9" }
+  0x20007: { name: "CmsgWhisper",          direction: "C2S", tuple: "2:7" }
+  0x2000d: { name: "CmsgMoveRequest",      direction: "C2S", tuple: "2:13" }
+  0x20053: { name: "CmsgChatContextual",   direction: "C2S", tuple: "2:83" }
+  0x30015: { name: "CmsgChatChannel",      direction: "C2S", tuple: "3:21" }

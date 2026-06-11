@@ -26,6 +26,24 @@ public sealed class ClientWorld
     /// <summary>Number of live actors currently registered.</summary>
     public int Count => _actors.Count;
 
+    /// <summary>
+    /// The local (controlled) player's <see cref="ActorKey"/>, or <see langword="null"/> until the
+    /// local player has been identified (e.g. via the 3/5 enter-game ack or the first self-spawn).
+    /// </summary>
+    /// <remarks>
+    /// The use-case layer reads this to source the local player's current position when building the
+    /// 2/13 move request's Heading delta. spec: Docs/RE/packets/2-13_move_request.yaml (Heading is
+    /// atan2 of target - current). Set by the composition root / handlers when the self actor is known.
+    /// </remarks>
+    public ActorKey? LocalActorKey { get; set; }
+
+    /// <summary>
+    /// The local player's live actor, or <see langword="null"/> when <see cref="LocalActorKey"/> is
+    /// unset or no matching actor is registered.
+    /// </summary>
+    public Actor? LocalActor =>
+        LocalActorKey is { } key && _actors.TryGetValue(key, out Actor? actor) ? actor : null;
+
     /// <summary>Registers or replaces the actor under its <see cref="Actor.Key"/>.</summary>
     public void Add(Actor actor)
     {

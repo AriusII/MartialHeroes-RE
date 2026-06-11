@@ -3,6 +3,7 @@ using MartialHeroes.Client.Application.Diagnostics;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.Handlers;
 using MartialHeroes.Client.Application.Ingestion;
+using MartialHeroes.Client.Application.Login;
 using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
@@ -65,18 +66,39 @@ public sealed partial class ClientContext : Node
         // 4. Unhandled opcode sink — count-only for now; no logging infrastructure wired yet.
         IUnhandledOpcodeSink opcodeSink = new CountingUnhandledOpcodeSink();
 
-        // 5. Packet handler — orchestrates Domain mutation and event publishing.
-        var handler = new GamePacketHandler(world, bus, fsm, opcodeSink);
-
-        // 6. Inbound frame dispatcher — channel-backed; synthetic feeder uses this.
-        var dispatcher = new InboundFrameDispatcher(handler);
-
-        // 7. No-op outbound sink: no live transport this session.
+        // 5. No-op outbound sink: no live transport this session.
         //    When Transport.Pipelines is wired, replace with the real implementation.
         IOutboundPacketSink noopSink = new NoOpOutboundPacketSink();
 
-        // 8. Use-case facade — presentation calls these for input intents.
-        var useCases = new ApplicationUseCases(noopSink, fsm, SessionId.None);
+        // 6. Session id — fixed/default for offline composition.
+        //    Real session id is assigned by the transport when a live connection is established.
+        SessionId sessionId = SessionId.None;
+
+        // 7. Login credential store — staged at login-form time; consumed by the handshake driver.
+        //    spec: Docs/RE/specs/crypto.md §6.1.
+        var credentialStore = new LoginCredentialStore();
+
+        // 8. Login handshake driver — null for offline/synthetic-feed mode; the GamePacketHandler
+        //    accepts null and silently counts 0/0 frames as unhandled when no driver is wired.
+        //    When a live transport session is established, replace with:
+        //      new LoginHandshakeDriver(noopSink, credentialStore, sessionId)
+        //    No Network.Crypto ProjectReference is needed here: LoginHandshakeDriver lives in
+        //    Client.Application, which arrives transitively. The null path avoids instantiating
+        //    SessionHandshake/CryptoPaddingRandom in the offline composition root.
+        ILoginHandshakeDriver? loginDriver = null;
+
+        // 9. Packet handler — orchestrates Domain mutation and event publishing.
+        var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, loginDriver);
+
+        // 10. Inbound frame dispatcher — channel-backed; synthetic feeder uses this.
+        var dispatcher = new InboundFrameDispatcher(handler);
+
+        // 11. Version token — 33 bytes, zero-filled (PROVISIONAL; real token is unrecovered).
+        //     spec: Docs/RE/packets/1-9_enter_game_request.yaml (VersionToken 0x01, 33 bytes, UNKNOWN).
+        ReadOnlySpan<byte> versionToken = stackalloc byte[ApplicationUseCases.VersionTokenLength]; // zero-filled
+
+        // 12. Use-case facade — presentation calls these for input intents.
+        var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId, versionToken);
 
         // Publish to fields.
         EventBus = bus;

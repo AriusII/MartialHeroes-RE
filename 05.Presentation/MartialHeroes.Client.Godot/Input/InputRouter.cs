@@ -73,9 +73,13 @@ public sealed partial class InputRouter : Node
             string actionName = $"use_skill_{slot + 1}";
             if (InputMap.HasAction(actionName) && GodotInput.IsActionJustPressed(actionName))
             {
-                // skill id = slot index for now; real mapping lives in Domain/Application.
-                // spec: IApplicationUseCases.UseSkillAsync — stub until C2S layout is specced.
-                _ = _clientContext.UseCases.UseSkillAsync(slot, targetId: 0);
+                // Slot is cast to byte (IApplicationUseCases.UseSkillAsync slot param is byte).
+                // No known targets at input time; pass empty arrays for both target groups.
+                // spec: IApplicationUseCases.UseSkillAsync; Docs/RE/packets/2-52_use_skill.yaml.
+                _ = _clientContext.UseCases.UseSkillAsync(
+                    (byte)slot,
+                    ReadOnlyMemory<uint>.Empty,
+                    ReadOnlyMemory<uint>.Empty);
                 GetViewport().SetInputAsHandled();
             }
         }

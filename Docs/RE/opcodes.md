@@ -60,11 +60,17 @@ family is the high 16 bits; the minor is the low 16 bits.
 | Opcode | Name | Direction | Size (bytes) | Packet spec | Status | Notes |
 |---|---|---|---|---|---|---|
 | `0x0` | SmsgKeyExchange | S2C | var | packets/0-0_key_exchange.yaml | draft | (0:0) Handshake; first secure-session frame. Carries server asymmetric key material; client replies with a C2S 1/4 auth. Layout capture-unverified. |
+| `0x10004` | CmsgAuthReply | C2S | var | packets/1-4_auth_reply.yaml | draft | (1:4) Client auth reply in the login handshake; sent over the secure-send path after the 0/0 key exchange. Carries the XOR-ciphered login credential body. Layout crypto-dependent; hand-off to Network.Crypto. |
+| `0x10006` | CmsgLoginRequest | C2S | var | - | draft | (1:6) Account/login credential blob (~52-byte form) in the major-1 account family. Field layout not yet specced; re-probe the caller before committing a struct. |
+| `0x10009` | CmsgEnterGameRequest | C2S | 40 | packets/1-9_enter_game_request.yaml | draft | (1:9) Enter-world / select-character request: selected slot index + client-version token. Server replies with 3/5 EnterGameAck. Layout capture-unverified. |
 | `0x10010` | SmsgSrvBillingDeactivated | S2C | var | - | confirmed | (1:16) Billing turned off. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x10011` | SmsgSrvBillingActivated | S2C | var | - | confirmed | (1:17) Billing turned on. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x10013` | SmsgSrvBillingExpiryNotice | S2C | var | - | confirmed | (1:19) Billing expiry notice. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x10014` | SmsgSrvLetterReceived | S2C | var | - | confirmed | (1:20) In-game letter/mail received. Routing dispatch-table-confirmed; field layout not yet specced. |
-| `0x20034` | CmsgUseSkill | C2S | var | packets/2-52_use_skill.yaml | draft | (2:52) Client skill-activate request; server replies with the 5/52 ActorSkillAction broadcast. Field layout inferred from the paired S2C handler; capture required. |
+| `0x20007` | CmsgWhisper | C2S | var | packets/2-7_whisper.yaml | draft | (2:7) Client whisper: 19-byte header (16-byte target name) + length-prefixed text. Layout capture-unverified. |
+| `0x2000d` | CmsgMoveRequest | C2S | 16 | packets/2-13_move_request.yaml | draft | (2:13) Client click-to-move / position sync: heading + target XZ + mode/run flags (16-byte fixed payload). Server echoes via 5/13. Layout capture-unverified. |
+| `0x20034` | CmsgUseSkill | C2S | var | packets/2-52_use_skill.yaml | draft | (2:52) Client skill-activate request: 24-byte header (skill slot + aim) + two optional u32 target-id arrays. Send-site now analyzed. Server replies with 5/52. Layout capture-unverified. |
+| `0x20053` | CmsgChatContextual | C2S | var | packets/2-83_chat_contextual.yaml | draft | (2:83) Client contextual chat: 24-byte context header + length-prefixed text. Header fields not yet decoded; layout capture-unverified. |
 | `0x30001` | SmsgCharacterList | S2C | var | packets/3-1_character_list.yaml | draft | (3:1) Character-select list; switches to the select screen. 3-byte header + per-slot 981-byte records gated by a slot bitmask. |
 | `0x30004` | SmsgCharManageResult | S2C | var | - | confirmed | (3:4) Char create/delete/manage response. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x30005` | SmsgEnterGameAck | S2C | 44 | packets/3-5_enter_game_response.yaml | draft | (3:5) Enter-world acknowledgement; transitions client into the in-world game state. |
@@ -73,6 +79,7 @@ family is the high 16 bits; the minor is the low 16 bits.
 | `0x30008` | SmsgShopPageUpdate | S2C | var | - | confirmed | (3:8) Shop page update. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x3000d` | SmsgCharStatusUpdate | S2C | var | - | confirmed | (3:13) Character status update. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x3000e` | SmsgSceneEntityUpdate | S2C | var | - | confirmed | (3:14) Scene / entity update. Routing dispatch-table-confirmed; field layout not yet specced. |
+| `0x30015` | CmsgChatChannel | C2S | var | packets/3-21_chat_channel.yaml | draft | (3:21) Client general/channel chat: 56-byte context header (channel selector at +4) + length-prefixed text. Header partly decoded; layout capture-unverified. |
 | `0x30017` | SmsgCharCreateResult | S2C | var | - | confirmed | (3:23) Character create result. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x30064` | SmsgCharActionResult | S2C | var | - | confirmed | (3:100) Generic character action result. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x3c350` | SmsgGmChatMessage | S2C | var | - | confirmed | (3:50000) GM chat / system message. Routing dispatch-table-confirmed; field layout not yet specced. |
@@ -95,7 +102,7 @@ family is the high 16 bits; the minor is the low 16 bits.
 | `0x40018` | SmsgUserTradeSlotUpdate | S2C | var | - | confirmed | (4:24) User trade slot update. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x40019` | SmsgUserTradeFullResponse | S2C | var | - | confirmed | (4:25) Full user-trade response. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x4001c` | SmsgRespawnConfirm | S2C | var | - | confirmed | (4:28) Respawn confirmation. Routing dispatch-table-confirmed; field layout not yet specced. |
-| `0x4001d` | SmsgStatUpdate | S2C | var | - | confirmed | (4:29) Stat update. Routing dispatch-table-confirmed; field layout not yet specced. |
+| `0x4001d` | SmsgStatUpdate | S2C | 36 | packets/4-29_stat_update.yaml | draft | (4:29) Stat-allocation ack: result byte + five u32 stat echoes + remaining points (36-byte fixed block). Pairs with C2S 2/29. Routing dispatch-table-confirmed; field layout capture-unverified. |
 | `0x4001e` | SmsgSocialPanelTarget | S2C | var | - | confirmed | (4:30) Social panel target. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x40023` | SmsgPartyInviteState | S2C | var | - | confirmed | (4:35) Party invite state. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x40024` | SmsgPartyMemberRemoveResult | S2C | var | - | confirmed | (4:36) Party member remove result. Routing dispatch-table-confirmed; field layout not yet specced. |
@@ -177,7 +184,7 @@ family is the high 16 bits; the minor is the low 16 bits.
 | `0x401f4` | SmsgShowPopupByCode | S2C | var | - | confirmed | (4:500) Special: routed outside the response table; shows a popup by code. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x4c350` | SmsgResponseDiscardText | S2C | var | - | confirmed | (4:50000) Special: routed outside the response table; discards a text payload. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x50000` | SmsgCharDespawn | S2C | 12 | packets/5-0_char_despawn.yaml | draft | (5:0) Actor leaves the world. 12-byte fixed block. |
-| `0x50001` | SmsgActorSpawnExtended | S2C | var | - | confirmed | (5:1) Extended actor spawn. Routing dispatch-table-confirmed; field layout not yet specced. |
+| `0x50001` | SmsgActorSpawnExtended | S2C | 912 | packets/5-1_actor_spawn_extended.yaml | draft | (5:1) Extended actor spawn (player/mob/item): 12-byte prefix + 880-byte SpawnDescriptor + 20-byte trailer. Routing dispatch-table-confirmed; field layout capture-unverified. |
 | `0x50003` | SmsgCharSpawn | S2C | 908 | packets/5-3_char_spawn.yaml | draft | (5:3) Actor enters the world; payload is a SpawnDescriptor record. 908-byte fixed block. |
 | `0x50005` | SmsgActorStateEvent | S2C | var | - | confirmed | (5:5) Actor state event. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x50006` | SmsgActorAutotargetOrMotion | S2C | var | - | confirmed | (5:6) Actor auto-target / motion. Routing dispatch-table-confirmed; field layout not yet specced. |
@@ -195,7 +202,7 @@ family is the high 16 bits; the minor is the low 16 bits.
 | `0x5001a` | SmsgLocalPlayerRelationSlot | S2C | var | - | confirmed | (5:26) Local player relation slot update. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x5001c` | SmsgRespawnAtPoint | S2C | var | - | confirmed | (5:28) Respawn at point. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x5001f` | SmsgBuffSlotUpdate | S2C | var | - | confirmed | (5:31) Buff slot update. Routing dispatch-table-confirmed; field layout not yet specced. |
-| `0x50020` | SmsgLevelUp | S2C | var | - | confirmed | (5:32) Level up. Routing dispatch-table-confirmed; field layout not yet specced. |
+| `0x50020` | SmsgLevelUp | S2C | 48 | packets/5-32_level_up.yaml | draft | (5:32) Level up: new level + packed HP/MP + stamina + rank-XP tail (48-byte fixed block). Routing dispatch-table-confirmed; field layout capture-unverified. |
 | `0x50021` | SmsgSkillHotbarSlotSet | S2C | var | - | confirmed | (5:33) Skill hotbar slot set. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x50022` | SmsgBillingBannerToggle | S2C | var | - | confirmed | (5:34) Billing banner toggle. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x50026` | SmsgPartyMemberStats | S2C | var | - | confirmed | (5:38) Party member stats. Routing dispatch-table-confirmed; field layout not yet specced. |
@@ -203,7 +210,7 @@ family is the high 16 bits; the minor is the low 16 bits.
 | `0x5002a` | SmsgPlayerPairSystemNotice | S2C | var | - | confirmed | (5:42) Player-pair system notice. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x50033` | SmsgSkillGuideState | S2C | var | - | confirmed | (5:51) Skill guide state. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x50034` | SmsgActorSkillAction | S2C | var | packets/5-52_actor_skill_action.yaml | draft | (5:52) Actor skill action / combat result. 24-byte header + N x 36-byte target records. |
-| `0x50035` | SmsgActorVitalsAndPairState | S2C | var | - | confirmed | (5:53) Actor vitals (HP/MP/stamina) and pair state. Routing dispatch-table-confirmed; field layout not yet specced. |
+| `0x50035` | SmsgActorVitalsAndPairState | S2C | 32 | packets/5-53_actor_vitals_and_pair_state.yaml | draft | (5:53) Actor vitals (HP/stamina/third vital) + level/state + pair (couple) id (32-byte fixed block). Routing dispatch-table-confirmed; field layout capture-unverified. |
 | `0x50037` | SmsgGuildNameDisplayUpdate | S2C | var | - | confirmed | (5:55) Guild name display update. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x50039` | SmsgTrackedPanelSlotUpdate | S2C | var | - | confirmed | (5:57) Tracked panel slot update. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x5003b` | SmsgRankProgressSfxEvent | S2C | var | - | confirmed | (5:59) Rank progress SFX event. Routing dispatch-table-confirmed; field layout not yet specced. |

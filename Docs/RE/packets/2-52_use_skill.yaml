@@ -1,29 +1,57 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED and ANALYSIS-INCOMPLETE: the C2S send-site layout was not recovered.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
 
 name: CmsgUseSkill
 opcode: 0x20034           # major 2 (GameAction), minor 52 -> (2 << 16) | 52
 direction: C2S
-size: var                 # unknown; the send-site builder was not analyzed
+size: var                 # fixed 24-byte header + (optional) two count-prefixed target-id arrays
 spec: packets/2-52_use_skill.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Client skill-activate request. The server replies with the S2C 5/52 ActorSkillAction broadcast.
+summary: Client skill-activate / battle-action request. A 24-byte header (skill slot + aim) followed by two optional arrays of target actor ids. The server replies with the S2C 5/52 ActorSkillAction broadcast.
 
-# DRAFT / INCOMPLETE. The C2S 2/52 builder (UI input -> packet) was not analyzed; the fields
-# below are a minimal hypothesis projected from the paired S2C 5/52 header. Do NOT implement a
-# fixed struct from this without a capture or a follow-up send-site analysis.
+# The C2S send-site is now analyzed (it was previously unknown). Fixed 24-byte header below; the
+# two trailing target arrays are variable and described in notes (the engineer hand-codes the loop
+# driven by CountA / CountB).
 fields:
-  - { name: SkillId,    type: u32 }   # hypothesized: the skill id to activate
-  - { name: TargetId,   type: u32 }   # hypothesized: the target actor id (0 = self / no target)
+  - { name: SkillSlot, type: u8 }          # 0x00  skill slot index; 0xFF = basic attack
+  - { name: Pad0,      type: "bytes[3]" }    # 0x01  padding / unused (zeroed in the short form)
+  - { name: AimMode,   type: u32 }         # 0x04  aim mode selector
+  - { name: AimScale,  type: f32 }         # 0x08  aim scale / radius factor
+  - { name: AimX,      type: f32 }         # 0x0c  aim point X (world)
+  - { name: AimZ,      type: f32 }         # 0x10  aim point Z (world)
+  - { name: CountA,    type: u16 }         # 0x14  number of entries in target array A
+  - { name: CountB,    type: u16 }         # 0x16  number of entries in target array B
 
 notes: |
-  ANALYSIS INCOMPLETE -- this is the weakest spec in the set. major 2 (GameAction) is C2S-only;
-  the client emits it and there is no inbound handler to read field offsets from. The two fields
-  above are a guess inferred from the paired S2C 5/52 (which carries SkillId at header +0x0c and
-  a per-target id). The real wire layout MUST come from one of:
-    - a capture of an outbound 2/52 frame, or
-    - a dirty-room analysis of the C2S send site (UI input -> PACKETBUF build), promoted to a
-      neutral note first.
-  Until then, treat size as unknown and do not generate a production struct.
+  Static inference only; no capture available. VARIABLE-LENGTH packet. The send-site builder was
+  recovered this pass (it previously was not analyzed -- the old "do not implement" caveat is now
+  replaced by the layout below).
+
+  Header = 24 bytes (0x00..0x17), matching the fixed block the sender writes before any arrays.
+    0x00 (1B) SkillSlot : which skill the client is activating; 0xFF marks the basic-attack form.
+    0x04 (4B) AimMode   : aim-mode selector (u32).
+    0x08 (4B) AimScale  : aim scale / radius factor (le f32).
+    0x0c (4B) AimX / 0x10 (4B) AimZ : the aim point in world XZ.
+    0x14 (2B) CountA / 0x16 (2B) CountB : entry counts for the two target arrays that follow.
+
+  TRAILER (variable, appended only when the counts are non-zero):
+    array A : CountA entries, each a 4-byte target actor id (u32). Appended first.
+    array B : CountB entries, each a 4-byte target actor id (u32). Appended after array A.
+  IMPORTANT: the two counts are u16, but each array element is 4 bytes wide (a u32 actor id), so
+  trailer length = (CountA + CountB) * 4 bytes. Both arrays are omitted when their count is 0.
+
+  Total wire payload = 24 + (CountA + CountB) * 4. There are two observed builder forms:
+    - full form: header + the two target arrays (single- or multi-target / AoE casts);
+    - short form: header only with both counts 0 (basic attack / fixed-form action).
+
+  Server reply: S2C 5/52 SmsgActorSkillAction (packets/5-52_actor_skill_action.yaml).
+
+  UNKNOWNS to resolve with a capture of a single-target cast vs an AoE cast:
+    - the precise meaning of array A vs array B (primary targets vs splash targets is the leading
+      hypothesis);
+    - confirm the 4-byte element stride against the u16 counts;
+    - whether AimMode is an enum worth lifting into Shared.Kernel.
+
+  UNBLOCKS: Client.Application UseSkill use-case (ack/echo 5/52).

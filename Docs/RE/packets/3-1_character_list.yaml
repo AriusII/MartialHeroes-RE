@@ -9,10 +9,10 @@ spec: packets/3-1_character_list.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Character-select list. A 3-byte header with a slot bitmask, followed by one 981-byte record per populated slot.
+summary: Character-select list. A 3-byte header with a slot bitmask, followed by one 981-byte slot record per populated slot. Each slot record is an 880-byte SpawnDescriptor + a 96-byte stat block + a flag + a timestamp.
 
-# Fixed header only. The variable per-slot records are described in notes (codegen models the
-# header; the engineer hand-codes the repeat loop driven by SlotMask).
+# Fixed header only is modelled as the codegen struct. The variable per-slot records are described
+# in notes as their own field tables (the engineer hand-codes the repeat loop driven by SlotMask).
 fields:
   - { name: ServerId,  type: u8 }   # 0x00  server id / list context byte
   - { name: ChannelId, type: u8 }   # 0x01  channel id / context byte
@@ -21,16 +21,36 @@ fields:
 notes: |
   Static inference only; no capture available. VARIABLE-LENGTH packet.
 
-  Header (3 bytes), then for each bit set in SlotMask (LSB-first, ~8 slots) one 981-byte slot
-  record is appended, read as four sequential sub-blocks:
-    sub-block 1: 880 bytes  SpawnDescriptor (same family as 5/3; see structs/actor.md)
-    sub-block 2:  96 bytes  stat block (not yet mapped)
-    sub-block 3:   1 byte   per-slot flag
-    sub-block 4:   4 bytes  timing / timestamp value (le u32)
-  Per-slot total = 880 + 96 + 1 + 4 = 981 bytes. A prior analyst observed a 1965-byte frame =
-  3 + 2*981 (two populated slots), capture-unverified here.
+  HEADER (3 bytes, 0x00..0x02):
+    0x00 (1B) ServerId  : server id / list context byte.
+    0x01 (1B) ChannelId : channel id / context byte.
+    0x02 (1B) SlotMask  : slot bitmask. Bit i set => slot i has a record that follows. The handler
+                          loops ~8 slot indices and reads a record for each set bit.
 
-  Implementation guidance: the network-protocol-engineer should read the 3-byte header, then loop
-  over set bits in SlotMask, decoding a 981-byte record each time. Drive the SpawnDescriptor
-  decode from structs/actor.md.
-  UNKNOWN: the 96-byte stat block layout; bit ordering of SlotMask vs slot index. Capture required.
+  PER-SLOT RECORD (981 bytes, appended once per set bit in SlotMask). The handler reads it as four
+  sequential sub-blocks, in this order:
+
+    Sub-block 1 -- SpawnDescriptor (880 bytes, record-relative 0x000..0x36f):
+      The same descriptor record family as 5/3 CharSpawn and 5/1 ActorSpawnExtended. Known
+      landmarks inside it (relative to the descriptor start) include a NUL-terminated name region,
+      a level value, and current vitals. Its full member map is a struct-cartographer task -- decode
+      from structs/actor.md.
+
+    Sub-block 2 -- StatBlock (96 bytes, record-relative 0x370..0x3cf):
+      A per-character stat block. Internal layout NOT decoded this pass.
+
+    Sub-block 3 -- SlotFlag (1 byte, record-relative 0x3d0):
+      A per-slot flag byte.
+
+    Sub-block 4 -- Timestamp (4 bytes, record-relative 0x3d1..0x3d4):
+      A timing / timestamp value (le u32).
+
+    Per-slot total = 880 + 96 + 1 + 4 = 981 bytes. A prior analyst observed a 1965-byte frame
+    = 3 + 2*981 (two populated slots), capture-unverified here.
+
+  IMPLEMENTATION GUIDANCE: read the 3-byte header, then for each set bit in SlotMask (LSB-first,
+  ~8 slots) decode one 981-byte record by stepping the four sub-blocks above. Drive the
+  SpawnDescriptor decode from structs/actor.md.
+
+  UNKNOWNS to resolve with a capture: the 96-byte StatBlock layout; the SpawnDescriptor member map;
+  the bit ordering of SlotMask vs slot index; whether ServerId/ChannelId carry real values.

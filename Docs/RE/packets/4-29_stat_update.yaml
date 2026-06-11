@@ -1,0 +1,48 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgStatUpdate
+opcode: 0x4001d           # major 4 (Response), minor 29 -> (4 << 16) | 29
+direction: S2C
+size: 36                 # fixed 36-byte payload block
+spec: packets/4-29_stat_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server acknowledges a stat-allocation request. Echoes the five resulting absolute stats and the remaining stat points; the client applies them only when the result byte signals success. Pairs with the C2S 2/29 StatAllocate request.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 36.
+fields:
+  - { name: Handle,        type: u32 }        # 0x00  handle / actor or request id
+  - { name: SessionToken,  type: u32 }        # 0x04  session token
+  - { name: ResultOk,      type: u8 }         # 0x08  result flag: value 1 applies the update
+  - { name: Pad0,          type: "bytes[3]" }   # 0x09  read but not decoded / padding
+  - { name: Stat0,         type: u32 }        # 0x0c  stat[0] echo
+  - { name: Stat1,         type: u32 }        # 0x10  stat[1] echo
+  - { name: Stat2,         type: u32 }        # 0x14  stat[2] echo
+  - { name: Stat3,         type: u32 }        # 0x18  stat[3] echo
+  - { name: Stat4,         type: u32 }        # 0x1c  stat[4] echo
+  - { name: RemainingStatPoints, type: u32 }  # 0x20  remaining stat points
+
+notes: |
+  Static inference only; no capture available. Total = 36 bytes (matches the handler's single
+  36-byte read). This is the acknowledgement of the C2S 2/29 StatAllocate request.
+
+    0x00 (4B) Handle        : a handle / actor or request id.
+    0x04 (4B) SessionToken  : a session token. The Handle/SessionToken split at 0x00/0x04 is a
+                              hypothesis -- see unknowns.
+    0x08 (1B) ResultOk      : the update is applied only when this byte == 1.
+    0x09 (3B)               : read into the struct but not decoded.
+    0x0c..0x1c (5 x 4B) Stat0..Stat4 : the five resulting absolute stats, echoing the five stats the
+                              2/29 request sent. HIGH CONFIDENCE (direct stores into the five stat
+                              slots).
+    0x20 (4B) RemainingStatPoints : remaining allocatable stat points.
+
+  On success the client also plays a confirm sound and refreshes the stat UI.
+
+  UNKNOWNS to resolve with a capture of a stat-allocate round trip:
+    - the Handle vs SessionToken split at 0x00/0x04;
+    - the meaning of the three bytes at 0x09.
+
+  PAIRS WITH: C2S 2/29 StatAllocate (5 x u32 absolute stats). UNBLOCKS the stat-allocation ack path
+  in Client.Application.

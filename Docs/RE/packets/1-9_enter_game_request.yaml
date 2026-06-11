@@ -1,0 +1,45 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgEnterGameRequest
+opcode: 0x10009           # major 1 (ServerCommand/account), minor 9 -> (1 << 16) | 9
+direction: C2S
+size: 40                 # fixed 40-byte payload
+spec: packets/1-9_enter_game_request.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client enter-world / select-character request. Carries the chosen character slot index plus a client-version handshake token. The server replies with S2C 3/5 EnterGameAck and the client transitions into the in-world state.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 40.
+fields:
+  - { name: SlotIndex,   type: u8 }           # 0x00  selected character slot (0..4)
+  - { name: VersionToken, type: "bytes[33]" } # 0x01  client/version handshake token (asciiz within the buffer)
+  - { name: Tail,        type: "bytes[6]" }   # 0x22  zero-filled remainder of the 40-byte buffer
+
+notes: |
+  Static inference only; no capture available. The character-select "enter world" action builds a
+  fixed 40-byte payload (the buffer is zero-initialised, then partially filled). Frame = 8-byte
+  header + 40 = 48 bytes.
+
+    0x00 (1B)  SlotIndex    : the chosen character slot, range 0..4. The select screen only sends
+                              this when the slot holds a real (non-blank) character. HIGH CONFIDENCE.
+    0x01 (33B) VersionToken : a client/version handshake token sourced from the client's version
+                              resource. Treated as a fixed 33-byte buffer holding a NUL-terminated
+                              ASCII string. LOWER CONFIDENCE -- see unknowns.
+    0x22 (6B)  Tail         : the unfilled remainder of the 40-byte buffer; observed zero.
+
+  SEQUENCE: this is the C2S precursor to S2C 3/5 SmsgEnterGameAck
+  (packets/3-5_enter_game_response.yaml). After sending, the client stages the selected slot's
+  spawn descriptor + stat block locally and transitions into the world-enter flow.
+
+  UNKNOWNS to resolve with a capture of an enter-world action and with re-crypto-analyst:
+    - the exact derivation/format of VersionToken (only the leading SlotIndex byte is high
+      confidence);
+    - whether Tail truly stays zero or carries a small trailing field.
+
+  RELATED major-1 account senders (same family, not specced here): 1/0 (header-only nudge),
+  1/2 (ping), 1/6 (52-byte credential/description blob -> see packets/1-6_login_request.yaml),
+  1/7 (2B), 1/13 (18B), 1/14 (1B).
+
+  UNBLOCKS: Client.Application SelectCharacter / EnterGame use-case (ack 3/5).

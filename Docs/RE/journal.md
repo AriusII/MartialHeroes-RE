@@ -119,3 +119,21 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
   Kept flagged as unresolved/capture-dependent: the exact L1/L2 split (server wire data), the bit
   meaning of the two 2-byte per-bignum headers, and whether an inbound decrypt exists (structurally
   absent, capture-unverified). Spec stays capture_verified: false. No pseudo-code or addresses copied.
+
+## 2026-06-11 — dirty-room RE expansion wave (re-protocol / re-struct-cartographer / re-asset-format / re-crypto)
+- binary: doida.exe @ 63fcaf8e (x86 32-bit), IDA Pro 9.3 via MCP, read-only (no IDB modification)
+- analyzed (by canonical subsystem): the 105 outbound C2S build-sites (Net_SendPacket) — MoveRequest 2/13,
+  UseSkill 2/52 send-site, EnterGameRequest 1/9, Auth/Login 1/4 & 1/6, chat 2/7 & 2/83 & 3/21 — plus
+  expanded S2C layouts (5/53 vitals, 5/1 spawn-extended, 5/32 level-up, 4/29 stat-update, 3/1 full slot
+  record); the max-HP/MP vitals formula and per-stat composition; the full 880-byte SpawnDescriptor,
+  the item and skill structs; the asset UNVERIFIED fields (data.inf header dwords, LenStr width,
+  .bnd bone record, texture container); and the session handshake reply construction.
+- specs produced/updated (promoted by the spec-author entries that follow, all neutral, capture_verified: false):
+  Docs/RE/opcodes.md (189 rows; C2S opcodes added), Docs/RE/packets/*.yaml (10 new/expanded),
+  Docs/RE/structs/{stats,spawn_descriptor,item,skill}.md, Docs/RE/specs/crypto.md (§6 handshake reply),
+  Docs/RE/formats/{pak,mesh,texture}.md (mesh corrections: LenStr u32, .bnd 36-byte record), names.yaml (C2S opcodes).
+- notes: All findings written to the gitignored Docs/RE/_dirty/ quarantine first, then rewritten into the
+  clean specs. No pseudo-code or addresses crossed the firewall. Two corrections to already-written
+  Assets.Parsers code surfaced (LenStr 4-byte prefix; .bnd 36-byte on-disk record). Handshake reply build,
+  cipher constants, and the stat formula are statically pinned; concrete server values (RSA n/e, L1/L2 split,
+  level/server stat bases) and field semantics remain capture/catalog-dependent.

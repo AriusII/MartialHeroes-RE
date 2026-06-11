@@ -10,12 +10,18 @@ namespace MartialHeroes.Assets.Parsers;
 /// spec: Docs/RE/formats/mesh.md §Format: .bnd — binary bind-pose skeleton
 /// <para>
 /// All fields little-endian.  No magic bytes at file start.
-/// Layout: actor_id u32, actor_name LenStr, bone_count u8, then bone_count × 72-byte bone records.
+/// Layout: actor_id u32 | actor_name LenStr | bone_count u32 | bone_count × 36-byte bone records.
 /// </para>
 /// <para>
-/// Each bone record is 72 bytes: 36 bytes of identified fields followed by 36 bytes that are
-/// entirely UNVERIFIED (kept verbatim as <see cref="BoneTrailingBytes"/>).
-/// spec: Docs/RE/formats/mesh.md §BndBone record — "remaining 36 bytes are uncharacterized": UNVERIFIED.
+/// spec: Docs/RE/formats/mesh.md §Bone array — CORRECTION:
+///   "The on-disk record is 36 bytes. There is no uncharacterized trailing region on disk.
+///    Any parser code written against the 72-byte on-disk assumption will over-read by 36 bytes
+///    per bone and must be corrected." CONFIRMED.
+/// </para>
+/// <para>
+/// spec: Docs/RE/formats/mesh.md §Header — bone_count:
+///   "On-disk representation is a full u32; only the low byte is stored to the in-memory count
+///    field, giving an effective maximum of 255 bones." CONFIRMED.
 /// </para>
 /// <para>
 /// ZERO rendering/engine dependencies.
@@ -23,12 +29,9 @@ namespace MartialHeroes.Assets.Parsers;
 /// </remarks>
 public static class BndParser
 {
-    // Bone record constants.
-    // spec: Docs/RE/formats/mesh.md §Bone array — "72-byte on-disk record size is confirmed
-    // by the loader's pointer arithmetic (stride of 18 dwords × 4 bytes = 72 bytes)": CONFIRMED.
-    private const int BoneRecordStride = 72;
-    private const int BoneKnownBytes   = 36; // first 36 bytes — identified fields
-    private const int BoneUnknownBytes = 36; // last 36 bytes  — UNVERIFIED
+    // On-disk bone record is 36 bytes — all fields characterized.
+    // spec: Docs/RE/formats/mesh.md §Bone array — "Total on-disk per bone: 36 bytes." CONFIRMED.
+    private const int BoneRecordStride = 36;
 
     /// <summary>
     /// Parses the raw bytes of a <c>.bnd</c> file into a <see cref="Skeleton"/>.
@@ -49,22 +52,29 @@ public static class BndParser
         int offset = 0;
 
         // --- Header ---
+
+        // actor_id u32 LE @ +0
         // spec: Docs/RE/formats/mesh.md §Header — actor_id @ +0 u32 LE: CONFIRMED.
         uint actorId = ReadU32LE(data, ref offset, "actor_id");
 
-        // LenStr actor_name — variable length.
-        // spec: Docs/RE/formats/mesh.md §Header — actor_name: CONFIRMED (presence); UNVERIFIED (encoding).
+        // actor_name LenStr — 4-byte u32 LE prefix + N bytes of body, no null terminator.
+        // spec: Docs/RE/formats/mesh.md §Header — actor_name LenStr: CONFIRMED.
+        // spec: Docs/RE/formats/mesh.md §String encoding (LenStr):
+        //   "The prefix is a 4-byte little-endian u32." CONFIRMED.
         string actorName = LenStrReader.Read(data, ref offset);
 
-        // bone_count — 1 byte.
-        // spec: Docs/RE/formats/mesh.md §Header — bone_count: "single unsigned byte; maximum 255". CONFIRMED.
-        if (offset >= data.Length)
-            throw new InvalidDataException(
-                $".bnd parse error: buffer truncated reading 'bone_count' u8 at offset {offset} " +
-                $"(buffer length {data.Length}).");
-        byte boneCount = data[offset++];
+        // bone_count u32 LE — full 4-byte read; only the low byte is the effective count.
+        // spec: Docs/RE/formats/mesh.md §Header — bone_count:
+        //   "On-disk representation is a full u32; only the low byte is stored to the in-memory
+        //    count field, giving an effective maximum of 255 bones." CONFIRMED.
+        // spec: Docs/RE/formats/mesh.md §Header — NOTE:
+        //   "A previous revision described bone_count as a 1-byte on-disk field. That was
+        //    incorrect. The loader reads a full 4-byte u32 in binary mode." CONFIRMED.
+        uint boneCountRaw = ReadU32LE(data, ref offset, "bone_count");
+        int  boneCount    = (int)(boneCountRaw & 0xFF); // low byte only
 
         // Validate buffer length for bone records.
+        // spec: Docs/RE/formats/mesh.md §Bone array — "36 bytes per record": CONFIRMED.
         long boneDataBytes = (long)boneCount * BoneRecordStride;
         if (offset + boneDataBytes > data.Length)
             throw new InvalidDataException(
@@ -77,37 +87,33 @@ public static class BndParser
         {
             int boneStart = offset;
 
-            // sub-offset 0: self_id u32 LE
-            // spec: Docs/RE/formats/mesh.md §BndBone record — self_id @ +0: MEDIUM confidence.
-            // NOTE: only the low byte is observed to be consumed by the original client.
+            // sub-offset 0: self_id u32 LE (low byte is the effective bone ID)
+            // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — self_id @ +0: CONFIRMED.
             uint selfId = ReadU32LE(data, ref offset, $"bone[{b}].self_id");
 
-            // sub-offset 4: parent_id u32 LE
-            // spec: Docs/RE/formats/mesh.md §BndBone record — parent_id @ +4: MEDIUM confidence.
-            // NOTE: only the low byte is observed to be consumed. Root bone sentinel: UNVERIFIED.
+            // sub-offset 4: parent_id u32 LE (low byte is the effective parent ID)
+            // Root bone: self_id == 0 && parent_id == 0 (both low bytes zero).
+            // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — parent_id @ +4: CONFIRMED.
+            // spec: Docs/RE/formats/mesh.md §Root bone sentinel: CONFIRMED.
             uint parentId = ReadU32LE(data, ref offset, $"bone[{b}].parent_id");
 
-            // sub-offset 8: translation f32[3] LE
-            // spec: Docs/RE/formats/mesh.md §BndBone record — translation @ +8: MEDIUM confidence.
+            // sub-offset 8: local_translation f32[3] LE — X at +8, Y at +12, Z at +16
+            // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — local_translation @ +8: CONFIRMED.
             float tX = ReadF32LE(data, ref offset, $"bone[{b}].translation.x");
             float tY = ReadF32LE(data, ref offset, $"bone[{b}].translation.y");
             float tZ = ReadF32LE(data, ref offset, $"bone[{b}].translation.z");
 
-            // sub-offset 20: rotation f32[4] LE
-            // spec: Docs/RE/formats/mesh.md §BndBone record — rotation @ +20: MEDIUM confidence.
-            // Component order (XYZW vs. WXYZ) is UNVERIFIED — no sample available.
+            // sub-offset 20: local_rotation f32[4] LE — XYZW order (scalar W at +32)
+            // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — local_rotation @ +20: CONFIRMED.
+            // spec: Docs/RE/formats/mesh.md §Quaternion component order:
+            //   "XYZW order: X at sub-offset +20, Y at +24, Z at +28, W (scalar) at +32." CONFIRMED.
             float rX = ReadF32LE(data, ref offset, $"bone[{b}].rotation.x");
             float rY = ReadF32LE(data, ref offset, $"bone[{b}].rotation.y");
             float rZ = ReadF32LE(data, ref offset, $"bone[{b}].rotation.z");
             float rW = ReadF32LE(data, ref offset, $"bone[{b}].rotation.w");
 
-            // sub-offset 36: unknown 36 bytes — UNVERIFIED
-            // spec: Docs/RE/formats/mesh.md §BndBone record — unknown_36 @ +36: UNVERIFIED.
-            ReadOnlySpan<byte> trailingSlice = data.Slice(offset, BoneUnknownBytes);
-            var trailing = new BoneTrailingBytes(trailingSlice);
-            offset += BoneUnknownBytes;
-
-            // Confirm we consumed exactly BoneRecordStride bytes for this bone.
+            // Confirm we consumed exactly BoneRecordStride bytes (36) for this bone.
+            // spec: Docs/RE/formats/mesh.md §Bone array — "Total on-disk per bone: 36 bytes." CONFIRMED.
             System.Diagnostics.Debug.Assert(
                 offset - boneStart == BoneRecordStride,
                 $"BndParser: bone[{b}] consumed {offset - boneStart} bytes, expected {BoneRecordStride}.");
@@ -116,8 +122,7 @@ public static class BndParser
                 selfId:      selfId,
                 parentId:    parentId,
                 translation: new Vec3(tX, tY, tZ),
-                rotation:    new Quat(rX, rY, rZ, rW),
-                unknown36:   trailing);
+                rotation:    new Quat(rX, rY, rZ, rW));
         }
 
         return new Skeleton

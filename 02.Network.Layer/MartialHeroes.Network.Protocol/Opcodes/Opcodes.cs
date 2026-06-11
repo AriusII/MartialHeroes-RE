@@ -19,7 +19,9 @@ public static class Opcodes
     /// <summary>0:0 — handshake key exchange. status: draft. spec: Docs/RE/opcodes.md.</summary>
     public const uint SmsgKeyExchange = 0x0;
 
-    // --- major 1: ServerCommand (S2C) ---
+    // --- major 1: ServerCommand (S2C) / account (C2S) ---
+    /// <summary>1:9 — client enter-world / select-character request (40 B). status: draft. spec: packets/1-9_enter_game_request.yaml.</summary>
+    public const uint CmsgEnterGameRequest = 0x10009;
     /// <summary>1:16 — billing deactivated. status: confirmed.</summary>
     public const uint SmsgSrvBillingDeactivated = 0x10010;
     /// <summary>1:17 — billing activated. status: confirmed.</summary>
@@ -30,12 +32,20 @@ public static class Opcodes
     public const uint SmsgSrvLetterReceived = 0x10014;
 
     // --- major 2: GameAction (C2S) ---
+    /// <summary>2:7 — client whisper / named private message (19 B header + text). status: draft. spec: packets/2-7_whisper.yaml.</summary>
+    public const uint CmsgWhisper = 0x20007;
+    /// <summary>2:13 — client click-to-move / position-sync request (16 B). status: draft. spec: packets/2-13_move_request.yaml.</summary>
+    public const uint CmsgMoveRequest = 0x2000d;
     /// <summary>2:52 — client skill-activate request. status: draft.</summary>
     public const uint CmsgUseSkill = 0x20034;
+    /// <summary>2:83 — client contextual chat (24 B header + text). status: draft. spec: packets/2-83_chat_contextual.yaml.</summary>
+    public const uint CmsgChatContextual = 0x20053;
 
-    // --- major 3: CharacterMgmt (S2C) ---
+    // --- major 3: CharacterMgmt (S2C; C2S chat 3/21) ---
     /// <summary>3:1 — character-select list. status: draft.</summary>
     public const uint SmsgCharacterList = 0x30001;
+    /// <summary>3:21 — client general / channel chat (56 B header + text). status: draft. spec: packets/3-21_chat_channel.yaml.</summary>
+    public const uint CmsgChatChannel = 0x30015;
     /// <summary>3:4 — char create/delete/manage result. status: confirmed.</summary>
     public const uint SmsgCharManageResult = 0x30004;
     /// <summary>3:5 — enter-world acknowledgement (44 B). status: draft. spec: packets/3-5_enter_game_response.yaml.</summary>

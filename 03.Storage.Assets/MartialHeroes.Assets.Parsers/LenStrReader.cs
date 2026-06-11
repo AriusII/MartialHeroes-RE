@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text;
 
 namespace MartialHeroes.Assets.Parsers;
@@ -8,24 +9,22 @@ namespace MartialHeroes.Assets.Parsers;
 /// <remarks>
 /// spec: Docs/RE/formats/mesh.md §String encoding (LenStr) — used in .skn and .bnd
 /// <para>
-/// UNVERIFIED: The exact prefix width (1 byte vs. 2 bytes) and whether a null terminator
-/// follows the character data are sample-unverified.  This implementation uses a 1-byte
-/// length prefix with no null terminator, which matches the most common observed pattern in
-/// D3D9-era Asian MMO clients.  The implementation is deliberately isolated behind this single
-/// helper so the encoding width can be changed in one place when a sample confirms it.
+/// Wire format: [u32 LE — byte length of body (4 bytes)][char[length] — string body, no null
+/// terminator on disk].  Both .skn and .bnd use this encoding throughout.
 /// </para>
 /// <para>
-/// Isolation rationale: the helper is the only site that reads the prefix byte; all three
-/// parsers (.skn header name, .bnd header actor_name) call this helper rather than inlining
-/// the logic.  Changing prefix width requires editing only this file.
+/// spec: Docs/RE/formats/mesh.md §String encoding (LenStr) — CORRECTION:
+/// "The prefix is a 4-byte little-endian u32. Any parser that reads these files must consume
+/// 4 bytes for the length prefix, not 1 byte." CONFIRMED.
 /// </para>
 /// </remarks>
 internal static class LenStrReader
 {
-    // UNVERIFIED: 1-byte prefix assumed; change to 2 when confirmed by sample.
-    // spec: Docs/RE/formats/mesh.md §String encoding (LenStr): "support at least a
-    // 1-byte-prefixed byte string until a sample confirms the encoding width."
-    private const int PrefixBytes = 1; // UNVERIFIED — see class remarks
+    // Length prefix is 4 bytes (u32 LE).
+    // spec: Docs/RE/formats/mesh.md §String encoding (LenStr):
+    //   "The length field is always a full 4-byte unsigned integer read in little-endian order."
+    //   CONFIRMED — resolved by direct analysis of the string-read primitive in binary mode.
+    private const int PrefixBytes = 4;
 
     /// <summary>
     /// Reads a LenStr from <paramref name="span"/> at position <paramref name="offset"/>,
@@ -33,8 +32,8 @@ internal static class LenStrReader
     /// </summary>
     /// <param name="span">The source byte span.</param>
     /// <param name="offset">
-    /// On entry: the byte index of the length-prefix byte.
-    /// On exit: the byte index immediately after the string data.
+    /// On entry: the byte index of the 4-byte u32 LE length prefix.
+    /// On exit: the byte index immediately after the string body.
     /// </param>
     /// <returns>The decoded string.</returns>
     /// <exception cref="InvalidDataException">
@@ -42,19 +41,29 @@ internal static class LenStrReader
     /// </exception>
     public static string Read(ReadOnlySpan<byte> span, ref int offset)
     {
-        // Guard: need at least PrefixBytes remaining.
+        // Guard: need at least 4 bytes for the length prefix.
+        // spec: Docs/RE/formats/mesh.md §String encoding (LenStr) — 4-byte prefix: CONFIRMED.
         if (offset + PrefixBytes > span.Length)
             throw new InvalidDataException(
-                $"LenStr prefix truncated: need {PrefixBytes} byte(s) at offset {offset}, " +
+                $"LenStr prefix truncated: need {PrefixBytes} bytes at offset {offset}, " +
                 $"but buffer length is {span.Length}.");
 
-        // Read the length prefix.
-        // UNVERIFIED: 1-byte prefix assumed.
-        // spec: Docs/RE/formats/mesh.md §String encoding (LenStr): UNVERIFIED.
-        int length = span[offset]; // single-byte prefix
+        // Read the 4-byte little-endian u32 length prefix.
+        // spec: Docs/RE/formats/mesh.md §String encoding (LenStr):
+        //   "The wire format is: [u32 LE — byte length of the body (4 bytes)]
+        //    [char[length] — string body, no null terminator on disk]." CONFIRMED.
+        uint rawLength = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
         offset += PrefixBytes;
 
-        // Guard: need 'length' more bytes.
+        // Guard against pathological length values before allocating.
+        if (rawLength > int.MaxValue)
+            throw new InvalidDataException(
+                $"LenStr: declared length {rawLength} exceeds addressable range at offset " +
+                $"{offset - PrefixBytes}.");
+
+        int length = (int)rawLength;
+
+        // Guard: need 'length' more bytes for the string body.
         if (offset + length > span.Length)
             throw new InvalidDataException(
                 $"LenStr data truncated: declared length {length} at offset {offset - PrefixBytes}, " +

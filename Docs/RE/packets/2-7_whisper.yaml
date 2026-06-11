@@ -1,0 +1,39 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgWhisper
+opcode: 0x20007           # major 2 (GameAction), minor 7 -> (2 << 16) | 7
+direction: C2S
+size: var                 # 19-byte fixed header + length-prefixed text body
+spec: packets/2-7_whisper.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client whisper (named-target private message). A 19-byte header carrying the target character name, followed by a length-prefixed text body.
+
+# Fixed 19-byte header below. The trailing text body is variable (length-prefixed; see notes).
+fields:
+  - { name: ChannelType, type: u8 }          # 0x00  channel / sub-type byte
+  - { name: Flag,        type: u8 }          # 0x01  flag byte
+  - { name: TargetName,  type: "bytes[16]" }   # 0x02  target character name (fixed buffer, NUL-padded)
+  - { name: HeaderTail,  type: u8 }          # 0x12  trailing byte of the 19-byte header
+
+notes: |
+  Static inference only; no capture available. VARIABLE-LENGTH packet.
+
+  Header = 19 bytes (0x00..0x12):
+    0x00 (1B)  ChannelType : channel / message sub-type selector.
+    0x01 (1B)  Flag        : a flag byte.
+    0x02 (16B) TargetName  : the recipient's character name, copied into a fixed 16-byte buffer,
+                             NUL-padded. HIGH CONFIDENCE.
+    0x12 (1B)  HeaderTail  : the trailing byte rounding the header out to 19 bytes.
+
+  BODY (after the 19-byte header): a length-prefixed text block:
+    [u32 textLength][text bytes]
+  The text is limited to 119 characters before send. The length prefix includes the terminating
+  NUL (consistent with the other C2S chat senders).
+
+  UNKNOWNS to resolve with a capture of a /whisper: the meaning of ChannelType / Flag / HeaderTail
+  (only the 16-byte TargetName is high confidence); the text charset.
+
+  UNBLOCKS: Client.Application chat-send (whisper) use-case.

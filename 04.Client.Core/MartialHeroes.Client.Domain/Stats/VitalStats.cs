@@ -1,55 +1,96 @@
 namespace MartialHeroes.Client.Domain.Stats;
 
 /// <summary>
-/// Resolved vital capacities for an actor: the inputs from which maximum HP / MP / stamina are
-/// computed on demand.
+/// Resolved vital capacities for an actor: the final maximum HP / MP / stamina the rest of the
+/// domain caps current values against. This is the single home of "Max" computation for an actor;
+/// <see cref="MartialHeroes.Client.Domain.Actors.Actor"/>'s <c>MaxHp</c>/<c>MaxMp</c>/<c>MaxStamina</c>
+/// are derived values fed by this type.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why this type exists.</b> The legacy client does <b>not</b> store max HP/MP as actor fields;
-/// they are computed from base stats plus equipment bonuses, and the vitals path caps current HP
-/// against that computed maximum. spec: Docs/RE/structs/actor.md ("max_hp / max_mp are NOT stored
-/// as fields. They are computed on demand from base stats plus equipment bonuses").
+/// <b>HP / MP — the recovered formula.</b> Maximum HP and MP are produced by the recovered
+/// three-stage stat/equipment/aura formula (<see cref="VitalFormula"/>), not a placeholder
+/// <c>base + bonus</c> aggregation. spec: Docs/RE/structs/stats.md. Use <see cref="FromFormula"/> to
+/// build resolved capacities from a <see cref="VitalFormulaInputs"/>. The legacy client computes
+/// max HP/MP on demand and does not store them as actor fields (spec: stats.md), so this struct is a
+/// cheap, recomputable value, not authoritative wire state.
 /// </para>
 /// <para>
-/// <b>Modeling choice (ours, not documented from the original game).</b> The actor spec does not
-/// publish the base-stat-to-max-vital growth curve or class coefficients (the equipment / stat
-/// block at descriptor +0xD4 is explicitly unmapped — spec: Docs/RE/structs/actor.md "Unverified /
-/// open questions"). Rather than invent coefficients, this type holds the already-resolved
-/// <see cref="BaseHp"/>/<see cref="BaseMp"/>/<see cref="BaseStamina"/> together with flat equipment
-/// bonuses, and defines maximum as <c>base + bonus</c>. When the real growth formula is documented,
-/// replace the resolution that produces these base values; the <c>Max*</c> definitions here are a
-/// deliberate, transparent placeholder for the aggregation step, not an original-game formula.
+/// <b>Stamina — modeling choice (ours, not documented).</b> The recovered spec
+/// (Docs/RE/structs/stats.md) covers HP and MP only; it publishes no stamina growth curve. Stamina
+/// is therefore carried as an already-resolved maximum supplied by the caller, with no formula here.
+/// When/if a stamina spec is recovered, replace the stamina resolution that feeds this value.
+/// </para>
+/// <para>
+/// Results from the formula are clamped into the non-negative <see cref="uint"/> capacity range used
+/// across the actor model. A formula result is non-negative in normal play (the sentinel class id 0
+/// yields a 0 HP multiplier — spec: stats.md), but the clamp guards malformed inputs.
 /// </para>
 /// </remarks>
-public readonly record struct VitalStats(
-    uint BaseHp,
-    uint BaseMp,
-    uint BaseStamina,
-    uint EquipmentHpBonus,
-    uint EquipmentMpBonus,
-    uint EquipmentStaminaBonus)
+public readonly record struct VitalStats(uint MaxHp, uint MaxMp, uint MaxStamina)
 {
-    /// <summary>A zeroed stats block (no capacity).</summary>
-    public static readonly VitalStats Zero = new(0, 0, 0, 0, 0, 0);
+    /// <summary>A zeroed capacity block (no max HP/MP/stamina).</summary>
+    public static readonly VitalStats Zero = new(0, 0, 0);
 
     /// <summary>
-    /// Computed maximum hit points: resolved base HP plus flat equipment HP bonus.
-    /// Modeling choice (see type remarks); not an original-game coefficient.
+    /// Compatibility constructor for callers that hold already-summed base-plus-bonus capacities
+    /// (the pre-formula aggregation shape). Delegates to <see cref="FromResolved"/>; for the
+    /// recovered HP/MP formula use <see cref="FromFormula"/> instead.
     /// </summary>
-    public uint MaxHp => SaturatingAdd(BaseHp, EquipmentHpBonus);
+    public VitalStats(
+        uint baseHp, uint baseMp, uint baseStamina,
+        uint equipmentHpBonus, uint equipmentMpBonus, uint equipmentStaminaBonus)
+        : this(
+            SaturatingAdd(baseHp, equipmentHpBonus),
+            SaturatingAdd(baseMp, equipmentMpBonus),
+            SaturatingAdd(baseStamina, equipmentStaminaBonus))
+    {
+    }
 
     /// <summary>
-    /// Computed maximum mana / ki points: resolved base MP plus flat equipment MP bonus.
-    /// Modeling choice (see type remarks); not an original-game coefficient.
+    /// Builds resolved capacities by running the recovered max-HP / max-MP formula
+    /// (<see cref="VitalFormula"/>) over <paramref name="inputs"/> and pairing the result with the
+    /// caller-supplied resolved <paramref name="maxStamina"/> (no formula — see type remarks).
+    /// spec: Docs/RE/structs/stats.md.
     /// </summary>
-    public uint MaxMp => SaturatingAdd(BaseMp, EquipmentMpBonus);
+    /// <remarks>
+    /// HP/MP results are <b>provisional</b> whenever the formula's external bases
+    /// (<see cref="VitalFormulaInputs.LevelBaseHp"/> etc.) are left at their default <c>0</c>: the
+    /// structure is correct but the absolute numbers are incomplete until catalog/server data exists
+    /// (spec: stats.md "External inputs (UNVERIFIED)").
+    /// </remarks>
+    public static VitalStats FromFormula(in VitalFormulaInputs inputs, uint maxStamina = 0)
+    {
+        (long maxHp, long maxMp) = VitalFormula.Compute(in inputs);
+        return new VitalStats(ClampToCapacity(maxHp), ClampToCapacity(maxMp), maxStamina);
+    }
 
     /// <summary>
-    /// Computed maximum stamina: resolved base stamina plus flat equipment stamina bonus.
-    /// Modeling choice (see type remarks); not an original-game coefficient.
+    /// Builds resolved capacities from already-summed base-plus-bonus numbers, saturating each at
+    /// <see cref="uint.MaxValue"/>. This is a compatibility/aggregation entry point for callers that
+    /// already hold resolved capacities (e.g. seeding from wire-reported current values); it is
+    /// <b>not</b> the recovered HP/MP formula — use <see cref="FromFormula"/> for that.
     /// </summary>
-    public uint MaxStamina => SaturatingAdd(BaseStamina, EquipmentStaminaBonus);
+    public static VitalStats FromResolved(
+        uint baseHp, uint baseMp, uint baseStamina,
+        uint equipmentHpBonus = 0, uint equipmentMpBonus = 0, uint equipmentStaminaBonus = 0)
+    {
+        return new VitalStats(
+            SaturatingAdd(baseHp, equipmentHpBonus),
+            SaturatingAdd(baseMp, equipmentMpBonus),
+            SaturatingAdd(baseStamina, equipmentStaminaBonus));
+    }
+
+    /// <summary>Clamps a formula result (which may be negative for malformed inputs) into the capacity range.</summary>
+    private static uint ClampToCapacity(long value)
+    {
+        if (value <= 0)
+        {
+            return 0u;
+        }
+
+        return value >= uint.MaxValue ? uint.MaxValue : (uint)value;
+    }
 
     /// <summary>Adds two unsigned values, clamping at <see cref="uint.MaxValue"/> instead of wrapping.</summary>
     private static uint SaturatingAdd(uint a, uint b)

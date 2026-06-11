@@ -1,0 +1,52 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED and CRYPTO-DEPENDENT: see notes. capture_verified: false.
+
+name: CmsgAuthReply
+opcode: 0x10004           # major 1 (ServerCommand/account), minor 4 -> (1 << 16) | 4
+direction: C2S
+size: var                 # variable login body, then ciphered; framed size is crypto-dependent
+spec: packets/1-4_auth_reply.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client authentication reply in the login handshake. Sent over the secure-send path immediately after the server key exchange (S2C 0/0). Carries the assembled login credential body, which is XOR-ciphered before it ships.
+
+# The login body below is assembled BEFORE the cipher pass. It is variable-length and the framed
+# wire form is crypto-dependent, so NO fixed field struct is emitted from this spec yet. The fields
+# list documents the pre-cipher body shape for the engineer; do not codegen a Pack=1 struct from it
+# until Network.Crypto has characterised the cipher.
+fields:
+  - { name: Tag,        type: u8 }    # 0x00  constant tag byte 0x2B (43)
+  # followed by: u32 username length, then username bytes (length-prefixed)
+  # followed by: optional u32 extra-field length, then extra-field bytes (length-prefixed)
+  # plus a separately-carried fixed-width, zero-padded password buffer folded in by the cipher
+
+notes: |
+  Static inference only; no capture available. CRYPTO-DEPENDENT and VARIABLE-LENGTH. This spec is a
+  HAND-OFF placeholder, not an implementable struct.
+
+  HANDSHAKE SEQUENCE (two stages):
+    1. S2C 0/0 SmsgKeyExchange (packets/0-0_key_exchange.yaml): the client reads the server key
+       material inline.
+    2. C2S 1/4 Auth reply (this message): sent over the client's secure-send path. The assembled
+       login body is XOR-ciphered, then copied into a fresh frame and shipped.
+
+  PRE-CIPHER LOGIN BODY (assembled before the cipher pass):
+    0x00 (1B)  Tag            : constant 0x2B (43).
+    0x01 (4B)  UsernameLength : u32 length prefix (includes the terminating NUL), minimum 2.
+    0x05 (n)   Username       : ASCII username bytes.
+    0x05+n (4B) ExtraLength   : OPTIONAL u32 length prefix for an extra field.
+    ...    (m) Extra          : OPTIONAL extra-field bytes.
+    (separate) Password       : NOT inline; copied into a separately allocated, zero-padded
+                                fixed-width buffer and folded into the packet by the cipher step.
+
+  CIPHER: the secure-send path applies an XOR transform over the assembled buffer (a block of
+  dwords, seeded by a small constant) and mixes in the server key material from the 0/0 exchange.
+  The exact key derivation, dword count, the wire placement of the password buffer relative to the
+  username/extra fields, and the final framed size are NOT determined here.
+
+  HAND-OFF: Network.Crypto / re-crypto-analyst must fully characterise the XOR cipher and the
+  server-key mixing before a clean, implementable login spec can be written. Until then treat this
+  as a structural sketch only.
+
+  UNBLOCKS (once crypto lands): Client.Application Login use-case; the Network.Crypto handshake.

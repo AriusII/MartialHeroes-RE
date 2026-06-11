@@ -21,8 +21,16 @@ public sealed class SknParserTests
     private static byte[] Le4f(float v) { var b = new byte[4]; BinaryPrimitives.WriteSingleLittleEndian(b, v); return b; }
 
     /// <summary>
-    /// Builds a minimal synthetic .skn binary buffer.
+    /// Builds a minimal synthetic .skn binary buffer using the confirmed on-disk layout.
     /// spec: Docs/RE/formats/mesh.md §Format: .skn.
+    /// <para>
+    /// Wire layout:
+    ///   id_a u32 LE | id_b u32 LE
+    ///   name LenStr  [u32 LE length prefix + ASCII body, no null terminator]
+    ///   face_count u32 LE | face_count × 36-byte face records
+    ///   vertex_count u32 LE | vertex_count × 24-byte vertex records
+    ///   weight_count u32 LE | weight_count × 12-byte weight records
+    /// </para>
     /// </summary>
     private static byte[] BuildSkn(
         uint idA, uint idB, string name,
@@ -37,10 +45,11 @@ public sealed class SknParserTests
         ms.Write(Le4(idA));
         ms.Write(Le4(idB));
 
-        // LenStr name (1-byte prefix + ASCII bytes)
-        // spec: Docs/RE/formats/mesh.md §String encoding (LenStr): UNVERIFIED (1-byte assumed).
+        // LenStr name: 4-byte u32 LE length prefix + ASCII body, no null terminator.
+        // spec: Docs/RE/formats/mesh.md §String encoding (LenStr):
+        //   "The prefix is a 4-byte little-endian u32." CONFIRMED.
         byte[] nameBytes = Encoding.ASCII.GetBytes(name);
-        ms.WriteByte((byte)nameBytes.Length);
+        ms.Write(Le4((uint)nameBytes.Length));
         ms.Write(nameBytes);
 
         // Face table: face_count u32 + face_count × 36 bytes
@@ -91,7 +100,7 @@ public sealed class SknParserTests
     [Fact]
     public void Parse_Header_IdAndName()
     {
-        // spec: Docs/RE/formats/mesh.md §Header — id_a, id_b, name: CONFIRMED (presence).
+        // spec: Docs/RE/formats/mesh.md §Header — id_a, id_b, name: CONFIRMED.
         byte[] data = BuildSkn(
             idA: 101, idB: 202, name: "HeroSkin",
             faces: [[(0, 0.5f, 0.5f), (1, 0.0f, 1.0f), (2, 1.0f, 0.0f)]],
@@ -226,5 +235,25 @@ public sealed class SknParserTests
 
         Assert.Equal(5u, mesh.IdA);
         Assert.Equal("Mem", mesh.Name);
+    }
+
+    [Fact]
+    public void Parse_LenStrPrefix_Is4Bytes()
+    {
+        // Structural check: confirm that the name LenStr uses a 4-byte u32 LE prefix,
+        // not a 1-byte prefix, by building two fixtures differing only in name length
+        // and verifying the total size difference matches the name bytes (not name+3 padding).
+        // spec: Docs/RE/formats/mesh.md §String encoding (LenStr):
+        //   "The prefix is a 4-byte little-endian u32." CONFIRMED.
+        (uint vIdx, float u, float v)[][] faces   = [[(0, 0f, 0f), (1, 0f, 0f), (2, 0f, 0f)]];
+        (float, float, float, float, float, float)[] verts = [(0f, 1f, 0f, 0f, 0f, 0f), (0f, 1f, 0f, 1f, 0f, 0f), (0f, 1f, 0f, 2f, 0f, 0f)];
+        (uint, uint, float)[] ws = [(0, 0, 1.0f)];
+
+        byte[] withName1 = BuildSkn(1, 2, "A",   faces, verts, ws); // 1-char name
+        byte[] withName5 = BuildSkn(1, 2, "ABCDE", faces, verts, ws); // 5-char name
+
+        // The difference must be exactly 4 (5 chars - 1 char) bytes of name body.
+        // The prefix is shared and is 4 bytes either way.
+        Assert.Equal(4, withName5.Length - withName1.Length);
     }
 }

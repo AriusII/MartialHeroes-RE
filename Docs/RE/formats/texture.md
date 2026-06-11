@@ -5,14 +5,15 @@
 
 ## Identification
 
-- **Extensions:** not fixed; texture files are referenced by logical VFS paths from scene config.
-  Common extensions in D3D9-era clients include `.dds`, `.tga`, `.bmp` — actual extensions in this
-  archive are SAMPLE-UNVERIFIED.
-- **Found in:** `.vfs` archive (logical path pattern: `textures/*` or similar; config section label
-  `TEXTURES` names the volume).
-- **Magic / signature:** depends on the concrete format. DDS files begin with ASCII `DDS ` (four
-  bytes); TGA files have no fixed magic. D3DX9 auto-detects both.
-- **Endianness:** depends on concrete format (DDS headers are little-endian).
+- **Extensions:** `.dds` (dominant), `.tga` (effect/particle textures), `.bmp` (minor UI assets).
+  Exact per-asset-category breakdown requires a sample; the extensions and dominant format are
+  confirmed from call-site analysis of the loader routines (see Concrete formats section).
+- **Found in:** `.vfs` archive (logical path pattern: `data/item/effect/` for DDS,
+  `data/effect/texture/` for TGA; config section label `TEXTURES` names the volume).
+- **Magic / signature:** DDS files begin with ASCII `DDS ` (four bytes, `44 44 53 20`). TGA files
+  have no fixed magic; D3DX9 auto-detects them from internal structure.
+- **Endianness:** DDS headers are little-endian; TGA headers are little-endian. BMP is
+  little-endian. All decoding is delegated to D3DX9.
 
 ## There is no proprietary texture format
 
@@ -26,8 +27,10 @@ This means `Assets.Parsers` does not need to implement a proprietary texture for
 only responsibility for textures is:
 
 1. Locate and extract the raw bytes from the VFS entry (format-transparent; see `formats/pak.md`).
-2. Pass the raw bytes to a standard image decoder (DDS-first is the high-confidence path).
-3. Produce a decoded pixel buffer for `Assets.Mapping`.
+2. Identify the format: check for DDS magic (`DDS ` / `44 44 53 20`) first; fall back to TGA,
+   then BMP.
+3. Pass the raw bytes to a standard image decoder (DDS-first is the high-confidence path).
+4. Produce a decoded pixel buffer for `Assets.Mapping`.
 
 ## Loading paths observed in the client
 
@@ -35,34 +38,60 @@ Two code paths reach the same D3DX9 decode API:
 
 **VFS path (primary):** Raw file bytes are loaded from the VFS into a heap allocation, then passed
 to the D3DX9 in-memory decode function. The function receives the pointer and the byte count from
-the VFS entry; it returns a Direct3D texture object. This is the normal runtime path.
+the VFS entry; D3DX9 auto-detects the format from the header bytes and returns a Direct3D texture
+object. This is the normal runtime path.
 
 **Disk fallback:** When the VFS is not mounted, the engine passes an on-disk file path to a D3DX9
-file-from-disk variant. Same format auto-detection applies; D3DX9 opens and decodes the file
-directly. This path is used during development or when the archive is unavailable.
+file-from-disk variant. Same format auto-detection applies. This path is used during development
+or when the archive is unavailable.
 
 Both paths share the same D3DX9 format auto-detection and produce equivalent output.
 
-## Likely concrete formats (sample-unverified)
+## Concrete formats — CONFIRMED from call-site analysis
 
-| Format | Confidence | Rationale |
+### DDS / DXT5 — primary format for game-world, item, and effect textures
+
+- **Status: CONFIRMED-from-routine** (was previously inferred from platform/era).
+- The dominant texture loader (used at over 200 call sites for UI, item, and effect textures)
+  passes an explicit DXT5 format constant as the D3DX9 decode hint. The string `.dds` appears at
+  well over 200 locations in the binary, far more than any other image extension.
+- **DDS is the dominant on-disk texture format.** DXT5 block compression is the primary variant.
+- DXT1 (opaque, no alpha) and DXT3 (explicit alpha) constants also appear in the binary, meaning
+  specific asset sub-categories may use those variants. The caller determines the expected format
+  per load; D3DX9 still auto-detects from the file header regardless.
+
+| Variant | Status | Notes |
 |---|---|---|
-| DDS with DXT1 block compression | HIGH | Standard D3D9-era compressed texture; smallest storage; natively supported by D3DX9 and hardware |
-| DDS with DXT3 or DXT5 block compression | HIGH | Common for alpha-channel textures in this era |
-| DDS uncompressed | MEDIUM | Used for render targets, palettised textures, or special-purpose surfaces |
-| TGA | MEDIUM | Common in Asian MMORPG clients of this era; supported natively by D3DX9 |
-| BMP | LOW | Possible for UI assets but large; supported by D3DX9 |
+| DXT5 | CONFIRMED-from-routine | Primary variant; used at 200+ explicit call sites |
+| DXT1 | MEDIUM | String constant found; specific asset categories unknown without sample |
+| DXT3 | MEDIUM | String constant found; specific asset categories unknown without sample |
+| DDS uncompressed | UNVERIFIED | Not ruled out; possible for special-purpose surfaces |
 
-All confidence ratings above are based on platform and era evidence only. **No texture file from
-this archive has been inspected.** Exact format(s) in use require a sample VFS-extracted texture
-to confirm.
+### TGA — effect and particle textures
 
-## JPEG is not an inbound texture format — confirmed
+- **Status: CONFIRMED-from-routine** (was previously MEDIUM/era-inferred).
+- TGA files appear at roughly 60 path locations, concentrated under `data/effect/texture/`. They
+  are loaded through the effect texture manager rather than the general item texture loader. The
+  loader calls D3DX9 with no explicit format hint (auto-detect), which natively handles TGA.
+- No custom TGA header parsing exists in the client; D3DX9 decodes TGA entirely.
 
-The Intel JPEG library (`ijl11`) is present in the client's import table, but only the write and
-free functions are imported; the read function is not imported. This means JPEG decoding is never
-called by this client. JPEG encoding is used for output paths (screenshot export or similar).
-Inbound textures loaded from the VFS are not JPEG files.
+### BMP — minor assets (UI)
+
+- **Status: LOW** — the `.bmp` string appears at four locations, all in UI or loader-path
+  contexts. Likely used for a small number of UI assets (cursor, splash, loading screen, or
+  similar). D3DX9 handles BMP natively. Specific use not fully traced without a sample.
+
+### PNG — not used
+
+- **Status: CONFIRMED-absent** — the string `.png` does not appear in the binary. PNG is not
+  used as a texture format in this client.
+
+### JPEG — not used for inbound textures
+
+- **Status: CONFIRMED** — the Intel JPEG library (`ijl11`) is present in the client's import
+  table, but only the write and free functions are imported; the read function is not imported.
+  JPEG decoding is never called for asset loading. JPEG encoding is used for output paths
+  (screenshot export or similar). Inbound textures loaded from the VFS are not JPEG files.
 
 ## Enumerations / flags
 
@@ -72,30 +101,25 @@ game-specific values, and are outside the scope of this spec.
 
 ## Known unknowns
 
-- Exact texture file extensions used in the archive: UNVERIFIED — requires a `.vfs` sample.
-- Whether DDS, TGA, or a mix of both is used: UNVERIFIED — requires sample inspection.
-- Whether any D3DX9 `colorKey` transparency value is set to a non-zero default (i.e., whether
+- Which specific VFS entry paths use DXT1 vs. DXT3 vs. DXT5: UNVERIFIED — requires a sample
+  VFS-extracted texture to confirm the per-category breakdown.
+- Whether any D3DX9 color-key transparency value is set to a non-zero default (i.e., whether
   a color is treated as transparent at load time): UNVERIFIED.
 - Mip-level generation policy (pre-generated in-file vs. D3DX9-generated at load time): UNVERIFIED.
-- Whether all textures share the same format or different logical categories (UI vs. world vs.
-  character) use different formats: UNVERIFIED.
+- Exact VFS path patterns for BMP assets: UNVERIFIED — four string occurrences noted but
+  context not fully traced.
 
 ## Implementation guidance for Assets.Parsers
 
-Because the format is not proprietary, the parser implementation should:
-
 - Extract raw bytes via the VFS layer (see `formats/pak.md`).
-- Attempt DDS decoding first (highest-confidence format for this era); fall back to a general
-  image decoder (e.g. StbImage or ImageSharp) that handles TGA, BMP, and PNG.
+- Check the first four bytes: if they are `44 44 53 20` (ASCII `DDS `), treat as DDS.
+- If not DDS, attempt TGA decode (no magic; rely on decoder heuristics or file extension hint).
+- If neither matches, attempt BMP.
 - Do NOT attempt JPEG decode for assets loaded from the VFS.
-- If the first four bytes of the raw buffer are `44 44 53 20` (ASCII `DDS `), treat as DDS.
 - Report the detected format and surface dimensions to `Assets.Mapping` along with the decoded
   pixel data.
 - If an unrecognized format header is encountered, log the first four bytes and report failure
   rather than attempting a blind decode.
-
-When a texture sample becomes available, update the "Likely concrete formats" table and promote
-the highest-confidence entry to CONFIRMED.
 
 ## Cross-references
 

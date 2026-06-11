@@ -83,23 +83,40 @@ Normals are not carried into the in-memory vertex buffer.
 - **Magic / signature:** none identified; file begins immediately with the header fields below.
 - **Endianness:** little-endian throughout.
 
+### String encoding (LenStr) — used in `.skn` and `.bnd`
+
+> ⚠ CORRECTION — previously this spec stated the prefix width was unverified and suggested
+> supporting a 1-byte prefix. That was wrong. The prefix is a **4-byte little-endian u32**.
+
+Both `.skn` and `.bnd` use a length-prefixed string encoding throughout. The wire format is:
+
+```
+[u32 LE — byte length of the body (4 bytes)]
+[char[length] — string body, no null terminator on disk]
+```
+
+The length field is always a full 4-byte unsigned integer read in little-endian order. The body
+is exactly `length` bytes with no trailing null byte on disk; the engine constructs an in-memory
+string object from the raw bytes.
+
+Any parser that reads these files must consume 4 bytes for the length prefix, not 1 byte.
+Implementations written against the previous (1-byte) assumption will misparse all LenStr fields
+in both `.skn` and `.bnd`.
+
+| Confidence |
+|---|
+| CONFIRMED — resolved by direct analysis of the string-read primitive in binary mode |
+
 ### Header
 
-Appears at offset 0. The `name` field is variable-length (see String encoding below), so
-subsequent sections have no fixed absolute offsets.
+Appears at offset 0. The `name` field is variable-length (its size is `4 + name_length` bytes),
+so subsequent sections have no fixed absolute offsets.
 
 | Rel. offset | Size | Type | Field | Notes | Confidence |
 |---:|---|---|---|---|---|
 | 0 | 4 | u32 LE | `id_a` | First numeric identifier for this mesh object. | CONFIRMED |
-| 4 | 4 | u32 LE | `id_b` | Bind-pose reference ID. The loader calls `CorePoseManager_GetById(id_b)` to associate this skin with a `.bnd` skeleton. | CONFIRMED |
-| 8 | variable | LenStr | `name` | Length-prefixed name string. See String encoding section. | CONFIRMED (presence); UNVERIFIED (exact wire encoding) |
-
-### String encoding (LenStr) — used in `.skn` and `.bnd`
-
-The string is read by a dedicated primitive that indicates a length prefix rather than a
-null-terminated layout. The exact prefix width (1 byte vs. 2 bytes) and whether a null terminator
-follows the character data are **sample-unverified**. Implementors should support at least
-a 1-byte-prefixed byte string until a sample confirms the encoding width.
+| 4 | 4 | u32 LE | `id_b` | Bind-pose reference ID. The loader associates this skin with the `.bnd` skeleton whose `actor_id` matches this value. | CONFIRMED |
+| 8 | 4 + N | LenStr | `name` | Length-prefixed name string. Wire format: 4-byte u32 LE length, then N bytes of body with no null terminator. See String encoding section. | CONFIRMED |
 
 ### Face table
 
@@ -166,7 +183,7 @@ Immediately follows the vertex table.
 | 8 | 4 | f32 LE | `weight` | Influence weight in the range (0.0, 1.0]. Records where `weight < 0.01` are skipped by the loader. | CONFIRMED |
 
 Post-load invariant: the engine normalizes weights per vertex so the sum equals 1.0. A zero total
-weight for any vertex is a fatal assertion in the original client (`total_weight != 0.0f`).
+weight for any vertex is a fatal assertion in the original client.
 
 ### End of file
 
@@ -187,35 +204,64 @@ No explicit end-of-file marker. The file ends immediately after the last weight 
 
 | Rel. offset | Size | Type | Field | Notes | Confidence |
 |---:|---|---|---|---|---|
-| 0 | 4 | u32 LE | `actor_id` | Numeric ID for this skeleton; typically the numeric suffix of the filename (e.g. filename `g100.bnd` → `actor_id = 100`). Matched against the `id_b` field in `.skn` headers. | CONFIRMED |
-| 4 | variable | LenStr | `actor_name` | Length-prefixed name string (see String encoding in `.skn` section). | CONFIRMED (presence); UNVERIFIED (exact wire encoding) |
-| after name | 1 | u8 | `bone_count` | Number of bone records that follow. Stored as a single unsigned byte; maximum value 255. | CONFIRMED |
+| 0 | 4 | u32 LE | `actor_id` | Numeric ID for this skeleton; typically the numeric suffix of the filename (e.g. `g100.bnd` → `actor_id = 100`). Matched against the `id_b` field in `.skn` headers. | CONFIRMED |
+| 4 | 4 + N | LenStr | `actor_name` | Length-prefixed name string. Wire format: 4-byte u32 LE length, then N bytes with no null terminator. See String encoding in the `.skn` section. | CONFIRMED |
+| after name | 4 | u32 LE | `bone_count` | Number of bone records that follow. On-disk representation is a full u32; only the low byte is stored to the in-memory count field, giving an effective maximum of 255 bones. | CONFIRMED |
+
+Note: a previous revision of this spec described `bone_count` as a 1-byte on-disk field.
+That was incorrect. The loader reads a full 4-byte u32 in binary mode; the high three bytes are
+discarded after the read. The on-disk representation is u32 LE.
 
 ### Bone array
 
-`bone_count` records of **72 bytes each**, read in sequence. The 72-byte on-disk record size is
-confirmed by the loader's pointer arithmetic (stride of 18 dwords × 4 bytes = 72 bytes). The
-in-memory bone allocation also uses 72 bytes.
+> ⚠ CORRECTION — a prior version of this spec stated the on-disk bone record was 72 bytes and
+> contained 36 bytes of uncharacterized data (sub-offsets 36–71). Both claims were wrong.
+>
+> The 72-byte figure is the **in-memory** object size, which includes computed fields populated
+> by post-load passes (parent/child tree pointers, world-space translation, world-space rotation).
+> The **on-disk** record is **36 bytes**. There is no uncharacterized trailing region on disk.
+> Any parser code written against the 72-byte on-disk assumption will over-read by 36 bytes per
+> bone and must be corrected.
 
-Note: a prior IDB comment described the bone record as "36 bytes on disk." This is incorrect; the
-stride evidence indicates 72 bytes on disk. The first 36 bytes account for the confirmed fields
-below; the remaining 36 bytes are uncharacterized. Mark as CONFLICTED pending a sample.
+`bone_count` records of **36 bytes each**, read in sequence. Every field in the 36-byte record
+is fully characterized.
 
-**BndBone record — 72 bytes on disk, little-endian:**
+**BndBone on-disk record — 36 bytes, little-endian:**
 
 | Sub-offset | Size | Type | Field | Notes | Confidence |
 |---:|---|---|---|---|---|
-| 0 | 4 | u32 LE | `self_id` | Identifies this bone within the skeleton; only the low byte is consumed in the observed code paths. | MEDIUM |
-| 4 | 4 | u32 LE | `parent_id` | Identifies the parent bone (for hierarchy linkage); only the low byte is consumed. Root bone convention (self-referential or sentinel value) is unverified. | MEDIUM |
-| 8 | 12 | f32[3] LE | `translation` | Rest-pose local translation vector (X, Y, Z). | MEDIUM |
-| 20 | 16 | f32[4] LE | `rotation` | Rest-pose local rotation quaternion (X, Y, Z, W component order unverified). | MEDIUM |
-| 36 | 36 | u8[36] | `unknown_36` | Remaining bytes of the 72-byte record. Never characterized by examined code paths. May contain scale, flags, inverse-bind matrix data, or additional transform data. | UNVERIFIED |
+| 0 | 4 | u32 LE | `self_id` | Identifies this bone within the skeleton. The loader stores only the low byte to the in-memory bone; the high three bytes are discarded after the read. | CONFIRMED |
+| 4 | 4 | u32 LE | `parent_id` | Identifies the parent bone. The loader stores only the low byte to the in-memory bone. For the root bone this field holds the same value as `self_id` (both zero). | CONFIRMED |
+| 8 | 12 | f32[3] LE | `local_translation` | Rest-pose local translation vector: X at +8, Y at +12, Z at +16. | CONFIRMED |
+| 20 | 16 | f32[4] LE | `local_rotation` | Rest-pose local rotation quaternion in **XYZW component order** (the scalar W component is stored last, at sub-offset +32 within the record). | CONFIRMED |
 
-**Confirmed sub-field byte count:** 4 + 4 + 12 + 16 = 36 bytes of identified fields.  
-**Uncharacterized:** 36 bytes (sub-offsets 36–71).
+**Total on-disk per bone: 36 bytes.**
 
-Post-load: the engine computes parent/child hierarchy linkage and world-space transforms from root
-after loading all bone records. These are derived data and are not stored on disk.
+The remaining fields in the in-memory bone object (parent/child/sibling tree pointers,
+world-space translation, world-space rotation) are derived values computed by post-load routines
+after all bone records are read. They are never stored on disk.
+
+### Root bone sentinel
+
+The root bone is identified by the condition: `self_id == 0` and `parent_id == 0` (both low
+bytes are zero). No other on-disk convention marks the root. Any bone whose `parent_id` low byte
+is non-zero and has no matching `self_id` among the other bones causes a fatal abort in the
+original client.
+
+| Confidence |
+|---|
+| CONFIRMED — resolved by direct analysis of the hierarchy-build routine |
+
+### Quaternion component order
+
+The local rotation quaternion is stored as four consecutive floats in **XYZW order**: X at
+sub-offset +20, Y at +24, Z at +28, W (scalar) at +32. This order applies both on disk and in
+the in-memory representation; the loader reads the bytes directly into the in-memory quaternion
+fields without reordering.
+
+| Confidence |
+|---|
+| CONFIRMED — resolved by analysis of the quaternion multiply routine used during world-transform accumulation |
 
 ---
 
@@ -226,14 +272,11 @@ None identified in these formats.
 ## Known unknowns
 
 - `.xobj` token 1 (`unused_token`): purpose of the first discarded token is unknown.
-- `.skn` / `.bnd` `LenStr` prefix width: 1-byte vs. 2-byte prefix unresolved; sample required.
-- `.bnd` bone record bytes 36–71: 36 bytes of each bone record are entirely uncharacterized.
-- `.bnd` bone `self_id` / `parent_id`: only the low byte is observed to be consumed; whether the
-  high bytes carry meaning is unknown.
-- `.bnd` root bone sentinel: what value `parent_id` holds for the root bone is unverified.
-- `.bnd` quaternion component order (XYZW vs. WXYZ): unverified without a sample.
-- No magic bytes confirmed for `.skn` or `.bnd`; the files may begin with content fields directly
-  or may have an unexamined preamble byte that was not observed.
+- `.skn` / `.bnd` `self_id` and `parent_id`: the on-disk representation is a full u32 LE; only
+  the low byte is consumed by the observed code paths. Whether the upper three bytes carry meaning
+  (e.g. a namespace, a category tag, or an extended bone count) is unknown without a sample.
+- No magic bytes confirmed for `.xobj`, `.skn`, or `.bnd`; the files begin with content fields
+  directly or may have an unexamined preamble not visible in the examined code path.
 
 ## Cross-references
 

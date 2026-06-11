@@ -1,0 +1,44 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED and HEADER-PARTLY-DECODED: see notes. capture_verified: false.
+
+name: CmsgChatChannel
+opcode: 0x30015           # major 3 (CharacterMgmt), minor 21 -> (3 << 16) | 21
+direction: C2S
+size: var                 # 56-byte fixed-size context header + length-prefixed text body
+spec: packets/3-21_chat_channel.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client general / channel chat. A 56-byte context header (sender + channel/scope metadata), followed by a length-prefixed text body. Channel routing is selected inside the header.
+
+# The 56-byte header is a context/metadata struct whose full breakdown was NOT decoded this pass.
+# One sub-field is known: a channel/scope selector lives at offset 0x04. The rest is modelled as
+# opaque buffers so the engineer can frame the packet and the variable text body correctly.
+fields:
+  - { name: HeaderPrefix,   type: "bytes[4]" }   # 0x00  leading 4 bytes of the context header (not decoded)
+  - { name: ChannelSelector, type: u32 }       # 0x04  channel / scope selector (a value where selector % 10 == 5 is a special channel)
+  - { name: HeaderRest,     type: "bytes[48]" }  # 0x08  remaining 48 bytes of the context header (not decoded)
+
+notes: |
+  Static inference only; no capture available. VARIABLE-LENGTH packet.
+
+  Header = 56 bytes (0x00..0x37): a context struct carrying sender + channel/scope metadata.
+    0x04 (4B) ChannelSelector : a channel / scope selector (u32). A selector whose value mod 10 == 5
+                                takes a special channel path that bypasses the empty/length gate.
+                                PARTIAL CONFIDENCE.
+    The remaining bytes (0x00..0x03 and 0x08..0x37) were NOT decoded this pass and are modelled as
+    opaque buffers.
+
+  BODY (after the 56-byte header): a length-prefixed text block:
+    [u32 textLength][text bytes]
+  where textLength = string length + 1 (includes the terminating NUL). For ordinary channels the
+  text is gated to a length less than 200; the special channel (selector % 10 == 5) bypasses the
+  empty/length gate.
+
+  UNKNOWNS to resolve with a follow-up send-site analysis and a capture:
+    - the full layout of the 56-byte header (sender id, target id, channel name region are the
+      likely contents);
+    - the precise semantics of the channel selector values;
+    - the text charset.
+
+  UNBLOCKS: Client.Application chat-send (general/channel) use-case.

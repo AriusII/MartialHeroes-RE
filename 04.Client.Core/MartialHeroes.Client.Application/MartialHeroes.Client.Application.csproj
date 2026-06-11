@@ -13,6 +13,10 @@
         <!-- 04 -> 02 downward-legal: typed packet structs, FrameHeader, Opcodes, and the
              Routing.IPacketHandler / PacketRouter dispatch seam this layer wires into. -->
         <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Protocol\MartialHeroes.Network.Protocol.csproj" />
+        <!-- 04 -> 02 downward-legal: SessionHandshake (0/0 parse + 1/4 reply build) for the login
+             handshake flow. The cipher/LZ4 stays downstream of IOutboundPacketSink; we only call the
+             pure key-exchange parser and the PKCS#1 reply builder. -->
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Crypto\MartialHeroes.Network.Crypto.csproj" />
     </ItemGroup>
 
 </Project>
