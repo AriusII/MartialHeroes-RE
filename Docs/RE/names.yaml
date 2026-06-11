@@ -41,12 +41,52 @@ client_mechanics:
 file_extensions:
   ".map": { note: "terrain cell text descriptor (sections + DATAFILE/TEXTURES directives)", spec: "Docs/RE/formats/terrain.md" }
   ".ted": { note: "terrain cell binary blob (heightmap/normals/lookup/direction/diffuse)", spec: "Docs/RE/formats/terrain.md" }
-  ".mud": { note: "terrain cell fixed 32768-byte opaque blob (internal layout UNVERIFIED)", spec: "Docs/RE/formats/terrain.md" }
-  ".sod": { note: "terrain cell collision solids + triangles", spec: "Docs/RE/formats/terrain.md" }
-  ".lst": { note: "binary cell-key manifest (u32 count + u32[] keys)", spec: "Docs/RE/formats/terrain.md" }
-  ".mot": { note: "skeletal animation clip (binary, little-endian)", spec: "Docs/RE/formats/animation.md" }
-  ".scr": { note: "client catalogue/stat-curve table (binary records)", spec: "Docs/RE/formats/config_tables.md" }
-  ".xeff": { note: "visual effects (magic XEFF); spec pending", spec: "Docs/RE/formats/sound_tables.md" }
+  ".mud": { note: "terrain cell 32768-byte blob: 64x64 grid of 8-byte per-tile ambient-sound records", spec: "Docs/RE/formats/terrain.md" }
+  ".sod": { note: "terrain cell collision: u32 solidCount + variable-length solid/triangle records", spec: "Docs/RE/formats/terrain.md" }
+  ".lst": { note: "binary cell-key manifest (u32 count + u32[] keys, key=mapZ+100000*mapX)", spec: "Docs/RE/formats/terrain.md" }
+  ".mot": { note: "skeletal animation clip (binary LE; 28-byte keyframes, 10 fps)", spec: "Docs/RE/formats/animation.md" }
+  ".scr": { note: "client catalogue/stat-curve table (binary fixed-stride records)", spec: "Docs/RE/formats/config_tables.md" }
+  ".bud": { note: "terrain cell building/scene geometry blob (the .map BUILDING DATAFILE; objectCount + per-object verts/indices)", spec: "Docs/RE/formats/terrain_scene.md" }
+  ".up":  { note: "terrain UP_TERRAIN geometry (u32 count + 40-byte triangle records)", spec: "Docs/RE/formats/terrain_layers.md" }
+  ".exd": { note: "terrain EXTRA_TERRAIN geometry (u32 count + 40-byte triangle records)", spec: "Docs/RE/formats/terrain_layers.md" }
+  ".fx1": { note: "terrain FX layer (per-index vertex strides 32/36/44 B); .fx1-.fx7", spec: "Docs/RE/formats/terrain_layers.md" }
+  ".pre": { note: "precomputed collision sidecar (<cell>.sod.pre)", spec: "Docs/RE/formats/terrain_layers.md" }
+  ".post": { note: "terrain editor full-snapshot sidecar (<cell>.ted.post, same 46987-byte layout as .ted)", spec: "Docs/RE/formats/terrain_layers.md" }
+  ".bin": { note: "per-map baked lightmap (lightN.bin)", spec: "Docs/RE/formats/terrain_layers.md" }
+  ".xeff": { note: "visual-effects definition (particle emitters/primitives; magic XEFF as invalid-sentinel)", spec: "Docs/RE/formats/effects.md" }
+  ".eff": { note: "AMBIGUOUS by directory: per-map sound-trigger table OR effect-object (data/effect/obj)", spec: "Docs/RE/formats/effects.md" }
+  ".wlk": { note: "per-map footstep(walk) sound table (256x48B)", spec: "Docs/RE/formats/sound_tables.md" }
+  ".run": { note: "per-map footstep(run) sound table (256x48B)", spec: "Docs/RE/formats/sound_tables.md" }
+  ".bgm": { note: "per-map background-music schedule table (256x48B)", spec: "Docs/RE/formats/sound_tables.md" }
+  ".bge": { note: "per-map ambient sound table (256x48B)", spec: "Docs/RE/formats/sound_tables.md" }
+  ".ogg": { note: "standard Ogg Vorbis audio (2d/3d directories)", spec: "Docs/RE/formats/sound_tables.md" }
+  ".skn": { note: "skinned mesh (binary)", spec: "Docs/RE/formats/mesh.md" }
+  ".bnd": { note: "skeleton (36-byte bone records)", spec: "Docs/RE/formats/mesh.md" }
+  ".xobj": { note: "ASCII static mesh (effect geometry)", spec: "Docs/RE/formats/mesh.md" }
+  ".dds": { note: "DXT texture (D3DX9-delegated)", spec: "Docs/RE/formats/texture.md" }
+  ".tga": { note: "TGA texture (D3DX9-delegated)", spec: "Docs/RE/formats/texture.md" }
+  ".bmp": { note: "standard BMP texture (directly usable; toonramp.bmp = shader LUT)", spec: "Docs/RE/formats/texture.md" }
+  ".png": { note: "standard PNG texture (directly usable; char texture buckets)", spec: "Docs/RE/formats/texture.md" }
+  ".csv": { note: "items.csv — plaintext item catalogue (~100 cols, CP949 names)", spec: "Docs/RE/formats/config_tables.md" }
+  ".do":  { note: "client data table (emoticon/msginfo/items_extra)", spec: "Docs/RE/formats/config_tables.md" }
+  ".psh": { note: "Direct3D 9 pixel shader assembly", spec: "Docs/RE/formats/shaders.md" }
+  ".vsh": { note: "Direct3D 9 vertex shader assembly", spec: "Docs/RE/formats/shaders.md" }
+  ".arr": { note: "NPC/monster spawn array (npcNNN.arr; links to mobs.scr ids)", spec: "Docs/RE/formats/npc_spawns.md" }
+  ".xdb": { note: "misc data table (actor_size/effectscale)", spec: "Docs/RE/formats/misc_data.md" }
+  ".mi":  { note: "mob-info data (mobinfo.mi)", spec: "Docs/RE/formats/misc_data.md" }
+
+# Asset/format constants (data magic numbers; NOT decompiler output).
+asset_constants:
+  DDS_MAGIC:               { value: "0x20534444", note: "'DDS ' little-endian", spec: "Docs/RE/formats/texture.md" }
+  DDS_HEADER_SIZE:         { value: 124, spec: "Docs/RE/formats/texture.md" }
+  DXT1_BLOCK_BYTES:        { value: 8, spec: "Docs/RE/formats/texture.md" }
+  DXT3_BLOCK_BYTES:        { value: 16, spec: "Docs/RE/formats/texture.md" }
+  DXT5_BLOCK_BYTES:        { value: 16, spec: "Docs/RE/formats/texture.md" }
+  XEFF_INVALID_MAGIC:      { value: "0x46464558", note: "'XEFF' LE; header equal to this = invalid-file sentinel", spec: "Docs/RE/formats/effects.md" }
+  TED_CELL_BYTES:          { value: 46987, note: "5 sequential blocks, no header", spec: "Docs/RE/formats/terrain.md" }
+  MUD_CELL_BYTES:          { value: 32768, note: "64x64 grid of 8-byte records", spec: "Docs/RE/formats/terrain.md" }
+  TERRAIN_VERTEX_SPACING:  { value: 16, note: "world units per vertex (1024/64)", spec: "Docs/RE/formats/terrain.md" }
+  VFS_ENTRY_COUNT_SAMPLE:  { value: 43347, note: "entries in the supplied real data.inf (validation datum)", spec: "Docs/RE/formats/pak.md" }
 
 # Opcodes are the (major:minor) wire tuple. The key is the catalog encoding major<<16|minor
 # (see Docs/RE/opcodes.md); `tuple` repeats the human-readable major:minor. Direction is

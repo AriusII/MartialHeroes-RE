@@ -176,3 +176,37 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
   is confirmed (banner); all asset field internals and .lua roles stay sample-dependent. Journal authored
   centrally by the orchestrator (spec-authors were barred from journal.md/names.yaml to avoid the
   parallel-write clobber observed in an earlier wave).
+
+## 2026-06-11 — real-asset RE wave (26 analysts / 12 spec-authors, sample-verified against the real VFS)
+- binary: doida.exe @ 63fcaf8e (x86 32-bit), IDA Pro 9.3 via MCP, read-only — used sparingly to disambiguate;
+  PRIMARY evidence this wave was real sample bytes (the user supplied the real client at D:\MartialHeroesClient).
+- inputs: the real archive (data.inf 6,241,992 B index + data/data.vfs 3.8 GB) was parsed by our own
+  MappedVfsArchive — 43,347 entries, 100.0% coverage (declared == vfs within 24 B), 0 out-of-bounds, 0 sort
+  violations, high-dword always 0 → pak.md byte-confirmed. 146 representative samples extracted (gitignored
+  Docs/RE/_dirty/samples/) for hexdump analysis; full TOC manifest under _dirty/assets/ (never committed).
+- analyzed (by canonical format): every asset extension across the 49 present. Validated existing specs against
+  real bytes (terrain .ted/.map/.mud/.sod, animation .mot, mesh .skn/.bnd/.xobj, catalogues .scr, textures
+  .dds/.tga, sound tables) and DISCOVERED previously-unspecified formats (.bud cell geometry, .xeff visual
+  effects, .fx1-7/.up/.exd/.pre/.post/.bin terrain sidecars, .psh/.vsh shaders, .arr NPC spawns, items.csv,
+  .do/.xdb/.mi/.tol misc data).
+- specs produced/updated (all promoted neutral; sample_verified flipped to true where confirmed against bytes):
+  - formats/terrain.md (UPDATED) — .ted 5-block fully confirmed (no header; heights = direct world Y; normals
+    signed-byte/127; 16x16 texture-index + direction grids; diffuse x0.5 runtime); .mud CRACKED (64x64 grid of
+    8-byte per-tile ambient-sound records); .sod variable-length records; DATAFILE->.bud linkage fixed.
+  - formats/terrain_scene.md (NEW) — .bud: u32 objectCount, per object {u8 type, u32 texId, u32 vertexCount,
+    32-byte vertices (XYZ f32 + 5 unknown f32), u32 indexCount, u16 indices}.
+  - formats/terrain_layers.md (NEW) — .fx1-7 (per-index vertex strides 32/36/44 B), .up/.exd (u32 count +
+    40-byte triangle records), .sod.pre/.ted.post precomputed sidecars, light*.bin.
+  - formats/animation.md, mesh.md, config_tables.md, texture.md, sound_tables.md (UPDATED — real-byte verified;
+    config_tables now carries the real .scr column semantics + the items.csv ~100-column schema; texture adds
+    .bmp/.png as standard directly-usable containers).
+  - formats/effects.md (NEW, .xeff/.eff), shaders.md (NEW, D3D9 .psh/.vsh), npc_spawns.md (NEW, .arr),
+    misc_data.md (NEW, .xdb/.mi/.tol/.ion/.sc).
+  - formats/pak.md (UPDATED by orchestrator) — promoted to CONFIRMED with the 43,347-entry/100%-coverage proof.
+  - names.yaml (orchestrator) — asset_formats + constants blocks for the new extensions.
+- notes: All raw findings went to gitignored Docs/RE/_dirty/formats/*.raw.md first, then were rewritten into the
+  clean specs by no-IDA spec-authors. Orchestrator firewall pass removed leaked Hex-Rays locals (v3/v5/v6 ->
+  field_NN) and analyst function-symbol names from the clean specs; final scan is clean (no addresses, no
+  sub_/loc_/dword_, no pseudo-code, no standalone "IDA" editorializing). All game text is CP949/EUC-KR. The
+  wave-7/8 "stat curves not extractable" gap is now fully resolved: the curves are client-side .scr + items.csv
+  and their real column layouts are documented. Journal + names.yaml authored centrally by the orchestrator.

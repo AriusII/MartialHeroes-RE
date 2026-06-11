@@ -2,6 +2,14 @@
 
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code.
 > Consumed by Assets.Parsers (Assets.Vfs). Every offset an engineer cites must reference this file.
+>
+> **Status: CONFIRMED against a real archive.** The reference implementation (`MappedVfsArchive`)
+> parsed a real `data.inf` (6,241,992 bytes) + `data/data.vfs` (3.8 GB) cleanly: exactly
+> **43,347 entries** (`6,241,992 = 24 + 144 × 43,347`, byte-exact), the declared payload extents
+> tile the data blob to **100.0% coverage** (sum of sizes == blob length within the trailing 24 B),
+> **zero** out-of-bounds offsets, **zero** TOC name-ordering violations (the binary-search key
+> invariant holds), and every `data_size` high dword is zero (low-32-bit size confirmed). A small
+> number of entries (≈65) share/overlap a payload offset — benign de-duplication of identical files.
 
 ## Identification
 

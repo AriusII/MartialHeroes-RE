@@ -428,6 +428,33 @@ Main.exe
 # specs promoted out of it are committed. See Docs/RE/README.md.
 Docs/RE/_dirty/
 
+# Defense-in-depth: copyrighted client asset payloads are never committed regardless of where
+# they land. Only neutral specs (Docs/RE/formats/*.md) describe them. The .vfs/.inf container,
+# extracted asset blobs, and plaintext catalogue dumps stay local.
+*.vfs
+*.inf
+*.pak
+*.bud
+*.ted
+*.sod
+*.mud
+*.exd
+*.up
+*.fx1
+*.fx2
+*.fx3
+*.fx4
+*.fx5
+*.fx6
+*.fx7
+*.mot
+*.skn
+*.bnd
+*.xobj
+*.xeff
+*.scr
+*.arr
+
 # === Claude Code tooling: SHARE hooks/skills/agents/settings, keep local state secret ===
 .claude/*
 !.claude/settings.json
