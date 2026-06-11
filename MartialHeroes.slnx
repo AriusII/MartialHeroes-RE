@@ -20,4 +20,5 @@
     <Project Path="04.Client.Core/MartialHeroes.Client.Infrastructure/MartialHeroes.Client.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/05.Presentation/" />
+  <Folder Name="/Docs/" />
 </Solution>
