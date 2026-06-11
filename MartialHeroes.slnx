@@ -21,4 +21,7 @@
   </Folder>
   <Folder Name="/05.Presentation/" />
   <Folder Name="/Docs/" />
+  <Folder Name="/Tests/">
+    <Project Path="tests/MartialHeroes.Shared.Kernel.Tests/MartialHeroes.Shared.Kernel.Tests.csproj" />
+  </Folder>
 </Solution>

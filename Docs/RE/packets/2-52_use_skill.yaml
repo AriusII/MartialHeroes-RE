@@ -1,0 +1,29 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED and ANALYSIS-INCOMPLETE: the C2S send-site layout was not recovered.
+
+name: CmsgUseSkill
+opcode: 0x20034           # major 2 (GameAction), minor 52 -> (2 << 16) | 52
+direction: C2S
+size: var                 # unknown; the send-site builder was not analyzed
+spec: packets/2-52_use_skill.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client skill-activate request. The server replies with the S2C 5/52 ActorSkillAction broadcast.
+
+# DRAFT / INCOMPLETE. The C2S 2/52 builder (UI input -> packet) was not analyzed; the fields
+# below are a minimal hypothesis projected from the paired S2C 5/52 header. Do NOT implement a
+# fixed struct from this without a capture or a follow-up send-site analysis.
+fields:
+  - { name: SkillId,    type: u32 }   # hypothesized: the skill id to activate
+  - { name: TargetId,   type: u32 }   # hypothesized: the target actor id (0 = self / no target)
+
+notes: |
+  ANALYSIS INCOMPLETE -- this is the weakest spec in the set. major 2 (GameAction) is C2S-only;
+  the client emits it and there is no inbound handler to read field offsets from. The two fields
+  above are a guess inferred from the paired S2C 5/52 (which carries SkillId at header +0x0c and
+  a per-target id). The real wire layout MUST come from one of:
+    - a capture of an outbound 2/52 frame, or
+    - a dirty-room analysis of the C2S send site (UI input -> PACKETBUF build), promoted to a
+      neutral note first.
+  Until then, treat size as unknown and do not generate a production struct.

@@ -1,0 +1,52 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgActorSkillAction
+opcode: 0x50034           # major 5 (Push), minor 52 -> (5 << 16) | 52
+direction: S2C
+size: var                 # 24-byte header + (target_count x 36-byte target records)
+spec: packets/5-52_actor_skill_action.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server broadcasts a skill/combat action by an actor, plus per-target hit results. Pairs with the C2S 2/52 request.
+
+# Fixed 24-byte header. The repeating 36-byte target records are described in notes; the engineer
+# hand-codes the loop driven by TargetCount.
+fields:
+  - { name: CasterSort,   type: u8 }        # 0x00  caster actor sort
+  - { name: Pad0,         type: "bytes[3]" }  # 0x01  padding
+  - { name: CasterId,     type: u32 }       # 0x04  caster actor id
+  - { name: CastFlag,     type: u8 }        # 0x08  0 => cancel/idle branch; nonzero => active cast
+  - { name: BasicSelector, type: u8 }       # 0x09  basic/alias selector (0xFF => basic attack)
+  - { name: Pad1,         type: "bytes[2]" }  # 0x0a  padding
+  - { name: SkillId,      type: u32 }       # 0x0c  skill id (resolved against the client skill table)
+  - { name: SkillArg,     type: u32 }       # 0x10  secondary skill/effect argument
+  - { name: ActionCode,   type: u8 }        # 0x14  action code (0=single target; 0xC8..0xCB=motion sub-ops; 0xCC=AoE)
+  - { name: Pad2,         type: "bytes[3]" }  # 0x15  padding (TargetCount lives in this 0x14..0x18 region; see notes)
+
+notes: |
+  Static inference only; no capture available. VARIABLE-LENGTH packet.
+
+  Header = 24 bytes (0x00..0x17), matching the handler's 0x18-byte read. When the per-record
+  counter is in (0, 0x28] the handler then reads target_count * 36 bytes of target records.
+
+  TARGET RECORD (36 bytes each, repeated target_count times):
+    +0x00 (1B)  u8    target actor sort
+    +0x04 (4B)  u32   target actor id
+    +0x08 (4B)  i32   anim/hit state (1 = landed hit)
+    +0x0c (4B)  i32   visible damage applied
+    +0x10 (4B)  --    reserved
+    +0x14 (8B)  i64   remaining HP after hit (signed; negative on overkill)
+    +0x1c (4B)  i32   max HP
+    +0x20 (4B)  --    tail / reserved
+
+  AMBIGUITY (resolve with a capture): the handler copies the 24-byte header into a work buffer
+  offset by +4, so its `target_count` loop reads from work+0x18 = the payload's 0x14..0x18 region.
+  The exact wire position of TargetCount versus ActionCode within 0x14..0x17 is NOT pinned. This
+  spec places ActionCode at 0x14 and treats the count as living in the same 4-byte region (Pad2);
+  the engineer must confirm which byte is the count before trusting the record loop bound.
+
+  SPECIAL: when ActionCode == 0xCC the handler treats the first record as an AoE origin and
+  procedurally fans out sub-actors (no extra wire fields).
+  UNKNOWN: precise TargetCount byte; meaning of the two reserved record words. Capture required.

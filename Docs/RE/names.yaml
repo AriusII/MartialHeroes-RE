@@ -1,25 +1,213 @@
-# names.yaml — project glossary for the legacy Martial Heroes client.
+# names.yaml - project glossary for the legacy Martial Heroes client.
 #
 # Maps original IDA symbols / addresses to canonical project names. This is a GLOSSARY
 # (clean, committed), not decompiler output. The `ida-naming-sync` skill applies this map
 # to the live IDA database and pulls renamed symbols back.
 #
-# Address keys are strings ("0x004A1230") so YAML never coerces them to ints/floats.
+# Address keys are strings ("0x<addr>") so YAML never coerces them to ints/floats.
 
 binary:
-  # Fill once a reference client is hashed (the analysis is pinned to this exact build).
-  name: "Main.exe"
-  sha256: ""          # e.g. "ab12…" — set by ida-recon
-  notes: ""
+  # The analysis is pinned to this exact build of the legacy client.
+  name: "doida.exe"
+  sha256: "63fcaf8e81a61097c68d22ae82514dded54e59c41c480850a568a0f0d79eb9df"
+  notes: "Legacy D.O. Online / Martial Heroes client; x86 32-bit; imagebase 0x400000."
 
 functions: {}
-  # "0x004A1230": { name: "RecvPacketDispatch", note: "main opcode switch" }
+  # "0x<addr>": { name: "RecvPacketDispatch", note: "main opcode switch" }
 
 globals: {}
-  # "0x006F0040": { name: "g_RollingKey", note: "packet cipher rolling key state" }
+  # "0x<addr>": { name: "g_RollingKey", note: "packet cipher rolling key state" }
 
-crypto: {}
-  # "0x0049F800": { name: "DecryptInPlace", note: "rolling-key stream cipher" }
+crypto:
+  # Keyed by canonical ROLE name (not address); see Docs/RE/specs/crypto.md.
+  WireCipher:      { note: "keyless/stateless message-tier payload byte cipher (outbound)", spec: "Docs/RE/specs/crypto.md" }
+  WireCompression: { note: "LZ4 payload compression applied after the wire cipher (outbound)", spec: "Docs/RE/specs/crypto.md" }
+  SecureHandshake: { note: "opcode 0/0 bignum public-key session handshake; reply as Auth 1/4; NOT Windows CryptoAPI", spec: "Docs/RE/specs/crypto.md" }
+  ConfigCryptoApi: { note: "ADVAPI32 anti-cheat + signed/encrypted config-file loader; OUT OF SCOPE for Network.Crypto", spec: "Docs/RE/specs/crypto.md" }
 
-opcodes: {}
-  # 0x0042: { name: "SmsgMovePlayer", direction: "S2C", note: "" }
+# Opcodes are the (major:minor) wire tuple. The key is the catalog encoding major<<16|minor
+# (see Docs/RE/opcodes.md); `tuple` repeats the human-readable major:minor. Direction is
+# from the client's point of view.
+opcodes:
+  0x0: { name: "SmsgKeyExchange", direction: "S2C", tuple: "0:0" }
+  0x10010: { name: "SmsgSrvBillingDeactivated", direction: "S2C", tuple: "1:16" }
+  0x10011: { name: "SmsgSrvBillingActivated", direction: "S2C", tuple: "1:17" }
+  0x10013: { name: "SmsgSrvBillingExpiryNotice", direction: "S2C", tuple: "1:19" }
+  0x10014: { name: "SmsgSrvLetterReceived", direction: "S2C", tuple: "1:20" }
+  0x20034: { name: "CmsgUseSkill", direction: "C2S", tuple: "2:52" }
+  0x30001: { name: "SmsgCharacterList", direction: "S2C", tuple: "3:1" }
+  0x30004: { name: "SmsgCharManageResult", direction: "S2C", tuple: "3:4" }
+  0x30005: { name: "SmsgEnterGameAck", direction: "S2C", tuple: "3:5" }
+  0x30006: { name: "SmsgRenameCharResult", direction: "S2C", tuple: "3:6" }
+  0x30007: { name: "SmsgCharSpawnResult", direction: "S2C", tuple: "3:7" }
+  0x30008: { name: "SmsgShopPageUpdate", direction: "S2C", tuple: "3:8" }
+  0x3000d: { name: "SmsgCharStatusUpdate", direction: "S2C", tuple: "3:13" }
+  0x3000e: { name: "SmsgSceneEntityUpdate", direction: "S2C", tuple: "3:14" }
+  0x30017: { name: "SmsgCharCreateResult", direction: "S2C", tuple: "3:23" }
+  0x30064: { name: "SmsgCharActionResult", direction: "S2C", tuple: "3:100" }
+  0x3c350: { name: "SmsgGmChatMessage", direction: "S2C", tuple: "3:50000" }
+  0x40001: { name: "SmsgGameStateTick", direction: "S2C", tuple: "4:1" }
+  0x40002: { name: "SmsgGameTickConfig", direction: "S2C", tuple: "4:2" }
+  0x40003: { name: "SmsgBillingInfo", direction: "S2C", tuple: "4:3" }
+  0x40004: { name: "SmsgAreaEntitySnapshot", direction: "S2C", tuple: "4:4" }
+  0x40005: { name: "SmsgItemUseResult", direction: "S2C", tuple: "4:5" }
+  0x4000c: { name: "SmsgEquipItemResult", direction: "S2C", tuple: "4:12" }
+  0x4000d: { name: "SmsgLocalPlayerStateSync", direction: "S2C", tuple: "4:13" }
+  0x4000e: { name: "SmsgGroundItemSlotAck", direction: "S2C", tuple: "4:14" }
+  0x4000f: { name: "SmsgItemWorldPickupAck", direction: "S2C", tuple: "4:15" }
+  0x40010: { name: "SmsgEquipChangeResult", direction: "S2C", tuple: "4:16" }
+  0x40011: { name: "SmsgQuickEquipSlotAck", direction: "S2C", tuple: "4:17" }
+  0x40013: { name: "SmsgNpcBuyOrAcquireAck", direction: "S2C", tuple: "4:19" }
+  0x40014: { name: "SmsgNpcSellItemAck", direction: "S2C", tuple: "4:20" }
+  0x40015: { name: "SmsgNpcShopSlotClearAck", direction: "S2C", tuple: "4:21" }
+  0x40016: { name: "SmsgItemSlotStateAck", direction: "S2C", tuple: "4:22" }
+  0x40017: { name: "SmsgUserTradeRequestResult", direction: "S2C", tuple: "4:23" }
+  0x40018: { name: "SmsgUserTradeSlotUpdate", direction: "S2C", tuple: "4:24" }
+  0x40019: { name: "SmsgUserTradeFullResponse", direction: "S2C", tuple: "4:25" }
+  0x4001c: { name: "SmsgRespawnConfirm", direction: "S2C", tuple: "4:28" }
+  0x4001d: { name: "SmsgStatUpdate", direction: "S2C", tuple: "4:29" }
+  0x4001e: { name: "SmsgSocialPanelTarget", direction: "S2C", tuple: "4:30" }
+  0x40023: { name: "SmsgPartyInviteState", direction: "S2C", tuple: "4:35" }
+  0x40024: { name: "SmsgPartyMemberRemoveResult", direction: "S2C", tuple: "4:36" }
+  0x40025: { name: "SmsgPartyLeaderActionResult", direction: "S2C", tuple: "4:37" }
+  0x40027: { name: "SmsgResponseDiscard39", direction: "S2C", tuple: "4:39" }
+  0x40028: { name: "SmsgResponseSlot40", direction: "S2C", tuple: "4:40" }
+  0x40029: { name: "SmsgSkillHotbarAssignResult", direction: "S2C", tuple: "4:41" }
+  0x4002a: { name: "SmsgPlayerInteractionState", direction: "S2C", tuple: "4:42" }
+  0x4002b: { name: "SmsgPlayerInteractionResult", direction: "S2C", tuple: "4:43" }
+  0x4002c: { name: "SmsgActorTickTableOpA", direction: "S2C", tuple: "4:44" }
+  0x4002d: { name: "SmsgActorTickTableOpB", direction: "S2C", tuple: "4:45" }
+  0x4002e: { name: "SmsgActorTickTableOpC", direction: "S2C", tuple: "4:46" }
+  0x4002f: { name: "SmsgSocialAckDrain", direction: "S2C", tuple: "4:47" }
+  0x40030: { name: "SmsgRankProgressEvent", direction: "S2C", tuple: "4:48" }
+  0x40031: { name: "SmsgRankProgressPanelUpdate", direction: "S2C", tuple: "4:49" }
+  0x40032: { name: "SmsgUpgradeItemResult", direction: "S2C", tuple: "4:50" }
+  0x40036: { name: "SmsgGuildRankSlotUpdate", direction: "S2C", tuple: "4:54" }
+  0x40037: { name: "SmsgGuildInfoUpdateResult", direction: "S2C", tuple: "4:55" }
+  0x40038: { name: "SmsgResponseSlot56", direction: "S2C", tuple: "4:56" }
+  0x40039: { name: "SmsgResponseSlot57", direction: "S2C", tuple: "4:57" }
+  0x4003a: { name: "SmsgResponseSlot58", direction: "S2C", tuple: "4:58" }
+  0x4003c: { name: "SmsgResponseSlot60", direction: "S2C", tuple: "4:60" }
+  0x4003d: { name: "SmsgGuildStateChangeResult", direction: "S2C", tuple: "4:61" }
+  0x4003e: { name: "SmsgGuildInviteJoinState", direction: "S2C", tuple: "4:62" }
+  0x4003f: { name: "SmsgGuildMemberRemoveResult", direction: "S2C", tuple: "4:63" }
+  0x40040: { name: "SmsgGuildPositionChangeResult", direction: "S2C", tuple: "4:64" }
+  0x40041: { name: "SmsgGuildInfoFullSync", direction: "S2C", tuple: "4:65" }
+  0x40042: { name: "SmsgResponseSlot66", direction: "S2C", tuple: "4:66" }
+  0x40046: { name: "SmsgResponseSlot70", direction: "S2C", tuple: "4:70" }
+  0x40047: { name: "SmsgResponseSlot71", direction: "S2C", tuple: "4:71" }
+  0x40048: { name: "SmsgResponseSlot72", direction: "S2C", tuple: "4:72" }
+  0x4004a: { name: "SmsgResponseSlot74", direction: "S2C", tuple: "4:74" }
+  0x4004b: { name: "SmsgResponseSlot75", direction: "S2C", tuple: "4:75" }
+  0x4004c: { name: "SmsgPartyAcceptResult", direction: "S2C", tuple: "4:76" }
+  0x4004e: { name: "SmsgServerTimeNotification", direction: "S2C", tuple: "4:78" }
+  0x4004f: { name: "SmsgCraftingResult", direction: "S2C", tuple: "4:79" }
+  0x40050: { name: "SmsgPvpDeathResult", direction: "S2C", tuple: "4:80" }
+  0x40051: { name: "SmsgActionErrorResult", direction: "S2C", tuple: "4:81" }
+  0x40052: { name: "SmsgBillingBalanceUpdate", direction: "S2C", tuple: "4:82" }
+  0x40053: { name: "SmsgBillingItemUseResult", direction: "S2C", tuple: "4:83" }
+  0x40054: { name: "SmsgRecordSlotConsumeResult", direction: "S2C", tuple: "4:84" }
+  0x4005d: { name: "SmsgUserVoteTallyUpdate", direction: "S2C", tuple: "4:93" }
+  0x4005f: { name: "SmsgLocalPlayerBattleMode", direction: "S2C", tuple: "4:95" }
+  0x40060: { name: "SmsgActorGuildRosterEntry", direction: "S2C", tuple: "4:96" }
+  0x40061: { name: "SmsgAreaSkillEffectPanel", direction: "S2C", tuple: "4:97" }
+  0x40063: { name: "SmsgCombatResultMessage", direction: "S2C", tuple: "4:99" }
+  0x40064: { name: "SmsgCombatAttackUpdate", direction: "S2C", tuple: "4:100" }
+  0x40065: { name: "SmsgGlobalScalarPairUpdate", direction: "S2C", tuple: "4:101" }
+  0x40066: { name: "SmsgSkillWindowStateUpdate", direction: "S2C", tuple: "4:102" }
+  0x40067: { name: "SmsgGuildPanelTextUpdate", direction: "S2C", tuple: "4:103" }
+  0x40069: { name: "SmsgGagePanelProgressUpdate", direction: "S2C", tuple: "4:105" }
+  0x4006b: { name: "SmsgEventLotteryPickResult", direction: "S2C", tuple: "4:107" }
+  0x4006c: { name: "SmsgPlayerGoldBalanceUpdate", direction: "S2C", tuple: "4:108" }
+  0x4006d: { name: "SmsgLocalActorSkillStateFlag", direction: "S2C", tuple: "4:109" }
+  0x40071: { name: "SmsgItemShopPurchaseResult", direction: "S2C", tuple: "4:113" }
+  0x40072: { name: "SmsgCashShopActionResult", direction: "S2C", tuple: "4:114" }
+  0x40073: { name: "SmsgItemShopBalanceUpdate", direction: "S2C", tuple: "4:115" }
+  0x40078: { name: "SmsgActorTableBatchResult", direction: "S2C", tuple: "4:120" }
+  0x4007a: { name: "SmsgResponseSlot122", direction: "S2C", tuple: "4:122" }
+  0x4007b: { name: "SmsgResponseSlot123", direction: "S2C", tuple: "4:123" }
+  0x4007d: { name: "SmsgResponseSlot125", direction: "S2C", tuple: "4:125" }
+  0x4007e: { name: "SmsgResponseSlot126", direction: "S2C", tuple: "4:126" }
+  0x40084: { name: "SmsgGmNoticeError", direction: "S2C", tuple: "4:132" }
+  0x40085: { name: "SmsgRankProgressUpdate", direction: "S2C", tuple: "4:133" }
+  0x40086: { name: "SmsgStatChangeNotify", direction: "S2C", tuple: "4:134" }
+  0x40087: { name: "SmsgResponseSlot135", direction: "S2C", tuple: "4:135" }
+  0x40089: { name: "SmsgGatheringResult", direction: "S2C", tuple: "4:137" }
+  0x4008a: { name: "SmsgNoticeError", direction: "S2C", tuple: "4:138" }
+  0x4008b: { name: "SmsgItemUseEffect", direction: "S2C", tuple: "4:139" }
+  0x4008c: { name: "SmsgColoredSystemText", direction: "S2C", tuple: "4:140" }
+  0x4008e: { name: "SmsgResponseSlot142", direction: "S2C", tuple: "4:142" }
+  0x40092: { name: "SmsgShowMessage51027", direction: "S2C", tuple: "4:146" }
+  0x40094: { name: "SmsgPlaytimeRewardResult", direction: "S2C", tuple: "4:148" }
+  0x40095: { name: "SmsgItemPanelSlotChunk", direction: "S2C", tuple: "4:149" }
+  0x40096: { name: "SmsgSkillPointUpdate", direction: "S2C", tuple: "4:150" }
+  0x40097: { name: "SmsgResponseSlot151", direction: "S2C", tuple: "4:151" }
+  0x40098: { name: "SmsgResponseSlot152", direction: "S2C", tuple: "4:152" }
+  0x40099: { name: "SmsgItemPanelSlotRefresh", direction: "S2C", tuple: "4:153" }
+  0x401f4: { name: "SmsgShowPopupByCode", direction: "S2C", tuple: "4:500" }
+  0x4c350: { name: "SmsgResponseDiscardText", direction: "S2C", tuple: "4:50000" }
+  0x50000: { name: "SmsgCharDespawn", direction: "S2C", tuple: "5:0" }
+  0x50001: { name: "SmsgActorSpawnExtended", direction: "S2C", tuple: "5:1" }
+  0x50003: { name: "SmsgCharSpawn", direction: "S2C", tuple: "5:3" }
+  0x50005: { name: "SmsgActorStateEvent", direction: "S2C", tuple: "5:5" }
+  0x50006: { name: "SmsgActorAutotargetOrMotion", direction: "S2C", tuple: "5:6" }
+  0x50007: { name: "SmsgChatBroadcast", direction: "S2C", tuple: "5:7" }
+  0x50009: { name: "SmsgExpGain", direction: "S2C", tuple: "5:9" }
+  0x5000a: { name: "SmsgCharDeath", direction: "S2C", tuple: "5:10" }
+  0x5000b: { name: "SmsgRankXpGain", direction: "S2C", tuple: "5:11" }
+  0x5000c: { name: "SmsgActorVisualSlotSet", direction: "S2C", tuple: "5:12" }
+  0x5000d: { name: "SmsgActorMovementUpdate", direction: "S2C", tuple: "5:13" }
+  0x5000e: { name: "SmsgCombatEffectInstanceSpawn", direction: "S2C", tuple: "5:14" }
+  0x5000f: { name: "SmsgTrackedWorldObjectRemove", direction: "S2C", tuple: "5:15" }
+  0x50010: { name: "SmsgActorVisualSlotClear", direction: "S2C", tuple: "5:16" }
+  0x50012: { name: "SmsgGameClockUpdate", direction: "S2C", tuple: "5:18" }
+  0x50015: { name: "SmsgPartyRosterEvent", direction: "S2C", tuple: "5:21" }
+  0x5001a: { name: "SmsgLocalPlayerRelationSlot", direction: "S2C", tuple: "5:26" }
+  0x5001c: { name: "SmsgRespawnAtPoint", direction: "S2C", tuple: "5:28" }
+  0x5001f: { name: "SmsgBuffSlotUpdate", direction: "S2C", tuple: "5:31" }
+  0x50020: { name: "SmsgLevelUp", direction: "S2C", tuple: "5:32" }
+  0x50021: { name: "SmsgSkillHotbarSlotSet", direction: "S2C", tuple: "5:33" }
+  0x50022: { name: "SmsgBillingBannerToggle", direction: "S2C", tuple: "5:34" }
+  0x50026: { name: "SmsgPartyMemberStats", direction: "S2C", tuple: "5:38" }
+  0x50027: { name: "SmsgPushNop39", direction: "S2C", tuple: "5:39" }
+  0x5002a: { name: "SmsgPlayerPairSystemNotice", direction: "S2C", tuple: "5:42" }
+  0x50033: { name: "SmsgSkillGuideState", direction: "S2C", tuple: "5:51" }
+  0x50034: { name: "SmsgActorSkillAction", direction: "S2C", tuple: "5:52" }
+  0x50035: { name: "SmsgActorVitalsAndPairState", direction: "S2C", tuple: "5:53" }
+  0x50037: { name: "SmsgGuildNameDisplayUpdate", direction: "S2C", tuple: "5:55" }
+  0x50039: { name: "SmsgTrackedPanelSlotUpdate", direction: "S2C", tuple: "5:57" }
+  0x5003b: { name: "SmsgRankProgressSfxEvent", direction: "S2C", tuple: "5:59" }
+  0x5003d: { name: "SmsgActorNameOverlaySet", direction: "S2C", tuple: "5:61" }
+  0x50040: { name: "SmsgRemoteActorRelationPair", direction: "S2C", tuple: "5:64" }
+  0x50041: { name: "SmsgGuildMemberRosterUpdate", direction: "S2C", tuple: "5:65" }
+  0x50043: { name: "SmsgStatsUpdate", direction: "S2C", tuple: "5:67" }
+  0x50044: { name: "SmsgQuestList", direction: "S2C", tuple: "5:68" }
+  0x50049: { name: "SmsgQuestComplete", direction: "S2C", tuple: "5:73" }
+  0x5004c: { name: "SmsgPartyMemberJoined", direction: "S2C", tuple: "5:76" }
+  0x5004d: { name: "SmsgRankProgressPanelBulk", direction: "S2C", tuple: "5:77" }
+  0x5004f: { name: "SmsgActorDeathState", direction: "S2C", tuple: "5:79" }
+  0x50050: { name: "SmsgPvpDeathFx", direction: "S2C", tuple: "5:80" }
+  0x50055: { name: "SmsgDungeonEventStateSyncA", direction: "S2C", tuple: "5:85" }
+  0x50056: { name: "SmsgDungeonEventStateSyncB", direction: "S2C", tuple: "5:86" }
+  0x50057: { name: "SmsgDungeonEventActorClear", direction: "S2C", tuple: "5:87" }
+  0x50058: { name: "SmsgPvpStateBytes", direction: "S2C", tuple: "5:88" }
+  0x50059: { name: "SmsgPvpRevengeRoster", direction: "S2C", tuple: "5:89" }
+  0x5005a: { name: "SmsgPvpCounters", direction: "S2C", tuple: "5:90" }
+  0x5005b: { name: "SmsgPvpScoreUpdate", direction: "S2C", tuple: "5:91" }
+  0x5005c: { name: "SmsgPvpRequestOrNotice", direction: "S2C", tuple: "5:92" }
+  0x5005d: { name: "SmsgActorMobIdChange", direction: "S2C", tuple: "5:93" }
+  0x5005e: { name: "SmsgVoteResult", direction: "S2C", tuple: "5:94" }
+  0x50062: { name: "SmsgActorClassFormRefresh", direction: "S2C", tuple: "5:98" }
+  0x5006a: { name: "SmsgTradeStateToggle", direction: "S2C", tuple: "5:106" }
+  0x50079: { name: "SmsgCharPropertySet", direction: "S2C", tuple: "5:121" }
+  0x5007b: { name: "SmsgGiftCharReceiveConfirm", direction: "S2C", tuple: "5:123" }
+  0x5007c: { name: "SmsgActorVisualFlagsSet", direction: "S2C", tuple: "5:124" }
+  0x5007e: { name: "SmsgActorStanceSet", direction: "S2C", tuple: "5:126" }
+  0x5007f: { name: "SmsgStealthToggle", direction: "S2C", tuple: "5:127" }
+  0x50081: { name: "SmsgMonsterNoticeByMobId", direction: "S2C", tuple: "5:129" }
+  0x50082: { name: "SmsgMonsterNoticeWithText", direction: "S2C", tuple: "5:130" }
+  0x50083: { name: "SmsgPvpRankScoreUpdate", direction: "S2C", tuple: "5:131" }
+  0x50088: { name: "SmsgActorTimedStateUpdate", direction: "S2C", tuple: "5:136" }
+  0x5008b: { name: "SmsgAttackEffect", direction: "S2C", tuple: "5:139" }
+  0x50092: { name: "SmsgPacketResponseAckRequest", direction: "S2C", tuple: "5:146" }
+  0x50093: { name: "SmsgActorCombatFlagUpdate", direction: "S2C", tuple: "5:147" }

@@ -1,0 +1,45 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgCharSpawn
+opcode: 0x50003            # major 5 (Push), minor 3 -> (5 << 16) | 3
+direction: S2C
+size: 908                 # fixed 908-byte payload block
+spec: packets/5-3_char_spawn.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server spawns an actor into the world; the payload carries an embedded SpawnDescriptor record.
+
+# Top-level layout. The 880-byte SpawnDescriptor is modelled as one fixed buffer here; its
+# internal fields are documented in Docs/RE/structs/actor.md (the SpawnDescriptor table).
+fields:
+  - { name: Sort,             type: u32 }        # 0x000  actor category (1=PC, 2=Mob/NPC); low byte is the real sort
+  - { name: ActorId,          type: u32 }        # 0x004  actor id
+  - { name: SpawnDescriptor,  type: "bytes[880]" } # 0x008  embedded SpawnDescriptor (0x370 bytes); see structs/actor.md
+  - { name: Trailer,          type: "bytes[20]" }  # 0x378  trailer; purpose unconfirmed (copied, not fully consumed)
+
+notes: |
+  Static inference only; no capture available. Total = 908 bytes (matches the handler's single
+  0x38C-byte read). The handler removes any existing actor with the same (sort,id) key, builds a
+  new actor from the descriptor, inserts it, and sets its world position.
+
+  SpawnDescriptor is a large game struct; the network-protocol-engineer should treat it as an
+  880-byte block on the wire and decode its sub-fields per Docs/RE/structs/actor.md. The
+  spawn-relevant sub-fields (descriptor-relative offsets) are:
+    +0x00  asciiz   character/mob name (UTF-8, fixed buffer; up to 16 chars + NUL)
+    +0x24  int64    current xp
+    +0x34  u16      model id (for sort==2 mobs, selects the mesh)
+    +0x3a  u16      level  (UNVERIFIED exact byte boundary; see structs/actor.md caveat)
+    +0x3c  u32      current hp
+    +0x40  u32      current mp
+    +0x44  u32      current stamina
+    +0x4c  f32      world X  (CONFIRMED float; extracted into the actor's world position)
+    +0x50  f32      world Z  (CONFIRMED float; world Y forced to 0 on spawn)
+    +0x74  u16      server class id (martial-arts style)
+    +0x7c  u8       race / skin variant
+  UNKNOWN / TO RESOLVE WITH A CAPTURE:
+    - the analyst note records two views of the world coordinate offset (descriptor +0x44/+0x48
+      vs +0x4c/+0x50) from different base points; these MUST be reconciled against a capture
+      before an engineer hard-codes a position offset.
+    - the 20-byte trailer's contents.

@@ -1,0 +1,47 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgActorMovementUpdate
+opcode: 0x5000d              # major 5 (Push), minor 13 -> (5 << 16) | 13
+direction: S2C
+size: 40                    # fixed 40-byte payload block
+spec: packets/5-13_actor_movement_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server pushes an actor's movement state (current XZ, destination XZ, facing) for interpolation.
+
+# Wire order, offset 0 = first payload byte. Pack=1; padding bytes are modelled explicitly
+# as bytes[N] so the summed widths equal size:.
+fields:
+  - { name: Sort,        type: u8 }        # 0x00  actor category (1=PC, 2=Mob, 3=NPC); also selects the interp branch
+  - { name: Pad0,        type: "bytes[3]" }  # 0x01  alignment padding to the next dword (may or may not carry data)
+  - { name: ActorId,     type: u32 }       # 0x04  actor id
+  - { name: Yaw,         type: f32 }        # 0x08  facing angle (radians-ish), fed to a yaw-quaternion builder
+  - { name: PosX,        type: f32 }        # 0x0c  current world X (float)
+  - { name: PosZ,        type: f32 }        # 0x10  current world Z (float); world Y is never sent (forced 0)
+  - { name: DestX,       type: f32 }        # 0x14  destination/move-to X (float)
+  - { name: DestZ,       type: f32 }        # 0x18  destination/move-to Z (float)
+  - { name: RunFlag,     type: u8 }        # 0x1c  1 = running (affects speed/anim)
+  - { name: Pad1,        type: "bytes[3]" }  # 0x1d  alignment padding
+  - { name: SpeedScale,  type: f32 }        # 0x20  speed/scale float, ~1.0 default
+  - { name: MotionCode,  type: u8 }        # 0x24  motion/action code; 5 => instant snap branch
+  - { name: Pad2,        type: "bytes[1]" }  # 0x25  alignment padding
+  - { name: StanceByte,  type: u8 }        # 0x26  stance / secondary-state byte
+  - { name: Pad3,        type: "bytes[1]" }  # 0x27  trailing padding to 40
+
+notes: |
+  Static inference only; no capture available. Total = 40 bytes (matches the handler's single
+  40-byte read).
+    0x00 (1B) actor sort / interp-branch selector (1 = path A; 1<sort<=3 = path B).
+    0x04 (4B) actor id (le u32), used for the (sort,id) actor lookup.
+    0x08 (4B) yaw float -> yaw quaternion.
+    0x0c (4B) / 0x10 (4B) current position X / Z as le f32. Y is not on the wire.
+    0x14 (4B) / 0x18 (4B) destination X / Z as le f32.
+    0x1c (1B) run flag.
+    0x20 (4B) speed/scale float.
+    0x24 (1B) motion code (==5 => snap).
+    0x26 (1B) stance byte.
+  UNKNOWNS to resolve with a capture:
+    - whether the three Pad* regions carry real data or are true filler.
+    - exact semantics of SpeedScale vs the global move-speed multiplier.

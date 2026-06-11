@@ -1,0 +1,29 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgEnterGameAck
+opcode: 0x30005            # major 3 (CharacterMgmt), minor 5 -> (3 << 16) | 5
+direction: S2C
+size: 44                  # 40-byte block + trailing u32
+spec: packets/3-5_enter_game_response.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Enter-world acknowledgement; sets billing state and transitions the client into the in-world game state.
+
+fields:
+  - { name: NameBlock,    type: "bytes[28]" }  # 0x00  character/account name region (asciiz within this block)
+  - { name: BillingState, type: u32 }        # 0x1c  billing state, fed to the client BillingState object
+  - { name: BlockTail,    type: "bytes[8]" }   # 0x20  remainder of the 40-byte block (unconsumed by the handler)
+  - { name: CharacterCount, type: u32 }      # 0x28  character count, read by a second 4-byte read
+
+notes: |
+  Static inference only; no capture available. The handler reads a 40-byte block (0x00..0x27)
+  then one more u32 (0x28). Total = 44 bytes.
+    0x00..0x1b (28B) name region; the account/character name is a NUL-terminated ASCII string
+                     somewhere inside this block. Exact name length is unconfirmed.
+    0x1c (4B) billing state (le u32).
+    0x20..0x27 (8B) unconsumed remainder of the leading block.
+    0x28 (4B) character count (le u32).
+  Side effect: transitions the client to the in-world game state.
+  UNKNOWN: precise name field length within NameBlock; capture required.

@@ -1,0 +1,28 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgCharDespawn
+opcode: 0x50000             # major 5 (Push), minor 0 -> (5 << 16) | 0
+direction: S2C
+size: 12                   # fixed 12-byte payload block
+spec: packets/5-0_char_despawn.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server tells the client an actor has left the world; the client removes it from the actor manager.
+
+fields:
+  - { name: Sort,     type: u32 }       # 0x00  actor category, read as a full dword (low byte is the real sort: 1=PC,2=Mob,3=NPC)
+  - { name: ActorId,  type: u32 }       # 0x04  actor id
+  - { name: Flags,    type: u8 }        # 0x08  bit0/==1 => play a "left" SFX + chat line
+  - { name: Pad0,     type: "bytes[3]" }  # 0x09  padding to 12
+
+notes: |
+  Static inference only; no capture available. Total = 12 bytes (matches the handler's single
+  12-byte read).
+    0x00 (4B) sort, read as a full le u32 here (unlike 5/13 which reads sort as u8). On the wire
+              this is most likely a 1-byte sort followed by 3 padding bytes; confirm with capture.
+    0x04 (4B) actor id (le u32); drives the (sort,id) lookup.
+    0x08 (1B) flags; when set, the client plays a leave SFX and a "%s left" chat line (string id 10024).
+  The handler removes the matching actor unless it is the local player.
+  UNKNOWN: whether Sort is genuinely a wire u32 or a u8 + 3 pad. Capture required.

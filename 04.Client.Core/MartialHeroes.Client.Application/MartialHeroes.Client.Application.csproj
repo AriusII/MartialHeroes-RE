@@ -4,6 +4,12 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <LangVersion>14.0</LangVersion>
     </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\MartialHeroes.Client.Domain\MartialHeroes.Client.Domain.csproj" />
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Abstractions\MartialHeroes.Network.Abstractions.csproj" />
+    </ItemGroup>
 
 </Project>

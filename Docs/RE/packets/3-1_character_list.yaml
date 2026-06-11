@@ -1,0 +1,36 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgCharacterList
+opcode: 0x30001           # major 3 (CharacterMgmt), minor 1 -> (3 << 16) | 1
+direction: S2C
+size: var                 # 3-byte header + N x 981-byte slot records
+spec: packets/3-1_character_list.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Character-select list. A 3-byte header with a slot bitmask, followed by one 981-byte record per populated slot.
+
+# Fixed header only. The variable per-slot records are described in notes (codegen models the
+# header; the engineer hand-codes the repeat loop driven by SlotMask).
+fields:
+  - { name: ServerId,  type: u8 }   # 0x00  server id / list context byte
+  - { name: ChannelId, type: u8 }   # 0x01  channel id / context byte
+  - { name: SlotMask,  type: u8 }   # 0x02  slot bitmask: bit i set => slot i record follows (loop ~8 slots)
+
+notes: |
+  Static inference only; no capture available. VARIABLE-LENGTH packet.
+
+  Header (3 bytes), then for each bit set in SlotMask (LSB-first, ~8 slots) one 981-byte slot
+  record is appended, read as four sequential sub-blocks:
+    sub-block 1: 880 bytes  SpawnDescriptor (same family as 5/3; see structs/actor.md)
+    sub-block 2:  96 bytes  stat block (not yet mapped)
+    sub-block 3:   1 byte   per-slot flag
+    sub-block 4:   4 bytes  timing / timestamp value (le u32)
+  Per-slot total = 880 + 96 + 1 + 4 = 981 bytes. A prior analyst observed a 1965-byte frame =
+  3 + 2*981 (two populated slots), capture-unverified here.
+
+  Implementation guidance: the network-protocol-engineer should read the 3-byte header, then loop
+  over set bits in SlotMask, decoding a 981-byte record each time. Drive the SpawnDescriptor
+  decode from structs/actor.md.
+  UNKNOWN: the 96-byte stat block layout; bit ordering of SlotMask vs slot index. Capture required.

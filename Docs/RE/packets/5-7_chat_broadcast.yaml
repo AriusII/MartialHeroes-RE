@@ -1,0 +1,39 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgChatBroadcast
+opcode: 0x50007           # major 5 (Push), minor 7 -> (5 << 16) | 7
+direction: S2C
+size: var                 # 36-byte fixed header + variable text body
+spec: packets/5-7_chat_broadcast.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server broadcasts a chat message. A 36-byte header (sender + routing) followed by variable message text.
+
+# Fixed 36-byte header. The trailing message text is variable (see notes).
+fields:
+  - { name: SenderSort,  type: u8 }         # 0x00  sender actor sort
+  - { name: Pad0,        type: "bytes[3]" }   # 0x01  padding
+  - { name: SenderId,    type: u32 }        # 0x04  sender actor id
+  - { name: ContextId,   type: u32 }        # 0x08  context id (target / room / whisper-peer id)
+  - { name: Reserved0C,  type: u8 }         # 0x0c  reserved / sub-field
+  - { name: SubCommand,  type: u8 }         # 0x0d  chat verb / sub-command
+  - { name: Channel,     type: u8 }         # 0x0e  channel (6 or 7 routed as whisper)
+  - { name: Reserved0F,  type: u8 }         # 0x0f  reserved
+  - { name: SenderName,  type: "bytes[20]" }  # 0x10  sender display name (fixed buffer, asciiz, 0x10..0x23)
+
+notes: |
+  Static inference only; no capture available. VARIABLE-LENGTH packet.
+
+  Header = 36 bytes (0x00..0x23), matching the handler's single 0x24-byte read. The message text
+  body follows the header.
+    0x00 (1B) sender sort, 0x04 (4B) sender id, 0x08 (4B) context id.
+    0x0d (1B) sub-command (chat verb); 0x0e (1B) channel (==6/==7 => whisper).
+    0x10..0x23 (20B) sender display name, NUL-terminated.
+
+  BODY (after the 36-byte header): variable-length chat text. The length encoding is NOT confirmed
+  statically (length-prefixed vs NUL-terminated vs "rest of frame"). Reasonable default hypothesis
+  for the engineer until a capture lands:
+    body_length = frame.size - 8 (frame header) - 36 (chat header), then NUL-trimmed.
+  UNKNOWN: body framing, charset of the text, meaning of the reserved bytes. Capture required.

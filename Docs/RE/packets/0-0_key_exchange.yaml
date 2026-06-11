@@ -1,0 +1,31 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgKeyExchange
+opcode: 0x0               # major 0 (KeyExchange), minor 0 -> (0 << 16) | 0
+direction: S2C
+size: var                # ~62 bytes total observed by a prior analyst; treat as variable until captured
+spec: packets/0-0_key_exchange.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Handshake; the first frame of the secure session. Carries the server's asymmetric key material.
+
+# The handler consumes roughly 54 bytes of key blob plus two trailing u32s.
+fields:
+  - { name: ServerKeyBlob, type: "bytes[54]" }  # 0x00  server public-key blob (root of the per-session cipher)
+  - { name: ServerValue2,  type: u32 }        # 0x36  server-supplied value (purpose unconfirmed)
+  - { name: ServerValue3,  type: u32 }        # 0x3a  server-supplied value (purpose unconfirmed)
+
+notes: |
+  Static inference only; no capture available. A prior analyst note (capture-unverified here)
+  observed 0/0 as a 62-byte frame that is NOT XOR-obfuscated. The handler parses a key blob then
+  two trailing 4-byte values; on receipt the client immediately sends a C2S 1/4 auth reply and
+  disables the compressed keepalive.
+    0x00..0x35 (54B) server public-key / "recv key" blob.
+    0x36 (4B) server value 2.
+    0x3a (4B) server value 3.
+  This is the root of the per-session cipher key schedule -- the actual crypto belongs to the
+  network-crypto-engineer (hand off via the crypto notes).
+  UNKNOWN: exact blob length (54 vs 62 total) and the meaning of value2/value3. Capture required
+  before treating any byte as fixed.
