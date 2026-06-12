@@ -96,6 +96,103 @@ public sealed partial class NpcRenderer : Node3D
     /// </summary>
     public Func<float, float, float>? GroundYFunc { get; set; }
 
+    /// <summary>
+    /// Optional injectable height sampler that returns <see langword="null"/> when the queried
+    /// cell is not yet resident (terrain not loaded).  Used by the pending-snap mechanism to
+    /// distinguish "real height available" from "fallback only".
+    ///
+    /// When set, <see cref="OnSectorBecameResident"/> calls this for each pending actor and snaps
+    /// only those for which a non-null value is returned.  This correctly handles actors whose
+    /// cells may span multiple sectors — they are snapped as soon as their sector arrives,
+    /// regardless of which sector triggered the notification.
+    ///
+    /// Wire alongside <see cref="GroundYFunc"/> in the orchestrator:
+    ///   <c>npcRenderer.TryGroundYFunc = (lx, lz, out float y) =&gt; _terrainNode.TryGetGroundHeight(lx, lz, out y);</c>
+    ///
+    /// spec: TerrainNode.TryGetGroundHeight — returns true when sector is resident: CONFIRMED.
+    /// </summary>
+    public TryGetHeightDelegate? TryGroundYFunc { get; set; }
+
+    /// <summary>
+    /// Delegate type for the nullable terrain height query.
+    /// Returns <see langword="true"/> when the cell is resident and <paramref name="height"/>
+    /// is a real heightmap value; <see langword="false"/> when the cell is not loaded.
+    /// </summary>
+    public delegate bool TryGetHeightDelegate(float worldX, float worldZ, out float height);
+
+    // -------------------------------------------------------------------------
+    // Pending ground-snap tracking
+    //
+    // Each spawned actor is recorded here with its legacy world position.  When a
+    // terrain sector becomes resident (TerrainNode.SectorBecameResident fires),
+    // OnSectorBecameResident() walks only the actors whose cell-key matches the
+    // freshly loaded sector and snaps their Godot Y to the heightmap value.
+    //
+    // This eliminates the fallback-Y race without a per-frame poll:
+    //   - No allocation per frame: the list is built once in PopulateFromArea.
+    //   - Re-grounding cost is O(actors_in_that_cell) per sector-load event, not O(all actors).
+    //   - Actors are removed from the list once grounded so re-grounded actors pay no ongoing cost.
+    //
+    // Cell-key formula (matches TerrainNode.TryGetGroundHeight):
+    //   cellMapX = floor(worldX / 1024) + 10000
+    //   cellMapZ = floor(worldZ / 1024) + 10000
+    // spec: Docs/RE/formats/terrain.md §1.4 — origin bias 10000, cell size 1024 wu: CONFIRMED.
+    // -------------------------------------------------------------------------
+
+    /// <summary>One spawned actor that may still need its ground Y corrected.</summary>
+    private readonly record struct PendingSnap(
+        Node3D Node,
+        float LegacyX,
+        float LegacyZ,
+        int CellMapX,
+        int CellMapZ);
+
+    // All actors still waiting for their cell to become resident.
+    // Cleared (and rebuilt) on each PopulateFromArea call.
+    private readonly List<PendingSnap> _pendingSnaps = new();
+
+    // Running totals for the summary log.
+    private int _totalSpawned;
+    private int _totalGrounded;
+    private int _totalSkinned; // actors built on the new CPU-LBS skinned path
+    private int _totalStaticFallback; // actors that fell back to the static rest-pose path
+
+    // -------------------------------------------------------------------------
+    // Skinning tick scheduler (~10 Hz, staggered)
+    //
+    // 40 actors × CPU LBS every frame is wasteful and the original animates at 10 fps anyway
+    // (spec: animation.md §Timing). We therefore drive each skinned mob at ~10 Hz, staggered so
+    // they do not all resample on the same frame: each frame we advance the actors in one of
+    // SkinTickGroups round-robin "buckets", passing the REAL elapsed seconds for that bucket so
+    // clip time still tracks wall-clock (only the resample cadence is coarser). The player path is
+    // unaffected — it self-ticks per frame via SkinnedCharacterNode._Process.
+    //
+    // spec: MISSION — "Update each actor's skinning at ~10 Hz (staggered); keep per-frame
+    //       allocations near zero (reuse buffers)."
+    // -------------------------------------------------------------------------
+
+    /// <summary>Target skinning resample rate for mobs (Hz). spec: animation.md §Timing — 10 fps.</summary>
+    public float SkinTickHz { get; set; } = 10f;
+
+    // Number of round-robin stagger buckets. Spreading 40 actors over 6 buckets keeps at most
+    // ~7 LBS deforms per frame instead of 40, and at 60 fps each bucket is revisited every 6
+    // frames ≈ 100 ms ≈ the 10 Hz target.
+    private const int SkinTickGroups = 6;
+
+    // One externally-driven skinned node plus the per-bucket accumulator it is pumped with.
+    private readonly record struct SkinnedActor(SkinnedCharacterNode Node, int Bucket);
+
+    private readonly List<SkinnedActor> _skinnedActors = new();
+
+    // Per-bucket elapsed-time accumulator (reused; no per-frame allocation).
+    private readonly double[] _bucketAccum = new double[SkinTickGroups];
+
+    // Round-robin cursor: which bucket is pumped this frame.
+    private int _tickCursor;
+
+    // Deterministic per-actor phase randomizer (seeded once; reused). Avoids System.Random churn.
+    private uint _phaseRng = 0x9E3779B9u;
+
     // -------------------------------------------------------------------------
     // Per-assets skin-class → skn-path lookup cache
     // -------------------------------------------------------------------------
@@ -129,8 +226,16 @@ public sealed partial class NpcRenderer : Node3D
     /// <param name="areaId">Area identifier (e.g. 1 for map001). Area 0 yields zero records.</param>
     public void PopulateFromArea(RealClientAssets assets, int areaId)
     {
-        // Remove previously spawned children.
+        // Remove previously spawned children and reset tracking state.
         ClearChildren();
+        _pendingSnaps.Clear();
+        _skinnedActors.Clear();
+        Array.Clear(_bucketAccum);
+        _tickCursor = 0;
+        _totalSpawned = 0;
+        _totalGrounded = 0;
+        _totalSkinned = 0;
+        _totalStaticFallback = 0;
 
         if (areaId == 0)
         {
@@ -145,6 +250,13 @@ public sealed partial class NpcRenderer : Node3D
         // Ensure the shared lookup tables are built (lazy, per-assets-instance).
         EnsureActorMotionLoaded(assets);
         EnsureSkinClassMapLoaded(assets);
+
+        // STAND-UP PIVOT verification: the +90°-about-Z pivot was validated on the g1 PLAYER rig
+        // only. Explicitly probe the spec's canonical MOB rig (g2048) so its pivot decision is
+        // derived from ITS OWN rest AABB rather than inherited from g1.
+        // spec: MISSION TASK 2 — "check g2048 explicitly and print per-rig pivot decisions."
+        // spec: Docs/RE/specs/skinning.md §8(d) — g2048.bnd (45 bones) + g219000630.skn (933 verts).
+        ProbeG2048Pivot(assets);
 
         int spawned = 0;
 
@@ -185,6 +297,11 @@ public sealed partial class NpcRenderer : Node3D
                     node.Name = $"Mob_{rec.MobId}_{spawned}";
                     AddChild(node);
                     spawned++;
+
+                    // Register for deferred Y-correction once the cell's heightmap loads.
+                    // Cell-key formula matches TerrainNode.TryGetGroundHeight.
+                    // spec: Docs/RE/formats/terrain.md §1.4 — origin bias 10000, cell size 1024: CONFIRMED.
+                    RegisterPendingSnap(node, rec.WorldX, rec.WorldZ);
                 }
             }
         }
@@ -233,6 +350,10 @@ public sealed partial class NpcRenderer : Node3D
                     node.Name = $"Npc_{rec.MobId}_{spawned}";
                     AddChild(node);
                     spawned++;
+
+                    // Register for deferred Y-correction once the cell's heightmap loads.
+                    // spec: Docs/RE/formats/terrain.md §1.4 — origin bias 10000, cell size 1024: CONFIRMED.
+                    RegisterPendingSnap(node, rec.WorldX, rec.WorldZ);
                 }
             }
         }
@@ -241,7 +362,137 @@ public sealed partial class NpcRenderer : Node3D
             GD.Print($"[NpcRenderer] No npc{tag}.arr for area {areaId} — skipping NPC spawns.");
         }
 
-        GD.Print($"[NpcRenderer] Area {areaId}: {spawned} total NPC/mob characters spawned (cap={MaxSpawns}).");
+        _totalSpawned = spawned;
+
+        // Mandatory summary line. spec: MISSION VERIFY — "[NpcRenderer] summary: X skinned /
+        // Y static-fallback / Z grounded (grounding must stay 23/40)."
+        GD.Print($"[NpcRenderer] summary: {_totalSkinned} skinned / {_totalStaticFallback} static-fallback / " +
+                 $"{_totalGrounded} grounded ({spawned} spawned, cap={MaxSpawns}, " +
+                 $"{_pendingSnaps.Count} pending terrain arrival).");
+
+        // One mob AABB sanity line so headless runs can confirm "plausible, not exploded".
+        // spec: MISSION VERIFY — "print one mob AABB sanity line".
+        PrintMobAabbSanity();
+    }
+
+    /// <summary>
+    /// Prints the rest AABB of the first skinned mob (in the actor's local pivot space) so a headless
+    /// run can confirm the deform is plausible (human-sized, finite) and not exploded (huge / NaN).
+    /// </summary>
+    private void PrintMobAabbSanity()
+    {
+        if (_skinnedActors.Count == 0)
+        {
+            GD.Print("[NpcRenderer] AABB sanity: no skinned mobs (all static-fallback).");
+            return;
+        }
+
+        SkinnedCharacterNode node = _skinnedActors[0].Node;
+        if (!global::Godot.GodotObject.IsInstanceValid(node)) return;
+
+        Aabb a = node.GetMeshAabb();
+        Vector3 sz = a.Size;
+        bool finite = !(float.IsNaN(sz.X) || float.IsNaN(sz.Y) || float.IsNaN(sz.Z) ||
+                        float.IsInfinity(sz.X) || float.IsInfinity(sz.Y) || float.IsInfinity(sz.Z));
+        bool plausible = finite && sz.Length() > 0.001f && sz.Length() < 1e4f;
+        GD.Print($"[NpcRenderer] AABB sanity (first skinned mob '{node.GetParent()?.Name}'): " +
+                 $"size=({sz.X:F2},{sz.Y:F2},{sz.Z:F2}) finite={finite} " +
+                 $"plausible={(plausible ? "YES" : "NO — EXPLOSION?")}.");
+    }
+
+    /// <summary>
+    /// One-time explicit probe of the spec's canonical MOB rig (g2048) so its stand-up pivot is
+    /// derived from its own rest AABB and printed, independently of g1. Builds the trio
+    /// (g2048.bnd + g219000630.skn + g182006900.mot) off-tree, logs the pivot decision via the
+    /// builder's diagnostics, then frees the temporary node. Skips silently if the assets are
+    /// absent (the trio is user-supplied and may not be present in every install).
+    ///
+    /// spec: MISSION TASK 2 — "derive/verify the pivot empirically for mob rigs; check g2048
+    ///       explicitly and print per-rig pivot decisions."
+    /// spec: Docs/RE/specs/skinning.md §8(d) — mob trio paths.
+    /// </summary>
+    private static bool _g2048Probed;
+
+    private void ProbeG2048Pivot(RealClientAssets assets)
+    {
+        if (_g2048Probed) return;
+        _g2048Probed = true;
+
+        const string sknPath = "data/char/skin/g219000630.skn";
+        const string bndPath = "data/char/bind/g2048.bnd";
+        const string motPath = "data/char/mot/g182006900.mot";
+
+        if (!assets.Contains(sknPath) || !assets.Contains(bndPath))
+        {
+            GD.Print("[NpcRenderer] g2048 pivot probe: trio assets absent — skipping explicit check.");
+            return;
+        }
+
+        try
+        {
+            SkinnedMesh mesh = SknParser.Parse(assets.GetRaw(sknPath));
+            Skeleton skel = BndParser.Parse(assets.GetRaw(bndPath));
+            AnimationClip? clip = assets.Contains(motPath)
+                ? AnimationParser.Parse(assets.GetRaw(motPath))
+                : null;
+
+            GD.Print($"[NpcRenderer] g2048 pivot probe: skn={mesh.Positions.Length}v " +
+                     $"bnd={skel.Bones.Length}bones mot={(clip is null ? "none" : $"{clip.FrameCount}f")}.");
+
+            // Build off-tree (externalDrive so it never self-ticks) purely to trigger the per-rig
+            // pivot derivation + diagnostics, then free it. The builder prints the pivot decision.
+            Node3D probe = SkinnedCharacterBuilder.Build(
+                mesh, skel, clip, albedo: null,
+                externalDrive: true, startPhaseSeconds: 0f,
+                out _, debugLabel: "g2048(mob-canonical)");
+            probe.QueueFree();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[NpcRenderer] g2048 pivot probe failed: {ex.Message}");
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // ~10 Hz staggered skinning scheduler
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Drives the externally-driven mob skinning at ~10 Hz, staggered across
+    /// <see cref="SkinTickGroups"/> round-robin buckets so they do not all resample on the same
+    /// frame. Each frame advances exactly one bucket, passing the real elapsed seconds accumulated
+    /// for that bucket (so clip time still tracks wall-clock while the resample cadence stays
+    /// coarse). Allocation-free: it walks the pre-built list and pumps each node's reused buffers.
+    ///
+    /// The player's SkinnedCharacterNode self-ticks per frame (not driven here) — this loop only
+    /// touches the mob nodes registered in <see cref="_skinnedActors"/>.
+    ///
+    /// spec: MISSION — "Update each actor's skinning at ~10 Hz (staggered); player stays per-frame;
+    ///       keep per-frame allocations near zero (reuse buffers)."
+    /// </summary>
+    public override void _Process(double delta)
+    {
+        int count = _skinnedActors.Count;
+        if (count == 0) return;
+
+        // Accumulate elapsed time into every bucket, then advance only the one the cursor selects.
+        for (int b = 0; b < SkinTickGroups; b++)
+            _bucketAccum[b] += delta;
+
+        int bucket = _tickCursor;
+        _tickCursor = (_tickCursor + 1) % SkinTickGroups;
+
+        float dt = (float)_bucketAccum[bucket];
+        _bucketAccum[bucket] = 0.0;
+        if (dt <= 0f) return;
+
+        for (int i = 0; i < count; i++)
+        {
+            SkinnedActor sa = _skinnedActors[i];
+            if (sa.Bucket != bucket) continue;
+            if (!global::Godot.GodotObject.IsInstanceValid(sa.Node)) continue;
+            sa.Node.Tick(dt);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -249,65 +500,74 @@ public sealed partial class NpcRenderer : Node3D
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Resolves a model for the given mob_id via the confirmed chain:
-    ///   actormotion.txt col1==mob_id → col2=skin_class
+    /// Resolves a model for the given mob_id via the confirmed chain and builds a SKINNED +
+    /// idle-animated CPU-LBS node (the same pipeline the player uses), falling back to a static
+    /// rest-pose node when any piece is missing:
+    ///   actormotion.txt col1==mob_id → col2=skin_class (and col15 = idle .mot id)
     ///   skinlist.txt scan → first .skn whose parsed IdB == skin_class
+    ///   data/char/bind/g{skin_class}.bnd → skeleton (.bnd)
+    ///   data/char/mot/g{idle}.mot → idle clip (.mot)
     ///   CharacterTextureResolver → albedo texture
-    ///   SkinnedCharacterBuilder.Build (static: skeleton=null, clip=null)
+    ///   SkinnedCharacterBuilder.Build (skinned when bnd present; static otherwise)
     ///
-    /// Returns null when any step fails; never throws.
+    /// Returns null when even the .skn cannot be resolved; never throws.
     ///
-    /// spec: MISSION B — "Resolve each spawn's model: actormotion.txt row col1==mob_id → col2=skin_class;
-    ///       skeleton=data/char/bind/g{skin_class}.bnd; body .skn = skinlist.txt whose IdB==skin_class."
-    /// spec: ActormotionEntry — ActorClassId=col1, SkinClassId=col2. CONFIRMED.
+    /// spec: MISSION — "resolve each actor's skin/bind/idle-mot via the existing actormotion chain,
+    ///       build the skinned node, fall back to the static path when any piece is missing."
+    /// spec: Docs/RE/formats/animation.md §actormotion.txt — col2=SkinClassId, col15=idle motion id.
+    /// spec: Docs/RE/specs/skinning.md §8(d) — mob trio g2048.bnd + g219000630.skn + g182006900.mot.
     /// </summary>
     private Node3D? TryBuildFromMobId(RealClientAssets assets, ushort mobId)
     {
         if (_actorMotionLookup is null || _skinClassToSknPath is null)
             return null;
 
-        // Step 1: actormotion.txt lookup: mob_id → skin_class.
-        // spec: ActormotionParser — col1=actor_class_id, col2=skin_class_id. CONFIRMED.
-        // spec: MISSION B — "actormotion.txt row col1==mob_id gives col2=skin_class."
+        // Step 1: actormotion.txt lookup: mob_id → skin_class + idle motion id.
+        // spec: ActormotionParser — col1=actor_class_id, col2=skin_class_id, col15=idle motion.
         if (!_actorMotionLookup.TryGetValue(mobId, out ActormotionEntry? entry))
             return null; // mob_id not in actormotion.txt — silently skip
 
         int skinClass = entry.SkinClassId;
 
         // Step 2: skinlist.txt scan → .skn path.
-        // spec: MISSION B — "body .skn = the entry in skinlist.txt whose parsed .skn IdB == skin_class."
+        // spec: MISSION — "body .skn = the entry in skinlist.txt whose parsed .skn IdB == skin_class."
         if (!_skinClassToSknPath.TryGetValue(skinClass, out string? sknPath))
             return null; // no .skn with matching IdB — silently skip
 
-        // Step 3: Parse .skn and build a static-pose node.
-        // spec: MISSION B — "build STATIC (skeleton=null, clip=null) for now."
-        return TryBuildStaticNode(assets, sknPath, $"mob_id={mobId} skin_class={skinClass}");
+        // col15 = idle motion id (MotionIds[0]). Zero = empty slot.
+        // spec: Docs/RE/formats/animation.md §col15 — idle_motion_id = motion_ids_a[0]. CONFIRMED.
+        int idleMotId = entry.MotionIds.Length > 0 ? entry.MotionIds[0] : 0;
+
+        return TryBuildActorNode(assets, sknPath, skinClass, idleMotId,
+            $"mob_id={mobId} skin_class={skinClass}");
     }
 
     /// <summary>
-    /// Fallback path: probe <c>data/char/skin/g{mobId}.skn</c> directly.
-    /// Used for NPC entries that are not in actormotion.txt.
+    /// Fallback path: probe <c>data/char/skin/g{mobId}.skn</c> directly (NPCs not in actormotion.txt).
+    /// Builds skinned if a <c>.bnd</c> can be derived from the parsed mesh's IdB; static otherwise.
     /// Returns null (silent skip) when the probe path does not exist in the VFS.
-    ///
-    /// spec: Old NpcRenderer comment — "MobId → skn path is NOT a confirmed mapping;
-    ///       this uses MobId as a BEST-EFFORT skin probe."
     /// </summary>
     private Node3D? TryBuildDirectSkinProbe(RealClientAssets assets, ushort mobId)
     {
         string sknPath = $"data/char/skin/g{mobId}.skn";
         if (!assets.Contains(sknPath))
             return null;
-        return TryBuildStaticNode(assets, sknPath, $"direct-probe mob_id={mobId}");
+        // No actormotion row → no skin_class hint, no idle id; the builder derives the .bnd from
+        // the parsed mesh IdB and renders a static rest pose (skeleton may still resolve).
+        return TryBuildActorNode(assets, sknPath, skinClass: -1, idleMotId: 0,
+            $"direct-probe mob_id={mobId}");
     }
 
     /// <summary>
-    /// Parses the .skn at <paramref name="sknPath"/>, resolves its albedo texture, and calls
-    /// <see cref="SkinnedCharacterBuilder.Build"/> with skeleton=null and clip=null (static pose).
-    ///
-    /// spec: MISSION B — "pass the resolved albedo texture; build STATIC (skeleton=null, clip=null)."
-    /// spec: SkinnedCharacterBuilder — "skeleton=null → static ArrayMesh (no Skeleton3D child)."
+    /// Parses the .skn, resolves its texture, loads the .bnd skeleton and idle .mot clip (when
+    /// available), and builds a skinned CPU-LBS node via <see cref="SkinnedCharacterBuilder"/>.
+    /// Registers the resulting skinned node with the ~10 Hz stagger scheduler. When the skeleton
+    /// is missing, the builder degrades to a static rest pose (counted as a static fallback).
     /// </summary>
-    private static Node3D? TryBuildStaticNode(RealClientAssets assets, string sknPath, string debugLabel)
+    /// <param name="skinClass">SkinClassId from actormotion (the .bnd g-id), or -1 to derive from mesh IdB.</param>
+    /// <param name="idleMotId">Idle .mot id_a (col15), or 0 for none.</param>
+    private Node3D? TryBuildActorNode(
+        RealClientAssets assets, string sknPath, int skinClass, int idleMotId, string debugLabel)
     {
         SkinnedMesh mesh;
         try
@@ -340,13 +600,44 @@ public sealed partial class NpcRenderer : Node3D
             // Albedo stays null — neutral material will be applied by builder.
         }
 
+        // Resolve the .bnd skeleton. The skin_class IS the .bnd g-id (== mesh IdB); fall back to
+        // the mesh's own IdB when no actormotion row gave a skin_class.
+        // spec: Docs/RE/formats/mesh.md §.bnd — actor_id == skin .skn id_b; path g{id}.bnd. CONFIRMED.
+        int bndId = skinClass > 0 ? skinClass : (int)mesh.IdB;
+        Skeleton? skeleton = TryLoadSkeleton(assets, bndId, debugLabel);
+
+        // Resolve the idle .mot clip. Only when we have a skeleton to drive it.
+        // spec: Docs/RE/formats/animation.md §col15 — idle motion id → data/char/mot/g{id}.mot.
+        AnimationClip? clip = (skeleton is not null && idleMotId > 0)
+            ? TryLoadAnimation(assets, idleMotId, debugLabel)
+            : null;
+
         try
         {
-            // Static build: skeleton=null, clip=null.
-            // The skinned path currently explodes the mesh; omit until the inverse-bind fix lands.
-            // spec: RealWorldRenderer — "_ = skeleton; _ = clip; intentionally unused until
-            //       the skinning fix lands." CONFIRMED pattern.
-            Node3D root = SkinnedCharacterBuilder.Build(mesh, null, null, albedo: albedo);
+            // Skinned when a skeleton resolved; static rest pose otherwise. Mobs are externally
+            // driven (the ~10 Hz scheduler pumps them) with a randomized clip start phase so the
+            // town does not animate in lockstep.
+            // spec: MISSION — skinned mob path, ~10 Hz staggered, randomized clip phase.
+            float startPhase = clip is not null ? NextPhase(clip.FrameCount * SkinningMath.MotSecondsPerFrame) : 0f;
+            Node3D root = SkinnedCharacterBuilder.Build(
+                mesh, skeleton, clip, albedo,
+                externalDrive: skeleton is not null,
+                startPhaseSeconds: startPhase,
+                out SkinnedCharacterNode? lbs,
+                debugLabel);
+
+            if (lbs is not null)
+            {
+                // Skinned: register with the stagger scheduler in a round-robin bucket.
+                int bucket = _skinnedActors.Count % SkinTickGroups;
+                _skinnedActors.Add(new SkinnedActor(lbs, bucket));
+                _totalSkinned++;
+            }
+            else
+            {
+                _totalStaticFallback++;
+            }
+
             return root;
         }
         catch (Exception ex)
@@ -354,6 +645,69 @@ public sealed partial class NpcRenderer : Node3D
             GD.PrintErr($"[NpcRenderer] SkinnedCharacterBuilder.Build failed '{sknPath}': {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Loads the <c>.bnd</c> skeleton at <c>data/char/bind/g{bndId}.bnd</c>, or returns null
+    /// (→ static rest pose) when absent / unparseable. Never throws.
+    /// spec: Docs/RE/formats/mesh.md §.bnd — path g{id}.bnd; id == skin id_b == skin_class. CONFIRMED.
+    /// </summary>
+    private static Skeleton? TryLoadSkeleton(RealClientAssets assets, int bndId, string debugLabel)
+    {
+        if (bndId <= 0) return null;
+        string bndPath = $"data/char/bind/g{bndId}.bnd";
+        if (!assets.Contains(bndPath)) return null;
+        try
+        {
+            ReadOnlyMemory<byte> data = assets.GetRaw(bndPath);
+            if (data.IsEmpty) return null;
+            return BndParser.Parse(data);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[NpcRenderer] .bnd load failed '{bndPath}' ({debugLabel}): {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Loads the idle <c>.mot</c> clip at <c>data/char/mot/g{idleMotId}.mot</c>, or returns null
+    /// (→ rest pose, no animation) when absent / unparseable. Never throws.
+    /// spec: Docs/RE/formats/animation.md §col15 — idle motion id → data/char/mot/g{id}.mot. CONFIRMED.
+    /// </summary>
+    private static AnimationClip? TryLoadAnimation(RealClientAssets assets, int idleMotId, string debugLabel)
+    {
+        string motPath = $"data/char/mot/g{idleMotId}.mot";
+        if (!assets.Contains(motPath)) return null;
+        try
+        {
+            ReadOnlyMemory<byte> data = assets.GetRaw(motPath);
+            if (data.IsEmpty) return null;
+            return AnimationParser.Parse(data);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[NpcRenderer] .mot load failed '{motPath}' ({debugLabel}): {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Deterministic pseudo-random clip start phase in [0, duration). Uses a cheap xorshift so it
+    /// allocates nothing and stays reproducible across runs (no System.Random per actor).
+    /// spec: MISSION — "randomize each actor's clip start phase so the town doesn't move in lockstep."
+    /// </summary>
+    private float NextPhase(float durationSeconds)
+    {
+        if (durationSeconds <= 0f) return 0f;
+        // xorshift32
+        uint x = _phaseRng;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        _phaseRng = x;
+        float u = (x & 0xFFFFFF) / (float)0x1000000; // [0,1)
+        return u * durationSeconds;
     }
 
     // -------------------------------------------------------------------------
@@ -490,8 +844,108 @@ public sealed partial class NpcRenderer : Node3D
     }
 
     // -------------------------------------------------------------------------
+    // Ground-snap notification — called from TerrainNode.SectorBecameResident
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Called on the Godot main thread when the terrain sector at (<paramref name="mapX"/>,
+    /// <paramref name="mapZ"/>) becomes resident (its heightmap is now queryable via
+    /// <see cref="Func{T1,T2,TResult}"/> <see cref="GroundYFunc"/>).
+    ///
+    /// Walks only the actors whose cell-key matches this sector, snaps their Godot Y to the
+    /// real heightmap value, and removes them from the pending list.  All other actors are left
+    /// untouched.  No allocation occurs per-call beyond iterating the list once.
+    ///
+    /// Wire this in <see cref="RealWorldRenderer"/> after NpcRenderer is created:
+    ///   <c>terrainNode.SectorBecameResident += npcRenderer.OnSectorBecameResident;</c>
+    ///
+    /// spec: Docs/RE/formats/terrain.md §1.4 — origin bias 10000, cell size 1024 wu: CONFIRMED.
+    /// spec: Docs/RE/formats/terrain.md §5.4 — Heights[] direct world-space Y: CONFIRMED.
+    /// spec: Helpers/WorldCoordinates.cs — ToGodot negate Z: CONFIRMED.
+    /// </summary>
+    /// <param name="mapX">Biased cell X that just became resident.</param>
+    /// <param name="mapZ">Biased cell Z that just became resident.</param>
+    public void OnSectorBecameResident(int mapX, int mapZ)
+    {
+        if (TryGroundYFunc is null) return; // no height function wired — nothing to snap
+        if (_pendingSnaps.Count == 0) return; // already all grounded
+
+        int snapped = 0;
+
+        // Walk backward so removal by index is safe and avoids shifting.
+        // We iterate ALL pending snaps (not just those matching the loaded sector) because
+        // a single sector-load may enable height queries for actors scattered across the area —
+        // e.g., actors near the edge of two cells that become resident at different times.
+        // Using TryGroundYFunc (returns false when not resident) is the correct discriminator;
+        // cell-key matching would miss actors whose cell differs from the notified sector.
+        for (int i = _pendingSnaps.Count - 1; i >= 0; i--)
+        {
+            PendingSnap ps = _pendingSnaps[i];
+
+            // The node may have been freed if the world was reloaded while we were waiting.
+            if (!global::Godot.GodotObject.IsInstanceValid(ps.Node))
+            {
+                _pendingSnaps.RemoveAt(i);
+                continue;
+            }
+
+            // Attempt to sample the heightmap.  Returns false → cell not yet resident → leave in list.
+            // spec: TerrainNode.TryGetGroundHeight — false when cell absent from _cellCache: CONFIRMED.
+            if (!TryGroundYFunc(ps.LegacyX, ps.LegacyZ, out float correctY))
+                continue;
+
+            // Apply: only correct the Y component; X and Z (Godot) are already right.
+            // spec: Helpers/WorldCoordinates.cs — Godot X = legacyX, Godot Z = -legacyZ: CONFIRMED.
+            Vector3 pos = ps.Node.Position;
+            pos.Y = correctY;
+            ps.Node.Position = pos;
+
+            _pendingSnaps.RemoveAt(i);
+            snapped++;
+        }
+
+        if (snapped > 0)
+        {
+            _totalGrounded += snapped;
+            GD.Print($"[NpcRenderer] Sector ({mapX},{mapZ}) resident — grounded {snapped} actors " +
+                     $"({_totalGrounded}/{_totalSpawned} total, {_pendingSnaps.Count} still pending).");
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Tries to snap <paramref name="node"/> to the real terrain height immediately (if the sector
+    /// is already resident via <see cref="TryGroundYFunc"/>), or adds it to the pending list for
+    /// deferred snapping when its sector arrives via <see cref="OnSectorBecameResident"/>.
+    ///
+    /// Cell-key computation for the pending record matches <c>TerrainNode.TryGetGroundHeight</c>
+    /// for diagnostic reference only; the actual snap uses <see cref="TryGroundYFunc"/> directly.
+    ///   cellMapX = floor(worldX / 1024) + 10000
+    ///   cellMapZ = floor(worldZ / 1024) + 10000
+    /// spec: Docs/RE/formats/terrain.md §1.4 — origin bias 10000, cell size 1024 wu: CONFIRMED.
+    /// </summary>
+    private void RegisterPendingSnap(Node3D node, float legacyX, float legacyZ)
+    {
+        // Try an immediate snap if TryGroundYFunc is wired (e.g. sector already resident).
+        if (TryGroundYFunc is not null && TryGroundYFunc(legacyX, legacyZ, out float immediateY))
+        {
+            Vector3 pos = node.Position;
+            pos.Y = immediateY;
+            node.Position = pos;
+            _totalGrounded++;
+            return; // grounded immediately — no need to add to pending list
+        }
+
+        // Sector not yet resident — queue for deferred snap.
+        // Compute the cell key for diagnostics (not for matching — TryGroundYFunc handles that).
+        // spec: terrain.md §1.4 — cellMapX = floor(worldX / 1024) + 10000: CONFIRMED.
+        int cellMapX = (int)Math.Floor(legacyX / 1024.0) + 10000;
+        int cellMapZ = (int)Math.Floor(legacyZ / 1024.0) + 10000;
+        _pendingSnaps.Add(new PendingSnap(node, legacyX, legacyZ, cellMapX, cellMapZ));
+    }
 
     /// <summary>
     /// Resolves Godot Y for a spawn position, using the injected <see cref="GroundYFunc"/>

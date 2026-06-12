@@ -260,3 +260,56 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
   decompiler symbol). Several dirty claims were DOWNGRADED on promotion where samples contradicted them (e.g.
   skill +1072 is not a reliable constant). Still-open items are flagged per spec (mostly fields with no observed
   non-zero sample). Journal + names authored centrally by the orchestrator.
+
+## 2026-06-12 — render-and-UI campaign, evidence wave (7 analysts / 5 spec-authors)
+- binary: doida.exe @ 63fcaf8e (x86 32-bit), IDA Pro 9.3 via MCP (read-only) + real VFS sample observation.
+  The user-supplied VFS now lives PROJECT-LOCAL at 05.Presentation/MartialHeroes.Client.Godot/clientdata/
+  (data.inf + data/data.vfs, byte-verified copy, triple-gitignored) — analysts read it through the
+  Assets.Vfs harness from there.
+- analyzed (by canonical subsystem): the complete Skinning/animation runtime math (bind-pose accumulation,
+  load-time inverse-bind bake, LBS deform, .mot sampling/composition, quaternion+handedness conventions);
+  a full-corpus animation census (3,891 .mot / 349 .bnd / 2,786 .skn — the prior "all stubs" reading was
+  sampling bias; canonical multi-bone test specimens identified; an 11-file BANI .mot variant discovered);
+  the UiSystem widget toolkit + hardcoded login/char-select layouts + per-screen asset manifests + the
+  data/ui census (uitex.txt / skillicon.txt / crestlist.txt manifests); the per-area Environment .bin
+  family (map_option/fog/light/material/stardome/clouddome/cloud_cycle) incl. water enable+Y placement and
+  the 48-keyframe day/night cycle; bgtexture.lst true record layout; .bud vertex completion (normal+UV,
+  no lightmaps); and CameraMovement/SceneLifecycle numeric parameters + the 9-state engine machine.
+- specs produced (promoted by no-IDA spec-authors; disjoint files):
+  - specs/skinning.md (NEW) — implementable skinning+animation pipeline incl. Godot import guidance and
+    canonical test trios. specs/ui_system.md (NEW) — widget model, screen layout tables, fonts, scene
+    machine, reconstruction guidance. specs/environment.md (NEW) — per-area env assembly, day/night
+    sampling, water placement rule (renderer flagged unrecovered). formats/environment_bins.md (NEW),
+    formats/ui_manifests.md (NEW).
+  - formats/animation.md, mesh.md (census + BANI variant + bone-ID addressing), texture.md (bgtexture.lst
+    48-byte records — supersedes the 76B claim), terrain_scene.md (.bud bytes 12–31 resolved; light*.bin
+    are NOT lightmaps), specs/camera_movement.md + client_runtime.md (CODE-CONFIRMED camera parameters,
+    fixed-radius orbit model, event-camera correction, 9-state lifecycle) — all UPDATED.
+  - names.yaml (orchestrator) — Skinning/UiSystem/Environment/SceneLifecycle mechanics entries, corrected
+    ".bin" extension entry, new asset constants (BANI magic, bgtexture record size, .bud FVF, sky keyframe
+    timing, UI canvas, camera projection).
+- notes: All raw findings (with addresses) stayed in gitignored Docs/RE/_dirty/ (anim/, formats/, recon/,
+  queries/, tools/). Orchestrator firewall scan of all 11 touched committed specs: CLEAN (no addresses, no
+  sub_/loc_/dword_, no pseudo-code). Known conflicts recorded rather than reconciled: bgtexture.lst 76B->48B
+  correction is explicit in texture.md; the animation.md "no magic" claim corrected to standard-vs-BANI
+  duality. A follow-up dirty-room pass (msg.xdb format, water renderer, BANI loader branch, UI-manifest
+  parsers) is in flight; its promotions will be journaled separately. Journal + names authored centrally
+  by the orchestrator.
+
+## 2026-06-12 — render-and-UI campaign, follow-up pass (1 analyst / 1 spec-author)
+- binary: doida.exe @ 63fcaf8e (x86 32-bit), IDA Pro 9.3 via MCP (read-only) + project-local VFS samples.
+- analyzed: the msg.xdb UI message catalogue loader (flat 516-byte records: u32 id + u8[512] CP949;
+  count = filesize/516; id-keyed ordered-map lookup); a definitive water-renderer hunt (NEGATIVE —
+  the original client renders no water plane; water_y feeds only spawn/terrain-init; OPTION_WATER has
+  no runtime reader); the BANI .mot variant header (confirmed on samples; the standard loader performs
+  no magic sniffing, so the 11 BANI files are non-loadable dead data); and the uitex.txt /
+  skillicon.txt manifest parsers (braced-block grammar PARSER-CONFIRMED).
+- specs updated: formats/misc_data.md (NEW msg.xdb section), specs/environment.md +
+  formats/environment_bins.md (water renderer RESOLVED-NEGATIVE + reimplementation freedom note),
+  formats/animation.md (BANI header SAMPLE-VERIFIED + loader-rejection conclusion),
+  formats/ui_manifests.md (grammar upgraded to PARSER-CONFIRMED; MSK still PROPOSED),
+  specs/ui_system.md (msg.xdb open item resolved by pointer).
+- notes: raw findings stayed in gitignored _dirty/formats/. Orchestrator firewall scan found ONE leaked
+  decompiler identifier in ui_manifests.md (a sub_ token in an open-questions line) — rewritten
+  neutrally by the orchestrator; rescan CLEAN. All six touched specs otherwise clean (no addresses,
+  no pseudo-code). Journal + names authored centrally by the orchestrator.

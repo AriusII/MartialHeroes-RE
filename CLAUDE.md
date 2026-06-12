@@ -12,7 +12,7 @@ The legacy 32-bit MSVC client (`Main.exe`) is reverse-engineered in IDA Pro **pu
 
 - **Repo root:** `C:/Users/Arius/RiderProjects/MartialHeroes`
 - **Solution:** `MartialHeroes.slnx` (the new XML `.slnx` format)
-- **Real client VFS (user-supplied, never committed):** `D:/MartialHeroesClient`
+- **Real client VFS (user-supplied, never committed):** project-local `05.Presentation/MartialHeroes.Client.Godot/clientdata/` (`data.inf` + `data/data.vfs`, gitignored — see `clientdata/README.md`); legacy fallback `D:/MartialHeroesClient`. Resolution order (`Dev/ClientPathResolver.cs`): `MH_CLIENT_DIR` env → `client_dir.cfg` → `clientdata/` → external installs.
 - **Authoritative blueprint:** `PRESERVATION_AND_ARCHITECTURE.md`
 
 ### Non-distribution rules (non-negotiable)

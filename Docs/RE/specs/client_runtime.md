@@ -1,7 +1,7 @@
 ---
-status: hypothesis
+status: confirmed
 sample_verified: partial   # sound tables, toonramp LUT, npc.arr, .sod/.ted bytes verified; runtime logic IDA-derived
-subsystems: [sound_runtime, ui_system, render_pipeline, camera_constants, movement_constants, quest_data]
+subsystems: [sound_runtime, ui_system, render_pipeline, camera_constants, movement_constants, quest_data, scene_lifecycle]
 networked: partial         # sound/UI/render/camera are client-only; movement uses 2/13 & 5/13; quest uses 2/28, 5/68, 5/73 (cataloged elsewhere)
 encoding_note: Korean in-game/config/dialog text is CP949 (legacy MS949 code page), not UTF-8.
 ---
@@ -13,9 +13,9 @@ encoding_note: Korean in-game/config/dialog text is CP949 (legacy MS949 code pag
 > spec-author: every behaviour and constant below is re-expressed in this author's own words
 > and tables. It documents the **presentation-and-client-runtime** side of the legacy client
 > (sound, UI widget tree + Lua binding, the "Diamond" render pipeline, the five camera modes,
-> movement/collision tuning, and the quest system) so the .NET core (`Client.Domain` /
-> `Client.Application` / `Client.Infrastructure`) and the Godot presentation layer can be
-> reimplemented from scratch.
+> movement/collision tuning, the quest system, and the master scene/screen lifecycle) so the
+> .NET core (`Client.Domain` / `Client.Application` / `Client.Infrastructure`) and the Godot
+> presentation layer can be reimplemented from scratch.
 >
 > **Cross-spec ownership.** Where a topic already has its own committed spec, that spec is the
 > authority and this file only summarises and cross-links:
@@ -36,6 +36,8 @@ encoding_note: Korean in-game/config/dialog text is CP949 (legacy MS949 code pag
 Per-section confidence model (used inline below):
 
 - **(confirmed)** — re-derived from behaviour with corroborating static evidence; safe to implement.
+- **(CODE-CONFIRMED)** — value lifted directly from binary immediate operands and confirmed by
+  control-flow context; same strength as confirmed, used in §4 and §7 for Mission-E additions.
 - **(sample-verified)** — additionally cross-checked against real shipped asset bytes (sound
   tables, `toonramp.bmp`, `.sod`/`.ted`, `npc.arr`); the strongest tier.
 - **(plausible)** — single-source behavioural inference; implement but keep tunable / behind a flag.
@@ -507,7 +509,7 @@ and **elevation**; the follow radius is the fixed magnitude of the eye-offset ve
 | **First** (first-person) | −π/6 (−30°) | −55 | (−750, 0, 500) | π | ≈ 901.39 | no |
 | **Static** (fixed-angle follow) | −π/6 (−30°) | −55 | (−750, 0, 500) | 0 | ≈ 901.39 | no |
 | **Gamble** (orbit, betting minigame) | −π/3 (−60°) | −160 | **(24097.46, 0, 55694.43)** | 0 | ≈ **60684.08** | yes (world-AABB probe) |
-| **Event** (scripted / cutscene) | −π/6 (−30°) | −55 | (−750, 0, 500) | π | ≈ 901.39 | data-driven (scripted) |
+| **Event** (scripted / cutscene) | −π/6 (−30°) | −55 | (−750, 0, 500) | π | ≈ 901.39 | data-driven (built-in curve) |
 
 Per-mode notes:
 
@@ -519,11 +521,17 @@ Per-mode notes:
   collision; tracks the local player position only.
 - **Gamble** orbits at a large radius (≈ 6e4 units) to frame a betting board; yaw clamp **symmetric ±π/2** (no
   0.9 ease); fetches the world-AABB and has a collision/height response; orbit input is UI-driven.
-- **Event** positioning is data-driven from a scripted block (cutscene start timestamp + a path/keyframe state);
-  the player loses manual control while it is active. Keyframe/path format not decoded.
+- **Event** positioning comes from a **built-in 17-entry × 3-float orbit-curve table compiled into the client
+  binary**, indexed by `mapRegionIndex % 17`. The map region index (0..31) is set from the server's world-state
+  packet. A second sub-mode (cinematic integer = 2) orbits around the player's last network position for a fixed
+  duration of **12 000 ms**. Duration otherwise comes from a motion-clip's length. The player loses manual
+  control while this mode is active. **This camera is NOT driven by a `.scr` data file and NOT Lua-scripted.**
+  (CODE-CONFIRMED; see §7.4 for the server-packet source of the region index)
 
 A separate **Select** (character-select preview) manipulator is outside the in-world set: it clears the yaw /
-elevation / eye-offset and builds a multi-waypoint preview camera path. Listed for completeness only.
+elevation / eye-offset and builds a multi-waypoint preview camera path from a literal world-position table baked
+into the constructor. Approximate waypoints: **(−1532, 137, −3254)**, **(−1705, −3508, 87)**,
+**(−1577, −3590, 104)**, with span constants **2048 / 6144 / −1536**. (CODE-CONFIRMED for values)
 
 ## 4.4 Terrain collision push-in (Third; probed by Gamble) — (confirmed)
 
@@ -539,22 +547,28 @@ elevation / eye-offset and builds a multi-waypoint preview camera path. Listed f
 So the "push-in" is a **vertical lift (+3.8, +2.0 bias)** plus an elevation nudge on occlusion — there is **no
 horizontal radial pull** (the radius is fixed).
 
-## 4.5 Projection / FOV — (UNVERIFIED)
+## 4.5 Projection / FOV — (CODE-CONFIRMED — reconciled)
 
-Three candidate vertical-FOV values remain unreconciled across setup sites: **60°** (perspective-camera
-setup), **45°** (π/4, the seed read from the perspective-camera object during cull), and **65°** (a main-window
-camera). Near/far candidates likewise differ (near 10000 in one path; near 5 / far 15000 in another). Do **not**
-hard-code an FOV; expose it as config and default to the runtime-read π/4 (45°) with a note. (Same open item as
-`specs/camera_movement.md` §D.2.)
+**The authoritative in-world gameplay camera uses vertical FOV = 65°, near = 5.0, far = 15000.0.** These values
+are constructed in the in-world scene-build path at the same time the five manipulators are wired to the camera
+object. This is the camera engineers must implement. (CODE-CONFIRMED)
+
+Two additional projection values appear in the binary but belong to a **separate generic projection initializer**,
+not the camera the in-world manipulators drive: a seed of **60°** vertical FOV with a near-constant of
+**10000.0**, and a **π/8 half-angle constant** (consistent with 45° vertical FOV). These are the source of the
+previously-unreconciled "60 / 45 / 65" ambiguity — the 60° and 45° figures belong to the generic path.
+
+> **Open item §4.6.3 is closed.** Implement the gameplay camera at **65° vertical FOV, near 5, far 15000**.
+> Live-feel still capture-unverified; expose as config but default to 65°.
 
 ## 4.6 Camera — open items
 
 1. Action polarity / axis binding (which ± of each input pair is up/in vs down/out; field→semantic mapping).
 2. The π yaw-orbit seed's visual effect (inferred 180° initial facing flip) — not proven against a running client.
-3. Authoritative runtime FOV (60 / 45 / 65 unreconciled).
+3. ~~Authoritative runtime FOV (60 / 45 / 65 unreconciled)~~ — **RESOLVED**: 65° CODE-CONFIRMED (§4.5).
 4. The constant mode-tag value present in every manipulator ctor — meaning unknown.
 5. Gamble far-orbit numbers' UI driver (orbit angle source not traced).
-6. Event keyframe/path format.
+6. ~~Event keyframe/path format~~ — **RESOLVED**: built-in 17-entry curve table (§4.3 Event note).
 7. `CAMERA_XZ` / `CAMERA_XYZ` saved-option semantics (2-axis vs 3-axis follow; may relate to the eye-Y clamp).
 
 ---
@@ -833,6 +847,125 @@ This matches the overall Lua model (scripts = data/config/i18n; host C++ = logic
 
 ---
 
+# 7. Master scene / screen lifecycle — (CODE-CONFIRMED)
+
+The legacy client's entire session is governed by a **single top-level integer state variable** (referred to
+here as the Engine State) that drives an 8-case dispatch loop in the application's main message loop. All scene
+and camera transitions go through this one variable — there is no secondary "substate" enum at the same scope.
+
+## 7.1 Engine state enumeration
+
+| State | Scene / owner | Camera | Notes |
+|---:|---|---|---|
+| 0 | **Initialisation** | none | One-time setup; transitions immediately to state 1 |
+| 1 | **LoginWindow** | UI only | Account/server/channel; a port-10000 in-process lobby mini-protocol handles server-list discovery. No 3D world camera. |
+| 2 | **LoadHandler** | loading UI | World asset load between auth and in-game. The camera rig is not yet live. The in-game state machine advances to state 5 once loading finishes. |
+| 3 | **COpeningWindow** | UI/intro | Opening / intro window. |
+| 4 | **SelectWindow** | **Select camera** (out-of-world, §7.3) | Character select / create-preview. |
+| 5 | **MainHandler** | **five in-world manipulators** (Third default) | In-game world. The camera rig is built once here; see §7.2. |
+| 6 | Quit / shutdown | none | |
+| 7 | Error / exit | none | |
+| 8 | Exit | none | |
+
+**Return path:** after leaving the in-game state (5), the state transitions back to **state 4** (character
+select), not to login. So the session arc is: Login (1) → Load (2) → [optional Opening (3)] → Select (4) →
+Load (2) → In-game (5) → Select (4) on logout/disconnect.
+
+### State-variable reconciliation note (CODE-CONFIRMED)
+
+Earlier dirty-room notes from the login/lobby path recorded "GameState 4 = char-select" and "GameState 2 =
+in-world" in one context, while another context described state 2 as a LoadHandler and state 5 as in-game.
+These are **not two different enumerations** — they use the same Engine State integer. The reconciliation:
+
+- The character-list network handler writes **state 4** (→ SelectWindow), which is character select.
+- The enter-game-acknowledgement network handler writes **state 2** (→ LoadHandler), which then advances
+  the loop automatically to **state 5** (MainHandler / in-game) once assets finish loading.
+- A separate "substate 8" that the login note mentioned is a **LoginWindow-local UI page index** (the form
+  page within the login/server-list UI), not the Engine State. The Engine State and the LoginWindow UI page
+  index live in different fields.
+
+## 7.2 What is constructed at each transition — (CODE-CONFIRMED)
+
+**Entering in-game (state 5):** the world builder runs `BuildSceneGraph` once. That call allocates and parents
+into the scene graph:
+
+- One **GPerspectiveCamera** with **vertical FOV = 65°, near = 5.0, far = 15000.0** (see §4.5).
+- Five **GViewPlatform** nodes (one per view mode: Third / First / Static / Gamble / Event), plus a
+  **reserved sixth slot** that is never assigned (provision for a future mode).
+- One **GScene** (the in-game scene root, labelled "charater scene" — sic — in a string literal).
+- One **GSwitch** node that selects which GViewPlatform is active each frame by enable flag.
+- Five **camera manipulators** (Third / First / Static / Gamble / Event), each registered into the
+  MainHandler child list with a localized string label.
+
+All five manipulators are built at this point and remain alive for the duration of the in-game session.
+Mode switching is purely a matter of toggling their enable flags (§4.3 / `specs/camera_movement.md` §A.2).
+
+**Entering char-select (state 4):** the SelectWindow builds its own out-of-world preview actor and the
+Select camera (separate constructor, not chained off any in-world base). The five in-world manipulators
+are **not** present in the char-select scene.
+
+**Login (state 1):** LoginWindow constructs the login UI widget tree (roughly 340 widgets, sourced from
+`data/script/uiconfig.lua`). The "Diamond" cash-shop window is also built from a Lua UI script. No world
+camera.
+
+## 7.3 Char-select camera (Select mode) — (CODE-CONFIRMED)
+
+The Select camera is constructed in the SelectWindow, separately from the in-world rig. Its constructor
+clears yaw, pitch, and eye-offset to zero and builds a **multi-waypoint camera path** from a literal
+world-position table compiled into the constructor. Approximate waypoints and span constants (see §4.3 per-mode
+table for the numeric values). This camera frames the char-select preview actor; it is destroyed when the
+SelectWindow tears down.
+
+## 7.4 Enter-world spawn handshake — (CODE-CONFIRMED)
+
+This is the load-bearing sequence for understanding player placement on first entering the world:
+
+1. **At char-select:** the player confirms a character slot. This caches that slot's **880-byte
+   SpawnDescriptor** into a global spawn-descriptor field and sends the enter-game request to the server.
+   The SelectWindow tears down.
+
+2. **LoadHandler (state 2):** assets load. The engine state advances to 5 when loading completes.
+
+3. **Server world-state packet** ("GameStateTick"): on entering the world, the server sends this packet.
+   It carries the spawn world coordinates as two single-precision floats: **spawn X** and **spawn Z** (near
+   the tail of the packet body). The in-game handler writes these into the cached SpawnDescriptor and into
+   world-mirror globals.
+
+4. **Player placement:** the handler creates the local-player actor from the SpawnDescriptor and places it
+   at world position **(spawnX, 0.0, spawnZ)** — **Y is always forced to 0**. This matches the general rule
+   that world vertical is never on the wire and terrain height is visual-only (§5.7). After placement the
+   handler streams the **3×3 terrain-ring** of cells around the spawn position and triggers the spawn
+   sound-effect and motion.
+
+5. **Camera placement:** the camera has no independent enter-world position. It simply follows the local
+   player, whose position was just set to (spawnX, 0.0, spawnZ). Third-person's standard orbit
+   (radius ≈ 901, pitch −30°) is applied on top.
+
+> **Godot relevance:** this is the mechanism behind the "NPCs spawn at fallback Y before terrain streams"
+> debt in CLAUDE.md. The player is placed at Y = 0 by design; terrain heights arrive asynchronously as
+> the 3×3 ring streams. A Godot-side pending-snap that defers visual Y until the terrain cell is loaded
+> is the correct architectural response — not an approximation.
+
+The same world-state packet also carries:
+- A **scenario/map-mode integer** (value 6 = tutorial scenario, which activates `TUTORSCRIPTINDEX`/`STOPIDX`
+  INI keys; value 1 = normal field play). This selects tutorial behaviour, not the camera.
+- The **map region index (0..31)** that the Event camera's built-in curve table consumes (§4.3 Event note).
+  The region index is validated server-side and reset to 0 on map unload.
+
+## 7.5 Scene lifecycle — open items
+
+1. Exact field layout of the 880-byte SpawnDescriptor beyond the X/Z spawn coordinates — not fully decoded.
+2. Precise world-state packet field offsets for spawn X/Z (positions are near the packet tail; the exact
+   byte offsets within the packet body are dirty-only and should be confirmed by the protocol analyst against
+   the committed packet YAML once one exists).
+3. The enter-game request packet shape (C2S; not yet in `opcodes.md`) — the SelectWindow sends it on slot
+   confirmation.
+4. The reserved sixth GViewPlatform slot — never assigned; provision only; meaning unknown.
+5. Whether the 3×3 terrain-ring streaming is triggered synchronously in the spawn handler or asynchronously
+   via a separate terrain-manager queue (affects the Godot pending-snap timing design).
+
+---
+
 ## Implementation notes (clean-room → .NET / Godot)
 
 - **Sound** (`Client.Infrastructure` / Godot audio): model the 2D-stereo / 3D-mono split, the 512 KiB one-shot
@@ -845,10 +978,15 @@ This matches the overall Lua model (scripts = data/config/i18n; host C++ = logic
   ramp sample, edge/bloom composite weights) and the no-vsync uncapped loop are the facts to reproduce; the rest
   is engine-specific D3D9 plumbing the Godot layer replaces.
 - **Camera / Movement** (`Client.Domain` + Godot camera): treat the camera as a fixed-radius orbit (yaw +
-  elevation, no distance clamp), and movement as click → unproject-to-XZ → 2D solid-quadtree walkability →
-  integrate (speed×4/frame; clamp 12 u when far; dead-zone 2 u) → snap on arrival/collision → emit the
-  move-request (heading = atan2 radians; constant mode byte; run flag) at sub-200 ms cadence with ±20 X dither;
-  simulation Y = 0; `.ted` height is visual-only. Expose all feel constants as config.
+  elevation, no distance clamp; FOV **65°, near 5, far 15000**), and movement as click → unproject-to-XZ →
+  2D solid-quadtree walkability → integrate (speed×4/frame; clamp 12 u when far; dead-zone 2 u) → snap on
+  arrival/collision → emit the move-request (heading = atan2 radians; constant mode byte; run flag) at
+  sub-200 ms cadence; simulation Y = 0; `.ted` height is visual-only. Expose all feel constants as config.
+- **Scene lifecycle** (`Client.Application` / Godot scenes): model the 9-state machine (§7.1). Session flow:
+  Login (state 1) → select server → enter-game-ack → Load (state 2) → Select (state 4) → enter-world → Load
+  (state 2) → In-game (state 5) → logout/disconnect → Select (state 4). Build the five-manipulator camera rig
+  exactly once on entering state 5. Spawn the local player at the server-supplied **(spawnX, 0, spawnZ)**; do
+  not invent a client-side Y; let the terrain stream fill in the visual height asynchronously.
 - **Quest** (`Client.Application` / `Client.Domain`): the client is a renderer of server-authoritative state —
   model the three data tables, the (group-key, step-index) dialog chain, the accept billing-gate at level 26,
   and the quest-log/completion mirror; do not invent client-side objective-type logic.

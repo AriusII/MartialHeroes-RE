@@ -240,9 +240,11 @@ public sealed partial class ClientContext : Node
         //     Area 0 is the default starting area. TODO: update on enter-game.
         var terrainSource = new VfsTerrainSectorSource(vfs, areaId: 0);
 
-        // 15. Terrain streaming service — medium quality (3×3 ring).
-        //     spec: Docs/RE/formats/terrain.md §9.2.
-        var streamingService = new SectorStreamingService(terrainSource, bus, StreamQuality.Medium);
+        // 15. Terrain streaming service — high quality (5×5 ring, radius=2).
+        //     spec: Docs/RE/formats/terrain.md §12.2 — High quality → 5×5 ring (ring-radius cells = 5).
+        //     The 5×5 ring loads up to 25 sectors around the player, covering all spawn-filled cells
+        //     in large walled areas (e.g. area 2) that exceed the 3×3 ring footprint.
+        var streamingService = new SectorStreamingService(terrainSource, bus, StreamQuality.High);
 
         // 16. Packet handler — orchestrates Domain mutation and event publishing.
         //     Wire the catalogue vitals resolver (real stat curves) at construction.
@@ -284,14 +286,16 @@ public sealed partial class ClientContext : Node
         _loopCts = new CancellationTokenSource();
         PeriodicGameClock clock = engineLoop.CreateRealtimeClock();
 
-        // Observe background faults so they do NOT silently kill the process.
-        // The ContinueWith runs only if the task faults, logs the exception, and does NOT rethrow.
+        // Store the RAW loop task so _ExitTree can drain it (wait for the loop to actually exit)
+        // before disposing the CancellationTokenSource — avoiding a use-after-free of _loopCts.
         Task rawLoop = engineLoop.RunAsync(clock, _loopCts.Token);
-        _loopTask = rawLoop.ContinueWith(
+        _loopTask = rawLoop;
+
+        // Observe background faults so they do NOT silently kill the process. The continuation runs
+        // only if the loop faults, logs, and does NOT rethrow (fire-and-forget; not the drain handle).
+        _ = rawLoop.ContinueWith(
             t => GD.PrintErr($"[ClientContext] EngineLoop faulted: {t.Exception}"),
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
-        // Keep the raw task alive for await in _ExitTree so the loop can drain.
-        _ = rawLoop; // intentionally not awaited here; fault is observed above.
 
         GD.Print("[ClientContext] Application graph constructed. EventBus ready. EngineLoop started at 30 Hz.");
     }
@@ -322,7 +326,8 @@ public sealed partial class ClientContext : Node
             var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, null);
             var dispatcher = new InboundFrameDispatcher(handler);
             var terrainSource = new VfsTerrainSectorSource(null, areaId: 0);
-            var streamingService = new SectorStreamingService(terrainSource, bus, StreamQuality.Medium);
+            // spec: Docs/RE/formats/terrain.md §12.2 — High quality → 5×5 ring (ring-radius cells = 5).
+            var streamingService = new SectorStreamingService(terrainSource, bus, StreamQuality.High);
             var engineLoop = new GameEngineLoop(world, bus, inputBus, GameEngineLoop.DefaultTickRateHz);
 
             EventBus = bus;
@@ -337,11 +342,12 @@ public sealed partial class ClientContext : Node
             // Start the loop (no assets, no network — just keeps the bus alive).
             _loopCts = new CancellationTokenSource();
             PeriodicGameClock clock = engineLoop.CreateRealtimeClock();
+            // Store the RAW loop task so _ExitTree drains it before disposing _loopCts (Fix 3).
             Task rawLoop = engineLoop.RunAsync(clock, _loopCts.Token);
-            _loopTask = rawLoop.ContinueWith(
+            _loopTask = rawLoop;
+            _ = rawLoop.ContinueWith(
                 t => GD.PrintErr($"[ClientContext] Fallback EngineLoop faulted: {t.Exception}"),
                 TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
-            _ = rawLoop;
         }
 
         ItemCatalogue ??= new ItemCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.ItemCsvRow>());
@@ -368,16 +374,30 @@ public sealed partial class ClientContext : Node
         // Signal the event channel so any async drainers stop cleanly.
         EventBus?.Complete();
 
-        // Cancel and wait for the engine loop task.
+        // Cancel and DRAIN the engine loop task BEFORE disposing the cancellation source.
+        // Disposing _loopCts while the loop task is still observing its token is a use-after-free
+        // (the running RunAsync may touch the disposed CTS). Wait bounded so a stuck loop cannot
+        // hang the editor/headless shutdown; the AggregateException wrapping the expected
+        // OperationCanceledException is swallowed. spec: Docs/RE/specs/game_loop.md §6 (loop teardown).
         _loopCts?.Cancel();
+        try
+        {
+            _loopTask?.Wait(TimeSpan.FromSeconds(2));
+        }
+        catch (AggregateException)
+        {
+            // Expected: the loop faulted/cancelled — the inner OperationCanceledException is benign.
+        }
+
         _loopCts?.Dispose();
         _loopCts = null;
+        _loopTask = null;
 
         // Dispose the catalogue loader (releases the VFS memory-mapped archive).
         _catalogueLoader?.Dispose();
         _catalogueLoader = null;
 
-        GD.Print("[ClientContext] EventBus completed. EngineLoop stopped. CatalogueLoader disposed.");
+        GD.Print("[ClientContext] EventBus completed. EngineLoop drained + stopped. CatalogueLoader disposed.");
     }
 
     // -------------------------------------------------------------------------

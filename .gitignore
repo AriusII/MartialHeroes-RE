@@ -455,6 +455,11 @@ Docs/RE/_dirty/
 *.scr
 *.arr
 
+# === Local render-verification artifacts (screenshots of copyrighted assets, temp probes) ===
+05.Presentation/MartialHeroes.Client.Godot/mh_screens/
+screenshot_probe.gd
+screenshot_probe.gd.uid
+
 # === Claude Code tooling: SHARE hooks/skills/agents/settings, keep local state secret ===
 .claude/*
 !.claude/settings.json

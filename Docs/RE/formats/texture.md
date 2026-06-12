@@ -456,6 +456,121 @@ table to confirm. Flag for `Docs/RE/names.yaml`.
 
 ---
 
+## Terrain texture catalogue: `bgtexture.lst` (and `bgtexture.txt`)
+
+**Overall status: SAMPLE-VERIFIED** (1222-entry real-VFS sample; byte-exact size formula confirmed)
+
+> **Correction to prior coverage:** An earlier version of this spec noted "bgtexture.lst —
+> stride 76 bytes, fields unknown" based on the GHTex runtime struct size (76 bytes / 0x4C),
+> which is an in-memory object size, not the on-disk record size. The on-disk record is
+> **48 bytes**, confirmed by the file-size formula `4 + 1222 × 48 = 58,660` matching the
+> actual sample file exactly. The 76-byte figure referred to the runtime `GHTex` object that
+> the loader constructs from each 48-byte disk record — these are two different sizes for two
+> different things. All field widths below are disk-record sizes.
+
+### Identification
+
+- **Filename:** `bgtexture.lst` (binary) and `bgtexture.txt` (text mirror — see below)
+- **VFS path:** `data/map000/texture/bgtexture.lst`
+- **Magic / signature:** none — file begins immediately with a 4-byte count
+- **Endianness:** little-endian
+
+### File-level layout
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| `+0x00` | 4 | u32-LE | `count` | Number of texture records. Valid range: 1 ≤ count < 2000. Observed value: 1222. | SAMPLE-VERIFIED |
+| `+0x04` | count × 48 | record[] | texture records | Packed immediately after count, no padding between records. | SAMPLE-VERIFIED |
+
+**File-size formula:** `total_bytes = 4 + count × 48`
+Verified: `4 + 1222 × 48 = 58,660 bytes` — matches the real-VFS sample file exactly.
+
+### Per-record layout (48 bytes each)
+
+| Offset within record | Size | Type | Field | Notes | Confidence |
+|---------------------:|-----:|------|-------|-------|------------|
+| `+0x00` | 1 | u8 | `kind` | Texture category / render-class byte. See kind enumeration below. | SAMPLE-VERIFIED |
+| `+0x01` | 47 | char[47] | `path_stem` | Null-terminated ASCII relative path stem, without extension. Max observed length: 38 characters. The runtime appends `.dds` to build the full VFS path. | SAMPLE-VERIFIED |
+
+### `kind` byte enumeration
+
+The `kind` byte drives two levels of dispatch. At load time, the loader uses it to select
+initialization options for the runtime texture object; separately, the `kind` value is stored
+in a parallel array for later use by the render/update loop.
+
+**Load-time dispatch (two-way):**
+
+| `kind` value | Load-time behaviour | Confidence |
+|-------------:|---------------------|------------|
+| 0 | Record skipped — no texture object is initialized; entry is inactive. No kind=0 records observed in the real sample. | CODE-CONFIRMED (loader guard), SAMPLE: not present |
+| 1 | Texture initialized as **animated** (wind-sway capable). | CODE-CONFIRMED |
+| ≥ 2 | Texture initialized as **static**. | CODE-CONFIRMED |
+
+**Observed fine-grained `kind` values in the real sample (1222 records):**
+
+| `kind` | Count in sample | Semantic category | Confidence |
+|-------:|----------------:|-------------------|------------|
+| 1 | 1100 | Animated — general ground cover, grass, and foliage | SAMPLE-VERIFIED |
+| 2 | 101 | Static — stone, moss, building surfaces, dense jungle textures | SAMPLE-VERIFIED |
+| 10 | 2 | Animated subtype — short grass (specific sway parameters) | SAMPLE-VERIFIED (stored); render dispatch UNVERIFIED |
+| 11 | 1 | Animated subtype — herbs / low-canopy foliage | SAMPLE-VERIFIED (stored); render dispatch UNVERIFIED |
+| 12 | 1 | Animated subtype — small tree | SAMPLE-VERIFIED (stored); render dispatch UNVERIFIED |
+| 20 | 17 | Animated subtype — large trees / heavy foliage (sway amplitude driven by XZ bounding box) | SAMPLE-VERIFIED (stored); render dispatch UNVERIFIED |
+
+Values 10, 11, 12, and 20 are stored in the per-entry kind array for use by the render/update
+loop but no render-path branch confirming their finer semantics was recovered from the loader
+function itself. Their enumeration and sway-parameter assignments are tentative pending
+analysis of the per-frame update functions.
+
+### Path resolution rule
+
+Each record's `path_stem` is a relative sub-path without extension. The runtime constructs the
+full VFS path as:
+
+```
+full_path = "data/map000/texture/" + path_stem + ".dds"
+```
+
+Example: a record with `path_stem = "terrain/a-b-1"` resolves to
+`"data/map000/texture/terrain/a-b-1.dds"`.
+
+The prefix `data/map000/texture/` is hardcoded — there is no per-area path substitution.
+All terrain and building textures for every map area are stored globally under `map000/texture/`.
+This is an intentional shared-pool design, not an oversight.
+
+### `intTexId` — 1-based indexing into this catalogue
+
+The `.map` scene descriptor's `TERRAIN TEXTURES` and `BUILDING TEXTURES` sections each carry
+an `intTexId` field (the second integer on each texture line). This value is a **1-based** index
+into the bgtexture.lst record array:
+
+- `intTexId = 1` → record index 0 (the first record)
+- `intTexId = N` → record index N − 1
+
+A value of 0 or a value greater than `count` is treated as an error. There is no 0-based
+indexing interpretation — the smallest legal `intTexId` is 1. This is consistent with the
+`tex_id` convention in `.bud` geometry (see `formats/terrain_scene.md §6`).
+
+The first integer on each `TEXTURES` line (the `intFlag`) is read by the parser but its purpose
+is not established. It is not the bgtexture.lst record index. See Known unknowns.
+
+### Text-format companion: `bgtexture.txt`
+
+A companion plain-text file exists at `data/map000/texture/bgtexture.txt`. It contains the same
+1222 entries, one per line, in tab-separated format:
+
+```
+<0-based-index>TAB<kind>TAB<path_stem>
+```
+
+The text and binary files were compared across all 1222 entries: every index, kind value, and
+path stem matches exactly. The text file is a human-readable export of the binary catalogue.
+Only the binary `.lst` is loaded at runtime; no code path loading `bgtexture.txt` was found in
+the parsed routines. Implementors should parse `bgtexture.lst`; `bgtexture.txt` is an editorial
+aid only.
+
+---
+
 ## Format status summary
 
 | Format | Status | Sample count | Confirmed use |
@@ -468,14 +583,17 @@ table to confirm. Flag for `Docs/RE/names.yaml`.
 | BMP (toonramp LUT 256×1) | SAMPLE-VERIFIED | 1 | `data/shader/toonramp.bmp` — cel-shading LUT |
 | PNG (char skin 256×256) | SAMPLE-VERIFIED | 3 | `data/char/tex256256/` character skin textures |
 | PNG (other resolutions) | CONFIRMED-from-routine | 0 | Higher-resolution char buckets and item textures |
+| bgtexture.lst (binary catalogue) | SAMPLE-VERIFIED | 1 file (1222 records) | `data/map000/texture/bgtexture.lst` — global terrain/building texture index |
 
 ---
 
 ## Enumerations / flags
 
-No game-specific enumerations. The client passes standard D3D9 API constants (`D3DFORMAT`,
-`D3DPOOL`, filter flags) as D3DX9 parameters. These are D3D9 SDK values outside the scope of
-this spec.
+No game-specific enumerations for the pixel-format assets. The client passes standard D3D9 API
+constants (`D3DFORMAT`, `D3DPOOL`, filter flags) as D3DX9 parameters. These are D3D9 SDK values
+outside the scope of this spec.
+
+For `bgtexture.lst`-specific enumerations see the `kind` byte table in the section above.
 
 ---
 
@@ -502,6 +620,16 @@ this spec.
   spec of `data/effect/map/` tiles is UNVERIFIED.
 - **Toonramp shader sampler binding register:** The vertex shader writes luminance to oT1.xyz,
   implying texture stage 1; binding register in the pixel shader not confirmed.
+- **bgtexture.lst `intFlag` field:** The first integer on each `TERRAIN/BUILDING TEXTURES` line
+  is read by the scene-file parser but its purpose has not been established. It is not the
+  bgtexture.lst record index.
+- **bgtexture.lst `kind` values 10/11/12/20 render dispatch:** These values are stored in the
+  per-entry kind array. The specific sway parameters or render-loop branches they trigger have
+  not been recovered from static analysis of the loader; they require analysis of the per-frame
+  terrain/building update functions.
+- **bgtexture.lst global pool vs per-area overrides:** The loader fills a single global pool
+  with the hardcoded `data/map000/texture/` prefix. Whether any per-area override mechanism
+  exists is unknown.
 
 ---
 
@@ -514,6 +642,7 @@ this spec.
    - BMP: bytes 0–1 = `42 4D` (ASCII `BM`)
    - TGA: no magic; use file extension. If extension is `.tga`, treat as TGA regardless of
      first-byte value.
+   - bgtexture.lst: identified by VFS path `data/map000/texture/bgtexture.lst`; no magic.
 3. For DDS: parse the standard 128-byte header, read `DDS_PIXELFORMAT.dwFourCC` to determine
    the block compression variant, and compute pixel data length using the file-size formula
    above. Report dimensions, variant, and mip count to `Assets.Mapping`.
@@ -526,9 +655,15 @@ this spec.
 6. For PNG: decode the standard chunk stream. Concatenate all consecutive IDAT chunk data
    before zlib decompression. After decompression, remove the leading filter byte from each
    scanline before presenting pixel data.
-7. Do NOT attempt JPEG decode for assets loaded from the VFS (JPEG import is not used by this
+7. For bgtexture.lst: read `count` (u32-LE at offset 0); validate `1 ≤ count < 2000`. Then
+   read `count` records of 48 bytes each. Each record: `kind` (u8 at `+0x00`) and `path_stem`
+   (null-terminated char[47] at `+0x01`). Construct the full DDS path as
+   `"data/map000/texture/" + path_stem + ".dds"`. Expose `kind` as a raw byte; treat kind=0 as
+   inactive. Index is 0-based internally; callers reference entries via 1-based `intTexId`
+   (subtract 1 to get the array index).
+8. Do NOT attempt JPEG decode for assets loaded from the VFS (JPEG import is not used by this
    client; only JPEG export for screenshots is present).
-8. Report the detected format, dimensions, and pixel data to `Assets.Mapping`. If an
+9. Report the detected format, dimensions, and pixel data to `Assets.Mapping`. If an
    unrecognized format header is encountered, log the first eight bytes and report failure
    rather than attempting a blind decode.
 
@@ -537,6 +672,8 @@ this spec.
 ## Cross-references
 
 - Related formats: `formats/pak.md` (container that delivers raw texture bytes)
+- Related formats: `formats/terrain_scene.md` (`.bud` tex_id → BUILDING TEXTURES → bgtexture.lst)
+- Related formats: `formats/terrain.md` (`.ted` TextureIndexGrid → TERRAIN TEXTURES → bgtexture.lst)
 - Canonical constants: see `Docs/RE/names.yaml` (`DDS_MAGIC`, `TGA_V2_FOOTER_SIGNATURE`,
   `DDS_HEADER_SIZE`, `DXT1_BLOCK_BYTES`, `DXT3_BLOCK_BYTES`, `DXT5_BLOCK_BYTES`)
 - Provenance: see `Docs/RE/journal.md`

@@ -36,6 +36,10 @@ client_mechanics:
   GameLoop:       { note: "Win32 message-pump -> render -> tick; subscriber-interval scheduler; timeGetTime ms clock", spec: "Docs/RE/specs/game_loop.md" }
   InputUi:        { note: "WndProc dispatch (IME-first); 20-byte mouse event; UI->world responsibility chain; widget tree", spec: "Docs/RE/specs/input_ui.md" }
   LuaScripting:   { note: "embedded Lua 5.1.2 + lua_tinker; minimal native surface (cpp_load); .lua plaintext in data/script", spec: "Docs/RE/specs/lua_scripting.md" }
+  Skinning:       { note: "CPU linear-blend skinning; parent-relative .bnd bind, inverse-bind BAKED at load (pure quaternion math, no 4x4 matrices); major/minor weight accumulation; child bones rotate-only", spec: "Docs/RE/specs/skinning.md" }
+  UiSystem:       { note: "retained-mode widget toolkit (component/panel/window/button/textbox/3D-canvas); HARDCODED screen layouts on a 1024x768 canvas; msg.xdb string catalogue; HANGUL system fonts via D3DX", spec: "Docs/RE/specs/ui_system.md" }
+  Environment:    { note: "per-area sky/light/fog/water assembled from the %d.bin family; 48-keyframe day/night cycle @1800ms (86.4s day); water = enable flag + Y plane (renderer unrecovered)", spec: "Docs/RE/specs/environment.md" }
+  SceneLifecycle: { note: "9-state master scene machine (init/login/load/opening/select/in-game/quit/error/exit); in-game returns to select; enter-world spawn = server X/Z with Y forced 0 then terrain ring streams", spec: "Docs/RE/specs/client_runtime.md" }
 
 gameplay_systems:
   # Gameplay/engine logic subsystems recovered in the gameplay-logic RE wave.
@@ -66,7 +70,7 @@ file_extensions:
   ".fx1": { note: "terrain FX layer (per-index vertex strides 32/36/44 B); .fx1-.fx7", spec: "Docs/RE/formats/terrain_layers.md" }
   ".pre": { note: "precomputed collision sidecar (<cell>.sod.pre)", spec: "Docs/RE/formats/terrain_layers.md" }
   ".post": { note: "terrain editor full-snapshot sidecar (<cell>.ted.post, same 46987-byte layout as .ted)", spec: "Docs/RE/formats/terrain_layers.md" }
-  ".bin": { note: "per-map baked lightmap (lightN.bin)", spec: "Docs/RE/formats/terrain_layers.md" }
+  ".bin": { note: "per-area environment binary family (map_option/fog/light/material/stardome/clouddome/cloud_cycle/weather %d.bin); light%d.bin = sky/light keyframe tables, NOT lightmaps (corrected)", spec: "Docs/RE/formats/environment_bins.md" }
   ".xeff": { note: "visual-effects definition (particle emitters/primitives; magic XEFF as invalid-sentinel)", spec: "Docs/RE/formats/effects.md" }
   ".eff": { note: "AMBIGUOUS by directory: per-map sound-trigger table OR effect-object (data/effect/obj)", spec: "Docs/RE/formats/effects.md" }
   ".wlk": { note: "per-map footstep(walk) sound table (256x48B)", spec: "Docs/RE/formats/sound_tables.md" }
@@ -101,6 +105,13 @@ asset_constants:
   MUD_CELL_BYTES:          { value: 32768, note: "64x64 grid of 8-byte records", spec: "Docs/RE/formats/terrain.md" }
   TERRAIN_VERTEX_SPACING:  { value: 16, note: "world units per vertex (1024/64)", spec: "Docs/RE/formats/terrain.md" }
   VFS_ENTRY_COUNT_SAMPLE:  { value: 43347, note: "entries in the supplied real data.inf (validation datum)", spec: "Docs/RE/formats/pak.md" }
+  BANI_MAGIC:              { value: "0x494E4142", note: "'BANI' LE; header magic of the 11-of-3891 .mot variant", spec: "Docs/RE/formats/animation.md" }
+  BGTEXTURE_RECORD_BYTES:  { value: 48, note: "u8 kind + char[47] path_stem; supersedes the earlier 76B claim", spec: "Docs/RE/formats/texture.md" }
+  BUD_VERTEX_FVF:          { value: "0x112", note: "XYZ|NORMAL|TEX1 — proves no lightmap UV / no vertex color in .bud", spec: "Docs/RE/formats/terrain_scene.md" }
+  SKY_KEYFRAME_COUNT:      { value: 48, note: "day/night keyframes per area", spec: "Docs/RE/formats/environment_bins.md" }
+  SKY_KEYFRAME_MS:         { value: 1800, note: "ms per keyframe; 48 x 1800 ms = 86.4 s simulated day", spec: "Docs/RE/formats/environment_bins.md" }
+  UI_REFERENCE_CANVAS:     { value: "1024x768", note: "pixel canvas all hardcoded UI layouts assume", spec: "Docs/RE/specs/ui_system.md" }
+  GAMEPLAY_CAMERA:         { value: "fov65/near5/far15000", note: "vertical FOV deg; fixed-radius orbit (zoom moves elevation)", spec: "Docs/RE/specs/camera_movement.md" }
 
 # Opcodes are the (major:minor) wire tuple. The key is the catalog encoding major<<16|minor
 # (see Docs/RE/opcodes.md); `tuple` repeats the human-readable major:minor. Direction is

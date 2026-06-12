@@ -1,0 +1,10 @@
+# Bring-your-own legacy client data — copyrighted originals, NEVER committed.
+# This folder holds the user-supplied Martial Heroes VFS so the Godot project is
+# self-contained:
+#   clientdata/data.inf        — VFS index   (spec: Docs/RE/formats/pak.md)
+#   clientdata/data/data.vfs   — VFS archive (spec: Docs/RE/formats/pak.md)
+# Defense-in-depth on top of the repo-root *.vfs / *.inf rules: ignore EVERYTHING
+# in here except this file and the README.
+*
+!.gitignore
+!README.md

@@ -40,6 +40,10 @@ public static class ClientPathResolver
     // spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules.
     // -------------------------------------------------------------------------
 
+    // Dossier client embarqué dans le projet Godot (gitignoré — voir clientdata/.gitignore).
+    // Emplacement natif recommandé : résolu via res:// pour être indépendant du CWD.
+    private const string ClientDataResPath = "res://clientdata";
+
     private static readonly string[] AutoDetectCandidates =
     [
         @"D:\MartialHeroesClient",
@@ -85,6 +89,11 @@ public static class ClientPathResolver
         string? cfgDir = ReadClientDirFromConfig();
         if (cfgDir is not null)
         {
+            // Valeur relative (ex: clientdata) → résolue contre res:// (racine du projet),
+            // pas contre le répertoire de travail qui varie selon le mode de lancement.
+            if (!Path.IsPathRooted(cfgDir))
+                cfgDir = GlobalizeRes("res://" + cfgDir.Replace('\\', '/'));
+
             if (IsValidClientDir(cfgDir))
             {
                 GD.Print($"[ClientPath] Resolved from client_dir.cfg: {cfgDir}");
@@ -94,7 +103,15 @@ public static class ClientPathResolver
             GD.PrintErr($"[ClientPath] client_dir.cfg pointe sur '{cfgDir}' mais les fichiers VFS sont absents.");
         }
 
-        // 3. Auto-détection.
+        // 3a. Dossier clientdata/ embarqué dans le projet Godot (emplacement natif).
+        string embedded = GlobalizeRes(ClientDataResPath);
+        if (IsValidClientDir(embedded))
+        {
+            GD.Print($"[ClientPath] Resolved from project-local clientdata/: {embedded}");
+            return embedded;
+        }
+
+        // 3b. Auto-détection des emplacements externes courants.
         foreach (string candidate in AutoDetectCandidates)
         {
             if (IsValidClientDir(candidate))
@@ -216,6 +233,25 @@ public static class ClientPathResolver
 
         return !raw.Equals("false", StringComparison.OrdinalIgnoreCase)
                && raw != "0";
+    }
+
+    /// <summary>
+    /// Traduit un chemin res:// en chemin absolu via ProjectSettings.GlobalizePath.
+    /// Hors contexte Godot (tests unitaires), retombe sur le chemin relatif brut
+    /// (res://X → X, relatif au répertoire de travail).
+    /// </summary>
+    private static string GlobalizeRes(string resPath)
+    {
+        try
+        {
+            return ProjectSettings.GlobalizePath(resPath);
+        }
+        catch
+        {
+            return resPath.StartsWith("res://", StringComparison.Ordinal)
+                ? resPath["res://".Length..]
+                : resPath;
+        }
     }
 
     /// <summary>

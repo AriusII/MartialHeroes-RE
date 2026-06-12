@@ -85,6 +85,31 @@ public sealed partial class TerrainNode : Node3D
     private readonly Dictionary<(int MapX, int MapZ), TerrainCell> _cellCache = new();
 
     // -------------------------------------------------------------------------
+    // Sector-resident notification
+    //
+    // Fired on the Godot main thread immediately after a new cell enters _cellCache,
+    // so subscribers (e.g. NpcRenderer) can snap actor Y values without polling.
+    // Parameters: (mapX, mapZ) — the biased cell coordinates of the newly resident sector.
+    //
+    // spec: Docs/RE/formats/terrain.md §1.4 — origin bias 10000, cell size 1024 wu: CONFIRMED.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Raised on the Godot main thread each time a new terrain sector becomes resident
+    /// (its <see cref="TerrainCell"/> enters the height-lookup cache).
+    ///
+    /// Subscribers receive the biased (<paramref name="mapX"/>, <paramref name="mapZ"/>) of the
+    /// newly loaded cell and can call <see cref="TryGetGroundHeight"/> immediately — the cell is
+    /// guaranteed to be in the cache at the point the delegate runs.
+    ///
+    /// Usage: wire this in the orchestrator (e.g. <see cref="RealWorldRenderer"/>) to re-ground
+    /// actors that were spawned before their cell's heightmap was available.
+    ///
+    /// spec: Docs/RE/formats/terrain.md §5.4 — Heights[] are direct world-space Y values: CONFIRMED.
+    /// </summary>
+    public event Action<int, int>? SectorBecameResident;
+
+    // -------------------------------------------------------------------------
     // Event handlers (called from GameLoop._Process, main thread)
     // -------------------------------------------------------------------------
 
@@ -159,6 +184,12 @@ public sealed partial class TerrainNode : Node3D
 
         GD.Print(
             $"[TerrainNode] Sector ({evt.MapX},{evt.MapZ}) loaded at Godot ({godotX:F0}, 0, {godotZ:F0}), {mesh.GetSurfaceCount()} surface(s).");
+
+        // Notify subscribers that this cell's heightmap is now queryable via TryGetGroundHeight.
+        // The cell is already in _cellCache above, so subscribers can call it immediately.
+        // Called on the Godot main thread (we are inside GameLoop._Process → DispatchEvent).
+        // spec: Docs/RE/formats/terrain.md §5.4 — Heights[] resident once _cellCache is updated: CONFIRMED.
+        SectorBecameResident?.Invoke(evt.MapX, evt.MapZ);
     }
 
     /// <summary>
@@ -351,13 +382,11 @@ public sealed partial class TerrainNode : Node3D
 
                         // Per-patch UV: local offset * 0.25, then apply mirror flags.
                         // spec: terrain.md §5.7 — "f = vertex_offset × 0.25": CONFIRMED.
-                        float uFrac = lr * 0.25f; // local row offset 0..4 → 0.0..1.0
-                        float vFrac = lc * 0.25f; // local col offset 0..4 → 0.0..1.0
                         // Note: UV rows go along Z (row index), UV cols along X (col index).
                         // The patch texture tiles in S=column-direction (X), T=row-direction (Z).
                         // Map: S=lc*0.25, T=lr*0.25 so texture is axis-aligned with the quad grid.
-                        float s = lc * 0.25f;
-                        float t = lr * 0.25f;
+                        float s = lc * 0.25f; // local col offset 0..4 → 0.0..1.0 (S axis = X)
+                        float t = lr * 0.25f; // local row offset 0..4 → 0.0..1.0 (T axis = Z)
                         if (flipU) s = 1.0f - s; // spec: terrain.md §5.7 — s_flip: CONFIRMED.
                         if (flipV) t = 1.0f - t; // spec: terrain.md §5.7 — t_flip: CONFIRMED.
                         uvs[vBase + lr * vertsPerPatch + lc] = new Vector2(s, t);

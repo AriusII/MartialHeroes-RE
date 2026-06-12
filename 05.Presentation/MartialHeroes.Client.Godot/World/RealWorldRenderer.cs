@@ -6,7 +6,8 @@
 // What this node does (all passive, no game logic):
 //   1. Uses SectorStreamingService to load a 3×3 ring of real terrain sectors.
 //   2. Loads building geometry (.bud → ArrayMesh via BudMeshBuilder — NO GltfDocument).
-//   3. Loads a skinned character mesh (.skn → static-pose ArrayMesh via SknMeshBuilder — NO GltfDocument).
+//   3. Loads a skinned character (.skn + .bnd + idle .mot → CPU-skinned, animated ArrayMesh via
+//      SkinnedCharacterBuilder / SkinnedCharacterNode — NO GltfDocument).
 //   4. Applies diffuse textures (PNG/BMP/DDS via AssetPassthrough → ImageTexture).
 //   5. Positions a camera over the terrain.
 //
@@ -25,7 +26,7 @@
 //
 // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
 // spec: Docs/RE/formats/terrain.md §1.1–1.4 (path, manifest, ted, world bounds).
-// spec: Docs/RE/formats/terrain.md §9.2 (3×3 streaming ring at StreamQuality.Medium).
+// spec: Docs/RE/formats/terrain.md §12.2 (5×5 streaming ring at StreamQuality.High, configurable via ring_radius= in client_dir.cfg).
 // spec: Docs/RE/formats/terrain_scene.md (bud scene).
 // spec: Docs/RE/formats/mesh.md (skn/bnd).
 // spec: Docs/RE/formats/texture.md (png/bmp/dds/tga).
@@ -34,6 +35,7 @@ using Godot;
 using MartialHeroes.Assets.Parsers;
 using MartialHeroes.Assets.Parsers.Models;
 using MartialHeroes.Client.Application.World;
+using MartialHeroes.Client.Godot.Adapters;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Dev;
 
@@ -113,6 +115,13 @@ public sealed partial class RealWorldRenderer : Node3D
     private TerrainNode? _terrainNode;
     private ClientContext? _ctx;
 
+    // Node-lifetime cancellation: cancelled in _ExitTree so the fire-and-forget streaming task
+    // stops touching this node (and skips its completion prints) once the node leaves the tree.
+    private readonly CancellationTokenSource _lifetimeCts = new();
+
+    // Player controller reference: used to push TargetForCamera → CameraController each frame.
+    private PlayerController? _playerController;
+
     // Texture-resolution inputs, loaded once in Initialise after the target cell is resolved.
     // The confirmed two-hop chain is: cell/building 1-based index → the cell .map's per-section
     // TEXTURES[idx-1].intTexId → bgtexture pool[intTexId] → data/map{tag}/texture/<rel>.dds.
@@ -182,11 +191,19 @@ public sealed partial class RealWorldRenderer : Node3D
         // and the cell's .map (per-section TEXTURES lists). spec: terrain.md §4.2 + §3.5. CONFIRMED.
         LoadTextureResolutionInputs();
 
-        // Atmosphere (EnvironmentNode) is available but NOT wired by default: the real per-area
-        // sky data renders the scene quite dark/moody, which reads worse than the bright default
-        // World.tscn environment for a preview. Re-enable + tune (ambient/exposure) when desired:
-        //   var envNode = new EnvironmentNode { Name = "EnvironmentNode" };
-        //   AddChild(envNode); envNode.Configure(_assets, TargetAreaId);
+        // Atmosphere (EnvironmentNode) + water (WaterRenderer): assemble the area's sky/fog/light
+        // from the parsed per-area environment bins (map_option/fog/light/material) and place a
+        // water plane when map_option.water_enable = 1.
+        // spec: Docs/RE/specs/environment.md §3 (assembly) + §4 (water placement).
+        GD.Print("[RealWorldRenderer] Initialise: wiring environment + water");
+        try
+        {
+            WireEnvironmentAndWater();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] WireEnvironmentAndWater failed: {ex.Message}");
+        }
 
         // Wire the texture resolver into TerrainNode so each sector can get a real texture.
         // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — 1-based TextureIndexGrid → texture path.
@@ -200,8 +217,8 @@ public sealed partial class RealWorldRenderer : Node3D
             GD.PrintErr($"[RealWorldRenderer] WireTerrainTextureResolver failed: {ex.Message}");
         }
 
-        // Kick off 3×3 terrain streaming via SectorStreamingService.
-        // spec: Docs/RE/formats/terrain.md §9.2 (3×3 ring, StreamQuality.Medium).
+        // Kick off 5×5 terrain streaming via SectorStreamingService.
+        // spec: Docs/RE/formats/terrain.md §12.2 (5×5 ring, StreamQuality.High).
         GD.Print("[RealWorldRenderer] Initialise: triggering terrain streaming");
         try
         {
@@ -253,8 +270,26 @@ public sealed partial class RealWorldRenderer : Node3D
                 var npcRenderer = new NpcRenderer { Name = "NpcRenderer" };
                 // Sample terrain height (legacy worldX/worldZ); falls back to 26 until sectors load.
                 npcRenderer.GroundYFunc = (lx, lz) => _terrainNode?.GetGroundHeight(lx, lz, 26f) ?? 26f;
+                // TryGroundYFunc returns false (not just a fallback constant) when the sector is absent —
+                // used by the pending-snap mechanism to snap only when real data is available.
+                // spec: TerrainNode.TryGetGroundHeight — returns false when cell absent: CONFIRMED.
+                if (_terrainNode is not null)
+                {
+                    TerrainNode terrainCapture = _terrainNode;
+                    npcRenderer.TryGroundYFunc = (float lx, float lz, out float hy) =>
+                        terrainCapture.TryGetGroundHeight(lx, lz, out hy);
+                }
+
                 AddChild(npcRenderer);
                 npcRenderer.PopulateFromArea(_assets, TargetAreaId);
+
+                // Wire the sector-resident notification so actors are re-grounded as soon as each
+                // cell's heightmap arrives — eliminates the fallback-Y race (D2).
+                // TerrainNode fires SectorBecameResident on the Godot main thread (GameLoop._Process)
+                // after the cell enters its height-lookup cache.
+                // spec: TerrainNode.SectorBecameResident — fired after _cellCache updated: CONFIRMED.
+                if (_terrainNode is not null)
+                    _terrainNode.SectorBecameResident += npcRenderer.OnSectorBecameResident;
             }
             catch (Exception ex)
             {
@@ -285,8 +320,115 @@ public sealed partial class RealWorldRenderer : Node3D
 
     public override void _ExitTree()
     {
+        // Cancel the node-lifetime token first so the background streaming task stops and skips its
+        // completion prints before we tear down the assets it reads. spec: terrain.md §12.3.
+        try
+        {
+            _lifetimeCts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // already disposed — nothing to do.
+        }
+
+        _lifetimeCts.Dispose();
+
         _assets?.Dispose();
         _assets = null;
+    }
+
+    /// <summary>
+    /// Each frame: push the player avatar's confirmed Godot position to the CameraController
+    /// so the Third-person orbit always follows the character.
+    ///
+    /// The CameraController reads PlayerGodotPosition in _Process to update its focus point.
+    /// This is purely a view update — no game logic.
+    ///
+    /// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — "strictly passive rendering".
+    /// </summary>
+    public override void _Process(double delta)
+    {
+        if (_cameraController is null || _playerController is null) return;
+        _cameraController.PlayerGodotPosition = _playerController.TargetForCamera;
+    }
+
+    // -------------------------------------------------------------------------
+    // Environment + water wiring
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Assembles the area's environment (sky/fog/light) into a <see cref="EnvironmentNode"/> and,
+    /// when the area's <c>map_option%d.bin</c> enables water, places a <see cref="WaterRenderer"/>
+    /// plane at the data-driven world-space Y.
+    ///
+    /// The environment is read+parsed from the per-area bins via
+    /// <see cref="VfsEnvironmentSource"/> (the same VFS-read+parse adapter pattern as terrain).
+    /// Water rendering visuals are a free engineering choice — the legacy client has no water
+    /// renderer (RESOLVED-NEGATIVE); only the enable/Y placement is legacy-derived.
+    ///
+    /// spec: Docs/RE/specs/environment.md §3 (assembly) + §4 (water RESOLVED-NEGATIVE, placement).
+    /// spec: Docs/RE/formats/environment_bins.md §1.1 (water_enable @0x00, water_y @0x04).
+    /// </summary>
+    private void WireEnvironmentAndWater()
+    {
+        if (_assets is null) return;
+
+        // ---- Environment (D3) ----
+        // Resolve the World scene's OWN WorldEnvironment + DirectionalLight3D (defined in World.tscn)
+        // and pass them explicitly into EnvironmentNode so it drives them in place instead of
+        // creating duplicates. This renderer is a direct child of the World scene root (GameLoop),
+        // so the scene's env/light are our SIBLINGS — found via our parent. Under boot_flow=login the
+        // scene tree is /root → Boot → World → RealWorldRenderer, and a generic top-of-tree walk lands
+        // on Boot (whose direct children exclude these) → that was the duplicate-sun bug.
+        Node worldSceneRoot = GetParent();
+        WorldEnvironment? sceneWorldEnv = FindDirectChildOfType<WorldEnvironment>(worldSceneRoot);
+        DirectionalLight3D? sceneDirLight = FindDirectChildOfType<DirectionalLight3D>(worldSceneRoot);
+        GD.Print($"[RealWorldRenderer] Scene env nodes under '{worldSceneRoot.Name}': " +
+                 $"WorldEnvironment={(sceneWorldEnv is not null)} DirectionalLight3D={(sceneDirLight is not null)}.");
+
+        var envNode = new EnvironmentNode { Name = "EnvironmentNode" };
+        AddChild(envNode);
+        envNode.Configure(_assets, TargetAreaId, sceneWorldEnv, sceneDirLight);
+
+        // ---- Water (D4) ----
+        // Read the area's map_option to decide water placement. spec: environment.md §4.1.
+        AreaEnvironment env = VfsEnvironmentSource.Load(_assets, TargetAreaId);
+        WaterPlacement water = WaterPlacement.FromMapOption(env.MapOption);
+
+        if (!water.Enabled)
+        {
+            // spec: environment.md §4 / §6.5 — water_enable = 0 → no water plane (e.g. area 2).
+            GD.Print($"[Water] area={TargetAreaId} water_enable=0 — no water plane.");
+            return;
+        }
+
+        // Centre the plane on the resolved cell, sized to the loaded streaming ring so it covers
+        // the visible terrain. Ring radius cells × 1024 wu, +1 cell of slop for the borders.
+        // spec: Docs/RE/formats/terrain.md §1.4 — cell size 1024 wu. CONFIRMED.
+        int ringRadius = ReadRingRadiusFromConfig();
+        float ringCells = 2 * ringRadius + 1 + 1f; // (2r+1) ring + 1 cell slop
+        float size = ringCells * 1024f;
+
+        float centreX = (TargetMapX - 10000) * 1024f + 512f;
+        float centreZ = (TargetMapZ - 10000) * 1024f + 512f;
+        // spec: WorldCoordinates.ToGodot — negate Z; Y is the data-driven water_y (unchanged).
+        var centre = new Vector3(centreX, water.WorldY, -centreZ);
+
+        var waterNode = new WaterRenderer { Name = "WaterRenderer" };
+        AddChild(waterNode);
+        waterNode.Configure(centre, size, water.WorldY);
+
+        GD.Print($"[Water] area={TargetAreaId} water_enable=1 Y={water.WorldY:F0} " +
+                 $"size={size:F0}u centre=({centre.X:F0},{centre.Y:F0},{centre.Z:F0}).");
+    }
+
+    /// <summary>First direct child of <paramref name="parent"/> assignable to T, or null.</summary>
+    private static T? FindDirectChildOfType<T>(Node parent) where T : Node
+    {
+        foreach (Node child in parent.GetChildren())
+            if (child is T match)
+                return match;
+        return null;
     }
 
     // -------------------------------------------------------------------------
@@ -423,7 +565,7 @@ public sealed partial class RealWorldRenderer : Node3D
 
     /// <summary>
     /// Calls <see cref="SectorStreamingService.UpdateCenterAsync"/> for the target cell centre.
-    /// spec: Docs/RE/formats/terrain.md §9.2 — "3×3 ring of sectors centred on the player cell".
+    /// spec: Docs/RE/formats/terrain.md §12.2 — "5×5 ring (High quality) of sectors centred on the player cell".
     /// </summary>
     private void TriggerTerrainStreaming(ClientContext ctx)
     {
@@ -433,21 +575,33 @@ public sealed partial class RealWorldRenderer : Node3D
         // spec: Docs/RE/formats/terrain.md §1.1 (per-area path tag) + §1.2 (per-area manifest).
         ctx.StreamingService.SetArea(TargetAreaId);
 
+        // Tie the streaming task to this node's lifetime (Fix 4): cancelled in _ExitTree so it stops
+        // and skips its completion prints once the node leaves the tree. spec: terrain.md §12.3.
+        CancellationToken lifetime = _lifetimeCts.Token;
         _ = Task.Run(async () =>
         {
             try
             {
-                await ctx.StreamingService.UpdateCenterAsync(TargetMapX, TargetMapZ)
+                await ctx.StreamingService.UpdateCenterAsync(TargetMapX, TargetMapZ, lifetime)
                     .ConfigureAwait(false);
+
+                // Skip the completion print if the node was torn down while streaming.
+                if (lifetime.IsCancellationRequested) return;
+
                 int residentCount = ctx.StreamingService.ResidentCount;
-                GD.Print($"[RealWorldRenderer] 3×3 terrain ring streaming complete " +
+                GD.Print($"[RealWorldRenderer] 5×5 terrain ring streaming complete " +
                          $"(area {TargetAreaId}, resident={residentCount} sectors).");
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when the node leaves the tree mid-stream — silent.
             }
             catch (Exception ex)
             {
-                GD.PrintErr($"[RealWorldRenderer] Terrain streaming error: {ex.Message}");
+                if (!lifetime.IsCancellationRequested)
+                    GD.PrintErr($"[RealWorldRenderer] Terrain streaming error: {ex.Message}");
             }
-        });
+        }, lifetime);
 
         GD.Print($"[RealWorldRenderer] Terrain streaming requested for centre ({TargetMapX},{TargetMapZ}).");
     }
@@ -597,13 +751,13 @@ public sealed partial class RealWorldRenderer : Node3D
             // Resolve the character's diffuse texture from skin.txt (mesh.IdA -> tex id -> PNG).
             // spec: Docs/RE/formats/mesh.md §.skn texture binding via data/char/skin.txt. CONFIRMED.
             ImageTexture? albedo = CharacterTextureResolver.Resolve(_assets, skinnedMesh);
-            // Render the STATIC upright textured mesh. The up-axis fix stands the mesh correctly,
-            // but the SKINNED path still explodes the mesh even after two bind-pose fixes — the
-            // legacy skinning convention is not fully recovered yet (tracked as a dedicated debt).
-            // ForceSkinned=false makes Build ignore the skeleton/clip and emit the clean static mesh;
-            // the skeleton/clip stay wired so flipping this back to true is the only change once the
-            // skinning is fixed.
-            SkinnedCharacterBuilder.ForceSkinned = false;
+            // Render the SKINNED + animated character via faithful CPU linear-blend skinning
+            // (SkinnedCharacterNode). The legacy bind/inverse-bind/LBS pipeline is now recovered
+            // (Docs/RE/specs/skinning.md), so the mesh deforms correctly and the idle .mot plays.
+            // A single unified handedness conversion (world Z-negate) is applied to bones+verts+
+            // keyframes, preserving the rest-pose cancellation that previously exploded the mesh.
+            // spec: Docs/RE/specs/skinning.md §0 (cancellation), §8(b) (single conversion).
+            SkinnedCharacterBuilder.ForceSkinned = true;
             charRoot = SkinnedCharacterBuilder.Build(skinnedMesh, skeleton, clip, albedo: albedo);
         }
         catch (Exception ex)
@@ -619,9 +773,9 @@ public sealed partial class RealWorldRenderer : Node3D
         float legacyX = (TargetMapX - 10000) * 1024.0f + 512.0f;
         float legacyZ = (TargetMapZ - 10000) * 1024.0f + 512.0f;
 
-        // The mesh now stands upright (SkinnedCharacterBuilder up-axis fix) and is textured; it is
-        // rendered STATIC (no skinning) because the skinned path still explodes the mesh — animation
-        // is deferred until the legacy skinning convention is fully recovered. No corrective rotation.
+        // The mesh is rendered SKINNED + animated (CPU LBS) in the single unified handedness
+        // conversion; no corrective rotation is applied (the conversion handles handedness).
+        // spec: Docs/RE/specs/skinning.md §8(b).
         charRoot.RotationDegrees = CharacterUprightRotationDeg;
         charRoot.Position = new Vector3(legacyX, 26f, -legacyZ - 350f);
         charRoot.Scale = Vector3.One * CharacterScale;
@@ -642,6 +796,8 @@ public sealed partial class RealWorldRenderer : Node3D
             // Follow the terrain each frame: convert the avatar's Godot position to legacy world XZ
             // (worldZ = -godotZ) and sample the heightmap. Falls back to 26 until sectors stream in.
             playerController.GroundHeightFunc = gp => _terrainNode?.GetGroundHeight(gp.X, -gp.Z, 26f) ?? 26f;
+            // Store reference so _Process can push TargetForCamera → CameraController each frame.
+            _playerController = playerController;
             GD.Print("[RealWorldRenderer] PlayerController attached (left-click to move / WASD).");
         }
         catch (Exception ex)
@@ -782,6 +938,9 @@ public sealed partial class RealWorldRenderer : Node3D
     // Camera placement
     // -------------------------------------------------------------------------
 
+    // Kept for PlayerController → camera position update wiring (set in SpawnCamera).
+    private CameraController? _cameraController;
+
     private void SpawnCamera()
     {
         // Compute the Godot-space centre of the resolved terrain cell.
@@ -789,12 +948,11 @@ public sealed partial class RealWorldRenderer : Node3D
         float centreX = (TargetMapX - 10000) * 1024.0f + 512.0f;
         float centreZ = (TargetMapZ - 10000) * 1024.0f + 512.0f;
         float godotZ = -centreZ; // negate Z: spec WorldCoordinates.ToGodot.
+        // spec: WorldCoordinates.ToGodot — legacy Z negated to Godot Z. CONFIRMED.
 
         var cellCentre = new Vector3(centreX, 0f, godotZ);
 
-        // Replace any existing static Camera3D with a free/orbital CameraController so the user
-        // can explore the world (orbit/zoom/pan, Tab → free-fly WASD). Configure() reproduces the
-        // previous oblique aerial framing as the initial view.
+        // Replace any existing static Camera3D with the spec-faithful CameraController.
         Camera3D? existing = GetViewport()?.GetCamera3D();
         if (existing is not null && existing is not CameraController)
         {
@@ -804,11 +962,24 @@ public sealed partial class RealWorldRenderer : Node3D
 
         var cam = new CameraController { Name = "CameraController" };
         AddChild(cam);
+
+        // Wire terrain ground-height delegate so the camera can do vertical collision.
+        // The delegate accepts LEGACY world coordinates (legacyX, legacyZ).
+        // spec: Docs/RE/specs/camera_movement.md §A.6 — terrain height clamp (Third only). CODE-CONFIRMED.
+        if (_terrainNode is not null)
+        {
+            TerrainNode terrainCapture = _terrainNode;
+            cam.GroundHeightFunc = (lx, lz) => terrainCapture.GetGroundHeight(lx, lz, 0f);
+        }
+
         cam.Configure(cellCentre, 1024f); // spec: terrain.md §1.4 — cell size 1024. CONFIRMED.
         cam.MakeCurrent();
 
-        GD.Print($"[RealWorldRenderer] CameraController spawned, framing cell centre ({centreX:F0}, 0, {godotZ:F0}). " +
-                 "Controls: RMB orbit, wheel zoom, MMB pan, Tab=free-fly (WASD/QE, Shift fast), Esc release.");
+        _cameraController = cam;
+
+        GD.Print($"[RealWorldRenderer] CameraController spawned (spec-faithful Third-person orbit). " +
+                 $"Cell centre ({centreX:F0}, 0, {godotZ:F0}). " +
+                 "RMB=orbit, wheel=elevation, ESC=reset-to-Third, Tab=devFreeFly.");
     }
 
     // -------------------------------------------------------------------------
@@ -823,15 +994,18 @@ public sealed partial class RealWorldRenderer : Node3D
     ///   1. Read "area=" key from client_dir.cfg (defaults to 0).
     ///   2. Enumerate .ted entries in the VFS for that area via
     ///      <see cref="RealClientAssets.EnumerateTerrainCells"/>.
-    ///   3. If at least one cell is found for the requested area, pick the first (sorted by
-    ///      ascending mapX then mapZ — typically the top-left cell).
+    ///   3. If at least one cell is found for the requested area, read the spawn files (mob/npc
+    ///      .arr) to compute a spawn-weighted anchor cell, then call <see cref="PickRingCenter"/>
+    ///      with that anchor so the ring centers on where the game content actually is.
+    ///      Falls back to terrain centroid when no spawn data is available.
     ///   4. If the requested area has NO cells, try areas 0..20 in order and pick the first
-    ///      area+cell pair that exists. This avoids targeting an empty area entirely.
+    ///      area+cell pair that exists.
     ///   5. If no cells are found in any area, fall back to the configured defaults and log a
     ///      warning — streaming will silently produce empty sectors but won't crash.
     ///
     /// spec: Docs/RE/formats/terrain.md §1.3 — per-cell path pattern. CONFIRMED.
     /// spec: Docs/RE/formats/terrain.md §1.1 — area id digit decomposition. CONFIRMED.
+    /// spec: Docs/RE/formats/npc_spawns.md — world_x f32@4, world_z f32@8: CONFIRMED.
     /// </summary>
     private void ResolveTargetCell()
     {
@@ -841,16 +1015,36 @@ public sealed partial class RealWorldRenderer : Node3D
         int configArea = ReadAreaFromConfig();
         GD.Print($"[RealWorldRenderer] Config area={configArea} (from client_dir.cfg or default).");
 
+        // Read ring_radius= from config. Default 2 (5×5 ring, High quality).
+        // spec: Docs/RE/formats/terrain.md §12.2 — High quality = radius 2 (5×5). CONFIRMED.
+        int ringRadius = ReadRingRadiusFromConfig();
+        GD.Print($"[RealWorldRenderer] Ring radius={ringRadius} ({(2 * ringRadius + 1)}×{(2 * ringRadius + 1)} ring) " +
+                 $"(from client_dir.cfg ring_radius= or default 2).");
+
         // Try to get cells for the configured area first.
         List<(int MapX, int MapZ)> cells = _assets.EnumerateTerrainCells(configArea);
         if (cells.Count > 0)
         {
-            (int mx, int mz, bool fullRing) = PickRingCenter(cells);
+            // Compute a spawn-weighted anchor from mob/npc .arr files so the ring centers on
+            // game content (the walled town, NPC clusters) rather than the terrain centroid.
+            // spec: Docs/RE/formats/terrain.md §1.4 — cell key formula. CONFIRMED.
+            // spec: Docs/RE/formats/npc_spawns.md — world_x f32@4, world_z f32@8. CONFIRMED.
+            // The spawn-anchor density is always computed with the smallest ring (radius=1 / 3×3
+            // neighbourhood) to find the tightest content cluster — not the streaming ring radius.
+            // A 5×5 neighbourhood would smear the density peak outward and miss tight clusters.
+            // The found anchor is then passed to PickRingCenter which selects a streaming center
+            // covering the anchor with the actual ringRadius.
+            // spec: Docs/RE/formats/terrain.md §12.2 — density anchor at radius 1; stream at radius 2. CONFIRMED.
+            const int DensityRadius = 1; // always 3×3 neighbourhood for anchor detection.
+            (double anchorX, double anchorZ) = ComputeSpawnAnchor(_assets, configArea, cells, DensityRadius);
+            (int mx, int mz, bool fullRing) = PickRingCenter(cells, anchorX, anchorZ, ringRadius);
             TargetAreaId = configArea;
             TargetMapX = mx;
             TargetMapZ = mz;
             GD.Print($"[RealWorldRenderer] Area {configArea}: {cells.Count} cells found — " +
-                     $"selected ({TargetMapX},{TargetMapZ}) (full 3×3 ring={fullRing}).");
+                     $"selected ({TargetMapX},{TargetMapZ}) " +
+                     $"(anchor=({anchorX:F1},{anchorZ:F1}), " +
+                     $"full {(2 * ringRadius + 1)}×{(2 * ringRadius + 1)} ring={fullRing}).");
             return;
         }
 
@@ -863,12 +1057,15 @@ public sealed partial class RealWorldRenderer : Node3D
             List<(int MapX, int MapZ)> areaCells = _assets.EnumerateTerrainCells(area);
             if (areaCells.Count > 0)
             {
-                (int mx, int mz, bool fullRing) = PickRingCenter(areaCells);
+                const int DensityRadiusAuto = 1; // same fixed radius for auto-select.
+                (double anchorX, double anchorZ) = ComputeSpawnAnchor(_assets, area, areaCells, DensityRadiusAuto);
+                (int mx, int mz, bool fullRing) = PickRingCenter(areaCells, anchorX, anchorZ, ringRadius);
                 TargetAreaId = area;
                 TargetMapX = mx;
                 TargetMapZ = mz;
                 GD.Print($"[RealWorldRenderer] Auto-selected area {area}: {areaCells.Count} cells — " +
-                         $"cell ({TargetMapX},{TargetMapZ}) (full 3×3 ring={fullRing}).");
+                         $"cell ({TargetMapX},{TargetMapZ}) " +
+                         $"(full {(2 * ringRadius + 1)}×{(2 * ringRadius + 1)} ring={fullRing}).");
                 return;
             }
         }
@@ -879,43 +1076,230 @@ public sealed partial class RealWorldRenderer : Node3D
     }
 
     /// <summary>
-    /// Picks the cell to centre the 3×3 streaming ring on, given every <c>.ted</c> cell present in an
-    /// area. Prefers a cell whose full 3×3 ring of neighbours all exist (so all nine sectors render),
-    /// choosing the complete-ring candidate nearest the area centroid; falls back to the middle
-    /// element of the sorted list when no cell has a complete ring (e.g. a 1- or 2-cell area).
-    /// spec: Docs/RE/formats/terrain.md §9.2 (3×3 ring) + §1.3 (per-cell path). CONFIRMED.
+    /// Computes a spawn-density anchor by reading the area's <c>mob{tag}.arr</c> and
+    /// <c>npc{tag}.arr</c> files and finding the cell that maximises the number of spawn
+    /// records that fall within a neighbourhood of <paramref name="ringRadius"/> cells
+    /// (matching the streaming ring size).
+    ///
+    /// Using the density-peak cell (rather than the simple centroid) handles the common case
+    /// where the game content (NPC clusters, the walled town) is concentrated in one corner
+    /// of the area's spawn grid.  The centroid can be pulled toward a sparse but large
+    /// peripheral region and land far from the actual player-visible cluster.
+    ///
+    /// Falls back to the terrain centroid when no spawn data is available.
+    ///
+    /// Cell key formula (matches <see cref="TerrainNode.TryGetGroundHeight"/>):
+    ///   mapX = floor(worldX / 1024) + 10000
+    ///   mapZ = floor(worldZ / 1024) + 10000
+    /// spec: Docs/RE/formats/terrain.md §1.4 — origin bias 10000, cell size 1024. CONFIRMED.
+    /// spec: Docs/RE/formats/terrain.md §12.2 — High quality = 5×5 ring (ring radius 2). CONFIRMED.
+    /// spec: Docs/RE/formats/npc_spawns.md — world_x f32@4, world_z f32@8. CONFIRMED.
+    /// spec: MISSION B — mob{tag}.arr world_x f32@4, world_z f32@8. CONFIRMED.
     /// </summary>
-    /// <param name="cells">All cell coordinates available for the area (may be unsorted).</param>
-    /// <returns>The chosen centre cell and whether its full 3×3 ring exists.</returns>
-    private static (int MapX, int MapZ, bool FullRing) PickRingCenter(List<(int MapX, int MapZ)> cells)
+    private static (double AnchorMapX, double AnchorMapZ) ComputeSpawnAnchor(
+        RealClientAssets assets,
+        int areaId,
+        List<(int MapX, int MapZ)> terrainCells,
+        int ringRadius = 2)
     {
-        // Deterministic order so a tie resolves the same way every run.
-        cells.Sort((a, b) => a.MapX != b.MapX ? a.MapX.CompareTo(b.MapX) : a.MapZ.CompareTo(b.MapZ));
-
-        var present = new HashSet<(int, int)>(cells.Count);
+        // Fallback: terrain centroid.
         long sumX = 0, sumZ = 0;
-        foreach ((int x, int z) in cells)
+        foreach ((int x, int z) in terrainCells)
         {
-            present.Add((x, z));
             sumX += x;
             sumZ += z;
         }
 
-        // Area centroid — the relief showcase looks best near the middle of the populated region.
-        double centroidX = sumX / (double)cells.Count;
-        double centroidZ = sumZ / (double)cells.Count;
+        double fallbackX = sumX / (double)terrainCells.Count;
+        double fallbackZ = sumZ / (double)terrainCells.Count;
 
-        bool best = false;
-        (int MapX, int MapZ) bestCell = cells[cells.Count / 2];
-        double bestDist = double.MaxValue;
+        if (areaId == 0)
+        {
+            // Area 0 has no spawn data.
+            // spec: Docs/RE/formats/npc_spawns.md §Anomaly: map 000 — 0 records: CONFIRMED.
+            return (fallbackX, fallbackZ);
+        }
+
+        string tag = AreaTag(areaId);
+
+        // Accumulate per-cell spawn count in a dictionary.
+        // Key: (cellMapX, cellMapZ). Value: number of spawn records in that cell.
+        // spec: terrain.md §1.4 — cellMapX = floor(worldX/1024)+10000. CONFIRMED.
+        var cellCounts = new Dictionary<(int, int), int>(64);
+
+        // ── mob{tag}.arr ──────────────────────────────────────────────────────
+        // 20-byte records; world_x f32@4, world_z f32@8.
+        // spec: MISSION B — mob record layout; world_x @4, world_z @8. CONFIRMED.
+        string mobPath = $"data/map{tag}/mob{tag}.arr";
+        if (assets.Contains(mobPath))
+        {
+            try
+            {
+                ReadOnlyMemory<byte> raw = assets.GetRaw(mobPath);
+                var mobRecords = MobSpawnParser.Parse(raw);
+                foreach (var rec in mobRecords)
+                {
+                    int cx = (int)Math.Floor(rec.WorldX / 1024.0) + 10000;
+                    int cz = (int)Math.Floor(rec.WorldZ / 1024.0) + 10000;
+                    cellCounts.TryGetValue((cx, cz), out int existing);
+                    cellCounts[(cx, cz)] = existing + 1;
+                }
+            }
+            catch
+            {
+                // Parse failure: ignore, use what we have.
+            }
+        }
+
+        // ── npc{tag}.arr ──────────────────────────────────────────────────────
+        // 28-byte records; world_x f32@4, world_z f32@8.
+        // spec: Docs/RE/formats/npc_spawns.md — world_x @4, world_z @8. CONFIRMED.
+        string npcPath = $"data/map{tag}/npc{tag}.arr";
+        if (assets.Contains(npcPath))
+        {
+            try
+            {
+                ReadOnlyMemory<byte> raw = assets.GetRaw(npcPath);
+                NpcSpawnArray npcArray = NpcSpawnParser.Parse(raw);
+                foreach (var rec in npcArray.Records)
+                {
+                    if (rec.MobId == 0) continue;
+                    int cx = (int)Math.Floor(rec.WorldX / 1024.0) + 10000;
+                    int cz = (int)Math.Floor(rec.WorldZ / 1024.0) + 10000;
+                    cellCounts.TryGetValue((cx, cz), out int existing);
+                    cellCounts[(cx, cz)] = existing + 1;
+                }
+            }
+            catch
+            {
+                // Parse failure: ignore, use what we have.
+            }
+        }
+
+        if (cellCounts.Count == 0)
+        {
+            // No usable spawn data — fall back to terrain centroid.
+            return (fallbackX, fallbackZ);
+        }
+
+        // Find the cell whose (2r+1)×(2r+1) neighbourhood (the streaming ring at ringRadius)
+        // covers the most spawns. This is an O(spawnerCells × (2r+1)²) pass — small for typical areas.
+        // spec: Docs/RE/formats/terrain.md §12.2 — High quality = 5×5 ring (ringRadius=2). CONFIRMED.
+        int bestNeighbourCount = -1;
+        (int BestCX, int BestCZ) bestDensityCell = (0, 0);
+        foreach ((int cx, int cz) in cellCounts.Keys)
+        {
+            int neighbourhood = 0;
+            for (int dz = -ringRadius; dz <= ringRadius; dz++)
+            {
+                for (int dx = -ringRadius; dx <= ringRadius; dx++)
+                {
+                    cellCounts.TryGetValue((cx + dx, cz + dz), out int n);
+                    neighbourhood += n;
+                }
+            }
+
+            if (neighbourhood > bestNeighbourCount)
+            {
+                bestNeighbourCount = neighbourhood;
+                bestDensityCell = (cx, cz);
+            }
+        }
+
+        int totalCount = cellCounts.Values.Sum();
+        GD.Print($"[RealWorldRenderer] Spawn density anchor for area {areaId}: " +
+                 $"({bestDensityCell.BestCX},{bestDensityCell.BestCZ}) " +
+                 $"neighbourhood={bestNeighbourCount}/{totalCount} spawns " +
+                 $"(terrain centroid was ({fallbackX:F2},{fallbackZ:F2})).");
+        return (bestDensityCell.BestCX, bestDensityCell.BestCZ);
+    }
+
+    /// <summary>
+    /// Picks the cell to centre the streaming ring on, given every <c>.ted</c> cell present in an
+    /// area.
+    ///
+    /// Strategy (two-pass):
+    ///   Pass 1 — full-ring preference: find the complete-ring candidate (all neighbours at
+    ///   Chebyshev radius <paramref name="ringRadius"/> present) nearest to the anchor.
+    ///   A full ring guarantees all (2r+1)² sectors render without holes.
+    ///   Pass 2 — fallback to any cell: if no full-ring cell exists, OR if the nearest full-ring
+    ///   cell is more than <c>MaxFullRingFallbackDistance</c> cells away from the anchor (meaning
+    ///   the NPC/spawn cluster lives outside all complete-ring areas), pick the available cell that
+    ///   is simply nearest to the anchor, even if its ring is incomplete.
+    ///
+    ///   The fallback matters when spawn data is dense in a region where the terrain edge cells
+    ///   don't have enough neighbours to form a complete ring (e.g. the walled town is near the
+    ///   edge of the map grid).  In that case it is better to centre the stream on the actual
+    ///   content and accept a few missing border sectors than to centre it on a geometrically-
+    ///   perfect but content-empty region far away.
+    ///   spec: Docs/RE/formats/terrain.md §12.3 — eviction: absent keys yield empty loads, not crashes.
+    ///
+    /// The anchor point is the spawn-weighted centroid (from <see cref="ComputeSpawnAnchor"/>)
+    /// so the ring centers on where the game content actually is.
+    ///
+    /// spec: Docs/RE/formats/terrain.md §12.2 — High quality = 5×5 ring (ringRadius=2). CONFIRMED.
+    /// spec: Docs/RE/formats/terrain.md §1.3 (per-cell path). CONFIRMED.
+    /// spec: Docs/RE/formats/terrain.md §1.4 — cell size 1024 wu. CONFIRMED.
+    /// </summary>
+    /// <param name="cells">All cell coordinates available for the area (may be unsorted).</param>
+    /// <param name="anchorMapX">Target mapX to stay near (e.g. spawn centroid cell X).</param>
+    /// <param name="anchorMapZ">Target mapZ to stay near (e.g. spawn centroid cell Z).</param>
+    /// <param name="ringRadius">
+    /// Chebyshev radius of the streaming ring (1 = 3×3, 2 = 5×5).
+    /// spec: Docs/RE/formats/terrain.md §12.2 — High quality → radius 2. CONFIRMED.
+    /// </param>
+    /// <returns>The chosen centre cell and whether its full ring exists.</returns>
+    private static (int MapX, int MapZ, bool FullRing) PickRingCenter(
+        List<(int MapX, int MapZ)> cells,
+        double anchorMapX,
+        double anchorMapZ,
+        int ringRadius = 2)
+    {
+        // When the nearest full-ring cell exceeds this Chebyshev distance from the anchor,
+        // we prefer a partial-ring cell that is actually near the content.
+        // A value of 2 means: "the full-ring center is more than 2 cells away from the NPC
+        // cluster — prefer proximity to content over a perfect ring".
+        // spec: Docs/RE/formats/terrain.md §1.4 — cell size 1024 wu per cell. CONFIRMED.
+        const double MaxFullRingFallbackDistance = 2.0;
+
+        // Deterministic order so a tie resolves the same way every run.
+        cells.Sort((a, b) => a.MapX != b.MapX ? a.MapX.CompareTo(b.MapX) : a.MapZ.CompareTo(b.MapZ));
+
+        var present = new HashSet<(int, int)>(cells.Count);
+        foreach ((int x, int z) in cells)
+        {
+            present.Add((x, z));
+        }
+
+        // ── Pass 1: nearest full-ring candidate ───────────────────────────────
+        bool bestFullFound = false;
+        (int MapX, int MapZ) bestFull = cells[cells.Count / 2];
+        double bestFullDist = double.MaxValue;
+
+        // ── Pass 2: nearest any-cell candidate ───────────────────────────────
+        (int MapX, int MapZ) bestAny = cells[cells.Count / 2];
+        double bestAnyDist = double.MaxValue;
 
         foreach ((int cx, int cz) in cells)
         {
-            // A full ring requires all eight neighbours (Chebyshev radius 1) to be present.
-            bool full = true;
-            for (int dz = -1; dz <= 1 && full; dz++)
+            double ddx = cx - anchorMapX;
+            double ddz = cz - anchorMapZ;
+            double dist = ddx * ddx + ddz * ddz; // squared distance in cell units
+
+            // Any-cell pass: always track the nearest cell regardless of ring completeness.
+            if (dist < bestAnyDist)
             {
-                for (int dx = -1; dx <= 1; dx++)
+                bestAny = (cx, cz);
+                bestAnyDist = dist;
+            }
+
+            // Full-ring pass: a full ring requires all (2r+1)² cells at Chebyshev radius r.
+            // For r=2 (5×5) that is 25 cells including the centre itself.
+            // spec: Docs/RE/formats/terrain.md §12.2 — High quality = 5×5 ring (r=2). CONFIRMED.
+            bool full = true;
+            for (int dz = -ringRadius; dz <= ringRadius && full; dz++)
+            {
+                for (int dx = -ringRadius; dx <= ringRadius; dx++)
                 {
                     if (!present.Contains((cx + dx, cz + dz)))
                     {
@@ -925,23 +1309,30 @@ public sealed partial class RealWorldRenderer : Node3D
                 }
             }
 
-            if (!full)
-            {
-                continue;
-            }
+            if (!full) continue;
 
-            double ddx = cx - centroidX;
-            double ddz = cz - centroidZ;
-            double dist = ddx * ddx + ddz * ddz;
-            if (!best || dist < bestDist)
+            if (!bestFullFound || dist < bestFullDist)
             {
-                best = true;
-                bestCell = (cx, cz);
-                bestDist = dist;
+                bestFullFound = true;
+                bestFull = (cx, cz);
+                bestFullDist = dist;
             }
         }
 
-        return (bestCell.MapX, bestCell.MapZ, best);
+        // ── Decision: use full-ring if it is close enough to the anchor ───────
+        // If the best full-ring center is within MaxFullRingFallbackDistance cells of the anchor,
+        // it is likely covering the content region too — use it for the perfect terrain ring.
+        // If it is farther away, the content (NPCs/spawns) lives outside the complete-ring area;
+        // use the nearest available cell so the streaming ring at least overlaps the content.
+        // spec: Docs/RE/formats/terrain.md §12.3 — absent cells load empty without crash: CONFIRMED.
+        double bestFullChebyshev = bestFullFound
+            ? Math.Max(Math.Abs(bestFull.MapX - anchorMapX), Math.Abs(bestFull.MapZ - anchorMapZ))
+            : double.MaxValue;
+
+        bool useFullRing = bestFullFound && bestFullChebyshev <= MaxFullRingFallbackDistance;
+        (int MapX, int MapZ) chosen = useFullRing ? bestFull : bestAny;
+
+        return (chosen.MapX, chosen.MapZ, useFullRing);
     }
 
     /// <summary>
@@ -979,6 +1370,47 @@ public sealed partial class RealWorldRenderer : Node3D
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// Reads the "ring_radius=" integer key from client_dir.cfg.
+    ///
+    /// Valid values: 1 (3×3 ring, Medium quality) or 2 (5×5 ring, High quality).
+    /// Returns 2 (the high-quality default) when the key is absent, out-of-range, or unparseable.
+    ///
+    /// spec: Docs/RE/formats/terrain.md §12.2 — High quality = ring radius 2 (5×5). CONFIRMED.
+    /// spec: Docs/RE/formats/terrain.md §12.2 — Medium/Low quality = ring radius 1 (3×3). CONFIRMED.
+    /// </summary>
+    private static int ReadRingRadiusFromConfig()
+    {
+        const int DefaultRingRadius = 2; // spec: terrain.md §12.2 — High quality = radius 2 (5×5). CONFIRMED.
+        try
+        {
+            string absPath = global::Godot.ProjectSettings.GlobalizePath("res://client_dir.cfg");
+            if (!File.Exists(absPath)) return DefaultRingRadius;
+
+            foreach (string rawLine in File.ReadLines(absPath))
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith('#')) continue;
+                int eq = line.IndexOf('=');
+                if (eq < 0) continue;
+                string k = line[..eq].Trim();
+                string v = line[(eq + 1)..].Trim();
+                if (k.Equals("ring_radius", StringComparison.OrdinalIgnoreCase) &&
+                    int.TryParse(v, out int parsed) &&
+                    parsed >= 1 && parsed <= 2)
+                {
+                    return parsed;
+                }
+            }
+        }
+        catch
+        {
+            // Any I/O error → default radius 2.
+        }
+
+        return DefaultRingRadius;
     }
 
     // -------------------------------------------------------------------------

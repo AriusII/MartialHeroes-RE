@@ -52,6 +52,29 @@ using MartialHeroes.Assets.Parsers.Models;
 namespace MartialHeroes.Client.Godot.World;
 
 /// <summary>
+/// Spec-cited water placement decision derived from a parsed <c>map_option%d.bin</c>.
+/// The legacy client has NO water renderer (RESOLVED-NEGATIVE) — only the PLACEMENT
+/// (enable + world-Y) is data-driven; the visuals are a free engineering choice.
+/// spec: Docs/RE/specs/environment.md §4 — water RESOLVED-NEGATIVE; §4.1 placement CONFIRMED.
+/// spec: Docs/RE/formats/environment_bins.md §1.1 — water_enable @0x00, water_y @0x04.
+/// </summary>
+internal readonly record struct WaterPlacement(bool Enabled, float WorldY)
+{
+    /// <summary>
+    /// Reads the water placement from a parsed <c>map_option%d.bin</c>. When the bin is null
+    /// (absent file), water is disabled. spec: environment.md §7 — missing map_option → no water.
+    /// </summary>
+    public static WaterPlacement FromMapOption(MapOptionBin? mapOption)
+    {
+        if (mapOption is null || mapOption.WaterEnable != 1)
+            return new WaterPlacement(false, 0f);
+
+        // water_y is a u32 world-space Y (observed 300/700/1000). spec: environment_bins.md §1.1.
+        return new WaterPlacement(true, mapOption.WaterY);
+    }
+}
+
+/// <summary>
 /// Passive <see cref="Node3D"/> that places a semi-transparent animated water plane in the scene.
 ///
 /// IMPORTANT: only add to the scene when <see cref="CellHasWater(MapDescriptor, BgTextureCatalog)"/>
@@ -202,10 +225,10 @@ public sealed partial class WaterRenderer : Node3D
     private float _time;
 
     // Deferred Configure() state (applied in _Ready if called before entering the tree).
-    private Vector3 _centre      = Vector3.Zero;
-    private float   _size        = 3072f; // default: 3×3 cell ring (3 × 1024 world units)
-    private float   _waterHeightY = FallbackWaterY;
-    private bool    _configured;
+    private Vector3 _centre = Vector3.Zero;
+    private float _size = 3072f; // default: 3×3 cell ring (3 × 1024 world units)
+    private float _waterHeightY = FallbackWaterY;
+    private bool _configured;
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -256,10 +279,10 @@ public sealed partial class WaterRenderer : Node3D
     /// </summary>
     public void Configure(Vector3 centre, float size, float waterHeightY)
     {
-        _centre       = centre;
-        _size         = size;
+        _centre = centre;
+        _size = size;
         _waterHeightY = waterHeightY;
-        _configured   = true;
+        _configured = true;
 
         if (IsInsideTree())
             ApplyPlacement();
@@ -275,25 +298,25 @@ public sealed partial class WaterRenderer : Node3D
         // One sub-quad per ~96 world units at the default 3072-unit extent.
         var planeMesh = new PlaneMesh
         {
-            Size           = new Vector2(_size, _size),
+            Size = new Vector2(_size, _size),
             SubdivideDepth = 32,
             SubdivideWidth = 32,
         };
 
         var shader = new Shader { Code = WaterShaderSource };
         _mat = new ShaderMaterial { Shader = shader };
-        _mat.SetShaderParameter("water_color",    WaterColor);
+        _mat.SetShaderParameter("water_color", WaterColor);
         _mat.SetShaderParameter("scroll_speed_1", ScrollSpeedU1);
         _mat.SetShaderParameter("scroll_speed_2", ScrollSpeedU2);
-        _mat.SetShaderParameter("fresnel_exp",    FresnelExponent);
-        _mat.SetShaderParameter("time",           0.0f);
+        _mat.SetShaderParameter("fresnel_exp", FresnelExponent);
+        _mat.SetShaderParameter("time", 0.0f);
         planeMesh.Material = _mat;
 
         _meshInst = new MeshInstance3D
         {
-            Mesh        = planeMesh,
-            Name        = "WaterPlaneMesh",
-            CastShadow  = GeometryInstance3D.ShadowCastingSetting.Off,
+            Mesh = planeMesh,
+            Name = "WaterPlaneMesh",
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
         };
         AddChild(_meshInst);
 

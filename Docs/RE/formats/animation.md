@@ -13,22 +13,58 @@
 | Area | Status | Confidence |
 |------|--------|------------|
 | `.mot` header (`id_a`, `id_b`, `name_length`, `name_body`, `frame_count`) | Resolved | CONFIRMED (sample-verified) |
-| `.mot` track / keyframe layout | Resolved | CONFIRMED (parser-derived; not yet byte-verified on a non-stub clip) |
+| `.mot` corpus is real, not stubs (3877/3891 are real clips) | Resolved | SAMPLE-VERIFIED (full census of 3,891 files) |
+| `.mot` BANI-magic variant (11 files; different header) | Header fully recovered | SAMPLE-VERIFIED (all header fields cross-checked on 3 of 11 files; body layout PROPOSED) |
+| `.mot` track / keyframe layout | Resolved | CONFIRMED (parser-derived; corpus census confirms full-payload clips exist) |
 | LenStr 4-byte u32 LE prefix | Resolved | CONFIRMED (sample-verified) |
 | `track_descriptor` upper-3-byte padding | Resolved | CONFIRMED (sample-verified) |
 | `id_a` vs `id_b` roles (load key vs runtime clip handle) | Resolved | CONFIRMED |
 | Wrap / loop is runtime-only (no on-disk flag) | Resolved | CONFIRMED |
 | `actormotion.txt` record layout (offsets + read order) | Resolved | CONFIRMED (parser-derived) |
-| `actormotion.txt` per-column semantic names | Proposed | PROPOSED (offsets confirmed; field meanings inferred) |
+| `actormotion.txt` per-column semantic names (cols 3–14) | Proposed | PROPOSED (offsets confirmed; field meanings inferred) |
+| `actormotion.txt` col15 = idle `.mot` `id_a` | Resolved | CONFIRMED (sample-verified — 89.2% hit rate, §`actormotion.txt` layout) |
+| `actormotion.txt` declared count (1084) vs parsed rows (1080) | Documented | SAMPLE-VERIFIED discrepancy (§`actormotion.txt` layout) |
 | Animation mixer two-list architecture | Resolved | CONFIRMED |
 | Mixer sync-phase mechanism + 1.5× rate constant | Resolved | CONFIRMED |
 | Per-bone weighted-average accumulation (lerp/slerp) | Resolved | CONFIRMED |
 | Default layer playback speed constant (≈1.575) | Documented | UNVERIFIED (constant confirmed; full semantics open) |
+| Skinning / deform pipeline that consumes `.mot` (LBS, inverse-bind, pose composition) | Cross-referenced | see `specs/skinning.md` |
+| BANI standard-loader rejection (parse-error on all 11 files) | Resolved | SAMPLE-VERIFIED + CODE-CONFIRMED — BANI files are non-loadable by the shipping client |
 
 Open items are tracked in §Known unknowns. This spec documents the on-disk `.mot` binary
 (the only artifact an `Assets.Parsers` engineer must implement) plus the runtime animation
 model as informative background for `Client.Application`. The runtime model describes
-behaviour and constants only; it does not expose any in-memory object layout.
+behaviour and constants only; it does not expose any in-memory object layout. The **math that
+deforms a skinned mesh using a sampled `.mot` pose** (linear-blend skinning, inverse-bind bake,
+pose composition, quaternion/handedness conventions) is documented in `specs/skinning.md`.
+
+---
+
+## Corpus census (sample-verified)
+
+> Earlier revisions of this spec were written against only **three stub clips** (both counts zero)
+> and gave the impression that `.mot` files are all stubs. A full census of all **3,891** `.mot` files
+> in the validated VFS corrects that: the corpus is overwhelmingly **real, full-payload clips**.
+
+| Status | Count | Share |
+|--------|------:|------:|
+| Total `.mot` files | 3,891 | 100% |
+| Real clips (`frame_count > 0` AND `track_count > 0`) | 3,877 | 99.7% |
+| Stub clips (`frame_count == 0` or `track_count == 0`) | 3 | 0.08% |
+| BANI-magic variant (separate header — see §BANI variant) | 11 | 0.28% |
+
+**Distribution highlights (real clips):**
+
+- **Frame count** is dominated by short loops: ~59% of real clips have 11–50 frames (1.1–5.0 s at
+  10 fps), consistent with combat/idle cycles. A long tail reaches into the hundreds and (rarely)
+  thousands of frames.
+- **Track count** confirms these are full-body skeletal clips: ~67% of real clips have **51+ bone
+  tracks**. The three known stubs are outliers, not representative.
+- A few very-long, low-track clips (e.g. ~7,650 frames with only 2 tracks) are cutscene / special
+  motions (root + one bone), not character body clips.
+
+**Implication:** character skinning is **not** blocked by missing animations — the assets are present
+and plentiful. The deform/skinning math that consumes them is specified in `specs/skinning.md`.
 
 ---
 
@@ -36,11 +72,18 @@ behaviour and constants only; it does not expose any in-memory object layout.
 
 - **Extension:** `.mot`
 - **Found in:** `.pak` / VFS archive (see `formats/pak.md`); logical path prefix `data/char/mot/`
-- **Magic / signature:** none — file begins immediately with the header fields below.
-  Both a binary mode and a text mode appear to be supported at runtime (see §Binary / Text duality
-  under Header layout); the binary mode is the primary format documented here.
+- **Magic / signature:** **two variants exist in the corpus.**
+  - **Standard variant (3,880 of 3,891 files):** no magic — the file begins immediately with the
+    header fields below (`id_a` at offset 0). This is the primary format documented in this spec.
+  - **BANI variant (11 files):** begins with the 4-byte ASCII magic `"BANI"` (`42 41 4E 49`) and uses
+    a different header layout before the name string. See §BANI variant. **A parser MUST sniff the
+    first 4 bytes** and route BANI files separately — the standard loader in the shipping client does
+    NOT detect the magic, causing a parse failure on all 11 files (see §BANI variant — loader rejection).
+  - Both a binary mode and a text mode appear to be supported at runtime for the standard variant
+    (see §Binary / Text duality under Header layout); the binary mode is the primary format here.
 - **Endianness:** little-endian throughout (all multi-byte integers and floats are LE).
-- **Confidence:** CONFIRMED; sample_verified: true (three 39-byte stub clips read byte-for-byte)
+- **Confidence:** CONFIRMED; sample_verified: true (standard header sample-verified; corpus census of
+  3,891 files; BANI header fully recovered across 3 cross-checked samples)
 
 ---
 
@@ -52,8 +95,8 @@ pre-loads clips:
 | File | Role | Confidence |
 |------|------|------------|
 | `data/char/motlist.txt` | Manifest — each line is a bare filename; the engine prepends `data/char/mot/` at load time to form the VFS path. | CONFIRMED |
-| `data/char/actormotion.txt` | Maps actor / visual identifiers to motion catalogue IDs. Tabular, count-prefixed, 33 columns per record; layout characterized in §`actormotion.txt` layout. | CONFIRMED (record layout, parser-derived); per-column semantics PROPOSED |
-| `data/motion.cache` | Pre-load ID cache. Wire layout: `[u32 count][count × u32 motion_catalogue_id]`. The engine opens this file through a direct OS file call (not the VFS) and uses the IDs to prime the in-memory clip map, triggering eager full-load for the listed IDs. | CONFIRMED (wire layout); magic / versioning UNVERIFIED |
+| `data/char/actormotion.txt` | Maps actor / visual identifiers to motion catalogue IDs. Tabular, count-prefixed, 33 columns per record; layout characterized in §`actormotion.txt` layout. | CONFIRMED (record layout, parser-derived); col15 idle mapping sample-verified; per-column semantics for cols 3–14 PROPOSED |
+| `data/motion.cache` | Pre-load ID cache. Wire layout: `[u32 count][count × u32 motion_catalogue_id]`. The engine opens this file through a direct OS file call (not the VFS) and uses the IDs to prime the in-memory clip map, triggering eager full-load for the listed IDs. | CONFIRMED (wire layout); size-math cross-checked (see §motion.cache / effect.cache size-math); magic / versioning UNVERIFIED |
 
 The 9-digit motion IDs stored in `actormotion.txt` (see §`actormotion.txt` layout) are the same
 values as the `.mot` per-file `id_a` field, which matches the numeric component of the `.mot`
@@ -66,7 +109,8 @@ motion slot, which `.mot` clip to play.
 
 The header is read in two passes (see §Two-stage loading below). Both passes read the same
 four fields in the same order. All fields are binary little-endian unless the text-mode flag is
-active (see §Binary / Text duality).
+active (see §Binary / Text duality). **This layout applies to the standard variant only**; the
+BANI variant has a different header (see §BANI variant).
 
 | Rel. offset | Size | Type    | Field         | Notes                                                                                                                              | Confidence |
 |------------:|-----:|---------|---------------|------------------------------------------------------------------------------------------------------------------------------------|------------|
@@ -85,7 +129,7 @@ The `name` field uses the same `LenStr` encoding that `.skn` and `.bnd` use (see
 §String encoding). The wire format is a 4-byte u32 LE length prefix followed by exactly `length`
 bytes of string body with no null terminator on disk.
 
-**CONFIRMED sample-verified:** in all three reference samples the four bytes at offset 8 decode as
+**CONFIRMED sample-verified:** in all reference samples the four bytes at offset 8 decode as
 a u32 LE value that equals exactly the byte count of the string body that follows it, and the
 subsequent fields align correctly on that assumption. A 1-byte prefix interpretation is inconsistent
 with the observed byte layout and is rejected.
@@ -142,7 +186,7 @@ then a sequence of variable-length track records.
 
 | Rel. offset (after header) | Size | Type   | Field         | Notes                                                                              | Confidence |
 |---------------------------:|-----:|--------|---------------|------------------------------------------------------------------------------------|------------|
-| 0                          | 4    | u32 LE | `track_count` | Number of `BoneTrack` records that follow. One track per animated bone. A value of zero is valid (stub clip). | CONFIRMED |
+| 0                          | 4    | u32 LE | `track_count` | Number of `BoneTrack` records that follow. One track per animated bone. A value of zero is valid (stub clip). Real full-body clips carry tens of tracks (~67% have 51+); a clip may have fewer tracks than the skeleton has bones — unanimated bones are simply absent and stay at their bind pose. | CONFIRMED |
 
 ### Per-track record
 
@@ -181,6 +225,12 @@ quaternion representation used in `.bnd` bind-pose records (see `formats/mesh.md
 **Scale:** there is no scale channel. The keyframe record carries only translation and rotation.
 Scale is not animated in this format.
 
+**Pose semantics (cross-reference):** a sampled keyframe is a **local replacement pose** for the
+named bone, not an additive delta — it overwrites the bone's animated local translation/rotation.
+Animation drives **rotation on child bones and translation on the root only**; a child bone's local
+translation is held at its bind-pose value each frame. The full pose-composition and deform math is
+specified in `specs/skinning.md` (§6 keyframe sampling, §5 deform).
+
 ---
 
 ## Timing and interpolation
@@ -196,7 +246,9 @@ Scale is not animated in this format.
 - **Interpolation parameter** `alpha` = `t − (sample_index / 10.0)`. This is expressed in raw
   seconds in the range `[0, 0.1]` and is passed directly as the blend factor to both the
   translation and rotation interpolators. It is not re-normalized to `[0, 1]` before use. Whether
-  this is intentional design or a latent defect in the original client is UNVERIFIED.
+  this is intentional design or a latent defect in the original client is UNVERIFIED. An importer
+  may reproduce the raw-seconds alpha for bit-faithful legacy motion, or renormalize `alpha /= 0.1`
+  for smooth playback — this choice is discussed for the Godot path in `specs/skinning.md` §8(c).
 
 ### Wrap and loop behaviour
 
@@ -246,11 +298,112 @@ is unaffected.
 Each track's `bone_id` (the low byte of `track_descriptor`) directly identifies which bone the
 track drives. This numeric ID matches the `self_id` field of the corresponding bone record in the
 `.bnd` skeleton file (see `formats/mesh.md`, §Bone array, field `self_id`). Linkage is purely
-numeric — no bone name string is stored in the `.mot` file.
+numeric — no bone name string is stored in the `.mot` file. The bone is resolved by **ID offset**
+(`bone_array[bone_id − base_id]`), not by array position; see `specs/skinning.md` §3 and
+`formats/mesh.md` §Bone addressing.
 
 At runtime, if a `bone_id` in the `.mot` track array has no matching `self_id` in the loaded
 `.bnd` skeleton, that track is silently skipped for that frame. Parsers and importers should
-treat an unmatched `bone_id` as a non-fatal warning.
+treat an unmatched `bone_id` as a non-fatal warning. (This is normal: a clip commonly animates
+fewer bones than the skeleton has — e.g. a 80-track clip on an 84-bone skeleton.)
+
+---
+
+## BANI variant
+
+> **Format deviation — header fully recovered; body layout partially characterised.**
+> Of the 3,891 `.mot` files, **11 begin with a 4-byte ASCII magic `"BANI"`** (`42 41 4E 49`)
+> instead of the bare standard header. The standard loader in the shipping client has **no
+> magic-check branch** and cannot load these files — all 11 produce parse errors and are
+> effectively dead data in the VFS. See §BANI variant — loader rejection for details.
+
+The 11 BANI files all reside in `data/char/mot/`. They fall in two numeric ID bands:
+
+- `g170350513.mot` through `g170350515.mot` (3 files, `version = 1`)
+- `g170576814.mot` through `g170948714.mot` (8 files, `version` values 1 and 3)
+
+They account for 0.28% of the `.mot` corpus. They are plausibly a specific character class's
+animations exported from a newer or different pipeline that was never integrated into the shipping
+client loader.
+
+### BANI header layout (SAMPLE-VERIFIED — 3 of 11 files cross-checked)
+
+The header is variable-length due to the embedded LenStr name field. All fields listed below are
+**SAMPLE-VERIFIED** except where noted.
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| 0x00 | 4 | u8[4] | `magic` | ASCII `"BANI"` (`42 41 4E 49`). Identifies the variant. | SAMPLE-VERIFIED |
+| 0x04 | 4 | u32 LE | `version` | Sub-format variant selector. Observed values: **1** (files g170350513–515 and part of the 170576xxx group) and **3** (one or more files in the 170577xxx / 170948xxx group). Whether version affects post-header payload layout is unknown. | SAMPLE-VERIFIED |
+| 0x08 | 4 | u32 LE | `anim_id` | Numeric animation identifier. Matches the decimal numeric suffix of the filename (same role as standard `id_a` but at offset 8 rather than offset 0). | SAMPLE-VERIFIED |
+| 0x0C | 4 | u32 LE | `unknown_field` | Constant value **7830** (0x1E96) across all 11 observed files. Candidate interpretations: skeleton/rig group ID, animation set category, or build-tool export revision. See §unknown_field note. | SAMPLE-VERIFIED (value); PROPOSED (interpretation) |
+| 0x10 | 4 | u32 LE | `name_len` | Byte length of the embedded name string (LenStr 4-byte u32 LE prefix, same encoding as the standard variant). Observed value 11 in the cross-checked samples. | SAMPLE-VERIFIED |
+| 0x14 | N | u8[N] | `name` | ASCII name string of `name_len` bytes; no NUL terminator on disk. Encodes the animation identifier string, e.g. `"g170350513"` (11 bytes). Same relative-path convention as the standard variant. | SAMPLE-VERIFIED |
+| 0x14+N | 4 | u32 LE | `frame_count` | Total number of keyframes. Observed values: 28, 29, 38 across the three cross-checked samples. | SAMPLE-VERIFIED |
+| 0x18+N | 4 | u32 LE | `track_count` | Number of bone tracks. **Constant 52 across all 11 files** (confirmed from the census scan). Consistent with a shared 52-bone skeleton rig. | SAMPLE-VERIFIED |
+| 0x1C+N | variable | — | payload | Per-track and per-frame data. Layout not yet decoded; see §BANI payload note. | NOT YET DECODED |
+
+After `track_count` the payload begins. Its structure is not confirmed. Identity-rotation float
+values appear in positions consistent with the standard keyframe encoding (translation XYZ +
+quaternion XYZW, 28 bytes per keyframe), but the exact arrangement of track descriptors and
+keyframe blocks has not been characterised.
+
+### Confirmed all-samples constants
+
+Two field values are consistent across every one of the 11 BANI files (confirmed from the full
+file census):
+
+| Field | Constant value | Interpretation |
+|-------|---------------|----------------|
+| `unknown_field` | 7830 (0x1E96) | Candidate: skeleton group / rig set ID; links these 11 files to a common 52-bone hierarchy. PROPOSED — requires cross-reference to the skeleton catalogue to confirm. |
+| `track_count` | 52 | Matches the bone count of a specific skeleton rig. All 11 files animate the same skeleton. |
+
+### Cross-checked sample summary
+
+| File | `version` | `anim_id` | `unknown_field` | `name` | `frame_count` | `track_count` |
+|------|:---------:|----------:|:--------------:|--------|:------------:|:-------------:|
+| `g170350513.mot` | 1 | 170350513 | 7830 | `g170350513` | 28 | 52 |
+| `g170350514.mot` | 1 | 170350514 | 7830 | `g170350514` | 29 | 52 |
+| `g170350515.mot` | 1 | 170350515 | 7830 | `g170350515` | 38 | 52 |
+
+### BANI variant — loader rejection (SAMPLE-VERIFIED + CODE-CONFIRMED)
+
+> **Conclusion: the shipping client cannot load BANI files. All 11 are dead/unused data.**
+
+The standard loader (`CoreMot_LoadFromFile_Header`) reads the first four bytes as a u32 LE
+`id_a` field with no magic check. When fed a BANI file:
+
+1. The four magic bytes `42 41 4E 49` are read as a bogus `id_a` value.
+2. The u32 at offset 4 (the `version` field, value 1 or 3) is read as `id_b`.
+3. The u32 at offset 8 (the `anim_id` field, e.g. 170350513) is read as `name_len`.
+4. The loader attempts to read 170 million bytes as a name string — far exceeding any real file
+   size — causing an immediate parse failure.
+
+Parse errors on all 11 BANI files were confirmed by the animscan census tool. No separate BANI
+loader branch was found in the binary after an exhaustive search. These files are not referenced
+at runtime by any code path in the shipping client.
+
+**Implication for Assets.Parsers:**
+
+1. **Sniff the first 4 bytes.** If they equal `42 41 4E 49` (ASCII `"BANI"`), skip or log and
+   continue — do not attempt standard header parsing.
+2. BANI files may be safely excluded from the production animation catalogue. If future
+   completeness requires them, a dedicated BANI parser may be built from the header table above;
+   the payload layout must be decoded separately before that parser is considered production-ready.
+3. Mark any BANI file in the catalogue as `NonLoadable` in the parser output — do not surface them
+   to `Client.Application` as valid clips.
+
+### BANI payload note
+
+After the `track_count` field, the payload structure is not yet decoded. Based on the confirmed
+`frame_count` and `track_count` values, the expected content is:
+- Per-track bone index / channel type descriptors
+- Per-frame quaternion/translation samples for each track
+
+Whether per-track data uses f32 or f16 quantization, and the exact packing order (interleaved
+vs. planar), is unknown. Decoding this payload is a deferred task; it is not required for the
+`Assets.Parsers` implementation because BANI files are non-loadable by the shipping client and
+should be skipped.
 
 ---
 
@@ -264,8 +417,8 @@ known unknown and is now resolved.
 
 - **`id_b` is the load-time catalogue key.** It is passed as the lookup key when registering a clip
   into the runtime clip map during loading. It is shared across all clips belonging to the same
-  actor motion set (all three reference samples carry `id_b = 7741`, confirming grouping semantics).
-  This is the key the loader uses to find clips by group / set.
+  actor motion set (all three earlier reference samples carried `id_b = 7741`, confirming grouping
+  semantics). This is the key the loader uses to find clips by group / set.
 - **`id_a` is the per-file unique identifier and the runtime clip handle.** It matches the decimal
   integer in the filename (e.g. filename `g170354502.mot` → `id_a = 170354502`). It is returned to
   callers as the clip handle after registration, and the runtime mixer uses `id_a` as the per-clip
@@ -288,15 +441,19 @@ content-creation time.
 a decimal count on the first line and one record per subsequent line. Each record has **33 columns**.
 The byte offsets below are the offsets within the engine's in-memory record (a fixed 136-byte
 record) into which each column is parsed; they are stable and parser-derived. Per-column **semantic
-names are PROPOSED** — the read order, types, and offsets are confirmed, but the meanings are
-inferred from sample values and usage and should be cross-checked before being relied upon.
+names for columns 3–14 are PROPOSED** — the read order, types, and offsets are confirmed, but the
+meanings are inferred from sample values and usage and should be cross-checked before being relied
+upon. **Column 15 (the idle motion) is now sample-verified** (see §col15 below).
 
 ### File structure
 
 | Element | Description |
 |---------|-------------|
-| Line 1 | Decimal record count (the sample file declares 1084 records). |
+| Line 1 | Decimal record count. The file declares **1084** records, but the production parser parses **1080** rows (see §Declared vs parsed count). |
 | Lines 2…N | One record per line, 33 tab-separated values, parsed in the column order below. |
+
+**Column count is uniform: every data line has exactly 33 columns** — SAMPLE-VERIFIED across the
+whole file (no per-line variation).
 
 ### Record layout (parser-derived offsets within the 136-byte record)
 
@@ -304,21 +461,46 @@ inferred from sample values and usage and should be cross-checked before being r
 |-------:|------|--------------:|----------------|-------|
 | 0  | u32 | (key input) | `group_type` | Actor class / visual group selector. Used together with column 1 to compute the record key (see §Record key). |
 | 1  | u32 | (key input) | `row_id` | Row index within the motion set; combined with `group_type` to form the global key. |
-| 2  | u32 | +0x04 | `class_variant` | Class / variant discriminator (sample value 1). |
-| 3  | f32 | +0x08 | `cycle_duration_a` | Cycle duration in seconds, set A (e.g. 7.402). |
-| 4  | u32 | +0x28 | `frame_count_a` | Frame count for set A. Clamped to a minimum of 1 (a parsed 0 is forced to 1). |
-| 5  | f32 | +0x0C | `cycle_duration_b` | Cycle duration in seconds, set B (e.g. 16.282). |
-| 6  | u32 | +0x2C | `frame_count_b` | Frame count for set B. Clamped to a minimum of 1. |
-| 7  | u32 | +0x10 | `flags` | Bitfield (purpose UNVERIFIED; sample value 0). |
-| 8  | f32 | +0x14 | `phase_a` | Phase / timing parameter A (e.g. 4.0). |
-| 9  | f32 | +0x18 | `phase_b` | Phase / timing parameter B (e.g. 5.0). |
-| 10 | f32 | +0x1C | `phase_c` | Phase / timing parameter C (e.g. 3.0). |
-| 11 | f32 | +0x20 | `weight_a` | Blend weight A (e.g. 1.0). |
-| 12 | f32 | +0x24 | `weight_b` | Blend weight B (e.g. 8.0). |
-| 13 | f32 | +0x38 | `speed_override_a` | Playback speed override A (e.g. 4.0). |
-| 14 | f32 | +0x3C | `speed_override_b` | Playback speed override B (e.g. 1.0). |
-| 15–23 | u32 ×9 | +0x40 … +0x60 | `motion_ids_a[9]` | Primary motion-ID array. Each non-zero entry is a 9-digit clip ID equal to a `.mot` `id_a`. Zero = empty slot. |
+| 2  | u32 | +0x04 | `skin_class_id` | **SkinClassId.** Selects the character's skeleton/skin: maps to `data/char/bind/g{id}.bnd` (and the `.skn` whose `id_b` equals this value). A value of **0** means no skeleton (null pointer; login/camera/special actors). SAMPLE-VERIFIED: 95.9% of rows resolve to an existing `.bnd`. |
+| 3  | f32 | +0x08 | `cycle_duration_a` | Cycle duration in seconds, set A (e.g. 7.402). PROPOSED meaning. |
+| 4  | u32 | +0x28 | `frame_count_a` | Frame count for set A. Clamped to a minimum of 1 (a parsed 0 is forced to 1). PROPOSED meaning. |
+| 5  | f32 | +0x0C | `cycle_duration_b` | Cycle duration in seconds, set B (e.g. 16.282). PROPOSED meaning. |
+| 6  | u32 | +0x2C | `frame_count_b` | Frame count for set B. Clamped to a minimum of 1. PROPOSED meaning. |
+| 7  | u32 | +0x10 | `flags` | Bitfield (purpose UNVERIFIED; sample value 0). PROPOSED meaning. |
+| 8  | f32 | +0x14 | `phase_a` | Phase / timing parameter A (e.g. 4.0). PROPOSED meaning. |
+| 9  | f32 | +0x18 | `phase_b` | Phase / timing parameter B (e.g. 5.0). PROPOSED meaning. |
+| 10 | f32 | +0x1C | `phase_c` | Phase / timing parameter C (e.g. 3.0). PROPOSED meaning. |
+| 11 | f32 | +0x20 | `weight_a` | Blend weight A (e.g. 1.0). PROPOSED meaning. |
+| 12 | f32 | +0x24 | `weight_b` | Blend weight B (e.g. 8.0). PROPOSED meaning. |
+| 13 | f32 | +0x38 | `speed_override_a` | Playback speed override A (e.g. 4.0). PROPOSED meaning. |
+| 14 | f32 | +0x3C | `speed_override_b` | Playback speed override B (e.g. 1.0). PROPOSED meaning. |
+| 15 | u32 | +0x40 | `idle_motion_id` (`motion_ids_a[0]`) | **Idle / stand motion** — the first of 9 primary motion IDs. A 9-digit clip ID equal to a `.mot` `id_a`; maps to `data/char/mot/g{id}.mot`. Zero = empty slot. **SAMPLE-VERIFIED** (see §col15). |
+| 16–23 | u32 ×8 | +0x44 … +0x60 | `motion_ids_a[1..8]` | Remaining primary motion-ID array. Same encoding; zero = empty slot. |
 | 24–32 | u32 ×9 | +0x64 … +0x84 | `motion_ids_b[9]` | Secondary motion-ID array, same encoding as the primary array. |
+
+### col2 → `.bnd` coverage (sample-verified)
+
+Mapping col2 (`skin_class_id`) → `data/char/bind/g{id}.bnd` resolves for **1,036 / 1,080 = 95.9%** of
+rows. The 44 misses break down as: ~28 rows with `skin_class_id = 0` (null skeleton — login/camera/
+special actors that take a different code path; treat 0 as a null pointer, no skeleton), and the
+remainder referencing `.bnd` ids absent from the preserved VFS (expected gaps). **This confirms col2
+is the SkinClassId**, the actor-to-skeleton key.
+
+### col15 → idle `.mot` coverage (sample-verified)
+
+Mapping col15 (`idle_motion_id`) → `data/char/mot/g{id}.mot` yields an **89.2% hit rate** (963 of 1,080
+rows; 56 rows have a zero id = intentionally empty slot; 61 reference clips absent from the preserved
+VFS). A random mapping would hit near 0%, so this **empirically confirms col15 is an idle `.mot`
+`id_a`** — previously PROPOSED, now CONFIRMED (sample-verified). The IDs in cols 15+ are confirmed
+`.mot` `id_a` references.
+
+### Declared vs parsed count (discrepancy noted)
+
+The file's line-1 count declares **1084** records, but the production parser yields **1080** parsed
+rows — a difference of **4 rows**. The 4 missing rows are most likely blank/structural separator lines
+silently skipped by the parser's `actorClassId` parse guard. This is a benign declared-vs-parsed
+mismatch, not a layout error; parsers should not trust the declared count as the exact iteration bound
+and should tolerate skipped/blank lines. SAMPLE-VERIFIED.
 
 ### Derived fields (computed after parsing, not present in the text)
 
@@ -345,10 +527,10 @@ so different groups can reuse small `row_id` values without collision.
 
 ### Sample record (first data line)
 
-For reference (sample-derived, illustrative): `group_type = 0`, `row_id = 1`, `class_variant = 1`,
+For reference (sample-derived, illustrative): `group_type = 0`, `row_id = 1`, `skin_class_id = 1`,
 `cycle_duration_a = 7.402`, `frame_count_a = 16`, `cycle_duration_b = 16.282`, `frame_count_b = 11`,
 `flags = 0`, `phase_a/b/c = 4 / 5 / 3`, `weight_a/b = 1 / 8`, `speed_override_a/b = 4 / 1`,
-`motion_ids_a` = seven non-zero 9-digit IDs followed by zeros, `motion_ids_b` = a few non-zero
+`motion_ids_a` = several non-zero 9-digit IDs followed by zeros, `motion_ids_b` = a few non-zero
 9-digit IDs followed by zeros.
 
 > A sibling table, `data/char/skin.txt`, uses a related but different 6-column key-and-identity
@@ -357,12 +539,29 @@ For reference (sample-derived, illustrative): `group_type = 0`, `row_id = 1`, `c
 
 ---
 
+## motion.cache / effect.cache size-math
+
+`data/motion.cache` and `data/effect.cache` are read through a **direct OS file call** (not the VFS),
+so they are absent from the VFS itself. They were not byte-observed in the validated install, but the
+recorded file sizes cross-check the documented `[u32 count][count × u32 id]` layout exactly:
+
+| File | Size | Layout check | Implied count |
+|------|-----:|--------------|--------------:|
+| `motion.cache` | 44 B | `4 + count × 4` → `count = (44 − 4) / 4` | 10 IDs |
+| `effect.cache` | 72 B | `4 + count × 4` → `count = (72 − 4) / 4` | 17 IDs |
+
+Both sizes are **exactly** consistent with the documented wire layout — an indirect confirmation
+without reading the files. Magic / versioning remains UNVERIFIED.
+
+---
+
 ## Animation mixer — runtime blend model
 
 This section describes the runtime layering and blending model as observed. It is informative for
 `Assets.Parsers` and mandatory background for `Client.Application`. It documents behaviour and
 constants only — no in-memory object layout is exposed, and no parser needs to reproduce these
-structures to decode a `.mot` file.
+structures to decode a `.mot` file. The downstream **deform** of a skinned mesh using the accumulated
+pose (linear-blend skinning, inverse-bind, pose composition) is specified in `specs/skinning.md`.
 
 ### Two clip lists
 
@@ -509,7 +708,8 @@ After accumulation, the mixer applies a heading (yaw) smoothing step: it blends 
 facing quaternion toward the target facing by a fixed factor of **0.2** per frame, sets the actor
 orientation from the smoothed result, composes it with the accumulated bind-pose rotation, and
 submits the final skinned pose to the GPU skinning path. This is purely a runtime presentation
-concern and has no bearing on the `.mot` file format.
+concern and has no bearing on the `.mot` file format. The composition into final bone world
+transforms and the deform that follows are specified in `specs/skinning.md`.
 
 ### Activating a cycle
 
@@ -523,10 +723,11 @@ created and appended to the Cycle list. Stopping all layers sets every layer's t
 
 ## Enumerations / flags
 
-No enumerated fields or bitflag fields exist in the on-disk `.mot` format. The upper three bytes
-of `track_descriptor` (bits 8–31) are reserved padding and carry no enumerated meaning. The
+No enumerated fields or bitflag fields exist in the on-disk standard `.mot` format. The upper three
+bytes of `track_descriptor` (bits 8–31) are reserved padding and carry no enumerated meaning. The
 `flags` column in `actormotion.txt` (§`actormotion.txt` layout, column 7) is a bitfield whose bit
-assignments are UNVERIFIED.
+assignments are UNVERIFIED. The BANI variant's `version` field (offset 4) takes the discrete values
+1 and 3 (§BANI variant) but its full enumeration and effect on payload layout are not characterized.
 
 ---
 
@@ -536,39 +737,49 @@ The following aspects are unresolved and must not be assumed by the implementing
 
 | Item | Status | Impact |
 |------|--------|--------|
-| `actormotion.txt` per-column semantics | UNVERIFIED — record layout, types, and offsets are confirmed (§`actormotion.txt` layout), but the proposed field names (`phase_*`, `weight_*`, `speed_override_*`, `flags` bit meanings) are inferred from sample values. | Parse by offset and type; treat field names as provisional until cross-checked against the actor controller. |
+| BANI variant payload layout (post `track_count`) | NOT YET DECODED — magic, version, anim_id, unknown_field, name LenStr, frame_count, and track_count are all sample-verified; the per-track and per-keyframe structure that follows is not characterised. | Sniff and skip BANI files in the standard parser; do not rely on BANI clips for production. If future decode is needed, the payload is expected to be similar to the standard keyframe encoding but this is unconfirmed. |
+| BANI `unknown_field = 7830` interpretation | PROPOSED — constant across all 11 files; candidate is a skeleton group / rig set ID linking these files to the 52-bone hierarchy. Cross-reference with the skeleton catalogue required to confirm. | Carry the value through; do not branch on it. |
+| BANI `version` effect on payload | UNVERIFIED — values 1 and 3 observed; whether they imply different post-header layouts is unknown. | Treat as informational metadata until payload is decoded. |
+| `actormotion.txt` per-column semantics (cols 3–14) | UNVERIFIED — record layout, types, and offsets are confirmed; the proposed names (`phase_*`, `weight_*`, `speed_override_*`, `flags` bit meanings) are inferred from sample values. Cols 2 and 15 are now sample-verified and removed from this caveat. | Parse by offset and type; treat cols 3–14 field names as provisional until cross-checked against the actor controller. |
 | `actormotion.txt` 15-unit rate base | UNVERIFIED — derived rate fields use a `15.0` base; relationship to the `.mot` 10 fps clip rate is unknown. | Compute the derived rates as specified; do not assume the bases are interchangeable. |
 | Default layer speed constant (≈1.575) | UNVERIFIED — a confirmed float literal set at layer construction; its interaction with `actormotion.txt` `speed_override` columns is unknown. | Document the constant; do not hard-wire playback speed to it until its role is confirmed. |
 | Sync-phase 1.5× rate rationale | UNVERIFIED — the 1.5 multiplier is a confirmed constant; the "15 fps / 10 fps" interpretation is a hypothesis. | Implement the constant as-is; do not depend on the hypothesized rationale. |
 | Character speed scale factor source | UNVERIFIED — the per-visual `scaled_dt` factor is sourced from character speed data not yet characterized. | Treat as a runtime input (default 1.0); not needed to decode `.mot` binaries. |
 | `flags` bitfield meanings (`actormotion.txt` column 7) | UNVERIFIED — the column is a u32 bitfield; individual bits are uncharacterized (sample value 0). | Carry the value through; do not branch on undocumented bits. |
-| Interpolation parameter normalization intent | UNVERIFIED — `alpha` is in raw seconds `[0, 0.1]`, not `[0, 1]`. Matches observed behaviour; whether intentional design or latent defect is unknown. | Implement as observed (raw seconds); document the deviation from standard practice. |
-| `motion.cache` magic and versioning | UNVERIFIED — no header magic or version field confirmed; only the `[u32 count][u32[] ids]` layout. | Parse defensively; treat as unversioned. |
+| Interpolation parameter normalization intent | UNVERIFIED — `alpha` is in raw seconds `[0, 0.1]`, not `[0, 1]`. Matches observed behaviour; whether intentional design or latent defect is unknown. | Implement as observed (raw seconds); document the deviation — see `specs/skinning.md` §8(c) for the Godot faithful-vs-smoothed choice. |
+| `motion.cache` magic and versioning | UNVERIFIED — no header magic or version field confirmed; only the `[u32 count][u32[] ids]` layout (cross-checked by size math, §motion.cache / effect.cache size-math). | Parse defensively; treat as unversioned. |
 | Variable frame rate (rates other than 10 fps) | UNVERIFIED — only 10 fps observed for `.mot` clips. | Treat 10 fps as fixed; flag any `frame_count` that produces an unexpected duration. |
 | Text-mode `.mot` files in the wild | UNVERIFIED — the binary/text switch exists in the reader code, but no text-mode samples are known to exist. | Implement binary mode only. |
-| Non-stub clips (frame_count > 0, track_count > 0) | The three reference samples are stub clips (both counts zero); no full-payload clip has been byte-verified. The track and keyframe layouts are derived from parser analysis rather than raw sample bytes. | The track/keyframe layout tables are CONFIRMED by parser analysis; consider a full-payload sample to close the loop before production. |
 
 The following items from previous spec revisions have been resolved and removed from the
 unknowns table:
 
 | Former item | Resolution |
 |-------------|------------|
-| LenStr prefix width (1-byte vs 4-byte) | CONFIRMED 4-byte u32 LE prefix — sample-verified in all three reference samples. |
+| "All `.mot` samples are stubs" | RESOLVED — a full census of 3,891 files shows 3,877 (99.7%) are real full-payload clips; only 3 are stubs and 11 are the BANI variant (§Corpus census). The track/keyframe layout is exercised by the corpus, not just by parser inference. |
+| LenStr prefix width (1-byte vs 4-byte) | CONFIRMED 4-byte u32 LE prefix — sample-verified. |
 | Upper 3 bytes of `track_descriptor` | CONFIRMED unused padding — parser reads the 4-byte word and extracts only the low byte; bits 8–31 are discarded with no comparison or storage. |
 | `id_a` vs `id_b` as catalogue key | CONFIRMED — `id_b` is the load-time catalogue / group key; `id_a` is the per-file UID matching the filename integer, returned as the clip handle and used by the runtime mixer as the per-clip lookup ID. |
 | Wrap-to-first at clip end | CONFIRMED — no loop flag exists in the `.mot` binary; wrap is a runtime property of `AnimationCycleLayer` (modulo on local time), not of the file. |
-| `actormotion.txt` column layout | CONFIRMED (record layout) — 33 columns, count-prefixed, parsed into a 136-byte record; offsets and types documented in §`actormotion.txt` layout. Per-column semantic names remain PROPOSED. |
+| `actormotion.txt` column layout | CONFIRMED (record layout) — 33 columns, count-prefixed, parsed into a 136-byte record; offsets and types documented in §`actormotion.txt` layout. Per-column semantic names for cols 3–14 remain PROPOSED; col2 (SkinClassId) and col15 (idle motion) are now sample-verified. |
+| `actormotion.txt` col15 = idle motion | CONFIRMED (sample-verified) — col15 → `data/char/mot/g{id}.mot` hits 89.2% of rows (§col15). |
+| `.mot` magic: "no magic, starts with id_a" | CORRECTED — true for 3,880 standard-variant files, but 11 files use the `"BANI"` magic with a different header (§BANI variant). Parsers must sniff the first 4 bytes. |
 | Animation mixer runtime blend model (provisional) | CONFIRMED — two-list architecture, sync-phase mechanism with 1.5× constant, weight ramping with 0.001 s floor, and per-bone normalized weighted-average accumulation (order-dependent for ≥3 layers) documented in §Animation mixer — runtime blend model. |
+| BANI files loadable by shipping client | CONFIRMED NEGATIVE (SAMPLE-VERIFIED + CODE-CONFIRMED) — the standard loader has no magic-check branch; all 11 BANI files produce parse errors and are dead/unused data. Parsers must sniff and skip them. |
 
 ---
 
 ## Cross-references
 
 - **Container:** `Docs/RE/formats/pak.md` — VFS archive that delivers `.mot` files.
-- **Skeleton:** `Docs/RE/formats/mesh.md` — `.bnd` bind-pose skeleton; the `self_id` field of
-  each bone record is the link target for `bone_id` in `.mot` track records. Also defines the
-  `LenStr` encoding (4-byte u32 LE prefix) confirmed for `.mot`.
+- **Skeleton / skinned mesh:** `Docs/RE/formats/mesh.md` — `.bnd` bind-pose skeleton and `.skn` skin;
+  the `self_id` field of each bone record is the link target for `bone_id` in `.mot` track records.
+  Also defines the `LenStr` encoding (4-byte u32 LE prefix) confirmed for `.mot`.
+- **Deform / skinning math:** `Docs/RE/specs/skinning.md` — how a sampled `.mot` pose is composed up
+  the bone hierarchy and used to deform a skinned mesh (linear-blend skinning, inverse-bind bake,
+  quaternion/handedness conventions, Godot import guidance, canonical test specimens).
 - **Canonical names:** see `Docs/RE/names.yaml`
-  (`MotionClip`, `BoneTrack`, `MotionClipManager`, `AnimationMixer`,
-  `AnimationCycleLayer`, `AnimationActionLayer`).
+  (`MotionClip`, `BoneTrack`, `Keyframe`, `MotionClipManager`, `AnimationMixer`,
+  `AnimationCycleLayer`, `AnimationActionLayer`; proposed `BaniMotClip`, `bani_magic`,
+  `bani_version`).
 - **Provenance:** see `Docs/RE/journal.md` (entry for this spec is appended separately).

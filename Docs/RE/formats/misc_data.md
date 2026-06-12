@@ -176,6 +176,7 @@ Total file size = 4 + (`count` × 28).
 - Observed `alt_name_str_id` values fall in the range 20000 – 20037. The dual reference may
   distinguish a short name from a long/title name; this is inferred, not confirmed.
 - No CP949 text is stored directly in this file; names are resolved at runtime via the string table.
+- String IDs in this file resolve against `data/script/msg.xdb` (see §6 of this document).
 
 **Portrait resource IDs (`portrait_res_1/2/3`):**
 - Large 32-bit values. A pattern of the form `(group × 1_000_000) + index` is consistent with the
@@ -190,7 +191,7 @@ Total file size = 4 + (`count` × 28).
 - No loader routine located in the binary; the file path was not found as a string literal in the binary.
   Format is confirmed by sample arithmetic alone.
 - The exact string-table structure that `name_str_id` / `alt_name_str_id` index is not documented
-  here; see the string-table spec when available.
+  here; see §6 of this document (`msg.xdb`) for the resolved record format.
 - The portrait resource ID encoding (group × 1e6 + index vs another scheme) is unconfirmed.
 - Whether files with `mob_class_id` ranges outside 101 – 121 exist is unknown (single sample).
 
@@ -404,6 +405,109 @@ CP949 before display or comparison. Never treat this field as ASCII.
 
 ---
 
+## Section 6 — `msg.xdb` — UI Message Catalogue
+
+> **Verification status: CODE-CONFIRMED (parser read-sequence, record stride, and lookup model
+> are all confirmed from the loader routine); SAMPLE-UNVERIFIED (VFS probe tool was unavailable
+> at time of writing — record count, specific id values, and string content not byte-confirmed).
+> Apply caution on any claim that depends on actual record content.**
+
+- **Extension:** `.xdb` (shares extension with §1 variants; distinguished by its VFS path)
+- **Found in:** `.pak` archive; logical path: `data/script/msg.xdb`
+- **Magic / signature:** None. No file-level header of any kind.
+- **Endianness:** Little-endian throughout.
+- **Version field:** None.
+
+**Role:** Startup binary string database that maps u32 integer IDs to CP949-encoded UI caption
+strings. All visible UI text (error messages, state names, quest text, menu labels, and similar
+captions) is fetched from this catalogue at runtime by numeric ID. The file is loaded once at
+engine startup, before any map or asset is loaded. It is a startup asset, not a per-area asset.
+
+### File layout
+
+The file is a flat, headerless array of fixed-size records. There is no stored record count; the
+count is derived at load time from the file size:
+
+```
+record_count = file_size / 516       (integer division; file must be an exact multiple of 516)
+```
+
+Any remainder implies a malformed file.
+
+### Record layout (516 bytes = 0x204)
+
+| Offset | Size | Type      | Field | Notes                                                    | Confidence |
+|-------:|-----:|-----------|-------|----------------------------------------------------------|------------|
+| 0x000  | 4    | u32LE     | id    | Unique message identifier; used as the runtime lookup key | CODE-CONFIRMED |
+| 0x004  | 512  | u8[512]   | text  | CP949-encoded string, NUL-terminated within the buffer; remaining bytes after the NUL are zero padding | CODE-CONFIRMED |
+
+**Total record size: 4 + 512 = 516 bytes.**
+
+### Text encoding
+
+All string content is encoded in **CP949** (Windows code page 949, the Korean EUC-KR superset).
+The `text` field is NUL-terminated within its 512-byte buffer. The maximum usable string length
+before the NUL is 511 bytes (511 CP949 code units; multi-byte Korean characters each occupy 2
+bytes, so the maximum is 255 Korean characters per message). Remaining bytes after the NUL are
+zero padding and must be ignored by the parser.
+
+Parsers must register `CodePagesEncodingProvider` and decode the buffer with
+`Encoding.GetEncoding(949)` before passing strings to any display layer.
+
+### Load and lookup model (CODE-CONFIRMED)
+
+The client performs a single bulk read of the entire file into a heap buffer, then iterates all
+records and inserts each one into a global **red-black tree** keyed on the u32 `id` field. The
+tree is accessed at runtime via a lookup function that accepts an integer `id` and returns a
+pointer to the 516-byte record; the string payload begins at byte offset 4 within that record.
+
+The tree is keyed on `id` only; there is no secondary index by string content. Lookups are by
+numeric ID exclusively.
+
+Load sequence:
+1. Open `data/script/msg.xdb` read-only.
+2. Query file size; compute `record_count = file_size / 516`.
+3. Allocate a heap buffer of `516 × record_count` bytes.
+4. Read all records in a single bulk read into the buffer.
+5. For each record: read `id` (u32LE at record base), insert `(id → record_ptr)` into the
+   global red-black tree.
+6. Close the file. The buffer remains live for the process lifetime.
+
+### Known ID ranges (CODE-CONFIRMED call sites; string content SAMPLE-UNVERIFIED)
+
+At least 500 distinct call sites in the binary hardcode specific message IDs, covering all major
+game subsystems. Confirmed category groupings inferred from call-site clustering:
+
+| ID range | Confirmed use | Confidence |
+|----------|---------------|------------|
+| 200–212 (0xC8–0xD4) | Character create / rename error messages | CODE-CONFIRMED |
+| 4025–4028 | Login error toast messages | CODE-CONFIRMED |
+| 9001 + stateIndex | Scene/state name strings (used by error dialog: `msg[9001 + state]`) | CODE-CONFIRMED |
+
+The full ID space (range, density, and contiguity) is **SAMPLE-UNVERIFIED**. The prediction from
+call-site density is several hundred to a few thousand records; IDs may be contiguous integers,
+may be sparse, or may use a category-encoded scheme. This must be verified once the VFS probe
+tool is repaired.
+
+### Cross-reference
+
+This catalogue is consumed by the UI system documented in `Docs/RE/specs/ui_system.md`. Mob
+name and alternate-name string IDs stored in `mobinfo.mi` (§2 of this document) resolve against
+this same catalogue.
+
+### Known unknowns
+
+- **ID range and density:** unknown without sample verification. Whether IDs are contiguous,
+  sparse, or category-encoded has not been confirmed from byte data.
+- **Record count:** the predicted range is several hundred to several thousand records; exact count
+  not confirmed.
+- **Specific string content:** no msg.xdb records have been decoded from bytes. The ID-to-string
+  mappings listed above are inferred from call sites, not from reading the file.
+- **VFS probe prerequisite:** the probe tool that would have verified this format had a build error
+  (`data/script/msg.xdb` was located in the VFS but could not be extracted at time of analysis).
+
+---
+
 ## Cross-format summary
 
 | Format          | Header          | Stride | Count source          | Text encoding | Loader confirmed |
@@ -415,6 +519,7 @@ CP949 before display or comparison. Never treat this field as ASCII.
 | `.tol`          | 16-byte header  | 1 B/tile | `width × height`    | none          | NO            |
 | `descript.ion`  | none            | variable | until EOF (CRLF delimited) | ASCII  | NO            |
 | `discript.sc`   | none            | 68 B   | `file_size / 68`      | CP949 (display_name) | YES (stride) |
+| `msg.xdb`       | none            | 516 B  | `file_size / 516`     | CP949 (text)  | YES (loader + stride; SAMPLE-UNVERIFIED) |
 
 ## Known unknowns (cross-format)
 
@@ -425,10 +530,13 @@ CP949 before display or comparison. Never treat this field as ASCII.
 - The world-origin sub-tile scale factor (256) in `.tol` files is inferred, not confirmed from
   the engine's internal constants.
 - The `reserved` 27-byte region in `discript.sc` records.
+- The full ID range, record count, and string content of `msg.xdb` pending VFS probe repair.
 
 ## Cross-references
 
 - Related formats: `pak.md` (archive container that holds all of the above), `terrain.md` (`.tol`
   is a terrain companion file), `texture.md` (`.ion` references `.tga` texture filenames).
+- `msg.xdb` consumers: `Docs/RE/specs/ui_system.md` (caption lookup by numeric ID),
+  `mobinfo.mi` §2 (mob name string IDs reference this catalogue).
 - Glossary: see `Docs/RE/names.yaml`
 - Provenance: see `Docs/RE/journal.md`

@@ -1,7 +1,7 @@
 ---
-status: hypothesis
+status: confirmed
 sample_verified: false
-subsystems: [camera_views, movement_collision]
+subsystems: [camera_views, camera_constants, movement_collision]
 networked: partial   # camera is client-only; movement uses 2/13, 5/13, 4/13
 encoding_note: Korean in-game/config text is CP949 (legacy MS949 code page), not UTF-8.
 ---
@@ -24,15 +24,18 @@ encoding_note: Korean in-game/config text is CP949 (legacy MS949 code page), not
 
 Each major claim is tagged inline:
 
-- **(solid)** — re-derived from behaviour with corroborating evidence; safe to implement.
-- **(plausible)** — single-source behavioural inference; implement but keep a feature flag / make it tunable.
+- **(CODE-CONFIRMED)** — value lifted directly from binary immediate operands and
+  confirmed by control-flow context; safe to implement.
+- **(SAMPLE-VERIFIED)** — additionally cross-checked against real shipped asset bytes.
+- **(INFERRED)** — single-source behavioural inference with supporting evidence;
+  implement but keep a feature flag / make it tunable.
 - **(UNVERIFIED)** — hypothesis only; do **not** hard-code. Listed again in §D.
 
 All exact numeric tuning constants below were lifted from the binary's immediate
-operands; they are **(solid)** as *values present in the code* but **(plausible)**
-as *the value that governs runtime feel*, because none has been confirmed against a
-live capture or recording. Treat the whole constant set as "faithful starting tune,
-expose as config."
+operands; they are **(CODE-CONFIRMED)** as *values present in the code* but
+**(INFERRED)** as *the value that governs runtime feel*, because none has been
+confirmed against a live capture or recording. Treat the whole constant set as
+"faithful starting tune, expose as config."
 
 ---
 
@@ -52,20 +55,21 @@ The renderer is an in-house scene-graph engine. Two distinct concepts cooperate:
 
 There are **five in-world view modes**, all sharing one common base manipulator
 that holds the shared state (§A.4), plus a **sixth, non-in-world** manipulator used
-only by the character-select / create-preview window:
+only by the character-select / create-preview window. A **reserved seventh slot**
+exists in the scene graph but is never assigned — provision only. (CODE-CONFIRMED)
 
 | Mode | Role | Orbits player? | Terrain collision? | Default? |
 |---|---|---|---|---|
-| **Third** | Over-the-shoulder follow camera | yes (yaw + pitch) | yes (height clamp + occlusion pull-in) | **yes** |
+| **Third** | Over-the-shoulder follow camera | yes (yaw + pitch) | yes (height clamp + occlusion nudge) | **yes** |
 | **First** | First-person (eye at player head) | yaw/pitch look, no follow distance | no | no |
 | **Static** | Fixed-angle tracking; follows position, never rotates around the player | no | no | no |
-| **Gamble** | Orbit camera for the gamble / betting minigame UI | yaw orbit, UI-driven | no | no |
-| **Event** | Scripted / cutscene camera; data-driven path; player loses control | n/a (scripted) | no | no |
+| **Gamble** | Orbit camera for the gamble / betting minigame UI | yaw orbit, UI-driven | partial (world-AABB probe) | no |
+| **Event** | Scripted / cutscene camera; built-in per-region curve; player loses control | n/a (built-in curve or orbit) | data-driven | no |
 | *Select* | Character-select / create-preview camera (out-of-world; framed by the select window) | preview-frame | no | n/a |
 
 This matches the input/UI spec (`specs/input_ui.md` §4), which records 5 active
 view-platform slots plus a reserved-and-unused sixth slot and a single integer
-"active view index." (solid)
+"active view index." (CODE-CONFIRMED)
 
 ## A.2 View-mode switching model (no pointer swap)
 
@@ -73,19 +77,52 @@ There is **no dispatch table that swaps a single active-manipulator pointer.**
 Instead **all five in-world manipulators live in the scene graph simultaneously**,
 constructed once at scene setup. Each manipulator carries a per-mode **enable flag**;
 its per-frame traversal hook early-outs unless that flag is set. So **"switch view
-mode" = enable the chosen manipulator and disable the others.** (solid)
+mode" = enable the chosen manipulator and disable the others, then apply the chosen
+mode's projection and persist the localized mode name.** (CODE-CONFIRMED)
 
 The per-frame skeleton per manipulator is: a traversal hook (runs only if enabled)
 which calls the mode's positioning math, then traverses scene-graph children.
-First-person and Third-person **share the same input-event handler** (mouse-look). (solid)
+First-person and Third-person **share the same input-event handler** (mouse-look). (CODE-CONFIRMED)
 
-### Cinematic lock
+### A.2.1 Default mode
+
+**Third-person is the default.** All five in-world manipulators are constructed in
+the order Third / First / Static / Gamble / Event (Third is scene-graph slot 0 and
+is the initially-active mode). The saved option `OPTION_VIEW_CHAR` (INI section
+`[DO_OPTION]`) is **clamped to the range 1..3** on load, with the floor value 1
+mapping to Third-person. Only the three user-selectable modes (Third / First /
+Static) are persisted. Gamble, Event, and Select are **not** part of the saved set.
+(CODE-CONFIRMED)
+
+### A.2.2 Mode-switch trigger points (exactly three call sites)
+
+The mode-selector function has exactly **three** caller sites, all client-side UI or
+keyboard — there is **no combat-enter camera transition and no packet that switches
+the gameplay camera**: (CODE-CONFIRMED)
+
+1. **View menu / hotkey dispatcher** — processes UI command codes (e.g. codes 300
+   and 301) and a keyboard path; converts the command to a view index (1 or 2) and
+   calls the selector. This is the in-game "change view" menu or bound key.
+2. **ESC reset** — on ESC (key 27) with no modal panel open, the keybind handler
+   calls the selector with index 0, snapping back to **Third-person**.
+3. **Second keybind site** in the same handler (paired with the right-drag look gate;
+   see §A.3.2).
+
+Separately, the **video-options apply** path writes `OPTION_VIEW_CHAR` alongside
+other graphics options, so the view-mode choice is also exposed as a graphics-
+options setting. The only server influence on any camera is the map region index
+that keys the Event camera curve (§A.5, "Event" row), which is read from the
+world-state packet — it is not a view-mode switch.
+
+### A.2.3 Cinematic lock
 
 A separate global **cinematic-lock flag** suppresses *all* in-game camera input and
 positioning while set. The gameplay cameras (Third etc.) check this flag and skip
-input + repositioning while it is non-zero — i.e. during scripted Event-camera
-sequences the player loses camera control. The Event camera itself runs *during*
-that lock (the inverse sense). (solid; the precise host field is dirty-only and omitted)
+input and repositioning while it is non-zero — i.e. during Event-camera sequences
+the player loses camera control. The Event camera itself runs *during* that lock
+(inverse sense). Setting and clearing this flag is what transfers control to and
+from the Event camera. (CODE-CONFIRMED; the precise host field is dirty-only and
+intentionally omitted from this spec)
 
 ## A.3 Input model
 
@@ -105,10 +142,11 @@ small integers (shown in decimal; same IDs in Third and First):
 | 1001 | zoom / distance axis B (the other) |
 | 1012 | modifier: while active, mouse-look is suppressed |
 
-> **(UNVERIFIED)** the *polarity* within each pitch pair (1002 vs 1003) and each
-> zoom pair (1000 vs 1001) — which member is "up" / "in" vs "down" / "out". Both
-> members of a pair feed the same integrator with opposite sign; the assignment of
-> sign-to-member is inferred, not proven. Implement as a configurable +/- pair.
+> **(INFERRED/configurable)** the *polarity* within each pitch pair (1002 vs 1003)
+> and each zoom pair (1000 vs 1001) — which member is "up" / "in" vs "down" /
+> "out". Both members of a pair feed the same integrator with opposite sign; the
+> assignment of sign-to-member is inferred, not proven. Implement as a configurable
+> +/- pair.
 
 These camera action IDs belong to the broader input-binding map and should be
 cross-linked when the input subsystem is fully specced. They are *not* the same
@@ -117,21 +155,25 @@ numeric space as the movement / left-click IDs in Part B.
 ### A.3.2 Mouse-look (shared First/Third event handler)
 
 The mouse-look handler dispatches on the pointer event type (move / button-down /
-other-button / wheel-or-extended). Behaviour:
+other-button / wheel-or-extended). Behaviour: (CODE-CONFIRMED)
 
 - While the **suppress modifier** (action 1012) is active, look mode is disabled and
   the drag-active state is cleared.
 - **Right-button drag begins:** on right-button press, set drag-active and record the
-  anchor cursor position. (solid)
+  anchor cursor position.
 - **Mouse move while dragging:** horizontal cursor delta (`cursorX − anchorX`) feeds
   the yaw-rate integrator; vertical delta (`anchorY − cursorY`) scaled by the
-  **mouse-drag pitch gain = 5e-4** feeds the pitch-rate integrator. (solid)
+  **mouse-drag pitch gain = 5e-4** feeds the pitch-rate integrator.
 - **Direct mouse axis:** raw mouse delta scaled by the **mouse-axis sensitivity = 1e-6**
-  integrates into pitch, clamped to **[-4.0, +4.0]**; overflow beyond the clamp spills
-  into a pitch-overflow accumulator and is re-clamped against a ceiling of **27.0**
-  (paired with a secondary **26.0** limit). (solid for values; semantics plausible)
+  integrates into pitch, clamped to **[−4.0, +4.0]**; overflow beyond the clamp
+  spills into a pitch-overflow accumulator and is re-clamped against a ceiling of
+  **27.0** (paired with a secondary **26.0** limit). (CODE-CONFIRMED for values;
+  INFERRED for overflow semantics)
 - **Other-button / wheel:** zoom delta is scaled by **0.01** and the drag accumulator
-  is reset. (solid)
+  is reset.
+
+**Left-click is click-to-move (Part B), not camera look. Right-button drag is the
+only mouse rotate gesture.** (CODE-CONFIRMED)
 
 ## A.4 Shared per-mode update math
 
@@ -140,66 +182,115 @@ Each enabled manipulator runs this skeleton per frame (Third/First/Static/Gamble
 1. Resolve the follow target (the local player), lazily cached once per mode.
 2. Read the elapsed time since the previous frame in milliseconds and convert to
    seconds by multiplying by **1e-3**; a secondary smoothing path for the distance
-   integrator uses **1e-4**. (solid)
-3. Multiply by the per-node **speed/time-scale factor** (default **1.0**). (solid)
+   integrator uses **1e-4**. (CODE-CONFIRMED)
+3. Multiply by the per-node **speed/time-scale factor** (default **1.0**). (CODE-CONFIRMED)
 4. Integrate polled / mouse input into the yaw-rate, pitch, and zoom state.
 5. Apply **gain**, **friction**, **dead-zone**, and **clamps** (table below).
 6. Compose the orientation from a yaw quaternion (about the up axis) and a
    pitch/elevation component.
-7. Place the eye relative to the focus point.
+7. Place the eye relative to the focus point using the fixed-radius orbit model.
 8. (Third only) run terrain collision (§A.6), then push the composed transform to
    the camera object and trigger a cull/refresh.
 
-### Shared smoothing / clamp constants
+### Fixed-radius orbit model — important correction
+
+**The camera is a FIXED-RADIUS orbit, not a spring-arm.** Eye position = focus point
+plus the eye-offset vector rotated by the current orientation. The eye-offset vector
+is **never scaled by any distance scalar**; its magnitude is the constant follow
+radius. There is **no minimum or maximum distance clamp and no zoom-changes-radius
+behaviour.** "Zoom" keys feed the elevation/orbit-step integrator, changing the
+vertical angle of the orbit, not the distance to the player. (CODE-CONFIRMED)
+
+### Shared smoothing / clamp constants (CODE-CONFIRMED as code immediates; INFERRED as runtime feel)
 
 | Role | Value | Notes |
 |---|---:|---|
 | Time delta scale (ms → s) | **1e-3** | applied to per-frame elapsed ms |
 | Distance-integrator smoothing | **1e-4** | secondary, slower time scale |
-| No-input rate decay (friction) | **0.6** | multiplies a rate each frame when no input |
+| No-input rate decay (friction) | **0.6** | multiplies a rate each frame when no input (Static uses **0.8**) |
 | Keyboard input → rate gain | **0.3** | per-frame step added on key |
-| Yaw-rate clamp | **[-0.1, +0.1]** | bounds the per-frame yaw angular velocity |
-| Zoom-delta clamp | **[-1.0, +1.0]** | bounds per-frame distance change |
-| Pitch clamp | **[-4.0, +4.0]** | bounds the pitch state |
-| Absolute-yaw clamp | **±π/2 (±1.5708)** | bounds accumulated yaw about the player |
-| Yaw slerp / damping factor | **0.9** | eases accumulated yaw toward its target |
+| Zoom-rate / orbit-step clamp | **[−0.1, +0.1]** | bounds the per-frame orbit-step angular velocity |
+| Pitch-rate clamp | **[−4.0, +4.0]** | bounds the pitch state |
+| **Elevation angle clamp (final)** | **[−90.0, −12.0]** | the real pitch limit in degrees; hard floor and ceiling |
+| **Absolute-yaw clamp** | **[−π/2, +π/2] = [−1.5708, +1.5708]** | base bound; Third upper eased to **+1.4137** |
+| Third yaw upper ease factor | **0.9** | Third upper-yaw = π/2 × 0.9 ≈ +1.4137 |
+| Gamble yaw clamp | **symmetric ±π/2** | no 0.9 ease |
 | Rate dead-zone | **1e-3** | rates with magnitude below this snap to 0 |
-| Pitch/elevation limits (secondary) | **[-90.0, -12.0]** | a separate elevation-clamp pair |
 | Mouse-drag pitch gain | **5e-4** | cursor-Y delta → pitch rate |
 | Mouse-axis sensitivity | **1e-6** | raw mouse delta → pitch |
-| Pitch-overflow ceiling | **27.0** (with **26.0** re-clamp) | spill clamp for over-driven pitch |
-| Button/wheel zoom scale | **0.01** | scales zoom on the other-button/wheel path |
-| Terrain-hit yaw kill | **-0.01** | forced yaw-rate value on a hard terrain hit |
-| No-collision pitch correction step | **50.0** | pitch nudge when occlusion probe misses |
+| Pitch-overflow ceiling | **27.0** (with **26.0** re-clamp) | spill clamp for over-driven pitch; never affects the eye |
+| Wheel / other-button zoom scale | **0.01** | scales zoom on the other-button/wheel path |
+| Terrain-collision camera lift | **3.8** | eye Y ≥ terrain + 3.8 |
+| Collision Y-bias step | **+2.0** | added to the clamped terrain Y |
+| Terrain hard-hit yaw kill | **−0.01** | forced yaw-rate value on a hard terrain hit |
+| Occlusion pitch nudge | **50.0 · dt** (+ 0.01 correction) | pitch step when occlusion probe blocks the line |
 
-All values **(solid as code immediates)**; runtime feel **(plausible)**. Expose as a config block.
+All values **(CODE-CONFIRMED as code immediates)**; runtime feel **(INFERRED)**. Expose as a config block.
 
 ## A.5 Per-mode behaviour
 
-- **Third (default).** Integrate keyboard yaw/pitch/zoom and mouse-look into the rate
-  fields with the gain/friction/dead-zone above; clamp pitch to ±4, yaw-rate to ±0.1,
-  zoom to ±1, and absolute yaw to ±π/2 via the 0.9 ease. Focus = the player's head
-  position when available, else the player's ground position with vertical forced to
-  0. Eye = focus + (a direction/offset basis rotated by the orientation) at the
-  current follow distance. Then terrain collision (§A.6) adjusts the eye height.
-  Defaults: **follow distance ≈ 10.0**, **pitch ≈ -π/6 (-30°)**, an eye-offset seed of
-  about **(-750, 0, +500)**, focus vertical seed **≈ -40**. (solid for behaviour;
-  exact seeds plausible)
-- **First (first-person).** Same input vocabulary and constant pool as Third. Eye sits
-  at the player's head with **no trailing follow distance** and **no terrain height
-  clamp** (the eye is already inside the player volume). Zoom is largely inert. (solid)
-- **Static (fixed-angle follow).** Pitch and yaw are **fixed** — the camera never
-  orbits the player; only the position is tracked, and (per its branch) a zoom axis
-  remains responsive. Pitch is hard-clamped to ±π/2. **No terrain collision.** Acts as
-  a fixed-orientation tracking cam. (solid)
-- **Gamble (orbit cam).** Builds a yaw (up-axis) quaternion each frame and orbits the
-  player focus; absolute yaw clamped to ±π/2. Driven by the gamble/betting minigame UI
-  rather than by movement keys; the exact UI message that rotates it is **(UNVERIFIED)**. (plausible)
-- **Event (scripted / cutscene).** Runs *during* the cinematic lock. Positioning is
-  data-driven from a per-mode scripted-parameter block; the player has no manual
-  control. The scripted keyframe/path **format is (UNVERIFIED)** and out of scope here. (plausible)
-- **Select (out-of-world preview).** Frames the character-select / create-preview
-  actor in the select window. Not part of the in-world mode set. (solid)
+### A.5.1 Shared base seeds (all five in-world manipulators inherit these, then override)
+
+| Field | Base seed | Notes |
+|---|---:|---|
+| Speed / time-scale factor | **1.0** | |
+| Accumulated yaw | **−π/6 = −0.5236 rad (−30°)** | base for Third / First / Static / Event |
+| Eye-offset vector | **(−750.0, 0.0, +500.0)** | magnitude **≈ 901.39 units** = fixed orbit radius for player modes |
+| Focus / look-at Z | **−40.0** | base / Third |
+| Pitch-overflow spill bucket | **10.0** | mouse-pitch overflow accumulator clamped [0, 27]; **not a follow distance** |
+
+### A.5.2 Per-mode table (CODE-CONFIRMED)
+
+| Mode | Default pitch | Focus Z | Yaw-orbit seed | Follow radius | Terrain collision |
+|---|---|---:|---|---:|---|
+| **Third** (DEFAULT) | −π/6 (−30°) | −40 | 0 | ≈ 901.39 | yes (height clamp + occlusion) |
+| **First** (first-person) | −π/6 (−30°) | −55 | **π** (180° flip) | ≈ 901.39 | no |
+| **Static** (fixed-angle follow) | −π/6 (−30°) | −55 | 0 | ≈ 901.39 | no |
+| **Gamble** (orbit, betting minigame) | −π/3 (−60°) | −160 | 0 | ≈ **60 684** | partial (world-AABB probe) |
+| **Event** (scripted / cutscene) | −π/6 (−30°) | −55 | **π** | built-in curve | data-driven |
+
+Per-mode detail notes:
+
+- **Third.** Full input pipeline (§A.3); yaw clamp **[−π/2, +1.4137]** (asymmetric, 0.9-eased upper);
+  elevation **[−90°, −12°]**; friction 0.6, gain 0.3. The only mode that runs both terrain collision
+  behaviours. Focus = the player's head position when available, else the player's ground position
+  with vertical forced to 0.
+
+- **First.** Shares Third's input pool and constant pool. Eye sits at the player's head so the
+  trailing follow distance collapses. No terrain collision. Yaw-orbit seeded to π (initial 180°
+  facing flip). (CODE-CONFIRMED; visual effect of π-flip INFERRED)
+
+- **Static.** Polls only the elevation keys. Gain **50.0**, friction **0.8**. Yaw is fixed — the
+  camera tracks player position without orbiting. No terrain collision.
+
+- **Gamble.** Far-orbit UI camera for the betting minigame. Orbit radius ≈ 60 684 units (Gamble
+  eye-offset ≈ (24 097, 0, 55 694)), default pitch −60°. Yaw clamp **symmetric ±π/2** (no ease).
+  Has a world-AABB collision/height response; orbit input is UI-driven, not movement-key-driven.
+  (CODE-CONFIRMED for values; UI driver UNVERIFIED)
+
+- **Event (cutscene).** Runs *during* the cinematic lock (§A.2.3). Two sub-modes:
+  - **Orbit sub-mode (cinematic integer = 2):** eye locks to the player's last network position
+    and orbits around the player for a fixed duration of **12 000 ms**. (CODE-CONFIRMED)
+  - **Region-curve sub-mode (other values):** eye position is read from a **built-in 17-entry ×
+    3-float orbit-curve table compiled directly into the client binary**, indexed as
+    `table[mapRegionIndex % 17]`. The map region index (0..31) is set from the server's world-state
+    packet and reset to 0 on map unload. Cinematic duration is taken from a **motion-clip's length**
+    (a CoreMotManager record's float field × 1000 − 100 ms), so the cut-scene is timed to an
+    animation clip, not to a script file. (CODE-CONFIRMED)
+  - **This camera is NOT data-file-driven, NOT Lua-scripted, and NOT driven by `.scr` files.**
+    The `data/script/*.scr` files are CSV data tables (quests, items, NPC, map settings, etc.) and
+    are not camera-path sources. Lua in this client is config/UI/localisation only — there is no
+    camera or cinematic Lua API. A prior IDB auto-comment suggesting `.scr` file playback is
+    inaccurate. (CODE-CONFIRMED)
+  - The exact 17 curve triples can be recovered from the binary table if cut-scene support is
+    ever needed; they are **not required for normal town/field play**, which uses only Third-person.
+
+- **Select (char-select preview).** Out-of-world. Its constructor clears yaw/pitch/eye-offset and
+  builds a **multi-waypoint camera path** from a literal world-position table baked into the
+  constructor. Approximate waypoints: **(−1532, 137, −3254)**, **(−1705, −3508, 87)**,
+  **(−1577, −3590, 104)**, with span constants **2048 / 6144 / −1536**. These are the char-select
+  stage's framing positions (the "fly-around the character" select-screen feel), not gameplay
+  tuning. Not part of the in-world mode set. (CODE-CONFIRMED for values; visual framing INFERRED)
 
 ## A.6 Terrain collision for the Third-person camera
 
@@ -207,43 +298,53 @@ Third-person performs **two** collision behaviours; the other modes do neither:
 
 1. **Terrain-height clamp.** Map the candidate eye's world (X, Z) into terrain-grid
    coordinates (grid origin index **10000**, cell size **1024** world units, i.e. a
-   world→grid scale of **-1/1024 = -0.0009765625**; secondary cell scale/bias
+   world→grid scale of **−1/1024 = −0.0009765625**; secondary cell scale/bias
    **1024.0 / 1.1**). Sample the **interpolated (bilinear) terrain height** at the eye
-   (X, Z) from the cell's heightmap when the cell has geometry. Clamp the eye's
-   vertical so it never sinks below **terrain + 3.8**; on a hard hit, force the
-   yaw-rate to **-0.01** to stop the camera fighting the ground. (solid)
-2. **Occlusion pull-in.** Probe the line from the focus to the eye against world
-   solids; if blocked, pull the eye in and/or nudge pitch (no-collision correction
-   step **50.0**) to keep the target visible. (plausible)
+   (X, Z) from the cell's heightmap when the cell has geometry. The no-terrain sentinel
+   is **−3.4028e38** (no hit). Clamp the eye's vertical so it never sinks below
+   **terrain + 3.8** (with a +2.0 bias step added to the clamped value). On a hard
+   hit, force the yaw-rate to **−0.01** to stop the camera fighting the ground.
+   **Radius is fixed — there is no horizontal pull-in on collision.** (CODE-CONFIRMED)
+2. **Occlusion nudge.** If the focus→eye line is occluded, nudge pitch by **50.0 · dt**
+   (+ 0.01 correction) to keep the target visible. No radial change. (CODE-CONFIRMED)
 
 > The terrain grid origin (**10000**) and cell size (**1024**) here are the **same
 > constants** the movement collision system uses (§B.4) and match the terrain/cell
-> tiling documented by the asset analysts — a useful cross-check, not an independent
-> derivation. (solid)
+> tiling documented by the asset analysts — a useful cross-check. (CODE-CONFIRMED)
 
-## A.7 Projection / field-of-view (the camera object)
+## A.7 Projection / field-of-view (CODE-CONFIRMED — reconciled)
 
-The perspective camera holds field-of-view (vertical), aspect, near, far, and a
-computed view volume (top/bottom/left/right) plus the embedded frustum.
+**The authoritative in-world gameplay FOV is 65° vertical, near 5.0, far 15000.0.**
+These values are constructed in the in-world scene-build path (`BuildSceneGraph`) at
+the same point the five manipulators are wired to the camera. The FOV is stored
+internally in half-angle form (`π × 65 / 180 / 2 / aspect` at build time). These
+are the values to implement for the gameplay camera. (CODE-CONFIRMED)
 
-- **View-volume derivation** (centered case): `top = near · tan(fovYaw/2)`,
-  `bottom = -top`, `right = top · aspect`, `left = -right`, then build the 6-plane
-  frustum. An off-center mode re-derives field-of-view from explicit L/R/B/T. (solid)
-- The client-side projection setup initializes with **vertical FOV = 60°** and a
-  near-distance constant of **10000.0**; a **π/8 (≈ 0.3927 rad, ≈ 22.5°)** half-angle
-  constant also appears in the same setup (consistent with a 45° vertical FOV).
-  **Which FOV reaches the live projection is (UNVERIFIED).** (the input/UI spec
-  separately records a main-window perspective camera at "FOV 65°, near 5, far 15000";
-  these three FOV figures — 60 / 45 / 65 — are **not yet reconciled** and must be
-  treated as UNVERIFIED until a single authoritative runtime value is confirmed.)
+Two additional projection values also appear in the binary but belong to a **separate
+generic projection initializer** that is not the camera the in-world manipulators
+bind to: a seed of **60°** vertical FOV with a near-constant of **10000.0**, and a
+**π/8 (≈ 22.5°) half-angle constant** (consistent with a 45° vertical FOV). These
+three figures — 60° / 45° / 65° — are not competing in-world FOVs; the 60° and 45°
+belong to the generic path; **65° is the in-world gameplay camera.**
+
+> **Prior open item D.2 in this spec is closed.** Implement the gameplay camera
+> at **65° vertical FOV, near 5, far 15000**. Live-feel still capture-unverified;
+> expose as config but default to 65°.
+
+View-volume derivation (centered case): `top = near · tan(fovY/2)`, `bottom = −top`,
+`right = top · aspect`, `left = −right`, then build the 6-plane frustum.
+An off-center mode re-derives field-of-view from explicit L/R/B/T. (CODE-CONFIRMED)
 
 ## A.8 Camera persistence (local config, not networked)
 
-The chosen view mode is written to the **local options/config file**, never to the
-server. Two config tokens, **`CAMERA_XZ`** and **`CAMERA_XYZ`**, distinguish a
-2-axis vs 3-axis camera-follow option in the saved options (e.g. lock camera vertical
-to the player vs free 3-axis). Their exact runtime consumer is **(UNVERIFIED)**.
-Any Korean labels in this option table are CP949-encoded. (plausible)
+The chosen view mode is written to the **local options/config file** under INI section
+`[DO_OPTION]`, key `OPTION_VIEW_CHAR`, **clamped to the integer range 1..3** (where
+1 = Third, 2 = First, 3 = Static). Gamble and Event are never persisted. On load the
+floor value 1 is the default. (CODE-CONFIRMED)
+
+Two additional config tokens, **`CAMERA_XZ`** and **`CAMERA_XYZ`**, distinguish a
+2-axis vs 3-axis camera-follow option in the saved options. Their exact runtime
+consumer is **(UNVERIFIED)**. Any Korean labels in this option table are CP949-encoded. (INFERRED)
 
 ---
 
@@ -262,7 +363,7 @@ snaps to the destination on arrival. Independently, a worker thread emits a peri
 **move-request heartbeat** so the server can reconcile position; the server echoes
 movement back. **World vertical (Y) is never on the wire and is forced to 0 for
 simulation** — the terrain heightmap is a *visual / placement* surface, not
-authoritative for the 2D collision. (solid)
+authoritative for the 2D collision. (CODE-CONFIRMED)
 
 ## B.1 Networking (cite the catalog; layout owned elsewhere)
 
@@ -292,8 +393,7 @@ field split). Behavioural facts for the engineer:
 - The **mode/run region** packs: a mode value (the click-to-move path passes **1**), a
   secondary preset value of **3** (role **UNVERIFIED**), and a **run flag** (the player
   is running when its run-state byte equals 1). The **exact byte split inside the flag
-  region is (UNVERIFIED)** and needs a click-to-move capture — this matches the open
-  question already recorded on the packet spec. (solid behaviour; split UNVERIFIED)
+  region is (UNVERIFIED)** and needs a click-to-move capture. (CODE-CONFIRMED behaviour; split UNVERIFIED)
 
 ### B.1.2 Heartbeat cadence (server reconciliation)
 
@@ -306,15 +406,16 @@ fires senders, logging when one is "overdue":
 | Proxy channel | **400 ms** | separate channel, same loop |
 
 The move heartbeat reads the player's last-network position, then **alternates the
-reported X by +20.0 / -20.0** on a parity counter — a deliberate ±20-unit dither so
+reported X by +20.0 / −20.0** on a parity counter — a deliberate ±20-unit dither so
 each heartbeat reports a slightly different point (keeps the server's position state
 fresh / defeats static-position dedupe). It calls the 2/13 builder with **mode = 1**
-and the dithered (X, Z). (solid)
+and the dithered (X, Z). (CODE-CONFIRMED)
 
 > **(UNVERIFIED)** whether 200 ms is a hard rate cap or only the overdue-warning
 > threshold (the worker fires at most once per distinct millisecond; no separate
 > rate-limit literal was found). Implement the heartbeat as a tunable period and do
-> **not** rely on the dither (a clean server should not need it).
+> **not** reproduce the ±20 dither or rely on the 200/400 ms warning thresholds as
+> protocol guarantees.
 
 ### B.1.3 Client anti-cheat cadence telemetry
 
@@ -322,7 +423,7 @@ The client carries **client-side** speedhack telemetry that compares server-time
 animation-cycle deltas against a tolerance of **1025 ms** before flagging an anomaly
 (emits "speedhack" diagnostic logs). This is anti-cheat, but it **bounds the
 legitimate move/cycle cadence**: a faithful client must keep its move cadence within
-~1 s of the server's clock. (solid as a bound; not required for re-implementation)
+~1 s of the server's clock. (CODE-CONFIRMED as a bound; not required for re-implementation)
 
 > Note: there is an unrelated external DRM/anti-hack command string that *looks*
 > movement-related but is **not** a movement-speed setter — ignore it for gameplay.
@@ -332,23 +433,23 @@ legitimate move/cycle cadence**: a faithful client must keep its move cadence wi
 1. **Click handler.** Distinguishes a context/attack click from the primary
    walk-to-ground click. Guards: modal-panel-open checks, a held left-mouse-input
    gate (input id **1013**, assumed left-mouse-hold, **UNVERIFIED**), and a **100 ms
-   re-issue throttle** so rapid clicks don't spam move-issues. Then calls move-init. (solid)
+   re-issue throttle** so rapid clicks don't spam move-issues. Then calls move-init. (CODE-CONFIRMED)
 2. **Screen-pixel → world ground point (unproject).** Cast the active camera to the
    perspective camera, convert the pixel to normalized device coordinates using the
    viewport size, unproject through the camera basis, and intersect the resulting ray
    with the ground plane to get the world (X, Z). A **pick ray length / max pick
-   distance of 1000.0** is seeded before the pick. (solid)
+   distance of 1000.0** is seeded before the pick. (CODE-CONFIRMED)
 3. **Move-init / path setup.** Bail if the player is not ready or is in a lock-state.
    Compute the direction from the player's last-network position to the target; if the
    **squared distance exceeds 144.0** (i.e. **> 12 units**), **clamp the step** by
    scaling the unit direction to length **12.0** (max advance per move-issue;
    144 = 12²). Seed a mover speed of **1000.0**, set the from/to path record, and
-   commit. (solid)
+   commit. (CODE-CONFIRMED)
 4. **Commit.** Enforce a per-mover **cooldown gate** (a millisecond-clock comparison)
    and a busy/lock check. Commit only if the **squared distance from current to
    destination exceeds 4.0** (i.e. **> 2 units**) — a dead-zone that ignores tiny
    moves. On commit, step the mover and drop a ground click-marker via the highlight
-   texture manager. (solid)
+   texture manager. (CODE-CONFIRMED)
 
 ## B.3 Per-frame movement integration (walk / run)
 
@@ -358,22 +459,22 @@ Invoked from the per-frame terrain update and from the move commit:
 2. Compute the forward step distance = **`speed · 4.0`**, where the per-frame speed
    scalar is the mover's current walk/run speed (set from config — §B.5) and **4.0**
    is a fixed step multiplier. Rotate the facing orientation to produce the candidate
-   next world position (current XZ + rotated step). (solid)
+   next world position (current XZ + rotated step). (CODE-CONFIRMED)
 3. If the candidate overshoots the destination **and** the collision subsystem
    reported a block, **snap to the corrected/clamped point** from the collision result
-   (the wall-slide / stop response). Otherwise snap to the destination. (solid)
+   (the wall-slide / stop response). Otherwise snap to the destination. (CODE-CONFIRMED)
 4. Write the resulting position into the actor (and into any coupled/mount-partner
    actors) and re-arm the walk motion; if the motion cycle ended, reset to the default
-   motion. Some branches also emit a 2/13 frame as part of the moving-state stream. (solid)
+   motion. Some branches also emit a 2/13 frame as part of the moving-state stream. (CODE-CONFIRMED)
 
 ### Walk vs run
 
 Walk/run manifests three ways, kept consistent:
 
-- A **lifecycle/motion-state** value: **2 = walk, 3 = run** (8 = dead/scripted). (solid)
-- The **run flag** on the wire (the actor's run-state byte == 1 means running). (solid)
+- A **lifecycle/motion-state** value: **2 = walk, 3 = run** (8 = dead/scripted). (CODE-CONFIRMED)
+- The **run flag** on the wire (the actor's run-state byte == 1 means running). (CODE-CONFIRMED)
 - A **different per-frame speed scalar** feeding the `· 4.0` step. The concrete walk
-  vs run *numbers* are **table-driven** (§B.5), not code literals. (solid)
+  vs run *numbers* are **table-driven** (§B.5), not code literals. (CODE-CONFIRMED)
 
 ## B.4 Collision against static solids (2D XZ swept-segment query)
 
@@ -381,27 +482,27 @@ Collision is **strictly 2D in the XZ plane (no vertical component).** It is a **
 test** of the player's movement line segment (from-XZ → to-XZ) against static solid
 line segments, organized in a per-cell spatial quadtree. The static solid *format*
 itself is owned by the asset specs; this section describes only the **query/movement
-side** the mover calls. (solid)
+side** the mover calls. (CODE-CONFIRMED)
 
 Behavioural pipeline (named by role, addresses stripped):
 
 1. **Resolve collision across cells.** Build the from/to XZ segment; query the current
    cell; if no hit, compute the neighbour cell the move crosses into and recurse across
-   the boundary. The design **asserts a single move crosses at most one cell boundary.** (solid)
+   the boundary. The design **asserts a single move crosses at most one cell boundary.** (CODE-CONFIRMED)
 2. **Cell-walkability / bounds check.** Validate the destination cell is loaded and the
-   point is in-bounds; includes a point-in-solid test. Returns walkable yes/no. (solid)
+   point is in-bounds; includes a point-in-solid test. Returns walkable yes/no. (CODE-CONFIRMED)
 3. **Per-cell nearest-hit query.** If the cell has solids, run the sweep seeded with a
-   max-float nearest-distance. (solid)
+   max-float nearest-distance. (CODE-CONFIRMED)
 4. **Grid query.** Map the move-segment's bounding box into a **16 × 16 grid of
    quadtrees** (indices clamped 0..15), run the recursive sweep per overlapped bin, and
-   dedup by a per-frame visit tag. (solid)
+   dedup by a per-frame visit tag. (CODE-CONFIRMED)
 5. **Quadtree recursive descent.** Test the query box against each of 4 child quadrants
-   (split on X then Z), recurse, and at a leaf run the segment sweep. (solid)
+   (split on X then Z), recurse, and at a leaf run the segment sweep. (CODE-CONFIRMED)
 6. **Leaf segment sweep.** Iterate the leaf's segments, keep the **nearest** intersection
-   (minimum squared distance) — hit point + hit solid. (solid)
+   (minimum squared distance) — hit point + hit solid. (CODE-CONFIRMED)
 7. **Single-segment swept test.** Box-overlap AND line-intersection AND two
    point-in-box tests. The line math uses a `Z = slope·X + intercept` form with a
-   vertical-segment special case (type flag). (solid; vertical-segment case **UNVERIFIED** by sample)
+   vertical-segment special case (type flag). (CODE-CONFIRMED; vertical-segment case UNVERIFIED by sample)
 
 The resolver returns the **nearest** hit point; the mover reads it back and clamps the
 player to it (the wall-slide / stop response of §B.3 step 3).
@@ -410,23 +511,23 @@ player to it (the wall-slide / stop response of §B.3 step 3).
 
 - **Cell size = 1024.0** world units (reciprocal **1/1024 = 0.0009765625**).
 - **Cell index base = 10000**; a cell (X or Z) index is computed roughly as
-  `10000 − (int)(coord · -1/1024) − cellOrigin`. This matches the asset filename
+  `10000 − (int)(coord · −1/1024) − cellOrigin`. This matches the asset filename
   pattern for cells clustered around index 10000.
 - **16 × 16** quadtree bins per cell.
 
-(All **(solid)**; these are the same origin/scale the camera terrain clamp uses.)
+(All **(CODE-CONFIRMED)**; same origin/scale the camera terrain clamp uses.)
 
 ### Out-of-bounds snap-back
 
 When a target cell is invalid / out of loaded space, a snap helper rewrites **both**
 the player's current position and its destination to a corrected point and re-steps
-the mover. This is the local-side correction when a move would leave walkable space. (solid)
+the mover. This is the local-side correction when a move would leave walkable space. (CODE-CONFIRMED)
 
 ### Walkability gate before committing a click
 
 Before committing a click move, the from(current)→to(target) segment is tested: either
 snap back (invalid cell) or return "move allowed" = *(not blocked-by-solid) OR
-(target cell valid)*. (solid)
+(target cell valid)*. (CODE-CONFIRMED)
 
 ## B.5 Speed constants (table-driven via map config)
 
@@ -435,7 +536,7 @@ config table keyed **`MAP_SPEED`** (load failure logs "MAP_SPEED data load error
 parsed by the map/scene config keyword parser, and end up in the actor/mover speed
 field. So to faithfully reproduce feel you need the per-map data values, not the code.
 **Actual numeric walk vs run speeds are (UNVERIFIED) — they live in map data, not the
-binary.** Any Korean text in this config is CP949. (solid that it is data-driven)
+binary.** Any Korean text in this config is CP949. (CODE-CONFIRMED that it is data-driven)
 
 ### Fixed numeric movement constants (code immediates)
 
@@ -454,17 +555,17 @@ binary.** Any Korean text in this config is CP949. (solid that it is data-driven
 | Proxy-send overdue warning | **400 ms** | send worker | "send proxy wait > limit" |
 | Speedhack tolerance | **1025 ms** | anti-cheat telemetry | server-time / cycle-delay anomaly bound |
 
-All values **(solid as code immediates)**, governing-at-runtime **(plausible)**.
+All values **(CODE-CONFIRMED as code immediates)**, governing-at-runtime **(INFERRED)**.
 
 ## B.6 Vertical / height (visual only)
 
 World vertical (Y) is **forced to 0 for simulation** and **never sent by the server.**
 The terrain heightmap (a 65 × 65 = 4225-vertex f32 grid spanning one 1024-unit cell →
 **16-unit vertex spacing**) is used for **rendering / visual vertical placement** (and
-possibly the camera height clamp of §A.6), **not** for the XZ collision, which is the
+for the camera height clamp of §A.6), **not** for the XZ collision, which is the
 2D solid quadtree only. The runtime function that bilinearly samples Y for an arbitrary
 XZ was **not pinned** — **(UNVERIFIED)**; flag for a focused pass if visual height is
-needed. (solid for the model; sampler UNVERIFIED)
+needed. (CODE-CONFIRMED for the model; sampler UNVERIFIED)
 
 ---
 
@@ -472,17 +573,22 @@ needed. (solid for the model; sampler UNVERIFIED)
 
 These are guidance, not faithful-copy mandates; deviate deliberately and document it.
 
-- **Camera lives in Godot (presentation), not in the core.** The camera is purely
-  client-side and never authoritative, so it belongs in the Godot layer as a passive
-  rig. Model the five view modes as a `CameraViewMode` enum + a per-mode rig; preserve
-  the **enable-one-disable-others** switch model conceptually but implement it as a
-  single active mode. Drop the out-of-world Select mode into the character-select
-  scene. The constant tables in §A.3–§A.6 are a tuning starting point — expose them as
-  exported/config values, not hard-coded magic numbers.
+- **Camera lives in Godot (presentation), not in the core.** Model the five view modes
+  as a `CameraViewMode` enum + a per-mode rig. Default = Third-person. Bind a "reset
+  view" (ESC) → Third. **No combat camera switch.** Gamble = minigame-only; Select =
+  char-select scene only; Event = optional cinematic, can be deferred.
+  - Use **65° vertical FOV, near 5, far 15000** (the CODE-CONFIRMED in-world values).
+  - Fixed orbit radius ≈ 901 units. Default pitch −30°. Elevation clamp [−90°, −12°].
+  - Yaw clamp [−π/2, +1.4137] for Third; symmetric ±π/2 for Gamble.
+  - Right-mouse drag = orbit look; mouse wheel / other-button = elevation (not radius).
+  - Ground collision = vertical lift to terrainHeight + 3.8 (slide, never snap); reuse
+    the existing `.ted` bilinear height sampler the Godot terrain already has.
+  - Keyboard: gain 0.3, friction 0.6, dead-zone 1e-3, rate clamps ±0.1.
+  - Expose all tuning constants as exported/config values.
 - **Movement simulation lives in `Client.Domain` / `Client.Application`** (engine-free,
   deterministic, server-reusable). Model: click → unproject-to-XZ (Godot supplies the
   ray) → walkability (2D solid quadtree) → integrate (`speed · 4` per fixed tick,
-  clamp 12u per issue, 2u dead-zone) → snap on arrival → emit a 2/13 move-request.
+  clamp 12 u per issue, 2 u dead-zone) → snap on arrival → emit a 2/13 move-request.
   Keep **Y = 0** in the simulation; treat terrain height as a Godot-side visual lift.
 - **Heartbeat:** implement as a tunable periodic 2/13 emitter; **do not** reproduce the
   ±20 dither or rely on the 200/400 ms warning thresholds as protocol guarantees.
@@ -492,6 +598,11 @@ These are guidance, not faithful-copy mandates; deviate deliberately and documen
   .NET core should integrate movement on the **fixed logic tick** (see
   `specs/game_loop.md` §6) and let Godot interpolate — the `speed · 4` step becomes
   `speed · stepPerTick`, retuned for the fixed rate. This is an intentional divergence.
+- **Scene lifecycle:** Login → Char-Select (Select preview cam) → World (Third follow
+  cam). Spawn the player at the server-supplied (x, 0, z); the camera just follows.
+  Build the in-world camera rig once on entering the world scene; the Select cam
+  belongs to the char-select scene. See `specs/client_runtime.md` §7 for the full
+  9-state lifecycle and the enter-world spawn handshake.
 
 ---
 
@@ -502,14 +613,16 @@ Do **not** hard-code anything in this list without a capture or an analyst cross
 **Camera**
 
 1. **Camera action polarity** — which member of the pitch pair (1002/1003) and zoom
-   pair (1000/1001) is up/in vs down/out.
-2. **Authoritative runtime FOV** — three candidate vertical FOVs are unreconciled:
-   60° and ~45° (π/8 half-angle) in the projection-setup path, and 65° recorded in the
-   input/UI main-window note. Pick none until confirmed.
+   pair (1000/1001) is up/in vs down/out. Implement as configurable ± axes. (INFERRED/configurable)
+2. ~~**Authoritative runtime FOV**~~ — **RESOLVED.** 65° vertical, near 5, far 15000 is
+   the CODE-CONFIRMED in-world gameplay camera (§A.7). The 60° and 45° figures belong
+   to a separate generic projection initializer, not the gameplay camera.
 3. **`CAMERA_XZ` / `CAMERA_XYZ` semantics** — the exact 2-axis vs 3-axis follow toggle
    the saved option controls.
-4. **Gamble / Select UI drivers** — the UI message(s) that rotate/frame these cameras.
-5. **Event-camera scripted-path format** — keyframe/parameter block not decoded.
+4. **Gamble UI driver** — the UI message(s) that control the Gamble orbit angle.
+5. ~~**Event-camera scripted-path format**~~ — **RESOLVED.** The Event camera is a
+   built-in 17-entry × 3-float orbit-curve table indexed by map region index (§A.5,
+   "Event" row). Not a data file. Not Lua. Not `.scr`. (CODE-CONFIRMED)
 6. A constant mode-tag (value 2) is set in every camera constructor; its meaning is
    unknown (node/camera-type tag?). Cosmetic; not load-bearing.
 
@@ -535,8 +648,14 @@ Do **not** hard-code anything in this list without a capture or an analyst cross
 
 ## Provenance
 
-Rewritten (not copied) from two dirty-room recon notes (subsystem keys
-`camera_views`, `movement_collision`). All legacy addresses, decompiler-style
+Rewritten (not copied) from dirty-room recon notes (subsystem keys `camera_views`,
+`camera_constants`, `movement_collision`). Updated in Mission E from
+`_dirty/recon/camera-scene.raw.md` (Mission 1G findings): FOV reconciliation (65°
+CODE-CONFIRMED), fixed-radius orbit model explicitly stated, per-mode parameter tables
+with confirmed numbers added, Event camera model corrected (built-in binary curve
+table, not data-file/Lua/`.scr`), mode-switch trigger call sites enumerated, default
+mode and OPTION_VIEW_CHAR persistence documented, Select camera waypoints added,
+enter-world camera placement clarified. All legacy addresses, decompiler-style
 identifiers, RTTI class names, vtable offsets, and raw struct offsets were
 **deliberately omitted**; only neutral behaviour, formulas, role-keyed constants,
 and already-cataloged opcode tuples (2/13, 5/13, 4/13 — see `opcodes.md`) were

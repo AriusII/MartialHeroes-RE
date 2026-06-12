@@ -20,8 +20,22 @@ Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 Encoding cp949 = Encoding.GetEncoding(949);
 
 // --- Defaults: the bring-your-own client location. Override with --inf / --vfs. ---
+// Probe order: MH_CLIENT_DIR env → the Godot project's embedded clientdata/ folder
+// (found by walking up from the harness binary to the repo root) → D:/MartialHeroesClient.
 string infPath = "D:/MartialHeroesClient/data.inf";
 string vfsPath = "D:/MartialHeroesClient/data/data.vfs";
+
+foreach (string root in DefaultClientRoots())
+{
+    string candidateInf = Path.Combine(root, "data.inf");
+    string candidateVfs = Path.Combine(root, "data", "data.vfs");
+    if (File.Exists(candidateInf) && File.Exists(candidateVfs))
+    {
+        infPath = candidateInf;
+        vfsPath = candidateVfs;
+        break;
+    }
+}
 
 // --- Parse arguments. Positional tokens are AND'd substring filters. ---
 var substrings = new List<string>();
@@ -85,7 +99,8 @@ if (!File.Exists(infPath) || !File.Exists(vfsPath))
     Console.Error.WriteLine(
         $"vfsls: client files not found.\n  inf: {infPath} (exists={File.Exists(infPath)})\n" +
         $"  vfs: {vfsPath} (exists={File.Exists(vfsPath)})\n" +
-        "Mount the bring-your-own client at D:/MartialHeroesClient or pass --inf/--vfs.");
+        "Drop the bring-your-own client into 05.Presentation/MartialHeroes.Client.Godot/clientdata/ " +
+        "(preferred), set MH_CLIENT_DIR, mount it at D:/MartialHeroesClient, or pass --inf/--vfs.");
     return 2;
 }
 
@@ -244,6 +259,26 @@ static string DecodePreview(ReadOnlySpan<byte> data, Encoding cp949)
     return sb.ToString();
 }
 
+static IEnumerable<string> DefaultClientRoots()
+{
+    // 1. Explicit env override.
+    string? env = Environment.GetEnvironmentVariable("MH_CLIENT_DIR");
+    if (!string.IsNullOrWhiteSpace(env)) yield return env;
+
+    // 2. The Godot project's embedded clientdata/ — walk up from the harness binary
+    //    (…/.claude/skills/vfs-inspect/scripts/vfsls/bin/…) towards the repo root and
+    //    probe the project-local folder at each ancestor.
+    for (DirectoryInfo? dir = new(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+    {
+        yield return Path.Combine(
+            dir.FullName, "05.Presentation", "MartialHeroes.Client.Godot", "clientdata");
+    }
+
+    // 3. Legacy external install locations.
+    yield return "D:/MartialHeroesClient";
+    yield return "C:/MartialHeroesClient";
+}
+
 static string NormPath(string p) => p.Replace('\\', '/').ToLowerInvariant();
 
 static string NormExt(string e)
@@ -292,8 +327,9 @@ static void PrintUsage()
           --head-bytes <n>    head preview length (default 256).
           --contains <path>   print true/false for one exact virtual path.
           --limit <n>         cap listed entries (default 200; 0 = unlimited).
-          --inf <path>        override data.inf (default D:/MartialHeroesClient/data.inf).
-          --vfs <path>        override data/data.vfs (default D:/MartialHeroesClient/data/data.vfs).
+          --inf <path>        override data.inf (default: probe MH_CLIENT_DIR, then the repo's
+                              05.Presentation/MartialHeroes.Client.Godot/clientdata/, then D:/MartialHeroesClient).
+          --vfs <path>        override data/data.vfs (same probe order).
           -h, --help          this help.
         """);
 }

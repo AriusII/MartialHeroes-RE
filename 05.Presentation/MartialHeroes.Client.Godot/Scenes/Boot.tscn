@@ -1,0 +1,11 @@
+[gd_scene format=3 uid="uid://ctoc6v8cetodk"]
+
+; Boot flow root: BootFlow — reads boot_flow= from client_dir.cfg and either shows the
+; login → character-select menu screens or boots the world directly.
+; NOTE: in Godot 4 the `script` is a PROPERTY assignment on its own line BELOW the [node]
+; header (`script = ExtResource(...)`), NOT an inline header attribute — putting it in the
+; header is silently ignored (gray screen). See CLAUDE.md "Known Godot Pitfalls".
+[ext_resource type="Script" path="res://Screens/BootFlow.cs" id="1"]
+
+[node name="Boot" type="Node"]
+script = ExtResource("1")
