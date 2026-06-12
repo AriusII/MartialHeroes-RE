@@ -1,7 +1,7 @@
 // World/RealWorldRenderer.cs
 //
 // PASSIVE rendering node that replaces SyntheticWorldFeeder when real client assets are available.
-// Activated by env-var: MH_REAL_ASSETS=1 (checked by GameLoop._Ready via RealWorldRenderer.IsEnabled).
+// Activated when ClientPathResolver.RealAssetsEnabled returns true (client dir résolu + real_assets != false).
 //
 // What this node does (all passive, no game logic):
 //   1. Uses SectorStreamingService to load a 3×3 ring of real terrain sectors.
@@ -79,12 +79,22 @@ public sealed partial class RealWorldRenderer : Node3D
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Returns true when the real-asset rendering path is requested.
-    /// Checks the <c>MH_REAL_ASSETS</c> environment variable (value "1" = enabled).
-    /// Use System.Environment explicitly to avoid ambiguity with Godot.Environment.
+    /// Returns true when the real-asset rendering path should be activated.
+    ///
+    /// Delegates to <see cref="ClientPathResolver"/>:
+    ///   - Resolves the client directory (env → config → auto-detect).
+    ///   - Returns true by default when a valid directory is found.
+    ///   - Returns false when real_assets=false (config) or MH_REAL_ASSETS=0 (env) forces
+    ///     synthetic mode, or when no valid client directory is found at all.
     /// </summary>
     public static bool IsEnabled
-        => System.Environment.GetEnvironmentVariable("MH_REAL_ASSETS") == "1";
+    {
+        get
+        {
+            string? clientDir = ClientPathResolver.ResolveClientDir();
+            return ClientPathResolver.RealAssetsEnabled(clientDir);
+        }
+    }
 
     // -------------------------------------------------------------------------
     // Internal state

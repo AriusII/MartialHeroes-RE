@@ -115,13 +115,13 @@ public sealed partial class GameLoop : Node
         catch (Exception ex) { GD.PrintErr($"[GameLoop] InputRouter.Initialise failed: {ex.Message}"); }
 
         // Real-asset rendering path vs. synthetic feeder.
-        // Controlled by MH_REAL_ASSETS=1 environment variable.
+        // Activation via ClientPathResolver (config file / env override / auto-detect).
         // Each step guarded individually: a failure in real-asset init falls back to synthetic.
         // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
         bool realRendererStarted = false;
         if (RealWorldRenderer.IsEnabled)
         {
-            GD.Print("[GameLoop] MH_REAL_ASSETS=1 — attempting real-asset renderer.");
+            GD.Print("[GameLoop] Real assets enabled — attempting real-asset renderer.");
             try
             {
                 _realWorldRenderer = new RealWorldRenderer();

@@ -12,6 +12,7 @@ using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Simulation;
 using MartialHeroes.Client.Godot.Adapters;
+using MartialHeroes.Client.Godot.Dev;
 using MartialHeroes.Client.Godot.Input;
 using MartialHeroes.Client.Infrastructure.Catalog;
 using MartialHeroes.Network.Abstractions.Protocol;
@@ -37,8 +38,9 @@ namespace MartialHeroes.Client.Godot.Autoload;
 /// main thread (enforced in GameLoop via CallDeferred).
 ///
 /// VFS / assets:
-///   The composition root resolves the VFS archive path from MH_CLIENT_DIR environment variable,
-///   falling back to LegacyClient/ relative path, then to empty-catalogue offline mode.
+///   The composition root resolves the VFS archive path via <see cref="MartialHeroes.Client.Godot.Dev.ClientPathResolver"/>:
+///   env override (MH_CLIENT_DIR), then client_dir.cfg, then auto-detection of common paths,
+///   finally empty-catalogue offline mode. No environment variable is required.
 ///   On failure, all catalogues are empty and the run continues with synthetic data only.
 ///
 /// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — composition root.
@@ -187,7 +189,7 @@ public sealed partial class ClientContext : Node
         var worldRelay = new RelayInputHandler(); // placeholder; InputRouter sets the target.
         var inputBus = new InputBus(hudHandler, worldRelay);
 
-        // 10. VFS catalogue loader — resolves MH_CLIENT_DIR env-var, falls back gracefully.
+        // 10. VFS catalogue loader — resolved via ClientPathResolver (config file / env / auto-detect).
         //     Used for item/skill/mob/stat catalogues (displayed by HUD).
         //     spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules (never hardcode path).
         _catalogueLoader = TryBuildCatalogueLoader();
@@ -382,43 +384,24 @@ public sealed partial class ClientContext : Node
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Builds a <see cref="VfsCatalogueLoader"/> from the MH_CLIENT_DIR environment variable,
-    /// falling back to the LegacyClient/ relative path. Returns an empty-catalogue loader when
-    /// neither path resolves.
+    /// Builds a <see cref="VfsCatalogueLoader"/> using <see cref="ClientPathResolver.ResolveClientDir"/>.
+    /// Returns an empty-catalogue loader when no valid client directory is found.
     ///
-    /// Path resolution order (never hard-coded):
-    ///   1. MH_CLIENT_DIR env-var + /data.inf and /data/data.vfs
-    ///   2. LegacyClient/ relative path (gitignored user-supplied directory)
-    ///   3. Empty loader (offline mode)
+    /// Path resolution is delegated entirely to <see cref="ClientPathResolver"/> (env-var override,
+    /// then client_dir.cfg, then auto-detection). No direct environment-variable read here.
     ///
     /// spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules (user supplies originals).
     /// spec: Docs/RE/formats/pak.md §Two-file scheme.
     /// </summary>
     private static VfsCatalogueLoader TryBuildCatalogueLoader()
     {
-        // Check MH_CLIENT_DIR first (explicit dev override).
-        // Use System.Environment explicitly to avoid ambiguity with Godot.Environment.
-        string? clientDir = System.Environment.GetEnvironmentVariable("MH_CLIENT_DIR");
-        if (!string.IsNullOrWhiteSpace(clientDir))
+        string? clientDir = ClientPathResolver.ResolveClientDir();
+        if (clientDir is not null)
         {
             string infPath = Path.Combine(clientDir, "data.inf");
             string vfsPath = Path.Combine(clientDir, "data", "data.vfs");
-            if (File.Exists(infPath) && File.Exists(vfsPath))
-            {
-                GD.Print($"[ClientContext] CatalogueLoader: using MH_CLIENT_DIR='{clientDir}'.");
-                return new VfsCatalogueLoader(infPath, vfsPath);
-            }
-
-            GD.PrintErr($"[ClientContext] MH_CLIENT_DIR='{clientDir}' set but archive missing — trying LegacyClient/.");
-        }
-
-        // Fallback: LegacyClient/ relative path.
-        const string relInf = "LegacyClient/data.inf";
-        const string relVfs = "LegacyClient/data/data.vfs";
-        if (File.Exists(relInf) && File.Exists(relVfs))
-        {
-            GD.Print("[ClientContext] CatalogueLoader: using LegacyClient/ relative path.");
-            return new VfsCatalogueLoader(relInf, relVfs);
+            GD.Print($"[ClientContext] CatalogueLoader: using resolved client dir '{clientDir}'.");
+            return new VfsCatalogueLoader(infPath, vfsPath);
         }
 
         // Offline / no VFS available — loader returns empty arrays for all catalogues.
@@ -427,55 +410,34 @@ public sealed partial class ClientContext : Node
     }
 
     /// <summary>
-    /// Opens the VFS archive for terrain sector streaming. Same path-resolution logic as the
-    /// catalogue loader but returns a raw <see cref="MappedVfsArchive"/> for the terrain source.
-    /// Returns null gracefully when the archive is absent (offline mode).
+    /// Opens the VFS archive for terrain sector streaming using <see cref="ClientPathResolver.ResolveClientDir"/>.
+    /// Returns null gracefully when no valid client directory is found (offline mode).
     ///
     /// spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
     /// spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules.
     /// </summary>
     private static MappedVfsArchive? TryOpenVfsForTerrain()
     {
-        string? clientDir = System.Environment.GetEnvironmentVariable("MH_CLIENT_DIR");
-        if (!string.IsNullOrWhiteSpace(clientDir))
+        string? clientDir = ClientPathResolver.ResolveClientDir();
+        if (clientDir is null)
         {
-            string infPath = Path.Combine(clientDir, "data.inf");
-            string vfsPath = Path.Combine(clientDir, "data", "data.vfs");
-            if (File.Exists(infPath) && File.Exists(vfsPath))
-            {
-                try
-                {
-                    MappedVfsArchive archive = MappedVfsArchive.Open(infPath, vfsPath);
-                    GD.Print($"[ClientContext] Terrain VFS opened from MH_CLIENT_DIR ({archive.EntryCount} entries).");
-                    return archive;
-                }
-                catch (Exception ex)
-                {
-                    GD.PrintErr($"[ClientContext] Terrain VFS open failed: {ex.Message}");
-                    return null;
-                }
-            }
+            GD.Print("[ClientContext] Terrain VFS not found — running offline (no terrain assets).");
+            return null;
         }
 
-        const string relInf = "LegacyClient/data.inf";
-        const string relVfs = "LegacyClient/data/data.vfs";
-        if (File.Exists(relInf) && File.Exists(relVfs))
+        string infPath = Path.Combine(clientDir, "data.inf");
+        string vfsPath = Path.Combine(clientDir, "data", "data.vfs");
+        try
         {
-            try
-            {
-                MappedVfsArchive archive = MappedVfsArchive.Open(relInf, relVfs);
-                GD.Print($"[ClientContext] Terrain VFS opened from LegacyClient/ ({archive.EntryCount} entries).");
-                return archive;
-            }
-            catch (Exception ex)
-            {
-                GD.PrintErr($"[ClientContext] Terrain VFS (LegacyClient/) open failed: {ex.Message}");
-                return null;
-            }
+            MappedVfsArchive archive = MappedVfsArchive.Open(infPath, vfsPath);
+            GD.Print($"[ClientContext] Terrain VFS opened from '{clientDir}' ({archive.EntryCount} entries).");
+            return archive;
         }
-
-        GD.Print("[ClientContext] Terrain VFS not found — running offline (no terrain assets).");
-        return null;
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] Terrain VFS open failed from '{clientDir}': {ex.Message}");
+            return null;
+        }
     }
 }
 

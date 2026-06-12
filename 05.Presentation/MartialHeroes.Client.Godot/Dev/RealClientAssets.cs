@@ -2,20 +2,24 @@
 //
 // HOW TO ACTIVATE REAL-ASSET RENDERING:
 //
-//   Set the environment variable MH_CLIENT_DIR to the root of your Martial Heroes client install:
+//   Option A — fichier de config (recommandé, aucune variable d'environnement requise) :
+//     Edite client_dir.cfg à côté de project.godot :
+//       client_dir=D:\MartialHeroesClient
+//       real_assets=true
+//
+//   Option B — variable d'environnement (override optionnel) :
 //     Windows PowerShell:  $env:MH_CLIENT_DIR = "D:\MartialHeroesClient"
 //     Windows CMD:         set MH_CLIENT_DIR=D:\MartialHeroesClient
-//     Godot editor:        Project → Project Settings → General → Environment → add MH_CLIENT_DIR
 //
-//   Then set MH_REAL_ASSETS=1 to enable the real-asset rendering path:
-//     Windows PowerShell:  $env:MH_REAL_ASSETS = "1"
+//   Option C — auto-détection : si le client est dans D:\MartialHeroesClient ou
+//     C:\MartialHeroesClient ou LegacyClient/, il est détecté automatiquement.
 //
-//   Expected directory layout under MH_CLIENT_DIR:
-//     <client_dir>/data.inf          — VFS index file
-//     <client_dir>/data/data.vfs     — VFS data blob
+//   Layout attendu sous le répertoire client :
+//     <client_dir>/data.inf          — index VFS
+//     <client_dir>/data/data.vfs     — archive VFS
 //
-//   If the directory or archive files are absent the system falls back to the
-//   synthetic feeder (SyntheticWorldFeeder) — no crash, no exception propagated to user.
+//   Si le répertoire ou les fichiers sont absents, le système bascule sur
+//   SyntheticWorldFeeder — aucun crash, aucune exception propagée à l'utilisateur.
 //
 // NOTE: This file is dev-only. It MUST NOT be referenced from production code paths.
 //       It lives under Dev/ to make that intent clear.
@@ -35,11 +39,8 @@ namespace MartialHeroes.Client.Godot.Dev;
 /// Dev-only helper that opens a real Martial Heroes VFS archive at runtime and exposes
 /// typed asset-loading helpers consumed by the real-asset rendering scene.
 ///
-/// Path resolution order (for both <c>data.inf</c> and <c>data/data.vfs</c>):
-///   1. <c>MH_CLIENT_DIR</c> environment variable
-///   2. Hard-coded fallback: <c>D:\MartialHeroesClient</c>
-///   3. If neither exists: return <see langword="null"/> from <see cref="TryOpen"/> and
-///      let the caller fall back to the synthetic feeder.
+/// Path resolution is fully delegated to <see cref="ClientPathResolver.ResolveClientDir"/>
+/// (env override → client_dir.cfg → auto-detection). No hard-coded path here.
 ///
 /// Threading: all public methods are called from the Godot main thread (via GameLoop._Ready
 /// or the deferred real-world spawner). They are NOT designed for concurrent access.
@@ -53,13 +54,6 @@ namespace MartialHeroes.Client.Godot.Dev;
 /// </summary>
 public sealed class RealClientAssets : IDisposable
 {
-    // -------------------------------------------------------------------------
-    // Default client directory fallback (dev convenience; never a hard dependency)
-    // -------------------------------------------------------------------------
-
-    // spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules — user supplies originals.
-    private const string DefaultClientDir = @"D:\MartialHeroesClient";
-
     // -------------------------------------------------------------------------
     // Internal state
     // -------------------------------------------------------------------------
@@ -77,40 +71,38 @@ public sealed class RealClientAssets : IDisposable
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Attempts to open the VFS archive from the configured client directory.
+    /// Attempts to open the VFS archive from the resolved client directory.
     /// Returns <see langword="null"/> and logs a diagnostic when the directory or archive
     /// files are absent — no exception is propagated to the caller.
+    ///
+    /// Path resolution is delegated to <see cref="ClientPathResolver.ResolveClientDir"/>:
+    /// MH_CLIENT_DIR env override → client_dir.cfg → auto-detection → null (offline).
     ///
     /// spec: Docs/RE/formats/pak.md — two-file scheme (data.inf + data/data.vfs).
     /// </summary>
     public static RealClientAssets? TryOpen()
     {
-        // Resolve client directory: env-var wins, fallback to constant.
+        // Delegate resolution to the shared resolver — no direct env-var read here.
         // spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules.
-        // Use System.Environment explicitly to avoid ambiguity with Godot.Environment.
-        string clientDir = System.Environment.GetEnvironmentVariable("MH_CLIENT_DIR")
-                           ?? DefaultClientDir;
+        string? clientDir = ClientPathResolver.ResolveClientDir();
+        if (clientDir is null)
+        {
+            GD.Print("[RealClientAssets] Aucun répertoire client résolu — mode synthétique.");
+            return null;
+        }
 
         string infPath = Path.Combine(clientDir, "data.inf");
         string vfsPath = Path.Combine(clientDir, "data", "data.vfs");
 
-        if (!File.Exists(infPath) || !File.Exists(vfsPath))
-        {
-            GD.Print($"[RealClientAssets] Client dir not found at '{clientDir}' " +
-                     "(set MH_CLIENT_DIR env var). Falling back to synthetic feeder.");
-            return null;
-        }
-
         try
         {
             MappedVfsArchive vfs = MappedVfsArchive.Open(infPath, vfsPath);
-            GD.Print($"[RealClientAssets] VFS opened: {vfs.EntryCount} entries " +
-                     $"from '{clientDir}'.");
+            GD.Print($"[RealClientAssets] VFS opened: {vfs.EntryCount} entries from '{clientDir}'.");
             return new RealClientAssets(vfs);
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[RealClientAssets] VFS open failed: {ex.Message}. " +
+            GD.PrintErr($"[RealClientAssets] VFS open failed from '{clientDir}': {ex.Message}. " +
                         "Falling back to synthetic feeder.");
             return null;
         }
