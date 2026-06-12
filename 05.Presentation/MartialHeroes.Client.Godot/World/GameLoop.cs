@@ -9,6 +9,7 @@ using MartialHeroes.Client.Godot.Input;
 
 namespace MartialHeroes.Client.Godot.World;
 
+
 /// <summary>
 /// Root scene orchestrator. Owns the per-frame event drain and dispatches each
 /// <see cref="IClientEvent"/> to the appropriate view subsystem.
@@ -40,6 +41,7 @@ public sealed partial class GameLoop : Node
     private SyntheticWorldFeeder _syntheticFeeder = null!;
     private ClientContext _clientContext = null!;
     private TerrainNode _terrainNode = null!;
+    private RealWorldRenderer? _realWorldRenderer;
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -76,9 +78,31 @@ public sealed partial class GameLoop : Node
         _inputRouter.Initialise(_clientContext);
         _inputRouter.InitialiseBus(_clientContext.InputBus);
 
-        // Start the synthetic feeder (fires and forgets onto a Task; publishes only through
-        // the legitimate Application event bus — no game rules inside).
-        _syntheticFeeder.StartAsync(_clientContext);
+        // Real-asset rendering path vs. synthetic feeder.
+        // Controlled by MH_REAL_ASSETS=1 environment variable.
+        // If real assets are enabled and the client directory is reachable, spawn the
+        // RealWorldRenderer and skip the synthetic feeder.
+        // If not, fall back to the existing synthetic feeder.
+        //
+        // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
+        if (RealWorldRenderer.IsEnabled)
+        {
+            GD.Print("[GameLoop] MH_REAL_ASSETS=1 — attempting real-asset renderer.");
+            _realWorldRenderer = new RealWorldRenderer();
+            _realWorldRenderer.Name = "RealWorldRenderer";
+            AddChild(_realWorldRenderer);
+            _realWorldRenderer.Initialise(_clientContext, _terrainNode);
+
+            // Only start the synthetic feeder if the real renderer could not open assets.
+            // The renderer sets itself up synchronously; if it printed a fallback message
+            // there is nothing else to do — the synthetic feeder provides offline content.
+        }
+        else
+        {
+            // Start the synthetic feeder (fires and forgets onto a Task; publishes only through
+            // the legitimate Application event bus — no game rules inside).
+            _syntheticFeeder.StartAsync(_clientContext);
+        }
 
         GD.Print("[GameLoop] Ready.");
     }
