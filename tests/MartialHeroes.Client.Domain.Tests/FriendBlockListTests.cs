@@ -23,10 +23,10 @@ public sealed class FriendBlockListTests
         var list = new FriendBlockList(8, localActorId: 1);
         list.Add(100);
 
-        Assert.Equal(-1, list.Add(1));                                 // self
+        Assert.Equal(-1, list.Add(1)); // self
         Assert.Equal(-1, list.Add(FriendBlockList.LocalPlayerSentinel)); // sentinel
-        Assert.Equal(-1, list.Add(100));                               // duplicate
-        Assert.Equal(-1, list.Add(0));                                 // zero id
+        Assert.Equal(-1, list.Add(100)); // duplicate
+        Assert.Equal(-1, list.Add(0)); // zero id
     }
 
     [Fact]

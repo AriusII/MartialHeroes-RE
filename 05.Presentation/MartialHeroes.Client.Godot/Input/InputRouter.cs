@@ -83,11 +83,23 @@ public sealed partial class InputRouter : Node
 
     private void LateInitialise()
     {
-        try { LookupCamera(); }
-        catch (Exception ex) { GD.PrintErr($"[InputRouter] LookupCamera failed: {ex.Message}"); }
+        try
+        {
+            LookupCamera();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[InputRouter] LookupCamera failed: {ex.Message}");
+        }
 
-        try { WireWorldHandler(); }
-        catch (Exception ex) { GD.PrintErr($"[InputRouter] WireWorldHandler failed: {ex.Message}"); }
+        try
+        {
+            WireWorldHandler();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[InputRouter] WireWorldHandler failed: {ex.Message}");
+        }
     }
 
     private void WireWorldHandler()
@@ -131,57 +143,55 @@ public sealed partial class InputRouter : Node
         // Guard: input translation errors must not crash the frame.
         try
         {
-
-        switch (evt)
-        {
-            case InputEventMouseMotion motion:
+            switch (evt)
             {
-                int x = (int)motion.Position.X;
-                int y = (int)motion.Position.Y;
-                int mods = BuildModifiers(motion);
-                // spec: Docs/RE/specs/input_ui.md §2 — type 3 = move.
-                var e = new AppInputEvent(InputType.MouseMove, x, y, 0, mods);
-                _inputBus.Enqueue(in e);
-                break;
-            }
-
-            case InputEventMouseButton mouseBtn:
-            {
-                int x = (int)mouseBtn.Position.X;
-                int y = (int)mouseBtn.Position.Y;
-                int button = MapMouseButton(mouseBtn.ButtonIndex);
-                int mods = BuildModifiers(mouseBtn);
-                InputType type = mouseBtn.Pressed
-                    ? InputType.MouseButtonDown // spec: input_ui.md §2 — type 5 = button press.
-                    : InputType.MouseButtonUp;
-
-                // Wheel events are encoded as button press in Godot.
-                if (mouseBtn.ButtonIndex == global::Godot.MouseButton.WheelUp ||
-                    mouseBtn.ButtonIndex == global::Godot.MouseButton.WheelDown)
+                case InputEventMouseMotion motion:
                 {
-                    int delta = mouseBtn.ButtonIndex == global::Godot.MouseButton.WheelUp ? 1 : -1;
-                    // spec: Docs/RE/specs/input_ui.md §2 — type 8 = wheel.
-                    var wheelEvt = new AppInputEvent(InputType.MouseWheel, x, y, delta, mods);
-                    _inputBus.Enqueue(in wheelEvt);
+                    int x = (int)motion.Position.X;
+                    int y = (int)motion.Position.Y;
+                    int mods = BuildModifiers(motion);
+                    // spec: Docs/RE/specs/input_ui.md §2 — type 3 = move.
+                    var e = new AppInputEvent(InputType.MouseMove, x, y, 0, mods);
+                    _inputBus.Enqueue(in e);
                     break;
                 }
 
-                var e = new AppInputEvent(type, x, y, button, mods);
-                _inputBus.Enqueue(in e);
-                break;
-            }
+                case InputEventMouseButton mouseBtn:
+                {
+                    int x = (int)mouseBtn.Position.X;
+                    int y = (int)mouseBtn.Position.Y;
+                    int button = MapMouseButton(mouseBtn.ButtonIndex);
+                    int mods = BuildModifiers(mouseBtn);
+                    InputType type = mouseBtn.Pressed
+                        ? InputType.MouseButtonDown // spec: input_ui.md §2 — type 5 = button press.
+                        : InputType.MouseButtonUp;
 
-            case InputEventKey key:
-            {
-                InputType type = key.Pressed ? InputType.KeyDown : InputType.KeyUp;
-                int vk = (int)key.Keycode;
-                int mods = BuildModifiers(key);
-                var e = new AppInputEvent(type, 0, 0, vk, mods);
-                _inputBus.Enqueue(in e);
-                break;
-            }
-        }
+                    // Wheel events are encoded as button press in Godot.
+                    if (mouseBtn.ButtonIndex == global::Godot.MouseButton.WheelUp ||
+                        mouseBtn.ButtonIndex == global::Godot.MouseButton.WheelDown)
+                    {
+                        int delta = mouseBtn.ButtonIndex == global::Godot.MouseButton.WheelUp ? 1 : -1;
+                        // spec: Docs/RE/specs/input_ui.md §2 — type 8 = wheel.
+                        var wheelEvt = new AppInputEvent(InputType.MouseWheel, x, y, delta, mods);
+                        _inputBus.Enqueue(in wheelEvt);
+                        break;
+                    }
 
+                    var e = new AppInputEvent(type, x, y, button, mods);
+                    _inputBus.Enqueue(in e);
+                    break;
+                }
+
+                case InputEventKey key:
+                {
+                    InputType type = key.Pressed ? InputType.KeyDown : InputType.KeyUp;
+                    int vk = (int)key.Keycode;
+                    int mods = BuildModifiers(key);
+                    var e = new AppInputEvent(type, 0, 0, vk, mods);
+                    _inputBus.Enqueue(in e);
+                    break;
+                }
+            }
         } // end try
         catch (Exception ex)
         {
@@ -210,7 +220,7 @@ public sealed partial class InputRouter : Node
         // Guard: unhandled-input processing errors must not crash the frame.
         try
         {
-        UnhandledInputInternal(evt);
+            UnhandledInputInternal(evt);
         }
         catch (Exception ex)
         {
@@ -220,7 +230,6 @@ public sealed partial class InputRouter : Node
 
     private void UnhandledInputInternal(global::Godot.InputEvent evt)
     {
-
         // Handle key events for chat and hotbar.
         if (evt is InputEventKey key && key.Pressed)
         {

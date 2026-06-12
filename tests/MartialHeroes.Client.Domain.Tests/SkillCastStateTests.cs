@@ -64,7 +64,8 @@ public sealed class SkillCastStateTests
         SkillDefinition skill = Skill();
         (state, _) = state.TryBeginCast(skill, CasterState.AllClear, cd, new StubTargeting(), Vector3Fixed.Zero, 0);
 
-        var (next, result) = state.TryBeginCast(skill, CasterState.AllClear, cd, new StubTargeting(), Vector3Fixed.Zero, 10);
+        var (next, result) =
+            state.TryBeginCast(skill, CasterState.AllClear, cd, new StubTargeting(), Vector3Fixed.Zero, 10);
 
         Assert.Equal(SkillCastResult.AlreadyCasting, result);
         Assert.Equal(SkillCastPhase.Casting, next.Phase);
@@ -152,9 +153,11 @@ public sealed class SkillCastStateTests
         var targeting = new StubTargeting { TargetValid = false };
 
         SkillCastResult single = SkillCastValidator.Validate(
-            Skill(mode: SkillTargetMode.SingleTarget), CasterState.AllClear, new CooldownTable(), targeting, Vector3Fixed.Zero, 0);
+            Skill(mode: SkillTargetMode.SingleTarget), CasterState.AllClear, new CooldownTable(), targeting,
+            Vector3Fixed.Zero, 0);
         SkillCastResult ground = SkillCastValidator.Validate(
-            Skill(mode: SkillTargetMode.GroundPoint), CasterState.AllClear, new CooldownTable(), targeting, Vector3Fixed.Zero, 0);
+            Skill(mode: SkillTargetMode.GroundPoint), CasterState.AllClear, new CooldownTable(), targeting,
+            Vector3Fixed.Zero, 0);
 
         Assert.Equal(SkillCastResult.InvalidTarget, single);
         Assert.Equal(SkillCastResult.Ok, ground); // ground mode skips the target-state test. spec: §2.2.
@@ -166,8 +169,10 @@ public sealed class SkillCastStateTests
         SkillDefinition skill = Skill(weaponReq: true);
         CasterState caster = CasterState.AllClear with { WeaponRequirementSatisfied = false };
 
-        SkillCastResult blocked = SkillCastValidator.Validate(skill, caster, new CooldownTable(), new StubTargeting(), Vector3Fixed.Zero, 0);
-        SkillCastResult ignored = SkillCastValidator.Validate(Skill(weaponReq: false), caster, new CooldownTable(), new StubTargeting(), Vector3Fixed.Zero, 0);
+        SkillCastResult blocked = SkillCastValidator.Validate(skill, caster, new CooldownTable(), new StubTargeting(),
+            Vector3Fixed.Zero, 0);
+        SkillCastResult ignored = SkillCastValidator.Validate(Skill(weaponReq: false), caster, new CooldownTable(),
+            new StubTargeting(), Vector3Fixed.Zero, 0);
 
         Assert.Equal(SkillCastResult.WeaponRequirement, blocked);
         Assert.Equal(SkillCastResult.Ok, ignored);
@@ -189,7 +194,8 @@ public sealed class SkillCastStateTests
         cdExempt.SetSlot(0, new SkillId(101), durationMs: 1000);
         cdExempt.Arm(new SkillId(101), 0);
         SkillCastResult exempt = SkillCastValidator.Validate(
-            Skill(id: 101, category: SkillDefinition.BasicAttackCategory), CasterState.AllClear, cdExempt, new StubTargeting(), Vector3Fixed.Zero, 500);
+            Skill(id: 101, category: SkillDefinition.BasicAttackCategory), CasterState.AllClear, cdExempt,
+            new StubTargeting(), Vector3Fixed.Zero, 500);
 
         Assert.Equal(SkillCastResult.OnCooldown, blocked);
         Assert.Equal(SkillCastResult.Ok, exempt);
@@ -201,7 +207,8 @@ public sealed class SkillCastStateTests
         var cd = new CooldownTable();
         SkillDefinition skill = Skill(id: 100, category: 2, cooldownCs: 30); // 3000 ms
         cd.SetSlot(5, skill.Id, skill.CooldownMs);
-        var (state, _) = SkillCastState.Idle.TryBeginCast(skill, CasterState.AllClear, cd, new StubTargeting(), Vector3Fixed.Zero, 0);
+        var (state, _) = SkillCastState.Idle.TryBeginCast(skill, CasterState.AllClear, cd, new StubTargeting(),
+            Vector3Fixed.Zero, 0);
 
         SkillCastState next = state.ConfirmCast(skill, cd, now: 1000);
 
@@ -215,7 +222,8 @@ public sealed class SkillCastStateTests
     {
         var cd = new CooldownTable();
         SkillDefinition skill = Skill(id: 100, category: SkillDefinition.BasicAttackCategory, cooldownCs: 30);
-        var (state, _) = SkillCastState.Idle.TryBeginCast(skill, CasterState.AllClear, cd, new StubTargeting(), Vector3Fixed.Zero, 0);
+        var (state, _) = SkillCastState.Idle.TryBeginCast(skill, CasterState.AllClear, cd, new StubTargeting(),
+            Vector3Fixed.Zero, 0);
 
         SkillCastState next = state.ConfirmCast(skill, cd, now: 1000);
 
@@ -228,7 +236,8 @@ public sealed class SkillCastStateTests
         var cd = new CooldownTable();
         SkillDefinition skill = Skill(id: 100, category: 2, cooldownCs: 10); // 1000 ms
         cd.SetSlot(0, skill.Id, skill.CooldownMs);
-        var (state, _) = SkillCastState.Idle.TryBeginCast(skill, CasterState.AllClear, cd, new StubTargeting(), Vector3Fixed.Zero, 0);
+        var (state, _) = SkillCastState.Idle.TryBeginCast(skill, CasterState.AllClear, cd, new StubTargeting(),
+            Vector3Fixed.Zero, 0);
         state = state.ConfirmCast(skill, cd, now: 0);
 
         Assert.Equal(SkillCastPhase.Cooldown, state.Tick(999).Phase);
@@ -239,7 +248,8 @@ public sealed class SkillCastStateTests
     public void Cancel_FromCasting_ReturnsToIdle()
     {
         var cd = new CooldownTable();
-        var (state, _) = SkillCastState.Idle.TryBeginCast(Skill(), CasterState.AllClear, cd, new StubTargeting(), Vector3Fixed.Zero, 0);
+        var (state, _) = SkillCastState.Idle.TryBeginCast(Skill(), CasterState.AllClear, cd, new StubTargeting(),
+            Vector3Fixed.Zero, 0);
 
         Assert.Equal(SkillCastPhase.Idle, state.Cancel().Phase);
     }

@@ -154,19 +154,19 @@ public sealed class SkillCatalogue
 
             var def = new SkillDefinition
             {
-                Id             = new SkillId(skillId),
-                Category       = skillSort,
-                TargetMode     = targetMode,
-                BaseRange      = baseRange,
-                AoeRadius      = aoeRadius,
-                MaxTargets     = maxTargetHits,
-                MpCostFactor   = mpCostFactor,
+                Id = new SkillId(skillId),
+                Category = skillSort,
+                TargetMode = targetMode,
+                BaseRange = baseRange,
+                AoeRadius = aoeRadius,
+                MaxTargets = maxTargetHits,
+                MpCostFactor = mpCostFactor,
                 CooldownCentiseconds = combatRecast,
-                WeaponReqA     = weaponReqA,
-                WeaponReqB     = weaponReqB,
+                WeaponReqA = weaponReqA,
+                WeaponReqB = weaponReqB,
                 WeaponReqActive = weaponReqActive,
-                ConsumedCost   = castCost,
-                StaminaCost    = staminaCost,
+                ConsumedCost = castCost,
+                StaminaCost = staminaCost,
             };
 
             _byId[skillId] = def;

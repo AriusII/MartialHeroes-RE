@@ -227,12 +227,12 @@ public sealed class XeffStaticState
         get
         {
             if (RotXDeg is null)
-                return new Quat(0f, 0f, 0f, 1f); // identity — spec: §A.3.6 "initialized to identity (0,0,0,1)": CONFIRMED
+                return
+                    new Quat(0f, 0f, 0f, 1f); // identity — spec: §A.3.6 "initialized to identity (0,0,0,1)": CONFIRMED
             return XeffKeyframe.ComputeQuat(RotXDeg.Value, RotYDeg!.Value, RotZDeg!.Value);
         }
     }
 }
-
 
 /// <summary>
 /// Decoded result of a <c>.xeff</c> particle effect descriptor file.

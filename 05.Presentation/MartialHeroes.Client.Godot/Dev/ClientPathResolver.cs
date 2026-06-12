@@ -44,7 +44,7 @@ public static class ClientPathResolver
     [
         @"D:\MartialHeroesClient",
         @"C:\MartialHeroesClient",
-        "LegacyClient",   // relatif au répertoire de travail (dossier projet)
+        "LegacyClient", // relatif au répertoire de travail (dossier projet)
     ];
 
     // Nom du fichier de config, à côté de project.godot.
@@ -127,7 +127,8 @@ public static class ClientPathResolver
         if (envFlag is not null)
         {
             bool envEnabled = envFlag != "0";
-            GD.Print($"[ClientPath] RealAssets override via MH_REAL_ASSETS={envFlag}: {(envEnabled ? "activé" : "désactivé")}");
+            GD.Print(
+                $"[ClientPath] RealAssets override via MH_REAL_ASSETS={envFlag}: {(envEnabled ? "activé" : "désactivé")}");
             return envEnabled;
         }
 
@@ -135,7 +136,8 @@ public static class ClientPathResolver
         bool? cfgFlag = ReadRealAssetsFlagFromConfig();
         if (cfgFlag.HasValue)
         {
-            GD.Print($"[ClientPath] RealAssets override via client_dir.cfg real_assets={cfgFlag.Value}: {(cfgFlag.Value ? "activé" : "désactivé")}");
+            GD.Print(
+                $"[ClientPath] RealAssets override via client_dir.cfg real_assets={cfgFlag.Value}: {(cfgFlag.Value ? "activé" : "désactivé")}");
             return cfgFlag.Value;
         }
 
@@ -156,7 +158,7 @@ public static class ClientPathResolver
         try
         {
             return File.Exists(Path.Combine(dir, "data.inf"))
-                && File.Exists(Path.Combine(dir, "data", "data.vfs"));
+                   && File.Exists(Path.Combine(dir, "data", "data.vfs"));
         }
         catch
         {
@@ -193,7 +195,7 @@ public static class ClientPathResolver
         if (raw is null) return null;
 
         return !raw.Equals("false", StringComparison.OrdinalIgnoreCase)
-            && raw != "0";
+               && raw != "0";
     }
 
     /// <summary>

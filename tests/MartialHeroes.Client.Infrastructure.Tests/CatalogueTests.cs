@@ -91,7 +91,7 @@ public sealed class CatalogueTests
         // spec: §2.4 — "L1..L11: divisorC=0; L12..L23: divisorC=2; L36..L144: divisorC=4": CONFIRMED.
         LevelBaseEntry[] entries =
         [
-            MakeLevelEntry(level: 1,  divisorC: 0, posScale: 1.0f),
+            MakeLevelEntry(level: 1, divisorC: 0, posScale: 1.0f),
             MakeLevelEntry(level: 12, divisorC: 2, posScale: 1.0f),
             MakeLevelEntry(level: 36, divisorC: 4, posScale: 3.0f),
         ];
@@ -99,11 +99,11 @@ public sealed class CatalogueTests
         var catalogue = new ScrStatCatalogue(entries);
         var hp = catalogue.GetHpBaseCurve();
 
-        long l1  = hp.BaseForLevel(1);
+        long l1 = hp.BaseForLevel(1);
         long l12 = hp.BaseForLevel(2);
         long l36 = hp.BaseForLevel(3);
 
-        Assert.True(l12 > l1,  $"L12 ({l12}) should be > L1 ({l1})");
+        Assert.True(l12 > l1, $"L12 ({l12}) should be > L1 ({l1})");
         Assert.True(l36 > l12, $"L36 ({l36}) should be > L12 ({l12})");
     }
 
@@ -126,7 +126,7 @@ public sealed class CatalogueTests
         Assert.False(catalogue.GetHpBaseCurve().IsEmpty);
         Assert.False(catalogue.GetMpBaseCurve().IsEmpty);
         Assert.Equal(catalogue.GetHpBaseCurve().BaseForLevel(1),
-                     catalogue.GetMpBaseCurve().BaseForLevel(1));
+            catalogue.GetMpBaseCurve().BaseForLevel(1));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -231,7 +231,7 @@ public sealed class CatalogueTests
     [Fact]
     public void ItemCatalogue_DuplicateItemId_LastRowWins()
     {
-        ItemCsvRow base0 = MakeItemRow(1u, "BaseItem",   1u, 100u, 1, 1, 10, 0u, 0u);
+        ItemCsvRow base0 = MakeItemRow(1u, "BaseItem", 1u, 100u, 1, 1, 10, 0u, 0u);
         ItemCsvRow ench1 = MakeItemRow(1u, "EnchItem+1", 1u, 200u, 1, 1, 10, 0u, 0u);
 
         var catalogue = new ItemCatalogue([base0, ench1]);
@@ -256,8 +256,8 @@ public sealed class CatalogueTests
         SkillCatalogEntry[] entries =
         [
             MakeSkillEntry(skillId: 11u, skillSort: 7, targetMode: 0,
-                           baseRange: 35.0f, aoeRadius: 0.0f,
-                           maxHits: 1, mpFactor: 0, recast: 0, staminaCost: 0),
+                baseRange: 35.0f, aoeRadius: 0.0f,
+                maxHits: 1, mpFactor: 0, recast: 0, staminaCost: 0),
         ];
 
         var catalogue = new SkillCatalogue(entries);
@@ -285,8 +285,8 @@ public sealed class CatalogueTests
         SkillCatalogEntry[] entries =
         [
             MakeSkillEntry(skillId: 0u, skillSort: 1, targetMode: 0,
-                           baseRange: 0f, aoeRadius: 0f,
-                           maxHits: 0, mpFactor: 0, recast: 0, staminaCost: 0),
+                baseRange: 0f, aoeRadius: 0f,
+                maxHits: 0, mpFactor: 0, recast: 0, staminaCost: 0),
         ];
 
         var catalogue = new SkillCatalogue(entries);
@@ -304,8 +304,8 @@ public sealed class CatalogueTests
         SkillCatalogEntry[] entries =
         [
             MakeSkillEntry(skillId: 10_000_000u, skillSort: 2, targetMode: 2,
-                           baseRange: 50f, aoeRadius: 30f,
-                           maxHits: 3, mpFactor: 10, recast: 600, staminaCost: 20),
+                baseRange: 50f, aoeRadius: 30f,
+                maxHits: 3, mpFactor: 10, recast: 600, staminaCost: 20),
         ];
 
         var catalogue = new SkillCatalogue(entries);
@@ -322,12 +322,12 @@ public sealed class CatalogueTests
     {
         SkillCatalogEntry[] entries =
         [
-            MakeSkillEntry(skillId: 11u,  skillSort: 7, targetMode: 0,
-                           baseRange: 35f, aoeRadius: 0f,
-                           maxHits: 1, mpFactor: 0, recast: 0, staminaCost: 0),
+            MakeSkillEntry(skillId: 11u, skillSort: 7, targetMode: 0,
+                baseRange: 35f, aoeRadius: 0f,
+                maxHits: 1, mpFactor: 0, recast: 0, staminaCost: 0),
             MakeSkillEntry(skillId: 100u, skillSort: 2, targetMode: 3,
-                           baseRange: 50f, aoeRadius: 30f,
-                           maxHits: 3, mpFactor: 10, recast: 600, staminaCost: 25),
+                baseRange: 50f, aoeRadius: 30f,
+                maxHits: 3, mpFactor: 10, recast: 600, staminaCost: 25),
         ];
 
         var catalogue = new SkillCatalogue(entries);
@@ -349,8 +349,8 @@ public sealed class CatalogueTests
         SkillCatalogEntry[] entries =
         [
             MakeSkillEntry(skillId: 200u, skillSort: 2, targetMode: 3,
-                           baseRange: 60f, aoeRadius: 40f,
-                           maxHits: 3, mpFactor: 10, recast: 600, staminaCost: 30),
+                baseRange: 60f, aoeRadius: 40f,
+                maxHits: 3, mpFactor: 10, recast: 600, staminaCost: 30),
         ];
 
         var catalogue = new SkillCatalogue(entries);
@@ -378,8 +378,8 @@ public sealed class CatalogueTests
         SkillCatalogEntry[] entries =
         [
             MakeSkillEntry(skillId: 77u, skillSort: 2, targetMode: 8,
-                           baseRange: 0f, aoeRadius: 0f,
-                           maxHits: 1, mpFactor: 0, recast: 0, staminaCost: 0),
+                baseRange: 0f, aoeRadius: 0f,
+                maxHits: 1, mpFactor: 0, recast: 0, staminaCost: 0),
         ];
 
         var catalogue = new SkillCatalogue(entries);
@@ -551,13 +551,13 @@ public sealed class CatalogueTests
 
         return new LevelBaseEntry
         {
-            Level             = level,
-            TierStepA         = 0,
-            TierStepB         = 0,
-            DivisorC          = divisorC,
+            Level = level,
+            TierStepA = 0,
+            TierStepB = 0,
+            DivisorC = divisorC,
             StatScalePositive = [posScale, posScale, posScale, posScale],
             StatScaleNegative = [-posScale, -posScale, -posScale, -posScale],
-            Body              = body,
+            Body = body,
         };
     }
 
@@ -596,8 +596,8 @@ public sealed class CatalogueTests
 
         return new SkillCatalogEntry
         {
-            RawRecord       = rec,
-            TrailingCount   = 0,
+            RawRecord = rec,
+            TrailingCount = 0,
             TrailingEntries = [],
         };
     }
@@ -620,11 +620,11 @@ public sealed class CatalogueTests
 
         return new MobCatalogEntry
         {
-            Id         = mobId,
-            Type       = mobType,
-            MobLevel   = level,
+            Id = mobId,
+            Type = mobType,
+            MobLevel = level,
             SpawnTimer = spawnTimer,
-            Raw        = raw,
+            Raw = raw,
         };
     }
 
@@ -639,58 +639,58 @@ public sealed class CatalogueTests
     {
         return new ItemCsvRow
         {
-            NameCp949         = name,
-            ItemId            = itemId,
-            DescriptionCp949  = "",
-            LinkedItemId      = 0u,
-            BaseRefId         = 0u,
-            SecondaryRefId    = 0u,
-            ItemSubtype       = subtype,
-            BonusFlagA        = 0,
-            BonusFlagB        = 0,
-            EnhancementSize   = 0,
-            SellPrice         = sellPrice,
-            NpcPurchaseable   = 0,
-            Enabled           = enabled,
-            MaxStack          = maxStack,
-            ItemTierRank      = tierRank,
-            MaxDurability     = (ushort)(maxStack == 1 ? 300u : 1u),
-            ReqStr            = 0,
-            ReqCon            = 0,
-            ReqAgi            = 0,
-            ReqInt            = 0,
-            ReqChi            = 0,
-            ClassYi           = 1,
-            ClassYe           = 1,
-            ClassIn           = 1,
-            ClassJi           = 1,
-            EnchantLevel      = 0,
-            GemPower          = 0,
-            BonusAtk          = 0u,
-            BonusHp           = 0u,
-            BonusExtAtk       = 0u,
-            AttackSpeed       = 1.0f,
-            DodgeRate         = 0f,
-            BonusChi          = 0u,
-            WeaponStatA       = 0u,
-            WeaponStatB       = 0u,
-            MinAttack         = minAtk,
-            MaxAttack         = maxAtk,
-            BonusDefenseA     = 0u,
-            PhysDefense       = 0u,
-            ArmorDefense      = 0u,
-            DurationMinutes   = 0u,
-            ExpireMode        = 0,
-            ConsumableValue   = 0u,
-            IsConsumable      = 0,
-            GemCategory       = 0,
-            EquippableFlag    = (byte)(maxStack == 1 ? 1 : 0),
-            HasEffect         = 0,
-            EffectType        = 0,
-            EffectStrength    = 0,
-            ModelSetId        = 0,
-            ModelType         = 0,
-            RawColumns        = new string[139],
+            NameCp949 = name,
+            ItemId = itemId,
+            DescriptionCp949 = "",
+            LinkedItemId = 0u,
+            BaseRefId = 0u,
+            SecondaryRefId = 0u,
+            ItemSubtype = subtype,
+            BonusFlagA = 0,
+            BonusFlagB = 0,
+            EnhancementSize = 0,
+            SellPrice = sellPrice,
+            NpcPurchaseable = 0,
+            Enabled = enabled,
+            MaxStack = maxStack,
+            ItemTierRank = tierRank,
+            MaxDurability = (ushort)(maxStack == 1 ? 300u : 1u),
+            ReqStr = 0,
+            ReqCon = 0,
+            ReqAgi = 0,
+            ReqInt = 0,
+            ReqChi = 0,
+            ClassYi = 1,
+            ClassYe = 1,
+            ClassIn = 1,
+            ClassJi = 1,
+            EnchantLevel = 0,
+            GemPower = 0,
+            BonusAtk = 0u,
+            BonusHp = 0u,
+            BonusExtAtk = 0u,
+            AttackSpeed = 1.0f,
+            DodgeRate = 0f,
+            BonusChi = 0u,
+            WeaponStatA = 0u,
+            WeaponStatB = 0u,
+            MinAttack = minAtk,
+            MaxAttack = maxAtk,
+            BonusDefenseA = 0u,
+            PhysDefense = 0u,
+            ArmorDefense = 0u,
+            DurationMinutes = 0u,
+            ExpireMode = 0,
+            ConsumableValue = 0u,
+            IsConsumable = 0,
+            GemCategory = 0,
+            EquippableFlag = (byte)(maxStack == 1 ? 1 : 0),
+            HasEffect = 0,
+            EffectType = 0,
+            EffectStrength = 0,
+            ModelSetId = 0,
+            ModelType = 0,
+            RawColumns = new string[139],
         };
     }
 
@@ -703,17 +703,17 @@ public sealed class CatalogueTests
     {
         var cols = new string[139];
         Array.Fill(cols, "0");
-        cols[0]  = col0;
-        cols[1]  = itemId.ToString();
-        cols[2]  = "";   // description (empty)
-        cols[18] = "1";  // enabled
-        cols[19] = "1";  // max_stack
-        cols[22] = "1";  // item_tier_rank
-        cols[23] = "1";  // max_durability
-        cols[29] = "1";  // class_yi
-        cols[30] = "1";  // class_ye
-        cols[31] = "1";  // class_in
-        cols[32] = "1";  // class_ji
+        cols[0] = col0;
+        cols[1] = itemId.ToString();
+        cols[2] = ""; // description (empty)
+        cols[18] = "1"; // enabled
+        cols[19] = "1"; // max_stack
+        cols[22] = "1"; // item_tier_rank
+        cols[23] = "1"; // max_durability
+        cols[29] = "1"; // class_yi
+        cols[30] = "1"; // class_ye
+        cols[31] = "1"; // class_in
+        cols[32] = "1"; // class_ji
         return string.Join(",", cols);
     }
 }

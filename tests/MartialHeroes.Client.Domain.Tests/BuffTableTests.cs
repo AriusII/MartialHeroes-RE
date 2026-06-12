@@ -68,9 +68,9 @@ public sealed class BuffTableTests
     public void Dispel_ClearsEffects43_46_47_Only()
     {
         var table = new BuffTable();
-        table.Apply(0, (int)BuffEffectCode.EnterStance, 5, 0, 0);    // 43 -> cleared
+        table.Apply(0, (int)BuffEffectCode.EnterStance, 5, 0, 0); // 43 -> cleared
         table.Apply(1, (int)BuffEffectCode.AppearanceSwap, 5, 0, 0); // 46 -> cleared
-        table.Apply(2, (int)BuffEffectCode.RootSnare, 5, 0, 0);      // 47 -> cleared
+        table.Apply(2, (int)BuffEffectCode.RootSnare, 5, 0, 0); // 47 -> cleared
         table.Apply(3, (int)BuffEffectCode.PoisonTransform, 5, 0, 0); // 50 -> kept
 
         table.Dispel();
@@ -93,8 +93,10 @@ public sealed class BuffTableTests
     [Fact]
     public void PercentGatedFlag_SetOnlyBelow100()
     {
-        var below = new BuffDebuff { EffectCode = (int)BuffEffectCode.PercentGatedFlag, DurationTicks = 5, Magnitude = 99 };
-        var atGate = new BuffDebuff { EffectCode = (int)BuffEffectCode.PercentGatedFlag, DurationTicks = 5, Magnitude = 100 };
+        var below = new BuffDebuff
+            { EffectCode = (int)BuffEffectCode.PercentGatedFlag, DurationTicks = 5, Magnitude = 99 };
+        var atGate = new BuffDebuff
+            { EffectCode = (int)BuffEffectCode.PercentGatedFlag, DurationTicks = 5, Magnitude = 100 };
 
         Assert.True(below.IsPercentGatedFlagSet);
         Assert.False(atGate.IsPercentGatedFlagSet);

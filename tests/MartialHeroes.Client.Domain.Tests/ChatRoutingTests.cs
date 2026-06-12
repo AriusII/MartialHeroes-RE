@@ -20,8 +20,8 @@ public sealed class ChatRoutingTests
     }
 
     [Theory]
-    [InlineData(0, ChatRouteResult.Send)]     // empty whisper allowed
-    [InlineData(119, ChatRouteResult.Send)]   // at cap
+    [InlineData(0, ChatRouteResult.Send)] // empty whisper allowed
+    [InlineData(119, ChatRouteResult.Send)] // at cap
     [InlineData(120, ChatRouteResult.TooLong)] // over cap
     public void Whisper_TextCap119(int len, ChatRouteResult expected)
     {
@@ -39,7 +39,7 @@ public sealed class ChatRoutingTests
     }
 
     [Theory]
-    [InlineData(0, ChatRouteResult.Send)]      // channel allows empty (no exclusive gate)
+    [InlineData(0, ChatRouteResult.Send)] // channel allows empty (no exclusive gate)
     [InlineData(199, ChatRouteResult.Send)]
     [InlineData(200, ChatRouteResult.TooLong)]
     public void Channel_Limit200(int len, ChatRouteResult expected)

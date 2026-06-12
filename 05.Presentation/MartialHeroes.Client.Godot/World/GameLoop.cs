@@ -9,7 +9,6 @@ using MartialHeroes.Client.Godot.Input;
 
 namespace MartialHeroes.Client.Godot.World;
 
-
 /// <summary>
 /// Root scene orchestrator. Owns the per-frame event drain and dispatches each
 /// <see cref="IClientEvent"/> to the appropriate view subsystem.
@@ -100,11 +99,23 @@ public sealed partial class GameLoop : Node
         }
 
         // Give subsystems their handles.
-        try { _actorRegistry.Initialise(_clientContext); }
-        catch (Exception ex) { GD.PrintErr($"[GameLoop] ActorRegistry.Initialise failed: {ex.Message}"); }
+        try
+        {
+            _actorRegistry.Initialise(_clientContext);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameLoop] ActorRegistry.Initialise failed: {ex.Message}");
+        }
 
-        try { _hud.Initialise(_clientContext); }
-        catch (Exception ex) { GD.PrintErr($"[GameLoop] GameHud.Initialise failed: {ex.Message}"); }
+        try
+        {
+            _hud.Initialise(_clientContext);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameLoop] GameHud.Initialise failed: {ex.Message}");
+        }
 
         // Wire InputRouter with bus from the composition root.
         try
@@ -112,7 +123,10 @@ public sealed partial class GameLoop : Node
             _inputRouter.Initialise(_clientContext);
             _inputRouter.InitialiseBus(_clientContext.InputBus);
         }
-        catch (Exception ex) { GD.PrintErr($"[GameLoop] InputRouter.Initialise failed: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameLoop] InputRouter.Initialise failed: {ex.Message}");
+        }
 
         // Real-asset rendering path vs. synthetic feeder.
         // Activation via ClientPathResolver (config file / env override / auto-detect).
@@ -148,8 +162,14 @@ public sealed partial class GameLoop : Node
         {
             // Start the synthetic feeder (fires and forgets onto a Task; publishes only through
             // the legitimate Application event bus — no game rules inside).
-            try { _syntheticFeeder.StartAsync(_clientContext); }
-            catch (Exception ex) { GD.PrintErr($"[GameLoop] SyntheticWorldFeeder.StartAsync failed: {ex.Message}"); }
+            try
+            {
+                _syntheticFeeder.StartAsync(_clientContext);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[GameLoop] SyntheticWorldFeeder.StartAsync failed: {ex.Message}");
+            }
         }
 
         GD.Print("[GameLoop] Ready.");
@@ -199,7 +219,10 @@ public sealed partial class GameLoop : Node
         {
             while (_clientContext.EventBus.Reader.TryRead(out IClientEvent? evt))
             {
-                try { DispatchEvent(evt); }
+                try
+                {
+                    DispatchEvent(evt);
+                }
                 catch (Exception ex)
                 {
                     GD.PrintErr($"[GameLoop] DispatchEvent error ({evt?.GetType().Name}): {ex.Message}");

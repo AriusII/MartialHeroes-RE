@@ -175,6 +175,7 @@ public static class XeffJsonConverter
             float opacity = keyframes[i]; // already converted by parser
             result[i] = new XeffJsonAlpha(Opacity: opacity);
         }
+
         return result;
     }
 

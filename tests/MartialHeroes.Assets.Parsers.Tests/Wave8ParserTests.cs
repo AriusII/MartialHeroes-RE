@@ -15,9 +15,26 @@ public sealed class Wave8ParserTests
 {
     // ─── helpers ───────────────────────────────────────────────────────────────
 
-    private static byte[] Le4(uint v)   { var b = new byte[4]; BinaryPrimitives.WriteUInt32LittleEndian(b, v); return b; }
-    private static byte[] Le4f(float v) { var b = new byte[4]; BinaryPrimitives.WriteSingleLittleEndian(b, v); return b; }
-    private static byte[] Le2(ushort v) { var b = new byte[2]; BinaryPrimitives.WriteUInt16LittleEndian(b, v); return b; }
+    private static byte[] Le4(uint v)
+    {
+        var b = new byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(b, v);
+        return b;
+    }
+
+    private static byte[] Le4f(float v)
+    {
+        var b = new byte[4];
+        BinaryPrimitives.WriteSingleLittleEndian(b, v);
+        return b;
+    }
+
+    private static byte[] Le2(ushort v)
+    {
+        var b = new byte[2];
+        BinaryPrimitives.WriteUInt16LittleEndian(b, v);
+        return b;
+    }
 
     private static void WriteU16LE(byte[] buf, int offset, ushort v) =>
         BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(offset, 2), v);
@@ -50,15 +67,22 @@ public sealed class Wave8ParserTests
         // vertex: 8 × f32le. spec: §3.2.2.
         // index_count u32le (=3) + 3 × u16le indices. spec: §3.2.3 + §3.2.4.
         using var ms = new System.IO.MemoryStream();
-        ms.Write(Le4(1));   // object_count = 1
-        ms.WriteByte(0);    // type_byte = 0 (OBSERVED)
-        ms.Write(Le4(1));   // tex_id = 1 (CONFIRMED 1-based)
-        ms.Write(Le4(1));   // vertex_count = 1
-        ms.Write(Le4f(px)); ms.Write(Le4f(py)); ms.Write(Le4f(pz));  // pos
-        ms.Write(Le4f(nx)); ms.Write(Le4f(ny)); ms.Write(Le4f(nz));  // normal
-        ms.Write(Le4f(uu)); ms.Write(Le4f(uv));                       // uv
-        ms.Write(Le4(3));   // index_count = 3
-        ms.Write(Le2(0)); ms.Write(Le2(0)); ms.Write(Le2(0)); // 3 indices (degenerate but parseable)
+        ms.Write(Le4(1)); // object_count = 1
+        ms.WriteByte(0); // type_byte = 0 (OBSERVED)
+        ms.Write(Le4(1)); // tex_id = 1 (CONFIRMED 1-based)
+        ms.Write(Le4(1)); // vertex_count = 1
+        ms.Write(Le4f(px));
+        ms.Write(Le4f(py));
+        ms.Write(Le4f(pz)); // pos
+        ms.Write(Le4f(nx));
+        ms.Write(Le4f(ny));
+        ms.Write(Le4f(nz)); // normal
+        ms.Write(Le4f(uu));
+        ms.Write(Le4f(uv)); // uv
+        ms.Write(Le4(3)); // index_count = 3
+        ms.Write(Le2(0));
+        ms.Write(Le2(0));
+        ms.Write(Le2(0)); // 3 indices (degenerate but parseable)
         return ms.ToArray();
     }
 
@@ -136,50 +160,53 @@ public sealed class Wave8ParserTests
 
         // File header: effect_id + element_count.
         // spec: §A.2 — effect_id u32le @ 0x00, element_count u32le @ 0x04: VERIFIED.
-        ms.Write(Le4(12345u));  // effect_id (not anti-magic)
-        ms.Write(Le4(1u));      // element_count = 1
+        ms.Write(Le4(12345u)); // effect_id (not anti-magic)
+        ms.Write(Le4(1u)); // element_count = 1
 
         // Group A — Emitter identity (5 × u32le = 20 bytes).
         // spec: §A.3.1 — emitter_type, resource_id, anim_flag, tex_count, field_unknown_a: PARSER-CONFIRMED.
         ms.Write(Le4(emitterType)); // emitter_type
-        ms.Write(Le4(0u));          // resource_id
-        ms.Write(Le4(1u));          // anim_flag != 0 → use animated branch
-        ms.Write(Le4(1u));          // tex_count = 1 → 1 keyframe
-        ms.Write(Le4(0u));          // field_unknown_a (UNRESOLVED)
+        ms.Write(Le4(0u)); // resource_id
+        ms.Write(Le4(1u)); // anim_flag != 0 → use animated branch
+        ms.Write(Le4(1u)); // tex_count = 1 → 1 keyframe
+        ms.Write(Le4(0u)); // field_unknown_a (UNRESOLVED)
 
         // Group B — Texture names (tex_count × 64 bytes).
         // spec: §A.3.2 — tex_count × 64 B char[64] names: PARSER-CONFIRMED.
-        ms.Write(new byte[64]);     // one 64-byte null name
+        ms.Write(new byte[64]); // one 64-byte null name
 
         // Group C — Alpha keyframes (count u32 + count × f32).
         // spec: §A.3.3 — alpha_key_count u32 + values f32[]: PARSER-CONFIRMED.
-        ms.Write(Le4(1u));          // alpha_key_count = 1
-        ms.Write(Le4f(0.0f));       // alpha_key[0]
+        ms.Write(Le4(1u)); // alpha_key_count = 1
+        ms.Write(Le4f(0.0f)); // alpha_key[0]
 
         // Group D — Scale channels (3 passes: X, Y, Z each with count u32 + values f32[]).
         // spec: §A.3.4 — three passes: PARSER-CONFIRMED.
-        ms.Write(Le4(1u)); ms.Write(Le4f(1.0f)); // scaleX
-        ms.Write(Le4(1u)); ms.Write(Le4f(1.0f)); // scaleY
-        ms.Write(Le4(1u)); ms.Write(Le4f(1.0f)); // scaleZ
+        ms.Write(Le4(1u));
+        ms.Write(Le4f(1.0f)); // scaleX
+        ms.Write(Le4(1u));
+        ms.Write(Le4f(1.0f)); // scaleY
+        ms.Write(Le4(1u));
+        ms.Write(Le4f(1.0f)); // scaleZ
 
         // Group E — Animation timing (9 bytes: anim_loop u8, anim_stride u32, anim_base_time u32).
         // spec: §A.3.5 — anim_loop u8 @ GrpE+0: CONFIRMED.
-        ms.WriteByte(1);            // anim_loop != 0 → Branch A
-        ms.Write(Le4(100u));        // anim_stride (ms)
-        ms.Write(Le4(0u));          // anim_base_time
+        ms.WriteByte(1); // anim_loop != 0 → Branch A
+        ms.Write(Le4(100u)); // anim_stride (ms)
+        ms.Write(Le4(0u)); // anim_base_time
 
         // Group F — Branch A: one keyframe (kf_index u32 + 6 × f32 + 3 × f32_rot = 40 bytes).
         // spec: §A.3.6 Branch A — kf_index u32 + velocity/size 6×f32 + rot_deg 3×f32: PARSER-CONFIRMED.
-        ms.Write(Le4(0u));          // kf_index = 0
-        ms.Write(Le4f(velX));       // velocity_x (file read 2)
-        ms.Write(Le4f(velY));       // velocity_y (file read 3)
-        ms.Write(Le4f(velZ));       // velocity_z (file read 4)
-        ms.Write(Le4f(szX));        // size_x (file read 5)
-        ms.Write(Le4f(szY));        // size_y (file read 6)
-        ms.Write(Le4f(szZ));        // size_z (file read 7)
-        ms.Write(Le4f(rotXDeg));    // kf_rot_x_deg (file read 8): CONFIRMED
-        ms.Write(Le4f(rotYDeg));    // kf_rot_y_deg (file read 9): CONFIRMED
-        ms.Write(Le4f(rotZDeg));    // kf_rot_z_deg (file read 10): CONFIRMED
+        ms.Write(Le4(0u)); // kf_index = 0
+        ms.Write(Le4f(velX)); // velocity_x (file read 2)
+        ms.Write(Le4f(velY)); // velocity_y (file read 3)
+        ms.Write(Le4f(velZ)); // velocity_z (file read 4)
+        ms.Write(Le4f(szX)); // size_x (file read 5)
+        ms.Write(Le4f(szY)); // size_y (file read 6)
+        ms.Write(Le4f(szZ)); // size_z (file read 7)
+        ms.Write(Le4f(rotXDeg)); // kf_rot_x_deg (file read 8): CONFIRMED
+        ms.Write(Le4f(rotYDeg)); // kf_rot_y_deg (file read 9): CONFIRMED
+        ms.Write(Le4f(rotZDeg)); // kf_rot_z_deg (file read 10): CONFIRMED
 
         return ms.ToArray();
     }
@@ -261,14 +288,14 @@ public sealed class Wave8ParserTests
         // spec: Docs/RE/formats/effects.md §A.3.7 static_velocity/size: HIGH.
         using var ms = new System.IO.MemoryStream();
         ms.Write(Le4(9999u)); // effect_id
-        ms.Write(Le4(1u));    // element_count = 1
+        ms.Write(Le4(1u)); // element_count = 1
 
         // Group A
-        ms.Write(Le4(0u));  // emitter_type = 0 (billboard, no extra rotation)
-        ms.Write(Le4(0u));  // resource_id
-        ms.Write(Le4(0u));  // anim_flag = 0
-        ms.Write(Le4(0u));  // tex_count = 0 (no textures, no keyframes)
-        ms.Write(Le4(0u));  // field_unknown_a
+        ms.Write(Le4(0u)); // emitter_type = 0 (billboard, no extra rotation)
+        ms.Write(Le4(0u)); // resource_id
+        ms.Write(Le4(0u)); // anim_flag = 0
+        ms.Write(Le4(0u)); // tex_count = 0 (no textures, no keyframes)
+        ms.Write(Le4(0u)); // field_unknown_a
 
         // Group B: 0 texture entries (tex_count = 0)
 
@@ -287,9 +314,9 @@ public sealed class Wave8ParserTests
 
         // Group F Branch B: 6 floats (no rotation for emitter_type=0)
         // spec: §A.3.6 Branch B — 24 bytes (reads 1–6) when emitter_type != 2: PARSER-CONFIRMED.
-        ms.Write(Le4f(7f));  // static_velocity_x
-        ms.Write(Le4f(8f));  // static_velocity_y
-        ms.Write(Le4f(9f));  // static_velocity_z
+        ms.Write(Le4f(7f)); // static_velocity_x
+        ms.Write(Le4f(8f)); // static_velocity_y
+        ms.Write(Le4f(9f)); // static_velocity_z
         ms.Write(Le4f(10f)); // static_size_x
         ms.Write(Le4f(11f)); // static_size_y
         ms.Write(Le4f(12f)); // static_size_z
@@ -353,23 +380,23 @@ public sealed class Wave8ParserTests
         // Set tile at row=1, col=2: offset = (1×64+2)×8 = 528.
         int off = (1 * 64 + 2) * 8; // = 528
         // spec: §6.2 record layout: pad0/pad1 @+0/+1, music_group @+2, ambient_idx_0 @+3, ...
-        mud[off + 2] = 3;   // music_group (BGM index)
-        mud[off + 3] = 5;   // ambient_idx_0 (BGE index)
-        mud[off + 4] = 6;   // ambient_idx_1 (BGE index)
-        mud[off + 5] = 91;  // effect_idx_0 (EFF index)
+        mud[off + 2] = 3; // music_group (BGM index)
+        mud[off + 3] = 5; // ambient_idx_0 (BGE index)
+        mud[off + 4] = 6; // ambient_idx_1 (BGE index)
+        mud[off + 5] = 91; // effect_idx_0 (EFF index)
         mud[off + 6] = 106; // effect_idx_1 (EFF index)
-        mud[off + 7] = 0;   // effect_idx_2
+        mud[off + 7] = 0; // effect_idx_2
 
         MudBlob blob = MudBlobParser.Parse(new ReadOnlyMemory<byte>(mud));
         MudTileRecord rec = blob.Tiles[1 * 64 + 2];
         MudTile tile = MudTile.FromRecord(rec);
 
-        Assert.Equal((byte)3,   tile.BgmIdx);
-        Assert.Equal((byte)5,   tile.BgeIdx0);
-        Assert.Equal((byte)6,   tile.BgeIdx1);
-        Assert.Equal((byte)91,  tile.EffIdx0);
+        Assert.Equal((byte)3, tile.BgmIdx);
+        Assert.Equal((byte)5, tile.BgeIdx0);
+        Assert.Equal((byte)6, tile.BgeIdx1);
+        Assert.Equal((byte)91, tile.EffIdx0);
         Assert.Equal((byte)106, tile.EffIdx1);
-        Assert.Equal((byte)0,   tile.EffIdx2);
+        Assert.Equal((byte)0, tile.EffIdx2);
     }
 
     // =========================================================================
@@ -398,9 +425,9 @@ public sealed class Wave8ParserTests
         // SolidRecord at offset 4 (108 bytes).
         // AABB @ +0..+15: VERIFIED.
         // spec: §11.2 — aabb_xmin f32 @ +000: VERIFIED.
-        WriteF32LE(buf, 4 + 0,  aabbXMin);
-        WriteF32LE(buf, 4 + 4,  aabbZMin);
-        WriteF32LE(buf, 4 + 8,  aabbXMax);
+        WriteF32LE(buf, 4 + 0, aabbXMin);
+        WriteF32LE(buf, 4 + 4, aabbZMin);
+        WriteF32LE(buf, 4 + 8, aabbXMax);
         WriteF32LE(buf, 4 + 12, aabbZMax);
         // +016..+059: _reserved_a (all zero — already zero in buf). VERIFIED.
         // quad_count_embedded @ +060: VERIFIED.
@@ -415,9 +442,9 @@ public sealed class Wave8ParserTests
         // QuadRecord at offset 116 (48 bytes).
         // Corners +0..+31: VERIFIED.
         // spec: §11.3 — x0 f32 @ +000: VERIFIED.
-        WriteF32LE(buf, 116 + 0,  x0);
-        WriteF32LE(buf, 116 + 4,  z0);
-        WriteF32LE(buf, 116 + 8,  x1);
+        WriteF32LE(buf, 116 + 0, x0);
+        WriteF32LE(buf, 116 + 4, z0);
+        WriteF32LE(buf, 116 + 8, x1);
         WriteF32LE(buf, 116 + 12, z1);
         WriteF32LE(buf, 116 + 16, x2);
         WriteF32LE(buf, 116 + 20, z2);
@@ -486,9 +513,9 @@ public sealed class Wave8ParserTests
         CollisionQuad quad = blob.Solids[0].Quads[0];
 
         Assert.Equal(-27.5f, quad.Plane0, precision: 4); // PARTIAL — confirmed present
-        Assert.Equal(0f,     quad.Plane1, precision: 5);
-        Assert.Equal(1234.5f,quad.Plane2, precision: 4);
-        Assert.Equal(0f,     quad.Plane3, precision: 5);
+        Assert.Equal(0f, quad.Plane1, precision: 5);
+        Assert.Equal(1234.5f, quad.Plane2, precision: 4);
+        Assert.Equal(0f, quad.Plane3, precision: 5);
     }
 
     [Fact]
@@ -506,7 +533,7 @@ public sealed class Wave8ParserTests
         Assert.Single(blob.RawSolidRecords);
         Assert.Equal(108, blob.RawSolidRecords[0].Length); // stride CONFIRMED
         Assert.Equal(1u, blob.TriangleCounts[0]);
-        Assert.Equal(48, blob.RawTriangleData[0].Length);  // stride CONFIRMED
+        Assert.Equal(48, blob.RawTriangleData[0].Length); // stride CONFIRMED
     }
 
     // =========================================================================
@@ -521,12 +548,12 @@ public sealed class Wave8ParserTests
         float posScale, float negScale)
     {
         byte[] buf = new byte[60]; // stride 60 bytes
-        WriteU16LE(buf, 0, level);       // +0 u16 level: CONFIRMED
-        WriteU16LE(buf, 2, 0);           // +2 u16 zero pad: CONFIRMED
-        WriteU16LE(buf, 4, tierStepA);   // +4 u16 TierStepA: CONFIRMED
-        WriteU16LE(buf, 6, tierStepB);   // +6 u16 TierStepB: CONFIRMED
-        WriteU16LE(buf, 8, divisorC);    // +8 u16 DivisorC: CONFIRMED
-        WriteU16LE(buf, 10, 0);          // +10 u16 zero pad: CONFIRMED
+        WriteU16LE(buf, 0, level); // +0 u16 level: CONFIRMED
+        WriteU16LE(buf, 2, 0); // +2 u16 zero pad: CONFIRMED
+        WriteU16LE(buf, 4, tierStepA); // +4 u16 TierStepA: CONFIRMED
+        WriteU16LE(buf, 6, tierStepB); // +6 u16 TierStepB: CONFIRMED
+        WriteU16LE(buf, 8, divisorC); // +8 u16 DivisorC: CONFIRMED
+        WriteU16LE(buf, 10, 0); // +10 u16 zero pad: CONFIRMED
         // +12..+27: 4×f32 positive-scale group (all same value for simplicity).
         for (int i = 0; i < 4; i++) WriteF32LE(buf, 12 + i * 4, posScale);
         // +28..+43: 4×f32 negative-scale group.
@@ -598,18 +625,18 @@ public sealed class Wave8ParserTests
         uint tert1, uint tert2)
     {
         byte[] buf = new byte[32]; // stride 32 bytes
-        WriteU16LE(buf, 0, key);        // +0 u16 key: CONFIRMED
-        WriteU16LE(buf, 2, const25);    // +2 u16 constant=25: CONFIRMED
-        WriteU16LE(buf, 4, sg1Gain);    // +4 u16 sg1 gain: CONFIRMED
-        WriteU16LE(buf, 6, 0);          // +6 u16 zero pad: CONFIRMED
-        WriteU32LE(buf, 8, sg1Cumul);   // +8 u32 sg1 cumulative: CONFIRMED (was u16)
-        WriteU16LE(buf, 12, sg2Gain);   // +12 u16 sg2 gain: CONFIRMED
-        WriteU16LE(buf, 14, 0);         // +14 u16 zero pad: CONFIRMED
-        WriteU32LE(buf, 16, sg2Cumul);  // +16 u32 sg2 cumulative: CONFIRMED
-        WriteU16LE(buf, 20, secLow);    // +20 u16 sec low: CONFIRMED
-        WriteU16LE(buf, 22, secHigh);   // +22 u16 sec high: CONFIRMED
-        WriteU32LE(buf, 24, tert1);     // +24 u32 tert1: CONFIRMED
-        WriteU32LE(buf, 28, tert2);     // +28 u32 tert2: CONFIRMED
+        WriteU16LE(buf, 0, key); // +0 u16 key: CONFIRMED
+        WriteU16LE(buf, 2, const25); // +2 u16 constant=25: CONFIRMED
+        WriteU16LE(buf, 4, sg1Gain); // +4 u16 sg1 gain: CONFIRMED
+        WriteU16LE(buf, 6, 0); // +6 u16 zero pad: CONFIRMED
+        WriteU32LE(buf, 8, sg1Cumul); // +8 u32 sg1 cumulative: CONFIRMED (was u16)
+        WriteU16LE(buf, 12, sg2Gain); // +12 u16 sg2 gain: CONFIRMED
+        WriteU16LE(buf, 14, 0); // +14 u16 zero pad: CONFIRMED
+        WriteU32LE(buf, 16, sg2Cumul); // +16 u32 sg2 cumulative: CONFIRMED
+        WriteU16LE(buf, 20, secLow); // +20 u16 sec low: CONFIRMED
+        WriteU16LE(buf, 22, secHigh); // +22 u16 sec high: CONFIRMED
+        WriteU32LE(buf, 24, tert1); // +24 u32 tert1: CONFIRMED
+        WriteU32LE(buf, 28, tert2); // +28 u32 tert2: CONFIRMED
         return buf;
     }
 

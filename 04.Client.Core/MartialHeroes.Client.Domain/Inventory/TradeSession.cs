@@ -87,7 +87,8 @@ public readonly record struct TradeSession
             return (this, false);
         }
 
-        return (new TradeSession { Phase = TradePhase.Requested, PartnerActorId = partnerActorId, LocalItemCount = 0 }, true);
+        return (new TradeSession { Phase = TradePhase.Requested, PartnerActorId = partnerActorId, LocalItemCount = 0 },
+            true);
     }
 
     /// <summary>

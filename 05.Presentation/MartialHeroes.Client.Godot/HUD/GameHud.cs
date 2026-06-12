@@ -191,12 +191,24 @@ public sealed partial class GameHud : Control
         vbox.AddChild(_combatStatsLabel);
 
         // ---- Hotbar (bottom of screen) ----
-        try { BuildHotbar(); }
-        catch (Exception ex) { GD.PrintErr($"[GameHud] BuildHotbar failed: {ex.Message}"); }
+        try
+        {
+            BuildHotbar();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] BuildHotbar failed: {ex.Message}");
+        }
 
         // ---- Chat (bottom-right corner) ----
-        try { BuildChatPanel(); }
-        catch (Exception ex) { GD.PrintErr($"[GameHud] BuildChatPanel failed: {ex.Message}"); }
+        try
+        {
+            BuildChatPanel();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] BuildChatPanel failed: {ex.Message}");
+        }
     }
 
     /// <summary>

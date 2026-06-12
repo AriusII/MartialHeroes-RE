@@ -323,7 +323,8 @@ internal static class SyntheticFrames
     /// 3/1 character list (3-byte header + one 981-byte record per set bit). Each record's first 880
     /// bytes are a SpawnDescriptor. spec: 3-1_character_list.yaml.
     /// </summary>
-    public static byte[] CharacterList(byte serverId, byte channelId, params (int Slot, string Name, ushort Level, uint Hp, ushort Class)[] slots)
+    public static byte[] CharacterList(byte serverId, byte channelId,
+        params (int Slot, string Name, ushort Level, uint Hp, ushort Class)[] slots)
     {
         byte mask = 0;
         foreach (var s in slots)

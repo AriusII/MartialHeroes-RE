@@ -1063,9 +1063,9 @@ public sealed class BudSceneNormalAndUvBinaryTests
         const float n = 0.577350259f; // ≈ 1/√3 — unit vector for (1,1,1) direction
         BudVertex[] verts =
         [
-            new BudVertex(PosX: 0f,  PosY: 0f, PosZ: 0f,  NormalX: n, NormalY: n, NormalZ: n, UvU: 0.0f, UvV: 0.0f),
-            new BudVertex(PosX: 1f,  PosY: 0f, PosZ: 0f,  NormalX: n, NormalY: n, NormalZ: n, UvU: 1.0f, UvV: 0.0f),
-            new BudVertex(PosX: 0f,  PosY: 0f, PosZ: 1f,  NormalX: n, NormalY: n, NormalZ: n, UvU: 0.0f, UvV: 1.0f),
+            new BudVertex(PosX: 0f, PosY: 0f, PosZ: 0f, NormalX: n, NormalY: n, NormalZ: n, UvU: 0.0f, UvV: 0.0f),
+            new BudVertex(PosX: 1f, PosY: 0f, PosZ: 0f, NormalX: n, NormalY: n, NormalZ: n, UvU: 1.0f, UvV: 0.0f),
+            new BudVertex(PosX: 0f, PosY: 0f, PosZ: 1f, NormalX: n, NormalY: n, NormalZ: n, UvU: 0.0f, UvV: 1.0f),
         ];
 
         return new BudScene
@@ -1128,8 +1128,8 @@ public sealed class BudSceneNormalAndUvBinaryTests
 
         const float expected = 0.577350259f;
         Assert.Equal(-expected, nx, precision: 4); // X must be negated
-        Assert.Equal( expected, ny, precision: 4); // Y unchanged
-        Assert.Equal( expected, nz, precision: 4); // Z unchanged
+        Assert.Equal(expected, ny, precision: 4); // Y unchanged
+        Assert.Equal(expected, nz, precision: 4); // Z unchanged
     }
 
     [Fact]
@@ -1411,9 +1411,9 @@ public sealed class XeffJsonNamedFieldsTests
             "staticState must expose named 'rotation' quaternion.");
         Assert.Equal(4, rot.GetArrayLength());
         // For 90° Y rotation: X=0, Y≈sin(45°)=0.7071, Z=0, W≈cos(45°)=0.7071.
-        Assert.Equal(0f,      rot[0].GetSingle(), precision: 3); // X
+        Assert.Equal(0f, rot[0].GetSingle(), precision: 3); // X
         Assert.Equal(0.7071f, rot[1].GetSingle(), precision: 3); // Y
-        Assert.Equal(0f,      rot[2].GetSingle(), precision: 3); // Z
+        Assert.Equal(0f, rot[2].GetSingle(), precision: 3); // Z
         Assert.Equal(0.7071f, rot[3].GetSingle(), precision: 3); // W
     }
 

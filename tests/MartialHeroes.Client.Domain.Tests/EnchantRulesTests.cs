@@ -15,7 +15,7 @@ public sealed class EnchantRulesTests
 
     [Theory]
     [InlineData(100.0, true, true, true)]
-    [InlineData(99.9, true, true, false)]   // gauge not full
+    [InlineData(99.9, true, true, false)] // gauge not full
     [InlineData(100.0, false, true, false)] // cannot act
     [InlineData(100.0, true, false, false)] // busy
     public void CanCommit_GatedOnGauge_AndPredicates(double gauge, bool canAct, bool notBusy, bool expected)

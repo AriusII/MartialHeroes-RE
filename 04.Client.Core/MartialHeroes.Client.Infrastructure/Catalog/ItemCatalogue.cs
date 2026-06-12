@@ -126,8 +126,8 @@ public sealed class ItemCatalogue
                 // ── Bonus stats ──────────────────────────────────────────────
                 // col64: bonus_atk. HIGH. col65: bonus_HP. CONFIRMED. col68: bonus_ext_atk. HIGH.
                 // spec: Docs/RE/formats/config_tables.md §4.3 — "col64/65/68: HIGH/CONFIRMED".
-                BonusAtk    = row.BonusAtk,
-                BonusHp     = row.BonusHp,
+                BonusAtk = row.BonusAtk,
+                BonusHp = row.BonusHp,
                 BonusExtAtk = row.BonusExtAtk,
 
                 // col84: bonus_chi. HIGH.
@@ -142,8 +142,8 @@ public sealed class ItemCatalogue
                 // col93: bonus_defense_A. HIGH. col94: phys_defense. CONFIRMED. col96: armor_defense. HIGH.
                 // spec: Docs/RE/formats/config_tables.md §4.3 — "col93/94/96: HIGH/CONFIRMED/HIGH".
                 BonusDefenseA = row.BonusDefenseA,
-                PhysDefense   = row.PhysDefense,
-                ArmorDefense  = row.ArmorDefense,
+                PhysDefense = row.PhysDefense,
+                ArmorDefense = row.ArmorDefense,
 
                 // ── Consumable ───────────────────────────────────────────────
                 // col112: duration_minutes. CONFIRMED.

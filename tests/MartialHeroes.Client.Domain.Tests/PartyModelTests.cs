@@ -29,7 +29,7 @@ public sealed class PartyModelTests
         var party = new PartyModel();
         party.Form(1, 1);
 
-        Assert.False(party.Form(2, 2));        // already formed
+        Assert.False(party.Form(2, 2)); // already formed
         Assert.False(new PartyModel().Form(1, 0)); // zero leader
     }
 
@@ -45,9 +45,9 @@ public sealed class PartyModelTests
         }
 
         Assert.True(party.IsFull);
-        Assert.False(party.Join(99));   // overflow
-        Assert.False(party.Join(2));    // duplicate
-        Assert.False(party.Join(0));    // zero id
+        Assert.False(party.Join(99)); // overflow
+        Assert.False(party.Join(2)); // duplicate
+        Assert.False(party.Join(0)); // zero id
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public sealed class PartyModelTests
 
         Assert.False(party.Kick(byActorId: 2, targetActorId: 3)); // non-leader cannot kick
         Assert.False(party.Kick(byActorId: 1, targetActorId: 1)); // leader cannot kick self
-        Assert.True(party.Kick(byActorId: 1, targetActorId: 3));  // leader kicks member
+        Assert.True(party.Kick(byActorId: 1, targetActorId: 3)); // leader kicks member
         Assert.False(party.Contains(3));
     }
 

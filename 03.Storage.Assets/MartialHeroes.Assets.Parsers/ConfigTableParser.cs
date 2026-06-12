@@ -150,7 +150,7 @@ public static class ConfigTableParser
             // spec: Docs/RE/formats/config_tables.md §2.4 — "+10 u16 always zero: CONFIRMED".
             ushort tierStepA = BinaryPrimitives.ReadUInt16LittleEndian(rec[4..]);
             ushort tierStepB = BinaryPrimitives.ReadUInt16LittleEndian(rec[6..]);
-            ushort divisorC  = BinaryPrimitives.ReadUInt16LittleEndian(rec[8..]);
+            ushort divisorC = BinaryPrimitives.ReadUInt16LittleEndian(rec[8..]);
             // +10 u16 zero pad: consumed implicitly (float array starts at +12).
 
             // Stat-scale positive group [0..3] f32×4 @ +12..+27. CONFIRMED.

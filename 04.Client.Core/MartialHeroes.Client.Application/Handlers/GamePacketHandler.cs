@@ -622,7 +622,8 @@ public sealed class GamePacketHandler : IPacketHandler
         var skill = new SkillId(unchecked((uint)packet.SkillId));
         if (_localPlayer is not null)
         {
-            int cooldownMs = CooldownDurationResolver?.Invoke(skill) ?? 0; // skills.scr lookup; 0 = ready. spec: skills.md §4.
+            int cooldownMs =
+                CooldownDurationResolver?.Invoke(skill) ?? 0; // skills.scr lookup; 0 = ready. spec: skills.md §4.
             _localPlayer.SetHotbarSlot(packet.HotbarSlot, skill, packet.SkillPoints, cooldownMs);
         }
 

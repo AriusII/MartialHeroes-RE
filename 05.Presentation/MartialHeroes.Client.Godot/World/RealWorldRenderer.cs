@@ -141,26 +141,56 @@ public sealed partial class RealWorldRenderer : Node3D
         // Wire the texture resolver into TerrainNode so each sector can get a real texture.
         // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — 1-based TextureIndexGrid → texture path.
         // Each step below is in its own try/catch so one failure does not block the rest.
-        try { WireTerrainTextureResolver(terrainNode); }
-        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] WireTerrainTextureResolver failed: {ex.Message}"); }
+        try
+        {
+            WireTerrainTextureResolver(terrainNode);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] WireTerrainTextureResolver failed: {ex.Message}");
+        }
 
         // Kick off 3×3 terrain streaming via SectorStreamingService.
         // spec: Docs/RE/formats/terrain.md §9.2 (3×3 ring, StreamQuality.Medium).
-        try { TriggerTerrainStreaming(ctx); }
-        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] TriggerTerrainStreaming failed: {ex.Message}"); }
+        try
+        {
+            TriggerTerrainStreaming(ctx);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] TriggerTerrainStreaming failed: {ex.Message}");
+        }
 
         // Load BUD scene and create MeshInstance3D children.
-        try { LoadAndSpawnBudScene(); }
-        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] LoadAndSpawnBudScene failed: {ex.Message}"); }
+        try
+        {
+            LoadAndSpawnBudScene();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] LoadAndSpawnBudScene failed: {ex.Message}");
+        }
 
         // Spawn skinned character (if available).
-        try { LoadAndSpawnCharacter(); }
-        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] LoadAndSpawnCharacter failed: {ex.Message}"); }
+        try
+        {
+            LoadAndSpawnCharacter();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] LoadAndSpawnCharacter failed: {ex.Message}");
+        }
 
         // Position a camera above the origin cell centre.
         // spec: Docs/RE/formats/terrain.md §1.4 — worldX_min = (mapX-10000)×1024, cell size 1024. CONFIRMED.
-        try { SpawnCamera(); }
-        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] SpawnCamera failed: {ex.Message}"); }
+        try
+        {
+            SpawnCamera();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] SpawnCamera failed: {ex.Message}");
+        }
 
         GD.Print($"[RealWorldRenderer] Real-asset render initialised for cell ({TargetMapX},{TargetMapZ}).");
     }
@@ -304,8 +334,15 @@ public sealed partial class RealWorldRenderer : Node3D
         }
 
         BudScene? scene = null;
-        try { scene = _assets.LoadBud(budPath); }
-        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] LoadBud failed: {ex.Message}"); return; }
+        try
+        {
+            scene = _assets.LoadBud(budPath);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] LoadBud failed: {ex.Message}");
+            return;
+        }
 
         if (scene is null || scene.Objects.Length == 0)
         {
@@ -338,8 +375,14 @@ public sealed partial class RealWorldRenderer : Node3D
 
         // Attempt to apply terrain texture from the map TEXTURES directive.
         // spec: Docs/RE/formats/terrain.md §3.5 TEXTURES directive — tex_id indexed array.
-        try { TryApplyBudTexture(budRoot); }
-        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] TryApplyBudTexture failed: {ex.Message}"); }
+        try
+        {
+            TryApplyBudTexture(budRoot);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] TryApplyBudTexture failed: {ex.Message}");
+        }
 
         GD.Print($"[RealWorldRenderer] BUD scene spawned: {scene.Objects.Length} objects.");
     }
@@ -403,8 +446,15 @@ public sealed partial class RealWorldRenderer : Node3D
 
         // Resolve .skn path: use explicit property or discover the first available.
         string? sknPath = null;
-        try { sknPath = SknVirtualPath ?? DiscoverFirstSknPath(); }
-        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] DiscoverFirstSknPath failed: {ex.Message}"); return; }
+        try
+        {
+            sknPath = SknVirtualPath ?? DiscoverFirstSknPath();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] DiscoverFirstSknPath failed: {ex.Message}");
+            return;
+        }
 
         if (sknPath is null)
         {
@@ -424,7 +474,7 @@ public sealed partial class RealWorldRenderer : Node3D
             bool ok = _assets.LoadSkinned(
                 sknPath: sknPath,
                 bndPath: bndPath,
-                motPaths: null,  // No .mot discovered yet — static pose only.
+                motPaths: null, // No .mot discovered yet — static pose only.
                 glbOutput: glbStream);
 
             if (!ok) return;

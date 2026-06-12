@@ -201,8 +201,9 @@ public sealed partial class ClientContext : Node
         try
         {
             scrStatCatalogue = ScrStatCatalogue.FromLoader(_catalogueLoader);
-            GD.Print($"[ClientContext] ScrStatCatalogue loaded (HP curve entries={scrStatCatalogue.GetHpBaseCurve().Count}, " +
-                     $"MP curve entries={scrStatCatalogue.GetMpBaseCurve().Count}).");
+            GD.Print(
+                $"[ClientContext] ScrStatCatalogue loaded (HP curve entries={scrStatCatalogue.GetHpBaseCurve().Count}, " +
+                $"MP curve entries={scrStatCatalogue.GetMpBaseCurve().Count}).");
         }
         catch (Exception ex)
         {

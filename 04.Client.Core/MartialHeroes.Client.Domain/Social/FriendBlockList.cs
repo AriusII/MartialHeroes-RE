@@ -137,7 +137,8 @@ public sealed class FriendBlockList
         {
             if (_slots[i].IsEmpty)
             {
-                _slots[i] = new RelationSlot { PartnerId = partnerId, Field1 = field1, Field2 = field2, Field3 = field3 };
+                _slots[i] = new RelationSlot
+                    { PartnerId = partnerId, Field1 = field1, Field2 = field2, Field3 = field3 };
                 return i;
             }
         }

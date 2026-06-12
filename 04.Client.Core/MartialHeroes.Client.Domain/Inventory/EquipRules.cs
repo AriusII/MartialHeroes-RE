@@ -148,10 +148,10 @@ public static class EquipRules
         }
 
         return stats.Str >= requirement.RequiredStr
-            && stats.Dex >= requirement.RequiredDex
-            && stats.Agi >= requirement.RequiredAgi
-            && stats.Con >= requirement.RequiredCon
-            && stats.Int >= requirement.RequiredInt;
+               && stats.Dex >= requirement.RequiredDex
+               && stats.Agi >= requirement.RequiredAgi
+               && stats.Con >= requirement.RequiredCon
+               && stats.Int >= requirement.RequiredInt;
     }
 
     /// <summary>

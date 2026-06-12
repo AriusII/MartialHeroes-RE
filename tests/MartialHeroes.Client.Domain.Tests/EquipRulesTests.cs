@@ -64,7 +64,8 @@ public sealed class EquipRulesTests
             OtherActorContextId = 2,
         };
 
-        EquipCheckResult result = EquipRules.CheckEquip(0, EquipSlots.StatExcludedSlot, EquipStateGates.AllClear, relation);
+        EquipCheckResult result =
+            EquipRules.CheckEquip(0, EquipSlots.StatExcludedSlot, EquipStateGates.AllClear, relation);
 
         Assert.Equal(EquipCheckResult.Allowed, result);
     }

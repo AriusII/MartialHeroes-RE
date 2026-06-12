@@ -117,8 +117,8 @@ public sealed class ScrStatCatalogue : IStatCatalogueSource
             // We use divisorC as a proxy for A (confirmed values: 2 → 15.0, 3 → 10.0, 4 → 7.5).
             // spec: §2.4 — "when C=2 formula yields 15.0; C=3 → 10.0; C=4 → 7.5 using B=3.0".
             float gridFactor = divisorC > 0
-                ? (10.0f / (float)divisorC) * 3.0f  // (10/divisorC) × B(=3.0)
-                : 0.0f;                               // divide-by-zero guard: 0 when divisorC=0
+                ? (10.0f / (float)divisorC) * 3.0f // (10/divisorC) × B(=3.0)
+                : 0.0f; // divide-by-zero guard: 0 when divisorC=0
 
             // Combine: posScale × gridFactor gives the tier-adjusted scale per level.
             // Multiply by LevelScaleMultiplier to convert to an integer curve value.

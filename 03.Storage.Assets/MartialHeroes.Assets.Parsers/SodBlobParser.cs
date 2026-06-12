@@ -39,10 +39,11 @@ public static class SodBlobParser
 
     // SolidRecord field offsets (all VERIFIED or CONFIRMED).
     // spec: Docs/RE/formats/terrain.md §11.2.
-    private const int SolidAabbXMinOffset  =  0;  // f32 VERIFIED
-    private const int SolidAabbZMinOffset  =  4;  // f32 VERIFIED
-    private const int SolidAabbXMaxOffset  =  8;  // f32 VERIFIED
-    private const int SolidAabbZMaxOffset  = 12;  // f32 VERIFIED
+    private const int SolidAabbXMinOffset = 0; // f32 VERIFIED
+    private const int SolidAabbZMinOffset = 4; // f32 VERIFIED
+    private const int SolidAabbXMaxOffset = 8; // f32 VERIFIED
+
+    private const int SolidAabbZMaxOffset = 12; // f32 VERIFIED
     // +016..+059: _reserved_a (all-zero, VERIFIED — meaning UNVERIFIED)
     // +060: quad_count_embedded u32 (VERIFIED — parser reads stream copy instead)
     // +064: _authoring_ptr u32 (stale pointer, VERIFIED — parser ignores it)
@@ -50,18 +51,18 @@ public static class SodBlobParser
 
     // QuadRecord field offsets.
     // spec: Docs/RE/formats/terrain.md §11.3.
-    private const int QuadX0Offset     =  0;  // f32 VERIFIED
-    private const int QuadZ0Offset     =  4;  // f32 VERIFIED
-    private const int QuadX1Offset     =  8;  // f32 VERIFIED
-    private const int QuadZ1Offset     = 12;  // f32 VERIFIED
-    private const int QuadX2Offset     = 16;  // f32 VERIFIED
-    private const int QuadZ2Offset     = 20;  // f32 VERIFIED
-    private const int QuadX3Offset     = 24;  // f32 VERIFIED
-    private const int QuadZ3Offset     = 28;  // f32 VERIFIED
-    private const int QuadPlane0Offset = 32;  // f32 PARTIAL
-    private const int QuadPlane1Offset = 36;  // f32 PARTIAL
-    private const int QuadPlane2Offset = 40;  // f32 PARTIAL
-    private const int QuadPlane3Offset = 44;  // f32 PARTIAL
+    private const int QuadX0Offset = 0; // f32 VERIFIED
+    private const int QuadZ0Offset = 4; // f32 VERIFIED
+    private const int QuadX1Offset = 8; // f32 VERIFIED
+    private const int QuadZ1Offset = 12; // f32 VERIFIED
+    private const int QuadX2Offset = 16; // f32 VERIFIED
+    private const int QuadZ2Offset = 20; // f32 VERIFIED
+    private const int QuadX3Offset = 24; // f32 VERIFIED
+    private const int QuadZ3Offset = 28; // f32 VERIFIED
+    private const int QuadPlane0Offset = 32; // f32 PARTIAL
+    private const int QuadPlane1Offset = 36; // f32 PARTIAL
+    private const int QuadPlane2Offset = 40; // f32 PARTIAL
+    private const int QuadPlane3Offset = 44; // f32 PARTIAL
 
     /// <summary>
     /// Parses the raw bytes of a <c>.sod</c> file into a <see cref="SodBlob"/>.
@@ -188,22 +189,22 @@ public static class SodBlobParser
         {
             solids[s] = new SolidRecord
             {
-                AabbXMin  = solidAabbXMin[s],
-                AabbZMin  = solidAabbZMin[s],
-                AabbXMax  = solidAabbXMax[s],
-                AabbZMax  = solidAabbZMax[s],
-                Quads     = decodedQuadsPerSolid[s],
+                AabbXMin = solidAabbXMin[s],
+                AabbZMin = solidAabbZMin[s],
+                AabbXMax = solidAabbXMax[s],
+                AabbZMax = solidAabbZMax[s],
+                Quads = decodedQuadsPerSolid[s],
                 RawRecord = rawSolids[s],
             };
         }
 
         return new SodBlob
         {
-            SolidCount       = solidCount,
-            Solids           = solids,
-            RawSolidRecords  = rawSolids,
-            TriangleCounts   = triCounts,
-            RawTriangleData  = rawTris,
+            SolidCount = solidCount,
+            Solids = solids,
+            RawSolidRecords = rawSolids,
+            TriangleCounts = triCounts,
+            RawTriangleData = rawTris,
         };
     }
 }

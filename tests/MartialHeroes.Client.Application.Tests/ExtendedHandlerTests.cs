@@ -31,7 +31,8 @@ public sealed class ExtendedHandlerTests
         return events;
     }
 
-    private static (GamePacketHandler Handler, InboundFrameDispatcher Dispatcher, ClientEventBus Bus, ClientWorld World, LocalPlayerState Local)
+    private static (GamePacketHandler Handler, InboundFrameDispatcher Dispatcher, ClientEventBus Bus, ClientWorld World,
+        LocalPlayerState Local)
         NewHarness(
             Func<CombatStats, CombatStats>? recompute = null,
             Func<SkillId, int>? cooldownResolver = null,
@@ -55,7 +56,11 @@ public sealed class ExtendedHandlerTests
     {
         bool recomputed = false;
         var (_, dispatcher, bus, world, _) = NewHarness(
-            recompute: s => { recomputed = true; return s with { AttackRating = 123 }; });
+            recompute: s =>
+            {
+                recomputed = true;
+                return s with { AttackRating = 123 };
+            });
         var key = new ActorKey(9, EntitySort.PlayerCharacter);
         world.Add(new Actor(key, 1, VitalStats.FromResolved(100, 0, 0), 100, 0, 0, Vector3Fixed.Zero));
         world.LocalActorKey = key;
@@ -76,7 +81,11 @@ public sealed class ExtendedHandlerTests
     public void EquipResult_4_12_failure_does_not_recompute()
     {
         bool recomputed = false;
-        var (_, dispatcher, bus, world, _) = NewHarness(recompute: s => { recomputed = true; return s; });
+        var (_, dispatcher, bus, world, _) = NewHarness(recompute: s =>
+        {
+            recomputed = true;
+            return s;
+        });
         var key = new ActorKey(9, EntitySort.PlayerCharacter);
         world.Add(new Actor(key, 1, VitalStats.FromResolved(100, 0, 0), 100, 0, 0, Vector3Fixed.Zero));
         world.LocalActorKey = key;
@@ -160,7 +169,11 @@ public sealed class ExtendedHandlerTests
     public void SkillPointUpdate_4_150_mode2_updates_level_and_recomputes()
     {
         bool recomputed = false;
-        var (_, dispatcher, bus, world, _) = NewHarness(recompute: s => { recomputed = true; return s; });
+        var (_, dispatcher, bus, world, _) = NewHarness(recompute: s =>
+        {
+            recomputed = true;
+            return s;
+        });
         var key = new ActorKey(7, EntitySort.PlayerCharacter);
         world.Add(new Actor(key, 1, VitalStats.FromResolved(100, 0, 0), 100, 0, 0, Vector3Fixed.Zero));
         world.LocalActorKey = key;
@@ -196,7 +209,11 @@ public sealed class ExtendedHandlerTests
     public void BuffSlotUpdate_5_31_local_player_applies_to_buff_table_and_recomputes()
     {
         bool recomputed = false;
-        var (_, dispatcher, bus, world, local) = NewHarness(recompute: s => { recomputed = true; return s; });
+        var (_, dispatcher, bus, world, local) = NewHarness(recompute: s =>
+        {
+            recomputed = true;
+            return s;
+        });
         var key = new ActorKey(7, EntitySort.PlayerCharacter);
         world.Add(new Actor(key, 1, VitalStats.FromResolved(100, 0, 0), 100, 0, 0, Vector3Fixed.Zero));
         world.LocalActorKey = key;

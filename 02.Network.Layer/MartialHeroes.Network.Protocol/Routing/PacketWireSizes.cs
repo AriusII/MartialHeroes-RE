@@ -76,7 +76,8 @@ public static class PacketWireSizes
                 size = SmsgSkillHotbarSlotSet.WireSize;
                 isVariableLength = false;
                 return true;
-            case Opcodes.Opcodes.SmsgSkillHotbarAssignResult: // spec: Docs/RE/structs/skill.md (SkillHotbarAssignResult, 4/41)
+            case Opcodes.Opcodes.SmsgSkillHotbarAssignResult
+                : // spec: Docs/RE/structs/skill.md (SkillHotbarAssignResult, 4/41)
                 size = SmsgSkillHotbarAssignResult.WireSize;
                 isVariableLength = false;
                 return true;

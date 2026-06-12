@@ -65,8 +65,8 @@ public sealed class ItemStackOpsTests
         bool ok = ItemStackOps.Merge(grid, fromIndex: 1, toIndex: 0);
 
         Assert.True(ok);
-        Assert.Equal(99u, grid[0].Quantity);   // capped
-        Assert.Equal(6u, grid[1].Quantity);    // overflow stays
+        Assert.Equal(99u, grid[0].Quantity); // capped
+        Assert.Equal(6u, grid[1].Quantity); // overflow stays
     }
 
     [Fact]

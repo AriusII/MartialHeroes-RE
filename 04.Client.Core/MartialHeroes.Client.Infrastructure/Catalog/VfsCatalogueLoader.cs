@@ -34,9 +34,9 @@ public sealed class VfsCatalogueLoader : IDisposable
     // All paths are stored lowercase; the VFS binary-search key is lowercased: CONFIRMED.
     // spec: Docs/RE/formats/pak.md §"Lookup algorithm" step 1 — "lowercase the requested virtual path": CONFIRMED.
     private const string UserLevelScrPath = "data/script/userlevel.scr"; // spec: §2.4
-    private const string SkillsScrPath    = "data/script/skills.scr";    // spec: §2.8
-    private const string MobsScrPath      = "data/script/mobs.scr";      // spec: §2.9
-    private const string ItemsCsvPath     = "data/script/items.csv";     // spec: §4.1
+    private const string SkillsScrPath = "data/script/skills.scr"; // spec: §2.8
+    private const string MobsScrPath = "data/script/mobs.scr"; // spec: §2.9
+    private const string ItemsCsvPath = "data/script/items.csv"; // spec: §4.1
 
     private readonly MappedVfsArchive? _archive;
     private bool _disposed;

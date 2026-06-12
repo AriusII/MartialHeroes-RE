@@ -44,7 +44,7 @@ public sealed class TradeSessionTests
     public void Request_RejectedWhenNotIdle_OrZeroPartner()
     {
         var (req, _) = TradeSession.Idle.Request(1);
-        Assert.False(req.Request(2).Accepted);          // already requested
+        Assert.False(req.Request(2).Accepted); // already requested
         Assert.False(TradeSession.Idle.Request(0).Accepted); // zero partner
     }
 
