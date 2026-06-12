@@ -282,7 +282,9 @@ public sealed partial class RealWorldRenderer : Node3D
         try
         {
             // spec: Docs/RE/formats/terrain.md §4.2 — bgtexture.txt path. CONFIRMED.
-            string txtPath = $"data/map{tag}/texture/bgtexture.txt";
+            // The bgtexture pool + texture .dds are GLOBAL under map000 for ALL areas (there is no
+            // per-area bgtexture.txt). spec: Docs/RE/formats/terrain.md §4.2 — global map000 pool. CONFIRMED.
+            string txtPath = "data/map000/texture/bgtexture.txt";
             if (_assets.Contains(txtPath))
             {
                 _bgTextures = BgTextureTxtParser.Parse(_assets.GetRaw(txtPath));
@@ -341,8 +343,8 @@ public sealed partial class RealWorldRenderer : Node3D
         string? rel = _bgTextures.GetRelPath(list[li].TexId);
         if (rel is null) return null;
 
-        string tag = AreaTag(TargetAreaId);
-        string ddsPath = $"data/map{tag}/texture/{rel}.dds";
+        // Texture .dds live under the GLOBAL map000 pool for all areas. spec: terrain.md §4.2. CONFIRMED.
+        string ddsPath = $"data/map000/texture/{rel}.dds";
         return _assets.Contains(ddsPath) ? _assets.LoadTexture(ddsPath) : null;
     }
 
@@ -571,7 +573,12 @@ public sealed partial class RealWorldRenderer : Node3D
             // Resolve the character's diffuse texture from skin.txt (mesh.IdA -> tex id -> PNG).
             // spec: Docs/RE/formats/mesh.md §.skn texture binding via data/char/skin.txt. CONFIRMED.
             ImageTexture? albedo = CharacterTextureResolver.Resolve(_assets, skinnedMesh);
-            charRoot = SkinnedCharacterBuilder.Build(skinnedMesh, skeleton, clip, albedo: albedo);
+            // Render the STATIC upright mesh (no skeleton): the up-axis fix in SkinnedCharacterBuilder
+            // stands the raw mesh correctly, but the skinned/animated path still explodes the mesh
+            // (the Skin inverse-bind matrices are wrong — a dedicated skinning fix is tracked). Passing
+            // the skeleton+clip is what triggers the explosion, so we omit them until skinning is fixed.
+            _ = skeleton; _ = clip; // intentionally unused until the skinning fix lands
+            charRoot = SkinnedCharacterBuilder.Build(skinnedMesh, null, null, albedo: albedo);
         }
         catch (Exception ex)
         {

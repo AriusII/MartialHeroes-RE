@@ -9,50 +9,113 @@
 //     │    └─ MeshInstance3D  — ArrayMesh with Bones/Weights arrays + Skin, child of Skeleton3D
 //     └─ AnimationPlayer     — one animation library entry from the .mot clip (or absent if no clip)
 //
-// Coordinate conventions (D3D9 left-handed → Godot right-handed):
-//   .skn / .bnd data is in MESH-LOCAL space (not world-space absolute). The handedness flip
-//   for mesh-local geometry is NEGATE X — matching SknMeshBuilder and the comment in
-//   WorldCoordinates.cs: "the mesh uses its per-vertex convention" (negate X).
-//   spec: Helpers/WorldCoordinates.cs — "mesh-local geometry uses negate X".
-//   spec: Docs/RE/formats/mesh.md §Vertex record — "pos_x stored second on disk at sub-offset 12".
-//   spec: Docs/RE/formats/mesh.md §Quaternion component order — "XYZW: X at +20, Y +24, Z +28, W +32".
+// ============================================================================
+// UP-AXIS AND COORDINATE CONVENTIONS
+// ============================================================================
 //
-//   The same negate-X rule applies to:
-//     - Vertex positions and normals (geometry)
-//     - Bone rest-pose translations (bone local space → Godot local space)
-//     - Bone rest-pose rotations (quaternion handedness: negate X and Z components of the quaternion)
-//     - Animation keyframe translations and rotations (same as bone rest)
+// The legacy .skn / .bnd character assets are stored with X as the UP axis.
+// This is evidenced by the orchestrator-observed AABB of the Musa character:
+//   ~5.0 along what the current build maps to Godot X (from raw pos_x)
+//   ~2.44 along what the current build maps to Godot Y (from raw pos_y)
+//   ~1.67 along what the current build maps to Godot Z (from raw pos_z)
+// A standing 84-bone humanoid should have its tallest dimension as Godot Y (up).
+// The largest dimension (5.0) is mapped from raw pos_x — therefore raw X is the
+// character height axis.  (empirical: AABB width=5.0 >> height=2.44 when using
+// the old -X,Y,Z mapping, confirming raw X is the character up-axis.)
 //
-// Quaternion handedness conversion (right-handed ↔ left-handed, negate X axis):
-//   In a right-hand basis with X negated, the equivalent rotation is obtained by negating
-//   the quaternion X and Z components (and keeping Y and W unchanged).
-//   This is the standard D3D-to-OpenGL quaternion flip for a Z-forward to Z-backward or
-//   X-mirror basis change.  Concretely: q_godot = Quaternion(-qx, qy, -qz, qw).
-//   spec: Docs/RE/formats/mesh.md §Quaternion component order — XYZW on disk maps to XYZW in memory.
+// The correct basis change for character mesh-local geometry is therefore:
 //
-// Winding order:
-//   On-disk .skn corner order is D3D9 CW. We emit corners as [0, 2, 1] per triangle for CCW.
-//   spec: Docs/RE/formats/mesh.md §Face table — D3D9 CW winding, swap for Godot CCW.
-//   spec: SknMeshBuilder — same [0, 2, 1] swap applied.
+//   godot.X = -legacy.Y    (legacy Y becomes Godot right, negated for handedness)
+//   godot.Y =  legacy.X    (legacy X = character up → Godot Y = up)
+//   godot.Z = -legacy.Z    (legacy Z negated: same direction as WorldCoordinates.ToGodot)
 //
-// Skinning:
-//   .skn weight records are NOT one-per-vertex; each record says "vertex N is influenced by
-//   bone B with weight W". Multiple records can share the same vertex_index. We accumulate up
-//   to 4 influences per vertex, normalise the weights, and then pack them into the flat
-//   unindexed (per-rendered-vertex) arrays Godot expects.
-//   spec: Docs/RE/formats/mesh.md §Weight record — 12 bytes, "vertex_index, bone_index, weight".
-//   spec: Docs/RE/formats/mesh.md §Weight / skin table — "weight_count == vertex_count in
-//         item-skin samples (single-bone); character skins expected to have multiple per vertex".
+// Matrix M (columns = where legacy basis vectors land in Godot space):
 //
-// Animation:
-//   Fixed 10 fps. Duration = frame_count × 0.1 s.
-//   spec: Docs/RE/formats/animation.md §Timing — "Fixed frame rate: 10 fps." CONFIRMED.
-//   Track bone linkage: track.BoneId matches Bone.SelfId (low byte).
-//   spec: Docs/RE/formats/animation.md §Bone-track linkage.
-//   Each keyframe is placed at time = keyframeIndex × 0.1 s (no re-normalization of alpha).
-//   Loop: set via Animation.LoopMode.Linear (wraps at clip end).
-//   spec: Docs/RE/formats/animation.md §Wrap and loop behaviour — "no loop flag on disk; wrap
-//         is a runtime property." Godot loop mode is the runtime equivalent of CycleLayer.
+//       legacy_x  legacy_y  legacy_z
+// gx [     0       -1          0   ]
+// gy [     1        0          0   ]
+// gz [     0        0         -1   ]
+//
+// det(M) = -1  → orientation-reversing (LH → RH).  This is correct.
+//
+// This same mapping applies to:
+//   - Vertex positions and normals (geometry)
+//   - Bone rest-pose translations (bone local-space → Godot local-space)
+//   - Bone rest-pose rotation quaternions (see §Quaternion formula)
+//   - Animation keyframe translations and rotations
+//
+// spec: Docs/RE/formats/mesh.md §Vertex record — "pos_x stored second on disk at
+//       sub-offset 12; normal_x stored first on disk at sub-offset 0."  CONFIRMED.
+// spec: Docs/RE/formats/mesh.md §BndBone on-disk record — local_trans_x/y/z @ +8.
+// empirical: orchestrator AABB width=5.0 identifies raw X as the character height axis.
+//
+// ============================================================================
+// QUATERNION FORMULA (from the M basis change above)
+// ============================================================================
+//
+// For a unit quaternion q = (qx i + qy j + qz k + qw), the physical rotation
+// transforms under basis change M as:  q' = M * q * M^{-1}  (conjugation by M).
+//
+// Since det(M) = -1, M is an improper rotation.  For the vector part, M acts as:
+//   M * (qx, qy, qz) = (-qy, qx, -qz)
+// For det=-1 we also negate the vector part of the result (chirality flip):
+//   q'_vec = -((-qy, qx, -qz)) = (qy, -qx, qz)  ← WRONG direction
+//
+// Instead, derive directly from M applied to the rotation axis:
+//   The new rotation axis is M * (qx, qy, qz) = (-qy, qx, -qz).
+//   The scalar w is unchanged (it is cos(θ/2) and θ is invariant).
+//
+// Verification:
+//   - 90° around legacy X (= Godot Y):  q=(sin,0,0,cos) → q'=(0,sin,0,cos)  ✓
+//   - 90° around legacy Y (→ Godot -X): q=(0,sin,0,cos) → q'=(-sin,0,0,cos) ✓
+//   - 90° around legacy Z (→ Godot -Z): q=(0,0,sin,cos) → q'=(0,0,-sin,cos) ✓
+//
+// Therefore:  q_godot = Quaternion(-q.Y, q.X, -q.Z, q.W).Normalized()
+//
+// spec: Docs/RE/formats/mesh.md §Quaternion component order —
+//       "XYZW order: X at +20, Y at +24, Z at +28, W at +32."  CONFIRMED.
+// spec: Docs/RE/formats/animation.md §Keyframe record —
+//       "component order: XYZ translation, then XYZW quaternion."  CONFIRMED.
+//
+// ============================================================================
+// WINDING ORDER
+// ============================================================================
+//
+// On-disk .skn corner order is D3D9 CW.  Emit corners as [0, 2, 1] per triangle.
+// spec: Docs/RE/formats/mesh.md §Face table — D3D9 CW winding, swap for Godot CCW.
+// spec: SknMeshBuilder — same [0, 2, 1] swap applied.
+//
+// ============================================================================
+// SKINNING / BONE WEIGHT BINDING
+// ============================================================================
+//
+// .skn weight records carry:
+//   vertex_index : zero-based index into the vertex array
+//   bone_index   : zero-based index into the .bnd bone ARRAY (not the SelfId space)
+//   weight       : influence weight
+//
+// spec: Docs/RE/formats/mesh.md §Weight record — "bone_index: zero-based index into
+//       the associated bind-pose bone array."  CONFIRMED.
+//
+// Since BuildSkeleton adds bones in on-disk order (bone[0] → Godot index 0,
+// bone[1] → Godot index 1, …), the Godot bone index for a weight record is
+// simply (int)wr.BoneIndex directly.  Using the SelfId lookup table for weights
+// is incorrect (SelfId values may not be sequential array indices).
+//
+// Animation tracks use a DIFFERENT linkage:
+//   track.BoneId = low byte of track_descriptor → must match Bone.SelfId low byte
+// spec: Docs/RE/formats/animation.md §Bone-track linkage — "bone_id matches Bone.SelfId".
+// Therefore animation tracks still use the SelfId → GodotIndex lookup map.
+//
+// ============================================================================
+// RECENTRE
+// ============================================================================
+//
+// After building the ArrayMesh, the mesh AABB is computed and the root Node3D
+// is translated so that:
+//   - The minimum Y of the mesh AABB sits at world Y=0 (feet on the ground plane).
+//   - The mesh is centred on X=0 and Z=0.
+// This is a presentation convenience; the orchestrator can override the position.
 
 using Godot;
 using MartialHeroes.Assets.Parsers.Models;
@@ -70,7 +133,8 @@ namespace MartialHeroes.Client.Godot.World;
 /// </list>
 ///
 /// The orchestrator should position and scale the returned root in world space.
-/// All mesh geometry is built around its own local origin (no world offset baked in).
+/// The root's position is pre-adjusted so that feet are near local Y=0 and the
+/// body is centred on X=0, Z=0.
 /// </summary>
 public static class SkinnedCharacterBuilder
 {
@@ -84,7 +148,7 @@ public static class SkinnedCharacterBuilder
     private const int MaxInfluences = 4;
 
     // Fixed animation frame rate for .mot clips.
-    // spec: Docs/RE/formats/animation.md §Timing — "Fixed frame rate: 10 fps." CONFIRMED.
+    // spec: Docs/RE/formats/animation.md §Timing — "Fixed frame rate: 10 fps."  CONFIRMED.
     private const float MotFrameRate = 10.0f;
 
     // Seconds per frame at the fixed .mot rate (0.1 s/frame = 10 fps).
@@ -105,6 +169,49 @@ public static class SkinnedCharacterBuilder
     private const string AnimationName = "clip";
 
     // -------------------------------------------------------------------------
+    // Coordinate helpers (character-local space)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Converts a legacy character-local position (X-up, left-handed) to Godot (Y-up, right-handed).
+    ///
+    /// Mapping:  godot.X = -legacy.Y
+    ///           godot.Y =  legacy.X    (raw X is the character height axis)
+    ///           godot.Z = -legacy.Z
+    ///
+    /// Matrix determinant = -1 → LH→RH handedness flip.
+    ///
+    /// empirical: orchestrator AABB 5.0-wide axis identified as raw pos_x → character up.
+    /// spec: Docs/RE/formats/mesh.md §Vertex record — pos_x @ sub-offset 12; normal_x @ sub-offset 0.
+    /// </summary>
+    private static Vector3 ToGodotCharacter(Vec3 v)
+        => new Vector3(-v.Y, v.X, -v.Z);
+
+    /// <summary>
+    /// Converts a legacy character-local unit normal to Godot and re-normalizes.
+    /// Same axis mapping as <see cref="ToGodotCharacter"/>.
+    /// </summary>
+    private static Vector3 ToGodotNormal(Vec3 n)
+        => new Vector3(-n.Y, n.X, -n.Z).Normalized();
+
+    /// <summary>
+    /// Converts a legacy character-local quaternion (XYZW, X-up left-handed) to Godot (Y-up right-handed).
+    ///
+    /// Formula derived by applying M to the rotation axis:
+    ///   q_godot = Quaternion(-q.Y, q.X, -q.Z, q.W).Normalized()
+    ///
+    /// Verification:
+    ///   90° around legacy X (= Godot Y): (sin,0,0,cos) → (0,sin,0,cos)  ✓
+    ///   90° around legacy Y (→ Godot -X): (0,sin,0,cos) → (-sin,0,0,cos) ✓
+    ///   90° around legacy Z (→ Godot -Z): (0,0,sin,cos) → (0,0,-sin,cos) ✓
+    ///
+    /// spec: Docs/RE/formats/mesh.md §Quaternion component order — XYZW on disk, W last.  CONFIRMED.
+    /// spec: Docs/RE/formats/animation.md §Keyframe record — XYZW quaternion.  CONFIRMED.
+    /// </summary>
+    private static Quaternion ToGodotQuat(Quat q)
+        => new Quaternion(-q.Y, q.X, -q.Z, q.W).Normalized();
+
+    // -------------------------------------------------------------------------
     // Public entry point
     // -------------------------------------------------------------------------
 
@@ -121,6 +228,7 @@ public static class SkinnedCharacterBuilder
     ///   <item>If <paramref name="clip"/> is non-null, build an <see cref="AnimationPlayer"/> with
     ///         position/rotation tracks targeting each animated bone; set it to loop and auto-play.
     ///         If <paramref name="clip"/> is null the mesh renders in the static rest pose.</item>
+    ///   <item>Recentre the root node so the mesh AABB min-Y is at 0 and the body is centred on X/Z.</item>
     /// </list>
     ///
     /// All steps are individually guarded: a failure in any step is logged and the node is still
@@ -143,7 +251,7 @@ public static class SkinnedCharacterBuilder
     /// </param>
     /// <returns>
     ///   A <see cref="Node3D"/> root ready to be added to the scene tree and positioned in
-    ///   world space by the orchestrator.
+    ///   world space by the orchestrator.  Feet are near local Y=0; body centred on X/Z.
     /// </returns>
     public static Node3D Build(
         SkinnedMesh mesh,
@@ -155,7 +263,7 @@ public static class SkinnedCharacterBuilder
 
         // Step 1 — build Skeleton3D.
         Skeleton3D godotSkeleton;
-        int[] boneIdToGodotIndex; // maps Bone.SelfId (low byte) → Godot bone index
+        int[] boneIdToGodotIndex; // maps Bone.SelfId (low byte) → Godot bone index (for anim tracks)
 
         try
         {
@@ -176,9 +284,11 @@ public static class SkinnedCharacterBuilder
         }
 
         // Step 2 — build skinned ArrayMesh and MeshInstance3D.
+        ArrayMesh? builtArrayMesh = null;
         try
         {
-            MeshInstance3D? meshInst = BuildSkinnedMesh(mesh, godotSkeleton, boneIdToGodotIndex, albedo);
+            MeshInstance3D? meshInst = BuildSkinnedMesh(
+                mesh, godotSkeleton, boneIdToGodotIndex, albedo, out builtArrayMesh);
             if (meshInst is not null)
             {
                 // The MeshInstance3D must be a CHILD of the Skeleton3D so that Godot applies
@@ -210,6 +320,20 @@ public static class SkinnedCharacterBuilder
             }
         }
 
+        // Step 4 — recentre: shift root so feet are at Y=0, body centred on X/Z.
+        if (builtArrayMesh is not null)
+        {
+            try
+            {
+                RecentreRoot(root, builtArrayMesh);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[SkinnedCharacterBuilder] Recentre failed for '{mesh.Name}': {ex.Message}");
+                // Non-fatal: character is visible but may be offset.
+            }
+        }
+
         return root;
     }
 
@@ -224,7 +348,8 @@ public static class SkinnedCharacterBuilder
     /// <c>Bone.ParentId</c> (low byte) to earlier entries' <c>Bone.SelfId</c> (low byte),
     /// consistent with the .bnd spec sentinel rule.
     ///
-    /// Rest transforms are converted from legacy left-handed (negate X) to Godot right-handed.
+    /// Rest transforms are converted from legacy X-up left-handed to Godot Y-up right-handed
+    /// using <see cref="ToGodotCharacter"/> (translation) and <see cref="ToGodotQuat"/> (rotation).
     ///
     /// spec: Docs/RE/formats/mesh.md §Bone array — 36 bytes per bone, XYZW quaternion.
     /// spec: Docs/RE/formats/mesh.md §Root bone sentinel — self_id==0 and parent_id==0.
@@ -232,7 +357,9 @@ public static class SkinnedCharacterBuilder
     /// <returns>
     ///   A tuple of (Skeleton3D, boneIdToGodotIndex).
     ///   boneIdToGodotIndex is a 256-element array where index = Bone.SelfId low byte,
-    ///   value = Godot bone index (or 0 if that bone ID has no entry).
+    ///   value = Godot bone index.  Used for animation-track → bone lookups.
+    ///   NOTE: do NOT use this map for weight-record bone_index lookups; those are
+    ///   array-position indices (see AccumulateWeights).
     /// </returns>
     private static (Skeleton3D Skel, int[] IdMap) BuildSkeleton(Skeleton? skeleton)
     {
@@ -255,13 +382,13 @@ public static class SkinnedCharacterBuilder
         Bone[] bones = skeleton.Bones;
         int count = bones.Length;
 
-        // First pass: add all bones and build the id→godotIndex map.
+        // First pass: add all bones and build the SelfId→godotIndex map.
         // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — self_id @ +0, low byte is ID.
         for (int i = 0; i < count; i++)
         {
             byte selfIdByte = (byte)(bones[i].SelfId & 0xFF);
             string boneName = $"bone_{selfIdByte}";
-            int godotIdx = godotSkel.GetBoneCount();
+            int godotIdx = godotSkel.GetBoneCount(); // == i since we add in order
             godotSkel.AddBone(boneName);
             idMap[selfIdByte] = godotIdx;
         }
@@ -281,26 +408,24 @@ public static class SkinnedCharacterBuilder
 
             if (!isRoot)
             {
-                // Look up the Godot index of the parent bone.
+                // Look up the Godot index of the parent bone via the SelfId map.
                 int parentGodotIdx = idMap[parentIdByte];
-                // Avoid self-parenting if the parent resolved to itself (e.g. all-zero idMap).
+                // Avoid self-parenting if the parent resolved to the same index.
                 if (parentGodotIdx != godotIdx)
                 {
                     godotSkel.SetBoneParent(godotIdx, parentGodotIdx);
                 }
             }
 
-            // Rest transform: convert from legacy left-handed (negate X) to Godot right-handed.
+            // Rest translation: convert from legacy X-up left-handed to Godot Y-up right-handed.
+            // godot.X = -legacy.Y,  godot.Y = legacy.X,  godot.Z = -legacy.Z
             // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — local_trans_x/y/z @ +8.
-            // spec: WorldCoordinates.cs — "mesh-local geometry uses negate X".
-            Vec3 lt = bone.Translation;
-            var restOrigin = new Vector3(-lt.X, lt.Y, lt.Z);
+            // empirical: raw pos_x is the character height axis (up).
+            Vector3 restOrigin = ToGodotCharacter(bone.Translation);
 
-            // Quaternion handedness conversion for negate-X basis:
-            //   q_godot = Quaternion(-qx, qy, -qz, qw)
+            // Rest rotation quaternion: q_godot = Quaternion(-q.Y, q.X, -q.Z, q.W)
             // spec: Docs/RE/formats/mesh.md §Quaternion component order — XYZW on disk.
-            Quat lr = bone.Rotation;
-            var restQuat = new Quaternion(-lr.X, lr.Y, -lr.Z, lr.W).Normalized();
+            Quaternion restQuat = ToGodotQuat(bone.Rotation);
 
             var restBasis = new Basis(restQuat);
             var restTransform = new Transform3D(restBasis, restOrigin);
@@ -332,14 +457,17 @@ public static class SkinnedCharacterBuilder
     ///
     /// spec: Docs/RE/formats/mesh.md §Weight / skin table.
     /// spec: Docs/RE/formats/mesh.md §Face table — CW winding swap [0,2,1] per triangle.
-    /// spec: Docs/RE/formats/mesh.md §Vertex record — negate X handedness flip.
+    /// spec: Docs/RE/formats/mesh.md §Vertex record — negate-X/Z, swap X↔Y for character up-axis.
     /// </summary>
     private static MeshInstance3D? BuildSkinnedMesh(
         SkinnedMesh skn,
         Skeleton3D godotSkeleton,
         int[] boneIdToGodotIndex,
-        ImageTexture? albedo)
+        ImageTexture? albedo,
+        out ArrayMesh? outArrayMesh)
     {
+        outArrayMesh = null;
+
         int faceCount = (int)skn.FaceCount;
         if (faceCount == 0 || skn.Positions.Length == 0)
         {
@@ -347,26 +475,34 @@ public static class SkinnedCharacterBuilder
             return null;
         }
 
+        int boneCount = godotSkeleton.GetBoneCount();
+
         // --- Accumulate per-geometry-vertex bone influences ---
         // Each geometry vertex can have multiple weight records pointing at it.
         // We take up to MaxInfluences (4) per vertex, then normalise.
-        // spec: Docs/RE/formats/mesh.md §Weight record — vertex_index, bone_index, weight.
+        //
+        // IMPORTANT: bone_index in weight records is a zero-based array index into the
+        // .bnd bone array, NOT the SelfId.  Since Godot bones are added in on-disk order,
+        // Godot bone index == .bnd array index.  Pass boneCount for bounds-clamping.
+        //
+        // spec: Docs/RE/formats/mesh.md §Weight record — "bone_index: zero-based index into
+        //       the associated bind-pose bone array."  CONFIRMED.
         int geoVertCount = skn.Positions.Length;
-        AccumulateWeights(skn.Weights, geoVertCount, boneIdToGodotIndex,
-            out int[] perGeoVtxBones, // [geoVertCount × MaxInfluences] Godot bone indices
-            out float[] perGeoVtxWts); // [geoVertCount × MaxInfluences] normalised weights
+        AccumulateWeights(skn.Weights, geoVertCount, boneCount,
+            out int[] perGeoVtxBones,   // [geoVertCount × MaxInfluences] Godot bone indices
+            out float[] perGeoVtxWts);  // [geoVertCount × MaxInfluences] normalised weights
 
         // --- Build flat rendered-vertex arrays ---
         int totalVerts = faceCount * 3;
         var positions = new Vector3[totalVerts];
-        var normals = new Vector3[totalVerts];
-        var uvs = new Vector2[totalVerts];
+        var normals   = new Vector3[totalVerts];
+        var uvs       = new Vector2[totalVerts];
 
         // Godot's Bones array is int[] (4 ints per vertex).
         // Godot's Weights array is float[] (4 floats per vertex).
         // Both are indexed identically.
         // spec: Godot 4 ArrayMesh — Bones/Weights arrays must be 4 × vertexCount.
-        var bones = new int[totalVerts * MaxInfluences];
+        var bones   = new int[totalVerts * MaxInfluences];
         var weights = new float[totalVerts * MaxInfluences];
 
         SknCorner[] corners = skn.Corners;
@@ -389,7 +525,7 @@ public static class SkinnedCharacterBuilder
                 SknCorner corner = corners[swap[j]];
                 uint vi = corner.VertexIndex;
 
-                // Clamp corrupt indices to 0; log once per face.
+                // Clamp corrupt indices to 0.
                 if (vi >= (uint)geoVertCount)
                 {
                     GD.PrintErr($"[SkinnedCharacterBuilder] Face {f} corner {j}: " +
@@ -400,14 +536,15 @@ public static class SkinnedCharacterBuilder
                 Vec3 p = srcPos[vi];
                 Vec3 n = (vi < (uint)srcNrm.Length) ? srcNrm[vi] : new Vec3(0f, 1f, 0f);
 
-                // Handedness flip: negate X (mesh-local convention).
+                // Coordinate conversion: legacy X-up LH → Godot Y-up RH.
+                // godot.X = -legacy.Y,  godot.Y = legacy.X,  godot.Z = -legacy.Z
+                // empirical: raw pos_x is character height (up).
                 // spec: Docs/RE/formats/mesh.md §Vertex record — pos_x @ sub-offset 12.
-                // spec: WorldCoordinates.cs — "mesh-local geometry uses negate X".
-                positions[vBase + j] = new Vector3(-p.X, p.Y, p.Z);
+                positions[vBase + j] = ToGodotCharacter(p);
 
-                // Normal: negate X.
+                // Normal: same axis mapping.
                 // spec: Docs/RE/formats/mesh.md §Vertex record — normal_x @ sub-offset 0.
-                normals[vBase + j] = new Vector3(-n.X, n.Y, n.Z).Normalized();
+                normals[vBase + j] = ToGodotNormal(n);
 
                 // UV: already v-flipped by the parser (1.0f - uv_v_on_disk).
                 // spec: Docs/RE/formats/mesh.md §Face record — uv_v: "engine applies 1.0 - uv_v".
@@ -418,7 +555,7 @@ public static class SkinnedCharacterBuilder
                 int srcBase = (int)vi * MaxInfluences;
                 for (int inf = 0; inf < MaxInfluences; inf++)
                 {
-                    bones[dstBase + inf] = perGeoVtxBones[srcBase + inf];
+                    bones[dstBase + inf]   = perGeoVtxBones[srcBase + inf];
                     weights[dstBase + inf] = perGeoVtxWts[srcBase + inf];
                 }
             }
@@ -427,10 +564,10 @@ public static class SkinnedCharacterBuilder
         // --- Assemble ArrayMesh ---
         var arrays = new global::Godot.Collections.Array();
         arrays.Resize((int)Mesh.ArrayType.Max);
-        arrays[(int)Mesh.ArrayType.Vertex] = positions;
-        arrays[(int)Mesh.ArrayType.Normal] = normals;
-        arrays[(int)Mesh.ArrayType.TexUV] = uvs;
-        arrays[(int)Mesh.ArrayType.Bones] = bones;
+        arrays[(int)Mesh.ArrayType.Vertex]  = positions;
+        arrays[(int)Mesh.ArrayType.Normal]  = normals;
+        arrays[(int)Mesh.ArrayType.TexUV]   = uvs;
+        arrays[(int)Mesh.ArrayType.Bones]   = bones;
         arrays[(int)Mesh.ArrayType.Weights] = weights;
         // No index array — flat unindexed layout mirrors SknMeshBuilder.
 
@@ -438,14 +575,15 @@ public static class SkinnedCharacterBuilder
 
         // Add surface with default flags (4-bone skinning).
         // Do NOT pass FlagUse8BoneWeights — that would require 8 entries per vertex.
-        // The standard 4-influence path uses the default (no special compress flag).
         // spec: Godot 4 ArrayMesh.AddSurfaceFromArrays — default flags = 4-bone skinning.
         arrayMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+
+        outArrayMesh = arrayMesh;
 
         // --- Material ---
         var mat = new StandardMaterial3D();
         mat.TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps;
-        // Double-sided is safe for now — character skins may have thin geometry.
+        // Double-sided for thin geometry safety.
         mat.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
 
         if (albedo is not null)
@@ -463,19 +601,19 @@ public static class SkinnedCharacterBuilder
         // --- Create Skin from the Skeleton3D rest transforms ---
         // CreateSkinFromRestTransforms() builds a Skin whose per-bone bind poses are the
         // inverse model-space rest transforms — exactly what GPU skinning needs.
+        // The Skeleton3D is already added to the root node at this point, and bone rests
+        // have been set, so the model-space accumulation is correct.
         // spec: Godot 4 Skeleton3D.CreateSkinFromRestTransforms() documentation.
         Skin skin = godotSkeleton.CreateSkinFromRestTransforms();
 
-        // Build the NodePath that points from the MeshInstance3D (which will be a child of
-        // Skeleton3D) to the Skeleton3D itself.  As a direct child, the path is "..".
+        // Build the MeshInstance3D.  It will be added as a child of Skeleton3D, so the
+        // path from MeshInstance3D to Skeleton3D is "..".
+        // spec: Godot 4 MeshInstance3D.Skeleton documentation.
         var meshInst = new MeshInstance3D
         {
-            Name = $"SkinnedMesh_{skn.Name}",
-            Mesh = arrayMesh,
-            Skin = skin,
-            // The Skeleton property is a NodePath relative to the MeshInstance3D.
-            // As a child of Skeleton3D the path to the parent is "..".
-            // spec: Godot 4 MeshInstance3D.Skeleton documentation.
+            Name     = $"SkinnedMesh_{skn.Name}",
+            Mesh     = arrayMesh,
+            Skin     = skin,
             Skeleton = new NodePath(".."),
         };
 
@@ -496,20 +634,26 @@ public static class SkinnedCharacterBuilder
     /// weight). Weights are normalised so their per-vertex sum equals 1.0. Any vertex with
     /// zero total weight receives full influence on bone 0 (root bone fallback).
     ///
+    /// IMPORTANT: <paramref name="weightRecords"/>'s <c>BoneIndex</c> is a zero-based array index
+    /// into the .bnd bone array — NOT a SelfId.  Since Godot bones are added in on-disk order,
+    /// the Godot bone index equals the .bnd array index directly.
+    ///
     /// spec: Docs/RE/formats/mesh.md §Weight / skin table — "post-load invariant: engine
     ///       normalizes weights per vertex so the per-vertex sum equals 1.0."
+    /// spec: Docs/RE/formats/mesh.md §Weight record — "bone_index: zero-based index into
+    ///       the associated bind-pose bone array."  CONFIRMED.
     /// spec: Docs/RE/formats/mesh.md §Weight record — "records where weight &lt; 0.01 are skipped."
     /// </summary>
     private static void AccumulateWeights(
         SknWeight[] weightRecords,
         int geoVertCount,
-        int[] boneIdToGodotIndex,
+        int godotBoneCount,
         out int[] outBones,
         out float[] outWeights)
     {
         // Working storage: each vertex holds up to MaxInfluences (boneIdx, weight) pairs.
         // We use parallel arrays sized [geoVertCount × MaxInfluences].
-        outBones = new int[geoVertCount * MaxInfluences];
+        outBones   = new int[geoVertCount * MaxInfluences];
         outWeights = new float[geoVertCount * MaxInfluences];
 
         // Track how many influences we have so far per vertex (0..MaxInfluences).
@@ -529,12 +673,17 @@ public static class SkinnedCharacterBuilder
                 continue;
             }
 
-            // Map the on-disk bone_index (which is a .bnd SelfId low-byte value) to the
-            // Godot bone index via the id→godotIndex lookup table.
-            // spec: Docs/RE/formats/mesh.md §Weight record — bone_index "zero-based index into
-            //       the associated bind-pose bone array."  Matches Bone.SelfId low byte.
-            byte boneId = (byte)(wr.BoneIndex & 0xFF);
-            int godotBoneIdx = boneIdToGodotIndex[boneId];
+            // bone_index in the weight record is a zero-based array position in the .bnd bone array.
+            // Since Godot bones are added in on-disk order, Godot bone index == bone array index.
+            // spec: Docs/RE/formats/mesh.md §Weight record — "zero-based index into the bone array."
+            int godotBoneIdx = (int)(wr.BoneIndex);
+            if (godotBoneIdx < 0 || godotBoneIdx >= godotBoneCount)
+            {
+                // Out-of-range bone index — clamp to root bone 0 as a safe fallback.
+                GD.PrintErr($"[SkinnedCharacterBuilder] Weight record: bone_index {godotBoneIdx} out of range " +
+                            $"(boneCount={godotBoneCount}) — clamping to 0.");
+                godotBoneIdx = 0;
+            }
 
             int current = influenceCounts[vi];
             int baseIdx = vi * MaxInfluences;
@@ -542,7 +691,7 @@ public static class SkinnedCharacterBuilder
             if (current < MaxInfluences)
             {
                 // Slot available — write directly.
-                outBones[baseIdx + current] = godotBoneIdx;
+                outBones[baseIdx + current]   = godotBoneIdx;
                 outWeights[baseIdx + current] = wr.Weight;
                 influenceCounts[vi] = current + 1;
             }
@@ -555,16 +704,12 @@ public static class SkinnedCharacterBuilder
                 for (int s = 1; s < MaxInfluences; s++)
                 {
                     float w = outWeights[baseIdx + s];
-                    if (w < minW)
-                    {
-                        minW = w;
-                        minSlot = s;
-                    }
+                    if (w < minW) { minW = w; minSlot = s; }
                 }
 
                 if (wr.Weight > minW)
                 {
-                    outBones[baseIdx + minSlot] = godotBoneIdx;
+                    outBones[baseIdx + minSlot]   = godotBoneIdx;
                     outWeights[baseIdx + minSlot] = wr.Weight;
                 }
             }
@@ -582,8 +727,7 @@ public static class SkinnedCharacterBuilder
             if (total < WeightSkipThreshold)
             {
                 // No usable influences — bind entirely to bone 0 (root).
-                // This is the single-bone item-skin default path.
-                outBones[baseIdx] = 0;
+                outBones[baseIdx]   = 0;
                 outWeights[baseIdx] = 1f;
                 // Remaining slots are already 0 / 0f from array initialisation.
             }
@@ -605,16 +749,19 @@ public static class SkinnedCharacterBuilder
     /// Builds an <see cref="AnimationPlayer"/> with one looping <see cref="Animation"/> whose
     /// tracks drive the skeleton bones in Godot-space.
     ///
-    /// <para>Track naming: <c>SkeletonNodeName/bone_N</c> where N is the Bone.SelfId low byte,
-    /// expressed as a <see cref="NodePath"/> relative to the AnimationPlayer's root
-    /// (i.e. relative to the parent <see cref="Node3D"/> root that also owns the Skeleton3D).</para>
+    /// <para>Track naming: <c>SkeletonNodeName:bone_N</c> where N is the Bone.SelfId low byte.
+    /// AnimationPlayer is a sibling of Skeleton3D under the root Node3D, so the track path
+    /// is relative to the root.</para>
     ///
     /// <para>Keyframe timing: key index K is placed at time K × 0.1 s (10 fps fixed).</para>
     ///
     /// <para>Loop mode: <see cref="Animation.LoopModeEnum.Linear"/> — identical to the runtime
     /// CycleLayer wrap behaviour described in the spec.</para>
     ///
-    /// spec: Docs/RE/formats/animation.md §Timing — "Fixed frame rate: 10 fps." CONFIRMED.
+    /// <para>Translations and rotations are converted to Godot-space using
+    /// <see cref="ToGodotCharacter"/> and <see cref="ToGodotQuat"/> respectively.</para>
+    ///
+    /// spec: Docs/RE/formats/animation.md §Timing — "Fixed frame rate: 10 fps."  CONFIRMED.
     /// spec: Docs/RE/formats/animation.md §Bone-track linkage — bone_id matches Bone.SelfId low byte.
     /// spec: Docs/RE/formats/animation.md §Wrap and loop behaviour — no on-disk flag; wrap is runtime.
     /// </summary>
@@ -632,31 +779,32 @@ public static class SkinnedCharacterBuilder
         }
 
         // Clip duration in seconds.
-        // spec: Docs/RE/formats/animation.md §Timing — "duration = frame_count × 0.1". CONFIRMED.
+        // spec: Docs/RE/formats/animation.md §Timing — "duration = frame_count × 0.1".  CONFIRMED.
         double durationSecs = clip.FrameCount * (double)SecondsPerFrame;
 
         var anim = new Animation();
-        anim.Length = (float)durationSecs;
-        anim.LoopMode = Animation.LoopModeEnum.Linear;
+        anim.Length    = (float)durationSecs;
+        anim.LoopMode  = Animation.LoopModeEnum.Linear;
         // spec: Docs/RE/formats/animation.md §Wrap and loop — CycleLayer is "looping; replays
-        //       continuously". Godot Linear loop is the equivalent.
+        //       continuously".  Godot Linear loop is the equivalent.
 
         // Build a reverse lookup: SelfId low byte → bone name (for track path construction).
-        // If no skeleton is supplied, every track bone_id maps to "root" (bone 0).
+        // Animation tracks use SelfId linkage (NOT array index).
+        // spec: Docs/RE/formats/animation.md §Bone-track linkage — "bone_id matches Bone.SelfId".
         var boneIdToName = BuildBoneNameMap(skeleton);
 
         foreach (AnimationTrack track in clip.Tracks)
         {
             // spec: Docs/RE/formats/animation.md §Per-track record — bone_id = low byte of track_descriptor.
-            byte boneId = track.BoneId;
+            byte boneId   = track.BoneId;
             string boneName = boneIdToName.TryGetValue(boneId, out string? n) ? n : $"bone_{boneId}";
 
             if (track.Keyframes.Length == 0)
                 continue;
 
-            // Track path: from the AnimationPlayer's root to the Skeleton3D's bone.
-            // AnimationPlayer is a child of the root Node3D; Skeleton3D is also a child.
-            // So the path is "SkeletonNodeName:boneName".
+            // Track path: from the AnimationPlayer's root (the Node3D root) to the Skeleton3D bone.
+            // AnimationPlayer is a child of the root Node3D; Skeleton3D is also a child of that root.
+            // Path format: "SkeletonNodeName:boneName"
             // spec: Godot 4 AnimationPlayer track naming convention for Skeleton3D bones.
             string trackPath = $"{SkeletonNodeName}:{boneName}";
 
@@ -678,16 +826,15 @@ public static class SkinnedCharacterBuilder
 
                 Keyframe kf = track.Keyframes[ki];
 
-                // Translation: negate X for legacy→Godot handedness.
-                // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — local_trans_x: CONFIRMED.
-                // spec: WorldCoordinates.cs — "mesh-local geometry uses negate X".
-                Vec3 tr = kf.Translation;
-                var godotPos = new Vector3(-tr.X, tr.Y, tr.Z);
+                // Translation: apply the same X-up LH → Y-up RH mapping as vertices.
+                // godot.X = -legacy.Y,  godot.Y = legacy.X,  godot.Z = -legacy.Z
+                // spec: Docs/RE/formats/animation.md §Keyframe record — translation_x/y/z @ sub-offset 0.
+                // empirical: raw X is character height axis.
+                Vector3 godotPos = ToGodotCharacter(kf.Translation);
 
-                // Rotation quaternion: q_godot = Quaternion(-qx, qy, -qz, qw) for negate-X basis.
-                // spec: Docs/RE/formats/mesh.md §Quaternion component order — XYZW on disk.
-                Quat rq = kf.Rotation;
-                var godotQuat = new Quaternion(-rq.X, rq.Y, -rq.Z, rq.W).Normalized();
+                // Rotation quaternion: q_godot = Quaternion(-q.Y, q.X, -q.Z, q.W)
+                // spec: Docs/RE/formats/animation.md §Keyframe record — XYZW quaternion.
+                Quaternion godotQuat = ToGodotQuat(kf.Rotation);
 
                 anim.PositionTrackInsertKey(posTrackIdx, t, godotPos);
                 anim.RotationTrackInsertKey(rotTrackIdx, t, godotQuat);
@@ -712,12 +859,52 @@ public static class SkinnedCharacterBuilder
     }
 
     // -------------------------------------------------------------------------
+    // Step 4 — Recentre
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Translates the root <see cref="Node3D"/> so that the mesh AABB minimum Y is at 0
+    /// (feet on the ground) and the mesh is centred on X=0, Z=0.
+    ///
+    /// The AABB is computed from the <see cref="ArrayMesh"/> directly (without requiring a
+    /// scene-tree traversal), so this works before the root is added to the scene.
+    ///
+    /// The translation is applied to the root node position.  The orchestrator may freely
+    /// override or further adjust this position when placing the character in world space.
+    /// </summary>
+    private static void RecentreRoot(Node3D root, ArrayMesh arrayMesh)
+    {
+        Aabb aabb = arrayMesh.GetAabb();
+
+        if (aabb.Size == Vector3.Zero)
+        {
+            GD.Print("[SkinnedCharacterBuilder] Recentre: degenerate AABB — skipping.");
+            return;
+        }
+
+        // Shift so that the lowest Y vertex is at Y=0 (feet on ground plane).
+        float yShift = -aabb.Position.Y;
+
+        // Centre on X and Z.
+        float xShift = -(aabb.Position.X + aabb.Size.X * 0.5f);
+        float zShift = -(aabb.Position.Z + aabb.Size.Z * 0.5f);
+
+        root.Position = new Vector3(xShift, yShift, zShift);
+
+        GD.Print($"[SkinnedCharacterBuilder] Recentre: AABB pos=({aabb.Position.X:F3},{aabb.Position.Y:F3},{aabb.Position.Z:F3}) " +
+                 $"size=({aabb.Size.X:F3},{aabb.Size.Y:F3},{aabb.Size.Z:F3}) " +
+                 $"→ root shift=({xShift:F3},{yShift:F3},{zShift:F3}).");
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
     /// <summary>
     /// Builds a dictionary from Bone.SelfId low byte → Godot bone name (e.g. "bone_0").
     /// Used to construct animation track paths.
+    /// Animation tracks use SelfId linkage — NOT bone array index.
+    /// spec: Docs/RE/formats/animation.md §Bone-track linkage — "bone_id matches Bone.SelfId".
     /// </summary>
     private static Dictionary<byte, string> BuildBoneNameMap(Skeleton? skeleton)
     {
