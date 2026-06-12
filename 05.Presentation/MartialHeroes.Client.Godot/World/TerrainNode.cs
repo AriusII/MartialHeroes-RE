@@ -240,11 +240,15 @@ public sealed partial class TerrainNode : Node3D
 
                     // Local-space position within the sector mesh.
                     // col → X, height → Y (direct f32 — scale UNVERIFIED per spec §5.3),
-                    // row → Z. Axis orientation convention matches TerrainGltfConverter.
+                    // row → -Z. The legacy row axis grows +Z (South); the world handedness flip
+                    // negates Z, so the mesh is built directly in Godot space with -Z rows. The
+                    // node is placed at godotZ = -legacyZmin so the sector spans the correct
+                    // Godot Z range [godotZ-1024, godotZ] (center -worldZ), aligned with BUD and
+                    // the character. spec: Helpers/WorldCoordinates.ToGodot — (x,y,z)->(x,y,-z).
                     positions[vi] = new Vector3(
                         c * spacing,
                         cell.Heights[vi],
-                        r * spacing);
+                        -(r * spacing));
 
                     // UV for texture mapping: normalized (0..1) over the cell.
                     // spec: Docs/RE/formats/terrain.md §5.1 — vertex spacing 16.0, cell 1024×1024.
@@ -254,8 +258,9 @@ public sealed partial class TerrainNode : Node3D
                     // spec: Docs/RE/formats/terrain.md §5.5 Block 2 — Nx=R, Ny=G, Nz=B decoded i8/127.0. CONFIRMED.
                     if (hasNormals)
                     {
+                        // Negate Nz to match the negated vertex Z (world handedness flip).
                         var n = cell.Normals[vi];
-                        normals[vi] = new Vector3(n.Nx, n.Ny, n.Nz).Normalized();
+                        normals[vi] = new Vector3(n.Nx, n.Ny, -n.Nz).Normalized();
                     }
                     else
                     {
@@ -283,14 +288,15 @@ public sealed partial class TerrainNode : Node3D
                     int vi2 = (r + 1) * gridSize + c; // BL
                     int vi3 = (r + 1) * gridSize + c + 1; // BR
 
-                    // CCW triangles (matches TerrainGltfConverter winding-corrected output).
-                    indices[idx++] = vi0; // tri 0: TL, BR, TR
-                    indices[idx++] = vi3;
+                    // Winding reversed vs the +Z-row layout because the vertex Z was negated
+                    // (negating one axis flips triangle parity); this keeps faces pointing up.
+                    indices[idx++] = vi0; // tri 0: TL, TR, BR
                     indices[idx++] = vi1;
-
-                    indices[idx++] = vi0; // tri 1: TL, BL, BR
-                    indices[idx++] = vi2;
                     indices[idx++] = vi3;
+
+                    indices[idx++] = vi0; // tri 1: TL, BR, BL
+                    indices[idx++] = vi3;
+                    indices[idx++] = vi2;
                 }
             }
 
@@ -311,6 +317,9 @@ public sealed partial class TerrainNode : Node3D
             var mat = new StandardMaterial3D();
             mat.VertexColorUseAsAlbedo = true;
             mat.ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded;
+            // Double-sided: the terrain is an unshaded heightmap; rendering both faces guarantees
+            // it is visible from any camera angle regardless of winding subtleties.
+            mat.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
             mesh.SurfaceSetMaterial(0, mat);
 
             return mesh;

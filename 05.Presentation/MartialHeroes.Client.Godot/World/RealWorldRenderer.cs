@@ -165,7 +165,8 @@ public sealed partial class RealWorldRenderer : Node3D
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[RealWorldRenderer] ResolveTargetCell failed: {ex.Message} — keeping default ({TargetMapX},{TargetMapZ}).");
+            GD.PrintErr(
+                $"[RealWorldRenderer] ResolveTargetCell failed: {ex.Message} — keeping default ({TargetMapX},{TargetMapZ}).");
         }
 
         GD.Print($"[RealWorldRenderer] Target cell resolved to ({TargetMapX},{TargetMapZ}) for area {TargetAreaId}.");
@@ -556,29 +557,37 @@ public sealed partial class RealWorldRenderer : Node3D
         // Preferred: reuse/move the scene's existing Camera3D so there is only ONE camera.
         // If none exists, spawn a new one. This avoids the two-camera conflict that causes
         // the viewport to flip between cameras mid-frame.
+        // Oblique aerial view: positioned above and on the +Z side of the cell centre, looking
+        // back at it. This shows the terrain in 3D with the BUD buildings standing up, rather
+        // than a flat top-down view. The cell is ~1024 units wide; at this distance a 60° FOV
+        // frames the whole cell plus the tallest buildings (~Y 300).
+        var camPos = new Vector3(centreX, 720f, godotZ + 1000f);
+        var lookTarget = new Vector3(centreX, 70f, godotZ);
+
         Camera3D? existing = GetViewport()?.GetCamera3D();
         if (existing is not null)
         {
-            // Reposition the existing camera above the resolved cell.
-            existing.Position = new Vector3(centreX, 800f, godotZ);
-            existing.LookAt(new Vector3(centreX, 0f, godotZ), Vector3.Back);
-            existing.Far = 5000f;
+            existing.Position = camPos;
+            existing.LookAt(lookTarget, Vector3.Up);
+            existing.Fov = 60f;
+            existing.Near = 0.5f;
+            existing.Far = 8000f;
             existing.MakeCurrent();
-            GD.Print($"[RealWorldRenderer] Existing camera repositioned to ({centreX:F0}, 800, {godotZ:F0}).");
+            GD.Print($"[RealWorldRenderer] Existing camera repositioned to ({camPos.X:F0}, {camPos.Y:F0}, {camPos.Z:F0}) looking at cell centre ({centreX:F0}, 0, {godotZ:F0}).");
             return;
         }
 
         var cam = new Camera3D();
-        cam.Position = new Vector3(centreX, 800f, godotZ);
-        cam.LookAt(new Vector3(centreX, 0f, godotZ), Vector3.Back);
+        cam.Position = camPos;
+        cam.LookAt(lookTarget, Vector3.Up);
         cam.Fov = 60f;
-        cam.Near = 1f;
-        cam.Far = 5000f;
+        cam.Near = 0.5f;
+        cam.Far = 8000f;
         cam.Name = "RealWorldCamera";
         AddChild(cam);
         cam.MakeCurrent();
 
-        GD.Print($"[RealWorldRenderer] New camera placed at ({centreX:F0}, 800, {godotZ:F0}).");
+        GD.Print($"[RealWorldRenderer] New camera placed at ({camPos.X:F0}, {camPos.Y:F0}, {camPos.Z:F0}) looking at cell centre ({centreX:F0}, 0, {godotZ:F0}).");
     }
 
     // -------------------------------------------------------------------------
@@ -687,6 +696,7 @@ public sealed partial class RealWorldRenderer : Node3D
         {
             // Any I/O error → default 0.
         }
+
         return 0;
     }
 

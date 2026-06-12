@@ -6,12 +6,14 @@
 // Each BudObject becomes one MeshInstance3D child of the returned Node3D root.
 //
 // Coordinate conventions (D3D9 left-handed → Godot right-handed):
-//   Negate X: legacy uses a left-handed coordinate system where X points right.
+//   Negate Z (WORLD convention). BUD vertices are pre-baked into ABSOLUTE world-space, so
+//   they must use the same world handedness flip as TerrainNode and the character node —
+//   negate Z — NOT the mesh-local negate-X convention. Negating X on absolute coordinates
+//   mirrors every building across the world X axis, placing them ~1000+ units away from the
+//   terrain they belong to (the gray-world bug: BUD landed at (-X, +Z) instead of (+X, -Z)).
 //   spec: Docs/RE/formats/terrain_scene.md §Coordinate system — "positions are pre-baked
 //         into absolute world-space": CONFIRMED.
-//   spec: WorldCoordinates.ToGodot — negate X for D3D9→Godot handedness flip.
-//   NOTE: TerrainNode and BudSceneGltfConverter both negate X (not Z) for BUD geometry.
-//         This is consistent with the D3D9 left-handed world where the X axis is mirrored.
+//   spec: Helpers/WorldCoordinates.ToGodot — (x, y, z) -> (x, y, -z).
 //
 // Winding order:
 //   The on-disk index array is CW (D3D9 default). We swap to CCW for Godot by reversing
@@ -94,14 +96,14 @@ public static class BudMeshBuilder
         {
             BudVertex bv = obj.Vertices[v];
 
-            // Handedness flip: negate X (D3D9 left-handed → Godot right-handed).
-            // spec: WorldCoordinates.ToGodot — negate X for BUD geometry.
+            // Handedness flip for ABSOLUTE world-space geometry: negate Z (world convention).
+            // spec: Helpers/WorldCoordinates.ToGodot — (x, y, z) -> (x, y, -z).
             // spec: Docs/RE/formats/terrain_scene.md §Vertex record — pos_x @ +0x00: CONFIRMED.
-            positions[v] = new Vector3(-bv.PosX, bv.PosY, bv.PosZ);
+            positions[v] = new Vector3(bv.PosX, bv.PosY, -bv.PosZ);
 
-            // Normals: negate X for the same handedness flip.
+            // Normals: negate Z for the same handedness flip.
             // spec: Docs/RE/formats/terrain_scene.md §Vertex record — normal_x @ +0x0C: CONFIRMED.
-            normals[v] = new Vector3(-bv.NormalX, bv.NormalY, bv.NormalZ).Normalized();
+            normals[v] = new Vector3(bv.NormalX, bv.NormalY, -bv.NormalZ).Normalized();
 
             // UV coordinates are passed through directly.
             // spec: Docs/RE/formats/terrain_scene.md §Vertex record — uv_u @ +0x18, uv_v @ +0x1C: CONFIRMED.
