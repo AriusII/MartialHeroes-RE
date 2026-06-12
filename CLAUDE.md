@@ -1,79 +1,174 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file guides Claude Code (claude.ai/code) when working in this repository. It is the master onboarding doc — read it first, then `PRESERVATION_AND_ARCHITECTURE.md` for the deep blueprint.
 
 ## What This Project Is
 
-A clean-room, open-source reconstruction of **Martial Heroes** (originally *D.O. Online*), an Asian martial-arts MMORPG that ran 2004–2008 and died with its servers. The legacy 32-bit client (`Main.exe`) is reverse-engineered with IDA Pro purely to document packet layouts, opcodes, and asset formats; everything here is re-implemented from scratch in **.NET 10 / C# 14** with a **Godot 4.6** presentation layer.
+A clean-room, open-source **fan revival** of **Martial Heroes** (originally *D.O. Online*), an Asian martial-arts MMORPG that ran ~2003/2004–2008 and died when its servers shut down. The goal is to make it playable again in Europe.
 
-**`PRESERVATION_AND_ARCHITECTURE.md` is the authoritative blueprint** — legal framework (EU interoperability exception), per-project technical mandates, and the zero-allocation pipeline. Read it before significant architectural work.
+The legacy 32-bit MSVC client (`Main.exe`) is reverse-engineered in IDA Pro **purely to document** packet layouts, opcodes, and asset/file formats. Nothing from the binary is copied. Everything is re-implemented fresh in **.NET 10 / C# 14**, with a **Godot 4.6.3-mono** presentation layer.
 
-### Clean-room and non-distribution rules (non-negotiable)
+**Legal basis:** EU Software Directive **2009/24/EC Art. 6** (decompilation permitted solely to achieve interoperability). This is the project's legal backbone and the reason the clean-room firewall below is non-negotiable.
 
-- Never copy or transcribe decompiled C++ pseudo-code from the legacy binary. Document the format/protocol, then implement fresh.
-- Never commit original game files or network captures. `*.pak`, `*.pcapng`, `*.tsv`, `Main.exe`, `*.exe`, `*.dll`, and `/LegacyClient/` are all gitignored; keep user-supplied originals in `/LegacyClient/`.
+- **Repo root:** `C:/Users/Arius/RiderProjects/MartialHeroes`
+- **Solution:** `MartialHeroes.slnx` (the new XML `.slnx` format)
+- **Real client VFS (user-supplied, never committed):** `D:/MartialHeroesClient`
+- **Authoritative blueprint:** `PRESERVATION_AND_ARCHITECTURE.md`
 
-## Commands
+### Non-distribution rules (non-negotiable)
+
+- Never commit original game assets, binaries, or captures. Gitignored: `*.pak`, `*.vfs`, `*.exe`, `*.dll`, `*.pcapng`, `*.tsv`, `*.scr`, `*.mot`, `*.ted`, `*.bud`, client `*.png`, and `Main.exe`. Keep user-supplied originals outside the tree (e.g. `D:/MartialHeroesClient`, `/LegacyClient/`).
+- This is a labour-of-love preservation project. Keep everything professional, accurate, and self-documenting.
+
+## Build & Test Commands
 
 ```powershell
-dotnet build MartialHeroes.slnx          # build everything (needs a .NET 10 SDK: net10.0 + .slnx format)
-dotnet test MartialHeroes.slnx           # run all tests (xUnit is the mandated framework)
-dotnet test --filter "FullyQualifiedName~MyTestClass.MyTest"   # single test
+dotnet build MartialHeroes.slnx          # build everything (needs a .NET 10 SDK; net10.0 TFM)
+dotnet test MartialHeroes.slnx           # run all xUnit tests (xUnit is the mandated framework)
+dotnet test --filter "FullyQualifiedName~MyTestClass.MyTest"   # a single test
 ```
 
-The Godot client (`05.Presentation/MartialHeroes.Client.Godot/`) is opened/run via the Godot 4.6 editor (Forward Plus, Jolt physics, D3D12 on Windows). Its `.godot/` directory is editor cache — gitignored, never commit it.
+The Godot client (`05.Presentation/MartialHeroes.Client.Godot/`) is opened/run via the **Godot 4.6.3-mono** editor (Forward Plus, Jolt physics, D3D12 on Windows). Its `.godot/` directory is editor cache — gitignored, never commit it. See **Headless Verify Loop** below to run it without the editor.
 
-## Current State (June 2026 — greenfield skeleton)
+## Clean-Room Firewall (`Docs/RE/`) — the legal backbone
 
-The architecture below is blueprint intent, not implemented reality:
+A strict **dirty → spec → engineer** pipeline keeps decompiler output out of the shipped code:
 
-- All 12 class libraries contain only a placeholder `Class1.cs`. **No `ProjectReference`s are wired yet** — add them per the dependency map below as you implement.
-- The Godot project exists (`project.godot`) but has no generated `.csproj` yet and is not referenced in `MartialHeroes.slnx` (its solution folder is empty). It gets a csproj once a C# script is attached in Godot.
-- No test projects exist yet (the `add-test-project` skill scaffolds them). `Docs/RE/` holds the clean-room RE knowledge base and firewall (see below).
-- Naming drift: the blueprint says `Network.Transport.Pipe`; the real project is `MartialHeroes.Network.Transport.Pipelines`. Disk reality wins.
+1. **Dirty-room RE** (IDA analysts) writes **only** to `Docs/RE/_dirty/` — gitignored, tainted, never shipped.
+2. **Spec-author agents rewrite** (never copy) those findings into committed, neutral specs:
+   - `Docs/RE/opcodes.md` — opcode catalogue (no addresses)
+   - `Docs/RE/packets/*.yaml` — wire-field specs
+   - `Docs/RE/formats/*.md` — asset/file formats
+   - `Docs/RE/structs/*.md` — struct offset tables
+   - `Docs/RE/specs/*.md` — subsystem behaviour (combat, login, quests, …)
+3. **Implementation agents read only the clean specs.** They never touch `_dirty/` or IDA.
 
-## Target Architecture
+Hard rules:
+- **Never paste IDA / Hex-Rays pseudo-C** (`sub_xxxx`, `loc_xxxx`, `_DWORD`, `__thiscall`, `*(_DWORD*)…`, mangled names) into any committed file or any C#.
+- Every magic constant / byte offset in C# cites its source spec: `// spec: Docs/RE/formats/terrain.md`.
+- `Docs/RE/journal.md` (provenance audit trail) and `Docs/RE/names.yaml` (canonical glossary) are **orchestrator-owned** — don't edit them as an authoring agent.
 
-Five numbered layer folders, mirrored as solution folders in `MartialHeroes.slnx`. Dependencies flow strictly downward (lower numbers never reference higher ones):
+See `Docs/RE/README.md`. Current spec inventory: ~20 packet YAMLs, ~14 format docs, ~6 struct tables, ~14 subsystem specs.
+
+## Architecture — five numbered layers, downward-only DAG
+
+Five numbered layer folders, mirrored as solution folders in `MartialHeroes.slnx`. **Dependencies flow strictly downward** — a lower-numbered layer never references a higher one (acyclic).
 
 | Layer | Projects | Role |
 |---|---|---|
 | `01.Infrastructure.Shared` | `Shared.Kernel`, `Shared.Diagnostics` | Primitives, enums, strongly-typed IDs; source-generated logging |
 | `02.Network.Layer` | `Network.Abstractions`, `Network.Protocol`, `Network.Crypto`, `Network.Transport.Pipelines` | Transport contracts; packet struct layouts + opcode routing; in-place decryption; `System.IO.Pipelines` socket I/O |
-| `03.Storage.Assets` | `Assets.Vfs`, `Assets.Parsers`, `Assets.Mapping` | Memory-mapped `.pak` virtual filesystem; binary decoders (mesh/terrain/anim); conversion to glTF/PNG |
+| `03.Storage.Assets` | `Assets.Vfs`, `Assets.Parsers`, `Assets.Mapping` | Memory-mapped `.pak`/VFS; binary decoders (mesh/terrain/anim/texture); conversion to glTF/PNG |
 | `04.Client.Core` | `Client.Domain`, `Client.Application`, `Client.Infrastructure` | Pure deterministic game-state/formulas; use cases + packet handlers + `Channels` event buses; SQLite/local config |
-| `05.Presentation` | `Client.Godot` (Godot project, not a classic csproj) | Strictly passive rendering — zero game-rule authority |
+| `05.Presentation` | `Client.Godot` (Godot project) | Strictly passive rendering — **zero game-rule authority** |
 
-The intended data path is a zero-allocation pipeline: socket → `Transport.Pipelines` (`PipeReader` framing) → `Crypto` (in-place `Span<byte>` mutation) → `Protocol` (source-generated opcode→handler routing, no reflection) → `Application` → `Domain` → Godot node updates on next frame.
+**Engine-free below 05:** nothing in layers 01–04 may contain `using Godot;`. The whole core is rendering-free and engine-free so it can be reused by a future headless server (`MartialHeroes.Server.Console`) and unit-tested without an engine.
 
-Core design constraints from the blueprint:
+**Project references (wired and acyclic):** `Abstractions`/`Protocol`/`Crypto` → `Kernel`; `Transport.Pipelines` → `Abstractions`; `Parsers` → `Vfs`; `Mapping` → `Parsers`; `Domain` → `Kernel`; `Application` → `Domain` + `Network.Abstractions`; `Infrastructure` → `Application`; `Client.Godot` → `Application` + `Assets.Mapping`.
 
-- Everything below layer 05 is rendering-free and engine-free, so the whole core can be reused by a future server (`MartialHeroes.Server.Console`) and tested headlessly.
-- Strongly-typed IDs as `readonly record struct` (e.g. `PlayerId(Guid Value)`) in `Shared.Kernel`; `[LoggerMessage]` source-generated logging in `Shared.Diagnostics`.
-- Packets: `[StructLayout(LayoutKind.Sequential, Pack = 1)]` with C# `[InlineArray]` fixed buffers — no managed strings in wire structs.
-- Crypto/parsing operate on `Span<byte>`/`ReadOnlyMemory<byte>` slices; no heap allocations on hot paths.
-- `Assets.Parsers` must stay free of any rendering dependency; `Assets.Mapping` is the only bridge to modern formats.
+**Intended zero-allocation data path:** socket → `Transport.Pipelines` (`PipeReader` framing) → `Crypto` (in-place `Span<byte>` mutation) → `Protocol` (source-generated opcode→handler routing, no reflection) → `Application` → `Domain` → Godot node updates next frame.
 
-Intended project references (per blueprint): `Abstractions`/`Protocol`/`Crypto` → `Kernel`; `Transport.Pipelines` → `Abstractions`; `Parsers` → `Vfs`; `Mapping` → `Parsers`; `Domain` → `Kernel`; `Application` → `Domain` + `Network.Abstractions`; `Infrastructure` → `Application`; `Client.Godot` → `Application` + `Assets.Mapping`.
+### Core engineering constraints
 
-## Reverse-Engineering Tooling
+- **Strongly-typed IDs** as `readonly record struct` (e.g. `PlayerId(Guid Value)`) in `Shared.Kernel`. `[LoggerMessage]` source-generated logging in `Shared.Diagnostics`.
+- **Wire structs:** `[StructLayout(LayoutKind.Sequential, Pack = 1)]` with C# `[InlineArray]` fixed buffers — no managed strings in wire structs.
+- **Zero-alloc hot paths:** operate on `Span<byte>` / `ReadOnlyMemory<byte>` slices; no heap allocations, no LINQ, no closures on hot paths.
+- **All game text is CP949** (Korean). Register it once: `Encoding.RegisterProvider(CodePagesEncodingProvider.Instance)` then `Encoding.GetEncoding(949)`.
+- `Assets.Parsers` stays free of any rendering dependency; `Assets.Mapping` is the only bridge to modern formats (glTF/PNG).
 
-An IDA Pro MCP server runs locally at `http://127.0.0.1:13337/mcp` when IDA is open, exposing the live analysis of the legacy client (tools namespaced `mcp__ida__*`). It is registered for Claude Code via the committed root `.mcp.json`. If the tools are missing (e.g. a headless run that skipped the file), register it once with:
+### Current implementation state
+
+The core (layers 01–04) is built and covered by **10 xUnit test projects** (one per core library, under `tests/`, registered in the `/Tests/` slnx folder). The Godot client (layer 05) is present and renders — see below. RE specs are populated. This is well past the original greenfield skeleton.
+
+> Note on drift: the blueprint mentions `Network.Transport.Pipe`; the real project is `MartialHeroes.Network.Transport.Pipelines`. **Disk reality always wins** over blueprint naming.
+
+## Godot Pipeline — current state (commit `c266e7e`)
+
+### What works
+- **Textured multi-texture terrain** (per-patch 16×16), area-aware multi-sector streaming.
+- **Populated walled town** (area 2: 779 buildings + 40 monsters/NPCs).
+- **Camera:** free / orbital.
+- **HUD:** inventory (key `I`), skills (key `K`); click-to-move + WASD via `PlayerController`.
+- **Character:** upright, textured humanoid player.
+
+### Debts (known, unfinished)
+1. **Character skinning explodes the mesh** — the legacy bind/weight convention isn't recovered yet, so the avatar is rendered **static** (no animation).
+2. **NPCs spawn at a fallback Y** before async terrain finishes loading (ground placement race).
+3. **`EnvironmentNode` is too dark** (atmosphere/lighting needs tuning).
+4. **Water is unwired.**
+
+### Recovered asset mappings (the chains that make the world render)
+- **Terrain texture:** cell `.ted` `TextureIndexGrid` byte → cell `.map` `TERRAIN/BUILDING TEXTURES[idx-1].intTexId` → `bgtexture.txt[id]` → `data/map000/texture/<rel>.dds`. Textures are **global under `map000`** for all areas.
+- **Character skin:** `.skn` `IdA` → `data/char/skin.txt` col4 → col5 `tex_id` → `data/char/tex{512512|10241024|…}/{id}.png`.
+- **Character bind/idle:** `.skn` `IdB` → `data/char/bind/g{IdB}.bnd`; idle motion via `data/char/actormotion.txt` (col2 == IdB → col16) → `data/char/mot/g{id}.mot`.
+- **Mob → skin:** `mob_id` → `actormotion.txt` col1 → col2 `skin_class` → `g{skin_class}.bnd` and the `.skn` whose `IdB == skin_class`.
+- **Spawns:** `npc{tag}.arr` = 28-byte records; `mob{tag}.arr` = 20-byte records.
+- **Collision:** `.sod` = 2D XZ wall segments (ray-parity point-in-polygon). Ground height from `.ted` bilinear interpolation.
+
+### Coordinate conventions (get these wrong and the world mirrors)
+- **World geometry negates Z** — `Helpers/WorldCoordinates.ToGodot`: `(x,y,z) → (x,y,-z)`.
+- **Mesh-local `.skn` geometry negates X.**
+- Cells are **1024 units**, on a **65×65** grid, spacing **16**.
+
+## Headless Verify Loop (verify without the user)
+
+Run the Godot **console** exe headless to check scripts/assets and capture all `GD.Print`/errors to stdout, no editor needed:
 
 ```powershell
-claude mcp add --transport http ida http://127.0.0.1:13337/mcp
+& "C:/Users/Arius/Desktop/Godot_v4.6.3-stable_mono_win64/Godot_v4.6.3-stable_mono_win64_console.exe" `
+  --headless --path "05.Presentation/MartialHeroes.Client.Godot" --quit-after 150
 ```
 
-The server is only reachable when IDA is open on the database. Run `/ida-mcp-connect` to verify connectivity before RE work.
+For a **real screenshot**, run **windowed** with a temporary GDScript autoload that does:
+`get_viewport().get_texture().get_image().save_png("…")`. A GDScript autoload is the most reliable in-engine probe.
 
-## Claude Code Tooling
+## Reverse-Engineering & MCP Tooling
 
-This repo ships a large, shared Claude Code setup under `.claude/` (committed via `.gitignore` negations; only `settings.local.json` and `hooks/state/` stay local).
+Two local MCP servers are registered in the committed root `.mcp.json`. Both connect only when their host app is open **and** a fresh Claude session starts. Discover tool names at runtime (they're deferred).
 
-**Clean-room firewall (`Docs/RE/`)** — the legal backbone. RE analysis that looks at decompiler output writes ONLY to `Docs/RE/_dirty/` (gitignored, tainted). Spec-author agents *rewrite* (never copy) those findings into committed neutral specs (`opcodes.md`, `packets/*.yaml`, `formats/*.md`, `structs/*.md`, `specs/*.md`). Implementation agents read ONLY the clean specs and never touch `_dirty/` or IDA. See `Docs/RE/README.md`.
+- **IDA Pro MCP** — `http://127.0.0.1:13337/mcp` (tools `mcp__ida__*`), live analysis of `Main.exe`. Reachable only when IDA is open on the database. Run `/ida-mcp-connect` to verify before RE work. If missing on a headless run, re-register:
+  ```powershell
+  claude mcp add --transport http ida http://127.0.0.1:13337/mcp
+  ```
+- **Godot MCP** (`slangwald/godot-mcp`, registered as `godot`) — **editor tools on port 9600** (`get_scene_tree`, `run_project`, `get_output`, `modify_node`, …) and **game tools on port 9601** (`screenshot`, `click`, `get_runtime_tree`, …). Tool names are `mcp__godot__*`. Connects only with the Godot editor open + a fresh session.
 
-**Hooks** (`.claude/hooks/`, Python, advisory-only — they warn/inject context, never block): `session_primer`/`re_intent_primer` (orientation), `clean_room_guard` (flags pasted decompiler code), `protect_artifacts` (flags committing copyrighted binaries), `layer_dependency_guard` (flags upward refs / `using Godot;` in core), `cs_post_edit` (zero-alloc + StructLayout nudges; opt-in build check via `MH_BUILD_ON_EDIT=1`), `re_provenance_logger` (hashes IDA output for the audit trail), `precompact_note`, `stop_loose_ends`.
+## Known Godot Pitfalls (each cost real time — heed them)
 
-**Skills** (`/name`) — RE/IDA (run IDAPython via the MCP): `ida-recon`, `ida-decompile-export`, `ida-struct-recovery`, `ida-opcode-map`, `ida-naming-sync`, `ida-script-runner`, `ida-crypto-hunt`, `ida-mcp-connect`. Protocol/captures: `pcap-extract`, `packet-diff`, `opcode-catalog`, `packet-codegen`. Assets: `pak-explore`, `asset-format-doc`. Scaffolding: `new-layer-project`, `wire-references`, `add-test-project`, `godot-csproj-bootstrap`. Quality/docs: `re-workspace-init`, `clean-room-audit`, `clean-room-firewall-check`, `re-session-log`, `preservation-readme`.
+- **`.tscn` script binding must be a PROPERTY LINE**, not a header attribute. Use `script = ExtResource("1")` under the node header. Writing `[node … script=ExtResource(...)]` is **silently ignored** → node has no script → no `_Ready` → gray screen.
+- **Namespace collision:** inside `namespace MartialHeroes.Client.Godot.*`, a bare `Input.` / `Environment.` / `Time.` resolves to the sibling project namespace, not the Godot class → `CS0234`. Use **`global::Godot.Input`**, `global::Godot.Environment`, etc.
+- **`GltfDocument.AppendFromBuffer` crashes natively** on this project's generated GLBs. **Never use it.** Build Godot `ArrayMesh` directly (`BudMeshBuilder` / `SknMeshBuilder` pattern).
 
-**Agents** (`@name`) — *dirty-room RE* (have `mcp__ida__*`, write only `_dirty/`): `re-static-analyst`, `re-protocol-analyst`, `re-crypto-analyst`, `re-struct-cartographer`, `re-asset-format-analyst`, `ida-script-author`. *Spec authors* (the dirty→clean bridge): `protocol-spec-author`, `asset-spec-author`. *Clean-room engineers* (one per project, no IDA): `kernel-`, `network-abstractions-`, `network-protocol-`, `network-crypto-`, `network-transport-`, `assets-vfs-`, `assets-parser-`, `assets-mapping-`, `domain-`, `application-`, `client-infrastructure-`, `godot-presentation-engineer`. *Quality*: `clean-room-auditor`, `architecture-guardian`, `perf-reviewer`, `csharp-reviewer`, `test-engineer`, `build-doctor`, `preservation-archivist`.
+## Tooling Map (`.claude/`)
+
+This repo ships a large shared Claude Code setup under `.claude/` (committed via `.gitignore` negations; only `settings.local.json` and `hooks/state/` stay local). **27 agents, 23 skills, 10 hooks.**
+
+### Hooks — `.claude/hooks/` (Python, std-lib only, **advisory-only & fail-open**; they warn / inject context, never block)
+| Hook | When it fires |
+|---|---|
+| `session_primer`, `re_intent_primer` | Orientation on session/prompt start |
+| `clean_room_guard` | Flags pasted decompiler-shaped code |
+| `protect_artifacts` | Flags committing copyrighted binaries/captures |
+| `layer_dependency_guard` | Flags upward refs / `using Godot;` in core layers |
+| `cs_post_edit` | Zero-alloc + `StructLayout` nudges (opt-in build check via `MH_BUILD_ON_EDIT=1`) |
+| `re_provenance_logger` | Hashes IDA output for the audit trail |
+| `precompact_note`, `stop_loose_ends` | Context-preservation / loose-end reminders |
+| `_hooklib.py` | Shared helpers — `import _hooklib as h` |
+
+### Skills (`/name`)
+- **RE / IDA** (run IDAPython via the MCP, write only `_dirty/`): `ida-recon`, `ida-decompile-export`, `ida-struct-recovery`, `ida-opcode-map`, `ida-naming-sync`, `ida-script-runner`, `ida-crypto-hunt`, `ida-mcp-connect`.
+- **Protocol / captures:** `pcap-extract`, `packet-diff`, `opcode-catalog`, `packet-codegen`.
+- **Assets:** `pak-explore`, `asset-format-doc`.
+- **Scaffolding:** `new-layer-project`, `wire-references`, `add-test-project`, `godot-csproj-bootstrap`.
+- **Quality / docs:** `re-workspace-init`, `clean-room-audit`, `clean-room-firewall-check`, `re-session-log`, `preservation-readme`.
+
+### Agents (`@name`)
+- **Dirty-room RE** (have `mcp__ida__*`, write only `_dirty/`): `re-static-analyst`, `re-protocol-analyst`, `re-crypto-analyst`, `re-struct-cartographer`, `re-asset-format-analyst`, `ida-script-author`.
+- **Spec authors** (the dirty→clean bridge): `protocol-spec-author`, `asset-spec-author`.
+- **Clean-room engineers** (one per project, **no IDA**): `kernel-`, `network-abstractions-`, `network-protocol-`, `network-crypto-`, `network-transport-`, `assets-vfs-`, `assets-parser-`, `assets-mapping-`, `domain-`, `application-`, `client-infrastructure-`, `godot-presentation-engineer`.
+- **Quality:** `clean-room-auditor`, `architecture-guardian`, `perf-reviewer`, `csharp-reviewer`, `test-engineer`, `build-doctor`, `preservation-archivist`.
+
+## Commit Discipline
+
+- **Commit only when the user explicitly asks.** If on the default branch, branch first.
+- **Never commit originals:** `*.pak`, `*.vfs`, `*.exe`, `*.dll`, `*.pcapng`, `*.tsv`, `*.scr`, `*.mot`, `*.ted`, `*.bud`, client `*.png`, `Main.exe`, anything under `_dirty/`, or the Godot `.godot/` cache.
+- Don't edit orchestrator-owned files as an authoring agent: `settings.json`, `.mcp.json`, `Docs/RE/journal.md`, `Docs/RE/names.yaml`.

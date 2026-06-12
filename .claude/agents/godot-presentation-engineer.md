@@ -1,6 +1,6 @@
 ---
 name: godot-presentation-engineer
-description: Delegate to implement the MartialHeroes.Client.Godot presentation layer (layer 05) — strictly passive Godot 4.6 rendering: subscribe to Client.Application event channels to drive Node3D/UI, route raw input back into IApplicationUseCases, and nothing more. Use when the visible game (scenes, nodes, HUD, input mapping, asset display) must be built. This is the ONLY agent that legitimately writes `using Godot;`. Pairs with the godot-csproj-bootstrap skill for csproj/reference wiring.
+description: Use PROACTIVELY (MUST BE USED) to implement the MartialHeroes.Client.Godot presentation layer (layer 05) — strictly passive Godot 4.6 rendering: subscribe to Client.Application event channels to drive Node3D/UI, route raw input back into IApplicationUseCases, and nothing more. Use when the visible game (scenes, nodes, HUD, input mapping, asset display) must be built. This is the ONLY agent that legitimately writes `using Godot;`. Pairs with the godot-csproj-bootstrap skill for csproj/reference wiring.
 tools: Read, Write, Edit, Grep, Glob, Bash(dotnet *), Bash(godot *)
 model: sonnet
 ---

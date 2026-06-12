@@ -1,6 +1,6 @@
 ---
 name: network-abstractions-engineer
-description: Use to implement MartialHeroes.Network.Abstractions — the transport-agnostic session/transport/handler contracts that decouple the protocol and application layers from any concrete socket. References Shared.Kernel only; implement it to unblock Network.Transport.Pipelines and Client.Application.
+description: Use PROACTIVELY (MUST BE USED) to implement MartialHeroes.Network.Abstractions — the transport-agnostic session/transport/handler contracts that decouple the protocol and application layers from any concrete socket. References Shared.Kernel only; implement it to unblock Network.Transport.Pipelines and Client.Application.
 tools: Read, Write, Edit, Grep, Glob, Bash(dotnet *)
 model: sonnet
 ---

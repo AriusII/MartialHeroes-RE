@@ -1,6 +1,6 @@
 ---
 name: re-asset-format-analyst
-description: Use to reverse .pak and binary asset formats by combining IDA parser-routine analysis with hexdumps of user-supplied samples. Delegate here to recover the .pak archive container (header, directory, entry records, compression) and the on-disk layouts of mesh/terrain/animation/texture blobs, by reading both the legacy parser routines in IDA and hexdumps of the user's own sample files — staging neutral format prose for promotion to Docs/RE/formats/*.md.
+description: Use PROACTIVELY to reverse .pak and binary asset formats by combining IDA parser-routine analysis with hexdumps of user-supplied samples. Delegate here to recover the .pak archive container (header, directory, entry records, compression) and the on-disk layouts of mesh/terrain/animation/texture blobs, by reading both the legacy parser routines in IDA and hexdumps of the user's own sample files — staging neutral format prose for promotion to Docs/RE/formats/*.md.
 tools: mcp__ida__*, Read, Write, Bash(python *)
 model: sonnet
 ---

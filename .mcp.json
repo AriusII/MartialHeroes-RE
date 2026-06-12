@@ -3,6 +3,17 @@
     "ida": {
       "type": "http",
       "url": "http://127.0.0.1:13337/mcp"
+    },
+    "godot": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "C:/Users/Arius/godot-mcp/mcp",
+        "python",
+        "godot_mcp_server.py"
+      ]
     }
   }
 }

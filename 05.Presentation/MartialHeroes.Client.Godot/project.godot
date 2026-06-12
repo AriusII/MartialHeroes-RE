@@ -18,10 +18,15 @@ config/icon="res://icon.svg"
 [autoload]
 
 ClientContext="*res://Autoload/ClientContext.cs"
+McpBridgeGame="*res://mcp_bridge_game.gd"
 
 [dotnet]
 
 project/assembly_name="MartialHeroes.Client.Godot"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/mcp_bridge/plugin.cfg")
 
 [physics]
 

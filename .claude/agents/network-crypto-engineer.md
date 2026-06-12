@@ -1,6 +1,6 @@
 ---
 name: network-crypto-engineer
-description: Use to implement MartialHeroes.Network.Crypto — in-place Span<byte> packet decryption — strictly from the algorithm DESCRIPTION in Docs/RE/specs/crypto.md. Zero-allocation, validated against capture-derived test vectors. This is the highest clean-room leakage-risk surface; never reads decompiler output.
+description: Use PROACTIVELY (MUST BE USED) to implement MartialHeroes.Network.Crypto — in-place Span<byte> packet decryption — strictly from the algorithm DESCRIPTION in Docs/RE/specs/crypto.md. Zero-allocation, validated against capture-derived test vectors. This is the highest clean-room leakage-risk surface; never reads decompiler output.
 tools: Read, Write, Edit, Grep, Glob, Bash(dotnet *)
 model: opus
 ---

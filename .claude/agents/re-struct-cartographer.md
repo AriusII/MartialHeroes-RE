@@ -1,6 +1,6 @@
 ---
 name: re-struct-cartographer
-description: Use to recover object/struct layouts and vtables into neutral offset tables. Delegate here to reconstruct a legacy C++ object's field layout (offset/size/type), resolve its vtable and the conceptual methods behind each slot, and stage neutral struct/vtable tables for promotion to Docs/RE/structs/*.md — including structures embedded inside packets handed over by re-protocol-analyst.
+description: Use PROACTIVELY to recover object/struct layouts and vtables into neutral offset tables. Delegate here to reconstruct a legacy C++ object's field layout (offset/size/type), resolve its vtable and the conceptual methods behind each slot, and stage neutral struct/vtable tables for promotion to Docs/RE/structs/*.md — including structures embedded inside packets handed over by re-protocol-analyst.
 tools: mcp__ida__*, Read, Write
 model: sonnet
 ---

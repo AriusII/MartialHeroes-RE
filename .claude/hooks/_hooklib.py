@@ -269,3 +269,136 @@ def git_dirty_count(pdir):
         return len([l for l in out.stdout.splitlines() if l.strip()])
     except Exception:
         return -1
+
+
+def staged_files(pdir):
+    """Names of files staged in the git index (git diff --cached --name-only)."""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=pdir, capture_output=True, text=True, timeout=6,
+        )
+        return [l.strip() for l in out.stdout.splitlines() if l.strip()]
+    except Exception:
+        return []
+
+
+# ------------------------------------------------------------- path classification
+
+def _low(path):
+    return (path or "").replace("\\", "/").lower()
+
+
+def is_godot_cs(path):
+    """A C# file inside the Godot presentation project (05.Presentation)."""
+    p = _low(path)
+    return p.endswith(".cs") and "/05.presentation/martialheroes.client.godot/" in p
+
+
+def is_tscn(path):
+    return _low(path).endswith(".tscn")
+
+
+def is_layer_cs(path):
+    """A C# file inside one of the numbered layer projects (00..05)."""
+    return _low(path).endswith(".cs") and layer_of(path)[0] is not None
+
+
+def is_spec(path):
+    """A committed clean RE spec under Docs/RE (NOT the _dirty/ quarantine)."""
+    p = _low(path)
+    return p.endswith(".md") and "/docs/re/" in p and "/_dirty/" not in p
+
+
+def is_dirty_path(path):
+    return "/docs/re/_dirty/" in _low(path)
+
+
+def is_parser_cs(path):
+    """A C# file in the Assets.Parsers project (CP949 text decoding lives here)."""
+    return _low(path).endswith(".cs") and "/martialheroes.assets.parsers/" in _low(path)
+
+
+# --------------------------------------------------------------- Godot / build env
+
+# The user's Godot 4.6.3 console build (prints stdout; used by the headless verify loop).
+GODOT_CONSOLE_EXE = (
+    r"C:\Users\Arius\Desktop\Godot_v4.6.3-stable_mono_win64"
+    r"\Godot_v4.6.3-stable_mono_win64_console.exe"
+)
+DOTNET_EXE = r"C:\Program Files\dotnet\dotnet.EXE"
+
+
+def godot_console_exe():
+    return GODOT_CONSOLE_EXE if os.path.isfile(GODOT_CONSOLE_EXE) else None
+
+
+def godot_project_dir(pdir):
+    return os.path.join(pdir, "05.Presentation", "MartialHeroes.Client.Godot")
+
+
+def dotnet_exe():
+    return DOTNET_EXE if os.path.isfile(DOTNET_EXE) else "dotnet"
+
+
+# ----------------------------------------------------------------------- detectors
+# These power the advisory Godot / clean-room / perf nudges. All best-effort.
+
+# In a Godot 4 .tscn, `script` is a PROPERTY LINE under the node header, NOT a header
+# attribute. `[node ... script=ExtResource("1")]` is SILENTLY IGNORED (node ends up
+# script-less -> gray screen). This catches the broken inline form.
+_TSCN_INLINE_SCRIPT = re.compile(r"\[node\b[^\]]*\bscript\s*=", re.I)
+
+# Inside namespace MartialHeroes.Client.Godot.*, a bare `Input.` / `Environment.` / `Time.`
+# resolves to the sibling project namespace, NOT the Godot class -> CS0234. Use global::Godot.
+_GODOT_NS_COLLISION = re.compile(r"(?<![\w.\"])(Input|Environment|Time)\s*\.\s*[A-Z]")
+
+# The native Godot GLB importer crashes on this project's generated GLBs (no managed stack).
+# AppendFromBuffer is a GltfDocument instance method; real code calls it on a local
+# (doc.AppendFromBuffer(...)), so anchor on the distinctive method name, not the type.
+_GLTF_CRASH = re.compile(r"\bAppendFromBuffer\s*\(")
+
+# A magic numeric constant (hex, or a float/int literal) that should cite a spec.
+_MAGIC = re.compile(r"\b0x[0-9A-Fa-f]{2,}\b|\b\d+\.\d+f?\b|(?<![\w.])\d{3,}\b")
+_SPEC_CITE = re.compile(r"//\s*spec\s*:", re.I)
+
+# CP949 / Korean-text decoding signals.
+_CP949_NEEDED = re.compile(r"GetEncoding\s*\(\s*949\s*\)|RegisterProvider")
+
+# Coordinate-convention signals in Godot World code.
+_VECTOR3 = re.compile(r"\bnew\s+Vector3\b|\bRotationDegrees\b|\bToGodot\b")
+
+
+def tscn_has_inline_script(text):
+    return bool(_TSCN_INLINE_SCRIPT.search(text or ""))
+
+
+def godot_ns_collisions(text):
+    """Distinct bare Godot-class references that will collide with project namespaces."""
+    seen = set()
+    for m in _GODOT_NS_COLLISION.finditer(text or ""):
+        seen.add(m.group(1))
+    return sorted(seen)
+
+
+def uses_gltf_appendfrombuffer(text):
+    return bool(_GLTF_CRASH.search(text or ""))
+
+
+def has_uncited_magic(text):
+    """True when code text has magic numeric constants but no nearby `// spec:` citation.
+    Best-effort: text should already be comment/string-stripped for the magic scan, but the
+    citation check runs on the RAW text (comments included)."""
+    return bool(_MAGIC.search(text or "")) and not _SPEC_CITE.search(text or "")
+
+
+def mentions_korean_or_txt_read(text):
+    """Heuristic: code likely decodes CP949 game text (a .scr/.txt/.csv read) without the provider."""
+    t = text or ""
+    reads_text = bool(re.search(r"\.(?:txt|csv|scr)\b|GetString\s*\(", t))
+    return reads_text and not _CP949_NEEDED.search(t)
+
+
+def has_coordinate_math(text):
+    return bool(_VECTOR3.search(text or ""))

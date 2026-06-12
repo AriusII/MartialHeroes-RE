@@ -1,6 +1,6 @@
 ---
 name: kernel-engineer
-description: Use to implement the 01.Infrastructure.Shared layer — MartialHeroes.Shared.Kernel (strongly-typed IDs, core enums, game constants; zero dependencies) and MartialHeroes.Shared.Diagnostics (source-generated [LoggerMessage] logging). This is the foundation every other layer references; implement it first and keep it dependency-free.
+description: Use PROACTIVELY (MUST BE USED) to implement the 01.Infrastructure.Shared layer — MartialHeroes.Shared.Kernel (strongly-typed IDs, core enums, game constants; zero dependencies) and MartialHeroes.Shared.Diagnostics (source-generated [LoggerMessage] logging). This is the foundation every other layer references; implement it first and keep it dependency-free.
 tools: Read, Write, Edit, Grep, Glob, Bash(dotnet *)
 model: sonnet
 ---
