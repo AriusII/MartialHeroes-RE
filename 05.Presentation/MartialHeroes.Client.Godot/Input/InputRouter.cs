@@ -77,13 +77,17 @@ public sealed partial class InputRouter : Node
     public override void _Ready()
     {
         // Defer camera lookup and world-handler wiring until after the scene is fully loaded.
+        // Guard: LateInitialise exceptions must not crash the scene.
         CallDeferred(MethodName.LateInitialise);
     }
 
     private void LateInitialise()
     {
-        LookupCamera();
-        WireWorldHandler();
+        try { LookupCamera(); }
+        catch (Exception ex) { GD.PrintErr($"[InputRouter] LookupCamera failed: {ex.Message}"); }
+
+        try { WireWorldHandler(); }
+        catch (Exception ex) { GD.PrintErr($"[InputRouter] WireWorldHandler failed: {ex.Message}"); }
     }
 
     private void WireWorldHandler()
@@ -123,6 +127,10 @@ public sealed partial class InputRouter : Node
             // Still handle hotbar in World state check below — done in _UnhandledInput.
             return;
         }
+
+        // Guard: input translation errors must not crash the frame.
+        try
+        {
 
         switch (evt)
         {
@@ -173,6 +181,12 @@ public sealed partial class InputRouter : Node
                 break;
             }
         }
+
+        } // end try
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[InputRouter] _Input error: {ex.Message}");
+        }
     }
 
     // Chat input state: true while the chat bar is active.
@@ -192,6 +206,20 @@ public sealed partial class InputRouter : Node
         {
             return;
         }
+
+        // Guard: unhandled-input processing errors must not crash the frame.
+        try
+        {
+        UnhandledInputInternal(evt);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[InputRouter] _UnhandledInput error: {ex.Message}");
+        }
+    }
+
+    private void UnhandledInputInternal(global::Godot.InputEvent evt)
+    {
 
         // Handle key events for chat and hotbar.
         if (evt is InputEventKey key && key.Pressed)

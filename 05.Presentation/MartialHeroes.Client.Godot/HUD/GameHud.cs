@@ -107,6 +107,22 @@ public sealed partial class GameHud : Control
 
     public override void _Ready()
     {
+        // Guard the entire HUD construction: a control creation failure must not crash the scene.
+        // If the HUD partially fails, the game still runs — just without some UI elements.
+        try
+        {
+            ReadyInternal();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] _Ready failed: {ex.Message}. HUD may be partially visible.");
+            // Ensure null-checked labels are non-null so event handlers don't null-ref.
+            EnsureFallbackLabels();
+        }
+    }
+
+    private void ReadyInternal()
+    {
         // Anchor the HUD to the top-left.
         AnchorLeft = 0f;
         AnchorTop = 0f;
@@ -175,10 +191,36 @@ public sealed partial class GameHud : Control
         vbox.AddChild(_combatStatsLabel);
 
         // ---- Hotbar (bottom of screen) ----
-        BuildHotbar();
+        try { BuildHotbar(); }
+        catch (Exception ex) { GD.PrintErr($"[GameHud] BuildHotbar failed: {ex.Message}"); }
 
         // ---- Chat (bottom-right corner) ----
-        BuildChatPanel();
+        try { BuildChatPanel(); }
+        catch (Exception ex) { GD.PrintErr($"[GameHud] BuildChatPanel failed: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// Ensures all Label/ProgressBar fields are non-null so event handlers never null-ref,
+    /// even if _Ready failed before constructing them. Creates lightweight off-screen stubs.
+    /// </summary>
+    private void EnsureFallbackLabels()
+    {
+        _stateLabel ??= new Label();
+        _actorCount ??= new Label();
+        _hpBar ??= new ProgressBar();
+        _hpText ??= new Label();
+        _mpBar ??= new ProgressBar();
+        _mpText ??= new Label();
+        _levelLabel ??= new Label();
+        _xpLabel ??= new Label();
+        _buffLabel ??= new Label();
+        _combatStatsLabel ??= new Label();
+        _chatLabel ??= new Label();
+        for (int i = 0; i < HotbarVisibleSlots; i++)
+        {
+            _hotbarKey[i] ??= new Label();
+            _hotbarName[i] ??= new Label();
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -257,6 +299,7 @@ public sealed partial class GameHud : Control
     /// </summary>
     public void OnActorSpawned(ActorSpawnedEvent evt)
     {
+        if (_actorCount is null) return; // HUD not yet ready or failed to build.
         _visibleActorCount++;
         _actorCount.Text = $"Actors: {_visibleActorCount}";
 
@@ -412,6 +455,7 @@ public sealed partial class GameHud : Control
     /// </summary>
     public void OnClientStateChanged(ClientStateChangedEvent evt)
     {
+        if (_stateLabel is null) return;
         _stateLabel.Text = $"State: {evt.Current}";
     }
 

@@ -101,6 +101,10 @@ public sealed partial class RealWorldRenderer : Node3D
     /// <summary>
     /// Called by GameLoop._Ready. Performs synchronous BUD/character loading and node creation;
     /// kicks off the async 3×3 terrain-ring streaming in a fire-and-forget task.
+    ///
+    /// Each step is individually guarded: a failure in one step is logged and skipped;
+    /// subsequent steps still run. This ensures the window always opens even if asset
+    /// loading partially fails on real data.
     /// </summary>
     public void Initialise(ClientContext ctx, TerrainNode terrainNode)
     {
@@ -108,7 +112,16 @@ public sealed partial class RealWorldRenderer : Node3D
         _terrainNode = terrainNode;
 
         // Open the VFS — falls back gracefully to null if absent.
-        _assets = RealClientAssets.TryOpen();
+        try
+        {
+            _assets = RealClientAssets.TryOpen();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] RealClientAssets.TryOpen threw: {ex.Message}");
+            _assets = null;
+        }
+
         if (_assets is null)
         {
             GD.Print("[RealWorldRenderer] No real assets available — skipping real-asset render.");
@@ -117,25 +130,27 @@ public sealed partial class RealWorldRenderer : Node3D
 
         // Wire the texture resolver into TerrainNode so each sector can get a real texture.
         // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — 1-based TextureIndexGrid → texture path.
-        // The resolver maps 1-based indices to VFS texture paths and loads them via AssetPassthrough.
-        // This is done before streaming so the resolver is ready when the first SectorLoadedEvent arrives.
-        WireTerrainTextureResolver(terrainNode);
+        // Each step below is in its own try/catch so one failure does not block the rest.
+        try { WireTerrainTextureResolver(terrainNode); }
+        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] WireTerrainTextureResolver failed: {ex.Message}"); }
 
         // Kick off 3×3 terrain streaming via SectorStreamingService.
-        // This publishes SectorLoadedEvent / SectorUnloadedEvent onto the EventBus which
-        // TerrainNode processes on the main thread each _Process frame — fully passive.
         // spec: Docs/RE/formats/terrain.md §9.2 (3×3 ring, StreamQuality.Medium).
-        TriggerTerrainStreaming(ctx);
+        try { TriggerTerrainStreaming(ctx); }
+        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] TriggerTerrainStreaming failed: {ex.Message}"); }
 
         // Load BUD scene and create MeshInstance3D children.
-        LoadAndSpawnBudScene();
+        try { LoadAndSpawnBudScene(); }
+        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] LoadAndSpawnBudScene failed: {ex.Message}"); }
 
         // Spawn skinned character (if available).
-        LoadAndSpawnCharacter();
+        try { LoadAndSpawnCharacter(); }
+        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] LoadAndSpawnCharacter failed: {ex.Message}"); }
 
         // Position a camera above the origin cell centre.
         // spec: Docs/RE/formats/terrain.md §1.4 — worldX_min = (mapX-10000)×1024, cell size 1024. CONFIRMED.
-        SpawnCamera();
+        try { SpawnCamera(); }
+        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] SpawnCamera failed: {ex.Message}"); }
 
         GD.Print($"[RealWorldRenderer] Real-asset render initialised for cell ({TargetMapX},{TargetMapZ}).");
     }
@@ -261,14 +276,27 @@ public sealed partial class RealWorldRenderer : Node3D
         if (_assets is null) return;
 
         // Get the BUILDING DATAFILE path from the .map descriptor.
-        (_, string? budPath) = _assets.LoadMapDatafilePaths(TargetAreaId, TargetMapX, TargetMapZ);
+        (string? _, string? budPath) = (null, null);
+        try
+        {
+            (_, budPath) = _assets.LoadMapDatafilePaths(TargetAreaId, TargetMapX, TargetMapZ);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] LoadMapDatafilePaths failed: {ex.Message}");
+            return;
+        }
+
         if (budPath is null)
         {
             GD.Print("[RealWorldRenderer] No BUILDING section in .map — skipping BUD scene.");
             return;
         }
 
-        BudScene? scene = _assets.LoadBud(budPath);
+        BudScene? scene = null;
+        try { scene = _assets.LoadBud(budPath); }
+        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] LoadBud failed: {ex.Message}"); return; }
+
         if (scene is null || scene.Objects.Length == 0)
         {
             GD.Print($"[RealWorldRenderer] BUD scene empty for: {budPath}");
@@ -279,11 +307,20 @@ public sealed partial class RealWorldRenderer : Node3D
         // BUD coordinates are absolute world-space (no cell-relative offset needed).
         // spec: Docs/RE/formats/terrain_scene.md §Coordinate system — "positions are pre-baked
         //       into absolute world-space": CONFIRMED.
-        var budGlb = new MemoryStream();
-        BudSceneGltfConverter.WriteGlb(scene, budGlb);
-        budGlb.Position = 0;
+        byte[]? budGlbBytes = null;
+        try
+        {
+            var budGlb = new MemoryStream();
+            BudSceneGltfConverter.WriteGlb(scene, budGlb);
+            budGlbBytes = budGlb.ToArray();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] BudSceneGltfConverter.WriteGlb failed: {ex.Message}");
+            return;
+        }
 
-        Node3D? budRoot = TryImportGlb(budGlb.ToArray(), "BudScene");
+        Node3D? budRoot = TryImportGlb(budGlbBytes, "BudScene");
         if (budRoot is null) return;
 
         budRoot.Name = "BudSceneNode";
@@ -291,7 +328,8 @@ public sealed partial class RealWorldRenderer : Node3D
 
         // Attempt to apply terrain texture from the map TEXTURES directive.
         // spec: Docs/RE/formats/terrain.md §3.5 TEXTURES directive — tex_id indexed array.
-        TryApplyBudTexture(budRoot);
+        try { TryApplyBudTexture(budRoot); }
+        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] TryApplyBudTexture failed: {ex.Message}"); }
 
         GD.Print($"[RealWorldRenderer] BUD scene spawned: {scene.Objects.Length} objects.");
     }
@@ -354,7 +392,10 @@ public sealed partial class RealWorldRenderer : Node3D
         if (_assets is null) return;
 
         // Resolve .skn path: use explicit property or discover the first available.
-        string? sknPath = SknVirtualPath ?? DiscoverFirstSknPath();
+        string? sknPath = null;
+        try { sknPath = SknVirtualPath ?? DiscoverFirstSknPath(); }
+        catch (Exception ex) { GD.PrintErr($"[RealWorldRenderer] DiscoverFirstSknPath failed: {ex.Message}"); return; }
+
         if (sknPath is null)
         {
             GD.Print("[RealWorldRenderer] No .skn found — skipping character render.");
@@ -366,28 +407,32 @@ public sealed partial class RealWorldRenderer : Node3D
         string? bndPath = BndVirtualPath ?? DeriveBndPath(sknPath);
 
         // Write GLB to memory.
-        var glbStream = new MemoryStream();
-        bool ok = _assets.LoadSkinned(
-            sknPath: sknPath,
-            bndPath: bndPath,
-            motPaths: null,  // No .mot discovered yet — static pose only.
-            glbOutput: glbStream);
+        byte[]? glbBytes = null;
+        try
+        {
+            var glbStream = new MemoryStream();
+            bool ok = _assets.LoadSkinned(
+                sknPath: sknPath,
+                bndPath: bndPath,
+                motPaths: null,  // No .mot discovered yet — static pose only.
+                glbOutput: glbStream);
 
-        if (!ok) return;
+            if (!ok) return;
 
-        glbStream.Position = 0;
-        byte[] glbBytes = glbStream.ToArray();
+            glbStream.Position = 0;
+            glbBytes = glbStream.ToArray();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] LoadSkinned failed for '{sknPath}': {ex.Message}");
+            return;
+        }
 
         // Import the GLB at runtime via Godot's GltfDocument API.
         // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — consume Assets.Mapping output.
         Node3D? charRoot = TryImportGlb(glbBytes, "CharacterSkin");
         if (charRoot is null)
         {
-            // TODO (runtime animation): GltfDocument.AppendFromBuffer imports skeleton+mesh but
-            // Godot 4.x requires a post-import hook to wire AnimationPlayer to the imported skeleton.
-            // Current: geometry and static pose are imported; animation clips are NOT played at runtime.
-            // The GLB is fully valid — open in the Godot editor for full animation preview.
-            // Tracked: Godot upstream issue — GltfDocument post-import hook for runtime animation.
             GD.PrintErr("[RealWorldRenderer] GLB runtime import failed. " +
                         "Skinned character will not be visible in this session.");
             return;

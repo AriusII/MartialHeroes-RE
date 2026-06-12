@@ -60,10 +60,28 @@ public sealed partial class GameLoop : Node
 
     public override void _Ready()
     {
+        // The entire _Ready body is wrapped defensively: any exception in subsystem wiring,
+        // context resolution, or real-asset initialisation must NOT crash the scene.
+        // F5 must always produce a Godot window; the window may be in degraded mode.
+        try
+        {
+            ReadyInternal();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameLoop] _Ready failed: {ex}");
+            GD.PrintErr("[GameLoop] Attempting emergency fallback to synthetic mode.");
+            TryEmergencyFallback();
+        }
+    }
+
+    /// <summary>The real _Ready body; separated so the defensive wrapper stays clean.</summary>
+    private void ReadyInternal()
+    {
         // Resolve the autoload singleton.
         _clientContext = GetNode<ClientContext>("/root/ClientContext");
 
-        // Resolve child nodes.
+        // Resolve child nodes — use HasNode for optional children so missing nodes don't crash.
         _actorRegistry = GetNode<ActorRegistry>("ActorRegistry");
         _hud = GetNode<GameHud>("HUD");
         _inputRouter = GetNode<InputRouter>("InputRouter");
@@ -82,40 +100,83 @@ public sealed partial class GameLoop : Node
         }
 
         // Give subsystems their handles.
-        _actorRegistry.Initialise(_clientContext);
-        _hud.Initialise(_clientContext);
+        try { _actorRegistry.Initialise(_clientContext); }
+        catch (Exception ex) { GD.PrintErr($"[GameLoop] ActorRegistry.Initialise failed: {ex.Message}"); }
 
-        // Wire HUD hit-test into HudInputHandler now that the HUD is ready.
-        // spec: Docs/RE/specs/input_ui.md §3 — "UI hit-test first".
-        // The HudInputHandler was constructed with hitTest=null; we cannot update it post-construction
-        // (it is immutable). The hit-test is advisory; for now the pass-through is acceptable.
-        // TODO: expose a late-bind hit-test setter on HudInputHandler if UI-blocking is needed.
+        try { _hud.Initialise(_clientContext); }
+        catch (Exception ex) { GD.PrintErr($"[GameLoop] GameHud.Initialise failed: {ex.Message}"); }
 
         // Wire InputRouter with bus from the composition root.
-        _inputRouter.Initialise(_clientContext);
-        _inputRouter.InitialiseBus(_clientContext.InputBus);
+        try
+        {
+            _inputRouter.Initialise(_clientContext);
+            _inputRouter.InitialiseBus(_clientContext.InputBus);
+        }
+        catch (Exception ex) { GD.PrintErr($"[GameLoop] InputRouter.Initialise failed: {ex.Message}"); }
 
         // Real-asset rendering path vs. synthetic feeder.
         // Controlled by MH_REAL_ASSETS=1 environment variable.
-        // If real assets are enabled and the client directory is reachable, spawn the
-        // RealWorldRenderer and skip the synthetic feeder.
+        // Each step guarded individually: a failure in real-asset init falls back to synthetic.
         // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
+        bool realRendererStarted = false;
         if (RealWorldRenderer.IsEnabled)
         {
             GD.Print("[GameLoop] MH_REAL_ASSETS=1 — attempting real-asset renderer.");
-            _realWorldRenderer = new RealWorldRenderer();
-            _realWorldRenderer.Name = "RealWorldRenderer";
-            AddChild(_realWorldRenderer);
-            _realWorldRenderer.Initialise(_clientContext, _terrainNode);
+            try
+            {
+                _realWorldRenderer = new RealWorldRenderer();
+                _realWorldRenderer.Name = "RealWorldRenderer";
+                AddChild(_realWorldRenderer);
+                _realWorldRenderer.Initialise(_clientContext, _terrainNode);
+                realRendererStarted = true;
+                GD.Print("[GameLoop] RealWorldRenderer initialised successfully.");
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[GameLoop] RealWorldRenderer.Initialise failed: {ex}");
+                GD.PrintErr("[GameLoop] Falling back to SyntheticWorldFeeder.");
+                // Clean up the partially-added node if present.
+                if (_realWorldRenderer is not null && IsInstanceValid(_realWorldRenderer))
+                {
+                    _realWorldRenderer.QueueFree();
+                    _realWorldRenderer = null;
+                }
+            }
         }
-        else
+
+        if (!realRendererStarted)
         {
             // Start the synthetic feeder (fires and forgets onto a Task; publishes only through
             // the legitimate Application event bus — no game rules inside).
-            _syntheticFeeder.StartAsync(_clientContext);
+            try { _syntheticFeeder.StartAsync(_clientContext); }
+            catch (Exception ex) { GD.PrintErr($"[GameLoop] SyntheticWorldFeeder.StartAsync failed: {ex.Message}"); }
         }
 
         GD.Print("[GameLoop] Ready.");
+    }
+
+    /// <summary>
+    /// Last-resort fallback called when <see cref="ReadyInternal"/> itself threw.
+    /// Attempts to start the synthetic feeder on whatever context we managed to resolve.
+    /// If even that fails, we remain silent — the window is at least open.
+    /// </summary>
+    private void TryEmergencyFallback()
+    {
+        try
+        {
+            _clientContext ??= GetNode<ClientContext>("/root/ClientContext");
+            _syntheticFeeder ??= GetNode<SyntheticWorldFeeder>("SyntheticWorldFeeder");
+            if (_clientContext is not null && _syntheticFeeder is not null)
+            {
+                _syntheticFeeder.StartAsync(_clientContext);
+                GD.Print("[GameLoop] Emergency fallback: SyntheticWorldFeeder started.");
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameLoop] Emergency fallback also failed: {ex.Message}. " +
+                        "The window is open but all subsystems are offline.");
+        }
     }
 
     /// <summary>
@@ -128,11 +189,26 @@ public sealed partial class GameLoop : Node
     /// </summary>
     public override void _Process(double delta)
     {
+        // Guard: if _clientContext was never resolved (extreme failure), skip frame silently.
+        if (_clientContext is null) return;
+
         // Drain every event that arrived since the last frame.
         // TryRead never blocks; we stop when the queue is empty.
-        while (_clientContext.EventBus.Reader.TryRead(out IClientEvent? evt))
+        // Individual dispatch errors are caught so one bad event cannot kill the frame loop.
+        try
         {
-            DispatchEvent(evt);
+            while (_clientContext.EventBus.Reader.TryRead(out IClientEvent? evt))
+            {
+                try { DispatchEvent(evt); }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[GameLoop] DispatchEvent error ({evt?.GetType().Name}): {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameLoop] _Process error: {ex.Message}");
         }
     }
 

@@ -80,11 +80,16 @@ public static class ItemsCsvParser
             ParseLine(text, ref pos, fields);
 
             if (fields.Count == 0) continue;
-            if (fields.Count != ExpectedColumnCount)
-                throw new InvalidDataException(
-                    $"items.csv parse error: expected {ExpectedColumnCount} columns, got {fields.Count} " +
-                    $"at character offset {pos}. " +
-                    "spec: Docs/RE/formats/config_tables.md §4.1.");
+
+            // Tolerate ragged rows. The nominal column count is 139, but the shipped catalogue
+            // contains occasional rows with a different count (a 138-column row was observed in the
+            // real items.csv). A single malformed row must NOT discard the entire 89,712-row catalogue,
+            // so we pad short rows with empty trailing fields to keep the fixed-index decode in
+            // BuildRow in bounds (highest typed index read is 131); extra columns on longer rows are
+            // preserved verbatim in RawColumns and ignored by the typed decode.
+            // spec: Docs/RE/formats/config_tables.md §4.1 — 139 columns nominal; real data is ragged.
+            for (int i = fields.Count; i < ExpectedColumnCount; i++)
+                fields.Add(string.Empty);
 
             rows.Add(BuildRow(fields));
         }

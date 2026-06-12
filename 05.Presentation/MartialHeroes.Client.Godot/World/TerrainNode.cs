@@ -68,6 +68,20 @@ public sealed partial class TerrainNode : Node3D
     /// </summary>
     public void OnSectorLoaded(SectorLoadedEvent evt)
     {
+        // The entire sector-load path is guarded: a bad payload or mesh build failure must not
+        // crash the scene — we just skip this sector silently (with a log).
+        try
+        {
+            OnSectorLoadedInternal(evt);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[TerrainNode] OnSectorLoaded error for ({evt.MapX},{evt.MapZ}): {ex.Message}");
+        }
+    }
+
+    private void OnSectorLoadedInternal(SectorLoadedEvent evt)
+    {
         if (evt.Payload.IsEmpty)
         {
             // Cell absent from the area manifest — no visual to add.
@@ -101,17 +115,25 @@ public sealed partial class TerrainNode : Node3D
         //       can translate it. Default behaviour: vertex colours only (fallback if no resolver).
         if (TextureResolver is not null && cell.TextureIndexGrid.Length > 0)
         {
-            int texIdx = cell.TextureIndexGrid[0]; // 1-based index into the .map TEXTURES array
-            ImageTexture? tex = TextureResolver(texIdx);
-            if (tex is not null)
+            try
             {
-                // Override the surface material with a real texture.
-                // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — tex_id[0] = dominant texture region.
-                var texMat = new StandardMaterial3D();
-                texMat.AlbedoTexture = tex;
-                texMat.TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps;
-                texMat.Uv1Scale = new Vector3(4f, 4f, 4f); // tiling scale for terrain texture
-                mesh.SurfaceSetMaterial(0, texMat);
+                int texIdx = cell.TextureIndexGrid[0]; // 1-based index into the .map TEXTURES array
+                ImageTexture? tex = TextureResolver(texIdx);
+                if (tex is not null)
+                {
+                    // Override the surface material with a real texture.
+                    // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — tex_id[0] = dominant texture region.
+                    var texMat = new StandardMaterial3D();
+                    texMat.AlbedoTexture = tex;
+                    texMat.TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps;
+                    texMat.Uv1Scale = new Vector3(4f, 4f, 4f); // tiling scale for terrain texture
+                    mesh.SurfaceSetMaterial(0, texMat);
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[TerrainNode] TextureResolver failed for ({evt.MapX},{evt.MapZ}): {ex.Message}");
+                // Continue: the sector will render with vertex colours only.
             }
         }
 

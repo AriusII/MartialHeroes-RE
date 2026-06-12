@@ -125,6 +125,31 @@ public sealed partial class ClientContext : Node
 
     public override void _Ready()
     {
+        // The entire composition-root body is wrapped in a defensive try/catch.
+        // Any exception in catalogue loading, VFS opening, or service construction is caught
+        // here; the run continues in a degraded-but-safe state so the Godot window still opens.
+        // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — composition root.
+        try
+        {
+            BuildApplicationGraph();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] FATAL during composition-root construction: {ex}");
+            GD.PrintErr("[ClientContext] Falling back to minimal offline state. " +
+                        "The window will open but real assets and the engine loop are unavailable.");
+
+            // Ensure all properties are non-null so child nodes never null-ref the context.
+            EnsureMinimalFallbackState();
+        }
+    }
+
+    /// <summary>
+    /// Builds the full Application object graph.  Separated from _Ready so the
+    /// defensive catch in _Ready remains clean.
+    /// </summary>
+    private void BuildApplicationGraph()
+    {
         // 1. Event bus — bounded 1024 capacity, DropOldest backpressure.
         //    spec: ClientEventBus default policy.
         var bus = new ClientEventBus(ClientEventBus.DefaultCapacity);
@@ -170,17 +195,38 @@ public sealed partial class ClientContext : Node
         // 11. Real stat catalogue — from userlevel.scr via VfsCatalogueLoader.
         //     Replaces the former ScrStatCatalogueSource stub with the real Implementation.
         //     spec: Docs/RE/formats/config_tables.md §2.4 userlevel.scr.
-        ScrStatCatalogue scrStatCatalogue = ScrStatCatalogue.FromLoader(_catalogueLoader);
-        GD.Print($"[ClientContext] ScrStatCatalogue loaded (HP curve entries={scrStatCatalogue.GetHpBaseCurve().Count}, " +
-                 $"MP curve entries={scrStatCatalogue.GetMpBaseCurve().Count}).");
+        ScrStatCatalogue scrStatCatalogue;
+        try
+        {
+            scrStatCatalogue = ScrStatCatalogue.FromLoader(_catalogueLoader);
+            GD.Print($"[ClientContext] ScrStatCatalogue loaded (HP curve entries={scrStatCatalogue.GetHpBaseCurve().Count}, " +
+                     $"MP curve entries={scrStatCatalogue.GetMpBaseCurve().Count}).");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] ScrStatCatalogue load failed: {ex.Message} — using empty catalogue.");
+            // Empty array constructor → both curves are StatBaseCurve.Empty (zero-alloc fallback).
+            scrStatCatalogue = new ScrStatCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.LevelBaseEntry>());
+        }
 
         // 12. Catalogue items / skills / mobs for UI display names (CP949).
         //     spec: Docs/RE/formats/config_tables.md §4 items.csv / §2.8 skills.scr / §2.9 mobs.scr.
-        ItemCatalogue = ItemCatalogue.FromLoader(_catalogueLoader);
-        SkillCatalogue = SkillCatalogue.FromLoader(_catalogueLoader);
-        MobCatalogue = MobCatalogue.FromLoader(_catalogueLoader);
-        GD.Print($"[ClientContext] Catalogues loaded: {ItemCatalogue.Count} items, " +
-                 $"{SkillCatalogue.Count} skills, {MobCatalogue.Count} mobs.");
+        try
+        {
+            ItemCatalogue = ItemCatalogue.FromLoader(_catalogueLoader);
+            SkillCatalogue = SkillCatalogue.FromLoader(_catalogueLoader);
+            MobCatalogue = MobCatalogue.FromLoader(_catalogueLoader);
+            GD.Print($"[ClientContext] Catalogues loaded: {ItemCatalogue.Count} items, " +
+                     $"{SkillCatalogue.Count} skills, {MobCatalogue.Count} mobs.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] Catalogue load failed: {ex.Message} — using empty catalogues.");
+            // Use empty-array constructors so the properties are non-null and Count returns 0.
+            ItemCatalogue ??= new ItemCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.ItemCsvRow>());
+            SkillCatalogue ??= new SkillCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.SkillCatalogEntry>());
+            MobCatalogue ??= new MobCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.MobCatalogEntry>());
+        }
 
         // 13. VFS archive for terrain (separate from catalogue loader — same paths).
         //     spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
@@ -234,9 +280,71 @@ public sealed partial class ClientContext : Node
         // spec: Docs/RE/specs/game_loop.md §6 — "Fixed-rate logic tick … via a PeriodicTimer".
         _loopCts = new CancellationTokenSource();
         PeriodicGameClock clock = engineLoop.CreateRealtimeClock();
-        _loopTask = engineLoop.RunAsync(clock, _loopCts.Token);
+
+        // Observe background faults so they do NOT silently kill the process.
+        // The ContinueWith runs only if the task faults, logs the exception, and does NOT rethrow.
+        Task rawLoop = engineLoop.RunAsync(clock, _loopCts.Token);
+        _loopTask = rawLoop.ContinueWith(
+            t => GD.PrintErr($"[ClientContext] EngineLoop faulted: {t.Exception}"),
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+        // Keep the raw task alive for await in _ExitTree so the loop can drain.
+        _ = rawLoop; // intentionally not awaited here; fault is observed above.
 
         GD.Print("[ClientContext] Application graph constructed. EventBus ready. EngineLoop started at 30 Hz.");
+    }
+
+    /// <summary>
+    /// Builds the absolute minimum set of non-null properties so child nodes that access
+    /// <c>ClientContext</c> never encounter a null reference, even when
+    /// <see cref="BuildApplicationGraph"/> threw.
+    ///
+    /// All services are hollow/no-op implementations that do nothing but are non-null.
+    /// </summary>
+    private void EnsureMinimalFallbackState()
+    {
+        if (EventBus is null)
+        {
+            var bus = new ClientEventBus(ClientEventBus.DefaultCapacity);
+            var fsm = new ClientStateMachine(bus, ClientState.Login);
+            var world = new ClientWorld();
+            var noopSink = new NoOpOutboundPacketSink();
+            var hudHandler = new HudInputHandler(hitTest: null);
+            var worldRelay = new RelayInputHandler();
+            var inputBus = new InputBus(hudHandler, worldRelay);
+            var credentialStore = new LoginCredentialStore();
+            SessionId sessionId = SessionId.None;
+            ReadOnlySpan<byte> versionToken = stackalloc byte[ApplicationUseCases.VersionTokenLength];
+            var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId, versionToken);
+            var opcodeSink = new CountingUnhandledOpcodeSink();
+            var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, null);
+            var dispatcher = new InboundFrameDispatcher(handler);
+            var terrainSource = new VfsTerrainSectorSource(null, areaId: 0);
+            var streamingService = new SectorStreamingService(terrainSource, bus, StreamQuality.Medium);
+            var engineLoop = new GameEngineLoop(world, bus, inputBus, GameEngineLoop.DefaultTickRateHz);
+
+            EventBus = bus;
+            UseCases = useCases;
+            Dispatcher = dispatcher;
+            StateMachine = fsm;
+            InputBus = inputBus;
+            EngineLoop = engineLoop;
+            StreamingService = streamingService;
+            _setWorldHandler = worldRelay.SetTarget;
+
+            // Start the loop (no assets, no network — just keeps the bus alive).
+            _loopCts = new CancellationTokenSource();
+            PeriodicGameClock clock = engineLoop.CreateRealtimeClock();
+            Task rawLoop = engineLoop.RunAsync(clock, _loopCts.Token);
+            _loopTask = rawLoop.ContinueWith(
+                t => GD.PrintErr($"[ClientContext] Fallback EngineLoop faulted: {t.Exception}"),
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+            _ = rawLoop;
+        }
+
+        ItemCatalogue ??= new ItemCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.ItemCsvRow>());
+        SkillCatalogue ??= new SkillCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.SkillCatalogEntry>());
+        MobCatalogue ??= new MobCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.MobCatalogEntry>());
+        GD.Print("[ClientContext] Minimal fallback state initialised.");
     }
 
     // Stored so InputRouter can wire the world handler after initialisation.
