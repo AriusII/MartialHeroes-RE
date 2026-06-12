@@ -29,6 +29,11 @@ public sealed partial class ActorRegistry : Node
     // Set during Initialise() — not constructor, since Godot nodes are wired after _Ready.
     private ClientContext _clientContext = null!;
 
+    public override void _Ready()
+    {
+        GD.Print("[ActorRegistry] _Ready start");
+    }
+
     /// <summary>Called by GameLoop._Ready before any events can arrive.</summary>
     public void Initialise(ClientContext context)
     {

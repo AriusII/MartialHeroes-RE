@@ -59,6 +59,8 @@ public sealed partial class GameLoop : Node
 
     public override void _Ready()
     {
+        GD.Print("[GameLoop] _Ready start");
+
         // The entire _Ready body is wrapped defensively: any exception in subsystem wiring,
         // context resolution, or real-asset initialisation must NOT crash the scene.
         // F5 must always produce a Godot window; the window may be in degraded mode.
@@ -77,6 +79,8 @@ public sealed partial class GameLoop : Node
     /// <summary>The real _Ready body; separated so the defensive wrapper stays clean.</summary>
     private void ReadyInternal()
     {
+        GD.Print("[GameLoop] ReadyInternal: resolving ClientContext");
+
         // Resolve the autoload singleton.
         _clientContext = GetNode<ClientContext>("/root/ClientContext");
 
@@ -97,6 +101,8 @@ public sealed partial class GameLoop : Node
             _terrainNode.Name = "TerrainNode";
             AddChild(_terrainNode);
         }
+
+        GD.Print("[GameLoop] ReadyInternal: child nodes resolved — wiring subsystems");
 
         // Give subsystems their handles.
         try
@@ -127,6 +133,8 @@ public sealed partial class GameLoop : Node
         {
             GD.PrintErr($"[GameLoop] InputRouter.Initialise failed: {ex.Message}");
         }
+
+        GD.Print("[GameLoop] ReadyInternal: subsystems wired — checking real-asset renderer");
 
         // Real-asset rendering path vs. synthetic feeder.
         // Activation via ClientPathResolver (config file / env override / auto-detect).

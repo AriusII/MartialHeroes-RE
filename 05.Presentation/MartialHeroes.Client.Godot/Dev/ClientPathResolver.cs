@@ -109,6 +109,26 @@ public static class ClientPathResolver
     }
 
     /// <summary>
+    /// Retourne true si le chargement des modèles 3D (.bud et .skn) est activé.
+    ///
+    /// Lit la clé <c>load_models</c> dans client_dir.cfg.
+    /// Défaut : true (les modèles sont chargés).
+    /// Mettre load_models=false pour charger uniquement le terrain (mode safe).
+    /// </summary>
+    public static bool LoadModelsEnabled()
+    {
+        string? cfgPath = ResolveCfgPath();
+        if (cfgPath is null) return true; // clé absente → défaut true
+
+        string? raw = ReadKeyFromCfg(cfgPath, "load_models");
+        if (raw is null) return true; // clé absente → défaut true
+
+        // false / 0 → désactivé ; tout autre valeur → activé.
+        return !raw.Equals("false", StringComparison.OrdinalIgnoreCase)
+               && raw != "0";
+    }
+
+    /// <summary>
     /// Retourne true si le rendu sur assets réels doit être activé.
     ///
     /// Retourne false si :

@@ -76,6 +76,8 @@ public sealed partial class InputRouter : Node
 
     public override void _Ready()
     {
+        GD.Print("[InputRouter] _Ready start");
+
         // Defer camera lookup and world-handler wiring until after the scene is fully loaded.
         // Guard: LateInitialise exceptions must not crash the scene.
         CallDeferred(MethodName.LateInitialise);

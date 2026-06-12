@@ -107,6 +107,8 @@ public sealed partial class GameHud : Control
 
     public override void _Ready()
     {
+        GD.Print("[GameHud] _Ready start");
+
         // Guard the entire HUD construction: a control creation failure must not crash the scene.
         // If the HUD partially fails, the game still runs — just without some UI elements.
         try
