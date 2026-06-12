@@ -1,14 +1,18 @@
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
+using System.Text;
 using MartialHeroes.Client.Application.Diagnostics;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.Login;
 using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors;
+using MartialHeroes.Client.Domain.Skills;
 using MartialHeroes.Client.Domain.Stats;
 using MartialHeroes.Network.Protocol.Opcodes;
 using MartialHeroes.Network.Protocol.Packets;
 using MartialHeroes.Network.Protocol.Routing;
+using MartialHeroes.Shared.Kernel.Ids;
 using MartialHeroes.Shared.Kernel.Numerics;
 
 namespace MartialHeroes.Client.Application.Handlers;
@@ -44,6 +48,23 @@ public sealed class GamePacketHandler : IPacketHandler
     private readonly ClientStateMachine _stateMachine;
     private readonly IUnhandledOpcodeSink _unhandled;
     private readonly ILoginHandshakeDriver? _loginDriver;
+    private readonly LocalPlayerState? _localPlayer;
+
+    /// <summary>
+    /// The combat-stat recompute seam: invoked whenever an equip / buff / level change should re-accumulate
+    /// the local player's derived combat-stat aggregate. The composition root supplies the resolver (it owns
+    /// the injected equipment / buff / server-base data the recompose needs); when absent, the recompose is
+    /// skipped. The default is a no-op that returns the current aggregate unchanged. spec:
+    /// Docs/RE/specs/combat.md §1 / §2 (re-accumulate on input change).
+    /// </summary>
+    public Func<CombatStats, CombatStats>? CombatStatsRecompute { get; init; }
+
+    /// <summary>
+    /// Per-skill cooldown duration resolver (ms) used when the 5/33 hotbar overwrite arms a recast slot.
+    /// The Application/Assets layer owns the skills.scr catalogue lookup; when absent the duration is 0
+    /// (a ready slot). spec: Docs/RE/specs/skills.md §4 (duration = cooldown_centiseconds × 100).
+    /// </summary>
+    public Func<SkillId, int>? CooldownDurationResolver { get; init; }
 
     /// <summary>
     /// Resolves the vital capacities for a freshly-spawned actor from its wire-reported current HP.
@@ -63,13 +84,15 @@ public sealed class GamePacketHandler : IPacketHandler
         IClientEventBus eventBus,
         ClientStateMachine stateMachine,
         IUnhandledOpcodeSink unhandled,
-        ILoginHandshakeDriver? loginDriver = null)
+        ILoginHandshakeDriver? loginDriver = null,
+        LocalPlayerState? localPlayer = null)
     {
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
         _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
         _unhandled = unhandled ?? throw new ArgumentNullException(nameof(unhandled));
         _loginDriver = loginDriver; // optional: only needed for the login handshake flow
+        _localPlayer = localPlayer; // optional: only needed for the skill/buff/combat subsystems
     }
 
     // -------------------------------------------------------------------------
@@ -267,6 +290,100 @@ public sealed class GamePacketHandler : IPacketHandler
                 }
 
                 break;
+
+            case Opcodes.SmsgEquipItemResult: // 4/12 — equip/unequip result
+                if (payload.Length >= SmsgEquipItemResult.WireSize)
+                {
+                    HandleEquipResult(in MemoryMarshal.AsRef<SmsgEquipItemResult>(payload));
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgItemSlotStateAck: // 4/22 — item-slot state ack
+                if (payload.Length >= SmsgItemSlotStateAck.WireSize)
+                {
+                    HandleItemSlotState(in MemoryMarshal.AsRef<SmsgItemSlotStateAck>(payload));
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgNpcBuyOrAcquireAck: // 4/19 — NPC buy / acquire ack
+                if (payload.Length >= SmsgNpcBuyOrAcquireAck.WireSize)
+                {
+                    HandleNpcAcquire(in MemoryMarshal.AsRef<SmsgNpcBuyOrAcquireAck>(payload));
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgSkillHotbarSlotSet: // 5/33 — hotbar slot overwrite
+                if (payload.Length >= SmsgSkillHotbarSlotSet.WireSize)
+                {
+                    HandleHotbarSlotSet(in MemoryMarshal.AsRef<SmsgSkillHotbarSlotSet>(payload));
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgSkillHotbarAssignResult: // 4/41 — hotbar assign result
+                if (payload.Length >= SmsgSkillHotbarAssignResult.WireSize)
+                {
+                    HandleHotbarAssignResult(in MemoryMarshal.AsRef<SmsgSkillHotbarAssignResult>(payload));
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgSkillPointUpdate: // 4/150 — skill-point / level update (fixed 16-byte header)
+                if (payload.Length >= SmsgSkillPointUpdateHeader.HeaderSize)
+                {
+                    HandleSkillPointUpdate(in MemoryMarshal.AsRef<SmsgSkillPointUpdateHeader>(payload));
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgBuffSlotUpdate: // 5/31 — buff/status slot update
+                if (HandleBuffSlotUpdate(payload))
+                {
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgStatsUpdate: // 5/67 — world-entry stat sync
+                if (HandleStatsUpdate(payload))
+                {
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgCombatAttackUpdate: // 4/100 — combat attack / charge update
+                if (HandleCombatAttackUpdate(payload))
+                {
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgChatBroadcast: // 5/7 — chat broadcast (36-byte header + text)
+                if (HandleChatBroadcast(payload))
+                {
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgCharacterList: // 3/1 — character-select list (3-byte header + per-slot records)
+                if (HandleCharacterList(payload))
+                {
+                    return;
+                }
+
+                break;
         }
 
         _unhandled.Record(packedOpcode, payload.Length);
@@ -419,8 +536,435 @@ public sealed class GamePacketHandler : IPacketHandler
     }
 
     // -------------------------------------------------------------------------
+    // 4/12 — equip/unequip result
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 4/12 — equip/unequip result. On success applies the equipment-slot/visual update to the local
+    /// player and triggers a combat-stat recompute (equipment changed); ToSlot 15 forces a title-slot
+    /// visual rebuild. spec: Docs/RE/specs/handlers.md §3 (4/12); Docs/RE/structs/item.md.
+    /// </summary>
+    private void HandleEquipResult(in SmsgEquipItemResult packet)
+    {
+        const byte ok = 1; // result 1 = success. spec: handlers.md §3 (4/12 result byte).
+        const byte titleSlot = 15; // ToSlot 15 = title/gear visual rebuild. spec: handlers.md §3 / item.md.
+        bool success = packet.Result == ok;
+
+        if (success)
+        {
+            // Equipment changed -> the derived combat-stat aggregate must be re-accumulated. spec: combat.md §2.
+            RecomputeCombatStats();
+        }
+
+        _eventBus.Publish(new EquipResultEvent(
+            success, packet.FromSlot, packet.ToSlot, packet.ToSlot == titleSlot));
+    }
+
+    // -------------------------------------------------------------------------
+    // 4/22 — item-slot state ack
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 4/22 — item-slot state ack: a slot's state plus stat/enchant fields. On success a recompute is
+    /// triggered (the slot's stats may feed the aggregate). spec: Docs/RE/specs/handlers.md §13 Group B
+    /// (4/22); Docs/RE/structs/item.md.
+    /// </summary>
+    private void HandleItemSlotState(in SmsgItemSlotStateAck packet)
+    {
+        const byte ok = 1; // result 1 = ok. spec: item.md (4/22 result byte).
+        bool success = packet.Result == ok;
+
+        if (success)
+        {
+            RecomputeCombatStats(); // a slot's stat/enchant fields may change the aggregate. spec: combat.md §2.
+        }
+
+        _eventBus.Publish(new ItemSlotStateEvent(
+            success, packet.FromSlot, packet.ToSlot, packet.BonusField1, packet.BonusField2, packet.BonusField3));
+    }
+
+    // -------------------------------------------------------------------------
+    // 4/19 — NPC buy / acquire ack
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 4/19 — NPC buy / inventory-acquire ack. Publishes the acquire outcome (slot, item actor id, gold).
+    /// spec: Docs/RE/specs/handlers.md §13 Group B (4/19); Docs/RE/structs/item.md.
+    /// </summary>
+    private void HandleNpcAcquire(in SmsgNpcBuyOrAcquireAck packet)
+    {
+        const byte ok = 1; // result 1 = ok. spec: item.md (4/19 result byte).
+        bool success = packet.Result == ok;
+
+        _eventBus.Publish(new NpcAcquireResultEvent(
+            success, packet.ReasonCode, packet.BagSlotIndex, packet.ItemQuadB, packet.GoldLo));
+    }
+
+    // -------------------------------------------------------------------------
+    // 5/33 — skill hotbar slot overwrite
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 5/33 — authoritative server overwrite of one skill-hotbar slot for the local player. Writes the
+    /// {skill, points} entry into the 240-slot hotbar (mirroring the cooldown duration), then emits the
+    /// snapshot. Ignored when no <see cref="LocalPlayerState"/> is wired. spec: Docs/RE/specs/handlers.md §4
+    /// (5/33); Docs/RE/structs/skill.md.
+    /// </summary>
+    private void HandleHotbarSlotSet(in SmsgSkillHotbarSlotSet packet)
+    {
+        // HotbarSlot must be < 240. spec: structs/skill.md (hotbar_slot < 0xF0).
+        if (packet.HotbarSlot >= SmsgSkillHotbarSlotSet.HotbarSlotCount)
+        {
+            _unhandled.Record(Opcodes.SmsgSkillHotbarSlotSet, SmsgSkillHotbarSlotSet.WireSize);
+            return;
+        }
+
+        var skill = new SkillId(unchecked((uint)packet.SkillId));
+        if (_localPlayer is not null)
+        {
+            int cooldownMs = CooldownDurationResolver?.Invoke(skill) ?? 0; // skills.scr lookup; 0 = ready. spec: skills.md §4.
+            _localPlayer.SetHotbarSlot(packet.HotbarSlot, skill, packet.SkillPoints, cooldownMs);
+        }
+
+        _eventBus.Publish(new SkillHotbarSlotSetEvent(packet.HotbarSlot, skill, packet.SkillPoints));
+    }
+
+    // -------------------------------------------------------------------------
+    // 4/41 — skill hotbar assign result
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 4/41 — result of a client-initiated hotbar assignment. spec: Docs/RE/specs/handlers.md §13 Group C
+    /// (4/41); Docs/RE/structs/skill.md.
+    /// </summary>
+    private void HandleHotbarAssignResult(in SmsgSkillHotbarAssignResult packet)
+    {
+        const byte ok = 1; // gate 1 = apply/ok. spec: structs/skill.md (4/41 gate).
+        bool success = packet.Gate == ok;
+
+        _eventBus.Publish(new SkillHotbarAssignResultEvent(
+            success, packet.ResultCode, packet.HotbarSlotEcho,
+            new SkillId(unchecked((uint)packet.SkillIdEcho)), packet.SkillPointPool));
+    }
+
+    // -------------------------------------------------------------------------
+    // 4/150 — skill-point / level update
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 4/150 — skill-point update (fixed 16-byte header). Mode 1 sets the total skill-point pool; mode 2
+    /// is a level-up notice (Value = new level), which also updates the local actor's level. The 255
+    /// display cap is UI-only; the wire value is not clamped. spec: Docs/RE/specs/handlers.md §13 Group F
+    /// (4/150); Docs/RE/structs/skill.md.
+    /// </summary>
+    private void HandleSkillPointUpdate(in SmsgSkillPointUpdateHeader packet)
+    {
+        const byte valid = 1; // +0 must equal 1. spec: structs/skill.md (valid).
+        if (packet.Valid != valid)
+        {
+            _unhandled.Record(Opcodes.SmsgSkillPointUpdate, SmsgSkillPointUpdateHeader.HeaderSize);
+            return;
+        }
+
+        const uint levelUpMode = 2; // mode 2 = level-up notice; Value = new level. spec: structs/skill.md (mode).
+        if (packet.Mode == levelUpMode
+            && _world.LocalActor is { } local
+            && packet.Value <= ushort.MaxValue)
+        {
+            local.SetLevel((ushort)packet.Value);
+            RecomputeCombatStats(); // level changed -> recompose. spec: combat.md §2.
+        }
+
+        _eventBus.Publish(new SkillPointUpdateEvent(packet.Mode, packet.Value));
+    }
+
+    // -------------------------------------------------------------------------
+    // 5/31 — buff/status slot update
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 5/31 — buff/status slot update. Writes the 12-byte status entry into the per-actor buff table; for
+    /// the local player it mirrors into <see cref="LocalPlayerState.Buffs"/> and recomputes combat stats
+    /// (a buff is a stat contribution). Only the per-actor table regime (slot 0..30) mutates Domain;
+    /// larger slot regimes are surfaced as events only. spec: Docs/RE/specs/handlers.md §4 (5/31);
+    /// Docs/RE/specs/skills.md §6.1.
+    /// </summary>
+    private bool HandleBuffSlotUpdate(ReadOnlySpan<byte> payload)
+    {
+        const int minSize = 56; // Min fixed payload 56 (0x38). spec: handlers.md §4 (5/31).
+        if (payload.Length < minSize)
+        {
+            return false;
+        }
+
+        // (sort@+0, id@+4) actor key; slot@+8; effect code@+12; value/duration@+16; extra/param@+20.
+        // spec: handlers.md §4 (5/31 fields).
+        byte sort = payload[0x00];
+        uint actorId = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x04, 4));
+        uint slot = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x08, 4));
+        uint effectCode = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x0C, 4));
+        uint duration = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x10, 4));
+        uint extra = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x14, 4));
+
+        var key = new ActorKey(actorId, ToEntitySort(sort));
+
+        // Per-actor table regime: small slots (0..30) write the local mirror. The >30 / >=1,000,000 regimes
+        // are global / per-actor-only and not modelled in this 31-slot local table. spec: skills.md §6.1.
+        bool isLocal = _world.LocalActorKey == key;
+        if (isLocal && _localPlayer is not null && slot < (uint)BuffTable.SlotCount)
+        {
+            // Magnitude (the parallel secondary-table strength) is not in this 56-byte read; default 0.
+            // spec: skills.md §6.1 (secondary magnitude table separate).
+            _localPlayer.Buffs.Apply(
+                (int)slot, unchecked((int)effectCode), unchecked((int)duration), unchecked((int)extra), magnitude: 0);
+            RecomputeCombatStats(); // a buff changed -> recompose. spec: combat.md §2.2.
+        }
+
+        _eventBus.Publish(new BuffSlotChangedEvent(
+            key, unchecked((int)slot), unchecked((int)effectCode), unchecked((int)duration), unchecked((int)extra)));
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // 5/67 — world-entry stat sync
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 5/67 — world-entry stat sync. Writes the neutral stat slots and current XP onto the actor's level
+    /// (XP only) and publishes the snapshot. The neutral slot numbering (stat0/2/4/5/6) is preserved
+    /// pending a named-stat mapping; no game-rule remap happens here. spec: Docs/RE/specs/handlers.md §4
+    /// (5/67).
+    /// </summary>
+    private bool HandleStatsUpdate(ReadOnlySpan<byte> payload)
+    {
+        const int minSize = 36; // Min fixed payload 36 (0x24). spec: handlers.md §4 (5/67).
+        if (payload.Length < minSize)
+        {
+            return false;
+        }
+
+        // sort@+0; id@+4; stat0@+8; stat2@+12; current-XP i64@+16; stat6@+24; stat4@+28; stat5@+32.
+        // spec: handlers.md §4 (5/67 fields).
+        byte sort = payload[0x00];
+        uint actorId = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x04, 4));
+        uint stat0 = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x08, 4));
+        uint stat2 = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x0C, 4));
+        long currentXp = BinaryPrimitives.ReadInt64LittleEndian(payload.Slice(0x10, 8));
+        uint stat6 = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x18, 4));
+        uint stat4 = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x1C, 4));
+        uint stat5 = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x20, 4));
+
+        var key = new ActorKey(actorId, ToEntitySort(sort));
+
+        _eventBus.Publish(new ActorStatSyncEvent(key, stat0, stat2, stat4, stat5, stat6, currentXp));
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // 4/100 — combat attack / charge update
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 4/100 — combat-attack / charge UI state update. Decodes only the documented phase/sub-kind/value
+    /// fields (the remaining ~176 bytes are opaque per the spec and not surfaced). Phase 3 starts a timed
+    /// charge; phase 5 ends it. spec: Docs/RE/specs/handlers.md §3 (4/100).
+    /// </summary>
+    private bool HandleCombatAttackUpdate(ReadOnlySpan<byte> payload)
+    {
+        const int minSize = 188; // Min fixed payload 188 (0xBC). spec: handlers.md §3 (4/100).
+        if (payload.Length < minSize)
+        {
+            return false;
+        }
+
+        // phase@+8 (u8); sub-kind@+10 (i8, 0xFF = reset); value@+12 (u32). spec: handlers.md §3 (4/100).
+        byte phase = payload[0x08];
+        sbyte subKind = unchecked((sbyte)payload[0x0A]);
+        uint value = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x0C, 4));
+
+        const byte startCharge = 3; // phase 3 starts a timed charge. spec: handlers.md §3 (4/100).
+        const byte endCharge = 5; // phase 5 ends it. spec: handlers.md §3 (4/100).
+
+        _eventBus.Publish(new CombatAttackUpdateEvent(
+            phase, subKind, value, phase == startCharge, phase == endCharge));
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // 5/7 — chat broadcast
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 5/7 — server chat broadcast. Decodes the 36-byte header struct, then the variable text body that
+    /// follows it. The body length encoding is unconfirmed; we read a length-prefixed block when one is
+    /// present and otherwise treat the remainder as the text (decoding the leading printable run).
+    /// CP949 -&gt; managed string at this presentation boundary. spec:
+    /// Docs/RE/packets/5-7_chat_broadcast.yaml; Docs/RE/specs/handlers.md §17.12.
+    /// </summary>
+    private bool HandleChatBroadcast(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < SmsgChatBroadcastHeader.HeaderSize)
+        {
+            return false;
+        }
+
+        ref readonly SmsgChatBroadcastHeader header =
+            ref MemoryMarshal.AsRef<SmsgChatBroadcastHeader>(payload);
+
+        string senderName = DecodeFixedText(header.SenderName);
+        ReadOnlySpan<byte> body = payload[SmsgChatBroadcastHeader.HeaderSize..];
+        string text = DecodeChatBody(body);
+
+        var key = new ActorKey(header.SenderId, ToEntitySort(header.SenderSort));
+        _eventBus.Publish(new ChatBroadcastEvent(
+            key, senderName, header.Channel, header.ContextId, text));
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // 3/1 — character-select list
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 3/1 — character-select list. Decodes the 3-byte header, then one 981-byte per-slot record for each
+    /// set bit in the slot mask (LSB-first, up to 8 slots), pulling the name/level/class/HP out of each
+    /// record's embedded 880-byte SpawnDescriptor. Switches the FSM to the select screen and emits the
+    /// list snapshot. spec: Docs/RE/packets/3-1_character_list.yaml; Docs/RE/specs/handlers.md §2 / §17.1.
+    /// </summary>
+    private bool HandleCharacterList(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < SmsgCharacterListHeader.HeaderSize)
+        {
+            return false;
+        }
+
+        ref readonly SmsgCharacterListHeader header =
+            ref MemoryMarshal.AsRef<SmsgCharacterListHeader>(payload);
+
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<CharacterListSlot>();
+        int cursor = SmsgCharacterListHeader.HeaderSize;
+        const int slotBits = 8; // up to 8 slots in the LSB-first mask. spec: 3-1_character_list.yaml.
+
+        for (int slot = 0; slot < slotBits; slot++)
+        {
+            if ((header.SlotMask & (1 << slot)) == 0)
+            {
+                continue; // bit clear -> no record for this slot. spec: 3-1.
+            }
+
+            // Each set bit consumes one 981-byte record = 880 descriptor + 96 stats + 1 flag + 4 timestamp.
+            // spec: 3-1_character_list.yaml (SlotRecordSize). A short/truncated frame ends the loop.
+            if (cursor + SmsgCharacterListHeader.SlotRecordSize > payload.Length)
+            {
+                break;
+            }
+
+            ReadOnlySpan<byte> record = payload.Slice(cursor, SmsgCharacterListHeader.SlotRecordSize);
+            cursor += SmsgCharacterListHeader.SlotRecordSize;
+
+            // The descriptor is the first 880 bytes of the record. spec: 3-1 / spawn_descriptor.md.
+            var reader = new SpawnDescriptorReader(record[..SpawnDescriptorReader.Size]);
+            builder.Add(new CharacterListSlot(
+                slot, reader.ReadName(), reader.ReadLevel(), reader.ReadServerClass(), reader.ReadCurrentHp()));
+        }
+
+        // 3/1 switches the client to the character-select screen. spec: opcodes.md (3/1 "switches to the
+        // select screen"). Drive the FSM there only when not already in-world.
+        _stateMachine.OnCharacterListReceived();
+
+        _eventBus.Publish(new CharacterListEvent(header.ServerId, header.ChannelId, builder.ToImmutable()));
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Re-accumulates the local player's derived combat-stat aggregate via the injected
+    /// <see cref="CombatStatsRecompute"/> seam, stores it on <see cref="LocalPlayerState"/>, and emits a
+    /// <see cref="CombatStatsRecomputedEvent"/>. No-op when the recompute seam or local-player state is
+    /// absent. spec: Docs/RE/specs/combat.md §1 / §2.
+    /// </summary>
+    private void RecomputeCombatStats()
+    {
+        if (CombatStatsRecompute is null || _localPlayer is null || _world.LocalActorKey is not { } key)
+        {
+            return;
+        }
+
+        CombatStats recomputed = CombatStatsRecompute(_localPlayer.Combat);
+        _localPlayer.Combat = recomputed;
+        _eventBus.Publish(new CombatStatsRecomputedEvent(key, recomputed));
+    }
+
+    /// <summary>Decodes a NUL-terminated CP949 fixed buffer to a managed string. spec: handlers.md (CP949 text fields).</summary>
+    private static string DecodeFixedText(ReadOnlySpan<byte> buffer)
+    {
+        int nul = buffer.IndexOf((byte)0);
+        if (nul >= 0)
+        {
+            buffer = buffer[..nul];
+        }
+
+        return buffer.IsEmpty ? string.Empty : DecodeCp949(buffer);
+    }
+
+    /// <summary>
+    /// Decodes the variable chat-body region: a leading length-prefixed <c>[u32 len][text]</c> block when
+    /// the prefix is plausible, else the printable run from the start of the body. spec:
+    /// Docs/RE/specs/handlers.md §17.12 (body length encoding unconfirmed).
+    /// </summary>
+    private static string DecodeChatBody(ReadOnlySpan<byte> body)
+    {
+        if (body.IsEmpty)
+        {
+            return string.Empty;
+        }
+
+        // Try the length-prefixed form (matching the C2S chat senders): [u32 len incl NUL][text].
+        // spec: handlers.md §17.12 / 2-7 / 3-21 framing.
+        if (body.Length >= sizeof(uint))
+        {
+            uint len = BinaryPrimitives.ReadUInt32LittleEndian(body[..sizeof(uint)]);
+            if (len >= 1 && len <= (uint)(body.Length - sizeof(uint)))
+            {
+                ReadOnlySpan<byte> text = body.Slice(sizeof(uint), (int)len);
+                int nul = text.IndexOf((byte)0);
+                if (nul >= 0)
+                {
+                    text = text[..nul];
+                }
+
+                return text.IsEmpty ? string.Empty : DecodeCp949(text);
+            }
+        }
+
+        // Fall back to the printable run from the body start.
+        return DecodeFixedText(body);
+    }
+
+    /// <summary>
+    /// Decodes a CP949 (EUC-KR) byte span to UTF-16 at the presentation boundary. spec: handlers.md
+    /// ("Korean text fields are CP949-encoded ... Decode CP949 → UTF-16 only at the presentation boundary").
+    /// Falls back to Latin-1 when the CP949 code page is unavailable (it is not on every runtime).
+    /// </summary>
+    private static string DecodeCp949(ReadOnlySpan<byte> bytes)
+    {
+        try
+        {
+            return Encoding.GetEncoding(949).GetString(bytes);
+        }
+        catch (ArgumentException)
+        {
+            // CP949 not registered on this runtime: ASCII/Latin-1 round-trips the ASCII subset losslessly.
+            return Encoding.Latin1.GetString(bytes);
+        }
+        catch (NotSupportedException)
+        {
+            return Encoding.Latin1.GetString(bytes);
+        }
+    }
 
     private static EntitySort ToEntitySort(byte sort) => sort switch
     {

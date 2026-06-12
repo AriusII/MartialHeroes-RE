@@ -281,39 +281,215 @@ public sealed class MudBlob
 }
 
 /// <summary>
-/// Stub for a <c>.sod</c> collision solid blob.
-/// Top-level count and stride are confirmed; internal field layouts are UNVERIFIED.
+/// Decoded <c>.sod</c> collision solid blob for one map cell.
+/// Top-level count (CONFIRMED), solid record stride 108 B (CONFIRMED), quad record stride 48 B (CONFIRMED).
+/// AABB fields (VERIFIED), corner fields (VERIFIED). Trailing quad scalars PARTIAL.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/terrain.md §8. Collision solid blob — .sod
+/// spec: Docs/RE/formats/terrain.md §11. Collision solid blob — .sod
+/// spec: Docs/RE/formats/terrain.md §11.1 Top-level layout: CONFIRMED.
 /// </remarks>
 public sealed class SodBlob
 {
     /// <summary>
     /// Number of solid records in this file.
-    /// spec: Docs/RE/formats/terrain.md §8.1 — solidCount u32le @ offset 0: CONFIRMED.
+    /// spec: Docs/RE/formats/terrain.md §11.1 — solidCount u32le @ offset 0: CONFIRMED.
     /// </summary>
     public required uint SolidCount { get; init; }
 
     /// <summary>
-    /// Raw solid records, each exactly 108 bytes.
-    /// Stride (108 bytes) is CONFIRMED; internal field layout is UNVERIFIED.
-    /// spec: Docs/RE/formats/terrain.md §8.2 SolidRecord — "108 bytes (0x6C)": CONFIRMED (stride).
-    /// Fields: UNVERIFIED.
+    /// Decoded solid records. One per solid, each with a typed AABB and an array of decoded quads.
+    /// spec: Docs/RE/formats/terrain.md §11.2 SolidRecord (108 bytes): CONFIRMED (stride + AABB fields VERIFIED).
+    /// </summary>
+    public required SolidRecord[] Solids { get; init; }
+
+    // ── Backward-compat raw accessors (kept so existing Mapping/Godot consumers don't break) ──
+
+    /// <summary>
+    /// Raw solid records, each exactly 108 bytes (backward compat — prefer <see cref="Solids"/>).
+    /// spec: Docs/RE/formats/terrain.md §11.2 SolidRecord — stride 108 bytes (0x6C): CONFIRMED.
     /// </summary>
     public required ReadOnlyMemory<byte>[] RawSolidRecords { get; init; }
 
     /// <summary>
-    /// Per-solid triangle counts.
-    /// spec: Docs/RE/formats/terrain.md §8.3 Per-record triangle data — triCount u32le: CONFIRMED.
+    /// Per-solid quad (triangle) counts (backward compat — prefer <see cref="Solids"/>).
+    /// spec: Docs/RE/formats/terrain.md §11.1 — quadCount u32le per solid (stream copy): CONFIRMED.
     /// </summary>
     public required uint[] TriangleCounts { get; init; }
 
     /// <summary>
-    /// Per-solid raw triangle data, each triangle is 48 bytes.
-    /// Stride (48 bytes) is CONFIRMED; internal field layout is UNVERIFIED.
-    /// spec: Docs/RE/formats/terrain.md §8.3 Per-record triangle data — "48-byte triangle structs": CONFIRMED (stride).
-    /// Fields: UNVERIFIED.
+    /// Per-solid raw quad data, each quad is 48 bytes (backward compat — prefer <see cref="Solids"/>).
+    /// spec: Docs/RE/formats/terrain.md §11.3 QuadRecord — stride 48 bytes: CONFIRMED.
     /// </summary>
     public required ReadOnlyMemory<byte>[] RawTriangleData { get; init; }
+}
+
+/// <summary>
+/// One solid record from a <c>.sod</c> file (108 bytes on disk).
+/// Contains the solid's 2D XZ AABB and an array of decoded <see cref="CollisionQuad"/> records.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain.md §11.2 SolidRecord — 108 bytes (0x6C): CONFIRMED (stride).
+/// AABB fields +0..+15: VERIFIED. Reserved bytes +016..+059: all-zero (VERIFIED value, meaning UNVERIFIED).
+/// quad_count_embedded +060 u32: VERIFIED (equals stream count). _authoring_ptr +064 u32: stale pointer (VERIFIED).
+/// Reserved bytes +068..+107: all-zero (VERIFIED value). Parser reads stream copy of quadCount, not embedded copy.
+/// </remarks>
+public sealed class SolidRecord
+{
+    // ── AABB +0..+15 (VERIFIED) ──────────────────────────────────────────────
+
+    /// <summary>
+    /// AABB minimum X (world-space). spec: Docs/RE/formats/terrain.md §11.2 — aabb_xmin f32 @ +000: VERIFIED.
+    /// </summary>
+    public required float AabbXMin { get; init; }
+
+    /// <summary>
+    /// AABB minimum Z (world-space). spec: Docs/RE/formats/terrain.md §11.2 — aabb_zmin f32 @ +004: VERIFIED.
+    /// </summary>
+    public required float AabbZMin { get; init; }
+
+    /// <summary>
+    /// AABB maximum X (world-space). spec: Docs/RE/formats/terrain.md §11.2 — aabb_xmax f32 @ +008: VERIFIED.
+    /// </summary>
+    public required float AabbXMax { get; init; }
+
+    /// <summary>
+    /// AABB maximum Z (world-space). Equals the union of all owned CollisionQuad AABBs.
+    /// spec: Docs/RE/formats/terrain.md §11.2 — aabb_zmax f32 @ +012: VERIFIED.
+    /// </summary>
+    public required float AabbZMax { get; init; }
+
+    // ── Decoded quad array ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Decoded collision quads belonging to this solid.
+    /// spec: Docs/RE/formats/terrain.md §11.3 QuadRecord (48 bytes): VERIFIED (corners), PARTIAL (trailing scalars).
+    /// </summary>
+    public required CollisionQuad[] Quads { get; init; }
+
+    // ── Raw 108-byte record ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Full 108-byte raw record including reserved regions (+016..+059, +068..+107) and the
+    /// stale authoring pointer (+064). Reserved bytes are all-zero in every sample.
+    /// spec: Docs/RE/formats/terrain.md §11.2 — _reserved_a +016..+059 (all-zero: VERIFIED); _authoring_ptr +064 (stale: VERIFIED).
+    /// </summary>
+    public required ReadOnlyMemory<byte> RawRecord { get; init; }
+}
+
+/// <summary>
+/// One collision quad from a <c>.sod</c> file (48 bytes on disk).
+/// Stores four explicit XZ world-space corner points followed by four trailing scalars.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain.md §11.3 QuadRecord — 48 bytes: VERIFIED (first 32 bytes = four XZ corners).
+/// Correction note (2026-06-12): earlier spec read these as slope/intercept; corrected to four XZ corners.
+/// The engine code calls these "triangles"; each quad may be split at runtime into two triangles (diagonal UNVERIFIED).
+/// Trailing scalars +032..+047 (plane0..plane3): PARTIAL (pattern suggests a plane equation, meaning unconfirmed).
+/// </remarks>
+public sealed class CollisionQuad
+{
+    // ── Four XZ world-space corners +000..+031 (VERIFIED) ────────────────────
+
+    /// <summary>Corner 0 world X. spec: §11.3 — x0 f32 @ +000: VERIFIED.</summary>
+    public required float X0 { get; init; }
+
+    /// <summary>Corner 0 world Z. spec: §11.3 — z0 f32 @ +004: VERIFIED.</summary>
+    public required float Z0 { get; init; }
+
+    /// <summary>Corner 1 world X. spec: §11.3 — x1 f32 @ +008: VERIFIED.</summary>
+    public required float X1 { get; init; }
+
+    /// <summary>Corner 1 world Z. spec: §11.3 — z1 f32 @ +012: VERIFIED.</summary>
+    public required float Z1 { get; init; }
+
+    /// <summary>Corner 2 world X. spec: §11.3 — x2 f32 @ +016: VERIFIED.</summary>
+    public required float X2 { get; init; }
+
+    /// <summary>Corner 2 world Z. spec: §11.3 — z2 f32 @ +020: VERIFIED.</summary>
+    public required float Z2 { get; init; }
+
+    /// <summary>Corner 3 world X. spec: §11.3 — x3 f32 @ +024: VERIFIED.</summary>
+    public required float X3 { get; init; }
+
+    /// <summary>Corner 3 world Z. spec: §11.3 — z3 f32 @ +028: VERIFIED.</summary>
+    public required float Z3 { get; init; }
+
+    // ── Trailing scalars +032..+047 (PARTIAL) ────────────────────────────────
+
+    /// <summary>
+    /// Trailing scalar 0 f32 @ +032. Non-zero and varies between quads; value ~−27 in samples.
+    /// Candidate: a plane-equation coefficient or Y surface height.
+    /// spec: Docs/RE/formats/terrain.md §11.3 — plane0 f32 @ +032: PARTIAL.
+    /// </summary>
+    public required float Plane0 { get; init; }
+
+    /// <summary>
+    /// Trailing scalar 1 f32 @ +036. Always 0.0 in every sampled quad.
+    /// spec: Docs/RE/formats/terrain.md §11.3 — plane1 f32 @ +036: PARTIAL.
+    /// </summary>
+    public required float Plane1 { get; init; }
+
+    /// <summary>
+    /// Trailing scalar 2 f32 @ +040. Non-zero, large magnitude (thousands); varies between quads.
+    /// spec: Docs/RE/formats/terrain.md §11.3 — plane2 f32 @ +040: PARTIAL.
+    /// </summary>
+    public required float Plane2 { get; init; }
+
+    /// <summary>
+    /// Trailing scalar 3 f32 @ +044. Always 0.0 in every sampled quad.
+    /// spec: Docs/RE/formats/terrain.md §11.3 — plane3 f32 @ +044: PARTIAL.
+    /// </summary>
+    public required float Plane3 { get; init; }
+}
+
+/// <summary>
+/// Typed record for one tile from a <c>.mud</c> ambient-sound blob, exposing
+/// the VERIFIED semantic field names.
+/// This is an alias / view over <see cref="MudTileRecord"/> that promotes the
+/// semantic names from the spec.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain.md §6.2 Record layout (8 bytes, all VERIFIED).
+/// </remarks>
+public readonly record struct MudTile(
+    /// <summary>
+    /// Music BGM group index. 0=no music. 1-based into the per-area BGM sound table (48-byte entry stride).
+    /// spec: Docs/RE/formats/terrain.md §6.2 — music_group u8 @ +2: VERIFIED.
+    /// </summary>
+    byte BgmIdx,
+    /// <summary>
+    /// Ambient-loop sound index 0 (first slot). 0=no sound. 1-based into the per-area BGE table.
+    /// spec: Docs/RE/formats/terrain.md §6.2 — ambient_idx_0 u8 @ +3: VERIFIED.
+    /// </summary>
+    byte BgeIdx0,
+    /// <summary>
+    /// Ambient-loop sound index 1 (second slot). 0=no sound.
+    /// spec: Docs/RE/formats/terrain.md §6.2 — ambient_idx_1 u8 @ +4: VERIFIED.
+    /// </summary>
+    byte BgeIdx1,
+    /// <summary>
+    /// Effect sound index 0 (first slot). 0=no sound. 1-based into the per-area EFF table.
+    /// spec: Docs/RE/formats/terrain.md §6.2 — effect_idx_0 u8 @ +5: VERIFIED.
+    /// </summary>
+    byte EffIdx0,
+    /// <summary>
+    /// Effect sound index 1 (second slot). 0=no sound.
+    /// spec: Docs/RE/formats/terrain.md §6.2 — effect_idx_1 u8 @ +6: VERIFIED.
+    /// </summary>
+    byte EffIdx1,
+    /// <summary>
+    /// Effect sound index 2 (third slot). 0 in all known samples. 0=no sound.
+    /// spec: Docs/RE/formats/terrain.md §6.2 — effect_idx_2 u8 @ +7: VERIFIED (limited, always zero).
+    /// </summary>
+    byte EffIdx2
+)
+{
+    /// <summary>
+    /// Constructs a <see cref="MudTile"/> from an existing <see cref="MudTileRecord"/>,
+    /// extracting only the semantic sound-index fields (bytes 2–7).
+    /// spec: Docs/RE/formats/terrain.md §6.2 — bytes 0–1 always zero and never read: VERIFIED.
+    /// </summary>
+    public static MudTile FromRecord(MudTileRecord rec) =>
+        new(rec.MusicGroup, rec.AmbientIdx0, rec.AmbientIdx1, rec.EffectIdx0, rec.EffectIdx1, rec.EffectIdx2);
 }

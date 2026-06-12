@@ -174,6 +174,187 @@ internal static class SyntheticFrames
         return Frame(0, 0, payload);
     }
 
+    /// <summary>4/12 equip result (16-byte payload). spec: structs/item.md (EquipItemResult).</summary>
+    public static byte[] EquipResult(byte result, byte fromSlot, byte toSlot, byte guard = 1)
+    {
+        Span<byte> p = stackalloc byte[16];
+        p.Clear();
+        p[0x00] = guard;
+        p[0x08] = result; // 0 = error, 1 = ok
+        p[0x0a] = fromSlot;
+        p[0x0c] = toSlot;
+        return Frame(4, 12, p);
+    }
+
+    /// <summary>4/22 item-slot state ack (36-byte payload). spec: structs/item.md (EquipSlotBody).</summary>
+    public static byte[] ItemSlotState(
+        byte result, byte fromSlot, byte toSlot, int bonus1, int bonus2, int bonus3)
+    {
+        Span<byte> p = stackalloc byte[36];
+        p.Clear();
+        p[0x08] = result;
+        p[0x0a] = fromSlot;
+        p[0x0b] = toSlot;
+        BinaryPrimitives.WriteInt32LittleEndian(p.Slice(0x18, 4), bonus1);
+        BinaryPrimitives.WriteInt32LittleEndian(p.Slice(0x1c, 4), bonus2);
+        BinaryPrimitives.WriteInt32LittleEndian(p.Slice(0x20, 4), bonus3);
+        return Frame(4, 22, p);
+    }
+
+    /// <summary>4/19 NPC buy / acquire ack (56-byte payload). spec: structs/item.md (NpcBuy ack).</summary>
+    public static byte[] NpcAcquire(byte result, byte reason, byte bagSlot, int itemActorId, int goldLo)
+    {
+        Span<byte> p = stackalloc byte[56];
+        p.Clear();
+        BinaryPrimitives.WriteInt32LittleEndian(p.Slice(0x08, 4), goldLo); // GoldLo @0x08
+        p[0x10] = result;
+        p[0x11] = reason;
+        p[0x12] = bagSlot;
+        BinaryPrimitives.WriteInt32LittleEndian(p.Slice(0x2c, 4), itemActorId); // ItemQuadB @0x2c
+        return Frame(4, 19, p);
+    }
+
+    /// <summary>5/33 skill hotbar slot set (20-byte payload). spec: structs/skill.md (SkillHotbarSlotSet).</summary>
+    public static byte[] HotbarSlotSet(byte sort, uint actorId, byte hotbarSlot, int skillId, short points)
+    {
+        Span<byte> p = stackalloc byte[20];
+        p.Clear();
+        p[0x00] = sort;
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x04, 4), actorId);
+        p[0x08] = hotbarSlot;
+        BinaryPrimitives.WriteInt32LittleEndian(p.Slice(0x0c, 4), skillId);
+        BinaryPrimitives.WriteInt16LittleEndian(p.Slice(0x10, 2), points);
+        return Frame(5, 33, p);
+    }
+
+    /// <summary>4/41 skill hotbar assign result (24-byte payload). spec: structs/skill.md (SkillHotbarAssignResult).</summary>
+    public static byte[] HotbarAssignResult(
+        byte gate, byte resultCode, int hotbarSlotEcho, int skillIdEcho, uint pool, uint header = 1, uint actorId = 1)
+    {
+        Span<byte> p = stackalloc byte[24];
+        p.Clear();
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x00, 4), header);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x04, 4), actorId);
+        p[0x08] = gate;
+        p[0x09] = resultCode;
+        BinaryPrimitives.WriteInt32LittleEndian(p.Slice(0x0c, 4), hotbarSlotEcho);
+        BinaryPrimitives.WriteInt32LittleEndian(p.Slice(0x10, 4), skillIdEcho);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x14, 4), pool);
+        return Frame(4, 41, p);
+    }
+
+    /// <summary>4/150 skill-point update (16-byte fixed header). spec: structs/skill.md (SkillPointUpdate).</summary>
+    public static byte[] SkillPointUpdate(uint mode, uint value, int idKey = 7, byte valid = 1)
+    {
+        Span<byte> p = stackalloc byte[16];
+        p.Clear();
+        p[0x00] = valid;
+        BinaryPrimitives.WriteInt32LittleEndian(p.Slice(0x04, 4), idKey);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x08, 4), mode);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x0c, 4), value);
+        return Frame(4, 150, p);
+    }
+
+    /// <summary>5/31 buff slot update (56-byte payload). spec: handlers.md §4 (5/31).</summary>
+    public static byte[] BuffSlotUpdate(byte sort, uint actorId, uint slot, uint effectCode, uint duration, uint extra)
+    {
+        Span<byte> p = stackalloc byte[56];
+        p.Clear();
+        p[0x00] = sort;
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x04, 4), actorId);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x08, 4), slot);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x0c, 4), effectCode);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x10, 4), duration);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x14, 4), extra);
+        return Frame(5, 31, p);
+    }
+
+    /// <summary>5/67 stats update (36-byte payload). spec: handlers.md §4 (5/67).</summary>
+    public static byte[] StatsUpdate(
+        byte sort, uint actorId, uint stat0, uint stat2, long currentXp, uint stat6, uint stat4, uint stat5)
+    {
+        Span<byte> p = stackalloc byte[36];
+        p.Clear();
+        p[0x00] = sort;
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x04, 4), actorId);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x08, 4), stat0);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x0c, 4), stat2);
+        BinaryPrimitives.WriteInt64LittleEndian(p.Slice(0x10, 8), currentXp);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x18, 4), stat6);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x1c, 4), stat4);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x20, 4), stat5);
+        return Frame(5, 67, p);
+    }
+
+    /// <summary>4/100 combat attack update (188-byte payload). spec: handlers.md §3 (4/100).</summary>
+    public static byte[] CombatAttackUpdate(byte phase, sbyte subKind, uint value)
+    {
+        Span<byte> p = stackalloc byte[188];
+        p.Clear();
+        p[0x08] = phase;
+        p[0x0a] = unchecked((byte)subKind);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x0c, 4), value);
+        return Frame(4, 100, p);
+    }
+
+    /// <summary>
+    /// 5/7 chat broadcast (36-byte header + length-prefixed text body). spec: 5-7_chat_broadcast.yaml.
+    /// </summary>
+    public static byte[] ChatBroadcast(
+        byte senderSort, uint senderId, byte channel, uint contextId, string senderName, string text)
+    {
+        byte[] nameBytes = System.Text.Encoding.ASCII.GetBytes(senderName);
+        byte[] textBytes = System.Text.Encoding.ASCII.GetBytes(text);
+
+        // 36-byte header + [u32 len incl NUL][text][0x00]. spec: handlers.md §17.12.
+        var p = new byte[36 + 4 + textBytes.Length + 1];
+        p[0x00] = senderSort;
+        BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(0x04, 4), senderId);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(0x08, 4), contextId);
+        p[0x0e] = channel;
+        int nameLen = Math.Min(nameBytes.Length, 19); // 20-byte buffer, leave a NUL
+        Array.Copy(nameBytes, 0, p, 0x10, nameLen);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(36, 4), (uint)(textBytes.Length + 1));
+        Array.Copy(textBytes, 0, p, 40, textBytes.Length);
+        return Frame(5, 7, p);
+    }
+
+    /// <summary>
+    /// 3/1 character list (3-byte header + one 981-byte record per set bit). Each record's first 880
+    /// bytes are a SpawnDescriptor. spec: 3-1_character_list.yaml.
+    /// </summary>
+    public static byte[] CharacterList(byte serverId, byte channelId, params (int Slot, string Name, ushort Level, uint Hp, ushort Class)[] slots)
+    {
+        byte mask = 0;
+        foreach (var s in slots)
+        {
+            mask |= (byte)(1 << s.Slot);
+        }
+
+        const int recordSize = 981;
+        var p = new byte[3 + slots.Length * recordSize];
+        p[0x00] = serverId;
+        p[0x01] = channelId;
+        p[0x02] = mask;
+
+        // Records appear in ascending slot order (LSB-first). Sort the supplied slots to match the decode.
+        var ordered = slots.OrderBy(s => s.Slot).ToArray();
+        int cursor = 3;
+        foreach (var s in ordered)
+        {
+            int sd = cursor; // descriptor starts at the record start (first 880 bytes).
+            byte[] nameBytes = System.Text.Encoding.ASCII.GetBytes(s.Name);
+            int nameLen = Math.Min(nameBytes.Length, 16);
+            Array.Copy(nameBytes, 0, p, sd + 0x00, nameLen);
+            BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(sd + 0x3A, 2), s.Level);
+            BinaryPrimitives.WriteUInt32LittleEndian(p.AsSpan(sd + 0x3C, 4), s.Hp);
+            BinaryPrimitives.WriteUInt16LittleEndian(p.AsSpan(sd + 0x74, 2), s.Class);
+            cursor += recordSize;
+        }
+
+        return Frame(3, 1, p);
+    }
+
     /// <summary>
     /// 5/3 char spawn (908-byte payload: 8-byte head + 880-byte SpawnDescriptor + 20-byte trailer).
     /// SpawnDescriptor sub-fields per Docs/RE/structs/actor.md. spec: 5-3_char_spawn.yaml.

@@ -47,116 +47,147 @@ public sealed class ExpCurveEntry
 }
 
 /// <summary>
-/// One record from <c>data/script/userlevel.scr</c> — base stat values per level.
-/// Stride: 60 bytes.
+/// One record from <c>data/script/userlevel.scr</c> — per-level stat-scaling coefficients.
+/// Stride: 60 bytes. 300 records.
 /// </summary>
 /// <remarks>
 /// spec: Docs/RE/formats/config_tables.md §2.4 userlevel.scr — "stride: 60 bytes, 300 records": CONFIRMED.
+/// Wave-8 SPEC CORRECTION: +4/+6/+8 are three u16 counters (not two u32); layout corrected below.
+/// spec: Docs/RE/formats/config_tables.md §2.4 — "SPEC CORRECTION from prior version: +4/+8 each a 4-byte u32 step field is wrong; they are 2-byte u16 counters".
 /// </remarks>
 public sealed class LevelBaseEntry
 {
     /// <summary>Level index 1-based (map key). spec: §2.4 +0 u16: CONFIRMED.</summary>
     public required ushort Level { get; init; }
 
-    /// <summary>
-    /// Step-count field A u32 @ +4. Transitions at L12, L24, L36, L145.
-    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+4 u32 Step-count field A: CONFIRMED (transitions); semantic UNVERIFIED".
-    /// </summary>
-    public required uint StepA { get; init; }
+    // +2 u16 always zero (alignment pad). CONFIRMED.
+    // spec: Docs/RE/formats/config_tables.md §2.4 — "+2 u16 always zero: CONFIRMED".
 
     /// <summary>
-    /// Step-count field B u32 @ +8. Transitions at L12, L24, L36, L145.
-    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+8 u32 Step-count field B: CONFIRMED (transitions); semantic UNVERIFIED".
+    /// Tier step counter A u16 @ +4. L1–L11=0; L12–L23=1; L24–L144=2; L145–L300=0.
+    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+4 u16 Tier step counter A: CONFIRMED (value); name UNVERIFIED".
     /// </summary>
-    public required uint StepB { get; init; }
+    public required ushort TierStepA { get; init; }
 
     /// <summary>
-    /// Stat-scale positive group [0..3] f32×4 @ +12. L1-L35=1.0; L36-L300=3.0.
-    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+12 4×f32 stat-scale positive group: CONFIRMED".
+    /// Tier step counter B u16 @ +6. Mirrors TierStepA in all 300 records.
+    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+6 u16 Tier step counter B (mirrors +4): CONFIRMED".
+    /// </summary>
+    public required ushort TierStepB { get; init; }
+
+    /// <summary>
+    /// Divisor index C u16 @ +8. L1–L11=0; L12=2; L24=3; L36–L144=4; L145–L300=0.
+    /// Feeds the (10/A)×B formula grid with users.scr.
+    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+8 u16 Divisor index C: CONFIRMED (value); name UNVERIFIED".
+    /// </summary>
+    public required ushort DivisorC { get; init; }
+
+    // +10 u16 always zero (alignment pad). CONFIRMED.
+    // spec: Docs/RE/formats/config_tables.md §2.4 — "+10 u16 always zero: CONFIRMED".
+
+    /// <summary>
+    /// Stat-scale positive group [0..3] f32×4 @ +12. L1–L35=1.0; L36–L300=3.0.
+    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+12 4×f32 positive-scale group: CONFIRMED".
     /// </summary>
     public required float[] StatScalePositive { get; init; }
 
     /// <summary>
-    /// Stat-scale negative group [0..3] f32×4 @ +28. L1-L35=-1.0; L36-L300=-2.0.
-    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+28 4×f32 stat-scale negative group: CONFIRMED".
+    /// Stat-scale negative group [0..3] f32×4 @ +28. L1–L35=−1.0; L36–L300=−2.0.
+    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+28 4×f32 negative-scale group: CONFIRMED".
     /// </summary>
     public required float[] StatScaleNegative { get; init; }
 
+    // +44..+59: reserved 4×f32 (all 0.0). CONFIRMED (all zero).
+    // spec: Docs/RE/formats/config_tables.md §2.4 — "+44 4×f32 Reserved group (all 0.0): CONFIRMED".
+
     /// <summary>
-    /// Full 60-byte raw record for fields not individually decoded (+44..+59 reserved group).
-    /// spec: Docs/RE/formats/config_tables.md §2.4 — "+44 4×f32 reserved (all zero): CONFIRMED".
+    /// Full 60-byte raw record. Exposes the reserved group (+44..+59) for future analysis.
+    /// spec: Docs/RE/formats/config_tables.md §2.4 — stride 60 bytes: CONFIRMED.
     /// </summary>
     public required ReadOnlyMemory<byte> Body { get; init; }
+
+    // ── Backward-compat aliases (kept so Mapping/Godot consumers don't break) ──
+    // The Wave-8 spec correction renamed StepA→TierStepA, StepB→TierStepB and split u32→u16.
+    // Aliases allow existing code to compile unchanged while new code uses the typed names.
+
+    /// <summary>Alias for <see cref="TierStepA"/> — use <see cref="TierStepA"/> in new code.</summary>
+    public ushort StepA => TierStepA;
+
+    /// <summary>Alias for <see cref="TierStepB"/> — use <see cref="TierStepB"/> in new code.</summary>
+    public ushort StepB => TierStepB;
 }
 
 /// <summary>
-/// One record from <c>data/script/userpoint.scr</c> — stat allocation curve.
+/// One record from <c>data/script/userpoint.scr</c> — stat-point allocation budget curve.
 /// Stride: 32 bytes. 301 records, keys 0..300.
 /// </summary>
 /// <remarks>
 /// spec: Docs/RE/formats/config_tables.md §2.5 userpoint.scr — "stride: 32 bytes, 301 records": CONFIRMED.
+/// Wave-8 SPEC CORRECTION: +8 cumulative is u32 (not u16 + flag byte); +16 cumulative is also u32.
+/// spec: Docs/RE/formats/config_tables.md §2.5 — "SPEC CORRECTION: +8 is u32 (cumulative exceeds 65535 at high keys)".
 /// </remarks>
 public sealed class UserPointEntry
 {
-    /// <summary>Point-allocation index 0-based (0..300). Map key. spec: §2.5 +0 u16: CONFIRMED.</summary>
+    /// <summary>Allocation step index 0-based (0..300). Map key. spec: §2.5 +0 u16: CONFIRMED.</summary>
     public required ushort Key { get; init; }
 
     /// <summary>
-    /// Constant 25 in all records; semantic UNVERIFIED.
+    /// Constant 25 in all 301 records. Semantic UNVERIFIED.
     /// spec: Docs/RE/formats/config_tables.md §2.5 — "+2 u16 constant=25: CONFIRMED (value); semantic UNVERIFIED".
     /// </summary>
     public required ushort Const25 { get; init; }
 
     /// <summary>
-    /// Stat-group-1 gain at this step. key=0→5; key=300→1000.
+    /// Stat-group-1 gain at this step. key=0→5; key=1..284→3; key=285..300→1000.
     /// spec: Docs/RE/formats/config_tables.md §2.5 — "+4 u16 Stat-group-1 gain: CONFIRMED".
     /// </summary>
     public required ushort StatGroup1Gain { get; init; }
 
-    /// <summary>
-    /// Stat-group-1 cumulative total. Verified for first 20 records.
-    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+8 u16 Stat-group-1 cumulative: CONFIRMED".
-    /// </summary>
-    public required ushort StatGroup1Cumulative { get; init; }
+    // +6 u16 always zero (alignment pad). CONFIRMED.
+    // spec: Docs/RE/formats/config_tables.md §2.5 — "+6 u16 always zero: CONFIRMED".
 
     /// <summary>
-    /// Mostly zero; rare value=1 in 2 of 301 records. Purpose UNVERIFIED.
-    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+10 u16 mostly zero (rare=1): UNVERIFIED".
+    /// Stat-group-1 cumulative total (running sum of <see cref="StatGroup1Gain"/>).
+    /// u32 — verified: value exceeds 65,535 at key≥285 (reaches ~65,960 at key=285).
+    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+8 u32 Stat-group-1 cumulative (u32, NOT u16): CONFIRMED".
     /// </summary>
-    public required ushort Field10 { get; init; }
+    public required uint StatGroup1Cumulative { get; init; }
 
     /// <summary>
-    /// Stat-group-2 gain. key=0→7; key=1→1; grows at high keys.
+    /// Stat-group-2 gain at this step. key=0→7; key=9→2; key=300→300.
     /// spec: Docs/RE/formats/config_tables.md §2.5 — "+12 u16 Stat-group-2 gain: CONFIRMED".
     /// </summary>
     public required ushort StatGroup2Gain { get; init; }
 
-    /// <summary>
-    /// Stat-group-2 cumulative total.
-    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+16 u16 Stat-group-2 cumulative: CONFIRMED".
-    /// </summary>
-    public required ushort StatGroup2Cumulative { get; init; }
+    // +14 u16 always zero (alignment pad). CONFIRMED.
+    // spec: Docs/RE/formats/config_tables.md §2.5 — "+14 u16 always zero: CONFIRMED".
 
     /// <summary>
-    /// Secondary curve low word. key=0..5→0; key=6→282; ~+3/step.
+    /// Stat-group-2 cumulative total (running sum of <see cref="StatGroup2Gain"/>). u32.
+    /// spec: Docs/RE/formats/config_tables.md §2.5 — "+16 u32 Stat-group-2 cumulative: CONFIRMED".
+    /// </summary>
+    public required uint StatGroup2Cumulative { get; init; }
+
+    /// <summary>
+    /// Secondary curve — low word u16 @ +20. key=0..5→0; key=6→282; ~+3/step; plateaus ~key150.
     /// spec: Docs/RE/formats/config_tables.md §2.5 — "+20 u16 secondary curve low: CONFIRMED".
     /// </summary>
     public required ushort SecondaryCurveLow { get; init; }
 
     /// <summary>
-    /// Secondary curve high word. key=0..5→0; key=6..9→20; grows slowly.
+    /// Secondary curve — high word u16 @ +22. key=0..5→0; key=6→20; grows slowly; plateaus ~56 by key150.
     /// spec: Docs/RE/formats/config_tables.md §2.5 — "+22 u16 secondary curve high: CONFIRMED".
     /// </summary>
     public required ushort SecondaryCurveHigh { get; init; }
 
     /// <summary>
-    /// Tertiary value 1. key=0..295→mostly 0; key=296→235000; key=300→255000.
+    /// Tertiary value 1 u32 @ +24. key=0..295→0; key=296→235,000; key=300→255,000.
     /// spec: Docs/RE/formats/config_tables.md §2.5 — "+24 u32 Tertiary value 1: CONFIRMED".
     /// </summary>
     public required uint TertiaryValue1 { get; init; }
 
     /// <summary>
-    /// Tertiary value 2. Same pattern as TertiaryValue1.
+    /// Tertiary value 2 u32 @ +28. Same pattern as TertiaryValue1.
     /// spec: Docs/RE/formats/config_tables.md §2.5 — "+28 u32 Tertiary value 2: CONFIRMED".
     /// </summary>
     public required uint TertiaryValue2 { get; init; }

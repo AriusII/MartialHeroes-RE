@@ -3,6 +3,8 @@ using System.Text;
 using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors;
+using MartialHeroes.Client.Domain.Inventory;
+using MartialHeroes.Client.Domain.Skills;
 using MartialHeroes.Network.Abstractions.Protocol;
 using MartialHeroes.Network.Abstractions.Session;
 using MartialHeroes.Network.Protocol.Packets;
@@ -41,6 +43,7 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     private readonly LoginCredentialStore _credentials;
     private readonly SessionId _sessionId;
     private readonly byte[] _versionToken;
+    private readonly LocalPlayerState? _localPlayer;
 
     /// <summary>The 1/9 version-token length: a fixed 33-byte buffer. spec: 1-9_enter_game_request.yaml.</summary>
     public const int VersionTokenLength = 33;
@@ -58,13 +61,15 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         ClientWorld world,
         LoginCredentialStore credentials,
         SessionId sessionId,
-        ReadOnlySpan<byte> versionToken = default)
+        ReadOnlySpan<byte> versionToken = default,
+        LocalPlayerState? localPlayer = null)
     {
         _outbound = outbound ?? throw new ArgumentNullException(nameof(outbound));
         _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
         _sessionId = sessionId;
+        _localPlayer = localPlayer; // optional: drives the cast state machine when wired
 
         // Zero-pad / truncate the provisional token into the fixed 33-byte buffer.
         _versionToken = new byte[VersionTokenLength];
@@ -213,6 +218,189 @@ public sealed class ApplicationUseCases : IApplicationUseCases
             : SendChannelChatAsync(channel, text, cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async ValueTask<SkillCastResult> CastSkillAsync(
+        byte slot,
+        SkillDefinition skill,
+        CasterState caster,
+        ISkillTargetingQuery targeting,
+        Vector3Fixed aimPoint,
+        long nowMs,
+        ReadOnlyMemory<uint> targetsA = default,
+        ReadOnlyMemory<uint> targetsB = default,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(targeting);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Run the full ordered gate chain via the cast state machine (which delegates to
+        // SkillCastValidator). On a non-Ok result, NOTHING is sent. spec: skills.md §2 / §2.4.
+        SkillCastState current = _localPlayer?.CastState ?? SkillCastState.Idle;
+        CooldownTable cooldowns = _localPlayer?.Cooldowns ?? _scratchCooldowns;
+        (SkillCastState next, SkillCastResult result) =
+            current.TryBeginCast(in skill, in caster, cooldowns, targeting, in aimPoint, nowMs);
+
+        if (result != SkillCastResult.Ok)
+        {
+            return result; // gate blocked -> no 2/52 send. spec: skills.md §2.1.
+        }
+
+        // Advance the cast state machine (Casting phase) when a local-player holder is wired.
+        if (_localPlayer is not null)
+        {
+            _localPlayer.CastState = next;
+        }
+
+        // Success -> build and send 2/52 CmsgUseSkill (header + the two target-id arrays). spec: §2.4.
+        await UseSkillAsync(slot, targetsA, targetsB, cancellationToken).ConfigureAwait(false);
+        return SkillCastResult.Ok;
+    }
+
+    /// <inheritdoc />
+    public ValueTask<EquipCheckResult> EquipItemAsync(
+        byte mode,
+        byte slot,
+        byte fromSub,
+        byte toSlot,
+        byte sub,
+        int itemIndex,
+        EquipStateGates state,
+        EquipRelationContext relation = default,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Client-side gate chain (valid index, state gates, slot-8 relation guard). spec: inventory_trade.md §4.2.
+        EquipCheckResult check = EquipRules.CheckEquip(itemIndex, toSlot, in state, in relation);
+        if (check != EquipCheckResult.Allowed)
+        {
+            return ValueTask.FromResult(check); // blocked -> no 2/16 send. spec: §4.2.
+        }
+
+        // Build the 12-byte 2/16 CmsgEquipChange payload. spec: inventory_trade.md §4.1.
+        var payload = new byte[EquipChangeWireSize];
+        payload[0x00] = mode; // 0x00 mode (0 unequip / 1 equip / 2 swap)
+        payload[0x01] = slot; // 0x01 equipment slot
+        payload[0x02] = fromSub; // 0x02 from
+        payload[0x03] = toSlot; // 0x03 to
+        payload[0x04] = sub; // 0x04 sub (e.g. bag page)
+        // 0x05..0x07 alignment pad stays zero. spec: §4.1.
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0x08, 4), itemIndex); // 0x08 item_index (≥ 0)
+
+        return SendResultAsync(major: 2, minor: 16, payload, EquipCheckResult.Allowed, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> MoveItemAsync(
+        InventoryGrid grid,
+        int fromIndex,
+        int toIndex,
+        uint quantity = 0,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(grid);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // An empty source has nothing to move: do not mutate and do not emit network traffic for a no-op.
+        // (Domain's Move treats an empty source as a successful no-op; we suppress the send.) spec: §9.
+        if (grid.IsEmpty(fromIndex))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        // Apply the local grid mutation deterministically (Domain owns the rules). quantity 0 = full move;
+        // a partial quantity into an empty slot is a split; same-item into an occupied slot is a merge.
+        // spec: inventory_trade.md §9.
+        bool moved = quantity > 0
+            ? ItemStackOps.Split(grid, fromIndex, toIndex, quantity)
+            : grid.Move(fromIndex, toIndex);
+
+        if (!moved)
+        {
+            return ValueTask.FromResult(false); // local move rejected -> nothing sent. spec: §9.
+        }
+
+        // The in-bag move rides the equip slot-move opcode (2/16). spec: inventory_trade.md §9 / §4.1.
+        // mode 1, slot 0; from/to carry the slot indices (low byte each); item_index = source slot.
+        var payload = new byte[EquipChangeWireSize];
+        payload[0x00] = 1; // mode (in-bag move reuses the equip path). spec: §9.
+        payload[0x02] = unchecked((byte)fromIndex); // 0x02 from
+        payload[0x03] = unchecked((byte)toIndex); // 0x03 to
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0x08, 4), fromIndex); // 0x08 item_index
+
+        return SendResultAsync(major: 2, minor: 16, payload, result: true, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<(TradeSession Next, bool Accepted)> TradeRequestAsync(
+        TradeSession session,
+        uint partnerActorId,
+        byte requestMode = 0,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Self-target guard: never trade with yourself. spec: inventory_trade.md §8.1 (self-target guard).
+        if (_world.LocalActorKey is { } self && self.RawId == partnerActorId)
+        {
+            return ValueTask.FromResult((session, false));
+        }
+
+        // Drive the Domain trade state machine (idle -> requested). spec: inventory_trade.md §8.1/§8.3.
+        (TradeSession next, bool accepted) = session.Request(partnerActorId);
+        if (!accepted)
+        {
+            return ValueTask.FromResult((session, false)); // out of phase / zero partner -> nothing sent.
+        }
+
+        // Build the 8-byte 2/23 CmsgTradeRequest. spec: inventory_trade.md §8.1.
+        var payload = new byte[TradeRequestWireSize];
+        payload[0x00] = requestMode; // 0x00 mode (request/accept/decline/cancel; enum UNVERIFIED)
+        // 0x01..0x03 pad stays zero. spec: §8.1.
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0x04, 4), partnerActorId); // 0x04 value = target id
+
+        return SendResultAsync(major: 2, minor: 23, payload, (next, true), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> PartyInviteAsync(
+        uint targetActorId,
+        byte subOp = 0,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Guard: a zero id or a self-invite is refused. spec: social.md §2.4 (self-target guarded cluster).
+        if (targetActorId == 0 || (_world.LocalActorKey is { } self && self.RawId == targetActorId))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        // Build the 8-byte 2/35 CmsgPartyOrRelationInvite: [u8 sub-op][u32 target id]. spec: social.md §2.4.
+        var payload = new byte[PartyInviteWireSize];
+        payload[0x00] = subOp; // 0x00 sub-op
+        // 0x01..0x03 pad stays zero (dword alignment of the target id).
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0x04, 4), targetActorId); // 0x04 target id
+
+        return SendResultAsync(major: 2, minor: 35, payload, result: true, cancellationToken);
+    }
+
+    // -------------------------------------------------------------------------
+    // C2S payload sizes (spec-cited; no struct exists for these client-emitted minors)
+    // -------------------------------------------------------------------------
+
+    /// <summary>2/16 CmsgEquipChange payload size. spec: Docs/RE/specs/inventory_trade.md §4.1 (12 bytes).</summary>
+    private const int EquipChangeWireSize = 12;
+
+    /// <summary>2/23 CmsgTradeRequest payload size. spec: Docs/RE/specs/inventory_trade.md §8.1 (8 bytes).</summary>
+    private const int TradeRequestWireSize = 8;
+
+    /// <summary>2/35 CmsgPartyOrRelationInvite payload size. spec: Docs/RE/specs/social.md §2.4 (8 bytes).</summary>
+    private const int PartyInviteWireSize = 8;
+
+    /// <summary>An idle scratch cooldown table for the cast gate when no local-player state is wired (tests).</summary>
+    private readonly CooldownTable _scratchCooldowns = new();
+
     // -------------------------------------------------------------------------
     // Chat helpers
     // -------------------------------------------------------------------------
@@ -292,4 +480,16 @@ public sealed class ApplicationUseCases : IApplicationUseCases
 
     private ValueTask SendAsync(ushort major, ushort minor, ReadOnlyMemory<byte> payload, CancellationToken ct) =>
         _outbound.SendAsync(_sessionId, major, minor, payload, ct);
+
+    /// <summary>
+    /// Sends an already-owning <paramref name="payload"/> array and completes with <paramref name="result"/>.
+    /// Lets the validated-then-send use cases return their Domain result while the send goes through the
+    /// sink. The array must outlive the send (the sink's <see cref="ReadOnlyMemory{T}"/> aliases it).
+    /// </summary>
+    private async ValueTask<T> SendResultAsync<T>(
+        ushort major, ushort minor, byte[] payload, T result, CancellationToken ct)
+    {
+        await _outbound.SendAsync(_sessionId, major, minor, payload, ct).ConfigureAwait(false);
+        return result;
+    }
 }

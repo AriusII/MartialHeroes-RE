@@ -1,3 +1,4 @@
+using MartialHeroes.Client.Domain.Skills;
 using MartialHeroes.Shared.Kernel.Numerics;
 
 namespace MartialHeroes.Client.Application.UseCases;
@@ -63,5 +64,109 @@ public interface IApplicationUseCases
         uint channel,
         string text,
         string? recipientName = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Validates a skill cast through the full §2.1 gate chain (party/billing/busy/mounted/zone/stun/
+    /// alive/action-lock/target/weapon/self-cast/cooldown/MP/range/LoS/window/targets) via the Domain
+    /// <see cref="SkillCastValidator"/> + <see cref="Domain.Skills.CooldownTable"/>, and only on
+    /// <see cref="SkillCastResult.Ok"/> sends the 2/52 CmsgUseSkill request. The cast state machine
+    /// advances to <see cref="SkillCastPhase.Casting"/> on success. Returns the gate result so the caller
+    /// can map a non-Ok code to UI feedback. <b>No packet is sent on a non-Ok result.</b> spec:
+    /// Docs/RE/specs/skills.md §2 / §2.4; Docs/RE/packets/2-52_use_skill.yaml.
+    /// </summary>
+    /// <param name="slot">The hotbar slot to cast (0xFF = basic attack).</param>
+    /// <param name="skill">The resolved skill definition (catalogue data) the gate chain reads.</param>
+    /// <param name="caster">The caster gate inputs sampled from the local player's state.</param>
+    /// <param name="targeting">The range / LoS / target-state port (Application/Assets implementation).</param>
+    /// <param name="aimPoint">The aim point (XZ) for the range / LoS test.</param>
+    /// <param name="nowMs">The caller-supplied millisecond clock for the cooldown tick.</param>
+    /// <param name="targetsA">Ally / PC target id array (2/52 array A).</param>
+    /// <param name="targetsB">Enemy / mob target id array (2/52 array B).</param>
+    /// <returns>The cast result; <see cref="SkillCastResult.Ok"/> means the 2/52 request was sent.</returns>
+    ValueTask<SkillCastResult> CastSkillAsync(
+        byte slot,
+        SkillDefinition skill,
+        CasterState caster,
+        ISkillTargetingQuery targeting,
+        Vector3Fixed aimPoint,
+        long nowMs,
+        ReadOnlyMemory<uint> targetsA = default,
+        ReadOnlyMemory<uint> targetsB = default,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Requests an equip / unequip / swap (or an in-bag slot-move, which rides the same opcode). Runs the
+    /// client-side §4.2 gates via Domain <see cref="Domain.Inventory.EquipRules.CheckEquip"/> and only on
+    /// <see cref="Domain.Inventory.EquipCheckResult.Allowed"/> sends the 12-byte 2/16 CmsgEquipChange.
+    /// <b>No packet is sent when a gate blocks.</b> spec: Docs/RE/specs/inventory_trade.md §4.
+    /// </summary>
+    /// <param name="mode">0 = unequip, 1 = equip, 2 = equip-swap.</param>
+    /// <param name="slot">The equipment slot index involved.</param>
+    /// <param name="fromSub">Source slot / sub-index.</param>
+    /// <param name="toSlot">Destination slot / sub-index (slot 8 triggers the relation guard).</param>
+    /// <param name="sub">Extra sub-index (e.g. bag page).</param>
+    /// <param name="itemIndex">The validated item / inventory index; must be ≥ 0.</param>
+    /// <param name="state">The shared in-game / not-busy / not-dead predicate.</param>
+    /// <param name="relation">The slot-8 relation-guard inputs (only consulted when toSlot == 8).</param>
+    /// <returns>The §4.2 gate result; Allowed means the 2/16 request was sent.</returns>
+    ValueTask<Domain.Inventory.EquipCheckResult> EquipItemAsync(
+        byte mode,
+        byte slot,
+        byte fromSub,
+        byte toSlot,
+        byte sub,
+        int itemIndex,
+        Domain.Inventory.EquipStateGates state,
+        Domain.Inventory.EquipRelationContext relation = default,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Moves an item between two inventory slots locally (split / merge / full move) via the Domain
+    /// <see cref="Domain.Inventory.ItemStackOps"/> / <see cref="Domain.Inventory.InventoryGrid"/>, then —
+    /// when the local mutation succeeds — sends the 2/16 slot-move request (the in-bag move rides the
+    /// equip opcode; no dedicated split/merge opcode exists). Returns whether the local move applied.
+    /// spec: Docs/RE/specs/inventory_trade.md §9 / §4.1.
+    /// </summary>
+    /// <param name="grid">The inventory grid to mutate.</param>
+    /// <param name="fromIndex">Source slot index.</param>
+    /// <param name="toIndex">Destination slot index.</param>
+    /// <param name="quantity">Quantity to move (0 = full move; &gt; 0 and &lt; stack = split into an empty slot).</param>
+    /// <returns>True when the local grid mutation applied and the 2/16 request was sent.</returns>
+    ValueTask<bool> MoveItemAsync(
+        Domain.Inventory.InventoryGrid grid,
+        int fromIndex,
+        int toIndex,
+        uint quantity = 0,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Requests a player-to-player trade with <paramref name="partnerActorId"/> via the Domain
+    /// <see cref="Domain.Inventory.TradeSession"/> state machine, and on acceptance of the request edge
+    /// sends the 8-byte 2/23 CmsgTradeRequest. Returns the next session state and whether the request was
+    /// accepted by the state machine (a self-target or out-of-phase request sends nothing). spec:
+    /// Docs/RE/specs/inventory_trade.md §8.1 / §8.3.
+    /// </summary>
+    /// <param name="session">The current trade session state (immutable).</param>
+    /// <param name="partnerActorId">The trade-partner actor id (the 2/23 value field).</param>
+    /// <param name="requestMode">The 2/23 mode byte (request vs accept vs decline vs cancel; enum UNVERIFIED).</param>
+    /// <returns>The next session state and whether the request was accepted / sent.</returns>
+    ValueTask<(Domain.Inventory.TradeSession Next, bool Accepted)> TradeRequestAsync(
+        Domain.Inventory.TradeSession session,
+        uint partnerActorId,
+        byte requestMode = 0,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sends a party / relation invite for <paramref name="targetActorId"/>: the 8-byte 2/35
+    /// CmsgPartyOrRelationInvite (<c>[u8 sub-op][u32 target id]</c>). The self-target guard refuses an
+    /// invite to the local player (returns false, sends nothing). spec: Docs/RE/specs/social.md §2.4.
+    /// </summary>
+    /// <param name="targetActorId">The actor to invite.</param>
+    /// <param name="subOp">The invite sub-op byte.</param>
+    /// <returns>True when the invite was sent (false on a self-target / zero-id guard).</returns>
+    ValueTask<bool> PartyInviteAsync(
+        uint targetActorId,
+        byte subOp = 0,
         CancellationToken cancellationToken = default);
 }

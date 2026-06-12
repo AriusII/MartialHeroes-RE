@@ -138,40 +138,43 @@ public static class ConfigTableParser
             // spec: Docs/RE/formats/config_tables.md §2.4 — "Level index u16 @ +0: CONFIRMED".
             ushort level = BinaryPrimitives.ReadUInt16LittleEndian(rec[0..]);
 
-            // Always zero u16 @ +2. CONFIRMED.
+            // +2 u16 always zero (alignment pad). CONFIRMED.
             // spec: Docs/RE/formats/config_tables.md §2.4 — "+2 u16 always zero: CONFIRMED".
             // (read and discarded to maintain correct offset arithmetic)
 
-            // Step-count field A u32 @ +4. CONFIRMED (transitions); semantic UNVERIFIED.
-            // spec: Docs/RE/formats/config_tables.md §2.4 — "+4 u32 Step-count field A: CONFIRMED (transitions)".
-            uint stepA = BinaryPrimitives.ReadUInt32LittleEndian(rec[4..]);
-
-            // Step-count field B u32 @ +8. CONFIRMED (transitions); semantic UNVERIFIED.
-            // spec: Docs/RE/formats/config_tables.md §2.4 — "+8 u32 Step-count field B: CONFIRMED (transitions)".
-            uint stepB = BinaryPrimitives.ReadUInt32LittleEndian(rec[8..]);
+            // Wave-8 SPEC CORRECTION: the prior version read stepA as u32@+4 and stepB as u32@+8.
+            // The corrected spec shows three u16 counters at +4/+6/+8 with a zero pad at +10.
+            // spec: Docs/RE/formats/config_tables.md §2.4 — "+4 u16 Tier step counter A: CONFIRMED (value)".
+            // spec: Docs/RE/formats/config_tables.md §2.4 — "+6 u16 Tier step counter B (mirrors +4): CONFIRMED".
+            // spec: Docs/RE/formats/config_tables.md §2.4 — "+8 u16 Divisor index C: CONFIRMED (value)".
+            // spec: Docs/RE/formats/config_tables.md §2.4 — "+10 u16 always zero: CONFIRMED".
+            ushort tierStepA = BinaryPrimitives.ReadUInt16LittleEndian(rec[4..]);
+            ushort tierStepB = BinaryPrimitives.ReadUInt16LittleEndian(rec[6..]);
+            ushort divisorC  = BinaryPrimitives.ReadUInt16LittleEndian(rec[8..]);
+            // +10 u16 zero pad: consumed implicitly (float array starts at +12).
 
             // Stat-scale positive group [0..3] f32×4 @ +12..+27. CONFIRMED.
-            // spec: Docs/RE/formats/config_tables.md §2.4 — "+12 4×f32 Stat-scale positive group: CONFIRMED".
+            // spec: Docs/RE/formats/config_tables.md §2.4 — "+12 4×f32 positive-scale group: CONFIRMED".
             var statScalePositive = new float[4];
             for (int s = 0; s < 4; s++)
                 statScalePositive[s] = BinaryPrimitives.ReadSingleLittleEndian(rec[(12 + s * 4)..]);
 
             // Stat-scale negative group [0..3] f32×4 @ +28..+43. CONFIRMED.
-            // spec: Docs/RE/formats/config_tables.md §2.4 — "+28 4×f32 Stat-scale negative group: CONFIRMED".
+            // spec: Docs/RE/formats/config_tables.md §2.4 — "+28 4×f32 negative-scale group: CONFIRMED".
             var statScaleNegative = new float[4];
             for (int s = 0; s < 4; s++)
                 statScaleNegative[s] = BinaryPrimitives.ReadSingleLittleEndian(rec[(28 + s * 4)..]);
 
             // Reserved group 4×f32 @ +44..+59 — all 0.0. CONFIRMED (all zero).
-            // spec: Docs/RE/formats/config_tables.md §2.4 — "+44 4×f32 reserved (all 0.0): CONFIRMED".
-            // (not exposed as named fields; included in RawBody if needed)
+            // spec: Docs/RE/formats/config_tables.md §2.4 — "+44 4×f32 reserved group (all 0.0): CONFIRMED".
             ReadOnlyMemory<byte> body = data.Slice(recOffset, UserLevelScrStride);
 
             results[i] = new LevelBaseEntry
             {
                 Level = level,
-                StepA = stepA,
-                StepB = stepB,
+                TierStepA = tierStepA,
+                TierStepB = tierStepB,
+                DivisorC = divisorC,
                 StatScalePositive = statScalePositive,
                 StatScaleNegative = statScaleNegative,
                 Body = body,
@@ -228,30 +231,24 @@ public static class ConfigTableParser
             // spec: Docs/RE/formats/config_tables.md §2.5 — "+4 u16 Stat-group-1 gain: CONFIRMED".
             ushort statGroup1Gain = BinaryPrimitives.ReadUInt16LittleEndian(rec[4..]);
 
-            // Always zero u16 @ +6. CONFIRMED.
+            // +6 u16 always zero (alignment pad). CONFIRMED.
             // spec: Docs/RE/formats/config_tables.md §2.5 — "+6 u16 always zero: CONFIRMED".
 
-            // Stat-group-1 cumulative u16 @ +8. CONFIRMED.
-            // spec: Docs/RE/formats/config_tables.md §2.5 — "+8 u16 Stat-group-1 cumulative: CONFIRMED".
-            ushort statGroup1Cumul = BinaryPrimitives.ReadUInt16LittleEndian(rec[8..]);
-
-            // Mostly-zero u16 @ +10. UNVERIFIED (rare value=1).
-            // spec: Docs/RE/formats/config_tables.md §2.5 — "+10 u16 mostly zero (rare=1): UNVERIFIED".
-            ushort field10 = BinaryPrimitives.ReadUInt16LittleEndian(rec[10..]);
+            // Stat-group-1 cumulative u32 @ +8..+11. CONFIRMED.
+            // Wave-8 SPEC CORRECTION: was u16; value exceeds 65535 at keys 285+ (reaches ~65960 at key=285).
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+8 u32 Stat-group-1 cumulative (u32): CONFIRMED".
+            uint statGroup1Cumul = BinaryPrimitives.ReadUInt32LittleEndian(rec[8..]);
 
             // Stat-group-2 gain u16 @ +12. CONFIRMED.
             // spec: Docs/RE/formats/config_tables.md §2.5 — "+12 u16 Stat-group-2 gain: CONFIRMED".
             ushort statGroup2Gain = BinaryPrimitives.ReadUInt16LittleEndian(rec[12..]);
 
-            // Always zero u16 @ +14. CONFIRMED.
+            // +14 u16 always zero (alignment pad). CONFIRMED.
             // spec: Docs/RE/formats/config_tables.md §2.5 — "+14 u16 always zero: CONFIRMED".
 
-            // Stat-group-2 cumulative u16 @ +16. CONFIRMED.
-            // spec: Docs/RE/formats/config_tables.md §2.5 — "+16 u16 Stat-group-2 cumulative: CONFIRMED".
-            ushort statGroup2Cumul = BinaryPrimitives.ReadUInt16LittleEndian(rec[16..]);
-
-            // Always zero u16 @ +18. CONFIRMED.
-            // spec: Docs/RE/formats/config_tables.md §2.5 — "+18 u16 always zero: CONFIRMED".
+            // Stat-group-2 cumulative u32 @ +16..+19. CONFIRMED.
+            // spec: Docs/RE/formats/config_tables.md §2.5 — "+16 u32 Stat-group-2 cumulative: CONFIRMED".
+            uint statGroup2Cumul = BinaryPrimitives.ReadUInt32LittleEndian(rec[16..]);
 
             // Secondary curve low u16 @ +20. CONFIRMED.
             // spec: Docs/RE/formats/config_tables.md §2.5 — "+20 u16 secondary curve low: CONFIRMED".
@@ -275,7 +272,6 @@ public static class ConfigTableParser
                 Const25 = const25,
                 StatGroup1Gain = statGroup1Gain,
                 StatGroup1Cumulative = statGroup1Cumul,
-                Field10 = field10,
                 StatGroup2Gain = statGroup2Gain,
                 StatGroup2Cumulative = statGroup2Cumul,
                 SecondaryCurveLow = secCurveLow,

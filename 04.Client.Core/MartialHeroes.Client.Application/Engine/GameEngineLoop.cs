@@ -47,11 +47,16 @@ public sealed class GameEngineLoop
     private readonly ClientWorld _world;
     private readonly IClientEventBus _eventBus;
     private readonly InputBus _inputBus;
+    private readonly LocalPlayerState? _localPlayer;
 
     // The base (un-scaled) fixed delta for one tick, in milliseconds.
     private readonly uint _baseFixedDeltaMs;
 
     private long _tick;
+
+    // Monotonic logical clock in ms, advanced by the scaled delta each tick. Feeds the deterministic
+    // cooldown / cast-state ticks (those take a caller-supplied ms clock, not an ambient one).
+    private long _clockMs;
 
     /// <summary>
     /// Creates a loop at <paramref name="tickRateHz"/> ticks per second (default
@@ -65,11 +70,13 @@ public sealed class GameEngineLoop
         ClientWorld world,
         IClientEventBus eventBus,
         InputBus inputBus,
-        int tickRateHz = DefaultTickRateHz)
+        int tickRateHz = DefaultTickRateHz,
+        LocalPlayerState? localPlayer = null)
     {
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
         _inputBus = inputBus ?? throw new ArgumentNullException(nameof(inputBus));
+        _localPlayer = localPlayer; // optional: cooldown / buff / cast-state ticks
 
         if (tickRateHz <= 0)
         {
@@ -149,12 +156,44 @@ public sealed class GameEngineLoop
         //     here — orchestration only.
         AdvanceWorld(deltaMs);
 
+        // (2b) Advance the local player's skill subsystems (cooldowns, buff expiry, cast state) on this
+        //      same logical owner. The Domain owns each deterministic tick. spec: skills.md §4 / §6.3 / §2.
+        AdvanceLocalPlayerSystems(deltaMs);
+
         // (3) Publish an immutable snapshot for Godot to interpolate. spec: game_loop.md §6.
         WorldSnapshotEvent snapshot = BuildSnapshot(deltaMs);
         _eventBus.Publish(snapshot);
 
         _tick++;
         return snapshot;
+    }
+
+    /// <summary>
+    /// Advances the local player's deterministic skill subsystems by one fixed tick: the cooldown table
+    /// (to the monotonic ms clock), the buff/status table (one §6.3 decrement), and the cast state machine
+    /// (cooldown-phase expiry). No-op when no <see cref="LocalPlayerState"/> is wired. Each tick is a
+    /// Domain call; no game-rule math here. spec: Docs/RE/specs/skills.md §4 / §6.3 / §2 / §5.2.
+    /// </summary>
+    private void AdvanceLocalPlayerSystems(uint deltaMs)
+    {
+        if (_localPlayer is null)
+        {
+            return;
+        }
+
+        // Advance the monotonic logical clock; the cooldown / cast ticks take a caller-supplied ms value.
+        _clockMs += deltaMs;
+
+        // Tick all cooldown slots to the current clock (expired slots disarm). spec: skills.md §4 (tick-all).
+        _localPlayer.Cooldowns.TickAll(_clockMs);
+
+        // One §6.3 buff tick: each active status slot decrements its duration by 1; reaching 0 expires it.
+        // spec: skills.md §6.3 (single decrement per tick).
+        _localPlayer.Buffs.Tick();
+
+        // Advance the cast state machine: a cooldown phase whose end has elapsed returns to idle. The cast
+        // window itself is server-confirmed (§5.2), not auto-completed here. spec: skills.md §4 / §5.2.
+        _localPlayer.CastState = _localPlayer.CastState.Tick(_clockMs);
     }
 
     /// <summary>The fixed delta after applying <see cref="TimeScale"/>, clamped to &gt;= 0.</summary>

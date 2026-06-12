@@ -46,6 +46,15 @@ public sealed class ClientStateMachine
         TryTransition(ClientState.CharacterSelection, ClientState.Loading);
 
     /// <summary>
+    /// 3/1 character-select list received: ensure the client is on the character-selection screen. spec:
+    /// Docs/RE/opcodes.md (3/1 "switches to the select screen"). Accepted from
+    /// <see cref="ClientState.Login"/>; a no-op (no event) when already on the select screen or further
+    /// along, so an in-world 3/1 (e.g. a roster refresh) does not regress the lifecycle.
+    /// </summary>
+    public bool OnCharacterListReceived() =>
+        Current == ClientState.Login && SetState(ClientState.CharacterSelection);
+
+    /// <summary>
     /// 3/5 enter-game ack received: enter the world. spec: Docs/RE/opcodes.md (3/5 transitions the
     /// client into the in-world game state). Accepted from <see cref="ClientState.Loading"/> and,
     /// defensively, directly from <see cref="ClientState.CharacterSelection"/> (server may ack
