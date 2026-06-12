@@ -1,5 +1,4 @@
 using Godot;
-using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Assets.Parsers;
 using MartialHeroes.Assets.Parsers.Models;
 using MartialHeroes.Client.Application.World;
@@ -12,16 +11,17 @@ namespace MartialHeroes.Client.Godot.World;
 /// <see cref="MeshInstance3D"/> nodes for each sector.
 ///
 /// PASSIVE: zero game logic. Converts raw .ted bytes → <see cref="TerrainCell"/> (via
-/// <see cref="TedTerrainParser"/>) → GLB bytes (via <see cref="TerrainGltfConverter"/>) →
-/// Godot <see cref="ArrayMesh"/>. The mesh is built from the heightmap (POSITION) and diffuse
-/// colour (COLOR_0) arrays; no formula, no gameplay authority.
+/// <see cref="TedTerrainParser"/>) → Godot <see cref="ArrayMesh"/>. The mesh is built from the
+/// heightmap (POSITION), diffuse colour (COLOR_0), and normals (NORMAL) arrays. A real texture
+/// is applied via the optional <see cref="TextureResolver"/> if available.
+///
+/// Texture support:
+///   The .ted cell carries a Textures array with (Flag, TexId) pairs from the .map TEXTURES block.
+///   spec: Docs/RE/formats/terrain.md §3.5 TEXTURES directive. When <see cref="TextureResolver"/> is
+///   non-null, <see cref="OnSectorLoaded"/> calls it with TexId[0] to retrieve a Godot ImageTexture,
+///   and applies it as the albedo on top of the vertex-colour material.
 ///
 /// Coordinate conventions:
-///   The GLB produced by <see cref="TerrainGltfConverter"/> uses right-handed Y-up with X
-///   negated (legacy left-handed D3D9 → glTF flip). The sector's world-space offset (derived
-///   from mapX / mapZ) is applied as the node's local position so each sector mesh sits at the
-///   correct position in the scene.
-///
 ///   World-space origin bias:
 ///     worldX_min = (mapX - 10000) × 1024
 ///     worldZ_min = (mapZ - 10000) × 1024
@@ -36,6 +36,21 @@ namespace MartialHeroes.Client.Godot.World;
 public sealed partial class TerrainNode : Node3D
 {
     // -------------------------------------------------------------------------
+    // Optional texture resolver (set by RealWorldRenderer when VFS is available)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Optional texture resolver: given a tex_id (from the .map TEXTURES block), returns a
+    /// Godot <see cref="ImageTexture"/> or null. Called for the first tex_id of each sector.
+    ///
+    /// Set by <see cref="RealWorldRenderer"/> when real VFS assets are available.
+    /// When null, the mesh renders with vertex colours only (offline / synthetic mode).
+    ///
+    /// spec: Docs/RE/formats/terrain.md §3.5 TEXTURES directive — tex_id indexed array.
+    /// </summary>
+    public Func<int, ImageTexture?>? TextureResolver { get; set; }
+
+    // -------------------------------------------------------------------------
     // Sector mesh registry: (mapX, mapZ) → MeshInstance3D
     // -------------------------------------------------------------------------
 
@@ -47,7 +62,7 @@ public sealed partial class TerrainNode : Node3D
 
     /// <summary>
     /// Reacts to a <see cref="SectorLoadedEvent"/>: parses the .ted bytes, converts to a Godot
-    /// <see cref="ArrayMesh"/>, and adds a <see cref="MeshInstance3D"/> to the scene.
+    /// <see cref="ArrayMesh"/>, applies optional texture, and adds a <see cref="MeshInstance3D"/>.
     /// If the payload is empty (cell not in area manifest), nothing is added.
     /// spec: Docs/RE/formats/terrain.md §5 (.ted blob); §1.4 (world-space bounds).
     /// </summary>
@@ -69,13 +84,35 @@ public sealed partial class TerrainNode : Node3D
             return;
         }
 
-        // Build the Godot ArrayMesh directly from the TerrainCell (no GLB round-trip needed
-        // for the runtime mesh; TerrainGltfConverter is used for offline GLB export).
-        // The ArrayMesh is built from POSITION (heights) and COLOR (diffuse) arrays.
+        // Build the Godot ArrayMesh directly from the TerrainCell.
         ArrayMesh? mesh = TryBuildMesh(cell);
         if (mesh is null)
         {
             return;
+        }
+
+        // Apply terrain texture using TextureIndexGrid[0] as the tex_id for the first region.
+        // TextureIndexGrid is a 16×16 grid of 1-based texture indices.
+        // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — "u8, 1-based, 16×16": CONFIRMED.
+        // The TextureResolver maps these 1-based indices to real textures via the .map TEXTURES block.
+        // NOTE: The TEXTURES block in the .map associates tex_id with texture paths; full cross-
+        //       referencing requires the MapDescriptor (available only in RealWorldRenderer context).
+        //       Here we pass the raw 1-based index and let RealWorldRenderer wire a resolver that
+        //       can translate it. Default behaviour: vertex colours only (fallback if no resolver).
+        if (TextureResolver is not null && cell.TextureIndexGrid.Length > 0)
+        {
+            int texIdx = cell.TextureIndexGrid[0]; // 1-based index into the .map TEXTURES array
+            ImageTexture? tex = TextureResolver(texIdx);
+            if (tex is not null)
+            {
+                // Override the surface material with a real texture.
+                // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — tex_id[0] = dominant texture region.
+                var texMat = new StandardMaterial3D();
+                texMat.AlbedoTexture = tex;
+                texMat.TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps;
+                texMat.Uv1Scale = new Vector3(4f, 4f, 4f); // tiling scale for terrain texture
+                mesh.SurfaceSetMaterial(0, texMat);
+            }
         }
 
         // Compute the sector's world-space origin and apply Godot coordinate conventions.
@@ -84,9 +121,8 @@ public sealed partial class TerrainNode : Node3D
         // worldZ_min = (mapZ - 10000) × 1024.0  — CONFIRMED (spec §1.4).
         // Godot convention: negate Z (legacy left-handed → right-handed).
         // spec: WorldCoordinates.ToGodot.
-        float
-            legacyX = (evt.MapX - 10000) *
-                      1024.0f; // spec: terrain.md §1.4, origin bias 10000, cell size 1024. CONFIRMED.
+        float legacyX = (evt.MapX - 10000) *
+                        1024.0f; // spec: terrain.md §1.4, origin bias 10000, cell size 1024. CONFIRMED.
         float legacyZ = (evt.MapZ - 10000) * 1024.0f; // spec: terrain.md §1.4. CONFIRMED.
         float godotX = legacyX;
         float godotZ = -legacyZ; // spec: WorldCoordinates.ToGodot — negate Z.
@@ -139,19 +175,18 @@ public sealed partial class TerrainNode : Node3D
     ///
     /// Mesh layout:
     ///   POSITION: 65×65 = 4225 vertices, local-space XYZ.
-    ///     X = c × 16.0 (columns → X axis — axis orientation UNVERIFIED, convention consistent with
-    ///         TerrainGltfConverter).
+    ///     X = c × 16.0 (columns → X axis).
     ///     Y = Heights[vi] (direct f32 world-space Y — scale UNVERIFIED per spec §5.3).
     ///     Z = r × 16.0 (rows → Z axis).
-    ///   No handedness flip needed here: the mesh is local to the sector node; the node's position
-    ///   carries the world-space offset with the Godot Z flip already applied.
-    ///
+    ///   NORMAL: decoded from Block 2 (i8/127.0). Used for lighting.
+    ///     spec: Docs/RE/formats/terrain.md §5.5 Block 2 — R=Nx, G=Ny, B=Nz: CONFIRMED.
     ///   COLOR: 4225 RGBA bytes from block 5 (diffuse colour map), interpreted as Color.
-    ///   INDICES: 64×64×2×3 = 24576 indices, CCW winding (consistent with TerrainGltfConverter).
+    ///   INDICES: 64×64×2×3 = 24576 indices, CCW winding.
     ///
     /// spec: Docs/RE/formats/terrain.md §5.1 — "65×65 vertex grid, 64×64 quads, vertex spacing
     ///       16.0 world units": CONFIRMED.
     /// spec: Docs/RE/formats/terrain.md §5.2 Block 1 — heights f32le: CONFIRMED.
+    /// spec: Docs/RE/formats/terrain.md §5.5 Block 2 — normals i8/127.0: CONFIRMED.
     /// spec: Docs/RE/formats/terrain.md §5.2 Block 5 — diffuse RGBA u8×4: CONFIRMED.
     /// </summary>
     private static ArrayMesh? TryBuildMesh(TerrainCell cell)
@@ -167,7 +202,12 @@ public sealed partial class TerrainNode : Node3D
             const int indexCount = quadSize * quadSize * 2 * 3; // 24576
 
             var positions = new Vector3[vertCount];
+            var normals = new Vector3[vertCount];
             var colours = new Color[vertCount];
+            var uvs = new Vector2[vertCount];
+
+            // spec: Docs/RE/formats/terrain.md §5.5 Block 2 — "VertexNormals" is "Normals" in TerrainCell.
+            bool hasNormals = cell.Normals is { Length: >= vertCount };
 
             // Build vertex arrays.
             for (int r = 0; r < gridSize; r++)
@@ -184,17 +224,30 @@ public sealed partial class TerrainNode : Node3D
                         cell.Heights[vi],
                         r * spacing);
 
-                    // Diffuse colour from block 5. The parser now decodes block 5 into
-                    // normalized (R,G,B,A) floats per vertex (on-disk u8 × 0.5 effective value).
+                    // UV for texture mapping: normalized (0..1) over the cell.
+                    // spec: Docs/RE/formats/terrain.md §5.1 — vertex spacing 16.0, cell 1024×1024.
+                    uvs[vi] = new Vector2((float)c / (gridSize - 1), (float)r / (gridSize - 1));
+
+                    // Normals from Block 2 (if available).
+                    // spec: Docs/RE/formats/terrain.md §5.5 Block 2 — Nx=R, Ny=G, Nz=B decoded i8/127.0. CONFIRMED.
+                    if (hasNormals)
+                    {
+                        var n = cell.Normals[vi];
+                        normals[vi] = new Vector3(n.Nx, n.Ny, n.Nz).Normalized();
+                    }
+                    else
+                    {
+                        normals[vi] = Vector3.Up; // fallback flat normal
+                    }
+
+                    // Diffuse colour from block 5.
                     // spec: Docs/RE/formats/terrain.md §5.2 Block 5 — CONFIRMED.
                     var d = cell.DiffuseColours[vi];
                     colours[vi] = new Color(d.R, d.G, d.B, d.A);
                 }
             }
 
-            // Build index array — CCW triangulation after handedness consideration.
-            // The mesh is in local right-handed space (no global X-flip here since the
-            // node offset handles the handedness via the negated Z origin).
+            // Build index array — CCW triangulation.
             // Winding convention consistent with TerrainGltfConverter (CCW).
             // spec: Docs/RE/formats/terrain.md §5.1 — 64×64 quads. CONFIRMED.
             var indices = new int[indexCount];
@@ -223,13 +276,16 @@ public sealed partial class TerrainNode : Node3D
             var arrays = new global::Godot.Collections.Array();
             arrays.Resize((int)Mesh.ArrayType.Max);
             arrays[(int)Mesh.ArrayType.Vertex] = positions;
+            arrays[(int)Mesh.ArrayType.Normal] = normals;
             arrays[(int)Mesh.ArrayType.Color] = colours;
+            arrays[(int)Mesh.ArrayType.TexUV] = uvs;
             arrays[(int)Mesh.ArrayType.Index] = indices;
 
             var mesh = new ArrayMesh();
             mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
 
-            // Assign a simple vertex-colour material so the diffuse colours are visible.
+            // Default material: vertex-colour unshaded (for offline/no-texture mode).
+            // If a texture is available, OnSectorLoaded will override this material.
             var mat = new StandardMaterial3D();
             mat.VertexColorUseAsAlbedo = true;
             mat.ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded;

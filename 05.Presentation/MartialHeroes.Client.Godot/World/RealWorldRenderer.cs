@@ -4,18 +4,20 @@
 // Activated by env-var: MH_REAL_ASSETS=1 (checked by GameLoop._Ready via RealWorldRenderer.IsEnabled).
 //
 // What this node does (all passive, no game logic):
-//   1. Loads a terrain sector from the VFS (.ted → TerrainNode mesh).
+//   1. Uses SectorStreamingService to load a 3×3 ring of real terrain sectors.
 //   2. Loads building geometry (.bud → GLB in memory → MeshInstance3D nodes).
 //   3. Loads a skinned character mesh (.skn + .bnd + .mot → GLB → GltfDocument runtime import).
-//   4. Applies a diffuse texture to the BUD mesh nodes (PNG/BMP/DDS via AssetPassthrough).
+//   4. Applies diffuse textures (PNG/BMP/DDS via AssetPassthrough → ImageTexture).
 //   5. Positions a camera over the terrain.
 //
 // Threading: all Godot node creation happens on the main thread (_Ready or CallDeferred).
-// Heavy parsing (GltfConverter.WriteGlb) runs synchronously in _Ready to keep it simple;
-// for production move it to a Task with CallDeferred node creation.
+// Heavy parsing (GltfConverter.WriteGlb) runs synchronously in Initialise to keep it simple.
+// The 3×3 sector streaming call goes through SectorStreamingService.UpdateCenterAsync which
+// is called from a background task (fire-and-forget) — TerrainNode reacts via the event bus.
 //
 // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
 // spec: Docs/RE/formats/terrain.md §1.1–1.4 (path, manifest, ted, world bounds).
+// spec: Docs/RE/formats/terrain.md §9.2 (3×3 streaming ring at StreamQuality.Medium).
 // spec: Docs/RE/formats/terrain_scene.md (bud scene).
 // spec: Docs/RE/formats/mesh.md (skn/bnd).
 // spec: Docs/RE/formats/animation.md (mot).
@@ -38,21 +40,21 @@ namespace MartialHeroes.Client.Godot.World;
 /// Default cell rendered: area 000, cell (10000, 10000) — the world-origin cell.
 /// Override via <see cref="TargetAreaId"/>, <see cref="TargetMapX"/>, <see cref="TargetMapZ"/>.
 ///
-/// Character rendered: the first .skn found under data/char/skin/ (or
-/// data/item/skin/ as fallback). Override <see cref="SknVirtualPath"/> / <see cref="BndVirtualPath"/>
-/// before <see cref="StartAsync"/> is called.
+/// Character rendered: the first .skn found under data/item/skin/ (best-effort).
+/// Override <see cref="SknVirtualPath"/> / <see cref="BndVirtualPath"/> before
+/// <see cref="Initialise"/> is called.
 /// </summary>
 public sealed partial class RealWorldRenderer : Node3D
 {
     // -------------------------------------------------------------------------
-    // Configuration (set before StartAsync)
+    // Configuration (set before Initialise)
     // -------------------------------------------------------------------------
 
     /// <summary>Area to load. Default 0 (map000). spec: Docs/RE/formats/terrain.md §1.1.</summary>
     public int TargetAreaId { get; set; } = 0;
 
     /// <summary>
-    /// Cell X coordinate. Default 10000 (world-origin cell).
+    /// Cell X coordinate (world-origin cell = 10000).
     /// spec: Docs/RE/formats/terrain.md §Overview (bias 10000). CONFIRMED.
     /// </summary>
     public int TargetMapX { get; set; } = 10000;
@@ -67,7 +69,7 @@ public sealed partial class RealWorldRenderer : Node3D
     public string? SknVirtualPath { get; set; }
 
     /// <summary>
-    /// VFS path for the character .bnd.  Null = try matching path from the .skn name.
+    /// VFS path for the character .bnd.  Null = derive from .skn filename or null (single-bone).
     /// spec: Docs/RE/formats/mesh.md §.bnd.
     /// </summary>
     public string? BndVirtualPath { get; set; }
@@ -90,16 +92,19 @@ public sealed partial class RealWorldRenderer : Node3D
 
     private RealClientAssets? _assets;
     private TerrainNode? _terrainNode;
+    private ClientContext? _ctx;
 
     // -------------------------------------------------------------------------
     // Lifecycle
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Called by GameLoop._Ready. Performs all synchronous asset loading and node creation.
+    /// Called by GameLoop._Ready. Performs synchronous BUD/character loading and node creation;
+    /// kicks off the async 3×3 terrain-ring streaming in a fire-and-forget task.
     /// </summary>
     public void Initialise(ClientContext ctx, TerrainNode terrainNode)
     {
+        _ctx = ctx;
         _terrainNode = terrainNode;
 
         // Open the VFS — falls back gracefully to null if absent.
@@ -110,9 +115,17 @@ public sealed partial class RealWorldRenderer : Node3D
             return;
         }
 
-        // Load terrain sector and post its event to ClientContext EventBus so TerrainNode
-        // reacts through the normal event path (passive, no direct mesh calls here).
-        LoadAndPostTerrain(ctx);
+        // Wire the texture resolver into TerrainNode so each sector can get a real texture.
+        // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — 1-based TextureIndexGrid → texture path.
+        // The resolver maps 1-based indices to VFS texture paths and loads them via AssetPassthrough.
+        // This is done before streaming so the resolver is ready when the first SectorLoadedEvent arrives.
+        WireTerrainTextureResolver(terrainNode);
+
+        // Kick off 3×3 terrain streaming via SectorStreamingService.
+        // This publishes SectorLoadedEvent / SectorUnloadedEvent onto the EventBus which
+        // TerrainNode processes on the main thread each _Process frame — fully passive.
+        // spec: Docs/RE/formats/terrain.md §9.2 (3×3 ring, StreamQuality.Medium).
+        TriggerTerrainStreaming(ctx);
 
         // Load BUD scene and create MeshInstance3D children.
         LoadAndSpawnBudScene();
@@ -134,39 +147,109 @@ public sealed partial class RealWorldRenderer : Node3D
     }
 
     // -------------------------------------------------------------------------
-    // Terrain loading
+    // Terrain texture resolver wiring
     // -------------------------------------------------------------------------
 
-    private void LoadAndPostTerrain(ClientContext ctx)
+    /// <summary>
+    /// Wires a <see cref="TerrainNode.TextureResolver"/> delegate that maps a 1-based
+    /// texture index (from TextureIndexGrid) to a Godot ImageTexture loaded from the VFS.
+    ///
+    /// The resolver uses heuristic path construction:
+    ///   1. Build the area texture directory path.
+    ///   2. Use the 1-based index to select a texture file (if the TEXTURES block mapping is
+    ///      unavailable, fall back to gr001.dds as index 1).
+    ///
+    /// In production, the full cross-referencing requires the MapDescriptor's TEXTURES block
+    /// (parsed via MapDescriptorParser). Full tex_id→path mapping is a TODO pending
+    /// MapDescriptor TEXTURES block parsing integration.
+    ///
+    /// spec: Docs/RE/formats/terrain.md §5.6 Block 3 — 1-based TextureIndexGrid.
+    /// spec: Docs/RE/formats/terrain.md §3.5 TEXTURES directive — intTexId indexed array.
+    /// </summary>
+    private void WireTerrainTextureResolver(TerrainNode terrainNode)
     {
         if (_assets is null) return;
 
-        // Prefer the .ted path from the .map descriptor (canonical); fall back to the
-        // pattern-derived path for cells that lack a .map.
-        (string? mapTedPath, _) = _assets.LoadMapDatafilePaths(TargetAreaId, TargetMapX, TargetMapZ);
+        // Cache loaded textures by index to avoid redundant VFS reads.
+        // The resolver is called once per sector per index on the main thread.
+        var texCache = new Dictionary<int, ImageTexture?>();
 
-        ReadOnlyMemory<byte> tedBytes = mapTedPath is not null
-            ? _assets.GetRaw(mapTedPath)
-            : _assets.LoadTed(TargetAreaId, TargetMapX, TargetMapZ);
+        string areaTag = AreaTag(TargetAreaId);
+        string texDir = $"data/map{areaTag}/texture/";
 
-        if (tedBytes.IsEmpty)
+        // Heuristic: map 1-based index → texture filename "gr{index:D3}.dds".
+        // spec: Docs/RE/formats/terrain.md §4 — "bgtexture.lst at data/map000/texture/bgtexture.lst".
+        // The actual mapping is in bgtexture.lst (list of texture filenames, 1-based indexing).
+        // TODO: parse bgtexture.lst to build a proper index→filename map.
+        // For now: gr001.dds for index 1, gr002.dds for index 2, etc. (observed naming pattern).
+        terrainNode.TextureResolver = texIdx =>
         {
-            GD.PrintErr($"[RealWorldRenderer] No .ted data for cell ({TargetMapX},{TargetMapZ}). " +
-                        "TerrainNode will render nothing for this cell.");
-            return;
-        }
+            if (texCache.TryGetValue(texIdx, out ImageTexture? cached))
+                return cached;
 
-        // Publish via the Application event bus so TerrainNode processes it normally.
-        // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — "subscribes to Application event
-        //       channels … translates those events into visual updates". CONFIRMED.
-        // SectorLoadedEvent lives in MartialHeroes.Client.Application.World namespace.
-        ctx.EventBus.Publish(new SectorLoadedEvent(
-            MapX: TargetMapX,
-            MapZ: TargetMapZ,
-            Payload: tedBytes));
+            // Attempt to load the indexed texture from the area texture directory.
+            // heuristic: gr{idx:D3}.dds — UNVERIFIED naming convention. Dev visual aid only.
+            string texPath = $"{texDir}gr{texIdx:D3}.dds";
+            ImageTexture? tex = null;
 
-        GD.Print($"[RealWorldRenderer] SectorLoadedEvent published for cell ({TargetMapX},{TargetMapZ}), " +
-                 $"{tedBytes.Length} bytes.");
+            if (_assets is not null && _assets.Contains(texPath))
+            {
+                tex = _assets.LoadTexture(texPath);
+                if (tex is not null)
+                    GD.Print($"[RealWorldRenderer] Terrain texture loaded: {texPath}");
+            }
+
+            // Fallback: try gr001.dds regardless of index (ensures some texture coverage).
+            if (tex is null)
+            {
+                string fallback = $"{texDir}gr001.dds";
+                if (_assets is not null && _assets.Contains(fallback))
+                    tex = _assets.LoadTexture(fallback);
+            }
+
+            texCache[texIdx] = tex; // cache null too to avoid repeated failed lookups
+            return tex;
+        };
+
+        GD.Print($"[RealWorldRenderer] Terrain TextureResolver wired for area {TargetAreaId}.");
+    }
+
+    // -------------------------------------------------------------------------
+    // 3×3 terrain streaming via SectorStreamingService
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Calls <see cref="SectorStreamingService.UpdateCenterAsync"/> for the target cell centre,
+    /// which triggers loading of the 3×3 ring and publishes SectorLoadedEvent per cell.
+    /// TerrainNode reacts to those events on the main thread; no direct mesh calls here.
+    ///
+    /// spec: Docs/RE/formats/terrain.md §9.2 — "3×3 ring of sectors centred on the player cell".
+    /// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive (event-driven).
+    /// </summary>
+    private void TriggerTerrainStreaming(ClientContext ctx)
+    {
+        // Fire-and-forget: UpdateCenterAsync is async (loads .ted bytes from the VFS);
+        // the events it publishes are drained by GameLoop._Process on the main thread.
+        // We do not await here to avoid blocking Initialise on the main thread.
+        // The sector source is already backed by the real VFS in VfsTerrainSectorSource.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ctx.StreamingService.UpdateCenterAsync(TargetMapX, TargetMapZ)
+                    .ConfigureAwait(false);
+                // Log the completion count (GD.Print is thread-safe in Godot 4).
+                int residentCount = ctx.StreamingService.ResidentCount;
+                GD.Print($"[RealWorldRenderer] 3×3 terrain ring streaming complete " +
+                         $"(resident={residentCount} sectors).");
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[RealWorldRenderer] Terrain streaming error: {ex.Message}");
+            }
+        });
+
+        GD.Print($"[RealWorldRenderer] Terrain streaming requested for centre ({TargetMapX},{TargetMapZ}).");
     }
 
     // -------------------------------------------------------------------------
@@ -203,13 +286,11 @@ public sealed partial class RealWorldRenderer : Node3D
         Node3D? budRoot = TryImportGlb(budGlb.ToArray(), "BudScene");
         if (budRoot is null) return;
 
-        // BUD positions are in legacy left-handed world space. The GltfConverter already negates X.
-        // The sector world offset is implicit in the absolute positions — no extra translation needed.
-        // spec: Docs/RE/formats/terrain_scene.md §Coordinate system: CONFIRMED (absolute world-space).
         budRoot.Name = "BudSceneNode";
         AddChild(budRoot);
 
-        // Attempt to apply a texture from the first .map TEXTURES entry to the BUD mesh.
+        // Attempt to apply terrain texture from the map TEXTURES directive.
+        // spec: Docs/RE/formats/terrain.md §3.5 TEXTURES directive — tex_id indexed array.
         TryApplyBudTexture(budRoot);
 
         GD.Print($"[RealWorldRenderer] BUD scene spawned: {scene.Objects.Length} objects.");
@@ -219,30 +300,31 @@ public sealed partial class RealWorldRenderer : Node3D
     {
         if (_assets is null) return;
 
-        // Try the background texture list for area 000 as a fallback texture.
-        // spec: Docs/RE/formats/terrain.md §4 — bgtexture.lst at data/map000/texture/bgtexture.lst.
-        // For now, look for any .dds in the map texture directory as a best-effort diffuse.
-        // This is a dev-mode visual aid only — no gameplay authority.
-        string texSearchPath = $"data/map{AreaTag(TargetAreaId)}/texture/";
+        // Heuristic: try the first .dds in the map texture directory.
+        // Production path: the .map TEXTURES{} block provides indexed tex_id (CONFIRMED spec §3.5).
+        // This is a dev-mode visual aid — no gameplay authority.
+        // spec: Docs/RE/formats/terrain.md §3.5 TEXTURES — tex_id cross-referencing documented;
+        //       full index→path lookup requires MapDescriptorParser TEXTURES block (parsed in .map).
+        // TODO: parse TEXTURES block from .map and use the correct tex_id index per BUD object.
 
-        // Try a plausible first texture path. This is heuristic-only for dev display.
-        // In production, the .map TEXTURES{} block provides the indexed tex_id.
-        // spec: Docs/RE/formats/terrain.md §3.5 TEXTURES directive.
+        // Try a plausible first texture path: area 000 background texture gr001.
+        // spec: Docs/RE/formats/terrain.md §4 — bgtexture.lst at data/map000/texture/bgtexture.lst.
         const string fallbackTex = "data/map000/texture/gr001.dds";
+        ImageTexture? tex = null;
         if (_assets.Contains(fallbackTex))
         {
-            ImageTexture? tex = _assets.LoadTexture(fallbackTex);
+            tex = _assets.LoadTexture(fallbackTex);
             if (tex is not null)
-            {
-                ApplyTextureToMeshInstances(budRoot, tex);
                 GD.Print($"[RealWorldRenderer] Applied diffuse texture: {fallbackTex}");
-            }
         }
-        else
+
+        if (tex is null)
         {
-            GD.Print($"[RealWorldRenderer] Fallback texture not found ({fallbackTex}). " +
-                     "BUD mesh will render without texture.");
+            GD.Print("[RealWorldRenderer] Fallback texture not found — BUD will render without texture.");
+            return;
         }
+
+        ApplyTextureToMeshInstances(budRoot, tex);
     }
 
     private static void ApplyTextureToMeshInstances(Node root, ImageTexture tex)
@@ -254,7 +336,7 @@ public sealed partial class RealWorldRenderer : Node3D
             {
                 var mat = new StandardMaterial3D();
                 mat.AlbedoTexture = tex;
-                // Terrain textures are world-scale tiled; set repeat to avoid white/black borders.
+                // Terrain textures are world-scale tiled; set repeat mode for tiling.
                 mat.TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps;
                 meshInst.MaterialOverride = mat;
             }
@@ -288,7 +370,7 @@ public sealed partial class RealWorldRenderer : Node3D
         bool ok = _assets.LoadSkinned(
             sknPath: sknPath,
             bndPath: bndPath,
-            motPaths: null,  // No specific .mot discovered yet — static pose only.
+            motPaths: null,  // No .mot discovered yet — static pose only.
             glbOutput: glbStream);
 
         if (!ok) return;
@@ -301,10 +383,12 @@ public sealed partial class RealWorldRenderer : Node3D
         Node3D? charRoot = TryImportGlb(glbBytes, "CharacterSkin");
         if (charRoot is null)
         {
-            // TODO: runtime glTF animation import requires Godot 4.x GltfDocument.AppendFromBuffer.
-            // If import fails, fall back to a placeholder MeshInstance3D built from vertex data.
-            // This is noted as a known limitation — see REPORT section below.
-            GD.PrintErr("[RealWorldRenderer] GLB runtime import failed (see TODO in code). " +
+            // TODO (runtime animation): GltfDocument.AppendFromBuffer imports skeleton+mesh but
+            // Godot 4.x requires a post-import hook to wire AnimationPlayer to the imported skeleton.
+            // Current: geometry and static pose are imported; animation clips are NOT played at runtime.
+            // The GLB is fully valid — open in the Godot editor for full animation preview.
+            // Tracked: Godot upstream issue — GltfDocument post-import hook for runtime animation.
+            GD.PrintErr("[RealWorldRenderer] GLB runtime import failed. " +
                         "Skinned character will not be visible in this session.");
             return;
         }
@@ -327,11 +411,9 @@ public sealed partial class RealWorldRenderer : Node3D
         if (_assets is null) return null;
 
         // Try common character skin paths.
-        // spec: Docs/RE/formats/texture.md §PNG — "data/char/tex256256/" and "data/item/texture/": CONFIRMED.
         // spec: Docs/RE/formats/mesh.md §.skn — "data/char/skin/" or "data/item/skin/": CONFIRMED.
         string[] candidates =
         [
-            // Item skins (simplest — single-bone rigid props, fully sample-verified).
             "data/item/skin/gi213050001.skn",
             "data/item/skin/gi213062382.skn",
             "data/item/skin/gi292020105.skn",
@@ -349,10 +431,9 @@ public sealed partial class RealWorldRenderer : Node3D
 
     private static string? DeriveBndPath(string sknPath)
     {
-        // Item skins have id_b=0 (single rigid bone) — try matching the .bnd convention.
+        // Item skins have id_b=0 (single rigid bone) — no .bnd needed.
         // spec: Docs/RE/formats/mesh.md §.skn — id_b: "Intended to match actor_id of .bnd". CONFIRMED.
-        // For item skins (id_b=0), no .bnd is needed — return null.
-        // This keeps the rigid single-bone path working without requiring a .bnd file.
+        // For item skins (id_b=0), null = single rigid bone path.
         return null;
     }
 
@@ -396,15 +477,13 @@ public sealed partial class RealWorldRenderer : Node3D
 
     /// <summary>
     /// Attempts a runtime GLB import via Godot's <see cref="GltfDocument"/> / <see cref="GltfState"/>.
-    /// Returns null if the import fails (e.g. Godot runtime limitations on headless builds).
+    /// Returns null if the import fails.
     ///
-    /// TODO (runtime anim): GltfDocument.AppendFromBuffer imports the skeleton and mesh but
-    /// Godot 4.x requires a post-import pass to wire up the AnimationPlayer to the
-    /// imported skeleton node. The current implementation imports geometry and skeleton pose
-    /// but does NOT yet play animation clips embedded in the GLB.
-    /// Workaround: the GLB is fully valid — open it in the Godot editor for full animation
-    /// preview. Runtime animation playback from dynamically-imported GLBs is blocked on
-    /// Godot's GltfDocument API exposing a post-import hook (tracked as Godot upstream issue).
+    /// TODO (runtime animation): GltfDocument.AppendFromBuffer imports skeleton+mesh but Godot 4.x
+    /// does not yet expose a post-import hook to wire AnimationPlayer to the runtime skeleton.
+    /// Geometry and static pose import correctly; animation clips embedded in the GLB are ignored.
+    /// Workaround: open the GLB in the Godot editor for full animation preview.
+    /// Tracked: Godot upstream issue — GltfDocument post-import hook for runtime animation.
     /// </summary>
     private static Node3D? TryImportGlb(byte[] glbBytes, string debugName)
     {
@@ -412,8 +491,6 @@ public sealed partial class RealWorldRenderer : Node3D
         {
             var gltfDoc = new GltfDocument();
             var gltfState = new GltfState();
-            // HandleBinaryImage was added in Godot 4.3+; omit the property set for compatibility.
-            // The default behaviour embeds images, which is fine for our GLBs.
 
             Error err = gltfDoc.AppendFromBuffer(glbBytes, string.Empty, gltfState);
             if (err != Error.Ok)
@@ -431,7 +508,6 @@ public sealed partial class RealWorldRenderer : Node3D
                 return null;
             }
 
-            // The generated scene root is a Node — cast to Node3D or wrap it.
             if (scene is Node3D node3D)
                 return node3D;
 

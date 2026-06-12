@@ -9,14 +9,16 @@
     </PropertyGroup>
 
     <!--
-      Layer 05 → Layer 04 (Client.Application) and Layer 03 (Assets.Mapping).
-      These are the ONLY two direct ProjectReferences permitted for this layer.
-      Network.*, Assets.Vfs, Assets.Parsers, and Client.Domain arrive transitively;
-      never reference them directly from this project.
+      Layer 05 → Layer 04 (Client.Application, Client.Infrastructure) and Layer 03 (Assets.Mapping).
+      Client.Infrastructure is added for catalogue access (VfsCatalogueLoader, ScrStatCatalogue,
+      ItemCatalogue, SkillCatalogue, MobCatalogue). Network.*, Assets.Vfs, Assets.Parsers, and
+      Client.Domain arrive transitively; never reference them directly from this project.
       spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation dependency rules.
+      spec: task requirement — VfsCatalogueLoader + ScrStatCatalogue wired in ClientContext.
     -->
     <ItemGroup>
         <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Application\MartialHeroes.Client.Application.csproj"/>
+        <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Infrastructure\MartialHeroes.Client.Infrastructure.csproj"/>
         <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Mapping\MartialHeroes.Assets.Mapping.csproj"/>
     </ItemGroup>
 

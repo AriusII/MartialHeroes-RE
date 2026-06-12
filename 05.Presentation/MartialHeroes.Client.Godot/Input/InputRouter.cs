@@ -175,10 +175,16 @@ public sealed partial class InputRouter : Node
         }
     }
 
+    // Chat input state: true while the chat bar is active.
+    // spec: Docs/RE/specs/input_ui.md §4 — "Enter key toggles the chat input bar".
+    private bool _chatActive;
+    private string _chatDraft = string.Empty;
+
     /// <summary>
-    /// Handles unhandled input — specifically the hotbar action-press path and the fallback
-    /// click-to-move when no UI consumed the click.
+    /// Handles unhandled input — specifically the hotbar action-press path, click-to-move
+    /// fallback, and the chat-input bar (Enter to toggle).
     /// spec: Docs/RE/specs/input_ui.md §3 — UI consumes first; world second.
+    /// spec: Docs/RE/specs/input_ui.md §4 — Enter key → chat input; hotbar 1–9.
     /// </summary>
     public override void _UnhandledInput(global::Godot.InputEvent evt)
     {
@@ -187,10 +193,67 @@ public sealed partial class InputRouter : Node
             return;
         }
 
-        // Hotbar: skill slots 1–6 mapped to input actions "use_skill_1" … "use_skill_6".
-        // These are hotbar-specific direct use-case calls, not dispatched through the bus
-        // (they have no spatial component and should not hit the UI chain).
-        for (uint slot = 0; slot < 6; slot++)
+        // Handle key events for chat and hotbar.
+        if (evt is InputEventKey key && key.Pressed)
+        {
+            // Enter key: toggle chat input bar or send current draft.
+            // spec: Docs/RE/specs/input_ui.md §4 — "Enter toggles chat input".
+            if (key.Keycode == Key.Enter || key.Keycode == Key.KpEnter)
+            {
+                if (_chatActive && !string.IsNullOrWhiteSpace(_chatDraft))
+                {
+                    // Send the current draft on general channel (0).
+                    // spec: IApplicationUseCases.SendChatAsync; Docs/RE/packets/3-21_chat_channel.yaml.
+                    _ = _clientContext.UseCases.SendChatAsync(0u, _chatDraft);
+                    _chatDraft = string.Empty;
+                    _chatActive = false;
+                    GD.Print("[InputRouter] Chat sent.");
+                }
+                else
+                {
+                    _chatActive = !_chatActive;
+                    if (!_chatActive) _chatDraft = string.Empty;
+                    GD.Print($"[InputRouter] Chat input {(_chatActive ? "opened" : "closed")}.");
+                }
+
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+
+            // Escape: close chat without sending.
+            if (_chatActive && key.Keycode == Key.Escape)
+            {
+                _chatActive = false;
+                _chatDraft = string.Empty;
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+
+            // While chat is active: accumulate printable keys into the draft.
+            if (_chatActive)
+            {
+                if (key.Keycode == Key.Backspace && _chatDraft.Length > 0)
+                {
+                    _chatDraft = _chatDraft[..^1];
+                }
+                else if (key.Unicode > 0 && key.Unicode < 128)
+                {
+                    _chatDraft += (char)key.Unicode;
+                }
+
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+        }
+
+        // Hotbar: skill slots 1–9 mapped to input actions "use_skill_1" … "use_skill_9".
+        // Direct use-case calls — not dispatched through the InputBus (no spatial component).
+        // spec: Docs/RE/specs/input_ui.md §4 — "hotbar 1–9 bind to CastSkillAsync".
+        // We use UseSkillAsync (the lightweight path without the full gate chain) because
+        // the full CastSkillAsync requires a SkillDefinition, caster state, and targeting query
+        // that are not available here in the presentation layer (those are Application/Domain concerns).
+        // TODO: if the gate chain is exposed via a simpler facade, replace UseSkillAsync.
+        for (uint slot = 0; slot < 9; slot++)
         {
             string actionName = $"use_skill_{slot + 1}";
             if (GodotInputMap.HasAction(actionName) && GodotInput.IsActionJustPressed(actionName))

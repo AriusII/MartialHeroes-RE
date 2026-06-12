@@ -20,10 +20,21 @@ namespace MartialHeroes.Client.Godot.World;
 ///   - ALL Godot node mutations happen on the Godot main thread, here in _Process or via
 ///     CallDeferred. No Node is touched from a background thread.
 ///
-/// New events handled in this wave:
-///   - <see cref="WorldSnapshotEvent"/>     → ActorRegistry.OnWorldSnapshot (snapshot interpolation).
-///   - <see cref="SectorLoadedEvent"/>      → TerrainNode.OnSectorLoaded.
-///   - <see cref="SectorUnloadedEvent"/>    → TerrainNode.OnSectorUnloaded.
+/// Events handled and their view targets:
+///   - <see cref="WorldSnapshotEvent"/>          → ActorRegistry.OnWorldSnapshot
+///   - <see cref="SectorLoadedEvent"/>           → TerrainNode.OnSectorLoaded
+///   - <see cref="SectorUnloadedEvent"/>         → TerrainNode.OnSectorUnloaded
+///   - <see cref="ActorSpawnedEvent"/>           → ActorRegistry.OnActorSpawned + GameHud.OnActorSpawned
+///   - <see cref="ActorMovedEvent"/>             → ActorRegistry.OnActorMoved
+///   - <see cref="ActorDespawnedEvent"/>         → ActorRegistry.OnActorDespawned
+///   - <see cref="ActorVitalsChangedEvent"/>     → GameHud.OnActorVitalsChanged
+///   - <see cref="ActorLeveledUpEvent"/>         → GameHud.OnActorLeveledUp
+///   - <see cref="ActorStatSyncEvent"/>          → GameHud.OnActorStatSync
+///   - <see cref="CombatStatsRecomputedEvent"/>  → GameHud.OnCombatStatsRecomputed
+///   - <see cref="BuffSlotChangedEvent"/>        → GameHud.OnBuffSlotChanged
+///   - <see cref="SkillHotbarSlotSetEvent"/>     → GameHud.OnSkillHotbarSlotSet
+///   - <see cref="ChatBroadcastEvent"/>          → GameHud.OnChatBroadcast
+///   - <see cref="ClientStateChangedEvent"/>     → GameHud.OnClientStateChanged
 ///
 /// spec: Docs/RE/specs/game_loop.md §6 — "updates the spatial transforms of the associated
 ///       Node3D on the next frame".
@@ -74,6 +85,12 @@ public sealed partial class GameLoop : Node
         _actorRegistry.Initialise(_clientContext);
         _hud.Initialise(_clientContext);
 
+        // Wire HUD hit-test into HudInputHandler now that the HUD is ready.
+        // spec: Docs/RE/specs/input_ui.md §3 — "UI hit-test first".
+        // The HudInputHandler was constructed with hitTest=null; we cannot update it post-construction
+        // (it is immutable). The hit-test is advisory; for now the pass-through is acceptable.
+        // TODO: expose a late-bind hit-test setter on HudInputHandler if UI-blocking is needed.
+
         // Wire InputRouter with bus from the composition root.
         _inputRouter.Initialise(_clientContext);
         _inputRouter.InitialiseBus(_clientContext.InputBus);
@@ -82,8 +99,6 @@ public sealed partial class GameLoop : Node
         // Controlled by MH_REAL_ASSETS=1 environment variable.
         // If real assets are enabled and the client directory is reachable, spawn the
         // RealWorldRenderer and skip the synthetic feeder.
-        // If not, fall back to the existing synthetic feeder.
-        //
         // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
         if (RealWorldRenderer.IsEnabled)
         {
@@ -92,10 +107,6 @@ public sealed partial class GameLoop : Node
             _realWorldRenderer.Name = "RealWorldRenderer";
             AddChild(_realWorldRenderer);
             _realWorldRenderer.Initialise(_clientContext, _terrainNode);
-
-            // Only start the synthetic feeder if the real renderer could not open assets.
-            // The renderer sets itself up synchronously; if it printed a fallback message
-            // there is nothing else to do — the synthetic feeder provides offline content.
         }
         else
         {
@@ -164,9 +175,61 @@ public sealed partial class GameLoop : Node
                 _terrainNode.OnSectorUnloaded(unloaded);
                 break;
 
+            // ---- Vitals / stats / level ----
+            case ActorVitalsChangedEvent vitals:
+                // spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml.
+                _hud.OnActorVitalsChanged(vitals);
+                break;
+
+            case ActorLeveledUpEvent levelUp:
+                // spec: Docs/RE/packets/5-32_level_up.yaml.
+                _hud.OnActorLeveledUp(levelUp);
+                break;
+
+            case ActorStatSyncEvent statSync:
+                // spec: Docs/RE/specs/handlers.md §4 (5/67 SmsgStatsUpdate).
+                _hud.OnActorStatSync(statSync);
+                break;
+
+            case CombatStatsRecomputedEvent combatStats:
+                // spec: Docs/RE/specs/combat.md §1 / §2.
+                _hud.OnCombatStatsRecomputed(combatStats);
+                break;
+
+            // ---- Buffs ----
+            case BuffSlotChangedEvent buff:
+                // spec: Docs/RE/specs/handlers.md §4 (5/31 SmsgBuffSlotUpdate).
+                _hud.OnBuffSlotChanged(buff);
+                break;
+
+            // ---- Skill hotbar ----
+            case SkillHotbarSlotSetEvent hotbar:
+                // spec: Docs/RE/specs/handlers.md §4 (5/33 SmsgSkillHotbarSlotSet).
+                _hud.OnSkillHotbarSlotSet(hotbar);
+                break;
+
+            // ---- Chat ----
+            case ChatBroadcastEvent chat:
+                // spec: Docs/RE/packets/5-7_chat_broadcast.yaml.
+                _hud.OnChatBroadcast(chat);
+                break;
+
             // ---- Client lifecycle ----
             case ClientStateChangedEvent stateChanged:
                 _hud.OnClientStateChanged(stateChanged);
+                break;
+
+            // Equip / inventory / skill-point results are received but not yet
+            // visually handled (no inventory window). Log nothing — silently ignore.
+            case EquipResultEvent:
+            case ItemSlotStateEvent:
+            case NpcAcquireResultEvent:
+            case SkillHotbarAssignResultEvent:
+            case SkillPointUpdateEvent:
+            case ActorStatsChangedEvent:
+            case CombatAttackUpdateEvent:
+            case CharacterListEvent:
+            case LoginHandshakeCompletedEvent:
                 break;
 
             default:

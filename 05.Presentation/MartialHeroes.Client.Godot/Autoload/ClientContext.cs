@@ -13,6 +13,7 @@ using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Simulation;
 using MartialHeroes.Client.Godot.Adapters;
 using MartialHeroes.Client.Godot.Input;
+using MartialHeroes.Client.Infrastructure.Catalog;
 using MartialHeroes.Network.Abstractions.Protocol;
 using MartialHeroes.Network.Abstractions.Session;
 
@@ -27,16 +28,18 @@ namespace MartialHeroes.Client.Godot.Autoload;
 ///   - <see cref="Dispatcher"/>: the inbound frame dispatcher (allows synthetic test frames).
 ///   - <see cref="InputBus"/>: the input chain-of-responsibility bus (UI first, world second).
 ///   - <see cref="EngineLoop"/>: the fixed-tick 30 Hz simulation loop.
+///   - <see cref="ItemCatalogue"/>: item definitions from items.csv (CP949 names).
+///   - <see cref="SkillCatalogue"/>: skill definitions from skills.scr.
+///   - <see cref="MobCatalogue"/>: mob definitions from mobs.scr.
 ///
 /// Threading contract: this node is created once on the Godot main thread. The constructed
 /// services are thread-safe (channel-based); Godot node mutation must still happen on the
 /// main thread (enforced in GameLoop via CallDeferred).
 ///
 /// VFS / assets:
-///   The composition root tries to open the VFS archive from the standard LegacyClient path.
-///   On failure (no LegacyClient directory, missing archive files) it silently falls back to
-///   offline mode: <see cref="VfsTerrainSectorSource"/> returns empty, <see cref="ScrStatCatalogueSource"/>
-///   returns empty curves, and the run continues with synthetic data only.
+///   The composition root resolves the VFS archive path from MH_CLIENT_DIR environment variable,
+///   falling back to LegacyClient/ relative path, then to empty-catalogue offline mode.
+///   On failure, all catalogues are empty and the run continues with synthetic data only.
 ///
 /// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — composition root.
 /// spec: Docs/RE/specs/game_loop.md §6 — fixed-tick GameEngineLoop wired here.
@@ -76,9 +79,45 @@ public sealed partial class ClientContext : Node
     /// </summary>
     public GameEngineLoop EngineLoop { get; private set; } = null!;
 
+    // -------------------------------------------------------------------------
+    // Catalogue surface (read-only; UI nodes call these for display names)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Item catalogue parsed from data/script/items.csv. Provides CP949-decoded item names
+    /// and stats via <see cref="ItemCatalogue.TryGet"/>. Empty when VFS is unavailable.
+    /// spec: Docs/RE/formats/config_tables.md §4 items.csv.
+    /// </summary>
+    public ItemCatalogue ItemCatalogue { get; private set; } = null!;
+
+    /// <summary>
+    /// Skill catalogue parsed from data/script/skills.scr. Provides skill definitions
+    /// via <see cref="SkillCatalogue.TryGet"/>. Empty when VFS is unavailable.
+    /// spec: Docs/RE/formats/config_tables.md §2.8 skills.scr.
+    /// </summary>
+    public SkillCatalogue SkillCatalogue { get; private set; } = null!;
+
+    /// <summary>
+    /// Mob catalogue parsed from data/script/mobs.scr. Provides mob records
+    /// via <see cref="MobCatalogue.TryGet"/>. Empty when VFS is unavailable.
+    /// spec: Docs/RE/formats/config_tables.md §2.9 mobs.scr.
+    /// </summary>
+    public MobCatalogue MobCatalogue { get; private set; } = null!;
+
+    /// <summary>
+    /// The terrain streaming service. Call <see cref="SectorStreamingService.UpdateCenterAsync"/>
+    /// whenever the local player's sector changes to stream the 3×3 ring of sectors.
+    /// spec: Docs/RE/formats/terrain.md §9.2 (3×3 ring at StreamQuality.Medium).
+    /// </summary>
+    public SectorStreamingService StreamingService { get; private set; } = null!;
+
     // Cancellation source for the engine loop Task.
     private CancellationTokenSource? _loopCts;
     private Task? _loopTask;
+
+    // VfsCatalogueLoader owns the VFS archive lifecycle for catalogue loading.
+    // It is disposed in _ExitTree alongside the loop cancellation.
+    private VfsCatalogueLoader? _catalogueLoader;
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -118,62 +157,64 @@ public sealed partial class ClientContext : Node
         var hudHandler = new HudInputHandler(hitTest: null); // HUD hit-test: TODO real bridge.
 
         // The world handler is created by InputRouter, so we build InputBus with only the
-        // HUD handler for now; the world handler is appended in StartEngineLoop after
-        // InputRouter is ready. For this wave, InputBus is built with both placeholder handlers.
-        // Since we cannot reach InputRouter here (it is a scene-tree node, not available yet),
-        // we build a WorldPassThroughHandler that always returns false (world input comes through
-        // the direct use-case call path in InputRouter._UnhandledInput for hotbar, and via
-        // InputBus.Enqueue + this handler for movement). We use a deferred update pattern:
-        // InputRouter.CreateWorldInputHandler() sets the real handler; the bus is rebuilt.
-        // Simpler: build the bus with only the HUD handler. After _Ready, InputRouter
-        // calls InitialiseBus to register the bus; the world handler is appended via
-        // a factory on InputBus (InputBus handler list is fixed at construction, so we use
-        // a two-stage construction: first pass the HUD handler, then add world handler via
-        // an extended InputBus wrapper).
-        //
-        // For this wave: the InputBus is constructed with TWO handlers. The world handler
-        // is a late-binding relay that InputRouter sets after construction.
-        //   spec: Docs/RE/specs/input_ui.md §3 — UI before world.
+        // HUD handler for now; the world handler is appended via a late-binding relay.
+        // spec: Docs/RE/specs/input_ui.md §3 — UI before world.
         var worldRelay = new RelayInputHandler(); // placeholder; InputRouter sets the target.
         var inputBus = new InputBus(hudHandler, worldRelay);
 
-        // 10. VFS — try to open; fall back gracefully if unavailable.
-        MappedVfsArchive? vfs = TryOpenVfs();
+        // 10. VFS catalogue loader — resolves MH_CLIENT_DIR env-var, falls back gracefully.
+        //     Used for item/skill/mob/stat catalogues (displayed by HUD).
+        //     spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules (never hardcode path).
+        _catalogueLoader = TryBuildCatalogueLoader();
 
-        // 11. Terrain sector source — backed by VFS (or empty if offline).
+        // 11. Real stat catalogue — from userlevel.scr via VfsCatalogueLoader.
+        //     Replaces the former ScrStatCatalogueSource stub with the real Implementation.
+        //     spec: Docs/RE/formats/config_tables.md §2.4 userlevel.scr.
+        ScrStatCatalogue scrStatCatalogue = ScrStatCatalogue.FromLoader(_catalogueLoader);
+        GD.Print($"[ClientContext] ScrStatCatalogue loaded (HP curve entries={scrStatCatalogue.GetHpBaseCurve().Count}, " +
+                 $"MP curve entries={scrStatCatalogue.GetMpBaseCurve().Count}).");
+
+        // 12. Catalogue items / skills / mobs for UI display names (CP949).
+        //     spec: Docs/RE/formats/config_tables.md §4 items.csv / §2.8 skills.scr / §2.9 mobs.scr.
+        ItemCatalogue = ItemCatalogue.FromLoader(_catalogueLoader);
+        SkillCatalogue = SkillCatalogue.FromLoader(_catalogueLoader);
+        MobCatalogue = MobCatalogue.FromLoader(_catalogueLoader);
+        GD.Print($"[ClientContext] Catalogues loaded: {ItemCatalogue.Count} items, " +
+                 $"{SkillCatalogue.Count} skills, {MobCatalogue.Count} mobs.");
+
+        // 13. VFS archive for terrain (separate from catalogue loader — same paths).
         //     spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
-        //     Area 0 is the default starting area. Real wiring: the active area id comes from the
-        //     server (enter-game ack); for offline testing, area 0 is used. TODO: update on enter-game.
+        MappedVfsArchive? vfs = TryOpenVfsForTerrain();
+
+        // 14. Terrain sector source — backed by VFS (or empty if offline).
+        //     spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
+        //     Area 0 is the default starting area. TODO: update on enter-game.
         var terrainSource = new VfsTerrainSectorSource(vfs, areaId: 0);
 
-        // 12. Terrain streaming service — medium quality (3×3 ring).
+        // 15. Terrain streaming service — medium quality (3×3 ring).
         //     spec: Docs/RE/formats/terrain.md §9.2.
         var streamingService = new SectorStreamingService(terrainSource, bus, StreamQuality.Medium);
 
-        // 13. Stat catalogue source — backed by VFS userlevel.scr.
-        //     spec: Docs/RE/formats/config_tables.md §2.4.
-        var statCatalogue = new ScrStatCatalogueSource(vfs);
-
-        // 14. Packet handler — orchestrates Domain mutation and event publishing.
-        //     Wire the catalogue vitals resolver at construction via the init-only property.
+        // 16. Packet handler — orchestrates Domain mutation and event publishing.
+        //     Wire the catalogue vitals resolver (real stat curves) at construction.
         //     spec: CatalogueVitalsResolver.Create — builds the seam from the catalogue.
         //     spec: Docs/RE/formats/config_tables.md §2.4.
         var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, loginDriver)
         {
-            VitalsResolver = CatalogueVitalsResolver.Create(statCatalogue)
+            VitalsResolver = CatalogueVitalsResolver.Create(scrStatCatalogue)
         };
 
-        // 15. Inbound frame dispatcher — channel-backed; synthetic feeder uses this.
+        // 17. Inbound frame dispatcher — channel-backed; synthetic feeder uses this.
         var dispatcher = new InboundFrameDispatcher(handler);
 
-        // 16. Version token — 33 bytes, zero-filled (PROVISIONAL).
+        // 18. Version token — 33 bytes, zero-filled (PROVISIONAL).
         //     spec: Docs/RE/packets/1-9_enter_game_request.yaml (VersionToken 0x01, 33 bytes, UNKNOWN).
         ReadOnlySpan<byte> versionToken = stackalloc byte[ApplicationUseCases.VersionTokenLength];
 
-        // 17. Use-case facade — presentation calls these for input intents.
+        // 19. Use-case facade — presentation calls these for input intents.
         var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId, versionToken);
 
-        // 18. Fixed-tick GameEngineLoop — 30 Hz.
+        // 20. Fixed-tick GameEngineLoop — 30 Hz.
         //     spec: Docs/RE/specs/game_loop.md §6 ("e.g. 30 Hz via a PeriodicTimer"). CONFIRMED.
         var engineLoop = new GameEngineLoop(world, bus, inputBus, GameEngineLoop.DefaultTickRateHz);
 
@@ -184,6 +225,7 @@ public sealed partial class ClientContext : Node
         StateMachine = fsm;
         InputBus = inputBus;
         EngineLoop = engineLoop;
+        StreamingService = streamingService;
 
         // Store the relay setter so InputRouter can set the real handler later.
         _setWorldHandler = worldRelay.SetTarget;
@@ -220,44 +262,112 @@ public sealed partial class ClientContext : Node
         _loopCts?.Dispose();
         _loopCts = null;
 
-        GD.Print("[ClientContext] EventBus completed. EngineLoop stopped.");
+        // Dispose the catalogue loader (releases the VFS memory-mapped archive).
+        _catalogueLoader?.Dispose();
+        _catalogueLoader = null;
+
+        GD.Print("[ClientContext] EventBus completed. EngineLoop stopped. CatalogueLoader disposed.");
     }
 
     // -------------------------------------------------------------------------
-    // VFS helpers
+    // VFS / catalogue helpers
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Attempts to open the VFS archive from the standard LegacyClient paths. Returns null
-    /// when the archive is absent or cannot be opened (offline mode).
+    /// Builds a <see cref="VfsCatalogueLoader"/> from the MH_CLIENT_DIR environment variable,
+    /// falling back to the LegacyClient/ relative path. Returns an empty-catalogue loader when
+    /// neither path resolves.
     ///
-    /// LegacyClient is gitignored and user-supplied. We do not fail the run if it is absent.
-    /// spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules.
+    /// Path resolution order (never hard-coded):
+    ///   1. MH_CLIENT_DIR env-var + /data.inf and /data/data.vfs
+    ///   2. LegacyClient/ relative path (gitignored user-supplied directory)
+    ///   3. Empty loader (offline mode)
+    ///
+    /// spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules (user supplies originals).
+    /// spec: Docs/RE/formats/pak.md §Two-file scheme.
     /// </summary>
-    private static MappedVfsArchive? TryOpenVfs()
+    private static VfsCatalogueLoader TryBuildCatalogueLoader()
     {
-        // Standard paths relative to the working directory (where the game executable runs from).
-        // Users place their original client files in /LegacyClient/.
-        const string infPath = "LegacyClient/data.inf";
-        const string vfsPath = "LegacyClient/data/data.vfs";
-
-        try
+        // Check MH_CLIENT_DIR first (explicit dev override).
+        // Use System.Environment explicitly to avoid ambiguity with Godot.Environment.
+        string? clientDir = System.Environment.GetEnvironmentVariable("MH_CLIENT_DIR");
+        if (!string.IsNullOrWhiteSpace(clientDir))
         {
-            if (!File.Exists(infPath) || !File.Exists(vfsPath))
+            string infPath = Path.Combine(clientDir, "data.inf");
+            string vfsPath = Path.Combine(clientDir, "data", "data.vfs");
+            if (File.Exists(infPath) && File.Exists(vfsPath))
             {
-                GD.Print("[ClientContext] VFS archive not found — running offline (no .pak assets).");
-                return null;
+                GD.Print($"[ClientContext] CatalogueLoader: using MH_CLIENT_DIR='{clientDir}'.");
+                return new VfsCatalogueLoader(infPath, vfsPath);
             }
 
-            MappedVfsArchive archive = MappedVfsArchive.Open(infPath, vfsPath);
-            GD.Print($"[ClientContext] VFS archive opened ({archive.EntryCount} entries).");
-            return archive;
+            GD.PrintErr($"[ClientContext] MH_CLIENT_DIR='{clientDir}' set but archive missing — trying LegacyClient/.");
         }
-        catch (Exception ex)
+
+        // Fallback: LegacyClient/ relative path.
+        const string relInf = "LegacyClient/data.inf";
+        const string relVfs = "LegacyClient/data/data.vfs";
+        if (File.Exists(relInf) && File.Exists(relVfs))
         {
-            GD.PrintErr($"[ClientContext] VFS open failed: {ex.Message}. Running offline.");
-            return null;
+            GD.Print("[ClientContext] CatalogueLoader: using LegacyClient/ relative path.");
+            return new VfsCatalogueLoader(relInf, relVfs);
         }
+
+        // Offline / no VFS available — loader returns empty arrays for all catalogues.
+        GD.Print("[ClientContext] CatalogueLoader: no VFS found — all catalogues empty (offline mode).");
+        return new VfsCatalogueLoader(); // empty constructor → no archive
+    }
+
+    /// <summary>
+    /// Opens the VFS archive for terrain sector streaming. Same path-resolution logic as the
+    /// catalogue loader but returns a raw <see cref="MappedVfsArchive"/> for the terrain source.
+    /// Returns null gracefully when the archive is absent (offline mode).
+    ///
+    /// spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
+    /// spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules.
+    /// </summary>
+    private static MappedVfsArchive? TryOpenVfsForTerrain()
+    {
+        string? clientDir = System.Environment.GetEnvironmentVariable("MH_CLIENT_DIR");
+        if (!string.IsNullOrWhiteSpace(clientDir))
+        {
+            string infPath = Path.Combine(clientDir, "data.inf");
+            string vfsPath = Path.Combine(clientDir, "data", "data.vfs");
+            if (File.Exists(infPath) && File.Exists(vfsPath))
+            {
+                try
+                {
+                    MappedVfsArchive archive = MappedVfsArchive.Open(infPath, vfsPath);
+                    GD.Print($"[ClientContext] Terrain VFS opened from MH_CLIENT_DIR ({archive.EntryCount} entries).");
+                    return archive;
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[ClientContext] Terrain VFS open failed: {ex.Message}");
+                    return null;
+                }
+            }
+        }
+
+        const string relInf = "LegacyClient/data.inf";
+        const string relVfs = "LegacyClient/data/data.vfs";
+        if (File.Exists(relInf) && File.Exists(relVfs))
+        {
+            try
+            {
+                MappedVfsArchive archive = MappedVfsArchive.Open(relInf, relVfs);
+                GD.Print($"[ClientContext] Terrain VFS opened from LegacyClient/ ({archive.EntryCount} entries).");
+                return archive;
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[ClientContext] Terrain VFS (LegacyClient/) open failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        GD.Print("[ClientContext] Terrain VFS not found — running offline (no terrain assets).");
+        return null;
     }
 }
 
