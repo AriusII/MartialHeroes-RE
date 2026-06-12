@@ -230,7 +230,8 @@ public static class CharacterTextureResolver
         const string primaryCandidate = "data/char/skin/g202110001.skn";
         if (assets.Contains(primaryCandidate))
         {
-            GD.Print($"[CharacterTextureResolver] PickHumanoidPlayerSkin: using confirmed candidate '{primaryCandidate}'.");
+            GD.Print(
+                $"[CharacterTextureResolver] PickHumanoidPlayerSkin: using confirmed candidate '{primaryCandidate}'.");
             return primaryCandidate;
         }
 
@@ -328,7 +329,11 @@ public static class CharacterTextureResolver
                 if (line.Length == 0) continue;
 
                 // Skip the first non-empty line (the entry-count header).
-                if (firstLine) { firstLine = false; continue; }
+                if (firstLine)
+                {
+                    firstLine = false;
+                    continue;
+                }
 
                 // All data rows are TAB-separated with exactly 6 columns.
                 // spec: Probed real VFS — 1351 6-column rows, zero rows with other column counts.
@@ -375,5 +380,4 @@ public static class CharacterTextureResolver
         if (str.Length == 0 || str[0] != '2') return 0;
         return uint.TryParse("4" + str[1..], out uint result) ? result : 0u;
     }
-
 }

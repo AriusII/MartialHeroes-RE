@@ -73,6 +73,18 @@ public sealed partial class TerrainNode : Node3D
     private readonly Dictionary<(int MapX, int MapZ), MeshInstance3D> _meshNodes = new();
 
     // -------------------------------------------------------------------------
+    // Height-lookup cache: (mapX, mapZ) → resident TerrainCell
+    //
+    // Populated in OnSectorLoadedInternal, cleared in RemoveSectorMesh.
+    // Only the Heights[] array is needed for the ground-height query, but we
+    // cache the full TerrainCell so callers can access other fields if needed.
+    // spec: Docs/RE/formats/terrain.md §5.4 (Block 1 — direct world-space Y values).
+    // spec: Docs/RE/formats/terrain.md §1.4 (per-cell world-space bounds).
+    // -------------------------------------------------------------------------
+
+    private readonly Dictionary<(int MapX, int MapZ), TerrainCell> _cellCache = new();
+
+    // -------------------------------------------------------------------------
     // Event handlers (called from GameLoop._Process, main thread)
     // -------------------------------------------------------------------------
 
@@ -114,6 +126,10 @@ public sealed partial class TerrainNode : Node3D
             return;
         }
 
+        // Cache the cell for ground-height queries before building the mesh.
+        // spec: Docs/RE/formats/terrain.md §5.4 — Heights[] are direct world-space Y values.
+        _cellCache[(evt.MapX, evt.MapZ)] = cell;
+
         // Build the Godot multi-surface ArrayMesh directly from the TerrainCell.
         ArrayMesh? mesh = TryBuildMultiSurfaceMesh(cell, TextureResolver);
         if (mesh is null)
@@ -141,7 +157,8 @@ public sealed partial class TerrainNode : Node3D
         AddChild(meshInst);
         _meshNodes[(evt.MapX, evt.MapZ)] = meshInst;
 
-        GD.Print($"[TerrainNode] Sector ({evt.MapX},{evt.MapZ}) loaded at Godot ({godotX:F0}, 0, {godotZ:F0}), {mesh.GetSurfaceCount()} surface(s).");
+        GD.Print(
+            $"[TerrainNode] Sector ({evt.MapX},{evt.MapZ}) loaded at Godot ({godotX:F0}, 0, {godotZ:F0}), {mesh.GetSurfaceCount()} surface(s).");
     }
 
     /// <summary>
@@ -268,6 +285,7 @@ public sealed partial class TerrainNode : Node3D
                         list = new List<(int, int)>();
                         byteToPatches[texByte] = list;
                     }
+
                     list.Add((pr, pc));
                 }
             }
@@ -277,8 +295,8 @@ public sealed partial class TerrainNode : Node3D
             // Malformed cell: fall back to treating the entire cell as one group with byte 0.
             var allPatches = new List<(int, int)>(patchGrid * patchGrid);
             for (int pr = 0; pr < patchGrid; pr++)
-                for (int pc = 0; pc < patchGrid; pc++)
-                    allPatches.Add((pr, pc));
+            for (int pc = 0; pc < patchGrid; pc++)
+                allPatches.Add((pr, pc));
             byteToPatches[0] = allPatches;
         }
 
@@ -370,8 +388,8 @@ public sealed partial class TerrainNode : Node3D
                 {
                     for (int lc = 0; lc < quadsPerPatch; lc++)
                     {
-                        int vi0 = vBase + lr * vertsPerPatch + lc;       // TL
-                        int vi1 = vBase + lr * vertsPerPatch + lc + 1;   // TR
+                        int vi0 = vBase + lr * vertsPerPatch + lc; // TL
+                        int vi1 = vBase + lr * vertsPerPatch + lc + 1; // TR
                         int vi2 = vBase + (lr + 1) * vertsPerPatch + lc; // BL
                         int vi3 = vBase + (lr + 1) * vertsPerPatch + lc + 1; // BR
 
@@ -473,5 +491,135 @@ public sealed partial class TerrainNode : Node3D
         {
             node.QueueFree();
         }
+
+        // Evict the height cache for this cell alongside the mesh node.
+        _cellCache.Remove(key);
+    }
+
+    // -------------------------------------------------------------------------
+    // Ground-height API (bilinear sample of the resident .ted heightmap)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Returns the terrain Y (world-space height) at the given legacy world position
+    /// by bilinear-sampling the resident sector's .ted heightmap.
+    ///
+    /// <para>
+    /// Coordinate convention: <paramref name="worldX"/> and <paramref name="worldZ"/> are
+    /// <b>legacy</b> world coordinates (not Godot Godot-space). The caller passes the
+    /// original (un-negated) legacy Z. The returned Y is a direct world-space value — no
+    /// scale or coordinate flip is applied to it.
+    /// spec: Docs/RE/formats/terrain.md §5.4 — "Values are direct world-space Y coordinates".
+    /// </para>
+    ///
+    /// <para>
+    /// Grid layout: row = Z axis, col = X axis; spacing 16 wu; 65×65 vertices per cell.
+    /// spec: Docs/RE/formats/terrain.md §5.2 — "rows are constant-Z slices": CONFIRMED.
+    /// spec: Docs/RE/formats/terrain.md §5.1 — vertex spacing 16.0 wu: CONFIRMED.
+    /// </para>
+    ///
+    /// <para>
+    /// Cell key formula:
+    ///   cellMapX = floor(worldX / 1024) + 10000
+    ///   cellMapZ = floor(worldZ / 1024) + 10000
+    /// spec: Docs/RE/formats/terrain.md §1.4 — world-space bounds, origin bias 10000: CONFIRMED.
+    /// Note: §2 of terrain.md describes an adjusted-axis correction for negative coordinates.
+    /// We reproduce that here using <see cref="Math.Floor"/> which already implements correct
+    /// floor-division for negatives — no explicit adjustment branch is needed.
+    /// </para>
+    ///
+    /// <para>
+    /// When the queried cell is not resident, returns the <paramref name="fallbackY"/>
+    /// value (default 0f). Callers that want to know whether a cell was actually sampled
+    /// should use <see cref="TryGetGroundHeight"/> instead.
+    /// </para>
+    /// </summary>
+    /// <param name="worldX">Legacy world-space X coordinate (not negated).</param>
+    /// <param name="worldZ">Legacy world-space Z coordinate (not negated).</param>
+    /// <param name="fallbackY">
+    /// Value returned when the cell is not resident. Defaults to 0f.
+    /// Pass the known flat-terrain height (e.g. 26f) for a graceful fallback.
+    /// </param>
+    /// <returns>World-space terrain Y at (worldX, worldZ), or <paramref name="fallbackY"/>.</returns>
+    public float GetGroundHeight(float worldX, float worldZ, float fallbackY = 0f)
+    {
+        TryGetGroundHeight(worldX, worldZ, out float result, fallbackY);
+        return result;
+    }
+
+    /// <summary>
+    /// Attempts to bilinear-sample the terrain height at the given legacy world position.
+    /// Returns <see langword="true"/> when the sector is resident and the sample succeeded;
+    /// <see langword="false"/> when the cell is not loaded (height is set to
+    /// <paramref name="fallbackY"/>).
+    ///
+    /// Bilinear formula over the 65×65 grid (spacing 16 wu):
+    ///   lx = (worldX - (cellMapX - 10000) × 1024) / 16
+    ///   lz = (worldZ - (cellMapZ - 10000) × 1024) / 16
+    ///   c0 = clamp(floor(lx), 0, 63),  fx = lx - c0
+    ///   r0 = clamp(floor(lz), 0, 63),  fz = lz - r0
+    ///   h = lerp(
+    ///         lerp(H[r0,c0],   H[r0,c0+1],   fx),
+    ///         lerp(H[r0+1,c0], H[r0+1,c0+1], fx),
+    ///         fz)
+    ///
+    /// spec: Docs/RE/formats/terrain.md §5.2 — row=Z, col=X: CONFIRMED.
+    /// spec: Docs/RE/formats/terrain.md §5.4 — Heights[] direct world-space Y: CONFIRMED.
+    /// spec: Docs/RE/formats/terrain.md §1.4 — cell size 1024, origin bias 10000: CONFIRMED.
+    ///
+    /// VERIFIED reference: cell (10000, 9990) is flat at ~26 wu; GetGroundHeight(474, -10101)
+    /// falls inside that cell (cellMapZ = floor(-10101/1024)+10000 = 9990) and returns ≈ 25.978.
+    /// </summary>
+    /// <param name="worldX">Legacy world-space X (not negated).</param>
+    /// <param name="worldZ">Legacy world-space Z (not negated).</param>
+    /// <param name="height">Sampled terrain Y on success; <paramref name="fallbackY"/> on miss.</param>
+    /// <param name="fallbackY">Value written to <paramref name="height"/> when cell not resident.</param>
+    /// <returns><see langword="true"/> if the cell was resident and height was sampled.</returns>
+    public bool TryGetGroundHeight(float worldX, float worldZ, out float height, float fallbackY = 0f)
+    {
+        // --- Step 1: map world position to (mapX, mapZ) cell key ---
+        // spec: terrain.md §1.4 — origin bias 10000, cell size 1024 wu: CONFIRMED.
+        // Math.Floor correctly handles negative worldX/worldZ (floor-division semantics).
+        int cellMapX = (int)Math.Floor(worldX / 1024.0) + 10000;
+        int cellMapZ = (int)Math.Floor(worldZ / 1024.0) + 10000;
+
+        if (!_cellCache.TryGetValue((cellMapX, cellMapZ), out TerrainCell? cell))
+        {
+            height = fallbackY;
+            return false;
+        }
+
+        // --- Step 2: compute fractional local coordinates within the cell ---
+        // Local position within cell in grid units (0..64 range for interior points).
+        // spec: terrain.md §5.1 — spacing 16.0 wu: CONFIRMED.
+        // spec: terrain.md §1.4 — worldX_min = (mapX - 10000) × 1024: CONFIRMED.
+        const float spacing = 16.0f; // spec: terrain.md §5.1 — 1024/64 = 16.0. CONFIRMED.
+        float lx = (worldX - (cellMapX - 10000) * 1024.0f) / spacing;
+        float lz = (worldZ - (cellMapZ - 10000) * 1024.0f) / spacing;
+
+        // --- Step 3: find the four corner vertices ---
+        // c0/r0: integer grid column/row of the lower-left quad corner.
+        // Clamp to [0,63] so the +1 neighbour is always valid (max grid index is 64).
+        int c0 = Math.Clamp((int)Math.Floor(lx), 0, TerrainCell.GridSize - 2); // [0, 63]
+        int r0 = Math.Clamp((int)Math.Floor(lz), 0, TerrainCell.GridSize - 2); // [0, 63]
+        float fx = lx - c0; // fractional X [0,1]
+        float fz = lz - r0; // fractional Z [0,1]
+
+        // --- Step 4: bilinear interpolation ---
+        // Grid index: [row * 65 + col].
+        // spec: terrain.md §5.2 — row=Z, col=X, row-major: CONFIRMED.
+        // spec: terrain.md §5.4 — Heights[] direct world-space Y, no scale: CONFIRMED.
+        const int gs = TerrainCell.GridSize; // 65
+        float[] h = cell.Heights;
+        float h00 = h[r0 * gs + c0]; // (r0,   c0)
+        float h01 = h[r0 * gs + c0 + 1]; // (r0,   c0+1)
+        float h10 = h[(r0 + 1) * gs + c0]; // (r0+1, c0)
+        float h11 = h[(r0 + 1) * gs + c0 + 1]; // (r0+1, c0+1)
+
+        // Bilinear: lerp along X for each Z row, then lerp along Z.
+        float topRow = h00 + (h01 - h00) * fx; // lerp at r0
+        float bottomRow = h10 + (h11 - h10) * fx; // lerp at r0+1
+        height = topRow + (bottomRow - topRow) * fz;
+        return true;
     }
 }

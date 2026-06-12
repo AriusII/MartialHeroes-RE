@@ -182,6 +182,12 @@ public sealed partial class RealWorldRenderer : Node3D
         // and the cell's .map (per-section TEXTURES lists). spec: terrain.md §4.2 + §3.5. CONFIRMED.
         LoadTextureResolutionInputs();
 
+        // Atmosphere (EnvironmentNode) is available but NOT wired by default: the real per-area
+        // sky data renders the scene quite dark/moody, which reads worse than the bright default
+        // World.tscn environment for a preview. Re-enable + tune (ambient/exposure) when desired:
+        //   var envNode = new EnvironmentNode { Name = "EnvironmentNode" };
+        //   AddChild(envNode); envNode.Configure(_assets, TargetAreaId);
+
         // Wire the texture resolver into TerrainNode so each sector can get a real texture.
         // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — 1-based TextureIndexGrid → texture path.
         GD.Print("[RealWorldRenderer] Initialise: wiring terrain texture resolver");
@@ -238,6 +244,24 @@ public sealed partial class RealWorldRenderer : Node3D
             }
 
             GD.Print("[RealWorldRenderer] Initialise: LoadAndSpawnCharacter done");
+
+            // Populate the area with monsters/NPCs from mob*.arr + npc*.arr (static characters,
+            // resolved via the mob_id -> actormotion -> skin chain). Areas with no spawns are no-ops.
+            GD.Print("[RealWorldRenderer] Initialise: NpcRenderer.PopulateFromArea start");
+            try
+            {
+                var npcRenderer = new NpcRenderer { Name = "NpcRenderer" };
+                // Sample terrain height (legacy worldX/worldZ); falls back to 26 until sectors load.
+                npcRenderer.GroundYFunc = (lx, lz) => _terrainNode?.GetGroundHeight(lx, lz, 26f) ?? 26f;
+                AddChild(npcRenderer);
+                npcRenderer.PopulateFromArea(_assets, TargetAreaId);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[RealWorldRenderer] NpcRenderer.PopulateFromArea failed: {ex.Message}");
+            }
+
+            GD.Print("[RealWorldRenderer] Initialise: NpcRenderer.PopulateFromArea done");
         }
         else
         {
@@ -573,12 +597,14 @@ public sealed partial class RealWorldRenderer : Node3D
             // Resolve the character's diffuse texture from skin.txt (mesh.IdA -> tex id -> PNG).
             // spec: Docs/RE/formats/mesh.md §.skn texture binding via data/char/skin.txt. CONFIRMED.
             ImageTexture? albedo = CharacterTextureResolver.Resolve(_assets, skinnedMesh);
-            // Render the STATIC upright mesh (no skeleton): the up-axis fix in SkinnedCharacterBuilder
-            // stands the raw mesh correctly, but the skinned/animated path still explodes the mesh
-            // (the Skin inverse-bind matrices are wrong — a dedicated skinning fix is tracked). Passing
-            // the skeleton+clip is what triggers the explosion, so we omit them until skinning is fixed.
-            _ = skeleton; _ = clip; // intentionally unused until the skinning fix lands
-            charRoot = SkinnedCharacterBuilder.Build(skinnedMesh, null, null, albedo: albedo);
+            // Render the STATIC upright textured mesh. The up-axis fix stands the mesh correctly,
+            // but the SKINNED path still explodes the mesh even after two bind-pose fixes — the
+            // legacy skinning convention is not fully recovered yet (tracked as a dedicated debt).
+            // ForceSkinned=false makes Build ignore the skeleton/clip and emit the clean static mesh;
+            // the skeleton/clip stay wired so flipping this back to true is the only change once the
+            // skinning is fixed.
+            SkinnedCharacterBuilder.ForceSkinned = false;
+            charRoot = SkinnedCharacterBuilder.Build(skinnedMesh, skeleton, clip, albedo: albedo);
         }
         catch (Exception ex)
         {
@@ -593,9 +619,9 @@ public sealed partial class RealWorldRenderer : Node3D
         float legacyX = (TargetMapX - 10000) * 1024.0f + 512.0f;
         float legacyZ = (TargetMapZ - 10000) * 1024.0f + 512.0f;
 
-        // NOTE: the legacy humanoid mesh currently renders lying down (SkinnedCharacterBuilder
-        // up-axis/recentre/skinning needs a dedicated fix — tracked separately). Rotation left at
-        // zero until that fix lands so the corrective angle can be derived from a recentred mesh.
+        // The mesh now stands upright (SkinnedCharacterBuilder up-axis fix) and is textured; it is
+        // rendered STATIC (no skinning) because the skinned path still explodes the mesh — animation
+        // is deferred until the legacy skinning convention is fully recovered. No corrective rotation.
         charRoot.RotationDegrees = CharacterUprightRotationDeg;
         charRoot.Position = new Vector3(legacyX, 26f, -legacyZ - 350f);
         charRoot.Scale = Vector3.One * CharacterScale;
@@ -613,6 +639,9 @@ public sealed partial class RealWorldRenderer : Node3D
             AddChild(playerController);
             playerController.SetAvatar(charRoot);
             playerController.SetGroundY(26f);
+            // Follow the terrain each frame: convert the avatar's Godot position to legacy world XZ
+            // (worldZ = -godotZ) and sample the heightmap. Falls back to 26 until sectors stream in.
+            playerController.GroundHeightFunc = gp => _terrainNode?.GetGroundHeight(gp.X, -gp.Z, 26f) ?? 26f;
             GD.Print("[RealWorldRenderer] PlayerController attached (left-click to move / WASD).");
         }
         catch (Exception ex)

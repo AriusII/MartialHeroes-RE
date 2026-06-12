@@ -107,6 +107,7 @@ public sealed partial class SkillWindow : Control
                 MoveToFront();
                 PopulateList();
             }
+
             GetViewport().SetInputAsHandled();
         }
 
@@ -144,7 +145,7 @@ public sealed partial class SkillWindow : Control
         AnchorTop = 0.5f;
         AnchorRight = 0f;
         AnchorBottom = 0.5f;
-        OffsetLeft = 640f;   // right of the inventory window
+        OffsetLeft = 640f; // right of the inventory window
         OffsetTop = -260f;
         OffsetRight = 980f;
         OffsetBottom = 260f;
@@ -240,7 +241,8 @@ public sealed partial class SkillWindow : Control
             shown++;
         }
 
-        _countLabel.Text = $"Showing {shown} of {catalogue.Count} skills (first {shown} found in IDs 1–{IdScanCeiling})";
+        _countLabel.Text =
+            $"Showing {shown} of {catalogue.Count} skills (first {shown} found in IDs 1–{IdScanCeiling})";
         GD.Print($"[SkillWindow] Populated {shown} skill rows from SkillCatalogue (total={catalogue.Count}).");
     }
 

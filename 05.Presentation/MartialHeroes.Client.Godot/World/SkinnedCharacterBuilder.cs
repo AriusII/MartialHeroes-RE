@@ -108,6 +108,29 @@
 // Therefore animation tracks still use the SelfId → GodotIndex lookup map.
 //
 // ============================================================================
+// BIND POSE (INVERSE GLOBAL REST) COMPUTATION
+// ============================================================================
+//
+// GPU skinning requires, per bone:
+//   skinned_pos = sum_i( weight_i * GlobalBonePose_i * InvBindPose_i * vertex_model_pos )
+//
+// where InvBindPose_i = (GlobalRestPose_i)^{-1}.
+//
+// GlobalRestPose_i is accumulated by walking the bone parent chain from root to bone i:
+//   GlobalRestPose[root]     = LocalRest[root]
+//   GlobalRestPose[child]    = GlobalRestPose[parent(child)] * LocalRest[child]
+//
+// This accumulation is done explicitly in BuildBindPoses() to guarantee correctness
+// regardless of scene-tree state.  The Skin resource is then populated with
+//   Skin.AddNamedBind(boneName, InvBindPose_i)
+// in the same order as the Skeleton3D bones.
+//
+// Previous approach (CreateSkinFromRestTransforms) was correct in principle but
+// depended on Godot's internal dirty-flag accumulation which may not flush
+// before scene-tree insertion in all Godot 4.x minor versions, causing the bind
+// poses to be identity (no inverse applied) → vertices fly to extreme positions.
+//
+// ============================================================================
 // RECENTRE
 // ============================================================================
 //
@@ -138,6 +161,20 @@ namespace MartialHeroes.Client.Godot.World;
 /// </summary>
 public static class SkinnedCharacterBuilder
 {
+    // -------------------------------------------------------------------------
+    // Orchestrator fallback flag
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// When <c>false</c>, the skeleton and animation paths are completely bypassed and
+    /// the mesh is rendered as a static (unskinned) surface in its rest geometry.
+    /// The orchestrator can flip this to <c>false</c> to isolate skinning problems:
+    /// the static geometry will still stand upright if the axis conversion is correct.
+    ///
+    /// Default: <c>true</c> (attempt full skinned + animated path).
+    /// </summary>
+    public static bool ForceSkinned = true;
+
     // -------------------------------------------------------------------------
     // Constants
     // -------------------------------------------------------------------------
@@ -261,13 +298,17 @@ public static class SkinnedCharacterBuilder
     {
         var root = new Node3D { Name = $"SkinnedChar_{mesh.Name}" };
 
-        // Step 1 — build Skeleton3D.
+        // When ForceSkinned==false: bypass skeleton entirely and render static geometry.
+        // The orchestrator flips this to false to isolate skinning from geometry issues.
+        bool useSkinning = ForceSkinned && (skeleton is not null);
+
+        // Step 1 — build Skeleton3D (always created; skinning wiring only if useSkinning).
         Skeleton3D godotSkeleton;
         int[] boneIdToGodotIndex; // maps Bone.SelfId (low byte) → Godot bone index (for anim tracks)
 
         try
         {
-            (godotSkeleton, boneIdToGodotIndex) = BuildSkeleton(skeleton);
+            (godotSkeleton, boneIdToGodotIndex) = BuildSkeleton(useSkinning ? skeleton : null);
             godotSkeleton.Name = SkeletonNodeName;
             root.AddChild(godotSkeleton);
         }
@@ -281,6 +322,7 @@ public static class SkinnedCharacterBuilder
             boneIdToGodotIndex = new int[256];
             // All bone IDs map to bone 0.
             root.AddChild(godotSkeleton);
+            useSkinning = false; // skeleton broken; fall back to static
         }
 
         // Step 2 — build skinned ArrayMesh and MeshInstance3D.
@@ -288,7 +330,7 @@ public static class SkinnedCharacterBuilder
         try
         {
             MeshInstance3D? meshInst = BuildSkinnedMesh(
-                mesh, godotSkeleton, boneIdToGodotIndex, albedo, out builtArrayMesh);
+                mesh, godotSkeleton, boneIdToGodotIndex, albedo, useSkinning, out builtArrayMesh);
             if (meshInst is not null)
             {
                 // The MeshInstance3D must be a CHILD of the Skeleton3D so that Godot applies
@@ -302,8 +344,8 @@ public static class SkinnedCharacterBuilder
             // Degraded: character is invisible but the node tree is valid.
         }
 
-        // Step 3 — build AnimationPlayer (optional).
-        if (clip is not null)
+        // Step 3 — build AnimationPlayer (optional, only when skinning is active).
+        if (clip is not null && useSkinning)
         {
             try
             {
@@ -441,6 +483,79 @@ public static class SkinnedCharacterBuilder
     }
 
     // -------------------------------------------------------------------------
+    // Step 1b — Bind pose (inverse global rest) computation
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Explicitly walks the bone parent chain to compute each bone's global rest transform
+    /// (model-space rest transform), then builds a <see cref="Skin"/> whose per-bone bind
+    /// poses are the inverses of those global rests.
+    ///
+    /// This replaces <c>Skeleton3D.CreateSkinFromRestTransforms()</c> which depends on
+    /// Godot's internal dirty-flag flush.  That flush may not occur when the Skeleton3D has
+    /// not yet been added to the main scene tree, causing every bind pose to be the identity
+    /// transform (no inversion applied) — the classic "vertices fly to extreme positions" bug.
+    ///
+    /// <para>Global rest accumulation (bones must be in parent-before-child order, which is
+    /// guaranteed by the .bnd on-disk format):</para>
+    /// <code>
+    ///   globalRest[root]  = localRest[root]                             (parent == -1)
+    ///   globalRest[child] = globalRest[parent(child)] × localRest[child]
+    /// </code>
+    ///
+    /// <para>Bind pose stored in the Skin = globalRest[i].AffineInverse().</para>
+    ///
+    /// spec: Docs/RE/formats/mesh.md §Bone array — bones stored root-first, parents before children.
+    /// spec: GPU skinning contract — skinned_pos = Σ weight_i · GlobalBonePose_i · InvBindPose_i · vertex
+    /// </summary>
+    private static Skin BuildBindPoses(Skeleton3D godotSkel)
+    {
+        int boneCount = godotSkel.GetBoneCount();
+        var globalRests = new Transform3D[boneCount];
+
+        for (int i = 0; i < boneCount; i++)
+        {
+            Transform3D localRest = godotSkel.GetBoneRest(i);
+            int parentIdx = godotSkel.GetBoneParent(i); // -1 for root bones
+
+            if (parentIdx < 0)
+            {
+                // Root bone: global rest == local rest.
+                globalRests[i] = localRest;
+            }
+            else
+            {
+                // Non-root: accumulate from parent.
+                // Parent index is < i for well-formed skeletons (parent-before-child order).
+                // If parent has not been processed yet (parentIdx >= i), fall back to identity
+                // for that sub-tree — safe degradation, not an explosion.
+                Transform3D parentGlobal = (parentIdx < i)
+                    ? globalRests[parentIdx]
+                    : Transform3D.Identity;
+
+                globalRests[i] = parentGlobal * localRest;
+            }
+        }
+
+        // Build the Skin resource.
+        // Each named bind must correspond to a bone name in the Skeleton3D.
+        // The GPU skinning pipeline resolves each surface-array bone index to the Skin bind
+        // at the same ordinal position — so bind[i] must match Skeleton3D bone[i].
+        var skin = new Skin();
+        for (int i = 0; i < boneCount; i++)
+        {
+            string boneName = godotSkel.GetBoneName(i);
+            // Bind pose = inverse of global rest.
+            // AffineInverse is safe for transforms with rotation + translation only.
+            Transform3D bindPose = globalRests[i].AffineInverse();
+            skin.AddNamedBind(boneName, bindPose);
+        }
+
+        GD.Print($"[SkinnedCharacterBuilder] BuildBindPoses: {boneCount} explicit inverse-global-rest bind poses.");
+        return skin;
+    }
+
+    // -------------------------------------------------------------------------
     // Step 2 — Skinned ArrayMesh + MeshInstance3D
     // -------------------------------------------------------------------------
 
@@ -464,6 +579,7 @@ public static class SkinnedCharacterBuilder
         Skeleton3D godotSkeleton,
         int[] boneIdToGodotIndex,
         ImageTexture? albedo,
+        bool useSkinning,
         out ArrayMesh? outArrayMesh)
     {
         outArrayMesh = null;
@@ -476,10 +592,9 @@ public static class SkinnedCharacterBuilder
         }
 
         int boneCount = godotSkeleton.GetBoneCount();
+        int geoVertCount = skn.Positions.Length;
 
-        // --- Accumulate per-geometry-vertex bone influences ---
-        // Each geometry vertex can have multiple weight records pointing at it.
-        // We take up to MaxInfluences (4) per vertex, then normalise.
+        // --- Accumulate per-geometry-vertex bone influences (only when skinning is active) ---
         //
         // IMPORTANT: bone_index in weight records is a zero-based array index into the
         // .bnd bone array, NOT the SelfId.  Since Godot bones are added in on-disk order,
@@ -487,10 +602,14 @@ public static class SkinnedCharacterBuilder
         //
         // spec: Docs/RE/formats/mesh.md §Weight record — "bone_index: zero-based index into
         //       the associated bind-pose bone array."  CONFIRMED.
-        int geoVertCount = skn.Positions.Length;
-        AccumulateWeights(skn.Weights, geoVertCount, boneCount,
-            out int[] perGeoVtxBones,   // [geoVertCount × MaxInfluences] Godot bone indices
-            out float[] perGeoVtxWts);  // [geoVertCount × MaxInfluences] normalised weights
+        int[]?   perGeoVtxBones = null;
+        float[]? perGeoVtxWts  = null;
+        if (useSkinning)
+        {
+            AccumulateWeights(skn.Weights, geoVertCount, boneCount,
+                out perGeoVtxBones,
+                out perGeoVtxWts);
+        }
 
         // --- Build flat rendered-vertex arrays ---
         int totalVerts = faceCount * 3;
@@ -500,10 +619,10 @@ public static class SkinnedCharacterBuilder
 
         // Godot's Bones array is int[] (4 ints per vertex).
         // Godot's Weights array is float[] (4 floats per vertex).
-        // Both are indexed identically.
+        // Only allocated when skinning is active.
         // spec: Godot 4 ArrayMesh — Bones/Weights arrays must be 4 × vertexCount.
-        var bones   = new int[totalVerts * MaxInfluences];
-        var weights = new float[totalVerts * MaxInfluences];
+        int[]?   bones   = useSkinning ? new int[totalVerts * MaxInfluences]   : null;
+        float[]? weights = useSkinning ? new float[totalVerts * MaxInfluences] : null;
 
         SknCorner[] corners = skn.Corners;
         Vec3[] srcPos = skn.Positions;
@@ -551,12 +670,16 @@ public static class SkinnedCharacterBuilder
                 uvs[vBase + j] = new Vector2(corner.UvU, corner.UvV);
 
                 // Copy bone influences from the per-geometry-vertex accumulator into the flat array.
-                int dstBase = (vBase + j) * MaxInfluences;
-                int srcBase = (int)vi * MaxInfluences;
-                for (int inf = 0; inf < MaxInfluences; inf++)
+                if (useSkinning && bones is not null && weights is not null &&
+                    perGeoVtxBones is not null && perGeoVtxWts is not null)
                 {
-                    bones[dstBase + inf]   = perGeoVtxBones[srcBase + inf];
-                    weights[dstBase + inf] = perGeoVtxWts[srcBase + inf];
+                    int dstBase = (vBase + j) * MaxInfluences;
+                    int srcBase = (int)vi * MaxInfluences;
+                    for (int inf = 0; inf < MaxInfluences; inf++)
+                    {
+                        bones[dstBase + inf]   = perGeoVtxBones[srcBase + inf];
+                        weights[dstBase + inf] = perGeoVtxWts[srcBase + inf];
+                    }
                 }
             }
         }
@@ -564,11 +687,15 @@ public static class SkinnedCharacterBuilder
         // --- Assemble ArrayMesh ---
         var arrays = new global::Godot.Collections.Array();
         arrays.Resize((int)Mesh.ArrayType.Max);
-        arrays[(int)Mesh.ArrayType.Vertex]  = positions;
-        arrays[(int)Mesh.ArrayType.Normal]  = normals;
-        arrays[(int)Mesh.ArrayType.TexUV]   = uvs;
-        arrays[(int)Mesh.ArrayType.Bones]   = bones;
-        arrays[(int)Mesh.ArrayType.Weights] = weights;
+        arrays[(int)Mesh.ArrayType.Vertex] = positions;
+        arrays[(int)Mesh.ArrayType.Normal] = normals;
+        arrays[(int)Mesh.ArrayType.TexUV]  = uvs;
+
+        if (useSkinning && bones is not null && weights is not null)
+        {
+            arrays[(int)Mesh.ArrayType.Bones]   = bones;
+            arrays[(int)Mesh.ArrayType.Weights] = weights;
+        }
         // No index array — flat unindexed layout mirrors SknMeshBuilder.
 
         var arrayMesh = new ArrayMesh();
@@ -598,27 +725,41 @@ public static class SkinnedCharacterBuilder
 
         arrayMesh.SurfaceSetMaterial(0, mat);
 
-        // --- Create Skin from the Skeleton3D rest transforms ---
-        // CreateSkinFromRestTransforms() builds a Skin whose per-bone bind poses are the
-        // inverse model-space rest transforms — exactly what GPU skinning needs.
-        // The Skeleton3D is already added to the root node at this point, and bone rests
-        // have been set, so the model-space accumulation is correct.
-        // spec: Godot 4 Skeleton3D.CreateSkinFromRestTransforms() documentation.
-        Skin skin = godotSkeleton.CreateSkinFromRestTransforms();
-
         // Build the MeshInstance3D.  It will be added as a child of Skeleton3D, so the
         // path from MeshInstance3D to Skeleton3D is "..".
         // spec: Godot 4 MeshInstance3D.Skeleton documentation.
         var meshInst = new MeshInstance3D
         {
-            Name     = $"SkinnedMesh_{skn.Name}",
-            Mesh     = arrayMesh,
-            Skin     = skin,
-            Skeleton = new NodePath(".."),
+            Name = $"SkinnedMesh_{skn.Name}",
+            Mesh = arrayMesh,
         };
 
-        GD.Print($"[SkinnedCharacterBuilder] Skinned ArrayMesh built: '{skn.Name}' " +
-                 $"{faceCount} faces, {geoVertCount} geo-verts, {totalVerts} rendered-verts.");
+        if (useSkinning)
+        {
+            // --- Build Skin with explicit inverse-global-rest bind poses ---
+            //
+            // We walk the bone parent chain explicitly to compute per-bone global rest
+            // transforms, then invert them for the bind pose.  This replaces the earlier
+            // Skeleton3D.CreateSkinFromRestTransforms() call which depends on Godot's
+            // internal dirty-flag flush — a flush that may NOT occur when the Skeleton3D
+            // has not yet been added to the main scene tree.  When the flush is missed,
+            // every bind pose is the identity (AffineInverse of Identity = Identity), so
+            // the GPU skinning formula reduces to:
+            //   vertex_skinned = sum_i( weight_i * GlobalBonePose_i * Identity * vertex )
+            // instead of:
+            //   vertex_skinned = sum_i( weight_i * GlobalBonePose_i * InvRestPose_i * vertex )
+            // Bones at non-zero rest positions then multiply the vertex by a large transform,
+            // launching geometry far from the origin — the classic "explosion" symptom.
+            //
+            // spec: GPU skinning contract — see §BIND POSE section in file header.
+            Skin skin = BuildBindPoses(godotSkeleton);
+            meshInst.Skin     = skin;
+            meshInst.Skeleton = new NodePath("..");
+        }
+
+        GD.Print($"[SkinnedCharacterBuilder] ArrayMesh built: '{skn.Name}' " +
+                 $"{faceCount} faces, {geoVertCount} geo-verts, {totalVerts} rendered-verts, " +
+                 $"skinning={useSkinning}.");
 
         return meshInst;
     }
@@ -634,9 +775,9 @@ public static class SkinnedCharacterBuilder
     /// weight). Weights are normalised so their per-vertex sum equals 1.0. Any vertex with
     /// zero total weight receives full influence on bone 0 (root bone fallback).
     ///
-    /// IMPORTANT: <paramref name="weightRecords"/>'s <c>BoneIndex</c> is a zero-based array index
-    /// into the .bnd bone array — NOT a SelfId.  Since Godot bones are added in on-disk order,
-    /// the Godot bone index equals the .bnd array index directly.
+    /// IMPORTANT: <paramref name="weightRecords"/>'s <c>BoneIndex</c> is a zero-based array
+    /// position in the .bnd bone array — NOT a SelfId.  Since Godot bones are added in on-disk
+    /// order, the Godot bone index equals the .bnd array index directly.
     ///
     /// spec: Docs/RE/formats/mesh.md §Weight / skin table — "post-load invariant: engine
     ///       normalizes weights per vertex so the per-vertex sum equals 1.0."
@@ -653,7 +794,7 @@ public static class SkinnedCharacterBuilder
     {
         // Working storage: each vertex holds up to MaxInfluences (boneIdx, weight) pairs.
         // We use parallel arrays sized [geoVertCount × MaxInfluences].
-        outBones   = new int[geoVertCount * MaxInfluences];
+        outBones = new int[geoVertCount * MaxInfluences];
         outWeights = new float[geoVertCount * MaxInfluences];
 
         // Track how many influences we have so far per vertex (0..MaxInfluences).
@@ -691,7 +832,7 @@ public static class SkinnedCharacterBuilder
             if (current < MaxInfluences)
             {
                 // Slot available — write directly.
-                outBones[baseIdx + current]   = godotBoneIdx;
+                outBones[baseIdx + current] = godotBoneIdx;
                 outWeights[baseIdx + current] = wr.Weight;
                 influenceCounts[vi] = current + 1;
             }
@@ -704,12 +845,16 @@ public static class SkinnedCharacterBuilder
                 for (int s = 1; s < MaxInfluences; s++)
                 {
                     float w = outWeights[baseIdx + s];
-                    if (w < minW) { minW = w; minSlot = s; }
+                    if (w < minW)
+                    {
+                        minW = w;
+                        minSlot = s;
+                    }
                 }
 
                 if (wr.Weight > minW)
                 {
-                    outBones[baseIdx + minSlot]   = godotBoneIdx;
+                    outBones[baseIdx + minSlot] = godotBoneIdx;
                     outWeights[baseIdx + minSlot] = wr.Weight;
                 }
             }
@@ -727,7 +872,7 @@ public static class SkinnedCharacterBuilder
             if (total < WeightSkipThreshold)
             {
                 // No usable influences — bind entirely to bone 0 (root).
-                outBones[baseIdx]   = 0;
+                outBones[baseIdx] = 0;
                 outWeights[baseIdx] = 1f;
                 // Remaining slots are already 0 / 0f from array initialisation.
             }
@@ -783,8 +928,8 @@ public static class SkinnedCharacterBuilder
         double durationSecs = clip.FrameCount * (double)SecondsPerFrame;
 
         var anim = new Animation();
-        anim.Length    = (float)durationSecs;
-        anim.LoopMode  = Animation.LoopModeEnum.Linear;
+        anim.Length = (float)durationSecs;
+        anim.LoopMode = Animation.LoopModeEnum.Linear;
         // spec: Docs/RE/formats/animation.md §Wrap and loop — CycleLayer is "looping; replays
         //       continuously".  Godot Linear loop is the equivalent.
 
@@ -796,7 +941,7 @@ public static class SkinnedCharacterBuilder
         foreach (AnimationTrack track in clip.Tracks)
         {
             // spec: Docs/RE/formats/animation.md §Per-track record — bone_id = low byte of track_descriptor.
-            byte boneId   = track.BoneId;
+            byte boneId = track.BoneId;
             string boneName = boneIdToName.TryGetValue(boneId, out string? n) ? n : $"bone_{boneId}";
 
             if (track.Keyframes.Length == 0)
@@ -891,9 +1036,10 @@ public static class SkinnedCharacterBuilder
 
         root.Position = new Vector3(xShift, yShift, zShift);
 
-        GD.Print($"[SkinnedCharacterBuilder] Recentre: AABB pos=({aabb.Position.X:F3},{aabb.Position.Y:F3},{aabb.Position.Z:F3}) " +
-                 $"size=({aabb.Size.X:F3},{aabb.Size.Y:F3},{aabb.Size.Z:F3}) " +
-                 $"→ root shift=({xShift:F3},{yShift:F3},{zShift:F3}).");
+        GD.Print(
+            $"[SkinnedCharacterBuilder] Recentre: AABB pos=({aabb.Position.X:F3},{aabb.Position.Y:F3},{aabb.Position.Z:F3}) " +
+            $"size=({aabb.Size.X:F3},{aabb.Size.Y:F3},{aabb.Size.Z:F3}) " +
+            $"→ root shift=({xShift:F3},{yShift:F3},{zShift:F3}).");
     }
 
     // -------------------------------------------------------------------------

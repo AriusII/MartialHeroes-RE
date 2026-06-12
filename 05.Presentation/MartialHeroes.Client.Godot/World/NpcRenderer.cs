@@ -1,47 +1,48 @@
 // World/NpcRenderer.cs
 //
-// PASSIVE rendering node that spawns NPC / monster skinned-character nodes from a caller-supplied
-// spawn list.  It has ZERO game-rule authority: it never decides who spawns, it only visualises
-// what it is told to.
+// PASSIVE rendering node that spawns NPC / monster static-pose character nodes for a given area.
+// It has ZERO game-rule authority: it only visualises spawn data it receives.
 //
 // Design:
-//   The orchestrator (RealWorldRenderer or GameLoop) owns the spawn SOURCE.
-//   This node owns only the VISUAL result: a Skeleton3D + skinned mesh + AnimationPlayer per spawn.
+//   The sole public entry point is:
+//     PopulateFromArea(RealClientAssets assets, int areaId)
 //
-//   Two entry points are exposed:
+//   This method:
+//     1. Loads data/map{tag}/mob{tag}.arr  → MobSpawnParser   → monster spawns
+//     2. Loads data/map{tag}/npc{tag}.arr  → NpcSpawnParser   → NPC spawns
+//     3. Resolves each spawn's model via the confirmed mob_id → skin chain:
+//          actormotion.txt: col1=mob_id → col2=skin_class
+//          skinlist.txt + SknParser: scan entries, first whose parsed IdB == skin_class
+//          skeleton path: data/char/bind/g{skin_class}.bnd  (not used for static build)
+//     4. Builds each character STATIC (skeleton=null, clip=null) via SkinnedCharacterBuilder.Build.
+//          The skinned path currently explodes the mesh; static mode is the safe fallback until
+//          the inverse-bind fix lands.  spec: RealWorldRenderer — "_ = skeleton; _ = clip;
+//          intentionally unused until the skinning fix lands."
+//     5. Places at Godot (WorldX, groundY(WorldX,WorldZ), -WorldZ).
+//          Coordinate negation: spec Helpers/WorldCoordinates.cs — ToGodot: "negate Z".
+//          spec: Docs/RE/formats/npc_spawns.md — world_x @4, world_z @8: CONFIRMED.
+//     6. Caps to MaxSpawns (default 40) for performance.
 //
-//   1. Populate(RealClientAssets, IEnumerable<(uint skinId, Vector3 worldPos)>)
-//      The minimal, directly-injectable path.  The orchestrator converts its source
-//      (NpcSpawnArray, items.csv, synthetic data …) into (skinId, worldPos) pairs and passes them.
-//      skinId is the VFS numeric id used to form the path "data/char/skin/g{skinId}.skn".
+// Ground-Y injection:
+//   GroundYFunc is a Func<float,float,float> that receives (worldX, worldZ) and returns the
+//   ground Y in Godot space.  Default implementation returns the flat constant GroundY.
+//   The orchestrator (RealWorldRenderer) may wire the terrain height function later.
 //
-//   2. PopulateFromArea(RealClientAssets, int areaId)
-//      Convenience helper: reads "data/map{tag}/npc{tag}.arr", parses it with NpcSpawnParser,
-//      and calls Populate() treating NpcSpawnRecord.MobId as a direct skin-id hint.
-//      NOTE: MobId → skn-path is NOT a confirmed mapping; this uses MobId as a BEST-EFFORT
-//      skin probe (tries data/char/skin/g{mobId}.skn and silently skips if absent).
-//      spec: Docs/RE/formats/npc_spawns.md §Identification — path pattern "data/map<NNN>/npc<NNN>.arr".
-//      spec: Docs/RE/formats/npc_spawns.md §Record layout — mob_id u16 @ +0: CONFIRMED.
+// skinlist.txt scan:
+//   skinlist.txt is a plain-text list of BARE FILENAMES (one per line, CP949), e.g. "g200002620.skn".
+//   The full VFS path is "data/char/skin/" + filename.
+//   We parse each .skn with SknParser and check whether mesh.IdB == skin_class.  First match wins.
+//   Verified on real VFS: 1269 bare filenames → 349 unique skin_class→sknPath mappings.
+//   spec: MISSION B — "build a Dictionary<int skin_class, string sknPath> ONCE by scanning
+//         data/char/skinlist.txt entries that parse with matching IdB; cache it."
+//   spec: ActormotionEntry — "id_b == SkinClassId for all 5 spot-checked triples: CONFIRMED."
 //
-//   World-to-Godot coordinate conversion:
-//     Godot Z = -world_z (negate Z, same as WorldCoordinates.ToGodot).
-//     spec: Helpers/WorldCoordinates.cs — ToGodot: "negate Z".
-//     spec: Docs/RE/formats/npc_spawns.md — world_x f32 @ +4; world_z f32 @ +8: CONFIRMED.
-//
-//   Character loading mirrors RealWorldRenderer.LoadAndSpawnCharacter:
-//     .skn path:  "data/char/skin/g{skinId}.skn"
-//     .bnd path:  "data/char/bind/g{mesh.IdB}.bnd"
-//     idle .mot:  resolved via actormotion.txt col2==mesh.IdB → col16 id → "data/char/mot/g{id}.mot"
-//     spec: Docs/RE/formats/mesh.md §.skn header — id_b → .bnd actor_id: CONFIRMED.
-//     spec: Docs/RE/formats/mesh.md §actormotion.txt — col2=class, col16=idle: CONFIRMED.
-//
-// Threading: Populate() is synchronous and MUST be called on the Godot main thread.
-//            All AddChild calls happen in Populate() directly.
-//
-// Performance cap: at most MaxSpawns characters are rendered in one call; the caller is expected
-//                  to pass a pre-filtered slice.  Default cap: 30.
+// Threading: PopulateFromArea MUST be called on the Godot main thread.
 //
 // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
+// spec: Docs/RE/formats/npc_spawns.md (NPC .arr format, 28-byte stride).
+// spec: MISSION B (mob .arr format, 20-byte stride).
+// spec: Docs/RE/formats/mesh.md §.skn header — id_b; §actormotion.txt. CONFIRMED.
 
 using Godot;
 using MartialHeroes.Assets.Parsers;
@@ -51,10 +52,10 @@ using MartialHeroes.Client.Godot.Dev;
 namespace MartialHeroes.Client.Godot.World;
 
 /// <summary>
-/// Passive <see cref="Node3D"/> that renders NPC / monster characters as skinned meshes.
+/// Passive <see cref="Node3D"/> that renders NPC / monster characters as static-pose meshes
+/// for a given map area.
 ///
-/// The node owns no spawn logic.  Call <see cref="Populate"/> or
-/// <see cref="PopulateFromArea"/> once from the Godot main thread to materialise the characters.
+/// Call <see cref="PopulateFromArea"/> once from the Godot main thread.
 /// All previously spawned children are removed on each call so the node can be re-populated
 /// when the viewed area changes.
 ///
@@ -67,311 +68,425 @@ public sealed partial class NpcRenderer : Node3D
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Maximum number of NPC/mob characters rendered in one <see cref="Populate"/> call.
+    /// Maximum number of NPC/mob characters rendered in one <see cref="PopulateFromArea"/> call.
     /// Excess entries are silently skipped.
+    /// spec: MISSION B — "Cap to ~40 spawns for perf."
     /// </summary>
-    public int MaxSpawns { get; set; } = 30;
+    public int MaxSpawns { get; set; } = 40;
 
     /// <summary>
     /// Visual scale applied to each spawned character node.
-    /// 5.0 matches RealWorldRenderer.CharacterScale (empirically tuned to legacy unit scale).
+    /// 5.0 matches the player character scale in RealWorldRenderer.
     /// spec: RealWorldRenderer.CharacterScale = 5.0f (visual tuning, no spec source).
     /// </summary>
     public float CharacterScale { get; set; } = 5.0f;
 
     /// <summary>
-    /// Y offset added to the world-ground position of each character node.
-    /// Set to a small positive value so characters sit on top of the terrain surface
-    /// rather than clipping through it.  Default: 26 f (observed terrain surface height in
-    /// the origin cell when flat terrain is rendered).
+    /// Flat ground Y used when <see cref="GroundYFunc"/> is not set.
+    /// Default 26 f — observed terrain surface height for flat terrain at the origin cell.
     /// </summary>
     public float GroundY { get; set; } = 26f;
 
+    /// <summary>
+    /// Optional injectable ground-height function: receives (worldX, worldZ) in legacy
+    /// coordinate space and returns the Godot Y for that position.
+    /// When null, <see cref="GroundY"/> is used as a flat constant.
+    /// spec: MISSION B — "accept an injected groundY function Func&lt;float,float,float&gt;
+    ///       (default flat) so the orchestrator can wire terrain height later."
+    /// </summary>
+    public Func<float, float, float>? GroundYFunc { get; set; }
+
     // -------------------------------------------------------------------------
-    // Primary entry point — injected spawn list
+    // Per-assets skin-class → skn-path lookup cache
+    // -------------------------------------------------------------------------
+
+    // Cached Dictionary<skinClass, sknVfsPath> built once by scanning skinlist.txt.
+    // Invalidated when a different RealClientAssets instance is presented.
+    // spec: MISSION B — "build a Dictionary<int skin_class, string sknPath> ONCE … cache it."
+    private static Dictionary<int, string>? _skinClassToSknPath;
+    private static RealClientAssets? _skinCacheOwner;
+
+    // Cached actormotion lookup: mob_id → ActormotionEntry.
+    // spec: ActormotionParser.ParseAsLookup — O(1) lookup by ActorClassId.
+    private static Dictionary<int, ActormotionEntry>? _actorMotionLookup;
+    private static RealClientAssets? _actorMotionCacheOwner;
+
+    // -------------------------------------------------------------------------
+    // Primary entry point
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Renders each NPC as a skinned character.
-    ///
-    /// <para>
-    /// <paramref name="spawns"/> is a sequence of <c>(skinId, worldPos)</c> where
-    /// <c>skinId</c> is the numeric part of the VFS path <c>data/char/skin/g{skinId}.skn</c>
-    /// and <c>worldPos</c> is already in Godot world-space (i.e. Z has been negated by the
-    /// orchestrator, or pass the raw <c>world_x</c>/<c>world_z</c> and set
-    /// <paramref name="rawLegacyCoords"/> to <see langword="true"/> to let this method negate Z).
-    /// </para>
+    /// Loads both monster (<c>mob{tag}.arr</c>) and NPC (<c>npc{tag}.arr</c>) spawn files
+    /// for the given area, resolves each spawn's model via the confirmed mob_id→skin chain,
+    /// builds static-pose character nodes, and places them in the scene.
     ///
     /// <para>Must be called on the Godot main thread.</para>
+    ///
+    /// spec: Docs/RE/formats/npc_spawns.md §Identification — "data/map{NNN}/npc{NNN}.arr".
+    /// spec: MISSION B — mob{tag}.arr path, 20-byte records, MobId u16 @0, WorldX f32 @4, WorldZ f32 @8.
     /// </summary>
     /// <param name="assets">Open VFS assets handle.</param>
-    /// <param name="spawns">Spawn list.  At most <see cref="MaxSpawns"/> entries are processed.</param>
-    /// <param name="rawLegacyCoords">
-    ///   When <see langword="true"/>, <c>worldPos.Z</c> is treated as legacy world-Z and is
-    ///   negated to produce Godot Z before positioning the node.
-    ///   spec: Helpers/WorldCoordinates.cs — ToGodot: "negate Z". CONFIRMED.
-    ///   Default: <see langword="false"/> (pos already in Godot space).
-    /// </param>
-    public void Populate(
-        RealClientAssets assets,
-        IEnumerable<(uint SkinId, Vector3 WorldPos)> spawns,
-        bool rawLegacyCoords = false)
+    /// <param name="areaId">Area identifier (e.g. 1 for map001). Area 0 yields zero records.</param>
+    public void PopulateFromArea(RealClientAssets assets, int areaId)
     {
         // Remove previously spawned children.
         ClearChildren();
 
-        int spawned = 0;
-        foreach ((uint skinId, Vector3 worldPos) in spawns)
+        if (areaId == 0)
         {
-            if (spawned >= MaxSpawns)
-                break;
-
-            // Convert raw legacy coords if requested.
-            // spec: Helpers/WorldCoordinates.cs — ToGodot: (x,y,z) → (x,y,-z). CONFIRMED.
-            Vector3 godotPos = rawLegacyCoords
-                ? new Vector3(worldPos.X, worldPos.Y, -worldPos.Z)
-                : worldPos;
-
-            // Lift the character to ground level.
-            godotPos.Y = GroundY;
-
-            Node3D? charRoot = TryBuildCharacter(assets, skinId);
-            if (charRoot is null)
-                continue;
-
-            charRoot.Position = godotPos;
-            charRoot.Scale = Vector3.One * CharacterScale;
-            AddChild(charRoot);
-            spawned++;
+            // Area 0 has no spawn data (map000 .arr files are stubs / anomalies).
+            // spec: Docs/RE/formats/npc_spawns.md §Anomaly: map 000 — 16 bytes → 0 records: CONFIRMED.
+            GD.Print("[NpcRenderer] Area 0 — no mob/NPC spawns (expected).");
+            return;
         }
 
-        GD.Print($"[NpcRenderer] Spawned {spawned} NPC/mob characters.");
-    }
-
-    // -------------------------------------------------------------------------
-    // Convenience entry point — load from VFS .arr file for an area
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Convenience method: loads <c>data/map{tag}/npc{tag}.arr</c> for the given area,
-    /// parses it with <see cref="NpcSpawnParser"/>, and delegates to
-    /// <see cref="Populate(RealClientAssets, IEnumerable{ValueTuple{uint, Vector3}}, bool)"/>
-    /// treating <c>NpcSpawnRecord.MobId</c> as a best-effort skin-id probe.
-    ///
-    /// <para>
-    /// CAVEAT: <c>MobId → skn path</c> is NOT a confirmed mapping.
-    /// The method probes <c>data/char/skin/g{MobId}.skn</c> and silently skips if absent.
-    /// Spawns from map 000 are always zero (16-byte anomaly; record_count == 0).
-    /// </para>
-    ///
-    /// spec: Docs/RE/formats/npc_spawns.md §Identification — path "data/map{NNN}/npc{NNN}.arr".
-    /// spec: Docs/RE/formats/npc_spawns.md §Record layout — mob_id u16 @ +0: CONFIRMED.
-    /// spec: Docs/RE/formats/npc_spawns.md §Anomaly: map 000 — 16 bytes → 0 records: CONFIRMED.
-    /// </summary>
-    /// <param name="assets">Open VFS assets handle.</param>
-    /// <param name="areaId">Area identifier (e.g. 1 for map001). Area 0 always yields zero records.</param>
-    public void PopulateFromArea(RealClientAssets assets, int areaId)
-    {
-        // Compute the area tag.
-        // spec: Docs/RE/formats/terrain.md §1.1 — digit decomposition. CONFIRMED.
         string tag = AreaTag(areaId);
-        string arrPath = $"data/map{tag}/npc{tag}.arr";
 
-        if (!assets.Contains(arrPath))
-        {
-            GD.Print($"[NpcRenderer] No .arr file for area {areaId} ({arrPath}) — no NPC spawns.");
-            return;
-        }
+        // Ensure the shared lookup tables are built (lazy, per-assets-instance).
+        EnsureActorMotionLoaded(assets);
+        EnsureSkinClassMapLoaded(assets);
 
-        ReadOnlyMemory<byte> arrData = assets.GetRaw(arrPath);
-        if (arrData.IsEmpty)
-        {
-            GD.Print($"[NpcRenderer] .arr file empty for area {areaId} ({arrPath}).");
-            return;
-        }
+        int spawned = 0;
 
-        NpcSpawnArray spawnArray;
-        try
+        // ── Step 1: Monster spawns (mob{tag}.arr, 20-byte records) ─────────────
+        // spec: MISSION B — "Load mob{tag}.arr (MobSpawnParser)".
+        string mobArrPath = $"data/map{tag}/mob{tag}.arr";
+        if (assets.Contains(mobArrPath))
         {
-            spawnArray = NpcSpawnParser.Parse(arrData);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[NpcRenderer] NpcSpawnParser.Parse failed for '{arrPath}': {ex.Message}");
-            return;
-        }
-
-        GD.Print($"[NpcRenderer] .arr parsed: {spawnArray.Records.Length} records for area {areaId}.");
-
-        // Convert to (skinId, worldPos) pairs.
-        // NOTE: MobId → skin-id is not confirmed.  We probe data/char/skin/g{MobId}.skn.
-        // world_x and world_z are legacy coordinates; pass rawLegacyCoords=true so Populate
-        // negates Z before positioning.
-        // spec: Docs/RE/formats/npc_spawns.md — world_x f32 @ +4; world_z f32 @ +8: CONFIRMED.
-        IEnumerable<(uint, Vector3)> AsSpawns()
-        {
-            foreach (NpcSpawnRecord r in spawnArray.Records)
+            ReadOnlyMemory<byte> mobData = assets.GetRaw(mobArrPath);
+            if (!mobData.IsEmpty)
             {
-                // world_y is absent from .arr; the terrain system would resolve it at runtime.
-                // We pass Y=0 here (GroundY override is applied in Populate).
-                // spec: Docs/RE/formats/npc_spawns.md — "Y (height) is not stored." CONFIRMED.
-                yield return ((uint)r.MobId, new Vector3(r.WorldX, 0f, r.WorldZ));
+                MobSpawnRecord[] mobRecords;
+                try
+                {
+                    mobRecords = MobSpawnParser.Parse(mobData);
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[NpcRenderer] MobSpawnParser.Parse failed for '{mobArrPath}': {ex.Message}");
+                    mobRecords = [];
+                }
+
+                GD.Print($"[NpcRenderer] mob{tag}.arr: {mobRecords.Length} unique records.");
+
+                foreach (MobSpawnRecord rec in mobRecords)
+                {
+                    if (spawned >= MaxSpawns) break;
+
+                    Node3D? node = TryBuildFromMobId(assets, rec.MobId);
+                    if (node is null) continue;
+
+                    // Place at Godot (worldX, groundY, -worldZ).
+                    // spec: Helpers/WorldCoordinates.cs — ToGodot: (x,y,z) → (x,y,-z). CONFIRMED.
+                    // spec: MISSION B — "Place at Godot (WorldX, groundY, -WorldZ)."
+                    float gy = ResolveGroundY(rec.WorldX, rec.WorldZ);
+                    node.Position = new Vector3(rec.WorldX, gy, -rec.WorldZ);
+                    node.Scale = Vector3.One * CharacterScale;
+                    node.Name = $"Mob_{rec.MobId}_{spawned}";
+                    AddChild(node);
+                    spawned++;
+                }
             }
         }
+        else
+        {
+            GD.Print($"[NpcRenderer] No mob{tag}.arr for area {areaId} — skipping monster spawns.");
+        }
 
-        Populate(assets, AsSpawns(), rawLegacyCoords: true);
+        // ── Step 2: NPC spawns (npc{tag}.arr, 28-byte records) ─────────────────
+        // spec: Docs/RE/formats/npc_spawns.md §Identification — path pattern. CONFIRMED.
+        // spec: MISSION B — "Load npc{tag}.arr (NpcSpawnParser)".
+        string npcArrPath = $"data/map{tag}/npc{tag}.arr";
+        if (assets.Contains(npcArrPath))
+        {
+            ReadOnlyMemory<byte> npcData = assets.GetRaw(npcArrPath);
+            if (!npcData.IsEmpty)
+            {
+                NpcSpawnArray npcArray;
+                try
+                {
+                    npcArray = NpcSpawnParser.Parse(npcData);
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[NpcRenderer] NpcSpawnParser.Parse failed for '{npcArrPath}': {ex.Message}");
+                    npcArray = new NpcSpawnArray { Records = [] };
+                }
+
+                GD.Print($"[NpcRenderer] npc{tag}.arr: {npcArray.Records.Length} records.");
+
+                foreach (NpcSpawnRecord rec in npcArray.Records)
+                {
+                    if (spawned >= MaxSpawns) break;
+                    if (rec.MobId == 0) continue;
+
+                    // NPC spawns also go through the actormotion chain first; if that fails we
+                    // fall back to the old best-effort probe (data/char/skin/g{MobId}.skn).
+                    Node3D? node = TryBuildFromMobId(assets, rec.MobId)
+                                   ?? TryBuildDirectSkinProbe(assets, rec.MobId);
+                    if (node is null) continue;
+
+                    // spec: Docs/RE/formats/npc_spawns.md — world_x f32 @4, world_z f32 @8: CONFIRMED.
+                    float gy = ResolveGroundY(rec.WorldX, rec.WorldZ);
+                    node.Position = new Vector3(rec.WorldX, gy, -rec.WorldZ);
+                    node.Scale = Vector3.One * CharacterScale;
+                    node.Name = $"Npc_{rec.MobId}_{spawned}";
+                    AddChild(node);
+                    spawned++;
+                }
+            }
+        }
+        else
+        {
+            GD.Print($"[NpcRenderer] No npc{tag}.arr for area {areaId} — skipping NPC spawns.");
+        }
+
+        GD.Print($"[NpcRenderer] Area {areaId}: {spawned} total NPC/mob characters spawned (cap={MaxSpawns}).");
     }
 
     // -------------------------------------------------------------------------
-    // Character building — mirrors RealWorldRenderer helpers
+    // Model resolution — mob_id → skin chain
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Attempts to build a Godot node for one NPC/mob character from the VFS.
+    /// Resolves a model for the given mob_id via the confirmed chain:
+    ///   actormotion.txt col1==mob_id → col2=skin_class
+    ///   skinlist.txt scan → first .skn whose parsed IdB == skin_class
+    ///   CharacterTextureResolver → albedo texture
+    ///   SkinnedCharacterBuilder.Build (static: skeleton=null, clip=null)
     ///
-    /// Steps:
-    ///   1. Parse <c>data/char/skin/g{skinId}.skn</c> via <see cref="SknParser"/>.
-    ///   2. Load <c>data/char/bind/g{mesh.IdB}.bnd</c> via <see cref="BndParser"/> (optional).
-    ///   3. Load idle .mot via actormotion.txt → <see cref="AnimationParser"/> (optional).
-    ///   4. Build Godot node tree via <see cref="SkinnedCharacterBuilder.Build"/>.
+    /// Returns null when any step fails; never throws.
     ///
-    /// Returns null (and logs) on any failure; never throws.
-    ///
-    /// spec: Docs/RE/formats/mesh.md §.skn header — id_b → .bnd actor_id: CONFIRMED.
-    /// spec: Docs/RE/formats/mesh.md §actormotion.txt — TAB-separated, col2=class, col16=idle: CONFIRMED.
-    /// spec: Docs/RE/formats/animation.md §.mot.
+    /// spec: MISSION B — "Resolve each spawn's model: actormotion.txt row col1==mob_id → col2=skin_class;
+    ///       skeleton=data/char/bind/g{skin_class}.bnd; body .skn = skinlist.txt whose IdB==skin_class."
+    /// spec: ActormotionEntry — ActorClassId=col1, SkinClassId=col2. CONFIRMED.
     /// </summary>
-    private Node3D? TryBuildCharacter(RealClientAssets assets, uint skinId)
+    private Node3D? TryBuildFromMobId(RealClientAssets assets, ushort mobId)
     {
-        string sknPath = $"data/char/skin/g{skinId}.skn";
-
-        if (!assets.Contains(sknPath))
-        {
-            // Expected for MobId-based probes — silent skip.
+        if (_actorMotionLookup is null || _skinClassToSknPath is null)
             return null;
-        }
 
-        SkinnedMesh? mesh = null;
+        // Step 1: actormotion.txt lookup: mob_id → skin_class.
+        // spec: ActormotionParser — col1=actor_class_id, col2=skin_class_id. CONFIRMED.
+        // spec: MISSION B — "actormotion.txt row col1==mob_id gives col2=skin_class."
+        if (!_actorMotionLookup.TryGetValue(mobId, out ActormotionEntry? entry))
+            return null; // mob_id not in actormotion.txt — silently skip
+
+        int skinClass = entry.SkinClassId;
+
+        // Step 2: skinlist.txt scan → .skn path.
+        // spec: MISSION B — "body .skn = the entry in skinlist.txt whose parsed .skn IdB == skin_class."
+        if (!_skinClassToSknPath.TryGetValue(skinClass, out string? sknPath))
+            return null; // no .skn with matching IdB — silently skip
+
+        // Step 3: Parse .skn and build a static-pose node.
+        // spec: MISSION B — "build STATIC (skeleton=null, clip=null) for now."
+        return TryBuildStaticNode(assets, sknPath, $"mob_id={mobId} skin_class={skinClass}");
+    }
+
+    /// <summary>
+    /// Fallback path: probe <c>data/char/skin/g{mobId}.skn</c> directly.
+    /// Used for NPC entries that are not in actormotion.txt.
+    /// Returns null (silent skip) when the probe path does not exist in the VFS.
+    ///
+    /// spec: Old NpcRenderer comment — "MobId → skn path is NOT a confirmed mapping;
+    ///       this uses MobId as a BEST-EFFORT skin probe."
+    /// </summary>
+    private Node3D? TryBuildDirectSkinProbe(RealClientAssets assets, ushort mobId)
+    {
+        string sknPath = $"data/char/skin/g{mobId}.skn";
+        if (!assets.Contains(sknPath))
+            return null;
+        return TryBuildStaticNode(assets, sknPath, $"direct-probe mob_id={mobId}");
+    }
+
+    /// <summary>
+    /// Parses the .skn at <paramref name="sknPath"/>, resolves its albedo texture, and calls
+    /// <see cref="SkinnedCharacterBuilder.Build"/> with skeleton=null and clip=null (static pose).
+    ///
+    /// spec: MISSION B — "pass the resolved albedo texture; build STATIC (skeleton=null, clip=null)."
+    /// spec: SkinnedCharacterBuilder — "skeleton=null → static ArrayMesh (no Skeleton3D child)."
+    /// </summary>
+    private static Node3D? TryBuildStaticNode(RealClientAssets assets, string sknPath, string debugLabel)
+    {
+        SkinnedMesh mesh;
         try
         {
             ReadOnlyMemory<byte> sknData = assets.GetRaw(sknPath);
-            if (sknData.IsEmpty) return null;
+            if (sknData.IsEmpty)
+            {
+                GD.PrintErr($"[NpcRenderer] .skn empty in VFS: {sknPath} ({debugLabel})");
+                return null;
+            }
+
             mesh = SknParser.Parse(sknData);
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[NpcRenderer] SknParser.Parse failed for '{sknPath}': {ex.Message}");
+            GD.PrintErr($"[NpcRenderer] SknParser.Parse failed '{sknPath}' ({debugLabel}): {ex.Message}");
             return null;
         }
 
-        // Load skeleton (.bnd) — optional.
-        // spec: Docs/RE/formats/mesh.md §.skn header — id_b: CONFIRMED.
-        Skeleton? skeleton = TryLoadSkeleton(assets, mesh);
-
-        // Load idle animation (.mot) — optional.
-        // spec: Docs/RE/formats/mesh.md §actormotion.txt — col2=class, col16=idle: CONFIRMED.
-        AnimationClip? clip = TryLoadAnimation(assets, mesh);
-
-        Node3D charRoot;
+        // Resolve texture — CharacterTextureResolver handles skin.txt + derivation fallback.
+        // spec: World/CharacterTextureResolver.cs — Resolve(assets, mesh). CONFIRMED.
+        ImageTexture? albedo = null;
         try
         {
-            charRoot = SkinnedCharacterBuilder.Build(mesh, skeleton, clip, albedo: null);
+            albedo = CharacterTextureResolver.Resolve(assets, mesh);
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[NpcRenderer] SkinnedCharacterBuilder.Build failed for '{sknPath}': {ex.Message}");
-            return null;
+            GD.PrintErr($"[NpcRenderer] Texture resolve failed for '{sknPath}': {ex.Message}");
+            // Albedo stays null — neutral material will be applied by builder.
         }
-
-        charRoot.Name = $"Npc_{skinId}";
-        return charRoot;
-    }
-
-    /// <summary>
-    /// Loads the skeleton for a character mesh, or returns null (static pose) if absent.
-    ///
-    /// spec: Docs/RE/formats/mesh.md §.skn header — id_b → .bnd actor_id. CONFIRMED.
-    /// spec: Docs/RE/formats/mesh.md §.bnd — "data/char/bind/g{id_b}.bnd". CONFIRMED.
-    /// </summary>
-    private static Skeleton? TryLoadSkeleton(RealClientAssets assets, SkinnedMesh mesh)
-    {
-        if (mesh.IdB == 0) return null;
-        string bndPath = $"data/char/bind/g{mesh.IdB}.bnd";
-        if (!assets.Contains(bndPath)) return null;
 
         try
         {
-            ReadOnlyMemory<byte> data = assets.GetRaw(bndPath);
-            if (data.IsEmpty) return null;
-            return BndParser.Parse(data);
+            // Static build: skeleton=null, clip=null.
+            // The skinned path currently explodes the mesh; omit until the inverse-bind fix lands.
+            // spec: RealWorldRenderer — "_ = skeleton; _ = clip; intentionally unused until
+            //       the skinning fix lands." CONFIRMED pattern.
+            Node3D root = SkinnedCharacterBuilder.Build(mesh, null, null, albedo: albedo);
+            return root;
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[NpcRenderer] .bnd load failed for IdB={mesh.IdB}: {ex.Message}");
+            GD.PrintErr($"[NpcRenderer] SkinnedCharacterBuilder.Build failed '{sknPath}': {ex.Message}");
             return null;
         }
     }
 
-    /// <summary>
-    /// Loads the idle animation for a character mesh, or returns null (rest pose) if absent.
-    ///
-    /// spec: Docs/RE/formats/mesh.md §actormotion.txt — col2=class, col16=idle-peace id. CONFIRMED.
-    /// spec: Docs/RE/formats/animation.md §.mot.
-    /// </summary>
-    private static AnimationClip? TryLoadAnimation(RealClientAssets assets, SkinnedMesh mesh)
-    {
-        if (mesh.IdB == 0) return null;
-
-        string? motPath = ResolveIdleMotPath(assets, mesh.IdB);
-        if (motPath is null || !assets.Contains(motPath)) return null;
-
-        try
-        {
-            ReadOnlyMemory<byte> data = assets.GetRaw(motPath);
-            if (data.IsEmpty) return null;
-            return AnimationParser.Parse(data);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[NpcRenderer] .mot load failed for IdB={mesh.IdB}: {ex.Message}");
-            return null;
-        }
-    }
+    // -------------------------------------------------------------------------
+    // Lazy lookup-table loading
+    // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Resolves the idle-peace motion path for an actor class from <c>actormotion.txt</c>.
-    /// Returns the VFS path <c>data/char/mot/g{id}.mot</c>, or null when no entry is found.
+    /// Builds the actormotion lookup (mob_id → <see cref="ActormotionEntry"/>) from
+    /// <c>data/char/actormotion.txt</c> on first call and caches it.
     ///
-    /// spec: Docs/RE/formats/mesh.md §actormotion.txt — TAB-separated; col2=class, col16=idle-peace id. CONFIRMED.
+    /// spec: ActormotionParser.ParseAsLookup — keyed by ActorClassId. CONFIRMED.
+    /// spec: Docs/RE/formats/mesh.md §actormotion.txt. CONFIRMED.
     /// </summary>
-    private static string? ResolveIdleMotPath(RealClientAssets assets, uint actorClassId)
+    private static void EnsureActorMotionLoaded(RealClientAssets assets)
     {
+        if (_actorMotionCacheOwner == assets && _actorMotionLookup is not null)
+            return;
+
+        _actorMotionCacheOwner = assets;
+        _actorMotionLookup = null;
+
         const string tablePath = "data/char/actormotion.txt";
-        if (!assets.Contains(tablePath)) return null;
-
-        // All game text is CP949 (EUC-KR).
-        // spec: project prompt — "ALL game text is CP949".
-        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
-        string text = System.Text.Encoding.GetEncoding(949)
-            .GetString(assets.GetRaw(tablePath).Span);
-
-        foreach (string rawLine in text.Split('\n'))
+        if (!assets.Contains(tablePath))
         {
-            // TAB-separated; strip CR.
-            string[] cols = rawLine.Replace("\r", string.Empty).Split('\t');
-            if (cols.Length <= 16) continue;
-
-            if (!uint.TryParse(cols[2].Trim(), out uint classId) || classId != actorClassId)
-                continue;
-
-            string idle = cols[16].Trim();
-            if (idle.Length == 0 || idle == "0") return null;
-
-            // spec: Docs/RE/formats/mesh.md §actormotion.txt — "data/char/mot/g{id}.mot". CONFIRMED.
-            return $"data/char/mot/g{idle}.mot";
+            GD.Print($"[NpcRenderer] '{tablePath}' absent — actormotion chain disabled.");
+            _actorMotionLookup = new Dictionary<int, ActormotionEntry>(0);
+            return;
         }
 
-        return null;
+        try
+        {
+            ReadOnlyMemory<byte> raw = assets.GetRaw(tablePath);
+            _actorMotionLookup = ActormotionParser.ParseAsLookup(raw);
+            GD.Print($"[NpcRenderer] actormotion.txt loaded: {_actorMotionLookup.Count} entries.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[NpcRenderer] actormotion.txt parse failed: {ex.Message}");
+            _actorMotionLookup = new Dictionary<int, ActormotionEntry>(0);
+        }
+    }
+
+    /// <summary>
+    /// Builds the skin-class → skn-path dictionary by scanning <c>data/char/skinlist.txt</c>
+    /// on first call and caches it.
+    ///
+    /// skinlist.txt is a plain-text list of VFS paths, one per line (CP949).  For each non-empty
+    /// line that names a <c>.skn</c> file, we parse the file header to read <c>IdB</c> and map
+    /// <c>skinClass → sknPath</c>.  Only the first occurrence of each skin_class is retained
+    /// (mirrors the "first entry" guarantee in <see cref="ActormotionEntry"/>).
+    ///
+    /// Parsing is done header-only (SknParser reads the full file but allocates only once per
+    /// unique path); this is acceptable for a one-time startup scan of ~900 entries.
+    ///
+    /// spec: MISSION B — "build a Dictionary&lt;int skin_class, string sknPath&gt; ONCE by
+    ///       scanning data/char/skinlist.txt entries that parse with matching IdB; cache it."
+    /// spec: ActormotionEntry — "id_b == SkinClassId for all 5 spot-checked triples: CONFIRMED."
+    /// spec: Docs/RE/formats/mesh.md §.skn header — "id_b at +4". CONFIRMED.
+    /// </summary>
+    private static void EnsureSkinClassMapLoaded(RealClientAssets assets)
+    {
+        if (_skinCacheOwner == assets && _skinClassToSknPath is not null)
+            return;
+
+        _skinCacheOwner = assets;
+        _skinClassToSknPath = null;
+
+        const string listPath = "data/char/skinlist.txt";
+        if (!assets.Contains(listPath))
+        {
+            GD.Print($"[NpcRenderer] '{listPath}' absent — skinlist-based skin resolution disabled.");
+            _skinClassToSknPath = new Dictionary<int, string>(0);
+            return;
+        }
+
+        try
+        {
+            // spec: project brief — "ALL game text is CP949".
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+            ReadOnlyMemory<byte> raw = assets.GetRaw(listPath);
+            string text = System.Text.Encoding.GetEncoding(949).GetString(raw.Span);
+
+            var map = new Dictionary<int, string>(1024);
+            int parsedCount = 0;
+            int errorCount = 0;
+
+            // skinlist.txt lines are bare filenames (e.g. "g200002620.skn"), NOT full VFS paths.
+            // The full VFS path is "data/char/skin/" + filename.
+            // Verified on real VFS: all 1269 lines are bare filenames present under data/char/skin/.
+            const string skinDir = "data/char/skin/";
+
+            foreach (string rawLine in text.Split('\n'))
+            {
+                string fname = rawLine.Trim('\r', '\n', ' ').ToLowerInvariant();
+                if (fname.Length == 0) continue;
+
+                // Only process .skn entries.
+                if (!fname.EndsWith(".skn", StringComparison.Ordinal)) continue;
+
+                // Prepend directory to get the full VFS path.
+                // spec: verified on real VFS — skinlist.txt bare filenames live under data/char/skin/.
+                string sknPath = skinDir + fname;
+                if (!assets.Contains(sknPath)) continue;
+
+                try
+                {
+                    ReadOnlyMemory<byte> sknData = assets.GetRaw(sknPath);
+                    if (sknData.IsEmpty) continue;
+
+                    SkinnedMesh mesh = SknParser.Parse(sknData);
+                    int idB = (int)mesh.IdB;
+                    if (idB == 0) continue;
+
+                    // First occurrence of each skin_class wins.
+                    // spec: ActormotionEntry — "first entry in skinlist.txt whose id_b == SkinClassId."
+                    map.TryAdd(idB, sknPath);
+                    parsedCount++;
+                }
+                catch
+                {
+                    errorCount++;
+                }
+            }
+
+            _skinClassToSknPath = map;
+            GD.Print($"[NpcRenderer] skinlist.txt scan: {map.Count} unique skin_class mappings " +
+                     $"({parsedCount} parsed, {errorCount} errors).");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[NpcRenderer] skinlist.txt scan failed: {ex.Message}");
+            _skinClassToSknPath = new Dictionary<int, string>(0);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -379,8 +494,16 @@ public sealed partial class NpcRenderer : Node3D
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Removes all currently spawned character children so the node can be repopulated.
+    /// Resolves Godot Y for a spawn position, using the injected <see cref="GroundYFunc"/>
+    /// if set, otherwise returning the flat <see cref="GroundY"/> constant.
+    ///
+    /// spec: MISSION B — "accept an injected groundY function Func&lt;float,float,float&gt;
+    ///       (default flat) so the orchestrator can wire terrain height later."
     /// </summary>
+    private float ResolveGroundY(float worldX, float worldZ)
+        => GroundYFunc is not null ? GroundYFunc(worldX, worldZ) : GroundY;
+
+    /// <summary>Removes all currently spawned character children.</summary>
     private void ClearChildren()
     {
         foreach (Node child in GetChildren())

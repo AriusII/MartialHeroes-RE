@@ -115,6 +115,7 @@ public sealed partial class InventoryWindow : Control
                 // Lazy-populate on first show so it is built after _context is set.
                 PopulateGrid();
             }
+
             GetViewport().SetInputAsHandled();
         }
 
@@ -153,7 +154,7 @@ public sealed partial class InventoryWindow : Control
         AnchorTop = 0.5f;
         AnchorRight = 0f;
         AnchorBottom = 0.5f;
-        OffsetLeft = 320f;   // offset right of the stats panel
+        OffsetLeft = 320f; // offset right of the stats panel
         OffsetTop = -260f;
         OffsetRight = 620f;
         OffsetBottom = 260f;
@@ -242,11 +243,11 @@ public sealed partial class InventoryWindow : Control
             // spec: Docs/RE/formats/config_tables.md §4.3 col22 item_tier_rank: CONFIRMED.
             string colour = rec.ItemTierRank switch
             {
-                0 => "#cccccc",   // common / grey
-                1 => "#44dd44",   // uncommon / green
-                2 => "#4488ff",   // rare / blue
-                3 => "#cc44ff",   // epic / purple
-                4 => "#ffaa00",   // legendary / orange
+                0 => "#cccccc", // common / grey
+                1 => "#44dd44", // uncommon / green
+                2 => "#4488ff", // rare / blue
+                3 => "#cc44ff", // epic / purple
+                4 => "#ffaa00", // legendary / orange
                 _ => "#ffffff",
             };
 

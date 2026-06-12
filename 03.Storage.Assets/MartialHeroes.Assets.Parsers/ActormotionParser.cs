@@ -40,7 +40,7 @@ public static class ActormotionParser
     // Number of leading motion-ID columns stored in MotionIds (cols 15..21, inclusive).
     // spec: actormotion.txt observed column count is 22 (indices 0..21).
     private const int MotionColStart = 15;
-    private const int MotionColEnd   = 21; // inclusive
+    private const int MotionColEnd = 21; // inclusive
     private const int MotionColCount = MotionColEnd - MotionColStart + 1; // = 7
 
     /// <summary>
@@ -61,7 +61,7 @@ public static class ActormotionParser
         var cp949 = Encoding.GetEncoding(949); // CP949 / EUC-KR
 
         // Decode full file as text; split into lines.
-        string text  = cp949.GetString(fileBytes.Span);
+        string text = cp949.GetString(fileBytes.Span);
         string[] raw = text.Split('\n');
 
         // Preallocate using the declared count from line 0 (best-effort, fallback = line count).
@@ -82,10 +82,10 @@ public static class ActormotionParser
             if (cols.Length < MotionColStart + 1) continue;
 
             if (!int.TryParse(cols[1].Trim(), out int actorClassId)) continue;
-            if (!int.TryParse(cols[2].Trim(), out int skinClassId))   continue;
+            if (!int.TryParse(cols[2].Trim(), out int skinClassId)) continue;
 
             // Capture motion IDs (cols 15..21) if present.
-            int available   = Math.Min(MotionColCount, cols.Length - MotionColStart);
+            int available = Math.Min(MotionColCount, cols.Length - MotionColStart);
             int[] motionIds = new int[MotionColCount];
             for (int m = 0; m < available; m++)
                 int.TryParse(cols[MotionColStart + m].Trim(), out motionIds[m]);

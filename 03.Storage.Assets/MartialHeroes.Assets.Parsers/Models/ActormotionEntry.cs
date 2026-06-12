@@ -69,7 +69,7 @@ public sealed class ActormotionEntry
     public ActormotionEntry(int actorClassId, int skinClassId, int[] motionIds)
     {
         ActorClassId = actorClassId;
-        SkinClassId  = skinClassId;
-        MotionIds    = motionIds;
+        SkinClassId = skinClassId;
+        MotionIds = motionIds;
     }
 }
