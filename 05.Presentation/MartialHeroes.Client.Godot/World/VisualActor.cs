@@ -82,6 +82,16 @@ public sealed partial class VisualActor : CharacterBody3D
         var capsule = new CapsuleMesh();
         capsule.Radius = 0.4f;
         capsule.Height = 1.8f;
+
+        // Bright cyan material so the actor stands out clearly against the ground.
+        // EmissionEnabled ensures visibility even without a perfectly aimed light.
+        var actorMat = new StandardMaterial3D();
+        actorMat.AlbedoColor = new Color(0.1f, 0.85f, 1.0f);
+        actorMat.EmissionEnabled = true;
+        actorMat.Emission = new Color(0.0f, 0.5f, 0.8f);
+        actorMat.EmissionEnergyMultiplier = 1.2f;
+        capsule.Material = actorMat;
+
         mesh.Mesh = capsule;
         AddChild(mesh);
 

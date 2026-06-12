@@ -59,7 +59,13 @@ public sealed partial class GameLoop : Node
 
     public override void _Ready()
     {
-        GD.Print("[GameLoop] _Ready start");
+        // *** INCONTOURNABLE — ce log apparaît avant TOUT le reste ***
+        GD.Print("===== [GameLoop] _Ready ENTERED =====");
+
+        // Spawn the debug baseline (floor + reference cube) IMMEDIATELY, before any try/catch,
+        // so the user always sees something even if all asset/context loading fails entirely.
+        // This is the guaranteed visual proof that the Godot scene executes.
+        SpawnDebugBaseline();
 
         // The entire _Ready body is wrapped defensively: any exception in subsystem wiring,
         // context resolution, or real-asset initialisation must NOT crash the scene.
@@ -73,6 +79,64 @@ public sealed partial class GameLoop : Node
             GD.PrintErr($"[GameLoop] _Ready failed: {ex}");
             GD.PrintErr("[GameLoop] Attempting emergency fallback to synthetic mode.");
             TryEmergencyFallback();
+        }
+
+        GD.Print("===== [GameLoop] _Ready COMPLETED =====");
+    }
+
+    /// <summary>
+    /// Spawns a large ground plane and an emissive reference cube at the world origin.
+    /// These are ALWAYS present regardless of VFS / asset availability — they guarantee the
+    /// user sees at least a floor and a cube when <see cref="_Ready"/> executes.
+    ///
+    /// The ground plane (100×100) uses a green checker-style solid material.
+    /// The reference cube is emissive red (visible even without lighting) at origin, Y=1.
+    ///
+    /// If real assets load successfully they are added on top of this baseline.
+    /// The baseline is NEVER removed — it serves as a permanent depth/orientation cue.
+    /// </summary>
+    private void SpawnDebugBaseline()
+    {
+        try
+        {
+            // --- Large ground plane ---
+            var groundMesh = new MeshInstance3D();
+            var planeMesh = new PlaneMesh();
+            planeMesh.Size = new Vector2(200f, 200f);
+            groundMesh.Mesh = planeMesh;
+
+            var groundMat = new StandardMaterial3D();
+            // Checkerboard-style green ground so depth and scale are readable.
+            groundMat.AlbedoColor = new Color(0.22f, 0.55f, 0.22f);
+            groundMat.RoughnessTexture = null;
+            planeMesh.Material = groundMat;
+
+            groundMesh.Name = "DebugGround";
+            groundMesh.Position = Vector3.Zero;
+            AddChild(groundMesh);
+
+            // --- Reference cube (emissive red — visible even with no lighting) ---
+            var cubeMesh = new MeshInstance3D();
+            var boxMesh = new BoxMesh();
+            boxMesh.Size = new Vector3(1.5f, 1.5f, 1.5f);
+            cubeMesh.Mesh = boxMesh;
+
+            var cubeMat = new StandardMaterial3D();
+            cubeMat.AlbedoColor = new Color(1f, 0f, 0f);
+            cubeMat.EmissionEnabled = true;
+            cubeMat.Emission = new Color(1f, 0.1f, 0.1f);
+            cubeMat.EmissionEnergyMultiplier = 2.0f;
+            boxMesh.Material = cubeMat;
+
+            cubeMesh.Name = "DebugReferenceCube";
+            cubeMesh.Position = new Vector3(0f, 1.5f, 0f);
+            AddChild(cubeMesh);
+
+            GD.Print("[GameLoop] Debug baseline (ground+cube) spawned.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameLoop] SpawnDebugBaseline failed: {ex.Message}");
         }
     }
 

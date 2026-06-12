@@ -153,6 +153,23 @@ public sealed partial class RealWorldRenderer : Node3D
             return;
         }
 
+        // Resolve the target area and cell.
+        // The area id is read from client_dir.cfg (key "area="), defaulting to 0.
+        // The cell is discovered by enumerating real VFS entries for that area.
+        // If the configured area has no cells, we auto-select the first area that does.
+        // This ensures we NEVER target a non-existent cell (fixing the (10000,10000) bug).
+        GD.Print("[RealWorldRenderer] Initialise: resolving target cell");
+        try
+        {
+            ResolveTargetCell();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] ResolveTargetCell failed: {ex.Message} — keeping default ({TargetMapX},{TargetMapZ}).");
+        }
+
+        GD.Print($"[RealWorldRenderer] Target cell resolved to ({TargetMapX},{TargetMapZ}) for area {TargetAreaId}.");
+
         // Wire the texture resolver into TerrainNode so each sector can get a real texture.
         // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — 1-based TextureIndexGrid → texture path.
         GD.Print("[RealWorldRenderer] Initialise: wiring terrain texture resolver");
@@ -411,7 +428,8 @@ public sealed partial class RealWorldRenderer : Node3D
         budRoot.Name = "BudSceneNode";
         AddChild(budRoot);
 
-        GD.Print($"[RealWorldRenderer] BUD scene spawned: {scene.Objects.Length} objects (ArrayMesh, no GltfDocument).");
+        GD.Print(
+            $"[RealWorldRenderer] BUD scene spawned: {scene.Objects.Length} objects (ArrayMesh, no GltfDocument).");
     }
 
     // -------------------------------------------------------------------------
@@ -529,21 +547,30 @@ public sealed partial class RealWorldRenderer : Node3D
 
     private void SpawnCamera()
     {
-        // Place a camera looking down at the centre of the target cell from above.
+        // Compute the Godot-space centre of the resolved terrain cell.
         // spec: Docs/RE/formats/terrain.md §1.4 — worldX_min = (mapX-10000)×1024, cell size 1024. CONFIRMED.
         float centreX = (TargetMapX - 10000) * 1024.0f + 512.0f;
         float centreZ = (TargetMapZ - 10000) * 1024.0f + 512.0f;
         float godotZ = -centreZ; // negate Z: spec WorldCoordinates.ToGodot.
 
-        if (GetViewport()?.GetCamera3D() is not null)
+        // Preferred: reuse/move the scene's existing Camera3D so there is only ONE camera.
+        // If none exists, spawn a new one. This avoids the two-camera conflict that causes
+        // the viewport to flip between cameras mid-frame.
+        Camera3D? existing = GetViewport()?.GetCamera3D();
+        if (existing is not null)
         {
-            GD.Print("[RealWorldRenderer] Camera already present in viewport — skipping spawn.");
+            // Reposition the existing camera above the resolved cell.
+            existing.Position = new Vector3(centreX, 800f, godotZ);
+            existing.LookAt(new Vector3(centreX, 0f, godotZ), Vector3.Back);
+            existing.Far = 5000f;
+            existing.MakeCurrent();
+            GD.Print($"[RealWorldRenderer] Existing camera repositioned to ({centreX:F0}, 800, {godotZ:F0}).");
             return;
         }
 
         var cam = new Camera3D();
         cam.Position = new Vector3(centreX, 800f, godotZ);
-        cam.LookAt(new Vector3(centreX, 0f, godotZ), Vector3.Forward);
+        cam.LookAt(new Vector3(centreX, 0f, godotZ), Vector3.Back);
         cam.Fov = 60f;
         cam.Near = 1f;
         cam.Far = 5000f;
@@ -551,7 +578,116 @@ public sealed partial class RealWorldRenderer : Node3D
         AddChild(cam);
         cam.MakeCurrent();
 
-        GD.Print($"[RealWorldRenderer] Camera placed at ({centreX:F0}, 800, {godotZ:F0}).");
+        GD.Print($"[RealWorldRenderer] New camera placed at ({centreX:F0}, 800, {godotZ:F0}).");
+    }
+
+    // -------------------------------------------------------------------------
+    // Target cell discovery
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Resolves <see cref="TargetAreaId"/>, <see cref="TargetMapX"/> and <see cref="TargetMapZ"/>
+    /// by enumerating real VFS entries instead of using a hard-coded coordinate.
+    ///
+    /// Resolution order:
+    ///   1. Read "area=" key from client_dir.cfg (defaults to 0).
+    ///   2. Enumerate .ted entries in the VFS for that area via
+    ///      <see cref="RealClientAssets.EnumerateTerrainCells"/>.
+    ///   3. If at least one cell is found for the requested area, pick the first (sorted by
+    ///      ascending mapX then mapZ — typically the top-left cell).
+    ///   4. If the requested area has NO cells, try areas 0..20 in order and pick the first
+    ///      area+cell pair that exists. This avoids targeting an empty area entirely.
+    ///   5. If no cells are found in any area, fall back to the configured defaults and log a
+    ///      warning — streaming will silently produce empty sectors but won't crash.
+    ///
+    /// spec: Docs/RE/formats/terrain.md §1.3 — per-cell path pattern. CONFIRMED.
+    /// spec: Docs/RE/formats/terrain.md §1.1 — area id digit decomposition. CONFIRMED.
+    /// </summary>
+    private void ResolveTargetCell()
+    {
+        if (_assets is null) return;
+
+        // Read area= from config. Default 0. Silently ignore missing key.
+        int configArea = ReadAreaFromConfig();
+        GD.Print($"[RealWorldRenderer] Config area={configArea} (from client_dir.cfg or default).");
+
+        // Try to get cells for the configured area first.
+        List<(int MapX, int MapZ)> cells = _assets.EnumerateTerrainCells(configArea);
+        if (cells.Count > 0)
+        {
+            // Pick the cell closest to the "centre" heuristic: sort by (mapX, mapZ) and take the
+            // middle element so we land in the heart of the area rather than a corner.
+            cells.Sort((a, b) => a.MapX != b.MapX ? a.MapX.CompareTo(b.MapX) : a.MapZ.CompareTo(b.MapZ));
+            int midIdx = cells.Count / 2;
+            (int mx, int mz) = cells[midIdx];
+            TargetAreaId = configArea;
+            TargetMapX = mx;
+            TargetMapZ = mz;
+            GD.Print($"[RealWorldRenderer] Area {configArea}: {cells.Count} cells found — " +
+                     $"selected ({TargetMapX},{TargetMapZ}) (index {midIdx} of {cells.Count}).");
+            return;
+        }
+
+        GD.Print($"[RealWorldRenderer] Area {configArea} has no .ted cells — scanning areas 0..20.");
+
+        // Auto-select: try areas 0 through 20 and take the first that has cells.
+        for (int area = 0; area <= 20; area++)
+        {
+            if (area == configArea) continue; // already tried
+            List<(int MapX, int MapZ)> areaCells = _assets.EnumerateTerrainCells(area);
+            if (areaCells.Count > 0)
+            {
+                areaCells.Sort((a, b) => a.MapX != b.MapX ? a.MapX.CompareTo(b.MapX) : a.MapZ.CompareTo(b.MapZ));
+                int midIdx = areaCells.Count / 2;
+                (int mx, int mz) = areaCells[midIdx];
+                TargetAreaId = area;
+                TargetMapX = mx;
+                TargetMapZ = mz;
+                GD.Print($"[RealWorldRenderer] Auto-selected area {area}: {areaCells.Count} cells — " +
+                         $"cell ({TargetMapX},{TargetMapZ}).");
+                return;
+            }
+        }
+
+        // No cells found anywhere — keep configured defaults but warn clearly.
+        GD.PrintErr($"[RealWorldRenderer] WARNING: no .ted cells found in any area 0..20. " +
+                    $"Keeping defaults ({TargetMapX},{TargetMapZ}) — streaming will produce empty sectors.");
+    }
+
+    /// <summary>
+    /// Reads the "area=" integer key from client_dir.cfg.
+    /// Returns 0 (the default) when the key is absent or unparseable.
+    /// </summary>
+    private static int ReadAreaFromConfig()
+    {
+        try
+        {
+            // Reuse ClientPathResolver's internal config reader by re-opening the same file.
+            // Duplicate the minimal read logic here to keep the coupling narrow.
+            // Fully-qualify to avoid ambiguity with the MartialHeroes namespace. spec: Godot API.
+            string absPath = global::Godot.ProjectSettings.GlobalizePath("res://client_dir.cfg");
+            if (!File.Exists(absPath)) return 0;
+
+            foreach (string rawLine in File.ReadLines(absPath))
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith('#')) continue;
+                int eq = line.IndexOf('=');
+                if (eq < 0) continue;
+                string k = line[..eq].Trim();
+                string v = line[(eq + 1)..].Trim();
+                if (k.Equals("area", StringComparison.OrdinalIgnoreCase) &&
+                    int.TryParse(v, out int parsed))
+                {
+                    return parsed;
+                }
+            }
+        }
+        catch
+        {
+            // Any I/O error → default 0.
+        }
+        return 0;
     }
 
     // -------------------------------------------------------------------------

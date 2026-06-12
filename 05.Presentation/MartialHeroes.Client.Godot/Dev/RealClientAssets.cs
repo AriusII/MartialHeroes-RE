@@ -430,6 +430,60 @@ public sealed class RealClientAssets : IDisposable
     }
 
     // -------------------------------------------------------------------------
+    // VFS cell enumeration
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Enumerates all terrain cell coordinates available in the VFS for the given area.
+    ///
+    /// Scans VFS entry names matching the pattern:
+    ///   data/map{tag}/dat/d{tag}x{mapX}z{mapZ}.ted
+    /// and parses (mapX, mapZ) from each matched name.
+    ///
+    /// Returns cells in the order they appear in the (sorted) TOC.
+    /// Returns an empty list when no cells are found or the VFS is unavailable.
+    ///
+    /// spec: Docs/RE/formats/terrain.md §1.3 — per-cell base path pattern. CONFIRMED.
+    /// </summary>
+    /// <param name="areaId">Area identifier (e.g. 0 for map000).</param>
+    public List<(int MapX, int MapZ)> EnumerateTerrainCells(int areaId)
+    {
+        var results = new List<(int, int)>();
+
+        string tag = AreaTag(areaId);
+        // Expected prefix: "data/map000/dat/d000x"
+        // Expected suffix: "z<mapZ>.ted"
+        // spec: Docs/RE/formats/terrain.md §1.3 — "data/map<d0d1d2>/dat/d<d0d1d2>x<mapX>z<mapZ>". CONFIRMED.
+        string prefix = $"data/map{tag}/dat/d{tag}x";
+        const string tedSuffix = ".ted";
+
+        ReadOnlySpan<VfsEntry> entries = _vfs.GetEntries();
+        foreach (VfsEntry entry in entries)
+        {
+            string name = entry.Name; // already lower-case, spec: pak.md §TOC names. CONFIRMED.
+            if (!name.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            if (!name.EndsWith(tedSuffix, StringComparison.Ordinal)) continue;
+
+            // Name between prefix and suffix: "<mapX>z<mapZ>"
+            // e.g. "10000z9990" → mapX=10000, mapZ=9990
+            int inner = name.Length - prefix.Length - tedSuffix.Length;
+            if (inner <= 0) continue;
+
+            string middle = name.Substring(prefix.Length, inner);
+            int zIndex = middle.IndexOf('z');
+            if (zIndex <= 0) continue;
+
+            if (int.TryParse(middle[..zIndex], out int mapX) &&
+                int.TryParse(middle[(zIndex + 1)..], out int mapZ))
+            {
+                results.Add((mapX, mapZ));
+            }
+        }
+
+        return results;
+    }
+
+    // -------------------------------------------------------------------------
     // IDisposable
     // -------------------------------------------------------------------------
 
