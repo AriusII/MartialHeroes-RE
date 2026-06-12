@@ -19,10 +19,15 @@
 
 ## 0. Status header — confidence per claim
 
-`capture_verified: false`. **No live network capture was available for this analysis.** Opcode
-routing is a hard static fact (corroborated by `opcodes.md`, which reads the client's dispatch
-installers). All field offsets/sizes and the lobby (port-10000) mini-protocol are static inferences
-unless explicitly marked otherwise.
+`capture_verified: false`. **No live network capture (`.pcapng` / `.tsv`) was available for this
+analysis.** Opcode routing is a hard static fact (corroborated by `opcodes.md`, which reads the
+client's dispatch installers). All field offsets/sizes and the lobby (port-10000) mini-protocol are
+static inferences unless explicitly marked otherwise.
+
+`sample_verified: partial`. **One real on-disk sample was available** — the local client version
+file `data/cursor/game.ver` (28 bytes, 7 little-endian u32 fields). It pins the enter-game version
+token value (Section 3.3) and is the only real-byte corroboration in this analysis. It is **not** a
+network capture, so it does not validate any wire layout; it validates a single derived constant.
 
 | Claim | Confidence | Basis |
 |---|---|---|
@@ -34,8 +39,11 @@ unless explicitly marked otherwise.
 | Overall ordered flow (Section 1) and its UI/net state transitions. | MEDIUM–HIGH | Static behavioral read of the login window state machine. |
 | The `0/0 → 1/4` RSA handshake and credential staging. | HIGH (cited) | `specs/crypto.md` — not re-derived here. |
 | Login blob (1/6) starts with sub-opcode byte **`0x2B` (43)** then length-prefixed account/optional strings; password travels only via the RSA 1/4 reply. | MEDIUM | Static; length-prefix width and optional-string presence are **capture-unverified**. |
+| Server-list record (8 bytes) decodes to **{server id, status, load, open-time}** with the load thresholds and status sentinels of Section 2.1. | MEDIUM–HIGH | Static — recovered from the server-list render path plus a debug format literal; the open-time packing and full status enum are **capture-unverified**. |
 | Character-list (3/1) shape: 3-byte header + per-slot **981-byte** records gated by a slot bitmask. | MEDIUM–HIGH | 981-byte stride is dispatch-path-confirmed; field internals capture-unverified. |
+| The character list supports a **maximum of 5 slots** (slot indices 0..4). | HIGH (static) | The parse loop is a **hard, bounded iteration of exactly 5**, not an open-ended scan — promoted from "inferred ≤5" to a fixed constant. |
 | Enter-game request (1/9) = **40-byte** body; slot index at +0; version token elsewhere in the buffer. | MEDIUM | 40-byte total + slot@0 are firm; token offset capture-unverified. |
+| Enter-game version token derivation `10 × versionField + 9`, and its concrete value **21149** for the sampled `game.ver`. | HIGH (sample) | `sample_verified` — computed from the real on-disk `data/cursor/game.ver` field value 2114. |
 | Enter-game ack (3/5) = **44-byte** block; name@0, billing u32 @ +28, char-count u32 @ +40. | MEDIUM–HIGH | 44-byte total dispatch-confirmed; block internals partly capture-unverified. |
 | Char-spawn result (3/7) = **16-byte** block; result + slot + three spawn-param u32s. | MEDIUM | 16-byte total dispatch-confirmed; param meaning capture-unverified. |
 | GameState transitions: char-list → select scene; enter-game ack → in-world. | MEDIUM–HIGH | Static behavioral. |
@@ -124,6 +132,10 @@ main game connection. It:
 - but **does** reuse the same **8-byte frame wrapper** and the same **inbound LZ4 decompression** as
   the game connection (see `specs/crypto.md` §3.2 for the LZ4 variant — raw block, no frame magic).
 
+The 8-byte wrapper is read as: a **frame size** (low 16 bits at the start of the wrapper), a `major`
+field (u16 at wrapper offset +4), and a `minor` field (u16 at wrapper offset +6). On the lobby
+surface, **`major` is repurposed as a count/length signal** (Section 2.1) and **`minor` is unused**.
+
 ### 2.0 Connect behavior
 
 The lobby connect helper:
@@ -139,7 +151,10 @@ The lobby connect helper:
 4. Connection failure is **non-fatal to the helper** — it logs the error and still returns the
    socket; the caller detects failure by the absence of a valid reply.
 
-The base port is **10000**. Both lobby fetches use the same wrapper + LZ4 receive pattern below.
+The base port is **10000**. Both lobby fetches use the same wrapper + LZ4 receive pattern below. The
+receive loop is a cooperative blocking read: it retries on a "would block" condition with a short
+back-off sleep until the full wrapper, then the full `size − 8` payload, have arrived; then it LZ4-
+decompresses.
 
 ### 2.1 Server-list fetch (port 10000)
 
@@ -151,18 +166,48 @@ Receive sequence:
 3. Block until the remaining `size − 8` payload bytes are read.
 4. **LZ4-decompress** the payload (inbound, raw block).
 5. Interpret `major` as the **server-record count**. Read `count` fixed-size records of **8 bytes**
-   each into the login window's server array, recording the count.
+   each into the login window's server array, recording the count. (When the count is positive, any
+   prior array is freed and a fresh `count × 8` buffer is allocated and filled from the decompressed
+   payload. On connect failure the stored count is set to a sentinel `-1`.)
 
-> **Server-list record (wire):** `count = wrapper.major`; each record is **8 bytes**. The record's
-> internal field layout is **UNVERIFIED** (likely a server id plus load/status fields). Only the
-> 8-byte stride and the `count = major` relationship are firm. A live lobby capture is required to
-> decode record internals.
+So: **server-list payload = `count` × 8-byte records, where `count = wrapper.major`.**
+
+#### Server-list record (8 bytes) — decoded
+
+Each record is four little-endian 16-bit fields (record stride 8). The meanings were recovered from
+the login window's server-list **render** path: a debug format literal of the shape
+`"i %d status %d count %d"` ties the fields at record offsets +2 and +4 to "status" and "count"
+(load), and the field at +0 is the index fed to the client-local server-name lookup. **Wire-relevant
+fields only** — the localized name itself is *not* on the wire (see the name-table note below).
+
+| Offset | Size | Field | Meaning | Confidence |
+|---|---|---|---|---|
+| +0 | 2 (u16) | `server_id` | Index **1..40** into the client-local localized server-name table. Values outside 1..40 are out of range. | HIGH |
+| +2 | 2 (i16) | `status_code` | Server availability state. A value `≤ 0` or `> 40` is treated as **invalid / unavailable** (an error label is shown). Special values: **3** = "open-time scheduled" (the open time is rendered from `open_time` at +6); **24** = a distinct "preparing / check" fixed label; **100** = "this is the connected / current selection" sentinel that, with a UI flag set, auto-advances into the channel-connect step. | MEDIUM–HIGH |
+| +4 | 2 (i16) | `load` | Population / load gauge. Compared against thresholds **1200 / 800 / 500** to choose a colored "load" label and text color (e.g. red above the high threshold, intermediate colors below). | MEDIUM–HIGH |
+| +6 | 2 (i16) | `open_time` | Used **only** when `status_code == 3`: rendered as a packed open-hour / open-minute schedule using a `×10` split (the field, and the `load` field, are each split as `value/10` and `value%10` to feed an `HH:MM`-style display). The exact packing is **inferred, not pinned**. | LOW–MEDIUM |
+
+**Server-name table (client-local, NOT wire data).** The localized server name shown in the UI is
+**not** transmitted. The wire carries only the numeric `server_id` (+0); the client resolves it
+through a local **41-entry name table** built from UI string resources (one bank per language /
+region). `server_id` indexes that table. A fresh implementation must supply its own name map; the
+protocol only needs the numeric id.
+
+**Render/UI constants (load-bearing for a faithful select screen, not for the wire codec):** the
+load-color thresholds **1200 / 800 / 500** and the status sentinels **3 / 24 / 100**. These are
+client-side presentation logic; they are documented here so a re-implemented select screen behaves
+identically, but they are **not** part of decoding the 8 wire bytes.
+
+> **Confidence note.** The 8-byte stride and `count = wrapper.major` are firm. The four-field
+> decode is a static read of the render path corroborated by the debug literal; the `open_time`
+> packing and the full `status_code` enum (beyond the special-cased 3 / 24 / 100) are
+> **capture-unverified**. A live lobby capture is still required to confirm record internals.
 
 ### 2.2 Channel-endpoint fetch (port `10000 + offset`)
 
 After server selection, the client connects to `10000 + selected_offset`, where `selected_offset` is
-the chosen server/channel index. The receive sequence is identical to §2.1 (8-byte wrapper + LZ4).
-After decompression:
+the chosen server/channel index recorded at server-select time. The receive sequence is identical to
+§2.1 (8-byte wrapper + LZ4). After decompression:
 
 - The client takes the **first 30 (0x1E) bytes** of the decompressed payload as a **NUL-padded ASCII
   `host port` string**. The buffer is zero-filled first; the 30 bytes are **not guaranteed
@@ -172,6 +217,13 @@ After decompression:
 
 > **Channel-endpoint payload (wire):** at least **30 bytes**; the first 30 are the ASCII `host port`
 > endpoint string. Any trailing fields are **UNVERIFIED**.
+>
+> **Selection-index provenance note (for `names.yaml` reconciliation).** The channel-port offset and
+> the server-list **render page/scroll** offset are two *different* window fields. An earlier dirty
+> note conflated them; the live re-read disambiguates: the **channel-port offset is its own selection
+> field**, while the render page offset is a separate UI-paging field. A fresh implementation should
+> keep "the selected server/channel index" and "the current select-screen scroll page" as distinct
+> values. This is a glossary/naming concern only — it does not change any wire byte.
 
 ---
 
@@ -206,7 +258,7 @@ Per-slot record (981 bytes total), as consumed by the handler:
 
 | Sub-offset | Size | Field | Meaning |
 |---|---|---|---|
-| 0 | 880 (0x370) | Character descriptor | The full character/spawn record; layout in `structs/spawn_descriptor.md`. Holds the display name, level, hit points, etc. |
+| 0 | 880 (0x370) | Character descriptor | The full character/spawn record; layout in `structs/spawn_descriptor.md`. Holds the display name, level, hit points, etc. The descriptor's name is compared against the empty-slot sentinel (Section 3.5). |
 | 880 | 96 (0x60) | Stats block | Per-slot stat block; layout in `structs/stats.md`. |
 | 976 | 1 | Slot flag | A per-slot flag byte (state / availability class). |
 | 977 | 4 (u32) | Slot timing | A per-slot timing value (e.g. delete-cooldown / create-time class). |
@@ -214,14 +266,17 @@ Per-slot record (981 bytes total), as consumed by the handler:
 After parsing all occupied slots, the client derives a **CP949** display name (cleaned/truncated to
 **17 bytes**) per slot, then forces the **character-select scene**.
 
-> **Slot count.** The number of slots is the population count of the bitmask. The maximum slot index
-> is **inferred to be 4 (i.e. up to 5 slots)** from the slot guards elsewhere in the client, but this
-> is **not pinned to a hard constant** here — treat 5 as a working upper bound pending capture.
+> **Slot count (now a hard constant).** The slot-parse loop is a **fixed, bounded iteration of
+> exactly 5** — it walks slot indices **0..4** and stops; it is not an open-ended scan driven only by
+> the bitmask width. The client therefore supports a **maximum of 5 character slots**. (This is
+> promoted from the earlier "inferred ≤ 5" to a firm static fact, corroborated by the slot-range
+> guard `slot ≤ 4` in the enter-game path, Section 3.5.) The number of *occupied* slots in any given
+> list is still the population count of the bitmask, but the bitmask never references a slot beyond 4.
 >
 > **Capture corroboration.** `opcodes.md` notes a prior single observation of a **1965-byte** list,
 > which equals `3 + 2 × 981` (a 3-byte header + two character slots), consistent with this shape. The
-> 981-byte stride is dispatch-path-confirmed; deeper field internals beyond the descriptor/stats
-> cross-references are **capture-unverified**.
+> 981-byte stride and the 5-slot loop bound are dispatch-path-confirmed; deeper field internals beyond
+> the descriptor/stats cross-references are **capture-unverified**.
 
 This handler is the one that **transitions** into the select scene. The management responses of
 Section 5 *refresh* an existing select scene but do not perform the transition.
@@ -234,11 +289,19 @@ minor = 9`. Known body layout:
 
 | Offset | Size | Field | Meaning |
 |---|---|---|---|
-| 0 | 1 (u8) | Selected slot index | The chosen character slot. |
+| 0 | 1 (u8) | Selected slot index | The chosen character slot (0..4). |
 | 1.. | rest of 40 | Version/token region | Zero-filled buffer into which a **client-version token** is stamped. The token is derived from a local version file (`data/cursor/game.ver`) as `10 × versionField + 9`. |
 
+**Version token (sample-verified value).** The local `data/cursor/game.ver` sample is 28 bytes = 7
+little-endian u32 fields. The token uses the **6th field** (zero-based field index 5), whose sampled
+value is **2114** (`0x0842`), giving a token of `10 × 2114 + 9 = ` **21149**. This concrete value is
+`sample_verified` against the real on-disk file. (Caveat: the reader is a parsed accessor that opens
+`game.ver` through the VFS and indexes the Nth field; field index 5 maps to the 6th u32 if the parse
+is 1:1 with the raw layout.)
+
 > The exact placement of the version token inside the 40-byte buffer is **UNVERIFIED**; only the slot
-> index at offset 0 and the 40-byte total are firmly established. Field spec:
+> index at offset 0 and the 40-byte total are firmly established. The token *value* (21149 for this
+> client build) is firm; its *offset* within the body is not. Field spec:
 > `packets/1-9_enter_game_request.yaml`.
 
 ### 3.4 Enter-game acknowledgement (3/5, S2C) and in-world transition
@@ -260,10 +323,10 @@ transitions into the **in-world game state**.
 
 On confirming a slot, before/around sending `1/9`, the client:
 
-- Guards the selection: the slot must be valid (not unselected, within range, not disabled, and not
-  already entering). If the slot's character descriptor name equals the literal sentinel
-  **`"@BLANK@"`**, the slot is **empty** and the client routes to **character creation** instead of
-  entering.
+- Guards the selection: the slot must be valid (not unselected, **within range — slot index ≤ 4**,
+  not disabled, and not already entering). If the slot's character descriptor name equals the literal
+  sentinel **`"@BLANK@"`**, the slot is **empty** and the client routes to **character creation**
+  instead of entering.
 - For a real character, it caches the chosen slot's data into the globals the world load consumes:
   the **880-byte character descriptor**, the **96-byte stats block**, and a couple of trailing
   name/flag bytes, plus a relation flag derived from the slot flag bits.
@@ -411,7 +474,9 @@ not specced here.
 
 The legacy binary's internal handler **names** for the major-3 family **disagree** with both (a) the
 dispatch arithmetic that actually routes minors to handlers, and (b) the canonical names in
-`opcodes.md`. Several handlers are **misnamed relative to the minor they are reached at**.
+`opcodes.md`. Several handlers are **misnamed relative to the minor they are reached at**, and a few
+even carry inline comments using yet a third numbering. There are therefore *three* disagreeing
+sources of truth in the binary; only the **dispatch arithmetic + the byte-level behavior** is real.
 
 **Resolution (and the rule this spec follows):**
 
@@ -429,13 +494,13 @@ The behavior-anchored opcode subset for this flow:
 
 | Opcode (major:minor) | Catalog name | Dir | Size | Behavior anchor |
 |---|---|---|---|---|
-| lobby (port 10000) | server-list | S2C | 8-byte wrapper + N×8 | `wrapper.major` = count; 8-byte records |
+| lobby (port 10000) | server-list | S2C | 8-byte wrapper + N×8 | `wrapper.major` = count; 8-byte records {id u16, status u16, load u16, open-time u16} |
 | lobby (port `10000+off`) | channel-endpoint | S2C | 8-byte wrapper + ≥30 | first 30 bytes = `host port` ASCII |
 | 0:0 | SmsgKeyExchange | S2C | 62 (cited) | RSA key material; triggers `1/4` (see `crypto.md`) |
 | 1:4 | CmsgAuthReply | C2S | var (cited) | RSA of the staged password (see `crypto.md`) |
 | 1:6 | CmsgLoginRequest | C2S | ~52 | `[0x2B][lenpfx account\0]([lenpfx opt\0])`; password via `1/4` |
-| 1:9 | CmsgEnterGameRequest | C2S | 40 | slot@0 + version token; server → `3/5` |
-| 3:1 | SmsgCharacterList | S2C | 3 + N×981 | header[srv, chan, mask] + per-slot {descriptor 880 + stats 96 + flag 1 + time 4}; enters select scene |
+| 1:9 | CmsgEnterGameRequest | C2S | 40 | slot@0 + version token (value 21149 for this build); server → `3/5` |
+| 3:1 | SmsgCharacterList | S2C | 3 + N×981 (N ≤ 5) | header[srv, chan, mask] + per-slot {descriptor 880 + stats 96 + flag 1 + time 4}; enters select scene |
 | 3:4 | SmsgCharManageResult | S2C | 8 | result + subtype + ready_time (delete cooldown) |
 | 3:5 | SmsgEnterGameAck | S2C | 44 | name + billing@28 + char_count@40; transitions to in-world |
 | 3:6 | SmsgRenameCharResult | S2C | 19 | result + (error code \| new name ASCIIZ[18]) |
@@ -456,18 +521,24 @@ The behavior-anchored opcode subset for this flow:
 | Login sub-opcode byte | **`0x2B` (43)** | First payload byte of the `1/6` login blob. |
 | Channel-endpoint copy length | **30 (0x1E) bytes** | The leading `host port` ASCII string. |
 | Server-list record size | **8 bytes** | Count = `wrapper.major`. |
+| Server-list record fields | id u16 @+0 (1..40), status u16 @+2, load u16 @+4, open-time u16 @+6 | See Section 2.1. |
+| Server-list load thresholds (UI color) | **1200 / 800 / 500** | Client-side load-gauge coloring (presentation only). |
+| Server-list status sentinels (UI) | **3** (open-time scheduled), **24** (preparing/check), **100** (current selection) | Client-side render special cases (presentation only). |
+| Server-name table | **41 entries**, indexed by `server_id` (+0) | Client-local localized names; **not on the wire**. |
 | Char-list per-slot record | **981 bytes** | 880 descriptor + 96 stats + 1 flag + 4 timing. |
 | Char-list header | **3 bytes** | server-id, channel-id, slot bitmask. |
+| Char-list maximum slots | **5** (slot indices 0..4) | Hard loop bound; also the enter-game slot-range guard (`slot ≤ 4`). |
 | Display-name length (char list) | **17 bytes** | CP949, cleaned/truncated. |
 | EnterGameRequest body (1/9) | **40 (0x28) bytes** | Slot index at offset 0. |
+| Version token | `10 × versionField + 9` = **21149** (this build) | Derived from `data/cursor/game.ver` (field index 5 = 2114). `sample_verified`. |
 | EnterGameAck (3/5) | **44 bytes** | 40-byte block + trailing char-count u32; billing u32 @ +28. |
 | CharCreateResult (3/23) | **12 bytes** | — |
 | CharSpawnResult (3/7) | **16 bytes** | — |
 | CharManageResult (3/4) | **8 bytes** | — |
 | RenameCharResult (3/6) | **19 bytes** | Name field up to 18 bytes incl. NUL. |
 | Char error-code range (create/rename UI strings) | **`0xC8..0xD4`** (200..212) | Mapped to UI strings. |
-| Version token | `10 × versionField + 9` | Derived from `data/cursor/game.ver`. |
-| Empty-slot sentinel | literal **`"@BLANK@"`** | Marks an unoccupied slot in the descriptor name. |
+| Empty-slot sentinel | literal **`"@BLANK@"`** | Marks an unoccupied slot in the descriptor name; routes to character creation on confirm. |
+| game.ver sample | 28 bytes, 7 LE u32: `[4, 31, 35, 1027, 52, 2114, 8]` | Real on-disk sample; field index 5 = 2114 pins the version token. |
 
 > Text encoding note: every name/string field above that originates from the Korean client is
 > **CP949 (EUC-KR superset)** on the wire. Wire structs use fixed byte buffers (`bytes[N]` →
@@ -495,25 +566,34 @@ The behavior-anchored opcode subset for this flow:
 
 ## 9. UNVERIFIED / open items (capture needed)
 
-1. **Lobby server-list record internals** — the 8 bytes per record (server id / load / status). Only
-   the 8-byte stride and `count = wrapper.major` are firm.
-2. **Lobby channel-endpoint payload** beyond "first 30 bytes = `host port` ASCII" (any trailing
+1. **Lobby server-list record `open_time` (+6) packing** — only the `status_code == 3` render path
+   uses it (`×10` hour/min split); the exact packing is inferred, not pinned. The 8-byte stride,
+   `count = wrapper.major`, and the id/status/load field positions are firm; the open-time encoding is
+   not. Lobby capture required.
+2. **Lobby server-list `status_code` (+2) full enum** — values **3 / 24 / 100** are special-cased in
+   render; the meaning of other in-range values (beyond "valid index") is not enumerated. Capture
+   required.
+3. **Lobby channel-endpoint payload** beyond "first 30 bytes = `host port` ASCII" (any trailing
    fields).
-3. **Login blob (1/6)** exact length-prefix width and whether the optional middle string is always
+4. **Login blob (1/6)** exact length-prefix width and whether the optional middle string is always
    present. Re-probe the send site before committing a struct. (`opcodes.md` already flags `~52B`;
    no `packets/*.yaml` authored here.)
-4. **Enter-game request (1/9)** exact byte layout of the 40-byte body beyond slot@0 — specifically the
-   version-token offset.
-5. **Enter-game ack (3/5)** internals of the 40-byte leading block beyond name@0 and billing u32 @+28.
-6. **Char-spawn result (3/7)** meaning of the three trailing spawn-param u32s.
-7. **Char-manage result (3/4)** subtype 0 / 1 semantics (only subtype 2 = delete-confirm is inferred).
-8. **Character-list maximum slot count** — inferred ≤ 5 (max slot index 4); not pinned to a hard
-   constant.
-9. **Opcode-naming inconsistency** (Section 6) — legacy handler names disagree with the dispatch
-   arithmetic and `opcodes.md`. Anchored to behavior + `opcodes.md` here; flagged for `names.yaml`
-   review. Do **not** promote minor→name mappings from legacy names.
-10. **No live capture was loaded for this analysis.** All offsets/sizes are static reads. The lobby
-    (port-10000) mini-protocol in particular has **no capture corroboration at all**.
+5. **Enter-game request (1/9)** exact byte **offset** of the version token inside the 40-byte body
+   (the token *value* 21149 is pinned from the real `game.ver`; its placement is not). Other body
+   bytes beyond slot@0.
+6. **Enter-game ack (3/5)** internals of the 40-byte leading block beyond name@0 and billing u32 @+28.
+7. **Char-spawn result (3/7)** meaning of the three trailing spawn-param u32s.
+8. **Char-manage result (3/4)** subtype 0 / 1 semantics (only subtype 2 = delete-confirm is inferred).
+9. **Selection-index vs. render-page field separation** (Section 2.2) — the channel-port selection
+   index and the select-screen render-page offset are distinct window fields; an earlier note
+   conflated them. Naming/glossary concern, flagged for `names.yaml`; no wire impact.
+10. **Opcode-naming inconsistency** (Section 6) — legacy handler names disagree with the dispatch
+    arithmetic and `opcodes.md`. Anchored to behavior + `opcodes.md` here; flagged for `names.yaml`
+    review. Do **not** promote minor→name mappings from legacy names.
+11. **No live network capture was loaded for this analysis.** All wire offsets/sizes are static reads;
+    the only real-byte corroboration is the local `data/cursor/game.ver` file (item 5 / Section 3.3).
+    The lobby (port-10000) mini-protocol in particular has **no network-capture corroboration at
+    all.** `capture_verified: false`; `sample_verified: partial` (game.ver only).
 
 ---
 
@@ -521,9 +601,17 @@ The behavior-anchored opcode subset for this flow:
 
 - Process/socket boundary, two-surface model, lobby protocol shape, base port, fallback IP, and the
   end-to-end ordered flow: **HIGH confidence** (static).
+- Lobby server-list 8-byte record decode (id / status / load + thresholds / sentinels): **MEDIUM–HIGH**
+  (static, from the render path + a debug literal; `open_time` packing and the full status enum are
+  capture-unverified).
 - Handshake (`0/0` → `1/4`) and credential staging: **HIGH confidence** (cited — `specs/crypto.md`).
-- Character-list 981-byte slot stride and the major-3 response sizes (3/1, 3/4, 3/5, 3/6, 3/7, 3/23):
-  **MEDIUM–HIGH** (dispatch-confirmed sizes; field internals capture-unverified).
+- Character-list 981-byte slot stride **and the hard 5-slot loop bound**; the major-3 response sizes
+  (3/1, 3/4, 3/5, 3/6, 3/7, 3/23): **MEDIUM–HIGH** (dispatch-confirmed sizes / bound; field internals
+  capture-unverified).
 - Login-blob (1/6) and enter-game-request (1/9) body internals: **MEDIUM** (totals firm; layouts
-  partly unverified).
-- End-to-end confirmation against captures: **not performed.** `capture_verified: false`.
+  partly unverified). Enter-game **version token value 21149**: **HIGH** (`sample_verified` from the
+  real `game.ver`).
+- End-to-end confirmation against network captures: **not performed.** `capture_verified: false`;
+  `sample_verified: partial` (local `game.ver` only).
+</content>
+</invoke>

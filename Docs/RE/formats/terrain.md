@@ -14,6 +14,13 @@
 | `binary_analysed`  | `doida.exe` (legacy 32-bit client build) |
 | `confidence`       | Fields labelled CONFIRMED are corroborated by parser read-sequence and/or real sample bytes. Fields labelled VERIFIED are confirmed directly by observed sample data. PARTIAL means size or existence is confirmed but field semantics are uncertain. UNVERIFIED means inferred from call-site context only. |
 
+**Recently promoted (2026-06-12):** The `.mud` per-tile sound-index targets (which in-memory sound
+table each byte indexes), the `.ted` texture-index reference chain (block 3), the `.ted`
+direction-flag bit mapping (block 4), the `.ted` diffuse alpha byte semantic (block 5), and the
+full internal layout of the `.sod` 48-byte collision record (now read as four XZ corners, not a
+slope-intercept line) are all sample- and read-sequence-confirmed and flipped to VERIFIED/CONFIRMED
+below. See sections 5.6–5.8, 6.2 and 11.3.
+
 ---
 
 ## Overview
@@ -346,40 +353,85 @@ to that offset before patching the diffuse block.
 - Values are **1-based** (no zero observed in any sample; maximum observed is 11).
 - The `.map` `GRID 16` directive matches this 16 × 16 subdivision factor exactly.
 - **Semantic:** each byte selects the background texture for the corresponding 4 × 4 quad region.
-  The index most likely refers to the per-tile `TEXTURES{}` list in the `.map` file (1-based
-  position in that list), though an alternative interpretation as a direct `bgtexture.lst` pool
-  index cannot be excluded without a sample pairing a `.map` file with 11+ TEXTURES entries
-  against its `.ted`. PARTIAL confidence on the exact reference target.
+  The value is a **1-based position into the per-cell texture list** that the section builds from
+  the `.map` file's `TEXTURES {}` block, and that list in turn holds indices into the global
+  `bgtexture.lst` pool. The full resolution chain is therefore two hops:
+
+  ```
+  texture_index_byte (1-based)
+    -> per_cell_texture_list[byte - 1]   (built from the .map TEXTURES{} entries, capacity 128)
+    -> bgtexture.lst[pool_slot]          (global texture pool loaded at startup)
+  ```
+
+  CONFIRMED: the loader stashes each registered texture into the section's per-cell array as the
+  `.map` is parsed, and stores this block-3 byte alongside each tile for later lookup against that
+  array. The two-hop resolution (per-cell list, then global pool) is confirmed; the per-cell list
+  caps at 128 entries. Sample `d036` exercises values 1..11 across distinct texture zones; `d000`
+  uses only value 1.
+- **Value 0:** no sample tile carries value 0. A 0 byte would be an invalid 1-based index and is
+  read as "no texture override / fallback"; this fallback meaning is PARTIAL (inferred, not yet
+  seen in a sample).
 
 ### 5.7 Block 4 — Quad split / UV orientation flags
 
-- 256 unsigned bytes forming a **16 × 16 grid**, same coverage as block 3.
-- Observed values: 0, 1, 2, 3 only (2 bits semantically used).
-- **Bit 0** and **bit 1** each control the UV/texture coordinate orientation for one of the two
-  triangles formed by the diagonal split of a quad. Together the two bits select from four
-  possible UV orientations.
-- Exact mapping of bit values to geometric diagonal direction and UV winding is UNVERIFIED.
-  The client error string names this block "direction map".
+- 256 unsigned bytes forming a **16 × 16 grid**, same coverage as block 3 (one byte per 4 × 4 quad
+  patch).
+- Only the two least-significant bits are used; observed values are 0, 1, 2, 3 only.
+- **Bit-to-axis mapping** (CONFIRMED from the UV-generation path):
+
+  | Mask  | Name     | Effect when set                                              |
+  |-------|----------|-------------------------------------------------------------|
+  | `0x01`| `s_flip` | Mirror the S (horizontal, U) texture coordinate of the patch |
+  | `0x02`| `t_flip` | Mirror the T (vertical, V) texture coordinate of the patch  |
+
+- **UV generation:** within each patch the loader walks the 5 × 5 vertices and assigns a UV
+  fraction `f = vertex_offset × 0.25` (stepping 0.0, 0.25, 0.5, 0.75, 1.0). When `s_flip` is set,
+  the S coordinate becomes `1.0 − f`; otherwise it is `f`. The same rule applies to T using
+  `t_flip`. The four bit combinations therefore are:
+
+  | Value | S axis            | T axis            |
+  |-------|-------------------|-------------------|
+  | `0b00`| forward           | forward           |
+  | `0b01`| mirrored          | forward           |
+  | `0b10`| forward           | mirrored          |
+  | `0b11`| mirrored          | mirrored          |
+
+- **Diagonal note:** because the texture seam follows the UV orientation, the flip combination also
+  determines the visual diagonal of the two-triangle quad split when the patch is rendered. The
+  client error string names this block "direction map". The S/T flip mapping is CONFIRMED; whether
+  a specific combination additionally re-selects the triangulation diagonal versus only re-orienting
+  the texture is PARTIAL.
 
 ### 5.8 Block 5 — Per-vertex diffuse colour
 
 - 4 225 four-byte RGBA quads, one per vertex, same row-major order as block 1.
-- **Channel order: R, G, B, A** (not ARGB). CONFIRMED.
+- **Channel order: R at +0, G at +1, B at +2, A at +3** (RGBA, not ARGB). CONFIRMED — the editor
+  write path fills the three colour bytes individually at those aligned offsets.
 - All three available samples contain exclusively `(R=255, G=255, B=255, A=0)` across all
-  vertices — the default unset state.
-- **On-disk encoding:** the editor writer multiplies each raw colour byte by 0.5 before storing
-  to disk; the loader multiplies by 0.5 at runtime to recover the intended value (i.e. the stored
-  byte equals twice the logical value). This 2× scaling is code-confirmed but not
-  sample-verified (all samples contain uninformative all-white content).
-- **Alpha semantic:** A=0 in samples. Whether alpha=0 means "no colour override" or "unmodulated
-  white multiplier" is UNVERIFIED.
+  vertices — the default unset (pure-white) state.
+- **Alpha byte (+3):** the A byte is **0x00 in every sampled vertex and is never read by the
+  runtime loader**. It is alignment padding emitted by the editor to keep each pixel 4-byte aligned,
+  not a meaningful channel. CONFIRMED (zero across all samples; no runtime read path consumes it).
+  Any modern re-encoder should write A as 0 and must not depend on it.
+- **On-disk 2× / load-time 0.5× encoding:** the editor doubles each colour byte on write
+  (`stored = 2 × source`) and the loader halves it on read (`output = stored × 0.5`), so the
+  round-trip is identity. The runtime halving deliberately leaves brightness headroom so that
+  dynamic lighting can add up to full white at draw time. This scaling is code-confirmed; it is not
+  independently sample-verified because all available samples are uniform white, where the 2×
+  relationship is unobservable (255 is not exactly 2 × any stored byte). Treat the 2× factor as
+  CONFIRMED-by-code / PARTIAL-by-sample.
 
 ### 5.9 Known unknowns
 
-- Block 3 reference target: does the 1-based index point into the per-tile `TEXTURES{}` list or
-  directly into the `bgtexture.lst` pool?
-- Block 4 bit-to-geometry mapping: which bit governs which diagonal, and what UV winding results?
-- Block 5 alpha semantic and 2× storage encoding, pending a sample with actual per-vertex colour.
+- Block 3 reference target: RESOLVED — the 1-based byte indexes the per-cell `TEXTURES{}` list,
+  which itself indexes the global `bgtexture.lst` pool (§5.6). Open (PARTIAL): the fallback meaning
+  of a value-0 byte, never seen in a sample.
+- Block 4 flag mapping: RESOLVED for texture orientation — bit `0x01` mirrors S (U), bit `0x02`
+  mirrors T (V) (§5.7). Open (PARTIAL): whether a flip combination also re-selects the quad
+  triangulation diagonal rather than only re-orienting the texture.
+- Block 5 alpha: RESOLVED — the A byte is alignment padding, always 0, never read (§5.8). The 2×
+  store / 0.5× load scaling is code-confirmed but stays sample-unverified until a tinted (non-white)
+  tile is captured.
 - World-unit-to-physical-scale relationship (1024 wu per cell = ? metres).
 
 ---
@@ -421,21 +473,29 @@ All fields are single bytes; endianness is not material.
 |-------:|-----:|-------|-----------------|----------------------|------------|-------|
 | 0      | 1    | u8    | `pad0`          | `0x00` only          | VERIFIED   | Always zero across all 3 samples (12 288 observations); no code reads this byte |
 | 1      | 1    | u8    | `pad1`          | `0x00` only          | VERIFIED   | Always zero; no code reads this byte |
-| 2      | 1    | u8    | `music_group`   | 0, 7                 | VERIFIED   | Indexes the music/BGM table (stride 48 bytes per entry). Value 0 = no music |
-| 3      | 1    | u8    | `ambient_idx_0` | 0, 2, 3, 16          | VERIFIED   | Indexes the ambient-sound table (stride 48 bytes per entry). First of two ambient slots. Value 0 = no sound |
-| 4      | 1    | u8    | `ambient_idx_1` | 0, 17                | VERIFIED   | Same table as byte 3. Second ambient slot. Value 0 = no sound |
-| 5      | 1    | u8    | `effect_idx_0`  | 0, 57, 58, 91, 106   | VERIFIED   | Indexes the terrain-effect sound table (stride 48 bytes per entry). First of three effect slots. Value 0 = no sound |
-| 6      | 1    | u8    | `effect_idx_1`  | 0, 91, 106           | VERIFIED   | Same table as byte 5. Second effect slot. Value 0 = no sound |
-| 7      | 1    | u8    | `effect_idx_2`  | `0x00` only          | VERIFIED (limited) | Same table. Third effect slot. Always zero in available samples; slot exists (loop runs 3 iterations) but may be unused |
+| 2      | 1    | u8    | `music_group`   | 0, 7                 | VERIFIED   | 1-based index into the per-area **background-music (BGM) sound table**. Value 0 = no music. Lookup is `table[index]`; entry stride is 48 bytes and the entry's first field is the playable sound resource handle |
+| 3      | 1    | u8    | `ambient_idx_0` | 0, 2, 3, 16          | VERIFIED   | Index into the per-area **ambient-loop (BGE) sound table** (48-byte stride). First of two ambient slots. Value 0 = no sound. In samples this slot pairs consistently with the value 16 when active |
+| 4      | 1    | u8    | `ambient_idx_1` | 0, 17                | VERIFIED   | Same ambient table as byte 3. Second ambient slot. Value 0 = no sound. Pairs with value 17 when active in samples |
+| 5      | 1    | u8    | `effect_idx_0`  | 0, 57, 58, 91, 106   | VERIFIED   | Index into the per-area **event-effect (EFF) sound table** (48-byte stride). First of three effect slots. Value 0 = no sound |
+| 6      | 1    | u8    | `effect_idx_1`  | 0, 91, 106           | VERIFIED   | Same EFF table as byte 5. Second effect slot. Value 0 = no sound. Non-zero values (91, 106) occur in samples, so this slot is genuinely used |
+| 7      | 1    | u8    | `effect_idx_2`  | `0x00` only          | VERIFIED (limited) | Same EFF table. Third effect slot. The slot is read (the player loop runs three iterations) but is `0` in every sampled tile, so no non-zero value is yet observed |
 
-**Sound table strides:** each of the three in-memory sound tables uses a 48-byte (0x30) stride
-per entry. The first field in each entry is used as a sound resource handle by the play-sound
-callers; remaining entry fields are UNVERIFIED.
+**Sound tables referenced:** the position-driven ambient update reads exactly three of the
+per-area sound tables — the BGM (music) table via byte 2, the BGE (ambient-loop) table via bytes
+3–4, and the EFF (event-effect) table via bytes 5–7. Each table holds up to 256 entries at a
+48-byte (0x30) stride; the first field of an entry is the playable sound resource handle and the
+remaining entry fields are UNVERIFIED. Two further per-area sound tables exist (a walk table and a
+run table) but are **not** indexed from the `.mud` grid in the analysed path — footstep sounds
+appear to be driven by movement/animation events rather than per-tile lookup, which is the leading
+explanation for why bytes 0–1 are unused (see §6.3).
 
 ### 6.3 Known unknowns
 
-- `pad0` and `pad1` purpose: always zero with no observed read; could be version fields, legacy
-  padding, or used by a code path not present in available samples.
+- `pad0` and `pad1` (bytes 0–1) purpose: always zero across all 12 288 sampled tiles and never
+  read by the analysed ambient-update path. The leading hypothesis is that they are simply unused
+  (a per-tile walkable-surface or footstep-sound flag that the movement system would have consumed
+  was not found in the cell-lookup path; footstep audio appears event-driven). They could
+  alternatively be reserved/version padding. PARTIAL — only zero values are available.
 - `effect_idx_2` non-zero values: the loop slot exists but is zero in all samples.
 - Maximum valid sound index (highest observed: 106 for `effect_idx_0`; theoretical maximum: 255).
 - Whether row 0 corresponds to world-min-Z or world-max-Z (the index formula is confirmed, but
@@ -647,21 +707,30 @@ File:
   u32le           solidCount
   SolidRecord[solidCount]          — fixed stride 108 bytes each
   — then, for each SolidRecord i in [0, solidCount):
-  u32le           segmentCount_i
-  SegmentRecord[segmentCount_i]    — fixed stride 48 bytes each
+  u32le           quadCount_i
+  QuadRecord[quadCount_i]          — fixed stride 48 bytes each
 ```
 
-**Important:** the per-solid `segmentCount` u32le appears in the data stream **after** the entire
-flat `SolidRecord` array, interleaved with its corresponding `SegmentRecord` array. It is NOT
-embedded before the matching `SolidRecord`. A redundant copy of the count is also stored inside
-the `SolidRecord` at byte offset +060, but the parser reads the stream copy; that internal copy
-is overwritten at runtime.
+The 48-byte record is the unit of collision geometry. The game code calls these records
+"triangles" internally (and the per-solid count field "triCount"), but each on-disk record actually
+stores **four XZ corner points** of a 2D quad plus four trailing scalars (see §11.3). This spec
+calls them **collision quads** to avoid confusion with 3D triangle meshes.
+
+**Important:** the per-solid `quadCount` u32le appears in the data stream **after** the entire flat
+`SolidRecord` array, interleaved with its corresponding `QuadRecord` array. It is NOT embedded
+before the matching `SolidRecord`. A redundant copy of the count is also stored inside the
+`SolidRecord` at byte offset +060, but the parser reads the stream copy; the internal copy is
+overwritten at runtime with a heap pointer.
 
 File size formula (all three samples verified with zero remainder):
 
 ```
-file_size = 4 + solidCount × (108 + 4 + segmentCount × 48)
+file_size = 4 + solidCount × (108 + 4 + quadCount × 48)
 ```
+
+Worked sample sizes (zero remainder): a 1-solid / 4-quad cell is `4 + (108 + 4 + 4 × 48) = 308`
+bytes; a 1-solid / 3-quad cell is `4 + (108 + 4 + 3 × 48) = 260` bytes. Both match their samples
+exactly.
 
 ### 11.2 SolidRecord — 108 bytes (0x6C)
 
@@ -670,55 +739,71 @@ file_size = 4 + solidCount × (108 + 4 + segmentCount × 48)
 | +000   | 4    | f32le | `aabb_xmin`               | AABB minimum X; used by AABB overlap test                             | VERIFIED   |
 | +004   | 4    | f32le | `aabb_zmin`               | AABB minimum Z                                                        | VERIFIED   |
 | +008   | 4    | f32le | `aabb_xmax`               | AABB maximum X                                                        | VERIFIED   |
-| +012   | 4    | f32le | `aabb_zmax`               | AABB maximum Z; AABB equals union of all owned SegmentRecord AABBs    | VERIFIED   |
-| +016   | 44   | —     | `_reserved_a`             | All zero on disk in all samples; purpose unknown                      | UNVERIFIED |
-| +060   | 4    | u32le | `segment_count_embedded`  | Redundant copy of stream segmentCount; overwritten at runtime; parser reads stream copy | PARTIAL |
-| +064   | 4    | u32le | `unknown_id`              | Non-zero in all samples; overwritten at runtime by the heap pointer to the SegmentRecord array; file-format semantic unknown (possibly a surface-material ID or cell hash) | UNVERIFIED |
-| +068   | 40   | —     | `_reserved_b`             | All zero on disk; used at runtime as a visited-frame-tag cache (not file data) | UNVERIFIED |
+| +012   | 4    | f32le | `aabb_zmax`               | AABB maximum Z; AABB equals the union of all owned QuadRecord AABBs    | VERIFIED   |
+| +016   | 44   | —     | `_reserved_a`             | All zero on disk across every sample (including two cells with identical geometry under different map IDs, byte-for-byte equal). Not read by any analysed routine; purpose unknown | VERIFIED (all-zero) / UNVERIFIED (meaning) |
+| +060   | 4    | u32le | `quad_count_embedded`     | Redundant copy of the per-solid quad count; parser reads the separate stream copy instead and overwrites this slot at runtime with the count it allocated | VERIFIED (equals stream count in all samples) |
+| +064   | 4    | u32le | `_authoring_ptr`          | **Stale heap pointer left over from the authoring machine** — differs between cells, is a plausible 32-bit address, and is overwritten at load with the runtime pointer to the quad array. Carries no file-format meaning; a parser MUST ignore it | VERIFIED (stale pointer) |
+| +068   | 40   | —     | `_reserved_b`             | All zero on disk in every sample; repurposed at runtime as a scratch/visited-frame cache (not file data) | VERIFIED (all-zero) / UNVERIFIED (meaning) |
 
-### 11.3 SegmentRecord — 48 bytes (0x30)
+### 11.3 QuadRecord — 48 bytes (0x30)
 
-Each SegmentRecord encodes a 2D collision line segment in the XZ plane using an axis-aligned
-bounding box for fast rejection and a slope-intercept equation for exact intersection.
+> **Correction (2026-06-12):** an earlier revision of this spec described the 48-byte record as a
+> slope-intercept *line segment* (`slope`/`intercept`/`lineKind` fields). Direct inspection of the
+> sample bytes shows that interpretation was wrong: the first 32 bytes are **four explicit XZ
+> corner points** that form a closed quad whose extents reproduce the parent `SolidRecord` AABB
+> exactly. The corner layout below supersedes the line-segment reading. The four trailing scalars
+> at +032..+047 remain only partly understood.
 
-| Offset | Size | Type  | Field              | Notes                                                                   | Confidence |
-|-------:|-----:|-------|--------------------|-------------------------------------------------------------------------|------------|
-| +000   | 4    | f32le | `seg_xmin`        | AABB minimum X; used by point-in-AABB and AABB-overlap tests            | VERIFIED   |
-| +004   | 4    | f32le | `seg_zmin`        | AABB minimum Z                                                          | VERIFIED   |
-| +008   | 4    | f32le | `seg_xmax`        | AABB maximum X                                                          | VERIFIED   |
-| +012   | 4    | f32le | `seg_zmax`        | AABB maximum Z                                                          | VERIFIED   |
-| +016   | 4    | f32le | `corner_c_x`      | Third corner X; always one of {xmin, xmax} in samples; no active collision code reads this offset | PARTIAL |
-| +020   | 4    | f32le | `corner_c_z`      | Third corner Z; always one of {zmin, zmax}                              | PARTIAL    |
-| +024   | 4    | f32le | `corner_d_x`      | Fourth corner X                                                         | PARTIAL    |
-| +028   | 4    | f32le | `corner_d_z`      | Fourth corner Z                                                         | PARTIAL    |
-| +032   | 4    | f32le | `slope`           | `m` in `Z = m × X + b`; zero for vertical segments (`lineKind` = 1)   | VERIFIED   |
-| +036   | 4    | f32le | `verticalX`       | For vertical segments: the constant X coordinate. For non-vertical: 0.0 in samples | PARTIAL |
-| +040   | 4    | f32le | `intercept`       | `b` in `Z = m × X + b`; 0.0 for vertical segments                      | VERIFIED   |
-| +044   | 4    | u32le | `lineKind`        | Orientation discriminator: 0 = oblique (slope-intercept form), 1 = vertical (X = constant). All samples have lineKind = 0 | PARTIAL |
+Each record stores one 2D collision quad in the XZ world-space plane as four corner points,
+followed by four scalars. There is no Y (height) component — collision is evaluated in XZ at the
+solid's elevation. The engine names the count field "triangle count" and may split each quad into
+two triangles at runtime; the split diagonal is not determined from the available code.
 
-**Line equation:** for `lineKind = 0`, intersection is tested as `Z = slope × X + intercept`.
-For `lineKind = 1`, the segment is a vertical line at `X = verticalX`. The `lineKind = 1` path
-is code-confirmed but no vertical segment appears in any sample.
+| Offset | Size | Type  | Field    | Notes                                                                          | Confidence |
+|-------:|-----:|-------|----------|--------------------------------------------------------------------------------|------------|
+| +000   | 4    | f32le | `x0`     | Corner 0 world X                                                                | VERIFIED   |
+| +004   | 4    | f32le | `z0`     | Corner 0 world Z                                                                | VERIFIED   |
+| +008   | 4    | f32le | `x1`     | Corner 1 world X                                                                | VERIFIED   |
+| +012   | 4    | f32le | `z1`     | Corner 1 world Z                                                                | VERIFIED   |
+| +016   | 4    | f32le | `x2`     | Corner 2 world X                                                                | VERIFIED   |
+| +020   | 4    | f32le | `z2`     | Corner 2 world Z                                                                | VERIFIED   |
+| +024   | 4    | f32le | `x3`     | Corner 3 world X                                                                | VERIFIED   |
+| +028   | 4    | f32le | `z3`     | Corner 3 world Z                                                                | VERIFIED   |
+| +032   | 4    | f32le | `plane0` | Trailing scalar 0. Non-zero and varies between quads; candidate: a plane-equation coefficient or a Y surface height. Sample magnitude is in the tens (e.g. ≈ −27) | PARTIAL |
+| +036   | 4    | f32le | `plane1` | Trailing scalar 1. `0.0` in every sampled quad | PARTIAL |
+| +040   | 4    | f32le | `plane2` | Trailing scalar 2. Non-zero, large magnitude (e.g. in the thousands); candidate: the other plane coefficient or a plane-distance term | PARTIAL |
+| +044   | 4    | f32le | `plane3` | Trailing scalar 3. `0.0` in every sampled quad | PARTIAL |
 
-**Slope verification:** all 7 sample segments are non-vertical. Computing `Z(x) = slope × x +
-intercept` at the AABB corner X values reproduces the stored AABB Z values within 0.18 world
-units (float rounding).
+**Corner verification:** the four XZ corners of each sampled quad form a geometrically valid
+rectangle whose min/max X and Z equal the owning `SolidRecord` AABB to within float rounding. This
+was confirmed for all four quads of the 4-quad sample cell and all three quads of the 3-quad sample
+cell — the corners are unambiguously world-space XZ positions, not line-equation parameters.
 
-**Terminology note:** the game code refers to these records internally as "triangles" (using
-`triCount` for the count field), but the geometry is 2D line segments in XZ. The term "segment"
-is used in this spec to avoid confusion with 3D triangle meshes.
+**Trailing scalars (+032..+047):** the alternating non-zero / zero pattern (`plane0`, `0`,
+`plane2`, `0`) is consistent with a packed plane representation such as `(a, b, c, d)` for a
+`a·x + b·z = d` style edge plane, or with a `(normal, distance)` pair, but the exact meaning is
+not yet pinned to a runtime read. Treat +032..+047 as PARTIAL.
+
+**Terminology note:** the game code calls these records "triangles" (count field "triCount"). The
+on-disk record is a four-corner XZ quad; this spec uses "quad" to avoid confusion with 3D triangle
+meshes. Whether the runtime tests one quad or two split triangles per record — and how the diagonal
+is chosen — is not confirmed.
 
 ### 11.4 Known unknowns for `.sod`
 
 - `SolidRecord` bytes +016..+059 (`_reserved_a`, 44 bytes): always zero in all samples; purpose
-  unknown. Could be padding or additional spatial metadata for multi-solid files.
-- `SolidRecord` byte +064 (`unknown_id`): non-zero on disk, overwritten at runtime. File-level
-  semantic unknown.
-- `SegmentRecord` bytes +016..+031 (corners c and d): AABB corner values in varying winding order;
-  no active collision function reads these. Likely redundant precomputed corner data or padding.
-- Vertical segments (`lineKind = 1`): interpretation of `verticalX` at +036 is inferred from the loader only,
-  not sample-verified.
-- All available samples have `solidCount = 1`. Behaviour with multiple solids is sample-unverified.
+  unknown. Could be padding or additional spatial metadata (for example a Y / height range) that
+  only appears in files not present in the sample set.
+- `SolidRecord` byte +064 (`_authoring_ptr`): identified as a stale authoring-machine heap pointer
+  (overwritten at load); it carries no portable file meaning, but its 4-byte slot must still be
+  skipped by a parser.
+- `QuadRecord` trailing scalars +032..+047 (`plane0..plane3`): the alternating non-zero / zero
+  pattern suggests a packed plane equation or a normal-plus-distance pair, but no runtime read has
+  been tied to a concrete interpretation. Needed to support exact (non-AABB) collision response.
+- `QuadRecord` quad-to-triangle split: whether the runtime tests the four-corner quad directly or
+  splits it into two triangles, and which diagonal it picks, is unknown.
+- All available samples have `solidCount = 1`. Behaviour with multiple solids per cell is
+  sample-unverified.
 
 ---
 
@@ -811,16 +896,17 @@ The following items remain unverified and represent the highest-risk unknowns fo
    suggests by routing to the same loader) or `.exd` blobs (as sample file naming implies)?
    Needs a `.map` file containing an `EXTRA_TERRAIN` section.
 
-2. **`.ted` block 3 reference target:** Does the 1-based texture index point into the per-tile
-   `TEXTURES{}` list or directly into the `bgtexture.lst` pool? Needs a `.map` + `.ted` pair
-   with 11 or more `TEXTURES` entries.
+2. **`.ted` block 3 reference target:** RESOLVED — the 1-based texture index resolves first into
+   the per-cell `TEXTURES{}` list, then into the global `bgtexture.lst` pool (§5.6). Remaining
+   sub-question (PARTIAL): the fallback meaning of a value-0 byte, never seen in a sample.
 
-3. **`.ted` block 4 bit-to-geometry mapping:** Which bit governs which diagonal split direction,
-   and what UV winding does each combination produce?
+3. **`.ted` block 4 bit-to-geometry mapping:** RESOLVED for texture orientation — bit `0x01`
+   mirrors S (U), bit `0x02` mirrors T (V) (§5.7). Remaining sub-question (PARTIAL): whether a flip
+   combination also re-selects the quad triangulation diagonal versus only re-orienting the texture.
 
-4. **`.ted` block 5 alpha and 2× encoding:** All samples hold uninformative all-white content.
-   A tile with actual per-vertex colour data is needed to confirm the 2× storage scaling and
-   the alpha=0 semantic.
+4. **`.ted` block 5 alpha and 2× encoding:** Alpha byte RESOLVED — it is 4-byte alignment padding,
+   always 0, never read (§5.8). The 2× store / 0.5× load scaling is code-confirmed; it stays
+   sample-unverified because all samples are uniform white. A tinted tile would close the loop.
 
 5. **`.bud` vertex bytes 12–31:** The five f32le values per vertex beyond XYZ are unconfirmed.
 
@@ -830,8 +916,9 @@ The following items remain unverified and represent the highest-risk unknowns fo
 7. **`.sod` `SolidRecord` bytes +016..+059:** Always zero in single-solid samples; purpose may
    become apparent in files with `solidCount > 1`.
 
-8. **`.sod` vertical segments (`lineKind = 1`):** Interpretation of `verticalX` at +036 is
-   code-inferred; no sample-verified vertical segment exists.
+8. **`.sod` `QuadRecord` trailing scalars (+032..+047):** RESOLVED that the first 32 bytes are
+   four XZ corners (§11.3); the four trailing scalars (`plane0..plane3`) still need a runtime read
+   tied to them before exact (non-AABB) collision can be reproduced.
 
 9. **`.gad` format:** Loader is a no-op stub; purpose and format entirely unknown.
 

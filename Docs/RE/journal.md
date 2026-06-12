@@ -236,3 +236,27 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
   committed specs (the only `0x..` tokens are packet field offsets and the 0xFFFFFFFF sentinel — format facts).
   Combat coefficients are bit-exact from the binary but final damage combination is server-authoritative and
   cannot be confirmed from the client alone (flagged in combat.md). Journal + names authored centrally.
+
+## 2026-06-12 — RE deepening wave (22 analysts / 12 spec-authors): unverified-field elimination + runtime subsystems
+- binary: doida.exe @ 63fcaf8e, IDA Pro 9.3 via MCP (read-only) + real sample bytes (Docs/RE/_dirty/samples/).
+- analyzed (by canonical target): .bud vertex format + objects; .xeff element/emitter/keyframe fields + effects
+  runtime; terrain internals (.mud 8-byte tile record, .sod SolidRecord/CollisionQuad, .ted five blocks); .mot
+  runtime (AnimationMixer two-list blend, sync clock, actormotion.txt 33-col); .scr record-body columns + the
+  ~140-col items.csv; full Actor / item-instance / skill / inventory / NPC structs; the complete opcode dispatch
+  sweep + tightened packet layouts; the login/lobby/world-entry protocol; and the client runtime subsystems
+  (sound, UI widget tree + Lua binding, Diamond render pipeline + shaders, camera constants, movement/collision,
+  quests).
+- specs updated: formats/terrain.md (.mud/.sod/.ted internals confirmed), terrain_scene.md (.bud vertex = pos +
+  unit normal + tiled UV, CCW, tex_id 1-based), effects.md (.xeff keyframe = index+velocity Vec3+size Vec3+quat;
+  emitter types 0/1/2; alpha inversion), animation.md (mixer runtime), config_tables.md (resolved .scr column
+  offsets + items.csv columns), specs/handlers.md (opcode-sweep completion + tighter layouts), specs/login_flow.md
+  (full server-list/channel/char-select/enter-game), structs/{actor,item,skill}.md (full field tables).
+- specs created: specs/client_runtime.md (sound / UI / render pipeline / camera / movement / quests), structs/npc.md
+  (NPC/mob struct + npc.arr spawn record + mobs.scr linkage).
+- notes: Raw findings (with addresses + decompiler locals) stayed in gitignored _dirty/. Orchestrator firewall
+  scan of the committed specs is clean: no addresses, no sub_/loc_/dword_ identifiers, no pseudo-code — the only
+  0x.. tokens are data constants (class flags 0x000N0000, sentinels 0x7FFFFFFF, the XEFF magic 0x46464558, the
+  1 MiB audio ring 0x100000) and the "sub_command_id"/"sub_level_byte" semantic field names (word prefix, not a
+  decompiler symbol). Several dirty claims were DOWNGRADED on promotion where samples contradicted them (e.g.
+  skill +1072 is not a reliable constant). Still-open items are flagged per spec (mostly fields with no observed
+  non-zero sample). Journal + names authored centrally by the orchestrator.

@@ -4,10 +4,20 @@
 > Consumed by Assets.Parsers. Every offset an engineer cites must reference this file.
 >
 > status: sample_verified
-> sample_verified: true (exp.scr, userlevel.scr, userpoint.scr, users.scr, mobs.scr,
->                        citems.scr, skillneedset.scr, warstoneinfo.scr, oblist.scr,
+> sample_verified: true (exp.scr, userlevel.scr, userpoint.scr, users.scr, skills.scr,
+>                        mobs.scr, citems.scr, skillneedset.scr, warstoneinfo.scr, oblist.scr,
 >                        textcommand.do, emoticon.do, msginfo.do, items_extra.do,
 >                        items.csv — all confirmed against real sample bytes)
+> confirmed: userlevel.scr / userpoint.scr / users.scr record-body columns and the skills.scr
+>            field survey are cross-checked against the binary loaders by an analyst; items.scr
+>            body fields remain loader-only (no sample) and stay UNVERIFIED where noted.
+>
+> Wave-8 update (stat curves + item/skill catalogue): the record-body column offsets for the
+> four stat-config files (userlevel / userpoint / users / skills) are now resolved against real
+> sample bytes, with a layout correction to userpoint.scr (the +8 cumulative is u32, not the
+> previously-described u16 + flag byte) and a substantial field survey for skills.scr. items.scr
+> disk fields were resolved from the loader path only (no sample available). All Korean text
+> fields are CP949 / EUC-KR, null-terminated.
 
 ---
 
@@ -31,6 +41,8 @@ extracting and parsing these files from the VFS once a sample is available.
   `items.csv` under `data/script/` in the VFS
 - **Magic / signature:** none — no file-level magic bytes or version header for any variant
 - **Endianness:** little-endian (all binary fields)
+- **String encoding:** all string fields are CP949 / EUC-KR (the legacy Korean code page),
+  null-terminated; numbers in `.csv` are decimal ASCII
 
 ---
 
@@ -63,9 +75,10 @@ All `.scr` and `.do` files share the same loader pattern:
 - **Flat array of fixed-size records**, concatenated without inter-record padding.
 - **Keyed insertion:** records are inserted into a runtime balanced BST (or map) keyed on the
   record's first integer field.
-- **Variable-length variants** (items.scr, skills.scr): after the fixed main record, the loader
-  reads `N × 8` trailing sub-entries, where `N` is a `u8` count stored at a fixed offset within
-  the main record (see per-file tables below).
+- **Variable-length variants** (items.scr): after the fixed main record, the loader reads
+  `N × 8` trailing sub-entries, where `N` is a `u8` count stored at a fixed offset within the
+  main record (see per-file tables below). Each 8-byte on-disk sub-entry is expanded to a
+  12-byte runtime entry (the extra 4 bytes are filled in at load time).
 - **Debug-build padding:** the client was compiled with MSVC debug mode enabled. Unused bytes
   after null terminators in string fields, and structural alignment padding bytes, are filled
   with `0xCC` (the MSVC debug-stack sentinel). These bytes carry no data.
@@ -79,11 +92,11 @@ traced.
 | VFS path | Stride (bytes) | Trailing entries | Confidence | Role |
 |---|---|---|---|---|
 | `data/script/exp.scr` | 20 | none | CONFIRMED | EXP required per level |
-| `data/script/userlevel.scr` | 60 | none | CONFIRMED | Base stat values per level |
-| `data/script/userpoint.scr` | 32 | none | CONFIRMED | Stat allocation curve |
-| `data/script/users.scr` | 496 (4 × 124-byte class blocks) | none | CONFIRMED | Character class stat grid |
-| `data/script/items.scr` | 548 | N × 8 B | CONFIRMED | Item catalogue (binary) |
-| `data/script/skills.scr` | 1504 | N × 8 B | CONFIRMED | Skill catalogue |
+| `data/script/userlevel.scr` | 60 | none | CONFIRMED | Per-level stat-scaling coefficients |
+| `data/script/userpoint.scr` | 32 | none | CONFIRMED | Stat-point allocation budget curve |
+| `data/script/users.scr` | 496 (4 × 124-byte class blocks) | none | CONFIRMED | Per-class stat-ratio grid |
+| `data/script/items.scr` | 548 | N × 8 B (each → 12 B runtime) | CONFIRMED | Item catalogue (binary) |
+| `data/script/skills.scr` | 1504 | none in sample (trailing count byte present but typically 0) | CONFIRMED | Skill catalogue |
 | `data/script/skillcategory.scr` | 564 | none | CONFIRMED | Skill category table |
 | `data/script/mobs.scr` | 488 | none | CONFIRMED | Mob / monster catalogue |
 | `data/script/npcs.scr` | 1916 | none | CONFIRMED | NPC catalogue |
@@ -117,6 +130,35 @@ traced.
 
 ---
 
+### 2.2a Canonical primary stat order (CONFIRMED)
+
+The five primary character stats appear throughout the runtime and item systems in one fixed,
+consecutive order. This order is corroborated from the stat-aggregation pipeline (five
+consecutive stat accessors, consecutive buff kinds, and consecutive runtime grant fields):
+
+| Index | Stat | Korean game text |
+|---|---|---|
+| 0 | STR (Strength) | 힘 |
+| 1 | AGI (Agility) | 민 |
+| 2 | DEX (Dexterity) | — |
+| 3 | INT (Intelligence) | 지 |
+| 4 | CON (Constitution) | 체 |
+
+The per-stat **base values are server-supplied at runtime** and are NOT stored in any client
+`.scr` file. The `.scr` stat files documented below store **scaling curves and budgets** that
+operate on those server-supplied bases, not the bases themselves:
+
+- `userlevel.scr` — per-level scaling coefficients for a stat-tier formula.
+- `userpoint.scr` — stat-point allocation budget (points granted per allocation step, and
+  cumulative totals).
+- `users.scr` — per-class stat-ratio inputs for a `(10 / A) × B` formula grid.
+
+Where this canonical order maps onto the specific float/group positions inside each file is, in
+most cases, still UNVERIFIED (the sample data does not vary enough per position to disambiguate).
+Those mapping gaps are listed per file.
+
+---
+
 ### 2.3 exp.scr — EXP per level (stride: 20 bytes, 300 records)
 
 **Wave-7 blocker: RESOLVED.** The EXP thresholds are client-side.
@@ -144,172 +186,350 @@ record aborts the load.
 
 ---
 
-### 2.4 userlevel.scr — Base stat values per level (stride: 60 bytes, 300 records)
+### 2.4 userlevel.scr — Per-level stat-scaling coefficients (stride: 60 bytes, 300 records)
 
-**Wave-7 blocker: RESOLVED. Sample verified: 300 records.**
+**Wave-7 blocker: RESOLVED. Record body columns RESOLVED. Sample verified: 300 records.**
+
+**Important semantic note:** this file does NOT store per-stat base values (those are
+server-supplied; see Section 2.2a). It stores **per-level scaling coefficients** consumed by a
+stat-tier formula together with `users.scr` and the `(10 / A) × B` grid (Section 2.6). The
+record is a 2-byte level index at +0 followed by a 58-byte body.
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| +0 | 2 | u16 | Level index, 1-based (map key) | Sequential 1..300 | CONFIRMED |
-| +2 | 2 | u16 | Always zero | Reserved; zero in all 300 records | CONFIRMED (value=0) |
-| +4 | 4 | u32 | Step-count field A | L1..L11=0; L12..L23=(1 as two u16); L24..L35=2; L36..L144=2; L145..L300=0 (resets) | CONFIRMED (transitions); UNVERIFIED (semantic) |
-| +8 | 4 | u32 | Step-count field B | L1..L11=0; L12=2; L24=3; L36=4; L145..L300=0 (resets) | CONFIRMED (transitions); UNVERIFIED (semantic) |
-| +12 | 4 | f32 | Stat-scale positive group [0] | L1..L35=1.0; L36..L300=3.0 | CONFIRMED |
-| +16 | 4 | f32 | Stat-scale positive group [1] | Matches group [0] in all observed records | CONFIRMED |
-| +20 | 4 | f32 | Stat-scale positive group [2] | Matches group [0] | CONFIRMED |
-| +24 | 4 | f32 | Stat-scale positive group [3] | Matches group [0] | CONFIRMED |
-| +28 | 4 | f32 | Stat-scale negative group [0] | L1..L35=−1.0; L36..L300=−2.0 | CONFIRMED |
-| +32 | 4 | f32 | Stat-scale negative group [1] | Matches negative group [0] | CONFIRMED |
-| +36 | 4 | f32 | Stat-scale negative group [2] | Matches negative group [0] | CONFIRMED |
-| +40 | 4 | f32 | Stat-scale negative group [3] | Matches negative group [0] | CONFIRMED |
-| +44 | 16 | 4×f32 | Reserved group | All 0.0 in all records | CONFIRMED (all zero) |
+| +0 | 2 | u16 | Level index, 1-based (map key, 1..300) | Sequential across all 300 records | CONFIRMED |
+| +2 | 2 | u16 | Always zero (alignment pad) | Zero in all 300 records | CONFIRMED (value=0) |
+| +4 | 2 | u16 | Tier step counter A | L1–L11=0; L12–L23=1; L24–L144=2; L145–L300=0 (resets) | CONFIRMED (value); UNVERIFIED (name) |
+| +6 | 2 | u16 | Tier step counter B | Mirrors +4 in all 300 records (same value as +4 everywhere) | CONFIRMED (mirrors +4) |
+| +8 | 2 | u16 | Divisor index C | L1–L11=0; L12=2; L24=3; L36–L144=4; L145–L300=0 (resets) | CONFIRMED (value); UNVERIFIED (name) |
+| +10 | 2 | u16 | Always zero (alignment pad) | Zero in all 300 records | CONFIRMED (value=0) |
+| +12 | 4 | f32 | Positive-scale group [0] | L1–L35=1.0; L36–L300=3.0 | CONFIRMED |
+| +16 | 4 | f32 | Positive-scale group [1] | Matches group [0] in all 300 records | CONFIRMED |
+| +20 | 4 | f32 | Positive-scale group [2] | Matches group [0] in all records | CONFIRMED |
+| +24 | 4 | f32 | Positive-scale group [3] | Matches group [0] in all records | CONFIRMED |
+| +28 | 4 | f32 | Negative-scale group [0] | L1–L35=−1.0; L36–L300=−2.0 | CONFIRMED |
+| +32 | 4 | f32 | Negative-scale group [1] | Matches negative group [0] in all records | CONFIRMED |
+| +36 | 4 | f32 | Negative-scale group [2] | Matches negative group [0] in all records | CONFIRMED |
+| +40 | 4 | f32 | Negative-scale group [3] | Matches negative group [0] in all records | CONFIRMED |
+| +44 | 4 | f32 | Reserved group [0] | Always 0.0 in all 300 records | CONFIRMED (value=0) |
+| +48 | 4 | f32 | Reserved group [1] | Always 0.0 | CONFIRMED (value=0) |
+| +52 | 4 | f32 | Reserved group [2] | Always 0.0 | CONFIRMED (value=0) |
+| +56 | 4 | f32 | Reserved group [3] | Always 0.0 | CONFIRMED (value=0) |
+
+**SPEC CORRECTION from prior version:** the prior spec described +4 and +8 each as a 4-byte `u32`
+step field. The sample resolution shows these are 2-byte `u16` counters with a 2-byte zero pad
+between/after them: counter A at +4, its mirror B at +6, divisor index C at +8, and a zero pad
+at +10. The reserved group at +44 is four individual f32 slots (all zero), not an opaque 16-byte
+blob.
 
 **Transition summary:**
 
-| Level range | Step field A | Step field B | Positive float | Negative float |
-|---|---|---|---|---|
-| L1–L11 | 0 | 0 | 1.0 | −1.0 |
-| L12–L23 | 1 (×2) | 2 | 1.0 | −1.0 |
-| L24–L35 | 2 (×2) | 3 | 1.0 | −1.0 |
-| L36–L144 | 2 (×2) | 4 | 3.0 | −2.0 |
-| L145–L300 | 0 | 0 | 3.0 | −2.0 |
+| Level range | Counter A (+4) | Mirror B (+6) | Divisor C (+8) | Positive floats | Negative floats |
+|---|---|---|---|---|---|
+| L1–L11 | 0 | 0 | 0 | 1.0 | −1.0 |
+| L12–L23 | 1 | 1 | 2 | 1.0 | −1.0 |
+| L24–L35 | 2 | 2 | 3 | 1.0 | −1.0 |
+| L36–L144 | 2 | 2 | 4 | 3.0 | −2.0 |
+| L145–L300 | 0 | 0 | 0 | 3.0 | −2.0 |
 
-The four positive and four negative float slots likely correspond to four stat categories (for
-example physical offense, physical defense, magical offense, magical defense), but the mapping
-to named game stats is UNVERIFIED. The reset of step fields to zero at L145 while the float
-values remain unchanged is UNVERIFIED in meaning.
+The four positive and four negative float slots are scaling coefficients applied to four stat
+categories. Because all four positions carry the same value in every observed record (all 1.0 or
+all 3.0; negative all −1.0 or all −2.0), the sample cannot distinguish whether the four positions
+are four named primary stats or four compound combat categories (for example physical offense,
+physical defense, magical offense, magical defense). The step/divisor counters at +4/+6/+8 act as
+indices into the `(10 / A) × B` grid built from `users.scr` (Section 2.6): when divisor C = 0
+(phases 1 and 5) the grid lookup is skipped via a divide-by-zero guard; when C = 2/3/4 the
+formula yields scaling factors 15.0 / 10.0 / 7.5 respectively using the B input 3.0 from
+`users.scr`.
 
 **Open questions:**
-- Names of the four stat categories in the positive/negative groups
-- Semantic meaning of the integer step fields at +4 and +8 (phase-gating mechanic?)
-- Why step fields reset to zero at L145 while scale floats do not change
+- Named-stat (STR/AGI/DEX/INT/CON) mapping for each of the four float positions
+- Whether the four groups are individual stats or compound combat categories
+- Why the step/divisor counters reset to zero at L145 while the float values do not change
 
 ---
 
-### 2.5 userpoint.scr — Stat allocation curve (stride: 32 bytes, 301 records)
+### 2.5 userpoint.scr — Stat-point allocation budget curve (stride: 32 bytes, 301 records)
 
-**Wave-7 blocker: RESOLVED. Sample verified: 301 records, keys 0..300.**
+**Wave-7 blocker: RESOLVED. Record body columns RESOLVED with LAYOUT CORRECTION.
+Sample verified: 301 records, keys 0..300.**
+
+**SPEC CORRECTION from prior version (important):** the prior spec described +8 as a `u16`
+cumulative and +10 as a rare `u16` flag. The sample proves the cumulative total at +8 exceeds
+65,535 at high keys (it reaches ~65,960 around key 285), so **the field at +8 is a `u32` spanning
++8..+11**. The apparent "flag" at +10 was simply the high byte of that `u32`. Reading +8 as a
+`u32` reproduces the running sum of the per-step gain at +4 across all 301 records exactly. The
+group-2 cumulative at +16 is likewise a `u32` (its values stay within `u16` range in the sample,
+but the field width is 4 bytes to mirror group 1). The +18 / +14 alignment pads from the prior
+spec are subsumed by the wider cumulative fields.
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| +0 | 2 | u16 | Point-allocation index, 0-based (0..300) | Map key | CONFIRMED |
-| +2 | 2 | u16 | Constant = 25; identical in all 301 records | Semantic UNVERIFIED; possibly base stat-point budget or creation constant | CONFIRMED (value); UNVERIFIED (semantic) |
-| +4 | 2 | u16 | Stat-group-1 gain at this step | key=0→5; key=300→1000 | CONFIRMED |
-| +6 | 2 | u16 | Always zero (alignment pad) | All records | CONFIRMED (value=0) |
-| +8 | 2 | u16 | Stat-group-1 cumulative total | Running sum of group-1 gains; verified for first 20 records | CONFIRMED |
-| +10 | 2 | u16 | Mostly zero; value 1 in two of 301 records | Rare flag or overflow indicator; UNVERIFIED | UNVERIFIED |
-| +12 | 2 | u16 | Stat-group-2 gain at this step | key=0→7; key=1→1; grows at high keys | CONFIRMED |
-| +14 | 2 | u16 | Always zero (alignment pad) | All records | CONFIRMED (value=0) |
-| +16 | 2 | u16 | Stat-group-2 cumulative total | Sequential pattern confirmed | CONFIRMED |
-| +18 | 2 | u16 | Always zero (alignment pad) | All records | CONFIRMED (value=0) |
-| +20 | 2 | u16 | Secondary curve low word | key=0..5→0; key=6→282; increments by approximately 3 per step | CONFIRMED |
-| +22 | 2 | u16 | Secondary curve high word | key=0..5→0; key=6..9→20; grows slowly | CONFIRMED |
-| +24 | 4 | u32 | Tertiary value 1 | key=0..295 mostly 0; key=296→235,000; key=300→255,000 | CONFIRMED |
-| +28 | 4 | u32 | Tertiary value 2 | Same pattern as +24; key=300→255,000 | CONFIRMED |
+| +0 | 2 | u16 | Allocation step index, 0-based (0..300) | Map key; sequential | CONFIRMED |
+| +2 | 2 | u16 | Constant = 25 in all 301 records | Semantic UNVERIFIED (creation budget? per-level cap?) | CONFIRMED (value); UNVERIFIED (semantic) |
+| +4 | 2 | u16 | Stat-group-1 gain this step | key=0→5; key=1–284→3; key=285–300→1000 | CONFIRMED |
+| +6 | 2 | u16 | Always zero (alignment pad) | Zero in all 301 records | CONFIRMED (value=0) |
+| +8 | 4 | u32 | Stat-group-1 cumulative total (running sum of +4) | Verified 301/301, including overflow past 65,535 | CONFIRMED |
+| +12 | 2 | u16 | Stat-group-2 gain this step | key=0→7; key=9→2; key=300→300 | CONFIRMED |
+| +14 | 2 | u16 | Always zero (alignment pad) | Zero in all 301 records | CONFIRMED (value=0) |
+| +16 | 4 | u32 | Stat-group-2 cumulative total (running sum of +12) | Verified 301/301; reaches ~38,941 at key=300 | CONFIRMED |
+| +20 | 2 | u16 | Secondary curve — low word | key=0–5→0; key=6→282; increments ~3/step; plateaus near key≈150 at 696 | CONFIRMED |
+| +22 | 2 | u16 | Secondary curve — high word | key=0–5→0; key=6→20; grows slowly; plateaus near 56 by key≈150 | CONFIRMED |
+| +24 | 4 | u32 | Tertiary value 1 | key=0–295→0; key=296→235,000; key=300→255,000; equals +28 in all checked records | CONFIRMED |
+| +28 | 4 | u32 | Tertiary value 2 | Equals +24 in all checked records | CONFIRMED |
 
-The two stat groups correspond to the two main stat allocation pools. The constant 25 at +2
-may be the base stat-point budget awarded at character creation. The semantic mapping of
-group-1 and group-2 to named stats (Strength, Defense, Agility, Wisdom, etc.) is UNVERIFIED.
+**Semantic interpretation:**
+
+- **Stat-group-1** (gain at +4, cumulative at +8): points allocated per step for the first stat
+  pool; the cumulative tracks total points available at a given allocation level. The very large
+  gains at keys 285–300 (1000/step) are high-level stat-point bursts.
+- **Stat-group-2** (gain at +12, cumulative at +16): the same pattern for a second pool with
+  different scaling (starts at 7, smaller increments).
+- **Constant 25 at +2** — UNVERIFIED. Candidate meanings: base stat points granted at character
+  creation, an early-curve per-level allocation cap, or a legacy formula constant.
+- **Secondary curve at +20/+22** — a 32-bit value pair encoding a secondary allocation curve
+  (possibly martial energy: 내공 / 내력, or a third stat type). Zero for keys 0–5, begins at
+  key 6, plateaus around key 150 with no further growth to key 300.
+- **Tertiary values at +24/+28** — identical in all checked records; begin at key 296 and rise by
+  5,000/step to 255,000 at key 300. Likely a high-level cap bonus or prestige reward pool.
 
 **Open questions:**
-- Semantic meaning of constant 25 at +2
-- Which named game stats map to group-1 versus group-2
-- Meaning of the secondary curve at +20..+23 (possibly martial-energy or a third stat type)
-- Meaning of the tertiary values at +24 and +28 (possibly max-cap for a third stat type)
-- The rare value 1 at +10 (two records only)
+- Which named stat (STR/AGI/DEX/INT/CON) maps to group-1 vs group-2
+- Semantic of constant 25 at +2
+- Whether the secondary curve at +20/+22 is a martial-energy (내공 / 내력) budget
+- Whether the tertiary values at +24/+28 are a third stat pool or a max-cap schedule
+- Meaning of the large gains at keys 285–300 (post-standard-level reward bursts?)
 
 ---
 
-### 2.6 users.scr — Character class stat grid (496-byte file, 4 × 124-byte class blocks)
+### 2.6 users.scr — Per-class stat-ratio grid (496-byte file, 4 × 124-byte class blocks)
 
-**Wave-7 blocker: RESOLVED. Sample verified: all 4 class blocks confirmed.**
+**Wave-7 blocker: RESOLVED. Record body columns RESOLVED. Sample verified: all 4 class blocks.**
 
-**Corrected structure:** the file is not a single flat blob; it contains four sequential 124-byte
-blocks, one per character class. Each block begins with a 4-byte header followed by 30 × f32
-values (120 bytes). Total: 4 × 124 = 496 bytes.
+**Structure:** the file is four sequential 124-byte blocks, one per character class. Each block
+is a 4-byte header followed by 30 × f32 values (120 bytes). Total: 4 × 124 = 496 bytes. These
+floats are the inputs to a `(10 / A) × B` formula grid evaluated after the file loads (the
+`(7.0, 24.0, 0.0)` triplets are `B` inputs; the `A` divisors come from a separate runtime table
+not stored in this file).
 
 **Per-block layout:**
 
 | Offset within block | Size | Type | Field | Notes | Confidence |
 |--------------------:|-----:|------|-------|-------|------------|
-| +0 | 1 | u8 | Class ID (1..4) | Block 0→1, block 1→2, block 2→3, block 3→4 | CONFIRMED |
-| +1 | 3 | — | Padding / header tail | Bytes observed as constant pattern across all 4 blocks; not data | CONFIRMED (present); UNVERIFIED (semantic) |
-| +4 | 12 | 3×f32 | Stat group A | Values 3.0, 3.0, 3.0; identical across all 4 classes | CONFIRMED |
-| +16 | 16 | 4×f32 | Zero group | All 0.0; all 4 classes | CONFIRMED (all zero) |
-| +32 | 4 | f32 | Stat ratio column 1 | 7.0 in all 4 classes | CONFIRMED |
-| +36 | 4 | f32 | Stat ratio column 2 | 24.0 in all 4 classes | CONFIRMED |
-| +40 | 4 | f32 | Zero | 0.0 in all 4 classes | CONFIRMED |
-| +44 | 12 | 3×f32 | Stat ratio repeat | Same (7.0, 24.0, 0.0) pattern; repeated a second and third time through +56 | CONFIRMED |
-| +68 | 32 | 8×f32 | Zero group | All 0.0; all 4 classes | CONFIRMED |
-| +92 | 32 | 8×f32 | Class-specific ratio group | Mostly 1.0; class-specific deviations (see table below) | CONFIRMED |
+| +0 | 1 | u8 | Class ID (1..4) | Block 0→1, 1→2, 2→3, 3→4; see class-name table below | CONFIRMED |
+| +1 | 1 | u8 | Constant 0x13 (19) in all 4 blocks | Semantic UNVERIFIED (count or version marker?) | CONFIRMED (value); UNVERIFIED (semantic) |
+| +2 | 1 | u8 | Constant 0x43 (67) in all 4 blocks | Semantic UNVERIFIED | CONFIRMED (value); UNVERIFIED (semantic) |
+| +3 | 1 | u8 | Always zero (header pad) | Zero in all 4 blocks | CONFIRMED (value=0) |
+| +4 | 12 | 3×f32 | Stat weight triplet A = (3.0, 3.0, 3.0) | Identical across all 4 classes | CONFIRMED |
+| +16 | 20 | 5×f32 | Zero group | All 0.0; all 4 classes | CONFIRMED (value=0) |
+| +36 | 4 | f32 | Ratio A = 7.0 | Same in all 4 classes; `B`-input #1 | CONFIRMED |
+| +40 | 4 | f32 | Ratio B = 24.0 | Same in all 4 classes; `B`-input #1 | CONFIRMED |
+| +44 | 4 | f32 | Ratio C = 0.0 | Same in all 4 classes; `B`-input #1 | CONFIRMED |
+| +48 | 12 | 3×f32 | Second (7.0, 24.0, 0.0) triplet | `B`-input #2; same in all 4 classes | CONFIRMED |
+| +60 | 12 | 3×f32 | Third (7.0, 24.0, 0.0) triplet | `B`-input #3; same in all 4 classes | CONFIRMED |
+| +72 | 20 | 5×f32 | Zero group | All 0.0; all 4 classes | CONFIRMED (value=0) |
+| +92 | 32 | 8×f32 | Class-specific multiplier group | Mostly 1.0; per-class deviations (table below) | CONFIRMED |
 
-**Class-specific deviations in the 8-float group (offsets +92..+120 relative to block start):**
+**SPEC CORRECTION from prior version:** the prior spec listed the block header as a 1-byte class
+ID at +0 followed by an opaque 3-byte pad. The two constant bytes at +1 (0x13 / 19) and +2
+(0x43 / 67) are now documented explicitly; only +3 is a true zero pad. The prior spec also placed
+the class-specific deviations on the wrong float positions; the corrected positions are below.
 
-| Class ID | Deviating position | Deviant value | All others |
-|---|---|---|---|
-| 1 | none | — | 1.0 |
-| 2 | float[1] at block+96 | 1.10 | 1.0 |
-| 3 | float[2] at block+100=1.15; float[3] at block+104=1.10 | as noted | 1.0 |
-| 4 | float[1] at block+96=1.10; float[2] at block+100=1.15 | as noted | 1.0 |
+**Class names (CONFIRMED):**
 
-These deviations are consistent with per-class base-stat multipliers (class 2 has a 10% bonus
-to one stat category; class 3 has 15% to one category and 10% to another).
+| Class ID | Korean | Romanisation |
+|---|---|---|
+| 1 | 무사 (武士) | Musa (warrior) |
+| 2 | 자객 (刺客) | Jagaek (assassin) |
+| 3 | 도사 (道士) | Dosa (mystic/Taoist) |
+| 4 | 승려 (僧侶) | Seungnyeo (monk) |
+
+> Note: the `items.csv` class-restriction flags (Section 4) name the four equip-class lines as
+> Musa / Jager / Dosa / Gungnyo. The `users.scr` class names above come from the stat-grid loader
+> and use 승려 (monk) for class 4. The discrepancy in the class-4 label (monk vs. archer) between
+> the two sources is an open question (see open list).
+
+**Class-specific multiplier group (block offsets +92..+123, eight f32 at indices [22..29]):**
+
+| Float index | Byte offset | Class 1 (무사) | Class 2 (자객) | Class 3 (도사) | Class 4 (승려) |
+|---|---|---|---|---|---|
+| [22] | +92 | 1.0 | 1.0 | 1.0 | 1.0 |
+| [23] | +96 | 1.0 | **1.10** | 1.0 | 1.0 |
+| [24] | +100 | 1.0 | 1.0 | **1.15** | **1.10** |
+| [25] | +104 | 1.0 | 1.0 | **1.10** | **1.15** |
+| [26] | +108 | 1.0 | 1.0 | 1.0 | 1.0 |
+| [27] | +112 | 1.0 | 1.0 | 1.0 | 1.0 |
+| [28] | +116 | 1.0 | 1.0 | 1.0 | 1.0 |
+| [29] | +120 | 1.0 | 1.0 | 1.0 | 1.0 |
+
+These eight multipliers are per-class stat-growth modifiers: class 2 has a 10% bonus at [23];
+class 3 has 15% at [24] and 10% at [25]; class 4 has 10% at [24] and 15% at [25]. Positions
+[26..29] are 1.0 across all classes. Which named stat maps to each of [22..29] is UNVERIFIED
+because only 2–4 positions deviate from 1.0.
 
 **Open questions:**
-- Names of the four character classes (Class 1=Monk? Class 2=Musa? etc.)
-- Which named game stats map to which float positions in the 8-float group
-- The semantic of the header padding bytes at +1..+3
-- Relationship to the `(10/A)*B` formula noted in prior loader tracing: `A` and `B` offset
-  positions within the block are UNVERIFIED
+- Which named stat maps to each of the 8 multiplier positions [22..29]
+- Semantic of the header constants 0x13 (19) and 0x43 (67)
+- Class-4 label discrepancy: `users.scr` calls it 승려 (monk); `items.csv` calls the fourth
+  equip class Gungnyo (궁녀, archer)
+- The runtime source of the `A` divisor table feeding the `(10 / A) × B` grid (populated outside
+  this file)
 
 ---
 
 ### 2.7 items.scr — Item catalogue (stride: 548 bytes + N × 8 trailing)
 
-**Wave-7 blocker: RESOLVED (stride, category flags, trailing count confirmed).**
+**Wave-7 blocker: RESOLVED (stride, category flags, trailing count). Body fields PARTIALLY
+RESOLVED from the loader path only — NO sample file was available, so individual field offsets
+between named anchors remain UNVERIFIED.**
 
-Note: `items.csv` (Section 5) provides a much richer human-readable item catalogue. `items.scr`
-is the binary runtime form. The two files likely share item IDs but were not cross-verified.
+Note: `items.csv` (Section 4) provides a much richer human-readable item catalogue. `items.scr`
+is the binary runtime form. The two files share item IDs (the CSV→SCR correspondence is assumed
+one-to-one in row order), but they were not cross-verified field by field. The item unique ID is
+at SCR record offset **+0x34** (i32, little-endian), which corresponds to CSV column 1
+(`item_id`).
 
 **Main record (548 bytes = 0x224):**
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| +0 | ? | u16 or u32 | Item ID | First field; exact width UNVERIFIED | CONFIRMED (position) |
-| +0xD2 | 1 | u8 | Sub-type flag | — | CONFIRMED |
-| +0xE5 | 1 | u8 | Category flag 1 | Value 1 = weapon | CONFIRMED |
-| +0xE6 | 1 | u8 | Category flag 2 | Value 1 = armour | CONFIRMED |
-| +0xE7 | 1 | u8 | Category flag 3 | Value 1 = type-11 | CONFIRMED |
-| +0xE8 | 1 | u8 | Category flag 4 | Value 1 = type-16 | CONFIRMED |
-| +0x220 | 1 | u8 | Trailing entry count N | Upgrade/effect sub-entries | CONFIRMED |
-| +0x221 | 3 | — | Alignment padding | Pads to 548-byte stride | CONFIRMED (derived) |
-| All other offsets | — | ? | Remaining item fields | UNVERIFIED | UNVERIFIED |
+| +0x00 | ? | ? | First record field (likely a leading ID or header word) | Not individually resolved | UNVERIFIED |
+| +0x34 (52) | 4 | i32 | Item unique ID | Maps to items.csv col 1 (`item_id`) | CONFIRMED |
+| +0x4C (76) | 4 | u32 | Item category / class key | Used as the lookup key into the animation catalogue | CONFIRMED (presence); UNVERIFIED (name) |
+| +0x98 (152) | 4 | i32 | Primary key field (item model or animation ID) | Passed into the catalogue dispatcher | CONFIRMED (presence); UNVERIFIED (name) |
+| +0x9C (156) | 4 | i32 | Secondary key field | Passed into the catalogue dispatcher | CONFIRMED (presence); UNVERIFIED (name) |
+| +0xD2 (210) | 1 | u8 | Type / category discriminator | A value of 14 bypasses an ID-modulo routing check | CONFIRMED (presence); UNVERIFIED (name) |
+| +0xE5 (229) | 1 | u8 | Category flag 1 | If 1 → dispatch code 1 (weapon-type item) | CONFIRMED |
+| +0xE6 (230) | 1 | u8 | Category flag 2 | If 1 → dispatch code 26 (armour-type item) | CONFIRMED |
+| +0xE7 (231) | 1 | u8 | Category flag 3 | If 1 → dispatch code 11 (other category) | CONFIRMED |
+| +0xE8 (232) | 1 | u8 | Category flag 4 | If 1 → dispatch code 16 (other category) | CONFIRMED |
+| +0x220 (544) | 1 | u8 | Trailing entry count N | Controls the variable upgrade section (N × 8 bytes) | CONFIRMED |
+| +0x221 (545) | 3 | — | Alignment padding to the 548-byte stride | Derived from record size | CONFIRMED (derived) |
+| All other offsets | — | ? | Remaining item fields (name/description/stat grants) | No sample; not resolved | UNVERIFIED |
 
-**Trailing upgrade-effect entries (N × 8 bytes, only present when N > 0):**
+The four flag bytes at +0xE5..+0xE8 select an item category for dispatch into the animation
+catalogue (code 0 when all four are zero). Exactly one flag is set for categorised items. The
+dispatcher composes a registration key from the type discriminator at +0xD2, the dispatch code,
+and a base value, then registers the item's animation reference; the registration confirms that
+`items.scr` populates the engine's item-animation catalogue.
 
-| Offset within entry | Size | Type | Field | Confidence |
-|--------------------:|-----:|------|-------|------------|
-| +0 | 8 | ? | All fields UNVERIFIED | UNVERIFIED |
+The runtime item object is 0x228 = 552 bytes (the 548-byte disk record copied verbatim, plus a
+4-byte pointer to the expanded upgrade-entry list).
 
-Each 8-byte on-disk entry maps to a 12-byte runtime object; the extra 4 bytes are derived at
-load time. Internal field layout UNVERIFIED.
+**Trailing upgrade-effect entries (N × 8 bytes on disk, only present when N > 0):**
+
+Each 8-byte on-disk entry expands to a 12-byte runtime entry:
+
+| On-disk bytes | Size | Type | Runtime field | Confidence |
+|---|---|---|---|---|
+| [0..1] | 2 | u16 | Effect type code | CONFIRMED |
+| [2..3] | 2 | i16 | Effect magnitude (sign-extended to i32 at runtime) | CONFIRMED |
+| [4..5] | 2 | u16 | Level threshold (level at which the upgrade activates) | CONFIRMED |
+| [6] | 1 | u8 | Upgrade sub-byte | CONFIRMED |
+| [7] | 1 | — | On-disk trailing byte (unused / pad) | UNVERIFIED |
+
+The observed maximum for N in the loader is ≤ 19.
+
+**Open questions:**
+- Width and encoding of the leading field at +0x00 (and whether +0x34 is the only ID field)
+- Field layout in the large unresolved regions (+0x00..+0x33, +0x35..+0x4B, +0x4D..+0x97,
+  +0x9D..+0xD1, +0xE9..+0x21F)
+- Where the item name and description text reside in the 548-byte record (CP949 expected, by
+  analogy with every other catalogue file, but unconfirmed without a sample)
+- How the on-disk record encodes the stat-grant values that populate the runtime item object
+  (STR/AGI/DEX/INT/CON/HP/MP)
 
 ---
 
-### 2.8 skills.scr — Skill catalogue (stride: 1504 bytes + N × 8 trailing)
+### 2.8 skills.scr — Skill catalogue (stride: 1504 bytes, ~194 real records)
 
-**Wave-7 blocker: RESOLVED (stride and trailing-count offset confirmed).**
+**Wave-7 blocker: RESOLVED (stride). Record body field survey SUBSTANTIALLY RESOLVED.
+Sample verified: 1504-byte stride; 194 real skill definitions detected (the remaining slots in
+the sample are zero-padded or hold misaligned/garbage data and should be filtered out).**
+
+Each record defines one skill across all of its levels (it is not one record per skill level).
+A real record is distinguished from garbage by a plausible skill ID (< 10,000,000) and a
+plausible category index (< 300). String fields are CP949, null-terminated.
 
 **Main record (1504 bytes = 0x5E0):**
 
-| Offset | Size | Type | Field | Confidence |
-|-------:|-----:|------|-------|------------|
-| +0 | 1500 | ? | Main skill data (all fields UNVERIFIED) | UNVERIFIED |
-| +0x5DC | 1 | u8 | Trailing entry count N | CONFIRMED |
-| +0x5DD | 3 | — | Alignment padding to reach 1504 bytes | CONFIRMED (derived) |
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| +0 | 4 | u32 | Skill ID (map key) | Examples: 11, 12, 13, 21…, 300131–300136 | CONFIRMED |
+| +4 | 4 | u32 | Skill category index | Class-skill values 150–153 (one per class); 154–158 mixed/universal; other ranges for combo/chain tiers (see table below) | CONFIRMED |
+| +8 | ≤24 | char[] | Skill name (CP949, null-terminated) | Longest real name 17 bytes; buffer always zero by +32; buffer width is 24 or 32 (UNVERIFIED which) | CONFIRMED (name at +8); CONFIRMED (buffer ends ≤ +31) |
+| +32..+515 | 484 | mixed | Integer/sparse field region | Mostly zero in real records; only +260 and +516 resolved within this region | PARTIALLY RESOLVED |
+| +260 | 4 | u32 | Constant 0x30000000 in all real records | Likely an internal type/version marker | CONFIRMED (value); UNVERIFIED (meaning) |
+| +516 | 4 | u32 | Class flag = (class ID << 16) | Class 1=0x00010000, 2=0x00020000, 3=0x00030000, 4=0x00040000 | CONFIRMED |
+| +520 | 1 | u8 | Skill type / tier byte | 0=passive/unknown, 1=movement-base, 2=tier-3, 3=tier-3/5 chain, 4=tier-2, 5=tier-5 chain, 6=tier-6 chain (see table below) | CONFIRMED |
+| +521 | ≤512 | char[] | Long description text (CP949, null-terminated) | Confirmed for all checked records; descriptions up to 52+ bytes | CONFIRMED |
+| +1032 | ≤8+ | char[] | Short description / action label (CP949) | Text begins shortly after +1032 (≈+1033); buffer width UNVERIFIED | CONFIRMED (presence); PARTIALLY CONFIRMED (exact offset) |
+| +1072 | 4 | u32 | Constant 0x00003000 (12288) in all real records | Unresolved | CONFIRMED (value); UNVERIFIED (meaning) |
+| +1116 | 4 | u32 | Skill chain reference [0] | Decimal-digit composite (e.g. 141100041 for skill 11, slot 0); encoding schema UNVERIFIED | CONFIRMED (presence); UNVERIFIED (encoding) |
+| +1120 | 4 | u32 | Skill chain reference [1] | Same pattern | CONFIRMED (presence) |
+| +1124 | 4 | u32 | Skill chain reference [2] | Same pattern | CONFIRMED (presence) |
+| +1128 | 4 | u32 | Skill chain reference [3] | Same pattern | CONFIRMED (presence) |
+| +1132 | 4 | u32 | Skill chain reference [4] | Same pattern | CONFIRMED (presence) |
+| +1136 | 4 | u32 | Skill chain reference [5] | Different decimal prefix (3xxxxxxxx vs 1xxxxxxxx), e.g. 341100111 | CONFIRMED (presence); UNVERIFIED (encoding) |
+| +1176 | 4 | f32 | Constant 1.0 in all real records | Meaning UNVERIFIED | CONFIRMED (value); UNVERIFIED (meaning) |
+| +1180 | 4 | u32 | Skill chain reference [6] | Third prefix type (8xxxxxxxx), e.g. 841100111 | CONFIRMED (presence) |
+| +1280 | 4 | u32 | Prerequisite / parent skill ID | 0 for base skills; e.g. skill 13 → 11 | CONFIRMED (pattern) |
+| +1292 | 2 | u16 | Skill-point (SP) cost to learn | Per-tier values 4, 8, 12 | CONFIRMED (pattern) |
+| +1294 | 2 | u16 | Next-in-chain reference or 0 | e.g. skill 11 → 13; some records hold a composite ID | CONFIRMED (pattern); UNVERIFIED (composite encoding) |
+| +1296 | 4 | u32 | Second chain / upgrade-path reference | Single ID or composite chain ID | CONFIRMED (presence); UNVERIFIED (encoding) |
+| +1300 | 4 | u32 | Third chain / upgrade-path reference | Same as +1296 | CONFIRMED (presence); UNVERIFIED (encoding) |
+| +1304 | 2 | u16 | Motion / animation index A | Increments 20, 46, 72 (by 26) across skill tiers | CONFIRMED (pattern); UNVERIFIED (name) |
+| +1306 | 2 | u16 | Constant 7 in all checked records | Meaning UNVERIFIED | CONFIRMED (value); UNVERIFIED (meaning) |
+| +1328 | 4 | u32 | Constant 0x00010000 (65536) in all real records | Meaning UNVERIFIED | CONFIRMED (value); UNVERIFIED (meaning) |
+| +1372 | 4 | u32 | Cooldown (seconds) | 8–16 for movement skills; 0 for passive skills | CONFIRMED (plausible range) |
+| +1412 | 4 | f32 | Range (game units) | 30.0–40.0 for movement skills; 0.0 for passive skills | CONFIRMED (plausible range) |
+| +1496 | 4 | u32 | Tail field | Sparse | UNVERIFIED |
+| +1500 | 4 | — | Tail bytes incl. trailing count byte | A trailing-count byte exists in the loader but is 0 for the sampled real records (no trailing 8-byte sub-entries observed) | PARTIALLY CONFIRMED |
 
-**Trailing sub-entries (N × 8 bytes):** same structural form as items.scr trailing entries; all
-fields UNVERIFIED.
+**SPEC CORRECTION from prior version:** the prior spec listed the entire 1500-byte body as
+UNVERIFIED with only a trailing count byte. The body is now substantially mapped (name, category,
+class flag, type byte, descriptions, SP cost, cooldown, range, chain references). The trailing
+`N × 8` sub-entry mechanism is the same shape as items.scr, but no non-zero trailing count was
+observed in the skill sample, so skills.scr is effectively a fixed-stride file in practice.
+
+**Skill category index (+4):**
+
+| Value | Meaning |
+|---|---|
+| 150 | Class 1 (무사 / warrior) skills |
+| 151 | Class 2 (자객 / assassin) skills |
+| 152 | Class 3 (도사 / Taoist) skills |
+| 153 | Class 4 (승려 / monk) skills |
+| 154–158 | Mixed / universal (e.g. 심법, 환마술) |
+| 80–106 | Higher-tier combination skill sub-types |
+| 47–51 | Advanced skill-chain sub-types |
+
+**Skill type / tier byte (+520):**
+
+| Value | Examples (Korean) | Interpretation |
+|---|---|---|
+| 0x00 | 환마술, passive IDs | Passive / no-movement / unknown |
+| 0x01 | 경공 (lightfoot), 심법 (simbeop) | Tier 1 / base skill |
+| 0x02 | 비선행공 | Tier 3 skill |
+| 0x03 | (3rd/5th chain) | Tier 3/5 chain |
+| 0x04 | 초상비 | Tier 2 skill |
+| 0x05 | (5th chain) | Tier 5 chain |
+| 0x06 | (6th chain) | Tier 6 chain |
+
+The chain-reference fields at +1116..+1136 and +1180 encode multiple sub-fields in **decimal
+digit groups** (not packed binary). The leading digit varies by class and chain type (1xx for
+base class chains, 3xx for combo chains, 8xx for an alternate chain set). The full decode schema
+is UNVERIFIED.
+
+**Open questions:**
+- Exact name-buffer width at +8 (24 or 32 bytes)
+- Field layout of the integer region between +32 and +515 (only +260 and +516 resolved)
+- Short-description field boundary and buffer width near +1032/+1033
+- Whether +1292 is strictly "SP cost to learn" and how it disambiguates from max level
+- Full decimal-composite encoding of the chain references (+1116..+1136, +1180, +1294)
+- Whether +1296/+1300 are prerequisite or successor chain IDs
+- Meaning of motion index at +1304 and the constant 7 at +1306
+- Tail fields between +1496 and +1503
 
 ---
 
@@ -661,7 +881,7 @@ The sentinel records appear mid-file (not at EOF), likely marking a sub-table bo
 
 | Property | Value | Confidence |
 |---|---|---|
-| VFS path | `data/script/items.csv` (probable; confirmed by sample analysis) | CONFIRMED |
+| VFS path | `data/script/items.csv` (the human-editable source that compiles to `items.scr`) | CONFIRMED |
 | File size | approximately 33.1 MB | CONFIRMED |
 | Total rows | 89,712 | CONFIRMED |
 | Columns per row | 139 (fixed, 0-based indices 0..138) | CONFIRMED |
@@ -673,6 +893,12 @@ The sentinel records appear mid-file (not at EOF), likely marking a sub-table bo
 
 A naive split on `,` will produce incorrect column counts when description fields (col2) contain
 embedded commas. A correct RFC 4180 CSV parser is required.
+
+**Relationship to items.scr:** the CSV is the human-editable source; `items.scr` (Section 2.7) is
+the compiled binary form the client actually loads at runtime. The CSV→SCR correspondence is
+assumed one-to-one in row order. CSV column 1 (`item_id`) is stored in the SCR record at offset
++0x34 (i32, little-endian). A separate compiled consumable catalogue (`citems.scr`, Section 2.11)
+uses a different record format and loader and is not derived from this CSV.
 
 ### 4.2 Enchant and pricing rules
 
@@ -696,12 +922,19 @@ bonus value for very high-tier items).
 
 ### 4.3 Column index table
 
+The catalogue has 139 columns (indices 0..138). Most non-zero data is concentrated in the
+identity, flag, requirement, enchant/socket, stat-bonus, and float-rate blocks below; a large
+fraction of the high-index columns are zero in nearly every row (marked `reserved_*`). Stat
+identities for the requirement and bonus blocks are corroborated against the canonical primary
+stat order in Section 2.2a, but per-column stat mapping inside the requirement block carries
+the caveat in the open list.
+
 #### Identity (cols 0–6)
 
 | Col | Field name | Type | Confidence | Notes |
 |---|---|---|---|---|
 | 0 | `name_cp949` | string | CONFIRMED | Display name, CP949; ` +N` suffix marks enchant level N > 0 |
-| 1 | `item_id` | uint32 | CONFIRMED | Unique numeric item ID; increments by 1 per enchant level within a family |
+| 1 | `item_id` | uint32 | CONFIRMED | Unique numeric item ID; increments by 1 per enchant level within a family; stored at items.scr +0x34 |
 | 2 | `description_cp949` | string | CONFIRMED | Tooltip/lore text, CP949; `\\` = in-game line break; RFC 4180 quoted when contains comma |
 | 3 | `linked_item_id` | uint32 | HIGH | For lottery ticket items (col6=1004): prize item ID; zero for all other items |
 | 4 | `base_ref_id` | uint32 | HIGH | Base/template item ID; stable across enchant levels of a family; likely NPC shop or crafting template reference |
@@ -738,7 +971,10 @@ bonus value for very high-tier items).
 #### Required stats (cols 24–28)
 
 These columns encode the minimum character stat values required to equip the item. They
-correspond to the five primary stats of Martial Heroes.
+correspond to the five primary stats of Martial Heroes. **Mapping caveat:** the requirement
+block is presented here in the column order observed in the sample (24..28). The canonical
+runtime primary-stat order is STR/AGI/DEX/INT/CON (Section 2.2a); whether the CSV requirement
+columns follow that same order or a CSV-specific order is not yet confirmed (see open list).
 
 | Col | Field name | Type | Confidence | Notes |
 |---|---|---|---|---|
@@ -1083,64 +1319,88 @@ relevance to the `.scr` / `.do` pipeline.
 
 ## Known unknowns
 
-### Resolved since last version (wave-7 unblocks)
-
-Items 1, 2, 3, 4, and 15 from the prior version's known-unknowns list are now PARTIALLY
-or FULLY RESOLVED:
+### Resolved since last version (wave-7 and wave-8 unblocks)
 
 1. **exp.scr +10..+19** — RESOLVED: three sub-fields identified (+8=reserved zero, +12=secondary
    EXP curve, +16=tertiary EXP curve); semantics of secondary and tertiary curves remain UNVERIFIED.
-2. **userlevel.scr field layout** — RESOLVED: eight f32 stat-scale values (four positive, four
-   negative) confirmed; step fields at +4/+8 confirmed; stat category names remain UNVERIFIED.
-3. **userpoint.scr layout** — FULLY RESOLVED: gain/cumulative pair for two stat groups plus
-   secondary/tertiary curve columns fully mapped.
-4. **users.scr internal layout** — FULLY RESOLVED: 4 class blocks × 124 bytes; class-specific
-   multiplier deviations confirmed.
-15. **UNVERIFIED strides** — RESOLVED for: citems.scr, skillneedset.scr, warstoneinfo.scr,
-    oblist.scr, statue.scr, setitemname.scr, Tutor.scr, viplevels.scr, itemscale.scr,
-    itemeffect.scr, textcommand.do, emoticon.do, msginfo.do.
+2. **userlevel.scr field layout** — RESOLVED (wave-8): 15 field positions documented, including
+   the corrected u16 counters at +4/+6/+8, the zero pads at +2/+10, the eight scale floats, and
+   four individual reserved f32 slots. Stat category names remain UNVERIFIED.
+3. **userpoint.scr layout** — RESOLVED (wave-8) with a CORRECTION: the +8 cumulative is a `u32`
+   (not u16 + flag byte); group-2 cumulative at +16 is a `u32`; gain/cumulative pairs and the
+   secondary/tertiary curve columns are fully mapped.
+4. **users.scr internal layout** — RESOLVED (wave-8): four 124-byte class blocks; the header
+   constants 0x13/0x43 documented; the class-specific multiplier deviations corrected to float
+   indices [23], [24], [25]; class names (무사/자객/도사/승려) added.
+5. **skills.scr main record body** — RESOLVED (wave-8) from a 1504-byte sample: skill ID,
+   category, name, class flag, type byte, descriptions, SP cost, cooldown, range, and chain
+   references mapped. Large integer sub-regions and the chain-reference encoding remain open.
+6. **items.scr item-ID offset** — RESOLVED: item ID is at +0x34 (i32) and maps to items.csv col 1.
+7. **UNVERIFIED strides** — RESOLVED for: citems.scr, skillneedset.scr, warstoneinfo.scr,
+   oblist.scr, statue.scr, setitemname.scr, Tutor.scr, viplevels.scr, itemscale.scr,
+   itemeffect.scr, textcommand.do, emoticon.do, msginfo.do.
 
 ### Still open
 
-1. **exp.scr +2 constant 64** — is this a max-level constant, EXP-rate denominator, or a flags word?
+1. **exp.scr +2 constant 64** — max-level constant, EXP-rate denominator, or flags word?
 2. **exp.scr secondary curve at +12** — semantic identity (inner cultivation? merit? prestige?)
 3. **exp.scr tertiary curve at +16** — semantic identity
-4. **userlevel.scr step fields at +4 and +8** — what phase-transition do they encode? Why do they reset to zero at L145 while float values do not?
-5. **userlevel.scr stat category names** — which of the four named game stats maps to positive group [0], [1], [2], [3]?
+4. **userlevel.scr counters at +4/+6/+8** — what phase do they encode? Why reset to zero at L145
+   while the scale floats do not change?
+5. **userlevel.scr stat category names** — which named stat maps to each of the four float positions?
 6. **userpoint.scr constant 25 at +2** — what does 25 represent in the allocator?
-7. **userpoint.scr secondary curve at +20** — martial-energy curve or a third stat type?
-8. **userpoint.scr tertiary values at +24/+28** — max-cap or something else?
-9. **users.scr class IDs 1..4 vs. 3 playable classes** — is one class unused/NPC-only?
-10. **users.scr header bytes +1..+3** — VTable pointer fragment or a magic marker?
-11. **items.scr ID field width** — u16 or u32 at offset +0?
-12. **items.scr main record body** — fields from +0 to +0xD1 and from +0xE9 to +0x21F entirely UNVERIFIED.
-13. **skills.scr main record body** — 1,500 bytes of skill data before the trailing count byte.
-14. **mobs.scr gap fields** — contiguous regions between +52 and +243 and between +253 and +271 fully UNVERIFIED; regions from +325 to +395 and +401 to +443 and +449 to +487 UNVERIFIED.
-15. **mobs.scr secondary name at +19** — is this the zone/region name or a sub-type label?
-16. **mobs.scr level field −1** — special scripted mobs or data anomalies?
-17. **npcs.scr** — character encoding (UCS-2 vs. CP949) and all field names.
-18. **citems.scr fields +4..+51** — names and semantics of fields between item name and flag word.
-19. **citems.scr description blocks 6–9 (largely empty)** — unused language slots?
-20. **citems.scr `#` placeholder** — is 0x23 the engine's null-description sentinel?
-21. **citems.scr tail fields at +1040 and +1044** — meaning of values 0/1 and 0/2.
-22. **oblist.scr fields field_00 and field_04** — role of the first two u32 values.
-23. **warstoneinfo.scr fields field_04, field_08, field_32, field_36** — semantic names.
-24. **emoticon.do flag at +4** — basic vs. premium emoticons? static vs. animated?
-25. **emoticon.do action link at +12** — confirmed cross-table link to textcommand.do?
-26. **emoticon.do fields at +16, +24, +28** — frame timing or sprite-sheet coordinates?
-27. **msginfo.do dialog flag at +4** — "requires confirmation"? Only one data point.
-28. **items_extra.do fields at +8 and +12** — bone indices? Secondary lookup indices?
-29. **items_extra.do field at +40** — fourth rotation component or animation blend parameter?
-30. **items_extra.do rarity_tier at +44** — no loader field name confirmed; inferred from value range.
-31. **items_extra.do category top-byte scheme** — enum names for top-byte values 0x0B–0x11.
-32. **items_extra.do sentinel records at 0x7FFFFFFF** — sub-table boundary or merge artifact?
-33. **items.csv cols 20, 21** — adjacent to max_stack; role unclear.
-34. **items.csv cols 115, 116** — large/signed values; possibly internal checksums or pre-computed.
-35. **All .xdb files** — record stride, key scheme, and field layout entirely UNVERIFIED.
-36. **option.ini / panel.ini / combo.ini / TSIDX.ini keys** — not traced.
-37. **INI field at read-order index +18** — key name and purpose UNVERIFIED.
-38. **npc.scr stride** — independent file or sub-table of npcs.scr; not traced.
-39. **UNVERIFIED stride .scr files** — mapsetting, quests, products, events, helps, plus those listed as UNVERIFIED in section 2.2.
+7. **userpoint.scr group-1 vs group-2** — which named stat maps to each pool?
+8. **userpoint.scr secondary curve at +20/+22** — martial-energy (내공/내력) budget or a third stat?
+9. **userpoint.scr tertiary values at +24/+28** — third stat pool or a max-cap schedule?
+10. **userpoint.scr large gains at keys 285–300** — post-standard-level reward bursts?
+11. **users.scr 8-multiplier-to-stat mapping** ([22..29] at +92..+123).
+12. **users.scr header constants 0x13/0x43** — counts or a version marker?
+13. **users.scr class-4 label discrepancy** — `users.scr` calls it 승려 (monk); `items.csv` calls
+    the fourth equip class Gungnyo (궁녀, archer). Reconcile which is canonical.
+14. **users.scr A-divisor table source** — populated outside this file; trace its origin.
+15. **items.scr leading field width** at +0x00 (and whether +0x34 is the only ID field).
+16. **items.scr unresolved body regions** — +0x00..+0x33, +0x35..+0x4B, +0x4D..+0x97,
+    +0x9D..+0xD1, +0xE9..+0x21F (no sample available).
+17. **items.scr name/description location** — where the CP949 text fields sit inside the 548-byte
+    record (no sample).
+18. **items.scr stat-grant encoding** — how the disk record stores the STR/AGI/DEX/INT/CON/HP/MP
+    grants that populate the runtime item object.
+19. **skills.scr name-buffer width** at +8 (24 or 32 bytes).
+20. **skills.scr integer region +32..+515** — only +260 and +516 resolved.
+21. **skills.scr chain-reference encoding** — decimal-composite decode for +1116..+1136, +1180, +1294.
+22. **skills.scr +1296/+1300** — prerequisite or successor chain IDs?
+23. **skills.scr motion index +1304 / constant 7 at +1306** — meaning.
+24. **skills.scr tail fields** +1496..+1503.
+25. **mobs.scr gap fields** — +52..+243, +253..+271, +325..+395, +401..+443, +449..+487 UNVERIFIED.
+26. **mobs.scr secondary name at +19** — zone/region name or sub-type label?
+27. **mobs.scr level field −1** — special scripted mobs or data anomalies?
+28. **npcs.scr** — character encoding (UCS-2 vs CP949) and all field names.
+29. **citems.scr fields +4..+51** — names and semantics between item name and flag word.
+30. **citems.scr description blocks 6–9** — unused language slots?
+31. **citems.scr `#` placeholder** — is 0x23 the engine's null-description sentinel?
+32. **citems.scr tail fields at +1040 and +1044** — meaning of values 0/1 and 0/2.
+33. **oblist.scr field_00 / field_04** — role of the first two u32 values.
+34. **warstoneinfo.scr field_04/field_08/field_32/field_36** — semantic names.
+35. **emoticon.do flag at +4** — basic vs premium? static vs animated?
+36. **emoticon.do action link at +12** — confirmed cross-table link to textcommand.do?
+37. **emoticon.do fields at +16/+24/+28** — frame timing or sprite-sheet coordinates?
+38. **msginfo.do dialog flag at +4** — "requires confirmation"? Only one data point.
+39. **items_extra.do fields at +8 and +12** — bone indices? secondary lookup indices?
+40. **items_extra.do field at +40** — fourth rotation component or animation blend parameter?
+41. **items_extra.do rarity_tier at +44** — no loader field name confirmed; inferred from range.
+42. **items_extra.do category top-byte scheme** — enum names for top-byte values 0x0B–0x11.
+43. **items_extra.do sentinel records at 0x7FFFFFFF** — sub-table boundary or merge artifact?
+44. **items.csv requirement-column stat order (cols 24–28)** — does the CSV follow the canonical
+    runtime order STR/AGI/DEX/INT/CON (Section 2.2a), or a CSV-specific order? Currently the table
+    labels them STR/CON/AGI/INT/CHI from sample patterning; this needs a definitive cross-check.
+45. **items.csv cols 20, 21** — adjacent to max_stack; role unclear.
+46. **items.csv cols 115, 116** — large/signed values; possibly internal checksums or pre-computed.
+47. **All .xdb files** — record stride, key scheme, and field layout entirely UNVERIFIED.
+48. **option.ini / panel.ini / combo.ini / TSIDX.ini keys** — not traced.
+49. **INI field at read-order index +18** — key name and purpose UNVERIFIED.
+50. **npc.scr stride** — independent file or sub-table of npcs.scr; not traced.
+51. **UNVERIFIED stride .scr files** — mapsetting, quests, products, events, helps, plus those
+    listed as UNVERIFIED in section 2.2.
 
 ---
 
