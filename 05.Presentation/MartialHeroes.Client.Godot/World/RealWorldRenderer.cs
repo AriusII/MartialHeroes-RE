@@ -118,7 +118,7 @@ public sealed partial class RealWorldRenderer : Node3D
     // TEXTURES[idx-1].intTexId → bgtexture pool[intTexId] → data/map{tag}/texture/<rel>.dds.
     // spec: Docs/RE/formats/terrain.md §4.2 (bgtexture.txt) + §3.5 (.map TEXTURES) + §5.6. CONFIRMED.
     private BgTextureCatalog? _bgTextures; // global pool: intTexId → relPath (from bgtexture.txt)
-    private MapDescriptor? _cellMap;       // the target cell's .map (TERRAIN/BUILDING TEXTURES lists)
+    private MapDescriptor? _cellMap; // the target cell's .map (TERRAIN/BUILDING TEXTURES lists)
 
     // -------------------------------------------------------------------------
     // Lifecycle
@@ -355,6 +355,7 @@ public sealed partial class RealWorldRenderer : Node3D
             if (string.Equals(section.Keyword, keyword, StringComparison.OrdinalIgnoreCase))
                 return section.Textures;
         }
+
         return null;
     }
 
@@ -569,12 +570,14 @@ public sealed partial class RealWorldRenderer : Node3D
             return;
         }
 
-        // Place the character at the centre of the terrain sector.
+        // Place the character on the terrain in an OPEN spot, offset ~350 units toward -Z (in
+        // front of the building cluster, which sits near the cell centre) so it is not spawned
+        // inside a building. Y is lifted onto the (flat) terrain surface (~26).
         // spec: Docs/RE/formats/terrain.md §1.4 (world-space bounds); WorldCoordinates.ToGodot (negate Z).
         float legacyX = (TargetMapX - 10000) * 1024.0f + 512.0f;
         float legacyZ = (TargetMapZ - 10000) * 1024.0f + 512.0f;
 
-        charRoot.Position = new Vector3(legacyX, 0f, -legacyZ);
+        charRoot.Position = new Vector3(legacyX, 26f, -legacyZ - 350f);
         charRoot.Scale = Vector3.One * CharacterScale;
         charRoot.Name = "CharacterNode";
         AddChild(charRoot);
@@ -587,20 +590,29 @@ public sealed partial class RealWorldRenderer : Node3D
     private const float CharacterScale = 5.0f;
 
     /// <summary>
-    /// Attempts to load the character's <c>.bnd</c> skeleton. Returns null (static pose) when the
-    /// skeleton cannot be resolved — never throws. spec: Docs/RE/formats/mesh.md §.bnd.
+    /// Attempts to load the character's <c>.bnd</c> skeleton. The <c>.skn</c> <c>id_b</c> matches
+    /// the <c>.bnd</c> <c>actor_id</c>; the skeleton path is <c>data/char/bind/g{id_b}.bnd</c>.
+    /// Returns null (static pose) when it cannot be resolved — never throws.
+    /// spec: Docs/RE/formats/mesh.md §.skn header (id_b → .bnd actor_id) + §.bnd actor_id. CONFIRMED.
     /// </summary>
     private Skeleton? TryLoadSkeleton(SkinnedMesh mesh)
     {
         if (_assets is null) return null;
         try
         {
-            // .bnd files live at data/char/bind/g{id}.bnd. The exact skin→bnd id mapping is not yet
-            // confirmed, so this is best-effort: if BndVirtualPath was set explicitly, use it.
-            string? bndPath = BndVirtualPath;
-            if (bndPath is null || !_assets.Contains(bndPath)) return null;
+            string bndPath = BndVirtualPath ?? $"data/char/bind/g{mesh.IdB}.bnd";
+            if (mesh.IdB == 0 || !_assets.Contains(bndPath))
+            {
+                GD.Print($"[RealWorldRenderer] No skeleton for IdB={mesh.IdB} ({bndPath}) — static pose.");
+                return null;
+            }
+
             ReadOnlyMemory<byte> data = _assets.GetRaw(bndPath);
-            return data.IsEmpty ? null : BndParser.Parse(data);
+            if (data.IsEmpty) return null;
+
+            Skeleton skel = BndParser.Parse(data);
+            GD.Print($"[RealWorldRenderer] Skeleton loaded: {bndPath} ({skel.Bones.Length} bones).");
+            return skel;
         }
         catch (Exception ex)
         {
@@ -610,13 +622,62 @@ public sealed partial class RealWorldRenderer : Node3D
     }
 
     /// <summary>
-    /// Attempts to load a character animation <c>.mot</c>. Returns null (static pose) when none is
-    /// resolved — never throws. spec: Docs/RE/formats/animation.md §.mot.
+    /// Attempts to load the character's looped idle animation <c>.mot</c> via
+    /// <c>actormotion.txt</c>. Returns null (static rest pose) when none is resolved — never throws.
+    /// spec: Docs/RE/formats/animation.md §.mot; Docs/RE/formats/mesh.md §actormotion.txt. CONFIRMED.
     /// </summary>
     private AnimationClip? TryLoadAnimation(SkinnedMesh mesh)
     {
-        // Animation requires a confirmed skin→mot mapping which is not yet established; left as a
-        // deliberate no-op (static pose) until the mapping is verified. spec: animation.md.
+        if (_assets is null || mesh.IdB == 0) return null;
+        try
+        {
+            string? motPath = ResolveIdleMotPath(mesh.IdB);
+            if (motPath is null || !_assets.Contains(motPath))
+            {
+                GD.Print($"[RealWorldRenderer] No idle .mot for IdB={mesh.IdB} — static rest pose.");
+                return null;
+            }
+
+            ReadOnlyMemory<byte> data = _assets.GetRaw(motPath);
+            if (data.IsEmpty) return null;
+
+            AnimationClip clip = AnimationParser.Parse(data);
+            GD.Print($"[RealWorldRenderer] Animation loaded: {motPath}.");
+            return clip;
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] .mot load failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the looped idle motion id for an actor class via <c>data/char/actormotion.txt</c>:
+    /// the row whose column 2 equals <paramref name="actorClassId"/> (= the skin/skeleton id_b);
+    /// the idle-peace motion id is column 16. Returns <c>data/char/mot/g{id}.mot</c> or null.
+    /// spec: Docs/RE/formats/mesh.md §actormotion.txt (TAB-separated; col2=class, col16=idle). CONFIRMED.
+    /// </summary>
+    private string? ResolveIdleMotPath(uint actorClassId)
+    {
+        if (_assets is null) return null;
+        const string tablePath = "data/char/actormotion.txt";
+        if (!_assets.Contains(tablePath)) return null;
+
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        string text = System.Text.Encoding.GetEncoding(949).GetString(_assets.GetRaw(tablePath).Span);
+
+        foreach (string rawLine in text.Split('\n'))
+        {
+            string[] cols = rawLine.Replace("\r", string.Empty).Split('\t');
+            if (cols.Length <= 16) continue;
+            if (!uint.TryParse(cols[2].Trim(), out uint classId) || classId != actorClassId) continue;
+
+            string idle = cols[16].Trim();
+            if (idle.Length == 0 || idle == "0") return null;
+            return $"data/char/mot/g{idle}.mot";
+        }
+
         return null;
     }
 

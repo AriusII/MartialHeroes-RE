@@ -98,7 +98,11 @@ public sealed partial class CameraController : Camera3D
     // Mode enum
     // -----------------------------------------------------------------------
 
-    private enum CameraMode { Orbit, FreeFly }
+    private enum CameraMode
+    {
+        Orbit,
+        FreeFly
+    }
 
     // -----------------------------------------------------------------------
     // State — orbit
@@ -265,6 +269,7 @@ public sealed partial class CameraController : Camera3D
                     if (_mode == CameraMode.FreeFly)
                         ReleaseMouse();
                 }
+
                 GetViewport().SetInputAsHandled();
                 break;
 
@@ -285,6 +290,7 @@ public sealed partial class CameraController : Camera3D
                     ApplyOrbitTransform();
                     GetViewport().SetInputAsHandled();
                 }
+
                 break;
             }
 
@@ -328,7 +334,7 @@ public sealed partial class CameraController : Camera3D
             if (_rightMouseHeld)
             {
                 // Orbit: yaw and pitch around the focus point.
-                _orbitYaw   -= rel.X * MouseSensitivity;
+                _orbitYaw -= rel.X * MouseSensitivity;
                 _orbitPitch -= rel.Y * MouseSensitivity;
                 ClampOrbitPitch();
                 ApplyOrbitTransform();
@@ -341,10 +347,10 @@ public sealed partial class CameraController : Camera3D
 
                 // Camera right and up axes in world space.
                 Vector3 right = Transform.Basis.X;
-                Vector3 up    = Transform.Basis.Y;
+                Vector3 up = Transform.Basis.Y;
 
                 _orbitFocus -= right * rel.X * panScale;
-                _orbitFocus += up    * rel.Y * panScale;
+                _orbitFocus += up * rel.Y * panScale;
 
                 // Guard: clamp focus to finite values (prevent NaN drift on extreme panning).
                 _orbitFocus = ClampToFinite(_orbitFocus, 1e6f);
@@ -356,7 +362,7 @@ public sealed partial class CameraController : Camera3D
         {
             if (_rightMouseHeld || _mouseCaptured)
             {
-                _flyYaw   -= rel.X * MouseSensitivity;
+                _flyYaw -= rel.X * MouseSensitivity;
                 _flyPitch -= rel.Y * MouseSensitivity;
                 ClampFlyPitch();
                 ApplyFlyTransform();
@@ -373,14 +379,14 @@ public sealed partial class CameraController : Camera3D
         if (_mode != CameraMode.FreeFly) return;
 
         // Choose speed: normal or fast (Shift held).
-        bool fast  = global::Godot.Input.IsKeyPressed(Key.Shift);
+        bool fast = global::Godot.Input.IsKeyPressed(Key.Shift);
         float speed = fast ? FastSpeed : NormalSpeed;
-        float dist  = speed * (float)delta;
+        float dist = speed * (float)delta;
 
         // Movement is relative to the camera's current look direction.
         // Basis.Z points "backwards" in Godot's right-handed system, so negate for forward.
         Vector3 forward = -Transform.Basis.Z;
-        Vector3 right   =  Transform.Basis.X;
+        Vector3 right = Transform.Basis.X;
         // Move straight up/down in world Y (not camera-relative) for Q/E — feels more natural.
         Vector3 worldUp = Vector3.Up;
 
@@ -429,12 +435,12 @@ public sealed partial class CameraController : Camera3D
         //   z = distance · cos(pitch) · cos(yaw)
         float cosPitch = Mathf.Cos(_orbitPitch);
         float sinPitch = Mathf.Sin(_orbitPitch);
-        float cosYaw   = Mathf.Cos(_orbitYaw);
-        float sinYaw   = Mathf.Sin(_orbitYaw);
+        float cosYaw = Mathf.Cos(_orbitYaw);
+        float sinYaw = Mathf.Sin(_orbitYaw);
 
         var offset = new Vector3(
             _orbitDistance * cosPitch * sinYaw,
-           -_orbitDistance * sinPitch,          // negative: positive pitch lifts camera above focus
+            -_orbitDistance * sinPitch, // negative: positive pitch lifts camera above focus
             _orbitDistance * cosPitch * cosYaw
         );
 
@@ -462,8 +468,8 @@ public sealed partial class CameraController : Camera3D
     private void ApplyFlyTransform()
     {
         // Yaw around world Y, then pitch around the rotated X axis.
-        Basis yawBasis   = Basis.Identity.Rotated(Vector3.Up,    _flyYaw);
-        Basis pitchBasis = yawBasis.Rotated(yawBasis.X,          _flyPitch);
+        Basis yawBasis = Basis.Identity.Rotated(Vector3.Up, _flyYaw);
+        Basis pitchBasis = yawBasis.Rotated(yawBasis.X, _flyPitch);
 
         // Apply rotation; preserve position.
         Transform = new Transform3D(pitchBasis, Position);
@@ -480,7 +486,8 @@ public sealed partial class CameraController : Camera3D
             // Entering free-fly: synchronise fly angles from current camera orientation.
             SyncFlyAnglesFromOrbit();
             _mode = CameraMode.FreeFly;
-            GD.Print("[CameraController] Switched to FREE-FLY mode. RMB+drag=look, WASD=move, Q/E=up/down, Shift=fast, Tab/F=orbit.");
+            GD.Print(
+                "[CameraController] Switched to FREE-FLY mode. RMB+drag=look, WASD=move, Q/E=up/down, Shift=fast, Tab/F=orbit.");
         }
         else
         {
@@ -489,9 +496,9 @@ public sealed partial class CameraController : Camera3D
             _rightMouseHeld = false;
             // Re-anchor orbit focus in front of the current camera so the transition
             // doesn't teleport the user to a distant focus.
-            _orbitFocus    = Position + (-Transform.Basis.Z) * _orbitDistance;
+            _orbitFocus = Position + (-Transform.Basis.Z) * _orbitDistance;
             _orbitDistance = Mathf.Clamp(_orbitDistance, MinZoom, MaxZoom);
-            _mode           = CameraMode.Orbit;
+            _mode = CameraMode.Orbit;
             ApplyOrbitTransform();
             GD.Print("[CameraController] Switched to ORBIT mode. RMB+drag=orbit, Wheel=zoom, MMB=pan, Tab/F=free-fly.");
         }

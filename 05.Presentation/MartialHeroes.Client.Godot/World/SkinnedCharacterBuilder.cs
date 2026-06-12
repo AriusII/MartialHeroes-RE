@@ -353,25 +353,25 @@ public static class SkinnedCharacterBuilder
         // spec: Docs/RE/formats/mesh.md §Weight record — vertex_index, bone_index, weight.
         int geoVertCount = skn.Positions.Length;
         AccumulateWeights(skn.Weights, geoVertCount, boneIdToGodotIndex,
-            out int[] perGeoVtxBones,    // [geoVertCount × MaxInfluences] Godot bone indices
-            out float[] perGeoVtxWts);   // [geoVertCount × MaxInfluences] normalised weights
+            out int[] perGeoVtxBones, // [geoVertCount × MaxInfluences] Godot bone indices
+            out float[] perGeoVtxWts); // [geoVertCount × MaxInfluences] normalised weights
 
         // --- Build flat rendered-vertex arrays ---
         int totalVerts = faceCount * 3;
         var positions = new Vector3[totalVerts];
-        var normals   = new Vector3[totalVerts];
-        var uvs       = new Vector2[totalVerts];
+        var normals = new Vector3[totalVerts];
+        var uvs = new Vector2[totalVerts];
 
         // Godot's Bones array is int[] (4 ints per vertex).
         // Godot's Weights array is float[] (4 floats per vertex).
         // Both are indexed identically.
         // spec: Godot 4 ArrayMesh — Bones/Weights arrays must be 4 × vertexCount.
-        var bones   = new int[totalVerts * MaxInfluences];
+        var bones = new int[totalVerts * MaxInfluences];
         var weights = new float[totalVerts * MaxInfluences];
 
         SknCorner[] corners = skn.Corners;
-        Vec3[]      srcPos  = skn.Positions;
-        Vec3[]      srcNrm  = skn.Normals;
+        Vec3[] srcPos = skn.Positions;
+        Vec3[] srcNrm = skn.Normals;
 
         for (int f = 0; f < faceCount; f++)
         {
@@ -418,7 +418,7 @@ public static class SkinnedCharacterBuilder
                 int srcBase = (int)vi * MaxInfluences;
                 for (int inf = 0; inf < MaxInfluences; inf++)
                 {
-                    bones[dstBase + inf]   = perGeoVtxBones[srcBase + inf];
+                    bones[dstBase + inf] = perGeoVtxBones[srcBase + inf];
                     weights[dstBase + inf] = perGeoVtxWts[srcBase + inf];
                 }
             }
@@ -427,10 +427,10 @@ public static class SkinnedCharacterBuilder
         // --- Assemble ArrayMesh ---
         var arrays = new global::Godot.Collections.Array();
         arrays.Resize((int)Mesh.ArrayType.Max);
-        arrays[(int)Mesh.ArrayType.Vertex]  = positions;
-        arrays[(int)Mesh.ArrayType.Normal]  = normals;
-        arrays[(int)Mesh.ArrayType.TexUV]   = uvs;
-        arrays[(int)Mesh.ArrayType.Bones]   = bones;
+        arrays[(int)Mesh.ArrayType.Vertex] = positions;
+        arrays[(int)Mesh.ArrayType.Normal] = normals;
+        arrays[(int)Mesh.ArrayType.TexUV] = uvs;
+        arrays[(int)Mesh.ArrayType.Bones] = bones;
         arrays[(int)Mesh.ArrayType.Weights] = weights;
         // No index array — flat unindexed layout mirrors SknMeshBuilder.
 
@@ -470,13 +470,13 @@ public static class SkinnedCharacterBuilder
         // Skeleton3D) to the Skeleton3D itself.  As a direct child, the path is "..".
         var meshInst = new MeshInstance3D
         {
-            Name      = $"SkinnedMesh_{skn.Name}",
-            Mesh      = arrayMesh,
-            Skin      = skin,
+            Name = $"SkinnedMesh_{skn.Name}",
+            Mesh = arrayMesh,
+            Skin = skin,
             // The Skeleton property is a NodePath relative to the MeshInstance3D.
             // As a child of Skeleton3D the path to the parent is "..".
             // spec: Godot 4 MeshInstance3D.Skeleton documentation.
-            Skeleton  = new NodePath(".."),
+            Skeleton = new NodePath(".."),
         };
 
         GD.Print($"[SkinnedCharacterBuilder] Skinned ArrayMesh built: '{skn.Name}' " +
@@ -504,12 +504,12 @@ public static class SkinnedCharacterBuilder
         SknWeight[] weightRecords,
         int geoVertCount,
         int[] boneIdToGodotIndex,
-        out int[]   outBones,
+        out int[] outBones,
         out float[] outWeights)
     {
         // Working storage: each vertex holds up to MaxInfluences (boneIdx, weight) pairs.
         // We use parallel arrays sized [geoVertCount × MaxInfluences].
-        outBones   = new int[geoVertCount   * MaxInfluences];
+        outBones = new int[geoVertCount * MaxInfluences];
         outWeights = new float[geoVertCount * MaxInfluences];
 
         // Track how many influences we have so far per vertex (0..MaxInfluences).
@@ -542,7 +542,7 @@ public static class SkinnedCharacterBuilder
             if (current < MaxInfluences)
             {
                 // Slot available — write directly.
-                outBones[baseIdx + current]   = godotBoneIdx;
+                outBones[baseIdx + current] = godotBoneIdx;
                 outWeights[baseIdx + current] = wr.Weight;
                 influenceCounts[vi] = current + 1;
             }
@@ -551,16 +551,20 @@ public static class SkinnedCharacterBuilder
                 // All 4 slots full — replace the lowest-weight slot if this one is heavier.
                 // This preserves the most significant influences for vertices with > 4 weights.
                 int minSlot = 0;
-                float minW  = outWeights[baseIdx];
+                float minW = outWeights[baseIdx];
                 for (int s = 1; s < MaxInfluences; s++)
                 {
                     float w = outWeights[baseIdx + s];
-                    if (w < minW) { minW = w; minSlot = s; }
+                    if (w < minW)
+                    {
+                        minW = w;
+                        minSlot = s;
+                    }
                 }
 
                 if (wr.Weight > minW)
                 {
-                    outBones[baseIdx + minSlot]   = godotBoneIdx;
+                    outBones[baseIdx + minSlot] = godotBoneIdx;
                     outWeights[baseIdx + minSlot] = wr.Weight;
                 }
             }
@@ -579,7 +583,7 @@ public static class SkinnedCharacterBuilder
             {
                 // No usable influences — bind entirely to bone 0 (root).
                 // This is the single-bone item-skin default path.
-                outBones[baseIdx]   = 0;
+                outBones[baseIdx] = 0;
                 outWeights[baseIdx] = 1f;
                 // Remaining slots are already 0 / 0f from array initialisation.
             }
@@ -622,7 +626,8 @@ public static class SkinnedCharacterBuilder
     {
         if (clip.FrameCount == 0 || clip.Tracks.Length == 0)
         {
-            GD.Print($"[SkinnedCharacterBuilder] Clip '{clip.Name}' is a stub (frameCount=0 or no tracks) — skipping AnimationPlayer.");
+            GD.Print(
+                $"[SkinnedCharacterBuilder] Clip '{clip.Name}' is a stub (frameCount=0 or no tracks) — skipping AnimationPlayer.");
             return null;
         }
 
@@ -631,8 +636,8 @@ public static class SkinnedCharacterBuilder
         double durationSecs = clip.FrameCount * (double)SecondsPerFrame;
 
         var anim = new Animation();
-        anim.Length     = (float)durationSecs;
-        anim.LoopMode   = Animation.LoopModeEnum.Linear;
+        anim.Length = (float)durationSecs;
+        anim.LoopMode = Animation.LoopModeEnum.Linear;
         // spec: Docs/RE/formats/animation.md §Wrap and loop — CycleLayer is "looping; replays
         //       continuously". Godot Linear loop is the equivalent.
 

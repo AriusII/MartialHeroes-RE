@@ -19,7 +19,7 @@ public sealed class BgTextureTxtParserTests
 
         Assert.Equal(3, cat.Count);
         Assert.Equal("terrain/a-b-1", cat.GetRelPath(0));
-        Assert.Equal("terrain/g3", cat.GetRelPath(116));      // the real target-cell ground texture
+        Assert.Equal("terrain/g3", cat.GetRelPath(116)); // the real target-cell ground texture
         Assert.Equal("building/_castle", cat.GetRelPath(200));
     }
 
