@@ -9,6 +9,10 @@
 
     <ItemGroup>
         <ProjectReference Include="..\MartialHeroes.Client.Application\MartialHeroes.Client.Application.csproj"/>
+        <!-- Downstream references to layer-03 are acyclic: Assets.* never reference Client.*. -->
+        <!-- spec: PRESERVATION_AND_ARCHITECTURE.md — dependency DAG: Infrastructure → Application → Domain; Assets.* ≤ layer-03 < layer-04. -->
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers\MartialHeroes.Assets.Parsers.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj"/>
     </ItemGroup>
 
     <ItemGroup>

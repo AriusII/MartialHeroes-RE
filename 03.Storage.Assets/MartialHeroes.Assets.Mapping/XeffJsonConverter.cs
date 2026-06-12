@@ -80,7 +80,7 @@ public static class XeffJsonConverter
     {
         // spec: Docs/RE/formats/effects.md §A.3.1 Group A — Emitter identity: PARSER-CONFIRMED.
         // spec: Docs/RE/formats/effects.md §A.3.2 Group B — Texture sub-array: PARSER-CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.3.3 Group C — Alpha keyframes: PARSER-CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.3.3 Group C — Alpha keyframes (inverted, stored as opacity): CONFIRMED.
         // spec: Docs/RE/formats/effects.md §A.3.4 Group D — Scale channels: PARSER-CONFIRMED.
         // spec: Docs/RE/formats/effects.md §A.3.5 Group E — Animation timing: PARSER-CONFIRMED.
         // spec: Docs/RE/formats/effects.md §A.3.6 Group F — Keyframe/static-state: PARSER-CONFIRMED.
@@ -93,7 +93,9 @@ public static class XeffJsonConverter
             // spec: Docs/RE/formats/effects.md §A.3.1 — field_unknown_a: PARSER-CONFIRMED (raw value).
             FieldUnknownA: el.FieldUnknownA,
             TextureNames: el.TextureNames,
-            AlphaKeyframes: el.AlphaKeyframes,
+            // AlphaKeyframes emitted with named opacity; the parser has already applied 1 - file_value.
+            // spec: Docs/RE/formats/effects.md §A.3.3 — "in-memory value is opacity": CONFIRMED.
+            AlphaKeyframes: MapAlphaKeyframes(el.AlphaKeyframes),
             ScaleX: el.ScaleX,
             ScaleY: el.ScaleY,
             ScaleZ: el.ScaleZ,
@@ -115,10 +117,19 @@ public static class XeffJsonConverter
         {
             XeffKeyframe kf = kfs[i];
             // spec: Docs/RE/formats/effects.md §A.3.6 Branch A — kf_index, params, rot_x/y/z_deg: PARSER-CONFIRMED.
-            // Params 0-5 purpose UNRESOLVED — emitted raw.
+            // spec: Docs/RE/formats/effects.md §A.3.7 — velocity Vec3 (Params[0..2]): HIGH.
+            // spec: Docs/RE/formats/effects.md §A.3.7 — size Vec3 (Params[3..5]): HIGH.
+            // spec: Docs/RE/formats/effects.md §A.4 — Rotation quaternion (Euler degrees → quat): CONFIRMED.
+            // Params array is kept for backward-compat / fallback for fields not yet resolved.
+            Vec3 vel = kf.Velocity;
+            Vec3 sz = kf.Size;
+            Quat rot = kf.Rotation;
             result[i] = new XeffJsonKeyframe(
                 KfIndex: kf.KfIndex,
                 Params: kf.Params,
+                Velocity: new float[] { vel.X, vel.Y, vel.Z },
+                Size: new float[] { sz.X, sz.Y, sz.Z },
+                Rotation: new float[] { rot.X, rot.Y, rot.Z, rot.W },
                 RotXDeg: kf.RotXDeg,
                 RotYDeg: kf.RotYDeg,
                 RotZDeg: kf.RotZDeg);
@@ -130,12 +141,41 @@ public static class XeffJsonConverter
     private static XeffJsonStaticState MapStaticState(XeffStaticState s)
     {
         // spec: Docs/RE/formats/effects.md §A.3.6 Branch B — 6 params + optional rot (emitter_type==2): PARSER-CONFIRMED.
-        // Params purpose UNRESOLVED — emitted raw.
+        // spec: Docs/RE/formats/effects.md §A.3.7 — velocity Vec3 (Params[0..2]): HIGH.
+        // spec: Docs/RE/formats/effects.md §A.3.7 — size Vec3 (Params[3..5]): HIGH.
+        // spec: Docs/RE/formats/effects.md §A.4 — Rotation quaternion (identity when emitter_type!=2): CONFIRMED.
+        // Params array kept as fallback.
+        Vec3 vel = s.Velocity;
+        Vec3 sz = s.Size;
+        Quat rot = s.Rotation;
         return new XeffJsonStaticState(
             Params: s.Params,
+            Velocity: new float[] { vel.X, vel.Y, vel.Z },
+            Size: new float[] { sz.X, sz.Y, sz.Z },
+            Rotation: new float[] { rot.X, rot.Y, rot.Z, rot.W },
             RotXDeg: s.RotXDeg,
             RotYDeg: s.RotYDeg,
             RotZDeg: s.RotZDeg);
+    }
+
+    /// <summary>
+    /// Converts per-keyframe alpha values (stored inverted in the file) to opacity values.
+    /// spec: Docs/RE/formats/effects.md §A.3.3 — "Stored inverted: 0.0 = opaque, 1.0 = transparent.
+    ///   In-memory value is opacity (0.0 = transparent, 1.0 = opaque)." CONFIRMED.
+    /// The parser already stores the inverted (in-memory = opacity) form in AlphaKeyframes.
+    /// We emit both the raw (file) value and the opacity for consumer clarity.
+    /// </summary>
+    private static XeffJsonAlpha[] MapAlphaKeyframes(float[] keyframes)
+    {
+        var result = new XeffJsonAlpha[keyframes.Length];
+        for (int i = 0; i < keyframes.Length; i++)
+        {
+            // AlphaKeyframes is already the in-memory opacity = (1 - file_value).
+            // spec: Docs/RE/formats/effects.md §A.3.3 — "loads as 1.0 − file_value": CONFIRMED.
+            float opacity = keyframes[i]; // already converted by parser
+            result[i] = new XeffJsonAlpha(Opacity: opacity);
+        }
+        return result;
     }
 
     // -------------------------------------------------------------------------
@@ -156,7 +196,9 @@ public static class XeffJsonConverter
         /// <summary>UNRESOLVED field; emitted raw for downstream tooling.</summary>
         uint FieldUnknownA,
         string[] TextureNames,
-        float[] AlphaKeyframes,
+        // Alpha keyframes emitted as {opacity} objects (parser already holds 1-file_value).
+        // spec: Docs/RE/formats/effects.md §A.3.3 — "in-memory value is opacity": CONFIRMED.
+        XeffJsonAlpha[] AlphaKeyframes,
         float[] ScaleX,
         float[] ScaleY,
         float[] ScaleZ,
@@ -166,19 +208,43 @@ public static class XeffJsonConverter
         XeffJsonKeyframe[]? AnimKeyframes,
         XeffJsonStaticState? StaticState);
 
-    // Animated keyframe
+    /// <summary>
+    /// One alpha keyframe entry. Emits <c>opacity</c> (the in-memory / render-time value).
+    /// spec: Docs/RE/formats/effects.md §A.3.3 — "in-memory value is opacity (0=transparent,1=opaque)": CONFIRMED.
+    /// </summary>
+    private sealed record XeffJsonAlpha(float Opacity);
+
+    // Animated keyframe — velocity/size/rotation are now named; params kept as fallback.
+    // spec: Docs/RE/formats/effects.md §A.3.7 — velocity Vec3 (Params[0..2]): HIGH.
+    // spec: Docs/RE/formats/effects.md §A.3.7 — size Vec3 (Params[3..5]): HIGH.
+    // spec: Docs/RE/formats/effects.md §A.4  — rotation quaternion (from Euler degrees): CONFIRMED.
     private sealed record XeffJsonKeyframe(
         uint KfIndex,
-        /// <summary>6 float params; purpose UNRESOLVED — emitted raw.</summary>
+        /// <summary>6 float params; kept as raw fallback.</summary>
         float[] Params,
+        /// <summary>Emission velocity Vec3 [X,Y,Z]. spec: §A.3.7: HIGH.</summary>
+        float[] Velocity,
+        /// <summary>Billboard/particle size Vec3 [X,Y,Z]. spec: §A.3.7: HIGH.</summary>
+        float[] Size,
+        /// <summary>Rotation quaternion [X,Y,Z,W] derived from Euler degrees. spec: §A.4: CONFIRMED.</summary>
+        float[] Rotation,
         float RotXDeg,
         float RotYDeg,
         float RotZDeg);
 
-    // Static emitter state
+    // Static emitter state — velocity/size/rotation are now named; params kept as fallback.
+    // spec: Docs/RE/formats/effects.md §A.3.7 — velocity Vec3 (Params[0..2]): HIGH.
+    // spec: Docs/RE/formats/effects.md §A.3.7 — size Vec3 (Params[3..5]): HIGH.
+    // spec: Docs/RE/formats/effects.md §A.4  — rotation quaternion: CONFIRMED.
     private sealed record XeffJsonStaticState(
-        /// <summary>6 float params; purpose UNRESOLVED — emitted raw.</summary>
+        /// <summary>6 float params; kept as raw fallback.</summary>
         float[] Params,
+        /// <summary>Static emission velocity Vec3 [X,Y,Z]. spec: §A.3.7: HIGH.</summary>
+        float[] Velocity,
+        /// <summary>Static billboard/particle size Vec3 [X,Y,Z]. spec: §A.3.7: HIGH.</summary>
+        float[] Size,
+        /// <summary>Rotation quaternion [X,Y,Z,W] (identity when emitter_type!=2). spec: §A.4: CONFIRMED.</summary>
+        float[] Rotation,
         float? RotXDeg,
         float? RotYDeg,
         float? RotZDeg);

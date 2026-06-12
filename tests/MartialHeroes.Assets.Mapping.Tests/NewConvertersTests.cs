@@ -1025,3 +1025,498 @@ public sealed class XeffJsonConverterTests
         Assert.Equal(json1, json2);
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  BudSceneGltfConverter — Normal and UV binary correctness
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Verifies that per-vertex Normal (NORMAL) and UV (TEXCOORD_0) attributes are correctly
+/// written to the GLB binary buffer with the expected coordinate-system conversion applied.
+///
+/// Coordinate conventions:
+///   .bud stores vertex normals as (normalX, normalY, normalZ) f32, unit-length.
+///   spec: Docs/RE/formats/terrain_scene.md §3.2.2 — normal_x @ +0x0C, normal_y @ +0x10, normal_z @ +0x14: CONFIRMED.
+///   Handedness flip: negate X for left-handed D3D9 → right-handed glTF.
+///   spec: Docs/RE/formats/terrain_scene.md §Coordinate system — X is horizontal: CONFIRMED.
+///   glTF 2.0 spec §3.4: right-handed Y-up, negate X.
+///
+///   UV: stored as world-scale tiled f32 values.
+///   spec: Docs/RE/formats/terrain_scene.md §3.2.2 — uv_u @ +0x18, uv_v @ +0x1C: CONFIRMED.
+///   No V-flip applied (no top-left/bottom-left mismatch documented for terrain geometry UVs).
+/// </summary>
+public sealed class BudSceneNormalAndUvBinaryTests
+{
+    // -------------------------------------------------------------------------
+    // Synthetic scene with known normal and UV values
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Scene with a single triangle whose vertices have known, non-trivial normals and UVs.
+    /// Normal (0.577, 0.577, 0.577) is approximately a unit vector (√(1/3) ≈ 0.5774).
+    /// UV values chosen to be clearly distinguishable in the buffer.
+    /// spec: Docs/RE/formats/terrain_scene.md §3.2.2 — vertex record layout: CONFIRMED.
+    /// </summary>
+    private static BudScene MakeKnownNormalUvScene()
+    {
+        // A right-isoceles triangle; all three vertices share the same surface normal pointing at 45°.
+        const float n = 0.577350259f; // ≈ 1/√3 — unit vector for (1,1,1) direction
+        BudVertex[] verts =
+        [
+            new BudVertex(PosX: 0f,  PosY: 0f, PosZ: 0f,  NormalX: n, NormalY: n, NormalZ: n, UvU: 0.0f, UvV: 0.0f),
+            new BudVertex(PosX: 1f,  PosY: 0f, PosZ: 0f,  NormalX: n, NormalY: n, NormalZ: n, UvU: 1.0f, UvV: 0.0f),
+            new BudVertex(PosX: 0f,  PosY: 0f, PosZ: 1f,  NormalX: n, NormalY: n, NormalZ: n, UvU: 0.0f, UvV: 1.0f),
+        ];
+
+        return new BudScene
+        {
+            Objects =
+            [
+                new BudObject
+                {
+                    TypeByte = 0,
+                    TexId = 1,
+                    Vertices = verts,
+                    Indices = [0, 1, 2],
+                },
+            ],
+        };
+    }
+
+    // -------------------------------------------------------------------------
+    // Normal attribute — presence and binary values
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void WriteGlb_NormalAccessor_PresentInAttributes()
+    {
+        // NORMAL accessor must be present as attribute index 1 in the primitive.
+        // spec: Docs/RE/formats/terrain_scene.md §3.2.2 — normal_x/y/z CONFIRMED.
+        string json = ExtractJson(MakeKnownNormalUvScene());
+        using var doc = JsonDocument.Parse(json);
+        var attrs = doc.RootElement
+            .GetProperty("meshes")[0]
+            .GetProperty("primitives")[0]
+            .GetProperty("attributes");
+        Assert.True(attrs.TryGetProperty("NORMAL", out _),
+            "NORMAL attribute must be present in the primitive.");
+    }
+
+    [Fact]
+    public void WriteGlb_NormalBuffer_HasXFlipped()
+    {
+        // The X component of each normal must be negated in the binary buffer.
+        // Original NormalX = +0.577… → written as −0.577…
+        // spec: Docs/RE/formats/terrain_scene.md §3.2.2 — normal_x @ +0x0C: CONFIRMED.
+        // glTF 2.0 spec §3.4: negate X for LH→RH handedness flip.
+        BudScene scene = MakeKnownNormalUvScene();
+        byte[] glb = WriteToBytes(scene);
+        string json = ExtractJsonFromBytes(glb);
+        using var doc = JsonDocument.Parse(json);
+
+        // Accessor index 1 = NORMAL (per: pos=0, nrm=1, uv=2, idx=3).
+        int bvIdx = doc.RootElement.GetProperty("accessors")[1]
+            .GetProperty("bufferView").GetInt32();
+        int byteOff = doc.RootElement.GetProperty("bufferViews")[bvIdx]
+            .GetProperty("byteOffset").GetInt32();
+
+        byte[] bin = ExtractBinChunk(glb);
+        // Vertex 0 normal: first 12 bytes at byteOff
+        float nx = BinaryPrimitives.ReadSingleLittleEndian(bin.AsSpan(byteOff + 0));
+        float ny = BinaryPrimitives.ReadSingleLittleEndian(bin.AsSpan(byteOff + 4));
+        float nz = BinaryPrimitives.ReadSingleLittleEndian(bin.AsSpan(byteOff + 8));
+
+        const float expected = 0.577350259f;
+        Assert.Equal(-expected, nx, precision: 4); // X must be negated
+        Assert.Equal( expected, ny, precision: 4); // Y unchanged
+        Assert.Equal( expected, nz, precision: 4); // Z unchanged
+    }
+
+    [Fact]
+    public void WriteGlb_NormalAccessor_CountMatchesVertexCount()
+    {
+        // The NORMAL accessor must have the same count as the number of vertices.
+        // spec: Docs/RE/formats/terrain_scene.md §3.2 — vertex_count: CONFIRMED.
+        string json = ExtractJson(MakeKnownNormalUvScene());
+        using var doc = JsonDocument.Parse(json);
+        // accessor[0]=POSITION, accessor[1]=NORMAL, accessor[2]=TEXCOORD_0, accessor[3]=indices
+        var nrmAcc = doc.RootElement.GetProperty("accessors")[1];
+        Assert.Equal(3, nrmAcc.GetProperty("count").GetInt32()); // 3 vertices
+        Assert.Equal("VEC3", nrmAcc.GetProperty("type").GetString());
+        Assert.Equal(5126 /*FLOAT*/, nrmAcc.GetProperty("componentType").GetInt32());
+    }
+
+    // -------------------------------------------------------------------------
+    // UV attribute — presence and binary values
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void WriteGlb_TexCoordAccessor_PresentInAttributes()
+    {
+        // TEXCOORD_0 accessor must be present as attribute index 2 in the primitive.
+        // spec: Docs/RE/formats/terrain_scene.md §3.2.2 — uv_u @ +0x18, uv_v @ +0x1C: CONFIRMED.
+        string json = ExtractJson(MakeKnownNormalUvScene());
+        using var doc = JsonDocument.Parse(json);
+        var attrs = doc.RootElement
+            .GetProperty("meshes")[0]
+            .GetProperty("primitives")[0]
+            .GetProperty("attributes");
+        Assert.True(attrs.TryGetProperty("TEXCOORD_0", out _),
+            "TEXCOORD_0 attribute must be present in the primitive.");
+    }
+
+    [Fact]
+    public void WriteGlb_UvBuffer_HasCorrectValues()
+    {
+        // UV values must be written verbatim (no V-flip): vertex 0 → (0,0), vertex 1 → (1,0).
+        // spec: Docs/RE/formats/terrain_scene.md §3.2.2 — uv_u @ +0x18: CONFIRMED.
+        // No top-left/bottom-left flip documented for terrain geometry UVs.
+        BudScene scene = MakeKnownNormalUvScene();
+        byte[] glb = WriteToBytes(scene);
+        string json = ExtractJsonFromBytes(glb);
+        using var doc = JsonDocument.Parse(json);
+
+        // Accessor index 2 = TEXCOORD_0.
+        int bvIdx = doc.RootElement.GetProperty("accessors")[2]
+            .GetProperty("bufferView").GetInt32();
+        int byteOff = doc.RootElement.GetProperty("bufferViews")[bvIdx]
+            .GetProperty("byteOffset").GetInt32();
+
+        byte[] bin = ExtractBinChunk(glb);
+        // Vertex 0: U=0.0, V=0.0
+        float u0 = BinaryPrimitives.ReadSingleLittleEndian(bin.AsSpan(byteOff + 0));
+        float v0 = BinaryPrimitives.ReadSingleLittleEndian(bin.AsSpan(byteOff + 4));
+        // Vertex 1: U=1.0, V=0.0
+        float u1 = BinaryPrimitives.ReadSingleLittleEndian(bin.AsSpan(byteOff + 8));
+        float v1 = BinaryPrimitives.ReadSingleLittleEndian(bin.AsSpan(byteOff + 12));
+        // Vertex 2: U=0.0, V=1.0
+        float u2 = BinaryPrimitives.ReadSingleLittleEndian(bin.AsSpan(byteOff + 16));
+        float v2 = BinaryPrimitives.ReadSingleLittleEndian(bin.AsSpan(byteOff + 20));
+
+        Assert.Equal(0.0f, u0, precision: 5);
+        Assert.Equal(0.0f, v0, precision: 5);
+        Assert.Equal(1.0f, u1, precision: 5);
+        Assert.Equal(0.0f, v1, precision: 5);
+        Assert.Equal(0.0f, u2, precision: 5);
+        Assert.Equal(1.0f, v2, precision: 5);
+    }
+
+    [Fact]
+    public void WriteGlb_TexCoordAccessor_IsVec2Float()
+    {
+        // TEXCOORD_0 accessor must be VEC2 / FLOAT.
+        // glTF 2.0 spec §Accessor: TEXCOORD_0 is VEC2 float.
+        string json = ExtractJson(MakeKnownNormalUvScene());
+        using var doc = JsonDocument.Parse(json);
+        var uvAcc = doc.RootElement.GetProperty("accessors")[2];
+        Assert.Equal("VEC2", uvAcc.GetProperty("type").GetString());
+        Assert.Equal(5126 /*FLOAT*/, uvAcc.GetProperty("componentType").GetInt32());
+        Assert.Equal(3, uvAcc.GetProperty("count").GetInt32());
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    private static string ExtractJson(BudScene scene)
+        => ExtractJsonFromBytes(WriteToBytes(scene));
+
+    private static byte[] WriteToBytes(BudScene scene)
+    {
+        using var ms = new MemoryStream();
+        BudSceneGltfConverter.WriteGlb(scene, ms);
+        return ms.ToArray();
+    }
+
+    private static string ExtractJsonFromBytes(byte[] glb)
+    {
+        uint jsonLen = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(12));
+        return Encoding.UTF8.GetString(glb, 20, (int)jsonLen).TrimEnd(' ');
+    }
+
+    private static byte[] ExtractBinChunk(byte[] glb)
+    {
+        uint jsonLen = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(12));
+        int binHdrOff = 12 + 8 + (int)jsonLen;
+        uint binLen = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(binHdrOff));
+        int binDataOff = binHdrOff + 8;
+        return glb[binDataOff..(binDataOff + (int)binLen)];
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  XeffJsonConverter — named Velocity / Size / Rotation fields
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Verifies that XeffJsonConverter emits properly named Velocity, Size, and Rotation
+/// fields in keyframes and static states, per the resolved spec.
+///
+/// spec: Docs/RE/formats/effects.md §A.3.7 — velocity Vec3 (Params[0..2]): HIGH.
+/// spec: Docs/RE/formats/effects.md §A.3.7 — size Vec3 (Params[3..5]): HIGH.
+/// spec: Docs/RE/formats/effects.md §A.4  — rotation quaternion (Euler → quat): CONFIRMED.
+/// spec: Docs/RE/formats/effects.md §A.3.3 — alpha opacity (1 - file_value): CONFIRMED.
+/// </summary>
+public sealed class XeffJsonNamedFieldsTests
+{
+    // -------------------------------------------------------------------------
+    // Fixtures
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Static-state element (AnimLoop=0) with known velocity, size, and rotation values.
+    /// EmitterType=2 so rotation floats are present.
+    /// spec: Docs/RE/formats/effects.md §A.3.6 Branch B — emitter_type==2 reads rotation: CONFIRMED.
+    /// </summary>
+    private static XeffData MakeStaticStateEffect()
+    {
+        return new XeffData
+        {
+            EffectId = 100u,
+            Elements =
+            [
+                new XeffElement
+                {
+                    EmitterType = 2u, // directional billboard: reads rotation floats
+                    EmitterSubtype = 0u,
+                    AnimFlag = 0u,
+                    TexCount = 0u,
+                    FieldUnknownA = 0u,
+                    TextureNames = [],
+                    // AlphaKeyframes: file stores 0.3 (transparency) → parser converts to 0.7 (opacity).
+                    // spec: Docs/RE/formats/effects.md §A.3.3 — "1 - file_value = opacity": CONFIRMED.
+                    AlphaKeyframes = [0.7f], // already opacity (parser has done 1 - 0.3)
+                    ScaleX = [],
+                    ScaleY = [],
+                    ScaleZ = [],
+                    AnimLoop = 0,
+                    AnimStride = 0u,
+                    AnimBaseTime = 0u,
+                    AnimKeyframes = null,
+                    StaticState = new XeffStaticState
+                    {
+                        // Params[0..2] = velocity (2, 3, 4); Params[3..5] = size (5, 6, 7).
+                        // spec: Docs/RE/formats/effects.md §A.3.7 — velocity Vec3 Params[0..2]: HIGH.
+                        // spec: Docs/RE/formats/effects.md §A.3.7 — size Vec3 Params[3..5]: HIGH.
+                        Params = [2f, 3f, 4f, 5f, 6f, 7f],
+                        // Rotation: 90° around Y-axis → Quat(0, sin(45°), 0, cos(45°)) ≈ (0, 0.7071, 0, 0.7071).
+                        // spec: Docs/RE/formats/effects.md §A.4 — half-angle Euler-XYZ: CONFIRMED.
+                        RotXDeg = 0f,
+                        RotYDeg = 90f,
+                        RotZDeg = 0f,
+                    },
+                },
+            ],
+        };
+    }
+
+    /// <summary>
+    /// Animated keyframe element (AnimLoop=1) with a single keyframe containing
+    /// known velocity, size, and rotation.
+    /// spec: Docs/RE/formats/effects.md §A.3.6 Branch A: PARSER-CONFIRMED.
+    /// </summary>
+    private static XeffData MakeAnimatedKeyframeEffect()
+    {
+        return new XeffData
+        {
+            EffectId = 200u,
+            Elements =
+            [
+                new XeffElement
+                {
+                    EmitterType = 0u, // billboard
+                    EmitterSubtype = 0u,
+                    AnimFlag = 1u,
+                    TexCount = 1u,
+                    FieldUnknownA = 0u,
+                    TextureNames = ["smoke"],
+                    AlphaKeyframes = [],
+                    ScaleX = [],
+                    ScaleY = [],
+                    ScaleZ = [],
+                    AnimLoop = 1, // Branch A
+                    AnimStride = 100u,
+                    AnimBaseTime = 0u,
+                    AnimKeyframes =
+                    [
+                        new XeffKeyframe
+                        {
+                            KfIndex = 0u,
+                            // Params[0..2] = velocity (10, 20, 30); Params[3..5] = size (1, 2, 3).
+                            // spec: Docs/RE/formats/effects.md §A.3.7 — velocity Params[0..2]: HIGH.
+                            // spec: Docs/RE/formats/effects.md §A.3.7 — size Params[3..5]: HIGH.
+                            Params = [10f, 20f, 30f, 1f, 2f, 3f],
+                            // Rotation: 180° around Z → Quat(0, 0, sin(90°), cos(90°)) = (0, 0, 1, 0).
+                            // spec: Docs/RE/formats/effects.md §A.4 — half-angle Euler-XYZ: CONFIRMED.
+                            RotXDeg = 0f,
+                            RotYDeg = 0f,
+                            RotZDeg = 180f,
+                        },
+                    ],
+                    StaticState = null,
+                },
+            ],
+        };
+    }
+
+    // -------------------------------------------------------------------------
+    // Static state: velocity, size, rotation
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void WriteJsonBytes_StaticState_HasNamedVelocity()
+    {
+        // staticState.velocity must be a 3-element array [2, 3, 4].
+        // spec: Docs/RE/formats/effects.md §A.3.7 — static_velocity Vec3 (Params[0..2]): HIGH.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeStaticStateEffect());
+        using var doc = JsonDocument.Parse(json);
+        var ss = doc.RootElement.GetProperty("elements")[0].GetProperty("staticState");
+
+        Assert.True(ss.TryGetProperty("velocity", out var vel),
+            "staticState must expose named 'velocity' field.");
+        Assert.Equal(3, vel.GetArrayLength());
+        Assert.Equal(2f, vel[0].GetSingle(), precision: 4);
+        Assert.Equal(3f, vel[1].GetSingle(), precision: 4);
+        Assert.Equal(4f, vel[2].GetSingle(), precision: 4);
+    }
+
+    [Fact]
+    public void WriteJsonBytes_StaticState_HasNamedSize()
+    {
+        // staticState.size must be a 3-element array [5, 6, 7].
+        // spec: Docs/RE/formats/effects.md §A.3.7 — static_size Vec3 (Params[3..5]): HIGH.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeStaticStateEffect());
+        using var doc = JsonDocument.Parse(json);
+        var ss = doc.RootElement.GetProperty("elements")[0].GetProperty("staticState");
+
+        Assert.True(ss.TryGetProperty("size", out var sz),
+            "staticState must expose named 'size' field.");
+        Assert.Equal(3, sz.GetArrayLength());
+        Assert.Equal(5f, sz[0].GetSingle(), precision: 4);
+        Assert.Equal(6f, sz[1].GetSingle(), precision: 4);
+        Assert.Equal(7f, sz[2].GetSingle(), precision: 4);
+    }
+
+    [Fact]
+    public void WriteJsonBytes_StaticState_HasRotationQuaternion()
+    {
+        // staticState.rotation must be a 4-element [X,Y,Z,W] quaternion.
+        // 90° around Y → approx (0, 0.7071, 0, 0.7071).
+        // spec: Docs/RE/formats/effects.md §A.4 — half-angle Euler-XYZ: CONFIRMED.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeStaticStateEffect());
+        using var doc = JsonDocument.Parse(json);
+        var ss = doc.RootElement.GetProperty("elements")[0].GetProperty("staticState");
+
+        Assert.True(ss.TryGetProperty("rotation", out var rot),
+            "staticState must expose named 'rotation' quaternion.");
+        Assert.Equal(4, rot.GetArrayLength());
+        // For 90° Y rotation: X=0, Y≈sin(45°)=0.7071, Z=0, W≈cos(45°)=0.7071.
+        Assert.Equal(0f,      rot[0].GetSingle(), precision: 3); // X
+        Assert.Equal(0.7071f, rot[1].GetSingle(), precision: 3); // Y
+        Assert.Equal(0f,      rot[2].GetSingle(), precision: 3); // Z
+        Assert.Equal(0.7071f, rot[3].GetSingle(), precision: 3); // W
+    }
+
+    [Fact]
+    public void WriteJsonBytes_StaticState_StillHasRawParams()
+    {
+        // The raw params array must still be present for backward compat/fallback.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeStaticStateEffect());
+        using var doc = JsonDocument.Parse(json);
+        var ss = doc.RootElement.GetProperty("elements")[0].GetProperty("staticState");
+
+        Assert.True(ss.TryGetProperty("params", out var p),
+            "staticState must retain raw 'params' array for fallback.");
+        Assert.Equal(6, p.GetArrayLength());
+    }
+
+    // -------------------------------------------------------------------------
+    // Animated keyframe: velocity, size, rotation
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void WriteJsonBytes_AnimKeyframe_HasNamedVelocity()
+    {
+        // keyframe.velocity must be a 3-element array [10, 20, 30].
+        // spec: Docs/RE/formats/effects.md §A.3.7 — kf_velocity Vec3 (Params[0..2]): HIGH.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeAnimatedKeyframeEffect());
+        using var doc = JsonDocument.Parse(json);
+        var kf = doc.RootElement.GetProperty("elements")[0].GetProperty("animKeyframes")[0];
+
+        Assert.True(kf.TryGetProperty("velocity", out var vel),
+            "keyframe must expose named 'velocity' field.");
+        Assert.Equal(3, vel.GetArrayLength());
+        Assert.Equal(10f, vel[0].GetSingle(), precision: 4);
+        Assert.Equal(20f, vel[1].GetSingle(), precision: 4);
+        Assert.Equal(30f, vel[2].GetSingle(), precision: 4);
+    }
+
+    [Fact]
+    public void WriteJsonBytes_AnimKeyframe_HasNamedSize()
+    {
+        // keyframe.size must be a 3-element array [1, 2, 3].
+        // spec: Docs/RE/formats/effects.md §A.3.7 — kf_size Vec3 (Params[3..5]): HIGH.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeAnimatedKeyframeEffect());
+        using var doc = JsonDocument.Parse(json);
+        var kf = doc.RootElement.GetProperty("elements")[0].GetProperty("animKeyframes")[0];
+
+        Assert.True(kf.TryGetProperty("size", out var sz),
+            "keyframe must expose named 'size' field.");
+        Assert.Equal(3, sz.GetArrayLength());
+        Assert.Equal(1f, sz[0].GetSingle(), precision: 4);
+        Assert.Equal(2f, sz[1].GetSingle(), precision: 4);
+        Assert.Equal(3f, sz[2].GetSingle(), precision: 4);
+    }
+
+    [Fact]
+    public void WriteJsonBytes_AnimKeyframe_HasRotationQuaternion()
+    {
+        // keyframe.rotation must be a 4-element [X,Y,Z,W] quaternion.
+        // 180° around Z → Q = (0, 0, sin(90°), cos(90°)) = (0, 0, 1, 0).
+        // spec: Docs/RE/formats/effects.md §A.4 — half-angle Euler-XYZ: CONFIRMED.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeAnimatedKeyframeEffect());
+        using var doc = JsonDocument.Parse(json);
+        var kf = doc.RootElement.GetProperty("elements")[0].GetProperty("animKeyframes")[0];
+
+        Assert.True(kf.TryGetProperty("rotation", out var rot),
+            "keyframe must expose named 'rotation' quaternion.");
+        Assert.Equal(4, rot.GetArrayLength());
+        // 180° Z: X=0, Y=0, Z=sin(90°)≈1, W=cos(90°)≈0
+        Assert.Equal(0f, rot[0].GetSingle(), precision: 3); // X
+        Assert.Equal(0f, rot[1].GetSingle(), precision: 3); // Y
+        Assert.Equal(1f, rot[2].GetSingle(), precision: 3); // Z
+        Assert.Equal(0f, rot[3].GetSingle(), precision: 3); // W
+    }
+
+    [Fact]
+    public void WriteJsonBytes_AnimKeyframe_StillHasRawParams()
+    {
+        // Raw params array must still be present.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeAnimatedKeyframeEffect());
+        using var doc = JsonDocument.Parse(json);
+        var kf = doc.RootElement.GetProperty("elements")[0].GetProperty("animKeyframes")[0];
+        Assert.True(kf.TryGetProperty("params", out var p));
+        Assert.Equal(6, p.GetArrayLength());
+    }
+
+    // -------------------------------------------------------------------------
+    // Alpha keyframes: opacity emitted correctly
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void WriteJsonBytes_AlphaKeyframes_EmittedAsOpacity()
+    {
+        // The parser stores AlphaKeyframes as opacity (1 - file_value).
+        // The converter must emit alphaKeyframes[i].opacity.
+        // spec: Docs/RE/formats/effects.md §A.3.3 — "in-memory value is opacity": CONFIRMED.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeStaticStateEffect());
+        using var doc = JsonDocument.Parse(json);
+        var el = doc.RootElement.GetProperty("elements")[0];
+        var alphas = el.GetProperty("alphaKeyframes");
+        Assert.Equal(1, alphas.GetArrayLength());
+        // The fixture stores 0.7 opacity (parser has already done 1 - 0.3 = 0.7).
+        Assert.True(alphas[0].TryGetProperty("opacity", out var op),
+            "alphaKeyframes entries must expose 'opacity' field.");
+        Assert.Equal(0.7f, op.GetSingle(), precision: 4);
+    }
+}

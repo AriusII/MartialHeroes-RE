@@ -19,6 +19,11 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Infrastructure\MartialHeroes.Client.Infrastructure.csproj"/>
+        <!-- Assets.Parsers referenced directly so tests can construct LevelBaseEntry / ItemCsvRow /
+             SkillCatalogEntry / MobCatalogEntry fixtures (these are public types from Assets.Parsers.Models
+             used in the Infrastructure catalogue constructors). ProjectReference transitivity does not
+             propagate to the test compilation unit — explicit reference is required. -->
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers\MartialHeroes.Assets.Parsers.csproj"/>
     </ItemGroup>
 
 </Project>
