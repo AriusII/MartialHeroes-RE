@@ -244,6 +244,19 @@ public sealed partial class GameLoop : Node
             }
         }
 
+        // HUD windows (inventory = key I, skills = key K). They self-wire to /root/ClientContext
+        // in their own _Ready, so no Initialise call is needed. Added programmatically to avoid
+        // depending on .tscn script bindings. Hidden until toggled.
+        try
+        {
+            AddChild(new HUD.InventoryWindow { Name = "InventoryWindow" });
+            AddChild(new HUD.SkillWindow { Name = "SkillWindow" });
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameLoop] HUD window attach failed: {ex.Message}");
+        }
+
         GD.Print("[GameLoop] Ready.");
     }
 

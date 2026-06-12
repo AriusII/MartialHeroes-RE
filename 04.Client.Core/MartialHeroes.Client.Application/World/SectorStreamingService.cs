@@ -59,6 +59,35 @@ public sealed class SectorStreamingService
     /// <summary>The streaming quality (selects the 3×3 vs 5×5 ring). spec: terrain.md §9.2.</summary>
     public StreamQuality Quality { get; set; }
 
+    /// <summary>
+    /// Rebinds the underlying sector source to a different area (reloading its <c>.lst</c> manifest)
+    /// and clears the resident ring so the next <see cref="UpdateCenterAsync"/> streams the new area
+    /// from scratch. Every previously-resident sector is published as a
+    /// <see cref="SectorUnloadedEvent"/> so the presentation tears down the old area's terrain nodes.
+    /// </summary>
+    /// <remarks>
+    /// Area changes happen on entering a new map. The biased <c>(mapX, mapZ)</c> ranges of two areas
+    /// can overlap, so the resident set (which is keyed only by <c>(mapX, mapZ)</c>) MUST be cleared on
+    /// an area switch — otherwise a same-coordinate cell from the old area would be treated as already
+    /// resident and never reloaded. spec: terrain.md §1.1 (per-area paths) + §9 (active set).
+    /// </remarks>
+    /// <param name="areaId">The target area identifier. spec: terrain.md §1.1.</param>
+    public void SetArea(int areaId)
+    {
+        _source.SetArea(areaId);
+
+        // Drop the old area's residents and notify the presentation to unload them.
+        foreach ((int MapX, int MapZ) sector in _resident)
+        {
+            _eventBus.Publish(new SectorUnloadedEvent(sector.MapX, sector.MapZ));
+        }
+
+        _resident.Clear();
+
+        // Force the next UpdateCenterAsync to treat its centre as new (no early-out on unchanged centre).
+        _hasCenter = false;
+    }
+
     /// <summary>The number of sectors currently resident.</summary>
     public int ResidentCount => _resident.Count;
 

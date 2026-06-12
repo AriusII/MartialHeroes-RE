@@ -23,13 +23,15 @@ internal sealed class VfsTerrainSectorSource : ITerrainSectorSource
     // The VFS archive; null when no archive is mounted (offline mode).
     private readonly MappedVfsArchive? _vfs;
 
-    // Area identifier for path construction.
+    // Area identifier for path construction. Mutable: rebound by SetArea when the player enters a
+    // different area so streaming resolves the correct per-area path family.
     // spec: Docs/RE/formats/terrain.md §1.1 areaId digit decomposition.
-    private readonly int _areaId;
+    private int _areaId;
 
     // Valid cell keys loaded from the .lst manifest; null when no archive / manifest is absent.
+    // Reloaded by SetArea so the manifest always matches the current _areaId.
     // spec: Docs/RE/formats/terrain.md §1.2 — cell key formula: key = mapZ + 100000 * mapX. CONFIRMED.
-    private readonly HashSet<uint>? _manifestKeys;
+    private HashSet<uint>? _manifestKeys;
 
     /// <summary>
     /// Creates a VFS-backed sector source for the given area. Loads and caches the .lst manifest
@@ -46,6 +48,24 @@ internal sealed class VfsTerrainSectorSource : ITerrainSectorSource
         _vfs = vfs;
         _areaId = areaId;
         _manifestKeys = vfs is not null ? TryLoadManifest(vfs, areaId) : null;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Rebinds the active area and reloads its <c>.lst</c> manifest in one shot, so subsequent loads
+    /// resolve <c>data/map{tag}/dat/...</c> for the new area and validate against its manifest. A
+    /// no-op when the area is unchanged. When no archive is mounted (offline), only the id is updated
+    /// (loads still return empty). spec: terrain.md §1.1 (path tag) + §1.2 (manifest).
+    /// </remarks>
+    public void SetArea(int areaId)
+    {
+        if (areaId == _areaId && _manifestKeys is not null)
+        {
+            return; // already bound to this area with a loaded manifest.
+        }
+
+        _areaId = areaId;
+        _manifestKeys = _vfs is not null ? TryLoadManifest(_vfs, areaId) : null;
     }
 
     /// <inheritdoc />

@@ -112,8 +112,8 @@ public static class BudMeshBuilder
 
         int vertCount = obj.Vertices.Length;
         var positions = new Vector3[vertCount];
-        var normals   = new Vector3[vertCount];
-        var uvs       = new Vector2[vertCount];
+        var normals = new Vector3[vertCount];
+        var uvs = new Vector2[vertCount];
 
         for (int v = 0; v < vertCount; v++)
         {
@@ -194,8 +194,8 @@ public static class BudMeshBuilder
         //   the normal PBR light/ambient path without artificial brightening.
         // -------------------------------------------------------------------------
         var mat = new StandardMaterial3D();
-        mat.ShadingMode   = BaseMaterial3D.ShadingModeEnum.PerPixel; // dynamic lit, depth from normals
-        mat.CullMode      = BaseMaterial3D.CullModeEnum.Disabled;    // double-sided — thin arch. surfaces
+        mat.ShadingMode = BaseMaterial3D.ShadingModeEnum.PerPixel; // dynamic lit, depth from normals
+        mat.CullMode = BaseMaterial3D.CullModeEnum.Disabled; // double-sided — thin arch. surfaces
         mat.TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps;
 
         bool hasTexture = false;

@@ -34,4 +34,27 @@ public interface ITerrainSectorSource
         int mapX,
         int mapZ,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Rebinds this source to a different area, reloading its per-area <c>.lst</c> manifest so
+    /// subsequent <see cref="LoadSectorAsync"/> calls resolve cells in <paramref name="areaId"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The streaming policy is area-agnostic (it works in biased <c>(mapX, mapZ)</c> space), but the
+    /// concrete VFS adapter must know which area's path family and manifest to use. This method is the
+    /// seam the composition root uses to point streaming at the area the player actually entered
+    /// (spec: terrain.md §1.1 — per-area path tag; §1.2 — per-area manifest).
+    /// </para>
+    /// <para>
+    /// The default implementation is a no-op so area-agnostic / test fakes need not implement it.
+    /// Implementations should not throw for an absent manifest; an absent area simply yields empty
+    /// loads (spec: terrain.md §1.2 — absent key → never loaded).
+    /// </para>
+    /// </remarks>
+    /// <param name="areaId">The target area identifier. spec: terrain.md §1.1.</param>
+    void SetArea(int areaId)
+    {
+        // Default no-op: area-agnostic sources ignore the rebind.
+    }
 }

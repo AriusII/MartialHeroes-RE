@@ -12,6 +12,7 @@ public sealed class SectorStreamingServiceTests
     private sealed class RecordingSectorSource : ITerrainSectorSource
     {
         public ConcurrentBag<(int MapX, int MapZ)> Requests { get; } = new();
+        public List<int> AreaCalls { get; } = new();
 
         public ValueTask<ReadOnlyMemory<byte>> LoadSectorAsync(
             int mapX, int mapZ, CancellationToken cancellationToken = default)
@@ -19,6 +20,8 @@ public sealed class SectorStreamingServiceTests
             Requests.Add((mapX, mapZ));
             return ValueTask.FromResult<ReadOnlyMemory<byte>>(new byte[] { (byte)mapX, (byte)mapZ });
         }
+
+        public void SetArea(int areaId) => AreaCalls.Add(areaId);
     }
 
     private static List<IClientEvent> Drain(ClientEventBus bus)
@@ -105,6 +108,32 @@ public sealed class SectorStreamingServiceTests
         Assert.Equal(9, events.OfType<SectorUnloadedEvent>().Count()); // all 9 old cells evicted
         Assert.Equal(9, events.OfType<SectorLoadedEvent>().Count()); // a fresh 3×3 ring loaded
         Assert.Equal(9, service.ResidentCount);
+    }
+
+    [Fact]
+    public async Task SetArea_rebinds_source_and_unloads_old_ring_so_next_update_streams_fresh()
+    {
+        var bus = new ClientEventBus(ClientEventBus.Unbounded);
+        var source = new RecordingSectorSource();
+        var service = new SectorStreamingService(source, bus, StreamQuality.Medium);
+
+        // Stream area 0's ring at a centre, then switch to area 5 at the SAME biased coordinate.
+        await service.UpdateCenterAsync(10000, 10000);
+        Drain(bus);
+        int afterFirst = source.Requests.Count; // 9
+
+        service.SetArea(5);
+
+        // The source was told to rebind; the old ring is fully unloaded and the resident set cleared.
+        Assert.Equal(new[] { 5 }, source.AreaCalls);
+        Assert.Equal(0, service.ResidentCount);
+        Assert.Equal(9, Drain(bus).OfType<SectorUnloadedEvent>().Count());
+
+        // Even at the identical centre, the new area re-streams the full ring (no stale residency).
+        await service.UpdateCenterAsync(10000, 10000);
+        Assert.Equal(9, service.ResidentCount);
+        Assert.Equal(afterFirst + 9, source.Requests.Count);
+        Assert.Equal(9, Drain(bus).OfType<SectorLoadedEvent>().Count());
     }
 
     [Fact]

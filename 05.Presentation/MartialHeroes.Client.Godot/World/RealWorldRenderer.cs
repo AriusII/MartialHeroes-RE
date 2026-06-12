@@ -401,6 +401,12 @@ public sealed partial class RealWorldRenderer : Node3D
     /// </summary>
     private void TriggerTerrainStreaming(ClientContext ctx)
     {
+        // Point the streaming source at the resolved area BEFORE streaming. The composition root
+        // constructs the source bound to area 0; ResolveTargetCell may have picked another area, so
+        // we rebind (reloads the area .lst manifest) — otherwise non-zero areas stream empty.
+        // spec: Docs/RE/formats/terrain.md §1.1 (per-area path tag) + §1.2 (per-area manifest).
+        ctx.StreamingService.SetArea(TargetAreaId);
+
         _ = Task.Run(async () =>
         {
             try
@@ -409,7 +415,7 @@ public sealed partial class RealWorldRenderer : Node3D
                     .ConfigureAwait(false);
                 int residentCount = ctx.StreamingService.ResidentCount;
                 GD.Print($"[RealWorldRenderer] 3×3 terrain ring streaming complete " +
-                         $"(resident={residentCount} sectors).");
+                         $"(area {TargetAreaId}, resident={residentCount} sectors).");
             }
             catch (Exception ex)
             {
@@ -562,7 +568,10 @@ public sealed partial class RealWorldRenderer : Node3D
         Node3D charRoot;
         try
         {
-            charRoot = SkinnedCharacterBuilder.Build(skinnedMesh, skeleton, clip, albedo: null);
+            // Resolve the character's diffuse texture from skin.txt (mesh.IdA -> tex id -> PNG).
+            // spec: Docs/RE/formats/mesh.md §.skn texture binding via data/char/skin.txt. CONFIRMED.
+            ImageTexture? albedo = CharacterTextureResolver.Resolve(_assets, skinnedMesh);
+            charRoot = SkinnedCharacterBuilder.Build(skinnedMesh, skeleton, clip, albedo: albedo);
         }
         catch (Exception ex)
         {
@@ -577,6 +586,10 @@ public sealed partial class RealWorldRenderer : Node3D
         float legacyX = (TargetMapX - 10000) * 1024.0f + 512.0f;
         float legacyZ = (TargetMapZ - 10000) * 1024.0f + 512.0f;
 
+        // NOTE: the legacy humanoid mesh currently renders lying down (SkinnedCharacterBuilder
+        // up-axis/recentre/skinning needs a dedicated fix — tracked separately). Rotation left at
+        // zero until that fix lands so the corrective angle can be derived from a recentred mesh.
+        charRoot.RotationDegrees = CharacterUprightRotationDeg;
         charRoot.Position = new Vector3(legacyX, 26f, -legacyZ - 350f);
         charRoot.Scale = Vector3.One * CharacterScale;
         charRoot.Name = "CharacterNode";
@@ -584,10 +597,28 @@ public sealed partial class RealWorldRenderer : Node3D
 
         GD.Print($"[RealWorldRenderer] Character spawned from '{sknPath}' " +
                  $"(skeleton={(skeleton is not null)}, anim={(clip is not null)}, scale={CharacterScale:F1}).");
+
+        // Attach a player controller so the avatar can be moved (left-click to move / WASD).
+        // Strictly visual/local for now (no game-rule authority).
+        try
+        {
+            var playerController = new PlayerController { Name = "PlayerController" };
+            AddChild(playerController);
+            playerController.SetAvatar(charRoot);
+            playerController.SetGroundY(26f);
+            GD.Print("[RealWorldRenderer] PlayerController attached (left-click to move / WASD).");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] PlayerController attach failed: {ex.Message}");
+        }
     }
 
     /// <summary>Display scale applied to the spawned character node (legacy unit → Godot). Tuned visually.</summary>
     private const float CharacterScale = 5.0f;
+
+    /// <summary>Corrective rotation (degrees) that stands the legacy character mesh upright. Tuned visually.</summary>
+    private static readonly Vector3 CharacterUprightRotationDeg = Vector3.Zero;
 
     /// <summary>
     /// Attempts to load the character's <c>.bnd</c> skeleton. The <c>.skn</c> <c>id_b</c> matches
@@ -685,7 +716,12 @@ public sealed partial class RealWorldRenderer : Node3D
     {
         if (_assets is null) return null;
 
-        // Prefer real character body skins (data/char/skin/g{id}.skn) over item-prop skins.
+        // Prefer a real HUMANOID player-class skin (Musa class, IdB=1) over the spider/item props,
+        // so the default avatar is a recognisable character. spec: Docs/RE/formats/mesh.md §.skn.
+        string? humanoid = CharacterTextureResolver.PickHumanoidPlayerSkin(_assets);
+        if (humanoid is not null) return humanoid;
+
+        // Fallback: other character body skins (data/char/skin/g{id}.skn) then item-prop skins.
         // spec: Docs/RE/formats/mesh.md §.skn — "data/char/skin/": CONFIRMED.
         string[] candidates =
         [
@@ -773,16 +809,12 @@ public sealed partial class RealWorldRenderer : Node3D
         List<(int MapX, int MapZ)> cells = _assets.EnumerateTerrainCells(configArea);
         if (cells.Count > 0)
         {
-            // Pick the cell closest to the "centre" heuristic: sort by (mapX, mapZ) and take the
-            // middle element so we land in the heart of the area rather than a corner.
-            cells.Sort((a, b) => a.MapX != b.MapX ? a.MapX.CompareTo(b.MapX) : a.MapZ.CompareTo(b.MapZ));
-            int midIdx = cells.Count / 2;
-            (int mx, int mz) = cells[midIdx];
+            (int mx, int mz, bool fullRing) = PickRingCenter(cells);
             TargetAreaId = configArea;
             TargetMapX = mx;
             TargetMapZ = mz;
             GD.Print($"[RealWorldRenderer] Area {configArea}: {cells.Count} cells found — " +
-                     $"selected ({TargetMapX},{TargetMapZ}) (index {midIdx} of {cells.Count}).");
+                     $"selected ({TargetMapX},{TargetMapZ}) (full 3×3 ring={fullRing}).");
             return;
         }
 
@@ -795,14 +827,12 @@ public sealed partial class RealWorldRenderer : Node3D
             List<(int MapX, int MapZ)> areaCells = _assets.EnumerateTerrainCells(area);
             if (areaCells.Count > 0)
             {
-                areaCells.Sort((a, b) => a.MapX != b.MapX ? a.MapX.CompareTo(b.MapX) : a.MapZ.CompareTo(b.MapZ));
-                int midIdx = areaCells.Count / 2;
-                (int mx, int mz) = areaCells[midIdx];
+                (int mx, int mz, bool fullRing) = PickRingCenter(areaCells);
                 TargetAreaId = area;
                 TargetMapX = mx;
                 TargetMapZ = mz;
                 GD.Print($"[RealWorldRenderer] Auto-selected area {area}: {areaCells.Count} cells — " +
-                         $"cell ({TargetMapX},{TargetMapZ}).");
+                         $"cell ({TargetMapX},{TargetMapZ}) (full 3×3 ring={fullRing}).");
                 return;
             }
         }
@@ -810,6 +840,72 @@ public sealed partial class RealWorldRenderer : Node3D
         // No cells found anywhere — keep configured defaults but warn clearly.
         GD.PrintErr($"[RealWorldRenderer] WARNING: no .ted cells found in any area 0..20. " +
                     $"Keeping defaults ({TargetMapX},{TargetMapZ}) — streaming will produce empty sectors.");
+    }
+
+    /// <summary>
+    /// Picks the cell to centre the 3×3 streaming ring on, given every <c>.ted</c> cell present in an
+    /// area. Prefers a cell whose full 3×3 ring of neighbours all exist (so all nine sectors render),
+    /// choosing the complete-ring candidate nearest the area centroid; falls back to the middle
+    /// element of the sorted list when no cell has a complete ring (e.g. a 1- or 2-cell area).
+    /// spec: Docs/RE/formats/terrain.md §9.2 (3×3 ring) + §1.3 (per-cell path). CONFIRMED.
+    /// </summary>
+    /// <param name="cells">All cell coordinates available for the area (may be unsorted).</param>
+    /// <returns>The chosen centre cell and whether its full 3×3 ring exists.</returns>
+    private static (int MapX, int MapZ, bool FullRing) PickRingCenter(List<(int MapX, int MapZ)> cells)
+    {
+        // Deterministic order so a tie resolves the same way every run.
+        cells.Sort((a, b) => a.MapX != b.MapX ? a.MapX.CompareTo(b.MapX) : a.MapZ.CompareTo(b.MapZ));
+
+        var present = new HashSet<(int, int)>(cells.Count);
+        long sumX = 0, sumZ = 0;
+        foreach ((int x, int z) in cells)
+        {
+            present.Add((x, z));
+            sumX += x;
+            sumZ += z;
+        }
+
+        // Area centroid — the relief showcase looks best near the middle of the populated region.
+        double centroidX = sumX / (double)cells.Count;
+        double centroidZ = sumZ / (double)cells.Count;
+
+        bool best = false;
+        (int MapX, int MapZ) bestCell = cells[cells.Count / 2];
+        double bestDist = double.MaxValue;
+
+        foreach ((int cx, int cz) in cells)
+        {
+            // A full ring requires all eight neighbours (Chebyshev radius 1) to be present.
+            bool full = true;
+            for (int dz = -1; dz <= 1 && full; dz++)
+            {
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    if (!present.Contains((cx + dx, cz + dz)))
+                    {
+                        full = false;
+                        break;
+                    }
+                }
+            }
+
+            if (!full)
+            {
+                continue;
+            }
+
+            double ddx = cx - centroidX;
+            double ddz = cz - centroidZ;
+            double dist = ddx * ddx + ddz * ddz;
+            if (!best || dist < bestDist)
+            {
+                best = true;
+                bestCell = (cx, cz);
+                bestDist = dist;
+            }
+        }
+
+        return (bestCell.MapX, bestCell.MapZ, best);
     }
 
     /// <summary>
