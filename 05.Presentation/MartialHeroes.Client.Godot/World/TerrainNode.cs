@@ -121,12 +121,19 @@ public sealed partial class TerrainNode : Node3D
                 ImageTexture? tex = TextureResolver(texIdx);
                 if (tex is not null)
                 {
-                    // Override the surface material with a real texture.
+                    // Override the surface material with a real texture, modulated by the .ted
+                    // diffuse/baked-light vertex colours. Unshaded + double-sided to match the base
+                    // material: the legacy terrain bakes its lighting into the vertex colours, so we
+                    // do NOT want dynamic shading (which would render dark when the flipped normals
+                    // face away from the light). Unshaded keeps the texture at full brightness.
                     // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — tex_id[0] = dominant texture region.
                     var texMat = new StandardMaterial3D();
                     texMat.AlbedoTexture = tex;
+                    texMat.VertexColorUseAsAlbedo = true; // texture × baked diffuse colour
+                    texMat.ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded;
+                    texMat.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
                     texMat.TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps;
-                    texMat.Uv1Scale = new Vector3(4f, 4f, 4f); // tiling scale for terrain texture
+                    texMat.Uv1Scale = new Vector3(8f, 8f, 8f); // tile the ground texture across the cell
                     mesh.SurfaceSetMaterial(0, texMat);
                 }
             }

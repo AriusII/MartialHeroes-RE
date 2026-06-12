@@ -113,6 +113,13 @@ public sealed partial class RealWorldRenderer : Node3D
     private TerrainNode? _terrainNode;
     private ClientContext? _ctx;
 
+    // Texture-resolution inputs, loaded once in Initialise after the target cell is resolved.
+    // The confirmed two-hop chain is: cell/building 1-based index → the cell .map's per-section
+    // TEXTURES[idx-1].intTexId → bgtexture pool[intTexId] → data/map{tag}/texture/<rel>.dds.
+    // spec: Docs/RE/formats/terrain.md §4.2 (bgtexture.txt) + §3.5 (.map TEXTURES) + §5.6. CONFIRMED.
+    private BgTextureCatalog? _bgTextures; // global pool: intTexId → relPath (from bgtexture.txt)
+    private MapDescriptor? _cellMap;       // the target cell's .map (TERRAIN/BUILDING TEXTURES lists)
+
     // -------------------------------------------------------------------------
     // Lifecycle
     // -------------------------------------------------------------------------
@@ -170,6 +177,10 @@ public sealed partial class RealWorldRenderer : Node3D
         }
 
         GD.Print($"[RealWorldRenderer] Target cell resolved to ({TargetMapX},{TargetMapZ}) for area {TargetAreaId}.");
+
+        // Load the texture-resolution inputs once: the global bgtexture pool (text companion)
+        // and the cell's .map (per-section TEXTURES lists). spec: terrain.md §4.2 + §3.5. CONFIRMED.
+        LoadTextureResolutionInputs();
 
         // Wire the texture resolver into TerrainNode so each sector can get a real texture.
         // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — 1-based TextureIndexGrid → texture path.
@@ -259,53 +270,124 @@ public sealed partial class RealWorldRenderer : Node3D
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Wires a <see cref="TerrainNode.TextureResolver"/> delegate that maps a 1-based
-    /// texture index (from TextureIndexGrid) to a Godot ImageTexture loaded from the VFS.
-    ///
-    /// spec: Docs/RE/formats/terrain.md §5.6 Block 3 — 1-based TextureIndexGrid.
-    /// spec: Docs/RE/formats/terrain.md §3.5 TEXTURES directive — intTexId indexed array.
+    /// Loads the inputs for the two-hop terrain/building texture resolution: the global
+    /// <c>bgtexture.txt</c> pool and the target cell's <c>.map</c> descriptor.
+    /// spec: Docs/RE/formats/terrain.md §4.2 (bgtexture.txt) + §3.5 (.map TEXTURES). CONFIRMED.
+    /// </summary>
+    private void LoadTextureResolutionInputs()
+    {
+        if (_assets is null) return;
+        string tag = AreaTag(TargetAreaId);
+
+        try
+        {
+            // spec: Docs/RE/formats/terrain.md §4.2 — bgtexture.txt path. CONFIRMED.
+            string txtPath = $"data/map{tag}/texture/bgtexture.txt";
+            if (_assets.Contains(txtPath))
+            {
+                _bgTextures = BgTextureTxtParser.Parse(_assets.GetRaw(txtPath));
+                GD.Print($"[RealWorldRenderer] bgtexture pool loaded: {_bgTextures.Count} entries.");
+            }
+            else
+            {
+                GD.Print($"[RealWorldRenderer] bgtexture.txt absent ({txtPath}) — terrain/buildings stay untextured.");
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] bgtexture.txt load failed: {ex.Message}");
+        }
+
+        try
+        {
+            // spec: Docs/RE/formats/terrain.md §1.3 per-cell path; §3.5 .map TEXTURES. CONFIRMED.
+            string mapPath = $"data/map{tag}/dat/d{tag}x{TargetMapX}z{TargetMapZ}.map";
+            if (_assets.Contains(mapPath))
+            {
+                _cellMap = MapDescriptorParser.Parse(_assets.GetRaw(mapPath));
+                GD.Print($"[RealWorldRenderer] cell .map loaded: {_cellMap.Sections.Length} sections.");
+            }
+            else
+            {
+                GD.Print($"[RealWorldRenderer] cell .map absent ({mapPath}).");
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] cell .map load failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Resolves a 1-based texture index from a cell patch (<see cref="TerrainNode"/>) or a BUD
+    /// object to a Godot <see cref="ImageTexture"/> via the confirmed two-hop chain:
+    /// <c>index-1</c> → the cell <c>.map</c> section's <c>TEXTURES[idx].intTexId</c> →
+    /// <c>bgtexture</c> pool → <c>data/map{tag}/texture/&lt;rel&gt;.dds</c>.
+    /// spec: Docs/RE/formats/terrain.md §3.5 + §4.2 + §5.6. CONFIRMED.
+    /// </summary>
+    /// <param name="sectionKeyword">The .map section to read the TEXTURES list from (e.g. "TERRAIN", "BUILDING").</param>
+    /// <param name="oneBasedIndex">The 1-based index into that section's TEXTURES list.</param>
+    private ImageTexture? ResolveSectionTexture(string sectionKeyword, int oneBasedIndex)
+    {
+        if (_assets is null || _bgTextures is null || _cellMap is null) return null;
+        if (oneBasedIndex <= 0) return null;
+
+        (int Flag, int TexId)[]? list = GetSectionTextures(sectionKeyword);
+        if (list is null) return null;
+
+        int li = oneBasedIndex - 1;
+        if ((uint)li >= (uint)list.Length) return null;
+
+        string? rel = _bgTextures.GetRelPath(list[li].TexId);
+        if (rel is null) return null;
+
+        string tag = AreaTag(TargetAreaId);
+        string ddsPath = $"data/map{tag}/texture/{rel}.dds";
+        return _assets.Contains(ddsPath) ? _assets.LoadTexture(ddsPath) : null;
+    }
+
+    /// <summary>Returns the TEXTURES list of the named <c>.map</c> section, or null if absent.</summary>
+    private (int Flag, int TexId)[]? GetSectionTextures(string keyword)
+    {
+        if (_cellMap is null) return null;
+        foreach (var section in _cellMap.Sections)
+        {
+            if (string.Equals(section.Keyword, keyword, StringComparison.OrdinalIgnoreCase))
+                return section.Textures;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Wires a <see cref="TerrainNode.TextureResolver"/> delegate that maps a 1-based cell texture
+    /// byte (from TextureIndexGrid) to a real Godot ImageTexture via <see cref="ResolveSectionTexture"/>
+    /// reading the cell <c>.map</c> <c>TERRAIN</c> section.
+    /// spec: Docs/RE/formats/terrain.md §5.6 Block 3 + §3.5 + §4.2. CONFIRMED.
     /// </summary>
     private void WireTerrainTextureResolver(TerrainNode terrainNode)
     {
         if (_assets is null) return;
 
-        // Cache loaded textures by index to avoid redundant VFS reads.
         var texCache = new Dictionary<int, ImageTexture?>();
+        bool loggedOnce = false;
 
-        string areaTag = AreaTag(TargetAreaId);
-        string texDir = $"data/map{areaTag}/texture/";
-
-        // Heuristic: map 1-based index → texture filename "gr{index:D3}.dds".
-        // spec: Docs/RE/formats/terrain.md §4 — "bgtexture.lst at data/map000/texture/bgtexture.lst".
-        // TODO: parse bgtexture.lst to build a proper index→filename map.
-        terrainNode.TextureResolver = texIdx =>
+        terrainNode.TextureResolver = texByte =>
         {
-            if (texCache.TryGetValue(texIdx, out ImageTexture? cached))
-                return cached;
+            if (texCache.TryGetValue(texByte, out ImageTexture? cached)) return cached;
 
-            string texPath = $"{texDir}gr{texIdx:D3}.dds";
-            ImageTexture? tex = null;
-
-            if (_assets is not null && _assets.Contains(texPath))
+            // spec: Docs/RE/formats/terrain.md §3.5 — terrain patches index the .map TERRAIN TEXTURES list.
+            ImageTexture? tex = ResolveSectionTexture("TERRAIN", texByte);
+            if (tex is not null && !loggedOnce)
             {
-                tex = _assets.LoadTexture(texPath);
-                if (tex is not null)
-                    GD.Print($"[RealWorldRenderer] Terrain texture loaded: {texPath}");
+                GD.Print($"[RealWorldRenderer] Terrain texture resolved for byte {texByte} (area {TargetAreaId}).");
+                loggedOnce = true;
             }
 
-            // Fallback: try gr001.dds regardless of index.
-            if (tex is null)
-            {
-                string fallback = $"{texDir}gr001.dds";
-                if (_assets is not null && _assets.Contains(fallback))
-                    tex = _assets.LoadTexture(fallback);
-            }
-
-            texCache[texIdx] = tex;
+            texCache[texByte] = tex;
             return tex;
         };
 
-        GD.Print($"[RealWorldRenderer] Terrain TextureResolver wired for area {TargetAreaId}.");
+        GD.Print($"[RealWorldRenderer] Terrain TextureResolver wired (2-hop bgtexture chain) for area {TargetAreaId}.");
     }
 
     // -------------------------------------------------------------------------
@@ -391,29 +473,15 @@ public sealed partial class RealWorldRenderer : Node3D
         Node3D budRoot;
         try
         {
-            // Wire a texture resolver for BUD objects: maps 1-based tex_id → ImageTexture.
-            // Uses the same fallback heuristic as the terrain texture resolver.
-            string areaTag = AreaTag(TargetAreaId);
-            string texDir = $"data/map{areaTag}/texture/";
+            // Wire a texture resolver for BUD objects: maps a 1-based tex_id to a real ImageTexture
+            // via the .map BUILDING section's TEXTURES list and the bgtexture pool (same two-hop
+            // chain as the terrain). spec: Docs/RE/formats/terrain.md §3.5 + §4.2. CONFIRMED.
             var budTexCache = new Dictionary<uint, ImageTexture?>();
 
             Func<uint, ImageTexture?> budTexResolver = texId =>
             {
                 if (budTexCache.TryGetValue(texId, out ImageTexture? cached)) return cached;
-
-                // Heuristic: tex_id 1-based → gr{texId:D3}.dds
-                string texPath = $"{texDir}gr{texId:D3}.dds";
-                ImageTexture? tex = null;
-                if (_assets is not null && _assets.Contains(texPath))
-                    tex = _assets.LoadTexture(texPath);
-
-                if (tex is null)
-                {
-                    string fallback = $"{texDir}gr001.dds";
-                    if (_assets is not null && _assets.Contains(fallback))
-                        tex = _assets.LoadTexture(fallback);
-                }
-
+                ImageTexture? tex = ResolveSectionTexture("BUILDING", (int)texId);
                 budTexCache[texId] = tex;
                 return tex;
             };
@@ -482,54 +550,89 @@ public sealed partial class RealWorldRenderer : Node3D
         }
 
         GD.Print($"[RealWorldRenderer] .skn parsed: '{skinnedMesh.Name}', " +
-                 $"{skinnedMesh.FaceCount} faces, {skinnedMesh.Positions.Length} verts — building static ArrayMesh.");
+                 $"{skinnedMesh.FaceCount} faces, {skinnedMesh.Positions.Length} verts — building character node.");
 
-        // Build static-pose ArrayMesh via SknMeshBuilder (NO GltfDocument).
-        // TODO: runtime animation via Skeleton/AnimationPlayer (future work).
-        MeshInstance3D? charMesh;
+        // Build a live character node (Skeleton3D + skinned mesh + optional AnimationPlayer).
+        // The skeleton (.bnd) and animation (.mot) are optional — a missing one yields a static
+        // pose. spec: Docs/RE/formats/mesh.md (.skn/.bnd); animation.md (.mot). NO GltfDocument.
+        Skeleton? skeleton = TryLoadSkeleton(skinnedMesh);
+        AnimationClip? clip = TryLoadAnimation(skinnedMesh);
+
+        Node3D charRoot;
         try
         {
-            charMesh = SknMeshBuilder.Build(skinnedMesh, albedoTexture: null);
+            charRoot = SkinnedCharacterBuilder.Build(skinnedMesh, skeleton, clip, albedo: null);
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[RealWorldRenderer] SknMeshBuilder.Build failed: {ex.Message}");
+            GD.PrintErr($"[RealWorldRenderer] SkinnedCharacterBuilder.Build failed: {ex.Message}");
             return;
         }
 
-        if (charMesh is null)
-        {
-            GD.PrintErr("[RealWorldRenderer] SknMeshBuilder returned null — character skipped.");
-            return;
-        }
-
-        // Place the character near the centre of the terrain sector.
-        // World origin cell (10000,10000) = legacy (0,0,0). Godot Z is negated.
-        // spec: Docs/RE/formats/terrain.md §1.4 (world-space bounds). CONFIRMED.
-        // spec: WorldCoordinates.ToGodot — negate Z.
+        // Place the character at the centre of the terrain sector.
+        // spec: Docs/RE/formats/terrain.md §1.4 (world-space bounds); WorldCoordinates.ToGodot (negate Z).
         float legacyX = (TargetMapX - 10000) * 1024.0f + 512.0f;
         float legacyZ = (TargetMapZ - 10000) * 1024.0f + 512.0f;
 
-        var charRoot = new Node3D();
-        charRoot.Position = new Vector3(legacyX, 0f, -legacyZ); // negate Z: spec WorldCoordinates.ToGodot.
+        charRoot.Position = new Vector3(legacyX, 0f, -legacyZ);
+        charRoot.Scale = Vector3.One * CharacterScale;
         charRoot.Name = "CharacterNode";
-        charRoot.AddChild(charMesh);
         AddChild(charRoot);
 
-        GD.Print($"[RealWorldRenderer] Character spawned from '{sknPath}' (static pose ArrayMesh, no GltfDocument).");
+        GD.Print($"[RealWorldRenderer] Character spawned from '{sknPath}' " +
+                 $"(skeleton={(skeleton is not null)}, anim={(clip is not null)}, scale={CharacterScale:F1}).");
+    }
+
+    /// <summary>Display scale applied to the spawned character node (legacy unit → Godot). Tuned visually.</summary>
+    private const float CharacterScale = 5.0f;
+
+    /// <summary>
+    /// Attempts to load the character's <c>.bnd</c> skeleton. Returns null (static pose) when the
+    /// skeleton cannot be resolved — never throws. spec: Docs/RE/formats/mesh.md §.bnd.
+    /// </summary>
+    private Skeleton? TryLoadSkeleton(SkinnedMesh mesh)
+    {
+        if (_assets is null) return null;
+        try
+        {
+            // .bnd files live at data/char/bind/g{id}.bnd. The exact skin→bnd id mapping is not yet
+            // confirmed, so this is best-effort: if BndVirtualPath was set explicitly, use it.
+            string? bndPath = BndVirtualPath;
+            if (bndPath is null || !_assets.Contains(bndPath)) return null;
+            ReadOnlyMemory<byte> data = _assets.GetRaw(bndPath);
+            return data.IsEmpty ? null : BndParser.Parse(data);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] .bnd load failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to load a character animation <c>.mot</c>. Returns null (static pose) when none is
+    /// resolved — never throws. spec: Docs/RE/formats/animation.md §.mot.
+    /// </summary>
+    private AnimationClip? TryLoadAnimation(SkinnedMesh mesh)
+    {
+        // Animation requires a confirmed skin→mot mapping which is not yet established; left as a
+        // deliberate no-op (static pose) until the mapping is verified. spec: animation.md.
+        return null;
     }
 
     private string? DiscoverFirstSknPath()
     {
         if (_assets is null) return null;
 
-        // Try common character skin paths.
-        // spec: Docs/RE/formats/mesh.md §.skn — "data/char/skin/" or "data/item/skin/": CONFIRMED.
+        // Prefer real character body skins (data/char/skin/g{id}.skn) over item-prop skins.
+        // spec: Docs/RE/formats/mesh.md §.skn — "data/char/skin/": CONFIRMED.
         string[] candidates =
         [
+            "data/char/skin/g200002620.skn",
+            "data/char/skin/g200003000.skn",
+            "data/char/skin/g200002630.skn",
+            // item-prop fallbacks (single-bone) if no character skin is present:
             "data/item/skin/gi213050001.skn",
-            "data/item/skin/gi213062382.skn",
-            "data/item/skin/gi292020105.skn",
         ];
 
         foreach (string candidate in candidates)
@@ -554,40 +657,25 @@ public sealed partial class RealWorldRenderer : Node3D
         float centreZ = (TargetMapZ - 10000) * 1024.0f + 512.0f;
         float godotZ = -centreZ; // negate Z: spec WorldCoordinates.ToGodot.
 
-        // Preferred: reuse/move the scene's existing Camera3D so there is only ONE camera.
-        // If none exists, spawn a new one. This avoids the two-camera conflict that causes
-        // the viewport to flip between cameras mid-frame.
-        // Oblique aerial view: positioned above and on the +Z side of the cell centre, looking
-        // back at it. This shows the terrain in 3D with the BUD buildings standing up, rather
-        // than a flat top-down view. The cell is ~1024 units wide; at this distance a 60° FOV
-        // frames the whole cell plus the tallest buildings (~Y 300).
-        var camPos = new Vector3(centreX, 720f, godotZ + 1000f);
-        var lookTarget = new Vector3(centreX, 70f, godotZ);
+        var cellCentre = new Vector3(centreX, 0f, godotZ);
 
+        // Replace any existing static Camera3D with a free/orbital CameraController so the user
+        // can explore the world (orbit/zoom/pan, Tab → free-fly WASD). Configure() reproduces the
+        // previous oblique aerial framing as the initial view.
         Camera3D? existing = GetViewport()?.GetCamera3D();
-        if (existing is not null)
+        if (existing is not null && existing is not CameraController)
         {
-            existing.Position = camPos;
-            existing.LookAt(lookTarget, Vector3.Up);
-            existing.Fov = 60f;
-            existing.Near = 0.5f;
-            existing.Far = 8000f;
-            existing.MakeCurrent();
-            GD.Print($"[RealWorldRenderer] Existing camera repositioned to ({camPos.X:F0}, {camPos.Y:F0}, {camPos.Z:F0}) looking at cell centre ({centreX:F0}, 0, {godotZ:F0}).");
-            return;
+            existing.GetParent()?.RemoveChild(existing);
+            existing.QueueFree();
         }
 
-        var cam = new Camera3D();
-        cam.Position = camPos;
-        cam.LookAt(lookTarget, Vector3.Up);
-        cam.Fov = 60f;
-        cam.Near = 0.5f;
-        cam.Far = 8000f;
-        cam.Name = "RealWorldCamera";
+        var cam = new CameraController { Name = "CameraController" };
         AddChild(cam);
+        cam.Configure(cellCentre, 1024f); // spec: terrain.md §1.4 — cell size 1024. CONFIRMED.
         cam.MakeCurrent();
 
-        GD.Print($"[RealWorldRenderer] New camera placed at ({camPos.X:F0}, {camPos.Y:F0}, {camPos.Z:F0}) looking at cell centre ({centreX:F0}, 0, {godotZ:F0}).");
+        GD.Print($"[RealWorldRenderer] CameraController spawned, framing cell centre ({centreX:F0}, 0, {godotZ:F0}). " +
+                 "Controls: RMB orbit, wheel zoom, MMB pan, Tab=free-fly (WASD/QE, Shift fast), Esc release.");
     }
 
     // -------------------------------------------------------------------------

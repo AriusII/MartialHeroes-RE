@@ -273,6 +273,42 @@ data/map000/texture/<name>.dds
 **Known unknowns:** The internal layout of each 76-byte GHTex record is not yet documented.
 Only the stride (76 bytes) and the type-byte conditional are inferred from loader logic.
 
+### 4.2 Text companion — `bgtexture.txt`
+
+**Path:** `data/map000/texture/bgtexture.txt` (a `bgtexture.txt` sits beside every `bgtexture.lst`).
+
+A plain-text (CP949) companion to the binary `.lst` that lists the same pool in human-readable
+form. Each line is TAB-separated with three columns (observed from sample — CONFIRMED against the
+shipped file and cross-checked: every resolved path exists in the VFS):
+
+```
+<poolIndex:int>  \t  <typeFlag:int>  \t  <relPath>
+0	1	terrain/a-b-1
+116	1	terrain/g3
+```
+
+| Column | Meaning |
+|-------:|---------|
+| 0 | 0-based pool index (same index the `.map` `TEXTURES{}` `intTexId` references) |
+| 1 | type flag (`1` = animated, observed; matches the `.lst` `typeBytes`) |
+| 2 | texture path **relative to** `data/map{area}/texture/`, **without** the `.dds` extension (e.g. `terrain/g3` → `data/map000/texture/terrain/g3.dds`; building textures use the `building/<name>` prefix) |
+
+The line count equals `texCount + 1` (header-less; index column is contiguous 0..texCount-1).
+This text companion is the preferred, robust source for the index→filename mapping (the binary
+GHTex record layout in §4.1 remains UNVERIFIED). Confidence: CONFIRMED (observed).
+
+**Full terrain texture resolution chain (CONFIRMED, observed on cell `d000x10000z9990`):**
+
+```
+.ted TextureIndexGrid[patch]  (1-based byte, e.g. 1)
+  -> .map  TERRAIN{} TEXTURES[byte-1].intTexId   (e.g. 116)
+  -> bgtexture.txt[intTexId]  relPath            (e.g. "terrain/g3")
+  -> data/map000/texture/<relPath>.dds           (exists)
+```
+
+Building (`.bud`) object textures resolve identically but through the `.map` `BUILDING{}`
+`TEXTURES` list: BUD `tex_id` (1-based) → `BUILDING TEXTURES[tex_id-1].intTexId` → pool → `.dds`.
+
 ---
 
 ## 5. Terrain geometry blob — `.ted`
