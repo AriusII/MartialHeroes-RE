@@ -1,0 +1,68 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgGameStateTick
+opcode: 0x40001           # major 4 (Response), minor 1 -> (4 << 16) | 1
+direction: S2C
+size: var                 # world-entry / periodic tick; the spawn-seed fields decoded below sit at the front
+spec: packets/4-1_game_state_tick.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Periodic game-state tick and world-entry seed. On world entry this message creates the local
+  player from the cached spawn descriptor and supplies the spawn position: a spawn X and spawn Z
+  (the vertical axis Y is always forced to 0, never sent), a scenario / map-mode integer, and a
+  region index. It also clears the keepalive-suppress flag so the ~20 s ping resumes. The 3x3
+  terrain ring streams around (spawnX, 0, spawnZ).
+
+# Only the front spawn-seed fields are decoded; the message is variable-length overall, so size is
+# 'var' and the fields below are documented as a leading sub-block (the engineer hand-codes the
+# rest of the tick body once a capture lands).
+fields:
+  - { name: SpawnX,        type: f32 }   # spawn X coordinate (world)
+  - { name: SpawnZ,        type: f32 }   # spawn Z coordinate (world); Y is forced to 0, NOT on the wire
+  - { name: ScenarioMode,  type: i32 }   # scenario / map-mode integer
+  - { name: RegionIndex,   type: i32 }   # region / area index
+
+notes: |
+  Static inference only; no capture available. VARIABLE-LENGTH message. Only the leading
+  spawn-seed sub-block is decoded here; do not assume the four fields below are the entire body.
+  Frame = 8-byte header + payload.
+
+  WORLD-ENTRY SPAWN SEED (the load-bearing part for a faithful client):
+    SpawnX       (f32) : the local player's spawn X in world coordinates.
+    SpawnZ       (f32) : the local player's spawn Z in world coordinates. The vertical axis is
+                         NOT carried -- the client forces Y = 0 and the actual ground height is
+                         resolved from terrain (bilinear .ted height) on the client side. So a
+                         reimplementation must read X and Z from this message and derive Y
+                         locally; never expect a wire Y. HIGH CONFIDENCE on the X/Z-only rule.
+    ScenarioMode (i32) : a scenario / map-mode selector integer. MEDIUM CONFIDENCE on type;
+                         the value enum is not decoded.
+    RegionIndex  (i32) : a region / area index used to pick which world sector loads.
+                         MEDIUM CONFIDENCE.
+
+  BEHAVIOUR (promoted from the network + scene analyses):
+    - On world entry, this handler CREATES the local player from the previously cached 880-byte
+      spawn descriptor, positioned at (SpawnX, 0, SpawnZ), and starts the 3x3 terrain ring around
+      it. If actor creation fails it forces a fallback back to the character-select state.
+    - It clears the keepalive-suppress flag, so the ~20 s keepalive ping (2/10000, see
+      packets/2-10000_keepalive.yaml) resumes once world ticks begin.
+    - It is the seam between the load phase and in-world: world (major-4/5) handlers that need
+      the local player no-op until this tick has run.
+
+  FIELD-ORDER CAVEAT: the four fields above are decoded as the LEADING sub-block. Their exact
+  byte offsets within the variable body, and whether ScenarioMode precedes or follows RegionIndex,
+  are static reads and must be pinned by a capture before they are trusted bit-for-bit. The
+  X/Z-spawn + Y-forced-0 rule is the firmest claim.
+
+  RELATED: pairs with the in-world snapshot family (4/4 AreaEntitySnapshot, 5/3 CharSpawn,
+  5/1 ActorSpawnExtended) which carry SpawnDescriptor records; this tick supplies only the local
+  player's position seed and the periodic state cadence.
+
+  UNKNOWNS to resolve with a capture of an enter-world sequence:
+    - the full body layout beyond the four leading fields (the periodic-tick portion);
+    - the ScenarioMode / RegionIndex value enums;
+    - the exact field order and any padding between SpawnZ and the two integers.
+
+  UNBLOCKS: Client.Application world-entry use-case (local player spawn at (SpawnX, 0, SpawnZ)).

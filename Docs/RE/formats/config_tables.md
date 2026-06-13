@@ -121,7 +121,7 @@ traced.
 | `data/script/emoticon.do` | 40 | none | CONFIRMED | Emoticon sprite-sheet definitions |
 | `data/script/msginfo.do` | 128 | none | CONFIRMED | In-game popup message strings |
 | `data/script/errorinfo.do` | 108 (0x6C) | none | CONFIRMED (stride only) | Error message strings |
-| `data/script/monkma.do` and class-stance variants | 166 (0xA6) | none | CONFIRMED (stride only) | Per-class stance/move tables |
+| `data/script/monkma.do` and class-stance variants | 116 (0x74) | none | SAMPLE-VERIFIED (12/12 files) | Per-class stance/move tables — the on-disk source of skill icon (srcX,srcY); see ui_manifests.md §2.7. The earlier 166-byte estimate was wrong: 9 of the 12 files divide by 116 exactly (e.g. musajung.do 34,916 B = 301×116) and the rest leave only a small ignored tail (12–60 B); none divides by 166. |
 
 **Additional .scr files observed in the engine string table (loaders not traced):**
 `nicktofame.scr`, `guildcrest.scr`, `letters.scr`, `chivalry.scr`,
@@ -707,7 +707,7 @@ These strides are confirmed; no sample bytes available for field-level breakdown
 | `data/script/itemscale.scr` | 8 bytes | Item scale table |
 | `data/script/itemeffect.scr` | 4 bytes | Item effect table |
 | `data/script/errorinfo.do` | 108 bytes (0x6C) | Error message strings |
-| Per-class stance `.do` files (`monkma.do`, `monksa.do`, etc.) | 166 bytes (0xA6) | Per-class skill/move tables |
+| Per-class stance `.do` files (`monkma.do`, `monksa.do`, etc.) | 116 bytes (0x74) — corrected from the earlier 166-byte estimate; SAMPLE-VERIFIED 12/12 | Per-class skill/move tables incl. skill icon (srcX,srcY) at +0x18/+0x1C (ui_manifests.md §2.7) |
 
 ---
 

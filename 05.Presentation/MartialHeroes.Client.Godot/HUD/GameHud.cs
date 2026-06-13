@@ -2,6 +2,7 @@ using Godot;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Domain.Actors;
 using MartialHeroes.Client.Godot.Autoload;
+using MartialHeroes.Client.Godot.Screens;
 using MartialHeroes.Shared.Kernel.Ids;
 
 namespace MartialHeroes.Client.Godot.HUD;
@@ -13,42 +14,86 @@ namespace MartialHeroes.Client.Godot.HUD;
 /// PASSIVE: zero game logic, zero stat math, zero protocol knowledge.
 /// Event payloads carry all data; this node only projects them onto Godot controls.
 ///
+/// Original chrome layer (stage-2, texture-driven):
+///   The background panel is backed by atlas uitex 0001 → data/ui/mainwindow.dds
+///   (1024×1024 DXT3, spec: Docs/RE/formats/ui_manifests.md §1.4 SAMPLE-VERIFIED).
+///   HP gauge bar backing: mainwindow.dds sub-rect (0, 0, 310, 60) // PLAUSIBLE – not byte-confirmed
+///   MP gauge bar backing: same chrome, Y-shifted                   // PLAUSIBLE
+///   When mainwindow.dds is unavailable (VFS offline) the TextureRect is transparent and the
+///   plain Godot PanelContainer fallback remains fully visible.
+///
 /// Control hierarchy (built procedurally in _Ready — no .tscn required):
-///   VBoxContainer (anchor top-left, panel)
-///     Label  _stateLabel   — shows current ClientState
-///     Label  _actorCount   — shows number of visible actors
-///     HBoxContainer (HP row)
-///       Label "HP:"
-///       ProgressBar _hpBar     — current / max HP (from VitalsChanged + SpawnedEvent)
-///       Label _hpText          — HP numeric value
-///     HBoxContainer (MP row)
-///       Label "MP:"
-///       ProgressBar _mpBar     — current / max MP
-///       Label _mpText          — MP numeric value
-///     HBoxContainer (Level row)
-///       Label "Lv:"
-///       Label _levelLabel
-///       Label "XP:"
-///       Label _xpLabel
-///     Label _buffLabel       — active buff summary (first 3 non-zero effect codes)
-///     Label _combatStatsLabel — derived atk/def snapshot from CombatStatsRecomputedEvent
-///   HBoxContainer (hotbar anchor bottom)
-///     9 × VBoxContainer (slot panels)
-///       Label  _hotbarKey[i]   — "1"–"9"
-///       Label  _hotbarName[i]  — skill name (CP949 via SkillCatalogue) or "—"
-///   PanelContainer (chat anchor bottom-right)
+///   Control (anchor top-left)
+///     TextureRect _hudChrome       — mainwindow.dds chrome slice (behind everything)
+///     VBoxContainer (stats panel)
+///       Label  _stateLabel         — shows current ClientState
+///       Label  _actorCount         — shows number of visible actors
+///       HBoxContainer (HP row)
+///         Label "HP:"
+///         ProgressBar _hpBar
+///         Label _hpText
+///       HBoxContainer (MP row)
+///         Label "MP:"
+///         ProgressBar _mpBar
+///         Label _mpText
+///       HBoxContainer (Level row)
+///         Label "Lv:"
+///         Label _levelLabel
+///         Label "XP:"
+///         Label _xpLabel
+///       Label _buffLabel
+///       Label _combatStatsLabel
+///   HBoxContainer (hotbar, anchor bottom)
+///     9 × VBoxContainer (slot panels, with TextureRect icon placeholders)
+///   PanelContainer (chat, anchor bottom-right)
 ///     VBoxContainer
-///       Label  _chatLabel      — last 6 lines of chat
+///       Label _chatLabel
 ///
 /// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — HUD bound to Application state.
+/// spec: Docs/RE/specs/ui_system.md §8.5 — in-game panels bind by uitex integer id.
+/// spec: Docs/RE/formats/ui_manifests.md §1.4 — uitex 0001 = data/ui/mainwindow.dds 1024×1024.
 /// spec: Docs/RE/specs/input_ui.md §4 — hotbar displays skills from SkillHotbarSlotSetEvent.
 /// </summary>
 public sealed partial class GameHud : Control
 {
     // -------------------------------------------------------------------------
+    // Atlas binding constants
+    // spec: Docs/RE/formats/ui_manifests.md §1.4 — uitex 0001 = data/ui/mainwindow.dds.
+    // -------------------------------------------------------------------------
+
+    /// <summary>uitex integer id for the main HUD chrome atlas.</summary>
+    private const int MainWindowTexId = 1;
+    // spec: Docs/RE/formats/ui_manifests.md §1.4 — uitex 0001 = data/ui/mainwindow.dds, 1024×1024 DXT3.
+
+    /// <summary>Fallback VFS path — used when the uitex manifest is unavailable so we can still
+    /// try a direct load via UiAssetLoader.</summary>
+    private const string MainWindowPath = "data/ui/mainwindow.dds";
+    // spec: Docs/RE/formats/ui_manifests.md §5.4 — mainwindow.dds 1024×1024 DXT3, hard-coded path.
+
+    // HUD chrome source rect on mainwindow.dds (top-left corner chrome strip).
+    // spec: no per-widget layout recovered for mainwindow.dds — values are PLAUSIBLE based on
+    //       the 1024×1024 atlas and the typical top-left panel position on the 1024×768 canvas.
+    //       Docs/RE/specs/ui_system.md §12 (open item 6) — in-game window layouts gated on uitex manifest.
+    private const int ChromeSrcX = 0;    // PLAUSIBLE
+    private const int ChromeSrcY = 0;    // PLAUSIBLE
+    private const int ChromeW    = 310;  // PLAUSIBLE
+    private const int ChromeH    = 130;  // PLAUSIBLE
+
+    // Hotbar atlas: uitex 0010 = data/ui/skillpipe.dds (primary skill hotbar).
+    // spec: Docs/RE/formats/ui_manifests.md §1.4 — uitex 0010 = data/ui/skillpipe.dds, 1024×1024 DXT3.
+    private const int HotbarTexId  = 10;
+    private const string HotbarPath = "data/ui/skillpipe.dds";
+    // Hotbar slot slot size: source rect per slot on skillpipe.dds. PLAUSIBLE — exact layout unrecovered.
+    private const int HotbarSlotSrcX = 0;  // PLAUSIBLE
+    private const int HotbarSlotSrcY = 0;  // PLAUSIBLE
+    private const int HotbarSlotW    = 48; // PLAUSIBLE — likely 48×48 slot on 1024×1024 sheet
+    private const int HotbarSlotH    = 48; // PLAUSIBLE
+
+    // -------------------------------------------------------------------------
     // Control handles (built in _Ready)
     // -------------------------------------------------------------------------
 
+    private TextureRect _hudChrome = null!;
     private Label _stateLabel = null!;
     private Label _actorCount = null!;
     private ProgressBar _hpBar = null!;
@@ -62,21 +107,22 @@ public sealed partial class GameHud : Control
 
     // Hotbar: 9 skill slots (spec: input_ui.md §4 — hotbar slots 0–239, first 9 shown).
     private const int HotbarVisibleSlots = 9;
-    private readonly Label[] _hotbarKey = new Label[HotbarVisibleSlots];
+    private readonly Label[] _hotbarKey  = new Label[HotbarVisibleSlots];
     private readonly Label[] _hotbarName = new Label[HotbarVisibleSlots];
+    private readonly TextureRect[] _hotbarIcon = new TextureRect[HotbarVisibleSlots];
 
     // Chat: ring buffer of last 6 lines.
     private readonly Queue<string> _chatLines = new(6);
     private const int ChatLineMax = 6;
     private Label _chatLabel = null!;
+    // Reusable StringBuilder for chat-line joins (avoids per-message heap allocation).
+    private readonly System.Text.StringBuilder _chatSb = new(512);
 
     // -------------------------------------------------------------------------
     // View state (display only — no domain state)
     // -------------------------------------------------------------------------
 
     private int _visibleActorCount;
-
-    // We display HP/MP for the first PlayerCharacter we observe as the local player.
     private ActorKey _trackedPlayerKey;
     private bool _hasTrackedPlayer;
     private uint _trackedHp;
@@ -92,8 +138,11 @@ public sealed partial class GameHud : Control
     // Buff summary: first 3 active effect codes.
     private readonly int[] _activeBuffCodes = new int[3];
 
-    // ClientContext reference (for catalogue lookups).
+    // ClientContext reference (for catalogue lookups and texture loading).
     private ClientContext? _context;
+
+    // UiAssetLoader for slicing atlas textures — lazy-opened on first use.
+    private UiAssetLoader? _uiLoader;
 
     // -------------------------------------------------------------------------
     // Initialisation
@@ -103,14 +152,14 @@ public sealed partial class GameHud : Control
     public void Initialise(ClientContext context)
     {
         _context = context;
+        // Bind the HUD chrome now that _context is available (avoids null read during _Ready,
+        // which runs before GameLoop calls Initialise — see finding 3).
+        BindHudChromeTexture();
     }
 
     public override void _Ready()
     {
         GD.Print("[GameHud] _Ready start");
-
-        // Guard the entire HUD construction: a control creation failure must not crash the scene.
-        // If the HUD partially fails, the game still runs — just without some UI elements.
         try
         {
             ReadyInternal();
@@ -118,28 +167,59 @@ public sealed partial class GameHud : Control
         catch (Exception ex)
         {
             GD.PrintErr($"[GameHud] _Ready failed: {ex.Message}. HUD may be partially visible.");
-            // Ensure null-checked labels are non-null so event handlers don't null-ref.
             EnsureFallbackLabels();
         }
     }
 
     private void ReadyInternal()
     {
-        // Anchor the HUD to the top-left.
-        AnchorLeft = 0f;
-        AnchorTop = 0f;
-        AnchorRight = 0f;
-        AnchorBottom = 0f;
-        OffsetLeft = 8f;
-        OffsetTop = 8f;
-        OffsetRight = 300f;
-        OffsetBottom = 230f;
+        // Make the HUD root full-rect (covers the whole viewport) with MouseFilter=Ignore so it
+        // does not eat world/camera input. The chrome box and hotbar are positioned as children.
+        // Finding 2: root was sized 318×138 → hotbar anchored AnchorTop=1 landed 54 px from top,
+        // clipped. Full-rect root lets the hotbar anchor to the true viewport bottom-centre.
+        SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        MouseFilter = MouseFilterEnum.Ignore;
 
-        // Background panel — stats panel top-left.
+        // ---- Chrome box — stats/vitals panel, anchored to top-left. ----
+        // A child Control hosts the chrome TextureRect + stats vbox, positioned at the
+        // top-left corner at (4,4) with its original (ChromeW+4) × (ChromeH+4) footprint.
+        var chromeBox = new Control
+        {
+            Name     = "ChromeBox",
+            Position = new Vector2(4f, 4f),
+            Size     = new Vector2(ChromeW, ChromeH),
+            CustomMinimumSize = new Vector2(ChromeW, ChromeH),
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        AddChild(chromeBox);
+
+        // ---- Chrome layer (mainwindow.dds) ----
+        // Placed first so stats panel draws on top (paint-order = insertion order,
+        // spec: Docs/RE/specs/ui_system.md §3.1).
+        _hudChrome = new TextureRect
+        {
+            Name            = "HudChrome",
+            StretchMode     = TextureRect.StretchModeEnum.Scale,
+            CustomMinimumSize = new Vector2(ChromeW, ChromeH),
+            MouseFilter     = MouseFilterEnum.Ignore,
+        };
+        _hudChrome.SetAnchorsAndOffsetsPreset(LayoutPreset.TopLeft);
+        _hudChrome.Position = Vector2.Zero;
+        _hudChrome.Size     = new Vector2(ChromeW, ChromeH);
+        chromeBox.AddChild(_hudChrome);
+
+        // Chrome bind is deferred to Initialise(context) when _context is available.
+        // Calling BindHudChromeTexture() here when _context is still null would skip the
+        // primary uitex path — see finding 3.
+
+        // ---- Stats panel (above chrome, inside chromeBox) ----
         var panel = new PanelContainer();
         panel.SetAnchorsAndOffsetsPreset(LayoutPreset.TopLeft);
-        panel.CustomMinimumSize = new Vector2(280, 220);
-        AddChild(panel);
+        panel.CustomMinimumSize = new Vector2(ChromeW, ChromeH);
+        // Transparent background — the chrome TextureRect provides the visual panel.
+        var transparent = new StyleBoxEmpty();
+        panel.AddThemeStyleboxOverride("panel", transparent);
+        chromeBox.AddChild(panel);
 
         var vbox = new VBoxContainer();
         panel.AddChild(vbox);
@@ -166,7 +246,6 @@ public sealed partial class GameHud : Control
         mpRow.AddChild(new Label { Text = "MP: " });
         _mpBar = new ProgressBar { MinValue = 0, MaxValue = 100, Value = 100 };
         _mpBar.CustomMinimumSize = new Vector2(120, 18);
-        // Blue tint for MP bar using a StyleBoxFlat override on the fill.
         var mpFillStyle = new StyleBoxFlat();
         mpFillStyle.BgColor = new Color(0.1f, 0.3f, 0.9f, 1f);
         _mpBar.AddThemeStyleboxOverride("fill", mpFillStyle);
@@ -184,57 +263,82 @@ public sealed partial class GameHud : Control
         _xpLabel = new Label { Text = "0" };
         lvRow.AddChild(_xpLabel);
 
-        // Buff summary.
         _buffLabel = new Label { Text = "Buffs: —" };
         vbox.AddChild(_buffLabel);
 
-        // Combat stats summary.
         _combatStatsLabel = new Label { Text = "" };
         vbox.AddChild(_combatStatsLabel);
 
         // ---- Hotbar (bottom of screen) ----
-        try
-        {
-            BuildHotbar();
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[GameHud] BuildHotbar failed: {ex.Message}");
-        }
+        try { BuildHotbar(); }
+        catch (Exception ex) { GD.PrintErr($"[GameHud] BuildHotbar failed: {ex.Message}"); }
 
         // ---- Chat (bottom-right corner) ----
+        try { BuildChatPanel(); }
+        catch (Exception ex) { GD.PrintErr($"[GameHud] BuildChatPanel failed: {ex.Message}"); }
+
+        GD.Print("[GameHud] _Ready completed. HUD chrome wired to uitex 0001 (mainwindow.dds).");
+    }
+
+    // -------------------------------------------------------------------------
+    // Chrome texture binding
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Binds the HUD chrome texture from the uitex catalogue (texId 0001) or falls back
+    /// to a direct VFS path load. Degrades gracefully when VFS is offline.
+    ///
+    /// spec: Docs/RE/specs/ui_system.md §8.5 — in-game windows bind atlas by uitex integer id.
+    /// spec: Docs/RE/formats/ui_manifests.md §1.4 — uitex 0001 = data/ui/mainwindow.dds.
+    /// </summary>
+    private void BindHudChromeTexture()
+    {
+        if (_hudChrome is null) return;
+
+        // Primary path: uitex catalogue via ClientContext.UiCatalogs.
+        // spec: Docs/RE/specs/ui_system.md §8.5.
+        if (_context?.UiCatalogs is { } cats)
+        {
+            ImageTexture? tex = cats.GetTexture(MainWindowTexId);
+            if (tex is not null)
+            {
+                // Slice the chrome panel sub-rect from the full 1024×1024 atlas.
+                // spec: Docs/RE/specs/ui_system.md §1.3 — "atlas pixels map 1:1 to screen pixels
+                //       at 1:1 on the reference 1024×768 canvas".
+                var at = new AtlasTexture
+                {
+                    Atlas       = tex,
+                    Region      = new Rect2(ChromeSrcX, ChromeSrcY, ChromeW, ChromeH), // PLAUSIBLE
+                    FilterClip  = true,
+                };
+                _hudChrome.Texture = at;
+                GD.Print($"[GameHud] Chrome bound via UiCatalogs uitex {MainWindowTexId} " +
+                         $"(mainwindow.dds). Rect2({ChromeSrcX},{ChromeSrcY},{ChromeW},{ChromeH}) // PLAUSIBLE");
+                return;
+            }
+        }
+
+        // Fallback: try via UiAssetLoader (direct VFS path).
+        // spec: Docs/RE/formats/ui_manifests.md §5.4 — mainwindow.dds hard-coded path.
         try
         {
-            BuildChatPanel();
+            _uiLoader ??= UiAssetLoader.Open();
+            AtlasTexture? atFallback = _uiLoader.Slice(MainWindowPath, ChromeSrcX, ChromeSrcY, ChromeW, ChromeH);
+            if (atFallback is not null)
+            {
+                _hudChrome.Texture = atFallback;
+                GD.Print($"[GameHud] Chrome bound via UiAssetLoader fallback ({MainWindowPath}). " +
+                         $"Rect2({ChromeSrcX},{ChromeSrcY},{ChromeW},{ChromeH}) // PLAUSIBLE");
+                return;
+            }
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[GameHud] BuildChatPanel failed: {ex.Message}");
+            GD.PrintErr($"[GameHud] UiAssetLoader chrome bind failed: {ex.Message} — chrome invisible (VFS offline).");
         }
-    }
 
-    /// <summary>
-    /// Ensures all Label/ProgressBar fields are non-null so event handlers never null-ref,
-    /// even if _Ready failed before constructing them. Creates lightweight off-screen stubs.
-    /// </summary>
-    private void EnsureFallbackLabels()
-    {
-        _stateLabel ??= new Label();
-        _actorCount ??= new Label();
-        _hpBar ??= new ProgressBar();
-        _hpText ??= new Label();
-        _mpBar ??= new ProgressBar();
-        _mpText ??= new Label();
-        _levelLabel ??= new Label();
-        _xpLabel ??= new Label();
-        _buffLabel ??= new Label();
-        _combatStatsLabel ??= new Label();
-        _chatLabel ??= new Label();
-        for (int i = 0; i < HotbarVisibleSlots; i++)
-        {
-            _hotbarKey[i] ??= new Label();
-            _hotbarName[i] ??= new Label();
-        }
+        GD.Print("[GameHud] mainwindow.dds unavailable — HUD chrome invisible (VFS offline mode). " +
+                 "Plain PanelContainer fallback is active.");
     }
 
     // -------------------------------------------------------------------------
@@ -244,35 +348,138 @@ public sealed partial class GameHud : Control
     private void BuildHotbar()
     {
         // Anchor to bottom-centre.
-        var hotbarPanel = new PanelContainer();
-        hotbarPanel.AnchorLeft = 0.5f;
-        hotbarPanel.AnchorTop = 1.0f;
-        hotbarPanel.AnchorRight = 0.5f;
-        hotbarPanel.AnchorBottom = 1.0f;
-        hotbarPanel.OffsetLeft = -225f;
-        hotbarPanel.OffsetTop = -80f;
-        hotbarPanel.OffsetRight = 225f;
-        hotbarPanel.OffsetBottom = -4f;
-        AddChild(hotbarPanel);
+        var hotbarContainer = new Control();
+        hotbarContainer.AnchorLeft   = 0.5f;
+        hotbarContainer.AnchorTop    = 1.0f;
+        hotbarContainer.AnchorRight  = 0.5f;
+        hotbarContainer.AnchorBottom = 1.0f;
+        hotbarContainer.OffsetLeft   = -225f;
+        hotbarContainer.OffsetTop    = -84f;
+        hotbarContainer.OffsetRight  = 225f;
+        hotbarContainer.OffsetBottom = -4f;
+        AddChild(hotbarContainer);
+
+        // Optional: hotbar chrome from skillpipe.dds (uitex 0010).
+        // We attempt a texture bind but don't block HUD construction on failure.
+        var hotbarBg = new TextureRect
+        {
+            Name        = "HotbarChrome",
+            StretchMode = TextureRect.StretchModeEnum.Tile,
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        hotbarBg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        hotbarContainer.AddChild(hotbarBg);
+        BindHotbarChromeTexture(hotbarBg);
 
         var hbox = new HBoxContainer();
-        hotbarPanel.AddChild(hbox);
+        hbox.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        hotbarContainer.AddChild(hbox);
 
         for (int i = 0; i < HotbarVisibleSlots; i++)
         {
             var slotVBox = new VBoxContainer();
-            slotVBox.CustomMinimumSize = new Vector2(48, 64);
+            slotVBox.CustomMinimumSize = new Vector2(48, 72);
             hbox.AddChild(slotVBox);
 
-            // Slot key label ("1"–"9").
+            // Key label ("1"–"9").
             _hotbarKey[i] = new Label { Text = $"{i + 1}", HorizontalAlignment = HorizontalAlignment.Center };
             slotVBox.AddChild(_hotbarKey[i]);
 
+            // Icon TextureRect — backed by skillpipe.dds slot sub-rect (PLAUSIBLE).
+            _hotbarIcon[i] = new TextureRect
+            {
+                Name        = $"HotbarIcon{i}",
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                CustomMinimumSize = new Vector2(HotbarSlotW, HotbarSlotH),
+                MouseFilter = MouseFilterEnum.Ignore,
+            };
+            // Icon slot src rect — each slot is HotbarSlotW×HotbarSlotH on the sheet.
+            // Exact per-slot offsets on skillpipe.dds are UNRECOVERED.
+            // We use column-major grid: slot i at (i * HotbarSlotW, 0). // PLAUSIBLE
+            // spec: Docs/RE/specs/ui_system.md §12 (open item 6) — hotbar layout gated on uitex manifest.
+            BindHotbarSlotIcon(_hotbarIcon[i], i);
+            slotVBox.AddChild(_hotbarIcon[i]);
+
             // Skill name (from SkillCatalogue via CP949 name).
-            _hotbarName[i] = new Label { Text = "—", HorizontalAlignment = HorizontalAlignment.Center };
-            _hotbarName[i].CustomMinimumSize = new Vector2(48, 40);
-            _hotbarName[i].AutowrapMode = TextServer.AutowrapMode.Word;
+            _hotbarName[i] = new Label
+            {
+                Text = "—",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                CustomMinimumSize   = new Vector2(48, 14),
+                AutowrapMode        = TextServer.AutowrapMode.Off,
+                ClipText            = true,
+            };
             slotVBox.AddChild(_hotbarName[i]);
+        }
+    }
+
+    private void BindHotbarChromeTexture(TextureRect target)
+    {
+        try
+        {
+            if (_context?.UiCatalogs is { } cats)
+            {
+                ImageTexture? tex = cats.GetTexture(HotbarTexId);
+                if (tex is not null)
+                {
+                    // Full-width hotbar chrome strip from top of skillpipe.dds. // PLAUSIBLE
+                    target.Texture = new AtlasTexture
+                    {
+                        Atlas      = tex,
+                        Region     = new Rect2(0, 0, 450, 80), // PLAUSIBLE
+                        FilterClip = true,
+                    };
+                    GD.Print($"[GameHud] Hotbar chrome bound via UiCatalogs uitex {HotbarTexId} (skillpipe.dds). // PLAUSIBLE");
+                    return;
+                }
+            }
+
+            _uiLoader ??= UiAssetLoader.Open();
+            AtlasTexture? at = _uiLoader.Slice(HotbarPath, 0, 0, 450, 80); // PLAUSIBLE
+            if (at is not null)
+            {
+                target.Texture = at;
+                GD.Print($"[GameHud] Hotbar chrome bound via UiAssetLoader ({HotbarPath}). // PLAUSIBLE");
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] Hotbar chrome bind failed: {ex.Message} — hotbar no chrome.");
+        }
+    }
+
+    private void BindHotbarSlotIcon(TextureRect target, int slotIndex)
+    {
+        try
+        {
+            // Column-major slot layout on skillpipe.dds: each slot occupies HotbarSlotW×HotbarSlotH.
+            // Exact layout unrecovered; this is a PLAUSIBLE grid.
+            // spec: Docs/RE/specs/ui_system.md §12 open item 6 — hotbar slot layout is gated on uitex manifest.
+            int slotSrcX = HotbarSlotSrcX + slotIndex * HotbarSlotW; // PLAUSIBLE
+            int slotSrcY = HotbarSlotSrcY;                            // PLAUSIBLE
+
+            if (_context?.UiCatalogs is { } cats)
+            {
+                ImageTexture? tex = cats.GetTexture(HotbarTexId);
+                if (tex is not null)
+                {
+                    target.Texture = new AtlasTexture
+                    {
+                        Atlas      = tex,
+                        Region     = new Rect2(slotSrcX, slotSrcY, HotbarSlotW, HotbarSlotH), // PLAUSIBLE
+                        FilterClip = true,
+                    };
+                    return;
+                }
+            }
+
+            _uiLoader ??= UiAssetLoader.Open();
+            AtlasTexture? at = _uiLoader.Slice(HotbarPath, slotSrcX, slotSrcY, HotbarSlotW, HotbarSlotH); // PLAUSIBLE
+            if (at is not null) target.Texture = at;
+        }
+        catch
+        {
+            // Silent: slot icon remains blank — not critical to HUD function.
         }
     }
 
@@ -283,13 +490,13 @@ public sealed partial class GameHud : Control
     private void BuildChatPanel()
     {
         var chatPanel = new PanelContainer();
-        chatPanel.AnchorLeft = 1.0f;
-        chatPanel.AnchorTop = 1.0f;
-        chatPanel.AnchorRight = 1.0f;
+        chatPanel.AnchorLeft   = 1.0f;
+        chatPanel.AnchorTop    = 1.0f;
+        chatPanel.AnchorRight  = 1.0f;
         chatPanel.AnchorBottom = 1.0f;
-        chatPanel.OffsetLeft = -360f;
-        chatPanel.OffsetTop = -180f;
-        chatPanel.OffsetRight = -4f;
+        chatPanel.OffsetLeft   = -360f;
+        chatPanel.OffsetTop    = -180f;
+        chatPanel.OffsetRight  = -4f;
         chatPanel.OffsetBottom = -4f;
         AddChild(chatPanel);
 
@@ -297,10 +504,35 @@ public sealed partial class GameHud : Control
         chatPanel.AddChild(chatVBox);
 
         _chatLabel = new Label();
-        _chatLabel.Text = "";
-        _chatLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _chatLabel.Text             = "";
+        _chatLabel.AutowrapMode     = TextServer.AutowrapMode.WordSmart;
         _chatLabel.CustomMinimumSize = new Vector2(350, 160);
         chatVBox.AddChild(_chatLabel);
+    }
+
+    // -------------------------------------------------------------------------
+    // Ensure fallback (partial _Ready failure path)
+    // -------------------------------------------------------------------------
+
+    private void EnsureFallbackLabels()
+    {
+        _stateLabel      ??= new Label();
+        _actorCount      ??= new Label();
+        _hpBar           ??= new ProgressBar();
+        _hpText          ??= new Label();
+        _mpBar           ??= new ProgressBar();
+        _mpText          ??= new Label();
+        _levelLabel      ??= new Label();
+        _xpLabel         ??= new Label();
+        _buffLabel       ??= new Label();
+        _combatStatsLabel ??= new Label();
+        _chatLabel       ??= new Label();
+        for (int i = 0; i < HotbarVisibleSlots; i++)
+        {
+            _hotbarKey[i]  ??= new Label();
+            _hotbarName[i] ??= new Label();
+            _hotbarIcon[i] ??= new TextureRect();
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -313,21 +545,19 @@ public sealed partial class GameHud : Control
     /// </summary>
     public void OnActorSpawned(ActorSpawnedEvent evt)
     {
-        if (_actorCount is null) return; // HUD not yet ready or failed to build.
+        if (_actorCount is null) return;
         _visibleActorCount++;
         _actorCount.Text = $"Actors: {_visibleActorCount}";
 
-        // Track the first PlayerCharacter we see as the local player.
         if (!_hasTrackedPlayer && evt.Key.Sort == EntitySort.PlayerCharacter)
         {
             _hasTrackedPlayer = true;
             _trackedPlayerKey = evt.Key;
-            _trackedHp = evt.CurrentHp;
-            _trackedMaxHp = evt.MaxHp;
-            _trackedLevel = evt.Level;
-            // Initial MP not in spawn event; show 0/0 until VitalsChanged arrives.
-            _trackedMp = 0;
-            _trackedMaxMp = 0;
+            _trackedHp        = evt.CurrentHp;
+            _trackedMaxHp     = evt.MaxHp;
+            _trackedLevel     = evt.Level;
+            _trackedMp        = 0;
+            _trackedMaxMp     = 0;
             RefreshVitals();
             _levelLabel.Text = $"{_trackedLevel}";
         }
@@ -341,11 +571,8 @@ public sealed partial class GameHud : Control
     public void OnActorVitalsChanged(ActorVitalsChangedEvent evt)
     {
         if (!_hasTrackedPlayer || evt.Key != _trackedPlayerKey) return;
-
-        _trackedHp = evt.CurrentHp;
-        _trackedMp = evt.CurrentMp;
-        // MaxHP/MaxMP come from the spawn event or from CombatStatsRecomputed.
-        // If max not yet set, show current as max so the bar shows full.
+        _trackedHp  = evt.CurrentHp;
+        _trackedMp  = evt.CurrentMp;
         if (_trackedMaxHp == 0) _trackedMaxHp = evt.CurrentHp;
         if (_trackedMaxMp == 0) _trackedMaxMp = evt.CurrentMp;
         RefreshVitals();
@@ -358,10 +585,9 @@ public sealed partial class GameHud : Control
     public void OnActorLeveledUp(ActorLeveledUpEvent evt)
     {
         if (!_hasTrackedPlayer || evt.Key != _trackedPlayerKey) return;
-
         _trackedLevel = evt.NewLevel;
-        _trackedHp = evt.CurrentHp;
-        _trackedMp = evt.CurrentMp;
+        _trackedHp    = evt.CurrentHp;
+        _trackedMp    = evt.CurrentMp;
         _levelLabel.Text = $"{_trackedLevel}";
         RefreshVitals();
     }
@@ -373,81 +599,46 @@ public sealed partial class GameHud : Control
     public void OnActorStatSync(ActorStatSyncEvent evt)
     {
         if (!_hasTrackedPlayer || evt.Key != _trackedPlayerKey) return;
-        // spec: Docs/RE/specs/handlers.md §4 — CurrentXp i64 at +16: CONFIRMED.
         _xpLabel.Text = evt.CurrentXp.ToString("N0");
     }
 
     /// <summary>
-    /// Reacts to a derived combat-stat recompute: refreshes the combat-stats summary label.
-    /// The event is published on equip/buff/level changes by the Application layer.
-    /// PASSIVE: we only read the pre-computed stats from the event — no formula here.
+    /// Reacts to a derived combat-stat recompute: refreshes combat-stats summary label.
+    /// PASSIVE: reads pre-computed stats from the event — no formula here.
     /// spec: Docs/RE/specs/combat.md §1 / §2 — CombatStats aggregate.
     /// </summary>
     public void OnCombatStatsRecomputed(CombatStatsRecomputedEvent evt)
     {
         if (!_hasTrackedPlayer || evt.Key != _trackedPlayerKey) return;
-
         var s = evt.Stats;
-        // Refresh MaxHP/MaxMP from the recomputed aggregate so the bars stay accurate.
-        // spec: Docs/RE/specs/combat.md §1 — MaxLife (flat HP) + MaxEnergy (flat MP).
-        // These are flat contributions; actual max HP/MP would require the full formula (UNVERIFIED).
-        // We use them as a best-effort upper bound for the display bars.
-        if (s.MaxLife > 0)
-        {
-            _trackedMaxHp = (uint)s.MaxLife;
-            // Clamp current to new max.
-            if (_trackedHp > _trackedMaxHp) _trackedHp = _trackedMaxHp;
-        }
-
-        if (s.MaxEnergy > 0)
-        {
-            _trackedMaxMp = (uint)s.MaxEnergy;
-            if (_trackedMp > _trackedMaxMp) _trackedMp = _trackedMaxMp;
-        }
-
+        if (s.MaxLife   > 0) { _trackedMaxHp = (uint)s.MaxLife;   if (_trackedHp > _trackedMaxHp) _trackedHp = _trackedMaxHp; }
+        if (s.MaxEnergy > 0) { _trackedMaxMp = (uint)s.MaxEnergy; if (_trackedMp > _trackedMaxMp) _trackedMp = _trackedMaxMp; }
         RefreshVitals();
-
-        // Show atk/def summary using confirmed CombatStats fields.
-        // spec: Docs/RE/specs/combat.md §1 — MinDamage, MaxDamage, Defence.
         _combatStatsLabel.Text = $"Atk:{s.MinDamage}–{s.MaxDamage}  Def:{s.Defence}";
     }
 
     /// <summary>
-    /// Reacts to a buff slot change: refreshes the buff summary label (first 3 active slots).
-    /// PASSIVE: reads DurationTicks from the event — no formula, no timer here.
+    /// Reacts to a buff slot change: refreshes buff summary label.
     /// spec: Docs/RE/specs/handlers.md §4 (5/31 SmsgBuffSlotUpdate).
     /// </summary>
     public void OnBuffSlotChanged(BuffSlotChangedEvent evt)
     {
         if (!_hasTrackedPlayer || evt.Key != _trackedPlayerKey) return;
-        // Track the first 3 active buff codes as a quick summary.
-        // SlotIndex 0..30 — only store first 3.
         if (evt.SlotIndex < _activeBuffCodes.Length)
-        {
             _activeBuffCodes[evt.SlotIndex] = evt.DurationTicks > 0 ? evt.EffectCode : 0;
-        }
-
         RefreshBuffLabel();
     }
 
     /// <summary>
     /// Reacts to a skill-hotbar slot set event: updates the hotbar label for that slot.
-    /// The CP949 skill name is retrieved from SkillCatalogue (empty name → "?").
     /// spec: Docs/RE/specs/handlers.md §4 (5/33 SmsgSkillHotbarSlotSet).
     /// </summary>
     public void OnSkillHotbarSlotSet(SkillHotbarSlotSetEvent evt)
     {
-        // Only display the first HotbarVisibleSlots slots (0–8).
         if (evt.HotbarSlot >= HotbarVisibleSlots) return;
-
         int slot = evt.HotbarSlot;
         _hotbarSkills[slot] = evt.Skill;
-
-        // Look up the skill name from the catalogue — CP949 decoded at parse time.
-        // spec: Docs/RE/formats/config_tables.md §2.8 skills.scr — skill_id → name lookup UNVERIFIED
-        //       (name field not confirmed in the 1504-byte record; we use the id as fallback).
-        string skillName = ResolveSkillName(evt.Skill.Value);
-        _hotbarName[slot].Text = skillName;
+        _hotbarName[slot].Text = ResolveSkillName(evt.Skill.Value);
     }
 
     /// <summary>
@@ -458,15 +649,21 @@ public sealed partial class GameHud : Control
     public void OnChatBroadcast(ChatBroadcastEvent evt)
     {
         string line = $"[{evt.SenderName}]: {evt.Text}";
-        if (_chatLines.Count >= ChatLineMax)
-            _chatLines.Dequeue();
+        if (_chatLines.Count >= ChatLineMax) _chatLines.Dequeue();
         _chatLines.Enqueue(line);
-        _chatLabel.Text = string.Join("\n", _chatLines);
+        // Reuse _chatSb to avoid per-message heap allocation (finding 4).
+        _chatSb.Clear();
+        bool first = true;
+        foreach (string l in _chatLines)
+        {
+            if (!first) _chatSb.Append('\n');
+            _chatSb.Append(l);
+            first = false;
+        }
+        _chatLabel.Text = _chatSb.ToString();
     }
 
-    /// <summary>
-    /// Reacts to a client lifecycle state change: update the state label.
-    /// </summary>
+    /// <summary>Reacts to a client lifecycle state change: update the state label.</summary>
     public void OnClientStateChanged(ClientStateChangedEvent evt)
     {
         if (_stateLabel is null) return;
@@ -479,20 +676,16 @@ public sealed partial class GameHud : Control
 
     /// <summary>
     /// Returns true when the screen point (x,y) lands inside any HUD control rect.
-    /// Called by the <see cref="MartialHeroes.Client.Godot.Input.HudInputHandler"/> to
-    /// implement the "UI is the gate" chain-of-responsibility pattern.
     /// spec: Docs/RE/specs/input_ui.md §3 — "UI hit-test first".
     /// </summary>
     public bool HitTest(int x, int y)
     {
-        Vector2 pt = new Vector2(x, y);
-        // Walk all direct children (panel containers) for a rect hit.
+        var pt = new Vector2(x, y);
         for (int i = 0; i < GetChildCount(); i++)
         {
             if (GetChild(i) is Control c && c.GetRect().HasPoint(pt))
                 return true;
         }
-
         return false;
     }
 
@@ -502,58 +695,56 @@ public sealed partial class GameHud : Control
 
     private void RefreshVitals()
     {
-        // HP bar — display ratio from confirmed server values, no formula.
-        if (_trackedMaxHp > 0)
-        {
-            _hpBar.MaxValue = _trackedMaxHp;
-            _hpBar.Value = _trackedHp;
-        }
-        else
-        {
-            _hpBar.Value = 0;
-        }
-
+        if (_trackedMaxHp > 0) { _hpBar.MaxValue = _trackedMaxHp; _hpBar.Value = _trackedHp; }
+        else                     _hpBar.Value = 0;
         _hpText.Text = $"{_trackedHp}/{_trackedMaxHp}";
 
-        // MP bar.
-        if (_trackedMaxMp > 0)
-        {
-            _mpBar.MaxValue = _trackedMaxMp;
-            _mpBar.Value = _trackedMp;
-        }
-        else
-        {
-            _mpBar.Value = 0;
-        }
-
+        if (_trackedMaxMp > 0) { _mpBar.MaxValue = _trackedMaxMp; _mpBar.Value = _trackedMp; }
+        else                     _mpBar.Value = 0;
         _mpText.Text = $"{_trackedMp}/{_trackedMaxMp}";
     }
 
     private void RefreshBuffLabel()
     {
-        var active = System.Array.FindAll(_activeBuffCodes, c => c != 0);
-        if (active.Length == 0)
+        // Manual loop avoids Array.FindAll allocation on every buff-slot change (finding 4).
+        int activeCount = 0;
+        for (int i = 0; i < _activeBuffCodes.Length; i++)
+            if (_activeBuffCodes[i] != 0) activeCount++;
+
+        if (activeCount == 0)
         {
             _buffLabel.Text = "Buffs: —";
             return;
         }
 
-        _buffLabel.Text = "Buffs: " + string.Join(", ", active);
+        _chatSb.Clear(); // reuse the existing StringBuilder field
+        _chatSb.Append("Buffs: ");
+        bool first = true;
+        for (int i = 0; i < _activeBuffCodes.Length; i++)
+        {
+            if (_activeBuffCodes[i] == 0) continue;
+            if (!first) _chatSb.Append(", ");
+            _chatSb.Append(_activeBuffCodes[i]);
+            first = false;
+        }
+        _buffLabel.Text = _chatSb.ToString();
     }
 
     /// <summary>
     /// Resolves a skill ID to a display name via SkillCatalogue.
-    /// Returns "Skill#id" when the catalogue is unavailable or the ID is missing.
+    /// Returns "Sk#id" when the catalogue is unavailable or the ID is missing.
     /// spec: Docs/RE/formats/config_tables.md §2.8 skills.scr — skill_id lookup.
-    /// NOTE: The 1504-byte skill record does not have a confirmed name field (spec §2.8
-    ///       known unknowns). We display the numeric id as a dev label until the name
-    ///       offset is confirmed.
+    /// NOTE: confirmed name field offset unknown (spec §2.8 known unknowns); numeric label used.
     /// </summary>
     private string ResolveSkillName(uint skillId)
     {
         // skill.scr records do not have a confirmed name column (spec §2.8 known unknowns).
-        // TODO: when the name field offset is confirmed in spec, update SkillCatalogue.
-        // For now: show "Sk#ID" as a clearly dev label.
         return $"Sk#{skillId}";
+    }
+
+    public override void _ExitTree()
+    {
+        _uiLoader?.Dispose();
+        _uiLoader = null;
     }
 }

@@ -36,8 +36,8 @@ public sealed class UiTexManifestParserTests
 
         UiTexManifest result = UiTexManifestParser.ParseText(txt);
 
-        Assert.Equal(1, result.DdsEntries.Count);
-        Assert.Equal(0, result.MskEntries.Count);
+        Assert.Single(result.DdsEntries);
+        Assert.Empty(result.MskEntries);
         UiTexEntry? e = result.GetById(1);
         Assert.NotNull(e);
         Assert.Equal(1, e.TexId);
@@ -93,7 +93,7 @@ public sealed class UiTexManifestParserTests
 
         UiTexManifest result = UiTexManifestParser.ParseText(txt);
 
-        Assert.Equal(1, result.DdsEntries.Count);
+        Assert.Single(result.DdsEntries);
         Assert.Equal("data/ui/skillpipe.dds", result.GetById(10)!.VfsPath);
     }
 
@@ -118,7 +118,7 @@ public sealed class UiTexManifestParserTests
         UiTexManifest result = UiTexManifestParser.ParseText(txt);
 
         // The entry must be parsed despite the missing closing quote.
-        Assert.Equal(1, result.DdsEntries.Count);
+        Assert.Single(result.DdsEntries);
         UiTexEntry? e = result.GetById(29);
         Assert.NotNull(e);
         Assert.Equal("data/ui/inactivemember.dds", e.VfsPath);
@@ -140,7 +140,7 @@ public sealed class UiTexManifestParserTests
         const string txt = "UI_TEXTURE { DDS { 0001 \"data/ui/x.dds\" } MSK { } }";
         UiTexManifest result = UiTexManifestParser.ParseText(txt);
 
-        Assert.Equal(0, result.MskEntries.Count);
+        Assert.Empty(result.MskEntries);
     }
 
     [Fact]

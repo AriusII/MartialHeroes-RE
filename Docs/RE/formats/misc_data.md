@@ -2,6 +2,10 @@
 
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code.
 > Consumed by Assets.Parsers. Every offset an engineer cites must reference this file.
+>
+> Promoted from dirty-room analyst notes under EU Software Directive 2009/24/EC Art. 6.
+> No decompiler output and no binary virtual addresses appear anywhere in this file.
+>
 > status: sample_verified — see per-section confidence notes.
 
 This document covers five distinct file types that share no common wire format but are all small
@@ -407,16 +411,18 @@ CP949 before display or comparison. Never treat this field as ASCII.
 
 ## Section 6 — `msg.xdb` — UI Message Catalogue
 
-> **Verification status: CODE-CONFIRMED (parser read-sequence, record stride, and lookup model
-> are all confirmed from the loader routine); SAMPLE-UNVERIFIED (VFS probe tool was unavailable
-> at time of writing — record count, specific id values, and string content not byte-confirmed).
-> Apply caution on any claim that depends on actual record content.**
+> **Verification status: CODE-CONFIRMED** (parser read-sequence, record stride, lookup model,
+> and fill-byte convention confirmed from the loader routine). **SAMPLE-VERIFIED** (record count,
+> fill byte, representative string content, and ID range groupings confirmed from direct
+> harness observation of the real VFS at `data/script/msg.xdb`). All claims below are graded
+> individually; previously SAMPLE-UNVERIFIED items are now resolved.
 
 - **Extension:** `.xdb` (shares extension with §1 variants; distinguished by its VFS path)
 - **Found in:** `.pak` archive; logical path: `data/script/msg.xdb`
 - **Magic / signature:** None. No file-level header of any kind.
 - **Endianness:** Little-endian throughout.
 - **Version field:** None.
+- **File size (SAMPLE-VERIFIED):** 1,364,304 bytes.
 
 **Role:** Startup binary string database that maps u32 integer IDs to CP949-encoded UI caption
 strings. All visible UI text (error messages, state names, quest text, menu labels, and similar
@@ -434,25 +440,58 @@ record_count = file_size / 516       (integer division; file must be an exact mu
 
 Any remainder implies a malformed file.
 
+**Record count (SAMPLE-VERIFIED):** 1,364,304 / 516 = **2,644 records exactly**.
+
 ### Record layout (516 bytes = 0x204)
 
-| Offset | Size | Type      | Field | Notes                                                    | Confidence |
-|-------:|-----:|-----------|-------|----------------------------------------------------------|------------|
-| 0x000  | 4    | u32LE     | id    | Unique message identifier; used as the runtime lookup key | CODE-CONFIRMED |
-| 0x004  | 512  | u8[512]   | text  | CP949-encoded string, NUL-terminated within the buffer; remaining bytes after the NUL are zero padding | CODE-CONFIRMED |
+| Offset | Size | Type      | Field | Notes                                                              | Confidence |
+|-------:|-----:|-----------|-------|--------------------------------------------------------------------|------------|
+| 0x000  | 4    | u32LE     | id    | Unique message identifier; used as the runtime lookup key          | CODE-CONFIRMED |
+| 0x004  | 512  | u8[512]   | text  | CP949-encoded string, NUL-terminated within the buffer; bytes after the NUL through +515 are filled with **0xEE** (not 0x00) | CODE-CONFIRMED + SAMPLE-VERIFIED |
 
 **Total record size: 4 + 512 = 516 bytes.**
+
+> **Fill-byte clarification (SAMPLE-VERIFIED):** The padding bytes after the NUL terminator are
+> filled with **0xEE**, not 0x00. This is a deliberate non-null sentinel that distinguishes padding
+> from short strings. A parser reading the `text` field must stop at the **first 0x00 byte**, not
+> the first 0xEE byte. A record whose entire 516 bytes consist of 0xEE (all padding, no NUL, no
+> non-zero id) is an empty/reserved slot and should be silently skipped.
+
+### Filled and empty record counts (SAMPLE-VERIFIED)
+
+| Category | Count |
+|---|---|
+| Total record slots | 2,644 |
+| Filled slots (non-zero id, text present) | 2,633 |
+| Empty slots (entirely 0xEE — reserved/unused) | 11 |
 
 ### Text encoding
 
 All string content is encoded in **CP949** (Windows code page 949, the Korean EUC-KR superset).
 The `text` field is NUL-terminated within its 512-byte buffer. The maximum usable string length
 before the NUL is 511 bytes (511 CP949 code units; multi-byte Korean characters each occupy 2
-bytes, so the maximum is 255 Korean characters per message). Remaining bytes after the NUL are
-zero padding and must be ignored by the parser.
+bytes, so the maximum is 255 Korean characters per message). Bytes after the NUL are 0xEE fill
+and must be ignored.
 
 Parsers must register `CodePagesEncodingProvider` and decode the buffer with
 `Encoding.GetEncoding(949)` before passing strings to any display layer.
+
+### Format-string conventions (SAMPLE-VERIFIED)
+
+Message strings may contain the following substitution conventions. A parser should not strip
+or transform these — pass the raw CP949 string to the display layer, which performs substitution:
+
+| Convention | Meaning | Example message |
+|---|---|---|
+| `%s` | String argument (player name, item name) | `%s님이 입장하셨습니다` |
+| `%d` | Integer argument (count, level, duration) | `%d시간`, `%d분`, `%d초` |
+| `%I64d` | 64-bit integer (large gold amounts) | `%I64d 금` |
+| `%1%`, `%2%`, `%3%` | Positional substitution (year, month, day, etc.) | `만료 기간 : %1%년 %2%월 %3%일 %4%:%5%` |
+| Embedded CRLF | Multi-line message body | Help text and long dialog strings contain `\r\n` within the string field |
+
+The positional `%N%` convention is a custom formatter, not standard printf. The engine's
+mechanism for this substitution is not documented here; the exact implementation is UNKNOWN
+(see Open questions §6.8).
 
 ### Load and lookup model (CODE-CONFIRMED)
 
@@ -464,47 +503,136 @@ pointer to the 516-byte record; the string payload begins at byte offset 4 withi
 The tree is keyed on `id` only; there is no secondary index by string content. Lookups are by
 numeric ID exclusively.
 
-Load sequence:
+**Load sequence:**
 1. Open `data/script/msg.xdb` read-only.
 2. Query file size; compute `record_count = file_size / 516`.
 3. Allocate a heap buffer of `516 × record_count` bytes.
 4. Read all records in a single bulk read into the buffer.
-5. For each record: read `id` (u32LE at record base), insert `(id → record_ptr)` into the
-   global red-black tree.
+5. For each record: check whether the record is an empty slot (all 0xEE — skip it); otherwise
+   read `id` (u32LE at record base), insert `(id → record_ptr)` into the global red-black tree.
 6. Close the file. The buffer remains live for the process lifetime.
 
-### Known ID ranges (CODE-CONFIRMED call sites; string content SAMPLE-UNVERIFIED)
+**Lookup contract for implementors:**
+- Do NOT assume `id == slot_index + 1`. The `id` stored at record +0x000 is the authoritative
+  identifier; slots are allocated in groups but are NOT sequentially numbered.
+- For an empty slot check: if all 516 bytes are 0xEE, skip. In practice, checking that
+  `id != 0` and that the byte at +0x004 is not 0xEE is sufficient.
+- The runtime dict is keyed by `id`; build it as `Dictionary<uint, string>` using the `id` field
+  as key and the CP949-decoded text as value.
 
-At least 500 distinct call sites in the binary hardcode specific message IDs, covering all major
-game subsystems. Confirmed category groupings inferred from call-site clustering:
+### ID range groupings (SAMPLE-VERIFIED from representative slot sampling)
 
-| ID range | Confirmed use | Confidence |
-|----------|---------------|------------|
-| 200–212 (0xC8–0xD4) | Character create / rename error messages | CODE-CONFIRMED |
-| 4025–4028 | Login error toast messages | CODE-CONFIRMED |
-| 9001 + stateIndex | Scene/state name strings (used by error dialog: `msg[9001 + state]`) | CODE-CONFIRMED |
+The `id` values are non-contiguous and non-sequential. They are allocated in semantic groups with
+large numeric gaps between groups. The table below lists the confirmed groups from direct record
+observation:
 
-The full ID space (range, density, and contiguity) is **SAMPLE-UNVERIFIED**. The prediction from
-call-site density is several hundred to a few thousand records; IDs may be contiguous integers,
-may be sparse, or may use a category-encoded scheme. This must be verified once the VFS probe
-tool is repaired.
+| Slot range | ID range | Representative CP949 texts | Apparent group |
+|---|---|---|---|
+| 0–3 | 1–4 | `%s금`, `%d은`, `%d동`, `엽전` | Currency format strings (gold/silver/copper/yang) |
+| 4–10 | 101–107 | `확인`, `취소`, `닫기`, `수령`, `검색`, `이전`, `다음` | Common UI button labels (OK, Cancel, Close, Receive, Search, Prev, Next) |
+| 11–18 | 201–208 | `%d시간`, `%d분`, `%d초`, `%d시`, `오전`, `오후`, `%d일`, `남은 시간: %s` | Time display format strings (hour/minute/second/AM/PM/day/remaining) |
+| 19–22 | 501–504 | `기간 연장`, `폐기`, `노점`, `정리` | Item shop/stall actions (Extend, Destroy, Stall, Organize) |
+| 23–34 | 901–912 | `을`, `를`, `은`, `는`, `이`, `가`, `에`, `굴림체`, `굴림`, `바탕체`, `궁서체`, `korean` | Korean postposition suffixes and font name strings |
+| 35–63 | ~913–940 | Map/camera/combat/trade system messages | General in-game system messages |
+| 64–157 | ~940–1057 | Warning dialogs, trade, item time-limit messages | In-game warning and transaction messages |
+| 158–~300 | ~1058–1300 | NPC dialog, party, alliance, server text | Multiplayer and social messages |
+| ~300–400 | ~1300–1400 | Server names, legal/privacy text | Server list and terms-of-service text |
+| ~400–600 | ~1400–1600 | Server status, stall actions, help text | Server/stall/UI system |
+| ~600–700 | ~1600–1700 | Combat/trade/system continuation | Mixed in-game messages |
+| ~700–800 | ~1700–1800 | Data server errors, item enhancement, help text | Error messages and help overlay |
+| ~800–900 | ~1800–1900 | Item enchant help text (multi-line), quest data | Item help and quest strings |
+| ~900–1000 | ~1900–2000 | Mob kill notifications, level-up, stat strings | Combat and progression feedback |
+| ~1000–1100 | ~2000–2100 | Item stat labels (attack, gear attribute strings) | Item attribute labels |
+| ~1100–1200 | ~2100–2200 | Money format (`%I64d 금`), elder/title strings | Economy and rank titles |
+| ~1200–1400 | ~2200–2400 | Class and rank names, NPC names | Class taxonomy and NPC names |
+| ~1400–1500 | ~2400–2500 | Required stat labels, buff window captions | Stat UI labels |
+| ~1500–1700 | ~2500–2700 | Alignment/faction text, skill book names | Faction and skill content |
+| ~1700–1800 | ~2700–2800 | Skill book names, weapon names | Item names |
+| ~1800–1900 | ~2800–2900 | Equipment equip messages, character death messages | Action feedback |
+| ~1900–2000 | ~2900–3000 | Death dialogs, dungeon restriction messages | Death/respawn/area |
+| ~2000–2100 | ~3000–3100 | Restriction messages, production item dialogs | Area restriction and crafting |
+| ~2100–2200 | ~3100–3200 | Mode/production text | Status messages |
+| ~2200–2300 | ~3200–3300 | Server error strings (energy-system errors) | System errors |
+| ~2300–2400 | ~3300–3400 | Charm slot/soul orb messages | Equipment system |
+| ~2400–2500 | ~3400–3500 | Lottery messages, buff selection | Event and buff system |
+| ~2500–2566 | ~3500–3566 | Buff format strings (`%d분간 %d 상승`), NPC error messages | Buff and NPC system |
+| ~2567–2580 | ~3567–3580 | Death by monster/player, war announcements | Combat and war system |
+| ~2580–2609 | ~3580–3609 | Job change item, map move, logout, CAPTCHA/question system | Class change, navigation, bot-prevention |
+| ~2610–2625 | ~3610–3625 | Auto-war, peace declaration, war mode | PvP/peace system |
+| ~2626–2643 | ~3626–3643 | Item time extension, appearance change cosmetics | Item system extension |
+
+> **ID vs. slot index (critical):** the `id` stored in each record is the authoritative
+> identifier. A record at slot 0 has `id = 1`; a record at slot 4 has `id = 101`; there is
+> no formula relating slot index to `id`. Always read the `id` field from the record itself.
+> The estimated maximum `id` is approximately **3,643** (derived from the last occupied slot).
+
+### Confirmed specific message IDs (combined CODE-CONFIRMED + SAMPLE-VERIFIED)
+
+The following IDs are pinned by both call-site analysis and direct sample observation:
+
+| msg_id | CP949 text | Translation | Confidence |
+|---|---|---|---|
+| 1 | `%s금` | Gold: %s | SAMPLE-VERIFIED |
+| 2 | `%d은` | Silver: %d | SAMPLE-VERIFIED |
+| 3 | `%d동` | Copper: %d | SAMPLE-VERIFIED |
+| 4 | `엽전` | Yang (currency unit) | SAMPLE-VERIFIED |
+| 101 | `확인` | OK / Confirm | SAMPLE-VERIFIED |
+| 102 | `취소` | Cancel | SAMPLE-VERIFIED |
+| 103 | `닫기` | Close | SAMPLE-VERIFIED |
+| 104 | `수령` | Receive | SAMPLE-VERIFIED |
+| 105 | `검색` | Search | SAMPLE-VERIFIED |
+| 106 | `이전` | Previous | SAMPLE-VERIFIED |
+| 107 | `다음` | Next | SAMPLE-VERIFIED |
+| 201 | `%d시간` | %d hour(s) | SAMPLE-VERIFIED |
+| 202 | `%d분` | %d minute(s) | SAMPLE-VERIFIED |
+| 203 | `%d초` | %d second(s) | SAMPLE-VERIFIED |
+| 204 | `%d시` | %d o'clock | SAMPLE-VERIFIED |
+| 205 | `오전` | AM | SAMPLE-VERIFIED |
+| 206 | `오후` | PM | SAMPLE-VERIFIED |
+| 207 | `%d일` | %d day(s) | SAMPLE-VERIFIED |
+| 208 | `남은 시간: %s` | Remaining time: %s | SAMPLE-VERIFIED |
+| 501 | `기간 연장` | Extend (duration) | SAMPLE-VERIFIED |
+| 502 | `폐기` | Destroy | SAMPLE-VERIFIED |
+| 503 | `노점` | Stall | SAMPLE-VERIFIED |
+| 504 | `정리` | Organize | SAMPLE-VERIFIED |
+| 901 | `을` | Korean postposition (object marker, after consonant) | SAMPLE-VERIFIED |
+| 902 | `를` | Korean postposition (object marker, after vowel) | SAMPLE-VERIFIED |
+| 903 | `은` | Korean postposition (topic marker, after consonant) | SAMPLE-VERIFIED |
+| 904 | `는` | Korean postposition (topic marker, after vowel) | SAMPLE-VERIFIED |
+| 905 | `이` | Korean postposition (subject marker, after consonant) | SAMPLE-VERIFIED |
+| 906 | `가` | Korean postposition (subject marker, after vowel) | SAMPLE-VERIFIED |
+| 907 | `에` | Korean postposition (location/direction) | SAMPLE-VERIFIED |
+| 908 | `굴림체` | Font name: Gulim bold | SAMPLE-VERIFIED |
+| 909 | `굴림` | Font name: Gulim | SAMPLE-VERIFIED |
+| 910 | `바탕체` | Font name: Batang | SAMPLE-VERIFIED |
+| 911 | `궁서체` | Font name: Gungseo | SAMPLE-VERIFIED |
+| 912 | `korean` | Font/locale identifier | SAMPLE-VERIFIED |
+| 200–212 | (error messages) | Character create/rename error messages | CODE-CONFIRMED |
+| 4025–4028 | (login errors) | Login error toast messages | CODE-CONFIRMED |
+| 9001 + N | (state names) | Scene/state name strings | CODE-CONFIRMED |
 
 ### Cross-reference
 
 This catalogue is consumed by the UI system documented in `Docs/RE/specs/ui_system.md`. Mob
 name and alternate-name string IDs stored in `mobinfo.mi` (§2 of this document) resolve against
-this same catalogue.
+this same catalogue. UI window button labels, currency display, time formatting, font selection,
+and Korean postposition injection all draw from this file.
 
-### Known unknowns
+### Open questions for §6
 
-- **ID range and density:** unknown without sample verification. Whether IDs are contiguous,
-  sparse, or category-encoded has not been confirmed from byte data.
-- **Record count:** the predicted range is several hundred to several thousand records; exact count
-  not confirmed.
-- **Specific string content:** no msg.xdb records have been decoded from bytes. The ID-to-string
-  mappings listed above are inferred from call sites, not from reading the file.
-- **VFS probe prerequisite:** the probe tool that would have verified this format had a build error
-  (`data/script/msg.xdb` was located in the VFS but could not be extracted at time of analysis).
+1. **Positional substitution mechanism (`%1%`/`%2%`/`%3%`):** the engine's implementation for
+   positional argument insertion is not documented. Whether it uses a custom formatter or an
+   sprintf-style call with numbered arguments is unknown.
+2. **Maximum `id` value:** the highest `id` in the file was not systematically extracted across
+   all 2,644 slots. The estimated maximum is approximately 3,643 based on the last occupied slot
+   grouping. The exact max is required for bounds-checking a lookup array if an array is preferred
+   over a dictionary.
+3. **Empty slot detection edge case:** the check "all 516 bytes are 0xEE" may be overly strict if
+   any padding variant uses 0x00 after the NUL. The confirmed fill byte is 0xEE; whether any
+   partial-0xEE/partial-0x00 padding exists in the 11 empty slots is not exhaustively confirmed.
+4. **ID stability across patches:** whether the same `id` values map to the same strings in
+   earlier or later client versions is unknown. The mapping documented here is from the single
+   analysed VFS version.
 
 ---
 
@@ -519,7 +647,7 @@ this same catalogue.
 | `.tol`          | 16-byte header  | 1 B/tile | `width × height`    | none          | NO            |
 | `descript.ion`  | none            | variable | until EOF (CRLF delimited) | ASCII  | NO            |
 | `discript.sc`   | none            | 68 B   | `file_size / 68`      | CP949 (display_name) | YES (stride) |
-| `msg.xdb`       | none            | 516 B  | `file_size / 516`     | CP949 (text)  | YES (loader + stride; SAMPLE-UNVERIFIED) |
+| `msg.xdb`       | none            | 516 B  | `file_size / 516` = 2,644 records | CP949 (text, 0xEE fill) | YES (loader + stride + content SAMPLE-VERIFIED) |
 
 ## Known unknowns (cross-format)
 
@@ -530,13 +658,15 @@ this same catalogue.
 - The world-origin sub-tile scale factor (256) in `.tol` files is inferred, not confirmed from
   the engine's internal constants.
 - The `reserved` 27-byte region in `discript.sc` records.
-- The full ID range, record count, and string content of `msg.xdb` pending VFS probe repair.
+- The positional-substitution mechanism for `%1%`/`%2%`/`%3%` format strings in `msg.xdb`.
+- The exact maximum `id` value in `msg.xdb` (estimated ~3,643; not exhaustively verified).
 
 ## Cross-references
 
 - Related formats: `pak.md` (archive container that holds all of the above), `terrain.md` (`.tol`
   is a terrain companion file), `texture.md` (`.ion` references `.tga` texture filenames).
 - `msg.xdb` consumers: `Docs/RE/specs/ui_system.md` (caption lookup by numeric ID),
-  `mobinfo.mi` §2 (mob name string IDs reference this catalogue).
+  `mobinfo.mi` §2 (mob name string IDs reference this catalogue),
+  `formats/ui_manifests.md` §8 (widget-to-caption binding reference).
 - Glossary: see `Docs/RE/names.yaml`
 - Provenance: see `Docs/RE/journal.md`

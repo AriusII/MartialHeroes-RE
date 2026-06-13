@@ -1,0 +1,48 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgRenameCharacter
+opcode: 0x1000d           # major 1 (ServerCommand/account), minor 13 -> (1 << 16) | 13
+direction: C2S
+size: 18                  # fixed 18-byte payload built by the rename sender (0x12)
+spec: packets/1-13_rename_character.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client rename-character request from the character-select screen. An 18-byte body carrying the new character name (CP949), NUL-terminated within the fixed buffer. The server answers with S2C 3/6 SmsgRenameCharResult and the select screen refreshes the slot's displayed name.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 18.
+fields:
+  - { name: NewName, type: "bytes[18]" }   # 0x00  new character name, CP949, NUL-terminated within the buffer
+
+notes: |
+  Static inference only; no capture available. The select-screen rename action validates the
+  new name, copies it into a fixed buffer, and the sender emits exactly 18 bytes. Frame =
+  8-byte header + 18 = 26 bytes on the wire.
+
+    0x00 (18B) NewName : the new character name as a fixed 18-byte buffer holding a CP949
+                         (Korean code page 949) string, NUL-terminated. The select screen caps
+                         display names at 17 bytes, which leaves room for one terminator in 18.
+                         Decode as a fixed [InlineArray] blob, then trim at the first NUL and
+                         decode CP949 -- never a managed string on the wire.
+
+  NAME VALIDATION (client-side, applied before the send; useful for the server-side and for
+  a faithful client): minimum length 2; allowed characters are ASCII lowercase a-z and digits
+  0-9 plus CP949 double-byte Hangul. Uppercase Latin and punctuation are rejected, and a lone
+  Hangul lead byte with an out-of-range trail also fails. So a valid name is Hangul and/or
+  lowercase-alphanumeric only.
+
+  SEQUENCE: client sends 1/13 -> server replies S2C 3/6 SmsgRenameCharResult (rename result;
+  a nonzero result indicates success and carries the applied name). The select screen also
+  routes a rename outcome through the 8-byte manage-result handler (3/4, subtype 1) to refresh
+  the slot's name -- see packets/3-4_char_manage_result.yaml.
+
+  UNKNOWNS to resolve with a capture of a rename action:
+    - whether the buffer carries any trailing field beyond the NUL-terminated name (no slot
+      index appears to travel with the name -- the target slot is the currently selected one);
+    - the exact CP949 length cap the server enforces (client trims at 17 + NUL).
+
+  RELATED major-1 char-management senders: 1/6 (create/login), 1/7 (select), 1/9 (enter game),
+  1/14 (delete). All gated by the select screen's single net-busy flag.
+
+  UNBLOCKS: Client.Application RenameCharacter use-case (reply 3/6 / 3/4 subtype 1).

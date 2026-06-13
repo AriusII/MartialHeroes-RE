@@ -457,6 +457,9 @@ Docs/RE/_dirty/
 
 # === Local render-verification artifacts (screenshots of copyrighted assets, temp probes) ===
 05.Presentation/MartialHeroes.Client.Godot/mh_screens/
+05.Presentation/MartialHeroes.Client.Godot/qa_capture_*.png
+05.Presentation/MartialHeroes.Client.Godot/qa_*.gd
+05.Presentation/MartialHeroes.Client.Godot/qa_*.gd.uid
 screenshot_probe.gd
 screenshot_probe.gd.uid
 

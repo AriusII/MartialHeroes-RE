@@ -12,6 +12,7 @@ using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Simulation;
 using MartialHeroes.Client.Godot.Adapters;
+using MartialHeroes.Client.Godot.Audio;
 using MartialHeroes.Client.Godot.Dev;
 using MartialHeroes.Client.Godot.Input;
 using MartialHeroes.Client.Infrastructure.Catalog;
@@ -113,6 +114,29 @@ public sealed partial class ClientContext : Node
     /// </summary>
     public SectorStreamingService StreamingService { get; private set; } = null!;
 
+    /// <summary>
+    /// The two startup UI data catalogs:
+    ///   - UiTex manifest (data/ui/UiTex.txt)  → <see cref="UiCatalogs.GetTexture"/>
+    ///   - Msg catalog (data/script/msg.xdb)   → <see cref="UiCatalogs.GetMessage"/>
+    ///
+    /// Both degrade gracefully when no VFS is available (offline mode).
+    /// spec: Docs/RE/formats/ui_manifests.md §1 (uitex.txt, PARSER-CONFIRMED grammar).
+    /// spec: Docs/RE/formats/misc_data.md §6 (msg.xdb, CODE-CONFIRMED loader).
+    /// spec: Docs/RE/specs/ui_system.md §8.5 (HUD uitex integer binding contract).
+    /// </summary>
+    public UiCatalogs UiCatalogs { get; private set; } = null!;
+
+    /// <summary>
+    /// The audio service façade. Handles BGM streaming, UI click SFX, world-entry SFX, and
+    /// per-area ambient BGM from the .bgm sound table.
+    ///
+    /// Null when audio initialisation failed (headless / no audio device).
+    /// Added as a child node in <see cref="_Ready"/> so it participates in the scene lifecycle.
+    /// spec: Docs/RE/specs/sound.md §12.1 (Godot reimplementation guidance).
+    /// spec: Docs/RE/names.yaml runtime_constants (UI_CLICK_SFX_ID, SPAWN_SFX_ID, ENTRY_BGM_CUE_ID).
+    /// </summary>
+    public AudioService? Audio { get; private set; }
+
     // Cancellation source for the engine loop Task.
     private CancellationTokenSource? _loopCts;
     private Task? _loopTask;
@@ -120,6 +144,16 @@ public sealed partial class ClientContext : Node
     // VfsCatalogueLoader owns the VFS archive lifecycle for catalogue loading.
     // It is disposed in _ExitTree alongside the loop cancellation.
     private VfsCatalogueLoader? _catalogueLoader;
+
+    // RealClientAssets for the UI catalogs (UiTex + msg.xdb).  Disposed in _ExitTree.
+    // Kept separate from the terrain VFS so the two archives have independent lifecycles.
+    private RealClientAssets? _uiAssets;
+
+    // The MappedVfsArchive opened by TryOpenVfsForTerrain() and passed into VfsTerrainSectorSource.
+    // VfsTerrainSectorSource stores the reference but does NOT implement IDisposable and therefore
+    // does NOT dispose the archive — ownership stays here. Disposed in _ExitTree.
+    // spec: Docs/RE/formats/pak.md §Two-file scheme (MappedVfsArchive = memory-mapped handle).
+    private MappedVfsArchive? _terrainVfs;
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -143,6 +177,22 @@ public sealed partial class ClientContext : Node
 
             // Ensure all properties are non-null so child nodes never null-ref the context.
             EnsureMinimalFallbackState();
+        }
+
+        // Wire the AudioService as a child node so it participates in the scene lifecycle.
+        // Added after the application graph (and its fallback) so the EventBus/StateMachine are
+        // available when AudioService._Ready runs. This is the minimal wiring for audio.
+        // spec: Docs/RE/specs/sound.md §12.1 (Godot reimplementation guidance).
+        try
+        {
+            var audio = new AudioService { Name = "AudioService" };
+            AddChild(audio);
+            Audio = audio;
+            GD.Print("[ClientContext] AudioService added as child node.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] AudioService init failed: {ex.Message} — no audio.");
         }
     }
 
@@ -231,22 +281,47 @@ public sealed partial class ClientContext : Node
             MobCatalogue ??= new MobCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.MobCatalogEntry>());
         }
 
-        // 13. VFS archive for terrain (separate from catalogue loader — same paths).
-        //     spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
-        MappedVfsArchive? vfs = TryOpenVfsForTerrain();
+        // 13. UI data catalogs: uitex manifest (data/ui/UiTex.txt) and msg.xdb string catalog.
+        //     Opens a second RealClientAssets handle backed by the same VFS archive path so that
+        //     UiCatalogs' lazy texture loading (which calls Godot Image APIs) stays on the main
+        //     thread independently of the terrain streaming pipeline.
+        //     spec: Docs/RE/formats/ui_manifests.md §1 (uitex.txt: 35 DDS entries, PARSER-CONFIRMED).
+        //     spec: Docs/RE/formats/misc_data.md §6 (msg.xdb: 2644 records, CODE-CONFIRMED).
+        //     spec: Docs/RE/specs/ui_system.md §8.5 (HUD uitex integer binding contract).
+        try
+        {
+            _uiAssets = RealClientAssets.TryOpen(); // path via ClientPathResolver (same chain as catalogue loader)
+            UiCatalogs = new UiCatalogs(_uiAssets);
+            // Force-load both catalogs now so sizes appear in the boot log.
+            // EnsureUiTex / EnsureMsg are lazy but we trigger them here for diagnostics.
+            GD.Print($"[ClientContext] UiCatalogs: {UiCatalogs.UiTexEntryCount} uitex entries, " +
+                     $"{UiCatalogs.MsgRecordCount} msg records.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] UiCatalogs load failed: {ex.Message} — using empty UI catalogs.");
+            _uiAssets = null;
+            UiCatalogs ??= new UiCatalogs(null);
+        }
 
-        // 14. Terrain sector source — backed by VFS (or empty if offline).
+        // 14. VFS archive for terrain (separate from catalogue loader — same paths).
+        //     spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
+        //     Store in _terrainVfs so _ExitTree can dispose it (VfsTerrainSectorSource does not own/dispose).
+        MappedVfsArchive? vfs = TryOpenVfsForTerrain();
+        _terrainVfs = vfs;
+
+        // 15. Terrain sector source — backed by VFS (or empty if offline).
         //     spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
         //     Area 0 is the default starting area. TODO: update on enter-game.
         var terrainSource = new VfsTerrainSectorSource(vfs, areaId: 0);
 
-        // 15. Terrain streaming service — high quality (5×5 ring, radius=2).
+        // 16. Terrain streaming service — high quality (5×5 ring, radius=2).
         //     spec: Docs/RE/formats/terrain.md §12.2 — High quality → 5×5 ring (ring-radius cells = 5).
         //     The 5×5 ring loads up to 25 sectors around the player, covering all spawn-filled cells
         //     in large walled areas (e.g. area 2) that exceed the 3×3 ring footprint.
         var streamingService = new SectorStreamingService(terrainSource, bus, StreamQuality.High);
 
-        // 16. Packet handler — orchestrates Domain mutation and event publishing.
+        // 17. Packet handler — orchestrates Domain mutation and event publishing.
         //     Wire the catalogue vitals resolver (real stat curves) at construction.
         //     spec: CatalogueVitalsResolver.Create — builds the seam from the catalogue.
         //     spec: Docs/RE/formats/config_tables.md §2.4.
@@ -255,17 +330,17 @@ public sealed partial class ClientContext : Node
             VitalsResolver = CatalogueVitalsResolver.Create(scrStatCatalogue)
         };
 
-        // 17. Inbound frame dispatcher — channel-backed; synthetic feeder uses this.
+        // 18. Inbound frame dispatcher — channel-backed; synthetic feeder uses this.
         var dispatcher = new InboundFrameDispatcher(handler);
 
-        // 18. Version token — 33 bytes, zero-filled (PROVISIONAL).
+        // 19. Version token — 33 bytes, zero-filled (PROVISIONAL).
         //     spec: Docs/RE/packets/1-9_enter_game_request.yaml (VersionToken 0x01, 33 bytes, UNKNOWN).
         ReadOnlySpan<byte> versionToken = stackalloc byte[ApplicationUseCases.VersionTokenLength];
 
-        // 19. Use-case facade — presentation calls these for input intents.
+        // 20. Use-case facade — presentation calls these for input intents.
         var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId, versionToken);
 
-        // 20. Fixed-tick GameEngineLoop — 30 Hz.
+        // 21. Fixed-tick GameEngineLoop — 30 Hz.
         //     spec: Docs/RE/specs/game_loop.md §6 ("e.g. 30 Hz via a PeriodicTimer"). CONFIRMED.
         var engineLoop = new GameEngineLoop(world, bus, inputBus, GameEngineLoop.DefaultTickRateHz);
 
@@ -353,6 +428,11 @@ public sealed partial class ClientContext : Node
         ItemCatalogue ??= new ItemCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.ItemCsvRow>());
         SkillCatalogue ??= new SkillCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.SkillCatalogEntry>());
         MobCatalogue ??= new MobCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.MobCatalogEntry>());
+
+        // UiCatalogs — null-safe offline fallback (no VFS).
+        // spec: Docs/RE/formats/ui_manifests.md §1 / Docs/RE/formats/misc_data.md §6.
+        UiCatalogs ??= new UiCatalogs(null);
+
         GD.Print("[ClientContext] Minimal fallback state initialised.");
     }
 
@@ -397,7 +477,20 @@ public sealed partial class ClientContext : Node
         _catalogueLoader?.Dispose();
         _catalogueLoader = null;
 
-        GD.Print("[ClientContext] EventBus completed. EngineLoop drained + stopped. CatalogueLoader disposed.");
+        // Dispose the UI catalog assets handle (releases its VFS memory-mapped archive).
+        // spec: Docs/RE/formats/ui_manifests.md §1 (UiTex.txt loaded via this handle).
+        // spec: Docs/RE/formats/misc_data.md §6 (msg.xdb loaded via this handle).
+        UiCatalogs?.Dispose();
+        _uiAssets?.Dispose();
+        _uiAssets = null;
+
+        // Dispose the terrain VFS archive (memory-mapped handle).
+        // VfsTerrainSectorSource stores the reference but does NOT dispose — ownership is here.
+        // spec: Docs/RE/formats/pak.md §Two-file scheme (MappedVfsArchive = memory-mapped handle).
+        _terrainVfs?.Dispose();
+        _terrainVfs = null;
+
+        GD.Print("[ClientContext] EventBus completed. EngineLoop drained + stopped. CatalogueLoader + UiCatalogs + TerrainVfs disposed.");
     }
 
     // -------------------------------------------------------------------------

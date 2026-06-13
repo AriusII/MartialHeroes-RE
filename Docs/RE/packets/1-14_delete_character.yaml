@@ -1,0 +1,43 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgDeleteCharacter
+opcode: 0x1000e           # major 1 (ServerCommand/account), minor 14 -> (1 << 16) | 14
+direction: C2S
+size: 1                   # fixed 1-byte payload built by the delete sender
+spec: packets/1-14_delete_character.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client delete-character request from the character-select screen. A single byte -- the slot index of the character to delete. The server answers with the 8-byte char-manage result (S2C 3/4, subtype 2 = delete confirmed) which may instead carry a same-day delete-cooldown timer.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the width sums to size: 1.
+fields:
+  - { name: SlotIndex, type: u8 }   # 0x00  character slot to delete (0..4)
+
+notes: |
+  Static inference only; no capture available. The select-screen delete action (a Yes/No
+  confirm popup) emits a single byte through the delete sender. Frame = 8-byte header + 1 = 9
+  bytes on the wire.
+
+    0x00 (1B) SlotIndex : the character slot to delete, range 0..4. It is the currently
+                          highlighted/hovered slot. MEDIUM-HIGH CONFIDENCE.
+
+  GUARDS: the delete is only sent when a valid slot is selected and the select screen's
+  net-busy flag is clear; the client sets the busy flag while the request is in flight.
+
+  SEQUENCE / RESULT: server replies with the 8-byte char-manage result (S2C 3/4 -- see
+  packets/3-4_char_manage_result.yaml). On result==1 with subtype==2 the deletion is confirmed
+  (the account character count is decremented and the slot is cleared). On result==0 with a
+  future ready_time the server is enforcing a same-day delete lock, and the client formats a
+  "deletion forbidden today, HH hours MM minutes" cooldown message from (ready_time - now).
+
+  UNKNOWNS to resolve with a capture of a delete action:
+    - whether any confirmation token accompanies the slot byte (none observed -- the body is
+      just the slot index);
+    - the precise units / epoch of the ready_time cooldown value reported back in 3/4.
+
+  RELATED major-1 char-management senders: 1/6 (create/login), 1/7 (select), 1/9 (enter game),
+  1/13 (rename). All gated by the select screen's single net-busy flag.
+
+  UNBLOCKS: Client.Application DeleteCharacter use-case (reply 3/4 subtype 2).

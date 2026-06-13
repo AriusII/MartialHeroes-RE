@@ -321,4 +321,134 @@ currently skips Client.Godot entirely). Related doc-only drift: the blueprint st
 - **R4 — 3.8 GB copy interrupted**: robocopy is resumable; sizes verified before cutover;
   D:\ original retained until Phase 0 acceptance passes.
 
+---
+
+# CYCLE 2 — Client Workflow Comprehension + UI/GUI Perfection + VFS Tooling (launched 2026-06-12)
+
+**Mandate (maintainer):** recover the COMPLETE legacy client runtime workflow from `Main.exe`
+(doida.exe) via massive IDA + IDAPython research — boot, main loop, scene machine, and every
+scene step (Login → Server-List Selection → Character Selection → World), plus the cross-cutting
+modules (Effects, UI/GUI toolkit, Sound, Network lifecycle, Resource/loading) — and consolidate
+it into one authoritative markdown. Then perfect the UI/GUI implementation (C# + Godot) and the
+VFS format tooling. Many phases, wide agent fan-out (50–70 agents incl. sub-waves).
+
+**Master deliverable:** `Docs/RE/specs/client_workflow.md` — the end-to-end workflow document
+(every system & module, scene-by-scene), promoted clean from `_dirty/workflow/` lane notes.
+
+## Phase W1 — GIGA RESEARCH (dirty-room, 19 lanes)
+
+IDA lanes (sub-waves of 3 — one IDB, bounded MCP concurrency), each writing
+`Docs/RE/_dirty/workflow/<lane>.md`:
+
+| # | Lane | Agent | Question |
+|---|---|---|---|
+| 1 | boot-init | re-static-analyst | WinMain → window/D3D → VFS mount → config → singletons → first scene |
+| 2 | main-loop | re-static-analyst | frame anatomy: pump order (input/network/scene update/render/present), timing |
+| 3 | scene-machine | re-static-analyst | exhaustive state machine: enter/update/exit/render per state, all transition triggers |
+| 4 | login-scene | re-static-analyst | login widget actions, validation, login send, transition + error dialogs |
+| 5 | server-select | re-protocol-analyst | server-list source (file/net), selection → connect flow |
+| 6 | char-select | re-static-analyst | char-list source, 3D preview canvas, create/delete, → world transition |
+| 7 | world-scene | re-static-analyst | world entry sequence (map load/spawn/HUD build) + per-frame world update order |
+| 8 | effects-system | re-asset-format-analyst | effect manager, .xeff/.fx1–7 loading, particle structs, trigger/render paths |
+| 9 | gui-internals | re-static-analyst | GU* toolkit: render/hit-test/z-order/action dispatch/window mgr/focus/editbox/fonts |
+| 10 | sound-system | re-static-analyst | sound/music module, formats, per-scene triggers |
+| 11 | network-module | re-protocol-analyst | per-scene connection lifecycle, packet pump ↔ scene integration |
+| 12 | resource-manager | re-static-analyst | load/cache pipeline, async, loading screens |
+| 13 | module-cartography | ida-script-author | IDAPython mass classification of functions into subsystems; inventory tables |
+| 14 | singletons-map | re-struct-cartographer | global manager objects, roles, init order, key struct layouts |
+
+VFS lanes (parallel, no IDA — `vfs-data-analyst`): 15 effects-samples census (.xeff/.fx1–7),
+16 sound-samples census, 17 ui-asset full census (DDS ↔ screens, msg.xdb id ranges),
+18 serverlist/config data hunt, 19 world-scene per-area data inventory.
+
+**W1 STATUS — ✅ DONE (2026-06-12):** 19/19 lanes returned (14 IDA in 5 sub-waves + 5 VFS), all
+high confidence (network-module medium). Headlines: WinMain IS the 9-state machine (full
+state×trigger transition table recovered); lobby protocol on port 10000 (8-byte server records,
+LZ4, no cipher; channel endpoint on port 10000+server_id); 5 char-select C2S sends incl. an
+UNRESOLVED 1/6 login-vs-create collision; GU* toolkit internals (sprite render path, button state
+frames, IME, fonts); DirectSound+Ogg Vorbis sound stack (footsteps come from actor-visual fields,
+NOT mud cells); XEffect class family + .xeff byte-verified layout; resource pipeline (no file
+cache, 3×3 sync ring + streamer thread); 19 singletons + module map (engine = "Diamond",
+MSVC 2005, Lua 5.1.2, LZ4, XTrap anti-cheat); 63-area census; server list is NETWORK-fetched
+(clean negative on VFS config). Follow-up lane: pixel-exact widget-rect sweep ✅ (login ~100%,
+char-select ~100%, 117 HUD builders inventoried; 7-state ctor actually yields 3 distinct frames;
+login form lives on login_slice1.dds; char-select action ids Create=4/Delete=5/Enter=6).
+
+## Phase W2 — PROMOTION (spec-authors)
+`specs/client_workflow.md` (master synthesis) + new `specs/effects.md`, `specs/sound.md`,
+`specs/frontend_scenes.md` (login/server-select/char-select); updates to `client_runtime.md`,
+`ui_system.md`. Orchestrator: firewall scan, journal.md, names.yaml.
+
+**W2 STATUS — ✅ DONE (2026-06-13, first pass 8/11 + recovery 5/5):** WRITTEN: opcodes.md
+(+Appendix A lobby protocol, 193 rows validator-clean) + 8 packets/*.yaml (1/6 collision doc,
+1/7, 1/13, 1/14, 2/10000 keepalive, 3/4, 4/1, lobby), specs/sound.md, specs/frontend_scenes.md,
+specs/resource_pipeline.md, specs/client_workflow.md (master), formats/area_inventory.md,
+structs/runtime_singletons.md, formats/ui_manifests.md+misc_data.md (msg.xdb SAMPLE-VERIFIED).
+3 satellites died on API socket errors → W2-bis recovery re-runs effects /
+client_runtime / ui_system (folding the widget-rects sweep + 3-frame correction) + surgical
+fixes (sound_tables 2d/3d split, ui_manifests DXT2) + master refresh.
+
+## Phase W4 (early start) — VFS TOOLING — ✅ vfsls subcommands DONE (2026-06-12)
+8 new subcommands smoke-tested on the real VFS: scan-mot, scan-bnd, scan-skn, scan-ui,
+dump-msgxdb, dump-uitex, scan-xeff, scan-sound. SKILL.md updated.
+
+## Phase W3 — UI/GUI PERFECTION (engineering)
+Per-widget msg.xdb captions; window-chrome atlas source sub-rects; button hover/pressed states;
+char-select right panel (+3D previews if spec'd); in-game HUD original skin (3F); font fidelity.
+
+**W3 PLAN (launched 2026-06-13, 2-stage pipeline):** Stage 1 foundations — widgets kit
+(3-frame state buttons per ui_system.md §1.5/§8, press/release-inside semantics), uitex.txt+msg.xdb
+runtime catalogs adapter, SoundTableParser (Assets.Parsers + tests). Stage 2 consumers — login
+fidelity (21-widget table, login_slice1.dds), char-select fidelity (77 widgets, action ids 4/5/6,
+stat grid 191/24, 5×3D previews), HUD reskin via uitex binding contract, audio wiring (VFS .ogg:
+click SFX 861010101, spawn 862010105, entry BGM cue 910066000, per-area .bgm tables).
+
+## Phase W4 — VFS TOOLING
+vfsls subcommands (scan-mot/scan-bnd/scan-skn/scan-ui + dump-msgxdb/dump-uitex/scan-xeff);
+parsers for newly spec'd formats (effects et al.) + tests.
+
+**W3 STATUS — ✅ DONE (2026-06-13, 7 agents in 2 stages):** Stage 1: Screens/Widgets kit
+(StateButton 3-frame + legacy press/release semantics, WidgetFactory, AlphaFadeDriver ±64/tick),
+Adapters/UiCatalogs (uitex 37 entries + msg.xdb 2,644 records live from VFS), SoundTableParser
+(+38 tests, real-VFS smoke on map002). Stage 2: LoginScreen pixel-faithful (login_slice1.dds,
+quit-confirm modal, local validation msg 4025/4026), CharacterSelectScreen (41 widgets, action
+ids 4/5/6, stat grid 191/24, **5 slots with live 3D skinned previews** via SubViewports),
+HUD reskin (mainwindow/inventwindow/skillwindow chrome via uitex binding), Audio/AudioService
+(Music+Sfx buses, VFS .ogg LoadFromBuffer cache, auto-wired StateButton click SFX, world-entry
+cues, per-area .bgm). Bonus research closed the icon chain: skill icons = per-skill (srcX,srcY)
+pairs stored in the per-class stance .do files (116-byte records, +0x18/+0x1C), fixed 23×23
+cells; item icons = one whole DDS per icon via flat texturelist.txt (1,335 entries, 100% present).
+
+## Phase W5 — REVIEW + FIX
+godot-render-reviewer (screenshots), csharp-reviewer, clean-room-auditor, architecture-guardian;
+fix wave; build 0/0 + full test suite green as hard gate.
+
+**W5 STATUS — ✅ DONE (2026-06-13):** Render PASS_WITH_NOTES (2 majors), C# PASS_WITH_NOTES
+(9 majors), architecture FAIL (pre-existing edges only — see decision block below). Fix wave
+(3 agents) closed ALL confirmed findings: login form-band backing (PLAUSIBLE dark panel —
+legacy panel art region unrecovered), GameHud full-rect root + hotbar at true viewport bottom
+(screenshot-verified), chrome bind moved post-Initialise (uitex path now live), AudioService
+idempotent click-SFX wiring + Callable.From BGM dispatch + nullable stream cache, terrain VFS
+disposal, CharPreview3D static-flag save/restore in finally + RegisterProvider static ctor,
+GameHud event-path allocations removed, SoundTableEntry.HourSchedule → [InlineArray(24)] (zero
+per-parse heap), UiTexManifestParserTests xUnit2013 ×5 + SessionHandshake CA2014 cleaned by the
+orchestrator. **Final gate: build 0 err/0 warn (non-incremental), 1,066 tests green (10/10 suites).**
+
+### ⚖️ PENDING MAINTAINER DECISION (extended 2026-06-13) — off-table dependency edges
+All pre-existing (none introduced by Cycle 2; today's wave touched no csproj), all downward-legal,
+all flagged by `check_dag.py` against the CLAUDE.md table:
+1. `Client.Application → Network.Protocol` (csproj:15) — table allows Network.Abstractions only.
+2. `Client.Application → Network.Crypto` (csproj:19) — same rule.
+3. `Client.Infrastructure → Assets.Parsers` (csproj:14) — table allows Client.Application only.
+4. `Client.Infrastructure → Assets.Vfs` (csproj:15) — same rule.
+5. `Shared.Diagnostics → Shared.Kernel` (csproj:17) — table says packages-only (csproj comment
+   calls it an intentional optional downward ref).
+6. (Carried over) `Client.Godot → Client.Infrastructure` — the original pending decision; also
+   enables layer-05 *transitive* use of Assets.Parsers types (UiCatalogs/AudioService) that the
+   table routes via Assets.Mapping.
+Options per edge: (a) bless into the table (update CLAUDE.md/PRESERVATION_AND_ARCHITECTURE.md +
+check_dag.py expected set) or (b) refactor through the allowed abstraction. Orchestrator default
+if unanswered: keep code as-is, document as accepted deviations. Related doc drift: blueprint
+still says `Network.Transport.Pipe` ×3 (real name `.Pipelines`; disk wins).
+
 — *Maintained by the orchestrator. Update phase statuses in place as waves complete.*

@@ -1,0 +1,53 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgKeepalive
+opcode: 0x22710           # major 2 (GameAction), minor 10000 -> (2 << 16) | 10000  (10000 = 0x2710)
+direction: C2S
+size: 4                   # 4-byte zero payload (the declared length 20 is a builder argument, NOT the body size)
+spec: packets/2-10000_keepalive.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client keepalive / ping. A dedicated background thread sends this roughly every 20 seconds while the game connection is up and not suppressed. The payload is a 4-byte zero body. It is the only major-2 (GameAction) message in this catalog that is server-bound on a timer rather than a user action, and it follows a special send path -- compressed only, NOT re-encrypted.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 4.
+fields:
+  - { name: Padding, type: u32 }   # 0x00  4-byte zero body (observed/built as all-zero)
+
+notes: |
+  Static inference only; no capture available. The keepalive template is built ONCE at network
+  handler construction with a 2/10000 header and a 4-byte zero payload, pre-compressed, and
+  cached on the network singleton together with its interval. Frame (pre-compression) =
+  8-byte header + 4 = 12 bytes; on the wire it travels compressed.
+
+    0x00 (4B) Padding : a 4-byte zero body. No meaningful field has been identified; the client
+                        writes zero. HIGH CONFIDENCE that the body is 4 zero bytes.
+
+  IMPORTANT -- the "20" is NOT the payload size. The builder is handed a declared length of 20,
+  but the actual body written is 4 zero bytes and the value 20 is multiplied by 1000 to become
+  the 20000 ms (20 second) send interval. Do not model an 18- or 20-byte body. The fixed body is
+  4 bytes.
+
+  SEND PATH (load-bearing for a faithful reimplementation): this packet does NOT go through the
+  normal outbound sink. It is COMPRESSED-ONLY -- it is enqueued from the keepalive thread already
+  pre-compressed and is NOT re-encrypted at send time. Every other client message is encrypted
+  then compressed; the keepalive bypasses the encrypt step. (Hand the cipher/compression detail
+  to Network.Crypto; this spec only records that the body is 4 zero bytes and the path is
+  compress-only.)
+
+  CADENCE: a background "keepalive" thread checks once per ~1000 ms whether the interval has
+  elapsed; the effective send cadence is ~20 s. A suppress flag silences the ping during
+  handshake / scene-transition windows; the world-state tick (S2C 4/1, see
+  packets/4-1_game_state_tick.yaml) clears the suppress flag on world entry, after which the
+  ping resumes.
+
+  NEW C2S OPCODE: the major-2 family is otherwise C2S GameAction (user actions). 2/10000 is the
+  timer-driven ping and is a new addition to the catalog.
+
+  UNKNOWNS to resolve with a capture:
+    - whether the server actually expects / answers the ping, and whether ~20 s is the real
+      period under load (all timing here is a static read of the client, not a wire observation);
+    - whether the 4-byte body ever carries a sequence value (built as zero here).
+
+  UNBLOCKS: Network.Transport keepalive timer + Network.Crypto compress-only send path.

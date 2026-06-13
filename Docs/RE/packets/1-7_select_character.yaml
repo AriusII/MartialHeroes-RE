@@ -1,0 +1,43 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgSelectCharacter
+opcode: 0x10007           # major 1 (ServerCommand/account), minor 7 -> (1 << 16) | 7
+direction: C2S
+size: 2                   # fixed 2-byte payload built by the select-character sender
+spec: packets/1-7_select_character.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client select-character pre-step on the character-select screen. Two bytes -- a slot index and a state/lock flag. Believed to lock or pre-stage the chosen slot before the enter-world request (1/9); whether it is mandatory before every enter or only on the first selection is unknown without a capture.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 2.
+fields:
+  - { name: SlotIndex, type: u8 }   # 0x00  selected character slot (0..4)
+  - { name: StateFlag, type: u8 }   # 0x01  accompanying state/lock flag byte
+
+notes: |
+  Static inference only; no capture available. The character-select command handler builds a
+  fixed 2-byte payload for this sender. Frame = 8-byte header + 2 = 10 bytes on the wire.
+
+    0x00 (1B) SlotIndex : the chosen character slot index, range 0..4. MEDIUM CONFIDENCE.
+    0x01 (1B) StateFlag : a second byte the sender pairs with the slot. Its meaning (lock /
+                          relation / detail-request flag) is not decoded. LOWER CONFIDENCE.
+
+  ROLE / SEQUENCE: this sender is reached both from the per-slot select action and from an
+  "enter via select" pre-step on the select screen. The working hypothesis is that 1/7 locks or
+  pre-stages the slot (the client sets its net-busy guard while it is in flight), and the actual
+  world entry is then driven by 1/9 CmsgEnterGameRequest (packets/1-9_enter_game_request.yaml).
+  No inbound reply opcode was attributed to 1/7 in the source analysis.
+
+  UNKNOWNS to resolve with a capture of a character-select / enter-world sequence:
+    - whether 1/7 must precede 1/9 on EVERY enter, or only on the first slot selection;
+    - the exact meaning of StateFlag (lock vs relation vs detail-request);
+    - whether the server sends a dedicated reply to 1/7 (none was identified statically).
+
+  RELATED major-1 char-management senders (same family): 1/6 (52-byte create OR login blob --
+  see packets/1-6_login_or_create.yaml), 1/9 (40-byte enter game), 1/13 (18-byte rename),
+  1/14 (1-byte delete). All are gated by the select screen's single net-busy flag so only one
+  character operation is ever in flight.
+
+  UNBLOCKS: Client.Application SelectCharacter use-case (the select-screen slot pre-stage).

@@ -1,8 +1,8 @@
 ---
 status: confirmed
-sample_verified: partial   # sound tables, toonramp LUT, npc.arr, .sod/.ted bytes verified; runtime logic IDA-derived
-subsystems: [sound_runtime, ui_system, render_pipeline, camera_constants, movement_constants, quest_data, scene_lifecycle]
-networked: partial         # sound/UI/render/camera are client-only; movement uses 2/13 & 5/13; quest uses 2/28, 5/68, 5/73 (cataloged elsewhere)
+sample_verified: partial   # sound tables, toonramp LUT, npc.arr, .sod/.ted bytes verified; runtime logic IDA-derived; boot/loop/scene-machine/world-scene CODE-CONFIRMED
+subsystems: [boot_startup, frame_loop, sound_runtime, ui_system, render_pipeline, camera_constants, movement_constants, quest_data, scene_lifecycle, world_scene]
+networked: partial         # sound/UI/render/camera are client-only; movement uses 2/13 & 5/13; quest uses 2/28, 5/68, 5/73; scene-machine uses 3/5, 3/1, 4/1, 4/3 (cataloged elsewhere)
 encoding_note: Korean in-game/config/dialog text is CP949 (legacy MS949 code page), not UTF-8.
 ---
 
@@ -12,19 +12,24 @@ encoding_note: Korean in-game/config/dialog text is CP949 (legacy MS949 code pag
 > pseudo-code, no decompiler identifiers. Promoted from dirty-room analyst notes by the
 > spec-author: every behaviour and constant below is re-expressed in this author's own words
 > and tables. It documents the **presentation-and-client-runtime** side of the legacy client
-> (sound, UI widget tree + Lua binding, the "Diamond" render pipeline, the five camera modes,
-> movement/collision tuning, the quest system, and the master scene/screen lifecycle) so the
-> .NET core (`Client.Domain` / `Client.Application` / `Client.Infrastructure`) and the Godot
+> (boot and startup, per-frame loop, sound, UI widget tree + Lua binding, the "Diamond" render
+> pipeline, the five camera modes, movement/collision tuning, the quest system, the master scene
+> lifecycle, and the world-scene entry and render order) so the .NET core
+> (`Client.Domain` / `Client.Application` / `Client.Infrastructure`) and the Godot
 > presentation layer can be reimplemented from scratch.
 >
 > **Cross-spec ownership.** Where a topic already has its own committed spec, that spec is the
 > authority and this file only summarises and cross-links:
 > - Camera view-mode behaviour and movement pipeline: `specs/camera_movement.md`.
 > - Lua VM version and `.lua` data-tree model: `specs/lua_scripting.md`.
-> - Per-frame loop ordering: `specs/game_loop.md`.
+> - Per-frame loop ordering (reference spec): `specs/game_loop.md`.
 > - Sound on-disk table format: `formats/sound_tables.md`.
 > - Shader file format: `formats/shaders.md`; terrain on-disk: `formats/terrain.md`.
 > - Quest packet shapes (2/28, 5/68, 5/73): `opcodes.md` + `packets/*.yaml` + `specs/quests.md`.
+> - Front-end scenes (login/select/create UI flow, sub-state machines, enter-world handoff):
+>   `specs/frontend_scenes.md`.
+> - Resource and loading pipeline (boot-load worker, loading-screen progress, terrain streaming):
+>   `specs/resource_pipeline.md`.
 >
 > This spec adds the *runtime engine behaviour and pinned constants* that those specs reference
 > but do not themselves enumerate. Packet byte layouts are never re-derived here.
@@ -46,6 +51,271 @@ Per-section confidence model (used inline below):
 All numeric constants below were lifted from the legacy binary's literal pool / immediate operands.
 They are reliable as *values present in the code* but, absent a live capture, treat the feel-governing
 ones (volume curve, smoothing, send cadence) as a faithful starting tune to expose as configuration.
+
+---
+
+# 0. Boot and startup — (CODE-CONFIRMED)
+
+The client is a single-threaded-driver Win32 application. Boot is **not** a monolithic init function —
+it is spread across two distinct construction tiers followed by the state-0→1 transition inside the
+main state-machine loop.
+
+## 0.1 Top-level boot timeline — (CODE-CONFIRMED)
+
+The ordered sequence from process start to the first interactive frame:
+
+1. **CRT static initializers.** The CRT startup routine runs all C++ static constructors before
+   transferring to the application entry point (`WinMain`). The most significant static object
+   registered here is a **billing/anti-cheat scheduler proxy** that gates engine entry (see §0.5). There
+   is **no `setlocale` or CP949 locale call anywhere in the boot path** — see §0.6.
+
+2. **Power/termination setup.** `SetThreadExecutionState` keeps the display awake; two `terminate`
+   handler installs follow.
+
+3. **Bootstrap config (`game.lua`).** A Lua config singleton loads `game.lua` and reads three boolean
+   globals that control fundamental engine behaviour. All three **default to `true`** if `game.lua`
+   fails to load or is absent:
+
+   | Lua global | Default | Effect |
+   |---|---|---|
+   | `vfsmode` | true | `true` → assets served from the packed VFS; `false` → loose files |
+   | `launcher` | true | `true` → require the external launcher unless `-Start` was passed |
+   | `debugmode` | true | stored in the engine-state struct (+0x0C byte); gates developer behaviour |
+
+4. **VFS mount flag.** A global "mounted" byte is set from the `vfsmode` value. The VFS archive
+   itself is opened just before the state loop (step 7).
+
+5. **Crash reporter.** The BugTrap crash logger is initialised with the application name `"do"`;
+   a `"winmain start"` entry is written to its log.
+
+6. **Launcher gate.** If `launcher` is `true` **and** the command line is **not** exactly `-Start`,
+   the engine does **not** boot itself — it launches the external updater/launcher program
+   (`dostart.exe`) via `WinExec` and returns immediately. The entire 9-state machine only runs when
+   the client is invoked with `-Start` (or when `launcher` is set to `false`).
+
+7. **VFS archive open.** The index file (`data.inf`) and the data archive (`data/data.vfs`) are
+   opened and the table-of-contents is loaded into memory (see §0.4). This happens **once**, immediately
+   before the state loop.
+
+8. **State-machine loop begins.** `WinMain` **is** the state machine — the application entry point
+   body is the 8-case dispatch loop. It starts at **state 0 (Initialisation)**, which transitions
+   immediately to **state 1 (LoginWindow)** — the first real interactive screen.
+
+## 0.2 `DoOption.ini` — persistent settings — (CODE-CONFIRMED)
+
+The settings object default-constructs to **1024 × 768 × 32-bpp**, every visual-quality slider = 1,
+every sound volume = 100, and is then immediately overwritten from INI.
+
+**Five INI files** are located in the EXE directory at startup and their paths are stored for later
+access. All five are marked hidden via `SetFileAttributesA`:
+
+| File | Role |
+|---|---|
+| `DoOption.ini` | Master display / sound / quality settings (`[DO_OPTION]` section) |
+| `option.ini` | Additional option storage |
+| `panel.ini` | UI panel positions (see §2.5) |
+| `combo.ini` | Gameplay-side combo/key bindings |
+| `TSIDX.ini` | Tutorial state index |
+
+The `[DO_OPTION]` key map — all keys read via `GetPrivateProfileIntA` (one consolidated loader, not
+a per-key family), then range-clamped. `OPTION_ID` is the only string key.
+
+| INI key | Default | Clamp | Object field index | Role |
+|---|---:|---|---:|---|
+| `OPTION_WIDTH` | 1024 | 800..1920 else 1024 | 0 | render width |
+| `OPTION_HEIGHT` | 768 | 600..1200 else 768 | 1 | render height |
+| `OPTION_COLORBIT` | 32 | 16 or 32 | 2 | colour depth |
+| `OPTION_LANG` | 1 | 1..3 | 3 | language id |
+| `OPTION_VIEW_CHAR` | 1 | 1..3 | 4 | draw-distance: characters |
+| `OPTION_VIEW_BACK` | 1 | 1..3 | 5 | draw-distance: background |
+| `OPTION_GROUND` | 1 | 1..3 | 6 | ground quality |
+| `OPTION_SKY` | 1 | 1..3 | 7 | sky quality |
+| `OPTION_WEATHER` | 1 | 1..3 | 8 | weather quality |
+| `OPTION_WATER` | 1 | 1..3 | 9 | water quality |
+| `OPTION_SHADOW` | 1 | 1..3 | 10 | shadow quality |
+| `OPTION_DMGTEXT` | 1 | 1..3 | 11 | damage-text mode |
+| *(forced)* | 1 | = 1 | 12 | **toon/cel-shading enable** (gates the bloom path — see §3.1) |
+| `OPTION_TEX_CHAR` | 1 | 1..5 | 13 | character texture bucket |
+| `OPTION_TEX_MOB` | 1 | 1..5 | 14 | mob texture bucket |
+| `OPTION_TEX_ITEM` | 1 | 1..5 | 15 | item texture bucket |
+| `OPTION_TEX_ETC` | 1 | 1..5 | 16 | misc texture bucket |
+| `OPTION_SOUND_CHAR` | 1 | 1..2 | 17 | character-sound enable |
+| `OPTION_SOUND_TERRAIN` | 1 | 1..2 | 19 | terrain-sound enable |
+| `OPTION_SOUND_MUSIC` | 1 | 1..2 | 20 | music enable |
+| `OPTION_SOUNDVOL_CHAR` | 100 | 0..100 | 21 | character volume |
+| `OPTION_SOUNDVOL_MOB` | 100 | 0..100 | 22 | mob volume |
+| `OPTION_SOUNDVOL_BACK` | 100 | 0..100 | 23 | ambient volume |
+| `OPTION_SOUNDBOL_MUSIC` *(sic)* | 100 | 0..100 | 24 | music volume |
+| `OPTION_STALL_NOTIFY` | 0 | 0..1 | 25 | private-shop notify |
+| `OPTION_WHISPER_NOTIFY` | 0 | 0..1 | 26 | whisper notify |
+| `OPTION_FORCE_NOTIFY` | 0 | 0..1 | 27 | force/PvP notify |
+| `OPTION_EFFECT` | 100 | 1..100 | 28 | effect intensity |
+| `OPTION_BRIGHT` | 100 | 1..100 | 29 | brightness |
+| `OPTION_SCREENMODE` | 0 | 0..2 | 30 | **display/screen mode** (drives window style and device path) |
+| `OPTION_ID` | `"(null)"` | ≤16 chars | 124 (string) | last-used account id (Save-ID) |
+
+**`OPTION_SCREENMODE` values:** `1` = windowed (sized), `2` = fullscreen/borderless. Value `0` is
+valid but its exact rendering behaviour was not byte-confirmed (see §0.9 open item 1). The Save-ID
+field (`OPTION_ID`) is also written by the login scene — see `specs/frontend_scenes.md` §1.6.
+
+## 0.3 Window class and creation — (CODE-CONFIRMED)
+
+The engine creates a single Win32 window with these properties:
+
+| Property | Value |
+|---|---|
+| **Window class name** | `"diamond engine application"` |
+| **Window title** | `"Do"` |
+| **Window procedure** | the engine WndProc |
+| **Single-instance guard** | in fullscreen mode, if another window of the same class already exists the new instance bails immediately |
+| **Window style** | `OPTION_SCREENMODE < 1` → popup/borderless style; else → overlapped (standard) style |
+| **Client size** | from the renderer's configured width/height (the `OPTION_WIDTH`/`OPTION_HEIGHT` values) |
+| **Centred** via | `GetSystemMetrics` |
+
+After `CreateWindowExA`: the window is registered with the IME pre-translate hook, shown, and
+focused. A **manual-reset event** is created and a **worker thread** is started (`_beginthreadex`);
+if the event creation fails the engine message-boxes `"CreateEvent() is failed in main thread"` and
+calls `exit(1)`. For `OPTION_SCREENMODE == 1` the window is additionally `SetWindowPos`'d to the
+configured client size.
+
+> The window class name `"diamond engine application"` and title `"Do"` are the actual string literals
+> in the code. "Martial Heroes" appears only in the BugTrap application name and in the window
+> title text string. Trust the code over any comment.
+
+## 0.4 Direct3D 9 device — (CODE-CONFIRMED)
+
+Created on the **main thread** immediately after window creation, during the state-0→1 transition.
+The D3D SDK version used is **32 (decimal)**.
+
+**Adapter and depth/stencil format selection:**
+
+For 32-bpp colour: a 2-entry adapter-format list is walked via `CheckDeviceType`. For 16-bpp: a
+3-entry list. The back-buffer default format is **X8R8G8B8**.
+
+Depth/stencil fallback chain (tried in order until `CheckDepthStencilMatch` succeeds):
+**D32 → D24X8 → D24S8 → D16**.
+
+**`D3DPRESENT_PARAMETERS` (zeroed 56-byte struct):**
+
+| Field | Value |
+|---|---|
+| BackBufferFormat | X8R8G8B8 (overridden to the chosen adapter format) |
+| BackBufferCount | 1 |
+| SwapEffect | 1 (DISCARD) |
+| PresentationInterval | `0x80000000` = `D3DPRESENT_INTERVAL_IMMEDIATE` → **no vsync** |
+| hDeviceWindow | the global main HWND |
+| Windowed | from the windowed/fullscreen choice |
+
+**CreateDevice flags:** adapter 0, `D3DDEVTYPE_HAL`, **`D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_MULTITHREADED`**.
+
+After device creation: `D3DXCreateSprite` for 2D HUD/UI; a default render-state init pass; then
+**cel/toon-shading load**. The toon/bloom path is enabled only if the toon-shading loaded
+successfully **and** settings object field index 12 (the forced-1 toon flag) equals `1`. This is
+exactly the user-togglable graphics option described in §3.1.
+
+See also §3.1 for the full device/present-mode description.
+
+## 0.5 VFS mount (`data.inf` / `data/data.vfs`) — (CODE-CONFIRMED)
+
+VFS mount is performed once, just before the state loop begins. Steps:
+
+1. Open `data.inf` (the index file) with `FILE_FLAG_SEQUENTIAL_SCAN`.
+2. Read a **24-byte header**; the **entry count is the third dword (byte offset +8)** of that header.
+3. Allocate `144 × count` bytes for the TOC array and read the full TOC.
+4. Close the index file handle.
+5. Open `data/data.vfs` (the data archive) and **keep its handle open** for the lifetime of the process.
+
+TOC entry layout (144 bytes each):
+
+| Offset | Size | Type | Field |
+|---|---:|---|---|
+| +0 | 100 | char[] | virtual path (stored lower-cased) |
+| +100 | 4 | — | padding / unused |
+| +104 | 8 | i64 | data offset within the archive file |
+| +112 | 8 | i64 | data size in bytes |
+| +120 | 24 | — | auxiliary / reserved |
+
+The mounted flag drives the dual-path behaviour of all file-open calls throughout the engine (VFS
+in-memory vs. loose `fopen`). See `formats/pak.md` for the full on-disk format spec (43,347-entry
+sample byte-confirmed).
+
+## 0.6 CP949 / Korean text model — (CODE-CONFIRMED)
+
+There is **no `setlocale`, no `_setmbcp`, and no process-wide codepage call** anywhere in the boot
+path. Korean text support is handled entirely at use-sites:
+
+- **Rendered Hangul:** 15 font slots (ids 0..14) at fixed point sizes and weights are created during
+  the state-0→1 transition using **`D3DXCreateFontA`** with Korean typefaces
+  (`DotumChe`, `Dotum`, `BatangChe`). These Win32-backed fonts resolve the HANGEUL charset at render
+  time.
+- **String conversions:** `MultiByteToWideChar(949, …)` is called at individual use-sites. There is
+  no global narrow → wide conversion layer.
+- **Conclusion for the reimplementation:** model CP949 as a **per-string decode** (code page 949),
+  not a global locale switch. Register `CodePagesEncodingProvider` once (see `CLAUDE.md`) and call
+  `Encoding.GetEncoding(949)` at each site that reads game text.
+
+## 0.7 Singleton construction order — (CODE-CONFIRMED)
+
+Two construction tiers:
+
+**Tier A — C++ static initializers (run before `WinMain`).** The only load-bearing static object
+traced end-to-end is a **billing/anti-cheat scheduler proxy** that the state-1 entry must pass
+through. If the gate fails, `WinMain` calls `exit(1)`. The full static-init list is large; only
+this gate is boot-critical.
+
+**Tier B — lazy Meyers singletons (guard-flag protected; construction order = first-use order).**
+The observed first-touch order during a normal boot:
+
+| Order | Singleton | First touched | Note |
+|---:|---|---|---|
+| 1 | Lua config | `WinMain` top | reads `game.lua` |
+| 2 | Engine-state struct | `WinMain` top | holds the engine-state int + debug flag |
+| 3 | Crash reporter (BugTrap) | `WinMain` | crash logger |
+| 4 | Settings object (DO_OPTION) | state 0 | loads `DoOption.ini` (window/device dims) |
+| 5 | Engine/App object | state 0 | wires InputManager and renderer |
+| 6 | Network handler | state 0 | network handler object |
+| 7 | Input manager | Engine ctor + state 1 | global HWND/IME owner |
+| 8 | Renderer/View object | state 0/1 | the large D3D renderer object |
+| 9 | Texture manager (GHTexManager) | every state (flushed before each MainLoop) | texture cache |
+| 10 | Billing-state object | state 1 (post-login) | account/billing/user-name state |
+| 11 | Network client | error/teardown | socket client (WSARecv/WSASend tier) |
+| 12 | Sound manager / DirectSound | first sound (~state 2) | lazily creates the DSound device; see §1.1 |
+
+## 0.8 State-0 → state-1 transition in detail — (CODE-CONFIRMED)
+
+**State 0 (Initialisation)** — executes once and immediately:
+
+1. Writes engine state → 1.
+2. Constructs the Engine/App and NetHandler singletons.
+3. Reads `OPTION_SCREENMODE` (field idx 30): if `== 2` (fullscreen), computes the screen width
+   via `GetSystemMetrics`, capped at **1920 px**; otherwise copies `OPTION_WIDTH`/`OPTION_HEIGHT`
+   into the renderer.
+
+**State 1 (LoginWindow)** — the first real screen; built immediately after state 0 returns:
+
+1. Loads the UI string database `data/script/msg.xdb` synchronously on the main thread.
+2. Constructs the LoginWindow widget tree (~340 widgets from `data/script/uiconfig.lua`).
+3. Registers the window as an event target.
+4. Passes the billing/anti-cheat scheduler gate (Tier A static object — `exit(1)` on failure).
+5. Creates the OS window (§0.3).
+6. Creates the D3D9 device (§0.4).
+7. Creates the **15 Korean font slots** (DotumChe/Dotum/BatangChe, fixed sizes/weights).
+8. Enters **`Engine_MainLoop`** — the per-screen frame pump.
+
+## 0.9 Boot — open items
+
+1. **`OPTION_SCREENMODE == 0` semantics.** Values 1 (windowed) and 2 (fullscreen) are proven by
+   the window/device branches; what 0 selects (probably default windowed) is not byte-pinned.
+2. **Full Tier-A static-initializer list.** Only the scheduler gate was traced end-to-end. Whether
+   other managers are static vs lazy is not confirmed.
+3. **`game.lua` full content.** Only the three bool keys read at boot are known; other globals
+   the file may set are unknown.
+4. **`OPTION_LANG` (field idx 3) effect.** Value is loaded/clamped 1..3 but where it branches
+   text/asset selection was not traced.
+5. **Worker thread identity.** The thread started during window creation stores its proc in the
+   engine object; its exact body was not traced in this pass.
+6. **First DirectSound touch.** SoundManager is a lazy singleton first observed near state 2 (Load),
+   but the precise first-call site in the boot sequence was not byte-pinned.
 
 ---
 
@@ -313,11 +583,11 @@ window ≥ ~0x240 B.
   bloom/brightness multipliers) — not widget layout. See §3.
 - **Chat-window config keys** read elsewhere: `CHAT_WINDOW_FONT_SIZE`, `CHAT_WINDOW_SIZE`,
   `CHAT_WINDOW_POS_X`, `CHAT_WINDOW_POS_Y`.
-- **Panel-position persistence** is stored in an INI file (exact path UNVERIFIED). The INI section name is
-  `"<billingStateIndex>_<spawnDesc>_PANELPOS"`; per panel index 0..8 the keys `PANEL_<i>_X` / `PANEL_<i>_Y`
-  give saved positions. If a saved coordinate is −1, or if `SCREEN_WIDTH` / screen-height changed, the panel
-  resets to its default position. Additional keys: `LINK_VERTICAL` (toolbar layout toggle), `MENU_OPEN`
-  (initial open/close state).
+- **Panel-position persistence** is stored in `panel.ini` (one of the five INI files built at startup, §0.2).
+  The INI section name is `"<billingStateIndex>_<spawnDesc>_PANELPOS"`; per panel index 0..8 the keys
+  `PANEL_<i>_X` / `PANEL_<i>_Y` give saved positions. If a saved coordinate is −1, or if `SCREEN_WIDTH` /
+  screen-height changed, the panel resets to its default position. Additional keys: `LINK_VERTICAL` (toolbar
+  layout toggle), `MENU_OPEN` (initial open/close state).
 - **Action-id → button mapping** (login window): roughly 200–201 = login OK, 202 = login + enter-load,
   203 = cancel, 204/207 = help, 205 = help2, 206/16 = server-list, 209/220 = quit, 221..245 = option tabs.
   Each action fires an SFX and mutates the window's state-machine variable.
@@ -330,7 +600,6 @@ window ≥ ~0x240 B.
 4. Total window footprint (depends on the embedded texture-list layout at ~+0x220).
 5. Scroll-widget internal pointer roles (up/down/thumb).
 6. The actual `uiconfig.lua` / `tutor.lua` content — not in the binary; only `NEW_SERVER_INDEX` confirmed.
-7. Exact panel-position INI file path.
 
 ---
 
@@ -354,7 +623,8 @@ back-buffer path runs. Per-frame loop ordering is owned by `specs/game_loop.md`;
   resources, e.g. fonts).
 
 The toon/bloom path is selected **at device-create time**: it turns on only if the toon-shading load succeeded
-**and** a graphics-option config flag is set. So it is a user-togglable graphics option.
+**and** a graphics-option config flag is set (settings object field idx 12 = 1). So it is a user-togglable
+graphics option. See §0.4 for the device-creation call chain.
 
 ## 3.2 Plain path (toon/bloom OFF) — (confirmed)
 
@@ -401,7 +671,7 @@ composite → post-scene transparent overlay`, then
 | Skinned-actor vertex stride | **32 bytes** | XYZ + normal + UV |
 | Toonramp LUT | **256 × 1, 24-bpp, uncompressed** | 1D cel-quantisation gradient, dark→bright |
 | Terrain FVF | `0x152` | animated multi-texture terrain vertex format |
-| Terrain water animation gate | **≥ 50 ms** timer | static vs UV-scrolling water variant |
+| Terrain water animation gate | **≥ 50 ms** timer | static vs UV-scrolling water variant (shared with day/night gate — see §8.4) |
 | Composite weights | c0 = edge, c1 = bloom | `finaldx8.psh` scalars |
 | Default ("missing") texture | 2×2, bytes per texel ~ (0x78,0x78,0x78,0x50) | grey/half-alpha placeholder when an actor has no texture |
 | Render-target fallback dims | 1024 × 1024 | when back-buffer dims unavailable |
@@ -846,147 +1116,446 @@ This matches the overall Lua model (scripts = data/config/i18n; host C++ = logic
 9. Whether a `Tutor.scr` record id equals its `tutor.lua` string-table id.
 
 ---
+---
 
-# 7. Master scene / screen lifecycle — (CODE-CONFIRMED)
+# 7. Scene state machine — (CODE-CONFIRMED)
 
-The legacy client's entire session is governed by a **single top-level integer state variable** (referred to
-here as the Engine State) that drives an 8-case dispatch loop in the application's main message loop. All scene
-and camera transitions go through this one variable — there is no secondary "substate" enum at the same scope.
+The master scene lifecycle is implemented as the body of the application entry point itself — the
+`WinMain` function **is** the state machine. It is an infinite dispatch loop over a single
+engine-state integer. Every interactive screen is modelled as one state in this nine-value
+enumeration (0..8). Cross-spec ownership: the UI control flow inside each front-end screen is
+detailed in `specs/frontend_scenes.md`; the resource loading pipeline driven by state 2 is
+detailed in `specs/resource_pipeline.md`. This section pins the engine-level transition mechanics.
 
-## 7.1 Engine state enumeration
+## 7.1 Engine-state struct — (CODE-CONFIRMED)
 
-| State | Scene / owner | Camera | Notes |
-|---:|---|---|---|
-| 0 | **Initialisation** | none | One-time setup; transitions immediately to state 1 |
-| 1 | **LoginWindow** | UI only | Account/server/channel; a port-10000 in-process lobby mini-protocol handles server-list discovery. No 3D world camera. |
-| 2 | **LoadHandler** | loading UI | World asset load between auth and in-game. The camera rig is not yet live. The in-game state machine advances to state 5 once loading finishes. |
-| 3 | **COpeningWindow** | UI/intro | Opening / intro window. |
-| 4 | **SelectWindow** | **Select camera** (out-of-world, §7.3) | Character select / create-preview. |
-| 5 | **MainHandler** | **five in-world manipulators** (Third default) | In-game world. The camera rig is built once here; see §7.2. |
-| 6 | Quit / shutdown | none | |
-| 7 | Error / exit | none | |
-| 8 | Exit | none | |
+A three-integer struct (`GameState`) is the sole source of truth for which scene is live. Fields:
 
-**Return path:** after leaving the in-game state (5), the state transitions back to **state 4** (character
-select), not to login. So the session arc is: Login (1) → Load (2) → [optional Opening (3)] → Select (4) →
-Load (2) → In-game (5) → Select (4) on logout/disconnect.
+| Field index | Offset | Type | Role |
+|---:|---:|---|---|
+| 0 | +0x00 | i32 | **engine state** (0..8 — the current scene enum value) |
+| 1 | +0x04 | i32 | **sub-state / error code** (transition context; 0 = none) |
+| 2 | +0x08 | i32 | **error detail** (the offending result code, when state = 7) |
+| — | +0x0C | u8 | **debugmode flag** (set once at startup from `game.lua`; read-only thereafter) |
 
-### State-variable reconciliation note (CODE-CONFIRMED)
+The debugmode byte gates floating damage-text overlays and other developer-visible UI. It is never
+a transition driver; all transitions are driven by writes to field 0 (and optionally field 1).
 
-Earlier dirty-room notes from the login/lobby path recorded "GameState 4 = char-select" and "GameState 2 =
-in-world" in one context, while another context described state 2 as a LoadHandler and state 5 as in-game.
-These are **not two different enumerations** — they use the same Engine State integer. The reconciliation:
+## 7.2 Loop-run flag and the transition commit mechanism — (CODE-CONFIRMED)
 
-- The character-list network handler writes **state 4** (→ SelectWindow), which is character select.
-- The enter-game-acknowledgement network handler writes **state 2** (→ LoadHandler), which then advances
-  the loop automatically to **state 5** (MainHandler / in-game) once assets finish loading.
-- A separate "substate 8" that the login note mentioned is a **LoginWindow-local UI page index** (the form
-  page within the login/server-list UI), not the Engine State. The Engine State and the LoginWindow UI page
-  index live in different fields.
+`WinMain` runs the game loop via `Engine_MainLoop`. That loop spins while a **global one-byte
+run-flag** is non-zero. A scene "finishes" when something writes the next engine-state value into
+the `GameState` struct **and then clears the run-flag** (a one-liner helper function). Control
+returns to `WinMain`, which reads the new engine-state and dispatches the next case of the switch.
 
-## 7.2 What is constructed at each transition — (CODE-CONFIRMED)
+This is the heartbeat of every transition: **write next-state → clear run-flag → WinMain
+re-dispatches**. The run-flag is also cleared by `WM_QUIT` (window close), which causes the
+active screen to exit and `WinMain` to read whatever state it holds.
 
-**Entering in-game (state 5):** the world builder runs `BuildSceneGraph` once. That call allocates and parents
-into the scene graph:
+## 7.3 Per-case behaviour — (CODE-CONFIRMED)
 
-- One **GPerspectiveCamera** with **vertical FOV = 65°, near = 5.0, far = 15000.0** (see §4.5).
-- Five **GViewPlatform** nodes (one per view mode: Third / First / Static / Gamble / Event), plus a
-  **reserved sixth slot** that is never assigned (provision for a future mode).
-- One **GScene** (the in-game scene root, labelled "charater scene" — sic — in a string literal).
-- One **GSwitch** node that selects which GViewPlatform is active each frame by enable flag.
-- Five **camera manipulators** (Third / First / Static / Gamble / Event), each registered into the
-  MainHandler child list with a localized string label.
+Each `switch` case is a **"build + run" block**, not a passive state. The case first writes the
+*next* engine state, then constructs that phase's handler object, registers it as an event target,
+calls `Engine_MainLoop`, and on loop-exit tears the handler down. The next iteration of the outer
+`while(1)` then dispatches the case matching whatever state was written last.
 
-All five manipulators are built at this point and remain alive for the duration of the in-game session.
-Mode switching is purely a matter of toggling their enable flags (§4.3 / `specs/camera_movement.md` §A.2).
+| State | Name | Writes next state | Constructs (approx. size) | Loop | On exit / teardown |
+|---|---|---|---|---|---|
+| **0** | Initialisation | `= 1` | sizes window from display config; stores `16` in an engine constant | falls to state-1 body | — |
+| **1** | Login | `= 2` | `LoginWindow` (~1368 B); loads `msg.xdb`; builds 15 Hangul font slots | `Engine_MainLoop` | `LoginWindow_End`; reads billing username/server; destructor |
+| **2** | Load | `= 4` or `= 3` | `LoadHandler` (~536 B); spawns async worker thread; starts loading SFX | `Engine_MainLoop` | `LoadHandler_End`; stamps billing timestamp |
+| **3** | Opening | `= 4` | `COpeningWindow` (~720 B); builds intro window | `Engine_MainLoop` | `COpeningWindow_End` (unregisters scene view only); destructor |
+| **4** | Select | `= 5` | `SelectWindow` (~6280 B); character-select UI + preview actor + Select camera | `Engine_MainLoop` | `SelectWindow_End`; clears SelectWindow singleton |
+| **5** | In-game | `= 4` | `MainHandler` (~200 B) + `BuildGameWorld` (camera rig + scene graph + services + HUD); enables networking | `Engine_MainLoop` | `MainHandler_End`; unregisters three event targets; destructor |
+| **6** | Quit | `= 8` | — (calls engine shutdown routine) | — | falls to shared exit tail |
+| **7** | Error | `= 8` | — builds error string from sub-state/detail; hides window; drops net connection; writes `error.log` (module list, timestamp, language, build date); shows modal dialog | — | falls to shared exit tail |
+| **8** | Exit | (terminal) | — final teardown: scheduler release, crash-logger close, OS resource cleanup | — | `return` from `WinMain` |
+| default | (unknown) | `= 8` | engine shutdown | — | shared exit tail |
 
-**Entering char-select (state 4):** the SelectWindow builds its own out-of-world preview actor and the
-Select camera (separate constructor, not chained off any in-world base). The five in-world manipulators
-are **not** present in the char-select scene.
+**Shared exit tail (states 6/7 converge here):** if engine state is `8`, run final teardown and
+return; otherwise clear the per-iteration scene pointer and loop again.
 
-**Login (state 1):** LoginWindow constructs the login UI widget tree (roughly 340 widgets, sourced from
-`data/script/uiconfig.lua`). The "Diamond" cash-shop window is also built from a Lua UI script. No world
-camera.
+> **`OPENNING/SKIP` INI key** (the typo is authentic): when state 2 pre-decides the next state,
+> it reads an integer from an INI section `OPENNING`, key `SKIP`. If true, state 2 writes `= 4`
+> (skip straight to Select); otherwise `= 3` (run the Opening intro first). This decision is made
+> once, at the post-login load, not at subsequent re-entries to state 2.
 
-## 7.3 Char-select camera (Select mode) — (CODE-CONFIRMED)
+## 7.4 What is constructed and destroyed at each transition — (CODE-CONFIRMED)
 
-The Select camera is constructed in the SelectWindow, separately from the in-world rig. Its constructor
-clears yaw, pitch, and eye-offset to zero and builds a **multi-waypoint camera path** from a literal
-world-position table compiled into the constructor. Approximate waypoints and span constants (see §4.3 per-mode
-table for the numeric values). This camera frames the char-select preview actor; it is destroyed when the
-SelectWindow tears down.
+| Transition | Constructed | Destroyed at previous scene exit |
+|---|---|---|
+| → 1 Login | `LoginWindow` tree (~340 widgets, `data/script/uiconfig.lua`); `msg.xdb` string catalogue; 15 Hangul font slots (DotumChe/Dotum/BatangChe); net handler singleton wired | (nothing prior) |
+| 1 → 2 Load | `LoadHandler` + async loader thread; loading sprite; SFX **920100100** | `LoginWindow` (via `_End` + destructor) |
+| 2 → 3 Opening | `COpeningWindow` (intro) | `LoadHandler` |
+| 2 → 4 Select | (opening skipped; next case handles construction) | `LoadHandler` |
+| 3 → 4 Select | `SelectWindow` (see below) | `COpeningWindow` |
+| → 4 Select | `SelectWindow` (~6280 B): character-list UI, preview actor, **Select camera** (own multi-waypoint preview path, distinct from the in-world five manipulators) | previous Opening or `LoadHandler` window |
+| 4 → 5 In-game | `MainHandler` (~200 B) + **`BuildGameWorld`**: `GPerspectiveCamera` (FOV 65°/near 5/far 15000), 5 `GViewPlatform` slots (+reserved sixth, allocated but never assigned), `GScene` (root, labelled "charater scene"), `GSwitch`, 5 camera manipulators; HUD panel tree activated; networking enabled | `SelectWindow` + Select camera + preview actor |
+| 5 → 4 | (rebuild `SelectWindow`) | `MainHandler`, full scene graph, all 5 manipulators, local player actor |
+| → 6/7 | error string / modal dialog | net connection dropped; engine shutdown |
+| → 8 | — | final teardown: scheduler, crash logger, OS |
 
-## 7.4 Enter-world spawn handshake — (CODE-CONFIRMED)
+The **reserved sixth GViewPlatform slot** is allocated in the in-world scene build but never
+assigned to any view mode — provision for a future mode not present in this build.
 
-This is the load-bearing sequence for understanding player placement on first entering the world:
+## 7.5 Complete transition table — (CODE-CONFIRMED)
 
-1. **At char-select:** the player confirms a character slot. This caches that slot's **880-byte
-   SpawnDescriptor** into a global spawn-descriptor field and sends the enter-game request to the server.
-   The SelectWindow tears down.
+### 7.5.1 Engine-internal (WinMain case body) transitions
 
-2. **LoadHandler (state 2):** assets load. The engine state advances to 5 when loading completes.
+| From state | Trigger | Next state | Sub-state |
+|---|---|---:|---:|
+| 0 Init | always (one-time startup) | 1 | — |
+| 1 Login | case body (pre-loop) | 2 | — |
+| 1 Login | window configuration fails | 7 | 1 |
+| 1 Login | device / secondary init fails | 7 | 3 |
+| 2 Load | `OPENNING/SKIP` INI = true | 4 | — |
+| 2 Load | `OPENNING/SKIP` INI = false/absent | 3 | — |
+| 3 Opening | case body (after intro) | 4 | — |
+| 4 Select | case body | 5 | — |
+| 5 In-game | case body (default return-to-select) | 4 | — |
+| 6 Quit | case body | 8 | — |
+| 7 Error | case body | 8 | — |
+| default | unknown engine state | 8 | — |
 
-3. **Server world-state packet** ("GameStateTick"): on entering the world, the server sends this packet.
-   It carries the spawn world coordinates as two single-precision floats: **spawn X** and **spawn Z** (near
-   the tail of the packet body). The in-game handler writes these into the cached SpawnDescriptor and into
-   world-mirror globals.
+### 7.5.2 Network-driven transitions
 
-4. **Player placement:** the handler creates the local-player actor from the SpawnDescriptor and places it
-   at world position **(spawnX, 0.0, spawnZ)** — **Y is always forced to 0**. This matches the general rule
-   that world vertical is never on the wire and terrain height is visual-only (§5.7). After placement the
-   handler streams the **3×3 terrain-ring** of cells around the spawn position and triggers the spawn
-   sound-effect and motion.
+Written by the network-receive path; each also clears the run-flag.
 
-5. **Camera placement:** the camera has no independent enter-world position. It simply follows the local
-   player, whose position was just set to (spawnX, 0.0, spawnZ). Third-person's standard orbit
-   (radius ≈ 901, pitch −30°) is applied on top.
+| Live scene | Trigger | Next state | Sub-state | Notes |
+|---|---|---:|---:|---|
+| 1 Login | **EnterGameAck (3/5)** received | 2 | — | auth OK → begin load |
+| 4/2 Select/Load | **CharacterList (3/1)** received | 4 | 8 | (re)enter select with fresh character list |
+| 5 In-game (bootstrap) | **GameStateTick (4/1)**, no local player | 4 | — | world-state pre-spawn fallback; actor creation failed |
+| 4 Select | **CharMgmt result = 0**, no local player | 6 | 8 | char op succeeded → quit/return path |
+| 4 Select | **CharMgmt result 1..4 or 7** | 7 | 5 | char operation failed → error |
+| 4 Select | **CharMgmt result 202/203/232** | 2 | — | create/rename accepted → reload |
+| 4 Select | **CharMgmt result out-of-range** | 7 | 8 | hard char-op error; error-detail = result code |
+| 5 In-game | **CharMgmt result ≠ 0**, local player present | 7 | 8 | in-game char error; error-detail = result code |
+| 5 In-game | **CharMgmt result = 0**, local player present | 6 | 8 | in-game char op succeeded |
+| any (state 2) | connection/handshake error during load | 7 | 2 | load-time disconnect |
+| any (state 4/5/6/other) | disconnect | 7 | 8 (or 6) | generic disconnect → error / quit |
 
-> **Godot relevance:** this is the mechanism behind the "NPCs spawn at fallback Y before terrain streams"
-> debt in CLAUDE.md. The player is placed at Y = 0 by design; terrain heights arrive asynchronously as
-> the 3×3 ring streams. A Godot-side pending-snap that defers visual Y until the terrain cell is loaded
-> is the correct architectural response — not an approximation.
+### 7.5.3 User-action transitions
 
-The same world-state packet also carries:
-- A **scenario/map-mode integer** (value 6 = tutorial scenario, which activates `TUTORSCRIPTINDEX`/`STOPIDX`
-  INI keys; value 1 = normal field play). This selects tutorial behaviour, not the camera.
-- The **map region index (0..31)** that the Event camera's built-in curve table consumes (§4.3 Event note).
-  The region index is validated server-side and reset to 0 on map unload.
+| From state | Trigger | Next state | Sub-state | Notes |
+|---|---|---:|---:|---|
+| 1 Login | quit button / `game.ver` VFS mismatch confirmed | 6 | 2 | SFX **861010106** |
+| 1 Login | enter-load / continue (login network machine completes) | (loop-break only) | — | Login case already wrote state 2; loop-break re-dispatches |
+| 1 Login | login network-machine fatal | 6 | 8 or 7 | depends on failure type |
+| 4 Select | confirm character slot (enter world) | 5 | 8 | `SelectWindow_End` writes 5 when confirm flag is set |
+| 4 Select | quit / exit command | 6 | 8 | character-select command handler |
+| 4 Select | "back/leave" command | (net request) | — | sends network leave; server reply drives state change |
+| 2 Load | quit hotkey | 6 | 2 | scene-aware quit dispatcher |
+| 5 In-game | explicit quit / logout (menu confirm or window close) | 6 | 8 | SFX **861010106**; logout cleanup |
 
-## 7.5 Scene lifecycle — open items
+**Scene-aware quit dispatcher:** a single quit-router function reads the current engine state and
+picks the appropriate teardown — state 2 → quit (state 6 / sub 2); state 5 → logout (state 6 /
+sub 8); state 4 → sends a network leave message (no direct state write).
 
-1. Exact field layout of the 880-byte SpawnDescriptor beyond the X/Z spawn coordinates — not fully decoded.
-2. Precise world-state packet field offsets for spawn X/Z (positions are near the packet tail; the exact
-   byte offsets within the packet body are dirty-only and should be confirmed by the protocol analyst against
-   the committed packet YAML once one exists).
-3. The enter-game request packet shape (C2S; not yet in `opcodes.md`) — the SelectWindow sends it on slot
-   confirmation.
-4. The reserved sixth GViewPlatform slot — never assigned; provision only; meaning unknown.
-5. Whether the 3×3 terrain-ring streaming is triggered synchronously in the spawn handler or asynchronously
-   via a separate terrain-manager queue (affects the Godot pending-snap timing design).
+## 7.6 The two LoginWindow sub-state machines — (CODE-CONFIRMED)
+
+The `LoginWindow` object contains **two independent internal counters** that are distinct from the
+engine state. They were previously misread as engine sub-states.
+
+- **UI page index** (object field `+0x17C`): which form/option panel is displayed.
+- **Network/handshake machine** (object field `+0x238`): a dedicated tick function advances
+  through sub-states 2..41 covering lobby connection, server-list fetch, server selection, and
+  login packet handshake. The value "8" seen in some older notes is a value of this field, not
+  an engine sub-state.
+
+When the handshake machine completes successfully it triggers the loop-break that causes `WinMain`
+to re-dispatch into state 2 (Load). Fatal handshake errors write engine state 6/8 or 7 and clear
+the run-flag. Full detail lives in `specs/frontend_scenes.md`.
+
+## 7.7 Dead / hidden states — (CODE-CONFIRMED)
+
+- **`SimpleLoadHandler`**: an RTTI class with a complete constructor exists in the binary but has
+  **zero callers** — it is never instantiated. A dead alternate loader, not part of the live machine.
+- **The `-Start` / `launcher` gate** (see §0.1): without `-Start` and with `launcher = true`,
+  `WinMain` shells out to the external launcher and returns immediately — the entire nine-state
+  machine never executes.
+- **State 7 error logging**: before the modal dialog, the error path writes `error.log` (module
+  list, timestamp, language setting, build date).
+
+## 7.8 Scene machine — open items
+
+1. **LoginWindow sub-states 2..41 full enumeration.** The network/handshake machine transitions
+   are partially traced; the exact action at each sub-state needs a focused pass or a live lobby
+   capture.
+2. **`OPENNING/SKIP` INI file path.** Built from a settings-object internal buffer at a fixed byte
+   offset; the literal filename was not resolved in this pass.
+3. **Opening (state 3) exit trigger.** Whether the intro ends on a movie-complete event, the
+   loading-done event (type 13, id 10001), or a timer is not confirmed.
+4. **Disconnect routing for states 0/1/3.** The scene-aware disconnect router handles states 2/4/5/6
+   explicitly; the fallback for states 0/1/3 was not fully traced.
+5. **Second-load path during enter-world.** Whether a distinct `LoadHandler` instance runs for the
+   enter-world asset stream or the `MainHandler` supplies its own loading overlay is not confirmed.
+6. **Menu dialog confirm ids.** The in-game quit-confirm dialog action ids (likely 50 = confirm,
+   51 = cancel) are inferred from control flow, not label-confirmed.
 
 ---
 
-## Implementation notes (clean-room → .NET / Godot)
+# 8. Per-frame loop — (CODE-CONFIRMED)
 
-- **Sound** (`Client.Infrastructure` / Godot audio): model the 2D-stereo / 3D-mono split, the 512 KiB one-shot
-  vs 1 MiB-ring streaming threshold, the five per-map tables keyed by mud-cell bytes, the per-actor footstep
-  ids, the ±0.7 3D scale, the −10000 silence endpoint, and the two playback routes (synchronous + worker queue).
-- **UI** (Godot Control tree): the widget semantics in §2 map onto retained-mode Control nodes; the flag-byte
-  meanings (visible/enabled/focused/hovered) and the UI-first / world-second hit-test precedence are the
-  load-bearing rules. Layout/text come from the `.lua` tables; see `specs/lua_scripting.md`.
-- **Render** (Godot): the toon+bloom contract (256×1 ramp LUT, stage0 albedo / stage1 ramp, N·L luminance →
-  ramp sample, edge/bloom composite weights) and the no-vsync uncapped loop are the facts to reproduce; the rest
-  is engine-specific D3D9 plumbing the Godot layer replaces.
-- **Camera / Movement** (`Client.Domain` + Godot camera): treat the camera as a fixed-radius orbit (yaw +
-  elevation, no distance clamp; FOV **65°, near 5, far 15000**), and movement as click → unproject-to-XZ →
-  2D solid-quadtree walkability → integrate (speed×4/frame; clamp 12 u when far; dead-zone 2 u) → snap on
-  arrival/collision → emit the move-request (heading = atan2 radians; constant mode byte; run flag) at
-  sub-200 ms cadence; simulation Y = 0; `.ted` height is visual-only. Expose all feel constants as config.
-- **Scene lifecycle** (`Client.Application` / Godot scenes): model the 9-state machine (§7.1). Session flow:
-  Login (state 1) → select server → enter-game-ack → Load (state 2) → Select (state 4) → enter-world → Load
-  (state 2) → In-game (state 5) → logout/disconnect → Select (state 4). Build the five-manipulator camera rig
-  exactly once on entering state 5. Spawn the local player at the server-supplied **(spawnX, 0, spawnZ)**; do
-  not invent a client-side Y; let the terrain stream fill in the visual height asynchronously.
-- **Quest** (`Client.Application` / `Client.Domain`): the client is a renderer of server-authoritative state —
-  model the three data tables, the (group-key, step-index) dialog chain, the accept billing-gate at level 26,
-  and the quest-log/completion mirror; do not invent client-side objective-type logic.
+The same `Engine_MainLoop` runs for every interactive screen — login, opening, character-select,
+and in-game all share one loop body. A screen builds its handler, registers it as the loop's event
+target, and calls `Engine_MainLoop`; on exit it tears the handler down. Cross-spec: the reference
+spec for game-loop ordering is `specs/game_loop.md`; this section confirms and extends it.
+
+## 8.1 Three-step iteration order — (CODE-CONFIRMED)
+
+Each loop iteration performs exactly three top-level steps in this fixed sequence:
+
+1. **Message pump + deferred input dispatch.** Win32 messages are drained (`PeekMessage` /
+   `GetMessage` / `TranslateMessage` / `DispatchMessage`). `WM_QUIT` clears the run-flag and
+   exits the loop. After the Win32 drain, a **double-buffered deferred-event list** is swapped
+   and each queued UI/input event is dispatched through the input manager. A **raw mouse/keyboard
+   DirectInput thread** is spawned once on the first pump iteration and runs concurrently thereafter.
+
+2. **Frame step (render one frame).** For each active scene node: update the camera matrix and
+   build the view frustum (frustum cull walk); execute the 3D draw pass (offscreen-RT toon/bloom
+   path or direct-to-back-buffer path). After all scenes: `Present` (whole back-buffer, D3D9
+   `IMMEDIATE` — no vsync). Then device-lost recovery: on `DEVICELOST` sleep **1000 ms** and
+   retry; on `DEVICENOTRESET` release default-pool resources → reset device → recreate default-pool
+   resources (including fonts).
+
+3. **Logic-tick sweep (round-robin scheduler).** Sample the millisecond clock once per frame;
+   advance the round-robin cursor by **approximately 1.1% of the total subscriber count** (floor
+   of `count × 0.011`); for each reached subscriber, fire its callback if elapsed time exceeds
+   its configured interval. **No leftover-time carry:** a missed tick cannot be caught up the next
+   frame. A "full sweep" override flag forces the count to equal the full subscriber list for one
+   frame.
+
+**The loop is genuinely uncapped.** The presentation interval is `IMMEDIATE` (no vsync). The only
+`Sleep` is the 1000 ms device-lost retry. There is no frame-gate sleep on the normal path.
+
+**Net one-line ordering per iteration:**
+`pump + deferred-input → [per scene: camera/cull → pre-draw callbacks → scene draw → (glow/bloom/composite) → transparent overlay → UI/HUD → FPS] → Present → device-recovery → logic-tick-sweep → repeat`.
+
+## 8.2 Render-pass inner order — (CODE-CONFIRMED)
+
+Both draw paths invoke scene callbacks in the same order. Full detail for the in-world case is in
+§9.3; the same five callback roles apply in reduced form for non-world screens.
+
+| Sub-step | What runs |
+|---|---|
+| Pre-draw A: environment / day-night | Environment/sky-light/day-night update + shadow setup; no geometry drawn |
+| Pre-draw B: sky dome | Sky/star/cloud dome geometry (Z-test off, camera-centred world matrix) |
+| Pre-draw C: shadow stamp | Terrain ground-shadow stamp + actor shadow projection |
+| Scene root draw | Opaque cull walk: terrain → solid → skinned actors → billboards |
+| FX/water/decal callback | Terrain FX layers, water/animated surfaces, alpha decals |
+| Transparent overlay callback | Alpha-blended billboards + particles + additive glow |
+| (toon path only) | Glow extract → bloom blur → finaldx8 composite (see §3.3) |
+| UI/HUD callback | 2D widget tree, screen-ortho space, after compositing |
+| FPS overlay (debug only) | Gated by debug flag; nanosecond-resolution profiling timer |
+
+## 8.3 Millisecond clock and time-scale — (CODE-CONFIRMED)
+
+The authoritative engine clock is `timeGetTime()` (Win32 multimedia millisecond timer). Its raw
+return is optionally multiplied by a global **time-scale float** (default 1.0; values below 1.0
+produce slow-motion; values above 1.0 produce fast-forward) and offset by a small float constant.
+This is the single clock used by animation, network throttling, FX timers, and the logic scheduler.
+Neither `GetTickCount` nor `QueryPerformanceCounter` feeds the logic delta.
+
+A **separate high-resolution (nanosecond-resolution) profiling timer** exists in the scene-draw
+path to accumulate average cull-time and draw-time readouts. This timer does **not** feed
+simulation and is a profiling-only concern.
+
+## 8.4 Day/night clock — location and mechanics — (CODE-CONFIRMED)
+
+The day/night cycle does **not** tick in the logic scheduler. It ticks inside the **3D render pass**
+as a scene pre-draw callback (pass A of §9.3 / §8.2).
+
+Mechanics:
+
+- Each frame the pre-draw callback accumulates an inter-frame delta from a raw `timeGetTime()`
+  delta (no time-scale applied here).
+- **Gate: only when the accumulator reaches ≥ 50 ms** does the environment step run; the
+  accumulator is then reset and a frame counter incremented. This 50 ms gate is shared with
+  terrain water UV-scroll animation — both run at the same ~20 Hz maximum cadence.
+- On each qualifying tick the frame counter parity determines the branch:
+  - **Odd tick → sky/day-night driver.** Reads the master game clock (server-synced via opcode
+    5/18; locally advanced by frame delta between syncs); computes keyframe index as
+    `floor(clock_ms / 1800)`, fractional blend as `(clock_ms mod 1800) / 1800`, wraps the index
+    at **48**. Linear interpolation between adjacent keyframes updates sun direction, sky colour,
+    light colour, and fog parameters.
+  - **Even tick → weather/cloud branch.**
+  - Cloud and star updates run every tick (both parities).
+  - A weather re-check runs every **120 ticks** (~6 seconds at 20 Hz).
+  - Frame counter wraps at 60 000.
+- **Day length:** 48 keyframes × 1800 ms = **86 400 ms = 86.4 seconds** of simulated day.
+  Matches `names.yaml` constants `SKY_KEYFRAME_COUNT = 48`, `SKY_KEYFRAME_MS = 1800`.
+- **Fallback keyframes:** if the area light bins (`data/sky/dat/light%d.bin`, 5312 bytes = 83 × 64
+  byte slots) are absent, a fallback builder constructs 48 default keyframes.
+- **Sky re-bake rate gate:** an additional per-area quality multiplier from `OPTION_SKY` (settings
+  field index 7) gates how frequently the sky interpolation re-bakes. Approximate multipliers:
+  quality 1 ≈ 0.25, quality 2 ≈ 0.7, quality 3 ≈ 0.5 (exact floats unconfirmed — see §8.6).
+
+## 8.5 GameTime struct and server sync — (CODE-CONFIRMED)
+
+The master game clock lives in a **three-field struct**. Fields:
+
+| Field offset | Type | Name | Role |
+|---:|---|---|---|
+| +0x00 | f32 or u32 | `time_scale` | local time scaling; relationship to the `timeGetTime` time-scale global is unconfirmed |
+| +0x04 | u32 | `current_ticks` | current game time in ms; advanced locally between server syncs |
+| +0x08 | u32 | `ticks_per_day` | total ms in one simulated day (nominally 86 400) |
+
+All in-engine reads target `current_ticks (+0x04)`. The struct is advanced via member functions,
+not by direct field writes. **Server synchronisation:** opcode **5/18** (`SmsgGameClockUpdate` in
+`names.yaml`) carries an 8-byte body — two u32 fields `(time_a, time_b)` — and posts it into the
+main handler's task queue. The exact field-to-struct mapping and whether the client free-runs
+between syncs or snaps fully on each packet are not yet byte-confirmed (see §8.6).
+
+For the .NET reimplementation: drive day/night phase from the server-synced game clock (opcode
+5/18), advancing `current_ticks` locally by the frame delta between sync packets. Do not use a
+free-running local timer as the sole source of day/night time.
+
+## 8.6 Frame loop — open items
+
+1. **Exact apply site of opcode 5/18 into `current_ticks`.** How `time_a` vs `time_b` maps to
+   `current_ticks` / `ticks_per_day`, and whether the client free-runs or snaps, was not byte-traced.
+2. **`time_scale (+0x00)` of the GameTime struct.** Whether this is the same or a distinct field
+   from the `timeGetTime` time-scale global is unconfirmed.
+3. **Per-area sky rate multiplier exact floats.** The approximate values 0.25/0.7/0.5 for sky
+   quality 1/2/other are inferred from float immediates; exact decoded floats need confirmation.
+4. **Scene-draw callbacks on non-in-world screens.** Character-select and opening screens likely
+   run a reduced callback set (sky preview without in-world day/night). Not traced.
+5. **WM_QUIT origin.** The window procedure posts quit on close; confirm no other path clears the
+   run-flag that could interfere with the scene-machine transition.
+6. **The `16` constant** stored in the engine struct during state-0 initialisation. Likely a
+   default subscriber interval seed in ms, not a frame-rate cap; no proven per-frame reader found.
+
+---
+
+# 9. World scene (state 5) — entry timeline and render order — (CODE-CONFIRMED)
+
+Engine state 5 is the in-game world scene, driven by the `MainHandler`. It is the only state with
+a persistent 3D scene graph. Cross-spec: camera constants for the five manipulators are in §4;
+movement and collision are in §5; sound ambient driver is in §1.4; terrain ring loading is in
+`specs/resource_pipeline.md`.
+
+## 9.1 Entry sequence — ordered timeline — (CODE-CONFIRMED)
+
+Pre-condition: character-select confirmed a slot → 880-byte SpawnDescriptor is cached; the
+enter-game request was sent; the engine advanced through state 2 (Load) to state 5 (In-game).
+
+| Step | Phase | What happens (neutral) |
+|--:|---|---|
+| 1 | **World-build** (synchronous) | `WinMain` case 5 constructs the `MainHandler` and calls `BuildGameWorld`. |
+| 2 | **Camera rig + scene graph** | `BuildSceneGraph` assembles: one `GPerspectiveCamera` (FOV 65°/near 5/far 15000), five `GViewPlatform` slots (Third/First/Static/Gamble/Event) plus one reserved sixth slot (allocated, never assigned), a scene root node labelled "charater scene" (typo authentic), a `GSwitch` node, and five camera manipulators. Manipulator string-catalogue label ids: 2006/2004/2005/2148/2148. |
+| 3 | **Environment node + render callbacks** | An environment/light node group and a second node group are parented into the scene. Five scene render-callback function-pointer/context pairs are installed. Approximately 17 world-manager singletons are cached. |
+| 4 | **World services + per-frame update** | Four world service managers (terrain, actor, effect, sound) are activated. A **per-frame world-update callback** is installed into the handler. HUD panel tree activated: community panel, character-billboard panel, link-combo panel, rank-progress panel, and slot panels. |
+| 5 | **Network: GameStateTick (4/1)** | Server sends the world-state packet (~9100-byte body). Spawn **X** at body offset +0x2374 (f32); spawn **Z** at +0x2378 (f32). **Y is never on the wire.** Packet also carries map/scenario code (+0x00C), hour-of-day, area id, and bulk actor mirror blocks. |
+| 6 | **Local player actor created** | First entry (`local_player == NULL`): `Actor_Factory_Create` allocates the local player from the SpawnDescriptor. On failure, engine state is written to 4 (back to Select). |
+| 7 | **Player placed at (spawnX, 0, spawnZ)** | World position set to `(spawnX, 0.0, spawnZ)`. **Y is always forced to zero** — terrain height is a visual surface only; server-side simulation Y is 0. |
+| 8 | **3×3 terrain ring streamed** | `Terrain_InitFirstRing_3x3` loads the centre cell and 8 neighbours. Cell-to-grid index: `10000 − floor(coord × −1 / 1024)` (cell size 1024 world units — consistent with §4.4 and `formats/terrain.md`). Client logs "first terrain init (x, z, area)" when this runs. |
+| 9 | **Materialize FX** | A timed spawn-in visual effect (id **310000001**) is spawned on the player. |
+| 10 | **Spawn SFX** | A 3D directional spawn sound (id **862010105**, kind 5) is fired at the player position. Audible radius for the local player: 200 units. |
+| 11 | **BGM start / cross-fade** | Entry BGM cue **910066000** is started or cross-faded via the 2D streaming path. In tutorial scenario, the same function is called with a cross-fade flag. The "fade-in" at world entry is **this BGM cue** — no screen-space alpha-fade overlay was found in the spawn path. |
+| 12 | **Tutorial cue** (conditional) | If map area = 1 and tutorial-state variable = 12: extra cue **910001000** is also started. |
+| 13 | **Scenario wiring** | If scenario code (4/1 body +0x00C) = 6 (tutorial): reads tutorial script index and stop-index from INI keys `TUTORSCRIPTINDEX` / `STOPIDX` keyed by character name. |
+| 14 | **Player visual / motion init** | Actor visual built; idle motion started. |
+| 15 | **HUD / rank / quest finalise** | Rank-progress panel state updated; billing-gated panels activated; system text and social roster swept. |
+| 16 | **Camera follows player** | Active manipulator (Third by default) begins orbiting the placed player at orbit radius ≈ 901 world units, pitch −30°. No separate enter-world camera placement exists. |
+| 17 | **World live** | Per-frame loop renders and ticks normally. The `LoadHandler` had already broken its loop on loading-done (event type 13, id 10001), so state 5 is live immediately. |
+
+### 9.1.1 Alternate entry path — BillingInfo (4/3) — (CODE-CONFIRMED)
+
+The BillingInfo handler (opcode 4/3) runs the **identical materialize sequence** (steps 7–11):
+forces `world_pos = (spawnX, 0, spawnZ)`, streams the 3×3 terrain ring, spawns materialize FX
+**310000001**, fires SFX **862010105**, re-syncs rank/vital globals. It reads spawn X/Z from a
+60-byte body structure and gates on a "ready" byte. Both 4/1 and 4/3 can drive the visible
+materialize depending on the login/billing flow; the exact ordering of the two packets is an open
+item (see §9.5).
+
+### 9.1.2 Re-entry vs first-entry split
+
+- **First entry** (`local_player == NULL`): create the actor (step 6), then steps 7–15.
+- **Re-entry / map change** (`local_player != NULL`): write spawn X/Z to world-mirror fields,
+  re-run the 3×3 ring, re-place at (spawnX, 0, spawnZ), re-fire FX/SFX/BGM, refresh panels. No
+  new actor allocation.
+
+## 9.2 Per-frame world-update order — (CODE-CONFIRMED)
+
+| Step | Phase | Description |
+|--:|---|---|
+| 1 | Input / message pump + deferred input | Win32 messages + UI events; raw mouse/keyboard on a separate DirectInput thread. |
+| 2 | **Per-frame world-update logic** | Env/light node recomputed from player position (sun/light direction, camera-relative light globals); cursor/3D-marker state; cursor hit-test (feeds click-to-move and UI); ambient sound driver + 1000 ms world-clock accumulator (§9.2.1). |
+| 3 | Scene camera + frustum cull | `GSwitch` selects active view platform; `GPerspectiveCamera` builds view frustum; cull-and-draw walk runs. (Engine frame-step — not the world-update callback.) |
+| 4 | 3D scene render pass | Five render callbacks in the order of §9.3. |
+| 5 | UI / HUD draw | 2D widget tree, screen-ortho space, after the 3D composite. |
+| 6 | FPS overlay (debug) | Optional; debug flag gated. |
+| 7 | Present | D3D9 `Present`, whole back-buffer, `IMMEDIATE` (no vsync). |
+| 8 | Device-lost recovery | Reset on lost device; 1000 ms retry sleep. |
+| 9 | Logic-tick sweep | Round-robin ~1.1% of subscribers per frame (network apply, AI, FX timers). |
+
+### 9.2.1 Ambient sound + world-clock tick (inside world-update, step 2)
+
+Each frame when the sound system is active: the per-position ambient driver re-evaluates the
+player's terrain mud-cell and starts/stops BGM/ambient/3D sounds on cell-byte change (§1.4).
+Streaming sound refill is kicked. A **1000 ms accumulator** uses the world-clock delta to run a
+slot update every 1000 ms and a second update every 3000 ms (every third 1000 ms tick). This is
+the logic-side day-progression heartbeat; the **visual** sky/day-night interpolation runs
+separately inside the render pass (§8.4, §9.3 pass A).
+
+## 9.3 Render pass order — five scene callbacks — (CODE-CONFIRMED)
+
+Both draw paths (toon/bloom offscreen-RT and direct-to-back-buffer) invoke the five scene
+render-callbacks in the following fixed order. The view transform is set before each callback. This
+is the authoritative intra-scene layer sequence.
+
+| Pass | Role | What draws / what state is set |
+|---|---|---|
+| **A** | **Environment / day-night / shadow setup** | Reads camera view transform and player position; computes sun/light direction in view space; updates the ≥ 50 ms day/night driver (§8.4); sets up shadow-map projection. No geometry drawn — setup only. |
+| **B** | **Sky dome / star dome / cloud** | Sky, star, and cloud dome geometry. Z-test disabled; lighting disabled; fog enabled; world matrix centred on the camera's XZ position. Drawn before any world geometry. |
+| **C** | **Terrain ground-shadow stamp + actor shadows** | Stamps ground cells; enables lighting and Z-test; draws ground-projected actor shadows via the shadow manager (texture stage 17). |
+| **D** | **Opaque world cull walk** | Scene-graph cull walk: **terrain** (multi-texture, FVF `0x152`) → **solid/batched geometry** → **skinned actors** (CPU-skinned, toon shader, §3.5/§3.6) → **billboards**. All opaque before any alpha. |
+| **E** | **FX terrain layers / water / decals** | `.fx1`–`.fx7` terrain FX layers, water/animated surfaces, alpha decals. Lighting on for first sub-passes then off; re-invokes a transparent sub-pass at its tail. |
+| **F** | **Post-scene transparent overlay** | Camera-facing billboards/sprites + particle effects (SRCALPHA/INVSRCALPHA default; SRCALPHA/ONE additive glow). Drawn after opaque composite; no per-particle back-to-front sort. |
+| (toon path only) | Glow extract → bloom blur → finaldx8 composite | RT→RT downsample passes; edge/bloom composite via `finaldx8.psh` (c0 = edge weight, c1 = bloom weight). See §3.3. |
+| (last) | **UI / HUD** | 2D widget tree, screen-ortho space, after compositing. `Present` follows. |
+
+**Net intra-scene draw order (one line):**
+environment/day-night setup → sky/star/cloud dome → ground-shadow + actor shadows → opaque terrain → solid geometry → skinned actors → billboards → FX/water/decals → transparent billboards/particles → *(toon path: glow/bloom/composite)* → UI/HUD → Present.
+
+> **Correction note.** An earlier analysis read renderer-object callback offsets from a partial
+> decompilation. The byte-verified pass from the world-scene lane supersedes that reading. The
+> intra-scene draw order above is the authoritative version. Raw byte offsets of the five function
+> pointers within the renderer struct are dirty-room details and are not reproduced here.
+
+## 9.4 Key world-scene constants — (CODE-CONFIRMED)
+
+| Constant | Value | Role |
+|---|---|---|
+| Spawn player Y | **0.0** | always; never on the wire; terrain height is visual only |
+| Terrain ring on spawn | **3×3** (centre + 8 neighbours) | `Terrain_InitFirstRing_3x3` |
+| Cell-grid index formula | `10000 − floor(coord × −1 / 1024)` | cell size 1024 world units; consistent with §4.4 and `formats/terrain.md` |
+| Materialize FX id | **310000001** | timed spawn-in `UserXEffect` on the player |
+| Spawn SFX id | **862010105** | 3D directional spawn sound, kind 5; 200-unit audible radius (local player) |
+| Entry BGM cue | **910066000** | BGM cross-fade on world entry (no screen-space alpha fade) |
+| Tutorial intro cue | **910001000** | extra cue when map = 1 and tutorial state = 12 |
+| Tutorial scenario code | **6** | value at 4/1 body +0x00C |
+| GameStateTick (4/1) body size | ~9100 bytes (0x238C) | spawn X at body +0x2374, Z at body +0x2378 (both f32) |
+| Camera FOV / near / far | 65° vertical / 5.0 / 15000.0 | built in `BuildSceneGraph` |
+| Reserved 6th view platform slot | allocated, never assigned | future mode provision |
+
+## 9.5 World scene — open items
+
+1. **Screen-space fade-in.** No alpha-fade overlay was found in the spawn path. A possible camera
+   or UI fade in the `LoadHandler`→`MainHandler` transition (loading-sprite teardown) was not
+   isolated.
+2. **Ordering of GameStateTick (4/1) vs BillingInfo (4/3).** Both run the materialize sequence.
+   Which arrives first, whether 4/3 is a billing-confirmation re-trigger after 4/1, and whether
+   double-firing the materialize FX 310000001 is observable needs a live capture.
+3. **3×3 terrain ring: synchronous or deferred.** `Terrain_InitFirstRing_3x3` runs inline in the
+   spawn handler (confirmed by the log line), but whether per-cell load blocks on VFS or queues to
+   the async asset worker is not traced. This governs the NPC ground-placement race (the
+   pending-snap Y timing debt in `CLAUDE.md`).
+4. **Per-frame world-update callback invocation site.** The callback is installed at a known handler
+   field; the precise engine call-site (scheduler subscriber vs frame-step hook vs handler OnEvent)
+   was not pinned. Order relative to `Scene_UpdateCameraAndCull` assumed "logic before render".
+5. **Scenario / map-mode integer full enum.** Values 1 (normal field) and 6 (tutorial) are
+   confirmed. Other values (instanced dungeon, PvP, event) are not enumerated.
+6. **Local player actor world-position struct.** The full actor-position field layout belongs to
+   the struct/cartographer lane.

@@ -39,7 +39,13 @@ client_mechanics:
   Skinning:       { note: "CPU linear-blend skinning; parent-relative .bnd bind, inverse-bind BAKED at load (pure quaternion math, no 4x4 matrices); major/minor weight accumulation; child bones rotate-only", spec: "Docs/RE/specs/skinning.md" }
   UiSystem:       { note: "retained-mode widget toolkit (component/panel/window/button/textbox/3D-canvas); HARDCODED screen layouts on a 1024x768 canvas; msg.xdb string catalogue; HANGUL system fonts via D3DX", spec: "Docs/RE/specs/ui_system.md" }
   Environment:    { note: "per-area sky/light/fog/water assembled from the %d.bin family; 48-keyframe day/night cycle @1800ms (86.4s day); water = enable flag + Y plane (renderer unrecovered)", spec: "Docs/RE/specs/environment.md" }
-  SceneLifecycle: { note: "9-state master scene machine (init/login/load/opening/select/in-game/quit/error/exit); in-game returns to select; enter-world spawn = server X/Z with Y forced 0 then terrain ring streams", spec: "Docs/RE/specs/client_runtime.md" }
+  SceneLifecycle: { note: "9-state master scene machine (init/login/load/opening/select/in-game/quit/error/exit); full state-x-trigger transition table recovered; in-game returns to select; enter-world spawn = server X/Z with Y forced 0 then 3x3 terrain ring streams", spec: "Docs/RE/specs/client_runtime.md" }
+  ClientWorkflow: { note: "MASTER end-to-end workflow synthesis: boot -> login -> server-select -> load -> [opening] -> char-select -> world; scene chapters + module chapters + interconnection matrix", spec: "Docs/RE/specs/client_workflow.md" }
+  FrontendScenes: { note: "login/server-select/char-select flows: action-id dispatch, sub-states 2..41, msg.xdb dialog ids, 880B spawn descriptors, create/delete/rename sends, enter-world cache", spec: "Docs/RE/specs/frontend_scenes.md" }
+  Effects:        { note: "XEffect runtime family (timed/bone-socket/world-space + particle + sword-light managers); 8 boot manifests; lazy first-spawn parse; hard-coded trigger effect ids", spec: "Docs/RE/specs/effects.md" }
+  Sound:          { note: "DirectSound + statically linked Ogg Vorbis 1.3.2; 3D=mono/2D=stereo rule; 1 MiB BGM streaming ring; terrain-driven ambient; footstep ids from actor-visual fields (NOT mud cells)", spec: "Docs/RE/specs/sound.md" }
+  ResourcePipeline: { note: "single VFS open chokepoint (binary search, fresh copy per open, NO file cache); per-subsystem lazy caches without eviction; boot bulk-loader thread; 3x3 sync ring + streamer thread", spec: "Docs/RE/specs/resource_pipeline.md" }
+  RuntimeSingletons: { note: "19 Meyers singletons (sizes + key field offsets) + module map; engine brand 'Diamond', MSVC 2005, Lua 5.1.2, static LZ4/Vorbis, XTrap anti-cheat presence", spec: "Docs/RE/structs/runtime_singletons.md" }
 
 gameplay_systems:
   # Gameplay/engine logic subsystems recovered in the gameplay-logic RE wave.
@@ -112,6 +118,30 @@ asset_constants:
   SKY_KEYFRAME_MS:         { value: 1800, note: "ms per keyframe; 48 x 1800 ms = 86.4 s simulated day", spec: "Docs/RE/formats/environment_bins.md" }
   UI_REFERENCE_CANVAS:     { value: "1024x768", note: "pixel canvas all hardcoded UI layouts assume", spec: "Docs/RE/specs/ui_system.md" }
   GAMEPLAY_CAMERA:         { value: "fov65/near5/far15000", note: "vertical FOV deg; fixed-radius orbit (zoom moves elevation)", spec: "Docs/RE/specs/camera_movement.md" }
+  MSGXDB_RECORD_BYTES:     { value: 516, note: "u32 id + u8[512] CP949 text; fill byte 0xEE; 2,644 records in the reference VFS", spec: "Docs/RE/formats/misc_data.md" }
+  SKILL_ICON_CELL_PX:      { value: 23, note: "fixed square skill-icon cell on the 512x512 (job,kind) sheets; per-skill (srcX,srcY) is STORED data, not a grid formula", spec: "Docs/RE/formats/ui_manifests.md" }
+  DO_STANCE_RECORD_BYTES:  { value: 116, note: "per-class stance .do record (12 files, data/script/<class><stance>.do); icon srcX/srcY at +0x18/+0x1C; corrects the earlier 166B estimate", spec: "Docs/RE/formats/ui_manifests.md" }
+  ITEM_TEXTURELIST_MODEL:  { value: "flat-list", note: "data/item/texturelist.txt: one filename per line, leading numeric prefix = tex_id; ONE whole DDS per item icon (no atlas sub-rects)", spec: "Docs/RE/formats/ui_manifests.md" }
+  SOUNDTABLE_RECORD_BYTES: { value: 48, note: "256 records per per-area sound table (.bgm/.bge/.eff/.wlk/.run)", spec: "Docs/RE/formats/sound_tables.md" }
+  VFS_TOC_ENTRY_BYTES:     { value: 144, note: "data.inf directory entry: name[100] + u64 offset + u64 size + aux", spec: "Docs/RE/formats/pak.md" }
+
+# Runtime behavior constants recovered in the Cycle-2 workflow wave (NOT decompiler output;
+# values are interoperability facts promoted via the clean specs referenced).
+runtime_constants:
+  LOBBY_PORT:                  { value: 10000, note: "synchronous login-server surface; server list query; channel endpoint at 10000+server_id", spec: "Docs/RE/packets/lobby.yaml" }
+  LOBBY_FALLBACK_HOST:         { value: "211.196.150.4", note: "hardcoded last-resort lobby host after ip.txt and list.dat", spec: "Docs/RE/packets/lobby.yaml" }
+  LISTDAT_RECORD_BYTES:        { value: 768, note: "list.dat: u32 count + records (CP949 name @+0, host string @+256)", spec: "Docs/RE/packets/lobby.yaml" }
+  SERVERLIST_RECORD_BYTES:     { value: 8, note: "lobby server entry: server_id u16, status i16, load i16, open_time i16", spec: "Docs/RE/packets/lobby.yaml" }
+  KEEPALIVE_INTERVAL_MS:       { value: 20000, note: "CmsgKeepalive cadence (1s poll granularity)", spec: "Docs/RE/packets/2-10000_keepalive.yaml" }
+  LOAD_PROGRESS_DENOMINATOR:   { value: 9395240, note: "hardcoded boot progress-bar byte estimate; NOT a completion signal", spec: "Docs/RE/specs/resource_pipeline.md" }
+  EFFECT_ID_PC_SPAWN:          { value: 310000001, note: "player materialize effect at world entry", spec: "Docs/RE/specs/effects.md" }
+  EFFECT_ID_LEVELUP:           { value: 310000002, note: "level-up effect", spec: "Docs/RE/specs/effects.md" }
+  EFFECT_ID_MOB_SPAWN:         { value: 360000001, note: "mob materialize effect", spec: "Docs/RE/specs/effects.md" }
+  SPAWN_SFX_ID:                { value: 862010105, note: "world-entry spawn SFX", spec: "Docs/RE/specs/client_runtime.md" }
+  ENTRY_BGM_CUE_ID:            { value: 910066000, note: "world-entry BGM cue (the only 'fade-in' — no screen-space fade exists)", spec: "Docs/RE/specs/client_runtime.md" }
+  INDOOR_BGM_OVERRIDE_ID:      { value: 863500002, note: "BGM forced while the local player indoor flag is set", spec: "Docs/RE/specs/sound.md" }
+  UI_CLICK_SFX_ID:             { value: 861010101, note: "standard button click SFX", spec: "Docs/RE/specs/frontend_scenes.md" }
+  CHARSELECT_ACTION_IDS:       { value: "create=4/delete=5/enter=6", note: "corrected from the earlier 413/531 misread (those were atlas src-X values)", spec: "Docs/RE/specs/ui_system.md" }
 
 # Opcodes are the (major:minor) wire tuple. The key is the catalog encoding major<<16|minor
 # (see Docs/RE/opcodes.md); `tuple` repeats the human-readable major:minor. Direction is
@@ -301,8 +331,14 @@ opcodes:
   0x50093: { name: "SmsgActorCombatFlagUpdate", direction: "S2C", tuple: "5:147" }
   # C2S (client->server) opcodes recovered from the outbound send-sites.
   0x10004: { name: "CmsgAuthReply",        direction: "C2S", tuple: "1:4" }
+  # 1:6 has a CONTESTED second meaning (52-byte character-create body without the 0x2B login
+  # sentinel) pending a capture — see Docs/RE/packets/1-6_login_or_create.yaml. Keep ONE row.
   0x10006: { name: "CmsgLoginRequest",     direction: "C2S", tuple: "1:6" }
+  0x10007: { name: "CmsgSelectCharacter",  direction: "C2S", tuple: "1:7" }
   0x10009: { name: "CmsgEnterGameRequest", direction: "C2S", tuple: "1:9" }
+  0x1000d: { name: "CmsgRenameCharacter",  direction: "C2S", tuple: "1:13" }
+  0x1000e: { name: "CmsgDeleteCharacter",  direction: "C2S", tuple: "1:14" }
+  0x22710: { name: "CmsgKeepalive",        direction: "C2S", tuple: "2:10000" }  # compressed-only ping, ~20s timer; 10000 = 0x2710
   0x20007: { name: "CmsgWhisper",          direction: "C2S", tuple: "2:7" }
   0x2000d: { name: "CmsgMoveRequest",      direction: "C2S", tuple: "2:13" }
   0x20053: { name: "CmsgChatContextual",   direction: "C2S", tuple: "2:83" }

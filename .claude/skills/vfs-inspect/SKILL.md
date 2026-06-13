@@ -1,6 +1,6 @@
 ---
 name: vfs-inspect
-description: Use to open the REAL Martial Heroes VFS (data.inf + data/data.vfs at D:/MartialHeroesClient) and list/inspect entries by substring — the throwaway console harness for "does this path exist?", "how big is it?", "what's the first N bytes?", "how many .skn/.ted/.txt files are there?". Bundles a ready-made net10.0 harness so you never hand-rebuild it again.
+description: Use to open the REAL Martial Heroes VFS (data.inf + data/data.vfs at D:/MartialHeroesClient) and list/inspect entries by substring — the throwaway console harness for "does this path exist?", "how big is it?", "what's the first N bytes?", "how many .skn/.ted/.txt files are there?". Bundles a ready-made net10.0 harness with 8 dedicated subcommands for census/analysis of the major asset formats. Subcommands: scan-mot, scan-bnd, scan-skn, scan-ui, dump-msgxdb, dump-uitex, scan-xeff, scan-sound.
 allowed-tools: Read Write Bash(dotnet *) Bash(mkdir *) Bash(copy *) Bash(xcopy *)
 model: sonnet
 ---
@@ -10,6 +10,9 @@ model: sonnet
 The single home for the throwaway VFS browser that has been hand-rebuilt five times. It mounts the
 real client archive through the production VFS API and lets you list entries, count by extension,
 test for a path, and peek at the head bytes of any file — without writing a test or touching Godot.
+It also provides 8 structured subcommands that census the major asset families and drive the
+production parsers (`Assets.Parsers`) directly, so observations match what the shipping client
+will see.
 
 It drives the production library directly:
 `MartialHeroes.Assets.Vfs.MappedVfsArchive.Open(infPath, vfsPath)` with
@@ -61,6 +64,8 @@ text payloads are CP949 (Korean code page 949), so the harness registers the cod
 
 3. **Pick the query via args** (all optional; with no args it prints a summary + extension census):
 
+   **Generic filtering options:**
+
    | Arg | Effect |
    |---|---|
    | `<substring> [<substring> …]` | List entries whose lower-cased name contains EVERY given substring (AND). |
@@ -72,6 +77,19 @@ text payloads are CP949 (Korean code page 949), so the harness registers the cod
    | `--contains <path>` | Print just `true`/`false` for one exact virtual path. |
    | `--limit <n>` | Cap the number of listed entries (default 200; `0` = unlimited). |
    | `--inf <path>` / `--vfs <path>` | Override the default `D:/MartialHeroesClient` locations. |
+
+   **Subcommands** (each accepts `--inf`/`--vfs` overrides):
+
+   | Subcommand | What it does | Spec |
+   |---|---|---|
+   | `scan-mot [--id <id_a>]` | Census .mot animation files: real vs stub, BANI-variant detection, frame/track count histograms. | `Docs/RE/formats/animation.md` |
+   | `scan-bnd` | Census .bnd skeletons: bone count distribution, base_id check, single vs multi-bone breakdown. | `Docs/RE/formats/mesh.md` |
+   | `scan-skn` | Census .skn skinned meshes: id_b (skeleton link), vertex/face totals, multi-weight ratio, max weights/vert. | `Docs/RE/formats/mesh.md` |
+   | `scan-ui` | Census data/ui/ DDS files: dimensions + fourCC decoded from DDS header, grouped by subdirectory, flags NPOT textures. | `Docs/RE/formats/texture.md`, `ui_manifests.md` |
+   | `dump-msgxdb [--id N] [--range A B]` | Dump msg.xdb records (u32 id + CP949 string, 516B stride) — all, one, or a range. | `Docs/RE/formats/misc_data.md §6` |
+   | `dump-uitex` | Parse UiTex.txt manifest (tex_id → vfs_path) and verify each path against the VFS. | `Docs/RE/formats/ui_manifests.md §1` |
+   | `scan-xeff` | Census .xeff particle effects: element_count distribution, 9-digit skill-code pattern, duplicate effect_ids. | `Docs/RE/formats/effects.md §A` |
+   | `scan-sound` | Census .ogg under data/sound/2d\|3d + parse per-area sound tables (.bgm/.bge/.eff/.wlk/.run), listing non-null entries with VFS existence check. | `Docs/RE/formats/sound_tables.md` |
 
    Examples:
 
@@ -85,6 +103,24 @@ text payloads are CP949 (Korean code page 949), so the harness registers the cod
    # Does the global texture catalog exist, and what's in its head?
    dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- --contains data/map000/bgtexture.txt
    dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- --head data/map000/bgtexture.txt
+
+   # Full .mot census (real vs stubs, BANI, frame/track distribution):
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- scan-mot
+
+   # Decode one specific .mot by id_a:
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- scan-mot --id 170354502
+
+   # Dump first 20 msg.xdb entries starting from id 200:
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- dump-msgxdb --range 200 220
+
+   # Check one specific message:
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- dump-msgxdb --id 4025
+
+   # Census all .xeff effect files:
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- scan-xeff
+
+   # Sound table census + per-area non-null entry listing:
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- scan-sound
    ```
 
 4. **Report findings as metadata**: counts, names, sizes (and, for `--head`, the decoded preview).

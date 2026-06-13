@@ -313,3 +313,89 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
   decompiler identifier in ui_manifests.md (a sub_ token in an open-questions line) — rewritten
   neutrally by the orchestrator; rescan CLEAN. All six touched specs otherwise clean (no addresses,
   no pseudo-code). Journal + names authored centrally by the orchestrator.
+
+## 2026-06-12/13 — Cycle 2: client-workflow comprehension campaign, evidence wave (19 lanes + 1 follow-up sweep)
+- binary: doida.exe @ 63fcaf8e (x86 32-bit), IDA Pro 9.3 via MCP (read-only, IDAPython sweeps) +
+  project-local VFS (clientdata/, 43,347 entries) read via Assets.Vfs harnesses + vfsls.
+- analyzed (14 IDA lanes, sub-waves of 3): boot/init timeline (game.lua bootstrap, DoOption.ini 30-key
+  map, window/D3D9 init, VFS mount, singleton tiers); main frame loop (3-step anatomy, uncapped
+  IMMEDIATE present, winmm clock, day/night tick in render pass); exhaustive 9-state scene machine
+  (full state×trigger transition table); login scene (action-id dispatch, validation, msg ids,
+  sub-states 2..41); server-select (lobby protocol port 10000, 8-byte records, list.dat layout,
+  channel endpoint); char-select (5 sends incl. unresolved 1/6 login-vs-create collision, 880B
+  descriptors, 3D preview stage); world scene (17-step entry, dual 4/1+4/3 materialize, 6-callback
+  render order); effects runtime (XEffect family, pools, manifests, trigger ids, tick math); GU*
+  toolkit internals (sprite path, state frames, IME, fonts, z-order); sound (DirectSound + static
+  Vorbis, volume curve, ambient driver, footstep source = actor-visual fields); network lifecycle
+  (3 threads, bus dispatch, keepalive 2/10000, persistent game socket); resource pipeline (no file
+  cache, boot bulk loader, 3×3 sync ring + streamer); module cartography (25,973 fns classified,
+  engine "Diamond", MSVC2005/Lua 5.1.2/LZ4/XTrap); 19 runtime singletons. Follow-up sweep:
+  pixel-exact widget atlas rects (login 21 sites ~100%, char-select 77 sites ~100%, 117 HUD builders;
+  multi-state button ctors yield 3 distinct frames; login form on login_slice1.dds; char-select
+  action ids Create=4/Delete=5/Enter=6).
+- analyzed (5 VFS lanes, sample-only): .xeff/.fx*/particle censuses (xeff layout byte-verified);
+  audio census (2,107 .ogg, 2d/3d split); full UI asset census (uitex/skillicon/crestlist/msg.xdb
+  2,644 records); serverlist/config hunt (clean negative — list is network-fetched; do.ini encrypted);
+  63-area per-file inventory (~2,505 cells, gap analysis).
+- notes: all raw findings (addresses included) stayed in gitignored Docs/RE/_dirty/workflow/ + _dirty/queries/.
+
+## 2026-06-12/13 — Cycle 2: promotion wave (10 satellite authors + 4 recovery + master synthesis)
+- specs NEW: specs/client_workflow.md (MASTER end-to-end workflow: flow diagram, 4 scene chapters,
+  9 module chapters, interconnection matrix, engine identity, open-questions register);
+  specs/effects.md; specs/sound.md; specs/frontend_scenes.md; specs/resource_pipeline.md;
+  formats/area_inventory.md; structs/runtime_singletons.md.
+- specs UPDATED: opcodes.md (+Appendix A lobby protocol; 193 rows validator-clean) + 8 new
+  packets/*.yaml (1-6_login_or_create collision doc, 1-7 select, 1-13 rename, 1-14 delete,
+  2-10000 keepalive, 3-4 char_manage_result, 4-1 game_state_tick, lobby); specs/client_runtime.md
+  (§7 state machine, §8 frame loop, §9 world scene); specs/ui_system.md (toolkit internals, 3-frame
+  button correction, actionId +0x10 correction, login_slice1.dds atlas correction, corrected font
+  Height/Width table, full login/char-select widget tables, HUD uitex-binding contract, sub-state
+  29/31 corrections); specs/frontend_scenes.md (action-id corrections); formats/effects.md (xeff
+  census + layout); formats/sound_tables.md (per-extension 2d/3d split); formats/ui_manifests.md
+  (DXT2 dominant fourCC census + full DDS reference tables); formats/misc_data.md (msg.xdb
+  SAMPLE-VERIFIED: 2,644 records, 0xEE fill, id-range groups).
+- notes: three first-pass authors died on API socket errors and were re-run in a recovery wave; a
+  stray helper script left in specs/ was removed by the orchestrator. Orchestrator firewall scan of
+  all 22 touched committed files: CLEAN (5 regex hits = false positives: the sub_effect_count field
+  name and client_workflow.md's own disclaimer line). Known cross-spec conflicts recorded, not
+  silently resolved: 1/6 opcode collision (login vs create — needs capture), fx2 header field[3]
+  15-vs-50, fame_buff_window.dds 1024x512-vs-1024x2048, 4/1-vs-4/3 ordering. Journal + names
+  authored centrally by the orchestrator. Tooling: vfsls gained 8 census subcommands (smoke-tested).
+
+## 2026-06-13 — Cycle 2: icon-chain recovery + promotion (2 IDA lanes / 1 VFS lane / 2 spec passes)
+- binary: doida.exe @ 63fcaf8e via IDA MCP (read-only) + project-local VFS harness observation.
+- analyzed: the skill/item icon rendering chain end-to-end. Skill icons: NO modular grid — each
+  skill stores a 16-bit (iconSrcX, iconSrcY) pair, blitted as a fixed 23×23 cell from the 512×512
+  (job,kind) sheet selected by skillicon.txt; confirmed at three draw sites. The ON-DISK source is
+  the 12 per-class stance .do files (116-byte records, icon pair at +0x18/+0x1C) — proven by a
+  field-write trace AND a sample harness (musajung.do = 34,916 B = exactly 301×116; a full
+  750-offset u16-pair scan of skills.scr was NEGATIVE; the +546/+548 "static record" path is
+  skillcategory.scr category banners, a secondary path). Item icons: texturelist.txt is a flat
+  newline list (leading numeric prefix = tex_id; 1,335 entries, all present in the VFS); one whole
+  DDS per icon, no atlas sub-rects.
+- specs updated: formats/ui_manifests.md (§2.6 corrected source + §2.7 NEW .do record layout +
+  §8.2 load chain rewritten + §9 items #1/#8 closed, #11 rewritten, #12/#13 added + §10 NEW
+  texturelist.txt grammar + §11 cross-refs); formats/config_tables.md (stance .do stride corrected
+  166→116, SAMPLE-VERIFIED 12/12 by the orchestrator from file-size arithmetic).
+- notes: raw findings in gitignored _dirty/workflow/ (icon-grids, skill-icon-data,
+  icon-source-trace). The first promotion pass predated the source trace and briefly attributed
+  the pair to skills.scr; corrected the same day by a follow-up pass — both passes journaled here.
+  Firewall scans CLEAN. Journal + names authored centrally by the orchestrator.
+
+## 2026-06-13 — Cycle 2: W3/W5 engineering record (not RE — provenance pointer only)
+- The UI/GUI engineering wave (widgets kit, UiCatalogs, login/char-select/HUD fidelity, audio,
+  SoundTableParser) implements ONLY committed clean specs (ui_system.md §8, frontend_scenes.md,
+  sound_tables.md, ui_manifests.md, misc_data.md §6, names.yaml constants); no engineer read
+  _dirty/ or IDA. Review wave + fix wave closed all confirmed findings; build 0/0, 1,066 tests.
+
+## 2026-06-13 — Cycle 2: pre-commit gate catches (orchestrator fixes)
+- The clean-room-auditor + preservation-archivist pre-commit pass caught TWO leaks in the staged
+  set, both fixed by the orchestrator before commit: (1) a header comment in the committed
+  skillcat-scan harness (.claude/skills/vfs-inspect/scripts/skillcat-scan/Program.cs) carried
+  four raw decompiler autonames pasted from a dirty note — rewritten neutrally with a spec
+  citation (ui_manifests.md §2.7); (2) structs/runtime_singletons.md quoted a verbatim mangled
+  MSVC RTTI symbol as engine-brand evidence — neutralized to a prose description (class
+  CVFSManager in a Diamond C++ namespace). Re-scan after both fixes: CLEAN. The two RE-probe
+  scripts under vfs-inspect (skillcat-scan, skill-icon-scan) received spec-citation headers as
+  recommended. Documented per the audit-trail discipline; both gate agents' findings preserved
+  in their reports.

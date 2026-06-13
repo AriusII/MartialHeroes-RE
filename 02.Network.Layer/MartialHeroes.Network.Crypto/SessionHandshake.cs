@@ -253,11 +253,11 @@ public static class SessionHandshake
     private static void FillNonZeroPadding(Span<byte> destination, IPaddingRandom paddingRng)
     {
         paddingRng.Fill(destination);
+        Span<byte> one = stackalloc byte[1];
         for (int i = 0; i < destination.Length; i++)
         {
             while (destination[i] == 0)
             {
-                Span<byte> one = stackalloc byte[1];
                 paddingRng.Fill(one);
                 destination[i] = one[0];
             }

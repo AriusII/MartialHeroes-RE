@@ -50,7 +50,7 @@ family is the high 16 bits; the minor is the low 16 bits.
 |-------|--------|-----------|---------|
 | 0 | KeyExchange | S2C (handshake) | Handled inline; triggers a C2S 1/4 auth reply. |
 | 1 | ServerCommand | S2C | Direct switch on minor (billing / letter). |
-| 2 | GameAction | **C2S** | Client-emitted; no inbound handler exists. |
+| 2 | GameAction | **C2S** | Client-emitted; no inbound handler exists. Mostly user actions; also carries the timer-driven keepalive 2/10000 (compressed-only). |
 | 3 | CharacterMgmt | S2C | Direct switch on minor. |
 | 4 | Response | S2C | Table-driven (acks / results). Minors 500 and 50000 are special-cased outside the table. |
 | 5 | Push | S2C | Table-driven (world events). |
@@ -61,8 +61,11 @@ family is the high 16 bits; the minor is the low 16 bits.
 |---|---|---|---|---|---|---|
 | `0x0` | SmsgKeyExchange | S2C | var | packets/0-0_key_exchange.yaml | draft | (0:0) Handshake; first secure-session frame. Carries server asymmetric key material; client replies with a C2S 1/4 auth. Layout capture-unverified. |
 | `0x10004` | CmsgAuthReply | C2S | var | packets/1-4_auth_reply.yaml | draft | (1:4) Client auth reply in the login handshake; sent over the secure-send path after the 0/0 key exchange. Carries the XOR-ciphered login credential body. Layout crypto-dependent; hand-off to Network.Crypto. |
-| `0x10006` | CmsgLoginRequest | C2S | var | - | draft | (1:6) Account/login credential blob (~52-byte form) in the major-1 account family. Field layout not yet specced; re-probe the caller before committing a struct. |
+| `0x10006` | CmsgLoginRequest | C2S | 52 | packets/1-6_login_or_create.yaml | draft | (1:6) **UNRESOLVED OPCODE COLLISION.** Two independent ~52-byte send-sites map to 1/6: the account LOGIN credential blob AND the character-CREATE body (name + class/appearance). May be one phase-dependent opcode or a mis-attribution; needs a capture to disambiguate. The canonical name CmsgLoginRequest is kept; do NOT silently treat 1/6 as a single message. See packets/1-6_login_or_create.yaml. Body modelled opaque (52B). |
+| `0x10007` | CmsgSelectCharacter | C2S | 2 | packets/1-7_select_character.yaml | draft | (1:7) Select-character pre-step on the char-select screen: slot index + state/lock flag (2-byte fixed payload). Believed to lock/pre-stage the slot before 1/9; no inbound reply attributed. Layout capture-unverified. |
 | `0x10009` | CmsgEnterGameRequest | C2S | 40 | packets/1-9_enter_game_request.yaml | draft | (1:9) Enter-world / select-character request: selected slot index + client-version token. Server replies with 3/5 EnterGameAck. Layout capture-unverified. |
+| `0x1000d` | CmsgRenameCharacter | C2S | 18 | packets/1-13_rename_character.yaml | draft | (1:13) Rename-character request: new CP949 name in an 18-byte buffer. Server replies with 3/6 RenameCharResult (and a 3/4 subtype-1 refresh). Layout capture-unverified. |
+| `0x1000e` | CmsgDeleteCharacter | C2S | 1 | packets/1-14_delete_character.yaml | draft | (1:14) Delete-character request: 1-byte slot index. Server replies with 3/4 manage result (subtype 2 = delete confirmed, or result 0 + a same-day cooldown ready_time). Layout capture-unverified. |
 | `0x10010` | SmsgSrvBillingDeactivated | S2C | var | - | confirmed | (1:16) Billing turned off. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x10011` | SmsgSrvBillingActivated | S2C | var | - | confirmed | (1:17) Billing turned on. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x10013` | SmsgSrvBillingExpiryNotice | S2C | var | - | confirmed | (1:19) Billing expiry notice. Routing dispatch-table-confirmed; field layout not yet specced. |
@@ -71,11 +74,12 @@ family is the high 16 bits; the minor is the low 16 bits.
 | `0x2000d` | CmsgMoveRequest | C2S | 16 | packets/2-13_move_request.yaml | draft | (2:13) Client click-to-move / position sync: heading + target XZ + mode/run flags (16-byte fixed payload). Server echoes via 5/13. Layout capture-unverified. |
 | `0x20034` | CmsgUseSkill | C2S | var | packets/2-52_use_skill.yaml | draft | (2:52) Client skill-activate request: 24-byte header (skill slot + aim) + two optional u32 target-id arrays. Send-site now analyzed. Server replies with 5/52. Layout capture-unverified. |
 | `0x20053` | CmsgChatContextual | C2S | var | packets/2-83_chat_contextual.yaml | draft | (2:83) Client contextual chat: 24-byte context header + length-prefixed text. Header fields not yet decoded; layout capture-unverified. |
+| `0x22710` | CmsgKeepalive | C2S | 4 | packets/2-10000_keepalive.yaml | draft | (2:10000) Keepalive/ping. Timer-driven (~20 s), 4-byte zero body. Compressed-only send path (NOT re-encrypted). The '20' is the interval in seconds, NOT the body size. New major-2 (otherwise C2S GameAction) addition. Layout capture-unverified. |
 | `0x30001` | SmsgCharacterList | S2C | var | packets/3-1_character_list.yaml | draft | (3:1) Character-select list; switches to the select screen. 3-byte header + per-slot 981-byte records gated by a slot bitmask. |
-| `0x30004` | SmsgCharManageResult | S2C | var | - | confirmed | (3:4) Char create/delete/manage response. Routing dispatch-table-confirmed; field layout not yet specced. |
+| `0x30004` | SmsgCharManageResult | S2C | 8 | packets/3-4_char_manage_result.yaml | confirmed | (3:4) Char create/delete/rename/manage result: result u8 @0, subtype u8 @2 (0 refresh / 1 rename-applied / 2 delete-confirmed), ready_time u32 @4 (same-day delete cooldown). NOTE: the raw handler is mislabelled '3/7'; behaviour-anchored it is 3/4. Routing dispatch-table-confirmed; field layout capture-unverified. |
 | `0x30005` | SmsgEnterGameAck | S2C | 44 | packets/3-5_enter_game_response.yaml | draft | (3:5) Enter-world acknowledgement; transitions client into the in-world game state. |
 | `0x30006` | SmsgRenameCharResult | S2C | var | - | confirmed | (3:6) Character rename result. Routing dispatch-table-confirmed; field layout not yet specced. |
-| `0x30007` | SmsgCharSpawnResult | S2C | var | - | confirmed | (3:7) Spawn-into-world response. Routing dispatch-table-confirmed; field layout not yet specced. |
+| `0x30007` | SmsgCharSpawnResult | S2C | var | - | confirmed | (3:7) Spawn-into-world response. NOTE: distinct from the 8-byte char-manage result; some raw decompiler output mislabels the 3/4 manage handler as '3/7' -- do not conflate. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x30008` | SmsgShopPageUpdate | S2C | var | - | confirmed | (3:8) Shop page update. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x3000d` | SmsgCharStatusUpdate | S2C | var | - | confirmed | (3:13) Character status update. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x3000e` | SmsgSceneEntityUpdate | S2C | var | - | confirmed | (3:14) Scene / entity update. Routing dispatch-table-confirmed; field layout not yet specced. |
@@ -83,7 +87,7 @@ family is the high 16 bits; the minor is the low 16 bits.
 | `0x30017` | SmsgCharCreateResult | S2C | var | - | confirmed | (3:23) Character create result. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x30064` | SmsgCharActionResult | S2C | var | - | confirmed | (3:100) Generic character action result. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x3c350` | SmsgGmChatMessage | S2C | var | - | confirmed | (3:50000) GM chat / system message. Routing dispatch-table-confirmed; field layout not yet specced. |
-| `0x40001` | SmsgGameStateTick | S2C | var | - | confirmed | (4:1) Periodic game-state tick. Routing dispatch-table-confirmed; field layout not yet specced. |
+| `0x40001` | SmsgGameStateTick | S2C | var | packets/4-1_game_state_tick.yaml | confirmed | (4:1) Periodic game-state tick + world-entry seed: spawn X/Z (Y forced 0, not on wire), scenario/map-mode int, region index. Creates the local player and clears keepalive-suppress on world entry. Routing dispatch-table-confirmed; field layout capture-unverified. |
 | `0x40002` | SmsgGameTickConfig | S2C | var | - | confirmed | (4:2) Game-tick configuration. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x40003` | SmsgBillingInfo | S2C | var | - | confirmed | (4:3) Billing info. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x40004` | SmsgAreaEntitySnapshot | S2C | var | - | confirmed | (4:4) Area entity snapshot update; carries SpawnDescriptor-family records. Routing dispatch-table-confirmed; field layout not yet specced. |
@@ -253,3 +257,75 @@ Status legend: `draft` (field layout hypothesized) - `observed` (seen in a captu
 `confirmed` (cross-checked against the binary's dispatch table; here, opcode->handler routing is
 confirmed even where the field layout is not yet specced) - `implemented` (C# struct + handler
 exist).
+
+---
+
+## Appendix A — Lobby protocol (login-server discovery; NOT a `(major:minor)` opcode)
+
+The catalog table above is the **game connection** protocol. Before that connection exists, the
+client talks to a **separate lobby / login-server surface** to discover which game server to join.
+The lobby is **not** part of the `(major:minor)` family table and carries **no opcode dispatch** —
+it is documented here so the `network-protocol-engineer` can build the login-server vs game-server
+split. Full field spec: `packets/lobby.yaml`.
+
+### Login-server vs game-server split
+
+- **Lobby / login server** — a host:port resolved **locally** (see host resolution below), queried
+  over a **synchronous, blocking** TCP socket. Two short-lived throwaway sockets, one per query.
+- **Game server** — the host:port returned by the lobby's channel-endpoint query. The client then
+  opens its **single persistent overlapped** game connection to it and runs the `(major:minor)`
+  protocol above (0/0 → 1/4 → 3/1 → 1/9 → …). The lobby and game sockets never share a connection.
+
+### The two lobby queries
+
+| Query | Port | Response (after LZ4 decompress) |
+|---|---|---|
+| Server list | **10000** | An 8-byte frame wrapper whose "major" field is a **record count**, then that many **8-byte little-endian records** `{server_id u16 @+0, status i16 @+2, load i16 @+4, open_time i16 @+6}`. |
+| Channel endpoint | **10000 + selected `server_id`** | An 8-byte wrapper, then a payload whose **first 30 (0x1E) bytes** are a NUL-padded ASCII **`host port`** string naming the game server. |
+
+Both responses are **LZ4-compressed and carry NO byte cipher**, and there is **no `(major:minor)`
+dispatch** on the lobby socket. The lobby wrapper's `minor` field (@+6) appears unused (believed
+always 0). The selected `server_id` (1..40) is added directly to 10000 to form the channel port, so
+`server_id` is effectively the channel **port offset** (implying ports 10001..10040).
+
+The wire carries only the **numeric `server_id`** (1..40); the localized server **display name** is
+**client-local** (a 41-entry localized name table) and must be supplied by a fresh implementation.
+
+### `status` / `load` / `open_time` presentation rules (capture-unverified)
+
+- `status`: `0` = normal/open; `2/3/4` = fixed status labels (when `open_time == 0`); `3` with
+  `open_time != 0` = "scheduled open" (renders an open clock); `100` = "this is the connected /
+  current selection" sentinel. Full enum is capture-only.
+- For scheduled-open, the displayed clock is **HH:MM** with **HH from `load`** and **MM from
+  `open_time`**, each split into two decimal digits. A `load` value of `24` is a "preparing" sentinel.
+
+### Lobby host resolution order (where the lobby host comes from)
+
+The lobby connect helper resolves the lobby host in this strict priority order:
+
+1. **`ip.txt`** in the working directory, if present — a single whitespace-free token, truncated to
+   19 characters.
+2. else a **`list.dat`** connection-IP-list record, selected by a registry server-name key.
+3. else the hardcoded fallback host `211.196.150.4`.
+
+This resolves the **lobby** host only; the **game** server host comes from the channel-endpoint query.
+
+### `list.dat` record layout (loose client-root file, NOT in the VFS)
+
+`list.dat` is a loose binary file in the client root. On-disk layout (file-size invariant
+`filesize == 768 * count + 4`):
+
+| Offset | Size | Field |
+|---|---|---|
+| +0 | u32 | record `count` |
+| +4 | `count × 768` | records |
+
+Per 768-byte record:
+
+| Sub-offset | Field |
+|---|---|
+| +0 | CP949 server **name** — the match key, compared against the registry `servername` value (a default CP949 name baked in the client is used if the registry read fails) |
+| +256 (0x100) | the lobby **host** string (IPv4 dotted) the client connects to |
+
+The 256-byte gap between the name and +256, and whether +256 also holds a port, are unverified (no
+on-disk sample) — see the open questions in `packets/lobby.yaml`.

@@ -125,17 +125,30 @@ Active `sound_entry_id` values observed in samples are 9-digit decimal integers:
 
 All share a high byte of 0x36 (decimal 54). The pattern is consistent with a Korean MMORPG
 resource catalog key of the form `<type> × 10^8 + <sequential_id>`, where the upper digits
-encode asset category. The engine constructs the audio file path as:
+encode asset category. The `sound_entry_id` integer is formatted as a plain decimal string
+(no zero-padding, no prefix) to form the filename stem.
 
-```
-data/sound/3d/<sound_entry_id>.ogg
-```
+**The audio directory is NOT universal — it depends on the table extension** (SAMPLE-VERIFIED +
+CODE-CONFIRMED; cross-reference `specs/sound.md §13`):
 
-The `sound_entry_id` integer is formatted as a plain decimal string (no zero-padding, no
-prefix) to form the filename stem. How the engine resolves IDs that correspond to `.wav`
-files rather than `.ogg` files is not determined; the path-construction format string uses
-`.ogg` unconditionally in the observed runtime code. WAV files in `data/sound/3d/` may be
-loaded through a different call path.
+| Table extension | Audio directory | Confidence |
+|---|---|---|
+| `.bgm` | `data/sound/2d/` | SAMPLE-VERIFIED: `.bgm` IDs confirmed present under `data/sound/2d/` |
+| `.eff` (sound table) | `data/sound/3d/` | SAMPLE-VERIFIED: `.eff` sound table IDs confirmed present under `data/sound/3d/` |
+| `.bge` | UNDETERMINED | All sampled `.bge` entries are null (sound_entry_id = 0); directory unverifiable from samples |
+| `.wlk` | UNDETERMINED | All sampled `.wlk` entries are null; directory unverifiable from samples |
+| `.run` | UNDETERMINED | All sampled `.run` entries are null; directory unverifiable from samples |
+
+The directory selection (`data/sound/2d/` vs `data/sound/3d/`) is encoded in the table
+extension, not in the `sound_entry_id` value itself. The engine selects the directory via an
+internal per-extension code path. For the `.bgm` case, the IDs in the range `910xxxxx` map
+to BGM tracks (stereo, 44100 Hz Vorbis) which reside exclusively in `data/sound/2d/`. For
+the `.eff` sound table case, the IDs map to short 3D positional effects stored in
+`data/sound/3d/`.
+
+How the engine resolves IDs that correspond to `.wav` files rather than `.ogg` files is
+not determined; the principal path-construction code uses `.ogg` unconditionally. WAV files
+in `data/sound/3d/` may be loaded through a different call path.
 
 ---
 
@@ -216,12 +229,13 @@ proprietary header, no encryption, and no additional framing wraps these files.
   - Nominal bitrate: 16000 bps
   - Encoder: Xiph.Org libVorbis I, build 2002-07-17
   - No embedded comment tags
-- **VFS path pattern:** `data/sound/3d/<sound_entry_id>.ogg` (3D positional),
-  `data/sound/2d/<sound_entry_id>.ogg` (2D non-positional; path confirmed from engine strings,
-  no sample files observed from 2D directory)
+- **VFS path pattern:** `data/sound/3d/<sound_entry_id>.ogg` (3D positional — `.eff` table
+  IDs); `data/sound/2d/<sound_entry_id>.ogg` (2D non-positional — `.bgm` table IDs; 178
+  `.ogg` files confirmed in `data/sound/2d/`, SAMPLE-VERIFIED)
 - **Filename scheme:** plain decimal integer stem matching `sound_entry_id`, no zero-padding
   (e.g. `841390513.ogg`)
-- **sample_verified: true** — three `.ogg` samples confirmed from `data/sound/3d/`
+- **sample_verified: true** — three `.ogg` samples confirmed from `data/sound/3d/`; directory
+  `data/sound/2d/` additionally SAMPLE-VERIFIED (178 files, including stereo 44100 Hz BGM tracks)
 - **Max decoded PCM size:** the engine allocates a 512 KiB (524288 bytes) decode buffer.
   At 22050 Hz mono 16-bit, this accommodates approximately 11.9 seconds of audio. The engine
   logs an error if decoded PCM exceeds this limit.
@@ -310,11 +324,13 @@ the `.ogg` container format is identical.
     triangle-strip or triangle-list index scheme is ambiguous from its size alone. Requires
     a trace of the effect-geometry loader.
 
-11. **2D audio samples** — no files from `data/sound/2d/` were available. Whether this
-    directory contains `.ogg` only, `.wav` only, or both is UNVERIFIED from samples.
+11. **2D audio samples** — RESOLVED (SAMPLE-VERIFIED 2026-06-12): `data/sound/2d/` contains
+    178 `.ogg` files (no `.wav` files present). BGM tracks (stereo, 44100 Hz Vorbis) reside in
+    this directory; a smaller set of non-positional SFX also resides here.
 
-12. **BGM streaming directory** — whether BGM tracks reside in `data/sound/2d/`,
-    `data/sound/3d/`, or a dedicated directory (e.g. `data/sound/bgm/`) is UNVERIFIED.
+12. **BGM streaming directory** — RESOLVED (SAMPLE-VERIFIED 2026-06-12): BGM tracks reside in
+    `data/sound/2d/`. No separate `data/sound/bgm/` directory exists. Cross-reference
+    `specs/sound.md §13` for the authoritative resolution record.
 
 ---
 
