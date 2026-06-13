@@ -2,7 +2,7 @@
   "mcpServers": {
     "ida": {
       "type": "http",
-      "url": "http://127.0.0.1:13337/mcp"
+      "url": "http://127.0.0.1:13337/mcp?ext=dbg"
     },
     "godot": {
       "type": "stdio",
