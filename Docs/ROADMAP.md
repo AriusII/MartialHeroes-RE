@@ -654,11 +654,11 @@ IDA-exclusive) and owns Tier-1 files; a **W1-Orchestrator** wave fans out the st
   widget tree → action dispatch), and a **debugger-confirmed** VFS open/find/read path (flagship §0.4).
 - Tool baseline verified 2026-06-13: IDA MCP **UP** (static; `doida.exe` sha `63fcaf8e…`, 25 973 funcs,
   2 790 named) · build **0/0** · tests green (Cycle-3 gate) · VFS **reachable** (`clientdata/` + `D:`).
-- **Debugger status (R11):** `dbg_start` fails deterministically — **no debugger backend armed on the
-  IDB** (opened for static analysis; the MCP can't select the backend — GUI-only). Dynamic lanes are
-  **BLOCKED pending maintainer**: IDA → *Debugger ▸ Select debugger ▸ Local Windows debugger*; *Process
-  options ▸ Directory = `D:\d.o online\`*; F9. XTrap anti-cheat may still refuse. Until armed, W1 runs
-  **static + VFS only**; debugger-confirmation lanes fold in when available (no blocking — R11/R4b).
+- **Debugger status — ✅ WORKING (2026-06-13).** Maintainer armed it in the IDA GUI (Local Windows
+  debugger, F9, accept the trust dialog). KEY: **never call `mcp__ida__dbg_start`** (the MCP can't dismiss
+  IDA's modal trust dialog, and a session is already active) — the maintainer F9-launches and the
+  orchestrator **pilots the live session** via `dbg_*` (reads even through PAGE_NOACCESS). Servers are
+  dead → live driving stops at login, but build-time (pre-send) assembly + VFS reads are fully capturable.
 
 ## Spine targets recovered (static scout, canonical names — addresses live only in `_dirty/`)
 Login: `Diamond_LoginWindow_{BuildScene,TickStateMachine,OnAction,HandleInputEvent,RenderCharacterList}`,
@@ -675,7 +675,10 @@ Effects: `EffectManager_LoadBmplistAndManifests`, `{User,Joint,Map,Core}XEffect_
 Mandate captured; scope + out-of-scope set; baseline verified (build 0/0, IDA static UP, VFS reachable);
 spine targets scouted; debugger R11 blocker documented. ROADMAP section written.
 
-## Phase C4-W1 — GIGA RESEARCH (dirty room) — ⏳ PENDING (static+VFS; debugger lanes deferred)
+## Phase C4-W1 — GIGA RESEARCH (dirty room) — ❌ SUPERSEDED, NOT RUN (see reframe in C4-1 below)
+> The blind 15-lane research below was designed before the debugger spine + a read of the existing
+> specs revealed the workflow is ALREADY comprehensively documented. It was **stopped and superseded**.
+> Kept as a historical record only — do NOT resume it. The real Cycle-4 trajectory is C4-1 onward.
 IDA static lanes (sub-waves of 3, single IDB) + VFS harness lanes (wide). Output: `_dirty/workflow/*.md`
 ONLY. Ledger: one writer per `_dirty/workflow/<lane>.md`.
 
@@ -701,10 +704,48 @@ ONLY. Ledger: one writer per `_dirty/workflow/<lane>.md`.
 **W1 EXIT:** lanes 1-3,6,8 (critical path) returned + ≥10 of 15 total; confidence rated; conflicts flagged.
 **W1 STATUS — PENDING.**
 
-## Phase C4-W2 — PROMOTION — ⏳ PENDING (spec-authors, 1 file each; master synth last)
-## Phase C4-E — ENGINEERING — ⏳ PENDING (UI/GUI front-end scenes in C#/Godot)
-## Phase C4-T — TOOLING — ⏳ PENDING (vfsls scan-ui / scan-effect; parsers for UI/effect manifests)
-## Phase C4-R — REVIEW + FIX + GATES — ⏳ PENDING
-## Phase C4-C — CONSOLIDATION — ⏳ PENDING
+## Phase C4-1 — DEBUGGER SPINE + REFRAME — ✅ DONE (2026-06-13)
+Debugger unblocked (status above). Drove the live client through account+password+PIN; captured the login
+blob `[0x2B][lenpfx account][lenpfx PIN]` pre-encryption from PACKETBUF memory (ground truth), confirmed
+the plaintext-8-byte-header / XOR-ROL-payload framing, and identified the long-unnamed optional
+login-blob field as the **second-password / PIN** (`DName::isPin`; caller = the §4.1 secure-context
+builder). Evidence in `_dirty/workflow/login-packet.dyn.md` (gitignored; creds never transcribed).
+**REFRAME:** the existing specs ALREADY document the client workflow comprehensively (`client_workflow.md`
+master + ~15 satellites + ~40 packet YAMLs) — so the blind giga-research (C4-W1 above) is SUPERSEDED.
+Real Cycle-4 work = front-end IMPLEMENTATION + VFS tooling depth + targeted gap-fill. A 4-axis
+gap-assessment (`wf_8651c471-a9e`) found: front-end = disconnected stubs; network crypto/handshake =
+solid but UNWIRED (no outbound sink, no inbound LZ4 decompress, lobby absent, 3/7 spawn missing); VFS
+tooling = near-complete but inspect-only.
 
-— *Maintained by the orchestrator. Update phase statuses in place as waves complete.*
+## Phase C4-2 — PIN PROMOTION + FRONT-END WIRING + VFS TOOLING + DDS FIX — ✅ DONE (committed `24151ac`)
+- PIN gap promoted → `specs/login_flow.md` + `specs/frontend_scenes.md` (journaled; firewall PASS).
+- Front-end WIRED (layer 05): BootFlow orchestrates Login→ServerSelect→PIN→CharSelect→World on
+  Client.Application; new ServerSelectScreen + PinModal; char-select driven by CharacterListEvent;
+  `DEV_OFFLINE_FLOW=1` replay makes the flow walkable with the servers dead.
+- VFS tooling: vfsls gains decode/extract/convert/hexdump/coverage (28-format registry).
+- Fix: DDS dwFourCC off-by-4 in Assets.Mapping/PngConverter (DDS→PNG unblocked) + 2 regression tests.
+- Gate: build 0/0 · 1153+ tests green · clean-room audit PASS. Branch `cycle4-login-capture-frontend-vfs`.
+
+## Phase C4-E2 — FRONT-END VISUAL FIDELITY — ⏳ IN PROGRESS
+A real windowed screenshot showed the login builds the full spec form + loads real atlases but composes
+poorly; root cause = no `[display]` content-scale (the 1024×768 4:3 canvas is un-fitted to the window).
+godot-presentation-engineer is fixing content-scale + login composition and verifying login/world via
+the screenshot loop.
+
+## Phase C4-E4 — NETWORK END-TO-END — ⏳ NEXT (layers 02/04; unit-testable, live path server-gated)
+Outbound `IOutboundPacketSink` (cipher→LZ4→header), inbound LZ4 decompress in FrameSplitter, PacketRouter
+arms for the login/char S2C set, `1/7` select struct (+`1/13`,`1/14`), `3/7` spawn handler + descriptor
+cache, `1/9` version-token derivation, `3/4`·`3/6`·`3/23` handlers, the port-10000 lobby mini-protocol
+client + use-cases.
+
+## Phase C4-E5 — VFS TOOLING DEPTH — ⏳ THEN (layer 03)
+Wire EnvironmentBinParsers (`.bin`, 955 files) + area_inventory into the vfsls registry/decode; add any
+missing parsers (shaders/tga-bmp); broaden decode/convert coverage.
+
+## Phase C4-R / C4-C — REVIEW + GATES + CONSOLIDATION — ⏳ PENDING
+Per-phase gates (build 0/0 + tests + clean-room audit) before each commit; consolidate, update memory.
+
+— *Maintained by the orchestrator. Cycle-4 pivoted from blind research to debugger-confirmed
+implementation; the C4-W1 giga-research table above is HISTORICAL (superseded, not run). Update phase
+statuses in place as waves complete. (Distinct from `ROADMAP-CAMPAGNE2.md` — that is a separate
+parallel session.)*

@@ -145,34 +145,44 @@ public sealed partial class LoginScreen : Control
         int widgetCount = 0;
 
         // --- [1] Backdrop base — solid colour fallback (shown when VFS is offline). ---
+        //     Dark blue-violet, typical of the legacy MMORPG night/dungeon aesthetic.
+        //     // PLAUSIBLE (no spec for canvas background colour; legacy sets D3D clear colour not captured).
         var solid = new ColorRect
         {
             Name = "BackdropBase",
-            Color = new Color(0.06f, 0.05f, 0.08f),
+            Color = new Color(0.04f, 0.04f, 0.10f),
         };
         solid.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         AddChild(solid);
         widgetCount++;
 
         // --- [2] Intro banner art — loginwindow_02.dds panning strip.
-        //     spec §8.1 site "Intro banner" / §9.1 AtlasLoginWindow02.
-        //     Rendered as the hero backdrop at full-canvas stretch when available. ---
+        //     spec §8.1 site "Intro banner": dst (—,97,202,372); x is register-fed/centre-computed
+        //     (i.e. the original animates it in from the side; exact x is a runtime value not in spec).
+        //     We place it at x=0 (left side, visible under the option tabs) as a plausible static
+        //     approximation of the animated entry position. Height=372 places it y=97..469 panel-local,
+        //     which maps to y=(BandTopY+97)..(BandTopY+469) absolu on the canvas.
+        //     PLAUSIBLE POSITION (exact x not in spec — runtime animated).
+        //     spec: Docs/RE/specs/ui_system.md §8.1 — "Intro banner BTN7 (—,97,202,372)". CODE-CONFIRMED.
+        //     spec: Docs/RE/specs/ui_system.md §9.1 — loginwindow_02.dds panning banner. CODE-CONFIRMED.
         Texture2D? bannerArt = _assets.LoadAtlas(LoginLayout.AtlasLoginWindow02);
-        if (bannerArt is null)
-        {
-            // Fallback: try login_slice1 as backdrop art.
-            bannerArt = _assets.LoadAtlas(LoginLayout.AtlasLoginSlice1);
-        }
-
         if (bannerArt is not null)
         {
             var artRect = new TextureRect
             {
-                Name = "BannerBackdrop",
+                Name = "BannerStrip",
                 Texture = bannerArt,
-                StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered,
+                // Scale within its panel-local rect: spec gives (w=202, h=372) for the strip.
+                // Keep aspect to display faithfully rather than stretching.
+                StretchMode = TextureRect.StretchModeEnum.KeepAspect,
+                // Panel-local position: x=0 (plausible left anchor), y=BandTopY+97 adjusted for
+                // the fact that BannerStrip is added as a child of LoginScreen (not the band).
+                // We add it after the band so it renders on top of the dark backdrop but under widgets.
+                Position = new Vector2(LoginLayout.BannerStripX,
+                    LoginLayout.BandTopY + LoginLayout.BannerStripLocalY),
+                Size = new Vector2(LoginLayout.BannerStripW, LoginLayout.BannerStripH),
+                MouseFilter = MouseFilterEnum.Ignore,
             };
-            artRect.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
             AddChild(artRect);
             widgetCount++;
         }
@@ -185,35 +195,66 @@ public sealed partial class LoginScreen : Control
         band.CustomMinimumSize = band.Size;
         AddChild(band);
 
-        // --- [3a] Form panel backing — semi-opaque dark rect placed behind all form widgets.
-        //     The spec (§8.1, §9.1) does not document a dedicated form-panel chrome sub-rect on
-        //     loginwindow.dds or login_slice1.dds; no form-panel art region was recovered.
-        //     We add a plain ColorRect so buttons/textboxes remain legible over the full-canvas
-        //     loginwindow_02.dds banner regardless of VFS availability.
-        //     // PLAUSIBLE backing (legacy panel art region unrecovered)
+        // --- [3a] Form panel backing — semi-opaque rect placed behind form widgets only.
+        //     The spec (§8.1, §9.1) does not document a dedicated form-panel chrome sub-rect;
+        //     no form-panel art region was recovered. We add a ColorRect so buttons/textboxes
+        //     remain legible. The backing covers the right half of the band where the form widgets
+        //     live (x=380..810 panel-local, covering ID/PW textboxes, OK, ServerList, SaveId).
+        //     The left zone (x=0..300) is left clear so the loginwindow_02.dds banner strip shows.
+        //     // PLAUSIBLE backing geometry (legacy panel art unrecovered; covers widget cluster)
+        //     spec: Docs/RE/specs/ui_system.md §8.1 (form widget cluster x=390..706). CODE-CONFIRMED coords.
         var formBacking = new ColorRect
         {
             Name = "FormBacking",
-            Color = new Color(0.04f, 0.03f, 0.07f, 0.78f),
+            Color = LoginLayout.FormBackingColor,
+            Position = new Vector2(LoginLayout.FormBackingX, LoginLayout.FormBackingY),
+            Size = new Vector2(LoginLayout.FormBackingW, LoginLayout.FormBackingH),
         };
-        formBacking.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         formBacking.MouseFilter = MouseFilterEnum.Ignore;
         band.AddChild(formBacking); // inserted first → drawn behind all sibling widgets
         widgetCount++;
 
         // --- [4] Account / ID textbox — @ (390,32) 102×13, login_slice1.dds src (615,404).
-        //     spec §8.1 "ID/account textbox" — IME slot 16, maxlen 6. CODE-CONFIRMED. ---
+        //     spec §8.1 "ID/account textbox" — IME slot 16, maxlen 6. CODE-CONFIRMED.
+        //     13px spec height is too small for a usable Godot LineEdit; we render at 22px for
+        //     legibility. Position (x,y) is spec-exact; width (102) is spec-exact.
         _accountEdit = MakeTextbox(masked: false, maxLength: 6);
-        PlaceLocal(_accountEdit, LoginLayout.AccountBox);
+        PlaceLocal(_accountEdit, LoginLayout.AccountBox, sizeFromRect: false);
+        _accountEdit.Size = new Vector2(LoginLayout.AccountBox.W, LoginLayout.TextboxRenderH);
+        _accountEdit.CustomMinimumSize = new Vector2(LoginLayout.AccountBox.W, LoginLayout.TextboxRenderH);
         band.AddChild(_accountEdit);
         widgetCount++;
 
+        // --- [4a] ID label — "ID:" prefix label to the left of the account textbox. ---
+        //     Not in the widget table (the legacy used a GULabel atlas sprite with text from msg.xdb).
+        //     Added here for legibility in the offline build. PLAUSIBLE.
+        //     msg id 4001 might be "ID" or another caption — exact mapping not confirmed; fall back.
+        var idLabel = WidgetFactory.MakeLabel("ID", LoginLayout.FontBodyHeight,
+            new Color(0.90f, 0.90f, 0.75f));
+        idLabel.Position = new Vector2(LoginLayout.AccountBox.X - 28, LoginLayout.AccountBox.Y + 4);
+        idLabel.Size = new Vector2(26, 16);
+        idLabel.HorizontalAlignment = HorizontalAlignment.Right;
+        band.AddChild(idLabel);
+
         // --- [5] Password textbox — @ (568,32) 102×13, login_slice1.dds src (615,404), masked.
-        //     spec §8.1 "Password textbox" — IME slot 12, maxlen 129. CODE-CONFIRMED. ---
+        //     spec §8.1 "Password textbox" — IME slot 12, maxlen 129. CODE-CONFIRMED.
+        //     Same height adjustment as the ID textbox (13px → 22px render height).
         _passwordEdit = MakeTextbox(masked: true, maxLength: 129);
-        PlaceLocal(_passwordEdit, LoginLayout.PasswordBox);
+        PlaceLocal(_passwordEdit, LoginLayout.PasswordBox, sizeFromRect: false);
+        _passwordEdit.Size = new Vector2(LoginLayout.PasswordBox.W, LoginLayout.TextboxRenderH);
+        _passwordEdit.CustomMinimumSize = new Vector2(LoginLayout.PasswordBox.W, LoginLayout.TextboxRenderH);
         band.AddChild(_passwordEdit);
         widgetCount++;
+
+        // --- [5a] PW label — "PW:" prefix label. PLAUSIBLE (as per [4a]). ---
+        // msg id 4001 = "ID", 4002 = "Server List" (used by ServerList button below).
+        // "PW" has no dedicated msg id in the 4001-4022 range; fall back to hardcoded string.
+        var pwLabel = WidgetFactory.MakeLabel("PW", LoginLayout.FontBodyHeight,
+            new Color(0.90f, 0.90f, 0.75f));
+        pwLabel.Position = new Vector2(LoginLayout.PasswordBox.X - 28, LoginLayout.PasswordBox.Y + 4);
+        pwLabel.Size = new Vector2(26, 16);
+        pwLabel.HorizontalAlignment = HorizontalAlignment.Right;
+        band.AddChild(pwLabel);
 
         // --- [6] Save-ID checkbox — @ (694,86) 13×13, login_slice1.dds.
         //     Unchecked NORMAL (717,398); checked = PRESSED (730,398).

@@ -154,6 +154,7 @@ public sealed partial class StateButton : Control
     private float _targetAlpha = 1f; // 0 = hiding, 1 = showing
 
     // Godot child controls built in _Ready
+    private ColorRect _fallbackBg = null!;
     private TextureRect _spriteRect = null!;
     private Label _captionLabel = null!;
 
@@ -166,6 +167,21 @@ public sealed partial class StateButton : Control
     {
         // The button Control itself is transparent; children render the content.
         MouseFilter = MouseFilterEnum.Stop; // capture mouse events
+
+        // Fallback background — a visible rect shown under the atlas sprite so the button area
+        // is always legible even when the atlas DXT3 pixels have alpha=0 (transparent field).
+        // The legacy client drew atlas sprites over a coloured panel background, so the net result
+        // was an opaque button face. We approximate with a darker-than-FormBacking rectangle.
+        // // PLAUSIBLE fallback colour (legacy panel art not recovered; darker than form band)
+        _fallbackBg = new ColorRect
+        {
+            Name = "FallbackBg",
+            // Darker and cooler than FormBacking (0.30, 0.20, 0.12) so buttons are distinguishable.
+            Color = new Color(0.10f, 0.07f, 0.04f, 0.85f),
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        _fallbackBg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        AddChild(_fallbackBg);
 
         // Sprite layer — fills the button rect exactly.
         _spriteRect = new TextureRect

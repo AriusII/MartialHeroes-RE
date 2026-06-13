@@ -29,12 +29,47 @@ public static class LoginLayout
     public const int RefWidth = 1024;
     public const int RefHeight = 768;
 
-    // --- Login form band. spec §8.1 — the widgets below are children of an outer panel band.
-    //     The root backdrop panel is 1024×398; the animated band starts below y=0 on the panel.
-    //     Historically documented as BandTopY=110.  The widget table coordinates in §8.1 are
-    //     panel-local (relative to the form panel), so BandTopY positions the panel on the canvas. ---
-    public const int BandTopY = 110; // form panel top on the reference canvas
+    // --- Login form band — the GUWindow root panel on the 1024×768 canvas.
+    //     spec §8.1 — widget coordinates are *relative to their parent panel* (§8.0).
+    //     The panel's absolute position on the canvas is not in the spec; the value 110 is a
+    //     plausible prior estimate. Evidence: Quit/Help strip at y=−3 must still be on-screen,
+    //     so BandTopY > 3; banner strip at y=97 panel-local → absolu = BandTopY+97; option tabs
+    //     at y=82 panel-local. A panel top of 110 places the Quit strip at y=107 (just visible)
+    //     and the banner at y=207, which fits the legacy screenshot appearance.
+    //     // PLAUSIBLE offset (exact panel y not in spec — use BandTopY=110 as working approximation)
+    //     spec: Docs/RE/specs/ui_system.md §8.1 — coords are panel-local; §8.0 — anchor semantics.
+    public const int BandTopY = 110; // form panel top on the reference canvas — PLAUSIBLE, not in spec
     public const int BandHeight = 398; // spec §8.1 "Root backdrop panel" h=398
+
+    // --- loginwindow_02.dds banner strip geometry.
+    //     spec §8.1 site "Intro banner" BTN7 (—,97,202,372); x is register-fed (runtime animated).
+    //     We use x=0 (panel-local left) as a static plausible approximation.
+    //     Strip is added directly to LoginScreen (not the band) at canvas-absolute position.
+    //     // PLAUSIBLE x=0 (exact runtime x not in spec)
+    //     spec: Docs/RE/specs/ui_system.md §8.1 "Intro banner (—,97,202,372)". CODE-CONFIRMED dims.
+    public const int BannerStripX = 0;        // PLAUSIBLE (register-fed x not in spec)
+    public const int BannerStripLocalY = 97;  // spec §8.1 y=97 panel-local. CODE-CONFIRMED.
+    public const int BannerStripW = 202;       // spec §8.1 w=202. CODE-CONFIRMED.
+    public const int BannerStripH = 372;       // spec §8.1 h=372. CODE-CONFIRMED.
+
+    // --- Form backing geometry — covers the widget cluster (x=380..810, y=−10..400 panel-local).
+    //     No dedicated panel art was recovered; this is a plausible solid backing.
+    //     Spec widget cluster: x range = 390..706 (AccountBox..SaveIdCheck+label), y range = −3..205.
+    //     We pad slightly for visual comfort: x=370, y=−10, w=430, h=220.
+    //     // PLAUSIBLE backing (art not in spec)
+    public const int FormBackingX = 370;   // left edge, panel-local, covers form cluster
+    public const int FormBackingY = -10;   // top edge, panel-local (Quit strip is at y=-3)
+    public const int FormBackingW = 430;   // covers x=370..800 (ID/PW/OK/ServerList/SaveId)
+    public const int FormBackingH = 220;   // covers y=-10..210 (all form widgets)
+
+    // Form backing colour — parchment-tinted panel backing behind the form widget cluster.
+    // Must clearly contrast with the full-canvas black backdrop (0.06, 0.05, 0.08).
+    // We use a mid-tone brown (approximately #6B4A2A) that reads as parchment/wood panel and
+    // provides enough contrast for button textures and text to be legible.
+    // // PLAUSIBLE colour (no panel art in spec — legacy used a DDS chrome sub-rect not yet recovered)
+    // global::Godot.Color avoids CS0234 namespace collision with MartialHeroes.Client.Godot.*
+    // spec: CLAUDE.md "Known Godot Pitfalls — Namespace collision".
+    public static readonly global::Godot.Color FormBackingColor = new(0.30f, 0.20f, 0.12f, 0.90f);
 
     // =========================================================================
     // Atlas path constants. spec §9.1 login asset manifest. CODE-CONFIRMED.
@@ -164,6 +199,14 @@ public static class LoginLayout
 
     // Slot 4: DotumChe h=12, w=6, weight 800 — used for button captions (bold small).
     public const int FontLabelHeight = 12;
+
+    // --- Textbox render height override.
+    //     The spec-recovered size is (102,13) which is too small for a usable Godot LineEdit.
+    //     We render textboxes at 22px height (the legacy drew text ON TOP of the atlas frame at the
+    //     font height, not inside a clipped 13px box — see LoginScreen.cs MakeTextbox comment).
+    //     The x/width (102) and position (x,y) remain spec-exact.
+    //     // PRESENTATION OVERRIDE — legacy drew text over atlas, not inside a clipped 13px box.
+    public const int TextboxRenderH = 22; // render height for LineEdit widgets (spec=13; not clipped)
 
     // =========================================================================
     // msg.xdb caption ids. spec §10 / §1.9. CODE-CONFIRMED (ids); captions VFS-only.
