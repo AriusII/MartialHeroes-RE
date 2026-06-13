@@ -733,15 +733,17 @@ viewport (3D World unaffected). Plus a project-wide gap fixed: a FontBootstrap a
 (login + char-select + World HUD), not tofu. Login form backing/labels + StateButton fallback bg (the
 legacy DXT3 button atlas regions are genuinely alpha=0 — RE follow-up). Verified via screenshots.
 
-## Phase C4-E4 — NETWORK END-TO-END — ◑ E4-a + E4-b DONE; E4-c DEFERRED
+## Phase C4-E4 — NETWORK END-TO-END — ✅ DONE (E4-a + E4-b + E4-c; code-complete, server-gated for live)
 - E4-a (committed `beb27af`): concrete `CryptoOutboundPacketSink` (cipher→LZ4→header, crypto injected as
   delegates), inbound LZ4 decompress in FrameSplitter, the port-10000 `LobbyClient`, and the login/select
   wire structs (1/7, 3/7, 1/13, 1/14, 1/6-opaque). +30 tests.
 - E4-b (committed `c18a68b`): completed enter-game → SPAWN — 3/7 handler + `CharacterSelectionStore`
   (descriptor cache) + @BLANK@ routing + slot≤4 guard + 1/9 version-token derivation (→21149). +8 tests.
-- E4-c — DEFERRED (server-gated, unit-test only): lobby ORCHESTRATION (needs `ILobbyClient` in
-  Network.Abstractions + DTOs + the concrete LobbyClient implementing it), the `3/4`·`3/6`·`3/23`
-  char-management result structs + handlers, the `1/6` login-blob emit (collision unresolved). Follow-up.
+- E4-c (committed `e4a8df9`): network completeness — `ILobbyClient` + DTOs (Abstractions), `LobbyClient`
+  implements it (Transport), the `3/4`·`3/6`·`3/23` result structs + handlers, lobby orchestration
+  use-cases (ServerListReceivedEvent / ChannelEndpointResolvedEvent) + char-mgmt result events, and a
+  flagged-OFF `1/6` login-blob emit. +25 tests. ONLY deferred bit: wire the front-end ServerSelect to the
+  real ILobbyClient (server-gated — the dev-offline replay stays the demo path with the servers dead).
 
 ## Phase C4-E5 — VFS TOOLING DEPTH — ✅ DONE (committed `72e02ef`)
 Wired the env/region `.bin` family (map_option/fog/material/light/stardome/clouddome/cloud_cycle/
