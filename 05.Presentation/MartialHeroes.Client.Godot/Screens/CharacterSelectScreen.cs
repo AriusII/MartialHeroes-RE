@@ -69,10 +69,12 @@ public sealed partial class CharacterSelectScreen : Control
     // =========================================================================
 
     /// <summary>Raised when the player enters the game with the selected slot.</summary>
-    [Signal] public delegate void EnterGameRequestedEventHandler(string characterName);
+    [Signal]
+    public delegate void EnterGameRequestedEventHandler(string characterName);
 
     /// <summary>Raised when the player goes back to the login/select entry.</summary>
-    [Signal] public delegate void BackRequestedEventHandler();
+    [Signal]
+    public delegate void BackRequestedEventHandler();
 
     // =========================================================================
     // Demo roster (offline stub)
@@ -84,9 +86,9 @@ public sealed partial class CharacterSelectScreen : Control
 
     private static readonly DemoSlot[] DemoRoster =
     [
-        new DemoSlot(Name: "Musa",   ClassName: "무사", Level: 10, Hp: 350, UiClassIndex: 1, FaceIndex: 2),
-        new DemoSlot(Name: "Blader", ClassName: "격사", Level:  5, Hp: 280, UiClassIndex: 2, FaceIndex: 4),
-        new DemoSlot(Name: "Warrior",ClassName: "전사", Level:  8, Hp: 420, UiClassIndex: 3, FaceIndex: 1),
+        new DemoSlot(Name: "Musa", ClassName: "무사", Level: 10, Hp: 350, UiClassIndex: 1, FaceIndex: 2),
+        new DemoSlot(Name: "Blader", ClassName: "격사", Level: 5, Hp: 280, UiClassIndex: 2, FaceIndex: 4),
+        new DemoSlot(Name: "Warrior", ClassName: "전사", Level: 8, Hp: 420, UiClassIndex: 3, FaceIndex: 1),
     ];
 
     private const int MaxSlots = 5; // spec: frontend_scenes.md §3.1 — "at most 5 slots". CODE-CONFIRMED.
@@ -101,17 +103,17 @@ public sealed partial class CharacterSelectScreen : Control
     private bool _ownsAssets;
 
     // Slot info labels (refreshed on selection change).
-    private Label _infoName  = null!;
+    private Label _infoName = null!;
     private Label _infoLevel = null!;
     private Label _infoClass = null!;
 
     // Create sub-form local state (view only, no domain mutation).
     private Control _createForm = null!;
     private bool _createFormVisible;
-    private int _createUiClassIndex;    // 0..3
+    private int _createUiClassIndex; // 0..3
     private int _createFaceIndex = CharacterSelectLayout.FaceIndexMin; // 1..7
     private Label _createClassLabel = null!;
-    private Label _createFaceLabel  = null!;
+    private Label _createFaceLabel = null!;
 
     // 3D preview controls (one per slot, null = empty slot placeholder).
     private readonly CharPreview3D?[] _previews = new CharPreview3D?[MaxSlots];
@@ -242,9 +244,9 @@ public sealed partial class CharacterSelectScreen : Control
         widgetCount += BuildStatGrid(infoPanel);
 
         // Char name / level / class info labels.
-        _infoName  = BuildInfoLabel(infoPanel,  "Name",  new Vector2(8, 8));
-        _infoLevel = BuildInfoLabel(infoPanel,  "Level", new Vector2(8, 22));
-        _infoClass = BuildInfoLabel(infoPanel,  "Class", new Vector2(8, 36));
+        _infoName = BuildInfoLabel(infoPanel, "Name", new Vector2(8, 8));
+        _infoLevel = BuildInfoLabel(infoPanel, "Level", new Vector2(8, 22));
+        _infoClass = BuildInfoLabel(infoPanel, "Class", new Vector2(8, 36));
         widgetCount += 3;
 
         // Create / Delete / Enter buttons using StateButton with CORRECT action IDs.
@@ -333,8 +335,9 @@ public sealed partial class CharacterSelectScreen : Control
                 CharacterSelectLayout.AtlasLoginWindow,
                 CharacterSelectLayout.StatIconCol1X, y,
                 CharacterSelectLayout.StatIconW, CharacterSelectLayout.StatIconH,
-                CharacterSelectLayout.StatIconCol1NormalSrcX,  CharacterSelectLayout.StatIconCol1NormalSrcY,
-                CharacterSelectLayout.StatIconCol1NormalSrcX,  CharacterSelectLayout.StatIconCol1NormalSrcY,  // HOVER=NORMAL (2-state)
+                CharacterSelectLayout.StatIconCol1NormalSrcX, CharacterSelectLayout.StatIconCol1NormalSrcY,
+                CharacterSelectLayout.StatIconCol1NormalSrcX,
+                CharacterSelectLayout.StatIconCol1NormalSrcY, // HOVER=NORMAL (2-state)
                 CharacterSelectLayout.StatIconCol1PressedSrcX, CharacterSelectLayout.StatIconCol1PressedSrcY,
                 actionId: 61 + row * 2); // actions 61..74 cover the stat-grid range, spec §8.2
             parent.AddChild(col1);
@@ -347,8 +350,9 @@ public sealed partial class CharacterSelectScreen : Control
                 CharacterSelectLayout.AtlasLoginWindow,
                 CharacterSelectLayout.StatIconCol2X, y,
                 CharacterSelectLayout.StatIconW, CharacterSelectLayout.StatIconH,
-                CharacterSelectLayout.StatIconCol2NormalSrcX,  CharacterSelectLayout.StatIconCol2NormalSrcY,
-                CharacterSelectLayout.StatIconCol2NormalSrcX,  CharacterSelectLayout.StatIconCol2NormalSrcY,  // HOVER=NORMAL
+                CharacterSelectLayout.StatIconCol2NormalSrcX, CharacterSelectLayout.StatIconCol2NormalSrcY,
+                CharacterSelectLayout.StatIconCol2NormalSrcX,
+                CharacterSelectLayout.StatIconCol2NormalSrcY, // HOVER=NORMAL
                 CharacterSelectLayout.StatIconCol2PressedSrcX, CharacterSelectLayout.StatIconCol2PressedSrcY,
                 actionId: 62 + row * 2);
             parent.AddChild(col2);
@@ -367,6 +371,7 @@ public sealed partial class CharacterSelectScreen : Control
             parent.AddChild(valLabel);
             count++;
         }
+
         return count;
     }
 
@@ -384,10 +389,10 @@ public sealed partial class CharacterSelectScreen : Control
 
         // Layout: 5 slots from x=260 to x=1010, each 148 px wide. y=70..530 (460 px tall).
         const float slotX0 = 260f;
-        const float slotW  = 148f;
+        const float slotW = 148f;
         const float slotGap = 2f;
-        const float slotY  = 70f;
-        const float slotH  = 460f;
+        const float slotY = 70f;
+        const float slotH = 460f;
 
         int count = 0;
         for (int i = 0; i < MaxSlots; i++)
@@ -414,6 +419,7 @@ public sealed partial class CharacterSelectScreen : Control
 
             GD.Print($"[Screens] CharacterSelectScreen: preview slot {i} occupied={occupied} phase={phase:F2}s.");
         }
+
         return count;
     }
 
@@ -424,10 +430,10 @@ public sealed partial class CharacterSelectScreen : Control
     private int BuildSlotSelectorRow()
     {
         const float slotX0 = 260f;
-        const float slotW  = 148f;
+        const float slotW = 148f;
         const float slotGap = 2f;
-        const float rowY   = 535f;
-        const float rowH   = 28f;
+        const float rowY = 535f;
+        const float rowH = 28f;
 
         int count = 0;
         for (int i = 0; i < MaxSlots; i++)
@@ -457,6 +463,7 @@ public sealed partial class CharacterSelectScreen : Control
             _slotButtons[i] = btn;
             count++;
         }
+
         return count;
     }
 
@@ -626,7 +633,7 @@ public sealed partial class CharacterSelectScreen : Control
         statHeader.Position = new Vector2(12, 310);
         form.AddChild(statHeader);
 
-        string[] statNames  = ["HP", "MP", "STR", "INT", "DEX", "STA"];
+        string[] statNames = ["HP", "MP", "STR", "INT", "DEX", "STA"];
         int[] classBaseStats = ClassBaseStats(_createUiClassIndex);
         for (int s = 0; s < 6; s++)
         {
@@ -715,7 +722,8 @@ public sealed partial class CharacterSelectScreen : Control
         // spec: frontend_scenes.md §7 — "Enter/select (action 6) → SFX 920100200; send 1/9 (40B);
         // cache 880B descriptor + 96B stats; write state 5 (In-game)". CODE-CONFIRMED.
         // In the offline stub we skip the wire send and cache; just emit the transition signal.
-        GD.Print($"[Screens] CharacterSelectScreen: Enter Game (action 6, offline stub) — character='{name}' slot={_selectedSlot}.");
+        GD.Print(
+            $"[Screens] CharacterSelectScreen: Enter Game (action 6, offline stub) — character='{name}' slot={_selectedSlot}.");
         EmitSignal(SignalName.EnterGameRequested, name);
     }
 
@@ -796,10 +804,10 @@ public sealed partial class CharacterSelectScreen : Control
         return internalClass switch
         {
             1 => [350, 100, 15, 8, 12, 14],
-            2 => [280, 150,  8,15, 14, 10],
+            2 => [280, 150, 8, 15, 14, 10],
             3 => [300, 120, 14, 9, 15, 12],
-            4 => [420,  80, 18, 6, 10, 18],
-            _ => [100, 100, 10,10, 10, 10],
+            4 => [420, 80, 18, 6, 10, 18],
+            _ => [100, 100, 10, 10, 10, 10],
         };
     }
 
@@ -813,13 +821,13 @@ public sealed partial class CharacterSelectScreen : Control
         {
             DemoSlot slot = DemoRoster[_selectedSlot];
             // spec: frontend_scenes.md §3.2 — slot info line shows name, level, and last position.
-            _infoName.Text  = $"Name: {slot.Name}";
+            _infoName.Text = $"Name: {slot.Name}";
             _infoLevel.Text = $"Lv {slot.Level}";
             _infoClass.Text = ClassCaption(slot.UiClassIndex);
         }
         else
         {
-            _infoName.Text  = "Name: (empty)";
+            _infoName.Text = "Name: (empty)";
             _infoLevel.Text = "Lv –";
             _infoClass.Text = "Class: –";
         }
@@ -863,8 +871,8 @@ public sealed partial class CharacterSelectScreen : Control
             _assets, atlas,
             norm.X, norm.Y, norm.W, norm.H,
             norm.SrcX, norm.SrcY,
-            hov.SrcX,  hov.SrcY,
-            hov.SrcX,  hov.SrcY, // PRESSED = HOVER, spec §1.5
+            hov.SrcX, hov.SrcY,
+            hov.SrcX, hov.SrcY, // PRESSED = HOVER, spec §1.5
             actionId, caption);
     }
 
@@ -877,8 +885,8 @@ public sealed partial class CharacterSelectScreen : Control
             _assets, atlas,
             norm.X, norm.Y, norm.W, norm.H,
             norm.SrcX, norm.SrcY,
-            hov.SrcX,  hov.SrcY,
-            hov.SrcX,  hov.SrcY, // PRESSED = HOVER, spec §1.5
+            hov.SrcX, hov.SrcY,
+            hov.SrcX, hov.SrcY, // PRESSED = HOVER, spec §1.5
             actionId, caption);
     }
 
@@ -926,6 +934,10 @@ public sealed partial class CharacterSelectScreen : Control
     /// <para>FaceIndex: 1..7 (spec §4.2).</para>
     /// </summary>
     private readonly record struct DemoSlot(
-        string Name, string ClassName, int Level, int Hp,
-        int UiClassIndex, int FaceIndex);
+        string Name,
+        string ClassName,
+        int Level,
+        int Hp,
+        int UiClassIndex,
+        int FaceIndex);
 }

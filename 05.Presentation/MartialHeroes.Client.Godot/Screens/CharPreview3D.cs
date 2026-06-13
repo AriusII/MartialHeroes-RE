@@ -343,6 +343,7 @@ public sealed partial class CharPreview3D : Control
                 GD.PrintErr($"[CharPreview3D] slot={SlotIndex} .skn '{sknPath}' empty in VFS.");
                 return null;
             }
+
             mesh = SknParser.Parse(raw);
         }
         catch (Exception ex)

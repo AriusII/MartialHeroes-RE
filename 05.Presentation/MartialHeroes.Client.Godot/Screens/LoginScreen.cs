@@ -83,13 +83,13 @@ public sealed partial class LoginScreen : Control
     // View state (no domain state — positions, focus, modal open/close only)
     // -------------------------------------------------------------------------
 
-    private LineEdit _accountEdit   = null!;
-    private LineEdit _passwordEdit  = null!;
-    private Label   _toast          = null!;
-    private Control _quitModal      = null!;
+    private LineEdit _accountEdit = null!;
+    private LineEdit _passwordEdit = null!;
+    private Label _toast = null!;
+    private Control _quitModal = null!;
 
-    private UiAssetLoader _assets  = null!;
-    private bool          _ownsAssets;
+    private UiAssetLoader _assets = null!;
+    private bool _ownsAssets;
 
     /// <summary>
     /// Optionally inject a shared asset loader. When null the screen opens its own and
@@ -103,7 +103,7 @@ public sealed partial class LoginScreen : Control
 
     public override void _Ready()
     {
-        _assets    = SharedAssets ?? UiAssetLoader.Open();
+        _assets = SharedAssets ?? UiAssetLoader.Open();
         _ownsAssets = SharedAssets is null;
 
         try
@@ -136,7 +136,7 @@ public sealed partial class LoginScreen : Control
         // --- [1] Backdrop base — solid colour fallback (shown when VFS is offline). ---
         var solid = new ColorRect
         {
-            Name  = "BackdropBase",
+            Name = "BackdropBase",
             Color = new Color(0.06f, 0.05f, 0.08f),
         };
         solid.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
@@ -152,12 +152,13 @@ public sealed partial class LoginScreen : Control
             // Fallback: try login_slice1 as backdrop art.
             bannerArt = _assets.LoadAtlas(LoginLayout.AtlasLoginSlice1);
         }
+
         if (bannerArt is not null)
         {
             var artRect = new TextureRect
             {
-                Name        = "BannerBackdrop",
-                Texture     = bannerArt,
+                Name = "BannerBackdrop",
+                Texture = bannerArt,
                 StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered,
             };
             artRect.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
@@ -168,9 +169,9 @@ public sealed partial class LoginScreen : Control
         // --- [3] Form band — widget local coordinates from spec §8.1 are relative to this panel. ---
         // spec §8.0 — "Widget coordinates are in pixels, relative to their parent panel's origin."
         var band = new Control { Name = "LoginBand" };
-        band.Position            = new Vector2(0, LoginLayout.BandTopY);
-        band.Size                = new Vector2(LoginLayout.RefWidth, LoginLayout.BandHeight);
-        band.CustomMinimumSize   = band.Size;
+        band.Position = new Vector2(0, LoginLayout.BandTopY);
+        band.Size = new Vector2(LoginLayout.RefWidth, LoginLayout.BandHeight);
+        band.CustomMinimumSize = band.Size;
         AddChild(band);
 
         // --- [3a] Form panel backing — semi-opaque dark rect placed behind all form widgets.
@@ -181,7 +182,7 @@ public sealed partial class LoginScreen : Control
         //     // PLAUSIBLE backing (legacy panel art region unrecovered)
         var formBacking = new ColorRect
         {
-            Name  = "FormBacking",
+            Name = "FormBacking",
             Color = new Color(0.04f, 0.03f, 0.07f, 0.78f),
         };
         formBacking.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
@@ -210,9 +211,9 @@ public sealed partial class LoginScreen : Control
             _assets, LoginLayout.AtlasLoginSlice1,
             LoginLayout.SaveIdCheck.X, LoginLayout.SaveIdCheck.Y,
             LoginLayout.SaveIdCheck.W, LoginLayout.SaveIdCheck.H,
-            LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY,     // NORMAL (unchecked)
-            LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY,     // HOVER = NORMAL
-            LoginLayout.SaveIdCheckedSrcX, LoginLayout.SaveIdCheckedSrcY,   // PRESSED (checked)
+            LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY, // NORMAL (unchecked)
+            LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY, // HOVER = NORMAL
+            LoginLayout.SaveIdCheckedSrcX, LoginLayout.SaveIdCheckedSrcY, // PRESSED (checked)
             LoginLayout.ActionSaveId,
             caption: "",
             captionTint: Colors.White);
@@ -220,7 +221,7 @@ public sealed partial class LoginScreen : Control
         // Caption label "Save ID" — inline beside the checkbox.
         // In the real client this is a GULabel drawn at the same row, not part of the checkbox widget.
         var saveIdLabel = WidgetFactory.MakeLabel(
-            _assets.Text(4004u, "Save ID"),           // msg id 4004 is in the 4001-4022 range
+            _assets.Text(4004u, "Save ID"), // msg id 4004 is in the 4001-4022 range
             LoginLayout.FontLabelHeight,
             new Color(0.85f, 0.85f, 0.9f));
         saveIdLabel.Position = new Vector2(
@@ -236,11 +237,11 @@ public sealed partial class LoginScreen : Control
         //     spec §8.1 "OK/Login button". CODE-CONFIRMED. ---
         var okBtn = WidgetFactory.MakeStateButton(
             _assets, LoginLayout.AtlasLoginSlice1,
-            LoginLayout.OkButton.X,   LoginLayout.OkButton.Y,
-            LoginLayout.OkButton.W,   LoginLayout.OkButton.H,
-            LoginLayout.OkButton.SrcX, LoginLayout.OkButton.SrcY,   // NORMAL (266,398)
-            LoginLayout.OkHoverSrcX,   LoginLayout.OkHoverSrcY,     // HOVER  (490,398)
-            LoginLayout.OkHoverSrcX,   LoginLayout.OkHoverSrcY,     // PRESSED (490,398) — HOVER==PRESSED per spec
+            LoginLayout.OkButton.X, LoginLayout.OkButton.Y,
+            LoginLayout.OkButton.W, LoginLayout.OkButton.H,
+            LoginLayout.OkButton.SrcX, LoginLayout.OkButton.SrcY, // NORMAL (266,398)
+            LoginLayout.OkHoverSrcX, LoginLayout.OkHoverSrcY, // HOVER  (490,398)
+            LoginLayout.OkHoverSrcX, LoginLayout.OkHoverSrcY, // PRESSED (490,398) — HOVER==PRESSED per spec
             LoginLayout.ActionOk,
             caption: _assets.Text(4003u, "Login"),
             captionTint: Colors.White);
@@ -258,13 +259,13 @@ public sealed partial class LoginScreen : Control
             LoginLayout.ServerListButton.X, LoginLayout.ServerListButton.Y,
             LoginLayout.ServerListButton.W, LoginLayout.ServerListButton.H,
             LoginLayout.ServerListButton.SrcX, LoginLayout.ServerListButton.SrcY, // NORMAL (154,398)
-            LoginLayout.ServerListHoverSrcX,   LoginLayout.ServerListHoverSrcY,   // HOVER  (378,398)
-            LoginLayout.ServerListHoverSrcX,   LoginLayout.ServerListHoverSrcY,   // PRESSED (378,398)
+            LoginLayout.ServerListHoverSrcX, LoginLayout.ServerListHoverSrcY, // HOVER  (378,398)
+            LoginLayout.ServerListHoverSrcX, LoginLayout.ServerListHoverSrcY, // PRESSED (378,398)
             LoginLayout.ActionServerList,
             caption: _assets.Text(4002u, "Server List"),
             captionTint: Colors.White);
-        serverBtn.Name       = "ServerListButton";
-        serverBtn.IsDisabled = true;  // OFFLINE STUB — spec §1.5 disabled = NORMAL frame + grey caption
+        serverBtn.Name = "ServerListButton";
+        serverBtn.IsDisabled = true; // OFFLINE STUB — spec §1.5 disabled = NORMAL frame + grey caption
         band.AddChild(serverBtn);
         widgetCount++;
 
@@ -277,8 +278,8 @@ public sealed partial class LoginScreen : Control
             LoginLayout.QuitButton.X, LoginLayout.QuitButton.Y,
             LoginLayout.QuitButton.W, LoginLayout.QuitButton.H,
             LoginLayout.QuitButton.SrcX, LoginLayout.QuitButton.SrcY, // NORMAL (792,398)
-            LoginLayout.QuitHoverSrcX,   LoginLayout.QuitHoverSrcY,   // HOVER  (602,416)
-            LoginLayout.QuitHoverSrcX,   LoginLayout.QuitHoverSrcY,   // PRESSED (602,416)
+            LoginLayout.QuitHoverSrcX, LoginLayout.QuitHoverSrcY, // HOVER  (602,416)
+            LoginLayout.QuitHoverSrcX, LoginLayout.QuitHoverSrcY, // PRESSED (602,416)
             LoginLayout.ActionQuit,
             caption: _assets.Text(4005u, "Quit"),
             captionTint: Colors.White);
@@ -296,7 +297,7 @@ public sealed partial class LoginScreen : Control
             LoginLayout.OptionTab1.W, LoginLayout.OptionTab1.H,
             LoginLayout.OptionTab1.SrcX, LoginLayout.OptionTab1.SrcY, // NORMAL (520,492)
             LoginLayout.OptionTab1HoverSrcX, LoginLayout.OptionTab1HoverSrcY, // HOVER (635,492)
-            LoginLayout.OptionTab1.SrcX,     LoginLayout.OptionTab1.SrcY,     // PRESSED = NORMAL (520,492)
+            LoginLayout.OptionTab1.SrcX, LoginLayout.OptionTab1.SrcY, // PRESSED = NORMAL (520,492)
             LoginLayout.ActionOptionTab1,
             caption: _assets.Text(4006u, "Option 1"),
             captionTint: Colors.White);
@@ -312,9 +313,9 @@ public sealed partial class LoginScreen : Control
             _assets, LoginLayout.AtlasLoginWindow,
             LoginLayout.OptionTab2.X, LoginLayout.OptionTab2.Y,
             LoginLayout.OptionTab2.W, LoginLayout.OptionTab2.H,
-            LoginLayout.OptionTab2.SrcX, LoginLayout.OptionTab2.SrcY,         // NORMAL (750,492)
+            LoginLayout.OptionTab2.SrcX, LoginLayout.OptionTab2.SrcY, // NORMAL (750,492)
             LoginLayout.OptionTab2HoverSrcX, LoginLayout.OptionTab2HoverSrcY, // HOVER (865,492)
-            LoginLayout.OptionTab2.SrcX,     LoginLayout.OptionTab2.SrcY,     // PRESSED = NORMAL (750,492)
+            LoginLayout.OptionTab2.SrcX, LoginLayout.OptionTab2.SrcY, // PRESSED = NORMAL (750,492)
             LoginLayout.ActionOptionTab2,
             caption: _assets.Text(4007u, "Option 2"),
             captionTint: Colors.White);
@@ -326,8 +327,8 @@ public sealed partial class LoginScreen : Control
         //     Captions come from msg.xdb ids 4025/4026 (spec §10). Loaded lazily at click time
         //     (the strings depend on which field is bad, so we set them then). ---
         _toast = WidgetFactory.MakeLabel("", LoginLayout.FontBodyHeight + 2, new Color(0.95f, 0.40f, 0.40f));
-        _toast.Position            = new Vector2(LoginLayout.RefWidth / 2f - 260f, 220f);
-        _toast.Size                = new Vector2(520, 24);
+        _toast.Position = new Vector2(LoginLayout.RefWidth / 2f - 260f, 220f);
+        _toast.Size = new Vector2(520, 24);
         _toast.HorizontalAlignment = HorizontalAlignment.Center;
         band.AddChild(_toast);
         widgetCount++;
@@ -337,7 +338,7 @@ public sealed partial class LoginScreen : Control
         //     spec §8.1 "Quit-confirm Yes #1/#2", §8.3 "shared InventWindow.dds chrome". ---
         _quitModal = BuildQuitConfirmModal();
         _quitModal.Visible = false;
-        AddChild(_quitModal);  // added to LoginScreen root (not band) so it overlays everything
+        AddChild(_quitModal); // added to LoginScreen root (not band) so it overlays everything
         widgetCount++;
 
         GD.Print($"[LoginScreen] Built — {widgetCount} widgets; " +
@@ -360,14 +361,14 @@ public sealed partial class LoginScreen : Control
         // Chrome width/height: spec §8.3 — 340×190.
         int chromeW = LoginLayout.ModalChromeW; // 340
         int chromeH = LoginLayout.ModalChromeH; // 190
-        int chromeX = (LoginLayout.RefWidth  - chromeW) / 2; // 342
+        int chromeX = (LoginLayout.RefWidth - chromeW) / 2; // 342
         int chromeY = (LoginLayout.RefHeight - chromeH) / 2; // 289
 
         var modal = new Control
         {
-            Name     = "QuitConfirmModal",
+            Name = "QuitConfirmModal",
             Position = new Vector2(chromeX, chromeY),
-            Size     = new Vector2(chromeW, chromeH),
+            Size = new Vector2(chromeW, chromeH),
         };
 
         // Chrome background — InventWindow.dds sub-rect (318,647) 340×190.
@@ -381,8 +382,8 @@ public sealed partial class LoginScreen : Control
         {
             var chromeBg = new TextureRect
             {
-                Name        = "ModalChrome",
-                Texture     = chrome,
+                Name = "ModalChrome",
+                Texture = chrome,
                 StretchMode = TextureRect.StretchModeEnum.Scale,
                 MouseFilter = MouseFilterEnum.Ignore,
             };
@@ -394,7 +395,7 @@ public sealed partial class LoginScreen : Control
             // VFS offline fallback — solid dark panel so the modal is still readable.
             var fallbackBg = new ColorRect
             {
-                Name  = "ModalFallbackBg",
+                Name = "ModalFallbackBg",
                 Color = new Color(0.07f, 0.07f, 0.12f, 0.97f),
             };
             fallbackBg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
@@ -407,8 +408,8 @@ public sealed partial class LoginScreen : Control
             _assets.Text(LoginLayout.MsgQuitConfirm1, "Are you sure you want to quit?"),
             LoginLayout.FontBodyHeight,
             new Color(0.9f, 0.9f, 0.9f));
-        prompt1.Position            = new Vector2(10, 80);
-        prompt1.Size                = new Vector2(320, 20);
+        prompt1.Position = new Vector2(10, 80);
+        prompt1.Size = new Vector2(320, 20);
         prompt1.HorizontalAlignment = HorizontalAlignment.Center;
         modal.AddChild(prompt1);
 
@@ -418,8 +419,8 @@ public sealed partial class LoginScreen : Control
             _assets.Text(LoginLayout.MsgQuitConfirm2, "Unsaved progress will be lost."),
             LoginLayout.FontBodyHeight,
             new Color(0.75f, 0.75f, 0.75f));
-        prompt2.Position            = new Vector2(10, 100);
-        prompt2.Size                = new Vector2(320, 20);
+        prompt2.Position = new Vector2(10, 100);
+        prompt2.Size = new Vector2(320, 20);
         prompt2.HorizontalAlignment = HorizontalAlignment.Center;
         modal.AddChild(prompt2);
 
@@ -429,9 +430,9 @@ public sealed partial class LoginScreen : Control
             _assets, LoginLayout.AtlasInventWindow,
             LoginLayout.QuitConfirmYes1.X, LoginLayout.QuitConfirmYes1.Y,
             LoginLayout.QuitConfirmYes1.W, LoginLayout.QuitConfirmYes1.H,
-            LoginLayout.QuitConfirmYes1.SrcX,       LoginLayout.QuitConfirmYes1.SrcY,     // NORMAL (302,900)
-            LoginLayout.QuitConfirmYes1HoverSrcX,   LoginLayout.QuitConfirmYes1HoverSrcY, // HOVER  (415,900)
-            LoginLayout.QuitConfirmYes1.SrcX,       LoginLayout.QuitConfirmYes1.SrcY,     // PRESSED = NORMAL
+            LoginLayout.QuitConfirmYes1.SrcX, LoginLayout.QuitConfirmYes1.SrcY, // NORMAL (302,900)
+            LoginLayout.QuitConfirmYes1HoverSrcX, LoginLayout.QuitConfirmYes1HoverSrcY, // HOVER  (415,900)
+            LoginLayout.QuitConfirmYes1.SrcX, LoginLayout.QuitConfirmYes1.SrcY, // PRESSED = NORMAL
             LoginLayout.ActionQuitConfirmYes1,
             caption: _assets.Text(4008u, "Yes"),
             captionTint: Colors.White);
@@ -448,9 +449,9 @@ public sealed partial class LoginScreen : Control
             _assets, LoginLayout.AtlasInventWindow,
             LoginLayout.QuitConfirmYes2.X, LoginLayout.QuitConfirmYes2.Y + 44, // offset for readability
             LoginLayout.QuitConfirmYes2.W, LoginLayout.QuitConfirmYes2.H,
-            LoginLayout.QuitConfirmYes2.SrcX,       LoginLayout.QuitConfirmYes2.SrcY,     // NORMAL (302,860)
-            LoginLayout.QuitConfirmYes2HoverSrcX,   LoginLayout.QuitConfirmYes2HoverSrcY, // HOVER  (415,860)
-            LoginLayout.QuitConfirmYes2.SrcX,       LoginLayout.QuitConfirmYes2.SrcY,     // PRESSED = NORMAL
+            LoginLayout.QuitConfirmYes2.SrcX, LoginLayout.QuitConfirmYes2.SrcY, // NORMAL (302,860)
+            LoginLayout.QuitConfirmYes2HoverSrcX, LoginLayout.QuitConfirmYes2HoverSrcY, // HOVER  (415,860)
+            LoginLayout.QuitConfirmYes2.SrcX, LoginLayout.QuitConfirmYes2.SrcY, // PRESSED = NORMAL
             LoginLayout.ActionQuitConfirmYes2,
             caption: _assets.Text(4009u, "OK"),
             captionTint: Colors.White);
@@ -461,7 +462,7 @@ public sealed partial class LoginScreen : Control
         // No / Cancel label — no action id in the spec; we add a plain text button for usability.
         var noBtn = new Button { Text = _assets.Text(4010u, "No") };
         noBtn.Position = new Vector2(chromeW - 140, LoginLayout.QuitConfirmYes1.Y);
-        noBtn.Size     = new Vector2(100, 36);
+        noBtn.Size = new Vector2(100, 36);
         noBtn.Pressed += HideQuitConfirmModal;
         modal.AddChild(noBtn);
 
@@ -489,7 +490,8 @@ public sealed partial class LoginScreen : Control
             // spec: Docs/RE/specs/frontend_scenes.md §1.4 CODE-CONFIRMED.
             _toast.Text = _assets.Text(LoginLayout.MsgErrShortId,
                 $"ID must be at least {LoginLayout.MinIdLength} characters.");
-            GD.Print($"[LoginScreen] Validation: ID too short ({account.Length} < {LoginLayout.MinIdLength}), msg 4025.");
+            GD.Print(
+                $"[LoginScreen] Validation: ID too short ({account.Length} < {LoginLayout.MinIdLength}), msg 4025.");
             return;
         }
 
@@ -515,7 +517,7 @@ public sealed partial class LoginScreen : Control
     private void ShowQuitConfirmModal()
     {
         // spec: §1.8 — quit-confirm modal shown on Quit/Help strip click.
-        _toast.Text        = "";
+        _toast.Text = "";
         _quitModal.Visible = true;
         GD.Print("[LoginScreen] Quit confirm modal shown.");
     }
@@ -547,10 +549,10 @@ public sealed partial class LoginScreen : Control
         return new LineEdit
         {
             // spec §8.1 — masked password field; both accept CP949 Korean via Godot IME.
-            Secret       = masked,
-            CaretBlink   = true,
-            MaxLength    = maxLength,
-            Alignment    = HorizontalAlignment.Left,
+            Secret = masked,
+            CaretBlink = true,
+            MaxLength = maxLength,
+            Alignment = HorizontalAlignment.Left,
             // The recovery rect is 13px tall — too short for a glyph.  We keep the widget for
             // the control frame and let the theme override the minimum height for readability.
             // This matches the legacy client where text was rendered over the atlas frame at the

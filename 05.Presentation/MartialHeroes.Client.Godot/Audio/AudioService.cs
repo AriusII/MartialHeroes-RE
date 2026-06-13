@@ -137,19 +137,19 @@ public sealed partial class AudioService : Node
     // The legacy 4-bus model (Music / Terrain+Ambient / Char / Mob) is simplified to 2 Godot buses.
     // spec: Docs/RE/specs/sound.md §10.1 (four buses), §12.1 (Godot mapping). DOCUMENTED SIMPLIFICATION.
     private const string MusicBusName = "Music";
-    private const string SfxBusName   = "Sfx";
+    private const string SfxBusName = "Sfx";
 
     // Default volume for Music bus: option index 24 default = 100 → linear 1.0.
     // spec: Docs/RE/specs/sound.md §10.2 — bus_gain = option_value / 100.0f. CODE-CONFIRMED.
     private const float DefaultMusicVolume = 1.0f; // option_value=100 / 100 = 1.0
-    private const float DefaultSfxVolume   = 1.0f;
+    private const float DefaultSfxVolume = 1.0f;
 
     // -------------------------------------------------------------------------
     // Godot audio player nodes — one per logical role.
     // -------------------------------------------------------------------------
 
-    private AudioStreamPlayer? _bgmPlayer;    // Music bus: looping BGM
-    private AudioStreamPlayer? _sfxPlayer;    // Sfx bus: one-shot 2D SFX (for UI + spawn sounds)
+    private AudioStreamPlayer? _bgmPlayer; // Music bus: looping BGM
+    private AudioStreamPlayer? _sfxPlayer; // Sfx bus: one-shot 2D SFX (for UI + spawn sounds)
 
     // The currently-playing BGM ID (for dedup per spec §6 "playMusicZone deduplicates").
     // spec: Docs/RE/specs/sound.md §6.6 — "playMusicZone deduplicates: if the ID is already playing, not restarted".
@@ -401,7 +401,11 @@ public sealed partial class AudioService : Node
                 bool anyHourActive = false;
                 foreach (byte h in entry.HourSchedule)
                 {
-                    if (h != 0) { anyHourActive = true; break; }
+                    if (h != 0)
+                    {
+                        anyHourActive = true;
+                        break;
+                    }
                 }
 
                 if (anyHourActive)
@@ -417,7 +421,8 @@ public sealed partial class AudioService : Node
                 return;
             }
 
-            GD.Print($"[AudioService] Area {areaId} BGM entry found: id={bgmId} — scheduling area BGM via Callable.From.");
+            GD.Print(
+                $"[AudioService] Area {areaId} BGM entry found: id={bgmId} — scheduling area BGM via Callable.From.");
 
             // Marshal StartBgm back to the main thread.
             // spec: PRESERVATION_AND_ARCHITECTURE.md — all Godot node mutation on main thread.
@@ -555,7 +560,14 @@ public sealed partial class AudioService : Node
         if (_bgmPlayer is not null && _bgmPlayer.Playing)
         {
             GD.Print($"[AudioService] BGM {_activeBgmId} stopped.");
-            try { _bgmPlayer.Stop(); } catch { /* headless guard */ }
+            try
+            {
+                _bgmPlayer.Stop();
+            }
+            catch
+            {
+                /* headless guard */
+            }
         }
 
         _activeBgmId = id;
@@ -577,7 +589,15 @@ public sealed partial class AudioService : Node
     public void StopBgm()
     {
         _activeBgmId = 0;
-        try { _bgmPlayer?.Stop(); } catch { /* headless guard */ }
+        try
+        {
+            _bgmPlayer?.Stop();
+        }
+        catch
+        {
+            /* headless guard */
+        }
+
         GD.Print("[AudioService] BGM stopped.");
     }
 

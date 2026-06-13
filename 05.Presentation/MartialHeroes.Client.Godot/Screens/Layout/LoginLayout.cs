@@ -26,14 +26,14 @@ public readonly record struct WidgetRect(int X, int Y, int W, int H, int SrcX, i
 public static class LoginLayout
 {
     // --- Reference canvas. spec §8.0 — "Reference canvas: 1024 × 768 pixels". CODE-CONFIRMED. ---
-    public const int RefWidth  = 1024;
+    public const int RefWidth = 1024;
     public const int RefHeight = 768;
 
     // --- Login form band. spec §8.1 — the widgets below are children of an outer panel band.
     //     The root backdrop panel is 1024×398; the animated band starts below y=0 on the panel.
     //     Historically documented as BandTopY=110.  The widget table coordinates in §8.1 are
     //     panel-local (relative to the form panel), so BandTopY positions the panel on the canvas. ---
-    public const int BandTopY   = 110; // form panel top on the reference canvas
+    public const int BandTopY = 110; // form panel top on the reference canvas
     public const int BandHeight = 398; // spec §8.1 "Root backdrop panel" h=398
 
     // =========================================================================
@@ -42,11 +42,11 @@ public static class LoginLayout
 
     // Primary form atlas: OK/Login, Server-list, ID/PW textboxes, Save-ID checkbox, Quit/Help.
     // spec: Docs/RE/specs/ui_system.md §8.1 "Atlas assignment" table — CODE-CONFIRMED.
-    public const string AtlasLoginSlice1  = "data/ui/login_slice1.dds";
+    public const string AtlasLoginSlice1 = "data/ui/login_slice1.dds";
 
     // Option/tab buttons, server name-strip, decorative elements.
     // spec: Docs/RE/specs/ui_system.md §9.1 CODE-CONFIRMED.
-    public const string AtlasLoginWindow  = "data/ui/loginwindow.dds";
+    public const string AtlasLoginWindow = "data/ui/loginwindow.dds";
 
     // Panning intro banner strip (backdrop hero art).
     // spec: Docs/RE/specs/ui_system.md §9.1 CODE-CONFIRMED.
@@ -75,9 +75,9 @@ public static class LoginLayout
     //   PRESSED/checked  src: (730,398)   (spec §8.1 — "checked state = PRESSED frame")
     //   atlas: login_slice1.dds.  ACTION: 104 (`h`). CODE-CONFIRMED.
     public static readonly WidgetRect SaveIdCheck = new(694, 86, 13, 13, 717, 398);
-    public const int SaveIdCheckedSrcX  = 730; // PRESSED (checked) frame atlas X
-    public const int SaveIdCheckedSrcY  = 398; // PRESSED (checked) frame atlas Y
-    public const int ActionSaveId       = 104; // spec §8.1 action table CODE-CONFIRMED
+    public const int SaveIdCheckedSrcX = 730; // PRESSED (checked) frame atlas X
+    public const int SaveIdCheckedSrcY = 398; // PRESSED (checked) frame atlas Y
+    public const int ActionSaveId = 104; // spec §8.1 action table CODE-CONFIRMED
 
     // --- OK / Login button (7-state) — @ (456,64) 112×39. ---
     //   NORMAL  src: (266,398)
@@ -85,9 +85,9 @@ public static class LoginLayout
     //   PRESSED src: (490,398)   (HOVER == PRESSED per spec §8.1 table)
     //   atlas: login_slice1.dds.  ACTION: 103 (`g`). CODE-CONFIRMED.
     public static readonly WidgetRect OkButton = new(456, 64, 112, 39, 266, 398);
-    public const int OkHoverSrcX   = 490;
-    public const int OkHoverSrcY   = 398;
-    public const int ActionOk       = 103; // spec §8.1 action table CODE-CONFIRMED
+    public const int OkHoverSrcX = 490;
+    public const int OkHoverSrcY = 398;
+    public const int ActionOk = 103; // spec §8.1 action table CODE-CONFIRMED
 
     // --- Server-list button (7-state) — @ (456,166) 112×39. ---
     //   NORMAL  src: (154,398)
@@ -97,7 +97,7 @@ public static class LoginLayout
     public static readonly WidgetRect ServerListButton = new(456, 166, 112, 39, 154, 398);
     public const int ServerListHoverSrcX = 378;
     public const int ServerListHoverSrcY = 398;
-    public const int ActionServerList    = 102; // spec §8.1 action table CODE-CONFIRMED
+    public const int ActionServerList = 102; // spec §8.1 action table CODE-CONFIRMED
 
     // --- Quit/Help strip button (7-state) — @ (456,-3) 111×38. ---
     //   Y coordinate is -3: CODE-CONFIRMED from the widget-sweep literal dump.
@@ -109,7 +109,7 @@ public static class LoginLayout
     public static readonly WidgetRect QuitButton = new(456, -3, 111, 38, 792, 398);
     public const int QuitHoverSrcX = 602;
     public const int QuitHoverSrcY = 416;
-    public const int ActionQuit    = 105; // spec §8.1 action table CODE-CONFIRMED
+    public const int ActionQuit = 105; // spec §8.1 action table CODE-CONFIRMED
 
     // --- Option/tab button 1 (7-state) — @ (40,82) 110×38. ---
     //   NORMAL  src: (520,492)   — corrected from earlier spec (was wrong); CODE-CONFIRMED.
@@ -117,9 +117,9 @@ public static class LoginLayout
     //   PRESSED src: (520,492)   (PRESSED == NORMAL per spec §8.1 table)
     //   atlas: loginwindow.dds.  ACTION: 111 (`o`). CODE-CONFIRMED.
     public static readonly WidgetRect OptionTab1 = new(40, 82, 110, 38, 520, 492);
-    public const int OptionTab1HoverSrcX   = 635;
-    public const int OptionTab1HoverSrcY   = 492;
-    public const int ActionOptionTab1      = 111; // spec §8.1 CODE-CONFIRMED
+    public const int OptionTab1HoverSrcX = 635;
+    public const int OptionTab1HoverSrcY = 492;
+    public const int ActionOptionTab1 = 111; // spec §8.1 CODE-CONFIRMED
 
     // --- Option/tab button 2 (7-state) — @ (164,82) 110×38. ---
     //   NORMAL  src: (750,492)   — corrected from earlier spec; CODE-CONFIRMED.
@@ -127,30 +127,30 @@ public static class LoginLayout
     //   PRESSED src: (750,492)   (PRESSED == NORMAL per spec §8.1 table)
     //   atlas: loginwindow.dds.  ACTION: 112 (`p`). CODE-CONFIRMED.
     public static readonly WidgetRect OptionTab2 = new(164, 82, 110, 38, 750, 492);
-    public const int OptionTab2HoverSrcX   = 865;
-    public const int OptionTab2HoverSrcY   = 492;
-    public const int ActionOptionTab2      = 112; // spec §8.1 CODE-CONFIRMED
+    public const int OptionTab2HoverSrcX = 865;
+    public const int OptionTab2HoverSrcY = 492;
+    public const int ActionOptionTab2 = 112; // spec §8.1 CODE-CONFIRMED
 
     // --- Quit-confirm modal chrome (InventWindow.dds). ---
     //   Shared 340×190 chrome at src (318,647). spec §8.3 CODE-CONFIRMED.
     public const int ModalChromeSrcX = 318;
     public const int ModalChromeSrcY = 647;
-    public const int ModalChromeW    = 340;
-    public const int ModalChromeH    = 190;
+    public const int ModalChromeW = 340;
+    public const int ModalChromeH = 190;
 
     // Quit-confirm "Yes" button #1 — @ (120,136) 113×40, NORMAL (302,900), HOVER (415,900).
     // spec: §8.1 site "Quit-confirm Yes #1"; atlas InventWindow.dds. ACTION: 113. CODE-CONFIRMED.
     public static readonly WidgetRect QuitConfirmYes1 = new(120, 136, 113, 40, 302, 900);
     public const int QuitConfirmYes1HoverSrcX = 415;
     public const int QuitConfirmYes1HoverSrcY = 900;
-    public const int ActionQuitConfirmYes1    = 113;
+    public const int ActionQuitConfirmYes1 = 113;
 
     // Quit-confirm "Yes" button #2 — @ (120,136) 113×40, NORMAL (302,860), HOVER (415,860).
     // spec: §8.1 site "Quit-confirm Yes #2"; atlas InventWindow.dds. ACTION: 114. CODE-CONFIRMED.
     public static readonly WidgetRect QuitConfirmYes2 = new(120, 136, 113, 40, 302, 860);
     public const int QuitConfirmYes2HoverSrcX = 415;
     public const int QuitConfirmYes2HoverSrcY = 860;
-    public const int ActionQuitConfirmYes2    = 114;
+    public const int ActionQuitConfirmYes2 = 114;
 
     // =========================================================================
     // Font slot pixel heights. spec §6.2 — D3DX Height column. CODE-CONFIRMED.
@@ -172,7 +172,7 @@ public static class LoginLayout
     // Login form static labels: 4001–4022 range.
     // spec: Docs/RE/specs/ui_system.md §10 — "4001–4022: login form static label captions". CODE-CONFIRMED.
     public const uint MsgLabelRangeFirst = 4001;
-    public const uint MsgLabelRangeLast  = 4022;
+    public const uint MsgLabelRangeLast = 4022;
 
     // Quit-confirm prompts — shown in the modal popup.
     // spec: Docs/RE/specs/ui_system.md §10 — "4023 / 4024: login quit-confirm prompts". CODE-CONFIRMED.
@@ -181,16 +181,17 @@ public static class LoginLayout
 
     // Validation error toasts — shown when OK is pressed with bad input.
     // spec: Docs/RE/specs/frontend_scenes.md §1.4 — "ID len < 4 → msg 4025; PW len < 1 → msg 4026". CODE-CONFIRMED.
-    public const uint MsgErrShortId       = 4025; // ID/account too short (len < 4)
+    public const uint MsgErrShortId = 4025; // ID/account too short (len < 4)
     public const uint MsgErrEmptyPassword = 4026; // password empty
 
     // Not-yet-used offline (server-list path absent), retained for completeness.
-    public const uint MsgErrNoServers     = 4027; // server list empty
+    public const uint MsgErrNoServers = 4027; // server list empty
     public const uint MsgErrConnectFailed = 4028; // server-list connection failed
 
     // Validation thresholds — CODE-CONFIRMED from frontend_scenes.md §1.4.
     // spec: Docs/RE/specs/frontend_scenes.md §1.4 — "ID length < 4 → show msg 4025". CODE-CONFIRMED.
-    public const int MinIdLength  = 4;   // minimum account field length; msg 4025 if shorter
+    public const int MinIdLength = 4; // minimum account field length; msg 4025 if shorter
+
     // spec: Docs/RE/specs/frontend_scenes.md §1.4 — "password length < 1 → show msg 4026". CODE-CONFIRMED.
-    public const int MinPwLength  = 1;   // minimum password field length; msg 4026 if shorter
+    public const int MinPwLength = 1; // minimum password field length; msg 4026 if shorter
 }

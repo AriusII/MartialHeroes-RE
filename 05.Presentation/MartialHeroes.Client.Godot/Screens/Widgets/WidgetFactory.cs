@@ -135,8 +135,8 @@ public static class WidgetFactory
             loader, atlasPath,
             destX, destY, w, h,
             normalSrcX, normalSrcY,
-            normalSrcX, normalSrcY,   // HOVER = NORMAL (spec §1.5 2-state)
-            normalSrcX, normalSrcY,   // PRESSED = NORMAL
+            normalSrcX, normalSrcY, // HOVER = NORMAL (spec §1.5 2-state)
+            normalSrcX, normalSrcY, // PRESSED = NORMAL
             actionId, caption, captionTint);
 
     // -------------------------------------------------------------------------

@@ -23,10 +23,15 @@ public static class CharacterSelectLayout
     // Atlas paths. spec: Docs/RE/specs/ui_system.md §9.2 character-select asset manifest.
     // All paths are VFS-relative. CODE-CONFIRMED.
     // =========================================================================
-    public const string AtlasLoginWindow = "data/ui/loginwindow.dds";       // tab buttons, stat-icon grids, Create/Delete/Enter strip
-    public const string AtlasInventWindow = "data/ui/inventwindow.dds";     // confirm/modal chrome + buttons
-    public const string AtlasBlacksheet = "data/ui/blacksheet.dds";         // corner close button, dim overlay
-    public const string AtlasCarrierPigeon = "data/ui/carrierpigeonperson.dds"; // appearance selector ±, gender/class swatches
+    public const string
+        AtlasLoginWindow = "data/ui/loginwindow.dds"; // tab buttons, stat-icon grids, Create/Delete/Enter strip
+
+    public const string AtlasInventWindow = "data/ui/inventwindow.dds"; // confirm/modal chrome + buttons
+    public const string AtlasBlacksheet = "data/ui/blacksheet.dds"; // corner close button, dim overlay
+
+    public const string
+        AtlasCarrierPigeon = "data/ui/carrierpigeonperson.dds"; // appearance selector ±, gender/class swatches
+
     // mainwindow.dds used for top bar and panel chrome — paths not confirmed in VFS scan; fallback panels used.
     public const string AtlasMainWindow = "data/ui/mainwindow.dds";
 
@@ -48,34 +53,34 @@ public static class CharacterSelectLayout
     public static readonly WidgetRect PortraitBox = new(0, 12, 200, 46, 608, 793);
 
     // --- Stat-row labels (Lv/HP/class): x=60, y={37,61,85} 70×12. spec §8.2. CODE-CONFIRMED. ---
-    public static readonly WidgetRect StatLabelLv    = new(60, 37, 70, 12, 0, 0);
-    public static readonly WidgetRect StatLabelHp    = new(60, 61, 70, 12, 0, 0);
+    public static readonly WidgetRect StatLabelLv = new(60, 37, 70, 12, 0, 0);
+    public static readonly WidgetRect StatLabelHp = new(60, 61, 70, 12, 0, 0);
     public static readonly WidgetRect StatLabelClass = new(60, 85, 70, 12, 0, 0);
 
     // --- Per-slot row geometry for the slot list. spec §8.2 PARTIAL: stride CODE-CONFIRMED.
     //     Note: CharacterSelectScreen.cs references these constants by name. ---
-    public const int SlotRowStride = 24;  // spec §8.2 — "loop step 24 px". CODE-CONFIRMED.
-    public const int SlotRowBaseY  = 70;  // plausible base Y (register-fed in legacy code).
-    public const int SlotIconX     = 12;  // per-slot stat-icon grid x=12. spec §8.2. CODE-CONFIRMED.
-    public const int SlotIconW     = 34;  // src 771, 34×18. spec §8.2. CODE-CONFIRMED.
-    public const int SlotIconH     = 18;  // src 771, 34×18. spec §8.2. CODE-CONFIRMED.
-    public const int SlotLabelX    = 46;  // per-slot value labels x=46. spec §8.2. CODE-CONFIRMED.
-    public const int SlotLabelW    = 157; // per-slot label width. spec §8.2. CODE-CONFIRMED.
-    public const int SlotLabelH    = 18;  // per-slot label height. spec §8.2. CODE-CONFIRMED.
+    public const int SlotRowStride = 24; // spec §8.2 — "loop step 24 px". CODE-CONFIRMED.
+    public const int SlotRowBaseY = 70; // plausible base Y (register-fed in legacy code).
+    public const int SlotIconX = 12; // per-slot stat-icon grid x=12. spec §8.2. CODE-CONFIRMED.
+    public const int SlotIconW = 34; // src 771, 34×18. spec §8.2. CODE-CONFIRMED.
+    public const int SlotIconH = 18; // src 771, 34×18. spec §8.2. CODE-CONFIRMED.
+    public const int SlotLabelX = 46; // per-slot value labels x=46. spec §8.2. CODE-CONFIRMED.
+    public const int SlotLabelW = 157; // per-slot label width. spec §8.2. CODE-CONFIRMED.
+    public const int SlotLabelH = 18; // per-slot label height. spec §8.2. CODE-CONFIRMED.
 
     // --- Server tab button: (67,17) 113×40. NORMAL (675,795), HOVER (483,883). spec §8.2. CODE-CONFIRMED. ---
-    public static readonly WidgetRect ServerTabBtn  = new(67,  17, 113, 40, 675, 795);
-    public static readonly WidgetRect ServerTabHov  = new(67,  17, 113, 40, 483, 883); // hover src
+    public static readonly WidgetRect ServerTabBtn = new(67, 17, 113, 40, 675, 795);
+    public static readonly WidgetRect ServerTabHov = new(67, 17, 113, 40, 483, 883); // hover src
     // Server tab actionId = 1. spec §8.2 action-id map.
 
     // --- Channel tab button: (232,7) 113×40. NORMAL (640,742), HOVER (483,923). spec §8.2. CODE-CONFIRMED. ---
-    public static readonly WidgetRect ChannelTabBtn = new(232,  7, 113, 40, 640, 742);
-    public static readonly WidgetRect ChannelTabHov = new(232,  7, 113, 40, 483, 923); // hover src
+    public static readonly WidgetRect ChannelTabBtn = new(232, 7, 113, 40, 640, 742);
+    public static readonly WidgetRect ChannelTabHov = new(232, 7, 113, 40, 483, 923); // hover src
     // Channel tab actionId = 2.
 
     // --- Back tab button: (393,17) 113×40. NORMAL (625,691), HOVER (483,963). spec §8.2. CODE-CONFIRMED. ---
-    public static readonly WidgetRect BackTabBtn    = new(393, 17, 113, 40, 625, 691);
-    public static readonly WidgetRect BackTabHov    = new(393, 17, 113, 40, 483, 963); // hover src
+    public static readonly WidgetRect BackTabBtn = new(393, 17, 113, 40, 625, 691);
+    public static readonly WidgetRect BackTabHov = new(393, 17, 113, 40, 483, 963); // hover src
     // Back tab actionId = 3.
 
     // =========================================================================
@@ -93,19 +98,19 @@ public static class CharacterSelectLayout
 
     // Create button: (42,325) 59×20. NORMAL src (354,1004), HOVER src (413,1004). CODE-CONFIRMED.
     public const int CreateActionId = 4; // spec: ui_system.md §8.2, frontend_scenes.md §4.
-    public static readonly WidgetRect CreateButton        = new(42,  325, 59, 20, 354, 1004);
-    public static readonly WidgetRect CreateButtonHover   = new(42,  325, 59, 20, 413, 1004);
+    public static readonly WidgetRect CreateButton = new(42, 325, 59, 20, 354, 1004);
+    public static readonly WidgetRect CreateButtonHover = new(42, 325, 59, 20, 413, 1004);
     // PRESSED = HOVER for this button (3-state ctor, spec §1.5 table).
 
     // Delete button: (112,325) 59×20. NORMAL src (472,1004), HOVER src (531,1004). CODE-CONFIRMED.
     public const int DeleteActionId = 5; // spec: ui_system.md §8.2, frontend_scenes.md §5.
-    public static readonly WidgetRect DeleteButton        = new(112, 325, 59, 20, 472, 1004);
-    public static readonly WidgetRect DeleteButtonHover   = new(112, 325, 59, 20, 531, 1004);
+    public static readonly WidgetRect DeleteButton = new(112, 325, 59, 20, 472, 1004);
+    public static readonly WidgetRect DeleteButtonHover = new(112, 325, 59, 20, 531, 1004);
 
     // Enter/select button: (112,112) 59×20. NORMAL src (236,1004), HOVER src (295,1004). CODE-CONFIRMED.
     public const int EnterActionId = 6; // spec: ui_system.md §8.2.
-    public static readonly WidgetRect EnterButton         = new(112, 112, 59, 20, 236, 1004);
-    public static readonly WidgetRect EnterButtonHover    = new(112, 112, 59, 20, 295, 1004);
+    public static readonly WidgetRect EnterButton = new(112, 112, 59, 20, 236, 1004);
+    public static readonly WidgetRect EnterButtonHover = new(112, 112, 59, 20, 295, 1004);
 
     // =========================================================================
     // §8.2 / §8.4 Stat-icon grid — CODE-CONFIRMED.
@@ -116,30 +121,30 @@ public static class CharacterSelectLayout
     //   Per-slot stat value labels: x=51, base-Y 193, stride 24, 35×12.
     // spec: Docs/RE/specs/ui_system.md §8.2 + §8.4 (generator, CODE-CONFIRMED).
     // =========================================================================
-    public const int StatGridBaseY    = 191; // spec: ui_system.md §8.2+§8.4 "base-Y 191". CODE-CONFIRMED.
-    public const int StatGridStride   = 24;  // spec: ui_system.md §8.2+§8.4 "stride 24". CODE-CONFIRMED.
-    public const int StatGridRows     = 5;   // up to 5 per-slot stat rows.
+    public const int StatGridBaseY = 191; // spec: ui_system.md §8.2+§8.4 "base-Y 191". CODE-CONFIRMED.
+    public const int StatGridStride = 24; // spec: ui_system.md §8.2+§8.4 "stride 24". CODE-CONFIRMED.
+    public const int StatGridRows = 5; // up to 5 per-slot stat rows.
 
-    public const int StatIconCol1X    = 154; // spec: ui_system.md §8.2. CODE-CONFIRMED.
-    public const int StatIconCol2X    = 178; // spec: ui_system.md §8.2. CODE-CONFIRMED.
-    public const int StatIconW        = 24;  // spec: ui_system.md §8.2. CODE-CONFIRMED.
-    public const int StatIconH        = 16;  // spec: ui_system.md §8.2. CODE-CONFIRMED.
+    public const int StatIconCol1X = 154; // spec: ui_system.md §8.2. CODE-CONFIRMED.
+    public const int StatIconCol2X = 178; // spec: ui_system.md §8.2. CODE-CONFIRMED.
+    public const int StatIconW = 24; // spec: ui_system.md §8.2. CODE-CONFIRMED.
+    public const int StatIconH = 16; // spec: ui_system.md §8.2. CODE-CONFIRMED.
 
     // NORMAL / PRESSED src coords for the stat icon grid buttons.
     // spec: ui_system.md §8.2 "Per-slot stat-icon grid col 1: NORMAL (500,770), PRESSED (548,770)".
-    public const int StatIconCol1NormalSrcX  = 500; // CODE-CONFIRMED
-    public const int StatIconCol1NormalSrcY  = 770; // CODE-CONFIRMED
+    public const int StatIconCol1NormalSrcX = 500; // CODE-CONFIRMED
+    public const int StatIconCol1NormalSrcY = 770; // CODE-CONFIRMED
     public const int StatIconCol1PressedSrcX = 548; // CODE-CONFIRMED
     public const int StatIconCol1PressedSrcY = 770; // CODE-CONFIRMED
-    public const int StatIconCol2NormalSrcX  = 524; // CODE-CONFIRMED
-    public const int StatIconCol2NormalSrcY  = 770; // CODE-CONFIRMED
+    public const int StatIconCol2NormalSrcX = 524; // CODE-CONFIRMED
+    public const int StatIconCol2NormalSrcY = 770; // CODE-CONFIRMED
     public const int StatIconCol2PressedSrcX = 572; // CODE-CONFIRMED
     public const int StatIconCol2PressedSrcY = 770; // CODE-CONFIRMED
 
-    public const int StatValueX       = 51;  // spec: ui_system.md §8.2+§8.4 "x=51". CODE-CONFIRMED.
-    public const int StatValueBaseY   = 193; // spec: ui_system.md §8.2+§8.4 "base-Y 193". CODE-CONFIRMED.
-    public const int StatValueW       = 35;  // spec: ui_system.md §8.2. CODE-CONFIRMED.
-    public const int StatValueH       = 12;  // spec: ui_system.md §8.2. CODE-CONFIRMED.
+    public const int StatValueX = 51; // spec: ui_system.md §8.2+§8.4 "x=51". CODE-CONFIRMED.
+    public const int StatValueBaseY = 193; // spec: ui_system.md §8.2+§8.4 "base-Y 193". CODE-CONFIRMED.
+    public const int StatValueW = 35; // spec: ui_system.md §8.2. CODE-CONFIRMED.
+    public const int StatValueH = 12; // spec: ui_system.md §8.2. CODE-CONFIRMED.
 
     // =========================================================================
     // §8.2 Confirm popup chrome — InventWindow.dds 340×190 at src (318,647). spec §8.3. CODE-CONFIRMED.
@@ -148,8 +153,8 @@ public static class CharacterSelectLayout
 
     // Confirm Yes/No buttons (popup-local). spec §8.2. CODE-CONFIRMED.
     // Yes: (55,136) 113×40, src (302,860). No: (174,136) 113×40, src (302,900).
-    public static readonly WidgetRect ConfirmYes = new(55,  136, 113, 40, 302, 860);
-    public static readonly WidgetRect ConfirmNo  = new(174, 136, 113, 40, 302, 900);
+    public static readonly WidgetRect ConfirmYes = new(55, 136, 113, 40, 302, 860);
+    public static readonly WidgetRect ConfirmNo = new(174, 136, 113, 40, 302, 900);
 
     // =========================================================================
     // §8.2 Name-entry sub-form. spec §8.2. CODE-CONFIRMED.
@@ -165,12 +170,12 @@ public static class CharacterSelectLayout
     //   Base y=30, w=45, h=19; NORMAL src-X base 590 stepping +45; HOVER base 815 (+45).
     // spec: Docs/RE/specs/ui_system.md §8.4 "Char-select appearance selector". CODE-CONFIRMED.
     // =========================================================================
-    public const int AppSelectorBaseY   = 30;  // CODE-CONFIRMED
-    public const int AppSelectorW       = 45;  // CODE-CONFIRMED
-    public const int AppSelectorH       = 19;  // CODE-CONFIRMED
+    public const int AppSelectorBaseY = 30; // CODE-CONFIRMED
+    public const int AppSelectorW = 45; // CODE-CONFIRMED
+    public const int AppSelectorH = 19; // CODE-CONFIRMED
     public const int AppSelectorNormBase = 590; // NORMAL src-X base. CODE-CONFIRMED.
-    public const int AppSelectorHovBase  = 815; // HOVER src-X base. CODE-CONFIRMED.
-    public const int AppSelectorStep     = 45;  // src-X step per selector. CODE-CONFIRMED.
+    public const int AppSelectorHovBase = 815; // HOVER src-X base. CODE-CONFIRMED.
+    public const int AppSelectorStep = 45; // src-X step per selector. CODE-CONFIRMED.
 
     // =========================================================================
     // §4.1 Create sub-form: class map, face range. spec: frontend_scenes.md §4.1/§4.2.
@@ -216,11 +221,11 @@ public static class CharacterSelectLayout
     // =========================================================================
     public static readonly float[] PreviewSlotX = [-1560f, -1548f, -1536f, -1524f, -1512f]; // CODE-CONFIRMED
     public const float PreviewSlotZ = -3593f; // CODE-CONFIRMED
-    public const float PreviewScale = 3.0f;   // CODE-CONFIRMED
+    public const float PreviewScale = 3.0f; // CODE-CONFIRMED
 
     // =========================================================================
     // §font: Font slot heights used in the select screen. spec §6.2.
     // =========================================================================
     public const int FontTitleHeight = 16; // DotumChe slot 14: Height=16. spec §6.2. CODE-CONFIRMED.
-    public const int FontRowHeight   = 12; // DotumChe slot 0: Height=12. spec §6.2. CODE-CONFIRMED.
+    public const int FontRowHeight = 12; // DotumChe slot 0: Height=12. spec §6.2. CODE-CONFIRMED.
 }

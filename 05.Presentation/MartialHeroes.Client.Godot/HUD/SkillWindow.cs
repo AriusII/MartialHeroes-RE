@@ -34,41 +34,42 @@ public sealed partial class SkillWindow : Control
     // spec: Docs/RE/formats/ui_manifests.md §1.4 — uitex 0008 = data/ui/skillwindow.dds 1024×1024 DXT3.
     // -------------------------------------------------------------------------
 
-    private const int    SkillWinTexId   = 8;
-    private const string SkillWinPath    = "data/ui/skillwindow.dds";
+    private const int SkillWinTexId = 8;
+    private const string SkillWinPath = "data/ui/skillwindow.dds";
 
     // Window chrome source rect on skillwindow.dds.
     // Full layout of skillwindow.dds is unrecovered — PLAUSIBLE strip from top-left.
     // spec: Docs/RE/specs/ui_system.md §12 open item 6 — in-game window layouts gated on manifest.
-    private const int ChromeSrcX = 0;   // PLAUSIBLE
-    private const int ChromeSrcY = 0;   // PLAUSIBLE
-    private const int ChromeW    = 340; // PLAUSIBLE
-    private const int ChromeH    = 520; // PLAUSIBLE
+    private const int ChromeSrcX = 0; // PLAUSIBLE
+    private const int ChromeSrcY = 0; // PLAUSIBLE
+    private const int ChromeW = 340; // PLAUSIBLE
+    private const int ChromeH = 520; // PLAUSIBLE
 
     // Close button on inventwindow.dds (shared modal chrome).
     // spec: Docs/RE/specs/ui_system.md §8.1 "Quit-confirm Yes #1" button — CODE-CONFIRMED.
-    private const int   CloseTexId    = 2;
+    private const int CloseTexId = 2;
     private const string CloseTexPath = "data/ui/inventwindow.dds";
-    private const int CloseBtnNormX   = 302;
-    private const int CloseBtnNormY   = 900;
-    private const int CloseBtnHoverX  = 415;
-    private const int CloseBtnHoverY  = 900;
-    private const int CloseBtnPressX  = 302; // PRESSED = NORMAL, spec §1.5
-    private const int CloseBtnPressY  = 900;
-    private const int CloseBtnW       = 113;
-    private const int CloseBtnH       = 40;
+    private const int CloseBtnNormX = 302;
+    private const int CloseBtnNormY = 900;
+    private const int CloseBtnHoverX = 415;
+    private const int CloseBtnHoverY = 900;
+    private const int CloseBtnPressX = 302; // PRESSED = NORMAL, spec §1.5
+    private const int CloseBtnPressY = 900;
+    private const int CloseBtnW = 113;
+    private const int CloseBtnH = 40;
 
     // Skill icon sheet — one of the 12 sheets from skillicon.txt.
     // We default to Musa-Jung (job=1, kind=1) as a representative icon sheet.
     // spec: Docs/RE/formats/ui_manifests.md §2.4 — skill_id 1001, job 1, kind 1 = musajung.dds.
     private const string DefaultIconSheetPath = "data/ui/skillicon/musajung.dds";
+
     // Skill icon grid within the 512×512 sheet.
     // UV offset of a specific skill within its sheet is UNKNOWN.
     // Assumed 48×48 grid: 10 columns × 10 rows = 100 slots.
     // spec: Docs/RE/formats/ui_manifests.md §9 known unknown 1 — "within-sheet icon UV grid: UNKNOWN".
     private const int IconCellW = 48; // PLAUSIBLE — see §9 known unknown 1
     private const int IconCellH = 48; // PLAUSIBLE
-    private const int IconCols  = 10; // PLAUSIBLE (512 / 48 ≈ 10)
+    private const int IconCols = 10; // PLAUSIBLE (512 / 48 ≈ 10)
 
     // msg.xdb id for close button caption.
     // spec: Docs/RE/specs/ui_system.md §10 — id 102 in button label range 101–107.
@@ -78,8 +79,8 @@ public sealed partial class SkillWindow : Control
     // Tunables
     // -------------------------------------------------------------------------
 
-    private const int DemoSkillCount  = 80;
-    private const uint IdScanCeiling  = 5_000;
+    private const int DemoSkillCount = 80;
+    private const uint IdScanCeiling = 5_000;
     // spec: Docs/RE/formats/config_tables.md §2.8 — valid skill_id < 10,000,000: CONFIRMED.
 
     // -------------------------------------------------------------------------
@@ -164,6 +165,7 @@ public sealed partial class SkillWindow : Control
                 MoveToFront();
                 PopulateList();
             }
+
             GetViewport().SetInputAsHandled();
         }
 
@@ -195,13 +197,13 @@ public sealed partial class SkillWindow : Control
     private void BuildUi()
     {
         // Anchor to the right of the InventoryWindow.
-        AnchorLeft   = 0f;
-        AnchorTop    = 0.5f;
-        AnchorRight  = 0f;
+        AnchorLeft = 0f;
+        AnchorTop = 0.5f;
+        AnchorRight = 0f;
         AnchorBottom = 0.5f;
-        OffsetLeft   = 670f;
-        OffsetTop    = -260f;
-        OffsetRight  = 1010f;
+        OffsetLeft = 670f;
+        OffsetTop = -260f;
+        OffsetRight = 1010f;
         OffsetBottom = 260f;
 
         var outerPanel = new PanelContainer();
@@ -213,7 +215,7 @@ public sealed partial class SkillWindow : Control
         // spec: Docs/RE/formats/ui_manifests.md §1.4 — uitex 0008 = data/ui/skillwindow.dds.
         _windowChrome = new TextureRect
         {
-            Name        = "SkillWindowChrome",
+            Name = "SkillWindowChrome",
             StretchMode = TextureRect.StretchModeEnum.Scale,
             MouseFilter = MouseFilterEnum.Ignore,
         };
@@ -278,8 +280,8 @@ public sealed partial class SkillWindow : Control
             {
                 _windowChrome.Texture = new AtlasTexture
                 {
-                    Atlas      = tex,
-                    Region     = new Rect2(ChromeSrcX, ChromeSrcY, ChromeW, ChromeH), // PLAUSIBLE
+                    Atlas = tex,
+                    Region = new Rect2(ChromeSrcX, ChromeSrcY, ChromeW, ChromeH), // PLAUSIBLE
                     FilterClip = true,
                 };
                 GD.Print($"[SkillWindow] Chrome bound via UiCatalogs uitex {SkillWinTexId} " +
@@ -315,21 +317,23 @@ public sealed partial class SkillWindow : Control
 
         if (_uiLoader is not null)
         {
-            AtlasTexture? normFrame    = _uiLoader.Slice(CloseTexPath, CloseBtnNormX,  CloseBtnNormY,  CloseBtnW, CloseBtnH);
-            AtlasTexture? hoverFrame   = _uiLoader.Slice(CloseTexPath, CloseBtnHoverX, CloseBtnHoverY, CloseBtnW, CloseBtnH);
-            AtlasTexture? pressedFrame = _uiLoader.Slice(CloseTexPath, CloseBtnPressX, CloseBtnPressY, CloseBtnW, CloseBtnH);
+            AtlasTexture? normFrame = _uiLoader.Slice(CloseTexPath, CloseBtnNormX, CloseBtnNormY, CloseBtnW, CloseBtnH);
+            AtlasTexture? hoverFrame =
+                _uiLoader.Slice(CloseTexPath, CloseBtnHoverX, CloseBtnHoverY, CloseBtnW, CloseBtnH);
+            AtlasTexture? pressedFrame =
+                _uiLoader.Slice(CloseTexPath, CloseBtnPressX, CloseBtnPressY, CloseBtnW, CloseBtnH);
 
             if (normFrame is not null)
             {
                 var stateBtn = new StateButton
                 {
-                    Name          = "CloseBtn",
+                    Name = "CloseBtn",
                     CustomMinimumSize = new Vector2(CloseBtnW, CloseBtnH),
-                    NormalFrame   = normFrame,
-                    HoverFrame    = hoverFrame,
-                    PressedFrame  = pressedFrame,
-                    Caption       = caption,
-                    ActionId      = 0,
+                    NormalFrame = normFrame,
+                    HoverFrame = hoverFrame,
+                    PressedFrame = pressedFrame,
+                    Caption = caption,
+                    ActionId = 0,
                 };
                 stateBtn.ActionFired += _ => { Visible = false; };
                 return stateBtn;
@@ -373,9 +377,9 @@ public sealed partial class SkillWindow : Control
             var def = catalogue.TryGet(id);
             if (def is null) continue;
 
-            string catText    = $"Cat:{def.Value.Category}";
-            string cdText     = def.Value.CooldownCentiseconds == 0 ? "CD:—" : $"CD:{def.Value.CooldownMs}ms";
-            string rangeText  = $"R:{def.Value.BaseRange:F1}";
+            string catText = $"Cat:{def.Value.Category}";
+            string cdText = def.Value.CooldownCentiseconds == 0 ? "CD:—" : $"CD:{def.Value.CooldownMs}ms";
+            string rangeText = $"R:{def.Value.BaseRange:F1}";
             string targetText = TargetMnemonic(def.Value.TargetMode);
 
             // Skill icon from the icon sheet.
@@ -412,18 +416,18 @@ public sealed partial class SkillWindow : Control
         ImageTexture? atlas = EnsureIconAtlas();
         if (atlas is null) return null;
 
-        int col   = slotIndex % IconCols;                // PLAUSIBLE
-        int row   = slotIndex / IconCols;                // PLAUSIBLE
-        int srcX  = col * IconCellW;                     // PLAUSIBLE
-        int srcY  = row * IconCellH;                     // PLAUSIBLE
+        int col = slotIndex % IconCols; // PLAUSIBLE
+        int row = slotIndex / IconCols; // PLAUSIBLE
+        int srcX = col * IconCellW; // PLAUSIBLE
+        int srcY = row * IconCellH; // PLAUSIBLE
 
         // Guard: stay within the 512×512 sheet boundary.
         if (srcX + IconCellW > 512 || srcY + IconCellH > 512) return null;
 
         return new AtlasTexture
         {
-            Atlas      = atlas,
-            Region     = new Rect2(srcX, srcY, IconCellW, IconCellH), // PLAUSIBLE
+            Atlas = atlas,
+            Region = new Rect2(srcX, srcY, IconCellW, IconCellH), // PLAUSIBLE
             FilterClip = true,
         };
     }
@@ -450,6 +454,7 @@ public sealed partial class SkillWindow : Control
                          "Icon UV grid: PLAUSIBLE 48×48 per cell — see ui_manifests.md §9 known unknown 1.");
                 return _iconAtlas;
             }
+
             // If LoadAtlas returned a different Texture2D type, wrap it.
             if (raw is not null)
             {
@@ -505,10 +510,10 @@ public sealed partial class SkillWindow : Control
         idLabel.AddThemeColorOverride("font_color", new Color(0.7f, 0.9f, 1.0f));
         hbox.AddChild(idLabel);
 
-        AddCell(hbox, catText,    60,  new Color(1.0f, 0.85f, 0.4f));
-        AddCell(hbox, cdText,     80,  new Color(0.8f, 0.8f,  0.8f));
-        AddCell(hbox, rangeText,  56,  new Color(0.6f, 1.0f,  0.6f));
-        AddCell(hbox, targetText, 64,  new Color(0.9f, 0.6f,  1.0f));
+        AddCell(hbox, catText, 60, new Color(1.0f, 0.85f, 0.4f));
+        AddCell(hbox, cdText, 80, new Color(0.8f, 0.8f, 0.8f));
+        AddCell(hbox, rangeText, 56, new Color(0.6f, 1.0f, 0.6f));
+        AddCell(hbox, targetText, 64, new Color(0.9f, 0.6f, 1.0f));
     }
 
     private static void AddCell(HBoxContainer row, string text, float minWidth, Color colour)
@@ -540,17 +545,17 @@ public sealed partial class SkillWindow : Control
     private static string TargetMnemonic(MartialHeroes.Client.Domain.Skills.SkillTargetMode mode) =>
         mode switch
         {
-            MartialHeroes.Client.Domain.Skills.SkillTargetMode.SingleSelfOrPrimary  => "Self",
-            MartialHeroes.Client.Domain.Skills.SkillTargetMode.SingleTarget          => "Single",
-            MartialHeroes.Client.Domain.Skills.SkillTargetMode.SingleEnemyOrHeal     => "S.Enem",
-            MartialHeroes.Client.Domain.Skills.SkillTargetMode.ChainNearbyAoe        => "Chain",
-            MartialHeroes.Client.Domain.Skills.SkillTargetMode.ConeForwardAoe        => "Cone",
-            MartialHeroes.Client.Domain.Skills.SkillTargetMode.GroundPoint           => "Ground",
-            MartialHeroes.Client.Domain.Skills.SkillTargetMode.PartyAoe              => "Party",
-            MartialHeroes.Client.Domain.Skills.SkillTargetMode.FactionGatedSingle    => "Faction",
-            MartialHeroes.Client.Domain.Skills.SkillTargetMode.PkGatedSingle         => "PK",
+            MartialHeroes.Client.Domain.Skills.SkillTargetMode.SingleSelfOrPrimary => "Self",
+            MartialHeroes.Client.Domain.Skills.SkillTargetMode.SingleTarget => "Single",
+            MartialHeroes.Client.Domain.Skills.SkillTargetMode.SingleEnemyOrHeal => "S.Enem",
+            MartialHeroes.Client.Domain.Skills.SkillTargetMode.ChainNearbyAoe => "Chain",
+            MartialHeroes.Client.Domain.Skills.SkillTargetMode.ConeForwardAoe => "Cone",
+            MartialHeroes.Client.Domain.Skills.SkillTargetMode.GroundPoint => "Ground",
+            MartialHeroes.Client.Domain.Skills.SkillTargetMode.PartyAoe => "Party",
+            MartialHeroes.Client.Domain.Skills.SkillTargetMode.FactionGatedSingle => "Faction",
+            MartialHeroes.Client.Domain.Skills.SkillTargetMode.PkGatedSingle => "PK",
             MartialHeroes.Client.Domain.Skills.SkillTargetMode.RadialAoeBothFactions => "RadAoE",
-            MartialHeroes.Client.Domain.Skills.SkillTargetMode.SelfOnly              => "SelfO",
+            MartialHeroes.Client.Domain.Skills.SkillTargetMode.SelfOnly => "SelfO",
             _ => "?",
         };
 }

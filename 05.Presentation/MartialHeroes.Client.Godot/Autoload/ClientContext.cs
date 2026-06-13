@@ -490,7 +490,8 @@ public sealed partial class ClientContext : Node
         _terrainVfs?.Dispose();
         _terrainVfs = null;
 
-        GD.Print("[ClientContext] EventBus completed. EngineLoop drained + stopped. CatalogueLoader + UiCatalogs + TerrainVfs disposed.");
+        GD.Print(
+            "[ClientContext] EventBus completed. EngineLoop drained + stopped. CatalogueLoader + UiCatalogs + TerrainVfs disposed.");
     }
 
     // -------------------------------------------------------------------------

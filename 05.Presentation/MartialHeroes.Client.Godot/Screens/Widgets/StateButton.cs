@@ -146,12 +146,12 @@ public sealed partial class StateButton : Control
     // -------------------------------------------------------------------------
 
     private bool _isHovered;
-    private bool _isPressed;    // true while the mouse button is held down after pressing inside
-    private bool _hasCapture;   // true while we own the "global click capture" (spec §4.2)
+    private bool _isPressed; // true while the mouse button is held down after pressing inside
+    private bool _hasCapture; // true while we own the "global click capture" (spec §4.2)
 
     // Alpha-fade state (spec §7.1)
-    private float _currentAlpha = 1f;   // 0..1, drives Modulate
-    private float _targetAlpha = 1f;    // 0 = hiding, 1 = showing
+    private float _currentAlpha = 1f; // 0..1, drives Modulate
+    private float _targetAlpha = 1f; // 0 = hiding, 1 = showing
 
     // Godot child controls built in _Ready
     private TextureRect _spriteRect = null!;
@@ -165,7 +165,7 @@ public sealed partial class StateButton : Control
     public override void _Ready()
     {
         // The button Control itself is transparent; children render the content.
-        MouseFilter = MouseFilterEnum.Stop;  // capture mouse events
+        MouseFilter = MouseFilterEnum.Stop; // capture mouse events
 
         // Sprite layer — fills the button rect exactly.
         _spriteRect = new TextureRect
@@ -296,6 +296,7 @@ public sealed partial class StateButton : Control
                 // Only un-press on pure exit (not drag-tracked exit — that is handled in _GuiInput).
                 _isPressed = false;
             }
+
             RefreshVisuals();
         }
     }

@@ -74,20 +74,22 @@ public sealed partial class GameHud : Control
     // spec: no per-widget layout recovered for mainwindow.dds — values are PLAUSIBLE based on
     //       the 1024×1024 atlas and the typical top-left panel position on the 1024×768 canvas.
     //       Docs/RE/specs/ui_system.md §12 (open item 6) — in-game window layouts gated on uitex manifest.
-    private const int ChromeSrcX = 0;    // PLAUSIBLE
-    private const int ChromeSrcY = 0;    // PLAUSIBLE
-    private const int ChromeW    = 310;  // PLAUSIBLE
-    private const int ChromeH    = 130;  // PLAUSIBLE
+    private const int ChromeSrcX = 0; // PLAUSIBLE
+    private const int ChromeSrcY = 0; // PLAUSIBLE
+    private const int ChromeW = 310; // PLAUSIBLE
+    private const int ChromeH = 130; // PLAUSIBLE
 
     // Hotbar atlas: uitex 0010 = data/ui/skillpipe.dds (primary skill hotbar).
     // spec: Docs/RE/formats/ui_manifests.md §1.4 — uitex 0010 = data/ui/skillpipe.dds, 1024×1024 DXT3.
-    private const int HotbarTexId  = 10;
+    private const int HotbarTexId = 10;
+
     private const string HotbarPath = "data/ui/skillpipe.dds";
+
     // Hotbar slot slot size: source rect per slot on skillpipe.dds. PLAUSIBLE — exact layout unrecovered.
-    private const int HotbarSlotSrcX = 0;  // PLAUSIBLE
-    private const int HotbarSlotSrcY = 0;  // PLAUSIBLE
-    private const int HotbarSlotW    = 48; // PLAUSIBLE — likely 48×48 slot on 1024×1024 sheet
-    private const int HotbarSlotH    = 48; // PLAUSIBLE
+    private const int HotbarSlotSrcX = 0; // PLAUSIBLE
+    private const int HotbarSlotSrcY = 0; // PLAUSIBLE
+    private const int HotbarSlotW = 48; // PLAUSIBLE — likely 48×48 slot on 1024×1024 sheet
+    private const int HotbarSlotH = 48; // PLAUSIBLE
 
     // -------------------------------------------------------------------------
     // Control handles (built in _Ready)
@@ -107,14 +109,16 @@ public sealed partial class GameHud : Control
 
     // Hotbar: 9 skill slots (spec: input_ui.md §4 — hotbar slots 0–239, first 9 shown).
     private const int HotbarVisibleSlots = 9;
-    private readonly Label[] _hotbarKey  = new Label[HotbarVisibleSlots];
+    private readonly Label[] _hotbarKey = new Label[HotbarVisibleSlots];
     private readonly Label[] _hotbarName = new Label[HotbarVisibleSlots];
     private readonly TextureRect[] _hotbarIcon = new TextureRect[HotbarVisibleSlots];
 
     // Chat: ring buffer of last 6 lines.
     private readonly Queue<string> _chatLines = new(6);
     private const int ChatLineMax = 6;
+
     private Label _chatLabel = null!;
+
     // Reusable StringBuilder for chat-line joins (avoids per-message heap allocation).
     private readonly System.Text.StringBuilder _chatSb = new(512);
 
@@ -185,9 +189,9 @@ public sealed partial class GameHud : Control
         // top-left corner at (4,4) with its original (ChromeW+4) × (ChromeH+4) footprint.
         var chromeBox = new Control
         {
-            Name     = "ChromeBox",
+            Name = "ChromeBox",
             Position = new Vector2(4f, 4f),
-            Size     = new Vector2(ChromeW, ChromeH),
+            Size = new Vector2(ChromeW, ChromeH),
             CustomMinimumSize = new Vector2(ChromeW, ChromeH),
             MouseFilter = MouseFilterEnum.Ignore,
         };
@@ -198,14 +202,14 @@ public sealed partial class GameHud : Control
         // spec: Docs/RE/specs/ui_system.md §3.1).
         _hudChrome = new TextureRect
         {
-            Name            = "HudChrome",
-            StretchMode     = TextureRect.StretchModeEnum.Scale,
+            Name = "HudChrome",
+            StretchMode = TextureRect.StretchModeEnum.Scale,
             CustomMinimumSize = new Vector2(ChromeW, ChromeH),
-            MouseFilter     = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore,
         };
         _hudChrome.SetAnchorsAndOffsetsPreset(LayoutPreset.TopLeft);
         _hudChrome.Position = Vector2.Zero;
-        _hudChrome.Size     = new Vector2(ChromeW, ChromeH);
+        _hudChrome.Size = new Vector2(ChromeW, ChromeH);
         chromeBox.AddChild(_hudChrome);
 
         // Chrome bind is deferred to Initialise(context) when _context is available.
@@ -270,12 +274,24 @@ public sealed partial class GameHud : Control
         vbox.AddChild(_combatStatsLabel);
 
         // ---- Hotbar (bottom of screen) ----
-        try { BuildHotbar(); }
-        catch (Exception ex) { GD.PrintErr($"[GameHud] BuildHotbar failed: {ex.Message}"); }
+        try
+        {
+            BuildHotbar();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] BuildHotbar failed: {ex.Message}");
+        }
 
         // ---- Chat (bottom-right corner) ----
-        try { BuildChatPanel(); }
-        catch (Exception ex) { GD.PrintErr($"[GameHud] BuildChatPanel failed: {ex.Message}"); }
+        try
+        {
+            BuildChatPanel();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] BuildChatPanel failed: {ex.Message}");
+        }
 
         GD.Print("[GameHud] _Ready completed. HUD chrome wired to uitex 0001 (mainwindow.dds).");
     }
@@ -307,9 +323,9 @@ public sealed partial class GameHud : Control
                 //       at 1:1 on the reference 1024×768 canvas".
                 var at = new AtlasTexture
                 {
-                    Atlas       = tex,
-                    Region      = new Rect2(ChromeSrcX, ChromeSrcY, ChromeW, ChromeH), // PLAUSIBLE
-                    FilterClip  = true,
+                    Atlas = tex,
+                    Region = new Rect2(ChromeSrcX, ChromeSrcY, ChromeW, ChromeH), // PLAUSIBLE
+                    FilterClip = true,
                 };
                 _hudChrome.Texture = at;
                 GD.Print($"[GameHud] Chrome bound via UiCatalogs uitex {MainWindowTexId} " +
@@ -349,13 +365,13 @@ public sealed partial class GameHud : Control
     {
         // Anchor to bottom-centre.
         var hotbarContainer = new Control();
-        hotbarContainer.AnchorLeft   = 0.5f;
-        hotbarContainer.AnchorTop    = 1.0f;
-        hotbarContainer.AnchorRight  = 0.5f;
+        hotbarContainer.AnchorLeft = 0.5f;
+        hotbarContainer.AnchorTop = 1.0f;
+        hotbarContainer.AnchorRight = 0.5f;
         hotbarContainer.AnchorBottom = 1.0f;
-        hotbarContainer.OffsetLeft   = -225f;
-        hotbarContainer.OffsetTop    = -84f;
-        hotbarContainer.OffsetRight  = 225f;
+        hotbarContainer.OffsetLeft = -225f;
+        hotbarContainer.OffsetTop = -84f;
+        hotbarContainer.OffsetRight = 225f;
         hotbarContainer.OffsetBottom = -4f;
         AddChild(hotbarContainer);
 
@@ -363,7 +379,7 @@ public sealed partial class GameHud : Control
         // We attempt a texture bind but don't block HUD construction on failure.
         var hotbarBg = new TextureRect
         {
-            Name        = "HotbarChrome",
+            Name = "HotbarChrome",
             StretchMode = TextureRect.StretchModeEnum.Tile,
             MouseFilter = MouseFilterEnum.Ignore,
         };
@@ -388,7 +404,7 @@ public sealed partial class GameHud : Control
             // Icon TextureRect — backed by skillpipe.dds slot sub-rect (PLAUSIBLE).
             _hotbarIcon[i] = new TextureRect
             {
-                Name        = $"HotbarIcon{i}",
+                Name = $"HotbarIcon{i}",
                 StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
                 CustomMinimumSize = new Vector2(HotbarSlotW, HotbarSlotH),
                 MouseFilter = MouseFilterEnum.Ignore,
@@ -405,9 +421,9 @@ public sealed partial class GameHud : Control
             {
                 Text = "—",
                 HorizontalAlignment = HorizontalAlignment.Center,
-                CustomMinimumSize   = new Vector2(48, 14),
-                AutowrapMode        = TextServer.AutowrapMode.Off,
-                ClipText            = true,
+                CustomMinimumSize = new Vector2(48, 14),
+                AutowrapMode = TextServer.AutowrapMode.Off,
+                ClipText = true,
             };
             slotVBox.AddChild(_hotbarName[i]);
         }
@@ -425,11 +441,12 @@ public sealed partial class GameHud : Control
                     // Full-width hotbar chrome strip from top of skillpipe.dds. // PLAUSIBLE
                     target.Texture = new AtlasTexture
                     {
-                        Atlas      = tex,
-                        Region     = new Rect2(0, 0, 450, 80), // PLAUSIBLE
+                        Atlas = tex,
+                        Region = new Rect2(0, 0, 450, 80), // PLAUSIBLE
                         FilterClip = true,
                     };
-                    GD.Print($"[GameHud] Hotbar chrome bound via UiCatalogs uitex {HotbarTexId} (skillpipe.dds). // PLAUSIBLE");
+                    GD.Print(
+                        $"[GameHud] Hotbar chrome bound via UiCatalogs uitex {HotbarTexId} (skillpipe.dds). // PLAUSIBLE");
                     return;
                 }
             }
@@ -456,7 +473,7 @@ public sealed partial class GameHud : Control
             // Exact layout unrecovered; this is a PLAUSIBLE grid.
             // spec: Docs/RE/specs/ui_system.md §12 open item 6 — hotbar slot layout is gated on uitex manifest.
             int slotSrcX = HotbarSlotSrcX + slotIndex * HotbarSlotW; // PLAUSIBLE
-            int slotSrcY = HotbarSlotSrcY;                            // PLAUSIBLE
+            int slotSrcY = HotbarSlotSrcY; // PLAUSIBLE
 
             if (_context?.UiCatalogs is { } cats)
             {
@@ -465,8 +482,8 @@ public sealed partial class GameHud : Control
                 {
                     target.Texture = new AtlasTexture
                     {
-                        Atlas      = tex,
-                        Region     = new Rect2(slotSrcX, slotSrcY, HotbarSlotW, HotbarSlotH), // PLAUSIBLE
+                        Atlas = tex,
+                        Region = new Rect2(slotSrcX, slotSrcY, HotbarSlotW, HotbarSlotH), // PLAUSIBLE
                         FilterClip = true,
                     };
                     return;
@@ -490,13 +507,13 @@ public sealed partial class GameHud : Control
     private void BuildChatPanel()
     {
         var chatPanel = new PanelContainer();
-        chatPanel.AnchorLeft   = 1.0f;
-        chatPanel.AnchorTop    = 1.0f;
-        chatPanel.AnchorRight  = 1.0f;
+        chatPanel.AnchorLeft = 1.0f;
+        chatPanel.AnchorTop = 1.0f;
+        chatPanel.AnchorRight = 1.0f;
         chatPanel.AnchorBottom = 1.0f;
-        chatPanel.OffsetLeft   = -360f;
-        chatPanel.OffsetTop    = -180f;
-        chatPanel.OffsetRight  = -4f;
+        chatPanel.OffsetLeft = -360f;
+        chatPanel.OffsetTop = -180f;
+        chatPanel.OffsetRight = -4f;
         chatPanel.OffsetBottom = -4f;
         AddChild(chatPanel);
 
@@ -504,8 +521,8 @@ public sealed partial class GameHud : Control
         chatPanel.AddChild(chatVBox);
 
         _chatLabel = new Label();
-        _chatLabel.Text             = "";
-        _chatLabel.AutowrapMode     = TextServer.AutowrapMode.WordSmart;
+        _chatLabel.Text = "";
+        _chatLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         _chatLabel.CustomMinimumSize = new Vector2(350, 160);
         chatVBox.AddChild(_chatLabel);
     }
@@ -516,20 +533,20 @@ public sealed partial class GameHud : Control
 
     private void EnsureFallbackLabels()
     {
-        _stateLabel      ??= new Label();
-        _actorCount      ??= new Label();
-        _hpBar           ??= new ProgressBar();
-        _hpText          ??= new Label();
-        _mpBar           ??= new ProgressBar();
-        _mpText          ??= new Label();
-        _levelLabel      ??= new Label();
-        _xpLabel         ??= new Label();
-        _buffLabel       ??= new Label();
+        _stateLabel ??= new Label();
+        _actorCount ??= new Label();
+        _hpBar ??= new ProgressBar();
+        _hpText ??= new Label();
+        _mpBar ??= new ProgressBar();
+        _mpText ??= new Label();
+        _levelLabel ??= new Label();
+        _xpLabel ??= new Label();
+        _buffLabel ??= new Label();
         _combatStatsLabel ??= new Label();
-        _chatLabel       ??= new Label();
+        _chatLabel ??= new Label();
         for (int i = 0; i < HotbarVisibleSlots; i++)
         {
-            _hotbarKey[i]  ??= new Label();
+            _hotbarKey[i] ??= new Label();
             _hotbarName[i] ??= new Label();
             _hotbarIcon[i] ??= new TextureRect();
         }
@@ -553,11 +570,11 @@ public sealed partial class GameHud : Control
         {
             _hasTrackedPlayer = true;
             _trackedPlayerKey = evt.Key;
-            _trackedHp        = evt.CurrentHp;
-            _trackedMaxHp     = evt.MaxHp;
-            _trackedLevel     = evt.Level;
-            _trackedMp        = 0;
-            _trackedMaxMp     = 0;
+            _trackedHp = evt.CurrentHp;
+            _trackedMaxHp = evt.MaxHp;
+            _trackedLevel = evt.Level;
+            _trackedMp = 0;
+            _trackedMaxMp = 0;
             RefreshVitals();
             _levelLabel.Text = $"{_trackedLevel}";
         }
@@ -571,8 +588,8 @@ public sealed partial class GameHud : Control
     public void OnActorVitalsChanged(ActorVitalsChangedEvent evt)
     {
         if (!_hasTrackedPlayer || evt.Key != _trackedPlayerKey) return;
-        _trackedHp  = evt.CurrentHp;
-        _trackedMp  = evt.CurrentMp;
+        _trackedHp = evt.CurrentHp;
+        _trackedMp = evt.CurrentMp;
         if (_trackedMaxHp == 0) _trackedMaxHp = evt.CurrentHp;
         if (_trackedMaxMp == 0) _trackedMaxMp = evt.CurrentMp;
         RefreshVitals();
@@ -586,8 +603,8 @@ public sealed partial class GameHud : Control
     {
         if (!_hasTrackedPlayer || evt.Key != _trackedPlayerKey) return;
         _trackedLevel = evt.NewLevel;
-        _trackedHp    = evt.CurrentHp;
-        _trackedMp    = evt.CurrentMp;
+        _trackedHp = evt.CurrentHp;
+        _trackedMp = evt.CurrentMp;
         _levelLabel.Text = $"{_trackedLevel}";
         RefreshVitals();
     }
@@ -611,8 +628,18 @@ public sealed partial class GameHud : Control
     {
         if (!_hasTrackedPlayer || evt.Key != _trackedPlayerKey) return;
         var s = evt.Stats;
-        if (s.MaxLife   > 0) { _trackedMaxHp = (uint)s.MaxLife;   if (_trackedHp > _trackedMaxHp) _trackedHp = _trackedMaxHp; }
-        if (s.MaxEnergy > 0) { _trackedMaxMp = (uint)s.MaxEnergy; if (_trackedMp > _trackedMaxMp) _trackedMp = _trackedMaxMp; }
+        if (s.MaxLife > 0)
+        {
+            _trackedMaxHp = (uint)s.MaxLife;
+            if (_trackedHp > _trackedMaxHp) _trackedHp = _trackedMaxHp;
+        }
+
+        if (s.MaxEnergy > 0)
+        {
+            _trackedMaxMp = (uint)s.MaxEnergy;
+            if (_trackedMp > _trackedMaxMp) _trackedMp = _trackedMaxMp;
+        }
+
         RefreshVitals();
         _combatStatsLabel.Text = $"Atk:{s.MinDamage}–{s.MaxDamage}  Def:{s.Defence}";
     }
@@ -660,6 +687,7 @@ public sealed partial class GameHud : Control
             _chatSb.Append(l);
             first = false;
         }
+
         _chatLabel.Text = _chatSb.ToString();
     }
 
@@ -686,6 +714,7 @@ public sealed partial class GameHud : Control
             if (GetChild(i) is Control c && c.GetRect().HasPoint(pt))
                 return true;
         }
+
         return false;
     }
 
@@ -695,12 +724,22 @@ public sealed partial class GameHud : Control
 
     private void RefreshVitals()
     {
-        if (_trackedMaxHp > 0) { _hpBar.MaxValue = _trackedMaxHp; _hpBar.Value = _trackedHp; }
-        else                     _hpBar.Value = 0;
+        if (_trackedMaxHp > 0)
+        {
+            _hpBar.MaxValue = _trackedMaxHp;
+            _hpBar.Value = _trackedHp;
+        }
+        else _hpBar.Value = 0;
+
         _hpText.Text = $"{_trackedHp}/{_trackedMaxHp}";
 
-        if (_trackedMaxMp > 0) { _mpBar.MaxValue = _trackedMaxMp; _mpBar.Value = _trackedMp; }
-        else                     _mpBar.Value = 0;
+        if (_trackedMaxMp > 0)
+        {
+            _mpBar.MaxValue = _trackedMaxMp;
+            _mpBar.Value = _trackedMp;
+        }
+        else _mpBar.Value = 0;
+
         _mpText.Text = $"{_trackedMp}/{_trackedMaxMp}";
     }
 
@@ -709,7 +748,8 @@ public sealed partial class GameHud : Control
         // Manual loop avoids Array.FindAll allocation on every buff-slot change (finding 4).
         int activeCount = 0;
         for (int i = 0; i < _activeBuffCodes.Length; i++)
-            if (_activeBuffCodes[i] != 0) activeCount++;
+            if (_activeBuffCodes[i] != 0)
+                activeCount++;
 
         if (activeCount == 0)
         {
@@ -727,6 +767,7 @@ public sealed partial class GameHud : Control
             _chatSb.Append(_activeBuffCodes[i]);
             first = false;
         }
+
         _buffLabel.Text = _chatSb.ToString();
     }
 

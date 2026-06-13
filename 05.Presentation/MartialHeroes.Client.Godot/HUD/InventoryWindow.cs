@@ -34,7 +34,7 @@ public sealed partial class InventoryWindow : Control
     // spec: Docs/RE/formats/ui_manifests.md §1.4 — uitex 0002 = data/ui/inventwindow.dds.
     // -------------------------------------------------------------------------
 
-    private const int   InvTexId    = 2;
+    private const int InvTexId = 2;
     private const string InvTexPath = "data/ui/inventwindow.dds";
     // spec: Docs/RE/formats/ui_manifests.md §1.4 SAMPLE-VERIFIED.
 
@@ -42,27 +42,27 @@ public sealed partial class InventoryWindow : Control
     // spec: Docs/RE/specs/ui_system.md §8.3 — "340×190 chrome at source (318,647)": CODE-CONFIRMED.
     private const int ModalChromeSrcX = 318;
     private const int ModalChromeSrcY = 647;
-    private const int ModalChromeW    = 340;
-    private const int ModalChromeH    = 190;
+    private const int ModalChromeW = 340;
+    private const int ModalChromeH = 190;
 
     // Close button frames on inventwindow.dds.
     // spec: Docs/RE/specs/ui_system.md §8.1 "Quit-confirm Yes #1": CODE-CONFIRMED.
-    private const int CloseBtnNormX    = 302;
-    private const int CloseBtnNormY    = 900;
-    private const int CloseBtnHoverX   = 415;
-    private const int CloseBtnHoverY   = 900;
-    private const int CloseBtnPressX   = 302; // PRESSED = NORMAL, spec §1.5
-    private const int CloseBtnPressY   = 900;
-    private const int CloseBtnW        = 113;
-    private const int CloseBtnH        = 40;
+    private const int CloseBtnNormX = 302;
+    private const int CloseBtnNormY = 900;
+    private const int CloseBtnHoverX = 415;
+    private const int CloseBtnHoverY = 900;
+    private const int CloseBtnPressX = 302; // PRESSED = NORMAL, spec §1.5
+    private const int CloseBtnPressY = 900;
+    private const int CloseBtnW = 113;
+    private const int CloseBtnH = 40;
 
     // Grid cell background sub-rect.
     // No per-cell layout recovered for inventwindow.dds — PLAUSIBLE small square from top-left.
     // spec: Docs/RE/specs/ui_system.md §12 open item 6 — in-game window layouts gated on manifest.
-    private const int CellBgSrcX = 0;  // PLAUSIBLE
-    private const int CellBgSrcY = 0;  // PLAUSIBLE
-    private const int CellBgW    = 30; // PLAUSIBLE
-    private const int CellBgH    = 30; // PLAUSIBLE
+    private const int CellBgSrcX = 0; // PLAUSIBLE
+    private const int CellBgSrcY = 0; // PLAUSIBLE
+    private const int CellBgW = 30; // PLAUSIBLE
+    private const int CellBgH = 30; // PLAUSIBLE
 
     // msg.xdb id for close button caption "닫기".
     // spec: Docs/RE/specs/ui_system.md §10 — id 102 in 101–107 button label range.
@@ -72,9 +72,9 @@ public sealed partial class InventoryWindow : Control
     // Tunables
     // -------------------------------------------------------------------------
 
-    private const int DemoItemCount  = 64;
+    private const int DemoItemCount = 64;
     private const uint IdScanCeiling = 5_000;
-    private const int GridColumns    = 4;
+    private const int GridColumns = 4;
     // spec: Docs/RE/formats/config_tables.md §4.1 — "Total rows: 89,712": CONFIRMED.
 
     // -------------------------------------------------------------------------
@@ -157,6 +157,7 @@ public sealed partial class InventoryWindow : Control
                 MoveToFront();
                 PopulateGrid();
             }
+
             GetViewport().SetInputAsHandled();
         }
 
@@ -188,13 +189,13 @@ public sealed partial class InventoryWindow : Control
     private void BuildUi()
     {
         // Anchor: centre-left of the viewport.
-        AnchorLeft   = 0f;
-        AnchorTop    = 0.5f;
-        AnchorRight  = 0f;
+        AnchorLeft = 0f;
+        AnchorTop = 0.5f;
+        AnchorRight = 0f;
         AnchorBottom = 0.5f;
-        OffsetLeft   = 320f;
-        OffsetTop    = -260f;
-        OffsetRight  = 660f;
+        OffsetLeft = 320f;
+        OffsetTop = -260f;
+        OffsetRight = 660f;
         OffsetBottom = 260f;
 
         // Window root container.
@@ -208,7 +209,7 @@ public sealed partial class InventoryWindow : Control
         // We stretch the modal chrome to fill the full window for a cohesive look.
         _windowChrome = new TextureRect
         {
-            Name        = "InvWindowChrome",
+            Name = "InvWindowChrome",
             StretchMode = TextureRect.StretchModeEnum.Scale,
             MouseFilter = MouseFilterEnum.Ignore,
         };
@@ -249,8 +250,8 @@ public sealed partial class InventoryWindow : Control
 
         // ---- Scrollable grid ----
         var scroll = new ScrollContainer();
-        scroll.CustomMinimumSize   = new Vector2(330, 430);
-        scroll.SizeFlagsVertical   = SizeFlags.ExpandFill;
+        scroll.CustomMinimumSize = new Vector2(330, 430);
+        scroll.SizeFlagsVertical = SizeFlags.ExpandFill;
         vbox.AddChild(scroll);
 
         var grid = new GridContainer { Columns = GridColumns, Name = "ItemGrid" };
@@ -278,8 +279,8 @@ public sealed partial class InventoryWindow : Control
             {
                 _windowChrome.Texture = new AtlasTexture
                 {
-                    Atlas      = tex,
-                    Region     = new Rect2(ModalChromeSrcX, ModalChromeSrcY, ModalChromeW, ModalChromeH),
+                    Atlas = tex,
+                    Region = new Rect2(ModalChromeSrcX, ModalChromeSrcY, ModalChromeW, ModalChromeH),
                     FilterClip = true,
                 };
                 GD.Print($"[InventoryWindow] Chrome bound via UiCatalogs uitex {InvTexId} " +
@@ -291,7 +292,8 @@ public sealed partial class InventoryWindow : Control
         // Fallback: UiAssetLoader direct path.
         if (_uiLoader is not null)
         {
-            AtlasTexture? at = _uiLoader.Slice(InvTexPath, ModalChromeSrcX, ModalChromeSrcY, ModalChromeW, ModalChromeH);
+            AtlasTexture? at = _uiLoader.Slice(InvTexPath, ModalChromeSrcX, ModalChromeSrcY, ModalChromeW,
+                ModalChromeH);
             if (at is not null)
             {
                 _windowChrome.Texture = at;
@@ -316,21 +318,23 @@ public sealed partial class InventoryWindow : Control
 
         if (_uiLoader is not null)
         {
-            AtlasTexture? normFrame    = _uiLoader.Slice(InvTexPath, CloseBtnNormX,  CloseBtnNormY,  CloseBtnW, CloseBtnH);
-            AtlasTexture? hoverFrame   = _uiLoader.Slice(InvTexPath, CloseBtnHoverX, CloseBtnHoverY, CloseBtnW, CloseBtnH);
-            AtlasTexture? pressedFrame = _uiLoader.Slice(InvTexPath, CloseBtnPressX, CloseBtnPressY, CloseBtnW, CloseBtnH);
+            AtlasTexture? normFrame = _uiLoader.Slice(InvTexPath, CloseBtnNormX, CloseBtnNormY, CloseBtnW, CloseBtnH);
+            AtlasTexture? hoverFrame =
+                _uiLoader.Slice(InvTexPath, CloseBtnHoverX, CloseBtnHoverY, CloseBtnW, CloseBtnH);
+            AtlasTexture? pressedFrame =
+                _uiLoader.Slice(InvTexPath, CloseBtnPressX, CloseBtnPressY, CloseBtnW, CloseBtnH);
 
             if (normFrame is not null)
             {
                 var stateBtn = new StateButton
                 {
-                    Name          = "CloseBtn",
+                    Name = "CloseBtn",
                     CustomMinimumSize = new Vector2(CloseBtnW, CloseBtnH),
-                    NormalFrame   = normFrame,
-                    HoverFrame    = hoverFrame,
-                    PressedFrame  = pressedFrame,
-                    Caption       = caption,
-                    ActionId      = 0,
+                    NormalFrame = normFrame,
+                    HoverFrame = hoverFrame,
+                    PressedFrame = pressedFrame,
+                    Caption = caption,
+                    ActionId = 0,
                 };
                 stateBtn.ActionFired += _ => { Visible = false; };
                 return stateBtn;
@@ -420,8 +424,13 @@ public sealed partial class InventoryWindow : Control
             {
                 ImageTexture? atlasImg = cats.GetTexture(InvTexId);
                 if (atlasImg is not null)
-                    cellTex = new AtlasTexture { Atlas = atlasImg, Region = new Rect2(CellBgSrcX, CellBgSrcY, CellBgW, CellBgH), FilterClip = true }; // PLAUSIBLE
+                    cellTex = new AtlasTexture
+                    {
+                        Atlas = atlasImg, Region = new Rect2(CellBgSrcX, CellBgSrcY, CellBgW, CellBgH),
+                        FilterClip = true
+                    }; // PLAUSIBLE
             }
+
             if (cellTex is null && _uiLoader is not null)
                 cellTex = _uiLoader.Slice(InvTexPath, CellBgSrcX, CellBgSrcY, CellBgW, CellBgH); // PLAUSIBLE
 
@@ -444,7 +453,7 @@ public sealed partial class InventoryWindow : Control
         {
             Text = displayName,
             HorizontalAlignment = HorizontalAlignment.Center,
-            AutowrapMode        = TextServer.AutowrapMode.Word,
+            AutowrapMode = TextServer.AutowrapMode.Word,
         };
         nameLabel.CustomMinimumSize = new Vector2(74, 0);
         if (Color.HtmlIsValid(colour))
