@@ -357,6 +357,23 @@ internal static class SyntheticFrames
     }
 
     /// <summary>
+    /// 3/7 char-spawn result (16-byte payload). spec: login_flow.md §5.3 (result + slot + 3×u32).
+    /// </summary>
+    public static byte[] CharSpawnResult(
+        byte result, byte slot, uint param1 = 0, uint param2 = 0, uint param3 = 0)
+    {
+        Span<byte> p = stackalloc byte[16];
+        p.Clear();
+        p[0x00] = result; // 0 = failure; nonzero = spawn
+        p[0x01] = slot;
+        // 0x02 padding (u16) stays zero.
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x04, 4), param1);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x08, 4), param2);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x0c, 4), param3);
+        return Frame(3, 7, p);
+    }
+
+    /// <summary>
     /// 5/3 char spawn (908-byte payload: 8-byte head + 880-byte SpawnDescriptor + 20-byte trailer).
     /// SpawnDescriptor sub-fields per Docs/RE/structs/actor.md. spec: 5-3_char_spawn.yaml.
     /// </summary>

@@ -5,6 +5,7 @@ using MartialHeroes.Client.Application.Diagnostics;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.Login;
 using MartialHeroes.Client.Application.StateMachine;
+using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors;
 using MartialHeroes.Client.Domain.Skills;
@@ -49,6 +50,7 @@ public sealed class GamePacketHandler : IPacketHandler
     private readonly IUnhandledOpcodeSink _unhandled;
     private readonly ILoginHandshakeDriver? _loginDriver;
     private readonly LocalPlayerState? _localPlayer;
+    private readonly CharacterSelectionStore? _characterSelection;
 
     /// <summary>
     /// The combat-stat recompute seam: invoked whenever an equip / buff / level change should re-accumulate
@@ -85,7 +87,8 @@ public sealed class GamePacketHandler : IPacketHandler
         ClientStateMachine stateMachine,
         IUnhandledOpcodeSink unhandled,
         ILoginHandshakeDriver? loginDriver = null,
-        LocalPlayerState? localPlayer = null)
+        LocalPlayerState? localPlayer = null,
+        CharacterSelectionStore? characterSelection = null)
     {
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
@@ -93,6 +96,7 @@ public sealed class GamePacketHandler : IPacketHandler
         _unhandled = unhandled ?? throw new ArgumentNullException(nameof(unhandled));
         _loginDriver = loginDriver; // optional: only needed for the login handshake flow
         _localPlayer = localPlayer; // optional: only needed for the skill/buff/combat subsystems
+        _characterSelection = characterSelection; // optional: only needed for the 3/1 cache + 3/7 spawn
     }
 
     // -------------------------------------------------------------------------
@@ -380,6 +384,15 @@ public sealed class GamePacketHandler : IPacketHandler
             case Opcodes.SmsgCharacterList: // 3/1 — character-select list (3-byte header + per-slot records)
                 if (HandleCharacterList(payload))
                 {
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgCharSpawnResult: // 3/7 — enter-game spawn result (16-byte block)
+                if (payload.Length >= SmsgCharSpawnResult.WireSize)
+                {
+                    HandleCharSpawnResult(in MemoryMarshal.AsRef<SmsgCharSpawnResult>(payload));
                     return;
                 }
 
@@ -842,11 +855,15 @@ public sealed class GamePacketHandler : IPacketHandler
         ref readonly SmsgCharacterListHeader header =
             ref MemoryMarshal.AsRef<SmsgCharacterListHeader>(payload);
 
+        // A fresh list replaces the prior roster (and any stale chosen-slot cache). spec: login_flow.md §3.2.
+        _characterSelection?.Reset();
+
         var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<CharacterListSlot>();
         int cursor = SmsgCharacterListHeader.HeaderSize;
-        const int slotBits = 8; // up to 8 slots in the LSB-first mask. spec: 3-1_character_list.yaml.
 
-        for (int slot = 0; slot < slotBits; slot++)
+        // Hard, bounded iteration of exactly 5 slots (indices 0..4); the list never references a slot
+        // beyond 4. spec: login_flow.md §3.2 / §7 (Char-list maximum slots = 5).
+        for (int slot = 0; slot < CharacterSelectionStore.MaxSlots; slot++)
         {
             if ((header.SlotMask & (1 << slot)) == 0)
             {
@@ -867,6 +884,14 @@ public sealed class GamePacketHandler : IPacketHandler
             var reader = new SpawnDescriptorReader(record[..SpawnDescriptorReader.Size]);
             builder.Add(new CharacterListSlot(
                 slot, reader.ReadName(), reader.ReadLevel(), reader.ReadServerClass(), reader.ReadCurrentHp()));
+
+            // Retain the RAW per-slot record (880 descriptor + 96 stats + 1 flag byte) so SelectCharacterAsync
+            // can detect "@BLANK@", and the 3/7 handler can materialize the local player. spec: login_flow.md §3.5.
+            // The 880 + 96 = 976-byte descriptor+stats span; the flag byte is at record +976. spec: §3.2.
+            const int descriptorAndStatsSize = SpawnDescriptorReader.Size + 96; // 976
+            byte slotFlag = record.Length > descriptorAndStatsSize ? record[descriptorAndStatsSize] : (byte)0;
+            _characterSelection?.Retain(
+                new CharacterSlotRecord(slot, record[..descriptorAndStatsSize], slotFlag));
         }
 
         // 3/1 switches the client to the character-select screen. spec: opcodes.md (3/1 "switches to the
@@ -875,6 +900,58 @@ public sealed class GamePacketHandler : IPacketHandler
 
         _eventBus.Publish(new CharacterListEvent(header.ServerId, header.ChannelId, builder.ToImmutable()));
         return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // 3/7 — char-spawn result (the actual local-player spawn)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 3/7 — enter-game spawn result. On Result != 0 the client materializes the local player from the
+    /// slot descriptor cached at select time (Section 3.5) and publishes <see cref="LocalPlayerSpawnedEvent"/>;
+    /// on Result == 0 it publishes <see cref="LocalPlayerSpawnFailedEvent"/> (a timed failure message).
+    /// The local player is registered as the controlled actor (<see cref="ClientWorld.LocalActorKey"/>),
+    /// so the move/skill use cases can source its position. spec: Docs/RE/specs/login_flow.md §3.5 / §5.3.
+    /// </summary>
+    private void HandleCharSpawnResult(in SmsgCharSpawnResult packet)
+    {
+        // Result 0 = failure (a timed message is shown). spec: login_flow.md §5.3.
+        if (packet.Result == 0)
+        {
+            _eventBus.Publish(new LocalPlayerSpawnFailedEvent(packet.Slot));
+            return;
+        }
+
+        // Success: materialize the local player from the CACHED slot descriptor (Section 3.5). Without a
+        // cache (no store wired, or no slot confirmed) there is nothing to spawn from; record and bail.
+        CharacterSlotRecord? cached = _characterSelection?.Chosen;
+        if (cached is null)
+        {
+            _unhandled.Record(Opcodes.SmsgCharSpawnResult, SmsgCharSpawnResult.WireSize);
+            return;
+        }
+
+        // The local player's actor id is not carried by the 16-byte 3/7 block (only result + slot + 3
+        // opaque spawn-param u32s; their meaning is UNVERIFIED — spec §5.3). Key the local player on the
+        // PlayerCharacter sort with the unassigned-id sentinel until a self-spawn (5/3) supplies the real
+        // id. spec: Docs/RE/structs/actor.md (id initialised to 0xFFFFFFFF before spawn).
+        var key = new ActorKey(ActorKey.UnassignedRawId, EntitySort.PlayerCharacter);
+
+        // Float -> fixed at the boundary; world Y forced to 0. spec: actor.md (coords float, Y = 0).
+        Vector3Fixed position = Vector3Fixed.FromFloat(cached.WorldX, 0f, cached.WorldZ);
+
+        var spawnInfo = new SpawnInfo(
+            key, cached.Level, cached.CurrentHp, cached.CurrentMp, cached.CurrentStamina, cached.ServerClass);
+        VitalStats vitals = VitalsResolver(spawnInfo);
+
+        var actor = new Actor(
+            key, cached.Level, vitals, cached.CurrentHp, cached.CurrentMp, cached.CurrentStamina, position);
+        _world.Add(actor);
+        _world.LocalActorKey = key; // mark the controlled actor for the move/skill use cases.
+
+        _eventBus.Publish(new LocalPlayerSpawnedEvent(
+            key, packet.Slot, cached.Name, cached.Level, actor.Position, actor.CurrentHp, actor.MaxHp,
+            cached.ServerClass));
     }
 
     // -------------------------------------------------------------------------

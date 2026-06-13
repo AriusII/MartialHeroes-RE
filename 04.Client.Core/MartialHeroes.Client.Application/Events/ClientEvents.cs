@@ -337,3 +337,47 @@ public readonly record struct CharacterListSlot(
     ushort Level,
     ushort ServerClass,
     uint CurrentHp);
+
+// =====================================================================================================
+// Enter-game spawn (3/7) and character-creation routing
+// =====================================================================================================
+
+/// <summary>
+/// Published when the local player materializes into the world (3/7 SmsgCharSpawnResult, Result != 0).
+/// Immutable snapshot of the freshly-spawned local player, sourced from the slot descriptor cached at
+/// select time. This is the load-bearing "you are in the world" event the presentation acts on. spec:
+/// Docs/RE/specs/login_flow.md §3.5 / §5.3.
+/// </summary>
+/// <param name="Key">The local player's composite actor identity (raw id + sort).</param>
+/// <param name="SlotIndex">The character slot that spawned (echoed by the 3/7 result).</param>
+/// <param name="Name">Decoded character name (from the cached descriptor).</param>
+/// <param name="Level">Character level.</param>
+/// <param name="Position">Spawn position (Q16.16, world Y forced to 0).</param>
+/// <param name="CurrentHp">Current hit points at spawn.</param>
+/// <param name="MaxHp">Resolved maximum hit points.</param>
+/// <param name="ServerClass">Server-assigned class id (martial-arts style).</param>
+public sealed record LocalPlayerSpawnedEvent(
+    ActorKey Key,
+    int SlotIndex,
+    string Name,
+    ushort Level,
+    Vector3Fixed Position,
+    uint CurrentHp,
+    uint MaxHp,
+    ushort ServerClass) : IClientEvent;
+
+/// <summary>
+/// Published when the enter-game spawn fails (3/7 SmsgCharSpawnResult, Result == 0). The presentation
+/// shows a timed failure message and may return to the character-select screen. Immutable snapshot.
+/// spec: Docs/RE/specs/login_flow.md §5.3 (Result 0 = failure, timed message shown).
+/// </summary>
+/// <param name="SlotIndex">The character slot the failed spawn targeted (echoed by the 3/7 result).</param>
+public sealed record LocalPlayerSpawnFailedEvent(byte SlotIndex) : IClientEvent;
+
+/// <summary>
+/// Published when the player confirms an <b>empty</b> character slot (descriptor name == "@BLANK@"):
+/// the flow routes to character creation instead of sending the 1/9 enter-game request. Immutable
+/// snapshot. spec: Docs/RE/specs/login_flow.md §3.3 / §3.5 (blank slot routes to creation).
+/// </summary>
+/// <param name="SlotIndex">The empty slot index the player picked (0..4).</param>
+public sealed record CreateCharacterRequestedEvent(int SlotIndex) : IClientEvent;

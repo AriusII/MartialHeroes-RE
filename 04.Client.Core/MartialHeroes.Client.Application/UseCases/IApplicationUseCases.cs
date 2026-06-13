@@ -32,11 +32,18 @@ public interface IApplicationUseCases
     ValueTask RequestMoveAsync(Vector3Fixed target, bool running, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Selects a character slot and requests enter-game. Builds and sends 1/9 CmsgEnterGameRequest
-    /// (slot index + version token), and drives the FSM toward <see cref="Events.ClientState.Loading"/>;
-    /// the 3/5 ack later completes the transition to World. spec:
-    /// Docs/RE/packets/1-9_enter_game_request.yaml.
+    /// Selects a character slot and requests enter-game. Enforces the slot-range guard (0..4) and, when a
+    /// character-selection store is wired, confirms the slot against the cached 3/1 roster: an
+    /// <b>"@BLANK@" empty slot routes to character creation</b> (publishes
+    /// <see cref="Events.CreateCharacterRequestedEvent"/>, sends NO 1/9), an unoccupied/unknown slot
+    /// sends nothing, and a real character is cached as the chosen descriptor (consumed by the 3/7
+    /// spawn). For a real character it builds and sends 1/9 CmsgEnterGameRequest (slot index + the
+    /// derived version token, <c>10 × versionField + 9</c> = 21149 for the sampled game.ver) and drives
+    /// the FSM toward <see cref="Events.ClientState.Loading"/>; the 3/5 ack later completes the
+    /// transition to World, and the 3/7 result spawns the local player. spec:
+    /// Docs/RE/specs/login_flow.md §3.3 / §3.5 / §7; Docs/RE/packets/1-9_enter_game_request.yaml.
     /// </summary>
+    /// <param name="slotIndex">The chosen character slot (0..4; out-of-range throws).</param>
     ValueTask SelectCharacterAsync(int slotIndex, CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Text;
+using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors;
@@ -28,11 +30,13 @@ namespace MartialHeroes.Client.Application.UseCases;
 /// the structs' <c>WireSize</c> / <c>HeaderSize</c> constants. spec: each packet yaml.
 /// </para>
 /// <para>
-/// <b>PROVISIONAL defaults.</b> The 1/9 VersionToken is client/build-specific and not recovered
-/// (spec: 1-9_enter_game_request.yaml UNKNOWN); an injected token (default zero-filled) is used. The
-/// pre-0/0 username send (1/6) is not specced; <see cref="LoginAsync"/> stages the credential but
-/// emits no 1/6 frame. The chat/credential text charset is UNKNOWN per the chat specs; UTF-8 is the
-/// documented provisional choice.
+/// <b>Version token (sample-verified).</b> The 1/9 version token is derived via
+/// <see cref="ClientVersionToken.Derive"/> (<c>10 × versionField + 9</c>) from the injected
+/// <see cref="IClientVersionSource"/>. The default source yields the sampled field 2114 → token 21149
+/// (<c>sample_verified</c> from the real <c>game.ver</c>). spec: login_flow.md §3.3 / §7. The pre-0/0
+/// username send (1/6) is not specced; <see cref="LoginAsync"/> stages the credential but emits no 1/6
+/// frame. The chat/credential text charset is UNKNOWN per the chat specs; UTF-8 is the documented
+/// provisional choice.
 /// </para>
 /// </remarks>
 public sealed class ApplicationUseCases : IApplicationUseCases
@@ -44,6 +48,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     private readonly SessionId _sessionId;
     private readonly byte[] _versionToken;
     private readonly LocalPlayerState? _localPlayer;
+    private readonly CharacterSelectionStore? _characterSelection;
+    private readonly IClientEventBus? _eventBus;
 
     /// <summary>The 1/9 version-token length: a fixed 33-byte buffer. spec: 1-9_enter_game_request.yaml.</summary>
     public const int VersionTokenLength = 33;
@@ -52,8 +58,24 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     /// Creates the use-case facade.
     /// </summary>
     /// <param name="versionToken">
-    /// PROVISIONAL. The 33-byte 1/9 client/version handshake token. Default (or a shorter buffer) is
-    /// zero-padded to 33 bytes; the real derivation is unrecovered. spec: 1-9_enter_game_request.yaml.
+    /// Optional explicit override of the 33-byte 1/9 version-token buffer. When <b>empty</b> (the
+    /// default), the token is DERIVED as <c>10 × versionField + 9</c> from
+    /// <paramref name="versionSource"/> and stamped as a NUL-terminated decimal ASCII string. A non-empty
+    /// span is used verbatim (zero-padded / truncated to 33 bytes) — an escape hatch for a future binary
+    /// placement. spec: login_flow.md §3.3 / §7; packets/1-9_enter_game_request.yaml.
+    /// </param>
+    /// <param name="versionSource">
+    /// Supplies the <c>game.ver</c> version field used to derive the 1/9 token when no explicit
+    /// <paramref name="versionToken"/> is given. Defaults to <see cref="DefaultClientVersionSource.Instance"/>
+    /// (field 2114 → token 21149, <c>sample_verified</c>). spec: login_flow.md §3.3 / §7.
+    /// </param>
+    /// <param name="characterSelection">
+    /// The session-scoped store the 3/1 handler fills and <see cref="SelectCharacterAsync"/> reads to
+    /// detect "@BLANK@" and cache the chosen descriptor for the 3/7 spawn. spec: login_flow.md §3.5.
+    /// </param>
+    /// <param name="eventBus">
+    /// Used to publish <see cref="CreateCharacterRequestedEvent"/> when an empty slot is confirmed.
+    /// Optional; when absent the create-character routing is silent (still suppresses the 1/9 send).
     /// </param>
     public ApplicationUseCases(
         IOutboundPacketSink outbound,
@@ -62,7 +84,10 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         LoginCredentialStore credentials,
         SessionId sessionId,
         ReadOnlySpan<byte> versionToken = default,
-        LocalPlayerState? localPlayer = null)
+        LocalPlayerState? localPlayer = null,
+        IClientVersionSource? versionSource = null,
+        CharacterSelectionStore? characterSelection = null,
+        IClientEventBus? eventBus = null)
     {
         _outbound = outbound ?? throw new ArgumentNullException(nameof(outbound));
         _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
@@ -70,12 +95,28 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
         _sessionId = sessionId;
         _localPlayer = localPlayer; // optional: drives the cast state machine when wired
+        _characterSelection = characterSelection; // optional: needed for @BLANK@ + descriptor cache
+        _eventBus = eventBus; // optional: publishes CreateCharacterRequested for empty slots
 
-        // Zero-pad / truncate the provisional token into the fixed 33-byte buffer.
         _versionToken = new byte[VersionTokenLength];
         if (!versionToken.IsEmpty)
         {
+            // Explicit override: use the supplied bytes verbatim (zero-padded / truncated to 33 bytes).
             versionToken[..Math.Min(versionToken.Length, VersionTokenLength)].CopyTo(_versionToken);
+        }
+        else
+        {
+            // Derive the version token: token = 10 × versionField + 9. spec: login_flow.md §3.3 / §7.
+            // The default source yields the sampled field 2114 -> token 21149 (sample_verified). Stamp it
+            // as a NUL-terminated decimal ASCII string into the fixed 33-byte buffer; the exact in-body
+            // placement is UNVERIFIED (spec §9 item 5) but the token VALUE is firm.
+            // spec: packets/1-9_enter_game_request.yaml (VersionToken = 33-byte asciiz).
+            uint token = ClientVersionToken.Derive(
+                (versionSource ?? DefaultClientVersionSource.Instance).VersionField);
+            string decimalToken = token.ToString(CultureInfo.InvariantCulture);
+            Encoding.ASCII.GetBytes(
+                decimalToken.AsSpan(0, Math.Min(decimalToken.Length, VersionTokenLength - 1)), _versionToken);
+            // Remaining bytes stay 0 (NUL terminator + zero tail).
         }
     }
 
@@ -134,18 +175,46 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     /// <inheritdoc />
     public ValueTask SelectCharacterAsync(int slotIndex, CancellationToken cancellationToken = default)
     {
-        if (slotIndex is < 0 or > byte.MaxValue)
+        // Slot-range guard: the char list supports a maximum of 5 slots (indices 0..4). spec:
+        // login_flow.md §3.5 ("slot index ≤ 4") / §7 (Char-list maximum slots = 5).
+        if (slotIndex is < 0 or > CharacterSelectionStore.MaxSlotIndex)
         {
-            throw new ArgumentOutOfRangeException(nameof(slotIndex), slotIndex, "Slot index out of range.");
+            throw new ArgumentOutOfRangeException(
+                nameof(slotIndex), slotIndex, "Slot index must be 0..4 (spec: login_flow.md §3.5).");
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+
+        // Confirm the slot against the cached 3/1 roster: detect the "@BLANK@" empty-slot sentinel,
+        // re-check the range, and on a real character cache the chosen descriptor for the 3/7 spawn.
+        // spec: login_flow.md §3.3 / §3.5.
+        if (_characterSelection is not null)
+        {
+            CharacterSelectionStore.SelectOutcome outcome = _characterSelection.Confirm(slotIndex);
+            switch (outcome)
+            {
+                case CharacterSelectionStore.SelectOutcome.Blank:
+                    // Empty slot -> route to character creation; do NOT send 1/9. spec: §3.3 / §3.5.
+                    _eventBus?.Publish(new CreateCharacterRequestedEvent(slotIndex));
+                    return ValueTask.CompletedTask;
+
+                case CharacterSelectionStore.SelectOutcome.Invalid:
+                    // Unoccupied / unknown slot (no retained record): nothing to enter. Suppress the send.
+                    return ValueTask.CompletedTask;
+
+                case CharacterSelectionStore.SelectOutcome.Confirmed:
+                default:
+                    break; // real character cached -> proceed to send 1/9.
+            }
+        }
 
         // Build the fixed 40-byte 1/9 payload. spec: 1-9_enter_game_request.yaml.
         Span<byte> payload = stackalloc byte[CmsgEnterGameRequest.WireSize];
         payload.Clear();
         payload[0x00] = (byte)slotIndex; // 0x00 SlotIndex (HIGH CONFIDENCE)
-        _versionToken.CopyTo(payload.Slice(0x01, VersionTokenLength)); // 0x01 VersionToken (PROVISIONAL)
+        // 0x01 VersionToken: token = 10 × versionField + 9 (= 21149 for the sampled game.ver), stamped
+        // as a NUL-terminated decimal ASCII string. spec: login_flow.md §3.3 / §7.
+        _versionToken.CopyTo(payload.Slice(0x01, VersionTokenLength));
         // 0x22 Tail (6 bytes) stays zero. spec: 1-9 (observed zero).
 
         // Drive the deterministic lifecycle toward Loading; the 3/5 ack later transitions to World
