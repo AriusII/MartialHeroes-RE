@@ -126,10 +126,13 @@ For a **real screenshot**, run **windowed** with a temporary GDScript autoload t
 
 Two local MCP servers are registered in the committed root `.mcp.json`. Both connect only when their host app is open **and** a fresh Claude session starts. Discover tool names at runtime (they're deferred).
 
-- **IDA Pro MCP** — `http://127.0.0.1:13337/mcp` (tools `mcp__ida__*`), live analysis of `Main.exe`. Reachable only when IDA is open on the database. Run `/ida-mcp-connect` to verify before RE work. If missing on a headless run, re-register:
+- **IDA Pro MCP** — live analysis of `Main.exe` (tools `mcp__ida__*`). Reachable only when IDA is open on the database. Run `/ida-mcp-connect` to verify before RE work. **Two endpoints expose DIFFERENT toolsets — prioritize `?ext=dbg`:**
+  - `http://127.0.0.1:13337/mcp` — base endpoint (static-analysis tools only).
+  - `http://127.0.0.1:13337/mcp?ext=dbg` — **debugger-extended endpoint**: surfaces the debugger tools (`mcp__ida__dbg_*`) **in addition to** the static tools. The committed `.mcp.json` registers THIS one — it is a superset (static recovery *and* dynamic confirmation from one connection). If the `dbg_*` tools are absent, the session is on the wrong (base) endpoint. Re-register on `?ext=dbg`:
   ```powershell
-  claude mcp add --transport http ida http://127.0.0.1:13337/mcp
+  claude mcp add --transport http ida "http://127.0.0.1:13337/mcp?ext=dbg"
   ```
+  Static analysis forms the hypothesis; the IDA **debugger** (run the real client, breakpoint, read registers/memory, step) confirms it against ground truth. Both modes are dirty-room: findings cross the firewall only as neutral prose — see `Docs/CAMPAIGN_TEMPLATE.md` §0.3/§4.4.
 - **Godot MCP** (`slangwald/godot-mcp`, registered as `godot`) — **editor tools on port 9600** (`get_scene_tree`, `run_project`, `get_output`, `modify_node`, …) and **game tools on port 9601** (`screenshot`, `click`, `get_runtime_tree`, …). Tool names are `mcp__godot__*`. Connects only with the Godot editor open + a fresh session.
 
 ## Known Godot Pitfalls (each cost real time — heed them)

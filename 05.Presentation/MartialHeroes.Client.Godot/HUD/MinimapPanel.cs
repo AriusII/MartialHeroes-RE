@@ -14,7 +14,7 @@ namespace MartialHeroes.Client.Godot.HUD;
 /// PASSIVE: reads actor positions from <see cref="ActorRegistry"/> (the Godot-space
 /// positions of live <see cref="VisualActor"/> nodes) and projects them onto the radar
 /// body using the BYTE-VERIFIED world→minimap transform:
-/// <code>
+/// <codela partie DEBUGG
 ///   rel.X = actorLegacyX − playerLegacyX
 ///   rel.Z = actorLegacyZ − playerLegacyZ
 ///   px = rel.X × 0.125 + 66.5

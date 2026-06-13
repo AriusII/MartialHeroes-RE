@@ -616,4 +616,95 @@ corrected in PRESERVATION_AND_ARCHITECTURE.md (×3).
 = **all 10 suites green, 0 failures**. The 3 LSP "always-true" + 4 CS8019 diagnostics were stale
 mid-flight cache (real code/line mismatch; msbuild surfaces neither). Committed after gates.
 
+# CYCLE 4 — Client workflow end-to-end: Boot → Login → ServerList → CharSelect (+ Effect/UI/GUI) (launched 2026-06-13)
+
+**Mandate (maintainer, verbatim, FR):** *"on gèle le World Scene — il y a encore trop de choses qui
+ne me vont pas avant de se focaliser dessus. Lance IDA en DEBUGGER (9.3) si tu peux voir/comprendre ce
+qui se passe (creds fournis). Prends le temps de bien réfléchir pour poursuivre la compréhension du
+WORKFLOW du client de bout en bout — effect, UI & GUI, Login Scene, Server List Selection, Character
+Selection, puis World Scene. Énormément de recherches, scripts PYTHON dans IDA, déploie 50-70 agents +
+sub-agents. Mets ça dans un markdown qui documente tout le workflow, tous les systèmes et modules. Puis
+parfaire UI/GUI (C# + Godot) et surtout le tooling de compréhension des fichiers du data.vfs. Beaucoup
+de phases, pleins d'agents partout. Ce n'est absolument pas suffisant !"*
+
+This cycle steps **back upstream** of the world scene to recover the **complete client boot-to-play
+workflow** as the original sequences it: process boot → engine/VFS init → **Login scene** (ID/PW) →
+**server/channel list selection** → **second-password (PIN)** → **character-select scene** → hand-off
+into the world — plus the cross-cutting **Effect** and **UI/GUI framework** layers that every scene
+sits on. End state: a single authoritative workflow document, deepened subsystem specs, a faithful
+C#/Godot UI/GUI implementation of the front-end scenes, and sharper VFS file-understanding tooling.
+
+**Master deliverable:** `Docs/RE/specs/client_workflow_master.md` — the end-to-end scene/state/module
+map (boot → login → serverlist → PIN → charselect → world hand-off), synthesised last from the cleaned
+subject specs (extends the Cycle-2 `client_workflow.md`, doesn't duplicate it).
+
+**Out of scope (deferred):** the **World Scene** gameplay deepening (frozen this cycle, per mandate);
+the **game server** (core stays engine-free for a future `MartialHeroes.Server.Console`, no server code).
+
+**Command structure:** Top Orchestrator (this session) drives the debugger spine directly (serial,
+IDA-exclusive) and owns Tier-1 files; a **W1-Orchestrator** wave fans out the static+VFS research
+(IDA in sub-waves of 3, VFS wide); E/R get Tier-2 orchestrators when they launch.
+
+## Evidence baseline
+- Going in: 27 specs / 16 formats / 62 packet YAMLs / opcodes.md; Cycle-2 `client_workflow.md` +
+  `ui_system.md` + `frontend_scenes.md` already cover the login/char-select **frontend at sketch level**.
+- Known gaps this cycle closes: the **scene state-machine** (push/pop/tick + the global state var),
+  **server-list/channel** record layout + fetch threads, the **second-password/PIN** sub-flow, the
+  **effect manifest pipeline** (XEffect family end-to-end), the **UI/GUI widget framework** (.do/.scr →
+  widget tree → action dispatch), and a **debugger-confirmed** VFS open/find/read path (flagship §0.4).
+- Tool baseline verified 2026-06-13: IDA MCP **UP** (static; `doida.exe` sha `63fcaf8e…`, 25 973 funcs,
+  2 790 named) · build **0/0** · tests green (Cycle-3 gate) · VFS **reachable** (`clientdata/` + `D:`).
+- **Debugger status (R11):** `dbg_start` fails deterministically — **no debugger backend armed on the
+  IDB** (opened for static analysis; the MCP can't select the backend — GUI-only). Dynamic lanes are
+  **BLOCKED pending maintainer**: IDA → *Debugger ▸ Select debugger ▸ Local Windows debugger*; *Process
+  options ▸ Directory = `D:\d.o online\`*; F9. XTrap anti-cheat may still refuse. Until armed, W1 runs
+  **static + VFS only**; debugger-confirmation lanes fold in when available (no blocking — R11/R4b).
+
+## Spine targets recovered (static scout, canonical names — addresses live only in `_dirty/`)
+Login: `Diamond_LoginWindow_{BuildScene,TickStateMachine,OnAction,HandleInputEvent,RenderCharacterList}`,
+`Diamond_CommonLoginWindow_{ctor,dtor}`, `Diamond_LoginWindow_{FetchServerList_Thread,FetchChannelEndpoint_Thread}`,
+`CIPList_GetSelectedRecord`, RTTI `LoginSecondPassword` (the PIN second factor). CharSelect:
+`Diamond_SelectWindow_{ctor,BuildScene,BuildSlotActors,BuildCreatePreviewActor,InitFromCharListAndBuildUI,EnterSelectedCharacter,End}`.
+Net/auth: `AuthSession_BuildLoginPacket43`, `NetClient_SetLoginEndpoint`, `NetHandler_CharMgmt_SceneEntityUpdate`.
+Main/render: `Diamond_MainHandler_BuildSceneGraph`, `Renderer_DrawScene*`, `Scene_UpdateCameraAndCull`.
+VFS: `VFS_{OpenArchive,FindEntry,ReadEntryData,LoadFile,IsMounted,SetMounted}`, `VFS_ScopedReader_*`.
+Effects: `EffectManager_LoadBmplistAndManifests`, `{User,Joint,Map,Core}XEffect_*`, `XEffect_tickAndDispatch`,
+`XEffectManager_LoadXeffectLst_*`, `ParticleEffectManager_*`.
+
+## Phase C4-0 — MANDATE & PRE-FLIGHT — ✅ DONE (2026-06-13)
+Mandate captured; scope + out-of-scope set; baseline verified (build 0/0, IDA static UP, VFS reachable);
+spine targets scouted; debugger R11 blocker documented. ROADMAP section written.
+
+## Phase C4-W1 — GIGA RESEARCH (dirty room) — ⏳ PENDING (static+VFS; debugger lanes deferred)
+IDA static lanes (sub-waves of 3, single IDB) + VFS harness lanes (wide). Output: `_dirty/workflow/*.md`
+ONLY. Ledger: one writer per `_dirty/workflow/<lane>.md`.
+
+| # | Lane | Type | Agent | Question | Deliverable | Conf |
+|---|------|------|-------|----------|-------------|------|
+| 1 | boot-sequence | IDA-S | re-static-analyst | entry→engine init→VFS mount→first scene push order | _dirty/workflow/boot-sequence.md | — |
+| 2 | scene-machine | IDA-S | re-static-analyst | global scene/state manager: push/pop/tick + the state var | _dirty/workflow/scene-machine.md | — |
+| 3 | login-scene | IDA-S | re-static-analyst | LoginWindow BuildScene + TickStateMachine states + field model | _dirty/workflow/login-scene.md | — |
+| 4 | serverlist-selection | IDA-S | re-protocol-analyst | server/channel list fetch threads + record layout + selection | _dirty/workflow/serverlist.md | — |
+| 5 | second-password-pin | IDA-S | re-static-analyst | LoginSecondPassword (PIN) sub-flow + where it gates | _dirty/workflow/second-password.md | — |
+| 6 | charselect-scene | IDA-S | re-static-analyst | SelectWindow InitFromCharList…→slot actors→EnterSelectedCharacter | _dirty/workflow/charselect-scene.md | — |
+| 7 | auth-login-packet | IDA-S | re-protocol-analyst | AuthSession_BuildLoginPacket43 field layout + login crypto init | _dirty/workflow/auth-login-packet.md | — |
+| 8 | vfs-deep (flagship §0.4) | IDA-S | re-asset-format-analyst | data.inf record layout + lookup + read/decompress→buffer | _dirty/workflow/vfs-deep.md | — |
+| 9 | effect-system | IDA-S | re-asset-format-analyst | XEffect family + manifest load (.xeff/bmplist) + tick/dispatch | _dirty/workflow/effect-system.md | — |
+| 10 | ui-gui-framework | IDA-S | re-static-analyst | window/widget base classes + .do/.scr→widget tree + action dispatch | _dirty/workflow/ui-framework.md | — |
+| 11 | mainloop-render | IDA-S | re-static-analyst | per-frame loop: BuildSceneGraph→cull→DrawScene order | _dirty/workflow/mainloop-render.md | — |
+| 12 | net-session-bootstrap | IDA-S | re-protocol-analyst | SetLoginEndpoint + connection/session setup + endpoint resolve | _dirty/workflow/net-bootstrap.md | — |
+| V-A | vfs-ui-manifests | VFS | vfs-data-analyst | login/select `data/ui/*.dds` + `.do/.scr` manifest census | _dirty/workflow/vfs-ui-manifests.md | — |
+| V-B | vfs-effect-files | VFS | vfs-data-analyst | effect manifests (.xeff/bmplist/effect/map) census + headers | _dirty/workflow/vfs-effect-files.md | — |
+| V-C | vfs-login-assets | VFS | vfs-data-analyst | exact asset set the login/charselect scenes load | _dirty/workflow/vfs-login-assets.md | — |
+| D-* | debugger-confirm (boot/scene/vfs/login-packet) | IDA-D | re-* | runtime confirm once backend armed | _dirty/workflow/*.dyn.md | DEFERRED |
+
+**W1 EXIT:** lanes 1-3,6,8 (critical path) returned + ≥10 of 15 total; confidence rated; conflicts flagged.
+**W1 STATUS — PENDING.**
+
+## Phase C4-W2 — PROMOTION — ⏳ PENDING (spec-authors, 1 file each; master synth last)
+## Phase C4-E — ENGINEERING — ⏳ PENDING (UI/GUI front-end scenes in C#/Godot)
+## Phase C4-T — TOOLING — ⏳ PENDING (vfsls scan-ui / scan-effect; parsers for UI/effect manifests)
+## Phase C4-R — REVIEW + FIX + GATES — ⏳ PENDING
+## Phase C4-C — CONSOLIDATION — ⏳ PENDING
+
 — *Maintained by the orchestrator. Update phase statuses in place as waves complete.*
