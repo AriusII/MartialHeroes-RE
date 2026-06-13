@@ -32,6 +32,8 @@
         -->
         <ProjectReference Include="C:\Users\Arius\RiderProjects\MartialHeroes\03.Storage.Assets\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj" />
         <ProjectReference Include="C:\Users\Arius\RiderProjects\MartialHeroes\03.Storage.Assets\MartialHeroes.Assets.Parsers\MartialHeroes.Assets.Parsers.csproj" />
+        <!-- Mapping = the modern-format bridge used by the `convert` subcommand (mesh→GLB, texture→PNG, xeff→JSON). -->
+        <ProjectReference Include="C:\Users\Arius\RiderProjects\MartialHeroes\03.Storage.Assets\MartialHeroes.Assets.Mapping\MartialHeroes.Assets.Mapping.csproj" />
     </ItemGroup>
 
     <!--

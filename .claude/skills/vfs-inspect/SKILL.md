@@ -1,6 +1,6 @@
 ---
 name: vfs-inspect
-description: Use to open the REAL Martial Heroes VFS (data.inf + data/data.vfs at D:/MartialHeroesClient) and list/inspect entries by substring — the throwaway console harness for "does this path exist?", "how big is it?", "what's the first N bytes?", "how many .skn/.ted/.txt files are there?". Bundles a ready-made net10.0 harness with 12 dedicated subcommands for census/analysis of the major asset formats. Subcommands: scan-mot, scan-bnd, scan-skn, scan-ui, dump-msgxdb, dump-uitex, scan-xeff, scan-sound, scan-fx, dump-do, scan-minimap, scan-quest.
+description: Use to open the REAL Martial Heroes VFS (data.inf + data/data.vfs at D:/MartialHeroesClient) and list/inspect/decode/convert entries — the throwaway console harness for "does this path exist?", "how big is it?", "what's the first N bytes?", "what format is this file and what's in it?", "extract/convert this asset". Bundles a ready-made net10.0 harness with a registry-driven file-understanding layer (decode, extract, convert, hexdump, coverage) plus 12 dedicated census subcommands for the major asset families. Understand-a-file: decode, extract, convert, hexdump, coverage. Census: scan-mot, scan-bnd, scan-skn, scan-ui, dump-msgxdb, dump-uitex, scan-xeff, scan-sound, scan-fx, dump-do, scan-minimap, scan-quest.
 allowed-tools: Read Write Bash(dotnet *) Bash(mkdir *) Bash(copy *) Bash(xcopy *)
 model: sonnet
 ---
@@ -79,7 +79,17 @@ text payloads are CP949 (Korean code page 949), so the harness registers the cod
    | `--limit <n>` | Cap the number of listed entries (default 200; `0` = unlimited). |
    | `--inf <path>` / `--vfs <path>` | Override the default `D:/MartialHeroesClient` locations. |
 
-   **Subcommands** (each accepts `--inf`/`--vfs` overrides):
+   **Understand-a-file subcommands** (registry-driven; one shared extension→capability table in `FormatRegistry.cs`):
+
+   | Subcommand | What it does | Notes |
+   |---|---|---|
+   | `decode <vfs-path>` | Auto-detect the format (by extension; path/magic disambiguation for ambiguous `.eff`) and dispatch to the matching `Assets.Parsers` decoder, printing a concise STRUCTURED summary (record/vertex/face counts, dimensions, key header fields, the cited spec). | Never prints raw payload bytes. Fail-soft: a parser exception is reported as a `decode error`, not a crash. |
+   | `extract <vfs-path> <out-file>` | Write the entry's RAW bytes to an explicit EXTERNAL out-file. | GUARD: refuses any path inside the repo tree or a `.git` dir. Prints a never-commit warning. e.g. `extract data/char/0.skn D:/dump/0.skn` |
+   | `convert <vfs-path> <out-dir>` | Convert via `Assets.Mapping` where supported (mesh→GLB, texture→PNG, `.xeff`→JSON, image/audio passthrough); skips + reports unsupported types. `.skn` auto-resolves its companion `g{id_b}.bnd` skeleton. | Same external-only path guard + never-commit warning. Writes `<stem>.<ext>` into out-dir; cleans up a half-written file on failure. |
+   | `hexdump <vfs-path> [--at <off>] [--len <n>] [--header]` | Windowed hexdump (default 64 bytes from the head; window capped at 512). `--header` shows the leading bytes plus a light structural annotation (the decode summary). | No full payload dumps. |
+   | `coverage` | Print the registry: extension → (decode? convert?) + cited spec, then cross-reference `Docs/RE/formats/*.md` to list documented-but-unparsed formats (the honest follow-up list). | Does NOT need a live VFS. |
+
+   **Family-census subcommands** (each accepts `--inf`/`--vfs` overrides):
 
    | Subcommand | What it does | Spec |
    |---|---|---|
@@ -99,6 +109,21 @@ text payloads are CP949 (Korean code page 949), so the harness registers the cod
    Examples:
 
    ```powershell
+   # What format is this and what's in it? (auto-detect + structured summary):
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- decode data/char/skin/g200002620.skn
+
+   # The honest capability map (decode/convert per extension + documented-but-unparsed formats):
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- coverage
+
+   # Convert a skinned mesh to GLB (resolves its companion .bnd automatically) — EXTERNAL out-dir:
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- convert data/char/skin/g200002620.skn D:/dump
+
+   # Extract raw bytes to an external path (guarded against the repo tree):
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- extract data/char/bind/g3045.bnd D:/dump/g3045.bnd
+
+   # Header window with a structural hint:
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- hexdump data/char/skin/g200002620.skn --header
+
    # Census of every extension (the 49-extension inventory):
    dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- --census
 

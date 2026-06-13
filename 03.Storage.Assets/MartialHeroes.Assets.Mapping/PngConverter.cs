@@ -117,12 +117,14 @@ public static class PngConverter
         int height = (int)BinaryPrimitives.ReadUInt32LittleEndian(hdr[8..]);
         int width = (int)BinaryPrimitives.ReadUInt32LittleEndian(hdr[12..]);
 
-        // DDPIXELFORMAT starts at offset 76 within DDS_HEADER.
-        // Public DDS spec §DDS_HEADER: ddspf @ dwSize+72 (0-based field offset 76 inside header).
-        ReadOnlySpan<byte> pf = hdr[76..]; // DDPIXELFORMAT (32 bytes)
-        uint pfFlags = BinaryPrimitives.ReadUInt32LittleEndian(pf[4..]); // dwFlags @ +4
-        uint fourCC = BinaryPrimitives.ReadUInt32LittleEndian(pf[8..]); // dwFourCC @ +8
-        uint rgbBitCount = BinaryPrimitives.ReadUInt32LittleEndian(pf[12..]); // dwRGBBitCount @ +12
+        // DDS_PIXELFORMAT is embedded at file offset 0x4C.
+        // Since hdr = dds.Slice(4, 124), the struct begins at hdr[0x4C - 4] = hdr[72].
+        // spec: Docs/RE/formats/texture.md §DDS_PIXELFORMAT (embedded at offset 0x4C, 32 bytes)
+        //   +0x00 dwSize, +0x04 dwFlags, +0x08 dwFourCC, +0x0C dwRGBBitCount.
+        ReadOnlySpan<byte> pf = hdr[72..]; // DDPIXELFORMAT (32 bytes); file offset 0x4C
+        uint pfFlags = BinaryPrimitives.ReadUInt32LittleEndian(pf[4..]); // dwFlags @ pf+0x04 = file 0x50
+        uint fourCC = BinaryPrimitives.ReadUInt32LittleEndian(pf[8..]); // dwFourCC @ pf+0x08 = file 0x54
+        uint rgbBitCount = BinaryPrimitives.ReadUInt32LittleEndian(pf[12..]); // dwRGBBitCount @ pf+0x0C = file 0x58
 
         ReadOnlySpan<byte> pixels = dds[DdsDataOffset..];
 

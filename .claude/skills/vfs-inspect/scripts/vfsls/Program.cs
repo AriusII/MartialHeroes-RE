@@ -19,6 +19,7 @@ using System.Text.RegularExpressions;
 using MartialHeroes.Assets.Parsers;
 using MartialHeroes.Assets.Parsers.Models;
 using MartialHeroes.Assets.Vfs;
+using Vfsls;
 
 // CP949 lives in the CodePages provider, which is opt-in on modern .NET.
 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -46,7 +47,9 @@ foreach (string root in DefaultClientRoots())
 if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) &&
     args[0] is "scan-mot" or "scan-bnd" or "scan-skn" or "scan-ui" or
                "dump-msgxdb" or "dump-uitex" or "scan-xeff" or "scan-sound" or "scan-fx" or
-               "dump-do" or "scan-minimap" or "scan-quest")
+               "dump-do" or "scan-minimap" or "scan-quest" or
+               // registry-driven file-understanding commands:
+               "decode" or "extract" or "convert" or "hexdump" or "coverage")
 {
     // Subcommand routing; handle --inf / --vfs overrides from the tail of args first.
     string subcmd = args[0];
@@ -58,6 +61,10 @@ if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) &&
         if (subcmdArgs[i] == "--inf") infPath = subcmdArgs[i + 1];
         else if (subcmdArgs[i] == "--vfs") vfsPath = subcmdArgs[i + 1];
     }
+
+    // `coverage` is the only subcommand that does NOT need a live VFS (it prints the registry).
+    if (subcmd == "coverage")
+        return Commands.Coverage(subcmdArgs, RepoRoot.Find() ?? Directory.GetCurrentDirectory());
 
     if (!File.Exists(infPath) || !File.Exists(vfsPath))
     {
@@ -84,6 +91,11 @@ if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) &&
         "dump-do"      => RunDumpDo(archive, subcmdArgs, cp949),
         "scan-minimap" => RunScanMinimap(archive, subcmdArgs, cp949),
         "scan-quest"   => RunScanQuest(archive, subcmdArgs, cp949),
+        // registry-driven file-understanding commands:
+        "decode"       => Commands.Decode(archive, subcmdArgs, cp949),
+        "extract"      => Commands.Extract(archive, subcmdArgs),
+        "convert"      => Commands.Convert(archive, subcmdArgs),
+        "hexdump"      => Commands.Hexdump(archive, subcmdArgs, cp949),
         _              => 2,
     };
 }
@@ -209,7 +221,8 @@ if (census || (substrings.Count == 0 && extensions.Count == 0 && !countOnly))
     // Fall through with no further listing when run with zero args (summary already shown).
     Console.WriteLine();
     Console.WriteLine("Pass substrings, --ext, --head, --contains or --count to drill in. --help for all.");
-    Console.WriteLine("Subcommands: scan-mot | scan-bnd | scan-skn | scan-ui | dump-msgxdb | dump-uitex | scan-xeff | scan-sound | scan-fx | dump-do | scan-minimap | scan-quest");
+    Console.WriteLine("Understand-a-file: decode | extract | convert | hexdump | coverage");
+    Console.WriteLine("Census subcommands: scan-mot | scan-bnd | scan-skn | scan-ui | dump-msgxdb | dump-uitex | scan-xeff | scan-sound | scan-fx | dump-do | scan-minimap | scan-quest");
     return 0;
 }
 
@@ -1482,6 +1495,34 @@ static void PrintUsage()
           -h, --help          this help.
 
         Subcommands (each accept --inf/--vfs overrides):
+
+        --- Understand a single file (registry-driven; one extension→capability table) ---
+
+          decode <vfs-path>
+            Auto-detect the format (by extension; path/magic disambiguation for .eff etc.) and
+            dispatch to the matching Assets.Parsers decoder, printing a concise STRUCTURED summary
+            (record counts, dimensions, key header fields). Never dumps raw payload bytes.
+
+          extract <vfs-path> <out-file>
+            Write the entry's RAW bytes to an explicit EXTERNAL out-file. GUARD: refuses any path
+            inside the repo tree or a .git dir; warns that extracted originals must never be
+            committed. e.g. extract data/char/0.skn D:/dump/0.skn
+
+          convert <vfs-path> <out-dir>
+            Convert via Assets.Mapping where supported (mesh→GLB, texture→PNG, xeff→JSON);
+            skips + reports unsupported types. Writes <stem>.<ext> into out-dir (external only).
+            e.g. convert data/char/0.skn D:/dump
+
+          hexdump <vfs-path> [--at <off>] [--len <n>] [--header]
+            Windowed hexdump (default 64 bytes from the head; window capped at 512).
+            --header shows the leading bytes with a light structural annotation. No full dumps.
+
+          coverage
+            Print the registry: extension → (decode available? convert available?), and
+            cross-reference Docs/RE/formats/*.md to list documented-but-unparsed formats.
+            (Does not need a live VFS.)
+
+        --- Family-census subcommands ---
 
           scan-mot [--id <id_a>]
             Census .mot animation files: count, stub vs real (frame/track counts),

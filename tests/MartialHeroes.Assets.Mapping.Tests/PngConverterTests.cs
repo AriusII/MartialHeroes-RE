@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
-using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Assets.Parsers.Models;
 using Xunit;
 
@@ -151,16 +150,17 @@ public sealed class PngConverterTests
         // dwWidth @ +12 (file offset 16)
         BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(16), 4u); // width  = 4
 
-        // DDPIXELFORMAT starts at header offset 76 = file offset 80.
-        // pfSize @ 80
-        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(80), 32u);
-        // pfFlags @ 84: DDPF_FOURCC = 4
-        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(84), 4u);
-        // pfFourCC @ 88: 'DXT1'
-        dds[88] = (byte)'D';
-        dds[89] = (byte)'X';
-        dds[90] = (byte)'T';
-        dds[91] = (byte)'1';
+        // DDS_PIXELFORMAT embedded at file offset 0x4C (= DDS_HEADER byte 72).
+        // spec: Docs/RE/formats/texture.md §DDS_PIXELFORMAT (embedded at offset 0x4C, 32 bytes)
+        //   +0x00 dwSize @ file 0x4C, +0x04 dwFlags @ file 0x50,
+        //   +0x08 dwFourCC @ file 0x54, +0x0C dwRGBBitCount @ file 0x58.
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x4C), 32u);   // dwSize
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x50), 4u);    // dwFlags = DDPF_FOURCC
+        // dwFourCC @ file 0x54: 'DXT1' = 44 58 54 31
+        dds[0x54] = (byte)'D';
+        dds[0x55] = (byte)'X';
+        dds[0x56] = (byte)'T';
+        dds[0x57] = (byte)'1';
 
         // Block data starts at offset 128 (4 magic + 124 header).
         // DXT1 block: c0 (2B LE) + c1 (2B LE) + selectors (4B LE)
@@ -257,6 +257,131 @@ public sealed class PngConverterTests
         Assert.Equal(85, pixels[1]); // G = (2*0+255+1)/3 = 85
         Assert.Equal(0, pixels[2]); // B
         Assert.Equal(255, pixels[3]); // A
+    }
+
+    // -------------------------------------------------------------------------
+    // FourCC offset regression tests
+    // spec: Docs/RE/formats/texture.md §DDS_PIXELFORMAT (embedded at offset 0x4C, 32 bytes)
+    //   dwFourCC is at DDS_PIXELFORMAT relative offset +0x08 = file offset 0x54.
+    //   Bug: previous code read from pf[8] where pf = hdr[76..] → file 0x58 (dwRGBBitCount),
+    //   which is 0 for all block-compressed formats and caused every DXT conversion to fail.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds a minimal DDS header byte array with the given FourCC written at the
+    /// spec-mandated file offset 0x54 (DDS_PIXELFORMAT+0x08).
+    /// No pixel data — callers that only test header detection can use a 128-byte buffer.
+    /// spec: Docs/RE/formats/texture.md §DDS_PIXELFORMAT (embedded at offset 0x4C, 32 bytes).
+    /// </summary>
+    private static byte[] MakeMinimalDdsHeader(uint fourCC, uint pfFlags, uint width = 4, uint height = 4)
+    {
+        // 128-byte header only — no pixel blocks.
+        byte[] dds = new byte[128];
+
+        // Magic "DDS " at file 0x00.  spec: Docs/RE/formats/texture.md §DDS_HEADER offset 0x00.
+        dds[0] = 0x44; dds[1] = 0x44; dds[2] = 0x53; dds[3] = 0x20;
+
+        // DDS_HEADER fields.  spec: Docs/RE/formats/texture.md §DDS_HEADER layout.
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x04), 124u); // dwSize
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x08), 0x1007u); // dwFlags
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x0C), height);  // dwHeight
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x10), width);   // dwWidth
+
+        // DDS_PIXELFORMAT at file offset 0x4C.  spec: Docs/RE/formats/texture.md §DDS_PIXELFORMAT.
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x4C), 32u);     // dwSize  @ file 0x4C
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x50), pfFlags); // dwFlags @ file 0x50
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x54), fourCC);  // dwFourCC @ file 0x54
+        // dwRGBBitCount @ file 0x58 intentionally left 0x00000000 — confirms the converter
+        // does NOT read FourCC from 0x58 (the off-by-4 regression location).
+
+        return dds;
+    }
+
+    [Fact]
+    public void FourCC_ReadAt_FileOffset_0x54_DetectsDxt1()
+    {
+        // Regression test: the converter must read dwFourCC from file offset 0x54.
+        // The byte at 0x58 (dwRGBBitCount) is zero, which was the old (wrong) read location.
+        // If the offset is wrong the FourCC will be 0x00000000 and the converter throws
+        // NotSupportedException instead of performing DXT1 decode.
+        // spec: Docs/RE/formats/texture.md §DDS_PIXELFORMAT +0x08 (file 0x54) = dwFourCC.
+        uint dxt1FourCC = (byte)'D' | ((uint)'X' << 8) | ((uint)'T' << 16) | ((uint)'1' << 24);
+        byte[] dds = MakeMinimalDdsHeader(dxt1FourCC, pfFlags: 0x00000004u); // DDPF_FOURCC
+
+        // Append one 4×4 DXT1 block (8 bytes) so the decoder has pixel data to read.
+        // Block: c0=0xFFFF (white), c1=0x0000 (black), selectors=0x00000000 → all palette[0].
+        byte[] fullDds = new byte[128 + 8];
+        dds.CopyTo(fullDds, 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(fullDds.AsSpan(128), 0xFFFF); // c0 = white
+        BinaryPrimitives.WriteUInt16LittleEndian(fullDds.AsSpan(130), 0x0000); // c1 = black
+        BinaryPrimitives.WriteUInt32LittleEndian(fullDds.AsSpan(132), 0x00000000u); // all palette[0]
+
+        var descriptor = new TextureDescriptor
+        {
+            Format = TextureFormat.Dds,
+            Payload = new ReadOnlyMemory<byte>(fullDds),
+        };
+
+        // Must NOT throw — if FourCC is misread as 0, this would throw NotSupportedException.
+        using var ms = new MemoryStream();
+        PngConverter.WritePng(descriptor, ms);
+        Assert.True(ms.Length > 0, "Converter must produce PNG output for a valid DXT1 DDS.");
+    }
+
+    [Fact]
+    public void FourCC_Zero_WithUncompressedRgba_Detected_Correctly()
+    {
+        // Uncompressed RGBA32 path: DDPF_RGB | DDPF_ALPHAPIXELS, dwFourCC = 0, dwRGBBitCount = 32.
+        // Verifies that the uncompressed branch is still reachable after the offset fix.
+        // spec: Docs/RE/formats/texture.md §DDS uncompressed (UNVERIFIED but valid DDS).
+        const uint pfFlagsUncompressed = 0x00000041u; // DDPF_RGB(0x40) | DDPF_ALPHAPIXELS(0x01)
+        byte[] dds = MakeMinimalDdsHeader(fourCC: 0u, pfFlags: pfFlagsUncompressed);
+
+        // Write dwRGBBitCount = 32 at file 0x58 and standard RGBA masks at 0x5C..0x6B.
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x58), 32u);           // dwRGBBitCount
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x5C), 0x00FF0000u);   // dwRBitMask
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x60), 0x0000FF00u);   // dwGBitMask
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x64), 0x000000FFu);   // dwBBitMask
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x68), 0xFF000000u);   // dwABitMask
+
+        // Append 4×4 uncompressed RGBA32 pixel data (64 bytes): all red (R=255,G=0,B=0,A=255).
+        // Wire format with above masks: each pixel = 0x00FF0000 (B@byte0=0,G@byte1=0,R@byte2=255,A@byte3=0)
+        // Wait — mask 0x00FF0000 extracts bits 16..23 as R.  LE pixel bytes: [B,G,R,A] = [0,0,255,255].
+        // In LE u32: 0xFF0000FF (A at bit31..24 = 0xFF, R at bit23..16 = 0x00?).
+        // Let's use simple A8R8G8B8 ordering: pixel u32 LE = BGRA bytes.
+        // R mask 0x00FF0000 → R from bits 16..23 → byte[2] in LE = R.
+        // Write pixel as bytes [B=0x00, G=0x00, R=0xFF, A=0xFF] = u32 LE 0xFF_FF_00_00.
+        byte[] fullDds = new byte[128 + 64];
+        dds.CopyTo(fullDds, 0);
+        for (int i = 0; i < 16; i++)
+        {
+            int ofs = 128 + i * 4;
+            fullDds[ofs + 0] = 0x00; // B channel
+            fullDds[ofs + 1] = 0x00; // G channel
+            fullDds[ofs + 2] = 0xFF; // R channel (mask 0x00FF0000 picks this byte)
+            fullDds[ofs + 3] = 0xFF; // A channel (mask 0xFF000000 picks this byte)
+        }
+
+        var descriptor = new TextureDescriptor
+        {
+            Format = TextureFormat.Dds,
+            Payload = new ReadOnlyMemory<byte>(fullDds),
+        };
+
+        using var ms = new MemoryStream();
+        PngConverter.WritePng(descriptor, ms);
+        byte[] pixels = DecodePngPixels(ms.ToArray(), out int w, out int h);
+
+        Assert.Equal(4, w);
+        Assert.Equal(4, h);
+        // Every texel should be red with full alpha.
+        for (int i = 0; i < 16; i++)
+        {
+            Assert.Equal(255, pixels[i * 4 + 0]); // R
+            Assert.Equal(0, pixels[i * 4 + 1]);   // G
+            Assert.Equal(0, pixels[i * 4 + 2]);   // B
+            Assert.Equal(255, pixels[i * 4 + 3]); // A
+        }
     }
 
     // -------------------------------------------------------------------------

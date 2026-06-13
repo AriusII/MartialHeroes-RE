@@ -452,3 +452,33 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
   the new packet YAMLs link to them. The Cycle-3 net-new contribution is the C2S send-site layer.
 - harness/tooling (Phase C3-T, ran parallel): vfsls gained dump-do / scan-minimap / scan-quest (now 12
   subcommands); firewall-clean (orchestrator pre-audit PASS). Journal + names authored centrally.
+
+## 2026-06-13 — Cycle 4 W1: live-debugger login capture + PIN spec promotion (FIRST dynamic-analysis session)
+- binary: doida.exe @ 63fcaf8e (x86 32-bit), IDA Pro 9.3 DEBUGGER via MCP (mcp__ida__dbg_*). The
+  maintainer armed the local Windows debugger in the IDA GUI (F9 + trust-dialog accept) and launched the
+  live client; the orchestrator PILOTED the already-running session (breakpoints, register/memory reads —
+  the debugger reads even through PAGE_NOACCESS). `dbg_start` is unusable via MCP (cannot dismiss the
+  modal trust dialog, and a session is already active). Game servers are dead, so live driving covers
+  build-time (pre-send) packet assembly and VFS-read paths only.
+- analyzed (by canonical name, DYNAMIC): drove the live client through account + password + second-password.
+  AuthSession_BuildLoginPacket43 (the login-blob builder) and its caller NetClient_RebuildSecureContext
+  (= the login_flow.md §4.1 secure-context builder); PacketBuf_Write{U8,LenPrefixedBytes} + the PACKETBUF
+  object; Net_EncryptOutboundPacket / Cipher_XorRolEncrypt (framing rule re-confirmed against ground truth —
+  8-byte header plaintext, payload XOR/ROL-encrypted; cipher already recovered & tested, 15/15); DName::isPin.
+- specs produced/updated:
+  - Docs/RE/specs/login_flow.md (UPD) — identified the previously-unnamed "optional auxiliary string" of the
+    1/6 login blob as the SECOND-PASSWORD / PIN; added the runtime-confirmed capacities (account < 20,
+    password < 17 staged in an exactly-17-byte zero-padded RSA-plaintext buffer, PIN < 5), the u32-LE
+    NUL-inclusive length prefix, the second-password step in the §1 flow, and a packet-framing §4.4 citing
+    crypto.md. The 1/6 login-vs-create collision is left OPEN (the live read reached login only).
+  - Docs/RE/specs/frontend_scenes.md (UPD) — added the §1.4a second-password / PIN modal (shown after the
+    primary login submit; ≤4-digit PIN → the optional login-blob field; data/ui/password.dds asset).
+- notes: runtime evidence (with addresses + live bytes) stayed in the gitignored
+  Docs/RE/_dirty/workflow/login-packet.dyn.md; the in-game credentials were NEVER transcribed anywhere. The
+  promotion was done by a no-IDA protocol-spec-author who grep-verified both touched specs CLEAN (no
+  addresses, no autonames, no pseudo-code, no credentials — only within-packet offsets/sizes and length-
+  example constants); a full clean-room-audit gate will run before any commit. Strategic finding (not a
+  spec): the workflow specs are already comprehensive, so Cycle 4 pivots to front-end implementation + VFS
+  tooling. Tooling (parallel): vfsls gained decode/extract/convert/hexdump/coverage (auto-detect registry,
+  28 formats; build 0/0); a pre-existing DDS dwFourCC off-by-4 in Assets.Mapping/PngConverter was found and
+  is being fixed. Journal authored centrally by the orchestrator.

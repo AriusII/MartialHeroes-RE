@@ -151,6 +151,12 @@ Two text-entry boxes, both routed through the Korean IME composition (CP949):
 - On scene build, if a saved id is present (§1.6) and is not the literal `"(null)"`, the ID box is
   pre-filled with it (the Save-ID round-trip).
 
+> **Wire-side capacity note (cross-reference, owned by `login_flow.md` §4.2).** These caps are the
+> *UI editbox* limits, not the protocol limits. The login blob's runtime-confirmed capacities are
+> account **< 20**, password **< 17** (staged in an exactly-17-byte zero-padded buffer), and the
+> second-password / PIN **< 5** (≤ 4 chars). They live in `login_flow.md`; do not re-derive them
+> here.
+
 ## 1.4 The Login click — local version gate then validation (CODE-CONFIRMED)
 
 The OK/Login button (and the Enter key on the form page) run this exact sequence. **None of it is a
@@ -173,11 +179,48 @@ the post-handoff handshake (§1.7).
    - Else → persist Save-ID again, advance to sub-state **31** (the EULA/accept overlay).
 5. The EULA → server-list → channel-endpoint → submit chain then runs (sub-states 31 → 41, §1.5).
    The actual account-login wire send and the cryptographic reply happen only at the **tail** of
-   that chain (sub-state 40), on the main game connection — owned by `login_flow.md`.
+   that chain (sub-state 40), on the main game connection — owned by `login_flow.md`. The
+   **second-password / PIN** modal (§1.4a) is collected as part of this tail, before the login blob
+   is built.
 
 The version check is **inline in the Login handler only** — there is no separate startup version
 popup, and no background patch dialog (patching is the external launcher's job; see
 `client_runtime.md` §6 on the `-Start`/launcher gate).
+
+## 1.4a The second-password / PIN modal (RUNTIME-CONFIRMED via `login_flow.md`)
+
+After the primary account + password submit succeeds the credential validation (§1.4, sub-state 29),
+and **before** the account-login blob is built and sent (sub-state 40), the client raises a dedicated
+**second-password / PIN** modal — the legacy "secondary password" dialog. It collects a short,
+typically numeric, PIN.
+
+- **What it is.** A first-class third login input, separate from the account id and the account
+  password. The client models the PIN as its own input concept (an input/name object carries an
+  explicit "is-PIN" flag distinguishing it from an ordinary text field), which is why it is a
+  distinct modal rather than a third box on the main form.
+- **Where it sits in the flow.** It is shown **after** the primary login submit and **before** the
+  credential-submit / handshake join point — i.e. between §1.4 (validation passes) and the §1.5
+  sub-state-40 join handoff. Conceptually it is the same boundary `login_flow.md` §1 step 1a places
+  the PIN at.
+- **Capacity.** The PIN is **≤ 4 characters** (the login blob validates it as length `< 5`, i.e.
+  ≤ 4 chars plus a NUL — `login_flow.md` §4.2 / §7). It is numeric in practice.
+- **Where its value goes.** The PIN's value becomes the **optional length-prefixed field of the
+  login blob** (`1/6 CmsgLoginRequest`): the blob is `[0x2B][u32len account\0]([u32len PIN\0])`.
+  This is the field a prior reading called the "optional auxiliary string"; a runtime read of the
+  live client identifies it as the PIN / second-password. **The PIN is *not* the account password**
+  — the account password is staged separately as the RSA `1/4` plaintext and never appears in the
+  blob. The byte layout, the u32-LE NUL-inclusive length prefix, and the field capacities are all
+  owned by `login_flow.md` §4.2; this spec owns only the UI modal and its place in the flow.
+- **Asset.** The dialog uses the secondary-password art catalogued in `formats/ui_manifests.md`
+  (`data/ui/password.dds`, 1024×1024 DXT3 — listed there as "Secondary password dialog"). The
+  caption strings are CP949 in the VFS and are not reproduced here.
+
+> **Confidence.** The PIN's existence, its first-class "is-PIN" input modelling, its ≤ 4-char
+> capacity, and the fact that its value lands in the optional login-blob field are **RUNTIME-
+> CONFIRMED** against the live client (read from the client's process at login time; no addresses).
+> The modal's exact widget layout / action ids are not yet swept (its `uiconfig.lua` controls were
+> not catalogued in this pass) — treat the modal's widget tree as **PLAUSIBLE / to-be-swept**
+> (Open question 10) while treating the PIN's flow position and wire destination as confirmed.
 
 ## 1.5 The login flow sub-state machine (CODE-CONFIRMED)
 
@@ -202,13 +245,14 @@ the front-end flow. **It supersedes two CODE-CONFIRMED-but-wrong labels in `ui_s
 | 37 | Server selected | entry click commits the selection + persists `Lastserver` (§2.5) |
 | 38 | Start the channel-endpoint fetch thread (lobby port `10000 + selected id`) | see `login_flow.md` §2.2 |
 | 39 | Wait for endpoint reply | thread sets 40 |
-| 40 | **Join handoff** | build the TAB credential string, rebuild the secure context, hand to the game connection; engine state set to **7** as a guard. The login window then exits. |
+| 40 | **Join handoff** | collect the second-password / PIN (§1.4a) if not already entered; build the TAB credential string, rebuild the secure context, hand to the game connection; engine state set to **7** as a guard. The login window then exits. |
 | 41 | Transition complete; login window exits | — |
 
 > **Sub-state 40 detail.** The TAB string is `account⟨TAB⟩option⟨TAB⟩field⟨TAB⟩"host port"`, where
-> the 4th field is the channel endpoint text obtained by the channel-endpoint fetch (§2.6). The
-> secure-context rebuild stages the credential session on the main (overlapped) game connection;
-> from there the `0/0 → 1/4 → 1/6` handshake proceeds. The byte layout of all of those is owned by
+> the optional middle field carries the **second-password / PIN** (§1.4a) and the 4th field is the
+> channel endpoint text obtained by the channel-endpoint fetch (§2.6). The secure-context rebuild
+> stages the credential session on the main (overlapped) game connection; from there the
+> `0/0 → 1/4 → 1/6` handshake proceeds. The byte layout of all of those is owned by
 > `login_flow.md` §3–§4 and `crypto.md`; this spec only marks the boundary. (`PLAUSIBLE` for msg id
 > **4029** as the endpoint-fetch-failure analogue at sub-state 39 — not pinned to a call site —
 > Open question 1.)
@@ -241,7 +285,9 @@ For an engineer's mental model only; the byte shapes are owned by `login_flow.md
   1. the two **lobby fetches** (synchronous, port 10000 then `10000 + selected id`; no
      `major/minor` opcode — an 8-byte frame wrapper + LZ4 payload), at sub-states 34 and 38, and
   2. the **game-socket handshake** at sub-state 40: the cryptographic key exchange and reply,
-     then the account-login send (`1/6 CmsgLoginRequest` per `opcodes.md`).
+     then the account-login send (`1/6 CmsgLoginRequest` per `opcodes.md`), whose blob carries the
+     account name and the second-password / PIN (§1.4a) — the account password rides only in the
+     RSA `1/4` reply.
 - **There is no dedicated "login" opcode fired by the button click.**
 
 ## 1.8 The quit paths (CODE-CONFIRMED)
@@ -601,7 +647,10 @@ guard, plays click SFX **861010101**, and sends the **create** message: **`major
 > login analyst conflated the 52-byte create send with the login blob. **This must be disambiguated
 > by the protocol analyst with a capture.** Until then, an engineer must treat `1/6` as carrying
 > **both** meanings by session phase and must **not** assume the create body starts with `0x2B`.
-> Recorded for `conflictsFlagged`; not resolved here.
+> Recorded for `conflictsFlagged`; not resolved here. *(Note: the runtime read of the login blob
+> in `login_flow.md` §4.2 resolved the **login-blob structure** and identified its optional field
+> as the second-password / PIN, but it did **not** reach the character-create send and therefore
+> does **not** resolve this collision.)*
 
 The create result is the inbound **`3/23 SmsgCharCreateResult`** (owned by `login_flow.md`):
 accept codes drive a scene refresh (and increment the account character count); failure codes map to
@@ -741,12 +790,17 @@ For the presentation/Godot engineer. Sound ids resolve through `sound_runtime.md
 **Loading-screen textures** (chosen at random on entering the Load state): `loading.dds`,
 `loading06.dds`, `loading08.dds`.
 
+**Secondary-password dialog texture:** `data/ui/password.dds` (1024×1024 DXT3, full mips —
+catalogued in `formats/ui_manifests.md` as "Secondary password dialog"); used by the
+second-password / PIN modal (§1.4a).
+
 **Other pinned constants:** ID-box max length **6**; PW-box max length **129**; IME slots ID **16**
 / PW **12**; face index range **1..7**; max slots **5**; preview stage X offsets
 {−1560, −1548, −1536, −1524, −1512}, preview scale **×3.0**; empty-slot sentinel **`"@BLANK@"`**;
 version-token formula **`10 × game.ver[field 5] + 9`**; Save-ID INI `DoOption.ini`
 `[DO_OPTION] OPTION_ID`; `Lastserver` & `servername` under registry `HKLM\software\crspace\do`;
-`NEW_SERVER_INDEX` Lua global in `data/script/uiconfig.lua`.
+`NEW_SERVER_INDEX` Lua global in `data/script/uiconfig.lua`; second-password / PIN capacity
+**≤ 4 chars** (login-blob bound `< 5`, owned by `login_flow.md` §4.2).
 
 ---
 
@@ -767,8 +821,10 @@ next scene.
   [SERVER SELECT, same window]
       → 37 server selected (persist Lastserver; randomized order; NEW badge)
       → 38 channel-endpoint fetch (lobby :10000+id) → 39 wait
-      → 40 build TAB join string + secure context handoff (guard state 7); window exits
-  game socket handshake (0/0 → 1/4 → 1/6 login blob)        [owned by login_flow.md / crypto.md]
+      → second-password / PIN modal (≤4 chars; value → optional login-blob field)   [§1.4a]
+      → 40 build TAB join string (account / PIN / host port) + secure context handoff
+           (guard state 7); window exits
+  game socket handshake (0/0 → 1/4 → 1/6 login blob: [0x2B][account\0][PIN\0])  [owned by login_flow.md / crypto.md]
   on auth OK: server sends 3/5 EnterGameAck → write state 2
 
 [state 2: LOAD] → (optional state 3 OPENING) → [state 4: SELECT] on 3/1 CharacterList
@@ -819,6 +875,11 @@ next scene.
    selection, is unclear without a capture or the inbound 2-byte select reply traced.
 9. **EULA gating.** The EULA/accept overlay (sub-states 31/32) gates the server-list fetch, but
    whether it is shown every launch or only first-run (an INI/registry guard) was not determined.
+10. **Second-password / PIN modal widget tree.** The PIN's existence, its first-class "is-PIN" input
+    modelling, its ≤4-char capacity, and the fact that its value becomes the optional login-blob
+    field are RUNTIME-CONFIRMED (§1.4a). What is **not** yet swept is the modal's exact widget
+    layout / action ids / `uiconfig.lua` source and whether it can be skipped/disabled per account.
+    Needs a widget-atlas sweep of the secondary-password dialog (uses `data/ui/password.dds`).
 
 ### Cross-spec conflicts recorded here (owners must resolve in their files)
 
@@ -828,7 +889,10 @@ next scene.
   should correct those two rows. (§1.5)
 - **Opcode `1/6` collision** (`opcodes.md` / `names.yaml` / `login_flow.md`): `1/6` is mapped to
   `CmsgLoginRequest` *and* is the 52-byte character-create send; the create body did not start with
-  the login `0x2B` sentinel. Needs protocol-author disambiguation with a capture. (§4.5)
+  the login `0x2B` sentinel. The runtime login-blob read (`login_flow.md` §4.2) resolved the
+  login-blob structure and named its optional field the second-password / PIN, but did **not** reach
+  the character-create send and so does **not** resolve this collision. Still needs protocol-author
+  disambiguation with a capture. (§4.5)
 - **New C2S char-management opcodes** `1/7` (select, 2B), `1/13` (rename, 18B), `1/14` (delete, 1B)
   may be absent from `names.yaml` / `opcodes.md`; the protocol author owns adding them. (§6, §8)
 - **Naming inconsistency**: the 8-byte char-manage result handler is labelled "3/7" by some legacy

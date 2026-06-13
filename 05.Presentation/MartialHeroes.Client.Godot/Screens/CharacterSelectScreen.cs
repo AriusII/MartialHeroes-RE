@@ -26,11 +26,13 @@
 //
 //   5. Preserves ScreenHost scaling and both boot flows (login → select; direct world boot).
 //
-// OFFLINE STUB: In a networked build this screen is constructed from the SmsgCharacterList
-// (opcode 3/1) packet payload. There is NO network here. We render up to 5 demo slots (Musa
-// class) so the roster, Create/Delete/Enter gestures, and 3D previews are exercisable offline.
-// The Create/Delete buttons emit use-case calls (currently logged as offline stubs); Enter-Game
-// advances the BootFlow node to the existing world boot.
+//   6. ApplyCharacterList() — driven from Application CharacterListEvent (opcode 3/1).
+//      Replaces the hardcoded DemoRoster when a real (or synthetic-offline) event arrives.
+//      Handles "@BLANK@" empty-slot sentinel. spec: frontend_scenes.md §3.1. CODE-CONFIRMED.
+//      Max 5 slots (indices 0..4). spec: frontend_scenes.md §3.1 "at most 5". CODE-CONFIRMED.
+//
+//   7. EnterGameRequested signal now carries (string characterName, int slotIndex) so BootFlow
+//      can call IApplicationUseCases.SelectCharacterAsync(slotIndex).
 //
 // PASSIVE: zero game logic. Reads atlas chrome, msg.xdb captions, and character VFS assets for
 // previews; turns UI gestures into C# signals that the flow node consumes. No domain state, no
@@ -40,7 +42,9 @@
 //       §8.4 (generator patterns: base-Y 191, stride 24), §9.2 (atlas manifest), §10 (msg.xdb).
 // spec: Docs/RE/specs/frontend_scenes.md §3–§7 (char-select flow, create, delete, enter).
 
+using System.Collections.Immutable;
 using Godot;
+using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Godot.Dev;
 using MartialHeroes.Client.Godot.Screens.Layout;
 using MartialHeroes.Client.Godot.Screens.Widgets;
@@ -68,9 +72,14 @@ public sealed partial class CharacterSelectScreen : Control
     // Outgoing intents — consumed by BootFlow (no game logic here).
     // =========================================================================
 
-    /// <summary>Raised when the player enters the game with the selected slot.</summary>
+    /// <summary>
+    /// Raised when the player enters the game with the selected slot.
+    /// Carries the character name and the slot index (0..4) so BootFlow can call
+    /// IApplicationUseCases.SelectCharacterAsync(slotIndex).
+    /// spec: Docs/RE/specs/frontend_scenes.md §7 — "send 1/9 with slot index". CODE-CONFIRMED.
+    /// </summary>
     [Signal]
-    public delegate void EnterGameRequestedEventHandler(string characterName);
+    public delegate void EnterGameRequestedEventHandler(string characterName, int slotIndex);
 
     /// <summary>Raised when the player goes back to the login/select entry.</summary>
     [Signal]
@@ -123,6 +132,77 @@ public sealed partial class CharacterSelectScreen : Control
 
     private const int MaxSlots = 5; // spec: frontend_scenes.md §3.1 — "at most 5 slots". CODE-CONFIRMED.
 
+    // Empty-slot sentinel value — the name field in the SpawnDescriptor carries this literal string
+    // for slots that have no character assigned.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.1 — "@BLANK@" empty-slot sentinel. CODE-CONFIRMED.
+    private const string BlankSentinel = "@BLANK@"; // spec: frontend_scenes.md §3.1. CODE-CONFIRMED.
+
+    // =========================================================================
+    // Live slot data — driven by CharacterListEvent (Application event bus, opcode 3/1).
+    // Falls back to DemoRoster entries when no event has arrived yet.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.1 — slot count 0..4, @BLANK@ empty. CODE-CONFIRMED.
+    // spec: Docs/RE/specs/login_flow.md §3.2 — per-slot 981-byte records. CODE-CONFIRMED.
+    // =========================================================================
+
+    /// <summary>
+    /// Per-slot resolved view state — populated by <see cref="ApplyCharacterList"/>.
+    /// Before the first event arrives this mirrors the DemoRoster entries.
+    /// </summary>
+    private readonly LiveSlot[] _liveSlots = new LiveSlot[MaxSlots];
+
+    /// <summary>
+    /// Returns true once ApplyCharacterList has been called (i.e. real Application data arrived).
+    /// When false the DemoRoster drives the display.
+    /// </summary>
+    private bool _liveDataApplied;
+
+    /// <summary>
+    /// Called by <see cref="CharListEventDrainer"/> (in BootFlow) when a CharacterListEvent
+    /// arrives on the Application event bus. Replaces the DemoRoster view state with spec-driven
+    /// data from the 3/1 packet (or synthetic offline equivalent).
+    ///
+    /// <para>Threading: always called on the Godot main thread (from _Process in CharListEventDrainer).</para>
+    ///
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.1 — "@BLANK@" empty-slot sentinel. CODE-CONFIRMED.
+    /// spec: Docs/RE/specs/login_flow.md §3.2 — per-slot decode. CODE-CONFIRMED.
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.1 — "at most 5 slots, indices 0..4". CODE-CONFIRMED.
+    /// </summary>
+    public void ApplyCharacterList(ImmutableArray<CharacterListSlot> slots)
+    {
+        // Reset all slots to empty first.
+        for (int i = 0; i < MaxSlots; i++)
+            _liveSlots[i] = new LiveSlot(IsEmpty: true);
+
+        // Populate from event payload. Cap at MaxSlots.
+        // spec: frontend_scenes.md §3.1 — loop bound is exactly 5. CODE-CONFIRMED.
+        foreach (CharacterListSlot s in slots)
+        {
+            int idx = s.SlotIndex;
+            if (idx < 0 || idx >= MaxSlots) continue;
+
+            // "@BLANK@" marks an unoccupied slot — route to character-creation on Enter.
+            // spec: frontend_scenes.md §3.1 — "@BLANK@" empty-slot sentinel. CODE-CONFIRMED.
+            bool empty = s.Name == BlankSentinel || string.IsNullOrEmpty(s.Name);
+            _liveSlots[idx] = new LiveSlot(
+                IsEmpty: empty,
+                Name: empty ? string.Empty : s.Name,
+                Level: s.Level,
+                ServerClass: s.ServerClass,
+                CurrentHp: s.CurrentHp,
+                SlotIndex: idx);
+        }
+
+        _liveDataApplied = true;
+        _selectedSlot = 0;
+
+        // Refresh the display on the main thread.
+        RebuildSlotSelectorRow();
+        RefreshInfo();
+
+        GD.Print($"[CharacterSelectScreen] ApplyCharacterList: {slots.Length} slots received; " +
+                 $"live data applied to {MaxSlots} slot array.");
+    }
+
     // =========================================================================
     // View state (NO domain state)
     // =========================================================================
@@ -150,6 +230,9 @@ public sealed partial class CharacterSelectScreen : Control
 
     // Slot row buttons (for the selection highlight).
     private readonly Button?[] _slotButtons = new Button?[MaxSlots];
+
+    // Container node for the slot selector row — held so RebuildSlotSelectorRow can clear+rebuild it.
+    private Control _slotRowContainer = null!;
 
     /// <summary>Optional shared asset loader injected by the flow node.</summary>
     public UiAssetLoader? SharedAssets { get; set; }
@@ -433,13 +516,30 @@ public sealed partial class CharacterSelectScreen : Control
             // Assuming a ~2-second idle cycle; phase offsets at 0.0, 0.4, 0.8, 1.2, 1.6 s.
             float phase = i * 0.4f;
 
-            // Per-slot descriptor fields from the demo roster (mirrors what SmsgCharacterList
-            // delivers per slot: name (+0x00), class (+0x34), level (+0x3A)).
+            // Per-slot descriptor fields. Use live data (CharacterListEvent) when available,
+            // else fall back to the demo roster.
             // spec: frontend_scenes.md §3.2 — SpawnDescriptor field offsets. CODE-CONFIRMED.
-            uint skinClassId = occupied ? DemoRoster[i].SkinClassId : 0u;
-            string charName = occupied ? DemoRoster[i].Name : string.Empty;
-            int charLevel = occupied ? DemoRoster[i].Level : 0;
-            string className = occupied ? DemoRoster[i].ClassName : string.Empty;
+            uint skinClassId;
+            string charName;
+            int charLevel;
+            string className;
+            if (_liveDataApplied)
+            {
+                LiveSlot ls = _liveSlots[i];
+                occupied = !ls.IsEmpty;
+                skinClassId = occupied ? (uint)ls.ServerClass : 0u;
+                charName = occupied ? ls.Name : string.Empty;
+                charLevel = occupied ? ls.Level : 0;
+                className = string.Empty; // ServerClass int is not the display name; preview uses skinClassId
+            }
+            else
+            {
+                occupied = i < DemoRoster.Length;
+                skinClassId = occupied ? DemoRoster[i].SkinClassId : 0u;
+                charName = occupied ? DemoRoster[i].Name : string.Empty;
+                charLevel = occupied ? DemoRoster[i].Level : 0;
+                className = occupied ? DemoRoster[i].ClassName : string.Empty;
+            }
 
             var preview = new CharPreview3D
             {
@@ -472,29 +572,60 @@ public sealed partial class CharacterSelectScreen : Control
 
     private int BuildSlotSelectorRow()
     {
+        // Create a container node so we can clear+rebuild the row when ApplyCharacterList fires.
+        _slotRowContainer = new Control { Name = "SlotRowContainer" };
+        AddChild(_slotRowContainer);
+
+        PopulateSlotSelectorRow();
+        return MaxSlots + 1; // +1 for the container node
+    }
+
+    /// <summary>
+    /// Populates the slot selector row buttons from current slot data.
+    /// Called both on initial build and when ApplyCharacterList updates the roster.
+    /// </summary>
+    private void PopulateSlotSelectorRow()
+    {
         const float slotX0 = 260f;
         const float slotW = 148f;
         const float slotGap = 2f;
         const float rowY = 535f;
         const float rowH = 28f;
 
-        int count = 0;
+        // Clear old buttons.
+        foreach (Node child in _slotRowContainer.GetChildren())
+            child.QueueFree();
+        for (int j = 0; j < MaxSlots; j++)
+            _slotButtons[j] = null;
+
         for (int i = 0; i < MaxSlots; i++)
         {
-            bool occupied = i < DemoRoster.Length;
-
-            // Show per-slot name + class + level on the selector button label.
-            // spec: frontend_scenes.md §3.2 — "slot info line shows name, level, and position". CODE-CONFIRMED.
+            // Determine slot data: live (from CharacterListEvent) or demo fallback.
             string label;
-            if (!occupied)
+            bool occupied;
+
+            if (_liveDataApplied)
             {
-                label = "(empty)";
+                LiveSlot ls = _liveSlots[i];
+                occupied = !ls.IsEmpty;
+                // spec: frontend_scenes.md §3.2 — "slot info line shows name, level, and position". CODE-CONFIRMED.
+                label = occupied
+                    ? $"{ls.Name}\nLv {ls.Level}"
+                    : "(empty — Create)";
             }
             else
             {
-                DemoSlot slot = DemoRoster[i];
-                // Format: "Name\nClass Lv N" — readable at the 148px slot width.
-                label = $"{slot.Name}\n{slot.ClassName} Lv {slot.Level}";
+                occupied = i < DemoRoster.Length;
+                if (!occupied)
+                {
+                    label = "(empty)";
+                }
+                else
+                {
+                    DemoSlot slot = DemoRoster[i];
+                    // Format: "Name\nClass Lv N" — readable at the 148px slot width.
+                    label = $"{slot.Name}\n{slot.ClassName} Lv {slot.Level}";
+                }
             }
 
             var btn = new Button
@@ -508,19 +639,22 @@ public sealed partial class CharacterSelectScreen : Control
             int slotCapture = i;
             btn.Pressed += () =>
             {
-                if (slotCapture < DemoRoster.Length)
-                {
-                    _selectedSlot = slotCapture;
-                    RefreshInfo();
-                    HighlightSlot(slotCapture);
-                }
+                _selectedSlot = slotCapture;
+                RefreshInfo();
+                HighlightSlot(slotCapture);
             };
-            AddChild(btn);
+            _slotRowContainer.AddChild(btn);
             _slotButtons[i] = btn;
-            count++;
         }
+    }
 
-        return count;
+    /// <summary>
+    /// Rebuilds the slot selector row in-place (called from ApplyCharacterList on the main thread).
+    /// </summary>
+    private void RebuildSlotSelectorRow()
+    {
+        if (_slotRowContainer is null || !IsInstanceValid(_slotRowContainer)) return;
+        PopulateSlotSelectorRow();
     }
 
     // =========================================================================
@@ -766,21 +900,39 @@ public sealed partial class CharacterSelectScreen : Control
 
     private void OnEnterGamePressed()
     {
-        if (_selectedSlot >= DemoRoster.Length)
+        // Resolve the selected slot.
+        bool isEmptySlot;
+        string name;
+
+        if (_liveDataApplied)
         {
-            // Empty slot → open create form. spec: frontend_scenes.md §7 — "enter on empty slot = create".
+            LiveSlot ls = _liveSlots[_selectedSlot];
+            isEmptySlot = ls.IsEmpty;
+            name = ls.Name;
+        }
+        else
+        {
+            isEmptySlot = _selectedSlot >= DemoRoster.Length;
+            name = isEmptySlot ? string.Empty : DemoRoster[_selectedSlot].Name;
+        }
+
+        if (isEmptySlot)
+        {
+            // Empty slot (or @BLANK@ sentinel) → open create form.
+            // spec: frontend_scenes.md §7 — "enter on empty slot = create". CODE-CONFIRMED.
+            // spec: frontend_scenes.md §3.1 — "@BLANK@" empty-slot sentinel. CODE-CONFIRMED.
             GD.Print($"[Screens] CharacterSelectScreen: Enter on empty slot {_selectedSlot} → opening Create form.");
             ShowCreateForm();
             return;
         }
 
-        string name = DemoRoster[_selectedSlot].Name;
         // spec: frontend_scenes.md §7 — "Enter/select (action 6) → SFX 920100200; send 1/9 (40B);
         // cache 880B descriptor + 96B stats; write state 5 (In-game)". CODE-CONFIRMED.
-        // In the offline stub we skip the wire send and cache; just emit the transition signal.
+        // The actual 1/9 send is routed through IApplicationUseCases.SelectCharacterAsync
+        // in BootFlow.OnEnterGameRequested — we emit the signal carrying slot index.
         GD.Print(
-            $"[Screens] CharacterSelectScreen: Enter Game (action 6, offline stub) — character='{name}' slot={_selectedSlot}.");
-        EmitSignal(SignalName.EnterGameRequested, name);
+            $"[Screens] CharacterSelectScreen: Enter Game (action 6) — character='{name}' slot={_selectedSlot}.");
+        EmitSignal(SignalName.EnterGameRequested, name, _selectedSlot);
     }
 
     // =========================================================================
@@ -873,10 +1025,28 @@ public sealed partial class CharacterSelectScreen : Control
 
     private void RefreshInfo()
     {
-        if (_selectedSlot < DemoRoster.Length)
+        // spec: frontend_scenes.md §3.2 — slot info line shows name, level, and last position.
+        if (_liveDataApplied)
+        {
+            LiveSlot ls = _liveSlots[_selectedSlot];
+            if (!ls.IsEmpty)
+            {
+                _infoName.Text = $"Name: {ls.Name}";
+                _infoLevel.Text = $"Lv {ls.Level}";
+                // ServerClass is the raw server class id. Display it as-is (no class-name lookup
+                // here — that would require the domain catalogue; this is a passive view).
+                _infoClass.Text = $"Class: {ls.ServerClass}";
+            }
+            else
+            {
+                _infoName.Text = "Name: (empty)";
+                _infoLevel.Text = "Lv –";
+                _infoClass.Text = "Class: –";
+            }
+        }
+        else if (_selectedSlot < DemoRoster.Length)
         {
             DemoSlot slot = DemoRoster[_selectedSlot];
-            // spec: frontend_scenes.md §3.2 — slot info line shows name, level, and last position.
             _infoName.Text = $"Name: {slot.Name}";
             _infoLevel.Text = $"Lv {slot.Level}";
             _infoClass.Text = ClassCaption(slot.UiClassIndex);
@@ -1003,4 +1173,22 @@ public sealed partial class CharacterSelectScreen : Control
         int UiClassIndex,
         int FaceIndex,
         uint SkinClassId = 1u);
+
+    /// <summary>
+    /// A resolved live slot driven by <see cref="CharacterListEvent"/> (opcode 3/1).
+    /// Populated by <see cref="ApplyCharacterList"/>; replaces the DemoRoster for the view.
+    ///
+    /// <para>IsEmpty=true: the slot carries no character (either absent from the event or the
+    /// "@BLANK@" sentinel was seen). Enter on an empty slot opens the Create sub-form.
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.1 — "@BLANK@" sentinel. CODE-CONFIRMED.</para>
+    ///
+    /// <para>This is view state only — never domain state.</para>
+    /// </summary>
+    private readonly record struct LiveSlot(
+        bool IsEmpty,
+        string Name = "",
+        ushort Level = 0,
+        ushort ServerClass = 0,
+        uint CurrentHp = 0,
+        int SlotIndex = 0);
 }

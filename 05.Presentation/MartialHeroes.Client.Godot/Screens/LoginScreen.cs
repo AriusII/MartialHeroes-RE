@@ -79,6 +79,17 @@ public sealed partial class LoginScreen : Control
     [Signal]
     public delegate void QuitRequestedEventHandler();
 
+    /// <summary>
+    /// Raised when the player clicks the Server-list button (action 102).
+    /// Carries the current account name so BootFlow can pre-fill it on return.
+    /// The actual server list is fetched from the lobby (port 10000) in a live build.
+    /// In the offline/dev flow the caller (BootFlow) populates a synthetic list.
+    /// spec: Docs/RE/specs/frontend_scenes.md §2 — "Server-list button opens ServerSelectScreen".
+    /// spec: Docs/RE/specs/login_flow.md §2.1 — lobby port 10000, server-list records.
+    /// </summary>
+    [Signal]
+    public delegate void ServerListRequestedEventHandler(string account);
+
     // -------------------------------------------------------------------------
     // View state (no domain state — positions, focus, modal open/close only)
     // -------------------------------------------------------------------------
@@ -265,7 +276,9 @@ public sealed partial class LoginScreen : Control
             caption: _assets.Text(4002u, "Server List"),
             captionTint: Colors.White);
         serverBtn.Name = "ServerListButton";
-        serverBtn.IsDisabled = true; // OFFLINE STUB — spec §1.5 disabled = NORMAL frame + grey caption
+        // Server button is now ENABLED — BootFlow handles it (online or dev-offline synthetic list).
+        // spec: Docs/RE/specs/frontend_scenes.md §2 — "Server-list button opens ServerSelectScreen".
+        serverBtn.ActionFired += _ => OnServerListPressed();
         band.AddChild(serverBtn);
         widgetCount++;
 
@@ -512,6 +525,19 @@ public sealed partial class LoginScreen : Control
         //       to the character-select phase.
         GD.Print($"[LoginScreen] OK — validation passed (offline stub), account='{account}'. Emitting LoginAccepted.");
         EmitSignal(SignalName.LoginAccepted, account);
+    }
+
+    private void OnServerListPressed()
+    {
+        // Emit ServerListRequested so BootFlow opens the ServerSelectScreen.
+        // The account field is passed so the server select can display a greeting if desired,
+        // and so BootFlow knows the account credential to forward to LoginAsync.
+        // No local validation required before showing the server list — it is purely informational.
+        // spec: Docs/RE/specs/frontend_scenes.md §2 — server-list button opens selection screen.
+        // spec: Docs/RE/specs/login_flow.md §2.1 — server list fetched from lobby port 10000.
+        string account = _accountEdit.Text.Trim();
+        GD.Print($"[LoginScreen] Server List button pressed (account='{account}'). Emitting ServerListRequested.");
+        EmitSignal(SignalName.ServerListRequested, account);
     }
 
     private void ShowQuitConfirmModal()
