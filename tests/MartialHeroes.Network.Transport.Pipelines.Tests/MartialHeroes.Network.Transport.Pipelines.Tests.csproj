@@ -20,6 +20,8 @@
     <ItemGroup>
         <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Transport.Pipelines\MartialHeroes.Network.Transport.Pipelines.csproj"/>
         <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Abstractions\MartialHeroes.Network.Abstractions.csproj"/>
+        <!-- Test project only: reference Network.Crypto to supply real WireCipher/PayloadCompression delegates. -->
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Crypto\MartialHeroes.Network.Crypto.csproj"/>
     </ItemGroup>
 
 </Project>

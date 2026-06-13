@@ -20,8 +20,26 @@ public static class Opcodes
     public const uint SmsgKeyExchange = 0x0;
 
     // --- major 1: ServerCommand (S2C) / account (C2S) ---
+    /// <summary>
+    /// 1:6 — CONTESTED login-OR-create C2S blob (52 B opaque). status: draft.
+    /// spec: packets/1-6_login_or_create.yaml. UNRESOLVED OPCODE COLLISION: two independent
+    /// ~52-byte send-sites map to 1/6 — the account LOGIN credential blob AND the character-CREATE
+    /// body. The catalog keeps the canonical name CmsgLoginRequest; the spec commits to NEITHER
+    /// field layout and forbids a field-split struct until a capture disambiguates. spec: opcodes.md.
+    /// </summary>
+    public const uint CmsgLoginRequest = 0x10006;
+
+    /// <summary>1:7 — client select-character pre-step (2 B: slot + state flag). status: draft. spec: packets/1-7_select_character.yaml.</summary>
+    public const uint CmsgSelectCharacter = 0x10007;
+
     /// <summary>1:9 — client enter-world / select-character request (40 B). status: draft. spec: packets/1-9_enter_game_request.yaml.</summary>
     public const uint CmsgEnterGameRequest = 0x10009;
+
+    /// <summary>1:13 — client rename-character request (18 B CP949 name buffer). status: draft. spec: packets/1-13_rename_character.yaml.</summary>
+    public const uint CmsgRenameCharacter = 0x1000d;
+
+    /// <summary>1:14 — client delete-character request (1 B slot index). status: draft. spec: packets/1-14_delete_character.yaml.</summary>
+    public const uint CmsgDeleteCharacter = 0x1000e;
 
     /// <summary>1:16 — billing deactivated. status: confirmed.</summary>
     public const uint SmsgSrvBillingDeactivated = 0x10010;

@@ -25,6 +25,7 @@ namespace MartialHeroes.Network.Transport.Pipelines;
 public sealed class TcpTransport : ITransport
 {
     private readonly IFrameSink _frameSink;
+    private readonly InboundDecompressDelegate? _decompress;
     private volatile bool _disposed;
 
     /// <summary>
@@ -35,10 +36,21 @@ public sealed class TcpTransport : ITransport
     /// The frame sink that receives all decoded frames for every session produced by this
     /// transport.
     /// </param>
-    public TcpTransport(IFrameSink frameSink)
+    /// <param name="decompress">
+    /// Optional LZ4 raw-block decompression delegate applied to every non-empty inbound payload
+    /// before it is handed to <paramref name="frameSink"/>. Supply
+    /// <c>PayloadCompression.DecompressPayload</c> from <c>Network.Crypto</c> at the composition
+    /// root. When <see langword="null"/> payloads are forwarded raw (useful for tests or when the
+    /// inbound path is known to be uncompressed).
+    /// spec: Docs/RE/specs/crypto.md §5 — inbound is compressed-only (no inverse cipher).
+    /// </param>
+    public TcpTransport(
+        IFrameSink frameSink,
+        InboundDecompressDelegate? decompress = null)
     {
         ArgumentNullException.ThrowIfNull(frameSink);
         _frameSink = frameSink;
+        _decompress = decompress;
     }
 
     /// <inheritdoc/>
@@ -77,7 +89,7 @@ public sealed class TcpTransport : ITransport
             throw;
         }
 
-        var connection = new SocketConnection(socket, _frameSink);
+        var connection = new SocketConnection(socket, _frameSink, _decompress);
         connection.Start();
         return connection;
     }

@@ -40,6 +40,7 @@ internal sealed class SocketConnection : IConnectionSession
 {
     private readonly Socket _socket;
     private readonly IFrameSink _frameSink;
+    private readonly InboundDecompressDelegate? _decompress;
     private readonly Pipe _inboundPipe;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
 
@@ -68,10 +69,21 @@ internal sealed class SocketConnection : IConnectionSession
     /// </remarks>
     public PipeReader Input => _inboundPipe.Reader;
 
-    internal SocketConnection(Socket socket, IFrameSink frameSink)
+    /// <param name="socket">Connected TCP socket.</param>
+    /// <param name="frameSink">Sink for decoded inbound frames.</param>
+    /// <param name="decompress">
+    /// Optional LZ4 decompression delegate applied to every non-empty inbound payload before
+    /// dispatch. When <see langword="null"/> payloads are forwarded raw.
+    /// spec: Docs/RE/specs/crypto.md §5 — inbound is compressed-only, no inverse cipher.
+    /// </param>
+    internal SocketConnection(
+        Socket socket,
+        IFrameSink frameSink,
+        InboundDecompressDelegate? decompress = null)
     {
         _socket = socket;
         _frameSink = frameSink;
+        _decompress = decompress;
 
         ulong id = (ulong)Interlocked.Increment(ref _sessionCounter);
         Id = new SessionId(id);
@@ -234,7 +246,7 @@ internal sealed class SocketConnection : IConnectionSession
         try
         {
             FrameSplitter.FrameLoopResult loopResult =
-                await FrameSplitter.RunAsync(_inboundPipe.Reader, Id, _frameSink, ct)
+                await FrameSplitter.RunAsync(_inboundPipe.Reader, Id, _frameSink, ct, _decompress)
                     .ConfigureAwait(false);
 
             if (loopResult == FrameSplitter.FrameLoopResult.FramingError)
