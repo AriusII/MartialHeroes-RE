@@ -71,6 +71,29 @@ internal static class FormatRegistry
     // spec: Docs/RE/formats/sound_tables.md §Overall structure — loader reads exactly 256×48 = 12288 bytes.
     private const int SoundTableDataSize = 256 * 48;
 
+    // ── .bin env-family synthetic registry keys ─────────────────────────────────────────────
+    // The bare ".bin" extension is shared by a dozen unrelated per-area blobs that carry NO magic
+    // and NO version field. They are disambiguated SOLELY by the file-name PREFIX (the part before
+    // the trailing area-id digits), confirmed by the fixed file size where one exists. The synthetic
+    // keys below are resolved by ResolveBinKey() in Lookup().
+    // spec: Docs/RE/formats/environment_bins.md §Overview — "no magic number, no version field".
+    private const string BinMapOptionKey   = ".bin#map_option";
+    private const string BinFogKey         = ".bin#fog";
+    private const string BinMaterialKey    = ".bin#material";
+    private const string BinLightKey       = ".bin#light";
+    private const string BinStarDomeKey    = ".bin#stardome";
+    private const string BinCloudDomeKey   = ".bin#clouddome";
+    private const string BinCloudCycleKey  = ".bin#cloud_cycle";
+    private const string BinPointLightKey  = ".bin#point_light";
+    private const string BinWindKey        = ".bin#wind";
+    private const string BinWeatherKey     = ".bin#weather";
+    private const string BinRegionTableKey = ".bin#regiontable";
+    private const string BinCompanionKey   = ".bin#companion"; // region<NNN>.bin / map<NNN>.bin (UNVERIFIED layout)
+
+    // weather%d.bin / weather%d_rain.bin fixed size (PARTIAL — content not decoded).
+    // spec: Docs/RE/formats/environment_bins.md §7 / §8 — "exactly 240 bytes": SAMPLE-VERIFIED (size only).
+    private const int WeatherBinSize = 240;
+
     /// <summary>
     /// All registered entries, keyed by extension. Built once.
     /// </summary>
@@ -100,6 +123,15 @@ internal static class FormatRegistry
                 : null;
         }
 
+        // .bin: a dozen unrelated per-area blobs share this extension with no magic. Resolve by
+        // the file-name PREFIX (everything before the trailing area-id digits), confirmed by size.
+        // spec: Docs/RE/formats/environment_bins.md §Overview — "no magic number, no version field".
+        if (ext == ".bin")
+        {
+            string key = ResolveBinKey(vfsPath, content);
+            return ByExt.GetValueOrDefault(key);
+        }
+
         return ByExt.GetValueOrDefault(ext);
     }
 
@@ -110,6 +142,41 @@ internal static class FormatRegistry
         int slash = name.LastIndexOf('/');
         if (dot < 0 || dot < slash) return "(none)";
         return name[dot..].ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Maps a <c>*.bin</c> virtual path to its synthetic registry key by file-name prefix.
+    /// The per-area env/region <c>.bin</c> blobs carry no magic and no version field, so the
+    /// only reliable discriminator is the name prefix (the text before the trailing area-id
+    /// digits); the fixed file size confirms it. Order matters: <c>cloud_cycle</c> must be tested
+    /// before <c>clouddome</c>/<c>cloud</c>, and <c>point_light</c> before <c>light</c>, because
+    /// the longer prefix subsumes the shorter.
+    /// spec: Docs/RE/formats/environment_bins.md §Overview — file family resolved by name pattern.
+    /// </summary>
+    private static string ResolveBinKey(string vfsPath, ReadOnlyMemory<byte> content)
+    {
+        string file = vfsPath[(vfsPath.LastIndexOf('/') + 1)..]; // already lower-cased by NormPath
+
+        // Longest-prefix-first so e.g. "point_light" wins over "light", "cloud_cycle" over "cloud".
+        // spec: Docs/RE/formats/environment_bins.md §Overview — per-area filename substitution "%d".
+        if (file.StartsWith("map_option", StringComparison.Ordinal))  return BinMapOptionKey;
+        if (file.StartsWith("cloud_cycle", StringComparison.Ordinal)) return BinCloudCycleKey;
+        if (file.StartsWith("clouddome", StringComparison.Ordinal))   return BinCloudDomeKey;
+        if (file.StartsWith("point_light", StringComparison.Ordinal)) return BinPointLightKey;
+        if (file.StartsWith("stardome", StringComparison.Ordinal))    return BinStarDomeKey;
+        if (file.StartsWith("material", StringComparison.Ordinal))    return BinMaterialKey;
+        if (file.StartsWith("weather", StringComparison.Ordinal))     return BinWeatherKey;
+        if (file.StartsWith("light", StringComparison.Ordinal))       return BinLightKey;
+        if (file.StartsWith("wind", StringComparison.Ordinal))        return BinWindKey;
+        if (file.StartsWith("fog", StringComparison.Ordinal))         return BinFogKey;
+        // regiontable<NNN>.bin (a fixed 32-byte-stride label table) vs the companion region<NNN>.bin.
+        // spec: Docs/RE/formats/misc_data.md §7.2 — regiontableNNN.bin vs region<NNN>.bin / map<NNN>.bin.
+        if (file.StartsWith("regiontable", StringComparison.Ordinal)) return BinRegionTableKey;
+        if (file.StartsWith("region", StringComparison.Ordinal))      return BinCompanionKey;
+        if (file.StartsWith("map", StringComparison.Ordinal))         return BinCompanionKey;
+
+        // Unknown .bin family: leave unresolved (decode reports UNREGISTERED, hexdump still works).
+        return ".bin";
     }
 
     // ── Convert dispatch (used by the `convert` command) ────────────────────────────────────
@@ -256,6 +323,30 @@ internal static class FormatRegistry
         // ── Shaders (D3D9 assembly source: .vsh vertex, .psh pixel) ─────────────────────────
         Add(".vsh", "D3D9 vertex shader source", "Docs/RE/formats/shaders.md", DecodeShader);
         Add(".psh", "D3D9 pixel shader source", "Docs/RE/formats/shaders.md", DecodeShader);
+
+        // ── Per-area environment / sky .bin family (no magic; resolved by name prefix) ───────
+        // spec: Docs/RE/formats/environment_bins.md — the data/sky/dat + data/map* env-bin family.
+        Add(BinMapOptionKey,  "Per-area master flags (map_option*.bin)", "Docs/RE/formats/environment_bins.md", DecodeBinMapOption);
+        Add(BinFogKey,        "Per-area fog parameters (fog*.bin)",        "Docs/RE/formats/environment_bins.md", DecodeBinFog);
+        Add(BinMaterialKey,   "Sun/sky material colour table (material*.bin)", "Docs/RE/formats/environment_bins.md", DecodeBinMaterial);
+        Add(BinLightKey,      "Sky-lighting keyframes (light*.bin)",       "Docs/RE/formats/environment_bins.md", DecodeBinLight);
+        Add(BinStarDomeKey,   "Star colour grid (stardome*.bin)",          "Docs/RE/formats/environment_bins.md", DecodeBinStarDome);
+        Add(BinCloudDomeKey,  "Cloud-dome colour grid (clouddome*.bin)",   "Docs/RE/formats/environment_bins.md", DecodeBinCloudDome);
+        Add(BinCloudCycleKey, "Cloud animation schedule (cloud_cycle*.bin)", "Docs/RE/formats/environment_bins.md", DecodeBinCloudCycle);
+        // point_light*.bin / wind*.bin are formally specified in terrain_layers.md §7–8.
+        Add(BinPointLightKey, "Per-area point-light array (point_light*.bin)", "Docs/RE/formats/terrain_layers.md", DecodeBinPointLight);
+        Add(BinWindKey,       "Foliage-sway keyframes (wind*.bin)",        "Docs/RE/formats/terrain_layers.md", DecodeBinWind);
+        // weather*.bin / weather*_rain.bin — size confirmed, body not decoded (PARTIAL).
+        Add(BinWeatherKey,    "Weather parameters (weather*.bin) — PARTIAL", "Docs/RE/formats/environment_bins.md", DecodeBinWeather);
+        // regiontable<NNN>.bin — sub-zone label table (misc_data.md §7.2).
+        Add(BinRegionTableKey, "Per-area sub-zone label table (regiontable*.bin)", "Docs/RE/formats/misc_data.md", DecodeBinRegionTable);
+        // region<NNN>.bin / map<NNN>.bin companions — layout UNVERIFIED (misc_data.md §7.2).
+        Add(BinCompanionKey,  "Per-area region/map companion .bin (layout UNVERIFIED)", "Docs/RE/formats/misc_data.md", DecodeBinCompanion);
+
+        // ── Per-area cell manifest (.lst — the area-inventory presence signal) ──────────────
+        // spec: Docs/RE/formats/area_inventory.md §1.2 — d<NNN>.lst is the authoritative area census;
+        // spec: Docs/RE/formats/terrain.md §1.2 — binary layout: u32 count | count × u32 keys.
+        Add(".lst", "Per-area cell manifest (area census; cell keys)", "Docs/RE/formats/area_inventory.md", DecodeLst);
 
         return t;
     }
@@ -488,6 +579,167 @@ internal static class FormatRegistry
         ShaderSource src = ShaderContainerParser.Parse(raw);
         // spec: Docs/RE/formats/shaders.md §Version Declaration Line — vs/ps token: VERIFIED.
         return [$"D3D9 {src.ShaderType} shader  source_chars={src.SourceText.Length:N0}  (ASCII)"];
+    }
+
+    // ── Per-area environment / sky .bin family ──────────────────────────────────────────────
+    // All emit COUNTS and a few flag/scalar header fields only — never a colour-table dump.
+
+    private static IReadOnlyList<string> DecodeBinMapOption(string path, ReadOnlyMemory<byte> raw)
+    {
+        MapOptionBin o = EnvironmentBinParsers.ParseMapOption(raw);
+        // spec: Docs/RE/formats/environment_bins.md §1.1 — 10 × u32 flag vector: CONFIRMED.
+        return
+        [
+            $"map_option  water_enable={o.WaterEnable}  water_y={o.WaterY}  sky_gate={o.SkyGate}  indoor={o.IndoorFlag}",
+            $"stardome={o.StarDomeEnable}  clouddome={o.CloudDomeEnable}  lensflare={o.LensFlareEnable}  " +
+            $"sun_moon={o.SunMoonEnable}  skybox={o.SkyboxEnable}",
+        ];
+    }
+
+    private static IReadOnlyList<string> DecodeBinFog(string path, ReadOnlyMemory<byte> raw)
+    {
+        FogBin f = EnvironmentBinParsers.ParseFog(raw);
+        // spec: Docs/RE/formats/environment_bins.md §2.1 — start/end dist + 48 BGRA keyframes: CONFIRMED.
+        return
+        [
+            $"fog  start_dist={f.StartDist:F3}  end_dist={f.EndDist:F3}  " +
+            $"data_load_flag={f.DataLoadFlag}  colour_keyframes={f.FogColors.Length}",
+        ];
+    }
+
+    private static IReadOnlyList<string> DecodeBinMaterial(string path, ReadOnlyMemory<byte> raw)
+    {
+        MaterialBin m = EnvironmentBinParsers.ParseMaterial(raw);
+        // spec: Docs/RE/formats/environment_bins.md §3.1 — f32[48][51] colour table: CONFIRMED.
+        return
+        [
+            $"material colour table  keyframes={m.ColorTable.Length}  values_per_keyframe={MaterialBin.ValuesPerKeyframe}",
+        ];
+    }
+
+    private static IReadOnlyList<string> DecodeBinLight(string path, ReadOnlyMemory<byte> raw)
+    {
+        LightBin l = EnvironmentBinParsers.ParseLight(raw);
+        // spec: Docs/RE/formats/environment_bins.md §9 — sample-verified light layout: CONFIRMED.
+        return
+        [
+            $"light  directional_keyframes={l.DirectionalKeyframes.Length}  ambient_keyframes={l.AmbientKeyframes.Length}",
+            $"fog_distance_scalars={l.FogDistanceScalars.Length}  secondary_fog_scalars={l.SecondaryFogScalars.Length}",
+            $"fallback_light scale={l.FallbackScale:F1} dir=({l.FallbackDirX:F1},{l.FallbackDirY:F1},{l.FallbackDirZ:F1})",
+        ];
+    }
+
+    private static IReadOnlyList<string> DecodeBinStarDome(string path, ReadOnlyMemory<byte> raw)
+    {
+        StarDomeBin s = EnvironmentBinParsers.ParseStarDome(raw);
+        // spec: Docs/RE/formats/environment_bins.md §4.1 — u8[12][192][4] BGRA grid: CONFIRMED.
+        return [$"stardome  keyframes={s.StarColors.Length}  stars_per_keyframe={StarDomeBin.StarsPerKeyframe}  (12-frame cycle)"];
+    }
+
+    private static IReadOnlyList<string> DecodeBinCloudDome(string path, ReadOnlyMemory<byte> raw)
+    {
+        CloudDomeBin c = EnvironmentBinParsers.ParseCloudDome(raw);
+        // spec: Docs/RE/formats/environment_bins.md §5.1 — two u8[12][240][4] BGRA layers: CONFIRMED.
+        return
+        [
+            $"clouddome  layers=2  keyframes={c.Layer1Colors.Length}  vertices_per_keyframe={CloudDomeBin.VerticesPerKeyframe}",
+        ];
+    }
+
+    private static IReadOnlyList<string> DecodeBinCloudCycle(string path, ReadOnlyMemory<byte> raw)
+    {
+        CloudCycleBin c = EnvironmentBinParsers.ParseCloudCycle(raw);
+        // spec: Docs/RE/formats/environment_bins.md §6.1 — 10 day-pattern rows × 7 u8: CONFIRMED.
+        return [$"cloud_cycle  day_patterns={c.Rows.Length}  (10 × 7 u8 schedule)"];
+    }
+
+    private static IReadOnlyList<string> DecodeBinPointLight(string path, ReadOnlyMemory<byte> raw)
+    {
+        PointLightBinData p = TerrainLayerParsers.ParsePointLightBin(raw);
+        int enabled = 0;
+        foreach (PointLightRecord r in p.Records) if (r.EnabledFlag == 0) enabled++;
+        // spec: Docs/RE/formats/terrain_layers.md §7 — header + 60-byte records: CONFIRMED (parser).
+        return [$"point_light  intensity_scale={p.IntensityScale}  records={p.Records.Length}  enabled={enabled}"];
+    }
+
+    private static IReadOnlyList<string> DecodeBinWind(string path, ReadOnlyMemory<byte> raw)
+    {
+        WindBinData w = TerrainLayerParsers.ParseWindBin(raw);
+        // spec: Docs/RE/formats/terrain_layers.md §8 — 8-byte header + 24-byte records: CONFIRMED (header).
+        return [$"wind  count={w.Count}  flag2={w.Flag2}  (24-byte keyframe records; fields UNVERIFIED)"];
+    }
+
+    private static IReadOnlyList<string> DecodeBinWeather(string path, ReadOnlyMemory<byte> raw)
+    {
+        // PARTIAL: size confirmed, body not decoded. Report size only + non-zero presence.
+        // spec: Docs/RE/formats/environment_bins.md §7 / §8 — exactly 240 bytes; content unknown.
+        bool isRain = path.Contains("_rain", StringComparison.Ordinal);
+        string variant = isRain ? "weather_rain" : "weather";
+        if (raw.Length != WeatherBinSize)
+            return [$"{variant}  {raw.Length:N0} bytes (expected {WeatherBinSize}; body not decoded — PARTIAL)"];
+
+        bool allZero = true;
+        foreach (byte b in raw.Span) if (b != 0) { allZero = false; break; }
+        return [$"{variant}  {WeatherBinSize} bytes  {(allZero ? "all-zero (inactive)" : "non-zero body present")}  (body not decoded — PARTIAL)"];
+    }
+
+    private static IReadOnlyList<string> DecodeBinRegionTable(string path, ReadOnlyMemory<byte> raw)
+    {
+        RegionTableRecord[] recs = RegionTableParser.Parse(raw);
+        // spec: Docs/RE/formats/misc_data.md §7.2 — 32-byte sub-zone label records: SAMPLE-VERIFIED.
+        return [$"regiontable  sub_zone_records={recs.Length}  (32B stride)"];
+    }
+
+    private static IReadOnlyList<string> DecodeBinCompanion(string path, ReadOnlyMemory<byte> raw)
+    {
+        // region<NNN>.bin (size varies) and map<NNN>.bin (fixed 520B) — layouts UNVERIFIED.
+        // spec: Docs/RE/formats/misc_data.md §7.2 — companion files, layout open: UNVERIFIED.
+        string file = path[(path.LastIndexOf('/') + 1)..];
+        string kind = file.StartsWith("map", StringComparison.Ordinal) ? "map<NNN>.bin (fixed 520B)" : "region<NNN>.bin";
+        return [$"{kind}  {raw.Length:N0} bytes  (companion .bin; layout UNVERIFIED — misc_data.md §7.2)"];
+    }
+
+    // ── Per-area cell manifest (.lst) — the area-inventory presence signal ──────────────────
+
+    private static IReadOnlyList<string> DecodeLst(string path, ReadOnlyMemory<byte> raw)
+    {
+        // Only the per-area cell manifest form (data/map<NNN>/dat/d<NNN>.lst) is the area-inventory
+        // presence signal. Other .lst files (e.g. data/effect/*.lst index/bmp lists) share the
+        // extension but have a different layout — don't claim them as area manifests.
+        // spec: Docs/RE/formats/area_inventory.md §1 — d<NNN>.lst is the authoritative area census.
+        string file = path[(path.LastIndexOf('/') + 1)..];
+        bool isAreaManifest = path.Contains("/dat/", StringComparison.Ordinal) &&
+                              file.StartsWith("d", StringComparison.Ordinal);
+
+        if (raw.Length < 4)
+            return [".lst too short for a u32 count prefix"];
+
+        if (!isAreaManifest)
+        {
+            // Generic count-prefixed list: report the leading u32 only (no cell-key interpretation).
+            uint hdrCount = BinaryPrimitives.ReadUInt32LittleEndian(raw.Span[..4]);
+            return
+            [
+                $"generic .lst (not a d<NNN>.lst area manifest)  leading_u32={hdrCount:N0}  size={raw.Length:N0} bytes",
+                "  (effect/index list — different layout; not the area-inventory cell manifest)",
+            ];
+        }
+
+        LstManifest m = LstManifestParser.Parse(raw);
+        // Census-style summary: cell count, the (file_size-4)/4 cross-check, and duplicate keys.
+        // spec: Docs/RE/formats/area_inventory.md §1.2 — cell_count = (file_size - 4) / 4: CONFIRMED.
+        // spec: Docs/RE/formats/area_inventory.md §4.1 — area 0 has a duplicate cell key: SAMPLE-VERIFIED.
+        long byFormula = (raw.Length - 4) / 4;
+        var distinct = new HashSet<uint>();
+        foreach (LstCellEntry e in m.Entries) distinct.Add(e.Key);
+        int dupes = m.Entries.Length - distinct.Count;
+        return
+        [
+            $"area manifest  cell_entries={m.Entries.Length}  distinct_keys={distinct.Count}" +
+            (dupes > 0 ? $"  duplicate_keys={dupes}" : ""),
+            $"size cross-check (file_size-4)/4 = {byFormula}  " +
+            (byFormula == m.Entries.Length ? "(matches count field)" : "(MISMATCH vs count field)"),
+        ];
     }
 
     // ── small helpers ───────────────────────────────────────────────────────────────────────
