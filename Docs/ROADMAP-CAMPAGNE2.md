@@ -80,46 +80,75 @@ is the **msg-string catalogue lookup**, NOT the packet dispatcher — do NOT see
 Scene-machine lane scoped to state-wiring to avoid UI/effects double-ownership. ADVAPI32 `Crypt*` =
 `ConfigCryptoApi`/anti-cheat, out of scope for cluster 2 (anti-debug risk C2-R8).
 
-## Phase B — Deep comprehension (READONLY, per cluster) — **STATUS: ⏳ PENDING**
-Per cluster: `re-comprehension-orchestrator` fans out Tier-3 analysts (IDA sub-waves of 3). Output:
-`_dirty/campaign2/comprehension/<cluster>/*.md` + `names.proposed.yaml` + `comments.proposed.md`.
+## Phase B — Deep comprehension (READONLY, per cluster) — **STATUS: ✅ DONE (5/5 clusters, 2026-06-13)**
+Per cluster: `re-comprehension-orchestrator` (Opus 4.8) fans out Tier-3 analysts (IDA sub-waves of 3).
+Output: `_dirty/campaign2/comprehension/<cluster>/*.md` + `names.proposed.yaml` + `comments.proposed.md`.
 **B EXIT:** cluster critical functions understood; manifests complete; conflicts flagged.
+**Note:** clusters run **sequentially** — the single IDB caps IDA at ≤3 concurrent consumers, so two
+comprehension orchestrators cannot run at once.
 
-| Cluster | Lanes (to fill) | Conf | Status |
-|---------|-----------------|------|--------|
-| network-dispatch | _TBD by Phase A_ | — | PENDING |
-| crypto-session | _TBD_ | — | PENDING |
-| vfs-assetio | _TBD_ | — | PENDING |
-| scene-machine | _TBD_ | — | PENDING |
-| effects-render | _TBD_ | — | PENDING |
+| Cluster | Lanes | Proposed names | Conf | Status |
+|---------|-------|----------------|------|--------|
+| network-dispatch | 5 (2 sub-waves; 0 dead) | 53 in-cluster (18H/16M/19L) + ~52 deferred + ~75 routed out | HIGH | ✅ DONE 2026-06-13 |
+| crypto-session | 3 (1 sub-wave; 0 dead) | 38 fns: 30H/3M/2L | HIGH | ✅ DONE 2026-06-13 |
+| vfs-assetio | 3 (1 sub-wave; 0 dead) | 60 fns (41 in/12 unproven/7 out) + 11 globals | HIGH | ✅ DONE 2026-06-13 — pak.md + resource_pipeline.md CONFIRMED; fixes: TOC base `0x8C3ECC`, IDB "+8"→"+12" |
+| scene-machine | 4 (2 sub-waves; 0 dead) | ~95 fns; 57 symbols 39H/18M/0L | HIGH | ✅ DONE 2026-06-13 — refines client_workflow §4.4; PIN keypad found; scheduler now-ms split → debugger lane |
+| effects-render | 6 (2 sub-waves; 0 dead) | ~100 addrs 78H/20M/3L (+deferred deep internals) | HIGH/MED | ✅ DONE 2026-06-13 — resolved several OQ-EFX; corrected formats/effects.md §E.2 (particleEmitter.eff variable-length); SwordLight ribbon still OPEN |
 
-## Phase C — Reconciliation & glossary (Tier-1 gate) — **STATUS: ⏳ PENDING**
-Merge all `names.proposed.yaml` → `_dirty/campaign2/glossary.yaml`: dedup, canonicalize reused
-elements, resolve `CONFLICT:`, neutrality check (no `sub_/loc_/_DWORD/__thiscall`/mangling; quoted
-address keys; no duplicate names).
-**C EXIT (HARD GATE):** glossary clean; no dup names; one name ↔ one symbol. *No IDB write before this.*
-**C STATUS:** _not started._
+**network-dispatch headline names:** `NetHandler_DispatchGamePacket`, `NetHandler_HandleNetworkEvent`
+(cmd-102 control vs cmd-100 data), `NetClient_RecvWorkerThread`/`_StartNetworkEngine`/`_Disconnect`,
+`NetConn_Shutdown`/`_SetLastErrorString`, `NetSocket_ConstructSlot`, the `NetPacketDeque_*` queue
+family, and the 5/52 `SkillActionList_*`/`SkillActionRing_*` container. Conflicts resolved (guest/member
+ctor ownership; `_fseeki64` CRT shim mis-aliased; shared string-buffer ctor named by role).
 
-## Phase D — IDA annotation (WRITE, serialized) — **STATUS: ⏳ PENDING**
-`re-annotation-orchestrator` drives, **one `re-ida-annotator` at a time**, `/ida-annotate-batch`
-(dry-run → review → apply) per cluster. Output: annotated IDB + `_dirty/campaign2/applied/<cluster>.md`.
-**D EXIT:** cluster `sub_xxxx` resorbed per glossary; re-decompiling a sample shows names/comments.
+## Phase C — Reconciliation & glossary (Tier-1 gate) — **STATUS: ✅ DONE (2026-06-13)**
+Merged 5 `names.proposed.yaml` → `_dirty/campaign2/glossary.yaml`. Apply-set **380** (361 fns + 19
+globals, high+med). 6 conflicts arbitrated by Tier-1 (cmd-102 `NetHandler_HandleNetworkEvent`;
+generic `CriticalSection_Enter/Leave`; `GHTexCache_FlushAll`; `Singleton_GetCameraConfig`;
+`ThreadSlot_SetPriority` dup → held `0x648ae2`). Holdbacks: ~100 low_confidence, 78 out_of_cluster,
+10 deferred ranges.
+**C EXIT (HARD GATE):** ✅ neutrality PASS (no `sub_/loc_/_DWORD/__thiscall`/mangling; quoted keys;
+no dup name→2 addrs; no collision with the 309 existing `names.yaml` canonical names).
 
-| Cluster | Renames applied | Comments applied | Status |
-|---------|-----------------|------------------|--------|
-| network-dispatch | — | — | PENDING |
-| crypto-session | — | — | PENDING |
-| vfs-assetio | — | — | PENDING |
-| scene-machine | — | — | PENDING |
-| effects-render | — | — | PENDING |
+## Phase D — IDA annotation (WRITE, serialized) — **STATUS: ✅ DONE (2026-06-13)**
+`re-annotation-orchestrator` drove **one `re-ida-annotator` at a time**, `/ida-annotate-batch`
+(dry-run → apply, idempotent) per cluster. Maintainer pre-cleared IDB writes. **380/380 applied, 0
+failed.** Census: `sub_` **21,278 → 21,076 (−202)**, named **4,695 → 4,897 (+202)**; the other 178
+canonicalized already-named fns. Fixups applied (pak `+8`→`+12`; `sub_41CADC`→MessageDB; VirtualProtect
+togglers; shadow-projection REFINE). Reports: `_dirty/campaign2/applied/<cluster>.md`.
 
-## Phase E — Sync-back · Verify · Provenance (Tier-1) — **STATUS: ⏳ PENDING**
-- [ ] Pull-back IDB renames → merge into `names.yaml` (`functions:`/`globals:` first population).
-- [ ] Spot-verify legibility (3–5 functions per annotated cluster).
-- [ ] `/clean-room-firewall-check` PASS (no pseudo-C in `names.yaml`/`journal.md`).
-- [ ] `journal.md` provenance entry (`/re-session-log`): clusters by canonical name + counts.
-- [ ] Update this roadmap in place + memory facts.
-**E STATUS:** _not started._
+| Cluster | Entries | Renamed | Noop | Overwrite | Failed |
+|---------|--------:|--------:|-----:|----------:|-------:|
+| network-dispatch | 61 | 60 | 0 | 0 | 0 |
+| crypto-session | 32 | 19 | 13 | 1 | 0 |
+| vfs-assetio | 72 | 28 | 39 | 4 | 0 |
+| scene-machine | 66 | 46 | 20 | 0 | 0 |
+| effects-render | 149 | 56 | 66 | 27 | 0 |
+
+## Phase E — Sync-back · Verify · Provenance (Tier-1) — **STATUS: ✅ DONE (2026-06-13)**
+- [x] Pull-back → merged **380 entries** into `names.yaml` (`functions:` 361 + `globals:` 19 — FIRST
+  population; the maps were empty). Sorted, quoted keys, cluster-tagged neutral notes.
+- [x] Pull-back confirmed 380/380 addresses read the glossary canonical name in the live IDB (Phase D).
+- [x] Firewall PASS: `names.yaml` grepped clean (no `sub_/loc_/dword_/_DWORD/__thiscall`); the sync agent
+  **caught & sanitized 7 leaking `dword_` tokens** in comments before write; nothing under `_dirty/`
+  tracked; no originals staged; `.gitignore` intact.
+- [x] `journal.md` provenance entry appended (5 clusters by canonical name + counts; no pseudo-code).
+- [x] Roadmap + memory (`campaign2-ida-legibility`) updated.
+**E STATUS:** ✅ DONE. Committed artifacts ready for maintainer: `Docs/RE/names.yaml`,
+`Docs/RE/journal.md`, `Docs/ROADMAP-CAMPAGNE2.md`, `Docs/PLAN-CAMPAGNE2.md`, and the 3 new agents +
+`/ida-annotate-batch` skill under `.claude/`. **No commit made — awaiting maintainer request.**
+
+---
+
+## ✅ CAMPAIGN 2 — RUN COMPLETE (2026-06-13)
+First full pass done end-to-end (0·A·B·C·D·E·T). The 5 priority spine clusters are understood,
+renamed, and commented in the live IDB; `names.yaml` now carries 380 address→name mappings.
+**Result:** IDB `sub_` 21,278 → 21,076 (−202), named 4,695 → 4,897 (+202), 380 neutral comments set.
+**Next-cycle candidates (expand surface, all PENDING):** UI/widget toolkit, sound, combat/gameplay
+handlers, Lua surface, terrain — plus the deferred effects-render deep internals (particle math,
+SwordLight ribbon §14.8 still OPEN) and the spec REFINEMENTs queued for a spec-author
+(client_workflow §4.4, formats/effects.md §E.2, crypto.md §6.5). One debugger lane recommended for
+the scheduler now-ms split before its comment is locked.
 
 ### ⚖️ PENDING MAINTAINER DECISION — Cycle-4 coordination
 Campaign 2 leads IDB naming (D4) and shares `names.yaml` / the single IDB with the active Cycle 4

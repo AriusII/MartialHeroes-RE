@@ -12,10 +12,392 @@ binary:
   sha256: "63fcaf8e81a61097c68d22ae82514dded54e59c41c480850a568a0f0d79eb9df"
   notes: "Legacy D.O. Online / Martial Heroes client; x86 32-bit; imagebase 0x400000."
 
-functions: {}
+functions:
+  # Campaign 2 (2026-06-13): 361 function names synced back from the annotated IDB. See Docs/ROADMAP-CAMPAGNE2.md.
+  "0x4015a6": { name: "Time_GetMs", note: "Engine millisecond clock: timeGetTime(); if g_TimeScale != 1.0 returns timeGetTime*scale... [scene-machine]" }
+  "0x401868": { name: "Quat_Mul", note: "Hamilton product XYZW [effects-render]" }
+  "0x4029a5": { name: "Track_SampleAtTime", note: "Keyframe sample: n=floor(t*10), alpha = t - n/10 (RAW seconds in [0,0.1]); lerp... [effects-render]" }
+  "0x40b7cf": { name: "Entity_ClearSubTable20x16", note: "Generic zero-init of a 20-entry x 16-byte sub-table at this+84 (used per character slot) [network-dispatch]" }
+  "0x40d1b6": { name: "Actor_RebuildSkinIntoVB", note: "Per-frame: lock dynamic VB, deform every skin by the actor blend-mode word (actor+1768)... [effects-render]" }
+  "0x41cadc": { name: "MessageDB_GetString", note: "Message-string lookup by numeric id; returns 'Id[%d] msg not found.' on a miss [scene-machine]" }
+  "0x41e3ee": { name: "Pose_GetBoneById", note: "Bone = bones[id - bones[0].selfId]; 88-byte stride; out-of-range clamps to a sentinel [effects-render]" }
+  "0x41fa68": { name: "AnimMixer_BuildPose", note: "Build pose for the frame: reset accumulators, action-pass accumulate+commit, cycle-pass... [effects-render]" }
+  "0x425ed7": { name: "Singleton_GetCameraConfig", note: "Generic Meyers-singleton accessor (atexit guard) for camera/render-config global... [scene-machine]" }
+  "0x42bc93": { name: "TsQueue_Push", note: "Thread-safe enqueue: lock(+36), inner push, unlock [scene-machine]" }
+  "0x42e90d": { name: "DiskFile_ReadU32", note: "Reads a little-endian unsigned 32-bit value; reads directly from the blob cursor when... [vfs-assetio]" }
+  "0x42e943": { name: "DiskFile_ReadF32", note: "Reads a little-endian 32-bit float; same blob-vs-OS split as the u32 read; advances the... [vfs-assetio]" }
+  "0x42fcb7": { name: "BindPose_ParseBoneRecord", note: "72-byte bone: selfId@12 parentId@13 localTrans@16 localQuat@28 [effects-render]" }
+  "0x42fdf8": { name: "BindPose_BuildWorldFromRoot", note: "Recursive bind-world transform from root (no anim term) [effects-render]" }
+  "0x42fe1e": { name: "BindPose_BuildHierarchy", note: "Link by parentId==selfId (root 0,0) [effects-render]" }
+  "0x430c5f": { name: "Quat_RotateVec3", note: "Active unit-quat rotation q (x) v (x) q^-1 expanded; XYZW [effects-render]" }
+  "0x431089": { name: "PoseNode_PlaceChildWorld", note: "Rotate scaled local trans by node world quat into world trans (used by attach composers) [effects-render]" }
+  "0x4346e1": { name: "CoreSkin_LoadFromFile", note: "Skin weight math: dedup verts (0.001), drop weights < 0.01, normalize per-vertex to 1.0... [effects-render]" }
+  "0x4358d0": { name: "AttachPoint_ComposeWorld_A", note: "Effect attach world from bone+56/+68: q=boneQuat (x) localQuat, p=boneQuat (x) localOff +... [effects-render]" }
+  "0x435f54": { name: "AttachPoint_ComposeWorld_B", note: "Variant attach-point world composer (different host struct offsets) [effects-render]" }
+  "0x436a4b": { name: "MessageDB_PreloadServerNames", note: "Preload a contiguous block of message-string ids (server/channel-name range, 5421+)... [scene-machine]" }
+  "0x437a1f": { name: "Billing_FormatStatusMessage", note: "Format a billing/error status string: strftime '%Y' for time-like args, otherwise map... [scene-machine]" }
+  "0x437f45": { name: "PoseNode_InitFromBindBone", note: "Copy one bind bone (local trans/quat) into runtime 88-byte node; bind ptr at +16 [effects-render]" }
+  "0x437f6d": { name: "Pose_WorldWalk", note: "World walk: worldQuat = parentWorld (x) bindLocal (x) animLocal; worldTrans = parentWorld... [effects-render]" }
+  "0x437ff2": { name: "Pose_LinkHierarchy", note: "Link runtime bones by parentId==selfId (root 0,0) [effects-render]" }
+  "0x4380fc": { name: "Pose_ResetAccumulators", note: "Zero per-frame blend accumulators on every runtime bone [effects-render]" }
+  "0x43848f": { name: "Bone_AccumulateWeightedSample", note: "Weighted-average blend into a bone accumulator: f = wNew/(wAcc+wNew) (denom floored... [effects-render]" }
+  "0x438571": { name: "PoseNode_CommitWithChildLock", note: "Child bones (full parent chain) lock translation to bind-local (rotate only); root LERPs... [effects-render]" }
+  "0x4386aa": { name: "Pose_BuildFromBindPose", note: "Alloc 88-byte runtime bones from bind pose, copy local trans/quat, link, initial world... [effects-render]" }
+  "0x43878d": { name: "Pose_CommitAccumulators", note: "Loop committing every 88-byte bone via PoseNode_CommitWithChildLock [effects-render]" }
+  "0x4387b2": { name: "Skin_DeformLBS", note: "Mode-0 LBS: major pass overwrites dst, minor pass accumulates; pos = boneWorldQuat (x)... [effects-render]" }
+  "0x4389e1": { name: "Skin_DeformRigidMajor", note: "Mode-1 single major bone, rigid [effects-render]" }
+  "0x438ab3": { name: "Skin_DeformRigidOwned", note: "Mode-2 proximity owner table, transform-once-copy [effects-render]" }
+  "0x441f92": { name: "Terrain_StreamerCtor", note: "Constructs the terrain streamer: installs the streamer worker procedure into a thread... [vfs-assetio]" }
+  "0x441fea": { name: "Terrain_GetStreamer", note: "Lazy singleton accessor for the terrain streamer object [vfs-assetio]" }
+  "0x44202a": { name: "Terrain_StreamWorkerThread", note: "Terrain streamer worker thread: polls at 10 ms, waits ~4000 ms before the first batch and... [vfs-assetio]" }
+  "0x443e41": { name: "ShadowManager_StampGroundCells", note: "Pass 3: stamp player-centred ground shadows over a tile grid; gates the per-actor shadow... [effects-render]" }
+  "0x4444aa": { name: "Diamond_Camera_PushStreamRadius", note: "Push the camera pose into the terrain streamer and set its stream radius, linking the... [scene-machine]" }
+  "0x44564a": { name: "Singleton_GetTerrainWorld", note: "Lazy singleton accessor (one-time init under an atexit guard) for the terrain/world... [scene-machine]" }
+  "0x44a721": { name: "ShadowManager_DrawAllActorShadows", note: "Pass 4b: per-actor blob shadows from a shared gradient texture/RT [effects-render]" }
+  "0x45af14": { name: "Singleton_GetSkyTimeMgr", note: "Lazy singleton accessor (one-time init under an atexit guard) for the sky/time manager... [scene-machine]" }
+  "0x4959d5": { name: "XObjManager_LoadXobjLst", note: "xobj.lst loader -> XObj_LoadFromFile [effects-render]" }
+  "0x496e22": { name: "EffectList_AllocNode", note: "12-byte list node alloc (payload+prev/next) [effects-render]" }
+  "0x49715b": { name: "EffectSystem_TickAllPerFrame", note: "Master per-frame effect tick: walk shared active list, then tick 4 subordinate managers... [effects-render]" }
+  "0x497345": { name: "GHTexCache_FlushAll", note: "Walk the named-texture container list, free every node; per-scene wholesale teardown (no... [vfs-assetio]" }
+  "0x4977a3": { name: "XEffect_dtor_real", note: "Non-deleting dtor [effects-render]" }
+  "0x498028": { name: "EffectManager_ActiveList_Insert", note: "Shared self-linking active-list node insert (this+144/+145) [effects-render]" }
+  "0x498a7a": { name: "XEffect_ctor_base", note: "Base instance ctor; scale=1, color=(1,1,1) [effects-render]" }
+  "0x498acc": { name: "UserXEffect_ctor", note: "Chains base ctor; type tag 1; anchor block +84..+100 [effects-render]" }
+  "0x498af6": { name: "UserXEffect_vftableSet_dtorLeg", note: "REFINE: IDB 'UserXEffect_ctor_v2' is actually a vftable-set + dtor leg, not a 2nd ctor [effects-render]" }
+  "0x498c97": { name: "EffectManager_LoadBmplistAndManifests", note: "Boot effect-asset loader: bmplist.lst (texture pool) -> xobj.lst -> xeffect.lst... [effects-render]" }
+  "0x49901b": { name: "XEffect84_PoolAlloc", note: "84-byte fourth-pool allocator; process-global singleton; OQ-EFX §14.1 [effects-render]" }
+  "0x4990ad": { name: "UserXEffect_PoolAlloc", note: "104-byte Pool B; process-global singleton [effects-render]" }
+  "0x499162": { name: "XEffect_dtor_scalar", note: "Scalar deleting dtor (vtable slot 0) [effects-render]" }
+  "0x499293": { name: "EffectBoot_AssetThreadInit", note: "Boot orchestrator (asset thread): damage-number init -> particle sub-system init ->... [effects-render]" }
+  "0x4992d9": { name: "UserXEffect_SpawnFactory_Timed", note: "UserXEffect spawn factory (timed): pool-alloc -> ctor -> setupTimed -> if valid insert... [effects-render]" }
+  "0x4993f1": { name: "UserXEffect_SpawnFactory_WorldPos", note: "UserXEffect spawn factory (world-pos): identical flow but uses setupTimedWithPos (writes... [effects-render]" }
+  "0x499488": { name: "GHTexManager_GetSingleton", note: "Lazy singleton accessor for the named-texture cache; the singleton owns a sorted... [vfs-assetio]" }
+  "0x49aa34": { name: "JointXEffectManagerA_Tick", note: "Entry-A manager per-frame tick [effects-render]" }
+  "0x49ab13": { name: "JointXEffectManagerB_Tick", note: "Entry-B manager per-frame tick [effects-render]" }
+  "0x49ac41": { name: "JointBindingMapA_LowerBound", note: "Ordered-map lower-bound for entry-A manager [effects-render]" }
+  "0x49aca1": { name: "JointBindingMapB_LowerBound", note: "Ordered-map lower-bound for entry-B manager [effects-render]" }
+  "0x49c438": { name: "JointXEffect_ctor", note: "Bone-binding block init; type tag 4 [effects-render]" }
+  "0x49c463": { name: "JointXEffect_vftableSet_dtorLeg", note: "REFINE: IDB 'JointXEffect_ctor_v2' is a vftable-set + dtor leg [effects-render]" }
+  "0x49c8e0": { name: "JointXEffect_PoolAlloc", note: "104-byte Pool C; process-global singleton [effects-render]" }
+  "0x49c9f9": { name: "JointXEffectManagerA_GetSingleton", note: "Entry-A manager accessor [effects-render]" }
+  "0x49ca39": { name: "JointXEffect_SpawnEntryA", note: "JointXEffect spawn entry A: per-actor equip-slot table walk; per record pool-alloc + ctor... [effects-render]" }
+  "0x49cb31": { name: "JointXEffectManagerB_GetSingleton", note: "Entry-B manager accessor [effects-render]" }
+  "0x49cb71": { name: "JointXEffect_SpawnEntryB", note: "JointXEffect spawn entry B: itemjointeff/mobjointeff 20-byte binding-list walk; stamps a... [effects-render]" }
+  "0x49e1ac": { name: "MapXEffect_ctor", note: "+84=-1 manifest-slot sentinel; type tag 2 [effects-render]" }
+  "0x49e1c9": { name: "MapXEffect_vftableSet_dtorLeg", note: "REFINE: IDB 'MapXEffect_ctor_v2' is a vftable-set + dtor leg [effects-render]" }
+  "0x49e1d4": { name: "MapXEffectManager_ctor", note: "Area-id=-1; manifest container + list roots [effects-render]" }
+  "0x49e21a": { name: "MapXEffectManager_GetSingleton", note: "Lazy singleton accessor [effects-render]" }
+  "0x49e25a": { name: "EffectMap_LoadMapTxt", note: "Per-area ambient manifest loader: data/effect/map<N>.txt = u32 count + 32-byte records... [effects-render]" }
+  "0x49e3ce": { name: "MapXEffect_PoolAlloc", note: "88-byte Pool A; process-global singleton [effects-render]" }
+  "0x49e4a5": { name: "MapXEffect_SpawnFactory_Ambient", note: "Ambient MapXEffect factory: 88-byte pool, inserts into MapXEffectManager's OWN list... [effects-render]" }
+  "0x49e557": { name: "MapXEffectManager_UpdatePerArea", note: "Per-area update: reload data/effect/map<N>.txt on area change, proximity + time-of-day... [effects-render]" }
+  "0x49e798": { name: "Renderer_SetTransform_World0", note: "Per-item world matrix [effects-render]" }
+  "0x49e7cb": { name: "Renderer_SetFillMode", note: "Force solid fill [effects-render]" }
+  "0x49e7df": { name: "Renderer_DisableAlphaBlend", note: "ALPHABLENDENABLE 0 [effects-render]" }
+  "0x49e89d": { name: "ShadowLight_BuildViewProjection", note: "Shadow light view-projection builder (perspective + 0.5/-0.5 tex scale/bias) [effects-render]" }
+  "0x49e9f7": { name: "ShadowManager_GetSingleton", note: "Lazily constructs the shadow manager [effects-render]" }
+  "0x49f26e": { name: "ShadowManager_Init", note: "Creates shadow-map texture + render-to-surface from shadow.dds (quality-tiered size) [effects-render]" }
+  "0x49f5b7": { name: "CoreXEffect_LoadCallback_Thunk", note: "CoreXEffect load-callback thunk (vtable slot 1): forwards to this descriptor's slot-2... [effects-render]" }
+  "0x4a0644": { name: "XEffect_EulerToBillboardDir", note: "Euler-to-direction billboard helper [effects-render]" }
+  "0x4a08a6": { name: "XEffect_InterpolateKeyframe", note: "Keyframe lerp/slerp of velocity/alpha/size/rotation [effects-render]" }
+  "0x4a0b08": { name: "Renderer_DrawSolidBatch", note: "Opaque sub-batch draw (pass 4); per-item blend mode + texture + indexed tris [effects-render]" }
+  "0x4a0d5b": { name: "XEffectRegistry_TreeDescend", note: "RB-tree descent primitive [effects-render]" }
+  "0x4a1eb0": { name: "XEffectRegistry_TreeLowerBound", note: "RB-tree lower-bound find by id [effects-render]" }
+  "0x4a2527": { name: "EffectCache_LoadIDs", note: "Warm-LRU prime from loose data/effect.cache [effects-render]" }
+  "0x4a25c7": { name: "XEffectRegistry_ResolveDescriptor", note: "Lazy-load resolver shared by all spawn paths: RB-tree lookup by numeric effect_id... [effects-render]" }
+  "0x4a2ba2": { name: "CoreXEffect_RegisterFromFile", note: "v1 boot existence check; effect_id at +52 [effects-render]" }
+  "0x4a2c2d": { name: "CoreXEffect_RegisterFromFile_v2", note: "v2 variant for the counted reader [effects-render]" }
+  "0x4a4aa2": { name: "CoreXEffect_ElementArray_PushBack", note: "Element vector grow/emplace helper [effects-render]" }
+  "0x4a4d84": { name: "CoreXEffect_ctor", note: "84-byte file-backed descriptor ctor; scale_default 1.0 at +0x40 [effects-render]" }
+  "0x4a4de2": { name: "EffectCache_SaveIDs", note: "Writes data/effect.cache (u32 count + u32 ids) for descriptors used within the last 20... [effects-render]" }
+  "0x4a4ed0": { name: "XEffectManager_LoadXeffectLst_Headerless", note: "xeffect.lst reader (boot): u32 count + 30B name records -> data/effect/xeff/<name>... [effects-render]" }
+  "0x4a5095": { name: "XEffectManager_LoadXeffectLst_Counted", note: "Sibling counted xeffect.lst reader; no live caller found [effects-render]" }
+  "0x4a52a1": { name: "CoreXEffect_CurveArray_PushBack", note: "Curve float vector grow/emplace helper [effects-render]" }
+  "0x4a53fd": { name: "CoreXEffect_LazyParseXeff", note: "CoreXEffect lazy .xeff parser (vtable slot 2): reads... [effects-render]" }
+  "0x4a5c9b": { name: "XEffectManager_GetSingleton", note: "Effect manager singleton accessor [effects-render]" }
+  "0x4a5cdb": { name: "XEffect_FirstTickInit_BuildParticles", note: "Per-element first-tick init: store descriptor at +0x0C, iterate element vector; resource... [effects-render]" }
+  "0x4a5dc9": { name: "XEffect_tickAndDispatch", note: "Central per-frame XEffect update (User/Map path): per active element gate->first-tick... [effects-render]" }
+  "0x4a66f2": { name: "UserXEffect_setupTimed", note: "Resolver + anchor/timing/lifetime writes [effects-render]" }
+  "0x4a6765": { name: "UserXEffect_setupTimedWithPos", note: "Timed setup + world-pos vec3 (+16..+24) [effects-render]" }
+  "0x4a7494": { name: "JointXEffect_bindToActorBone", note: "Writes bone-source/quat-source enums + ids [effects-render]" }
+  "0x4a7505": { name: "JointXEffect_tickAndDispatch", note: "JointXEffect per-frame tick: actor lookup by (sort,sub) -> bone resolve via bone-source... [effects-render]" }
+  "0x4a81a3": { name: "MapXEffect_setupAtPosQuat", note: "Writes +16..+24 pos, +28..+43 quat [effects-render]" }
+  "0x4a830f": { name: "XObj_LoadFromFile", note: "ASCII .xobj triangle-mesh parser (mesh particles): tri count, 3*count indices, vert... [effects-render]" }
+  "0x4a9fc5": { name: "DamageNumberRenderer_CreateVB", note: "VB allocator; stride 96 / usage 520 / flags 322 (arg-order stride-vs-size MEDIUM until... [effects-render]" }
+  "0x4a9ff1": { name: "DamageNumberRenderer_Init", note: "Boot init (before manifest loader); 12x32-byte digit frames; loads... [effects-render]" }
+  "0x4ab5b1": { name: "ParticleEffectManager_CreateEffect_v0", note: "Spawn-validate: requires emit_file.texture(+20) && particle_count(+16) &&... [effects-render]" }
+  "0x4abb2e": { name: "ParticleEffectManager_DrawAll", note: "Per-frame draw-all: default blend SRCALPHA/INVSRCALPHA; iterate intrusive doubly-linked... [effects-render]" }
+  "0x4abcdf": { name: "ParticleEffectManager_CreateEffect_byName", note: "Map lookup by name + validate + ctor [effects-render]" }
+  "0x4abd79": { name: "ParticleEffectManager_CreateEffect_atPos", note: "createEffect_atPos: the XEffect->particle runtime bridge; map-lookup + validate + ctor... [effects-render]" }
+  "0x4ac2f2": { name: "EFF_LoadParticleEmitter", note: "Loads data/effect/particle/particleEmitter.eff: VARIABLE-length entries (28B header +... [effects-render]" }
+  "0x4ac58c": { name: "ParticleEffectManager_ctor", note: "PEM singleton ctor; installs vftable + list sentinel; calls EFF_LoadParticleEmitter inline [effects-render]" }
+  "0x4ac5ec": { name: "ParticleEffectManager_GetSingleton", note: "First-call guard; process-global singleton [effects-render]" }
+  "0x4ae4d7": { name: "SwordLightManager_LoadItemDescriptors", note: "Loads itemswordlight.txt; 28-byte nodes; std::map keyed by item_id [effects-render]" }
+  "0x4ae762": { name: "SwordLightManager_LoadMobDescriptors", note: "Loads mobswordlight.txt; 28-byte nodes; flat 170-slot array by mob_id (NOT a map) [effects-render]" }
+  "0x4ae99e": { name: "SwordLightManager_ctorInit", note: "Item-side map init + 170-slot mob array pre-alloc [effects-render]" }
+  "0x4ae9d8": { name: "SwordLightManager_GetSingleton", note: "First-call guard; process-global singleton [effects-render]" }
+  "0x4c91eb": { name: "RingBuffer_SlotPtr", note: "Compute element address in a chunked ring buffer (chunk = head>>2, sub-index = head&3... [scene-machine]" }
+  "0x4c94e4": { name: "RingBuffer_PopAdvance", note: "Pop/advance a chunked ring buffer -- bump consumer index (wrap at 4*chunk_count)... [scene-machine]" }
+  "0x5063fe": { name: "Scene_LogoutFromInGame", note: "Net-result-driven in-game logout (reached from item-use / gathering result handlers) [scene-machine]" }
+  "0x506528": { name: "Scene_QuitFromInGame", note: "Leave SFX 861010106, tears down net session and world objects, writes engine state 6 /... [scene-machine]" }
+  "0x5065d0": { name: "Scene_QuitFromLoad", note: "Plays leave SFX 861010106, fades, writes engine state 6 / sub-state 2 (quit during load) [scene-machine]" }
+  "0x50661c": { name: "Scene_QuitDispatcher", note: "Scene-aware quit/disconnect dispatcher (client_workflow §4.4)... [scene-machine]" }
+  "0x5066e8": { name: "Scene_InputEscapeHandler", note: "Input/event handler that routes ESC/quit input into Scene_QuitDispatcher [scene-machine]" }
+  "0x5242b6": { name: "Diamond_MainHandler_BuildPlayerSkillPanel", note: "Build the in-game player panel / skill bar (class stance script + nine skill slots +... [scene-machine]" }
+  "0x5319d3": { name: "Singleton_GetMainWindowState", note: "Lazy singleton accessor (one-time init under an atexit guard) for a MainWindow-state... [scene-machine]" }
+  "0x532ac7": { name: "Diamond_LoadHandler_Start", note: "Starts the boot load: picks one of three loading-screen backgrounds at random, plays the... [vfs-assetio]" }
+  "0x5366be": { name: "BulkAssetLoader_Thread", note: "Boot worker thread: loads roughly fifty global data tables in a fixed compiled order plus... [vfs-assetio]" }
+  "0x53697a": { name: "Diamond_LoadHandler_ctor", note: "Constructs the boot load handler: installs the bulk-asset-loader worker procedure into a... [vfs-assetio]" }
+  "0x539da1": { name: "Diamond_MainHandler_BuildSceneGraph", note: "Builds the in-game scene graph: GScene('charater scene'), one 65-degree... [scene-machine]" }
+  "0x53d8f0": { name: "Diamond_MainHandler_BuildGameWorld", note: "State-5 (in-game) entry point that builds the live world/scene graph (subsystem... [scene-machine]" }
+  "0x547f02": { name: "Diamond_SelectWindow_BuildScene", note: "Builds the char-select 3D scene: sets active map area + terrain first-ring, a 50-degree... [scene-machine]" }
+  "0x567242": { name: "Scene_WorldRoot_DrawOpaqueAndShadows", note: "World scene-root callback: ground-shadow stamp (pass 3), opaque world (pass 4... [effects-render]" }
+  "0x5685c1": { name: "Diamond_MainHandler_InstallRenderPasses", note: "Install the five per-pass render callbacks onto the scene and cache ~18 subsystem... [scene-machine]" }
+  "0x5e115b": { name: "GameState_Init", note: "GameState object init {state=0, substate=8}; seed for GameState_GetSingleton used by... [network-dispatch]" }
+  "0x5e1170": { name: "GameState_GetSingleton", note: "Guarded singleton accessor for the engine-state int array: [0]=state... [scene-machine]" }
+  "0x5e119c": { name: "Error_GetMessageById", note: "Error-state helper: offset the error/state code by +9001 and fetch the corresponding... [scene-machine]" }
+  "0x5e23ef": { name: "DoOption_GetSingleton", note: "DoOption.ini config singleton accessor [scene-machine]" }
+  "0x5e2541": { name: "NetHandler_Guest_ctor", note: "Embedded Guest sub-object constructor (sets vftable 0x72CCC0); called by... [network-dispatch]" }
+  "0x5e254a": { name: "NetHandler_Guest_dtor", note: "Embedded Guest sub-object destructor (restores vftable) [network-dispatch]" }
+  "0x5e3265": { name: "NetHandler_Guest_VFunc_ScalarDeletingDtor", note: "Guest vtable deleting-destructor thunk: calls the Guest destructor then frees [network-dispatch]" }
+  "0x5e3281": { name: "Earth_StringBuffer_ctor", note: "Embedded string-buffer ctor: installs vftable + std::string from a CharSlot name; shared... [network-dispatch]" }
+  "0x5e4388": { name: "NetHandler_Member_ctor", note: "Embedded Member sub-object constructor: sets vftable, caches ActorManager/AnimCatalog... [network-dispatch]" }
+  "0x5e43ba": { name: "NetHandler_Member_dtor", note: "Embedded Member sub-object destructor (restores vftable) [network-dispatch]" }
+  "0x5e44cb": { name: "NetHandler_Member_VFunc_ScalarDeletingDtor", note: "Member vtable scalar-deleting-destructor thunk [network-dispatch]" }
+  "0x5e5044": { name: "SkillActionVec_Capacity", note: "Return the ring capacity in 4-byte element slots [network-dispatch]" }
+  "0x5e5065": { name: "SkillActionRing_ElementAt", note: "Resolve the element ptr for a logical ring index (wraps at capacity) [network-dispatch]" }
+  "0x5e511a": { name: "SkillActionVec_MoveRange", note: "memmove a range of 4-byte element ptrs [network-dispatch]" }
+  "0x5e51da": { name: "SkillActionVec_CopyRange", note: "Copy/move an element-ptr range (wrapper) [network-dispatch]" }
+  "0x5e521d": { name: "SkillActionList_NewNode", note: "Allocate+init a 12-byte list node (prev,next,value) for a skill-action record ptr [network-dispatch]" }
+  "0x5e5251": { name: "SkillActionRing_Advance", note: "Advance the ring head and decrement the live element count [network-dispatch]" }
+  "0x5e5b6c": { name: "Actor_FindByPresenceAndTag", note: "Find a live actor by presence flag + tag word; used by the LevelUp push and GameStateTick [network-dispatch]" }
+  "0x5e623d": { name: "SkillActionVec_FillN", note: "Fill-construct N element pointers into the record ring storage [network-dispatch]" }
+  "0x5e67a8": { name: "SkillActionList_AddSize", note: "Increment the list size with an overflow guard (throws length_error) [network-dispatch]" }
+  "0x5e6804": { name: "SkillActionList_PushBackNode", note: "Construct + link one list node into the 5/52 skill-action record list [network-dispatch]" }
+  "0x5e6833": { name: "SkillActionVec_InsertFill", note: "Vector insert-with-grow used to seed the 5/52 skill-action record ring [network-dispatch]" }
+  "0x5e69bd": { name: "SkillActionVec_InsertOne", note: "Single-element insert wrapper over the vector grow path [network-dispatch]" }
+  "0x5e69fa": { name: "SkillActionVec_PushBack", note: "Push-back an element ptr into the 5/52 record ring; grows when full [network-dispatch]" }
+  "0x5e6a3a": { name: "SkillActionList_AcquireRecord", note: "Acquire/grow a 1468-byte skill-action record slot for the 5/52 handler (ring of element... [network-dispatch]" }
+  "0x5ec5fd": { name: "SlotTable_ClearAll", note: "Zero the 10x16-byte slot table at the start of the min-75 slot response handler [network-dispatch]" }
+  "0x5eebb5": { name: "World_SetActiveRegionIndex", note: "Set the active region index (0..31) from a packet field; logs on out-of-range [network-dispatch]" }
+  "0x5eed1f": { name: "WorldRecord_InitSubObjects", note: "Initialize two embedded sub-objects during the GameStateTick response [network-dispatch]" }
+  "0x5eed48": { name: "Actor_FindPlayerByOwnerPtr", note: "Find the player actor whose owner ptr matches (type byte +96 == 3); used by the... [network-dispatch]" }
+  "0x5f6917": { name: "NetHandler_Destruct", note: "NetHandler destructor: tears down embedded Guest/Member sub-objects then the base handler [network-dispatch]" }
+  "0x5f6964": { name: "NetHandler_VFunc_ScalarDeletingDtor", note: "vftable deleting-destructor thunk: calls the NetHandler destructor, frees the block when... [network-dispatch]" }
+  "0x5f6ad8": { name: "NetHandler_HandleNetworkEvent", note: "Envelope cmd-102 path: drives game-state/scene transitions from a network event (no... [network-dispatch]" }
+  "0x5f7c25": { name: "Engine_vcall_slot4", note: "Vtable call thunk (slot +4) on the engine/scheduler object; its false result triggers... [scene-machine]" }
+  "0x5f7c33": { name: "Engine_vcall_slot12", note: "Vtable call thunk (slot +12) on the engine object; invoked on the Exit path [scene-machine]" }
+  "0x5f7c41": { name: "Engine_vcall_slot16", note: "Vtable call thunk (slot +16) on the engine object; invoked after the login loop [scene-machine]" }
+  "0x5f817b": { name: "Engine_PreShutdownTeardown", note: "Exit-state teardown: walk the ~100 internal manager/handler destructors before the final... [scene-machine]" }
+  "0x5f997e": { name: "Diamond_LoginSecondPassword_BuildKeypad", note: "Build the PIN keypad scene for the second-password sub-window: load password.dds, lay out... [scene-machine]" }
+  "0x5fa0a5": { name: "Diamond_LoginSecondPassword_ctor", note: "Construct the LoginSecondPassword (PIN / second-password) sub-window and store it as the... [scene-machine]" }
+  "0x5fa9dd": { name: "Diamond_LoginWindow_BuildScene", note: "Builds the flat 2D login overlay (no GScene/camera): view-context init, uiconfig.lua +... [scene-machine]" }
+  "0x5fd17d": { name: "Window_ResolveWidth", note: "Window width resolver: when caller passes 0, take SM_CXSCREEN; store into engine object... [scene-machine]" }
+  "0x5fd1a4": { name: "Window_ResolveHeight", note: "Window height resolver: when caller passes 0, take SM_CYSCREEN; store into engine object... [scene-machine]" }
+  "0x5fdf12": { name: "WinMain", note: "Program entry (CRT->WinMain) AND the master scene state machine [scene-machine]" }
+  "0x5fe82e": { name: "Engine_CrashErrorLogger", note: "Exception/crash handler: builds error text from state[1]/[2], writes error.log with a... [scene-machine]" }
+  "0x5fedef": { name: "Engine_TeardownWindowAndThreads", note: "Concrete shutdown: signal the worker event, close the thread-slot handle, close the... [scene-machine]" }
+  "0x5ff134": { name: "Diamond_InputManager_DispatchEvent", note: "Walk the deferred GUI/input event-subscriber list; for each whose event-mask... [scene-machine]" }
+  "0x5ff4f7": { name: "Engine_PumpMessages", note: "Phase 1 = Win32 PeekMessage/GetMessage/Translate/Dispatch (clears the run-flag byte on... [scene-machine]" }
+  "0x60206b": { name: "Diamond_GGroup_traverseChildren", note: "Per active child call child vtable +8 (tree recursion) [effects-render]" }
+  "0x6032f9": { name: "IME_GetSingleton", note: "IME/input-method context singleton used by the window proc and editable text widgets [scene-machine]" }
+  "0x60527c": { name: "Texture_LoadFile_VFSorDisk", note: "Loads a texture: creates a D3D texture from the in-memory VFS bytes, or from the loose... [vfs-assetio]" }
+  "0x605367": { name: "Surface_LoadFromFile_VFSorDisk", note: "One-shot surface loader: creates a D3D surface from the in-memory VFS bytes (or from the... [vfs-assetio]" }
+  "0x60810c": { name: "Diamond_GGeode_intersect", note: "Geometry-leaf frustum test -> emitDrawItem [effects-render]" }
+  "0x608ca8": { name: "DiskFile_ReadBytes_Impl", note: "Read-bytes member implementing all three modes: loose OS handle, packed pack-handle with... [vfs-assetio]" }
+  "0x608df1": { name: "DiskFile_GetBlobDescriptor", note: "Returns the in-memory blob descriptor (data pointer, size) from the reader, used to hand... [vfs-assetio]" }
+  "0x608e05": { name: "DiskFile_Close", note: "Closes the reader: frees the in-memory blob or closes the OS handle per mode, then resets... [vfs-assetio]" }
+  "0x608e74": { name: "DiskFile_Seek", note: "64-bit seek (set/current/end origins) over either the OS handle or the in-memory cursor... [vfs-assetio]" }
+  "0x609082": { name: "DiskFile_ReadByte", note: "Reads a single byte, advancing the 64-bit reader cursor; supports all three I/O modes [vfs-assetio]" }
+  "0x60919b": { name: "DiskFile_IsEOF", note: "End-of-file test: true when the cursor reaches or passes the size (size source depends on... [vfs-assetio]" }
+  "0x6091d7": { name: "DiskFile_IsGood", note: "Validity test: in-memory blob pointer non-null, or OS handle valid, depending on mode [vfs-assetio]" }
+  "0x6091fb": { name: "DiskFile_GetSize", note: "Returns the file size in bytes (the VFS payload size or the OS file size depending on... [vfs-assetio]" }
+  "0x609271": { name: "VfsOpenRouter_ThreeWay", note: "The single file-open router: branches on the VFS mount flag and the raw/seek mode bit... [vfs-assetio]" }
+  "0x609445": { name: "VfsOpenRouter_ThreeWay_ByName", note: "Same three-way open router as the by-value form, but takes the path by name (copied... [vfs-assetio]" }
+  "0x609650": { name: "DiskFile_OpenCtor_ByValue", note: "DiskFile constructor (path by value): zeroes the dual-path state, installs the vtable... [vfs-assetio]" }
+  "0x6096a7": { name: "DiskFile_OpenCtor", note: "DiskFile constructor (path by name): routes the open via the by-name router [vfs-assetio]" }
+  "0x60972b": { name: "DiskFile_ModeHasReadBit", note: "Predicate: open-mode read bit set; steers the loose-file open flags and gates writes [vfs-assetio]" }
+  "0x609738": { name: "DiskFile_ModeHasWriteBit", note: "Predicate: open-mode write/create bit set; steers the loose-file open flags and gates... [vfs-assetio]" }
+  "0x6098b3": { name: "DiskFile_ReadBytes", note: "Read dispatch: performs cursor bookkeeping, then copies from the cached in-memory blob... [vfs-assetio]" }
+  "0x609c14": { name: "DiskFile_ReadLineOrLength", note: "Shared length/line buffer reader behind both string-read variants (reads N characters or... [vfs-assetio]" }
+  "0x60a086": { name: "DiskFile_ReadStringInto", note: "Reads a length-prefixed (or newline-terminated in text mode) string into a... [vfs-assetio]" }
+  "0x60a0f4": { name: "DiskFile_ReadString", note: "Reads a length-prefixed (or newline-terminated in text mode) string into a returned... [vfs-assetio]" }
+  "0x60a55b": { name: "VFS_ScopedReader_Construct", note: "Constructs the stack-local VFS reader RAII guard (writes its vtable pointer); paired with... [vfs-assetio]" }
+  "0x60a564": { name: "VFS_ScopedReader_Destruct", note: "Destructor body for the stack-local VFS reader guard; re-writes the vtable pointer before... [vfs-assetio]" }
+  "0x60a59b": { name: "VFS_IsMounted", note: "Returns the global VFS mount flag; non-zero selects the packed-archive read path, zero... [vfs-assetio]" }
+  "0x60a5a1": { name: "VFS_SetMounted", note: "Writes the global VFS mount flag; set from the game.lua vfsmode key at startup before any... [vfs-assetio]" }
+  "0x60a5ab": { name: "VFS_OpenArchive", note: "Mounts the VFS pair: opens data.inf, reads its 24-byte header (only entry_count at offset... [vfs-assetio]" }
+  "0x60a6b0": { name: "VFS_AccumulateProgress", note: "Loading-progress meter: adds a loaded byte count to the cumulative counter and recomputes... [vfs-assetio]" }
+  "0x60a6e7": { name: "VFS_EnableProgressTracking", note: "Resets the cumulative load-progress counter to zero and enables per-read byte... [vfs-assetio]" }
+  "0x60a6f6": { name: "VFS_DisableProgressTracking", note: "Disables per-read byte accumulation (clears the tracking flag) [vfs-assetio]" }
+  "0x60a6fe": { name: "VFS_GetProgress", note: "Returns the current normalized load-progress value for the loading-screen progress bar [vfs-assetio]" }
+  "0x60a704": { name: "VFS_FindEntry", note: "Pure metadata lookup: lowercases the requested virtual path, then binary-searches the... [vfs-assetio]" }
+  "0x60a82d": { name: "Diamond_CVFSManager_dtor", note: "Virtual destructor for the VFS manager object; optionally frees the instance per the... [vfs-assetio]" }
+  "0x60a84a": { name: "VFS_ReadEntryData", note: "Reads one entry's payload under the VFS read lock: seeks data/data.vfs to... [vfs-assetio]" }
+  "0x60a909": { name: "VFS_LoadFile", note: "In-memory VFS read chokepoint: zeroes the 16-byte output block, guards the data handle... [vfs-assetio]" }
+  "0x60aa33": { name: "DiamondEventSubscriber_BaseInit", note: "Base init for scheduler subscribers: installs the base vtable, marks enabled, and sets... [vfs-assetio]" }
+  "0x60aa61": { name: "Diamond_GHandle_ctor", note: "Base object constructor for the scheduler-handle type (generic plumbing) [vfs-assetio]" }
+  "0x60aa74": { name: "Diamond_GHandle_dtor", note: "Scalar-deleting destructor for the scheduler-handle type (generic plumbing) [vfs-assetio]" }
+  "0x60ab0d": { name: "DiamondEventScheduler_Subscribe", note: "Register a subscriber into g_DiamondEventScheduler's slot table (index capped < 6000) [scene-machine]" }
+  "0x60ab72": { name: "DiamondEventScheduler_Unsubscribe", note: "Unsubscribes by clearing the subscriber's main and tick-list slots, bounds-checked... [vfs-assetio]" }
+  "0x60aba1": { name: "GHTex_ctor", note: "Constructs an unloaded named-texture cache element (base init plus vtable; identifier... [vfs-assetio]" }
+  "0x60abc6": { name: "GHTex_dtor_inplace", note: "Destroys a named-texture element: releases the D3D texture, unsubscribes from the event... [vfs-assetio]" }
+  "0x60ac45": { name: "GHTex_GetBoundIfLoaded", note: "Hot non-loading peek: returns the bound texture only when both ready flags are set... [vfs-assetio]" }
+  "0x60ac58": { name: "GHTex_GetBoundOrLoad", note: "Element-level lazy find-or-load: if enabled but not yet loaded, invokes the virtual load... [vfs-assetio]" }
+  "0x60ac87": { name: "GHTex_ForceLoad", note: "Thunk to the element's virtual load [vfs-assetio]" }
+  "0x60ac8c": { name: "GHTex_Unload", note: "Explicit per-element unload: releases the texture, decrements the global live-texture... [vfs-assetio]" }
+  "0x60acbb": { name: "GHTex_SetLoadOptions", note: "Allocates and populates the element's texture-create options block from ten integer... [vfs-assetio]" }
+  "0x60ae0c": { name: "TickSubscriber_DispatchIfElapsed", note: "Per-subscriber gate [scene-machine]" }
+  "0x60ae54": { name: "GHTex_LoadFromDisk", note: "Virtual load body: caches the render device once, then creates the D3D texture via the... [vfs-assetio]" }
+  "0x60af39": { name: "GHTex_InitNamed", note: "Fully initializes a named-texture cache element from a name string, format selector, and... [vfs-assetio]" }
+  "0x60afbc": { name: "GHTex_Init", note: "Lightly initializes a named-texture cache element: wires the options pointer and format... [vfs-assetio]" }
+  "0x60b8fc": { name: "FrameTickScheduler_Init", note: "One-time init of g_FrameTickScheduler [scene-machine]" }
+  "0x60b987": { name: "DiamondEventScheduler_TickAll", note: "Per-frame logic tick [scene-machine]" }
+  "0x60ba00": { name: "FrameTickScheduler_GetSingleton", note: "Lazy accessor for g_FrameTickScheduler [scene-machine]" }
+  "0x60bc06": { name: "GParticleBuffer_setSpriteSize", note: "Clamps sizeMin/Max; selects quad vs point-sprite mode by D3D9 cap [effects-render]" }
+  "0x60bcb6": { name: "GParticleBuffer_FillStaticIndices", note: "Fill static IB: 6 u16 indices per quad (4i,4i+1,4i+3, 4i,4i+3,4i+2); IB lock size 0x2000... [effects-render]" }
+  "0x60bd43": { name: "GParticleBuffer_setBillboardSize", note: "Writes 4 unit-square corner offsets (TL,TR,BR,BL) scaled by half-size [effects-render]" }
+  "0x60bde8": { name: "GParticleBuffer_setPointScaleA", note: "D3DRS_POINTSIZE_ATTENUATION A coefficient setter [effects-render]" }
+  "0x60be04": { name: "GParticleBuffer_drawLock", note: "VB Lock(D3DLOCK_DISCARD); in billboard mode extract camera 3x3 and transform 4 template... [effects-render]" }
+  "0x60bead": { name: "GParticleBuffer_unlockVB", note: "VB Unlock (vtable slot 12) after fill; not an index commit [effects-render]" }
+  "0x60bf83": { name: "GParticleBuffer_fillVertices", note: "Fills the locked VB with alive-particle geometry (point-sprite memcpy or quad corner... [effects-render]" }
+  "0x60c135": { name: "GParticleBuffer_draw", note: "Quad mode DrawIndexedPrimitive (4 verts/2 tris per particle) or point-sprite mode... [effects-render]" }
+  "0x60c34b": { name: "GParticleBuffer_ctor_simple", note: "Point-sprite VB usage 258 stride 20; separate global VB [effects-render]" }
+  "0x60c6d9": { name: "GParticleBuffer_ctor_full", note: "248-byte; billboard VB usage 322 stride 24; shared global VB/IB [effects-render]" }
+  "0x60ca67": { name: "Diamond_GParticleBuffer_dtor_body", note: "Compiler dtor body, not the allocating ctor (IDB mislabels as _ctor) [effects-render]" }
+  "0x60cadb": { name: "Diamond_GParticleBuffer_dtor", note: "Virtual dtor (vtable[0]) [effects-render]" }
+  "0x60ccf3": { name: "Renderer_BeginScene", note: "Thin BeginScene wrapper [effects-render]" }
+  "0x60cd1c": { name: "Renderer_Clear_Default", note: "Clear target+Z with default color [effects-render]" }
+  "0x60cd41": { name: "Renderer_ClearWithColor", note: "Clear with caller color/Z (RT pre-clear) [effects-render]" }
+  "0x60cdc0": { name: "Renderer_SetTransform_View", note: "SetTransform(VIEW) + dirty flag [effects-render]" }
+  "0x60cf80": { name: "Diamond_GScene_setView", note: "GScene::setView [scene-machine]" }
+  "0x60cfa7": { name: "Diamond_GScene_setRoot", note: "GScene::setRoot [scene-machine]" }
+  "0x60cfee": { name: "Renderer_DrawScene_PostScene", note: "Set view+identity world, invoke post-scene/FX overlay callback (object +172) [effects-render]" }
+  "0x60d0b4": { name: "Renderer_GlowExtractDownsample", note: "Glow extract (Phase B): fixed-function bright-pass downsample TEX0 -> TEX1 [effects-render]" }
+  "0x60d412": { name: "Renderer_BloomBlurDownsample", note: "Bloom blur (Phase C): glow-blur pixel shader downsample TEX1 -> TEX2 [effects-render]" }
+  "0x60d797": { name: "Renderer_UploadToonShaderConstants", note: "Upload per-frame toon lighting/material/sky shader constants (vs c4..c10) before the... [effects-render]" }
+  "0x60dbef": { name: "Renderer_DrawScene_Body", note: "Set view+identity world, invoke main scene-root draw callback (object +204) [effects-render]" }
+  "0x60dcb5": { name: "HUD_DrawFPSCounter", note: "Loads counter.dds, draws FPS digits as ortho sprite quads (pass 6 UI) [effects-render]" }
+  "0x60e594": { name: "Scene_UpdateCameraAndCull", note: "Refresh camera+frustum and run the cull-and-draw tree for the scene root (pass 0; emits... [effects-render]" }
+  "0x6101e2": { name: "Renderer_DrawScene_OffscreenRT", note: "OffscreenRT compositor: scene->TEX0, glow extract->TEX1, bloom blur->TEX2, final... [effects-render]" }
+  "0x610c93": { name: "Renderer_DrawScene_Direct", note: "Direct-to-backbuffer, no post-process (fallback tier) [effects-render]" }
+  "0x6110b5": { name: "Renderer_DrawScene", note: "Selects offscreen-RT (post-process) vs direct-to-backbuffer path by the offscreen-enabled... [effects-render]" }
+  "0x612abc": { name: "Diamond_GRenderState_equals", note: "Per-slot compare; a slot id of -1 forces re-application [effects-render]" }
+  "0x614232": { name: "Texture_LoadSimple", note: "Anonymous one-shot UI/icon texture loader: loads the bytes, creates a managed-pool D3D... [vfs-assetio]" }
+  "0x616f08": { name: "ParticleEffect_drawAlive", note: "Per-frame draw dispatch; drawLock -> fillVertices -> unlockVB -> draw [effects-render]" }
+  "0x616f81": { name: "ParticleEffect_setOrigin", note: "Writes world XYZ into ParticleEffect+36/+40/+44 [effects-render]" }
+  "0x617364": { name: "ParticleEffect_ctor", note: "60-byte object; allocs state array + vert array + 248-byte GParticleBuffer [effects-render]" }
+  "0x6187e7": { name: "PacketBuf_WhitenPayloadDwords", note: "Per-dword XOR whitening over the packet payload, used only by the secure 1/4 reply builder [crypto-session]" }
+  "0x6188f6": { name: "Net_NullStub", note: "No-op stub on the post-dispatch buffer-free path (empty hook) [network-dispatch]" }
+  "0x618941": { name: "Net_CompressOutboundPacket", note: "Outbound LZ4 raw-block compress stage [crypto-session]" }
+  "0x6189bd": { name: "Net_DecompressInboundPacket", note: "Inbound LZ4 raw-block decompress stage [crypto-session]" }
+  "0x618a8a": { name: "NetClient_GetConnSubobject", note: "NetClient accessor: returns the embedded NETCONN sub-object (this+0x48) [network-dispatch]" }
+  "0x618a8e": { name: "NetClient_GetInitGate", note: "NetClient accessor: winsock/handshake init gate byte (NetClient+0x14178) [network-dispatch]" }
+  "0x618a95": { name: "Net_EncryptOutboundPacket", note: "Outbound cipher gate [crypto-session]" }
+  "0x618ae0": { name: "NetClient_InitSecureContextMember", note: "Init the secure key-exchange member object (login handshake path); 0x63E9xx are... [network-dispatch]" }
+  "0x618b1b": { name: "NetClient_SpawnWorkerThreads", note: "Spawn NetClient worker threads: create stop event, arm alive flags, start recv+keepalive... [network-dispatch]" }
+  "0x618b74": { name: "NetClient_Disconnect", note: "NetClient disconnect: shut the NETCONN, post a disconnect event (code 102), clear the... [network-dispatch]" }
+  "0x618bcb": { name: "NetClient_StartNetworkEngine", note: "Network engine bootstrap: WSAStartup 2.2, set the init gate, spawn worker threads [network-dispatch]" }
+  "0x618c3e": { name: "Net_SendPacket", note: "Outbound send chain (convergence point for all client->server traffic): stamp the... [crypto-session]" }
+  "0x618cb6": { name: "NetClient_ArmCompressedKeepalive", note: "Arm a periodic keepalive: compress the supplied packet once, store the buffer and the... [crypto-session]" }
+  "0x618d01": { name: "NetClient_RecvWorker_DisposePacket", note: "Recv worker: free a dispatched inbound PACKETBUF (vtable no-op + raw free) [network-dispatch]" }
+  "0x618d18": { name: "PacketHolder_Peek", note: "Packet holder: peek the held PACKETBUF pointer [network-dispatch]" }
+  "0x618d1b": { name: "PacketHolder_Take", note: "Packet holder: take the held PACKETBUF pointer and null the slot (ownership transfer) [network-dispatch]" }
+  "0x618d21": { name: "NetClient_RecvWorkerThread", note: "Inbound recv worker thread: pop the recv queue, forward each PACKETBUF to dispatch... [network-dispatch]" }
+  "0x618e9a": { name: "NetConn_StoreWsaErrorString", note: "Socket error helper: WSAGetLastError + FormatMessageA into the error string at this+32 [network-dispatch]" }
+  "0x619017": { name: "NetConn_GetSocketError", note: "Read the pending socket error (getsockopt SOL_SOCKET/SO_ERROR); on failure store the WSA... [network-dispatch]" }
+  "0x619098": { name: "NetClient_RebuildSecureContext", note: "Login-form stage: free and reallocate the 0x2E20 secure context, run its constructor... [crypto-session]" }
+  "0x61b53b": { name: "FontManager_GetSingleton", note: "GDI font-manager singleton; receives the 15 boot Font_Create entries... [scene-machine]" }
+  "0x61b685": { name: "Engine_SetRunFlag", note: "8-byte setter writing the frame-loop run-flag to 1 (arms the loop) [scene-machine]" }
+  "0x61b695": { name: "Engine_ConfigureWindow", note: "Window params + create main HWND; boolean result gates the Init->LoginWindow path... [effects-render]" }
+  "0x61b6b8": { name: "Engine_InitDevice", note: "Renderer device bring-up wrapper (entry into the D3D9 device chain); its boolean result... [scene-machine]" }
+  "0x61b6cc": { name: "Engine_Shutdown", note: "Engine_Shutdown shim -> Engine_TeardownWindowAndThreads; closes worker... [scene-machine]" }
+  "0x61b6e2": { name: "Renderer_HandleDeviceLost", note: "Device-lost recovery: OnLostDevice -> ResetDevice -> OnResetDevice [effects-render]" }
+  "0x61b7e2": { name: "Renderer_TestCooperativeLevel", note: "Device cooperative-level probe; routes DEVICENOTRESET to reset, DEVICELOST to retry [effects-render]" }
+  "0x61b9c7": { name: "Engine_FrameStep", note: "Per-frame render [scene-machine]" }
+  "0x61bab8": { name: "Engine_MainLoop", note: "Per-scene frame loop: one-shot caches the FrameTickScheduler singleton under a guard... [scene-machine]" }
+  "0x61bb80": { name: "Engine_GetSingleton", note: "Core Engine/View singleton: the event-target host that owns the Win32 window and drives... [scene-machine]" }
+  "0x61c0c0": { name: "Diamond_GScene_updateBoundsAndApplyMask", note: "Refresh scene bounds before cull [effects-render]" }
+  "0x61c0fd": { name: "Diamond_GScene_runCullAndDraw", note: "GScene runCullAndDraw: pack projection params, setupCullAndWalk, then accept-visitor with... [effects-render]" }
+  "0x61d2d1": { name: "Diamond_MainWindow_InitViewContext", note: "MainWindow view-context init [scene-machine]" }
+  "0x629ef6": { name: "BugTrap_LogVersion_Thunk", note: "Thin forwarder to the BugTrap version/footer logger (writes 'winmain end' on exit) [scene-machine]" }
+  "0x62c014": { name: "Diamond_RenderState_compareAndApply_cull", note: "18-slot diff (cull side); re-apply changed slots [effects-render]" }
+  "0x62c050": { name: "Diamond_RenderState_compareAndApply_draw", note: "18-slot diff (draw side) + bump the stateChanges statistic [effects-render]" }
+  "0x62c0aa": { name: "Diamond_RenderState_bindAll", note: "Force-commit the 18-slot render-state cache (used at stage-2 start) [effects-render]" }
+  "0x62cce6": { name: "Diamond_GTraverser_emitDrawItem", note: "Recycle/alloc an 88-byte GDrawablePair and push it to the cull queue at visitor+320 [effects-render]" }
+  "0x62ef8e": { name: "Diamond_GCullPipeline_dispatchAndDraw", note: "Stage-2: per draw-item world transform + light/material, then RenderState_bindAll to... [effects-render]" }
+  "0x62f0f1": { name: "Diamond_GCullPipeline_setupCullAndWalk", note: "Stage-1: seed root render-state, program device view transform, walk node tree into the... [effects-render]" }
+  "0x62fe5e": { name: "LZ4_compressBound", note: "LZ4 worst-case output bound: srcSize + srcSize/255 + 16, returning 0 when the input... [crypto-session]" }
+  "0x637437": { name: "LZ4_decompress_safe", note: "Stock LZ4 raw-block decoder: token nibbles, LSIC extension, u16 little-endian offsets... [crypto-session]" }
+  "0x63c37f": { name: "LZ4_compress_default", note: "Stock LZ4 raw-block encode core: hash-table match finder, token nibbles, u16... [crypto-session]" }
+  "0x63d7c3": { name: "LZ4_compress_stack16k", note: "Live LZ4 compress core wrapper: reserves a ~16KB (0x4020) on-stack hash table (the... [crypto-session]" }
+  "0x63d7f0": { name: "LZ4_compress_safe", note: "Stock LZ4 raw-block compress entry; forwards to the stack-state core with acceleration... [crypto-session]" }
+  "0x63e563": { name: "Cipher_XorRolEncrypt", note: "Keyless/stateless packet payload byte cipher: 3 rounds, each a forward sweep (low->high)... [crypto-session]" }
+  "0x63e83b": { name: "Secure_AllocContextPage", note: "VirtualAlloc the 0x2E20 (11808)-byte secure-context page as committed read/write (a... [crypto-session]" }
+  "0x63e868": { name: "SecureCtx_LockPageNoAccess", note: "Anti-tamper page guard (close): VirtualProtect the secure context (0x2E20 bytes) to... [crypto-session]" }
+  "0x63e87d": { name: "SecureCtx_UnprotectPageRW", note: "Anti-tamper page guard (open): VirtualProtect the secure context (0x2E20 bytes) to... [crypto-session]" }
+  "0x63e892": { name: "Secure_EncryptCredentialReply", note: "RSA-encrypt the staged credential M with the imported exponent and modulus; serialize the... [crypto-session]" }
+  "0x63e933": { name: "Secure_ConstructContext", note: "Construct the secure context: empty the embedded packet buffer, zero the staged-message... [crypto-session]" }
+  "0x63e9bd": { name: "Secure_RecvKey_ParseKeyExchange", note: "Secure::recvKey: parse the inbound 0/0 key-exchange payload [crypto-session]" }
+  "0x63ea69": { name: "AuthSession_BuildLoginPacket43", note: "Pre-stage the RSA plaintext: validate field lengths, write login sub-opcode 0x2B and the... [crypto-session]" }
+  "0x63eb65": { name: "Secure_BuildSecureAuthReply", note: "Build the secure 1/4 Auth reply: under the page guard, set the major/minor header words... [crypto-session]" }
+  "0x63ecc3": { name: "NetPacketQueue_UnlockUnwind", note: "SEH unwind helper that releases a queue critical section [network-dispatch]" }
+  "0x63ed65": { name: "NetPacketDeque_AllocBlock", note: "Allocate a 4-pointer deque block (operator new, overflow-checked) [network-dispatch]" }
+  "0x63edcc": { name: "NetPacketDeque_AllocMap", note: "Allocate the deque block-pointer map (operator new, overflow-checked) [network-dispatch]" }
+  "0x63ee22": { name: "NetPacketDeque_MovePtrs", note: "memmove a run of dword pointers (deque map copy primitive) [network-dispatch]" }
+  "0x63ee57": { name: "NetPacketDeque_FillDwords", note: "Write a dword value into N consecutive slots [network-dispatch]" }
+  "0x63eee7": { name: "NetPacketDeque_CopyPtrs", note: "Copy a run of block pointers during map growth (forwards to the memmove copy) [network-dispatch]" }
+  "0x63ef10": { name: "NetPacketDeque_FillPtrsImpl", note: "Map-slot fill (forwards to the dword fill loop) [network-dispatch]" }
+  "0x63efce": { name: "NetPacketDeque_FillPtrs", note: "Fill a run of new map slots with a value during map growth [network-dispatch]" }
+  "0x63f087": { name: "NetSocket_ConstructSlot", note: "Initialize the NETCONN socket slot: INVALID_SOCKET + empty error string [network-dispatch]" }
+  "0x63f145": { name: "NetPacketDeque_ZeroHeader", note: "Zero a packet-deque header (unused in this build) [network-dispatch]" }
+  "0x63f2f6": { name: "NetConn_SetLastErrorString", note: "Format a Winsock error code into the NETCONN error string (conn+0x140F0) [network-dispatch]" }
+  "0x63f492": { name: "NetConn_CapturePeerAddress", note: "Record the connected peer's IP (binary in_addr + dotted string) [network-dispatch]" }
+  "0x63f559": { name: "NetConn_Shutdown", note: "Tear down the NETCONN: stop the IO thread, close the socket, close the four WSA events [network-dispatch]" }
+  "0x647d7a": { name: "CriticalSection_Init", note: "InitializeCriticalSection(this+4); shared utility [network-dispatch]" }
+  "0x647d8b": { name: "CriticalSection_Delete", note: "DeleteCriticalSection(this+4); shared utility [network-dispatch]" }
+  "0x647d96": { name: "CriticalSection_Enter", note: "EnterCriticalSection(this+4); generic shared synchronisation primitive (NOT specialized... [network-dispatch]" }
+  "0x647da1": { name: "CriticalSection_Leave", note: "LeaveCriticalSection(this+4); generic shared synchronisation primitive (pair of... [network-dispatch]" }
+  "0x648a45": { name: "ThreadSlot_Init", note: "Initializes a thread slot: stores the worker procedure pointer and clears the handle and... [vfs-assetio]" }
+  "0x648a67": { name: "ThreadSlot_Start", note: "Starts/restarts a worker thread via _beginthreadex (closing any prior handle); store... [vfs-assetio]" }
+  "0x648af7": { name: "ThreadSlot_SetPriority", note: "SetThreadPriority on the slot thread [vfs-assetio]" }
+  "0x649a76": { name: "Bignum_CopyNormalize", note: "Copy a bignum word array and renormalize its length (shared library helper) [crypto-session]" }
+  "0x649cc6": { name: "Bignum_SecureZeroBuffer", note: "Zero a 0x202-byte bignum buffer before freeing it (key/plaintext hygiene) [crypto-session]" }
+  "0x64b1b3": { name: "Bignum_DigitExtractByMod", note: "Inner serializer worker: repeatedly take the bignum modulo a fixed base word to extract... [crypto-session]" }
+  "0x64f6a0": { name: "Bignum_AccumulateBigEndianDigits", note: "Big-endian digit accumulation loop: acc=0; for each source byte acc = acc*256 + byte... [crypto-session]" }
+  "0x65169c": { name: "Bignum_FromBytes_BigEndian", note: "Build a bignum from a byte array: allocate the fixed 0x202-byte word buffer and import... [crypto-session]" }
+  "0x651adc": { name: "Bignum_Assign", note: "Bignum assignment operator (=): copy the source word array, length, and status into the... [crypto-session]" }
+  "0x65496d": { name: "Bignum_ModExp", note: "Modular exponentiation c = m^e mod n (multi-precision library; assert tag 'mexpkm') [crypto-session]" }
+  "0x655c81": { name: "Bignum_ToBytes_BigEndian", note: "Serialize a bignum to a big-endian digit byte string (library tag 'lint2byte'); the [BE... [crypto-session]" }
+  "0x657589": { name: "Secure_ImportKeyBlob_ModulusExponent", note: "Import the 54-byte key blob: store two opaque 2-byte per-value headers (never read back)... [crypto-session]" }
+  "0x657852": { name: "Pkcs1V15_Pad", note: "PKCS#1 v1.5 padding builder: block type 1 (0x01 then 0xFF run) or block type 2 (0x02 then... [crypto-session]" }
+  "0x657b7f": { name: "Rsa_PadAndModExp", note: "PKCS#1 v1.5 type-2 pad the message to (modulus_bytes - 1), import the padded block as a... [crypto-session]" }
+  "0x661d52": { name: "CRT_SetUnexpectedHandler", note: "CRT shim: set the encoded-pointer unexpected handler [scene-machine]" }
+  "0x6628bb": { name: "CRT_SetTerminateHandler", note: "CRT shim: set the encoded-pointer terminate handler [scene-machine]" }
+  "0x71d957": { name: "NetHandler_AtexitDestroy", note: "atexit thunk: destructs the global NetHandler singleton at process exit [network-dispatch]" }
   # "0x<addr>": { name: "RecvPacketDispatch", note: "main opcode switch" }
 
-globals: {}
+globals:
+  # Campaign 2 (2026-06-13): 19 global/data labels synced from the IDB.
+  "0x796248": { name: "g_TimeScale", note: "float time-scale for Time_GetMs (1.0=realtime, <1 slow, >1 fast) [scene-machine]" }
+  "0x796878": { name: "g_VfsProgressDenominator", note: "i64 literal 9,395,240 -- expected total bytes denominator for the loading-screen bar [vfs-assetio]" }
+  "0x796880": { name: "g_VfsDataPath", note: "char* -> 'data/data.vfs' (string @0x72ef58) [vfs-assetio]" }
+  "0x796884": { name: "g_VfsIndexPath", note: "char* -> 'data.inf' (string @0x72ef4c) [vfs-assetio]" }
+  "0x796888": { name: "g_VfsDataHandle", note: "Retained HANDLE to data/data.vfs (process lifetime); INVALID at start [vfs-assetio]" }
+  "0x796890": { name: "g_VfsReadLock", note: "CRITICAL_SECTION (24B) -- the VFS read lock around SetFilePointerEx+ReadFile [vfs-assetio]" }
+  "0x797d5c": { name: "g_EngineRunFlag", note: "One-byte main-loop run flag; Engine_MainLoop runs while non-zero, cleared on WM_QUIT... [scene-machine]" }
+  "0x854bf8": { name: "g_GameState", note: "Backing storage for the scene state machine [0]=state [1]=sub [2]=reason; touched only... [scene-machine]" }
+  "0x897c4c": { name: "g_TimeScaleOffset", note: "float offset subtracted in Time_GetMs after time-scale multiply [scene-machine]" }
+  "0x8c3ebc": { name: "g_VfsProgressNormalized", note: "dword normalized progress = counter / denominator; read by VFS_GetProgress [vfs-assetio]" }
+  "0x8c3ec0": { name: "g_VfsProgressBytes", note: "qword cumulative bytes loaded while tracking active [vfs-assetio]" }
+  "0x8c3ec8": { name: "g_VfsProgressTracking", note: "byte tracking-enable flag (set by Diamond_LoadHandler ctor, cleared by dtor) [vfs-assetio]" }
+  "0x8c3ec9": { name: "g_VfsMounted", note: "byte VFS mount/vfsmode flag -- the real one (corrects cartography seed which named... [vfs-assetio]" }
+  "0x8c3ecc": { name: "g_VfsTocBase", note: "void* heap TOC array base (operator new(144*count)) -- the real TOC ptr (corrects... [vfs-assetio]" }
+  "0x8c3ed0": { name: "g_VfsTocCount", note: "dword TOC entry count, from data.inf header offset 12 -- the real count (corrects... [vfs-assetio]" }
+  "0x8c3f00": { name: "g_DiamondEventScheduler", note: "General event-subscriber scheduler object (Subscribe target); subscriber gate reads its... [scene-machine]" }
+  "0x8c3f90": { name: "g_FrameTickScheduler", note: "Per-frame round-robin tick scheduler object (ticked by TickAll); now-ms at +72020 ->... [scene-machine]" }
+  "0x9fa348": { name: "g_FrameTickScheduler_cached", note: "Engine_MainLoop's cached pointer to FrameTickScheduler_GetSingleton() result [scene-machine]" }
+  "0x9fa34c": { name: "g_MainLoopInitGuard", note: "One-shot init guard bit for Engine_MainLoop singleton caching [scene-machine]" }
   # "0x<addr>": { name: "g_RollingKey", note: "packet cipher rolling key state" }
 
 crypto:

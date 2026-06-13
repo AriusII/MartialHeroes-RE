@@ -482,3 +482,51 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
   tooling. Tooling (parallel): vfsls gained decode/extract/convert/hexdump/coverage (auto-detect registry,
   28 formats; build 0/0); a pre-existing DDS dwFourCC off-by-4 in Assets.Mapping/PngConverter was found and
   is being fixed. Journal authored centrally by the orchestrator.
+
+## 2026-06-13 — Campaign 2: IDB comprehension and annotation run (5 clusters, WRITE to IDB)
+- binary: doida.exe @ 63fcaf8e81a61097c68d22ae82514dded54e59c41c480850a568a0f0d79eb9df (x86 32-bit)
+- tool: IDA Pro 9.3 via MCP (mcp__ida__*), static analysis + IDB annotation (WRITE — names and
+  comments set in the IDB; no execution, no debugger)
+- analyzed (by canonical cluster):
+  - network-dispatch: NetHandler_DispatchGamePacket (central opcode router), NetClient recv engine
+    and thread workers, NetPacketDeque queue internals, SkillActionList/Ring container for 5/52
+    records, Actor_FindByPresenceAndTag, GameState_GetSingleton, Scene_QuitDispatcher
+  - crypto-session: Cipher_XorRolEncrypt (XOR/ROL payload cipher), LZ4_compress_default /
+    LZ4_decompress_safe, Bignum_ModExp / Rsa_PadAndModExp / Secure_BuildSecureAuthReply
+    (0/0 bignum handshake), Secure_EncryptCredentialReply, PacketBuf_WhitenPayloadDwords
+  - vfs-assetio: VfsOpenRouter_ThreeWay, DiskFile_ReadBytes_Impl, GHTex_GetBoundOrLoad /
+    GHTex_LoadFromDisk (named-texture cache), BulkAssetLoader_Thread, Terrain_StreamWorkerThread,
+    VFS_OpenArchive / VFS_FindEntry / VFS_ReadEntryData
+  - scene-machine: WinMain (program entry + master scene state machine), Engine_MainLoop /
+    Engine_FrameStep, Diamond_LoginWindow_BuildScene, Diamond_SelectWindow_BuildScene,
+    Diamond_MainHandler_BuildGameWorld, Diamond_LoginSecondPassword_BuildKeypad,
+    MessageDB_GetString, GameState_Init, DiamondEventScheduler_Subscribe /
+    DiamondEventScheduler_TickAll, Scene_LogoutFromInGame / Scene_QuitFromInGame
+  - effects-render: AnimMixer_BuildPose, Skin_DeformLBS, BindPose_ParseBoneRecord,
+    Pose_WorldWalk, XEffect_tickAndDispatch, EffectSystem_TickAllPerFrame,
+    EFF_LoadParticleEmitter, Renderer_DrawScene / Renderer_DrawScene_OffscreenRT,
+    Diamond_GCullPipeline_dispatchAndDraw, ShadowManager_StampGroundCells,
+    CoreXEffect_LazyParseXeff, GParticleBuffer_fillVertices
+- counts: 361 functions renamed + 19 globals renamed + 380 neutral comments set in the IDB;
+  live sub_ census moved 21,278 -> 21,076 (202 autonames resorbed into named entries); 0 failures
+- committed artifacts produced:
+  - Docs/RE/names.yaml — functions: and globals: maps first-populated (380 entries total);
+    all keys are hex addresses as strings; all values are neutral canonical role names with
+    cluster tags; no pseudo-code, no decompiler locals, no raw autonames
+  - Docs/PLAN-CAMPAGNE2.md — campaign method document (5-cluster comprehension plan,
+    annotation protocol, firewall rules)
+  - Docs/ROADMAP-CAMPAGNE2.md — run record (per-cluster counts, session log, open items)
+  - .claude/agents/re-comprehension-orchestrator (new agent)
+  - .claude/agents/re-annotation-orchestrator (new agent)
+  - .claude/agents/re-ida-annotator (new agent)
+  - .claude/skills/ida-annotate-batch (new skill)
+- notes: The campaign purpose was comprehension and IDB legibility — making the IDB self-describing
+  so future RE waves can navigate by role name rather than autoname. All annotations are neutral
+  functional descriptions; no pseudo-code, decompiler syntax, or raw addresses appear in any
+  committed file. Spec refinements identified during comprehension (client_workflow.md §4.4
+  disconnect routing, formats/effects.md §E.2 particleEmitter.eff variable-length record,
+  crypto.md §6.5 placeholder-seed note) were noted but NOT applied to committed specs — they are
+  queued as a future spec-author task and must be journaled separately when promoted. Several
+  OQ-EFX-* touchpoints were incidentally resolved during the effects-render cluster walk. The
+  dirty room received no new tainted material this session (annotations write only to the IDB,
+  not to _dirty/). Journal authored by the preservation-archivist.
