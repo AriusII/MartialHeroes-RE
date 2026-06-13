@@ -726,24 +726,37 @@ tooling = near-complete but inspect-only.
 - Fix: DDS dwFourCC off-by-4 in Assets.Mapping/PngConverter (DDS→PNG unblocked) + 2 regression tests.
 - Gate: build 0/0 · 1153+ tests green · clean-room audit PASS. Branch `cycle4-login-capture-frontend-vfs`.
 
-## Phase C4-E2 — FRONT-END VISUAL FIDELITY — ⏳ IN PROGRESS
-A real windowed screenshot showed the login builds the full spec form + loads real atlases but composes
-poorly; root cause = no `[display]` content-scale (the 1024×768 4:3 canvas is un-fitted to the window).
-godot-presentation-engineer is fixing content-scale + login composition and verifying login/world via
-the screenshot loop.
+## Phase C4-E2 — FRONT-END VISUAL FIDELITY — ✅ DONE (committed `033b18c`)
+Root cause was no `[display]` content-scale. Added `canvas_items` stretch + `keep` aspect + 1024×768
+viewport (3D World unaffected). Plus a project-wide gap fixed: a FontBootstrap autoload sets
+`ThemeDB.FallbackFont` = SystemFont of the legacy Korean faces → ALL CP949 UI text renders as real Hangul
+(login + char-select + World HUD), not tofu. Login form backing/labels + StateButton fallback bg (the
+legacy DXT3 button atlas regions are genuinely alpha=0 — RE follow-up). Verified via screenshots.
 
-## Phase C4-E4 — NETWORK END-TO-END — ⏳ NEXT (layers 02/04; unit-testable, live path server-gated)
-Outbound `IOutboundPacketSink` (cipher→LZ4→header), inbound LZ4 decompress in FrameSplitter, PacketRouter
-arms for the login/char S2C set, `1/7` select struct (+`1/13`,`1/14`), `3/7` spawn handler + descriptor
-cache, `1/9` version-token derivation, `3/4`·`3/6`·`3/23` handlers, the port-10000 lobby mini-protocol
-client + use-cases.
+## Phase C4-E4 — NETWORK END-TO-END — ◑ E4-a + E4-b DONE; E4-c DEFERRED
+- E4-a (committed `beb27af`): concrete `CryptoOutboundPacketSink` (cipher→LZ4→header, crypto injected as
+  delegates), inbound LZ4 decompress in FrameSplitter, the port-10000 `LobbyClient`, and the login/select
+  wire structs (1/7, 3/7, 1/13, 1/14, 1/6-opaque). +30 tests.
+- E4-b (committed `c18a68b`): completed enter-game → SPAWN — 3/7 handler + `CharacterSelectionStore`
+  (descriptor cache) + @BLANK@ routing + slot≤4 guard + 1/9 version-token derivation (→21149). +8 tests.
+- E4-c — DEFERRED (server-gated, unit-test only): lobby ORCHESTRATION (needs `ILobbyClient` in
+  Network.Abstractions + DTOs + the concrete LobbyClient implementing it), the `3/4`·`3/6`·`3/23`
+  char-management result structs + handlers, the `1/6` login-blob emit (collision unresolved). Follow-up.
 
-## Phase C4-E5 — VFS TOOLING DEPTH — ⏳ THEN (layer 03)
-Wire EnvironmentBinParsers (`.bin`, 955 files) + area_inventory into the vfsls registry/decode; add any
-missing parsers (shaders/tga-bmp); broaden decode/convert coverage.
+## Phase C4-E5 — VFS TOOLING DEPTH — ✅ DONE (committed `72e02ef`)
+Wired the env/region `.bin` family (map_option/fog/material/light/stardome/clouddome/cloud_cycle/
+point_light/wind/regiontable — existing Assets.Parsers, prefix-disambiguated) + area_inventory `.lst`
+into the vfsls decode registry. coverage now 41 / 40-decode / 12-convert; smoke-verified on the real VFS.
 
-## Phase C4-R / C4-C — REVIEW + GATES + CONSOLIDATION — ⏳ PENDING
-Per-phase gates (build 0/0 + tests + clean-room audit) before each commit; consolidate, update memory.
+## Phase C4-E6 — LAYER-05 INTEGRATION + E2E VISUAL — ⏳ IN PROGRESS
+Fix the version-token call site (ClientContext passes a zero span that overrides the 21149 derivation),
+wire LocalPlayerSpawnedEvent → World entry, extend the dev-offline replay to the full
+Login→ServerSelect→PIN→CharSelect→World flow, and screenshot-verify each screen end-to-end.
+
+## Phase C4-R / C4-C — REVIEW + GATES + CONSOLIDATION — ◑ ONGOING
+Each phase gated (build 0/0 + tests + clean-room smell scan) before its commit — done for all 6 commits
+above; full-solution gate GREEN at **1206 tests, 0 failures**. Final consolidation TODO: CS8019
+unnecessary-using sweep (cosmetic, LSP-only — accumulated across E4/E5), memory refresh.
 
 — *Maintained by the orchestrator. Cycle-4 pivoted from blind research to debugger-confirmed
 implementation; the C4-W1 giga-research table above is HISTORICAL (superseded, not run). Update phase

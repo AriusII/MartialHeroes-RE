@@ -467,12 +467,21 @@ public sealed partial class ClientContext : Node
         // 18. Inbound frame dispatcher — channel-backed; synthetic feeder uses this.
         var dispatcher = new InboundFrameDispatcher(handler);
 
-        // 19. Version token — 33 bytes, zero-filled (PROVISIONAL).
-        //     spec: Docs/RE/packets/1-9_enter_game_request.yaml (VersionToken 0x01, 33 bytes, UNKNOWN).
-        ReadOnlySpan<byte> versionToken = stackalloc byte[ApplicationUseCases.VersionTokenLength];
+        // 19. Version token — pass `default` (empty span) so ApplicationUseCases derives it via
+        //     DefaultClientVersionSource.Instance: token = 10 × 2114 + 9 = 21149 (sample_verified).
+        //     An explicit zero-filled span would OVERRIDE the derivation to all-zeros. Passing default
+        //     activates the branch that calls ClientVersionToken.Derive() and stamps "21149\0" into the
+        //     33-byte buffer. spec: Docs/RE/specs/login_flow.md §3.3 / §7.
+        //     spec: Docs/RE/packets/1-9_enter_game_request.yaml (VersionToken 0x01, 33 bytes).
+        ReadOnlySpan<byte> versionToken = default; // empty → derives via IClientVersionSource
 
         // 20. Use-case facade — presentation calls these for input intents.
-        var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId, versionToken);
+        //     versionSource = null → DefaultClientVersionSource.Instance → field 2114 → token 21149.
+        //     spec: Docs/RE/specs/login_flow.md §3.3 / §7 (token = 10 × versionField + 9 = 21149).
+        var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId,
+            versionToken: versionToken, versionSource: null);
+        GD.Print($"[ClientContext] Version token derived: {ClientVersionToken.Derive(DefaultClientVersionSource.Instance.VersionField)}" +
+                 " (= 10 × 2114 + 9; sample_verified). spec: login_flow.md §3.3 / §7.");
 
         // 21. Fixed-tick GameEngineLoop — 30 Hz.
         //     spec: Docs/RE/specs/game_loop.md §6 ("e.g. 30 Hz via a PeriodicTimer"). CONFIRMED.
@@ -529,8 +538,10 @@ public sealed partial class ClientContext : Node
             var inputBus = new InputBus(hudHandler, worldRelay);
             var credentialStore = new LoginCredentialStore();
             SessionId sessionId = SessionId.None;
-            ReadOnlySpan<byte> versionToken = stackalloc byte[ApplicationUseCases.VersionTokenLength];
-            var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId, versionToken);
+            // Pass default (empty span) so the derivation via DefaultClientVersionSource runs.
+            // spec: Docs/RE/specs/login_flow.md §3.3 / §7 (token = 10 × 2114 + 9 = 21149).
+            var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId,
+                versionToken: default, versionSource: null);
             var opcodeSink = new CountingUnhandledOpcodeSink();
             var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, null);
             var dispatcher = new InboundFrameDispatcher(handler);

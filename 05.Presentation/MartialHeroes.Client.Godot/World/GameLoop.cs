@@ -425,6 +425,40 @@ public sealed partial class GameLoop : Node
                 _hud.OnClientStateChanged(stateChanged);
                 break;
 
+            // ---- Local player spawn (3/7) ----
+            case LocalPlayerSpawnedEvent localSpawn:
+                // The local player materialized into the world: spawn the local avatar as an actor
+                // and notify the HUD so it can initialize HP/MP bars and minimap position.
+                // spec: Docs/RE/specs/login_flow.md §3.5 / §5.3 (3/7 SmsgCharSpawnResult → spawn).
+                // Translate to an ActorSpawnedEvent so ActorRegistry can place the visual actor.
+                _actorRegistry.OnActorSpawned(new ActorSpawnedEvent(
+                    localSpawn.Key,
+                    localSpawn.Name,
+                    localSpawn.Level,
+                    localSpawn.Position,
+                    localSpawn.CurrentHp,
+                    localSpawn.MaxHp,
+                    localSpawn.ServerClass));
+                _hud.OnActorSpawned(new ActorSpawnedEvent(
+                    localSpawn.Key,
+                    localSpawn.Name,
+                    localSpawn.Level,
+                    localSpawn.Position,
+                    localSpawn.CurrentHp,
+                    localSpawn.MaxHp,
+                    localSpawn.ServerClass));
+                GD.Print($"[GameLoop] LocalPlayerSpawnedEvent: name='{localSpawn.Name}' " +
+                         $"level={localSpawn.Level} pos=({localSpawn.Position.RawX},{localSpawn.Position.RawZ}) " +
+                         $"slot={localSpawn.SlotIndex}. spec: login_flow.md §3.5 / §5.3.");
+                break;
+
+            case LocalPlayerSpawnFailedEvent spawnFailed:
+                // Spawn failure: log for diagnostics; BootFlow already transitioned to World
+                // so we show the failure in-world (timed message). spec: login_flow.md §5.3.
+                GD.PrintErr($"[GameLoop] LocalPlayerSpawnFailedEvent: slot={spawnFailed.SlotIndex}. " +
+                            "spec: Docs/RE/specs/login_flow.md §5.3 (Result 0 = failure).");
+                break;
+
             // Equip / inventory / skill-point results are received but not yet
             // visually handled (no inventory window). Log nothing — silently ignore.
             case EquipResultEvent:

@@ -365,6 +365,65 @@ public sealed partial class BootFlow : Node
 
         TeardownMenu();
         EnterWorld();
+
+        // DEV OFFLINE FLOW: after the World scene is instantiated, publish a synthetic
+        // LocalPlayerSpawnedEvent + a ClientStateChangedEvent (World state) so GameLoop.DispatchEvent
+        // can spawn the local player and the HUD can initialise. We defer this onto the next frame
+        // via CallDeferred so GameLoop._Ready has time to complete its wiring before the events arrive.
+        // spec: Docs/RE/specs/login_flow.md §3.5 / §5.3 (3/7 → LocalPlayerSpawnedEvent).
+        // spec: Docs/RE/specs/frontend_scenes.md §7 — "enter-game ack → in-world".
+        if (IsDevOfflineMode())
+        {
+            GD.Print("[BootFlow] DEV OFFLINE MODE — scheduling synthetic enter-game + spawn events.");
+            CallDeferred(MethodName.SeedSyntheticEnterGame, characterName, slotIndex);
+        }
+    }
+
+    /// <summary>
+    /// Called via CallDeferred after <see cref="EnterWorld"/> so the World scene's GameLoop is
+    /// initialised before the events arrive on the bus.
+    ///
+    /// Publishes:
+    ///   1. A synthetic <see cref="ClientStateChangedEvent"/> (Login → World) — exercises the FSM path
+    ///      that <c>3/5 SmsgEnterGameAck</c> would normally trigger. spec: opcodes.md (3/5 → World).
+    ///   2. A synthetic <see cref="LocalPlayerSpawnedEvent"/> materializing the chosen character.
+    ///      spec: Docs/RE/specs/login_flow.md §3.5 / §5.3 (3/7 SmsgCharSpawnResult → spawn).
+    ///
+    /// DEV ONLY. Data is synthetic (no game logic derived here — no stats, no formula, no position
+    /// computation beyond a safe demo origin). The events travel through the legitimate Application
+    /// event bus so all downstream view nodes react exactly as with a real server.
+    /// </summary>
+    private void SeedSyntheticEnterGame(string characterName, int slotIndex)
+    {
+        if (_ctx is null) return;
+
+        // Synthetic 3/5 analogue: advance FSM to World state so HUD and InputRouter activate.
+        // spec: Docs/RE/specs/client_workflow.md §4 — 3/5 transitions Loading → World.
+        _ctx.EventBus.Publish(new ClientStateChangedEvent(
+            Previous: Client.Application.Events.ClientState.CharacterSelection,
+            Current:  Client.Application.Events.ClientState.World));
+
+        // Synthetic 3/7 LocalPlayerSpawnedEvent: materializes the local player with demo values.
+        // Key uses the unassigned raw-id sentinel (same as the real handler when no 5/3 id is known).
+        // spec: Docs/RE/specs/login_flow.md §3.5 — "key on UnassignedRawId until 5/3 supplies real id".
+        // Position: world origin — safe spawn point with no terrain dependency. spec: WorldCoordinates.
+        var key = new MartialHeroes.Client.Domain.Actors.ActorKey(
+            MartialHeroes.Client.Domain.Actors.ActorKey.UnassignedRawId,
+            MartialHeroes.Client.Domain.Actors.EntitySort.PlayerCharacter);
+
+        _ctx.EventBus.Publish(new LocalPlayerSpawnedEvent(
+            Key:         key,
+            SlotIndex:   slotIndex,
+            Name:        characterName,
+            Level:       25,                                           // demo level — no formula
+            Position:    MartialHeroes.Shared.Kernel.Numerics.Vector3Fixed.FromFloat(0f, 0f, 0f),
+            CurrentHp:   650u,
+            MaxHp:       650u,
+            ServerClass: 1));  // Musa class. spec: login_flow.md §4.1. CODE-CONFIRMED.
+
+        GD.Print($"[BootFlow] DEV: published synthetic ClientStateChangedEvent(World) + " +
+                 $"LocalPlayerSpawnedEvent(name='{characterName}', slot={slotIndex}). " +
+                 "spec: login_flow.md §3.5 / §5.3 / client_workflow.md §4.");
     }
 
     private void OnBackToLogin()
