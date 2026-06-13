@@ -33,9 +33,9 @@ public sealed class LobbyClientTests
     {
         byte[] wrapper = new byte[8];
         BinaryPrimitives.WriteUInt16LittleEndian(wrapper.AsSpan(0), totalSize); // +0 size
-        BinaryPrimitives.WriteUInt16LittleEndian(wrapper.AsSpan(2), 0);         // +2 unused
-        BinaryPrimitives.WriteUInt16LittleEndian(wrapper.AsSpan(4), major);     // +4 count/major
-        BinaryPrimitives.WriteUInt16LittleEndian(wrapper.AsSpan(6), 0);         // +6 minor (unused)
+        BinaryPrimitives.WriteUInt16LittleEndian(wrapper.AsSpan(2), 0); // +2 unused
+        BinaryPrimitives.WriteUInt16LittleEndian(wrapper.AsSpan(4), major); // +4 count/major
+        BinaryPrimitives.WriteUInt16LittleEndian(wrapper.AsSpan(6), 0); // +6 minor (unused)
         return wrapper;
     }
 
@@ -46,10 +46,10 @@ public sealed class LobbyClientTests
     private static byte[] BuildServerRecord(ushort serverId, short status, short load, short openTime)
     {
         byte[] rec = new byte[8];
-        BinaryPrimitives.WriteUInt16LittleEndian(rec.AsSpan(0), serverId);          // +0 server_id u16
-        BinaryPrimitives.WriteInt16LittleEndian(rec.AsSpan(2), status);             // +2 status i16
-        BinaryPrimitives.WriteInt16LittleEndian(rec.AsSpan(4), load);               // +4 load i16
-        BinaryPrimitives.WriteInt16LittleEndian(rec.AsSpan(6), openTime);           // +6 open_time i16
+        BinaryPrimitives.WriteUInt16LittleEndian(rec.AsSpan(0), serverId); // +0 server_id u16
+        BinaryPrimitives.WriteInt16LittleEndian(rec.AsSpan(2), status); // +2 status i16
+        BinaryPrimitives.WriteInt16LittleEndian(rec.AsSpan(4), load); // +4 load i16
+        BinaryPrimitives.WriteInt16LittleEndian(rec.AsSpan(6), openTime); // +6 open_time i16
         return rec;
     }
 
@@ -114,8 +114,8 @@ public sealed class LobbyClientTests
                 //   +0 u16 server_id, +2 i16 status, +4 i16 load, +6 i16 open_time
                 records[i] = new LobbyServerRecord(
                     ServerId: BinaryPrimitives.ReadUInt16LittleEndian(rec[0..]),
-                    Status:   BinaryPrimitives.ReadInt16LittleEndian(rec[2..]),
-                    Load:     BinaryPrimitives.ReadInt16LittleEndian(rec[4..]),
+                    Status: BinaryPrimitives.ReadInt16LittleEndian(rec[2..]),
+                    Load: BinaryPrimitives.ReadInt16LittleEndian(rec[4..]),
                     OpenTime: BinaryPrimitives.ReadInt16LittleEndian(rec[6..]));
             }
 

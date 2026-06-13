@@ -126,7 +126,7 @@ public sealed partial class PinModal : Control
         const int panelW = 320;
         const int panelH = 200;
         const int panelX = (1024 - panelW) / 2; // 352
-        const int panelY = (768 - panelH) / 2;  // 284
+        const int panelY = (768 - panelH) / 2; // 284
 
         var panel = new Panel
         {

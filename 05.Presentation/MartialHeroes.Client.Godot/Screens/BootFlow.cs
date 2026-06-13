@@ -83,7 +83,7 @@ public sealed partial class BootFlow : Node
     // Never domain state; purely view-session state so the flow can reassemble the TAB string.
     private string _account = "";
     private string _password = "";
-    private int _selectedServerId = 1;  // default if user does not pick
+    private int _selectedServerId = 1; // default if user does not pick
 
     // Subscription cancel token for the event-bus drain.
     private CancellationTokenSource? _eventBusCts;
@@ -404,7 +404,7 @@ public sealed partial class BootFlow : Node
         // spec: Docs/RE/specs/client_workflow.md §4 — 3/5 transitions Loading → World.
         _ctx.EventBus.Publish(new ClientStateChangedEvent(
             Previous: Client.Application.Events.ClientState.CharacterSelection,
-            Current:  Client.Application.Events.ClientState.World));
+            Current: Client.Application.Events.ClientState.World));
 
         // Synthetic 3/7 LocalPlayerSpawnedEvent: materializes the local player with demo values.
         // Key uses the unassigned raw-id sentinel (same as the real handler when no 5/3 id is known).
@@ -415,14 +415,14 @@ public sealed partial class BootFlow : Node
             MartialHeroes.Client.Domain.Actors.EntitySort.PlayerCharacter);
 
         _ctx.EventBus.Publish(new LocalPlayerSpawnedEvent(
-            Key:         key,
-            SlotIndex:   slotIndex,
-            Name:        characterName,
-            Level:       25,                                           // demo level — no formula
-            Position:    MartialHeroes.Shared.Kernel.Numerics.Vector3Fixed.FromFloat(0f, 0f, 0f),
-            CurrentHp:   650u,
-            MaxHp:       650u,
-            ServerClass: 1));  // Musa class. spec: login_flow.md §4.1. CODE-CONFIRMED.
+            Key: key,
+            SlotIndex: slotIndex,
+            Name: characterName,
+            Level: 25, // demo level — no formula
+            Position: MartialHeroes.Shared.Kernel.Numerics.Vector3Fixed.FromFloat(0f, 0f, 0f),
+            CurrentHp: 650u,
+            MaxHp: 650u,
+            ServerClass: 1)); // Musa class. spec: login_flow.md §4.1. CODE-CONFIRMED.
 
         GD.Print($"[BootFlow] DEV: published synthetic ClientStateChangedEvent(World) + " +
                  $"LocalPlayerSpawnedEvent(name='{characterName}', slot={slotIndex}). " +
@@ -495,18 +495,24 @@ public sealed partial class BootFlow : Node
         return
         [
             // Light load (≤ 500). spec: login_flow.md §2.1 load threshold 500. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 1, DisplayName: "Jade Dragon",   StatusCode: 1, Load: 120,  OpenTime: 0, IsNew: false),
+            new ServerEntry(ServerId: 1, DisplayName: "Jade Dragon", StatusCode: 1, Load: 120, OpenTime: 0,
+                IsNew: false),
             // Medium load (>500). spec: load threshold 500. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 2, DisplayName: "Iron Phoenix",  StatusCode: 1, Load: 650,  OpenTime: 0, IsNew: false),
+            new ServerEntry(ServerId: 2, DisplayName: "Iron Phoenix", StatusCode: 1, Load: 650, OpenTime: 0,
+                IsNew: false),
             // High load (>800). spec: load threshold 800. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 3, DisplayName: "Azure Tiger",   StatusCode: 1, Load: 980,  OpenTime: 0, IsNew: true),
+            new ServerEntry(ServerId: 3, DisplayName: "Azure Tiger", StatusCode: 1, Load: 980, OpenTime: 0,
+                IsNew: true),
             // Full load (>1200). spec: load threshold 1200. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 4, DisplayName: "Shadow Crane",  StatusCode: 1, Load: 1450, OpenTime: 0, IsNew: false),
+            new ServerEntry(ServerId: 4, DisplayName: "Shadow Crane", StatusCode: 1, Load: 1450, OpenTime: 0,
+                IsNew: false),
             // Scheduled open (status=3). spec: status sentinel 3. CODE-CONFIRMED.
             // Load=10 → HH = "01"; open_time=30 → MM = "30" (HH:MM = "01:30").
-            new ServerEntry(ServerId: 5, DisplayName: "Thunder Snake", StatusCode: 3, Load: 10,   OpenTime: 30, IsNew: false),
+            new ServerEntry(ServerId: 5, DisplayName: "Thunder Snake", StatusCode: 3, Load: 10, OpenTime: 30,
+                IsNew: false),
             // Preparing / under check (status=24). spec: sentinel 24. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 6, DisplayName: "Crimson Wolf",  StatusCode: 24, Load: 0,  OpenTime: 0, IsNew: false),
+            new ServerEntry(ServerId: 6, DisplayName: "Crimson Wolf", StatusCode: 24, Load: 0, OpenTime: 0,
+                IsNew: false),
         ];
     }
 
@@ -535,12 +541,12 @@ public sealed partial class BootFlow : Node
                 SlotIndex: 0,
                 Name: "무사영웅",
                 Level: 25,
-                ServerClass: 1,  // internal class 1 (Musa). spec §4.1. CODE-CONFIRMED.
+                ServerClass: 1, // internal class 1 (Musa). spec §4.1. CODE-CONFIRMED.
                 CurrentHp: 650),
             // Slot 1: empty slot (sentinel "@BLANK@"). spec: §3 / login_flow.md §3.5. CODE-CONFIRMED.
             new CharacterListSlot(
                 SlotIndex: 1,
-                Name: "@BLANK@",  // spec: empty-slot sentinel. CODE-CONFIRMED.
+                Name: "@BLANK@", // spec: empty-slot sentinel. CODE-CONFIRMED.
                 Level: 0,
                 ServerClass: 0,
                 CurrentHp: 0));
@@ -639,4 +645,3 @@ public sealed partial class BootFlow : Node
         }
     }
 }
-

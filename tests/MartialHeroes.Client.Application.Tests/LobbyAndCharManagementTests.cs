@@ -77,7 +77,8 @@ public sealed class LobbyAndCharManagementTests
         {
             ServerList =
             [
-                new LobbyServerRecord(ServerId: 1, Status: 1, Load: 1300, OpenTime: 0), // Full, Normal (status 1 = in-range)
+                new LobbyServerRecord(ServerId: 1, Status: 1, Load: 1300,
+                    OpenTime: 0), // Full, Normal (status 1 = in-range)
                 new LobbyServerRecord(ServerId: 2, Status: 3, Load: 900, OpenTime: 30), // Busy, ScheduledOpen
                 new LobbyServerRecord(ServerId: 3, Status: 24, Load: 600, OpenTime: 0), // Moderate, Preparing
                 new LobbyServerRecord(ServerId: 4, Status: 100, Load: 100, OpenTime: 0), // Light, CurrentSelection
@@ -144,10 +145,8 @@ public sealed class LobbyAndCharManagementTests
         var useCases = new ApplicationUseCases(
             sink, fsm, new ClientWorld(), new LoginCredentialStore(), new SessionId(1), eventBus: bus);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            async () => await useCases.FetchServerListAsync());
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            async () => await useCases.SelectServerAsync(1));
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await useCases.FetchServerListAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await useCases.SelectServerAsync(1));
     }
 
     // =====================================================================================================

@@ -22,11 +22,11 @@ public sealed class LoginSelectFlowLayoutTests
     public void LoginSelectFlow_opcode_constants_match_catalog()
     {
         // Fully qualified: the `Opcodes` static class lives inside the same-named namespace.
-        Assert.Equal(0x10006u, Protocol.Opcodes.Opcodes.CmsgLoginRequest);     // 1/6
-        Assert.Equal(0x10007u, Protocol.Opcodes.Opcodes.CmsgSelectCharacter);  // 1/7
-        Assert.Equal(0x1000du, Protocol.Opcodes.Opcodes.CmsgRenameCharacter);  // 1/13
-        Assert.Equal(0x1000eu, Protocol.Opcodes.Opcodes.CmsgDeleteCharacter);  // 1/14
-        Assert.Equal(0x30007u, Protocol.Opcodes.Opcodes.SmsgCharSpawnResult);  // 3/7
+        Assert.Equal(0x10006u, Protocol.Opcodes.Opcodes.CmsgLoginRequest); // 1/6
+        Assert.Equal(0x10007u, Protocol.Opcodes.Opcodes.CmsgSelectCharacter); // 1/7
+        Assert.Equal(0x1000du, Protocol.Opcodes.Opcodes.CmsgRenameCharacter); // 1/13
+        Assert.Equal(0x1000eu, Protocol.Opcodes.Opcodes.CmsgDeleteCharacter); // 1/14
+        Assert.Equal(0x30007u, Protocol.Opcodes.Opcodes.SmsgCharSpawnResult); // 3/7
 
         // OpcodeId mirrors the catalog constant on every struct.
         Assert.Equal(Protocol.Opcodes.Opcodes.CmsgLoginRequest, CmsgLoginRequest.OpcodeId);
@@ -128,7 +128,7 @@ public sealed class LoginSelectFlowLayoutTests
     public void CmsgSelectCharacter_decodes_known_bytes()
     {
         Span<byte> body = stackalloc byte[CmsgSelectCharacter.WireSize];
-        body[0x00] = 3;    // SlotIndex
+        body[0x00] = 3; // SlotIndex
         body[0x01] = 0xA5; // StateFlag
 
         ref readonly CmsgSelectCharacter p = ref MemoryMarshal.AsRef<CmsgSelectCharacter>(body);
@@ -140,8 +140,8 @@ public sealed class LoginSelectFlowLayoutTests
     public void SmsgCharSpawnResult_decodes_known_bytes()
     {
         Span<byte> body = stackalloc byte[SmsgCharSpawnResult.WireSize];
-        body[0x00] = 1;    // Result = proceed
-        body[0x01] = 4;    // Slot
+        body[0x00] = 1; // Result = proceed
+        body[0x01] = 4; // Slot
         BinaryPrimitives.WriteUInt16LittleEndian(body[0x02..], 0xBEEF); // Pad
         BinaryPrimitives.WriteUInt32LittleEndian(body[0x04..], 0x11111111u); // SpawnParam1
         BinaryPrimitives.WriteUInt32LittleEndian(body[0x08..], 0x22222222u); // SpawnParam2
@@ -174,7 +174,7 @@ public sealed class LoginSelectFlowLayoutTests
         Assert.Equal((byte)'r', p.NewName[2]);
         Assert.Equal((byte)'o', p.NewName[3]);
         Assert.Equal((byte)'7', p.NewName[4]);
-        Assert.Equal((byte)0, p.NewName[5]);  // NUL terminator
+        Assert.Equal((byte)0, p.NewName[5]); // NUL terminator
         Assert.Equal((byte)0, p.NewName[17]); // last padding byte stays zero
     }
 

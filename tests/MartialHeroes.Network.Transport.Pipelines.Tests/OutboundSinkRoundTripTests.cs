@@ -108,8 +108,11 @@ public sealed class OutboundSinkRoundTripTests
     [Fact]
     public async Task EndToEnd_OutboundCipherAndCompress_ThenInboundDecompressAndDecipher_RecoverOriginalPayload()
     {
-        byte[] plaintext = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
-                             0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80];
+        byte[] plaintext =
+        [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
+            0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80
+        ];
         const ushort major = 4;
         const ushort minor = 102;
         uint expectedPackedOpcode = ((uint)major << 16) | minor; // 0x40066

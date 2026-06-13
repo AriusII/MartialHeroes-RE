@@ -480,8 +480,9 @@ public sealed partial class ClientContext : Node
         //     spec: Docs/RE/specs/login_flow.md §3.3 / §7 (token = 10 × versionField + 9 = 21149).
         var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId,
             versionToken: versionToken, versionSource: null);
-        GD.Print($"[ClientContext] Version token derived: {ClientVersionToken.Derive(DefaultClientVersionSource.Instance.VersionField)}" +
-                 " (= 10 × 2114 + 9; sample_verified). spec: login_flow.md §3.3 / §7.");
+        GD.Print(
+            $"[ClientContext] Version token derived: {ClientVersionToken.Derive(DefaultClientVersionSource.Instance.VersionField)}" +
+            " (= 10 × 2114 + 9; sample_verified). spec: login_flow.md §3.3 / §7.");
 
         // 21. Fixed-tick GameEngineLoop — 30 Hz.
         //     spec: Docs/RE/specs/game_loop.md §6 ("e.g. 30 Hz via a PeriodicTimer"). CONFIRMED.

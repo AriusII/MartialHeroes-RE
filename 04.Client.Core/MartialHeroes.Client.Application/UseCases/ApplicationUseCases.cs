@@ -178,8 +178,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         CancellationToken cancellationToken = default)
     {
         ILobbyClient lobby = _lobbyClient
-            ?? throw new InvalidOperationException(
-                "No ILobbyClient was wired; FetchServerListAsync requires the lobby surface. spec: login_flow.md §2.");
+                             ?? throw new InvalidOperationException(
+                                 "No ILobbyClient was wired; FetchServerListAsync requires the lobby surface. spec: login_flow.md §2.");
 
         IReadOnlyList<LobbyServerRecord> records =
             await lobby.FetchServerListAsync(cancellationToken).ConfigureAwait(false);
@@ -203,8 +203,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         ushort serverId, CancellationToken cancellationToken = default)
     {
         ILobbyClient lobby = _lobbyClient
-            ?? throw new InvalidOperationException(
-                "No ILobbyClient was wired; SelectServerAsync requires the lobby surface. spec: login_flow.md §2.");
+                             ?? throw new InvalidOperationException(
+                                 "No ILobbyClient was wired; SelectServerAsync requires the lobby surface. spec: login_flow.md §2.");
 
         // Resolve the game-server endpoint for the chosen server (channel port = 10000 + serverId).
         // spec: login_flow.md §2.2 / §7 (lobby base port constant).

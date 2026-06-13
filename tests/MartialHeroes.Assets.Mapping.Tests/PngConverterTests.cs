@@ -154,8 +154,8 @@ public sealed class PngConverterTests
         // spec: Docs/RE/formats/texture.md §DDS_PIXELFORMAT (embedded at offset 0x4C, 32 bytes)
         //   +0x00 dwSize @ file 0x4C, +0x04 dwFlags @ file 0x50,
         //   +0x08 dwFourCC @ file 0x54, +0x0C dwRGBBitCount @ file 0x58.
-        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x4C), 32u);   // dwSize
-        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x50), 4u);    // dwFlags = DDPF_FOURCC
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x4C), 32u); // dwSize
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x50), 4u); // dwFlags = DDPF_FOURCC
         // dwFourCC @ file 0x54: 'DXT1' = 44 58 54 31
         dds[0x54] = (byte)'D';
         dds[0x55] = (byte)'X';
@@ -279,18 +279,21 @@ public sealed class PngConverterTests
         byte[] dds = new byte[128];
 
         // Magic "DDS " at file 0x00.  spec: Docs/RE/formats/texture.md §DDS_HEADER offset 0x00.
-        dds[0] = 0x44; dds[1] = 0x44; dds[2] = 0x53; dds[3] = 0x20;
+        dds[0] = 0x44;
+        dds[1] = 0x44;
+        dds[2] = 0x53;
+        dds[3] = 0x20;
 
         // DDS_HEADER fields.  spec: Docs/RE/formats/texture.md §DDS_HEADER layout.
         BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x04), 124u); // dwSize
         BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x08), 0x1007u); // dwFlags
-        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x0C), height);  // dwHeight
-        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x10), width);   // dwWidth
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x0C), height); // dwHeight
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x10), width); // dwWidth
 
         // DDS_PIXELFORMAT at file offset 0x4C.  spec: Docs/RE/formats/texture.md §DDS_PIXELFORMAT.
-        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x4C), 32u);     // dwSize  @ file 0x4C
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x4C), 32u); // dwSize  @ file 0x4C
         BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x50), pfFlags); // dwFlags @ file 0x50
-        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x54), fourCC);  // dwFourCC @ file 0x54
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x54), fourCC); // dwFourCC @ file 0x54
         // dwRGBBitCount @ file 0x58 intentionally left 0x00000000 — confirms the converter
         // does NOT read FourCC from 0x58 (the off-by-4 regression location).
 
@@ -338,11 +341,11 @@ public sealed class PngConverterTests
         byte[] dds = MakeMinimalDdsHeader(fourCC: 0u, pfFlags: pfFlagsUncompressed);
 
         // Write dwRGBBitCount = 32 at file 0x58 and standard RGBA masks at 0x5C..0x6B.
-        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x58), 32u);           // dwRGBBitCount
-        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x5C), 0x00FF0000u);   // dwRBitMask
-        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x60), 0x0000FF00u);   // dwGBitMask
-        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x64), 0x000000FFu);   // dwBBitMask
-        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x68), 0xFF000000u);   // dwABitMask
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x58), 32u); // dwRGBBitCount
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x5C), 0x00FF0000u); // dwRBitMask
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x60), 0x0000FF00u); // dwGBitMask
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x64), 0x000000FFu); // dwBBitMask
+        BinaryPrimitives.WriteUInt32LittleEndian(dds.AsSpan(0x68), 0xFF000000u); // dwABitMask
 
         // Append 4×4 uncompressed RGBA32 pixel data (64 bytes): all red (R=255,G=0,B=0,A=255).
         // Wire format with above masks: each pixel = 0x00FF0000 (B@byte0=0,G@byte1=0,R@byte2=255,A@byte3=0)
@@ -378,8 +381,8 @@ public sealed class PngConverterTests
         for (int i = 0; i < 16; i++)
         {
             Assert.Equal(255, pixels[i * 4 + 0]); // R
-            Assert.Equal(0, pixels[i * 4 + 1]);   // G
-            Assert.Equal(0, pixels[i * 4 + 2]);   // B
+            Assert.Equal(0, pixels[i * 4 + 1]); // G
+            Assert.Equal(0, pixels[i * 4 + 2]); // B
             Assert.Equal(255, pixels[i * 4 + 3]); // A
         }
     }

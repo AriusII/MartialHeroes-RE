@@ -58,13 +58,13 @@ public sealed partial class FontBootstrap : Node
     // Gulim / Gulimche: older KR system faces present on many KR Windows installs.
     private static readonly string[] KoreanFaceNames =
     [
-        "Dotum",       // spec: §6.2 face "Dotum" (proportional sans) CODE-CONFIRMED
-        "DotumChe",    // spec: §6.2 face "DotumChe" (fixed-pitch sans) CODE-CONFIRMED
-        "Gulim",       // common KR alternative proportional sans
-        "GulimChe",    // common KR alternative fixed-pitch sans
-        "Malgun Gothic",   // ships on all Windows 10/11 — guaranteed CJK coverage
-        "Batang",      // spec: §6.2 face "BatangChe" proportional variant CODE-CONFIRMED
-        "BatangChe",   // spec: §6.2 face "BatangChe" (fixed-pitch serif) CODE-CONFIRMED
+        "Dotum", // spec: §6.2 face "Dotum" (proportional sans) CODE-CONFIRMED
+        "DotumChe", // spec: §6.2 face "DotumChe" (fixed-pitch sans) CODE-CONFIRMED
+        "Gulim", // common KR alternative proportional sans
+        "GulimChe", // common KR alternative fixed-pitch sans
+        "Malgun Gothic", // ships on all Windows 10/11 — guaranteed CJK coverage
+        "Batang", // spec: §6.2 face "BatangChe" proportional variant CODE-CONFIRMED
+        "BatangChe", // spec: §6.2 face "BatangChe" (fixed-pitch serif) CODE-CONFIRMED
     ];
 
     // -------------------------------------------------------------------------

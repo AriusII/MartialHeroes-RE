@@ -99,9 +99,9 @@ public sealed class CharManageResultLayoutTests
     public void SmsgCharManageResult_decodes_known_bytes()
     {
         Span<byte> body = stackalloc byte[SmsgCharManageResult.WireSize];
-        body[0x00] = 1;    // Result = success path
+        body[0x00] = 1; // Result = success path
         body[0x01] = 0xAA; // Reserved1
-        body[0x02] = 2;    // Subtype = delete-confirm
+        body[0x02] = 2; // Subtype = delete-confirm
         body[0x03] = 0xBB; // Reserved3
         BinaryPrimitives.WriteUInt32LittleEndian(body[0x04..], 0x5F3A_C0DEu); // ReadyTime
 
@@ -133,15 +133,15 @@ public sealed class CharManageResultLayoutTests
         Assert.Equal((byte)'r', p.NameOrError[2]);
         Assert.Equal((byte)'o', p.NameOrError[3]);
         Assert.Equal((byte)'7', p.NameOrError[4]);
-        Assert.Equal((byte)0, p.NameOrError[5]);   // NUL terminator
-        Assert.Equal((byte)0, p.NameOrError[17]);  // last buffer byte stays zero
+        Assert.Equal((byte)0, p.NameOrError[5]); // NUL terminator
+        Assert.Equal((byte)0, p.NameOrError[17]); // last buffer byte stays zero
     }
 
     [Fact] // spec: Docs/RE/specs/login_flow.md §5.6 (failure path: error code in NameOrError[0])
     public void SmsgRenameCharResult_decodes_failure_error_code()
     {
         Span<byte> body = stackalloc byte[SmsgRenameCharResult.WireSize];
-        body[0x00] = 0;    // Result = failure
+        body[0x00] = 0; // Result = failure
         body[0x01] = 0xC8; // error code (range 0xC8..0xD4) lands in NameOrError[0]
 
         ref readonly SmsgRenameCharResult p = ref MemoryMarshal.AsRef<SmsgRenameCharResult>(body);
@@ -153,11 +153,11 @@ public sealed class CharManageResultLayoutTests
     public void SmsgCharCreateResult_decodes_known_bytes()
     {
         Span<byte> body = stackalloc byte[SmsgCharCreateResult.WireSize];
-        body[0x00] = 1;    // Result = success
-        body[0x01] = 3;    // Code = assigned slot id (success) / or 0xC8..0xD4 on failure
-        BinaryPrimitives.WriteUInt16LittleEndian(body[0x02..], 0xBEEF);       // Pad
-        BinaryPrimitives.WriteUInt32LittleEndian(body[0x04..], 0x11223344u);  // Value1
-        BinaryPrimitives.WriteUInt32LittleEndian(body[0x08..], 0x55667788u);  // Value2
+        body[0x00] = 1; // Result = success
+        body[0x01] = 3; // Code = assigned slot id (success) / or 0xC8..0xD4 on failure
+        BinaryPrimitives.WriteUInt16LittleEndian(body[0x02..], 0xBEEF); // Pad
+        BinaryPrimitives.WriteUInt32LittleEndian(body[0x04..], 0x11223344u); // Value1
+        BinaryPrimitives.WriteUInt32LittleEndian(body[0x08..], 0x55667788u); // Value2
 
         ref readonly SmsgCharCreateResult p = ref MemoryMarshal.AsRef<SmsgCharCreateResult>(body);
         Assert.Equal((byte)1, p.Result);

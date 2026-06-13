@@ -47,20 +47,20 @@ public static class LoginLayout
     //     Strip is added directly to LoginScreen (not the band) at canvas-absolute position.
     //     // PLAUSIBLE x=0 (exact runtime x not in spec)
     //     spec: Docs/RE/specs/ui_system.md §8.1 "Intro banner (—,97,202,372)". CODE-CONFIRMED dims.
-    public const int BannerStripX = 0;        // PLAUSIBLE (register-fed x not in spec)
-    public const int BannerStripLocalY = 97;  // spec §8.1 y=97 panel-local. CODE-CONFIRMED.
-    public const int BannerStripW = 202;       // spec §8.1 w=202. CODE-CONFIRMED.
-    public const int BannerStripH = 372;       // spec §8.1 h=372. CODE-CONFIRMED.
+    public const int BannerStripX = 0; // PLAUSIBLE (register-fed x not in spec)
+    public const int BannerStripLocalY = 97; // spec §8.1 y=97 panel-local. CODE-CONFIRMED.
+    public const int BannerStripW = 202; // spec §8.1 w=202. CODE-CONFIRMED.
+    public const int BannerStripH = 372; // spec §8.1 h=372. CODE-CONFIRMED.
 
     // --- Form backing geometry — covers the widget cluster (x=380..810, y=−10..400 panel-local).
     //     No dedicated panel art was recovered; this is a plausible solid backing.
     //     Spec widget cluster: x range = 390..706 (AccountBox..SaveIdCheck+label), y range = −3..205.
     //     We pad slightly for visual comfort: x=370, y=−10, w=430, h=220.
     //     // PLAUSIBLE backing (art not in spec)
-    public const int FormBackingX = 370;   // left edge, panel-local, covers form cluster
-    public const int FormBackingY = -10;   // top edge, panel-local (Quit strip is at y=-3)
-    public const int FormBackingW = 430;   // covers x=370..800 (ID/PW/OK/ServerList/SaveId)
-    public const int FormBackingH = 220;   // covers y=-10..210 (all form widgets)
+    public const int FormBackingX = 370; // left edge, panel-local, covers form cluster
+    public const int FormBackingY = -10; // top edge, panel-local (Quit strip is at y=-3)
+    public const int FormBackingW = 430; // covers x=370..800 (ID/PW/OK/ServerList/SaveId)
+    public const int FormBackingH = 220; // covers y=-10..210 (all form widgets)
 
     // Form backing colour — parchment-tinted panel backing behind the form widget cluster.
     // Must clearly contrast with the full-canvas black backdrop (0.06, 0.05, 0.08).

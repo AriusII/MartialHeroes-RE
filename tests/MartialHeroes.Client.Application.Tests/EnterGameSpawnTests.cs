@@ -187,8 +187,8 @@ public sealed class EnterGameSpawnTests
     {
         var (useCases, _, _, _, sink, _) = NewSelectionHarness(ClientState.CharacterSelection);
 
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            async () => await useCases.SelectCharacterAsync(slotIndex: 5));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await useCases.SelectCharacterAsync(slotIndex: 5));
 
         Assert.Empty(sink.Sends); // nothing sent for an out-of-range slot
     }
@@ -228,7 +228,7 @@ public sealed class EnterGameSpawnTests
 
     private static (ApplicationUseCases UseCases, ClientWorld World, CharacterSelectionStore Store,
         ClientEventBus Bus, FakeOutboundSink Sink, ClientStateMachine Fsm) NewSelectionHarness(
-        ClientState initial)
+            ClientState initial)
     {
         var bus = new ClientEventBus(ClientEventBus.Unbounded);
         var fsm = new ClientStateMachine(bus, initial);

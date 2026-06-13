@@ -78,7 +78,7 @@ public sealed class LobbyClient : ILobbyClient
     // -----------------------------------------------------------------------
 
     // spec: Docs/RE/packets/lobby.yaml — COMMON LOBBY FRAME WRAPPER
-    private const int WrapperSize = 8;      // lobby frame wrapper is 8 bytes (same as game header)
+    private const int WrapperSize = 8; // lobby frame wrapper is 8 bytes (same as game header)
     private const int WrapperSizeOffset = 0; // +0 u16 LE: total frame size
     private const int WrapperMajorOffset = 4; // +4 u16 LE: server-record count (server-list query)
 
@@ -229,8 +229,8 @@ public sealed class LobbyClient : ILobbyClient
             //   +0 u16 server_id, +2 i16 status, +4 i16 load, +6 i16 open_time
             records[i] = new LobbyServerRecord(
                 ServerId: BinaryPrimitives.ReadUInt16LittleEndian(rec[0..]),
-                Status:   BinaryPrimitives.ReadInt16LittleEndian(rec[2..]),
-                Load:     BinaryPrimitives.ReadInt16LittleEndian(rec[4..]),
+                Status: BinaryPrimitives.ReadInt16LittleEndian(rec[2..]),
+                Load: BinaryPrimitives.ReadInt16LittleEndian(rec[4..]),
                 OpenTime: BinaryPrimitives.ReadInt16LittleEndian(rec[6..]));
         }
 
