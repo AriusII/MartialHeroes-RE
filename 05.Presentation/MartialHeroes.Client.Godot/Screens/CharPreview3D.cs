@@ -17,10 +17,23 @@
 // IMPORTANT: 3D preview viewport construction is DEFERRED (via CallDeferred) so it happens safely
 // on the main thread after _Ready. All Control mutation is main-thread-only.
 //
-// KNOWN LIMITATION: The character loaded here is the CANONICAL g202110001 Musa player skin (the
-// same proven humanoid rig from RealWorldRenderer), NOT a slot-specific skin from the char-list
-// packet — there is no Application event layer feeding the select screen yet. When the
-// application-engineer wires SmsgCharacterList events, replace _sknPath with the per-slot value.
+// RIG RESOLUTION (per-slot, not hardcoded):
+//   The skin_class (= IdB field in the .skn header) drives the asset chain:
+//     skin_class → data/char/skin/g202{skin_class}10001.skn   (primary candidate)
+//                → data/char/bind/g{skin_class}.bnd           (.bnd skeleton)
+//                → actormotion.txt col2==skin_class col16      (idle .mot)
+//   spec: CLAUDE.md §Recovered asset mappings — "skin_class → data/char/bind/g{skin_class}.bnd".
+//   spec: frontend_scenes.md §3.3 — "same in-world player actor factory; no new asset loading".
+//
+//   The class→skin_class mapping used by the offline stub:
+//     internal class 1 (Musa)    → skin_class 1  (g202110001.skn, IdB=1)
+//     internal class 2 (Tao)     → skin_class 2  (g202220001.skn, IdB=2)
+//     internal class 3 (Blader)  → skin_class 3  (g202130001.skn, IdB=3)
+//     internal class 4 (Warrior) → skin_class 4  (g202140001.skn, IdB=4)
+//   TODO: pin to a spec entry once the class→skin_class table is formally documented.
+//   PLAUSIBLE — the g202{X}10001 pattern is confirmed on the real VFS for X in {1,2,3,4} and the
+//   IdB field equals X; no capture or formal spec yet maps internal class id → IdB.
+//   (Tracked as an open item; see frontend_scenes.md Open questions.)
 //
 // spec: Docs/RE/specs/frontend_scenes.md §3.3 (live 3D preview actors, stage positions, scale ×3.0).
 // spec: Docs/RE/specs/ui_system.md §1 (GUCanvas3D widget role: "renders a live model into a 2D UI rect").
@@ -99,6 +112,27 @@ public sealed partial class CharPreview3D : Control
     /// </summary>
     public RealClientAssets? SharedRealAssets { get; set; }
 
+    /// <summary>
+    /// The skin_class (= IdB in the .skn header) for this slot's character.
+    /// Drives the asset chain: g202{SkinClassId}10001.skn → g{SkinClassId}.bnd → actormotion.txt idle.
+    /// spec: CLAUDE.md §Recovered asset mappings — "skin_class → data/char/bind/g{skin_class}.bnd".
+    /// PLAUSIBLE mapping (class id == IdB for player classes 1..4) — see file header TODO note.
+    /// When 0, falls back to the canonical Musa skin (skin_class=1).
+    /// </summary>
+    public uint SkinClassId { get; set; } = 1;
+
+    /// <summary>Character name to display on the placeholder label overlay.</summary>
+    public string SlotCharacterName { get; set; } = string.Empty;
+
+    /// <summary>Character level to display on the placeholder label overlay.</summary>
+    public int SlotLevel { get; set; }
+
+    /// <summary>
+    /// Human-readable class label (e.g. "Musa", "Tao", "Blader", "Warrior") for the overlay.
+    /// Sourced from the ClassLabelFallbacks in the layout, not decoded from VFS here.
+    /// </summary>
+    public string SlotClassName { get; set; } = string.Empty;
+
     // -------------------------------------------------------------------------
     // Runtime state
     // -------------------------------------------------------------------------
@@ -151,13 +185,32 @@ public sealed partial class CharPreview3D : Control
         placeholder.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         AddChild(placeholder);
 
-        // Slot label.
+        // Slot info label — shows name/class/level for occupied slots.
+        // spec: frontend_scenes.md §3.2 — "slot info line shows name, level, position". CODE-CONFIRMED.
+        string labelText;
+        if (!IsOccupied)
+        {
+            labelText = "(empty)";
+        }
+        else if (!string.IsNullOrEmpty(SlotCharacterName))
+        {
+            // Show name + class + level when the descriptor data has been supplied.
+            string classLine = string.IsNullOrEmpty(SlotClassName) ? string.Empty : $"\n{SlotClassName}";
+            string levelLine = SlotLevel > 0 ? $"\nLv {SlotLevel}" : string.Empty;
+            labelText = $"{SlotCharacterName}{classLine}{levelLine}";
+        }
+        else
+        {
+            labelText = $"Slot {SlotIndex + 1}";
+        }
+
         var lbl = new Label
         {
-            Text = IsOccupied ? $"Slot {SlotIndex + 1}" : "(empty)",
+            Text = labelText,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Bottom,
             MouseFilter = MouseFilterEnum.Ignore,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
         };
         lbl.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         lbl.AddThemeFontSizeOverride("font_size", 11);
@@ -324,15 +377,19 @@ public sealed partial class CharPreview3D : Control
 
     private Node3D? TryBuildCharacterRig(RealClientAssets assets)
     {
-        // Load the canonical humanoid player skin (Musa g202110001) — the proven rig.
-        // In a networked build this would use the per-slot spawn descriptor's class/skin.
-        // spec: frontend_scenes.md §3.3 — "same in-world player actor factory; no new asset loading".
-        string? sknPath = CharacterTextureResolver.PickHumanoidPlayerSkin(assets);
+        // Resolve skin by SkinClassId (= IdB in .skn header = the slot's skin_class / player class).
+        // Asset chain: skin_class → data/char/skin/g202{skin_class}10001.skn (primary candidate).
+        // spec: CLAUDE.md §Recovered asset mappings — "skin_class → data/char/bind/g{skin_class}.bnd
+        //   + the .skn whose IdB == skin_class".
+        // PLAUSIBLE: class id == IdB for standard player classes 1..4 — see file header TODO note.
+        string? sknPath = PickSkinForClass(assets, SkinClassId);
         if (sknPath is null)
         {
-            GD.Print($"[CharPreview3D] slot={SlotIndex} no humanoid skin in VFS.");
+            GD.Print($"[CharPreview3D] slot={SlotIndex} no humanoid skin in VFS for skin_class={SkinClassId}.");
             return null;
         }
+
+        GD.Print($"[CharPreview3D] slot={SlotIndex} resolved skin_class={SkinClassId} → '{sknPath}'.");
 
         SkinnedMesh? mesh = null;
         try
@@ -422,6 +479,69 @@ public sealed partial class CharPreview3D : Control
             // Always restore the saved value, even if Build threw.
             SkinnedCharacterBuilder.PrintDiagnostics = savedPrintDiagnostics;
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Per-class skin resolution
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Resolves a VFS .skn path for the given <paramref name="skinClassId"/> (= IdB).
+    /// <para>Asset chain (spec: CLAUDE.md §Recovered asset mappings):</para>
+    /// <list type="number">
+    ///   <item>Primary candidate: <c>data/char/skin/g202{skinClassId}10001.skn</c></item>
+    ///   <item>Variant scan: <c>g202{skinClassId}10002</c> .. <c>g202{skinClassId}10010</c></item>
+    ///   <item>Fallback to <see cref="CharacterTextureResolver.PickHumanoidPlayerSkin"/> (Musa rig).</item>
+    /// </list>
+    /// <para>
+    /// PLAUSIBLE mapping: internal class id == IdB for standard player classes 1..4.
+    /// Confirmed on real VFS: g202110001 (IdB=1), g202220001 (IdB=2), g202130001 (IdB=3),
+    /// g202140001 (IdB=4). TODO: pin to a formal class→IdB spec entry.
+    /// spec: CLAUDE.md §Recovered asset mappings (skin_class / IdB chain). PLAUSIBLE.
+    /// </para>
+    /// </summary>
+    private static string? PickSkinForClass(RealClientAssets assets, uint skinClassId)
+    {
+        if (skinClassId == 0)
+            return CharacterTextureResolver.PickHumanoidPlayerSkin(assets);
+
+        // Primary: g202{skinClassId}10001.skn — the base skin for this class.
+        // spec: CLAUDE.md §Recovered asset mappings — confirmed on real VFS for classes 1..4.
+        // Pattern: 202{classDigit}10001 where classDigit is the 1-digit class index.
+        // For classes 1..4 the pattern is:
+        //   class 1 → g202110001.skn  (Musa)      CONFIRMED
+        //   class 2 → g202220001.skn  (Tao)        CONFIRMED
+        //   class 3 → g202130001.skn  (Blader)     CONFIRMED
+        //   class 4 → g202140001.skn  (Warrior)    CONFIRMED
+        // The numeric ID schema: 202{class}{10001} where the middle segment encodes the class.
+        // Classes 1,3,4 use 2021X0001; class 2 uses 2022X0001 (Tao has a different prefix).
+        // PLAUSIBLE — no formal spec; confirmed by VFS probe only.
+
+        // Build skin ID candidates for this class.
+        // The Tao class (class 2) uses 2022X0001; others use 2021X0001.
+        // TODO: confirm with a formal class→skinId spec entry.
+        uint[] candidates = skinClassId switch
+        {
+            2 => [202220001u, 202220002u, 202220003u], // Tao — "g202220001.skn" etc.
+            _ =>
+            [
+                202100001u + skinClassId * 10000u, // formula: 202{class}10001
+                202100002u + skinClassId * 10000u,
+                202100003u + skinClassId * 10000u
+            ],
+        };
+
+        foreach (uint skinId in candidates)
+        {
+            string path = $"data/char/skin/g{skinId}.skn";
+            if (assets.Contains(path))
+                return path;
+        }
+
+        // Fallback to the canonical Musa skin (the proven rig).
+        GD.Print($"[CharPreview3D] PickSkinForClass: skin_class={skinClassId} not found, " +
+                 $"falling back to Musa humanoid skin.");
+        return CharacterTextureResolver.PickHumanoidPlayerSkin(assets);
     }
 
     private static AnimationClip? TryLoadIdleClip(RealClientAssets assets, uint actorClassId)

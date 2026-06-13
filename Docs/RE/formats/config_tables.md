@@ -110,18 +110,20 @@ traced.
 | `data/script/viplevels.scr` | 92 (0x5C) | none | CONFIRMED | VIP level table |
 | `data/script/itemscale.scr` | 8 | none | CONFIRMED | Item scale table |
 | `data/script/itemeffect.scr` | 4 | none | CONFIRMED | Item effect table |
-| `data/script/npc.scr` | UNVERIFIED | — | UNVERIFIED | NPC sub-table |
+| `data/script/npc.scr` | 404 (0x194) | none | SAMPLE-VERIFIED | NPC description-text table (see §2.17; distinct from npcs.scr) |
+| `data/script/quests.scr` | 3720 (0xE88), sparse | none | SAMPLE-VERIFIED | Quest template catalogue (see §2.17; 488 slots / 122 occupied) |
+| `data/script/autoquestion_cl.scr` | 92 (0x5C) | none | SAMPLE-VERIFIED | Anti-bot arithmetic-quiz question pool (see §2.17) |
+| `data/script/discript.sc` | 68 (0x44) | none | SAMPLE-VERIFIED | UI context-menu label table (see §2.17) |
+| `data/script/products.scr` | 212 (0xD4) | none | SAMPLE-VERIFIED (stride) | Crafting recipe catalogue (id + CP949 name verified; body fields UNVERIFIED) |
 | `data/script/mapsetting.scr` | UNVERIFIED | — | UNVERIFIED | Map settings |
-| `data/script/quests.scr` | UNVERIFIED | — | UNVERIFIED | Quest definitions |
-| `data/script/products.scr` | UNVERIFIED | — | UNVERIFIED | Crafting recipes |
-| `data/script/events.scr` | UNVERIFIED | — | UNVERIFIED | Event table |
-| `data/script/helps.scr` | UNVERIFIED | — | UNVERIFIED | Help text |
+| `data/script/events.scr` | variable-length (indexed) | offset-table header | SAMPLE-VERIFIED (header only) | Event table — not a flat array; in-file offset table at +0x64 (see §2.17 note) |
+| `data/script/helps.scr` | two-level hierarchical | per-page sub-entries | SAMPLE-VERIFIED (first page) | Help text — outer 16-byte page header + N × 48-byte sub-entries (see §2.17 note) |
 | `data/item/items_extra.do` | 48 | none | CONFIRMED | Item extended / 3D-attachment data |
 | `data/script/textcommand.do` | 52 | none | CONFIRMED | Chat command definitions |
 | `data/script/emoticon.do` | 40 | none | CONFIRMED | Emoticon sprite-sheet definitions |
 | `data/script/msginfo.do` | 128 | none | CONFIRMED | In-game popup message strings |
 | `data/script/errorinfo.do` | 108 (0x6C) | none | CONFIRMED (stride only) | Error message strings |
-| `data/script/monkma.do` and class-stance variants | 116 (0x74) | none | SAMPLE-VERIFIED (12/12 files) | Per-class stance/move tables — the on-disk source of skill icon (srcX,srcY); see ui_manifests.md §2.7. The earlier 166-byte estimate was wrong: 9 of the 12 files divide by 116 exactly (e.g. musajung.do 34,916 B = 301×116) and the rest leave only a small ignored tail (12–60 B); none divides by 166. |
+| `data/script/monkma.do` and class-stance variants | 116 (0x74) | none | SAMPLE-VERIFIED (12/12 files) + CODE-CONFIRMED layout | Per-class stance skill-hotbar tables — the on-disk source of skill icon (srcX,srcY); **full 116-byte record layout in §3.5**; see also ui_manifests.md §2.7. The earlier 166-byte estimate was wrong: 9 of the 12 files divide by 116 exactly (e.g. musajung.do 34,916 B = 301×116) and the rest leave only a small ignored tail (12–60 B); none divides by 166. |
 
 **Additional .scr files observed in the engine string table (loaders not traced):**
 `nicktofame.scr`, `guildcrest.scr`, `letters.scr`, `chivalry.scr`,
@@ -707,7 +709,104 @@ These strides are confirmed; no sample bytes available for field-level breakdown
 | `data/script/itemscale.scr` | 8 bytes | Item scale table |
 | `data/script/itemeffect.scr` | 4 bytes | Item effect table |
 | `data/script/errorinfo.do` | 108 bytes (0x6C) | Error message strings |
-| Per-class stance `.do` files (`monkma.do`, `monksa.do`, etc.) | 116 bytes (0x74) — corrected from the earlier 166-byte estimate; SAMPLE-VERIFIED 12/12 | Per-class skill/move tables incl. skill icon (srcX,srcY) at +0x18/+0x1C (ui_manifests.md §2.7) |
+| Per-class stance `.do` files (`monkma.do`, `monksa.do`, etc.) | 116 bytes (0x74) — corrected from the earlier 166-byte estimate; SAMPLE-VERIFIED 12/12 | Per-class skill-hotbar tables incl. skill icon (srcX,srcY) at +0x18/+0x1C; full layout in §3.5 (ui_manifests.md §2.7) |
+
+---
+
+### 2.17 Quest-data family (quests.scr, autoquestion_cl.scr, npc.scr, discript.sc)
+
+**Sample verified (2026-06-13) via VFS byte inspection (no IDA).** These four files back the
+quest / NPC-dialog subsystem; the behavioural model that consumes them is in
+`specs/quests.md`. The behavioural roles are summarised there; the byte layouts are here.
+
+All strings CP949 / EUC-KR, null-terminated. All integers little-endian.
+
+#### 2.17.1 quests.scr — quest template catalogue (stride: 3720 bytes, 488 slots, 122 occupied)
+
+**SPEC CORRECTION:** the §2.2 inventory previously listed `quests.scr` as UNVERIFIED, and a
+prior static inference put the stride at 4960 bytes (~366 quests). The real sample measures a
+**3720-byte (0xE88) stride, 488 slots, 122 occupied** (366 empty). This is a **sparse** flat
+array, not index-keyed: a slot is empty when its leading `u16` quest id is 0, and the runtime
+keys a map on the non-zero quest ids (range 1..617).
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| +0x000 | 2 | u16 | Quest id (map key) | 1..617; 0 = empty slot | SAMPLE-VERIFIED |
+| +0x002 | ≤32 | char[] | Quest name (CP949) | Null-terminated; in a ~62-byte name buffer ending by ~+0x3F | SAMPLE-VERIFIED |
+| +0x040 | 6 | u8[6] | Step / objective code bytes | Three distinct patterns (e.g. `05 06 07 08 09 0A`); 100% occupancy; index/template meaning UNVERIFIED | SAMPLE-VERIFIED (presence); UNVERIFIED (semantic) |
+| +0x046 | 14 | — | Zero pad | Zero in all occupied records | SAMPLE-VERIFIED (value=0) |
+| +0x054 | 4 | u32 | Chain/category reference A | Decimal-digit composite `730 R QQQQQ 04` (R = region/category, QQQQQ = quest id) | SAMPLE-VERIFIED (pattern) |
+| +0x058 | 4 | u32 | Chain/category reference B | Always `A + 1` (the `…05` sibling) | SAMPLE-VERIFIED |
+| +0x064 | 4 | u32 | Quest type or step count | Constant value 2 across all 122 occupied records; semantic UNVERIFIED | SAMPLE-VERIFIED (value); UNVERIFIED (semantic) |
+| +0x068 onward | var | char[] | Objective / step description text (CP949) | One or more strings; occupancy tapers across later steps | SAMPLE-VERIFIED (presence) |
+| +0x0E4, +0x1D4, +0x248, +0x2C4, +0x338, … +0xE78 | 4 ea | u32 | Sub-section markers (value 48 / 0x30) | 100% occupancy at regular spacing (≈0xF0=240 B for the first group, then ≈0x7C=124 B); implies embedded fixed-stride objective/reward sub-records | SAMPLE-VERIFIED (value=48) |
+
+**Structural note.** The recurring `u32 = 48` at fixed spacing is the strongest structural
+signal in the record: it is consistent with embedded **48-byte sub-records** (quest steps,
+each likely carrying objective NPC id, kill/collect targets, reward item id and EXP). The
+sub-record contents are not yet field-decoded. The composite at +0x054/+0x058 mirrors the
+decimal-composite chain-reference scheme seen in `skills.scr` (§2.8).
+
+#### 2.17.2 autoquestion_cl.scr — anti-bot quiz pool (stride: 92 bytes, 1300 records)
+
+Sequential `u32` question id at +0; the file stores the **display text** of simple
+Korean-language arithmetic (multiplication) questions for human-verification. The numeric
+answer is checked server-side and is not stored on the client.
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| +0x00 | 4 | u32 | Question id (map key) | Sequential 1..1300 | SAMPLE-VERIFIED |
+| +0x04 | ≤28 | char[] | Question text (CP949) | Null-terminated; e.g. "(number) 과 (number)(을)를 곱한 결과는?" | SAMPLE-VERIFIED |
+| ~+0x20 | var | char[] | Answer-hint text (CP949) | "정답을 숫자로 입력해주세요" ("enter the answer as a number") | SAMPLE-VERIFIED |
+| tail | — | — | Zero pad to the 92-byte stride | — | SAMPLE-VERIFIED |
+
+#### 2.17.3 npc.scr — NPC description-text table (stride: 404 bytes, 2510 records)
+
+**SPEC CORRECTION:** §2.2 previously listed `npc.scr` as UNVERIFIED. The sample confirms a
+**404-byte (0x194) stride, 2510 records**, sequential `u32` id at +0 mirrored at +4. This file
+holds the multi-paragraph **NPC class/archetype description text** (and is the dialogue-body
+store referenced by the quest dialogs); it is distinct from the `npcs.scr` catalogue (stride
+1916, §2.10). The key linking the two id spaces is UNVERIFIED.
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| +0x000 | 4 | u32 | NPC class/descriptor id (map key) | Sequential 1..2510 | SAMPLE-VERIFIED |
+| +0x004 | 4 | u32 | Id mirror | Equals +0x000 in all records (possible second lookup key) | SAMPLE-VERIFIED |
+| +0x008 | 8 | — | Reserved | Zero in observed records | SAMPLE-VERIFIED (value=0) |
+| +0x014 | ≤36 | char[] | Description paragraph 0 (CP949) | First archetype paragraph | SAMPLE-VERIFIED |
+| +0x050 | ≤28 | char[] | Description paragraph 1 (CP949) | Second paragraph | SAMPLE-VERIFIED |
+| +0x090 | ≤28 | char[] | Description paragraph 2 (CP949) | Third paragraph | SAMPLE-VERIFIED |
+| +0x0D0 | 4 | u32 | Sub-section marker (value 48 / 0x30) | 100% occupancy | SAMPLE-VERIFIED (value=48) |
+| +0x110 | 4 | u32 | Sub-section marker (value 48) | 100% occupancy | SAMPLE-VERIFIED (value=48) |
+| +0x150 | 4 | u32 | Sub-section marker (value 48) | 100% occupancy | SAMPLE-VERIFIED (value=48) |
+| other | — | — | Mostly zero / sparse | — | UNVERIFIED |
+
+The three `48`-markers at +0xD0 / +0x110 / +0x150 (spacing 0x40 = 64) mirror the `quests.scr`
+sub-record pattern: each 404-byte record carries three 64-byte description "pages".
+
+#### 2.17.4 discript.sc — UI context-menu labels (stride: 68 bytes, 33 records)
+
+A small table of right-click / context-menu item labels, referenced from quest and
+interaction UI menus (party/guild actions, currency names, window toggles, school actions).
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| +0x00 | 4 | u32 | Menu item id (map key) | e.g. 8..12 (party), 70..73 (currency), 0xF2A0+ (window toggles), 0x1194+ (school) | SAMPLE-VERIFIED |
+| +0x04 | 4 | u32 | Category / type code | e.g. 3 = party action, 67 = shop item, 70/102 = hotkey/function-key labels | SAMPLE-VERIFIED |
+| +0x08 | ≤24 | char[] | Label text (CP949) | e.g. "무리 권유" (party invite), "협행창" (quest window), "행낭창" (inventory) | SAMPLE-VERIFIED |
+| +0x1C | ≤20 | char[] | Secondary text / ASCII shortcut | For hotkey items: "(F)", "(I)", … | SAMPLE-VERIFIED |
+| ~+0x26 | 4 | u32 | Sub-section marker (value 48) | Consistent with the family's 48-marker convention | SAMPLE-VERIFIED (value=48) |
+| tail | — | — | Zero pad to the 68-byte stride | — | SAMPLE-VERIFIED |
+
+#### 2.17.5 Related quest-data files (stride/structure only, this pass)
+
+| File | Size / structure | Notes |
+|---|---|---|
+| `products.scr` | stride 212 (0xD4), 9092 records | `u32` recipe id @ +0, CP949 name @ +4; 188-byte body (ingredients/output) UNVERIFIED |
+| `events.scr` | variable-length, indexed | File header with a `u16` event-category count and an in-file `u32` offset table at +0x64..+0xA7 pointing to ~15 variable-length event-record bodies; record content not decoded |
+| `helps.scr` | two-level hierarchical | Outer 16-byte page header (`page_id`, `section_id`, reserved, `entry_count`) + `entry_count` × 48-byte sub-entries; first page sample-verified, full page-walk UNVERIFIED |
+| `tiphelp.scr` | variable-length | Loading-screen tip records; `u32` body-size + tip-count header then CP949 tip text; not flat-stride |
+| `dashs.scr` / `minds.scr` | stride 796 / 808 | Movement-skill / inner-cultivation skill reference tables; `u32` id @ +0, CP949 name; 7 / 9 records |
 
 ---
 
@@ -872,6 +971,136 @@ The sentinel records appear mid-file (not at EOF), likely marking a sub-table bo
 - Exact semantics of `rarity_tier` (+44)
 - The category scheme encoded by the top byte of the item ID (category enum names unknown)
 - Purpose of the 16 sentinel records at ID 0x7FFFFFFF (sub-table separator?)
+
+---
+
+### 3.5 Per-class stance `.do` skill-hotbar table (stride: 116 bytes / 0x74)
+
+**Code-confirmed (static analysis), CAPTURE-UNVERIFIED, plus sample-verified census (2026-06-13).**
+The 12 per-class stance `.do` files (`data/script/musajung.do` and 11 siblings) are the
+**authoritative on-disk source** of the per-skill UI hotbar slot layout, including the skill
+icon source coordinates `(iconSrcX, iconSrcY)`. Each file covers one `(job × stance)` path. The
+file-to-class mapping and the icon-source role are described in `ui_manifests.md §2.7`; this
+section gives the **complete 116-byte record layout** that §2.7 previously left as a 72-byte
+"unmapped" tail.
+
+**Correction (2026-06-13).** Earlier notes (and `ui_manifests.md §2.7`) described `+0x14` as a
+`u16` and the icon fields `+0x18 / +0x1C` as `i16`. The engine's hotbar-slot widget builder reads
+**all** multi-byte fields from `+0x08` onward as 32-bit `u32` (each field is moved as a DWORD; the
+small on-disk values simply leave the top two bytes zero). The icon coordinates are therefore
+**unsigned `u32`** with values in the range 0..489, **not** signed `i16`. The sample census reads
+the same fields as 16-bit-valued and confirms the upper two bytes of every such field are
+near-universally zero (96–97% zero, occasional uninitialised-memory garbage), so the on-disk and
+in-engine views agree: a 16-bit value stored in a 4-byte slot.
+
+**Important — this record carries NO game-mechanic data.** It is a pure UI widget descriptor:
+screen position, icon atlas UV, a secondary level/rank-bar UV pair, and up to three optional
+overlay-sprite descriptors. Level requirement, MP/SP cost, cooldown, range, and target mode are
+**not** in the `.do` record; those live in `skills.scr` (§2.8) and are reached via the join
+described below. (The §2.16 inventory still lists this file family at 116 bytes; the row there
+remains correct.)
+
+**Sample-verified census (3,312 records across all 12 files):** the 116-byte stride is confirmed;
+9 of the 12 files divide by 116 exactly, the other 3 leave a small ignored tail (12/40/60 bytes).
+The icon coordinates at `+0x18 / +0x1C` resolve to valid 23-px-cell grid positions for 93.9% of
+records (the remainder are empty/unused skill slots). All odd-aligned 2-byte positions across the
+whole record (the upper halves of the `u32` fields) are 96–97% zero — i.e. padding.
+
+**The earlier "72 vs 76 bytes at +0x28" discrepancy is resolved.** `116 − 0x28 = 76` bytes, and
+those 76 bytes (`+0x28..+0x73`) are a **UI overlay-sprite descriptor block**: three optional badge
+sprites that decorate the hotbar slot, each gated by its own presence flag. The block is fully
+accounted for below; there is no remaining unmapped region.
+
+#### Record layout (116 bytes / 0x74, little-endian, naturally 4-byte aligned)
+
+| Offset | Hex | Size | Type | Field | Notes | Confidence |
+|-------:|----:|-----:|------|-------|-------|------------|
+| +0   | 00 | 4 | u32 | `instanceKey` | Large sequential skill-instance id; primary map key (first `musajung.do` record = 131101011 / 0x07D07153). Joined to `skills.scr` client-side via the skill-catalogue lookup; see below | CODE-CONFIRMED (CAPTURE-UNVERIFIED) + SAMPLE-VERIFIED |
+| +4   | 04 | 1 | u8  | `stanceFilter` | Stance/sex discriminator byte, compared against the active stance value; non-matching records are skipped when the hotbar is built. Compared as `< 3` in the dispatch | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +5   | 05 | 3 | — | _pad | Alignment padding; never individually read | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +8   | 08 | 4 | u32 | `slotIndex` | Sequential slot identifier 0,1,2,…; secondary map key | CODE-CONFIRMED (CAPTURE-UNVERIFIED) + SAMPLE-VERIFIED |
+| +12  | 0C | 4 | u32 | `classStanceRef` | `(job × stance)` discriminator used to resolve the skill-icon DDS sheet. Sample-verified values (census): {1001, 1002, 1004, 1005, 1007, 1008, 1010, 1011} in the eight "jung/sa" files; the four "ma"-path files carry small integers (0/12/19/21/23/…) instead of a 4-digit ref — an anomaly (see open list) | CODE-CONFIRMED (8 files) + SAMPLE-VERIFIED; PLAUSIBLE (4 "ma" files) |
+| +16  | 10 | 4 | u32 | `widgetPosX` | Screen X base (pixels) of the hotbar slot widget group | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +20  | 14 | 4 | u32 | `widgetPosY_raw` | Screen Y raw (pixels); the engine subtracts 92 before use (`screenY = widgetPosY_raw − 92`) (corrected 2026-06-13: read as u32, not the previously-noted u16) | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +24  | 18 | 4 | u32 | `iconSrcX` | Skill icon atlas left edge (pixels); 0..489 on a 23-px grid (authored data, not a formula) (corrected 2026-06-13: u32, not i16) | CODE-CONFIRMED (CAPTURE-UNVERIFIED) + SAMPLE-VERIFIED |
+| +28  | 1C | 4 | u32 | `iconSrcY` | Skill icon atlas top edge (pixels); 0..489, same 23-px grid (corrected 2026-06-13: u32, not i16) | CODE-CONFIRMED (CAPTURE-UNVERIFIED) + SAMPLE-VERIFIED |
+| +32  | 20 | 4 | u32 | `levelBarSrcX` | Secondary level/rank-bar UV pair, X. Region is an 87×13-px horizontal strip on the same skill-icon sheet (corrected 2026-06-13: u32) | CODE-CONFIRMED access (CAPTURE-UNVERIFIED); semantic PLAUSIBLE |
+| +36  | 24 | 4 | u32 | `levelBarSrcY` | Secondary level/rank-bar UV pair, Y (87×13 strip) | CODE-CONFIRMED access (CAPTURE-UNVERIFIED); semantic PLAUSIBLE |
+| +40  | 28 | 1 | u8 | `hasOverlay0` | Presence flag: 1 = overlay badge 0 is drawn | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +41  | 29 | 1 | u8 | `hasOverlay1` | Presence flag: overlay badge 1 | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +42  | 2A | 1 | u8 | `hasOverlay2` | Presence flag: overlay badge 2 | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +43  | 2B | 1 | — | _pad | Alignment padding; never read (not a 4th flag) | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +44  | 2C | 4 | u32 | `overlay0_dx` | Overlay 0 X pixel offset from `widgetPosX` (`screenX = overlay0_dx + widgetPosX + 110`) | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +48  | 30 | 4 | u32 | `overlay1_dx` | Overlay 1 X offset (`screenX = overlay1_dx + widgetPosX + 143`) | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +52  | 34 | 4 | u32 | `overlay2_dx` | Overlay 2 X offset (`screenX = overlay2_dx + widgetPosX + 98`) | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +56  | 38 | 4 | u32 | `overlay0_dy` | Overlay 0 Y pixel offset (`screenY = widgetPosY_raw − overlay0_dy − 92 − 5`) | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +60  | 3C | 4 | u32 | `overlay1_dy` | Overlay 1 Y offset (`screenY = overlay1_dy + widgetPosY_raw − 92 + 10`) | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +64  | 40 | 4 | u32 | `overlay2_dy` | Overlay 2 Y offset (`screenY = overlay2_dy + widgetPosY_raw − 92 + 49`) | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +68  | 44 | 4 | u32 | `overlay0_srcX` | Overlay 0 atlas source X (pixels) | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +72  | 48 | 4 | u32 | `overlay0_srcY` | Overlay 0 atlas source Y | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +76  | 4C | 4 | u32 | `overlay1_srcX` | Overlay 1 atlas source X | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +80  | 50 | 4 | u32 | `overlay1_srcY` | Overlay 1 atlas source Y | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +84  | 54 | 4 | u32 | `overlay2_srcX` | Overlay 2 atlas source X | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +88  | 58 | 4 | u32 | `overlay2_srcY` | Overlay 2 atlas source Y | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +92  | 5C | 4 | u32 | `overlay0_w` | Overlay 0 width (pixels) | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +96  | 60 | 4 | u32 | `overlay0_h` | Overlay 0 height | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +100 | 64 | 4 | u32 | `overlay1_w` | Overlay 1 width | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +104 | 68 | 4 | u32 | `overlay1_h` | Overlay 1 height | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +108 | 6C | 4 | u32 | `overlay2_w` | Overlay 2 width | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| +112 | 70 | 4 | u32 | `overlay2_h` | Overlay 2 height | CODE-CONFIRMED (CAPTURE-UNVERIFIED) |
+| **116** | **74** | — | | **[end of record]** | Total = 116 bytes = 0x74 | |
+
+Every byte position 0x00..0x73 is accounted for: 29 data fields plus 4 padding bytes (one
+3-byte pad at +0x05 and one 1-byte pad at +0x2B). The overlay block (`+0x28..+0x73`) is the three
+optional badge descriptors — each a presence flag plus a `{dx, dy, srcX, srcY, w, h}` group whose
+six components are interleaved across the block (all `u32`). The three different X anchor offsets
+(110 / 143 / 98 from `widgetPosX`) place the badges at fixed, visually distinct positions around
+the main 23×23 icon cell. No string constant in the binary names the badges; their identity
+(e.g. cooldown / cost / chain-rank indicator) is PLAUSIBLE but UNVERIFIED.
+
+#### Census-derived hypotheses for the overlay block (PLAUSIBLE only)
+
+The sample census found three statistically prominent fields inside the overlay block whose value
+distributions hint at skill-parameter meaning rather than pure UI geometry. These are **PLAUSIBLE**
+and not reconciled with the code-confirmed overlay interpretation above; record them as candidate
+secondary meanings only:
+
+- `+0x3C` low `u16`: values 5 (88 occurrences) and 10 (54) dominate — PLAUSIBLE `skillKind`/category enum.
+- `+0x68` low `u16`: value 13 dominates (69 occurrences), then 21/23/26 — PLAUSIBLE `levelReq` (minimum level to unlock).
+- `+0x28` low `u16`: power-of-two-ish values (256, 1024, 1792, 3072; one record shows 196608 = 0x30000) — PLAUSIBLE bit-flag/count.
+
+The census also observed `classStanceRef`-valued echoes ({1001, …}) at `+0x2C / +0x30 / +0x34 /
++0x40`, possibly prerequisite/cross-reference links (PLAUSIBLE). The census float scan found **no
+IEEE-754 floats anywhere in the record** (SAMPLE-VERIFIED negative): all fields are integer.
+
+#### The `instanceKey` → `skills.scr` join (and the c2s 2/52 wire field)
+
+The `.do` record enters the skill-use path only as two keys, both used **client-side**:
+
+1. `instanceKey` (+0x00) → skill-catalogue lookup → the `skills.scr` runtime object that supplies
+   the actual combat parameters (range, cost, cooldown, target mode).
+2. `classStanceRef` (+0x0C) → skill-icon DDS sheet path (e.g. 1001 → the `musajung` icon sheet).
+
+**CRITICAL — the wire field in the UseSkill packet (opcode 2/52) is the hotbar SLOT INDEX (a
+`u8`), NOT the `.do` `instanceKey`.** When the player activates a hotbar slot, the client sends the
+slot index byte; the server resolves the skill from the slot contents (it mirrors the client's
+hotbar). The `instanceKey` never appears on the wire — its only role is the client-side join into
+`skills.scr`. The runtime hotbar holds one `(instanceKey, slot-points/rank)` pair per slot; slot
+index 0xFF in the 2/52 packet denotes the basic attack. (This is a static / CODE-CONFIRMED protocol
+fact and is **CAPTURE-UNVERIFIED**; it must be confirmed against a real capture before any wire
+implementation depends on it. See the skill-use spec and `opcodes.md`.)
+
+**Open questions (this record):**
+- `classStanceRef` for the four "ma"-path files: why these carry small integers (0/12/19/21/23/…)
+  instead of 4-digit refs — whether a second record type is interleaved or "ma" uses a different
+  encoding. The 4-digit refs 1003 / 1006 / 1009 / 1012 do NOT appear as the primary `classStanceRef`
+  in those files (sample-verified negative).
+- Whether the `+0x3C` / `+0x68` / `+0x28` census candidates (`skillKind` / `levelReq` / flags) are
+  real secondary meanings or coincidental, given the code-confirmed overlay-block interpretation.
+- The identity of the three overlay badges and of the 87×13 level/rank strip at `+0x20/+0x24`.
+- Whether the `.do` `instanceKey` equals the `skills.scr` skill id (+0x00) directly or via a transform.
+- The tail bytes ignored by the loader (`musama` 40, `assasinma` 60, `monkma` 12): authoring
+  artefact or footer (cosmetic; UNRESOLVED).
 
 ---
 
@@ -1253,6 +1482,31 @@ They are created with the hidden file attribute.
 All five are read via the Windows INI API. A parser need not implement binary INI parsing;
 the Windows API or any standard INI library suffices.
 
+**Plaintext-config note — "do.ini ships encrypted" is RESOLVED as a false premise (2026-06-13,
+CODE-CONFIRMED, CAPTURE-UNVERIFIED).** `DoOption.ini` and its four sibling INIs are **plaintext**:
+they are read and written through the standard Windows profile API (the `GetPrivateProfileInt` /
+`GetPrivateProfileString` / `WritePrivateProfileString` family) with **no byte-level transform of
+any kind**. There is **no file cipher**. The only obfuscation applied is cosmetic — the path
+builder sets `FILE_ATTRIBUTE_HIDDEN` on all five INIs, so they are merely hidden from a default
+Explorer view (this is almost certainly what created the "encrypted/obfuscated" impression).
+
+The same conclusion holds for the `.do` and `.scr` **data** files: they are plaintext fixed-record
+binary streams read through the same unencrypted disk/VFS reader as every `.txt` and `.csv` — no
+XOR, no rolling key, no table substitution on the file path. The only per-byte step in the text-mode
+read path is CR/LF newline normalisation, not a cipher.
+
+The binary does contain two genuine cipher routines, but **neither touches config or data files**:
+the **network packet cipher** (an XOR + bit-rotation transform applied only to outbound packet
+buffers — documented separately by the network-crypto firewall, not here) and an **anti-cheat
+in-memory string obfuscator** (a runtime-only decode of sensitive API/DLL name strings held in
+process memory, so a memory scan does not reveal them; never reads or writes a file). Both are
+out of scope for the config/asset spec and are mentioned only to disambiguate them from any
+supposed file cipher.
+
+Privacy note for the clean re-implementation: `OPTION_ID` (the saved login/account identifier) is
+persisted in clear text inside the hidden `DoOption.ini`; a faithful re-implementation should
+decide deliberately whether to keep that behaviour.
+
 ### 5.2 DoOption.ini — Section [DO_OPTION]
 
 Single section. All keys are integers except `OPTION_ID` which is a string.
@@ -1294,6 +1548,29 @@ Single section. All keys are integers except `OPTION_ID` which is a string.
 One field in the runtime options struct (read-order index +18) is read by the loader but its
 key name is UNVERIFIED. `OPTION_SCREENMODE` occupies read-order index +30 (the read order is
 non-contiguous).
+
+**Clamp-range refinement (2026-06-13, CODE-CONFIRMED, CAPTURE-UNVERIFIED).** The `[DO_OPTION]`
+section holds **31 keys** (the rows above plus the read-order-index quirks below). A fresh read of
+the loader's per-key range clamps refines several ranges that were over-narrowed in the table
+above; where these differ, the loader is authoritative:
+
+- The render/view toggles (`OPTION_VIEW_CHAR`, `OPTION_VIEW_BACK`, `OPTION_GROUND`, `OPTION_SKY`,
+  `OPTION_WEATHER`, `OPTION_WATER`, `OPTION_SHADOW`, `OPTION_DMGTEXT`) clamp to **1..3** (a 3-level
+  quality/visibility selector), not a 0/1 boolean; out-of-range values reset to 1.
+- The texture-quality keys (`OPTION_TEX_CHAR`, `OPTION_TEX_MOB`, `OPTION_TEX_ITEM`,
+  `OPTION_TEX_ETC`) clamp to **1..5**, reset to 1 out of range.
+- The sound on/off keys (`OPTION_SOUND_CHAR`, `OPTION_SOUND_MOB`, `OPTION_SOUND_TERRAIN`,
+  `OPTION_SOUND_MUSIC`) clamp to **1..2**; a value of 2 ("off") additionally forces the matching
+  `OPTION_SOUNDVOL_*` volume field to 0.
+- The four `OPTION_SOUNDVOL_*` keys (including the `…SOUNDBOL_MUSIC` typo'd key) clamp to **0..100**.
+- `OPTION_SCREENMODE` clamps to **0..2** (not 0/1); values > 2 reset to 0.
+- `OPTION_EFFECT` and `OPTION_BRIGHT` clamp to **1..100**.
+- The three `*_NOTIFY` keys clamp to **0..1** (>= 2 resets to 0).
+- `OPTION_ID` (string) is stored only when non-empty and shorter than 16 characters (a 17-byte
+  buffer); read with the string profile API, written back verbatim — see the plaintext-config and
+  privacy notes in §5.1.
+- One read-order slot (index +12) is **forced to 1 by the constructor and is not read from the
+  INI** at all; this accounts for a gap between the key count and the read-order indices.
 
 ### 5.3 Other INI files
 
@@ -1339,6 +1616,23 @@ relevance to the `.scr` / `.do` pipeline.
 7. **UNVERIFIED strides** — RESOLVED for: citems.scr, skillneedset.scr, warstoneinfo.scr,
    oblist.scr, statue.scr, setitemname.scr, Tutor.scr, viplevels.scr, itemscale.scr,
    itemeffect.scr, textcommand.do, emoticon.do, msginfo.do.
+8. **Quest-data family** — RESOLVED (2026-06-13, sample): `quests.scr` (3720 B, sparse,
+   488/122 — corrected from the 4960 B estimate), `npc.scr` (404 B, 2510 — description text),
+   `autoquestion_cl.scr` (92 B, 1300 — anti-bot quiz), `discript.sc` (68 B, 33 — UI menu
+   labels), `products.scr` (212 B stride). See §2.17. The behavioural model is in
+   `specs/quests.md`. `events.scr` / `helps.scr` / `tiphelp.scr` structure outlined (not
+   flat-stride); their record bodies remain UNVERIFIED.
+9. **Per-class stance `.do` record body** — RESOLVED (2026-06-13, code-confirmed + sample): the
+   full 116-byte (0x74) layout is mapped in §3.5 — all 29 fields plus 4 padding bytes, including
+   the previously-"unmapped" `+0x28..+0x73` overlay-sprite descriptor block. Corrections applied:
+   icon coordinates and `widgetPosY_raw` are `u32` (not `i16`/`u16`); the "72 vs 76 bytes @ +0x28"
+   discrepancy is resolved (76 bytes = three optional overlay-badge descriptors). The c2s 2/52
+   UseSkill wire field is the hotbar **slot index** (`u8`), not the `.do` `instanceKey`.
+10. **"do.ini ships encrypted"** — RESOLVED (2026-06-13): FALSE premise. `DoOption.ini` and the
+   four sibling INIs, and the `.do`/`.scr` data files, are all **plaintext** read/written via the
+   Windows profile API and an uncrypted disk/VFS reader; the only obfuscation is
+   `FILE_ATTRIBUTE_HIDDEN` on the five INIs. The binary's two real ciphers (network packet
+   XOR/ROL, anti-cheat in-memory string obfuscation) are not file-related. See §5.1.
 
 ### Still open
 
@@ -1398,9 +1692,29 @@ relevance to the `.scr` / `.do` pipeline.
 47. **All .xdb files** — record stride, key scheme, and field layout entirely UNVERIFIED.
 48. **option.ini / panel.ini / combo.ini / TSIDX.ini keys** — not traced.
 49. **INI field at read-order index +18** — key name and purpose UNVERIFIED.
-50. **npc.scr stride** — independent file or sub-table of npcs.scr; not traced.
-51. **UNVERIFIED stride .scr files** — mapsetting, quests, products, events, helps, plus those
-    listed as UNVERIFIED in section 2.2.
+50. **npc.scr ↔ npcs.scr link** — `npc.scr` (404 B, 2510 description records, §2.17.3) and
+    `npcs.scr` (1916 B, 812 catalogue records, §2.10) are now both stride-resolved, but the key
+    that links the 1..2510 descriptor id space to the catalogue NPC ids is UNVERIFIED.
+51. **quests.scr undecoded fields** — the six step-code bytes at +0x040, the contents of the
+    embedded 48-byte sub-records (objective/reward), and the constant 2 at +0x064 (§2.17.1).
+52. **quests.scr `abandonable` flag byte** — `specs/quests.md` §15.4 reads an `abandonable`
+    flag whose runtime offset is inconsistent with the 3720-byte stride; reconcile against the
+    sample record.
+53. **events.scr / helps.scr / tiphelp.scr record bodies** — structure outlined in §2.17.5;
+    the variable-length record contents are not decoded.
+54. **Remaining UNVERIFIED-stride .scr files** — mapsetting, plus those listed as UNVERIFIED in
+    section 2.2.
+55. **Stance `.do` `classStanceRef` in the four "ma" files** — why `musama`/`assasinma`/`wizardma`/
+    `monkma` carry small integers at +0x0C instead of 4-digit refs (1003/1006/1009/1012), and
+    whether a second record type is interleaved (§3.5).
+56. **Stance `.do` overlay block secondary meaning** — whether the census candidates `+0x3C`
+    (`skillKind`?), `+0x68` (`levelReq`?), and `+0x28` (flags?) are real fields or coincidental,
+    and the identity of the three overlay badges and the 87×13 level/rank strip at +0x20/+0x24 (§3.5).
+57. **Stance `.do` `instanceKey` ↔ `skills.scr` skill id** — whether the join key is identity or a
+    transform; needs cross-check against `skills.scr` +0x00 (§3.5, §2.8).
+58. **c2s 2/52 slot-index claim is CAPTURE-UNVERIFIED** — the protocol fact that the UseSkill packet
+    sends the hotbar slot index (`u8`), not the instanceKey, is static-confirmed only and must be
+    validated against a real capture before any wire code relies on it (§3.5).
 
 ---
 
@@ -1411,5 +1725,7 @@ relevance to the `.scr` / `.do` pipeline.
 - Mob type byte (value 11 = boss) relates to the spawn descriptor: `Docs/RE/structs/spawn_descriptor.md`
 - Item category flags relate to: `Docs/RE/structs/item.md`
 - Skill catalogue relates to: `Docs/RE/structs/skill.md`
+- Skill icon source coordinates and stance `.do` file-to-class mapping: `Docs/RE/formats/ui_manifests.md` §2.7 (§3.5 here gives the full `.do` record layout)
+- UseSkill (c2s 2/52) opcode and the skill-use path: `Docs/RE/opcodes.md`, `Docs/RE/specs/skill_system.md`
 - Glossary: `Docs/RE/names.yaml`
 - Provenance: `Docs/RE/journal.md`

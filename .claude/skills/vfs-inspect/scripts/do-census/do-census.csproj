@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        do-census — THROWAWAY harness: statistical census of all 12 per-class stance .do files.
+        Reads every offset 0x00..0x73 across all records across all 12 files and produces
+        per-field statistics under u8/u16/u32/i16/float reinterpretations.
+        NOT a MartialHeroes.slnx member. Never git-add. Run: dotnet run
+        spec: Docs/RE/formats/ui_manifests.md §2.7
+    -->
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>14.0</LangVersion>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="C:\Users\Arius\RiderProjects\MartialHeroes\03.Storage.Assets\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj" />
+    </ItemGroup>
+
+</Project>

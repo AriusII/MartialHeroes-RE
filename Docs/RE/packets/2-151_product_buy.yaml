@@ -1,0 +1,58 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgProductBuy
+opcode: 0x20097           # major 2 (GameAction), minor 151 -> (2 << 16) | 151
+direction: C2S
+size: var                 # body bytes not yet pinned (see notes); modelled minimum below
+spec: packets/2-151_product_buy.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Product-panel (full paged item-shop window) client primitives. This file covers the THREE related product-panel C2S minors that drive the paged buy window with its buy-confirm popup — 2/151 (buy / confirm), 2/152 (page / select) and 2/153 (action). The primary 2/151 buy/confirm is modelled in fields below; 2/152 and 2/153 are documented in notes (each is its own opcode and gets its own generated struct when its body is captured).
+
+# Wire order, offset 0 = first payload byte. Pack=1. size is 'var' until the body is field-decoded.
+# This block models the PRIMARY minor, 2/151 (buy / confirm).
+fields:
+  - { name: TargetId, type: u32 }        # 0x00  active-target field: the product-shop NPC's id
+  - { name: SelIndex, type: u32 }        # 0x04  selected product entry index (within the current page)
+
+notes: |
+  Static inference only; no capture available. The product panel is the full paged item-shop window
+  (distinct from the simple sundry shop): a multi-page product list plus a separate buy-confirm
+  popup. It drives THREE C2S minors. None of the three bodies was field-decoded this pass; their
+  send-wrapper bodies were confirmed by minor and by caller only, so each on-wire size is 'var'
+  here and the field splits are the leading hypothesis.
+
+  This file's `fields:` block models the PRIMARY minor only:
+
+    2/151 — CmsgProductBuy (buy / confirm), modelled above:
+      0x00 (4B) TargetId : the client's active-target field (the product-shop NPC). Hypothesis.
+      0x04 (4B) SelIndex : the selected product entry. A purchase QUANTITY field is the most likely
+                           additional field beyond these two words — do NOT assume the body ends
+                           after SelIndex until a capture confirms the length.
+
+  The other two product-panel minors are SEPARATE opcodes (already cataloged in opcodes.md as
+  CmsgProductPage 2/152 and CmsgProductAction 2/153). They are described here for the engineer but
+  each must get its own generated struct from its own captured body:
+
+    2/152 — CmsgProductPage (page / select):
+      Paged-shop navigation: change the visible product page and/or move the selection cursor.
+      fields not yet pinned — needs npc.scr sample / capture. Likely carries a target/NPC word and a
+      page or selection index; body length not re-read this pass.
+
+    2/153 — CmsgProductAction (action):
+      The third product-panel primitive (e.g. confirm-popup action / order finalize). fields not yet
+      pinned — needs npc.scr sample / capture. Body length not re-read this pass.
+
+  RELATIONSHIP: the product shop ALSO rides the shared buy/order commit 2/115 (CmsgShopBuy); the
+  2/151-family are the in-window paging / selection / confirm primitives layered on top. The product
+  list and confirm popup are atlas-swap UI panels; the product catalog source (npc.scr template or a
+  server push) is not pinned for the full product shop. S2C acknowledgements expected in the item-shop
+  result family (4/113 SmsgItemShopPurchaseResult, 4/115 SmsgItemShopBalanceUpdate).
+
+  fields not yet pinned — needs npc.scr sample / capture, for all three minors: exact body lengths,
+  the presence of a quantity field on 2/151, and the page/cursor encoding on 2/152.
+
+  UNBLOCKS: Client.Application product-shop use-case — but each of 2/151/2/152/2/153 needs its body
+  captured before a faithful struct can be generated. Treat the fields block as the 2/151 minimum only.

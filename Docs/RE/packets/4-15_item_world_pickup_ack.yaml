@@ -1,0 +1,71 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgItemWorldPickupAck
+opcode: 0x4000f          # major 4 (Response), minor 15 -> (4 << 16) | 15
+direction: S2C
+size: 36                 # the handler reads a fixed 36-byte body (0x24) before dispatch
+spec: packets/4-15_item_world_pickup_ack.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server reply to a CmsgPickupItem (2/15) request. Reports success/failure and, on success, the path the client takes to insert the item into a bag slot (or credit a coin into gold). A success-subtype selector chooses between a party-share insert, a plain insert, and an insert-with-echo path.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the named fields plus the header/echo regions and
+# the two pad bytes sum to size: 36.
+fields:
+  - { name: Header,  type: "bytes[8]" }    # 0x00  valid/echo region (not decoded; see notes)
+  - { name: Result,  type: u8 }            # 0x08  0=error, nonzero=ok
+  - { name: Subtype, type: u8 }            # 0x09  success path / failure code selector (see notes)
+  - { name: Pad0,    type: "bytes[2]" }    # 0x0a  alignment
+  - { name: Echo0,   type: i32 }           # 0x0c  echoed dword (use-flag / slot region) [PLAUSIBLE]
+  - { name: Echo1,   type: "bytes[8]" }    # 0x10  echoed bytes consumed by the slot-insert path
+  - { name: ItemId,  type: u32 }           # 0x18  item / actor id used for the world lookup
+  - { name: Echo2,   type: i32 }           # 0x1c  echoed dword [PLAUSIBLE]
+  - { name: Echo3,   type: i32 }           # 0x20  echoed dword [PLAUSIBLE]
+
+notes: |
+  Static inference only; no capture available. Protocol facts are read directly from the client
+  (CODE-CONFIRMED for the 36-byte / 0x24 read size, the result gate at 0x08, the subtype byte at
+  0x09, and the item id at 0x18) but no live capture confirms the bytes on the wire
+  (CAPTURE-UNVERIFIED). The echoed dwords (Echo0 @0x0c, Echo2 @0x1c, Echo3 @0x20) and the echoed
+  region Echo1 @0x10 are PLAUSIBLE only -- they are consumed by the slot-insert path but their exact
+  meanings are not decided from the client alone.
+
+  The handler reads a fixed 36-byte body. Frame = 8-byte header + 36 = 44 bytes on the wire.
+
+    0x00 (8B) Header  : an 8-byte valid / echo region preceding the result gate; not decoded into
+                          named fields. Modelled as an opaque fixed buffer.
+    0x08 (1B) Result  : the result gate. 0 = error; nonzero = ok.
+    0x09 (1B) Subtype : selects the path, and its meaning depends on Result:
+                          FAILURE (Result == 0): cases 1..5 map to error string ids 10001..10005
+                            (10005 is the level / eligibility error, also used at pickup request time).
+                          SUCCESS (Result != 0):
+                            100  = share / party-split path: the client finds the next free bag slot
+                                   and inserts the item there, refreshing the slot UI; if no slot is
+                                   free it falls back to a name-only "you got X" announce.
+                            101  = plain insert: insert the item into the resolved slot.
+                            else = insert + an effect/echo: insert the item, run a local ground-item
+                                   despawn on the picker's grid, and announce.
+    0x0a (2B) Pad0    : alignment bytes; treat as don't-care.
+    0x0c (4B) Echo0   : an echoed dword in the use-flag / slot region; meaning PLAUSIBLE.
+    0x10 (8B) Echo1   : echoed bytes consumed by the slot-insert path; meaning PLAUSIBLE.
+    0x18 (4B) ItemId  : the item / actor id used for the world lookup. If it equals the coin template
+                          id 217000501 the pickup is a coin: the client credits gold and plays the
+                          coin SFX instead of inserting an item into a bag slot.
+    0x1c (4B) Echo2   : an echoed dword; meaning PLAUSIBLE.
+    0x20 (4B) Echo3   : an echoed dword; meaning PLAUSIBLE.
+
+  RELATIONSHIP: this acknowledges a CmsgPickupItem (2/15). The matching world despawn of the picked
+  item is normally driven by SmsgGroundItemRemove (5/15); for the local player's own pickup the
+  "else" success subtype also runs a local despawn. Whether a 5/15 always follows a 4/15 for the
+  picker, or the client self-despawns and 5/15 is only for observers, is capture-unverified.
+
+  UNKNOWNS to resolve with a capture of a normal pickup, a coin pickup, and a party-share pickup:
+    - decode the 0x00..0x07 header/echo region;
+    - pin the meanings of Echo0/Echo1/Echo2/Echo3 (slot indices, quantities, or echoed request data);
+    - confirm the server policy that selects success subtype 100 vs 101 vs else (party loot rules are
+      server-side and not fully decidable from the client);
+    - confirm Pad0 @0x0a is unused.
+
+  UNBLOCKS: Client.Application PickupItem ack handler (paired with CmsgPickupItem 2/15).

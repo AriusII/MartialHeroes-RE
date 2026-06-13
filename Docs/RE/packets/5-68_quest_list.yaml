@@ -1,0 +1,55 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are static facts; the field layout is NOT yet decoded. capture_verified: false.
+
+name: SmsgQuestList
+opcode: 0x50044           # major 5 (Push), minor 68 -> (5 << 16) | 68
+direction: S2C
+size: 452                # fixed 452-byte payload block (0x1C4)
+spec: packets/5-68_quest_list.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server pushes the player's quest-log snapshot. A fixed 452-byte block that the client copies into its in-memory quest mirror and uses to rebuild the three quest-log tabs (active / completable / available). This message is how a quest action (2/28) result reaches the client.
+
+# Fixed 452-byte block. The internal field layout is NOT decoded in the source note available to this
+# spec -- only the total size (452 = 0x1C4) and the routing are CODE-CONFIRMED. The body is modelled as
+# one opaque region so the engine reserves the correct length; the structure must be filled in from a
+# capture or a follow-up struct pass before any field is parsed.
+fields:
+  - { name: Payload, type: "bytes[452]" }   # 0x000  opaque 452-byte quest-log snapshot (layout undecoded)
+
+notes: |
+  CODE-CONFIRMED routing + size, CAPTURE-UNVERIFIED and UNDECODED body. The receive handler for this
+  message is identified by role (the quest-list push handler) and reads a fixed 452-byte payload. The
+  client copies the block into its quest mirror and rebuilds the quest-log window's three tabs.
+
+  WHAT IS CONFIRMED:
+    - the opcode routing (5/68) is installed in the push dispatch table;
+    - the payload is a FIXED 452 bytes (0x1C4).
+
+  WHAT IS NOT DECODED (do not guess offsets):
+    - the source note for this lane does not enumerate the 452 bytes; the byte-level layout was
+      attributed to an earlier raw pass that is NOT available to this spec. Therefore NO field offsets
+      are published here. The block is reserved as opaque.
+
+  STRUCTURE HYPOTHESIS (from cross-referenced notes, NOT promoted to fields): the network quest mirror
+  is understood to be a count plus an array of fixed-size quest entries with a stride of 32 bytes each
+  (distinct from the quest-log WINDOW's own display tables, which use a 28-byte stride). 452 is not a
+  clean multiple of 32, so the block is likely a small fixed header + an entry array + trailer. This is
+  a hypothesis only and is deliberately NOT modelled as fields.
+
+  HOW THE CLIENT USES IT: the quest-log window presents three tabs -- ACTIVE (in-progress, up to 6
+  rows), COMPLETABLE (turn-in ready, up to 6 rows), and AVAILABLE (offers). Quest CAPTION/header text
+  is resolved from the message-string database (data/script/msg.xdb) by numeric id; the quest dialog
+  BODY lines come from the npc.scr dialog records via the quest record's dialog handles. Neither text
+  source is carried in this packet -- this packet carries the quest STATE (which quests, their
+  progress), and the client renders text from local data.
+
+  UNKNOWNS to resolve with a quest-log capture (REQUIRED before any field parsing):
+    - the entry count field position and the per-entry stride (32-byte hypothesis);
+    - per-entry fields (quest id, chapter/prereq id, objective progress, tab/status);
+    - the header/trailer that pads the block to 452.
+
+  RELATED: 2/28 CmsgQuestAction (packets/2-28_quest_action.yaml) is the C2S that causes this push;
+  5/73 SmsgQuestComplete (packets/5-73_quest_complete.yaml) is the turn-in verdict. UNBLOCKS reserving
+  the correct frame length in Client.Application; full parsing is BLOCKED on a capture.

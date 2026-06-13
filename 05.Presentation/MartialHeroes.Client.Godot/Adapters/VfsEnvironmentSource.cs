@@ -29,12 +29,19 @@ namespace MartialHeroes.Client.Godot.Adapters;
 /// The decoded environment for one area: the parsed bins the renderer needs.
 /// Any field may be <see langword="null"/> when the corresponding file is absent or unreadable;
 /// the renderer applies its documented fallbacks (spec: environment.md §7).
+///
+/// Tier-2 dome fields (StarDome, CloudDome, CloudCycle) are populated when
+/// map_option stardome_enable / clouddome_enable = 1 AND the files are present.
+/// spec: Docs/RE/specs/environment.md §3.1 steps 4–5 — gated by per-area flags.
 /// </summary>
 internal sealed record AreaEnvironment(
     MapOptionBin? MapOption,
     FogBin? Fog,
     LightBin? Light,
-    MaterialBin? Material);
+    MaterialBin? Material,
+    StarDomeBin? StarDome = null,
+    CloudDomeBin? CloudDome = null,
+    CloudCycleBin? CloudCycle = null);
 
 /// <summary>
 /// Reads and parses the per-area environment binary family from the VFS.
@@ -82,7 +89,35 @@ internal static class VfsEnvironmentSource
                            EnvironmentBinParsers.ParseMaterial, "material(fallback area0)");
         }
 
-        return new AreaEnvironment(mapOption, fog, light, material);
+        // 4. stardome{id}.bin — gated by stardome_enable.
+        // spec: Docs/RE/specs/environment.md §3.1 step 4 — gated by stardome_enable.
+        StarDomeBin? starDome = null;
+        if (mapOption is null || mapOption.StarDomeEnable == 1)
+        {
+            starDome = TryParse(assets, $"data/sky/dat/stardome{areaId}.bin",
+                           EnvironmentBinParsers.ParseStarDome, "stardome")
+                       ?? TryParse(assets, "data/sky/dat/stardome0.bin",
+                           EnvironmentBinParsers.ParseStarDome, "stardome(fallback area0)");
+        }
+
+        // 5. clouddome{id}.bin + cloud_cycle{id}.bin — gated by clouddome_enable.
+        // spec: Docs/RE/specs/environment.md §3.1 step 5 — gated by clouddome_enable.
+        CloudDomeBin? cloudDome = null;
+        CloudCycleBin? cloudCycle = null;
+        if (mapOption is null || mapOption.CloudDomeEnable == 1)
+        {
+            cloudDome = TryParse(assets, $"data/sky/dat/clouddome{areaId}.bin",
+                            EnvironmentBinParsers.ParseCloudDome, "clouddome")
+                        ?? TryParse(assets, "data/sky/dat/clouddome0.bin",
+                            EnvironmentBinParsers.ParseCloudDome, "clouddome(fallback area0)");
+
+            cloudCycle = TryParse(assets, $"data/sky/dat/cloud_cycle{areaId}.bin",
+                             EnvironmentBinParsers.ParseCloudCycle, "cloud_cycle")
+                         ?? TryParse(assets, "data/sky/dat/cloud_cycle0.bin",
+                             EnvironmentBinParsers.ParseCloudCycle, "cloud_cycle(fallback area0)");
+        }
+
+        return new AreaEnvironment(mapOption, fog, light, material, starDome, cloudDome, cloudCycle);
     }
 
     /// <summary>

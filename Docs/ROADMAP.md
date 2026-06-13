@@ -444,11 +444,176 @@ all flagged by `check_dag.py` against the CLAUDE.md table:
 5. `Shared.Diagnostics → Shared.Kernel` (csproj:17) — table says packages-only (csproj comment
    calls it an intentional optional downward ref).
 6. (Carried over) `Client.Godot → Client.Infrastructure` — the original pending decision; also
-   enables layer-05 *transitive* use of Assets.Parsers types (UiCatalogs/AudioService) that the
-   table routes via Assets.Mapping.
+   enables layer-05 *source-level transitive* use of Assets.Parsers types that the table routes via
+   Assets.Mapping. **Confirmed pervasive & pre-existing (2026-06-13 C3-R review):** 21 existing
+   layer-05 files already `using MartialHeroes.Assets.Parsers` transitively (IconCatalogs,
+   ScrStatCatalogueSource, UiCatalogs, Vfs*Source, NpcRenderer, TerrainNode, SkinnedCharacter*, …);
+   the Cycle-3 review flagged 3 new files in the SAME category (BuffIconCatalog, ZoneCatalog,
+   MinimapPanel). The csproj DAG stays clean (Client.Godot references only Assets.Mapping directly;
+   no new ProjectReference). Refactoring only the 3 new files would be inconsistent with the 21
+   existing ones and is a dependency-edge change the standing rule forbids without maintainer
+   go-ahead → **accepted as a documented deviation, code kept as-is** (orchestrator default).
 Options per edge: (a) bless into the table (update CLAUDE.md/PRESERVATION_AND_ARCHITECTURE.md +
 check_dag.py expected set) or (b) refactor through the allowed abstraction. Orchestrator default
 if unanswered: keep code as-is, document as accepted deviations. Related doc drift: blueprint
-still says `Network.Transport.Pipe` ×3 (real name `.Pipelines`; disk wins).
+still said `Network.Transport.Pipe` (real name `.Pipelines`) — corrected in
+PRESERVATION_AND_ARCHITECTURE.md by the orchestrator on 2026-06-13.
+
+---
+
+# CYCLE 3 — World-Scene Systems + Icon/Window Fidelity + Deeper VFS Tooling (launched 2026-06-13)
+
+**Mandate (maintainer):** "poursuivre très fortement — ce n'est absolument pas suffisant". Push the
+IDA research into the WORLD-SCENE gameplay systems (combat, chat, NPC interaction/shops, quests,
+party/trade, minimap, buffs, equipment visuals, skill→effect chain, progression), wire the recovered
+icon chains into the HUD for real, and keep scaling the VFS tooling. Same clean-room firewall, same
+wide agent fan-out as Cycle 2.
+
+## Phase C3-W1 — GIGA RESEARCH (dirty room, 20 lanes) — ✅ DONE (2026-06-13, 20 agents)
+IDA lanes (5 sub-waves of 3 — single IDB): combat-flow, chat-system, npc-interaction /
+quest-system, party-trade, minimap-worldmap / ingame-windows-art, buff-state-icons,
+do-record-fields / equip-visuals, skill-cast-fx, floating-text-target / do-ini-crypto,
+drop-pickup, exp-levelup.
+VFS lanes (parallel, harness-only): do-census (full 116B field statistics), minimap-assets,
+window-art-census, quest-dialog-data, fx-asset-links (fx2 field[3] arbitration data).
+Output: `Docs/RE/_dirty/world/*.md` only.
+
+**W1 STATUS — ✅ DONE (2026-06-13):** 20/20 lanes DELIVERED, all high confidence (~92 min,
+3.86M tokens). Key headlines fed to W2:
+- **combat-flow:** server-authoritative `BattleHandler`; basic melee IS a skill via C2S **2/52 slot
+  byte 0xFF** (no separate attack opcode); target two-tier (global hover id @0x7AC1CC + per-controller
+  pick); incoming 5/52 ActorSkillAction (anim/FX + floating dmg), 5/53 vitals → HP@actor+176;
+  cooldown = swing-ready-ts + 100ms·cadence + 550ms motion lockout.
+- **chat-system:** say/party/guild/shout/alliance/whisper ALL **2/7 with first payload byte = channel
+  code** (0/1/2/3/6/7/9/15); 36-byte ring records {string,ARGB,channel}; overhead bubbles live on the
+  Actor struct (5000ms). Corrects prior 2/82/83/84 misread.
+- **npc-interaction:** central click router maps ~30 NPC KIND → 117 MainHandler panel slots; storage
+  = **2/142** (16B [i32][u8 op][i64]); shop = 2/115; sell 2/20; repair 2/113; interact-open 2/19;
+  shop catalog baked in npc.scr+128 (6 entries). NO client teleport opcode (server-resolved off 2/19).
+- **quest-system:** QuestPanel 3-tab browser (active/completable/available); C2S **2/28** quest action
+  (send-only); S2C 5/68 QuestList + 5/73 QuestComplete; quest text = msg.xdb ids + npc.scr 6-line records.
+- **party-trade:** PARTY 2/35 invite / 2/36 leave-kick / 2/37 leader-op (8B [u8 mode][u32 id]);
+  TRADE 2/23 request / 2/24 slot-add 20B / 2/25 confirm-manifest; GUILD 2/30; S2C phase machines
+  4/23, 4/36, 5/21 event codes.
+- **minimap-worldmap:** dot transform BYTE-VERIFIED px=relX·0.125+66.5, py=relZ·0.125+66.5 (1:8,
+  133×133 body); radar streams data/effect/map/d{prefix}x{X}z{Z}.bmp ring; full-screen 'b'-key
+  BroodWar map data/ui/map/map%d.dds + broodwarmap.dds + g_LandmarkTable POI pins.
+- **ingame-windows-art:** corrects widget-rects S5 mislabels (StatusPanel=char-info 0x5298b2,
+  SkillPanel=skill window); in-game chrome binds by **uitex.txt integer id** (1=mainwindow,
+  2=inventwindow, 3=skill_window_1, 4=tradekeepwindow, 9=messagewindow, 11=skillpipe_02); skill title
+  msg 3027; OptionPanel 4-tab host.
+- **buff-state-icons:** file **data/script/buff_icon_position.xdb** (12B records {u32 buffId, i32
+  srcX, i32 srcY}); shared atlas data/ui/skillicon/stateicon.dds; 30-slot HUD buff bar driven by
+  **4/102** (476B, 30×12B buff records @payload+116); 23×23 cells for id≤80, 25×25 for >80.
+- **do-record-fields:** FULL 116-byte .do layout (29 fields + 4 pad = 0x74); **CORRECTION**
+  iconSrcX/Y @+0x18/+0x1C are **u32 not i16**; +0x28..+0x73 = 3 optional UI overlay-sprite badges;
+  2/52 wire field = hotbar slot index u8, NOT instanceKey.
+- **equip-visuals:** avatar changes by PER-PART mesh recomposition (head/face/hair/body/weapon under
+  one skeleton @Visual+1300); part table @Visual+204 (16B records); weapon attached to hand bone;
+  weapon glow tier from item_actor+231 (1..9).
+- **skill-cast-fx:** skill_id→effect_id is DIRECT (SkillData byte 1136); cast FX = looping
+  actor-anchored UserXEffect on action 0xC8, stopped on 0xC9/0xCB; FX1/FX2 layout corrected
+  (4B group_count + per-group 20B header).
+- **floating-text-target:** per-digit billboard quads from att-font.dds/cri-font.dds; 8-kind
+  motion/color switch (red phys / blue skill / gold / green heal); actor name labels via
+  CharacterBillboardPanel (faction color); overhead HP minibar from minibar.tga.
+- **do-ini-crypto:** RESOLVED — DoOption.ini and the .do data files are **PLAINTEXT** (no cipher);
+  the only "obfuscation" is FILE_ATTRIBUTE_HIDDEN. Real ciphers (network packet XOR-ROL, anti-cheat
+  string) are out of file scope.
+- **drop-pickup:** S2C 4/4/5/14/4/14/4/15/5/15 ground-item lifecycle; C2S 2/14 drop (8B) / 2/15
+  pickup (12B); ground items = per-template 3D actors (fallback model 201011001); coin id 217000501.
+- **exp-levelup:** 5/9 ExpGain (32B, 64-bit xp), 5/11 RankXpGain, 5/32 LevelUp (UserXEffect
+  310000002 + class-evolution panels at lvl 12/24), 5/67 StatsUpdate; C2S **2/29** StatAllocate
+  (20B five absolute u32 STR/INT/AGI/DEX/CON).
+- **VFS lanes:** do-census (3,312 records, stride 116 confirmed, 93.9% icon-valid; classStanceRef
+  anomaly in ma-files); minimap-assets (NO baked minimap tiles exist; mapsetting.scr 52×84B zone
+  table decoded; regiontableNNN.bin 52×32B); window-art-census (22 dimension/format corrections to
+  ui_manifests.md — many "1024² DXT3" are actually 512² ARGB32; 2 undocumented DDS);
+  quest-dialog-data (quests.scr 3720B stride / npc.scr 404B / autoquestion_cl.scr 92B / discript.sc
+  68B all SAMPLE-VERIFIED); fx-asset-links (fx2 field[3] is VARIABLE not constant — committed spec
+  WRONG; itemjointeff.txt 18,580 rows + mobjointeff.txt + totalmugong.txt effect-id registries).
+- Raw lane notes: `Docs/RE/_dirty/world/*.md` (gitignored, tainted, awaiting W2 promotion).
+
+## Phase C3-E1 — EARLY ENGINEERING (clean room, ran parallel with W1) — ✅ DONE (2026-06-13, 7 agents)
+6/6 lanes DONE + verify PASS. **Build 0 err/0 warn; 1,121 tests green (+55 new); headless boot
+clean in BOTH boot flows** (login: icon catalogs proven; world: `[SkyDome] star=built cloud=built`
++ `[StreamFollow] ARMED` proven by the orchestrator, cfg restored byte-exact).
+- **B1 parsers:** `DoStanceParser` (116B stance records; tail +0x28..+0x73 preserved as
+  [InlineArray(76)]; Map-A instanceKey + Map-B slotIndex lookups) + `TextureListParser`
+  (texturelist.txt, tex_id prefix) + 55 xUnit tests incl. real-VFS smokes (musajung 301 records,
+  musama 222 + 40 tail bytes). Found a spec discrepancy: §2.7 says "72 bytes unmapped @+0x28" but
+  116−0x28=76 — flagged for the W2 spec pass.
+- **B2 skill icons:** `Adapters/IconCatalogs.cs` — skillicon.txt sheet (job=1,kind=1) +
+  musajung.do Map-B → AtlasTexture 23×23; SkillWindow shows 80 real slots; hotbar slots 0..8
+  get real icons. Boot log: 301 records / 12 sheet entries.
+- **B3 item icons:** `ItemIconCatalog` (texturelist.txt → whole-DDS icons, 1,336 entries on the
+  real file); InventoryWindow demo grid shows real DDS icons. Open: items.csv tex_id column
+  unspec'd (§9 #12) — demo maps slot→file order.
+- **B4 follow-streaming:** RealWorldRenderer re-anchors the ring on player movement (Chebyshev ≥1
+  cell + in-flight guard; eviction bounds resident ≤25 sectors); boot anchor unchanged (23/40
+  grounded at boot, south NPCs ground as the player walks via existing pending-snap).
+- **B5 sky domes:** `World/SkyDomeNode.cs` — star dome 192 verts + cloud dome 240 verts (2 layers,
+  UV scroll from cloud_cycle speed), day/night alpha ramp, indoor suppression, RenderPriority −128.
+  Solid-color domes for now; DDS star/cloud textures = follow-up.
+- **B6 char-select skins:** per-slot rigs — demo roster now Musa Lv25 / Tao Lv18 / Blader Lv32 /
+  Warrior Lv40, class→skin .skn chain (Tao special-cased; mapping PLAUSIBLE, needs a spec entry),
+  name/class/level overlays per frontend_scenes.md §3.2.
+
+## Phase C3-W2 — PROMOTION (after W1) — ✅ DONE (2026-06-13, 21 authors + master)
+`specs/world_systems.md` (NEW master) + 10 subject specs (combat UPD, chat NEW, social UPD,
+inventory_trade UPD, npc_interaction NEW, quests UPD, minimap NEW, progression NEW,
+equipment_visuals NEW, ui_system UPD, effects UPD) + 4 format specs (effects/config_tables/
+misc_data/ui_manifests UPD) + opcodes.md (UPD, 2/7→CmsgChat) + ~35 new packets/*.yaml. Each author
+owned ONE file (zero contention); master synthesised only from cleaned specs.
+**Orchestrator post-promotion (all DONE):** firewall scan **CLEAN** (zero autonames/VAs in new files;
+only hits = imagebase 0x400000 in provenance docs + sample data values 0x46464558/0x7FFFFFFF/
+0x64000007); **consistency fix** — added 16 omitted C2S opcode rows to opcodes.md in sorted order
+(2/19,2/20,2/23,2/24,2/25,2/30,2/35,2/36,2/37,2/100,2/110,2/113,2/115,2/142,2/143,2/151-153);
+**names.yaml merged** (2/7 rename, 22 C2S opcodes, 6 subsystem entries, 16 constants);
+**journal.md** W1+W2 provenance entries written. Specs total now 27, formats 16, packets 62.
+
+## Phase C3-E2 — ENGINEERING (after W2) — ✅ DONE (2026-06-13, 9 agents / 3 stages)
+3-stage pipeline, clean-room (engineers read ONLY committed specs, cite `// spec:`):
+- **Stage A (contracts, distinct projects):** Client.Application HUD event hub (ChatLine/BuffState/
+  CombatText/TargetChanged/ExpLevel/StatAllocationView channels, stub-fed now, live-handler later);
+  Assets.Parsers BuffIconPosition(12B)/MapSetting(84B)/RegionTable(32B)/NpcScr(404B)/QuestsScr(3720B)
+  + tests.
+- **Stage B (6 Godot components):** ChatWindow; CharacterStatsWindow+BuffBar+BuffIconCatalog;
+  TargetFrame+FloatingCombatText; MinimapPanel+ZoneCatalog (dot transform px=relX·0.125+66.5);
+  OptionsWindow+audio buses; EffectRenderer MVP (cast effect @byte1136, action 0xC8 loop).
+- **Stage C (integration):** wire into GameHud + ClientContext + project.godot input map; full
+  `dotnet build` 0/0 + headless smoke (both boot flows, cfg restored byte-exact).
+Architectural seam: HUD ← Application event channels (passive, zero game authority). Live
+packet→Application handlers (4/102, 5/9, 5/52, 5/7, target) are a documented follow-up.
+
+## Phase C3-T — TOOLING — ✅ DONE (2026-06-13, 2 agents, ran parallel with W2)
+`vfsls` now exposes **12 subcommands** (was 8): added `scan-fx` (W1), `dump-do`, `scan-minimap`,
+`scan-quest`. Build 0 err/0 warn; real-VFS smoke proven: dump-do = 12 files / **3,312 .do records**
+(0 missing, 93.9% icon-valid, classStanceRef single-value per jung/sa file); scan-quest = quests.scr
+488 slots / 122 occupied (ids 1..617), npc.scr 2,510, autoquestion_cl.scr 1,300, discript.sc 33;
+scan-minimap = mapsetting.scr 52 zones (84B), 60× regiontableNNN.bin (3,120 records, 32B), 3 map DDS.
+`vfs-inspect/SKILL.md` updated to the real 12-subcommand surface + a "Sibling research harnesses"
+section (do-census, minimap-scan, quest-dialog-scan, msgxdb, skill-icon-scan, skillcat-scan).
+Firewall-clean (orchestrator pre-audit PASS; only hit was a sample data value 0x64000007).
+
+## Phase C3-R — REVIEW + FIX + GATES — ✅ DONE (2026-06-13, 4 reviewers + 1 fix agent)
+**Review (4 read-only reviewers):** render **PASS_WITH_NOTES** (HUD renders, zero town/character
+regression; 1 major leak + 1 minor demo-state), csharp **PASS_WITH_NOTES** (0 blockers; 5 majors =
+2 per-frame allocs + GD.Print hot-path + 3 dead usings; XdbParser uint→int confirmed correct;
+parsers zero-alloc), clean-room **FAIL→resolved** (leak scan SPOTLESS, 0 leaks, all constants cited;
+FAIL was only the journal/names staging gap, cleared by staging them in this commit), architecture
+**FAIL→accepted deviation** (3 new layer-05 files use Assets.Parsers transitively — a pre-existing
+pervasive pattern across 21 files; csproj DAG clean; documented, not refactored per the no-edge-refactor
+rule).
+**Fix wave (1 agent, 9 fixes):** MinimapPanel VFS-handle leak → borrow shared ClientContext.ZoneCatalog;
+MinimapPanel blip render → pooled ColorRect[64] (zero per-frame alloc); coord label → cached, alloc only
+on change; EffectRenderer hot-path GD.Print removed; 3 dead usings + 1 dead ChatWindow computation
+removed; TargetFrame demo state cleared on Bind. Stray QA artifacts (client_dir.cfg.bak, screenshot)
+deleted; client_dir.cfg restored byte-exact.
+**Orchestrator doc pass:** ROADMAP deviation note extended; `Network.Transport.Pipe`→`.Pipelines`
+corrected in PRESERVATION_AND_ARCHITECTURE.md (×3).
+**FINAL GATE:** `dotnet build MartialHeroes.slnx --no-incremental` = **0 err / 0 warn**; `dotnet test`
+= **all 10 suites green, 0 failures**. The 3 LSP "always-true" + 4 CS8019 diagnostics were stale
+mid-flight cache (real code/line mismatch; msbuild surfaces neither). Committed after gates.
 
 — *Maintained by the orchestrator. Update phase statuses in place as waves complete.*

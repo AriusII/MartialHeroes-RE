@@ -9,44 +9,72 @@ spec: packets/5-52_actor_skill_action.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Server broadcasts a skill/combat action by an actor, plus per-target hit results. Pairs with the C2S 2/52 request.
+summary: >
+  Server broadcasts a skill/combat action by an actor, plus per-target hit results. The body carries
+  per-target records (36 bytes each) that the client forwards to each target actor's animation/FX
+  queue and that drive the floating damage numbers over each victim's head. Pairs with the C2S 2/52
+  request.
 
 # Fixed 24-byte header. The repeating 36-byte target records are described in notes; the engineer
 # hand-codes the loop driven by TargetCount.
 fields:
-  - { name: CasterSort,   type: u8 }        # 0x00  caster actor sort
-  - { name: Pad0,         type: "bytes[3]" }  # 0x01  padding
-  - { name: CasterId,     type: u32 }       # 0x04  caster actor id
-  - { name: CastFlag,     type: u8 }        # 0x08  0 => cancel/idle branch; nonzero => active cast
-  - { name: BasicSelector, type: u8 }       # 0x09  basic/alias selector (0xFF => basic attack)
-  - { name: Pad1,         type: "bytes[2]" }  # 0x0a  padding
-  - { name: SkillId,      type: u32 }       # 0x0c  skill id (resolved against the client skill table)
-  - { name: SkillArg,     type: u32 }       # 0x10  secondary skill/effect argument
-  - { name: ActionCode,   type: u8 }        # 0x14  action code (0=single target; 0xC8..0xCB=motion sub-ops; 0xCC=AoE)
-  - { name: Pad2,         type: "bytes[3]" }  # 0x15  padding (TargetCount lives in this 0x14..0x18 region; see notes)
+  - { name: CasterSort,    type: u8 }        # 0x00  caster actor sort
+  - { name: Pad0,          type: "bytes[3]" }  # 0x01  padding
+  - { name: CasterId,      type: u32 }       # 0x04  caster actor id
+  - { name: CastFlag,      type: u8 }        # 0x08  0 => cancel/idle branch; nonzero => active cast
+  - { name: BasicSelector, type: u8 }        # 0x09  basic/alias selector (0xFF => basic attack)
+  - { name: Pad1,          type: "bytes[2]" }  # 0x0a  padding
+  - { name: SkillId,       type: u32 }       # 0x0c  skill id (resolved against the client skill table)
+  - { name: SkillArg,      type: u32 }       # 0x10  secondary skill/effect argument
+  - { name: ActionCode,    type: u8 }        # 0x14  action code (0=single target; 0xC8..0xCB=motion sub-ops; 0xCC=AoE)
+  - { name: Pad2,          type: "bytes[3]" }  # 0x15  pad / TargetCount region (see notes)
 
 notes: |
-  Static inference only; no capture available. VARIABLE-LENGTH packet.
+  Static inference only; no capture available. VARIABLE-LENGTH packet. CAPTURE-UNVERIFIED.
 
-  Header = 24 bytes (0x00..0x17), matching the handler's 0x18-byte read. When the per-record
-  counter is in (0, 0x28] the handler then reads target_count * 36 bytes of target records.
+  Header = 24 bytes (0x00..0x17), matching the handler's fixed 0x18-byte read. After the header the
+  handler reads a target count and then that many 36-byte target records.
 
-  TARGET RECORD (36 bytes each, repeated target_count times):
-    +0x00 (1B)  u8    target actor sort
-    +0x04 (4B)  u32   target actor id
-    +0x08 (4B)  i32   anim/hit state (1 = landed hit)
-    +0x0c (4B)  i32   visible damage applied
+  TARGET-COUNT HEADER (PLAUSIBLE position). CODE-CONFIRMED that the handler reads a per-target count,
+  bounds it to (0, 0x28] (i.e. at most 40 records), and then reads target_count * 36 bytes of records.
+  The count is read from the 0x14..0x17 region of the header (the handler copies the 24-byte header
+  into a work buffer offset by +4 and then reads its count from work+0x18, which maps back to the
+  payload's 0x14..0x17 dword). This spec places ActionCode at 0x14 and treats the target count as
+  living in the same 4-byte region (modeled inside Pad2). The exact byte split between ActionCode and
+  TargetCount within 0x14..0x17 is NOT pinned -- grade PLAUSIBLE -- so the engineer must confirm which
+  byte is the record count before trusting the loop bound. A reasonable reading is: ActionCode at 0x14
+  selects the action shape (single / motion sub-op / AoE) and a small TargetCount (<= 0x28) sits
+  alongside it; in the common single-target case both encode "one record follows".
+
+  TARGET RECORD (36 bytes each, repeated target_count times). CODE-CONFIRMED stride 36; each record is
+  forwarded to the target actor's per-actor animation/FX queue (the hit-animation / hit-FX driver) and
+  feeds a floating damage number over that target:
+    +0x00 (1B)  u8    target actor sort        (actor lookup key, with CasterId-style {sort,id})
+    +0x04 (4B)  u32   target actor id          (actor lookup key)
+    +0x08 (4B)  i32   anim/hit state           (1 = a hit landed; selects the hit animation)
+    +0x0c (4B)  i32   visible damage applied   (the number rendered as a floating damage figure)
     +0x10 (4B)  --    reserved
-    +0x14 (8B)  i64   remaining HP after hit (signed; negative on overkill)
-    +0x1c (4B)  i32   max HP
+    +0x14 (8B)  i64   remaining HP after hit    (signed; negative on overkill; feeds the HP bar)
+    +0x1c (4B)  i32   max HP                     (feeds the HP bar)
     +0x20 (4B)  --    tail / reserved
 
-  AMBIGUITY (resolve with a capture): the handler copies the 24-byte header into a work buffer
-  offset by +4, so its `target_count` loop reads from work+0x18 = the payload's 0x14..0x18 region.
-  The exact wire position of TargetCount versus ActionCode within 0x14..0x17 is NOT pinned. This
-  spec places ActionCode at 0x14 and treats the count as living in the same 4-byte region (Pad2);
-  the engineer must confirm which byte is the count before trusting the record loop bound.
+  CLIENT BEHAVIOUR (CODE-CONFIRMED, for the engineer's context -- not extra wire fields):
+    - Each record is pushed onto the target actor's animation/FX queue, which plays the per-target hit
+      animation and hit effect. This is THE driver for "the victim reacts to being hit".
+    - The visible-damage field (record +0x0c) is rendered as a floating damage number anchored over
+      the target's head (subject to the player's damage-message display option).
+    - The remaining-HP (record +0x14) and max-HP (record +0x1c) keep each actor's overhead HP bar
+      current; together with 5/53 they track every actor's HP.
+    - On the cast itself the local player's own stamina/HP cost is drained client-side.
 
   SPECIAL: when ActionCode == 0xCC the handler treats the first record as an AoE origin and
-  procedurally fans out sub-actors (no extra wire fields).
-  UNKNOWN: precise TargetCount byte; meaning of the two reserved record words. Capture required.
+  procedurally fans out sub-actors around it (no extra wire fields). ActionCode values 0xC8..0xCB are
+  motion sub-ops (animation toggles only, typically with no damage records).
+
+  UNKNOWNS to resolve with a capture (single-target hit, multi-hit combo, and an AoE cast):
+    - the precise byte that carries the record count within 0x14..0x17 (ActionCode vs TargetCount);
+    - the meaning of the two reserved record words (+0x10, +0x20);
+    - whether SkillArg is an effect id or a secondary target.
+
+  RELATED: paired request C2S 2/52 CmsgUseSkill (packets/2-52_use_skill.yaml); absolute HP also
+  arrives via S2C 5/53 SmsgActorVitalsAndPairState (packets/5-53_actor_vitals_and_pair_state.yaml).

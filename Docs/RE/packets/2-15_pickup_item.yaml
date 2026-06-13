@@ -1,0 +1,79 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgPickupItem
+opcode: 0x2000f           # major 2 (GameAction), minor 15 -> (2 << 16) | 15
+direction: C2S
+size: 12                 # fixed 12-byte payload built by the client pickup sender
+spec: packets/2-15_pickup_item.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client pickup request. Asks the server to pick up a specific ground item (or coin stack), identified by its world entity key. The server replies with S2C 4/15 SmsgItemWorldPickupAck.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths plus the 1-byte pad sum to size: 12.
+fields:
+  - { name: Key,    type: u32 }          # 0x00  target ground-item entity key (the world actor id)
+  - { name: Share0, type: u8 }           # 0x04  destination/share byte 0
+  - { name: Share1, type: u8 }           # 0x05  destination/share byte 1
+  - { name: Share2, type: u8 }           # 0x06  destination/share byte 2
+  - { name: Pad0,   type: "bytes[1]" }   # 0x07  alignment pad
+  - { name: Amount, type: u32 }          # 0x08  quantity / coin amount requested
+
+notes: |
+  Static inference only; no capture available. Protocol facts are read directly from the client
+  (CODE-CONFIRMED layout) but no live capture confirms the bytes on the wire (CAPTURE-UNVERIFIED).
+
+  The client pickup sender builds a fixed 12-byte payload, so total payload = 12 bytes. Frame =
+  8-byte header + 12 = 20 bytes on the wire.
+
+    0x00 (4B) Key    : the entity key of the targeted ground item -- the same world key the server
+                         assigned when the item was spawned (see the 5/14 / 4/4 / 5/15 specs). This is
+                         how the server identifies which world item to pick up.
+    0x04 (1B) Share0 : destination / party-share byte 0. For a coin pickup the client sets this to
+                         0xF0. For a normal item pickup it carries the chosen destination free-slot
+                         index (the client picks the next free bag slot).
+    0x05 (1B) Share1 : destination / share byte 1. For a normal item pickup this is the free-slot
+                         index shifted right by 3.
+    0x06 (1B) Share2 : destination / share byte 2. For a normal item pickup this is the free-slot
+                         index masked with 7 (low 3 bits). Together Share1/Share2 encode the same
+                         slot index split two ways; for the coin form Share1/Share2 are 0.
+    0x07 (1B) Pad0   : one alignment byte; treat as don't-care.
+    0x08 (4B) Amount : the requested quantity. For a coin pickup this is the coin amount; for an item
+                         it is the stack size to take.
+
+  COIN SPECIAL CASE: when the targeted item is a coin (template id 217000501), the share bytes are
+  (0xF0, 0, 0) and Amount is the coin amount. The coin template id 217000501 also appears in the
+  drop, spawn, and pickup-ack specs.
+
+  CLIENT-SIDE PRE-VALIDATION (read from the pickup driver; the engine should mirror these gates so a
+  pickup is not emitted when the server would reject it -- all checked in order before the send):
+    1. lock / busy / trade state: deny if the player is locked (in trade, dialog, or a menu), if the
+       client is in a busy state, or if a trade window is open.
+    2. free inventory slot: resolve a destination free bag slot; a free slot must exist. (The client
+       counts inventory slots whose marker indicates "empty" across the carry arrays -- this is an
+       occupancy / capacity check, NOT a world-distance check.)
+    3. pickable flag: the targeted item must carry the pickable flag; non-pickable items are refused
+       locally with a message.
+    4. level requirement: the player's level must satisfy the item's level requirement. The client
+       compares the player level field against the item's required-level field; if the player level
+       is below the requirement it shows error string id 10005 (a level / eligibility error) and does
+       NOT send. (The two fields live at distinct struct offsets within the local-player and item
+       records; the comparison is "player level >= item required level".)
+    5. coin gold cap: for a coin pickup, reject if (Amount + current gold) would exceed the gold cap
+       9,999,999,990,000,000 (a localized "gold full" message); otherwise set the share bytes to
+       (0xF0, 0, 0) and send.
+  On success the client stamps a client-side last-pickup timestamp as a local rate gate.
+
+  PHYSICAL PROXIMITY: no client-side metric pickup-radius gate was found on the send path. Proximity
+  is enforced by the click hit-test (the targeted ground item must be the one clicked / stood on) and
+  presumably server-side. A floating name label is drawn over a ground item only within ~1000 world
+  units (one terrain cell), but that label radius does not gate the pickup send.
+
+  UNKNOWNS to resolve with a capture of a normal pickup, a coin pickup, and a party-share pickup:
+    - whether the server honours the client-suggested destination slot in Share0/Share1/Share2 or
+      re-derives the slot itself;
+    - confirm the single pad byte at 0x07 is unused on the wire;
+    - confirm the share-byte encoding for the party-split / share path.
+
+  UNBLOCKS: Client.Application PickupItem use-case (paired with the 4/15 SmsgItemWorldPickupAck handler).

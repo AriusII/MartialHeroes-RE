@@ -60,6 +60,14 @@ gameplay_systems:
   LoginFlow:     { note: "login -> char-select -> enter-game; lobby/online server boundary", spec: "Docs/RE/specs/login_flow.md" }
   Social:        { note: "chat channels, whisper, party, guild, friend/block", spec: "Docs/RE/specs/social.md" }
   Quests:        { note: "quest accept/progress/complete, NPC dialog, Lua/npc.arr linkage, rewards", spec: "Docs/RE/specs/quests.md" }
+  # --- World-Scene systems promoted in Cycle 3 W2 ---
+  WorldSystems:  { note: "MASTER index of the World-Scene gameplay systems (combat/chat/NPC/quest/party/trade/minimap/progression/equip/effects); per-system summary + opcode tables + data files + see-also links", spec: "Docs/RE/specs/world_systems.md" }
+  Chat:          { note: "chat subsystem: ALL everyday channels send via C2S 2/7 with first payload byte = channel code (say/party/guild/shout/alliance/whisper); 1000-line 36B ring log, per-channel colour+filter, overhead bubbles on the Actor struct (5000ms); S2C 5/7 broadcast", spec: "Docs/RE/specs/chat.md" }
+  NpcInteraction: { note: "NPC click router (~30 KIND -> 117 panel slots): merchant/storage/repair/quest/gather; shop catalog in npc.scr+128; storage 2/142, sell 2/20, repair 2/113, shop 2/115, interact 2/19 (no teleport opcode)", spec: "Docs/RE/specs/npc_interaction.md" }
+  Minimap:       { note: "HUD radar + full-screen world map; dot transform px=relX*0.125+66.5, py=relZ*0.125+66.5 (1:8, 133x133); radar streams data/effect/map/d*x*z*.bmp; world map data/ui/map/map%d.dds; mapsetting.scr 52x84B zones; regiontableNNN.bin 52x32B", spec: "Docs/RE/specs/minimap.md" }
+  Progression:   { note: "exp/level/rank/stat-alloc/skill-points: S2C 5/9 ExpGain (64-bit xp), 5/11 RankXp, 5/32 LevelUp (evo panels lvl 12/24), 5/67 StatsUpdate, 4/150 SkillPoint; C2S 2/29 StatAllocate (five absolute u32 STR/INT/AGI/DEX/CON)", spec: "Docs/RE/specs/progression.md" }
+  EquipmentVisuals: { note: "avatar = per-part mesh recomposition (head/face/hair/body/weapon) under one skeleton @Visual+1300; part table @Visual+204 (16B); weapon -> hand bone; weapon glow tier from item_actor+231 (1..9)", spec: "Docs/RE/specs/equipment_visuals.md" }
+  BuffState:     { note: "30-slot HUD buff bar, fully server-driven by S2C 4/102 (476B, 30x12B records @payload+116); icon (srcX,srcY) from data/script/buff_icon_position.xdb (12B {u32 buffId,i32 srcX,i32 srcY}) on shared atlas data/ui/skillicon/stateicon.dds; 23x23 buff (id<=80) / 25x25 state (id>80)", spec: "Docs/RE/formats/misc_data.md" }
 
 # Canonical client-asset file extensions recovered from the loader routines.
 file_extensions:
@@ -124,6 +132,18 @@ asset_constants:
   ITEM_TEXTURELIST_MODEL:  { value: "flat-list", note: "data/item/texturelist.txt: one filename per line, leading numeric prefix = tex_id; ONE whole DDS per item icon (no atlas sub-rects)", spec: "Docs/RE/formats/ui_manifests.md" }
   SOUNDTABLE_RECORD_BYTES: { value: 48, note: "256 records per per-area sound table (.bgm/.bge/.eff/.wlk/.run)", spec: "Docs/RE/formats/sound_tables.md" }
   VFS_TOC_ENTRY_BYTES:     { value: 144, note: "data.inf directory entry: name[100] + u64 offset + u64 size + aux", spec: "Docs/RE/formats/pak.md" }
+  # --- World-Scene formats promoted in Cycle 3 W2 ---
+  BUFF_ICON_POS_RECORD_BYTES: { value: 12, note: "data/script/buff_icon_position.xdb record {u32 buffId (key), i32 iconSrcX, i32 iconSrcY}; CODE-CONFIRMED", spec: "Docs/RE/formats/misc_data.md" }
+  BUFF_BAR_SLOTS:          { value: 30, note: "HUD buff-bar slot count; cleared+rebuilt each 4/102 refresh", spec: "Docs/RE/formats/misc_data.md" }
+  BUFF_STATE_ID_BOUNDARY:  { value: 80, note: "buff id <=80 = 23x23 cell (left-to-right); id >80 = 25x25 state/debuff (fixed slot)", spec: "Docs/RE/formats/misc_data.md" }
+  STATE_ICON_ATLAS:        { value: "data/ui/skillicon/stateicon.dds", note: "512x512 DXT2 shared buff/state icon atlas; per-buff (srcX,srcY) from buff_icon_position.xdb", spec: "Docs/RE/formats/misc_data.md" }
+  MAPSETTING_RECORD_BYTES: { value: 84, note: "mapsetting.scr zone record {i32 zone_id, char[36] CP949 name, i32[4] bbox, f32 fog_density, 4x i32}; 52 zones; SAMPLE-VERIFIED", spec: "Docs/RE/formats/misc_data.md" }
+  REGIONTABLE_RECORD_BYTES: { value: 32, note: "regiontableNNN.bin sub-region record {f32 centreX@0, f32 centreZ@4, char[16] CP949 label@0x10}; 52 records; SAMPLE-VERIFIED", spec: "Docs/RE/formats/misc_data.md" }
+  MINIMAP_DOT_SCALE:       { value: "0.125", note: "world->radar: px = relX*0.125 + 66.5, py = relZ*0.125 + 66.5 (1:8, player centred in a 133x133 body); BYTE-VERIFIED", spec: "Docs/RE/specs/minimap.md" }
+  QUESTS_SCR_RECORD_BYTES: { value: 3720, note: "quests.scr stride; 488 slots / 122 occupied (sparse u16 id@0, CP949 name@2); SAMPLE-VERIFIED", spec: "Docs/RE/formats/config_tables.md" }
+  NPC_SCR_RECORD_BYTES:    { value: 404, note: "npc.scr stride; 2510 records (u32 id@0 mirrored@4, three CP949 paragraphs @0x14/0x50/0x90); SAMPLE-VERIFIED", spec: "Docs/RE/formats/config_tables.md" }
+  AUTOQUESTION_RECORD_BYTES: { value: 92, note: "autoquestion_cl.scr stride; 1300 anti-bot quiz records (CP949 question@4); SAMPLE-VERIFIED", spec: "Docs/RE/formats/config_tables.md" }
+  DISCRIPT_RECORD_BYTES:   { value: 68, note: "discript.sc stride; 33 records {u32 menu_id@0, u32 category@4, CP949 label@8}; SAMPLE-VERIFIED", spec: "Docs/RE/formats/config_tables.md" }
 
 # Runtime behavior constants recovered in the Cycle-2 workflow wave (NOT decompiler output;
 # values are interoperability facts promoted via the clean specs referenced).
@@ -134,6 +154,13 @@ runtime_constants:
   SERVERLIST_RECORD_BYTES:     { value: 8, note: "lobby server entry: server_id u16, status i16, load i16, open_time i16", spec: "Docs/RE/packets/lobby.yaml" }
   KEEPALIVE_INTERVAL_MS:       { value: 20000, note: "CmsgKeepalive cadence (1s poll granularity)", spec: "Docs/RE/packets/2-10000_keepalive.yaml" }
   LOAD_PROGRESS_DENOMINATOR:   { value: 9395240, note: "hardcoded boot progress-bar byte estimate; NOT a completion signal", spec: "Docs/RE/specs/resource_pipeline.md" }
+  # --- World-Scene runtime/wire constants promoted in Cycle 3 W2 ---
+  MELEE_SKILL_SLOT:            { value: "0xFF", note: "skill-slot byte in C2S 2/52 that marks a basic melee attack; there is NO separate plain-attack opcode", spec: "Docs/RE/specs/combat.md" }
+  BUFF_STATE_PACKET_BYTES:     { value: 476, note: "S2C 4/102 fixed body: stat block + 30 x 12B active-buff records at payload+116; server-authoritative buff bar", spec: "Docs/RE/packets/4-102_buff_state.yaml" }
+  EXP_GAIN_PACKET_BYTES:       { value: 32, note: "S2C 5/9 ExpGain: 64-bit xp amount added to local current xp; server XP %-bonus", spec: "Docs/RE/packets/5-9_exp_gain.yaml" }
+  COIN_ITEM_ID:                { value: 217000501, note: "the coin/money ground-item template id (C2S 2/14 mode 0xFF)", spec: "Docs/RE/specs/inventory_trade.md" }
+  GROUND_ITEM_FALLBACK_MODEL:  { value: 201011001, note: "shared 3D model id used for a ground item whose template model is missing", spec: "Docs/RE/specs/inventory_trade.md" }
+  LEVELUP_EVOLUTION_PANELS:    { value: "100@lvl12,101@lvl24", note: "class-evolution panels opened by S2C 5/32 LevelUp; UserXEffect 310000002 + sound 800000002", spec: "Docs/RE/specs/progression.md" }
   EFFECT_ID_PC_SPAWN:          { value: 310000001, note: "player materialize effect at world entry", spec: "Docs/RE/specs/effects.md" }
   EFFECT_ID_LEVELUP:           { value: 310000002, note: "level-up effect", spec: "Docs/RE/specs/effects.md" }
   EFFECT_ID_MOB_SPAWN:         { value: 360000001, note: "mob materialize effect", spec: "Docs/RE/specs/effects.md" }
@@ -339,7 +366,30 @@ opcodes:
   0x1000d: { name: "CmsgRenameCharacter",  direction: "C2S", tuple: "1:13" }
   0x1000e: { name: "CmsgDeleteCharacter",  direction: "C2S", tuple: "1:14" }
   0x22710: { name: "CmsgKeepalive",        direction: "C2S", tuple: "2:10000" }  # compressed-only ping, ~20s timer; 10000 = 0x2710
-  0x20007: { name: "CmsgWhisper",          direction: "C2S", tuple: "2:7" }
+  0x20007: { name: "CmsgChat",             direction: "C2S", tuple: "2:7" }  # single sender for ALL everyday chat; first payload byte = channel code (say/party/guild/shout/alliance/whisper); supersedes the earlier CmsgWhisper label (whisper is one channel, not a separate opcode)
   0x2000d: { name: "CmsgMoveRequest",      direction: "C2S", tuple: "2:13" }
-  0x20053: { name: "CmsgChatContextual",   direction: "C2S", tuple: "2:83" }
-  0x30015: { name: "CmsgChatChannel",      direction: "C2S", tuple: "3:21" }
+  0x20053: { name: "CmsgChatContextual",   direction: "C2S", tuple: "2:83" }  # friend-note/contextual submit, NOT everyday say-chat
+  0x30015: { name: "CmsgChatChannel",      direction: "C2S", tuple: "3:21" }  # relation/announce submit, NOT everyday say-chat
+  # --- World-Scene C2S send-sites recovered in Cycle 3 W1 (CODE-CONFIRMED static, CAPTURE-UNVERIFIED). See Docs/RE/opcodes.md + packets/. ---
+  0x2000e: { name: "CmsgDropItem",         direction: "C2S", tuple: "2:14" }
+  0x2000f: { name: "CmsgPickupItem",       direction: "C2S", tuple: "2:15" }
+  0x20013: { name: "CmsgNpcInteract",      direction: "C2S", tuple: "2:19" }   # also resolves NPC map-travel; no dedicated teleport opcode
+  0x20014: { name: "CmsgNpcSell",          direction: "C2S", tuple: "2:20" }
+  0x20017: { name: "CmsgTradeRequest",     direction: "C2S", tuple: "2:23" }
+  0x20018: { name: "CmsgTradeSlotAdd",     direction: "C2S", tuple: "2:24" }
+  0x20019: { name: "CmsgTradeConfirm",     direction: "C2S", tuple: "2:25" }
+  0x2001c: { name: "CmsgQuestAction",      direction: "C2S", tuple: "2:28" }   # send-only; server answers via 5:68/5:73
+  0x2001d: { name: "CmsgStatAllocate",     direction: "C2S", tuple: "2:29" }   # five absolute u32 STR/INT/AGI/DEX/CON; ack 4:29
+  0x2001e: { name: "CmsgGuildOp",          direction: "C2S", tuple: "2:30" }
+  0x20023: { name: "CmsgPartyInvite",      direction: "C2S", tuple: "2:35" }
+  0x20024: { name: "CmsgPartyLeaveKick",   direction: "C2S", tuple: "2:36" }
+  0x20025: { name: "CmsgPartyLeaderOp",    direction: "C2S", tuple: "2:37" }
+  0x20064: { name: "CmsgNpcOpenReq",       direction: "C2S", tuple: "2:100" }
+  0x2006e: { name: "CmsgQuestNpcStep",     direction: "C2S", tuple: "2:110" }
+  0x20071: { name: "CmsgRepairCommit",     direction: "C2S", tuple: "2:113" }
+  0x20073: { name: "CmsgShopBuy",          direction: "C2S", tuple: "2:115" }
+  0x2008e: { name: "CmsgStorageOp",        direction: "C2S", tuple: "2:142" }   # {i32 target, u8 op = widget action - 7, i64 amount}
+  0x2008f: { name: "CmsgQuestItemKeep",    direction: "C2S", tuple: "2:143" }
+  0x20097: { name: "CmsgProductBuy",       direction: "C2S", tuple: "2:151" }
+  0x20098: { name: "CmsgProductPage",      direction: "C2S", tuple: "2:152" }   # shares packets/2-151_product_buy.yaml
+  0x20099: { name: "CmsgProductConfirm",   direction: "C2S", tuple: "2:153" }   # shares packets/2-151_product_buy.yaml

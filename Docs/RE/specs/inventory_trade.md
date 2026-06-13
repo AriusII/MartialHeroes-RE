@@ -8,13 +8,19 @@ sample_verified: false
 > Neutral, rewritten behavioural specification. No legacy symbols, no binary
 > addresses, no pseudo-code. Describes the *observed behaviour*, state model,
 > opcode tuples and constants of the legacy client's inventory / equip / quick-use /
-> NPC-shop / item-upgrade / player-trade subsystems, so the .NET core can be
-> reimplemented from scratch.
+> NPC-shop / item-upgrade / player-trade / ground-item (drop & pickup) subsystems, so
+> the .NET core can be reimplemented from scratch.
 >
-> Scope: the client send-side (C2S) of the item/trade family and the rules the
-> client applies before sending or on receiving an ack. The detailed wire layouts
+> Scope: the client send-side (C2S) of the item/trade/ground-item family and the rules
+> the client applies before sending or on receiving an ack. The detailed wire layouts
 > of several server acks already live in `structs/item.md`; this spec references
 > those and does **not** restate them field-by-field.
+>
+> **Revision 2026-06-13** promoted the full player-to-player **trade** three-packet flow
+> (2/23, 2/24, 2/25; 4/23 phase machine) and the **ground-item** drop/pickup/render flow
+> (2/14, 2/15; 4/4 tag 4, 5/14, 4/14, 4/15, 5/15) into §8 and the new §12, correcting the
+> earlier provisional trade entries. Those findings are CODE-CONFIRMED in static read/write
+> order but remain CAPTURE-UNVERIFIED; see the per-row notes and §11.
 
 ## Status & confidence
 
@@ -110,26 +116,30 @@ The following client→server messages drive this subsystem. Sizes are payload b
 | Opcode | Dir | Size | Canonical name (proposed) | Purpose | Pairs with ack |
 |---|---|---|---|---|---|
 | 2/5  | C2S | 28 | `CmsgUseItemOrTeleport`  | Item-use / teleport-item request. | 4/5 item-use result |
+| 2/14 | C2S | 8  | `CmsgDropItem`          | Drop an inventory item or coin stack to the ground. See §12. | 4/14 (20 B) |
+| 2/15 | C2S | 12 | `CmsgPickupItem`        | Pick up a targeted ground item. See §12. | 4/15 (36 B) |
 | 2/16 | C2S | 12 | `CmsgEquipChange`        | Equip / unequip / swap request (also inventory slot-move). See §4. | 4/16 + 4/12 |
 | 2/17 | C2S | 8  | `CmsgQuickEquipSlotSet`  | Quick-equip / quick-use slot set. See §5. | 4/17 |
 | 2/19 | C2S | 12 | `CmsgNpcInteractOpen`    | NPC interact / shop-open. See §7. | 4/19 (56 B) |
 | 2/20 | C2S | 12 | `CmsgNpcSellItem`        | Sell one inventory item to an NPC. See §7. | 4/20 (24 B) |
 | 2/22 | C2S | 8  | `CmsgUseItemOnTarget`    | Item-use targeted at an actor (tentative). | item-use acks |
-| 2/23 | C2S | 8  | `CmsgTradeRequest`       | Player-trade request / accept / decline / cancel. See §8. | 4/23 |
-| 2/24 | C2S | 20 | `CmsgTradeSlotUpdate`    | Add / update an item in your trade-window half. See §8. | 4/24 |
-| 2/30 | C2S | 8  | (trade/social — role UNVERIFIED) | Social/interaction op near the trade path; possibly trade-finalize or a social-panel op. | — |
+| 2/23 | C2S | 8  | `CmsgTradeRequest`       | Player-trade request / accept. See §8. | 4/23 |
+| 2/24 | C2S | 20 | `CmsgTradeSlotUpdate`    | Add / update money or an item in your trade-window half. See §8. | 4/24 |
+| 2/25 | C2S | 2 + 4×N | `CmsgTradeConfirm`     | Confirm / lock or cancel the trade, re-transmitting the own-side offer manifest. See §8. | 4/25 |
+| 2/30 | C2S | 8  | `CmsgGuildAction` (relation/guild op) | Small guild / relation action channel; **not** a trade op (corrected 2026-06-13). See §8.4. | — |
 | 2/50 | C2S | 16 | `CmsgUpgradeItemCommit`  | Timed/progress-channel commit (item upgrade/enchant candidate). See §6. | 4/50 (likely) |
 
 Confidence: routing (`major/minor` + direction) `CONFIRMED` for all of the above except
-**2/30** (role `UNVERIFIED`) and **2/50** (commit purpose `LIKELY`, payload `UNVERIFIED`).
-The detailed payload tables are in the relevant section per opcode.
+**2/50** (commit purpose `LIKELY`, payload `UNVERIFIED`). The detailed payload tables are in the
+relevant section per opcode.
 
 > **Open routing gaps (flag for follow-up):**
-> - **2/30**'s role is unknown; it sits near the trade path and could be a trade
->   finalize/confirm or a social op.
-> - The **outbound trade-finalize/confirm minor is not pinned.** The *inbound* finalize
->   is observed as 4/25 with phase = 4 (§8); the matching C2S confirm minor is a candidate
->   among 2/30 or a second mode of 2/23.
+> - The **outbound trade finalize/confirm minor is now pinned as 2/25** (corrected
+>   2026-06-13: it is the in-window confirm/lock and cancel op — a 2-byte header plus an
+>   own-side offer manifest, *not* a flat 2-byte packet — see §8.1). The earlier note that
+>   the confirm minor was a candidate among 2/30 or a second mode of 2/23 is superseded.
+> - **2/30**'s role is resolved as a guild / relation action channel (corrected 2026-06-13);
+>   it is no longer a trade-finalize candidate. See §8.4.
 > - No **dedicated stack split/merge** opcode was found (§9).
 
 ---
@@ -368,50 +378,109 @@ only; their layouts are out of scope for this spec.
 Direction of travel is from the client's point of view. All inbound trade handlers feed a
 shared inventory/trade controller.
 
+The trade is a **three-packet client→server flow**: **2/23** (request / accept),
+**2/24** (add money or an item to your half), **2/25** (confirm/lock or cancel,
+re-transmitting your offer manifest) (corrected 2026-06-13: previously the confirm minor was
+left unpinned and 2/24's field map was undecoded — both are now resolved from the trade-panel
+build / action / send-builder routines). All offsets are CODE-CONFIRMED (static read/write
+order) but **CAPTURE-UNVERIFIED**.
+
 ### 8.1 Client-emitted (C2S)
 
-- **2/23 `CmsgTradeRequest` (8 bytes)** — request / accept / decline / cancel.
+- **2/23 `CmsgTradeRequest` (8 bytes)** — request / accept. Shares the family's common 8-byte
+  "social op" shape: a 1-byte mode at +0, three uninitialised stack bytes at +1…+3 (write as
+  zero, ignore on read), and a 4-byte value at +4. (Corrected 2026-06-13: the mode enum is now
+  pinned — `2 = request`, `0 = accept` — replacing the earlier "request/accept/decline/cancel
+  enum UNVERIFIED" note.)
 
   | Off | Size | Field | Meaning | Conf |
   |---|---|---|---|---|
-  | +0 | u8  | `mode`  | Encodes request vs accept vs decline vs cancel. Exact enum `UNVERIFIED`. | LIKELY |
-  | +1 | 3 B | (pad)   | Alignment padding to the dword. | UNVERIFIED |
-  | +4 | i32 | `value` | Target actor id (on request) or a response code (on accept/decline). | LIKELY |
+  | +0 | u8  | `mode`  | `2` = initiate trade request; `0` = accept / respond-OK. Decline/cancel modes (`1`/`3`) are plausible by symmetry but were not observed on a send path. | CODE-CONFIRMED (modes 0, 2) |
+  | +1 | 3 B | (pad)   | Uninitialised stack bytes; written as zero. | CODE-CONFIRMED |
+  | +4 | i32 | `value` | Target actor id (on request) or response/responder context (on accept). | CODE-CONFIRMED (placement) |
 
-  Field widths sum to 8 bytes (1+3+4). Sent under can-act gating; on a blocked state the
-  client shows the **"cannot trade now"** message (id **36030**) and does not send.
-  `LIKELY`.
+  Field widths sum to 8 bytes (1+3+4). On **mode 2** (request) the client first opens the timed
+  right-click confirmation popup (a shared "pending interaction" context with an **8000 ms**
+  countdown, distinguished from the party-invite and relation contexts only by a small internal
+  context-type code) before sending. The send is gated by the can-act predicates; on a blocked
+  state the client shows the **"cannot trade now"** message (id **36030**) and does not send.
 
-- **2/24 `CmsgTradeSlotUpdate` (20 bytes)** — put / change an item + quantity in your half
-  of the trade window. Gated by busy/dead checks before send.
+- **2/24 `CmsgTradeSlotUpdate` (20 bytes)** — add or change **money or an item** in your half
+  of the trade window. Gated by busy/dead checks and by the slot validator before send. (Corrected
+  2026-06-13: the field map is now decoded — a leading **category** byte selects money vs item, and
+  money rides as a 64-bit value split across two dwords.)
 
   | Off | Size | Field | Meaning | Conf |
   |---|---|---|---|---|
-  | +0 | u8  | `mode` | Operation mode. | LIKELY |
-  | +1 | u8  | `sub`  | Sub-operation index. | LIKELY |
-  | +2 | 2 B | (pad)  | Alignment padding to the dword. | UNVERIFIED |
-  | +4 | i32 | `a`    | One of {slot, item, quantity}. Field assignment `UNVERIFIED`. | UNVERIFIED |
-  | +8 | i32 | `b`    | One of {slot, item, quantity}. Field assignment `UNVERIFIED`. | UNVERIFIED |
-  | +12| i32 | `c`    | One of {slot, item, quantity}. Field assignment `UNVERIFIED`. | UNVERIFIED |
-  | +16| u8  | `x`    | Extra byte. | UNVERIFIED |
-  | +17| u8  | `y`    | Extra byte. | UNVERIFIED |
-  | +18| u8  | `z`    | Extra byte. | UNVERIFIED |
-  | +19| 1 B | (pad)  | Alignment padding to 20 bytes. | UNVERIFIED |
+  | +0 | u8  | `category` | `0` = money, `1` = item, `4` = add-item-with-confirm, `255` = set money total. | CODE-CONFIRMED |
+  | +1 | u8  | `slot`     | Slot / sub-index. | CODE-CONFIRMED |
+  | +2 | 2 B | (pad)      | Alignment padding to the dword. | PLAUSIBLE |
+  | +4 | i32 | `a`        | Item index (item categories) **or** the low dword of the money value. | CODE-CONFIRMED (money case) / PLAUSIBLE (item case) |
+  | +8 | i32 | `b`        | High dword of the money value (money is a 64-bit amount split across +4/+8) **or** extra (item categories). | CODE-CONFIRMED (money case) |
+  | +12| i32 | `c`        | Quantity (item categories) or extra. | PLAUSIBLE |
+  | +16| u8  | `flag0`    | Trailing flag byte. | PLAUSIBLE |
+  | +17| u8  | `flag1`    | Trailing flag byte. | PLAUSIBLE |
+  | +18| u8  | `flag2`    | Trailing flag byte. | PLAUSIBLE |
+  | +19| 1 B | (pad)      | Alignment padding to 20 bytes. | PLAUSIBLE |
 
-  Field widths sum to 20 bytes (1+1+2+4+4+4+1+1+1+1). **The order of slot / item /
-  quantity among `a`/`b`/`c` is `UNVERIFIED`** — pin against a capture before decoding.
+  Field widths sum to 20 bytes (1+1+2+4+4+4+1+1+1+1). The **money case is CODE-CONFIRMED** (a
+  64-bit amount split across +4/+8); the item-category column order (item index vs quantity among
+  `a`/`b`/`c`) is inferred from argument order and remains capture-unverified.
 
-- **Trade finalize / confirm (C2S)** — **not pinned this pass.** The inbound finalize is
-  observed as 4/25 phase = 4 (§8.2); the matching outbound confirm minor is a candidate
-  among **2/30** or a second mode of **2/23**. `UNVERIFIED`.
+  **Money is a base-1000 three-digit composite.** The trade panel holds the offered money as three
+  digit fields and assembles the 64-bit total as `total = d2 + 1000 × (d1 + 1000 × d0)` (the three
+  fields live at trade-panel offsets +1536 / +1544 / +1552; see §8.5). Setting the money offer from
+  the panel's right-click menu emits **2/24 with `category` = 255** carrying that composite.
+
+  The pre-send slot validator rejects, with a localized message: a duplicate item already present in
+  the 40 trade slots; insufficient gold (current gold below the offered amount); a busy / already-
+  confirmed trade; an open-shop conflict; or a non-tradeable / bound item.
+
+- **2/25 `CmsgTradeConfirm` (2-byte header + N × 4-byte own-side slot manifest, N ≤ 40)** —
+  confirm/lock or cancel the trade. (Corrected 2026-06-13: this was previously listed as a flat
+  2-byte packet and the outbound confirm minor was "not pinned". It is **not** a flat 2-byte
+  packet — it is a 2-byte header followed by a variable manifest of 4-byte records, one per
+  occupied own-side trade slot, up to 40. This is the trade-finalize/confirm edge the earlier
+  pass left open.)
+
+  | Off | Size | Field | Meaning | Conf |
+  |---|---|---|---|---|
+  | +0 | u8  | `mode`  | `1` = confirm / agree / lock; `0` = cancel / withdraw. | CODE-CONFIRMED |
+  | +1 | u8  | `flag`  | Confirm-state / sub-flag carried from the panel's local lock state. | CODE-CONFIRMED |
+  | +2 + 4×i | 4 B | `slot_record[i]` | One record **per occupied own-side trade slot**, `i` from 0 to N−1, N ≤ 40. Each record is `{ slot_index:u8, b0:u8, b1:u8, b2:u8 }`. | CODE-CONFIRMED (structure) |
+
+  The send routine walks all 40 own-side trade slots and appends a 4-byte record only for each
+  **occupied** slot, so the total payload size is `2 + 4 × (occupied own-side slots)`. The three
+  trailing bytes per record are slot-record fields (plausibly `{category, item-sub, count}`); their
+  exact meaning is capture-unverified. This is a **commit-with-manifest** packet: the client
+  re-transmits its own offered-item manifest at confirm time. Whether the server treats this
+  manifest as authoritative or merely advisory (recomputing the offer server-side) is an open
+  question (§11).
 
 ### 8.2 Server acks (S2C; all `confirmed` routing in `opcodes.md`)
 
-- **4/23 `UserTradeRequestResult` (20 bytes)** — `result` at +8 (`0` = error, `1` = ok),
-  `reason` at +9 (values 1…5 map to **five distinct decline-reason** messages). On
-  `result == 1` the client opens the trade window (copies the 20-byte body into the trade
-  controller and runs window setup). On `result == 0` it closes the panel and shows the
-  reason message. `LIKELY`.
+- **4/23 `UserTradeRequestResult` (20 bytes)** — a **phase machine on the byte at +10**, not the
+  generic `result@+8` / `reason@+9` ack stereotype (corrected 2026-06-13: the trade-specific
+  selector is the phase byte at **+10**, and the two trader ids are at **+4 / +12 / +16**; the
+  earlier "result@8, reason@9 → five decline reasons" description was the generic family
+  stereotype and is superseded for this opcode).
+
+  | Off | Size | Field | Meaning | Conf |
+  |---|---|---|---|---|
+  | +4  | u32 | `requester_id` | The actor that initiated the request. | CODE-CONFIRMED |
+  | +10 | u8  | `phase`        | `0` = cancel / decline; `2` = incoming request; `3` = accepted → open the trade window. | CODE-CONFIRMED |
+  | +12 | u32 | `target_id`    | The addressed target actor. | CODE-CONFIRMED |
+  | +16 | u32 | `responder_id` | The responder / canceller actor. | CODE-CONFIRMED |
+
+  Phase behaviour (own-vs-partner resolved by comparing `requester_id` against `responder_id`):
+  - **phase 2 (incoming request):** if the request is addressed to the local player and the player
+    is not busy, show the "X wants to trade" prompt (id **2042**) in the request panel; if the
+    player is busy, the client auto-accepts by sending **2/23 mode 0**.
+  - **phase 3 (accepted):** close the confirmation popup, **open the trade window** plus the partner
+    **item panel**, set both side name labels (own = local player name, partner = partner actor
+    name), and hide the rest of the HUD windows.
+  - **phase 0 (cancel/decline):** close the trade / wait panels; if the canceller differs from the
+    requester, show a decline message; clear the trade state and zero the 20-byte trade context.
 - **4/24 `UserTradeSlotUpdateResult` (44 bytes)** — `result` at +8, `reason` at +9
   (value 1 → one message, value 2 → another). On `result == 1` the client updates the
   trade-slot view; otherwise it refreshes / clears the view. `LIKELY`.
@@ -439,21 +508,54 @@ shared inventory/trade controller.
 
 ### 8.3 Trade state machine (client view)
 
+(Updated 2026-06-13: the confirm edge is now the pinned **2/25 mode 1**, and window-open is keyed
+on the **4/23 phase** byte rather than a generic result flag.)
+
 ```
 IDLE
-  └─(send 2/23 request)─► REQUESTED
-                              └─(recv 4/23 result==1)─► WINDOW_OPEN
+  └─(send 2/23 mode 2 request)─► REQUESTED
+                              └─(recv 4/23 phase==2 incoming, to me)─► (request prompt; accept ─► send 2/23 mode 0)
+                              └─(recv 4/23 phase==3 accepted)──────────► WINDOW_OPEN
 WINDOW_OPEN
-  ├─(send 2/24 add/update)  ◄──(recv 4/24 slot-update result)─►  (view updates)
-  ├─(recv 5/106 on)         ─► both parties marked trade-busy
-  └─(confirm; minor UNVERIFIED)
+  ├─(send 2/24 add money/item)  ◄──(recv 4/24 slot-update result)─►  (view updates)
+  ├─(recv 5/106 on)             ─► both parties marked trade-busy
+  └─(send 2/25 mode 1 confirm + own-side manifest)
         └─(recv 4/25 phase==4 FINALIZE, full item list)─► apply items, close ─► IDLE
 
-Any of: 4/23 error, 4/24 error, 4/25 phase==0, or 5/106 off  ─► cancel / close ─► IDLE
+Any of: send 2/25 mode 0 cancel, recv 4/23 phase==0, 4/24 error,
+        4/25 phase==0, or 5/106 off  ─► cancel / close ─► IDLE
 ```
 
-The outbound **confirm** transition is the only unpinned edge (§8.1). `LIKELY` for the
-overall shape; the confirm edge is `UNVERIFIED`.
+`LIKELY` for the overall shape; the individual edges are CODE-CONFIRMED in placement but
+CAPTURE-UNVERIFIED.
+
+### 8.4 2/30 — guild / relation action channel (not a trade op)
+
+(Added 2026-06-13.) **2/30 `CmsgGuildAction` (8 bytes)** is the small guild / relation action
+channel, **not** the trade-finalize candidate the earlier pass guessed. Its payload is a pair of
+4-byte words: `op` at +0 and an `id` at +4. The submit path resolves a target id and applies a
+self-target guard (it shows a "cannot target yourself"-class message and does not send when the
+target equals the local player's own actor id) before transmitting the 8 bytes verbatim. The
+trade flow does **not** use 2/30; it is documented here only to close the earlier open routing
+gap. `CODE-CONFIRMED` (routing + 2-word shape); the deeper guild flows are out of scope for this
+spec.
+
+### 8.5 Trade-window field map (HUD; offsets relative to the trade-panel object)
+
+(Added 2026-06-13.) The trade window is a HUD panel object; an implementer mirroring its layout can
+use the recovered field offsets below. These are **in-memory panel offsets**, not wire offsets.
+`CODE-CONFIRMED` (offsets) / `PLAUSIBLE` (semantics).
+
+| Off (from panel base) | Meaning |
+|---|---|
+| +1528 | Own-side name label. |
+| +1532 | Partner-side name label. |
+| +1536 / +1544 / +1552 | The three base-1000 money digits; total = +1552 + 1000 × (+1544 + 1000 × +1536). |
+| +1588 | Own-side item slot table — 40 slots, stride 20. |
+| +2388 | Partner-side item slot table — 40 slots, stride 20. |
+
+The own-side slot region (40 slots, stride 20) is the same region the **2/25** confirm manifest
+walks to build its per-occupied-slot record list (§8.1).
 
 ---
 
@@ -485,20 +587,39 @@ overall shape; the confirm edge is `UNVERIFIED`.
 | Equip slot 14 | Special weapon slot. | LIKELY |
 | Equip slot 8 | Excluded from equip-onto-other and from the worn-item stat sum. | LIKELY |
 | Quick-use slot stride = 8 bytes | Quick-use slot occupancy array. | LIKELY |
-| Trade window max items = 40 (0x28) | 4/25 `item_count` cap; 40-entry trade array. | CONFIRMED |
+| Trade window max items = 40 (0x28) | 4/25 `item_count` cap; 40-entry trade array; 2/25 manifest cap. | CONFIRMED |
 | Trade-item record = 16 bytes | Per item in the 4/25 finalize list. | CONFIRMED |
 | 4/25 `phase` at +0x10: 4 = finalize, 0 = cancel | Trade finalize selector. | LIKELY |
+| 2/23 `mode`: 2 = request, 0 = accept | C2S trade request/accept selector (added 2026-06-13). | CODE-CONFIRMED |
+| 2/24 `category`: 0 = money, 1 = item, 4 = add-item-with-confirm, 255 = set-money | C2S trade-slot category selector (added 2026-06-13). | CODE-CONFIRMED |
+| 2/24 money composite: total = d2 + 1000×(d1 + 1000×d0) | Base-1000 3-digit money encoding from panel fields +1536/+1544/+1552 (added 2026-06-13). | CODE-CONFIRMED |
+| 2/25 `mode`: 1 = confirm/lock, 0 = cancel | C2S trade-confirm selector; payload = 2 + 4×(occupied own-side slots), N ≤ 40 (added 2026-06-13). | CODE-CONFIRMED |
+| 4/23 `phase` at +10: 0 = cancel/decline, 2 = incoming request, 3 = accepted→open | C2S trade-request-result phase machine; trader ids at +4/+12/+16 (corrected 2026-06-13, supersedes the old result@8/reason@9 reading). | CODE-CONFIRMED |
+| 2/30 op pair: `op`@+0, `id`@+4 | Guild / relation action channel; not a trade op (added 2026-06-13). | CODE-CONFIRMED |
 | Upgrade motion 8 = success, 9 = fail | 4/50 enchant/upgrade animation. | LIKELY |
 | Repair divisors 60 and 12 | 4/19 repair time = value/60 min (rem value%60); value/12, value%12. | LIKELY |
 | Message id 59003 | Equip-onto-other rejection (slot-8 relation guard). CP949. | LIKELY |
 | Message id 36003 | Item-shop-expired. CP949. | LIKELY |
 | Message ids 36004 … 36028 | Repair price / time template table (base 36004, trailer 36028). CP949. | LIKELY |
 | Message id 36030 | "Cannot trade now". CP949. | LIKELY |
-| 4/23 `reason` 1…5 → 5 decline messages | Trade-request decline reason map. | LIKELY |
+| Message id 2042 | "X wants to trade" request prompt (4/23 phase 2). CP949. | CODE-CONFIRMED (string-ref) |
 | 4/24 `reason` 1 / 2 → 2 messages | Trade-slot-update reason map. | LIKELY |
 | Sound id 862050101 | NPC purchase SFX. | LIKELY |
 | Sound ids 863500001 / 863500002 / 863500003 | Trade-open SFX. | LIKELY |
 | Visual id 350000063 | Trade-open visual cue. | LIKELY |
+| Ground-item fallback model id = 201011001 | Shared default world model when an item's template model lookup fails (added 2026-06-13). | CODE-CONFIRMED |
+| Coin / money ground-item effect id = 217000501 | Drop mode 0xFF / pickup coin branch (added 2026-06-13). | CODE-CONFIRMED |
+| Ground-item actor record = 76 bytes | Pool stride for a ground-item world actor (added 2026-06-13). | CODE-CONFIRMED |
+| Ground-item float height = +1.0 unit | Item sits 1 unit above terrain (added 2026-06-13). | CODE-CONFIRMED |
+| Name-label display radius = 1000.0 units (1,000,000.0 squared) | One terrain cell; label drawn at item pos + (0,2,0) (added 2026-06-13). | CODE-CONFIRMED |
+| Mob-drop auto-expire ≈ 1000 ms | Ground item from a Mob dropper auto-despawns after ~1 s (added 2026-06-13). | CODE-CONFIRMED |
+| Gold cap on coin pickup = 9,999,999,990,000,000 | Pickup pre-validation rejects when amount + current gold exceeds this (added 2026-06-13). | CODE-CONFIRMED |
+| Pickup level requirement: player level ≥ item level requirement | Pickup pre-validation; else error 10005 (player level field +1684 vs item field +228) (added 2026-06-13). | CODE-CONFIRMED |
+| Pickup free-slot capacity threshold = 20 | Inventory free-slot count gate (marker byte 0xFF across the bag arrays), NOT a distance check (added 2026-06-13). | CODE-CONFIRMED |
+| Drop SFX 862030106; coin-pickup SFX 862030105 | Ground-item A/V cues (added 2026-06-13). | LIKELY |
+| Drop announce string 2146; pickup announce 10006 / 37003; other-player pickup notice 10018 | Ground-item chat cues, CP949 (added 2026-06-13). | LIKELY |
+| Pickup error strings 10001…10005 | 4/15 failure subtypes 1…5; 10005 = level/eligibility (added 2026-06-13). CP949. | CODE-CONFIRMED |
+| Rare-drop chat strings 64001 / 64002 | 5/14 `notice_flag` one-shot line (added 2026-06-13). CP949. | LIKELY |
 
 > The "message ids" above are runtime **localized message codes** (CP949 strings), not
 > opcodes and not enum values on the wire. Keep them as display constants only.
@@ -508,20 +629,25 @@ overall shape; the confirm edge is `UNVERIFIED`.
 ## 11. UNVERIFIED / open questions
 
 1. **No live capture this pass.** Every field offset/size is a static inference unless
-   tagged `prior-capture-claim`. All sizes should be byte-confirmed against a capture.
-2. **2/30 role** and the **outbound trade finalize/confirm minor** — not pinned. 4/25
-   phase = 4 is the inbound finalize; the matching outbound minor is a candidate among
-   2/30 or an alternate mode of 2/23.
+   tagged `prior-capture-claim`. All sizes should be byte-confirmed against a capture. The trade
+   and ground-item flows added/corrected 2026-06-13 are CODE-CONFIRMED in read/write order but
+   remain CAPTURE-UNVERIFIED.
+2. **(Resolved 2026-06-13.)** The **outbound trade finalize/confirm minor is 2/25** (a 2-byte
+   header plus an own-side offer manifest, §8.1), and **2/30 is a guild / relation action
+   channel** (§8.4), not a trade op. Open follow-up: confirm whether the server treats the 2/25
+   manifest as authoritative or merely advisory (does it recompute the offer server-side?).
 3. **Stack split / merge request** — no dedicated opcode found. Quantity is an i32 in the
-   sell/trade/use paths; split likely reuses a slot-move minor. Probe 2/22, 2/30, and
-   small slot ops next.
+   sell/trade/use paths; split likely reuses a slot-move minor. Probe 2/22 and small slot ops next
+   (2/30 is now ruled out — it is the guild/relation channel).
 4. **Equip level / class requirement** — not enforced on the client send path (only state
    gates + slot-8 relation guard). Eligibility appears server-authoritative; confirm
    whether (and where) the client greys out ineligible items (tooltip / template-compare
    path).
 5. **2/16 bytes +5…+7** — treated as alignment padding; verify they are zero on the wire.
-6. **2/24 trade-slot fields `a`/`b`/`c`** — the slot / item / quantity ordering is
-   unknown.
+6. **2/24 item-category column order** — the leading `category` byte and the 64-bit money case
+   are now decoded (corrected 2026-06-13), but for the item categories (1 / 4) the order of item
+   index vs quantity among the `a`/`b`/`c` dwords is still inferred from argument order, not
+   byte-verified.
 7. **4/50 32-byte body** — the exact offset of the resulting +N enchant level is unknown
    (candidates: the bonus dwords analogous to `EquipSlotBody` +0x18/+0x1C/+0x20).
 8. **2/50 16-byte payload** — not decoded field-by-field; confirm it is the *upgrade*
@@ -535,3 +661,255 @@ overall shape; the confirm edge is `UNVERIFIED`.
     decode against a capture.
 12. **2/19 sub-flags (`flag_a…d`, `arg`)** — zero on a plain open; their meaning on a
     purchase path is unknown.
+13. **2/25 confirm-manifest record interior** (added 2026-06-13) — the three trailing bytes of
+    each 4-byte own-side slot record are plausibly `{category, item-sub, count}`; confirm against
+    a capture of a multi-item trade confirm.
+14. **Ground-item drop modes 0 vs 2** (added 2026-06-13) — both the C2S 2/14 drop request and the
+    4/14 drop-ack mode byte distinguish `0` = bag slot vs `2` = staged/fixed slot; which UI action
+    emits which mode, and the exact resolution of the "staged" slot, is inferred.
+15. **5/14 spawn body holes** (added 2026-06-13) — the 48-byte body shares a wire shape with the
+    combat-effect-instance spawn; the bytes the ground-item handler does not consume (the hole at
+    +16 and the +33…+43 region) are capture-unverified. Confirm the server sends a full 48 bytes
+    for a drop.
+16. **4/15 pickup success subtypes 100 / 101 / else** (added 2026-06-13) — the three success
+    sub-paths (share/party-split, plain insert, insert+echo) were read structurally; the server
+    policy that selects each (party loot rules) is server-side and not fully decidable from the
+    client. The echoed dwords at +12 / +0x1C / +0x20 are `PLAUSIBLE` only.
+17. **Despawn authority** (added 2026-06-13) — 5/15 is the explicit ground-item despawn; the 4/15
+    "else" success path also runs a local remover for the picker. Whether a 5/15 always follows a
+    4/15 for the picker, or the client self-despawns and 5/15 is only for observers, is
+    capture-unverified.
+18. **Pickup physical proximity** (added 2026-06-13) — no explicit client-side metric distance
+    gate was found on the 2/15 send path (the free-slot count of 20 is a capacity check, not
+    units). Proximity is enforced by the click hit-test and presumably server-side. The C2S 2/15
+    share-bytes (+4/+5/+6) carry a client-suggested destination free-slot index for non-coin
+    pickups (and `(0xF0, 0, 0)` for coins); whether the server honours the suggestion or re-derives
+    the slot is unknown.
+
+---
+
+## 12. Ground items — drop, pickup, and world rendering
+
+(Added 2026-06-13.) This section covers the **ground-item lifecycle**: items dropped into the
+world, the requests that drop and pick them up, and the way the client renders them. All offsets
+are CODE-CONFIRMED (static read/write order or in-memory pool stride) but **CAPTURE-UNVERIFIED**;
+field *meanings* are graded individually. Korean text fields are CP949. All wire offsets are
+payload-relative (relative to frame +8).
+
+> **Headline:** ground items are **first-class 3D world actors**, *not* billboards and *not* a
+> single shared bag mesh. Each dropped item resolves its own per-template world model; when that
+> lookup fails the engine substitutes one **shared default fallback model (id 201011001)**, a
+> generic sack/bag mesh. Items are tracked in a dedicated registry (the "ItemMap") and inserted
+> into the terrain spatial grid like any other actor, with a floating name label.
+
+### 12.1 Lifecycle and opcode map
+
+| Opcode | Dir | Size (bytes; read count) | Canonical name (proposed) | Role |
+|---|---|---|---|---|
+| 4/4 tag 4 | S2C | 24-byte tag record (inside the area stream) | (part of `SmsgAreaEntitySnapshot`) | Bulk area spawn: a ground item already present in the visible area on (re)entry/refresh. |
+| 5/14 | S2C | 48 (read 0x30) | `SmsgGroundItemSpawn` (a.k.a. combat-effect-instance spawn) | The live "an item just dropped in the world" push (monster drops, combat-effect drops, coin drops). |
+| 4/14 | S2C | 20 (read 0x14) | `SmsgGroundItemDropAck` | Result of a **drop-from-inventory** request; spawns the dropped item at the dropper's feet. |
+| 4/15 | S2C | 36 (read 0x24) | `SmsgItemWorldPickupAck` | Result of a **pickup** request; inserts the item into a bag slot (or coin into gold) and announces it. |
+| 5/15 | S2C | 16 (read 0x10) | `SmsgGroundItemRemove` | Despawn a ground item (someone picked it up); optional "X picked up Y" notice. |
+| 2/14 | C2S | 8 | `CmsgDropItem` | Drop an inventory item / coin stack to the ground. |
+| 2/15 | C2S | 12 | `CmsgPickupItem` | Pick up a targeted ground item. |
+
+Routing for 4/14, 4/15, 5/14, 5/15 and the 5/106 trade-state toggle is `confirmed` in
+`opcodes.md`; the 4/4 tag stream is the area entity snapshot. The matching packet YAMLs
+(2-14, 2-15, 4-14, 4-15, 5-14, 5-15) are not yet authored — this section is their design input.
+
+### 12.2 C2S 2/14 `CmsgDropItem` (8 bytes)
+
+Drops an inventory item or coin stack to the ground at the local player's feet.
+
+| Off | Size | Field | Meaning | Conf |
+|---|---|---|---|---|
+| +0 | u8  | `mode`  | `0` = bag slot, `1` = equip slot, `2` = staged/fixed slot, `0xFF` = coin. | CODE-CONFIRMED |
+| +1 | u8  | `slot`  | Slot index in the relevant array. | CODE-CONFIRMED |
+| +2 | 2 B | (pad)   | Uninitialised padding. | PLAUSIBLE |
+| +4 | i32 | `count` | Item count / coin amount. | CODE-CONFIRMED |
+
+The pre-send validator requires the in-game / action-ready state flags. For a coin drop
+(`mode = 0xFF`) it checks the amount does not exceed current gold and **decrements local gold
+immediately** (client-side prediction); for an item drop it resolves the item from the slot array
+and requires the item's droppable flag. The drop coin id is **217000501**.
+
+### 12.3 C2S 2/15 `CmsgPickupItem` (12 bytes)
+
+Picks up a targeted ground item. The target is the clicked / stood-on ground-item actor.
+
+| Off | Size | Field | Meaning | Conf |
+|---|---|---|---|---|
+| +0 | i32 | `ground_item_key` | Target ground-item entity id (the world key). | CODE-CONFIRMED |
+| +4 | u8  | `share0` | Coin path sets `0xF0`; otherwise the destination free-slot index. | CODE-CONFIRMED |
+| +5 | u8  | `share1` | Free-slot index `>> 3` (else 0 for coins). | CODE-CONFIRMED |
+| +6 | u8  | `share2` | Free-slot index `& 7` (else 0 for coins). | CODE-CONFIRMED |
+| +7 | 1 B | (pad)    | Padding. | PLAUSIBLE |
+| +8 | i32 | `amount` | Coin amount or stack size. | CODE-CONFIRMED |
+
+**Client-side pickup pre-validation** (in order; all CODE-CONFIRMED, all enforced before send):
+
+1. **Lock-state gate** — if the local player is locked (in trade / dialog / menu), deny.
+2. **Busy gate** — if the busy predicate is set, deny.
+3. **Trade-open gate** — if a trade is open, deny (with a message).
+4. **Coin special** — if the target item id is the coin id (**217000501**): reject when
+   `amount + current_gold` would exceed the **gold cap 9,999,999,990,000,000** (a "too much gold"
+   message); otherwise set the share-bytes to `(0xF0, 0, 0)` and send.
+5. **Non-coin** — resolve a free destination bag slot; if the item is **non-pickable** (its
+   pickable flag is clear), show a message; check the inventory **free-slot capacity** (the count
+   of empty bag slots, threshold 20 — this is a capacity gate, **not** a distance check); and check
+   the **level requirement** (player level ≥ the item's level-requirement field — the player level
+   field at +1684 vs the item field at +228) — on failure, error string **10005**.
+6. On success — send 2/15 with the target key, amount, and the share-byte destination hint, and
+   stamp the current time as a last-pickup rate gate.
+
+No explicit client-side metric pickup radius was found on the send path; physical proximity is
+enforced by the click hit-test (the target must be the picked ground-item actor) and presumably
+server-side (§11 #18).
+
+### 12.4 S2C 4/4 tag-4 ground-item spawn record (24 bytes, inside the area stream)
+
+The area entity snapshot (4/4) carries a tag loop; **tag 4** is a ground item present in the
+visible area on (re)entry/refresh. Each tag-4 body is 24 bytes (read 0x18).
+
+| Off | Size | Type | Meaning | Conf |
+|---|---|---|---|---|
+| +0  | 4 | u32 | item **key** (entity id; the pickup target id / ground-item actor key) | CODE-CONFIRMED (placement) |
+| +4  | 4 | u32 | item **template id** (resolves the 3D model; 0 / unknown → fallback 201011001) | CODE-CONFIRMED (placement) |
+| +8  | 4 | — | unused (passed to the spawner but not stored in the read fields) | PLAUSIBLE |
+| +12 | 4 | i32 | **opaque** (likely quantity or flags) | CODE-CONFIRMED (placement) |
+| +16 | 4 | f32 | world **posX** | CODE-CONFIRMED |
+| +20 | 4 | f32 | world **posZ** | CODE-CONFIRMED |
+
+A zero / empty tag-4 body produces the fallback model 201011001 at the origin. Ground-item despawn
+does **not** come from 4/4 — the area stream is additive / prune-by-rewalk, and the whole ItemMap
+registry is flushed on map change.
+
+### 12.5 S2C 5/14 `SmsgGroundItemSpawn` (48 bytes, read 0x30)
+
+The live "an item just dropped" push (monster drops, combat-effect drops, coin drops). This opcode
+shares a wire shape and handler with combat-effect-instance spawns; only the named fields below are
+consumed for a ground item.
+
+| Off | Size | Type | Meaning | Conf |
+|---|---|---|---|---|
+| +0  | 4 | u32 | **sort** (low byte `2` = Mob dropper ⇒ the item auto-expires ~1000 ms) | CODE-CONFIRMED |
+| +4  | 4 | u32 | **dropper / source actor id** | CODE-CONFIRMED |
+| +8  | 1 | i8  | **mode** (`0xFF` = coin ⇒ effect id forced to 217000501) | CODE-CONFIRMED |
+| +9  | 1 | u8  | **slot** (source slot index on the dropper) | CODE-CONFIRMED |
+| +12 | 4 | i32 | **effect / template id** (the ground-item 3D model id) | CODE-CONFIRMED |
+| +16 | 4 | — | (hole; not read into a named field) | CODE-CONFIRMED (unread) |
+| +20 | 4 | i32 | **param1** (→ ground-item actor opaque slot) | CODE-CONFIRMED |
+| +24 | 4 | i32 | **param2** (→ ground-item actor key) | CODE-CONFIRMED |
+| +28 | 4 | f32 | world **posX** | CODE-CONFIRMED |
+| +32 | 4 | f32 | world **posZ** | CODE-CONFIRMED |
+| +44 | 1 | u8  | **notice_flag** (`1` ⇒ one-shot "rare drop" chat line, strings 64001 / 64002) | CODE-CONFIRMED |
+
+A Mob dropper (sort low byte `2`) makes the spawned item auto-expire after ~1000 ms. Certain
+effect-id ranges play a spawn/pickup SFX. The bytes the handler does not consume (+16, +33…+43)
+are capture-unverified (§11 #15).
+
+### 12.6 S2C 4/14 `SmsgGroundItemDropAck` (20 bytes, read 0x14)
+
+Result of a **drop-from-inventory** request; on success it spawns the dropped item at the local
+player's current position.
+
+| Off | Size | Type | Meaning | Conf |
+|---|---|---|---|---|
+| +0..+7 | 8 | — | header / echo region | PLAUSIBLE |
+| +8  | 1 | u8  | **result** (`0` = error → UI error; `1` = ok → spawn the drop) | CODE-CONFIRMED |
+| +10 | 1 | u8  | **mode** (`0` = bag slot, `1` = equip slot, `2` = fixed slot, `0xFF` = coin) | CODE-CONFIRMED |
+| +11 | 1 | u8  | **slot** index | CODE-CONFIRMED |
+| +12 | 4 | i32 | **count / coin amount** | CODE-CONFIRMED |
+| +16 | 4 | i32 | **opaque** (→ ground-item actor opaque slot) | CODE-CONFIRMED |
+
+On `result == 1` the client reads the drop sub-record (mode / slot / count / opaque), resolves the
+item id (bag, equip, or coin — coin forces id 217000501), and spawns the ground item at the local
+player's current world position. Drop SFX **862030106**, drop announce string **2146**.
+
+### 12.7 S2C 4/15 `SmsgItemWorldPickupAck` (36 bytes, read 0x24)
+
+Result of a **pickup** request; inserts the picked item into a bag slot (or a coin into gold) and
+announces it.
+
+| Off | Size | Type | Meaning | Conf |
+|---|---|---|---|---|
+| +0..+7 | 8 | — | valid / echo region | PLAUSIBLE |
+| +8  | 1 | u8  | **result** (`0` = error; non-zero = ok) | CODE-CONFIRMED |
+| +9  | 1 | u8  | **subtype** — see below | CODE-CONFIRMED |
+| +12 | 4 | i32 | echoed dword (use-flag / slot region) | PLAUSIBLE |
+| +16..+0x17 | — | — | echoed bytes (consumed by the slot insert) | PLAUSIBLE |
+| +0x18 (24) | 4 | u32 | **item / actor id** (world lookup key; == 217000501 ⇒ coin) | CODE-CONFIRMED |
+| +0x1C (28) | 4 | i32 | echoed dword | PLAUSIBLE |
+| +0x20 (32) | 4 | i32 | echoed dword | PLAUSIBLE |
+
+The **subtype** byte at +9 is interpreted by result:
+- **Failure** (`result == 0`): subtype values `1…5` select error strings **10001…10005**
+  (10005 = a level / eligibility error, also used at request time, §12.3).
+- **Success** (`result != 0`): subtype selects the insert path —
+  - **100** = share / party-split: find the next free bag slot, insert, refresh the slot UI; if no
+    slot is free, fall back to a name announce ("you got %s", strings 10006 / 37003).
+  - **101** = plain insert.
+  - **else** = insert plus a local despawn/echo on the picker's grid, then announce.
+
+If the id at +0x18 equals the coin id **217000501** the pickup is a coin: it credits gold and
+plays coin SFX **862030105** instead of an item insert. The pickup announce to other players in the
+same context uses string **10006** / **902**. The exact server policy choosing subtype 100 vs 101
+vs else is server-side (§11 #16).
+
+### 12.8 S2C 5/15 `SmsgGroundItemRemove` (16 bytes, read 0x10)
+
+Despawns a ground item (someone picked it up).
+
+| Off | Size | Type | Meaning | Conf |
+|---|---|---|---|---|
+| +0 | 4 | u32 | **sort** (of the picker actor) | CODE-CONFIRMED |
+| +4 | 4 | u32 | **id** (the actor that picked it up) | CODE-CONFIRMED |
+| +8 | 4 | u32 | **tracked_id** (the ground-item key to remove from the ItemMap) | CODE-CONFIRMED |
+| +0xC (12) | 1 | u8 | **notify_flag** (`1` ⇒ "X picked up Y" notice) | CODE-CONFIRMED |
+
+The client looks the ground item up in the ItemMap by `tracked_id`; if `notify_flag` is set, the
+picker is another player sharing the local player's relation / party context, and the item is not a
+coin, it shows a green "X picked up Y" line (string **10018**). It then removes the item from its
+terrain grid cell and frees the registry entry. (Despawn authority vs the 4/15 local-remove path is
+§11 #17.)
+
+### 12.9 Ground-item world actor and rendering
+
+When a ground item spawns (from any of 4/4 tag 4, 5/14, or 4/14), the client:
+
+- **Resolves a 3D model** from the item's template id. If the lookup returns nothing, it falls back
+  to the **shared default model id 201011001** (a generic sack/bag mesh). So every ground item is a
+  per-template 3D world actor with one shared fallback — never a billboard icon.
+- **Allocates a 76-byte ground-item actor record** and inserts it into the terrain spatial grid
+  cell, and registers it in the ItemMap registry. Salient in-memory record fields:
+
+  | Off | Size | Type | Meaning |
+  |---|---|---|---|
+  | +0  | 4 | f32 | scale (= 2.0) |
+  | +20 | 4 | f32 | world X (wire X + spiral offset) |
+  | +24 | 4 | f32 | world Y (terrain height + 1.0) |
+  | +28 | 4 | f32 | world Z (wire Z + spiral offset) |
+  | +32 | 4 | i32 | opaque (from wire opaque / param1; likely quantity / flags) |
+  | +36 | 4 | i32 | grid cell X |
+  | +40 | 4 | i32 | grid cell Z |
+  | +44 | 4 | i32 | key (the wire entity id; despawn / pickup lookup key) |
+  | +48 | 4 | ptr | resolved 3D model pointer (the item's world model, or the 201011001 fallback) |
+  | +52..+68 | 16 | f32×4 | color / tint (= 1,1,1,1) |
+  | +72 | 4 | u32 | expire-at-ms (= now + 1000 when the timed flag is set, e.g. Mob drops) |
+
+- **Floats the item +1.0 unit above terrain** (world Y = terrain-height query + 1.0).
+- **Fans out overlapping drops in a log/sin spiral** so stacked drops at the same coordinate do not
+  visually overlap: a ring radius starts at 1, grows by 2, and wraps back to 1 when it exceeds 6;
+  the placed position is `X = (ring / 2) × logf(angle) + wireX`, `Z = (ring / 2) × sinf(angle) +
+  wireZ`.
+- **Auto-expires Mob drops after ~1000 ms** (the +72 expire-at-ms field is set when the dropper is
+  a Mob).
+- **Draws a floating name label** above each ground item when the local player is within **1000
+  world units** (one terrain cell; the gate is a squared distance of 1,000,000.0). The label is
+  drawn at the item position + (0, 2.0, 0) and resolves the item template's display name.
+
+A re-implementation should model ground items as pooled scene actors keyed by the wire entity id,
+with the spiral anti-overlap placement, the +1.0 float, the Mob-drop expiry timer, and the
+1000-unit label radius — and use 201011001 as the fallback model whenever the per-template model is
+missing.

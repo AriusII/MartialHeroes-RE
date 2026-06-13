@@ -1,0 +1,46 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgPartyRosterEvent
+opcode: 0x50015             # major 5 (Push), minor 21 -> (5 << 16) | 21
+direction: S2C
+size: 12                   # fixed 12-byte read by the party roster-event handler
+spec: packets/5-21_party_event.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server push of an incremental party roster event (a member joined, left, was updated, or the party disbanded). Carries an event code and the affected party member slot.
+
+# Wire order, offset 0 = first payload byte. Pack=1; padding bytes modelled explicitly so the
+# summed widths equal size: 12. Only the two fields the handler reads are named.
+fields:
+  - { name: Pad0,       type: "bytes[8]" }   # 0x00  leading bytes not consumed by this path
+  - { name: Event,      type: u8 }         # 0x08  event code (see notes)
+  - { name: MemberSlot, type: u8 }         # 0x09  affected party member slot index
+  - { name: Pad1,       type: "bytes[2]" }   # 0x0a  trailing filler to 12
+
+notes: |
+  Static inference only; no capture available. Fixed 12-byte read; the event code at offset 8 and
+  the member-slot index at offset 9 are CODE-CONFIRMED from the handler's read order, CAPTURE-
+  UNVERIFIED in meaning.
+
+    0x08 (1B) Event      : roster event code:
+                             0 = member joined (the slot at offset 9 is now occupied);
+                             1 = member left;
+                             2 = member updated;
+                             3 = party disbanded.
+    0x09 (1B) MemberSlot : the party member slot index the event applies to. The handler resolves
+                           this slot index against the party's member-slot table to find the actual
+                           actor, then patches the party panel entry.
+
+  RELATIONSHIP: this is the lightweight incremental roster push; it complements the fuller results
+  4/35 (invite state), 4/36 SmsgPartyMemberRemoveResult
+  (packets/4-36_party_member_remove_result.yaml) and 4/76 (accept result). It is a sibling Push of
+  5/38 (party member stats) and 5/76 (party member joined).
+
+  UNKNOWNS to resolve with a capture of a join / leave / disband sequence:
+    - the contents of the 8-byte Pad0 region (whether it carries an actor id or a sub-header);
+    - whether further event codes exist beyond 0..3;
+    - confirm the member-slot indexing against the on-actor party slot table.
+
+  UNBLOCKS: Client.Application party roster-event handler (5/21).

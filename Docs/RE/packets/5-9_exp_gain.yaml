@@ -1,0 +1,64 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing is a static fact; the field layout is a static inference. capture_verified: false.
+
+name: SmsgExpGain
+opcode: 0x50009           # major 5 (Push), minor 9 -> (5 << 16) | 9
+direction: S2C
+size: 32                 # fixed 32-byte payload block
+spec: packets/5-9_exp_gain.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server pushes an experience-point gain (or loss) for the local player. Carries the 64-bit XP amount, the actor that received it, the XP-source actor (the killed mob), and two optional weapon/skill-proficiency target slots. The client adds the amount to its running XP accumulator, refreshes the exp bar, floats a "+xp"/"-xp" text, and spawns exp-orb effects.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 32.
+fields:
+  - { name: ActorSort,    type: u32 }   # 0x00  XP recipient actor sort; low byte == 2 enables the bonus-split display
+  - { name: ActorId,      type: u32 }   # 0x04  XP recipient actor id (the local player for self-XP)
+  - { name: SourceSort,   type: u32 }   # 0x08  XP-source actor sort (the killed mob)
+  - { name: SourceId,     type: u32 }   # 0x0c  XP-source actor id
+  - { name: XpAmount,     type: i64 }   # 0x10  signed 64-bit XP amount, added (with carry) to the running XP accumulator
+  - { name: ProficiencyA, type: i32 }   # 0x18  proficiency/mastery target slot A; -1 = none
+  - { name: ProficiencyB, type: i32 }   # 0x1c  proficiency/mastery target slot B; -1 = none
+
+notes: |
+  CODE-CONFIRMED layout, CAPTURE-UNVERIFIED. Total = 32 bytes (matches the handler's single 32-byte
+  read). Field offsets are taken from the receive handler's read frame. The handler is gated to the
+  local player by (sort, id).
+
+    0x00 (4B) ActorSort    : the sort of the actor receiving XP. The LOW BYTE of this field doubles as
+                             a display-mode flag: when it equals 2 the gain is rendered as a split
+                             "base + bonus" (see the bonus split below). The "is this two fields or one
+                             reused field" question is an open item.
+    0x04 (4B) ActorId      : the XP recipient's actor id; equals the local player id for self-XP.
+    0x08 (4B) SourceSort   : the sort of the XP source (the killed mob / target).
+    0x0c (4B) SourceId     : the XP source's actor id. When a valid source actor exists the client
+                             spawns paired exp-orb ring effects on the source and on the local player.
+    0x10 (8B) XpAmount      : the SIGNED 64-bit XP delta. Added to the local player's running XP
+                             accumulator with carry, and also accumulated into a lifetime-XP total.
+                             A negative amount is an XP loss. HIGH CONFIDENCE.
+    0x18 (4B) ProficiencyA : a weapon/skill proficiency (mastery) target slot; a value of -1 means
+                             "none / skip". When present it feeds a proficiency-XP channel.
+    0x1c (4B) ProficiencyB : a second proficiency target slot; -1 = none.
+
+  BONUS-SPLIT DISPLAY (presentation, not extra wire fields): when ActorSort's low byte == 2, the
+  client splits the shown gain using a server-set XP bonus-rate percentage held in a client global
+  (NOT on this wire): shown_base = 100 * amount / (rate + 100); bonus = amount - shown_base; the two
+  are rendered as a "base + bonus" string. The rate itself arrives by another channel, not in this
+  packet.
+
+  FLOATING TEXT + FX (asset ids, for the FX/sound spec-authors; NOT wire fields):
+    - floating gain text uses UI string id 10085 ("+xp"); loss text uses 10086 ("-xp").
+    - exp-orb effects: own-XP ring effect id 380001011 or 380001012 (selected by an actor descriptor
+      flag) on the XP source; a paired ring effect id 380002011 / 380002012 on the local player.
+  These ids are catalogued for the effects/text pipeline; they are not bytes in this message.
+
+  UNKNOWNS to resolve with an XP-gain capture:
+    - whether 0x00 is one field (actor sort) whose low byte is reused as the bonus-mode flag, or two
+      adjacent fields;
+    - confirm the i64 width / position of XpAmount across the 0x10..0x17 region;
+    - the -1 sentinel and meaning of the two proficiency slots.
+
+  RELATED: 5/11 SmsgRankXpGain (packets/5-11_rank_xp_gain.yaml) is the separate rank/honor XP channel;
+  5/32 SmsgLevelUp (packets/5-32_level_up.yaml) carries the level transition. UNBLOCKS the exp-bar
+  accumulation path in Client.Application (accumulate i64 XP from this push).

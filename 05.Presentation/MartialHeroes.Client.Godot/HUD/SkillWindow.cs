@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Godot.Adapters;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Screens;
 using MartialHeroes.Client.Godot.Screens.Widgets;
@@ -58,18 +59,11 @@ public sealed partial class SkillWindow : Control
     private const int CloseBtnW = 113;
     private const int CloseBtnH = 40;
 
-    // Skill icon sheet — one of the 12 sheets from skillicon.txt.
-    // We default to Musa-Jung (job=1, kind=1) as a representative icon sheet.
-    // spec: Docs/RE/formats/ui_manifests.md §2.4 — skill_id 1001, job 1, kind 1 = musajung.dds.
-    private const string DefaultIconSheetPath = "data/ui/skillicon/musajung.dds";
-
-    // Skill icon grid within the 512×512 sheet.
-    // UV offset of a specific skill within its sheet is UNKNOWN.
-    // Assumed 48×48 grid: 10 columns × 10 rows = 100 slots.
-    // spec: Docs/RE/formats/ui_manifests.md §9 known unknown 1 — "within-sheet icon UV grid: UNKNOWN".
-    private const int IconCellW = 48; // PLAUSIBLE — see §9 known unknown 1
-    private const int IconCellH = 48; // PLAUSIBLE
-    private const int IconCols = 10; // PLAUSIBLE (512 / 48 ≈ 10)
+    // Skill icon cell dimensions: 23×23 px — CODE-CONFIRMED from three draw sites.
+    // spec: Docs/RE/formats/ui_manifests.md §2.6 — "fixed 23×23 pixel cell": CODE-CONFIRMED.
+    // The real (iconSrcX, iconSrcY) is authored data from the .do stance file, resolved via IconCatalogs.
+    private const int IconCellW = IconCatalogs.IconCellW; // 23 — CODE-CONFIRMED
+    private const int IconCellH = IconCatalogs.IconCellH; // 23 — CODE-CONFIRMED
 
     // msg.xdb id for close button caption.
     // spec: Docs/RE/specs/ui_system.md §10 — id 102 in button label range 101–107.
@@ -79,6 +73,11 @@ public sealed partial class SkillWindow : Control
     // Tunables
     // -------------------------------------------------------------------------
 
+    // Number of .do stance slots to show in the demo list (slot 0 … DemoSlotCount-1).
+    // spec: Docs/RE/formats/ui_manifests.md §2.7 — musajung.do has 301 non-zero records: SAMPLE-VERIFIED.
+    private const int DemoSlotCount = 80;
+
+    // Kept for the SkillCatalogue fallback path (when IconCatalogs is offline).
     private const int DemoSkillCount = 80;
     private const uint IdScanCeiling = 5_000;
     // spec: Docs/RE/formats/config_tables.md §2.8 — valid skill_id < 10,000,000: CONFIRMED.
@@ -97,16 +96,15 @@ public sealed partial class SkillWindow : Control
     private Label _countLabel = null!;
     private TextureRect _windowChrome = null!;
 
-    // Cached skill icon atlas texture (musajung.dds loaded once).
-    private ImageTexture? _iconAtlas;
-    private bool _iconAtlasAttempted;
-
     // -------------------------------------------------------------------------
     // Context + asset loader
     // -------------------------------------------------------------------------
 
     private ClientContext? _context;
     private UiAssetLoader? _uiLoader;
+
+    // Short-hand reference to the skill icon catalog (non-owning; owned by ClientContext).
+    private IconCatalogs? _iconCatalogs;
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -117,6 +115,8 @@ public sealed partial class SkillWindow : Control
         try
         {
             _context = GetNode<ClientContext>("/root/ClientContext");
+            // Pull the IconCatalogs reference (non-owning).
+            _iconCatalogs = _context.IconCatalogs;
         }
         catch (Exception ex)
         {
@@ -144,7 +144,8 @@ public sealed partial class SkillWindow : Control
 
         Visible = false;
         GD.Print("[SkillWindow] Ready. Chrome wired to uitex 0008 (skillwindow.dds). " +
-                 "Skill icon grid uses PLAUSIBLE 48×48 stride — see ui_manifests.md §9 known unknown 1.");
+                 "Skill icons use real 23×23 cells from musajung.do+skillicon.txt (IconCatalogs) " +
+                 "when VFS is available. spec: Docs/RE/formats/ui_manifests.md §2.6 CODE-CONFIRMED.");
     }
 
     public override void _ExitTree()
@@ -363,11 +364,40 @@ public sealed partial class SkillWindow : Control
             return;
         }
 
+        // ── Primary path: IconCatalogs (VFS online, real icons from .do + skillicon.txt) ──
+        // spec: Docs/RE/formats/ui_manifests.md §2.6 — "data-driven UV per skill": CODE-CONFIRMED.
+        // spec: Docs/RE/formats/ui_manifests.md §2.7 — "musajung.do Map B (slotIndex)": CODE-CONFIRMED.
+        if (_iconCatalogs is not null)
+        {
+            IReadOnlyList<(uint SlotIndex, AtlasTexture? Icon)> slots =
+                _iconCatalogs.GetFirstSlots(DemoSlotCount);
+
+            if (slots.Count > 0)
+            {
+                foreach ((uint slotIndex, AtlasTexture? icon) in slots)
+                {
+                    // We show the slotIndex as the "skill ID" since the instanceKey → skills.scr
+                    // join is UNVERIFIED (spec: Docs/RE/formats/ui_manifests.md §9 item #11a).
+                    AddRow(list, slotIndex, icon, "Slot", "—", "—", "Musa");
+                }
+
+                _countLabel.Text =
+                    $"Showing {slots.Count} Musa-jung slots from musajung.do " +
+                    $"(spec: Docs/RE/formats/ui_manifests.md §2.7 CODE-CONFIRMED + SAMPLE-VERIFIED). " +
+                    $"Icons: 23×23 px — spec §2.6 CODE-CONFIRMED.";
+                GD.Print($"[SkillWindow] Populated {slots.Count} real skill icon rows from IconCatalogs " +
+                         "(musajung.do + skillicon.txt). " +
+                         "spec: Docs/RE/formats/ui_manifests.md §2.6 23×23 cell CODE-CONFIRMED.");
+                return;
+            }
+        }
+
+        // ── Fallback: SkillCatalogue (VFS offline — no real icons) ──
         var catalogue = _context?.SkillCatalogue;
         if (catalogue is null || catalogue.Count == 0)
         {
-            _countLabel.Text = "SkillCatalogue not available (offline mode).";
-            AddRow(list, 0, null, "Cat:—", "CD:—", "R:—", "Self");
+            _countLabel.Text = "No data available (offline mode — VFS not found).";
+            AddRow(list, 0, null, "Cat:—", "CD:—", "R:—", "—");
             return;
         }
 
@@ -382,94 +412,27 @@ public sealed partial class SkillWindow : Control
             string rangeText = $"R:{def.Value.BaseRange:F1}";
             string targetText = TargetMnemonic(def.Value.TargetMode);
 
-            // Skill icon from the icon sheet.
-            // spec: Docs/RE/formats/ui_manifests.md §2.4 — 12 sheets, 512×512 each.
-            // Within-sheet UV is UNKNOWN (§9 known unknown 1); we show a fixed cell per
-            // skill index: row = (shown / IconCols), col = (shown % IconCols). // PLAUSIBLE
-            AtlasTexture? icon = BuildSkillIcon(shown);
-
-            AddRow(list, def.Value.Id.Value, icon, catText, cdText, rangeText, targetText);
+            // Offline: no real icon available — pass null (placeholder blank square).
+            AddRow(list, def.Value.Id.Value, null, catText, cdText, rangeText, targetText);
             shown++;
         }
 
         _countLabel.Text =
-            $"Showing {shown} of {catalogue.Count} skills (first {shown} found in IDs 1–{IdScanCeiling})";
-        GD.Print($"[SkillWindow] Populated {shown} skill rows from SkillCatalogue (total={catalogue.Count}). " +
-                 "Icon UV grid is PLAUSIBLE — see ui_manifests.md §9 known unknown 1.");
+            $"Showing {shown} skills from SkillCatalogue (offline — no icon data). " +
+            $"IDs 1–{IdScanCeiling} scanned.";
+        GD.Print($"[SkillWindow] Populated {shown} skill rows from SkillCatalogue (offline fallback, " +
+                 "IconCatalogs unavailable).");
     }
 
     // -------------------------------------------------------------------------
-    // Skill icon building
+    // Skill icon building (now delegated to IconCatalogs — see PopulateList)
     // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Returns an AtlasTexture slice for the <paramref name="slotIndex"/>-th skill icon.
-    ///
-    /// Within-sheet UV position is unknown (open item — ui_manifests.md §9 known unknown 1).
-    /// We use a PLAUSIBLE column-major 48×48 grid: col = slotIndex % IconCols, row = slotIndex / IconCols.
-    ///
-    /// spec: Docs/RE/formats/ui_manifests.md §2.4 — sheet = musajung.dds (512×512 SAMPLE-VERIFIED).
-    /// spec: Docs/RE/formats/ui_manifests.md §9 known unknown 1 — "UV offset UNKNOWN; grid stride UNKNOWN".
-    /// </summary>
-    private AtlasTexture? BuildSkillIcon(int slotIndex)
-    {
-        ImageTexture? atlas = EnsureIconAtlas();
-        if (atlas is null) return null;
-
-        int col = slotIndex % IconCols; // PLAUSIBLE
-        int row = slotIndex / IconCols; // PLAUSIBLE
-        int srcX = col * IconCellW; // PLAUSIBLE
-        int srcY = row * IconCellH; // PLAUSIBLE
-
-        // Guard: stay within the 512×512 sheet boundary.
-        if (srcX + IconCellW > 512 || srcY + IconCellH > 512) return null;
-
-        return new AtlasTexture
-        {
-            Atlas = atlas,
-            Region = new Rect2(srcX, srcY, IconCellW, IconCellH), // PLAUSIBLE
-            FilterClip = true,
-        };
-    }
-
-    /// <summary>
-    /// Lazily loads and caches the default skill icon atlas (musajung.dds).
-    /// spec: Docs/RE/formats/ui_manifests.md §2.4 — skill_id 1001, job 1, kind 1 = musajung.dds 512×512.
-    /// </summary>
-    private ImageTexture? EnsureIconAtlas()
-    {
-        if (_iconAtlasAttempted) return _iconAtlas;
-        _iconAtlasAttempted = true;
-
-        // Try UiCatalogs path first (but skillicon sheets are NOT in uitex.txt —
-        // spec §2.5: "9 supplementary sheets not in skillicon.txt manifest").
-        // We use UiAssetLoader direct VFS path for the skillicon sheets.
-        if (_uiLoader is not null)
-        {
-            Texture2D? raw = _uiLoader.LoadAtlas(DefaultIconSheetPath);
-            if (raw is ImageTexture it)
-            {
-                _iconAtlas = it;
-                GD.Print($"[SkillWindow] Skill icon atlas loaded: {DefaultIconSheetPath} (512×512 SAMPLE-VERIFIED). " +
-                         "Icon UV grid: PLAUSIBLE 48×48 per cell — see ui_manifests.md §9 known unknown 1.");
-                return _iconAtlas;
-            }
-
-            // If LoadAtlas returned a different Texture2D type, wrap it.
-            if (raw is not null)
-            {
-                var img = raw.GetImage();
-                if (img is not null)
-                {
-                    _iconAtlas = ImageTexture.CreateFromImage(img);
-                    return _iconAtlas;
-                }
-            }
-        }
-
-        GD.Print($"[SkillWindow] Skill icon atlas ({DefaultIconSheetPath}) unavailable — icons blank.");
-        return null;
-    }
+    // The old PLAUSIBLE 48×48 grid is replaced by the real 23×23 data-driven lookup via
+    // IconCatalogs.GetFirstSlots(). The helper methods were removed because PopulateList
+    // now calls IconCatalogs directly; no per-slotIndex BuildSkillIcon call is needed here.
+    //
+    // spec: Docs/RE/formats/ui_manifests.md §2.6 — "fixed 23×23 pixel cell, data-driven UV":
+    //       CODE-CONFIRMED. The old §9 known-unknown-1 "UV offset UNKNOWN" is now resolved.
 
     // -------------------------------------------------------------------------
     // Row builder
@@ -484,18 +447,21 @@ public sealed partial class SkillWindow : Control
         string rangeText,
         string targetText)
     {
+        // Row height: 28px to comfortably contain a 23px icon + padding.
+        // spec: Docs/RE/formats/ui_manifests.md §2.6 — "23×23 pixel cell": CODE-CONFIRMED.
         var rowPanel = new PanelContainer();
-        rowPanel.CustomMinimumSize = new Vector2(0, 48);
+        rowPanel.CustomMinimumSize = new Vector2(0, 28);
         list.AddChild(rowPanel);
 
         var hbox = new HBoxContainer();
         rowPanel.AddChild(hbox);
 
-        // Skill icon (48×48 if available).
+        // Skill icon: 23×23 real cell (CODE-CONFIRMED) or blank placeholder (offline).
+        // spec: Docs/RE/formats/ui_manifests.md §2.6 — "fixed 23×23 pixel": CODE-CONFIRMED.
         var iconRect = new TextureRect
         {
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-            CustomMinimumSize = new Vector2(48, 48),
+            CustomMinimumSize = new Vector2(IconCellW, IconCellH),
             MouseFilter = MouseFilterEnum.Ignore,
         };
         if (icon is not null) iconRect.Texture = icon;

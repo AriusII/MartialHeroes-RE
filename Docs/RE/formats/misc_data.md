@@ -59,10 +59,13 @@ Y-axis scale). Used at runtime to resize actor meshes per class.
 
 ### 1.3 `buff_icon_position.xdb` — Buff-effect icon atlas coordinates
 
-**sample_verified: true**
+**sample_verified: true** (record stride and field roles); **CODE-CONFIRMED** (record layout and
+resolver behaviour — confirmed from the icon-position lookup routine).
 
-**Role:** Maps a buff-effect integer ID to the pixel origin of its icon cell within a shared UI
-sprite atlas texture. Icon cells are 25 × 25 pixels.
+**Role:** Maps a buff-effect integer ID to the pixel origin of its icon cell within a single shared
+UI sprite-atlas texture. The atlas is `data/ui/skillicon/stateicon.dds` (a 512 × 512 DXT2 texture);
+the same atlas serves every buff and state. The per-buff `(atlas_x, atlas_y)` pair is **stored data**
+read from this file, not a position derived from a grid formula and not a per-buff texture file.
 
 **Record stride:** 12 bytes. Record count = `file_size / 12`.
 
@@ -70,23 +73,34 @@ sprite atlas texture. Icon cells are 25 × 25 pixels.
 
 | Offset | Size | Type  | Field   | Notes                                                        | Confidence |
 |-------:|-----:|-------|---------|--------------------------------------------------------------|------------|
-| 0      | 4    | u32LE | buff_id | Buff-effect identifier; non-sequential; range 1 – 1103 observed | HIGH   |
-| 4      | 4    | u32LE | atlas_x | Pixel X of the icon's top-left corner within the atlas       | HIGH       |
-| 8      | 4    | u32LE | atlas_y | Pixel Y of the icon's top-left corner within the atlas       | HIGH       |
+| 0      | 4    | u32LE | buff_id | Buff-effect identifier (the lookup key); non-sequential; range 1 – 1103 observed | CODE-CONFIRMED |
+| 4      | 4    | i32LE | atlas_x | Pixel X of the icon cell's top-left corner within `stateicon.dds` | CODE-CONFIRMED |
+| 8      | 4    | i32LE | atlas_y | Pixel Y of the icon cell's top-left corner within `stateicon.dds` | CODE-CONFIRMED |
 
-**Atlas grid:**
-- Cell size: 25 × 25 pixels.
-- Origin convention: 1-based (first cell top-left = pixel (1, 1), not (0, 0)).
-- X values follow a regular stride of 25 starting from 1: 1, 26, 51, 76, 101, 126, 151, 176, …
-- When X would overflow a row, X wraps back to 1 and Y advances by 25.
-- Occasional irregular coordinate values (e.g. 250, 251, 276, 304 …) suggest some icons are
-  placed in non-grid positions; the parser must treat `atlas_x` and `atlas_y` as raw pixel values
-  and not infer them from a formula.
+> **(corrected 2026-06-13: `atlas_x` / `atlas_y` are signed `i32LE`, not `u32LE`; the resolver
+> returns them as a signed coordinate pair. The earlier "25 × 25 cells, 1-based grid formula"
+> description was wrong — cell size is class-dependent (23 × 23 or 25 × 25, see §1.6) and the
+> coordinates are raw stored pixel values read from this file, never inferred from a grid stride.)**
+
+**Atlas model:**
+- The icon source is a single shared atlas, `data/ui/skillicon/stateicon.dds` (512 × 512, DXT2).
+  There is no per-buff texture file and no separate sheet-plus-cell-index addressing.
+- Each active buff blits one cell from that atlas at the per-buff `(atlas_x, atlas_y)` read from
+  this table. The cell's width and height are not stored here; they are fixed by buff class at
+  render time (23 × 23 for `buff_id` ≤ 80, 25 × 25 for `buff_id` > 80 — see §1.6).
+- The parser must treat `atlas_x` and `atlas_y` as raw pixel values and never infer them from a
+  formula. Some coordinates fall off any regular 25-pixel grid (e.g. 250, 251, 276, 304 …),
+  confirming the values are authored data, not computed.
 
 **Notes:**
 - The stride 12 is confirmed by exact file-size division: a known sample of 1608 bytes yields
   exactly 134 records with no remainder.
-- The record key (`buff_id`) is used as a lookup key in a runtime red-black tree (see §1.5).
+- The record key (`buff_id`) is used as a lookup key in a runtime red-black tree (see §1.5). The
+  lookup routine searches the tree by `buff_id` and returns the `(atlas_x, atlas_y)` pair from the
+  record (record offsets +4 and +8), or `(0, 0)` when the ID is absent.
+- This table is the missing catalogue for `stateicon.dds`: that atlas ships with no companion text
+  or descriptor file, so the `(atlas_x, atlas_y)` mapping lives entirely in this `.xdb`.
+- For the HUD buff bar that consumes this table and the wire packet that drives it, see §1.6.
 
 ---
 
@@ -130,6 +144,106 @@ associated particle or effect mesh at runtime.
   these two variants.
 - Whether additional named `.xdb` variants exist beyond the three documented here is unknown.
 - Whether `.xdb` files carry a version across different game patches is unknown (single samples only).
+
+---
+
+### 1.6 Buff/state HUD bar — render model and wire source for `buff_icon_position.xdb`
+
+> **Verification status: CODE-CONFIRMED** (atlas binding, slot count, cell sizes, the per-refresh
+> reset, and the wire-packet structure are all confirmed from the buff-window builder, the slot
+> setter, and the response-4/102 handler). **CAPTURE-UNVERIFIED:** no packet capture was available,
+> so the wire-field *meanings* of the 12-byte active-buff record (beyond `buff_id`) are graded
+> PLAUSIBLE, and the duration unit is unconfirmed. The static structure is certain; the live values
+> have not been observed against a real capture.
+
+This section documents how `buff_icon_position.xdb` (§1.3) is consumed at runtime: the HUD buff bar
+that draws the icons, and the server packet that decides which buffs are active.
+
+**Shared atlas (CODE-CONFIRMED):** The buff-window builder loads `data/ui/skillicon/stateicon.dds`
+(512 × 512 DXT2) exactly once and binds that single texture handle to all icon slots. It also loads
+two companion sheets for the same window: `data/ui/skillwindow.dds` (window chrome) and
+`data/ui/blacksheet.dds` (a solid-fill sheet). The icon-source model is therefore one shared atlas
+with per-buff UV offsets, not one texture per buff.
+
+**Slot count and cell sizes (CODE-CONFIRMED):** The buff bar has **30 icon slots**. The slot setter
+selects the cell size from the buff class:
+
+| Buff class | `buff_id` range | Cell w × h | Position model |
+|---|---|---|---|
+| Buff | `buff_id` ≤ 80 | 23 × 23 px | Flowing left-to-right counter; placed in the next free position and the counter advances |
+| State / debuff | `buff_id` > 80 | 25 × 25 px | Fixed per-slot screen position |
+
+The boundary value 80 is a literal comparison in the slot setter. Whether 80 is a true semantic
+buff-versus-debuff partition in the catalogue, or merely an array-bound guard between two internal
+UV tables, is not confirmed (it needs the `buff_id` distribution from a real VFS dump of the table).
+
+**Per-refresh reset (CODE-CONFIRMED):** Each time the bar refreshes, the window first clears and
+hides all 30 slots (zeroing each slot's source rectangle and size, clearing its caption, and
+resetting the flowing-layout counter), then re-shows and positions only the slots that the incoming
+packet marks active. There is no client-side expiry: a buff vanishes only when a later refresh omits
+it. Slot assignment is therefore **fully server-driven** — the server owns which buff occupies which
+slot and how many stack.
+
+#### Wire source — server-to-client response, major 4 / minor 102 (`SkillWindowStateUpdate`)
+
+> **CODE-CONFIRMED structure / CAPTURE-UNVERIFIED values.** Opcode tuple and payload size are read
+> from the dispatch-table install and the handler's fixed-length read; field meanings within the
+> stat block are inferred from the caption format-string IDs and read widths (PLAUSIBLE).
+
+The active-buff set is pushed in a single fixed-length response message. One message rebuilds the
+entire skill/state window: it fills roughly 20 player-stat text fields, then drives all 30 buff
+slots.
+
+- **Opcode:** major 4, minor 102 (S2C response). The handler rebuilds the skill/state window and
+  the buff bar. (An older analyst label of this handler as a "quest data update" is stale and was
+  discarded.)
+- **Payload size:** fixed **476 bytes (0x1DC)**, read in one bounded copy.
+- **Layout:** a player stat block occupies roughly the first 116 bytes (level, PvP mode, primary
+  stats, experience, hp/mp, an actor id-key, and similar fields formatted into the stat text
+  widgets); the active-buff array follows.
+
+**Active-buff array:** **30 records of 12 bytes each.** The record base for slot `i` is at
+`payload + 116 + 12*i` (the handler walks the array in 12-byte strides for 30 iterations). 30 × 12
+= 360 bytes; 116 + 360 = 476, matching the payload size.
+
+##### Active-buff record (12 bytes, little-endian)
+
+| Offset | Size | Type  | Field        | Notes                                                                 | Confidence |
+|-------:|-----:|-------|--------------|------------------------------------------------------------------------|------------|
+| +0     | 2    | u16LE | buff_id      | Buff/state catalogue id; `0` marks an empty slot (skipped). `buff_id` ≤ 80 → buff cell (23 px); > 80 → state cell (25 px). Keys into `buff_icon_position.xdb`. | CODE-CONFIRMED (role) |
+| +2     | 2    | u16LE | (reserved)   | Not consumed by the slot setter; possibly high bits of the id or padding | PLAUSIBLE |
+| +4     | 4    | u32LE | duration     | Remaining-time candidate; stored into the live per-slot duration array. Unit (ms vs s) not determined | PLAUSIBLE |
+| +8     | 2    | u16LE | stack_level  | Stack count or buff level; stored into the live per-slot stack array     | PLAUSIBLE |
+| +10    | 1    | u8    | flag         | Type/category flag (buff vs debuff vs neutral)                          | PLAUSIBLE |
+| +11    | 1    | u8    | (reserved)   | Not read                                                               | PLAUSIBLE |
+
+**Render contract for implementors:**
+1. On each 4/102 message, clear and hide all 30 buff slots.
+2. For each of the 30 records, if `buff_id == 0`, leave the slot hidden.
+3. Otherwise look up `buff_id` in `buff_icon_position.xdb` (§1.3) to obtain `(atlas_x, atlas_y)`,
+   choose the cell size by class (23 × 23 for `buff_id` ≤ 80, else 25 × 25), and blit that cell from
+   `data/ui/skillicon/stateicon.dds`.
+4. Position buff-class icons (≤ 80) with the flowing counter and state-class icons (> 80) at their
+   fixed per-slot coordinates.
+5. Show the stack count from `stack_level`. Treat `duration` as a candidate countdown source only —
+   verify it against a real capture before drawing any on-icon timer (no countdown/sweep render was
+   located in the static analysis).
+
+**Variant aura strip (CODE-CONFIRMED that it exists; role PLAUSIBLE):** A separate, smaller 3-slot
+readout reads buff ids in the 1000–1002 and 1010–1012 ranges from the **same** `buff_icon_position`
+resolver, with 21 × 21 cells at fixed positions. It is distinct from the 30-slot main bar (whose ids
+are small, ≤ ~250) and is likely a permanent status/aura indicator (e.g. a PvP/peace or mount-state
+strip). The exact HUD element it belongs to is not confirmed.
+
+**Known unknowns (§1.6):**
+- Duration rendering: no countdown sweep, timer text, or alpha-ramp draw was located. The `duration`
+  field is the strongest remaining-time candidate but its unit (ms vs s) and whether it is rendered
+  at all are unconfirmed.
+- Record-base precision: the `payload + 116 + 12*i` base should be confirmed against a real 4/102
+  capture (verify that the first buff id sits at `payload + 116` and that `payload[112..115]` belong
+  to the stat block, not the buff array).
+- The `buff_id` ≤ 80 / > 80 boundary as a semantic partition (vs an array bound) is unconfirmed.
+- `stack_level` could instead be an icon-variant selector or a magnitude; capture-verify.
 
 ---
 
@@ -636,6 +750,159 @@ and Korean postposition injection all draw from this file.
 
 ---
 
+## Section 7 — Map zone tables (`mapsetting.scr`, `regiontableNNN.bin`)
+
+> **Verification status: SAMPLE-VERIFIED.** Both formats were decoded by direct observation of the
+> real VFS (no decompiler involved): the strides divide their file sizes exactly with zero
+> remainder, and the CP949 name fields and numeric ranges decode coherently across multiple
+> records and multiple area instances. No loader routine was traced, so a few field *semantics*
+> (the bounding-box ordering, the fog-density float, the sub-zone coordinate pair) are graded
+> PLAUSIBLE even though the layout itself is SAMPLE-VERIFIED.
+
+These two files describe playable zones for the world-map / minimap system. `mapsetting.scr` is a
+single global table of zone bounding boxes and fog settings; `regiontableNNN.bin` is a per-area
+table of sub-zone landmark labels with world coordinates. Both are flat arrays of fixed records.
+
+Related minimap art (not part of these tables) lives under `data/ui/`: a single world-map panel
+texture `data/ui/map/map1.dds` (512 × 512 DXT2) shared across all areas, a PvP overview
+`data/ui/broodwarmap.dds` (1024 × 1024 DXT2), a compass icon `data/ui/direction.dds` (16 × 16 RGBA),
+and a player-marker `data/ui/map_userpoint.tga` (64 × 64). No per-area baked minimap bitmaps exist
+in the VFS; the in-game minimap is assumed to be generated at runtime from terrain data rather than
+loaded from images.
+
+### 7.1 `mapsetting.scr` — Zone bounding-box and fog table
+
+**sample_verified: true**
+
+- **Extension:** `.scr`
+- **Found in:** `.pak` archive; logical path: `data/script/mapsetting.scr`
+- **Magic / signature:** None. No file-level header.
+- **Endianness:** Little-endian throughout.
+- **Version field:** None observed.
+
+**Role:** One record per playable zone. Stores the zone's integer id, its CP949 display name, an
+axis-aligned world-space bounding box (used to test which zone a world position falls in and to map
+world coordinates onto the shared world-map panel), and a per-zone fog density.
+
+#### File layout
+
+Flat array of fixed 84-byte records. No header. Record count = `file_size / 84`. The file size must
+be an exact multiple of 84.
+
+**Size verification:** a known sample of 4,368 bytes yields exactly **52 records** with no
+remainder. Zone ids run roughly sequentially (1, 2, 3, …) with gaps and a few high ids (100, 203,
+204, 205, 208, 300), so the array index is not the zone id — always read the `zone_id` field.
+
+#### Per-record layout (84 bytes = 0x54)
+
+| Offset | Size | Type      | Field        | Notes                                                                 | Confidence |
+|-------:|-----:|-----------|--------------|------------------------------------------------------------------------|------------|
+| 0x00   | 4    | i32LE     | zone_id      | Zone identifier and lookup key; non-contiguous (gaps), not the array index | SAMPLE-VERIFIED |
+| 0x04   | 36   | char[36]  | zone_name    | CP949-encoded zone name, NUL-terminated within the field               | SAMPLE-VERIFIED |
+| 0x28   | 4    | i32LE     | world_min_x  | World-space X lower bound of the zone's bounding box                   | PLAUSIBLE  |
+| 0x2C   | 4    | i32LE     | world_min_z  | World-space Z lower bound                                              | PLAUSIBLE  |
+| 0x30   | 4    | i32LE     | world_max_x  | World-space X upper bound                                              | PLAUSIBLE  |
+| 0x34   | 4    | i32LE     | world_max_z  | World-space Z upper bound                                              | PLAUSIBLE  |
+| 0x38   | 4    | i32LE     | flags_a      | Packed flags; `0x012C0001` in 50 of 52 records (two exceptions hold `0x012C0000`) | UNKNOWN |
+| 0x3C   | 4    | i32LE     | flags_b      | Usually `0x00000001`; one record holds `0x00000000`                   | UNKNOWN    |
+| 0x40   | 4    | f32LE     | fog_density  | Per-zone fog density; observed values 1.30 (interior), 1.50 (rare), 1.70 (outdoor) | PLAUSIBLE |
+| 0x44   | 4    | i32LE     | unknown_0x44 | First record = 1, all others = 0                                      | UNKNOWN    |
+| 0x48   | 4    | i32LE     | unknown_0x48 | Typically 0 or -1                                                     | UNKNOWN    |
+| 0x4C   | 4    | i32LE     | unknown_0x4C | High byte constant `0x64` (= 100), low 24 bits vary (e.g. `0x64000007`, `0x64000002`, `0x64001200`); candidate: packed minimap scale + flags | UNKNOWN |
+| 0x50   | 4    | i32LE     | unknown_0x50 | Always 0 in all 52 observed records                                   | UNKNOWN    |
+
+**Total:** 4 + 36 + 16 + 8 + 4 + 16 = 84 bytes.
+
+**Field notes:**
+- The four bounding-box fields form a `(min_x, min_z, max_x, max_z)` box: the min pair precedes the
+  max pair and the observed values bracket plausibly (e.g. `(-10240, -7168)` min / `(5120, 10240)`
+  max for the first zone). The exact axis assignment and whether these are inclusive bounds is
+  inferred from the value ranges, not from a loader. World units match the terrain coordinate scale
+  documented elsewhere (cells of 1024 units).
+- `fog_density` reads as a float that clusters at three physically meaningful values; indoor/cave
+  zones tend to 1.30 and outdoor zones to 1.70.
+- The `zone_name` field decodes cleanly as CP949 (e.g. the first three zones are `하왕관`, `염무진`,
+  `사해주`). One record has an empty name. Decode the field with `Encoding.GetEncoding(949)`; never
+  treat it as ASCII.
+
+**Cross-reference:** zone names are stored directly in this file, not in `msg.xdb` (§6). The map
+transfer / region UI strings (a map-move countdown, a "no location data" cancel message, a
+quick-move label, and a "Region" column header) live in `msg.xdb` in the 73001–73007 and 18503 id
+range; server/realm names occupy the 5001–5040 range. Those are caption strings only and do not
+carry zone geometry.
+
+**Known unknowns (§7.1):**
+- The packed meaning of `flags_a` (`0x012C0001`) and the two exception records.
+- Whether `unknown_0x4C`'s `0x64` high byte is a 1:100 minimap scale factor packed with flags.
+- The exact inclusivity / axis convention of the bounding box (PLAUSIBLE, not loader-confirmed).
+- A few apparent duplicate or drifted rows in the 52-record sample suggest version drift in the
+  table; whether other client versions carry a different record count is unknown.
+
+### 7.2 `regiontableNNN.bin` — Per-area sub-zone label table
+
+**sample_verified: true** (stride and name field); **PLAUSIBLE** (coordinate fields)
+
+- **Extension:** `.bin`
+- **Found in:** `.pak` archive; logical path pattern: `data/map<NNN>/regiontable<NNN>.bin`
+- **Magic / signature:** None. No file-level header.
+- **Endianness:** Little-endian throughout.
+- **Version field:** None observed.
+
+**Role:** One record per named sub-zone / landmark within an area. Stores a world XZ centre point
+and a CP949 label, used to place sub-zone name captions on the world map.
+
+#### File layout
+
+Flat array of fixed 32-byte records. No header. Record count = `file_size / 32`.
+
+**Size verification:** the area-1, area-2, and area-3 instances are each 1,664 bytes = exactly
+**52 records** with no remainder, confirmed identical across all three instances.
+
+#### Per-record layout (32 bytes = 0x20)
+
+| Offset | Size | Type      | Field          | Notes                                                         | Confidence |
+|-------:|-----:|-----------|----------------|---------------------------------------------------------------|------------|
+| 0x00   | 4    | f32LE     | center_x       | World-space X of the sub-zone label                          | PLAUSIBLE  |
+| 0x04   | 4    | f32LE     | center_z       | World-space Z of the sub-zone label                          | PLAUSIBLE  |
+| 0x08   | 8    | u8[8]     | unknown_0x08   | Zero in all observed records                                  | UNKNOWN    |
+| 0x10   | 16   | char[16]  | sub_zone_name  | CP949-encoded landmark name, NUL-terminated within the field | PLAUSIBLE  |
+
+**Total:** 4 + 4 + 8 + 16 = 32 bytes.
+
+**Field notes:**
+- The CP949 `sub_zone_name` field decodes cleanly into Korean landmark names across multiple
+  records and area files (e.g. for area 1: `폐어촌`, `구룡부`, `무암촌`; for area 2: `녹영초산곡`,
+  `남소사`, `적릉`). Decode with `Encoding.GetEncoding(949)`.
+- The `(center_x, center_z)` floats land in the world-unit ranges of the matching `mapsetting.scr`
+  bounding box for that area, which is the basis for grading them PLAUSIBLE.
+- **Two sub-types under one stride (open):** some records read as garbage floats at offset 0 while
+  still carrying coherent CP949 text at offset 0x10, suggesting two record sub-types share the
+  32-byte stride — one carrying a coordinate plus a name, and one whose first 8 bytes hold something
+  other than a usable coordinate (an unused anchor, or a name placed at a different offset). The
+  discriminator between the two sub-types has not been resolved; a defensive parser should validate
+  that `center_x` / `center_z` fall within the area bounding box before trusting them as coordinates.
+
+**Character-select special case:** `data/map000/regiontable000.bin` begins with the CP949 string
+`캐릭터선택창` ("Character Select Window") padded to 1,664 bytes. Area 0 (`map000`) is the
+character-select / lobby zone, not a world area, so its coordinates are dummy/zero.
+
+#### Companion files (out of scope here, noted for completeness)
+
+The per-area directory also contains `region<NNN>.bin` and `map<NNN>.bin` files whose layouts are
+not yet decoded:
+- `region<NNN>.bin` — size varies by area (32 bytes for `map000`, 4,096 / 1,680 / 1,776 bytes for
+  later areas); structure undecoded. Possibly a polygonal boundary or entry-link list, distinct from
+  the fixed-size `regiontableNNN.bin` label table.
+- `map<NNN>.bin` — a fixed 520-byte per-area file, almost entirely zero (in `map000.bin` only the
+  byte at offset 4 is non-zero, value `0x10`); structure undecoded.
+
+**Known unknowns (§7.2):**
+- The two-sub-type discriminator in `regiontableNNN.bin`.
+- The eight bytes at offset 0x08 (zero in all samples).
+- The layouts of the companion `region<NNN>.bin` and `map<NNN>.bin` files.
+
+---
+
 ## Cross-format summary
 
 | Format          | Header          | Stride | Count source          | Text encoding | Loader confirmed |
@@ -648,6 +915,8 @@ and Korean postposition injection all draw from this file.
 | `descript.ion`  | none            | variable | until EOF (CRLF delimited) | ASCII  | NO            |
 | `discript.sc`   | none            | 68 B   | `file_size / 68`      | CP949 (display_name) | YES (stride) |
 | `msg.xdb`       | none            | 516 B  | `file_size / 516` = 2,644 records | CP949 (text, 0xEE fill) | YES (loader + stride + content SAMPLE-VERIFIED) |
+| `mapsetting.scr` | none           | 84 B   | `file_size / 84` = 52 records | CP949 (zone_name) | NO (sample-verified stride) |
+| `regiontableNNN.bin` | none       | 32 B   | `file_size / 32` = 52 records | CP949 (sub_zone_name) | NO (sample-verified stride) |
 
 ## Known unknowns (cross-format)
 
@@ -660,13 +929,25 @@ and Korean postposition injection all draw from this file.
 - The `reserved` 27-byte region in `discript.sc` records.
 - The positional-substitution mechanism for `%1%`/`%2%`/`%3%` format strings in `msg.xdb`.
 - The exact maximum `id` value in `msg.xdb` (estimated ~3,643; not exhaustively verified).
+- The duration-field unit and on-icon countdown rendering for the buff bar (§1.6); the whole
+  buff-bar wire path (response 4/102) is CODE-CONFIRMED but CAPTURE-UNVERIFIED.
+- The packed `flags_a` / `unknown_0x4C` semantics in `mapsetting.scr` (§7.1) and the two-sub-type
+  discriminator in `regiontableNNN.bin` (§7.2).
 
 ## Cross-references
 
 - Related formats: `pak.md` (archive container that holds all of the above), `terrain.md` (`.tol`
-  is a terrain companion file), `texture.md` (`.ion` references `.tga` texture filenames).
+  is a terrain companion file; `.ted` terrain data is the likely runtime minimap source),
+  `texture.md` (`.ion` references `.tga` texture filenames).
 - `msg.xdb` consumers: `Docs/RE/specs/ui_system.md` (caption lookup by numeric ID),
   `mobinfo.mi` §2 (mob name string IDs reference this catalogue),
   `formats/ui_manifests.md` §8 (widget-to-caption binding reference).
+- Buff bar (§1.6): `buff_icon_position.xdb` (§1.3) supplies the per-buff atlas coordinates;
+  the shared atlas `data/ui/skillicon/stateicon.dds` and the 30-slot bar are described in
+  `formats/ui_manifests.md` (UI atlas catalogue); the driving response 4/102
+  `SkillWindowStateUpdate` is packet-spec material for `Docs/RE/packets/`.
+- Map zone tables (§7): the world-map / minimap art (`data/ui/map/map1.dds`,
+  `data/ui/broodwarmap.dds`, `data/ui/direction.dds`, `data/ui/map_userpoint.tga`) is catalogued in
+  `formats/ui_manifests.md`; world-coordinate conventions are documented in `terrain.md`.
 - Glossary: see `Docs/RE/names.yaml`
 - Provenance: see `Docs/RE/journal.md`

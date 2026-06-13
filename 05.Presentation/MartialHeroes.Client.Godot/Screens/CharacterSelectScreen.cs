@@ -79,16 +79,46 @@ public sealed partial class CharacterSelectScreen : Control
     // =========================================================================
     // Demo roster (offline stub)
     // =========================================================================
-    // In a networked build these come from the SmsgCharacterList event payload (Application).
-    // We render up to 5 Musa-class demo slots so the UI is exercisable offline.
+    // In a networked build these come from the SmsgCharacterList event payload (Application),
+    // specifically the 880-byte SpawnDescriptor per-slot (opcode 3/1 SmsgCharacterList).
     // spec: frontend_scenes.md §3.1 — up to 5 slots, "faceA nonzero ⇒ occupied". CODE-CONFIRMED.
-    // spec: Docs/RE/formats/config_tables.md §2.6 — class 1 = Musa.
+    // spec: packets/3-1_character_list.yaml — per-slot SpawnDescriptor fields.
+    //
+    // Five varied demo slots cover all four internal classes so the per-class 3D preview
+    // resolution path is exercisable offline.
+    //
+    // UiClassIndex (0..3) → internal class {4,1,3,2}. spec: frontend_scenes.md §4.1. CODE-CONFIRMED.
+    //   UI 0 → internal 4 (Warrior)  → skin_class 4 (g202140001.skn)
+    //   UI 1 → internal 1 (Musa)     → skin_class 1 (g202110001.skn)
+    //   UI 2 → internal 3 (Blader)   → skin_class 3 (g202130001.skn)
+    //   UI 3 → internal 2 (Tao)      → skin_class 2 (g202220001.skn)
+    //
+    // SkinClassId == internal class id for player classes 1..4 (PLAUSIBLE; VFS-confirmed pattern).
+    // TODO: pin to a formal class→skin_class spec entry once documented.
+    // spec: CLAUDE.md §Recovered asset mappings — skin_class chain. PLAUSIBLE.
+    // spec: Docs/RE/formats/config_tables.md §2.6 — class id references.
 
     private static readonly DemoSlot[] DemoRoster =
     [
-        new DemoSlot(Name: "Musa", ClassName: "무사", Level: 10, Hp: 350, UiClassIndex: 1, FaceIndex: 2),
-        new DemoSlot(Name: "Blader", ClassName: "격사", Level: 5, Hp: 280, UiClassIndex: 2, FaceIndex: 4),
-        new DemoSlot(Name: "Warrior", ClassName: "전사", Level: 8, Hp: 420, UiClassIndex: 3, FaceIndex: 1),
+        // Slot 0 — UI class 1 → internal class 1 (Musa) → skin_class 1 → g202110001.skn
+        // spec: frontend_scenes.md §4.1 — UI index 1 → internal class 1. CODE-CONFIRMED.
+        new DemoSlot(Name: "무사영웅", ClassName: "Musa", Level: 25, Hp: 650,
+            UiClassIndex: 1, FaceIndex: 2, SkinClassId: 1),
+
+        // Slot 1 — UI class 3 → internal class 2 (Tao) → skin_class 2 → g202220001.skn
+        // spec: frontend_scenes.md §4.1 — UI index 3 → internal class 2. CODE-CONFIRMED.
+        new DemoSlot(Name: "TaoMaster", ClassName: "Tao", Level: 18, Hp: 480,
+            UiClassIndex: 3, FaceIndex: 5, SkinClassId: 2),
+
+        // Slot 2 — UI class 2 → internal class 3 (Blader) → skin_class 3 → g202130001.skn
+        // spec: frontend_scenes.md §4.1 — UI index 2 → internal class 3. CODE-CONFIRMED.
+        new DemoSlot(Name: "격사전설", ClassName: "Blader", Level: 32, Hp: 520,
+            UiClassIndex: 2, FaceIndex: 4, SkinClassId: 3),
+
+        // Slot 3 — UI class 0 → internal class 4 (Warrior) → skin_class 4 → g202140001.skn
+        // spec: frontend_scenes.md §4.1 — UI index 0 → internal class 4. CODE-CONFIRMED.
+        new DemoSlot(Name: "IronWarrior", ClassName: "Warrior", Level: 40, Hp: 820,
+            UiClassIndex: 0, FaceIndex: 1, SkinClassId: 4),
     ];
 
     private const int MaxSlots = 5; // spec: frontend_scenes.md §3.1 — "at most 5 slots". CODE-CONFIRMED.
@@ -403,6 +433,14 @@ public sealed partial class CharacterSelectScreen : Control
             // Assuming a ~2-second idle cycle; phase offsets at 0.0, 0.4, 0.8, 1.2, 1.6 s.
             float phase = i * 0.4f;
 
+            // Per-slot descriptor fields from the demo roster (mirrors what SmsgCharacterList
+            // delivers per slot: name (+0x00), class (+0x34), level (+0x3A)).
+            // spec: frontend_scenes.md §3.2 — SpawnDescriptor field offsets. CODE-CONFIRMED.
+            uint skinClassId = occupied ? DemoRoster[i].SkinClassId : 0u;
+            string charName = occupied ? DemoRoster[i].Name : string.Empty;
+            int charLevel = occupied ? DemoRoster[i].Level : 0;
+            string className = occupied ? DemoRoster[i].ClassName : string.Empty;
+
             var preview = new CharPreview3D
             {
                 Name = $"Preview{i}",
@@ -410,6 +448,10 @@ public sealed partial class CharacterSelectScreen : Control
                 IdlePhaseOffset = phase,
                 IsOccupied = occupied,
                 SharedRealAssets = _realAssets,
+                SkinClassId = skinClassId,
+                SlotCharacterName = charName,
+                SlotLevel = charLevel,
+                SlotClassName = className,
                 Position = new Vector2(slotX0 + i * (slotW + slotGap), slotY),
                 Size = new Vector2(slotW, slotH),
             };
@@ -417,7 +459,8 @@ public sealed partial class CharacterSelectScreen : Control
             _previews[i] = preview;
             count++;
 
-            GD.Print($"[Screens] CharacterSelectScreen: preview slot {i} occupied={occupied} phase={phase:F2}s.");
+            GD.Print($"[Screens] CharacterSelectScreen: preview slot {i} occupied={occupied} " +
+                     $"skin_class={skinClassId} name='{charName}' level={charLevel} phase={phase:F2}s.");
         }
 
         return count;
@@ -439,15 +482,28 @@ public sealed partial class CharacterSelectScreen : Control
         for (int i = 0; i < MaxSlots; i++)
         {
             bool occupied = i < DemoRoster.Length;
-            string label = occupied ? $"{DemoRoster[i].Name}" : "(empty)";
+
+            // Show per-slot name + class + level on the selector button label.
+            // spec: frontend_scenes.md §3.2 — "slot info line shows name, level, and position". CODE-CONFIRMED.
+            string label;
+            if (!occupied)
+            {
+                label = "(empty)";
+            }
+            else
+            {
+                DemoSlot slot = DemoRoster[i];
+                // Format: "Name\nClass Lv N" — readable at the 148px slot width.
+                label = $"{slot.Name}\n{slot.ClassName} Lv {slot.Level}";
+            }
 
             var btn = new Button
             {
                 Text = label,
                 Position = new Vector2(slotX0 + i * (slotW + slotGap), rowY),
-                Size = new Vector2(slotW, rowH),
+                Size = new Vector2(slotW, rowH * 2), // double height to fit two lines
             };
-            btn.AddThemeFontSizeOverride("font_size", 11);
+            btn.AddThemeFontSizeOverride("font_size", 10);
 
             int slotCapture = i;
             btn.Pressed += () =>
@@ -930,8 +986,14 @@ public sealed partial class CharacterSelectScreen : Control
 
     /// <summary>
     /// An offline demo roster slot — view-only; never domain state.
-    /// <para>UiClassIndex: 0=Musa, 1=Tao, 2=Blader, 3=Warrior (spec §4.1 UI index).</para>
-    /// <para>FaceIndex: 1..7 (spec §4.2).</para>
+    /// Mirrors the fields the SmsgCharacterList SpawnDescriptor carries per slot
+    /// (spec: packets/3-1_character_list.yaml + frontend_scenes.md §3.2).
+    /// <para>UiClassIndex: 0..3 mapped to internal class {4,1,3,2} via UiToInternalClass.
+    /// spec: frontend_scenes.md §4.1. CODE-CONFIRMED.</para>
+    /// <para>FaceIndex: 1..7 (spec §4.2). CODE-CONFIRMED.</para>
+    /// <para>SkinClassId: IdB in the .skn header = skin_class driving the rig/skeleton/motion chain.
+    /// PLAUSIBLE: equals the internal class id for player classes 1..4 (VFS-confirmed pattern).
+    /// spec: CLAUDE.md §Recovered asset mappings.</para>
     /// </summary>
     private readonly record struct DemoSlot(
         string Name,
@@ -939,5 +1001,6 @@ public sealed partial class CharacterSelectScreen : Control
         int Level,
         int Hp,
         int UiClassIndex,
-        int FaceIndex);
+        int FaceIndex,
+        uint SkinClassId = 1u);
 }

@@ -399,3 +399,56 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
   scripts under vfs-inspect (skillcat-scan, skill-icon-scan) received spec-citation headers as
   recommended. Documented per the audit-trail discipline; both gate agents' findings preserved
   in their reports.
+
+## 2026-06-13 — Cycle 3 W1: World-Scene gameplay-systems dirty-room research (20 lanes)
+- scope: a 20-lane GIGA research wave over the WORLD scene — combat, chat, NPC interaction/shops,
+  quests, party/trade, minimap/world-map, in-game windows, buff/state icons, .do records,
+  equipment visuals, skill->effect cast chain, floating text/target frame, do.ini "crypto",
+  drop/pickup, exp/level-up (15 IDA lanes in 5 sub-waves of 3 against the single doida.exe IDB) +
+  5 harness-only VFS lanes (do-census, minimap-assets, window-art-census, quest-dialog-data,
+  fx-asset-links). All 20 delivered high-confidence.
+- output: raw notes in gitignored `_dirty/world/*.md` ONLY (tainted; never shipped). No IDA address,
+  autoname, or pseudo-C left the dirty room.
+- headline facts (full detail in the promoted specs below): basic melee IS C2S 2/52 with skill-slot
+  0xFF (no separate attack opcode); ALL everyday chat is C2S 2/7 with first payload byte = channel
+  code; storage 2/142 / shop 2/115 / sell 2/20 / repair 2/113 / interact 2/19 (no teleport opcode);
+  30-slot buff bar driven by S2C 4/102 with icon positions in data/script/buff_icon_position.xdb
+  (12B records); .do stance record is 116B with icon srcX/srcY at +0x18/+0x1C read as u32 (corrects
+  an earlier i16 read; resolves the 72-vs-76 tail discrepancy = 76B overlay-sprite block);
+  DoOption.ini + .do/.scr data are PLAINTEXT (the only obfuscation is FILE_ATTRIBUTE_HIDDEN — the
+  prior "do.ini ships encrypted" open item is RESOLVED=plaintext); FX field[3] is VARIABLE per group
+  (the earlier "constant 15" committed claim was WRONG); NO baked minimap tiles exist in the VFS.
+
+## 2026-06-13 — Cycle 3 W2: promotion of the 20 world lanes into committed clean specs (21 authors + master)
+- crossing: 21 spec-author agents (each owning ONE committed file — zero write contention) REWROTE
+  the `_dirty/world/` notes into neutral committed specs; a 22nd agent synthesised the master
+  `specs/world_systems.md` reading ONLY the freshly-cleaned specs (clean by construction).
+- written/updated: specs/combat.md (UPD), specs/chat.md (NEW), specs/social.md (UPD), specs/
+  inventory_trade.md (UPD), specs/npc_interaction.md (NEW), specs/quests.md (UPD), specs/minimap.md
+  (NEW), specs/progression.md (NEW), specs/equipment_visuals.md (NEW), specs/ui_system.md (UPD),
+  specs/effects.md (UPD), specs/world_systems.md (NEW master); formats/effects.md (UPD), formats/
+  config_tables.md (UPD), formats/misc_data.md (UPD), formats/ui_manifests.md (UPD); opcodes.md (UPD)
+  + ~35 new packets/*.yaml (npc/trade/party/guild/quest/progression/buff/drop families) and the
+  2-7 relabel (CmsgWhisper -> CmsgChat).
+- key corrections promoted: combat 2/52-0xFF melee RESOLVED (was UNVERIFIED #7); chat reclassified
+  (2/82/83/84/3/21 are friend-note/announce/relation, NOT say-chat); trade 2/23-25 fully decoded
+  (2/25 is the confirm manifest, not a flat 2-byte packet); 4/23 is a phase machine on byte +10;
+  social 5/21 affected-member is a party-slot index (not actor id); ui_system StatusPanel/SkillPanel
+  mislabels fixed; ui_manifests 22 DDS dimension/format corrections (many "1024^2 DXT3" are really
+  512^2 ARGB32); .do icon offsets u32; FX field[3] variable.
+- ORCHESTRATOR firewall scan over all committed specs/formats/packets/opcodes (excluding _dirty/):
+  CLEAN. Zero autonames (sub_/loc_/dword_/byte_), zero image-range VAs in the new files (only hit was
+  the documented imagebase 0x400000 in journal/names/audits, and sample DATA values like 0x46464558
+  / 0x7FFFFFFF / 0x64000007 which are interoperability facts, not addresses).
+- ORCHESTRATOR consistency fixes (post-promotion): the opcodes-agent had added the 2/14/2/15/2/28/2/29
+  C2S rows but omitted 16 sibling C2S rows whose packet YAMLs existed — added them in sorted position
+  (2/19,2/20,2/23,2/24,2/25,2/30,2/35,2/36,2/37,2/100,2/110,2/113,2/115,2/142,2/143,2/151-153).
+  names.yaml merged centrally: 2/7 renamed CmsgChat, 22 new world C2S opcodes, 6 new gameplay/format
+  subsystem entries (WorldSystems/Chat/NpcInteraction/Minimap/Progression/EquipmentVisuals/BuffState),
+  16 new asset/runtime constants (buff_icon_position 12B, mapsetting 84B, regiontable 32B, quests.scr
+  3720B, npc.scr 404B, minimap dot scale, 4/102 476B, coin/fallback-model ids, melee slot 0xFF).
+- NOTE on S2C: most world S2C opcodes (4/14, 4/15, 4/23, 4/36, 4/102, 5/9/11/14/15/21/32/52/53/67/68/73)
+  were ALREADY in the catalog from the Cycle-2 dispatch-table sweep; the canonical names were kept and
+  the new packet YAMLs link to them. The Cycle-3 net-new contribution is the C2S send-site layer.
+- harness/tooling (Phase C3-T, ran parallel): vfsls gained dump-do / scan-minimap / scan-quest (now 12
+  subcommands); firewall-clean (orchestrator pre-audit PASS). Journal + names authored centrally.

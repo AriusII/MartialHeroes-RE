@@ -1,0 +1,64 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing is a static fact; the field layout is a static inference. capture_verified: false.
+
+name: CmsgQuestAction
+opcode: 0x2001c           # major 2 (GameAction), minor 28 -> (2 << 16) | 28
+direction: C2S
+size: var                 # small fixed body driven by a sub-action selector; modelled as 12 bytes below
+spec: packets/2-28_quest_action.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client quest action request. A single send-only message that carries the player's quest-flow command (accept / proceed / give-up), chosen by a sub-action selector. Major 2 is C2S-only, so this message has no inbound dispatch slot by design and the server answers through unrelated push channels (5/68 quest list, 5/73 quest complete).
+
+# Wire order, offset 0 = first payload byte. Pack=1.
+# The send-site assembles a small fixed body whose meaning is selected by SubAction. The modelled
+# 12-byte form below sums to a fixed block, but the true total is selector-dependent -- treat the
+# trailing two ids as present-or-omitted per sub-action and verify against a capture.
+fields:
+  - { name: SubAction, type: u32 }   # 0x00  quest sub-action selector (e.g. accept / proceed / give-up)
+  - { name: QuestId,   type: u32 }   # 0x04  target quest id the action applies to
+  - { name: ParamA,    type: u32 }   # 0x08  auxiliary parameter (NPC kind / objective slot, sub-action dependent)
+
+notes: |
+  CODE-CONFIRMED, CAPTURE-UNVERIFIED. The send path for this message is identified in the client by
+  role: it is the quest-action sender invoked from the quest-log window's give-up confirm button and
+  from the NPC quest-dialog accept/proceed flow. Major family 2 (GameAction) is strictly client-to-
+  server; the dispatch installer wires no inbound handler for 2/28, which is correct and expected,
+  not an omission.
+
+  SEND-ONLY -- NO ACK ON THIS OPCODE. There is no 2/28 reply. The server's response to a quest action
+  arrives later on the push channels:
+    - the refreshed quest log via 5/68 SmsgQuestList (packets/5-68_quest_list.yaml);
+    - a turn-in verdict via 5/73 SmsgQuestComplete (packets/5-73_quest_complete.yaml).
+  An engine implementation should fire-and-forget 2/28 and update state from those pushes, not wait
+  on an ack for this opcode.
+
+  SUB-ACTION SELECTOR (SubAction @0x00). The client builds this body from one sender with a sub-action
+  selector that distinguishes the quest verbs:
+    - accept an offered quest;
+    - proceed / advance an in-progress quest;
+    - give up / abandon a held quest (the value observed from the give-up confirm button is 4).
+  The exact numeric encoding of accept vs proceed is not pinned without a capture; only the give-up
+  value (4) is named in the source note. Model SubAction as a u32 and resolve the full enum from a
+  quest-flow capture.
+
+  FIELD MODEL (provisional, 12-byte form):
+    0x00 (4B) SubAction : the quest verb selector (accept / proceed / give-up; give-up == 4).
+    0x04 (4B) QuestId   : the quest the action targets.
+    0x08 (4B) ParamA    : an auxiliary parameter. For the give-up path the window also carries an NPC
+                          "kind" byte alongside the quest id; ParamA is the modelled home for that
+                          auxiliary value. May be absent for verbs that need no parameter.
+
+  RELATED, NOT THIS OPCODE: the quest-log window also drives a SECOND, distinct C2S quest channel for
+  per-row "request detail / claim" round-trips (the list-row request path). That sender's opcode tuple
+  and body were not traced and are NOT 2/28; do not fold it into this spec. A future protocol pass
+  must trace it separately.
+
+  UNKNOWNS to resolve with a quest-flow capture:
+    - the full SubAction enum (accept / proceed values; only give-up == 4 is named);
+    - whether QuestId and ParamA are always present or selector-dependent (true body length);
+    - the meaning and width of ParamA per sub-action (NPC kind vs objective index).
+
+  UNBLOCKS: the Client.Application quest accept / proceed / give-up use-cases (send-only), paired with
+  the 5/68 and 5/73 push consumers.

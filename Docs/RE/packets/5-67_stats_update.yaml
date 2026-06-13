@@ -1,0 +1,54 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing is a static fact; the field layout is a static inference. capture_verified: false.
+
+name: SmsgStatsUpdate
+opcode: 0x50043           # major 5 (Push), minor 67 -> (5 << 16) | 67
+direction: S2C
+size: 36                 # fixed 36-byte payload block
+spec: packets/5-67_stats_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server pushes an authoritative resync of the local player's five primary stats and current XP. This is the world-entry stat sync that also primes the exp bar; it overwrites the client's cached stats/XP wholesale and refreshes the character window.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 36.
+# IMPORTANT: the handler reads a single 36-byte block and writes five primary stats + current XP, but
+# the source note does NOT give a byte-level offset table for this message. The field PLACEMENT below
+# is a reconstruction chosen so the widths sum to exactly 36; the SET of carried values (five stats +
+# current XP, local-player-gated) is CODE-CONFIRMED, the per-offset placement is a hypothesis.
+fields:
+  - { name: Sort,    type: u8 }          # 0x00  actor sort (placement hypothesis)
+  - { name: Pad0,    type: "bytes[3]" }    # 0x01  alignment padding
+  - { name: ActorId, type: u32 }         # 0x04  actor id (placement hypothesis)
+  - { name: Str,     type: u32 }         # 0x08  primary stat STR
+  - { name: Int,     type: u32 }         # 0x0c  primary stat INT
+  - { name: Agi,     type: u32 }         # 0x10  primary stat AGI
+  - { name: Dex,     type: u32 }         # 0x14  primary stat DEX
+  - { name: Con,     type: u32 }         # 0x18  primary stat CON
+  - { name: CurrentXp, type: i64 }       # 0x1c  current experience (i64), primes the exp bar
+
+notes: |
+  CODE-CONFIRMED set, CAPTURE-UNVERIFIED layout. Total = 36 bytes (matches the handler's single
+  36-byte read). The handler writes five primary-stat fields into the actor descriptor and the
+  current-XP accumulator, then refreshes the character/stat window. Local-player gated; this is the
+  authoritative world-entry stat sync.
+
+  WHAT IS CONFIRMED (the carried values): the handler resyncs the five primary stats AND the current
+  XP accumulator (the same XP accumulator that 5/9 ExpGain increments). Because it writes XP, it also
+  re-primes the on-HUD exp bar -- this is the message that seeds the bar on world entry.
+
+  WHAT IS A HYPOTHESIS (the offsets): the source note does not enumerate the 36 bytes offset-by-offset.
+  The layout above (sort + pad, id, five u32 stats, i64 current XP -> 4 + 4 + 20 + 8 = 36) is a
+  reconstruction that fits the 36-byte total and the (sort, id)-keyed actor lookup convention used by
+  sibling push messages. The five-stat ORDER is modelled STR, INT, AGI, DEX, CON to match the 2/29
+  StatAllocate / 4/29 StatUpdate wire order, but this packet's own ordering is unconfirmed.
+
+  UNKNOWNS to resolve with a world-entry / stats-resync capture (verify FIRST before implementing):
+    - the exact byte offsets of the five stats and the current-XP qword within the 36-byte block;
+    - whether the leading bytes are (sort + pad + id) as modelled, or a different header;
+    - the on-wire stat order for THIS message (vs the assumed STR, INT, AGI, DEX, CON).
+
+  RELATED: 4/29 SmsgStatUpdate (packets/4-29_stat_update.yaml) is the allocation ACK (echoes the five
+  stats + remaining points); this 5/67 is the unsolicited authoritative resync. 5/9 SmsgExpGain
+  (packets/5-9_exp_gain.yaml) increments the same XP accumulator this message seeds. UNBLOCKS the
+  world-entry stat/XP sync in Client.Application.

@@ -1,0 +1,65 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgTradeSlotAdd
+opcode: 0x20018           # major 2 (GameAction), minor 24 -> (2 << 16) | 24
+direction: C2S
+size: 20                 # fixed 20-byte payload built by the trade-slot builder
+spec: packets/2-24_trade_slot_add.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client add / update one trade-window slot (offer an item, set a quantity, or set the money total). A 1-byte category selector chooses the meaning of the three 4-byte numeric fields; money is carried as a 64-bit value split across two of them. The server replies with 4/24 TradeSlotUpdate.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 20.
+fields:
+  - { name: Category, type: u8 }          # 0x00  0=money, 1=item, 4=add-item-with-confirm, 255=set-money-total
+  - { name: SlotIndex, type: u8 }         # 0x01  slot / sub-index within the trade window
+  - { name: Pad0,     type: "bytes[2]" }    # 0x02  filler to the next dword; treat as zero
+  - { name: ValueA,   type: i32 }         # 0x04  item index, OR the low 32 bits of a money amount
+  - { name: ValueB,   type: i32 }         # 0x08  the high 32 bits of a money amount (money is an i64 split A/B)
+  - { name: ValueC,   type: i32 }         # 0x0c  quantity / extra
+  - { name: FlagA,    type: u8 }          # 0x10  per-action flag a
+  - { name: FlagB,    type: u8 }          # 0x11  per-action flag b
+  - { name: FlagC,    type: u8 }          # 0x12  per-action flag c
+  - { name: Pad1,     type: "bytes[1]" }    # 0x13  trailing filler to 20
+
+notes: |
+  Static inference only; no capture available. The 20-byte total and the i64-money split are
+  CODE-CONFIRMED; the per-category roles of the three numeric fields are partly PLAUSIBLE (read from
+  argument order, not byte-verified).
+
+    0x00 (1B) Category : selects what this update means.
+                           0   = money  (offer/clear a money amount);
+                           1   = item;
+                           4   = add an item to the trade with the confirm step (the path the
+                                 inventory "add to trade" action uses);
+                           255 = set the money total directly (the own-money input field).
+    0x01 (1B) SlotIndex: which trade slot / sub-index the update targets.
+    0x04 (4B) ValueA / 0x08 (4B) ValueB : for a money update these two dwords are the low and high
+                         halves of a single 64-bit money amount (little-endian i64, low at 0x04).
+                         For an item update, ValueA is the source inventory item index. (The
+                         money split is CODE-CONFIRMED; the item-index placement is INFERRED.)
+    0x0c (4B) ValueC   : item quantity, or an extra parameter, depending on category (INFERRED).
+    0x10..0x12 (3x1B)  : three per-action flag bytes (FlagA/B/C).
+
+  MONEY ENCODING: the client builds the 64-bit money amount from a three-digit base-1000 composite
+  in the trade window (three money-entry fields, d0/d1/d2): amount = d2 + 1000*(d1 + 1000*d0). The
+  result is the i64 placed in ValueA/ValueB. So the wire never carries the three UI digits
+  separately -- only the assembled i64.
+
+  CONTEXT (client-side validation, not wire fields): before sending, the client rejects duplicate
+  items already in the (up to 40) trade slots, insufficient gold, a busy/already-confirmed trade, a
+  conflicting open shop, and non-tradeable / bound items. These are pre-send guards only.
+
+  RELATIONSHIP: part of the in-window trade flow (2/23 open, 2/24 slot add/update, 2/25 confirm).
+  Server reply is 4/24 SmsgUserTradeSlotUpdate; the full trade state is mirrored by 4/25
+  SmsgUserTradeFullResponse.
+
+  UNKNOWNS to resolve with a capture of (a) a money offer, (b) an item add, (c) a quantity change:
+    - confirm the ValueA/ValueB/ValueC roles per category (the item-index vs quantity column order);
+    - the exact meaning of the three flag bytes;
+    - whether SlotIndex and the flags are signed or unsigned (modelled unsigned bytes here).
+
+  UNBLOCKS: Client.Application trade slot add/update use-case (money path is solid; item/quantity
+  column order should be confirmed against a capture before relying on it).

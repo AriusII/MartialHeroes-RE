@@ -1,0 +1,58 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing is a static fact; the field layout is a static inference. capture_verified: false.
+
+name: CmsgStatAllocate
+opcode: 0x2001d           # major 2 (GameAction), minor 29 -> (2 << 16) | 29
+direction: C2S
+size: 20                 # fixed 20-byte body: five contiguous u32 absolute stats
+spec: packets/2-29_stat_allocate.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client stat-point allocation request. Carries the five primary stats as ABSOLUTE target values (not deltas), in the order STR, INT, AGI, DEX, CON. Sent by the character/stat window's Apply action. The server answers with the 4/29 stat-update ack.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 20 (5 x u32).
+fields:
+  - { name: Str, type: u32 }   # 0x00  absolute STR target
+  - { name: Int, type: u32 }   # 0x04  absolute INT target
+  - { name: Agi, type: u32 }   # 0x08  absolute AGI target
+  - { name: Dex, type: u32 }   # 0x0c  absolute DEX target
+  - { name: Con, type: u32 }   # 0x10  absolute CON target
+
+notes: |
+  CODE-CONFIRMED layout, CAPTURE-UNVERIFIED. The send path is identified by role: it is the stat-
+  allocation sender invoked from the character/stat window's "Apply" button (the window's Apply action,
+  numeric action id 311). Body is a single fixed 20-byte block written in one write.
+
+  ABSOLUTE, NOT DELTAS. The five u32 are the player's RESULTING absolute stat values, computed by the
+  window as (cached current stat + pending UI delta) for each stat, and sent as the new target totals.
+  The server does not receive the per-stat increments; it receives the final desired totals and
+  validates them. An engine that mirrors the UI delta model must add the deltas onto the cached
+  current stats before sending.
+
+  WIRE ORDER (fixed): STR, INT, AGI, DEX, CON.
+    0x00 (4B) Str : absolute STR target.
+    0x04 (4B) Int : absolute INT target.
+    0x08 (4B) Agi : absolute AGI target.
+    0x0c (4B) Dex : absolute DEX target.
+    0x10 (4B) Con : absolute CON target.
+  NOTE on ordering: the wire order (STR, INT, AGI, DEX, CON) is NOT the same as the order of the
+  window's per-stat +/- buttons in the UI; the sender reorders the cached stats into this wire order
+  before writing. Trust the wire order above, not any UI button ordering.
+
+  SEND GATE (client-side, informational): the window only sends when there are unspent stat points
+  remaining AND at least one of the five pending deltas is non-zero. This is a client behaviour, not a
+  wire field.
+
+  ACK: the server replies with 4/29 SmsgStatUpdate (packets/4-29_stat_update.yaml), which echoes the
+  five resulting absolute stats plus the remaining stat points and a result flag; the client applies
+  the new stats only when that ack's result byte signals success. On a successful ack the client also
+  plays the stat-confirm sound (sound id 800000002, the same jingle as a level-up) and refreshes /
+  closes the allocation edit state.
+
+  UNKNOWNS to resolve with a stat-allocate round-trip capture:
+    - confirm the absolute (not delta) semantics on the wire;
+    - confirm the STR, INT, AGI, DEX, CON wire order against the ack echo order.
+
+  PAIRS WITH: 4/29 SmsgStatUpdate (ack). UNBLOCKS the Client.Application stat-allocation use-case
+  (pending-delta UI -> absolute 2/29 send -> 4/29 ack apply).

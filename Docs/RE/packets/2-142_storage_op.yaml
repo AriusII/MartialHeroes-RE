@@ -1,0 +1,52 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgStorageOp
+opcode: 0x2008e           # major 2 (GameAction), minor 142 -> (2 << 16) | 142
+direction: C2S
+size: 16                  # fixed 16-byte body built by the storage deposit/withdraw sender
+spec: packets/2-142_storage_op.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Storage (bank / vault) deposit / withdraw / move operation, sent from the 60-slot storage grid panel that opens off a storage NPC (descriptor KIND 0x9). A fixed 16-byte body carrying a target/select field, an operation byte, and an i64 amount. The client sends only when the amount is greater than zero.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 16.
+fields:
+  - { name: Target, type: i32 }          # 0x00  target / select field (= the active-target field)
+  - { name: Op,     type: u8 }           # 0x04  operation code = (widget action id − 7)
+  - { name: Pad0,   type: "bytes[3]" }   # 0x05  alignment padding before the 8-byte amount
+  - { name: Amount, type: i64 }          # 0x08  quantity moved (only sent when > 0)
+
+notes: |
+  Static inference only; no capture available. The storage deposit/withdraw sender builds a fixed
+  16-byte body, so total payload = 16 bytes; frame = 8-byte header + 16 = 24 bytes on the wire. The
+  16-byte body length is CODE-CONFIRMED; the per-field meanings are static inferences (grade:
+  body-layout CODE-CONFIRMED-as-written, field meaning hypothesis).
+
+    0x00 (4B) Target : the client's active-target field — the storage selection / target slot. Sent
+                       as an i32. CODE-CONFIRMED as the first body word; "which slot / which target"
+                       is the hypothesis.
+    0x04 (1B) Op     : the operation code. The client computes it as (the panel widget action id − 7),
+                       i.e. a small base-7 offset that distinguishes deposit vs withdraw vs move.
+                       CODE-CONFIRMED that the byte is (action − 7); WHICH numeric value means
+                       deposit vs withdraw is NOT yet pinned (needs a capture or the widget-id base).
+    0x05 (3B) Pad0   : three bytes between Op and the i64 amount. Treated as alignment padding /
+                       stack bytes; they should be zeroed by a fresh sender. Modelled as bytes[3].
+    0x08 (8B) Amount : the quantity to deposit / withdraw, as an i64. The client only sends the
+                       message when Amount > 0 (a zero/negative amount is suppressed locally).
+
+  fields not yet pinned — needs npc.scr sample / capture: the Op enum (which value = deposit, which
+  = withdraw, which = move) and whether Pad0 is truly always zero. Until a capture resolves the Op
+  enum, an implementer should surface Op as a raw byte and NOT hardcode a deposit/withdraw constant.
+
+  STORAGE GRID: the vault holds up to 60 item slots (the panel open routine iterates 60 entries).
+  The storage CONTENTS arrive through the shared item-panel S2C family (the same 4/149 / 4/153
+  item-slot chunks the bag uses, routed into the storage view) — no dedicated "storage snapshot"
+  S2C was isolated, so an implementer should expect storage fills to reuse the bag item-slot
+  messages with a storage-view target rather than a storage-specific opcode.
+
+  GATE: opening the storage NPC is refused client-side when the bag holds more than 50 items
+  (a client pre-check; does not affect this wire body).
+
+  UNBLOCKS: Client.Application StorageDepositWithdraw use-case (Op enum still needs a capture).

@@ -4,6 +4,7 @@ using MartialHeroes.Client.Application.Diagnostics;
 using MartialHeroes.Client.Application.Engine;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.Handlers;
+using MartialHeroes.Client.Application.Hud;
 using MartialHeroes.Client.Application.Ingestion;
 using MartialHeroes.Client.Application.Input;
 using MartialHeroes.Client.Application.Login;
@@ -127,6 +128,32 @@ public sealed partial class ClientContext : Node
     public UiCatalogs UiCatalogs { get; private set; } = null!;
 
     /// <summary>
+    /// Skill icon catalog: resolves per-skill 23×23 AtlasTextures from the active class-stance
+    /// .do table and the skillicon.txt sheet manifest.
+    ///
+    /// Populated from:
+    ///   - <c>data/ui/skillicon/skillicon.txt</c> (sheet DDS paths per (job,kind))
+    ///   - <c>data/script/musajung.do</c> (Musa-jung demo stance; per-skill iconSrcX/Y)
+    ///
+    /// Degrades gracefully when VFS is unavailable (all methods return null → placeholders).
+    /// spec: Docs/RE/formats/ui_manifests.md §2.6 (23×23 cell model: CODE-CONFIRMED).
+    /// spec: Docs/RE/formats/ui_manifests.md §2.7 (.do record layout: CODE-CONFIRMED + SAMPLE-VERIFIED).
+    /// </summary>
+    public IconCatalogs IconCatalogs { get; private set; } = null!;
+
+    /// <summary>
+    /// Item icon catalog: resolves per-item <see cref="Godot.ImageTexture"/> values from
+    /// <c>data/item/texturelist.txt</c> for display in the InventoryWindow.
+    ///
+    /// Each item icon is a whole-texture DDS blit — no atlas sub-rect.
+    /// Degrades gracefully when VFS is unavailable (all methods return null → placeholders).
+    ///
+    /// spec: Docs/RE/formats/ui_manifests.md §10 (texturelist.txt: CODE-CONFIRMED).
+    /// spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit, no sub-rect": CODE-CONFIRMED.
+    /// </summary>
+    public ItemIconCatalog ItemIconCatalog { get; private set; } = null!;
+
+    /// <summary>
     /// The audio service façade. Handles BGM streaming, UI click SFX, world-entry SFX, and
     /// per-area ambient BGM from the .bgm sound table.
     ///
@@ -136,6 +163,38 @@ public sealed partial class ClientContext : Node
     /// spec: Docs/RE/names.yaml runtime_constants (UI_CLICK_SFX_ID, SPAWN_SFX_ID, ENTRY_BGM_CUE_ID).
     /// </summary>
     public AudioService? Audio { get; private set; }
+
+    /// <summary>
+    /// The HUD event hub: the single facade through which packet handlers publish per-frame
+    /// HUD events (chat lines, buff states, combat texts, target changes, XP/level, stat views)
+    /// and HUD widgets subscribe (one ChannelReader per family).
+    ///
+    /// Constructed once in <see cref="BuildApplicationGraph"/>; exposed as <see cref="IHudEventHub"/>
+    /// so no consumer sees the mutable concrete type.
+    ///
+    /// spec: MartialHeroes.Client.Application.Hud — IHudEventHub / HudEventHub.
+    /// </summary>
+    public IHudEventHub HudEventHub { get; private set; } = null!;
+
+    /// <summary>
+    /// Buff icon catalog: resolves per-buff AtlasTextures from the shared stateicon.dds atlas,
+    /// keyed by buff_id via buff_icon_position.xdb.
+    ///
+    /// Degrades gracefully when VFS is unavailable (all methods return null → placeholders).
+    /// spec: Docs/RE/formats/misc_data.md §1.3 (atlas path, record layout).
+    /// spec: Docs/RE/formats/misc_data.md §1.6 (cell sizes 23/25 px, 30-slot bar).
+    /// </summary>
+    public BuffIconCatalog BuffIconCatalog { get; private set; } = null!;
+
+    /// <summary>
+    /// Zone catalog: resolves the display name of the zone (and optionally a nearby sub-zone
+    /// label) for a given legacy world XZ position, sourced from mapsetting.scr.
+    ///
+    /// Degrades gracefully when VFS is unavailable (lookups return empty strings).
+    /// spec: Docs/RE/formats/misc_data.md §7.1 (mapsetting.scr — 52 zone records).
+    /// spec: Docs/RE/specs/minimap.md §6.3 (zone names live in mapsetting.scr, not msg.xdb).
+    /// </summary>
+    public ZoneCatalog ZoneCatalog { get; private set; } = null!;
 
     // Cancellation source for the engine loop Task.
     private CancellationTokenSource? _loopCts;
@@ -304,18 +363,93 @@ public sealed partial class ClientContext : Node
             UiCatalogs ??= new UiCatalogs(null);
         }
 
-        // 14. VFS archive for terrain (separate from catalogue loader — same paths).
+        // 14. Skill icon catalog: skillicon.txt + musajung.do stance table.
+        //     Uses the same _uiAssets handle as UiCatalogs so no additional VFS handle is opened.
+        //     Lazy — both files are parsed on first GetIcon() / GetFirstSlots() call.
+        //     spec: Docs/RE/formats/ui_manifests.md §2.6 (23×23 cell model: CODE-CONFIRMED).
+        //     spec: Docs/RE/formats/ui_manifests.md §2.7 (musajung.do, SAMPLE-VERIFIED presence).
+        try
+        {
+            IconCatalogs = new IconCatalogs(_uiAssets);
+            // Trigger lazy load now so the boot log shows the record count.
+            int doCount = IconCatalogs.DoRecordCount;
+            GD.Print($"[ClientContext] IconCatalogs: {doCount} musajung.do records loaded. " +
+                     "spec: Docs/RE/formats/ui_manifests.md §2.7 CODE-CONFIRMED + SAMPLE-VERIFIED.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] IconCatalogs load failed: {ex.Message} — skill icons will use placeholders.");
+            IconCatalogs ??= new IconCatalogs(null);
+        }
+
+        // 15. Item icon catalog: data/item/texturelist.txt — maps tex_id to DDS icon paths.
+        //     Uses the same _uiAssets handle as UiCatalogs (no additional VFS handle opened).
+        //     Lazy — the manifest is parsed on first GetIcon() / GetDemoIcons() call.
+        //     spec: Docs/RE/formats/ui_manifests.md §10 (flat newline-delimited list: CODE-CONFIRMED).
+        //     spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit, no sub-rect": CODE-CONFIRMED.
+        try
+        {
+            ItemIconCatalog = new ItemIconCatalog(_uiAssets);
+            // Trigger lazy load now so the boot log shows the manifest entry count.
+            int itemIconCount = ItemIconCatalog.ManifestCount;
+            GD.Print($"[ClientContext] ItemIconCatalog: {itemIconCount} texturelist.txt entries loaded. " +
+                     "spec: Docs/RE/formats/ui_manifests.md §10 CODE-CONFIRMED.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr(
+                $"[ClientContext] ItemIconCatalog load failed: {ex.Message} — item icons will use placeholders.");
+            ItemIconCatalog ??= new ItemIconCatalog(null);
+        }
+
+        // 16-A. HUD event hub: the single facade for all per-frame HUD channels.
+        //     Constructed once here; widgets subscribe via IHudEventHub.
+        //     spec: MartialHeroes.Client.Application.Hud — IHudEventHub / HudEventHub.
+        var hudHub = new HudEventHub();
+        HudEventHub = hudHub;
+        GD.Print("[ClientContext] HudEventHub constructed (6 typed channels).");
+
+        // 16-B. Buff icon catalog (stateicon.dds + buff_icon_position.xdb).
+        //     Uses the same _uiAssets handle (no additional VFS archive opened).
+        //     spec: Docs/RE/formats/misc_data.md §1.3 / §1.6.
+        try
+        {
+            BuffIconCatalog = new BuffIconCatalog(_uiAssets);
+            GD.Print($"[ClientContext] BuffIconCatalog initialised ({BuffIconCatalog.TableCount} entries).");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr(
+                $"[ClientContext] BuffIconCatalog init failed: {ex.Message} — buff icons will be placeholders.");
+            BuffIconCatalog ??= new BuffIconCatalog(null);
+        }
+
+        // 16-C. Zone catalog (mapsetting.scr — 52 zone records, CP949 names).
+        //     Uses a fresh RealClientAssets handle for the zone-data VFS path.
+        //     spec: Docs/RE/formats/misc_data.md §7.1 / Docs/RE/specs/minimap.md §6.3.
+        try
+        {
+            ZoneCatalog = new ZoneCatalog(RealClientAssets.TryOpen());
+            GD.Print($"[ClientContext] ZoneCatalog initialised ({ZoneCatalog.AllZones.Count} zone records).");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] ZoneCatalog init failed: {ex.Message} — zone names unavailable.");
+            ZoneCatalog ??= new ZoneCatalog(null);
+        }
+
+        // 16. VFS archive for terrain (separate from catalogue loader — same paths).
         //     spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
         //     Store in _terrainVfs so _ExitTree can dispose it (VfsTerrainSectorSource does not own/dispose).
         MappedVfsArchive? vfs = TryOpenVfsForTerrain();
         _terrainVfs = vfs;
 
-        // 15. Terrain sector source — backed by VFS (or empty if offline).
+        // 17. Terrain sector source — backed by VFS (or empty if offline).
         //     spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
         //     Area 0 is the default starting area. TODO: update on enter-game.
         var terrainSource = new VfsTerrainSectorSource(vfs, areaId: 0);
 
-        // 16. Terrain streaming service — high quality (5×5 ring, radius=2).
+        // 18. Terrain streaming service — high quality (5×5 ring, radius=2).
         //     spec: Docs/RE/formats/terrain.md §12.2 — High quality → 5×5 ring (ring-radius cells = 5).
         //     The 5×5 ring loads up to 25 sectors around the player, covering all spawn-filled cells
         //     in large walled areas (e.g. area 2) that exceed the 3×3 ring footprint.
@@ -433,6 +567,26 @@ public sealed partial class ClientContext : Node
         // spec: Docs/RE/formats/ui_manifests.md §1 / Docs/RE/formats/misc_data.md §6.
         UiCatalogs ??= new UiCatalogs(null);
 
+        // IconCatalogs — null-safe offline fallback (no VFS).
+        // spec: Docs/RE/formats/ui_manifests.md §2.6 / §2.7.
+        IconCatalogs ??= new IconCatalogs(null);
+
+        // ItemIconCatalog — null-safe offline fallback (no VFS).
+        // spec: Docs/RE/formats/ui_manifests.md §10 / §10.5.
+        ItemIconCatalog ??= new ItemIconCatalog(null);
+
+        // HudEventHub — null-safe offline fallback.
+        // spec: MartialHeroes.Client.Application.Hud — IHudEventHub / HudEventHub.
+        HudEventHub ??= new HudEventHub();
+
+        // BuffIconCatalog — null-safe offline fallback (no VFS).
+        // spec: Docs/RE/formats/misc_data.md §1.3 / §1.6.
+        BuffIconCatalog ??= new BuffIconCatalog(null);
+
+        // ZoneCatalog — null-safe offline fallback (no VFS).
+        // spec: Docs/RE/formats/misc_data.md §7.1 / Docs/RE/specs/minimap.md §6.3.
+        ZoneCatalog ??= new ZoneCatalog(null);
+
         GD.Print("[ClientContext] Minimal fallback state initialised.");
     }
 
@@ -453,6 +607,10 @@ public sealed partial class ClientContext : Node
     {
         // Signal the event channel so any async drainers stop cleanly.
         EventBus?.Complete();
+
+        // Complete the HUD event hub so all widget channel-readers finish cleanly.
+        // spec: MartialHeroes.Client.Application.Hud — IHudEventHub.Complete().
+        HudEventHub?.Complete();
 
         // Cancel and DRAIN the engine loop task BEFORE disposing the cancellation source.
         // Disposing _loopCts while the loop task is still observing its token is a use-after-free
@@ -481,8 +639,18 @@ public sealed partial class ClientContext : Node
         // spec: Docs/RE/formats/ui_manifests.md §1 (UiTex.txt loaded via this handle).
         // spec: Docs/RE/formats/misc_data.md §6 (msg.xdb loaded via this handle).
         UiCatalogs?.Dispose();
+        // Dispose the skill icon catalog (no archive owned — just clears internal state).
+        // spec: Docs/RE/formats/ui_manifests.md §2.6 / §2.7.
+        IconCatalogs?.Dispose();
+        // Dispose the item icon catalog (clears texture cache; no archive owned).
+        // spec: Docs/RE/formats/ui_manifests.md §10 / §10.5.
+        ItemIconCatalog?.Dispose();
         _uiAssets?.Dispose();
         _uiAssets = null;
+
+        // Dispose the buff icon catalog (clears texture cache; no archive owned).
+        // spec: Docs/RE/formats/misc_data.md §1.3 / §1.6.
+        BuffIconCatalog?.Dispose();
 
         // Dispose the terrain VFS archive (memory-mapped handle).
         // VfsTerrainSectorSource stores the reference but does NOT dispose — ownership is here.

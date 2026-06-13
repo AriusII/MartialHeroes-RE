@@ -1,0 +1,182 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are static facts; the field layout is a static inference. capture_verified: false.
+
+name: SmsgSkillWindowStateUpdate   # canonical name (names.yaml); this message is the buff/state-bar snapshot
+opcode: 0x40066           # major 4 (Response), minor 102 -> (4 << 16) | 102
+direction: S2C
+size: 476                # fixed 476-byte payload block (0x1DC)
+spec: packets/4-102_buff_state.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server pushes the full skill/state window snapshot in one fixed 476-byte block. The first 116 bytes are a player stat block (level, class, primary stats, HP/MP, big counters); the remaining bytes are 30 fixed 12-byte active-buff records. The handler clears and hides all 30 buff slots, then re-shows only the active ones, so buff stacking is entirely server-driven.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 476.
+# Layout = 116-byte stat-block head (modelled opaque, sub-offsets in notes; field MEANINGS PLAUSIBLE)
+# + 30 active-buff records of 12 bytes each (116 + 30*12 = 476). The buff-record stride and the
+# +116 record-array base are CODE-CONFIRMED; the per-record field roles follow the task directive
+# (id + two coords) with the analyst's alternative interpretation flagged in notes.
+fields:
+  - { name: StatBlock, type: "bytes[116]" }   # 0x000  player stat block (level/class/stats/HP-MP/counters); sub-offsets in notes
+  # --- 30 active-buff records, 12 bytes each, starting at payload offset 116 (0x074) ---
+  - { name: Buff00Id, type: u32 }   # +116  buff/state catalog id (0 = empty slot)
+  - { name: Buff00X,  type: i32 }   # +120  icon source X / param 1
+  - { name: Buff00Y,  type: i32 }   # +124  icon source Y / param 2
+  - { name: Buff01Id, type: u32 }   # +128
+  - { name: Buff01X,  type: i32 }   # +132
+  - { name: Buff01Y,  type: i32 }   # +136
+  - { name: Buff02Id, type: u32 }   # +140
+  - { name: Buff02X,  type: i32 }   # +144
+  - { name: Buff02Y,  type: i32 }   # +148
+  - { name: Buff03Id, type: u32 }   # +152
+  - { name: Buff03X,  type: i32 }   # +156
+  - { name: Buff03Y,  type: i32 }   # +160
+  - { name: Buff04Id, type: u32 }   # +164
+  - { name: Buff04X,  type: i32 }   # +168
+  - { name: Buff04Y,  type: i32 }   # +172
+  - { name: Buff05Id, type: u32 }   # +176
+  - { name: Buff05X,  type: i32 }   # +180
+  - { name: Buff05Y,  type: i32 }   # +184
+  - { name: Buff06Id, type: u32 }   # +188
+  - { name: Buff06X,  type: i32 }   # +192
+  - { name: Buff06Y,  type: i32 }   # +196
+  - { name: Buff07Id, type: u32 }   # +200
+  - { name: Buff07X,  type: i32 }   # +204
+  - { name: Buff07Y,  type: i32 }   # +208
+  - { name: Buff08Id, type: u32 }   # +212
+  - { name: Buff08X,  type: i32 }   # +216
+  - { name: Buff08Y,  type: i32 }   # +220
+  - { name: Buff09Id, type: u32 }   # +224
+  - { name: Buff09X,  type: i32 }   # +228
+  - { name: Buff09Y,  type: i32 }   # +232
+  - { name: Buff10Id, type: u32 }   # +236
+  - { name: Buff10X,  type: i32 }   # +240
+  - { name: Buff10Y,  type: i32 }   # +244
+  - { name: Buff11Id, type: u32 }   # +248
+  - { name: Buff11X,  type: i32 }   # +252
+  - { name: Buff11Y,  type: i32 }   # +256
+  - { name: Buff12Id, type: u32 }   # +260
+  - { name: Buff12X,  type: i32 }   # +264
+  - { name: Buff12Y,  type: i32 }   # +268
+  - { name: Buff13Id, type: u32 }   # +272
+  - { name: Buff13X,  type: i32 }   # +276
+  - { name: Buff13Y,  type: i32 }   # +280
+  - { name: Buff14Id, type: u32 }   # +284
+  - { name: Buff14X,  type: i32 }   # +288
+  - { name: Buff14Y,  type: i32 }   # +292
+  - { name: Buff15Id, type: u32 }   # +296
+  - { name: Buff15X,  type: i32 }   # +300
+  - { name: Buff15Y,  type: i32 }   # +304
+  - { name: Buff16Id, type: u32 }   # +308
+  - { name: Buff16X,  type: i32 }   # +312
+  - { name: Buff16Y,  type: i32 }   # +316
+  - { name: Buff17Id, type: u32 }   # +320
+  - { name: Buff17X,  type: i32 }   # +324
+  - { name: Buff17Y,  type: i32 }   # +328
+  - { name: Buff18Id, type: u32 }   # +332
+  - { name: Buff18X,  type: i32 }   # +336
+  - { name: Buff18Y,  type: i32 }   # +340
+  - { name: Buff19Id, type: u32 }   # +344
+  - { name: Buff19X,  type: i32 }   # +348
+  - { name: Buff19Y,  type: i32 }   # +352
+  - { name: Buff20Id, type: u32 }   # +356
+  - { name: Buff20X,  type: i32 }   # +360
+  - { name: Buff20Y,  type: i32 }   # +364
+  - { name: Buff21Id, type: u32 }   # +368
+  - { name: Buff21X,  type: i32 }   # +372
+  - { name: Buff21Y,  type: i32 }   # +376
+  - { name: Buff22Id, type: u32 }   # +380
+  - { name: Buff22X,  type: i32 }   # +384
+  - { name: Buff22Y,  type: i32 }   # +388
+  - { name: Buff23Id, type: u32 }   # +392
+  - { name: Buff23X,  type: i32 }   # +396
+  - { name: Buff23Y,  type: i32 }   # +400
+  - { name: Buff24Id, type: u32 }   # +404
+  - { name: Buff24X,  type: i32 }   # +408
+  - { name: Buff24Y,  type: i32 }   # +412
+  - { name: Buff25Id, type: u32 }   # +416
+  - { name: Buff25X,  type: i32 }   # +420
+  - { name: Buff25Y,  type: i32 }   # +424
+  - { name: Buff26Id, type: u32 }   # +428
+  - { name: Buff26X,  type: i32 }   # +432
+  - { name: Buff26Y,  type: i32 }   # +436
+  - { name: Buff27Id, type: u32 }   # +440
+  - { name: Buff27X,  type: i32 }   # +444
+  - { name: Buff27Y,  type: i32 }   # +448
+  - { name: Buff28Id, type: u32 }   # +452
+  - { name: Buff28X,  type: i32 }   # +456
+  - { name: Buff28Y,  type: i32 }   # +460
+  - { name: Buff29Id, type: u32 }   # +464
+  - { name: Buff29X,  type: i32 }   # +468
+  - { name: Buff29Y,  type: i32 }   # +472
+
+notes: |
+  CODE-CONFIRMED routing + size + record stride, CAPTURE-UNVERIFIED, per-record field roles PLAUSIBLE.
+  Total = 476 bytes (0x1DC), read in one block. ONE opcode rebuilds the WHOLE skill/state window AND
+  the buff bar; the older raw label "quest data update" on this handler is stale and must be ignored.
+
+  TWO REGIONS:
+    1. STAT BLOCK -- payload bytes 0..115 (116 bytes). A player summary that the handler formats into
+       ~20 text widgets (level, class/job, PK/peace mode, primary stats, HP/MP, big counters, title
+       reference, an actor idkey). The exact widths of the 64-bit reads in this region are not fully
+       pinned and several field MEANINGS are PLAUSIBLE, so it is reserved here as one opaque 116-byte
+       block. Best-effort sub-offsets WITHIN the stat block (verify before trusting):
+         +0x08 (1B) class/job code
+         +0x09 (1B) level
+         +0x0A (1B) PK/peace mode
+         +0x0B (1B) PK / kill count
+         +0x0C (1B) sub-class / promote flag
+         +0x0D (1B) stance / sign
+         +0x0E..+0x18 (u16 x6) primary stats (order unconfirmed)
+         +0x1C (8B) a large counter (exp-class number)
+         +0x24 (8B) a large counter
+         +0x2C (2B) title / rank reference
+         +0x30..+0x38 a coordinate / triple region
+         +0x40..+0x4C an HP/MP ratio numerator / denominator group
+         +0x50 / +0x54 (u32) two numbers
+         +0x58 (8B) actor idkey
+       These are aids only; the 116 bytes are modelled opaque so the engine reserves the correct span.
+
+    2. ACTIVE-BUFF ARRAY -- 30 fixed records of 12 bytes each, starting at payload offset 116 (0x074),
+       running to the end of the block (116 + 30*12 = 476). CODE-CONFIRMED: the array base is payload
+       +116 and the stride is 12 bytes for 30 records.
+
+  PER-RECORD LAYOUT (this spec, per the task directive): each 12-byte record is modelled as
+    {u32 buffId @+0, i32 paramX @+4, i32 paramY @+8}
+  where buffId is the buff/state catalog id (0 = empty slot, skipped by the client), and the two i32
+  values are the icon source coordinates / parameters that position the icon cell on the shared state-
+  icon atlas. ID CLASS SPLIT (CODE-CONFIRMED branch): a buff id <= 80 draws as a 23x23 "buff" cell and
+  flows left-to-right in a counter; an id > 80 draws as a 25x25 "state/debuff" cell at a fixed per-slot
+  screen position.
+
+  COMPETING INTERPRETATION OF THE 12-BYTE RECORD (flagged, NOT modelled): a separate analyst reading of
+  the receive loop parses the same 12 bytes as {u16 id @+0, u16 @+2, u32 @+4 (a duration / remaining-
+  time candidate), u16 @+8 (stack/level), u8 @+10 (a type/category flag), u8 @+11}. Under that reading
+  the per-buff icon coordinates are NOT on the wire -- they are looked up CLIENT-SIDE from the
+  data/script/buff_icon_position.xdb table (a flat array of 12-byte {u32 id, i32 srcX, i32 srcY}
+  records keyed by id) and only the id/stack/duration/flag travel in this packet. Both readings are 12
+  bytes and capture-unverified. A capture of a buff-apply event is REQUIRED to decide which 12-byte
+  record shape is correct; the engine should treat the buffId field as reliable and the two trailing
+  i32 values as provisional.
+
+  RESET + SERVER-DRIVEN STACKING (CODE-CONFIRMED behaviour): before consuming the array the handler
+  clears and HIDES all 30 buff slots and resets the flow counter, then re-shows only the records whose
+  id is non-zero. The client does no client-side expiry between packets -- a buff disappears only when
+  the next 4/102 omits it. So the server fully owns which buff sits in which slot.
+
+  ICON RENDERING (asset facts, NOT wire fields; for the asset/godot engineers): icons are cells of the
+  shared atlas data/ui/skillicon/stateicon.dds (512x512). Per-buff icon UV is data-driven: either it
+  arrives in this packet (the {id, X, Y} reading) or it is resolved from buff_icon_position.xdb by id
+  (the {id, ..., duration} reading). Cell size 23x23 for buff ids <= 80, 25x25 for state ids > 80.
+
+  UNKNOWNS to resolve with a buff-apply capture (verify FIRST):
+    - which 12-byte record shape is correct ({id, X, Y} vs {id, ?, duration, stack, flag});
+    - confirm the stat-block sub-offsets and the 64-bit field widths in bytes 0..115;
+    - confirm record base = payload + 116 (that payload[116] is the first buff id, and bytes 112..115
+      belong to the stat block, not the buff array);
+    - the buff/state id boundary at 80 (true catalog partition vs an array-bound guard);
+    - the duration unit (ms vs s) if the duration reading holds.
+
+  RELATED: 5/31 SmsgBuffSlotUpdate is a separate per-slot buff push (not specced here). UNBLOCKS the
+  buff-bar / skill-state window rebuild in Client.Application and the buff-icon render in the Godot
+  presentation layer (server owns slot assignment; clear+hide all 30, re-show active).

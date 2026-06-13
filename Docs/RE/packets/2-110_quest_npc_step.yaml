@@ -1,0 +1,43 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgQuestNpcStep
+opcode: 0x2006e           # major 2 (GameAction), minor 110 -> (2 << 16) | 110
+direction: C2S
+size: 4                   # fixed 4-byte body
+spec: packets/2-110_quest_npc_step.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Quest-NPC step request emitted by the quest-NPC panel (NPC descriptor KIND 0xA). A 4-byte body whose leading "mode" byte is derived from the NPC's current quest phase. This is distinct from the general quest-action message (2/28).
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 4.
+fields:
+  - { name: Mode, type: u8 }             # 0x00  step/mode selector, mapped from the NPC quest phase
+  - { name: ArgA, type: u8 }             # 0x01  first argument byte — meaning not yet pinned
+  - { name: ArgB, type: u8 }             # 0x02  second argument byte — meaning not yet pinned
+  - { name: ArgC, type: u8 }             # 0x03  third argument byte — meaning not yet pinned
+
+notes: |
+  Static inference only; no capture available. The quest-NPC panel builds a fixed 4-byte body, so
+  total payload = 4 bytes; frame = 8-byte header + 4 = 12 bytes on the wire. Body length and the
+  presence of a leading mode byte are CODE-CONFIRMED; the three trailing argument bytes are not yet
+  individually decoded.
+
+    0x00 (1B) Mode : the panel maps the NPC's current quest phase to this byte before sending. The
+                     phase-to-mode mapping observed in the panel logic is (phase -> Mode):
+                       2 -> 1, 7 -> 2, 0x0C (12) -> 3, 0x10 (16) -> 6, 0x11 (17) -> 4, 0x15 (21) -> 5.
+                     (The phase value 7 path also references quest item id 215003301.) This mapping
+                     is CODE-CONFIRMED from the panel; the meaning of each Mode value to the server
+                     is the leading hypothesis, not capture-confirmed.
+    0x01..0x03 (3B) ArgA/ArgB/ArgC : three argument bytes whose individual roles are not yet pinned.
+                     They may be zero in the simple step case. Modelled as three u8 fields so the
+                     struct matches the confirmed 4-byte size.
+
+  fields not yet pinned — needs npc.scr sample / capture: the meaning of the three argument bytes
+  and which Mode values the server treats as accept vs proceed vs complete.
+
+  RELATIONSHIP: this is the quest-NPC STEP request, separate from the unified quest accept / proceed
+  / give-up action carried by C2S 2/28 (CmsgQuestAction). An implementer must keep the two distinct.
+
+  UNBLOCKS: Client.Application QuestNpcStep use-case.

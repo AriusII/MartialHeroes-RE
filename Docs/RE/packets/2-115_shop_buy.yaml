@@ -1,0 +1,48 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgShopBuy
+opcode: 0x20073           # major 2 (GameAction), minor 115 -> (2 << 16) | 115
+direction: C2S
+size: var                 # body bytes not yet pinned (see notes); modelled minimum below
+spec: packets/2-115_shop_buy.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Buy / order commit at an NPC shop. This is the shared buy-commit for both the simple sundry/item shop and the full product shop window. The send arguments observed are the active target field and the selected catalog index. The server replies with the NPC buy/acquire acknowledgement family (S2C 4/19, and item-shop result 4/113 for the product shop).
+
+# Wire order, offset 0 = first payload byte. Pack=1. size is 'var' until the body is field-decoded.
+fields:
+  - { name: TargetId, type: u32 }        # 0x00  active-target field: the shop NPC's actor/entity id
+  - { name: SelIndex, type: u32 }        # 0x04  selected catalog/order entry index
+
+notes: |
+  Static inference only; no capture available. The shop buy/order sender is invoked by the sundry
+  item-shop confirm path; the send-wrapper's exact body length was NOT re-read this pass, so the
+  on-wire body is recorded as 'var' rather than a hard size.
+
+    0x00 (4B) TargetId : the client's active-target field (the shop NPC). CODE-CONFIRMED as a send
+                         argument; treating it as a u32 id is the leading hypothesis.
+    0x04 (4B) SelIndex : the selected catalog entry / order line. For the sundry shop the catalog is
+                         a 6-entry list baked into the NPC's npc.scr template (catalog region at
+                         template offset +128); for the product shop the entry is chosen in the
+                         paged window. CODE-CONFIRMED as a send argument; the on-wire width is not
+                         pinned.
+
+  fields not yet pinned — needs npc.scr sample / capture: the exact body length and whether a
+  purchase QUANTITY and/or a page index also ride this body. The two u32 words above are the
+  minimum plausible body; a quantity field is the most likely missing field. Do NOT assume the body
+  ends after these two words until a capture confirms the length.
+
+  SHARED COMMIT: both shop variants ride this 2/115 buy/order commit. The product shop ALSO uses the
+  separate paged-shop minors 2/151 / 2/152 / 2/153 for in-window paging, selection and confirm —
+  see packets/2-151_product_buy.yaml. Treat 2/115 as the buy/order commit and the 2/151-family as
+  the product-panel navigation/confirm primitives.
+
+  CLIENT PRE-CHECK (does not change the wire body): the sundry shop prices each catalog entry as
+  amount / 1,000,000 (the global gold display divisor) and shows the player's gold before purchase.
+
+  RELATIONSHIP: paired with S2C 4/19 SmsgNpcBuyOrAcquireAck (generic NPC buy/acquire) and, for the
+  product/item shop, S2C 4/113 SmsgItemShopPurchaseResult.
+
+  UNBLOCKS: Client.Application ShopBuy use-case (after body length is captured).

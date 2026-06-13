@@ -1,6 +1,6 @@
 ---
 name: vfs-inspect
-description: Use to open the REAL Martial Heroes VFS (data.inf + data/data.vfs at D:/MartialHeroesClient) and list/inspect entries by substring — the throwaway console harness for "does this path exist?", "how big is it?", "what's the first N bytes?", "how many .skn/.ted/.txt files are there?". Bundles a ready-made net10.0 harness with 8 dedicated subcommands for census/analysis of the major asset formats. Subcommands: scan-mot, scan-bnd, scan-skn, scan-ui, dump-msgxdb, dump-uitex, scan-xeff, scan-sound.
+description: Use to open the REAL Martial Heroes VFS (data.inf + data/data.vfs at D:/MartialHeroesClient) and list/inspect entries by substring — the throwaway console harness for "does this path exist?", "how big is it?", "what's the first N bytes?", "how many .skn/.ted/.txt files are there?". Bundles a ready-made net10.0 harness with 12 dedicated subcommands for census/analysis of the major asset formats. Subcommands: scan-mot, scan-bnd, scan-skn, scan-ui, dump-msgxdb, dump-uitex, scan-xeff, scan-sound, scan-fx, dump-do, scan-minimap, scan-quest.
 allowed-tools: Read Write Bash(dotnet *) Bash(mkdir *) Bash(copy *) Bash(xcopy *)
 model: sonnet
 ---
@@ -10,9 +10,10 @@ model: sonnet
 The single home for the throwaway VFS browser that has been hand-rebuilt five times. It mounts the
 real client archive through the production VFS API and lets you list entries, count by extension,
 test for a path, and peek at the head bytes of any file — without writing a test or touching Godot.
-It also provides 8 structured subcommands that census the major asset families and drive the
+It also provides 12 structured subcommands that census the major asset families and drive the
 production parsers (`Assets.Parsers`) directly, so observations match what the shipping client
-will see.
+will see. Several of these subcommands mirror standalone research harnesses that live as siblings
+under `scripts/` (see "Sibling research harnesses" below).
 
 It drives the production library directly:
 `MartialHeroes.Assets.Vfs.MappedVfsArchive.Open(infPath, vfsPath)` with
@@ -90,6 +91,10 @@ text payloads are CP949 (Korean code page 949), so the harness registers the cod
    | `dump-uitex` | Parse UiTex.txt manifest (tex_id → vfs_path) and verify each path against the VFS. | `Docs/RE/formats/ui_manifests.md §1` |
    | `scan-xeff` | Census .xeff particle effects: element_count distribution, 9-digit skill-code pattern, duplicate effect_ids. | `Docs/RE/formats/effects.md §A` |
    | `scan-sound` | Census .ogg under data/sound/2d\|3d + parse per-area sound tables (.bgm/.bge/.eff/.wlk/.run), listing non-null entries with VFS existence check. | `Docs/RE/formats/sound_tables.md` |
+   | `scan-fx` | Census .fx1–.fx7 terrain layer files: count + total bytes per layer, plus header field histograms (field[0] type_tag @0x00, field[3] @0x0C, field[4] @0x10, field[5] @0x14) to arbitrate the disputed FX2 field[3] value. | `Docs/RE/formats/terrain_layers.md §1` |
+   | `dump-do` | Census the 12 per-class stance `.do` files (icon/skill sprite-sheet records, stride 116/0x74): per-file record count + iconSrcX/Y validity (in [0..489]) + classStanceRef set + a compact per-u32-offset field census (distinct/min/max/zero%). Counts and short decoded fields only — no raw bytes. | `Docs/RE/formats/ui_manifests.md §2.7` |
+   | `scan-minimap` | Census the minimap/worldmap chain: `mapsetting.scr` 84B zone table (id + CP949 name + bounds), `regiontableNNN.bin` 32B sub-region records, and the data/ui map DDS inventory (dimensions + fourCC). Strides + counts only. | `Docs/RE/formats/misc_data.md` |
+   | `scan-quest` | Census the quest/dialog script tables by fixed stride: `quests.scr` 3720B (sparse — u16 id@0 marks an occupied slot), `npc.scr` 404B, `autoquestion_cl.scr` 92B, `discript.sc` 68B. Record/slot/occupied counts + a few decoded ids. | `Docs/RE/formats/misc_data.md` |
 
    Examples:
 
@@ -121,10 +126,43 @@ text payloads are CP949 (Korean code page 949), so the harness registers the cod
 
    # Sound table census + per-area non-null entry listing:
    dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- scan-sound
+
+   # Terrain layer (.fx1–.fx7) census incl. the contested field[3] @0x0C histogram:
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- scan-fx
+
+   # Per-class stance .do census (record counts + iconSrcX/Y validity + per-offset field census):
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- dump-do
+
+   # Minimap/worldmap chain: mapsetting.scr zones + regiontable*.bin + ui map DDS:
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- scan-minimap
+
+   # Quest/dialog script tables (quests.scr / npc.scr / autoquestion_cl.scr / discript.sc):
+   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- scan-quest
    ```
 
 4. **Report findings as metadata**: counts, names, sizes (and, for `--head`, the decoded preview).
    Quote the exact virtual path strings so the next caller can re-query. Do not paste large dumps.
+
+## Sibling research harnesses (`scripts/`)
+
+Alongside `scripts/vfsls/`, this skill bundles a handful of **standalone single-purpose harnesses**
+— the original research probes that first recovered each format. Several `vfsls` subcommands are now
+production mirrors of these, so for routine work prefer the subcommand. The standalones remain as the
+focused originals (and as a cross-check when a subcommand's census looks off). Each is its own
+`net10.0` exe; run it the same way (`dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/<name>" -- …`).
+
+| Sibling harness | Mirrored by | Focus |
+|---|---|---|
+| `scripts/do-census` | `dump-do` | The 12 per-class stance `.do` files (stride 116/0x74): record counts + per-offset field census. |
+| `scripts/minimap-scan` | `scan-minimap` | `mapsetting.scr` zone table + `regiontableNNN.bin` sub-regions + ui map DDS inventory. |
+| `scripts/quest-dialog-scan` | `scan-quest` | `quests.scr` / `npc.scr` / `autoquestion_cl.scr` / `discript.sc` fixed-stride census. |
+| `scripts/msgxdb` | `dump-msgxdb` | `msg.xdb` 516B records (u32 id + CP949 string). |
+| `scripts/skill-icon-scan` | `dump-do` (icon side) | Skill/icon sprite-sheet coordinate validation against the 512×512 sheet. |
+| `scripts/skillcat-scan` | — | Skill-category table census (no vfsls subcommand mirror yet). |
+
+These siblings carry the same hard rules as `vfsls`: read-only over the VFS, metadata/counts and
+short decoded structural fields only, never a full asset dump, and they are never registered in
+`MartialHeroes.slnx`.
 
 ## Hard rules
 

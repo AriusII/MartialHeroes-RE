@@ -1,0 +1,81 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgCombatEffectInstanceSpawn   # canonical name in names.yaml / opcodes.md. Ground-item spawn is its primary role (alias: SmsgGroundItemSpawn).
+opcode: 0x5000e          # major 5 (Push), minor 14 -> (5 << 16) | 14
+direction: S2C
+size: 48                 # the handler reads a fixed 48-byte body (0x30) before dispatch
+spec: packets/5-14_ground_item_spawn.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server push that spawns a ground item in the world (monster drops, combat-effect drops, coin drops). The client resolves the item's per-template 3D model and places a first-class scene actor at the given world XZ. This opcode shares its 48-byte wire shape with combat-effect instance spawns (hence the canonical name SmsgCombatEffectInstanceSpawn), so several bytes are not consumed by the ground-item path.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the named fields plus the two reserved holes
+# (Reserved0 at offset 0x10 and Reserved1 at 0x21..0x2B) sum to size: 48.
+fields:
+  - { name: Sort,       type: u32 }          # 0x00  source/dropper sort key (low byte 2 == Mob dropper)
+  - { name: SourceId,   type: u32 }          # 0x04  dropper / source actor id
+  - { name: Mode,       type: i8 }           # 0x08  0xFF == coin (forces coin template 217000501)
+  - { name: Slot,       type: u8 }           # 0x09  source slot index on the dropper
+  - { name: Pad0,       type: "bytes[2]" }   # 0x0a  alignment to the next 4-byte field
+  - { name: TemplateId, type: i32 }          # 0x0c  ground-item 3D-model / effect template id
+  - { name: Reserved0,  type: "bytes[4]" }   # 0x10  hole: not read by the ground-item path
+  - { name: Param1,     type: i32 }          # 0x14  opaque (likely quantity or flags)
+  - { name: Param2,     type: i32 }          # 0x18  the world entity key for this ground item
+  - { name: PosX,       type: f32 }          # 0x1c  world X
+  - { name: PosZ,       type: f32 }          # 0x20  world Z
+  - { name: Reserved1,  type: "bytes[11]" }  # 0x21  hole: bytes 0x21..0x2b not read by this handler
+  - { name: NoticeFlag, type: u8 }           # 0x2c  one-shot "rare drop" chat line when set
+
+notes: |
+  Static inference only; no capture available. Protocol facts are read directly from the client
+  (CODE-CONFIRMED layout, including the 48-byte body read size and the named field offsets from the
+  handler's stack frame) but no live capture confirms the bytes on the wire (CAPTURE-UNVERIFIED).
+
+  The handler reads a fixed 48-byte body. Frame = 8-byte header + 48 = 56 bytes on the wire.
+
+  SHARED WIRE SHAPE -- IMPORTANT: this opcode shares its handler (and therefore its 48-byte wire
+  shape) with combat-effect instance spawns, which is why its canonical name is
+  SmsgCombatEffectInstanceSpawn even though its primary use is the live ground-item drop push. The
+  ground-item path consumes only the named fields below; the two reserved regions (Reserved0 at
+  offset 0x10 and Reserved1 at 0x21..0x2b) are NOT read into any ground-item field. They are modelled
+  here as fixed reserved buffers so the field widths sum to 48 and an engineer can lay out a Pack=1
+  struct without guessing; their meaning (combat-effect payload, a second quantity/flags word, or
+  genuine padding) is unknown and must be settled by a capture.
+
+    0x00 (4B) Sort       : the source/dropper "sort" key. Its low byte distinguishes the dropper
+                             kind; a low byte of 2 marks a Mob dropper, which makes the spawned item
+                             a timed drop (it auto-expires after roughly 1000 ms).
+    0x04 (4B) SourceId   : the dropper / source actor id (paired with Sort to look the actor up).
+    0x08 (1B) Mode       : drop mode; 0xFF forces the coin/money form, which uses the coin template
+                             id 217000501 regardless of TemplateId.
+    0x09 (1B) Slot       : the source slot index on the dropper.
+    0x0a (2B) Pad0       : alignment bytes before the next 4-byte field; treat as don't-care.
+    0x0c (4B) TemplateId : the item's world-model / effect template id. The client resolves a
+                             per-template 3D model from this id; if the lookup fails it falls back to
+                             the shared default model id 201011001. Ground items are first-class 3D
+                             scene actors, NOT billboards and NOT a single shared bag mesh.
+    0x10 (4B) Reserved0  : a hole; not read by the ground-item path (see SHARED WIRE SHAPE above).
+    0x14 (4B) Param1     : an opaque integer carried into the ground-item actor record; likely a
+                             quantity or a flags word.
+    0x18 (4B) Param2     : the world entity key assigned to this ground item -- the value a later
+                             CmsgPickupItem (2/15) or SmsgTrackedWorldObjectRemove (5/15) refers to.
+    0x1c (4B) PosX / 0x20 (4B) PosZ : the world XZ where the item lands. The client places the actor
+                             1.0 unit above the terrain (a terrain-height query plus 1.0); stacked
+                             drops at the same coordinate are fanned out in a small spiral so they do
+                             not visually overlap.
+    0x21 (11B) Reserved1 : a hole spanning 0x21..0x2b; not read by this handler.
+    0x2c (1B) NoticeFlag : when set, drives a one-shot "rare drop" chat line.
+
+  AUDIO/VISUAL (client-local, not wire fields): certain template-id ranges trigger a spawn/pickup SFX;
+  the coin form uses the coin template id 217000501. These are presentation cues for the engineer's
+  awareness and are not part of the packet layout.
+
+  UNKNOWNS to resolve with a capture of a monster drop, a coin drop, and a combat-effect spawn:
+    - whether the server actually sends a full 48 bytes for a ground item, or whether the 48-byte
+      body is the combat-effect shape reused (the two reserved holes are the open region);
+    - the meaning of Param1 (quantity vs flags) and confirmation that Param2 is the pickup key;
+    - confirm the two pad bytes after Slot carry no data.
+
+  UNBLOCKS: Client.Application ground-item spawn handler and the Godot ground-item actor.

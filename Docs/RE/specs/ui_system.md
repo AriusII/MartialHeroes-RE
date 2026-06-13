@@ -608,24 +608,31 @@ scan):**
 | Large data window (skill/quest/guild class) | 1 | 61 (44 BTN7, 17 LABEL) | heavy msg.xdb usage |
 | Web-link window (cash-shop/billing/help) | 1 | 50 (23 BTN7, 24 LABEL, 1 TEXTBOX) | refs `"iexplorer.exe"`, `AssocQueryStringA` |
 | **Guild window** | 1 | 43 (26 BTN7, 16 LABEL, 1 TEXTBOX) | key `CHAR_GUILDCAP_ENABLE` |
-| Dice/gamble panel | 1 | 37 (13 BTN7, 24 LABEL) | atlas `five.tga` |
+| **Character-info / Stat window (StatusPanel)** | 1 | 37 (13 BTN7, 24 LABEL) | binds uitex 2 + 4; `five.tga` star-rating strip loaded standalone (corrected 2026-06-13: this 37-ctor builder is the **StatusPanel** char-info/stat window — earlier labelled "dice/gamble panel" by `five.tga` presence; the `five.tga` strip is the five-star rating glyph icon, not the window chrome — see §8.7) |
 | **Quest window** | 1 | 35 (22 BTN7, 1 CHECK, 12 LABEL) | key `CHAR_QUEST_TRACKING` |
 | **Emotion/expression panel** | 1 | 28 (22 BTN7, 3 BTN2, 3 LABEL) | atlas `data/ui/face/anger/ani_000.dds` |
-| **Options/settings panel** | 1 | 26 (12 CHECK, 12 LABEL, 2 BTN7) | 12 checkboxes |
+| **Options — Character sub-panel (OptionPanel_Character)** | 1 | 26 (12 CHECK, 12 LABEL, 2 BTN7) | 12 checkboxes; binds uitex 1 + 9 (corrected 2026-06-13: this 26-ctor builder is specifically the **Character** sub-tab of the Options window, hosted by the 4-tab `OptionPanel` container — see §8.9) |
 | Toolbar/hotbar | 1 | 25 (19 BTN7, 6 BTN2) | many 2-state buttons |
-| Trade/mail/search input window | 1 | 24 (21 BTN7, 1 LABEL, 2 TEXTBOX) | 2 textboxes |
+| **Friend window (FriendPanel)** | 1 | 24 (21 BTN7, 1 LABEL, 2 TEXTBOX) | binds uitex 2 (`inventwindow.dds`); 2 textboxes (corrected 2026-06-13: this 24-ctor, 2-textbox builder is the **FriendPanel** friend-list window, **not** a "trade/mail/search input window" — the two textboxes are the friend-name add/search fields) |
 | **Chat window** | 1 | 22 (15 BTN7, 7 CHECK) | keys `CHAT_WINDOW_POS_X/Y/SIZE/FONT_SIZE` |
 | **Tender/auction window** | 1 | 21 (2 BTN7, 19 LABEL) | atlas `tender_window.dds` |
 | Options sub-page | 1 | 21 (7 CHECK, 10 LABEL, 4 BTN7) | many checkboxes |
-| Musajung (NPC/duel) window | 1 | 15 | atlas `musajung.dds` |
+| **Skill window (SkillPanel)** | 1 | 15 | binds uitex 3 (`skill_window_1.dds`) + 2 + 1 + 11 + 14; skill-icon atlas `data/ui/skillicon/musajung.dds` loaded standalone (corrected 2026-06-13: this 15-ctor builder is the **SkillPanel** skill window — earlier labelled "Musajung (NPC/duel) window" because it loads `musajung.dds`; that DDS is the skill-icon atlas, not a duel-window chrome — see §8.8) |
 | **Password entry window** | 1 | 5 | atlas `password.dds`, `InventWindow.dds` |
 | Additional windows (unlabelled) | ~103 | varies | — |
 
-The **16 identified windows** are: chat, guild, quest, options (main + sub-page), web-link,
-password, emotion, tender, toolbar/hotbar, trade/mail input, large data window, dice/gamble,
-musajung, plus the skill and inventory windows (confirmed atlas from §3.5 of the prior asset
-manifest). The remaining ~101 builders are inventoried by ctor count and are DDS-attribution-gated
-on the VFS manifest (Open item 6).
+The **identified windows** are: chat, guild, quest, options (the 4-tab container + its sub-panels),
+web-link, password, emotion, tender, toolbar/hotbar, the friend window, the large data window, the
+character-info/stat window, plus the skill and inventory windows. The remaining ~101 builders are
+inventoried by ctor count and are DDS-attribution-gated on the VFS manifest (Open item 6).
+
+> **Corrected 2026-06-13.** An earlier version of this list named "dice/gamble", "musajung", and
+> "trade/mail input" as three distinct identified windows. Reading the builders directly (via vtable
+> slot 14 = `BuildScene` for each window class) reclassified all three: the 37-ctor `five.tga`
+> builder is the **character-info/stat window** (StatusPanel, §8.7), the 15-ctor `musajung.dds`
+> builder is the **skill window** (SkillPanel, §8.8), and the 24-ctor 2-textbox builder is the
+> **friend window** (FriendPanel). `five.tga` and `musajung.dds` are *icon* atlases loaded standalone
+> by those windows, not duel/gamble chrome.
 
 The **chat window** is the **only** widget whose initial size and position come from a data file
 rather than hardcoded literals: it reads `CHAT_WINDOW_POS_X`, `CHAT_WINDOW_POS_Y`,
@@ -643,6 +650,279 @@ their hardcoded default, but the player's dragged position is saved and restored
 - **Reset condition:** if a saved coordinate is −1, or if `SCREEN_WIDTH` / `SCREEEN_HEIGTH` (note:
   the legacy key name contains a typo — two E's) differ from the stored value, the panel resets to
   its hardcoded default position.
+
+### 8.6.1 In-game chrome atlas binding — `uitex.txt` integer-id key table (CODE-CONFIRMED)
+
+Unlike the login and character-select builders (§8.1–§8.2), which bind atlas sheets by a literal
+DDS path string, **every in-game window builder binds its chrome by an integer `uitex.txt`
+texture-id**. The build routine fetches a texture handle through the `uitex.txt` registry lookup
+keyed by that integer id; the source rectangles (`srcX, srcY, w, h`) it then issues are pixels
+within whichever DDS that id resolves to. So an in-game source rect is only fully resolved once the
+integer id is joined against the `uitex.txt` id→DDS manifest.
+
+This table is the **key** that un-gates the in-game window rects recovered in §8.7–§8.10. The
+authoritative id→DDS dimension/format table lives in `formats/ui_manifests.md` (the manifest
+author owns it); the subset below is the binding used by the windows specified in this section.
+Confidence is CODE-CONFIRMED for the integer-id binding (read directly from the builders);
+the DDS-name resolution is per the committed `ui_manifests.md` manifest.
+
+| `uitex.txt` id | Resolved DDS (`formats/ui_manifests.md`) | In-game windows that bind it (this spec) |
+|---|---|---|
+| 1 | `data/ui/mainwindow.dds` | Options Character sub-panel chrome + checkbox glyphs (§8.9); Skill-window close button (§8.8); Status-window apply button (§8.7) |
+| 2 | `data/ui/inventwindow.dds` | Status-window base panel + apply button (§8.7); inventory slot grid (per-instance, §8.10); inventory sort menu (§8.10); Skill-window apply button (§8.8) |
+| 3 | `data/ui/skill_window_1.dds` | Skill-window main backdrop + class/tab buttons (§8.8) |
+| 4 | `data/ui/tradekeepwindow.dds` | Status-window stat-row sprites + stat +/- buttons (§8.7) |
+| 9 | `data/ui/messagewindow.dds` | Options 4-tab container tab buttons + Options Apply/Close buttons (§8.9) |
+| 11 | `data/ui/skillpipe_02.dds` | Skill-window hotbar / skill-pipe assignment rows (§8.8) |
+| 14 | (live 3D-canvas render texture) | Skill-window `GUCanvas3D` preview rects (§8.8) |
+
+> To resolve any in-game source rect below: read its `(srcX, srcY, w, h)` and its `uitex` id from
+> §8.7–§8.10, then look the id up in this table for the DDS. The DDS *dimensions* (mip-0 surface
+> size, pixel format) are not duplicated here — see `formats/ui_manifests.md`.
+
+### 8.7 In-game Character-info / Stat window — `StatusPanel` builder (CODE-CONFIRMED)
+
+The character-info / stat window (the panel showing the player's primary attributes and the stat
++/- distribution controls). Its builder is the `StatusPanel` window class's `BuildScene` (vtable
+slot 14).
+
+> **Corrected 2026-06-13.** This window was previously catalogued in §8.5 as a "dice/gamble panel"
+> on the strength of its standalone `five.tga` load. That was a mis-identification: `five.tga` is the
+> **five-star rating glyph strip** drawn over the panel, not gamble chrome. The builder is the
+> character-info/stat window (`StatusPanel`).
+
+**Chrome atlas binding (corrected 2026-06-13):** the window chrome is composed from
+**`inventwindow.dds` (uitex 2)** (panel base) and **`tradekeepwindow.dds` (uitex 4)**
+(stat-row sprites and the +/- glyphs), **not** from `characwindow.dds`. The builder does not bind
+`characwindow.dds` at all. (An earlier asset hypothesis attributed this window's chrome to
+`characwindow.dds`; that file is not bound here — it is plausibly an unused/legacy asset or belongs
+to a different other-player info popup. See Open item 14.) The apply button alone is on
+`mainwindow.dds` (uitex 1). The `five.tga` star strip is loaded standalone, not via `uitex.txt`.
+
+**Decorative base sprites (no action):**
+
+| dst (x, y, w, h) | src (srcX, srcY) | Atlas (uitex → DDS) |
+|---|---|---|
+| 0, 36, 318, 50 | 0, 683 | 2 → `inventwindow.dds` |
+| 0, 85, 318, 625 | 634, 0 | 4 → `tradekeepwindow.dds` |
+| 114, 60, 93, 17 | 194, 704 | 4 → `tradekeepwindow.dds` |
+| 87, 460, 224, 17 | 400, 627 | 4 → `tradekeepwindow.dds` (divider strip) |
+
+**Stat-row value labels** are text-only (atlas id 0; the value text is filled at runtime from
+network character data). They sit on the 318-wide panel at fixed positions in two columns
+(left column x ≈ 91–94, right column x ≈ 247–249), most 12 × 12, stepping down the panel; the lower
+description rows are wider (e.g. 226 × 12 at y 528 / 555). One label carries a red colour override
+(`0xFFFF0000`). A looped block of four description rows starts at (74, 555) with a **+27** y-stride.
+Exact per-label positions are recoverable from the builder; they are not load-bearing for behaviour
+and are summarised rather than tabulated row-by-row here.
+
+**Stat +/- buttons and action ids (the load-bearing interactive table)** — all 7-state buttons;
+the +/- pairs are on `tradekeepwindow.dds` (uitex 4) at 9 × 9, the apply button is on
+`inventwindow.dds` (uitex 2), the close button is on `mainwindow.dds` (uitex 1):
+
+| dst (x, y, w, h) | NORMAL (srcX, srcY) | PRESSED (srcX, srcY) | Atlas (uitex → DDS) | Action id | Role |
+|---|---|---|---|---|---|
+| 286, 46, 29, 26 | 354, 596 | 354, 622 | 1 → `mainwindow.dds` | **312** | Close |
+| 150, 210, 9, 9 | 296, 702 | 287, 702 | 4 → `tradekeepwindow.dds` | **300** | increment (+) |
+| 301, 210, 9, 9 | 296, 702 | 287, 702 | 4 → `tradekeepwindow.dds` | **301** | increment (+) |
+| 150, 237, 9, 9 | 296, 702 | 287, 702 | 4 → `tradekeepwindow.dds` | **302** | increment (+) |
+| 301, 237, 9, 9 | 296, 702 | 287, 702 | 4 → `tradekeepwindow.dds` | **303** | increment (+) |
+| 150, 264, 9, 9 | 296, 702 | 287, 702 | 4 → `tradekeepwindow.dds` | **304** | increment (+) |
+| 150, 220, 9, 9 | 296, 711 | 287, 711 | 4 → `tradekeepwindow.dds` | **305** | decrement (−) |
+| 301, 220, 9, 9 | 296, 711 | 287, 711 | 4 → `tradekeepwindow.dds` | **306** | decrement (−) |
+| 150, 247, 9, 9 | 296, 711 | 287, 711 | 4 → `tradekeepwindow.dds` | **307** | decrement (−) |
+| 301, 247, 9, 9 | 296, 711 | 287, 711 | 4 → `tradekeepwindow.dds` | **308** | decrement (−) |
+| 150, 274, 9, 9 | 296, 711 | 287, 711 | 4 → `tradekeepwindow.dds` | **309** | decrement (−) |
+| 271, 262, 40, 35 | 370, 630 | 208, 669 | 4 → `tradekeepwindow.dds` | **311** | stat-icon / avatar button |
+| 259, 655, 59, 77 | 301, 947 | 360, 947 | 2 → `inventwindow.dds` | **310** | big **Apply** (confirm stat distribution) |
+
+The +/- design is one increment glyph row (atlas y 702) and one decrement glyph row (atlas y 711)
+on `tradekeepwindow.dds`, reused per stat line. The two action-id runs are therefore: **300–304**
+= the five increment buttons, **305–309** = the five decrement buttons, **310** = big Apply,
+**311** = the stat-icon/avatar button, **312** = Close. (Eleven stat +/- buttons total across the
+two runs, plus Apply and Close.)
+
+**Title:** the `StatusPanel` header is set from the shared empty-init scratch string and then filled
+at runtime from network character data (player name + class). There is **no fixed `msg.xdb` title
+id** for this window. The static stat *names* (as opposed to the title) come from a different draw
+path and use `msg.xdb` ids in the 60005–60022 range.
+
+### 8.8 In-game Skill window — `SkillPanel` builder (CODE-CONFIRMED)
+
+The skill window (class/tab selector, scrollable skill list, two live 3D previews, and a
+skill-pipe / hotbar assignment column). Its builder is the `SkillPanel` window class's `BuildScene`.
+
+> **Corrected 2026-06-13.** This window was previously catalogued in §8.5 as a "Musajung (NPC/duel)
+> window" because it loads `musajung.dds`. That DDS is the **skill-icon atlas**
+> (`data/ui/skillicon/musajung.dds`), loaded standalone; the window itself is the skill window
+> (`SkillPanel`), with its chrome on `skill_window_1.dds`.
+
+**Atlas binding:** main chrome on **`skill_window_1.dds` (uitex 3)**; the universal close button
+on **`mainwindow.dds` (uitex 1)**; the apply button on **`inventwindow.dds` (uitex 2)**; the
+skill-pipe rows on **`skillpipe_02.dds` (uitex 11)**; the two 3D previews on the live 3D-canvas
+texture (uitex 14). The skill-icon atlas `data/ui/skillicon/musajung.dds` is loaded standalone.
+
+**Chrome, close, apply, and title:**
+
+| Type | dst (x, y, w, h) | NORMAL (srcX, srcY) | PRESSED (srcX, srcY) | Atlas (uitex → DDS) | Action / role |
+|---|---|---|---|---|---|
+| base sprite | 0, 0, 964, 655 | 0, 0 | — | 3 → `skill_window_1.dds` | window backdrop (964 × 655) |
+| 7-state | 938, 48, 29, 26 | 354, 596 | 354, 622 | 1 → `mainwindow.dds` | **812** Close (same close glyph as §8.7) |
+| 7-state | 846, 60, 72, 22 | 292, 720 | 292, 742 | 3 → `skill_window_1.dds` | **814** Help / info |
+| 7-state | 865, 599, 50, 77 | 301, 947 | 360, 947 | 2 → `inventwindow.dds` | **811** Apply / confirm |
+| 7-state | 726, 616, 31, 16 | 0, 0 | 0, 0 | 0 (text-only button) | **813** |
+| base sprite | 587, 606, 251, 34 | 212, 662 | — | 3 → `skill_window_1.dds` | footer strip |
+| LABEL | 133, 618, 400, 20 | — | — | 0 (text-only) | **title caption = msg 3027** |
+
+**Nine class/tab buttons** (7-state, y = 71, h = 21, x-stride **62**, on `skill_window_1.dds`
+uitex 3), action ids **802–810**:
+
+| dst (x, y, w, h) | NORMAL (srcX, srcY) | PRESSED (srcX, srcY) | Action id |
+|---|---|---|---|
+| 3, 71, 62, 21 | 0, 770 | 0, 791 | 802 |
+| 65, 71, 62, 21 | 62, 770 | 62, 791 | 803 |
+| 127, 71, 62, 21 | 124, 770 | 124, 791 | 804 |
+| 189, 71, 63, 21 | 0, 959 | 63, 959 | 805 |
+| 251, 71, 62, 21 | 187, 833 | 187, 854 | 806 |
+| 313, 71, 62, 21 | 249, 833 | 249, 854 | 807 |
+| 375, 71, 62, 21 | 311, 833 | 311, 854 | 808 |
+| 437, 71, 62, 21 | 214, 959 | 214, 959 | 809 |
+| 499, 71, 62, 21 | 222, 980 | 222, 980 | 810 |
+
+**Other skill widgets:** nine looped sub-list containers (dst 0, 92, 964, 563 src 0, 0) host the
+scrollable skill-list rows; two `GUCanvas3D` preview rects (dst 0, 0, 220, 200, uitex 14) render
+the live skill-effect / character previews; a 50-step loop (dst x = 163, y stepping **+125** from
+50, 242 × 65, on `skillpipe_02.dds` uitex 11 src 0, 358) builds the skill-pipe / hotbar
+assignment rows.
+
+**Title:** the skill window's title label caption is **`msg.xdb` id 3027** (CODE-CONFIRMED id; the
+CP949 caption text itself is VFS-only and is not transcribed here). Adjacent records 3028 and 3029
+are the skill-window level headers ("current level" / "next level"); 3027 is the adjacent window
+title. The CP949 string must be supplied from a `msg.xdb` extract.
+
+### 8.9 In-game Options window — 4-tab container + Character sub-panel (CODE-CONFIRMED)
+
+The options window is a **tab-host container** (`OptionPanel`) presenting four tabs, each switching
+to a dedicated sub-panel. The Character sub-tab (`OptionPanel_Character`) is the one fully recovered
+here; the Sound and Graphic sub-panels (and a fourth tab) bind the same atlases (uitex 1 + 9) but
+their widget tables were not swept (Open item 15).
+
+> **Note (2026-06-13):** the §8.5 "Options/settings panel, 26 ctors" builder is specifically this
+> **Character sub-panel**, not the tab host; the tab host is a separate builder.
+
+**Tab container — four tab buttons** (7-state, x = 15, 186 × 40, y-stride **40**), on
+**`messagewindow.dds` (uitex 9)**. HOVER equals NORMAL (caption-only hover feedback):
+
+| dst (x, y, w, h) | NORMAL (srcX, srcY) | PRESSED (srcX, srcY) | Action id | Tab |
+|---|---|---|---|---|
+| 15, 30, 186, 40 | 833, 517 | 460, 916 | **0** | Character |
+| 15, 70, 186, 40 | 833, 557 | 460, 876 | **1** | Sound |
+| 15, 110, 186, 40 | 833, 597 | 460, 956 | **2** | Graphic |
+| 15, 150, 186, 40 | 833, 637 | 646, 516 | **3** | fourth tab |
+
+**Character sub-panel — Apply / Close** (two 7-state buttons on **`messagewindow.dds`, uitex 9**;
+added as the first two children, action indices 0 and 1):
+
+| dst (x, y, w, h) | NORMAL (srcX, srcY) | PRESSED (srcX, srcY) | child action index | Role |
+|---|---|---|---|---|
+| 60, 415, 186, 40 | 462, 757 | 646, 796 | **0** | Apply |
+| 60, 455, 186, 40 | 462, 837 | 646, 876 | **1** | Close |
+
+**Character sub-panel — 12 checkboxes** (24 × 24, right-aligned column at `panelWidth − 50`, base
+y = **50**, y-stride **30**), on **`mainwindow.dds` (uitex 1)** — UNCHECKED src (372, 730),
+CHECKED src (372, 754), action ids **2–13**:
+
+| dst (x, y, w, h) | Action id |
+|---|---|
+| (panelW − 50), 50, 24, 24 | **2** |
+| (panelW − 50), 80, 24, 24 | **3** |
+| (panelW − 50), 110, 24, 24 | **4** |
+| (panelW − 50), 140, 24, 24 | **5** |
+| (panelW − 50), 170, 24, 24 | **6** |
+| (panelW − 50), 200, 24, 24 | **7** |
+| (panelW − 50), 230, 24, 24 | **8** |
+| (panelW − 50), 260, 24, 24 | **9** |
+| (panelW − 50), 290, 24, 24 | **10** |
+| (panelW − 50), 320, 24, 24 | **11** |
+| (panelW − 50), 350, 24, 24 | **12** |
+| (panelW − 50), 380, 24, 24 | **13** |
+
+Each checkbox is a `GUCheckBox` (checked = the PRESSED frame), so UNCHECKED uses the NORMAL origin
+and CHECKED uses the PRESSED origin (per §1).
+
+**Character sub-panel — caption labels** (text-only, x = 40, 115 × 24, base y = **55**, y-stride
+**30**), captions fetched from `msg.xdb`:
+
+| dst (x, y, w, h) | Caption `msg.xdb` id |
+|---|---|
+| 40, 55, 115, 24 | **8009** |
+| 40, 85, 115, 24 | **8010** |
+| 40, 115, 115, 24 | **8011** |
+| 40, 145, 115, 24 | **8012** |
+| 40, 175, 115, 24 | **8013** |
+| 40, 205, 115, 24 | **8014** |
+| 40, 235, 115, 24 | **8018** |
+| 40, 265, 115, 24 | **8016** |
+| 40, 295, 115, 24 | **8017** |
+| 40, 325, 115, 24 | **8037** |
+| 40, 355, 115, 24 | **8039** |
+| 40, 385, 115, 24 | **8015** |
+
+(Two further caption labels at the same x and y-stride were register-fed and not reduced to literals
+here; their ids are within the same 8xxx options bank — Open item 15.) Each caption row also has a
+small text-only value/status glyph to its right (drawn from `mainwindow.dds`, uitex 1, src
+(140, 668)) indicating that option's current value. Two decorative header strips (no action) sit at
+(109, 20, 92, 11) src (405, 868) and (55, 33, 195, 8) src (186, 1014) on uitex 1.
+
+The full Character-tab option-label range is therefore **`msg.xdb` 8009–8039** (a subset of the
+broader 8001–8047 options-string bank).
+
+> **Atlas resolution (confirms a prior open question):** the options window has no dedicated
+> `option*.dds` sheet. Its tab buttons and Apply/Close are sub-regions of **`messagewindow.dds`
+> (uitex 9)**; its checkbox glyphs, value indicators, and header strips are sub-regions of
+> **`mainwindow.dds` (uitex 1)**.
+
+### 8.10 In-game Inventory window — slot grid + sort menu (CODE-CONFIRMED)
+
+The inventory ("bag") window is built by two cooperating builders: the slot-grid panel
+(`GatherSlotPanel`) and a small sort-menu panel (`InvenSortPanel`).
+
+**Slot-grid panel.** This builder binds **texture id 0** for every widget — the slot/icon atlas is
+assigned to the panel *per instance* after the build runs (the slot sprites read their frame origins
+from panel fields pre-seeded to (296, 0), (296, 64), (296, 128), (296, 192) — a 4-row icon table,
+plausibly resolving to `inventwindow.dds` at runtime; the exact runtime bind site was not traced —
+Open item 16). Recovered geometry:
+
+- Three slot-row buttons (65 × 64), x stepping **+84** from 32, y = 96, action ids **502, 503, 504**.
+- Full-window base backdrop sprite (0, 0, panelWidth, panelHeight).
+- Header / divider sprites at (21, 174, 253, 34) src (0, 372) and (33, 189, 239, 8) src (0, 407).
+- Close button at (panelW − 13, 2, 11, 12) src (410, 0) / (399, 0), action **509**; minimise button
+  at (panelW − 26, 2, 11, 12) src (388, 0), action **501**.
+- Sort/menu button at (114, 25, 66, 19) src (0, 416), action **508**.
+- A looped row of slot-category buttons (80 × 31, x stepping **+84**, y = 207, action ids 505+) with
+  paired 40 × 23 labels, and two footer labels (104 × 21) at y = 344.
+
+**Sort menu panel** (`InvenSortPanel`) binds **`inventwindow.dds` (uitex 2)** and uses caption
+`msg.xdb` ids **37101** (sort-inventory / "행낭 정리"), **37107**, and **37108** (sort options).
+
+**Title:** the inventory window builder makes **no `msg.xdb` title call**. Its window title is
+therefore **baked into the `inventwindow.dds` chrome art (the panel edge region)**, not fetched as a
+caption (CODE-CONFIRMED absence of a title lookup; the baked-into-art conclusion is PLAUSIBLE). The
+associated label strings are the sort-menu captions (**msg 37101 / 37107 / 37108**) and the hotkey
+toggle label (**msg 25017**, "show inventory window"); none of these is the window title itself.
+
+### 8.11 In-game window title `msg.xdb` ids — summary (CODE-CONFIRMED ids)
+
+| Window | Title source | Grade |
+|---|---|---|
+| Skill window (`SkillPanel`) | `msg.xdb` **3027** (title label at 133, 618, 400 × 20) | CODE-CONFIRMED (id); CP949 text VFS-only |
+| Inventory window (`GatherSlotPanel`) | **no `msg.xdb` title** — baked into `inventwindow.dds` edge art; sort labels msg 37101 / 37107 / 37108, toggle msg 25017 | CODE-CONFIRMED (absence) / PLAUSIBLE (baked-in-art) |
+| Character-info / Stat window (`StatusPanel`) | runtime player name (empty-init scratch buffer); static stat *names* msg 60005–60022 | CODE-CONFIRMED |
+| Options window (`OptionPanel`) | tabs are sprite-only (no title caption); Character-tab option labels msg 8009–8039 | CODE-CONFIRMED |
+
+> All `msg.xdb` ids above are CODE-CONFIRMED (read from the builders); the in-game window protocol
+> behaviour is static and **CAPTURE-UNVERIFIED** (no Wireshark oracle). The CP949 caption *text* for
+> each id is VFS-only and must be supplied from a `msg.xdb` extract (`formats/misc_data.md §6`).
 
 ---
 
@@ -840,10 +1120,12 @@ widget tree does not exist until the packet is received.
    load). Record content is SAMPLE-UNVERIFIED pending VFS probe repair. Full spec at
    `Docs/RE/formats/misc_data.md §6`.
 
-6. **In-game window DDS attribution (the big open debt).** 115 of 117 builders bind atlas by
-   integer `uitex.txt` texture-id, not DDS string. Resolving each in-game window's per-widget
-   atlas DDS name requires the VFS `data/ui/uitex.txt` id→DDS manifest. The destination rects and
-   4-frame src origins are recoverable from the binary now; only the DDS name resolution is gated.
+6. **In-game window DDS attribution (the big open debt — now partially resolved).** Almost all
+   in-game builders bind atlas by integer `uitex.txt` texture-id, not DDS string. The
+   character-info/stat, skill, options, and inventory windows are **now un-gated** via the
+   `uitex.txt` id→DDS key table in §8.6.1 (joined against `formats/ui_manifests.md`). The remaining
+   ~101 unlabelled builders still need their per-widget atlas DDS names resolved through that
+   manifest; their destination rects and 4-frame src origins are recoverable from the binary now.
    See `formats/ui_manifests.md`.
 
 7. **Exact `Font_Create` slot record stride.** The per-slot descriptor stores the font pointer,
@@ -870,6 +1152,22 @@ widget tree does not exist until the packet is received.
 13. **DISABLED frame runtime write.** No ctor passes a distinct disabled sprite origin (DISABLED
     always equals NORMAL). If any window code writes a distinct origin to +0xE0/+0xE4 at runtime
     (post-ctor), the sweep would not see it. Not observed in login/select but unverified in-game.
+
+14. **`characwindow.dds` provenance.** The in-game character-info/stat window (§8.7) is **not** built
+    on `characwindow.dds` — its chrome is `inventwindow.dds` (uitex 2) + `tradekeepwindow.dds`
+    (uitex 4). `characwindow.dds` is not bound by that builder; it is plausibly an unused/legacy
+    asset, or belongs to a different other-player info popup (a distinct builder not swept here).
+
+15. **Options Sound / Graphic / fourth sub-panels.** Only the Options **Character** sub-panel (§8.9)
+    was fully recovered. The Sound and Graphic sub-panels (and the fourth tab's sub-panel) bind the
+    same atlases (uitex 1 + 9) but their widget tables were not dumped; their option-label `msg.xdb`
+    ids are in the same 8xxx bank. Two of the Character-tab caption labels were register-fed and not
+    reduced to literals.
+
+16. **Inventory slot-grid runtime atlas.** The inventory slot grid (§8.10) binds texture id 0 at
+    build time; the slot/icon atlas (and its 4-row frame table seeded to origins (296, 0) / (296, 64)
+    / (296, 128) / (296, 192)) is assigned to the panel per-instance after build. The exact runtime
+    bind site and DDS (PLAUSIBLE `inventwindow.dds`) were not traced.
 
 ---
 
@@ -947,11 +1245,21 @@ hardcoded build coordinates.
 
 ### 13.9 In-game HUD (atlas-gated contract)
 
-All 117 in-game window builders bind atlas by `uitex.txt` integer id. The Godot presentation
-engineer **must** resolve each integer id to a DDS filename via the `uitex.txt` manifest before
-implementing per-widget atlas regions. The destination rects and 4-frame src origins for all in-game
-windows are recoverable from the binary once DDS names are supplied. This is the §12 open item 6
-dependency — the implementation of in-game HUD sub-windows is gated on `formats/ui_manifests.md`.
+All in-game window builders bind atlas by `uitex.txt` integer id. The Godot presentation engineer
+**must** resolve each integer id to a DDS filename via the `uitex.txt` manifest before implementing
+per-widget atlas regions. The destination rects and 4-frame src origins for all in-game windows are
+recoverable from the binary once DDS names are supplied. This is the §12 open item 6 dependency —
+the implementation of the remaining (unlabelled) in-game HUD sub-windows is gated on
+`formats/ui_manifests.md`.
+
+For the **character-info/stat, skill, options, and inventory windows**, the binding is already
+resolved: use the `uitex.txt` id→DDS key table in **§8.6.1** to turn each builder's integer id into
+a DDS path, then build an `AtlasTexture` per source rect (`region = Rect2(srcX, srcY, w, h)` on that
+DDS). For each 7-state button keep NORMAL / HOVER / PRESSED regions (§8.7–§8.9); for each
+`GUCheckBox`, UNCHECKED = NORMAL region and CHECKED = PRESSED region. Window titles come from
+`msg.xdb` (skill window = id 3027; the inventory and character-info/stat windows have no title id —
+see §8.11), so the Godot side should fetch those captions through `Assets.Parsers` rather than
+baking title text, except the inventory title which is part of the `inventwindow.dds` chrome art.
 
 ---
 

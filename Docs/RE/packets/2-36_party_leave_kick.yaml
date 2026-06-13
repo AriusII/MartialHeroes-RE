@@ -1,0 +1,44 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgPartyLeaveKick
+opcode: 0x20024           # major 2 (GameAction), minor 36 -> (2 << 16) | 36
+direction: C2S
+size: 8                  # fixed 8-byte payload built by the shared social-op sender
+spec: packets/2-36_party_leave_kick.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client party leave (self) or kick (expel a member) request. Carries a 1-byte mode selector and a 4-byte actor id. The server replies with 4/36 PartyMemberRemoveResult.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8.
+fields:
+  - { name: Mode, type: u8 }          # 0x00  0 = leave party (self), 1 = kick / expel a member
+  - { name: Pad0, type: "bytes[3]" }    # 0x01  filler to the next dword; written from uninitialised stack, treat as zero
+  - { name: Id,   type: u32 }         # 0x04  actor id (own id for self-leave, target member id for a kick)
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout, CAPTURE-UNVERIFIED meaning.
+  Same shared 8-byte "social op" shape as 2/23, 2/30, 2/35 and 2/37: a 1-byte mode at offset 0,
+  three filler bytes (uninitialised stack, write zero / ignore on read), then a 4-byte value at
+  offset 4.
+
+    0x00 (1B) Mode : 0 = leave the party yourself; 1 = kick / expel another member.
+    0x04 (4B) Id   : the actor id the op applies to (le u32). For mode 0 this is the local player's
+                     own actor id; for mode 1 it is the target member's actor id.
+
+  CONTEXT (client-side gates, not wire fields): each mode resolves its actor id and runs a
+  self/target guard before sending (the wrong-target case shows a notice and does NOT send). When a
+  4/36 PartyMemberRemoveResult later leaves one or fewer members in the party, the client
+  auto-disbands by re-emitting this same message with mode 0 (a client-driven cleanup, still just an
+  8-byte mode-0 frame on the wire).
+
+  RELATIONSHIP: shares the 8-byte shape with the rest of the party/trade/guild C2S ops. Server reply
+  is 4/36 SmsgPartyMemberRemoveResult (packets/4-36_party_member_remove_result.yaml); roster changes
+  also surface via 5/21 SmsgPartyRosterEvent (packets/5-21_party_event.yaml).
+
+  UNKNOWNS to resolve with a capture:
+    - confirm mode 0 vs mode 1 against an observed self-leave and an observed kick;
+    - whether any further modes exist (none seen on a send path).
+
+  UNBLOCKS: Client.Application party leave / kick use-case.

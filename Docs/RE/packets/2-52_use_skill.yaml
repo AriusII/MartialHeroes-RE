@@ -15,8 +15,8 @@ summary: Client skill-activate / battle-action request. A 24-byte header (skill 
 # two trailing target arrays are variable and described in notes (the engineer hand-codes the loop
 # driven by CountA / CountB).
 fields:
-  - { name: SkillSlot, type: u8 }          # 0x00  skill slot index; 0xFF = basic attack
-  - { name: Pad0,      type: "bytes[3]" }    # 0x01  padding / unused (zeroed in the short form)
+  - { name: SkillSlot, type: u8 }          # 0x00  skill slot index; 0xFF = basic melee attack
+  - { name: Pad0,      type: "bytes[3]" }    # 0x01  selector/pad region (0x01 carries a basic/alias selector; rest zeroed in the short form)
   - { name: AimMode,   type: u32 }         # 0x04  aim mode selector
   - { name: AimScale,  type: f32 }         # 0x08  aim scale / radius factor
   - { name: AimX,      type: f32 }         # 0x0c  aim point X (world)
@@ -29,9 +29,23 @@ notes: |
   recovered this pass (it previously was not analyzed -- the old "do not implement" caveat is now
   replaced by the layout below).
 
+  BASIC MELEE == THIS OPCODE (no separate attack message). CODE-CONFIRMED: a plain melee swing is
+  NOT its own opcode -- it is just this 2/52 with SkillSlot == 0xFF. The client resolves a skill id to
+  a hotbar slot index by scanning a 240-entry skill hotbar; a skill that is not on the hotbar (the
+  default punch/weapon swing) yields slot 0xFF, which is the sentinel the basic-attack builders write.
+  Both melee and explicit skills travel the identical send path; the ONLY difference is the SkillSlot
+  byte (a real hotbar index 0..239 for a skill, or 0xFF for the basic attack). For the basic-attack
+  form the builders also set AimMode to 1.0 and send with both counts 0, taking the target from the
+  client's current-target global rather than the target arrays. Therefore an engine implementation
+  needs no distinct "attack" packet: emit 2/52 with SkillSlot=0xFF for a melee swing.
+
   Header = 24 bytes (0x00..0x17), matching the fixed block the sender writes before any arrays.
-    0x00 (1B) SkillSlot : which skill the client is activating; 0xFF marks the basic-attack form.
-    0x04 (4B) AimMode   : aim-mode selector (u32).
+    0x00 (1B) SkillSlot : which skill the client is activating; 0xFF marks the basic-melee form.
+    0x01 (1B) selector  : a basic/alias selector byte (the basic-attack builders write 0 or 1 here);
+                          the remaining bytes of the 0x01..0x03 region are zeroed. Modeled inside the
+                          Pad0 buffer above to keep the header an even 24 bytes -- split it into an
+                          explicit u8 selector + 2-byte pad if a capture warrants it.
+    0x04 (4B) AimMode   : aim-mode selector (u32; set to 1.0 by the basic-attack builders).
     0x08 (4B) AimScale  : aim scale / radius factor (le f32).
     0x0c (4B) AimX / 0x10 (4B) AimZ : the aim point in world XZ.
     0x14 (2B) CountA / 0x16 (2B) CountB : entry counts for the two target arrays that follow.
@@ -44,7 +58,7 @@ notes: |
 
   Total wire payload = 24 + (CountA + CountB) * 4. There are two observed builder forms:
     - full form: header + the two target arrays (single- or multi-target / AoE casts);
-    - short form: header only with both counts 0 (basic attack / fixed-form action).
+    - short form: header only with both counts 0 (basic melee attack / fixed-form action).
 
   Server reply: S2C 5/52 SmsgActorSkillAction (packets/5-52_actor_skill_action.yaml).
 
@@ -52,6 +66,7 @@ notes: |
     - the precise meaning of array A vs array B (primary targets vs splash targets is the leading
       hypothesis);
     - confirm the 4-byte element stride against the u16 counts;
+    - whether the 0x01 byte is a stable selector (basic vs alias) or part of the pad;
     - whether AimMode is an enum worth lifting into Shared.Kernel.
 
-  UNBLOCKS: Client.Application UseSkill use-case (ack/echo 5/52).
+  UNBLOCKS: Client.Application UseSkill use-case (ack/echo 5/52) and the basic-melee attack path.

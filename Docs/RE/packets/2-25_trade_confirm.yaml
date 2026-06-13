@@ -1,0 +1,56 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgTradeConfirm
+opcode: 0x20019           # major 2 (GameAction), minor 25 -> (2 << 16) | 25
+direction: C2S
+size: var                # 2-byte fixed header + N x 4-byte manifest records (N <= 40)
+spec: packets/2-25_trade_confirm.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client confirm / cancel a trade and (on confirm) re-transmit its own-side offer as a manifest. A 2-byte header (mode + flag) is followed by one 4-byte record per occupied own-side trade slot, up to 40. This is NOT a flat 2-byte packet.
+
+# VARIABLE-LENGTH packet. Fixed 2-byte header below; the manifest trailer is described in notes
+# (the engineer hand-codes the loop driven by the number of occupied own-side slots).
+fields:
+  - { name: Mode, type: u8 }          # 0x00  1 = confirm / agree (lock), 0 = cancel / withdraw
+  - { name: Flag, type: u8 }          # 0x01  sub / confirm-state flag (see notes)
+
+notes: |
+  Static inference only; no capture available. VARIABLE-LENGTH packet. The structure (a 2-byte
+  header followed by a per-slot 4-byte manifest) is CODE-CONFIRMED; the three manifest record bytes
+  are PLAUSIBLE in meaning.
+
+  HEADER = 2 bytes (0x00..0x01):
+    0x00 (1B) Mode : 1 = confirm / agree (lock in the current offer); 0 = cancel / withdraw (also
+                     sent by the trade window's close / cancel / escape paths).
+    0x01 (1B) Flag : a sub/confirm-state flag carried from the trade window's local confirm state
+                     (observed values 0, 1, and -1 i.e. 0xFF). Exact meaning is PLAUSIBLE.
+
+  TRAILER (variable, present on confirm): immediately after the 2-byte header the client walks its
+  own-side trade slot table (up to 40 slots) and, for EACH OCCUPIED slot, appends one 4-byte record:
+    record = { SlotIndex:u8, A:u8, B:u8, C:u8 }
+  so the trailer length = (number of occupied own-side slots) * 4 bytes, with at most 40 records.
+  Empty slots are skipped, so the record count is the count of occupied own-side slots, not a fixed
+  40. There is NO explicit count field on the wire -- the receiver must consume records until the
+  frame's declared size is exhausted (total payload = 2 + occupied_slots * 4).
+
+  The three record bytes A/B/C are the trade slot's own record fields; their meaning is PLAUSIBLE
+  and most likely {category, item-sub, count}. This is the "commit-with-manifest" packet: at confirm
+  time the client re-transmits the full own-side offered-item manifest so the server can cross-check
+  what the client believes it is offering.
+
+  RELATIONSHIP: final step of the in-window trade flow (2/23 open, 2/24 slot updates, 2/25 confirm
+  /cancel). The inbound finalize is the 4/25 SmsgUserTradeFullResponse finalize phase. Whether the
+  server treats this manifest as authoritative or merely advisory is unknown (see below).
+
+  UNKNOWNS to resolve with a capture of a multi-item trade confirm:
+    - the exact meaning of the A/B/C record bytes (category / item-sub / count is the hypothesis);
+    - whether the manifest is authoritative or advisory relative to the prior 2/24 updates;
+    - confirm the Flag value set (0 / 1 / 0xFF) and its meaning.
+
+  IMPLEMENTATION NOTE: model the fixed 2-byte header as a struct and decode the trailer as a loop of
+  4-byte records sized by the remaining frame length; do not assume a fixed 40-record array.
+
+  UNBLOCKS: Client.Application trade confirm / cancel use-case.

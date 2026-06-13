@@ -1,0 +1,52 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgTrackedWorldObjectRemove   # canonical name in names.yaml / opcodes.md (alias: SmsgGroundItemRemove)
+opcode: 0x5000f          # major 5 (Push), minor 15 -> (5 << 16) | 15
+direction: S2C
+size: 16                 # the handler reads a fixed 16-byte body (read length 0x10) before dispatch
+spec: packets/5-15_ground_item_remove.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server push that despawns a tracked ground item (someone picked it up). The client removes the world item from its tracking registry and terrain grid cell, and optionally shows an "X picked up Y" notice for party / relation context.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the named fields plus the trailing pad sum to size: 16.
+fields:
+  - { name: Sort,       type: u32 }          # 0x00  picker actor sort key
+  - { name: PickerId,   type: u32 }          # 0x04  the actor that picked the item up
+  - { name: TrackedId,  type: u32 }          # 0x08  the ground-item key to remove
+  - { name: NotifyFlag, type: u8 }           # 0x0c  1 => show an "X picked up Y" notice
+  - { name: Pad0,       type: "bytes[3]" }   # 0x0d  alignment to the 16-byte body
+
+notes: |
+  Static inference only; no capture available. Protocol facts are read directly from the client
+  (CODE-CONFIRMED for the 16-byte body read length and the field offsets) but no live capture
+  confirms the bytes on the wire (CAPTURE-UNVERIFIED).
+
+  The handler reads a fixed 16-byte body. Frame = 8-byte header + 16 = 24 bytes on the wire.
+
+    0x00 (4B) Sort       : the picker actor's sort key (paired with PickerId to identify the picker).
+    0x04 (4B) PickerId   : the actor that picked the item up.
+    0x08 (4B) TrackedId  : the ground-item entity key to remove. This matches the key the item was
+                             spawned with (Param2 in the 5/14 spawn, or the Key field of the 4/4
+                             tag-4 record). The client looks the item up in its ground-item registry
+                             by this key, then removes it from its terrain grid cell and frees the
+                             registry entry.
+    0x0c (1B) NotifyFlag : when set, the client shows a green "X picked up Y" notice -- but only when
+                             the picker is another player who shares the local player's relation /
+                             party context, and the item is not a coin (the coin template id 217000501
+                             is excluded from the notice).
+    0x0d (3B) Pad0       : three alignment bytes filling out the 16-byte body; treat as don't-care.
+
+  DESPAWN AUTHORITY: this push is the explicit despawn. It is distinct from the area entity stream
+  (4/4), which is additive / prune-by-rewalk; the whole ground-item registry is also flushed on map
+  change. For the local player's own pickup, the 4/15 pickup-ack "else" success path also runs a
+  local despawn -- so whether a 5/15 always follows the picker's own 4/15, or 5/15 is only for
+  observers, is capture-unverified.
+
+  UNKNOWNS to resolve with a capture of an other-player pickup and a coin pickup:
+    - confirm the three pad bytes after NotifyFlag carry no data;
+    - confirm whether the picker receives a 5/15 for their own pickup or only observers do.
+
+  UNBLOCKS: Client.Application ground-item despawn handler and the Godot ground-item actor teardown.

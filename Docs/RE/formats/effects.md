@@ -556,6 +556,134 @@ This file feeds the separate GPU particle sub-system (`ParticleEffectManager`). 
 
 ---
 
+# Section F: Effect-Link Tables — Gameplay ID → Effect ID
+
+> **Confidence: SAMPLE-VERIFIED** for record structure, delimiter, encoding, and column positions
+> of all three tables; **PLAUSIBLE** for individual column semantics. These are CP949 tab-delimited
+> text tables (not binary) that wire gameplay identifiers (item slots, mob types, mugong/skill
+> classes) to effect ids consumed by the effect registry (Section C.2). All three are confirmed
+> present in the VFS and were measured by reading the real archive (added 2026-06-13).
+
+## F.1 Identification and VFS Locations
+
+All three tables, plus the related sword-light tables, live under `data/effect/` (NOT
+`data/script/`, which the Cross-References list previously implied for some of them — corrected
+2026-06-13; only `effectscale.xdb` is under `data/script/`).
+
+| File | VFS path | Size | Records | Role |
+|------|----------|-----:|--------:|------|
+| `itemjointeff.txt` | `data/effect/itemjointeff.txt` | 550,065 B | 18,580 | Item slot → xeff effect id (`390xxxxxx`) |
+| `mobjointeff.txt` | `data/effect/mobjointeff.txt` | 9,306 B | 414 | Mob type + slot → effect id (`360xxxxxx`) |
+| `totalmugong.txt` | `data/effect/totalmugong.txt` | 11,692 B | 484 | Mugong (skill) class + slot → two effect ids (`12xxxxxxx`, `82xxxxxxx`) |
+| `itemswordlight.txt` | `data/effect/itemswordlight.txt` | 145,350 B | 3,614 | Item id → sword-light blade texture/length |
+| `mobswordlight.txt` | `data/effect/mobswordlight.txt` | 1,585 B | 39 | Mob type → sword-light blade texture/length |
+
+**Common encoding (SAMPLE-VERIFIED):** CP949 text, TAB-delimited columns, CRLF line endings. The
+first line of each file is a single integer giving the data-row count; data rows follow. (Sample
+bytes were pure ASCII, but the files are CP949 because Korean names may appear in other rows.)
+
+## F.2 `itemjointeff.txt` — Item Slot → Effect ID
+
+**Confidence: SAMPLE-VERIFIED** structure; **PLAUSIBLE** semantics. Effect-id presence in the VFS
+is **SAMPLE-VERIFIED** — col1 values resolve directly to `.xeff` filenames.
+
+- **Line 1:** record count. Observed: 18,580.
+- **Data rows:** six tab-separated columns.
+
+| Column | Type | Observed values | Meaning (proposed) |
+|--------|------|-----------------|--------------------|
+| col0 | u32 | 1, 2, 3, … 200, 201, … 301 | Item slot / equip-position id |
+| col1 | u32 | 390000011, 390000021, … (range `390000001`–`390000305`) | Effect id in the xeff registry |
+| col2 | u32 | 0 | Flag (constant 0 in sample) |
+| col3 | u32 | 0 or 1 | Flag (PLAUSIBLE: two-handed / off-hand applicability) |
+| col4 | u32 | 1 | Flag (constant 1 in sample) |
+| col5 | u32 | 2 | Field (constant 2 in sample) |
+
+**Key cross-link (SAMPLE-VERIFIED VFS presence):** col1 ids in the `390xxxxxx` range match numeric
+`.xeff` filenames directly, e.g. `390000011` → `data/effect/xeff/390000011.xeff` (file presence
+CONFIRMED in the VFS). This range is the wearable/item-equip effect group (25 numeric files,
+Section A.3). For this range the filename-equals-`effect_id` convention (Section A.2) holds, so the
+registry can resolve these ids either by filename or by the `.xeff` header's `effect_id` field.
+
+## F.3 `mobjointeff.txt` — Mob Type + Slot → Effect ID
+
+**Confidence: SAMPLE-VERIFIED** structure; **PLAUSIBLE** semantics. **The col2 effect ids are
+HEADER `effect_id` values, NOT filenames** (SAMPLE-VERIFIED: no matching numeric `.xeff` file
+exists in the VFS).
+
+- **Line 1:** record count. Observed: 414.
+- **Data rows:** six tab-separated columns.
+
+| Column | Type | Observed values | Meaning (proposed) |
+|--------|------|-----------------|--------------------|
+| col0 | u32 | 1 | Mob-type index (all 1 in sample) |
+| col1 | u32 | 1, 2, 3, … | Mob slot / skill slot within the type |
+| col2 | u32 | 0, 360000605, 360001405, 360001705, 360001805, 360002005, 360002105, 360002205, 360002305 | Effect id, primary (0 = none) |
+| col3 | u32 | 0, 4, 6, 9, 19 | Secondary index or bone-attachment slot (PLAUSIBLE) |
+| col4 | u32 | 1 | Flag (constant 1 in sample) |
+| col5 | u32 | 1 | Flag (constant 1 in sample) |
+
+**Resolution note (SAMPLE-VERIFIED):** col2 ids lie in the `360xxxxxx` mob-effect range, but the
+VFS contains **no** file named e.g. `data/effect/xeff/360000605.xeff` (checked). These ids must
+therefore be resolved by the **`effect_id` header field** inside `.xeff` files, not by filename —
+i.e. through the effect registry's id keying (Section C.2), not a path lookup.
+
+## F.4 `totalmugong.txt` — Mugong (Skill) Class + Slot → Two Effect IDs
+
+**Confidence: SAMPLE-VERIFIED** structure; **PLAUSIBLE** semantics. **Neither effect-id column
+matches any `.xeff` filename** (SAMPLE-VERIFIED) — both must be resolved by the `effect_id` header
+field through the registry.
+
+- **Line 1:** record count. Observed: 484.
+- **Data rows:** four tab-separated columns.
+
+| Column | Type | Observed values | Meaning (proposed) |
+|--------|------|-----------------|--------------------|
+| col0 | u32 | 0, 1, 2, 3, … | Mugong (skill) class index |
+| col1 | u32 | 1, 2, 3, 4, … | Skill slot within the class |
+| col2 | u32 | 0, 121100040, 121113040, … (`12xxxxxxx` range) | Primary effect id (0 = no effect) |
+| col3 | u32 | 0, 821100003, 821400003, … (`82xxxxxxx` range) | Secondary effect id (0 = no effect) |
+
+**Resolution note (SAMPLE-VERIFIED):** the col2 (`12xxxxxxx`) and col3 (`82xxxxxxx`) ids do **not**
+correspond to any numeric `.xeff` filename in the VFS. The registry must resolve them by the
+`effect_id` field stored in the `.xeff` header (Section C.2), not by constructing a path from the
+numeric id. This is the strongest VFS-confirmed case that the effect registry is keyed on the
+header `effect_id`, independent of filename, and it generalises the resolution rule used by
+`mobjointeff.txt` (F.3).
+
+This table is also a runtime data source for a separate timing-precise martial-arts SFX overlay
+(loaded into an effect-manager map keyed by an animation-frame slot); that audio behaviour is out
+of scope for this format spec — see `specs/effects.md`. Here it is documented purely as an
+effect-id link table.
+
+## F.5 Companion Sword-Light Tables (overview)
+
+`itemswordlight.txt` (3,614 rows) and `mobswordlight.txt` (39 rows) share the same CP949 / TAB /
+CRLF convention and a leading record-count line. They map an item id (col0, `items.csv` id domain)
+or a mob type (col0) to a **blade-trail texture name** (final string column, resolving to
+`data/effect/texture/<name>.tga`, the same texture path as `.xeff` name-table entries) plus a
+floating-point blade length/offset column and several still-unresolved flag columns. These feed the
+sword-light renderer, which is a distinct sub-system; their full column semantics are PLAUSIBLE
+only and the renderer itself is specified in `specs/effects.md`. They are listed here for
+completeness as members of the effect-link family.
+
+## F.6 Effect-ID Resolution Rule (summary)
+
+| Source table | Effect-id range | Matches `.xeff` filename? | Registry resolves by |
+|--------------|-----------------|---------------------------|----------------------|
+| `itemjointeff.txt` | `390xxxxxx` | **Yes** (SAMPLE-VERIFIED) | filename or header `effect_id` (equivalent for this range) |
+| `mobjointeff.txt` | `360xxxxxx` | **No** (SAMPLE-VERIFIED) | header `effect_id` field only |
+| `totalmugong.txt` | `12xxxxxxx`, `82xxxxxxx` | **No** (SAMPLE-VERIFIED) | header `effect_id` field only |
+
+The practical consequence for an implementer: the effect registry **must** index `.xeff`
+descriptors by their header `effect_id` (Section A.2) and resolve link-table ids against that
+index. A filename-only resolver would succeed for `itemjointeff.txt` but silently fail for
+`mobjointeff.txt` and `totalmugong.txt`. The reverse mismatch — duplicate `effect_id` values shared
+by multiple files (Section A.2; 47 such ids) — interacts with this rule and is tracked in Open
+Questions.
+
+---
+
 ## Terrain FX Layer Formats — Cross-Format Deltas
 
 The per-cell terrain layer mesh files (`.fx1` through `.fx7`) are documented in full in
@@ -565,19 +693,128 @@ byte layouts; do NOT duplicate its tables here.
 This section records only **new sample observations** from the June 2026 black-box pass that
 extend or correct the `terrain_layers.md` record:
 
-### FX2 Header Field[3]: CONFLICT FLAGGED
+### FX2 Header Field[3]: CONFLICT RESOLVED (corrected 2026-06-13)
 
 `terrain_layers.md §1.6` states that the `render_state` field at header offset `0x0C` has value
 `15 (0x0F)` for FX2, identical to FX1. The June 2026 black-box pass observed **value 50** in
-one FX2 sample (`d001x9990z10000.fx2`). These two values contradict each other.
+one FX2 sample (`d001x9990z10000.fx2`). These two values contradicted each other.
 
-Resolution status: **UNRESOLVED**. Possible explanations:
-- The field is variable (encodes a per-file texture-slot or render-mode index) and was
-  coincidentally 15 in the IDA-analyzed sample.
-- The IDA sample and the black-box sample come from different map areas with different rendering setups.
-- The field meaning is different from `render_state` (it may be a texture ID, not a constant).
+**(corrected 2026-06-13: the conflict is now RESOLVED — the field is per-group and VARIABLE, not
+constant.)** Two independent lines of evidence agree:
 
-Engineering guidance: do NOT treat this field as a constant 15. Read and expose it; do not branch on its value until the conflict is resolved.
+1. **Structural (CODE-CONFIRMED).** A trace of the FX1 and FX2 binary loaders shows the byte at
+   file offset `0x0C` is NOT a file-level header field at all. It is the third u32 of a **20-byte
+   per-group header** (see the new "FX1/FX2 corrected binary layout" subsection below). The file
+   begins with a 4-byte `group_count`, after which each group carries its own 20-byte header; the
+   field formerly read as the constant `render_state` is the per-group field at group-relative
+   offset `+0x08`. Its value is not mandated to be 15.
+2. **Corpus census (SAMPLE-VERIFIED, 595 FX2 files).** The field takes **seven** distinct values
+   across the full FX2 corpus. The modal value is 50 (0x32) at 80.2% of files; value 15 (0x0F)
+   appears in only 35 files (5.9%). Full distribution:
+
+   | Value | Hex | FX2 file count | Fraction |
+   |------:|-----|---------------:|---------:|
+   | 0  | 0x0000 | 5   | 0.8% |
+   | 10 | 0x000A | 17  | 2.9% |
+   | 15 | 0x000F | 35  | 5.9% |
+   | 20 | 0x0014 | 17  | 2.9% |
+   | 30 | 0x001E | 22  | 3.7% |
+   | 40 | 0x0028 | 22  | 3.7% |
+   | 50 | 0x0032 | 477 | 80.2% |
+
+Both the IDA-traced value (15) and the June 2026 single-sample value (50) are valid observations
+of the same variable field in different cells. The earlier committed claim — that FX2 field[3]
+equals `15`, "same as FX1" — is **WRONG** and is corrected here.
+
+**The same variability holds for every other FX layer measured** (SAMPLE-VERIFIED):
+
+| Extension | Files measured | Distinct field[3] values | Modal value (share) | Committed-spec value | Spec value's share |
+|-----------|---------------:|-------------------------:|---------------------|---------------------:|-------------------:|
+| FX1 | 226 | 13 | 0 (22.6%) | 15 | 35 files / 15.5% |
+| FX2 | 595 | 7  | 50 (80.2%) | 15 | 35 files / 5.9% |
+| FX3 | 160 | 7  | 400 (36%) | 5 | 24 files / 15% |
+| FX5 | 89  | 6  | 300 (~63%) | — | — |
+| FX6 | 6   | 1  | 0 (100%) | — | — |
+| FX7 | 2   | 1  | 0x42F73439 = f32 123.602 | — | — (distinct header; see below) |
+
+FX1 distinct values span `{0, 2, 15, 20, 30, 60, 70, 100, 110, 118, 120, 300, 400}`; FX5 values
+are larger, `{100, 118, 120, 300, 400, 450}`. In every case the value the prior spec cited as a
+constant is a **minority** observation, not the mode.
+
+**Plausible interpretation (PLAUSIBLE — not confirmed by a render-path trace):** the field is a
+**LOD / render-distance threshold in world units**, not a render-state enum or a format-version
+constant. Supporting evidence: the values are sparse round integers; larger FX types (FX5,
+multi-section large overlays) carry systematically larger values (100–450) than small FX types
+(FX2, small quad overlays, mode 50); FX6 is uniformly 0 (possibly "no LOD / always render"). A
+render-state-index reading is also consistent with the small discrete value set. The field is
+neither a binary flag (too many values), a format-version constant (it varies within a single
+extension), nor padding (the non-zero values are clearly intentional). For FX7 the bytes at
+`0x0C` decode as an f32 (123.602), not a uint, consistent with FX7's separate header layout.
+
+Engineering guidance: do NOT treat this field as a constant 15. Read and expose it per group; do
+not branch on its value until the interpretation is confirmed by a render-path trace.
+
+### FX1/FX2 Corrected Binary Layout (corrected 2026-06-13)
+
+> **CODE-CONFIRMED** layout and size formulae; CAPTURE-UNVERIFIED is not applicable (this is a
+> file format, not a wire protocol). Field-A/B/C semantics remain UNRESOLVED.
+
+The prior FX1/FX2 description (in `terrain_layers.md §1.6`) treated the file as opening with a
+**24-byte constant header** of the form
+`[type_tag=1][unknown_1=1][unknown_2=0][render_state=15][mesh_count][index_count]`. A trace of the
+two binary loaders (the FX1 layer loader and the FX2 layer loader) shows this was a structural
+**misidentification (corrected 2026-06-13)**. The real layout is:
+
+- The file begins with a **4-byte `group_count`** at file offset `0x00` (the outer loop count).
+- Each of `group_count` groups then carries a **20-byte per-group header**, immediately followed
+  by that group's vertex array and index array.
+- There is no constant 24-byte file header and no single file-level `render_state` field.
+
+**Per-group header (20 bytes):**
+
+| Group-relative offset | File offset (group 0) | Size | Type | Field | Prior (WRONG) label | Notes |
+|----------------------:|----------------------:|-----:|------|-------|---------------------|-------|
+| +0x00 | 0x04 | 4 | u32 LE | `field_A` | `unknown_1 = 1` | Observed 1 in samples; VARIABLE across corpus; semantics UNRESOLVED |
+| +0x04 | 0x08 | 4 | u32 LE | `field_B` | `unknown_2 = 0` | Observed 0 in samples; semantics UNRESOLVED |
+| +0x08 | 0x0C | 4 | u32 LE | `field_C` | `render_state = 15` | Per-group, VARIABLE (see field[3] census above); semantics UNRESOLVED |
+| +0x0C | 0x10 | 4 | u32 LE | `vert_count` | `mesh_count` | Number of vertex records in this group |
+| +0x10 | 0x14 | 4 | u32 LE | `idx_count` | `index_count` | Number of u16 indices in this group |
+
+Note the layout consequence: what the prior spec called `type_tag` at file offset `0x00` is the
+`group_count` outer loop count, and the per-group fields begin at file offset `0x04`. The
+"field[3]" referenced throughout the census above is `field_C` (group-relative `+0x08`,
+file offset `0x0C` for group 0).
+
+**(corrected 2026-06-13: the `type_tag` "constant = 1" claim is also WRONG.)** The field at file
+offset `0x00` — now identified as `group_count` — is likewise VARIABLE, not the constant `1` the
+prior description implied. Across the corpus, FX1 file offset `0x00` takes 27 distinct values
+(range 1–61) and FX2 takes 11 distinct values (range 1–16). Value 1 is the most common but far
+from the only value. PLAUSIBLE reading: this is a genuine per-file group count (a cell may carry
+several overlay mesh groups), which also re-explains why a "type_tag" appeared to vary.
+
+**Vertex and index arrays (per group, immediately after the 20-byte header):**
+
+- `vert_count` vertex records, then `idx_count` u16 indices.
+- **Vertex stride is 36 bytes for FX1** (`VF_36`) and **44 bytes for FX2** (`VF_44` = `VF_36`
+  plus an extra 8 bytes carrying a second UV pair). This is the structural difference between the
+  two extensions.
+- Indices are a flat u16 triangle list.
+
+**File-size formula (CODE-CONFIRMED, byte-exact on samples):**
+
+```
+FX1: total = 4 + group_count × (20 + vert_count × 36 + idx_count × 2)
+FX2: total = 4 + group_count × (20 + vert_count × 44 + idx_count × 2)
+```
+
+Worked examples with zero residual bytes:
+- FX1 `group_count=1, vert_count=3, idx_count=3`: `4 + (20 + 3×36 + 3×2) = 4 + 20 + 108 + 6 = 138 B`.
+- FX2 `group_count=1, vert_count=3, idx_count=3`: `4 + (20 + 3×44 + 3×2) = 4 + 20 + 132 + 6 = 162 B`.
+
+`terrain_layers.md §1.6` should be corrected to match this group-based layout; this file records
+the correction. The semantic meaning of `field_A`, `field_B`, and `field_C` is stored in the
+per-group in-memory record but no downstream consumer reading them for dispatch was traced — they
+remain UNRESOLVED (see Open Questions).
 
 ### FX4: Confirmed Structurally Identical to FX3/FX5
 
@@ -641,9 +878,35 @@ The June 2026 black-box pass analyzed both known FX7 files (both exactly 35,202 
 
 ## From terrain FX deltas
 
-1. **FX2 field[3] conflict (15 vs 50)** — the discrepancy between the IDA-traced value (15) and the sample-observed value (50) is unresolved. Read the field but do not treat it as a constant.
-2. **FX7 full field layout** — only the position/normal offset divergence from FX1–FX5 is confirmed; complete header and vertex format mapping awaits a parser trace.
-3. **FX4 single-instance prevalence** — only one FX4 file exists in the full VFS (43,347 files). The reason for this is unknown; it may be a deprecated or experimental format.
+1. **FX2 field[3] conflict (15 vs 50)** — RESOLVED 2026-06-13: the field is per-group and VARIABLE
+   (7 values across 595 FX2 files; mode 50, not 15). Remaining open: the **semantic meaning** of
+   `field_A`/`field_B`/`field_C` in the per-group header. The LOD / render-distance-threshold
+   reading (PLAUSIBLE) is consistent with the corpus statistics but is not confirmed by a
+   render-path trace — no downstream consumer reading these fields for dispatch was located.
+2. **FX field[0] (`group_count`) semantics** — corrected 2026-06-13 from "constant = 1" to a
+   variable per-file count (FX1: 27 distinct values; FX2: 11). Whether it is strictly a mesh-group
+   count or also selects a rendering sub-path is PLAUSIBLE only.
+3. **FX7 full field layout** — only the position/normal offset divergence from FX1–FX5 is confirmed;
+   complete header and vertex format mapping awaits a parser trace. Its field at `0x0C` decodes as
+   an f32 (123.602), not a uint, in both (byte-identical) FX7 files.
+4. **FX4 single-instance prevalence** — only one FX4 file exists in the full VFS (43,347 files). The
+   reason for this is unknown; it may be a deprecated or experimental format.
+
+## From effect-link tables (Section F)
+
+1. **Effect-id resolution path** — col2/col3 ids of `mobjointeff.txt` and `totalmugong.txt` have no
+   matching `.xeff` filename, so the registry must resolve them by the header `effect_id` field
+   (Section C.2). The exact lookup code path was not traced; SAMPLE-VERIFIED only that the filenames
+   do not exist for these ranges. How a `12xxxxxxx`/`82xxxxxxx`/`360xxxxxx` id finds its descriptor
+   (linear scan of `effect_id` fields vs a secondary index) is the most important open linkage gap.
+2. **`itemjointeff.txt` col2–col5** — constant in the sample (0/0-1/1/2); their flag meanings (e.g.
+   col3 as a two-handed / off-hand applicability flag) are PLAUSIBLE only.
+3. **`mobjointeff.txt` col3** — values 4, 6, 9, 19; possibly a secondary effect index or bone slot.
+4. **`totalmugong.txt` col0** — whether the mugong class index aligns with the `[CCC]` prefix of the
+   9-digit `.xeff` naming scheme (Section A.3) is unconfirmed.
+5. **`xeffect.lst` vs VFS count** — the manifest records 3,669 name entries but only 3,584 `.xeff`
+   files exist (85-entry surplus). May be stale manifest rows or names served from a secondary
+   archive.
 
 ---
 
@@ -652,7 +915,7 @@ The June 2026 black-box pass analyzed both known FX7 files (both exactly 35,202 
 - **Related formats:** `pak.md` (container), `sound_tables.md` (the other `.eff` variant), `mesh.md` (shares 32-byte vertex record convention), `terrain_layers.md` (FX layer formats; authoritative for `.fx1`–`.fx7` byte layouts)
 - **Related runtime spec:** `specs/effects.md` — the authoritative effects system behavioral spec (boot manifests, object pools, trigger dispatch table, per-frame tick math, bone attachment, damage-number renderer, sword-light sub-system)
 - **Related specs:** `specs/combat.md` (server-authoritative damage; effects here are presentation-only), `specs/skinning.md` (bone hierarchy used by bone-attached effects)
-- **Companion plain-text files:** `xeffect.lst`, `bmplist.lst`, `totalmugong.txt`, `itemjointeff.txt`, `mobjointeff.txt`, `itemswordlight.txt`, `mobswordlight.txt` — boot manifests (see `specs/effects.md §3`)
+- **Companion plain-text files:** `xeffect.lst`, `bmplist.lst` (boot manifests, see `specs/effects.md §3`); the effect-link tables `totalmugong.txt`, `itemjointeff.txt`, `mobjointeff.txt`, `itemswordlight.txt`, `mobswordlight.txt` are documented in **Section F** above (all under `data/effect/`, corrected 2026-06-13 from the prior `data/script/` implication; only `effectscale.xdb` is under `data/script/`)
 - **Companion ASCII format:** `.xobj` files in `data/effect/xobj/` — plain-text primitive meshes
 - **Companion binary tables:** `effectscale.xdb` (Section D), `particleEmitter.eff` (Section E)
 - **Glossary:** see `Docs/RE/names.yaml`

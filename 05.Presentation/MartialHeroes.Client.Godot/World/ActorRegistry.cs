@@ -145,6 +145,20 @@ public sealed partial class ActorRegistry : Node
     }
 
     // -------------------------------------------------------------------------
+    // Lookup (presentation only — read-only view of the actor map)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Returns the <see cref="VisualActor"/> for the given key, or <see langword="null"/> if
+    /// the actor is not yet in the registry. Used by <see cref="FloatingCombatText"/> to resolve
+    /// a 3D head position for world→screen projection.
+    ///
+    /// Threading contract: main thread only (all callers are in _Process).
+    /// </summary>
+    public VisualActor? TryGetActor(ActorKey key) =>
+        _actors.TryGetValue(key, out VisualActor? v) ? v : null;
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 

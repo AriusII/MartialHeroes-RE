@@ -1,0 +1,43 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgPartyLeaderOp
+opcode: 0x20025           # major 2 (GameAction), minor 37 -> (2 << 16) | 37
+direction: C2S
+size: 8                  # fixed 8-byte payload built by the shared social-op sender
+spec: packets/2-37_party_leader_op.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client party leader / transfer operation. Carries a 1-byte mode selector and a 4-byte target actor id. Believed to drive a leader-transfer or role toggle from the party panel context menu; the matching server result is folded into the 4/37 PartyLeaderActionResult family.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8.
+fields:
+  - { name: Mode,     type: u8 }          # 0x00  operation selector (semantics PLAUSIBLE; see notes)
+  - { name: Pad0,     type: "bytes[3]" }    # 0x01  filler to the next dword; written from uninitialised stack, treat as zero
+  - { name: TargetId, type: u32 }         # 0x04  target member actor id
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout (same shared 8-byte social-op
+  shape as 2/23, 2/30, 2/35, 2/36), CAPTURE-UNVERIFIED meaning.
+
+    0x00 (1B) Mode     : operation selector. The exact value(s) were not pinned on a send path this
+                         pass; the field exists and occupies offset 0 as in every sibling op. Treat
+                         the precise mode value as PLAUSIBLE until a capture confirms it.
+    0x04 (4B) TargetId : the member actor id the leader op applies to (le u32).
+
+  ROLE: this op sits between "leave party" and the extended party operations in the party panel's
+  context menu, and it runs the same self/target guard as the other party sends. From that position
+  it is read as a leader/transfer action (e.g. hand leadership to the named member) -- this naming
+  is INFERRED from menu position and guard behaviour, not from an observed packet, so it is
+  PLAUSIBLE. It could alternatively be a ready / role toggle.
+
+  RELATIONSHIP: shares the 8-byte shape with the other party/trade/guild C2S ops. No distinct S2C
+  acknowledgement was isolated for this op; the result is believed to be folded into 4/37
+  SmsgPartyLeaderActionResult.
+
+  UNKNOWNS to resolve with a capture:
+    - the actual Mode value(s) emitted and their meaning (leader transfer vs role toggle);
+    - whether 4/37 is indeed the paired result.
+
+  UNBLOCKS: Client.Application party leader / transfer use-case (subject to the open questions above).

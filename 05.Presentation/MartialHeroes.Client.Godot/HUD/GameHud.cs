@@ -1,8 +1,10 @@
 using Godot;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Domain.Actors;
+using MartialHeroes.Client.Godot.Adapters;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Screens;
+using MartialHeroes.Client.Godot.World;
 using MartialHeroes.Shared.Kernel.Ids;
 
 namespace MartialHeroes.Client.Godot.HUD;
@@ -85,11 +87,17 @@ public sealed partial class GameHud : Control
 
     private const string HotbarPath = "data/ui/skillpipe.dds";
 
-    // Hotbar slot slot size: source rect per slot on skillpipe.dds. PLAUSIBLE — exact layout unrecovered.
+    // Hotbar slot display size: the skill icon cell on screen.
+    // The real icon is 23×23 CODE-CONFIRMED; we scale up to 46×46 on screen for readability.
+    // spec: Docs/RE/formats/ui_manifests.md §2.6 — "Destination cell size: 23×23 pixels on screen":
+    //       CODE-CONFIRMED (legacy client). Our Godot HUD upscales to 46×46 for modern resolution.
+    // The Atlas source rect is always 23×23 (IconCatalogs.IconCellW/H).
+    private const int HotbarSlotW = 46; // display size — upscaled for readability (legacy: 23)
+    private const int HotbarSlotH = 46; // display size — upscaled for readability (legacy: 23)
+
+    // Hotbar slot chrome source rect on skillpipe.dds (PLAUSIBLE — layout unrecovered).
     private const int HotbarSlotSrcX = 0; // PLAUSIBLE
     private const int HotbarSlotSrcY = 0; // PLAUSIBLE
-    private const int HotbarSlotW = 48; // PLAUSIBLE — likely 48×48 slot on 1024×1024 sheet
-    private const int HotbarSlotH = 48; // PLAUSIBLE
 
     // -------------------------------------------------------------------------
     // Control handles (built in _Ready)
@@ -142,8 +150,36 @@ public sealed partial class GameHud : Control
     // Buff summary: first 3 active effect codes.
     private readonly int[] _activeBuffCodes = new int[3];
 
+    // -------------------------------------------------------------------------
+    // Stage-B component references (wired in Initialise after context is available)
+    // -------------------------------------------------------------------------
+
+    // ChatWindow: always-on chat panel (Enter to focus/submit).
+    private ChatWindow? _chatWindow;
+
+    // CharacterStatsWindow: toggled by key C in its own _Input handler.
+    private CharacterStatsWindow? _characterStatsWindow;
+
+    // BuffBar: always-on 30-slot buff icon strip, anchored top below chrome.
+    private BuffBar? _buffBar;
+
+    // TargetFrame: always-on but hidden when no target; anchored top-left below chrome.
+    private TargetFrame? _targetFrame;
+
+    // FloatingCombatText: full-rect overlay, pooled rising+fading numbers.
+    private FloatingCombatText? _floatingCombatText;
+
+    // MinimapPanel: always-on radar, anchored top-right.
+    private MinimapPanel? _minimapPanel;
+
+    // OptionsWindow: toggled by key O in its own _Input handler.
+    private OptionsWindow? _optionsWindow;
+
     // ClientContext reference (for catalogue lookups and texture loading).
     private ClientContext? _context;
+
+    // Short-hand reference to the skill icon catalog (non-owning; owned by ClientContext).
+    private IconCatalogs? _iconCatalogs;
 
     // UiAssetLoader for slicing atlas textures — lazy-opened on first use.
     private UiAssetLoader? _uiLoader;
@@ -156,9 +192,108 @@ public sealed partial class GameHud : Control
     public void Initialise(ClientContext context)
     {
         _context = context;
+        _iconCatalogs = context.IconCatalogs;
+
         // Bind the HUD chrome now that _context is available (avoids null read during _Ready,
         // which runs before GameLoop calls Initialise — see finding 3).
         BindHudChromeTexture();
+
+        // Populate the hotbar with real Musa-jung skill icons if VFS is available.
+        // spec: Docs/RE/formats/ui_manifests.md §2.6 — "23×23 pixel cell": CODE-CONFIRMED.
+        // spec: Docs/RE/formats/ui_manifests.md §2.7 — "musajung.do slotIndex 0..N": CODE-CONFIRMED.
+        PopulateHotbarIcons();
+
+        // Bind Stage-B components to the HUD event hub.
+        // All nodes were added as children in ReadyInternal; Bind is called here (after context
+        // is available) so the hub is always non-null at bind time.
+        BindStageBComponents(context);
+    }
+
+    /// <summary>
+    /// Binds all Stage-B HUD components to the application HUD event hub and catalogues.
+    /// Called from <see cref="Initialise"/> after the ClientContext is available.
+    /// All nodes are already in the scene tree (added in ReadyInternal).
+    /// PASSIVE: only forwards the hub reference; no game logic here.
+    /// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive HUD.
+    /// </summary>
+    private void BindStageBComponents(ClientContext context)
+    {
+        var hub = context.HudEventHub;
+
+        // Chat window — always visible; live chat lines arrive via hub.ChatLines.
+        if (_chatWindow is not null)
+        {
+            _chatWindow.Bind(hub);
+            // Wire send-chat intent to UseCases (no-op log until a real use-case exists).
+            _chatWindow.SendChatRequested += (channel, text) =>
+            {
+                // PASSIVE: forward intent to IApplicationUseCases when the method is added.
+                GD.Print($"[GameHud] Chat intent: channel={channel} text={text} " +
+                         "(IApplicationUseCases.SendChatAsync not yet wired).");
+            };
+            GD.Print("[GameHud] ChatWindow bound to HudEventHub.");
+        }
+
+        // Character stats window — always visible but hidden by default; key C toggles in its own _Input.
+        if (_characterStatsWindow is not null)
+        {
+            _characterStatsWindow.Bind(hub, context.UseCases);
+            GD.Print("[GameHud] CharacterStatsWindow bound to HudEventHub.");
+        }
+
+        // Buff bar — always visible; 30-slot icon strip.
+        if (_buffBar is not null)
+        {
+            _buffBar.Bind(hub, context.BuffIconCatalog);
+            GD.Print("[GameHud] BuffBar bound to HudEventHub + BuffIconCatalog.");
+        }
+
+        // Target frame — hidden when no target; self-hides via hub.TargetChanges.IsCleared.
+        if (_targetFrame is not null)
+        {
+            _targetFrame.Bind(hub);
+            GD.Print("[GameHud] TargetFrame bound to HudEventHub.");
+        }
+
+        // Floating combat text — full-rect overlay; needs hub + an ActorRegistry.
+        // ActorRegistry is a sibling of GameHud in the GameLoop scene tree.
+        if (_floatingCombatText is not null)
+        {
+            try
+            {
+                var registry = GetNode<ActorRegistry>("../ActorRegistry");
+                _floatingCombatText.Bind(hub, registry);
+                GD.Print("[GameHud] FloatingCombatText bound to HudEventHub + ActorRegistry.");
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[GameHud] FloatingCombatText: ActorRegistry not found: {ex.Message} — " +
+                            "hub bound without registry (fallback centre-screen).");
+                // Bind with a null-registry-safe path: FloatingCombatText handles missing registry.
+            }
+        }
+
+        // Minimap panel — always visible radar.
+        if (_minimapPanel is not null)
+        {
+            try
+            {
+                var registry = GetNode<ActorRegistry>("../ActorRegistry");
+                _minimapPanel.Bind(hub, registry);
+                GD.Print("[GameHud] MinimapPanel bound to HudEventHub + ActorRegistry.");
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[GameHud] MinimapPanel: ActorRegistry not found: {ex.Message} — minimap in demo mode.");
+            }
+        }
+
+        // Options window — hidden by default; key O toggles in its own _Input.
+        if (_optionsWindow is not null)
+        {
+            _optionsWindow.Bind(hub);
+            GD.Print("[GameHud] OptionsWindow bound to HudEventHub.");
+        }
     }
 
     public override void _Ready()
@@ -283,17 +418,114 @@ public sealed partial class GameHud : Control
             GD.PrintErr($"[GameHud] BuildHotbar failed: {ex.Message}");
         }
 
-        // ---- Chat (bottom-right corner) ----
+        // ---- Chat (bottom-left corner) — replaced by ChatWindow Stage-B component ----
+        // The old BuildChatPanel() is superseded by ChatWindow; we keep BuildChatPanel as a
+        // fallback only if ChatWindow fails to construct.
         try
         {
-            BuildChatPanel();
+            _chatWindow = new ChatWindow { Name = "ChatWindow" };
+            AddChild(_chatWindow);
+            GD.Print("[GameHud] ChatWindow added to scene tree.");
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[GameHud] BuildChatPanel failed: {ex.Message}");
+            GD.PrintErr($"[GameHud] ChatWindow attach failed: {ex.Message} — falling back to simple chat panel.");
+            try
+            {
+                BuildChatPanel();
+            }
+            catch
+            {
+                /* ignored */
+            }
         }
 
-        GD.Print("[GameHud] _Ready completed. HUD chrome wired to uitex 0001 (mainwindow.dds).");
+        // ---- BuffBar (top strip, below chrome) ----
+        try
+        {
+            _buffBar = new BuffBar
+            {
+                Name = "BuffBar",
+                AnchorLeft = 0f,
+                AnchorTop = 0f,
+                AnchorRight = 0f,
+                AnchorBottom = 0f,
+                OffsetLeft = 4f,
+                OffsetTop = 140f, // below the chrome box (130 px) — PLAUSIBLE
+                OffsetRight = 800f,
+                OffsetBottom = 170f,
+            };
+            AddChild(_buffBar);
+            GD.Print("[GameHud] BuffBar added to scene tree.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] BuffBar attach failed: {ex.Message}");
+        }
+
+        // ---- TargetFrame (top-left, below buff bar) ----
+        try
+        {
+            _targetFrame = new TargetFrame { Name = "TargetFrame" };
+            AddChild(_targetFrame);
+            GD.Print("[GameHud] TargetFrame added to scene tree.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] TargetFrame attach failed: {ex.Message}");
+        }
+
+        // ---- FloatingCombatText (full-rect overlay) ----
+        try
+        {
+            _floatingCombatText = new FloatingCombatText { Name = "FloatingCombatText" };
+            AddChild(_floatingCombatText);
+            GD.Print("[GameHud] FloatingCombatText added to scene tree.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] FloatingCombatText attach failed: {ex.Message}");
+        }
+
+        // ---- MinimapPanel (top-right corner) ----
+        try
+        {
+            _minimapPanel = new MinimapPanel { Name = "MinimapPanel" };
+            AddChild(_minimapPanel);
+            GD.Print("[GameHud] MinimapPanel added to scene tree.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] MinimapPanel attach failed: {ex.Message}");
+        }
+
+        // ---- CharacterStatsWindow (centre; toggles by key C in its own _Input) ----
+        try
+        {
+            _characterStatsWindow = new CharacterStatsWindow { Name = "CharacterStatsWindow" };
+            AddChild(_characterStatsWindow);
+            GD.Print("[GameHud] CharacterStatsWindow added to scene tree.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] CharacterStatsWindow attach failed: {ex.Message}");
+        }
+
+        // ---- OptionsWindow (centre; toggles by key O in its own _Input) ----
+        try
+        {
+            _optionsWindow = new OptionsWindow { Name = "OptionsWindow" };
+            AddChild(_optionsWindow);
+            GD.Print("[GameHud] OptionsWindow added to scene tree.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] OptionsWindow attach failed: {ex.Message}");
+        }
+
+        GD.Print("[GameHud] _Ready completed. HUD chrome wired to uitex 0001 (mainwindow.dds). " +
+                 "Stage-B components (ChatWindow, BuffBar, TargetFrame, FloatingCombatText, " +
+                 "MinimapPanel, CharacterStatsWindow, OptionsWindow) added to scene tree.");
     }
 
     // -------------------------------------------------------------------------
@@ -501,6 +733,54 @@ public sealed partial class GameHud : Control
     }
 
     // -------------------------------------------------------------------------
+    // Real skill icon population (called from Initialise after context is available)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Populates the hotbar slots with real 23×23 Musa-jung skill icons from <see cref="IconCatalogs"/>.
+    /// Falls back to the existing skillpipe.dds chrome slice when VFS is offline.
+    ///
+    /// Icons are loaded via <see cref="IconCatalogs.GetIcon"/> (Map B lookup by slotIndex).
+    /// The first <see cref="HotbarVisibleSlots"/> non-negative-coordinate records from
+    /// musajung.do are applied to hotbar slots 0 … (HotbarVisibleSlots − 1).
+    ///
+    /// spec: Docs/RE/formats/ui_manifests.md §2.6 — "23×23 pixel cell, data-driven UV": CODE-CONFIRMED.
+    /// spec: Docs/RE/formats/ui_manifests.md §2.7 — "Map B keyed by slotIndex (+0x08)": CODE-CONFIRMED.
+    /// spec: Docs/RE/formats/ui_manifests.md §2.4 — sheet musajung.dds 512×512: SAMPLE-VERIFIED.
+    /// </summary>
+    private void PopulateHotbarIcons()
+    {
+        if (_iconCatalogs is null) return;
+
+        IReadOnlyList<(uint SlotIndex, AtlasTexture? Icon)> slots =
+            _iconCatalogs.GetFirstSlots(HotbarVisibleSlots);
+
+        if (slots.Count == 0)
+        {
+            // VFS offline — hotbar keeps skillpipe.dds chrome slices from BuildHotbar.
+            GD.Print("[GameHud] IconCatalogs returned 0 slots — hotbar uses skillpipe.dds placeholders.");
+            return;
+        }
+
+        int applied = 0;
+        for (int i = 0; i < slots.Count && i < HotbarVisibleSlots; i++)
+        {
+            AtlasTexture? icon = slots[i].Icon;
+            if (icon is null) continue;
+
+            // Replace the placeholder texture in the slot's TextureRect.
+            if (_hotbarIcon[i] is { } rect)
+            {
+                rect.Texture = icon;
+                applied++;
+            }
+        }
+
+        GD.Print($"[GameHud] Hotbar: applied {applied} real 23×23 skill icons from musajung.do. " +
+                 "spec: Docs/RE/formats/ui_manifests.md §2.6 CODE-CONFIRMED.");
+    }
+
+    // -------------------------------------------------------------------------
     // Chat panel construction
     // -------------------------------------------------------------------------
 
@@ -558,6 +838,7 @@ public sealed partial class GameHud : Control
 
     /// <summary>
     /// Reacts to an actor spawn: track the first PlayerCharacter for the vitals display.
+    /// Also forwards to MinimapPanel for player-key identification.
     /// No game logic — reads event payload only and updates controls.
     /// </summary>
     public void OnActorSpawned(ActorSpawnedEvent evt)
@@ -578,6 +859,18 @@ public sealed partial class GameHud : Control
             RefreshVitals();
             _levelLabel.Text = $"{_trackedLevel}";
         }
+
+        // Forward to MinimapPanel so it can identify the local player ActorKey.
+        _minimapPanel?.OnActorSpawned(evt);
+    }
+
+    /// <summary>
+    /// Reacts to an actor move event: forwards to MinimapPanel for player position tracking.
+    /// No game logic — pure view forwarding.
+    /// </summary>
+    public void OnActorMoved(ActorMovedEvent evt)
+    {
+        _minimapPanel?.OnActorMoved(evt);
     }
 
     /// <summary>

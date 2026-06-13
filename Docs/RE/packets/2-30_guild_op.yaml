@@ -1,0 +1,40 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgGuildOp
+opcode: 0x2001e           # major 2 (GameAction), minor 30 -> (2 << 16) | 30
+direction: C2S
+size: 8                  # fixed 8-byte payload (two dwords) built by the social-op sender
+spec: packets/2-30_guild_op.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Small client guild / relation action primitive. Carries a 4-byte operation code and a 4-byte actor id. The lightweight channel for assorted guild/relation actions; richer guild flows use separate opcodes.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8.
+fields:
+  - { name: Op, type: u32 }          # 0x00  operation code (which guild/relation action)
+  - { name: Id, type: u32 }          # 0x04  target actor id
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout (8 bytes = two little-endian
+  dwords), CAPTURE-UNVERIFIED meaning. Unlike the party/trade sends, this op does NOT use the
+  mode-byte + padding shape -- it is two full 4-byte values supplied by the caller and sent verbatim.
+
+    0x00 (4B) Op : the operation code selecting which small guild / relation action to perform
+                   (le u32). The specific code values were not enumerated this pass.
+    0x04 (4B) Id : the target actor id the action applies to (le u32).
+
+  CONTEXT (client-side gate, not a wire field): the submit wrapper resolves the target id and runs
+  the same self-target guard as the party/trade ops (refuses to act on the local player's own actor
+  id, showing a notice instead of sending).
+
+  SCOPE: this is the cheap guild/relation primitive only. Heavier guild traffic -- guild create, the
+  member-management ops, diplomacy, and the full guild sync -- travels on separate opcodes that are
+  out of this lane's scope and are not modelled here.
+
+  UNKNOWNS to resolve with a capture:
+    - the enumerated Op code values and their meanings;
+    - whether Op and Id are ever signed (modelled unsigned here).
+
+  UNBLOCKS: Client.Application guild/relation small-action use-case (subject to enumerating Op).

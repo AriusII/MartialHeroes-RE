@@ -37,8 +37,10 @@ payload @+8). **All field offsets in this document are payload-relative** (relat
 | Guild full-sync (4:65) 50-member array layout | MEDIUM — offsets walked; field meanings inferred |
 | Guild member roster patch (5:65) and party stats (5:38) layouts | MEDIUM |
 | Party roster event (5:21) and relation slot (5:26) layouts | MEDIUM |
+| Party member-remove result (4:36) layout and auto-disband behaviour | MEDIUM — offsets walked; self-leave vs expel submode read |
 | Chat context headers for 2:82 / 2:83 / 3:21 (per-field breakdown) | LOW — only channel selector + text trailer decoded |
-| "Party vs relation/FATE" labelling of the C2S 2:35/36/37 and 2:60–2:76 cluster | LOW — flagged UNVERIFIED #2 |
+| C2S 2:35/36/37 are genuine party (not relation/FATE) | HIGH — pinned to party-panel action handlers (corrected 2026-06-13) |
+| "Relation vs FATE" labelling of the remaining C2S 2:60–2:76 cluster | LOW — flagged UNVERIFIED #2 |
 | 2:122 short-name field width; auto-accept event codes | LOW — flagged UNVERIFIED #6/#7 |
 
 **UNVERIFIED list** is consolidated in Section 9. All Korean text fields referenced here are
@@ -104,27 +106,32 @@ suggestions for `names.yaml`; confirm before committing.
 | Opcode | Catalog / proposed name | Dir | Size | Purpose / confidence |
 |--------|-------------------------|-----|------|----------------------|
 | 4:35 | `SmsgPartyInviteState`        | S2C | 56  | Invite/roster state snapshot (Section 6.1). NOTE: catalog labels this "party"; see UNVERIFIED #2. |
-| 4:36 | `SmsgPartyMemberRemoveResult` | S2C | —   | Result of a member-remove action. |
-| 4:37 | `SmsgPartyLeaderActionResult` | S2C | —   | Result of a leader action. |
+| 4:36 | `SmsgPartyMemberRemoveResult` | S2C | 56  | Result of a member-remove action; left/expelled (Section 6.6). MEDIUM. |
+| 4:37 | `SmsgPartyLeaderActionResult` | S2C | 56  | Result of a leader action. |
 | 4:76 | `SmsgPartyAcceptResult`       | S2C | —   | Result of accepting an invite. |
 | 5:21 | `SmsgPartyRosterEvent`        | S2C | 12  | Add/remove/update one member (Section 6.2). MEDIUM. |
 | 5:38 | `SmsgPartyMemberStats`        | S2C | 100 | Full per-member vitals/buffs snapshot (Section 6.3). MEDIUM. |
 | 5:76 | `SmsgPartyMemberJoined`       | S2C | 36  | Member-joined event with name + greeting mode (Section 6.4). MEDIUM. |
 
-### 2.4 Party / relation submits (C2S — combined; see UNVERIFIED #2)
+### 2.4 Party submits (C2S — genuine party; corrected 2026-06-13)
+
+These three are now confirmed **genuine party** operations driven by the mini-party / party-panel
+context-menu actions, not relation/FATE submits (corrected 2026-06-13: a later static pass pinned
+them to the party-panel action handler and its "party healing actor ok" debug marker; the earlier
+"party or relation" hedge is resolved in favour of party — see Section 6.6 and UNVERIFIED #2).
 
 | Opcode | Proposed name | Dir | Size | Payload shape (inferred) |
 |--------|---------------|-----|------|--------------------------|
-| 2:35 | `CmsgPartyOrRelationInvite`   | C2S | 8  | `[u8 sub-op][u32 target id]` |
-| 2:36 | `CmsgPartyOrRelationOpB`      | C2S | 8  | `[u8 sub-op][u32 target id]` |
-| 2:37 | `CmsgPartyOrRelationOpC`      | C2S | 8  | `[u8 sub-op][u32 target id]` |
+| 2:35 | `CmsgPartyInvite`       | C2S | 8  | `[u8 mode @0][u32 id @4]` (mode 0 = accept/commit, 2 = invite) |
+| 2:36 | `CmsgPartyLeaveOrKick`  | C2S | 8  | `[u8 mode @0][u32 id @4]` (mode 0 = self-leave, 1 = kick) |
+| 2:37 | `CmsgPartyLeaderOp`     | C2S | 8  | `[u8 mode @0][u32 target id @4]` (leader / transfer op) |
 
 ### 2.5 Guild (C2S submits)
 
 | Opcode | Proposed name | Dir | Size | Notes |
 |--------|---------------|-----|------|-------|
 | 2:8   | `CmsgGuildCreateOrCrest` | C2S | 241 | Large guild blob (likely create / crest). UNVERIFIED #8. |
-| 2:30  | `CmsgGuildAction30`      | C2S | 8   | Two dwords; self-target guarded. |
+| 2:30  | `CmsgGuildAction30`      | C2S | 8   | `[u32 op @0][u32 id @4]`; self-target guarded (Section 5.6). |
 | 2:54  | `CmsgGuildToggle54`      | C2S | 1   | 1-byte guild/relation toggle. |
 | 2:55  | `CmsgGuildMemberOp55`    | C2S | 32  | Guild member op (32-byte struct). |
 | 2:56  | `CmsgGuildMemberOp56`    | C2S | 4   | Guild member op. |
@@ -316,6 +323,20 @@ local player, also mirrors the fields into the local-player guild state.
 Field widths sum to 30; bytes `30..31` complete the 32-byte block (treat as trailing pad). When
 `NamePresent == 0`, the name is cleared rather than applied.
 
+### 5.6 Guild action submit — 2:30 (C2S, 8 bytes)
+
+The small guild/relation action channel. Its 8-byte payload is two dwords (added 2026-06-13):
+
+| Off | Size | Type | Field | Meaning |
+|-----|------|------|-------|---------|
+| 0   | 4    | u32  | `Op`  | Guild action / operation selector. |
+| 4   | 4    | u32  | `Id`  | Target actor / guild-member id. |
+
+The submit wrapper resolves the target id from the payload, applies the **self-target guard**
+(Section 1): on a self/stale mismatch it shows error id `862010101` and **sends nothing**; only a
+valid non-self target sends the 8 bytes verbatim. The full enumeration of `Op` values is not
+recovered (UNVERIFIED).
+
 ---
 
 ## 6. Party subsystem (genuine party — S2C confirmed)
@@ -345,12 +366,22 @@ A single add/remove/update for one member.
 
 | Off | Size | Type | Field           | Meaning |
 |-----|------|------|-----------------|---------|
-| 0   | 1    | u8   | `Event`         | Roster event code (add / remove / update). |
-| 4   | 4    | i32  | `MemberActorId` | Affected member's actor id. |
+| 0   | 1    | u8   | `Event`         | Roster event code (see enumeration below). |
+| 1   | 1    | u8   | `MemberSlot`    | Party-slot index of the affected member (corrected 2026-06-13: the affected member is identified by a slot index at payload +1, resolved through the party slot table, rather than by an actor id at payload +4). |
 
-Bytes `1..3` and `8..11` are padding. The handler resolves the actor and gates on "resolved actor is
-the local player" before applying the roster change; it surfaces user notices (string ids
-`2119`–`2122`). Those ids are display-only.
+**Event codes (`Event` at payload +0):**
+
+| Event | Meaning      | Display notice id |
+|-------|--------------|-------------------|
+| 0     | member joined  | `2120` |
+| 1     | member left    | `2119` |
+| 2     | member updated | `2121` |
+| 3     | party disbanded| `2122` |
+
+The handler resolves the affected member through the party slot table (slot index at payload +1),
+patches that party-panel entry, and posts the notice (colour code `0xFFFF8000`). A secondary
+party-active flag (Section 6.6 / Section 8) gates a quickslot / auto-target relink for party members.
+Those string ids are display-only.
 
 ### 6.3 Party member stats — 5:38 (S2C, 100 bytes)
 
@@ -399,6 +430,57 @@ motion keyed by `Event` and may surface a rank-progress notice (display id).
 - The party roster/stats live in a single party-panel cache on the local-player UI singleton.
 - Roster add/remove/update is applied from 5:21; member stats from 5:38; joins from 5:76.
 - The local player's `PartyId` is mirrored from 4:35.
+- Each actor carries its own **party id** at on-actor offset **+968**; the remove handler clears this
+  field on a removed member, and a global **party-active flag** plus a secondary party flag (the
+  quickslot / auto-target relink gate) track whether the local player is currently grouped. These are
+  local in-memory state, not wire fields. (added 2026-06-13)
+
+### 6.6 Party member remove result — 4:36 (S2C, 56 bytes)
+
+The result of a member-remove action (a self-leave or an expel/kick). The handler clears the removed
+member's on-actor party id, updates the local roster, and may surface a notice or auto-disband. New
+this pass (added 2026-06-13).
+
+| Off | Size | Type    | Field         | Meaning |
+|-----|------|---------|---------------|---------|
+| 4   | 4    | i32     | `RequesterId` | Actor that triggered the removal. |
+| 10  | 1    | u8      | `Submode`     | `0` = member left, `1` = member expelled/kicked. |
+| 12  | 4    | i32     | `RemovedId1`  | Removed member id — read when `Submode == 1` (expelled). |
+| 20  | 32   | i32[8]  | `MemberIds`   | Resulting party member-id array (up to 8), re-applied to the roster. |
+| 52  | 4    | i32     | `RemovedId2`  | Removed member id — read when `Submode == 0` (left). |
+
+Bytes `0..3`, `8..9`, `11..19`, and the gaps between named fields are header/padding not enumerated;
+read the named fields at the listed offsets within the 56-byte block.
+
+Behaviour:
+
+- The handler clears the removed member's on-actor party id (offset +968). If the removed id equals
+  `RequesterId` (a self-leave), it closes the party panel, clears the party-active flag, and clears
+  the local player's own party id.
+- Otherwise it surfaces a member-left / member-expelled notice (display ids `23004` "left" / `23005`
+  "expelled") and removes the member from the roster.
+- **Client-side auto-disband.** After applying the removal, the handler re-reads the 8-id member
+  array (`MemberIds`) and counts the survivors. If **one or zero members remain**, it auto-sends
+  `2:36` with `mode == 0` (a self-leave), collapsing the now-pointless one-person party. A
+  re-implementation that mirrors the client must reproduce this auto-send so its local state matches.
+
+### 6.7 Party invite confirmation popup (interaction-context model)
+
+Party invitation, trade request, and one relation operation all share a single **timed confirmation
+popup** mediated by a small integer **context-type code**. When the local player issues one of these
+interactions from the right-click target menu, the client opens the shared confirm window with an
+**8000 ms** countdown (the popup shows a `label - seconds` line, the seconds derived as
+`timeout / 1000`) and stamps it with the context code so the deferred "commit" step routes to the
+correct sender:
+
+| Context code (hex / dec) | Interaction | Sender it commits to |
+|--------------------------|-------------|----------------------|
+| `0x320` / 800 | party invite      | `2:35` (mode 0 on commit) |
+| `0x2C2` / 706 | trade request     | `2:23` (see `inventory_trade.md`) |
+| `0x334` / 820 | relation op       | relation submit (out of this section's lane) |
+
+This is a client-side input-flow detail (a deferred confirm), not a distinct wire message: the popup
+times out after 8000 ms or routes to the listed sender when confirmed. Added 2026-06-13.
 
 ---
 
@@ -466,7 +548,7 @@ the wire messages are those in Sections 7.1–7.3.
 |-------|---------------|------------|
 | Local player id sentinel | Local actor id; `0xFFFFFFFF` until enter-world. Drives the self-target guard. | enter-world |
 | Relation-slot table | Flat array of **16-byte slots** keyed by `SlotIndex`; mirrored on the local player. | 5:26 |
-| Party roster/stats | Single party-panel cache; party id, member ids (≤8), per-member vitals/buffs. | 4:35, 5:21, 5:38, 5:76 |
+| Party roster/stats | Single party-panel cache; party id, member ids (≤8), per-member vitals/buffs. Each actor also carries a party id at on-actor offset +968; a global party-active flag tracks whether the local player is grouped. | 4:35, 4:36, 5:21, 5:38, 5:76 |
 | Guild roster/cache | Up to **50 members** (struct-of-arrays); per-actor guild rank/title/flags; local-player guild name/grade. | 4:65 (full), 5:65 (per-actor) |
 
 Caps and gates to model:
@@ -485,10 +567,13 @@ Caps and gates to model:
 1. **No network capture cross-check performed.** All field layouts are static inferences from
    sender/handler read order. Sizes (literal byte counts) are hard facts; field meanings,
    signedness, and most field boundaries are hypotheses.
-2. **Party vs relation/FATE labelling.** The C2S 2:35/2:36/2:37 and the 2:60–2:76 cluster are
-   relationship/FATE-flavoured at the submit layer, while the catalog labels 4:35 "party". Genuine
-   party is the S2C 5:21 / 5:38 / 5:76 + party panel. Resolve with captures of party-invite vs
-   couple/training vs friend-add to decide whether the C2S cluster is party, relation, or both.
+2. **Party vs relation/FATE labelling.** (corrected 2026-06-13: the **2:35/2:36/2:37** cluster is now
+   resolved to **genuine party** — pinned to the mini-party / party-panel action handlers and a
+   "party healing actor ok" debug marker — and is documented as party in Sections 2.4 and 6. Only
+   the separate **2:60–2:76** cluster remains relationship/FATE-flavoured and capture-unverified.)
+   The 2:60–2:76 cluster is still relationship/FATE-flavoured at the submit layer; genuine party is
+   the C2S 2:35/2:36/2:37 plus the S2C 4:36 / 5:21 / 5:38 / 5:76 + party panel. Resolve the remaining
+   2:60–2:76 ambiguity with captures of couple/training vs friend-add.
 3. **2:82 (28-byte chat variant) purpose** — party chat? guild chat? trade chat? The builder writes
    a 28-byte header and no text in the thunk itself; a caller may append text separately.
 4. **2:84 (19-byte + text chat variant) channel/scope** — unknown.
@@ -506,5 +591,5 @@ Caps and gates to model:
     (3:21 offset +4) and the text trailer are decoded; the remaining sender/target/scope header
     fields are not broken out field-by-field.
 11. **String-table message ids** referenced here (`862010101` reject; `2119`–`2122` party roster;
-    `10011`/`2183` guild-leave; `67030` relation) are **display ids**, not wire fields — listed for
-    context only.
+    `23004`/`23005` party member left/expelled; `10011`/`2183` guild-leave; `67030` relation) are
+    **display ids**, not wire fields — listed for context only.

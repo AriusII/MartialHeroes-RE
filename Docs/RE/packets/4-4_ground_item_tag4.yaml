@@ -1,0 +1,63 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+# SUB-RECORD SPEC. This is the tag-4 ground-item record carried INSIDE the 4/4
+# SmsgAreaEntitySnapshot stream -- it is NOT a standalone opcode body and gets NO separate row in
+# opcodes.md (the parent opcode 0x40004 = SmsgAreaEntitySnapshot owns that row). The 'name:' below
+# is the generated struct name for the embedded record only.
+name: SmsgAreaGroundItemTag4
+opcode: 0x40004          # parent opcode: major 4 (Response), minor 4 -> (4 << 16) | 4 (SmsgAreaEntitySnapshot)
+direction: S2C
+size: 24                 # one tag-4 ground-item sub-record (read length 0x18 inside the tag loop)
+spec: packets/4-4_ground_item_tag4.yaml
+status: hypothesis
+capture_verified: false
+
+summary: The tag-4 ground-item sub-record inside the area entity snapshot stream (4/4 SmsgAreaEntitySnapshot). On (re)entry or refresh of a visible area, each ground item already present is delivered as one 24-byte tag-4 record so the client can spawn the world item. This is a SUB-RECORD of 4/4, not a standalone opcode body -- do not frame it on its own.
+
+# Wire order, offset 0 = first byte of this 24-byte sub-record. Pack=1; the field widths sum to 24.
+fields:
+  - { name: Key,        type: u32 }          # 0x00  ground-item entity key (pickup / remove key)
+  - { name: TemplateId, type: u32 }          # 0x04  item template id -> per-template 3D model
+  - { name: Reserved0,  type: "bytes[4]" }   # 0x08  unused: passed to the spawner, not stored
+  - { name: Opaque,     type: i32 }          # 0x0c  opaque (likely quantity or flags)
+  - { name: PosX,       type: f32 }          # 0x10  world X
+  - { name: PosZ,       type: f32 }          # 0x14  world Z
+
+notes: |
+  Static inference only; no capture available. Protocol facts are read directly from the client
+  (CODE-CONFIRMED for the 24-byte sub-record read and the argument order into the ground-item
+  spawner) but no live capture confirms the bytes on the wire (CAPTURE-UNVERIFIED). The exact field
+  labels (which dword is the key vs the template vs opaque) are PLAUSIBLE -- they are read from how
+  the spawner uses each argument, not from a labelled wire format.
+
+  SCOPE: this spec describes ONE tag-4 ground-item sub-record only. It lives inside the 4/4 area
+  entity snapshot stream, which begins with a 17-byte area header (a flag byte, a viewer entity id,
+  an area grid id, and an area-center Z/X pair -- only the two center floats are used, to recenter
+  the actor grid; the rest are read and discarded) followed by a tag loop that runs until a zero
+  tag. The tag-4 case reads this 24-byte body and hands it to the ground-item spawner. The full
+  area-snapshot framing belongs to the 4/4 SmsgAreaEntitySnapshot spec (not yet written); this file
+  documents the ground-item record so a codegen for the snapshot can embed it.
+
+    0x00 (4B) Key        : the ground-item entity key. This is the value a later CmsgPickupItem
+                             (2/15) targets and that SmsgTrackedWorldObjectRemove (5/15) removes.
+    0x04 (4B) TemplateId : the item template id. The client resolves a per-template 3D model from it;
+                             on lookup failure it falls back to the shared default model id 201011001.
+    0x08 (4B) Reserved0  : passed to the spawner but not stored into any read field; could be a
+                             second quantity / flags word. Modelled as a reserved buffer.
+    0x0c (4B) Opaque     : an opaque integer carried into the ground-item actor record; likely a
+                             quantity or flags word (mirrors Param1 in the 5/14 spawn).
+    0x10 (4B) PosX / 0x14 (4B) PosZ : the world XZ where the item sits. As elsewhere, the client
+                             places the actor 1.0 unit above the terrain and spirals stacked drops so
+                             they do not overlap.
+
+  An empty / all-zero tag-4 body produces the shared default model (201011001) at the world origin --
+  a useful sentinel an engineer should guard against (skip zero records).
+
+  UNKNOWNS to resolve with a capture of an area (re)entry that contains ground items:
+    - confirm the Reserved0 dword at offset 0x08 is genuinely unused (or a second quantity / flags word);
+    - confirm Key vs TemplateId vs Opaque labels against an item whose template and quantity differ;
+    - this record is delivered inside 4/4 -- confirm the surrounding tag framing when the full
+      SmsgAreaEntitySnapshot spec is authored.
+
+  UNBLOCKS: the ground-item branch of the SmsgAreaEntitySnapshot (4/4) handler.

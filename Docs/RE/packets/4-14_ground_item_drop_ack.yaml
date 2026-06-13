@@ -1,0 +1,62 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgGroundItemSlotAck   # canonical name in names.yaml / opcodes.md (alias: SmsgGroundItemDropAck)
+opcode: 0x4000e          # major 4 (Response), minor 14 -> (4 << 16) | 14
+direction: S2C
+size: 20                 # the handler reads a fixed 20-byte body (read length 0x14) before dispatch
+spec: packets/4-14_ground_item_drop_ack.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server reply to a CmsgDropItem (2/14) request. Reports whether the drop was accepted and, on success, carries the source-slot descriptor so the client spawns the dropped item at the dropper's feet. Pairs with the live SmsgCombatEffectInstanceSpawn (5/14) push for items dropped by other actors.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the named fields plus the header/echo region and
+# the two pad bytes sum to size: 20.
+fields:
+  - { name: Header,  type: "bytes[8]" }    # 0x00  header / echo region (not decoded; see notes)
+  - { name: Result,  type: u8 }            # 0x08  0=error (show UI error), 1=ok (spawn the drop)
+  - { name: Pad0,    type: "bytes[1]" }    # 0x09  alignment
+  - { name: Mode,    type: u8 }            # 0x0a  0=bag, 1=equip, 2=fixed, 0xFF=coin
+  - { name: Slot,    type: u8 }            # 0x0b  source slot index
+  - { name: Count,   type: i32 }           # 0x0c  drop count / coin amount
+  - { name: Opaque,  type: i32 }           # 0x10  opaque (carried into the spawned ground-item actor)
+
+notes: |
+  Static inference only; no capture available. Protocol facts are read directly from the client
+  (CODE-CONFIRMED for the 20-byte body read length, the result gate at offset 0x08, and the drop
+  sub-record fields the spawner reads at 0x0a/0x0b/0x0c/0x10) but no live capture confirms the bytes
+  on the wire (CAPTURE-UNVERIFIED). The semantics of the 0x00..0x07 header/echo region are
+  PLAUSIBLE only.
+
+  The handler reads a fixed 20-byte body. Frame = 8-byte header + 20 = 28 bytes on the wire.
+
+    0x00 (8B) Header : an 8-byte header / echo region preceding the result gate. The handler does not
+                         decode it into named fields on the ground-item path; modelled as an opaque
+                         fixed buffer so the layout sums to 20 bytes. Likely echoes request context.
+    0x08 (1B) Result : the result gate. 0 = error (the client shows a UI error and does nothing);
+                         1 = ok (the client spawns the dropped ground item at the local player's
+                         current world position).
+    0x09 (1B) Pad0   : one alignment byte before the drop sub-record; treat as don't-care.
+    0x0a (1B) Mode   : the source-slot kind of the dropped item:
+                         0    = bag-array slot,
+                         1    = equip slot,
+                         2    = fixed slot,
+                         0xFF = coin (the item id is forced to the coin template 217000501).
+    0x0b (1B) Slot   : the source slot index within whichever array Mode selects.
+    0x0c (4B) Count  : the drop count, or the coin amount when Mode == 0xFF.
+    0x10 (4B) Opaque : an opaque integer carried into the spawned ground-item actor record (mirrors
+                         the Param1 role in the 5/14 spawn); likely a quantity or flags word.
+
+  BEHAVIOUR: on Result == 1 the client resolves the dropped item's id from the slot descriptor
+  (Mode/Slot), spawns the ground item at the local player's current world position, and announces the
+  drop. The coin form (Mode == 0xFF) forces the coin template id 217000501 and the coin amount comes
+  from Count.
+
+  UNKNOWNS to resolve with a capture of a drop ack:
+    - decode the 0x00..0x07 header/echo region (whether it echoes the request key, a sequence value,
+      or carries the dropper id);
+    - confirm the pad byte after Result is unused;
+    - confirm the precise meaning of Opaque (quantity vs flags).
+
+  UNBLOCKS: Client.Application DropItem ack handler (paired with CmsgDropItem 2/14).

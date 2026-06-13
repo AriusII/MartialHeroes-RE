@@ -296,18 +296,28 @@ Nine additional icon DDS sheets reside in `data/ui/skillicon/` but are not enume
 | VFS path | File size (bytes) | Dimensions | Probable role | Confidence |
 |---|---|---|---|---|
 | `data/ui/skillicon/stateicon.dds` | 262,272 | 512×512 | Buff/debuff status icons (also uitex.txt id 0026) | SAMPLE-VERIFIED |
-| `data/ui/skillicon/cmonkicon.dds` | 262,272 | 512×512 | Common Monk class icon set | SAMPLE-VERIFIED |
-| `data/ui/skillicon/gungsaicon.dds` | 262,272 | 512×512 | Gungsa (crossbow) class icons | SAMPLE-VERIFIED |
-| `data/ui/skillicon/pmusaicon.dds` | 262,272 | 512×512 | Premium Musa class icons | SAMPLE-VERIFIED |
-| `data/ui/skillicon/sdocicon.dds` | 262,272 | 512×512 | Sdoc class icons | SAMPLE-VERIFIED |
-| `data/ui/skillicon/segumicon.dds` | 262,272 | 512×512 | Segum class icons | SAMPLE-VERIFIED |
-| `data/ui/skillicon/smusaicon.dds` | 262,272 | 512×512 | Smusa (super-warrior) icons | SAMPLE-VERIFIED |
-| `data/ui/skillicon/wizardicon.dds` | 262,272 | 512×512 | Wizard class overview icon | SAMPLE-VERIFIED |
-| `data/ui/skillicon/minddashicon.dds` | 131,200 | 512×256 | Mind dash (half-size sheet) | SAMPLE-VERIFIED |
+| `data/ui/skillicon/cmonkicon.dds` | 262,272 | 256×256 | Common Monk class icon set *(corrected 2026-06-13: 256×256 uncompressed ARGB32, not 512×512 DXT — 256×256×4 + 128 = 262,272; parser must decode as raw ARGB32, not a block-compressed sheet)* | SAMPLE-VERIFIED |
+| `data/ui/skillicon/gungsaicon.dds` | 262,272 | 256×256 | Gungsa (crossbow) class icons *(corrected 2026-06-13: 256×256 uncompressed ARGB32, not 512×512 DXT — parser must decode as raw ARGB32)* | SAMPLE-VERIFIED |
+| `data/ui/skillicon/pmusaicon.dds` | 262,272 | 256×256 | Premium Musa class icons *(corrected 2026-06-13: 256×256 uncompressed ARGB32, not 512×512 DXT — parser must decode as raw ARGB32)* | SAMPLE-VERIFIED |
+| `data/ui/skillicon/sdocicon.dds` | 262,272 | 256×256 | Sdoc class icons *(corrected 2026-06-13: 256×256 uncompressed ARGB32, not 512×512 DXT — parser must decode as raw ARGB32)* | SAMPLE-VERIFIED |
+| `data/ui/skillicon/segumicon.dds` | 262,272 | 256×256 | Segum class icons *(corrected 2026-06-13: 256×256 uncompressed ARGB32, not 512×512 DXT — parser must decode as raw ARGB32)* | SAMPLE-VERIFIED |
+| `data/ui/skillicon/smusaicon.dds` | 262,272 | 256×256 | Smusa (super-warrior) icons *(corrected 2026-06-13: 256×256 uncompressed ARGB32, not 512×512 DXT — parser must decode as raw ARGB32)* | SAMPLE-VERIFIED |
+| `data/ui/skillicon/wizardicon.dds` | 262,272 | 256×256 | Wizard class overview icon *(corrected 2026-06-13: 256×256 uncompressed ARGB32, not 512×512 DXT — parser must decode as raw ARGB32)* | SAMPLE-VERIFIED |
+| `data/ui/skillicon/minddashicon.dds` | 262,272 | 256×256 | Mind dash icon set *(corrected 2026-06-13: 256×256 uncompressed ARGB32 — not 512×256 DXT1; parser must decode as raw ARGB32)* | SAMPLE-VERIFIED |
 
 **Grand total under data/ui/skillicon/:** 22 entries (12 manifest sheets + 1 stateicon also in
 uitex.txt + 9 supplementary = 22 files, consistent with the observed VFS entry count for this
-subdirectory).
+subdirectory). One of those 22 is `skillicon.txt` itself (a text manifest, not a DDS), so the
+DDS-only count under this subdirectory is 21.
+
+> **Supplementary-sheet format correction (2026-06-13):** the eight supplementary class icon
+> sheets above — `cmonkicon.dds`, `gungsaicon.dds`, `pmusaicon.dds`, `sdocicon.dds`,
+> `segumicon.dds`, `smusaicon.dds`, `wizardicon.dds`, `minddashicon.dds` — are **256×256
+> uncompressed ARGB32**, NOT 512×512 (or 512×256) block-compressed DXT sheets as earlier
+> rows implied. Their 262,272-byte size matches 256×256×4 + 128, identical to a 512×512 DXT2
+> blob, so size alone is misleading; the DDS pixel-format flags confirm they carry no FourCC
+> block-compression marker. A parser MUST decode these eight sheets as raw ARGB32. The primary
+> 12 `(job, kind)` manifest sheets and `stateicon.dds` remain 512×512 block-compressed.
 
 > **Within-sheet icon layout:** resolved — see §2.6 below. The icon UV is data-driven per
 > skill, not a computed grid stride. Whether the supplementary sheets (stateicon.dds,
@@ -550,11 +560,19 @@ Example decoded lines:
 | `data/ui/guildicon/` (root) | 14 entries | 13 template crest sheets + `crestlist.txt` |
 
 **Pool blob size:** every pool entry is exactly **704 bytes** (SAMPLE-VERIFIED across multiple
-pool files). The precise pixel dimensions for a 704-byte DDS crest are not yet confirmed from
-a header read; the most consistent candidate is a 12×12 pixel uncompressed ARGB8888 image
-(12 × 12 × 4 bytes per pixel + 128-byte DDS header = 576 + 128 = 704 bytes), but this
-dimension is PARTIAL — the DDS header at bytes 0x0C–0x13 (height and width fields) has not
-been byte-confirmed from a pool entry.
+pool files), with one documented exception (`guildbasic.dds`, below). The precise pixel
+dimensions for a 704-byte DDS crest are not yet confirmed from a header read; the most consistent
+candidate is a 12×12 pixel uncompressed ARGB8888 image (12 × 12 × 4 bytes per pixel + 128-byte
+DDS header = 576 + 128 = 704 bytes), but this dimension is PARTIAL — the DDS header at bytes
+0x0C–0x13 (height and width fields) has not been byte-confirmed from a pool entry.
+
+**Non-standard pool entry — `guildbasic.dds` (added 2026-06-13; SAMPLE-VERIFIED):** the pool
+directory also holds `data/ui/guildicon/pool/guildbasic.dds`, which does **not** follow the
+704-byte user-crest convention. It is **72×48 pixels, DXT2, 3,584 bytes**. It is not a
+user-uploaded crest (wrong size and a name rather than the `{region}_{type}_{guild_id}_…`
+pattern of §3.2). It appears to be a built-in blank/default crest template stored alongside the
+user crests (PLAUSIBLE role). A parser scanning the pool by fixed 704-byte stride must treat this
+single file as an exception rather than assume a uniform blob size for the directory.
 
 **Template crest sheets (SAMPLE-VERIFIED):** the 13 template sheets are
 `data/ui/guildicon/guildcresticon1.dds` through `guildcresticon12.dds` and
@@ -570,8 +588,10 @@ from `data/ui/` can use this table to verify the expected file size given dimens
 | File size (bytes) | Dimensions | Block format | Mip chain | Byte formula |
 |---|---|---|---|---|
 | 2,097,280 | 1024×2048 | DXT3 | none | ceil(1024/4)×ceil(2048/4)×16 + 128 |
+| 2,097,280 | 1024×512 | Uncompressed ARGB32 | none | 1024×512×4 + 128 *(added 2026-06-13: same byte count as 1024×2048 DXT3 — ambiguous, see size-ambiguity note below)* |
 | 1,398,256 | 1024×1024 | DXT3 | full (11 levels) | sum of all mip levels + 128 |
 | 1,048,704 | 1024×1024 | DXT3 or DXT5 | none | ceil(1024/4)×ceil(1024/4)×16 + 128 |
+| 1,048,704 | 512×512 | Uncompressed ARGB32 | none | 512×512×4 + 128 *(added 2026-06-13: same byte count as 1024×1024 DXT3 — ambiguous, see size-ambiguity note below)* |
 | 786,560 | 1024×768 | DXT3 | none | ceil(1024/4)×ceil(768/4)×16 + 128 |
 | 699,216 | 1024×512 | DXT3 | full chain | sum of all mip levels + 128 |
 | 524,416 | 1024×512 | DXT3 | none | ceil(1024/4)×ceil(512/4)×16 + 128 |
@@ -592,7 +612,8 @@ from `data/ui/` can use this table to verify the expected file size given dimens
 | 0x00–0x03 | 4 bytes | Magic | `44 44 53 20` = "DDS " |
 | 0x0C–0x0F | 4 bytes u32LE | Height in pixels | |
 | 0x10–0x13 | 4 bytes u32LE | Width in pixels | |
-| 0x54–0x57 | 4 bytes ASCII | FourCC pixel format code | See table below |
+| 0x50–0x53 | 4 bytes u32LE | Pixel-format flags | `0x04` = block-compressed (FourCC present, e.g. DXTn); `0x41` = uncompressed ARGB (DDPF_ALPHAPIXELS \| DDPF_RGB, 32 bpp, no FourCC). The discriminator between same-byte-count DXT and ARGB32 files — see size-ambiguity note below *(added 2026-06-13)* |
+| 0x54–0x57 | 4 bytes ASCII | FourCC pixel format code | See table below. Only meaningful when the pixel-format flags at 0x50 indicate block compression (`0x04`); zero/ignored when 0x50 = `0x41` (uncompressed) |
 
 **FourCC observed values (SAMPLE-VERIFIED):**
 
@@ -619,6 +640,25 @@ from `data/ui/` can use this table to verify the expected file size given dimens
 >
 > **loginwindow.dds is the sole DXT5 file** in the entire `data/ui/` tree (SAMPLE-VERIFIED).
 
+### 4.1 Size-ambiguity note — file size alone does NOT determine format (SAMPLE-VERIFIED — 2026-06-13)
+
+Several window sheets were previously mis-recorded because a file's byte count is not unique to
+one (dimensions, format) pair. Two collisions matter for `data/ui/`:
+
+| File size (bytes) | Candidate A | Candidate B | How to disambiguate |
+|---|---|---|---|
+| 1,048,704 | 1024×1024 DXT3, no mips | 512×512 uncompressed ARGB32 | Read pixel-format flags at header offset 0x50: `0x04` = DXT3 (1024×1024); `0x41` = ARGB32 (512×512) |
+| 2,097,280 | 1024×2048 DXT3, no mips | 1024×512 uncompressed ARGB32 | Read pixel-format flags at header offset 0x50: `0x04` = DXT3 (1024×2048); `0x41` = ARGB32 (1024×512) |
+
+A parser MUST read the DDS pixel-format flags at offset 0x50 (and, when present, the FourCC at
+0x54) before deciding dimensions or decoder. It must NOT infer format from file size. The set of
+known 512×512 uncompressed ARGB32 windows that collide with 1024×1024 DXT3 at 1,048,704 bytes is:
+`characwindow.dds`, `masterwindow.dds`, `statusquestexitwindow.dds`, `shwdnwindow.dds`,
+`popdepositwindow.dds`, `skillprodotherwindow.dds`, `tradepartywindow.dds`, `login_base.dds`,
+and `blacksheet copy.dds`. The known 1024×512 ARGB32 window colliding at 2,097,280 bytes is
+`fame_buff_window.dds`. (All SAMPLE-VERIFIED from header reads — see §5.4 and the window-art
+census.)
+
 ---
 
 ## 5. Window DDS files NOT in uitex.txt (hard-coded paths; SAMPLE-VERIFIED)
@@ -632,7 +672,7 @@ in the `UiTex.txt` ID system. An engineer must hard-code their paths, not look t
 |---|---|---|---|---|
 | `data/ui/loginwindow.dds` | 1,048,704 | 1024×1024 | DXT5 | Login screen chrome — the only DXT5 in data/ui/ |
 | `data/ui/loginwindow_02.dds` | 1,048,704 | 1024×1024 | DXT3 | Login screen variant 2 |
-| `data/ui/login_base.dds` | 1,048,704 | 1024×1024 | DXT3 | Login base layer |
+| `data/ui/login_base.dds` | 1,048,704 | 512×512 | Uncompressed ARGB32 | Login base layer *(corrected 2026-06-13: real format is 512×512 uncompressed ARGB32, not 1024×1024 DXT3; same byte count — disambiguate via header pixel-format flags, §4)* |
 | `data/ui/login_new.dds` | 1,048,704 | 1024×1024 | DXT3 | New character creation screen |
 | `data/ui/login_slice1.dds` | 1,048,704 | 1024×1024 | DXT3 | Login screen slice 1 |
 | `data/ui/password.dds` | 1,398,256 | 1024×1024 | DXT3, full mips | Secondary password dialog |
@@ -672,18 +712,18 @@ in the `UiTex.txt` ID system. An engineer must hard-code their paths, not look t
 | VFS path | Size (bytes) | Dimensions | Format | Role |
 |---|---|---|---|---|
 | `data/ui/mainwindow.dds` | 1,048,704 | 1024×1024 | DXT3 | Main HUD chrome (also uitex 0001) |
-| `data/ui/characwindow.dds` | 1,048,704 | 1024×1024 | DXT3 | Character stats window |
-| `data/ui/masterwindow.dds` | 1,048,704 | 1024×1024 | DXT3 | Master/NPC window |
-| `data/ui/statusquestexitwindow.dds` | 1,048,704 | 1024×1024 | DXT3 | Status/quest/exit panel |
-| `data/ui/shwdnwindow.dds` | 1,048,704 | 1024×1024 | DXT3 | Shutdown confirmation |
+| `data/ui/characwindow.dds` | 1,048,704 | 512×512 | Uncompressed ARGB32 | Character stats window *(corrected 2026-06-13: real format is 512×512 uncompressed ARGB32, not 1024×1024 DXT3; same byte count — disambiguate via header pixel-format flags, §4)* |
+| `data/ui/masterwindow.dds` | 1,048,704 | 512×512 | Uncompressed ARGB32 | Master/NPC window *(corrected 2026-06-13: real format is 512×512 uncompressed ARGB32, not 1024×1024 DXT3; same byte count — disambiguate via header pixel-format flags, §4)* |
+| `data/ui/statusquestexitwindow.dds` | 1,048,704 | 512×512 | Uncompressed ARGB32 | Status/quest/exit panel *(corrected 2026-06-13: real format is 512×512 uncompressed ARGB32, not 1024×1024 DXT3; same byte count — disambiguate via header pixel-format flags, §4)* |
+| `data/ui/shwdnwindow.dds` | 1,048,704 | 512×512 | Uncompressed ARGB32 | Shutdown confirmation *(corrected 2026-06-13: real format is 512×512 uncompressed ARGB32, not 1024×1024 DXT3; same byte count — disambiguate via header pixel-format flags, §4)* |
 | `data/ui/moonpa.dds` | 1,048,704 | 1024×1024 | DXT3 | Moon-PA event window |
 | `data/ui/myway.dds` | 1,048,704 | 1024×1024 | DXT3 | My-way / personal path window |
 | `data/ui/pandemonium.dds` | 1,048,704 | 1024×1024 | DXT3 | Pandemonium event |
 | `data/ui/revengesummons.dds` | 1,048,704 | 1024×1024 | DXT3 | Revenge summons window |
-| `data/ui/skillprodotherwindow.dds` | 1,048,704 | 1024×1024 | DXT3 | Skill production window |
+| `data/ui/skillprodotherwindow.dds` | 1,048,704 | 512×512 | Uncompressed ARGB32 | Skill production window *(corrected 2026-06-13: real format is 512×512 uncompressed ARGB32, not 1024×1024 DXT3; same byte count — disambiguate via header pixel-format flags, §4)* |
 | `data/ui/skilltree.dds` | 1,048,704 | 1024×1024 | DXT3 | Skill tree view |
-| `data/ui/tradepartywindow.dds` | 1,048,704 | 1024×1024 | DXT3 | Trade/party window |
-| `data/ui/popdepositwindow.dds` | 1,048,704 | 1024×1024 | DXT3 | Deposit/bank pop window |
+| `data/ui/tradepartywindow.dds` | 1,048,704 | 512×512 | Uncompressed ARGB32 | Trade/party window *(corrected 2026-06-13: real format is 512×512 uncompressed ARGB32, not 1024×1024 DXT3; same byte count — disambiguate via header pixel-format flags, §4)* |
+| `data/ui/popdepositwindow.dds` | 1,048,704 | 512×512 | Uncompressed ARGB32 | Deposit/bank pop window *(corrected 2026-06-13: real format is 512×512 uncompressed ARGB32, not 1024×1024 DXT3; same byte count — disambiguate via header pixel-format flags, §4)* |
 | `data/ui/help.dds` | 1,048,704 | 1024×1024 | DXT3 | Help overlay |
 | `data/ui/itemshop.dds` | 1,048,704 | 1024×1024 | DXT3 | Item shop |
 | `data/ui/itemshoppop.dds` | 1,048,704 | 1024×1024 | DXT3 | Item shop popup 1 |
@@ -699,9 +739,9 @@ in the `UiTex.txt` ID system. An engineer must hard-code their paths, not look t
 | `data/ui/guildnewwindow.dds` | 1,048,704 | 1024×1024 | DXT3 | Guild new window |
 | `data/ui/ui_help1024.dds` | 1,048,704 | 1024×1024 | DXT3 | UI help full (1024 mode) |
 | `data/ui/ui_help800.dds` | 1,048,704 | 1024×1024 | DXT3 | UI help full (800 mode) |
-| `data/ui/fame_buff_window.dds` | 2,097,280 | 1024×2048 | DXT3 | Fame buff window (double-height) |
+| `data/ui/fame_buff_window.dds` | 2,097,280 | 1024×512 | Uncompressed ARGB32 | Fame buff window *(corrected 2026-06-13: real format is 1024×512 landscape uncompressed ARGB32, not 1024×2048 DXT3 double-height; same byte count — disambiguate via header pixel-format flags, §4)* |
 | `data/ui/12pahwangtext.dds` | 1,048,704 | 1024×1024 | DXT3 | 12-pahwang event text |
-| `data/ui/blacksheet copy.dds` | 1,048,704 | 1024×1024 | DXT3 | Blacksheet copy variant |
+| `data/ui/blacksheet copy.dds` | 1,048,704 | 512×512 | Uncompressed ARGB32 | Blacksheet copy variant *(corrected 2026-06-13: real format is 512×512 uncompressed ARGB32, not 1024×1024 DXT3; same byte count — disambiguate via header pixel-format flags, §4)* |
 
 ### 5.5 512×512 secondary windows
 
@@ -738,7 +778,7 @@ in the `UiTex.txt` ID system. An engineer must hard-code their paths, not look t
 |---|---|---|---|---|
 | `data/ui/broodwarmap.dds` | 1,048,704 | 1024×1024 | DXT3 | Brood War large map |
 | `data/ui/npc_helper.dds` | 524,416 | 1024×512 | DXT3 | NPC helper wide panel |
-| `data/ui/tender_window.dds` | 524,416 | 1024×512 | DXT3 | Tender/auction wide panel |
+| `data/ui/tender_window.dds` | 524,416 | 512×1024 | DXT2 | Tender/auction panel *(corrected 2026-06-13: real dimensions are 512 wide × 1024 tall portrait, format DXT2 — width and height were transposed in the prior 1024×512 DXT3 entry)* |
 | `data/ui/warstoneinfo.dds` | 699,216 | 1024×512 | DXT3, full mips | War stone info |
 | `data/ui/pahwangtext.dds` | 262,272 | 512×512 | DXT2/3 | Pa-hwang event text |
 
@@ -784,6 +824,20 @@ in the `UiTex.txt` ID system. An engineer must hard-code their paths, not look t
 > **1024×920** pixels, DXT3, file size 942,208 bytes (SAMPLE-VERIFIED:
 > ceil(1024/4) × ceil(920/4) × 16 + 128 = 256 × 230 × 16 + 128 = 942,208). The
 > 5 `anger_0x.dds` base sheets at 1,048,704 bytes are the full 1024×1024 sheets.
+
+### 5.10 Newly enumerated root windows (added 2026-06-13; SAMPLE-VERIFIED)
+
+The following root-level `data/ui/` DDS files were absent from the prior census and are recorded
+here. With these two entries, the full root-level `data/ui/` DDS census stands at **119 entries**.
+
+| VFS path | Size (bytes) | Dimensions | Format | Role |
+|---|---|---|---|---|
+| `data/ui/carrierpigeon.dds` | 65,664 | 256×256 | DXT2 | Carrier-pigeon channel icon — a small icon distinct from the 512×512 `carrierpigeonall.dds` / `carrierpigeonperson.dds` window chrome in §5.5 (PLAUSIBLE: chat-window channel button for carrier-pigeon mail) |
+| `data/ui/productnpc.dds` | 65,664 | 256×256 | DXT2 | Production/crafting NPC icon (PLAUSIBLE: portrait or icon for the crafting NPC dialog) |
+
+> Both are 256×256 DXT2; size 65,664 = ceil(256/4)×ceil(256/4)×16 + 128. Their attribution to a
+> specific widget is PLAUSIBLE (inferred from filename and dimensions); no draw-site trace has
+> confirmed the binding call.
 
 ---
 

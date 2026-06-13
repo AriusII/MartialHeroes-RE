@@ -1,0 +1,32 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgNpcOpenReq
+opcode: 0x20064           # major 2 (GameAction), minor 100 -> (2 << 16) | 100
+direction: C2S
+size: 1                   # fixed 1-byte body
+spec: packets/2-100_npc_open_req.yaml
+status: hypothesis
+capture_verified: false
+
+summary: One-byte "request open NPC panel" round-trip for the service NPC whose descriptor KIND byte is 0x19 (25). Instead of opening a pre-built panel locally, this NPC kind asks the server to open the panel; the body is a single byte.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field width sums to size: 1.
+fields:
+  - { name: Request, type: u8 }          # 0x00  single request byte (value not yet pinned)
+
+notes: |
+  Static inference only; no capture available. This is the request half of a server round-trip:
+  the KIND-0x19 NPC does not open a client-side panel directly — clicking it emits this 1-byte
+  message and waits for the server to drive the panel open. Body length is CODE-CONFIRMED (the
+  send-wrapper writes a fixed 1-byte body).
+
+    0x00 (1B) Request : a single request byte. Its concrete value is not yet pinned — it is likely
+                        a constant marker (and may simply be 0 or a fixed sub-id). Modelled as one
+                        u8 so the struct matches the confirmed 1-byte size.
+
+  fields not yet pinned — needs npc.scr sample / capture: confirm the exact byte value and whether
+  the server distinguishes which NPC opened the request via session state (no NPC id appears in
+  this 1-byte body, so the target must be tracked server-side from a prior interaction).
+
+  UNBLOCKS: Client.Application NpcOpenRequest use-case (server-driven panel open).

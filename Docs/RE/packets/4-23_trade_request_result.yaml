@@ -1,0 +1,64 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgUserTradeRequestResult
+opcode: 0x40017             # major 4 (Response), minor 23 -> (4 << 16) | 23
+direction: S2C
+size: 20                   # fixed 20-byte read by the trade-window-open handler
+spec: packets/4-23_trade_request_result.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server result for a player-trade request. A phase byte drives the client's trade-request state machine (incoming popup, accepted -> open window, or cancel/decline) and three actor-id fields identify the requester, target and responder.
+
+# Wire order, offset 0 = first payload byte. Pack=1; padding bytes modelled explicitly so the
+# summed widths equal size: 20. Only the fields the handler reads are named; the rest is filler.
+fields:
+  - { name: Pad0,        type: "bytes[4]" }  # 0x00  leading bytes not consumed by the trade path (generic ack header region)
+  - { name: RequesterId, type: u32 }       # 0x04  actor that issued the trade request
+  - { name: Pad1,        type: "bytes[2]" }  # 0x08  filler up to the phase byte
+  - { name: Phase,       type: u8 }        # 0x0a  trade phase selector (see notes)
+  - { name: Pad2,        type: "bytes[1]" }  # 0x0b  filler to the next dword
+  - { name: TargetId,    type: u32 }       # 0x0c  trade target id
+  - { name: ResponderId, type: u32 }       # 0x10  responder / canceller id
+
+notes: |
+  Static inference only; no capture available. Fixed 20-byte read; the layout (phase byte at offset
+  10, three actor ids at 4 / 12 / 16) is CODE-CONFIRMED from the handler's read order, CAPTURE-
+  UNVERIFIED in meaning. The handler is a PHASE MACHINE keyed on the byte at offset 0x0a (decimal
+  10), NOT the generic result/reason stereotype.
+
+    0x04 (4B) RequesterId : the actor that started the trade request (le u32).
+    0x0a (1B) Phase       : trade-request phase selector:
+                              0 = cancel / decline (end the request, close the trade/wait panels);
+                              2 = incoming request (show the "wants to trade" popup; if the local
+                                  player is busy, the client auto-accepts);
+                              3 = accepted -> open the trade window (own + partner panels).
+    0x0c (4B) TargetId    : the trade target id (le u32).
+    0x10 (4B) ResponderId : the responder / canceller id (le u32).
+
+  HANDLER BEHAVIOUR (from the static read order, for the engineer's mental model):
+    - Phase 2 (incoming): if TargetId == RequesterId (addressed to me) and I am not busy, show the
+      incoming-trade prompt; if I am busy, auto-accept by sending 2/23 mode 0. If it is not addressed
+      to me, it is routed to a different UI slot.
+    - Phase 3 (accepted): close the confirm popup, open the trade window and the partner item panel,
+      and set both side name labels. Own vs partner is resolved by comparing RequesterId (0x04)
+      against ResponderId (0x10).
+    - Phase 0 (cancel): close the trade / wait panels; if the canceller (ResponderId) is not the
+      original requester, show a decline notice; clear the trade context.
+
+  Note: the project's generic 4-family "ack" shape carries a result byte at 0x08 and a reason byte at
+  0x09. This message does NOT follow that shape -- its trade-specific selector is the Phase byte at
+  0x0a. Implementers must read 0x0a, not 0x08/0x09. (Pad1 at 0x08..0x09 covers that generic region;
+  do not assume it is meaningful for the trade path.)
+
+  RELATIONSHIP: this is the server reply to C2S 2/23 CmsgTradeRequest
+  (packets/2-23_trade_request.yaml). After phase 3 the in-window trade flow uses 2/24 / 2/25 and the
+  server's 4/24 / 4/25.
+
+  UNKNOWNS to resolve with a capture of a request -> accept and a request -> decline:
+    - the contents of Pad0 (0x00..0x03) and Pad1 (0x08..0x09) -- whether they carry a generic
+      result/reason that the trade path simply ignores;
+    - whether further phase values exist beyond 0 / 2 / 3.
+
+  UNBLOCKS: Client.Application trade-request-result handler (4/23).

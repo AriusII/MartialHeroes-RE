@@ -1,0 +1,38 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgNpcSell
+opcode: 0x20014           # major 2 (GameAction), minor 20 -> (2 << 16) | 20
+direction: C2S
+size: 12                  # fixed 12-byte payload built by the NPC-sell sender
+spec: packets/2-20_npc_sell.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Sell one inventory item to an NPC merchant. Emitted from the inventory/merchant flow when the player confirms a sale. The server replies with S2C 4/20 NpcSellItemAck.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 12.
+fields:
+  - { name: Word0, type: u32 }           # 0x00  first 4-byte word — meaning not yet pinned
+  - { name: Word1, type: u32 }           # 0x04  second 4-byte word — meaning not yet pinned
+  - { name: Word2, type: u32 }           # 0x08  third 4-byte word — meaning not yet pinned
+
+notes: |
+  Static inference only; no capture available. The NPC-sell sender builds a fixed 12-byte body, so
+  total payload = 12 bytes; frame = 8-byte header + 12 = 20 bytes on the wire. Body length is
+  CODE-CONFIRMED (the send-wrapper writes a fixed 12-byte body); the internal field split is NOT
+  yet pinned.
+
+  fields not yet pinned — needs npc.scr sample / capture. The three 4-byte words are expected to
+  carry, in some order: the NPC/target id, the source inventory slot index, and a sell quantity,
+  but neither the order nor the exact widths have been decoded from the binary this pass. They are
+  modelled here as three opaque u32 words so the struct size matches the confirmed 12-byte body.
+
+  RELATIONSHIP: pairs with C2S 2/19 (the merchant panel must be opened first) and is acknowledged
+  by S2C 4/20 SmsgNpcSellItemAck. The buy side is a separate opcode (2/115).
+
+  UNKNOWNS to resolve with a capture of a single NPC sale:
+    - which word is the target NPC id vs the source slot index vs the quantity;
+    - whether any word is actually two narrower fields (e.g. slot u16 + flags u16).
+
+  UNBLOCKS: Client.Application NpcSell use-case (ack 4/20).

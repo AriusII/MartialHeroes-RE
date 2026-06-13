@@ -10,6 +10,13 @@
 //      SkinnedCharacterBuilder / SkinnedCharacterNode — NO GltfDocument).
 //   4. Applies diffuse textures (PNG/BMP/DDS via AssetPassthrough → ImageTexture).
 //   5. Positions a camera over the terrain.
+//   6. PLAYER-FOLLOWING TERRAIN STREAMING: each frame, if the player crosses a cell boundary
+//      (Chebyshev distance ≥ 1 from the current streaming anchor with hysteresis), the streaming
+//      ring is re-centred on the player's current cell. The initial anchor is always the spawn-
+//      density peak (boot behaviour unchanged). New sectors are loaded asynchronously off the main
+//      thread; sectors > 2 cells from the new anchor are evicted by SectorStreamingService
+//      (Chebyshev eviction policy). spec: Docs/RE/specs/resource_pipeline.md §4.3 (streamer thread).
+//      spec: Docs/RE/formats/terrain.md §9.2 / §9.3 (ring eviction).
 //
 // GltfDocument.AppendFromBuffer is NOT used anywhere in this file. The native Godot GLB importer
 // was removed because it caused a native crash on our generated GLBs (no managed stack trace).
@@ -35,6 +42,7 @@ using Godot;
 using MartialHeroes.Assets.Parsers;
 using MartialHeroes.Assets.Parsers.Models;
 using MartialHeroes.Client.Application.World;
+using MartialHeroes.Client.Domain.Simulation;
 using MartialHeroes.Client.Godot.Adapters;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Dev;
@@ -121,6 +129,41 @@ public sealed partial class RealWorldRenderer : Node3D
 
     // Player controller reference: used to push TargetForCamera → CameraController each frame.
     private PlayerController? _playerController;
+
+    // -------------------------------------------------------------------------
+    // Player-following streaming state
+    //
+    // The streaming ring re-anchors when the player crosses a cell boundary, measured using
+    // Chebyshev distance from the current anchor.  Hysteresis: recenter only when the player
+    // is ≥ HysteresisThresholdCells cells away from the current anchor (avoids thrash when
+    // the player stands on a cell boundary and oscillates between two cells).
+    //
+    // Eviction policy: SectorStreamingService.UpdateCenterAsync already calls EvictOutOfRange
+    // which evicts all resident sectors with Chebyshev distance > 2 from the new anchor.
+    // For a 5×5 ring (radius 2) this bounds the resident set to at most 25 sectors, with a
+    // worst-case of 25 + up to (new ring - overlap) transient in-flight loads per recenter.
+    // spec: Docs/RE/formats/terrain.md §9.3 — eviction radius 2 (Chebyshev > 2). CONFIRMED.
+    // spec: Docs/RE/specs/resource_pipeline.md §4.3 — streamer thread follows the player: CODE-CONFIRMED.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Recenter only when the player moves ≥ this many cells (Chebyshev) from the current anchor.
+    /// Prevents thrash when the player walks along a cell boundary.
+    /// spec: Docs/RE/specs/resource_pipeline.md §4.3 — streaming ring follows the player cell. CODE-CONFIRMED.
+    /// </summary>
+    private const int HysteresisThresholdCells = 1;
+
+    // Current streaming anchor in biased cell coordinates (mapX, mapZ).
+    // Initialised from the spawn-density peak in TriggerTerrainStreaming; updated each recenter.
+    // spec: Docs/RE/formats/terrain.md §Overview — origin bias 10000, cell size 1024. CONFIRMED.
+    private (int MapX, int MapZ) _streamAnchor;
+
+    // True while a streaming update is in-flight (fire-and-forget Task still running).
+    // Guards against overlapping recenter tasks that would double-load the same sectors.
+    private volatile bool _isRecentering;
+
+    // True once TriggerTerrainStreaming has set _streamAnchor (arm signal for _Process).
+    private bool _followAnchorArmed;
 
     // Texture-resolution inputs, loaded once in Initialise after the target cell is resolved.
     // The confirmed two-hop chain is: cell/building 1-based index → the cell .map's per-section
@@ -338,18 +381,107 @@ public sealed partial class RealWorldRenderer : Node3D
     }
 
     /// <summary>
-    /// Each frame: push the player avatar's confirmed Godot position to the CameraController
-    /// so the Third-person orbit always follows the character.
+    /// Each frame:
+    ///   1. Push the player avatar's confirmed Godot position to the CameraController
+    ///      so the Third-person orbit always follows the character.
+    ///   2. Check whether the player has crossed a cell boundary. If the Chebyshev distance
+    ///      from the current streaming anchor to the player's current cell is ≥
+    ///      <see cref="HysteresisThresholdCells"/>, and no recenter is already in-flight,
+    ///      kick off an async <see cref="SectorStreamingService.UpdateCenterAsync"/> call with
+    ///      the player's cell as the new anchor. This is the player-following streaming loop:
+    ///      as the player walks south the southern cells load and the northern cells are evicted.
     ///
-    /// The CameraController reads PlayerGodotPosition in _Process to update its focus point.
-    /// This is purely a view update — no game logic.
+    /// Coordinate conversion (Godot → legacy world):
+    ///   The player's Godot position has Z negated relative to legacy world Z.
+    ///   legacyX = godotX  (X is unchanged)
+    ///   legacyZ = -godotZ  (negate back; spec: WorldCoordinates.ToGodot negate Z. CONFIRMED.)
+    ///   Cell: SectorGrid.WorldToSector(legacyX, legacyZ)
+    ///   spec: Docs/RE/formats/terrain.md §2 — cell key formula. CONFIRMED.
+    ///   spec: Docs/RE/specs/resource_pipeline.md §4.3 — streamer follows the player cell. CODE-CONFIRMED.
+    ///
+    /// Eviction: SectorStreamingService.UpdateCenterAsync → EvictOutOfRange evicts all resident
+    ///   sectors with Chebyshev distance > 2 from the new anchor automatically.
+    ///   spec: Docs/RE/formats/terrain.md §9.3 — eviction radius 2. CONFIRMED.
     ///
     /// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — "strictly passive rendering".
     /// </summary>
     public override void _Process(double delta)
     {
-        if (_cameraController is null || _playerController is null) return;
-        _cameraController.PlayerGodotPosition = _playerController.TargetForCamera;
+        if (_playerController is not null && _cameraController is not null)
+            _cameraController.PlayerGodotPosition = _playerController.TargetForCamera;
+
+        // ---- Player-following streaming ----
+        // Only runs when the follow anchor is armed (TriggerTerrainStreaming succeeded) and a
+        // ClientContext + player controller are available. No game logic here — pure presentation.
+        if (!_followAnchorArmed || _ctx is null || _playerController is null)
+            return;
+
+        // Read the player's Godot-space position (X unchanged, Z negated relative to legacy).
+        // spec: WorldCoordinates.ToGodot — (x,y,z) → (x,y,-z). CONFIRMED.
+        Vector3 godotPos = _playerController.TargetForCamera;
+        float legacyX = godotPos.X;
+        float legacyZ = -godotPos.Z; // negate back to legacy world Z
+
+        // Map to the biased (mapX, mapZ) cell coordinate.
+        // spec: Docs/RE/formats/terrain.md §2 — cell key formula: CONFIRMED.
+        (int playerMapX, int playerMapZ) = SectorGrid.WorldToSector(legacyX, legacyZ);
+
+        // Compute Chebyshev distance from the current streaming anchor.
+        int distX = Math.Abs(playerMapX - _streamAnchor.MapX);
+        int distZ = Math.Abs(playerMapZ - _streamAnchor.MapZ);
+        int chebyshev = Math.Max(distX, distZ);
+
+        // Hysteresis: only recenter when the player is ≥ HysteresisThresholdCells away and
+        // no async recenter is currently in-flight.
+        // spec: Docs/RE/specs/resource_pipeline.md §4.3 — streamer thread follows the player. CODE-CONFIRMED.
+        if (chebyshev < HysteresisThresholdCells || _isRecentering)
+            return;
+
+        // Capture locals for the closure (avoid capturing 'this' state that changes each frame).
+        int newAnchorX = playerMapX;
+        int newAnchorZ = playerMapZ;
+        (int OldX, int OldZ) oldAnchor = _streamAnchor;
+
+        // Update the anchor BEFORE launching the task so subsequent frames see the new anchor
+        // and do not queue another recenter for the same cell.
+        _streamAnchor = (newAnchorX, newAnchorZ);
+        _isRecentering = true;
+
+        GD.Print($"[RealWorldRenderer] StreamFollow: recenter anchor " +
+                 $"({oldAnchor.OldX},{oldAnchor.OldZ}) → ({newAnchorX},{newAnchorZ}) " +
+                 $"(Chebyshev={chebyshev}, player legacyXZ=({legacyX:F0},{legacyZ:F0})).");
+
+        CancellationToken lifetime = _lifetimeCts.Token;
+        ClientContext ctxCapture = _ctx;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ctxCapture.StreamingService.UpdateCenterAsync(newAnchorX, newAnchorZ, lifetime)
+                    .ConfigureAwait(false);
+
+                if (lifetime.IsCancellationRequested) return;
+
+                int resident = ctxCapture.StreamingService.ResidentCount;
+                GD.Print($"[RealWorldRenderer] StreamFollow: recenter to ({newAnchorX},{newAnchorZ}) " +
+                         $"complete — resident={resident} sectors.");
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected on node exit — silent.
+            }
+            catch (Exception ex)
+            {
+                if (!lifetime.IsCancellationRequested)
+                    GD.PrintErr($"[RealWorldRenderer] StreamFollow: UpdateCenterAsync error: {ex.Message}");
+            }
+            finally
+            {
+                // Always clear the in-flight flag so the next cell crossing can trigger a recenter.
+                _isRecentering = false;
+            }
+        }, lifetime);
     }
 
     // -------------------------------------------------------------------------
@@ -564,8 +696,22 @@ public sealed partial class RealWorldRenderer : Node3D
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Calls <see cref="SectorStreamingService.UpdateCenterAsync"/> for the target cell centre.
-    /// spec: Docs/RE/formats/terrain.md §12.2 — "5×5 ring (High quality) of sectors centred on the player cell".
+    /// Calls <see cref="SectorStreamingService.UpdateCenterAsync"/> for the initial spawn-anchor
+    /// cell and arms the player-following streaming loop.
+    ///
+    /// Boot behaviour: the initial anchor is the spawn-density peak (already resolved by
+    /// <see cref="ResolveTargetCell"/> before this method is called). This is unchanged from the
+    /// pre-follow behaviour.
+    ///
+    /// Follow behaviour: after boot, <see cref="_Process"/> checks the player position each frame
+    /// and recenter the streaming ring whenever the player moves ≥ <see cref="HysteresisThresholdCells"/>
+    /// cells (Chebyshev) from <see cref="_streamAnchor"/>. Each recenter calls
+    /// <see cref="SectorStreamingService.UpdateCenterAsync"/> which also evicts sectors that drifted
+    /// more than 2 cells from the new anchor (Chebyshev eviction).
+    ///
+    /// spec: Docs/RE/formats/terrain.md §12.2 — "5×5 ring (High quality) of sectors centred on the player cell". CONFIRMED.
+    /// spec: Docs/RE/specs/resource_pipeline.md §4.3 — streamer thread follows the player: CODE-CONFIRMED.
+    /// spec: Docs/RE/formats/terrain.md §9.3 — eviction at Chebyshev distance > 2: CONFIRMED.
     /// </summary>
     private void TriggerTerrainStreaming(ClientContext ctx)
     {
@@ -574,6 +720,11 @@ public sealed partial class RealWorldRenderer : Node3D
         // we rebind (reloads the area .lst manifest) — otherwise non-zero areas stream empty.
         // spec: Docs/RE/formats/terrain.md §1.1 (per-area path tag) + §1.2 (per-area manifest).
         ctx.StreamingService.SetArea(TargetAreaId);
+
+        // Initialise the streaming anchor to the resolved spawn-density peak.
+        // _Process will update this as the player moves.
+        // spec: Docs/RE/formats/terrain.md §Overview — origin bias 10000, cell size 1024. CONFIRMED.
+        _streamAnchor = (TargetMapX, TargetMapZ);
 
         // Tie the streaming task to this node's lifetime (Fix 4): cancelled in _ExitTree so it stops
         // and skips its completion prints once the node leaves the tree. spec: terrain.md §12.3.
@@ -603,7 +754,16 @@ public sealed partial class RealWorldRenderer : Node3D
             }
         }, lifetime);
 
-        GD.Print($"[RealWorldRenderer] Terrain streaming requested for centre ({TargetMapX},{TargetMapZ}).");
+        // Arm the follow-streaming loop (enables the _Process recenter checks).
+        // Done AFTER _streamAnchor is set so _Process never sees a zero anchor.
+        // spec: Docs/RE/specs/resource_pipeline.md §4.3 — streamer thread follows the player. CODE-CONFIRMED.
+        _followAnchorArmed = true;
+
+        GD.Print($"[RealWorldRenderer] Terrain streaming requested for centre ({TargetMapX},{TargetMapZ}). " +
+                 $"[StreamFollow] Player-following terrain streaming ARMED — anchor=({TargetMapX},{TargetMapZ}), " +
+                 $"hysteresis={HysteresisThresholdCells} cell(s). " +
+                 $"As the player moves, the ring will recenter and the 17 south NPCs will ground " +
+                 $"via the pending-snap mechanism as their sectors stream in.");
     }
 
     // -------------------------------------------------------------------------

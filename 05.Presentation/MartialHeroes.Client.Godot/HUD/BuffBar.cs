@@ -1,0 +1,267 @@
+// HUD/BuffBar.cs
+//
+// 30-slot HUD buff bar. Clears and rebuilds all slots from a BuffStateEvent each refresh.
+// Buff icons are resolved via BuffIconCatalog (stateicon.dds + buff_icon_position.xdb).
+//
+// Spec facts implemented:
+//   - 30 icon slots total.
+//     spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED — "buff bar has 30 icon slots".
+//   - buff_id ≤ 80  → 23×23 px cell, flowing left-to-right counter.
+//     spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED.
+//   - buff_id > 80  → 25×25 px cell, fixed per-slot screen position.
+//     spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED.
+//   - Per-refresh reset: hide all 30 slots, then re-show only active non-zero ones.
+//     spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED — "per-refresh reset".
+//   - buff_id == 0 marks an empty slot (skipped).
+//     spec: Docs/RE/formats/misc_data.md §1.6 / Docs/RE/packets/4-102_buff_state.yaml.
+//   - Duration rendering NOT implemented: unit (ms vs s) CAPTURE-UNVERIFIED.
+//     spec: Docs/RE/formats/misc_data.md §1.6 known unknowns ("duration rendering … not located").
+//
+// PASSIVE: zero game logic; subscribes to IHudEventHub.BuffStates and drains on _Process.
+// All Control mutation on the main thread (drain in _Process, never in a background task).
+
+using System.Threading.Channels;
+using Godot;
+using MartialHeroes.Client.Application.Hud;
+using MartialHeroes.Client.Godot.Adapters;
+
+namespace MartialHeroes.Client.Godot.HUD;
+
+/// <summary>
+/// The 30-slot HUD buff bar, displaying active buff/state icons from the server's 4/102 push.
+///
+/// <para><b>Slot layout</b></para>
+/// Two icon classes share the 30 slots:
+/// <list type="bullet">
+///   <item>buff_id ≤ 80: 23×23 px cells laid left-to-right with a flowing counter.</item>
+///   <item>buff_id &gt; 80: 25×25 px cells at fixed per-slot positions.</item>
+/// </list>
+/// spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED.
+///
+/// <para><b>Offline / demo mode</b></para>
+/// When no hub is bound (VFS offline, no server), the bar shows a small demo label.
+///
+/// <para><b>Binding</b></para>
+/// Call <see cref="Bind(IHudEventHub, BuffIconCatalog)"/> from the owning HUD or autoload to wire
+/// the bar to the Application event stream; the drain happens in <see cref="_Process"/>.
+/// </summary>
+public sealed partial class BuffBar : Control
+{
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Constants
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // 30 icon slots total.
+    // spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED — "buff bar has 30 icon slots".
+    private const int SlotCount = BuffStateEvent.SlotCount; // spec: misc_data.md §1.6
+
+    // Spacing between flowing buff-class icons.
+    private const int BuffSlotSpacing = 2;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  View state (not domain state)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Hub channel reader — drained in _Process.
+    private ChannelReader<BuffStateEvent>? _buffStates;
+
+    // The catalog used to resolve icon AtlasTextures.
+    private BuffIconCatalog? _iconCatalog;
+
+    // 30 TextureRect nodes — one per slot (built in _Ready).
+    private readonly TextureRect[] _slots = new TextureRect[SlotCount];
+
+    // Whether Bind() has been called.
+    private bool _bound;
+
+    // Demo label — shown when the bar is offline.
+    private Label? _demoLabel;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Godot lifecycle
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public override void _Ready()
+    {
+        try
+        {
+            BuildUi();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[BuffBar] _Ready failed: {ex.Message}");
+        }
+
+        GD.Print("[BuffBar] Ready. Call Bind(hub, catalog) to wire to Application event stream.");
+    }
+
+    public override void _Process(double delta)
+    {
+        if (_buffStates is null) return;
+
+        // Drain the latest-wins channel. ChannelReader.TryRead is allocation-free.
+        // All Control mutation here is on the main thread (Godot requirement).
+        while (_buffStates.TryRead(out BuffStateEvent? evt))
+        {
+            ApplyBuffState(evt);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Public Bind surface
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Wires the buff bar to the HUD event hub and the buff icon catalog.
+    /// Call this once from the owning HUD node after both are available.
+    /// Safe to call multiple times; subsequent calls are no-ops.
+    ///
+    /// <para>When <paramref name="hub"/> is null the bar remains in offline/demo mode.</para>
+    /// </summary>
+    /// <param name="hub">The application HUD event hub exposing the BuffStates channel.</param>
+    /// <param name="catalog">
+    /// The buff icon catalog backed by stateicon.dds + buff_icon_position.xdb.
+    /// Pass null to keep placeholder rendering.
+    /// </param>
+    public void Bind(IHudEventHub? hub, BuffIconCatalog? catalog)
+    {
+        if (_bound) return;
+        _bound = true;
+
+        _iconCatalog = catalog;
+
+        if (hub is not null)
+        {
+            _buffStates = hub.BuffStates;
+            GD.Print($"[BuffBar] Bound to IHudEventHub.BuffStates. " +
+                     $"BuffIconCatalog entries: {catalog?.TableCount ?? 0}.");
+        }
+        else
+        {
+            GD.Print("[BuffBar] Bound with null hub — offline/demo mode.");
+        }
+
+        // Hide the demo label once bound (real data expected).
+        if (_demoLabel is not null)
+            _demoLabel.Visible = hub is null;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  UI construction
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void BuildUi()
+    {
+        // The bar is a thin horizontal strip anchored to the top of whatever container it lives in.
+        // The parent HUD is responsible for positioning the bar.
+        SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        MouseFilter = MouseFilterEnum.Ignore;
+
+        // Container for the 30 slot TextureRects.
+        var hbox = new HBoxContainer
+        {
+            Name = "BuffSlots",
+            CustomMinimumSize = new Vector2(SlotCount * (BuffIconCatalog.StateCellSize + BuffSlotSpacing),
+                BuffIconCatalog.StateCellSize),
+        };
+        hbox.SetAnchorsAndOffsetsPreset(LayoutPreset.TopLeft);
+        AddChild(hbox);
+
+        for (int i = 0; i < SlotCount; i++)
+        {
+            var rect = new TextureRect
+            {
+                Name = $"Buff{i}",
+                // Default size: 25×25 (the larger of the two cell sizes — avoids layout shifts).
+                // spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED (state cell 25×25).
+                CustomMinimumSize = new Vector2(BuffIconCatalog.StateCellSize, BuffIconCatalog.StateCellSize),
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                MouseFilter = MouseFilterEnum.Ignore,
+            };
+            rect.Visible = false; // hidden until a refresh marks the slot active
+            hbox.AddChild(rect);
+            _slots[i] = rect;
+        }
+
+        // Demo label — shown in offline mode.
+        _demoLabel = new Label
+        {
+            Name = "DemoLabel",
+            Text = "[BuffBar — offline]",
+            Visible = true,
+        };
+        AddChild(_demoLabel);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Refresh logic (called on main thread from _Process)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Clears and rebuilds the 30 buff slots from the server snapshot.
+    ///
+    /// Per-refresh reset contract from spec:
+    ///   1. Clear and hide all 30 slots.
+    ///   2. For each record: if buff_id == 0, leave hidden.
+    ///   3. Otherwise look up buff_id in the catalog, choose cell size, show.
+    ///
+    /// spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED — "per-refresh reset".
+    /// </summary>
+    private void ApplyBuffState(BuffStateEvent evt)
+    {
+        // Step 1: clear all slots.
+        // spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED — "clears and hides all 30 slots … then re-shows".
+        for (int i = 0; i < SlotCount; i++)
+        {
+            _slots[i].Texture = null;
+            _slots[i].Visible = false;
+        }
+
+        // Flowing counter for buff-class (≤80) icons.
+        // spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED — "flowing left-to-right counter".
+        int flowingIndex = 0;
+
+        for (int i = 0; i < evt.Slots.Length && i < SlotCount; i++)
+        {
+            BuffSlot slot = evt.Slots[i];
+
+            // buff_id == 0 marks an empty slot — skip.
+            // spec: Docs/RE/formats/misc_data.md §1.6 / Docs/RE/packets/4-102_buff_state.yaml.
+            if (slot.IsEmpty) continue;
+
+            ushort buffId = slot.BuffId;
+
+            // Resolve icon from catalog (null-safe offline).
+            AtlasTexture? icon = _iconCatalog?.GetIcon(buffId);
+
+            int cellSize = BuffIconCatalog.CellSizeForId(buffId); // spec: misc_data.md §1.6
+
+            if (buffId <= BuffIconCatalog.BuffStateBoundary)
+            {
+                // Buff class: place at the next flowing slot position.
+                // spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED — "placed in the next free
+                //       position and the counter advances".
+                if (flowingIndex < SlotCount)
+                {
+                    TextureRect slotRect = _slots[flowingIndex++];
+                    slotRect.Texture = icon;
+                    slotRect.CustomMinimumSize = new Vector2(cellSize, cellSize);
+                    slotRect.Visible = true;
+                }
+            }
+            else
+            {
+                // State/debuff class: fixed per-slot screen position (use wire slot index i).
+                // spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED — "fixed per-slot screen position".
+                TextureRect slotRect = _slots[i];
+                slotRect.Texture = icon;
+                slotRect.CustomMinimumSize = new Vector2(cellSize, cellSize);
+                slotRect.Visible = true;
+            }
+        }
+
+        // Hide the demo label once we receive real server data.
+        if (_demoLabel is { Visible: true })
+            _demoLabel.Visible = false;
+    }
+}

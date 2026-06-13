@@ -1,0 +1,48 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgTradeRequest
+opcode: 0x20017           # major 2 (GameAction), minor 23 -> (2 << 16) | 23
+direction: C2S
+size: 8                  # fixed 8-byte payload built by the shared social-op sender
+spec: packets/2-23_trade_request.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client player-to-player trade request / response. Carries a 1-byte mode selector and a 4-byte actor id. Started from the right-click target "trade" menu; the server replies with 4/23 TradeRequestResult.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8.
+fields:
+  - { name: Mode,  type: u8 }          # 0x00  2 = request, 0 = accept / respond-OK (see notes)
+  - { name: Pad0,  type: "bytes[3]" }    # 0x01  filler to the next dword; written from uninitialised stack, treat as zero
+  - { name: Value, type: u32 }         # 0x04  target / responder actor id
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout, CAPTURE-UNVERIFIED meaning.
+  Same shared 8-byte "social op" shape as 2/30, 2/35, 2/36 and 2/37: a 1-byte mode at offset 0,
+  three filler bytes (uninitialised stack, write zero / ignore on read), then a 4-byte value at
+  offset 4.
+
+    0x00 (1B) Mode  : 2 = initiate trade request (opens the timed trade-request confirm popup on the
+                          target and sends the request);
+                      0 = accept / respond-OK (sent by the trade-request popup's accept button, and
+                          by the auto-accept path when the local player is already busy).
+                      Decline / cancel modes (likely 1 and/or 3, by symmetry with the leave/kick and
+                      party ops) are PLAUSIBLE but were NOT observed on a send path.
+    0x04 (4B) Value : the other party's actor id (le u32) -- the target for a request, the
+                      requester/responder for an accept.
+
+  CONTEXT (client-side gates, not wire fields): the request (mode 2) is blocked client-side when the
+  local player is not in a tradeable state (a "can't trade now" notice is shown instead of sending),
+  and the trade menu entry enforces level / zone / subscriber gates before sending. None of those
+  gates alter the 8 wire bytes.
+
+  RELATIONSHIP: shares the 8-byte shape with the other party/trade/guild C2S ops. Server reply is
+  4/23 SmsgUserTradeRequestResult (packets/4-23_trade_request_result.yaml), which is the phase
+  machine that opens or cancels the trade window. The in-window trade flow then continues with 2/24
+  (slot add/update) and 2/25 (confirm/cancel).
+
+  UNKNOWNS to resolve with a capture of a request -> accept and a request -> decline:
+    - the full Mode enum (decline / cancel values).
+
+  UNBLOCKS: Client.Application trade-request use-case.

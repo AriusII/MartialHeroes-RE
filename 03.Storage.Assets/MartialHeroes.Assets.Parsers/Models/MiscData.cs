@@ -27,20 +27,34 @@ public sealed class ActorSizeRecord
 /// One record from <c>buff_icon_position.xdb</c>. Stride: 12 bytes.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/misc_data.md §1.3 buff_icon_position.xdb: sample_verified true.
-/// buff_id u32 @ +0: HIGH. atlas_x u32 @ +4: HIGH. atlas_y u32 @ +8: HIGH.
-/// Icon cell size: 25 × 25 pixels. Origin convention: 1-based.
+/// spec: Docs/RE/formats/misc_data.md §1.3 buff_icon_position.xdb: sample_verified true; CODE-CONFIRMED.
+/// buff_id u32 @ +0: CODE-CONFIRMED. atlas_x i32 @ +4: CODE-CONFIRMED. atlas_y i32 @ +8: CODE-CONFIRMED.
+/// SPEC CORRECTION 2026-06-13: atlas_x / atlas_y are signed i32LE (not u32); the resolver returns them as
+/// a signed coordinate pair. Raw pixel values stored in the file; never inferred from a grid formula.
+/// spec: Docs/RE/formats/misc_data.md §1.3 — "(corrected 2026-06-13: atlas_x / atlas_y are signed i32LE)".
 /// </remarks>
 public sealed class BuffIconPositionRecord
 {
-    /// <summary>spec: §1.3 — buff_id u32 @ +0: HIGH.</summary>
+    /// <summary>
+    /// Buff-effect identifier (the lookup key); non-sequential; range 1–1103 observed.
+    /// spec: Docs/RE/formats/misc_data.md §1.3 — buff_id u32 @ +0: CODE-CONFIRMED.
+    /// </summary>
     public required uint BuffId { get; init; }
 
-    /// <summary>Pixel X of icon top-left corner within atlas. spec: §1.3 — atlas_x u32 @ +4: HIGH.</summary>
-    public required uint AtlasX { get; init; }
+    /// <summary>
+    /// Pixel X of icon cell top-left corner within stateicon.dds.
+    /// Signed (i32); some observed values fall off any regular 25-pixel grid.
+    /// spec: Docs/RE/formats/misc_data.md §1.3 — atlas_x i32 @ +4: CODE-CONFIRMED
+    ///   "(corrected 2026-06-13: i32LE, not u32LE)".
+    /// </summary>
+    public required int AtlasX { get; init; }
 
-    /// <summary>Pixel Y of icon top-left corner within atlas. spec: §1.3 — atlas_y u32 @ +8: HIGH.</summary>
-    public required uint AtlasY { get; init; }
+    /// <summary>
+    /// Pixel Y of icon cell top-left corner within stateicon.dds. Signed (i32).
+    /// spec: Docs/RE/formats/misc_data.md §1.3 — atlas_y i32 @ +8: CODE-CONFIRMED
+    ///   "(corrected 2026-06-13: i32LE, not u32LE)".
+    /// </summary>
+    public required int AtlasY { get; init; }
 }
 
 /// <summary>
@@ -176,4 +190,135 @@ public sealed class DescriptorRecord
     /// spec: Docs/RE/formats/misc_data.md §5 — reserved u8[27] @ +41: LOW.
     /// </summary>
     public required ReadOnlyMemory<byte> Reserved { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  mapsetting.scr  Zone bounding-box and fog table
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// One record from <c>data/script/mapsetting.scr</c>. Stride: 84 bytes (0x54).
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/misc_data.md §7.1 mapsetting.scr: SAMPLE-VERIFIED.
+/// No header; record count = file_size / 84. Known sample: 52 records (4 368 bytes).
+/// </remarks>
+public sealed class MapZoneRecord
+{
+    /// <summary>
+    /// Zone identifier (lookup key). Non-contiguous; not the array index.
+    /// spec: Docs/RE/formats/misc_data.md §7.1 — zone_id i32 @ 0x00: SAMPLE-VERIFIED.
+    /// </summary>
+    public required int ZoneId { get; init; }
+
+    /// <summary>
+    /// CP949-encoded zone name, NUL-terminated within the 36-byte field.
+    /// spec: Docs/RE/formats/misc_data.md §7.1 — zone_name char[36] CP949 @ 0x04: SAMPLE-VERIFIED.
+    /// </summary>
+    public required string ZoneName { get; init; }
+
+    /// <summary>
+    /// World-space X lower bound of the zone bounding box.
+    /// spec: Docs/RE/formats/misc_data.md §7.1 — world_min_x i32 @ 0x28: PLAUSIBLE.
+    /// </summary>
+    public required int WorldMinX { get; init; }
+
+    /// <summary>
+    /// World-space Z lower bound.
+    /// spec: Docs/RE/formats/misc_data.md §7.1 — world_min_z i32 @ 0x2C: PLAUSIBLE.
+    /// </summary>
+    public required int WorldMinZ { get; init; }
+
+    /// <summary>
+    /// World-space X upper bound.
+    /// spec: Docs/RE/formats/misc_data.md §7.1 — world_max_x i32 @ 0x30: PLAUSIBLE.
+    /// </summary>
+    public required int WorldMaxX { get; init; }
+
+    /// <summary>
+    /// World-space Z upper bound.
+    /// spec: Docs/RE/formats/misc_data.md §7.1 — world_max_z i32 @ 0x34: PLAUSIBLE.
+    /// </summary>
+    public required int WorldMaxZ { get; init; }
+
+    /// <summary>
+    /// Per-zone fog density. Observed: 1.30 (interior), 1.50 (rare), 1.70 (outdoor).
+    /// spec: Docs/RE/formats/misc_data.md §7.1 — fog_density f32 @ 0x40: PLAUSIBLE.
+    /// </summary>
+    public required float FogDensity { get; init; }
+
+    /// <summary>
+    /// Unknown packed flags at 0x38. 0x012C0001 in 50/52 records.
+    /// spec: Docs/RE/formats/misc_data.md §7.1 — flags_a i32 @ 0x38: UNKNOWN.
+    /// </summary>
+    public required int FlagsA { get; init; }
+
+    /// <summary>
+    /// Unknown flags at 0x3C. Usually 0x00000001.
+    /// spec: Docs/RE/formats/misc_data.md §7.1 — flags_b i32 @ 0x3C: UNKNOWN.
+    /// </summary>
+    public required int FlagsB { get; init; }
+
+    /// <summary>
+    /// Unknown field at 0x44. First record = 1, all others = 0.
+    /// spec: Docs/RE/formats/misc_data.md §7.1 — unknown_0x44 i32: UNKNOWN.
+    /// </summary>
+    public required int Unknown0x44 { get; init; }
+
+    /// <summary>
+    /// Unknown field at 0x48. Typically 0 or -1.
+    /// spec: Docs/RE/formats/misc_data.md §7.1 — unknown_0x48 i32: UNKNOWN.
+    /// </summary>
+    public required int Unknown0x48 { get; init; }
+
+    /// <summary>
+    /// Unknown field at 0x4C. High byte 0x64 constant; low 24 bits vary.
+    /// spec: Docs/RE/formats/misc_data.md §7.1 — unknown_0x4C i32: UNKNOWN.
+    /// </summary>
+    public required int Unknown0x4C { get; init; }
+
+    /// <summary>
+    /// Unknown field at 0x50. Always 0 in all 52 observed records.
+    /// spec: Docs/RE/formats/misc_data.md §7.1 — unknown_0x50 i32: UNKNOWN.
+    /// </summary>
+    public required int Unknown0x50 { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  regiontableNNN.bin  Per-area sub-zone label table
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// One record from <c>data/mapNNN/regiontableNNN.bin</c>. Stride: 32 bytes (0x20).
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/misc_data.md §7.2 regiontableNNN.bin: SAMPLE-VERIFIED (stride and name field).
+/// No header; record count = file_size / 32. Known: 52 records per area (1 664 bytes).
+/// Coordinate fields: PLAUSIBLE (may contain garbage for some sub-types — validate before use).
+/// </remarks>
+public sealed class RegionTableRecord
+{
+    /// <summary>
+    /// World-space X of sub-zone label. PLAUSIBLE — validate within area bounding box before use.
+    /// spec: Docs/RE/formats/misc_data.md §7.2 — center_x f32 @ 0x00: PLAUSIBLE.
+    /// </summary>
+    public required float CenterX { get; init; }
+
+    /// <summary>
+    /// World-space Z of sub-zone label. PLAUSIBLE.
+    /// spec: Docs/RE/formats/misc_data.md §7.2 — center_z f32 @ 0x04: PLAUSIBLE.
+    /// </summary>
+    public required float CenterZ { get; init; }
+
+    /// <summary>
+    /// Unknown 8 bytes at 0x08. Zero in all observed records.
+    /// spec: Docs/RE/formats/misc_data.md §7.2 — unknown_0x08 u8[8] @ 0x08: UNKNOWN.
+    /// </summary>
+    public required ReadOnlyMemory<byte> Unknown0x08 { get; init; }
+
+    /// <summary>
+    /// CP949-encoded sub-zone landmark name, NUL-terminated within the 16-byte field.
+    /// spec: Docs/RE/formats/misc_data.md §7.2 — sub_zone_name char[16] CP949 @ 0x10: PLAUSIBLE.
+    /// </summary>
+    public required string SubZoneName { get; init; }
 }

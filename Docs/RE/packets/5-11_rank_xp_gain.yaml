@@ -1,0 +1,50 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing is a static fact; the field layout is a static inference. capture_verified: false.
+
+name: SmsgRankXpGain
+opcode: 0x5000b           # major 5 (Push), minor 11 -> (5 << 16) | 11
+direction: S2C
+size: 20                 # fixed 20-byte payload block
+spec: packets/5-11_rank_xp_gain.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server pushes a rank / honor experience gain for the local player. This is a SEPARATE progression channel from character XP (5/9): it advances a rank/honor accumulator and a within-rank progress value, with no HP/MP or character-level math. Caps at the top rank.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 20.
+fields:
+  - { name: ActorId,   type: u32 }   # 0x00  recipient actor id
+  - { name: ActorSort, type: u32 }   # 0x04  recipient actor sort
+  - { name: Amount,    type: u64 }   # 0x08  rank/honor XP amount
+  - { name: Mode,      type: u8 }    # 0x10  add mode: 2 = add directly to the rank accumulator (no level math)
+  - { name: Pad0,      type: "bytes[3]" }  # 0x11  alignment padding to 20 bytes
+
+notes: |
+  CODE-CONFIRMED layout, CAPTURE-UNVERIFIED. Total = 20 bytes (matches the handler's read frame). This
+  is a DISTINCT channel from character XP (5/9 SmsgExpGain): rank/honor XP feeds a rank progression
+  system, not the character exp bar. Local-player gated.
+
+    0x00 (4B) ActorId   : the recipient actor id.
+    0x04 (4B) ActorSort : the recipient actor sort. NOTE the field order here is (id, sort) -- the
+                          reverse of the (sort, id) order used by 5/9 ExpGain. Trust this order.
+    0x08 (8B) Amount    : the rank/honor XP amount, added to the rank accumulator and the within-rank
+                          progress value.
+    0x10 (1B) Mode      : add mode. A value of 2 adds the amount DIRECTLY to the rank accumulator with
+                          no rank-table / level math; other values route the amount through the rank
+                          progression table to advance the rank and carry the remainder as within-rank
+                          progress. Rank advancement caps at the top rank.
+    0x11 (3B) Pad0      : alignment padding, read into the struct.
+
+  PRESENTATION (NOT wire fields): like 5/9, the display can apply a server-set rank-XP bonus-rate
+  percentage held in a client global (not on this wire). Floating text uses UI string id 10017 (rank
+  XP gain, with optional bonus) or 10015 (no gain). The rank-progression per-level table is a client
+  global, not part of this packet.
+
+  UNKNOWNS to resolve with a rank-XP capture:
+    - confirm the (id, sort) field order vs 5/9's (sort, id);
+    - the full Mode enum beyond the named "2 = direct add";
+    - whether the 3 bytes at 0x11 are pure padding or carry sub-fields.
+
+  RELATED: 5/9 SmsgExpGain (packets/5-9_exp_gain.yaml) is the character-XP channel; 5/32 SmsgLevelUp
+  (packets/5-32_level_up.yaml) also carries a rank-XP tail for the local player. UNBLOCKS the rank/
+  honor progression path in Client.Application.

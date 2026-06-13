@@ -91,17 +91,18 @@ public static class XdbParser
             int offset = i * BuffIconStride;
             ReadOnlySpan<byte> rec = span.Slice(offset, BuffIconStride);
 
-            // buff_id u32le @ +0. HIGH.
-            // spec: Docs/RE/formats/misc_data.md §1.3 — "buff_id u32 @ 0: HIGH".
+            // buff_id u32le @ +0. CODE-CONFIRMED.
+            // spec: Docs/RE/formats/misc_data.md §1.3 — "buff_id u32 @ 0: CODE-CONFIRMED".
             uint buffId = BinaryPrimitives.ReadUInt32LittleEndian(rec[0..]);
 
-            // atlas_x u32le @ +4. HIGH.
-            // spec: Docs/RE/formats/misc_data.md §1.3 — "atlas_x u32 @ 4: HIGH".
-            uint atlasX = BinaryPrimitives.ReadUInt32LittleEndian(rec[4..]);
+            // atlas_x i32le @ +4. CODE-CONFIRMED.
+            // SPEC CORRECTION 2026-06-13: signed i32LE, not u32LE — resolver returns a signed coordinate pair.
+            // spec: Docs/RE/formats/misc_data.md §1.3 — "atlas_x i32 @ 4: CODE-CONFIRMED (corrected 2026-06-13)".
+            int atlasX = BinaryPrimitives.ReadInt32LittleEndian(rec[4..]);
 
-            // atlas_y u32le @ +8. HIGH.
-            // spec: Docs/RE/formats/misc_data.md §1.3 — "atlas_y u32 @ 8: HIGH".
-            uint atlasY = BinaryPrimitives.ReadUInt32LittleEndian(rec[8..]);
+            // atlas_y i32le @ +8. CODE-CONFIRMED.
+            // spec: Docs/RE/formats/misc_data.md §1.3 — "atlas_y i32 @ 8: CODE-CONFIRMED (corrected 2026-06-13)".
+            int atlasY = BinaryPrimitives.ReadInt32LittleEndian(rec[8..]);
 
             results[i] = new BuffIconPositionRecord
             {

@@ -131,6 +131,11 @@ public sealed partial class EnvironmentNode : Node3D
     private AreaEnvironment? _env;
     private int _areaId;
 
+    // Sky dome rendering node (star + cloud domes). Null when VFS absent or domes not enabled.
+    // Owned by this node; created and parented in Configure.
+    // spec: Docs/RE/specs/environment.md §6 — Godot reconstruction guidance for sky domes.
+    private SkyDomeNode? _skyDome;
+
     // Cached fallback directional light direction in Godot space (computed once in Configure).
     private Vector3 _sunDirGodot = Vector3.Zero;
     private bool _hasSunDir;
@@ -195,6 +200,11 @@ public sealed partial class EnvironmentNode : Node3D
         // direction exists — §8.4). Default to the spec's hard-coded fallback when light is absent.
         ResolveSunDirection();
 
+        // Build sky domes (star + cloud) when their flags allow.
+        // spec: Docs/RE/specs/environment.md §3.1 steps 4–5 — gated by stardome_enable / clouddome_enable.
+        // Domes are suppressed for indoor areas (spec §5.1) and when the parsed flags are absent.
+        BuildSkyDomes();
+
         // Seed at noon and apply once immediately so the first rendered frame is daylight.
         _clockMs = NoonKeyframe * KeyframeMs;
         _appliedKeyframe = -1;
@@ -235,6 +245,10 @@ public sealed partial class EnvironmentNode : Node3D
         float frac = (float)((_clockMs % KeyframeMs) / KeyframeMs);
 
         ApplyKeyframe(kf, frac);
+
+        // Update sky domes (star/cloud tint, visibility, UV scroll) from the same clock.
+        // spec: Docs/RE/specs/environment.md §3.2 step 4 — compute star_kf_index and star_frac.
+        _skyDome?.UpdateDomes(_clockMs, delta);
     }
 
     // -------------------------------------------------------------------------
@@ -424,6 +438,49 @@ public sealed partial class EnvironmentNode : Node3D
         (float gx, float gy, float gz) = WorldCoordinates.ToGodot(dx, dy, dz);
         _sunDirGodot = new Vector3(gx, gy, gz);
         _hasSunDir = _sunDirGodot.LengthSquared() > 1e-6f;
+    }
+
+    // -------------------------------------------------------------------------
+    // Sky dome wiring
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Creates and builds the <see cref="SkyDomeNode"/> child from the loaded area environment.
+    ///
+    /// Suppressed when:
+    ///   - VFS data is absent (_env is null).
+    ///   - The area is indoor (indoor_flag = 1 suppresses all sky domes — spec §5.1).
+    ///   - Both stardome and clouddome bins are null (files absent for this area).
+    ///
+    /// spec: Docs/RE/specs/environment.md §5.1 — indoor areas suppress cloud dome, star dome.
+    /// spec: Docs/RE/specs/environment.md §3.1 steps 4–5 — star/clouddome gated by enable flags.
+    /// spec: Docs/RE/specs/environment.md §7 — fallback: domes absent → graceful no-op.
+    /// </summary>
+    private void BuildSkyDomes()
+    {
+        if (_env is null) return;
+
+        // Indoor areas suppress all sky subsystems including domes.
+        // spec: Docs/RE/specs/environment.md §5.1 — indoor_flag = 1 suppresses domes.
+        if (_env.MapOption is { IndoorFlag: 1 })
+        {
+            GD.Print("[SkyDome] indoor area — domes suppressed.");
+            return;
+        }
+
+        // Both dome bins may be null when their VFS files are absent; that is graceful.
+        // spec: Docs/RE/specs/environment.md §7 — stardome absent → white; clouddome absent → white.
+        if (_env.StarDome is null && _env.CloudDome is null)
+        {
+            GD.Print("[SkyDome] no dome bins available — no sky domes created.");
+            return;
+        }
+
+        _skyDome = new SkyDomeNode { Name = "SkyDomeNode" };
+        AddChild(_skyDome);
+
+        // Build the dome meshes from parsed data (graceful when either bin is null).
+        _skyDome.Build(_env.StarDome, _env.CloudDome, _env.CloudCycle);
     }
 
     // -------------------------------------------------------------------------

@@ -1,0 +1,56 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgDropItem
+opcode: 0x2000e           # major 2 (GameAction), minor 14 -> (2 << 16) | 14
+direction: C2S
+size: 8                  # fixed 8-byte payload built by the client drop sender
+spec: packets/2-14_drop_item.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client drop request. Drops an inventory item (or a coin stack) onto the ground at the local player's feet. The server replies with S2C 4/14 SmsgGroundItemDropAck, which carries the result and spawns the world item.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths plus the 2-byte pad sum to size: 8.
+fields:
+  - { name: Mode,  type: u8 }            # 0x00  source-slot kind: 0=bag, 1=equip, 2=staged, 0xFF=coin
+  - { name: Slot,  type: u8 }            # 0x01  slot index within the chosen source array
+  - { name: Pad0,  type: "bytes[2]" }    # 0x02  alignment pad (not initialised by the sender)
+  - { name: Count, type: u32 }           # 0x04  quantity to drop, or coin amount when Mode == 0xFF
+
+notes: |
+  Static inference only; no capture available. Protocol facts are read directly from the client
+  (CODE-CONFIRMED layout) but no live capture confirms the bytes on the wire (CAPTURE-UNVERIFIED).
+
+  The client drop sender builds a fixed 8-byte payload, so total payload = 8 bytes. Frame =
+  8-byte header + 8 = 16 bytes on the wire.
+
+    0x00 (1B) Mode  : which inventory surface the item is taken from:
+                        0    = bag slot (the 20-slot carry inventory),
+                        1    = equipped slot,
+                        2    = staged / fixed slot,
+                        0xFF = coin (money). For the coin form the dropped ground item resolves to
+                               the coin/money template id 217000501 (see CmsgPickupItem and the
+                               4/14 / 5/14 specs, which reuse the same coin id).
+    0x01 (1B) Slot  : the index inside whichever source array Mode selected. Ignored for the coin
+                        form (the amount in Count is authoritative there).
+    0x02 (2B) Pad0  : two bytes the sender does not initialise; modelled as a fixed pad to keep the
+                        payload an even 8 bytes. Treat as don't-care on send; do not read on receive.
+    0x04 (4B) Count : the quantity. For an item stack this is the number of units to drop; for the
+                        coin form (Mode == 0xFF) it is the coin amount. The client validates Count
+                        against the held stack / current gold before sending.
+
+  CLIENT-SIDE PRE-VALIDATION (read from the drop driver; the engine should mirror these so a drop is
+  not emitted when the server would reject it):
+    - coin form (Mode == 0xFF): the amount must not exceed the player's current gold;
+    - item form: the resolved item must carry the droppable flag, and the client must be in-game and
+      action-ready (not in a blocking UI / dialog).
+  On a coin drop the client also predicts locally by decrementing displayed gold immediately; the
+  authoritative change waits for the 4/14 ack.
+
+  UNKNOWNS to resolve with a capture of an item drop and a coin drop:
+    - confirm the two pad bytes at 0x02 are unused on the wire (and carry no flags);
+    - confirm Mode 0 ("bag") vs Mode 2 ("staged/fixed") map to the UI actions assumed here -- both
+      resolve item ids from slot arrays and the precise distinction is PLAUSIBLE only.
+
+  UNBLOCKS: Client.Application DropItem use-case (paired with the 4/14 SmsgGroundItemDropAck handler).

@@ -1,0 +1,35 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgQuestItemKeep
+opcode: 0x2008f           # major 2 (GameAction), minor 143 -> (2 << 16) | 143
+direction: C2S
+size: 4                   # fixed 4-byte body
+spec: packets/2-143_quest_item_keep.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Open request for the quest-item-keep (quest-item hold) service, sent when the player clicks an NPC whose descriptor KIND byte is 0x23 (35). A short fixed 4-byte body that asks the server to open the quest-item-hold panel.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field width sums to size: 4.
+fields:
+  - { name: Word0, type: u32 }           # 0x00  single 4-byte word — meaning not yet pinned
+
+notes: |
+  Static inference only; no capture available. The KIND-0x23 NPC path emits this 4-byte open
+  request to ask the server to open the quest-item-keep panel. Body length is CODE-CONFIRMED (the
+  send-wrapper writes a fixed 4-byte body).
+
+    0x00 (4B) Word0 : a single 4-byte word. The most likely content is the active-target field (the
+                      clicked NPC id), by analogy with the other open/interact senders in this lane,
+                      but this is NOT yet pinned. Modelled as one u32 so the struct matches the
+                      confirmed 4-byte size.
+
+  fields not yet pinned — needs npc.scr sample / capture: confirm whether Word0 is the NPC id, a
+  fixed request marker, or a sub-action selector; and whether the response is server-driven panel
+  open (no separate id needed because the target is tracked from the click).
+
+  RELATIONSHIP: this is an OPEN request only; any subsequent deposit/withdraw of quest items into
+  the hold (if it uses a distinct opcode) was not isolated this pass and is an open question.
+
+  UNBLOCKS: Client.Application QuestItemKeepOpen use-case.

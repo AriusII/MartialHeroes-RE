@@ -45,7 +45,8 @@ foreach (string root in DefaultClientRoots())
 // --- Parse arguments ---
 if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) &&
     args[0] is "scan-mot" or "scan-bnd" or "scan-skn" or "scan-ui" or
-               "dump-msgxdb" or "dump-uitex" or "scan-xeff" or "scan-sound")
+               "dump-msgxdb" or "dump-uitex" or "scan-xeff" or "scan-sound" or "scan-fx" or
+               "dump-do" or "scan-minimap" or "scan-quest")
 {
     // Subcommand routing; handle --inf / --vfs overrides from the tail of args first.
     string subcmd = args[0];
@@ -77,9 +78,13 @@ if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) &&
         "scan-ui"     => RunScanUi(archive, subcmdArgs),
         "dump-msgxdb" => RunDumpMsgXdb(archive, subcmdArgs, cp949),
         "dump-uitex"  => RunDumpUitex(archive, subcmdArgs, cp949),
-        "scan-xeff"   => RunScanXeff(archive, subcmdArgs),
-        "scan-sound"  => RunScanSound(archive, subcmdArgs),
-        _             => 2,
+        "scan-xeff"    => RunScanXeff(archive, subcmdArgs),
+        "scan-sound"   => RunScanSound(archive, subcmdArgs),
+        "scan-fx"      => RunScanFx(archive, subcmdArgs),
+        "dump-do"      => RunDumpDo(archive, subcmdArgs, cp949),
+        "scan-minimap" => RunScanMinimap(archive, subcmdArgs, cp949),
+        "scan-quest"   => RunScanQuest(archive, subcmdArgs, cp949),
+        _              => 2,
     };
 }
 
@@ -204,7 +209,7 @@ if (census || (substrings.Count == 0 && extensions.Count == 0 && !countOnly))
     // Fall through with no further listing when run with zero args (summary already shown).
     Console.WriteLine();
     Console.WriteLine("Pass substrings, --ext, --head, --contains or --count to drill in. --help for all.");
-    Console.WriteLine("Subcommands: scan-mot | scan-bnd | scan-skn | scan-ui | dump-msgxdb | dump-uitex | scan-xeff | scan-sound");
+    Console.WriteLine("Subcommands: scan-mot | scan-bnd | scan-skn | scan-ui | dump-msgxdb | dump-uitex | scan-xeff | scan-sound | scan-fx | dump-do | scan-minimap | scan-quest");
     return 0;
 }
 
@@ -909,6 +914,426 @@ static int RunScanSound(MappedVfsArchive archive, string[] args)
 }
 
 // ============================================================================
+// SUBCOMMAND: scan-fx
+// ============================================================================
+// Census all .fx1–.fx7 terrain layer files: count per layer, file-size
+// distribution, and — critically — header offset 0x0C (field[3]) value
+// histogram across all files of each layer. This resolves the FX2 field[3]
+// conflict documented in effects.md (IDA says 15; sample observation says 50).
+// spec: Docs/RE/formats/terrain_layers.md §Section 1
+// ============================================================================
+
+static int RunScanFx(MappedVfsArchive archive, string[] args)
+{
+    // FX layer extensions and their nominal header size in bytes.
+    // spec: Docs/RE/formats/terrain_layers.md §1.5 FX1 Header = 24 bytes: CONFIRMED.
+    // spec: Docs/RE/formats/terrain_layers.md §1.6 FX2 Header = 24 bytes: CONFIRMED.
+    // spec: Docs/RE/formats/terrain_layers.md §1.7 FX3 Header = 48 bytes: CONFIRMED.
+    // spec: Docs/RE/formats/terrain_layers.md §1.8 FX5 Header = 40+12 bytes per section: CONFIRMED.
+    // FX4/FX6/FX7 header sizes: PLAUSIBLE from pattern observation.
+    var layerExts = new[] { ".fx1", ".fx2", ".fx3", ".fx4", ".fx5", ".fx6", ".fx7" };
+
+    // Per-layer accumulators: count, size total, field[3] histogram (at header offset 0x0C)
+    var counts     = new Dictionary<string, int>(StringComparer.Ordinal);
+    var sizeTotals = new Dictionary<string, long>(StringComparer.Ordinal);
+    // field3 value → count, per layer
+    var field3Histo = new Dictionary<string, SortedDictionary<uint, int>>(StringComparer.Ordinal);
+    // Also track field[0] (type_tag) histogram per layer
+    var field0Histo = new Dictionary<string, SortedDictionary<uint, int>>(StringComparer.Ordinal);
+    // Track field[4] (mesh_count equivalent for FX1/FX2) for size formula verification
+    var field4Histo = new Dictionary<string, SortedDictionary<uint, int>>(StringComparer.Ordinal);
+    // Track field[5] (index_count equivalent for FX1/FX2) for size formula verification
+    var field5Histo = new Dictionary<string, SortedDictionary<uint, int>>(StringComparer.Ordinal);
+    int parseErrors = 0;
+
+    foreach (string ext in layerExts)
+    {
+        counts[ext]     = 0;
+        sizeTotals[ext] = 0;
+        field3Histo[ext] = new SortedDictionary<uint, int>();
+        field0Histo[ext] = new SortedDictionary<uint, int>();
+        field4Histo[ext] = new SortedDictionary<uint, int>();
+        field5Histo[ext] = new SortedDictionary<uint, int>();
+    }
+
+    foreach (VfsEntry e in archive.GetEntries())
+    {
+        string ext = ExtOf(e.Name);
+        if (!counts.ContainsKey(ext)) continue;
+
+        counts[ext]++;
+        sizeTotals[ext] += e.DataSize;
+
+        // Need at least 24 bytes to read the first 6 uint32 fields (6 × 4 = 24).
+        ReadOnlyMemory<byte> raw = archive.GetFileContent(e.Name);
+        if (raw.Length < 24) { parseErrors++; continue; }
+
+        ReadOnlySpan<byte> hdr = raw.Span[..24];
+
+        // field[0] at +0x00 (type_tag): u32 LE
+        // spec: Docs/RE/formats/terrain_layers.md §1.5 — type_tag @ 0x00: CONFIRMED constant=1 in FX1.
+        uint f0 = BinaryPrimitives.ReadUInt32LittleEndian(hdr[0..4]);
+        // field[3] at +0x0C (render_state / contested field): u32 LE
+        // spec: Docs/RE/formats/terrain_layers.md §1.6 — render_state @ 0x0C value=15 for FX2: UNVERIFIED.
+        // hypothesis: June 2026 sample saw 50 for FX2; this scan will arbitrate.
+        uint f3 = BinaryPrimitives.ReadUInt32LittleEndian(hdr[12..16]);
+        // field[4] at +0x10 (mesh_count in FX1/FX2): u32 LE
+        // spec: Docs/RE/formats/terrain_layers.md §1.5 — mesh_count @ 0x10: CONFIRMED.
+        uint f4 = BinaryPrimitives.ReadUInt32LittleEndian(hdr[16..20]);
+        // field[5] at +0x14 (index_count in FX1/FX2): u32 LE
+        // spec: Docs/RE/formats/terrain_layers.md §1.5 — index_count @ 0x14: CONFIRMED.
+        uint f5 = BinaryPrimitives.ReadUInt32LittleEndian(hdr[20..24]);
+
+        field0Histo[ext].TryGetValue(f0, out int f0n); field0Histo[ext][f0] = f0n + 1;
+        field3Histo[ext].TryGetValue(f3, out int f3n); field3Histo[ext][f3] = f3n + 1;
+        field4Histo[ext].TryGetValue(f4, out int f4n); field4Histo[ext][f4] = f4n + 1;
+        field5Histo[ext].TryGetValue(f5, out int f5n); field5Histo[ext][f5] = f5n + 1;
+    }
+
+    Console.WriteLine($"\nscan-fx: terrain layer file census");
+    Console.WriteLine($"  parse errors: {parseErrors:N0}");
+    Console.WriteLine();
+
+    foreach (string ext in layerExts)
+    {
+        int cnt = counts[ext];
+        Console.WriteLine($"  {ext}: {cnt:N0} files, {sizeTotals[ext]:N0} bytes total");
+        if (cnt == 0) continue;
+        Console.WriteLine($"    field[0] (type_tag @ 0x00) distinct values:");
+        foreach ((uint v, int n) in field0Histo[ext])
+            Console.WriteLine($"      {v,6} (0x{v:X4}) × {n,5:N0}");
+        Console.WriteLine($"    field[3] (@ 0x0C) distinct values:");
+        foreach ((uint v, int n) in field3Histo[ext])
+            Console.WriteLine($"      {v,6} (0x{v:X4}) × {n,5:N0}");
+        Console.WriteLine($"    field[4] (@ 0x10) distinct values (top 10):");
+        int shown4 = 0;
+        foreach ((uint v, int n) in field4Histo[ext].OrderByDescending(p => p.Value))
+        {
+            Console.WriteLine($"      {v,6} (0x{v:X4}) × {n,5:N0}");
+            if (++shown4 >= 10) break;
+        }
+        Console.WriteLine($"    field[5] (@ 0x14) distinct values (top 10):");
+        int shown5 = 0;
+        foreach ((uint v, int n) in field5Histo[ext].OrderByDescending(p => p.Value))
+        {
+            Console.WriteLine($"      {v,6} (0x{v:X4}) × {n,5:N0}");
+            if (++shown5 >= 10) break;
+        }
+        Console.WriteLine();
+    }
+
+    return 0;
+}
+
+// ============================================================================
+// SUBCOMMAND: dump-do
+// ============================================================================
+// Census the 12 per-class stance .do files (icon/skill sprite-sheet records).
+// Reports per-file record count + a compact field census across all records:
+// the known header fields (instanceKey/groupSub/slotIndex/classStanceRef/groupId,
+// iconSrcX @+0x18, iconSrcY @+0x1C) plus per-u32-offset distinct/min/max/zero%.
+// Prints COUNTS and short decoded structural fields only — NO raw byte dumps.
+// spec: Docs/RE/formats/ui_manifests.md §2.7
+// ============================================================================
+
+static int RunDumpDo(MappedVfsArchive archive, string[] args, Encoding cp949)
+{
+    // Record stride = 116 bytes (0x74). Ground truth: 12 per-class stance files,
+    // each a flat array of 116-byte records.
+    // spec: Docs/RE/formats/ui_manifests.md §2.7 — stride 0x74: SAMPLE-VERIFIED.
+    const int Stride = 0x74;
+    // Icon sprite-sheet geometry: 23-px cells on a 512×512 sheet → coords in [0..489].
+    // spec: Docs/RE/formats/ui_manifests.md §2.7 — cell 23, sheet 512, max coord 489.
+    const int Cell = 23, Sheet = 512, MaxCoord = Sheet - Cell;
+    const int NumU32 = Stride / 4; // 29 dword-aligned offsets (0x00..0x70)
+
+    // The 12 per-class stance files (jung/sa/ma × musa/assasin/wizard/monk).
+    // spec: Docs/RE/formats/ui_manifests.md §2.7 — class-stance .do file set: SAMPLE-VERIFIED.
+    string[] doFiles =
+    {
+        "data/script/musajung.do",   "data/script/musasa.do",     "data/script/musama.do",
+        "data/script/assasinjung.do","data/script/assasinsa.do",  "data/script/assasinma.do",
+        "data/script/wizardjung.do", "data/script/wizardsa.do",   "data/script/wizardma.do",
+        "data/script/monkjung.do",   "data/script/monksa.do",     "data/script/monkma.do",
+    };
+
+    // Per-u32-offset accumulators across ALL records of ALL files.
+    var distinctU32 = new HashSet<uint>[NumU32];
+    var minU32 = new uint[NumU32];
+    var maxU32 = new uint[NumU32];
+    var zeroU32 = new long[NumU32];
+    for (int d = 0; d < NumU32; d++) { distinctU32[d] = new HashSet<uint>(); minU32[d] = uint.MaxValue; }
+
+    int totalFiles = 0, totalRecords = 0, totalValidIcon = 0, missing = 0;
+
+    Console.WriteLine($"\ndump-do: per-class stance .do census (stride {Stride} = 0x74)");
+    Console.WriteLine($"  {"file",-22}  {"bytes",10}  {"records",8}  {"tail",5}  {"iconValid",10}  classStanceRef");
+
+    foreach (string path in doFiles)
+    {
+        if (!archive.Contains(path)) { Console.WriteLine($"  {Path.GetFileName(path),-22}  MISSING"); missing++; continue; }
+
+        ReadOnlyMemory<byte> mem = archive.GetFileContent(path);
+        ReadOnlySpan<byte> raw = mem.Span;
+        int nrec = raw.Length / Stride;
+        int tail = raw.Length % Stride;
+        totalFiles++;
+        totalRecords += nrec;
+
+        int validIcon = 0;
+        var classRefSet = new SortedSet<uint>();
+
+        for (int i = 0; i < nrec; i++)
+        {
+            ReadOnlySpan<byte> r = raw.Slice(i * Stride, Stride);
+
+            // iconSrcX @+0x18, iconSrcY @+0x1C (i16); valid when both in [0..489].
+            // spec: Docs/RE/formats/ui_manifests.md §2.7 — iconSrcX @0x18 / iconSrcY @0x1C: CODE-CONFIRMED.
+            short sx = BinaryPrimitives.ReadInt16LittleEndian(r.Slice(0x18, 2));
+            short sy = BinaryPrimitives.ReadInt16LittleEndian(r.Slice(0x1C, 2));
+            if (sx >= 0 && sx <= MaxCoord && sy >= 0 && sy <= MaxCoord) validIcon++;
+
+            // classStanceRef @+0x0C (u32 enum, e.g. 1001..1012).
+            // spec: Docs/RE/formats/ui_manifests.md §2.7 — classStanceRef @0x0C: SAMPLE-VERIFIED.
+            classRefSet.Add(BinaryPrimitives.ReadUInt32LittleEndian(r.Slice(0x0C, 4)));
+
+            // Per-u32-offset census.
+            for (int d = 0; d < NumU32; d++)
+            {
+                uint v = BinaryPrimitives.ReadUInt32LittleEndian(r.Slice(d * 4, 4));
+                distinctU32[d].Add(v);
+                if (v < minU32[d]) minU32[d] = v;
+                if (v > maxU32[d]) maxU32[d] = v;
+                if (v == 0) zeroU32[d]++;
+            }
+        }
+        totalValidIcon += validIcon;
+
+        string classRefStr = string.Join(",", classRefSet.Take(5)) + (classRefSet.Count > 5 ? "…" : "");
+        Console.WriteLine($"  {Path.GetFileName(path),-22}  {raw.Length,10:N0}  {nrec,8:N0}  {tail,5}  {validIcon,10:N0}  [{classRefStr}]");
+    }
+
+    Console.WriteLine($"\n  totals: {totalFiles} files, {totalRecords:N0} records, {missing} missing");
+    if (totalRecords > 0)
+        Console.WriteLine($"  iconSrcX/Y in [0..{MaxCoord}]: {totalValidIcon:N0} / {totalRecords:N0} ({100.0 * totalValidIcon / totalRecords:F1}%)");
+
+    if (totalRecords == 0)
+        return missing == doFiles.Length ? 1 : 0;
+
+    // Compact per-offset field census (counts only, no raw bytes).
+    Console.WriteLine("\n  per-u32-offset census (across all records):");
+    Console.WriteLine($"    {"off",4}  {"#distinct",9}  {"min",12}  {"max",12}  {"zero%",6}  field");
+    for (int d = 0; d < NumU32; d++)
+    {
+        int o = d * 4;
+        double zp = 100.0 * zeroU32[d] / totalRecords;
+        string field = o switch
+        {
+            0x00 => "instanceKey (primary map key)",
+            0x04 => "groupSubIndex (0..N)",
+            0x08 => "slotIndex (secondary map key)",
+            0x0C => "classStanceRef (1001..1012)",
+            0x10 => "groupId (skill family)",
+            0x14 => "secXvar+unknown (u16 pair)",
+            0x18 => "iconSrcX @0x18 / pad @0x1A (CONFIRMED)",
+            0x1C => "iconSrcY @0x1C / pad @0x1E (CONFIRMED)",
+            0x20 => "secondarySpriteX (u16 pair)",
+            0x24 => "secondarySpriteY (u16 pair)",
+            _    => "",
+        };
+        Console.WriteLine($"    {o,4:X2}  {distinctU32[d].Count,9:N0}  {minU32[d],12:N0}  {maxU32[d],12:N0}  {zp,5:F1}%  {field}");
+    }
+
+    return 0;
+}
+
+// ============================================================================
+// SUBCOMMAND: scan-minimap
+// ============================================================================
+// Census the minimap/worldmap asset chain:
+//   1. data/script/mapsetting.scr — 84-byte-stride zone table (id + CP949 name + bounds)
+//   2. data/mapNNN/regiontableNNN.bin — 32-byte-stride sub-region records
+//   3. data/ui map DDS inventory (dimensions + fourCC)
+// Prints zone counts + strides + decoded structural fields only (NO raw bytes).
+// spec: Docs/RE/formats/misc_data.md (mapsetting/regiontable strides SAMPLE-VERIFIED)
+// ============================================================================
+
+static int RunScanMinimap(MappedVfsArchive archive, string[] args, Encoding cp949)
+{
+    // mapsetting.scr stride = 84 (0x54): 4368 / 84 = 52 zones exactly.
+    // spec: Docs/RE/formats/misc_data.md — mapsetting.scr stride 84: SAMPLE-VERIFIED.
+    const int MapSettingStride = 84;
+    // regiontable stride = 32: 1664 / 32 = 52 records exactly.
+    // spec: Docs/RE/formats/misc_data.md — regiontable stride 32: PLAUSIBLE.
+    const int RegionStride = 32;
+
+    // --- 1. mapsetting.scr zone table ---
+    Console.WriteLine("\nscan-minimap: zone/worldmap asset chain");
+    const string mapSettingPath = "data/script/mapsetting.scr";
+    if (archive.Contains(mapSettingPath))
+    {
+        ReadOnlyMemory<byte> mem = archive.GetFileContent(mapSettingPath);
+        ReadOnlySpan<byte> data = mem.Span;
+        int zoneCount = data.Length / MapSettingStride;
+        int tail = data.Length % MapSettingStride;
+        Console.WriteLine($"\n  [1] {mapSettingPath}: {data.Length:N0} bytes, {zoneCount} zones (stride {MapSettingStride}, tail {tail})");
+        Console.WriteLine($"      {"id",3}  {"name(CP949)",-20}  {"minX",8} {"minY",8} {"maxX",8} {"maxY",8}");
+        for (int i = 0; i < zoneCount; i++)
+        {
+            ReadOnlySpan<byte> rec = data.Slice(i * MapSettingStride, MapSettingStride);
+            // [+0x00] id (i32), [+0x04] name (36B CP949), [+0x28..0x37] bounds (4×i32).
+            // spec: Docs/RE/formats/misc_data.md — mapsetting record layout: SAMPLE-VERIFIED.
+            int id = BinaryPrimitives.ReadInt32LittleEndian(rec[0x00..]);
+            string name = cp949.GetString(rec.Slice(4, 36)).TrimEnd('\0');
+            int minX = BinaryPrimitives.ReadInt32LittleEndian(rec[0x28..]);
+            int minY = BinaryPrimitives.ReadInt32LittleEndian(rec[0x2C..]);
+            int maxX = BinaryPrimitives.ReadInt32LittleEndian(rec[0x30..]);
+            int maxY = BinaryPrimitives.ReadInt32LittleEndian(rec[0x34..]);
+            // Cap the per-zone listing to keep output compact.
+            if (i < 8 || i >= zoneCount - 2)
+                Console.WriteLine($"      {id,3}  {name,-20}  {minX,8} {minY,8} {maxX,8} {maxY,8}");
+            else if (i == 8)
+                Console.WriteLine($"      … ({zoneCount - 10} more zones)");
+        }
+    }
+    else Console.WriteLine($"\n  [1] MISSING: {mapSettingPath}");
+
+    // --- 2. regiontableNNN.bin sub-region records ---
+    Console.WriteLine("\n  [2] regiontableNNN.bin sub-region tables (stride 32):");
+    int regionFiles = 0, regionRecords = 0;
+    foreach (VfsEntry e in archive.GetEntries())
+    {
+        string nl = e.Name.ToLowerInvariant();
+        if (!nl.StartsWith("data/map", StringComparison.Ordinal)) continue;
+        if (!nl.Contains("/regiontable", StringComparison.Ordinal)) continue;
+        if (!nl.EndsWith(".bin", StringComparison.Ordinal)) continue;
+
+        int recs = (int)(e.DataSize / RegionStride);
+        long rtail = e.DataSize % RegionStride;
+        regionFiles++;
+        regionRecords += recs;
+        Console.WriteLine($"      {e.Name,-40}  {e.DataSize,8:N0} bytes  {recs,4} records  tail {rtail}");
+    }
+    Console.WriteLine($"      ({regionFiles} regiontable files, {regionRecords:N0} records total)");
+
+    // --- 3. data/ui map DDS inventory ---
+    // spec: Docs/RE/formats/texture.md §DDS_HEADER — height@0x0C, width@0x10, fourCC@0x54.
+    const uint DdsMagic = 0x20534444; // "DDS "
+    Console.WriteLine("\n  [3] data/ui map DDS inventory (dimensions + fourCC):");
+    int mapDds = 0;
+    foreach (VfsEntry e in archive.GetEntries())
+    {
+        string nl = e.Name.ToLowerInvariant();
+        if (!nl.StartsWith("data/ui/", StringComparison.Ordinal)) continue;
+        if (!nl.EndsWith(".dds", StringComparison.Ordinal)) continue;
+        if (!nl.Contains("map", StringComparison.Ordinal) &&
+            !nl.Contains("world", StringComparison.Ordinal) &&
+            !nl.Contains("direction", StringComparison.Ordinal)) continue;
+
+        ReadOnlyMemory<byte> mem = archive.GetFileContent(e.Name);
+        if (mem.Length < 0x58) continue;
+        ReadOnlySpan<byte> d = mem.Span;
+        if (BinaryPrimitives.ReadUInt32LittleEndian(d[..4]) != DdsMagic) continue;
+
+        uint h = BinaryPrimitives.ReadUInt32LittleEndian(d[0x0C..]);
+        uint w = BinaryPrimitives.ReadUInt32LittleEndian(d[0x10..]);
+        uint fourccRaw = BinaryPrimitives.ReadUInt32LittleEndian(d.Slice(0x54, 4));
+        string fourcc = fourccRaw == 0 ? "RAW"
+            : Encoding.ASCII.GetString(BitConverter.GetBytes(fourccRaw)).TrimEnd('\0');
+        mapDds++;
+        Console.WriteLine($"      {e.Name,-40}  {w,4}x{h,-4}  {fourcc}");
+    }
+    Console.WriteLine($"      ({mapDds} map DDS files)");
+
+    return 0;
+}
+
+// ============================================================================
+// SUBCOMMAND: scan-quest
+// ============================================================================
+// Census the quest/dialog script tables by their fixed strides:
+//   quests.scr        — stride 3720  (sparse: u16 id @0 != 0 marks an occupied slot)
+//   npc.scr           — stride  404
+//   autoquestion_cl.scr — stride 92
+//   discript.sc       — stride  68
+// Reports record/slot counts + occupied counts + strides + a few decoded ids.
+// Prints COUNTS and short decoded fields only — NO raw byte dumps.
+// spec: Docs/RE/formats/misc_data.md (quest/dialog script strides SAMPLE-VERIFIED)
+// ============================================================================
+
+static int RunScanQuest(MappedVfsArchive archive, string[] args, Encoding cp949)
+{
+    // quests.scr: fixed 3720-byte record slots; u16 quest_id @+0x00, 0 = empty slot.
+    // spec: Docs/RE/formats/misc_data.md — quests.scr stride 3720: SAMPLE-VERIFIED.
+    ScanQuestsScr(archive, "data/script/quests.scr", 3720, cp949);
+
+    // npc.scr: fixed 404-byte records; u32 id @+0x00, CP949 text @+0x10.
+    // spec: Docs/RE/formats/misc_data.md — npc.scr stride 404: SAMPLE-VERIFIED.
+    ScanFixedStride(archive, "data/script/npc.scr", 404, cp949);
+
+    // autoquestion_cl.scr: fixed 92-byte records.
+    // spec: Docs/RE/formats/misc_data.md — autoquestion_cl.scr stride 92: SAMPLE-VERIFIED.
+    ScanFixedStride(archive, "data/script/autoquestion_cl.scr", 92, cp949);
+
+    // discript.sc: fixed 68-byte records; u32 id @+0x00, CP949 menu text @+0x08.
+    // spec: Docs/RE/formats/misc_data.md — discript.sc stride 68: SAMPLE-VERIFIED.
+    ScanFixedStride(archive, "data/script/discript.sc", 68, cp949);
+
+    return 0;
+
+    // ---- local helpers ----
+    static void ScanQuestsScr(MappedVfsArchive archive, string path, int stride, Encoding cp949)
+    {
+        if (!archive.Contains(path)) { Console.WriteLine($"\nscan-quest: MISSING {path}"); return; }
+        ReadOnlyMemory<byte> mem = archive.GetFileContent(path);
+        ReadOnlySpan<byte> raw = mem.Span;
+        int slots = raw.Length / stride;
+        int tail = raw.Length % stride;
+
+        int occupied = 0;
+        ushort minId = ushort.MaxValue, maxId = 0;
+        var firstIds = new List<ushort>();
+        for (int i = 0; i < slots; i++)
+        {
+            // u16 quest_id @+0x00; 0 = empty slot.
+            ushort id = BinaryPrimitives.ReadUInt16LittleEndian(raw.Slice(i * stride, 2));
+            if (id == 0) continue;
+            occupied++;
+            if (id < minId) minId = id;
+            if (id > maxId) maxId = id;
+            if (firstIds.Count < 12) firstIds.Add(id);
+        }
+
+        Console.WriteLine($"\nscan-quest: {path}");
+        Console.WriteLine($"  {raw.Length:N0} bytes, stride {stride}, {slots} slots (tail {tail}), {occupied} occupied (u16 id@0 != 0)");
+        if (occupied > 0)
+        {
+            Console.WriteLine($"  quest_id range: {minId}..{maxId}");
+            Console.WriteLine($"  first occupied ids: {string.Join(", ", firstIds)}");
+        }
+    }
+
+    static void ScanFixedStride(MappedVfsArchive archive, string path, int stride, Encoding cp949)
+    {
+        if (!archive.Contains(path)) { Console.WriteLine($"\nscan-quest: MISSING {path}"); return; }
+        ReadOnlyMemory<byte> mem = archive.GetFileContent(path);
+        ReadOnlySpan<byte> raw = mem.Span;
+        int nrec = raw.Length / stride;
+        int tail = raw.Length % stride;
+
+        Console.WriteLine($"\nscan-quest: {path}");
+        Console.WriteLine($"  {raw.Length:N0} bytes, stride {stride}, {nrec:N0} records (tail {tail})");
+
+        // Decode the first few record ids (u32 @+0x00) as a sanity readout — no raw bytes.
+        var ids = new List<uint>();
+        for (int i = 0; i < nrec && ids.Count < 8; i++)
+            ids.Add(BinaryPrimitives.ReadUInt32LittleEndian(raw.Slice(i * stride, 4)));
+        if (ids.Count > 0)
+            Console.WriteLine($"  first record ids (u32@0): {string.Join(", ", ids)}");
+    }
+}
+
+// ============================================================================
 // Helpers (shared)
 // ============================================================================
 
@@ -1097,5 +1522,29 @@ static void PrintUsage()
             sound tables (.bgm/.bge/.eff/.wlk/.run) listing non-null entries.
             Reports whether each referenced ogg exists in the VFS.
             spec: Docs/RE/formats/sound_tables.md
+
+          scan-fx
+            Census all .fx1–.fx7 terrain layer files: counts per layer, total bytes,
+            and header field histograms — especially field[3] at offset 0x0C which is
+            disputed (IDA says 15; June 2026 sample says 50 for FX2).
+            spec: Docs/RE/formats/terrain_layers.md §Section 1
+
+          dump-do
+            Census the 12 per-class stance .do files (icon/skill sprite-sheet records,
+            stride 116/0x74): per-file record count, iconSrcX/Y validity, classStanceRef,
+            plus a compact per-u32-offset field census. No raw bytes.
+            spec: Docs/RE/formats/ui_manifests.md §2.7
+
+          scan-minimap
+            Census the minimap/worldmap asset chain: mapsetting.scr 52×84B zone table
+            (id + CP949 name + bounds), regiontableNNN.bin 32B sub-region records, and
+            the data/ui map DDS inventory (dimensions + fourCC). Strides + counts only.
+            spec: Docs/RE/formats/misc_data.md
+
+          scan-quest
+            Census the quest/dialog script tables by fixed stride: quests.scr (3720B,
+            sparse — u16 id@0 marks an occupied slot), npc.scr (404B), autoquestion_cl.scr
+            (92B), discript.sc (68B). Record/slot/occupied counts + a few decoded ids.
+            spec: Docs/RE/formats/misc_data.md
         """);
 }

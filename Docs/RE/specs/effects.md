@@ -24,6 +24,7 @@
 | Damage-number renderer | CODE-CONFIRMED for init; geometry detail not fully traced. See §10. |
 | Particle sub-system | CODE-CONFIRMED for spawn path; record layout PLAUSIBLE only. See §11. |
 | SwordLight sub-system | CODE-CONFIRMED for boot and descriptor layout. See §12. |
+| Skill-cast effect chain | CODE-CONFIRMED but CAPTURE-UNVERIFIED — the network half (opcode `5/52`, action codes) is read statically from the binary; no live capture has confirmed the on-wire action-code values. See §15. |
 
 ---
 
@@ -232,6 +233,7 @@ Two factory functions cover all dispatches. The table below lists every confirme
 | Attack hit (actor type flag A set) | `AttackEffect` handler | **350000021** | `UserXEffect` | actor internal flag A non-zero |
 | Attack hit (actor type flag B set) | `AttackEffect` handler | **350000022** | `UserXEffect` | actor internal flag B non-zero |
 | Skill cast (inner event 1001) | `AttackEffect` handler | from actor's cast-skill field | `UserXEffect` or `MapXEffect` | inner event = 1001 |
+| (corrected 2026-06-13: this `AttackEffect` row is the post-contact **hit-burst** leg, fired on the `AttackEffect` message when the actor template's inner-event field reads 1001 — `MapXEffect` spawned at the caster position from the template's effect-id field. It is NOT the cast-channel looping effect, which is driven separately by the `ActorSkillAction` (`5/52`) handler from the per-skill record; see §15.) | | | | |
 | Actor state (class range A) | `ActorStateEvent` handler | **350000026** | `UserXEffect` | class-id range A |
 | Actor state (class ranges B/C) | `ActorStateEvent` handler | **350000021** | `UserXEffect` | class-id ranges B/C |
 | Buff applied (inner event 1023) | `ActorStateEvent` handler | **350000021** | `UserXEffect` | inner event = 1023 |
@@ -515,9 +517,104 @@ Note on `totalmugong.txt`: the loader reads 4 fields per record into a 12-byte h
 
 10. **Effect cleanup on area transition.** When the player enters a new area, it is unknown whether the effect manager flushes all active `UserXEffect` and `JointXEffect` objects, or only the `MapXEffect` objects. The area-transition call chain was not traced past the `EffectCache_SaveIDs` call at shutdown.
 
+11. **AoE fan-out (action code 0xCC) per-sub-actor effects.** The `5/52` AoE action code places sub-actors in a ring (position placement is documented), but whether each sub-actor in the ring receives its own cast-channel effect spawn — and if so, whether each re-emits a 0xC8-style enable for its own instance — was not confirmed in this pass. PLAUSIBLE: each ring instance re-emits its own enable; UNRESOLVED. See §15.3.
+
+12. **Frame-precise cast-SFX consumer (`totalmugong.txt`).** The cast chain fires a single one-shot sound at cast-enable from the skill record's `cast_sfx_id` (byte offset 1180; §15.2). Separately, `totalmugong.txt` (§5 step 5, §13) builds a timing-keyed sound-overlay map (the effect manager's `class_idx`-keyed table) intended to fire **frame-synchronised** sounds during the cast animation. The runtime consumer that reads that map and triggers those frame-precise overlays was **not** traced — it is unknown which subsystem reads it, and whether a single cast uses both the one-shot `cast_sfx_id` and the `totalmugong.txt` overlays, or whether they are mutually exclusive. This extends open question §14 item 7.
+
 ---
 
-## 15. Cross-References
+## 15. Skill-Cast Effect Chain (cast-channel leg)
+
+**Confidence: CODE-CONFIRMED for the resolution chain and spawn/teardown behaviour; CAPTURE-UNVERIFIED for the network half.** The action-code values and the `5/52` message layout are read statically from the client; no live capture has yet confirmed the on-wire values. Treat the protocol facts here as static-truth-only until a capture exists.
+
+This section documents the **cast-channel** effect — the looping aura/glow that plays while a martial-arts skill is being channelled. It is distinct from, and coexists with, the post-contact **hit-burst** effect in §7 (the `AttackEffect` hardcoded-id path). The two fire on different events and from different data sources.
+
+### 15.1 Trigger and resolution chain
+
+The cast-channel effect is driven by the **actor skill-action** server message (opcode `5/52`, `SmsgActorSkillAction`; see `opcodes.md` and `packets/5-52_actor_skill_action.yaml`). That message carries a server-supplied `skill_id` and an **action code** byte that selects cast-enable vs. cast-disable behaviour (see §15.3).
+
+On cast-enable, the handler resolves the effect id **directly from the per-skill record** — there is **no separate skill-id → effect-id lookup table**:
+
+```
+skill_id (from the 5/52 message)
+  → skill-catalog lookup (id-keyed map of loaded skill records)
+  → skill record  (the in-memory copy of one data/script/skills.scr record)
+  → cast_effect_id  =  skill record field at byte offset 1136
+                       (indexed by the caster's visual-class byte; see §15.2)
+  → CoreXEffect lazy-load resolver (§5.1), keyed by numeric effect_id
+  → CoreXEffect descriptor  (lazy-parsed from data/effect/xeff/<effect_id>.xeff)
+  → looping UserXEffect spawn via the UserXEffect factory (§5)
+```
+
+The effect id is embedded **verbatim** in the skill record; it is the same numeric id that names the `.xeff` file on disk (the 9-digit `.xeff` filename is the decimal form of the effect id — see `formats/effects.md §A.2`).
+
+**Confidence: CODE-CONFIRMED** (two independent action-code handlers read the same byte offset 1136); the `.xeff`-filename = decimal(effect_id) mapping is SAMPLE-VERIFIED elsewhere (`formats/effects.md §A.2`), not re-verified in this pass.
+
+### 15.2 The three sibling fields in the skill record
+
+The cast chain reads three sibling u32 fields from the in-memory skill record (the 1504-byte structure copied from one `data/script/skills.scr` row). All three are indexed by the caster's **visual-class byte** (the actor's resolved visual/mesh class id; the field at offset 1136 etc. is element 0 of a parallel array, with the visual-class byte added as the array index). For the default visual class (0) the offsets are exactly as listed.
+
+| Skill-record byte offset | Field (role) | Consumed for | Confidence |
+|---:|---|---|---|
+| **1116** | `cast_motion_base` — base id of the cast animation | Combined with the caster's class and gender into a final animation id, then played on the actor's animation mixer when the cast begins. | CODE-CONFIRMED |
+| **1136** | `cast_effect_id` — the cast-channel effect id | Resolved through the CoreXEffect registry and spawned as a looping `UserXEffect` (§15.1, §15.4). | CODE-CONFIRMED |
+| **1180** | `cast_sfx_id` — the cast-start sound id | Played once as a one-shot sound cue (sound kind 11) when the cast begins. | CODE-CONFIRMED |
+
+> The skill-record layout itself (these offsets) is authoritatively owned by `structs/skill.md` and `formats/config_tables.md`, which previously listed +1116 / +1136 / +1180 as un-decoded chain-reference composites (`ChainRef[0]` / `ChainRef[5]` / `ChainRef[7]`). This section **resolves the field meaning** for the three offsets the cast chain consumes; the prefix families observed there (`3xxxxxxx` at +1136, `8xxxxxxx` at +1180) match the effect-id and sound-id families used elsewhere in this spec, corroborating the resolution. The byte layout stays in `structs/skill.md`; do not re-list it here.
+
+**Array note:** `cast_motion_base` and `cast_effect_id` are parallel arrays indexed by the visual-class byte. The array extents (how many visual classes a single skill carries) are not independently confirmed; at minimum the index expression is consistent with adjacent parallel arrays covering several classes. PLAUSIBLE only — see §14 open items.
+
+### 15.3 Action codes (cast lifecycle)
+
+The `5/52` handler branches on an action-code byte. The cast-channel effect is bound to the enable/disable pair:
+
+| Action code | Phase | Effect behaviour | Confidence |
+|---|---|---|---|
+| **0xC8** | Cast-enable | Spawn the looping `UserXEffect` from `cast_effect_id` (§15.4); play the cast animation from `cast_motion_base`; fire the `cast_sfx_id` one-shot; set the actor's action-lock slot to the active skill id. | CODE-CONFIRMED |
+| **0xC9** | Cast-disable | Soft-stop the running cast effect by `cast_effect_id` (§15.5); reset the animation; clear the action-lock slot. | CODE-CONFIRMED |
+| **0xCA** | Secondary enable | Sets a secondary action-lock; no cast-channel effect is spawned on this code. | CODE-CONFIRMED |
+| **0xCB** | Secondary disable | Soft-stops the cast effect by the same `cast_effect_id` (byte offset 1136), mirroring the 0xC9 teardown. | CODE-CONFIRMED |
+| **0xCC** | AoE fan-out | Places sub-actors in a ring (position placement only; per-sub-actor effect spawning is UNRESOLVED — see §14). | UNRESOLVED (effect behaviour) |
+
+**Confidence: CODE-CONFIRMED** for the 0xC8 / 0xC9 / 0xCB effect coupling (the same effect id, read at byte offset 1136, is used to both start and stop the instance). **CAPTURE-UNVERIFIED** for the action-code values themselves.
+
+### 15.4 Cast effect is a looping, actor-anchored `UserXEffect` (NOT bone-attached)
+
+On cast-enable, the resolved `cast_effect_id` is spawned through the **`UserXEffect` factory** (§5), not the `JointXEffect` factory. The key spawn properties:
+
+- **Looping** — the loop flag is set, so the effect repeats its keyframe animation indefinitely until it is explicitly stopped (it does not expire on a lifetime timer).
+- **Actor-anchored, not bone-attached** — the effect is bound to the caster by the actor's sort-id + id pair (the `UserXEffect` actor-relative anchor of §6.2), so the effect origin follows the caster's **world position**. It does **not** track a specific skeleton bone; it is a `UserXEffect`, not a `JointXEffect`.
+- **Default transform** — spawned at scale 1.0 and time-scale 1.0 with no extra anchor offset.
+
+This is why the cast aura sits at the character's body/feet origin and follows them as they move during the channel, rather than riding a hand or weapon bone. Weapon-trail effects (the `SwordLight` sub-system, §12, and the `JointXEffect` equip bindings, §9) are a separate system and run independently of the cast channel.
+
+**Confidence: CODE-CONFIRMED.**
+
+### 15.5 Cast teardown is a soft-stop
+
+Cast-disable (action codes 0xC9 / 0xCB) does **not** free the effect with a fade-out callback. Instead it performs a **soft-stop**: the active `UserXEffect` list is walked for an instance whose descriptor effect id equals `cast_effect_id` **and** whose anchored actor sort-id + id pair match the caster, and that instance's active flag is cleared. The instance is then removed by the per-frame tick on the following frame (§5.2, §8.3).
+
+Because there is no fade-out, the visual close of the cast effect is whatever the descriptor's keyframe animation happens to be showing when the active flag is cleared. The same soft-stop routine is also used to cancel the cast effect on an animation-cycle-end / idle transition (so an interrupted or naturally ending cast removes its aura the same way).
+
+**Confidence: CODE-CONFIRMED.**
+
+### 15.6 Relationship to the hit-burst leg (§7)
+
+The two skill-related effect legs are independent and may both be live during a single skill use:
+
+| | Cast-channel leg (this section) | Hit-burst leg (§7) |
+|---|---|---|
+| Source message | `5/52` `SmsgActorSkillAction`, action code 0xC8/0xC9/0xCB | `AttackEffect` message |
+| Effect-id source | Per-skill record field at byte offset 1136 (varies by skill) | Hardcoded id ranges in the handler (always a small fixed set, e.g. 350000021 / 350000022 / 350000026) |
+| When it fires | At cast-start, removed at cast-end | On contact / post-hit |
+| Lifetime | Looping until soft-stopped | One-shot (plays out and expires) |
+| Per-skill identity | Yes — each skill carries its own cast effect id | No — the wire payload's id range selects from the fixed set |
+
+**Confidence: CODE-CONFIRMED** for the distinction.
+
+---
+
+## 16. Cross-References
 
 - **Binary format specs:** `formats/effects.md` — the authoritative `.xeff` and `.eff` format specs, including the 32-byte `.xeff` header (§A.2), sub-effect block structure (§A.4), in-memory element layout (§A.5), and the `particleEmitter.eff` layout (§E).
 - **Scale override table:** `formats/effects.md §D` (`effectscale.xdb`).
@@ -525,5 +622,9 @@ Note on `totalmugong.txt`: the loader reads 4 fields per record into a 12-byte h
 - **Bone and skeleton layout:** `specs/skinning.md` — bone world-transform format required for §9.3 step 3.
 - **Combat:** `specs/combat.md` — server-authoritative damage values; the effects system is presentation-only and has no authority over damage numbers.
 - **Actor struct:** `structs/actor.md` — actor field layout referenced by `actor_sort_id` lookup and `visual_slot_byte`.
+- **Skill record (cast chain, §15):** `structs/skill.md` and `formats/config_tables.md §2.8` — authoritative byte layout of the `skills.scr` record. They own the +1116 / +1136 / +1180 offsets that §15 resolves to `cast_motion_base` / `cast_effect_id` / `cast_sfx_id`.
+- **Skill subsystem behaviour:** `specs/skills.md` — skill catalog load, cost/cooldown, and per-rank rows.
+- **Cast network message (§15):** `opcodes.md` (opcode `5/52` `SmsgActorSkillAction`) and `packets/5-52_actor_skill_action.yaml` — the message that drives the cast-channel action codes (capture-unverified).
+- **Cast-effect `.xeff` files:** `formats/effects.md §A.2` — the `.xeff` filename = decimal(effect_id) mapping the cast chain relies on. The FX1/FX2 terrain layer byte layout is **not** here; see `formats/terrain_layers.md §Section 1`.
 - **Glossary:** see `Docs/RE/names.yaml`.
 - **Provenance:** see `Docs/RE/journal.md`.

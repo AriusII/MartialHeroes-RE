@@ -1,39 +1,103 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# CAPTURE-UNVERIFIED: the byte layout below is a static inference (CODE-CONFIRMED from the
+# client's chat send path, but never observed on the wire). capture_verified: false.
 
-name: CmsgWhisper
+name: CmsgChat
 opcode: 0x20007           # major 2 (GameAction), minor 7 -> (2 << 16) | 7
 direction: C2S
-size: var                 # 19-byte fixed header + length-prefixed text body
+size: var                 # channel byte + length-prefixed CP949 text; whisper form adds a 16-byte name
 spec: packets/2-7_whisper.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Client whisper (named-target private message). A 19-byte header carrying the target character name, followed by a length-prefixed text body.
+summary: >
+  Client chat send. A SINGLE opcode carries every everyday chat channel; the first payload byte is a
+  channel code that selects say / party / guild / shout / alliance / whisper. Two on-wire forms: a
+  broadcast form (channel byte + length-prefixed CP949 text) and a whisper sub-case that additionally
+  carries a 16-byte target-character-name buffer. Server echoes back as S2C 5/7 ChatBroadcast.
 
-# Fixed 19-byte header below. The trailing text body is variable (length-prefixed; see notes).
+# Two forms share opcode 2/7. The BROADCAST form is the common case (say/party/guild/shout/alliance).
+# The WHISPER form adds a 16-byte target-name buffer ahead of the text body. The fields[] block
+# below models the BROADCAST form; the whisper-only fields are documented in notes (the codegen
+# engineer hand-codes the channel branch). CODE-CONFIRMED from the client's chat send routine;
+# CAPTURE-UNVERIFIED (no packet capture of any chat line yet).
 fields:
-  - { name: ChannelType, type: u8 }          # 0x00  channel / sub-type byte
-  - { name: Flag,        type: u8 }          # 0x01  flag byte
-  - { name: TargetName,  type: "bytes[16]" }   # 0x02  target character name (fixed buffer, NUL-padded)
-  - { name: HeaderTail,  type: u8 }          # 0x12  trailing byte of the 19-byte header
+  - { name: Channel,    type: u8 }          # 0x00  channel code (see Channel codes table in notes)
+  # BROADCAST form: a length-prefixed CP949 text body follows immediately (see notes).
+  # WHISPER form (channel 15): a 16-byte TargetName buffer precedes the text body (see notes).
 
 notes: |
-  Static inference only; no capture available. VARIABLE-LENGTH packet.
+  Static inference only; no capture available. VARIABLE-LENGTH packet. CAPTURE-UNVERIFIED.
+  This file keeps its historical name (2-7_whisper.yaml) because opcodes.md and the social spec
+  cross-reference it, but the concept is now the GENERAL chat send (CmsgChat), of which whisper is
+  just one channel -- it is NOT a whisper-only opcode.
 
-  Header = 19 bytes (0x00..0x12):
-    0x00 (1B)  ChannelType : channel / message sub-type selector.
-    0x01 (1B)  Flag        : a flag byte.
-    0x02 (16B) TargetName  : the recipient's character name, copied into a fixed 16-byte buffer,
-                             NUL-padded. HIGH CONFIDENCE.
-    0x12 (1B)  HeaderTail  : the trailing byte rounding the header out to 19 bytes.
+  CHANNEL CODE (first payload byte, 0x00). CODE-CONFIRMED that the first byte selects the channel and
+  that the everyday say/party/guild/shout/alliance/whisper traffic all ride this one opcode (the chat
+  editbox parser emits 2/7 for ordinary text, with the channel byte taken from the active chat tab or
+  a slash prefix). The numeric channel-code -> meaning mapping below follows the values requested for
+  this catalog; the dirty analyst note observed a slightly different code set and flagged it
+  capture-blocked, so the exact integer-to-channel binding is NOT pinned until a capture confirms it.
 
-  BODY (after the 19-byte header): a length-prefixed text block:
+    code | channel
+    -----|---------------------------------
+     0   | say (local/normal)
+     1   | party
+     2   | guild
+     3   | shout
+     6   | alliance
+     7   | whisper (private, named target)
+     9   | whisper (private, named target)
+    15   | whisper (private, named target)
+
+  The whisper channels are the named-target private channels; the others are area/group broadcasts.
+  (Note: the source note's own table bound some of these integers differently -- e.g. it read the
+  higher codes as alliance/event/special and a lower code as whisper. The discriminator that matters
+  for wire layout is simply "is this a whisper channel" -- i.e. does the payload carry a 16-byte
+  target name. Resolve the exact integer<->channel table from a capture of each /command.)
+
+  -------------------------------------------------------------------------------------------------
+  FORM A -- BROADCAST (say / party / guild / shout / alliance). Modeled by fields[] above.
+    0x00 (1B) Channel    : channel code (a non-whisper value).
+    0x01 ...  text body  : a length-prefixed CP949 text block (see TEXT BODY below). No target name.
+
+  FORM B -- WHISPER (a whisper channel, e.g. code 15). Adds a target-name buffer:
+    0x00 (1B)  Channel    : a whisper channel code.
+    0x01 (16B) TargetName : recipient character name, copied into a FIXED 16-byte buffer, NUL-padded
+                            (CP949). HIGH CONFIDENCE that whisper carries a 16-byte name buffer.
+    0x11 ...   text body  : the length-prefixed CP949 text block (see TEXT BODY below).
+
+  Engineer guidance: model whisper as the same struct prefixed by the Channel byte, then branch on
+  the channel value to read/skip the 16-byte TargetName before the text body. (A possible 1-byte
+  flag/sub-type may sit between Channel and TargetName in the legacy header -- the older note showed a
+  small fixed prefix rounding the whisper header to ~19 bytes -- but only the channel byte and the
+  16-byte name are high confidence. Treat any extra header bytes as draft until capture.)
+
+  TEXT BODY (both forms): a length-prefixed CP949 text block:
     [u32 textLength][text bytes]
-  The text is limited to 119 characters before send. The length prefix includes the terminating
-  NUL (consistent with the other C2S chat senders).
+  The length prefix is consistent with the other C2S chat senders and is believed to include the
+  terminating NUL. All chat text is CP949 (Korean codepage); never a managed UTF-16 string on the
+  wire.
 
-  UNKNOWNS to resolve with a capture of a /whisper: the meaning of ChannelType / Flag / HeaderTail
-  (only the 16-byte TargetName is high confidence); the text charset.
+  LENGTH LIMITS (CODE-CONFIRMED from the editbox / send path):
+    - broadcast channels: the chat input box caps typed input at 100 characters.
+    - whisper channel: the whisper text is capped at 119 characters before send.
+    - a general gate rejects chat text >= 200 characters.
+  These are character caps in the editor, not byte caps; CP949 wide glyphs are 2 bytes each, so the
+  on-wire byte length can exceed the character count.
 
-  UNBLOCKS: Client.Application chat-send (whisper) use-case.
+  STATUS: hypothesis. The single-opcode / channel-byte model and the 16-byte whisper name buffer are
+  CODE-CONFIRMED; the exact integer channel table, any extra fixed header bytes, and the precise text
+  framing (length-prefix width and whether the prefix counts the NUL) are CAPTURE-UNVERIFIED.
+
+  UNKNOWNS to resolve with a capture (one line per channel: /say, /party, /guild, /shout, /alliance,
+  /whisper <name>):
+    - the exact integer -> channel binding (the dirty note and this catalog disagree on a few codes);
+    - whether a 1-byte flag/sub-type sits between Channel and the body (and, for whisper, before the
+      16-byte name);
+    - the length-prefix width and whether it includes the terminating NUL.
+
+  RELATED: server echo is S2C 5/7 SmsgChatBroadcast (packets/5-7_chat_broadcast.yaml), whose header
+  also carries a channel byte and a sender-name field.
+
+  UNBLOCKS: Client.Application chat-send use-case (all channels + whisper).

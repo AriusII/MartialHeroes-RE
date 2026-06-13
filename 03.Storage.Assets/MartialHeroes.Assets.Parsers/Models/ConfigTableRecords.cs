@@ -722,3 +722,81 @@ public sealed class ItemCsvRow
     /// </summary>
     public required string[] RawColumns { get; init; }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  data/script/npc.scr  NPC description-text table
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// One record from <c>data/script/npc.scr</c>. Stride: 404 bytes (0x194).
+/// 2510 records; sequential u32 id at +0 mirrored at +4.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/config_tables.md §2.17.3 npc.scr: SAMPLE-VERIFIED.
+/// No header; record count = file_size / 404. All strings CP949, null-terminated.
+/// </remarks>
+public sealed class NpcScrRecord
+{
+    /// <summary>
+    /// NPC class/descriptor id (map key). Sequential 1..2510.
+    /// spec: Docs/RE/formats/config_tables.md §2.17.3 — id u32 @ 0x000: SAMPLE-VERIFIED.
+    /// </summary>
+    public required uint Id { get; init; }
+
+    /// <summary>
+    /// Id mirror — equals Id in all records (possible second lookup key).
+    /// spec: Docs/RE/formats/config_tables.md §2.17.3 — id_mirror u32 @ 0x004: SAMPLE-VERIFIED.
+    /// </summary>
+    public required uint IdMirror { get; init; }
+
+    /// <summary>
+    /// Description paragraph 0 (CP949, first archetype paragraph).
+    /// spec: Docs/RE/formats/config_tables.md §2.17.3 — paragraph_0 char[] @ 0x014: SAMPLE-VERIFIED.
+    /// </summary>
+    public required string Paragraph0 { get; init; }
+
+    /// <summary>
+    /// Description paragraph 1 (CP949, second paragraph).
+    /// spec: Docs/RE/formats/config_tables.md §2.17.3 — paragraph_1 char[] @ 0x050: SAMPLE-VERIFIED.
+    /// </summary>
+    public required string Paragraph1 { get; init; }
+
+    /// <summary>
+    /// Description paragraph 2 (CP949, third paragraph).
+    /// spec: Docs/RE/formats/config_tables.md §2.17.3 — paragraph_2 char[] @ 0x090: SAMPLE-VERIFIED.
+    /// </summary>
+    public required string Paragraph2 { get; init; }
+
+    /// <summary>Full 404-byte raw record for future field analysis.</summary>
+    public required ReadOnlyMemory<byte> Raw { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  data/script/quests.scr  Quest template catalogue
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// One occupied slot from <c>data/script/quests.scr</c>. Stride: 3720 bytes (0xE88).
+/// 488 total slots; 122 occupied (leading u16 quest_id != 0).
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/config_tables.md §2.17.1 quests.scr: SAMPLE-VERIFIED.
+/// Sparse flat array: slot is empty when quest_id == 0. Runtime keys a map on non-zero ids (range 1..617).
+/// </remarks>
+public sealed class QuestScrRecord
+{
+    /// <summary>
+    /// Quest id (map key). 1..617; 0 = empty slot (never returned by the parser).
+    /// spec: Docs/RE/formats/config_tables.md §2.17.1 — quest_id u16 @ 0x000: SAMPLE-VERIFIED.
+    /// </summary>
+    public required ushort QuestId { get; init; }
+
+    /// <summary>
+    /// Quest name (CP949, null-terminated within ~62-byte name buffer ending by ~0x3F).
+    /// spec: Docs/RE/formats/config_tables.md §2.17.1 — quest_name char[] @ 0x002: SAMPLE-VERIFIED.
+    /// </summary>
+    public required string QuestName { get; init; }
+
+    /// <summary>Full 3720-byte raw slot for future field analysis.</summary>
+    public required ReadOnlyMemory<byte> Raw { get; init; }
+}

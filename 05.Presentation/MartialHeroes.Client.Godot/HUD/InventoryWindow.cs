@@ -77,6 +77,12 @@ public sealed partial class InventoryWindow : Control
     private const int GridColumns = 4;
     // spec: Docs/RE/formats/config_tables.md §4.1 — "Total rows: 89,712": CONFIRMED.
 
+    // Icon display size in pixels. The native DDS dimensions are used (no forced resize),
+    // so we scale the display rect to fit the slot.
+    // spec: Docs/RE/formats/ui_manifests.md §9 item #12 — "item icon native pixel size and
+    //       inventory cell layout unpinned": OPEN.  We use 48×48 as a reasonable display size.
+    private const int IconDisplaySize = 48;
+
     // -------------------------------------------------------------------------
     // Drag state (view-only)
     // -------------------------------------------------------------------------
@@ -97,6 +103,11 @@ public sealed partial class InventoryWindow : Control
 
     private ClientContext? _context;
     private UiAssetLoader? _uiLoader;
+
+    // Pre-fetched demo icon list from ItemIconCatalog (texturelist.txt first N entries).
+    // Populated once in _Ready; null entries mean the DDS failed to load (offline fallback).
+    // spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit": CODE-CONFIRMED.
+    private IReadOnlyList<(int TexId, ImageTexture? Icon)>? _demoIcons;
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -124,6 +135,26 @@ public sealed partial class InventoryWindow : Control
         catch (Exception ex)
         {
             GD.PrintErr($"[InventoryWindow] UiAssetLoader.Open failed: {ex.Message} — chrome offline.");
+        }
+
+        // Pre-fetch demo item icons from ItemIconCatalog (texturelist.txt first DemoItemCount entries).
+        // This is a whole-texture blit per icon — no sub-rect, no atlas math.
+        // spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit, no sub-rect": CODE-CONFIRMED.
+        // spec: Docs/RE/formats/ui_manifests.md §10.3 — texturelist.txt keyed by tex_id: CODE-CONFIRMED.
+        try
+        {
+            if (_context?.ItemIconCatalog is { } cat)
+            {
+                _demoIcons = cat.GetDemoIcons(DemoItemCount);
+                int loaded = _demoIcons.Count(p => p.Icon is not null);
+                GD.Print($"[InventoryWindow] Item icons: {_demoIcons.Count} entries fetched, " +
+                         $"{loaded} DDS loaded. spec: Docs/RE/formats/ui_manifests.md §10 CODE-CONFIRMED.");
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[InventoryWindow] ItemIconCatalog.GetDemoIcons failed: {ex.Message} — icons offline.");
+            _demoIcons = null;
         }
 
         try
@@ -369,7 +400,7 @@ public sealed partial class InventoryWindow : Control
         if (catalogue is null || catalogue.Count == 0)
         {
             _countLabel.Text = "ItemCatalogue not available (offline mode).";
-            AddSlot(grid, 0, "(no data — VFS offline)", "#888888");
+            AddSlot(grid, 0, "(no data — VFS offline)", "#888888", slotIndex: 0);
             return;
         }
 
@@ -395,7 +426,7 @@ public sealed partial class InventoryWindow : Control
                 _ => "#ffffff",
             };
 
-            AddSlot(grid, rec.ItemId, displayName, colour);
+            AddSlot(grid, rec.ItemId, displayName, colour, slotIndex: shown);
             shown++;
         }
 
@@ -403,7 +434,15 @@ public sealed partial class InventoryWindow : Control
         GD.Print($"[InventoryWindow] Populated {shown} item slots from ItemCatalogue (total={catalogue.Count}).");
     }
 
-    private void AddSlot(GridContainer grid, uint itemId, string displayName, string colour)
+    /// <param name="slotIndex">
+    /// Zero-based display slot index. Used to pick the i-th demo icon from
+    /// <see cref="_demoIcons"/> (texturelist.txt file order). The per-item tex_id column
+    /// in items.csv is not yet confirmed in the spec (§9 item #12), so we use the
+    /// texturelist.txt enumeration order as the demo icon mapping rather than a tex_id lookup.
+    /// spec: Docs/RE/formats/ui_manifests.md §9 item #12 — inventory cell layout UNPINNED.
+    /// spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit": CODE-CONFIRMED.
+    /// </param>
+    private void AddSlot(GridContainer grid, uint itemId, string displayName, string colour, int slotIndex)
     {
         var slotPanel = new PanelContainer();
         slotPanel.CustomMinimumSize = new Vector2(78, 78);
@@ -441,9 +480,36 @@ public sealed partial class InventoryWindow : Control
         var inner = new VBoxContainer();
         slotPanel.AddChild(inner);
 
+        // ---- Item icon from texturelist.txt (whole-texture blit, no sub-rect) ----
+        // Demo mapping: slot i → i-th entry of texturelist.txt (file order).
+        // The per-item tex_id column in items.csv is spec-open (§9 item #12), so we use
+        // the manifest enumeration order as the demo approximation.
+        // spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit": CODE-CONFIRMED.
+        ImageTexture? icon = null;
+        int iconTexId = -1;
+        if (_demoIcons is not null && slotIndex < _demoIcons.Count)
+        {
+            (iconTexId, icon) = _demoIcons[slotIndex];
+        }
+
+        if (icon is not null)
+        {
+            var iconRect = new TextureRect
+            {
+                Texture = icon,
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                CustomMinimumSize = new Vector2(IconDisplaySize, IconDisplaySize),
+                MouseFilter = MouseFilterEnum.Ignore,
+            };
+            inner.AddChild(iconRect);
+        }
+
+        // ---- Text labels ----
         var idLabel = new Label
         {
-            Text = $"#{itemId}",
+            Text = icon is not null
+                ? $"#{itemId} tex={iconTexId}"
+                : $"#{itemId}",
             HorizontalAlignment = HorizontalAlignment.Center,
         };
         idLabel.AddThemeColorOverride("font_color", new Color(0.6f, 0.6f, 0.6f));

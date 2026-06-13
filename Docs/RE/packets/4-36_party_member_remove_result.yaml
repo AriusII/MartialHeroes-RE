@@ -1,0 +1,59 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: SmsgPartyMemberRemoveResult
+opcode: 0x40024             # major 4 (Response), minor 36 -> (4 << 16) | 36
+direction: S2C
+size: 56                   # fixed 56-byte read by the party-member-remove handler
+spec: packets/4-36_party_member_remove_result.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server result when a party member is removed (a member left, or was expelled/kicked). Carries the requester, a submode selector, the removed member id, and the resulting 8-entry party member-id roster.
+
+# Wire order, offset 0 = first payload byte. Pack=1; padding bytes modelled explicitly so the
+# summed widths equal size: 56. Note: the removed-member id appears in TWO positions selected by
+# Submode (see notes) -- both are modelled so the struct stays a faithful 56-byte image.
+fields:
+  - { name: Pad0,           type: "bytes[4]" }   # 0x00  leading bytes not consumed by this path
+  - { name: RequesterId,    type: u32 }        # 0x04  actor that triggered the removal
+  - { name: Pad1,           type: "bytes[2]" }   # 0x08  filler up to the submode byte
+  - { name: Submode,        type: u8 }         # 0x0a  0 = member left, 1 = member expelled / kicked
+  - { name: Pad2,           type: "bytes[1]" }   # 0x0b  filler to the next dword
+  - { name: RemovedIdExpel, type: u32 }        # 0x0c  removed member id, used when Submode == 1
+  - { name: Pad3,           type: "bytes[4]" }   # 0x10  filler up to the roster array
+  - { name: MemberIds,      type: "bytes[32]" }  # 0x14  resulting party roster: 8 contiguous u32 actor ids
+  - { name: RemovedIdLeft,  type: u32 }        # 0x34  removed member id, used when Submode == 0
+
+notes: |
+  Static inference only; no capture available. Fixed 56-byte read; field offsets are CODE-CONFIRMED
+  from the handler's read order, CAPTURE-UNVERIFIED in meaning.
+
+    0x04 (4B)  RequesterId    : the actor that triggered the removal (le u32).
+    0x0a (1B)  Submode        : 0 = the member left on their own; 1 = the member was expelled/kicked.
+    0x0c (4B)  RemovedIdExpel : the removed member's actor id -- READ ONLY WHEN Submode == 1.
+    0x14 (32B) MemberIds      : the resulting party roster after the removal: EIGHT contiguous
+                               little-endian u32 actor ids (8 * 4 = 32 bytes). Unused slots are
+                               expected to be 0. Modelled as bytes[32]; decode as u32[8].
+    0x34 (4B)  RemovedIdLeft  : the removed member's actor id -- READ ONLY WHEN Submode == 0.
+
+  IMPORTANT -- two removed-id positions: the removed member's id lives at a DIFFERENT offset
+  depending on Submode. For a self-leave (Submode 0) read RemovedIdLeft at 0x34; for an expel
+  (Submode 1) read RemovedIdExpel at 0x0c. Select on Submode; do not read both.
+
+  HANDLER BEHAVIOUR (for the engineer's mental model): clears the removed member's party-id field;
+  if the removed id equals RequesterId it is treated as a self-leave (close the party panel, clear
+  the party-active state); otherwise it shows a "left" / "expelled" notice, drops the member from
+  the roster, and re-applies the 8-id MemberIds array. If one or fewer members remain afterwards the
+  client auto-disbands by re-sending 2/36 mode 0.
+
+  RELATIONSHIP: server reply in the party-leave / kick flow; pairs with C2S 2/36
+  CmsgPartyLeaveKick (packets/2-36_party_leave_kick.yaml). Incremental roster changes also arrive
+  via 5/21 SmsgPartyRosterEvent (packets/5-21_party_event.yaml).
+
+  UNKNOWNS to resolve with a capture of a self-leave and an expel:
+    - confirm the two disjoint removed-id positions (0x0c vs 0x34) against observed packets;
+    - the contents of the Pad regions (whether any carry a generic result/reason);
+    - whether the roster is always exactly 8 slots (the cap) or fewer on the wire.
+
+  UNBLOCKS: Client.Application party-member-remove handler (4/36).

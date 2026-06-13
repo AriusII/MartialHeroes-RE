@@ -1,0 +1,53 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing is a static fact; the field layout is a static inference. capture_verified: false.
+
+name: SmsgSkillPointUpdate
+opcode: 0x40096           # major 4 (Response), minor 150 -> (4 << 16) | 150
+direction: S2C
+size: 16                 # modelled 16-byte fixed block (result + idkey + mode + value)
+spec: packets/4-150_skill_point_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server pushes a skill-point update for the local player. Carries a result flag, the local-player id key, a mode selector, and a value that is either the new skill-point total (mode 1) or a skill level-up notice (mode 2). Shares the character/skill window with stat allocation but is a separate channel.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the handler reads fields at offsets 0/4/8/12.
+# The modelled 16-byte block (result + 3 pad + three u32) is the minimal layout consistent with those
+# reads; the on-wire TOTAL length is not stated in the source note (the catalog lists it 'var'),
+# so size: 16 is a model -- verify the exact body length against a capture.
+fields:
+  - { name: Result, type: u8 }          # 0x00  result flag: value 1 applies the update
+  - { name: Pad0,   type: "bytes[3]" }    # 0x01  alignment padding to the next dword
+  - { name: IdKey,  type: u32 }         # 0x04  local-player id key (matches the local player)
+  - { name: Mode,   type: u32 }         # 0x08  mode: 1 = set total skill points; 2 = skill level-up notice
+  - { name: Value,  type: u32 }         # 0x0c  skill-point total (mode 1) or skill-up level (mode 2)
+
+notes: |
+  CODE-CONFIRMED field reads, CAPTURE-UNVERIFIED, and the on-wire total length is a model. The receive
+  handler is identified by role (the skill-point update handler) and reads four values at fixed offsets.
+  Local-player gated by the id key.
+
+    0x00 (1B) Result : the update is applied only when this byte == 1.
+    0x01 (3B) Pad0   : alignment padding (the next field is dword-aligned at 0x04).
+    0x04 (4B) IdKey  : the local-player id key; the client checks this matches its own player.
+    0x08 (4B) Mode   : a mode selector. Mode 1 SETS the player's total skill points (stored to the
+                       skill window); mode 2 is a skill LEVEL-UP notice (drives a chat message).
+    0x0c (4B) Value  : interpreted by Mode -- the new skill-point total when Mode == 1, or the skill's
+                       new level when Mode == 2.
+
+  SIZE CAVEAT: the source note enumerates reads at offsets 0/4/8/12 but does not state a single fixed
+  read length, and the opcode catalog carries this message as variable-length. The 16-byte block above
+  is the minimal layout that covers all four reads with natural alignment. If a capture shows a longer
+  body, extend with a trailing opaque region; the four fields above keep their offsets either way.
+
+  PRESENTATION (NOT wire fields): the mode-2 skill level-up path floats a chat notice (UI string ids in
+  the 743xx range). The skill-point counter is also shown in the character/skill window.
+
+  UNKNOWNS to resolve with a skill-point-change capture:
+    - confirm the true on-wire body length (16 bytes vs longer);
+    - the full Mode enum beyond 1 (set total) and 2 (level-up notice);
+    - the three bytes at 0x01 (assumed pure alignment padding).
+
+  RELATED: distinct from stat-point allocation (2/29 CmsgStatAllocate / 4/29 SmsgStatUpdate) -- this is
+  the SKILL-point channel, though it shares the character/skill window. UNBLOCKS the skill-point total
+  / skill level-up path in Client.Application.

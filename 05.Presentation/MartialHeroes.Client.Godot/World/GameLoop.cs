@@ -53,6 +53,10 @@ public sealed partial class GameLoop : Node
     private TerrainNode _terrainNode = null!;
     private RealWorldRenderer? _realWorldRenderer;
 
+    // Stage-B: world-side effect renderer (3D particle/placeholder casts).
+    // spec: Docs/RE/specs/effects.md §15.3 — action codes 0xC8/0xC9/0xCB; CODE-CONFIRMED.
+    private EffectRenderer? _effectRenderer;
+
     // -------------------------------------------------------------------------
     // Godot lifecycle
     // -------------------------------------------------------------------------
@@ -257,6 +261,22 @@ public sealed partial class GameLoop : Node
             GD.PrintErr($"[GameLoop] HUD window attach failed: {ex.Message}");
         }
 
+        // Stage-B: EffectRenderer — world-side 3D particle placeholder for cast effects.
+        // Added as a Node3D child of GameLoop (the 3D scene root) so it lives in world space.
+        // spec: Docs/RE/specs/effects.md §15.3 — action codes 0xC8/0xC9/0xCB; CODE-CONFIRMED.
+        // spec: Docs/RE/specs/effects.md §15.4 — looping actor-anchored UserXEffect; CODE-CONFIRMED.
+        try
+        {
+            _effectRenderer = new EffectRenderer { Name = "EffectRenderer" };
+            AddChild(_effectRenderer);
+            _effectRenderer.Bind(_clientContext.HudEventHub);
+            GD.Print("[GameLoop] EffectRenderer added + bound to HudEventHub.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameLoop] EffectRenderer init failed: {ex.Message}");
+        }
+
         GD.Print("[GameLoop] Ready.");
     }
 
@@ -338,6 +358,8 @@ public sealed partial class GameLoop : Node
             case ActorMovedEvent moved:
                 // Legacy fallback path — superseded by WorldSnapshotEvent when the engine loop runs.
                 _actorRegistry.OnActorMoved(moved);
+                // Forward to HUD for minimap player-position tracking.
+                _hud.OnActorMoved(moved);
                 break;
 
             case ActorDespawnedEvent despawned:

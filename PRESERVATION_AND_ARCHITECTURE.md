@@ -97,7 +97,7 @@ MartialHeroes.slnx
 │   ├── MartialHeroes.Network.Abstractions     (Transport Contracts, Session Interfaces)
 │   ├── MartialHeroes.Network.Protocol         (Opcodes, Sequenced Packed Layouts, Inline Arrays)
 │   ├── MartialHeroes.Network.Crypto           (In-Place Sliding XOR/Stream Decryption)
-│   └── MartialHeroes.Network.Transport.Pipe   (System.IO.Pipelines Socket Implementation)
+│   └── MartialHeroes.Network.Transport.Pipelines  (System.IO.Pipelines Socket Implementation)
 ├── 📁 03.Storage.Assets/
 │   ├── MartialHeroes.Assets.Vfs               (Virtual File System, .PAK Multi-Mapping Memory)
 │   ├── MartialHeroes.Assets.Parsers           (Binary Stream Decoders for Mesh/Terrain/Animations)
@@ -165,7 +165,7 @@ MartialHeroes.slnx
       ```
     * Utilizes Roslyn **Source Generators** to map network opcodes directly to their packet processing handlers at compile-time, completely avoiding the overhead of runtime reflection.
 
-#### `MartialHeroes.Network.Transport.Pipe`
+#### `MartialHeroes.Network.Transport.Pipelines`
 * **System Type:** Class Library (`net10.0`)
 * **Dependencies:** `MartialHeroes.Network.Abstractions`, `System.IO.Pipelines`
 * **Technical Mandate:** Handles high-throughput asynchronous network stream parsing. Uses `PipeReader` and `PipeWriter` to read bytes directly from Windows or Linux sockets, managing backpressure automatically and outputting clean, framed byte windows to the protocol layers.
@@ -230,7 +230,7 @@ By structuring data pathways exclusively around modern .NET memory primitives, n
                 │
                 │ Pushes raw binary byte stream via PipeReader
                 ▼
-[MartialHeroes.Network.Transport.Pipe]
+[MartialHeroes.Network.Transport.Pipelines]
                 │
                 │ Frames data windows and isolates complete message packets
                 ▼

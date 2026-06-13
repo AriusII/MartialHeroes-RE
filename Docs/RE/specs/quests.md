@@ -1,6 +1,6 @@
 ---
 status: hypothesis
-sample_verified: false
+sample_verified: partial
 ---
 
 # Quest & NPC Dialog — Clean-Room Specification
@@ -10,6 +10,18 @@ sample_verified: false
 > model, opcode tuples, data-table linkage and constants of the legacy client's
 > NPC-interaction, quest-dialog, quest-log and reward-verdict subsystems, so the
 > .NET core can be reimplemented from scratch.
+>
+> **Update (2026-06-13) — world lane.** This pass adds the in-game **quest-log
+> window** (a three-tab browser with per-tab list + detail renderer), the
+> **two distinct sources of quest text** (UI captions/headers/notices from a
+> message-string database vs. quest dialogue body from the NPC-script records),
+> the **install-table confirmation** of the quest opcodes, a **second C2S quest
+> channel** observed but not yet opcode-traced, and the **sample-verified record
+> layouts** of the quest-data tables (`quests.scr`, `autoquestion_cl.scr`,
+> `npc.scr`, `discript.sc`). The detailed byte/stride tables for those data files
+> live in `formats/config_tables.md`; this spec keeps them behavioural and links
+> across. New material is in §§15–19; the quest-template record size and the
+> `npc.scr` string-slot description are **corrected** inline where noted.
 >
 > Scope: the NPC click → panel dispatch flow, the unified C2S quest-action request,
 > the two S2C quest-state pushes (quest-log snapshot, completion verdict), and the
@@ -358,22 +370,45 @@ access point used across the quest-dialog cluster.
 | Property | Value | Conf |
 |---|---|---|
 | Logical path | `data/script/quests.scr` | CONFIRMED |
-| Record size | 4960 bytes (0x1360), fixed | CONFIRMED |
-| Record count | ~366 quests (derived from file size / record size) | LIKELY |
-| Lookup key | `quest_id` | CONFIRMED |
-| Title | Localized string-table id **18022** (not stored inline as text) | LIKELY |
+| Record size | **3720 bytes (0xE88), fixed** *(corrected 2026-06-13: a real `quests.scr` sample measures a 3720-byte stride, not the 4960-byte value inferred this earlier pass)* | SAMPLE-VERIFIED |
+| Slot count | **488 slots, 122 occupied** (366 empty); a slot is empty when its leading `u16` quest id is 0 | SAMPLE-VERIFIED |
+| Lookup key | `quest_id` (sparse `u16`, range 1..617; the file is a sparse flat array, not index-keyed — the runtime keys a map on the id) | SAMPLE-VERIFIED |
+| Title | Localized message-string id **18022** (not stored inline as text) | LIKELY |
+
+> **Record-size correction.** The earlier value `4960 bytes (0x1360), ~366 quests`
+> was a static size-inference and is superseded by the sample: stride **3720 bytes
+> (0xE88)**, **488 slots / 122 occupied**. The field tables below that cited
+> offsets beyond 0xE88 (e.g. a give-up `abandonable` flag described from the world
+> lane at a higher offset) cannot both be true of a 3720-byte record; that conflict
+> is tracked as an open item in §13 and §19.4. The full sample-verified field/stride
+> table for `quests.scr` lives in `formats/config_tables.md` (quest-data family).
 
 ### 8.1 Known record fields
 
+The byte layout of the on-disk record is now sample-verified and documented in
+`formats/config_tables.md` (quest-data family). The on-disk view and the runtime
+view differ in vocabulary — the code path reaches dialogue by *handle*, the sample
+sees *offsets* — so both are recorded:
+
 | Off | Type | Field | Meaning | Conf |
 |----:|------|-------|---------|------|
-| +72 (0x48) | handle | `step_list` | Pointer/handle to the quest's objective/dialog **step list**, iterated to produce the up-to-6 dialog/objective lines and the objective counter (§5.1). | LIKELY |
+| +0x000 | u16 | `quest_id` | Sparse quest id (1..617); 0 = empty slot. Map key. | SAMPLE-VERIFIED |
+| +0x002 | char[≤32] | `quest_name` | CP949 quest name, null-terminated, in a ~62-byte name buffer ending by ~+0x3F. | SAMPLE-VERIFIED |
+| +0x040 | u8[6] | `step_codes` | Six step/objective code bytes (e.g. `05 06 07 08 09 0A`); three distinct patterns observed; 100% occupancy. | SAMPLE-VERIFIED |
+| +0x054 | u32 | `quest_ref_a` | Composite chain/category reference, decimal-digit encoded `730 R QQQQQ 04` (R = region/category, QQQQQ = quest id). | SAMPLE-VERIFIED (pattern) |
+| +0x058 | u32 | `quest_ref_b` | Same composite, always `+1` from `quest_ref_a` (the `…05` sibling). | SAMPLE-VERIFIED |
+| +0x064 | u32 | `quest_type_or_step_count` | Constant value 2 across all 122 occupied records; meaning unresolved (quest type? step count?). | SAMPLE-VERIFIED (value) |
+| +0x068 onward | CP949 | `objective_text[]` | One or more CP949 objective/step description strings (e.g. "Talk to the village elder"); occupancy tapers across later steps. | SAMPLE-VERIFIED (presence) |
+| +0x0E4, +0x1D4, +0x248, … | u32 | `sub_section_markers` | A `u32` = 48 (0x30) recurs at 100% occupancy at regular spacing (≈240 B then ≈124 B apart), consistent with embedded 48-byte sub-records (objective/reward sub-arrays). | SAMPLE-VERIFIED |
+| ~+72 (0x48) | handle | `step_list` (runtime view) | The quest-dialog/detail code path reaches the per-quest objective/dialog **step list** through a record handle and iterates it for the up-to-6 dialog lines and the objective counter (§5.1, §16). The runtime "handle" maps onto the on-disk step/objective region above; the exact byte correspondence is not pinned. | LIKELY |
 
-> **UNVERIFIED — most of the 4960-byte record is undecoded.** Reward item ids, required
-> level, prerequisite-quest chain, and objective target counts are all unknown. Only the
-> step-list handle (+72) and the title-id usage are proven. A dedicated quest-record
-> struct pass needs a real `quests.scr` sample (asset analyst). Do **not** guess reward or
-> prerequisite fields from this spec.
+> **Most of the 3720-byte record is still semantically undecoded** *(corrected
+> 2026-06-13: size was 4960; it is 3720)*. Reward item ids, required level,
+> prerequisite-quest chain, and per-objective target counts are not yet labelled,
+> though the `48`-marker spacing strongly implies embedded fixed-stride
+> objective/reward sub-records. The title is a message-string id (18022), not inline
+> text. Do **not** guess reward or prerequisite fields from this spec; consult the
+> sample-verified table in `formats/config_tables.md`.
 
 ---
 
@@ -383,16 +418,23 @@ access point used across the quest-dialog cluster.
 
 | Property | Value | Conf |
 |---|---|---|
-| Logical path | `data/script/npc.scr` (sibling variant `npcs.scr`) | CONFIRMED |
-| Record size | 404 bytes (0x194), fixed | CONFIRMED |
-| Record count | ~2510 entries | LIKELY |
-| String sub-fields | 6 × 64-byte string slots per record (name + dialog/label slots), CP949 | LIKELY |
-| Empty-string convention | A sub-field whose first character is ASCII `'0'` is treated as empty / cleared. | LIKELY |
+| Logical path | `data/script/npc.scr` (sibling catalogue `npcs.scr`, stride 1916 — see `formats/config_tables.md`) | CONFIRMED |
+| Record size | 404 bytes (0x194), fixed | SAMPLE-VERIFIED |
+| Record count | 2510 entries (sequential `u32` id 1..2510 at +0, mirrored at +4) | SAMPLE-VERIFIED |
+| String sub-fields | **Three CP949 description paragraphs at +0x14, +0x50, +0x90** *(corrected 2026-06-13: the earlier "6 × 64-byte string slots" was a static estimate; the sample shows three segmented paragraphs plus three `48`-marker sub-section boundaries at +0xD0/+0x110/+0x150)* | SAMPLE-VERIFIED |
+| Empty-string convention | A string sub-field whose first character is ASCII `'0'` is treated as empty / cleared. | LIKELY |
 
-These records feed the **NPC template lookup map** keyed by NPC id (the actor
-descriptor's NPC-id field). The actor factory uses the lookup to resolve an NPC's model
-and interaction record when an actor is of the NPC sort. See `structs/actor.md` for the
-descriptor fields.
+These records carry the multi-paragraph NPC **class/archetype description text** the
+client shows in UI panels. The quest dialogue **body** lines (the 6 lines populated
+into a quest dialog) are reached through the quest record's dialogue handles and the
+NPC-script dialog map; the body text store is the NPC-script record set — see §16 and
+§17, and the byte tables in `formats/config_tables.md`.
+
+> **`npc.scr` vs `npcs.scr`.** `npc.scr` (stride 404, 2510 records) holds the
+> description text above; `npcs.scr` (stride 1916, 812 records) is the NPC catalogue
+> proper (ids / quests / dialog links). The key linking the two ID spaces is an open
+> item (§13). The actor factory uses an NPC template lookup keyed by the actor
+> descriptor's NPC-id field; see `structs/actor.md` for the descriptor fields.
 
 ### 9.2 NPC placement array — `.arr`
 
@@ -429,8 +471,10 @@ The per-area NPC placement array is the 28-byte `.arr` record fully specified in
 | 5/73 `apply` == 1 | Handler acts only when the apply selector is 1. | LIKELY |
 | 5/73 `reward_state` 1 / 2 | grant / deny verdict. | LIKELY |
 | 5/73 phase 0 / 1 / 2 | result-panel phase: idle / showing / closed. | LIKELY |
-| `quests.scr` = 4960-byte records, ~366 quests, +72 = step-list handle | Quest template table. | CONFIRMED (size); LIKELY (count); LIKELY (+72) |
-| `npc.scr` = 404-byte records, ~2510 entries, 6 × 64-byte strings | NPC definition table. | CONFIRMED (size); LIKELY (count, strings) |
+| `quests.scr` = **3720-byte records, 488 slots / 122 occupied** | Quest template table *(corrected 2026-06-13: was 4960 B / ~366)*. | SAMPLE-VERIFIED |
+| `npc.scr` = 404-byte records, 2510 entries, **3 CP949 paragraphs @ +0x14/+0x50/+0x90** | NPC description table *(corrected 2026-06-13: was "6 × 64-byte strings")*. | SAMPLE-VERIFIED |
+| `autoquestion_cl.scr` = 92-byte records, 1300 entries | Anti-bot arithmetic-quiz question pool (CP949 question @ +4). | SAMPLE-VERIFIED |
+| `discript.sc` = 68-byte records, 33 entries | UI context-menu label table (u32 menu id @ +0, u32 category @ +4, CP949 label @ +8). | SAMPLE-VERIFIED |
 | `Tutor.scr` = 1660-byte records, ~86 lessons | Tutorial definition table. | CONFIRMED (size); LIKELY (count) |
 | String-table id 18022 | Quest-dialog title caption. CP949. | LIKELY |
 | String-table ids 309 / 618 | Quest-result captions. CP949. | LIKELY |
@@ -513,18 +557,255 @@ Tutorials are a parallel system to quests, summarised here; full Lua linkage is 
    only a subset map to identified panels; which KIND opens the quest dialog (vs guild /
    confession / gather / repair / merchant) is not resolved. Needs the `npc.scr` field
    decode to label KIND values.
-8. **`quests.scr` record layout** — only the step-list handle (+72) and the title-id are
-   proven. Reward item ids, required level, prerequisite chain, and objective targets are
-   all unknown. Needs a `quests.scr` sample (asset analyst).
-9. **`npc.scr` record layout** — record size and the 6 × 64-byte string-slot pattern are
-   known; the meaning of each of the 6 string slots, and the non-string fields, are not
-   decoded.
+8. **`quests.scr` record layout** *(updated 2026-06-13)* — the on-disk stride (3720 B),
+   the id/name/step-code/chain-reference fields, and the `48`-marker sub-record spacing
+   are now sample-verified (§8.1, `formats/config_tables.md`). Still unresolved: what the
+   six step-code bytes at +0x040 index, what the embedded 48-byte sub-records contain
+   (reward item ids, objective NPC/kill/collect targets), and the meaning of the constant
+   2 at +0x064. See §19.
+9. **`npc.scr` record layout** *(updated 2026-06-13)* — stride 404 B, the `u32` id mirrored
+   at +4, and the three CP949 description paragraphs at +0x14/+0x50/+0x90 are sample-verified
+   (§9.1). Still unresolved: the key that links `npc.scr` (2510 descriptor records) to
+   `npcs.scr` (812 catalogue records), and the non-string fields.
 10. **Accept gate (threshold 26)** — whether the gated runtime value is character level
     or a cash / VIP status is a guess; only the literal threshold 26 is proven.
 11. **Reward delivery** — assumed server-authoritative via side-channel item/exp/gold
     opcodes; not directly proven that 5/73 carries no reward list (related to item 6).
 12. **Event/tutorial gating hook (§3.3)** — the precise placement-record + global-flag
     condition that promotes an NPC's dialog kind is not pinned.
+
+13a. **Second C2S quest channel (window list-row actions)** — the quest-log window's
+    list-row "request" buttons (the AVAILABLE-tab per-row actions, §15.3) drive a network
+    send that is **distinct from 2/28**, through a different send-builder. Its opcode tuple
+    and body were **not traced** this pass. Treat it as a separate, unmapped C2S quest
+    request until an analyst recovers its tuple. See §15.5.
+
+---
+
+## 15. Quest-log window (the in-game quest browser)
+
+The in-game quest log is a single HUD window — the project glossary calls its class the
+**quest panel** — identified by the per-character config key `CHAR_QUEST_TRACKING`. It is a
+**three-tab quest browser** over the player's held and offered quests. Each tab has its own
+selectable row list, its own selection index, and a shared per-tab **detail renderer**
+(§16). This section is the window/UI/flow layer that sits on top of the protocol and
+data-table model in §§1–10. All facts here are **CODE-CONFIRMED** at the relevant builder /
+event-handler / renderer sites unless tagged otherwise; no capture was involved (window
+behaviour is not wire-observable).
+
+### 15.1 The three tabs
+
+| Tab | Role | Rows | Detail mode | Row action group |
+|---|---|---|---|---|
+| **Tab 0 — ACTIVE** | Quests in progress. | up to 6 selectable rows | mode 0 (§16) | row-select actions, one per slot |
+| **Tab 1 — COMPLETABLE** | Quests ready to turn in. | up to 6 rows | mode 1 (§16) | a second row-select action group |
+| **Tab 2 — AVAILABLE** | Offered quests (walks the global quest-template map by chapter). | up to 10 rows | mode 2 (§16) | a third row-select action group |
+
+The window keeps **three parallel display tables**, one per tab, each holding the per-row
+quest entries for that tab, plus a **per-tab selected-row index**. These window display
+tables are a presentation-side structure and are **distinct from** the 5/68 quest-log
+snapshot mirror in §6 (they use a different entry stride); the copy path from the snapshot
+mirror into the window tables was not fully traced (§18). The three tab buttons switch the
+active tab, then re-run the detail renderer for the newly selected tab.
+
+### 15.2 Window input model (tabs, scrolling, ESC, buttons)
+
+The window's event handler dispatches on an event-type byte:
+
+- **Key events.** The **ESC** key closes the window when it is visible. A billing/lock gate
+  can intercept input first and show a notice instead (the same lock gate guards the button
+  path).
+- **Scrollbar drag.** Dragging within the scrollbar track sets a **scroll pixel position**
+  (0..239) and a derived **scroll line offset** (0..40, computed as `40 − 40·pixel/239`),
+  then re-lays the visible list rows. The list holds **40 line slots** internally.
+- **Widget/button activation.** The clicked widget's **action id** selects a branch in the
+  window action map (§15.3). The whole button path is also behind the billing/lock gate.
+
+### 15.3 Window action map (selected actions)
+
+Buttons and list rows are bound to numeric **action ids**. The behaviourally important ones:
+
+| Action group | Effect | Conf |
+|---|---|---|
+| Tab buttons (0/1/2 + a sort toggle) | Switch active tab, then re-render detail via the renderer (§16) for the new tab's mode. | CODE-CONFIRMED |
+| ACTIVE-tab row select | Set the ACTIVE selected index (0..5) and render mode 0 for that row. | CODE-CONFIRMED |
+| COMPLETABLE-tab row select | Set the COMPLETABLE selected index (0..5), render mode 1, and set the active quest id from the active-quest index table. | CODE-CONFIRMED |
+| AVAILABLE-tab row select | Set the AVAILABLE selected chapter id and render mode 2 (the index is a chapter id). | CODE-CONFIRMED |
+| Category / chapter filter | A string-match over the list rows filters the AVAILABLE list by chapter/category (a fixed bank of filter slots). | CODE-CONFIRMED |
+| **Give up / abandon** | Opens the abandon-confirm panel (§15.4). | CODE-CONFIRMED |
+| **View dialog** | Opens the NPC quest-dialog populator in **info-only** layout for the selected active quest (read the full dialogue without the accept controls). | CODE-CONFIRMED |
+| **Close** | Closes the window. | CODE-CONFIRMED |
+| **Help** | Shows a help/info sub-panel; caption = message id **16003**. | CODE-CONFIRMED |
+| **HUD-track checkbox** | Toggles quest tracking and persists the flag (§15.6). | CODE-CONFIRMED |
+| **List-row network request** | A per-row request through a **second C2S send-builder** distinct from 2/28 — opcode untraced (§15.5, §13a). | CODE-CONFIRMED (that a send occurs); UNVERIFIED (tuple/body) |
+
+### 15.4 Abandon / give-up panel (gated by an `abandonable` flag)
+
+The **Give up** action does not abandon directly. It first looks up the selected active
+quest and reads a one-byte **`abandonable` flag** from the quest's template record. **Only
+when the flag is set** does the abandon-confirm panel open: the panel is filled with the
+quest id and an NPC-kind byte, its prompt caption is message id **18027** and its confirm
+button caption is message id **18028**, and it is shown. Confirming on that panel is what
+emits the C2S **give-up** action (`sub_action = 4`, §4.2) and clears the local active-quest
+state. If the `abandonable` flag is clear, the window shows a "cannot abandon this quest"
+notice and nothing is sent.
+
+> The `abandonable` flag was read at a record offset (the world lane observed it well past
+> 0x1300) that is **inconsistent with the now-confirmed 3720-byte (0xE88) `quests.scr`
+> stride** (§8). Either the flag lives within the 3720-byte record at an offset not yet
+> mapped to the sample, or it is read from a different runtime structure. The *behaviour*
+> (an `abandonable` gate on the give-up panel, captions 18027/18028) is CODE-CONFIRMED; the
+> exact source byte is an open item (§19.4). Do not hard-code the flag offset from this spec.
+
+### 15.5 Second C2S quest channel (list-row request) — UNVERIFIED tuple
+
+The AVAILABLE-tab list-row request buttons drive a network send through a **different
+send-builder than the unified 2/28 quest action**. It is most plausibly a "request quest
+detail / claim row" round-trip, but its **opcode tuple and body were not traced** this pass.
+This is a genuinely new, second quest C2S path beyond 2/28; it is tracked as an open item
+(§13a) and handed to protocol analysis. Do not assume it reuses 2/28.
+
+### 15.6 HUD quest-tracking checkbox (per-character INI flag)
+
+One window widget is a checkbox that toggles **HUD quest tracking** (the over-actor quest
+marker). Toggling it drives the tracking-on / tracking-off helpers that show or hide the
+marker, and **persists the on/off state to the per-character configuration**: it writes the
+`CHAR_QUEST_TRACKING` key under a per-character section named `<billing_id>_<player_name>_CHARACTER`.
+So the tracking preference is config-backed and scoped to the specific character. This is
+the same `CHAR_QUEST_TRACKING` key that identifies the window (§15).
+
+---
+
+## 16. Per-tab detail renderer (modes 0 / 1 / 2)
+
+A single **detail renderer** populates the right-hand detail area for the selected row,
+parameterised by the **tab mode** and the selected index. It first clears the internal list
+line slots (40 lines), then by mode:
+
+| Mode | Tab | Quest lookup | Dialogue source | Header caption | Body |
+|---|---|---|---|---|---|
+| **0** | ACTIVE | Active display table by selected index. | The quest record's **active dialogue handle**. | message id **18031** | 6 dialogue body lines, then an objective progress line. |
+| **1** | COMPLETABLE | Completable display table by selected index. | The quest record's **turn-in dialogue handle**. | message id **18033** | 6 dialogue body lines. |
+| **2** | AVAILABLE | Walk the global quest-template map for the record whose chapter id matches the selected index. | The quest record's **offer dialogue handle**. | (per template) | 6 dialogue body lines. |
+
+For **mode 0 (ACTIVE)** the renderer also walks the quest's per-quest **objective array**
+(an embedded fixed-stride sub-array on the quest record — consistent with the `48`-marker
+sub-records of §8.1), finds the active objective for the quest's current step, and formats
+an **objective progress line** using message id **18032** (a `%d` counter rendered as the
+1-based current step). The progress value and the per-objective reward value are read from
+that objective sub-record. This matches the §5.1 "up to 6 lines + current/total counter"
+behaviour and pins the source: the **6 body lines come from the NPC-script dialogue records**
+(§17), the **captions come from the message-string database** (§17).
+
+> The three dialogue handles correspond to the quest record's offer / active / turn-in
+> dialogue references (the §8 "step-list handle" family). The exact byte offsets of these
+> handles inside the 3720-byte record are not pinned against the sample (§19.4).
+
+---
+
+## 17. Quest text has two distinct sources
+
+Quest-related text is drawn from **two separate stores**, and conflating them is the main
+trap for a reimplementer. Both are **CODE-CONFIRMED**.
+
+### 17.1 UI captions / headers / notices → message-string database (`msg.xdb`)
+
+All quest **UI captions, tab headers, and error/notice strings** are numeric **message
+ids** resolved through a message-string accessor backed by a `std::map`, populated once at
+startup from **`data/script/msg.xdb`** (loaded in the engine's main init path). A lookup
+miss yields an `"Id[%d] msg not found."` placeholder. These are localized CP949 message
+codes, **not** opcodes and **not** wire enum values.
+
+`msg.xdb` itself is a flat record table (sample-verified stride 48 bytes, ~28,423 records —
+see `formats/config_tables.md`); an adjacent `msginfo.do` table holds message-id index /
+metadata, not the quest text itself.
+
+Quest message ids observed at the window/dialog sites this pass:
+
+| Message id(s) | Use |
+|---|---|
+| 16003 | Help / info notice (window Help button). |
+| 18022 | Quest-dialog title caption. |
+| 18027 | Give-up confirm prompt. |
+| 18028 | Give-up confirm button caption. |
+| 18031 | ACTIVE-tab detail header. |
+| 18032 | ACTIVE-tab objective progress line (`%d` = current step, 1-based). |
+| 18033 | COMPLETABLE-tab detail header. |
+| 18003 … 18071 | Requirement / availability notices (a contiguous block; e.g. 18003–18019, 18054–18071). |
+| 309, 618 | Quest-completion result panel captions (also noted in §7.3). |
+
+### 17.2 Quest dialogue body → NPC-script records (`npc.scr`)
+
+The **6 dialogue body lines** of every offer / active / turn-in quest dialog come from the
+**NPC-script record set** (`npc.scr`), reached through the quest record's dialogue handles
+(§16). These are the multi-paragraph CP949 strings of the 404-byte `npc.scr` record (§9.1).
+The dialogue body is therefore **never** stored in `msg.xdb` and **never** inline-text in
+`quests.scr`; only the captions/headers above are message ids.
+
+---
+
+## 18. Opcode install-table confirmation (routing CODE-CONFIRMED, bodies capture-unverified)
+
+The quest opcodes were re-verified against the client's **live push-handler install table**,
+which strengthens the routing claims of §2 from "observed at a dispatch/send site" to
+"present in the installed handler table":
+
+| Tuple | Name | Dir | Size | Install status |
+|---|---|---|---|---|
+| **5/68** | `SmsgQuestList` | S2C | 452 B | Installed in the major-5 push table (quest-log snapshot handler). CODE-CONFIRMED. |
+| **5/73** | `SmsgQuestComplete` | S2C | 344 B | Installed in the major-5 push table (quest-completion verdict handler). CODE-CONFIRMED. |
+| **2/28** | `CmsgQuestAction` | C2S | see §4 | Major-2 is **send-only**; there is correctly **no inbound handler slot**. The send-builder fills `sub_action` 2/3/4. CODE-CONFIRMED. |
+| (2nd C2S) | quest list-row request | C2S | — | A separate send-builder (§15.5); **opcode/body not traced**. UNVERIFIED. |
+
+> **These are static routing facts and remain CAPTURE-UNVERIFIED.** The install table
+> proves the handlers exist and are wired to these minors; it does **not** validate the
+> payload field offsets/sizes of §§4/6/7. The 452 B / 344 B / body layouts are still static
+> inferences to be byte-confirmed against a real capture (§13 #1).
+
+---
+
+## 19. Quest-data tables (sample-verified) — behavioural summary
+
+The on-disk quest-data files are now **SAMPLE-VERIFIED** via VFS byte inspection (no IDA).
+This spec keeps them **behavioural**; the **full stride / field byte tables live in
+`formats/config_tables.md`** (quest-data family). Summary:
+
+### 19.1 `quests.scr` — quest template catalogue
+Sparse flat array, **stride 3720 B (0xE88)**, **488 slots / 122 occupied**. Quest id is a
+`u16` at +0 (range 1..617; 0 = empty), CP949 name at +2, six step-code bytes at +0x040,
+decimal-composite chain references at +0x054/+0x058, and a recurring `u32 = 48` sub-section
+marker implying embedded objective/reward sub-records (§8.1). Replaces the earlier 4960-byte
+estimate.
+
+### 19.2 `autoquestion_cl.scr` — anti-bot quiz pool
+Flat array, **stride 92 B, 1300 records**. Sequential `u32` question id at +0, CP949 question
+text at +4 (simple Korean-language multiplication problems), CP949 answer-hint text after it.
+The numeric answer is checked server-side; the file holds only the display text. This is the
+anti-bot human-verification question bank, a sibling of the quest system rather than a quest
+table proper.
+
+### 19.3 `npc.scr` — NPC description text
+Flat array, **stride 404 B, 2510 records**. `u32` id at +0 mirrored at +4, then three CP949
+description paragraphs at +0x14 / +0x50 / +0x90 with `u32 = 48` sub-section markers between
+them (§9.1). This is the **dialogue-body / archetype-description store** (§17.2), distinct
+from the `npcs.scr` catalogue.
+
+### 19.4 Open data items (carried forward)
+- The six `quests.scr` step-code bytes at +0x040 — index into a step-type enum, or objective
+  template references? (Three distinct patterns across 122 quests.)
+- The embedded 48-byte `quests.scr` sub-records — objective NPC ids, kill/collect counts,
+  reward item ids and EXP are the expected contents but are not yet field-decoded.
+- The `abandonable` flag source byte — the world lane read it at an offset inconsistent with
+  the 3720-byte stride (§15.4); reconcile against the sample.
+- The `npc.scr` ↔ `npcs.scr` linking key (the 1..2510 description id space vs the catalogue
+  NPC ids).
+- The three quest dialogue handles' exact byte offsets inside the 3720-byte record.
+
+### 19.5 `discript.sc` — UI context-menu labels (sibling table)
+Flat array, **stride 68 B, 33 records**. `u32` menu id at +0, `u32` category code at +4, CP949
+label at +8 (party actions, currency names, window-toggle labels, school/clan actions). Not a
+quest file, but it is referenced from quest/interaction UI menus, so it is catalogued with the
+quest-data family in `formats/config_tables.md`.
 
 ---
 
@@ -539,6 +820,7 @@ Tutorials are a parallel system to quests, summarised here; full Lua linkage is 
 | `handlers.md` | The area-entity snapshot opcode that references NPCs by placement index (§9.2). |
 | `lua_scripting.md` | The `tutor.lua` panel-layout / string-table loading model (§12). |
 | `opcodes.md` | Authoritative opcode catalog; 2/28, 5/68, 5/73 routing rows. |
+| `formats/config_tables.md` | **The full sample-verified stride/field byte tables for the quest-data family** (`quests.scr`, `autoquestion_cl.scr`, `npc.scr`, `discript.sc`, `msg.xdb`, `msginfo.do`). This spec keeps those behavioural and links across (§§8–10, §17, §19). |
 
 - **Glossary:** see `Docs/RE/names.yaml`
 - **Provenance:** see `Docs/RE/journal.md`
