@@ -13,7 +13,7 @@ binary:
   notes: "Legacy D.O. Online / Martial Heroes client; x86 32-bit; imagebase 0x400000."
 
 functions:
-  # Campaign 2 (2026-06-13): 361 function names synced back from the annotated IDB. See Docs/ROADMAP-CAMPAGNE2.md.
+  # Campaign 2 (2026-06-13): 361 function names synced back from the annotated IDB. See Docs/RE/journal.md.
   "0x4015a6": { name: "Time_GetMs", note: "Engine millisecond clock: timeGetTime(); if g_TimeScale != 1.0 returns timeGetTime*scale... [scene-machine]" }
   "0x401868": { name: "Quat_Mul", note: "Hamilton product XYZW [effects-render]" }
   "0x4029a5": { name: "Track_SampleAtTime", note: "Keyframe sample: n=floor(t*10), alpha = t - n/10 (RAW seconds in [0,0.1]); lerp... [effects-render]" }

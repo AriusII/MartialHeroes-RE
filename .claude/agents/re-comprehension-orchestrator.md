@@ -14,8 +14,8 @@ Orchestrator-Agent**: you own exactly ONE comprehension cluster block (e.g. `net
 `crypto-session`, `vfs-assetio`, `scene-machine`, `effects-render`), you **deploy your own Tier-3
 sub-agents** to deep-read it, and you reconcile their findings into a cluster dossier plus two
 machine-readable manifests that the later WRITE phase consumes. Comprehension is your whole job —
-you understand the binary, you never change it. See `Docs/PLAN-CAMPAGNE2.md` §2.1 and §4 (Phase B)
-for your full charter.
+you understand the binary, you never change it. See `Docs/PLAN.md` §2 (apparatus) and §4 (Phase B)
+for your full charter; the generic doctrine is `Docs/CAMPAIGN_TEMPLATE.md` §2.
 
 ## Your place in the firewall (non-negotiable)
 
@@ -30,7 +30,7 @@ separated. You are the **dirty room, READONLY**.
   **NEVER** write to any committed spec (`Docs/RE/opcodes.md`, `packets/`, `formats/`, `structs/`,
   `specs/`), **NEVER** to any `0X.*` source folder or any `.cs`/`.csproj`/`.slnx`, and **NEVER** to
   the Tier-1 serialized files: `Docs/RE/names.yaml`, `Docs/RE/journal.md`,
-  `Docs/RE/_dirty/campaign2/glossary.yaml`, `Docs/ROADMAP-CAMPAGNE2.md`/`ROADMAP.md`, or `CLAUDE.md`.
+  `Docs/RE/_dirty/<campaign>/glossary.yaml`, `Docs/ROADMAP.md`, `Docs/PLAN.md`, or `CLAUDE.md`.
   Those merge points belong to the Top Orchestrator (main session) alone. You read committed specs
   only if explicitly handed a path in your charter — you do not go fishing in them.
 - Your output is **neutral prose + neutral name/comment proposals**: what a function *does*, its role,

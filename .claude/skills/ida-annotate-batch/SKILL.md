@@ -10,9 +10,9 @@ effort: medium
 
 A clean **extension** of the `ida-rename-batch` / `ida-naming-sync` pattern: where those apply only
 glossary *names*, this skill applies a per-cluster **annotation manifest** — a slice of the campaign
-glossary `Docs/RE/_dirty/campaign2/glossary.yaml` — that pairs each address with a **name**, a
-**neutral comment**, and an optional **struct/enum type**. It is the mechanical engine behind Phase D
-of Campaign 2 (`Docs/PLAN-CAMPAGNE2.md` §4 / §5.2): for one cluster, one atomic, re-runnable
+glossary `Docs/RE/_dirty/<campaign>/glossary.yaml` — that pairs each address with a **name**, a
+**neutral comment**, and an optional **struct/enum type**. It is the mechanical engine behind the IDB
+annotation phase (`Docs/PLAN.md` §4 Phase D / §6 glossary & sync-back): for one cluster, one atomic, re-runnable
 IDAPython apply — **dry-run first, apply only on explicit user confirmation, idempotent**.
 
 Renames and comments derived from a clean role-word glossary are firewall-safe (the same posture as
@@ -40,10 +40,10 @@ Comments are **neutral interop documentation** — never Hex-Rays pseudo-C, neve
 
 ## Steps
 
-1. **Pick the cluster.** Choose ONE cluster from the §6 backlog (e.g. `network-dispatch`,
-   `crypto-session`, `vfs-assetio`). Annotation is strictly serialized — exactly one annotator per
-   IDB at a time (`Docs/PLAN-CAMPAGNE2.md` §3.2). Extract that cluster's slice from
-   `Docs/RE/_dirty/campaign2/glossary.yaml`: a map of `addresses → { name?, comment?, type? }`.
+1. **Pick the cluster.** Choose ONE cluster from the `PLAN.md` §5 cluster backlog (e.g.
+   `network-dispatch`, `crypto-session`, `vfs-assetio`). Annotation is strictly serialized — exactly
+   one annotator per IDB at a time (`Docs/PLAN.md` §3). Extract that cluster's slice from
+   `Docs/RE/_dirty/<campaign>/glossary.yaml`: a map of `addresses → { name?, comment?, type? }`.
 2. **Read the bundled script** `${CLAUDE_SKILL_DIR}/scripts/annotate_batch.py` (also reachable as
    `scripts/annotate_batch.py`). It is real, runnable IDAPython using `ida_name` / `ida_funcs` /
    `ida_bytes` / `ida_typeinf` and a tiny stdlib parser for the flat manifest shape (no PyYAML inside
@@ -67,7 +67,7 @@ Comments are **neutral interop documentation** — never Hex-Rays pseudo-C, neve
    `type` was declared — applies the struct/enum type. It re-skips runtime symbols and conflicts and
    returns the same JSON shape with `applied` counts and any per-entry failures. Idempotent: a second
    run reports `noop` for everything already applied. *Decision: confirm you are the **only** annotator
-   on this IDB (strictly one writer at a time — `Docs/PLAN-CAMPAGNE2.md` §3.2). If a `type` fails to
+   on this IDB (strictly one writer at a time — `Docs/PLAN.md` §3). If a `type` fails to
    apply (struct not yet imported into the IDB), apply name+comment and report the type failure rather
    than aborting the whole cluster. On any SHA-256 mismatch vs `names.yaml`, STOP before applying.*
 7. **Stage the applied report.** Write the apply result to

@@ -152,7 +152,7 @@ For any multi-lane objective (a research wave, a per-cluster sweep, a staged eng
 - **Use Opus 4.8 for the orchestrators** (judgment-heavy decomposition / reconciliation / gating); workers may run a lighter model where the task is mechanical.
 - **Two levels of orchestration max** (Tier-1 main session → Tier-2 Orchestrator-Agent → Tier-3 worker). A Tier-2 agent never spawns another Tier-2.
 - **IDA fan-out is capped at sub-waves of ~3** (single IDB, MCP saturation); **WRITE to the IDB is strictly serialized — exactly one writer at a time**.
-- **Campaign 2** (`Docs/PLAN-CAMPAGNE2.md` + `Docs/ROADMAP-CAMPAGNE2.md`) is the live instance of this doctrine: a comprehension→annotation campaign that makes the `doida.exe` IDB legible, driven by the orchestrator agents below.
+- **The active campaign** is tracked in `Docs/PLAN.md` (method/charter) + `Docs/ROADMAP.md` (live run record), specialising `Docs/CAMPAIGN_TEMPLATE.md`. **CAMPAIGN 3** continues the `doida.exe` reverse (workflow / UI-UX / VFS) end-to-end: dirty recovery → clean specs → IDB annotation → wired client. The Campaign-2 comprehension→annotation apparatus (`re-comprehension-orchestrator`, `re-annotation-orchestrator`, `re-ida-annotator`, `/ida-annotate-batch`) is reused for its IDB phases. Prior cycles live in git history + `Docs/RE/journal.md`.
 
 ### Hooks — `.claude/hooks/` (Python, std-lib only, **advisory-only & fail-open**; they warn / inject context, never block)
 | Hook | When it fires |
