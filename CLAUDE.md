@@ -143,7 +143,16 @@ Two local MCP servers are registered in the committed root `.mcp.json`. Both con
 
 ## Tooling Map (`.claude/`)
 
-This repo ships a large shared Claude Code setup under `.claude/` (committed via `.gitignore` negations; only `settings.local.json` and `hooks/state/` stay local). **27 agents, 23 skills, 10 hooks.**
+This repo ships a large shared Claude Code setup under `.claude/` (committed via `.gitignore` negations; only `settings.local.json` and `hooks/state/` stay local). **41 agents, 46 skills, 24 hooks** (counts as of 2026-06-13; the bullet lists below are *representative*, not exhaustive — `ls .claude/agents/` and `.claude/skills/` are the source of truth).
+
+### Orchestration doctrine — prefer Tier-2 Orchestrator-Agents for big / simultaneous work
+
+For any multi-lane objective (a research wave, a per-cluster sweep, a staged engineering pipeline, several independent goals at once), **route through a Tier-2 Orchestrator-Agent rather than driving every lane from the main session**. An Orchestrator-Agent owns one big block, fans out its own single-deliverable Tier-3 sub-agents, maintains the file-ownership ledger (one writer per path per wave), and reports **one** rolled-up result. This is the proven way to run wide and stay safe — see `Docs/CAMPAIGN_TEMPLATE.md` §2 (the three command tiers) and §3 (concurrency).
+
+- **Use Opus 4.8 for the orchestrators** (judgment-heavy decomposition / reconciliation / gating); workers may run a lighter model where the task is mechanical.
+- **Two levels of orchestration max** (Tier-1 main session → Tier-2 Orchestrator-Agent → Tier-3 worker). A Tier-2 agent never spawns another Tier-2.
+- **IDA fan-out is capped at sub-waves of ~3** (single IDB, MCP saturation); **WRITE to the IDB is strictly serialized — exactly one writer at a time**.
+- **Campaign 2** (`Docs/PLAN-CAMPAGNE2.md` + `Docs/ROADMAP-CAMPAGNE2.md`) is the live instance of this doctrine: a comprehension→annotation campaign that makes the `doida.exe` IDB legible, driven by the orchestrator agents below.
 
 ### Hooks — `.claude/hooks/` (Python, std-lib only, **advisory-only & fail-open**; they warn / inject context, never block)
 | Hook | When it fires |
@@ -158,17 +167,20 @@ This repo ships a large shared Claude Code setup under `.claude/` (committed via
 | `_hooklib.py` | Shared helpers — `import _hooklib as h` |
 
 ### Skills (`/name`)
-- **RE / IDA** (run IDAPython via the MCP, write only `_dirty/`): `ida-recon`, `ida-decompile-export`, `ida-struct-recovery`, `ida-opcode-map`, `ida-naming-sync`, `ida-script-runner`, `ida-crypto-hunt`, `ida-mcp-connect`.
+- **RE / IDA** (run IDAPython via the MCP, write only `_dirty/`): `ida-recon`, `ida-decompile-export`, `ida-struct-recovery`, `ida-struct-apply`, `ida-vtable-recover`, `ida-opcode-map`, `ida-naming-sync`, `ida-rename-batch`, `ida-annotate-batch`, `ida-py`, `ida-script-runner`, `ida-crypto-hunt`, `ida-xref-map`, `ida-callgraph-map`, `ida-data-flow`, `ida-batch-analyze`, `ida-string-hunt`, `ida-mcp-connect`.
+  - `ida-annotate-batch` is the **Campaign 2 IDB-write applier** — dry-run → apply a rename+comment+type manifest slice from `_dirty/campaign2/glossary.yaml`; idempotent; firewall-safe (IDB never commits).
 - **Protocol / captures:** `pcap-extract`, `packet-diff`, `opcode-catalog`, `packet-codegen`.
 - **Assets:** `pak-explore`, `asset-format-doc`.
 - **Scaffolding:** `new-layer-project`, `wire-references`, `add-test-project`, `godot-csproj-bootstrap`.
 - **Quality / docs:** `re-workspace-init`, `clean-room-audit`, `clean-room-firewall-check`, `re-session-log`, `preservation-readme`.
 
 ### Agents (`@name`)
-- **Dirty-room RE** (have `mcp__ida__*`, write only `_dirty/`): `re-static-analyst`, `re-protocol-analyst`, `re-crypto-analyst`, `re-struct-cartographer`, `re-asset-format-analyst`, `ida-script-author`.
+- **Dirty-room RE** (have `mcp__ida__*`, write only `_dirty/`): `re-static-analyst`, `re-protocol-analyst`, `re-crypto-analyst`, `re-struct-cartographer`, `re-asset-format-analyst`, `re-animation-analyst`, `vfs-data-analyst`, `ida-script-author`.
+- **Campaign 2 orchestrators** (Tier-2, hold the `Agent` tool, **Opus 4.8**): `re-comprehension-orchestrator` (READONLY — fans out IDA analysts in sub-waves of 3 to deeply understand a cluster, emits proposed-name/comment manifests), `re-annotation-orchestrator` (WRITE — serializes one `re-ida-annotator` at a time to rename+comment the IDB from the gate-passed glossary). Tier-3 worker: `re-ida-annotator` (applies one cluster's annotations via `/ida-annotate-batch`).
 - **Spec authors** (the dirty→clean bridge): `protocol-spec-author`, `asset-spec-author`.
-- **Clean-room engineers** (one per project, **no IDA**): `kernel-`, `network-abstractions-`, `network-protocol-`, `network-crypto-`, `network-transport-`, `assets-vfs-`, `assets-parser-`, `assets-mapping-`, `domain-`, `application-`, `client-infrastructure-`, `godot-presentation-engineer`.
-- **Quality:** `clean-room-auditor`, `architecture-guardian`, `perf-reviewer`, `csharp-reviewer`, `test-engineer`, `build-doctor`, `preservation-archivist`.
+- **Clean-room engineers** (one per project, **no IDA**): `kernel-`, `network-abstractions-`, `network-protocol-`, `network-crypto-`, `network-transport-`, `assets-vfs-`, `assets-parser-`, `assets-mapping-`, `domain-`, `application-`, `client-infrastructure-`, `godot-presentation-engineer`, `godot-ui-engineer`, `godot-input-engineer`, `godot-skinning-specialist`.
+- **Quality:** `clean-room-auditor`, `architecture-guardian`, `perf-reviewer`, `csharp-reviewer`, `test-engineer`, `build-doctor`, `preservation-archivist`, `godot-render-reviewer`, `tooling-auditor`.
+- **Meta-authors** (grow/maintain the fleet): `agent-author`, `skill-author`, `hook-author`; plus `godot-mcp-operator` (drives the live Godot editor/game).
 
 ## Commit Discipline
 
