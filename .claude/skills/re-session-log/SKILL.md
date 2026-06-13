@@ -2,6 +2,8 @@
 name: re-session-log
 description: Use to append a provenance entry to Docs/RE/journal.md after an IDA reverse-engineering session. Records date, analyst, binary sha256 prefix, the functions/opcodes/structs touched (by canonical name only), and the committed spec files produced — the append-only audit trail backing the EU Art.6 interoperability claim. Append-only; never rewrites history; never records pseudo-code.
 allowed-tools: Read Write
+model: sonnet
+effort: medium
 ---
 
 # re-session-log
@@ -66,6 +68,32 @@ Every entry MUST carry:
    mention of the spec path — that pairing is exactly what `clean-room-firewall-check` enforces in
    CI. If this session changed a spec but you cannot name it here, fix that before committing.
    Report the appended entry back to the user and remind them the journal change is itself committed.
+
+## Decision points
+
+- **If `journal.md` is absent**, run `re-workspace-init` first — never create the journal from
+  scratch here (its header is canonical).
+- **If a fact was debugger-confirmed vs static-only**, you may note "confirmed via live session"
+  in plain language, but still no addresses — the journal records *what was learned*, not *how*.
+- **If the binary hash is unknown**, write `@ (unhashed)` and flag it — do not invent digits.
+- **If the session produced no committed spec**, say so explicitly ("specs: none") rather than
+  omitting the field.
+
+## Verify / Done when
+
+- [ ] Exactly one new entry appended at the bottom; every prior byte preserved.
+- [ ] All names are canonical (resolve in `names.yaml`); no address, no `sub_`/`dword_` autoname.
+- [ ] No pseudo-code / decompiler output anywhere in the note.
+- [ ] Every committed spec the session touched is named in `specs produced/updated`.
+
+## Pitfalls (anti-patterns)
+
+- **Never** edit, reorder, or reformat existing entries — append-only, always.
+- **Never** record a raw address or autoname; resolve to the canonical name first.
+- **Never** paste a code snippet or control-flow transcription into a note.
+
+> North star: serves **N1** — the journal is the contemporaneous Art. 6 audit trail proving each
+> clean-room session mapped structure for interoperability and produced neutral specs.
 
 ## Hard rules
 

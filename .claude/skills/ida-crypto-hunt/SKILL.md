@@ -2,6 +2,8 @@
 name: ida-crypto-hunt
 description: Use to recover the packet cipher and key schedule of the legacy Martial Heroes client (Main.exe) so Network.Crypto can interoperate with the original wire format. Fuses crypto-shaped bit-op loop detection, xrefs walked out from the socket-recv/decrypt path, and constant-table (S-box/key-material) extraction into one crypto-focused report under Docs/RE/_dirty/crypto/. The deliverable that crosses the firewall is a NEUTRAL algorithm description in words and math — never transcribed code.
 allowed-tools: 'Read Write'
+model: sonnet
+effort: high
 ---
 
 # ida-crypto-hunt — recover the packet cipher
@@ -75,6 +77,32 @@ byte = plain XOR k_i; key schedule seeds S from a 16-byte session key delivered 
    neutral algorithm description for Network.Crypto must be authored into
    Docs/RE/specs/crypto.md by the spec-author, with a journal.md entry. Constants promote
    only via that reviewed spec." Do not author the clean spec from here.
+
+## Decision points
+
+- **If two symmetric routines appear**, you've likely found encrypt + decrypt — note both and which
+  side the recv path uses. Expect a rolling **XOR/ROL** shape operating in-place per byte/block.
+- **If the static algorithm is uncertain** (key schedule, where the session key enters), the decisive
+  evidence is dynamic: hand off to `ida-debugger-drive` — in the maintainer's live F9 session,
+  breakpoint just before and after the cipher routine and `dbg_read` the buffer (it reads through
+  `PAGE_NOACCESS`) to capture the same bytes plain and encrypted. That confirms the transform and the
+  key without ever transcribing code. Static forms the hypothesis; the debugger confirms it.
+- **If a 256-entry table is a 0..255 permutation**, flag it as a likely S-box; it promotes only via a
+  reviewed spec justified by interoperability necessity.
+
+## Verify / Done when
+
+- The cipher function is identified by all three signals (recv-reachable, tight bit-op loop, constant table).
+- The dirty notes characterize: per-byte/block op, stream vs block, state size, key schedule, key entry point, endianness, encrypt==decrypt?.
+- Everything stays in `_dirty/crypto/`; the deliverable that crosses is a neutral words+math description.
+
+## Pitfalls (never)
+
+- Never transcribe Hex-Rays pseudo-code anywhere — describe the transform in words and math only.
+- Never put capture bytes, keys, or addresses in a committed file.
+- Never promote an S-box/key as copied code — only as interoperability-justified data via a reviewed spec.
+
+*North star N1: recovers the wire cipher Network.Crypto must reproduce byte-exact — the static shape a live debugger read confirms against ground truth.*
 
 ## Hard rules
 

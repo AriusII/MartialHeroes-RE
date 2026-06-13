@@ -3,6 +3,7 @@ name: ida-vtable-recover
 description: Use to resolve a C++ vtable in the legacy Martial Heroes client (Main.exe) — walk its function-pointer slots and describe the conceptual method behind each slot (ctor/dtor, virtual handler, getter) — into a NEUTRAL slot table under Docs/RE/_dirty/structs. The way to recover an object's polymorphic interface (e.g. an actor or asset-loader class hierarchy) before a spec-author writes the clean struct.
 allowed-tools: Read Write
 model: sonnet
+effort: high
 ---
 
 # ida-vtable-recover — resolve a vtable into a neutral slot table
@@ -36,7 +37,11 @@ All output is **dirty** (addresses derived directly from the copyrighted binary)
 1. **Locate the vtable.** Either you already have its data EA, or you start from the
    constructor/object: the vtable address is the value moved into `[this+0]` near the top of the
    constructor (look for `mov dword ptr [ecx], offset ??_7Class@@...`). Note the data EA and a
-   working class name (e.g. `CActor`).
+   working class name (e.g. `CActor`). *If only the object instance is in hand (e.g. caught live in
+   the debugger), read the dword at `[obj+0]` to get the vtable EA — `dbg_read` reads through
+   `PAGE_NOACCESS` against the running client; never `dbg_start` (the maintainer F9-launches).* If the
+   constructor moves several offsets into `[this+N]`, the one at `+0` is the primary vtable; secondary
+   ones at `+N` are multiple-inheritance/base subobject vtables — recover each as its own table.
 2. **Walk the slots.** Read `${CLAUDE_SKILL_DIR}/scripts/vtable_recover.py`, set CONFIG (`VTABLE_EA`
    = the table's data EA, OR `CTOR` = the constructor name/address to auto-find the table;
    `CLASS_NAME`; `MAX_SLOTS`). Run it via the exec tool. It reads consecutive pointer-sized slots
@@ -54,6 +59,29 @@ All output is **dirty** (addresses derived directly from the copyrighted binary)
 5. **Hand off.** In your reply, summarize the interface in words (slot count, which slots are
    ctor/dtor, the notable virtuals) and point to the `_dirty/` table. Resolve `sub_…` slot targets
    to proposed canonical names for `ida-naming-sync`; never rename here.
+
+## Verify / Done when
+
+- The walk stopped at a natural boundary (next named vtable, a data label, or a non-code slot) — not
+  at `MAX_SLOTS` (if it hit the cap, the table is likely longer; raise the cap and re-walk).
+- Every slot has an EA, a target, an in-degree, and a one-line **hypothesised** role — and the
+  important roles are spot-confirmed by reading the slot (`ida-decompile-export`), not left as guesses.
+- The slot table is written under `Docs/RE/_dirty/structs/<class>.vtable.md` with the SHA-256 tag and
+  the `> DIRTY` banner; no address leaked into the reply.
+
+## Pitfalls
+
+- **Never** treat a heuristic role tag as confirmed truth — a "getter" by size can be an inlined
+  accessor with side effects; phrase roles as hypotheses until read.
+- **Never** run past the table boundary into adjacent RTTI/data and report phantom slots — bound with
+  `MAX_SLOTS` and stop at the first non-code/cross-referenced slot.
+- Do not confuse a base-subobject vtable (offset `+N`) with the primary (`+0`); mixing them mislabels
+  the polymorphic interface.
+- **Never** rename slot targets here or transcribe a slot's pseudo-C — names go through the glossary,
+  bodies stay in `ida-decompile-export`'s quarantine.
+
+> **N1:** recovering the polymorphic interface as a neutral slot table is the static half of clean-room
+> RE — the hypothesis a spec-author promotes and the debugger can confirm against the live object.
 
 ## Hard rules
 

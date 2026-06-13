@@ -3,6 +3,7 @@ name: memory-curate
 description: Use to tidy the Claude auto-memory store for this project — review MEMORY.md and the per-fact memory files, dedupe overlapping facts, fix broken [[links]], ensure each fact is its own file with correct frontmatter, and prune stale/superseded entries. Read-mostly hygiene so the memory index stays trustworthy and small.
 allowed-tools: Read Write Edit Glob Grep
 model: opus
+effort: high
 ---
 
 # memory-curate — keep the auto-memory store clean and trustworthy
@@ -66,6 +67,39 @@ makes only conservative, well-justified edits, and never invents facts.
 
 7. **Report** what you changed: files merged/split/deleted, links fixed, entries pruned, and a list
    of anything you flagged for the user to decide rather than acting on.
+
+## Decision heuristics
+
+- **If two implementation-state notes conflict** (old "greenfield skeleton" vs newer "full client +
+  Godot, 551 tests") → keep the newest, demote the older to a one-line historical note or delete with a
+  rationale. The project moves fast; state facts go stale first.
+- **If a fact is uncertain or possibly-still-true** → flag it for the user; do not delete. Memory loss is
+  a one-way cost worse than a stale note.
+- **If a fact file holds a decompiler identifier, an address, a raw asset/packet byte, or a credential**
+  → strip it on sight and note the firewall reason; this is the one place curation rewrites content.
+- **If a bullet and its file slug drift** → repair the link target to the real filename; never leave a
+  dead `[[link]]`.
+
+## Verify / Done when
+
+- Every `MEMORY.md` bullet links to a file that exists; every fact file is referenced by exactly one
+  bullet (no orphans, no dead links, no duplicate bullets).
+- Each fact is one focused file with frontmatter whose slug matches its filename.
+- No conflicting state notes remain (newest kept, older demoted/removed with rationale); uncertain facts
+  are flagged, not deleted.
+- No pseudo-code, address, raw bytes, or secret survives in any memory file.
+- Only files under the project's memory dir were touched; a change report was returned.
+
+## Pitfalls
+
+- Never edit repo source, `Docs/RE/`, or `.claude/` config under the banner of "curation" — memory dir only.
+- Never fabricate or "improve" a fact's claim; curation reorganizes and prunes, it does not author.
+- Never delete on a hunch — only what is provably duplicated or superseded, and say why; everything else
+  is flagged.
+- Don't impose a new frontmatter schema; match the shape of the files already present.
+
+> North star: a trustworthy, small memory index keeps every future session correctly oriented on the N1
+> firewall and N2 fidelity state — bad memory actively misleads the work.
 
 ## Hard rules
 

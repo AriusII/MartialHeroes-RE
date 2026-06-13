@@ -3,6 +3,7 @@ name: ida-string-hunt
 description: Use to census the string table of the legacy Martial Heroes client (Main.exe) and tag candidate subsystems by string + import evidence — the fastest way to locate networking, asset I/O, crypto, UI, scripting, and config code before reading any function. Drives the typed mcp__ida__find / mcp__ida__get_string / mcp__ida__imports tools (falling back to a bundled census IDAPython snippet) and writes a tagged string map to Docs/RE/_dirty/static/.
 allowed-tools: Read Write
 model: sonnet
+effort: high
 ---
 
 # ida-string-hunt — string census + subsystem tagging
@@ -40,13 +41,36 @@ and lands under `Docs/RE/_dirty/static/`.
    long runs of it.
 3. **Read the buckets.** The output is a per-bucket table: matched string (truncated), its data EA,
    and the function that references it. Skim for the obvious anchors — a format extension, an error
-   message, an API name — that pin a subsystem's entry point.
+   message, an API name — that pin a subsystem's entry point. *Decision: if a bucket is empty but the
+   subsystem must exist (e.g. crypto with no keyword hits), pivot to the import evidence (`WSAStartup`,
+   `CryptAcquireContext`) or run `ida-script-runner`'s `find_bitops_loops.py` — the cipher is often
+   constant-driven with no strings. If a string has many referencers, it is a shared log/format string,
+   not a subsystem anchor — prefer the single-referencer strings as entry points.*
 4. **Save it.** The snippet best-effort-writes `Docs/RE/_dirty/static/strings.<label>.md`; confirm
    the path or save the Markdown yourself. Keep the full table in `_dirty/` only.
 5. **Hand off.** In your reply, summarize which subsystems are clearly present and the single best
    anchor string/function per subsystem. Feed those anchors to `ida-xref-map` (fan-in to the
    consumer) or `ida-batch-analyze` (triage the cluster). Resolve `sub_…` referencing functions to
    proposed canonical names for `ida-naming-sync`; never rename here.
+
+## Verify / Done when
+
+- Every named subsystem (network / asset_io / crypto / ui / scripting / config) has at least one
+  concrete anchor (string + referencing function), or is explicitly reported absent with the evidence.
+- CP949 runs were flagged, not transcribed; the saved table lives only under
+  `Docs/RE/_dirty/static/strings.<label>.md` with the SHA-256 tag and `> DIRTY` banner.
+- Each anchor names the function (proposed name), not a raw address, in the reply.
+
+## Pitfalls
+
+- **Never** transcribe long CP949/Korean runs — flag the marker, keep the bytes in `_dirty/`.
+- Do not over-trust substring buckets: `key` matches both crypto and UI-key strings — verify the
+  referencing function before declaring a subsystem.
+- A reachable string table is not proof the DB is the right build — confirm `ida-recon`'s SHA-256 if in
+  doubt; never census a stale/empty IDB.
+
+> **N1:** the string census is the cheapest static map that forms the subsystem hypotheses clean-room
+> RE then drills into and the debugger confirms.
 
 ## Hard rules
 

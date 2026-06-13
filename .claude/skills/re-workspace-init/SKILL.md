@@ -2,6 +2,8 @@
 name: re-workspace-init
 description: Use when Docs/RE is missing its canonical structure (e.g. fresh clone, deleted folder, or a teammate reports specs have no home). Idempotently materializes the clean-room knowledge base — committed spec tree plus the gitignored _dirty/ quarantine — without ever touching files that already exist.
 allowed-tools: Read Write Bash(mkdir *)
+model: sonnet
+effort: medium
 ---
 
 # re-workspace-init
@@ -84,6 +86,31 @@ Docs/RE/
    End with a count of created vs. kept, and remind the user that any new committed spec must be
    accompanied by a `journal.md` entry (`re-session-log` skill) and will be audited by
    `clean-room-firewall-check`.
+
+## Decision points
+
+- **If `.gitignore` lacks the `Docs/RE/_dirty/` rule**, STOP and surface the gap — do not create
+  the quarantine, and do not add the ignore rule silently; let the user confirm.
+- **If a canonical file already exists** (even empty-with-content), SKIP it and report "kept" —
+  an existing file is a signal that real RE work lives there.
+- **If you cannot locate the repo root** (no `PRESERVATION_AND_ARCHITECTURE.md` / `.gitignore`),
+  do not guess — ask the user for the root.
+
+## Verify / Done when
+
+- [ ] Every committed folder + `_dirty/` subfolder in the canonical layout exists.
+- [ ] Missing canonical files were seeded; existing ones were untouched (reported "kept").
+- [ ] `.gitkeep` sits in each empty committed subfolder; none under `_dirty/`.
+- [ ] The gap summary lists `created`/`kept`/`skipped` per path with a created-vs-kept count.
+
+## Pitfalls (anti-patterns)
+
+- **Never** overwrite, truncate, or reformat a file that already exists.
+- **Never** write anything under `_dirty/` except its `README.md`.
+- **Never** create the quarantine when its `.gitignore` rule is absent.
+
+> North star: serves **N1** — it materializes the dirty/clean firewall tree that gives every
+> later clean-room session a lawful home for findings and neutral specs.
 
 ## Hard rules
 

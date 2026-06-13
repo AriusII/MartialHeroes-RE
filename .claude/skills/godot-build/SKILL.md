@@ -3,6 +3,7 @@ name: godot-build
 description: Use to build the Martial Heroes Godot client's C# assembly (MartialHeroes.Client.Godot.csproj) before a headless run or screenshot — the managed DLL the engine loads must be current. Surfaces compiler errors plainly, and documents the clean-rebuild (delete .godot/mono) for when Godot's generated bindings look stale (CS0103 on Godot types, "type not found" after an API change).
 allowed-tools: Bash("C:/Program Files/dotnet/dotnet.EXE" *) Bash(pwsh *) Bash(powershell *) Read
 model: sonnet
+effort: medium
 ---
 
 # godot-build — compile the Godot client assembly
@@ -54,6 +55,32 @@ This skill is that rebuild step, with the stale-bindings clean-rebuild documente
    build regenerate it.) If the glue files themselves are missing, open the project once in the Godot
    editor to regenerate them, then build again.
 4. Report: succeeded/failed, error count, and (on failure) the first few errors with file:line.
+
+## Decision points
+
+- **If the error is `CS0234`/wrong-type on bare `Input.`/`Environment.`/`Time.`** → namespace
+  collision, fully qualify with `global::Godot.*` (step 2) — a source fix, never a clean rebuild.
+- **If the error is on a Godot type that genuinely exists** (editor is happy, API is real) → stale
+  generated glue → `-Clean` (step 3); if glue files are missing entirely, open the project once in the
+  editor to regenerate, then build.
+- **If the error names a file in layer 01–04** → the cause is downstream; fix it there (and if it is
+  `using Godot;` in a core layer, that's an architecture violation, not a Godot-build problem).
+- **If you see `GltfDocument.AppendFromBuffer`** → flag it (banned, native crash); steer to the
+  `ArrayMesh` builders. Not a compiler error, but a blocker.
+- **On green** → proceed to `/godot-run-headless` (loads cleanly) and `/godot-screenshot` (looks right).
+
+## Verify / Done when
+
+- `Build succeeded` with `0 Error(s)` on the Godot csproj — OR the first errors are reported with
+  file:line and the matching decision above (qualify / clean / downstream) is named.
+
+## Pitfalls
+
+- Never "fix" a stale-binding error by editing committed source — `-Clean` the generated glue instead.
+- Never delete anything outside `.godot/`, `bin/`, `obj/` during a clean.
+- Never treat a green build as proof it renders — compiling is not loading is not looking right.
+
+*North star: N2 — a current managed DLL is the precondition for verifying the 1:1 client honestly.*
 
 ## Hard rules
 

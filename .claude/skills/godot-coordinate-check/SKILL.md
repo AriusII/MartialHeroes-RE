@@ -3,6 +3,7 @@ name: godot-coordinate-check
 description: Use to catch coordinate-convention bugs in the Martial Heroes client — dumps a placed node's global AABB via a temporary autoload and checks it lands where its cell/world position says it should. The numeric guard against the negate-Z / negate-X mix-ups (the historical gray-world bug where buildings landed ~1000+ units away, mirrored across an axis).
 allowed-tools: Read Write Edit Bash(pwsh *) Bash(powershell *) Bash(python *)
 model: sonnet
+effort: high
 ---
 
 # godot-coordinate-check — verify a node sits where its cell says
@@ -55,6 +56,24 @@ sign-flip on one axis is the signature of a handedness bug.
 5. **CLEANUP.** Remove the `AabbProbe` autoload line from `project.godot` and delete
    `res://Dev/_aabb_probe.gd` (+ `.uid`). Report the expected position, the measured AABB centre, the
    per-axis delta, and the likely convention bug (if any).
+
+## Verify / Done when
+
+- The measured **global** AABB centre matches the expected world position within a cell-sized
+  tolerance — OR a single-axis sign-flip / constant-multiple residual is named with its cause (Z drop,
+  X gray-world, 1024/16/65 scale, or fallback-Y race), pointing at the ONE source file to fix; and the
+  temporary `AabbProbe` autoload + script (+ `.uid`) are removed.
+
+## Pitfalls
+
+- Never compare the LOCAL AABB — it ignores the placement transform you are validating.
+- Never fix a mismatch by adding a second flip elsewhere — correct it at the single source
+  (`WorldCoordinates` / the builder / the placement code).
+- Never trust the helper's expected value over the actual placement code if they diverge — it's a
+  hypothesis (world negates Z, mesh `.skn` negates X; cells 1024, 65×65, spacing 16).
+
+*North star: N2 — exact coordinates are non-negotiable for a 1:1 world; a mirrored axis is a fidelity
+defect, not cosmetics. Pairs with `/godot-fidelity-check`.*
 
 ## Hard rules
 

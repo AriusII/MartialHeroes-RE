@@ -55,7 +55,11 @@
           { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/spec_citation_guard.py\"", "timeout": 6 },
           { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/cp949_nudge.py\"", "timeout": 6 },
           { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/unsafe_alloc_nudge.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/test_after_core_edit.py\"", "timeout": 8 }
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/test_after_core_edit.py\"", "timeout": 8 },
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/agent_md_guard.py\"", "timeout": 6 },
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/skill_md_guard.py\"", "timeout": 6 },
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/hook_advisory_guard.py\"", "timeout": 6 },
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/settings_wiring_nudge.py\"", "timeout": 6 }
         ]
       },
       {
@@ -83,7 +87,6 @@
     "PreCompact": [
       {
         "hooks": [
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/precompact_note.py\"", "timeout": 6 },
           { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/memory_persist_nudge.py\"", "timeout": 6 }
         ]
       }

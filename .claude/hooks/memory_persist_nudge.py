@@ -25,7 +25,7 @@ def main():
         h.system_message(
             "ℹ context is about to compact — persist NOW any new opcodes / struct layouts / "
             "asset mappings: raw → Docs/RE/_dirty/, promoted → specs (packets|formats|structs|"
-            "specs|opcodes.md), durable facts → auto-memory. Advisory only."
+            "specs|opcodes.md), durable facts → auto-memory. " + h.CLEAN_ROOM_BLURB
         )
     else:  # Stop / SubagentStop
         h.system_message(

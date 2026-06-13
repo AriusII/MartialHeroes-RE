@@ -2,6 +2,8 @@
 name: new-layer-project
 description: Use to add a new class library into the correct numbered layer folder of the MartialHeroes solution and register it in MartialHeroes.slnx with canonical csproj props and only legal downward ProjectReferences.
 allowed-tools: Read Write Bash(dotnet new *) Bash(dotnet sln *) Bash(dotnet add *)
+model: sonnet
+effort: medium
 ---
 
 # new-layer-project
@@ -104,6 +106,41 @@ slnx. Lower numbers must never reference higher numbers.
 8. **Report** the created csproj path, the slnx folder it was registered under, and
    the exact reference edges applied — so the caller can run `wire-references`'
    `check_dag.py` to confirm the global graph is still acyclic and downward-only.
+
+## Decision points
+
+- **If the intended references are unclear or span the layer boundary**, stop at step 1
+  and ask — never guess an edge. A wrong upward edge is far costlier to unwind than a
+  one-line clarification.
+- **If the new project sits in 02/03**, place it correctly in the intra-layer sub-order
+  (`Parsers`→`Vfs`, `Mapping`→`Parsers`, `Transport.Pipelines`→`Abstractions`). When in
+  doubt, reference only `Shared.Kernel` (01) — that edge is always legal from anywhere.
+- **If `dotnet sln add` lands the `<Project>` in the wrong `<Folder>`** (or flattens the
+  XML), fix it with a precise Write that preserves every other line verbatim, then re-Read.
+- **If the request is a layer-05 / Godot project**, hand off to `godot-csproj-bootstrap`
+  and stop — Godot generates its own csproj and this skill must not touch it.
+
+## Verify / Done when
+
+- [ ] The csproj lives at `NN.LayerFolder/MartialHeroes.<Suffix>/…` and is the canonical
+      4-property shape (no SDK-template noise).
+- [ ] Every `ProjectReference` points strictly downward; no `using Godot;`-pulling package
+      sits in layers 01–04.
+- [ ] The slnx `<Project Path=…>` is inside the correct layer `<Folder>`, forward-slashed,
+      alphabetically ordered among siblings.
+- [ ] `wire-references`' `check_dag.py` (run by the caller) reports the graph still acyclic
+      and downward-only.
+
+## Pitfalls (anti-patterns)
+
+- **Never** add an upward or sideways-out-of-order edge "just to compile" — that breaks the
+  downward-only DAG the whole architecture rests on.
+- **Never** name the transport project `.Pipe`; disk reality is `Network.Transport.Pipelines`.
+- **Never** leave the SDK template's extra `PropertyGroup` noise — match the minimal repo shape.
+- **Never** create a layer-05/Godot project here.
+
+> North star: serves **N2** — a clean downward-DAG core that re-creates the original client's
+> behavior is reusable headless and engine-free, the substrate the 1:1 port stands on.
 
 ## Do not
 

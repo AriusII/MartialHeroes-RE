@@ -3,6 +3,7 @@ name: godot-asset-preview
 description: Use to visually preview ONE real Martial Heroes asset (.bud building scene, .skn skinned mesh, or .ted/.map terrain cell) from the VFS as a Godot ArrayMesh and screenshot it — the way to eyeball a parser's output. Reuses BudMeshBuilder / SknMeshBuilder (NEVER GltfDocument, which crashes), documents the world negate-Z / mesh negate-X coordinate conventions, and verifies via the headless/windowed screenshot loop.
 allowed-tools: Read Write Edit Bash(pwsh *) Bash(powershell *) Bash("C:/Program Files/dotnet/dotnet.EXE" *)
 model: sonnet
+effort: high
 ---
 
 # godot-asset-preview — eyeball one parsed asset as a mesh
@@ -65,6 +66,34 @@ captures a screenshot to inspect.
 6. **CLEANUP.** Remove the temporary preview scene/autoload + `AssetPreviewNode.cs` (+ `.uid`), and
    the `_shot.gd` artifacts the screenshot skill left. Report the asset previewed, the PNG path, and
    what you observed.
+
+## Decision points
+
+- **If the mesh is mirrored or ~1000+ units from origin** → a Z/X negate mix-up; world assets negate Z,
+  mesh-local `.skn` negates X — never both, never swapped → quantify with `/godot-coordinate-check`.
+- **If the character mesh is exploded/static** → the known skinning debt (static bind pose, no
+  animation); expected for a `.skn`, not a parser failure.
+- **If the frame is empty** → warmup too short (bump `/godot-screenshot -Frames`) or the parser threw
+  (check `/godot-run-headless` output first).
+- **If you reach for `GltfDocument.AppendFromBuffer`** → STOP; it crashes natively → use
+  `BudMeshBuilder` / `SknMeshBuilder` / the TerrainNode ArrayMesh pattern.
+- **For a 1:1 verdict vs the original asset** (not just "shape is sane") → hand to
+  `/godot-fidelity-check`.
+
+## Verify / Done when
+
+- The PNG was Read back and the parsed asset's shape is sane and right-side-out (buildings near origin
+  not mirrored away; character upright-but-static as expected; terrain tiling not smeared); and every
+  temporary file (preview node/scene/autoload, `_shot.gd`, `.uid`s) is removed.
+
+## Pitfalls
+
+- Never use `GltfDocument.AppendFromBuffer` (native crash) — build `ArrayMesh` directly.
+- Never swap the negate axes (world Z, mesh `.skn` X) or double-flip — fix at the one source.
+- Never commit the PNG or asset bytes — copyrighted, user-supplied, kept in temp only.
+
+*North star: N2 — eyeballing one parsed asset is how a parser change is checked for faithful, 1:1
+reproduction of the original geometry.*
 
 ## Hard rules
 

@@ -3,6 +3,7 @@ name: godot-run-headless
 description: Use to verify the Martial Heroes Godot client's scripts and asset wiring WITHOUT the user driving the editor — runs the Godot 4.6.3 console exe headless against the project, lets it tick a few seconds, then captures all GD.Print output and engine errors from stdout. The fast inner loop for "does this scene/script/asset load cleanly?".
 allowed-tools: Bash(pwsh *) Bash(powershell *) Read
 model: sonnet
+effort: medium
 ---
 
 # godot-run-headless — verify scripts/assets without the user
@@ -66,6 +67,32 @@ need to confirm something **visually**.
    `/godot-scene-author`'s DIAG dump rather than trusting the exit code.
 4. Report: the exit code, the log path, and the salient lines (errors first, then the
    confirming breadcrumbs). Keep it tight — quote the load-bearing lines, don't dump the whole log.
+
+## Decision points
+
+- **If C# was just edited** → `/godot-build` first, else you verify a stale DLL (a green load that
+  doesn't reflect your change).
+- **If the run hangs past `-TimeoutSec`** → an async asset load is wedged (VFS missing / wrong path);
+  re-run with a `-Scene` override on a minimal scene to isolate the offending loader.
+- **If no errors but your expected `GD.Print`s are absent** → suspect the silent gray-screen
+  (`.tscn` script in the header, not a property line) → confirm with `/godot-scene-author`'s DIAG dump.
+- **If you need pixels** (is it textured? upright? mirrored?) → hand to `/godot-screenshot`; headless
+  cannot. For a 1:1 fidelity comparison against the original, hand to `/godot-fidelity-check`.
+
+## Verify / Done when
+
+- Exit code captured, log path reported, and EITHER the first real error (with file:line) OR the
+  expected happy-path breadcrumbs are confirmed present — not merely "exit 0".
+- A "clean" verdict is only claimed after ruling out the silent gray-screen (expected prints present).
+
+## Pitfalls
+
+- Never trust a `0` exit code alone — gray-screen scenes load clean with no error.
+- Never use the non-console `.exe` (detaches, no stdout) or pass `--headless` when you actually need
+  an image.
+- Never copy any asset filename/byte the log mentions out of temp; the VFS is bring-your-own.
+
+*North star: N2 — this is the fast inner loop that keeps the Godot client's 1:1 re-creation honest.*
 
 ## Hard rules
 

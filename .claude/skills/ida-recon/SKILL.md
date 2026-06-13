@@ -3,6 +3,7 @@ name: ida-recon
 description: Use when starting analysis of the legacy Martial Heroes Main.exe and you need a baseline census — segments, imports, exports, entry points, strings, and named globals — before drilling into any single function. Produces a pinned SHA-256 and a navigable map of the binary.
 allowed-tools: Read Write
 model: sonnet
+effort: high
 ---
 
 # ida-recon — baseline census of the legacy client
@@ -51,6 +52,31 @@ cross the firewall into `Docs/RE/specs|formats|structs|opcodes.md`.
 5. Report back to the user: the full SHA-256, segment count, import/export counts, string count,
    global count, and the two output paths. Note whether `Docs/RE/names.yaml`'s `binary.sha256` is
    empty so a maintainer/spec-author can pin it.
+
+## Decision points
+
+- **If the SHA-256 differs from a prior recon** (a re-export, or you're on `doida.exe` not `Main.exe`),
+  do NOT overwrite — write a new `recon-<sha8>.*` pair; every downstream spec cites one exact build.
+- **If `strings` is suspiciously short** (a few dozen on a real MMORPG client), auto-analysis is
+  unfinished or you're on the wrong/empty DB — STOP and tell the maintainer to let analysis settle.
+- **If you spot recv/cipher/opcode-shaped markers** in the strings/imports (`recv`, `WSARecv`, format
+  keys), don't chase them here — hand the anchors to `ida-string-hunt` → `ida-opcode-map` /
+  `ida-crypto-hunt`. Recon only maps; it never reads bodies.
+
+## Verify / Done when
+
+- `binary.sha256` is 64 hex chars; both `recon-<sha8>.json` and `.md` exist under `_dirty/recon/`
+  with the `> DIRTY` banner + full SHA-256.
+- Counts are non-trivial (dozens of segments/imports, hundreds+ of strings) — a real client, not a stub.
+- No address, string, or symbol leaked outside `_dirty/`.
+
+## Pitfalls (never)
+
+- Never fabricate a census from memory when the MCP is red — STOP and surface the connect hint.
+- Never decompile or paste pseudo-C — that is `ida-decompile-export`. Recon is metadata only.
+- Never reuse a stale `recon-<sha8>` filename for a different binary build.
+
+*North star N1: recon is the first, build-pinned map every later static-hypothesis (then debugger-confirm) pass navigates from.*
 
 ## Hard rules
 

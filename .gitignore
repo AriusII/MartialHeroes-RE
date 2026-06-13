@@ -463,9 +463,11 @@ Docs/RE/_dirty/
 screenshot_probe.gd
 screenshot_probe.gd.uid
 
-# === Claude Code tooling: SHARE hooks/skills/agents/settings, keep local state secret ===
+# === Claude Code tooling: SHARE hooks/skills/agents/settings + the kit design docs, keep local state secret ===
 .claude/*
 !.claude/settings.json
+!.claude/KIT.md
+!.claude/README.md
 !.claude/hooks/
 !.claude/skills/
 !.claude/agents/

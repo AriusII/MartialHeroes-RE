@@ -2,6 +2,8 @@
 name: preservation-readme
 description: Use to generate or refresh the repository README.md and CONTRIBUTING.md from the authoritative PRESERVATION_AND_ARCHITECTURE.md. Covers the EU Art.6 legal basis, bring-your-own-assets policy, the dirty/clean clean-room firewall, the no-commit rules for .pak/.exe/.pcapng/.tsv, and the contribution flow. Loving-fan-project tone, professional and accurate.
 allowed-tools: Read Write
+model: sonnet
+effort: medium
 ---
 
 # preservation-readme
@@ -74,6 +76,36 @@ affiliation with the original rights holders.
 4. **Verify accuracy.** Every legal sentence must be traceable to `PRESERVATION_AND_ARCHITECTURE.md`;
    every no-commit pattern must match `.gitignore`; every project/folder name must match the real
    on-disk names. Report both written paths to the user.
+
+## Decision heuristics
+
+- **If a README/CONTRIBUTING already exists** → refresh in place, preserving maintainer-added badges,
+  links, and credits; never blind-overwrite.
+- **If the blueprint and disk disagree on a name** → disk reality wins (e.g. write
+  `Network.Transport.Pipelines`, not the stale "Pipe"); the `Status` section reflects the *current* state
+  (full client built, Godot rendering), not the old "greenfield skeleton" line.
+- **If tempted to phrase a legal claim** → quote/condense from `PRESERVATION_AND_ARCHITECTURE.md` only;
+  if the wording isn't traceable there, omit it rather than freelance.
+
+## Verify / Done when
+
+- `README.md` and `CONTRIBUTING.md` both written at the repo root, with all required sections present.
+- Every legal sentence traces to `PRESERVATION_AND_ARCHITECTURE.md`; every no-commit pattern matches
+  `.gitignore` verbatim; every project/folder name matches on-disk reality.
+- No pseudo-code, addresses, asset/binary contents, or affiliation claims leaked into the public docs.
+- Both written paths reported to the user.
+
+## Pitfalls
+
+- Never freelance legal language — unsourced legal wording is a liability; source it from the blueprint
+  or drop it.
+- Never imply endorsement by or affiliation with the original rights holders.
+- Never use stale blueprint names over real on-disk ones, or a stale `Status` snapshot.
+- These are public, committed docs: never paste a decompiler identifier, an address, or any asset/binary
+  bytes into them.
+
+> North star N1: the public docs make the EU Art. 6 clean-room basis and the bring-your-own-assets
+> firewall legible to newcomers, so contributors stay inside the legal lines while advancing the N2 revival.
 
 ## Hard rules
 

@@ -3,6 +3,7 @@ name: ida-data-flow
 description: Use to trace how a value flows forward or backward from an instruction/operand in the legacy Martial Heroes client (Main.exe) — e.g. "where does this recv buffer go", "what feeds this length field", "what is this register at the call site". Drives the typed mcp__ida__trace_data_flow tool (falling back to a bundled intra-function def/use IDAPython snippet) and writes a neutral flow trace to Docs/RE/_dirty/static/. The way to follow a packet field or a parsed value through the code.
 allowed-tools: Read Write
 model: sonnet
+effort: high
 ---
 
 # ida-data-flow — forward/backward data-flow trace from an address
@@ -54,6 +55,31 @@ All output is **dirty** (addresses derived directly from the copyrighted binary)
    format/packet (hand off to `protocol-spec-author` / `asset-spec-author`, or to
    `ida-struct-apply` if it lands in an object field). Resolve `sub_…` names to proposed canonical
    names for `ida-naming-sync`; never rename here.
+
+## Decision points
+
+- **If tracing a packet/recv buffer** and the value is the post-cipher payload, the cleanest ground
+  truth is dynamic: hand off to `ida-debugger-drive` — breakpoint just after decrypt in the
+  maintainer's live F9 session and `dbg_read` the buffer (it reads through `PAGE_NOACCESS`) pre/post.
+  Static traces the path; the debugger confirms the actual bytes and the length field's real value.
+- **If the chain forks** (the value is combined or copied to two sinks), record each sink as its own
+  step; do not collapse them.
+- **If the value crosses a function boundary** with the fallback snippet, stop and continue as a
+  separate trace (or use the typed `trace_data_flow`) — never fake interprocedural flow.
+
+## Verify / Done when
+
+- Every boundary (store-to-field, call-arg slot, function crossing, value combine) is flagged in the chain.
+- A `dataflow.<slug>.md` exists under `_dirty/static/`; the reply states what the chain implies for the spec.
+- No ambiguous step was silently resolved — ambiguity is reported, not guessed.
+
+## Pitfalls (never)
+
+- Never extend the intra-function snippet to pretend cross-function flow.
+- Never resolve a value-laundering `xor reg,reg` or indirect address by guessing — report it.
+- Never paste the disassembled body; the artifact is a step chain (EA + what happens to the value).
+
+*North star N1: follows a packet field or parsed value to its sinks — the static hypothesis a debugger read then confirms byte-for-byte.*
 
 ## Hard rules
 

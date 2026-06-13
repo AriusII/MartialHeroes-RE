@@ -2,6 +2,8 @@
 name: packet-codegen
 description: Use to generate a C# packet struct skeleton from a Docs/RE/packets/*.yaml field spec. Emits a [StructLayout(LayoutKind.Sequential, Pack=1)] struct into 02.Network.Layer/MartialHeroes.Network.Protocol/, fixed byte buffers as C# [InlineArray] types, enum fields resolved to Shared.Kernel enums, and a header comment citing the source spec path. REFUSES to read anything under _dirty/ — clean-room only, never calls IDA.
 allowed-tools: Read Write Bash(dotnet build *)
+model: sonnet
+effort: high
 ---
 
 # packet-codegen
@@ -105,6 +107,35 @@ No managed `string` fields are ever emitted in a wire struct — fixed text is `
 6. **Hand off.** The generated `.g.cs` is a *skeleton*. Serialization helpers, opcode→handler
    routing (source-generated), and validation are the `network-protocol-engineer`'s job — this
    skill only lays down the layout-correct struct.
+
+## Decision points
+
+- **`size:` disagrees with Σ field widths?** STOP — do not pad or truncate to make it fit. A
+  mismatch means the spec is wrong or a field is missing; the byte total must equal the sum of
+  the declared field widths for the struct to be wire-faithful. Send it back to the spec-author.
+- **Fixed text field?** Always `bytes[N]` → `[InlineArray(N)]`, never a managed `string` — wire
+  structs stay blittable so the zero-alloc `Span<byte>` decode path holds.
+- **`enum:` field?** Confirm the named enum exists in `Shared.Kernel`. If it doesn't, stop and
+  ask the spec-author/kernel-engineer to add it — never invent the enum or fall back to a raw int
+  silently.
+- **Variable-length payload (`size: var`)?** Generate the fixed head only and leave the tail to
+  the engineer's serializer; do not fabricate a fixed buffer for a variable region.
+
+Verify / Done when: `<Name>.g.cs` exists under `Packets/` with `[StructLayout(...Pack=1)]`, one
+field per spec entry in declared order, `OpcodeId` mirroring `opcode:`, a header `// spec:`
+citation, `[InlineArray]` buffers for every `bytes[N]`, and (optionally) the project builds. No
+`_dirty/` path was read.
+
+## Pitfalls (anti-patterns)
+
+- **Never** read anything under `_dirty/` or call IDA — the `packets/*.yaml` spec is the only oracle.
+- **Never** emit a managed `string` in a wire struct, drop `Pack = 1`, or reorder fields — any of
+  these breaks blittability and wire parity.
+- **Never** guess a missing/ambiguous field — bounce it to the spec-author.
+- Don't add project references beyond the mandated `Protocol → Kernel`.
+
+North star: serves **N2** — every generated struct is a byte-exact, citation-traced
+re-implementation of the original wire layout.
 
 ## Hard rules
 

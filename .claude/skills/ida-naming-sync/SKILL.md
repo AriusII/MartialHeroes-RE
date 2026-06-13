@@ -3,6 +3,7 @@ name: ida-naming-sync
 description: Use when you want the canonical names in Docs/RE/names.yaml applied to the live IDA database (so functions/globals read by their project names), and to pull the IDB's current analyst-renamed symbols back into the glossary. Dry-runs a diff before writing, and never touches compiler-runtime symbols.
 allowed-tools: Read Write
 model: sonnet
+effort: medium
 ---
 
 # ida-naming-sync — sync Docs/RE/names.yaml ⇄ the IDA database
@@ -53,13 +54,36 @@ never renames compiler-runtime symbols.
    it differs — the glossary may be pinned to a different build).
 5. **Apply only on explicit go-ahead.** Re-send the snippet with `MODE = "apply"`. It performs the
    `apply`-verdict renames (functions + globals), re-skips runtime symbols and conflicts, and
-   returns the same JSON shape with `applied` counts and any failures.
+   returns the same JSON shape with `applied` counts and any failures. *Decision: IDB writes are
+   serialized — ensure no `ida-rename-batch`/`ida-annotate-batch` run is writing this IDB at the same
+   time. If the SHA-256 differs from `names.yaml`'s pin, do NOT apply (the glossary targets a different
+   build) — report and stop. Treat `conflict` verdicts as maintainer-reconcile, never force.*
 6. **Pull back.** From the `pull_candidates` in the JSON, write the new/changed names into a dirty
    staging file `Docs/RE/_dirty/names-pulled-<sha8>.yaml` (function/global address → current name).
    Do NOT edit `Docs/RE/names.yaml` automatically — leave a clear note telling the maintainer to
    review the staged pulls and merge the wanted ones into the committed glossary by hand (and add a
    `journal.md` entry).
 7. Report: per-verdict counts, applied counts (if any), the SHA-256, and the staged-pull path.
+
+## Verify / Done when
+
+- A dry-run diff was shown before any apply; the user confirmed; the IDB SHA-256 matched the glossary
+  pin (or the mismatch was surfaced and apply withheld).
+- Apply (yaml→IDB) touched only `apply`-verdict entries and zero CRT/runtime symbols; conflicts were
+  skipped. Pull (IDB→yaml) candidates were staged to `Docs/RE/_dirty/names-pulled-<sha8>.yaml`, **not**
+  merged into `names.yaml` automatically.
+- The committed glossary and `journal.md` were left untouched by the skill; the maintainer hand-off
+  note is present.
+
+## Pitfalls
+
+- **Never** auto-edit `Docs/RE/names.yaml` or `journal.md` — pulls are staged for human review only.
+- **Never** run concurrently with another IDB writer — single-writer is the rule.
+- Do not coerce address keys to ints when writing YAML back, and never override the CRT/FLIRT skip.
+- Do not apply across a SHA-256 mismatch — names would land on the wrong addresses.
+
+> **N1:** bidirectional name sync is the legibility layer of clean-room RE — the IDB reads in project
+> names and analyst discoveries flow back to the glossary, with no pseudo-C ever crossing.
 
 ## Hard rules
 

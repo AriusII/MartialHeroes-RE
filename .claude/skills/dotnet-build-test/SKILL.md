@@ -3,6 +3,7 @@ name: dotnet-build-test
 description: Use to build and test the MartialHeroes solution the canonical way — full build/test of MartialHeroes.slnx, or a tightly scoped single-project / single-test run via the dotnet test --filter form. The one place the project's build & test invocations live, so you stop guessing flags.
 allowed-tools: Read Bash(dotnet *)
 model: sonnet
+effort: medium
 ---
 
 # dotnet-build-test — canonical build & test invocations
@@ -91,6 +92,33 @@ dotnet test tests/MartialHeroes.Network.Protocol.Tests/MartialHeroes.Network.Pro
 | `--no-restore` / `--no-build` | tighten the inner loop when nothing changed upstream. |
 | `-v minimal` / `-v quiet` | shrink noisy logs to just the result line. |
 | `--logger "console;verbosity=detailed"` | expand a single failing test to see the full stack. |
+
+## Decision points
+
+- **If a project fails to build for a missing `ProjectReference`**, that is an architecture
+  gap → hand to `wire-references` / `new-layer-project`; do not paper over it with a flag.
+- **If `dotnet` rejects the `.slnx`** (parse error), the SDK is too old (need ≥ 10) — report
+  the SDK cause, not a "test failure".
+- **If iterating on one area**, scope to that `.csproj` (§C/§D) — a whole-solution `--filter`
+  still builds every test project first and wastes the loop.
+- **If judging perf or pre-ship**, use `-c Release` — the debug JIT is not representative.
+
+## Verify / Done when
+
+- [ ] You quote the exact command you ran.
+- [ ] Build: `succeeded` with warning count, or the first `error CSxxxx` with `file(line,col)`.
+- [ ] Test: `Failed: N, Passed: M, Skipped: K`; for failures, each FQN + assertion message.
+- [ ] An SDK/`.slnx`/missing-reference failure is reported as a tooling cause, not a test fail.
+
+## Pitfalls (anti-patterns)
+
+- **Never** edit source to make a build/test pass — this skill only builds and tests.
+- **Never** pair `--no-build` with a stale tree to claim green; only after a fresh build.
+- **Never** silence warnings or skip tests to manufacture a green result — a failure is a finding.
+- **Never** dump the whole log; quote the actionable line (first error / failing FQN).
+
+> North star: serves **N2** — the canonical build/test loop is the gate that proves the
+> re-implemented core matches the original's wire and behavior before it ships.
 
 ## Reporting
 

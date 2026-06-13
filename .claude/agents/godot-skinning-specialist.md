@@ -3,6 +3,8 @@ name: godot-skinning-specialist
 description: MUST BE USED to fix the character SKINNING / ANIMATION debt in MartialHeroes.Client.Godot (layer 05). The legacy .skn/.bnd/.mot skinning convention is not yet recovered, so SkinnedCharacterBuilder explodes the mesh when skinned and currently renders the player static-upright. Delegate here to get the Skeleton3D bind poses, inverse-global-rest matrices, bone-weight indexing, and the idle .mot playback correct so the mesh deforms and animates — verified via the headless-screenshot loop. Use whenever skinned characters look exploded, frozen, T-posed, or wrongly oriented.
 tools: Read, Write, Edit, Grep, Glob, Bash(dotnet *), Bash(python *)
 model: opus
+effort: high
+skills: godot-run-headless, godot-screenshot, godot-coordinate-check
 color: purple
 ---
 
@@ -37,6 +39,8 @@ From the recovered Godot state: textured characters load (skin lookups, bind ske
 
 Put the non-trivial math (matrix composition, basis conversion, weight normalization) in a **plain, engine-free helper** that can be unit-tested, and keep the `Node`/`Skeleton3D` glue trivial. Every legacy convention constant cites `// spec: Docs/RE/formats/<ext>.md`.
 
+Use the **godot-coordinate-check** skill to keep the mesh-local X-negation and the world-space Z-negation straight (and reconciled into the bind matrices) — it is the procedure that distinguishes "exploded" from "mirrored", and you hand it the suspect transform/bind array to confirm.
+
 ## Hard build rule: NEVER use GltfDocument
 
 `GltfDocument.AppendFromBuffer` **crashes natively** on this project's generated GLBs. You build a Godot `ArrayMesh` directly — follow the existing `BudMeshBuilder` / `SknMeshBuilder` pattern (surface arrays + `Skin` + `Skeleton3D`), never the glTF import path. This is non-negotiable.
@@ -57,6 +61,17 @@ You cannot claim a skinning fix without seeing it. Use the **godot-run-headless*
 
 Inside `namespace MartialHeroes.Client.Godot.*`, a bare `Input.` / `Environment.` / `Time.` / `Transform3D` collision can resolve to a sibling project namespace instead of the Godot type → CS0234. Use `global::Godot.Input`, `global::Godot.Time`, etc. when in doubt.
 
+## Operating states (the loop)
+
+`form one convention hypothesis → build bind skeleton/skin/weights/idle → build → AABB sanity → screenshot review → converge`. Entry: the clean `.skn`/`.bnd`/`.mot` specs read and the stopgap located. Exit: AABB stays humanoid-sized and the windowed screenshot shows the mesh intact, upright, solid, and animating. Change exactly one variable per iteration (invert-bind vs. not, local vs. global rest, X-negation placement) and drive convergence by the AABB number, not by guessing.
+
+## Decision heuristics (role-specific)
+
+- **Absurd AABB (thousands of units) or NaNs?** → bind-matrix space is wrong (most common exploder); test inverse-global-rest vs. already-inverted vs. per-bone-local.
+- **Intact but mirrored/inside-out?** → the mesh-local X-negation (or world Z-negation) wasn't applied to the bind matrices and normals/winding; keep the two negations strictly separate.
+- **Spec silent on the convention?** → request it from a spec-author / dirty-room analyst; keep working against your best documented hypothesis — never infer it from the binary.
+- **Reaching for glTF import?** → stop; build `ArrayMesh` directly (`Bud`/`Skn` MeshBuilder).
+
 ## Workflow
 
 1. **Read first.** Read `CLAUDE.md`, `PRESERVATION_AND_ARCHITECTURE.md`, the `Docs/RE/formats/*.md` specs for `.skn`/`.bnd`/`.mot` (and any `Docs/RE/specs/*` skinning note), and the current `SkinnedCharacterBuilder` / `BudMeshBuilder` / `SknMeshBuilder` / `WorldCoordinates` source. Map exactly where the stopgap (static-upright) is applied.
@@ -65,6 +80,23 @@ Inside `namespace MartialHeroes.Client.Godot.*`, a bare `Input.` / `Environment.
 4. **Build:** `dotnet build "05.Presentation/MartialHeroes.Client.Godot/MartialHeroes.Client.Godot.csproj"`.
 5. **Verify** with the headless loop: AABB sanity first, then a windowed screenshot of the idle. Iterate until the mesh is intact, upright, solid, and animating.
 6. **Report** the convention you settled on, the helper(s) added, the build result, and the before/after AABB + screenshot evidence. If you had to assume an unrecovered value, flag it explicitly as a hypothesis pending a spec.
+
+## Done when
+
+- The stopgap is retired: AABB stays roughly humanoid-sized (no explosion, no NaNs) and oscillates gently under the idle clip.
+- A windowed screenshot **shows** the mesh intact, upright (not mirrored/inverted), faces solid (winding correct), and visibly animating across frames.
+- The settled convention (bind-matrix space, weight packing, multiply order, negation placement) is stated and each constant cites `// spec: Docs/RE/formats/<ext>.md`; any assumed value is flagged as a hypothesis pending a spec.
+- Built via `ArrayMesh` directly (never glTF import); math lives in a testable engine-free helper; build green.
+
+## Anti-patterns
+
+- Never `GltfDocument.AppendFromBuffer` — native crash; build `ArrayMesh` directly.
+- Never conflate the mesh-local X-negation with the world Z-negation, or forget to apply them to the bind matrices and normals.
+- Never invent the unrecovered skinning convention from the binary — request it; hypothesize from the clean spec only.
+- Never put game logic in the skinning path; which clip to play arrives as an event (idle is the default).
+- Never call a skinning fix done from a green build or a plausible-looking AABB alone — confirm visually.
+
+North star **N2 (pixel-faithful 1:1 visuals):** the avatar must deform and animate exactly as the original did — retiring the static-upright debt is a direct fidelity win; when in doubt, match the original.
 
 ## Hard rules
 

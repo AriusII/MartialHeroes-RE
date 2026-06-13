@@ -2,6 +2,8 @@
 name: clean-room-audit
 description: Use to scan the C# source tree for clean-room leakage smells — decompiler-derived identifiers (sub_/loc_/dword_), MSVC artifacts (__thiscall, _DWORD, mangled names), and uncited magic byte-offset literals that should reference a Docs/RE spec. Produces a read-only file:line report graded by severity; it never edits code.
 allowed-tools: Read Grep Glob Bash(python *)
+model: opus
+effort: high
 ---
 
 # clean-room-audit
@@ -57,6 +59,41 @@ citation**, not the constant itself. The scanner only escalates an offset litera
 5. **Recommend, do not edit.** For high-severity leaks, recommend the engineer reimplement the
    region from the cited `Docs/RE/` spec (and add the `// spec:` citation). For uncited offsets,
    recommend adding the missing `// spec: Docs/RE/...` reference. This skill never touches the file.
+
+## Decision heuristics
+
+- **If a hit is a Hex-Rays autoname or MSVC pseudo-type** (`sub_`, `_DWORD`, `__thiscall`, a mangled
+  `@@` name) → grade **high / BLOCKER**: these almost never occur innocently in idiomatic C# and are a
+  direct firewall breach. Recommend a from-spec reimplement, not a rename.
+- **If a hit is `a1`/`v12`-shaped** → grade medium/advisory: confirm with Grep it is a real decompiler
+  variable, not a legit field (`a1Channel`, a viewmodel `v2`). When the surrounding code reads
+  spec-derived and well-named, it is a false positive — say so.
+- **If a hit is an uncited offset** → medium: distinguish a genuine wire/asset offset (escalate, needs
+  `// spec:`) from a benign constant (colour channel, percent, loop bound). Defer the deep offset sweep
+  to `spec-citation-audit`; here just surface the smell.
+- **If zero high-severity hits but many uncited offsets** → the tree is leak-free but provenance-thin;
+  point the caller at `spec-citation-audit` rather than over-grading here.
+
+## Verify / Done when
+
+- Every `**/*.cs` under the five numbered layers scanned (obj/bin/generated/`_dirty/` excluded), file
+  count reported.
+- Each finding is `path:line — smell — severity` with a one-line rationale; high-severity hits were
+  corroborated with Grep against false positives.
+- A top-line `N high, M medium` summary is present; a zero-finding run states the tree is clean and how
+  many files were scanned. No file was edited.
+
+## Pitfalls
+
+- Never "verify" a hit by opening `_dirty/` or IDA — that read itself crosses the firewall.
+- Never edit source to silence a smell; this skill reports, the engineer fixes.
+- Never treat a clean report as legal proof — it only excludes *these* smells; pair with
+  `clean-room-firewall-check` and human review for a release gate.
+- Don't over-flag: a method named `Subtract`, a field `offsetTable`, or a test `v2` are false positives
+  — read context before grading high.
+
+> North star N1: this is the firewall's smell test — it keeps decompiler output from leaking into the
+> shipped C# so the EU Art. 6 clean-room basis holds.
 
 ## Hard rules
 

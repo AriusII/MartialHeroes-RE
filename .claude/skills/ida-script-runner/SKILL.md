@@ -2,6 +2,8 @@
 name: ida-script-runner
 description: Use for ad-hoc reverse-engineering queries against the legacy Martial Heroes client (Main.exe) that no fixed skill covers — e.g. "who calls function X", "what touches this global", "find crypto-shaped XOR/ROL/ROR loops", "find S-box-like constant tables", "where is this string referenced". This is the explicit run-arbitrary-IDAPython-to-go-faster skill: pick the closest bundled snippet, set its CONFIG, run it through the IDA MCP exec tool, and drop results in Docs/RE/_dirty/queries/.
 allowed-tools: 'Read Write'
+model: sonnet
+effort: medium
 ---
 
 # ida-script-runner — ad-hoc IDAPython queries
@@ -55,7 +57,30 @@ const-table into one report). Use the individual snippets here for narrower prob
 6. **Interpret, neutrally.** In your reply, summarize what was found in plain language
    (counts, candidate addresses, shapes). Do NOT paste decompiled pseudo-code into your
    reply or any committed file — describe behavior. Addresses are allowed only inside
-   `Docs/RE/_dirty/`.
+   `Docs/RE/_dirty/`. *Decision: if a `find_bitops_loops`/`find_const_tables` hit looks like the real
+   cipher/S-box, escalate to `ida-crypto-hunt` (it fuses the evidence) rather than concluding here. If
+   the probe touches a wide subsystem, switch to `ida-batch-analyze`. A static hit is a hypothesis —
+   confirm the hot ones live via the debugger (`dbg_add_bp` at the EA, `dbg_read`/`dbg_gpregs`; never
+   `dbg_start`).*
+
+## Verify / Done when
+
+- Only the snippet's CONFIG block was edited (logic untouched), so the result is reproducible; the
+  snippet printed its Markdown block and saved under `Docs/RE/_dirty/queries/<snippet>.<slug>.md`.
+- The reply describes findings in words — counts, candidate addresses, shapes — with no pseudo-C and no
+  address outside `_dirty/`.
+
+## Pitfalls
+
+- **Never** hand-edit a snippet's analysis logic — divergent logic makes results unreviewable and
+  irreproducible.
+- Do not present a static bit-ops/const-table hit as a confirmed cipher — it is a candidate until
+  `ida-crypto-hunt` fuses it or the debugger confirms.
+- Do not coerce address args to the wrong type or run against a stale IDB; report partial/failed calls
+  exactly, never invent.
+
+> **N1:** the snippet library is the fast static probe of clean-room RE — narrow, reproducible queries
+> that form hypotheses the focused skills and the debugger then confirm.
 
 ## Snippet reference
 

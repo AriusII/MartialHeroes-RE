@@ -2,6 +2,8 @@
 name: pcap-extract
 description: Use to turn a .pcapng Martial Heroes capture into per-TCP-stream .tsv extracts (the protocol oracle for Network.Protocol / Network.Crypto work). Splits a capture by tcp.stream and emits one tab-separated row per segment (frame.time_epoch, tcp.stream, ip.src, tcp.srcport, tcp.len, data.data, plus a C2S/S2C direction tag). This skill is the single version-controlled home of the canonical tshark invocation.
 allowed-tools: Bash(tshark *) Read Write
+model: sonnet
+effort: medium
 ---
 
 # pcap-extract
@@ -70,6 +72,36 @@ The `.tsv` columns, in order, are:
    server endpoint used. Remind the user the `.tsv` files are gitignored and regenerable —
    nothing here gets staged. If you changed the canonical command, update
    `references/tshark.md` **and** say so explicitly.
+
+## Decision points
+
+- **Many tiny streams vs one fat stream?** The login flow is its own short-lived stream;
+  the world/game stream is the long high-volume one — usually the highest-row-count
+  `stream_<N>.tsv`. Steer downstream consumers (`packet-diff`, `opcode-catalog`) to that
+  stream for combat/movement, the short one for the lobby/PIN handshake.
+- **Direction can't be tagged?** If both `--server-port` and `--server-ip` are absent and the
+  printed `(ip.src, tcp.srcport)` pairs are ambiguous, the server side is the endpoint that
+  *replies first* after the client's SYN and carries the bulk of S2C broadcast traffic — name
+  it and re-run rather than committing `?` rows.
+- **Reassembly:** the 8-byte frame `[u32 size][u16 major][u16 minor]` can span TCP segments,
+  so a single `data.data` row is *not* guaranteed to be one packet. Leave reframing to the
+  consumer; this skill emits per-segment payload, never re-split frames.
+
+Verify / Done when: `streams_all.tsv` + one `stream_<N>.tsv` per stream exist under the
+gitignored out-dir; each row has all 7 columns; `dir` is `C2S`/`S2C` (not `?`) for the stream
+you care about; pure-ACK rows (`tcp.len == 0`) are dropped; nothing was staged.
+
+## Pitfalls (anti-patterns)
+
+- **Never** stage the `.pcapng` or any `.tsv` — only `references/tshark.md` is committed.
+- **Never** edit the tshark fields in `scripts/extract_streams.py` without also editing
+  `references/tshark.md` — the two must never drift.
+- **Never** interpret a byte's meaning here — this skill only transports observed bytes;
+  semantics belong to `packet-diff`/`opcode-catalog`.
+- Don't treat one `data.data` row as one packet — the wire frame can straddle segments.
+
+North star: serves **N2** — the capture is the ground-truth oracle for byte-exact wire parity
+with the original client.
 
 ## Hard rules
 

@@ -2,6 +2,8 @@
 name: godot-csproj-bootstrap
 description: Use once a C# script is attached in Godot and MartialHeroes.Client.Godot.csproj has been generated, to normalize its TFM/SDK, wire ONLY Client.Application and Assets.Mapping, register it in the slnx /05.Presentation/ folder, and keep .godot/ ignored.
 allowed-tools: Read Write Bash(dotnet *)
+model: sonnet
+effort: medium
 ---
 
 # godot-csproj-bootstrap
@@ -124,6 +126,27 @@ file rather than fighting it.
 8. **Report** the normalized SDK/TFM, the two references applied (and an explicit note
    that no other core references were added), the slnx folder it now lives in, and the
    build result.
+
+## Decision points
+
+- **If the csproj does not exist** → STOP (rule 1); tell the user to attach a C# script in the editor
+  and trigger a build. Never hand-fabricate a Godot csproj.
+- **If Godot wrote a different `Godot.NET.Sdk/<patch>`** → keep that exact version; only change the TFM
+  to `net10.0` and add the conventional props. Never swap to `Microsoft.NET.Sdk`.
+- **If a tempting extra reference appears** (`Network.*`, `Assets.Vfs`/`Parsers`, `Client.Domain`/
+  `Infrastructure`, any `Shared.*`) → REFUSE it; those arrive transitively. Exactly two refs.
+- **If `dotnet sln add` self-closes or misplaces the `/05.Presentation/` folder** → fix the slnx with a
+  precise Write, leaving every other line verbatim (step 5).
+
+## Verify / Done when
+
+- SDK is `Godot.NET.Sdk/<Godot's version>`, TFM `net10.0`, `EnableDynamicLoading` true; exactly two
+  ProjectReferences (`Client.Application` + `Assets.Mapping`); the project sits inside
+  `<Folder Name="/05.Presentation/">` with a forward-slash path; `.godot/` is gitignored; and the
+  single-project `dotnet build` succeeds.
+
+*North star: N2 — wiring layer 05 as a strictly-passive, two-reference renderer keeps the 1:1 client's
+engine boundary one-directional (no game-rule authority leaks upward).*
 
 ## Do not
 

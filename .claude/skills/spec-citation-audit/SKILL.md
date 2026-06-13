@@ -3,6 +3,7 @@ name: spec-citation-audit
 description: Use to enforce the project's "every magic constant cites its spec" rule — scans committed layer C# for magic numeric literals (byte offsets, sizes, opcodes, hex constants) that lack a nearby '// spec: Docs/RE/...' citation, and reports file:line. The targeted citation checker that backs the clean-room provenance of every wire/asset constant.
 allowed-tools: Read Grep Glob Bash(python *)
 model: sonnet
+effort: high
 ---
 
 # spec-citation-audit — find magic constants missing a // spec: citation
@@ -67,6 +68,43 @@ configurable lookback window above it (so a block of offsets under one `// spec:
    to (or above) the constant — pointing at the relevant `formats/`, `structs/`, `packets/`, or
    `specs/` file. If no spec exists for that constant yet, that is a deeper gap: the value needs a
    promoted spec first (see the `re-promote` / `asset-format-doc` / `opcode-catalog` skills).
+
+## Decision heuristics
+
+- **If the constant is a wire/asset offset or record size** (`0x2C`, `Slice(112, 8)`, the 28-byte
+  `npc.arr` / 20-byte `mob.arr` records, the 8-byte frame header) → it MUST cite a `packets/`/`structs/`/
+  `formats/` spec; an uncited one is a real hit. These are the constants the firewall most cares about.
+- **If the constant is an opcode** (`(major<<16)|minor`, or a bare `0x07`/`142`-shaped minor) → it cites
+  `Docs/RE/opcodes.md`; flag if uncited.
+- **If the literal is a colour channel, percent, loop bound, enum `= N`, `[InlineData]` value, or
+  `new byte[n]` allocation** → benign, false positive; the scanner already suppresses most, confirm with
+  Grep and don't report.
+- **If a real offset has NO committed spec to cite** → don't just recommend a citation; escalate: the
+  value needs promotion first via `re-promote` / `asset-format-doc` / `opcode-catalog`.
+- **If a block of offsets sits under one `// spec:` header** → all pass within `--lookback`; raise the
+  window only if a legitimately grouped block trips.
+
+## Verify / Done when
+
+- Every `**/*.cs` under the five layers + `tests/` scanned (build/generated/`_dirty/` skipped), file
+  count reported.
+- Findings listed as `path:line — <literal> — uncited magic constant` with one-line context, each
+  triaged with Grep against the benign set.
+- A `N uncited constant(s) across M file(s)` summary present; a clean run states the tree is fully cited.
+  No file edited.
+
+## Pitfalls
+
+- Never resolve a finding by reading `_dirty/` or IDA to confirm the number — the fix is always a
+  citation to a *committed neutral spec*, never to dirty.
+- Never insert the citation or change the constant yourself — that is the engineer's deliberate act.
+- Don't flag tiny structural constants (`0`,`1`,`-1`,`2`) or literals inside comments/strings — that is
+  noise, not provenance.
+- A clean report proves citations exist, not that they point at the *correct* spec; pair with
+  `clean-room-audit` and human review.
+
+> North star N1: every wire/asset/opcode constant tracing to a committed neutral spec is what proves the
+> C# was built from specs, not eyeballed from the binary — the citation half of the clean-room firewall.
 
 ## Hard rules
 

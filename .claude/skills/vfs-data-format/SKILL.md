@@ -2,7 +2,8 @@
 name: vfs-data-format
 description: Use to recover a CP949 text/tab DATA-FILE format (skin.txt, actormotion.txt, bgtexture.txt, *.csv, text *.scr) by observing real bytes via the vfs-inspect harness — NOT by decompiling. Writes neutral column/delimiter findings to Docs/RE/_dirty/formats/<name>.raw.md for later promotion. The sanctioned non-IDA reverse-engineering path for the client's plain-text tables.
 allowed-tools: Read Write Bash(dotnet *)
-model: opus
+model: sonnet
+effort: high
 ---
 
 # vfs-data-format — recover a plain-text data-file format by harness observation
@@ -85,6 +86,36 @@ real client text bytes (D:/MartialHeroesClient VFS)
 6. **Report**: the entry path + size, the delimiter/header/encoding verdict, the column count, the
    key join columns discovered, and the `_dirty/formats/<name>.raw.md` path you wrote. State clearly
    that promotion (the committed spec) is the next, separate step.
+
+## Decision points
+
+- **Binary, not text?** If `--head` shows non-printable bytes / a magic signature rather than
+  CP949 rows, STOP — this is a binary asset, use `asset-format-doc` instead.
+- **Header row or data row 0?** If row 0's values don't type-match the rows below (labels where
+  later rows hold ids), it's a header — otherwise the table is headerless and row 0 is data.
+- **Which column is the join key?** Match it to the recovered chains: `skin.txt` IdA/tex_id link
+  the skin chain; `actormotion.txt` col1 = mob_id, col2 = skin_class joins to `.bnd`/`.skn`/`.mot`;
+  `bgtexture.txt[id]` resolves the terrain texture path. Capture the cross-file edge so
+  `/asset-chain-trace` and the data-tables engineer can follow it.
+- **Mojibake?** If a Korean column reads as garbage, the read wasn't CP949 — fix the decode; never
+  record mojibake as the real value. If a column's meaning needs the loader code, mark it
+  `UNVERIFIED` and stop (don't cross into IDA — that's the analyst lane).
+
+Verify / Done when: `_dirty/formats/<name>.raw.md` exists with the DIRTY banner, the virtual path
++ byte size, delimiter/header/encoding verdict, a column table (`col# | meaning | type | example |
+confidence`), the cross-file join keys, and CP949 confirmation; only short illustrative values
+were quoted (no full-file dump); promotion via `re-promote` is named as the next step.
+
+## Pitfalls (anti-patterns)
+
+- **Never** write into the committed `Docs/RE/formats/` tree — findings go to `_dirty/formats/`
+  only; promotion (rewrite, never copy) is `re-promote`'s job.
+- **Never** paste the file's full contents — quote only the few values needed to explain a column.
+- **Never** assume UTF-8 — all game text is CP949 (EUC-KR).
+- **Never** open IDA here — this is the sanctioned non-decompiler text-observation path.
+
+North star: serves **N2** — recovering these CP949 join tables is what lets the re-implemented
+client resolve the original asset chains exactly.
 
 ## Hard rules
 

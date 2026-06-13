@@ -3,6 +3,7 @@ name: godot-scene-author
 description: Use to author or repair a Godot .tscn scene for the Martial Heroes client CORRECTLY — format 3, ext_resource with uid+path, and (the trap that costs hours) the 'script' attached as a PROPERTY LINE under the node header, NOT an inline header attribute. Includes the gray-screen failure mode and a temp-autoload DIAG dump to verify every node actually got its script.
 allowed-tools: Read Write Edit Bash(pwsh *) Bash(powershell *)
 model: sonnet
+effort: high
 ---
 
 # godot-scene-author — write/repair a .tscn without the gray-screen trap
@@ -74,6 +75,32 @@ does nothing", suspect this first.
 5. **CLEANUP.** Remove the `SceneDiag` autoload line from `project.godot` and delete
    `res://Dev/_diag_scene.gd` (+ `.uid`). It is a diagnostic, not a shipped node.
 6. Report what you authored/fixed and the DIAG result (which nodes have scripts, which were `NONE`).
+
+## Decision points
+
+- **If a node you expected scripted prints `script=NONE`** → its `script=` was jammed into the `[node]`
+  header (silently ignored) → move it to a property line below the header. This is the gray-screen bug.
+- **If a `.cs` has no sibling `.cs.uid`** → the `path=` still resolves (uid degrades gracefully); fix
+  the uid by importing once in the editor, but don't block on it.
+- **If the scene loads with no error yet does nothing** → it is almost always this skill's trap; run
+  the DIAG dump rather than trusting the clean load (cf. `/godot-run-headless` step 3).
+- **If a node's C# references bare `Input.`/`Environment.`/`Time.`** → that's a build-side collision,
+  not a scene bug → `global::Godot.*` via `/godot-build`.
+
+## Verify / Done when
+
+- The DIAG autoload reports every node you intended to script as `script=<res path>` (none `NONE`);
+  `format=3` + `uid="uid://..."` are on the `gd_scene` header; and the temporary `SceneDiag` autoload +
+  `res://Dev/_diag_scene.gd` (+ `.uid`) are removed.
+
+## Pitfalls
+
+- Never put `script=` inside a `[node ...]` header — silently ignored, no `_Ready`, gray screen.
+- Never leave the `SceneDiag` autoload behind (every launch would self-quit).
+- Never bake a copyrighted client asset into a `.tscn` by absolute path — assets resolve through the
+  VFS at runtime.
+
+*North star: N2 — a correctly-wired scene is the precondition for the 1:1 client to render at all.*
 
 ## Hard rules
 

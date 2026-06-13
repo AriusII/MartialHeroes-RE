@@ -3,6 +3,7 @@ name: ida-xref-map
 description: Use to follow ALL cross-references to a string, global, constant, or function in the legacy Martial Heroes client (Main.exe) and produce a neutral call-path map — "who reaches this, from where". Drives the typed mcp__ida__xref_query / mcp__ida__xrefs_to / mcp__ida__trace_data_flow tools (falling back to a bundled IDAPython snippet) and writes the reference map to Docs/RE/_dirty/queries/. The fast way to find the code that consumes a given marker.
 allowed-tools: Read Write
 model: sonnet
+effort: high
 ---
 
 # ida-xref-map — map every reference to a target
@@ -52,6 +53,32 @@ All output is **dirty** (addresses derived directly from the copyrighted binary)
    reference the anchor, which look like the primary consumer, and the suggested next function to
    read closely (hand off to `ida-callgraph-map` or `ida-decompile-export`). Resolve `sub_…` names
    to proposed canonical names for `ida-naming-sync`; never rename here.
+
+## Decision points
+
+- **If the anchor is a hub** (a global touched by hundreds of functions — a logger, an allocator, a
+  manager singleton), the fan-in is noise: narrow to write-xrefs only, or to one segment, rather than
+  dumping every reference.
+- **If a name resolves to multiple EAs** (overloads/duplicates), record all; pick the one on the
+  recv/dispatch path as primary.
+- **If the static fan-in is ambiguous** about which caller actually fires at runtime, that is a
+  ground-truth question: hand off to `ida-debugger-drive` — set a breakpoint on the anchor in the
+  maintainer's live F9 session and read which caller hits it. Static forms the hypothesis; the
+  debugger confirms.
+
+## Verify / Done when
+
+- Every referencing function in the map has an EA and a reference-kind tag (read/write/call/jump).
+- A `xref_map.<slug>.md` exists under `_dirty/queries/`; the reply names the primary consumer + next read.
+- No address or `sub_`/`loc_` symbol leaked outside `_dirty/`.
+
+## Pitfalls (never)
+
+- Never invent an xref or address — a partial/failed call is reported as partial, not guessed.
+- Never paste a function body; this skill maps *which* functions reference, not their pseudo-C.
+- Never treat a static fan-in as proof of the runtime caller — confirm in the debugger when it matters.
+
+*North star N1: turns a recognizable marker into the exact function set worth reading — the entry to every static-hypothesis pass.*
 
 ## Hard rules
 

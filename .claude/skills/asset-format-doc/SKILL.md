@@ -2,6 +2,8 @@
 name: asset-format-doc
 description: Use to start documenting a new binary asset format from the legacy Martial Heroes client (mesh, terrain, anim, texture, etc.); scaffolds a neutral Docs/RE/formats/<ext>.md spec and produces an annotated hexdump of a sample to seed it, without ever committing sample bytes.
 allowed-tools: Read Write Bash(python *)
+model: sonnet
+effort: high
 ---
 
 # asset-format-doc
@@ -75,6 +77,40 @@ implements fresh. This skill writes the neutral spec and helps you read the byte
 5. **Hand off.** Tell the user to (a) append a `journal.md` provenance entry, and (b) that an
    `Assets.Parsers` engineer can now implement from `Docs/RE/formats/<ext>.md`, citing offsets with
    `// spec: Docs/RE/formats/<ext>.md`.
+
+## Decision points
+
+- **Text table, not binary?** If the sample is CP949 tab/comma rows (`skin.txt`,
+  `actormotion.txt`, `bgtexture.txt`, a `.csv`, a text `.scr`), STOP and use `vfs-data-format`
+  instead — this skill is for byte-offset binary headers, that one for delimited text.
+- **Field width unclear?** A 4-byte run that reads as a plausible float in IEEE-754 is likely an
+  `f32`; a small monotonic value is a `u16`/`u32` count or id. A run that matches the file size /
+  a header count is a record-stride or count field — mark confidence accordingly.
+- **Does it belong to a recovered chain?** Mesh/terrain/anim/texture formats feed the known
+  chains (terrain `.ted`→`.map`→`bgtexture.txt`→`.dds`; skin `.skn`→`skin.txt`→tex; bind/idle
+  `.bnd`/`.mot`; spawn `.arr`; collision `.sod`). Note the join key (e.g. `.skn` IdA/IdB) so
+  `/asset-chain-trace` and the parser engineer can wire it; don't re-document a documented chain.
+- **Coords in the data?** Remember the conventions when interpreting geometry fields: world
+  geometry negates Z, mesh-local `.skn` negates X — flag, don't silently normalize.
+
+Verify / Done when: `Docs/RE/formats/<ext>.md` exists with magic/version filled from the
+hexdump, a header table and a record/stride table with per-field confidence, a "Known unknowns"
+section for everything unverified, and cross-refs to related formats; the annotated hexdump
+stayed under `_dirty/`; no sample bytes are in the committed spec; the user is reminded to
+journal it.
+
+## Pitfalls (anti-patterns)
+
+- **Never** paste hex rows, byte tables, or any reproduction of asset content into the committed
+  spec — neutral descriptions only.
+- **Never** call IDA or read `_dirty/` decompiler output — layout knowledge here comes from the
+  sample's own bytes (kept dirty) and already-promoted neutral notes.
+- **Never** overwrite a populated `formats/<ext>.md` — read and extend it.
+- Don't guess a field you can't verify — put it in "Known unknowns" so the engineer doesn't
+  guess either.
+
+North star: serves **N2** — a faithful binary-format spec is the contract the `Assets.Parsers`
+engineer re-implements to reproduce the original asset exactly.
 
 ## Committed spec template (write to `Docs/RE/formats/<ext>.md`)
 

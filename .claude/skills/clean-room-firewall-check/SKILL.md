@@ -2,6 +2,8 @@
 name: clean-room-firewall-check
 description: Use in CI or as a pre-commit gate to verify the clean-room firewall held. Fails nonzero if any committed/staged file lives under Docs/RE/_dirty/, if any C# under a numbered layer folder cites a _dirty/ path, or if a changed Docs/RE spec has no matching mention in journal.md. Read-only plus git status; designed for exit-code-driven hooks.
 allowed-tools: Read Grep Glob Bash(git *) Bash(python *)
+model: sonnet
+effort: high
 ---
 
 # clean-room-firewall-check
@@ -59,6 +61,46 @@ block the commit/merge. It is read-only apart from running `git`.
    proceed; `1` blocks it. Do not "fix and continue" automatically — a firewall breach needs a human
    decision. As a pre-commit hook, a typical `.git/hooks/pre-commit` runs the script and aborts the
    commit on nonzero.
+
+## BLOCKER vs advisory
+
+All three invariants are **BLOCKERs** — this skill is a hard gate, unlike `clean-room-audit` (advisory
+smell report). Exit `1` means the commit/merge must not proceed until a human resolves it. Severity ladder:
+
+- **Invariant 1 (tracked/staged `_dirty/` or originals)** — highest: tainted material or a copyrighted
+  binary is about to enter git history. `git rm --cached` and confirm `.gitignore` coverage.
+- **Invariant 2 (`.cs` cites a `_dirty/` path)** — a clean-room file points at the quarantine; recite
+  the committed spec (`Docs/RE/packets/...`) instead.
+- **Invariant 3 (spec changed without a journal mention)** — provenance gap; run `re-session-log`.
+
+## Decision heuristics
+
+- **If invariant 1 trips on a copyrighted original** (`*.pak`/`*.exe`/`*.dll`/`*.pcapng`/`*.tsv`) → never
+  suggest a `.gitignore` tweak alone; the file must be `git rm --cached`'d AND the pattern verified.
+- **If invariant 3 trips but `journal.md` is in the same change set** → PASS that spec; the provenance
+  link is satisfied by the journal moving together with the spec.
+- **If run in CI vs pre-commit** → use `--mode tracked` for a full-repo merge-base audit, `--mode staged`
+  (default) for the local gate; never silently switch modes.
+
+## Verify / Done when
+
+- All three invariants printed with a per-invariant verdict; the script's exit code surfaced unchanged
+  (`0` pass / `1` block).
+- Every violation names the exact offending path (or `file:line` for invariant 2) and the fix action.
+- No file was staged, committed, or edited to make the check pass; nothing under `_dirty/` was opened.
+
+## Pitfalls
+
+- Never auto-resolve a breach (`git rm`, edit, re-stage) and continue — a firewall trip is a human
+  decision; only report.
+- Never open or print `_dirty/` contents to "investigate" — the check works on paths and committed
+  C#/spec/journal text only.
+- Don't downgrade the exit code in a hook wrapper — a swallowed `1` defeats the gate.
+- A green result asserts only these three invariants; deeper review (`clean-room-audit`, human auditor)
+  is still required for release.
+
+> North star N1: this is the firewall's hard gate — it stops tainted `_dirty/` material, copyrighted
+> originals, and unprovenanced specs from ever entering committed history, keeping the Art. 6 basis intact.
 
 ## Hard rules
 

@@ -143,7 +143,7 @@ Two local MCP servers are registered in the committed root `.mcp.json`. Both con
 
 ## Tooling Map (`.claude/`)
 
-This repo ships a large shared Claude Code setup under `.claude/` (committed via `.gitignore` negations; only `settings.local.json` and `hooks/state/` stay local). **41 agents, 46 skills, 24 hooks** (counts as of 2026-06-13; the bullet lists below are *representative*, not exhaustive — `ls .claude/agents/` and `.claude/skills/` are the source of truth).
+This repo ships a large shared Claude Code setup under `.claude/` (committed via `.gitignore` negations; only `settings.local.json` and `hooks/state/` stay local). **53 agents, 53 skills, 27 hooks** (counts as of 2026-06-13; the bullet lists below are *representative*, not exhaustive — `ls .claude/agents/` and `.claude/skills/` are the source of truth). The authoritative kit design — the **orchestrator fleet**, the per-role **`model` + `effort`** policy, and the **agent↔skill linking fabric** (`skills:` preload + knowledge-skill `paths:`) — lives in **`.claude/KIT.md`**; read it before authoring or refining any agent/skill/hook. Every agent declares an explicit `model:` (`opus` for judgement/orchestration, `sonnet` for execution) and `effort:` (`high` for orchestrators/judgement/precision, `medium` for mechanical).
 
 ### Orchestration doctrine — prefer Tier-2 Orchestrator-Agents for big / simultaneous work
 
@@ -163,7 +163,8 @@ For any multi-lane objective (a research wave, a per-cluster sweep, a staged eng
 | `layer_dependency_guard` | Flags upward refs / `using Godot;` in core layers |
 | `cs_post_edit` | Zero-alloc + `StructLayout` nudges (opt-in build check via `MH_BUILD_ON_EDIT=1`) |
 | `re_provenance_logger` | Hashes IDA output for the audit trail |
-| `precompact_note`, `stop_loose_ends` | Context-preservation / loose-end reminders |
+| `memory_persist_nudge`, `stop_loose_ends` | Persist-knowledge (Stop/PreCompact) / loose-end reminders |
+| `agent_md_guard`, `skill_md_guard`, `hook_advisory_guard`, `settings_wiring_nudge` | Keep the `.claude/` kit self-consistent (valid agent/skill frontmatter, advisory-only hooks, sane settings wiring) |
 | `_hooklib.py` | Shared helpers — `import _hooklib as h` |
 
 ### Skills (`/name`)
@@ -172,14 +173,16 @@ For any multi-lane objective (a research wave, a per-cluster sweep, a staged eng
 - **Protocol / captures:** `pcap-extract`, `packet-diff`, `opcode-catalog`, `packet-codegen`.
 - **Assets:** `pak-explore`, `asset-format-doc`.
 - **Scaffolding:** `new-layer-project`, `wire-references`, `add-test-project`, `godot-csproj-bootstrap`.
-- **Quality / docs:** `re-workspace-init`, `clean-room-audit`, `clean-room-firewall-check`, `re-session-log`, `preservation-readme`.
+- **Quality / docs:** `re-workspace-init`, `clean-room-audit`, `clean-room-firewall-check`, `re-session-log`, `preservation-readme`, `spec-citation-audit`, `memory-curate`.
+- **Knowledge** (auto-load via `paths:`, `user-invocable: false` — they surface conventions without being invoked): `dotnet-csharp14` (C#14/.NET10 core conventions), `godot-engine` (Godot 4.6 pitfalls + coordinate conventions), `ida-pro-re` (RE methodology + clean-room firewall), `martial-heroes-domain` (recovered protocol/asset-chain index).
+- **North-star (the two goals — N1 live RE, N2 1:1 port):** `ida-debugger-drive` (pilot the **live** IDA debugger to confirm a static hypothesis against ground truth — never `dbg_start`), `godot-fidelity-check` (verify the Godot client renders/behaves **1:1** vs the original), `asset-chain-trace` (walk an asset id through its recovered mapping chain to the on-disk VFS file).
 
 ### Agents (`@name`)
-- **Dirty-room RE** (have `mcp__ida__*`, write only `_dirty/`): `re-static-analyst`, `re-protocol-analyst`, `re-crypto-analyst`, `re-struct-cartographer`, `re-asset-format-analyst`, `re-animation-analyst`, `vfs-data-analyst`, `ida-script-author`.
-- **Campaign 2 orchestrators** (Tier-2, hold the `Agent` tool, **Opus 4.8**): `re-comprehension-orchestrator` (READONLY — fans out IDA analysts in sub-waves of 3 to deeply understand a cluster, emits proposed-name/comment manifests), `re-annotation-orchestrator` (WRITE — serializes one `re-ida-annotator` at a time to rename+comment the IDB from the gate-passed glossary). Tier-3 worker: `re-ida-annotator` (applies one cluster's annotations via `/ida-annotate-batch`).
+- **Orchestrators** (Tier-2, hold the `Agent` tool, **`opus` + `effort: high`**, each with a linked roster — see `.claude/KIT.md` §2): **per-lane** — `re-cleanroom-orchestrator` (general dirty→spec RE), `network-stack-orchestrator` (layer 02), `assets-pipeline-orchestrator` (layer 03), `client-core-orchestrator` (layer 04), `godot-client-orchestrator` (layer 05), `tooling-orchestrator` (the `.claude/` kit itself), `quality-gate-orchestrator` (pre-commit validation); **Campaign 2** — `re-comprehension-orchestrator` (READONLY comprehension), `re-annotation-orchestrator` (serialized IDB WRITE, Tier-3 worker `re-ida-annotator`). For a single-deliverable task, delegate straight to the worker; route an orchestrator only for a multi-lane objective.
+- **Dirty-room RE** (have `mcp__ida__*`, write only `_dirty/`): `re-static-analyst`, `re-protocol-analyst`, `re-crypto-analyst`, `re-struct-cartographer`, `re-asset-format-analyst`, `re-animation-analyst`, `re-analyst` (one-off generalist), `vfs-data-analyst`, `ida-script-author`.
 - **Spec authors** (the dirty→clean bridge): `protocol-spec-author`, `asset-spec-author`.
-- **Clean-room engineers** (one per project, **no IDA**): `kernel-`, `network-abstractions-`, `network-protocol-`, `network-crypto-`, `network-transport-`, `assets-vfs-`, `assets-parser-`, `assets-mapping-`, `domain-`, `application-`, `client-infrastructure-`, `godot-presentation-engineer`, `godot-ui-engineer`, `godot-input-engineer`, `godot-skinning-specialist`.
-- **Quality:** `clean-room-auditor`, `architecture-guardian`, `perf-reviewer`, `csharp-reviewer`, `test-engineer`, `build-doctor`, `preservation-archivist`, `godot-render-reviewer`, `tooling-auditor`.
+- **Clean-room engineers** (one per project, **no IDA**): `kernel-`, `network-abstractions-`, `network-protocol-`, `network-crypto-`, `network-transport-`, `assets-vfs-`, `assets-parser-`, `assets-mapping-`, `domain-`, `application-`, `client-infrastructure-`, `dotnet-engineer` (cross-layer generalist), `data-tables-engineer` (CP949 tables→typed C#), `godot-presentation-engineer`, `godot-ui-engineer`, `godot-input-engineer`, `godot-skinning-specialist`, `godot-shader-specialist`.
+- **Quality:** `clean-room-auditor`, `architecture-guardian`, `perf-reviewer`, `csharp-reviewer`, `csharp-modernizer` (C#14/.NET10 idiom refactors), `test-engineer`, `build-doctor`, `preservation-archivist`, `godot-render-reviewer`, `tooling-auditor`.
 - **Meta-authors** (grow/maintain the fleet): `agent-author`, `skill-author`, `hook-author`; plus `godot-mcp-operator` (drives the live Godot editor/game).
 
 ## Commit Discipline

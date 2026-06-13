@@ -3,6 +3,7 @@ name: ida-batch-analyze
 description: Use to analyze a whole candidate subsystem of the legacy Martial Heroes client (Main.exe) in one pass — a set of related functions (a network reader cluster, an asset-loader family, a UI module) — and produce a neutral per-function role summary. Drives the typed mcp__ida__analyze_batch / mcp__ida__analyze_component / mcp__ida__func_profile tools (falling back to a bundled per-function metrics IDAPython snippet) and writes the summary to Docs/RE/_dirty/static/. The way to triage many functions at once before deep-reading any.
 allowed-tools: Read Write
 model: sonnet
+effort: high
 ---
 
 # ida-batch-analyze — multi-function subsystem triage
@@ -52,6 +53,31 @@ All output is **dirty** (addresses derived directly from the copyrighted binary)
    point the next analyst at them (`ida-decompile-export` to read, `ida-data-flow` to trace, or a
    specialist analyst). Resolve `sub_…` names to proposed canonical names for `ida-naming-sync`;
    never rename here.
+
+## Decision points
+
+- **If the set exceeds ~30 functions**, split into batches — a sweep over hundreds dilutes the role
+  guesses and risks dumping the binary. Narrow the range or process in passes.
+- **If a function references recv/cipher/opcode markers** (high import degree on socket/crypto APIs),
+  flag it as the cluster's likely hot node — it's the one to deep-read first.
+- **If two role hypotheses tie on static metrics**, the tiebreaker is dynamic: which one actually runs
+  on the path under test. Hand the candidate set to `ida-debugger-drive` for a breakpoint census in
+  the maintainer's F9 session before committing analyst time to a deep read.
+- **When fanned out under an orchestrator**, keep sub-waves to ~3 analysts and serialize any IDB write.
+
+## Verify / Done when
+
+- The metrics table + per-function evidence/role exist in `batch.<label>.md` under `_dirty/static/`.
+- Each role is phrased as a hypothesis, not a fact; the reply ranks the 1–3 worth a deep read with why.
+- No address leaked outside `_dirty/`; the sweep stayed bounded.
+
+## Pitfalls (never)
+
+- Never dump the whole binary or an unbounded range — triage is targeted.
+- Never present a role guess as confirmed; it's a hypothesis a deep read (then debugger) settles.
+- Never paste any function body; this skill collects metrics + references only.
+
+*North star N1: triages many functions to the few worth reading — the static hypothesis the deep read and debugger then confirm.*
 
 ## Hard rules
 

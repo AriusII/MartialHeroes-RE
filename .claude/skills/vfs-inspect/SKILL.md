@@ -3,6 +3,7 @@ name: vfs-inspect
 description: Use to open the REAL Martial Heroes VFS (data.inf + data/data.vfs at D:/MartialHeroesClient) and list/inspect/decode/convert entries — the throwaway console harness for "does this path exist?", "how big is it?", "what's the first N bytes?", "what format is this file and what's in it?", "extract/convert this asset". Bundles a ready-made net10.0 harness with a registry-driven file-understanding layer (decode, extract, convert, hexdump, coverage) plus 12 dedicated census subcommands for the major asset families. Understand-a-file: decode, extract, convert, hexdump, coverage. Census: scan-mot, scan-bnd, scan-skn, scan-ui, dump-msgxdb, dump-uitex, scan-xeff, scan-sound, scan-fx, dump-do, scan-minimap, scan-quest.
 allowed-tools: Read Write Bash(dotnet *) Bash(mkdir *) Bash(copy *) Bash(xcopy *)
 model: sonnet
+effort: medium
 ---
 
 # vfs-inspect — open the real VFS and inspect entries
@@ -188,6 +189,37 @@ focused originals (and as a cross-check when a subcommand's census looks off). E
 These siblings carry the same hard rules as `vfsls`: read-only over the VFS, metadata/counts and
 short decoded structural fields only, never a full asset dump, and they are never registered in
 `MartialHeroes.slnx`.
+
+## Decision points
+
+- **Which query?** Existence/size → `--contains` / `<substring>`; "what IS this file" → `decode`
+  (structured summary, no bytes); inventory → `--census`; a whole asset family → the matching
+  `scan-*`/`dump-*` subcommand; a structural peek → `hexdump --header`; the honest capability map →
+  `coverage` (no live VFS needed).
+- **Tracing an id through a chain (skin/terrain/bind/mot/spawn/collision)?** That's
+  `/asset-chain-trace`'s job — use this harness to *confirm each hop exists* (`--contains`) and to
+  `decode` the endpoint, not to walk the chain yourself.
+- **Census looks off?** Cross-check against the standalone sibling harness the subcommand mirrors
+  (see the table) — the originals are the focused ground truth.
+- **Need a real file on disk** (for `asset-format-doc`)? Use `extract` to an EXTERNAL path; the
+  guard refuses any path inside the repo tree and prints a never-commit warning.
+- **CP949 always.** Any text preview is decoded code-page 949; a mojibake preview means the file
+  is binary (use `decode`/`hexdump`), not that the encoding guess was wrong.
+
+Verify / Done when: the query ran under `-c Release`; output is metadata / short head previews /
+structured summaries only (no full asset dump); any `extract`/`convert` wrote to an external
+path; exact virtual path strings are quoted so the next caller can re-query.
+
+## Pitfalls (anti-patterns)
+
+- **Never** register the harness in `MartialHeroes.slnx` or `git add` its `bin/`/`obj/`.
+- **Never** print a full asset or dump an entire file's bytes — inspect, don't export.
+- **Never** patch the production `Assets.Vfs`/`Assets.Parsers` to suit the harness — if the API
+  drifted, fix the harness call site (the compile failure is a feature).
+- Don't assume UTF-8 — Korean text mojibakes; the harness wires the CP949 provider for a reason.
+
+North star: serves **N2** — driving the *production* parsers over the real VFS confirms the
+re-implemented client reads the original bytes exactly as the shipping client will.
 
 ## Hard rules
 

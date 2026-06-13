@@ -3,6 +3,7 @@ name: ida-struct-apply
 description: Use to recover the in-memory layout of a C++ object in the legacy Martial Heroes client (Main.exe) — field offsets, sizes, and the vtable pointer — into a NEUTRAL offset table under Docs/RE/_dirty/structs. Reconstructs the struct from member-access patterns (this+offset reads/writes) and applies it to the IDB via mcp__ida__declare_type / mcp__ida__type_apply_batch so the disassembly reads structurally. Offset table only — never Hex-Rays pseudo-C.
 allowed-tools: Read Write
 model: sonnet
+effort: high
 ---
 
 # ida-struct-apply — recover a C++ object layout into a neutral offset table
@@ -58,6 +59,32 @@ under `Docs/RE/_dirty/structs/`.
 6. **Hand off.** In your reply, describe the layout in words (n fields, vtable at 0, notable
    pointer/count/float fields, inferred size) and point to the `_dirty/` table for a spec-author.
    Resolve `sub_…` names to proposed canonical names for `ida-naming-sync`; never rename here.
+
+## Decision points
+
+- **If a `call [this+0]` / `mov eax,[this]; call [eax+..]` pattern appears**, mark offset 0 as
+  `vtable*`. **If no such pattern**, treat it as a plain struct (offset 0 is a real field).
+- **If you choose to apply the type to the IDB (step 5)** and you're fanned out under an orchestrator,
+  the IDB write is **strictly serialized** — exactly one writer at a time; never apply concurrently
+  with another analyst. A declared C struct (layout) is firewall-safe; a transcribed decompilation is not.
+- **If an offset's size or meaning is ambiguous** from access patterns alone, confirm it dynamically:
+  hand off to `ida-debugger-drive` — breakpoint a method in the maintainer's live F9 session and
+  `dbg_read` the live instance to size and read the field. Static infers the layout; the debugger confirms it.
+
+## Verify / Done when
+
+- The `<struct>.offsets.md` exists under `_dirty/structs/` with offset / size / access / candidate type,
+  every type marked as a candidate (not a fact), no pseudo-C.
+- If applied to the IDB, `read_struct` confirms the declared type took and the disassembly reads `obj->field`.
+- No address leaked outside `_dirty/`; the reply describes the layout structurally.
+
+## Pitfalls (never)
+
+- Never invent an offset you did not observe in an access pattern.
+- Never apply an IDB type concurrently with another analyst — writes are serialized.
+- Never paste a Hex-Rays body; a declared layout type is allowed, a transcribed decompilation is not.
+
+*North star N1: infers an undefined object's layout from access patterns into a promotable table — the static shape a live debugger read confirms.*
 
 ## Hard rules
 

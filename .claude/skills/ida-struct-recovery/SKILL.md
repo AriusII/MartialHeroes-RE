@@ -3,6 +3,7 @@ name: ida-struct-recovery
 description: Use when you need the field layout or vtable of a legacy object from the Martial Heroes Main.exe — for example a packet struct, an entity/actor class, or an asset header — so a spec-author can write a clean offset table. Dumps member offset/size/type and vtable slots to the dirty quarantine, plus a neutral .h-style offset table that is safe to promote.
 allowed-tools: Read Write
 model: sonnet
+effort: high
 ---
 
 # ida-struct-recovery — recover field & vtable layouts of a legacy object
@@ -68,6 +69,32 @@ This skill produces **two** kinds of output:
 5. Report: the target, member count, vtable slot count, the SHA-256, and both output paths. State
    clearly that `.offsets.h` is the promotion candidate but a spec-author must still review and
    rewrite it into `Docs/RE/structs/` (and log it in `journal.md`).
+
+## Decision points
+
+- **If the target is a polymorphic class** (`__thiscall`, `this` in `ECX`), vtable recovery is the way
+  in — resolve each slot to its function name. **If it's a plain struct/header**, members suffice.
+- **If a member's type is unknown**, emit a raw byte span (`uint8_t pad_0x14[4];`) in the `.offsets.h`
+  rather than guessing a type.
+- **If field semantics are uncertain** (is offset 0x1C a length or a flags word?), that's a runtime
+  question: hand off to `ida-debugger-drive` — breakpoint a method in the maintainer's F9 session and
+  `dbg_read` the live instance to read the actual field values. Static gives the layout; the debugger
+  confirms the meaning.
+
+## Verify / Done when
+
+- Both files exist under `_dirty/structs/`: the `.dirty.md` (with `> DIRTY` banner + full SHA-256) and
+  the `.offsets.h` (PROMOTABLE comment, no addresses, no symbol names, no pseudo-C).
+- Member/vtable counts are reported; one object per invocation.
+- The `.offsets.h` is pure layout — verify it contains no `0x…` address and no original symbol name.
+
+## Pitfalls (never)
+
+- Never let an address, vtable function name, or pseudo-C into the `.offsets.h`.
+- Never invent an offset, size, or slot name — report the resolve error and stop.
+- Never write directly into `Docs/RE/structs/` — promotion is a separate human-reviewed act.
+
+*North star N1: recovers a legacy object's shape as a promotable offset table — the static layout a debugger read confirms field-by-field.*
 
 ## Hard rules
 

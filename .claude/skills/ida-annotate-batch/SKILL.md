@@ -3,6 +3,7 @@ name: ida-annotate-batch
 description: Use when you want to apply a Campaign 2 annotation manifest to the live IDA database — batch-annotate a cluster: rename functions/globals + add neutral comments + (optionally) apply struct/enum types, all from a slice of Docs/RE/_dirty/campaign2/glossary.yaml. Triggers on "apply renames+comments to the IDB", "annotate a cluster in IDA for Campaign 2", "batch comment + rename + type". Dry-runs a per-entry verdict diff first, applies ONLY on explicit confirmation, and is idempotent (re-run → noop for already-applied entries).
 allowed-tools: Read Write
 model: sonnet
+effort: medium
 ---
 
 # ida-annotate-batch — atomically annotate one Campaign 2 cluster in the IDB
@@ -65,7 +66,10 @@ Comments are **neutral interop documentation** — never Hex-Rays pseudo-C, neve
    performs each `apply`-verdict entry: `set_name` (rename), function/repeatable comment, and — if a
    `type` was declared — applies the struct/enum type. It re-skips runtime symbols and conflicts and
    returns the same JSON shape with `applied` counts and any per-entry failures. Idempotent: a second
-   run reports `noop` for everything already applied.
+   run reports `noop` for everything already applied. *Decision: confirm you are the **only** annotator
+   on this IDB (strictly one writer at a time — `Docs/PLAN-CAMPAGNE2.md` §3.2). If a `type` fails to
+   apply (struct not yet imported into the IDB), apply name+comment and report the type failure rather
+   than aborting the whole cluster. On any SHA-256 mismatch vs `names.yaml`, STOP before applying.*
 7. **Stage the applied report.** Write the apply result to
    `Docs/RE/_dirty/campaign2/applied/<cluster>.md` — an address → {name, comment, type} table with
    the per-entry verdict/result, the IDB SHA-256, a `> DIRTY — never commit` banner, and a generated
@@ -73,6 +77,29 @@ Comments are **neutral interop documentation** — never Hex-Rays pseudo-C, neve
 8. **Report.** Per-verdict counts, applied/failed counts, the SHA-256, and the applied-report path.
    Note that the sync-back of these names into `Docs/RE/names.yaml` is Phase E (Tier-1, via
    `ida-naming-sync`'s pull path) — this skill does **not** edit `names.yaml`.
+
+## Verify / Done when
+
+- The manifest came from the gate-passed `glossary.yaml` slice (never a `*.proposed.*`); dry-run ran;
+  user confirmed; IDB SHA-256 matched the pin.
+- Exactly one cluster was applied by exactly one writer; every name/comment/type traces to a manifest
+  entry; zero CRT/runtime symbols touched; conflicts skipped (not forced).
+- A re-run reports `noop` for the cluster (idempotent); the applied-report exists at
+  `Docs/RE/_dirty/campaign2/applied/<cluster>.md` with banner + SHA-256; `names.yaml`/`journal.md`
+  untouched.
+
+## Pitfalls
+
+- **Never** annotate from a `*.proposed.*` manifest or invent a name/comment/type — only the
+  reconciled, gate-passed glossary slice.
+- **Never** let two annotators write the same IDB — serialization is the whole safety model.
+- **Never** write a comment that is pseudo-C, a `sub_`/`_DWORD`/`__thiscall` token, or "paste into C#"
+  — comments are neutral interop documentation only.
+- Do not edit the `glossary.yaml` merge point, `names.yaml`, or `journal.md` — the only file you write
+  is the dirty applied-report.
+
+> **N1:** batch annotation makes the legacy IDB legible for clean-room comprehension — neutral names
+> and interop comments only, so the binary becomes navigable without anything tainted crossing.
 
 ## Hard rules
 

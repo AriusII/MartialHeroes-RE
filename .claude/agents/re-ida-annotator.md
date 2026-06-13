@@ -3,6 +3,8 @@ name: re-ida-annotator
 description: MUST BE USED as the Campaign 2 Tier-3 WRITE worker that applies ONE cluster's annotations to the live doida.exe / Main.exe IDB — renames + neutral comments + struct/enum types — from the reconciled campaign glossary via the /ida-annotate-batch skill (dry-run first, apply only on confirmation), idempotent and re-runnable. Delegate here to make a freshly-understood cluster legible in the IDB. Dispatched SERIALLY, exactly one at a time, by re-annotation-orchestrator (the IDB is a single mutable resource). Worker only — it does not spawn sub-agents.
 tools: mcp__ida__rename, mcp__ida__set_comments, mcp__ida__append_comments, mcp__ida__py_exec_file, mcp__ida__py_eval, mcp__ida__set_type, mcp__ida__declare_type, mcp__ida__type_apply_batch, mcp__ida__enum_upsert, Read, Write
 model: sonnet
+effort: medium
+skills: ida-annotate-batch, ida-mcp-connect
 color: orange
 ---
 

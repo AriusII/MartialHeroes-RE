@@ -2,6 +2,8 @@
 name: ida-opcode-map
 description: Use when you need to locate the packet dispatch table in the legacy Martial Heroes client (Main.exe) and recover the raw opcode -> handler-address map. Finds the large switch/jump table the network reader dispatches on, resolves each case to its handler function, and writes opcode/handler pairs to Docs/RE/_dirty/opcodes.raw.md. This is dirty-room recon only; promotion to the clean Docs/RE/opcodes.md is a separate step owned by the opcode-catalog skill.
 allowed-tools: 'Read Write'
+model: sonnet
+effort: high
 ---
 
 # ida-opcode-map — recover the packet dispatch table
@@ -71,6 +73,33 @@ into neutral prose. Do not edit `Docs/RE/opcodes.md` from here.
 8. **Hand off.** State plainly: "Raw map written to Docs/RE/_dirty/opcodes.raw.md;
    promotion to Docs/RE/opcodes.md is the opcode-catalog skill's job." Do not promote
    here.
+
+## Decision points
+
+- **If you find only a handful of cases**, you hit a sub-dispatcher — note `partial: true` and keep
+  scanning for the master table (a real client has dozens: chat, movement, combat, inventory, login).
+- **If the dispatcher is a function-pointer array** not a compiler `switch`, the `.rdata` scan still
+  finds it — record the array EA and the opcode→index relationship in the header.
+- **If a case→handler mapping is ambiguous statically** (computed index, virtual dispatch), confirm it
+  dynamically: hand off to `ida-debugger-drive` — breakpoint the dispatcher in the maintainer's live
+  F9 session, send/observe a known packet, and read which handler the opcode lands on. Recall the wire
+  shape: 8-byte frame `[u32 size][u16 major][u16 minor]`, opcode `(major<<16)|minor`. Static forms the
+  table; the debugger confirms the live routing.
+
+## Verify / Done when
+
+- The header records the dispatcher EA, candidate table EA, opcode width, and base value (the provenance).
+- The table has dozens of `opcode | handler_ea | handler_name | confidence` rows, or is tagged `partial: true`.
+- `Docs/RE/_dirty/opcodes.raw.md` is appended (not silently overwriting a richer prior run).
+- No address or pseudo-C leaked outside `_dirty/`; `Docs/RE/opcodes.md` untouched.
+
+## Pitfalls (never)
+
+- Never fabricate opcode/handler pairs when the MCP is down — STOP and surface the connect hint.
+- Never promote here — the clean catalog is `opcode-catalog`'s job.
+- Never overwrite a richer prior run; add a dated section and let the spec-author reconcile.
+
+*North star N1: recovers the opcode→handler backbone of Network.Protocol's routing — the table a debugger then confirms packet-by-packet.*
 
 ## Hard rules
 

@@ -3,6 +3,7 @@ name: ida-decompile-export
 description: Use when you need to understand exactly ONE function's behavior in the legacy Martial Heroes Main.exe to author or refine a spec — for example a packet handler, a crypto routine, or an asset parser. Exports that function's raw Hex-Rays pseudo-C plus its callers/callees to the dirty quarantine for an analyst to read, then describe in neutral prose.
 allowed-tools: Read Write
 model: sonnet
+effort: high
 ---
 
 # ida-decompile-export — decompile ONE function into the dirty quarantine
@@ -67,7 +68,32 @@ Hex-Rays pseudo-C is written to `Docs/RE/_dirty/functions/<name>.dirty.md`.
    `## Callees (xrefs from)`, `## Local types`, and a fenced ```` ```c ```` block with the raw
    pseudo-C body.
 5. Report: the resolved address, caller/callee counts, the SHA-256, and the dirty output path.
-   Remind the user that promotion requires a fresh neutral note authored by a spec-author.
+   Remind the user that promotion requires a fresh neutral note authored by a spec-author. *Decision:
+   if the body is heavy on `*(_DWORD*)(this + N)` field accesses, the function's shape is best confirmed
+   live — note it as a candidate for the debugger (`dbg_add_bp` at the resolved EA, then `dbg_gpregs` /
+   `dbg_read` to capture the real buffer at the breakpoint; never `dbg_start`). If decompilation is
+   garbled (bad stack analysis, missing prototype), fix the prototype/struct first, or fall back to the
+   disassembly — do not transcribe garbled pseudo-C as fact.*
+
+## Verify / Done when
+
+- The JSON resolved a real address (not 0) and the SHA-256 matches the pinned build; callers/callees
+  are listed with names.
+- `Docs/RE/_dirty/functions/<name>.dirty.md` exists with the verbatim banner first, then the four
+  sections and the fenced pseudo-C — and the reply contains **no** pseudo-C, only counts and the path.
+- Exactly one function was exported (this is one-function-per-invocation).
+
+## Pitfalls
+
+- **Never** let a single token of this output cross into a committed spec, a C# file, or your reply —
+  it is copyright-tainted; only a from-scratch neutral note by a spec-author may cross the firewall.
+- Do not bulk-dump a call tree in one shot — run repeatedly per discovered callee; a mass dump is both
+  contaminating and unreviewable.
+- Do not trust pseudo-C with an inferred (wrong) prototype as ground truth — confirm the data shape in
+  the debugger before a spec asserts a layout.
+
+> **N1:** this is the static-hypothesis half of clean-room RE — read one function precisely in the
+> quarantine; the debugger confirms it against the live client before any spec asserts behavior.
 
 ## Hard rules
 

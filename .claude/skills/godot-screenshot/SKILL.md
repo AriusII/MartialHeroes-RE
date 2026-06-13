@@ -3,6 +3,7 @@ name: godot-screenshot
 description: Use to SEE what the Martial Heroes Godot client actually renders — captures a PNG of the running scene by booting the client WINDOWED with a temporary GDScript autoload that grabs the viewport after a few frames, saves it, and quits. Read the PNG back to confirm terrain/buildings/character actually appear. The visual half of the verify loop (headless can't capture pixels).
 allowed-tools: Bash(pwsh *) Bash(powershell *) Read Write Edit
 model: sonnet
+effort: medium
 ---
 
 # godot-screenshot — capture what the client renders
@@ -56,6 +57,27 @@ autoload beats a C# capture node here because it loads before any scene script a
    temporary autoload calls `quit()` on every run; leaving it in would make every future editor/game
    launch quit itself after a few frames. The helper prints this reminder; do it before reporting done.
 
+## Decision points
+
+- **If the frame is all sky / empty** → either warmup too short (async terrain/NPC streamed in AFTER
+  capture) → bump `-Frames`; or a script-attachment gray-screen → confirm with `/godot-scene-author`.
+- **If geometry is mirrored / ~1000+ units off** → a coordinate-convention bug, not a screenshot
+  problem → hand to `/godot-coordinate-check` for the numeric AABB diagnosis (world negates Z, mesh
+  `.skn` negates X; cells 1024, 65×65, spacing 16).
+- **If the character renders static/exploded** → that is the known skinning debt (mesh renders static,
+  no animation); expected, not a capture failure.
+- **If you need several angles** → drive the live camera via the `godot` MCP game tools
+  (`/godot-mcp-connect`) rather than re-running this per shot.
+- **For a 1:1 check against the original** (visuals, materials, placement) → hand to
+  `/godot-fidelity-check`, which uses this loop as its eyes.
+
+## Verify / Done when
+
+- A PNG exists, was Read back, and the expected subject is confirmed present and correctly placed
+  (textured terrain, walled town, upright character) — OR a concrete defect is named with its likely
+  cause and the next skill to run.
+- The temporary `ShotCapture` autoload line AND `res://Dev/_shot.gd` (+ `.uid`) are removed.
+
 ## Notes & gotchas
 
 - If the saved image is all background-sky with no geometry, the scene likely streamed its content
@@ -73,3 +95,15 @@ autoload beats a C# capture node here because it loads before any scene script a
 - Never `--headless` here; that defeats the purpose (blank viewport).
 - The PNG may depict copyrighted assets the user supplied — keep it in temp, inspect it, do not
   commit it or copy it into the repo (client `*.png` are gitignored for exactly this reason).
+
+## Pitfalls
+
+- Never leave the `ShotCapture` autoload behind — every future launch would self-quit after a few
+  frames (the single worst failure mode of this skill).
+- Never declare a defect from a too-short warmup — rule out late streaming (`-Frames`) before blaming
+  geometry.
+- Never use a C# capture node (needs a rebuild and loads after scene scripts) — the GDScript autoload
+  is the reliable probe.
+
+*North star: N2 — pixels are the verdict on the 1:1 visual re-creation; when in doubt, match the
+original.*

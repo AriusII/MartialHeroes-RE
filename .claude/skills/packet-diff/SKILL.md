@@ -2,6 +2,8 @@
 name: packet-diff
 description: Use to isolate which bytes encode a field by diffing two (or more) captured packets of the same opcode. Aligns the messages, diffs them byte-column by byte-column, highlights the offsets that vary, and emits an offset->hypothesis table you paste into the Notes of a Docs/RE/packets/*.yaml spec. Pure observation of capture bytes — clean-room-safe, no IDA, no decompiler.
 allowed-tools: Bash(tshark *) Read Write
+model: sonnet
+effort: high
 ---
 
 # packet-diff
@@ -75,6 +77,38 @@ note you paste the result into.
    fields at the localized offsets, and paste the hypothesis table under the spec's `notes:`
    so the evidence travels with the spec. Mark uncertain fields `status: draft`. If you
    created/changed a committed spec, add a one-line entry to `Docs/RE/journal.md`.
+
+## Decision points
+
+- **Variant block looks like a coordinate?** A 4-byte run that changes smoothly with player
+  movement is almost always an `f32` (little-endian) — confirm by re-diffing two positions a
+  known delta apart. A 2-byte run that ticks `+1` per packet is a sequence/counter `u16`.
+- **Where does the payload start?** The first bytes are the opcode pair, not field data — the
+  wire frame is `[u32 size][u16 major][u16 minor]` and opcodes combine as `(major<<16)|minor`.
+  Align the diff *after* the header if you are diffing whole frames, or feed already-stripped
+  payloads.
+- **Nothing varies / everything varies?** All-`=` means your samples didn't actually change the
+  target variable — vary it harder. All-`*` past the header usually means you crossed opcodes or
+  directions — re-filter (`--opcode`, fixed direction) before trusting the table.
+- **Ragged lengths?** A trailing `.` region is a variable-length tail (string/array) → record it
+  `size: var`, not a fixed field.
+
+Verify / Done when: the diff fixes *one* opcode + direction; the varying offsets line up with
+the single game variable you changed; the hypothesis table names width + a candidate type per
+field; uncertain rows are marked `status: draft`; the table is pasted under the spec's `notes:`
+and (if a committed spec changed) a `journal.md` line is added.
+
+## Pitfalls (anti-patterns)
+
+- **Never** diff across different opcodes or directions — that yields noise, not fields.
+- **Never** assert endianness/semantics the diff alone can't support — they stay labeled
+  hypotheses for confirmation against more captures.
+- **Never** read `_dirty/` decompiler notes or call IDA to "explain" a byte — this is the
+  capture-only lane.
+- Don't forget the 8-byte frame header offset when diffing whole frames vs stripped payloads.
+
+North star: serves **N2** — localizing real wire offsets is how the re-implemented packet
+structs reach byte-exact parity with the original.
 
 ## Reading the markers
 

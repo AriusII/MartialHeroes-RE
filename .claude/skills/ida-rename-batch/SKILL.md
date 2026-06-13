@@ -3,6 +3,7 @@ name: ida-rename-batch
 description: Use to clear the sub_xxxx / loc_xxxx autoname noise in the legacy Martial Heroes IDB — proposes canonical names for unnamed functions from their behavior, but APPLIES (via mcp__ida__rename) ONLY names already present in Docs/RE/names.yaml. Everything else is emitted as a proposal for ida-naming-sync / a maintainer to add to names.yaml. Always dry-runs first; never invents a name straight into the database.
 allowed-tools: Read Write
 model: sonnet
+effort: medium
 ---
 
 # ida-rename-batch — propose names, apply only the glossary-approved ones
@@ -48,11 +49,37 @@ must go through the glossary.
 4. **Apply ONLY glossary names, on explicit go-ahead.** Either re-run the snippet with
    `MODE = "apply"`, or apply each `apply`-verdict entry via the typed `mcp__ida__rename` tool. Skip
    runtime symbols and conflicts. Never rename an address whose target name is not in the glossary.
+   *Decision: IDB writes are strictly serialized — confirm no other annotator/sync is writing this IDB
+   right now before applying (one writer at a time). If the dry-run shows a `conflict`, do NOT force it
+   — the desired name is already bound elsewhere; stage it as a proposal and let the maintainer
+   reconcile. If the SHA-256 mismatches `names.yaml`, STOP — you are about to name the wrong build.*
 5. **Stage the proposals.** Write every *new* proposed name (the ones NOT in `names.yaml`) to
    `Docs/RE/_dirty/names-proposed-<sha8>.md` as an address→proposed-name table with a one-line
    rationale each. Tell the maintainer to vet these via `ida-naming-sync` and add the good ones to
    `names.yaml` (and journal it). Do **not** edit `names.yaml` yourself.
 6. **Report.** Per-verdict counts, applied count, the SHA-256, and the staged-proposals path.
+
+## Verify / Done when
+
+- A dry-run ran before any apply; the user gave explicit go-ahead; the IDB SHA-256 matched
+  `names.yaml`'s `binary.sha256`.
+- Every applied name was already in `names.yaml`; every *new* name went to the `_dirty/` proposals
+  file, not the IDB; zero CRT/runtime symbols were touched; conflicts were skipped, not forced.
+- A re-run reports `noop` for the just-applied entries (idempotent), and the proposals path is reported
+  for `ida-naming-sync` follow-up.
+
+## Pitfalls
+
+- **Never** write a new name straight into the IDB — that path bypasses the glossary firewall; new
+  names are *proposals* under `_dirty/` only.
+- **Never** run a second writer against the IDB concurrently — IDB writes are serialized to one at a
+  time.
+- Do not coerce `"0x004A1230"` to an int, and do not override the CRT/FLIRT skip — those symbols are
+  off-limits.
+- Do not apply against a mismatched SHA-256 build — you would scatter names onto wrong addresses.
+
+> **N1:** keeping the IDB in sync with the clean glossary makes the binary legible for clean-room RE
+> without ever letting a non-glossary name (or any pseudo-C) cross the firewall.
 
 ## Hard rules
 

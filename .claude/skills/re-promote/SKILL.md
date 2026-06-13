@@ -3,6 +3,7 @@ name: re-promote
 description: Use to cross the clean-room firewall — take a raw finding sitting in Docs/RE/_dirty/ and REWRITE it (never copy) into neutral prose inside the right committed spec (formats/ structs/ specs/ opcodes.md / packets/), strip every Hex-Rays artifact, add the // spec citation note, and journal it. The deliberate dirty→clean promotion step the whole legal model depends on.
 allowed-tools: Read Write Edit Grep Glob
 model: opus
+effort: high
 ---
 
 # re-promote — the dirty→clean firewall bridge
@@ -80,6 +81,40 @@ material. If you find yourself tempted to paste, stop — describe the behavior 
 
 8. **Report**: the dirty source you promoted, the committed spec path you wrote, the confidence of
    the key facts, and a reminder that the journal entry is itself a committed change.
+
+## Decision points
+
+- **If a fact still rests only on a static hypothesis**, tag it `UNVERIFIED` — do not promote a
+  guessed offset/algorithm as `CONFIRMED`. The debugger-confirmed half of N1 is what earns
+  `CONFIRMED`; static-only stays load-bearing-but-flagged.
+- **If the dirty note still carries an autoname or address**, resolve it to a canonical
+  `names.yaml` name *before* writing — never let `sub_`/`0x004…` leak into the draft.
+- **If the finding is an opcode row or a packet wire layout**, prefer the dedicated
+  `opcode-catalog` / `packet-codegen` skills (schema-validated) over hand-writing here, and
+  validate that a packet's `size:` equals the sum of its field widths.
+- **If the draft can only make its point by pasting code**, the point stays in `_dirty/` — it
+  does not belong in a committed spec.
+- **If no committed spec tree exists yet**, run `re-workspace-init` first.
+
+## Verify / Done when
+
+- [ ] The committed draft contains **zero** Hex-Rays artifacts: no `sub_`/`loc_`/`dword_`/`off_`,
+      no `_DWORD`/`__thiscall`/`LODWORD`, no mangled `?x@@…`, no `0x004…` address.
+- [ ] Every name is canonical (resolves in `names.yaml`); offsets are a tidy
+      `offset | size | type | field | notes` table; each fact carries a confidence tag.
+- [ ] The spec path is stable and obvious so downstream C# can cite `// spec: Docs/RE/<file>`.
+- [ ] A paired `journal.md` entry names the spec path (the `clean-room-firewall-check` pairing).
+- [ ] The `_dirty/` source is left intact, unmodified, as the provenance record.
+
+## Pitfalls (anti-patterns)
+
+- **Never** copy/transcribe — even "cleaned-up" pseudo-C is a firewall breach that voids Art. 6.
+- **Never** bundle unrelated findings into one promotion; one finding per spec keeps the audit clean.
+- **Never** edit, delete, or "tidy" the `_dirty/` source — it is the gitignored provenance.
+- **Never** skip the journal pairing; an unjournaled spec change fails the firewall check.
+
+> North star: this skill IS the **N1→N2 bridge** — it converts dirty IDA findings into the
+> neutral committed specs that the faithful 1:1 re-implementation reads. Rewrite, never copy.
 
 ## Hard rules
 

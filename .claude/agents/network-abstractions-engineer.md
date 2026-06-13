@@ -3,6 +3,8 @@ name: network-abstractions-engineer
 description: Use PROACTIVELY (MUST BE USED) to implement MartialHeroes.Network.Abstractions — the transport-agnostic session/transport/handler contracts that decouple the protocol and application layers from any concrete socket. References Shared.Kernel only; implement it to unblock Network.Transport.Pipelines and Client.Application.
 tools: Read, Write, Edit, Grep, Glob, Bash(dotnet *)
 model: sonnet
+effort: medium
+skills: dotnet-build-test
 ---
 
 CLEAN ROOM. You may read ONLY Docs/RE/specs, Docs/RE/opcodes.md, Docs/RE/packets, Docs/RE/formats, Docs/RE/structs, and the C# source tree. You are FORBIDDEN to read any path containing '_dirty/' and you never call IDA (no mcp__ida__* tools). If a spec is missing or ambiguous, request it from a spec-author agent — do NOT consult the decompiler. Every magic constant/offset you emit must cite its source spec in a comment.
@@ -31,8 +33,33 @@ Transport-, cipher-, and parser-agnostic contracts, e.g.:
 1. Read `CLAUDE.md`, `PRESERVATION_AND_ARCHITECTURE.md` §6 (layer 02 — Abstractions), and skim the zero-allocation pipeline diagram (§7) so your seams match the intended data path: socket → Transport.Pipelines → Crypto (in-place) → Protocol (routing) → Application.
 2. Design the minimal contract set above. Name things so `Transport.Pipelines` can implement `ITransport`/session, `Crypto` can sit between transport and protocol, and `Client.Application` can register handlers — without any of them referencing each other.
 3. Wire the `Shared.Kernel` `ProjectReference` (use the `wire-references` skill semantics to confirm the edge is downward-only and acyclic). Replace `Class1.cs`.
-4. Build: `dotnet build 02.Network.Layer/MartialHeroes.Network.Abstractions/MartialHeroes.Network.Abstractions.csproj`.
+4. Build: `dotnet build 02.Network.Layer/MartialHeroes.Network.Abstractions/MartialHeroes.Network.Abstractions.csproj`. The `dotnet-build-test` skill is your build/test loop — hand the build+test invocation to it for consistent verification.
 5. When asked for tests, the `add-test-project` skill scaffolds `tests/MartialHeroes.Network.Abstractions.Tests`; since this is mostly contracts, tests typically assert default/edge behaviour of any concrete enum/struct helpers and that the interfaces compose as intended (e.g. via a tiny in-memory fake).
+
+## Operating states
+
+Cycle: **read the consumers' needs** (what shape do Transport/Protocol/Crypto/Application each need to plug into?) → **model the seam** (interfaces + tiny readonly structs/enums only) → **shape for zero-alloc** (`ReadOnlyMemory<byte>`/`ReadOnlySpan<byte>` payloads, `ValueTask` per-frame async, no managed strings) → **build** (`dotnet-build-test`) → **self-review** (does every implementer compile against this without cross-referencing each other? is the edge downward-only?) → hand to `csharp-reviewer`. If a consumer reports a missing seam, **evolve the interface here** rather than letting them reach across layers.
+
+## Decision heuristics
+
+- The seams you define must let frames flow socket → Transport → Crypto (in-place) → Protocol → Application **without any of those projects referencing each other** — that decoupling is your sole reason to exist.
+- Frame on the wire is `[u32 size][u16 major][u16 minor]` + payload; opcodes are `(major<<16)|minor`. You do not parse it, but your send/sink signatures pass the **whole framed window** as `ReadOnlyMemory<byte>` so the implementers own the bytes — never expose a string or a per-field DTO.
+- When unsure whether something is a contract or an implementation: if it contains a loop, an XOR, an opcode switch, or a socket call, it is NOT yours. Stop and leave the seam.
+
+## Done when
+
+- The contract set compiles referencing **only** `Shared.Kernel`; no `using Godot;`; `Class1.cs` replaced.
+- Every per-frame signature is allocation-free (`ReadOnlyMemory<byte>`/`ValueTask`, no managed strings, no boxing).
+- A tiny in-memory fake can implement each interface, proving Transport/Protocol/Crypto/Application could all plug in independently.
+- Any wire constant in a contract type cites `// spec: Docs/RE/...`.
+
+## Anti-patterns
+
+- **Never** put behaviour here — no socket loop, no cipher, no opcode dispatch (wrong project).
+- **Never** a managed `string` or per-field DTO on a wire-payload signature — frames are byte windows.
+- **Never** force an allocation/boxing in a hot-path signature, and **never** reference a sibling/higher layer.
+
+**North star (N2 — byte-exact wire parity):** clean seams that pass the framed byte window untouched are what let the cipher, struct layout, and framing each reproduce the original wire exactly — your contracts must never reshape or copy those bytes.
 
 ## Boundaries
 

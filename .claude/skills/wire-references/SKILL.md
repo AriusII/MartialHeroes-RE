@@ -2,6 +2,8 @@
 name: wire-references
 description: Use to apply the intended ProjectReference graph onto the existing placeholder MartialHeroes projects, verify it is acyclic and downward-only, build to confirm, and report any drift.
 allowed-tools: Read Write Bash(dotnet add *) Bash(dotnet list *) Bash(dotnet build *)
+model: sonnet
+effort: medium
 ---
 
 # wire-references
@@ -92,6 +94,36 @@ also a strict sub-order. These are the ONLY edges allowed:
    result. If `check_dag.py` flagged extra or upward edges that you did not add (pre-
    existing drift), list them explicitly and recommend removal rather than silently
    editing unrelated references.
+
+## Decision points
+
+- **If a csproj already carries the intended edge**, skip it (idempotent) — do not re-add,
+  which produces a duplicate `<ProjectReference>` warning.
+- **If `check_dag.py` reports an UNEXPECTED/upward/cyclic edge you did not add**, do NOT
+  silently delete it: report it as pre-existing drift and recommend removal, so the
+  intentional-vs-accidental distinction is preserved for the caller.
+- **If the build fails after wiring**, distinguish a *missing reference* (architecture gap —
+  add the legal edge) from a *compile error in code* (not this skill's job — report it).
+- **If asked to wire `Network.Protocol`/`Network.Crypto` into `Application`**, refuse:
+  Application knows only `Network.Abstractions`. The hidden edge would couple use-cases to
+  wire layout and break the seam.
+
+## Verify / Done when
+
+- [ ] Every edge in the table is present; no edge outside it exists.
+- [ ] `check_dag.py .` exits 0 (acyclic, downward-only, no `.Pipe` sighting).
+- [ ] `dotnet build MartialHeroes.slnx` succeeds.
+- [ ] `Shared.Kernel`, `Shared.Diagnostics`, `Assets.Vfs` carry zero `ProjectReference`s.
+
+## Pitfalls (anti-patterns)
+
+- **Never** add an edge not in the table — extras are drift even if they compile.
+- **Never** let `Application` reference `Network.Protocol`/`Network.Crypto`.
+- **Never** edit unrelated references to make `check_dag.py` pass; fix only the in-scope csproj.
+- **Never** trust a green build over a red `check_dag.py` — the DAG checker is authoritative.
+
+> North star: serves **N2** — the exact downward graph keeps the core engine-free and
+> headless-reusable, the foundation the faithful 1:1 client port builds on.
 
 ## Do not
 

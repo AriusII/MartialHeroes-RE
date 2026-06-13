@@ -3,6 +3,7 @@ name: godot-mcp-connect
 description: Use before driving the Martial Heroes Godot client through the 'godot' MCP, or when mcp__godot__* tools are unavailable / failing. Probes the editor bridge (port 9600) and game bridge (port 9601), reports UP/DOWN, enumerates the live mcp__godot__* toolset, and refuses to let interactive scene/runtime work proceed until the bridge is reachable with the editor open.
 allowed-tools: Bash(python *) Bash(claude *) Read
 model: sonnet
+effort: medium
 ---
 
 # godot-mcp-connect — preflight for the live Godot bridge
@@ -70,6 +71,33 @@ exists: never start interactive scene-tree or runtime work without a green check
    out: report "Godot bridge ready", note which ports/tools are live, and hand off. If the caller
    needs a screenshot of the running game, first `run_project` (which brings up the 9601 game bridge)
    then use the game `screenshot` tool — or fall back to the standalone `/godot-screenshot` skill.
+
+## Decision points
+
+- **If 9600 DOWN** → STOP; relay remediation (open the editor / enable `mcp_bridge` / re-add the MCP +
+  restart session). Do NOT fabricate results.
+- **If 9600 UP but `mcp__godot__*` tools absent from this session** → the editor was opened AFTER the
+  session started → restart the Claude session (the bridge can't be hot-attached).
+- **If 9601 DOWN while 9600 UP** → normal (no game running); `run_project` to raise it before any game
+  tool (`screenshot`, `click`, `get_runtime_tree`).
+- **If `get_scene_tree` shows a non-`World` root** → some other editor instance is bound; warn before
+  driving it.
+- **If the editor isn't open at all and you only need a non-interactive check** → don't wait on the
+  bridge; fall back to `/godot-run-headless` (load check) or `/godot-screenshot` (pixels).
+
+## Verify / Done when
+
+- 9600 reported UP/DOWN with remediation if down; on UP, the live `mcp__godot__*` toolset is
+  enumerated and classified (editor vs game), and the open project is confirmed to be Martial Heroes
+  `World` — then "bridge ready" with the next interactive skill named.
+
+## Pitfalls
+
+- Never invent scene-tree / runtime results while the bridge is DOWN — refusing is the correct outcome.
+- Never assume tool names — discover them at runtime (the bridge build varies, like `/ida-mcp-connect`).
+- Never treat a DOWN 9601 with UP 9600 as a failure — it only listens during a running game.
+
+*North star: N2 — the live bridge lets you drive and inspect the running 1:1 client interactively.*
 
 ## Hard rules
 

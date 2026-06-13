@@ -2,6 +2,8 @@
 name: add-test-project
 description: Use to add an xUnit test project for a MartialHeroes core library, named MartialHeroes.<Project>.Tests, placed under the tests/ tree, registered in the slnx /Tests/ folder, referencing the SUT, with one passing smoke test.
 allowed-tools: Read Write Bash(dotnet new *) Bash(dotnet sln *) Bash(dotnet add *) Bash(dotnet test *)
+model: sonnet
+effort: medium
 ---
 
 # add-test-project
@@ -129,6 +131,34 @@ test-project convention for a single subject-under-test (SUT) library.
 
 8. **Report** the test csproj path, the SUT it references, the slnx folder used, and the
    `dotnet test` result (1 passing smoke test expected).
+
+## Decision points
+
+- **If `MartialHeroes.<Project>.Tests` already exists**, STOP — do not duplicate; tell the
+  caller to add cases to the existing project.
+- **If the SUT still has only the placeholder `Class1`**, touch `Class1` in the smoke test
+  and leave a `// TODO` to retarget; never assert bare `true` (a broken reference must fail
+  the build, not silently pass).
+- **If the `/Tests/` slnx folder is missing**, create it (sibling to `/Docs/`) before adding.
+- **If the SUT is a Domain library**, prefer the smoke test exercise a deterministic public
+  type — that primes the project for the real behavior-parity tests engineers add later.
+
+## Verify / Done when
+
+- [ ] The test project lives under `tests/`, NOT inside a numbered layer folder.
+- [ ] It references the SUT and nothing higher than the SUT; no Godot/presentation reference.
+- [ ] The slnx `<Project Path=…>` is inside the `/Tests/` `<Folder>`, forward-slashed.
+- [ ] `dotnet test` shows exactly one passing test that actually touches a SUT type.
+
+## Pitfalls (anti-patterns)
+
+- **Never** place a test project in a numbered production layer folder.
+- **Never** reference Godot or a layer above the SUT from a core test project.
+- **Never** write a smoke test that asserts `true` without touching the SUT.
+- **Never** create a second test project for a SUT that already has one.
+
+> North star: serves **N2** — headless xUnit coverage is how the re-implemented core proves
+> byte-/behavior-fidelity to the original without ever opening the Godot editor.
 
 ## Do not
 

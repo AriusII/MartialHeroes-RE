@@ -2,6 +2,8 @@
 name: opcode-catalog
 description: Use to maintain the authoritative Docs/RE/opcodes.md opcode catalog (no IDA addresses). Add/curate entries (opcode + name + direction + size + packet-yaml link + status), schema-validate the table, detect duplicate opcode ids, and flag opcodes that appear in captures but are missing from the catalog. Clean-side curation only — never store addresses or decompiler output.
 allowed-tools: Read Write Bash(python *)
+model: sonnet
+effort: high
 ---
 
 # opcode-catalog
@@ -83,11 +85,42 @@ handler exist).
 6. **Journal it.** Any committed change to `opcodes.md` gets a one-line entry in
    `Docs/RE/journal.md` (which specs changed, by whom, no pseudo-code).
 
+## Decision points
+
+- **major/minor vs flat id?** This protocol's opcodes are `(major<<16)|minor` — a message is a
+  `(major, minor)` pair (e.g. melee `2/52`, chat `2/7`, storage `2/142`, buff `4/102`). Record
+  the catalog id in whatever single-hex convention the file already uses, but keep the pair
+  legible in `Name`/`Notes` so it round-trips to the wire frame `[u16 major][u16 minor]`.
+- **What status?** Seen on the wire only → `observed`. A `packets/*.yaml` exists → `draft`+.
+  An analyst confirmed it against the binary's dispatch table (neutral fact only) → `confirmed`.
+  A C# struct + handler live in `Network.Protocol` (incl. the `OnUnhandled` fallback set
+  0/0, 3/1, 3/7, 3/4, 3/6, 3/23) → `implemented`.
+- **Validator fails on an address token?** That means dirty material leaked in — strip it; the
+  catalog never carries `sub_`/`loc_`/absolute addresses. Promote only *that it exists* and its
+  size, never *where* it lives.
+
+Verify / Done when: `validate_opcodes.py` passes (all 7 columns, unique ids, valid
+direction/status/size, **zero address tokens**, every `Packet spec` link resolves under
+`packets/`); any capture-`--seen` warnings are triaged; `names.yaml` `opcodes:` mirrors the row;
+the change is journaled.
+
+## Pitfalls (anti-patterns)
+
+- **Never** store an address, `sub_`/`loc_`, or any decompiler output — the validator fails the
+  file and the firewall is breached.
+- **Never** read `_dirty/` or call IDA — the catalog carries only already-promoted neutral facts.
+- **Never** duplicate an opcode id — duplicates are a hard validation failure.
+- Don't reformat the file's prose, legend, or column order — edit table rows only.
+
+North star: serves **N2** — a complete, validated opcode table is the index of every message the
+re-implemented client must speak byte-for-byte like the original.
+
 ## Hard rules
 
 - **No addresses. Ever.** This file documents *what* a message is, never *where* it lives in
   the binary. Address discovery stays in gitignored `_dirty/opcodes.raw.md`. The validator
   enforces this and will fail the file if it finds an address-shaped token.
 - **No decompiler output** anywhere in the catalog — neutral prose only.
+- **Clean-side only:** never read anything under `_dirty/` and never call IDA; the catalog carries only neutral facts already promoted across the firewall.
 - One opcode id appears at most once. Duplicate ids are a hard validation failure.
 - Do not reformat the file's prose, legend, or column order — only edit table rows.

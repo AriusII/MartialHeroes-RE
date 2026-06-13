@@ -2,6 +2,8 @@
 name: ida-mcp-connect
 description: Use before any IDA reverse-engineering session, or when mcp__ida__* tools are unavailable / failing. Probes the local IDA Pro 9.3 MCP server (127.0.0.1:13337), reports UP/DOWN, enumerates the live mcp__ida__* toolset, and refuses to let analysis proceed until the server is reachable with a database open.
 allowed-tools: Bash(python *) Bash(claude *) Read
+model: sonnet
+effort: medium
 ---
 
 # ida-mcp-connect
@@ -45,6 +47,10 @@ tool (often named like `execute_script` / `run_python` / `eval`); typed tools
    - **Script-exec** (preferred): any tool that runs arbitrary IDAPython — look for names containing
      `execute`, `script`, `run`, `python`, or `eval`. Bundled IDAPython snippets from other RE
      skills are meant to run through this.
+   - **Debugger** (`mcp__ida__dbg_*`): present only on the `?ext=dbg` endpoint. *Decision: if the
+     `dbg_*` tools are ABSENT, the session is on the base endpoint — re-register on `?ext=dbg`
+     (`claude mcp add --transport http ida "http://127.0.0.1:13337/mcp?ext=dbg"`) and restart, so
+     ground-truth confirmation is available. The `?ext=dbg` endpoint is a superset; prefer it always.*
    - **Typed fallbacks**: `decompile`, `rename`/`set_name`, `xrefs`, `list_strings`,
      `get_function`, etc. Use these when no script-exec tool is present.
    Report which category is available so downstream skills know how to call IDA.
@@ -59,6 +65,25 @@ tool (often named like `execute_script` / `run_python` / `eval`); typed tools
 5. **Green light.** Only when the socket is UP, `mcp__ida__*` tools are present, and a sane database
    is confirmed: report "IDA session ready", note the binary name + function count, and hand off to
    the requested RE workflow (recon, opcode mapping, crypto, struct dump).
+
+## Verify / Done when
+
+- The probe printed `IDA MCP: UP`, the `mcp__ida__*` tools resolve, and a one-liner confirmed a sane,
+  non-empty IDB whose `get_root_filename()` is the Martial Heroes client (not another instance).
+- The available tool category (script-exec / debugger / typed) is reported, and whether `dbg_*` is
+  present (i.e. on `?ext=dbg`).
+- If anything failed, the exact remediation was handed back and **no** analysis was allowed to start.
+
+## Pitfalls
+
+- **Never** fabricate `mcp__ida__*` results when DOWN — refusing is the correct, safe behavior.
+- A reachable socket is not a loaded IDB — always confirm the database, or downstream skills produce
+  silent garbage.
+- Do not settle for the base endpoint when debugger confirmation is needed — missing `dbg_*` means
+  re-register on `?ext=dbg`.
+
+> **N1:** this preflight is the gate that keeps clean-room RE honest — no recon, decompile, or
+> debugger confirmation proceeds without a live, correct IDA session.
 
 ## Hard rules
 

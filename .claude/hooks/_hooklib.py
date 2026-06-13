@@ -402,3 +402,132 @@ def mentions_korean_or_txt_read(text):
 
 def has_coordinate_math(text):
     return bool(_VECTOR3.search(text or ""))
+
+
+# ------------------------------------------------- .claude/ kit self-consistency
+# Classifiers + a tiny frontmatter parser + advisory issue-finders that power the
+# meta-guard hooks (agent_md_guard / skill_md_guard / hook_advisory_guard /
+# settings_wiring_nudge). See .claude/KIT.md sections 6 and 7. All best-effort,
+# std-lib only, returning simple values; advisory only.
+
+def _claude_rel(path):
+    """Path portion after '.claude/' (forward-slash, lower-cased), or '' if not under .claude/."""
+    p = _low(path)
+    i = p.find("/.claude/")
+    if i != -1:
+        return p[i + len("/.claude/"):]
+    if p.startswith(".claude/"):
+        return p[len(".claude/"):]
+    return ""
+
+
+def is_agent_md(path):
+    """True for an agent definition file under .claude/agents/*.md (not the kit README/KIT)."""
+    rel = _claude_rel(path)
+    return rel.startswith("agents/") and rel.endswith(".md")
+
+
+def is_skill_md(path):
+    """True for a skill definition file under .claude/skills/<name>/SKILL.md."""
+    rel = _claude_rel(path)
+    return rel.startswith("skills/") and rel.endswith("/skill.md")
+
+
+def is_hook_py(path):
+    """True for a hook script under .claude/hooks/*.py (including _hooklib.py)."""
+    rel = _claude_rel(path)
+    return rel.startswith("hooks/") and rel.endswith(".py")
+
+
+def is_claude_settings(path):
+    """True for .claude/settings.json (or settings.local.json)."""
+    rel = _claude_rel(path)
+    return rel in ("settings.json", "settings.local.json")
+
+
+def parse_frontmatter(text):
+    """Best-effort parse of a leading YAML frontmatter block (--- ... ---).
+
+    Returns a dict of top-level `key: value` pairs (values as strings; surrounding
+    quotes stripped; simple `[a, b]` or `a, b` lists left as the raw string). Returns
+    {} when there is no frontmatter. Std-lib only — NOT a full YAML parser; good enough
+    for advisory frontmatter checks on agent/skill files."""
+    if not text:
+        return {}
+    t = strip_bom(text).lstrip("\n")
+    if not t.startswith("---"):
+        return {}
+    lines = t.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    fm = {}
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        m = re.match(r"^([A-Za-z0-9_-]+)\s*:\s*(.*)$", line)
+        if m:
+            key = m.group(1).strip().lower()
+            val = m.group(2).strip()
+            if len(val) >= 2 and val[0] in "\"'" and val[-1] == val[0]:
+                val = val[1:-1]
+            fm[key] = val
+    return fm
+
+
+_VALID_AGENT_MODELS = ("opus", "sonnet", "haiku", "fable", "inherit")
+_VALID_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+
+def agent_frontmatter_issues(text):
+    """Advisory problems in an agent .md frontmatter, per .claude/KIT.md §1. Returns
+    a list of human-readable strings (empty = clean)."""
+    fm = parse_frontmatter(text)
+    if not fm:
+        return ["no YAML frontmatter found"]
+    issues = []
+    mv = (fm.get("model") or "").strip()
+    if not mv:
+        issues.append("missing `model:` (KIT §1 — every agent declares opus or sonnet)")
+    else:
+        if not (mv in _VALID_AGENT_MODELS or mv.startswith("claude-")):
+            issues.append("invalid `model:` '{}' (opus/sonnet/haiku/fable/inherit or a full id)".format(mv))
+        if re.match(r"claude-3", mv):
+            issues.append("stale model id '{}' (use the `opus`/`sonnet` alias)".format(mv))
+    ev = (fm.get("effort") or "").strip()
+    if not ev:
+        issues.append("missing `effort:` (KIT §1 — low/medium/high/xhigh/max)")
+    elif ev not in _VALID_EFFORTS:
+        issues.append("invalid `effort:` '{}'".format(ev))
+    if "allowed-tools" in fm:
+        issues.append("agents use `tools:`, not `allowed-tools:` (that is a skill field)")
+    return issues
+
+
+def skill_frontmatter_issues(text):
+    """Advisory problems in a SKILL.md frontmatter, per .claude/KIT.md §0/§5."""
+    fm = parse_frontmatter(text)
+    if not fm:
+        return ["no YAML frontmatter found"]
+    issues = []
+    if "tools" in fm and "allowed-tools" not in fm:
+        issues.append("skills use `allowed-tools:`, not `tools:`")
+    if len((fm.get("description") or "").strip()) < 12:
+        issues.append("missing/short `description:` (lead with a when-to-use trigger)")
+    return issues
+
+
+_HOOK_BLOCK = re.compile(
+    r"sys\.exit\(\s*2\s*\)"
+    r"|(?<![\w.])exit\(\s*2\s*\)"
+    r'|["\']decision["\']\s*:\s*["\']block["\']'
+    r'|["\']permissionDecision["\']\s*:\s*["\'](?:deny|ask)["\']'
+)
+
+
+def hook_can_block(text):
+    """True if hook source could BLOCK a tool/stop (violates the advisory-only rule).
+    Scans raw text: the block signatures (`{"decision": "block"}`, a deny/ask
+    `permissionDecision`) live inside string literals, so stripping strings would hide
+    them. `sys.exit(2)` is matched as code. A rare false positive on a comment that
+    literally writes `sys.exit(2)` is acceptable for an advisory nudge."""
+    return bool(_HOOK_BLOCK.search(text or ""))

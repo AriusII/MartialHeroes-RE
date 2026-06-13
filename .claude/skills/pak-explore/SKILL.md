@@ -2,6 +2,8 @@
 name: pak-explore
 description: Use to inspect a Martial Heroes .pak archive index from the documented format spec (Docs/RE/formats/pak.md); lists entry name/offset/size only and never extracts or prints copyrighted payload bytes.
 allowed-tools: Read Write Bash(python *)
+model: sonnet
+effort: medium
 ---
 
 # pak-explore
@@ -84,6 +86,34 @@ is off-limits.
 5. **Summarize for the engineer**: entry count, total payload bytes covered, any names that look
    like directory roots (useful for `Assets.Vfs` mount points), and whether offsets are monotonic
    and within the file size (a cheap integrity check that needs no payload reads).
+
+## Decision points
+
+- **`pak.md` missing?** Don't invent a layout — run `--probe` (size + first magic bytes only) to
+  bootstrap, then hand to `asset-format-doc` to seed `Docs/RE/formats/pak.md` first.
+- **Offsets non-monotonic or out of range?** That's a layout/endianness mismatch with the spec,
+  not a corrupt file — recheck `--endian` and the entry record sizes against `pak.md` before
+  trusting the listing.
+- **User wants the bytes out?** Any "extract / unpack / dump / get the bytes" request → REFUSE
+  (Hard Rule #2) and offer the index listing. Existence + name/offset/size only — never payload.
+- **Tracing an asset, not auditing the archive?** If the goal is "where does mob/skin/terrain id
+  X resolve on disk", that's the recovered-chain job — use `/asset-chain-trace`, not this skill.
+
+Verify / Done when: magic validated against `pak.md`; one `index offset size name` line per
+entry; offsets are monotonic and within file size (the integrity check); entry count + total
+covered bytes reported; **zero payload bytes** were read; any saved listing lives under
+`_dirty/scratch/` or `.work/`.
+
+## Pitfalls (anti-patterns)
+
+- **Never** seek to an entry `offset` and read `size` payload bytes — index region only.
+- **Never** hexdump, decompress, or decode entry content — this is a listing tool with no
+  extract mode.
+- **Never** write a listing into a committed/tracked path, and never modify the `.pak`.
+- Don't hardcode RE'd offsets here — they come from `pak.md` via flags, cited.
+
+North star: serves **N2** — knowing the archive index (without ever copying payload) is the
+first step to faithfully reproducing the original asset set.
 
 ## What this skill deliberately does NOT do
 

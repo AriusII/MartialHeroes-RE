@@ -3,6 +3,7 @@ name: ida-py
 description: Use to run an ARBITRARY user-supplied IDAPython snippet against the live IDA Pro 9.3 database of the legacy Martial Heroes client (Main.exe) and capture its result — the escape hatch for any one-off analysis the fixed RE skills (ida-recon, ida-opcode-map, ida-crypto-hunt, ida-xref-map, ida-callgraph-map, ida-data-flow, ida-batch-analyze, ida-string-hunt, ida-struct-apply, ida-vtable-recover) do not cover. Wraps the snippet so it prints exactly one RESULT_JSON line and lands the result in Docs/RE/_dirty/queries/.
 allowed-tools: Read Write
 model: sonnet
+effort: medium
 ---
 
 # ida-py — run an arbitrary IDAPython snippet via the IDA MCP
@@ -52,7 +53,31 @@ Prefer a fixed skill when one fits — `ida-recon` (census), `ida-opcode-map` (d
    JSON there yourself, plus a short `.md` sibling summarizing the finding in plain English.
 5. **Interpret, neutrally.** In your reply, summarize what was found in words (counts, candidate
    addresses, observed shapes). Addresses are allowed only inside `_dirty/`. Flag any `sub_…` name
-   you resolved as a proposed canonical name for `ida-naming-sync` — do not rename here.
+   you resolved as a proposed canonical name for `ida-naming-sync` — do not rename here. *Decision: if
+   the question is really one of the named subsystems (dispatcher, cipher, xref graph, strings, struct,
+   vtable), STOP and use that fixed skill — `ida-py` is only for the long tail. If the snippet needs to
+   write into the IDB, it doesn't belong here (use the rename/annotate skills, serialized). If a fact
+   needs live confirmation, hand the candidate EA to the debugger (`dbg_add_bp`/`dbg_read`; never
+   `dbg_start`).*
+
+## Verify / Done when
+
+- The harness printed exactly one `RESULT_JSON:` line and it parsed (`ok: true`); on `ok: false` the
+  error was read and the snippet fixed, not guessed around.
+- `result` holds only metadata you explicitly gathered (addresses, names, counts, short byte/string
+  reads) — no whole-function pseudo-C; output is under `Docs/RE/_dirty/queries/` with a slug.
+- The serialization boilerplate was left intact (only CONFIG + USER CODE edited).
+
+## Pitfalls
+
+- **Never** dump disassembly or pseudo-C into `result` or the reply — reading one function closely is
+  `ida-decompile-export`'s quarantined job.
+- Do not reinvent a fixed skill's wheel here — `ida-py` is the escape hatch, not the default.
+- Do not edit the serialization boilerplate — a malformed `RESULT_JSON:` line is unparseable and the
+  finding is lost.
+
+> **N1:** the escape hatch keeps clean-room RE unblocked on the long tail of one-off questions while
+> still landing every byte read in the `_dirty/` quarantine.
 
 ## Hard rules
 
