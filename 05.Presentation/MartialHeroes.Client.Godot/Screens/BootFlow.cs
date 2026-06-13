@@ -193,7 +193,10 @@ public sealed partial class BootFlow : Node
         // In offline mode UseCases is a no-op sink.
         if (_useCases is not null)
         {
-            _ = _useCases.LoginAsync(account, password: "", CancellationToken.None);
+            // pin is null here — it is collected later by the PIN modal (after server select),
+            // so the cancellationToken must be passed by name (the new LoginAsync inserts string? pin
+            // before the token). spec: Docs/RE/specs/login_flow.md §1 step 1a.
+            _ = _useCases.LoginAsync(account, password: "", cancellationToken: CancellationToken.None);
         }
 
         ShowServerSelect();

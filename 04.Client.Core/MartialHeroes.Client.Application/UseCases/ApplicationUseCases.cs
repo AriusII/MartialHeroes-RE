@@ -4,9 +4,11 @@ using System.Text;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.World;
+using System.Collections.Immutable;
 using MartialHeroes.Client.Domain.Actors;
 using MartialHeroes.Client.Domain.Inventory;
 using MartialHeroes.Client.Domain.Skills;
+using MartialHeroes.Network.Abstractions.Lobby;
 using MartialHeroes.Network.Abstractions.Protocol;
 using MartialHeroes.Network.Abstractions.Session;
 using MartialHeroes.Network.Protocol.Packets;
@@ -50,6 +52,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     private readonly LocalPlayerState? _localPlayer;
     private readonly CharacterSelectionStore? _characterSelection;
     private readonly IClientEventBus? _eventBus;
+    private readonly ILobbyClient? _lobbyClient;
+    private readonly bool _emitLoginBlob16;
 
     /// <summary>The 1/9 version-token length: a fixed 33-byte buffer. spec: 1-9_enter_game_request.yaml.</summary>
     public const int VersionTokenLength = 33;
@@ -74,8 +78,21 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     /// detect "@BLANK@" and cache the chosen descriptor for the 3/7 spawn. spec: login_flow.md §3.5.
     /// </param>
     /// <param name="eventBus">
-    /// Used to publish <see cref="CreateCharacterRequestedEvent"/> when an empty slot is confirmed.
-    /// Optional; when absent the create-character routing is silent (still suppresses the 1/9 send).
+    /// Used to publish <see cref="CreateCharacterRequestedEvent"/> when an empty slot is confirmed, and
+    /// the lobby <see cref="ServerListReceivedEvent"/> / <see cref="ChannelEndpointResolvedEvent"/>.
+    /// Optional; when absent the create-character routing is silent (still suppresses the 1/9 send) and
+    /// the lobby use-cases still return their results without publishing.
+    /// </param>
+    /// <param name="lobbyClient">
+    /// The lobby discovery surface (server-list + channel-endpoint). Injected as a contract; the app
+    /// never references the concrete transport. Required only for the lobby use-cases. spec:
+    /// Docs/RE/specs/login_flow.md §2.
+    /// </param>
+    /// <param name="emitLoginBlob16">
+    /// FEATURE FLAG (default <see langword="false"/>) for emitting the optional 1/6 login blob in
+    /// <see cref="LoginAsync"/>. Kept OFF because the 1/6 opcode collision (login blob vs character
+    /// create) is unresolved pending a capture. spec: Docs/RE/packets/1-6_login_or_create.yaml;
+    /// Docs/RE/specs/login_flow.md §4.2.
     /// </param>
     public ApplicationUseCases(
         IOutboundPacketSink outbound,
@@ -87,7 +104,9 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         LocalPlayerState? localPlayer = null,
         IClientVersionSource? versionSource = null,
         CharacterSelectionStore? characterSelection = null,
-        IClientEventBus? eventBus = null)
+        IClientEventBus? eventBus = null,
+        ILobbyClient? lobbyClient = null,
+        bool emitLoginBlob16 = false)
     {
         _outbound = outbound ?? throw new ArgumentNullException(nameof(outbound));
         _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
@@ -96,7 +115,9 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         _sessionId = sessionId;
         _localPlayer = localPlayer; // optional: drives the cast state machine when wired
         _characterSelection = characterSelection; // optional: needed for @BLANK@ + descriptor cache
-        _eventBus = eventBus; // optional: publishes CreateCharacterRequested for empty slots
+        _eventBus = eventBus; // optional: publishes CreateCharacterRequested + lobby events
+        _lobbyClient = lobbyClient; // optional: only the lobby use-cases need it
+        _emitLoginBlob16 = emitLoginBlob16; // FEATURE FLAG: off by default (1/6 collision unresolved)
 
         _versionToken = new byte[VersionTokenLength];
         if (!versionToken.IsEmpty)
@@ -121,7 +142,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     }
 
     /// <inheritdoc />
-    public ValueTask LoginAsync(string username, string password, CancellationToken cancellationToken = default)
+    public ValueTask LoginAsync(
+        string username, string password, string? pin = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(username);
         ArgumentNullException.ThrowIfNull(password);
@@ -135,10 +157,62 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         // analogue of "secure session established / awaiting auth result".
         _stateMachine.OnAuthenticated();
 
-        // PROVISIONAL: the pre-0/0 username send (1/6, 52-byte credential/description blob) is not
-        // specced (spec: 1-9_enter_game_request.yaml "RELATED ... 1/6 ... not specced here"). We do not
-        // fabricate a 1/6 frame; the handshake proceeds from the inbound 0/0. Documented gap.
+        // OPT-IN 1/6 login-blob emit, OFF by default. The 1/6 opcode is a known UNRESOLVED collision
+        // (login credential blob vs character-create body) — a capture is needed to disambiguate, so
+        // this path stays gated behind the feature flag. The password is NEVER in this blob; it travels
+        // only via the RSA 1/4 reply. spec: Docs/RE/packets/1-6_login_or_create.yaml;
+        // Docs/RE/specs/login_flow.md §4.2 / §7.
+        if (_emitLoginBlob16)
+        {
+            byte[] blob = BuildLoginBlob16(username, pin);
+            return SendAsync(major: 1, minor: 6, blob, cancellationToken);
+        }
+
+        // Default (flag OFF): we do NOT fabricate a 1/6 frame; the handshake proceeds from the inbound
+        // 0/0. Documented gap pending capture resolution of the 1/6 collision.
         return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<LobbyServerRecord>> FetchServerListAsync(
+        CancellationToken cancellationToken = default)
+    {
+        ILobbyClient lobby = _lobbyClient
+            ?? throw new InvalidOperationException(
+                "No ILobbyClient was wired; FetchServerListAsync requires the lobby surface. spec: login_flow.md §2.");
+
+        IReadOnlyList<LobbyServerRecord> records =
+            await lobby.FetchServerListAsync(cancellationToken).ConfigureAwait(false);
+
+        // Map each decoded record to a presentation view, attaching the load-color band + status-sentinel
+        // hints so the ServerSelect screen does not re-derive the spec constants. spec: login_flow.md §2.1.
+        var builder = ImmutableArray.CreateBuilder<ServerListEntryView>(records.Count);
+        foreach (LobbyServerRecord r in records)
+        {
+            builder.Add(new ServerListEntryView(
+                r.ServerId, r.Status, r.Load, r.OpenTime,
+                ClassifyLoad(r.Load), ClassifyStatus(r.Status)));
+        }
+
+        _eventBus?.Publish(new ServerListReceivedEvent(builder.ToImmutable()));
+        return records;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<LobbyChannelEndpoint> SelectServerAsync(
+        ushort serverId, CancellationToken cancellationToken = default)
+    {
+        ILobbyClient lobby = _lobbyClient
+            ?? throw new InvalidOperationException(
+                "No ILobbyClient was wired; SelectServerAsync requires the lobby surface. spec: login_flow.md §2.");
+
+        // Resolve the game-server endpoint for the chosen server (channel port = 10000 + serverId).
+        // spec: login_flow.md §2.2 / §7 (lobby base port constant).
+        LobbyChannelEndpoint endpoint =
+            await lobby.FetchChannelEndpointAsync(serverId, cancellationToken).ConfigureAwait(false);
+
+        _eventBus?.Publish(new ChannelEndpointResolvedEvent(serverId, endpoint.Host, endpoint.Port));
+        return endpoint;
     }
 
     /// <inheritdoc />
@@ -469,6 +543,72 @@ public sealed class ApplicationUseCases : IApplicationUseCases
 
     /// <summary>An idle scratch cooldown table for the cast gate when no local-player state is wired (tests).</summary>
     private readonly CooldownTable _scratchCooldowns = new();
+
+    /// <summary>
+    /// First payload byte of the 1/6 login blob: sub-opcode 0x2B (43). spec:
+    /// Docs/RE/specs/login_flow.md §4.2 / §7 (login sub-opcode byte = 0x2B).
+    /// </summary>
+    private const byte LoginBlobSubOpcode = 0x2B;
+
+    // -------------------------------------------------------------------------
+    // 1/6 login blob (feature-flagged) + lobby presentation classification
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds the optional 1/6 login blob: <c>[0x2B][u32len account\0]([u32len PIN\0])</c>. Each
+    /// length-prefixed field is <c>[u32 LE length][bytes][NUL]</c> where the length INCLUDES the
+    /// trailing NUL (so prefix = byte-count + 1). The PIN field is omitted entirely when no PIN is
+    /// supplied. The password is NEVER serialized here — it rides only the RSA 1/4 reply. spec:
+    /// Docs/RE/specs/login_flow.md §4.2 / §7; Docs/RE/packets/1-6_login_or_create.yaml (collision-gated).
+    /// </summary>
+    private static byte[] BuildLoginBlob16(string account, string? pin)
+    {
+        // Field bytes are CP949 in the Korean client; ASCII account/PIN round-trip losslessly. We use
+        // the same length-prefixed encoder as the chat path (u32 LE length incl. NUL). spec: §4.2.
+        byte[] accountField = BuildLengthPrefixedText(account);
+        byte[]? pinField = string.IsNullOrEmpty(pin) ? null : BuildLengthPrefixedText(pin);
+
+        int size = sizeof(byte) + accountField.Length + (pinField?.Length ?? 0);
+        var blob = new byte[size];
+        Span<byte> w = blob;
+        w[0] = LoginBlobSubOpcode; // 0x2B sub-opcode. spec: §4.2 order 1.
+        int cursor = 1;
+        accountField.CopyTo(w[cursor..]); // [u32len account\0]. spec: §4.2 order 2.
+        cursor += accountField.Length;
+        if (pinField is not null)
+        {
+            pinField.CopyTo(w[cursor..]); // optional [u32len PIN\0]. spec: §4.2 order 3.
+        }
+
+        return blob;
+    }
+
+    /// <summary>
+    /// Classifies a lobby server's load into a presentation color band from the spec thresholds
+    /// 1200 / 800 / 500 (presentation-only; not a wire decode). spec: Docs/RE/specs/login_flow.md
+    /// §2.1 / §7 (load-color thresholds).
+    /// </summary>
+    private static ServerLoadBand ClassifyLoad(short load) => load switch
+    {
+        >= 1200 => ServerLoadBand.Full, // spec: §2.1 high threshold 1200
+        >= 800 => ServerLoadBand.Busy, // spec: §2.1 threshold 800
+        >= 500 => ServerLoadBand.Moderate, // spec: §2.1 threshold 500
+        _ => ServerLoadBand.Light,
+    };
+
+    /// <summary>
+    /// Classifies a lobby server's status sentinel for presentation (3 = scheduled open, 24 =
+    /// preparing, 100 = current selection; in-range otherwise = normal; ≤ 0 or &gt; 40 = invalid).
+    /// Presentation-only; not a wire decode. spec: Docs/RE/specs/login_flow.md §2.1 / §7.
+    /// </summary>
+    private static ServerStatusHint ClassifyStatus(short status) => status switch
+    {
+        3 => ServerStatusHint.ScheduledOpen, // spec: §2.1 sentinel 3
+        24 => ServerStatusHint.Preparing, // spec: §2.1 sentinel 24
+        100 => ServerStatusHint.CurrentSelection, // spec: §2.1 sentinel 100
+        <= 0 or > 40 => ServerStatusHint.Invalid, // spec: §2.1 (≤ 0 or > 40 is invalid/unavailable)
+        _ => ServerStatusHint.Normal,
+    };
 
     // -------------------------------------------------------------------------
     // Chat helpers

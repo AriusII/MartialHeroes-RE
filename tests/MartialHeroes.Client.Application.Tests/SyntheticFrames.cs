@@ -374,6 +374,63 @@ internal static class SyntheticFrames
     }
 
     /// <summary>
+    /// 3/4 char manage / delete result (8-byte payload). spec: login_flow.md §5.5
+    /// (result@0, subtype@2, ready_time u32@4).
+    /// </summary>
+    public static byte[] CharManageResult(byte result, byte subtype, uint readyTime)
+    {
+        Span<byte> p = stackalloc byte[8];
+        p.Clear();
+        p[0x00] = result; // 1 = success
+        // 0x01 reserved
+        p[0x02] = subtype; // 0/1/2 (2 = delete-confirm)
+        // 0x03 reserved
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x04, 4), readyTime);
+        return Frame(3, 4, p);
+    }
+
+    /// <summary>
+    /// 3/6 rename result (19-byte payload). spec: login_flow.md §5.6 (result@0; 18-byte name-or-error
+    /// overlay @1). On success the overlay holds a CP949/ASCII name; on failure overlay[0] = error code.
+    /// </summary>
+    public static byte[] RenameCharResult(byte result, string? name = null, byte errorCode = 0)
+    {
+        Span<byte> p = stackalloc byte[19];
+        p.Clear();
+        p[0x00] = result; // nonzero = success
+        if (result != 0 && name is not null)
+        {
+            byte[] nameBytes = System.Text.Encoding.ASCII.GetBytes(name);
+            int n = Math.Min(nameBytes.Length, 17); // 18-byte field leaves room for a NUL
+            for (int i = 0; i < n; i++)
+            {
+                p[0x01 + i] = nameBytes[i];
+            }
+        }
+        else if (result == 0)
+        {
+            p[0x01] = errorCode; // NameOrError[0] carries the error code on failure
+        }
+
+        return Frame(3, 6, p);
+    }
+
+    /// <summary>
+    /// 3/23 character-create result (12-byte payload). spec: login_flow.md §5.4
+    /// (result@0, code@1, value1 u32@4, value2 u32@8).
+    /// </summary>
+    public static byte[] CharCreateResult(byte result, byte code, uint value1 = 0, uint value2 = 0)
+    {
+        Span<byte> p = stackalloc byte[12];
+        p.Clear();
+        p[0x00] = result; // 1 = success
+        p[0x01] = code; // assigned slot id on success / error code on failure
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x04, 4), value1);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x08, 4), value2);
+        return Frame(3, 23, p);
+    }
+
+    /// <summary>
     /// 5/3 char spawn (908-byte payload: 8-byte head + 880-byte SpawnDescriptor + 20-byte trailer).
     /// SpawnDescriptor sub-fields per Docs/RE/structs/actor.md. spec: 5-3_char_spawn.yaml.
     /// </summary>

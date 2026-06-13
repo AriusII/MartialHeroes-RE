@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using MartialHeroes.Network.Abstractions.Lobby;
 using MartialHeroes.Network.Crypto;
 using MartialHeroes.Network.Transport.Pipelines;
 
@@ -72,8 +73,9 @@ public sealed class LobbyClientTests
     }
 
     /// <summary>
-    /// A lobby-decode test that does NOT use a real socket: it exercises the parsing logic
-    /// by calling the internal helpers via a thin test-double <see cref="TestLobbyDecoder"/>.
+    /// A lobby-decode test double that exercises the parsing logic directly on synthetic byte
+    /// buffers without a socket, returning the Abstractions DTOs
+    /// (<see cref="LobbyServerRecord"/> / <see cref="LobbyChannelEndpoint"/>).
     /// </summary>
     private sealed class TestLobbyDecoder
     {
@@ -87,8 +89,10 @@ public sealed class LobbyClientTests
         /// <summary>
         /// Decodes a server-list lobby frame (wrapper + compressed payload) from
         /// <paramref name="frameBytes"/> without a socket.
+        /// Returns <see cref="LobbyServerRecord"/> entries (Network.Abstractions DTOs).
+        /// spec: Docs/RE/packets/lobby.yaml RECORD SHAPE A.
         /// </summary>
-        public LobbyClient.ServerRecord[] DecodeServerList(byte[] frameBytes)
+        public LobbyServerRecord[] DecodeServerList(byte[] frameBytes)
         {
             Span<byte> span = frameBytes.AsSpan();
 
@@ -102,11 +106,13 @@ public sealed class LobbyClientTests
             using IMemoryOwner<byte> decompOwner = _decompress(compressed, out int decompLen);
             ReadOnlySpan<byte> data = decompOwner.Memory.Span[..decompLen];
 
-            var records = new LobbyClient.ServerRecord[count];
+            var records = new LobbyServerRecord[count];
             for (int i = 0; i < count; i++)
             {
                 ReadOnlySpan<byte> rec = data.Slice(i * LobbyClient.ServerRecordSize, LobbyClient.ServerRecordSize);
-                records[i] = new LobbyClient.ServerRecord(
+                // spec: Docs/RE/packets/lobby.yaml RECORD SHAPE A:
+                //   +0 u16 server_id, +2 i16 status, +4 i16 load, +6 i16 open_time
+                records[i] = new LobbyServerRecord(
                     ServerId: BinaryPrimitives.ReadUInt16LittleEndian(rec[0..]),
                     Status:   BinaryPrimitives.ReadInt16LittleEndian(rec[2..]),
                     Load:     BinaryPrimitives.ReadInt16LittleEndian(rec[4..]),
@@ -119,8 +125,10 @@ public sealed class LobbyClientTests
         /// <summary>
         /// Decodes a channel-endpoint lobby frame (wrapper + compressed payload) from
         /// <paramref name="frameBytes"/> without a socket.
+        /// Returns a <see cref="LobbyChannelEndpoint"/> (Network.Abstractions DTO).
+        /// spec: Docs/RE/packets/lobby.yaml RECORD SHAPE B.
         /// </summary>
-        public LobbyClient.ChannelEndpoint DecodeChannelEndpoint(byte[] frameBytes)
+        public LobbyChannelEndpoint DecodeChannelEndpoint(byte[] frameBytes)
         {
             Span<byte> span = frameBytes.AsSpan();
             ushort totalSize = BinaryPrimitives.ReadUInt16LittleEndian(span[0..]);
@@ -143,7 +151,7 @@ public sealed class LobbyClientTests
             string text = System.Text.Encoding.ASCII.GetString(endpointBytes[..contentLen]);
             string[] parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             int port = int.Parse(parts[1]);
-            return new LobbyClient.ChannelEndpoint(parts[0], port);
+            return new LobbyChannelEndpoint(parts[0], port);
         }
     }
 
@@ -164,7 +172,7 @@ public sealed class LobbyClientTests
         byte[] frame = BuildLobbyFrame(payload, recordCount: 2);
 
         var decoder = new TestLobbyDecoder();
-        LobbyClient.ServerRecord[] records = decoder.DecodeServerList(frame);
+        LobbyServerRecord[] records = decoder.DecodeServerList(frame);
 
         Assert.Equal(2, records.Length);
 
@@ -192,7 +200,7 @@ public sealed class LobbyClientTests
         byte[] frame = BuildLobbyFrame(payload, recordCount: 3);
 
         var decoder = new TestLobbyDecoder();
-        LobbyClient.ServerRecord[] records = decoder.DecodeServerList(frame);
+        LobbyServerRecord[] records = decoder.DecodeServerList(frame);
 
         Assert.Equal(3, records.Length);
         Assert.Equal((ushort)5, records[0].ServerId);
@@ -219,7 +227,7 @@ public sealed class LobbyClientTests
         byte[] frame = BuildLobbyFrame(endpointBytes, recordCount: 0);
 
         var decoder = new TestLobbyDecoder();
-        LobbyClient.ChannelEndpoint ep = decoder.DecodeChannelEndpoint(frame);
+        LobbyChannelEndpoint ep = decoder.DecodeChannelEndpoint(frame);
 
         Assert.Equal("192.168.1.100", ep.Host);
         Assert.Equal(7000, ep.Port);
@@ -237,7 +245,7 @@ public sealed class LobbyClientTests
         byte[] frame = BuildLobbyFrame(endpointBytes, recordCount: 0);
 
         var decoder = new TestLobbyDecoder();
-        LobbyClient.ChannelEndpoint ep = decoder.DecodeChannelEndpoint(frame);
+        LobbyChannelEndpoint ep = decoder.DecodeChannelEndpoint(frame);
 
         Assert.Equal("211.196.150.4", ep.Host);
         Assert.Equal(9000, ep.Port);
@@ -280,5 +288,18 @@ public sealed class LobbyClientTests
         Assert.Equal(19, LobbyClient.IpTextMaxLength);
         Assert.Equal(8, LobbyClient.ServerRecordSize);
         Assert.Equal(30, LobbyClient.ChannelEndpointLength); // 0x1E
+    }
+
+    // -----------------------------------------------------------------------
+    // Test (e): ILobbyClient surface — LobbyClient implements the contract
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void LobbyClient_ImplementsILobbyClient()
+    {
+        // Verify the compile-time type relationship (no network call made).
+        // Using the decompress delegate that would be injected in production.
+        var client = new LobbyClient("127.0.0.1", PayloadCompression.DecompressPayload);
+        Assert.IsAssignableFrom<ILobbyClient>(client);
     }
 }

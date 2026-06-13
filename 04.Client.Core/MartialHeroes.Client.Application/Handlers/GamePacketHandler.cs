@@ -51,6 +51,7 @@ public sealed class GamePacketHandler : IPacketHandler
     private readonly ILoginHandshakeDriver? _loginDriver;
     private readonly LocalPlayerState? _localPlayer;
     private readonly CharacterSelectionStore? _characterSelection;
+    private readonly AccountCharacterState? _accountCharacters;
 
     /// <summary>
     /// The combat-stat recompute seam: invoked whenever an equip / buff / level change should re-accumulate
@@ -88,7 +89,8 @@ public sealed class GamePacketHandler : IPacketHandler
         IUnhandledOpcodeSink unhandled,
         ILoginHandshakeDriver? loginDriver = null,
         LocalPlayerState? localPlayer = null,
-        CharacterSelectionStore? characterSelection = null)
+        CharacterSelectionStore? characterSelection = null,
+        AccountCharacterState? accountCharacters = null)
     {
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
@@ -97,6 +99,7 @@ public sealed class GamePacketHandler : IPacketHandler
         _loginDriver = loginDriver; // optional: only needed for the login handshake flow
         _localPlayer = localPlayer; // optional: only needed for the skill/buff/combat subsystems
         _characterSelection = characterSelection; // optional: only needed for the 3/1 cache + 3/7 spawn
+        _accountCharacters = accountCharacters; // optional: tracks the create/delete char-count deltas
     }
 
     // -------------------------------------------------------------------------
@@ -393,6 +396,33 @@ public sealed class GamePacketHandler : IPacketHandler
                 if (payload.Length >= SmsgCharSpawnResult.WireSize)
                 {
                     HandleCharSpawnResult(in MemoryMarshal.AsRef<SmsgCharSpawnResult>(payload));
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgCharManageResult: // 3/4 — char manage / delete result (8-byte block)
+                if (payload.Length >= SmsgCharManageResult.WireSize)
+                {
+                    HandleCharManageResult(in MemoryMarshal.AsRef<SmsgCharManageResult>(payload));
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgRenameCharResult: // 3/6 — rename result (19-byte block)
+                if (payload.Length >= SmsgRenameCharResult.WireSize)
+                {
+                    HandleRenameCharResult(payload);
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgCharCreateResult: // 3/23 — character-create result (12-byte block)
+                if (payload.Length >= SmsgCharCreateResult.WireSize)
+                {
+                    HandleCharCreateResult(in MemoryMarshal.AsRef<SmsgCharCreateResult>(payload));
                     return;
                 }
 
@@ -952,6 +982,98 @@ public sealed class GamePacketHandler : IPacketHandler
         _eventBus.Publish(new LocalPlayerSpawnedEvent(
             key, packet.Slot, cached.Name, cached.Level, actor.Position, actor.CurrentHp, actor.MaxHp,
             cached.ServerClass));
+    }
+
+    // -------------------------------------------------------------------------
+    // 3/4 — char manage / delete result
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 3/4 — character manage / delete result. Classifies the subtype (subtype 2 = delete-confirm,
+    /// which decrements the account char count) and forwards the ReadyTime so the presentation can
+    /// format a "wait HH:MM" delete-cooldown message on the blocked path. spec:
+    /// Docs/RE/specs/login_flow.md §5.5; Docs/RE/packets/3-4_char_manage_result.yaml.
+    /// </summary>
+    private void HandleCharManageResult(in SmsgCharManageResult packet)
+    {
+        const byte success = 1; // result 1 = success path. spec: §5.5.
+        const byte deleteConfirmSubtype = 2; // subtype 2 = delete-confirm. spec: §5.5.
+        bool ok = packet.Result == success;
+
+        CharManageSubtype subtype = packet.Subtype switch
+        {
+            0 => CharManageSubtype.GenericRefresh, // spec: §5.5 (semantics UNVERIFIED)
+            1 => CharManageSubtype.RenameApplied, // spec: §5.5 (semantics UNVERIFIED)
+            2 => CharManageSubtype.DeleteConfirm, // spec: §5.5 (delete-confirm)
+            _ => CharManageSubtype.Other,
+        };
+
+        // A successful delete-confirm decrements the account char count. spec: §5.5.
+        int charCount = _accountCharacters?.CharacterCount ?? 0;
+        if (ok && packet.Subtype == deleteConfirmSubtype && _accountCharacters is not null)
+        {
+            charCount = _accountCharacters.Decrement();
+        }
+
+        _eventBus.Publish(new CharManageResultEvent(
+            ok, subtype, packet.Subtype, packet.ReadyTime, charCount));
+    }
+
+    // -------------------------------------------------------------------------
+    // 3/6 — rename-character result
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 3/6 — rename-character result. On success the 18-byte overlay holds the new CP949 character name
+    /// (decoded to a managed string at this boundary); on failure its first byte is an error code
+    /// (0xC8..0xD4). spec: Docs/RE/specs/login_flow.md §5.6; Docs/RE/packets/SmsgRenameCharResult.
+    /// </summary>
+    private void HandleRenameCharResult(ReadOnlySpan<byte> payload)
+    {
+        // Result @0x00: nonzero = success. The 18-byte NameOrError overlay starts at +1. spec: §5.6.
+        byte result = payload[0x00];
+        bool ok = result != 0;
+        ReadOnlySpan<byte> nameOrError = payload.Slice(0x01, SmsgRenameCharResult.WireSize - 1); // 18 bytes
+
+        if (ok)
+        {
+            // Success: the overlay is the new name as CP949 ASCIIZ (up to 18 bytes incl. NUL). spec: §5.6.
+            _eventBus.Publish(new CharRenameResultEvent(true, DecodeFixedText(nameOrError), ErrorCode: 0));
+            return;
+        }
+
+        // Failure: NameOrError[0] is the error code (0xC8..0xD4, mapped to a UI string). spec: §5.6.
+        _eventBus.Publish(new CharRenameResultEvent(false, string.Empty, nameOrError[0]));
+    }
+
+    // -------------------------------------------------------------------------
+    // 3/23 — character-create result
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 3/23 — character-create result. Pairs with the CreateCharacterRequestedEvent the select use-case
+    /// emits for a blank slot. On success the Code byte is the assigned slot id and the account char
+    /// count is incremented; on failure Code is an error code (0xC8..0xD4). spec:
+    /// Docs/RE/specs/login_flow.md §5.4; Docs/RE/packets/SmsgCharCreateResult.
+    /// </summary>
+    private void HandleCharCreateResult(in SmsgCharCreateResult packet)
+    {
+        const byte success = 1; // result 1 = success. spec: §5.4.
+        bool ok = packet.Result == success;
+
+        // On success the account char count is incremented. spec: §5.4.
+        int charCount = _accountCharacters?.CharacterCount ?? 0;
+        if (ok && _accountCharacters is not null)
+        {
+            charCount = _accountCharacters.Increment();
+        }
+
+        // Code is the assigned slot id on success, or the error code on failure. spec: §5.4.
+        byte assignedSlotId = ok ? packet.Code : (byte)0;
+        byte errorCode = ok ? (byte)0 : packet.Code;
+
+        _eventBus.Publish(new CharCreateResultEvent(
+            ok, assignedSlotId, errorCode, packet.Value1, packet.Value2, charCount));
     }
 
     // -------------------------------------------------------------------------

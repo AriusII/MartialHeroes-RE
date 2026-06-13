@@ -1,4 +1,6 @@
+using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Domain.Skills;
+using MartialHeroes.Network.Abstractions.Lobby;
 using MartialHeroes.Shared.Kernel.Numerics;
 
 namespace MartialHeroes.Client.Application.UseCases;
@@ -18,10 +20,47 @@ public interface IApplicationUseCases
     /// is built and sent later by the inbound handler when the server's 0/0 KeyExchange arrives.
     /// spec: Docs/RE/specs/crypto.md §6.1 (credential pre-staged at login-form time, before any 0/0).
     /// </summary>
-    /// <param name="username">Account name. PROVISIONAL: the pre-0/0 username send (1/6) is not fully
-    /// specced; staged here for the flow but no 1/6 frame is emitted until that layout is recovered.</param>
+    /// <param name="username">Account name. Staged for the flow; also the account token of the optional
+    /// 1/6 login blob (see <paramref name="pin"/>).</param>
     /// <param name="password">The login credential plaintext (RSA-encrypted later as the 1/4 reply M).</param>
-    ValueTask LoginAsync(string username, string password, CancellationToken cancellationToken = default);
+    /// <param name="pin">
+    /// The second-password / PIN collected after the primary submit (≤ 4 chars). It is the optional
+    /// length-prefixed field of the 1/6 login blob, NOT the password (the password rides only the RSA
+    /// 1/4 reply). Only consumed when the 1/6 emit feature flag is enabled at construction; ignored (and
+    /// no 1/6 frame is emitted) otherwise. spec: Docs/RE/specs/login_flow.md §1 step 1a / §4.2.
+    /// </param>
+    ValueTask LoginAsync(
+        string username, string password, string? pin = null, CancellationToken cancellationToken = default);
+
+    // -------------------------------------------------------------------------
+    // Lobby orchestration (server-list fetch + channel-endpoint resolve)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Fetches the server list from the lobby (port 10000) via the injected <see cref="ILobbyClient"/>,
+    /// maps each decoded <see cref="LobbyServerRecord"/> into a presentation
+    /// <see cref="ServerListEntryView"/> (attaching the load-color band + status-sentinel hints), and
+    /// publishes a <see cref="ServerListReceivedEvent"/> so the ServerSelect screen can bind to the real
+    /// lobby. Returns the decoded raw records for callers that want them directly. Requires a lobby
+    /// client to be wired; throws <see cref="System.InvalidOperationException"/> otherwise. spec:
+    /// Docs/RE/specs/login_flow.md §1 steps 2-3 / §2.1.
+    /// </summary>
+    /// <returns>The decoded raw <see cref="LobbyServerRecord"/> list (empty, never null).</returns>
+    ValueTask<IReadOnlyList<LobbyServerRecord>> FetchServerListAsync(
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resolves the game-server endpoint for the selected <paramref name="serverId"/> via the lobby
+    /// channel-endpoint query (port 10000 + serverId) on the injected <see cref="ILobbyClient"/>, and
+    /// publishes a <see cref="ChannelEndpointResolvedEvent"/> (host + port). The caller hands that
+    /// endpoint to the transport to open the persistent game connection. Returns the resolved endpoint.
+    /// Requires a lobby client to be wired; throws <see cref="System.InvalidOperationException"/>
+    /// otherwise. spec: Docs/RE/specs/login_flow.md §1 step 4 / §2.2.
+    /// </summary>
+    /// <param name="serverId">The chosen server id (1..40), added to 10000 to form the channel port.</param>
+    /// <returns>The resolved game-server <see cref="LobbyChannelEndpoint"/> (host + port).</returns>
+    ValueTask<LobbyChannelEndpoint> SelectServerAsync(
+        ushort serverId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Requests that the local player move toward <paramref name="target"/> (Q16.16 logical position;

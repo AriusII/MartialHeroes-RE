@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using MartialHeroes.Network.Abstractions.Lobby;
 
 namespace MartialHeroes.Network.Transport.Pipelines;
 
@@ -36,7 +37,7 @@ namespace MartialHeroes.Network.Transport.Pipelines;
 /// description (spec: Docs/RE/specs/login_flow.md §2).
 /// </para>
 /// </remarks>
-public sealed class LobbyClient
+public sealed class LobbyClient : ILobbyClient
 {
     // -----------------------------------------------------------------------
     // Constants
@@ -87,50 +88,6 @@ public sealed class LobbyClient
 
     private readonly string _lobbyHost;
     private readonly InboundDecompressDelegate _decompress;
-
-    // -----------------------------------------------------------------------
-    // Result types
-    // -----------------------------------------------------------------------
-
-    /// <summary>
-    /// A single server record decoded from the lobby server-list response.
-    /// spec: Docs/RE/packets/lobby.yaml — RECORD SHAPE A.
-    /// </summary>
-    /// <param name="ServerId">
-    /// Index 1..40 into the client-local localized server-name table.
-    /// spec: Docs/RE/packets/lobby.yaml +0 (u16) server_id.
-    /// </param>
-    /// <param name="Status">
-    /// Server availability / status code.
-    /// spec: Docs/RE/packets/lobby.yaml +2 (i16) status.
-    /// </param>
-    /// <param name="Load">
-    /// Population gauge. Thresholds 1200/800/500.
-    /// spec: Docs/RE/packets/lobby.yaml +4 (i16) load.
-    /// </param>
-    /// <param name="OpenTime">
-    /// Used only when Status == 3 (scheduled open); renders an HH:MM open clock.
-    /// spec: Docs/RE/packets/lobby.yaml +6 (i16) open_time.
-    /// </param>
-    public readonly record struct ServerRecord(
-        ushort ServerId,   // spec: Docs/RE/packets/lobby.yaml +0 u16
-        short Status,      // spec: Docs/RE/packets/lobby.yaml +2 i16
-        short Load,        // spec: Docs/RE/packets/lobby.yaml +4 i16
-        short OpenTime);   // spec: Docs/RE/packets/lobby.yaml +6 i16
-
-    /// <summary>
-    /// Game-server endpoint decoded from the lobby channel-endpoint response.
-    /// spec: Docs/RE/packets/lobby.yaml — RECORD SHAPE B.
-    /// </summary>
-    /// <param name="Host">
-    /// The game server host (ASCII, typically dotted IPv4).
-    /// spec: Docs/RE/packets/lobby.yaml — first 30 bytes = "host port" ASCII string, split on space.
-    /// </param>
-    /// <param name="Port">
-    /// The game server TCP port.
-    /// spec: Docs/RE/packets/lobby.yaml — decimal port parsed from the ASCII string after the space.
-    /// </param>
-    public readonly record struct ChannelEndpoint(string Host, int Port);
 
     // -----------------------------------------------------------------------
     // Construction
@@ -199,7 +156,38 @@ public sealed class LobbyClient
     }
 
     // -----------------------------------------------------------------------
-    // Public operations
+    // ILobbyClient implementation
+    // -----------------------------------------------------------------------
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The blocking socket I/O is performed on the calling thread. The wrapper's <c>major</c>
+    /// field (+4) carries the record count.
+    /// spec: Docs/RE/packets/lobby.yaml — "count = wrapper.major"; RECORD SHAPE A.
+    /// </remarks>
+    public Task<IReadOnlyList<LobbyServerRecord>> FetchServerListAsync(
+        CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<LobbyServerRecord> result = FetchServerListCore(cancellationToken);
+        return Task.FromResult(result);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The blocking socket I/O is performed on the calling thread.
+    /// spec: Docs/RE/packets/lobby.yaml — RECORD SHAPE B;
+    /// Docs/RE/specs/login_flow.md §2.2.
+    /// </remarks>
+    public Task<LobbyChannelEndpoint> FetchChannelEndpointAsync(
+        ushort serverId,
+        CancellationToken cancellationToken = default)
+    {
+        LobbyChannelEndpoint result = FetchChannelEndpointCore(serverId, cancellationToken);
+        return Task.FromResult(result);
+    }
+
+    // -----------------------------------------------------------------------
+    // Private synchronous core (wrapped by the ILobbyClient async methods)
     // -----------------------------------------------------------------------
 
     /// <summary>
@@ -212,10 +200,10 @@ public sealed class LobbyClient
     /// </remarks>
     /// <param name="cancellationToken">Token to abort the blocking I/O.</param>
     /// <returns>
-    /// An array of <see cref="ServerRecord"/> values, one per server, in wire order.
-    /// Returns an empty array on connect failure.
+    /// A list of <see cref="LobbyServerRecord"/> values, one per server, in wire order.
+    /// Returns an empty list on connect failure.
     /// </returns>
-    public ServerRecord[] FetchServerList(CancellationToken cancellationToken = default)
+    private IReadOnlyList<LobbyServerRecord> FetchServerListCore(CancellationToken cancellationToken)
     {
         using Socket socket = ConnectBlocking(_lobbyHost, LobbyBasePort, cancellationToken);
         if (!socket.Connected)
@@ -223,23 +211,23 @@ public sealed class LobbyClient
             return [];
         }
 
-        (ReadOnlyMemory<byte> decompressed, int count) = ReceiveAndDecompress(socket, out ushort major);
+        (ReadOnlyMemory<byte> decompressed, int _) = ReceiveAndDecompress(socket, out ushort major);
         // spec: Docs/RE/packets/lobby.yaml — "count = wrapper.major" on the server-list query.
-        count = major; // major field re-purposed as record count on this query
+        int count = major; // major field re-purposed as record count on this query
 
         if (count <= 0 || decompressed.Length < count * ServerRecordSize)
         {
             return [];
         }
 
-        ServerRecord[] records = new ServerRecord[count];
+        LobbyServerRecord[] records = new LobbyServerRecord[count];
         ReadOnlySpan<byte> data = decompressed.Span;
         for (int i = 0; i < count; i++)
         {
             ReadOnlySpan<byte> rec = data.Slice(i * ServerRecordSize, ServerRecordSize);
             // spec: Docs/RE/packets/lobby.yaml RECORD SHAPE A:
             //   +0 u16 server_id, +2 i16 status, +4 i16 load, +6 i16 open_time
-            records[i] = new ServerRecord(
+            records[i] = new LobbyServerRecord(
                 ServerId: BinaryPrimitives.ReadUInt16LittleEndian(rec[0..]),
                 Status:   BinaryPrimitives.ReadInt16LittleEndian(rec[2..]),
                 Load:     BinaryPrimitives.ReadInt16LittleEndian(rec[4..]),
@@ -266,9 +254,9 @@ public sealed class LobbyClient
     /// spec: Docs/RE/packets/lobby.yaml +0 u16 server_id.
     /// </param>
     /// <param name="cancellationToken">Token to abort the blocking I/O.</param>
-    public ChannelEndpoint FetchChannelEndpoint(
+    private LobbyChannelEndpoint FetchChannelEndpointCore(
         ushort serverId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
         // spec: Docs/RE/packets/lobby.yaml — "port = 10000 + selected server_id".
         int channelPort = LobbyBasePort + serverId;
@@ -312,7 +300,7 @@ public sealed class LobbyClient
                 "spec: Docs/RE/packets/lobby.yaml RECORD SHAPE B.");
         }
 
-        return new ChannelEndpoint(parts[0], port);
+        return new LobbyChannelEndpoint(parts[0], port);
     }
 
     // -----------------------------------------------------------------------
