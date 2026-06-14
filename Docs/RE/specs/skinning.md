@@ -477,6 +477,100 @@ These trios link through the recovered mappings: a `.skn`'s `id_b` selects the `
 relationship is a confirmed bijection across all 349 ids — see `formats/mesh.md`), and a clip's track
 `bone_id`s address that skeleton's bones by ID (§3.2).
 
+### (e) Rig/clip identity: select skeleton AND clip by the skin's `id_b` (the class/rig-mismatch shatter)
+
+> Provenance: promoted from a dirty-room root-cause note kept under
+> `Docs/RE/_dirty/campaign4/charselect3d/class4-shatter-mot.md` (gitignored). Asset byte facts are
+> **SAMPLE-VERIFIED** against the real client VFS; the resolution mechanism is **CODE-CONFIRMED**
+> (prior). The cross-link to the char-create preview is `frontend_scenes.md` §3.7.5 (preview-character
+> assets for the four starter classes).
+
+This subsection states the identity invariant that ties a skinned mesh, its skeleton, and its played
+clip together. Ignoring it produces the **clean-at-rest / shatter-on-play** failure observed on the
+char-create preview for the Monk class, while the Warrior class rendered correctly.
+
+#### The invariant: one skin is authored against exactly one skeleton, named by its `id_b`
+
+A skinned mesh's bind-local vertex offsets (§4, the inverse-bind bake) are baked against **one specific
+skeleton's rest pose**. That skeleton is identified by the skin's own `id_b` (the SkinClassId, the
+skeleton selector — `formats/mesh.md` §Header). The cancellation property of §0 holds **only** when all
+three of the following are the same `id_b` rig:
+
+- the **deform skeleton** that supplies the animated bone world transforms,
+- the **inverse-bind bake** that produced each influence's `localPos` / `localNormal`, and
+- the **played clip**, whose track `bone_id`s address that same skeleton.
+
+Concretely the engine-intended matched trio per class is:
+
+| Skin `id_b` | Skeleton | Idle clip (actormotion col2 == `id_b` → col16) | Tracks = bones |
+|---:|---|---|---:|
+| 1 | `data/char/bind/g1.bnd` (84 bones) | `data/char/mot/g111100010.mot` | 84 = 84 |
+| 2 | `data/char/bind/g2.bnd` (87 bones) | `data/char/mot/g112200010.mot` | 87 = 87 |
+| 3 | `data/char/bind/g3.bnd` (82 bones) | `data/char/mot/g111300010.mot` | 82 = 82 |
+| 4 | `data/char/bind/g4.bnd` (89 bones) | `data/char/mot/g111400010.mot` | 89 = 89 |
+
+The four creatable classes therefore do **NOT** share one rig. The Warrior base mesh carries `id_b = 1`
+(its skeleton has 84 bones); the Monk base mesh carries `id_b = 4` (its skeleton has 89 bones). Each
+class's overlay parts carry the same `id_b` as that class's base mesh.
+
+#### Why bone IDs are NOT portable across skeletons
+
+Two skeletons can share the bone-**ID** range `0..N` and yet be **different skeletons**: the same ID
+denotes a **different physical joint** on each. Comparing the 84-bone and 89-bone rigs above over their
+shared ID range:
+
+- rest **translation** differs on almost every shared bone (max difference on the order of several model
+  units — different limb lengths),
+- rest **rotation** differs on a large majority of shared bones (up to a fully opposite orientation),
+- **parent** differs on roughly half of the shared bones — the hierarchy is re-topologised (a bone may
+  hang under a completely different parent on the other rig),
+- the larger rig also has extra appendage bones at the top of the ID range that simply do not exist on
+  the smaller rig.
+
+Because of this, a clip or a skinned mesh authored against rig A **must never** be applied to rig B,
+**even when the IDs "fit"** within B's window. The IDs fitting is necessary but not sufficient — the
+joints they name are physically different.
+
+#### The clean-at-rest / shatter-on-play diagnostic fingerprint
+
+When a mesh is bound to the **wrong** same-ID-range skeleton and an idle clip from the wrong rig is
+played:
+
+- **At rest** (no clip, or every track at its bind value) the inverse-bind and the forward bone
+  transform still cancel (§0), so the rest mesh is reproduced **cleanly** — there is no visible defect.
+- **The instant a clip rotates bones off bind**, each vertex is rotated about the **wrong joint up a
+  wrong parent chain**, and the mesh **shatters**.
+
+This precise signature — correct at rest, exploding only once animation moves bones off bind — is the
+fingerprint of a **rig substitution**. It is NOT a defect in the skinning math of §0–§7, and it is NOT
+a track→bone-ID overflow (the wrong clip's IDs happened to fit the wrong rig's window). The matched
+class renders correctly purely because its shared default choice coincided with its own `id_b` rig.
+
+#### Importer invariant (implementers MUST follow)
+
+1. Parse the base `.skn` and read its `id_b` (`formats/mesh.md` §Header). Resolve the deform skeleton as
+   `data/char/bind/g{id_b}.bnd`, **per class** — never a single shared rig hard-coded across all classes.
+2. Select the idle clip from `actormotion.txt` keyed by `skin_class == id_b` (col2 → col16), **per
+   class** — never a single shared idle clip. Each clip's track count equals its rig's bone count.
+3. Skin **every** overlay part onto that **same** `id_b`-selected skeleton (all of a class's overlays
+   carry the class's `id_b`).
+4. **Defensive guard:** in the track→bone binder, **SKIP (do not clamp)** any clip track whose `bone_id`
+   falls outside `[base_id, base_id + bone_count)` of the bound skeleton (unmatched `bone_id` is a
+   non-fatal skip — `formats/animation.md` §Bone-track linkage). Clamping the index into range would
+   still drive the wrong bone; the track must be dropped, not redirected.
+5. **Honour §6.3 (secondary hazard, not the cause):** idle clips store a **non-zero translation on
+   nearly every child track on disk**, which the legacy engine ignores — child bones rotate only and
+   keep their bind-pose local translation; only the root translates. Feed **rotation tracks for child
+   bones and a position track for the root only**. Applying the stored child translations stretches bone
+   lengths and can itself shatter the mesh — this would affect every class, so it is a separate fidelity
+   requirement that must be respected once the rig/clip identity above is correct.
+
+Bring-up assertion: after step 1–3 the trio is self-consistent for **all** classes, so the cancellation
+invariant of §8(a) holds at rest and the animation reproduces correctly. If a class is clean at rest but
+shatters on its idle, re-check that its rig and clip were resolved from that class's own `id_b` and not a
+shared default. This is the recovered cause of the char-create preview shatter cross-referenced in
+`frontend_scenes.md` §3.7.5.
+
 ---
 
 ## 9. Open items
@@ -488,6 +582,7 @@ relationship is a confirmed bijection across all 349 ids — see `formats/mesh.m
 | Faithful vs. renormalized interpolation alpha (§6.1) | PROPOSED choice — both are documented; pick one per project taste | Affects playback feel, not correctness; document the choice |
 | `actormotion.txt` columns 3–14 semantics | PROPOSED — offsets/types confirmed, meanings inferred (see `formats/animation.md` §`actormotion.txt` layout) | Not needed to deform; do not branch on these until confirmed |
 | Multi-bone character `.skn`/`.bnd` byte-level cross-check of the inverse-bind bake | PARTIALLY VERIFIED — corpus confirms multi-weight skins exist (§5.2); the bake math is code-recovered, not yet byte-validated end-to-end on a real character | Validate against the §8(d) player trio; assert the cancellation invariant |
+| Which skeleton the original char-create preview pairs with class 4 (§8(e)) | PLAUSIBLE (disk-implied: the class-4 skin's own `id_b` selects the 89-bone rig) — to be ratified against the live original | The recovered fix resolves rig + clip from the skin's `id_b` per class; the live ratification only confirms the original makes the same per-class choice |
 
 ---
 
@@ -498,6 +593,8 @@ relationship is a confirmed bijection across all 349 ids — see `formats/mesh.m
 - **Animation clip bytes + mixer:** `formats/animation.md` (`.mot` tracks/keyframes, 10 fps timing,
   raw-seconds alpha, the BANI variant, `actormotion.txt`).
 - **Container:** `formats/pak.md` — VFS archive that delivers `.skn` / `.bnd` / `.mot`.
+- **Char-create preview (rig/clip identity, §8(e)):** `frontend_scenes.md` §3.7.5 (preview-character
+  assets for the four starter classes).
 - **Canonical names:** see `Docs/RE/names.yaml` (`SkinFile`, `BindPoseFile`, `BndBone`, `MotionClip`,
   `BoneTrack`, `Keyframe`, `AnimationMixer`).
 - **Provenance:** see `Docs/RE/journal.md` (entry for this spec is appended separately).

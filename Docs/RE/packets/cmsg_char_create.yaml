@@ -61,10 +61,10 @@ notes: |
                                  (sex vs another appearance toggle) -- capture/debugger to confirm.
     0x16 (2B)  HairOrReserved  : zeroed when the form opens; PLAUSIBLE hair index or reserved/pad.
     0x18 (2B)  ClassInternalId : INTERNAL class id. The UI class buttons 0..3 map to internal ids by
-                                 the remap {0->1, 1->3, 2->4, 3->2}: two branches are confirmed
-                                 (button 0 -> internal 1, button 1 -> internal 3) and the remaining
-                                 two are inferred from the symmetric preview-base numbering. PLAUSIBLE
-                                 for the full permutation -- a live create capture should pin it.
+                                 the remap {0->4, 1->1, 2->3, 3->2}. All four branches are now
+                                 read off the class picker (CODE-CONFIRMED end-to-end: the picker
+                                 write into this word, the preview-actor switch on it, and the body
+                                 placement all agree; matches frontend_scenes.md S4.1).
                                  The internal class gates the stat floors below.
     0x1A (2B)  Reserved1A      : a 2-byte alignment gap so the stat block starts dword-aligned at
                                  0x1C. Model as reserved/padding.
@@ -90,7 +90,7 @@ notes: |
 
   UNKNOWNS (capture/debugger required):
     - the exact sex-vs-hair distinction at 0x14 / 0x16, and whether 0x16 is hair or pure padding;
-    - the full UI-button -> internal-class permutation (two branches confirmed, two inferred);
+    - (RESOLVED) the full UI-button -> internal-class permutation is {0->4,1->1,2->3,3->2}, all four branches code-confirmed;
     - whether the trailing PointsRemaining dword is server-meaningful;
     - the precise per-stat semantic order within the five-stat run.
   Recommended: a debugger read of the 52-byte staging buffer pre-send, or a captured 1/6 C2S frame.

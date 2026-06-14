@@ -310,6 +310,16 @@ public sealed class RealClientAssets : IDisposable
     /// Supports PNG, BMP, DDS (via Godot's built-in DDS importer), and TGA.
     /// Returns null when the file is absent or the format is not recognised.
     ///
+    /// DXT2 premultiplied-alpha note (P5 fix):
+    ///   <c>loginwindow_02.dds</c> and <c>login_slice1.dds</c> are DXT2 (premultiplied alpha) —
+    ///   FourCC DXT2, spec: Docs/RE/specs/frontend_scenes.md §11.1a.
+    ///   Godot 4 loads DXT2 as BC2 (same layout as DXT3) but treats RGB as straight.
+    ///   The RGB channels are actually RGB*A (premultiplied), so transparent edges composite
+    ///   with a dark fringe unless we unpremultiply: R'=R/A, G'=G/A, B'=B/A.
+    ///   We detect DXT2 by reading bytes 84–87 of the DDS header (the FourCC field).
+    ///   After unpremultiplication the image is straight-alpha RGBA8 and composites correctly.
+    ///   spec: Docs/RE/specs/frontend_scenes.md §11.1a "DXT2 premultiplied-alpha flag". CODE-CONFIRMED.
+    ///
     /// spec: Docs/RE/formats/texture.md §PNG / §BMP / §DDS / §TGA.
     /// spec: Docs/RE/formats/texture.md §There is no proprietary texture format — standard
     ///       D3DX9 format auto-detection: CONFIRMED.
@@ -323,6 +333,24 @@ public sealed class RealClientAssets : IDisposable
         {
             string ext = Path.GetExtension(virtualPath).ToLowerInvariant();
             ImagePassthroughResult result = AssetPassthrough.PassthroughImage(raw, ext);
+
+            // Detect DXT2 (premultiplied alpha) before decoding.
+            // DDS header FourCC is at bytes 84–87 (little-endian).
+            // DXT2 FourCC = 0x32545844 ('D','X','T','2'). CODE-CONFIRMED by byte-verified header.
+            // spec: Docs/RE/specs/frontend_scenes.md §11.1a "DXT2 (premultiplied alpha)". CODE-CONFIRMED.
+            bool isDxt2Premultiplied = false;
+            if (result.Format == ImageFormat.Dds && raw.Length >= 88)
+            {
+                ReadOnlySpan<byte> header = raw.Span;
+                // FourCC offset 84 in the DDS binary layout (4-byte magic "DDS " at 0, then header).
+                // DDS header: magic(4) + DDSURFACEDESC2(124): pfFourCC is at offset 80 within DDSURFACEDESC2
+                // = byte offset 84 from file start. DXT2 = ASCII "DXT2" = 0x44 0x58 0x54 0x32.
+                isDxt2Premultiplied =
+                    header[84] == 0x44 && // 'D'
+                    header[85] == 0x58 && // 'X'
+                    header[86] == 0x54 && // 'T'
+                    header[87] == 0x32; // '2'
+            }
 
             // Build a Godot Image from the raw bytes.
             // Godot 4 Image.LoadFromBuffer handles PNG and BMP natively.
@@ -367,6 +395,41 @@ public sealed class RealClientAssets : IDisposable
                 return null;
             }
 
+            // DXT2 premultiplied-alpha unpremultiplication (P5 fix).
+            // Godot decodes DXT2 as BC2 (same data as DXT3) — the block format is identical,
+            // only the semantic differs: DXT2 RGB channels are premultiplied by alpha.
+            // We must DECOMPRESS first (Image.Decompress()) — block-compressed formats stay
+            // compressed after Image.Convert() and GetPixel() will throw on compressed images.
+            // Then divide R/G/B by A to recover straight-alpha RGBA8.
+            // spec: Docs/RE/specs/frontend_scenes.md §11.1a "DXT2 premultiplied alpha". CODE-CONFIRMED.
+            if (isDxt2Premultiplied)
+            {
+                // Decompress block-compressed DXT2/BC2 to uncompressed RGBA8 for pixel access.
+                if (img.IsCompressed())
+                {
+                    Error decompErr = img.Decompress();
+                    if (decompErr != Error.Ok)
+                    {
+                        GD.PrintErr($"[RealClientAssets] DXT2 decompress failed for '{virtualPath}': {decompErr}. Skipping unpremultiply.");
+                    }
+                    else
+                    {
+                        if (img.GetFormat() != Image.Format.Rgba8)
+                            img.Convert(Image.Format.Rgba8);
+                        UnpremultiplyAlpha(img);
+                        GD.Print($"[RealClientAssets] DXT2 decompressed+unpremultiplied: '{virtualPath}'.");
+                    }
+                }
+                else
+                {
+                    // Already uncompressed (safe path, unlikely for DDS).
+                    if (img.GetFormat() != Image.Format.Rgba8)
+                        img.Convert(Image.Format.Rgba8);
+                    UnpremultiplyAlpha(img);
+                    GD.Print($"[RealClientAssets] DXT2 unpremultiplied (pre-decompressed): '{virtualPath}'.");
+                }
+            }
+
             // Character skin PNGs are RGB8 (no alpha channel). Some GPU backends (D3D12 Forward+)
             // require RGBA8 for reliable GPU texture creation; convert before upload.
             // spec: Docs/RE/formats/texture.md §PNG — standard ISO 15948 RGB, no alpha channel.
@@ -378,8 +441,8 @@ public sealed class RealClientAssets : IDisposable
             // Generate mipmaps so LinearWithMipmaps filter works correctly.
             // GenerateMipmaps() only works on uncompressed images — DDS (DXT1/DXT3/DXT5) images
             // are already compressed and Godot will log an error if we try to generate mips from
-            // them. Guard to Rgba8 only (character skin PNGs convert to Rgba8 above; DDS stays
-            // in its compressed format and Godot handles the mip chain from the DDS header).
+            // them. Guard to Rgba8 only (character skin PNGs convert to Rgba8 above; DXT2 images
+            // are also converted to Rgba8 in the unpremultiply path above).
             // spec: Docs/RE/formats/texture.md §DDS — DXT1/DXT5 already contain a mip chain.
             if (img.GetFormat() == Image.Format.Rgba8)
             {
@@ -392,6 +455,39 @@ public sealed class RealClientAssets : IDisposable
         {
             GD.PrintErr($"[RealClientAssets] Texture load failed ({virtualPath}): {ex.Message}");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// In-place straight-alpha conversion for a DXT2 (premultiplied-alpha) image decoded to RGBA8.
+    /// For each pixel: if A &gt; 0, R' = R*255/A, G' = G*255/A, B' = B*255/A.
+    /// Fully transparent pixels (A==0) are left as-is (any RGB value is valid, we zero them).
+    ///
+    /// spec: Docs/RE/specs/frontend_scenes.md §11.1a "DXT2 premultiplied-alpha flag". CODE-CONFIRMED.
+    /// </summary>
+    private static void UnpremultiplyAlpha(Image img)
+    {
+        // Operate pixel-by-pixel via GetPixel/SetPixel.
+        // This is intentionally simple: UI atlases are loaded once at startup, not on hot paths.
+        int w = img.GetWidth();
+        int h = img.GetHeight();
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                Color c = img.GetPixel(x, y);
+                float a = c.A;
+                if (a > 0f)
+                {
+                    // Un-premultiply: divide colour channels by alpha.
+                    img.SetPixel(x, y, new Color(c.R / a, c.G / a, c.B / a, a));
+                }
+                else
+                {
+                    // Fully transparent: zero the colour channels to avoid artefacts.
+                    img.SetPixel(x, y, new Color(0f, 0f, 0f, 0f));
+                }
+            }
         }
     }
 

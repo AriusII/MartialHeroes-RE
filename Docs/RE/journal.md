@@ -798,3 +798,46 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
   idle shatters (separate per-mesh skinning-convention debt; its rest pose is clean and class 1 animates
   fine) — needs the unrecovered skinning convention. Plus: wire the brazier/portal `.xeff`; the
   3/5-vs-4/1 live order; Phase-D IDB annotation. Journal authored by the Top Orchestrator (main session).
+
+---
+
+## 2026-06-14 — CAMPAIGN 4 (cont.): Login display-list 1:1 + char-create rig fix + workflow conflict reconciliation
+
+Top-Orchestrator session (main loop). Many parallel waves; firewall held (dirty → `_dirty/`, REWRITE-only
+promotion, no pseudo-C in committed files), build 0/0, ~1409 tests green throughout.
+
+- **RECOVERY (dirty, READONLY IDA ≤3 readers/wave, no `dbg_start`):**
+  - **Login render fidelity:** full LoginWindow DISPLAY LIST (#0–#73 + cursor) — canvas 1024×768 top-left
+    anchored/centered; the carved-iron bezel + hanging rings + red badge/flag + URL are **NOT widgets** but
+    **baked art** in two `login_slice1.dds` backdrops: upper src(0,0,1024,398), lower src(0,582,1024,442).
+    Draw/z-order + conditional default-focus (`(null)` saved-id sentinel → ID else PW) + caret (1 Hz blink,
+    insertion bar, PW masked `*`) + generic ~4-frame show/hide fade. VFS cross-check confirmed the atlas
+    regions visually.
+  - **Char-select camera:** there is **NO traveling/dolly/focus-on-selected** — fixed keyframe-1 frames the
+    whole row; only interactive motion = mouse-wheel dolly (±4, boom-Z clamp [0,22]). Angle multipliers
+    0..5=PITCH / 6..11=YAW; base pitch −30°; field +0x114 = zoom (not pitch); no keyframe auto-advance.
+  - **Char-create shatter root cause:** a `.skn` is authored against ONE skeleton named by its own `id_b`
+    (class 4 = Monk g4/89 bones; class 1 = g1/84 bones). The preview hard-coded a single shared g1 rig+idle
+    for all classes → wrong-rig clip shatters off-bind. Fix = resolve `g{id_b}.bnd` + idle per class.
+  - **Full front-end workflow:** Loading = engine-state 2, **VFS-preload gate (not network)**, progress bar,
+    SKIP-driven out-edge. SelectWindow ops confirmed (1/6 create 52B, 1/7 manage `{slot,mode}` 2B, 1/9 enter
+    40B, 1/13 rename 18B, 1/14 slot-move 1B); 1/9 offsets statically pinned; **UI→internal class map
+    {0→4,1→1,2→3,3→2}**; **delete = 1/7 {slot,1}** (mode byte literal 1; `1/14` = slot-move). Char-count =
+    BillingState **+0x80** + MessageDB 2209, 4 writers incl. the 3/5 ack overwrite; slots = **bit-position**
+    (mask bit k → slot k). The **981-byte** per-character `3/1` list record fully cartographed (name@+0x00,
+    variant@+0x2C, internal_class@+0x34, equip/visible-gear table@+0x58 slots {3,4,6,2,11,14}); appearance is
+    **descriptor-driven** (`model_class_id = 5·(internal_class + 4·variant) − 24` → IdB → catalog skeleton).
+- **PROMOTION (REWRITE, firewall PASS):** `frontend_scenes.md` §3.1/§3.5.3-5/§3.8.2/§5/§6/§8/§10/§11.2e/g/h;
+  `skinning.md` §8(e) rig/clip identity; `opcodes.md` 0x10006/0x10007/0x10009 corrected; `cmsg_char_*.yaml`
+  (create class-map, select delete mode=1, enter offsets pinned); `3-1_character_list.yaml` (96B StatBlock +
+  appearance driver); `structs/actor.md` (SpawnDescriptor sharpened).
+- **ENGINEERING (build 0/0, tests green):**
+  - **Godot login (layer 05):** rebuilt 1:1 from the display-list — removed the wrong `loginwindow.dds`
+    "TopChrome" hack; bottom-layer `login_slice1.dds` backdrops (frame/rings/flag/URL baked) + ink-wash panel
+    on top; DXT2 premultiplied-alpha decode+unpremultiply in `RealClientAssets`; channel-blocks/listbox hidden
+    at boot; faceplate dst/src transposition fixed. (Residual: painting-vs-frame proportional calibration.)
+  - **Godot char-create (layer 05):** per-class `g{id_b}.bnd`+idle resolution + defensive skip-out-of-range-
+    track guard — all 4 classes render intact and animate (the class-4 shatter is gone).
+- **RESIDUAL:** login painting/frame proportional polish; wire brazier/portal `.xeff` into the cavern; the
+  3/5-vs-4/1 + `3/4`-vs-`3/7` delete-carrier live-debugger confirms; Phase-D IDB annotation (function-name
+  proposals staged under `_dirty/**/names.proposed.yaml` — NOT opcode glossary, deferred to ida-naming-sync).

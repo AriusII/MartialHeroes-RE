@@ -142,7 +142,7 @@ public static class XeffParser
             // spec: Docs/RE/formats/effects.md §A.4 — blocks[1..N-1] prefix: u32 sub_id + u32[4] zeros + u32 entry_count = 24 bytes: CONFIRMED.
             const int BlockPrefixSize = 24; // 6 × u32 = 24 bytes
             EnsureBytes(span, offset, BlockPrefixSize, $"sub_effect[{subIndex}] 24-byte prefix");
-            subId = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);         // prefix+0
+            subId = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]); // prefix+0
             // prefix+4..+16: four zero u32s (reserved/padding) — skip without reading.
             entryCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 20)..]); // prefix+20
             offset += BlockPrefixSize;

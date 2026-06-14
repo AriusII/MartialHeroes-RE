@@ -635,7 +635,7 @@ exist until then (a quirk also noted in `ui_system.md` §6.4 and `client_runtime
 
 The inbound `3/1 SmsgCharacterList` (S2C, byte shape owned by `login_flow.md` §3.2 / `opcodes.md`)
 is the message that **forces the select scene** (it writes engine state 4 / substate 8). Its body is
-a **3-byte header** (the third byte is a 5-bit slot mask) followed, **for each set bit**, by one
+a **3-byte header** — `[server, channel, 5-bit slot mask]` — followed, **for each set bit**, by one
 per-slot record read in four parts:
 
 | Part | Size | Role |
@@ -652,8 +652,38 @@ per-slot record read in four parts:
 > timing arrays. **No conflict** — recorded so the two specs read consistently.
 
 There are at most **5 slots**. On entering the scene the select window **copies** these four arrays
-into its own storage, then builds the 124-widget UI (owned by `ui_system.md` §2.2) and the 5 preview
+into its own storage (a straight index-preserving block move — slot k in the inbound scratch becomes
+slot k in the window), then builds the 124-widget UI (owned by `ui_system.md` §2.2) and the 5 preview
 actors.
+
+> **Slot placement is by BIT-POSITION, not sequential fill (CODE-CONFIRMED).** The handler first
+> **zero-clears all five slots** (the 5×880-byte descriptor block, the 5×96-byte stats block, the
+> 5-byte flag array, and the 5-entry timing array), then runs a **fixed 5-iteration loop** over the
+> mask bits. The four destination cursors advance **every iteration** (descriptor +880, stats +96,
+> flag +1, timing +4), but a record is **only read** when mask **bit k is set** — so a record for set
+> bit k lands in **slot k**, and an **unset bit leaves slot k empty** (already blanked by the
+> zero-clear). The operational rule: **slot k is occupied iff mask bit k is set** — records are *not*
+> packed into the first N slots. A mask with bits `{0, 2}` set therefore populates slots 0 and 2 and
+> leaves slots 1, 3, 4 empty. This is corroborated downstream: the enter path addresses the chosen
+> slot **directly by index** (`880·slot` / `96·slot`), which would be meaningless under sequential
+> packing. (Empty slots surface to the consumer as the **`"@BLANK@"`** / zero-name sentinel; §3.2.)
+
+<!-- source: _dirty/campaign5/charcount-billing.md (3/1 header [server, channel, 5-bit slot mask]; up-front 5-slot zero-clear; fixed 5-iteration loop, dest cursors advance every iteration, packet consumed only on set bit → slot index == bit position; unset bit → empty slot; index-preserving copy into select window) -->
+
+> **Each slot's preview appearance is DESCRIPTOR-DRIVEN, not hardcoded (CODE-CONFIRMED).** An
+> existing slot shows the *real* character because its rendered skin/skeleton/outfit come entirely
+> from the server-supplied 880-byte descriptor (§3.2), exactly as the in-world actor factory builds
+> it — the create-scene's hardcoded carousel gids (§4.3) are used only for the *create* class
+> preview, never for a list slot. The chain: read `internal_class` (desc +0x34, `{1..4}`) and
+> `appearance_variant` (desc +0x2C), derive `model_class_id = 5·(internal_class + 4·variant) − 24`
+> ∈ `{1, 11, 16, 26}` (the IdB), select the catalog skeleton for that IdB (one of g1..g4 via the
+> visual catalog — no literal `g{n}.bnd` filename), then layer the visible-gear overlays from the
+> equipment table at desc +0x58 (overlay slots `{3, 4, 6, 2, 11, 14}`, each leading gid →
+> `data/char/skin/g{gid}.skn`). This reuses the §3.3 skin/bind/idle-motion chain; the appearance
+> resolution itself is owned by `specs/skinning.md` and the skeleton-resolution chain. So Godot
+> must render slot k from slot k's descriptor record, not from a placeholder.
+
+<!-- source: _dirty/campaign5/charlist-record-layout.md (descriptor-driven list-slot appearance: internal_class@+0x34 + appearance_variant@+0x2C → model_class_id formula → IdB {1,11,16,26} → catalog skeleton g1..g4; visible-gear overlays from equip table @+0x58, overlay slots {3,4,6,2,11,14} → data/char/skin/g{gid}.skn) -->
 
 ## 3.2 The 880-byte spawn descriptor — fields the select scene uses (CODE-CONFIRMED)
 
@@ -846,27 +876,39 @@ the orbit in stage-world space. The 6 anchored keyframe positions:
 > them. Apply the project's world-to-engine convention (world geometry negates Z — see
 > `Helpers/WorldCoordinates`) when porting; do not silently re-sign them here.
 
-### 3.5.3 The 12 PI-scaled angle multipliers (CODE-CONFIRMED values; yaw/pitch split MEDIUM)
+### 3.5.3 The 12 PI-scaled angle multipliers (CODE-CONFIRMED values **and** yaw/pitch split)
 
 The camera also holds **12 angle multipliers**, each multiplied by π to yield an angle in radians.
-With 6 keyframes the natural reading is **6 yaw + 6 pitch** (one yaw and one pitch per keyframe),
-but the exact assignment of the second six (indices 6..11) to yaw vs pitch is **MEDIUM** until
-confirmed against the manipulator's update law.
+The split is now resolved (CODE-CONFIRMED against the manipulator's keyframe-apply path): the twelve
+values are **6 pitch + 6 yaw**, indexed by keyframe — **indices 0..5 = PITCH** (elevation, a rotation
+about the camera's local X axis), one per keyframe 0..5, and **indices 6..11 = YAW** (azimuth, a
+rotation about the world-up Y axis), one per keyframe 0..5. The keyframe-apply step builds a pitch
+quaternion from the 0..5 value and a yaw quaternion from the matching 6..11 value, multiplies them
+into that keyframe's orientation, then blends that orientation against the previous keyframe per the
+easing law (§3.5.4).
 
-| Index | Multiplier | × π (rad) | ≈ degrees |
-|------:|-----------:|----------:|----------:|
-| 0 | −0.03333334 | −0.104720 | −6.000 |
-| 1 | −0.01483333 | −0.046600 | −2.670 |
-| 2 |  0.00333333 |  0.010472 |  0.600 |
-| 3 | −0.01111111 | −0.034907 | −2.000 |
-| 4 |  0.04333333 |  0.136136 |  7.800 |
-| 5 | −0.07666667 | −0.240855 | −13.800 |
-| 6 |  0.01333333 |  0.041888 |  2.400 |
-| 7 |  0.00436111 |  0.013701 |  0.785 |
-| 8 | −0.20333332 | −0.638790 | −36.600 |
-| 9 | −0.44444445 | −1.396263 | −80.000 |
-| 10 |  0.41276109 |  1.296727 |  74.297 |
-| 11 |  0.29111111 |  0.914553 |  52.400 |
+The per-keyframe **pitch** deltas are small (about ±6° to ±14°), refining the −30° base tilt; the
+per-keyframe **yaw** deltas are large for the inner keyframes (keyframes 2/3/4 swing roughly
+−37° / −80° / +74°), i.e. the framing slews mostly in azimuth between presets. For the live keyframe
+(index 1) the seed angles are **pitch ≈ −2.67°** and **yaw ≈ +0.785°**.
+
+| Index | Axis | Keyframe | Multiplier | × π (rad) | ≈ degrees |
+|------:|:----:|:--------:|-----------:|----------:|----------:|
+| 0 | PITCH | kf 0 | −0.03333334 | −0.104720 | −6.000 |
+| 1 | PITCH | kf 1 | −0.01483333 | −0.046600 | −2.670 |
+| 2 | PITCH | kf 2 |  0.00333333 |  0.010472 |  0.600 |
+| 3 | PITCH | kf 3 | −0.01111111 | −0.034907 | −2.000 |
+| 4 | PITCH | kf 4 |  0.04333333 |  0.136136 |  7.800 |
+| 5 | PITCH | kf 5 | −0.07666667 | −0.240855 | −13.800 |
+| 6 | YAW | kf 0 |  0.01333333 |  0.041888 |  2.400 |
+| 7 | YAW | kf 1 |  0.00436111 |  0.013701 |  0.785 |
+| 8 | YAW | kf 2 | −0.20333332 | −0.638790 | −36.600 |
+| 9 | YAW | kf 3 | −0.44444445 | −1.396263 | −80.000 |
+| 10 | YAW | kf 4 |  0.41276109 |  1.296727 |  74.297 |
+| 11 | YAW | kf 5 |  0.29111111 |  0.914553 |  52.400 |
+
+<!-- source: _dirty/campaign4/charselect3d/camera-update-law.md §2 (yaw/pitch split CODE-CONFIRMED) -->
+
 
 Other constructor scalars (CODE-CONFIRMED): a `1.0` and a `10.0` speed/rate scalar pair, identity
 initial scale/orientation values, and a constructor-default active keyframe index of 0 (wired to
@@ -904,26 +946,77 @@ locked / new / creating.)
   ease-in-out); the keyframe-0↔1 transition uses the plain linear blend only. The tween normalizer
   decodes to **≈ 2.0 s** per transition. **UNVERIFIED:** an old note reads "0.5 s"; the decoded
   constant gives ≈ 2.0 s — resolve by timing the live transition. (Open question 12.)
-- **Auto-advance (MEDIUM):** no timer was found that auto-cycles the keyframe index; statically the
-  camera rests on keyframe 1 unless an external caller (e.g. a UI/event handler responding to slot
-  selection) requests another index. Whether selecting a different slot switches the keyframe was not
-  fully traced.
+- **Auto-advance (CONFIRMED — none):** no timer auto-cycles the keyframe index. The per-frame update
+  law never re-applies a keyframe; it only reads the active/previous index to drive the blend. The
+  index is changed only by an explicit keyframe-apply call — at construction (index 0) and once when
+  the actor row is built/rebuilt (index 1, the live value); no clock or counter advances it.
+
+#### Interactive camera — zoom is a dolly, slot interaction never re-aims (CODE-CONFIRMED)
+
+The only camera response to user input on the Select screen is a **player-driven mouse-wheel dolly**.
+The manipulator keeps a manual **zoom/dolly accumulator** (camera object field at offset +0x114),
+which the mouse wheel feeds (and which two zoom keys can also drive, damped toward zero when no input
+arrives). It is **clamped to ±4**. This accumulator is the field whose role was previously ambiguous
+("zoom or pitch"): it is now **definitively zoom/dolly, not pitch.** Each frame it scales the unit
+**boom direction** and is added into the **boom vector**, lengthening or shortening the boom; the
+boom's depth (Z) component is then **hard-clamped to the range [0, 22]** before the boom is rotated by
+the orientation and added to the orbit point to make the eye. Manual pitch and yaw are **separate**
+accumulators (each clamped ±1.0) layered on the −30° pitch base / 0 yaw base; they are not the +0x114
+field.
+
+So the **final eye distance = the keyframe-stored boom-depth seed, extended or retracted by the ±4
+wheel/key accumulator along the boom, hard-capped to [0, 22].** (The exact live boom-depth seed for
+keyframe 1 is debugger-pending — see §3.5.5.)
+
+- **Slot select / hover does NOT re-aim or zoom the camera (CODE-CONFIRMED).** There is no camera
+  travelling, dolly-on-select, or focus-on-selected behaviour. The camera holds keyframe 1 for the
+  entire Select screen, framing the **whole actor row**. Clicking or hovering a slot moves nothing on
+  the camera — no keyframe switch, no orbit-point move, no boom/zoom change. Slot interaction only
+  (a) highlights the hovered actor and plays its select/idle clip, and (b) fills the UI labels (name /
+  level / position). All five slots share the single keyframe (1); there is no per-slot keyframe
+  table. The camera eye/look-at delta from any slot or state change is therefore **zero** — the only
+  possible camera motion is the player's own ±4 wheel dolly.
+- **Create-mode moves the ACTOR, not the camera (CODE-CONFIRMED).** Entering character creation does
+  not move the camera. Instead the single create-preview actor is placed **+56.5 units forward in Z
+  (toward the camera)** relative to the centre of the select row, so the lone preview character fills
+  the same frame the five-actor row occupied. The camera keyframe, orbit point and boom are identical
+  between select and create. For a 1:1 port: keep one fixed camera for both modes, never tween the
+  camera on slot click, and for create-mode move the single preview actor +56.5 in the forward
+  (world −Z) direction instead of moving the camera.
+
+<!-- source: _dirty/campaign4/charselect3d/camera-update-law.md §3 (zoom/dolly via +0x114, ±4 clamp, boom-Z [0,22], no auto-advance) and _dirty/campaign4/charselect3d/camera-on-select.md §1-§5 (slot interaction never re-aims; create-mode +56.5 actor offset) -->
+
 
 ### 3.5.5 Static-complete vs runtime-pending (explicit)
 
 - **Static-complete (CODE-CONFIRMED):** all 6 keyframe positions, the `(+2048, 0, −6144)` anchor
-  offset (= stage origin), the 12 π-scaled angle multipliers, FOV 50° / aspect-divided, near 5.0,
-  far 15000.0, the `1.0` (input-time) / `10.0` (manual-zoom) scalars, scene name `"select"`, base
-  world `map000`, the **live keyframe index = 1**, the look-at target = active orbit point, the
-  boom-zoom clamp ≤ 22, the base pitch ≈ −30°, the lerp/slerp + inner-keyframe quadratic-ease law.
-- **Runtime-pending (NOT yet confirmed — do not invent):**
-  1. **The precise eye world coordinate** (boom vector + live yaw/pitch quaternion).
-  2. **The exact tween duration** (≈ 2.0 s decoded vs a "0.5 s" annotation — Open question 12).
-  3. **The yaw-vs-pitch assignment** of angle indices 6..11 vs 0..5.
-  4. **Whether slot selection auto-switches the keyframe** (no timer auto-advance found).
+  offset (= stage origin), the 12 π-scaled angle multipliers **and their axis split (0..5 pitch,
+  6..11 yaw)**, FOV 50° / aspect-divided, near 5.0, far 15000.0, the `1.0` (input-time) / `10.0`
+  (manual-zoom) scalars, scene name `"select"`, base world `map000`, the **live keyframe index = 1**,
+  the look-at target = active orbit point, the boom-zoom clamp ≤ 22, the base pitch ≈ −30°, the
+  lerp/slerp + inner-keyframe quadratic-ease law, the **+0x114 manual accumulator = zoom/dolly
+  (±4 clamp), not pitch**, the **no-auto-advance** rule, the **no-re-aim-on-slot-select** rule, and
+  the **create-mode +56.5 actor-Z offset** (camera unchanged).
+- **NOW RESOLVED (previously runtime-pending, closed CODE-CONFIRMED this pass):**
+  - **The yaw-vs-pitch assignment** of the angle indices → **0..5 = pitch, 6..11 = yaw** (§3.5.3).
+  - **The +0x114 zoom-vs-pitch question** → **zoom/dolly** (§3.5.4).
+  - **Whether slot selection auto-switches the keyframe** → **no** (no auto-advance; the index is only
+    set by an explicit keyframe-apply at construction = 0 and row-build = 1; slot interaction never
+    re-aims).
+- **Runtime-pending (still NOT confirmed — debugger-pending, do not invent):**
+  1. **The precise eye world coordinate** (depends on the live boom vector + yaw/pitch quaternion).
+  2. **The live boom-depth (zoom) seed** for keyframe 1 — the actual starting dolly distance before
+     the ±4 wheel delta; the static value is the keyframe-stored boom, the live float is unverified.
+  3. **The exact tween duration** (≈ 2.0 s decoded vs a "0.5 s" annotation — Open question 12).
+  4. **Whether any UI action ever applies a keyframe other than 1** — none was found beyond the
+     construction (0) and row-build (1) callers, but a live confirmation is left for the debugger.
 
-An implementer should treat the orbit geometry, the live keyframe (1), the look-at target, and the
-easing law as authoritative, and the precise eye / tween duration as tunable until confirmed.
+An implementer should treat the orbit geometry, the live keyframe (1), the look-at target, the
+yaw/pitch axis split, the zoom-dolly law, the no-re-aim rule, and the easing law as authoritative,
+and the precise eye / live boom-depth seed / tween duration as tunable until debugger-confirmed.
+
+<!-- source: _dirty/campaign4/charselect3d/camera-update-law.md §5 and camera-on-select.md (resolved items + residual debugger-pending) -->
+
 
 ## 3.6 Char-select environment, lighting & ambient FX (CODE-CONFIRMED structure; colours data-driven)
 
@@ -1216,13 +1309,34 @@ The top-of-screen "character count : N" caption is built by a dedicated helper:
 - **Template:** MessageDB template id **2209** — a `%d`-bearing format string in the message DB
   (`msg.xdb`, CP949). The id **2209** is a hardcoded immediate (not a config-resolved global), so it
   is unambiguous; the localized template text is VFS-only and not reproduced here.
-- **Count source `N`:** the **BillingState character-count field** (dword index 32, i.e. byte offset
-  `+0x80` in the BillingState singleton) — the **same field the delete response decrements**
-  (`3/4 SmsgCharManageResult`, subtype 2; §5).
+- **Count source `N`:** the **BillingState character-count field** at **dword index 32 (byte offset
+  `+0x80`)** of the BillingState singleton — read directly by the caption helper and formatted through
+  MessageDB template **2209**. This is an **account-wide** field; it is **independent of the current
+  server's slot mask** (§3.1) and is never computed from the mask popcount, so the caption number can
+  legitimately differ from the count of filled slots shown for the selected server.
 - **Format / inject:** a single `snprintf` of template 2209 with the one integer `N`, assigned to the
   caption widget.
+- **Exactly four writers of the `+0x80` field (CODE-CONFIRMED).** The field has a small, closed writer
+  set — and **no other code path mutates it** (the billing/subscription packets — billing-info,
+  billing-balance, subscription-toggle/notice server-commands — touch the gold balance, the
+  subscription flag, or the notice string, **never** this field):
+  1. **Constructor init → 0.** The BillingState singleton's constructor zero-initializes the field, so
+     an empty account renders "0" before any character list arrives.
+  2. **Create-accept (`3/6`) → increment.** The create-result handler, on a success result, performs a
+     `+1` on the field and repaints the caption.
+  3. **Delete-accept → decrement (floored at 0).** The char-manage response handler, on a delete
+     success, decrements the field only while it is `> 0`, then repaints. (The opcode carrying this
+     result — `3/4` vs a `3/7`-shaped branch — is the **UNRESOLVED** carrier of §5; the decrement of
+     this field is independent of that dispute.)
+  4. **Enter-game (`3/5 SmsgEnterGameAck`) → overwrite store.** The enter-game response reads a
+     **trailing standalone `u32` CharacterCount** from the packet and stores it **directly** into this
+     same `+0x80` field (a plain assignment, not an increment). So `3/5`'s trailing CharacterCount is
+     **not a separate counter** — it **re-syncs (overwrites) the same account char-count field** with
+     the server's authoritative value at world entry.
 - **Refresh points:** built on the initial select-window build, and re-rendered **after create and
   after delete** (the count-changed paths re-read BillingState `+0x80` and re-format the caption).
+
+<!-- source: _dirty/campaign5/charcount-billing.md (field = BillingState dword index 32 / +0x80, MessageDB 2209; four writers: ctor init 0, 3/6 create +1, delete -1 floored at 0, 3/5 enter-game trailing CharacterCount u32 OVERWRITES same field; account-wide, independent of 3/1 server slot mask; billing/subscription handlers do NOT write it; 3/4-vs-3/7 delete carrier UNRESOLVED) -->
 
 > **SUPERSEDE** the earlier guesses that the count caption was id **48001 / 2206** (or 48003/48004/
 > 48005). Those are **per-slot info-line / chrome label** ids (config-resolved; see §11.5d), **not**
@@ -1354,9 +1468,13 @@ accept codes drive a scene refresh (and increment the account character count); 
 # 5. Character deletion
 
 Triggered by the **Delete** button (UI action **5**, CODE-CONFIRMED — see correction note below) → a confirm popup whose **Yes** runs the
-delete. Guards: a valid selected slot and the net-busy flag clear. On confirm it plays SFX
-**861010101**, sets net-busy, and sends the **delete** message: **`major 1 / minor 14`, 1-byte
-body** = the slot index.
+delete. Guards: a valid selected slot (0..4), an occupied-slot flag, and the net-busy flag clear. On
+confirm it plays SFX **861010101**, sets net-busy, copies the slot to a pending field, and sends the
+**delete** message: **`major 1 / minor 7`, 2-byte body** = `{ slot, mode }` with the **mode byte
+fixed at 1** (`{slot, 1}`). Delete is therefore an overload of the same `1/7` char-manage send used
+for slot select (§7): the **mode byte distinguishes them** — `1/7 {slot, 0}` = select / view,
+`1/7 {slot, 1}` = delete. (The mode-byte value `1` for delete is the literal in the binary; the
+earlier static-elimination alternative `2` is refuted.)
 
 The delete result arrives on the inbound **8-byte char-manage result** message (`3/4
 SmsgCharManageResult` per `opcodes.md`; result / subtype / ready-time):
@@ -1368,9 +1486,14 @@ SmsgCharManageResult` per `opcodes.md`; result / subtype / ready-time):
   computed from `(ready_time − now)` (a same-day delete lock). The CP949 format string is in the
   binary's data; the *id/string* is VFS-owned and not reproduced.
 
-> The `3/4` handler is mislabelled "3/7" by some legacy tooling; **anchor to behaviour: the 8-byte
-> result/subtype/ready-time message is `3/4 SmsgCharManageResult`** (a naming inconsistency already
-> flagged by `login_flow.md`). Recorded for `conflictsFlagged`.
+> The `3/4`-vs-`3/7` **delete-result carrier remains UNRESOLVED** (capture-pending). The 8-byte
+> result/subtype/ready-time handler is labelled "3/7" by some legacy tooling, while the committed
+> attribution is `3/4 SmsgCharManageResult`; the static read surfaces both shapes and **does not
+> overturn the committed `3/4` row** on static evidence alone — a live delete capture is needed to
+> settle it. **Anchor to behaviour**: whichever minor carries it, this is the handler that decrements
+> the account character count on `result == 1, subtype == 2`. Recorded for `conflictsFlagged`.
+
+<!-- source: _dirty/campaign5/selectwindow-lifecycle.md (delete = 1/7 {slot,1}, 2 bytes; 1/14 = slot-move; delete mode byte literal = 1, alt 2 refuted); _dirty/campaign5/charcount-billing.md (delete-accept decrements BillingState index 32 / +0x80, floored at 0; 3/4-vs-3/7 carrier UNRESOLVED, do not overwrite committed 3/4 on static) -->
 
 ---
 
@@ -1386,10 +1509,15 @@ result is success (carrying the new name); a failure carries an error code that 
 string. The select screen also routes a rename outcome through the 8-byte char-manage result
 (subtype 1) to refresh the displayed name.
 
-> The three char-management C2S messages — **`1/7` select (2 bytes)**, **`1/13` rename (18 bytes)**,
-> **`1/14` delete (1 byte)** — are the select-side counterparts of the inbound results, and (per the
-> char-select lane) are **new C2S opcodes** relative to the older `names.yaml`. Their catalog/YAML
-> are owned by the protocol author; recorded here as a flag (§7 / `conflictsFlagged`).
+> The char-management C2S sends share a small family. **`1/7` is a 2-byte `{slot, mode}` char-manage
+> message** carrying **both select (`{slot, 0}`) and delete (`{slot, 1}`)** by its mode byte (§5 / §7);
+> **`1/13` rename (18 bytes)**; and **`1/14` slot-move / "location" (1 byte = one slot index)** — a
+> distinct send that the binary's debug text identifies as "is sending location", **not** delete.
+> These are the select-side counterparts of the inbound results, and (per the char-select lane) are
+> **new C2S opcodes** relative to the older `names.yaml`. Their catalog/YAML are owned by the protocol
+> author; recorded here as a flag (§7 / §8 / `conflictsFlagged`).
+
+<!-- source: _dirty/campaign5/selectwindow-lifecycle.md (1/7 = char-manage {slot,mode}: mode 0 select / mode 1 delete; 1/13 rename 18B; 1/14 = slot-move "is sending location", 1B, single slot index — NOT delete) -->
 
 ---
 
@@ -1445,10 +1573,19 @@ matching inbound result clears it.
 | Action | Message (`major/minor`) | Body size | Trigger |
 |---|---|---|---|
 | Create character | `1/6` (collision — see §4.5) | 52 bytes | Create form confirm (valid name) |
-| Select character | `1/7` | 2 bytes | slot select / pre-enter step |
+| Select character | `1/7` `{slot, 0}` | 2 bytes | slot select / pre-enter step (mode byte = 0) |
+| Delete character | `1/7` `{slot, 1}` | 2 bytes | delete confirm (mode byte = 1; §5) |
 | Enter game | `1/9` | 40 bytes | confirm a real (non-blank) slot |
 | Rename character | `1/13` | 18 bytes | rename confirm (valid name) |
-| Delete character | `1/14` | 1 byte | delete confirm |
+| Slot-move ("location") | `1/14` | 1 byte | move/commit slot (single slot index; "is sending location") |
+
+> **`1/7` carries select *and* delete** — same opcode, distinguished by the 2-byte body's **mode
+> byte** (`0` = select, `1` = delete; §5). **`1/14` is a separate slot-move / "location" send** (1-byte
+> single slot index), **not** delete. The two `1/14` emitters both print the "is sending location"
+> debug string; whether they represent a drag-to-empty vs a reorder is not decidable from the 1-byte
+> body and stays capture-pending.
+
+<!-- source: _dirty/campaign5/selectwindow-lifecycle.md (five senders: 1/6 create 52B, 1/7 manage 2B {slot,mode}, 1/9 enter 40B, 1/13 rename 18B, 1/14 slot-move 1B; delete = 1/7 {slot,1}; 1/14 = slot-move not delete) -->
 
 ---
 
@@ -1535,7 +1672,8 @@ next scene.
   per-slot pick = hit-test the 3D row (Y band 70..92)
   Create (action 4) → class 0..3 → internal {4,1,3,2}, face 1..7, sex, starter gear
                       → name validate (min 2; a-z/0-9/Hangul) → send 1/6 (52B) → 3/23 result
-  Delete (action 5) → confirm → send 1/14 (1B) → 3/4 result (subtype 2 = deleted; cooldown msg)
+  Delete (action 5) → confirm → send 1/7 {slot,1} (2B) → 3/4 result (subtype 2 = deleted; cooldown msg)
+                      (1/14 is a separate slot-move/"location" send, 1B — NOT delete; §5/§8)
   Rename             → name validate → send 1/13 (18B) → 3/6 result
   Enter (confirm slot):
       empty slot ("@BLANK@") → open Create form
@@ -1612,8 +1750,9 @@ next scene.
   login-blob structure and named its optional field the second-password / PIN, but did **not** reach
   the character-create send and so does **not** resolve this collision. Still needs protocol-author
   disambiguation with a capture. (§4.5)
-- **New C2S char-management opcodes** `1/7` (select, 2B), `1/13` (rename, 18B), `1/14` (delete, 1B)
-  may be absent from `names.yaml` / `opcodes.md`; the protocol author owns adding them. (§6, §8)
+- **New C2S char-management opcodes** `1/7` (char-manage `{slot, mode}`, 2B — `mode 0` select /
+  `mode 1` delete; §5), `1/13` (rename, 18B), and `1/14` (slot-move / "location", 1B — **not** delete)
+  may be absent from `names.yaml` / `opcodes.md`; the protocol author owns adding them. (§5, §6, §8)
 - **Naming inconsistency**: the 8-byte char-manage result handler is labelled "3/7" by some legacy
   tooling but is behaviourally **`3/4 SmsgCharManageResult`** (result/subtype/ready-time). (§5)
 
@@ -1836,6 +1975,30 @@ and generic-error dialogs reuse the same rect (see section 11.2f for the trailin
 > caption-art plates and the gold button faces) - they are **not** message-catalogue strings. Only
 > the server-row labels (4001..4022) and the dialog bodies (4023/4024) are runtime text.
 
+> **Default input focus is conditional on the saved id (CODE-CONFIRMED).** When the login form is
+> built, focus is placed once, branching on whether a saved account id exists (the persisted saved-id
+> string, recognised as absent by a `"(null)"` sentinel):
+> - **No saved id** (fresh install / id not remembered): the ID field is left empty and **focus goes
+>   to the ID field** — the caret blinks in the ID box.
+> - **Saved id present** (Save-ID was checked previously): the ID field is **pre-filled** with the
+>   saved account string, the Save-ID checkbox is shown checked, and **focus goes to the PW field** —
+>   the caret blinks in the password box so the user types the password directly.
+>
+> A faithful rebuild must reproduce this conditional default (ID box by default, PW box when an id is
+> remembered), tied to the Save-ID persistence of §1.6.
+
+> **Caret behaviour (CODE-CONFIRMED).** The focused field — and only the focused field — draws a
+> blinking **insertion caret**: a thin vertical insertion bar at the text insertion point (right edge
+> of the text when the cursor is at the end, otherwise advanced one fixed glyph pitch per character).
+> It is an insertion bar, **not** a block/box cursor. The unfocused field draws no caret. The blink is
+> a **1 Hz square wave** — about **500 ms on / 500 ms off** (a constant 500 ms half-period) — driven
+> off a single shared global blink phase, so all editboxes blink **in sync**. In the password field
+> the entered text is still rendered as one `*` glyph per character (one fixed pitch per char, §11.2e
+> masking note); the caret rides at the masked insertion point.
+
+<!-- source: _dirty/campaign4/frontend/login-draw-zorder.md §3 (conditional default focus) and §4 (caret = insertion bar, 500 ms half-period shared phase, PW masked as *) -->
+
+
 > **The field handles are object field offsets, not "widget index 170/171" (CODE-CONFIRMED;
 > supersedes the prior index note).** An earlier reading referred to the ID/PW edit boxes by global
 > widget-array slots "≈170/171". Those are **global widget-manager registration slots** (registration-
@@ -1875,6 +2038,95 @@ and generic-error dialogs reuse the same rect (see section 11.2f for the trailin
 | Button | B | 164,82,110,38 | 750,492 / 750,492 / 865,492 | 3-state button | 112 |
 | Quit-confirm dialog panel | C | 342,289,340,190 | 318,647 | panel | - | - |
 | Generic error dialog panel | C | 342,289,340,190 | 318,647 | panel | - | - |
+
+### 11.2g Draw order / z-order, show/hide fade, static chrome (CODE-CONFIRMED)
+
+**Paint order is back-to-front in build order.** The login window paints its widgets in the order they
+were added to the scene (the §11.2a–§11.2f row order), depth-first per panel: a panel paints, then its
+whole subtree paints on top, before the next sibling. Only currently-visible widgets paint. The first
+widget added is the **bottommost**, the last added is the **topmost**. Hit-testing walks the **same
+order in reverse**, so the topmost widget under the cursor receives the click first — the inverse
+relationship a correct z-order requires.
+
+**Back-to-front z-order (1 = bottom, highest number = top):**
+
+| z (1 = bottom) | layer |
+|---:|---|
+| 1 | full-screen background art + stone-frame / bezel chrome panel |
+| 2 | central login-window main panel art |
+| 3 | server listbox container panel (channel-row labels, scroll arrows, thumb, header bar) |
+| 4 | the two server-channel selector blocks (header + body + toggle + labels) |
+| 5 | badge / arrow decoration sprites + the dynamic scrollbar thumb |
+| 6 | the server-row select buttons |
+| 7 | the large top action button + its caption face plate |
+| 8 | notice / success dialog panel #1 (+ body label + OK button) — hidden until shown |
+| 9 | error dialog panel #2 (+ body label + OK button) — hidden until shown |
+| 10 | the bottom login-bar container panel |
+| 11 | the bottom confirm/login gold button + its label face plate |
+| 12 | the inner form sub-panel (an invisible layout panel; its subtree, z 13–17, paints on top) |
+| 13 | the ID / PW caption-art plates + small decoration plate |
+| 14 | the ID input box (its glyph text + caret when focused) |
+| 15 | the PW input box (masked `*` glyphs + caret when focused) |
+| 16 | the Save-ID checkbox (off/on frame) |
+| 17 | the second bottom button |
+| 18 | the PIN / second-password keypad sub-window — built hidden; paints over the form when shown |
+| 19 (topmost content) | the quit-confirm and generic-error modal dialogs — hidden until triggered; added last, so they always composite over the form |
+| 20 (above everything) | the hardware mouse cursor sprite — a separate top-level node repositioned each frame, topmost of all |
+
+Layers 8, 9, 18 and 19 are present in the tree but invisible in the steady login form; they paint only
+when their sub-state shows them, and because they are added late they always composite **over** the
+form when shown. The mouse cursor is a sibling top-level node, above all window content.
+
+**Widget show/hide fade (CODE-CONFIRMED).** Every GU widget runs a generic alpha fade on show/hide:
+its alpha ramps **toward 255 by 64 per frame when becoming visible** and **toward 0 by 64 per frame
+when hidden** — about a **4-frame fade** (0 → 64 → 128 → 192 → 255). A widget may pin a fixed alpha to
+opt out of the fade. So the revealed login form, the notice/error dialogs and the PIN keypad **fade
+in** over ~4 frames rather than popping. This is a generic show/hide transition, **not** a continuous
+pulse/breathing effect.
+
+**Hardware cursor (CONFIRMS §11.1).** The hardware cursor sprite is **repositioned to the OS pointer
+every frame** (read the OS pointer, map to client space, drive the cursor widget to it, clamped to the
+client rect) — now CODE-CONFIRMED.
+
+**Login chrome is static art (CONFIRMS the §5/fidelity scan).** The bezel / stone-frame, the central
+panel art, the dragon / hanging-ring / flag decoration sprites, the painting and caption-art plates
+are all **static art** — drawn with a translation-only transform; no rotation, sway, pulse, gradient
+fill or alpha-cycle on any login chrome element. The only animated behaviours on the login form are
+(a) the ~4-frame show/hide alpha fade, (b) the 1 Hz caret blink (§11.2e), (c) the per-frame cursor
+follow, and (d) the separate intro curtain (§1.0 / §1.5, out of scope here). The 3-state buttons and
+checkbox swap frames by mouse state (normal/hover/down) — a state-driven sprite swap, not a continuous
+animation.
+
+<!-- source: _dirty/campaign4/frontend/login-draw-zorder.md §2 (back-to-front build-order z-list, reverse hit-test), §4 (per-frame cursor follow), §5 (generic ~4-frame alpha fade; chrome is static art) -->
+
+### 11.2h The two baked-art backdrop panels (CODE-CONFIRMED — bezel / rings / flag / URL are NOT widgets)
+
+The carved-iron **bezel frame** (top / left / right / bottom rails + corners), the **hanging rings /
+chains**, the small **red flag** (top-left), and the **URL text** (top-right) are **not** separate
+sprite widgets. They are all painted pixels **baked into two large background-art panels**, both
+sub-rects of `login_slice1.dds` (atlas **A**). The earlier subsections fold these into the z-order as
+"full-screen background art + bezel chrome" (z=1) and "bottom login-bar container panel" (z=10)
+without their backdrop dest/src spelled out as explicit rows; they are spelled out here.
+
+| Role | Atlas | Rect (X,Y,W,H) | Src (U,V,W,H) | Kind | Notes | z |
+|---|---|---|---|---|---|---|
+| **Upper backdrop** (carved bezel top/left/right rails + corners + hanging rings + red flag (top-left) + URL (top-right) + upper frame) | A | 0,0,1024,398 | 0,0,1024,398 | image (backdrop blit) | bottommost; the entire upper carved-iron frame is **one baked image**, not child sprites | 1 |
+| **Lower backdrop** (bottom carved-metal plate holding the ID/PW rows + buttons) | A | 0, round(326*H/768), 1024,442 | 0,582,1024,442 | image (backdrop blit) | Y scales with screen height; src is bottom-aligned in the atlas (582+442 = 1024) | 10 |
+
+> **Flag / rings / URL are baked ART, not runtime sprites (CODE-CONFIRMED).** A faithful 1:1 rebuild
+> must **blit these two rects** rather than place individual flag / ring / chain / URL sprites — the
+> legacy client never split them out as widgets. In particular the **URL text is image art baked into
+> the upper backdrop, NOT a `msg.xdb` string**: do not render it as runtime text. The confirmed canvas
+> is **1024 x 768, top-left anchored, centred on screen** (scene origin `(screenW/2 - 512,
+> screenH/2 - 384)`).
+>
+> **`login_slice1.dds` vertical-band partition (1024² atlas):** rows **0..398** = upper backdrop / frame
+> art (the upper-backdrop row above); rows **398..582** = the broken-out caption-art plates and gold
+> button-face plates (the small sprites in §11.2c / §11.2e at srcV 398 / 404 / 437 / 469); rows
+> **582..1024** = lower backdrop / bottom-panel art (the lower-backdrop row above). An engineer must
+> slice the atlas along these three bands.
+
+<!-- source: _dirty/campaign4/frontend/login-display-list.md -->
 
 ## 11.3 PIN / second-password modal - layout & keypad behaviour (CODE-CONFIRMED)
 

@@ -267,7 +267,7 @@ public sealed partial class CharacterSelectScreen : Control
     // spec: frontend_scenes.md §4.2 — "pure display from the class template". CODE-CONFIRMED.
     private static readonly int[][] CreateClassBaseStats =
     [
-        [420, 80, 18, 6, 10, 18],  // UI 0 → internal 4 (Warrior)
+        [420, 80, 18, 6, 10, 18], // UI 0 → internal 4 (Warrior)
         [350, 100, 15, 8, 12, 14], // UI 1 → internal 1 (Musa)
         [300, 120, 14, 9, 15, 12], // UI 2 → internal 3 (Blader)
         [280, 150, 8, 15, 14, 10], // UI 3 → internal 2 (Tao)

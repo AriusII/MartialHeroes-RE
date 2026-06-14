@@ -39,6 +39,7 @@ public sealed class BindlistParserTests
                 ms.WriteByte((byte)'\n');
             }
         }
+
         return ms.ToArray();
     }
 
@@ -67,8 +68,8 @@ public sealed class BindlistParserTests
         var data = BuildBindlist(["g1.bnd", "g5.bnd", "g10.bnd"]);
         BindlistData result = BindlistParser.Parse(data);
 
-        Assert.Equal("g1.bnd",  result.Entries[0]);
-        Assert.Equal("g5.bnd",  result.Entries[1]);
+        Assert.Equal("g1.bnd", result.Entries[0]);
+        Assert.Equal("g5.bnd", result.Entries[1]);
         Assert.Equal("g10.bnd", result.Entries[2]);
     }
 
@@ -210,7 +211,7 @@ public sealed class BindlistParserTests
 
         Assert.Equal(349, result.Count);
         // First and last entries must round-trip.
-        Assert.Equal(names[0],   result.Entries[0]);
+        Assert.Equal(names[0], result.Entries[0]);
         Assert.Equal(names[348], result.Entries[348]);
     }
 }

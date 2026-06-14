@@ -284,11 +284,13 @@ absolute Actor offset (= SD offset + 0x74) for the fields the live Actor uses di
 | +0x00     | +0x74   | 17   | bytes[17]| `name`            | confirmed  | Actor name, NUL-terminated, **CP949 / EUC-KR** encoded (up to 16 bytes + NUL). |
 | +0x11     | +0x85   | 3    | —        | (pad)             | —          | Alignment after name. |
 | +0x14     | +0x88   | 2    | uint16   | `inner_event_code`| high       | Internal event / class code; compared against a fixed constant when resetting the default motion. |
-| +0x16     | +0x8A   | 14   | bytes    | (gap)             | low        | Partially used; one interior byte is a display-name discriminator for the player-clone path. |
+| +0x16     | +0x8A   | 12   | bytes    | (gap)             | low        | Mostly unverified region up to the discriminator below. |
+| +0x22     | +0x96   | 1    | uint8    | `name_clone_discriminator` | high | Display-name discriminator for the player-clone path (distinguishes same-named clones). Also feeds the slot-14 visible-gear catalog key as its high decimal digit. |
+| +0x23     | +0x97   | 1    | bytes    | (gap)             | low        | Alignment up to SD +0x24. |
 | +0x24     | +0x98   | 8    | int64    | `current_xp`      | high       | Current experience points (signed 64-bit). |
-| +0x2C     | +0xA0   | 1    | uint8    | `body_variant`    | partial    | Body / gender variant byte; used for model routing. |
+| +0x2C     | +0xA0   | 1    | uint8    | `appearance_variant` | confirmed | Body / gender appearance variant. The **`variant` argument** of the model-class formula (see SpawnDescriptor notes). For a list/spawn character the **server supplies it**; the create form only seeds it for the class carousel. |
 | +0x2D     | +0xA1   | 7    | bytes    | (gap)             | low        | Remainder up to SD +0x34. |
-| +0x34     | +0xA8   | 2    | uint16   | `model_id`        | confirmed  | Model / mesh template id. For mobs this keys the model-template lookup. |
+| +0x34     | +0xA8   | 2    | uint16   | `internal_class`  | confirmed  | Internal class word. **For PCs it is the class id `{1,2,3,4}`** (1 Musa, 2 Salsu, 3 Dosa, 4 Monk) and is the **primary skeleton/appearance driver** -- the `class` argument of the model-class formula. For mobs the same field keys the model-template lookup. (Earlier drafts called this `model_id`.) |
 | +0x36     | +0xAA   | 2    | uint16   | `anim_class_word` | partial    | Read in the PC spawn branch as a name-assignment gate; may encode class or animation variant. |
 | +0x38     | +0xAC   | 1    | uint8    | `state_byte`      | confirmed  | Level/state byte, written by the 5/53 vitals handler from a packet byte. |
 | +0x39     | +0xAD   | 1    | uint8    | `sub_level_byte`  | confirmed  | Second level/state byte, written by the 5/53 vitals handler from the next packet byte. |
@@ -300,7 +302,7 @@ absolute Actor offset (= SD offset + 0x74) for the fields the live Actor uses di
 | +0x4C     | +0xC0   | 4    | f32      | `world_x`         | confirmed  | World X (float). Extracted into the live position on spawn. |
 | +0x50     | +0xC4   | 4    | f32      | `world_z`         | confirmed  | World Z (float). World Y forced to 0 on spawn. |
 | +0x54     | +0xC8   | 4    | bytes    | (gap)             | partial    | Tail of the coordinate region; one path reuses part of it as a move-speed override for a special sort. |
-| +0x58     | +0xCC   | 320  | slot[20] | `equip_ref_table` | high       | Equipment reference table: 20 entries of 16 bytes each. Each entry begins with a 4-byte item-actor id that is resolved via the global actor lookup; the remaining 12 bytes per entry are unverified. Spans SD +0x58 .. SD +0x197. |
+| +0x58     | +0xCC   | 320  | slot[20] | `equip_ref_table` | confirmed  | Visible-gear / equipment reference table: 20 entries of 16 bytes each. The **leading 4-byte dword of each entry is the part gid**. The renderer attaches **overlay slots {3,4,6,2,11,14}**, mapping each entry's gid to `data/char/skin/g{gid}.skn` to layer the worn outfit. The remaining 12 bytes per entry are unverified. Spans SD +0x58 .. SD +0x197. |
 | +0x74     | +0xE8   | 2    | uint16   | `server_class`    | high       | Server-assigned class id (maps to a martial-arts style). |
 | +0x76     | +0xEA   | 6    | bytes    | (gap)             | low        | Unverified padding. |
 | +0x7C     | +0xF0   | 1    | uint8    | `race_or_skin`    | high       | Race / skin variant identifier. |
@@ -312,6 +314,7 @@ absolute Actor offset (= SD offset + 0x74) for the fields the live Actor uses di
 | +0x194    | +0x208  | 4    | int32    | `aura_pct_value`  | confirmed  | Aura percentage value (divided by 100 to get a multiplier) used in the max-HP / max-MP formulas. Interior of the buff block. |
 | +0x1AA    | +0x21E  | 1    | uint8    | `buff_kind`       | confirmed  | Aura / buff type discriminator: 1 = HP aura, 2 = MP aura. Interior of the buff block. |
 | +0x1F0    | +0x264  | 2    | uint16   | `skill_state_word`| partial    | Skill state word used for state gating in the skill handler. Interior of the buff block. |
+| +0x2EE    | +0x362  | 1    | uint8    | `motion_state_byte` | high     | Passed by the PC spawn branch into a motion-setup helper; on a mob fast-path a `0xFF` sentinel triggers a move-speed / animation-tag shortcut. Interior of the buff block. |
 | +0x32C    | +0x3A0  | 4    | uint32   | `in_combat_flag`  | high       | Combat state flag. |
 | +0x330    | +0x3A4  | 64   | bytes    | `sd_tail`         | partial    | Tail of the descriptor. A partner / pair-actor id is stored at SD +0x354 (Actor +0x3C8) for mob pair-state tracking. |
 | +0x35C    | +0x3D0  | 4    | int32    | `world_state`     | partial    | Read by the local-player-status handler to gate a disconnect notification. Semantics unverified. |
@@ -329,6 +332,16 @@ absolute Actor offset (= SD offset + 0x74) for the fields the live Actor uses di
 - **`level` is not yet a clean field** — see open question 1. Until a capture confirms the byte
   boundary, prefer reading the level/state bytes at SD +0x38 / +0x39 explicitly rather than a
   u16 at SD +0x3A.
+- **The descriptor drives the rendered appearance** (for an existing PC, a 3/1 list slot, or a
+  5/3 spawn). The two inputs are `internal_class` (SD +0x34, `{1,2,3,4}`) and `appearance_variant`
+  (SD +0x2C). The client derives a model-class id from them:
+  `model_class_id = 5 * (internal_class + 4 * appearance_variant) - 24`, which yields an IdB in
+  `{1, 11, 16, 26}` for the four starter classes. That IdB selects the catalog skeleton (one of
+  g1..g4 via the visual catalog — there is **no** literal `g{n}.bnd` filename computed). The
+  visible outfit is then layered from the `equip_ref_table` (SD +0x58): the renderer attaches
+  overlay slots `{3, 4, 6, 2, 11, 14}`, mapping each entry's leading gid to
+  `data/char/skin/g{gid}.skn`. A list/spawn character therefore renders its REAL appearance from
+  the server-supplied descriptor, never from the create-scene's hardcoded carousel gids.
 - The **equipment reference table** (SD +0x58, 20×16 bytes) and the **600-byte equipment/buff
   block** (SD +0xD4) are largely opaque. Only the three interior points listed (`aura_pct_value`,
   `buff_kind`, `skill_state_word`) and the per-slot item-id dword in the equip table are located.
@@ -388,12 +401,16 @@ index — it does not need to reproduce the legacy container's internal node lay
    u16 may overlap the two state bytes, or `level` may sit cleanly at SD +0x3A..+0x3B. **Resolve
    with a real 5/53 vitals capture for a character of known level before treating `level` as a
    clean 16-bit field.**
-2. **`equip_ref_table` interior (SD +0x58 .. +0x197).** 20 entries × 16 bytes. Only the leading
-   4-byte item-actor id per entry is confirmed; the remaining 12 bytes per entry (item state /
-   visual override / enhancement data) are unverified.
-3. **`body_variant` / `anim_class_word` region (SD +0x2C .. +0x37).** `body_variant` (SD +0x2C)
-   and `model_id` (SD +0x34) are confirmed; the bytes between, and the role of `anim_class_word`
-   (SD +0x36), need pattern analysis plus a capture.
+2. **`equip_ref_table` interior (SD +0x58 .. +0x197).** 20 entries × 16 bytes. The leading 4-byte
+   dword per entry is **confirmed** as the visible-gear **part gid**; the renderer attaches
+   **overlay slots {3,4,6,2,11,14}** from this table (each gid -> `data/char/skin/g{gid}.skn`).
+   The remaining 12 bytes per entry (item state / visual override / enhancement data) are
+   unverified.
+3. **Appearance region (SD +0x2C .. +0x37).** `appearance_variant` (SD +0x2C, the `variant` arg)
+   and `internal_class` (SD +0x34, the `class` arg, `{1,2,3,4}` for PCs) are confirmed as the
+   model-class formula inputs (see SpawnDescriptor notes). Still open: the 7 bytes between
+   (SD +0x2D..+0x33) and the role of `anim_class_word` (SD +0x36) need pattern analysis plus a
+   capture.
 4. **`equip_stat_buff_block` (SD +0xD4 .. +0x32B, 600 bytes).** Only three interior points are
    located (`aura_pct_value`, `buff_kind`, `skill_state_word`). The per-item equipment stat
    offsets referenced by the vitals formulas belong to *item* objects, not the player descriptor;

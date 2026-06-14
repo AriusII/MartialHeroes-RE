@@ -26,12 +26,23 @@
 //       class 3: 202130003 / 203130002 / 206130002 / 209130001
 //       class 4: 202140003 / 203140002 / 206140002 / 209140001
 //
+// RIG/CLIP IDENTITY (the class-mismatch shatter fix):
+//   A .skn mesh is authored against ONE skeleton named by its OWN id_b. That id_b selects BOTH
+//   the skeleton (data/char/bind/g{id_b}.bnd) AND the matched idle clip (actormotion.txt
+//   col2 == id_b → col16 → data/char/mot/g{...}.mot). The four creatable classes do NOT share a
+//   rig: class 1 has id_b=1 (g1, 84 bones); class 4 (Warrior) has id_b=4 (g4, 89 bones). Binding a
+//   class-4 mesh to the g1 rig + g1 idle is clean AT REST but SHATTERS the instant the wrong-rig
+//   clip rotates bones off bind. We therefore resolve the rig AND clip from the mesh's own id_b,
+//   PER class — never a single shared rig/clip.
+//   spec: Docs/RE/specs/skinning.md §8(e) "Rig/clip identity" — SAMPLE-VERIFIED / CODE-CONFIRMED.
+//
 // PASSIVE: zero game logic. View state only (which class/face, turntable angle).
 // Reads VFS assets via RealClientAssets; rebuilds the actor node when the class changes.
 // All Control mutation on the main thread.
 //
 // spec: Docs/RE/specs/frontend_scenes.md §4.2  CODE-CONFIRMED.
 // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 CODE-CONFIRMED (assets).
+// spec: Docs/RE/specs/skinning.md §8(e) — select skeleton AND clip by the skin's id_b, per class.
 
 using Godot;
 using MartialHeroes.Assets.Parsers;
@@ -88,9 +99,10 @@ public sealed partial class CharCreatePreview3D : Control
     // Per-class skin path table (§4.2 / §3.7.5). CODE-CONFIRMED.
     // =========================================================================
 
-    // Shared across all four create-preview classes (§3.7.5 CODE-CONFIRMED).
-    private const string SharedBndPath = "data/char/bind/g1.bnd";
-    private const string SharedIdleMotPath = "data/char/mot/g111100010.mot";
+    // NOTE: there is NO shared g1.bnd / g111100010.mot any more. The rig AND the idle clip are
+    // resolved PER CLASS from the parsed .skn's own id_b (see TryBuildActorForClass), because a
+    // skin is authored against exactly one skeleton named by its id_b and shatters on the wrong rig.
+    // spec: Docs/RE/specs/skinning.md §8(e) — rig/clip identity, per class.
 
     // Starter base-skin mesh per internal class id 1..4.
     // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 CODE-CONFIRMED.
@@ -230,9 +242,9 @@ public sealed partial class CharCreatePreview3D : Control
         _camera = new Camera3D
         {
             Name = "CreatePreviewCam",
-            Fov = 50f,   // spec: §3.5.1 CODE-CONFIRMED
+            Fov = 50f, // spec: §3.5.1 CODE-CONFIRMED
             Near = 0.05f, // tuned: at scale=3 units the near plane must be small (spec near=5 is world-space)
-            Far = 500f,   // sufficient for this SubViewport
+            Far = 500f, // sufficient for this SubViewport
             KeepAspect = Camera3D.KeepAspectEnum.Height,
         };
         // Place camera looking at the rig origin from the front.
@@ -495,39 +507,40 @@ public sealed partial class CharCreatePreview3D : Control
             return null;
         }
 
-        // Skeleton — shared g1.bnd.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 CODE-CONFIRMED.
+        // Skeleton — resolved from the MESH'S OWN id_b (NOT a shared g1.bnd). The skin's
+        // bind-local vertex offsets are baked against exactly this skeleton's rest pose; binding it
+        // to any other same-ID-range rig is clean at rest but shatters on play.
+        // spec: Docs/RE/specs/skinning.md §8(e) — data/char/bind/g{id_b}.bnd, per class.
         Skeleton? skeleton = null;
-        if (assets.Contains(SharedBndPath))
+        string bndPath = $"data/char/bind/g{mesh.IdB}.bnd";
+        if (mesh.IdB != 0 && assets.Contains(bndPath))
         {
             try
             {
-                ReadOnlyMemory<byte> bndData = assets.GetRaw(SharedBndPath);
+                ReadOnlyMemory<byte> bndData = assets.GetRaw(bndPath);
                 if (!bndData.IsEmpty)
                     skeleton = BndParser.Parse(bndData);
             }
             catch (Exception ex)
             {
-                GD.PrintErr($"[CharCreatePreview3D] BndParser failed: {ex.Message}");
+                GD.PrintErr($"[CharCreatePreview3D] BndParser failed '{bndPath}': {ex.Message}");
             }
+        }
+        else
+        {
+            GD.PrintErr($"[CharCreatePreview3D] .bnd not found for id_b={mesh.IdB}: {bndPath}");
         }
 
-        // Idle animation — shared g111100010.mot.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 CODE-CONFIRMED.
-        AnimationClip? idleClip = null;
-        if (assets.Contains(SharedIdleMotPath))
-        {
-            try
-            {
-                ReadOnlyMemory<byte> motData = assets.GetRaw(SharedIdleMotPath);
-                if (!motData.IsEmpty)
-                    idleClip = AnimationParser.Parse(motData);
-            }
-            catch (Exception ex)
-            {
-                GD.PrintErr($"[CharCreatePreview3D] MotParser failed: {ex.Message}");
-            }
-        }
+        // Idle animation — the MATCHED clip for this rig, keyed by the mesh's own id_b via
+        // actormotion.txt (col2 == id_b → col16). Each class's idle clip targets ITS rig's bones;
+        // playing the wrong-rig clip is the direct cause of the create-preview shatter.
+        // spec: Docs/RE/specs/skinning.md §8(e) — actormotion col2==id_b → col16, per class.
+        AnimationClip? idleClip = TryLoadIdleClip(assets, mesh.IdB);
+
+        GD.Print($"[CharCreatePreview3D] class={internalClass} resolved rig from id_b={mesh.IdB}: " +
+                 $"bnd='{bndPath}' bones={(skeleton?.Bones.Length ?? 0)} " +
+                 $"idle={(idleClip is null ? "none" : $"{idleClip.Tracks.Length}trk/{idleClip.FrameCount}f")}. " +
+                 "spec: skinning.md §8(e) per-class rig/clip identity.");
 
         // Texture.
         ImageTexture? albedo = null;
@@ -564,6 +577,52 @@ public sealed partial class CharCreatePreview3D : Control
         {
             SkinnedCharacterBuilder.PrintDiagnostics = savedDiag;
         }
+    }
+
+    /// <summary>
+    /// Loads the idle <c>.mot</c> clip MATCHED to a skin's <paramref name="actorClassId"/> (its
+    /// id_b) from <c>actormotion.txt</c>: the row whose col2 == id_b gives the idle motion id in
+    /// col16, resolved to <c>data/char/mot/g{idle}.mot</c>. This guarantees the clip's track bone
+    /// IDs address the SAME skeleton the mesh was baked against (per-class rig/clip identity).
+    /// spec: Docs/RE/specs/skinning.md §8(e); CLAUDE.md §Recovered asset mappings (actormotion idle).
+    /// </summary>
+    private static AnimationClip? TryLoadIdleClip(RealClientAssets assets, uint actorClassId)
+    {
+        if (actorClassId == 0) return null;
+
+        const string tablePath = "data/char/actormotion.txt";
+        if (!assets.Contains(tablePath)) return null;
+
+        try
+        {
+            // CP949 provider registered once at startup; decode the table text.
+            // spec: CLAUDE.md §Core engineering constraints — "Register [CP949] once".
+            string text = System.Text.Encoding.GetEncoding(949).GetString(assets.GetRaw(tablePath).Span);
+
+            foreach (string rawLine in text.Split('\n'))
+            {
+                string[] cols = rawLine.Replace("\r", string.Empty).Split('\t');
+                if (cols.Length <= 16) continue;
+                if (!uint.TryParse(cols[2].Trim(), out uint classId) || classId != actorClassId) continue;
+
+                string idle = cols[16].Trim();
+                if (idle.Length == 0 || idle == "0") return null;
+
+                string motPath = $"data/char/mot/g{idle}.mot";
+                if (!assets.Contains(motPath)) return null;
+
+                ReadOnlyMemory<byte> motData = assets.GetRaw(motPath);
+                if (motData.IsEmpty) return null;
+
+                return AnimationParser.Parse(motData);
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[CharCreatePreview3D] TryLoadIdleClip(id_b={actorClassId}) failed: {ex.Message}");
+        }
+
+        return null;
     }
 
     private void ApplyTurntableRotation()

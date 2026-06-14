@@ -113,21 +113,47 @@ public sealed partial class SkinnedCharacterNode : Node3D
         SkinningMath.BakeInverseBind(_perVertex, mesh.Positions, mesh.Normals, bindWorld);
 
         // 3) Per-bone track binding (by bone ID → array index).
+        //
+        // DEFENSIVE GUARD (rig/clip identity): a track whose bone_id is NOT a bone of this skeleton
+        // is SKIPPED, never clamped/redirected. Clamping a stray bone_id into range would still
+        // drive the WRONG bone (the precise way a wrong-rig clip shatters the mesh once it rotates
+        // bones off bind). Unmatched bone_id is a NON-FATAL skip. With the rig + clip now resolved
+        // from the same id_b (CharCreatePreview3D / CharPreview3D), the matched clip's track count
+        // equals the rig's bone count, so this guard should drop nothing for a correct trio — it is
+        // a belt-and-braces safety net against a future mismatch.
+        // spec: Docs/RE/specs/skinning.md §8(e) item 4 — "SKIP (do not clamp) any clip track whose
+        //       bone_id falls outside [base_id, base_id + bone_count)".
         // spec: Docs/RE/formats/animation.md §Bone-track linkage — bone_id matches Bone.SelfId.
         _trackByBoneIndex = new AnimationTrack?[boneCount];
         if (clip is not null && clip.FrameCount > 0)
         {
+            int boundTracks = 0;
+            int skippedTracks = 0;
             foreach (AnimationTrack tr in clip.Tracks)
             {
+                // Resolve bone_id → array slot ONLY by the skeleton's own id→index map. A bone_id
+                // absent from the map names a joint that does not exist on this rig → SKIP it.
+                // (No "off = bone_id − base_id" salvage: that is exactly the clamp-into-range the
+                // spec forbids, since the offset could land on an unrelated bone of the wrong rig.)
                 int bid = tr.BoneId & 0xFF;
                 int bIdx = (bid >= 0 && bid < 256) ? idToIndex[bid] : -1;
-                if (bIdx < 0)
-                {
-                    int off = tr.BoneId - baseId;
-                    bIdx = (off >= 0 && off < boneCount) ? off : -1;
-                }
 
-                if (bIdx >= 0 && bIdx < boneCount) _trackByBoneIndex[bIdx] = tr;
+                if (bIdx >= 0 && bIdx < boneCount)
+                {
+                    _trackByBoneIndex[bIdx] = tr;
+                    boundTracks++;
+                }
+                else
+                {
+                    skippedTracks++;
+                }
+            }
+
+            if (skippedTracks > 0)
+            {
+                GD.PrintErr($"[Skinning] '{mesh.Name}': SKIPPED {skippedTracks} clip track(s) whose " +
+                            $"bone_id is not a bone of this {boneCount}-bone rig (base_id={baseId}); " +
+                            $"bound {boundTracks}. spec: skinning.md §8(e) item 4 — skip, do not clamp.");
             }
 
             // Duration = frame_count × 0.1 (10 fps).

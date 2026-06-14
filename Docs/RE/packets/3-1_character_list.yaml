@@ -9,7 +9,7 @@ spec: packets/3-1_character_list.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Character-select list. A 3-byte header with a slot bitmask, followed by one 981-byte slot record per populated slot. Each slot record is an 880-byte SpawnDescriptor + a 96-byte stat block + a flag + a timestamp.
+summary: Character-select list. A 3-byte header with a slot bitmask, followed by one 981-byte slot record per populated slot. Each slot record is an 880-byte SpawnDescriptor + a 96-byte stat block + a flag + a timestamp. The descriptor drives the slot's rendered appearance (skin/skeleton/outfit) -- a list slot shows the REAL character, not a placeholder.
 
 # Fixed header only is modelled as the codegen struct. The variable per-slot records are described
 # in notes as their own field tables (the engineer hand-codes the repeat loop driven by SlotMask).
@@ -28,29 +28,80 @@ notes: |
                           loops ~8 slot indices and reads a record for each set bit.
 
   PER-SLOT RECORD (981 bytes, appended once per set bit in SlotMask). The handler reads it as four
-  sequential sub-blocks, in this order:
+  sequential sub-blocks, in this fixed order:
 
     Sub-block 1 -- SpawnDescriptor (880 bytes, record-relative 0x000..0x36f):
-      The same descriptor record family as 5/3 CharSpawn and 5/1 ActorSpawnExtended. Known
-      landmarks inside it (relative to the descriptor start) include a NUL-terminated name region,
-      a level value, and current vitals. Its full member map is a struct-cartographer task -- decode
-      from structs/actor.md.
+      The same descriptor record family as 5/3 CharSpawn and 5/1 ActorSpawnExtended. Its full
+      member map is owned by structs/actor.md -- decode from there. The fields that drive the
+      char-select preview's REAL appearance are:
+        +0x00  name (char[17], CP949/EUC-KR, NUL-terminated, <=16 bytes + terminator)
+        +0x2C  appearance_variant (u8)  -- body/gender variant; the 'variant' arg of the model formula
+        +0x34  internal_class (u16, {1,2,3,4})  -- THE skeleton driver; the 'class' arg of the formula
+        +0x38/+0x39  level/state bytes  -- see level CONFLICT below
+        +0x3C/+0x40/+0x44  current_hp / current_mp / current_stamina (u32 each)
+        +0x4C/+0x50  world_x / world_z (f32 each)
+        +0x58  equip/visible-gear table (20 entries x 16 bytes); leading dword of each entry is the
+               part gid. Renderer overlays the gear slots {3,4,6,2,11,14}.
+        +0x74  server_class (u16) -- server-assigned style id, distinct from internal_class.
 
     Sub-block 2 -- StatBlock (96 bytes, record-relative 0x370..0x3cf):
-      A per-character stat block. Internal layout NOT decoded this pass.
+      Per-character primary-stat record. On enter-character the chosen slot's 96 bytes are copied
+      verbatim into the local-player stat globals, so this IS the character's stat record. Block
+      offsets are relative to the StatBlock start (record-relative 0x370 + the value below):
+        +0x00 (4B u32) primary_stat_0  : 1st of the 5 allocatable primaries (STR-family).
+        +0x04 (4B u32) primary_stat_1
+        +0x08 (4B u32) primary_stat_2
+        +0x0C (4B u32) primary_stat_3
+        +0x10 (4B u32) primary_stat_4  : the 5 primaries are in allocation order. The slot-id ->
+                                         stat mapping (70=STR,71=AGI,72=DEX,73=INT,74=CON) is owned
+                                         by stats.md / structs/actor.md; these dwords are the same
+                                         five primaries.
+        +0x14 (4B u32) vital_current   : a current vital value.
+        +0x18 (8B i64) rank_xp         : rank/realm experience (8-byte span before +0x20).
+        +0x20 (4B u32) within_rank_xp  : xp progress within the current rank.
+        +0x24 (12B)    (gap)           : rank/xp tail, not mapped this pass.
+        +0x30 (4B u32) remaining_stat_points : unspent allocation points; gates the 2/29 send.
+        +0x34 (4B u32) (interior value, unmapped this pass).
+        +0x38 (40B)    (gap)           : remainder to the 96-byte boundary; interior owned by
+                                         stats.md, capture-pending.
+      96-byte boundary confirmed (first 5 dwords + tail span exactly one 0x60 block).
 
     Sub-block 3 -- SlotFlag (1 byte, record-relative 0x3d0):
-      A per-slot flag byte.
+      A per-slot availability/relation flag byte. The handler clears it to 0 on a successful read,
+      i.e. it is initialised on load. Exact relation semantics (e.g. locked / deletion-pending)
+      UNRESOLVED -- needs a capture with a non-default flag. Partial.
 
     Sub-block 4 -- Timestamp (4 bytes, record-relative 0x3d1..0x3d4):
-      A timing / timestamp value (le u32).
+      A timing / timestamp value (le u32) -- likely a cooldown/relation timestamp (delete- or
+      rename-cooldown). Exact meaning UNRESOLVED. Partial.
 
     Per-slot total = 880 + 96 + 1 + 4 = 981 bytes. A prior analyst observed a 1965-byte frame
     = 3 + 2*981 (two populated slots), capture-unverified here.
+
+  APPEARANCE DRIVER (how a list slot renders the REAL character, not a placeholder):
+    For an existing character the rendered appearance comes ENTIRELY from the server-supplied
+    SpawnDescriptor -- never from the create-scene's hardcoded preview gids. The factory reads
+    internal_class (desc +0x34) and appearance_variant (desc +0x2C), then:
+      model_class_id = 5*(internal_class + 4*appearance_variant) - 24
+    which yields an IdB in {1,11,16,26} for the four starter classes. That IdB selects the
+    catalog skeleton (one of g1..g4 via the visual catalog, NOT a literal g{n}.bnd filename).
+    The visible outfit is then layered from the equip table at desc +0x58: the renderer attaches
+    overlay slots {3,4,6,2,11,14}, each reading the first dword of its 16-byte entry as a part
+    gid -> data/char/skin/g{gid}.skn. See frontend_scenes.md SS3.1/SS3.2 and the skinning chain.
+
+  SLOT ORDERING (cross-link): slot index == SlotMask bit position. The handler zero-clears all
+  slots, then runs a fixed loop over the mask bits; a record is consumed ONLY for a set bit and
+  lands in that bit's slot, so an unset bit leaves the slot empty (records are NOT packed into the
+  first N slots). Owned by frontend_scenes.md SS3.1 (BIT-POSITION placement). LSB-first.
 
   IMPLEMENTATION GUIDANCE: read the 3-byte header, then for each set bit in SlotMask (LSB-first,
   ~8 slots) decode one 981-byte record by stepping the four sub-blocks above. Drive the
   SpawnDescriptor decode from structs/actor.md.
 
-  UNKNOWNS to resolve with a capture: the 96-byte StatBlock layout; the SpawnDescriptor member map;
-  the bit ordering of SlotMask vs slot index; whether ServerId/ChannelId carry real values.
+  CONFLICT (level boundary): the level u16 at descriptor +0x3A may overlap the two state bytes at
+  desc +0x38/+0x39. Do NOT promote a clean u16 level without a 5/53 vitals capture for a character
+  of known level. Flagged open question (see structs/actor.md open question 1), not adjudicated.
+
+  REMAINING UNKNOWNS (capture-pending): the StatBlock tail (+0x24, +0x34, +0x38..) interior;
+  SlotFlag and Timestamp semantics; whether ServerId/ChannelId carry real values; the level byte
+  boundary above.

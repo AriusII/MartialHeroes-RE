@@ -75,6 +75,14 @@ public static class LoginLayout
     // §11.2a Upper window — main panel, server listbox, scroll controls. CODE-CONFIRMED.
     // =========================================================================
 
+    // B@(0,0,1024,110) src(0,0) — TOP chrome cap strip (carved bezel, hanging rings, top edge).
+    // The main panel art (B) starts at canvas Y=110; this slice of the same atlas placed at
+    // canvas Y=0 shows the top ornamental cap of the stone frame above the ink-wash painting.
+    // The region B src(0,0..110) contains the top edge of the stone chrome (rings, carved rim).
+    // spec: Docs/RE/specs/frontend_scenes.md §11.2a (main panel B at Y=110); top cap is
+    //       the same atlas region placed at Y=0 to show above the main panel anchor. CODE-CONFIRMED layout.
+    public static readonly WidgetRect TopChrome = new(0, 0, 1024, 110, 0, 0);
+
     // B@(0,110,1024,490) src(0,0) — main background panel art.
     // spec §11.2a "Main panel art". CODE-CONFIRMED.
     public static readonly WidgetRect MainPanel = new(0, 110, 1024, 490, 0, 0);
@@ -194,9 +202,11 @@ public static class LoginLayout
     public const int ConfirmHoverSrcY = 398;
     public const int ActionConfirm = 102; // spec §1.2 "Server-list button". CODE-CONFIRMED.
 
-    // Confirm-button face plate (baked art overlay on the gold button).
-    // A@(265,0,494,113) src(0,469). spec §11.2e. CODE-CONFIRMED.
-    public static readonly WidgetRect ConfirmFacePlate = new(265, 0, 494, 113, 0, 469);
+    // Confirm-button face plate (baked art overlay — the plate the ID/PW row sits on).
+    // §11.2e: dst=(0,469,494,113) src=(265,0) — canvas X=0,Y=469,W=494,H=113; atlas srcX=265,srcY=0.
+    // The prior record had dst/src transposed (265,0 dst vs 0,469 src). CODE-CONFIRMED.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.2e "Login background plate image". CODE-CONFIRMED.
+    public static readonly WidgetRect ConfirmFacePlate = new(0, 469, 494, 113, 265, 0);
 
     // Account-label caption art (baked Korean "아이디" plate).
     // A@(340,30,38,13) src(0,398) — baked art, no runtime text. spec §11.2e. CODE-CONFIRMED.

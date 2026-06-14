@@ -90,10 +90,10 @@ public sealed class GameVerParserTests
     }
 
     [Theory]
-    [InlineData(0u, 9u)]          // 10×0+9 = 9
-    [InlineData(1u, 19u)]         // 10×1+9 = 19
-    [InlineData(2114u, 21149u)]   // real-client observed value
-    [InlineData(100u, 1009u)]     // 10×100+9 = 1009
+    [InlineData(0u, 9u)] // 10×0+9 = 9
+    [InlineData(1u, 19u)] // 10×1+9 = 19
+    [InlineData(2114u, 21149u)] // real-client observed value
+    [InlineData(100u, 1009u)] // 10×100+9 = 1009
     public void EnterGameVersionToken_Formula_10xPluS9(uint versionSource, uint expectedToken)
     {
         // spec: Docs/RE/formats/config_tables.md §7 §Version token derivation —
@@ -129,7 +129,7 @@ public sealed class GameVerParserTests
         Assert.Equal(0xCAFEBABEu, result.Field2);
         Assert.Equal(0x11223344u, result.Field3);
         Assert.Equal(0xAABBCCDDu, result.Field4);
-        Assert.Equal(2114u,       result.VersionSourceField);
+        Assert.Equal(2114u, result.VersionSourceField);
         Assert.Equal(0x99887766u, result.Field6);
     }
 

@@ -91,12 +91,12 @@ public sealed class XeffParserTests
         {
             // 24-byte prefix for blocks 1..N-1.
             // spec: Docs/RE/formats/effects.md §A.4 §A.15 — blocks[1..N-1]: u32 sub_id + u32[4] zeros + u32 entry_count: CONFIRMED.
-            ms.Write(Le4(blockIndex));   // sub_id = block ordinal (u32 @ prefix+0)
-            ms.Write(Le4(0u));           // u32[0] zeros @ prefix+4
-            ms.Write(Le4(0u));           // u32[1] zeros @ prefix+8
-            ms.Write(Le4(0u));           // u32[2] zeros @ prefix+12
-            ms.Write(Le4(0u));           // u32[3] zeros @ prefix+16
-            ms.Write(Le4(n));            // entry_count u32 @ prefix+20
+            ms.Write(Le4(blockIndex)); // sub_id = block ordinal (u32 @ prefix+0)
+            ms.Write(Le4(0u)); // u32[0] zeros @ prefix+4
+            ms.Write(Le4(0u)); // u32[1] zeros @ prefix+8
+            ms.Write(Le4(0u)); // u32[2] zeros @ prefix+12
+            ms.Write(Le4(0u)); // u32[3] zeros @ prefix+16
+            ms.Write(Le4(n)); // entry_count u32 @ prefix+20
         }
         // For block 0, no prefix — entry_count comes from header first_entry_count.
         // spec: Docs/RE/formats/effects.md §A.15 — block[0] has NO entry_count prefix: CONFIRMED.
@@ -118,10 +118,10 @@ public sealed class XeffParserTests
 
         // ── Body: track header (13 bytes) ────────────────────────────────────
         // spec: Docs/RE/formats/effects.md §A.4.3 Track header (13 bytes): CONFIRMED.
-        ms.WriteByte(1);         // anim_loop u8 @ +0
-        ms.Write(Le4(67u));      // unknown_constant u32 @ +1
-        ms.Write(Le4(469u));     // anim_stride u32 @ +5
-        ms.Write(Le4(0u));       // anim_base_time u32 @ +9
+        ms.WriteByte(1); // anim_loop u8 @ +0
+        ms.Write(Le4(67u)); // unknown_constant u32 @ +1
+        ms.Write(Le4(469u)); // anim_stride u32 @ +5
+        ms.Write(Le4(0u)); // anim_base_time u32 @ +9
 
         // ── Body: keyframes ──────────────────────────────────────────────────
         // spec: Docs/RE/formats/effects.md §A.4.4 Keyframe array: CONFIRMED.
@@ -401,8 +401,8 @@ public sealed class XeffParserTests
 
         Assert.Equal(68u, xeff.SubEffectCount);
         Assert.Equal(68, xeff.SubEffects.Length);
-        Assert.Equal(2u, xeff.SubEffects[0].EntryCount);  // block[0]: from header
-        Assert.Equal(2u, xeff.SubEffects[1].EntryCount);  // block[1]: from 24-byte prefix
+        Assert.Equal(2u, xeff.SubEffects[0].EntryCount); // block[0]: from header
+        Assert.Equal(2u, xeff.SubEffects[1].EntryCount); // block[1]: from 24-byte prefix
         Assert.Equal(2u, xeff.SubEffects[67].EntryCount); // last block
         // Each block has 2 keyframes
         Assert.All(xeff.SubEffects, sub => Assert.Equal(2, sub.Keyframes.Length));
@@ -489,8 +489,8 @@ public sealed class XeffParserTests
         ms.Write(BitConverter.GetBytes((ushort)2));
         ms.Write(Le4(3u));
         for (int v = 0; v < 3; v++)
-            for (int f = 0; f < 8; f++)
-                ms.Write(Le4f((float)(v * 10 + f)));
+        for (int f = 0; f < 8; f++)
+            ms.Write(Le4f((float)(v * 10 + f)));
 
         EffObjectShape shape = XeffParser.ParseEff(new ReadOnlyMemory<byte>(ms.ToArray()));
         Assert.Equal(3, shape.Indices.Length);
@@ -507,9 +507,14 @@ public sealed class XeffParserTests
         ms.Write(BitConverter.GetBytes((ushort)1));
         ms.Write(BitConverter.GetBytes((ushort)2));
         ms.Write(Le4(3u));
-        ms.Write(Le4f(10f)); ms.Write(Le4f(20f)); ms.Write(Le4f(30f));
-        ms.Write(Le4f(0f));  ms.Write(Le4f(1f));  ms.Write(Le4f(0f));
-        ms.Write(Le4f(0.5f)); ms.Write(Le4f(0.25f));
+        ms.Write(Le4f(10f));
+        ms.Write(Le4f(20f));
+        ms.Write(Le4f(30f));
+        ms.Write(Le4f(0f));
+        ms.Write(Le4f(1f));
+        ms.Write(Le4f(0f));
+        ms.Write(Le4f(0.5f));
+        ms.Write(Le4f(0.25f));
         ms.Write(new byte[64]); // vertices 1 and 2
 
         EffObjectShape shape = XeffParser.ParseEff(new ReadOnlyMemory<byte>(ms.ToArray()));
@@ -568,13 +573,13 @@ public sealed class XeffParserTests
         //   + (N−1)×40       — frames 1..N-1 (§A.4.4)
         // With N=5: 32 + 320 + 24 + 12 + 13 + 36 + 160 = 597 bytes (no prefix for single block[0]).
         const int N = 5;
-        int expectedSize = 32          // header
-                         + N * 64      // name table — §A.4.1
-                         + (4 + N * 4) // alpha curve — §A.4.2
-                         + 3 * 4       // scaleX/Y/Z count prefixes — §A.4.2
-                         + 13          // track header — §A.14
-                         + 36          // frame 0 — §A.4.4
-                         + (N - 1) * 40; // frames 1..N-1 — §A.4.4
+        int expectedSize = 32 // header
+                           + N * 64 // name table — §A.4.1
+                           + (4 + N * 4) // alpha curve — §A.4.2
+                           + 3 * 4 // scaleX/Y/Z count prefixes — §A.4.2
+                           + 13 // track header — §A.14
+                           + 36 // frame 0 — §A.4.4
+                           + (N - 1) * 40; // frames 1..N-1 — §A.4.4
         // Note: no entry_count prefix for single-block file (block[0] is prefix-free).
         // spec: Docs/RE/formats/effects.md §A.15 — block[0] has NO entry_count prefix: CONFIRMED.
 
@@ -592,28 +597,34 @@ public sealed class XeffParserTests
         using var ms = new MemoryStream();
 
         // 32-byte header
-        ms.Write(Le4(1u));      // effect_id
-        ms.Write(Le4(1u));      // sub_effect_count
-        ms.Write(Le4(1u));      // type_flag
+        ms.Write(Le4(1u)); // effect_id
+        ms.Write(Le4(1u)); // sub_effect_count
+        ms.Write(Le4(1u)); // type_flag
         ms.Write(new byte[16]); // reserved
-        ms.Write(Le4(1u));      // first_entry_count = 1
+        ms.Write(Le4(1u)); // first_entry_count = 1
 
         // Block[0] body (no prefix) with N=1:
         ms.Write(new byte[64]); // name table 1×64
-        ms.Write(Le4(1u));      // alpha count=1
-        ms.Write(Le4f(0.5f));   // alpha[0]
-        ms.Write(Le4(0u));      // scaleX count=0
-        ms.Write(Le4(0u));      // scaleY count=0
-        ms.Write(Le4(0u));      // scaleZ count=0
+        ms.Write(Le4(1u)); // alpha count=1
+        ms.Write(Le4f(0.5f)); // alpha[0]
+        ms.Write(Le4(0u)); // scaleX count=0
+        ms.Write(Le4(0u)); // scaleY count=0
+        ms.Write(Le4(0u)); // scaleZ count=0
         // track header (13 bytes)
         ms.WriteByte(1);
         ms.Write(Le4(67u));
         ms.Write(Le4(100u));
         ms.Write(Le4(0u));
         // frame 0 (no index): rotation 0, 90, 0 degrees
-        ms.Write(Le4f(0f)); ms.Write(Le4f(0f)); ms.Write(Le4f(0f)); // velocity
-        ms.Write(Le4f(1f)); ms.Write(Le4f(1f)); ms.Write(Le4f(1f)); // size
-        ms.Write(Le4f(0f)); ms.Write(Le4f(90f)); ms.Write(Le4f(0f)); // rot deg
+        ms.Write(Le4f(0f));
+        ms.Write(Le4f(0f));
+        ms.Write(Le4f(0f)); // velocity
+        ms.Write(Le4f(1f));
+        ms.Write(Le4f(1f));
+        ms.Write(Le4f(1f)); // size
+        ms.Write(Le4f(0f));
+        ms.Write(Le4f(90f));
+        ms.Write(Le4f(0f)); // rot deg
 
         XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(ms.ToArray()));
         Quat q = xeff.SubEffects[0].Keyframes[0].Rotation;
