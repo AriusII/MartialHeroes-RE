@@ -425,8 +425,6 @@ character-select (state 4).
   layouts, scene state machine); `formats/ui_manifests.md` (the UI texture-id resolver); the
   `specs/frontend_scenes.md` / `specs/client_workflow.md` front-end counterparts.
 
----
-
 ## 14. Consolidated opcode table (all World-scene rows)
 
 Direction is from the **client's** point of view (`C2S` = client→server, `S2C` = server→client). Sizes
@@ -531,12 +529,171 @@ tail). **Routing and sizes are CODE-CONFIRMED; every body field is CAPTURE-UNVER
 | `specs/effects.md` | Effect runtime, boot pipeline, trigger table, skill-cast effect chain. |
 | `specs/minimap.md` | HUD radar projection, tile streaming, blip table; full-screen world map. |
 | `specs/ui_system.md` | The `Diamond::GU*` widget toolkit hosting every World-scene window. |
+| `world_systems.md` Ch. 16 | The 256-unit region grid, the zone-type enum (safe/PvP/closed), the PvP/movement gates, the gather-anchor table, and `.mud` as a sound grid. |
 | `formats/config_tables.md` | `.scr` / `.do` / `.csv` catalogues (items, skills, NPCs, stat curves, quests, `msg.xdb`). |
 | `formats/misc_data.md` | `.xdb` / `.mi` / `.tol` / `.ion` / `.sc` small data files (incl. `actor_size.xdb`). |
 | `formats/effects.md` | `.xeff` / `.eff` / `.xobj` descriptors and the effect-manifest list files. |
 | `formats/ui_manifests.md` | `uitex.txt` / `skillicon.txt` / `crestlist.txt` / `texturelist.txt` UI manifests. |
 | `opcodes.md` | The authoritative `(major:minor)` catalogue (the consolidated table above is a per-system index of it). |
 | `packets/*.yaml` | Per-opcode wire field specs (linked per chapter). |
+
+---
+
+## 16. Regions & zones (PvP / safe / closed gating) — Campaign 5
+
+> **Campaign-5 addition** (Lane 4 — Regions & Triggers). This chapter documents the third world
+> grid scale — the **256-unit region grid** — and the **zone-type enum** it indexes, which feed the
+> same server-authoritative world-state tick and combat machinery the chapters above describe.
+> The world is gridded at **three scales**: 1024-unit **terrain cells** (`formats/terrain.md`),
+> 256-unit **region cells** (this chapter), and 16-unit **sub-tiles** (the `.mud` sound grid below).
+> Engine code citing any constant here writes `// spec: Docs/RE/specs/world_systems.md` (Ch. 16).
+
+The client keeps a **per-area region grid** that quantizes the world into 256-unit cells, and a
+parallel **region-properties table** that maps each region id to a small **zone-type enum**. Combat
+permission, movement barriers, and the world-marker overlay are driven off these two structures, but
+the **authoritative active region** comes from the **network layer** (server-pushed into the
+world-state tick), not from the local grid — the local grid is consulted to classify *target*
+positions and to gate the player's own intended moves. This is consistent with the chapter-0 model:
+server-authoritative resolution, client-side gating for presentation and to avoid pointless sends.
+
+### 16.1 The region grid (per-area, `region<area>.bin`)
+
+The per-area region file is loaded once when the active map area is set, alongside the area's other
+binary tables (the per-area map header, the region-properties table, and the gather/anchor table).
+Its on-disk shape is a **flat byte grid plus dimensions and a world origin**:
+
+| Element | Size / form | Meaning | Confidence |
+|---|---|---|---|
+| grid width | 4-byte unsigned integer | number of columns | CONFIRMED |
+| grid height | 4-byte unsigned integer | number of rows | CONFIRMED |
+| grid buffer | width x height bytes, **1 byte per cell** | each byte = a **region id** (0..31) | CONFIRMED |
+| world-X origin | 4-byte unsigned integer | subtracted before the 256-unit quantize | CONFIRMED |
+| world-Z origin | 4-byte unsigned integer | subtracted before the 256-unit quantize | CONFIRMED |
+
+Read order in the file is: width, height, then `width x height` cell bytes, then the X origin, then
+the Z origin. **Each grid cell is one byte holding a region id (0..31)** — it is *not* a flag byte.
+The flags/semantics live in the region-properties table (16.2), indexed by that id.
+
+**World position to region id** (the lookup every gating site uses):
+
+```
+col   = (worldX - originX) / 256          # integer cell column
+row   = (worldZ - originZ) / 256          # integer cell row
+index = col + row * width
+region_id = gridBuffer[index]             # unsigned byte, 0..31
+```
+
+- **Cell size = 256 world units per axis** (a finer quantization layered over the 1024-unit terrain
+  cell; 256 = a quarter of a terrain cell). [CONFIRMED]
+- If the grid is not loaded, or `index >= width x height`, the lookup is treated as a failure and
+  yields region id 0. [CONFIRMED]
+- Cell math is integer division; world-coordinate handling follows the project's standard convention.
+
+### 16.2 The region-properties (zone) table (`regiontable<area>.bin`)
+
+A fixed **32 records x 48 bytes = 1536 bytes** table, indexed directly by region id (0..31). A region
+id >= 32 has no record (lookup returns nothing / treated as the default). [CONFIRMED]
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|---:|---:|---|---|---|---|
+| +0  | 40 | (opaque) | unread bytes | Present in each record; not consumed by any region-gating path examined. Meaning undetermined. | UNVERIFIED |
+| +40 | 4  | u32 | **zone type** | The only field consumed in region logic; an **enum**, not a bitmask. | CONFIRMED (encoding) |
+| +44 | 4  | (opaque) | trailing bytes | Remainder of the 48-byte stride; unread in region paths. | UNVERIFIED |
+
+- **Record count:** fixed 32. **Record stride:** 48 bytes. **Index source:** the region id byte from
+  the grid (16.1) or the network-pushed active region id (16.3). [CONFIRMED]
+- This is the same `regiontable<area>.bin` referenced as the minimap sub-zone label source in
+  Chapter 10; the **+40 zone-type word** is the region-gating field, distinct from any label use.
+
+### 16.3 Zone-type enum (record offset +40)
+
+The zone type is a small **enumerated value**, **not a packed bitmask** — every consuming site does
+an **equality compare** (`== 1`, `== 2`, `!= 0`), never a bit test. A missing record (region id >= 32)
+is treated by the combat arbiter as type `1`.
+
+| Value | Meaning | Confidence |
+|---|---|---|
+| `0`  | **Safe / no-combat** zone — combat arbiter yields the "denied" result. | PLAUSIBLE |
+| `1`  | **Open PvP / combat-enabled** zone — combat is permitted (subject to the faction check). | CONFIRMED (1 = combat-permitted) |
+| `2`  | **Movement-restricted / closed** zone — entry/movement into a type-2 cell is **denied** (the move is rejected, a localized message is shown, and the actor is snapped back). Also a distinct non-open combat mode. | CONFIRMED (2 = movement-restricted) |
+| `3+` | Not observed at any examined site. | UNVERIFIED |
+
+**Where the enum is consumed:**
+
+- **Active region is server-authoritative.** The player's current region id is a separate global
+  pushed from the **network layer** into the world-state tick and the local-player status handler —
+  it is *not* read from the local grid for the player's own position. The local grid (16.1) is used
+  to classify a **target actor's** position. [CONFIRMED]
+- **Combat / PvP arbiter.** Reads the player's self-region type and the target region's type (each
+  defaulting to `1` if the record is missing), then resolves a combat-mode result: if either side is
+  type `1`, combat is the open/permitted mode; if both sides are non-safe (non-zero) it is a distinct
+  restricted combat mode; otherwise it is the safe/denied mode. The target region is computed from
+  the target actor's world XZ via the 16.1 lookup. [CONFIRMED encoding; PLAUSIBLE labels]
+- **Attack / target validity gate.** Refuses the action unless **both** the active region and the
+  target's region are type `1`, and additionally cross-checks a faction/team value — i.e. flagged PvP
+  is allowed only in type-1 zones, subject to faction. [CONFIRMED]
+- **Movement gate.** If the destination cell's region type is `2`, the move is denied: a localized
+  message is shown (message id 74309) and the actor is snapped back. [CONFIRMED]
+- **World-marker overlay.** The world-state tick builds labeled world markers that also read the
+  same +40 type field; the marker names themselves come from the gather/anchor table (16.4), not the
+  zone table. [PLAUSIBLE]
+
+### 16.4 Quest / event triggers are NOT region-grid-driven
+
+No region grid cell and no region-table record carries a quest or event trigger id in any path
+examined. Enter-region quest/event dispatch, if present, is **server-authoritative**; client-side the
+region byte only gates **movement / combat / UI**. [PLAUSIBLE]
+
+- **Quest/event scripts** load from **global text scripts at startup** (the quest and event `.scr`
+  scripts), pulled by the bulk asset-preload thread — area-independent, not per-cell.
+- **Gather/anchor table** (`gathertable<area>.bin`, **28-byte records**) holds **named world-anchor
+  markers** (gather nodes / quest-NPC anchors). Each record's leading 2 bytes are an id key; a record
+  is found by **lookup-by-id**, yielding a world position + display name that the world-state tick
+  turns into on-screen labeled markers. This is a static-anchor lookup, **not** an on-enter trigger.
+- Whether any quest/event script entry keys off a region id at parse time was **out of scope** and is
+  **UNVERIFIED**.
+
+### 16.5 `.mud` is a per-cell sound grid — not region, not collision
+
+`.mud` is a **per-terrain-cell** blob (loaded per cell with the cell's `.map` scene and a `.gad`
+stub), used for **per-cell sound / ambience zoning**. It is **distinct** from the region/PvP system
+(`region<area>.bin` + `regiontable<area>.bin`) and from collision/walkability (`.sod` 2D wall
+segments + `.ted` ground height). [CONFIRMED]
+
+| `.mud` fact | Value / verdict | Confidence |
+|---|---|---|
+| file scope | per terrain cell (loaded with `.gad` / `.map`) | CONFIRMED |
+| size | fixed 32 KiB (32768 bytes) | CONFIRMED |
+| grid | 64 x 64 tiles, **8 bytes/tile**, **16 world units/tile** (1024 / 64) | CONFIRMED (geometry); tile content PLAUSIBLE |
+| purpose | sound / ambience zoning per 16-unit sub-tile (lookup family sits adjacent to the audio buffer code) | PLAUSIBLE (strong) |
+| region / PvP? | NO — that is `region.bin` + `regiontable` | CONFIRMED |
+| collision / walkability? | NO — that is `.sod` / `.ted` | CONFIRMED |
+
+Runtime lookup subtracts the cell's `(cellX x 1024, cellZ x 1024)` world origin and quantizes to a
+tile, returning the one 8-byte tile under a given world XZ. The **8-byte tile's internal layout**
+(sound id / volume / flags) is **not** established here and is owned by a sound/asset-format analyst.
+[UNVERIFIED]
+
+### 16.6 Known unknowns (so the engineer never guesses)
+
+- The exact label for zone type `0` ("safe" is inferred from the arbiter's denied result, never seen
+  named) and whether any area uses type `3+`. [UNVERIFIED]
+- The other 44 bytes of each 48-byte region-table record (only the +40 type word is read). [UNVERIFIED]
+- Whether any quest/event script entry keys off a region id at parse time. [UNVERIFIED]
+- The internal byte layout of the 8-byte `.mud` tile. [UNVERIFIED]
+- The contents of the 520-byte per-area map header (loaded with the region tables but not part of
+  region gating). [UNVERIFIED]
+
+- **Driving VFS data:** `region<area>.bin` (256-unit region-id grid), `regiontable<area>.bin`
+  (32 x 48-byte zone-type records; the same file the minimap reads for sub-zone labels, Chapter 10),
+  `gathertable<area>.bin` (28-byte named world-anchor records), per-cell `.mud` (64x64 sound-tile
+  grid); `msg.xdb` (the movement-denied message id 74309) — `formats/config_tables.md`.
+- **See also:** Chapter 1 (combat — the PvP arbiter feeds the same loop), Chapter 10 (minimap —
+  shares `regiontable<area>.bin`), `formats/terrain.md` (1024-unit terrain cells + `.ted`/`.sod`
+  ground/collision the region grid is layered over). The `map_option<area>.bin` byte layout is owned
+  by a separate VFS data spec, not this chapter.
+
+---
 
 - **Glossary:** see `Docs/RE/names.yaml`
 - **Provenance:** see `Docs/RE/journal.md`

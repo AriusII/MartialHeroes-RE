@@ -897,3 +897,23 @@ Top-Orchestrator session, continued. Firewall held; build 0/0; ~1520 tests green
 - **RESIDUAL:** char-select SLOT actors render T-posed (idle `.mot` not applied to the slot row — same
   per-id_b idle resolution as the create fix is needed); waterfall render; build the PIN/server-list/loading
   Godot screens from the recovered display-lists; promote loading §9.
+
+---
+
+## 2026-06-14 — CAMPAIGN 4 (cont.): char-select slots animate + appearance pipeline RE + loading §9.1
+
+- **ENGINEERING (Godot layer 05, build 0/0):** char-select SLOT actors no longer T-pose — each slot resolves
+  its OWN `g{id_b}.bnd` + per-id_b idle `.mot` (same §8(e) fix as the create preview); slots 0/2/3 animate
+  (track==bone, INV1<2e-6), slot 1 (id_b=2, no idle row in this VFS) fail-safes to a clean rest pose;
+  character key-light raised so figures read lit, not silhouettes.
+- **PROMOTION:** `frontend_scenes.md §9.1` loading-screen visual composition (rand%3 background, 223×pct/100
+  bar from a baked DDS strip, no caption/spinner, looping cue 920100100).
+- **RECOVERY (READONLY IDA):** full character APPEARANCE ASSEMBLY — a character = one shared skeleton + up to
+  6 overlay `.skn` parts (body = overlay slot 3, NOT a separate base mesh); `model_class_id = 5·(class+4·
+  variant)−24 ∈ {1,11,16,26}`; overlay slots {3,4,6,2,11,14} (14=weapon, local-player only); textures +
+  motions are REGISTRY-keyed by numeric id from list files (`tex{W}{H}list.txt`, `motlist.txt`) — not
+  `%d.png`/`g%d.mot` formatting; idle via actormotion(id_b). Resolves `preview-character.md §8` "no IDA
+  cross-check". Staged in `_dirty/campaign5/character-appearance-assembly.md` (+ deltas for texture.md/
+  animation.md/skinning.md/frontend_scenes §3).
+- **RESIDUAL:** waterfall render; build PIN/server-list/loading Godot screens from the recovered display-lists;
+  promote the appearance-pipeline deltas; live-debugger value-edge confirms (catalog categoryBase[], bind-pose).

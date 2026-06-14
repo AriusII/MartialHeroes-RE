@@ -11,7 +11,7 @@
 | Attribute         | Value |
 |-------------------|-------|
 | `status`          | `mixed` — see per-format status rows below |
-| `sample_verified` | `true` for `.fx1`–`.fx6`, `.up`, `.exd`, `.sod.pre`, `.ted.post`, `wind%d.bin` header; `false` for `light%d.bin`, `point_light%d.bin`, `.fx4`, `.fx7` |
+| `sample_verified` | `true` for `.fx1`–`.fx6`, `.up`, `.exd`, `.sod.pre`, `.ted.post`, `wind%d.bin` header; `false` for `light%d.bin`, `point_light%d.bin`; `.fx7` size-formula PLAUSIBLE (dual-sample); `.fx4` UNVERIFIED (single-sample) |
 | `binary_analysed` | `doida.exe` (legacy 32-bit client, x86 LE) |
 | `confidence`      | Fields annotated CONFIRMED are corroborated by parser read-sequence and/or real sample bytes. Fields annotated UNVERIFIED are structurally inferred or parser-only, without sample cross-check. |
 
@@ -71,7 +71,7 @@ blend or alpha-splat maps.
 
 | Format key | sample_verified |
 |-----------|-----------------|
-| `fx_layer` | `true` for `.fx1`–`.fx3`, `.fx5`, `.fx6`; `false` for `.fx4`, `.fx7` |
+| `fx_layer` | `true` for `.fx1`–`.fx3`, `.fx5`, `.fx6`; `.fx7` PLAUSIBLE (dual-sample); `.fx4` UNVERIFIED (single-sample) |
 
 **Path pattern:** `data/map{MAP}/dat/d{MAP}x1{TX:04d}z1{TZ:04d}.fx{N}` where `N` is 1–7.
 
@@ -337,17 +337,121 @@ Verified: 3 files = 29 444 bytes = 32 + 39 × 736 + 708.
 
 **Per-sub-chunk verification:** `8 + 20 × 32 + 30 × 2 + 28 = 8 + 640 + 60 + 28 = 736`; final = `8 + 640 + 60 = 708`.
 
-### 1.10 FX layer summary table
+### 1.10 FX7 Format  (`.fx7`)
+
+**Status:** PLAUSIBLE — 2 sample files (dual-sample), byte-identical in size, size formula exact for both.
+**Semantic:** Single-section terrain overlay mesh using the **FX5-style section header** but the
+**VF_32** vertex format (no per-vertex colour). Where FX5 carries a per-vertex colour and groups
+1–3 sections, FX7 (in both observed samples) is a single section with a high vertex count and a
+plain position/normal/UV0 vertex. The two observed files are identical in size, consistent with the
+same cell tile reused across two map areas.
+
+**File layout:**
+
+```
+FX7_File = Section_Header (40 bytes) + SubChunk_Header (12 bytes) + VertexData + IndexData
+```
+
+A single section; the 52-byte header is the same FX5 section + sub-chunk structure (`terrain_layers.md` §1.8).
+
+**Section_Header (40 bytes):**
+
+| Offset | Size | Type | Field | Observed values | Confidence |
+|-------:|-----:|------|-------|-----------------|------------|
+| 0x00 | 4 | u32 | `section_type` | 1 | DUAL-SAMPLE (constant=1; matches FX5) |
+| 0x04 | 4 | u32 | _unknown_1_ | 2 | DUAL-SAMPLE (within FX5's 1–3 range) |
+| 0x08 | 4 | f32 | `unk_dist` | large float (thousands) | DUAL-SAMPLE — **a large f32, NOT a small integer LOD distance.** FX5 stores 300/400/450 here as a u32; FX7 stores a large float (candidate world-space bounding coordinate). Do not treat this as the FX5 LOD-distance field. |
+| 0x0C | 4 | f32 | _unknown_2_ | fractional | DUAL-SAMPLE — candidate bounding coordinate / dimension |
+| 0x10 | 4 | f32 | _unknown_3_ | large float | DUAL-SAMPLE — candidate bounding coordinate |
+| 0x14 | 4 | f32 | _unknown_4_ | small signed fractional | DUAL-SAMPLE — candidate direction / normal component |
+| 0x18 | 4 | u32/f32 | _unknown_5_ | 0 | DUAL-SAMPLE (zero) |
+| 0x1C | 4 | f32 | _unknown_6_ | near-zero fractional | DUAL-SAMPLE |
+| 0x20 | 4 | u32 | _unknown_7_ | 1 | DUAL-SAMPLE (constant=1; matches FX5 _unknown_5_) |
+| 0x24 | 4 | u32 | _unknown_8_ | 0 | DUAL-SAMPLE (constant=0; matches FX5 _unknown_6_) |
+
+**SubChunk_Header (12 bytes):**
+
+| Offset | Size | Type | Field | Observed values | Confidence |
+|-------:|-----:|------|-------|-----------------|------------|
+| 0x28 | 4 | u32 | _unknown_flags_ | 0 | DUAL-SAMPLE (FX5 had 1 here; FX7 had 0) |
+| 0x2C | 4 | u32 | `vert_count` | large (hundreds–thousand) | DUAL-SAMPLE |
+| 0x30 | 4 | u32 | `idx_count` | large; divisible by 3 | DUAL-SAMPLE |
+
+**VertexData:** `vert_count × 32` bytes (**VF_32** — position 12 B + normal 12 B + UV0 8 B; **no
+per-vertex colour field**). This is the same VF_32 used by FX6 (`terrain_layers.md` §1.2), not FX5's VF_36.
+
+**IndexData:** `idx_count × 2` bytes (u16). Plain triangle list (`idx_count` divisible by 3).
+
+**File-size formula:** `52 + vert_count × 32 + idx_count × 2`
+
+Verified: both samples satisfy the formula exactly with zero residual bytes (a 52-byte header + a
+VF_32 vertex block + a u16 index block account for the whole file in both cases).
+
+### 1.11 FX4 Format  (`.fx4`)
+
+**Status:** UNVERIFIED — 1 sample file only (single-sample). The section-0 size formula is exact,
+but the file's two-section structure and the section-1 header boundary are ambiguous at one sample.
+Treat the entire FX4 layout as UNVERIFIED.
+
+**Semantic:** Two-section terrain overlay mesh using the **VF_44** vertex format (position + normal +
+RGBA colour + UV0 + UV1 — the same vertex format as FX2, `terrain_layers.md` §1.2). The first
+section parses cleanly as an FX5-style section (40-byte section header + 12-byte sub-chunk header +
+VF_44 vertex block + u16 index block). A second section of geometry follows it. Where FX5 uses VF_36
+and FX2 is single-section, FX4 combines FX2's two-UV-channel VF_44 vertex with a multi-section container.
+
+**File layout (single observed sample):**
+
+```
+FX4_File = Section[0] + Section[1]
+```
+
+**Section 0 header (52 bytes — 40-byte section header + 12-byte sub-chunk header):**
+
+| Offset | Size | Type | Field | Observed value | Confidence |
+|-------:|-----:|------|-------|----------------|------------|
+| 0x00 | 4 | u32 | `section_type` | 2 | SINGLE-SAMPLE (FX5 stores ascending 1/2/3 per section) |
+| 0x04 | 4 | u32 | _unknown_1_ | 3 | SINGLE-SAMPLE |
+| 0x08 | 4 | u32 | _unknown_2_ | 1 | SINGLE-SAMPLE (matches FX5) |
+| 0x0C | 4 | u32 | `render_state` | 200 | SINGLE-SAMPLE — differs from FX5's 300–450 |
+| 0x10 | 4 | f32 | `direction_x` | fractional | SINGLE-SAMPLE — candidate direction vector |
+| 0x14 | 4 | f32 | `direction_y` | fractional | SINGLE-SAMPLE |
+| 0x18 | 4 | f32 | `direction_z` | near-zero | SINGLE-SAMPLE |
+| 0x1C | 4 | u32 | _unknown_3_ | 40 | SINGLE-SAMPLE (FX5 had 30/50) |
+| 0x20 | 4 | u32 | _unknown_4_ | 2 | SINGLE-SAMPLE (matches FX5) |
+| 0x24 | 4 | u32 | _unknown_5_ | 0 | SINGLE-SAMPLE (matches FX5) |
+| 0x28 | 4 | u32 | _unknown_flags_ | 2 | SINGLE-SAMPLE (FX5 had 1) |
+| 0x2C | 4 | u32 | `vert_count` | small (tens) | SINGLE-SAMPLE |
+| 0x30 | 4 | u32 | `idx_count` | small; divisible by 3 | SINGLE-SAMPLE |
+
+**Section 0 VertexData:** `vert_count × 44` bytes (**VF_44**). **IndexData:** `idx_count × 2` bytes (u16).
+
+**Section 0 size formula (exact):** `52 + vert_count × 44 + idx_count × 2`. The first section
+accounts for the leading bytes of the file with zero residual.
+
+**Section 1 (UNVERIFIED boundary):** a second section of geometry follows section 0. Its leading word
+is zero (a null `section_type`, unlike section 0's value 2), so the section-header / sub-chunk split
+for section 1 cannot be pinned at one sample. Two readings both reconcile the remaining byte count
+with the same geometry (a VF_44 vertex block + a u16 index block of the same counts as section 0):
+
+- **Reading A:** 40-byte section header + 8-byte sub-chunk header, then VF_44 vertices + u16 indices.
+- **Reading B:** 36-byte section header + 12-byte sub-chunk header, then VF_44 vertices + u16 indices.
+
+Both give a 44-byte vertex stride consistent with section 0. **The exact section-1 header boundary is
+UNVERIFIED** — an engineer must not assume Reading A or Reading B. The total file is fully
+accounted for by section 0 (formula above) plus a section-1 geometry block of matching vertex/index
+counts; only the internal split of section 1's header is ambiguous.
+
+### 1.12 FX layer summary table
 
 | Layer | sample_verified | Header size | Vertex format | UV channels | Per-vertex colour |
 |-------|-----------------|------------:|---------------|:-----------:|:-----------------:|
 | FX1   | true  | 24 B | VF_36 (36 B) | 1 | yes |
 | FX2   | true  | 24 B | VF_44 (44 B) | 2 | yes |
 | FX3   | true  | 48 B | VF_36 (36 B) | 1 | yes |
-| FX4   | false | UNKNOWN | UNKNOWN | ? | ? |
+| FX4   | UNVERIFIED (single-sample) | 40 B section + 12 B sub (s0); s1 boundary ambiguous | VF_44 (44 B) | 2 | yes |
 | FX5   | true (partial) | 40 B section + 12 B sub | VF_36 (36 B) | 1 | yes |
 | FX6   | true  | 32 B global + 8 B/chunk | VF_32 (32 B) | 1 | no |
-| FX7   | false | UNKNOWN | UNKNOWN | ? | ? |
+| FX7   | PLAUSIBLE (dual-sample) | 40 B section + 12 B sub | VF_32 (32 B) | 1 | no |
 
 ---
 
@@ -745,8 +849,14 @@ these without further evidence.
 5. **FX6 sub-chunk footer fields at +0x10 and +0x14:** Vary per sub-chunk. Candidates: LOD
    distances, texture tile indices, rendering priority. No pattern established.
 
-6. **FX4 and FX7 formats:** No sample files available. Vertex format, header size, and section
-   structure are entirely unknown.
+6. **FX7 format (§1.10):** PLAUSIBLE from two byte-identical samples. The 52-byte FX5-style
+   header + VF_32 vertex block + u16 index block reconciles both files exactly. The nine
+   section-header fields (especially `unk_dist` at 0x08, a large f32 rather than the FX5
+   u32 LOD distance) are unresolved in semantics. No IDA cross-check yet.
+7. **FX4 format (§1.11):** UNVERIFIED from a single sample. Section 0 parses exactly
+   (52-byte header + VF_44 vertices + u16 indices); the **section-1 header boundary is
+   ambiguous** (Reading A 40+8 vs. Reading B 36+12) — do not assume either. The whole
+   two-section interpretation rests on one file. No IDA cross-check yet.
 
 7. **`.up` `plane_height` vs vertex Y for non-flat geometry:** All sampled upper terrain
    triangles are flat (all vertex Y = plane_height). The field may diverge for non-flat overhangs.

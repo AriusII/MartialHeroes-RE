@@ -22,8 +22,7 @@
   `data/sky/dat/sky<area_id>.box` for the sky-dome geometry; sky textures expand to
   `data/sky/texture/<name>.dds`. `<area_id>` is the active integer area id.
 - **Found in:** the `.pak` archive / VFS (see `formats/pak.md`). The `.box` file is opened through
-  the **archive by-name lookup** (it is VFS-only — no loose `.box` files were present in the
-  extracted asset dump).
+  the **archive by-name lookup** — but see §A: no `.box` entry exists in the production VFS.
 - **Endianness:** little-endian throughout.
 - **Magic / version:** none — these files have no magic number and no version field. File identity
   comes from the path; field meaning comes from the per-file loader.
@@ -32,71 +31,85 @@
 
 ## Section A — `sky%d.box`  (sky-dome geometry, NEW)
 
-> **Status:** layout parser-derived; **sample-unverified** (no `.box` file was present in the
-> extracted asset dump — it is VFS-only). Treat the vertex byte decode (§A.4) as the lower-confidence
-> part until a real `.box` is dumped.
+> **Status: CONFIRMED-ABSENT from the production VFS.** A census of the full 43,347-entry
+> production VFS (the archive set the real client mounts) returned **zero `.box` files** of any
+> kind. The skybox enable flag in `map_option%d.bin` (the `SKYBOX` field at offset 0x1C — see
+> `environment_bins.md §1`) is **0 in every observed area**. The skybox feature was defined in the
+> client's parser source but **no skybox asset was ever authored** for any area: the read sequence
+> exists, the asset does not.
+>
+> **The hypothesized byte layout below (§A.1–§A.6) remains UNVERIFIED.** Because no `.box` sample
+> exists anywhere in the VFS, the layout can be neither confirmed nor denied by byte inspection; it
+> rests on the parser read-sequence alone. Engineers must NOT treat any field below as load-bearing.
+>
+> **Engineering guidance:** since no `.box` asset exists, do not implement a `.box` loader for
+> faithful reproduction. A **synthetic sky-dome** (procedurally generated dome geometry, tinted by
+> the sample-verified colour tables in `environment_bins.md`) is the correct engineering path for
+> the sky — there is no original asset to reproduce here, only the colour/lighting data, which is
+> already specified. The §A.1–§A.6 tables are retained only as a record of the parser-side read
+> order, in case a `.box` asset ever surfaces from another archive.
 
-A `.box` file describes a set of sky-dome **textured meshes** (one per skybox texture). It is opened
-via the archive by-name lookup. The file is a count-prefixed sequence of three parallel sections:
-texture-name records, per-mesh vertex arrays, and per-mesh index arrays.
+A `.box` file (if one existed) would describe a set of sky-dome **textured meshes** (one per skybox
+texture). It is opened via the archive by-name lookup. The hypothesized layout is a count-prefixed
+sequence of three parallel sections: texture-name records, per-mesh vertex arrays, and per-mesh
+index arrays.
 
-### A.1 Header
+### A.1 Header (hypothesized — UNVERIFIED)
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| 0x00 | 4 | u32 | `texture_count` | number of skybox textures = number of meshes | HIGH |
+| 0x00 | 4 | u32 | `texture_count` | number of skybox textures = number of meshes | UNVERIFIED (no sample) |
 
-### A.2 Texture-name records (× `texture_count`)
+### A.2 Texture-name records (× `texture_count`) (hypothesized — UNVERIFIED)
 
 Read `texture_count` fixed-width name records, in order:
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| +0x00 | 47 | char[47] | `texture_name` | fixed-width texture name; expands to `data/sky/texture/<name>.dds` | HIGH |
+| +0x00 | 47 | char[47] | `texture_name` | fixed-width texture name; would expand to `data/sky/texture/<name>.dds` | UNVERIFIED (no sample) |
 
-- **Record stride:** 47 bytes (the name field is the whole record).
-- Each name allocates a texture wrapper at load time; the global sky detail-level option selects an
-  animated vs. static default texture for the slot.
+- **Record stride:** 47 bytes (the name field is the whole record) — parser-derived, UNVERIFIED.
+- Each name would allocate a texture wrapper at load time; the global sky detail-level option selects
+  an animated vs. static default texture for the slot.
 
-### A.3 Per-mesh vertex array (× `texture_count` meshes)
+### A.3 Per-mesh vertex array (× `texture_count` meshes) (hypothesized — UNVERIFIED)
 
 For each mesh, in order:
 
-1. Read `u32 vertex_count`. **Cap: 300 (0x12C)** — a larger value is a load error.
-2. Read `vertex_count` vertices, each **20 bytes** (the in-memory buffer is `4 + 20 × vertex_count`
-   bytes: a count prefix followed by the packed vertices).
+1. Read `u32 vertex_count`. **Cap: 300 (0x12C)** — a larger value would be a load error.
+2. Read `vertex_count` vertices, each **20 bytes** (the in-memory buffer would be
+   `4 + 20 × vertex_count` bytes: a count prefix followed by the packed vertices).
 
 - **Record count source:** the per-mesh `vertex_count` u32 immediately preceding the array.
-- **Vertex stride:** 20 bytes.
+- **Vertex stride:** 20 bytes — parser-derived, UNVERIFIED.
 
-### A.4 Vertex decode (20-byte stride) — sample-unverified
+### A.4 Vertex decode (20-byte stride) — UNVERIFIED
 
 The 20-byte vertex most plausibly decodes as position + UV:
 
 | Sub-offset | Size | Type | Field | Confidence |
 |-----------:|-----:|------|-------|------------|
-| 0x00 | 12 | f32[3] | `position` (x, y, z) | MED |
-| 0x0C | 8 | f32[2] | `uv` (u, v) | MED |
+| 0x00 | 12 | f32[3] | `position` (x, y, z) | UNVERIFIED |
+| 0x0C | 8 | f32[2] | `uv` (u, v) | UNVERIFIED |
 
 `12 + 8 = 20`. An alternative packing (12-byte position + 4-byte packed colour + 4-byte single UV
-pair) also fits 20 bytes; the position(12) + UV(8) reading is the more common skybox convention but
-is **sample-unverified**. Flag for runtime confirmation of the vertex buffer.
+pair) also fits 20 bytes; neither can be confirmed without a sample.
 
 > Coordinate note: world geometry in this client negates Z when mapping to the target engine (see the
-> project coordinate conventions). Apply the same Z handling to `.box` positions as to other world
-> geometry; do not silently normalise here.
+> project coordinate conventions). The same Z handling would apply to `.box` positions; this is moot
+> while no `.box` asset exists.
 
-### A.5 Per-mesh index array (× `texture_count` meshes)
+### A.5 Per-mesh index array (× `texture_count` meshes) (hypothesized — UNVERIFIED)
 
 For each mesh, in order:
 
-1. Read `u32 index_count`. **Cap: 900 (0x384)** — a larger value is a load error.
-2. Read `index_count` indices, each **2 bytes (u16)** (the buffer is `2 × index_count` bytes).
+1. Read `u32 index_count`. **Cap: 900 (0x384)** — a larger value would be a load error.
+2. Read `index_count` indices, each **2 bytes (u16)** (the buffer would be `2 × index_count` bytes).
 
-- **Index width:** 16-bit (u16) — HIGH.
+- **Index width:** 16-bit (u16) — parser-derived, UNVERIFIED.
 - **Record count source:** the per-mesh `index_count` u32 immediately preceding the array.
 
-### A.6 Overall `.box` structure
+### A.6 Overall `.box` structure (hypothesized — UNVERIFIED)
 
 ```
 u32 texture_count
@@ -110,8 +123,9 @@ for each mesh m in 0..texture_count-1:       // index arrays, one per mesh, in o
 ```
 
 The exact interleave of the vertex-array block vs. the index-array block (whether all vertex arrays
-precede all index arrays, or they alternate per mesh) is read in two passes over the mesh count in
+precede all index arrays, or they alternate per mesh) was read in two passes over the mesh count in
 the parser; the order above (all vertex arrays, then all index arrays) is the parser read order.
+None of this is sample-confirmed.
 
 ---
 
@@ -133,6 +147,8 @@ fixed order. Each sub-init that fails aborts the hub; on full success a "ready" 
    textures and a derived detail scalar).
 5. **Moon / particle dome** init (uses `moon%d.dds`).
 6. **Sky-box** sub-object — conditionally loads `sky%d.box` (Section A) when the skybox gate is set.
+   In the shipping VFS this branch is never taken: the skybox gate is always 0 and no `.box` asset
+   exists (see §A).
 7. Bind the **day/night time manager** to the dome.
 8. **Fog** init — loads `fog%d.bin`.
 
@@ -218,15 +234,17 @@ is **time-indexed, 48 slots covering a full day**.
 
 ## Known unknowns
 
-1. **`sky%d.box` vertex decode** — position(12) + UV(8) vs. position(12) + colour(4) + UV(4); the
-   whole `.box` format is **sample-unverified** (VFS-only, none in the extracted dump).
-2. **`sky%d.box` section interleave** — confirmed as two passes (all vertex arrays, then all index
-   arrays) at the parser level; a real sample would confirm there is no per-mesh interleave.
-3. **Fog source-band channel grouping** in the 0.75/0.25 blend (MED) — which bytes of the 192-byte
+1. **`sky%d.box` does not exist in the production VFS (CONFIRMED-ABSENT).** The entire §A layout is
+   **UNVERIFIED** and unverifiable without a sample. Because the skybox feature was never shipped
+   (no `.box` asset in any of the 43,347 VFS entries; `SKYBOX` flag 0 in every area), the position(12)
+   + UV(8) vs. position(12) + colour(4) + UV(4) vertex ambiguity, the section interleave, and every
+   other §A field can be neither confirmed nor denied. A synthetic sky-dome is the correct
+   engineering path (see §A status block).
+2. **Fog source-band channel grouping** in the 0.75/0.25 blend (MED) — which bytes of the 192-byte
    sky-colour-table slot are the "high" and "low" source bands.
-4. **Cloud `cloud_id_table` row count** — the 7-wide stride is HIGH; the "10 rows / variants" reading
+3. **Cloud `cloud_id_table` row count** — the 7-wide stride is HIGH; the "10 rows / variants" reading
    is MED.
-5. **Star / cloud grid factoring** at the parser level (the BGRX-per-instance vs. keyframe grouping)
+4. **Star / cloud grid factoring** at the parser level (the BGRX-per-instance vs. keyframe grouping)
    — MED; defer to `environment_bins.md` sample-verified sizes.
 
 ## Cross-references

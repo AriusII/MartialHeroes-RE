@@ -220,6 +220,140 @@ These sizes are provided for parser sanity-checks and regression tests only. Do 
 
 ---
 
+## Campaign 5 — Runtime Cel/Glow Shader Set: Assembly, Bind Sites, Toon LUT, and VS Constants
+
+> Added 2026-06-14 from Campaign 5 / Lane 3 (SHADERS) dirty-room static analysis. This section
+> records *which* shaders the runtime assembles, *where* they bind, *how* the toon ramp LUT is
+> sampled, and *which vertex-shader constants* were recovered as literals. It does NOT contain
+> shader source text or bytecode (those are external VFS files — see §C5.2). The render passes that
+> consume these shaders are documented in `specs/rendering.md`; this section cross-references that
+> spec rather than duplicating the post-chain. `// spec: Docs/RE/specs/rendering.md`
+
+### C5.1 The five runtime-assembled shaders
+
+**Confidence: HIGH** (each path string fans into exactly the two loader functions; handle slots and
+bind sites recovered statically).
+
+All five are loaded by the same idiom: a path-string global → the file is opened from the mounted VFS
+(or, as a fallback, directly off disk) → the file's text is fed to a Direct3D runtime assemble call
+(`D3DXAssembleShader` for the VFS buffer, `D3DXAssembleShaderFromFileA` for the disk fallback) → the
+returned token buffer is turned into a device shader object → the handle is stored on the renderer
+for later binding. There are exactly **two loader functions**: a *full cel-shading initialiser* (run
+at device-creation time, which also creates the post render targets and loads the toon LUT) and a
+*partial pixel-shader reload* (run on device reset / hot-reload, which re-assembles only the two cel
+pixel shaders without touching the vertex shader or the render targets).
+
+| Shader file | Role | Bound in | Confidence |
+|-------------|------|----------|------------|
+| `data/shader/dotoonshading.vsh` | Cel vertex shader — world-view-projection transform + two-light Lambert → emits the N·L luminance coordinate on a texcoord | The cel bind site, once per skinned-character draw | HIGH |
+| `data/shader/dotoonshading.psh` | Cel tone pixel shader — **normal** render state | The cel bind site (default branch) | HIGH |
+| `data/shader/dotoonshading2.psh` | Cel tone pixel shader — **stealth / 은신 variant** | The cel bind site (stealth branch, selected by a boolean argument) | HIGH |
+| `data/shader/finaldx8.psh` | Final composite / blur pixel shader for the post chain | The bloom-blur post pass (see `specs/rendering.md` §6) | HIGH |
+| `data/shader/power1dx8.psh` | Glow downsample / blur pixel shader for the post chain | The offscreen/scene glow pass (see `specs/rendering.md` §6) | HIGH |
+
+The glow pixel-shader path is **not a fixed string operand**: the renderer constructor pre-fills an
+**editable filename slot** with `data/shader/power1dx8.psh`, and the loader reads the path from that
+slot. The glow shader is therefore configurable but defaults to `power1dx8.psh`. This is why the
+multi-tap `power2`/`power4` chain depth is data-driven and UNVERIFIED — see `specs/rendering.md` §6.4.
+
+### C5.2 The shader source is NOT in the executable
+
+**Confidence: HIGH.**
+
+Because the five shaders are assembled at runtime via the Direct3D runtime assemble calls (which take
+**ASCII shader-assembly source text** and assemble it to bytecode at load), the executable contains
+only the *file paths* and the *loader logic* — never the shader source or its compiled bytecode. The
+actual `.psh` / `.vsh` / `.bmp` bytes are **external VFS asset files** under `data/shader/` and are
+**not recoverable from the executable**. Recovering the precise per-instruction shader logic (the
+exact ramp lookup, the exact composite arithmetic, any rim math) requires the on-disk files from the
+client VFS. The `dotoonshading.psh`, `dotoonshading2.psh`, and `finaldx8.psh` source samples remain
+UNVERIFIED for this reason (see Known Unknowns #2).
+
+### C5.3 Toon ramp LUT — `data/shader/toonramp.bmp`
+
+**Confidence: HIGH (role); MEDIUM (exact pixel dimensions).**
+
+The toon ramp is a real loaded texture (`data/shader/toonramp.bmp`), loaded by the full cel
+initialiser through the generic VFS-or-disk texture loader and stored in a dedicated renderer slot.
+How it is used:
+
+- The cel vertex shader transforms the already-CPU-skinned vertices (the stride-32 XYZ / NORMAL / UV
+  layout — see `specs/rendering.md` §5.2) by the world-view-projection matrix and computes the
+  per-vertex diffuse term, emitting an **N·L luminance coordinate on a texcoord**.
+- The cel bind site binds the ramp as a texture on **texture stage 1**, sets the cel vertex shader,
+  then sets either the normal or the stealth cel pixel shader. The pixel shader performs a **1-D
+  lookup into the ramp by the interpolated N·L luminance** — a classic 1-D cel-quantisation ramp keyed
+  by N·L. The ramp file converts a smooth `0..1` lighting term into a small number of hard tone bands
+  (the stepped cel look).
+- **The light-step lives in the ramp file, not in code.** There is no numeric "light-step threshold"
+  constant to recover — the per-tone quantisation is encoded entirely in `toonramp.bmp`. Re-authoring
+  the cel look faithfully therefore requires the on-disk ramp file.
+- **Pixel geometry:** a prior lane tagged the ramp as a small 1-D ramp (about 256×1, 24 bpp). That
+  exact size is a prior-lane annotation, not re-measured here — treat the dimensions as MEDIUM
+  confidence; the *role* (1-D N·L cel ramp on stage 1) is HIGH confidence and confirmable by reading
+  the on-disk file.
+
+### C5.4 Recovered cel vertex-shader constants
+
+**Confidence: HIGH** (all float values were literal in code, decoded from their IEEE-754 bit
+patterns; none required a debugger). Two sources feed the toon shaders: a block of float defaults
+pre-initialised by the renderer constructor, and a per-frame upload of vertex-shader constant
+registers `c4`–`c10`.
+
+| Register | Recovered value | Role | Confidence |
+|----------|-----------------|------|------------|
+| `c4` | runtime-set light vector | Configurable light direction (from an editable renderer slot; value set at runtime) | HIGH (mechanism); value runtime-set |
+| `c5` | `[0, 0, -1, 0]` | Axis / view-Z vector | HIGH |
+| `c6` | `[1, 1, 1, 1]` | White / material-ambient | HIGH |
+| `c7` | `[0, 0, 0, 0]` | Zero vector | HIGH |
+| `c8` | `[0, 1, 1, 1]` | Mask / partial-white | HIGH |
+| **`c9`** | **`[0.299, 0.587, 0.114, 1.0]`** | **Luminance weights — exactly the ITU-R BT.601 luma coefficients (R, G, B). This is the signature constant of the cel shader: the dot of the accumulated diffuse colour against `c9` produces the scalar N·L luminance that keys the toon-ramp lookup.** | HIGH |
+| `c10` | `[1, 1, 1, 1]` | White | HIGH |
+
+The default colour-modulation triple read by the post composite pass is `[1, 1, 1]` (white init
+default); those per-tone post constants are owned by the post chain — see `specs/rendering.md` §6.
+
+### C5.5 Load / bind flow (neutral prose)
+
+1. **Device creation** runs the full cel initialiser. It creates three offscreen render targets at
+   backbuffer size (with a 1024×1024 fallback) — a scene/cel RT, a bright/edge RT, and a downscaled
+   glow RT — and opens a render-to-surface helper for each (the post chain is documented in
+   `specs/rendering.md` §6).
+2. It loads the toon ramp LUT (`data/shader/toonramp.bmp`) into its dedicated slot (1-D N·L ramp,
+   stage-1 texture).
+3. It builds the inline cel vertex declaration (stream-0 stride 32: XYZ at 0, NORMAL at 12,
+   TEXCOORD0 at 24, plus the N·L luminance channel — see `specs/rendering.md` §5.2), then assembles
+   the five shaders in order: `dotoonshading.vsh` → `dotoonshading.psh` → `dotoonshading2.psh` →
+   `finaldx8.psh` → the editable-slot glow shader (default `power1dx8.psh`). Each is created as a
+   device vertex or pixel shader and stored on the renderer; the temporary assembly object is
+   released.
+4. **Per-frame use:** the cel constants `c4`–`c10` (including the BT.601 luma vector `c9`) are uploaded
+   each frame and the cel render/texture states are set. Once per skinned-character draw, the cel bind
+   site binds the ramp to stage 1, sets the cel vertex shader, and sets the stealth or normal cel
+   pixel shader based on a boolean argument. The offscreen/scene and glow-extract/bloom-blur post
+   passes use the glow and composite pixel shaders and the three RTs — those passes belong to
+   `specs/rendering.md`.
+5. **Hot reload:** on a device reset, the partial reload re-assembles only the two cel pixel shaders
+   (and clears the stage-1 texture, vertex shader, and pixel shader) without touching the vertex
+   shader or the render targets.
+
+### C5.6 Campaign 5 known unknowns
+
+- **The actual `.psh` / `.vsh` shader-assembly source text** — external VFS files; not in the
+  executable. The `saturate(2·edge·c0 + bloom·c1)` note for `finaldx8.psh` (above) is a prior-lane
+  summary, not re-derived here. UNVERIFIED until the on-disk files are read.
+- **The numeric light-step threshold** — there is none in code; the quantisation lives in
+  `toonramp.bmp`.
+- **A distinct rim / outline colour constant** — not found in the cel path; the outline is the
+  bright/edge render target composited in the post chain (see `specs/rendering.md` §6), not a literal
+  colour.
+- **Exact `toonramp.bmp` pixel dimensions** — prior-lane comment says about 256×1×24 bpp; not
+  re-measured (MEDIUM confidence). Confirmable by reading the on-disk file.
+- **The runtime light-direction value (`c4`)** — the mechanism (editable slot + accessor) is HIGH
+  confidence; the live value would need the running client or whatever config feeds it.
+
+---
+
 ## Enumerations / Flags
 
 Not applicable. This format carries no binary enumeration fields. The shader-type token (`vs` / `ps`) in the version line is an ASCII string, not a binary value.
@@ -229,6 +363,7 @@ Not applicable. This format carries no binary enumeration fields. The shader-typ
 ## Cross-references
 
 - Related formats: `pak.md` (container that holds these files), `texture.md` (toon LUT texture referenced by `dotoonshading.vsh`)
+- Related specs: `specs/rendering.md` (the render pipeline + glow/bloom post passes that bind these shaders), `specs/skinning.md` (the skinned-character vertex buffer the cel shader consumes)
 - Glossary: see `Docs/RE/names.yaml`
 - Provenance: see `Docs/RE/journal.md`
 - Dirty-room samples: `Docs/RE/_dirty/samples/data/shader/` (gitignored, do not commit)

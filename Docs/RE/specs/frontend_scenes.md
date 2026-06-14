@@ -1676,6 +1676,57 @@ For the presentation/Godot engineer. Sound ids resolve through `sound_runtime.md
 **Loading-screen textures** (chosen at random on entering the Load state): `loading.dds`,
 `loading06.dds`, `loading08.dds`.
 
+### 9.1 Loading screen — visual composition (CODE-CONFIRMED)
+
+Cross-links the loading **mechanics** (engine state 2 LOAD — the VFS bulk-preload gate driven by a
+worker loading ~50 global data tables, exited on the running-flag clear + grace, NOT on the bar; see
+the state-2 LOAD node in §10 and `client_runtime.md` §7). This sub-block is the on-screen
+**composition** so the Godot loading screen can be rebuilt 1:1. The per-frame draw handler emits
+**exactly two textured quads and zero text calls.**
+
+- **Canvas.** Authoring reference is **1024 × 768**, origin at screen center, +Y up. The draw handler
+  builds an orthographic projection sized to the **live backbuffer**, and every authored layout
+  constant is multiplied by a per-axis screen-scale factor so the layout stretches to any resolution:
+  `scaleX = liveWidth ÷ 1024`, `scaleY = liveHeight ÷ 768`. At native 1024×768 both factors are 1.0
+  and the authored constants are literal screen pixels.
+
+- **Background.** On entering the LOAD state, **one of three** VFS paths is chosen by `rand() % 3`
+  (0 → `data/ui/loading.dds`, 1 → `data/ui/loading06.dds`, 2 → `data/ui/loading08.dds`), loaded via
+  the VFS-or-disk texture loader, and drawn **full-screen** (quad spans `[−W/2..+W/2] × [−H/2..+H/2]`
+  for live screen size W×H). Background UV crop ≈ `u,v ∈ [0..0.75]` (the art appearing to occupy the
+  top-left region of the DDS) — **PLAUSIBLE / sample-unverified.**
+
+- **Progress bar (screen rect).** A lower-left rectangle, authored in 1024×768-reference center-origin
+  pixels: x ∈ **[−499, −170]**, y ∈ **[−363, −140]** (negative Y is below center → lower third), each
+  edge × the screen-scale factor. This ~329 px-wide slot is the bar's art frame.
+
+- **Progress bar (fill).** The visible fill width = **`223 × percent/100` px**, clamped to ≤ 223,
+  **left-anchored** (grows left-to-right inside the slot, max 223 px — narrower than the 329 px frame).
+  The bar is drawn **only when percent ≠ 0**, so it is **invisible at 0%** and appears once preload
+  starts. The fill art is a **sub-rect of the SAME loading DDS** (no separate progress-bar texture is
+  ever bound) — sampled from a horizontal strip at `u ∈ [≈0.754, ≈0.969]`, `v ∈ [≈0.432, ≈0.75]`.
+  Sampling-from-the-same-DDS is CODE-CONFIRMED; the **UV→pixel crop is PLAUSIBLE / sample-unverified.**
+
+- **No caption, no spinner, no percent text.** The draw handler issues exactly the two textured quads
+  above and makes **zero font/text/string render calls** — there is **no `msg.xdb` caption id** and no
+  numeric percent overlay. Any "loading…" wording the player sees is **baked into the DDS art** itself.
+
+- **SFX.** A **looping** cue `920100100` (source dir `data/sound/2d/`) plays for the duration of the
+  LOAD state (stopped at teardown); the abort/leave path plays `861010106`.
+
+- **Timing.** The bar tracks the VFS bulk-preload counter (0..100, accumulated by the ~50-table
+  worker). Loop-exit is gated by the scene running-flag clear **+ a ~500 ms grace**, not by the bar
+  reaching 100% — so the bar can finish visually slightly before the state exits. No network signal is
+  involved.
+
+> The UV→pixel crops (background `[0..0.75]`, bar fill strip) are derived from the renderer's f32 UV
+> constants; **no original `loading*.dds` was available** to confirm the pixel mapping. The screen
+> rects and the screen-scale model are CODE-CONFIRMED and hold regardless; only the UV→pixel mapping
+> would shift if a real DDS's dimensions differ.
+
+<!-- source: _dirty/campaign5/loading-screen-composition.md -->
+
+
 **Secondary-password dialog texture:** `data/ui/password.dds` (1024×1024 DXT3, full mips —
 catalogued in `formats/ui_manifests.md` as "Secondary password dialog"); used by the
 second-password / PIN modal (§1.4a).

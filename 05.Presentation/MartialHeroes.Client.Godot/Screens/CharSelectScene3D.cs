@@ -6,8 +6,10 @@
 //   1. Loads the single backdrop cell d000x10000z9990 (terrain .ted + props .bud) into a 3D Node3D
 //      using the existing TerrainNode + BudMeshBuilder builders — reuses the World scene's proven
 //      path, does NOT rebuild those parsers.
-//   2. Instantiates up to 5 SkinnedCharacterNode actors at the spec world positions with the correct
-//      idle pose (g111100010.mot) using the now-fixed SkinnedCharacterBuilder + SkinningMath path.
+//   2. Instantiates up to 5 SkinnedCharacterNode actors at the spec world positions, each resolving
+//      its OWN skeleton g{id_b}.bnd AND its OWN idle clip (actormotion.txt col2==id_b → col16) from
+//      the parsed .skn's id_b — never a shared rig/clip — via the now-fixed SkinnedCharacterBuilder.
+//      spec: Docs/RE/specs/skinning.md §8(e) — per-class rig/clip identity (the slot-row T-pose fix).
 //   3. Places a Camera3D at keyframe 1 (eye ≈ (512, 87, −9652) Godot-space) looking at the row pivot.
 //   4. Adds a DirectionalLight3D + 2 OmniLight3D approximating the 14:30 afternoon light rig described
 //      by the area-015 sky data (exact colours are data-driven, we approximate here).
@@ -20,8 +22,7 @@
 //   Camera eye KF1 (512, 87, −9652) spec: Docs/RE/specs/frontend_scenes.md §3.5.2 CODE-CONFIRMED.
 //   FOV 50° / near 5 / far 15000 spec: Docs/RE/specs/frontend_scenes.md §3.5.1 CODE-CONFIRMED.
 //   Backdrop cell d000x10000z9990 spec: Docs/RE/specs/frontend_scenes.md §3.7.1 CODE-CONFIRMED.
-//   Idle clip g111100010.mot spec: Docs/RE/specs/frontend_scenes.md §3.7.5 CODE-CONFIRMED.
-//   Shared skeleton g1.bnd spec: Docs/RE/specs/frontend_scenes.md §3.7.5 CODE-CONFIRMED.
+//   Per-slot rig/clip identity (g{id_b}.bnd + actormotion idle) spec: Docs/RE/specs/skinning.md §8(e) CODE-CONFIRMED.
 //   Row pivot (508.48, 69.89, −9758.57) spec: Docs/RE/specs/frontend_scenes.md §3.6.5 CODE-CONFIRMED.
 //   Area-015 sky data spec: Docs/RE/specs/frontend_scenes.md §3.6.3 CODE-CONFIRMED (paths).
 //   Yaw 0 = front, π = back spec: Docs/RE/specs/frontend_scenes.md §3.3.2 CODE-CONFIRMED.
@@ -110,11 +111,10 @@ public sealed partial class CharSelectScene3D : Node3D
     private const int BackdropMapX = 10000;
     private const int BackdropMapZ = 9990; // cell d000x10000z9990
 
-    // Starter idle motion. spec: frontend_scenes.md §3.7.5. CODE-CONFIRMED.
-    private const string IdleMotPath = "data/char/mot/g111100010.mot";
-
-    // Shared skeleton. spec: frontend_scenes.md §3.7.5. CODE-CONFIRMED.
-    private const string SharedBndPath = "data/char/bind/g1.bnd";
+    // NOTE: there is NO shared g1.bnd / g111100010.mot. The rig AND the idle clip are resolved PER
+    // SLOT from the parsed .skn's own id_b (TryLoadSkeletonForIdB / TryLoadIdleClipForIdB), because a
+    // skin is authored against exactly one skeleton named by its id_b and T-poses / shatters on the
+    // wrong rig. spec: Docs/RE/specs/skinning.md §8(e) — rig/clip identity, per class.
 
     // Per-class starter skins. spec: frontend_scenes.md §3.7.5. CODE-CONFIRMED.
     // Keys are internal class ids 3,4,6,11 → Musa g202110001 / Dosa g202110001 etc.
@@ -234,11 +234,13 @@ public sealed partial class CharSelectScene3D : Node3D
         env.BackgroundMode = global::Godot.Environment.BGMode.Color;
         env.BackgroundColor = new Color(0.04f, 0.03f, 0.02f); // near-black warm dark
 
-        // Moderate ambient — enough to see character geometry without washing out the cavern look.
-        // Aesthetic: warm dim fill so characters read against the dark background.
+        // Ambient — raised so the textured idle characters read clearly (not black silhouettes)
+        // against the dark cavern, matching the official screenshot where the figures are brightly
+        // lit. The background stays near-black via the dense fog; ambient lifts the SUBJECT.
+        // Aesthetic: warm fill, energy tuned so character textures are plainly visible.
         env.AmbientLightSource = global::Godot.Environment.AmbientSource.Color;
-        env.AmbientLightColor = new Color(0.50f, 0.38f, 0.25f); // warm stone fill — Aesthetic
-        env.AmbientLightEnergy = 1.0f; // moderate — enough for character visibility
+        env.AmbientLightColor = new Color(0.62f, 0.52f, 0.42f); // warm stone fill — Aesthetic
+        env.AmbientLightEnergy = 2.2f; // raised — characters must read as lit, not silhouettes
 
         // Tonemap tuned for dark-cavern + torchlit subject.
         // Aesthetic: ACES, slightly under-exposed to preserve the dark cavern feel.
@@ -352,13 +354,27 @@ public sealed partial class CharSelectScene3D : Node3D
         var keyFill = new OmniLight3D
         {
             Name = "CameraKeyFill",
-            LightEnergy = 2.0f,  // boosted to illuminate character faces — Aesthetic
-            LightColor = new Color(0.90f, 0.75f, 0.55f), // warm fill — Aesthetic
-            OmniRange = 300.0f,
+            LightEnergy = 4.0f,  // boosted to clearly light character bodies/faces — Aesthetic
+            LightColor = new Color(0.95f, 0.82f, 0.62f), // warm fill — Aesthetic
+            OmniRange = 360.0f,
             ShadowEnabled = false,
-            Position = new Vector3(512.0f, 100.0f, 9655.0f), // in front, above — Aesthetic
+            Position = new Vector3(512.0f, 105.0f, 9670.0f), // in front, above the row — Aesthetic
         };
         AddChild(keyFill);
+
+        // Dedicated character key — sits right at the row, range tight to the actors, so the textured
+        // idle figures are plainly lit (the official screenshot shows brightly-lit characters, not
+        // silhouettes). spec: §3.6.1 "≈5 positional lights". Aesthetic position/colour/energy.
+        var charKey = new OmniLight3D
+        {
+            Name = "CharacterKey",
+            LightEnergy = 3.5f,
+            LightColor = new Color(1.0f, 0.90f, 0.74f), // warm near-white — Aesthetic
+            OmniRange = 160.0f, // tight to the 5-actor row so it lifts the subject, not the terrain
+            ShadowEnabled = false,
+            Position = new Vector3(512.0f, 88.0f, 9700.0f), // just in front of the row, eye height — Aesthetic
+        };
+        AddChild(charKey);
 
         // Rim / back-light from behind the row (cascade glow approximation).
         // Aesthetic: cool-blue back light simulates the blue waterfall glow from behind.
@@ -386,7 +402,8 @@ public sealed partial class CharSelectScene3D : Node3D
         };
         AddChild(groundFill);
 
-        GD.Print("[CharSelectScene3D] 5-light torch rig built (5 omni, range≈280 Godot-units). " +
+        GD.Print("[CharSelectScene3D] Torch rig built (6 omni: 2 pillar + camera-fill + character-key " +
+                 "+ rim + ground). Character-key added so the lit idle figures read against the dark cavern. " +
                  "spec: frontend_scenes.md §3.6.1 CODE-CONFIRMED count/range ≈1024; colours UNVERIFIED (Aesthetic).");
     }
 
@@ -592,15 +609,15 @@ public sealed partial class CharSelectScene3D : Node3D
 
     private void BuildCharacterRow(RealClientAssets assets)
     {
-        // Load the shared skeleton and idle clip once.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.7.5. CODE-CONFIRMED.
-        Skeleton? sharedSkeleton = TryLoadSkeleton(assets);
-        AnimationClip? idleClip = TryLoadIdleClip(assets);
-
-        GD.Print($"[CharSelectScene3D] Shared skeleton loaded={sharedSkeleton is not null}, " +
-                 $"idle clip loaded={idleClip is not null}. " +
-                 "spec: frontend_scenes.md §3.7.5 CODE-CONFIRMED.");
-
+        // RIG/CLIP IDENTITY (the slot-row T-pose / shatter fix):
+        //   Each slot actor resolves its OWN skeleton AND idle clip from the parsed .skn's own id_b —
+        //   NOT a single shared g1.bnd + shared g111100010.mot. A skin is authored against exactly one
+        //   skeleton named by its id_b; the four starter classes do NOT share a rig (class 1 → g1/84
+        //   bones, class 4 → g4/89 bones). Binding the wrong rig is clean at rest but T-poses / shatters
+        //   the instant a wrong-rig idle clip drives bones off bind. This mirrors the proven
+        //   CharCreatePreview3D fix exactly.
+        // spec: Docs/RE/specs/skinning.md §8(e) — select skeleton AND clip by the skin's id_b, per class.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.3.4 — char-select actors start in IDLE.
         for (int i = 0; i < 5; i++)
         {
             bool occupied = i < SlotDescriptors.Length && SlotDescriptors[i].IsOccupied;
@@ -610,7 +627,7 @@ public sealed partial class CharSelectScene3D : Node3D
 
             try
             {
-                Node3D? actor = TryBuildSlotActor(assets, i, skinClassId, sharedSkeleton, idleClip);
+                Node3D? actor = TryBuildSlotActor(assets, i, skinClassId);
                 if (actor is not null)
                 {
                     _slotActors[i] = actor;
@@ -629,8 +646,7 @@ public sealed partial class CharSelectScene3D : Node3D
     }
 
     private Node3D? TryBuildSlotActor(
-        RealClientAssets assets, int slotIdx, uint skinClassId,
-        Skeleton? skeleton, AnimationClip? idleClip)
+        RealClientAssets assets, int slotIdx, uint skinClassId)
     {
         // Resolve the .skn path for this slot's skin class.
         // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 — per-class starter meshes. CODE-CONFIRMED.
@@ -654,7 +670,7 @@ public sealed partial class CharSelectScene3D : Node3D
 
             mesh = SknParser.Parse(sknData);
             GD.Print($"[CharSelectScene3D] Slot {slotIdx}: loaded '{sknPath}' " +
-                     $"({mesh.Positions.Length} verts, {mesh.FaceCount} faces, IdA={mesh.IdA}).");
+                     $"({mesh.Positions.Length} verts, {mesh.FaceCount} faces, IdA={mesh.IdA}, IdB={mesh.IdB}).");
         }
         catch (Exception ex)
         {
@@ -662,13 +678,32 @@ public sealed partial class CharSelectScene3D : Node3D
             return null;
         }
 
+        // Skeleton — resolved from the MESH'S OWN id_b (NOT a shared g1.bnd). The skin's bind-local
+        // vertex offsets are baked against exactly this skeleton's rest pose; binding it to any other
+        // same-ID-range rig is clean at rest but T-poses / shatters on play.
+        // spec: Docs/RE/specs/skinning.md §8(e) — data/char/bind/g{id_b}.bnd, per class.
+        Skeleton? skeleton = TryLoadSkeletonForIdB(assets, mesh.IdB);
+
+        // Idle animation — the MATCHED clip for THIS rig, keyed by the mesh's own id_b via
+        // actormotion.txt (col2 == id_b → col16). Each class's idle clip targets ITS rig's bones;
+        // playing the wrong-rig clip is the direct cause of the slot-row shatter. If no idle row
+        // exists for this id_b (some VFS classes have none), idleClip is null → SkinnedCharacterBuilder
+        // renders a clean upright REST pose (NOT a T-pose, NOT a shatter) and we log it below.
+        // spec: Docs/RE/specs/skinning.md §8(e) — actormotion col2==id_b → col16, per class.
+        AnimationClip? idleClip = TryLoadIdleClipForIdB(assets, mesh.IdB);
+
+        GD.Print($"[CharSelectScene3D] Slot {slotIdx}: resolved rig from id_b={mesh.IdB}: " +
+                 $"bnd 'data/char/bind/g{mesh.IdB}.bnd' bones={(skeleton?.Bones.Length ?? 0)} " +
+                 $"idle={(idleClip is null ? "NONE → rest-pose fail-safe" : $"{idleClip.Tracks.Length}trk/{idleClip.FrameCount}f")}. " +
+                 "spec: skinning.md §8(e) per-class rig/clip identity.");
+
         // Resolve the albedo texture via CharacterTextureResolver (skin.txt col4→col5→png).
         // spec: Docs/RE/specs/skinning.md §10 / CLAUDE.md asset chain — skin.txt col4=meshSkinId, col5=texId.
         ImageTexture? albedo = CharacterTextureResolver.Resolve(assets, mesh.IdA);
         GD.Print($"[CharSelectScene3D] Slot {slotIdx}: albedo resolved={albedo is not null} " +
                  $"for skinIdA={mesh.IdA}.");
 
-        // Build the skinned actor node (with idle clip and shared skeleton).
+        // Build the skinned actor node with the PER-SLOT rig + idle clip.
         // SkinnedCharacterBuilder handles LBS/static fallback, diagnostics, stand-up pivot, recentre.
         // spec: Docs/RE/specs/skinning.md §8(b) — single Z-negate handedness conversion. CODE-CONFIRMED.
         Node3D actorRoot = SkinnedCharacterBuilder.Build(mesh, skeleton, idleClip, albedo);
@@ -690,66 +725,99 @@ public sealed partial class CharSelectScene3D : Node3D
     // =========================================================================
 
     /// <summary>
-    /// Loads the shared g1.bnd skeleton used by all 4 starter class previews.
-    /// spec: Docs/RE/specs/frontend_scenes.md §3.7.5 — "Skeleton: data/char/bind/g1.bnd — 84 bones". CODE-CONFIRMED.
+    /// Loads the skeleton MATCHED to a skin's <paramref name="idB"/>: data/char/bind/g{id_b}.bnd.
+    /// The skin's bind-local vertex offsets are baked against exactly this rig's rest pose; binding
+    /// any other same-ID-range rig is clean at rest but T-poses / shatters on play. PER SLOT — never
+    /// a single shared g1.bnd.
+    /// spec: Docs/RE/specs/skinning.md §8(e) — data/char/bind/g{id_b}.bnd, per class. CODE-CONFIRMED.
     /// </summary>
-    private static Skeleton? TryLoadSkeleton(RealClientAssets assets)
+    private static Skeleton? TryLoadSkeletonForIdB(RealClientAssets assets, uint idB)
     {
-        if (!assets.Contains(SharedBndPath)) return null;
+        if (idB == 0) return null;
+        string bndPath = $"data/char/bind/g{idB}.bnd";
+        if (!assets.Contains(bndPath))
+        {
+            GD.PrintErr($"[CharSelectScene3D] .bnd not found for id_b={idB}: {bndPath}.");
+            return null;
+        }
+
         try
         {
-            ReadOnlyMemory<byte> data = assets.GetRaw(SharedBndPath);
+            ReadOnlyMemory<byte> data = assets.GetRaw(bndPath);
             return data.IsEmpty ? null : BndParser.Parse(data);
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[CharSelectScene3D] g1.bnd failed: {ex.Message}");
+            GD.PrintErr($"[CharSelectScene3D] BndParser failed '{bndPath}': {ex.Message}");
             return null;
         }
     }
 
     /// <summary>
-    /// Loads the shared idle clip g111100010.mot.
-    /// spec: Docs/RE/specs/frontend_scenes.md §3.7.5 — "Idle: g111100010.mot, 30 frames @ 10 fps". CODE-CONFIRMED.
+    /// Loads the idle <c>.mot</c> clip MATCHED to a skin's <paramref name="idB"/> from
+    /// <c>actormotion.txt</c>: the row whose col2 == id_b gives the idle motion id in col16, resolved
+    /// to <c>data/char/mot/g{idle}.mot</c>. This guarantees the clip's track bone IDs address the SAME
+    /// skeleton the mesh was baked against (per-class rig/clip identity). Returns null (→ clean rest
+    /// pose) when this id_b has no idle row — fail SAFE, never a T-pose or a shatter.
+    /// spec: Docs/RE/specs/skinning.md §8(e); CLAUDE.md §Recovered asset mappings (actormotion idle).
     /// </summary>
-    private static AnimationClip? TryLoadIdleClip(RealClientAssets assets)
+    private static AnimationClip? TryLoadIdleClipForIdB(RealClientAssets assets, uint idB)
     {
-        if (!assets.Contains(IdleMotPath)) return null;
+        if (idB == 0) return null;
+
+        const string tablePath = "data/char/actormotion.txt";
+        if (!assets.Contains(tablePath)) return null;
+
         try
         {
-            ReadOnlyMemory<byte> data = assets.GetRaw(IdleMotPath);
-            return data.IsEmpty ? null : AnimationParser.Parse(data);
+            // CP949 provider registered once at startup; decode the table text.
+            // spec: CLAUDE.md §Core engineering constraints — "Register [CP949] once".
+            string text = System.Text.Encoding.GetEncoding(949).GetString(assets.GetRaw(tablePath).Span);
+
+            foreach (string rawLine in text.Split('\n'))
+            {
+                string[] cols = rawLine.Replace("\r", string.Empty).Split('\t');
+                if (cols.Length <= 16) continue;
+                if (!uint.TryParse(cols[2].Trim(), out uint classId) || classId != idB) continue;
+
+                string idle = cols[16].Trim();
+                if (idle.Length == 0 || idle == "0") return null;
+
+                string motPath = $"data/char/mot/g{idle}.mot";
+                if (!assets.Contains(motPath)) return null;
+
+                ReadOnlyMemory<byte> motData = assets.GetRaw(motPath);
+                return motData.IsEmpty ? null : AnimationParser.Parse(motData);
+            }
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[CharSelectScene3D] g111100010.mot failed: {ex.Message}");
-            return null;
+            GD.PrintErr($"[CharSelectScene3D] TryLoadIdleClipForIdB(id_b={idB}) failed: {ex.Message}");
         }
+
+        return null;
     }
 
     /// <summary>
-    /// Resolves a VFS .skn path for the given skin_class (= IdB).
-    /// Uses the spec §3.7.5 per-class mesh table first, then a general pattern.
-    /// spec: Docs/RE/specs/frontend_scenes.md §3.7.5 CODE-CONFIRMED meshes.
+    /// Resolves a VFS .skn path for the given internal class id (1..4 for the four starter classes).
+    /// Uses the SAME per-class starter-mesh table as the proven CharCreatePreview3D so each slot's
+    /// mesh carries a DISTINCT id_b (class 1 → id_b 1 / g1, … class 4 → id_b 4 / g4), letting the
+    /// per-slot rig/clip resolution in TryBuildSlotActor pick each character's own skeleton + idle.
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.7.5 / §4.2 CODE-CONFIRMED meshes.
+    /// spec: Docs/RE/specs/skinning.md §8(e) — the .skn id_b drives the rig, so per-class meshes matter.
     /// </summary>
     private static string? PickSknPath(RealClientAssets assets, uint skinClassId)
     {
-        // Spec §3.7.5 four starter class meshes (IdA=1, CodedConfirmed).
-        // spec: Docs/RE/specs/frontend_scenes.md §3.7.5. CODE-CONFIRMED.
+        // Per-class starter base-skin meshes (internal class 1..4) — identical to
+        // CharCreatePreview3D.SknPathForClass so the slot row and the create preview agree.
+        // spec: Docs/RE/specs/frontend_scenes.md §4.2 / §3.7.5. CODE-CONFIRMED.
         string[] specPaths = skinClassId switch
         {
-            // Class 3 = Bichimi/Dosa → g202110001 (reuses class-1 base mesh per spec §3.7.5)
-            // Actually spec says: class 3 (Bichimi/Dosa `b`) → g202110001.skn. CODE-CONFIRMED.
-            3 => ["data/char/skin/g202110001.skn"],
-            // Class 4 = Monk → g203110001.skn. CODE-CONFIRMED.
-            4 => ["data/char/skin/g203110001.skn"],
-            // Class 6 = Archer → g209110001.skn. CODE-CONFIRMED.
-            6 => ["data/char/skin/g209110001.skn"],
-            // Class 11 = Sorceress → g206110001.skn. CODE-CONFIRMED.
-            11 => ["data/char/skin/g206110001.skn"],
-            // Generic pattern for other classes (class 1 = Musa, class 2 = Tao, etc.).
-            // PLAUSIBLE: g202{class}10001 for class 1,3,4; g202220001 for class 2.
-            2 => ["data/char/skin/g202220001.skn", "data/char/skin/g202210001.skn"],
+            1 => ["data/char/skin/g202110001.skn"], // Musa  → id_b 1 (g1, 84 bones)
+            2 => ["data/char/skin/g202220001.skn"], // Tao   → id_b 2 (g2, 87 bones)
+            3 => ["data/char/skin/g202130001.skn"], // Blader→ id_b 3 (g3, 82 bones)
+            4 => ["data/char/skin/g202140001.skn"], // Warrior→ id_b 4 (g4, 89 bones)
+            // Other (mob / appearance) classes: best-effort pattern, rig still resolved from id_b.
             _ =>
             [
                 $"data/char/skin/g202{skinClassId}10001.skn",

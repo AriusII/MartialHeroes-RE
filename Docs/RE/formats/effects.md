@@ -363,6 +363,96 @@ Char-class selection within char-select additionally uses 16 `guildmaster_{d|j|m
 files (4 classes × 2 levels × 2 event types); these are standard `.xeff` (Section A) and need no
 special mapping beyond their filenames.
 
+## A.16 In-Memory Runtime Element Struct (104 bytes / 0x68) — Campaign-5
+
+> **Confidence: 104-byte size CONFIRMED; ctor/setup-written field offsets CONFIRMED; a few pad
+> dwords PLAUSIBLE; the `.xeff` on-disk → this-struct field mapping is UNVERIFIED (out of this
+> lane — see note at the end).** Added Campaign 5, Lane 1 (effects runtime). This documents only
+> the **in-memory runtime element** that the live effect system ticks; the on-disk `.xeff` byte
+> layout is in Sections A.1–A.15 and is owned by the format lane. Behavioural semantics
+> (emitter dispatch, keyframe sampling, bone attachment, blending, draw order) are in
+> `specs/effects.md §17`. Engineers cite this table as `// spec: Docs/RE/formats/effects.md §A.16`.
+
+This is the single fixed-size object the runtime allocates for every live effect, regardless of
+subtype. Its size (104 bytes / 0x68) is **CONFIRMED** independently by the fixed-block pool
+allocator, which batch-allocates `104 × N` bytes and strides the block in 104-byte units to build a
+free-list. The polymorphic family (`XEffect` base, `UserXEffect`, `JointXEffect`, `MapXEffect`) is
+selected by the virtual-dispatch pointer at +0x00 plus the **type tag** at +0x04. This in-memory
+struct is distinct from the on-disk per-element layout in §A.5 (the §A.5 table is the loader's
+per-component descriptor element; this §A.16 table is the per-instance runtime object).
+
+### A.16.1 Base / `UserXEffect` element (all subtypes share this layout)
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| +0x00 | 4 | ptr | `vtable` | Class identity (base / User / Joint / Map). | CONFIRMED |
+| +0x04 | 4 | i32 | `type_tag` | 1 = `UserXEffect`, 4 = `JointXEffect` (set by the derived constructor); base leaves it unset; `MapXEffect` sets its own. | CONFIRMED |
+| +0x08 | 1 | u8 | `alive` | Active flag; cleared to stop the effect (lifetime expiry, lost attach, soft-stop). | CONFIRMED |
+| +0x09 | 1 | u8 | `particles_built` | Set once first-tick init has built the per-element particle/draw objects. | CONFIRMED |
+| +0x0C | 4 | ptr | `descriptor` | Pointer to the shared parsed `.xeff` descriptor (`CoreXEffect`); 0 = invalid / lookup failed (discard before active list). | CONFIRMED |
+| +0x10 | 12 | f32[3] | `world_pos` | Current effect origin (x, y, z); copied from the anchor actor or bone each tick. | CONFIRMED |
+| +0x1C | 16 | f32[4] | `world_rot` | Current effect orientation quaternion (x, y, z, w); copied from the anchor actor or bone each tick. | CONFIRMED |
+| +0x2C | 4 | f32 | `pad_0` | Zeroed by the base constructor; no tick read observed. | PLAUSIBLE |
+| +0x30 | 4 | f32 | `pad_1` | Zeroed; no tick read observed. | PLAUSIBLE |
+| +0x34 | 4 | f32 | `pad_2` | Zeroed; no tick read observed. | PLAUSIBLE |
+| +0x38 | 1 | u8 | `flagA` | Base constructor sets 0; semantics unresolved. | PLAUSIBLE |
+| +0x3C | 1 | u8 | `loop_flag` | Set from the setup argument; when set, the period-expiry kill is bypassed (effect loops). Low byte of a dword whose non-zero-ness also indicates a valid lookup result (see §6.2 note in `specs/effects.md`). | CONFIRMED |
+| +0x40 | 4 | u32 | `start_ms` | Spawn time stamp = `delay_arg + clock_ms`; per-tick update is skipped while `now < start_ms`. | CONFIRMED |
+| +0x44 | 1 | u8 | `visible` | "Drawn this frame" flag; cleared while before the start time. | CONFIRMED |
+| +0x45 | 1 | u8 | `in_range` | Cleared when distance-culled vs the local player. | CONFIRMED |
+| +0x48 | 4 | f32 | `effect_scale` | Per-instance scale; multiplied into every component extent each tick. = descriptor base scale × spawn `effectscale` argument. | CONFIRMED |
+| +0x4C | 4 | f32 | `y_offset` | Height offset added to the anchor actor's Y when placing the effect. | CONFIRMED |
+| +0x50 | 4 | f32 | `time_rate` | Elapsed-ms multiplier: `local_ms = (now − start_ms) × time_rate`. | CONFIRMED |
+| +0x54 | 4 | i32 | `anchor_id` | Actor sort/id used to look up the anchor actor (`UserXEffect`). | CONFIRMED |
+| +0x58 | 1 | u8 | `anchor_sub` | Actor sub-id / kind selector for the anchor lookup. | CONFIRMED |
+| +0x5C | 4 | i32 | `target_id` | Secondary actor (the "target", for line/beam effects between two actors). | CONFIRMED |
+| +0x60 | 1 | u8 | `target_sub` | Sub-id for the target actor lookup. | CONFIRMED |
+| +0x64 | 1 | u8 | `tail` | `UserXEffect`: a miscellaneous byte. `JointXEffect`: re-used as the orientation-source selector (see A.16.2). | CONFIRMED |
+
+**Stride / size:** 104 bytes (0x68), CONFIRMED. There is one element per live effect; the count is
+not stored in the element — instances live on the manager's active list (see `specs/effects.md §5.2`).
+
+### A.16.2 `JointXEffect` overlay of the attachment region (+0x58 .. +0x64)
+
+For a `JointXEffect` (type tag 4) the bytes from +0x58 onward are re-purposed as a bone-attachment
+descriptor. This overlay replaces the `anchor_sub` / `target_id` / `target_sub` / `tail` reading
+above:
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| +0x58 | 4 | i32 | `bone_actor_id` | Actor whose skeleton owns the bone. | CONFIRMED |
+| +0x5C | 1 | u8 | `bone_actor_sub` | Actor sub-id for the bone-owner lookup. | CONFIRMED |
+| +0x5D | 1 | u8 | `bone_name_mode` | 0 = use the explicit bone id at +0x60; 1 = look the bone up through the AnimCatalog by weapon/hand slot (see `specs/effects.md §17.4`). | CONFIRMED |
+| +0x60 | 4 | i32 | `bone_id` | Explicit bone id (used when `bone_name_mode` = 0). | CONFIRMED |
+| +0x64 | 1 | u8 | `rot_source` | Orientation source: 1 = the bone's own world rotation; 2 = the actor's facing quaternion. | CONFIRMED |
+
+The runtime copies the resolved bone's world translation into `world_pos` (+0x10) and a quaternion
+into `world_rot` (+0x1C) each tick. The full bone-resolution behaviour, including the AnimCatalog
+weapon-hand slot lookup (PLAUSIBLE which slot is which hand/weapon), is specified in
+`specs/effects.md §17.4`; the bone world-transform layout is owned by `specs/skinning.md`.
+
+### A.16.3 Named constants (Campaign-5 runtime element)
+
+| Name | Value | Context |
+|------|------:|---------|
+| `XEFF_RUNTIME_ELEMENT_SIZE` | 104 (0x68) | In-memory runtime effect-instance object size (CONFIRMED via the pool allocator). |
+| `XEFF_TYPE_TAG_USER` | 1 | `type_tag` (+0x04) value for `UserXEffect`. |
+| `XEFF_TYPE_TAG_JOINT` | 4 | `type_tag` (+0x04) value for `JointXEffect`. |
+| `XEFF_BONE_MODE_EXPLICIT` | 0 | `bone_name_mode`: use explicit bone id. |
+| `XEFF_BONE_MODE_CATALOG` | 1 | `bone_name_mode`: AnimCatalog weapon-slot lookup. |
+| `XEFF_ROT_SOURCE_BONE` | 1 | `rot_source`: use the bone's own world rotation. |
+| `XEFF_ROT_SOURCE_ACTOR` | 2 | `rot_source`: use the actor's facing quaternion. |
+
+> **Note — `.xeff` on-disk → runtime-element mapping is UNVERIFIED / pending.** The byte layout of
+> the on-disk `.xeff` descriptor that ultimately feeds this runtime element (the file parser side)
+> was not walked in the runtime lane. The runtime descriptor offsets the tick reads (loaded flag,
+> last-use timestamp, period, component count, component array base) are behavioural details kept in
+> `specs/effects.md §17`; how `.xeff` file bytes map into them is **owned by the format/struct lane**
+> and remains UNVERIFIED here. Do not infer the on-disk layout from this in-memory table — the two
+> differ in field order, and several fields here (texture handles, resolved descriptor pointer) have
+> no on-disk counterpart. The authoritative on-disk `.xeff` layout is Sections A.1–A.15.
+
+
 ---
 
 # Section B: `.eff` Effect-Object Shape

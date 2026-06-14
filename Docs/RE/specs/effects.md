@@ -25,6 +25,7 @@
 | Particle sub-system | CODE-CONFIRMED for spawn path; record layout PLAUSIBLE only. See §11. |
 | SwordLight sub-system | CODE-CONFIRMED for boot and descriptor layout. See §12. |
 | Skill-cast effect chain | CODE-CONFIRMED but CAPTURE-UNVERIFIED — the network half (opcode `5/52`, action codes) is read statically from the binary; no live capture has confirmed the on-wire action-code values. See §15. |
+| Campaign-5 runtime deep-dive | 104-byte element CONFIRMED; emitter dispatch + keyframe math CONFIRMED; bone-attach overlay CONFIRMED; blend-state and draw-order internals PLAUSIBLE; AnimCatalog weapon-slot meaning PLAUSIBLE. See §17. |
 
 ---
 
@@ -129,6 +130,8 @@ Each live-effect class allocates from a fixed-size object pool. Objects are retu
 | (Unknown class) | Pool D | Type unresolved; torn down at shutdown alongside the three known pools. Candidates: a local-player-only subtype or an absolute-world subtype. |
 
 An additional singleton (`SwordLightManager`) is also torn down at the same shutdown point but belongs to the separate sword-light sub-system (§12).
+
+The `UserXEffect` pool (Pool B) is a **fixed-block free-list pool**: when its free-list is empty it batch-allocates a block of `N` elements at the fixed element stride (104 bytes; see §17.1) and links them into the free-list, so the element size is structurally load-bearing for the pool. CONFIRMED.
 
 ---
 
@@ -301,6 +304,8 @@ For each active element within a live instance:
    - A blended `size` Vec3 (billboard half-extents or mesh scale).
    - A blended `alpha` float (already converted from the stored inverted value to opacity in `[0, 1]`).
 
+   See §17.3 for the full per-channel sampling rule (linear lerp for scalar/vector channels, slerp for rotation, stepped for the sprite-frame index).
+
 7. **Orientation.** The active orientation quaternion is fetched:
    - For `MapXEffect`: the stored `world_rot_quat` field.
    - For `JointXEffect`: resolved from the bound actor's bone each tick (see §9).
@@ -320,6 +325,8 @@ For each active element within a live instance:
    | 1 — Mesh-particle | Vertices from the `.xobj` mesh (selected by `resource_id`); each vertex position scaled by `(size_x, size_y, size_z)` and rotated by the orientation quaternion. |
    | 2 — Directional billboard | Camera-facing quad with an additional 90° Y pre-rotation applied before the camera-facing transform. Reads an extra rotation value from the static-state branch. |
 
+   The runtime CPU geometry-build branch is described more fully in §17.2 (billboard / oriented-quad / mesh, plus the `resource_id` CPU-mesh-vs-GPU-particle split).
+
 10. **Vertex alpha.** `vertex_color.alpha = round(255 × blended_alpha_opacity)`.
 
 11. **UV scroll** (conditional). If bit 0 of the low byte of `tex_count` is set:
@@ -328,7 +335,7 @@ For each active element within a live instance:
     ```
     If bit 1 is set, the same formula applies to the V coordinate. Confidence: MEDIUM (dual use of the frame-count field as a flags byte is unusual; the behavior is consistent with a render test but the intent is unverified).
 
-12. **Submit.** The built geometry is submitted to the render pipeline's transparent draw queue. No per-particle back-to-front depth sorting is performed; the pipeline relies on alpha-smearing for approximate transparency layering.
+12. **Submit.** The built geometry is submitted to the render pipeline's transparent draw queue. No per-particle back-to-front depth sorting is performed; the pipeline relies on alpha-smearing for approximate transparency layering. See §17.7 for the submission model (effects push their per-frame drawables into the shared queue and do not keep a private sort).
 
 ### 8.3 Expiry and cleanup
 
@@ -369,6 +376,8 @@ Expired instances are unlinked from the active list and returned to their pool.
 |---|---|---|
 | 1 | Use the bone's own world-space quaternion for the effect orientation. | CODE-CONFIRMED |
 | 2 | Use the actor's root transform quaternion for the effect orientation. | CODE-CONFIRMED |
+
+> Campaign-5 refinement (§17.4) further resolves the `bone_source_enum` non-zero case as a lookup through the AnimCatalog keyed by the actor's model/visual class (modulo 40) plus one of four weapon-hand slot offsets; which slot means which hand/weapon remains PLAUSIBLE only.
 
 ### 9.2 Per-tick bone resolution
 
@@ -438,6 +447,8 @@ It then:
 
 The `GParticleBuffer` is a Direct3D vertex buffer manager dedicated to particle geometry; it uses a prepare-and-lock mechanism. Error conditions include: "index lock failed" and "vertex lock failed" (confirmed from error strings in the binary read-only data section).
 
+The Campaign-5 pass adds that the start/stop of a GPU-particle component is gated by that component's **active-frame window**: entering the window starts the emitter, leaving it stops/destroys it. See §17.2.
+
 ---
 
 ## 12. `SwordLightManager` Sub-System
@@ -474,6 +485,8 @@ Each record in both files (loaded as text, field-by-field):
 
 The sword-light trail is rendered as a geometric ribbon attached to the actor's weapon bone. The per-frame trail geometry build (the ribbon construction from bone position, offset, color, and texture) was **not fully traced** in this analysis pass. See Open Questions §14, item 8.
 
+The Campaign-5 pass identifies the runtime renderable as a dedicated `SwordLightEffect` class (separate from the `.txt` descriptor tables above) carrying a paired start/end RGBA gradient; see §17.6.
+
 ---
 
 ## 13. Companion Manifest File Format Summary
@@ -499,9 +512,9 @@ Note on `totalmugong.txt`: the loader reads 4 fields per record into a 12-byte h
 
 1. **Fourth (and possibly sixth) effect pool class.** The fourth pool type was not identified from the traced class hierarchy; possible candidates are a local-player-only effect type or an absolute-world effect type. A search from the fourth pool's allocator function would recover the constructor and class name.
 
-2. **`bone_source_enum` modes 1 and 2 (action tables A and B).** The tables themselves were not located or traced. They are likely per-action effect-slot tables inside the actor structure, possibly linked to animation event descriptors. Cross-reference with `specs/skinning.md` and the animation catalog for the bone-mapping tables.
+2. **`bone_source_enum` modes 1 and 2 (action tables A and B).** The tables themselves were not located or traced. They are likely per-action effect-slot tables inside the actor structure, possibly linked to animation event descriptors. Cross-reference with `specs/skinning.md` and the animation catalog for the bone-mapping tables. The Campaign-5 pass (§17.4) narrows this to an AnimCatalog weapon-hand slot lookup but does not resolve which slot means which hand/weapon — still open.
 
-3. **Per-frame bone world-position read offset.** The byte offset of the bone's world-space position within the actor's skeleton transform array was not isolated in this pass. Engineers implementing bone attachment should reference `specs/skinning.md` for the confirmed bone-world-transform layout.
+3. **Per-frame bone world-position read offset.** The byte offset of the bone's world-space position within the actor's skeleton transform array was not isolated in this pass. Engineers implementing bone attachment should reference `specs/skinning.md` for the confirmed bone-world-transform layout. The Campaign-5 pass (§17.4) observes the runtime reads the bone world translation from the bone matrix's translation row and a quaternion adjacent to it; reconcile the exact slot indices with the skinning lane.
 
 4. **Visual-slot visual cycle event (`inner_event` 1021).** The effect id for this trigger is looked up from the actor's visual-slot table at index `visual_id + 1` (where `visual_id` is a byte within the actor object at `+0x96`). The table structure and the relationship between the visual slot and the texture manager's index are not fully mapped.
 
@@ -511,7 +524,7 @@ Note on `totalmugong.txt`: the loader reads 4 fields per record into a 12-byte h
 
 7. **`totalmugong.txt` record semantics.** The loader reads `class_idx` as a 0-based index into the animation catalog's martial-arts class table. The `timing_offset` and the two sound ids are stored but their read-back path and relationship to skill-cast sound timing were not traced beyond the loader itself.
 
-8. **SwordLight trail geometry generation.** The per-frame ribbon construction — transforming bone position + color-offset → screen-space ribbon vertices — was not traced in this pass. The trail width, fade duration, and vertex count are entirely UNVERIFIED.
+8. **SwordLight trail geometry generation.** The per-frame ribbon construction — transforming bone position + color-offset → screen-space ribbon vertices — was not traced in this pass. The trail width, fade duration, and vertex count are entirely UNVERIFIED. The Campaign-5 pass (§17.6) adds the head/tail alpha-gradient bytes and the in-pipeline draw, but the full ribbon vertex generation and its exact blend state (additive vs alpha) remain UNVERIFIED.
 
 9. **`effectscale.xdb` application site.** The per-effect scale override table (`formats/effects.md §D`) is loaded at boot. Whether the override multiplier is applied in addition to, or instead of, `CoreXEffect.scale_default` during the effective-scale computation in §8.2 step 8 was not confirmed.
 
@@ -520,6 +533,10 @@ Note on `totalmugong.txt`: the loader reads 4 fields per record into a 12-byte h
 11. **AoE fan-out (action code 0xCC) per-sub-actor effects.** The `5/52` AoE action code places sub-actors in a ring (position placement is documented), but whether each sub-actor in the ring receives its own cast-channel effect spawn — and if so, whether each re-emits a 0xC8-style enable for its own instance — was not confirmed in this pass. PLAUSIBLE: each ring instance re-emits its own enable; UNRESOLVED. See §15.3.
 
 12. **Frame-precise cast-SFX consumer (`totalmugong.txt`).** The cast chain fires a single one-shot sound at cast-enable from the skill record's `cast_sfx_id` (byte offset 1180; §15.2). Separately, `totalmugong.txt` (§5 step 5, §13) builds a timing-keyed sound-overlay map (the effect manager's `class_idx`-keyed table) intended to fire **frame-synchronised** sounds during the cast animation. The runtime consumer that reads that map and triggers those frame-precise overlays was **not** traced — it is unknown which subsystem reads it, and whether a single cast uses both the one-shot `cast_sfx_id` and the `totalmugong.txt` overlays, or whether they are mutually exclusive. This extends open question §14 item 7.
+
+13. **emitter_type enum completeness.** The Campaign-5 runtime pass observed only three CPU geometry branches (billboard / oriented-quad / mesh, §17.2). If the `.xeff` format defines additional named emitter kinds, they collapse into the "else" mesh branch at runtime — UNVERIFIED that this is the full set. The on-disk enum is `formats/effects.md §A.12`.
+
+14. **Global transparent-pass sort.** §17.7 confirms effects submit drawables into the shared queue rather than self-sorting, but the global depth/transparent sort itself was not walked — UNVERIFIED whether effects are forced into a late/transparent bucket or sorted purely by material/blend state.
 
 ---
 
@@ -614,12 +631,249 @@ The two skill-related effect legs are independent and may both be live during a 
 
 ---
 
+## 17. Campaign-5 Runtime Deep-Dive — XEffect / EffectManager Element Model
+
+> Added Campaign 5, Lane 1 (effects runtime). Promoted from dirty-room runtime analysis under EU
+> Software Directive 2009/24/EC Art. 6, solely to achieve interoperability. This section refines
+> and extends the earlier runtime sections (§5–§9) with the per-element dispatch model, the precise
+> keyframe-sampling math, the bone-attach overlay, the blending model, and the
+> draw-order/submission model. It does NOT restate the boot sequence (§3), pool teardown (§4), or
+> trigger table (§7). The companion in-memory struct table is `formats/effects.md §A.16`.
+> Engineers cite this section as `// spec: Docs/RE/specs/effects.md §17`.
+
+### 17.1 One polymorphic 104-byte runtime element
+
+**Confidence: 104-byte size CONFIRMED.** Every live effect instance is a single fixed-size object
+of **104 bytes (0x68)**, regardless of subtype. The size is independently confirmed by the pool
+allocator, which batch-allocates blocks of `104 × N` bytes and walks them in 104-byte strides to
+build its free-list. The polymorphic family selects behaviour through a virtual-dispatch-table
+pointer at the element's start plus a numeric **type tag** stored at byte offset +0x04:
+
+| Class (neutral name) | type tag (+0x04) | Role |
+|---|---:|---|
+| `XEffect` (base) | (none set by the base) | Abstract base; zeroes defaults at construction |
+| `UserXEffect` | 1 | World / actor-anchored timed effect (also the looping cast-channel, §15.4) |
+| `JointXEffect` | 4 | Bone-attached effect; samples a skeleton bone each tick (§17.4) |
+| `MapXEffect` | (set by its own constructor) | Map / world-placed effect |
+
+`SwordLightEffect` (§17.6) is a **separate, much larger class** and is NOT a member of this
+104-byte family.
+
+The byte-level field table for the 104-byte element (including the `JointXEffect` overlay of the
+attachment region) is the authoritative struct in `formats/effects.md §A.16`. This section describes
+only behaviour. The shared-field offsets above and in §6 are consistent with that table.
+
+### 17.2 Per-element emitter dispatch (billboard / oriented-quad / mesh, and the GPU split)
+
+**Confidence: emitter dispatch CONFIRMED; exact enum names PLAUSIBLE (named by behaviour).**
+
+Each parsed descriptor (the shared `CoreXEffect`, referenced by the element's descriptor pointer)
+owns a vector of **components** (the emitter elements). Each component carries an `emitter_type`
+selector and a `resource_id`. Two orthogonal choices drive how a component renders:
+
+**(a) emitter_type — the geometry style** (a three-way branch on the component's first field):
+
+| emitter_type (runtime branch) | Geometry built per frame |
+|---|---|
+| 0 | **Screen-facing billboard quad.** Four corners at ±0.5·size_x / ±0.5·size_y in the camera's billboard basis (the camera-config view-matrix right/up vectors), each corner rotated by the element's world-orientation quaternion, then translated to the world position; per-vertex diffuse colour stamped. |
+| 1 | **Axis-rotated / oriented quad.** Same quad, but a facing direction is first derived from the sampled rotation (Euler→direction) and an extra fixed 90° rotation about Y is applied. Used for ground-aligned or velocity-aligned sprites. Iterates the source mesh vertex list applying the rotation. |
+| else (mesh) | **Mesh particle.** Take the shared mesh's vertices (24-byte stride: position Vec3, UV/normal, packed diffuse), scale each by the sampled size and the instance's effective scale, rotate by the element quaternion, translate to world, and stamp diffuse colour. |
+
+> Reconciliation with the on-disk enum: `formats/effects.md §A.12` lists the **file** `emitter_type`
+> as 0 = billboard, 1 = mesh, 2 = directional. This section describes the **runtime CPU geometry
+> branch** (billboard / oriented-quad / else-mesh). Treat the format spec as authoritative for
+> parse-time enum decoding and verify the geometry path against a sample at implementation time
+> where the meaning of value 1 vs the "else" branch differs (PLAUSIBLE reconciliation).
+
+**(b) resource_id — the CPU-mesh vs GPU-particle split** (CONFIRMED):
+
+- `resource_id < 10000` → **CPU mesh particle** (the shared mesh table, "XObj"). The per-frame CPU
+  vertex transform above applies.
+- `resource_id ≥ 10000` → **GPU particle** ("XPObj"), handed to the separate particle manager
+  (§11). The CPU vertex transform is bypassed entirely; the runtime only positions the emitter and
+  starts/stops it on the component's active-frame window.
+
+This `< 10000 / ≥ 10000` rule is the primary "billboard/mesh vs GPU-particle" switch and matches the
+`XEFF_RESOURCE_PARTICLE_THRESHOLD = 10000` constant in `formats/effects.md §A.14`.
+
+**Per-component active-frame window (CONFIRMED):** each component carries a `[start_frame,
+end_frame]` window in the same time units as the local phase. A component is skipped while the phase
+is outside its window; for GPU-particle components, leaving the window stops/destroys the emitter.
+
+### 17.3 Keyframe / curve sampling — piecewise-linear with slerp rotation
+
+**Confidence: CONFIRMED** (the sampling math was fully traced).
+
+Per component, per frame, the runtime samples each animated channel by **linear interpolation in
+time**, except rotation (which uses **slerp**) and the sprite-frame index (which is **stepped**).
+
+Given the local phase time `t` (the elapsed-and-wrapped time after the loop-period modulo and the
+per-component window), and a per-channel frame stride `dt` and frame base time `t0`:
+
+```
+i      = floor((t - t0) / dt)          // integer key index
+i_next = i + 1
+frac   = ((t - t0) mod dt) / dt        // fractional position in [0, 1)
+```
+
+The index is **clamped to the channel's key count** (the last key holds past the end). Each channel
+is then sampled as:
+
+| Channel | Sampling rule |
+|---|---|
+| Sprite / texture frame index | **Stepped (no interpolation):** `frame = keys[min(i, count − 1)]`. Selects the animated sub-image. |
+| Alpha (scalar) | **Linear:** `alpha = keys[i]·(1 − frac) + keys[i_next]·frac`; defaults to 1.0 when no keys. |
+| Colour (RGB Vec3) | **Linear, component-wise**; defaults to (1, 1, 1) when no keys. |
+| Velocity / position-delta (Vec3) | **Linear.** |
+| Size / half-extents (Vec3) | **Linear.** |
+| Rotation (quaternion) | **Slerp** between adjacent keys. |
+
+So: **scale, colour, alpha, position, and velocity are straight piecewise-linear lerps between
+adjacent keys; rotation is slerp; the discrete sprite-frame channel is stepped.** There is no spline
+/ curve table — only linear sampling with frame-index stepping for the sprite channel.
+
+**Texture scroll (independent of keyframes):** a per-component render flag byte enables a continuous
+texture scroll on top of the keyframes — if its low bit is set, each vertex's U texture coordinate is
+offset by `(phase mod 5000) / 5000` (a five-second loop); the next bit does the same for V. This
+matches the UV-scroll behaviour and period in `formats/effects.md §A.13` / `XEFF_UV_SCROLL_PERIOD_MS
+= 5000`, and refines §8.2 step 11. CONFIRMED.
+
+**Vertex colour packing (CONFIRMED):** the sampled colour and alpha are written to each vertex as a
+packed diffuse value — red/green/blue from the colour channel times 255, alpha from the alpha channel
+times 255 — with the alpha additionally scaled for mesh particles by a global brightness/option
+factor (a configurable brightness setting blended with a base constant). This is ordinary per-vertex
+alpha modulation, not an inversion flag (the on-disk **storage** of alpha is inverted; see §17.5 and
+`formats/effects.md §A.6`).
+
+### 17.4 `JointXEffect` bone attachment (overlay of the attachment region)
+
+**Confidence: bone-attach mechanism CONFIRMED; AnimCatalog weapon-slot meaning PLAUSIBLE.**
+
+A `JointXEffect` (type tag 4) re-purposes the element's actor-anchor region (the bytes from +0x58
+onward) as a **bone-attachment descriptor** — see the overlay table in `formats/effects.md §A.16`,
+and the field-level view in §6.3 / §9.1. Each tick:
+
+1. **Resolve the owning actor** from the stored `(bone_actor_id, bone_actor_sub)` pair via the actor
+   manager. If the actor is gone, kill the effect.
+2. **Resolve the bone** by the bone-source mode byte:
+   - **Mode 0 (explicit):** use the stored explicit bone id directly.
+   - **Mode 1 (catalog lookup):** pick a bone id from the **AnimCatalog**, keyed by the actor's
+     model/visual class wrapped modulo 40, plus a weapon-hand slot offset (one of four sibling slot
+     indices) chosen by a sub-mode and an actor-descriptor flag byte. This is the weapon-hand /
+     handedness selector (left/right hand, primary/secondary weapon). The four slot indices and the
+     class-wrap are CONFIRMED from the code; **which slot means which hand/weapon is PLAUSIBLE only**
+     and must be reconciled with the skinning / AnimCatalog lane.
+   Then fetch the bone object from the actor's live pose by that bone id.
+3. **Read the bone world transform.** The runtime copies the bone's **world translation** into the
+   element's world position. For orientation it copies a **quaternion** (not re-derived from the
+   matrix) chosen by an orientation-source byte:
+   - source = 1 → the **bone's own world rotation**;
+   - source = 2 → the **actor's facing** quaternion.
+   The bone's world translation is read from the bone-matrix translation row (the matrix is row-major
+   with the translation in its last row), and the bone quaternion sits adjacent to that translation in
+   the bone struct.
+4. **Distance-cull** versus the local player, then drive every component exactly as in §17.2 / §17.3,
+   anchored to the bone transform instead of an actor root. A configurable height offset is added to
+   the anchor position.
+
+**Godot-bridge facts:** the attach point is a **bone WORLD transform sampled from the live skeleton
+pose** (the same pose pool the skinning lane recovered), addressed **by bone id**, optionally resolved
+through the AnimCatalog weapon-slot map. Because the position and orientation are copied from the live
+actor/bone each tick, the effect inherits the actor's world convention unchanged; the project's
+world-Z-negation rule (`WorldCoordinates.ToGodot`) applies to the sampled position as-is. Billboard
+quads, by contrast, are built in the **camera basis**, so their up axis / handedness follow the camera
+config, not the mesh-local X-negate rule. See `specs/skinning.md` for the authoritative bone
+world-transform layout, and §9 for the earlier field-level description of this attachment.
+
+### 17.5 Blending model — alpha vs additive, and the "alpha-invert" question
+
+**Confidence: alpha storage inversion CONFIRMED; additive-vs-alpha blend-state PLAUSIBLE.**
+
+Two distinct things were found, and they should not be conflated:
+
+- **Per-particle alpha** of the billboard / mesh path is the sampled alpha channel (§17.3), written
+  into the vertex diffuse alpha and modulated by the global brightness option. This is ordinary alpha.
+  The **on-disk** alpha keys are stored **inverted** (file 0.0 = opaque, 1.0 = transparent; the loader
+  applies `1 − value`) — see `formats/effects.md §A.6`. There is no per-effect "invert" boolean in the
+  runtime.
+- **The actual blend state** (additive vs alpha-blend, alpha-test / alpha-ref) is NOT hard-coded by
+  the effect code. It is carried by each drawable's own material/render-state and applied by the shared
+  (Diamond) render layer that owns the blend modes. So whether a given effect renders additively or as
+  straight alpha is a property of its drawable's material, decided downstream, not by the effect tick.
+  PLAUSIBLE.
+
+So "alpha-invert" is best understood as the **inverted on-disk storage of the alpha curve** (§A.6),
+not a runtime invert flag. The visual "inverted/additive glow" look of many effects comes from the
+drawable's additive blend state plus the alpha-modulated diffuse, not from a boolean named "invert".
+
+### 17.6 `SwordLightEffect` — the weapon-swing trail (separate class)
+
+**Confidence: start/end alpha gradient bytes CONFIRMED; additive blend PLAUSIBLE.**
+
+The weapon-swing light trail is a **separate effect class**, NOT the 104-byte XEffect. It derives
+from the engine's geometry-drawable family and is a much larger object (on the order of a few
+kilobytes) that holds a fixed-capacity sub-array of trail segments. Its colour model is a **paired
+start/end RGBA gradient** along the swing: a start RGB with a start alpha byte (default fully opaque)
+and an end RGB with an end alpha byte. The trail therefore fades from a **head alpha to a tail alpha**
+along its length — this gradient is the designer-set "swing alpha" property (a named serialized
+property read by an in-editor property dialog). The trail is drawn **in-pipeline** as part of its
+owning geometry's draw (a direct indexed-primitive draw, position+diffuse vertex format, 24-byte
+stride), with no separate effects pass.
+
+This is the concrete meaning of "alpha-invert" for the sword trail: a **head→tail alpha gradient**
+plus an (PLAUSIBLE) additive blend state, not a boolean invert. This `SwordLightEffect` class is
+distinct from, and runs independently of, both the `XEffect` family and the `SwordLight` descriptor
+text tables of §12 (the tables feed it; this class renders it).
+
+### 17.7 Effect draw order — submission into the shared drawable queue (no private sort)
+
+**Confidence: the per-frame submit call is CONFIRMED; the absence of a private sort is observed
+(PLAUSIBLE→CONFIRMED); the global transparent-pass sort itself was NOT walked (UNVERIFIED).**
+
+Effects do **not** maintain their own depth-sorted draw list. Each tick, after a component's geometry
+is transformed, the runtime calls that component drawable's "submit" virtual-dispatch slot, pushing
+the mesh/GPU-particle drawable into the engine's **normal (Diamond) drawable queue**. Ordering and the
+transparent pass are then handled by the generic scene/draw manager, keyed by each drawable's
+material/blend render-state — not by the effect code.
+
+- **GPU-particle components** (`resource_id ≥ 10000`) are handed to the particle manager (§11);
+  start/stop is driven by the component's active-frame window (enter window = start, leave window =
+  stop/destroy). The particle manager owns their draw.
+- **`SwordLightEffect`** (§17.6) is drawn in-pipeline as part of its owning geometry's draw — no
+  separate effects pass.
+
+Net: effects register their per-frame drawables into the shared queue; transparency/additive ordering
+is the render layer's job via per-drawable blend state. Whether effects are forced into a
+late/transparent bucket or sorted purely by material is **UNVERIFIED** — the global sort was not fully
+walked this pass. This refines §8.2 step 12.
+
+### 17.8 Confidence summary for this section
+
+| Fact | Confidence |
+|---|---|
+| 104-byte element size; type tag at +0x04 selecting the subtype | CONFIRMED |
+| Emitter dispatch (billboard / oriented-quad / mesh) and the `< 10000` CPU-mesh vs `≥ 10000` GPU split | CONFIRMED |
+| Per-component active-frame window gating | CONFIRMED |
+| Keyframe sampling: linear lerp for scale/colour/alpha/position/velocity, slerp for rotation, stepped sprite-frame index | CONFIRMED |
+| UV scroll on a 5000 ms loop via a per-component flag | CONFIRMED |
+| `JointXEffect` bone attachment by bone id; world translation + quaternion copied from the live pose | CONFIRMED |
+| AnimCatalog weapon-hand slot meaning (which slot = which hand/weapon) | PLAUSIBLE |
+| On-disk alpha stored inverted (`1 − value`) | CONFIRMED |
+| Additive-vs-alpha blend state lives on the drawable material, not hard-coded by the effect code | PLAUSIBLE |
+| `SwordLightEffect` head→tail start/end alpha gradient bytes | CONFIRMED |
+| `SwordLightEffect` additive blend specifically | PLAUSIBLE |
+| Effects submit drawables into the shared queue with no private depth sort | PLAUSIBLE→CONFIRMED |
+| Global transparent-pass sort / late-bucket forcing | UNVERIFIED |
+| `.xeff` on-disk → descriptor field mapping | UNVERIFIED (out of this lane; pending — see `formats/effects.md §A.16` note) |
+
+---
+
 ## 16. Cross-References
 
-- **Binary format specs:** `formats/effects.md` — the authoritative `.xeff` and `.eff` format specs, including the 32-byte `.xeff` header (§A.2), sub-effect block structure (§A.4), in-memory element layout (§A.5), and the `particleEmitter.eff` layout (§E).
+- **Binary format specs:** `formats/effects.md` — the authoritative `.xeff` and `.eff` format specs, including the 32-byte `.xeff` header (§A.2), sub-effect block structure (§A.4), in-memory element layout (§A.5), the Campaign-5 runtime element struct (§A.16), and the `particleEmitter.eff` layout (§E).
 - **Scale override table:** `formats/effects.md §D` (`effectscale.xdb`).
 - **Terrain FX layer formats:** `formats/terrain_layers.md §Section 1` — authoritative for `.fx1`–`.fx7` byte layouts; do NOT look here for those.
-- **Bone and skeleton layout:** `specs/skinning.md` — bone world-transform format required for §9.3 step 3.
+- **Bone and skeleton layout:** `specs/skinning.md` — bone world-transform format required for §9.3 step 3 and §17.4.
 - **Combat:** `specs/combat.md` — server-authoritative damage values; the effects system is presentation-only and has no authority over damage numbers.
 - **Actor struct:** `structs/actor.md` — actor field layout referenced by `actor_sort_id` lookup and `visual_slot_byte`.
 - **Skill record (cast chain, §15):** `structs/skill.md` and `formats/config_tables.md §2.8` — authoritative byte layout of the `skills.scr` record. They own the +1116 / +1136 / +1180 offsets that §15 resolves to `cast_motion_base` / `cast_effect_id` / `cast_sfx_id`.
