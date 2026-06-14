@@ -1467,11 +1467,26 @@ and generic-error dialogs reuse the same rect (see section 11.2f for the trailin
 | **ID input field** | A | 390,32,102,13 | 615,404 | text box | max length 16 (UI cap; section 1.3) | **109** |
 | **Password input field** | A | 568,32,102,13 | 615,404 | text box | max length 12, masked (password filter) | **110** |
 | **Save-ID checkbox** | A | 694,86,13,13 | 717,398 (off) / 730,398 (on) | 2-state checkbox | pre-checked from saved-id (section 1.6) | **104** |
-| Secondary bottom button | A | 456,64,112,39 | 266,398 / 490,398 / 490,398 | 3-state button | register / find-password | **103** |
+| Secondary bottom button (the login quit route, builder button #63) | A | 456,64,112,39 | 266,398,112,39 / 490,398 / 490,398 | 3-state button | advances toward the shared quit-confirm gate (see the quit-verdict note below); gates the shared ExitPanel `C` (318,647,340,190). Baked-glyph identity UNVERIFIED | **103** |
 
 > The account / password / confirm / save-id Korean words are **baked into `login_slice1.dds`** (the
 > caption-art plates and the confirm-button face) - they are **not** message-catalogue strings. Only
 > the server-row labels (4001..4022) and the dialog bodies (4023/4024) are runtime text.
+
+> **Login quit - there is NO dedicated bottom-bar quit sprite (CORRECTS any earlier assumption).**
+> The login scene exposes two quit routes, neither of which is a stand-alone "quit" push-button face
+> on the bottom bar:
+> 1. **Keyboard accelerator.** A keyboard activation (the legacy input dispatcher's `'e'` accelerator)
+>    triggers an immediate engine shutdown. No widget feeds this path - it is keyboard-only.
+> 2. **Visible route via builder button #63** (the *Secondary bottom button* row above: `A`
+>    src `266,398,112x39`, on-screen `456,64,112,39`). Activating it advances the login flow toward
+>    the quit-confirm gate, whose modal box is the **shared ExitPanel** frame - `InventWindow.dds`
+>    (`C`) source `(318,647) 340x190` drawn at on-screen `342,289,340,190` (the same notice/error/
+>    quit frame, section 11.2d / 11.2f). The ExitPanel is a dialog *panel*, not a button.
+> Any earlier note implying a dedicated bottom-bar quit button sprite is superseded: the quit affordance
+> is (keyboard) + (button #63 -> shared ExitPanel). **UNVERIFIED:** the baked label glyph on button #63
+> art (`login_slice1.dds` 266,398,112x39) - whether it reads the quit word or a register / find-password
+> caption - needs a texture peek of `login_slice1.dds`; flag for the VFS/texture lane.
 
 ### 11.2f Trailing controls + quit/error dialogs
 
@@ -1490,15 +1505,28 @@ and generic-error dialogs reuse the same rect (see section 11.2f for the trailin
 
 The PIN modal (section 1.4a) is the second-password child window mounted over the login background.
 It uses two atlases only: **`password.dds`** (all digit-tile and reset/OK/cancel button art) and the
-shared dialog/frame atlas (`InventWindow.dds`) for the framed background quad (source
-`(318,647) 340x190`).
+shared dialog/frame atlas (`InventWindow.dds`) for the framed background quad - source rect
+`(318, 647, 340, 190)` (`srcU=318, srcV=647, W=340, H=190`), the same notice/error/quit frame
+(section 11.2d). This is the dragon-frame background quad described in the table below.
 
 - **Modal panel rect:** `347, 173, 329, 422` on the canvas (panel-local coordinates below are
   relative to this panel).
-- **No runtime text.** The number-entry caption, the warning line, and the modal title are all
-  **baked into the atlas art** - the modal calls no caption lookup. The entered PIN is held as an
-  internal string (<= 4 chars) and shown as a masked `*`-per-digit string; there is no text-box
-  widget.
+- **Dragon-frame background quad.** The modal background is the framed dragon quad - a sub-rect of
+  `InventWindow.dds`, source `(318, 647, 340, 190)`, NOT the whole 1024x1024 texture. The source art
+  is `340 x 190` but the on-screen panel is `329 x 422` (taller than the source), so the frame is
+  drawn **stretched**: render it as a **NinePatch** (or equivalent corner-preserving stretch) from
+  `(318, 647, 340, 190)` up to the `347, 173, 329, 422` panel rect. The keypad tiles and buttons
+  below are NOT stretched - they are drawn at their native `password.dds` source sizes
+  (52x52 / 154x58 / 58x30).
+- **No runtime text - the warning line is baked atlas art (CONFIRMED).** The number-entry caption,
+  the **red warning line**, the button faces, and the modal title are all **baked into the atlas
+  art** (the digit/button glyphs into `password.dds`; the title + warning line into the
+  `InventWindow.dds` dragon-frame quad). The modal performs **no caption lookup at all** - there is
+  no message-catalogue id for the warning line. A revival must therefore render the warning line as
+  part of the dragon-frame sub-rect art and must NOT wire it to a `msg.xdb` / message-catalogue
+  caption. (A dynamic warning string would be a NEW addition, not a fidelity match.) The entered PIN
+  is held as an internal string (<= 4 chars) and shown as a masked `*`-per-digit string; there is no
+  text-box widget.
 
 ### 11.3a Keypad tile grid (2 rows x 5 columns)
 
@@ -1564,15 +1592,18 @@ reuses the same four atlases loaded once at login-scene build. Shorthand: **A**=
 | Role | Atlas | Src rect (U,V,W,H) | Dst (X,Y) | Kind | Action / caption |
 |---|---|---|---|---|---|
 | Server-list backdrop band | A/D | 0, 326*.., 1024, 442 | 0, 326*H/768 | image (dimmed band) | - |
-| Parchment scroll panel (server tab) | D | per-row 100x372 / 202x372 plates | ~448 region | panel | - |
-| Channel-tab plates (loop x2) | D | 100x372 / 202x372 | X step +233, dst step +124 | image | row ids 400+ |
+| Parchment row/tab PLATE - normal state | D | 9,6,202,372 | col0 dst 24,97,202,372 / col1 dst 257,97,202,372 | 3-state plate | row ids 400/401 |
+| Parchment row/tab PLATE - hover/pressed state | D | 220,6,202,372 | (same dst as normal) | 3-state plate | row ids 400/401 |
+| Parchment scroll BODY - channel column 0 | D | 448,6,100,372 | dst 77,97,100,372 | image | - |
+| Parchment scroll BODY - channel column 1 | D | 572,6,100,372 | dst 310,97,100,372 | image | - |
+| Parchment scrollbar thumb | D | 700,18,46,168 | dst 0,(runtime),46,168 | image (dynamic Y) | - |
 | Server-row buttons x10 (loop) | B | 13,66,47,18, X step +47 | sprite row y=985 | 3-state button | **115..124** (id-115 = index) |
 | List column header labels | (text) | - | in scroll | label | captions 4029..4032 |
 | List up / down arrows | B | 690,985 / 784,985 | window-anchored | button | - |
 | **Refresh button** | A | 456,-3,111,38 | 792,398 | button | **105** (10 s cooldown -> re-enter fetch) |
 | Refresh-button label plate | A | 407,-3,210,70 | 743,398 | image (gold plate) | **baked art** |
 | Availability indicator (per row) | (text) | - | per row | label | population captions 6001..6005 |
-| Connecting dialog (states 35/39) | C | reuses notice panel (318,647 340x190) | centered | panel | caption 4023-candidate |
+| Connecting-dialog FRAME (endpoint wait, state 39) | C | 318,647,340,190 (== shared notice panel) | 342,289,340,190 (centered) | panel | runtime body caption (msg.xdb id; not a texture rect) |
 | Sword/arrow cursor | `data/cursor/stand.dds` | - | follows mouse | sprite | verified vs `data/cursor/game.ver` |
 
 - **Per-server-row record:** 8 bytes/entry (decode owned by section 2.2 / `login_flow.md`): `+0` u16
@@ -1583,6 +1614,21 @@ reuses the same four atlases loaded once at login-scene build. Shorthand: **A**=
   - UNVERIFIED which; the rects (Refresh `456,-3,111x38`; Cancel = login action 111) are firm.
 - The left-scroll calligraphy header is a runtime caption (integer id, **UNVERIFIED** exact id -
   needs a `msg.xdb` extract).
+- **Parchment plate vs server-row button (do not confuse).** The `202x372` row/tab PLATE
+  (`loginwindow_02.dds` src normal `9,6` / hover-pressed `220,6`) is the parchment BACKING the row
+  face draws over - it is DISTINCT from the small clickable server-row button sprite
+  (`loginwindow.dds` src `596,985` / `643,985`, `47x18`, actions 115..124 above). The plate's source-UV
+  is FIXED (does not advance per channel column). The `100x372` scroll BODY source-U advances **+124**
+  per channel column (`448` -> `572`); `srcV = 6` is fixed for both parchment quads; only two channel
+  columns are built (channel-tab count = 2). The parchment chrome lives entirely on
+  `loginwindow_02.dds`.
+- **Connecting dialog == the shared notice panel (not a distinct sub-rect).** The dialog shown during
+  the channel-endpoint wait (state 39) is the SAME `InventWindow.dds` frame sub-rect `(318,647,340,190)`
+  used for notice / error / quit dialogs (section 11.2d), drawn at on-screen `342,289,340,190`. There is
+  no dedicated connecting-frame texture rect - only the runtime body caption differs (a `msg.xdb`
+  caption id, not reproduced here). **Behavioral nuance (UNVERIFIED, static-only):** the server-list
+  WAIT (state 35) raises the channel-tab parchment panel + refresh button, NOT the notice frame; only
+  the endpoint WAIT (state 39) raises this connecting frame.
 
 ## 11.5 Char-select scene - widget layout (CODE-CONFIRMED literals)
 

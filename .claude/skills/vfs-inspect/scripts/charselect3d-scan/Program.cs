@@ -9,6 +9,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using MartialHeroes.Assets.Vfs;
+using MartialHeroes.Assets.Parsers;
 
 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 var cp949 = Encoding.GetEncoding(949);
@@ -338,6 +339,102 @@ if (archive.Contains("data/effect/xeff/zone_sel_u.xeff"))
     var b = archive.GetFileContent("data/effect/xeff/zone_sel_u.xeff").ToArray();
     PrintStrings("  ", b, Math.Min(2048, b.Length), cp949);
 }
+Console.WriteLine();
+
+// ── CS3D: .bud object AABB scan for d000x10000z9990 ─────────────────────────
+Console.WriteLine("=== CS3D: .bud per-object world AABB (d000x10000z9990) ===");
+const string budPath = "data/map000/dat/d000x10000z9990.bud";
+if (archive.Contains(budPath))
+{
+    var budMem = archive.GetFileContent(budPath);
+    var budScene = TerrainSceneParser.Parse(budMem);
+    Console.WriteLine($"  objects: {budScene.Objects.Length}");
+    for (int oi = 0; oi < budScene.Objects.Length; oi++)
+    {
+        var obj = budScene.Objects[oi];
+        float xMin = float.MaxValue, yMin = float.MaxValue, zMin = float.MaxValue;
+        float xMax = float.MinValue, yMax = float.MinValue, zMax = float.MinValue;
+        foreach (var v in obj.Vertices)
+        {
+            if (v.PosX < xMin) xMin = v.PosX; if (v.PosX > xMax) xMax = v.PosX;
+            if (v.PosY < yMin) yMin = v.PosY; if (v.PosY > yMax) yMax = v.PosY;
+            if (v.PosZ < zMin) zMin = v.PosZ; if (v.PosZ > zMax) zMax = v.PosZ;
+        }
+        float cx = (xMin + xMax) * 0.5f, cy = (yMin + yMax) * 0.5f, cz = (zMin + zMax) * 0.5f;
+        Console.WriteLine($"  obj[{oi:D2}] tex_id={obj.TexId} verts={obj.Vertices.Length} tris={obj.Indices.Length/3}");
+        Console.WriteLine($"         X=[{xMin:F1},{xMax:F1}] Y=[{yMin:F1},{yMax:F1}] Z=[{zMin:F1},{zMax:F1}]");
+        Console.WriteLine($"         center=({cx:F1},{cy:F1},{cz:F1})  size=({xMax-xMin:F1},{yMax-yMin:F1},{zMax-zMin:F1})");
+    }
+}
+else Console.WriteLine($"  MISSING {budPath}");
+Console.WriteLine();
+
+// ── CS3D: .ted height range + texture_index block summary ──────────────────
+Console.WriteLine("=== CS3D: .ted height statistics (d000x10000z9990) ===");
+const string tedPath = "data/map000/dat/d000x10000z9990.ted";
+if (archive.Contains(tedPath))
+{
+    var tedBytes = archive.GetFileContent(tedPath).ToArray();
+    // Block 1: 4225 f32 heights at offset 0
+    float hMin = float.MaxValue, hMax = float.MinValue, hSum = 0;
+    for (int i = 0; i < 4225; i++)
+    {
+        float h = BitConverter.ToSingle(tedBytes, i * 4);
+        if (h < hMin) hMin = h; if (h > hMax) hMax = h;
+        hSum += h;
+    }
+    Console.WriteLine($"  heights: min={hMin:F3} max={hMax:F3} mean={hSum/4225:F3}  (near-flat={Math.Abs(hMax-hMin)<1f})");
+    // Block 3: texture index grid at offset 29575
+    var texIdx = new byte[256];
+    Array.Copy(tedBytes, 29575, texIdx, 0, 256);
+    var usedIdx = texIdx.Distinct().OrderBy(x => x).ToArray();
+    Console.WriteLine($"  texture_index_grid: distinct values={string.Join(",", usedIdx.Select(v=>v.ToString()))}");
+}
+Console.WriteLine();
+
+// ── CS3D: .sod collision solid AABB ──────────────────────────────────────────
+Console.WriteLine("=== CS3D: .sod collision AABB (d000x10000z9990) ===");
+const string sodPath = "data/map000/dat/d000x10000z9990.sod";
+if (archive.Contains(sodPath))
+{
+    var sodBytes = archive.GetFileContent(sodPath).ToArray();
+    // SolidCount at +0
+    int solidCount = BitConverter.ToInt32(sodBytes, 0);
+    Console.WriteLine($"  solidCount={solidCount}");
+    // SolidRecord[0] AABB at +4..+19
+    if (solidCount > 0 && sodBytes.Length >= 4 + 16)
+    {
+        float ax = BitConverter.ToSingle(sodBytes, 4);
+        float az = BitConverter.ToSingle(sodBytes, 8);
+        float bx = BitConverter.ToSingle(sodBytes, 12);
+        float bz = BitConverter.ToSingle(sodBytes, 16);
+        Console.WriteLine($"  solid[0] AABB: X=[{ax:F1},{bx:F1}] Z=[{az:F1},{bz:F1}]");
+    }
+}
+Console.WriteLine();
+
+// ── CS3D: lightmap BMP head ─────────────────────────────────────────────────
+Console.WriteLine("=== CS3D: lightmap BMP header (data/effect/map/d000x10000z9990.bmp) ===");
+const string bmpPath = "data/effect/map/d000x10000z9990.bmp";
+if (archive.Contains(bmpPath))
+{
+    var bmpB = archive.GetFileContent(bmpPath).ToArray();
+    Console.WriteLine($"  size: {bmpB.Length} bytes");
+    if (bmpB.Length >= 54 && bmpB[0] == 'B' && bmpB[1] == 'M')
+    {
+        int fileSize = BitConverter.ToInt32(bmpB, 2);
+        int dataOffset = BitConverter.ToInt32(bmpB, 10);
+        int dibSize = BitConverter.ToInt32(bmpB, 14);
+        int width = BitConverter.ToInt32(bmpB, 18);
+        int height = BitConverter.ToInt32(bmpB, 22);
+        short bpp = BitConverter.ToInt16(bmpB, 28);
+        int compression = BitConverter.ToInt32(bmpB, 30);
+        Console.WriteLine($"  BMP header: fileSize={fileSize} dataOffset={dataOffset} dibHeaderSize={dibSize}");
+        Console.WriteLine($"  dimensions: {width}x{height}  bpp={bpp}  compression={compression}");
+    }
+    else Console.WriteLine($"  head[0..1]: {bmpB[0]:X2} {bmpB[1]:X2} (not standard BMP magic)");
+}
+else Console.WriteLine($"  MISSING {bmpPath}");
 Console.WriteLine();
 
 Console.WriteLine("DONE.");

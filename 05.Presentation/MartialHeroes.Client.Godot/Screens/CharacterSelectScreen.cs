@@ -2,7 +2,14 @@
 //
 // The legacy CHARACTER-SELECT screen (master scene state 4), rebuilt to spec fidelity.
 //
-// SPEC FIDELITY (this revision):
+// SPEC FIDELITY (this revision — CS3D rebuild):
+//   MAJOR CHANGE: The character-select is now a REAL 3D SCENE, not 5 separate SubViewports.
+//   One SubViewportContainer holds CharSelectScene3D (the full 3D backdrop: map000 terrain,
+//   character row, camera KF1, environment). The 2D chrome (slot tabs, info, Create/Delete/Enter)
+//   is a transparent Control layer composited ON TOP of the 3D viewport.
+//   spec: Docs/RE/specs/frontend_scenes.md §3 — "a full 3D world backdrop, not a flat 2D screen".
+//   CODE-CONFIRMED composition.
+//
 //   1. Action IDs corrected: Create=4, Delete=5, Enter=6  (was 413/531 — those were HOVER srcX).
 //      spec: Docs/RE/specs/ui_system.md §8.2 + correction note, frontend_scenes.md §4 + §5.
 //      Buttons constructed via the stage-1 StateButton with real NORMAL/HOVER/PRESSED atlas frames.
@@ -13,11 +20,11 @@
 //      Class labels from msg.xdb ids 14003..14007 via UiAssetLoader.Text().
 //      spec: Docs/RE/specs/ui_system.md §10; frontend_scenes.md §4.1. CODE-CONFIRMED.
 //
-//   3. 5 character slots with 3D PREVIEWS via CharPreview3D (SubViewport-backed Control).
-//      Legacy: real actors on a baked stage at X offsets {-1560…-1512}, scale ×3.0.
-//      spec: frontend_scenes.md §3.3. CODE-CONFIRMED.
-//      Each slot gets its own CharPreview3D with a staggered idle phase so all 5 don't
-//      animate in lockstep. Degrades to 2D placeholder when VFS absent.
+//   3. ONE shared 3D scene (CharSelectScene3D in a single SubViewport) replaces 5 SubViewports.
+//      The scene holds: map000 backdrop cell d000x10000z9990, standing character row at spec world
+//      positions, Camera3D at KF1, DirectionalLight3D + 4 OmniLight3D approximating 14:30 lighting.
+//      spec: frontend_scenes.md §3.3/§3.5/§3.6/§3.7. CODE-CONFIRMED.
+//      3D selection: slot hover is AABB screen-space hit-test (§3.3.3). Stub in this revision.
 //
 //   4. Creation sub-form per frontend_scenes.md §4:
 //      Class choice UI 0..3 → internal {4,1,3,2} (NOT the identity). spec §4.1. CODE-CONFIRMED.
@@ -41,6 +48,7 @@
 // spec: Docs/RE/specs/ui_system.md §8.2 (select layout, 77 ctor sites), §8.3 (InventWindow modal),
 //       §8.4 (generator patterns: base-Y 191, stride 24), §9.2 (atlas manifest), §10 (msg.xdb).
 // spec: Docs/RE/specs/frontend_scenes.md §3–§7 (char-select flow, create, delete, enter).
+// spec: Docs/RE/specs/frontend_scenes.md §3.7 (3D composition: map000, cell d000x10000z9990, stage).
 
 using System.Collections.Immutable;
 using Godot;
@@ -199,6 +207,10 @@ public sealed partial class CharacterSelectScreen : Control
         RebuildSlotSelectorRow();
         RefreshInfo();
 
+        // Push updated slot data into the 3D scene.
+        PushSlotDescriptorsToScene();
+        _scene3D?.SetSelectedSlot(_selectedSlot);
+
         GD.Print($"[CharacterSelectScreen] ApplyCharacterList: {slots.Length} slots received; " +
                  $"live data applied to {MaxSlots} slot array.");
     }
@@ -225,12 +237,14 @@ public sealed partial class CharacterSelectScreen : Control
     private Label _createClassLabel = null!;
     private Label _createFaceLabel = null!;
 
-    // 3D preview controls (one per slot, null = empty slot placeholder).
-    private readonly CharPreview3D?[] _previews = new CharPreview3D?[MaxSlots];
+    // The single unified 3D scene — replaces the old per-slot CharPreview3D array.
+    // spec: Docs/RE/specs/frontend_scenes.md §3 — "a full 3D world backdrop". CODE-CONFIRMED.
+    private CharSelectScene3D? _scene3D;
+    private SubViewport? _scene3DViewport;
 
-    // Active camera keyframe (0..5) shared across all preview slots.
-    // spec: Docs/RE/specs/frontend_scenes.md §3.5.3 — "initial active keyframe index = 0". CODE-CONFIRMED.
-    private int _activeCameraKeyframe;
+    // Active camera keyframe (0..5) — kept for potential runtime switching; KF1 is the live frame.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 — "live keyframe = 1". CODE-CONFIRMED.
+    private int _activeCameraKeyframe = 1; // KF1 is live per spec.
 
     // Camera pose buttons (one per keyframe).
     private readonly Button[] _poseButtons = new Button[6];
@@ -290,27 +304,16 @@ public sealed partial class CharacterSelectScreen : Control
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         int widgetCount = 0;
 
-        // --- Full-canvas dim backdrop.
-        // spec: Docs/RE/specs/ui_system.md §9.2 — blacksheet.dds used for dim overlay. ---
-        var backdrop = new ColorRect { Color = new Color(0.06f, 0.06f, 0.10f) };
-        backdrop.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        AddChild(backdrop);
-        widgetCount++;
+        // --- LAYER 0: The 3D scene viewport (full canvas, bottom-most layer).
+        // The legacy char-select is a real 3D world — NOT a 2D screen with a backdrop image.
+        // spec: Docs/RE/specs/frontend_scenes.md §3 — "a full 3D world backdrop". CODE-CONFIRMED.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.7 (composition: map000, cell, stage). CODE-CONFIRMED.
+        // The SubViewportContainer fills the canvas; the 2D chrome layers are Control children on top.
+        widgetCount += Build3DSceneViewport();
 
-        // Attempt to load the blacksheet atlas dim overlay.
-        Texture2D? blackTex = _assets.LoadAtlas(CharacterSelectLayout.AtlasBlacksheet);
-        if (blackTex is not null)
-        {
-            var blackRect = new TextureRect
-            {
-                Texture = blackTex,
-                StretchMode = TextureRect.StretchModeEnum.Scale,
-                Modulate = new Color(1f, 1f, 1f, 0.6f),
-            };
-            blackRect.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-            AddChild(blackRect);
-            widgetCount++;
-        }
+        // --- LAYER 1: Transparent 2D chrome overlaid on the 3D viewport.
+        // NOTE: No solid dim backdrop (the 3D viewport IS the background).
+        // The left info panel and buttons are semi-transparent panels so the 3D scene shows through.
 
         // --- Title bar panel @ (0,0) 577×58.
         // spec §8.2 "Top title bar panel". CODE-CONFIRMED. ---
@@ -405,21 +408,18 @@ public sealed partial class CharacterSelectScreen : Control
         infoPanel.AddChild(enterBtn);
         widgetCount++;
 
-        // --- 3D preview area — 5 slots side by side in the centre/right region.
-        // spec: frontend_scenes.md §3.3 — 5 slots, per-slot X offsets, scale ×3.0. CODE-CONFIRMED.
-        // The previews are placed on the 1024×768 canvas in the centre region (x=260..1010, y=64..560). ---
-        widgetCount += BuildPreviewSlots();
+        // The 3D viewport (Layer 0) was already inserted as the first child in BuildUi().
+        // The 2D chrome (info panel, buttons, slot row) composites on top of the 3D scene.
+        // No per-slot SubViewport boxes needed anymore — the unified CharSelectScene3D handles
+        // the full map000 backdrop + character row + camera.
+        // spec: Docs/RE/specs/frontend_scenes.md §3 — "a full 3D world backdrop". CODE-CONFIRMED.
 
-        // --- Slot selector row (text buttons below previews) ---
+        // --- Slot selector row (text buttons below the 3D region) ---
         widgetCount += BuildSlotSelectorRow();
 
-        // C2 fix: camera-pose debug buttons are NOT part of the official client UI.
-        // They were a dev-only exploration aid for the 6-keyframe orbit (spec §3.5.2 / §3.5.3).
-        // Removed from the presentation build; BuildCameraPoseButtons() is kept for potential
-        // dev mode re-enable but is not called here.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.5.4 — "runtime-pending; do not invent UI".
-        // Camera starts at KF0 (spec §3.5.3 "initial active keyframe = 0"). CODE-CONFIRMED.
-        _activeCameraKeyframe = 0;
+        // Camera is at KF1 (the live keyframe per spec).
+        // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 — "live keyframe = 1". CODE-CONFIRMED.
+        _activeCameraKeyframe = 1; // KF1 is the scene's active camera.
 
         // --- Corner close button @ (971,610) 23×23, blacksheet.dds src (941,910).
         // spec §8.2 "Corner close". CODE-CONFIRMED. ---
@@ -467,7 +467,7 @@ public sealed partial class CharacterSelectScreen : Control
 
         GD.Print($"[Screens] CharacterSelectScreen built ({widgetCount} widgets; " +
                  $"roster={DemoRoster.Length}; vfs={(_assets.HasVfs ? "real-atlas" : "offline")}; " +
-                 $"previews={_previews.Count(p => p is not null)} 3D slots active).");
+                 $"3D scene viewport queued for deferred init).");
     }
 
     // =========================================================================
@@ -530,81 +530,105 @@ public sealed partial class CharacterSelectScreen : Control
     }
 
     // =========================================================================
-    // 3D preview slots — spec: frontend_scenes.md §3.3. CODE-CONFIRMED.
+    // 3D scene — ONE unified SubViewport with CharSelectScene3D.
+    // Replaces the old per-slot CharPreview3D approach.
+    // spec: Docs/RE/specs/frontend_scenes.md §3 — "a full 3D world backdrop". CODE-CONFIRMED.
     // =========================================================================
 
-    private int BuildPreviewSlots()
+    /// <summary>
+    /// Builds the single SubViewportContainer that hosts CharSelectScene3D.
+    /// The SubViewportContainer fills the full reference canvas (1024×768) as the bottom-most
+    /// layer; 2D chrome Controls are added as siblings on top (higher child index = rendered later).
+    ///
+    /// <para>The 3D scene is initialised via a deferred call so that all parent nodes (ScreenHost,
+    /// CanvasLayer) are settled before the SubViewport is populated.</para>
+    ///
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.7 CODE-CONFIRMED (map000, cell, stage origin).
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.5 CODE-CONFIRMED (camera KF1).
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.6 CODE-CONFIRMED (5-light rig, fog zeroed).
+    /// </summary>
+    private int Build3DSceneViewport()
     {
-        // Place 5 preview boxes horizontally across the reference canvas, centred vertically.
-        // Each box gets a CharPreview3D (3D when VFS available, 2D placeholder otherwise).
-        // Phase stagger: each slot starts the idle clip (360°/5) apart.
-        // spec: mission brief — "ONE preview rig instanced 5 times with slot-varied idle phase".
-        // spec: frontend_scenes.md §3.3 — stage scale ×3.0. CODE-CONFIRMED.
+        // The SubViewport size matches the reference canvas (1024×768).
+        // spec: Docs/RE/specs/ui_system.md §8.1 — "reference canvas 1024×768". CODE-CONFIRMED.
+        _scene3DViewport = new SubViewport
+        {
+            Name = "CharSelect3DViewport",
+            Size = new Vector2I(1024, 768),
+            RenderTargetUpdateMode = SubViewport.UpdateMode.Always,
+            TransparentBg = false, // opaque — this IS the background
+        };
 
-        // Layout: 5 slots from x=260 to x=1010, each 148 px wide. y=70..530 (460 px tall).
-        const float slotX0 = 260f;
-        const float slotW = 148f;
-        const float slotGap = 2f;
-        const float slotY = 70f;
-        const float slotH = 460f;
+        // CharSelectScene3D holds all 3D content (terrain, characters, camera, lights).
+        // spec: Docs/RE/specs/frontend_scenes.md §3 CODE-CONFIRMED.
+        _scene3D = new CharSelectScene3D { Name = "CharSelectScene3D" };
 
-        int count = 0;
+        // Set slot descriptors from the current roster (before Initialise).
+        PushSlotDescriptorsToScene();
+
+        _scene3DViewport.AddChild(_scene3D);
+
+        // SubViewportContainer: stretches the viewport to fill the Control area.
+        var container = new SubViewportContainer
+        {
+            Name = "Scene3DContainer",
+            Stretch = true,
+            MouseFilter = MouseFilterEnum.Ignore, // 2D chrome handles input
+        };
+        container.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        container.AddChild(_scene3DViewport);
+        AddChild(container);
+
+        // Defer Initialise to the next frame so the SubViewport is settled in the tree.
+        // spec: CharSelectScene3D — "call Initialise after node is in tree". CONFIRMED.
+        Callable.From(InitialiseScene3D).CallDeferred();
+
+        GD.Print("[CharacterSelectScreen] 3D scene SubViewport queued (deferred Initialise). " +
+                 "spec: frontend_scenes.md §3.7 CODE-CONFIRMED.");
+        return 2; // container + viewport
+    }
+
+    /// <summary>
+    /// Deferred: initialises the 3D scene once the SubViewport is settled.
+    /// </summary>
+    private void InitialiseScene3D()
+    {
+        if (_scene3D is null || !IsInstanceValid(_scene3D)) return;
+        try
+        {
+            _scene3D.Initialise(_realAssets);
+            // Set initial slot selection highlight.
+            _scene3D.SetSelectedSlot(_selectedSlot);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[CharacterSelectScreen] InitialiseScene3D failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Pushes the current slot occupancy / skin data into <see cref="_scene3D"/>'s descriptor array.
+    /// Called before Initialise and after ApplyCharacterList.
+    /// </summary>
+    private void PushSlotDescriptorsToScene()
+    {
+        if (_scene3D is null) return;
+        var descs = new (bool IsOccupied, uint SkinClassId)[MaxSlots];
         for (int i = 0; i < MaxSlots; i++)
         {
-            bool occupied = i < DemoRoster.Length;
-
-            // Phase: spread idle clips across the cycle so 5 previews don't snap in lockstep.
-            // Assuming a ~2-second idle cycle; phase offsets at 0.0, 0.4, 0.8, 1.2, 1.6 s.
-            float phase = i * 0.4f;
-
-            // Per-slot descriptor fields. Use live data (CharacterListEvent) when available,
-            // else fall back to the demo roster.
-            // spec: frontend_scenes.md §3.2 — SpawnDescriptor field offsets. CODE-CONFIRMED.
-            uint skinClassId;
-            string charName;
-            int charLevel;
-            string className;
             if (_liveDataApplied)
             {
                 LiveSlot ls = _liveSlots[i];
-                occupied = !ls.IsEmpty;
-                skinClassId = occupied ? (uint)ls.ServerClass : 0u;
-                charName = occupied ? ls.Name : string.Empty;
-                charLevel = occupied ? ls.Level : 0;
-                className = string.Empty; // ServerClass int is not the display name; preview uses skinClassId
+                descs[i] = (!ls.IsEmpty, !ls.IsEmpty ? (uint)ls.ServerClass : 0u);
             }
             else
             {
-                occupied = i < DemoRoster.Length;
-                skinClassId = occupied ? DemoRoster[i].SkinClassId : 0u;
-                charName = occupied ? DemoRoster[i].Name : string.Empty;
-                charLevel = occupied ? DemoRoster[i].Level : 0;
-                className = occupied ? DemoRoster[i].ClassName : string.Empty;
+                bool occ = i < DemoRoster.Length;
+                descs[i] = (occ, occ ? DemoRoster[i].SkinClassId : 0u);
             }
-
-            var preview = new CharPreview3D
-            {
-                Name = $"Preview{i}",
-                SlotIndex = i,
-                IdlePhaseOffset = phase,
-                IsOccupied = occupied,
-                SharedRealAssets = _realAssets,
-                SkinClassId = skinClassId,
-                SlotCharacterName = charName,
-                SlotLevel = charLevel,
-                SlotClassName = className,
-                Position = new Vector2(slotX0 + i * (slotW + slotGap), slotY),
-                Size = new Vector2(slotW, slotH),
-            };
-            AddChild(preview);
-            _previews[i] = preview;
-            count++;
-
-            GD.Print($"[Screens] CharacterSelectScreen: preview slot {i} occupied={occupied} " +
-                     $"skin_class={skinClassId} name='{charName}' level={charLevel} phase={phase:F2}s.");
         }
 
-        return count;
+        _scene3D.SlotDescriptors = descs;
     }
 
     // =========================================================================
@@ -779,12 +803,11 @@ public sealed partial class CharacterSelectScreen : Control
     private void SetCameraKeyframe(int keyframe)
     {
         _activeCameraKeyframe = ((keyframe % 6) + 6) % 6;
-        GD.Print($"[Screens] CharacterSelectScreen: camera keyframe → {_activeCameraKeyframe}.");
-        foreach (CharPreview3D? preview in _previews)
-        {
-            if (preview is not null && IsInstanceValid(preview))
-                preview.ActiveKeyframe = _activeCameraKeyframe;
-        }
+        GD.Print($"[Screens] CharacterSelectScreen: camera keyframe → {_activeCameraKeyframe}. " +
+                 "(CharSelectScene3D uses a single camera; keyframe switching is runtime-pending. " +
+                 "spec: frontend_scenes.md §3.5.4 — keyframe orbit auto-advance: MEDIUM.)");
+        // The unified CharSelectScene3D uses one camera fixed at KF1.
+        // Full keyframe orbit switching is runtime-pending (spec §3.5.4 open item 4).
     }
 
     // =========================================================================
@@ -1203,6 +1226,10 @@ public sealed partial class CharacterSelectScreen : Control
                     : Colors.White;
             }
         }
+
+        // Propagate selection to the 3D scene for actor highlight.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.3.4 — clip swap on selection. CODE-CONFIRMED (spec).
+        _scene3D?.SetSelectedSlot(index);
     }
 
     // =========================================================================
