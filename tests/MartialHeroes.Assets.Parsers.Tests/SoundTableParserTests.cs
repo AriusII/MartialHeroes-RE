@@ -283,8 +283,9 @@ public sealed class SoundTableParserTests
         SoundTableData result = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Eff);
 
         Assert.Equal(24, result.Entries[5].HourSchedule.Length);
-        // HourSchedule24 is an [InlineArray] struct; AsReadOnlySpan() yields all 24 bytes for assertion.
-        Assert.All(result.Entries[5].HourSchedule.AsReadOnlySpan().ToArray(), b => Assert.Equal(0x01, b));
+        // HourSchedule24 is an [InlineArray] struct; iterate the span directly — no intermediate array.
+        foreach (byte b in result.Entries[5].HourSchedule.AsReadOnlySpan())
+            Assert.Equal(0x01, b);
     }
 
     [Fact]

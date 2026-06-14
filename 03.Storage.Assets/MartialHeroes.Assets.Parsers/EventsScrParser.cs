@@ -110,6 +110,12 @@ public static class EventsScrParser
         int count = span.Length / RecordStride;
         var records = new EventsScrRecord[count];
 
+        // M4: stackalloc scratch buffers hoisted before the loop (CA2014 — must not stackalloc inside a loop).
+        // Each iteration clears rateCount/actorCount and overwrites the scratch before calling ToArray().
+        // spec: Docs/RE/formats/events_scr.md §1.3 — rate_array[50] / actor_array[52]: CONFIRMED CONSUMED.
+        Span<uint> rateBuf = stackalloc uint[RateArrayCount];
+        Span<uint> actorBuf = stackalloc uint[ActorArrayCount];
+
         for (int i = 0; i < count; i++)
         {
             int recBase = i * RecordStride;
@@ -145,28 +151,38 @@ public static class EventsScrParser
             // spec: Docs/RE/formats/events_scr.md §1.3 — rate_array u32LE[50] @ 0x68: CONFIRMED CONSUMED.
             // spec: Docs/RE/formats/events_scr.md §1.7 — "÷1,000,000 = rate fraction displayed as %": HIGH.
             // NOTE: formerly 'ids_array_a' — corrected to 'rate_array' per spec update.
-            var rateArray = new List<uint>(RateArrayCount);
+            // M4: scratch buffer hoisted before the loop; reset count and fill for this record.
+            int rateCount = 0;
             for (int k = 0; k < RateArrayCount; k++)
             {
                 uint v = BinaryPrimitives.ReadUInt32LittleEndian(
                     rec[(OffRateArray + k * 4)..]);
                 if (v == 0) break;
-                rateArray.Add(v);
+                rateBuf[rateCount++] = v;
             }
+
+            IReadOnlyList<uint> rateArray = rateCount == 0
+                ? Array.Empty<uint>()
+                : rateBuf[..rateCount].ToArray();
 
             // CONSUMED FIELD: actor_array u32LE[52] @ 0x130. CONFIRMED.
             // Values are 9-digit actor IDs (same namespace as items.scr / citems.scr).
             // Zero-terminated: iteration stops at first non-positive/zero slot.
             // spec: Docs/RE/formats/events_scr.md §1.3 — actor_array u32LE[52] @ 0x130: CONFIRMED CONSUMED / HIGH.
             // NOTE: formerly 'ids_array_b' — corrected to 'actor_array' per spec update.
-            var actorArray = new List<uint>(ActorArrayCount);
+            // M4: scratch buffer hoisted before the loop; reset count and fill for this record.
+            int actorCount = 0;
             for (int k = 0; k < ActorArrayCount; k++)
             {
                 uint v = BinaryPrimitives.ReadUInt32LittleEndian(
                     rec[(OffActorArray + k * 4)..]);
                 if (v == 0) break;
-                actorArray.Add(v);
+                actorBuf[actorCount++] = v;
             }
+
+            IReadOnlyList<uint> actorArray = actorCount == 0
+                ? Array.Empty<uint>()
+                : actorBuf[..actorCount].ToArray();
 
             // [skipped: record_trailer @0x200 — 8 bytes, NOT-CONSUMED]
             // spec: Docs/RE/formats/events_scr.md §1.3 — record_trailer @ 0x200: CONFIRMED not-consumed.

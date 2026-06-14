@@ -127,6 +127,10 @@ public static class ItemsCsvParser
         // (Including float because §2 warns: "treat a token containing a period as numeric" to avoid
         //  re-opening the description boundary on a float token.)
         // spec: Docs/RE/formats/items_csv.md §2.HAZARD-A — implementation caution.
+        //
+        // KNOWN LIMITATION (spec: items_csv.md §HAZARD-A): if a name segment is itself a purely-numeric
+        // token, the numeric-anchor scan can misidentify it as item_id; safe only when item names never
+        // start with a digit-only token.
         int idTokenIndex = -1;
         for (int t = 0; t < tokens.Length; t++)
         {
@@ -188,20 +192,34 @@ public static class ItemsCsvParser
     }
 
     /// <summary>
-    /// Returns true when the token is a valid integer or float (contains only digits and optionally
-    /// a single period for floating-point). Empty string is not numeric.
+    /// Returns true when the token is a valid integer or float (digits, optional single leading '-',
+    /// optional single period for floating-point). A bare "-" with no digits is NOT numeric.
+    /// Empty string is not numeric.
     /// </summary>
     /// <remarks>
     /// spec: Docs/RE/formats/items_csv.md §2.HAZARD-A — implementation caution: "treat a token
     /// containing a period as numeric too (it is the float field)".
+    /// spec: Docs/RE/formats/items_csv.md §HAZARD-A — signed values guarded defensively.
     /// </remarks>
     private static bool IsNumericToken(string token)
     {
         if (string.IsNullOrEmpty(token)) return false;
+
+        int start = 0;
+        // Accept an optional single leading '-' for signed values.
+        // A bare "-" (no following digits) is NOT numeric.
+        // spec: Docs/RE/formats/items_csv.md §HAZARD-A — signed values guarded defensively.
+        if (token[0] == '-')
+        {
+            if (token.Length == 1) return false; // bare "-" is not numeric
+            start = 1;
+        }
+
         // A numeric token contains only ASCII digits and at most one period.
         bool hasPeriod = false;
-        foreach (char c in token)
+        for (int i = start; i < token.Length; i++)
         {
+            char c = token[i];
             if (c == '.')
             {
                 if (hasPeriod) return false; // two periods = not numeric
@@ -222,11 +240,12 @@ public static class ItemsCsvParser
         // spec: Docs/RE/formats/items_csv.md §1 — col 3+ are the numeric tail.
         // spec: Docs/RE/formats/items_csv.md §2.HAZARD-B — parse numeric tail with InvariantCulture: CONFIRMED.
 
-        // Helper: safe tail column access (returns 0 when absent or unparseable).
-        uint GetU(int tailIndex) => tailIndex < tail.Length ? ParseUInt(tail[tailIndex]) : 0u;
-        ushort GetS(int tailIndex) => tailIndex < tail.Length ? ParseUShort(tail[tailIndex]) : (ushort)0;
-        byte GetB(int tailIndex) => tailIndex < tail.Length ? ParseByte(tail[tailIndex]) : (byte)0;
-        float GetF(int tailIndex) => tailIndex < tail.Length ? ParseFloat(tail[tailIndex]) : 0f;
+        // perf: static local functions — no closure allocation; the array is passed explicitly.
+        // spec: items_csv.md §HAZARD-A — signed values guarded defensively (ParseUInt/ParseFloat cover negatives).
+        static uint GetU(string[] t, int i) => i < t.Length ? ParseUInt(t[i]) : 0u;
+        static ushort GetS(string[] t, int i) => i < t.Length ? ParseUShort(t[i]) : (ushort)0;
+        static byte GetB(string[] t, int i) => i < t.Length ? ParseByte(t[i]) : (byte)0;
+        static float GetF(string[] t, int i) => i < t.Length ? ParseFloat(t[i]) : 0f;
 
         // Build the raw columns array: col0=name, col1=id (as string), col2=desc, col3+=tail.
         // Materialised for consumers that need untyped access.
@@ -245,76 +264,76 @@ public static class ItemsCsvParser
             NameCp949 = name, // col 0 — item_name CP949: HIGH
             ItemId = itemId, // col 1 — item_id u32: HIGH
             DescriptionCp949 = desc, // col 2 — item_description CP949: HIGH
-            LinkedItemId = GetU(0), // col 3 — u32 (small int, observed 0): LOW
-            BaseRefId = GetU(1), // col 4 — base_item_id / archetype id (9-digit): HIGH
-            SecondaryRefId = GetU(2), // col 5 — secondary type id (9-digit): MEDIUM
-            ItemSubtype = GetU(3), // col 6 — small flag (1 observed): LOW
+            LinkedItemId = GetU(tail, 0), // col 3 — u32 (small int, observed 0): LOW
+            BaseRefId = GetU(tail, 1), // col 4 — base_item_id / archetype id (9-digit): HIGH
+            SecondaryRefId = GetU(tail, 2), // col 5 — secondary type id (9-digit): MEDIUM
+            ItemSubtype = GetU(tail, 3), // col 6 — small flag (1 observed): LOW
 
             // ── Flags and meta (cols 7–18) ──────────────────────────────────
-            BonusFlagA = GetB(4), // col 7  — bonus flag a: UNVERIFIED
-            BonusFlagB = GetB(5), // col 8  — bonus flag b: UNVERIFIED
+            BonusFlagA = GetB(tail, 4), // col 7  — bonus flag a: UNVERIFIED
+            BonusFlagB = GetB(tail, 5), // col 8  — bonus flag b: UNVERIFIED
             // col 9 (tail[6]): reserved_09 u8 HIGH (always 0) — not decoded
-            EnhancementSize = GetB(7), // col 10 — enhancement_size u8: HIGH
-            SellPrice = GetU(13), // col 16 — sell_price u32: CONFIRMED
-            NpcPurchaseable = GetB(14), // col 17 — npc_purchaseable u8: HIGH
-            Enabled = GetB(15), // col 18 — enabled u8: CONFIRMED
+            EnhancementSize = GetB(tail, 7), // col 10 — enhancement_size u8: HIGH
+            SellPrice = GetU(tail, 13), // col 16 — sell_price u32: CONFIRMED
+            NpcPurchaseable = GetB(tail, 14), // col 17 — npc_purchaseable u8: HIGH
+            Enabled = GetB(tail, 15), // col 18 — enabled u8: CONFIRMED
 
             // ── Stacking, tier, durability (cols 19–23) ─────────────────────
-            MaxStack = GetS(16), // col 19 — max_stack u16: CONFIRMED
-            ItemTierRank = GetS(19), // col 22 — item_tier_rank u16: CONFIRMED
-            MaxDurability = GetS(20), // col 23 — max_durability u16: HIGH
+            MaxStack = GetS(tail, 16), // col 19 — max_stack u16: CONFIRMED
+            ItemTierRank = GetS(tail, 19), // col 22 — item_tier_rank u16: CONFIRMED
+            MaxDurability = GetS(tail, 20), // col 23 — max_durability u16: HIGH
 
             // ── Required stats (cols 24–28) ─────────────────────────────────
-            ReqStr = GetS(21), // col 24 — req_str u16
-            ReqCon = GetS(22), // col 25 — req_con u16
-            ReqAgi = GetS(23), // col 26 — req_agi u16
-            ReqInt = GetS(24), // col 27 — req_int u16
-            ReqChi = GetS(25), // col 28 — req_chi u16
+            ReqStr = GetS(tail, 21), // col 24 — req_str u16
+            ReqCon = GetS(tail, 22), // col 25 — req_con u16
+            ReqAgi = GetS(tail, 23), // col 26 — req_agi u16
+            ReqInt = GetS(tail, 24), // col 27 — req_int u16
+            ReqChi = GetS(tail, 25), // col 28 — req_chi u16
 
             // ── Class restriction flags (cols 29–32) ────────────────────────
-            ClassYi = GetB(26), // col 29 — class_yi u8
-            ClassYe = GetB(27), // col 30 — class_ye u8
-            ClassIn = GetB(28), // col 31 — class_in u8
-            ClassJi = GetB(29), // col 32 — class_ji u8
+            ClassYi = GetB(tail, 26), // col 29 — class_yi u8
+            ClassYe = GetB(tail, 27), // col 30 — class_ye u8
+            ClassIn = GetB(tail, 28), // col 31 — class_in u8
+            ClassJi = GetB(tail, 29), // col 32 — class_ji u8
 
             // ── Enchant and socket block (cols 47–48) ───────────────────────
-            EnchantLevel = GetB(44), // col 47 — enchant_level u8
-            GemPower = GetB(45), // col 48 — gem_power u8
+            EnchantLevel = GetB(tail, 44), // col 47 — enchant_level u8
+            GemPower = GetB(tail, 45), // col 48 — gem_power u8
 
             // ── Bonus stat block A (cols 64–65, 68) ─────────────────────────
-            BonusAtk = GetU(61), // col 64 — bonus_atk u32
-            BonusHp = GetU(62), // col 65 — bonus_hp u32
-            BonusExtAtk = GetU(65), // col 68 — bonus_ext_atk u32
+            BonusAtk = GetU(tail, 61), // col 64 — bonus_atk u32
+            BonusHp = GetU(tail, 62), // col 65 — bonus_hp u32
+            BonusExtAtk = GetU(tail, 65), // col 68 — bonus_ext_atk u32
 
             // ── Float rate block (cols 75, 78) ──────────────────────────────
             // spec: Docs/RE/formats/items_csv.md §2.HAZARD-B — float column, InvariantCulture: CONFIRMED.
-            AttackSpeed = GetF(72), // col 75 — attack_speed f32
-            DodgeRate = GetF(75), // col 78 — dodge_rate f32
+            AttackSpeed = GetF(tail, 72), // col 75 — attack_speed f32
+            DodgeRate = GetF(tail, 75), // col 78 — dodge_rate f32
 
             // ── Bonus stat block B (cols 84–87, 90, 93–96) ──────────────────
-            BonusChi = GetU(81), // col 84 — bonus_chi u32
-            WeaponStatA = GetU(82), // col 85 — weapon_stat_a u32
-            WeaponStatB = GetU(83), // col 86 — weapon_stat_b u32
-            MinAttack = GetU(84), // col 87 — min_attack u32
-            MaxAttack = GetU(87), // col 90 — max_attack u32
-            BonusDefenseA = GetU(90), // col 93 — bonus_defense_a u32
-            PhysDefense = GetU(91), // col 94 — phys_defense u32
-            ArmorDefense = GetU(93), // col 96 — armor_defense u32
+            BonusChi = GetU(tail, 81), // col 84 — bonus_chi u32
+            WeaponStatA = GetU(tail, 82), // col 85 — weapon_stat_a u32
+            WeaponStatB = GetU(tail, 83), // col 86 — weapon_stat_b u32
+            MinAttack = GetU(tail, 84), // col 87 — min_attack u32
+            MaxAttack = GetU(tail, 87), // col 90 — max_attack u32
+            BonusDefenseA = GetU(tail, 90), // col 93 — bonus_defense_a u32
+            PhysDefense = GetU(tail, 91), // col 94 — phys_defense u32
+            ArmorDefense = GetU(tail, 93), // col 96 — armor_defense u32
 
             // ── Model / visual IDs (cols 117–118) ───────────────────────────
-            ModelSetId = GetS(114), // col 117 — model_set_id u16
-            ModelType = GetB(115), // col 118 — model_type u8
+            ModelSetId = GetS(tail, 114), // col 117 — model_set_id u16
+            ModelType = GetB(tail, 115), // col 118 — model_type u8
 
             // ── Consumable block (cols 112, 113, 119–120, 127–130) ──────────
-            DurationMinutes = GetU(109), // col 112 — duration_minutes u32
-            ExpireMode = GetB(110), // col 113 — expire_mode u8
-            ConsumableValue = GetU(116), // col 119 — consumable_value u32
-            IsConsumable = GetB(117), // col 120 — is_consumable u8
-            GemCategory = GetB(124), // col 127 — gem_category u8
-            EquippableFlag = GetB(125), // col 128 — equippable_flag u8
-            HasEffect = GetB(126), // col 129 — has_effect u8
-            EffectType = GetB(127), // col 130 — effect_type u8
-            EffectStrength = GetS(128), // col 131 — effect_strength u16
+            DurationMinutes = GetU(tail, 109), // col 112 — duration_minutes u32
+            ExpireMode = GetB(tail, 110), // col 113 — expire_mode u8
+            ConsumableValue = GetU(tail, 116), // col 119 — consumable_value u32
+            IsConsumable = GetB(tail, 117), // col 120 — is_consumable u8
+            GemCategory = GetB(tail, 124), // col 127 — gem_category u8
+            EquippableFlag = GetB(tail, 125), // col 128 — equippable_flag u8
+            HasEffect = GetB(tail, 126), // col 129 — has_effect u8
+            EffectType = GetB(tail, 127), // col 130 — effect_type u8
+            EffectStrength = GetS(tail, 128), // col 131 — effect_strength u16
 
             // ── All raw columns ──────────────────────────────────────────────
             RawColumns = rawColumns,

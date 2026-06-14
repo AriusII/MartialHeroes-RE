@@ -199,15 +199,7 @@ public static class TerrainGltfConverter
             }
         }
 
-        // Store min/max for JSON (passed out via a local we'll put in a closure-like pattern).
-        // We'll stash them in temp fields since C# doesn't have out-local-tuples easily here.
-        // Instead we write them to a pre-allocated slot at the start of a temporary buffer.
-        // Simpler: use ref fields via inline compute below in BuildJson. We pass them as a
-        // separate out parameter group by boxing into an array so we can share them.
-        // Actually, the cleanest is: compute min/max separately before calling BuildJson.
-        // We've already computed them here, so store in fields on a small struct.
-        // For simplicity: pass them as a small value tuple returned from a helper.
-        // --- we'll recompute them inside BuildJson since we have the cell data ---
+        // min/max are recomputed inside BuildJson from the same cell data.
 
         // ---- UVs ----
         // Normalised UV: U = col / (GridSize-1), V = row / (GridSize-1).

@@ -26,6 +26,22 @@ public sealed class VfsDeepIISpecCorrectionTests
 {
     // ─── Binary helpers ────────────────────────────────────────────────────────
 
+    /// <summary>Concatenates byte arrays without LINQ allocation.</summary>
+    private static byte[] Concat(params byte[][] arrays)
+    {
+        int totalLen = 0;
+        foreach (byte[] a in arrays) totalLen += a.Length;
+        byte[] result = new byte[totalLen];
+        int pos = 0;
+        foreach (byte[] a in arrays)
+        {
+            a.CopyTo(result, pos);
+            pos += a.Length;
+        }
+
+        return result;
+    }
+
     private static void WriteU8(byte[] buf, int off, byte v) => buf[off] = v;
 
     private static void WriteU16LE(byte[] buf, int off, ushort v) =>
@@ -122,7 +138,7 @@ public sealed class VfsDeepIISpecCorrectionTests
         // spec: Docs/RE/formats/items_scr.md §1.3 -- "Record count: obtained by walking to EOF."
         byte[] r1 = BuildItemsScrRecord("ItemAlpha", uid: 100u);
         byte[] r2 = BuildItemsScrRecord("ItemBeta", uid: 200u);
-        byte[] buf = r1.Concat(r2).ToArray();
+        byte[] buf = Concat(r1, r2);
 
         var records = ItemsScrParser.Parse(new ReadOnlyMemory<byte>(buf)).ToArray();
 
@@ -162,7 +178,7 @@ public sealed class VfsDeepIISpecCorrectionTests
         byte[] r1 = BuildItemsScrRecord("Bow", uid: 1u, effectCount: 0); // 548 bytes
         byte[] r2 = BuildItemsScrRecord("Sword", uid: 2u, effectCount: 1); // 548 + 8 = 556 bytes
         byte[] r3 = BuildItemsScrRecord("Ring", uid: 3u, effectCount: 1); // 548 + 8 = 556 bytes
-        byte[] buf = r1.Concat(r2).Concat(r3).ToArray(); // total = 548 + 556 + 556 = 1660 bytes
+        byte[] buf = Concat(r1, r2, r3); // total = 548 + 556 + 556 = 1660 bytes
 
         var records = ItemsScrParser.Parse(new ReadOnlyMemory<byte>(buf)).ToArray();
 
@@ -285,7 +301,7 @@ public sealed class VfsDeepIISpecCorrectionTests
         // Multi-record: second record item_name should also come from 0x04.
         byte[] r1 = BuildCitemsRecord(slotIndex: 1u, itemName: "Alpha", itemUid: 283000001u);
         byte[] r2 = BuildCitemsRecord(slotIndex: 2u, itemName: "Beta", itemUid: 283000002u);
-        byte[] buf = r1.Concat(r2).ToArray();
+        byte[] buf = Concat(r1, r2);
         CitemsCatalog cat = CitemsParser.Parse(new ReadOnlyMemory<byte>(buf));
 
         Assert.Equal(2, cat.Records.Count);

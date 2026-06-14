@@ -34,6 +34,18 @@ public static class ItemsScrParser
     // spec: Docs/RE/formats/items_scr.md §1.2 — "fixed 548-byte (0x224) block": CONFIRMED.
     private const int FixedBlockSize = 0x224; // 548
 
+    // CP949 encoding — hoisted to avoid per-record construction (≈90,937 records per file).
+    // The static constructor registers the provider before the field is used;
+    // DecodeRecord accesses this field only after Parse() has run, ensuring correct init order.
+    // spec: Docs/RE/formats/items_scr.md §Identification — "Text encoding: CP949": CONFIRMED.
+    private static readonly System.Text.Encoding Cp949;
+
+    static ItemsScrParser()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Cp949 = Encoding.GetEncoding(949);
+    }
+
     // item_name CP949[52] @ 0x000. CONFIRMED (90,937/90,937).
     // spec: Docs/RE/formats/items_scr.md §1.4 — item_name CP949[52] @0x000: CONFIRMED.
     private const int OffItemName = 0x000;
@@ -95,6 +107,7 @@ public static class ItemsScrParser
     public static IEnumerable<ItemsScrRecord> Parse(ReadOnlyMemory<byte> data)
     {
         // Register CP949 provider. Idempotent; safe to call multiple times.
+        // The static Cp949 field is evaluated lazily on first access after this call.
         // spec: Docs/RE/formats/items_scr.md §Identification — "Text encoding: CP949": CONFIRMED.
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
@@ -127,7 +140,14 @@ public static class ItemsScrParser
     /// </summary>
     private static ItemsScrRecord DecodeRecord(ReadOnlyMemory<byte> data, int recordOffset, int totalLen)
     {
-        var cp949 = Encoding.GetEncoding(949); // spec: Docs/RE/formats/items_scr.md §Identification — CP949.
+        // M1: in-method bounds guard — makes this method safe even when called directly.
+        // The outer loop already breaks on short reads; this guard closes the local safety gap.
+        // spec: Docs/RE/formats/items_scr.md §1.2 — "fixed 548-byte (0x224) block": CONFIRMED.
+        if ((uint)recordOffset + (uint)FixedBlockSize > (uint)totalLen)
+            throw new InvalidDataException(
+                $"items.scr parse error: record at offset {recordOffset}: " +
+                $"fixed block requires {FixedBlockSize} bytes but only {totalLen - recordOffset} bytes remain. " +
+                "spec: Docs/RE/formats/items_scr.md §1.2.");
 
         // Take a span of just the fixed block — lifetime bounded to this call frame.
         ReadOnlySpan<byte> fixedBlock = data.Span.Slice(recordOffset, FixedBlockSize);
@@ -137,8 +157,8 @@ public static class ItemsScrParser
         ReadOnlySpan<byte> nameBytes = fixedBlock.Slice(OffItemName, ItemNameLen);
         int nameNul = nameBytes.IndexOf((byte)0);
         string itemName = nameNul >= 0
-            ? cp949.GetString(nameBytes[..nameNul])
-            : cp949.GetString(nameBytes);
+            ? Cp949.GetString(nameBytes[..nameNul])
+            : Cp949.GetString(nameBytes);
 
         // item_uid u32LE @ 0x034. CONFIRMED.
         // spec: Docs/RE/formats/items_scr.md §1.4 — item_uid u32LE @0x034: CONFIRMED (90,937/90,937).
@@ -149,8 +169,8 @@ public static class ItemsScrParser
         ReadOnlySpan<byte> descRegion = fixedBlock[OffItemDesc..];
         int descNul = descRegion.IndexOf((byte)0);
         string itemDesc = descNul >= 0
-            ? cp949.GetString(descRegion[..descNul])
-            : cp949.GetString(descRegion);
+            ? Cp949.GetString(descRegion[..descNul])
+            : Cp949.GetString(descRegion);
 
         // stat_f32 f32 @ 0x0A4. PARTIAL; semantic UNVERIFIED.
         // spec: Docs/RE/formats/items_scr.md §1.4 — stat_f32 f32 @0x0A4: PARTIAL; semantic UNVERIFIED.
@@ -178,8 +198,11 @@ public static class ItemsScrParser
                 "spec: Docs/RE/formats/items_scr.md §1.2.");
 
         // Decode trailing effect entries.
+        // N1: use Array.Empty when there are no effects to avoid a zero-length heap allocation.
         // spec: Docs/RE/formats/items_scr.md §1.5 — on-disk 8-byte effect entry layout.
-        var effects = new ItemEffectEntry[effectCount];
+        var effects = effectCount == 0
+            ? Array.Empty<ItemEffectEntry>()
+            : new ItemEffectEntry[effectCount];
         ReadOnlySpan<byte> fullSpan = data.Span;
         int effectsBase = recordOffset + FixedBlockSize;
         for (int e = 0; e < effectCount; e++)

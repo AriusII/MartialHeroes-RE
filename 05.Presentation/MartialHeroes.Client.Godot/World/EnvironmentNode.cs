@@ -488,15 +488,19 @@ public sealed partial class EnvironmentNode : Node3D
         // Direction: fixed fallback vector (no per-keyframe direction — §8.4).
         if (_hasSunDir && _sunDirGodot.LengthSquared() > 1e-6f)
         {
-            try
+            if (!_sunDirGodot.IsZeroApprox())
             {
-                Vector3 dir = _sunDirGodot.Normalized();
-                Vector3 up = Math.Abs(dir.Dot(Vector3.Up)) > 0.99f ? Vector3.Forward : Vector3.Up;
-                _dirLight.Basis = Basis.LookingAt(dir, up);
-            }
-            catch
-            {
-                // degenerate direction — leave the existing basis.
+                try
+                {
+                    Vector3 dir = _sunDirGodot.Normalized();
+                    Vector3 up = Math.Abs(dir.Dot(Vector3.Up)) > 0.99f ? Vector3.Forward : Vector3.Up;
+                    _dirLight.Basis = Basis.LookingAt(dir, up);
+                }
+                catch (Exception ex)
+                {
+                    // Degenerate direction after normalization — leave the existing basis.
+                    global::Godot.GD.PrintErr($"[EnvironmentNode] degenerate sun dir: {ex.Message}");
+                }
             }
         }
 

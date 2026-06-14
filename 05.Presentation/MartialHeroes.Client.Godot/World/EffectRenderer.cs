@@ -550,7 +550,10 @@ public sealed partial class EffectRenderer : Node3D
             for (int i = 0; i < subEffects.Length; i++)
             {
                 SubEffectDesc se = subEffects[i];
-                textures[i] = LoadSubEffectTextures(se);
+                // Coalesce to empty: the downstream mesh builders treat null and empty arrays
+                // identically (all gated by `Length > 0`), so this preserves behaviour and keeps
+                // the array element type honest (silences CS8601).
+                textures[i] = LoadSubEffectTextures(se) ?? System.Array.Empty<ImageTexture?>();
 
                 if (se.ResourceId >= XeffResourceParticleThreshold)
                 {
