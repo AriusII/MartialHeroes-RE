@@ -645,3 +645,28 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
 - Build 0/0. Remaining: apply the PIN dragon-frame sub-rect, the format-table loaders (bgtexture.lst /
   .xdb / mapsetting), the char-preview skinning debt, the IDB annotation + `names.yaml` sync. Journal
   authored by the Top Orchestrator (main session).
+
+## 2026-06-14 — CAMPAIGN 4: Char-Select is a 3D scene (map000) + the skinning debt FIXED
+
+- RECOVERY (READONLY static IDA + VFS harness, `_dirty/campaign4/charselect3d/`): the Character-Select
+  is NOT a 2D screen — it is a **3D GScene built on `map000`**. `Map_SetActiveArea(area=0,…)` → "000" →
+  map000; the earlier "area 52200" in `frontend_scenes.md §3.5.1` was a MISREAD — **52200 = 14:30
+  time-of-day, 48 = weather sub-index**. Recovered: the backdrop (the single map000 cell
+  `d000x10000z9990` + its 11 textures), the camera (live keyframe = index 1, eye ≈ (512,87,−9652),
+  look-at the orbit point, ~2 s ease), the environment (real area-0 world env frozen at 14:30; area-015
+  sky `.bin` files; ~5 positional lights; ambient `380003001.xeff` + `zone_sel_u.xeff`), the
+  character-preview placement (a row along world +X at Y=0, spacing 36, pure-yaw facing 0=front/π=back,
+  pose = the in-world pipeline with an idle vs select-turn clip swap, selection = 3D AABB hit-test), and
+  the preview-character assets (4 starter classes at IdA=1 share `g1.bnd` 84 bones + idle
+  `g111100010.mot`; meshes g202/203/209/206 110001.skn).
+- PROMOTION: `specs/frontend_scenes.md` corrected (§3.5.1) + extended (§3.3 placement, §3.5.2/.4 camera,
+  §3.6 environment, §3.7 the 3D composition + preview assets). Firewall PASS (no addresses, no Korean).
+- ENGINEERING — **the long-standing skinning debt (D1, exploded character mesh) is FIXED**: the root
+  cause was the `.mot` animated-rotation composition mode in `SkinningMath.ComputeAnimatedWorld` — it
+  REPLACED the bone's bind-local rotation with the sampled keyframe rotation, but `specs/skinning.md`
+  §6.5/§6.6 say the keyframe is a right-multiply DELTA (`bindLocal ⊗ animLocal`). Fixed (the vertex
+  normal-first/position-second order was already correct). Now the mesh is intact through the idle and
+  frame-0 is pixel-identical to the bind pose. Godot build 0/0. Remaining: the faithful Godot 3D
+  char-select rebuild (load the map000 backdrop + the 3D actor row + the camera/environment/VFX + the 2D
+  overlay) from the promoted spec; a front-3/4 preview framing; the format-table loaders; the IDB
+  annotation + `names.yaml` sync. Journal authored by the Top Orchestrator (main session).

@@ -67,6 +67,22 @@ public sealed partial class SkinnedCharacterNode : Node3D
     // spec: Docs/RE/specs/skinning.md §8(c) — "Smoothed (recommended): renormalize alpha /= 0.1."
     private const bool RenormalizeAlpha = true;
 
+    // Animated-rotation composition mode. spec: Docs/RE/specs/skinning.md §6.5/§6.6 — the sampled
+    // keyframe rotation is a RIGHT (post) multiply DELTA on top of the bind-local rotation
+    // (parentWorld ⊗ bindLocal ⊗ animLocal), NOT a literal replacement of the bind-local rotation.
+    //
+    // VALIDATED EMPIRICALLY (the fix for the exploded char-select preview): the canonical g1 player
+    // rig (g202110001.skn + g1.bnd + idle g111100010.mot) renders an INTACT mesh under the delta
+    // form and shatters into flying triangle shards under the replacement form. Decisively, under
+    // the delta form the rig FROZEN at idle frame 0 is pixel-identical to the bind-pose rest mesh —
+    // proving the §6.4 wording ("replacement") describes the per-pass accumulator, while the WORLD
+    // walk (§6.5/§6.6) composes the sampled rotation as a delta on top of bind-local. The replacement
+    // reading drops the bindLocal factor and explodes any rig whose frame-0 keyframes are small
+    // deltas rather than full local rotations.
+    //
+    // Internal so only this presentation assembly can toggle it; the validated default is delta=true.
+    internal static bool AnimAsDelta { get; set; } = true;
+
     /// <summary>
     /// Builds the rig from parsed data. Must be called once before the node ticks.
     /// Performs: hierarchy resolution, bind-world accumulation, influence build, inverse-bind bake,
@@ -273,7 +289,8 @@ public sealed partial class SkinnedCharacterNode : Node3D
     private void ComputeWorldPoses(float t, bool restPose)
     {
         AnimationTrack?[] tracks = restPose ? _noTracks : _trackByBoneIndex;
-        SkinningMath.ComputeAnimatedWorld(_bones, _parentIndex, tracks, t, RenormalizeAlpha, _world);
+        SkinningMath.ComputeAnimatedWorld(
+            _bones, _parentIndex, tracks, t, RenormalizeAlpha, _world, AnimAsDelta);
     }
 
     // =========================================================================

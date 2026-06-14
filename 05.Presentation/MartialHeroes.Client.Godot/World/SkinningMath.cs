@@ -435,7 +435,8 @@ public static class SkinningMath
         AnimationTrack?[] trackByBoneIndex,
         float t,
         bool renormalizeAlpha,
-        BoneTransform[] outWorld)
+        BoneTransform[] outWorld,
+        bool animAsDelta = true)
     {
         int n = bones.Length;
 
@@ -449,8 +450,16 @@ public static class SkinningMath
             {
                 (Vec3 sT, Quat sR) = SampleTrack(track.Keyframes, t, renormalizeAlpha);
 
-                // Rotation is taken from the clip for any tracked bone.
-                localQ = sR;
+                // Rotation composition for a TRACKED bone.
+                //   animAsDelta == true  (spec §6.5/§6.6): the world rotation is
+                //       parentWorld ⊗ bindLocal ⊗ animLocal — the sampled rotation is a RIGHT
+                //       (post) multiply DELTA layered on top of the bind-local rotation. So the
+                //       committed local pose is bindLocalQ ⊗ sR.
+                //   animAsDelta == false (spec §6.4 literal): the sampled rotation REPLACES the
+                //       bind-local rotation outright (localQ = sR).
+                // spec: Docs/RE/specs/skinning.md §6.5 — "applied as a right (post) multiply on top
+                //       of the bind-local rotation in the world walk (§6.6)".
+                localQ = animAsDelta ? Mul(bones[i].Rotation, sR) : sR;
 
                 // Translation: only the root translates freely; child bones hold the bind-pose
                 // local translation (fixed bone length, rotate-only).

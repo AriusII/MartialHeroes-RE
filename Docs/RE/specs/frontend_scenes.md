@@ -474,6 +474,15 @@ owned by a dedicated **select window** object. Its widget tree and the 5 live 3D
 **built only when the character-list packet (`3/1 SmsgCharacterList`) arrives** — the scene does not
 exist until then (a quirk also noted in `ui_system.md` §6.4 and `client_runtime.md` §7).
 
+> **The char-select scene is a full 3D world, not a 2D screen.** The select window does **not**
+> paint a flat backdrop behind a 2D character portrait; it **builds a named 3D scene ("select") on
+> the real game world `data/map000`, frozen at afternoon (14:30), with up to five live, animated 3D
+> character models standing on a stage in front of a perspective camera.** The 2D chrome (slot
+> frames, Create/Delete/Enter buttons, info plates — §11.5) only *dresses* that 3D scene; selection
+> itself is the 3D row (§3.3). The 3D composition (world, cell, coordinates, assets) is specified in
+> **§3.7**; the environment/lighting in **§3.6**; the camera in **§3.5**; per-slot placement/pose in
+> **§3.3**.
+
 ## 3.1 Where the slots come from & the per-slot record (CODE-CONFIRMED)
 
 The inbound `3/1 SmsgCharacterList` (S2C, byte shape owned by `login_flow.md` §3.2 / `opcodes.md`)
@@ -518,32 +527,102 @@ owned by the struct cartographer). Only the fields the front-end touches are lis
 The slot info line shows, for the active slot: **name**, **level**, and **position** (the two
 floats above). Toggling the enter/create/delete buttons depends on the slot's lock flag.
 
-## 3.3 The live 3D preview actors (CODE-CONFIRMED)
+## 3.3 The live 3D preview actors — placement, facing, pose (CODE-CONFIRMED)
 
-The select scene renders each occupied slot as a **live, animated 3D character** in a preview
-viewport — **not** a 2D portrait, and **not** a separate asset path. The preview reuses the exact
-in-world actor build path:
+The select scene renders each occupied slot as a **live, animated 3D character** standing in a **row**
+on the 3D stage (§3.7) — **not** a 2D portrait, and **not** a separate asset path. The preview reuses
+the exact in-world player-actor build path, so skin / bind / idle-motion resolve through the normal
+`.skn` / `.bnd` / `.mot` chains (owned by `specs/skinning.md`, `formats/mesh.md`); char-select adds
+**no new asset loading and no dedicated "select" motion clip** (§3.3.4 / §3.7.5). The preview-character
+asset set for the four starter classes is catalogued in **§3.7.5**.
 
-- The 5 slots are iterated. A slot is **occupied iff `faceA` (descriptor +0x2E) is nonzero**; an
-  empty slot leaves its preview pointer null.
-- For an occupied slot, the same in-world **player actor factory** builds the actor from the slot's
-  spawn descriptor. The skin / bind / idle-motion therefore resolve through the **normal
-  `.skn` / `.bnd` / `.mot` chains** (owned by `specs/skinning.md`, `formats/mesh.md`) — char-select
-  adds **no new asset loading**.
-- The actor is placed at a **baked stage position**: per-slot X offsets **{−1560, −1548, −1536,
-  −1524, −1512}** (12 units apart), Z ≈ **−3593** (plus the stage origin), at **scale ×3.0**.
-- **Worn gear** is overlaid by scanning the descriptor's 20×16-byte equipment table at +0x58; each
-  slot's first dword is resolved to a visual id and attached, gated by a class/sex check.
-- **Facing:** a new/locked slot faces away (idle yaw ≈ π) if its lock flag is set, else faces front.
-  The idle motion plays from the actor's own motion clip; the select **preview camera** (the
-  corrected **6-keyframe** orbit — geometry, anchor, FOV/near/far) frames the row and is specified in
-  **§3.5** below (it supersedes the approximate waypoint reading in `client_runtime.md §7.3`).
-- After building, the **default slot** is auto-highlighted and its info line shown.
+### 3.3.1 Per-slot world placement (CODE-CONFIRMED)
 
-**Per-slot selection is the 3D row itself.** On a mouse move, the cursor is unprojected and each
-preview actor's screen-space bounding box is hit-tested; a hit sets the hovered/selected slot and
-plays that slot's idle/turn animation while dimming the others. So the row of 3D models *is* the
-clickable slot selector.
+Each preview actor's world position is the **stage origin** (§3.7.2; world `(2048, 0, −6144)`) plus a
+**baked per-slot offset**. The row runs along **world +X**; the Z component arcs very slightly toward
+the camera at the centre slot (a shallow ~1.5-unit bow). **Y is exactly 0.0 for every slot** — the
+actors stand on the stage-origin plane; there is **no terrain sample and no per-slot ground lookup**.
+
+| Slot | ΔX | ΔY | ΔZ | World X | World Y | World Z | Confidence |
+|---|---|---|---|---|---|---|---|
+| 0 | −1560.0 | 0.0 | −3593.0  | 488.0 | 0.0 | −9737.0 | CONFIRMED |
+| 1 | −1548.0 | 0.0 | −3594.0  | 500.0 | 0.0 | −9738.0 | CONFIRMED |
+| 2 | −1536.0 | 0.0 | −3594.5  | 512.0 | 0.0 | −9738.5 | CONFIRMED |
+| 3 | −1524.0 | 0.0 | −3594.0  | 524.0 | 0.0 | −9738.0 | CONFIRMED |
+| 4 | −1512.0 | 0.0 | −3593.0  | 536.0 | 0.0 | −9737.0 | CONFIRMED |
+
+- **X spacing:** adjacent slots are **12 world units** apart; with the **×3.0 preview scale** (below)
+  the on-screen separation is **36 units**.
+- **Z arc:** the Z offsets `{−3593, −3594, −3594.5, −3594, −3593}` dip to the centre slot, bowing the
+  row very slightly toward the camera. (This refines the earlier "Z ≈ −3593" approximation.)
+- **Scale:** the per-slot preview actor's scale factor is multiplied by **3.0**.
+- **Spin:** the slot previews do **not** auto-rotate. (The separate single **create-preview** actor at
+  §4.2 *does* idle-spin.)
+
+### 3.3.2 Facing — pure yaw, fixed at build (CODE-CONFIRMED placement; front/back UNVERIFIED)
+
+Orientation is a **pure-yaw quaternion** (rotation about the world up axis Y only; no pitch, no roll),
+built once at actor creation and not changed by hover. The yaw is chosen from the slot's lock flag:
+
+| Slot lock flag | Yaw | Meaning |
+|---|---|---|
+| set (locked / new / creating slot) | **π** (180°) | faces **away** from the camera (back to viewer) |
+| clear (existing, occupied, playable slot) | **0** | faces **front** (toward the camera) |
+
+- The front yaw is **literally 0.0** (not a camera-relative offset); the camera (§3.5) is posed so
+  that yaw-0 shows the character's front.
+- **UNVERIFIED (MEDIUM):** the project's mesh-local `.skn` X-negation convention (`formats/mesh.md`)
+  can flip apparent facing. Whether a yaw-0 preview shows the **front** (expected) or the **back**
+  after the importer's X-negation must be confirmed against a live frame; if it shows the back, the
+  importer must add π / mirror consistently with the X-negation. (Open question 13.)
+
+### 3.3.3 Selection is the 3D row itself (CODE-CONFIRMED)
+
+There is **no 2D slot widget that drives selection** — the row of 3D models *is* the clickable
+selector. On each mouse move the cursor is unprojected and, for each preview actor, a screen-space
+**axis-aligned bounding box** is built around the actor's projected position (`X ± 6`, `Z ± 6`, with a
+**Y band from 70.0 to 92.0** = the standing-height range) and tested against the cursor. A hit sets the
+hovered/selected slot. **The actor transform is never re-written on hover** — neither its position nor
+its yaw changes; the visible "turn" is an animation-clip swap only (§3.3.4). The 2D slot frame / dim
+chrome (§11.5) runs in parallel as cosmetic dressing.
+
+### 3.3.4 Pose / motion — idle vs select-turn clip swap (CODE-CONFIRMED)
+
+The preview uses the standard in-world animation pipeline; **there is no hardcoded "select stand"
+motion id.** The clip is chosen indirectly through the per-class animation-catalogue **visual record**,
+selected by the actor's **motion-state byte** (descriptor field `+0x3C4`):
+
+- **idle / default cycle** → the visual record's **idle field (`+0x44`)** when the motion-state byte is
+  0. This is what plays at scene entry for **every** occupied slot.
+- **select / "turn-to-front" cycle** → the visual record's **select field (`+0x58`)** when the
+  motion-state byte is 1.
+
+On hover/selection, the hit-test handler swaps the hit actor's clip **idle → select** (record `+0x44`
+→ `+0x58`) and forces **every other** slot back to **idle**. The apparent "turn to face the player" is
+**baked into the select clip**, not a transform change. The concrete `g{id}.mot` that each visual-record
+field resolves to is owned by `specs/skinning.md` + the animation-catalogue struct; for the starter
+classes the idle clip is `g111100010.mot` ("peace", 30 frames @ 10 fps; §3.7.5).
+
+| State | 3D-actor effect |
+|---|---|
+| Unselected occupied slot | idle cycle (record `+0x44`); yaw 0 (or π if locked); scale ×3 |
+| Selected / hovered slot | select/"turn-to-front" cycle (record `+0x58`); **same transform** (no move, no extra rotation) |
+| Locked / new / creating slot | yaw π (faces away); otherwise idle handling |
+
+### 3.3.5 Worn gear & default highlight (CODE-CONFIRMED)
+
+- **Worn gear** is overlaid by scanning the descriptor's 20 × 16-byte equipment table at +0x58; each
+  slot's first dword is resolved to a visual id and attached (gear/visual sub-mesh channels are
+  re-armed after the build), gated by a class/sex check.
+- After building, the **default slot** is auto-highlighted and its info line (name / level / position,
+  §3.2) shown. The default-slot index source is **MEDIUM** (not load-bearing for placement/pose).
+
+> **Coordinate convention reminder (for the Godot bridge).** These are raw legacy stage-world
+> coordinates with up = Y and the row along +X. Apply the project's world-to-engine convention when
+> porting — `Helpers/WorldCoordinates.ToGodot` negates Z `(x,y,z) → (x,y,−z)` (after which the row Z
+> becomes +9737..+9738.5). The 12-unit X spacing and the ×3.0 scale are convention-neutral. The
+> mesh-local `.skn` X-negation is internal to skin building and is the source of the §3.3.2 front/back
+> caveat.
 
 ## 3.4 Slot availability vs lock flags
 
@@ -552,21 +631,39 @@ marks a slot **creating/locked** (which also drives the "faces away" idle facing
 difference (selectable vs creating/locked/cooldown) is **inferred, not byte-confirmed** (Open
 question 6).
 
-## 3.5 The character-select preview camera (CODE-CONFIRMED geometry; framing runtime-pending)
+## 3.5 The character-select preview camera (CODE-CONFIRMED geometry; framing partly confirmed)
 
-The select window builds a dedicated preview camera (a derived "third-person" camera manipulator)
-to frame the row of 3D character previews. Its **orbit geometry is statically recovered in full**;
-the runtime framing law (which keyframe is shown, the easing between keyframes) is **not yet
-confirmed** and is flagged below. This **supersedes** the earlier approximate "7-waypoint" reading
-referenced from `client_runtime.md §7.3`: the orbit is **6 keyframes, not 7**.
+The select window builds a dedicated preview camera (a derived "third-person" camera manipulator) to
+frame the row of 3D character previews. Its **orbit geometry is statically recovered in full**; the
+runtime **framing law** (which keyframe is live, the easing, the look-at target) is now largely
+recovered too — see §3.5.4. This **supersedes** the earlier approximate "7-waypoint" reading
+referenced from `client_runtime.md §7.3`: the orbit is **6 keyframes, not 7**, and the **live keyframe
+is index 1** (§3.5.2).
 
 ### 3.5.1 Scene & projection (CODE-CONFIRMED)
 
+> **CORRECTION (CODE-CONFIRMED) — the char-select is a 3D GScene built on `map000`, NOT
+> "map area 52200".** Earlier readings of this spec recorded the active map area as **52200** with a
+> sub-area of **0x30 (48)**. A re-read of the scene builder shows those two values are **not** a map
+> area id: the scene activates **area code 0**, which is rendered into the three-digit map-folder
+> string **`"000"`** → the world folder **`data/map000`**. The triple that earlier readings mistook
+> for "area 52200 / sub 0x30" is the **game-clock / weather** argument:
+> - **52200** is a **time-of-day** value — **52200 seconds = 14:30** (afternoon) — fed to the world
+>   clock setter, which validates it against the seconds-in-a-day bound (86400).
+> - **48** is a **time / weather sub-index** (a discrete value bounded at 48), not a map id.
+>
+> So the char-select scene **reuses the real in-world environment, frozen at 14:30**, on `map000` — a
+> full 3D world backdrop, not a flat 2D screen. The afternoon clock is why the backdrop is lit and
+> sunny. The 3D scene composition / world coordinates / cells / assets are specified in the new
+> **§3.7**; the environment & lighting in **§3.6**. The struck-through "52200 / 0x30 = area" row below
+> is retained only as a redirect.
+
 | Property | Value | Notes |
 |---|---|---|
-| Scene name | `"select"` | the char-select preview scene |
-| Active map area | **52200** (sub-area 0x30) | the char-select stage area; a 3×3 first terrain ring is seeded around it |
-| Camera type | perspective | a `GPerspectiveCamera` |
+| Scene name | `"select"` | the named char-select 3D scene root |
+| Base world | **`data/map000`** (area code **0** → folder string `"000"`) | the real world map, reused as the backdrop — see §3.7 |
+| ~~Active map area 52200 / sub 0x30~~ | **NOT a map area** | superseded: `52200` = time-of-day clock (14:30), `48` = weather sub-index — see the correction above and §3.6 |
+| Camera type | perspective | a perspective camera node |
 | Vertical FOV | **50°** | `π · 50 / 180`, then **divided by the aspect ratio** (screen width / screen height) before being set as the projection field-of-view |
 | Near clip | **5.0** | |
 | Far clip | **15000.0** | |
@@ -576,20 +673,26 @@ referenced from `client_runtime.md §7.3`: the orbit is **6 keyframes, not 7**.
 > 50° and let the renderer apply aspect normally; the legacy `fov / aspect` is the same framing on a
 > 4:3 reference canvas.
 
-### 3.5.2 The 6-keyframe orbit (CODE-CONFIRMED)
+### 3.5.2 The 6-keyframe orbit (CODE-CONFIRMED; live keyframe = 1)
 
 The camera holds a table of **6 position keyframes**, each a 3-float `(x, y, z)` triple. An **anchor
-offset of `(+2048, 0, −6144)`** is added to every raw keyframe to place the orbit in stage-world
-space. The 6 anchored keyframe positions:
+offset of `(+2048, 0, −6144)`** (= the stage origin, §3.7.2) is added to every raw keyframe to place
+the orbit in stage-world space. The 6 anchored keyframe positions:
 
 | Keyframe | Anchored position (x, y, z) |
 |---|---|
 | 0 | (515.55, 137.27, −9397.71) |
-| 1 | (512.00, 87.00, −9652.00) |
+| **1 (live)** | **(512.00, 87.00, −9652.00)** |
 | 2 | (343.00, 104.00, −9734.00) |
 | 3 | (471.00, 115.00, −9812.00) |
 | 4 | (622.00, 75.00, −9802.50) |
 | 5 | (662.00, 130.00, −9746.00) |
+
+> **Live keyframe (CODE-CONFIRMED).** The camera constructor's default active keyframe is **0**, but
+> after the scene is built the camera-wire step sets the active keyframe to **1**. That wire step runs
+> on the character-management response path and the select-window rebuild paths, so the keyframe the
+> player actually sees is **index 1** ≈ world `(512, 87, −9652)`. (Earlier versions of this spec
+> recorded only the constructor default of 0.)
 
 > **Coordinate convention reminder.** These are stage-world coordinates as the legacy client stores
 > them. Apply the project's world-to-engine convention (world geometry negates Z — see
@@ -617,25 +720,248 @@ confirmed against the manipulator's update law.
 | 10 |  0.41276109 |  1.296727 |  74.297 |
 | 11 |  0.29111111 |  0.914553 |  52.400 |
 
-Other constructor scalars (CODE-CONFIRMED): a `1.0` and a `10.0` speed/rate scalar pair (the
-likely interpolation-time and easing-rate constants), identity initial scale/orientation values, and
-an **initial active keyframe index of 0**.
+Other constructor scalars (CODE-CONFIRMED): a `1.0` and a `10.0` speed/rate scalar pair, identity
+initial scale/orientation values, and a constructor-default active keyframe index of 0 (wired to
+**1** at runtime — §3.5.2). The **`1.0`** scalar is a time→input-rate multiplier (it scales the
+per-frame millisecond delta when damping manual-orbit input); the **`10.0`** scalar is the manual
+zoom/yaw/pitch input-rate constant. **Neither drives the automatic keyframe framing** — the keyframe
+tween uses its own normalizer (§3.5.4).
 
-### 3.5.4 Static-complete vs runtime-pending (explicit)
+### 3.5.4 Framing law — look-at, eye, easing (CODE-CONFIRMED structure; eye MEDIUM)
+
+The camera manipulator is a scene-graph node, not an explicit eye/target pair. Each frame it computes:
+
+- a current **orbit point** (a keyframe-derived world position), and
+- an **orientation** (yaw/pitch quaternion),
+
+then sets the camera eye to **`eye = orbitPoint + Rotate(orientation, boomVector)`**, where the boom
+vector points from the target out to the eye and its length (the zoom distance) is clamped to **≤ 22
+units**. **The look-at target is the active orbit point** — *not* the stage origin (the stage origin
+is only the anchor the keyframes are added to). The base pitch is **≈ −30°** (downward), modulated by
+each keyframe's stored yaw/pitch; so the camera looks slightly **down at the standing row from in
+front**.
+
+- **Look-at target (CONFIRMED):** the active (keyframe-1) orbit point ≈ world **(512, 87, −9652)**,
+  which sits essentially **over the actor-row pivot ≈ (508, 70, −9759)** (§3.6 / §3.7.2) — slightly
+  above and ~100 units in front of the standing row.
+- **Eye (MEDIUM):** the exact eye world coordinate depends on the runtime boom vector and the live
+  yaw/pitch quaternion; the **look-at identity is CONFIRMED**, the precise eye is MEDIUM (debugger-
+  confirmable on a live select frame).
+- **Easing (CONFIRMED constants; duration MEDIUM):** when the active keyframe changes, the orbit point
+  is **linearly interpolated** and the orientation **spherically interpolated (slerp)** over a
+  normalized progress `t`. For transitions among the inner keyframes (both indices ≥ 2) an extra
+  **quadratic ease `(1 − t)·(2t)`** is layered over the linear blend ("linear-then-quadratic" /
+  ease-in-out); the keyframe-0↔1 transition uses the plain linear blend only. The progress normalizer
+  decodes to **≈ 2000 ms (2.0 s)** per transition. **MEDIUM:** an existing tool annotation says
+  "0.5 s"; the decoded constant gives 2.0 s — resolve by timing the live transition. (Open question 12.)
+- **Auto-advance (MEDIUM):** no timer was found that auto-cycles the keyframe index; statically the
+  camera rests on keyframe 1 unless an external caller (e.g. a UI/event handler responding to slot
+  selection) requests another index. Whether selecting a different slot switches the keyframe was not
+  fully traced.
+
+### 3.5.5 Static-complete vs runtime-pending (explicit)
 
 - **Static-complete (CODE-CONFIRMED):** all 6 keyframe positions, the `(+2048, 0, −6144)` anchor
-  offset, the 12 π-scaled angle multipliers, FOV 50° / aspect-divided, near 5.0, far 15000.0, the
-  `1.0` / `10.0` speed scalars, scene name `"select"`, area 52200.
+  offset (= stage origin), the 12 π-scaled angle multipliers, FOV 50° / aspect-divided, near 5.0,
+  far 15000.0, the `1.0` (input-time) / `10.0` (manual-zoom) scalars, scene name `"select"`, base
+  world `map000`, the **live keyframe index = 1**, the look-at target = active orbit point, the
+  boom-zoom clamp ≤ 22, the base pitch ≈ −30°, the lerp/slerp + inner-keyframe quadratic-ease law.
 - **Runtime-pending (NOT yet confirmed — do not invent):**
-  1. **Which keyframe is actually shown** at the live char-select screen (the initial index is 0,
-     but the manipulator may auto-advance).
-  2. **The interpolation / easing law** between keyframes (time-driven via the engine millisecond
-     clock and the `10.0` / `1.0` scalars; the easing curve is not statically obvious).
+  1. **The precise eye world coordinate** (boom vector + live yaw/pitch quaternion).
+  2. **The exact tween duration** (≈ 2.0 s decoded vs a "0.5 s" annotation — Open question 12).
   3. **The yaw-vs-pitch assignment** of angle indices 6..11 vs 0..5.
-  4. **The final on-screen framing** (the camera look-at target relative to the preview row's pivot).
+  4. **Whether slot selection auto-switches the keyframe** (no timer auto-advance found).
 
-These four are deferred to a live-client (debugger) confirmation pass; an implementer should treat
-the orbit geometry as authoritative and the framing/easing as tunable until confirmed.
+An implementer should treat the orbit geometry, the live keyframe (1), the look-at target, and the
+easing law as authoritative, and the precise eye / tween duration as tunable until confirmed.
+
+## 3.6 Char-select environment, lighting & ambient FX (CODE-CONFIRMED structure; colours data-driven)
+
+The select scene does **not** author a bespoke select-only sky or light rig. It activates the **real
+area-0 world environment** (§3.5.1 correction) and **freezes the world clock at 14:30** (time-of-day
+value 52200, weather sub-index 48). The sky, sun direction, fog and ambient colour are therefore
+whatever the **area-0 map + sky data + the 14:30 clock** produce — a **parametric sky**, not a `.box`
+skybox file (no skybox file exists in the VFS for this scene; §3.7.4).
+
+### 3.6.1 Lighting rig (CODE-CONFIRMED counts; colours UNVERIFIED)
+
+The scene attaches the shared **sky/time manager** singleton's render node into the 3D scene as a
+child (the same manager the main world uses). That manager builds the lighting rig:
+
+- **≈ 5 positional lights** (the sun plus fill lights), each with a light range/radius of **≈ 1024**.
+- A **white (1.0) colour-scale baseline** (identity colour multipliers) and a **black, full-alpha
+  clear colour** baseline, both later tinted by the time-of-day-driven sky data.
+- **No hard-coded ambient colour literal** exists in the scene builder — the final on-screen sun /
+  ambient / fog **colours are data-driven** through the sky/time manager and the area-0 sky data at
+  the frozen 14:30 clock. (Light count, range ≈ 1024, white baseline, black clear = CONFIRMED; the
+  **final colours and the per-light directions are UNVERIFIED here** — they come from the sky data /
+  per-frame update, debugger-confirmable on a live frame.)
+
+### 3.6.2 Fog / sky (MEDIUM)
+
+The select scene explicitly **zeroes a sky/fog blend scalar** (a fog-density / sky-blend factor set to
+0.0) — i.e. **minimal / no distance fog** behind the preview row, so the row reads clearly. The exact
+visual meaning of the zeroed scalar is MEDIUM (needs a live read of the resulting fog density/colour).
+
+### 3.6.3 Sky-data asset set for the char-select area (CODE-CONFIRMED paths; black-box VFS)
+
+The sky/environment system is a **per-area index** of binary `.bin` parameter files under
+`data/sky/map/` (with human-readable `.txt` companions), **not** a single skybox file. The char-select
+area uses the **area-015** sky index. The verified files (sizes are interoperability facts):
+
+| Role | VFS path | Size | Confidence |
+|---|---|---|---|
+| Fog parameters | `data/sky/map/fog015.bin` | 204 B | CONFIRMED |
+| Day-cycle directional light | `data/sky/map/light015.bin` | 5,312 B | CONFIRMED |
+| Per-cell light-map references | `data/sky/map/light_map015.txt` | 14,458 B | CONFIRMED |
+| Per-area effect placement table | `data/sky/map/map015.txt` | 44,091 B | CONFIRMED |
+| Sky render options | `data/sky/map/map_option015.bin` | 40 B | CONFIRMED |
+| Sky material / shader params | `data/sky/map/material015.bin` | 9,792 B | CONFIRMED |
+| Local point-light sources | `data/sky/map/point_light015.bin` | 4,748 B | CONFIRMED |
+| Weather parameters | `data/sky/map/weather015.bin` | 240 B | CONFIRMED |
+| Wind direction/strength | `data/sky/map/wind015.bin` | 8 B | CONFIRMED |
+
+Per-area light/material parameters are also embedded directly under `data/map000/`
+(`light0.bin` 5,312 B; `material0.bin` 9,792 B). Shared sky textures (cloud / sun / moon / star /
+lens-flare / precipitation) live under `data/sky/texture/` and are global to all areas.
+
+> **UNVERIFIED:** whether the char-select clock value `48` and the area-015 sky index are the same
+> "area/sub" index, and how the area-0 world maps to the area-015 sky files, was not pinned (black-box
+> VFS witness only; no on-disk table mapping was found). The per-family files above are the concrete
+> assets the scene's parametric sky reads.
+
+### 3.6.4 Per-cell lightmaps (CODE-CONFIRMED)
+
+The backdrop cell carries a baked lightmap bitmap under `data/effect/map/` named by the cell coordinate
+(`d000x{X}z{Z}.bmp`, e.g. `data/effect/map/d000x10000z9990.bmp`, 49,208 B = 128×128 24-bit BMP). These
+are pre-baked ambient/occlusion lighting for the terrain. (~3,791 such lightmaps exist across all
+areas; the char-select cell's is present.)
+
+### 3.6.5 Ambient VFX anchored at the row centre (CODE-CONFIRMED placement)
+
+A persistent background **map effect** is spun up once at scene build and lives in the active-effect
+list for the duration of the select screen (it is a standing background effect, not a one-shot). It is
+anchored at world **(508.48, 69.89, −9758.57)** — the **centre of the preview character row**, framed
+dead-centre by the camera (this is the same point as the terrain-init pivot, §3.7.2). The concrete
+VFS asset for this effect is the yellow lens-flare / glow effect file
+`data/effect/xeff/380003001.xeff` (23,675 B) — the client's numeric effect id is the family root
+**380003000** (no file of that exact name exists; the shipped variant is `…001`). A companion ring
+particle effect `data/effect/xeff/zone_sel_u.xeff` (26,947 B) is also part of the char-select ambient
+set, drawn around the platform centre. A map ambient **sound/effect cue** (a numeric map-cue id) is
+also pushed at scene start.
+
+> **MEDIUM:** whether the effect-id-to-filename resolution drops the last digit (family `380003000` →
+> first variant `380003001.xeff`) or selects `…001` directly is not byte-pinned; and which of
+> `380003001.xeff` / `char_select-u.xeff` / `zone_sel_u.xeff` fires as the primary ambient vs the ring
+> overlay depends on the scene-config slot (the placement at the row centre is CONFIRMED). The
+> effect-file byte format is owned by `formats/xeff.md` / the effect catalogue — not this spec.
+
+## 3.7 Char-select 3D scene composition — world, cell, stage, assets (CODE-CONFIRMED + black-box VFS)
+
+This section is the implementable composition of the char-select 3D backdrop: the world, the single
+backdrop cell and its textures, the stage coordinate frame, and the preview-character asset set. It is
+what an engineer rebuilds the scene from as a **3D scene**, not a 2D screen.
+
+### 3.7.1 Base world & backdrop cell (CODE-CONFIRMED world; black-box VFS for the cell/textures)
+
+- **Base world:** `data/map000` (area code 0 → folder string `"000"`, §3.5.1). Textures under
+  `map000` are global to the whole client.
+- **Backdrop cell:** the scene seeds a **3×3 first terrain ring** around the centre cell, but `map000`
+  is **sparse** — only the single cell **`d000x10000z9990`** exists; the engine requests all 9 ring
+  cells and silently skips the 8 absent neighbours. The backdrop is therefore rendered from this one
+  purpose-built cell. Its cell-list manifest records the same key twice (a pre-compute + render pass
+  pair).
+- **Cell addressing (CONFIRMED):** cells are **1024 world units** on a side; `1024 / 64 = 16` is the
+  intra-cell vertex spacing on the 65×65 grid. The cell naming/key convention is:
+  - `mapX = 10000 + cx`, `mapZ = 10000 + cz` (so cell `(cx=0, cz=−10)` → `mapX=10000, mapZ=9990`),
+  - `cell_key = mapX · 100000 + mapZ`,
+  - file stem `d000x{mapX}z{mapZ}`, cell world origin `(cx·1024, cz·1024)` = `(0, −10240)` for the
+    backdrop cell.
+- **Centre cell:** `(mapX=10000, mapZ=9990)` = world X ∈ [0, 1024], Z ∈ [−10240, −9216]; the row pivot
+  (508, −9734) sits inside it.
+
+The backdrop cell's component files (under `data/map000/dat/`), as black-box VFS observations:
+
+| File | Role |
+|---|---|
+| `d000x10000z9990.map` | Cell manifest (ASCII text): origin, terrain/building/FX section pointers, per-cell texture-id table; ORIGIN `0.000, −10240.000` |
+| `d000x10000z9990.ted` | Height-field (binary): 64×64, 16×16 patches |
+| `d000x10000z9990.bud` | Building / prop geometry (binary): the decorative 3D props (walls, pillars, ornaments) |
+| `d000x10000z9990.exd` | Extra terrain data (binary) |
+| `d000x10000z9990.fx1` | Terrain layer FX1 (binary) |
+| `d000x10000z9990.fx3` | Terrain layer FX3 — water/reflection layer (binary) |
+| `d000x10000z9990.fx5` | Terrain layer FX5 — secondary water layer (binary) |
+| `d000x10000z9990.sod` | Collision wall segments (2D XZ ray-parity; minimal) |
+
+(No `.mud`/`.pre`/`.post`/`.fx2` etc. for this cell — it is a purpose-built backdrop, not a full play
+cell. The terrain/building/water binary formats are owned by their own `formats/*.md`.)
+
+### 3.7.2 Stage coordinate frame (CODE-CONFIRMED)
+
+| Quantity | Value | Notes |
+|---|---|---|
+| Stage world origin (X, Y, Z) | **(2048.0, 0.0, −6144.0)** | the preview-stage origin; per-slot offsets (§3.3.1) and the camera keyframe anchor (§3.5.2) are added to this |
+| Terrain-ring centre / row pivot (X, Z) | **(508.0, −9734.0)** | = stage origin minus the ring-centre constants (X−1540, Z−3590); the focal point of the backdrop |
+| Ambient-FX / look-at anchor (X, Y, Z) | **(508.48, 69.89, −9758.57)** | row centre lifted ~70 in Y (§3.6.5); the camera look-at (§3.5.4) sits essentially over it |
+| Cell stride | **1024** world units / cell / axis | |
+
+> The stage origin `(2048, 0, −6144)` is the anchor; the camera keyframes (§3.5.2) and the per-slot
+> placements (§3.3.1) are both expressed relative to it. The **row pivot (508, −9734)** is the visual
+> focus and the centre of the standing row.
+
+### 3.7.3 Backdrop textures (black-box VFS; CONFIRMED present)
+
+The backdrop cell's textures resolve through the standard terrain chain (`.map` texture-id →
+`data/map000/texture/bgtexture.txt[id]` rel-path → `data/map000/texture/<rel>.dds`). The 11 textures
+this cell references (all confirmed present):
+
+| Section | Rel path → VFS `.dds` |
+|---|---|
+| Terrain | `terrain/g3` |
+| Buildings | `building/haha`, `building/suksang01`, `building/suksang02`, `building/suksang03`, `building/suksang04`, `building/walll04`, `building/walll04_2` |
+| Water (FX3/FX5, animated) | `terrain/_water_new01`, `terrain/_water_new03`, `terrain/_water_new04` |
+
+(The water rows carry the animated-texture flag in `bgtexture.txt`. The terrain/building/texture-chain
+formats are owned by their own specs; this is the concrete asset list for the backdrop.)
+
+### 3.7.4 No skybox file (black-box VFS)
+
+There is **no `.box` / `skybox.bin` skybox file** anywhere relevant in the VFS (none under
+`data/effect/`, `data/sky/`, or `data/map000/`). The sky is **parametric** — assembled at runtime from
+the per-area sky-parameter `.bin` files (§3.6.3) and the frozen 14:30 clock — not a pre-baked cube/box
+texture. A revival must render the sky parametrically (or substitute an equivalent), not look for a
+skybox asset.
+
+### 3.7.5 Preview-character assets — the four starter classes (black-box VFS; CONFIRMED present)
+
+All four playable starter classes use the **default appearance `IdA = 1`**, which shares a single
+**skeleton** and a single **idle motion**; only the mesh and texture differ per class:
+
+| Class (tag) | Mesh `.skn` | Texture (1024²) |
+|---|---|---|
+| 3 — Bichimi / Dosa (`b`) | `data/char/skin/g202110001.skn` | `data/char/tex10241024/402110001.png` |
+| 4 — Monk (`p`) | `data/char/skin/g203110001.skn` | `data/char/tex10241024/403110001.png` |
+| 6 — Archer (`a`) | `data/char/skin/g209110001.skn` | `data/char/tex10241024/409110001.png` |
+| 11 — Sorceress / Summoner (`s`) | `data/char/skin/g206110001.skn` | `data/char/tex10241024/406110001.png` |
+
+Shared across all four starter previews:
+
+- **Skeleton (bind):** `data/char/bind/g1.bnd` — **84 bones**, 1 root.
+- **Idle motion:** `data/char/mot/g111100010.mot` — "peace", **30 frames @ 10 fps** (3.0 s loop). This
+  is the in-world idle clip the preview plays by default (§3.3.4); there is **no dedicated char-select
+  clip**. (The reference/bind-pose clip `g101100001.mot`, 3 frames, is the rest-state anchor, **not**
+  the visible idle.)
+
+The class → skin → texture / bind / motion chain is the normal in-world chain (owned by
+`specs/skinning.md`, `formats/mesh.md`); char-select adds no new asset. Higher-tier appearances
+(`IdA` 11/16/26) have distinct skeletons and idle clips, but the **char-select preview uses only
+`IdA=1`** (simplest mesh/rig).
+
+> **Note (single-source).** The preview-asset chain above is a **black-box VFS / production-parser
+> observation** (no IDA cross-check yet for this specific lookup chain). The per-class mesh/texture
+> paths and the shared `g1.bnd` / `g111100010.mot` are confirmed present and decode cleanly; treat the
+> chain as CONFIRMED-present, the col-index → role mapping of `skin.txt` / `actormotion.txt` as owned
+> by the data-table / skinning specs.
 
 ---
 
@@ -685,9 +1011,11 @@ spawn descriptor seeded with the current create choices:
 | +0x30 | second appearance selector | **faceB** — hair / alt appearance seed (exact meaning unresolved, Open question 4) |
 | +0x34 | class selector | **internal class id (1..4)** |
 
-The create preview is placed at the stage centre (X ≈ origin − 1536.5, Z ≈ origin − 3538) and idle-
-rotated, so the player sees their would-be character before naming it. A per-class **stat preview**
-(six stat-label groups) is filled from the class template (pure display).
+The create preview is placed at the stage centre (X ≈ origin − 1536.5, Z ≈ origin − 3538 — i.e. between
+slots 2 and 3 in X and ~56 units nearer the camera than the row) and **idle-rotates** (a spin rate is
+set on this single actor, unlike the standing slot previews), so the player sees their would-be
+character before naming it. A per-class **stat preview** (six stat-label groups) is filled from the
+class template (pure display).
 
 ## 4.3 Per-class starter equipment (CODE-CONFIRMED)
 
@@ -882,11 +1210,14 @@ second-password / PIN modal (§1.4a).
 
 **Other pinned constants:** ID-box max length **6**; PW-box max length **129**; IME slots ID **16**
 / PW **12**; face index range **1..7**; max slots **5**; preview stage X offsets
-{−1560, −1548, −1536, −1524, −1512}, preview scale **×3.0**; empty-slot sentinel **`"@BLANK@"`**;
-version-token formula **`10 × game.ver[field 5] + 9`**; Save-ID INI `DoOption.ini`
-`[DO_OPTION] OPTION_ID`; `Lastserver` & `servername` under registry `HKLM\software\crspace\do`;
-`NEW_SERVER_INDEX` Lua global in `data/script/uiconfig.lua`; second-password / PIN capacity
-**≤ 4 chars** (login-blob bound `< 5`, owned by `login_flow.md` §4.2).
+{−1560, −1548, −1536, −1524, −1512}, preview Z offsets {−3593, −3594, −3594.5, −3594, −3593},
+preview scale **×3.0** (§3.3.1); preview yaw 0 = front / π = away (§3.3.2); stage origin
+**(2048, 0, −6144)** (§3.7.2); row pivot / look-at anchor **(508, −9734)** / **(508.48, 69.89,
+−9758.57)**; backdrop world **`data/map000`**, cell **`d000x10000z9990`** (§3.7.1); empty-slot
+sentinel **`"@BLANK@"`**; version-token formula **`10 × game.ver[field 5] + 9`**; Save-ID INI
+`DoOption.ini` `[DO_OPTION] OPTION_ID`; `Lastserver` & `servername` under registry
+`HKLM\software\crspace\do`; `NEW_SERVER_INDEX` Lua global in `data/script/uiconfig.lua`;
+second-password / PIN capacity **≤ 4 chars** (login-blob bound `< 5`, owned by `login_flow.md` §4.2).
 
 ---
 
@@ -915,9 +1246,9 @@ next scene.
 
 [state 2: LOAD] → (optional state 3 OPENING) → [state 4: SELECT] on 3/1 CharacterList
 
-[state 4: SELECT]
+[state 4: SELECT]   (a 3D GScene "select" on data/map000, frozen at 14:30 — §3.5.1/§3.6/§3.7)
   build select window + 5 live 3D preview actors from the 3/1 char list
-  per-slot pick = hit-test the 3D row
+  per-slot pick = hit-test the 3D row (Y band 70..92)
   Create (action 4) → class 0..3 → internal {4,1,3,2}, face 1..7, sex, starter gear
                       → name validate (min 2; a-z/0-9/Hangul) → send 1/6 (52B) → 3/23 result
   Delete (action 5) → confirm → send 1/14 (1B) → 3/4 result (subtype 2 = deleted; cooldown msg)
@@ -971,6 +1302,14 @@ next scene.
     the char-select 2D builder; per-slot class is conveyed by the descriptor-driven 3D preview (§3.3)
     plus the slot frame art (§11.5b). If a 2D class badge is desired in the revival, it must be added
     fresh - there is no legacy class→source-rect lookup to reproduce.
+12. **Char-select camera tween duration.** The keyframe-transition normalizer decodes to ≈ 2.0 s, but
+    an existing tool annotation reads "0.5 s". MEDIUM — resolve by timing the live transition or
+    reading the millisecond deltas at the manipulator's update on a live select frame (§3.5.4).
+13. **Char-select preview front/back facing.** The slot-preview yaw is literally 0 for occupied
+    (front-facing) slots and π for locked slots, but the project's mesh-local `.skn` X-negation can
+    flip apparent facing. Confirm on a live frame whether yaw-0 shows the character's **front**
+    (expected) or back; if back, the importer must add π / mirror consistently with the X-negation
+    (§3.3.2).
 
 ### Cross-spec conflicts recorded here (owners must resolve in their files)
 
@@ -1309,7 +1648,7 @@ placeholders). All from `loginwindow.dds` unless noted.
 The per-slot info-line **caption labels** carry caption ids **48001, 48003, 48004, 48005** (the
 name/level/position label set); additional chrome captions are **46001, 46002, 14001, 14002, 2206,
 63030** (all integer ids; text VFS-only, not reproduced). The scene-ambient VFX id is **380003000**
-(section 3.5 / effect catalogue); the enter-world cue is SFX **920100200** (section 9).
+(section 3.6.5 / effect catalogue); the enter-world cue is SFX **920100200** (section 9).
 
 > **No standalone class-icon-by-index widget exists in the 2D builder.** Per-slot class is conveyed
 > by the descriptor-driven 3D preview (section 3.3) and the slot frame art (section 11.5b); the

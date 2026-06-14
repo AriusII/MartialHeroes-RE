@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        charselect3d-scan — THROWAWAY harness for Campaign 4 CS3D recovery.
+        Resolves skin/bind/tex/motion chains for char-select 3D preview characters.
+
+        NOT a solution member. Never add to MartialHeroes.slnx. Never git add.
+        Run with: dotnet run -c Release
+    -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>14.0</LangVersion>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="C:\Users\Arius\RiderProjects\MartialHeroes\03.Storage.Assets\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj" />
+        <ProjectReference Include="C:\Users\Arius\RiderProjects\MartialHeroes\03.Storage.Assets\MartialHeroes.Assets.Parsers\MartialHeroes.Assets.Parsers.csproj" />
+    </ItemGroup>
+</Project>
