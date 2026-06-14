@@ -19,6 +19,18 @@ functions:
   # (0x49e7cb, 0x5eebb5) are edited in place below. struct RegionRecord { char zoneName[40]; u32 zoneType@+40;
   # u32 _tail@+44 } (48B x 32) and enum RegionZoneType { SAFE=0, OPEN_PVP=1, CLOSED=2 } are documented in
   # Docs/RE/formats/region_grid.md. See Docs/RE/journal.md "CAMPAIGN 5".
+  # Campaign VFS-DEEP-II (2026-06-14): loader / lighting functions LOCATED by READ-ONLY IDA lanes.
+  # No IDB write was performed this wave — these are staged for a later ida-naming-sync / annotation
+  # phase. See Docs/RE/journal.md "CAMPAIGN VFS-DEEP-II".
+  "0x471322": { name: "ItemsScr_LoadRecord", note: "items.scr loader; fixed 0x224 block read (read call @0x471383); per-record stride 0x224 + 8*effect_count (count u8 @0x220) [vfs-assetio]" }
+  "0x47128d": { name: "ItemsScrRecord_Ctor", note: "items.scr runtime record ctor; 0x228-byte object; 0x224 block copy + trailing-effect ptr stored at +0x224 [vfs-assetio]" }
+  "0x44ad98": { name: "Ted_LoadCellTerrainBlob", note: ".ted cell terrain loader+builder; height grid row-major heights[row*65+col] (X=column, inner stride 1) [vfs-assetio]" }
+  "0x44b21d": { name: "TileTerrain_SetTextureId", note: "per-cell terrain texture bind; cell texture-index byte used as texlist[byte-1]; byte 0 = no-texture sentinel [effects-render]" }
+  "0x43daec": { name: "Map_ParseDescriptor", note: "master .map scene-descriptor text parser (TERRAIN/EXTRA/UP/BUILDING/FX/SOLID DATAFILE lines) [vfs-assetio]" }
+  "0x4c4543": { name: "EventsScr_LookupById", note: "events.scr event_id -> record accessor (520B stride; blob global @0x84df14, id->record map global @0x84d90c) [scene-machine]" }
+  "0x512aa3": { name: "EventsScr_ConsumeRecord", note: "events.scr consumer; reads mode_flag u16 @0x64, rate_array @0x68 (values /1e6), actor_array @0x130 (zero-terminated) [scene-machine]" }
+  "0x45a312": { name: "Lighting_ApplyBrightnessAmbient", note: "OPTION_BRIGHT -> device ambient; offset = floor(bright/100*255), packed ARGB; default bright=100 -> 255 (full white) [render-pipeline]" }
+  "0x4590e9": { name: "Renderer_SetDeviceAmbient", note: "device ambient setter; issues SetRenderState(139 = D3DRS_AMBIENT) from the packed ARGB [render-pipeline]" }
   "0x49876d": { name: "TotalMugong_LoadTxt", note: "totalmugong.txt loader; 4 int tokens; key = B + AnimCatalog[A+1] [effects-render]" }
   "0x49c73d": { name: "ItemJointEff_LoadTxt", note: "itemjointeff.txt -> JointXEffectManagerB; raw group key; 6 tokens [effects-render]" }
   "0x49c594": { name: "MobJointEff_LoadTxt", note: "mobjointeff.txt -> JointXEffectManagerA; catalog-resolved key [effects-render]" }
@@ -2516,6 +2528,903 @@ functions:
   "0x71dabd": { name: "ConcurrentPtrVec_AtexitDestroy", note: "atexit thunk: destruct the global concurrent ptr-vector singleton at process exit [net-dispatch]" }
   "0x71daea": { name: "Atexit_DeleteCriticalSection_9D5D28", note: "EXCLUDED FROM NET: generic atexit thunk; DeleteCriticalSection on global singleton @0x9D5D28 (not a net object) [net-dispatch]" }
   "0x71db72": { name: "Atexit_DeleteCriticalSection_9FC0DC", note: "EXCLUDED FROM NET: generic atexit thunk; DeleteCriticalSection on global singleton @0x9FC0DC (not a net object) [net-dispatch]" }
+
+  # --- Campaign 6 (IDA-only total-IDB-legibility, 2026-06-14): 895 names synced from the annotated IDB ---
+  "0x407294": { name: "Actor_DistanceSqXZ", note: "> [actor-combat]" }
+  "0x408801": { name: "Actor_PlayDefaultIdleCycle", note: "> [actor-combat]" }
+  "0x41aa98": { name: "Actor_ReleaseAttachedEffectsAndReset", note: "> [actor-combat]" }
+  "0x41bf96": { name: "Actor_ReleaseBuffSlot", note: "Releases/clears a single expired buff slot (called by Actor_TickBuffSlots on expiry). [actor-combat]" }
+  "0x41c3f2": { name: "Actor_TickBuffSlots", note: "> [actor-combat]" }
+  "0x421786": { name: "Vec4_Copy", note: "MIS-CLUSTERED (math util). Copies four contiguous floats (a Vec4/quaternion) src->dst. [actor-combat]" }
+  "0x4217a9": { name: "Actor_IsActiveInstance", note: "> [actor-combat]" }
+  "0x425177": { name: "Quest_HighlightTargetMobsInScene", note: "marks scene mobs whose drop-id matches quest arg (XEffect 350000064) [world-systems]" }
+  "0x42560f": { name: "ActorMap_AssignElementRefcounted", note: "> [actor-combat]" }
+  "0x428ace": { name: "Actor_IsInMotionState", note: "> [actor-combat]" }
+  "0x428c52": { name: "Actor_SetInterpTargetAndFaceRecursive", note: "> [actor-combat]" }
+  "0x429e14": { name: "Actor_IsRelevantForLocalView", note: "> [actor-combat]" }
+  "0x42a0e1": { name: "ActorManager_TickCooldownSlots", note: "> [actor-combat]" }
+  "0x42a62b": { name: "PlayerMarkerSet_NodeLeft", note: " [world-systems]" }
+  "0x42a654": { name: "PlayerMarkerSet_NodeRight", note: " [world-systems]" }
+  "0x42a8d3": { name: "PlayerMarkerSet_MakeNodePair", note: " [world-systems]" }
+  "0x42a9ef": { name: "PlayerMarkerSet_Helper_a9ef", note: " [world-systems]" }
+  "0x42b904": { name: "MapPanel_InitSubBlock", note: "Small member-init for MapPanel (called from default ctor). [ui-hud]" }
+  "0x42ba42": { name: "PlayerMarkerSet_Find", note: " [world-systems]" }
+  "0x42ba63": { name: "PlayerMarkerSet_InsertNode", note: " [world-systems]" }
+  "0x42bb5a": { name: "PlayerMarkerSet_Insert", note: "used by avatar-effect routine (0x43a8d2) [world-systems]" }
+  "0x439876": { name: "Actor_FollowDesiredDistance", note: "Returns the desired leader-follower spacing scalar used by the follow update/catch-up math. [actor-combat]" }
+  "0x4398a0": { name: "Actor_AdjustFollowInterpSpeed", note: "> [actor-combat]" }
+  "0x439996": { name: "Actor_UpdateMountFollowPosition", note: "> [actor-combat]" }
+  "0x439f53": { name: "U16Vector_Size", note: " [world-systems]" }
+  "0x439f8e": { name: "U16Vector_Capacity", note: " [world-systems]" }
+  "0x43a028": { name: "U16Vector_Reserve", note: " [world-systems]" }
+  "0x43a0a3": { name: "U16Vector_Helper_0a3", note: " [world-systems]" }
+  "0x43a0d6": { name: "U16Vector_Helper_0d6", note: " [world-systems]" }
+  "0x43a0f7": { name: "U16Vector_Helper_0f7", note: " [world-systems]" }
+  "0x43a228": { name: "U16Vector_Helper_228", note: " [world-systems]" }
+  "0x43a250": { name: "U16Vector_Helper_250", note: " [world-systems]" }
+  "0x43a272": { name: "U16Vector_CopyRange", note: " [world-systems]" }
+  "0x43a2ed": { name: "U16Vector_MoveRange", note: " [world-systems]" }
+  "0x43a315": { name: "U16Vector_Helper_315", note: " [world-systems]" }
+  "0x43a8b2": { name: "U16Vector_FillRange", note: " [world-systems]" }
+  "0x43a8d2": { name: "LocalPlayer_ApplyEquipBuffVisualOverlays", note: "AnimCatalog visual -> UserXEffect status overlays (350000048..51) [world-systems]" }
+  "0x43b08d": { name: "U16Vector_GrowHelper", note: " [world-systems]" }
+  "0x43b0d1": { name: "U16Vector_Insert", note: " [world-systems]" }
+  "0x43b259": { name: "U16Vector_InsertWrapper", note: " [world-systems]" }
+  "0x43b2e5": { name: "U16Vector_Helper_2e5", note: " [world-systems]" }
+  "0x452c14": { name: "GSound_SetPosition3D", note: " [sound-input]" }
+  "0x452c4b": { name: "GSound_SetMinDistance3D", note: " [sound-input]" }
+  "0x452d20": { name: "SoundMusic_BeginCrossfade", note: " [sound-input]" }
+  "0x453033": { name: "SoundIdMap_DecrementIterator", note: " [sound-input]" }
+  "0x4536e0": { name: "SoundIdMap_LowerBoundNode", note: " [sound-input]" }
+  "0x453f4e": { name: "SoundIdMap_LowerBound", note: " [sound-input]" }
+  "0x454fec": { name: "SoundIdMap_FindInsertSlot", note: " [sound-input]" }
+  "0x45571d": { name: "SoundZone_PlayEffPoint", note: " [sound-input]" }
+  "0x457172": { name: "RegionTable_FindRowById", note: "linear scan of g_RegionTable (28-byte stride) -> parallel value [world-systems]" }
+  "0x4571d6": { name: "World_FindNearbyPortalForLocalPlayer", note: "> [actor-combat]" }
+  "0x4b3a23": { name: "ChatOutputPanel_InitConfigDefaults", note: ">- [ui-hud]" }
+  "0x4b5a5e": { name: "ChatOutputPanel_SaveWindowSettingsAndInitRing", note: ">- [ui-hud]" }
+  "0x4b5b80": { name: "ChatOutputPanel_ResetAndSaveSettings", note: ">- [ui-hud]" }
+  "0x4bb729": { name: "ChatPanel_ComposeFormattedLine", note: ">- [ui-hud]" }
+  "0x4bb7cd": { name: "ChatPanel_HandleSystemSlashCommand", note: ">- [ui-hud]" }
+  "0x4bbf01": { name: "ChatPanel_ProcessInputLine", note: ">- [ui-hud]" }
+  "0x4bea5f": { name: "HudModeBar_LoadAttackModeIcons", note: ">- [ui-hud]" }
+  "0x4bfce1": { name: "ActorNameplate_RefreshBillboard", note: "> [actor-combat]" }
+  "0x4c1366": { name: "ActorNameplate_RefreshBillboard_Thunk", note: "Thin forwarder to ActorNameplate_RefreshBillboard with the rebuild flag set. [actor-combat]" }
+  "0x4c2a45": { name: "Hotkey_ToggleInventoryGroup", note: "opens inventory + closes conflicting windows [world-systems]" }
+  "0x4c2d11": { name: "Hotkey_TogglePartyGroup", note: " [world-systems]" }
+  "0x4c2f54": { name: "Hotkey_ToggleBuddyRelationGroup", note: " [world-systems]" }
+  "0x4c31c5": { name: "Hotkey_ToggleSkillGroup", note: " [world-systems]" }
+  "0x4c395c": { name: "Hotkey_ToggleRelationOrCloseGroup", note: " [world-systems]" }
+  "0x4c586a": { name: "Hud_LoadFaceFireIcons", note: "Loads the animated face/portrait fire-overlay icon set (data/ui/face/fire/*.tga). [ui-hud]" }
+  "0x4c5a08": { name: "Hud_LoadFacePortraitByPair", note: "Loads a face/portrait tile by (class,index) pair from data/ui/face/%d_%d.tga. [ui-hud]" }
+  "0x4c92dd": { name: "LinkPanel_InitMembers", note: "Member-init for the hyperlink/item-link popup panel (LinkPanel) sized ctor. [ui-hud]" }
+  "0x4cc3df": { name: "MapPanel_InitSubVectorA", note: "Initialises an owned vector of MapPanel. [ui-hud]" }
+  "0x4cc442": { name: "MapPanel_InitMembers", note: "Zeroes MapPanel members (shared member-init). [ui-hud]" }
+  "0x4cc480": { name: "TotalMapPanel_InitMembers", note: "Shared member-init for the full-screen world-map panel ctors. [ui-hud]" }
+  "0x4ce0f0": { name: "MopGagePanel_InitMembers", note: ">- [ui-hud]" }
+  "0x4db343": { name: "StatusDistributePanel_InitSubVector", note: "Initialises an owned vector of StatusDistributePanel. [ui-hud]" }
+  "0x4db6e3": { name: "StatusDistributePanel_ResetChildPanels", note: ">- [ui-hud]" }
+  "0x4dce59": { name: "EmoticonPanel_BuildWidgets", note: "Widget/list construction for the emoticon picker panel (sized ctor). [ui-hud]" }
+  "0x4de05d": { name: "DiamondHud_TogglePartyPanel", note: "idx[220] window; slide-in show/hide, calls a global refresh [world-systems]" }
+  "0x4e0755": { name: "MiniParty_InitMemberSlots", note: ">- [ui-hud]" }
+  "0x4e26fc": { name: "ActorPreview_CreateAndConfigureRender", note: "> [actor-combat]" }
+  "0x4e32b0": { name: "ActorPreview_SpawnByIdForWindow", note: "> [actor-combat]" }
+  "0x4e417b": { name: "PartyPanel_InitSubVectorA", note: "Initialises an owned child-component vector of PartyPanel. [ui-hud]" }
+  "0x4e4245": { name: "PartyPanel_InitSubVectorB", note: "Initialises a second owned vector of PartyPanel. [ui-hud]" }
+  "0x4e4c6b": { name: "PartyPanel_InitMembers", note: "Zeroes PartyPanel roster/stat member fields (shared member-init, sized ctor). [ui-hud]" }
+  "0x4e5d41": { name: "DiamondHud_ToggleBuddyRelationPanel", note: "idx[185]; refresh a global + minimap re-anchor a global [world-systems]" }
+  "0x4e633a": { name: "PcPanel_InitMembers", note: "Shared member-init for the player-character frame panel (PcPanel) ctor. [ui-hud]" }
+  "0x4e9593": { name: "RelationPanel_BuildWidgetsPart1", note: "First part of RelationPanel widget construction (called from default ctor). [ui-hud]" }
+  "0x4e9646": { name: "DiamondHud_RelationPanel_Reset", note: "idx[193]; clears + rebuilds via RelationPanel_BuildWidgetsPart1 [world-systems]" }
+  "0x4e987c": { name: "RelationPanel_InitSubVectorA", note: "Initialises an owned vector of RelationPanel. [ui-hud]" }
+  "0x4e991f": { name: "RelationPanel_InitSubVectorB", note: "Initialises a second owned vector of RelationPanel. [ui-hud]" }
+  "0x4e9d80": { name: "RelationPanel_InitMembers", note: ">- [ui-hud]" }
+  "0x4ead7f": { name: "RelationPanel_SetMemberOfRelation", note: ">- [ui-hud]" }
+  "0x4f5968": { name: "FameBuffNpcPanel_GetRowCount", note: " [world-systems]" }
+  "0x4f5977": { name: "FameBuffNpcPanel_GetScrollMax", note: " [world-systems]" }
+  "0x4f5ae6": { name: "FameBuffNpcPanel_OnRowClick", note: " [world-systems]" }
+  "0x4f5d71": { name: "FameBuffNpcPanel_RowHelper", note: " [world-systems]" }
+  "0x4f7810": { name: "Diamond_GuildNpcPanel_End", note: "GuildNpcPanel End/reset: reset child active-flags, chain base End, release held aux object at slot +52 [ui-toolkit]" }
+  "0x4f787a": { name: "GatherNpcPanel_Helper", note: " [world-systems]" }
+  "0x4f78d1": { name: "ConfessionNpcPanel_Helper", note: " [world-systems]" }
+  "0x4f9219": { name: "NpcQuestPanel_InitSubBlock", note: "Small member-init for the NPC quest dialog panel. [ui-hud]" }
+  "0x4f9371": { name: "NpcQuest_EvaluateEligibility", note: "level/class/prereq/accepted gates -> status-color id [world-systems]" }
+  "0x4f9601": { name: "NpcQuestMenu_SetOptionEntry", note: "writes one menu entry (label/id/eligibility-color/flag) [world-systems]" }
+  "0x4f967f": { name: "NpcQuestMenu_PopulateOptions", note: "reads 8 quest-option ids @template+1084, fills menu buttons [world-systems]" }
+  "0x4f9ee3": { name: "NpcQuestTalkPanel_OnConfirm", note: "branch on state byte -> Net_SendC2S_QuestAction_Sub28 [world-systems]" }
+  "0x4ff1e8": { name: "NpcDialog_ClearTextLines", note: "resets 6 dialog-line strings [world-systems]" }
+  "0x4ff3f3": { name: "NpcDialog_PopulateText", note: "6 dialog lines from NpcTemplateMap + MessageDB(2034) [world-systems]" }
+  "0x4ffa6a": { name: "Hud_LoadChunriHoJungOverlay", note: "Loads the data/ui/chunrihojung.dds HUD overlay texture. [ui-hud]" }
+  "0x509254": { name: "OptionPanel_InitSubVector", note: "Initialises an owned vector of an options-window tab. [ui-hud]" }
+  "0x5099f8": { name: "OptionPanelCharacter_InitMembers", note: "Member-init for the Character tab of the options window. [ui-hud]" }
+  "0x50b678": { name: "OptionPanelGraphic_InitMembers", note: "Member-init for the Graphic tab of the options window. [ui-hud]" }
+  "0x50cdf2": { name: "OptionPanel_InitTabBlockA", note: "Member-init for an options-window tab block. [ui-hud]" }
+  "0x50e368": { name: "OptionPanel_InitTabBlockB", note: "Member-init for a second options-window tab block. [ui-hud]" }
+  "0x51924f": { name: "QuestInfoList_OnScrollButton", note: "1017=page, 1010..=line scroll [world-systems]" }
+  "0x519598": { name: "QuestPanel_SlideAnimTick", note: "onDraw slide-in/out animation step [world-systems]" }
+  "0x5196a1": { name: "QuestPanel_ClampDragPosition", note: " [world-systems]" }
+  "0x5196f0": { name: "DiamondHud_ToggleQuestTrackerPanel", note: "idx[206]; show/hide quest tracker overlay [world-systems]" }
+  "0x51976c": { name: "QuestPanel_FindQuestRowByName", note: "strcmp over 40 rows, 44-byte stride [world-systems]" }
+  "0x5207e6": { name: "SkillPanel_InitMembers", note: ">- [ui-hud]" }
+  "0x520d87": { name: "DiamondHud_ToggleSkillPanel", note: "idx[159]; gated by g_SkillHotbar scan; syncs idx[227] + child[94] [world-systems]" }
+  "0x522833": { name: "SkillPanel_InitSubVectorA", note: "Initialises one owned child-component pointer vector of SkillPanel. [ui-hud]" }
+  "0x52678f": { name: "DiamondHud_PanelDockY_Compute", note: "computes docked panel Y from screen height + status-panel width [world-systems]" }
+  "0x52689f": { name: "DiamondHud_ToggleInventoryPanel", note: "idx[158]; pairs with DiamondHud_PanelDockY (0x52678f) [world-systems]" }
+  "0x52d5fe": { name: "SkillPanel_InitSubVectorB", note: "Initialises a second owned vector of SkillPanel. [ui-hud]" }
+  "0x52d6b1": { name: "SkillPanel_InitSubVectorC", note: "Initialises a third owned vector of SkillPanel. [ui-hud]" }
+  "0x5570d4": { name: "Diamond_GuildCreateAPanel_End", note: "GuildCreateAPanel End/reset: reset child active-flags, chain base End, release held aux object at slot +127 [ui-toolkit]" }
+  "0x55712b": { name: "Diamond_GuildCreateAPanel_Close", note: "GuildCreateAPanel close: run End/reset then hide-clear child at +0xBC and clear its remove-mark byte [ui-toolkit]" }
+  "0x558225": { name: "Diamond_GuildFameDonatorPanel_End", note: "GuildFameDonatorPanel End/reset: reset child active-flags, chain base End, release held aux object at slot +54 [ui-toolkit]" }
+  "0x5585ff": { name: "Diamond_GuildFameDonatorPanel_ResetState", note: "GuildFameDonatorPanel: zero the donor-entry scratch fields (+56..+59) then enter sub-state 3 [ui-toolkit]" }
+  "0x5586b9": { name: "Diamond_GuildFameDonatorPanel_Close", note: "GuildFameDonatorPanel close: select state 4, run End/reset, chain base hide(0) [ui-toolkit]" }
+  "0x558f52": { name: "Diamond_GuildMemberPosSetPanel_BuildRows", note: "GuildMemberPosSetPanel: rebuild member-position list rows on event [ui-toolkit]" }
+  "0x55908f": { name: "Diamond_GuildMemberPosSetPanel_Update", note: "GuildMemberPosSetPanel per-frame update tail (base update forward) [ui-toolkit]" }
+  "0x559198": { name: "Diamond_GuildMemberPosSetPanel_OnDirty", note: "GuildMemberPosSetPanel: on selection change (+65 vs +66), post a HUD refresh request (slot 167, code 11) then run base update [ui-toolkit]" }
+  "0x55975d": { name: "Diamond_GuildAPanel_SetTabVisible", note: "GuildAPanel: show/hide the whole tab widget group (header + 6 buttons + 3 list children + tail) by branching on the +140 active flag [ui-toolkit]" }
+  "0x55984b": { name: "Diamond_GuildAPanel_OnTabAction", note: "GuildAPanel: large tab/action dispatch helper invoked from the panel onEvent [ui-toolkit]" }
+  "0x559a48": { name: "Diamond_GuildAPanel_SelectTab", note: "GuildAPanel: select active tab from action id (4513/4514/4515): set tab marker src-rect X (27/118/209) and Y(249), make visible, refresh [ui-toolkit]" }
+  "0x559e4e": { name: "Diamond_GuildAPanel_BuildMemberList", note: "GuildAPanel: populate the member/roster list rows [ui-toolkit]" }
+  "0x55a3be": { name: "Diamond_GuildAPanel_TickSlide", note: "GuildAPanel show/hide slide animation: ease panel X toward a screen-edge target by ~0.7 of viewport width per tick; finalize hide when reached [ui-toolkit]" }
+  "0x55a7e0": { name: "Diamond_GuildAPanel_OnListClick", note: "GuildAPanel: handle a click inside the member list [ui-toolkit]" }
+  "0x55dcec": { name: "DiamondHud_GuildPanel_Reset", note: "idx[207] guild window teardown (4 child sub-widgets freed) [world-systems]" }
+  "0x55ed1c": { name: "Diamond_GuildReaskPanel_OnConfirm", note: "GuildReaskPanel: handle confirm/cancel of the re-ask dialog [ui-toolkit]" }
+  "0x561cd5": { name: "Diamond_GuildWarInfoPanel_BuildUI", note: "GuildWarInfoPanel ctor helper: build the war-info child widgets [ui-toolkit]" }
+  "0x568fbf": { name: "WorldOverlay_DrawNearbyEntityMarkers", note: "> [actor-combat]" }
+  "0x5709c5": { name: "Party_FindMemberByGroupId", note: "> [actor-combat]" }
+  "0x5712d4": { name: "World_EnterScene_PopulateFromSpawn", note: "copies 0x610 spawn block, hides HUD set, binds local actor name/title [world-systems]" }
+  "0x571ba4": { name: "Party_CountQualifiedMembersNearby", note: "> [actor-combat]" }
+  "0x57c687": { name: "CharSelect_OpenPreviewWindow", note: "spawns actor preview (ActorPreview_SpawnByIdForWindow) + hides HUD [world-systems]" }
+  "0x57c762": { name: "World_HandleSelfDespawnEvent", note: "on local-actor despawn (type<=1): purge HUD windows [world-systems]" }
+  "0x57cbef": { name: "Diamond_GuildAPanel_ResolveGuildContext", note: "GuildAPanel draw/event helper: resolve the active guild-info context (own guild vs viewed guild) before rendering [ui-toolkit]" }
+  "0x57cf23": { name: "CharSelect_OpenPreviewWindow_Thunk", note: " [world-systems]" }
+  "0x5b3ddc": { name: "NpcSearch_Helper_3ddc", note: " [world-systems]" }
+  "0x5b3e10": { name: "NpcSearch_Helper_3e10", note: " [world-systems]" }
+  "0x5b3e3d": { name: "NpcSearch_Helper_3e3d", note: " [world-systems]" }
+  "0x5b3faf": { name: "NpcSearch_SubmitNameQuery", note: "copies 20-char CP949 name -> NetHandler (auto-question/report) [world-systems]" }
+  "0x5b5023": { name: "NpcSearch_LookupRegionRecord", note: "wraps RegionTable_FindRowById (0x457172) [world-systems]" }
+  "0x5b512a": { name: "NpcSearch_LayoutResultBox", note: " [world-systems]" }
+  "0x5b520d": { name: "NpcSearch_List_Helper_520d", note: " [world-systems]" }
+  "0x5b526a": { name: "NpcSearch_List_Helper_526a", note: " [world-systems]" }
+  "0x5b52ba": { name: "NpcSearch_List_Helper_52ba", note: " [world-systems]" }
+  "0x5b530a": { name: "NpcSearch_List_Helper_530a", note: " [world-systems]" }
+  "0x5b533c": { name: "NpcSearch_List_EraseNode", note: " [world-systems]" }
+  "0x5b5374": { name: "NpcSearch_List_Clear", note: " [world-systems]" }
+  "0x5be44b": { name: "DiamondHud_ToggleNpcDialogRootPanel", note: "NPC-dialog window; pushes idx[146] aside (a global) [world-systems]" }
+  "0x5bf697": { name: "GoodsPanel_BuildWidgets", note: "Widget construction for the goods/vendor window (called from a sized ctor). [ui-hud]" }
+  "0x5bf821": { name: "GoodsPanel_InitSubVectorA", note: "Initialises an owned vector of GoodsPanel. [ui-hud]" }
+  "0x5bf8fe": { name: "GoodsPanel_InitSubVectorB", note: "Initialises a second owned vector of GoodsPanel. [ui-hud]" }
+  "0x5bfaa8": { name: "GoodsPanel_InitMembers", note: ">- [ui-hud]" }
+  "0x5cd425": { name: "ItemPanel_InitSubBlock", note: "Small member-init for ItemPanel. [ui-hud]" }
+  "0x5cf5f3": { name: "ItemPanel_InitSubVectorA", note: "Initialises an owned vector of ItemPanel. [ui-hud]" }
+  "0x5cf63f": { name: "ItemPanel_InitSubVectorB", note: "Initialises a second owned vector of ItemPanel. [ui-hud]" }
+  "0x5d05ef": { name: "DiamondHud_ToggleStatusCharacterPanel", note: "idx[146]; reflows a global/5CF98E, syncs inventory [world-systems]" }
+  "0x5d58b9": { name: "PcTradePanel_InitSlotGrid", note: ">- [ui-hud]" }
+  "0x5d7e84": { name: "QuestItemKeepPanel_InitSlotGrid", note: "5 rows x 6 cols, 38px spacing, origin (7,44) [world-systems]" }
+  "0x5d7f3d": { name: "QuestItemKeepPanel_IsSlotOccupied", note: "slot[+204]!=0xFF && slot dword@+0xC0 != 0 [world-systems]" }
+  "0x5d7fea": { name: "QuestItemKeepPanel_CopySlotRecord", note: "copies 16-byte item-slot payload (dwords @+47..+50) [world-systems]" }
+  "0x5d8bdd": { name: "TradePanel_InitMembers", note: ">- [ui-hud]" }
+  "0x5d9b85": { name: "TradePanel_InitSubVector", note: "Initialises an owned vector of TradePanel. [ui-hud]" }
+  "0x5da1fb": { name: "World_CloseAllHudPanels", note: "mass HUD teardown / return-to-game [world-systems]" }
+  "0x5e241b": { name: "Option_SaveViewBack_AndRestream", note: " [sound-input]" }
+  "0x5f1e2f": { name: "Net_SendC2S_QuestAction_Sub28", note: "group 2, sub 0x1C, 12-byte body (NpcQuestTalk/GiveUp) [world-systems]" }
+  "0x5f3684": { name: "Net_SendC2S_QuestAction_Sub152", note: "group 2, sub 0x98, two u32 (QuestPanel) [world-systems]" }
+  "0x5fa1ae": { name: "Settings_WriteLastServer_Registry", note: " [sound-input]" }
+  "0x602b80": { name: "Cp949_IsLeadTrailPair", note: " [sound-input]" }
+  "0x612021": { name: "SoundEventQueue_At", note: " [sound-input]" }
+  "0x61208b": { name: "SoundEventQueue_PopFront", note: " [sound-input]" }
+  "0x6122ba": { name: "SoundEventQueue_FlushAll", note: " [sound-input]" }
+  "0x6127bd": { name: "GSoundThread_SoundLoop", note: " [sound-input]" }
+  "0x61635c": { name: "Diamond_GUPanel_AnchorToCorner", note: "Position a panel to a screen corner (mode 2 left / 3 right): origin = half-size offset scaled by a per-state factor (1.0 or 2.7 when kind+0x220==2) [ui-toolkit]" }
+  "0x619d5e": { name: "Diamond_GUScroll_SolveThumbFromEvent", note: "GUScroll: compute thumb pos from event code (200 line-up / 201 line-down / else absolute drag), clamp to track, derive 0..1 ratio at +184 and index at +276 [ui-toolkit]" }
+  "0x61a325": { name: "Diamond_GUScrollEx_ApplyDrag", note: "GUScrollEx drag (state 303): clamp thumb between min(+196)/max(+200), map to value via orientation(+188) & content range(+192), notify, refresh [ui-toolkit]" }
+  "0x61a40e": { name: "Diamond_GUScrollEx_StepLine", note: "GUScrollEx line-step (301 dec / 302 inc): advance value(+212) by one step, reclamp thumb, refresh; clears state 303 on release [ui-toolkit]" }
+  "0x61a57e": { name: "Diamond_GUScrollEx_BeginDrag", note: "GUScrollEx press (state 300): capture drag offset(+216) from thumb half-extent, mark drag-active(+220), enter drag state 303 [ui-toolkit]" }
+  "0x61ab90": { name: "LuaTinker_ReadTop_String", note: "lua_tinker read<const char*>: lua_tolstring(L,-1) then pop. Used by typed getTableString call wrappers. [lua-config]" }
+  "0x61abd0": { name: "LuaTinker_ReadTop_Double", note: "lua_tinker read<double>: lua_tonumber(L,-1) then pop. [lua-config]" }
+  "0x61af1a": { name: "LuaTinker_UpvalueArg_thunk", note: "Thunk to lua_tolstring-style upvalue/arg fetch in the lua_tinker single-upvalue trampoline. [lua-config]" }
+  "0x61af1f": { name: "LuaTinker_GetUpvalue", note: "lua_tinker upvalue fetch: lua_touserdata(L, lua_upvalueindex(1)) (index -10003). Returns bound C fn ptr. [lua-config]" }
+  "0x61af30": { name: "LuaTinker_Trampoline_bool", note: "lua_tinker single-upvalue dispatch trampoline: reads arg, fetches bound C fn from upvalue, calls it, pushes bool result. [lua-config]" }
+  "0x61b4cb": { name: "Diamond_GUTextbox_DrawStringInRect", note: "GUTextbox draw helper: build dest rect (x,y,x+w,y+h) and call the font/text vtable slot to render a non-empty string with the default text color [ui-toolkit]" }
+  "0x61b8f1": { name: "Diamond_GUCmdHandler_InvokeNode", note: "Invoke one matched command-list node (action dispatch helper for the command handler) [ui-toolkit]" }
+  "0x61ba52": { name: "Diamond_GUCmdHandler_FindAndInvoke", note: "Walk the command-handler intrusive list (head at +4); when node key (+8) matches the requested id, invoke its action node [ui-toolkit]" }
+  "0x61bb1d": { name: "Diamond_GUCmdHandler_DispatchByName", note: "GUWindow secondary-base command handler: look up & invoke a command record by id (forwards into the intrusive command list) [ui-toolkit]" }
+  "0x62f33a": { name: "SoundEventBlock_New", note: " [sound-input]" }
+  "0x62f519": { name: "SoundEvent_Alloc", note: " [sound-input]" }
+  "0x62f63e": { name: "SoundEventQueue_Grow", note: " [sound-input]" }
+  "0x62f751": { name: "SoundEventQueue_Push", note: " [sound-input]" }
+  "0x62f7d0": { name: "SoundEvent_Free", note: " [sound-input]" }
+  "0x63fcaa": { name: "LuaTinker_s64_meta_eq", note: "lua_tinker __s64 metamethod __eq: 8-byte memcmp of two userdata == 0. [lua-config]" }
+  "0x63fce0": { name: "LuaTinker_s64_meta_lt", note: "lua_tinker __s64 metamethod __lt: 8-byte memcmp < 0. [lua-config]" }
+  "0x63fd18": { name: "LuaTinker_s64_meta_le", note: "lua_tinker __s64 metamethod __le: 8-byte memcmp <= 0. [lua-config]" }
+  "0x63fd50": { name: "LuaTinker_Register_s64_meta", note: "Registers the lua_tinker __s64 userdata metatable: __name/__tostring/__eq/__lt/__le on a 64-bit signed integer wrapper. [lua-config]" }
+  "0x63fe65": { name: "LuaTinker_u64_meta_eq", note: "lua_tinker __u64 metamethod __eq: 8-byte memcmp == 0. [lua-config]" }
+  "0x63fe9b": { name: "LuaTinker_u64_meta_lt", note: "lua_tinker __u64 metamethod __lt: 8-byte memcmp < 0. [lua-config]" }
+  "0x63fed3": { name: "LuaTinker_u64_meta_le", note: "lua_tinker __u64 metamethod __le: 8-byte memcmp <= 0. [lua-config]" }
+  "0x63ff0b": { name: "LuaTinker_Register_u64_meta", note: "Registers the lua_tinker __u64 userdata metatable (__name/__tostring/__eq/__lt/__le) for a 64-bit unsigned integer wrapper. [lua-config]" }
+  "0x63ffd4": { name: "LuaTinker_Print", note: "lua_tinker::print: vsprintf then route to the global _ALERT Lua function if present, else printf. The print/alert sink for all script errors. [lua-config]" }
+  "0x640066": { name: "LuaTinker_DumpStack", note: "lua_tinker::enum_stack: walks the Lua value stack and prints each slot's type/value via LuaTinker_Print (debug dump). [lua-config]" }
+  "0x6401d9": { name: "LuaTinker_Push_String_thunk", note: "Thin wrapper over lua_tolstring(L,idx,NULL); used as the read<const char*> primitive. [lua-config]" }
+  "0x640264": { name: "LuaTinker_Read_BoolNum", note: "lua_tinker read<bool>/int-from-number: lua_tonumber then ftol (used as the typed-call return reader). [lua-config]" }
+  "0x6402a5": { name: "LuaTinker_ToNumber_thunk", note: "Thunk to lua_tonumber(L,idx). [lua-config]" }
+  "0x640418": { name: "LuaTinker_Push_Int", note: "lua_tinker push<int>: converts int to double and lua_pushnumber. Used to push the row index arg in getTableString(name,i). [lua-config]" }
+  "0x640489": { name: "LuaTinker_Push_Bool_thunk", note: "Thunk to lua_pushboolean(L,b). [lua-config]" }
+  "0x64053b": { name: "LuaTinker_Meta_FindParent", note: "Recursively walks the __parent metatable chain to resolve an inherited field (lua_tinker class inheritance lookup). [lua-config]" }
+  "0x6405c8": { name: "LuaTinker_LuaValue_ctor", note: "lua_tinker::lua_value ctor: captures (L, stack-index, value-ptr) into a 16-byte wrapper that mirrors a Lua stack slot. [lua-config]" }
+  "0x6405f2": { name: "LuaTinker_LuaValue_Revalidate", note: "Re-locates the captured Lua value on the stack after stack motion (validates/relocates the wrapper's index). [lua-config]" }
+  "0x640646": { name: "LuaTinker_LuaTable_ctor", note: "lua_tinker::table ctor (creates a new table): lua_createtable + wrap as a lua_value with refcount bump. [lua-config]" }
+  "0x64068a": { name: "LuaTinker_LuaTable_ctor_named", note: "lua_tinker::table ctor by global name: fetch/create the named global table then wrap it. [lua-config]" }
+  "0x640719": { name: "LuaTinker_LuaTable_ctor_atindex", note: "lua_tinker::table ctor at a given stack index: normalize negative index, wrap with refcount bump. [lua-config]" }
+  "0x64077f": { name: "LuaTinker_Traceback", note: "lua_tinker call-stack traceback formatter: walks lua_getstack frames, formats 'fn() : line N [src : line N]'. [lua-config]" }
+  "0x640825": { name: "LuaTinker_OnError", note: "lua_tinker error handler closure (pcall msgh): pushes error string via LuaTinker_Print then appends a traceback. [lua-config]" }
+  "0x64084f": { name: "LuaTinker_LuaValue_PopIfValid", note: "Revalidates the captured value then pops it (lua_tinker wrapper teardown helper). [lua-config]" }
+  "0x64099c": { name: "LuaTinker_UpvalueIndex_thunk", note: "Thunk to the pseudo-index fetch used by the lua_tinker trampoline. [lua-config]" }
+  "0x68f790": { name: "Lua__0068F790", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68f850": { name: "Lua__0068F850", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68f910": { name: "Lua__0068F910", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68f9a0": { name: "Lua__0068F9A0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68fa40": { name: "Lua__0068FA40", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68fa90": { name: "Lua__0068FA90", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68fbc0": { name: "Lua__0068FBC0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68fbd0": { name: "Lua__0068FBD0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68fc30": { name: "Lua__0068FC30", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68fcd0": { name: "Lua__0068FCD0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68fd00": { name: "Lua__0068FD00", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68fd60": { name: "Lua__0068FD60", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68fde0": { name: "Lua__0068FDE0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68fe90": { name: "Lua__0068FE90", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68fee0": { name: "Lua__0068FEE0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68ff30": { name: "Lua__0068FF30", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x68fff0": { name: "Lua__0068FFF0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690020": { name: "Lua__00690020", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690040": { name: "Lua__00690040", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690060": { name: "Lua__00690060", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690090": { name: "Lua__00690090", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6900d0": { name: "Lua__006900D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690100": { name: "Lua__00690100", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690130": { name: "Lua__00690130", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690170": { name: "Lua__00690170", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6901d0": { name: "Lua__006901D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690210": { name: "Lua__00690210", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690250": { name: "Lua__00690250", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690290": { name: "Lua__00690290", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690330": { name: "Lua__00690330", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6903d0": { name: "Lua__006903D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690400": { name: "Lua__00690400", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690420": { name: "Lua__00690420", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690490": { name: "Lua__00690490", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6904b0": { name: "Lua__006904B0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6904d0": { name: "Lua__006904D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6904f0": { name: "Lua__006904F0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6905b0": { name: "Lua__006905B0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6905e0": { name: "Lua__006905E0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6906b0": { name: "Lua__006906B0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690700": { name: "Lua__00690700", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690760": { name: "Lua__00690760", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6907c0": { name: "Lua__006907C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690800": { name: "Lua__00690800", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690890": { name: "Lua__00690890", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6908f0": { name: "Lua__006908F0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690990": { name: "Lua__00690990", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690a00": { name: "Lua__00690A00", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690a70": { name: "Lua__00690A70", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690ae0": { name: "Lua__00690AE0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690b90": { name: "Lua__00690B90", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690c10": { name: "Lua__00690C10", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690c50": { name: "Lua__00690C50", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690ce0": { name: "Lua__00690CE0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690d50": { name: "Lua__00690D50", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690e10": { name: "Lua__00690E10", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690e20": { name: "Lua__00690E20", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690f10": { name: "Lua__00690F10", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690f20": { name: "Lua__00690F20", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x690f60": { name: "Lua__00690F60", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691030": { name: "Lua__00691030", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691230": { name: "Lua__00691230", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6912f0": { name: "Lua__006912F0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691410": { name: "Lua__00691410", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691470": { name: "Lua__00691470", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691540": { name: "Lua__00691540", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691610": { name: "Lua__00691610", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691660": { name: "Lua__00691660", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691700": { name: "Lua__00691700", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691730": { name: "Lua__00691730", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691770": { name: "Lua__00691770", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6917b0": { name: "Lua__006917B0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6917d0": { name: "Lua__006917D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691880": { name: "Lua__00691880", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6918b0": { name: "Lua__006918B0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6918f0": { name: "Lua__006918F0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691930": { name: "Lua__00691930", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691970": { name: "Lua__00691970", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6919e0": { name: "Lua__006919E0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691a40": { name: "Lua__00691A40", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691a80": { name: "Lua__00691A80", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691b00": { name: "Lua__00691B00", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691b60": { name: "Lua__00691B60", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691bb0": { name: "Lua__00691BB0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691c00": { name: "Lua__00691C00", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691c80": { name: "Lua__00691C80", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691d00": { name: "Lua__00691D00", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691d50": { name: "Lua__00691D50", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691da0": { name: "Lua__00691DA0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691ea0": { name: "Lua__00691EA0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x691f80": { name: "Lua__00691F80", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x692030": { name: "Lua__00692030", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6920b0": { name: "Lua__006920B0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x692170": { name: "Lua__00692170", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6921a0": { name: "Lua__006921A0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6921c0": { name: "Lua__006921C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x692270": { name: "Lua__00692270", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6923f0": { name: "Lua__006923F0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x692480": { name: "Lua__00692480", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6924b0": { name: "Lua__006924B0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x692540": { name: "Lua__00692540", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6925a0": { name: "Lua__006925A0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x692620": { name: "Lua__00692620", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x692740": { name: "Lua__00692740", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x692800": { name: "Lua__00692800", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6928e0": { name: "Lua__006928E0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6929a0": { name: "Lua__006929A0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x692a50": { name: "Lua__00692A50", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x692b00": { name: "Lua__00692B00", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x692e50": { name: "Lua__00692E50", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x692f90": { name: "Lua__00692F90", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x692fd0": { name: "Lua__00692FD0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693010": { name: "Lua__00693010", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6930a0": { name: "Lua__006930A0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693120": { name: "Lua__00693120", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693180": { name: "Lua__00693180", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6931e0": { name: "Lua__006931E0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693260": { name: "Lua__00693260", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693290": { name: "Lua__00693290", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693300": { name: "Lua__00693300", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693330": { name: "Lua__00693330", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693460": { name: "Lua__00693460", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6935a0": { name: "Lua__006935A0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693660": { name: "Lua__00693660", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693680": { name: "Lua__00693680", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6936c0": { name: "Lua__006936C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693770": { name: "Lua__00693770", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693810": { name: "Lua__00693810", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693880": { name: "Lua__00693880", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6938d0": { name: "Lua__006938D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693930": { name: "Lua__00693930", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6939f0": { name: "Lua__006939F0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693ac0": { name: "Lua__00693AC0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693af0": { name: "Lua__00693AF0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693b40": { name: "Lua__00693B40", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693fc0": { name: "Lua__00693FC0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x693fe0": { name: "Lua__00693FE0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694010": { name: "Lua__00694010", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694190": { name: "Lua__00694190", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694240": { name: "Lua__00694240", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6942d0": { name: "Lua__006942D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694360": { name: "Lua__00694360", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694390": { name: "Lua__00694390", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6944e0": { name: "Lua__006944E0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694620": { name: "Lua__00694620", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694640": { name: "Lua__00694640", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6946e0": { name: "Lua__006946E0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694700": { name: "Lua__00694700", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694750": { name: "Lua__00694750", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6947e0": { name: "Lua__006947E0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6948a0": { name: "Lua__006948A0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694950": { name: "Lua__00694950", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694a00": { name: "Lua__00694A00", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694a60": { name: "Lua__00694A60", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694ad0": { name: "Lua__00694AD0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694b20": { name: "Lua__00694B20", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694bb0": { name: "Lua__00694BB0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694c60": { name: "Lua__00694C60", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694c80": { name: "Lua__00694C80", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694cd0": { name: "Lua__00694CD0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694d60": { name: "Lua__00694D60", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694df0": { name: "Lua__00694DF0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694e70": { name: "Lua__00694E70", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x694f70": { name: "Lua__00694F70", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6951c0": { name: "Lua__006951C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x695320": { name: "Lua__00695320", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x695680": { name: "Lua__00695680", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x695b50": { name: "Lua__00695B50", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6962e0": { name: "Lua__006962E0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696330": { name: "Lua__00696330", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696350": { name: "Lua__00696350", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6963b0": { name: "Lua__006963B0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6963e0": { name: "Lua__006963E0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696440": { name: "Lua__00696440", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696480": { name: "Lua__00696480", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696550": { name: "Lua__00696550", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696610": { name: "Lua__00696610", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696700": { name: "Lua__00696700", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696770": { name: "Lua__00696770", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6967d0": { name: "Lua__006967D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696850": { name: "Lua__00696850", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696910": { name: "Lua__00696910", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696970": { name: "Lua__00696970", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696a20": { name: "Lua__00696A20", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696a80": { name: "Lua__00696A80", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696b10": { name: "Lua__00696B10", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696ba0": { name: "Lua__00696BA0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696be0": { name: "Lua__00696BE0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696c80": { name: "Lua__00696C80", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696cf0": { name: "Lua__00696CF0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696d40": { name: "Lua__00696D40", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696df0": { name: "Lua__00696DF0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x696e50": { name: "Lua__00696E50", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697040": { name: "Lua__00697040", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697090": { name: "Lua__00697090", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6971c0": { name: "Lua__006971C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6972c0": { name: "Lua__006972C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697320": { name: "Lua__00697320", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697400": { name: "Lua__00697400", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697430": { name: "Lua__00697430", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6974d0": { name: "Lua__006974D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697680": { name: "Lua__00697680", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697760": { name: "Lua__00697760", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697880": { name: "Lua__00697880", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697970": { name: "Lua__00697970", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697af0": { name: "Lua__00697AF0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697bf0": { name: "Lua__00697BF0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697c90": { name: "Lua__00697C90", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697d20": { name: "Lua__00697D20", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697d90": { name: "Lua__00697D90", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697e50": { name: "Lua__00697E50", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697e80": { name: "Lua__00697E80", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697ed0": { name: "Lua__00697ED0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697f10": { name: "Lua__00697F10", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697f80": { name: "Lua__00697F80", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x697fc0": { name: "Lua__00697FC0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698120": { name: "Lua__00698120", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698230": { name: "Lua__00698230", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6982c0": { name: "Lua__006982C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698340": { name: "Lua__00698340", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698380": { name: "Lua__00698380", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6983a0": { name: "Lua__006983A0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6983d0": { name: "Lua__006983D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698430": { name: "Lua__00698430", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698470": { name: "Lua__00698470", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6984d0": { name: "Lua__006984D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698510": { name: "Lua__00698510", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6985c0": { name: "Lua__006985C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698600": { name: "Lua__00698600", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6986b0": { name: "Lua__006986B0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698710": { name: "Lua__00698710", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6987b0": { name: "Lua__006987B0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6987f0": { name: "Lua__006987F0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698840": { name: "Lua__00698840", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6988c0": { name: "Lua__006988C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6989c0": { name: "Lua__006989C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698a20": { name: "Lua__00698A20", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698aa0": { name: "Lua__00698AA0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698ad0": { name: "Lua__00698AD0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698bc0": { name: "Lua__00698BC0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698d20": { name: "Lua__00698D20", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698dc0": { name: "Lua__00698DC0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698e20": { name: "Lua__00698E20", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698eb0": { name: "Lua__00698EB0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x698f60": { name: "Lua__00698F60", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699070": { name: "Lua__00699070", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6990f0": { name: "Lua__006990F0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699180": { name: "Lua__00699180", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6993d0": { name: "Lua__006993D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699450": { name: "Lua__00699450", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6994d0": { name: "Lua__006994D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6995e0": { name: "Lua__006995E0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699650": { name: "Lua__00699650", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699680": { name: "Lua__00699680", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6996a0": { name: "Lua__006996A0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6996d0": { name: "Lua__006996D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699720": { name: "Lua__00699720", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6997d0": { name: "Lua__006997D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699830": { name: "Lua__00699830", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699af0": { name: "Lua__00699AF0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699b10": { name: "Lua__00699B10", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699c60": { name: "Lua__00699C60", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699cb0": { name: "Lua__00699CB0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699d30": { name: "Lua__00699D30", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699dc0": { name: "Lua__00699DC0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699e70": { name: "Lua__00699E70", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x699f10": { name: "Lua__00699F10", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69a000": { name: "Lua__0069A000", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69a130": { name: "Lua__0069A130", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69a180": { name: "Lua__0069A180", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69a210": { name: "Lua__0069A210", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69a290": { name: "Lua__0069A290", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69a300": { name: "Lua__0069A300", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69a390": { name: "Lua__0069A390", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69a430": { name: "Lua__0069A430", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69a510": { name: "Lua__0069A510", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69a720": { name: "Lua__0069A720", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69ba20": { name: "Lua__0069BA20", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69ba60": { name: "Lua__0069BA60", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69bae0": { name: "Lua__0069BAE0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69bb90": { name: "Lua__0069BB90", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69c280": { name: "Lua__0069C280", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69c350": { name: "Lua__0069C350", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69c420": { name: "Lua__0069C420", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69c440": { name: "Lua__0069C440", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69c4a0": { name: "Lua__0069C4A0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69c5a0": { name: "Lua__0069C5A0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69c5e0": { name: "Lua__0069C5E0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69c620": { name: "Lua__0069C620", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69c7c0": { name: "Lua__0069C7C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69c8a0": { name: "Lua__0069C8A0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69c900": { name: "Lua__0069C900", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69c9c0": { name: "Lua__0069C9C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69ca10": { name: "Lua__0069CA10", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69cb20": { name: "Lua__0069CB20", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69cbe0": { name: "Lua__0069CBE0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69cdb0": { name: "Lua__0069CDB0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69cdf0": { name: "Lua__0069CDF0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69ce40": { name: "Lua__0069CE40", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69cf50": { name: "Lua__0069CF50", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69d000": { name: "Lua__0069D000", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69d290": { name: "Lua__0069D290", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69d450": { name: "Lua__0069D450", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69d5b0": { name: "Lua__0069D5B0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69d5f0": { name: "Lua__0069D5F0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69d730": { name: "Lua__0069D730", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69d7a0": { name: "Lua__0069D7A0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69da90": { name: "Lua__0069DA90", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69dcb0": { name: "Lua__0069DCB0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69de60": { name: "Lua__0069DE60", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69dfb0": { name: "Lua__0069DFB0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69e040": { name: "Lua__0069E040", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69e0a0": { name: "Lua__0069E0A0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69e1d0": { name: "Lua__0069E1D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69e210": { name: "Lua__0069E210", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69e280": { name: "Lua__0069E280", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69e3b0": { name: "Lua__0069E3B0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69e510": { name: "Lua__0069E510", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69e540": { name: "Lua__0069E540", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69e6f0": { name: "Lua__0069E6F0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69e930": { name: "Lua__0069E930", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69ebb0": { name: "Lua__0069EBB0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69ecc0": { name: "Lua__0069ECC0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69ed40": { name: "Lua__0069ED40", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69ee00": { name: "Lua__0069EE00", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69ef10": { name: "Lua__0069EF10", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69f030": { name: "Lua__0069F030", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69f120": { name: "Lua__0069F120", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69f170": { name: "Lua__0069F170", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69f1d0": { name: "Lua__0069F1D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69f2f0": { name: "Lua__0069F2F0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69f430": { name: "Lua__0069F430", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69f4d0": { name: "Lua__0069F4D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69f660": { name: "Lua__0069F660", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69f6d0": { name: "Lua__0069F6D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69f720": { name: "Lua__0069F720", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69f7d0": { name: "Lua__0069F7D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69f850": { name: "Lua__0069F850", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69faf0": { name: "Lua__0069FAF0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69fdb0": { name: "Lua__0069FDB0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x69ffb0": { name: "Lua__0069FFB0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0070": { name: "Lua__006A0070", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0100": { name: "Lua__006A0100", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0150": { name: "Lua__006A0150", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a01b0": { name: "Lua__006A01B0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0210": { name: "Lua__006A0210", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0290": { name: "Lua__006A0290", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0320": { name: "Lua__006A0320", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0400": { name: "Lua__006A0400", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0450": { name: "Lua__006A0450", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0490": { name: "Lua__006A0490", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0500": { name: "Lua__006A0500", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0520": { name: "Lua__006A0520", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0610": { name: "Lua__006A0610", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0640": { name: "Lua__006A0640", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0670": { name: "Lua__006A0670", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0690": { name: "Lua__006A0690", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a06d0": { name: "Lua__006A06D0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0760": { name: "Lua__006A0760", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a07c0": { name: "Lua__006A07C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0810": { name: "Lua__006A0810", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0930": { name: "Lua__006A0930", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0950": { name: "Lua__006A0950", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a09f0": { name: "Lua__006A09F0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0a30": { name: "Lua__006A0A30", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0a60": { name: "Lua__006A0A60", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0af0": { name: "Lua__006A0AF0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0b90": { name: "Lua__006A0B90", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0bd0": { name: "Lua__006A0BD0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0c00": { name: "Lua__006A0C00", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0c70": { name: "Lua__006A0C70", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0c90": { name: "Lua__006A0C90", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0da0": { name: "Lua__006A0DA0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0eb0": { name: "Lua__006A0EB0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a0f10": { name: "Lua__006A0F10", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a1030": { name: "Lua__006A1030", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a10b0": { name: "Lua__006A10B0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a1110": { name: "Lua__006A1110", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a1130": { name: "Lua__006A1130", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a1230": { name: "Lua__006A1230", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a1300": { name: "Lua__006A1300", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a13c0": { name: "Lua__006A13C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a1440": { name: "Lua__006A1440", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a1570": { name: "Lua__006A1570", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a1630": { name: "Lua__006A1630", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a1650": { name: "Lua__006A1650", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a1730": { name: "Lua__006A1730", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a17c0": { name: "Lua__006A17C0", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a1860": { name: "Lua__006A1860", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a1910": { name: "Lua__006A1910", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6a1b60": { name: "Lua__006A1B60", note: "Third-party Lua 5.1 VM (out of game-RE scope). [lib:Lua]" }
+  "0x6ddae3": { name: "libVorbis__6ddae3", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ddae4": { name: "libVorbis__6ddae4", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ddae5": { name: "libVorbis__6ddae5", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ddb4a": { name: "libVorbis__6ddb4a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ddb98": { name: "libVorbis__6ddb98", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ddc32": { name: "libVorbis__6ddc32", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ddd3a": { name: "libVorbis__6ddd3a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ddd72": { name: "libVorbis__6ddd72", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ddd95": { name: "libVorbis__6ddd95", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6dddb0": { name: "libVorbis__6dddb0", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ddf42": { name: "libVorbis__6ddf42", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6de193": { name: "libVorbis__6de193", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6de2b4": { name: "libVorbis__6de2b4", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6de6b3": { name: "libVorbis__6de6b3", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6de717": { name: "libVorbis__6de717", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6de739": { name: "libVorbis__6de739", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6de9dc": { name: "libVorbis__6de9dc", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6de9fc": { name: "libVorbis__6de9fc", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6deaed": { name: "libVorbis__6deaed", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6deb06": { name: "libVorbis__6deb06", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6deb0e": { name: "libVorbis__6deb0e", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6deba3": { name: "libVorbis__6deba3", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6dec17": { name: "libVorbis__6dec17", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6dec8a": { name: "libVorbis__6dec8a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6decfc": { name: "libVorbis__6decfc", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6df06b": { name: "libVorbis__6df06b", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6df614": { name: "libVorbis__6df614", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6df8ee": { name: "libVorbis__6df8ee", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6df9a2": { name: "libVorbis__6df9a2", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6dfb42": { name: "libVorbis__6dfb42", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6dfb9e": { name: "libVorbis__6dfb9e", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6dfba1": { name: "libVorbis__6dfba1", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6dff10": { name: "libVorbis__6dff10", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6dffd9": { name: "libVorbis__6dffd9", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e009d": { name: "libVorbis__6e009d", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e00c1": { name: "libVorbis__6e00c1", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e00fb": { name: "libVorbis__6e00fb", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0374": { name: "libVorbis__6e0374", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e04fa": { name: "libVorbis__6e04fa", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e066a": { name: "libVorbis__6e066a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e07b5": { name: "libVorbis__6e07b5", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0958": { name: "libVorbis__6e0958", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0990": { name: "libVorbis__6e0990", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0a18": { name: "libVorbis__6e0a18", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0ab8": { name: "libVorbis__6e0ab8", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0c65": { name: "libVorbis__6e0c65", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0c70": { name: "libVorbis__6e0c70", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0c7e": { name: "libVorbis__6e0c7e", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0c8c": { name: "libVorbis__6e0c8c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0c9a": { name: "libVorbis__6e0c9a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0d22": { name: "libVorbis__6e0d22", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0d43": { name: "libVorbis__6e0d43", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0d86": { name: "libVorbis__6e0d86", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0d9a": { name: "libVorbis__6e0d9a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0dfb": { name: "libVorbis__6e0dfb", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0e3a": { name: "libVorbis__6e0e3a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0e98": { name: "libVorbis__6e0e98", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e0f2c": { name: "libVorbis__6e0f2c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e10be": { name: "libVorbis__6e10be", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1395": { name: "libVorbis__6e1395", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e13b1": { name: "libVorbis__6e13b1", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e13f3": { name: "libVorbis__6e13f3", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1401": { name: "libVorbis__6e1401", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1483": { name: "libVorbis__6e1483", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e14aa": { name: "libVorbis__6e14aa", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e162c": { name: "libVorbis__6e162c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e18ad": { name: "libVorbis__6e18ad", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e18d2": { name: "libVorbis__6e18d2", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e192a": { name: "libVorbis__6e192a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1953": { name: "libVorbis__6e1953", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1a54": { name: "libVorbis__6e1a54", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1a7a": { name: "libVorbis__6e1a7a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1abb": { name: "libVorbis__6e1abb", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1b32": { name: "libVorbis__6e1b32", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1b41": { name: "libVorbis__6e1b41", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1b66": { name: "libVorbis__6e1b66", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1b88": { name: "libVorbis__6e1b88", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1b99": { name: "libVorbis__6e1b99", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1c7b": { name: "libVorbis__6e1c7b", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1ddb": { name: "libVorbis__6e1ddb", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1e3d": { name: "libVorbis__6e1e3d", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1e54": { name: "libVorbis__6e1e54", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1e77": { name: "libVorbis__6e1e77", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e1fc0": { name: "libVorbis__6e1fc0", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e2083": { name: "libVorbis__6e2083", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e218d": { name: "libVorbis__6e218d", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e2417": { name: "libVorbis__6e2417", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e249c": { name: "libVorbis__6e249c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e257a": { name: "libVorbis__6e257a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e261c": { name: "libVorbis__6e261c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e26c3": { name: "libVorbis__6e26c3", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e2bab": { name: "libVorbis__6e2bab", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e2bb1": { name: "libVorbis__6e2bb1", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e2d38": { name: "libVorbis__6e2d38", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e2e09": { name: "libVorbis__6e2e09", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e2e73": { name: "libVorbis__6e2e73", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e2e9c": { name: "libVorbis__6e2e9c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e2eaa": { name: "libVorbis__6e2eaa", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e2eb9": { name: "libVorbis__6e2eb9", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e2f2e": { name: "libVorbis__6e2f2e", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e2f8b": { name: "libVorbis__6e2f8b", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e2fec": { name: "libVorbis__6e2fec", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e3055": { name: "libVorbis__6e3055", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e325b": { name: "libVorbis__6e325b", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e3300": { name: "libVorbis__6e3300", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e37c2": { name: "libVorbis__6e37c2", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e3821": { name: "libVorbis__6e3821", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e3dc6": { name: "libVorbis__6e3dc6", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e3e16": { name: "libVorbis__6e3e16", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e3e38": { name: "libVorbis__6e3e38", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e3ff6": { name: "libVorbis__6e3ff6", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e4025": { name: "libVorbis__6e4025", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e43d4": { name: "libVorbis__6e43d4", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e4431": { name: "libVorbis__6e4431", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e447c": { name: "libVorbis__6e447c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e44ae": { name: "libVorbis__6e44ae", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e44ed": { name: "libVorbis__6e44ed", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e450e": { name: "libVorbis__6e450e", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e453b": { name: "libVorbis__6e453b", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e4568": { name: "libVorbis__6e4568", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e4580": { name: "libVorbis__6e4580", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e4c50": { name: "libVorbis__6e4c50", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e5207": { name: "libVorbis__6e5207", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e52b4": { name: "libVorbis__6e52b4", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e5355": { name: "libVorbis__6e5355", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e542c": { name: "libVorbis__6e542c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e556a": { name: "libVorbis__6e556a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e568a": { name: "libVorbis__6e568a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e5cb0": { name: "libVorbis__6e5cb0", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e5da1": { name: "libVorbis__6e5da1", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e5e5b": { name: "libVorbis__6e5e5b", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e5f87": { name: "libVorbis__6e5f87", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e601c": { name: "libVorbis__6e601c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e60a1": { name: "libVorbis__6e60a1", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e633e": { name: "libVorbis__6e633e", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e6acd": { name: "libVorbis__6e6acd", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e6b7a": { name: "libVorbis__6e6b7a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e6bbd": { name: "libVorbis__6e6bbd", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e6d12": { name: "libVorbis__6e6d12", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e6d7f": { name: "libVorbis__6e6d7f", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e6f3d": { name: "libVorbis__6e6f3d", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e6f79": { name: "libVorbis__6e6f79", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e6fd3": { name: "libVorbis__6e6fd3", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e705c": { name: "libVorbis__6e705c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e70b9": { name: "libVorbis__6e70b9", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e70d8": { name: "libVorbis__6e70d8", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e743f": { name: "libVorbis__6e743f", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e769a": { name: "libVorbis__6e769a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e796b": { name: "libVorbis__6e796b", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e79ae": { name: "libVorbis__6e79ae", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e7a0b": { name: "libVorbis__6e7a0b", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e7b09": { name: "libVorbis__6e7b09", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e7b2f": { name: "libVorbis__6e7b2f", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e7c0c": { name: "libVorbis__6e7c0c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e7d34": { name: "libVorbis__6e7d34", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e7dab": { name: "libVorbis__6e7dab", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e7e32": { name: "libVorbis__6e7e32", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e7fa5": { name: "libVorbis__6e7fa5", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e7fbb": { name: "libVorbis__6e7fbb", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e8183": { name: "libVorbis__6e8183", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e8594": { name: "libVorbis__6e8594", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e902a": { name: "libVorbis__6e902a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e9180": { name: "libVorbis__6e9180", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e931e": { name: "libVorbis__6e931e", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e95b5": { name: "libVorbis__6e95b5", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6e9a16": { name: "libVorbis__6e9a16", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ea39a": { name: "libVorbis__6ea39a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ea502": { name: "libVorbis__6ea502", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ea54c": { name: "libVorbis__6ea54c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ea585": { name: "libVorbis__6ea585", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ea5b9": { name: "libVorbis__6ea5b9", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ea69c": { name: "libVorbis__6ea69c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ea6ad": { name: "libVorbis__6ea6ad", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eab1c": { name: "libVorbis__6eab1c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ead27": { name: "libVorbis__6ead27", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eaded": { name: "libVorbis__6eaded", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eaf44": { name: "libVorbis__6eaf44", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eb20f": { name: "libVorbis__6eb20f", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eb392": { name: "libVorbis__6eb392", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eb51c": { name: "libVorbis__6eb51c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eb5b3": { name: "libVorbis__6eb5b3", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eb5e7": { name: "libVorbis__6eb5e7", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eb77d": { name: "libVorbis__6eb77d", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eb9ee": { name: "libVorbis__6eb9ee", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ebbbe": { name: "libVorbis__6ebbbe", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ebbf7": { name: "libVorbis__6ebbf7", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ebd93": { name: "libVorbis__6ebd93", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ebde9": { name: "libVorbis__6ebde9", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ec1a3": { name: "libVorbis__6ec1a3", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ec39b": { name: "libVorbis__6ec39b", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ec449": { name: "libVorbis__6ec449", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ec4ac": { name: "libVorbis__6ec4ac", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ec63b": { name: "libVorbis__6ec63b", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ec6d9": { name: "libVorbis__6ec6d9", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ec6e5": { name: "libVorbis__6ec6e5", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ec7ef": { name: "libVorbis__6ec7ef", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ec810": { name: "libVorbis__6ec810", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ec81f": { name: "libVorbis__6ec81f", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ec95f": { name: "libVorbis__6ec95f", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ecb28": { name: "libVorbis__6ecb28", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ecb61": { name: "libVorbis__6ecb61", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ed36d": { name: "libVorbis__6ed36d", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ed6c4": { name: "libVorbis__6ed6c4", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ed6e5": { name: "libVorbis__6ed6e5", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ed74f": { name: "libVorbis__6ed74f", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ed75f": { name: "libVorbis__6ed75f", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ed771": { name: "libVorbis__6ed771", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ed84a": { name: "libVorbis__6ed84a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ed9cb": { name: "libVorbis__6ed9cb", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6edb68": { name: "libVorbis__6edb68", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eddb8": { name: "libVorbis__6eddb8", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ede02": { name: "libVorbis__6ede02", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6edf7a": { name: "libVorbis__6edf7a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee0b4": { name: "libVorbis__6ee0b4", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee286": { name: "libVorbis__6ee286", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee468": { name: "libVorbis__6ee468", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee4b5": { name: "libVorbis__6ee4b5", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee505": { name: "libVorbis__6ee505", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee54d": { name: "libVorbis__6ee54d", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee59a": { name: "libVorbis__6ee59a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee5d4": { name: "libVorbis__6ee5d4", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee67e": { name: "libVorbis__6ee67e", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee7ee": { name: "libVorbis__6ee7ee", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee80f": { name: "libVorbis__6ee80f", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee830": { name: "libVorbis__6ee830", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee840": { name: "libVorbis__6ee840", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee84f": { name: "libVorbis__6ee84f", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee9c5": { name: "libVorbis__6ee9c5", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ee9d6": { name: "libVorbis__6ee9d6", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eec1b": { name: "libVorbis__6eec1b", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eede6": { name: "libVorbis__6eede6", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eee2a": { name: "libVorbis__6eee2a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eee50": { name: "libVorbis__6eee50", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eeefd": { name: "libVorbis__6eeefd", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6eef7d": { name: "libVorbis__6eef7d", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ef0a0": { name: "libVorbis__6ef0a0", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ef25a": { name: "libVorbis__6ef25a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ef43c": { name: "libVorbis__6ef43c", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ef456": { name: "libVorbis__6ef456", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ef88f": { name: "libVorbis__6ef88f", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6ef940": { name: "libVorbis__6ef940", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6efdbd": { name: "libVorbis__6efdbd", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f0016": { name: "libVorbis__6f0016", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f0133": { name: "libVorbis__6f0133", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f0151": { name: "libVorbis__6f0151", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f019e": { name: "libVorbis__6f019e", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f026a": { name: "libVorbis__6f026a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f03e3": { name: "libVorbis__6f03e3", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f0413": { name: "libVorbis__6f0413", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f0522": { name: "libVorbis__6f0522", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f0592": { name: "libVorbis__6f0592", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f06e4": { name: "libVorbis__6f06e4", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f072b": { name: "libVorbis__6f072b", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f0767": { name: "libVorbis__6f0767", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f0909": { name: "libVorbis__6f0909", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f0f04": { name: "CRT_fputs", note: "MSVCRT fputs() implementation; reached from a Lua io-lib function. Standard CRT, out of game-RE scope. [lib:CRT]" }
+  "0x6f1c31": { name: "libVorbis__6f1c31", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f1c37": { name: "libVorbis__6f1c37", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f24ac": { name: "libVorbis__6f24ac", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f24fb": { name: "libVorbis__6f24fb", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f2561": { name: "libVorbis__6f2561", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f257f": { name: "libVorbis__6f257f", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f25a6": { name: "libVorbis__6f25a6", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f25d0": { name: "libVorbis__6f25d0", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f2762": { name: "libVorbis__6f2762", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f27cd": { name: "libVorbis__6f27cd", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f2a34": { name: "libVorbis__6f2a34", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f2a4a": { name: "libVorbis__6f2a4a", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f2a61": { name: "libVorbis__6f2a61", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f2a6e": { name: "libVorbis__6f2a6e", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f2b63": { name: "libVorbis__6f2b63", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f2c9b": { name: "libVorbis__6f2c9b", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f2d5f": { name: "libVorbis__6f2d5f", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x6f2d7f": { name: "libVorbis__6f2d7f", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
+  "0x71d2bd": { name: "Diamond_MainWindow_StaticInit", note: "CRT static-init thunk: construct the global MainWindow (window-manager) singleton instance [ui-toolkit]" }
+  "0x71db3c": { name: "LuaConfig_Singleton_atexit", note: "atexit/_onexit thunk that tears down the process-wide LuaConfig singleton (frees the shared Lua state) on shutdown. [lua-config]" }
 
 globals:
   # Campaign 2 (2026-06-13): 19 global/data labels synced from the IDB.
