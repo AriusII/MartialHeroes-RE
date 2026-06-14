@@ -761,3 +761,40 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
 - Remaining: fix the create-preview pose; wire the now-parsing brazier/portal `.xeff` into the cavern;
   implement the `bindlist.txt`/`game.ver` parsers + the server-list/enter-world network structs; the
   3/5-vs-4/1 live-debugger order check; Phase-D IDB annotation. Journal authored by the Top Orchestrator.
+
+## 2026-06-14 — CAMPAIGN 4: opening-intro + login-form RE; parsers/structs implemented; create-pose fixed
+
+- RECOVERY (READONLY static IDA on `doida.exe`; `_dirty/campaign4/login/`):
+  - **OpeningWindow intro:** a STANDALONE `COpeningWindow` scene at engine-state **3 (Opening)**, BEFORE the
+    login form (state 4) — torn down before the LoginWindow ctor (NOT a login phase). A fade machine of
+    **4 phases × 17,500 ms = 70.0 s** (`openning_001..004.dds`, alpha 0→250) + a parallel scroll crawl of
+    `openning_scenario.dds` at 30 u/s to bound ~1843 (~61 s). One looped 2D cue **910061000** (doubles as
+    BGM; distinct from login SFX 861010105). Transition = auto-after-dwell OR skip-on-input
+    (Enter/ESC/Space/skip-button) which persists `[OPENNING] SKIP=1` to the INI (returning players bypass).
+    Crawl text is baked into the art (no message table).
+  - **Login-form widgets (CODE-CONFIRMED ~18-widget table):** atlases `loginwindow.dds` (edit frames) +
+    `login_slice1.dds` (buttons/captions). ID edit src 390,32,102,13 @615,404 action 109 max 16; PW edit
+    src 568,32,102,13 @615,404 action 110 max 12; login-OK button src 456,64,112,39 action 103; notice src
+    456,166,112,39 action 102; save-ID checkbox action 104; server up/down/confirm 106/107/108. **PW
+    masking = one ASCII `*` per char (NOT a round dot).** The quit/종료 tab strip is register-staged
+    (PLAUSIBLE); the prior "widget index 170/171" is SUPERSEDED (global slots, not the field handles →
+    needs-debugger).
+- PROMOTION (REWRITE, firewall PASS): `frontend_scenes.md` §1.0 (opening intro = state 3→4) + §11.2e/§11.6
+  (login widget table + the two distinct intros: standalone opening vs login-window curtain).
+- ENGINEERING (full solution build 0/0, ~1409 tests green):
+  - **Parsers (layer 03):** `BindlistParser` (skeleton registry — ordered list + O(1) `IsRegistered`) +
+    `GameVerParser` (7×u32, `EnterGameVersionToken = 10×field5+9`); +23 tests (460 total).
+  - **Network.Protocol (layer 02):** `CmsgEnterGameRequest` (1/9, 40B), `SmsgEnterGameAck` (3/5, 44B),
+    and the lobby server-list structs (`LobbyFrameWrapper` 8B, `LobbyServerEntry` 8B,
+    **`LobbyChannelEndpointToken`** 30B — renamed from `LobbyChannelEndpoint` to avoid colliding with the
+    established `Network.Abstractions.Lobby.LobbyChannelEndpoint` record) + a zero-alloc `ref struct`
+    reader; +10 tests (102 total). UNVERIFIED 1/9 intra-buffer offsets left as `// TODO needs-capture`.
+  - **Godot (layer 05):** the create-preview "lying 90°" defect FIXED — root cause was the create-preview
+    CAMERA aiming at the recentre OFFSET (not the mesh AABB), pushing the upright actor out of frustum;
+    `CharCreatePreview3D.FrameCameraOnActor` now frames the actor's real world-AABB. Slot-row confirmed
+    upright. **Build-break fixes:** the duplicate `LobbyChannelEndpoint` (rename above) + `XeffSubEffect.SubId`
+    made non-`required` (it broke `Assets.Mapping.Tests`; SubId defaults 0 for block[0]).
+- Residual DEBT: the create form defaults to UI class 0 → internal class 4 (`g202140001`), whose ANIMATED
+  idle shatters (separate per-mesh skinning-convention debt; its rest pose is clean and class 1 animates
+  fine) — needs the unrecovered skinning convention. Plus: wire the brazier/portal `.xeff`; the
+  3/5-vs-4/1 live order; Phase-D IDB annotation. Journal authored by the Top Orchestrator (main session).

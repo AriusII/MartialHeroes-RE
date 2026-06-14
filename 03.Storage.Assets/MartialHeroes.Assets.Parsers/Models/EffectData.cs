@@ -25,7 +25,7 @@ public sealed class XeffSubEffect
     /// Always 0 for block 0 (no prefix).
     /// spec: Docs/RE/formats/effects.md §A.4 — sub_id u32 @ prefix+0 (blocks 1..N-1 only): CONFIRMED.
     /// </summary>
-    public required uint SubId { get; init; }
+    public uint SubId { get; init; }
 
     /// <summary>
     /// Number of entries in this sub-effect (drives name table, curve passes, and keyframe array).

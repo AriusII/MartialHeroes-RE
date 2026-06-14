@@ -76,7 +76,10 @@ public sealed partial class CharCreatePreview3D : Control
     // Wrapper scale is applied, so effective actor height = scale * unscaled_height ≈ 3 units.
     // Visible height at distance D with FOV=50°: 2*D*tan(25°) ≈ 0.932*D.
     // To frame 3-unit character with headroom: D = 3.5 / 0.932 ≈ 3.75 → use 8 for more margin.
-    private const float OrbitDistance = 35.0f; // TUNABLE — calibrated to frame character at scale=3
+    // Minimum camera distance floor. The real framing distance is derived per-build from the actor's
+    // scaled height in FrameCameraOnActor (height × 1.6), so this is only a lower bound for tiny rigs.
+    // spec: Docs/RE/specs/frontend_scenes.md §4.2 — front-on full-body framing. CODE-CONFIRMED intent.
+    private const float OrbitDistance = 6.0f; // TUNABLE floor — height-based framing dominates
 
     // Look-at Y (unused now — camera is auto-aimed in BuildActorInWrapper).
     private const float LookAtY = 1.5f; // TUNABLE (kept for initial position only)
@@ -353,50 +356,29 @@ public sealed partial class CharCreatePreview3D : Control
             {
                 // spec: frontend_scenes.md §4.2 — "scale 3 (matching slot-row scale)". CODE-CONFIRMED.
                 //
-                // SkinnedCharacterBuilder.RecentreRoot sets actor.Position = (xShift, yShift, zShift)
-                // to offset the mesh vertices so that the AABB's bottom is at Y=0 in local space.
-                // However, the AABB position is in local coordinates BEFORE scaling.
+                // SkinnedCharacterBuilder applies the SAME upright stand-up pivot (DeriveStandUpBasis)
+                // and the SAME RecentreRoot used by the slot row in CharSelectScene3D — so the actor
+                // already stands VERTICALLY (head → +Y) with its FEET at local Y≈0 and its body
+                // CENTRED on local X≈0 / Z≈0. The mesh therefore renders near the wrapper ORIGIN,
+                // NOT at actor.Position (which is only the recentre OFFSET that produced that layout).
                 //
-                // Strategy: apply scale to the actorWrapper instead of the actor itself, so that
-                // actor.Position remains in world-unit coordinates and we can aim the camera at it.
-                // OR: use the actor's position to calculate the LookAt target.
-                //
-                // We use the wrapper-scale approach: set _actorWrapper.Scale = (3,3,3) and keep
-                // actor at its original position. The effective world position of the mesh is then
-                // scale * actor.Position. We aim the camera at that scaled position.
+                // ROOT-CAUSE FIX: the previous code aimed the camera at actor.Position * scale — i.e.
+                // at the recentre offset, far from where the mesh actually is — so the upright actor
+                // fell outside the frame and only a skewed sliver was visible (read as "lying ~90°").
+                // We now frame the camera on the actor's ACTUAL rendered AABB (its recentred,
+                // pivot-stood mesh), exactly mirroring the slot row which looks at the real mesh
+                // location (its row pivot), not at any recentre offset.
+                // spec: frontend_scenes.md §3.3.1 / §4.2 — preview reuses the slot stand-up + framing.
                 _actorWrapper.Scale = Vector3.One * CreatePreviewScale;
-                // actor.Position is the raw un-scaled recentre offset (feet at Y=0 in local).
-                // After wrapper scaling, the world position of the actor's origin = CreatePreviewScale * actor.Position.
-                var scaledActorPos = actor.Position * CreatePreviewScale;
-                float lookAtX = scaledActorPos.X;
-                float lookAtY = scaledActorPos.Y + CreatePreviewScale * 0.5f; // mid-torso
-                float lookAtZ = scaledActorPos.Z;
-
-                // Scale the lookAt Y to account for full character height (not just 0.5×scale).
-                // The SKN meshes have AABB starting at Y = -actor.Position.Y (raw offset).
-                // After wrapper scale, Y_feet ≈ 0, Y_head ≈ scale * aabb_height.
-                // Use a larger lookAt multiplier to aim at true mid-body.
-                lookAtY = scaledActorPos.Y + CreatePreviewScale * 2.0f; // aim higher (2x scale for taller meshes)
-
-                GD.Print($"[CharCreatePreview3D] Wrapper scaled {CreatePreviewScale}x. Actor localPos={actor.Position}. Scaled world={scaledActorPos}. Camera LookAt=({lookAtX:F1},{lookAtY:F1},{lookAtZ:F1}).");
                 _actorWrapper.AddChild(actor);
 
-                // Re-aim the camera at the mesh midpoint. Place camera at lookAt + (0, 0, OrbitDistance).
-                if (_camera is not null && IsInstanceValid(_camera))
-                {
-                    var target = new Vector3(lookAtX, lookAtY, lookAtZ);
-                    var eye = new Vector3(lookAtX, lookAtY + CreatePreviewScale, lookAtZ + OrbitDistance);
-                    _camera.Position = eye;
-                    Callable.From(() =>
-                    {
-                        if (_camera is not null && IsInstanceValid(_camera))
-                            _camera.LookAt(target, Vector3.Up);
-                    }).CallDeferred();
-                    GD.Print($"[CharCreatePreview3D] Camera eye={eye}; lookAt={target}.");
-                }
+                // Frame the camera once the actor's transform is settled in-tree, using its real
+                // global AABB (centre + height). The actor is upright, so its tallest extent is Y.
+                Callable.From(FrameCameraOnActor).CallDeferred();
 
                 ApplyTurntableRotation();
-                GD.Print($"[CharCreatePreview3D] Actor built for class={InternalClassId} scale={CreatePreviewScale}. " +
+                GD.Print($"[CharCreatePreview3D] Actor built for class={InternalClassId} scale={CreatePreviewScale}, " +
+                         $"localRecentreOffset={actor.Position} (camera frames the recentred mesh, not this offset). " +
                          "spec: frontend_scenes.md §4.2 CODE-CONFIRMED.");
             }
             else
@@ -417,9 +399,75 @@ public sealed partial class CharCreatePreview3D : Control
     private void ReplaceActorInViewport()
     {
         // Called on class change — rebuild the actor inside the existing wrapper.
+        // BuildActorInWrapper already defers FrameCameraOnActor, which re-frames the camera on the
+        // new (possibly differently-proportioned) class mesh. No stale fixed look-at re-apply here.
         BuildActorInWrapper();
-        // Re-apply camera look-at after rebuild.
-        Callable.From(ApplyCameraLookAt).CallDeferred();
+    }
+
+    /// <summary>
+    /// Aims the camera at the actor's ACTUAL rendered location, computed from its in-tree global
+    /// AABB (centre + height). The actor is built upright by SkinnedCharacterBuilder (the same
+    /// stand-up pivot the slot row uses) and recentred so its feet sit at the wrapper origin, so
+    /// the correct look-at is the AABB centre — NOT the recentre offset that the old code used.
+    ///
+    /// <para>Deferred so the wrapper scale and the actor's recentre <c>Position</c> are settled in
+    /// the tree before the global AABB is read.</para>
+    ///
+    /// spec: Docs/RE/specs/frontend_scenes.md §4.2 — front-on framing, scale 75 (here scale 3),
+    ///       camera placed +OrbitDistance toward the viewer; up = +Y so the actor stands vertically.
+    /// </summary>
+    private void FrameCameraOnActor()
+    {
+        if (_camera is null || !IsInstanceValid(_camera) || _actorWrapper is null) return;
+
+        Aabb world = ComputeWorldAabb(_actorWrapper);
+        Vector3 centre = world.Position + world.Size * 0.5f;
+
+        // Distance to comfortably frame the actor's height in the FOV, with headroom.
+        float height = Mathf.Max(world.Size.Y, 0.001f);
+        float dist = Mathf.Max(OrbitDistance, height * 1.6f);
+
+        // Front-on eye: same X/Y as the look-at centre, pulled +Z toward the viewer.
+        // Up = +Y keeps the upright (head→+Y) actor standing vertically on screen.
+        var eye = new Vector3(centre.X, centre.Y, centre.Z + dist);
+        _camera.Position = eye;
+        _camera.LookAt(centre, Vector3.Up);
+
+        GD.Print($"[CharCreatePreview3D] Camera framed: actor AABB centre={centre} size={world.Size} " +
+                 $"eye={eye} dist={dist:F1}. spec: frontend_scenes.md §4.2 CODE-CONFIRMED (front-on, up=+Y).");
+    }
+
+    /// <summary>
+    /// Walks a node subtree and unions the GLOBAL AABBs of every <see cref="VisualInstance3D"/>
+    /// (e.g. the LBS <see cref="MeshInstance3D"/>). Returns an empty AABB when none are found.
+    /// Global (not local) so the wrapper scale and the actor's recentre offset are included — this
+    /// is the actor's true rendered extent, which is what the camera must frame.
+    /// </summary>
+    private static Aabb ComputeWorldAabb(Node3D root)
+    {
+        var result = new Aabb();
+        bool any = false;
+        var stack = new Stack<Node>();
+        stack.Push(root);
+        while (stack.Count > 0)
+        {
+            Node n = stack.Pop();
+            if (n is VisualInstance3D vis && vis.IsInsideTree())
+            {
+                Aabb local = vis.GetAabb();
+                if (local.Size != Vector3.Zero)
+                {
+                    Aabb global = vis.GlobalTransform * local;
+                    result = any ? result.Merge(global) : global;
+                    any = true;
+                }
+            }
+
+            foreach (Node child in n.GetChildren())
+                stack.Push(child);
+        }
+
+        return result;
     }
 
     private static Node3D? TryBuildActorForClass(RealClientAssets assets, int internalClass)

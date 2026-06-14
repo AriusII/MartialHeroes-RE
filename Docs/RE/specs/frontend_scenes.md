@@ -83,6 +83,124 @@ The login window carries **two independent internal counters** that must not be 
   §1.5. (Both are *below* the engine state and are never visible as an engine-state value — a point
   already reconciled in `client_runtime.md` §7.1 and `ui_system.md` §6.)
 
+## 1.0 The opening intro — a standalone scene *before* the login form (CODE-CONFIRMED)
+
+> **Front-end engine-state model: 3 (Opening) → 4 (next front-end form).** The opening crawl is **not
+> a phase of the login window.** It is its own dedicated **opening-window scene** that the top-level
+> engine-state ladder constructs and runs at **engine state 3 (Opening)**, in its own main loop, and
+> **tears down completely before the next interactive form's window is constructed at state 4.** The
+> two windows never coexist. (Engine-state numbering is owned by `client_runtime.md` §7; this spec
+> only records that the opening occupies state 3 and the interactive form follows at state 4.)
+>
+> This **supersedes** the older §11.6 reading that folded the opening into login sub-states 1–5 and
+> attributed the intro SFX to it. The red-ribbon / banner-pan motion in login sub-states 1–5 (§1.5)
+> is a **separate** intro animation belonging to the login window's own curtain; the four
+> `openning_001..004` backdrops and the `openning_scenario` crawl are owned **exclusively** by the
+> opening-window scene described here, and the opening-window cue is a **different** sound id from the
+> login curtain SFX (§1.0.4 vs §1.5 sub-state 1).
+
+### 1.0.0 Launch gate — the opening can be skipped at boot (CODE-CONFIRMED)
+
+Before choosing the entry state, the engine reads an integer option from the client options INI,
+section **`[OPENNING]`**, key **`SKIP`**:
+
+- **`SKIP != 0`** → jump straight to engine state **4** (the interactive form); the opening is not run.
+- **`SKIP == 0`** → enter engine state **3** and run the opening scene below.
+
+So a returning player who has already watched or skipped the intro never sees it again. The value is
+written by the skip action (§1.0.5).
+
+### 1.0.1 What the opening scene composites (CODE-CONFIRMED)
+
+The opening scene draws **two overlaid layers** plus one skip control, all from `data/ui/`:
+
+- a **4-frame cross-fading backdrop** — `openning_001.dds`, `openning_002.dds`, `openning_003.dds`,
+  `openning_004.dds`, held in a 4-entry frame array and selected one-at-a-time by the fade phase
+  (§1.0.2);
+- a **vertical scrolling crawl** — `openning_scenario.dds`, a tall strip drawn as a quad centred
+  horizontally (≈ screen-width/2 − 512) and scrolled upward by the scroll machine (§1.0.3);
+- one **skip button** (action id **100**) placed near the lower-right of the canvas, sourced from
+  `data/ui/mainwindow.dds`.
+
+A per-frame callback drives the scene each frame: it runs the update step (which advances both the
+fade machine and the scroll machine), draws the scenario panel (current backdrop frame + alpha +
+scroll quad), then the standard view / input / texture-flush passes.
+
+### 1.0.2 Fade machine — the dominant ~70 s dwell (CODE-CONFIRMED)
+
+The backdrop is governed by a 4-phase fade machine, ticked from the per-frame update:
+
+| Quantity | Value |
+|---|---|
+| Phases | **4** — phase index runs **1 → 2 → 3 → 4** |
+| Backdrop per phase | phase **N** shows `openning_00N.dds` (frame array indexed by the phase) |
+| Hold per phase | **17 500 ms** (a phase advances when `phase_start + 17 500 ms` is reached) |
+| Per-phase alpha ramp | a per-phase alpha counter ramps **0 → 250** to fade the current frame in/out, one step per global pacing pulse |
+| **Total dwell** | **4 × 17 500 ms = 70 000 ms = 70.0 s** |
+
+The fade machine reaching the end of phase 4 is what drives the scene toward teardown and the
+auto-transition (§1.0.5). The 70.0 s figure is exact (4 × 17.5 s).
+
+### 1.0.3 Scroll crawl — runs alongside (CODE-CONFIRMED rate/bound; seconds arithmetic)
+
+The `openning_scenario` crawl is an independent machine, also ticked every frame:
+
+- a one-time **1 000 ms** start delay before scrolling begins;
+- the scroll position advances at **30.0 units per second** (wall-clock based);
+- it stops at a bound of **1843.0 units**, where a "scroll complete" flag is set;
+- after completion, two input events (a back / forward nudge pair) allow manual nudging of the scroll
+  position, clamped to roughly **30 … 1833**.
+
+Derived run length ≈ **1843 / 30 ≈ 61 s** (plus the 1 s start delay). Because this is shorter than the
+70 s fade dwell, the crawl finishes first and idles (or is hand-nudged) until the fade machine ends
+the scene. The 30 u/s rate and 1843 bound are CODE-CONFIRMED; the human-readable seconds are
+arithmetic over a wall-clock timer (robust, but reported as derived).
+
+### 1.0.4 Audio cue (CODE-CONFIRMED)
+
+The opening scene starts **exactly one sound** at build time: a **looped 2D cue, id 910061000**, loaded
+from `data/sound/2d/`. Being looped it doubles as the opening BGM; no separate streamed-music start
+exists in the scene. This id is **distinct** from the login-curtain intro SFX **861010105** (§1.5
+sub-state 1), which belongs to the separate login window — there is no evidence the opening fires
+861010105.
+
+### 1.0.5 Transition to the next form — auto-after-dwell or skip-on-input (CODE-CONFIRMED skip; auto-edge PLAUSIBLE)
+
+- **Auto (completion).** The scene runs its own engine main loop; the loop ends when the engine
+  run-flag is cleared, after which the engine tears down the opening window and advances engine
+  state **3 → 4** (the interactive form). The fade machine completing phase 4 (after the ~70 s dwell)
+  drives this teardown — so the **default behaviour is automatic transition after ~70 s.** The
+  loop-exit and teardown mechanisms are CODE-CONFIRMED; the precise edge from "phase-4 end" into the
+  run-flag clear runs through scene/scroll completion callbacks not fully unwound in static analysis,
+  so that immediate trigger edge is **PLAUSIBLE** (Open question 14).
+- **Skip-on-input (CODE-CONFIRMED).** The opening's input handler short-circuits the dwell:
+
+  | Input | Condition | Action |
+  |---|---|---|
+  | Keyboard | key code **10 (Enter) / 27 (ESC) / 32 (Space)** | persist skip + stop scene |
+  | Mouse | left-click on the **skip button** (action id **100**) | persist skip + stop scene |
+  | Scroll / arrow | — | manual nudge of the crawl position (§1.0.3) |
+
+  The "persist skip + stop" action writes **`[OPENNING] SKIP = 1`** into the client options INI, sets
+  an internal skip latch, and issues stop calls on the scroll/scene objects to end playback. So
+  pressing **Enter / ESC / Space**, or clicking the skip button, **both immediately ends the opening
+  and records SKIP = 1** so the intro is bypassed on the next launch (§1.0.0).
+
+### 1.0.6 Crawl content is baked art — no message table (CODE-CONFIRMED)
+
+The opening draws **only pre-rendered images**: the four cross-fade backdrops selected by the fade
+phase, and the single scrolling texture moved by the scroll position. There is **no message-catalogue
+lookup, no per-line text fetch, no message-id indexing, and no font-render loop** anywhere in the
+scene's build / update / draw functions. Any "scrolling text" the player sees is **baked into
+`openning_scenario.dds`** itself. A faithful rebuild must therefore render the crawl as image art and
+must **not** wire it to `msg.xdb`. (A dynamic text crawl would be a new addition, not a fidelity match.)
+
+> **Godot-fidelity contract.** Reproduce the opening as a standalone scene that runs before the
+> login form: four full-screen backdrops cross-fading at **17.5 s each (70 s total, phase N →
+> `openning_00N`)**, a vertical scroll of `openning_scenario.dds` at **30 u/s to bound 1843 (~61 s)**,
+> a single looped 2D BGM **910061000**, a skip on **Enter / ESC / Space / skip-button (action 100)**,
+> and a persisted "seen intro" flag (`[OPENNING] SKIP=1`) that is checked at boot to bypass the intro.
+
 ## 1.1 Widget action dispatch — how a click reaches behaviour (CODE-CONFIRMED)
 
 Each interactive widget is registered with a small **numeric action id** when it is parented into
@@ -1676,38 +1794,74 @@ and generic-error dialogs reuse the same rect (see section 11.2f for the trailin
 
 ### 11.2e Bottom login form (the ID/PW box) - core fidelity target
 
+> **Action-id correction (CODE-CONFIRMED, supersedes the earlier confirm/notice swap).** The
+> login-form action handler dispatches **103 = login OK / confirm** (submit the ID+PW, run the version
+> gate then advance to credential validation, §1.4) and **102 = notice / agreement** (toggle the
+> notice/agreement panel). The two gold 3-state buttons below carry these ids exactly: the
+> `login_slice1.dds` button at **src (456, 64, 112, 39)** is the **login-OK** (action **103**), and the
+> button at **src (456, 166, 112, 39)** is the **notice / agreement** (action **102**). The login-OK
+> button, the two edit fields (109/110), the save-ID checkbox (104) and the server-select trio
+> (106/107/108) are the load-bearing form controls.
+
 | Role | Atlas | Rect (X,Y,W,H) | Src (U,V) | Kind | States / notes | Action |
 |---|---|---|---|---|---|---|
 | Bottom login-bar panel | A | 0, 326*H/768, 1024,442 | 0,582 | panel | Y scales with screen height | - |
-| **Confirm button** (gold) | A | 456,166,112,39 | 154,398 / 378,398 / 378,398 | 3-state button | login submit; word baked into art | **102** |
-| Confirm-button face plate | A | 265,0,494,113 | 0,469 | image | - | - |
-| Inner form box (layout only) | (none) | 0,0,1024,100 | - | panel | invisible | - |
+| Login background plate image | A | 0,469,494,113 | 265,0 | image | the plate the ID/PW row sits on | - |
+| **Login / confirm button** (gold) | A | 456,64,112,39 (on-screen y=398) | 266,398 / 490,398 / 490,398 | 3-state button | submit ID+PW (version gate → validation, §1.4); word baked into art | **103** |
+| **Notice / agreement button** (gold) | A | 456,166,112,39 (on-screen y=398) | 154,398 / 378,398 / 378,398 | 3-state button | toggle notice / agreement panel; word baked into art | **102** |
+| Inner form box (layout only) | (none) | 0,0,1024,100 | - | panel | invisible container | - |
 | Account-label caption art | A | 340,30,38,13 | 0,398 | image | **baked art** | - |
 | Password-label caption art | A | 507,30,49,13 | 38,398 | image | **baked art** | - |
 | Small decoration plate | A | 619,86,67,13 | 87,398 | image | **baked art** | - |
-| **ID input field** | A | 390,32,102,13 | 615,404 | text box | max length 16 (UI cap; section 1.3) | **109** |
-| **Password input field** | A | 568,32,102,13 | 615,404 | text box | max length 12, masked (password filter) | **110** |
-| **Save-ID checkbox** | A | 694,86,13,13 | 717,398 (off) / 730,398 (on) | 2-state checkbox | pre-checked from saved-id (section 1.6) | **104** |
-| Secondary bottom button (the login quit route, builder button #63) | A | 456,64,112,39 | 266,398,112,39 / 490,398 / 490,398 | 3-state button | advances toward the shared quit-confirm gate (see the quit-verdict note below); gates the shared ExitPanel `C` (318,647,340,190). Baked-glyph identity UNVERIFIED | **103** |
+| **ID input field** | B | 390,32,102,13 | 615,404 | text box | plain text; max length 16 (UI cap, §1.3) | **109** |
+| **Password input field** (masked) | B | 568,32,102,13 | 615,404 | text box | masked, max length 12; mask glyph = ASCII `*` (§11.2e mask note) | **110** |
+| **Save-ID checkbox** | A | 694,86,13,13 | 717,398 (off) / 730,398 (on) | 3-state checkbox | pre-checked from saved-id (§1.6) | **104** |
+| Server-select up arrow | B | 467,86,13,10 | 483,490 | button | scroll/select server up | **106** |
+| Server-select down arrow | B | 467,455,13,10 | 505,490 | button | scroll/select server down | **107** |
+| Server-select confirm dot | B | 469,98,9,9 | 496,490 | button | commit server selection | **108** |
+
+> **Atlas note for the edit fields.** The two edit-field frames are sub-rects of **`loginwindow.dds`**
+> (the primary form chrome atlas — ID frame at src `(390,32)`, PW frame at src `(568,32)`), while the
+> buttons, captions and the background plate are sub-rects of **`login_slice1.dds`**. The earlier
+> table sourced the edit fields from `login_slice1.dds`; the chrome atlas `loginwindow.dds` is the
+> CODE-CONFIRMED source for the `(390,32)` / `(568,32)` edit-field frames.
+
+> **Password masking — one ASCII asterisk per character (CODE-CONFIRMED, corrects "round dot").** The
+> password textbox renders **one ASCII asterisk `*` glyph per entered character** (a fixed-pitch run
+> over the live character count), **not** a round bullet dot. The ID field is plain (unmasked). A
+> faithful rebuild must mask the password as `*`-per-character. UI max lengths are **ID = 16**,
+> **PW = 12** (legacy editbox caps; the protocol caps are owned by `login_flow.md`, §1.3).
 
 > The account / password / confirm / save-id Korean words are **baked into `login_slice1.dds`** (the
-> caption-art plates and the confirm-button face) - they are **not** message-catalogue strings. Only
+> caption-art plates and the gold button faces) - they are **not** message-catalogue strings. Only
 > the server-row labels (4001..4022) and the dialog bodies (4023/4024) are runtime text.
+
+> **The field handles are object field offsets, not "widget index 170/171" (CODE-CONFIRMED;
+> supersedes the prior index note).** An earlier reading referred to the ID/PW edit boxes by global
+> widget-array slots "≈170/171". Those are **global widget-manager registration slots** (registration-
+> order dependent), **not** the field handles on the login-window object. The authoritative handles are
+> the login-window **object field offsets** for the two edit boxes; the global-array indices are
+> **needs-debugger** to confirm and must not be used as the field identity. The small-string-optimized
+> inline text buffer inside each textbox (chars stored inline below a small length, else via a pointer)
+> is confirmed.
 
 > **Login quit - there is NO dedicated bottom-bar quit sprite (CORRECTS any earlier assumption).**
 > The login scene exposes two quit routes, neither of which is a stand-alone "quit" push-button face
 > on the bottom bar:
-> 1. **Keyboard accelerator.** A keyboard activation (the legacy input dispatcher's `'e'` accelerator)
->    triggers an immediate engine shutdown. No widget feeds this path - it is keyboard-only.
-> 2. **Visible route via builder button #63** (the *Secondary bottom button* row above: `A`
->    src `266,398,112x39`, on-screen `456,64,112,39`). Activating it advances the login flow toward
->    the quit-confirm gate, whose modal box is the **shared ExitPanel** frame - `InventWindow.dds`
->    (`C`) source `(318,647) 340x190` drawn at on-screen `342,289,340,190` (the same notice/error/
->    quit frame, section 11.2d / 11.2f). The ExitPanel is a dialog *panel*, not a button.
-> Any earlier note implying a dedicated bottom-bar quit button sprite is superseded: the quit affordance
-> is (keyboard) + (button #63 -> shared ExitPanel). **UNVERIFIED:** the baked label glyph on button #63
-> art (`login_slice1.dds` 266,398,112x39) - whether it reads the quit word or a register / find-password
-> caption - needs a texture peek of `login_slice1.dds`; flag for the VFS/texture lane.
+> 1. **Keyboard accelerator.** A keyboard activation triggers an immediate engine shutdown. No widget
+>    feeds this path - it is keyboard-only.
+> 2. **Visible route via a strip button** that advances the login flow toward the quit-confirm gate,
+>    whose modal box is the **shared dialog frame** - `InventWindow.dds` (`C`) source `(318,647) 340x190`
+>    drawn at on-screen `342,289,340,190` (the same notice/error/quit frame, §11.2d / §11.2f). The
+>    quit-confirm popup is a dialog *panel*, not a button.
+> **The quit tab is register-staged — PLAUSIBLE.** The top server-tab / option strip builds its
+> buttons in a loop with a **register-accumulated x position and a computed action id** (no single
+> literal per button). The strip button whose computed id resolves to the click handler's **quit case
+> (209 / 220)** is the quit tab, but **which loop index** is the quit slot, and its exact source / screen
+> rect, are **register-staged → PLAUSIBLE / needs-debugger** (breakpoint the click handler against the
+> live client to pin the quit slot). The tab-button rects follow the pattern `(13 + 47·n, 66, 47, 18)`
+> with hover/pressed at the `985`-row sprite band.
+
 
 ### 11.2f Trailing controls + quit/error dialogs
 
@@ -1925,23 +2079,40 @@ SFX **920100200** (kind-0 music slot, §3.8.1), which is also the enter-world cu
 > inline-source cells in the info region are **number-glyph placeholders**, not class icons. A 2D
 > class badge keyed by a class index is **UNVERIFIED / absent** in this builder (Open question 11).
 
-## 11.6 Intro / opening sequence (CODE-CONFIRMED art; sequencing per section 1.5)
+## 11.6 Intro / opening sequence (CODE-CONFIRMED art; sequencing per §1.0 and §1.5)
 
-Before the login form (login flow sub-states 1-5), the engine plays a fullscreen slideshow and a
-banner-pan animation:
+> **Two distinct intros — do not conflate them (CODE-CONFIRMED).** There are **two** separate intro
+> animations in the front-end, owned by different windows:
+> 1. **The standalone opening scene (engine state 3)** — the `openning_001..004` cross-fade + the
+>    `openning_scenario` crawl. This runs **before** the login form's window exists and is fully owned
+>    by **§1.0** (4 phases × 17.5 s = 70 s dwell; crawl 30 u/s to 1843; looped 2D BGM **910061000**;
+>    skip on Enter/ESC/Space/skip-button id 100; persists `[OPENNING] SKIP=1`).
+> 2. **The login window's own curtain (login sub-states 1–5)** — a banner-pan / letterbox-curtain
+>    reposition animation belonging to the login window, with the login-enter SFX **861010105** fired
+>    at the 1→2 edge. This is **not** the opening scene and does **not** play `openning_*` art.
 
-- **Slides:** four 1024x768 opening frames (`data/ui/openning_001.dds`..`004.dds`) plus the tall
-  1024x2048 scenario strip (`data/ui/openning_scenario.dds`, scrolled vertically).
+**Standalone opening scene art (state 3, owned by §1.0):**
+
+- **Backdrops:** four 1024×768 opening frames (`data/ui/openning_001.dds`..`004.dds`), one per fade
+  phase (phase N → `openning_00N`), 17.5 s each = 70 s total.
+- **Crawl:** the tall `data/ui/openning_scenario.dds` strip, scrolled vertically at 30 u/s to bound
+  1843 (~61 s), centred horizontally.
+- **Skip control:** one skip button (action id **100**, from `data/ui/mainwindow.dds`).
+- **Audio:** one looped 2D cue **910061000** from `data/sound/2d/` (doubles as the opening BGM).
+
+**Login window curtain art (login sub-states 1–5, owned by §1.5):**
+
 - **Banner pan:** two banner panels animate into place (their Y advances from off-canvas to a settled
-  position) - pure procedural positional animation, no external asset.
-- **Intro cue:** the login-enter / intro effect id **861010105** fires at the intro sub-state
-  (SFX/VFX; resolves to `data/sound/2d/<id>.ogg` and/or the effect catalogue - section 9 /
-  `sound_runtime.md`).
+  position) — pure procedural positional animation, no external asset.
+- **Login-enter cue:** SFX **861010105** fires at the intro sub-state (resolves to `data/sound/2d/`
+  per `sound_runtime.md` / §9). This cue belongs to the login curtain, **not** to the opening scene.
 - **Loading transition:** on the credential-submit join (sub-state 40), transition effect ids
   **30000 / 10001** fire (fade into world-load).
 
-> The exact slideshow timing/sequence is owned by the section 1.5 sub-state machine (states 1-5);
-> section 11.6 records only which art each step composites.
+> The standalone opening's timing/skip/transition is owned by **§1.0** (engine state 3 → 4); the login
+> curtain's banner-pan timing is owned by the **§1.5** sub-state machine (states 1–5). §11.6 records
+> only which art each step composites.
+
 
 ## 11.7 Layout known-unknowns (carried for the engineer)
 

@@ -114,9 +114,9 @@ public sealed class LoginSelectFlowLayoutTests
     public void CmsgEnterGameRequest_field_offsets()
     {
         Assert.Equal(0x00, (int)Marshal.OffsetOf<CmsgEnterGameRequest>(nameof(CmsgEnterGameRequest.SlotIndex)));
-        Assert.Equal(0x01, (int)Marshal.OffsetOf<CmsgEnterGameRequest>(nameof(CmsgEnterGameRequest.VersionBlob)));
+        Assert.Equal(0x01, (int)Marshal.OffsetOf<CmsgEnterGameRequest>(nameof(CmsgEnterGameRequest.SessionToken)));
         Assert.Equal(0x22, (int)Marshal.OffsetOf<CmsgEnterGameRequest>(nameof(CmsgEnterGameRequest.Pad)));
-        Assert.Equal(0x24, (int)Marshal.OffsetOf<CmsgEnterGameRequest>(nameof(CmsgEnterGameRequest.VersionCheck)));
+        Assert.Equal(0x24, (int)Marshal.OffsetOf<CmsgEnterGameRequest>(nameof(CmsgEnterGameRequest.VersionToken)));
     }
 
     [Fact] // spec: Docs/RE/packets/cmsg_char_rename.yaml (slot @0 + 17-byte name @1)
@@ -153,22 +153,22 @@ public sealed class LoginSelectFlowLayoutTests
     {
         Span<byte> body = stackalloc byte[CmsgEnterGameRequest.WireSize];
         body[0x00] = 4; // SlotIndex
-        // "v1.2.3\0" ASCII into the 33-byte version blob; rest stays zero.
+        // "v1.2.3\0" ASCII into the 33-byte session token; rest stays zero.
         body[0x01] = (byte)'v';
         body[0x02] = (byte)'1';
         body[0x03] = (byte)'.';
         body[0x04] = (byte)'2';
         // Pad @0x22..0x23 stays zero.
-        BinaryPrimitives.WriteUInt32LittleEndian(body[0x24..], 0xABCD1234u); // VersionCheck
+        BinaryPrimitives.WriteUInt32LittleEndian(body[0x24..], 0xABCD1234u); // VersionToken
 
         ref readonly CmsgEnterGameRequest p = ref MemoryMarshal.AsRef<CmsgEnterGameRequest>(body);
         Assert.Equal((byte)4, p.SlotIndex);
-        Assert.Equal((byte)'v', p.VersionBlob[0]);
-        Assert.Equal((byte)'1', p.VersionBlob[1]);
-        Assert.Equal((byte)0, p.VersionBlob[32]); // last blob byte stays zero
+        Assert.Equal((byte)'v', p.SessionToken[0]);
+        Assert.Equal((byte)'1', p.SessionToken[1]);
+        Assert.Equal((byte)0, p.SessionToken[32]); // last token byte stays zero
         Assert.Equal((byte)0, p.Pad[0]);
         Assert.Equal((byte)0, p.Pad[1]);
-        Assert.Equal(0xABCD1234u, p.VersionCheck);
+        Assert.Equal(0xABCD1234u, p.VersionToken);
     }
 
     [Fact] // spec: Docs/RE/packets/cmsg_char_rename.yaml
