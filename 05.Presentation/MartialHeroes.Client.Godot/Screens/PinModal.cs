@@ -219,12 +219,11 @@ public sealed partial class PinModal : Control
         }
 
         // PIN masked display — shows "****" as the user types.
-        // The label position is approximate (no exact coord in spec for the display line).
-        // PLAUSIBLE: centred near the top of the form area.
+        // Panel-local (81, 138, 150, 22). spec §11.3 "Masked-PIN echo label … (81,138,150,22)". CODE-CONFIRMED.
         _pinDisplay = WidgetFactory.MakeLabel("____", 20, new Color(0.95f, 0.90f, 0.55f));
         _pinDisplay.Name = "PinDisplay";
-        _pinDisplay.Position = new Vector2(100, 90);
-        _pinDisplay.Size = new Vector2(130, 30);
+        _pinDisplay.Position = new Vector2(81, 138);   // spec §11.3. CODE-CONFIRMED.
+        _pinDisplay.Size = new Vector2(150, 22);        // spec §11.3. CODE-CONFIRMED.
         _pinDisplay.HorizontalAlignment = HorizontalAlignment.Center;
         panel.AddChild(_pinDisplay);
 
@@ -283,23 +282,26 @@ public sealed partial class PinModal : Control
             for (int d = 0; d < 10; d++)
             {
                 // Digit d at position p.
-                // Glyph row in password.dds: d * 52. Three state columns: N=560, H=664, P=612.
-                // spec §11.3b. CODE-CONFIRMED.
-                int srcY = d * LoginLayout.PinDigitRowHeight;
+                // CORRECTED per spec §11.3b: digit d varies along U/X, state varies along V/Y.
+                // srcU = d*52 (X column = digit index * tile width).
+                // srcV = 560 (normal) / 612 (pressed) / 664 (hover) — the V/Y axis is the state axis.
+                // "digit d's normal-state glyph is password.dds source rect (d*52, 560, 52, 52)"
+                // spec §11.3b. CODE-CONFIRMED. A previous revision had the axes swapped; corrected here.
+                int srcX = d * LoginLayout.PinDigitColWidth; // U = d*52 — spec §11.3b. CODE-CONFIRMED.
 
                 AtlasTexture? normalTex = _assets.Slice(
                     LoginLayout.AtlasPassword,
-                    LoginLayout.PinDigitNormalSrcX, srcY,
+                    srcX, LoginLayout.PinDigitNormalSrcY,
                     LoginLayout.PinKeypadTileW, LoginLayout.PinKeypadTileH);
 
                 AtlasTexture? hoverTex = _assets.Slice(
                     LoginLayout.AtlasPassword,
-                    LoginLayout.PinDigitHoverSrcX, srcY,
+                    srcX, LoginLayout.PinDigitHoverSrcY,
                     LoginLayout.PinKeypadTileW, LoginLayout.PinKeypadTileH);
 
                 AtlasTexture? pressedTex = _assets.Slice(
                     LoginLayout.AtlasPassword,
-                    LoginLayout.PinDigitPressedSrcX, srcY,
+                    srcX, LoginLayout.PinDigitPressedSrcY,
                     LoginLayout.PinKeypadTileW, LoginLayout.PinKeypadTileH);
 
                 var btn = new TextureButton

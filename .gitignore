@@ -485,3 +485,6 @@ screenshot_probe.gd.uid
 # Dev atlas-dump autoload artifacts (throwaway)
 05.Presentation/MartialHeroes.Client.Godot/Dev/_dump_atlas.gd
 05.Presentation/MartialHeroes.Client.Godot/Dev/_dump_atlas.gd.uid
+
+# Scratch screenshots/probes (never committed)
+_scratch/

@@ -32,7 +32,7 @@ of binary files from `data/sky/dat/` using the area ID as the substitution for `
 filename. Together these files define:
 
 - which sky subsystems are enabled for the area,
-- whether a water plane is present and at what height (placement only; no renderer in the shipping binary),
+- which sky subsystems are gated per area (dungeon flag, sight clamp, lens flare, star/cloud dome, sun, moon, skybox, indoor) via `map_option%d.bin` — see §1 (note: this file holds NO water field; the old water_enable/water_y reading was a misread, reconciled Campaign 5),
 - the fog start/end distances and per-keyframe fog colours,
 - the per-keyframe sun/sky/cloud material colours,
 - per-keyframe star and cloud-dome tints, and
@@ -66,77 +66,109 @@ colour tables use a coarser 12-keyframe cycle (one keyframe = 7200 ms = four lig
 
 ## Section 1: `map_option%d.bin` — Per-Area Master Flags
 
-**Status:** CONFIRMED  
-**File size:** exactly **40 bytes** (10 × u32 little-endian, fixed, no header)  
-**Sample coverage:** areas 0–35; flag patterns documented for all observed combinations
+**Status:** CONFIRMED (field semantics RECONCILED Campaign 5 against the `.txt` companions)
+**File size:** exactly **40 bytes** (10 × u32 little-endian, fixed, no header)
+**Sample coverage:** 64 `.bin` files (one per area), each with a sibling `.txt`; cross-referenced
+field-by-field for area 11; flag patterns spot-checked across many areas
 
-### 1.1 Field table
+> ### ⚠️ Conflict reconciled — these are NOT water fields
+>
+> A prior revision of this table named offset 0x00 `water_enable` and 0x04 `water_y`, an
+> interpretation **derived from IDA function names** (e.g. water/sight helpers). A
+> `.txt` ↔ `.bin` cross-reference over the 64 area pairs **disproves** that reading. Every
+> `map_option%d.bin` ships with a sibling `map_option%d.txt` listing the author's field names and
+> values in `FIELD_NAME <tab> value` form; reading area 11's `.txt` against its `.bin` matches all
+> ten u32 words **in order** to the names below. The bytes `[1, 300, …]` at 0x00/0x04 mean
+> "**this area IS a dungeon** (`MOVE_DUNGEON = 1`), **camera sight is clamped to 300**
+> (`SIGHT_FIX = 300`)" — **not** "water enabled, water surface at Y = 300." Both witnesses agree on
+> the numeric values at each offset; the semantics are where the old IDA-name reading was wrong.
+>
+> **There are NO water fields anywhere in `map_option%d.bin`.** The old `water_enable` / `water_y`
+> interpretation is a misread and is removed from this table. (Water placement is unrelated to this
+> file; on the renderer side the shipping client has no water render path at all — that separate
+> negative result is unchanged and is recorded in §1.4.)
+>
+> **⚠️ C# wiring action required:** `MapOptionBinParser.cs` and every consumer that reads
+> `water_enable` / `water_y` from this 40-byte blob must be corrected to the layout below (especially:
+> 0x00 is the dungeon flag, 0x04 is a sight-clamp distance, and there is no water Y here). The C#
+> wiring wave will handle this correction; this spec is the authority it cites.
 
-| Offset | Size | Type | Field | Notes | Confidence |
-|-------:|-----:|------|-------|-------|------------|
-| 0x00 | 4 | u32 | `water_enable` | 0 = no water plane; 1 = water plane placement active at `water_y`. Note: the shipping client contains no water renderer — see §1.4. | CONFIRMED |
-| 0x04 | 4 | u32 | `water_y` | World-space Y coordinate of the water surface plane. Meaningful only when `water_enable = 1`. Observed values: 300, 700, 1000 | CONFIRMED |
-| 0x08 | 4 | u32 | `sky_gate` | 1 = full sky subsystem active; 0 = sky minimal or disabled | CONFIRMED |
-| 0x0C | 4 | u32 | `stardome_enable` | 1 = star-dome point sprites rendered | CONFIRMED |
-| 0x10 | 4 | u32 | `clouddome_enable` | 1 = cloud-dome hemisphere rendered | CONFIRMED |
-| 0x14 | 4 | u32 | `lensflare_enable` | 1 = sun lens-flare screen-space sprites rendered | CONFIRMED |
-| 0x18 | 4 | u32 | `sun_moon_enable` | 1 = sun and moon billboard particles rendered | CONFIRMED |
-| 0x1C | 4 | u32 | `skybox_enable` | 1 = load skybox mesh from `sky%d.box`. No `.box` files are present in the shipping VFS; this flag is 0 in all validated areas | CONFIRMED (value always 0) |
-| 0x20 | 4 | u32 | `indoor_flag` | 1 = indoor/dungeon area. Most sky subsystems are suppressed; ambient-only lighting applies | CONFIRMED |
-| 0x24 | 4 | u32 | _reserved_ | Always 0 in all sampled areas | SAMPLE-VERIFIED (value always 0) |
+### 1.1 Field table (CONFIRMED — `.txt` ↔ `.bin` cross-referenced)
+
+The author field names come from the `.txt` companion (`FIELD_NAME <tab> value`). All ten u32 words
+are little-endian.
+
+| Offset | Size | Type | `.txt` field | Proposed code name | Notes | Confidence |
+|-------:|-----:|------|--------------|--------------------|-------|------------|
+| 0x00 | 4 | u32 | `MOVE_DUNGEON` | `is_dungeon` | 0 = outdoor / field; 1 = dungeon (dungeon-type movement zone). | CONFIRMED |
+| 0x04 | 4 | u32 | `SIGHT_FIX` | `sight_distance` | Camera sight-clamp distance. 0 = free range; otherwise a fixed clamp (observed e.g. 300, 800). NOT a water surface Y. | CONFIRMED |
+| 0x08 | 4 | u32 | `LENSFLARE` | `lensflare_enable` | 0 = off; 1 = sun lens-flare screen-space sprites. | CONFIRMED |
+| 0x0C | 4 | u32 | `STARDOME` | `stardome_enable` | 0 = off; 1 = star-dome point sprites rendered. | CONFIRMED |
+| 0x10 | 4 | u32 | `CLOUDDOME` | `clouddome_enable` | 0 = off; 1 = cloud-dome hemisphere rendered. | CONFIRMED |
+| 0x14 | 4 | u32 | `SUN` | `sun_enable` | 0 = off; 1 = sun billboard. Stored separately from MOON below. | CONFIRMED |
+| 0x18 | 4 | u32 | `MOON` | `moon_enable` | 0 = off; 1 = moon billboard. **Stored as its own u32 word**, distinct from SUN at 0x14, even though both carry the same value in every observed area. Whether the client reads them independently is UNVERIFIED; the storage is two separate words. | CONFIRMED (as stored) |
+| 0x1C | 4 | u32 | `SKYBOX` | `skybox_enable` | 0 = off; 1 = load `sky%d.box`. **Always 0 in every observed area (CONFIRMED-ABSENT).** A VFS census found 0 `.box` files in all 43,347 entries — the skybox feature was parsed but never shipped. See `formats/sky.md §A`. | CONFIRMED (value always 0) |
+| 0x20 | 4 | u32 | `MAPHIDE` | `indoor_flag` | 0 = outdoor; 1 = indoor / dungeon lighting (suppresses most sky subsystems). | CONFIRMED |
+| 0x24 | 4 | u32 | _(unnamed in `.txt`)_ | `_reserved` | Always 0 in all sampled areas. | SAMPLE-VERIFIED (value always 0) |
 
 ### 1.2 Observed flag patterns
 
-The ten u32 values are listed as `[water_enable, water_y, sky_gate, stardome, clouddome, lensflare, sun_moon, skybox, indoor, reserved]`:
+The ten u32 values, in offset order, are
+`[is_dungeon, sight_distance, lensflare, stardome, clouddome, sun, moon, skybox, indoor, reserved]`:
 
-| Pattern | Representative areas | Meaning |
-|---------|---------------------|---------|
-| `[0,0,1,1,1,1,1,0,0,0]` | 0, 1, 2, 3, 6, 8, 12, 19, 21, 32, 35 | Standard outdoor area, no water |
-| `[0,0,0,1,1,0,1,0,0,0]` | 4, 7 | Outdoor, stardome + sun/moon, no lensflare |
-| `[0,0,0,0,0,0,0,0,1,0]` | 5, 17, 20, 24, 27, 33 | Indoor/dungeon — all sky gates off |
-| `[1,300,0,0,0,0,0,0,1,0]` | 11, 15, 16, 22, 23, 25, 26, 31, 34 | Water at Y=300, indoor lighting, sky off |
-| `[1,700,0,0,0,0,0,0,1,0]` | 29, 30, 209, 210 | Water at Y=700, indoor lighting, sky off |
-| `[1,1000,0,0,0,0,0,0,0,0]` | 206, 207, 208 | Water at Y=1000, outdoor sky |
+| Pattern (offset order) | Representative areas | Meaning |
+|------------------------|----------------------|---------|
+| `[0,0,1,1,1,1,1,0,0,0]` | 0*, 1, 2, 3, 6, 8, 12, 19, 21, 32, 35 | Standard outdoor area: lensflare + stardome + clouddome + sun + moon on. |
+| `[0,0,0,1,1,0,1,0,0,0]` | 4, 7 | Outdoor: stardome + clouddome + moon on; no lensflare, no sun. |
+| `[0,0,0,0,0,0,0,0,1,0]` | 5, 17, 20, 24, 27, 33 | Indoor / dungeon: all sky gates off, `indoor_flag` set. |
+| `[1,300,0,0,0,0,0,0,1,0]` | 11, 15, 16, 22, 23, 25, 26, 31, 34 | Dungeon, sight clamped to 300, indoor lighting, sky off. |
+| `[1,800,0,0,0,0,0,0,1,0]` | (dungeon areas with a wider clamp) | Dungeon, sight clamped to 800, indoor lighting, sky off. |
 
-### 1.3 Water placement
+\* **Area-0 anomaly:** `map_option0.bin` does not match its own `.txt` field ordering (its raw
+words do not line up with the `.txt` values). Area 0 appears to be a special-case default / template
+entry written with a different ordering and must not be used to validate the field table. This does
+not affect the CONFIRMED layout for all other areas.
 
-The water plane Y coordinate comes **exclusively** from this file. There is no water height stored
-in per-cell `.map` or `.ted` files. The placement rule is:
+> The previously tabulated `[1,300,…]` / `[1,700,…]` / `[1,1000,…]` "water at Y=N" patterns were a
+> consequence of the old water misread. Under the reconciled layout these are dungeon areas with a
+> `SIGHT_FIX` (sight-clamp) value at 0x04, not a water height. The exact value distribution per area
+> is in the dirty-room census, not reproduced here.
 
-- If `water_enable = 0`: no water plane for this area.
-- If `water_enable = 1`: place a water surface at world-space Y = `water_y`.
+### 1.3 Relationship to the water renderer (unchanged negative result)
 
-See §1.4 for the confirmed negative result on water rendering in the shipping binary.
+`map_option%d.bin` carries **no water fields**. Water surface placement is not stored in this file
+(nor, per prior analysis, anywhere the shipping renderer consumes). The separate, independently
+established result — that the shipping client has **no water render path** — is unaffected by this
+reconciliation and is retained in §1.4 as historical context. Engineers should not look to
+`map_option%d.bin` for any water parameter.
 
-### 1.4 Water renderer — RESOLVED-NEGATIVE
+### 1.4 Water renderer — RESOLVED-NEGATIVE (context, unchanged)
 
-> **Status: RESOLVED-NEGATIVE.** The shipping `Main.exe` contains **no dedicated water render
-> path**. This is confirmed by exhaustive cross-reference analysis.
+> **Status: RESOLVED-NEGATIVE.** The shipping client contains **no dedicated water render path**.
+> This conclusion is independent of the §1.1 field reconciliation above and remains valid: even if a
+> water enable/height existed somewhere, no renderer consumes it. (As of the Campaign-5
+> reconciliation, no water enable/height is stored in `map_option%d.bin` at all — see §1.1.)
 
-Key evidence:
+Key evidence (from cross-reference analysis):
 
-- The `water_y` global has exactly two cross-references in the binary: one initialisation to
-  zero, and one pass to the terrain streaming system. It is never read by any renderer.
-- `OPTION_WATER` is written to and read from `DoOption.ini` but the field it populates has no
-  confirmed runtime reader that alters rendering state.
-- Searches across all string literals for "water", "reflect", "ripple", and "wave" return zero
-  hits other than `"OPTION_WATER"` itself. No water texture path, no water vertex buffer name,
-  no water draw function name is present in the binary.
+- Searches across all string literals for "water", "reflect", "ripple", and "wave" return no water
+  texture path, water vertex-buffer name, or water draw-function name in the binary.
+- No water texture files (e.g. `water*.dds`) exist anywhere in the VFS.
 
-**Implication for Assets.Parsers:** the `water_enable` and `water_y` fields must be parsed and
-surfaced for the Godot layer, but no Assets.Parsers code need implement water geometry or
-texture lookup — that is a free engineering decision for `05.Presentation`.
-
-**Reimplementation guidance:** use `water_enable` as the enable gate and `water_y` as the
-world-space Y placement. Rendering approach (shader, texture, UV animation, reflection) is
-unconstrained by the legacy format.
+**Implication for Assets.Parsers:** there are no water fields to parse out of this file, and no
+Assets.Parsers code need implement water geometry or texture lookup. Any water surface a
+reimplementation chooses to render in `05.Presentation` is a free engineering decision, not a
+faithful reproduction of an original asset.
 
 ### 1.5 Remaining known unknowns
 
-- **`sky_gate = 0` vs. `indoor_flag = 1` interaction:** When both are 0/1, the exact set of
-  suppressed subsystems is not fully enumerated from the binary. Indoor areas suppress at minimum
-  the cloud dome, star dome, sun/moon, and lens flare. Whether fog parameters still apply indoors
-  is unverified.
+- **`SUN` (0x14) vs. `MOON` (0x18) independence:** stored as two separate u32 words; in every
+  observed area they hold the same value. Whether the runtime ever reads them independently (i.e.
+  whether a sun-on / moon-off area is possible) is UNVERIFIED — only the two-word storage is confirmed.
+- **`indoor_flag = 1` suppression set:** indoor areas suppress at minimum cloud dome, star dome,
+  sun/moon, and lens flare. Whether fog parameters still apply indoors is unverified.
+- **Area-0 ordering anomaly:** the cause of area 0's mismatch between `.bin` words and `.txt` values
+  is unresolved (template/default candidate).
 
 ---
 
@@ -498,9 +530,12 @@ and therefore has no water texture assets (§1.4).
 
 ## Known unknowns (format family level)
 
-1. **Water rendering mechanism: RESOLVED-NEGATIVE.** Y-plane position is confirmed via
-   `map_option%d.bin`. The shipping binary contains no water renderer — see §1.4 for the
-   complete evidence. Reimplementations choose their own water visuals at the confirmed Y coordinate.
+1. **Water: RESOLVED-NEGATIVE, and NO water fields in `map_option%d.bin`.** The shipping
+   client contains no water renderer (§1.4), and the Campaign-5 `.txt` ↔ `.bin`
+   reconciliation (§1.1) proved `map_option%d.bin` stores no water enable/height — the old
+   `water_enable` / `water_y` at 0x00/0x04 were a misread of the dungeon flag and sight-clamp
+   distance. No source of a water surface Y is established anywhere; any water a reimplementation
+   renders is a free engineering choice, not a reproduced asset value.
 2. **`fog%d.bin` data_load_flag = 0 code path:** Whether `fog_colors[]` is overridden by the
    material table or used directly when this flag is 0 is not confirmed.
 3. **`light%d.bin` gaps at 0x0900 and 0x1230:** All-zero in samples; may be wrap-around

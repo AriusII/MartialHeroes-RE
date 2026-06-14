@@ -94,7 +94,7 @@ pre-loads clips:
 
 | File | Role | Confidence |
 |------|------|------------|
-| `data/char/motlist.txt` | Manifest — each line is a bare filename; the engine prepends `data/char/mot/` at load time to form the VFS path. | CONFIRMED |
+| `data/char/motlist.txt` | Manifest / registry index — each line is a bare on-disk filename; the engine prepends `data/char/mot/` to form the VFS path and registers the clip in a numeric-id keyed motion registry (see *Motion id registry* below). | CONFIRMED |
 | `data/char/actormotion.txt` | Maps actor / visual identifiers to motion catalogue IDs. Tabular, count-prefixed, 33 columns per record; layout characterized in §`actormotion.txt` layout. | CONFIRMED (record layout, parser-derived); col15 idle mapping sample-verified; per-column semantics for cols 3–14 PROPOSED |
 | `data/motion.cache` | Pre-load ID cache. Wire layout: `[u32 count][count × u32 motion_catalogue_id]`. The engine opens this file through a direct OS file call (not the VFS) and uses the IDs to prime the in-memory clip map, triggering eager full-load for the listed IDs. | CONFIRMED (wire layout); size-math cross-checked (see §motion.cache / effect.cache size-math); magic / versioning UNVERIFIED |
 
@@ -102,6 +102,22 @@ The 9-digit motion IDs stored in `actormotion.txt` (see §`actormotion.txt` layo
 values as the `.mot` per-file `id_a` field, which matches the numeric component of the `.mot`
 filename. `actormotion.txt` is therefore the actor-facing table that names, per actor class and
 motion slot, which `.mot` clip to play.
+
+### Motion id registry (CODE-CONFIRMED)
+
+`.mot` clips are resolved by **numeric id through a registry**, not by formatting a `g%d.mot`
+filename at play time. At boot the engine reads `data/char/motlist.txt` line by line; for each line
+it prepends the directory prefix `data/char/mot/` to the listed on-disk filename and registers the
+resulting clip under a **numeric motion id** taken from the leading digits of the filename (the same
+name-prefix-as-id convention the texture list files use; see `formats/texture.md`). After the list is
+registered, the pre-load id cache (`data/motion.cache`) drives eager full-load of the listed ids.
+
+At runtime a motion id (a 9-digit value equal to the clip's `id_a`, sourced from `actormotion.txt`)
+is looked up in this registry to obtain the clip; the on-disk file it maps to is whatever
+`motlist.txt` named for that id. The filenames happen to follow `g{id}.mot`, but that is the naming
+convention on disk, not a runtime template — the resolution is id -> registry entry.
+
+<!-- source: _dirty/campaign5/character-appearance-assembly.md -->
 
 ---
 
@@ -439,6 +455,21 @@ content-creation time.
 
 `data/char/actormotion.txt` is the actor-facing motion table. It is a tab-separated text file with
 a decimal count on the first line and one record per subsequent line. Each record has **33 columns**.
+
+> **In-memory record size and lookup key (CODE-CONFIRMED).** Each parsed row is stored as a
+> fixed **136-byte (0x88)** in-memory record. The record is filed under a lookup key derived from
+> the first two columns: `key = col1 + categoryBase[col0]`, where `col0` is a small category /
+> actor-group selector and `categoryBase[]` is a per-category base-offset table held on the catalogue
+> object (the **same** base-offset table the skin catalogue uses — see `specs/skinning.md`). This
+> turns a locally numbered row id into a globally unique motion-set key. **Column 2 (`id_b` /
+> SkinClassId)** is the per-actor skeleton/skin selector. The 18 motion-id columns are stored as
+> **two runs of 9** (a primary run and a secondary run), and two derived per-frame-rate fields are
+> computed from the cycle-duration and frame-count columns (see *Derived fields* below). The exact
+> contents of `categoryBase[]` are **UNVERIFIED** (a live array dump is needed); the record size,
+> key shape, column-2 role, and 9+9 motion-id split are CODE-CONFIRMED.
+>
+> <!-- source: _dirty/campaign5/character-appearance-assembly.md -->
+> <!-- pending live-debugger value-edge: actormotion/skin catalogue categoryBase[] array contents -->
 The byte offsets below are the offsets within the engine's in-memory record (a fixed 136-byte
 record) into which each column is parsed; they are stable and parser-derived. Per-column **semantic
 names for columns 3–14 are PROPOSED** — the read order, types, and offsets are confirmed, but the

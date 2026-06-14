@@ -52,9 +52,9 @@
 
 | Item | Value |
 |------|-------|
-| `sample_verified` | **PLAUSIBLE** — file header uint16 and record stride hypothesis derived from sample byte observation; internal field layout is UNVERIFIED |
+| `sample_verified` | **file structure CONFIRMED** — 16-byte header (u32 magic `0x2711` + u32 group_count + two f32) and a 2,243 × 52-byte record array reconcile the file exactly; stride anchored by a sequential u16 at record +0x10. Per-record field semantics largely UNVERIFIED. Corrected Campaign 5 from the prior PLAUSIBLE u16-count / 48-stride reading. |
 | Endianness | Little-endian |
-| Note | This is a distinct `.eff` sub-type at `data/effect/particle/particleEmitter.eff`; must NOT be parsed with the Section B geometry parser |
+| Note | This is a distinct `.eff` sub-type at `data/effect/particle/particleEmitter.eff` (VFS-lowercased `particleemitter.eff`); must NOT be parsed with the Section B geometry parser |
 
 ---
 
@@ -655,37 +655,93 @@ This is a per-effect-id scale-override table that augments the descriptor base-s
 
 # Section E: `particleEmitter.eff` — GPU Particle Emitter Descriptor Table
 
-**Confidence: PLAUSIBLE** (file-level header byte SAMPLE-VERIFIED; internal record layout is UNVERIFIED)
+**Confidence: file structure CONFIRMED (16-byte header + 2,243 records of 52 bytes, reconciled by
+exact arithmetic and a sequential stride anchor); per-record field semantics largely UNVERIFIED.**
+
+> This section was corrected (Campaign 5) from a prior PLAUSIBLE reading that assumed a u16
+> `record_count` at offset 0x00, a record start at 0x20, and a 48-byte stride. Sample byte
+> observation reconciles the file exactly with a **16-byte header** and a **52-byte record stride**;
+> the prior 0x20-start / 48-stride hypothesis did not divide the file evenly and is superseded.
 
 ## E.1 Identification
 
-- **Path:** `data/effect/particle/particleEmitter.eff`
-- **Magic:** None
+- **Path:** `data/effect/particle/particleEmitter.eff` (the VFS normalises this to lowercase
+  `data/effect/particle/particleemitter.eff`; the logical name is `particleEmitter.eff`)
+- **Magic:** u32 numeric format tag `0x00002711` (= 10001 decimal) at offset 0x00 — not a printable
+  ASCII signature
 - **Endianness:** Little-endian
-- **File size:** 116,652 bytes (observed)
-- **Disambiguation:** This is NOT the same format as the Section B geometry `.eff` files. Must be dispatched by directory path, not extension alone.
+- **File size:** 116,652 bytes (single instance in the production VFS)
+- **Disambiguation:** This is NOT the same format as the Section B geometry `.eff` files. Must be
+  dispatched by directory path, not extension alone. Keep particle / GPU-emitter framing consistent
+  with §A.16 (the in-memory runtime element) — this on-disk table feeds the GPU particle sub-system
+  that `resource_id ≥ 10000` `.xeff` elements bridge to.
 
-## E.2 File layout
+## E.2 File layout — CONFIRMED structure
 
-**Header (at file offset 0x00):**
+```
+File = Header (16 bytes) + Record[2243] (52 bytes each)
+```
+
+**Reconciliation (CONFIRMED):** `16 + 2243 × 52 = 16 + 116,636 = 116,652` — exact, zero residual.
+`(116,652 − 16) / 52 = 2,243` with remainder 0. The record count is **derived from file size and
+stride**, not stored in a count field.
+
+### E.2.1 Header (16 bytes, offsets 0x00–0x0F)
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| 0x00 | 2 | u16 LE | `record_count` | Observed value: 10,001 (0x2711) | SAMPLE-VERIFIED |
-| 0x02 | 2 | u16 LE | _unknown_ | Observed value; purpose not confirmed | UNVERIFIED |
+| 0x00 | 4 | u32 LE | `magic` | Constant `0x00002711` (= 10001). Numeric format tag, no ASCII form. | CONFIRMED |
+| 0x04 | 4 | u32 LE | `group_count` | Observed value 10. Candidate: number of emitter groups / particle systems. | UNVERIFIED (semantics) |
+| 0x08 | 4 | f32 LE | `f_global_a` | Observed value 64.0. Candidate: global emission radius or world scale. | UNVERIFIED |
+| 0x0C | 4 | f32 LE | `f_global_b` | Observed value 1.0. Candidate: global intensity / rate multiplier. | UNVERIFIED |
 
-**Record array:** begins at offset 0x20 (hypothesis). Stride is **48 bytes** per record (PLAUSIBLE from byte pattern observation; not fully confirmed). Each record encodes one particle-type descriptor (`emit_file` entry): texture handle, particle count, and a particle info pointer. At runtime, `resource_id ≥ 10000` in a `.xeff` element selects a record from this table by its index.
+### E.2.2 Record (52 bytes, 2,243 records, immediately after the header)
 
-The exact field layout within each 48-byte record is **UNVERIFIED**. The following fields are hypothesized from parser analysis:
+The record array is a flat array starting at offset 0x10. There is no per-record directory or
+offset table; records are 1-based by their sequence id.
 
-| Slot | Type | Field | Confidence |
-|---|---|---|---|
-| texture handle | ptr or u32 | resolved DDS/TGA texture | UNVERIFIED |
-| particle_count | u32 | number of particles to emit | UNVERIFIED |
-| particle_info | ptr | pointer to a particle descriptor sub-record | UNVERIFIED |
-| remaining ~28 bytes | unknown | pre-baked state or padding | UNVERIFIED |
+**Stride anchor (CONFIRMED):** a u16 at record-internal offset **+0x10** reads 1, 2, 3, … across
+consecutive records, incrementing by exactly 1 per record. Because the same field reappears 52 bytes
+later with value +1, this both fixes the **52-byte stride** and provides a per-record sequence id.
+A u32 sentinel `0xFFFFFFFF` at **+0x14** is present in every observed record.
 
-**Do not implement a parser for this format until the field layout is confirmed** from an IDA trace of the particle-system constructor arguments.
+| Rec offset | Size | Type | Field | Notes | Confidence |
+|-----------:|-----:|------|-------|-------|------------|
+| +0x00 | 4 | u32 LE | _candidate_id_a_ | Record 0 = 1 (consistent with a 1-based id); a later record carried a large value. Semantics and even the field width are ambiguous. | UNVERIFIED |
+| +0x04 | 4 | u32 LE | _candidate_seed_a_ | Large u32 in one record, 0 in another. Candidate: PRNG seed. | UNVERIFIED |
+| +0x08 | 4 | u32 LE | _candidate_seed_b_ | One observed value equals the f32 encoding of 1.0; type ambiguous (u32 vs f32). | UNVERIFIED |
+| +0x0C | 4 | u32 LE | _unk_c_ | Zero in observed records. | UNVERIFIED |
+| +0x10 | 2 | u16 LE | `emitter_seq_id` | **Sequential counter, +1 per record. Primary stride anchor.** | CONFIRMED |
+| +0x12 | 2 | u16 LE | _param_a_ | Constant 30 in observed records. Candidate: max lifetime (frames?). | UNVERIFIED |
+| +0x14 | 4 | u32 LE | `sentinel` | `0xFFFFFFFF` in every observed record. Candidate: unused-field / no-cross-reference marker. | CONFIRMED (value); semantics UNVERIFIED |
+| +0x18 | 4 | u32 LE | _unk_d_ | Zero in observed records. | UNVERIFIED |
+| +0x1C | 4 | u32 LE | _unk_e_ | Zero in observed records. | UNVERIFIED |
+| +0x20 | 4 | u32 LE | _unk_f_ | Zero in observed records. | UNVERIFIED |
+| +0x24 | 4 | f32 LE | _spawn_rate_signed_ | Constant −0.2 in observed records. Candidate: spawn rate; negative may encode continuous vs. burst. | UNVERIFIED |
+| +0x28 | 2 | i16 LE | _i16_a_ | Zero in observed records. | UNVERIFIED |
+| +0x2A | 2 | i16 LE | _i16_b_ | Constant −5 in observed records. | UNVERIFIED |
+| +0x2C | 2 | i16 LE | _i16_c_ | Zero in observed records. | UNVERIFIED |
+| +0x2E | 2 | i16 LE | _i16_d_ | Constant −7 in observed records. | UNVERIFIED |
+| +0x30 | 4 | u32 LE | _unk_h_ | 0 in one record; a large value in another (ambiguous; may be two packed u16s, or a different record subtype). | UNVERIFIED |
+
+- **Record count source:** derived = `(file_size − 16) / 52` = 2,243 (CONFIRMED). No header count field.
+- **Record stride:** 52 bytes (CONFIRMED via the +0x10 sequence anchor).
+
+### E.2.3 Known unknowns (Section E)
+
+- **Almost all per-record field semantics** at +0x00..+0x30 are UNVERIFIED. Only the +0x10 sequence
+  id and the +0x14 sentinel are confirmed by repeated structure; the named-candidate fields above are
+  hypotheses from a two-record observation.
+- **The large values at +0x00 and +0x30** differ markedly between the first two records. This may
+  indicate a record subtype where these fields carry different semantics, a non-u32 packing, or
+  first-record ambiguity. Reading further records would resolve the pattern.
+- **The runtime selector:** a `.xeff` element with `resource_id ≥ 10000` (Section A) is believed to
+  index this table; whether it indexes by `emitter_seq_id` (+0x10) or by flat record index is
+  UNVERIFIED.
+
+**Do not branch on any UNVERIFIED field.** A parser may read the header and stride the 52-byte
+records using `emitter_seq_id` as the anchor; assigning meaning to the candidate fields requires an
+IDA trace of the particle-system constructor arguments.
 
 ## E.3 Cross-reference
 

@@ -843,6 +843,36 @@ lookup (not a printf) and is **not yet pinned** — do not invent it (carried in
 > mesh-local `.skn` X-negation is internal to skin building and is the source of the §3.3.2 front/back
 > caveat.
 
+### 3.3.6 Shared actor factory — list slots and the create preview build the same way (CODE-CONFIRMED)
+
+Both the up-to-5 **list-slot previews** and the single **create preview** (§4.2) are built through the
+**same actor factory** — the same path the in-world player actor uses — so skeleton selection, the
+six-slot overlay attach, texture binding, and idle-motion resolution are identical across all three
+contexts. The composition model is owned by `specs/skinning.md` §3.5: one shared skeleton (selected by
+`model_class_id` / the skin's `id_b`) carrying up to six overlay `.skn` parts `{3, 4, 6, 2, 11, 14}`,
+with the **body as overlay slot 3** (the `202`/"b" family) — there is no separate base mesh.
+
+- **List-slot previews are fully descriptor-driven.** Each slot's appearance comes entirely from the
+  server 880-byte spawn descriptor (§3.2): class at +0x34, variant at +0x2C, and the per-slot overlay
+  gids in the equipment table at +0x58 (§3.3.5). No appearance values are hardcoded for the slots.
+- **The create preview seeds a synthetic descriptor.** For a fresh create there is no server
+  descriptor, so the create builder seeds the body-family overlay gids for the chosen class — the four
+  layer families `202` / `203` / `206` / `209` (slots 3 / 4 / 6 / 2) — plus the variant, then calls the
+  same factory. Slots 11 (head) and 14 (weapon) are empty for a fresh create, so the create carousel
+  shows no head overlay and no weapon (the iterate-all-six loop still runs; empty slots resolve to no
+  node).
+- **Idle motion is actormotion-driven by `id_b`** for both forms: the actor's idle clip is selected
+  from `data/char/actormotion.txt` keyed by the actor's `id_b` (col2), then resolved through the motion
+  id registry (`formats/animation.md`). For the `IdA = 1` starter set all four classes share `id_b = 1`,
+  hence the same "peace" idle (§3.7.5); higher-tier appearances carry class-distinct idles. No
+  char-select-specific idle asset exists.
+- **Rotation differs by form, not by factory.** The list slots do **not** auto-rotate (§3.3.1). The
+  single create preview *does* turn so the player can inspect the would-be character — the concrete
+  rotation mechanism (a press-and-hold turntable, superseding any earlier "auto-spin" description) is
+  owned by **§4.2** and is the authority for that behaviour.
+
+<!-- source: _dirty/campaign5/character-appearance-assembly.md -->
+
 ## 3.4 Slot availability vs lock flags
 
 Two per-slot flag arrays gate enter/render. One marks a slot **selectable for enter**; the other

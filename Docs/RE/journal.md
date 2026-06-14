@@ -917,3 +917,27 @@ Top-Orchestrator session, continued. Firewall held; build 0/0; ~1520 tests green
   animation.md/skinning.md/frontend_scenes §3).
 - **RESIDUAL:** waterfall render; build PIN/server-list/loading Godot screens from the recovered display-lists;
   promote the appearance-pipeline deltas; live-debugger value-edge confirms (catalog categoryBase[], bind-pose).
+
+---
+
+## 2026-06-14 — CAMPAIGN 4 (cont.): PIN screen 1:1 + appearance-pipeline promotion + enter-world sequence RE
+
+- **ENGINEERING (Godot layer 05, build 0/0):** PIN modal built 1:1 from §11.3 — dragon/parchment frame
+  (`InventWindow.dds` 318,647,340,190 NinePatch), 2×5 scrambled digit grid (`password.dds`, digit src
+  CORRECTED to (d*52,560,52,52); positions Fisher-Yates re-rolled on open/Reset, button carries true digit),
+  masked `*` echo (81,138,150,22), OK tag12 / Cancel tag13 / Reset tag11.
+- **PROMOTION (REWRITE, firewall PASS):** appearance pipeline → `formats/texture.md` (list-file numeric-id
+  registry, not %d.png), `formats/animation.md` (motlist.txt registry + 0x88 actormotion record),
+  `skinning.md §3.5` (shared skeleton + 6 overlays, body=slot 3, model_class_id formula, slot→family),
+  `frontend_scenes.md §3.3.6` (list-slot vs create-preview share the factory).
+- **RECOVERY (READONLY IDA):** enter-world sequence — `1/9` (40B) confirmed off the Enter helper (slot@0,
+  33B session token@+1 = launcher token NOT typed account, version@+0x24); `3/5 EnterGameAck` sets
+  GameState→2 (LOADING, gate = VFS preload not net); `4/1` builds LocalPlayer at (X,0,Z) → GameState→5.
+  `1/9` is the ONLY C2S the Enter action emits. **The live 3/5-vs-4/1 arrival ORDER remains the one
+  genuinely debugger-pending fact** (login.md §5.3 marker stands). Staged `_dirty/protocol/enter-game-sequence.md`.
+  Note: no protocol `.tsv` capture is present in the tree — the 3/5 "capture x2" provenance can't be
+  re-verified now (flagged for reconciliation).
+- **Also committed (prior-wave bonus):** `Docs/RE/specs/rendering.md` — D3D9 per-frame draw loop / draw order
+  / render-state cache / glow-bloom post chain (clean, firewall-verified).
+- **RESIDUAL:** build the ServerList + Loading Godot screens from the recovered display-lists; login bezel
+  polish; waterfall; the 3/5-vs-4/1 live-debugger confirm (needs maintainer F9-launch).

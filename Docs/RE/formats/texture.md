@@ -436,7 +436,66 @@ dimensions per bucket.
 | `data/item/texture/` | unknown | unknown | CONFIRMED-from-routine (no sample) |
 
 Each bucket directory contains a companion `*list.txt` index file. A list-index loader reads
-this index and dispatches a per-entry texture load with the bucket's fixed dimensions.
+this index and dispatches a per-entry texture load with the bucket's fixed dimensions. The
+id-registry model that this index builds — and how a numeric texture id resolves to a file — is
+documented in the next section.
+
+### Texture id registry — list files build a numeric-id -> file map (CODE-CONFIRMED)
+
+Character and item textures are **not** resolved by formatting a `%d.png` filename at draw time.
+Instead, a small set of plain-text **list files** is read once at boot and each line is registered
+into an in-memory map keyed by a **numeric texture id**. The draw path then looks a texture up by
+that id; the on-disk filename and extension are whatever the list file names.
+
+**List files and their target directories (CODE-CONFIRMED):**
+
+| List file | Target directory | Dimensions hint | Notes |
+|-----------|------------------|-----------------|-------|
+| `data/char/tex10241024list.txt` | `data/char/tex10241024/` | 1024 x 1024 | full-resolution char bucket |
+| `data/char/tex512512list.txt` | `data/char/tex512512/` | 512 x 512 | |
+| `data/char/tex256512list.txt` | `data/char/tex256512/` | 256 x 512 | |
+| `data/char/tex256256list.txt` | `data/char/tex256256/` | 256 x 256 | |
+| `data/item/texturelist.txt` | `data/item/texture/` | not fixed | item textures; dimensions taken from the file |
+
+**Per-line registration rule (CODE-CONFIRMED):**
+
+Each line of a list file is a bare on-disk filename of the form `<name>.<ext>` (the extension is
+free-form -- `.png`, `.dds`, or another image container; it is taken from the line, **not**
+hardcoded). The loader:
+
+1. locates the first `.` in the line and strips the extension, keeping `<name>`;
+2. parses `<name>` as a base-10 integer (a numeric parse of the leading digits) -- this integer is
+   the **texture id**;
+3. prepends the bucket's target directory prefix to form the full VFS path;
+4. inserts an entry mapping `id -> (deferred texture, full path, dimensions hint)` into the texture
+   registry; the underlying image is loaded lazily on first use.
+
+So the **leading digits of the filename are the texture id**; the rest of the name and the
+extension are incidental. The 9-digit numeric filenames seen in `data/char/tex256256/` (e.g.
+`419000410.png`) are the textual form of these ids -- see the PNG filename convention below.
+
+**Draw-time binding (CODE-CONFIRMED):** when a character or item part needs its texture, the engine
+queries the same registry by the numeric id carried on the part (for characters this id is the
+`tex_id` recovered through the skin chain -- see below) and binds the returned texture to the render
+node. No filename is formatted at this point; the lookup is purely id -> registry entry.
+
+### The skin chain that populates the per-part texture id (CODE-CONFIRMED)
+
+A character part's `tex_id` reaches the texture registry through the skin catalogue, loaded at boot
+from `data/char/skin.txt`:
+
+1. A `.skn` part carries an appearance id (`IdA`; see `formats/mesh.md`).
+2. `data/char/skin.txt` is parsed into the character appearance catalogue. Each row contributes,
+   among its columns, a **mesh gid** (column 4) and a **texture id** (column 5).
+3. The part's resolved catalogue entry yields its `tex_id` (the column-5 value).
+4. That `tex_id` is looked up in the texture id registry above to obtain the bound texture.
+
+The catalogue-population details (the full skin-row layout and the catalogue key) live in
+`specs/skinning.md`; this spec documents only the texture-registry tail of the chain. The net
+result is the chain **`.skn` `IdA` -> `skin.txt` col4/col5 -> `tex_id` -> texture id registry ->
+image file**, all resolved by numeric id rather than by a runtime filename template.
+
+<!-- source: _dirty/campaign5/character-appearance-assembly.md -->
 
 ### PNG texture filename convention
 

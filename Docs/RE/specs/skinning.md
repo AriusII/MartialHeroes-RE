@@ -203,6 +203,100 @@ style). This holds for both the bind-pose world walk (§3.1) and the animated wo
 
 ---
 
+## 3.5 Character appearance assembly — one shared skeleton + up to 6 overlay parts (CODE-CONFIRMED)
+
+> Provenance: promoted from a dirty-room appearance-assembly note (gitignored). The catalogue
+> population, overlay-slot set, and `model_class_id` formula are **CODE-CONFIRMED**; the two
+> data-driven value-edges noted at the end remain pending a live-debugger confirm.
+
+A rendered character — whether an in-world actor or a char-select preview — is **one shared
+skeleton** carrying a **fixed set of overlay `.skn` parts**, one per visible-gear slot, each skinned
+onto that single skeleton (§3, §4, §5) and textured via a per-part texture id (`formats/texture.md`).
+There is **no monolithic body mesh**: the body is itself an overlay part. Everything resolves through
+one in-memory **appearance catalogue** (a gid -> visual map) plus three registry caches loaded once at
+boot — skin, texture (`formats/texture.md`), and motion (`formats/animation.md`).
+
+### 3.5.1 The body is overlay slot 3 — there is no separate base mesh
+
+A full character is composed of **up to six overlay parts**, attached in a fixed slot order. Slot 3
+is the **body** (the torso/legs mesh, the `202`/"b" family); it is attached through the **same**
+overlay path as every other part, not loaded as a distinct base mesh. `skin.txt` is consumed to
+**build the catalogue**, not to scan a body row at draw time; at draw time the body is just slot 3 of
+the uniform overlay set.
+
+| Slot id | Outfit family | Meaning | Present on |
+|--------:|---------------|---------|-----------|
+| 3 | `202` ("b") | **BODY** (torso/legs) | every actor; sole slot in the reduced high-tier composition |
+| 4 | `203` ("p") | layer "p" | every actor |
+| 6 | `206` ("s") | layer "s" | every actor |
+| 2 | `209` ("a") | layer "a" | every actor |
+| 11 | (head / hair / face family) | head overlay | every actor |
+| 14 | (weapon) | WEAPON, hand-attached | **local player only** |
+
+Other actors omit slot 14 (weapon); above a per-character skin-level threshold read from the
+catalogue, the local-player path binds **only slot 3** (a reduced high-tier composition). All of a
+character's overlay parts are authored against the **same skeleton** (the class's `id_b` rig — §8(e));
+the cancellation invariant of §0 holds only when every part, the deform skeleton, and the played clip
+share that one `id_b`.
+
+### 3.5.2 model_class_id (the appearance/skeleton selector)
+
+The class + variant of a player resolve to a single integer `model_class_id` (also the value a
+`.skn` carries as its `id_b`):
+
+```
+model_class_id = 5 * (class + 4 * variant) - 24            in {1, 11, 16, 26}
+```
+
+- `class` is the internal class index (1..4); `variant` is the appearance variant.
+- `variant == 3` resolves to `0`, which means an **invisible actor** (no mesh) — a reserved sentinel.
+- `model_class_id` selects the visual record in the appearance catalogue, whose bound bind-pose
+  handle is the actor's skeleton (§3, §8(e)).
+
+### 3.5.3 The appearance catalogue is populated from skin.txt (CODE-CONFIRMED)
+
+`data/char/skin.txt` is parsed once at boot into the appearance catalogue. Each row carries (in disk
+order) an appearance group id, a class id, and two further catalogue digits, followed by the two
+identity columns the draw path needs: **column 4 = the mesh gid** (`g{gid}.skn` is the part's mesh)
+and **column 5 = the texture id** (`tex_id`, looked up in the texture registry, `formats/texture.md`).
+The payload stored under each catalogue key is the `(mesh_gid, tex_id)` pair.
+
+Each row is filed under a 64-bit catalogue key. The same key shape is reconstructed by the overlay
+draw path from `(slot, model_class_id, reduced_gid)`:
+
+```
+catalog_key = gid_reduced + 1e9 * ( slot + 100 * model_class_id )
+```
+
+so a part registered from skin.txt under a given `(class, slot, reduced gid)` is found again at draw
+time by recomputing the same key. The `model_class_id` term in the key is itself built from a
+per-appearance-group base offset table (`categoryBase[]`, indexed by the appearance group id) held on
+the catalogue object — the **same** base-offset table the actormotion table uses
+(`formats/animation.md`). The exact contents of `categoryBase[]` are **UNVERIFIED**.
+
+### 3.5.4 Overlay attach order and the reduced gid
+
+The factory iterates the fixed slot list `{3, 4, 6, 2, 11, 14}` and, per slot, reads the slot's gid
+from the actor's equipment table, computes the catalogue key above, looks up the `(mesh_gid, tex_id)`
+payload, loads/caches the `.skn` mesh by gid, skins its geometry onto the shared skeleton (§4, §5),
+and binds the texture by `tex_id` (`formats/texture.md`). The `reduced_gid` term differs by slot
+family: the weapon slot (14) uses a wider reduction with a base-1000 slot multiplier, while the other
+slots use a base-100 multiplier — both are deterministic reductions of the slot gid. Empty slots
+(e.g. no head overlay, no weapon) resolve to no node and are skipped.
+
+### 3.5.5 Pending value-edges (do NOT invent)
+
+Two data-driven edges are CODE-CONFIRMED in mechanism but their concrete values await a live-debugger
+confirm and must not be invented:
+
+- the **`categoryBase[]`** array contents (the per-category base offsets used in both the catalogue
+  key and the actormotion key);
+- the concrete **`model_class_id` -> bind-pose handle** mapping (which loaded `.bnd` each of
+  `{1, 11, 16, 26}` selects — the data-driven `{1->g1, 26->g2, 11->g3, 16->g4}` edge of §8(e)).
+
+<!-- source: _dirty/campaign5/character-appearance-assembly.md -->
+<!-- pending live-debugger value-edges: catalogue categoryBase[] contents; model_class_id -> concrete bind-pose handle -->
+
 ## 4. Inverse bind — computed at load, never stored
 
 There is **no inverse-bind matrix on disk.** It is baked once per skin, immediately after the skin

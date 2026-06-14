@@ -305,12 +305,27 @@ public static class LoginLayout
     public const int PinKeypadTileW = 52; // spec §11.3a. CODE-CONFIRMED.
     public const int PinKeypadTileH = 52; // spec §11.3a. CODE-CONFIRMED.
 
-    // Digit glyph source columns in password.dds. spec §11.3b. CODE-CONFIRMED.
-    // For digit d: glyph row = d*52. State columns: normal=560, hover=664, pressed=612.
-    public const int PinDigitNormalSrcX = 560; // spec §11.3b. CODE-CONFIRMED.
-    public const int PinDigitHoverSrcX = 664; // spec §11.3b. CODE-CONFIRMED.
-    public const int PinDigitPressedSrcX = 612; // spec §11.3b. CODE-CONFIRMED.
-    public const int PinDigitRowHeight = 52; // per digit d: srcY = d*52. spec §11.3b. CODE-CONFIRMED.
+    // Digit glyph source rects in password.dds. spec §11.3b. CODE-CONFIRMED.
+    // AXIS CONVENTION (§11.3b CORRECTED): digit d varies along U/X, state varies along V/Y.
+    //   srcU = d * 52  (X column = digit index × tile width)
+    //   srcV = 560 (normal) | 612 (pressed) | 664 (hover)
+    // "digit d's normal-state glyph is password.dds source rect (d*52, 560, 52, 52)".
+    // spec §11.3b. CODE-CONFIRMED. Previous revision had axes swapped; corrected.
+    public const int PinDigitColWidth = 52;       // per-digit X stride: srcU = d*52. spec §11.3b. CODE-CONFIRMED.
+    public const int PinDigitNormalSrcY = 560;    // state normal  → srcV=560. spec §11.3b. CODE-CONFIRMED.
+    public const int PinDigitHoverSrcY = 664;     // state hover   → srcV=664. spec §11.3b. CODE-CONFIRMED.
+    public const int PinDigitPressedSrcY = 612;   // state pressed → srcV=612. spec §11.3b. CODE-CONFIRMED.
+
+    // Legacy mis-named aliases (kept for compile compatibility; the _SrcX suffix was a mistake — these
+    // were always V/Y values, not U/X values; use the corrected _SrcY names above in all new code).
+    [System.Obsolete("Axis was swapped in old code — use PinDigitNormalSrcY instead. spec §11.3b CORRECTED.")]
+    public const int PinDigitNormalSrcX = 560;
+    [System.Obsolete("Axis was swapped in old code — use PinDigitHoverSrcY instead. spec §11.3b CORRECTED.")]
+    public const int PinDigitHoverSrcX = 664;
+    [System.Obsolete("Axis was swapped in old code — use PinDigitPressedSrcY instead. spec §11.3b CORRECTED.")]
+    public const int PinDigitPressedSrcX = 612;
+    [System.Obsolete("Axis was swapped in old code — use PinDigitColWidth instead. spec §11.3b CORRECTED.")]
+    public const int PinDigitRowHeight = 52;
 
     // Reset button (tag 11): panel-local (243,133,58,30). spec §11.3d. CODE-CONFIRMED.
     // password.dds src: normal(663,8), hover(663,88), pressed(663,48).
