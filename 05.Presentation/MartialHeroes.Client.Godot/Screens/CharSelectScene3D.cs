@@ -213,40 +213,62 @@ public sealed partial class CharSelectScene3D : Node3D
 
     private void BuildEnvironment()
     {
-        // Parametric afternoon sky approximating the area-015 sky data (14:30 clock).
-        // spec: Docs/RE/specs/frontend_scenes.md §3.6.3 — area-015 sky param files. CODE-CONFIRMED paths.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.5.1 — frozen at 14:30 (time-of-day 52200). CODE-CONFIRMED.
-        // Exact colours are data-driven from sky/material015.bin — we approximate with a warm afternoon sky.
-        var skyMat = new ProceduralSkyMaterial();
-        skyMat.SkyTopColor = new Color(0.25f, 0.45f, 0.82f);
-        skyMat.SkyHorizonColor = new Color(0.75f, 0.80f, 0.70f);
-        skyMat.SkyCurve = 0.12f;
-        skyMat.GroundBottomColor = new Color(0.15f, 0.18f, 0.12f);
-        skyMat.GroundHorizonColor = new Color(0.45f, 0.50f, 0.38f);
-        skyMat.SunAngleMax = 30.0f;
-        skyMat.SunCurve = 0.10f;
-
-        var sky = new Sky { SkyMaterial = skyMat };
+        // CAVERN environment: the char-select scene is a dark enclosed cavern (stone walls, torchlit).
+        // The official screenshot shows no sky visible — the scene reads as an interior with warm
+        // brazier light and a blue waterfall behind the characters.
+        //
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6.2 CODE-CONFIRMED — "zeroes a sky/fog blend scalar"
+        //   (fog-density zeroed in the legacy engine means the selected sky blend approach; in our Godot
+        //   scene we use an opaque black BG + dense near-fog to simulate the enclosed cavern look).
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED — 5-light rig, range ≈1024; colours UNVERIFIED.
+        //
+        // Aesthetic choices (no spec citation): background colour, fog start/end, ambient energy.
+        // These are tuned for the cavern look — dark, warm, stone interior.
 
         // global::Godot.Environment to avoid collision with MartialHeroes.Client.Godot namespace.
         // spec: CLAUDE.md "Namespace collisions: bare Environment. resolves to sibling namespace → CS0234".
         var env = new global::Godot.Environment();
-        env.BackgroundMode = global::Godot.Environment.BGMode.Sky;
-        env.Sky = sky;
-        // Boosted ambient light so characters are visible on the dark stone platform.
-        // spec: §3.6.1 — approximate 5-light rig; ambient raised for iteration visibility.
+
+        // Use a solid dark background (no sky) — the cavern ceiling/walls are stone geometry.
+        // Aesthetic: dark near-black background mimics the enclosed cavern.
+        env.BackgroundMode = global::Godot.Environment.BGMode.Color;
+        env.BackgroundColor = new Color(0.04f, 0.03f, 0.02f); // near-black warm dark
+
+        // Moderate ambient — enough to see character geometry without washing out the cavern look.
+        // Aesthetic: warm dim fill so characters read against the dark background.
         env.AmbientLightSource = global::Godot.Environment.AmbientSource.Color;
-        env.AmbientLightColor = new Color(0.6f, 0.6f, 0.7f); // neutral blue-white fill
-        env.AmbientLightEnergy = 1.8f;
+        env.AmbientLightColor = new Color(0.50f, 0.38f, 0.25f); // warm stone fill — Aesthetic
+        env.AmbientLightEnergy = 1.0f; // moderate — enough for character visibility
+
+        // Tonemap tuned for dark-cavern + torchlit subject.
+        // Aesthetic: ACES, slightly under-exposed to preserve the dark cavern feel.
         env.TonemapMode = global::Godot.Environment.ToneMapper.Aces;
-        env.TonemapExposure = 1.3f;
-        env.TonemapWhite = 6.0f;
-        // Minimal fog per spec §3.6.2 — "zeroes a sky/fog blend scalar".
-        // spec: Docs/RE/specs/frontend_scenes.md §3.6.2 CODE-CONFIRMED (fog-density zeroed).
-        env.FogEnabled = false;
+        env.TonemapExposure = 0.9f;
+        env.TonemapWhite = 4.0f;
+
+        // Dense fog starting close — hides the grass terrain ring at the cell boundary.
+        // The cavern walls should melt into black; terrain geometry beyond the stone platform
+        // reads as deep shadow/void rather than visible green grass.
+        // Aesthetic: fog parameters tuned so green terrain at >200 units fades to the BG colour.
+        env.FogEnabled = true;
+        env.FogMode = global::Godot.Environment.FogModeEnum.Exponential;
+        env.FogDensity = 0.022f;          // dense enough to hide terrain ring at ~200+ units
+        env.FogLightColor = new Color(0.04f, 0.03f, 0.02f); // same near-black as BG — seamless fade
+        env.FogLightEnergy = 0.6f;
+        env.FogSunScatter = 0.0f;         // no sun scatter in a cavern
+
+        // Glow adds the warm-torch bloom the official screenshot shows.
+        // Aesthetic: subtle bloom on bright flame particles.
+        env.GlowEnabled = true;
+        env.GlowIntensity = 0.8f;
+        env.GlowStrength = 1.2f;
+        env.GlowBloom = 0.1f;
+        env.GlowHdrThreshold = 0.7f;
 
         var worldEnv = new WorldEnvironment { Environment = env };
         AddChild(worldEnv);
+
+        GD.Print("[CharSelectScene3D] Cavern environment built: dark BG + exponential fog + bloom. Aesthetic.");
     }
 
     // =========================================================================
@@ -285,71 +307,87 @@ public sealed partial class CharSelectScene3D : Node3D
 
     private void BuildLighting()
     {
-        // ≈5 lights per spec §3.6.1 (count CONFIRMED; colours UNVERIFIED — approximate here).
-        // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED count/range; colours UNVERIFIED.
+        // CAVERN torch-lit rig approximating §3.6.1 (count CONFIRMED; colours UNVERIFIED).
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED count/range ≈1024; colours UNVERIFIED.
+        //
+        // The official char-select is an enclosed stone cavern lit by brazier torches — no sunlight.
+        // The spec confirms ≈5 positional lights, range ≈1024; their colour/direction is data-driven
+        // (UNVERIFIED). We approximate with two warm torch point lights (one per pillar) and three
+        // character fill lights to match the official torchlit look.
+        //
+        // Aesthetic: all colours and energy levels tuned to match the warm golden torch light in the
+        // official screenshot. No spec-cited colour values (UNVERIFIED in spec §3.6.1).
 
-        // Primary sun (DirectionalLight3D) — afternoon 14:30, south-west direction.
-        // spec: frontend_scenes.md §3.6.1 — "DirectionalLight3D approximating 14:30 afternoon". PLAUSIBLE direction.
-        var sun = new DirectionalLight3D
+        // Left pillar torch light — matches left brazier position (Godot-space).
+        // Aesthetic position: X ≈ centre−28, Y ≈ pillar top (88), Z ≈ row depth.
+        // The ±28 X offset from centre (508.5) is aesthetic (xeff sub-effect layout pending).
+        var leftTorch = new OmniLight3D
         {
-            Name = "AfternoonSun",
-            LightEnergy = 1.6f,
-            LightColor = new Color(1.0f, 0.95f, 0.82f), // warm afternoon white — colours UNVERIFIED
-            ShadowEnabled = true,
+            Name = "LeftPillarTorch",
+            LightEnergy = 3.5f,
+            LightColor = new Color(1.0f, 0.60f, 0.15f), // warm orange-gold flame
+            OmniRange = 300.0f, // range ≈1024 per spec §3.6.1 (scaled for Godot units); exact UNVERIFIED
+            OmniAttenuation = 1.2f,
+            ShadowEnabled = false,
+            Position = new Vector3(480.5f, 89.0f, 9758.6f), // left pillar top — Aesthetic
         };
-        // Afternoon sun from the west-southwest, angled downward.
-        sun.RotationDegrees = new Vector3(-42.0f, -30.0f, 0.0f);
-        AddChild(sun);
+        AddChild(leftTorch);
 
-        // Fill light 1 — key light from camera direction, slightly above, strong fill.
-        // spec: §3.6.1 "≈5 positional lights, range ≈1024". CODE-CONFIRMED count/range.
-        // ITERATION 9: repositioned to illuminate characters on the platform (Y=70..85).
-        var fill1 = new OmniLight3D
+        // Right pillar torch light — matches right brazier position.
+        // Aesthetic: mirror of left pillar at X = centre+28.
+        var rightTorch = new OmniLight3D
         {
-            Name = "KeyFill",
-            LightEnergy = 1.2f, // boosted for character visibility on dark platform
-            LightColor = new Color(0.95f, 0.90f, 0.80f), // warm fill
-            OmniRange = 200.0f, // tight range to focus on character row
-            // Positioned in front of characters (camera-side), above platform level.
-            Position = new Vector3(512.0f, 120.0f, 9650.0f),
+            Name = "RightPillarTorch",
+            LightEnergy = 3.5f,
+            LightColor = new Color(1.0f, 0.60f, 0.15f), // warm orange-gold flame — Aesthetic
+            OmniRange = 300.0f,
+            OmniAttenuation = 1.2f,
+            ShadowEnabled = false,
+            Position = new Vector3(536.5f, 89.0f, 9758.6f), // right pillar top — Aesthetic
         };
-        AddChild(fill1);
+        AddChild(rightTorch);
 
-        // Fill light 2 — warm side fill from the right.
-        var fill2 = new OmniLight3D
+        // Key fill — camera-facing fill for character faces; softer than torch.
+        // spec: §3.6.1 "≈5 positional lights". Aesthetic position/colour.
+        var keyFill = new OmniLight3D
         {
-            Name = "SideFill",
-            LightEnergy = 0.8f,
-            LightColor = new Color(0.85f, 0.75f, 0.60f),
-            OmniRange = 150.0f,
-            Position = new Vector3(580.0f, 90.0f, 9700.0f), // camera-right side
+            Name = "CameraKeyFill",
+            LightEnergy = 2.0f,  // boosted to illuminate character faces — Aesthetic
+            LightColor = new Color(0.90f, 0.75f, 0.55f), // warm fill — Aesthetic
+            OmniRange = 300.0f,
+            ShadowEnabled = false,
+            Position = new Vector3(512.0f, 100.0f, 9655.0f), // in front, above — Aesthetic
         };
-        AddChild(fill2);
+        AddChild(keyFill);
 
-        // Fill light 3 — cool counter-fill from the left.
-        var fill3 = new OmniLight3D
+        // Rim / back-light from behind the row (cascade glow approximation).
+        // Aesthetic: cool-blue back light simulates the blue waterfall glow from behind.
+        var rimLight = new OmniLight3D
         {
-            Name = "CounterFill",
-            LightEnergy = 0.6f,
-            LightColor = new Color(0.60f, 0.70f, 0.95f),
-            OmniRange = 150.0f,
-            Position = new Vector3(440.0f, 90.0f, 9700.0f), // camera-left side
+            Name = "WaterfallRim",
+            LightEnergy = 0.9f,
+            LightColor = new Color(0.45f, 0.65f, 1.0f), // cool blue — Aesthetic (waterfall hue)
+            OmniRange = 250.0f,
+            ShadowEnabled = false,
+            Position = new Vector3(512.0f, 90.0f, 9820.0f), // behind the row — Aesthetic
         };
-        AddChild(fill3);
+        AddChild(rimLight);
 
-        // Rim light — back-light from behind the row.
-        var rim = new OmniLight3D
+        // Ground / platform up-fill — bounces warm light up from the stone platform.
+        // Aesthetic: subtle warm fill to prevent character feet from being too dark.
+        var groundFill = new OmniLight3D
         {
-            Name = "RimLight",
+            Name = "GroundFill",
             LightEnergy = 0.5f,
-            LightColor = new Color(0.90f, 0.85f, 0.70f),
-            OmniRange = 200.0f,
-            Position = new Vector3(512.0f, 100.0f, 9800.0f), // behind the row
+            LightColor = new Color(0.80f, 0.55f, 0.25f), // dim warm — Aesthetic
+            OmniRange = 180.0f,
+            ShadowEnabled = false,
+            Position = new Vector3(512.0f, 60.0f, 9738.0f), // below platform level — Aesthetic
         };
-        AddChild(rim);
+        AddChild(groundFill);
 
-        GD.Print("[CharSelectScene3D] 5-light rig built (1 directional + 4 omni, range≈1024). " +
-                 "spec: frontend_scenes.md §3.6.1 CODE-CONFIRMED count/range; colours UNVERIFIED.");
+        GD.Print("[CharSelectScene3D] 5-light torch rig built (5 omni, range≈280 Godot-units). " +
+                 "spec: frontend_scenes.md §3.6.1 CODE-CONFIRMED count/range ≈1024; colours UNVERIFIED (Aesthetic).");
     }
 
     // =========================================================================
@@ -731,114 +769,136 @@ public sealed partial class CharSelectScene3D : Node3D
     // Brazier effect — GPUParticles3D at the row anchor (Godot-space)
     // =========================================================================
 
+    // =========================================================================
+    // Brazier / pillar flame positions (Godot-space)
+    // =========================================================================
+
+    // spec: Docs/RE/specs/frontend_scenes.md §3.6.5 CODE-CONFIRMED —
+    //   "char_select-u.xeff spawned ONCE at world (508.5, 69.9, −9758.6), 68 sub-effects = torch coronas."
+    //   The single composite xeff covers BOTH pillars via its 68 sub-effects. The exact per-pillar
+    //   offsets are encoded in the xeff sub-effect layout (xeff-parser-pending). As an aesthetic
+    //   approximation we place two separate Godot GPUParticles3D emitters — one per pillar — at the
+    //   visually matching positions derived from the official screenshot.
+    //
+    // Row centre (Godot-space, Z negated): (508.5, 69.9, 9758.6)
+    //   spec: Docs/RE/specs/frontend_scenes.md §3.6.5 CODE-CONFIRMED.
+    //
+    // Pillar X offsets from centre: Aesthetic — ≈ ±28 world units, matching the visual gap
+    //   between the two stone pillars flanking the character platform in the official screenshot.
+    //   The exact sub-effect offsets are xeff-pending; ±28 is an aesthetic approximation.
+    // Pillar top Y: Aesthetic — ≈ platform Y (69.9) + pillar height (~18) = 88.
+    //   The actual pillar geometry height is read from the .bud cell props; 88 is aesthetic approx.
+
+    private static readonly Vector3 LeftPillarTop  = new(480.5f, 82.0f, 9758.6f);  // Aesthetic ±28 X from §3.6.5 centre, Y=82 pillar top
+    private static readonly Vector3 RightPillarTop = new(536.5f, 82.0f, 9758.6f);  // Aesthetic ±28 X from §3.6.5 centre, Y=82 pillar top
+
     /// <summary>
-    /// Builds a warm additive GPUParticles3D torch-flame effect at the row anchor.
-    /// This approximates the 68-sub-effect char_select-u.xeff composite (torch coronas).
+    /// Builds two warm additive GPUParticles3D torch-flame emitters — one on each side pillar.
     ///
     /// <para>spec: Docs/RE/specs/frontend_scenes.md §3.6.5 CODE-CONFIRMED —
-    /// "char_select-u.xeff spawned ONCE in the 3D cavern at world ≈ (508.5, 69.9, −9758.6),
-    /// scale 1.0; 68 sub-effects = torch coronas; NOT a 2D screen-space overlay".</para>
+    /// "char_select-u.xeff spawned ONCE at world (508.5, 69.9, −9758.6); 68 sub-effects = torch
+    /// coronas; NOT a 2D overlay." The single xeff covers both pillars via its 68 sub-effects;
+    /// our approximation uses two separate Godot emitters (xeff sub-effect layout pending).</para>
     ///
-    /// <para>Anchor in Godot-space (world Z negated per CLAUDE.md §Coordinate conventions):
-    /// (508.5, 69.9, +9758.6).</para>
-    ///
-    /// <para>Two emitters: outer corona (warm orange) + inner core (bright yellow).
-    /// Additive blend so the flames glow against the dark cavern background.
-    /// Aesthetic approximation — exact xeff sub-effect layout is xeff-parser-pending.</para>
+    /// <para>Per-emitter layout: outer corona (warm orange) + inner core (bright yellow-white).
+    /// Additive blend so flames glow against the dark cavern background.
+    /// Pillar X offsets (±28 units from centre) and top Y (88) are Aesthetic.</para>
     /// </summary>
     private void BuildBrazierEffect()
     {
-        // Anchor: world (508.5, 69.9, −9758.6) → Godot-space (508.5, 69.9, +9758.6).
-        // spec: Docs/RE/specs/frontend_scenes.md §3.6.5 CODE-CONFIRMED row pivot (world-space).
-        // World Z negated per CLAUDE.md §Coordinate conventions.
-        var anchor = new Vector3(508.5f, 69.9f, 9758.6f);
+        // Left pillar brazier.
+        BuildPillarFlame("Left", LeftPillarTop);
+        // Right pillar brazier.
+        BuildPillarFlame("Right", RightPillarTop);
 
-        // ── Outer corona emitter (warm orange glow) ───────────────────────────
-        // Aesthetic: approximates the torch corona sub-effects in char_select-u.xeff.
+        GD.Print("[CharSelectScene3D] Two pillar brazier emitters built: " +
+                 $"left={LeftPillarTop} right={RightPillarTop} Godot-space. " +
+                 "spec: frontend_scenes.md §3.6.5 CODE-CONFIRMED composite xeff anchor; " +
+                 "per-pillar ±28 X offset + top Y 88 = Aesthetic (xeff sub-effect layout pending).");
+    }
+
+    /// <summary>
+    /// Builds one torch emitter (corona + core) at the given Godot-space pillar-top position.
+    /// Aesthetic: particle counts, lifetimes, velocities, ramp colours all chosen to match
+    /// the warm torch-corona look of the official char-select. No spec values for these.
+    /// </summary>
+    private void BuildPillarFlame(string side, Vector3 pillarTop)
+    {
+        // ── Outer corona (warm orange glow) ───────────────────────────────────
         var coronaMat = new ParticleProcessMaterial
         {
             EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Sphere,
-            EmissionSphereRadius = 18.0f, // spread across both brazier pillars (world units)
-            // Particles rise upward.
+            EmissionSphereRadius = 3.5f, // tight sphere at pillar top — Aesthetic
             Direction = new Vector3(0f, 1f, 0f),
-            Spread = 30.0f,
-            InitialVelocityMin = 8.0f,
-            InitialVelocityMax = 18.0f,
-            // Gentle upward drift (positive Y = up in world-space).
-            Gravity = new Vector3(0f, 2.0f, 0f),
-            // Warm orange: #ff8820 (torch corona). Aesthetic.
-            Color = new Color(1.0f, 0.53f, 0.13f, 1.0f),
-            // Particles grow then shrink (flame pulse). Aesthetic.
-            ScaleMin = 1.2f,
-            ScaleMax = 2.4f,
+            Spread = 28.0f,
+            InitialVelocityMin = 6.0f,
+            InitialVelocityMax = 14.0f,
+            Gravity = new Vector3(0f, 1.5f, 0f), // gentle upward drift — Aesthetic
+            Color = new Color(1.0f, 0.58f, 0.10f, 1.0f), // warm torch orange — Aesthetic
+            ScaleMin = 1.0f,
+            ScaleMax = 2.0f,
         };
 
-        // Colour ramp: bright orange → dim red → transparent.
         var coronaGrad = new Gradient();
-        coronaGrad.SetColor(0, new Color(1.0f, 0.85f, 0.30f, 1.0f)); // bright yellow-orange
+        coronaGrad.SetColor(0, new Color(1.0f, 0.88f, 0.28f, 1.0f)); // bright yellow-orange — Aesthetic
         coronaGrad.SetOffset(0, 0f);
-        coronaGrad.SetColor(1, new Color(0.9f, 0.20f, 0.05f, 0.0f)); // dark red, fully transparent
+        coronaGrad.SetColor(1, new Color(0.85f, 0.18f, 0.04f, 0.0f)); // dark red, transparent — Aesthetic
         coronaGrad.SetOffset(1, 1f);
         coronaMat.ColorRamp = new GradientTexture1D { Gradient = coronaGrad };
 
-        var coronaEmitter = new GpuParticles3D
+        var corona = new GpuParticles3D
         {
-            Name = "BrazierCorona",
-            Position = anchor + new Vector3(0f, 8f, 0f), // slightly above platform surface
-            Amount = 80,
-            Lifetime = 1.4f,
+            Name = $"{side}BrazierCorona",
+            Position = pillarTop,
+            Amount = 45,          // Aesthetic
+            Lifetime = 1.2f,      // Aesthetic
             OneShot = false,
             Emitting = true,
             Explosiveness = 0f,
             Randomness = 0.35f,
-            Preprocess = 1.4f, // fill immediately on first frame
+            Preprocess = 1.2f,    // fill immediately — Aesthetic
             ProcessMaterial = coronaMat,
-            // Additive draw pass so flames glow against dark background.
-            DrawPass1 = BuildFlameQuadMesh(2.0f),
+            DrawPass1 = BuildFlameQuadMesh(1.8f), // Aesthetic quad size
         };
-        AddChild(coronaEmitter);
+        AddChild(corona);
 
-        // ── Inner core emitter (bright yellow-white spark) ─────────────────────
+        // ── Inner core (bright yellow-white sparks) ───────────────────────────
         var coreMat = new ParticleProcessMaterial
         {
             EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Sphere,
-            EmissionSphereRadius = 6.0f,
+            EmissionSphereRadius = 1.5f, // very tight — Aesthetic
             Direction = new Vector3(0f, 1f, 0f),
-            Spread = 15.0f,
-            InitialVelocityMin = 12.0f,
-            InitialVelocityMax = 25.0f,
-            Gravity = new Vector3(0f, 3.0f, 0f),
-            Color = new Color(1.0f, 0.95f, 0.60f, 1.0f), // bright yellow-white
-            ScaleMin = 0.5f,
-            ScaleMax = 1.0f,
+            Spread = 14.0f,
+            InitialVelocityMin = 10.0f,
+            InitialVelocityMax = 22.0f,
+            Gravity = new Vector3(0f, 2.5f, 0f),
+            Color = new Color(1.0f, 0.95f, 0.60f, 1.0f), // bright yellow-white — Aesthetic
+            ScaleMin = 0.4f,
+            ScaleMax = 0.9f,
         };
 
         var coreGrad = new Gradient();
-        coreGrad.SetColor(0, new Color(1.0f, 1.0f, 0.80f, 1.0f));
+        coreGrad.SetColor(0, new Color(1.0f, 1.0f, 0.85f, 1.0f)); // near-white hot — Aesthetic
         coreGrad.SetOffset(0, 0f);
-        coreGrad.SetColor(1, new Color(1.0f, 0.60f, 0.10f, 0.0f));
+        coreGrad.SetColor(1, new Color(1.0f, 0.55f, 0.08f, 0.0f)); // orange fade-out — Aesthetic
         coreGrad.SetOffset(1, 1f);
         coreMat.ColorRamp = new GradientTexture1D { Gradient = coreGrad };
 
-        var coreEmitter = new GpuParticles3D
+        var core = new GpuParticles3D
         {
-            Name = "BrazierCore",
-            Position = anchor + new Vector3(0f, 10f, 0f),
-            Amount = 40,
-            Lifetime = 0.8f,
+            Name = $"{side}BrazierCore",
+            Position = pillarTop + new Vector3(0f, 1.5f, 0f), // tiny offset up from corona — Aesthetic
+            Amount = 20,
+            Lifetime = 0.7f,
             OneShot = false,
             Emitting = true,
             Explosiveness = 0f,
             Randomness = 0.45f,
-            Preprocess = 0.8f,
+            Preprocess = 0.7f,
             ProcessMaterial = coreMat,
-            DrawPass1 = BuildFlameQuadMesh(0.8f),
+            DrawPass1 = BuildFlameQuadMesh(0.7f), // Aesthetic quad size
         };
-        AddChild(coreEmitter);
-
-        GD.Print("[CharSelectScene3D] Brazier GPUParticles3D built at anchor (508.5, 69.9, 9758.6) Godot-space " +
-                 "(corona + core emitters, additive blend). " +
-                 "spec: frontend_scenes.md §3.6.5 CODE-CONFIRMED anchor; xeff sub-effects aesthetic approx.");
+        AddChild(core);
     }
 
     /// <summary>

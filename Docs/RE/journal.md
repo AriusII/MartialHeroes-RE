@@ -878,3 +878,22 @@ Top-Orchestrator session, continued. Firewall held; build 0/0; ~1520 tests green
   68-sub-effect layout); char-select environment should be a darker enclosed cavern (currently shows map000
   green-grass surround); build the PIN + server-list Godot screens from the now-recovered display-lists;
   promote server-list §11.4; the live-debugger render-path confirms.
+
+---
+
+## 2026-06-14 — CAMPAIGN 4 (cont.): char-select cavern + server-list/loading RE
+
+- **PROMOTION:** `frontend_scenes.md §11.4` (server-list: 10 rows actions 115..124, 8-byte record, channel
+  plates 400/401, scroll-arrow src corrected to loginwindow.dds 483/505/496,490, single builder + NEW_SERVER
+  render-branch) + §1.5 callout.
+- **RECOVERY (READONLY IDA):** Loading-screen composition — canvas 1024×768 center-origin; background = one of
+  `loading.dds`/`loading06.dds`/`loading08.dds` (rand%3); progress bar lower-left rect, fill 223×pct/100 px
+  sampled from a baked strip of the SAME DDS; NO caption/spinner/percent text (any wording baked); looping cue
+  920100100 (abort 861010106). Staged in `_dirty/campaign5/loading-screen-composition.md`.
+- **ENGINEERING (Godot layer 05, build 0/0):** char-select cavern — two brazier `GPUParticles3D` now sit on
+  the two side pillars (±X from the §3.6.5 anchor) with matching torch OmniLights; environment reworked to a
+  dark enclosed cavern (near-black BG, exponential fog absorbing the map000 grass surround, warm torch
+  lighting, glow; sun DirectionalLight removed). Red-screen era fully over; cavern reads like the official.
+- **RESIDUAL:** char-select SLOT actors render T-posed (idle `.mot` not applied to the slot row — same
+  per-id_b idle resolution as the create fix is needed); waterfall render; build the PIN/server-list/loading
+  Godot screens from the recovered display-lists; promote loading §9.

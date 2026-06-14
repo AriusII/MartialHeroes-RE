@@ -399,6 +399,15 @@ the front-end flow. **It supersedes two CODE-CONFIRMED-but-wrong labels in `ui_s
 > lobby mini-protocol bytes (8-byte wrapper + LZ4 payload, the 8-byte server record, the 30-byte
 > endpoint string) are owned by `login_flow.md` §2.
 
+> **Server-list widgets are built ONCE, toggled by visibility (CODE-CONFIRMED).** The server-list
+> overlay (states 35/36/37) is not a separate scene — all its widgets (the 10 server-row buttons
+> actions **115..124**, the two channel-block parchment plates actions 400/401, scroll arrows, refresh
+> button action 105, and the two shared notice/error dialogs) are constructed by the single login
+> window builder at scene build and merely shown/hidden by the tick. A clicked row (action 115+idx) at
+> state **37** commits the selection, persists `Lastserver`, and derives the channel-endpoint port as
+> `10000 + selected server id` for the state-**38** fetch — consistent with the §11.4 layout.
+> <!-- source: _dirty/structs/serverlist-displaylist.md -->
+>
 > **No login BGM (CODE-CONFIRMED absence).** No music/stream start was found anywhere in the login
 > tick or in any of its state-enter branches: the tick plays the intro **SFX 861010105** and queues
 > the transition **effect 10001**, and starts the net engine, but **issues no BGM/music start**. If a
@@ -2304,35 +2313,78 @@ The binary builds **two different** on-screen numeric keypads. Only the first is
 
 ## 11.4 Server-list overlay - widget layout (CODE-CONFIRMED literals)
 
-Server selection is a **visibility state (sub-state 37) of the same login window** (section 2), so it
-reuses the same four atlases loaded once at login-scene build. Shorthand: **A**=`login_slice1.dds`,
-**B**=`loginwindow.dds`, **C**=`InventWindow.dds`, **D**=`loginwindow_02.dds`.
+Server selection is a **visibility sub-state (35/36/37) of the same login window** (section 2): all of
+its widgets are built ONCE at login-scene build by the same single window builder and toggled
+visible/hidden by the per-frame tick (§1.5). There is **one builder, not two** — the "classic vs new"
+server-list look (§2.1) is a render-time branch on a client config flag (a field index, baked-art
+overlay), not a second build function. The set reuses the same four atlases loaded once at login-scene
+build. Shorthand: **A**=`login_slice1.dds`, **B**=`loginwindow.dds`, **C**=`InventWindow.dds`,
+**D**=`loginwindow_02.dds` (parchment, DXT5).
 
-| Role | Atlas | Src rect (U,V,W,H) | Dst (X,Y) | Kind | Action / caption |
+| Role | Atlas | Src rect (U,V,W,H) | Dst (X,Y,W,H) | Kind | Action / caption |
 |---|---|---|---|---|---|
-| Server-list backdrop band | A/D | 0, 326*.., 1024, 442 | 0, 326*H/768 | image (dimmed band) | - |
-| Parchment row/tab PLATE - normal state | D | 9,6,202,372 | col0 dst 24,97,202,372 / col1 dst 257,97,202,372 | 3-state plate | row ids 400/401 |
-| Parchment row/tab PLATE - hover/pressed state | D | 220,6,202,372 | (same dst as normal) | 3-state plate | row ids 400/401 |
+| Full background art panel | A | 0,0,1024,398 | 0,0,1024,398 | panel (full-bg) | - |
+| Bottom-bar band | A | 0,582,1024,442 | 0,(runtime),1024,442 | panel (Y scales w/ screen) | - |
+| Parchment row/tab PLATE - normal state | D | 9,6,202,372 | col0 dst 24,97,202,372 / col1 dst 257,97,202,372 | 3-state plate | channel toggles **400/401** |
+| Parchment row/tab PLATE - hover/pressed state | D | 220,6,202,372 | (same dst as normal) | 3-state plate | channel toggles **400/401** |
 | Parchment scroll BODY - channel column 0 | D | 448,6,100,372 | dst 77,97,100,372 | image | - |
 | Parchment scroll BODY - channel column 1 | D | 572,6,100,372 | dst 310,97,100,372 | image | - |
 | Parchment scrollbar thumb | D | 700,18,46,168 | dst 0,(runtime),46,168 | image (dynamic Y) | - |
-| Server-row buttons x10 (loop) | B | 13,66,47,18, X step +47 | sprite row y=985 | 3-state button | **115..124** (id-115 = index) |
+| Server-row buttons x10 (loop) | B | 596,985,47,18 / hover-pressed 643,985 | X=13+47n, 66,47,18 | 3-state button | **115..124** (115 + row index) |
+| List scroll-UP arrow | B | 483,490,13,10 | 467,86,13,10 | 1-state button | - |
+| List scroll-DOWN arrow | B | 505,490,13,10 | 467,455,13,10 | 1-state button | - |
+| Scrollbar thumb / commit dot | B | 496,490,9,9 | 469,98,9,9 | 1-state button | - |
+| **Refresh button** | A | 792,398,111,38 | 456,-3,111,38 | button (+2nd UV rect) | **105** (10 s cooldown -> re-enter fetch) |
+| Refresh-button label plate | A | 743,398,210,70 | 407,-3,210,70 | image (gold plate) | **baked art** |
 | List column header labels | (text) | - | in scroll | label | captions 4029..4032 |
-| List up / down arrows | B | 690,985 / 784,985 | window-anchored | button | - |
-| **Refresh button** | A | 456,-3,111,38 | 792,398 | button | **105** (10 s cooldown -> re-enter fetch) |
-| Refresh-button label plate | A | 407,-3,210,70 | 743,398 | image (gold plate) | **baked art** |
 | Availability indicator (per row) | (text) | - | per row | label | population captions 6001..6005 |
-| Connecting-dialog FRAME (endpoint wait, state 39) | C | 318,647,340,190 (== shared notice panel) | 342,289,340,190 (centered) | panel | runtime body caption (msg.xdb id; not a texture rect) |
+| Notice dialog #1 FRAME | C | 318,647,340,190 (== shared notice panel) | 342,289,340,190 (centered) | panel (hidden) | runtime body caption (msg.xdb id) + OK button |
+| Error dialog #2 FRAME | C | 318,647,340,190 (== shared notice panel) | 342,289,340,190 (centered) | panel (hidden) | runtime body caption (msg.xdb id) + OK button |
 | Sword/arrow cursor | `data/cursor/stand.dds` | - | follows mouse | sprite | verified vs `data/cursor/game.ver` |
 
-- **Per-server-row record:** 8 bytes/entry (decode owned by section 2.2 / `login_flow.md`): `+0` u16
-  server id, `+2` i16 status, `+4` i16 population code (color thresholds 500/800/1200), `+6` i16
-  extra/flag. Row count from the window's row-count field. Population captions **6001..6005**; column
-  headers **4029..4032**; unknown-id fallback **5901**.
+- **Server-row count = exactly 10 (CODE-CONFIRMED).** The row-button loop runs X from 13 in steps of
+  +47 while X < 483 → 10 iterations → X ∈ {13,60,107,154,201,248,295,342,389,436}, each at dst
+  `(X,66,47,18)`. Each row registers action id **115 + row index** → the contiguous range **115..124**.
+  These small clickable row sprites (`loginwindow.dds` src `596,985` normal / `643,985` hover-pressed,
+  `47x18`) are DISTINCT from the parchment row/tab PLATE — see the parchment-plate note below.
+  <!-- source: _dirty/structs/serverlist-displaylist.md -->
+- **Per-server-row record:** 8 bytes/entry, little-endian (decode owned by section 2.2 /
+  `login_flow.md`): `+0` u16 server id (valid range 1..40), `+2` i16 status, `+4` i16 population /
+  load code (color thresholds 500/800/1200), `+6` i16 open-time / extra flag. Row count from the
+  window's row-count field. **Display names are NOT on the wire** — server id (1..40) indexes a
+  client-local localized name table (string banks **5001..5040** + locale banks). Population captions
+  **6001..6005**; column headers **4029..4032**; unknown-id fallback **5901**.
+  <!-- source: _dirty/structs/serverlist-displaylist.md -->
+- **Row click → channel-endpoint flow (cross-ref §1.5 / `login_flow.md` §2):** a clicked row button
+  (action 115+idx) sets the window's selected-server field; the selected server id is persisted to the
+  client `Lastserver` setting and added to **10000** to derive the channel-endpoint fetch port
+  (`10000 + server_id`) — the sub-state advance **37 → 38**. The two channel-block parchment plates
+  (actions **400/401**) are the channel/sub-list toggles revealed once a server is selected.
+  <!-- source: _dirty/structs/serverlist-displaylist.md -->
+- **Channel-block geometry (CODE-CONFIRMED loop, 2 iterations):** the two parchment channel columns
+  are built by a loop of count 2. Block X base starts **30** and steps **+233** → block X {30, 263};
+  the scroll-BODY source-U starts **448** and steps **+124** → src-U {448, 572} (the two columns
+  already tabulated above). `srcV = 6` is fixed for both parchment quads; the PLATE source-UV is FIXED
+  (normal `9,6` / hover-pressed `220,6`) and does NOT advance per column.
+  <!-- source: _dirty/structs/serverlist-displaylist.md -->
 - The Refresh and Cancel button **words** may be baked atlas art (gold plates) rather than caption ids
   - UNVERIFIED which; the rects (Refresh `456,-3,111x38`; Cancel = login action 111) are firm.
-- The left-scroll calligraphy header is a runtime caption (integer id, **UNVERIFIED** exact id -
-  needs a `msg.xdb` extract).
+- **CORRECTION — list scroll arrows / thumb source (CODE-CONFIRMED).** Earlier drafts placed the list
+  up/down arrows at `loginwindow.dds` src `690,985` / `784,985`. The real builder sources all three
+  list controls from a DIFFERENT band of `loginwindow.dds` (B): scroll-UP at src **(483,490)** (dst
+  `467,86,13,10`), scroll-DOWN at src **(505,490)** (dst `467,455,13,10`), and the scrollbar
+  thumb / commit dot at src **(496,490)** (dst `469,98,9,9`). The `690,985` / `784,985` figures are
+  WRONG for these controls — corrected in the table above.
+  <!-- source: _dirty/structs/serverlist-displaylist.md -->
+- **Calligraphic title (武神再起), the per-server "NEW" badge, and `server_icon.dds` are render-time /
+  baked art, NOT scene-build widgets.** The calligraphy title and parchment scroll art are baked into
+  `loginwindow_02.dds`. The red "NEW" badge is driven by a client config flag (a server index) and is
+  drawn beside the matching server record by the per-row render path — a presentation flag, not a
+  server address and not a build-time widget. `data/ui/server_icon.dds` (128x128 per-server badge) is
+  likewise bound on the per-row render path, not in this builder. **PENDING (live-debugger):** the
+  exact per-row render-path draw of `server_icon` / the NEW badge, and the integer caption id of the
+  calligraphy header, are not pinned here — they need a render-tick read / `msg.xdb` extract.
+  <!-- source: _dirty/structs/serverlist-displaylist.md -->
 - **Parchment plate vs server-row button (do not confuse).** The `202x372` row/tab PLATE
   (`loginwindow_02.dds` src normal `9,6` / hover-pressed `220,6`) is the parchment BACKING the row
   face draws over - it is DISTINCT from the small clickable server-row button sprite
@@ -2341,13 +2393,16 @@ reuses the same four atlases loaded once at login-scene build. Shorthand: **A**=
   per channel column (`448` -> `572`); `srcV = 6` is fixed for both parchment quads; only two channel
   columns are built (channel-tab count = 2). The parchment chrome lives entirely on
   `loginwindow_02.dds`.
-- **Connecting dialog == the shared notice panel (not a distinct sub-rect).** The dialog shown during
-  the channel-endpoint wait (state 39) is the SAME `InventWindow.dds` frame sub-rect `(318,647,340,190)`
-  used for notice / error / quit dialogs (section 11.2d), drawn at on-screen `342,289,340,190`. There is
-  no dedicated connecting-frame texture rect - only the runtime body caption differs (a `msg.xdb`
-  caption id, not reproduced here). **Behavioral nuance (UNVERIFIED, static-only):** the server-list
-  WAIT (state 35) raises the channel-tab parchment panel + refresh button, NOT the notice frame; only
-  the endpoint WAIT (state 39) raises this connecting frame.
+- **Two notice/error dialogs are built (not one), both == the shared notice panel.** The server-list
+  set instantiates the shared `InventWindow.dds` frame sub-rect `(318,647,340,190)` TWICE — a notice
+  dialog #1 and an error dialog #2 — each drawn (hidden) at on-screen `342,289,340,190`, each with its
+  own runtime body caption label (a `msg.xdb` caption id, not reproduced here) and its own OK button.
+  The OK button's pressed state is at source-U **415** (same shared 3-state OK widget used elsewhere in
+  §11.2d). There is no dedicated connecting-frame texture rect — only the runtime body caption differs.
+  **Behavioral nuance (UNVERIFIED, static-only):** the server-list WAIT (state 35) raises the
+  channel-tab parchment panel + refresh button, NOT a notice frame; the dialogs are raised on the
+  empty-list / connect-fail / endpoint-wait branches (msg 4027/4028 etc., §1.5 states 36/39).
+  <!-- source: _dirty/structs/serverlist-displaylist.md -->
 
 ## 11.5 Char-select scene - widget layout (CODE-CONFIRMED literals)
 
