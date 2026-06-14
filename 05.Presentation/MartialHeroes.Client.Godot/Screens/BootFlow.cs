@@ -706,20 +706,44 @@ public sealed partial class BootFlow : Node
         // Per spec: empty slot must carry name "@BLANK@". CODE-CONFIRMED.
         // Per spec: max 5 slots (indices 0..4). CODE-CONFIRMED.
         //
-        // Synthetic roster: 1 real char + 1 @BLANK@ empty slot. Covers both the enter-game path
-        // and the create-character path (enter on @BLANK@).
+        // Synthetic roster: 3 real chars + 2 @BLANK@ empty slots.
+        // Matches the official reference which shows "캐릭터 개수 : 3" (character count: 3).
+        // spec: Docs/RE/specs/frontend_scenes.md §3.1 — "at most 5 slots". CODE-CONFIRMED.
         var slots = System.Collections.Immutable.ImmutableArray.Create<CharacterListSlot>(
-            // Slot 0: real character.
+            // Slot 0: Musa (class 1).
             new CharacterListSlot(
                 SlotIndex: 0,
                 Name: "무사영웅",
                 Level: 25,
                 ServerClass: 1, // internal class 1 (Musa). spec §4.1. CODE-CONFIRMED.
                 CurrentHp: 650),
-            // Slot 1: empty slot (sentinel "@BLANK@"). spec: §3 / login_flow.md §3.5. CODE-CONFIRMED.
+            // Slot 1: Blader (class 3) — exercises the blader skin chain.
+            // spec: Docs/RE/specs/frontend_scenes.md §4.1 — UI index 2 → internal class 3. CODE-CONFIRMED.
             new CharacterListSlot(
                 SlotIndex: 1,
+                Name: "격사전설",
+                Level: 32,
+                ServerClass: 3, // internal class 3 (Blader). spec §4.1. CODE-CONFIRMED.
+                CurrentHp: 520),
+            // Slot 2: Tao (class 2) — exercises the Tao skin chain.
+            // spec: Docs/RE/specs/frontend_scenes.md §4.1 — UI index 3 → internal class 2. CODE-CONFIRMED.
+            new CharacterListSlot(
+                SlotIndex: 2,
+                Name: "TaoMaster",
+                Level: 18,
+                ServerClass: 2, // internal class 2 (Tao). spec §4.1. CODE-CONFIRMED.
+                CurrentHp: 480),
+            // Slot 3: empty slot (sentinel "@BLANK@"). spec: §3 / login_flow.md §3.5. CODE-CONFIRMED.
+            new CharacterListSlot(
+                SlotIndex: 3,
                 Name: "@BLANK@", // spec: empty-slot sentinel. CODE-CONFIRMED.
+                Level: 0,
+                ServerClass: 0,
+                CurrentHp: 0),
+            // Slot 4: empty slot (sentinel "@BLANK@").
+            new CharacterListSlot(
+                SlotIndex: 4,
+                Name: "@BLANK@",
                 Level: 0,
                 ServerClass: 0,
                 CurrentHp: 0));

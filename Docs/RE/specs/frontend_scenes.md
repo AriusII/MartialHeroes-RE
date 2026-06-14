@@ -711,17 +711,22 @@ The select scene renders each occupied slot as a **live, animated 3D character**
 on the 3D stage (§3.7) — **not** a 2D portrait, and **not** a separate asset path. The preview reuses
 the exact in-world player-actor build path, so skin / bind / idle-motion resolve through the normal
 `.skn` / `.bnd` / `.mot` chains (owned by `specs/skinning.md`, `formats/mesh.md`); char-select adds
-**no new asset loading and no dedicated "select" motion clip** (§3.3.4 / §3.7.5). The preview-character
+**no new mesh/skin asset loading**, though hover/select swaps to a **distinct second motion clip**
+(the select / turn-to-front `.mot`, §3.3.4 / §3.7.5). The preview-character
 asset set for the four starter classes is catalogued in **§3.7.5**.
 
 ### 3.3.1 Per-slot world placement (CODE-CONFIRMED)
 
 Each preview actor's world position is the **stage origin** (§3.7.2; world `(2048, 0, −6144)`) plus a
-**baked per-slot offset**. The row runs along **world +X**; the Z component arcs very slightly toward
-the camera at the centre slot (a shallow ~1.5-unit bow). **Y is exactly 0.0 for every slot** — the
-actors stand on the stage-origin plane; there is **no terrain sample and no per-slot ground lookup**.
+**baked per-slot offset**. Each offset is a **negative ΔX added to the base stage X (2048)**: the five
+slots' ΔX run `{−1560, −1548, −1536, −1524, −1512}` — negative offsets ascending by a **+12 step**
+(slot 0 is the most-negative offset, slot 4 the least), placing world X in the range ≈ 488..536. The Z
+component arcs very slightly toward the camera at the centre slot (a shallow ~1.5-unit bow). **Y is
+exactly 0.0 for every slot** — the actors stand on the stage-origin plane; Y is a **hard `0.0`
+immediate** (stage-origin Y 0.0 + slot ΔY 0.0), with **no terrain sample and no per-slot ground lookup**
+on the placement path.
 
-| Slot | ΔX | ΔY | ΔZ | World X | World Y | World Z | Confidence |
+| Slot | ΔX (offset from base X 2048) | ΔY | ΔZ | World X | World Y | World Z | Confidence |
 |---|---|---|---|---|---|---|---|
 | 0 | −1560.0 | 0.0 | −3593.0  | 488.0 | 0.0 | −9737.0 | CONFIRMED |
 | 1 | −1548.0 | 0.0 | −3594.0  | 500.0 | 0.0 | −9738.0 | CONFIRMED |
@@ -729,13 +734,23 @@ actors stand on the stage-origin plane; there is **no terrain sample and no per-
 | 3 | −1524.0 | 0.0 | −3594.0  | 524.0 | 0.0 | −9738.0 | CONFIRMED |
 | 4 | −1512.0 | 0.0 | −3593.0  | 536.0 | 0.0 | −9737.0 | CONFIRMED |
 
-- **X spacing:** adjacent slots are **12 world units** apart; with the **×3.0 preview scale** (below)
-  the on-screen separation is **36 units**.
+- **Placement is a separate post-build step.** The static scene builder does **not** place the actors
+  and contains no 5-iteration actor loop; the up-to-5 preview actors are placed by a **separate
+  post-build slot-actor step**, reached from the char-select orchestrator after the static scene is
+  built. A faithful rebuild sequences the static stage first, then populates the preview row as a
+  distinct step driven by the character list.
+- **Offset table is a code immediate.** The five ΔX/ΔY/ΔZ triples are a **5-row code-immediate table**
+  (a pooled float-constant block consumed by a per-slot branch chain), **exactly 5 rows**, **not** read
+  from any data file. The loop covers slots 0..4.
+- **X spacing:** adjacent slots are **12 world units** apart (the +12 ΔX step); with the **×3.0 preview
+  scale** (below) the on-screen separation is **36 units**.
 - **Z arc:** the Z offsets `{−3593, −3594, −3594.5, −3594, −3593}` dip to the centre slot, bowing the
   row very slightly toward the camera. (This refines the earlier "Z ≈ −3593" approximation.)
-- **Scale:** the per-slot preview actor's scale factor is multiplied by **3.0**.
+- **Scale:** the per-slot preview actor's scale factor is **multiplied** by **3.0** (a relative scale
+  multiply, not an absolute scale).
 - **Spin:** the slot previews do **not** auto-rotate. (The separate single **create-preview** actor at
   §4.2 *does* idle-spin.)
+<!-- source: _dirty/campaign5/charselect3d/stage-assembly-confirm.md, _RECONCILED.md (LANE 1) -->
 
 ### 3.3.2 Facing — pure yaw, fixed at build (CODE-CONFIRMED placement; front/back UNVERIFIED)
 
@@ -767,33 +782,50 @@ chrome (§11.5) runs in parallel as cosmetic dressing.
 ### 3.3.4 Pose / motion — idle vs select-turn clip swap (CODE-CONFIRMED)
 
 The preview uses the standard in-world animation pipeline; **there is no hardcoded "select stand"
-motion id.** The clip is chosen indirectly through the per-class animation-catalogue **visual record**,
-selected by the actor's **motion-state byte** (descriptor field `+0x3C4`):
+motion id.** The **only on-actor change on hover/select is an animation-clip swap** — the actor plays a
+different motion clip. **No** position, quaternion, scale, tint, glow, flash, or brightness change is
+applied to the actor on hover/select; the visible "turn to face the player" is **baked into the select
+clip**, not a transform change.
 
-- **idle / default cycle** → the visual record's **idle field (`+0x44`)** when the motion-state byte is
-  0. This is what plays at scene entry for **every** occupied slot.
-- **select / "turn-to-front" cycle** → the visual record's **select field (`+0x58`)** when the
-  motion-state byte is 1.
+- **Idle clip** plays at scene entry for **every** occupied slot.
+- **Select clip** is a **distinct second motion clip** — not a re-pose of the idle clip and not a
+  play-mode flag. The idle clip and the select clip each resolve to a **separate** animation through the
+  per-class animation catalogue, so a faithful rebuild needs a genuine **second `.mot`** for the
+  turn-to-front pose.
 
-On hover/selection, the hit-test handler swaps the hit actor's clip **idle → select** (record `+0x44`
-→ `+0x58`) and forces **every other** slot back to **idle**. The apparent "turn to face the player" is
-**baked into the select clip**, not a transform change. The concrete `g{id}.mot` that each visual-record
-field resolves to is owned by `specs/skinning.md` + the animation-catalogue struct; for the starter
-classes the idle clip is `g111100010.mot` ("peace", 30 frames @ 10 fps; §3.7.5).
+On hover of a slot, that slot's actor plays the **select** clip; **every other occupied slot is forced
+back to idle** the same frame. De-hover reverts the actor to the **idle** clip — the select pose is
+**not sticky** (the hit-test runs every frame, and an explicit mouse-leave path forces all slots idle).
+At scene entry **all** actors start in the idle clip (slot 0 is only the info-panel default, §3.3.5 —
+it is **not** auto-played into the select clip).
+
+The concrete `g{id}.mot` that each clip resolves to is owned by `specs/skinning.md` + the
+animation-catalogue struct, via the same data-table chain as idle: **`data/char/actormotion.txt`
+(col2 == IdB) → `data/char/mot/g{id}.mot`**. For the starter classes the idle clip is `g111100010.mot`
+("peace", 30 frames @ 10 fps; §3.7.5). The **select** clip is the sibling entry in the **same** visual
+record, read out of the catalogue the same way; the exact IdA=1 select `.mot` filename is a data-table
+lookup (not a printf) and is **not yet pinned** — do not invent it (carried in §3.7.5 / Open questions).
 
 | State | 3D-actor effect |
 |---|---|
-| Unselected occupied slot | idle cycle (record `+0x44`); yaw 0 (or π if locked); scale ×3 |
-| Selected / hovered slot | select/"turn-to-front" cycle (record `+0x58`); **same transform** (no move, no extra rotation) |
+| Unselected occupied slot | idle clip; yaw 0 (or π if locked); scale ×3 |
+| Selected / hovered slot | select / "turn-to-front" clip (a distinct second `.mot`); **same transform** (no move, no extra rotation, no glow/flash/tint/scale) |
+| De-hovered / mouse-leave | reverts to idle clip (select pose is **not** sticky) |
 | Locked / new / creating slot | yaw π (faces away); otherwise idle handling |
+<!-- source: _dirty/campaign5/charselect3d/highlight-feedback.md, _RECONCILED.md (LANE 3) -->
+<!-- pending data-table: exact IdA=1 select .mot filename (table lookup, not yet dumped — do not invent) -->
 
 ### 3.3.5 Worn gear & default highlight (CODE-CONFIRMED)
 
 - **Worn gear** is overlaid by scanning the descriptor's 20 × 16-byte equipment table at +0x58; each
   slot's first dword is resolved to a visual id and attached (gear/visual sub-mesh channels are
   re-armed after the build), gated by a class/sex check.
-- After building, the **default slot** is auto-highlighted and its info line (name / level / position,
-  §3.2) shown. The default-slot index source is **MEDIUM** (not load-bearing for placement/pose).
+- After building, **slot 0 is the default committed selection** — its info line (name / level /
+  position, §3.2) and slot-frame chrome are shown by default. This is an **info-panel default only**:
+  **all** preview actors start in the **idle** clip, and slot 0's actor is **not** auto-played into the
+  select / turn-to-front clip (the select clip appears only on actual mouse hover; §3.3.4). The
+  default-highlight source is **CODE-CONFIRMED** (upgraded from MEDIUM).
+<!-- source: _dirty/campaign5/charselect3d/highlight-feedback.md, _RECONCILED.md (LANE 3) -->
 
 > **Coordinate convention reminder (for the Godot bridge).** These are raw legacy stage-world
 > coordinates with up = Y and the row along +X. Apply the project's world-to-engine convention when
@@ -1104,26 +1136,36 @@ The backdrop cell carries a baked lightmap bitmap under `data/effect/map/` named
 are pre-baked ambient/occlusion lighting for the terrain. (~3,791 such lightmaps exist across all
 areas; the char-select cell's is present.)
 
-### 3.6.5 Ambient FX — one code-spawned effect + the placement engine (CODE-CONFIRMED placement; visual roles UNVERIFIED)
+### 3.6.5 Ambient FX — one code-spawned effect + the placement engine (CODE-CONFIRMED placement; brazier/waterfall roles RESOLVED)
 
 The char-select scene's fixed ambient FX come from **two distinct mechanisms**, both feeding the same
 pooled map-effect spawner; the scene also pushes one ambient **sound** cue.
 
 **(a) The single code-spawned ambient effect (CODE-CONFIRMED).** The scene builder spawns **exactly
-one** ambient map effect from a code immediate: effect id **380003000**, at world
-**(508.48, 69.89, −9758.57)** — the **centre of the preview character row**, framed dead-centre by the
-camera (the same point as the terrain-init pivot, §3.7.2) — with **identity orientation** and **scale
-1.0**. It is pooled and inserted into the active-effect list, so it is a **standing background effect
-for the whole select session**, not a one-shot. This is the only effect-id immediate reachable from
-the scene builder.
+one** ambient map effect from a code immediate: effect id **380003000**, which is the internal id of
+**`char_select-u.xeff`** (the composite torch/brazier corona effect, 68 sub-effects). It is spawned at
+world **(508.48, 69.89, −9758.57)** — the **centre of the preview character row**, framed dead-centre by
+the camera (the same point as the terrain-init pivot, §3.7.2) — with **identity orientation** and
+**scale 1.0**. It is pooled and inserted into the active-effect list, so it is a **standing background
+effect for the whole select session**, not a one-shot. This is the **only** effect-id immediate
+reachable from the scene builder; the braziers are this **single composite `.xeff`**, not per-pillar
+spawns and not `.bud`-baked.
+<!-- source: _dirty/campaign5/charselect3d/fx-spawn-path.md, _RECONCILED.md (LANE 2) -->
+<!-- pending render-time confirm: that ALL visible braziers trace to this single 380003000 spawn (live frame) -->
 
-> **Effect-id → file resolution is UNVERIFIED.** No `380003000.xeff` file exists in the VFS, and the
-> id→filename mapping is not recoverable from the text tables alone (the `380003xxx` family is
-> labelled "ambient/env" by filename convention only, and the `effect_id` column of the placement
-> manifests does not index `xeffect.txt` by line). The shipped variant is plausibly `380003001.xeff`
-> (a yellow lens-flare / glow), but that is INFERRED-from-filename, not byte-pinned. The effect-file
-> byte format and the id→file resolution are owned by the effect catalogue / `formats/xeff.md`, not
-> this spec.
+> **Effect-id → file resolution is RESOLVED.** Effect id **380003000 is the internal effect id of
+> `char_select-u.xeff`** — the single composite front-end effect that carries the torch / brazier
+> coronas (68 sub-effects, a yellow lens-flare family). The earlier caveat ("no `380003000.xeff` exists,
+> resolution UNVERIFIED") and the `380003001.xeff` guess are both **corrected**: a prior hex→decimal
+> mis-conversion produced the wrong decimal id; the byte id pins to `char_select-u.xeff`.
+>
+> Resolution is **by registry id, not by filename**: effect filenames are listed in the effect manifest
+> `data/effect/xeff/xeffect.lst`, and each `.xeff`'s own embedded header descriptor carries the internal
+> id that becomes its registry key. A spawn looks the effect up by that numeric id. So the **absence** of
+> a literal `380003000.xeff` file (and of `data/effect/map000.txt`) is **expected and not a gap** — the
+> braziers come from the registry-resolved `char_select-u.xeff`, joined by id 380003000. The effect-file
+> byte format is owned by the effect catalogue / `formats/xeff.md`; this spec owns only the id→role join.
+<!-- source: _dirty/campaign5/charselect3d/fx-spawn-path.md, _RECONCILED.md (LANE 2) -->
 
 **(b) The per-area ambient-effect placement engine (CODE-CONFIRMED mechanism; no records for area 0).**
 Beyond the single code-spawned effect, fixed-anchor ambient effects (braziers, waterfalls, portals in
@@ -1153,18 +1195,21 @@ audible char-select music is the BGM cue **920100200** of §3.8, on the separate
 
 | Visual feature | Source | Confidence |
 |---|---|---|
-| Central ambient FX (row centre) | code-spawned effect **380003000** at (508.48, 69.89, −9758.57), scale 1.0, identity quat | placement CODE-CONFIRMED; visual role UNVERIFIED |
-| Waterfall / blue "portal" behind the row | the cell's own **`.fx3` / `.fx5` water layers** (animated water mesh + water fog; textures `_water_new01/03/04`), rendered by the terrain system independent of the effect engine | INFERRED (water layer present in the cell; full confirm needs an `.fx3` decode) |
-| Brazier flames | **AMBIGUOUS / UNVERIFIED** — no `map000.txt` record exists; either baked into the cell `.bud` mesh, or carried inside the composite `char_select-u.xeff` placed by a path not yet found | UNVERIFIED |
-| Front-end effect files present in the VFS | `char_select-u.xeff` (68 sub-effects, first texture family `lflare-…` = yellow lens-flare / torch corona), `zone_sel_u.xeff` + `zone_sel2-u.xeff` (11 sub-effects each, first texture `ring11b-…` = portal ring; the two differ only in the low byte of their effect id) | files CONFIRMED-present; none referenced by any placement manifest — their spawn path is UNRESOLVED |
+| Braziers / central ambient FX (row centre) | the **single composite `char_select-u.xeff`** (effect id **380003000**; 68 sub-effects = all torch coronas), spawned **once** by the scene builder at world **(508.48, 69.89, −9758.57)**, scale **1.0**, identity rotation — **not** per-pillar spawns, **not** `.bud`-baked | CODE-CONFIRMED (single composite `.xeff` spawn; id→file resolved) |
+| Waterfall / blue surface behind the row | the cell's own **terrain water layer** (`.fx3` / `.fx5`; textures `_water_new01/03/04`), rendered by the terrain system independent of the effect engine, **gated by the water option** — **not** a spawned `.xeff` | CODE-CONFIRMED that it is the cell water layer (exact `.fx3`/`.fx5` texture binding is terrain-side) |
+| `zone_sel_u.xeff` / `zone_sel2-u.xeff` (ids 380000000 / 380000001) | **World-only** zone-transition / teleport portals, spawned only by in-world movement handlers gated on the local player (absent in char-select) — **not** char-select dressing | CODE-CONFIRMED (never spawned in char-select) |
 
 > So the cavern look = **the cell geometry + lighting + the cell water layers + the single
-> code-spawned 380003000 effect** — not a different cell and not a 907-entry placement overlay. A
-> faithful rebuild should load `map000` cell `d000x10000z9990`, spawn one ambient effect (family
-> 380003) at world (508.48, 69.89, −9758.57), render the cell `.fx3`/`.fx5` water, and **not** attempt
-> to load a `data/effect/map000.txt` (absent) or any `data/sky/map/map%d.txt` placement table (dead
-> path). The brazier source (`.bud` geometry vs the xeff) and the role of the three front-end `.xeff`
-> files remain UNVERIFIED pending an `.fx3` decode and/or a live-frame effect-list census.
+> code-spawned `char_select-u.xeff` (id 380003000)** — not a different cell and not a 907-entry
+> placement overlay. A faithful rebuild should load `map000` cell `d000x10000z9990`, spawn the one
+> composite ambient effect **`char_select-u.xeff` (id 380003000)** at world (508.48, 69.89, −9758.57),
+> render the cell `.fx3`/`.fx5` water (water option), and **not** attempt to load a
+> `data/effect/map000.txt` (absent) or any `data/sky/map/map%d.txt` placement table (dead path). The
+> brazier source is **RESOLVED** to the single composite `.xeff` (not `.bud`-baked); the `zone_sel*`
+> portal files are **World-only** and never enter char-select. The remaining render-time item is only
+> whether **every** visible brazier traces to this one spawn (vs the effect's own sub-effects) — a
+> live-frame count.
+<!-- source: _dirty/campaign5/charselect3d/fx-spawn-path.md, _RECONCILED.md (LANE 2) -->
 
 ## 3.7 Char-select 3D scene composition — world, cell, stage, assets (CODE-CONFIRMED + black-box VFS)
 
@@ -2136,15 +2181,19 @@ shared dialog/frame atlas (`InventWindow.dds`) for the framed background quad - 
 `(318, 647, 340, 190)` (`srcU=318, srcV=647, W=340, H=190`), the same notice/error/quit frame
 (section 11.2d). This is the dragon-frame background quad described in the table below.
 
-- **Modal panel rect:** `347, 173, 329, 422` on the canvas (panel-local coordinates below are
-  relative to this panel).
+- **Modal panel rect:** `347, 173, 329, 422` on the canvas. **Panel origin = `(347, 173)`**; every
+  panel-local child rect below maps to the canvas as **`(347 + Xlocal, 173 + Ylocal)`** (the panel-
+  local coordinates below are relative to this origin). The frame quad is centred inside the window
+  from the window's own W/H, which lands it on this panel rect.
 - **Dragon-frame background quad.** The modal background is the framed dragon quad - a sub-rect of
   `InventWindow.dds`, source `(318, 647, 340, 190)`, NOT the whole 1024x1024 texture. The source art
   is `340 x 190` but the on-screen panel is `329 x 422` (taller than the source), so the frame is
   drawn **stretched**: render it as a **NinePatch** (or equivalent corner-preserving stretch) from
   `(318, 647, 340, 190)` up to the `347, 173, 329, 422` panel rect. The keypad tiles and buttons
   below are NOT stretched - they are drawn at their native `password.dds` source sizes
-  (52x52 / 154x58 / 58x30).
+  (52x52 / 154x58 / 58x30). The frame quad is constructed **set-invisible at build** and is **shown
+  when the modal is raised**; it is the visual backdrop, so render it behind the keypad tiles/buttons.
+  <!-- source: _dirty/structs/pin-modal-displaylist.md -->
 - **No runtime text - the warning line is baked atlas art (CONFIRMED).** The number-entry caption,
   the **red warning line**, the button faces, and the modal title are all **baked into the atlas
   art** (the digit/button glyphs into `password.dds`; the title + warning line into the
@@ -2152,8 +2201,14 @@ shared dialog/frame atlas (`InventWindow.dds`) for the framed background quad - 
   no message-catalogue id for the warning line. A revival must therefore render the warning line as
   part of the dragon-frame sub-rect art and must NOT wire it to a `msg.xdb` / message-catalogue
   caption. (A dynamic warning string would be a NEW addition, not a fidelity match.) The entered PIN
-  is held as an internal string (<= 4 chars) and shown as a masked `*`-per-digit string; there is no
-  text-box widget.
+  is held as an internal string (<= 4 chars) and shown as a masked `*`-per-digit string.
+- **Masked-PIN echo label (passive widget).** There is no editable text-box widget, but the build
+  function DOES construct a dedicated passive label that echoes the typed digits as `*` characters
+  (one `*` per entered digit, up to the internal entry cap of 4). It is a plain text label (no atlas
+  source rect), built first — before the keypad tiles — at **panel-local `(81, 138, 150, 22)`**
+  (`X=81, Y=138, W=150, H=22`); it carries no tag and takes no input (the keypad buttons drive entry).
+  Render it as the masked-echo display surface above the keypad.
+  <!-- source: _dirty/structs/pin-modal-displaylist.md -->
 
 ### 11.3a Keypad tile grid (2 rows x 5 columns)
 
@@ -2166,6 +2221,13 @@ shared dialog/frame atlas (`InventWindow.dds`) for the framed background quad - 
 | Column spacing | 55 px |
 | Row spacing | 60 px |
 
+Equivalently (build-function form, panel-local): each tile position `p` is placed at
+dest **X = `55 * (p % 5) + 28`**, **Y = `170`** for the top row (`p < 5`) / **`230`** for the bottom
+row (`p >= 5`), size `52 x 52`. The OK/확인 (tag 12, dest `90,290`, `154x58`), Cancel/취소 (tag 13,
+dest `90,350`, `154x58`) and Reset (tag 11, dest `243,133`, `58x30`) buttons in section 11.3d sit at
+fixed panel-local dests; their source rects are listed there.
+<!-- source: _dirty/structs/pin-modal-displaylist.md -->
+
 ### 11.3b Scrambled-digit glyphs (sourced from `password.dds`)
 
 The keypad does **not** build one button per position. For **each** of the 10 positions it builds a
@@ -2173,10 +2235,15 @@ stack of **10 overlapping digit-graphic buttons** (one per digit value 0..9) at 
 **100 button widgets total**. Per position, exactly one digit graphic is made visible; the rest are
 hidden. The visible digit at position `p` is `perm[p]` from the scramble (section 11.3c).
 
-- **Digit glyph source.** For digit value `d`, the source **row** is `d * 52` (rows
-  `0, 52, ..., 468`). The three button states read from three source **columns**:
-  **normal = 560, hover = 664, pressed = 612**, each tile `52 x 52`. So digit `d`'s normal-state
-  glyph is `password.dds` source rect `(560, d*52, 52, 52)`.
+- **Digit glyph source (CORRECTED — the digit varies along U/x, the button state along V/y).**
+  For digit value `d`, the source **column** is `U = d * 52` (columns `0, 52, ..., 468`). The three
+  button states read from three source **rows**: **normal = 560, state1/hover = 664, state2/pressed
+  = 612** (these are the `srcV` values), each tile `52 x 52`. So digit `d`'s normal-state glyph is
+  `password.dds` source rect **`(d*52, 560, 52, 52)`** (`srcU = d*52`, `srcV = 560`). The digit
+  changes the U (x) coordinate; the button state changes the V (y) coordinate. (A previous revision of
+  this section recorded the rect transposed as `(560, d*52, 52, 52)`; the build function's actual
+  source-rect arguments are `srcU = d*52`, `srcV = 560` — the axes were swapped.)
+  <!-- source: _dirty/structs/pin-modal-displaylist.md -->
 
 ### 11.3c Keypad scramble (CODE-CONFIRMED; live re-roll-on-reset UNVERIFIED)
 
@@ -2194,13 +2261,21 @@ Result: a **fresh random permutation of 0-9 every time the modal opens and every
 pressed**. The on-open re-roll is statically confirmed; the live re-roll on Reset is debugger-
 testable and currently **UNVERIFIED**.
 
+- **Digit-key behaviour — the TAG is the true digit, the POSITION is scrambled.** The on-screen digit
+  positions are re-rolled on open and on Reset, but each digit button's **tag is its true digit value
+  `d` (0..9)** — set when the 10 overlapping digit-glyph buttons are built for each position (the inner
+  build loop runs the tag counter 0..9). The keypad event handler reads the pressed button's **tag**,
+  not its grid position, to know which digit was entered. So scrambling the visible layout never
+  changes which digit a button means; the visible glyph and the tag always agree.
+  <!-- source: _dirty/structs/pin-modal-displaylist.md -->
+
 ### 11.3d Reset / OK / Cancel buttons + key tags
 
 Button **tags** are integer ids stored on each widget and read back by the keypad event handler.
 
 | Role | Tag | Rect (panel-local, X,Y,W,H) | `password.dds` src (normal / hover / pressed) | Behaviour |
 |---|---|---|---|---|
-| Digit tiles 0-9 | 0..9 | per section 11.3a (52x52) | 560 / 664 / 612, row = digit*52 | append digit (cap 4), mask `*` |
+| Digit tiles 0-9 | 0..9 | per section 11.3a (52x52) | `(d*52, 560)` / `(d*52, 664)` / `(d*52, 612)` — digit `d` along U/x, state along V/y (section 11.3b) | append digit (cap 4), mask `*` |
 | Reset (clear + re-shuffle) | 11 | 243,133,58,30 | 663,8 / 663,88 / 663,48 | re-run scramble (section 11.3c) |
 | OK (submit) | 12 | 90,290,154,58 | 330,0 / 330,116 / 330,58 | submit second password (PIN -> login blob, section 1.4a) |
 | Cancel (close/abort) | 13 | 90,350,154,58 | 486,0 / 486,116 / 486,58 | close / abort modal |
@@ -2209,6 +2284,23 @@ Button **tags** are integer ids stored on each widget and read back by the keypa
 > optional login-blob field - owned by `login_flow.md` section 4.2; the in-game gift-character
 > variant of this modal routes its submit through the net handler with a separate constant). The
 > modal fires no VFX and no PIN-specific SFX of its own.
+
+### 11.3e Two distinct numeric keypads — do NOT conflate them
+
+The binary builds **two different** on-screen numeric keypads. Only the first is the §11.3 modal:
+
+- **The §11.3 login PIN / second-password modal (this section).** Dragon/parchment-framed popup using
+  **`password.dds` + `InventWindow.dds`** (the `(318,647,340,190)` frame). The SAME builder serves
+  **two mount points** with an identical layout: the login-time second-password modal (section 1.4a),
+  and the **in-game HUD second-password keypad** (storage / gift-character unlock). The in-game
+  variant is the same widget layout, not a separate one — its submit routes through the net handler
+  with a different constant (section 11.3d blockquote).
+- **The `AutoCheckPanel` anti-bot / "auto-check" keypad (a SEPARATE class — NOT §11.3).** A distinct
+  countdown challenge keypad that uses **`password.dds` only** (no dragon frame), with a **different
+  tile grid**, two large buttons, **three yellow text labels**, and an **~18-second timer** with a
+  periodic tick callback. Do not treat it as the §11.3 modal; it is an independent anti-bot challenge
+  and would be documented separately if/when a spec covers it.
+<!-- source: _dirty/structs/pin-modal-displaylist.md -->
 
 ## 11.4 Server-list overlay - widget layout (CODE-CONFIRMED literals)
 

@@ -10,17 +10,21 @@
 //
 // LAYERS (bottom → top, pixel-confirmed visual order 2026-06-14):
 //   0. Dark canvas fill (near-black background).
-//   1. A — upper bezel backdrop (0,0,1024,398) src(0,0) — carved frame+rings+flag+URL §11.2b
-//   2. B — ink-wash painting (0,110,1024,490) src(0,0) — warrior+ribbon (DXT5 alpha)   §11.2a
-//   3. B — server listbox + channel selector (hidden at boot)                           §11.2a/b
-//   4. A — bottom login-bar panel (0,326,1024,442) src(0,582)                          §11.2e
-//   5. A — confirm/gold button (456,166,112,39) src(154,398)                           §11.2e
-//   6. A — face plate overlay (265,0,494,113) src(0,469)                               §11.2e
-//   7. B — option/tab buttons 1+2 at (40,82) / (164,82)                               §11.2f
-//   8. LineEdit controls for ID/PW at (390,32) / (568,32) (height-expanded to 22)      §11.2e
-//   9. A — Save-ID checkbox (694,86,13,13)                                             §11.2e
-//  10. A — secondary bottom button (OK / Login) at (456,64,112,39) src(266,398)        §11.2e
-//  11. C — quit-confirm modal (342,289,340,190) src(318,647)                           §11.2d
+//   1. A — bottom login-bar panel (0,326,1024,442) src(0,582)                          §11.2e
+//          (Z-LOWEST so painting covers it Y=326..600; stone band visible Y=600..768)
+//   2. A — upper bezel backdrop (0,0,1024,398) src(0,0) — carved frame+rings+flag+URL §11.2b
+//          (visible at Y=0..110 above painting; painting covers it Y=110..398)
+//   3. B — ink-wash painting (0,110,1024,490) src(0,0) — warrior+ribbon               §11.2a
+//          (highest art; covers backdrop Y=110..398 and BottomBar Y=326..600)
+//   4. B — server listbox + channel selector (hidden at boot)                          §11.2a/b
+//   5. BottomBand container (transparent) — holds all form controls                    §11.2e
+//      5a. A — confirm/gold button (456,166,112,39) src(154,398)                       §11.2e
+//      5b. A — face plate overlay (265,0,494,113) src(0,469)                           §11.2e
+//      5c. B — option/tab buttons 1+2 at (40,82) / (164,82)                           §11.2f
+//      5d. LineEdit controls for ID/PW at (390,32) / (568,32) (height-expanded to 22)  §11.2e
+//      5e. A — Save-ID checkbox (694,86,13,13)                                         §11.2e
+//      5f. A — secondary bottom button (OK / Login) at (456,64,112,39) src(266,398)    §11.2e
+//   6. C — quit-confirm modal (342,289,340,190) src(318,647)                           §11.2d
 //
 // ATLAS NOTES:
 //   - DXT2 atlases (login_slice1.dds, loginwindow_02.dds) use premultiplied alpha.
@@ -130,30 +134,42 @@ public sealed partial class LoginScreen : Control
         int widgetCount = 0;
 
         // =======================================================================
-        // CONFIRMED VISUAL LAYER ORDER (pixel-tested 2026-06-14 against the original client
-        // screenshot "Capture d'écran 2026-06-14 015528.png"):
+        // CONFIRMED VISUAL LAYER ORDER (pixel-confirmed 2026-06-14 from atlas analysis):
         //
-        // Display-list widget numbers (#0 = builder's first AddChild, #30 = thirtieth):
-        //   Widget #0  = loginwindow.dds  dest(0,110,1024,490) src(0,0) — INK-WASH PAINTING
-        //   Widget #30 = login_slice1.dds dest(0,0,1024,398)   src(0,0) — BEZEL FRAME + BACKDROP
+        // login_slice1.dds (atlas A) src(0,0..398):
+        //   Entirely OPAQUE dark-stone backdrop (alpha=255 throughout Y=0..330, fading
+        //   transparent only at Y=330..398). Provides the dark frame background behind the
+        //   painting, plus the visible top ornaments (rings, red flag, URL) in canvas Y=0..110
+        //   where no painting sits.
         //
-        // In the legacy GUI engine's widget tree, HIGHER widget index = HIGHER Z-order (drawn
-        // on top). BUT pixel-test proved login_slice1.dds is ENTIRELY OPAQUE (no transparent
-        // central window). This means the visual order in Godot must be the INVERSE:
-        //   • login_slice1.dds (Z=LOWER): the opaque carved metal backdrop. Hangs rings, red
-        //     flag, URL, rails all baked into this quad. Central region is opaque dark metal.
-        //   • loginwindow.dds (Z=HIGHER): the ink-wash painting layer. DXT5 alpha makes the
-        //     painted subject opaque while the rail/border region is transparent, so the rails
-        //     of login_slice1.dds show through around the painting.
+        // loginwindow.dds (atlas B): fully OPAQUE painting (alpha=255, Y=0..490).
+        //   PLACED ABOVE the A backdrop: the painting covers the dark stone from canvas Y=110..600.
+        //   Above Y=110, only login_slice1.dds is visible (rings, flag, URL).
         //
-        // spec: Docs/RE/_dirty/campaign4/frontend/login-display-list.md §0, §2, §4.
-        //       Pixel-confirmed visual order 2026-06-14.
+        // login_slice1.dds (atlas A) BottomBar src(0,582..1024):
+        //   The login form band, transparent at the central opening (src Y=582..606 transparent,
+        //   then partially transparent to ~Y=800), opaque stone at the very bottom (Y=800..1024)
+        //   which maps to canvas Y≈630..768. This stone band reveals the login form widgets.
+        //
+        // Layer order (bottom → top):
+        //   1. Dark bg fill (ColorRect, always-visible backdrop).
+        //   2. BottomBar (login_slice1.dds src 0,582, canvas Y=326, H=442) — Z=LOWEST backdrop.
+        //   3. BackgroundPanel (login_slice1.dds src 0,0, canvas Y=0, H=398) — Z=MIDDLE.
+        //   4. MainPanelChrome (loginwindow.dds painting, canvas Y=110, H=490) — Z=HIGHEST art.
+        //   5. Form widgets (buttons, textboxes, etc.) — added last, always topmost.
+        //
+        // Result: painting visible from canvas Y=110..600 (covers dark stone). Dark stone
+        //         visible Y=0..110 (frame top with rings/flag). Form band visible Y=600..768
+        //         (painting ends there, stone bottom band shows). Form widgets float above all.
+        //
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2a–b, §11.2e (layer order, CODE-CONFIRMED).
+        //       Atlas alpha analysis 2026-06-14: loginwindow.dds alpha=255 Y=0..490;
+        //       login_slice1.dds src(0..398) alpha=255 Y=0..330 (opaque dark stone backdrop).
         // =======================================================================
 
         // =======================================================================
         // BASE BACKGROUND: solid dark fill covering the entire canvas.
-        // The dark area outside the login frame is the window background.
-        // spec: Docs/RE/_dirty/campaign4/frontend/login-display-list.md §1 — window background.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2b.
         // =======================================================================
         {
             var bgFill = new ColorRect
@@ -167,17 +183,47 @@ public sealed partial class LoginScreen : Control
         }
 
         // =======================================================================
-        // [Z=1] UPPER BACKDROP — login_slice1.dds (A), LOWER LAYER.
-        // A@(0,0,1024,398) src(0,0) — the full carved-iron bezel frame:
-        //   top/left/right/bottom rails, corner ornaments, hanging RINGS/chains,
-        //   RED FLAG (top-left), URL text (top-right), dark central backdrop.
-        // ALL of these are baked-art pixels — no separate child widgets.
-        // This layer is ENTIRELY OPAQUE; the central region is a dark metal tone.
-        // The ink-wash painting (loginwindow.dds) is composited on top, and its DXT5
-        // alpha makes the subject opaque while the border region is transparent,
-        // so the rails of login_slice1.dds are visible around the painting.
-        // spec: Docs/RE/_dirty/campaign4/frontend/login-display-list.md §0, §2 widget#30.
-        //       Docs/RE/specs/frontend_scenes.md §11.2b "Full background art panel". CODE-CONFIRMED.
+        // [Z=1] LOWER BACKDROP — bottom carved-metal panel. ADDED FIRST so it is Z-LOWEST
+        // art. The painting (Z=3, added later) will cover it from Y=110..600. It remains
+        // visible only at Y=600..768 where the painting alpha fades, revealing the stone
+        // login-form band.
+        // A@(0, 326, 1024, 442) src(0,582) — login_slice1.dds — the brown/stone bottom band.
+        // Y = 326 on the 1024×768 reference canvas (= 326×768/768).
+        // spec §11.2e "Bottom login-bar panel". CODE-CONFIRMED.
+        // =======================================================================
+        AtlasTexture? bottomBar = _assets.Slice(
+            LoginLayout.AtlasLoginSlice1,
+            LoginLayout.BottomBarSrcX, LoginLayout.BottomBarSrcY,
+            LoginLayout.BottomBarW, LoginLayout.BottomBarH);
+
+        if (bottomBar is not null)
+        {
+            var bottomBarRect = MakeSprite("BottomBar", bottomBar,
+                0, LoginLayout.BottomBarCanvasY,
+                LoginLayout.BottomBarW, LoginLayout.BottomBarH);
+            AddChild(bottomBarRect);
+            widgetCount++;
+        }
+        else
+        {
+            // Offline fallback: solid parchment-tone band.
+            var fallbackBand = new ColorRect
+            {
+                Name = "BottomBarFallback",
+                Color = new Color(0.22f, 0.14f, 0.08f, 0.95f),
+                Position = new Vector2(0, LoginLayout.BottomBarCanvasY),
+                Size = new Vector2(LoginLayout.RefWidth, LoginLayout.BottomBarH),
+            };
+            AddChild(fallbackBand);
+        }
+
+        // =======================================================================
+        // [Z=2] UPPER BACKDROP — login_slice1.dds (A), MIDDLE LAYER.
+        // A@(0,0,1024,398) src(0,0) — dark-stone carved backdrop:
+        //   Opaque stone texture behind the painting. Visible at canvas Y=0..110 (top frame
+        //   area with rings, red flag, URL). Hidden by painting from Y=110..398. The frame
+        //   ornaments (rings/flag) are baked art at Y=0..110 of the atlas.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2b "Full background art panel". CODE-CONFIRMED.
         // =======================================================================
         AtlasTexture? bgSlice = _assets.Slice(
             LoginLayout.AtlasLoginSlice1,
@@ -194,12 +240,15 @@ public sealed partial class LoginScreen : Control
         }
 
         // =======================================================================
-        // [Z=2] CENTRAL PANEL PAINTING — loginwindow.dds (B), drawn ABOVE login_slice1.dds.
-        // B@(0,110,1024,490) src(0,0) — the ink-wash painting: warrior + red ribbon.
-        // DXT5 alpha: painted subject is opaque; rail/border region is transparent, letting
-        // the carved rails of login_slice1.dds (below) show through around the painting.
-        // spec: Docs/RE/_dirty/campaign4/frontend/login-display-list.md §2 widget#0.
-        //       Docs/RE/specs/frontend_scenes.md §11.2a "Main panel art". CODE-CONFIRMED.
+        // [Z=3] CENTRAL PANEL PAINTING — loginwindow.dds (B), HIGHEST ART LAYER.
+        // B@(0,110,1024,490) src(0,0) — the ink-wash painting: warrior + landscape.
+        // Fully opaque (alpha=255 Y=0..490). Placed above the dark stone backdrop so the
+        // painting covers it from canvas Y=110..600. Only the top frame ornaments (canvas
+        // Y=0..110) remain visible from the backdrop below.
+        // Also covers the BottomBar (Z=1) from canvas Y=326..600. The painting and BottomBar
+        // share the zone Y=326..600; painting wins (higher Z). At Y=600..768, painting ends
+        // (alpha goes to 0) and BottomBar stone form-band becomes visible.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2a "Main panel art". CODE-CONFIRMED.
         // =======================================================================
         AtlasTexture? mainPanel = _assets.Slice(
             LoginLayout.AtlasLoginWindow,
@@ -220,7 +269,7 @@ public sealed partial class LoginScreen : Control
         }
 
         // =======================================================================
-        // [Z=2..29] Widgets #1..#29: server listbox + channel-selector blocks (hidden at boot).
+        // [Z=4..N] Widgets: server listbox + channel-selector blocks (hidden at boot).
         // Hidden at boot — only shown when the server-list sub-state is active.
         // spec: Docs/RE/specs/frontend_scenes.md §1.5. CODE-CONFIRMED.
         // =======================================================================
@@ -264,47 +313,18 @@ public sealed partial class LoginScreen : Control
         }
 
         // =======================================================================
-        // [Z=53] Widget #53: LOWER BACKDROP — bottom carved-metal panel.
-        // A@(0, 326, 1024, 442) src(0,582) — login_slice1.dds — the brown/stone bottom band.
-        // Y = 326 on the 1024×768 reference canvas (= 326×768/768).
-        // spec §11.2e "Bottom login-bar panel". CODE-CONFIRMED.
+        // Form-widget band: a transparent container at canvas Y=326 that holds all
+        // interactive form controls (textboxes, buttons). Added AFTER the painting so
+        // these widgets are ALWAYS topmost (Z=N). The BottomBar art beneath provides
+        // the stone frame look; these widgets float above the painting + BottomBar.
         // =======================================================================
-        AtlasTexture? bottomBar = _assets.Slice(
-            LoginLayout.AtlasLoginSlice1,
-            LoginLayout.BottomBarSrcX, LoginLayout.BottomBarSrcY,
-            LoginLayout.BottomBarW, LoginLayout.BottomBarH);
-
-        Control bottomBand; // parent for all form widgets below
-        if (bottomBar is not null)
+        Control bottomBand = new Control
         {
-            var bottomBarRect = MakeSprite("BottomBar", bottomBar,
-                0, LoginLayout.BottomBarCanvasY,
-                LoginLayout.BottomBarW, LoginLayout.BottomBarH);
-            AddChild(bottomBarRect);
-            widgetCount++;
-
-            // Form widgets are children of this container (panel-local = band-relative coords).
-            bottomBand = new Control
-            {
-                Name = "BottomBand",
-                Position = new Vector2(0, LoginLayout.BottomBarCanvasY),
-                Size = new Vector2(LoginLayout.RefWidth, LoginLayout.BottomBarH),
-            };
-            AddChild(bottomBand);
-        }
-        else
-        {
-            // Offline fallback: solid parchment-tone band.
-            var fallbackBand = new ColorRect
-            {
-                Name = "BottomBandFallback",
-                Color = new Color(0.22f, 0.14f, 0.08f, 0.95f),
-                Position = new Vector2(0, LoginLayout.BottomBarCanvasY),
-                Size = new Vector2(LoginLayout.RefWidth, LoginLayout.BottomBarH),
-            };
-            AddChild(fallbackBand);
-            bottomBand = fallbackBand;
-        }
+            Name = "BottomBand",
+            Position = new Vector2(0, LoginLayout.BottomBarCanvasY),
+            Size = new Vector2(LoginLayout.RefWidth, LoginLayout.BottomBarH),
+        };
+        AddChild(bottomBand);
 
         // --- Baked label art plates (§11.2e) — "아이디" / "비밀번호" / decoration. ---
         // These are DDS sub-rects that contain Korean text baked into the atlas art.

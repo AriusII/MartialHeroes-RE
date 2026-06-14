@@ -507,27 +507,14 @@ public sealed partial class CharacterSelectScreen : Control
         AddChild(_createForm);
         widgetCount++;
 
-        // --- Char-select ambient VFX — char_select-u.xeff (effect_id 380003000, 68 sub-effects).
-        // spec: Docs/RE/formats/effects.md §A.15 — char_select-u.xeff; effect_id 380003000;
-        //   sub_effect_count 68; SAMPLE-VERIFIED.
-        // Parser caveat per spec: the 68-sub-effect file may fail at the scale-curve (Group D) read;
-        // FrontEndEffectPlayer handles this gracefully with a fallback ring effect.
-        // spec: Docs/RE/formats/effects.md §A.15 — "parser caveat: high-sub_effect_count files...
-        //   currently fail the existing .xeff parser at the scale-curve (Group D) read".
-        var charVfxPlayer = new FrontEndEffectPlayer
-        {
-            Name = "CharSelectEffect",
-            XeffVfsPath = "data/effect/xeff/char_select-u.xeff",
-            SharedRealAssets = _realAssets,
-            MouseFilter = MouseFilterEnum.Ignore,
-            // Z-index above other 2D children so particles render in front of the dark
-            // SubViewport preview rects. Additive blend makes them glow without hiding chrome.
-            ZIndex = 10,
-        };
-        charVfxPlayer.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        AddChild(charVfxPlayer);
-        // No MoveChild needed — ZIndex controls draw order regardless of child-list position.
-        widgetCount++;
+        // NOTE: char_select-u.xeff (effect_id 380003000, 68 sub-effects) is a COMPOSITE 3D effect —
+        // torch coronas placed in the 3D cavern. Braziers live in the 3D subviewport (CharSelectScene3D),
+        // NOT as a 2D fullscreen overlay on the canvas.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6.5 CODE-CONFIRMED — "spawned ONCE in the 3D cavern
+        //   at world ≈ (508.5, 69.9, −9758.6), scale 1.0; part of the 3D scene — NOT a 2D overlay".
+        // A 2D FrontEndEffectPlayer with raw SizeX ~160–194 × 24f × 20f = ~77,000 px effective particle
+        // size covers the entire viewport (the full-red-screen bug). Braziers are GPUParticles3D in
+        // CharSelectScene3D.BuildBrazierEffect(). Aesthetic/3D only — no 2D overlay here.
 
         RefreshInfo();
 

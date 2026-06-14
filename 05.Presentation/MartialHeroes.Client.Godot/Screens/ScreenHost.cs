@@ -104,14 +104,14 @@ public sealed partial class ScreenHost : Control
 
         if (windowSize.X <= 0 || windowSize.Y <= 0) return;
 
-        // Uniform fit-scale (letterbox) so the legacy canvas keeps its 4:3 proportions.
+        // Fill-scale: stretch the legacy 1024×768 canvas to fill the entire window edge-to-edge.
+        // The official client fills the entire window with no letterbox bars/gray margins.
         // spec: Docs/RE/specs/ui_system.md §8.1 "scale to the actual window size".
-        float scale = Mathf.Min(windowSize.X / RefWidth, windowSize.Y / RefHeight);
-        _canvas.Scale = new Vector2(scale, scale);
-
-        // Centre the scaled canvas in the window (letterbox bars on wide/tall windows).
-        float scaledW = RefWidth * scale;
-        float scaledH = RefHeight * scale;
-        _canvas.Position = new Vector2((windowSize.X - scaledW) * 0.5f, (windowSize.Y - scaledH) * 0.5f);
+        // Aesthetic choice: non-uniform scale on non-4:3 windows (slight stretch) is preferable to
+        // gray bands. For a 1024×768 window the scale is exactly 1×1 (pixel-perfect).
+        float scaleX = windowSize.X / RefWidth;
+        float scaleY = windowSize.Y / RefHeight;
+        _canvas.Scale = new Vector2(scaleX, scaleY);
+        _canvas.Position = Vector2.Zero;
     }
 }

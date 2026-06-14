@@ -168,6 +168,14 @@ public sealed partial class CharSelectScene3D : Node3D
                 GD.Print("[CharSelectScene3D] No VFS — terrain/props/characters skipped; env+camera only.");
             }
 
+            // Brazier flame effect: GPUParticles3D at the row anchor — warm additive torch coronas.
+            // spec: Docs/RE/specs/frontend_scenes.md §3.6.5 CODE-CONFIRMED —
+            //   "char_select-u.xeff spawned ONCE in the 3D cavern at world ≈ (508.5, 69.9, −9758.6),
+            //   scale 1.0; 68 sub-effects = torch coronas; part of the 3D scene NOT a 2D overlay".
+            // Anchor in Godot-space (world Z negated): (508.5, 69.9, +9758.6).
+            // Aesthetic: warm additive flame approximation; exact sub-effect layout is xeff-pending.
+            BuildBrazierEffect();
+
             GD.Print("[CharSelectScene3D] 3D scene initialised.");
         }
         catch (Exception ex)
@@ -717,6 +725,151 @@ public sealed partial class CharSelectScene3D : Node3D
 
         // Fallback: Musa (g202110001.skn) — the proven humanoid rig.
         return assets.Contains(FallbackSknPath) ? FallbackSknPath : null;
+    }
+
+    // =========================================================================
+    // Brazier effect — GPUParticles3D at the row anchor (Godot-space)
+    // =========================================================================
+
+    /// <summary>
+    /// Builds a warm additive GPUParticles3D torch-flame effect at the row anchor.
+    /// This approximates the 68-sub-effect char_select-u.xeff composite (torch coronas).
+    ///
+    /// <para>spec: Docs/RE/specs/frontend_scenes.md §3.6.5 CODE-CONFIRMED —
+    /// "char_select-u.xeff spawned ONCE in the 3D cavern at world ≈ (508.5, 69.9, −9758.6),
+    /// scale 1.0; 68 sub-effects = torch coronas; NOT a 2D screen-space overlay".</para>
+    ///
+    /// <para>Anchor in Godot-space (world Z negated per CLAUDE.md §Coordinate conventions):
+    /// (508.5, 69.9, +9758.6).</para>
+    ///
+    /// <para>Two emitters: outer corona (warm orange) + inner core (bright yellow).
+    /// Additive blend so the flames glow against the dark cavern background.
+    /// Aesthetic approximation — exact xeff sub-effect layout is xeff-parser-pending.</para>
+    /// </summary>
+    private void BuildBrazierEffect()
+    {
+        // Anchor: world (508.5, 69.9, −9758.6) → Godot-space (508.5, 69.9, +9758.6).
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6.5 CODE-CONFIRMED row pivot (world-space).
+        // World Z negated per CLAUDE.md §Coordinate conventions.
+        var anchor = new Vector3(508.5f, 69.9f, 9758.6f);
+
+        // ── Outer corona emitter (warm orange glow) ───────────────────────────
+        // Aesthetic: approximates the torch corona sub-effects in char_select-u.xeff.
+        var coronaMat = new ParticleProcessMaterial
+        {
+            EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Sphere,
+            EmissionSphereRadius = 18.0f, // spread across both brazier pillars (world units)
+            // Particles rise upward.
+            Direction = new Vector3(0f, 1f, 0f),
+            Spread = 30.0f,
+            InitialVelocityMin = 8.0f,
+            InitialVelocityMax = 18.0f,
+            // Gentle upward drift (positive Y = up in world-space).
+            Gravity = new Vector3(0f, 2.0f, 0f),
+            // Warm orange: #ff8820 (torch corona). Aesthetic.
+            Color = new Color(1.0f, 0.53f, 0.13f, 1.0f),
+            // Particles grow then shrink (flame pulse). Aesthetic.
+            ScaleMin = 1.2f,
+            ScaleMax = 2.4f,
+        };
+
+        // Colour ramp: bright orange → dim red → transparent.
+        var coronaGrad = new Gradient();
+        coronaGrad.SetColor(0, new Color(1.0f, 0.85f, 0.30f, 1.0f)); // bright yellow-orange
+        coronaGrad.SetOffset(0, 0f);
+        coronaGrad.SetColor(1, new Color(0.9f, 0.20f, 0.05f, 0.0f)); // dark red, fully transparent
+        coronaGrad.SetOffset(1, 1f);
+        coronaMat.ColorRamp = new GradientTexture1D { Gradient = coronaGrad };
+
+        var coronaEmitter = new GpuParticles3D
+        {
+            Name = "BrazierCorona",
+            Position = anchor + new Vector3(0f, 8f, 0f), // slightly above platform surface
+            Amount = 80,
+            Lifetime = 1.4f,
+            OneShot = false,
+            Emitting = true,
+            Explosiveness = 0f,
+            Randomness = 0.35f,
+            Preprocess = 1.4f, // fill immediately on first frame
+            ProcessMaterial = coronaMat,
+            // Additive draw pass so flames glow against dark background.
+            DrawPass1 = BuildFlameQuadMesh(2.0f),
+        };
+        AddChild(coronaEmitter);
+
+        // ── Inner core emitter (bright yellow-white spark) ─────────────────────
+        var coreMat = new ParticleProcessMaterial
+        {
+            EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Sphere,
+            EmissionSphereRadius = 6.0f,
+            Direction = new Vector3(0f, 1f, 0f),
+            Spread = 15.0f,
+            InitialVelocityMin = 12.0f,
+            InitialVelocityMax = 25.0f,
+            Gravity = new Vector3(0f, 3.0f, 0f),
+            Color = new Color(1.0f, 0.95f, 0.60f, 1.0f), // bright yellow-white
+            ScaleMin = 0.5f,
+            ScaleMax = 1.0f,
+        };
+
+        var coreGrad = new Gradient();
+        coreGrad.SetColor(0, new Color(1.0f, 1.0f, 0.80f, 1.0f));
+        coreGrad.SetOffset(0, 0f);
+        coreGrad.SetColor(1, new Color(1.0f, 0.60f, 0.10f, 0.0f));
+        coreGrad.SetOffset(1, 1f);
+        coreMat.ColorRamp = new GradientTexture1D { Gradient = coreGrad };
+
+        var coreEmitter = new GpuParticles3D
+        {
+            Name = "BrazierCore",
+            Position = anchor + new Vector3(0f, 10f, 0f),
+            Amount = 40,
+            Lifetime = 0.8f,
+            OneShot = false,
+            Emitting = true,
+            Explosiveness = 0f,
+            Randomness = 0.45f,
+            Preprocess = 0.8f,
+            ProcessMaterial = coreMat,
+            DrawPass1 = BuildFlameQuadMesh(0.8f),
+        };
+        AddChild(coreEmitter);
+
+        GD.Print("[CharSelectScene3D] Brazier GPUParticles3D built at anchor (508.5, 69.9, 9758.6) Godot-space " +
+                 "(corona + core emitters, additive blend). " +
+                 "spec: frontend_scenes.md §3.6.5 CODE-CONFIRMED anchor; xeff sub-effects aesthetic approx.");
+    }
+
+    /// <summary>
+    /// Builds a small quad <see cref="QuadMesh"/> for the flame particle draw pass.
+    /// GPUParticles3D needs a mesh to draw (otherwise no geometry is submitted to the GPU).
+    /// Aesthetic: plain white quad; colour comes from <see cref="ParticleProcessMaterial.Color"/>
+    /// and the colour ramp, composed with an additive <see cref="StandardMaterial3D"/>.
+    /// </summary>
+    private static QuadMesh BuildFlameQuadMesh(float size)
+    {
+        // Additive StandardMaterial3D: src += src × alpha → bright on dark, invisible on white.
+        // Aesthetic: this is the correct blend for torch / fire VFX.
+        var mat = new StandardMaterial3D
+        {
+            ShadingMode = StandardMaterial3D.ShadingModeEnum.Unshaded,
+            VertexColorUseAsAlbedo = true,
+            // Additive blend via transparency flag + blend mode.
+            Transparency = StandardMaterial3D.TransparencyEnum.Alpha,
+            BlendMode = StandardMaterial3D.BlendModeEnum.Add,
+            // Disable depth-write so overlapping particles accumulate additive light correctly.
+            NoDepthTest = false,
+            DepthDrawMode = StandardMaterial3D.DepthDrawModeEnum.Disabled,
+            BillboardMode = StandardMaterial3D.BillboardModeEnum.Enabled, // always face camera
+            AlbedoColor = Colors.White,
+        };
+
+        return new QuadMesh
+        {
+            Size = new Vector2(size, size),
+            Material = mat,
+        };
     }
 
     private static string AreaTag(int areaId) => areaId.ToString("D3");

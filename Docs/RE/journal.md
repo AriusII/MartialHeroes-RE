@@ -841,3 +841,40 @@ promotion, no pseudo-C in committed files), build 0/0, ~1409 tests green through
 - **RESIDUAL:** login painting/frame proportional polish; wire brazier/portal `.xeff` into the cavern; the
   3/5-vs-4/1 + `3/4`-vs-`3/7` delete-carrier live-debugger confirms; Phase-D IDB annotation (function-name
   proposals staged under `_dirty/**/names.proposed.yaml` — NOT opcode glossary, deferred to ida-naming-sync).
+
+---
+
+## 2026-06-14 — CAMPAIGN 4 (cont.): char-select red-screen fixed + scene/PIN/server-list RE
+
+Top-Orchestrator session, continued. Firewall held; build 0/0; ~1520 tests green (3/1 reader +9).
+
+- **RECOVERY (READONLY IDA):**
+  - **Char-select scene assembly:** 5 actors placed by a separate post-build step from a 5-row code-immediate
+    table; platform Y = hard 0.0; ΔX negative offsets from base X 2048 (+12 step); ΔZ shallow arc; ×3.0.
+    Single composite brazier effect `char_select-u.xeff` (internal id **380003000** — prior hex→dec
+    misconversion corrected) at world ≈ (508.5,69.9,−9758.6); waterfall = terrain cell water layer (not an
+    effect); `zone_sel*` are World-only portals. Selection feedback = idle→select clip swap (distinct second
+    `.mot`), no glow.
+  - **PIN modal display-list:** keypad window (347,173,329,422); 100 scrambled digit tiles where TAG = true
+    digit (positions re-rolled on open/Reset); OK tag 12 / Cancel tag 13 / Reset tag 11; dragon frame
+    `InventWindow.dds`(318,647,340,190) NinePatch; masked echo GULabel (81,138,150,22). **Correction:** digit
+    glyph src is (d*52, 560, 52, 52) — U=digit, V=state. A separate `AutoCheckPanel` anti-bot keypad exists.
+  - **Server-list display-list:** single LoginWindow builder + render-time NEW_SERVER branch; exactly 10
+    server rows (actions 115..124); 8-byte record {id u16, status i16, load i16, open_time i16}; row click
+    sets selected server, persists Lastserver, fetches channel endpoint at 10000+id; two channel parchment
+    plates (actions 400/401); scroll-arrow src corrected to loginwindow.dds (483/505/496,490); names 5001..5040.
+- **PROMOTION (REWRITE, firewall PASS):** `frontend_scenes.md` §3.3.1/§3.3.4/§3.3.5/§3.6.5 (char-select scene
+  + 380003000 resolved) and §11.3 (PIN corrected + masked echo + AutoCheckPanel). Server-list deltas staged
+  in `_dirty/structs/serverlist-displaylist.md` for a later §11.4 promotion.
+- **ENGINEERING (build 0/0):**
+  - **Network.Protocol (layer 02):** `3/1` character-list reader — 981-byte per-slot record, zero-alloc
+    `ref struct`, bit-position slot placement, appearance helper `5*(class+4*variant)−24`; +9 tests.
+  - **Godot (layer 05) — char-select RED SCREEN FIXED:** root cause was `FrontEndEffectPlayer` 2D particles
+    double-scaled (SizeX ×24 then ×20 → ~77,000 px) covering the viewport. Removed the 2D overlay (braziers
+    are 3D per §3.6.5); wired `GPUParticles3D` braziers at the world anchor in the cavern; the 3D scene
+    (cavern + characters) now renders. **Login margins FIXED:** `ScreenHost` letterbox → non-uniform fill
+    (no gray bands); roster seeded to 3 to match "캐릭터 개수 : 3".
+- **RESIDUAL:** brazier emitters should sit on the two side pillars (currently centred — needs the xeff
+  68-sub-effect layout); char-select environment should be a darker enclosed cavern (currently shows map000
+  green-grass surround); build the PIN + server-list Godot screens from the now-recovered display-lists;
+  promote server-list §11.4; the live-debugger render-path confirms.

@@ -410,7 +410,8 @@ public sealed class RealClientAssets : IDisposable
                     Error decompErr = img.Decompress();
                     if (decompErr != Error.Ok)
                     {
-                        GD.PrintErr($"[RealClientAssets] DXT2 decompress failed for '{virtualPath}': {decompErr}. Skipping unpremultiply.");
+                        GD.PrintErr(
+                            $"[RealClientAssets] DXT2 decompress failed for '{virtualPath}': {decompErr}. Skipping unpremultiply.");
                     }
                     else
                     {
