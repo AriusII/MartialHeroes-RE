@@ -41,36 +41,41 @@ public static class EnvironmentBinParsers
                 $"got {span.Length}. " +
                 "spec: Docs/RE/formats/environment_bins.md §1.");
 
-        // water_enable u32 @ 0x00. spec: §1.1 — water_enable u32 @ 0x00: CONFIRMED
-        uint waterEnable = BinaryPrimitives.ReadUInt32LittleEndian(span[0x00..]);
-        // water_y u32 @ 0x04. spec: §1.1 — water_y u32 @ 0x04: CONFIRMED
-        uint waterY = BinaryPrimitives.ReadUInt32LittleEndian(span[0x04..]);
-        // sky_gate u32 @ 0x08. spec: §1.1 — sky_gate u32 @ 0x08: CONFIRMED
-        uint skyGate = BinaryPrimitives.ReadUInt32LittleEndian(span[0x08..]);
-        // stardome_enable u32 @ 0x0C. spec: §1.1 — stardome_enable u32 @ 0x0C: CONFIRMED
+        // RECONCILED Campaign 5: the 10 u32 words are MOVE_DUNGEON, SIGHT_FIX, LENSFLARE, STARDOME,
+        // CLOUDDOME, SUN, MOON, SKYBOX, MAPHIDE, reserved — NOT water_enable/water_y (an IDA-name
+        // misread, disproved by the .txt↔.bin cross-reference over 64 area pairs).
+        // spec: Docs/RE/formats/environment_bins.md §1.1 (field table, .txt↔.bin cross-referenced).
+
+        // MOVE_DUNGEON u32 @ 0x00. spec: §1.1 — is_dungeon u32 @ 0x00: CONFIRMED
+        uint isDungeon = BinaryPrimitives.ReadUInt32LittleEndian(span[0x00..]);
+        // SIGHT_FIX u32 @ 0x04. spec: §1.1 — sight_distance u32 @ 0x04: CONFIRMED
+        uint sightDistance = BinaryPrimitives.ReadUInt32LittleEndian(span[0x04..]);
+        // LENSFLARE u32 @ 0x08. spec: §1.1 — lensflare_enable u32 @ 0x08: CONFIRMED
+        uint lensFlareEnable = BinaryPrimitives.ReadUInt32LittleEndian(span[0x08..]);
+        // STARDOME u32 @ 0x0C. spec: §1.1 — stardome_enable u32 @ 0x0C: CONFIRMED
         uint starDomeEnable = BinaryPrimitives.ReadUInt32LittleEndian(span[0x0C..]);
-        // clouddome_enable u32 @ 0x10. spec: §1.1 — clouddome_enable u32 @ 0x10: CONFIRMED
+        // CLOUDDOME u32 @ 0x10. spec: §1.1 — clouddome_enable u32 @ 0x10: CONFIRMED
         uint cloudDomeEnable = BinaryPrimitives.ReadUInt32LittleEndian(span[0x10..]);
-        // lensflare_enable u32 @ 0x14. spec: §1.1 — lensflare_enable u32 @ 0x14: CONFIRMED
-        uint lensFlareEnable = BinaryPrimitives.ReadUInt32LittleEndian(span[0x14..]);
-        // sun_moon_enable u32 @ 0x18. spec: §1.1 — sun_moon_enable u32 @ 0x18: CONFIRMED
-        uint sunMoonEnable = BinaryPrimitives.ReadUInt32LittleEndian(span[0x18..]);
-        // skybox_enable u32 @ 0x1C. spec: §1.1 — skybox_enable u32 @ 0x1C: CONFIRMED (always 0)
+        // SUN u32 @ 0x14. spec: §1.1 — sun_enable u32 @ 0x14: CONFIRMED
+        uint sunEnable = BinaryPrimitives.ReadUInt32LittleEndian(span[0x14..]);
+        // MOON u32 @ 0x18. spec: §1.1 — moon_enable u32 @ 0x18 (its own word, distinct from SUN): CONFIRMED
+        uint moonEnable = BinaryPrimitives.ReadUInt32LittleEndian(span[0x18..]);
+        // SKYBOX u32 @ 0x1C. spec: §1.1 — skybox_enable u32 @ 0x1C: CONFIRMED (always 0)
         uint skyboxEnable = BinaryPrimitives.ReadUInt32LittleEndian(span[0x1C..]);
-        // indoor_flag u32 @ 0x20. spec: §1.1 — indoor_flag u32 @ 0x20: CONFIRMED
+        // MAPHIDE u32 @ 0x20. spec: §1.1 — indoor_flag u32 @ 0x20: CONFIRMED
         uint indoorFlag = BinaryPrimitives.ReadUInt32LittleEndian(span[0x20..]);
         // _reserved_ u32 @ 0x24. spec: §1.1 — _reserved_ u32 @ 0x24: SAMPLE-VERIFIED (always 0)
         uint reserved = BinaryPrimitives.ReadUInt32LittleEndian(span[0x24..]);
 
         return new MapOptionBin
         {
-            WaterEnable = waterEnable,
-            WaterY = waterY,
-            SkyGate = skyGate,
+            IsDungeon = isDungeon,
+            SightDistance = sightDistance,
+            LensFlareEnable = lensFlareEnable,
             StarDomeEnable = starDomeEnable,
             CloudDomeEnable = cloudDomeEnable,
-            LensFlareEnable = lensFlareEnable,
-            SunMoonEnable = sunMoonEnable,
+            SunEnable = sunEnable,
+            MoonEnable = moonEnable,
             SkyboxEnable = skyboxEnable,
             IndoorFlag = indoorFlag,
             Reserved = reserved,

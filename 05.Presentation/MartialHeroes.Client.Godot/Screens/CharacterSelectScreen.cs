@@ -206,6 +206,9 @@ public sealed partial class CharacterSelectScreen : Control
         // Refresh the display on the main thread.
         RebuildSlotSelectorRow();
         RefreshInfo();
+        // Refresh the "character count : N" caption — count changed when live data arrived.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — caption rebuilt on char-list.
+        RefreshCharCountCaption();
 
         // Push updated slot data into the 3D scene.
         PushSlotDescriptorsToScene();
@@ -223,6 +226,11 @@ public sealed partial class CharacterSelectScreen : Control
     private UiAssetLoader _assets = null!;
     private RealClientAssets? _realAssets;
     private bool _ownsAssets;
+
+    // Title-bar char-count caption label — driven by msg id 2209 "캐릭터 개수 : %d".
+    // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — MessageDB id 2209, count from BillingState +0x80.
+    // Offline: count = number of occupied slots in the current roster.
+    private Label _charCountCaption = null!;
 
     // Slot info labels (refreshed on selection change).
     private Label _infoName = null!;
@@ -385,10 +393,15 @@ public sealed partial class CharacterSelectScreen : Control
         // spec §8.2 "Top title bar panel". CODE-CONFIRMED. ---
         var titleBar = MakeChrome(CharacterSelectLayout.TitleBar, CharacterSelectLayout.AtlasMainWindow);
         AddChild(titleBar);
-        var titleLabel = WidgetFactory.MakeLabel("CHARACTER SELECT",
+        // Title caption: msg id 2209 "캐릭터 개수 : %d" formatted with occupied-slot count.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — MessageDB id 2209,
+        //   count from BillingState +0x80 (account-wide char count). Offline: count = occupied slots.
+        // The literal CP949 template text is VFS-only; _assets.Text(2209, ...) decodes it already.
+        _charCountCaption = WidgetFactory.MakeLabel(
+            BuildCharCountCaption(),
             CharacterSelectLayout.FontTitleHeight, new Color(0.95f, 0.86f, 0.55f));
-        titleLabel.Position = new Vector2(16, 16);
-        titleBar.AddChild(titleLabel);
+        _charCountCaption.Position = new Vector2(16, 16);
+        titleBar.AddChild(_charCountCaption);
         widgetCount += 2;
 
         // --- Tab buttons: Server (act 1), Channel (act 2), Back (act 3).
@@ -1261,6 +1274,10 @@ public sealed partial class CharacterSelectScreen : Control
         // spec: frontend_scenes.md §4.5 — "gather fields → guard → click SFX 861010101 → send 1/6 (52B)".
         // CODE-CONFIRMED. The send is the network layer's job; here we only gather and guard.
         HideCreateForm();
+        // Refresh the char-count caption — the server will later send 3/6 (create-accept) which
+        // increments BillingState +0x80; in offline mode we refresh now as the best-effort view update.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — "create-accept → +1 + repaint".
+        RefreshCharCountCaption();
     }
 
     /// <summary>
@@ -1400,6 +1417,10 @@ public sealed partial class CharacterSelectScreen : Control
             case CharacterSelectLayout.DeleteActionId: // 5 — spec §8.2
                 GD.Print($"[Screens] CharacterSelectScreen: Delete pressed (action 5) — " +
                          $"offline stub (slot={_selectedSlot}, no use-case available).");
+                // Refresh char-count caption on delete intent — the server delete-accept (3/4 or 3/7)
+                // decrements BillingState +0x80 and repaints; in offline stub we do a best-effort refresh.
+                // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — "delete-accept → −1 + repaint".
+                RefreshCharCountCaption();
                 break;
 
             case CharacterSelectLayout.EnterActionId: // 6 — spec §8.2
@@ -1593,6 +1614,64 @@ public sealed partial class CharacterSelectScreen : Control
             4 => [420, 80, 18, 6, 10, 18],
             _ => [100, 100, 10, 10, 10, 10],
         };
+    }
+
+    // =========================================================================
+    // Char-count caption — msg id 2209 "캐릭터 개수 : %d"
+    // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED.
+    // =========================================================================
+
+    /// <summary>
+    /// Returns the formatted "character count : N" caption for the title bar.
+    /// Uses MessageDB template id 2209 with the current occupied-slot count.
+    ///
+    /// <para>Online: count comes from BillingState +0x80 (account-wide, independent of slot mask).
+    /// Offline: we derive it from the current roster occupancy — the nearest available value.
+    /// The Application layer will overwrite this via <see cref="ApplyCharacterList"/> when live data arrives.</para>
+    ///
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED (msg id 2209, count source).
+    /// </summary>
+    private string BuildCharCountCaption()
+    {
+        // Count occupied slots from live data or the demo roster.
+        int count;
+        if (_liveDataApplied)
+        {
+            count = 0;
+            for (int i = 0; i < MaxSlots; i++)
+                if (!_liveSlots[i].IsEmpty)
+                    count++;
+        }
+        else
+        {
+            count = DemoRoster.Length;
+        }
+
+        // Retrieve the CP949-decoded template from the msg.xdb catalogue via UiAssetLoader.
+        // Template is "캐릭터 개수 : %d" (VFS-only; not reproduced here).
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED (msg id 2209).
+        // Fallback when VFS absent: English approximation so the offline flow shows something.
+        string template = _assets.Text(2209u, "캐릭터 개수 : {0}");
+
+        // The template uses a C-style %d; we do a simple substitution of the placeholder.
+        // UiAssetLoader already decodes the CP949 text; we only swap %d → count.
+        string caption = template.Contains("%d")
+            ? template.Replace("%d", count.ToString())
+            : string.Format(template, count); // handle both printf and .NET placeholder fallbacks
+        return caption;
+    }
+
+    /// <summary>
+    /// Refreshes the title-bar "character count : N" caption widget in-place.
+    /// Call after create or delete operations mutate the character count.
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — "re-rendered after create and after delete".
+    /// </summary>
+    private void RefreshCharCountCaption()
+    {
+        if (_charCountCaption is null || !IsInstanceValid(_charCountCaption)) return;
+        _charCountCaption.Text = BuildCharCountCaption();
+        GD.Print($"[CharacterSelectScreen] Char-count caption refreshed: '{_charCountCaption.Text}'. " +
+                 "spec: frontend_scenes.md §3.8.2 CODE-CONFIRMED.");
     }
 
     // =========================================================================

@@ -44,6 +44,12 @@ public interface IHudEventHub
     /// <summary>Publishes a refreshed stat-allocation view (latest-wins). Returns false only if dropped under backpressure.</summary>
     bool PublishStatAllocation(StatAllocationView view);
 
+    /// <summary>
+    /// Publishes a zone-type change (latest-wins). Returns false only if dropped under backpressure.
+    /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.
+    /// </summary>
+    bool PublishZoneChanged(ZoneChangedEvent zoneChanged);
+
     // ---- Subscribe side (HUD widgets) ----------------------------------------------------------
 
     /// <summary>The chat-log stream. Drain with <see cref="ChannelReader{T}.ReadAllAsync(System.Threading.CancellationToken)"/>.</summary>
@@ -63,6 +69,12 @@ public interface IHudEventHub
 
     /// <summary>The stat-panel stream (latest-wins).</summary>
     ChannelReader<StatAllocationView> StatAllocations { get; }
+
+    /// <summary>
+    /// The zone-type change stream (latest-wins).
+    /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.
+    /// </summary>
+    ChannelReader<ZoneChangedEvent> ZoneChanges { get; }
 
     /// <summary>Signals that no further HUD events will be published, completing every stream's reader for clean shutdown.</summary>
     void Complete();

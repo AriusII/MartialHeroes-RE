@@ -9,7 +9,7 @@
 // Assets.Parsers parser, swallow absence/errors and return null so the offline run never breaks).
 //
 // Files loaded (all under data/sky/dat/, bare-decimal area id, no zero-padding — VFS-confirmed):
-//   map_option{areaId}.bin  (40 B)   — master flags (water enable/Y, sky gates, indoor)
+//   map_option{areaId}.bin  (40 B)   — master flags (dungeon/sight + per-subsystem sky enables, indoor)
 //   fog{areaId}.bin          (204 B)  — fog start/end ratios + 48 BGRA fog colours
 //   light{areaId}.bin        (5312 B) — 48 directional + 48 ambient keyframes + fallback dir
 //   material{areaId}.bin     (9792 B) — sun/sky material colour table (optional, sky tint)
@@ -78,10 +78,13 @@ internal static class VfsEnvironmentSource
                           ?? TryParse(assets, "data/sky/dat/light0.bin",
                               EnvironmentBinParsers.ParseLight, "light(fallback area0)");
 
-        // 3. material{id}.bin — only when sky_gate = 1 (optional sky tint). Fallback to area 0.
-        // spec: Docs/RE/specs/environment.md §3.1 step 3 — gated by sky_gate.
+        // 3. material{id}.bin — sky material tint, loaded for outdoor areas (indoor suppresses sky).
+        //    RECONCILED Campaign 5: map_option has no sky_gate master flag; sky subsystems are gated
+        //    individually and the whole sky is suppressed indoors. Load the sky-tint table when the
+        //    area is outdoor (indoor_flag = 0). spec: Docs/RE/formats/environment_bins.md §1.1 (MAPHIDE).
+        // spec: Docs/RE/specs/environment.md §3.1 step 3 — optional sky tint.
         MaterialBin? material = null;
-        if (mapOption is null || mapOption.SkyGate == 1)
+        if (mapOption is null || mapOption.IndoorFlag == 0)
         {
             material = TryParse(assets, $"data/sky/dat/material{areaId}.bin",
                            EnvironmentBinParsers.ParseMaterial, "material")

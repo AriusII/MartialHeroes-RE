@@ -244,6 +244,87 @@ public sealed class Fx3Layer
     public required ushort[] Indices { get; init; }
 }
 
+// ─── FX4 ───────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// One tile within an <c>.fx4</c> terrain overlay layer file.
+/// Each tile carries a fixed 48-byte header, a VF_44 vertex block, and a u16 index block.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain_layers.md §1.11 FX4 Format: CONFIRMED-FROM-LOADER.
+/// File layout: u32 tile_count, then per tile: TileHeader(48 B) + VertexData + IndexData.
+/// vertex_count @ tile-relative +0x28: CONFIRMED (parser-verified).
+/// index_count  @ tile-relative +0x2C: CONFIRMED (parser-verified).
+/// VF_44 vertex format (44 B stride): CONFIRMED (parser-verified).
+/// The leading 40 bytes of the tile header (tile_metadata) are read-but-not-consumed: UNVERIFIED semantics.
+/// spec: Docs/RE/formats/terrain_layers.md §1.11 — tile_metadata @ +0x00 (40 bytes): UNVERIFIED.
+/// </remarks>
+public sealed class Fx4Tile
+{
+    /// <summary>
+    /// Raw 48-byte tile header. Only bytes at +0x28 (vertex_count) and +0x2C (index_count) are consumed.
+    /// The leading 40 bytes (tile_metadata) are preserved for faithful byte-level storage.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — per-tile header (48 bytes): CONFIRMED-FROM-LOADER.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — tile_metadata @ +0x00 (40 bytes): UNVERIFIED (read-but-not-consumed).
+    /// </summary>
+    public required ReadOnlyMemory<byte> RawTileHeader { get; init; }
+
+    /// <summary>
+    /// Vertex count (u32 LE @ tile-relative +0x28). Drives the vertex_count × 44 VF_44 read.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — vertex_count u32 @ +0x28: CONFIRMED (parser-verified).
+    /// </summary>
+    public required uint VertexCount { get; init; }
+
+    /// <summary>
+    /// Index count (u32 LE @ tile-relative +0x2C). Drives the index_count × 2 u16 read.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — index_count u32 @ +0x2C: CONFIRMED (parser-verified).
+    /// </summary>
+    public required uint IndexCount { get; init; }
+
+    /// <summary>
+    /// Vertex buffer (VF_44). Leading position float3 (X, Y, Z) is parser-verified via AABB compute.
+    /// Remaining 32 bytes (normal + RGBA + UV0 + UV1) match the §1.2 VF_44 description.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — VertexData (vertex_count × 44, VF_44): CONFIRMED.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.2 VF_44 (44 B): CONFIRMED.
+    /// </summary>
+    public required FxVertex44[] Vertices { get; init; }
+
+    /// <summary>
+    /// Index buffer (u16, plain triangle list).
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — IndexData (index_count × 2, u16): CONFIRMED.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.3 Index format — u16 triangle list: CONFIRMED.
+    /// </summary>
+    public required ushort[] Indices { get; init; }
+}
+
+/// <summary>
+/// Decoded result of an <c>.fx4</c> terrain overlay layer file.
+/// Flat tile array: u32 tile_count, then tile_count tiles (each 48-byte header + VF_44 vertices + u16 indices).
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain_layers.md §1.11 FX4 Format: CONFIRMED-FROM-LOADER.
+/// File layout: u32 tileCount at 0x00, then per tile: TileHeader(48 B) + VertexData(vertex_count×44) + IndexData(index_count×2).
+/// File-size formula: 4 + Σ over tiles (48 + vertex_count × 44 + index_count × 2).
+/// Cross-confirmed by FX5 loader which uses the same control flow (only stride differs: VF_36 vs VF_44).
+/// spec: Docs/RE/formats/terrain_layers.md §1.11 — "FX4 and FX5 differ only in vertex stride": CONFIRMED.
+/// Vertex format: VF_44 (44 B) — same as FX2, not FX1/FX3/FX5 which use VF_36 (36 B).
+/// spec: Docs/RE/formats/terrain_layers.md §1.12 FX layer summary table: CONFIRMED.
+/// </remarks>
+public sealed class Fx4Layer
+{
+    /// <summary>
+    /// tile_count u32 LE @ file offset 0x00. Drives the per-tile read loop.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — tile_count u32 @ 0x00: CONFIRMED (parser-verified).
+    /// </summary>
+    public required uint TileCount { get; init; }
+
+    /// <summary>
+    /// Tiles decoded from the file in on-disk order. Length == TileCount.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — per-tile loop: CONFIRMED.
+    /// </summary>
+    public required Fx4Tile[] Tiles { get; init; }
+}
+
 // ─── FX5 ───────────────────────────────────────────────────────────────────
 
 /// <summary>

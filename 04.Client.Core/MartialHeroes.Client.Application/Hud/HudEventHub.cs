@@ -59,6 +59,7 @@ public sealed class HudEventHub : IHudEventHub
     private readonly Channel<TargetChangedEvent> _targetChanges;
     private readonly Channel<ExpLevelEvent> _expLevels;
     private readonly Channel<StatAllocationView> _statAllocations;
+    private readonly Channel<ZoneChangedEvent> _zoneChanges;
 
     /// <summary>Creates a hub with one channel per event family sized per the documented policy.</summary>
     public HudEventHub()
@@ -69,6 +70,7 @@ public sealed class HudEventHub : IHudEventHub
         _targetChanges = CreateBounded<TargetChangedEvent>(LatestWinsCapacity);
         _expLevels = CreateBounded<ExpLevelEvent>(LatestWinsCapacity);
         _statAllocations = CreateBounded<StatAllocationView>(LatestWinsCapacity);
+        _zoneChanges = CreateBounded<ZoneChangedEvent>(LatestWinsCapacity);
     }
 
     private static Channel<T> CreateBounded<T>(int capacity) =>
@@ -123,6 +125,13 @@ public sealed class HudEventHub : IHudEventHub
         return _statAllocations.Writer.TryWrite(view);
     }
 
+    /// <inheritdoc />
+    public bool PublishZoneChanged(ZoneChangedEvent zoneChanged)
+    {
+        ArgumentNullException.ThrowIfNull(zoneChanged);
+        return _zoneChanges.Writer.TryWrite(zoneChanged);
+    }
+
     // ---- Subscribe side ------------------------------------------------------------------------
 
     /// <inheritdoc />
@@ -144,6 +153,9 @@ public sealed class HudEventHub : IHudEventHub
     public ChannelReader<StatAllocationView> StatAllocations => _statAllocations.Reader;
 
     /// <inheritdoc />
+    public ChannelReader<ZoneChangedEvent> ZoneChanges => _zoneChanges.Reader;
+
+    /// <inheritdoc />
     public void Complete()
     {
         _chatLines.Writer.TryComplete();
@@ -152,5 +164,6 @@ public sealed class HudEventHub : IHudEventHub
         _targetChanges.Writer.TryComplete();
         _expLevels.Writer.TryComplete();
         _statAllocations.Writer.TryComplete();
+        _zoneChanges.Writer.TryComplete();
     }
 }

@@ -174,7 +174,8 @@ public sealed partial class FrontEndEffectPlayer : Control
         {
             XeffData data = XeffParser.ParseXeff(raw);
             GD.Print($"[FrontEndEffectPlayer] Parsed '{XeffVfsPath}': effect_id={data.EffectId} " +
-                     $"sub_effects={data.SubEffectCount} type_flag={data.TypeFlag}. " +
+                     $"sub_effects={data.SubEffectCount}. " +
+                     // Header is 8 bytes (CORRECTED 2026-06-14): no file-level type_flag; emitter_type is per sub-effect (A.4.0).
                      // spec: Docs/RE/formats/effects.md §A.15 — front-end VFX mapping; SAMPLE-VERIFIED.
                      "spec: Docs/RE/formats/effects.md §A.15.");
             return data;

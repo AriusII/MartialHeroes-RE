@@ -514,7 +514,21 @@ public static class ConfigTableParser
     /// <remarks>
     /// spec: Docs/RE/formats/config_tables.md §2.8 skills.scr: CONFIRMED (stride 1504, trailing N×8).
     /// Trailing count offset ambiguity: see inline comment above (SkillScrTrailingCountOffset).
-    /// Main body field layout: UNVERIFIED.
+    /// Main body field layout: partially UNVERIFIED; confirmed named fields are in the spec table.
+    /// <para>
+    /// CONFLICT-PENDING corrections (spec: Docs/RE/formats/config_tables.md §2.8, preamble note):
+    /// The following skills.scr fields were previously tagged "constant" from a small sample.
+    /// A full-record distribution pass CORRECTS them to "variable". They are NOT decoded here
+    /// (the body is carried raw), but any future decoder MUST treat them as variable:
+    ///   - skills.scr +1072: variable (CONFLICT-PENDING — WAS assumed constant; full-record pass refutes it).
+    ///     spec: Docs/RE/formats/config_tables.md §2.8 — "+1072 variable (CONFLICT-PENDING)".
+    ///   - skills.scr +1176 f32: variable (CONFLICT-PENDING — WAS "constant 1.0"; full-record pass found 8 distinct values {0.4,0.6,0.8,1.0,1.2,1.4,1.5,2.0}; PROPOSED: per-tier rate multiplier).
+    ///     spec: Docs/RE/formats/config_tables.md §2.8 — "+1176 variable (CONFLICT-PENDING)".
+    ///   - skills.scr +1306 u16: variable (CONFLICT-PENDING — WAS "constant 7"; full-record pass found 10 distinct values; PROPOSED: max upgrade tier / combo depth).
+    ///     spec: Docs/RE/formats/config_tables.md §2.8 — "+1306 variable (CONFLICT-PENDING)".
+    ///   - skills.scr +1328: variable (CONFLICT-PENDING — WAS assumed constant; full-record pass refutes it).
+    ///     spec: Docs/RE/formats/config_tables.md §2.8 — "+1328 variable (CONFLICT-PENDING)".
+    /// </para>
     /// </remarks>
     public static SkillCatalogEntry[] ParseSkillsScr(ReadOnlyMemory<byte> data)
     {
@@ -596,6 +610,18 @@ public static class ConfigTableParser
     /// <remarks>
     /// spec: Docs/RE/formats/config_tables.md §2.9 mobs.scr: CONFIRMED (stride, ID @ +0, type @ +324).
     /// Remaining fields: UNVERIFIED.
+    /// <para>
+    /// CONFLICT-PENDING corrections (spec: Docs/RE/formats/config_tables.md §2.9, preamble note):
+    /// The following mobs.scr fields were previously tagged "constant" from a small sample.
+    /// A full-record distribution pass CORRECTS them to "variable". Not decoded here (raw), but
+    /// any future decoder MUST treat them as variable:
+    ///   - mobs.scr +60: variable (CONFLICT-PENDING — WAS assumed constant; full-record pass refutes it).
+    ///     spec: Docs/RE/formats/config_tables.md §2.9 — "+60 variable (CONFLICT-PENDING)".
+    ///   - mobs.scr +188: variable (CONFLICT-PENDING — WAS assumed constant; full-record pass refutes it).
+    ///     spec: Docs/RE/formats/config_tables.md §2.9 — "+188 variable (CONFLICT-PENDING)".
+    ///   - mobs.scr +272: variable (CONFLICT-PENDING — WAS assumed constant; full-record pass refutes it).
+    ///     spec: Docs/RE/formats/config_tables.md §2.9 — "+272 variable (CONFLICT-PENDING)".
+    /// </para>
     /// </remarks>
     public static MobCatalogEntry[] ParseMobsScr(ReadOnlyMemory<byte> data)
     {

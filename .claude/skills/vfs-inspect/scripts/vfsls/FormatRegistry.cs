@@ -588,12 +588,14 @@ internal static class FormatRegistry
     private static IReadOnlyList<string> DecodeBinMapOption(string path, ReadOnlyMemory<byte> raw)
     {
         MapOptionBin o = EnvironmentBinParsers.ParseMapOption(raw);
-        // spec: Docs/RE/formats/environment_bins.md §1.1 — 10 × u32 flag vector: CONFIRMED.
+        // spec: Docs/RE/formats/environment_bins.md §1.1 — 10 × u32 flag vector (RECONCILED Campaign 5,
+        // NO water fields): MOVE_DUNGEON, SIGHT_FIX, LENSFLARE, STARDOME, CLOUDDOME, SUN, MOON,
+        // SKYBOX, MAPHIDE, reserved. CONFIRMED.
         return
         [
-            $"map_option  water_enable={o.WaterEnable}  water_y={o.WaterY}  sky_gate={o.SkyGate}  indoor={o.IndoorFlag}",
-            $"stardome={o.StarDomeEnable}  clouddome={o.CloudDomeEnable}  lensflare={o.LensFlareEnable}  " +
-            $"sun_moon={o.SunMoonEnable}  skybox={o.SkyboxEnable}",
+            $"map_option  is_dungeon={o.IsDungeon}  sight_fix={o.SightDistance}  indoor={o.IndoorFlag}",
+            $"lensflare={o.LensFlareEnable}  stardome={o.StarDomeEnable}  clouddome={o.CloudDomeEnable}  " +
+            $"sun={o.SunEnable}  moon={o.MoonEnable}  skybox={o.SkyboxEnable}",
         ];
     }
 

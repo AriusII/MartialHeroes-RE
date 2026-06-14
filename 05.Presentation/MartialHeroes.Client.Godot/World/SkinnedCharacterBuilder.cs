@@ -269,13 +269,40 @@ public static class SkinnedCharacterBuilder
         var arrayMesh = new ArrayMesh();
         arrayMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
 
-        var mat = new StandardMaterial3D
+        // Cel material for static path — same scope as the skinned path (skinned char only).
+        // spec: Docs/RE/specs/rendering.md §5.2 — dotoonshading path = skinned character only.
+        Material mat;
+        if (CelShadeMaterialFactory.CelEnabled)
         {
-            TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-        };
-        if (albedo is not null) mat.AlbedoTexture = albedo;
-        else mat.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+            try
+            {
+                mat = CelShadeMaterialFactory.Build(albedo);
+            }
+            catch
+            {
+                // Fallback to PBR if shader resource unavailable.
+                var std = new StandardMaterial3D
+                {
+                    TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
+                    CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                };
+                if (albedo is not null) std.AlbedoTexture = albedo;
+                else std.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+                mat = std;
+            }
+        }
+        else
+        {
+            var std = new StandardMaterial3D
+            {
+                TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            };
+            if (albedo is not null) std.AlbedoTexture = albedo;
+            else std.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+            mat = std;
+        }
+
         arrayMesh.SurfaceSetMaterial(0, mat);
 
         var inst = new MeshInstance3D { Name = $"StaticMesh_{skn.Name}", Mesh = arrayMesh };

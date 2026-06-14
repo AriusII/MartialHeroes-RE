@@ -7,10 +7,13 @@ namespace MartialHeroes.Assets.Parsers.Models;
 /// <summary>
 /// Decoded result of <c>map_option%d.bin</c>.
 /// Fixed size: 40 bytes (10 × u32 LE, no magic, no version).
-/// Controls which sky/water subsystems are active for the area.
+/// Per-area master flags: dungeon/sight gating plus which sky subsystems are enabled.
 /// </summary>
 /// <remarks>
 /// spec: Docs/RE/formats/environment_bins.md §1.1 Field table: CONFIRMED
+/// RECONCILED Campaign 5: this file holds NO water field. The old <c>WaterEnable</c>/<c>WaterY</c>
+/// at 0x00/0x04 were an IDA-name misread of <c>MOVE_DUNGEON</c> / <c>SIGHT_FIX</c>, disproved by a
+/// <c>.txt</c>↔<c>.bin</c> cross-reference over 64 area pairs. spec: §1 ⚠ conflict-reconciled note.
 /// </remarks>
 public sealed class MapOptionBin
 {
@@ -19,57 +22,57 @@ public sealed class MapOptionBin
     public const int FixedSize = 40;
 
     /// <summary>
-    /// 0 = no water plane; 1 = water plane at <see cref="WaterY"/>.
+    /// <c>MOVE_DUNGEON</c>: 0 = outdoor / field; 1 = dungeon-type movement zone.
     /// </summary>
-    /// <remarks>spec: Docs/RE/formats/environment_bins.md §1.1 — water_enable u32 @ 0x00: CONFIRMED</remarks>
-    public required uint WaterEnable { get; init; }
+    /// <remarks>spec: Docs/RE/formats/environment_bins.md §1.1 — is_dungeon u32 @ 0x00: CONFIRMED</remarks>
+    public required uint IsDungeon { get; init; }
 
     /// <summary>
-    /// World-space Y of the infinite horizontal water plane.
-    /// Meaningful only when <see cref="WaterEnable"/> = 1.
-    /// Observed values: 300, 700, 1000.
+    /// <c>SIGHT_FIX</c>: camera sight-clamp distance. 0 = free range; otherwise a fixed clamp
+    /// (observed e.g. 300, 800). NOT a water surface Y.
     /// </summary>
-    /// <remarks>spec: Docs/RE/formats/environment_bins.md §1.1 — water_y u32 @ 0x04: CONFIRMED</remarks>
-    public required uint WaterY { get; init; }
+    /// <remarks>spec: Docs/RE/formats/environment_bins.md §1.1 — sight_distance u32 @ 0x04: CONFIRMED</remarks>
+    public required uint SightDistance { get; init; }
 
     /// <summary>
-    /// 1 = full sky subsystem active; 0 = sky minimal or disabled.
+    /// <c>LENSFLARE</c>: 1 = sun lens-flare screen-space sprites rendered.
     /// </summary>
-    /// <remarks>spec: Docs/RE/formats/environment_bins.md §1.1 — sky_gate u32 @ 0x08: CONFIRMED</remarks>
-    public required uint SkyGate { get; init; }
+    /// <remarks>spec: Docs/RE/formats/environment_bins.md §1.1 — lensflare_enable u32 @ 0x08: CONFIRMED</remarks>
+    public required uint LensFlareEnable { get; init; }
 
     /// <summary>
-    /// 1 = star-dome point sprites rendered.
+    /// <c>STARDOME</c>: 1 = star-dome point sprites rendered.
     /// </summary>
     /// <remarks>spec: Docs/RE/formats/environment_bins.md §1.1 — stardome_enable u32 @ 0x0C: CONFIRMED</remarks>
     public required uint StarDomeEnable { get; init; }
 
     /// <summary>
-    /// 1 = cloud-dome hemisphere rendered.
+    /// <c>CLOUDDOME</c>: 1 = cloud-dome hemisphere rendered.
     /// </summary>
     /// <remarks>spec: Docs/RE/formats/environment_bins.md §1.1 — clouddome_enable u32 @ 0x10: CONFIRMED</remarks>
     public required uint CloudDomeEnable { get; init; }
 
     /// <summary>
-    /// 1 = sun lens-flare screen-space sprites rendered.
+    /// <c>SUN</c>: 1 = sun billboard. Stored separately from <see cref="MoonEnable"/>.
     /// </summary>
-    /// <remarks>spec: Docs/RE/formats/environment_bins.md §1.1 — lensflare_enable u32 @ 0x14: CONFIRMED</remarks>
-    public required uint LensFlareEnable { get; init; }
+    /// <remarks>spec: Docs/RE/formats/environment_bins.md §1.1 — sun_enable u32 @ 0x14: CONFIRMED</remarks>
+    public required uint SunEnable { get; init; }
 
     /// <summary>
-    /// 1 = sun and moon billboard particles rendered.
+    /// <c>MOON</c>: 1 = moon billboard. Stored as its own u32 word, distinct from
+    /// <see cref="SunEnable"/> at 0x14 (both carry the same value in every observed area).
     /// </summary>
-    /// <remarks>spec: Docs/RE/formats/environment_bins.md §1.1 — sun_moon_enable u32 @ 0x18: CONFIRMED</remarks>
-    public required uint SunMoonEnable { get; init; }
+    /// <remarks>spec: Docs/RE/formats/environment_bins.md §1.1 — moon_enable u32 @ 0x18: CONFIRMED (as stored)</remarks>
+    public required uint MoonEnable { get; init; }
 
     /// <summary>
-    /// 1 = load skybox mesh from sky%d.box. Always 0 — no .box files present in VFS.
+    /// <c>SKYBOX</c>: 1 = load skybox mesh from sky%d.box. Always 0 — no .box files present in VFS.
     /// </summary>
     /// <remarks>spec: Docs/RE/formats/environment_bins.md §1.1 — skybox_enable u32 @ 0x1C: CONFIRMED (value always 0)</remarks>
     public required uint SkyboxEnable { get; init; }
 
     /// <summary>
-    /// 1 = indoor/dungeon area; most sky subsystems suppressed; ambient-only lighting.
+    /// <c>MAPHIDE</c>: 0 = outdoor; 1 = indoor / dungeon lighting (suppresses most sky subsystems).
     /// </summary>
     /// <remarks>spec: Docs/RE/formats/environment_bins.md §1.1 — indoor_flag u32 @ 0x20: CONFIRMED</remarks>
     public required uint IndoorFlag { get; init; }

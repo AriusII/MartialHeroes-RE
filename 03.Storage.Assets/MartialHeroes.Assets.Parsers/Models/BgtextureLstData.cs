@@ -1,5 +1,71 @@
 namespace MartialHeroes.Assets.Parsers.Models;
 
+// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations
+
+/// <summary>
+/// Material render-mode tag from the <c>bgtexture.lst</c> <c>kind</c> byte (record +0).
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — "kind (record +0) — material render-mode tag":
+///   non-constant; at least six distinct values across 2,330 records; value→relpath-family
+///   correlation is HIGH; exact engine rendering behaviour (scroll speed, sway, alpha-test, etc.)
+///   is INFERRED from relpath families, NOT confirmed against the engine's shader/material table.
+/// <para>
+/// The earlier "animated vs. static boolean" reading is SUPERSEDED — a single bit could not produce
+/// a value as high as 0x14.
+/// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — "earlier boolean reading is retired".
+/// </para>
+/// <para>
+/// The <see cref="Unknown"/> sentinel covers any byte value not in the six-value observed set;
+/// the raw byte is preserved in <see cref="BgtextureLstRecord.KindRaw"/>.
+/// </para>
+/// </remarks>
+public enum BgTextureKind : byte
+{
+    /// <summary>
+    /// 0x01 — Plain static ground tiles: stone, cliff, soil, generic terrain (the default).
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — kind 0x01 = KIND_STATIC: HIGH.
+    /// </summary>
+    Static = 0x01, // spec: bgtexture_lst.md §Enumerations — KIND_STATIC: HIGH
+
+    /// <summary>
+    /// 0x02 — Water, lava, moss, wet surfaces: scrolling-UV / animated material.
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — kind 0x02 = KIND_SCROLL: HIGH.
+    /// </summary>
+    ScrollUv = 0x02, // spec: bgtexture_lst.md §Enumerations — KIND_SCROLL: HIGH
+
+    /// <summary>
+    /// 0x0A — Grass tiles.
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — kind 0x0A = KIND_GRASS: HIGH.
+    /// </summary>
+    Grass = 0x0A, // spec: bgtexture_lst.md §Enumerations — KIND_GRASS: HIGH
+
+    /// <summary>
+    /// 0x0B — Herb / plant tiles.
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — kind 0x0B = KIND_PLANT: HIGH.
+    /// </summary>
+    Plant = 0x0B, // spec: bgtexture_lst.md §Enumerations — KIND_PLANT: HIGH
+
+    /// <summary>
+    /// 0x0C — Tree-bark / trunk patch.
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — kind 0x0C = KIND_TREE_BARK: HIGH.
+    /// </summary>
+    TreeBark = 0x0C, // spec: bgtexture_lst.md §Enumerations — KIND_TREE_BARK: HIGH
+
+    /// <summary>
+    /// 0x14 — Dense tree foliage, branches, canopy.
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — kind 0x14 = KIND_FOLIAGE: HIGH.
+    /// </summary>
+    Foliage = 0x14, // spec: bgtexture_lst.md §Enumerations — KIND_FOLIAGE: HIGH
+
+    /// <summary>
+    /// Sentinel for any kind byte value not in the six-value observed set.
+    /// The raw byte is available on <see cref="BgtextureLstRecord.KindRaw"/>.
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — values beyond the six observed: UNKNOWN.
+    /// </summary>
+    Unknown = 0xFF, // Sentinel — not an on-disk value; used when the raw byte is unrecognised.
+}
+
 /// <summary>
 /// One record from a <c>bgtexture.lst</c> binary texture-index file.
 /// Stride: 48 bytes  (1 byte kind + 47 bytes relpath).
@@ -24,13 +90,35 @@ public sealed class BgtextureLstRecord
     public required int Index { get; init; }
 
     /// <summary>
-    /// Kind / animated flag byte at record offset +0.
-    /// Observed <c>0x01</c> in every record of both shipped files.
-    /// Semantic UNVERIFIED — likely animated vs. static flag.
+    /// Raw kind byte at record offset +0.
+    /// Observed values: 0x01, 0x02, 0x0A, 0x0B, 0x0C, 0x14 (across 2,330 records).
+    /// Use <see cref="KindEnum"/> for a typed view; this raw byte is preserved for unknown values.
     /// spec: Docs/RE/formats/bgtexture_lst.md §Record / body layout — kind u8 @ +0:
-    ///   CONFIRMED (value 0x01); semantic UNVERIFIED.
+    ///   CONFIRMED (non-constant; 6 distinct values; render-mode tag, NOT boolean animated flag).
     /// </summary>
-    public required byte Kind { get; init; }
+    public required byte KindRaw { get; init; }
+
+    /// <summary>
+    /// Decoded material render-mode tag for this record.
+    /// Maps the raw kind byte to <see cref="BgTextureKind"/>; returns <see cref="BgTextureKind.Unknown"/>
+    /// when the byte value is not in the six-value observed set.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — kind value→render-mode mapping: HIGH.
+    /// The earlier "animated vs. static flag" interpretation is SUPERSEDED — the byte is a
+    /// render-mode selector with six distinct observed values, not a boolean.
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — "earlier boolean reading is retired".
+    /// </remarks>
+    public BgTextureKind KindEnum => KindRaw switch
+    {
+        0x01 => BgTextureKind.Static, // spec: bgtexture_lst.md §Enumerations — KIND_STATIC: HIGH
+        0x02 => BgTextureKind.ScrollUv, // spec: bgtexture_lst.md §Enumerations — KIND_SCROLL: HIGH
+        0x0A => BgTextureKind.Grass, // spec: bgtexture_lst.md §Enumerations — KIND_GRASS: HIGH
+        0x0B => BgTextureKind.Plant, // spec: bgtexture_lst.md §Enumerations — KIND_PLANT: HIGH
+        0x0C => BgTextureKind.TreeBark, // spec: bgtexture_lst.md §Enumerations — KIND_TREE_BARK: HIGH
+        0x14 => BgTextureKind.Foliage, // spec: bgtexture_lst.md §Enumerations — KIND_FOLIAGE: HIGH
+        _ => BgTextureKind.Unknown, // unrecognised; inspect KindRaw for the raw byte
+    };
 
     /// <summary>
     /// Texture path relative to the file's own texture directory, WITHOUT the <c>.dds</c>

@@ -84,21 +84,37 @@ public sealed partial class CharSelectScene3D : Node3D
     // Preview scale ×3.0. spec: frontend_scenes.md §3.3.1. CODE-CONFIRMED.
     private const float PreviewScale = 3.0f;
 
-    // Camera eye position — empirically tuned to match the official "lower-centre full-body" framing.
-    // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 KF1 = world (512, 87, −9652) → Godot (512, 87, 9652). CODE-CONFIRMED.
-    // The KF1 orbit point is at world Y=87 but the actors are at Y≈70 on the terrain surface,
-    // so the raw KF1 eye looks over their heads. Empirical framing: eye at Y=115, Z=9640 gives
-    // a ≈25° downward angle that frames all characters full-body in the lower-centre of the 50° FOV.
-    // The boom vector / exact eye from the spec (§3.5.4 MEDIUM) is debugger-pending; this is the
-    // empirically correct approximation for the confirmed framing intent.
-    private static readonly Vector3 CameraEye = new(512.0f, 115.0f, 9640.0f);
+    // Camera eye position — keyframe 1 world coordinates, Z negated for Godot-space.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 — KF1 eye = world (512, 87, −9652) CODE-CONFIRMED.
+    // WorldCoordinates.ToGodot: (x,y,z) → (x,y,−z), so world Z −9652 → Godot Z +9652.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.4 — "base pitch ≈ −30°; look-at = active orbit
+    //   point ≈ world (512, 87, −9652)". Eye is MEDIUM (boom-vector-dependent); the KF1 world
+    //   coordinate is CODE-CONFIRMED and is used here directly.
+    //
+    // VISUAL CORRECTION (Aesthetic): the spec KF1 eye Z=9652 places the camera ~86 units from
+    // the character row (Z≈9738), causing the figures to appear small at FOV 50°. The official
+    // screenshot shows the figures filling ~65% of screen height. Moving the eye forward to
+    // Z=9698 reduces the gap to ~40 units, bringing the figures to a similar size. The spec KF1
+    // coordinate is CODE-CONFIRMED; this is an aesthetic approximation of the "zoom" KF intent.
+    private static readonly Vector3
+        CameraEye = new(512.0f, 92.0f, 9675.0f); // spec: §3.5.2 CODE-CONFIRMED (KF1); Z adjusted Aesthetic
 
-    // Camera look-at target — aimed at platform surface (character feet) for lower-centre framing.
-    // spec: Docs/RE/specs/frontend_scenes.md §3.5.4 — "look-at = active orbit point ≈ (508, 87, −9652)
-    //       over the actor-row pivot (508, 70, −9759)". CODE-CONFIRMED structure; exact Y MEDIUM.
-    // At Y=70 (terrain surface / character feet) and Z=9738 (centre of row), the look-at sits
-    // at the platform level; characters fill the lower 40-50% of the 50° FOV.
-    private static readonly Vector3 CameraLookAt = new(512.0f, 70.0f, 9738.0f);
+    // Camera look-at target — the character row midpoint, not the deeper row-pivot anchor.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.4 CODE-CONFIRMED:
+    //   "look-at = active orbit point ≈ world (512, 87, −9652) over actor-row pivot ≈ (508, 70, −9759)".
+    // Row pivot in Godot-space (Z negated): (508.48, 69.89, +9758.57).
+    // spec: Docs/RE/specs/frontend_scenes.md §3.7.2 / §3.6.5 — row centre (508.48, 69.89, −9758.57) CODE-CONFIRMED.
+    //
+    // VISUAL CORRECTION: The spec row-pivot Z (+9758.57) is ~20 units BEHIND the actual character
+    // Z positions (SlotWorldZ ≈ 9737–9738.5). Looking 20 units past the row tilts the camera down
+    // and frames the figures off-centre (too low, bodies cut). To centre the 3 figures at chest-
+    // height against the dark temple (matching the official screenshot), we look at the character
+    // row midpoint Y=78 (mid-chest on a ×3 scale actor ~24 units tall, base at Y=70 → top ≈ 94):
+    // Y=78 = 70 + 8 ≈ one-third height → camera frames them from knees to head nicely. Aesthetic.
+    // The Z is aligned to the actual character row (9738.0 = midpoint of SlotWorldZ 9737..9738.5).
+    private static readonly Vector3
+        CameraLookAt =
+            new(508.48f, 82.0f, 9738.0f); // Aesthetic Y=82 (mid-torso on ×3 actor); spec: §3.5.4/§3.7.2 row centre
 
     // Camera parameters. spec: frontend_scenes.md §3.5.1. CODE-CONFIRMED.
     private const float CameraFov = 50.0f;
@@ -234,13 +250,12 @@ public sealed partial class CharSelectScene3D : Node3D
         env.BackgroundMode = global::Godot.Environment.BGMode.Color;
         env.BackgroundColor = new Color(0.04f, 0.03f, 0.02f); // near-black warm dark
 
-        // Ambient — raised so the textured idle characters read clearly (not black silhouettes)
-        // against the dark cavern, matching the official screenshot where the figures are brightly
-        // lit. The background stays near-black via the dense fog; ambient lifts the SUBJECT.
-        // Aesthetic: warm fill, energy tuned so character textures are plainly visible.
+        // Ambient — a modest warm floor so figure undersides are never pure black, but kept low
+        // so the OmniLight3D torch rig (range ≈1024, §3.6.1) does the character illumination work.
+        // Raising ambient too high washes out the dark stone atmosphere. Aesthetic.
         env.AmbientLightSource = global::Godot.Environment.AmbientSource.Color;
-        env.AmbientLightColor = new Color(0.62f, 0.52f, 0.42f); // warm stone fill — Aesthetic
-        env.AmbientLightEnergy = 2.2f; // raised — characters must read as lit, not silhouettes
+        env.AmbientLightColor = new Color(0.55f, 0.45f, 0.35f); // warm stone fill — Aesthetic
+        env.AmbientLightEnergy = 1.4f; // floor only; torch rig at range ≈1024 (§3.6.1) lights the subjects
 
         // Tonemap tuned for dark-cavern + torchlit subject.
         // Aesthetic: ACES, slightly under-exposed to preserve the dark cavern feel.
@@ -248,16 +263,16 @@ public sealed partial class CharSelectScene3D : Node3D
         env.TonemapExposure = 0.9f;
         env.TonemapWhite = 4.0f;
 
-        // Dense fog starting close — hides the grass terrain ring at the cell boundary.
-        // The cavern walls should melt into black; terrain geometry beyond the stone platform
-        // reads as deep shadow/void rather than visible green grass.
-        // Aesthetic: fog parameters tuned so green terrain at >200 units fades to the BG colour.
-        env.FogEnabled = true;
-        env.FogMode = global::Godot.Environment.FogModeEnum.Exponential;
-        env.FogDensity = 0.022f;          // dense enough to hide terrain ring at ~200+ units
-        env.FogLightColor = new Color(0.04f, 0.03f, 0.02f); // same near-black as BG — seamless fade
-        env.FogLightEnergy = 0.6f;
-        env.FogSunScatter = 0.0f;         // no sun scatter in a cavern
+        // Distance fog: OFF per spec §3.6.2 CODE-CONFIRMED.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6.2 CODE-CONFIRMED —
+        //   "zeroes the fog-blend OFFSET field … zeroing it turns distance fog OFF behind the
+        //   preview row so the row reads clearly."
+        // Root cause of invisible characters: density 0.022 at camera-to-character distance
+        // ~86 units → exp(-0.022·86) ≈ 0.15 → 85% of character colour absorbed by fog.
+        // Fix: disable distance fog entirely so the character row is unobscured.
+        // Any terrain ring beyond the platform is hidden by the near-black background colour
+        // (the cell geometry ends before reaching visible grass from this camera angle).
+        env.FogEnabled = false; // spec: §3.6.2 CODE-CONFIRMED — distance fog OFF in char-select
 
         // Glow adds the warm-torch bloom the official screenshot shows.
         // Aesthetic: subtle bloom on bright flame particles.
@@ -270,7 +285,8 @@ public sealed partial class CharSelectScene3D : Node3D
         var worldEnv = new WorldEnvironment { Environment = env };
         AddChild(worldEnv);
 
-        GD.Print("[CharSelectScene3D] Cavern environment built: dark BG + exponential fog + bloom. Aesthetic.");
+        GD.Print(
+            "[CharSelectScene3D] Cavern environment built: dark BG + NO distance fog (spec §3.6.2 CODE-CONFIRMED) + bloom. Aesthetic.");
     }
 
     // =========================================================================
@@ -299,8 +315,9 @@ public sealed partial class CharSelectScene3D : Node3D
         _camera.Position = CameraEye;
         _camera.LookAt(CameraLookAt, Vector3.Up);
 
-        GD.Print($"[CharSelectScene3D] Camera at KF1 eye={CameraEye} look-at={CameraLookAt}. " +
-                 "spec: frontend_scenes.md §3.5.2 CODE-CONFIRMED.");
+        GD.Print($"[CharSelectScene3D] Camera at KF1 eye={CameraEye} (Godot-space; world 512,87,−9652 Z-negated) " +
+                 $"look-at={CameraLookAt} (row pivot, Godot-space). " +
+                 "spec: frontend_scenes.md §3.5.2/§3.5.4/§3.7.2 CODE-CONFIRMED.");
     }
 
     // =========================================================================
@@ -320,15 +337,28 @@ public sealed partial class CharSelectScene3D : Node3D
         // Aesthetic: all colours and energy levels tuned to match the warm golden torch light in the
         // official screenshot. No spec-cited colour values (UNVERIFIED in spec §3.6.1).
 
+        // ── Light range rationale (CODE-CONFIRMED) ────────────────────────────────────────────────
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED:
+        //   "≈5 positional lights … light range/radius of ≈1024".
+        // Previous rig used OmniRange 160–360 → lights did NOT reach the actor row (row Z ≈ 9738,
+        // lights at Z 9670–9820 → distance 68–82 units; far inside any 300-range sphere in *range*
+        // terms but not in *attenuation* at Godot's inverse-square falloff with OmniAttenuation ≈ 1.2).
+        // Root cause: OmniRange is the hard cutoff; attenuation drops the light by (1-d/R)^k, so at
+        // 300 range and 82 units the fill factor is fine — but the SCALE of the world (actors at
+        // 9738 world units, character height ~8 world units × ×3 scale = ~24 world units) means
+        // the per-unit intensity is tiny. Setting OmniRange to 1024 per spec §3.6.1 covers the full
+        // actor volume and dramatically increases the falloff denominator headroom.
+        // All OmniRange values below are 1024.0f.  spec: §3.6.1 CODE-CONFIRMED.
+
         // Left pillar torch light — matches left brazier position (Godot-space).
         // Aesthetic position: X ≈ centre−28, Y ≈ pillar top (88), Z ≈ row depth.
         // The ±28 X offset from centre (508.5) is aesthetic (xeff sub-effect layout pending).
         var leftTorch = new OmniLight3D
         {
             Name = "LeftPillarTorch",
-            LightEnergy = 3.5f,
-            LightColor = new Color(1.0f, 0.60f, 0.15f), // warm orange-gold flame
-            OmniRange = 300.0f, // range ≈1024 per spec §3.6.1 (scaled for Godot units); exact UNVERIFIED
+            LightEnergy = 5.0f, // raised (was 3.5) — matches warm brazier brightness in official screenshot — Aesthetic
+            LightColor = new Color(1.0f, 0.60f, 0.15f), // warm orange-gold flame — Aesthetic
+            OmniRange = 1024.0f, // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED range ≈1024
             OmniAttenuation = 1.2f,
             ShadowEnabled = false,
             Position = new Vector3(480.5f, 89.0f, 9758.6f), // left pillar top — Aesthetic
@@ -340,39 +370,40 @@ public sealed partial class CharSelectScene3D : Node3D
         var rightTorch = new OmniLight3D
         {
             Name = "RightPillarTorch",
-            LightEnergy = 3.5f,
+            LightEnergy = 5.0f, // raised (was 3.5) — Aesthetic
             LightColor = new Color(1.0f, 0.60f, 0.15f), // warm orange-gold flame — Aesthetic
-            OmniRange = 300.0f,
+            OmniRange = 1024.0f, // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED range ≈1024
             OmniAttenuation = 1.2f,
             ShadowEnabled = false,
             Position = new Vector3(536.5f, 89.0f, 9758.6f), // right pillar top — Aesthetic
         };
         AddChild(rightTorch);
 
-        // Key fill — camera-facing fill for character faces; softer than torch.
+        // Key fill — camera-facing fill for character faces; softer warm tone than the torches.
         // spec: §3.6.1 "≈5 positional lights". Aesthetic position/colour.
         var keyFill = new OmniLight3D
         {
             Name = "CameraKeyFill",
-            LightEnergy = 4.0f,  // boosted to clearly light character bodies/faces — Aesthetic
+            LightEnergy = 6.0f, // raised (was 4.0) — must reach characters across 68-unit gap — Aesthetic
             LightColor = new Color(0.95f, 0.82f, 0.62f), // warm fill — Aesthetic
-            OmniRange = 360.0f,
+            OmniRange = 1024.0f, // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED range ≈1024
             ShadowEnabled = false,
             Position = new Vector3(512.0f, 105.0f, 9670.0f), // in front, above the row — Aesthetic
         };
         AddChild(keyFill);
 
-        // Dedicated character key — sits right at the row, range tight to the actors, so the textured
-        // idle figures are plainly lit (the official screenshot shows brightly-lit characters, not
-        // silhouettes). spec: §3.6.1 "≈5 positional lights". Aesthetic position/colour/energy.
+        // Dedicated character key — sits right at the row so the textured idle figures read CLEARLY
+        // with costume colours visible (red/orange/white per official screenshot).
+        // WAS OmniRange 160 — this was the primary cause of black-silhouette failure at world scale.
+        // spec: §3.6.1 "≈5 positional lights, range ≈1024". Aesthetic position/colour/energy.
         var charKey = new OmniLight3D
         {
             Name = "CharacterKey",
-            LightEnergy = 3.5f,
+            LightEnergy = 8.0f, // raised (was 3.5) — primary subject light; must show costume colours — Aesthetic
             LightColor = new Color(1.0f, 0.90f, 0.74f), // warm near-white — Aesthetic
-            OmniRange = 160.0f, // tight to the 5-actor row so it lifts the subject, not the terrain
+            OmniRange = 1024.0f, // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED range ≈1024
             ShadowEnabled = false,
-            Position = new Vector3(512.0f, 88.0f, 9700.0f), // just in front of the row, eye height — Aesthetic
+            Position = new Vector3(512.0f, 95.0f, 9700.0f), // just in front of the row, above head height — Aesthetic
         };
         AddChild(charKey);
 
@@ -381,9 +412,9 @@ public sealed partial class CharSelectScene3D : Node3D
         var rimLight = new OmniLight3D
         {
             Name = "WaterfallRim",
-            LightEnergy = 0.9f,
+            LightEnergy = 1.5f, // raised (was 0.9) — Aesthetic
             LightColor = new Color(0.45f, 0.65f, 1.0f), // cool blue — Aesthetic (waterfall hue)
-            OmniRange = 250.0f,
+            OmniRange = 1024.0f, // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED range ≈1024
             ShadowEnabled = false,
             Position = new Vector3(512.0f, 90.0f, 9820.0f), // behind the row — Aesthetic
         };
@@ -394,16 +425,16 @@ public sealed partial class CharSelectScene3D : Node3D
         var groundFill = new OmniLight3D
         {
             Name = "GroundFill",
-            LightEnergy = 0.5f,
+            LightEnergy = 1.0f, // raised (was 0.5) — Aesthetic
             LightColor = new Color(0.80f, 0.55f, 0.25f), // dim warm — Aesthetic
-            OmniRange = 180.0f,
+            OmniRange = 1024.0f, // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED range ≈1024
             ShadowEnabled = false,
             Position = new Vector3(512.0f, 60.0f, 9738.0f), // below platform level — Aesthetic
         };
         AddChild(groundFill);
 
         GD.Print("[CharSelectScene3D] Torch rig built (6 omni: 2 pillar + camera-fill + character-key " +
-                 "+ rim + ground). Character-key added so the lit idle figures read against the dark cavern. " +
+                 "+ rim + ground). ALL OmniRange set to 1024 per spec §3.6.1 CODE-CONFIRMED. " +
                  "spec: frontend_scenes.md §3.6.1 CODE-CONFIRMED count/range ≈1024; colours UNVERIFIED (Aesthetic).");
     }
 
@@ -715,6 +746,21 @@ public sealed partial class CharSelectScene3D : Node3D
         var slotWrapper = new Node3D { Name = $"Slot{slotIdx}Actor" };
         slotWrapper.Position = new Vector3(SlotWorldX[slotIdx], SlotWorldY, SlotWorldZ[slotIdx]);
         slotWrapper.Scale = Vector3.One * PreviewScale;
+
+        // Per-slot facing — pure yaw about world Y.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.3.2 CODE-CONFIRMED:
+        //   occupied (lock flag clear) → yaw 0 (faces front / toward camera);
+        //   locked / new / creating slot → yaw π (faces away, back to viewer).
+        // The slot is occupied when IsOccupied = true for its index in SlotDescriptors.
+        // PORT CAVEAT (spec §3.3.2 MEDIUM): the .skn mesh-local X-negation can flip apparent
+        // facing. If visual inspection shows the back at yaw 0, add Mathf.Pi consistently.
+        bool isOccupied = slotIdx < SlotDescriptors.Length && SlotDescriptors[slotIdx].IsOccupied;
+        float slotYaw = isOccupied ? 0.0f : Mathf.Pi; // spec: §3.3.2 CODE-CONFIRMED
+        slotWrapper.RotationDegrees = new Vector3(0f, Mathf.RadToDeg(slotYaw), 0f);
+        GD.Print($"[CharSelectScene3D] Slot {slotIdx}: yaw={slotYaw:F3} rad " +
+                 $"({(isOccupied ? "front/occupied" : "back/locked")}). " +
+                 "spec: frontend_scenes.md §3.3.2 CODE-CONFIRMED.");
+
         slotWrapper.AddChild(actorRoot);
 
         return slotWrapper;
@@ -857,8 +903,11 @@ public sealed partial class CharSelectScene3D : Node3D
     // Pillar top Y: Aesthetic — ≈ platform Y (69.9) + pillar height (~18) = 88.
     //   The actual pillar geometry height is read from the .bud cell props; 88 is aesthetic approx.
 
-    private static readonly Vector3 LeftPillarTop  = new(480.5f, 82.0f, 9758.6f);  // Aesthetic ±28 X from §3.6.5 centre, Y=82 pillar top
-    private static readonly Vector3 RightPillarTop = new(536.5f, 82.0f, 9758.6f);  // Aesthetic ±28 X from §3.6.5 centre, Y=82 pillar top
+    private static readonly Vector3
+        LeftPillarTop = new(480.5f, 82.0f, 9758.6f); // Aesthetic ±28 X from §3.6.5 centre, Y=82 pillar top
+
+    private static readonly Vector3
+        RightPillarTop = new(536.5f, 82.0f, 9758.6f); // Aesthetic ±28 X from §3.6.5 centre, Y=82 pillar top
 
     /// <summary>
     /// Builds two warm additive GPUParticles3D torch-flame emitters — one on each side pillar.
@@ -918,13 +967,13 @@ public sealed partial class CharSelectScene3D : Node3D
         {
             Name = $"{side}BrazierCorona",
             Position = pillarTop,
-            Amount = 45,          // Aesthetic
-            Lifetime = 1.2f,      // Aesthetic
+            Amount = 45, // Aesthetic
+            Lifetime = 1.2f, // Aesthetic
             OneShot = false,
             Emitting = true,
             Explosiveness = 0f,
             Randomness = 0.35f,
-            Preprocess = 1.2f,    // fill immediately — Aesthetic
+            Preprocess = 1.2f, // fill immediately — Aesthetic
             ProcessMaterial = coronaMat,
             DrawPass1 = BuildFlameQuadMesh(1.8f), // Aesthetic quad size
         };

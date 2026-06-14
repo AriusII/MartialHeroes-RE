@@ -55,6 +55,15 @@ public sealed partial class PinModal : Control
     // PIN capacity: ≤ 4 characters. spec: login_flow.md §4.2. RUNTIME-CONFIRMED.
     private const int MaxPinLength = LoginLayout.PinMaxLength; // 4
 
+    // Header band height — the top portion of the InventWindow.dds dragon-frame quad that
+    // contains the baked title/warning-line art.
+    // spec §11.3 "the title + warning line [are] baked into the InventWindow.dds dragon-frame quad".
+    // CODE-CONFIRMED (baked art in the dragon-frame rect; no separate sprite; no msg.xdb caption id).
+    // TODO needs-spec-confirm: exact band height not pinned in §11.3 — 40 px is a revival
+    //   estimate (the 340×190 source rect has a prominent top cap visible in the atlas art;
+    //   40 px is consistent with other dialog chrome in this game's UI atlas family).
+    private const int PinHeaderBandH = 40; // PLAUSIBLE — see TODO above.
+
     // =========================================================================
     // Outgoing intents
     // =========================================================================
@@ -159,6 +168,15 @@ public sealed partial class PinModal : Control
             // The source is 340×190 but the panel is 329×422 — taller than the source.
             // spec §11.3 "drawn stretched: render it as a NinePatch ... from (318,647,340,190)
             //   up to the 347,173,329,422 panel rect." CODE-CONFIRMED.
+            //
+            // PatchMarginTop is set to PinHeaderBandH (40px) so the baked title/warning-line band
+            // at the top of the InventWindow.dds dragon-frame quad is preserved as a fixed cap and
+            // not compressed/distorted by the vertical stretch.
+            // spec §11.3 "the title + warning line [are] baked into the InventWindow.dds dragon-frame quad".
+            // CODE-CONFIRMED (header is baked art in the dragon-frame rect, not a separate sprite
+            // and not a msg.xdb caption).
+            // TODO needs-spec-confirm: header band height not pinned in §11.3 — 40 px is a
+            // revival estimate derived from the 190-px source height minus the keypad/button area.
             var np = new NinePatchRect
             {
                 Name = "PinFrameNinePatch",
@@ -166,15 +184,58 @@ public sealed partial class PinModal : Control
                 // Source region in the atlas (the dragon-frame sub-rect).
                 RegionRect = new Rect2(LoginLayout.ModalChromeSrcX, LoginLayout.ModalChromeSrcY,
                     LoginLayout.ModalChromeW, LoginLayout.ModalChromeH),
-                // Nine-patch margins: use 20px on all sides so corners are preserved cleanly.
+                // Nine-patch margins:
+                //   Top  = PinHeaderBandH (40 px) — preserves the baked title/warning-line header
+                //          band at the top of the dragon-frame quad without stretching it.
+                //          spec §11.3 "title + warning line baked into InventWindow.dds dragon-frame quad".
+                //          CODE-CONFIRMED (baked art, no caption id). Header band height: PLAUSIBLE.
+                //          TODO needs-spec-confirm: header band height not pinned in §11.3.
+                //   Left/Right = 20 px — preserve side chrome rings/border.
+                //   Bottom = 20 px — preserve bottom chrome edge.
+                PatchMarginTop = PinHeaderBandH, // 40 px. See above. CODE-CONFIRMED art; height PLAUSIBLE.
                 PatchMarginLeft = 20,
                 PatchMarginRight = 20,
-                PatchMarginTop = 20,
                 PatchMarginBottom = 20,
                 MouseFilter = MouseFilterEnum.Ignore,
             };
             np.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
             panel.AddChild(np);
+
+            // Explicit header sprite — samples the top PinHeaderBandH rows of the dragon-frame
+            // sub-rect and pins it at the top of the panel (panel-local Y=0), full panel width.
+            // This ensures the baked title/warning band is rendered at native scale as a cap
+            // BEFORE the stretched NinePatch body, matching the official modal appearance.
+            //
+            // Source: InventWindow.dds sub-rect (318, 647, 340, PinHeaderBandH).
+            //   = The top 40 px of the 340×190 dragon-frame quad.
+            // Destination (panel-local): (0, 0, PanelW=329, PinHeaderBandH=40).
+            //
+            // spec §11.3 "title + warning line baked into the InventWindow.dds dragon-frame quad".
+            // CODE-CONFIRMED (baked art; no msg.xdb caption id).
+            // TODO needs-spec-confirm: header band height not pinned in §11.3; 40 px is a
+            //   revival estimate — adjust once a pixel-read of the DDS is available.
+            AtlasTexture? headerTex = _assets.Slice(
+                LoginLayout.AtlasInventWindow,
+                LoginLayout.ModalChromeSrcX, // U = 318. spec §11.3. CODE-CONFIRMED.
+                LoginLayout.ModalChromeSrcY, // V = 647. spec §11.3. CODE-CONFIRMED.
+                LoginLayout.ModalChromeW, // W = 340. spec §11.3. CODE-CONFIRMED.
+                PinHeaderBandH); // H = 40. PLAUSIBLE — see TODO above.
+
+            if (headerTex is not null)
+            {
+                var header = new TextureRect
+                {
+                    Name = "PinHeaderBand",
+                    Texture = headerTex,
+                    // Stretch to panel width so the title band spans the full modal top.
+                    StretchMode = TextureRect.StretchModeEnum.Scale,
+                    Position = new Vector2(0f,
+                        0f), // panel-local top-left. spec §11.3 "panel origin = (347,173)". CODE-CONFIRMED.
+                    Size = new Vector2(LoginLayout.PinModalW, PinHeaderBandH), // 329×40.
+                    MouseFilter = MouseFilterEnum.Ignore,
+                };
+                panel.AddChild(header);
+            }
         }
         else
         {
@@ -222,8 +283,8 @@ public sealed partial class PinModal : Control
         // Panel-local (81, 138, 150, 22). spec §11.3 "Masked-PIN echo label … (81,138,150,22)". CODE-CONFIRMED.
         _pinDisplay = WidgetFactory.MakeLabel("____", 20, new Color(0.95f, 0.90f, 0.55f));
         _pinDisplay.Name = "PinDisplay";
-        _pinDisplay.Position = new Vector2(81, 138);   // spec §11.3. CODE-CONFIRMED.
-        _pinDisplay.Size = new Vector2(150, 22);        // spec §11.3. CODE-CONFIRMED.
+        _pinDisplay.Position = new Vector2(81, 138); // spec §11.3. CODE-CONFIRMED.
+        _pinDisplay.Size = new Vector2(150, 22); // spec §11.3. CODE-CONFIRMED.
         _pinDisplay.HorizontalAlignment = HorizontalAlignment.Center;
         panel.AddChild(_pinDisplay);
 

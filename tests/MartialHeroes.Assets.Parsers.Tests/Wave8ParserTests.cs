@@ -609,10 +609,10 @@ public sealed class Wave8ParserTests
         SodBlob blob = SodBlobParser.Parse(new ReadOnlyMemory<byte>(data));
         CollisionQuad quad = blob.Solids[0].Quads[0];
 
-        Assert.Equal(-27.5f, quad.Plane0, precision: 4); // PARTIAL — confirmed present
-        Assert.Equal(0f, quad.Plane1, precision: 5);
-        Assert.Equal(1234.5f, quad.Plane2, precision: 4);
-        Assert.Equal(0f, quad.Plane3, precision: 5);
+        Assert.Equal(-27.5f, quad.EdgeSlope, precision: 4); // formerly Plane0; re-labelled 2026-06-14 per spec §11.3
+        Assert.Equal(0f, quad.EdgePad0, precision: 5); // formerly Plane1
+        Assert.Equal(1234.5f, quad.EdgeIntercept, precision: 4); // formerly Plane2
+        Assert.Equal(0f, quad.EdgePad1, precision: 5); // formerly Plane3
     }
 
     [Fact]

@@ -6,7 +6,9 @@
 > status: sample_verified
 > sample_verified: true — both shipped `bgtexture.lst` instances verify the size formula
 >                  exactly; the per-record kind byte and the relpath layout are cross-checked
->                  against the matching `bgtexture.txt` text mirror for the head records.
+>                  against the matching `bgtexture.txt` text mirror. A full-file scan of every
+>                  record in both instances (not just the head window) corrected the earlier
+>                  "kind is always 0x01" reading — see §Enumerations.
 
 ---
 
@@ -62,7 +64,7 @@ inlines its own kind byte and relpath; there is no separate parallel array.
 
 | Offset (in record) | Size | Type      | Field      | Notes                                                        | Confidence |
 |-------------------:|-----:|-----------|------------|-------------------------------------------------------------|------------|
-| +0                 | 1    | u8        | `kind`     | Observed `0x01` in every record of both files. Same value as `bgtexture.txt` column 1. Semantic UNVERIFIED — likely an animated/static flag. | CONFIRMED (value `0x01`); UNVERIFIED (semantic) |
+| +0                 | 1    | u8        | `kind`     | Material render-mode tag. Same value as `bgtexture.txt` column 1. NOT constant: across a full scan of every record in both files, `0x01` is the majority but at least six distinct values occur. Value→mode mapping in §Enumerations. | CONFIRMED (non-constant, 6 values); HIGH (render-mode semantic) |
 | +1                 | 47   | char[47]  | `rel_path` | Texture path **relative to** the file's own texture directory, **without** the `.dds` extension. Null-terminated, zero-padded to the full 47 bytes. | CONFIRMED |
 
 - **Record stride:** 48 bytes.
@@ -90,7 +92,7 @@ A tab-delimited (`\t`) CP949/ASCII text file with `\r\n` line endings and **no h
 | Column | Type        | Field                         | Maps to `.lst`                          |
 |-------:|-------------|-------------------------------|-----------------------------------------|
 | col0   | u32 decimal | record index (0-based)        | the implicit record position in the `.lst` (the binary has no id field; records are addressed by position) |
-| col1   | u8 decimal  | kind flag                     | the `kind` byte at record +0            |
+| col1   | u8 decimal  | kind / render-mode tag        | the `kind` byte at record +0 (see §Enumerations — NOT a simple 0/1 flag) |
 | col2   | string      | relpath (no `.dds` extension) | the `rel_path` field at record +1       |
 
 Row count equals the `.lst` `record_count` (1222 for `map000`, 1108 for `effect`). The `.txt`
@@ -118,19 +120,44 @@ The record index is the global pool slot that terrain and building geometry refe
 
 ## Enumerations / flags
 
-- **`kind` (record +0):** observed `0x01` in every record of both shipped files. Candidate
-  semantic: animated vs. static texture flag (the `terrain.md` text-companion notes treat
-  column 1 as `1` = animated). UNVERIFIED — the value never varied in the sample.
+**`kind` (record +0) — material render-mode tag.** A full scan of every record in both shipped
+instances (2,330 records total) found the byte is **not constant**: `0x01` is the majority, but
+227 records carry a value other than `0x01`. At least six distinct values occur. The earlier
+"animated vs static boolean" reading is retired — a single bit would not produce a value as high
+as `0x14`. Each value correlates with a recognisable family of texture relpaths, so the byte is a
+**material / shader render-mode selector**, not a boolean. The default mode is `0x01` (plain
+static ground).
+
+| kind | Dec | Proposed label    | Correlated relpath family (observed)                              |
+|-----:|----:|-------------------|------------------------------------------------------------------|
+| 0x01 |   1 | `KIND_STATIC`     | Plain static ground tiles — stone, cliff, soil, generic terrain (the default) |
+| 0x02 |   2 | `KIND_SCROLL`     | Water, lava, moss, wet surfaces — scrolling-UV / animated material |
+| 0x0A |  10 | `KIND_GRASS`      | Grass tiles                                                       |
+| 0x0B |  11 | `KIND_PLANT`      | Herb / plant tiles                                               |
+| 0x0C |  12 | `KIND_TREE_BARK`  | Tree-bark / trunk patch                                          |
+| 0x14 |  20 | `KIND_FOLIAGE`    | Dense tree foliage, branches, canopy                            |
+
+- The render-mode **categories** are HIGH confidence (the value→relpath-family correlation holds
+  across the full scan of both files). The **exact rendering behaviour** behind each mode
+  (scroll speed, sway parameters, alpha-test vs. billboard) is INFERRED from the relpath families
+  and the value spread — it is NOT confirmed against the engine's shader/material table. An
+  engineer must not treat the proposed labels as confirmed shader semantics; treat them as a
+  render-mode bucket and tune behaviour from the family.
+- The two instances have overlapping but not identical relpath populations, so the per-file count
+  of non-`0x01` records differs (105 in `effect`, 227 in `map000`). The value set is shared.
+- The same correction applies to **`bgtexture.txt` col1**: it is the same render-mode tag, not a
+  `0`/`1` animated flag. Do not read col1 as a boolean.
 
 ---
 
 ## Known unknowns
 
-- Semantic meaning of the `kind` byte (only the constant value `0x01` was observed; the
-  animated/static interpretation is inferred, not confirmed).
-- Whether any record in the unwalked middle/tail of either file carries a `kind` other than
-  `0x01` (full-file consistency is inferred from the exact size match; only the head records
-  were byte-checked against the `.txt`).
+- The exact engine rendering behaviour selected by each non-`0x01` `kind` value (scroll vector,
+  vertex-sway parameters, alpha-test threshold, billboarding) — the value→render-mode buckets are
+  HIGH, but the per-bucket behaviour is INFERRED from relpath families, not read from the engine's
+  material table.
+- Whether `kind` values beyond the six observed (`0x01`, `0x02`, `0x0A`, `0x0B`, `0x0C`, `0x14`)
+  exist in other VFS revisions; only these two shipped instances were scanned.
 - Whether the relpath buffer is exactly 47 bytes or a smaller logical cap zero-padded into 47
   (the stride is fixed at 48 regardless; a parser should read up to the first NUL within the
   47-byte field).
@@ -142,5 +169,6 @@ The record index is the global pool slot that terrain and building geometry refe
 - Related formats: `terrain.md` (the `.ted` → `.map` → pool → `.dds` chain; this spec replaces
   the inferred 76-byte record layout in `terrain.md §4.1`), `texture.md` (the `.dds` payload).
 - Glossary: see `Docs/RE/names.yaml` (proposed: `BgtextureLst`, `BgtextureLstRecord.kind`,
-  `BgtextureLstRecord.relPath`, `BgtextureTxt`).
+  `BgtextureLstRecord.relPath`, `BgtextureTxt`; render-mode labels `KIND_STATIC`, `KIND_SCROLL`,
+  `KIND_GRASS`, `KIND_PLANT`, `KIND_TREE_BARK`, `KIND_FOLIAGE`).
 - Provenance: see `Docs/RE/journal.md` (add an entry for this spec).

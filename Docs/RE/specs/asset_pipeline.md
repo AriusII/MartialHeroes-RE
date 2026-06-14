@@ -209,11 +209,24 @@ cell (area, cx, cz)
   final terrain path.)
 - Kind selector: 1 ⇒ animated texture options; ≥ 2 ⇒ static options; 0 ⇒ slot skipped (no element
   built). The `count` is propagated to the terrain layer renderers (tile / mass / overlay layers).
-- The pool is **0-based**. Earlier mapping notes an `idx-1` step at the `.map` authoring layer;
-  whether the cell's index byte is used raw or `idx-1` at the render call is **UNVERIFIED** here (the
-  off-by-one likely lives in the `.map` authoring layer / the render-time index call, not the `.lst`
-  loader). Trace the terrain-render draw path to confirm. The global texture repository under
-  `data/map000/texture/` serves **all** areas — terrain textures are not area-local.
+- **Cell index byte is `idx-1` (RESOLVED in favour of `idx-1`).** The earlier raw-vs-`idx-1`
+  question is settled: the per-cell `.ted` texture-index byte is **1-based**, and the texture is
+  resolved as `per_cell_texture_list[byte - 1]`, with byte value **0 = no-texture sentinel**. The
+  loader stores the block-3 byte RAW (no decrement at load); the `- 1` happens downstream at the
+  cell-attach / render-resolution step. The decrement is structurally forced: the on-disk block-3
+  bytes are 1-based (observed 1..11, never 0) while the per-cell texture list is built **0-based by
+  registration order** (one entry per `.map` `TEXTURES{}` line, slot 0 first). This mirrors the
+  already-CONFIRMED **BUILDING** path (`BUILDING TEXTURES[tex_id - 1]`) — the same
+  `setTextureId` registration machinery, the same `- 1`. Confidence: **HIGH**. *Residual:* the
+  literal `- 1` was not pinned to a single instruction, because the runtime draw resolves each
+  patch to a texture-node pointer at cell-attach rather than re-subscripting the per-cell list per
+  frame; the mapping is structurally certain, but the instruction-exact decrement site is the one
+  thin residual (a debugger pass would make it instruction-exact). Use `texlist[byte - 1]`
+  (byte 0 = no texture), not `texlist[byte]`. The full block-3 chain is documented in
+  `formats/terrain.md` §5.6. (This resolves the raw-vs-`idx-1` question only; the separate
+  `bgtexture.txt`-vs-`.lst` runtime-source note above is unrelated and stands.) The global texture
+  repository under `data/map000/texture/` serves **all** areas — terrain textures are not
+  area-local.
 
 ### C. Character → skin → bind → motion  (parser-verified)
 ```

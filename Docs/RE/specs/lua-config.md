@@ -1,9 +1,9 @@
 ---
 status: confirmed
-sample_verified: false   # C++ consumption surface CODE-CONFIRMED; actual .lua file contents live in the VFS, not the binary
+sample_verified: true    # C++ consumption surface CODE-CONFIRMED; real config.lua / display.lua / uiconfig.lua samples now inspected on disk (§9)
 subsystems: [lua_vm, config_scripts, string_tables, boot_flags]
 networked: false          # Lua is a client-side config/text-table engine; nothing on the wire
-encoding_note: Lua string-table rows decode as UTF-8 (code page 65001), NOT CP949 — see §5
+encoding_note: The shipped .lua source files are CP949 (code page 949), NOT UTF-8 — this CORRECTS the earlier UTF-8 claim. See §0 (Encoding correction) and §9.
 ---
 
 # Lua configuration & string-table engine (in-process VM, config scripts, table API)
@@ -22,6 +22,51 @@ encoding_note: Lua string-table rows decode as UTF-8 (code page 65001), NOT CP94
 > are carried here as load-bearing facts (§2.2 script source path, §6 the integer reader misnomer).
 > Engineers implementing the config/localization loader should treat this file as the primary
 > reference for *what the scripts must define* and the older file as the VM-identity reference.
+>
+> **Engineer note (encoding):** `LuaConfigReader` (and any loader that reads the shipped `.lua`
+> source files) **must decode the file bytes as CP949 (code page 949)**, register the CP949 provider
+> once, and cite `// spec: Docs/RE/specs/lua-config.md`. See §0.
+
+---
+
+## 0. Encoding correction — the shipped `.lua` files are CP949, NOT UTF-8 (LOAD-BEARING)
+
+> **This supersedes the earlier UTF-8 claim.** An earlier note (carried in the front-matter and in
+> §5.2 below as the original UTF-8 assertion) stated that Lua text decodes as UTF-8 (code page
+> 65001). **Direct inspection of the real shipped config files refutes that for the file source
+> itself.** The shipped `.lua` source files — `config.lua`, `display.lua`, `uiconfig.lua` — are
+> **CP949 (code page 949, EUC-KR)** for their inline Korean comment strings, consistent with the
+> project-wide "all game text is CP949" rule.
+
+**Why the prior UTF-8 claim was wrong.** The earlier UTF-8 assertion came from reading the *C++
+host's row-decode path* in the binary (the tutorial string-table conversion that ran the row bytes
+through a wide-char conversion configured for code page 65001) and generalising it to the file
+encoding. The actual config files were never byte-inspected at that time. When the real files are
+read, the Korean comment bytes are unambiguously **double-byte CP949 syllables, not UTF-8**: a
+Korean syllable in CP949 occupies two bytes in the high range, whereas the same syllable in UTF-8
+would begin with a three-byte lead-byte sequence. The observed comment bytes match the CP949
+two-byte pattern and do not match the UTF-8 three-byte pattern. Therefore the file source encoding
+is CP949.
+
+**Scope of the correction.**
+
+- The **file source encoding** of `config.lua` / `display.lua` / `uiconfig.lua` (and, by the
+  project-wide rule, other shipped `.lua` source) is **CP949** — this is the corrected, authoritative
+  fact for `LuaConfigReader`.
+- The **C++ host's tutorial row-decode path** (§5.2) was observed configured for code page 65001 in
+  the binary. That remains a separate, narrower observation about one in-binary conversion routine and
+  is NOT the file encoding. Where the two disagree, **the on-disk file bytes (CP949) are ground truth
+  for a clean-room reader**: a reimplementation reads the bytes off disk and must decode them as the
+  encoding they were actually written in (CP949). The §5.2 paragraph is retained verbatim below for an
+  honest record, annotated as superseded for file-source purposes.
+
+**File-format facts confirmed by inspection (all three files):** no byte-order mark (BOM); line
+endings are CRLF; ASCII key names and numeric literals are 7-bit safe (only the inline Korean
+comments are double-byte). The VM is stock Lua 5.1.2 (statically linked).
+
+**Implementation contract:** `LuaConfigReader` registers the CP949 code-page provider once and
+decodes every shipped `.lua` file as CP949. Do not decode these files as UTF-8 — doing so corrupts
+the inline Korean comments and any Korean string literal.
 
 ---
 
@@ -34,13 +79,14 @@ encoding_note: Lua string-table rows decode as UTF-8 (code page 65001), NOT CP94
 | `cpp_load` = script-side include (chain-loads another `.lua` through the same loader) | CODE-CONFIRMED |
 | Four named config scripts and their loader call sites | CODE-CONFIRMED |
 | Boot globals `vfsmode` / `launcher` / `debugmode` (read, gate, and downstream effect) | CODE-CONFIRMED |
-| `uiconfig.lua` global `NEW_SERVER_INDEX` | CODE-CONFIRMED |
-| `display.lua` `DISPLAY_*` global set (ints, the per-status float brightness matrix, one string) | CODE-CONFIRMED |
+| `uiconfig.lua` global `NEW_SERVER_INDEX` | CODE-CONFIRMED / SAMPLE-CONFIRMED |
+| `display.lua` `DISPLAY_*` global set (ints, the per-status float brightness matrix, one string) | CODE-CONFIRMED / SAMPLE-CONFIRMED |
 | `getTableSize` / `getTableString` / `getTableStringByID` Lua API contract | CODE-CONFIRMED |
-| **Lua string-table rows decode as UTF-8 (code page 65001), NOT CP949** | CODE-CONFIRMED |
+| **Shipped `.lua` source files are CP949 (code page 949), NOT UTF-8** (corrects prior claim) | SAMPLE-CONFIRMED |
 | The global config reader returns a Lua *number as a full int* (the "bool" name is a misnomer) | CODE-CONFIRMED |
 | Scripts are sourced through the same VFS-vs-disk router as every other asset | CODE-CONFIRMED |
-| The actual *contents/values* inside each `.lua` (they live in the VFS, not the binary) | UNVERIFIED |
+| `config.lua` developer bootstrap keys + the `tableString` lookup library | SAMPLE-CONFIRMED |
+| Concrete shipped values inside each `.lua` (matrix numbers, exact key values) | SAMPLE-OBSERVED (single sample) |
 
 ---
 
@@ -82,7 +128,7 @@ singleton and runs another named `.lua` file through the same load-and-run path 
 cpp_load("<relative-script-path>.lua")   -- runs that script in the shared VM
 ```
 
-It is the script-side **`#include` / `dofile`** mechanism: any of the four named config scripts may
+It is the script-side **`#include` / `dofile`** mechanism: any of the named config scripts may
 chain-load further config scripts through `cpp_load`. It is re-entrant. The binding is registered
 through `lua_tinker`'s generic single-upvalue trampoline (one shared C dispatcher carries the bound
 C function pointer as an upvalue), but that is binding plumbing, not a semantic extension — see
@@ -90,7 +136,7 @@ C function pointer as an upvalue), but that is binding plumbing, not a semantic 
 
 ---
 
-## 2. Script load path and the four config scripts
+## 2. Script load path and the named config scripts
 
 ### 2.1 Load-and-run mechanism
 
@@ -118,18 +164,19 @@ undefined (the host then falls back to its compiled-in defaults, see §3).
 > they are read as loose files from disk. Implementers must route script loading through the same
 > VFS abstraction as other assets, not a separate plain-filesystem reader.
 
-### 2.3 The four config scripts
+### 2.3 The named config scripts
 
 | Script (relative path) | Loaded at | What the host reads back |
 |---|---|---|
 | `game.lua` | Boot (early startup) | Boot flags `vfsmode`, `launcher`, `debugmode` (§3); later a game-addiction warning timing value. `game.lua` defines these as plain global numbers. |
+| `data/script/config.lua` | Boot / pre-script environment | Developer bootstrap flags `CONFIG_*` (§3.1) plus the shared `tableString` table-read library (§5 / §5.3). The leading comment marks these as developer defaults not to be patched to users. |
 | `data/script/uiconfig.lua` | Login-window scene build | Exactly one global: **`NEW_SERVER_INDEX`** (an integer index used to pre-select the default / newest server entry in the login server list). The remaining login widgets are built from compiled-in constants + the message database, not from Lua. |
-| `data/script/display.lua` | Renderer display-config load | A large `DISPLAY_*` global set fed into renderer state (§4). |
+| `data/script/display.lua` | Renderer display-config load | A large `DISPLAY_*` global set fed into renderer state (§4), including a derived shader-path string. |
 | `data/script/tutor.lua` | Tutorial panel open/refresh | Tutorial text content, pulled row-by-row via the Lua table-read helpers `getTableString` / `getTableStringByID` (§5). |
 
-> UNVERIFIED: the exact contents/values of each `.lua` file are **not in the binary** — they live in
-> the VFS. The above is the C++ *consumption surface*, which fully constrains the schema each script
-> must satisfy (which globals/functions it must define) but not the concrete values it assigns.
+> The C++ consumption surface fully constrains *which* globals/functions each script must define.
+> The concrete *values* in `config.lua` / `display.lua` / `uiconfig.lua` are now corroborated by a
+> single on-disk sample (§9); `game.lua` / `tutor.lua` shipped contents remain UNVERIFIED.
 
 ---
 
@@ -152,26 +199,94 @@ A fourth value read out of `game.lua` later is a game-addiction-warning timing n
 integer, read by the same number reader as the flags above); it is a localisation/legal timing knob
 and is outside the boot-flag triad.
 
+### 3.1 Developer bootstrap flags read from `config.lua` (SAMPLE-CONFIRMED)
+
+`config.lua` carries a separate set of **developer/system bootstrap** globals (distinct from the
+`game.lua` boot triad). The file's leading Korean comment marks them as developer defaults that must
+not be shipped to users in a patch. These are global constants set before other scripts evaluate.
+Each is read by the number-as-int reader (§6).
+
+| Key | Type | Default (observed) | Range | Effect |
+|---|---|---|---|---|
+| `CONFIG_NO_VFS` | bool (0/1) | `false` | `false` / `true` | `false` = use the VFS archive; `true` = legacy loose-filesystem mode (no VFS). A `config.lua`-level mirror of the asset-source choice. |
+| `CONFIG_DEBUG_LEVEL` | int | `3` | `0`–`3` | Debug verbosity; lower = more output. `3` = minimal / no debug output (production). |
+| `CONFIG_LOAD_SIMPLE_EFFECT` | int | `0` | `0`–`1` | `1` = fast / simplified effect loading; `0` = full effect loading. |
+| `CONFIG_LOAD_MESH` | int | `1` | `0`–`1` | `1` = load via converted mesh instead of skin; `0` = load skin directly. Selects the character render-load path. |
+| `CONFIG_SAVE_MESH` | int | `0` | `0`–`1` | `1` = after a skin loads, persist the converted mesh to disk (developer cache tool); `0` = do not persist. |
+
+**Confidence:** SAMPLE-CONFIRMED for the keys and their inline-documented effects (decoded cleanly
+via CP949). UNVERIFIED: the exact code path that honours `CONFIG_SAVE_MESH = 1` (the mesh-cache
+write) and the precise interaction between `CONFIG_LOAD_MESH` and `CONFIG_SAVE_MESH` are not
+confirmable from the file alone.
+
 ---
 
-## 4. `display.lua` renderer globals (CODE-CONFIRMED)
+## 4. `display.lua` renderer globals (CODE-CONFIRMED / SAMPLE-CONFIRMED)
 
 The renderer display-config load reads a set of `DISPLAY_*` globals from `display.lua` into renderer
-state. The set is large; the structurally significant members are:
+state. All keys follow the pattern `DISPLAY_<CATEGORY>_<CHANNEL>_<STATE>`. The tint model throughout
+is the affine form `out = MULTI * in + ADD`, applied per RGB channel, plus an alpha value. The
+sampled file defines on the order of seventy keys.
 
-| Global | Type | Notes |
+### 4.1 Per-status character-brightness matrix
+
+For each character status variant the file defines an 8-key block: a multiply factor and an additive
+offset for each of R / G / B, plus a single alpha value (the inline comment notes alpha below roughly
+0.6 renders fully transparent).
+
+```
+DISPLAY_CHAR_BRIGHT_MULTI_{R|G|B}_<STATE>   (float, per-channel multiply)
+DISPLAY_CHAR_BRIGHT_ADD_{R|G|B}_<STATE>     (float, per-channel additive offset)
+DISPLAY_CHAR_BRIGHT_ALPHA_<STATE>           (float, alpha)
+```
+
+The status variants and their inline-documented triggers:
+
+| State suffix | Trigger (inline comment) |
+|---|---|
+| `DEFAULT` | Normal / idle state. |
+| `CHOICE` | This NPC / monster is currently selected (targeted). |
+| `HIT` | Character tint at the moment of receiving a hit. |
+| `ALPHA` | Meaning unknown to the original authors ("ignoring for now") — defined but its trigger condition is not documented. |
+| `HIDDEN` | Own hide / stealth mode, or a summoned creature of the same faction. |
+| `POISON` | Character afflicted by poison. |
+| `TYPE` | A damage-reduction "property type" buff is applied. |
+| `ANGER` | Anger / rage mode active. |
+| `AUTO` | Auto-attack penalty active. |
+
+> The concrete per-state multiply/add/alpha numbers exist in the sampled file; they are renderer
+> tuning values and are intentionally not transcribed here. An implementer reads them straight from
+> the `.lua` file at runtime via `LuaConfigReader`.
+
+### 4.2 Global display scalars
+
+| Global | Type | Effect |
 |---|---|---|
-| `DISPLAY_GLOW_RANGE_X`, `DISPLAY_GLOW_RANGE_Y` | int | Glow kernel range (a small default such as 2). |
-| `DISPLAY_FRAMERATE` | int | Target frame-rate cap. |
-| `DISPLAY_CHAR_BRIGHT_{MULTI,ADD,ALPHA}_{R,G,B}_{state}` | float | A **per-status brightness matrix**: a multiply / add / alpha triple, each with R/G/B components, for each character status (DEFAULT / CHOICE / HIT / ALPHA / HIDDEN / POISON / TYPE / ANGER / AUTO). This is the bulk of the file. |
-| `DISPLAY_BASE_BRIGHT_MULTI` | float | Base brightness multiplier. |
-| `DISPLAY_GLOW_BRIGHT_MULTI` | float | Glow brightness multiplier. |
-| `DISPLAY_LIGHT_RATIO` | float | Lighting ratio. |
-| `DISPLAY_POWERSHADER` | string | A short string (read as a string global), copied into a fixed-size buffer — most plausibly a shader filename. |
+| `DISPLAY_BASE_BRIGHT_MULTI` | float | Global background (terrain / scene) brightness multiplier (the `MULTI` factor of the affine model). |
+| `DISPLAY_GLOW_BRIGHT_MULTI` | float | Glow-pass brightness multiplier. |
+| `DISPLAY_GLOW_RANGE_X` | int | Horizontal glow downsample factor (valid set: 1, 2, 4, 8; higher = coarser). |
+| `DISPLAY_GLOW_RANGE_Y` | int | Vertical glow downsample factor (same scale). |
+| `DISPLAY_FRAMERATE` | int | Show FPS counter: `0` = off, `1` = on. |
+| `DISPLAY_POWER` | int | Glow shader intensity level (valid set: 1, 2, 4, 8, 16, 32); selects which glow pixel-shader file is used (§4.3). |
+| `DISPLAY_LIGHT_RATIO` | float | Character light colour-correction factor (range 0.0–1.0). |
+| `DISPLAY_GAME_CLASS_VIEW_TIME` | int | Minutes between game-rating (age-rating) UI notifications. |
+| `DISPLAY_GAME_ADDICTION_WARNING_CHECK_TIME` | int | Seconds between addiction-warning UI checks. |
+| `DISPLAY_GAME_ADDICTION_WARNING_VIEW_TIME` | int | Seconds the addiction-warning UI stays visible. |
+| `DISPLAY_COMBO_COOL_TIME` | int | Combo-chain cooldown, in seconds. |
+| `DISPLAY_POWERSHADER` | string | Path to the active glow pixel-shader `.psh` file — **derived, not a bare assignment** (§4.3). |
 
-The integer members are read by the number-as-int reader (§6); the float members are read by the
-string/float reader sibling (the value is consumed as a float); `DISPLAY_POWERSHADER` is read by the
-string reader. So `display.lua` must define each of these as the appropriate Lua value type.
+### 4.3 The derived `DISPLAY_POWERSHADER` key
+
+`DISPLAY_POWERSHADER` is **computed** at the end of the file by an `if`/`elseif` chain over
+`DISPLAY_POWER`, mapping the power level to a glow pixel-shader path of the form
+`data/shader/power<N>dx8.psh`. It is the only `DISPLAY_*` key that is set programmatically rather
+than as a bare scalar assignment; a config author must not pre-assign it. The host reads it back via
+the string reader (§6) and copies it into a fixed-size buffer. This establishes a dependency from
+`display.lua` onto the shader assets under `data/shader/`.
+
+The integer members are read by the number-as-int reader (§6); the float members by the float reader
+sibling; `DISPLAY_POWERSHADER` by the string reader. `display.lua` must define each member as the
+appropriate Lua value type.
 
 ---
 
@@ -179,17 +294,18 @@ string reader. So `display.lua` must define each of these as the appropriate Lua
 
 The tutorial panel is the one feature that pulls **numbered text rows** out of Lua. After building
 its (compiled-in) widget skeleton it runs `tutor.lua`, then fills a host-side string list by calling
-Lua-side helper functions that `tutor.lua` must define.
+Lua-side helper functions that the script must define.
 
-### 5.1 The three Lua functions a string-table script must define
+### 5.1 The Lua functions a string-table script must define
 
-These three global function names are the **Lua API contract** the host depends on; a string-table
-script (e.g. `tutor.lua`) must define them:
+These global function names are the **Lua API contract** the host depends on; a string-table
+script (e.g. `tutor.lua`) must define them. `config.lua` ships the same family as a shared library
+(§5.3).
 
 | Lua function (called by host) | Shape | Role |
 |---|---|---|
-| `getTableSize(name)` | `(string) -> int` | Returns the number of rows in the named table. |
-| `getTableString(name, i)` | `(string, int) -> string` | Returns the *i*-th row string of the named table. |
+| `getTableSize(name)` | `(string) -> int` | Number of rows in the named table. |
+| `getTableString(name, i)` | `(string, int) -> string` | The *i*-th row string of the named table. |
 | `getTableStringByID(id)` / `getTableStringByID(id, i)` | `(int) -> int` and `(int, int) -> string` | ID-keyed variant: first form returns the row count for table `id`; second returns the *i*-th row string of that table. |
 
 The host's name-based loader iterates `getTableSize(name)` then `getTableString(name, i)` for each
@@ -200,17 +316,38 @@ Calls into these globals follow the standard `lua_tinker` typed-call pattern: th
 global by name, verifies it is a function (logging "attempt to call global … (not a function)" if
 not), pushes the arguments, performs a protected call, and reads the typed return.
 
-### 5.2 String decoding — UTF-8, NOT CP949 (LOAD-BEARING)
+### 5.2 String decoding — original host-path observation (SUPERSEDED for file source; see §0)
 
-> **Critical divergence from the project-wide "all game text is CP949" assumption.** Each row
-> string returned by the Lua table-read API is decoded as **UTF-8 (Windows code page 65001)**, not
-> CP949 (code page 949). The host converts the row from UTF-8 wide form to a multibyte buffer and
-> stores the result. Any table loader that consumes Lua string-table rows **must decode them as
-> UTF-8** — applying the project's default CP949 decode here would corrupt the text.
+> **Retained verbatim for an honest record.** *Original claim:* each row string returned by the Lua
+> table-read API is decoded by the C++ host as UTF-8 (Windows code page 65001), via a wide-char
+> conversion configured for that code page.
 >
-> This applies to the **Lua string-table text path specifically**. It does not change the encoding
-> of the project's other (non-Lua) CP949 text tables; it is a per-path exception that the engineer
-> must honour exactly for the `getTableSize` / `getTableString` / `getTableStringByID` rows.
+> **Status:** this describes one in-binary conversion routine and was previously over-generalised to
+> the *file* encoding. **§0 supersedes that generalisation:** the shipped `.lua` *files* are CP949,
+> confirmed by byte inspection. A clean-room reader treats the on-disk file bytes as ground truth and
+> decodes them as **CP949**. The 65001-configured host routine is noted only so the record is
+> complete; it does not override the confirmed file encoding for `LuaConfigReader`.
+
+### 5.3 The `tableString` lookup library shipped in `config.lua` (SAMPLE-CONFIRMED)
+
+`config.lua` defines a generic Lua string-table lookup library operating on a global `tableString`
+variable (a nested table keyed by either name or numeric id). It exposes the §5.1 family plus
+index-based siblings:
+
+| Function | Signature | Role |
+|---|---|---|
+| `getTableSize(name)` | `(string) -> int` | Count of sub-entries under a named key. |
+| `getTableString(name, num)` | `(string, int) -> string` | Fetch the *num*-th sub-entry of a named key. |
+| `getTableSizeByIndex(index)` | `(int) -> int` | Count sub-entries by numeric position in `tableString`. |
+| `getTableStringByIndex(index, num)` | `(int, int) -> string` | Fetch a sub-entry by table position and sub-index. |
+| `getTableSizeByID(id)` | `(int) -> int` | Count sub-entries for a numeric id key. |
+| `getTableStringByID(id, num)` | `(int, int) -> string` | Fetch a sub-entry for a numeric id key + sub-index. |
+
+In the sampled file the `tableString` content is a **developer stub / test fixture** (placeholder
+entries under dummy ids), not production data. **UNVERIFIED:** whether production usage replaces
+`tableString` at load time with real content from another script, or whether this library is seeded
+externally / is vestigial. This cannot be resolved without tracing the Lua `cpp_load` / `dofile`
+call graph. A commented-out block in the file shows a name-keyed variant of the same structure.
 
 ---
 
@@ -224,17 +361,18 @@ not), pushes the arguments, performs a protected call, and reads the typed retur
 
 Proof that it returns the full integer (not a clamped bool): the very same reader is used for genuine
 multi-valued integers — the target frame-rate, the glow range, the addiction-warning timing values
-(scaled by 1000), and the `NEW_SERVER_INDEX` server selector. The boot flags merely *happen* to be
-0/1 in `game.lua`, which is why the misnomer arose.
+(scaled by 1000), the `CONFIG_DEBUG_LEVEL` 0–3 level, the `DISPLAY_POWER` level, and the
+`NEW_SERVER_INDEX` server selector. The boot flags merely *happen* to be 0/1 in their scripts, which
+is why the misnomer arose.
 
 There is in fact a small **polymorphic global-reader family**, selected by which sibling the host
 calls:
 
 | Reader variant | Returns | Used for |
 |---|---|---|
-| number-as-int reader | full signed `int` | `vfsmode`, `launcher`, `debugmode`, `DISPLAY_FRAMERATE`, `DISPLAY_GLOW_RANGE_X/Y`, the addiction-warning timing ints, `NEW_SERVER_INDEX` |
-| string reader | `const char*` (string pointer) | `DISPLAY_POWERSHADER` |
-| float reader (sibling) | `float` (consumed off the FPU) | the `DISPLAY_*` brightness-matrix floats |
+| number-as-int reader | full signed `int` | `vfsmode`, `launcher`, `debugmode`, the `CONFIG_*` ints, `DISPLAY_FRAMERATE`, `DISPLAY_GLOW_RANGE_X/Y`, `DISPLAY_POWER`, the addiction-warning timing ints, `NEW_SERVER_INDEX` |
+| string reader | string value | `DISPLAY_POWERSHADER` |
+| float reader (sibling) | `float` | the `DISPLAY_*` brightness-matrix floats and the float scalars (`DISPLAY_BASE_BRIGHT_MULTI`, `DISPLAY_GLOW_BRIGHT_MULTI`, `DISPLAY_LIGHT_RATIO`) |
 
 **Implementation contract:** treat a config global read as **"read the Lua number as a full
 integer"**, not as a 0/1 boolean. For 0/1 flags, compare the returned integer `!= 0`. Do not clamp.
@@ -248,28 +386,47 @@ integer"**, not as a 0/1 boolean. For 0/1 flags, compare the returned integer `!
 | VM scope | One process-wide Lua 5.1.x-compatible state; open the standard library; register exactly one global, `cpp_load`. No gameplay/object bindings in this build. |
 | `cpp_load` | Implement as a script-side include that runs another script through the same loader (re-entrant). |
 | Script source | Route script loading through the **same VFS-vs-disk abstraction** as other assets; the `vfsmode` flag selects packed-VFS vs loose-disk. Do **not** hard-code a plain-filesystem reader. |
+| **File encoding** | **`LuaConfigReader` decodes every shipped `.lua` file as CP949 (code page 949).** Register the CP949 provider once; files have no BOM and use CRLF line endings. Do NOT decode as UTF-8. (§0) |
 | Boot flags | `vfsmode` (VFS vs loose), `launcher` (launcher bounce unless `-Start`), `debugmode` (windowed vs fullscreen). Read as ints; default each to `1` if absent; interpret as `!= 0`. |
+| Developer flags | `config.lua` defines `CONFIG_NO_VFS` / `CONFIG_DEBUG_LEVEL` / `CONFIG_LOAD_SIMPLE_EFFECT` / `CONFIG_LOAD_MESH` / `CONFIG_SAVE_MESH` (§3.1) — read as ints; these are developer defaults. |
 | Config globals | Read each as the correct Lua type (int / float / string). The integer reader returns the **full int**, never a clamped bool. |
-| String tables | The script must define `getTableSize` / `getTableString` / `getTableStringByID`. **Decode every returned row as UTF-8 (cp 65001), not CP949.** |
-| Interpreter vs. direct-parse | The data-vs-logic trade-off (embed a managed Lua 5.1 interpreter vs. direct-parse the data tables) is unchanged from `specs/lua_scripting.md` §7 — that decision is gated on recovering real `.lua` samples. |
+| `DISPLAY_POWERSHADER` | Treat as **derived** from `DISPLAY_POWER`; do not pre-assign. Maps to `data/shader/power<N>dx8.psh`. |
+| String tables | The script must define `getTableSize` / `getTableString` / `getTableStringByID`. Decode every returned row using the file's CP949 encoding (§0/§5.2). |
+| Interpreter vs. direct-parse | The data-vs-logic trade-off (embed a managed Lua 5.1 interpreter vs. direct-parse the data tables) is unchanged from `specs/lua_scripting.md` §7 — gated on recovering real `.lua` samples (now partially available, §9). |
 
 ---
 
 ## 8. Known unknowns
 
-1. **Actual `.lua` contents/values.** Every concrete value (`vfsmode`'s shipped setting, the
-   `DISPLAY_*` matrix numbers, `NEW_SERVER_INDEX`, the tutorial row text) lives in the VFS, not the
-   binary. The C++ consumption contract above fully constrains *which* globals/functions each script
-   must define, but the values themselves are UNVERIFIED until a `.lua` sample is recovered.
-2. **Source vs. precompiled bytecode.** Whether the shipped `.lua` files are source text or
-   precompiled Lua 5.1 bytecode is unconfirmed (carried over from `specs/lua_scripting.md`
-   UNVERIFIED item 4).
-3. **Whether any further config script is `cpp_load`-included.** The four named scripts may pull in
-   additional siblings via `cpp_load`; the included set is not enumerable from the binary.
-4. **The `.xdb` filename-pointer block** that sits adjacent to the `tutor.lua` path pointer in
-   read-only data is **NOT Lua-bound** — only the `tutor.lua` pointer has live code references; the
-   `.xdb` entries are loaded by their own asset loaders and are out of scope here (defer to the
-   `.xdb` / asset lanes). Do not fold the `.xdb` table into this spec.
+1. **`tableString` production seeding.** The sampled `config.lua` ships stub/test data. Whether
+   production replaces it externally or whether the library is vestigial is UNVERIFIED without the
+   `cpp_load` / `dofile` call graph.
+2. **`config.lua` mesh-cache path.** The exact code path honouring `CONFIG_SAVE_MESH = 1` and the
+   `CONFIG_LOAD_MESH` interaction are UNVERIFIED from the file alone.
+3. **`DISPLAY_CHAR_BRIGHT_*` `ALPHA` state.** The original authors' comment marks the `ALPHA`
+   status's trigger as unknown ("ignoring for now"); the values exist but the trigger does not.
+4. **`NEW_SERVER_INDEX` target table.** Which server-list table the index `NEW_SERVER_INDEX` selects
+   into is not visible in these files; it references a list loaded elsewhere.
+5. **Source vs. precompiled bytecode.** Whether shipped `.lua` files are source text or precompiled
+   Lua 5.1 bytecode is unconfirmed (the inspected samples were readable source text, but the full
+   shipped set is not confirmed uniformly source).
+6. **`cpp_load` include chains.** The named scripts may pull additional siblings via `cpp_load`; the
+   included set is not enumerable from the binary, and no `cpp_load` / `dofile` calls were observed in
+   the three inspected files (each is self-contained).
+7. **The `.xdb` filename-pointer block** adjacent to the `tutor.lua` path pointer is **NOT
+   Lua-bound** — out of scope here; defer to the `.xdb` / asset lanes.
+
+---
+
+## 9. Sample provenance (file inspection, no IDA)
+
+`config.lua`, `display.lua`, and `uiconfig.lua` were observed as on-disk files (black-box header /
+hexdump inspection; no decompiler). Observed file characteristics: no BOM; CRLF line endings; CP949
+double-byte Korean comments (§0). `config.lua` carries the five `CONFIG_*` developer flags plus the
+`tableString` library; `display.lua` carries on the order of seventy `DISPLAY_*` keys and the derived
+`DISPLAY_POWERSHADER`; `uiconfig.lua` is a minimal single-key file defining `NEW_SERVER_INDEX`.
+These are **single-sample** observations: the schema (which globals/functions exist) is firmly
+corroborated, but concrete numeric values are intentionally not transcribed and are read at runtime.
 
 ---
 
@@ -280,8 +437,10 @@ integer"**, not as a 0/1 boolean. For 0/1 flags, compare the returned integer `!
 - **VFS container / mount that `vfsmode` selects:** `formats/pak.md`.
 - **Login server-list scene that consumes `NEW_SERVER_INDEX`:** `specs/frontend_scenes.md` /
   `specs/login_flow.md`.
-- **Renderer state fed by `display.lua`:** `specs/environment.md` (brightness / glow / lighting).
-- **Canonical names:** see `Docs/RE/names.yaml` (e.g. the config-reader family proposed as
-  `LuaConfig_GetGlobalInt` / `LuaConfig_ReadGlobalNumber` / `LuaTinker_ReadNumberAsInt`; the
-  trampoline as `luaT_invoke_trampoline`; the tutorial widget-builder helpers by role).
+- **Renderer state fed by `display.lua` (brightness / glow / lighting):** `specs/environment.md`.
+  Glow shader path `data/shader/power<N>dx8.psh` is consumed by the rendering layer.
+- **Project-wide CP949 text rule:** all game text is CP949 — see `CLAUDE.md`; this spec's §0 confirms
+  the `.lua` source files follow that rule.
+- **Canonical names:** see `Docs/RE/names.yaml` (config-reader family, the trampoline, the tutorial
+  widget-builder helpers; proposed `CONFIG_*` / `DISPLAY_*` / `NEW_SERVER_INDEX` glossary entries).
 - **Provenance:** see `Docs/RE/journal.md`.

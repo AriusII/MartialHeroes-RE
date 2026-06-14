@@ -114,6 +114,101 @@ public static class XobjParser
         };
     }
 
+    // ─── Mesh-particle overload ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Parses a <c>.xobj</c> file into a <see cref="XobjMeshData"/> representing the
+    /// 24-byte per-vertex shared mesh table layout used by mesh-particle emitters
+    /// (<c>emitter_type == 1</c>, <c>resource_id &lt; 10000</c>).
+    /// </summary>
+    /// <param name="data">Raw file content from the VFS.</param>
+    /// <returns>
+    /// Decoded mesh in the 24-byte stride layout:
+    /// POSITION12 (3 × f32) + DIFFUSE4 (uninitialised, always 0) + TEXCOORD8 (2 × f32).
+    /// </returns>
+    /// <exception cref="InvalidDataException">
+    /// Thrown on truncation, token under-run, or malformed float/integer tokens.
+    /// </exception>
+    /// <remarks>
+    /// spec: Docs/RE/formats/effects.md §A.11 — .xobj files feed the shared mesh table at 24-byte stride
+    ///   for emitter_type == 1 mesh-particle objects (resource_id &lt; 10000): CONFIRMED.
+    /// spec: Docs/RE/formats/mesh.md §In-memory vertex layout — 24 bytes per vertex
+    ///   (pos_x/y/z @ +0/4/8, uninitialised @ +12, tex_u @ +16, tex_v as 1.0−disk @ +20): CONFIRMED.
+    /// Normals are read from disk and discarded (not in the 24-byte in-memory layout).
+    /// spec: Docs/RE/formats/mesh.md §Vertex list — norm_x/y/z: "read then discarded": CONFIRMED.
+    /// DIFFUSE4 (@+12) is always zero (uninitialised by the loader per spec).
+    /// spec: Docs/RE/formats/mesh.md §In-memory vertex layout — offset +12 "(uninitialised / padding)": CONFIRMED.
+    /// </remarks>
+    public static XobjMeshData ParseAsMeshParticle(ReadOnlyMemory<byte> data) =>
+        ParseAsMeshParticle(data.Span);
+
+    /// <summary>
+    /// Parses from a <see cref="ReadOnlySpan{byte}"/>.
+    /// </summary>
+    public static XobjMeshData ParseAsMeshParticle(ReadOnlySpan<byte> data)
+    {
+        // The file is pure ASCII text.
+        // spec: Docs/RE/formats/mesh.md — "pure ASCII with no binary header": CONFIRMED.
+        string text = Encoding.ASCII.GetString(data);
+        string[] tokens = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        int pos = 0;
+
+        // Token 1: slot_id (discard).
+        // spec: Docs/RE/formats/mesh.md §Preamble — slot_id u32 @ token 1: CONFIRMED (discard confirmed).
+        _ = NextU32(tokens, ref pos, "slot_id");
+
+        // Token 2: face_count (num_triangles).
+        // spec: Docs/RE/formats/mesh.md §Preamble — face_count u32 @ token 2: CONFIRMED.
+        uint numTriangles = NextU32(tokens, ref pos, "face_count");
+
+        // Index list: face_count × 3 tokens.
+        // spec: Docs/RE/formats/mesh.md §Index list — vertex_index[n]: CONFIRMED.
+        int indexCount = checked((int)(numTriangles * 3));
+        ushort[] indices = new ushort[indexCount];
+        for (int i = 0; i < indexCount; i++)
+        {
+            uint raw = NextU32(tokens, ref pos, $"index[{i}]");
+            indices[i] = (ushort)(raw & 0xFFFF);
+        }
+
+        // vertex_count.
+        // spec: Docs/RE/formats/mesh.md §Vertex count: CONFIRMED.
+        uint numVertices = NextU32(tokens, ref pos, "vertex_count");
+
+        var vertices = new XobjVertex[numVertices];
+        for (uint v = 0; v < numVertices; v++)
+        {
+            // Tokens 1-3: position.
+            // spec: Docs/RE/formats/mesh.md §Vertex data rows — pos_x/y/z @ col 0/1/2: CONFIRMED.
+            float px = NextF32(tokens, ref pos, $"vertex[{v}].pos_x");
+            float py = NextF32(tokens, ref pos, $"vertex[{v}].pos_y");
+            float pz = NextF32(tokens, ref pos, $"vertex[{v}].pos_z");
+
+            // Tokens 4-6: normals — read and discard.
+            // spec: Docs/RE/formats/mesh.md §Vertex data rows — norm_x/y/z @ col 3/4/5: "discarded": CONFIRMED.
+            // spec: Docs/RE/formats/effects.md §A.11 — normals not in the shared mesh table: CONFIRMED.
+            _ = NextF32(tokens, ref pos, $"vertex[{v}].norm_x");
+            _ = NextF32(tokens, ref pos, $"vertex[{v}].norm_y");
+            _ = NextF32(tokens, ref pos, $"vertex[{v}].norm_z");
+
+            // Tokens 7-8: UV coordinates.
+            // spec: Docs/RE/formats/mesh.md §Vertex data rows — tex_u @ col 6, tex_v @ col 7: CONFIRMED.
+            float tu = NextF32(tokens, ref pos, $"vertex[{v}].tex_u");
+            float tvDisk = NextF32(tokens, ref pos, $"vertex[{v}].tex_v");
+            // V-flip: in-memory tex_v = 1.0 − disk_tex_v.
+            // spec: Docs/RE/formats/mesh.md §Vertex list — tex_v: "engine transforms it to 1.0 - tex_v in-memory": CONFIRMED.
+            float tvMem = 1.0f - tvDisk;
+
+            // DIFFUSE4 at in-memory offset +12 is uninitialised (always 0 per spec).
+            // spec: Docs/RE/formats/mesh.md §In-memory vertex layout — offset +12 "(uninitialised / padding)": CONFIRMED.
+            const uint diffuse = 0u;
+
+            vertices[v] = new XobjVertex(px, py, pz, diffuse, tu, tvMem);
+        }
+
+        return new XobjMeshData { Indices = indices, Vertices = vertices };
+    }
+
     // -------------------------------------------------------------------------
     // Private token-reader helpers
     // -------------------------------------------------------------------------

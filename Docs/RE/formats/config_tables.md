@@ -17,7 +17,17 @@
 > sample bytes, with a layout correction to userpoint.scr (the +8 cumulative is u32, not the
 > previously-described u16 + flag byte) and a substantial field survey for skills.scr. items.scr
 > disk fields were resolved from the loader path only (no sample available). All Korean text
-> fields are CP949 / EUC-KR, null-terminated.
+>  fields are CP949 / EUC-KR, null-terminated.
+>
+> Full-record value-distribution pass (skills.scr / mobs.scr / exp.scr / userpoint.scr /
+> products.scr): several fields previously tagged "constant" were established from a SMALL sample
+> and DO NOT hold across the full record set. Five such fields are corrected from "constant" to
+> "variable" below, each with the observed range / distribution: skills.scr +1072, +1176, +1306,
+> +1328 (Section 2.8) and mobs.scr +60, +188, +272 (Section 2.9). Proposed semantics for
+> previously-opaque fields are recorded at the confidence the data supports (LOW / MEDIUM / HIGH)
+> and never overclaimed. The skills.scr / mobs.scr corrections conflict with the earlier
+> small-sample spec and are flagged CONFLICT-PENDING until an IDA loader witness confirms them;
+> the corrected value distributions themselves are full-record observations.
 
 ---
 
@@ -114,7 +124,7 @@ traced.
 | `data/script/quests.scr` | 3720 (0xE88), sparse | none | SAMPLE-VERIFIED | Quest template catalogue (see §2.17; 488 slots / 122 occupied) |
 | `data/script/autoquestion_cl.scr` | 92 (0x5C) | none | SAMPLE-VERIFIED | Anti-bot arithmetic-quiz question pool (see §2.17) |
 | `data/script/discript.sc` | 68 (0x44) | none | SAMPLE-VERIFIED | UI context-menu label table (see §2.17) |
-| `data/script/products.scr` | 212 (0xD4) | none | SAMPLE-VERIFIED (stride) | Crafting recipe catalogue (id + CP949 name verified; body fields UNVERIFIED) |
+| `data/script/products.scr` | 212 (0xD4) | none | SAMPLE-VERIFIED (stride; full body distribution) | Crafting recipe catalogue (id + CP949 name CONFIRMED; 188-byte body structured into zones A-G — ingredients/quantities/outputs/costs/prerequisites/type, see Section 2.18) |
 | `data/script/mapsetting.scr` | 84 (0x54) | none | SAMPLE-VERIFIED | Per-zone map settings (52 records: zone id + CP949 name + XZ bounds; see §2.17.6) |
 | `data/script/events.scr` | variable-length (indexed) | offset-table header | SAMPLE-VERIFIED (header only) | Event table — not a flat array; in-file offset table at +0x64 (see §2.17 note) |
 | `data/script/helps.scr` | two-level hierarchical | per-page sub-entries | SAMPLE-VERIFIED (first page) | Help text — outer 16-byte page header + N × 48-byte sub-entries (see §2.17 note) |
@@ -169,11 +179,11 @@ Those mapping gaps are listed per file.
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | +0 | 2 | u16 | Level index, 1-based (1..300) | Sequential; loader validates monotonic increment | CONFIRMED |
-| +2 | 2 | u16 | Constant value 64 (0x0040) | Identical across all 300 records; semantic UNVERIFIED | CONFIRMED (value); UNVERIFIED (semantic) |
+| +2 | 2 | u16 | Constant value 64 (0x0040) | Identical across all 300 records (full-record verified). PROPOSED: an EXP-rate divisor / denominator in a `grant x rate / 64` formula, or a sub-system level cap (64 tiers). 64 does not match any other field-derived value and is the only constant in this position across all `.scr` files | CONFIRMED (value=64, full record set); PROPOSED meaning (LOW) |
 | +4 | 4 | u32 | Primary EXP required to reach the next level | L1=10; L50=112,284,408; plateaus at 1,999,557,415 from approximately L143 onward | CONFIRMED |
 | +8 | 4 | u32 | Reserved or high-word extension | Zero in all 300 records | CONFIRMED (always zero) |
-| +12 | 4 | u32 | Secondary EXP curve | Zero for L1–L73; L74=1; grows to approximately 4.17 billion at L240 then plateaus; non-monotone at very high levels | CONFIRMED (present); UNVERIFIED (semantic) |
-| +16 | 4 | u32 | Tertiary EXP curve | Zero until approximately L186; L200=8; L300=263,880 | CONFIRMED (present); UNVERIFIED (semantic) |
+| +12 | 4 | u32 | Secondary EXP curve | Onset L74 (first non-zero = 1); grows very slowly (still 1 at L80, 3 at L81), reaching ~4.29 billion (legal u32) near the plateau; 29 decreasing transitions => NOT monotone, NOT a cumulative sum of +4. PROPOSED: per-level EXP threshold for a SECOND advancement track (inner cultivation / prestige) that unlocks at L74, tracked modulo 2^32 | CONFIRMED (present, full record set); PROPOSED meaning (MEDIUM) |
+| +16 | 4 | u32 | Tertiary EXP curve | Onset L186 (1 at L186-L188, 3 at L189, 7 at L190 and holding for ~100 levels, then growing to 263,880 at L300); only 1 decreasing transition => approximately monotone, stepped schedule. PROPOSED: per-level EXP threshold for a THIRD advancement track (prestige / arena rank / guild contribution) unlocking at L186 | CONFIRMED (present, full record set); PROPOSED meaning (MEDIUM) |
 
 The two non-primary columns (+12 and +16) are **not** cumulative sums of the primary column.
 They are likely separate progression curves for secondary advancement systems (inner
@@ -181,9 +191,11 @@ cultivation, merit, or prestige). The loader validates sequential level ordering
 record aborts the load.
 
 **Open questions:**
-- Semantic meaning of the constant 64 at +2 (max skill level? EXP-rate denominator? flags word?)
-- Semantic identity of the secondary EXP curve at +12
-- Semantic identity of the tertiary EXP curve at +16
+- Constant 64 at +2 — PROPOSED as an EXP-rate denominator or sub-system cap (LOW); the exact role
+  (formula constant vs. skill cap vs. format marker) needs the loader / debugger to settle.
+- Secondary EXP curve at +12 — PROPOSED as a second advancement-track threshold (onset L74,
+  MEDIUM); the track's name and the meaning of its 29 within-cycle decreases need a loader witness.
+- Tertiary EXP curve at +16 — PROPOSED as a third advancement-track threshold (onset L186, MEDIUM).
 - Whether field +8 is a true reserved pad or the high word of a future u64
 
 ---
@@ -268,7 +280,7 @@ spec are subsumed by the wider cumulative fields.
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | +0 | 2 | u16 | Allocation step index, 0-based (0..300) | Map key; sequential | CONFIRMED |
-| +2 | 2 | u16 | Constant = 25 in all 301 records | Semantic UNVERIFIED (creation budget? per-level cap?) | CONFIRMED (value); UNVERIFIED (semantic) |
+| +2 | 2 | u16 | Constant = 25 in all 301 records | Full-record verified. PROPOSED: the initial character-creation stat-point budget (free points distributed across STR/AGI/DEX/INT/CON before the level-based allocation schedule begins). 25 is within the canonical 25-30 genre range for a creation budget and matches no gain/cumulative/header value elsewhere. Alternative (LOW): a per-step allocation cap | CONFIRMED (value=25, full record set); PROPOSED meaning (MEDIUM) |
 | +4 | 2 | u16 | Stat-group-1 gain this step | key=0→5; key=1–284→3; key=285–300→1000 | CONFIRMED |
 | +6 | 2 | u16 | Always zero (alignment pad) | Zero in all 301 records | CONFIRMED (value=0) |
 | +8 | 4 | u32 | Stat-group-1 cumulative total (running sum of +4) | Verified 301/301, including overflow past 65,535 | CONFIRMED |
@@ -287,8 +299,11 @@ spec are subsumed by the wider cumulative fields.
   gains at keys 285–300 (1000/step) are high-level stat-point bursts.
 - **Stat-group-2** (gain at +12, cumulative at +16): the same pattern for a second pool with
   different scaling (starts at 7, smaller increments).
-- **Constant 25 at +2** — UNVERIFIED. Candidate meanings: base stat points granted at character
-  creation, an early-curve per-level allocation cap, or a legacy formula constant.
+- **Constant 25 at +2** — PROPOSED (MEDIUM): the initial character-creation stat-point budget
+  (free points allocated to STR/AGI/DEX/INT/CON at creation, before the per-level table begins).
+  Genre-consistent (25-30 typical for this era) and not contradicted by any field in the file.
+  Less likely (LOW): an early-curve per-level allocation cap or a legacy formula constant. The
+  precise game-mechanic role cannot be proven from bytes alone and needs the loader / debugger.
 - **Secondary curve at +20/+22** — a 32-bit value pair encoding a secondary allocation curve
   (possibly martial energy: 내공 / 내력, or a third stat type). Zero for keys 0–5, begins at
   key 6, plateaus around key 150 with no further growth to key 300.
@@ -461,28 +476,28 @@ plausible category index (< 300). String fields are CP949, null-terminated.
 | +4 | 4 | u32 | Skill category index | Class-skill values 150–153 (one per class); 154–158 mixed/universal; other ranges for combo/chain tiers (see table below) | CONFIRMED |
 | +8 | ≤24 | char[] | Skill name (CP949, null-terminated) | Longest real name 17 bytes; buffer always zero by +32; buffer width is 24 or 32 (UNVERIFIED which) | CONFIRMED (name at +8); CONFIRMED (buffer ends ≤ +31) |
 | +32..+515 | 484 | mixed | Integer/sparse field region | Mostly zero in real records; only +260 and +516 resolved within this region | PARTIALLY RESOLVED |
-| +260 | 4 | u32 | Constant 0x30000000 in all real records | Likely an internal type/version marker | CONFIRMED (value); UNVERIFIED (meaning) |
+| +260 | 4 | u32 | Constant 0x30000000 in all real records (full-record verified) | PROPOSED: an internal type / version sentinel; the low byte is 0x30 = 48, the same marker byte that delimits sub-records in quests.scr / npc.scr | CONFIRMED (value, full record set); PROPOSED meaning (MEDIUM) |
 | +516 | 4 | u32 | Class flag = (class ID << 16) | Class 1=0x00010000, 2=0x00020000, 3=0x00030000, 4=0x00040000 | CONFIRMED |
 | +520 | 1 | u8 | Skill type / tier byte | 0=passive/unknown, 1=movement-base, 2=tier-3, 3=tier-3/5 chain, 4=tier-2, 5=tier-5 chain, 6=tier-6 chain (see table below) | CONFIRMED |
 | +521 | ≤512 | char[] | Long description text (CP949, null-terminated) | Confirmed for all checked records; descriptions up to 52+ bytes | CONFIRMED |
 | +1032 | ≤8+ | char[] | Short description / action label (CP949) | Text begins shortly after +1032 (≈+1033); buffer width UNVERIFIED | CONFIRMED (presence); PARTIALLY CONFIRMED (exact offset) |
-| +1072 | 4 | u32 | Constant 0x00003000 (12288) in all real records | Unresolved | CONFIRMED (value); UNVERIFIED (meaning) |
+| +1072 | 4 | (string) | **CORRECTED: variable, not a constant** | WAS: "constant 0x00003000 (12288) in all real records". Full-record pass found 54 distinct u32 values here, many of which decode as CP949 text bytes read little-endian. This offset falls INSIDE a CP949 string field (an intermediate description / sub-label), not a numeric constant. The earlier 0x00003000 was a small-sample artifact | CORRECTED to variable; PROPOSED: interior of a CP949 string field. CONFLICT-PENDING (needs loader witness) |
 | +1116 | 4 | u32 | Skill chain reference [0] | Decimal-digit composite (e.g. 141100041 for skill 11, slot 0); encoding schema UNVERIFIED | CONFIRMED (presence); UNVERIFIED (encoding) |
 | +1120 | 4 | u32 | Skill chain reference [1] | Same pattern | CONFIRMED (presence) |
 | +1124 | 4 | u32 | Skill chain reference [2] | Same pattern | CONFIRMED (presence) |
 | +1128 | 4 | u32 | Skill chain reference [3] | Same pattern | CONFIRMED (presence) |
 | +1132 | 4 | u32 | Skill chain reference [4] | Same pattern | CONFIRMED (presence) |
 | +1136 | 4 | u32 | Skill chain reference [5] | Different decimal prefix (3xxxxxxxx vs 1xxxxxxxx), e.g. 341100111 | CONFIRMED (presence); UNVERIFIED (encoding) |
-| +1176 | 4 | f32 | Constant 1.0 in all real records | Meaning UNVERIFIED | CONFIRMED (value); UNVERIFIED (meaning) |
+| +1176 | 4 | f32 | **CORRECTED: variable, not a constant** | WAS: "constant 1.0 in all real records". Full-record pass found 8 distinct float values {0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.5, 2.0}. The 0.4-2.0 spread is a per-tier scaling ratio (base = 1.0, upgraded = 1.5/2.0, reduced-power = 0.4/0.6). PROPOSED: a skill damage / range multiplier per skill tier | CORRECTED to variable; PROPOSED: per-tier rate multiplier (MEDIUM). CONFLICT-PENDING (needs loader witness) |
 | +1180 | 4 | u32 | Skill chain reference [6] | Third prefix type (8xxxxxxxx), e.g. 841100111 | CONFIRMED (presence) |
 | +1280 | 4 | u32 | Prerequisite / parent skill ID | 0 for base skills; e.g. skill 13 → 11 | CONFIRMED (pattern) |
 | +1292 | 2 | u16 | Skill-point (SP) cost to learn | Per-tier values 4, 8, 12 | CONFIRMED (pattern) |
 | +1294 | 2 | u16 | Next-in-chain reference or 0 | e.g. skill 11 → 13; some records hold a composite ID | CONFIRMED (pattern); UNVERIFIED (composite encoding) |
 | +1296 | 4 | u32 | Second chain / upgrade-path reference | Single ID or composite chain ID | CONFIRMED (presence); UNVERIFIED (encoding) |
 | +1300 | 4 | u32 | Third chain / upgrade-path reference | Same as +1296 | CONFIRMED (presence); UNVERIFIED (encoding) |
-| +1304 | 2 | u16 | Motion / animation index A | Increments 20, 46, 72 (by 26) across skill tiers | CONFIRMED (pattern); UNVERIFIED (name) |
-| +1306 | 2 | u16 | Constant 7 in all checked records | Meaning UNVERIFIED | CONFIRMED (value); UNVERIFIED (meaning) |
-| +1328 | 4 | u32 | Constant 0x00010000 (65536) in all real records | Meaning UNVERIFIED | CONFIRMED (value); UNVERIFIED (meaning) |
+| +1304 | 2 | u16 | Motion / animation index A | Full-record pass: 15 distinct values; MODAL value is 1 (481 records, = passive / no-motion); active skills use larger motion-index values {6,12,18,20,24,30,36,42,46,48,54,60,66,72}. The earlier "increments by 26 (20,46,72)" pattern holds only for class-1 skills 11/12/13 and is NOT a general rule | CONFIRMED (motion index, full record set); name UNVERIFIED |
+| +1306 | 2 | u16 | **CORRECTED: variable, not a constant** | WAS: "constant 7 in all checked records". Full-record pass found 10 distinct values; the MODAL value is 5 (477 records), with 0/1/2/3/5/6/7/11/14/17 all observed; 7 occurs only 12 times. PROPOSED: a small enum, most likely a max upgrade-tier / combo-depth count (5 tiers for most skills, more for advanced ones) | CORRECTED to variable; PROPOSED: max upgrade tier / combo depth (MEDIUM). CONFLICT-PENDING (needs loader witness) |
+| +1328 | 4 | u32 | **CORRECTED: variable, not a constant** | WAS: "constant 0x00010000 (65536) in all real records". Full-record pass found 8 distinct values 0x00010000..0x00080000 (i.e. (1<<16)..(8<<16)). These mirror the bit-shifted shape of the class flag at +516 but are INDEPENDENT of it (724 records have class flag != 0x00010000 while +1328 = 0x00010000). PROPOSED: a stance / school unlock bitmask (which of 8 stance/school combinations may learn the skill) | CORRECTED to variable; PROPOSED: stance/school unlock bitmask (MEDIUM). CONFLICT-PENDING (needs loader witness) |
 | +1372 | 4 | u32 | Cooldown (seconds) | 8–16 for movement skills; 0 for passive skills | CONFIRMED (plausible range) |
 | +1412 | 4 | f32 | Range (game units) | 30.0–40.0 for movement skills; 0.0 for passive skills | CONFIRMED (plausible range) |
 | +1496 | 4 | u32 | Tail field | Sparse | UNVERIFIED |
@@ -499,6 +514,15 @@ across the whole file) account for the remainder. The correct record model is th
 `stride = 1504 fixed + N × 8 trailing` per record, identical in shape to `items.scr`, where `N`
 is 0 for most records. A parser must read the per-record trailing count and advance by
 `1504 + N × 8`; it cannot assume a uniform 1504-byte stride.
+
+**FULL-RECORD CORRECTION (value distributions).** A subsequent full-record value-distribution
+pass corrected four fields that the earlier survey had marked as constants from a small sample —
+they are VARIABLE across the real record set: +1072 (interior of a CP949 string field, 54 distinct
+values), +1176 (8 float values 0.4-2.0, a per-tier rate multiplier), +1306 (10 values, modal 5, a
+small enum / max-tier count), and +1328 (8 values (1<<16)..(8<<16), an independent stance/school
+bitmask). +260 (0x30000000) remains a genuine constant across all real records. These four
+corrections conflict with the prior small-sample spec and are **CONFLICT-PENDING** until an IDA
+loader witness confirms them.
 
 **Skill category index (+4):**
 
@@ -536,7 +560,10 @@ is UNVERIFIED.
 - Whether +1292 is strictly "SP cost to learn" and how it disambiguates from max level
 - Full decimal-composite encoding of the chain references (+1116..+1136, +1180, +1294)
 - Whether +1296/+1300 are prerequisite or successor chain IDs
-- Meaning of motion index at +1304 and the constant 7 at +1306
+- Meaning of motion index at +1304 (now confirmed variable; modal 1 = passive)
+- Exact enum for +1306 (corrected to variable; PROPOSED max-tier / combo-depth count)
+- The string-field extent that +1072 falls inside, and the rate-multiplier scaling at +1176
+- The stance/school bitmask semantics at +1328 (independent of the +516 class flag)
 - Tail fields between +1496 and +1503
 
 ---
@@ -552,19 +579,19 @@ two separate fields: an `i32` mob-level at +244 and a `u32` spawn timer at +248.
 |-------:|-----:|------|-------|-------|------------|
 | +0 | 2 | u16 | Mob ID (map key) | First 10 records: 11, 12, 21, 22, 31 … (sequential by 10 for low IDs); boss range 14,000+ | CONFIRMED |
 | +2 | ≤17 | char[] | Primary mob name | CP949/EUC-KR, null-terminated; buffer ≤17 bytes (16 chars + NUL); longest observed null at offset +18 | CONFIRMED |
-| +19 | ≤19 | char[] | Secondary mob name (category or region label?) | CP949, null-terminated; buffer ≤19 bytes; common substring shared across many mobs; semantic UNVERIFIED | CONFIRMED (presence); UNVERIFIED (semantic) |
+| +19 | <=19 | char[] | Secondary name = SPAWN-ZONE / AREA LABEL | CP949, null-terminated. Full-record pass: 214 distinct values across 3,997 records; values are recognisable game location names (most-frequent non-event value is a starting-zone place name; low-ID mobs 11-141 all carry the same starting-zone tag) plus event tags ('event', '이벤트 몹', seasonal-event strings) and dungeon-floor tags. PROPOSED: a spawn-area descriptor, NOT a monster category | CONFIRMED (presence); PROPOSED meaning: spawn-zone label (HIGH) |
 | +2..+51 | 50 | mixed | Additional name/tag fields | Region between primary name end and +52; mixed zero and text; UNVERIFIED | UNVERIFIED |
 | +52 | 2 | u16 | Unknown field | Observed value 379 (0x017B) in first record; other records UNVERIFIED | UNVERIFIED |
-| +60 | 4 | f32 | Constant 3.0 in all observed records | Value/semantic UNVERIFIED | CONFIRMED (value); UNVERIFIED (name) |
-| +188 | 4 | f32 | Constant 1.0 in all observed records | UNVERIFIED | UNVERIFIED |
+| +60 | 4 | f32 | **CORRECTED: variable, not a constant** | WAS: "constant 3.0 in all observed records". Full-record pass found 31 distinct float values; MODAL is 3.0 (1046 records) but the range spans 0.5..400 (e.g. 4=894, 9=756, 2=243, 5=199, 8.4=197). Boss default also = 3.0. The mostly small integer-ish spread suggests a per-mob distance/scale figure. PROPOSED: aggro/detection radius or base movement speed (small 2-10 for standard mobs; large 40/400 for rare area mobs) | CORRECTED to variable; PROPOSED: aggro radius or movement-speed base (MEDIUM). CONFLICT-PENDING (needs loader witness) |
+| +188 | 4 | f32 | **CORRECTED: variable, not a constant** | WAS: "constant 1.0 in all observed records" (single-record observation). Full-record pass: modal 1.0 (3081/3997 = 77%) but 40 other values exist (2=332, 0=191, 2.2=101, 80=42, 100=36, ... 6000=11). PROPOSED: an HP / combat-stat multiplier relative to baseline (1.0 standard; 2.0-2.5 elite; 80/100 boss-scale; the 6000 outliers possibly raw-HP world-boss entries) | CORRECTED to variable; PROPOSED: HP / combat-stat multiplier (MEDIUM). CONFLICT-PENDING (needs loader witness) |
 | +244 | 4 | i32 | Mob level | −1 = not set; 0 = trivial; boss range 36..46 for ID range 14000–14009; regular mobs 87..249 for high-ID range | CONFIRMED (boss validation path) |
 | +248 | 4 | u32 | Spawn timer in seconds | Range 33..41,006 in sample; boss default ≈ 40 s | CONFIRMED (plausible range) |
 | +252 | ? | ? | Unknown fields | UNVERIFIED | UNVERIFIED |
-| +272 | 24 | 6×f32 | All 1.0 | Observed in first record | CONFIRMED (value); UNVERIFIED (name) |
-| +296 | 4 | f32 | Variance/spread low | 0.95 in first record | UNVERIFIED |
-| +300 | 4 | f32 | Variance/spread high | 1.05 in first record | UNVERIFIED |
-| +304 | 4 | f32 | Variance low (second pair?) | 0.95 | UNVERIFIED |
-| +308 | 4 | f32 | Variance high (second pair?) | 1.05 | UNVERIFIED |
+| +272 | 24 | 6xf32 | **CORRECTED: variable, not all-1.0** | WAS: "all 1.0" (single first-record observation). Full-record pass: 0 of 3,997 records have all six f32 in this region equal to 1.0 — the region holds variable data across the file. Individual field meanings UNVERIFIED | CORRECTED: variable (the all-1.0 claim was a single-sample artifact). CONFLICT-PENDING (needs loader witness) |
+| +296 | 4 | f32 | Spawn-variance: center / sentinel = 1.0 | Full-record pass: the four-value group at +296..+308 holds exactly (1.0, 0.95, 1.05, 0.95) UNIFORMLY across ALL 3,997 records — no per-mob or per-type variation | CONFIRMED (value, full record set); PROPOSED meaning (HIGH) |
+| +300 | 4 | f32 | Spawn-variance: low bound = 0.95 | Low multiplier of a symmetric (0.95, 1.05) variance pair applied to a stat at spawn time (e.g. HP = base x rand(0.95,1.05)) | CONFIRMED (value, full record set); PROPOSED meaning (HIGH) |
+| +304 | 4 | f32 | Spawn-variance: high bound = 1.05 | High multiplier of the same variance pair | CONFIRMED (value, full record set); PROPOSED meaning (HIGH) |
+| +308 | 4 | f32 | Spawn-variance: second-stat low bound = 0.95 | Low multiplier of a second variance pair (a second stat, e.g. damage). The full group reads as two symmetric (0.95/1.05) variance pairs with a leading 1.0 sentinel | CONFIRMED (value, full record set); PROPOSED meaning (HIGH) |
 | +316 | 4 | f32 | Scale factor — normal vs. boss differs | 0.19 for normal mobs; 3.09 for bosses | CONFIRMED (boss differentiation) |
 | +320 | 4 | f32 | Scale factor B — normal vs. boss differs | 0.23 for normal; 3.71 for bosses | CONFIRMED (boss differentiation) |
 | +324 | 1 | u8 | Mob type | 0=normal (3,749 records); 2–10=sub-types (106 records total); 11=boss/elite (125 records); 12=special (2 records) | CONFIRMED |
@@ -579,7 +606,16 @@ two separate fields: an `i32` mob-level at +244 and a `u32` spawn timer at +248.
 | Remaining bytes | ? | ? | Fields from +456 to end of 488-byte record | UNVERIFIED | UNVERIFIED |
 
 Boss-type mobs (type byte = 11) are inserted into a separate runtime index in addition to the
-main map. Mobs with mob-level = −1 may be special scripted or data-anomaly entries.
+main map. Mobs with mob-level = -1 may be special scripted or data-anomaly entries.
+
+**FULL-RECORD CORRECTION (value distributions).** A full-record value-distribution pass over all
+3,997 records corrected three fields previously marked as constants from a single-record sample —
+they are VARIABLE: +60 (31 float values 0.5..400; modal 3.0), +188 (41 float values; modal 1.0 at
+77%), and +272 (the prior "6 x 1.0" holds in 0 of 3,997 records). The same pass elevated two
+previously-opaque fields to PROPOSED-with-evidence: +19 (secondary name = spawn-zone label, HIGH)
+and +296..+308 (two symmetric spawn-time variance pairs (0.95/1.05) with a 1.0 sentinel, uniform
+across ALL records, HIGH). The three constant->variable corrections conflict with the prior
+small-sample spec and are **CONFLICT-PENDING** until an IDA loader witness confirms them.
 
 ---
 
@@ -808,7 +844,7 @@ interaction UI menus (party/guild actions, currency names, window toggles, schoo
 
 | File | Size / structure | Notes |
 |---|---|---|
-| `products.scr` | stride 212 (0xD4), 9092 records | `u32` recipe id @ +0, CP949 name @ +4; 188-byte body (ingredients/output) UNVERIFIED |
+| `products.scr` | stride 212 (0xD4), 9092 records | `u32` recipe id @ +0, CP949 name @ +4; 188-byte body now structured into zones A-G (ingredients / quantities / outputs / costs / prerequisites / type) — full map in Section 2.18 |
 | `events.scr` | variable-length, indexed | File header with a `u16` event-category count and an in-file `u32` offset table at +0x64..+0xA7 pointing to ~15 variable-length event-record bodies; record content not decoded |
 | `helps.scr` | two-level hierarchical | Outer 16-byte page header (`page_id`, `section_id`, reserved, `entry_count`) + `entry_count` × 48-byte sub-entries; first page sample-verified, full page-walk UNVERIFIED |
 | `tiphelp.scr` | variable-length | Loading-screen tip records; `u32` body-size + tip-count header then CP949 tip text; not flat-stride |
@@ -835,6 +871,71 @@ minimap scan tooling described in `misc_data.md`.
   the XZ bounds are sample-verified. An engineer should treat the inner-offset layout as UNVERIFIED.
 
 ---
+
+---
+
+### 2.18 products.scr — crafting recipe catalogue (stride: 212 bytes, 9092 records)
+
+**SPEC UPGRADE.** Section 2.17.5 previously listed `products.scr` body fields as UNVERIFIED. A
+full-record value-distribution pass (reading the 53 `u32` words of every 212-byte record and
+measuring per-word occupancy and value ranges) resolves the 188-byte body into a clear
+ingredient -> quantity -> output -> cost -> prerequisite -> type structure. Field WIDTHS and the
+overall ZONE MAP are PROPOSED with the confidence noted; exact per-stat names within the
+prerequisite zone remain UNVERIFIED.
+
+**Record model:** no file header; flat array; `record_count = file_size / 212`. The record is read
+as 53 little-endian `u32` words (word[i] is at byte offset `4 * i`). Words [9]+ that carry 9-digit
+decimal composites use the SAME packed-decimal item-code scheme seen in the `skills.scr` chain
+references (Section 2.8) and the `quests.scr` chain references (Section 2.17.1) — they are compact
+item-class/family/tier codes, NOT raw sequential item IDs.
+
+| Word(s) | Byte offset | Occupancy | Type | Field / zone | Confidence |
+|---|---|---|---|---|---|
+| [0]      | +0       | 100%     | u32     | Recipe ID (map key) | CONFIRMED |
+| [1]-[8]  | +4..+35  | 100%     | char[]  | CP949 recipe name (null-terminated; ends by ~+36) | CONFIRMED |
+| [9]      | +36      | 100%     | u32     | **Zone A** — ingredient 1 item-code (composite) | PROPOSED (HIGH) |
+| [10]     | +40      | 100%     | u32     | Zone A — ingredient 2 item-code | PROPOSED (HIGH) |
+| [11]-[17]| +44..+71 | 85%->3%  | u32     | Zone A — ingredients 3..9 item-codes (occupancy tapers = variable ingredient count) | PROPOSED (MEDIUM) |
+| [18]     | +72      | 100%     | u32     | Ingredient count / list terminator (small values dominate) | PROPOSED (MEDIUM) |
+| [19]     | +76      | 85%      | u32     | **Zone B** — quantity for ingredient 1 (values 0..625) | PROPOSED (HIGH) |
+| [20]-[25]| +80..+100| 28%->3%  | u32     | Zone B — quantities for ingredients 2..7 (occupancy mirrors Zone A) | PROPOSED (HIGH) |
+| [26]     | +104     | 100%     | u32     | **Zone C** — output 1 item-code (composite) | PROPOSED (HIGH) |
+| [27]-[33]| +108..+135| 55%->11%| u32     | Zone C — outputs 2..8 item-codes (primary + secondary outputs) | PROPOSED (HIGH) |
+| [34]     | +136     | 100%     | u32     | **Zone D** — base gold/material cost (values {250000, 495652, 500000, 1000000}; always present) | PROPOSED (HIGH) |
+| [35]-[41]| +140..+164| 55%->11%| u32     | Zone D — per-ingredient / secondary material costs (values up to 1,000,000) | PROPOSED (MEDIUM) |
+| [42]     | +168     | 100%     | u32     | **Zone E** — output quantity (values 1..10,000) | PROPOSED (HIGH) |
+| [43]-[49]| +172..+196| 16%->11%| u32     | **Zone F** — player level / skill prerequisites (small ints; word[47]@+188 = {1,12,32,100,300,1000}) | PROPOSED (MEDIUM) |
+| [50]     | +200     | 51%      | u32     | **Zone G** — output category / sub-product reference (composite item-code) | PROPOSED (MEDIUM) |
+| [51]     | +204     | 51%      | u32     | Zone G — crafting service fee in game currency (values 1,000..199,500,000) | PROPOSED (HIGH) |
+| [52]     | +208     | 31%      | u32     | Zone G — recipe type flag (values {0, 1, 4, 5}: 0=none, 1=basic, 4/5=advanced) | PROPOSED (MEDIUM) |
+
+**Zone summary:**
+
+- **A (words [9]-[17]):** ingredient item-codes; first two always present, the rest tapering =>
+  variable-length ingredient list (1..9 entries). HIGH.
+- **B (words [19]-[25]):** one quantity per ingredient; occupancy tracks Zone A. HIGH.
+- **C (words [26]-[33]):** output item-codes; primary output always present, secondary outputs
+  optional. HIGH.
+- **D (words [34]-[41]):** base gold/material cost (always present) plus optional per-material
+  cost components. HIGH (base) / MEDIUM (components).
+- **E (word [42]):** how many of the output the recipe yields. HIGH.
+- **F (words [43]-[49]):** player level / skill prerequisites for the recipe. MEDIUM.
+- **G (words [50]-[52]):** output-category reference, crafting service fee, recipe type flag.
+  MEDIUM (refs/type) / HIGH (fee).
+
+**Test-record caveat.** Records id=1..6 (CP949 names reading "activation-talisman test 1..6") are
+a synthetic debug sequence: each successive record adds one more ingredient and one more output,
+with the fee scaling roughly exponentially. They are not representative of real recipes (id >= 7);
+a parser should not treat them as canonical data shape.
+
+**Open questions:**
+- Exact field WIDTH of each zone entry (the body reads cleanly as u32 words, but some zones could
+  pack two 16-bit sub-fields per word — needs a loader witness).
+- The packed-decimal item-code schema (Zones A / C / G) — its digit groups (class / family / tier)
+  are not yet decoded; same open item as the skills.scr and quests.scr composites.
+- Which named prerequisite (level vs. skill vs. stat) each Zone-F word encodes.
+- Whether Zone D word[34] and Zone G word[51] are two separate currencies (material cost vs.
+  service fee) or one cost split across phases.
 
 ---
 

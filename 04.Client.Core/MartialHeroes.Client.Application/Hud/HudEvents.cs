@@ -170,6 +170,23 @@ public sealed record TargetChangedEvent(
 }
 
 /// <summary>
+/// The player's current zone type changed. Immutable snapshot driving the HUD zone indicator.
+/// Published by <c>RegionService</c> whenever the 256-unit region cell under the local player
+/// switches to a different <see cref="MartialHeroes.Shared.Kernel.Enums.ZoneType"/>.
+///
+/// Only published when the zone CHANGES — identical consecutive positions do not re-fire.
+/// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — zone-type enum (Safe/OpenPvp/Closed).
+/// </summary>
+/// <param name="Zone">
+/// The new zone type.
+/// <see cref="MartialHeroes.Shared.Kernel.Enums.ZoneType.Unknown"/> is emitted when region data
+/// is absent (VFS offline or files missing).
+/// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.
+/// </param>
+public sealed record ZoneChangedEvent(
+    MartialHeroes.Shared.Kernel.Enums.ZoneType Zone) : IHudEvent;
+
+/// <summary>
 /// The experience bar / level changed. Immutable snapshot driving the HUD XP gage. <see cref="Ratio"/>
 /// is the filled fraction the streaming bar widget renders.
 /// </summary>

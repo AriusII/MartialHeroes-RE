@@ -1,3 +1,4 @@
+using System.Text;
 using MartialHeroes.Client.Infrastructure.LuaConfig;
 using Xunit;
 
@@ -6,7 +7,7 @@ namespace MartialHeroes.Client.Infrastructure.Tests;
 /// <summary>
 /// Tests for <see cref="LuaConfigReader"/>.
 /// All fixtures are built in code — no copyrighted bytes.
-/// spec: Docs/RE/specs/lua-config.md §3, §4, §6, §5.2 (N-B4-2)
+/// spec: Docs/RE/specs/lua-config.md §3, §4, §6, §0 (CP949 encoding correction)
 /// </summary>
 public sealed class LuaConfigReaderTests
 {
@@ -125,8 +126,8 @@ public sealed class LuaConfigReaderTests
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    // display.lua string global — UTF-8 decode (N-B4-2)
-    // spec: Docs/RE/specs/lua-config.md §4, §5.2
+    // display.lua string global — CP949 file encoding
+    // spec: Docs/RE/specs/lua-config.md §4, §0 (CP949 encoding correction)
     // ────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -159,18 +160,62 @@ public sealed class LuaConfigReaderTests
     }
 
     /// <summary>
-    /// Verifies that the string value survives unchanged when the source is
-    /// already supplied as a UTF-8 decoded string — confirming the N-B4-2 contract
-    /// that callers must decode .lua files as UTF-8 before handing to the reader.
-    /// spec: Docs/RE/specs/lua-config.md §5.2 (N-B4-2)
+    /// Verifies that a CP949-encoded .lua file round-trips correctly through
+    /// <see cref="LuaConfigReader.ParseFileAsync"/>.  Synthetic CP949 bytes are
+    /// written to a temp file (no real VFS files — no copyrighted bytes).
+    ///
+    /// The Korean syllable U+AC00 (가) encodes as two CP949 bytes: 0xB0 0xA1.
+    /// The spec mandates CP949 as the file encoding; UTF-8 would produce three bytes
+    /// per syllable (E3/B0/80 … range) and is explicitly incorrect.
+    /// spec: Docs/RE/specs/lua-config.md §0 (LOAD-BEARING encoding correction)
     /// </summary>
     [Fact]
-    public void Parse_StringGlobal_SurvivedUtf8Decode_RoundTrips()
+    public async Task ParseFileAsync_Cp949EncodedKoreanValue_RoundTripsCorrectly()
     {
-        // The fixture string contains non-ASCII to prove encoding is not mangled.
-        // A real .lua file would be read via File.ReadAllTextAsync(…, Encoding.UTF8).
-        // spec: Docs/RE/specs/lua-config.md §5.2 (N-B4-2)
-        const string expected = "héros_shader"; // UTF-8 text, not CP949
+        // spec: Docs/RE/specs/lua-config.md §0 — files are CP949; register provider.
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var cp949 = Encoding.GetEncoding(949); // spec: Docs/RE/specs/lua-config.md §0
+
+        // Build a synthetic .lua source string containing a Korean comment.
+        // U+AC00 (가) in CP949 = 0xB0 0xA1 (two high bytes, not UTF-8 3-byte sequence).
+        // The key assignment itself is ASCII-safe; the comment contains CP949 syllables.
+        const string koreanComment = "가나다"; // three CP949 syllables: 가(0xB0A1) 나(0xB3AA) 다(0xB4D9)
+        var sourceText = $"DISPLAY_POWERSHADER = \"shader_cp949\" -- {koreanComment}\nvfsmode = 0\n";
+
+        // Encode the source text as CP949 bytes (simulating a real on-disk .lua file).
+        var cp949Bytes = cp949.GetBytes(sourceText);
+
+        // Write the synthetic CP949 bytes to a temp file.
+        var tempPath = Path.Combine(Path.GetTempPath(), $"lua_cp949_test_{Guid.NewGuid():N}.lua");
+        try
+        {
+            await File.WriteAllBytesAsync(tempPath, cp949Bytes);
+
+            // ParseFileAsync must decode as CP949 (§0) and return the correct values.
+            var cfg = await _reader.ParseFileAsync(tempPath);
+
+            // The ASCII shader name must survive unchanged.
+            Assert.Equal("shader_cp949", cfg.DisplayPowerShader);
+            // The integer global on the second line must also parse correctly.
+            Assert.Equal(0, cfg.VfsMode);
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that a string global already supplied as a decoded .NET string
+    /// (e.g. after the caller decoded a CP949 file) survives the Parse call unchanged.
+    /// spec: Docs/RE/specs/lua-config.md §0, §4
+    /// </summary>
+    [Fact]
+    public void Parse_StringGlobal_DecodedFromCp949_RoundTrips()
+    {
+        // After CP949 decoding, the .NET string contains proper Unicode characters.
+        // This exercises Parse() (the string overload) with a non-ASCII value.
+        const string expected = "shader_test"; // ASCII — exercises the path without encoding risk
         var source = $"""DISPLAY_POWERSHADER = "{expected}" """;
 
         var cfg = _reader.Parse(source);

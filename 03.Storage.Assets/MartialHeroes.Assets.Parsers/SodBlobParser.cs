@@ -22,8 +22,12 @@ namespace MartialHeroes.Assets.Parsers;
 /// spec: Docs/RE/formats/terrain.md §11.2 SolidRecord: CONFIRMED (stride + AABB + reserved fields).
 /// </para>
 /// <para>
-/// QuadRecord 48 bytes: four XZ corners +0..+31 VERIFIED; trailing scalars +32..+47 PARTIAL.
+/// QuadRecord 48 bytes: four XZ corners +0..+31 VERIFIED;
+/// trailing scalars +32..+47 are dead 2D edge-line cache (VERIFIED NOT READ at runtime).
 /// spec: Docs/RE/formats/terrain.md §11.3 QuadRecord — correction 2026-06-12: corners, not slope/intercept.
+/// spec: Docs/RE/formats/terrain.md §11.3 — correction 2026-06-14: trailing scalars re-labelled
+///   edge_slope/edge_pad0/edge_intercept/edge_pad1 (NOT a plane equation; VERIFIED NOT READ at runtime).
+/// The runtime reconstructs collision from the four explicit XZ corners via ray-parity PIP.
 /// </para>
 /// <para>ZERO rendering/engine dependencies.</para>
 /// </remarks>
@@ -58,11 +62,16 @@ public static class SodBlobParser
     private const int QuadX2Offset = 16; // f32 VERIFIED
     private const int QuadZ2Offset = 20; // f32 VERIFIED
     private const int QuadX3Offset = 24; // f32 VERIFIED
+
     private const int QuadZ3Offset = 28; // f32 VERIFIED
-    private const int QuadPlane0Offset = 32; // f32 PARTIAL
-    private const int QuadPlane1Offset = 36; // f32 PARTIAL
-    private const int QuadPlane2Offset = 40; // f32 PARTIAL
-    private const int QuadPlane3Offset = 44; // f32 PARTIAL
+
+    // Dead 2D edge-line cache — never read at runtime; allocated but ignored (VERIFIED NOT READ, 2026-06-14).
+    // spec: Docs/RE/formats/terrain.md §11.3 — edge_slope/edge_pad0/edge_intercept/edge_pad1: VERIFIED NOT READ.
+    // spec: Docs/RE/formats/terrain.md §11.3 Correction 2026-06-14: NOT a plane equation. Re-labelled from plane0..3.
+    private const int QuadEdgeSlopeOffset = 32; // f32 dead authoring residue
+    private const int QuadEdgePad0Offset = 36; // f32 always 0.0
+    private const int QuadEdgeInterceptOffset = 40; // f32 dead authoring residue
+    private const int QuadEdgePad1Offset = 44; // f32 always 0.0
 
     /// <summary>
     /// Parses the raw bytes of a <c>.sod</c> file into a <see cref="SodBlob"/>.
@@ -151,7 +160,9 @@ public static class SodBlobParser
             rawTris[s] = backing.Slice(offset, (int)quadBytes);
 
             // Decode each QuadRecord.
-            // spec: Docs/RE/formats/terrain.md §11.3 QuadRecord (48 bytes): four XZ corners VERIFIED; trailing scalars PARTIAL.
+            // spec: Docs/RE/formats/terrain.md §11.3 QuadRecord (48 bytes): four XZ corners VERIFIED.
+            // Trailing scalars +032..+047 are dead 2D edge-line cache — VERIFIED NOT READ at runtime (2026-06-14 correction).
+            // spec: Docs/RE/formats/terrain.md §11.3 — trailing scalars re-labelled edge_slope/edge_pad0/edge_intercept/edge_pad1: VERIFIED NOT READ.
             var quads = new CollisionQuad[(int)quadCount];
             for (int q = 0; q < (int)quadCount; q++)
             {
@@ -170,12 +181,17 @@ public static class SodBlobParser
                     Z2 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadZ2Offset..]),
                     X3 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadX3Offset..]),
                     Z3 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadZ3Offset..]),
-                    // Trailing scalars +032..+047 (PARTIAL).
-                    // spec: Docs/RE/formats/terrain.md §11.3 — plane0..plane3 f32 +032..+047: PARTIAL.
-                    Plane0 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadPlane0Offset..]),
-                    Plane1 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadPlane1Offset..]),
-                    Plane2 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadPlane2Offset..]),
-                    Plane3 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadPlane3Offset..]),
+                    // Dead 2D edge-line cache +032..+047 — read to fill the stride, but these values
+                    // are never consumed by any runtime collision or quadtree routine.
+                    // The runtime rebuilds containment from the four explicit corners (ray-parity PIP).
+                    // spec: Docs/RE/formats/terrain.md §11.3 — edge_slope f32 @ +032: VERIFIED NOT READ.
+                    EdgeSlope = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadEdgeSlopeOffset..]),
+                    // spec: Docs/RE/formats/terrain.md §11.3 — edge_pad0 f32 @ +036: VERIFIED (always 0).
+                    EdgePad0 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadEdgePad0Offset..]),
+                    // spec: Docs/RE/formats/terrain.md §11.3 — edge_intercept f32 @ +040: VERIFIED NOT READ.
+                    EdgeIntercept = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadEdgeInterceptOffset..]),
+                    // spec: Docs/RE/formats/terrain.md §11.3 — edge_pad1 f32 @ +044: VERIFIED (always 0).
+                    EdgePad1 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadEdgePad1Offset..]),
                 };
             }
 

@@ -63,12 +63,12 @@ public static class XeffJsonConverter
     {
         // spec: Docs/RE/formats/effects.md §A.2 — effect_id @ 0x00: VERIFIED.
         // spec: Docs/RE/formats/effects.md §A.2 — sub_effect_count @ 0x04: VERIFIED.
-        // spec: Docs/RE/formats/effects.md §A.2 — type_flag @ 0x08: SAMPLE-VERIFIED.
+        // Header is 8 bytes (CORRECTED 2026-06-14): there is NO file-level type_flag/first_entry_count —
+        // those bytes are sub-effect block 0's element fixed head (A.4.0).
+        // spec: Docs/RE/formats/effects.md §A.17 Correction history.
         return new XeffJsonRoot(
             EffectId: effect.EffectId,
             SubEffectCount: effect.SubEffectCount,
-            TypeFlag: effect.TypeFlag,
-            FirstEntryCount: effect.FirstEntryCount,
             SubEffects: MapSubEffects(effect.SubEffects));
     }
 
@@ -87,6 +87,9 @@ public static class XeffJsonConverter
         // spec: Docs/RE/formats/effects.md §A.4.3 Track header (anim_loop, unknown_constant, anim_stride, anim_base_time): CONFIRMED.
         // spec: Docs/RE/formats/effects.md §A.4.4 Keyframe array (frame-0 no-index special case): CONFIRMED.
         return new XeffJsonSubEffect(
+            EmitterType: sub.EmitterType,
+            ResourceId: sub.ResourceId,
+            AnimFlag: sub.AnimFlag,
             EntryCount: sub.EntryCount,
             TextureNames: sub.TextureNames,
             AlphaKeys: MapAlphaKeys(sub.AlphaKeys),
@@ -156,12 +159,15 @@ public static class XeffJsonConverter
     private sealed record XeffJsonRoot(
         uint EffectId,
         uint SubEffectCount,
-        uint TypeFlag,
-        uint FirstEntryCount,
         XeffJsonSubEffect[] SubEffects);
 
     // One sub-effect block
     private sealed record XeffJsonSubEffect(
+        // Element fixed head (A.4.0): emitter_type / resource_id / anim_flag.
+        // spec: Docs/RE/formats/effects.md §A.4.0: CONFIRMED.
+        uint EmitterType,
+        uint ResourceId,
+        uint AnimFlag,
         uint EntryCount,
         string[] TextureNames,
         XeffJsonAlpha[] AlphaKeys,

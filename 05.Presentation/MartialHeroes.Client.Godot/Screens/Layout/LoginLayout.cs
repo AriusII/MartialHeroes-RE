@@ -220,15 +220,29 @@ public static class LoginLayout
     // A@(619,86,67,13) src(87,398). spec §11.2e. CODE-CONFIRMED.
     public static readonly WidgetRect SmallDecorPlate = new(619, 86, 67, 13, 87, 398);
 
-    // ID input field — A@(390,32,102,13) src(615,404), max length 16 (UI cap, §1.3). action 109.
-    // spec §11.2e "ID input field". CODE-CONFIRMED.
-    public static readonly WidgetRect AccountBox = new(390, 32, 102, 13, 615, 404);
+    // ATLAS CORRECTION (§11.2e, IDA pass 2026-06-14):
+    // The edit-field frames sample ATLAS A (login_slice1.dds), NOT loginwindow.dds.
+    // Both ID and PW fields share a single source rect in atlas A at src(615,404,102,13).
+    // The numbers (390,32) and (568,32) in the widget table are DESTINATION origins on the canvas,
+    // not source UV coordinates. The spec note at §11.2e "Atlas note" originally said loginwindow.dds
+    // — the IDA pass corrected this to login_slice1.dds. spec: Docs/RE/specs/frontend_scenes.md §11.2e.
+    public const string EditFieldFrameAtlas = AtlasLoginSlice1; // A — spec §11.2e atlas correction. CODE-CONFIRMED.
+    public const int EditFieldFrameSrcX = 615; // shared source U in atlas A. spec §11.2e. CODE-CONFIRMED.
+    public const int EditFieldFrameSrcY = 404; // shared source V in atlas A. spec §11.2e. CODE-CONFIRMED.
+    public const int EditFieldFrameW = 102; // spec §11.2e. CODE-CONFIRMED.
+    public const int EditFieldFrameH = 13; // spec §11.2e. CODE-CONFIRMED.
+
+    // ID input field — dest (390,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 16 (UI cap, §1.3). action 109.
+    // NOTE: SrcX/SrcY on this WidgetRect are intentionally set to the shared edit-field frame source,
+    // NOT to the dest origin; and the atlas is EditFieldFrameAtlas (A), not AtlasLoginWindow (B).
+    // spec §11.2e "ID input field atlas correction". CODE-CONFIRMED.
+    public static readonly WidgetRect AccountBox = new(390, 32, 102, 13, EditFieldFrameSrcX, EditFieldFrameSrcY);
     public const int ActionFocusId = 109; // spec §1.2. CODE-CONFIRMED.
     public const int IdMaxLength = 16; // spec §1.3 "max length 16 (UI cap)". CODE-CONFIRMED.
 
-    // Password input field — A@(568,32,102,13) src(615,404), max length 12, masked. action 110.
-    // spec §11.2e "Password input field". CODE-CONFIRMED.
-    public static readonly WidgetRect PasswordBox = new(568, 32, 102, 13, 615, 404);
+    // Password input field — dest (568,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 12, masked. action 110.
+    // Same shared source rect as ID field (both at login_slice1.dds src 615,404). spec §11.2e. CODE-CONFIRMED.
+    public static readonly WidgetRect PasswordBox = new(568, 32, 102, 13, EditFieldFrameSrcX, EditFieldFrameSrcY);
     public const int ActionFocusPw = 110; // spec §1.2. CODE-CONFIRMED.
     public const int PwMaxLength = 12; // spec §1.3 "max length 12, masked". CODE-CONFIRMED.
 
@@ -311,19 +325,22 @@ public static class LoginLayout
     //   srcV = 560 (normal) | 612 (pressed) | 664 (hover)
     // "digit d's normal-state glyph is password.dds source rect (d*52, 560, 52, 52)".
     // spec §11.3b. CODE-CONFIRMED. Previous revision had axes swapped; corrected.
-    public const int PinDigitColWidth = 52;       // per-digit X stride: srcU = d*52. spec §11.3b. CODE-CONFIRMED.
-    public const int PinDigitNormalSrcY = 560;    // state normal  → srcV=560. spec §11.3b. CODE-CONFIRMED.
-    public const int PinDigitHoverSrcY = 664;     // state hover   → srcV=664. spec §11.3b. CODE-CONFIRMED.
-    public const int PinDigitPressedSrcY = 612;   // state pressed → srcV=612. spec §11.3b. CODE-CONFIRMED.
+    public const int PinDigitColWidth = 52; // per-digit X stride: srcU = d*52. spec §11.3b. CODE-CONFIRMED.
+    public const int PinDigitNormalSrcY = 560; // state normal  → srcV=560. spec §11.3b. CODE-CONFIRMED.
+    public const int PinDigitHoverSrcY = 664; // state hover   → srcV=664. spec §11.3b. CODE-CONFIRMED.
+    public const int PinDigitPressedSrcY = 612; // state pressed → srcV=612. spec §11.3b. CODE-CONFIRMED.
 
     // Legacy mis-named aliases (kept for compile compatibility; the _SrcX suffix was a mistake — these
     // were always V/Y values, not U/X values; use the corrected _SrcY names above in all new code).
     [System.Obsolete("Axis was swapped in old code — use PinDigitNormalSrcY instead. spec §11.3b CORRECTED.")]
     public const int PinDigitNormalSrcX = 560;
+
     [System.Obsolete("Axis was swapped in old code — use PinDigitHoverSrcY instead. spec §11.3b CORRECTED.")]
     public const int PinDigitHoverSrcX = 664;
+
     [System.Obsolete("Axis was swapped in old code — use PinDigitPressedSrcY instead. spec §11.3b CORRECTED.")]
     public const int PinDigitPressedSrcX = 612;
+
     [System.Obsolete("Axis was swapped in old code — use PinDigitColWidth instead. spec §11.3b CORRECTED.")]
     public const int PinDigitRowHeight = 52;
 
@@ -421,6 +438,9 @@ public static class LoginLayout
     // msg.xdb caption ids (§1.9 / §9). CODE-CONFIRMED ids; captions VFS-only.
     // =========================================================================
 
+    // Version-gate error box (shown before credential checks). spec §1.4 / §1.8 / §1.9. CODE-CONFIRMED.
+    public const uint MsgVersionMismatch = 2204; // game.ver mismatch → show this, then quit. spec §1.4. CODE-CONFIRMED.
+
     // Quit-confirm prompts. spec §1.9. CODE-CONFIRMED.
     public const uint MsgQuitConfirm1 = 4023;
     public const uint MsgQuitConfirm2 = 4024;
@@ -434,6 +454,28 @@ public static class LoginLayout
     // Login form static labels (4001–4022 range). spec §1.9. CODE-CONFIRMED.
     public const uint MsgLabelFirst = 4001;
     public const uint MsgLabelLast = 4022;
+
+    // =========================================================================
+    // Save-ID persistence (§1.6, CODE-CONFIRMED). Layer-05 only — Godot ConfigFile.
+    // Equivalent of DoOption.ini [DO_OPTION] OPTION_ID in the legacy client.
+    // spec: Docs/RE/specs/frontend_scenes.md §1.6. CODE-CONFIRMED.
+    // =========================================================================
+
+    public const string SaveIdConfigPath = "user://mh_options.cfg"; // layer-05 ConfigFile path.
+    public const string SaveIdSection = "DO_OPTION"; // spec §1.6 — INI section. CODE-CONFIRMED.
+    public const string SaveIdKey = "OPTION_ID"; // spec §1.6 — INI key. CODE-CONFIRMED.
+    public const string SaveIdNullSentinel = "(null)"; // sentinel = no saved id. spec §1.6. CODE-CONFIRMED.
+
+    // =========================================================================
+    // Dialog fade-in / fade-out alpha ramp (§11.2g, CODE-CONFIRMED).
+    // The dialog overlays ramp ±64 alpha per frame toward 255 (show) or 0 (hide).
+    // At 60 fps, 64/frame means 4 frames to full opacity — ≈67 ms.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.2g. CODE-CONFIRMED.
+    // =========================================================================
+
+    public const int DialogFadeStep = 64; // alpha step per frame. spec §11.2g. CODE-CONFIRMED.
+    public const int DialogAlphaVisible = 255; // target alpha when shown. spec §11.2g.
+    public const int DialogAlphaHidden = 0; // target alpha when hidden. spec §11.2g.
 
     // =========================================================================
     // Validation thresholds. spec §1.4. CODE-CONFIRMED.

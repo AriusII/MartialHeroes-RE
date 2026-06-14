@@ -64,12 +64,9 @@ public static class AnimationParser
 
         // name LenStr — 4-byte u32 LE prefix + body (no null terminator on disk).
         // spec: Docs/RE/formats/animation.md §LenStr encoding:
-        //   "The .mot LenStr wire format is UNVERIFIED by sample; implementors should apply
-        //    the same 4-byte prefix convention documented in formats/mesh.md."
-        // spec: Docs/RE/formats/animation.md §Known unknowns:
-        //   "LenStr wire format in .mot (1-byte vs 4-byte prefix) — UNVERIFIED — assumed 4-byte
-        //    by analogy with .skn/.bnd; confirm with a sample."
-        // hypothesis — LenStr width unverified, see formats/animation.md §LenStr encoding.
+        //   "CONFIRMED (loader + sample): 4-byte u32 LE length prefix, then exactly length body bytes,
+        //    no null terminator on disk. Verified independently via loader and real sample — they agree."
+        // spec: Docs/RE/formats/animation.md — "LenStr prefix width: CONFIRMED 4-byte u32 LE, no on-disk terminator."
         string name = LenStrReader.Read(data, ref offset);
 
         // frame_count u32 LE — follows immediately after the name string.
@@ -88,10 +85,12 @@ public static class AnimationParser
 
         for (int t = 0; t < (int)trackCount; t++)
         {
-            // track_descriptor u32 LE: low byte = bone_id; upper 3 bytes purpose UNVERIFIED.
+            // track_descriptor u32 LE: low byte = bone_id; upper 3 bytes CONFIRMED reserved/unused padding.
+            // All three candidate interpretations (key-count, channel-mask, interp-flag) have been REFUTED.
             // spec: Docs/RE/formats/animation.md §Per-track record —
             //   "track_descriptor low byte = bone_id": CONFIRMED.
-            //   "upper three bytes purpose UNVERIFIED": UNVERIFIED.
+            //   "upper three bytes: CONFIRMED reserved/unused padding; all three candidate
+            //    interpretations REFUTED (not key-count, not channel-mask, not interp-flag)."
             uint trackDescriptor = ReadU32LE(data, ref offset, $"track[{t}].track_descriptor");
             byte boneId = (byte)(trackDescriptor & 0xFF);
             uint trackDescHigh24 = trackDescriptor >> 8;

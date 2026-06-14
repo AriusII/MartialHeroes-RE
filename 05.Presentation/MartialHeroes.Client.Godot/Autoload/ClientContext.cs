@@ -196,6 +196,17 @@ public sealed partial class ClientContext : Node
     /// </summary>
     public ZoneCatalog ZoneCatalog { get; private set; } = null!;
 
+    /// <summary>
+    /// The region service: resolves the local player's world position to a
+    /// <see cref="MartialHeroes.Shared.Kernel.Enums.ZoneType"/> and publishes
+    /// <see cref="MartialHeroes.Client.Application.Hud.ZoneChangedEvent"/> when the zone changes.
+    ///
+    /// Call <c>LoadAreaAsync</c> when the area is set, then <c>UpdatePosition</c> each frame.
+    /// Degrades gracefully when VFS is unavailable (publishes Unknown on first UpdatePosition).
+    /// spec: Docs/RE/specs/world_systems.md Ch. 16.
+    /// </summary>
+    public MartialHeroes.Client.Application.World.RegionService RegionService { get; private set; } = null!;
+
     // Cancellation source for the engine loop Task.
     private CancellationTokenSource? _loopCts;
     private Task? _loopTask;
@@ -444,6 +455,24 @@ public sealed partial class ClientContext : Node
         MappedVfsArchive? vfs = TryOpenVfsForTerrain();
         _terrainVfs = vfs;
 
+        // 16-D. Region service (Ch. 16 — 256-unit PvP/safe/closed zone grid).
+        //     Uses the same VFS archive as terrain (both read data/map<area>/ paths).
+        //     The VfsRegionSource and RegionService are engine-free — safe to construct here.
+        //     spec: Docs/RE/specs/world_systems.md Ch. 16.
+        try
+        {
+            var regionSource = new MartialHeroes.Client.Godot.Adapters.VfsRegionSource(vfs);
+            RegionService = new MartialHeroes.Client.Application.World.RegionService(regionSource, hudHub);
+            GD.Print("[ClientContext] RegionService constructed (region grid + zone-type table). " +
+                     "spec: Docs/RE/specs/world_systems.md Ch. 16.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] RegionService construction failed: {ex.Message} — zone indicator offline.");
+            RegionService = new MartialHeroes.Client.Application.World.RegionService(
+                new MartialHeroes.Client.Godot.Adapters.VfsRegionSource(null), hudHub);
+        }
+
         // 17. Terrain sector source — backed by VFS (or empty if offline).
         //     spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
         //     Area 0 is the default starting area. TODO: update on enter-game.
@@ -598,6 +627,11 @@ public sealed partial class ClientContext : Node
         // ZoneCatalog — null-safe offline fallback (no VFS).
         // spec: Docs/RE/formats/misc_data.md §7.1 / Docs/RE/specs/minimap.md §6.3.
         ZoneCatalog ??= new ZoneCatalog(null);
+
+        // RegionService — null-safe offline fallback (no VFS → null source → Unknown zone).
+        // spec: Docs/RE/specs/world_systems.md Ch. 16.
+        RegionService ??= new MartialHeroes.Client.Application.World.RegionService(
+            new MartialHeroes.Client.Godot.Adapters.VfsRegionSource(null), HudEventHub);
 
         GD.Print("[ClientContext] Minimal fallback state initialised.");
     }

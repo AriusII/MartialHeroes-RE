@@ -47,7 +47,8 @@
 > the sample-verified colour tables in `environment_bins.md`) is the correct engineering path for
 > the sky — there is no original asset to reproduce here, only the colour/lighting data, which is
 > already specified. The §A.1–§A.6 tables are retained only as a record of the parser-side read
-> order, in case a `.box` asset ever surfaces from another archive.
+> order, in case a `.box` asset ever surfaces from another archive. (The visible sun/moon BILLBOARDS
+> that DO orbit the sky — separate from this absent skybox mesh — are specified in **Section D**.)
 
 A `.box` file (if one existed) would describe a set of sky-dome **textured meshes** (one per skybox
 texture). It is opened via the archive by-name lookup. The hypothesized layout is a count-prefixed
@@ -145,7 +146,9 @@ fixed order. Each sub-init that fails aborts the hub; on full success a "ready" 
 3. **Cloud-dome** object — then loads `clouddome%d.bin` + `cloud_cycle%d.bin`.
 4. Read the global **sky detail-level** option (values 0 / 1 / 2; selects animated vs. static sky
    textures and a derived detail scalar).
-5. **Moon / particle dome** init (uses `moon%d.dds`).
+5. **Sun and Moon billboard** init (the moon uses `moon%d.dds`). These are point/particle
+   billboards that, after init, **orbit the sky every frame** on the time-of-day angle — see
+   **Section D** (the per-frame orbit, the 15-phase moon, and lens flare).
 6. **Sky-box** sub-object — conditionally loads `sky%d.box` (Section A) when the skybox gate is set.
    In the shipping VFS this branch is never taken: the skybox gate is always 0 and no `.box` asset
    exists (see §A).
@@ -232,6 +235,98 @@ is **time-indexed, 48 slots covering a full day**.
 
 ---
 
+## Section D — sun / moon billboards (time-of-day orbit, moon phase, lens flare) — NEW
+
+> **Status: genuine new content; does NOT contradict `environment_bins.md §10.6`.** §10.6 establishes
+> that the directional **shading LIGHT** is static (`(-7, 7, 20)`, colour-only over the day cycle) —
+> that finding stands. The visible **sun/moon BILLBOARDS** are a **separate subsystem** that DOES arc
+> across the sky on a time-of-day angle, recomputed every frame by the map-clock tick. The two are
+> independent: the shaded light vector is fixed; the billboard sprites orbit. A faithful port keeps the
+> directional light fixed **and** moves the sun/moon sprites.
+
+The sun and moon are **point/particle billboards** (not dome meshes). Each frame, when the map clock
+advances, a tick updates the sun billboard position, then the moon billboard position, then the
+star/cloud domes, and only then the directional/ambient **light colour** (the §10.6 colour-only path).
+
+### D.1 Time-of-day orbit angle (CONFIRMED)
+
+Both billboards share one orbit angle derived from the time-of-day (the current second-of-day, range
+`0 .. 86399`):
+
+```
+angle_deg = (time_of_day / 86400) * 360.0      # fraction-of-day → degrees, 0..360 over one day
+angle_rad = angle_deg * DEG2RAD                 # DEG2RAD = pi/180 ≈ 0.0174533
+```
+
+- `DEG2RAD` is `pi/180 ≈ 0.0174533` — **CONFIRMED** (read directly from the client's degree→radian
+  constant).
+- `angle_deg` sweeps a full `0..360°` over one simulated day (the same 86400 s day length as the
+  48-slot colour cycle, Section C). **CONFIRMED.**
+
+### D.2 Billboard position (sun vs moon, mirrored)
+
+The billboard X coordinate is a sine of the orbit angle scaled by ±3200 world units; the **sun uses
+−3200** and the **moon uses +3200**, so the moon rides the **opposite side of the sky** from the sun:
+
+| Axis | Sun billboard | Moon billboard | Confidence |
+|------|---------------|----------------|------------|
+| X | `sin(angle_rad) × −3200` | `sin(angle_rad) × +3200` | **HIGH** (the ±3200·sin term and the sun/moon sign opposition) |
+| other two axes | a **natural-log-based** curve of the orbit angle scaled by ±3200 and a fixed 45°-derived tilt pair | the same log-based curve, scaled by +3200 | **MED** (an asymmetric arc, not a clean semicircle) |
+
+- The X term `±3200 · sin(angle_rad)` is **HIGH**: the sun and moon trace opposite horizontal arcs.
+- The **other two axes** use a `log`-based curve of the angle (a monotonic, asymmetric rising/falling
+  curve, not a `cos`), with a fixed tilt derived from a 45° constant pair — so the path is an
+  **asymmetric arc, not a perfect semicircle**. The per-axis exact math is **MED** (it may be a cheap
+  developer shortcut rather than true astronomy).
+- The static default orientation the billboard is seeded with is overwritten by this per-frame orbit
+  update each tick.
+
+> **Porting guidance.** A faithful port may reproduce the `±3200 · sin(angle)` horizontal arc with the
+> sun/moon sign opposition, and either reproduce the log-based vertical/depth curve or — given the MED
+> tag on the non-X axes — treat the vertical arc as a **free engineering choice** (a clean semicircle
+> is acceptable). Keep the directional shading light **fixed** at `(-7, 7, 20)` regardless (§10.6).
+
+### D.3 Moon phase — 30-day, 15-texture lunar cycle (HIGH)
+
+The moon billboard texture is selected from a **day counter** (a separate value from the time-of-day
+angle):
+
+```
+phase_index = floor((day_counter mod 30) / 2)   # integer 0..14
+moon_texture = "data/sky/texture/moon{phase_index}.dds"
+```
+
+- This is a **30-day lunar cycle producing 15 distinct phase textures** (`moon0.dds .. moon14.dds`);
+  two consecutive days share a phase texture. **HIGH.**
+- The phase texture is **reloaded once per night, near the middle of the moon's arc** (when the orbit
+  angle has passed the half-way point and the day index has changed), so the swap happens while the
+  moon is up rather than producing a visible texture pop. **HIGH** (gate), MED (intent).
+
+### D.4 Lens flare (screen-space, anchored to the sun) — MED
+
+Lens flare is a set of **screen-space layered sprites** driven by a lens-flare config file
+(`data/sky/lensflare.txt`) with **per-layer color / position / radius / texture-id** records; the
+per-layer textures expand to `data/sky/texture/lensflare<n>.dds`.
+
+- The "position" field is a **per-layer screen-space offset factor along the flare axis** (the flare
+  line runs screen-centre ↔ light source), not a world position — classic lens-flare layer placement.
+- The flare set is **anchored to the sun's screen position** (the Section D.2 sun billboard,
+  projected to screen).
+- Gating: lens flare renders only when **`map_option[LENSFLARE]`** (see `environment_bins.md §1.1`,
+  offset 0x08) is set **and** the global sky-detail tier permits it (the highest detail-off tier
+  suppresses it).
+- **UNRESOLVED:** the exact sun-screen-position → flare-anchor transform was not pinned. The record
+  field set (color/position/radius/texture-id), the gating, and the sun anchoring are HIGH; the exact
+  anchor projection math is MED.
+
+### D.5 Billboard sizes (sprite radii)
+
+The sun and moon are particle billboards with fixed sprite sizes (a sprite radius / billboard-size
+scalar each); these are **sprite sizes, not dome geometry**. The numeric radii are not load-bearing
+for a faithful port (a port sizes the sprites to taste) and are not reproduced as field tables here.
+
+---
+
 ## Known unknowns
 
 1. **`sky%d.box` does not exist in the production VFS (CONFIRMED-ABSENT).** The entire §A layout is
@@ -246,6 +341,15 @@ is **time-indexed, 48 slots covering a full day**.
    is MED.
 4. **Star / cloud grid factoring** at the parser level (the BGRX-per-instance vs. keyframe grouping)
    — MED; defer to `environment_bins.md` sample-verified sizes.
+5. **Sun/moon billboard non-X axis math (§D.2)** — the X term `±3200·sin(angle)` is HIGH, but the
+   vertical/depth axes use a `log`-based asymmetric-arc curve with a 45°-derived tilt; the per-axis
+   exact math and the world/screen semantics of each written coordinate are MED. A port may treat
+   the vertical arc as a free choice (clean semicircle acceptable).
+6. **Lens-flare sun-anchor transform (§D.4)** — the exact sun-screen-position → flare-layer anchor
+   projection was not pinned (UNRESOLVED). The record fields, gating, and sun anchoring are HIGH.
+7. **Moon-phase day-counter source (§D.3)** — confirmed a day index distinct from the time-of-day
+   angle, and the `floor((day mod 30)/2)` 15-phase scheme is HIGH; the exact day-counter derivation
+   is not fully pinned.
 
 ## Cross-references
 
@@ -256,5 +360,7 @@ is **time-indexed, 48 slots covering a full day**.
 - **Container:** `Docs/RE/formats/pak.md` (the `.box` open uses the archive by-name lookup).
 - **Textures:** `Docs/RE/formats/texture.md` (the `.dds` payloads the names resolve to).
 - **Glossary:** see `Docs/RE/names.yaml` (`SkySystem_Init`, `SkyBox_Load`, `Fog_Init`,
-  `CloudDome_Init`, `StarDome_Init`, `SkyColorTable_GetSingleton`, `SkyColor_SampleByTime`).
+  `CloudDome_Init`, `StarDome_Init`, `SkyColorTable_GetSingleton`, `SkyColor_SampleByTime`;
+  Section D adds the sun/moon billboard-orbit, moon-phase-load, and lens-flare-host subsystems —
+  flag canonical names for the glossary, do not edit it here).
 - **Provenance:** see `Docs/RE/journal.md` (add an entry for this spec).

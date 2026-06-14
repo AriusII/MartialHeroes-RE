@@ -364,6 +364,125 @@ public static class TerrainLayerParsers
         };
     }
 
+    // ─── .fx4 ─────────────────────────────────────────────────────────────────
+
+    // FX4 file header: 4 bytes (u32 tile_count).
+    // spec: Docs/RE/formats/terrain_layers.md §1.11 — u32 tile_count @ file offset 0x00: CONFIRMED (parser-verified).
+    private const int Fx4FileTileCountSize = 4;
+
+    // FX4 per-tile header: 48 bytes (fixed).
+    // spec: Docs/RE/formats/terrain_layers.md §1.11 — TileHeader (48 bytes): CONFIRMED (parser-verified).
+    private const int Fx4TileHeaderSize = 48;
+
+    // vertex_count @ tile-relative offset +0x28: CONFIRMED (parser-verified).
+    // spec: Docs/RE/formats/terrain_layers.md §1.11 — vertex_count u32 @ +0x28: CONFIRMED.
+    private const int Fx4TileVertexCountOffset = 0x28; // 40
+
+    // index_count @ tile-relative offset +0x2C: CONFIRMED (parser-verified).
+    // spec: Docs/RE/formats/terrain_layers.md §1.11 — index_count u32 @ +0x2C: CONFIRMED.
+    private const int Fx4TileIndexCountOffset = 0x2C; // 44
+
+    // VF_44 vertex stride: 44 bytes. CONFIRMED.
+    // spec: Docs/RE/formats/terrain_layers.md §1.11 — VertexData (vertex_count × 44, VF_44): CONFIRMED.
+    // spec: Docs/RE/formats/terrain_layers.md §1.2 VF_44 (44 B): CONFIRMED.
+    private const int Fx4VertexStride = 44;
+
+    /// <summary>
+    /// Parses an <c>.fx4</c> terrain overlay layer file.
+    /// Layout: u32 tile_count, then tile_count tiles (each: 48-byte TileHeader + VF_44 vertices + u16 indices).
+    /// Vertex format: VF_44 (44 B). UV channels: 2. Per-vertex colour: yes.
+    /// </summary>
+    /// <param name="data">Raw file bytes from VFS.</param>
+    /// <returns>Decoded FX4 layer.</returns>
+    /// <exception cref="InvalidDataException">Thrown on truncation.</exception>
+    /// <remarks>
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 FX4 Format: CONFIRMED-FROM-LOADER.
+    /// File-size formula: 4 + Σ over tiles (48 + vertex_count × 44 + index_count × 2).
+    /// For a single tile: 52 + vertex_count × 44 + index_count × 2.
+    /// The loader reads the 48-byte tile header atomically and consumes only vertex_count @ +0x28
+    /// and index_count @ +0x2C. The leading 40 bytes (tile_metadata) are read-but-not-consumed.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — tile_metadata @ +0x00 (40 bytes): UNVERIFIED semantics.
+    /// FX4 and FX5 share identical loader control flow; they differ only in vertex stride.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — "FX4 and FX5 differ only in vertex stride": CONFIRMED.
+    /// </remarks>
+    public static Fx4Layer ParseFx4(ReadOnlyMemory<byte> data) =>
+        ParseFx4(data.Span, data);
+
+    private static Fx4Layer ParseFx4(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
+    {
+        // tile_count u32 LE @ file offset 0x00.
+        // spec: Docs/RE/formats/terrain_layers.md §1.11 — tile_count u32 @ 0x00: CONFIRMED.
+        if (span.Length < Fx4FileTileCountSize)
+            throw new InvalidDataException(
+                $".fx4 parse error: buffer too short for tile_count field (need {Fx4FileTileCountSize}, " +
+                $"got {span.Length}). spec: Docs/RE/formats/terrain_layers.md §1.11.");
+
+        uint tileCount = BinaryPrimitives.ReadUInt32LittleEndian(span[0..]);
+        int offset = Fx4FileTileCountSize;
+
+        var tiles = new Fx4Tile[tileCount];
+
+        for (uint t = 0; t < tileCount; t++)
+        {
+            // Per-tile header: 48 bytes (fixed, read atomically).
+            // spec: Docs/RE/formats/terrain_layers.md §1.11 — TileHeader (48 bytes): CONFIRMED.
+            if (offset + Fx4TileHeaderSize > span.Length)
+                throw new InvalidDataException(
+                    $".fx4 parse error: tile[{t}] header truncated at offset {offset} " +
+                    $"(need {Fx4TileHeaderSize}, remaining {span.Length - offset}). " +
+                    "spec: Docs/RE/formats/terrain_layers.md §1.11.");
+
+            // Store raw tile header for faithful round-trip.
+            ReadOnlyMemory<byte> rawTileHdr = backing.IsEmpty
+                ? span.Slice(offset, Fx4TileHeaderSize).ToArray()
+                : backing.Slice(offset, Fx4TileHeaderSize);
+
+            // vertex_count u32 @ tile-relative +0x28.
+            // spec: Docs/RE/formats/terrain_layers.md §1.11 — vertex_count u32 @ +0x28: CONFIRMED.
+            uint vertexCount = BinaryPrimitives.ReadUInt32LittleEndian(
+                span.Slice(offset + Fx4TileVertexCountOffset, 4));
+
+            // index_count u32 @ tile-relative +0x2C.
+            // spec: Docs/RE/formats/terrain_layers.md §1.11 — index_count u32 @ +0x2C: CONFIRMED.
+            uint indexCount = BinaryPrimitives.ReadUInt32LittleEndian(
+                span.Slice(offset + Fx4TileIndexCountOffset, 4));
+
+            offset += Fx4TileHeaderSize;
+
+            // Validate geometry block size before reading.
+            long geoBytes = (long)vertexCount * Fx4VertexStride + (long)indexCount * 2;
+            if (offset + geoBytes > span.Length)
+                throw new InvalidDataException(
+                    $".fx4 parse error: tile[{t}] geometry truncated at offset {offset} — " +
+                    $"need {geoBytes} bytes (vertexCount={vertexCount}×44 + indexCount={indexCount}×2), " +
+                    $"remaining {span.Length - offset}. " +
+                    "spec: Docs/RE/formats/terrain_layers.md §1.11.");
+
+            // VertexData: vertex_count × 44 bytes (VF_44).
+            // spec: Docs/RE/formats/terrain_layers.md §1.11 — VertexData (vertex_count × 44, VF_44): CONFIRMED.
+            var vertices = new FxVertex44[(int)vertexCount];
+            for (int v = 0; v < (int)vertexCount; v++)
+                vertices[v] = ReadFxVertex44(span.Slice(offset + v * Fx4VertexStride, Fx4VertexStride));
+            offset += (int)vertexCount * Fx4VertexStride;
+
+            // IndexData: index_count × 2 bytes (u16 triangle list).
+            // spec: Docs/RE/formats/terrain_layers.md §1.11 — IndexData (index_count × 2, u16): CONFIRMED.
+            var indices = ReadU16Indices(span, offset, (int)indexCount);
+            offset += (int)indexCount * 2;
+
+            tiles[t] = new Fx4Tile
+            {
+                RawTileHeader = rawTileHdr,
+                VertexCount = vertexCount,
+                IndexCount = indexCount,
+                Vertices = vertices,
+                Indices = indices,
+            };
+        }
+
+        return new Fx4Layer { TileCount = tileCount, Tiles = tiles };
+    }
+
     // ─── .fx5 ─────────────────────────────────────────────────────────────────
 
     // FX5 section header: 40 bytes. SubChunk header: 12 bytes.

@@ -7,6 +7,16 @@
 > records the campaign-specific decisions, the orchestrator→phase assignment, the cluster taxonomy,
 > and the master deliverables. The live run record is [`ROADMAP.md`](ROADMAP.md).
 
+> **▶ ACTIVE CAMPAIGN (2026-06-14): CAMPAIGN 6 — Total IDB Legibility (IDA-only).** Mandate: work
+> exclusively in IDA Pro 9.3 (the `ida` MCP) on `doida.exe` and make the whole IDB legible — name /
+> comment / type every meaningful function, global, class, struct field and (where it pays) local — via a
+> ~75-deployment fleet across ~6 sequential waves with heavy IDAPython batching. It **reuses this file's
+> apparatus verbatim** (the tiers in §2, the concurrency ledger, the firewall, the
+> comprehension→annotation pipeline) but replaces the cluster taxonomy with a **16-cluster partition of
+> the ≈ 21,075 anonymous `sub_`** and the Engineering (E) phase with a **serialized-WRITE annotation (D)**
+> phase. Charter detail: `~/.claude/plans/dans-ce-plan-on-tranquil-panda.md`; live record: the
+> **CAMPAIGN 6** section of [`ROADMAP.md`](ROADMAP.md). CAMPAIGN 3/4 below are paused (kept for provenance).
+
 ---
 
 ## §0 — Charter

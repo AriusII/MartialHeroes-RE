@@ -11,7 +11,7 @@
 | Attribute         | Value |
 |-------------------|-------|
 | `status`          | `mixed` — see per-format status rows below |
-| `sample_verified` | `true` for `.fx1`–`.fx6`, `.up`, `.exd`, `.sod.pre`, `.ted.post`, `wind%d.bin` header; `false` for `light%d.bin`, `point_light%d.bin`; `.fx7` size-formula PLAUSIBLE (dual-sample); `.fx4` UNVERIFIED (single-sample) |
+| `sample_verified` | `true` for `.fx1`–`.fx6`, `.up`, `.exd`, `.sod.pre`, `.ted.post`, `wind%d.bin` header; `false` for `light%d.bin`, `point_light%d.bin`; `.fx7` size-formula PLAUSIBLE (dual-sample); `.fx4` structure CONFIRMED-from-loader (flat tile array; internal header fields sample-unverified) |
 | `binary_analysed` | `doida.exe` (legacy 32-bit client, x86 LE) |
 | `confidence`      | Fields annotated CONFIRMED are corroborated by parser read-sequence and/or real sample bytes. Fields annotated UNVERIFIED are structurally inferred or parser-only, without sample cross-check. |
 
@@ -71,7 +71,7 @@ blend or alpha-splat maps.
 
 | Format key | sample_verified |
 |-----------|-----------------|
-| `fx_layer` | `true` for `.fx1`–`.fx3`, `.fx5`, `.fx6`; `.fx7` PLAUSIBLE (dual-sample); `.fx4` UNVERIFIED (single-sample) |
+| `fx_layer` | `true` for `.fx1`–`.fx3`, `.fx5`, `.fx6`; `.fx7` PLAUSIBLE (dual-sample); `.fx4` structure CONFIRMED-from-loader (flat tile array) |
 
 **Path pattern:** `data/map{MAP}/dat/d{MAP}x1{TX:04d}z1{TZ:04d}.fx{N}` where `N` is 1–7.
 
@@ -389,57 +389,81 @@ VF_32 vertex block + a u16 index block account for the whole file in both cases)
 
 ### 1.11 FX4 Format  (`.fx4`)
 
-**Status:** UNVERIFIED — 1 sample file only (single-sample). The section-0 size formula is exact,
-but the file's two-section structure and the section-1 header boundary are ambiguous at one sample.
-Treat the entire FX4 layout as UNVERIFIED.
+**Status:** CONFIRMED-FROM-LOADER (flat-model control flow) — the FX4 binary loader's read
+sequence was recovered, and it resolves the earlier section-boundary ambiguity. The file is a flat
+tile array, **not** a section/sub-chunk container. The internal meaning of the per-tile header's
+leading bytes remains sample-unverified (no sample cross-check this pass), but the **structure**
+(tile count, fixed 48-byte per-tile header with vertex/index counts at fixed offsets, VF_44 vertex
+block, u16 index block) is parser-verified and cross-confirmed by the FX5 loader.
 
-**Semantic:** Two-section terrain overlay mesh using the **VF_44** vertex format (position + normal +
-RGBA colour + UV0 + UV1 — the same vertex format as FX2, `terrain_layers.md` §1.2). The first
-section parses cleanly as an FX5-style section (40-byte section header + 12-byte sub-chunk header +
-VF_44 vertex block + u16 index block). A second section of geometry follows it. Where FX5 uses VF_36
-and FX2 is single-section, FX4 combines FX2's two-UV-channel VF_44 vertex with a multi-section container.
+**Semantic:** Terrain overlay mesh using the **VF_44** vertex format (position + normal + RGBA
+colour + UV0 + UV1 — the same vertex format as FX2, `terrain_layers.md` §1.2), stored as a flat
+array of tiles. Each tile carries its own fixed-size header, a VF_44 vertex block, and a u16 index
+block. This is the same flat tile-array model the FX5 loader uses; FX4 and FX5 differ **only** in
+vertex stride (FX4 = VF_44 / 44 B, FX5 = VF_36 / 36 B).
 
-**File layout (single observed sample):**
+> **Boundary resolution (supersedes the prior "Reading A vs Reading B" ambiguity).** The earlier
+> revision described FX4 as a two-section container and could not pin the section-1 header split
+> (40+8 vs 36+12). Loader analysis proves that question was **moot**: the loader never branches on
+> any "section_type" word and never splits a header into section-header + sub-chunk parts. It reads
+> a single file-level tile count, then for **each** tile reads one fixed **48-byte** header block as
+> a single unit and consumes only two fields from it (vertex count, index count). What the prior
+> revision called the "52-byte header" decomposes exactly as **4 bytes (file-level tile count) + 48
+> bytes (tile-0 header)**. Both Reading A (40+8) and Reading B (36+12) "reconciled" only because each
+> summed to the same opaque 48-byte block the loader reads atomically — there is **no boundary
+> inside it**. The per-tile header size is **fixed at 48 bytes**, not data-driven. What looked like
+> "two sections" was a file with **tile count = 2** (two tiles in the flat array).
+
+**File layout:**
 
 ```
-FX4_File = Section[0] + Section[1]
+FX4_File = u32 tileCount
+           per tile (× tileCount):
+               TileHeader (48 bytes)        ; only vertexCount@+0x28 and indexCount@+0x2C consumed
+               VertexData (vertexCount × 44) ; VF_44
+               IndexData  (indexCount  × 2)  ; u16 triangle list
 ```
 
-**Section 0 header (52 bytes — 40-byte section header + 12-byte sub-chunk header):**
+**File header (4 bytes):**
 
-| Offset | Size | Type | Field | Observed value | Confidence |
-|-------:|-----:|------|-------|----------------|------------|
-| 0x00 | 4 | u32 | `section_type` | 2 | SINGLE-SAMPLE (FX5 stores ascending 1/2/3 per section) |
-| 0x04 | 4 | u32 | _unknown_1_ | 3 | SINGLE-SAMPLE |
-| 0x08 | 4 | u32 | _unknown_2_ | 1 | SINGLE-SAMPLE (matches FX5) |
-| 0x0C | 4 | u32 | `render_state` | 200 | SINGLE-SAMPLE — differs from FX5's 300–450 |
-| 0x10 | 4 | f32 | `direction_x` | fractional | SINGLE-SAMPLE — candidate direction vector |
-| 0x14 | 4 | f32 | `direction_y` | fractional | SINGLE-SAMPLE |
-| 0x18 | 4 | f32 | `direction_z` | near-zero | SINGLE-SAMPLE |
-| 0x1C | 4 | u32 | _unknown_3_ | 40 | SINGLE-SAMPLE (FX5 had 30/50) |
-| 0x20 | 4 | u32 | _unknown_4_ | 2 | SINGLE-SAMPLE (matches FX5) |
-| 0x24 | 4 | u32 | _unknown_5_ | 0 | SINGLE-SAMPLE (matches FX5) |
-| 0x28 | 4 | u32 | _unknown_flags_ | 2 | SINGLE-SAMPLE (FX5 had 1) |
-| 0x2C | 4 | u32 | `vert_count` | small (tens) | SINGLE-SAMPLE |
-| 0x30 | 4 | u32 | `idx_count` | small; divisible by 3 | SINGLE-SAMPLE |
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| 0x00 | 4 | u32 | `tile_count` | Number of tiles in the flat array. Drives the per-tile loop. | CONFIRMED (parser-verified) |
 
-**Section 0 VertexData:** `vert_count × 44` bytes (**VF_44**). **IndexData:** `idx_count × 2` bytes (u16).
+**Per-tile header (48 bytes, repeated `tile_count` times):**
 
-**Section 0 size formula (exact):** `52 + vert_count × 44 + idx_count × 2`. The first section
-accounts for the leading bytes of the file with zero residual.
+The loader reads this 48-byte block in one operation and indexes only the vertex and index counts
+out of it. Offsets below are **relative to the start of each tile header**.
 
-**Section 1 (UNVERIFIED boundary):** a second section of geometry follows section 0. Its leading word
-is zero (a null `section_type`, unlike section 0's value 2), so the section-header / sub-chunk split
-for section 1 cannot be pinned at one sample. Two readings both reconcile the remaining byte count
-with the same geometry (a VF_44 vertex block + a u16 index block of the same counts as section 0):
+| Tile-rel offset | Size | Type | Field | Notes | Confidence |
+|----------------:|-----:|------|-------|-------|------------|
+| +0x00 | 40 | bytes | _tile_metadata_ | Read into the tile struct but not consumed for parsing (no branch on any field). Candidates: transform / texture-id / flags / a per-tile range value used by the post-load AABB compute. The leading dword (the prior revision's "section_type") is **not** tested by the loader and does **not** size the header. | UNVERIFIED (read-but-not-consumed at load; internal meaning sample-unverified) |
+| +0x28 | 4 | u32 | `vertex_count` | Drives the `vertex_count × 44` VF_44 read. | CONFIRMED (parser-verified) |
+| +0x2C | 4 | u32 | `index_count` | Drives the `index_count × 2` u16 index read. | CONFIRMED (parser-verified) |
 
-- **Reading A:** 40-byte section header + 8-byte sub-chunk header, then VF_44 vertices + u16 indices.
-- **Reading B:** 36-byte section header + 12-byte sub-chunk header, then VF_44 vertices + u16 indices.
+**VertexData (per tile):** `vertex_count × 44` bytes (**VF_44**). The leading position float3 (X, Y,
+Z) is parser-verified (the post-load AABB compute strides the array by 44 bytes and reads the first
+three floats of each vertex as position). The remaining 32 bytes (normal + RGBA + UV0 + UV1, per the
+VF_44 layout in §1.2) are **not** decomposed by the loader, so the **internal field breakdown stays
+sample-derived** — the 44-byte stride and leading position float3 are parser-verified, the rest is
+inherited from the §1.2 VF_44 description.
 
-Both give a 44-byte vertex stride consistent with section 0. **The exact section-1 header boundary is
-UNVERIFIED** — an engineer must not assume Reading A or Reading B. The total file is fully
-accounted for by section 0 (formula above) plus a section-1 geometry block of matching vertex/index
-counts; only the internal split of section 1's header is ambiguous.
+**IndexData (per tile):** `index_count × 2` bytes (u16). Plain triangle list.
+
+**File-size formula:** `4 + Σ over tiles (48 + vertex_count × 44 + index_count × 2)`.
+
+For a single-tile file this reduces to `52 + vertex_count × 44 + index_count × 2` — which is why the
+prior revision's "section-0 size formula" reconciled exactly: its "52-byte header" is `4 + 48`, and
+its single "section" was tile 0.
+
+**Cross-confirmation (FX5):** the FX5 loader is byte-for-byte the same control flow — a u32 file-level
+tile count, then per tile a fixed 48-byte header read as one unit (vertex count at tile-relative
++0x28, index count at +0x2C), a vertex block, and a u16 index block — differing **only** in vertex
+stride (VF_36 / 36 B instead of VF_44 / 44 B). This cross-family identity is the strongest evidence
+that the 48-byte per-tile header is a fixed, type-agnostic block in both formats. FX5 (§1.8) is
+documented below in the older section/sub-chunk terminology for historical continuity, but its
+loader obeys this same flat model; treat the FX5 "40-byte section header + 12-byte sub-chunk header"
+as the same opaque 48-byte per-tile header read once per tile.
 
 ### 1.12 FX layer summary table
 
@@ -448,7 +472,7 @@ counts; only the internal split of section 1's header is ambiguous.
 | FX1   | true  | 24 B | VF_36 (36 B) | 1 | yes |
 | FX2   | true  | 24 B | VF_44 (44 B) | 2 | yes |
 | FX3   | true  | 48 B | VF_36 (36 B) | 1 | yes |
-| FX4   | UNVERIFIED (single-sample) | 40 B section + 12 B sub (s0); s1 boundary ambiguous | VF_44 (44 B) | 2 | yes |
+| FX4   | CONFIRMED-from-loader (flat tile array) | 4 B count + 48 B/tile | VF_44 (44 B) | 2 | yes |
 | FX5   | true (partial) | 40 B section + 12 B sub | VF_36 (36 B) | 1 | yes |
 | FX6   | true  | 32 B global + 8 B/chunk | VF_32 (32 B) | 1 | no |
 | FX7   | PLAUSIBLE (dual-sample) | 40 B section + 12 B sub | VF_32 (32 B) | 1 | no |
@@ -853,10 +877,15 @@ these without further evidence.
    header + VF_32 vertex block + u16 index block reconciles both files exactly. The nine
    section-header fields (especially `unk_dist` at 0x08, a large f32 rather than the FX5
    u32 LOD distance) are unresolved in semantics. No IDA cross-check yet.
-7. **FX4 format (§1.11):** UNVERIFIED from a single sample. Section 0 parses exactly
-   (52-byte header + VF_44 vertices + u16 indices); the **section-1 header boundary is
-   ambiguous** (Reading A 40+8 vs. Reading B 36+12) — do not assume either. The whole
-   two-section interpretation rests on one file. No IDA cross-check yet.
+7. **FX4 format (§1.11):** RESOLVED for structure (the earlier Reading A vs Reading B boundary
+   ambiguity is now moot — see §1.11). Loader analysis proves FX4 is a flat tile array: a u32
+   tile count, then per tile a fixed 48-byte header (vertex count at +0x28, index count at +0x2C),
+   a VF_44 vertex block, and a u16 index block. The header size is fixed at 48 bytes (not
+   data-driven), cross-confirmed by the FX5 loader (same control flow, VF_36 stride). What remains
+   UNVERIFIED is the **internal meaning of the per-tile header's leading 40 bytes** (read but not
+   consumed at load — candidates: transform / texture-id / flags) and the VF_44 internal field
+   breakdown past the leading position float3; both are sample-derived, no sample cross-check this
+   pass.
 
 7. **`.up` `plane_height` vs vertex Y for non-flat geometry:** All sampled upper terrain
    triangles are flat (all vertex Y = plane_height). The field may diverge for non-flat overhangs.
@@ -872,9 +901,13 @@ these without further evidence.
 
 11. **`.sod.pre` runtime loading:** No game-runtime loader was found. The file may be editor-only.
 
-12. **`.ted.post` texture index block (block 3) reference target:** Whether the 1-based index
-    references the global `bgtexture.lst` pool or the per-tile `TEXTURES{}` list in `.map` is
-    unresolvable from available samples.
+12. **`.ted.post` texture index block (block 3) reference target:** RESOLVED for the base `.ted`
+    (the `.ted.post` block layout is identical). The 1-based block-3 byte resolves as
+    `per_cell_texture_list[byte - 1]` (`idx-1`, byte 0 = no-texture sentinel) into the per-cell
+    `.map` `TEXTURES{}` registration-order list, which in turn indexes the global `bgtexture.lst`
+    pool. See `Docs/RE/formats/terrain.md` §5.6 (HIGH confidence; one thin instruction-exact
+    residual on the decrement site). The runtime never reads `.ted.post`, so no parser consumes
+    this block from the sidecar regardless.
 
 13. **`light%d.bin` gaps at 0x0900 and 0x1230 (48 bytes each):** May be a 49th wrap-around
     interpolation slot, or alignment padding between sections.

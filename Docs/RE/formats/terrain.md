@@ -21,6 +21,13 @@ full internal layout of the `.sod` 48-byte collision record (now read as four XZ
 slope-intercept line) are all sample- and read-sequence-confirmed and flipped to VERIFIED/CONFIRMED
 below. See sections 5.6–5.8, 6.2 and 11.3.
 
+**Recently promoted (2026-06-14, CAMPAIGN VFS-DEEP):** Two authoring-sidecar families that the
+shipped runtime **never parses** are now explicitly documented and require **no runtime parser** —
+`*.ted.post` (full drop-in `.ted`, §5.10) and the `.pre` family (`*.bud.pre`, `*.sod.pre`,
+`*.fx<N>.pre` — full standalone files in their base format, §16). The `.sod` `QuadRecord` trailing
+scalars at +032..+047 are **re-labelled**: they are a dead 2D edge-line cache, **not** a plane
+equation (§11.3, correction below). Confidence markers preserved per source.
+
 ---
 
 ## Overview
@@ -49,6 +56,11 @@ Binary assets referenced from within `.map` include:
 | `.exd`    | Extended-detail blob: same binary structure as `.up`; section association UNVERIFIED |
 | `.fx1`–`.fx7` | Special-effect layer blobs (7 named slots) |
 | `.sod`    | Collision solid geometry |
+
+Two further per-cell file families are present in the VFS but are **authoring/editor sidecars that
+the shipped runtime never opens**: `*.ted.post` and the `.pre` family (`*.bud.pre`, `*.sod.pre`,
+`*.fx<N>.pre`). They are documented for preservation/tooling only — see §5.10 and §16. **An engineer
+implementing `Assets.Parsers` needs no parser for either family.**
 
 A separate per-area cell manifest (`.lst`) and a global background-texture list (`bgtexture.lst`)
 are loaded at area-switch time, outside the per-cell path.
@@ -189,6 +201,12 @@ associated binary blob. The sub-loader is selected by section keyword, not by fi
 | `FX1`–`FX7`      | `.fx1`–`.fx7`         | Special-effect layers                           | CONFIRMED (parser + samples) |
 | `SOLID`          | `.sod`                | Collision geometry                              | CONFIRMED (parser + samples) |
 
+**`DATAFILE` always names a BASE extension.** Every `DATAFILE` line observed names a base asset
+path (`… .bud`, `… .ted`, `… .sod`, `… .fx<N>`, `… .up`) — **never** a `.pre` or a `.post` variant.
+The runtime VFS open router resolves the literal path with no extension rewriting, fallback, or
+base/pre/post selection logic, so the authoring sidecars are unreachable from any runtime load
+path (see §5.10, §16). CONFIRMED.
+
 ### 3.3 EXTRA_TERRAIN and `.exd` blobs
 
 Sample `.exd` files share cell coordinates with cells that could have `EXTRA_TERRAIN` sections,
@@ -319,8 +337,8 @@ always the first height value of the heightmap. This is CONFIRMED — the loader
 read at file offset 0 with no preceding header read, and all three sample files begin with valid
 IEEE 754 height values at byte 0.
 
-Files named `*.ted.post` use an identical 46987-byte layout and are written by the in-game
-terrain editor as workspace copies. The runtime client reads only `.ted` files, never `.ted.post`.
+An editor-only sidecar named `*.ted.post` shares this exact layout but is never read by the
+runtime — see §5.10.
 
 ### 5.1 Grid geometry
 
@@ -331,19 +349,39 @@ terrain editor as workspace copies. The runtime client reads only `.ted` files, 
 | Vertex spacing    | 16.0 world units          | CONFIRMED (derived: 1024 / 64 = 16; literal constant in loader) |
 | Total file size   | 46 987 bytes (0xB78B)     | CONFIRMED (three samples, all identical size; sum of the five block sizes) |
 
-### 5.2 Axis orientation
+### 5.2 Axis orientation — `heights[row * 65 + col]`, X = column
 
-Rows are constant-Z slices; columns are constant-X slices. CONFIRMED by seam-continuity test
-between two adjacent Z-axis-neighbouring cells: the last row (index 64) of the lower-Z cell
-matches the first row (index 0) of the higher-Z cell within float rounding noise.
+Rows are constant-Z slices; columns are constant-X slices. The grid is **row-major with X as the
+inner (fast, stride-1) axis and Z as the outer (slow, stride-65) axis**:
 
 ```
 heights[row * 65 + col]
-  row = Z axis:  row 0 = cell Z minimum (southern edge),  row 64 = cell Z maximum (northern edge)
-  col = X axis:  col 0 = cell X minimum (western edge),   col 64 = cell X maximum (eastern edge)
+  col = X axis (INNER / fast, stride 1):  col 0 = cell X minimum (western edge),  col 64 = cell X maximum (eastern edge)
+  row = Z axis (OUTER / slow, stride 65): row 0 = cell Z minimum (southern edge), row 64 = cell Z maximum (northern edge)
 ```
 
-All five data blocks use this same row-major, Z-as-row, X-as-column convention.
+**Confidence: PARSER-VERIFIED (CONFIRMED).** Two independent lines of evidence agree, so there is
+**no residual** on the axis:
+
+1. **Loader index arithmetic.** The terrain loader builds the per-cell vertex grid in the same pass
+   that reads the five blocks. Its mesh-build nested loops compute each vertex's linear height index
+   as `row * 65 + col`, where the contiguous unit-stride term increments per inner step and the
+   `+65` term accumulates per outer step (grid width 65). The same two loop dimensions stamp the
+   per-vertex world coordinates against the cell-origin bases (cell-X base `(mapX - 10000) * 1024`,
+   cell-Z base `(mapZ - 10000) * 1024`): **world X is driven by the unit-stride (column) dimension**
+   and **world Z by the stride-65 (row) dimension**. This fixes column -> world X and row -> world Z
+   directly from the loader, independent of any sample test.
+2. **Seam-continuity sample test.** Between two Z-adjacent cells the last row (index 64) of the
+   lower-Z cell matches the first row (index 0) of the higher-Z cell within float rounding noise --
+   consistent with row = Z.
+
+This upgrades the earlier sample-only/UNVERIFIED reading of the grid orientation to parser-verified.
+A converter (e.g. the terrain -> glTF mapper in `Assets.Mapping`) may treat `heights[row * 65 + col]`
+with X = column / Z = row as settled and drop any "axis unverified" caveat.
+
+All five data blocks (heightmap, normals, texture-index 16x16, direction 16x16, diffuse) use this
+same row-major, Z-as-row, X-as-column convention -- the loader addresses every block with the same
+`row * 65 + col` (or the matching `/4` patch-grid) arithmetic.
 
 ### 5.3 Sequential block layout
 
@@ -400,13 +438,26 @@ to that offset before patching the diffuse block.
   ```
 
   CONFIRMED: the loader stashes each registered texture into the section's per-cell array as the
-  `.map` is parsed, and stores this block-3 byte alongside each tile for later lookup against that
-  array. The two-hop resolution (per-cell list, then global pool) is confirmed; the per-cell list
-  caps at 128 entries. Sample `d036` exercises values 1..11 across distinct texture zones; `d000`
-  uses only value 1.
-- **Value 0:** no sample tile carries value 0. A 0 byte would be an invalid 1-based index and is
-  read as "no texture override / fallback"; this fallback meaning is PARTIAL (inferred, not yet
-  seen in a sample).
+  `.map` is parsed (one entry appended per `TEXTURES{}` line, in file order, starting at slot 0),
+  and stores this block-3 byte RAW (no decrement, no zero-check) alongside each tile for later
+  lookup against that array. The two-hop resolution (per-cell list, then global pool) is confirmed;
+  the per-cell list caps at 128 entries. Sample `d036` exercises values 1..11 across distinct
+  texture zones; `d000` uses only value 1.
+- **The decrement is `[byte - 1]` (idx-1), HIGH confidence.** The on-disk block-3 byte is **1-based**
+  (never 0 in any sample, max observed 11) while the per-cell texture list is **0-based,
+  registration-order** (first registered texture at slot 0). The only consistent mapping of a
+  1-based selector onto a 0-based list is `per_cell_texture_list[byte - 1]`. This is the same
+  machinery as the already-CONFIRMED BUILDING object path (`BUILDING TEXTURES[tex_id - 1]`, §4.2):
+  the building `tex_id` is likewise a 1-based index into its own per-section registration-order
+  list, so the identical `- 1` applies to the terrain tile path. Confidence: HIGH (structurally
+  forced by the 1-based-byte / 0-based-list mismatch and the BUILDING analog). **Residual:** the
+  literal decrement was not pinned to a single instruction, because the runtime draw resolves each
+  patch to a texture-node pointer at cell-attach time (it does not re-subscript the per-cell list
+  per frame); the mapping is structurally certain but the instruction-exact decrement site is the
+  one thin residual (a debugger pass would make it instruction-exact). Use `texlist[byte - 1]`.
+- **Value 0:** no sample tile carries value 0. A 0 byte cannot be a valid 1-based index and is the
+  **no-texture / fallback sentinel**; this fallback meaning is PARTIAL (inferred, not yet seen in a
+  sample).
 
 ### 5.7 Block 4 — Quad split / UV orientation flags
 
@@ -469,6 +520,39 @@ to that offset before patching the diffuse block.
   store / 0.5× load scaling is code-confirmed but stays sample-unverified until a tinted (non-white)
   tile is captured.
 - World-unit-to-physical-scale relationship (1024 wu per cell = ? metres).
+
+### 5.10 Editor sidecar — `*.ted.post` (runtime never reads)
+
+**Path pattern:** `data/map<NNN>/dat/d<NNN>x<mapX>z<mapZ>.ted.post`
+
+A `*.ted.post` file is a **full, drop-in copy of its companion `.ted` cell** in the identical
+46 987-byte five-block layout — there is **no wrapper header, no version prefix, and no delta/patch
+framing**. Offset 0 is the first heightmap float, exactly as in a base `.ted`. The `.post` suffix
+marks a workspace copy written by the in-game terrain editor when it saves a patched cell.
+
+- **The shipped runtime never loads `*.ted.post`.** The `.map` `DATAFILE` line always names the base
+  `.ted` (§3.2), and the VFS open router performs no extension fallback, so this sidecar sits off
+  every runtime load path. CONFIRMED.
+- **An engineer needs no parser for this format.** If a preservation tool ever wishes to read one,
+  it parses byte-for-byte as the `.ted` blocks documented in §5.3–§5.8 — no other handling.
+
+| Property                        | Value / finding | Confidence |
+|---------------------------------|-----------------|------------|
+| On-disk layout                  | Identical to base `.ted` (five blocks, no prefix) | HIGH (head/mid/tail windows compared byte-for-byte across map016/map046/map038 pairs) |
+| Fixed file size                 | 46 987 bytes    | HIGH (all 852 VFS instances are exactly this size) |
+| Wrapper / patch header          | None — data starts at offset 0 | HIGH |
+| Count in VFS                    | 852 files; base extension is `.ted` only (every entry is `*.ted.post`) | HIGH |
+| Affected areas                  | 23 areas (map016 and above); absent in map001–map015 | HIGH |
+| Read by runtime                 | No                | HIGH (runtime reads only `.ted`; corroborated by the loader analysis behind §3.2) |
+
+**Known unknowns (sidecar):**
+
+- **Content divergence:** every sampled `.post` is byte-for-byte identical to its companion `.ted`,
+  so it is UNVERIFIED whether any `.post` in this VFS snapshot ever holds different terrain data
+  (the editor may copy then patch, or the snapshot predates any edit). This does not affect the
+  format verdict — the layout is identical regardless.
+- **Editor save protocol** (write-then-rename vs. staging copy) is not recoverable from VFS content
+  alone; the "post" = post-edit naming is a reasonable inference, marked UNVERIFIED.
 
 ---
 
@@ -553,6 +637,9 @@ The `.bud` blob is the binary payload referenced by `DATAFILE` inside a `BUILDIN
 contains a variable-count list of mesh objects, each consisting of a vertex array and an index
 list. The name "BUD" likely abbreviates "BUilDing" (the symbol prefix for all related
 loader functions uses this three-letter prefix). There is no file-level magic or version field.
+
+An authoring sidecar named `*.bud.pre` is a full standalone `.bud` file in this same layout but is
+never read by the runtime — see §16.
 
 ### 8.1 Top-level layout
 
@@ -640,6 +727,9 @@ samples; behaviour for non-planar triangles is unknown.
 Each FX section (`FX1`–`FX7`) has its own DATAFILE blob with the corresponding extension
 (`.fx1`–`.fx7`). All blobs share a common outer structure, but the header size and vertex record
 stride depend on a `typeId` field within the header.
+
+Authoring sidecars named `*.fx<N>.pre` are full standalone files in their corresponding base
+`.fx<N>` format but are never read by the runtime — see §16 and `terrain_layers.md`.
 
 ### 10.1 Common outer structure
 
@@ -734,7 +824,12 @@ encodes per-cell 2D collision geometry in the XZ world-space plane. All multi-by
 little-endian. There is no file-level magic or version prefix.
 
 The format is **strictly 2D**: collision testing is performed in the XZ plane; there is no Y
-(height) component in the geometry.
+(height) component in the geometry. The runtime resolves containment purely from the explicit
+corner geometry via a ray-parity point-in-polygon test (with AABB broad-phase) — it never lifts
+any per-quad scalar into a 3D plane test (see §11.3 correction).
+
+An authoring sidecar named `*.sod.pre` exists but is **never read by the runtime** and does **not**
+share this 108-byte/48-byte runtime layout — see §16 and `terrain_layers.md`.
 
 ### 11.1 Top-level layout
 
@@ -787,38 +882,50 @@ exactly.
 > slope-intercept *line segment* (`slope`/`intercept`/`lineKind` fields). Direct inspection of the
 > sample bytes shows that interpretation was wrong: the first 32 bytes are **four explicit XZ
 > corner points** that form a closed quad whose extents reproduce the parent `SolidRecord` AABB
-> exactly. The corner layout below supersedes the line-segment reading. The four trailing scalars
-> at +032..+047 remain only partly understood.
+> exactly. The corner layout below supersedes the line-segment reading.
+>
+> **Correction (2026-06-14, CAMPAIGN VFS-DEEP):** the four trailing scalars at +032..+047 are
+> **NOT a plane equation** and **NOT a normal-plus-distance pair** — that hypothesis is REFUTED by
+> both a consumer census (no runtime routine reads this region) and value-shape inspection (values
+> are orders of magnitude outside any unit-normal range; the layout is `nonzero, 0, nonzero, 0`,
+> at most a 2-value pair). They are a **dead 2D edge-line cache** (a slope-like coefficient and an
+> intercept-like term for one quad edge), authored at build time and **never read at runtime**. The
+> fields are re-labelled `edge_slope / edge_pad0 / edge_intercept / edge_pad1` below.
 
 Each record stores one 2D collision quad in the XZ world-space plane as four corner points,
-followed by four scalars. There is no Y (height) component — collision is evaluated in XZ at the
-solid's elevation. The engine names the count field "triangle count" and may split each quad into
-two triangles at runtime; the split diagonal is not determined from the available code.
+followed by four unused authoring scalars. There is no Y (height) component — collision is
+evaluated in XZ at the solid's elevation. The runtime reconstructs all containment it needs from
+the four corner points (ray-parity point-in-polygon); the trailing scalars are disregarded.
 
-| Offset | Size | Type  | Field    | Notes                                                                          | Confidence |
-|-------:|-----:|-------|----------|--------------------------------------------------------------------------------|------------|
-| +000   | 4    | f32le | `x0`     | Corner 0 world X                                                                | VERIFIED   |
-| +004   | 4    | f32le | `z0`     | Corner 0 world Z                                                                | VERIFIED   |
-| +008   | 4    | f32le | `x1`     | Corner 1 world X                                                                | VERIFIED   |
-| +012   | 4    | f32le | `z1`     | Corner 1 world Z                                                                | VERIFIED   |
-| +016   | 4    | f32le | `x2`     | Corner 2 world X                                                                | VERIFIED   |
-| +020   | 4    | f32le | `z2`     | Corner 2 world Z                                                                | VERIFIED   |
-| +024   | 4    | f32le | `x3`     | Corner 3 world X                                                                | VERIFIED   |
-| +028   | 4    | f32le | `z3`     | Corner 3 world Z                                                                | VERIFIED   |
-| +032   | 4    | f32le | `plane0` | Trailing scalar 0. Non-zero and varies between quads; candidate: a plane-equation coefficient or a Y surface height. Sample magnitude is in the tens (e.g. ≈ −27) | PARTIAL |
-| +036   | 4    | f32le | `plane1` | Trailing scalar 1. `0.0` in every sampled quad | PARTIAL |
-| +040   | 4    | f32le | `plane2` | Trailing scalar 2. Non-zero, large magnitude (e.g. in the thousands); candidate: the other plane coefficient or a plane-distance term | PARTIAL |
-| +044   | 4    | f32le | `plane3` | Trailing scalar 3. `0.0` in every sampled quad | PARTIAL |
+| Offset | Size | Type  | Field            | Notes                                                                          | Confidence |
+|-------:|-----:|-------|------------------|--------------------------------------------------------------------------------|------------|
+| +000   | 4    | f32le | `x0`             | Corner 0 world X                                                                | VERIFIED   |
+| +004   | 4    | f32le | `z0`             | Corner 0 world Z                                                                | VERIFIED   |
+| +008   | 4    | f32le | `x1`             | Corner 1 world X                                                                | VERIFIED   |
+| +012   | 4    | f32le | `z1`             | Corner 1 world Z                                                                | VERIFIED   |
+| +016   | 4    | f32le | `x2`             | Corner 2 world X                                                                | VERIFIED   |
+| +020   | 4    | f32le | `z2`             | Corner 2 world Z                                                                | VERIFIED   |
+| +024   | 4    | f32le | `x3`             | Corner 3 world X                                                                | VERIFIED   |
+| +028   | 4    | f32le | `z3`             | Corner 3 world Z                                                                | VERIFIED   |
+| +032   | 4    | f32le | `edge_slope`     | Dead authoring residue: slope-like coefficient of a precomputed 2D edge line. NOT a plane coefficient. Never read by any runtime routine; a parser should skip it | VERIFIED (not read) / MODERATE (slope reading) |
+| +036   | 4    | f32le | `edge_pad0`      | Always `0.0` in every sampled quad; unused lane                                 | VERIFIED   |
+| +040   | 4    | f32le | `edge_intercept` | Dead authoring residue: intercept-like term of the same 2D edge line. NOT a plane-distance term. Never read by any runtime routine; a parser should skip it | VERIFIED (not read) / MODERATE (intercept reading) |
+| +044   | 4    | f32le | `edge_pad1`      | Always `0.0` in every sampled quad; unused lane                                 | VERIFIED   |
 
 **Corner verification:** the four XZ corners of each sampled quad form a geometrically valid
 rectangle whose min/max X and Z equal the owning `SolidRecord` AABB to within float rounding. This
 was confirmed for all four quads of the 4-quad sample cell and all three quads of the 3-quad sample
 cell — the corners are unambiguously world-space XZ positions, not line-equation parameters.
 
-**Trailing scalars (+032..+047):** the alternating non-zero / zero pattern (`plane0`, `0`,
-`plane2`, `0`) is consistent with a packed plane representation such as `(a, b, c, d)` for a
-`a·x + b·z = d` style edge plane, or with a `(normal, distance)` pair, but the exact meaning is
-not yet pinned to a runtime read. Treat +032..+047 as PARTIAL.
+**Trailing scalars (+032..+047) — dead edge-line cache:** the alternating `nonzero, 0, nonzero, 0`
+layout is a precomputed 2D edge line (a `z = m·x + c`-style parameterisation of one quad edge),
+left over from the authoring/export step. **No runtime collision or quadtree routine reads any of
+these four scalars** — the maximum offset any of them touches inside a QuadRecord is +028 (the last
+corner). A plane-equation interpretation would require a signed-distance read of this region, and
+no such read exists. The values are also far outside unit-normal range, ruling out a packed normal.
+Treat +032..+047 as **disregarded authoring residue**: a parser allocates the 48-byte stride but
+ignores these four floats. Confidence: HIGH that it is not a plane equation; MODERATE on the exact
+slope/intercept reading (the value shape fits; no runtime read ties it down).
 
 **Terminology note:** the game code calls these records "triangles" (count field "triCount"). The
 on-disk record is a four-corner XZ quad; this spec uses "quad" to avoid confusion with 3D triangle
@@ -833,9 +940,11 @@ is chosen — is not confirmed.
 - `SolidRecord` byte +064 (`_authoring_ptr`): identified as a stale authoring-machine heap pointer
   (overwritten at load); it carries no portable file meaning, but its 4-byte slot must still be
   skipped by a parser.
-- `QuadRecord` trailing scalars +032..+047 (`plane0..plane3`): the alternating non-zero / zero
-  pattern suggests a packed plane equation or a normal-plus-distance pair, but no runtime read has
-  been tied to a concrete interpretation. Needed to support exact (non-AABB) collision response.
+- `QuadRecord` trailing scalars +032..+047 (`edge_slope`/`edge_pad0`/`edge_intercept`/`edge_pad1`):
+  RESOLVED that they are a **dead 2D edge-line cache, not a plane equation**, and are never read at
+  runtime (§11.3). Only the exact authoring formula behind the slope/intercept pair (which edge it
+  parameterises, sign convention) remains open — not recoverable from the runtime because the
+  runtime never reads it, and not required to reproduce collision (use the corners).
 - `QuadRecord` quad-to-triangle split: whether the runtime tests the four-corner quad directly or
   splits it into two triangles, and which diagonal it picks, is unknown.
 - All available samples have `solidCount = 1`. Behaviour with multiple solids per cell is
@@ -942,7 +1051,7 @@ The following items remain unverified and represent the highest-risk unknowns fo
 
 4. **`.ted` block 5 alpha and 2× encoding:** Alpha byte RESOLVED — it is 4-byte alignment padding,
    always 0, never read (§5.8). The 2× store / 0.5× load scaling is code-confirmed; it stays
-   sample-unverified because all samples are uniform white. A tinted tile would close the loop.
+   sample-unverified until a tinted tile is captured.
 
 5. **`.bud` vertex bytes 12–31:** The five f32le values per vertex beyond XYZ are unconfirmed.
 
@@ -952,9 +1061,10 @@ The following items remain unverified and represent the highest-risk unknowns fo
 7. **`.sod` `SolidRecord` bytes +016..+059:** Always zero in single-solid samples; purpose may
    become apparent in files with `solidCount > 1`.
 
-8. **`.sod` `QuadRecord` trailing scalars (+032..+047):** RESOLVED that the first 32 bytes are
-   four XZ corners (§11.3); the four trailing scalars (`plane0..plane3`) still need a runtime read
-   tied to them before exact (non-AABB) collision can be reproduced.
+8. **`.sod` `QuadRecord` trailing scalars (+032..+047):** RESOLVED — they are a **dead 2D edge-line
+   cache, not a plane equation**, and are never read at runtime (§11.3). Collision is reproduced
+   from the four explicit corners; the exact authoring formula behind the slope/intercept pair is
+   out of scope (the original editor is not in the binary).
 
 9. **`.gad` format:** Loader is a no-op stub; purpose and format entirely unknown.
 
@@ -967,6 +1077,81 @@ The following items remain unverified and represent the highest-risk unknowns fo
 ## 15. Cross-references
 
 - **Related formats:** `Docs/RE/formats/pak.md` (VFS container that delivers all per-cell files),
-  `Docs/RE/formats/mesh.md` (building mesh blobs referenced by BUILDING sections)
+  `Docs/RE/formats/mesh.md` (building mesh blobs referenced by BUILDING sections),
+  `Docs/RE/formats/terrain_layers.md` (per-cell overlay/lighting sidecars: `.fx<N>`, `.up`, `.exd`,
+  `.sod.pre`, `.ted.post`, plus the `.fx<N>.pre` note)
 - **Glossary:** `Docs/RE/names.yaml`
 - **Provenance:** `Docs/RE/journal.md`
+
+---
+
+## 16. Authoring/editor sidecars — `.pre` and `.post` families (runtime never parses)
+
+This section consolidates the two per-cell file families that exist in the VFS purely as
+**authoring / content-pipeline / editor sidecars**. **The shipped runtime client never opens
+either family**, so `Assets.Parsers` needs **no parser** for them. They are documented for
+preservation and tooling only.
+
+> A standalone consolidated index of both families — with the deep-pass `.sod.pre` lean
+> multi-polygon layout (848 files) and the `.fx<N>.pre` extended-record findings — lives in
+> `Docs/RE/formats/authoring_sidecars.md`. Cite that file when documenting why a `.pre`/`.post`
+> extension is skipped.
+
+The decisive evidence is the same for both: the `.map` `DATAFILE` line always names a **base**
+extension (§3.2), the literal strings `.pre` and `.post` do not drive any runtime load path, and
+the VFS open router does no extension rewriting / fallback / base-pre-post selection. The runtime
+load path therefore always resolves to the base asset, never to a sidecar.
+
+### 16.1 `.post` family — full drop-in `.ted` (editor workspace copy)
+
+Covered in detail in §5.10. Summary: `*.ted.post` is a byte-identical 46 987-byte `.ted` written
+by the in-game terrain editor; 852 instances in the VFS, all the same fixed size; runtime never
+reads it. Confidence: HIGH.
+
+### 16.2 `.pre` family — full standalone files in their base format
+
+A `.pre` file is a **complete, self-contained copy of an asset in the same on-disk format as the
+base extension named before `.pre`** — for example a `*.bud.pre` is a complete `.bud`, a
+`*.sod.pre` is a `.sod`-family file, a `*.fx<N>.pre` is a complete `.fx<N>`. It holds a different
+*version* of the same scene/object set (e.g. vertex coordinates nudged), parsed start-to-finish by
+the same sequential count-prefixed reader as the base format. **There is no offset+length+
+replacement-byte patch grammar — `.pre` is a full file, not a delta.** It appears to be a
+pre-processed / source capture kept beside the shipped base file during the build pipeline.
+
+**Confidence: HIGH** that `.pre` is a full standalone file the runtime never consumes (the literal
+`.pre` is absent from the binary; no routine constructs or opens a `.pre` filename; the `.map`
+references base extensions only; a sampled `.bud.pre` shares the base `.bud` header and record
+layout, differing only slightly in float values — a re-saved variant, not a patch).
+
+**VFS census (full mount, 43 347 entries):** 2 014 `.pre` files by embedded base extension —
+`.sod` 848, `.bud` 757, `.fx2` 170, `.fx1` 127, `.fx3` 82, `.fx5` 29, `.fx7` 1 (no `.fx4`/`.fx6`
+`.pre` observed). Sizes range from tiny (a 40-byte `.sod.pre`, a 195-byte `.bud.pre`) to 800 KB+,
+consistent with full files of varying content, not fixed-size patch headers. No compression or
+encryption; raw little-endian, identical in shape to the base format.
+
+| Sidecar           | Internal layout                                                                 | Confidence |
+|-------------------|---------------------------------------------------------------------------------|------------|
+| `*.bud.pre`       | Full `.bud` (see §8): `u32 objectCount` then packed MassObject records          | HIGH (sample header/first-record match base `.bud`) |
+| `*.fx<N>.pre`     | Full `.fx<N>` (see §10 and `terrain_layers.md`); not byte-inspected this pass    | UNVERIFIED (expected full base format) |
+| `*.sod.pre`       | **Does NOT match the runtime `.sod` 108/48-byte layout** — see nuance below      | SAMPLE-only / NOT runtime-parsed |
+
+**`.sod.pre` nuance (flagged):** the inspected `.sod.pre` sample does **not** use the runtime
+`.sod` 108-byte SolidRecord + 48-byte QuadRecord layout of §11. A 40-byte sample reads as
+`u32 = 1`, `u32 = 4`, then four XZ float pairs — a single 4-vertex polygon, i.e. a leaner
+polygon-list representation. Two readings, both consistent with the verdict: (a) `.sod.pre` is a
+*source* polygon list the build step expands into the shipped 108-byte-record `.sod`, or (b) an
+older/alternate `.sod` schema. Either way it is a **full standalone file, not a patch**, and since
+the runtime never opens `.pre`, this representation difference does not affect the shipped client.
+The `.sod.pre` internal layout is marked **SAMPLE-only / NOT runtime-parsed**; do not implement a
+runtime reader for it. (The detailed `.sod.pre` field table lives in `terrain_layers.md` §4.)
+
+**Engineering takeaway:** neither `.pre` nor `.post` requires a runtime parser. An engineer wiring
+`Assets.Parsers` resolves every per-cell asset through the base extension named in the `.map`
+`DATAFILE` line and ignores `.pre`/`.post` entirely. Cite `// spec: Docs/RE/formats/terrain.md`
+(§16) when documenting why these extensions are skipped.
+
+**Known unknowns (`.pre`):** the exact authoring-pipeline semantics (is `.pre` the source the build
+consumes, or a backup of a prior version?) is not recoverable from the client binary (the producer
+is a content tool not present in it); `.fx<N>.pre` internal bytes were not dumped this pass
+(expected full base format); the `.sod.pre` lean-polygon layout vs. runtime `.sod` (whether source
+or older schema) is SAMPLE-only.

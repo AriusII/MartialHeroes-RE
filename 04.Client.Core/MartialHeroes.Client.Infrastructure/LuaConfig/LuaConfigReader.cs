@@ -22,10 +22,12 @@ namespace MartialHeroes.Client.Infrastructure.LuaConfig;
 /// </para>
 ///
 /// <para>
-/// <b>Encoding (N-B4-2):</b> string globals are decoded as UTF-8 (code page 65001),
-/// NOT CP949.  This is a load-bearing per-path exception to the project-wide CP949
-/// default.
-/// spec: Docs/RE/specs/lua-config.md §5.2
+/// <b>Encoding:</b> the shipped <c>.lua</c> source files (<c>config.lua</c>,
+/// <c>display.lua</c>, <c>uiconfig.lua</c> and siblings) are <b>CP949 (code page 949,
+/// EUC-KR)</b>, NOT UTF-8.  The prior UTF-8 claim ("N-B4-2") has been superseded by
+/// direct byte-inspection of the real shipped files.  This reader registers the CP949
+/// provider once and decodes every file as CP949.
+/// spec: Docs/RE/specs/lua-config.md §0 (encoding correction, LOAD-BEARING), §7
 /// </para>
 ///
 /// <para>
@@ -59,10 +61,10 @@ public sealed partial class LuaConfigReader
     /// defaults.
     /// </summary>
     /// <param name="luaSource">
-    /// The UTF-8 decoded text of the Lua config script.
+    /// The CP949-decoded text of the Lua config script.
     /// The caller is responsible for reading the file (from VFS or loose disk,
-    /// per the <c>vfsmode</c> flag) and decoding it as UTF-8.
-    /// spec: Docs/RE/specs/lua-config.md §2.2, §5.2 (N-B4-2)
+    /// per the <c>vfsmode</c> flag) and decoding it as CP949 (code page 949).
+    /// spec: Docs/RE/specs/lua-config.md §0 (encoding correction), §2.2
     /// </param>
     /// <returns>
     /// A fully-populated, immutable <see cref="LuaConfigRecord"/>.
@@ -97,14 +99,15 @@ public sealed partial class LuaConfigReader
             DisplayGlowBrightMulti = ReadFloat(globals, "DISPLAY_GLOW_BRIGHT_MULTI", defaultValue: 1.0f),
             DisplayLightRatio = ReadFloat(globals, "DISPLAY_LIGHT_RATIO", defaultValue: 1.0f),
 
-            // spec: Docs/RE/specs/lua-config.md §4 — string global, UTF-8 per N-B4-2
+            // spec: Docs/RE/specs/lua-config.md §4 — string global; file decoded as CP949 (§0)
             DisplayPowerShader = ReadString(globals, "DISPLAY_POWERSHADER", defaultValue: string.Empty),
         };
     }
 
     /// <summary>
-    /// Async overload: reads a config file from disk, decodes it as UTF-8
-    /// (spec: Docs/RE/specs/lua-config.md §5.2 N-B4-2), then calls <see cref="Parse"/>.
+    /// Async overload: reads a config file from disk, decodes it as CP949
+    /// (spec: Docs/RE/specs/lua-config.md §0 — shipped .lua files are CP949, NOT UTF-8),
+    /// then calls <see cref="Parse"/>.
     /// </summary>
     /// <param name="filePath">Absolute path to the <c>.lua</c> file on disk.</param>
     /// <param name="cancellationToken">Propagated to the async file read.</param>
@@ -115,8 +118,13 @@ public sealed partial class LuaConfigReader
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         try
         {
-            // spec: Docs/RE/specs/lua-config.md §5.2 (N-B4-2) — UTF-8 decode, NOT CP949
-            var text = await File.ReadAllTextAsync(filePath, Encoding.UTF8, cancellationToken);
+            // spec: Docs/RE/specs/lua-config.md §0 (LOAD-BEARING encoding correction) —
+            // the shipped .lua source files are CP949 (code page 949, EUC-KR), NOT UTF-8.
+            // RegisterProvider must be called once at app boot; we call it here defensively
+            // so the reader is self-contained in tests and headless contexts.
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            var cp949 = Encoding.GetEncoding(949); // spec: Docs/RE/specs/lua-config.md §0
+            var text = await File.ReadAllTextAsync(filePath, cp949, cancellationToken);
             return Parse(text);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -200,9 +208,9 @@ public sealed partial class LuaConfigReader
     /// <summary>
     /// Reads a global as a string.
     /// The raw Lua string literal is unwrapped from its surrounding quotes.
-    /// The text is already stored as UTF-8 (the caller decoded the file as UTF-8
-    /// per N-B4-2; no additional re-encoding is needed here).
-    /// spec: Docs/RE/specs/lua-config.md §4, §5.2 (N-B4-2)
+    /// The text is already a decoded .NET string (the caller decoded the file as CP949;
+    /// no additional re-encoding is needed here).
+    /// spec: Docs/RE/specs/lua-config.md §4, §0 (CP949 file encoding)
     /// </summary>
     private static string ReadString(
         Dictionary<string, string> globals,

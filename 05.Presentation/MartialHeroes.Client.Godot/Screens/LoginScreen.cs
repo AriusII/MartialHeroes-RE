@@ -92,6 +92,14 @@ public sealed partial class LoginScreen : Control
     private Label _toast = null!;
     private Control _quitModal = null!;
 
+    // Save-ID checkbox view state (item 2 — §1.6). Not domain state — purely presentational.
+    private bool _saveIdChecked;
+
+    // Dialog fade state (item 6 — §11.2g): current alpha [0..255] and target alpha.
+    // Alpha ramp ±64 per frame until target is reached. spec §11.2g. CODE-CONFIRMED.
+    private int _quitModalAlpha; // current modulated alpha [0..255]
+    private int _quitModalTarget; // 255 = showing, 0 = hiding
+
     private UiAssetLoader _assets = null!;
     private bool _ownsAssets;
 
@@ -107,13 +115,27 @@ public sealed partial class LoginScreen : Control
         _assets = SharedAssets ?? UiAssetLoader.Open();
         _ownsAssets = SharedAssets is null;
 
+        // Load saved id BEFORE building UI so BuildUi can pre-fill and set default focus.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.6 — DoOption.ini [DO_OPTION] OPTION_ID. CODE-CONFIRMED.
+        string savedId = LoadSavedId();
+
         try
         {
-            BuildUi();
+            BuildUi(savedId);
         }
         catch (Exception ex)
         {
             GD.PrintErr($"[LoginScreen] Build failed: {ex.Message}");
+        }
+
+        // Default focus: ID box when no saved id, PW box when id is pre-filled.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2e "Default input focus". CODE-CONFIRMED.
+        if (_accountEdit is not null && _passwordEdit is not null)
+        {
+            if (string.IsNullOrEmpty(savedId))
+                _accountEdit.CallDeferred(Control.MethodName.GrabFocus);
+            else
+                _passwordEdit.CallDeferred(Control.MethodName.GrabFocus);
         }
     }
 
@@ -122,11 +144,68 @@ public sealed partial class LoginScreen : Control
         if (_ownsAssets) _assets?.Dispose();
     }
 
+    /// <summary>
+    /// Keyboard shortcuts for the login form.
+    /// Enter = login (same as OK button press). Tab = swap focus ID ↔ PW.
+    /// spec: Docs/RE/specs/frontend_scenes.md §1.1 / §1.2 "id 9 = swap focus; id 10 = Enter = Login".
+    /// CODE-CONFIRMED.
+    /// </summary>
+    public override void _UnhandledInput(InputEvent @event)
+    {
+        if (@event is not InputEventKey key || !key.Pressed) return;
+
+        // Enter key → same as OK/Login button. spec §1.2 "id 10 = Enter on form page". CODE-CONFIRMED.
+        if (key.PhysicalKeycode == Key.Enter || key.PhysicalKeycode == Key.KpEnter)
+        {
+            GetViewport().SetInputAsHandled();
+            OnOkPressed();
+            return;
+        }
+
+        // Tab → swap focus ID ↔ PW (mutually exclusive). spec §1.1 "id 9 = swap focused textbox". CODE-CONFIRMED.
+        if (key.PhysicalKeycode == Key.Tab)
+        {
+            GetViewport().SetInputAsHandled();
+            if (_accountEdit.HasFocus())
+                _passwordEdit.GrabFocus();
+            else
+                _accountEdit.GrabFocus();
+        }
+    }
+
+    /// <summary>
+    /// Per-frame: advance dialog alpha ramps.
+    /// spec: Docs/RE/specs/frontend_scenes.md §11.2g — ±64 alpha per frame toward 255/0. CODE-CONFIRMED.
+    /// </summary>
+    public override void _Process(double delta)
+    {
+        if (_quitModal is null) return;
+
+        if (_quitModalAlpha != _quitModalTarget)
+        {
+            // Ramp ±64 per frame, clamped [0,255]. spec §11.2g. CODE-CONFIRMED.
+            int step = LoginLayout.DialogFadeStep;
+            if (_quitModalTarget > _quitModalAlpha)
+                _quitModalAlpha = Math.Min(_quitModalAlpha + step, LoginLayout.DialogAlphaVisible);
+            else
+                _quitModalAlpha = Math.Max(_quitModalAlpha - step, LoginLayout.DialogAlphaHidden);
+
+            float a = _quitModalAlpha / 255f;
+            _quitModal.Modulate = new Color(1f, 1f, 1f, a);
+
+            // Make visible as soon as ramp starts showing; hide once fully transparent.
+            if (_quitModalAlpha > 0 && !_quitModal.Visible)
+                _quitModal.Visible = true;
+            else if (_quitModalAlpha == 0 && _quitModal.Visible)
+                _quitModal.Visible = false;
+        }
+    }
+
     // -------------------------------------------------------------------------
     // UI construction — §11.2 layer-by-layer.
     // -------------------------------------------------------------------------
 
-    private void BuildUi()
+    private void BuildUi(string savedId = "")
     {
         // Fill the reference 1024×768 canvas. ScreenHost scales us to the window.
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
@@ -452,19 +531,42 @@ public sealed partial class LoginScreen : Control
 
         // =======================================================================
         // [L9] ID and PW text-entry fields (§11.2e).
-        // ID field:  A@(390,32,102,13) src(615,404), max 16, action 109.
-        // PW field:  A@(568,32,102,13) src(615,404), max 12, masked, action 110.
-        // spec §11.2e. CODE-CONFIRMED positions and max-lengths.
+        // ID field:  dest(390,32,102,13); frame src = login_slice1.dds (A) at (615,404). max 16, action 109.
+        // PW field:  dest(568,32,102,13); frame src = login_slice1.dds (A) at (615,404). max 12, masked, action 110.
+        //
+        // ATLAS CORRECTION (§11.2e IDA pass 2026-06-14):
+        //   Both edit-field frames sample the SAME source rect in atlas A (login_slice1.dds)
+        //   at src(615,404,102,13). The (390,32)/(568,32) numbers are DEST canvas positions.
+        //   AtlasLoginWindow (B/loginwindow.dds) is NOT the source for these frames.
+        //   spec: Docs/RE/specs/frontend_scenes.md §11.2e "Atlas note for the edit fields". CODE-CONFIRMED.
         //
         // NOTE: The spec DDS frame height is 13px — too small for a usable Godot LineEdit.
         // We keep the spec X/Y position and width (102) exact; height is expanded to 22px.
         // The legacy client drew text ON TOP of the atlas frame at the font height, not
         // clipped inside a 13px box. Our LineEdit approach is the closest Godot equivalent.
         // =======================================================================
+
+        // Draw the edit-field frame sprites (from atlas A / login_slice1.dds). §11.2e atlas correction.
+        // Both frames share src(615,404,102,13) in login_slice1.dds. spec §11.2e. CODE-CONFIRMED.
+        AddAtlasSprite(bottomBand, "AccountFrameArt",
+            LoginLayout.EditFieldFrameAtlas,
+            LoginLayout.EditFieldFrameSrcX, LoginLayout.EditFieldFrameSrcY,
+            LoginLayout.AccountBox.X, LoginLayout.AccountBox.Y,
+            LoginLayout.EditFieldFrameW, LoginLayout.EditFieldFrameH);
+
+        AddAtlasSprite(bottomBand, "PasswordFrameArt",
+            LoginLayout.EditFieldFrameAtlas,
+            LoginLayout.EditFieldFrameSrcX, LoginLayout.EditFieldFrameSrcY,
+            LoginLayout.PasswordBox.X, LoginLayout.PasswordBox.Y,
+            LoginLayout.EditFieldFrameW, LoginLayout.EditFieldFrameH);
+
         _accountEdit = MakeTextbox(masked: false, maxLen: LoginLayout.IdMaxLength);
         _accountEdit.Name = "AccountEdit";
         _accountEdit.Position = new Vector2(LoginLayout.AccountBox.X, LoginLayout.AccountBox.Y);
         _accountEdit.Size = new Vector2(LoginLayout.AccountBox.W, LoginLayout.TextboxRenderH);
+        // Pre-fill if a saved id is available. spec §1.6 / §11.2e "Default input focus". CODE-CONFIRMED.
+        if (!string.IsNullOrEmpty(savedId))
+            _accountEdit.Text = savedId;
         bottomBand.AddChild(_accountEdit);
         widgetCount++;
 
@@ -472,6 +574,8 @@ public sealed partial class LoginScreen : Control
         _passwordEdit.Name = "PasswordEdit";
         _passwordEdit.Position = new Vector2(LoginLayout.PasswordBox.X, LoginLayout.PasswordBox.Y);
         _passwordEdit.Size = new Vector2(LoginLayout.PasswordBox.W, LoginLayout.TextboxRenderH);
+        // Password mask character — ASCII '*', not the default Godot bullet. spec §11.2e. CODE-CONFIRMED.
+        _passwordEdit.SecretCharacter = "*";
         bottomBand.AddChild(_passwordEdit);
         widgetCount++;
 
@@ -490,6 +594,10 @@ public sealed partial class LoginScreen : Control
             LoginLayout.ActionSaveId,
             caption: "", captionTint: Colors.White);
         saveIdBtn.Name = "SaveIdCheckbox";
+        // Initialise checkbox visual state from persistent save (pre-check if we have a saved id).
+        // spec §1.6. CODE-CONFIRMED.
+        _saveIdChecked = !string.IsNullOrEmpty(savedId);
+        saveIdBtn.ActionFired += _ => OnSaveIdToggled(); // wire toggle. spec §1.6.
         bottomBand.AddChild(saveIdBtn);
         widgetCount++;
 
@@ -536,7 +644,10 @@ public sealed partial class LoginScreen : Control
         // spec §11.2d. CODE-CONFIRMED.
         // =======================================================================
         _quitModal = BuildQuitConfirmModal();
-        _quitModal.Visible = false;
+        _quitModal.Visible = false; // starts hidden; shown via alpha ramp in _Process. spec §11.2g.
+        _quitModal.Modulate = new Color(1f, 1f, 1f, 0f); // start fully transparent
+        _quitModalAlpha = LoginLayout.DialogAlphaHidden;
+        _quitModalTarget = LoginLayout.DialogAlphaHidden;
         AddChild(_quitModal); // added to root so it overlays everything
         widgetCount++;
 
@@ -659,10 +770,34 @@ public sealed partial class LoginScreen : Control
 
     private void OnOkPressed()
     {
-        // Local credential validation. spec §1.4. CODE-CONFIRMED.
+        // Local credential validation sequence. spec §1.4. CODE-CONFIRMED.
         _toast.Text = "";
 
+        // ===================================================================
+        // STEP 1 — game.ver version gate (runs FIRST, before ID/PW checks).
+        // spec: Docs/RE/specs/frontend_scenes.md §1.4 "Version gate (local, runs first)".
+        // CODE-CONFIRMED: mismatch → msg 2204 → abort login.
+        //
+        // In the offline/dev flow, the VFS comparison is stubbed as always-equal so the
+        // gate passes. The abort path is wired for when VFS is mounted and versions differ.
+        // ===================================================================
+        if (!CheckGameVersion())
+        {
+            // Version mismatch — show msg 2204 and abort. spec §1.4 / §1.8. CODE-CONFIRMED.
+            _toast.Text = _assets.Text(LoginLayout.MsgVersionMismatch,
+                "Client version mismatch. Please update your client.");
+            GD.Print("[LoginScreen] Version gate: game.ver mismatch (msg 2204). Aborting login.");
+            return;
+        }
+
         string account = _accountEdit.Text.Trim();
+
+        // ===================================================================
+        // STEP 2 — Persist Save-ID if checkbox is checked (before validation).
+        // spec §1.4 step 2 "Persist Save-ID if the checkbox is set (§1.6)". CODE-CONFIRMED.
+        // ===================================================================
+        if (_saveIdChecked && !string.IsNullOrEmpty(account))
+            PersistSavedId(account);
 
         // spec §1.4: "ID length < 4 → msg 4025 → return to sub-state 6". CODE-CONFIRMED.
         if (account.Length < LoginLayout.MinIdLength)
@@ -686,6 +821,68 @@ public sealed partial class LoginScreen : Control
         EmitSignal(SignalName.LoginAccepted, account);
     }
 
+    // -------------------------------------------------------------------------
+    // game.ver version gate helper (§1.4). Stubbed as always-equal in dev/offline flow.
+    // spec: Docs/RE/specs/frontend_scenes.md §1.4 "Version gate". CODE-CONFIRMED.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Compares VFS game.ver against on-disk game.ver.
+    /// Returns true when they match (or VFS is unavailable).
+    /// Returns false on mismatch — caller must show msg 2204 and abort.
+    /// spec: Docs/RE/specs/frontend_scenes.md §1.4. CODE-CONFIRMED gate; stub = always true.
+    /// </summary>
+    private bool CheckGameVersion()
+    {
+        // Offline/dev stub: always pass.
+        // When VFS is mounted: read data/cursor/game.ver from VFS and compare to local on-disk file.
+        // On mismatch → return false so the caller shows msg 2204 and aborts. spec §1.4. CODE-CONFIRMED.
+        // TODO (VFS online): _assets.ReadVfsText("data/cursor/game.ver") vs FileAccess.ReadFileAsString("game.ver").
+        return true; // stub: treat as equal. spec §1.4 "match or VFS not mounted → continue". CODE-CONFIRMED.
+    }
+
+    // -------------------------------------------------------------------------
+    // Save-ID persistence helpers (§1.6). Layer-05 Godot ConfigFile.
+    // Equivalent of DoOption.ini [DO_OPTION] OPTION_ID.
+    // spec: Docs/RE/specs/frontend_scenes.md §1.6. CODE-CONFIRMED.
+    // -------------------------------------------------------------------------
+
+    private static string LoadSavedId()
+    {
+        // Load from Godot ConfigFile at user://mh_options.cfg.
+        // Section [DO_OPTION], key OPTION_ID. spec §1.6. CODE-CONFIRMED.
+        var cfg = new ConfigFile();
+        if (cfg.Load(LoginLayout.SaveIdConfigPath) != Error.Ok)
+            return string.Empty;
+
+        string raw = (string)cfg.GetValue(
+            LoginLayout.SaveIdSection, LoginLayout.SaveIdKey,
+            LoginLayout.SaveIdNullSentinel);
+
+        // Spec §1.6: the "(null)" sentinel means no id is saved.
+        return raw == LoginLayout.SaveIdNullSentinel ? string.Empty : raw;
+    }
+
+    private static void PersistSavedId(string account)
+    {
+        // Write id to Godot ConfigFile. spec §1.6. CODE-CONFIRMED.
+        var cfg = new ConfigFile();
+        cfg.Load(LoginLayout.SaveIdConfigPath); // load existing (ignore if missing)
+        cfg.SetValue(LoginLayout.SaveIdSection, LoginLayout.SaveIdKey, account);
+        cfg.Save(LoginLayout.SaveIdConfigPath);
+        GD.Print($"[LoginScreen] Save-ID: persisted account='{account}'.");
+    }
+
+    private static void ClearSavedId()
+    {
+        // Clearing = write the "(null)" sentinel. spec §1.6. CODE-CONFIRMED.
+        var cfg = new ConfigFile();
+        cfg.Load(LoginLayout.SaveIdConfigPath);
+        cfg.SetValue(LoginLayout.SaveIdSection, LoginLayout.SaveIdKey, LoginLayout.SaveIdNullSentinel);
+        cfg.Save(LoginLayout.SaveIdConfigPath);
+        GD.Print("[LoginScreen] Save-ID: cleared (wrote null sentinel).");
+    }
+
     private void OnServerListPressed()
     {
         // Server-list button (action 102) — open the server-select flow.
@@ -698,21 +895,44 @@ public sealed partial class LoginScreen : Control
     private void ShowQuitConfirmModal()
     {
         _toast.Text = "";
-        _quitModal.Visible = true;
-        GD.Print("[LoginScreen] Quit confirm modal shown.");
+        // Fade in via alpha ramp ±64/frame → 255. spec §11.2g. CODE-CONFIRMED.
+        _quitModalTarget = LoginLayout.DialogAlphaVisible;
+        _quitModal.Visible = true; // make visible immediately so ramp is visible
+        GD.Print("[LoginScreen] Quit confirm modal — fade in started.");
     }
 
     private void HideQuitConfirmModal()
     {
-        _quitModal.Visible = false;
+        // Fade out via alpha ramp ±64/frame → 0. spec §11.2g. CODE-CONFIRMED.
+        _quitModalTarget = LoginLayout.DialogAlphaHidden;
+        GD.Print("[LoginScreen] Quit confirm modal — fade out started.");
     }
 
     private void OnQuitConfirmed()
     {
         // spec §1.8 "Quit-confirm Yes → engine state 6 / substate 8". CODE-CONFIRMED.
         GD.Print("[LoginScreen] Quit confirmed (actions 113/114). Emitting QuitRequested.");
-        _quitModal.Visible = false;
+        _quitModalTarget = LoginLayout.DialogAlphaHidden; // begin fade out before quit
         EmitSignal(SignalName.QuitRequested);
+    }
+
+    private void OnSaveIdToggled()
+    {
+        // Toggle the save-id preference and persist / clear accordingly. spec §1.6. CODE-CONFIRMED.
+        _saveIdChecked = !_saveIdChecked;
+        if (_saveIdChecked)
+        {
+            // Persist the current account text (may be empty — will not overwrite with empty).
+            string account = _accountEdit?.Text.Trim() ?? "";
+            if (!string.IsNullOrEmpty(account))
+                PersistSavedId(account);
+        }
+        else
+        {
+            ClearSavedId();
+        }
+
+        GD.Print($"[LoginScreen] Save-ID toggled: saveIdChecked={_saveIdChecked}");
     }
 
     // -------------------------------------------------------------------------

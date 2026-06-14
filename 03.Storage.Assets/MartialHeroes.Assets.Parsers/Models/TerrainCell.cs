@@ -379,13 +379,18 @@ public sealed class SolidRecord
 
 /// <summary>
 /// One collision quad from a <c>.sod</c> file (48 bytes on disk).
-/// Stores four explicit XZ world-space corner points followed by four trailing scalars.
+/// Stores four explicit XZ world-space corner points followed by four dead authoring scalars.
+/// The runtime rebuilds all collision containment from the four corner points via a ray-parity
+/// point-in-polygon test. The trailing scalars (+032..+047) are never read at runtime.
 /// </summary>
 /// <remarks>
 /// spec: Docs/RE/formats/terrain.md §11.3 QuadRecord — 48 bytes: VERIFIED (first 32 bytes = four XZ corners).
 /// Correction note (2026-06-12): earlier spec read these as slope/intercept; corrected to four XZ corners.
+/// Correction note (2026-06-14): trailing scalars re-labelled as dead 2D edge-line cache (not a plane equation).
+/// The four trailing scalars (edge_slope, edge_pad0, edge_intercept, edge_pad1) are a precomputed
+/// 2D edge line authored at build time; NO runtime collision routine reads past offset +028 in a QuadRecord.
+/// spec: Docs/RE/formats/terrain.md §11.3 — trailing scalars +032..+047 VERIFIED NOT READ; re-labelled 2026-06-14.
 /// The engine code calls these "triangles"; each quad may be split at runtime into two triangles (diagonal UNVERIFIED).
-/// Trailing scalars +032..+047 (plane0..plane3): PARTIAL (pattern suggests a plane equation, meaning unconfirmed).
 /// </remarks>
 public sealed class CollisionQuad
 {
@@ -415,32 +420,42 @@ public sealed class CollisionQuad
     /// <summary>Corner 3 world Z. spec: §11.3 — z3 f32 @ +028: VERIFIED.</summary>
     public required float Z3 { get; init; }
 
-    // ── Trailing scalars +032..+047 (PARTIAL) ────────────────────────────────
+    // ── Dead 2D edge-line cache +032..+047 (VERIFIED NOT READ at runtime) ────
+    // These four scalars are a precomputed 2D edge line (slope + intercept for one quad edge)
+    // authored at build/export time. NO runtime collision or quadtree routine reads any of them —
+    // the maximum offset any runtime code touches inside a QuadRecord is +028 (the last corner Z).
+    // The runtime reconstructs all containment from the four explicit XZ corners via ray-parity PIP.
+    // A parser must allocate the full 48-byte stride but may ignore these four floats.
+    // spec: Docs/RE/formats/terrain.md §11.3 — edge_slope/edge_pad0/edge_intercept/edge_pad1: VERIFIED NOT READ.
+    // spec: Docs/RE/formats/terrain.md §11.3 Correction 2026-06-14: NOT a plane equation.
 
     /// <summary>
-    /// Trailing scalar 0 f32 @ +032. Non-zero and varies between quads; value ~−27 in samples.
-    /// Candidate: a plane-equation coefficient or Y surface height.
-    /// spec: Docs/RE/formats/terrain.md §11.3 — plane0 f32 @ +032: PARTIAL.
+    /// Dead authoring residue — slope-like coefficient of a precomputed 2D edge line f32 @ +032.
+    /// Never read by any runtime routine. Parser should skip.
+    /// spec: Docs/RE/formats/terrain.md §11.3 — edge_slope f32 @ +032: VERIFIED (not read) / MODERATE (slope reading).
     /// </summary>
-    public required float Plane0 { get; init; }
+    public required float EdgeSlope { get; init; }
 
     /// <summary>
-    /// Trailing scalar 1 f32 @ +036. Always 0.0 in every sampled quad.
-    /// spec: Docs/RE/formats/terrain.md §11.3 — plane1 f32 @ +036: PARTIAL.
+    /// Dead authoring residue — always 0.0 in every sampled quad f32 @ +036.
+    /// Unused lane in the 2D edge-line cache.
+    /// spec: Docs/RE/formats/terrain.md §11.3 — edge_pad0 f32 @ +036: VERIFIED.
     /// </summary>
-    public required float Plane1 { get; init; }
+    public required float EdgePad0 { get; init; }
 
     /// <summary>
-    /// Trailing scalar 2 f32 @ +040. Non-zero, large magnitude (thousands); varies between quads.
-    /// spec: Docs/RE/formats/terrain.md §11.3 — plane2 f32 @ +040: PARTIAL.
+    /// Dead authoring residue — intercept-like term of the same 2D edge line f32 @ +040.
+    /// Never read by any runtime routine. Parser should skip.
+    /// spec: Docs/RE/formats/terrain.md §11.3 — edge_intercept f32 @ +040: VERIFIED (not read) / MODERATE (intercept reading).
     /// </summary>
-    public required float Plane2 { get; init; }
+    public required float EdgeIntercept { get; init; }
 
     /// <summary>
-    /// Trailing scalar 3 f32 @ +044. Always 0.0 in every sampled quad.
-    /// spec: Docs/RE/formats/terrain.md §11.3 — plane3 f32 @ +044: PARTIAL.
+    /// Dead authoring residue — always 0.0 in every sampled quad f32 @ +044.
+    /// Unused lane in the 2D edge-line cache.
+    /// spec: Docs/RE/formats/terrain.md §11.3 — edge_pad1 f32 @ +044: VERIFIED.
     /// </summary>
-    public required float Plane3 { get; init; }
+    public required float EdgePad1 { get; init; }
 }
 
 /// <summary>

@@ -662,30 +662,30 @@ public sealed partial class BootFlow : Node
     /// </summary>
     private static IReadOnlyList<ServerEntry> BuildServerList()
     {
-        // Synthetic data that exercises all load tiers and the NEW badge.
+        // Synthetic data that exercises all load tiers, the NEW badge, and the status sentinels.
         // Entries are spec-shaped (server_id 1..40, status_code, load, open_time).
+        // IsNew is NO LONGER a constructor arg — derived at render time: server_id == NEW_SERVER_INDEX (5).
+        // spec: Docs/RE/specs/frontend_scenes.md §2.7. CODE-CONFIRMED.
         // spec: Docs/RE/specs/login_flow.md §2.1. CODE-CONFIRMED thresholds.
         return
         [
             // Light load (≤ 500). spec: login_flow.md §2.1 load threshold 500. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 1, DisplayName: "Jade Dragon", StatusCode: 1, Load: 120, OpenTime: 0,
-                IsNew: false),
+            new ServerEntry(ServerId: 1, DisplayName: "Jade Dragon", StatusCode: 1, Load: 120, OpenTime: 0),
             // Medium load (>500). spec: load threshold 500. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 2, DisplayName: "Iron Phoenix", StatusCode: 1, Load: 650, OpenTime: 0,
-                IsNew: false),
+            new ServerEntry(ServerId: 2, DisplayName: "Iron Phoenix", StatusCode: 1, Load: 650, OpenTime: 0),
             // High load (>800). spec: load threshold 800. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 3, DisplayName: "Azure Tiger", StatusCode: 1, Load: 980, OpenTime: 0,
-                IsNew: true),
+            // NOTE: ServerId 3 does NOT get the NEW badge; NEW_SERVER_INDEX=5 triggers it (§2.7).
+            new ServerEntry(ServerId: 3, DisplayName: "Azure Tiger", StatusCode: 1, Load: 980, OpenTime: 0),
             // Full load (>1200). spec: load threshold 1200. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 4, DisplayName: "Shadow Crane", StatusCode: 1, Load: 1450, OpenTime: 0,
-                IsNew: false),
-            // Scheduled open (status=3). spec: status sentinel 3. CODE-CONFIRMED.
-            // Load=10 → HH = "01"; open_time=30 → MM = "30" (HH:MM = "01:30").
-            new ServerEntry(ServerId: 5, DisplayName: "Thunder Snake", StatusCode: 3, Load: 10, OpenTime: 30,
-                IsNew: false),
-            // Preparing / under check (status=24). spec: sentinel 24. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 6, DisplayName: "Crimson Wolf", StatusCode: 24, Load: 0, OpenTime: 0,
-                IsNew: false),
+            new ServerEntry(ServerId: 4, DisplayName: "Shadow Crane", StatusCode: 1, Load: 1450, OpenTime: 0),
+            // Scheduled open with clock (status=3, open_time!=0). spec §2.3/§2.4. CODE-CONFIRMED.
+            // Load=10 → HH digits = (10/10=1, 10%10=0) → "10"; open_time=30 → MM digits = (30/10=3, 30%10=0) → "30".
+            // Display: "10:30". ServerId=5 = NEW_SERVER_INDEX → gets NEW badge. spec §2.7. CODE-CONFIRMED.
+            new ServerEntry(ServerId: 5, DisplayName: "Thunder Snake", StatusCode: 3, Load: 10, OpenTime: 30),
+            // Preparing / under check: status=3, open_time==0, load==24. spec §2.3. CODE-CONFIRMED.
+            // NOTE: 24 is a LOAD sentinel under status 3, NOT a top-level status code. spec §2.3.
+            // Previous synthetic had StatusCode:24 which was WRONG — corrected to StatusCode:3, Load:24.
+            new ServerEntry(ServerId: 6, DisplayName: "Crimson Wolf", StatusCode: 3, Load: 24, OpenTime: 0),
         ];
     }
 

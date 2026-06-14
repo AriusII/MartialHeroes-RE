@@ -1,19 +1,30 @@
+using System.Globalization;
 using System.Text;
 using MartialHeroes.Assets.Parsers.Models;
 
 namespace MartialHeroes.Assets.Parsers;
 
 /// <summary>
-/// Parser for <c>data/script/items.csv</c> — the plain-text item catalogue.
+/// Parser for <c>data/script/items.csv</c> — the flat comma-delimited item catalogue.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/config_tables.md §4 items.csv
+/// spec: Docs/RE/formats/items_csv.md
 /// <para>
-/// Format: CP949 encoding (no BOM), LF line endings, no header row, 139 columns per row.
-/// RFC 4180 quoting (description fields may contain commas and are double-quote quoted).
-/// <c>\\</c> inside field text represents an in-game newline.
-/// Total rows: 89,712 confirmed. Columns: 139 confirmed.
-/// spec: Docs/RE/formats/config_tables.md §4.1: CONFIRMED.
+/// Format: CP949 encoding (no BOM), LF-only line endings, no header row.
+/// HAZARD A — item_name (col 0) and item_description (col 2) are unquoted CP949 strings that
+/// may contain literal comma characters. A naive Split(',') corrupts column alignment.
+/// CORRECT rule: numeric-anchor field splitting (spec: Docs/RE/formats/items_csv.md §2.HAZARD-A).
+/// spec: Docs/RE/formats/items_csv.md §2 — Hazard A (embedded commas): CONFIRMED; CRITICAL.
+/// </para>
+/// <para>
+/// HAZARD B — at least one numeric column is a float (period decimal separator, invariant culture).
+/// A tokenizer that treats period as a separator inserts a phantom column for that row.
+/// CORRECT rule: parse numeric tail with InvariantCulture; treat tokens containing a period as float.
+/// spec: Docs/RE/formats/items_csv.md §2 — Hazard B (float column): CONFIRMED; HIGH.
+/// </para>
+/// <para>
+/// LF-only line endings: split on '\n'; trim trailing '\r' defensively.
+/// spec: Docs/RE/formats/items_csv.md §2 — Secondary note (LF-only): CONFIRMED; MEDIUM.
 /// </para>
 /// <para>
 /// ZERO rendering/engine dependencies.
@@ -21,19 +32,15 @@ namespace MartialHeroes.Assets.Parsers;
 /// </remarks>
 public static class ItemsCsvParser
 {
-    // Column count: 139 (0-based indices 0..138). CONFIRMED.
-    // spec: Docs/RE/formats/config_tables.md §4.1 — "Columns per row: 139 (fixed, 0-based 0..138)": CONFIRMED.
-    private const int ExpectedColumnCount = 139;
-
     /// <summary>
     /// Parses <c>data/script/items.csv</c> into an array of <see cref="ItemCsvRow"/> records.
     /// </summary>
-    /// <param name="data">Raw file bytes (CP949 encoding, LF line endings).</param>
-    /// <returns>Array of decoded item rows, one per CSV data row.</returns>
+    /// <param name="data">Raw file bytes (CP949 encoding, LF-only line endings).</param>
+    /// <returns>Array of decoded item rows, one per data line.</returns>
     /// <remarks>
-    /// CP949 encoding: CONFIRMED. LF line endings: CONFIRMED. No header row: CONFIRMED.
-    /// spec: Docs/RE/formats/config_tables.md §4.1.
-    /// RFC 4180 quoting required for description fields that contain commas: CONFIRMED.
+    /// spec: Docs/RE/formats/items_csv.md §Identification — "Encoding: CP949": CONFIRMED.
+    /// spec: Docs/RE/formats/items_csv.md §Identification — "Line ending: LF only": CONFIRMED.
+    /// spec: Docs/RE/formats/items_csv.md §Identification — "Header row: NONE": CONFIRMED.
     /// </remarks>
     public static ItemCsvRow[] Parse(ReadOnlyMemory<byte> data) =>
         Parse(data.Span);
@@ -42,7 +49,7 @@ public static class ItemsCsvParser
     public static ItemCsvRow[] Parse(ReadOnlySpan<byte> span)
     {
         // Decode as CP949.
-        // spec: Docs/RE/formats/config_tables.md §4.1 — "Encoding: CP949 / EUC-KR (no BOM)": CONFIRMED.
+        // spec: Docs/RE/formats/items_csv.md §Identification — "Encoding: CP949 / EUC-KR": CONFIRMED.
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         var cp949 = Encoding.GetEncoding(949);
         string text = cp949.GetString(span);
@@ -55,223 +62,277 @@ public static class ItemsCsvParser
     /// </summary>
     public static ItemCsvRow[] ParseText(string text)
     {
-        var rows = new List<ItemCsvRow>(89712); // pre-size for expected row count
-        var fields = new List<string>(ExpectedColumnCount);
-        int pos = 0;
+        var rows = new List<ItemCsvRow>();
 
-        while (pos < text.Length)
+        // Split on LF only (CONFIRMED line ending).
+        // spec: Docs/RE/formats/items_csv.md §Identification — "Line ending: LF only (0x0A)": CONFIRMED.
+        // Trim trailing \r defensively in case a CRLF crept in.
+        // spec: Docs/RE/formats/items_csv.md §2 — Secondary note (LF-only line endings): CONFIRMED.
+        int start = 0;
+        int len = text.Length;
+        while (start < len)
         {
-            // Skip empty lines (bare LF after CRLF or lone LF).
-            if (text[pos] == '\n')
+            int lf = text.IndexOf('\n', start);
+            int lineEnd = lf >= 0 ? lf : len;
+            ReadOnlySpan<char> lineSpan = text.AsSpan(start, lineEnd - start);
+
+            // Trim trailing \r.
+            if (lineSpan.Length > 0 && lineSpan[^1] == '\r')
+                lineSpan = lineSpan[..^1];
+
+            if (lineSpan.Length > 0)
             {
-                pos++;
-                continue;
+                string line = new string(lineSpan);
+                ItemCsvRow? row = ParseLine(line);
+                if (row is not null)
+                    rows.Add(row);
             }
 
-            if (text[pos] == '\r' && pos + 1 < text.Length && text[pos + 1] == '\n')
-            {
-                pos += 2;
-                continue;
-            }
-
-            // Parse one RFC 4180 CSV line.
-            // spec: Docs/RE/formats/config_tables.md §4.1 — "Quoting: RFC 4180 double-quote quoting": CONFIRMED.
-            fields.Clear();
-            ParseLine(text, ref pos, fields);
-
-            if (fields.Count == 0) continue;
-
-            // Tolerate ragged rows. The nominal column count is 139, but the shipped catalogue
-            // contains occasional rows with a different count (a 138-column row was observed in the
-            // real items.csv). A single malformed row must NOT discard the entire 89,712-row catalogue,
-            // so we pad short rows with empty trailing fields to keep the fixed-index decode in
-            // BuildRow in bounds (highest typed index read is 131); extra columns on longer rows are
-            // preserved verbatim in RawColumns and ignored by the typed decode.
-            // spec: Docs/RE/formats/config_tables.md §4.1 — 139 columns nominal; real data is ragged.
-            for (int i = fields.Count; i < ExpectedColumnCount; i++)
-                fields.Add(string.Empty);
-
-            rows.Add(BuildRow(fields));
+            start = lf >= 0 ? lf + 1 : len;
         }
 
         return rows.ToArray();
     }
 
-    private static void ParseLine(string text, ref int pos, List<string> fields)
+    /// <summary>
+    /// Parses one line from items.csv using the numeric-anchor split rule.
+    /// Returns null when the line cannot produce a valid record (e.g. no numeric id found).
+    /// </summary>
+    /// <remarks>
+    /// Implements the hazard-safe parsing recipe from:
+    /// spec: Docs/RE/formats/items_csv.md §3 — Implementable parsing recipe (hazard-safe).
+    /// <para>
+    /// Step 1: Split on commas into raw tokens.
+    /// Step 2: Find col 1 (item_id) — the first purely-numeric (integer or float) token.
+    ///         Everything before it is col 0 (item_name), commas included.
+    ///         spec: Docs/RE/formats/items_csv.md §2.HAZARD-A — numeric-anchor field splitting: CONFIRMED.
+    /// Step 3: Find the start of the numeric tail after the description (col 2).
+    ///         The description runs from after item_id to the token before the first numeric tail token.
+    ///         spec: Docs/RE/formats/items_csv.md §3 step 3.
+    /// Step 4: Parse the numeric tail under InvariantCulture (float-safe).
+    ///         spec: Docs/RE/formats/items_csv.md §2.HAZARD-B — float column, InvariantCulture: CONFIRMED.
+    /// </para>
+    /// </remarks>
+    private static ItemCsvRow? ParseLine(string line)
     {
-        int len = text.Length;
+        // Split the entire line on raw commas.
+        // The name (col 0) and description (col 2) may contain embedded commas, so we cannot use
+        // the resulting token count as a column count. We must re-assemble col 0 and col 2 by anchor.
+        // spec: Docs/RE/formats/items_csv.md §2 — Hazard A: CONFIRMED; CRITICAL.
+        string[] tokens = line.Split(',');
 
-        while (pos < len)
+        // Step 2: Find col 1 (item_id) — first purely-numeric token.
+        // spec: Docs/RE/formats/items_csv.md §3 step 2 — "first token that is purely an integer is item_id".
+        // A "purely numeric" token is one that parses successfully as integer or float-with-period.
+        // (Including float because §2 warns: "treat a token containing a period as numeric" to avoid
+        //  re-opening the description boundary on a float token.)
+        // spec: Docs/RE/formats/items_csv.md §2.HAZARD-A — implementation caution.
+        int idTokenIndex = -1;
+        for (int t = 0; t < tokens.Length; t++)
         {
-            char c = text[pos];
-
-            if (c == '\n')
+            if (IsNumericToken(tokens[t].Trim()))
             {
-                pos++;
-                return;
-            }
-
-            if (c == '\r')
-            {
-                if (pos + 1 < len && text[pos + 1] == '\n') pos++;
-                pos++;
-                return;
-            }
-
-            // RFC 4180 quoted field.
-            if (c == '"')
-            {
-                pos++; // skip opening quote
-                var sb = new System.Text.StringBuilder();
-                while (pos < len)
-                {
-                    char fc = text[pos];
-                    if (fc == '"')
-                    {
-                        pos++;
-                        if (pos < len && text[pos] == '"')
-                        {
-                            sb.Append('"');
-                            pos++;
-                        } // escaped ""
-                        else break; // closing quote
-                    }
-                    else
-                    {
-                        sb.Append(fc);
-                        pos++;
-                    }
-                }
-
-                fields.Add(sb.ToString());
-                // Expect comma or line-end after closing quote.
-                if (pos < len && text[pos] == ',') pos++;
-            }
-            else
-            {
-                // Unquoted field — read until comma or line-end.
-                int start = pos;
-                while (pos < len && text[pos] != ',' && text[pos] != '\n' && text[pos] != '\r')
-                    pos++;
-                fields.Add(text.Substring(start, pos - start));
-                if (pos < len && text[pos] == ',') pos++;
+                idTokenIndex = t;
+                break;
             }
         }
+
+        if (idTokenIndex < 0)
+            return null; // No numeric id found — skip malformed line.
+
+        // Reconstruct col 0 (item_name): join tokens[0..idTokenIndex-1] with commas.
+        // spec: Docs/RE/formats/items_csv.md §3 step 2 — "everything before the preceding comma is item_name".
+        string itemName = string.Join(",", tokens, 0, idTokenIndex);
+
+        // Col 1 (item_id): the purely-numeric token at idTokenIndex.
+        // spec: Docs/RE/formats/items_csv.md §1 col 1 — item_id u32: HIGH.
+        uint itemId = ParseUInt(tokens[idTokenIndex]);
+
+        // Step 3: Find col 2 (description) — from idTokenIndex+1 up to the first numeric tail token.
+        // spec: Docs/RE/formats/items_csv.md §3 step 3 — "continue scanning until the first numeric token".
+        int descStart = idTokenIndex + 1;
+        int numericTailStart = -1;
+        for (int t = descStart; t < tokens.Length; t++)
+        {
+            if (IsNumericToken(tokens[t].Trim()))
+            {
+                numericTailStart = t;
+                break;
+            }
+        }
+
+        string itemDesc;
+        string[] numericTokens;
+
+        if (numericTailStart < 0)
+        {
+            // No numeric tail — the rest of the line is description, no stats.
+            itemDesc = string.Join(",", tokens, descStart, tokens.Length - descStart);
+            numericTokens = [];
+        }
+        else
+        {
+            // Reconstruct col 2 (description): join tokens[descStart..numericTailStart-1] with commas.
+            itemDesc = string.Join(",", tokens, descStart, numericTailStart - descStart);
+
+            // Cols 3..N: the numeric tail tokens from numericTailStart onward.
+            int tailCount = tokens.Length - numericTailStart;
+            numericTokens = new string[tailCount];
+            Array.Copy(tokens, numericTailStart, numericTokens, 0, tailCount);
+        }
+
+        // Build typed row. Numeric tail columns are 0-based relative to col 3 of the full row,
+        // which is tail index 0 here.
+        // spec: Docs/RE/formats/items_csv.md §1 — col layout (0-indexed from start of row).
+        return BuildRow(itemName, itemId, itemDesc, numericTokens);
     }
 
-    private static ItemCsvRow BuildRow(List<string> f)
+    /// <summary>
+    /// Returns true when the token is a valid integer or float (contains only digits and optionally
+    /// a single period for floating-point). Empty string is not numeric.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/items_csv.md §2.HAZARD-A — implementation caution: "treat a token
+    /// containing a period as numeric too (it is the float field)".
+    /// </remarks>
+    private static bool IsNumericToken(string token)
     {
-        // spec: Docs/RE/formats/config_tables.md §4.3 Column index table.
-        // Only typed columns with CONFIRMED or HIGH confidence are decoded to their stated types.
-        // UNVERIFIED columns are exposed raw as strings.
+        if (string.IsNullOrEmpty(token)) return false;
+        // A numeric token contains only ASCII digits and at most one period.
+        bool hasPeriod = false;
+        foreach (char c in token)
+        {
+            if (c == '.')
+            {
+                if (hasPeriod) return false; // two periods = not numeric
+                hasPeriod = true;
+            }
+            else if (c < '0' || c > '9')
+            {
+                return false;
+            }
+        }
 
+        return true;
+    }
+
+    private static ItemCsvRow BuildRow(string name, uint itemId, string desc, string[] tail)
+    {
+        // Numeric tail columns are 0-based (tail[0] = full-row col 3, tail[1] = col 4, etc.).
+        // spec: Docs/RE/formats/items_csv.md §1 — col 3+ are the numeric tail.
+        // spec: Docs/RE/formats/items_csv.md §2.HAZARD-B — parse numeric tail with InvariantCulture: CONFIRMED.
+
+        // Helper: safe tail column access (returns 0 when absent or unparseable).
+        uint GetU(int tailIndex) => tailIndex < tail.Length ? ParseUInt(tail[tailIndex]) : 0u;
+        ushort GetS(int tailIndex) => tailIndex < tail.Length ? ParseUShort(tail[tailIndex]) : (ushort)0;
+        byte GetB(int tailIndex) => tailIndex < tail.Length ? ParseByte(tail[tailIndex]) : (byte)0;
+        float GetF(int tailIndex) => tailIndex < tail.Length ? ParseFloat(tail[tailIndex]) : 0f;
+
+        // Build the raw columns array: col0=name, col1=id (as string), col2=desc, col3+=tail.
+        // Materialised for consumers that need untyped access.
+        var rawColumns = new string[3 + tail.Length];
+        rawColumns[0] = name;
+        rawColumns[1] = itemId.ToString(CultureInfo.InvariantCulture);
+        rawColumns[2] = desc;
+        tail.CopyTo(rawColumns, 3);
+
+        // Column offsets below are FULL ROW indices (col 0 = name, col 1 = id, col 2 = desc).
+        // Tail index = full-row index - 3.
+        // spec: Docs/RE/formats/items_csv.md §1 — column layout PARTIAL (leading cols HIGH, tail UNVERIFIED).
         return new ItemCsvRow
         {
             // ── Identity (cols 0–6) ─────────────────────────────────────────
-            // col0: name_cp949 string CONFIRMED
-            NameCp949 = f[0],
-            // col1: item_id uint32 CONFIRMED
-            ItemId = ParseUInt(f[1]),
-            // col2: description_cp949 string CONFIRMED (\\=in-game newline preserved)
-            DescriptionCp949 = f[2],
-            // col3: linked_item_id uint32 HIGH
-            LinkedItemId = ParseUInt(f[3]),
-            // col4: base_ref_id uint32 HIGH
-            BaseRefId = ParseUInt(f[4]),
-            // col5: secondary_ref_id uint32 HIGH
-            SecondaryRefId = ParseUInt(f[5]),
-            // col6: item_subtype uint32 CONFIRMED
-            ItemSubtype = ParseUInt(f[6]),
+            NameCp949 = name, // col 0 — item_name CP949: HIGH
+            ItemId = itemId, // col 1 — item_id u32: HIGH
+            DescriptionCp949 = desc, // col 2 — item_description CP949: HIGH
+            LinkedItemId = GetU(0), // col 3 — u32 (small int, observed 0): LOW
+            BaseRefId = GetU(1), // col 4 — base_item_id / archetype id (9-digit): HIGH
+            SecondaryRefId = GetU(2), // col 5 — secondary type id (9-digit): MEDIUM
+            ItemSubtype = GetU(3), // col 6 — small flag (1 observed): LOW
 
             // ── Flags and meta (cols 7–18) ──────────────────────────────────
-            BonusFlagA = ParseByte(f[7]),
-            BonusFlagB = ParseByte(f[8]),
-            // col9: reserved_09 uint8 HIGH (always 0)
-            // col10: enhancement_size uint8 HIGH
-            EnhancementSize = ParseByte(f[10]),
-            // col16: sell_price uint32 CONFIRMED
-            SellPrice = ParseUInt(f[16]),
-            // col17: npc_purchaseable uint8 HIGH
-            NpcPurchaseable = ParseByte(f[17]),
-            // col18: enabled uint8 CONFIRMED
-            Enabled = ParseByte(f[18]),
+            BonusFlagA = GetB(4), // col 7  — bonus flag a: UNVERIFIED
+            BonusFlagB = GetB(5), // col 8  — bonus flag b: UNVERIFIED
+            // col 9 (tail[6]): reserved_09 u8 HIGH (always 0) — not decoded
+            EnhancementSize = GetB(7), // col 10 — enhancement_size u8: HIGH
+            SellPrice = GetU(13), // col 16 — sell_price u32: CONFIRMED
+            NpcPurchaseable = GetB(14), // col 17 — npc_purchaseable u8: HIGH
+            Enabled = GetB(15), // col 18 — enabled u8: CONFIRMED
 
             // ── Stacking, tier, durability (cols 19–23) ─────────────────────
-            // col19: max_stack uint16 CONFIRMED
-            MaxStack = ParseUShort(f[19]),
-            // col22: item_tier_rank uint16 CONFIRMED
-            ItemTierRank = ParseUShort(f[22]),
-            // col23: max_durability uint16 HIGH
-            MaxDurability = ParseUShort(f[23]),
+            MaxStack = GetS(16), // col 19 — max_stack u16: CONFIRMED
+            ItemTierRank = GetS(19), // col 22 — item_tier_rank u16: CONFIRMED
+            MaxDurability = GetS(20), // col 23 — max_durability u16: HIGH
 
             // ── Required stats (cols 24–28) ─────────────────────────────────
-            ReqStr = ParseUShort(f[24]),
-            ReqCon = ParseUShort(f[25]),
-            ReqAgi = ParseUShort(f[26]),
-            ReqInt = ParseUShort(f[27]),
-            ReqChi = ParseUShort(f[28]),
+            ReqStr = GetS(21), // col 24 — req_str u16
+            ReqCon = GetS(22), // col 25 — req_con u16
+            ReqAgi = GetS(23), // col 26 — req_agi u16
+            ReqInt = GetS(24), // col 27 — req_int u16
+            ReqChi = GetS(25), // col 28 — req_chi u16
 
             // ── Class restriction flags (cols 29–32) ────────────────────────
-            ClassYi = ParseByte(f[29]),
-            ClassYe = ParseByte(f[30]),
-            ClassIn = ParseByte(f[31]),
-            ClassJi = ParseByte(f[32]),
+            ClassYi = GetB(26), // col 29 — class_yi u8
+            ClassYe = GetB(27), // col 30 — class_ye u8
+            ClassIn = GetB(28), // col 31 — class_in u8
+            ClassJi = GetB(29), // col 32 — class_ji u8
 
             // ── Enchant and socket block (cols 47–48) ───────────────────────
-            EnchantLevel = ParseByte(f[47]),
-            GemPower = ParseByte(f[48]),
+            EnchantLevel = GetB(44), // col 47 — enchant_level u8
+            GemPower = GetB(45), // col 48 — gem_power u8
 
             // ── Bonus stat block A (cols 64–65, 68) ─────────────────────────
-            BonusAtk = ParseUInt(f[64]),
-            BonusHp = ParseUInt(f[65]),
-            BonusExtAtk = ParseUInt(f[68]),
+            BonusAtk = GetU(61), // col 64 — bonus_atk u32
+            BonusHp = GetU(62), // col 65 — bonus_hp u32
+            BonusExtAtk = GetU(65), // col 68 — bonus_ext_atk u32
 
             // ── Float rate block (cols 75, 78) ──────────────────────────────
-            AttackSpeed = ParseFloat(f[75]),
-            DodgeRate = ParseFloat(f[78]),
+            // spec: Docs/RE/formats/items_csv.md §2.HAZARD-B — float column, InvariantCulture: CONFIRMED.
+            AttackSpeed = GetF(72), // col 75 — attack_speed f32
+            DodgeRate = GetF(75), // col 78 — dodge_rate f32
 
             // ── Bonus stat block B (cols 84–87, 90, 93–96) ──────────────────
-            BonusChi = ParseUInt(f[84]),
-            WeaponStatA = ParseUInt(f[85]),
-            WeaponStatB = ParseUInt(f[86]),
-            MinAttack = ParseUInt(f[87]),
-            MaxAttack = ParseUInt(f[90]),
-            BonusDefenseA = ParseUInt(f[93]),
-            PhysDefense = ParseUInt(f[94]),
-            ArmorDefense = ParseUInt(f[96]),
+            BonusChi = GetU(81), // col 84 — bonus_chi u32
+            WeaponStatA = GetU(82), // col 85 — weapon_stat_a u32
+            WeaponStatB = GetU(83), // col 86 — weapon_stat_b u32
+            MinAttack = GetU(84), // col 87 — min_attack u32
+            MaxAttack = GetU(87), // col 90 — max_attack u32
+            BonusDefenseA = GetU(90), // col 93 — bonus_defense_a u32
+            PhysDefense = GetU(91), // col 94 — phys_defense u32
+            ArmorDefense = GetU(93), // col 96 — armor_defense u32
 
             // ── Model / visual IDs (cols 117–118) ───────────────────────────
-            ModelSetId = ParseUShort(f[117]),
-            ModelType = ParseByte(f[118]),
+            ModelSetId = GetS(114), // col 117 — model_set_id u16
+            ModelType = GetB(115), // col 118 — model_type u8
 
             // ── Consumable block (cols 112, 113, 119–120, 127–130) ──────────
-            DurationMinutes = ParseUInt(f[112]),
-            ExpireMode = ParseByte(f[113]),
-            ConsumableValue = ParseUInt(f[119]),
-            IsConsumable = ParseByte(f[120]),
-            GemCategory = ParseByte(f[127]),
-            EquippableFlag = ParseByte(f[128]),
-            HasEffect = ParseByte(f[129]),
-            EffectType = ParseByte(f[130]),
-            EffectStrength = ParseUShort(f[131]),
+            DurationMinutes = GetU(109), // col 112 — duration_minutes u32
+            ExpireMode = GetB(110), // col 113 — expire_mode u8
+            ConsumableValue = GetU(116), // col 119 — consumable_value u32
+            IsConsumable = GetB(117), // col 120 — is_consumable u8
+            GemCategory = GetB(124), // col 127 — gem_category u8
+            EquippableFlag = GetB(125), // col 128 — equippable_flag u8
+            HasEffect = GetB(126), // col 129 — has_effect u8
+            EffectType = GetB(127), // col 130 — effect_type u8
+            EffectStrength = GetS(128), // col 131 — effect_strength u16
 
-            // ── All 139 raw columns (zero-alloc for consumers that need untyped access) ──
-            RawColumns = f.ToArray(),
+            // ── All raw columns ──────────────────────────────────────────────
+            RawColumns = rawColumns,
         };
     }
 
+    // ─── scalar parsers — always use InvariantCulture ────────────────────────
+    // spec: Docs/RE/formats/items_csv.md §2.HAZARD-B — "use invariant culture explicitly": CONFIRMED.
+
     private static uint ParseUInt(string s) =>
-        uint.TryParse(s.Trim(), out var v) ? v : 0;
+        uint.TryParse(s.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var v) ? v : 0;
 
     private static ushort ParseUShort(string s) =>
-        ushort.TryParse(s.Trim(), out var v) ? v : (ushort)0;
+        ushort.TryParse(s.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var v) ? v : (ushort)0;
 
     private static byte ParseByte(string s) =>
-        byte.TryParse(s.Trim(), out var v) ? v : (byte)0;
+        byte.TryParse(s.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var v) ? v : (byte)0;
 
     private static float ParseFloat(string s) =>
-        float.TryParse(s.Trim(), System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var v)
-            ? v
-            : 0f;
+        float.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : 0f;
 }

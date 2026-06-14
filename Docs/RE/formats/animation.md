@@ -16,8 +16,8 @@
 | `.mot` corpus is real, not stubs (3877/3891 are real clips) | Resolved | SAMPLE-VERIFIED (full census of 3,891 files) |
 | `.mot` BANI-magic variant (11 files; different header) | Header fully recovered | SAMPLE-VERIFIED (all header fields cross-checked on 3 of 11 files; body layout PROPOSED) |
 | `.mot` track / keyframe layout | Resolved | CONFIRMED (parser-derived; corpus census confirms full-payload clips exist) |
-| LenStr 4-byte u32 LE prefix | Resolved | CONFIRMED (sample-verified) |
-| `track_descriptor` upper-3-byte padding | Resolved | CONFIRMED (sample-verified) |
+| LenStr 4-byte u32 LE prefix, no on-disk terminator | Resolved | CONFIRMED (loader + sample) |
+| `track_descriptor` upper-3-byte padding (key-count / channel-mask / interp-flag all refuted) | Resolved | CONFIRMED (loader-direct + sample-verified) |
 | `id_a` vs `id_b` roles (load key vs runtime clip handle) | Resolved | CONFIRMED |
 | Wrap / loop is runtime-only (no on-disk flag) | Resolved | CONFIRMED |
 | `actormotion.txt` record layout (offsets + read order) | Resolved | CONFIRMED (parser-derived) |
@@ -132,7 +132,7 @@ BANI variant has a different header (see §BANI variant).
 |------------:|-----:|---------|---------------|------------------------------------------------------------------------------------------------------------------------------------|------------|
 | 0           | 4    | u32 LE  | `id_a`        | Per-file unique numeric identifier. Matches the decimal integer component of the filename (e.g. `g170354502.mot` → `id_a = 170354502`). Returned as the clip handle by the registration function and used by the runtime mixer as the per-clip lookup ID; not used as the load-time catalogue key (see §Clip catalogue). | CONFIRMED (sample-verified) |
 | 4           | 4    | u32 LE  | `id_b`        | Group / set load key. Shared across all clips in the same actor motion set. Used as the key when inserting into the runtime clip map at load time (see §Clip catalogue). | CONFIRMED (sample-verified) |
-| 8           | 4    | u32 LE  | `name_length` | Length of the name body that follows, in bytes. 4-byte u32 LE prefix — no null terminator on disk. See §LenStr encoding. | CONFIRMED (sample-verified) |
+| 8           | 4    | u32 LE  | `name_length` | Length of the name body that follows, in bytes. 4-byte u32 LE prefix — no null terminator on disk. See §LenStr encoding. | CONFIRMED (loader + sample) |
 | 12          | N    | bytes   | `name_body`   | Clip path string of `name_length` bytes. Relative source-tree path, form `./do/g{id_a}.mot`. Read in both loading stages and silently discarded; parsers must read and skip it to advance the file pointer. See §Name field semantics. | CONFIRMED (sample-verified) |
 | 12+N        | 4    | u32 LE  | `frame_count` | Raw frame count. Clip duration in seconds = `frame_count × 0.1` (fixed 10 fps rate; see §Timing). | CONFIRMED (sample-verified) |
 
@@ -145,10 +145,22 @@ The `name` field uses the same `LenStr` encoding that `.skn` and `.bnd` use (see
 §String encoding). The wire format is a 4-byte u32 LE length prefix followed by exactly `length`
 bytes of string body with no null terminator on disk.
 
-**CONFIRMED sample-verified:** in all reference samples the four bytes at offset 8 decode as
-a u32 LE value that equals exactly the byte count of the string body that follows it, and the
-subsequent fields align correctly on that assumption. A 1-byte prefix interpretation is inconsistent
-with the observed byte layout and is rejected.
+**CONFIRMED (loader + sample):** the 4-byte u32 LE length prefix with no on-disk terminator is
+independently verified two ways that agree exactly. (a) **Loader-verified:** the shared
+length-prefixed-string helper, in its binary branch, reads the length as a fixed 4-byte word
+directly from the file and then consumes exactly `length` body bytes — it does not read an extra
+terminator byte in the fixed-count case (the newline-terminated case exists only in text mode).
+(b) **Sample-verified:** in the reference samples the four bytes at offset 8 decode as a u32 LE
+value that equals exactly the byte count of the string body that follows, and the byte immediately
+after the body is the first byte of the next field (`frame_count`), not a `00` terminator. A 1-byte
+or 2-byte prefix interpretation does not align the subsequent fields and is rejected. The
+terminator visible in memory is a runtime string-object artifact, not a byte stored on disk.
+
+This is the same shared `LenStr` helper used by the `.skn` skin loader and the `.bnd` skeleton
+loader, consistent with the single shared encoding noted in `formats/mesh.md`.
+
+> Engineer note: read 4 bytes as `u32 LE` = `name_length`, then read exactly `name_length` body
+> bytes and advance the cursor — do **not** skip a terminator byte. // spec: Docs/RE/formats/animation.md
 
 The name body in the reference samples is ASCII. The field is discarded after reading, so encoding
 matters only when the name body must be inspected for diagnostics. For such cases, treat as
@@ -211,11 +223,42 @@ variable-length keyframe block.
 
 | Rel. offset (within track) | Size                | Type    | Field              | Notes                                                                                                                                   | Confidence |
 |---------------------------:|--------------------:|---------|--------------------|-------------------------------------------------------------------------------------------------------------------------------------------| -----------|
-| 0                          | 4                   | u32 LE  | `track_descriptor` | Low byte = `bone_id` (see §Bone-track linkage). Bytes 1–3 (bits 8–31) are reserved padding: the parser reads and discards them; they carry no meaning. Strict parsers may assert that the upper three bytes are zero. | CONFIRMED (sample-verified; upper bytes confirmed unused padding) |
-| 4                          | 4                   | u32 LE  | `key_count`        | Number of keyframes in this track.                                                                                                      | CONFIRMED |
+| 0                          | 4                   | u32 LE  | `track_descriptor` | Low byte = `bone_id` (see §Bone-track linkage). Bytes 1–3 (bits 8–31) are reserved/unused padding: the loader reads the whole word once, slices off the low byte, and discards the rest — they carry no meaning. Strict parsers may assert that the upper three bytes are zero. See §`track_descriptor` byte decomposition. | CONFIRMED (loader-direct + sample-verified; upper bytes confirmed unused padding) |
+| 4                          | 4                   | u32 LE  | `key_count`        | Number of keyframes in this track. **Sole driver** of the keyframe-array length — it is a field of its own, never derived from `track_descriptor`. | CONFIRMED |
 | 8                          | `key_count × 28`   | bytes   | `keyframes`        | Inline array of keyframe records, each 28 bytes. See §Keyframe record.                                                                  | CONFIRMED |
 
 **Track record stride:** variable — `8 + key_count × 28` bytes.
+
+### `track_descriptor` byte decomposition (CONFIRMED — loader-direct)
+
+The four bytes of `track_descriptor` decompose as a single low-byte field plus reserved padding.
+This decomposition is **CONFIRMED from the full-data loader directly** (independent of, and in
+agreement with, the earlier parser-derived + sample confirmation):
+
+| Bits  | Byte        | Field      | Role                                                              | Confidence |
+|------:|-------------|------------|------------------------------------------------------------------|------------|
+| 0–7   | byte 0 (low) | `bone_id` | Bone selector for this track; the **only** part of the word used. | CONFIRMED  |
+| 8–15  | byte 1      | (reserved) | Read as part of the word, then discarded — no meaning.           | CONFIRMED  |
+| 16–23 | byte 2      | (reserved) | Discarded (same as byte 1).                                       | CONFIRMED  |
+| 24–31 | byte 3      | (reserved) | Discarded (same as byte 1).                                       | CONFIRMED  |
+
+The loader consumes the descriptor word exactly once, extracts the low byte via a low-8-bits
+accessor, and stores only that byte into the per-track record (it is later matched to a `.bnd`
+bone `self_id`). The remaining 24 bits are never shifted, never masked, never compared, and never
+stored; no downstream consumer receives them. The loader does not itself assert they are zero — it
+simply ignores them, so it tolerates any value there.
+
+**The three candidate interpretations for the upper bytes are positively refuted:**
+
+| Candidate hypothesis for bits 8–31 | Verdict | Why |
+|------------------------------------|---------|-----|
+| A key / keyframe count             | REFUTED | The keyframe-array length is driven **entirely** by the separate `key_count` u32 (the field read immediately after the descriptor), not by any sub-field of the descriptor. |
+| A channel / component presence mask | REFUTED | Each keyframe is a **fixed, unconditional** 7-float set (vec3 translation + vec4 quaternion = 28 bytes). No descriptor bit gates which channels are present; there is no TX/TY/TZ/RX/RY/RZ presence flag. |
+| An interpolation-mode flag         | REFUTED | Interpolation (lerp for translation, slerp for rotation) is selected at the runtime per-track sampler, not from any descriptor bit. No interpolation branch is keyed on this word. |
+
+**Engineer note:** read the 4-byte word as `u32 LE`, take `bone_id = descriptor & 0xFF`, ignore the
+upper three bytes (or assert them zero for a strict validator), then read `key_count` as a separate
+`u32 LE` to size the keyframe array. // spec: Docs/RE/formats/animation.md
 
 ### Keyframe record — 28 bytes, little-endian
 
@@ -788,8 +831,8 @@ unknowns table:
 | Former item | Resolution |
 |-------------|------------|
 | "All `.mot` samples are stubs" | RESOLVED — a full census of 3,891 files shows 3,877 (99.7%) are real full-payload clips; only 3 are stubs and 11 are the BANI variant (§Corpus census). The track/keyframe layout is exercised by the corpus, not just by parser inference. |
-| LenStr prefix width (1-byte vs 4-byte) | CONFIRMED 4-byte u32 LE prefix — sample-verified. |
-| Upper 3 bytes of `track_descriptor` | CONFIRMED unused padding — parser reads the 4-byte word and extracts only the low byte; bits 8–31 are discarded with no comparison or storage. |
+| LenStr prefix width (1-byte vs 4-byte) | CONFIRMED 4-byte u32 LE prefix, no on-disk terminator — verified independently against both the loader and a real sample, which agree exactly. |
+| Upper 3 bytes of `track_descriptor` | CONFIRMED unused padding — the loader reads the 4-byte word and extracts only the low byte (`bone_id`); bits 8–31 are discarded with no shift, mask, comparison, or storage. The three candidate interpretations (key/keyframe count, channel/component mask, interpolation flag) are positively REFUTED: keyframe length is driven by the separate `key_count` field, the 7-float keyframe set is fixed and unconditional, and interpolation mode is chosen at the runtime sampler. See §`track_descriptor` byte decomposition. |
 | `id_a` vs `id_b` as catalogue key | CONFIRMED — `id_b` is the load-time catalogue / group key; `id_a` is the per-file UID matching the filename integer, returned as the clip handle and used by the runtime mixer as the per-clip lookup ID. |
 | Wrap-to-first at clip end | CONFIRMED — no loop flag exists in the `.mot` binary; wrap is a runtime property of `AnimationCycleLayer` (modulo on local time), not of the file. |
 | `actormotion.txt` column layout | CONFIRMED (record layout) — 33 columns, count-prefixed, parsed into a 136-byte record; offsets and types documented in §`actormotion.txt` layout. Per-column semantic names for cols 3–14 remain PROPOSED; col2 (SkinClassId) and col15 (idle motion) are now sample-verified. |

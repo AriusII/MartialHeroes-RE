@@ -5,9 +5,56 @@
 > Fresh start by maintainer decision (G2): prior Cycles 1–4 + Campaign 2 live in git history and
 > `Docs/RE/journal.md`. Generic doctrine: [`CAMPAIGN_TEMPLATE.md`](CAMPAIGN_TEMPLATE.md).
 >
-> **▶ RESUME ANCHOR (2026-06-14):** pivoted to **CAMPAIGN 4 — Front-End Fidelity** (see the section
-> directly below). **The World scene is FROZEN** by maintainer decision; CAMPAIGN 3's broader lanes are
-> paused (their record is preserved below for provenance). No commit yet (continue-then-commit-later).
+> **▶ RESUME ANCHOR (2026-06-14):** active campaign = **CAMPAIGN 6 — Total IDB Legibility** (IDA-only deep
+> RE of `doida.exe`; see the section directly below). CAMPAIGN 4 (Front-End Fidelity) and CAMPAIGN 3 are
+> **paused**, their records preserved below for provenance. **The World scene remains FROZEN.** No commit
+> yet (continue-then-commit-later).
+
+---
+
+## CAMPAIGN 6 — Total IDB Legibility: name/comment/type the whole `doida.exe` (IDA-only)
+
+**Mandate (maintainer, 2026-06-14):** work **EXCLUSIVELY in IDA Pro 9.3** (the `ida` MCP) on `doida.exe`.
+Deep-analyse the whole client; rename functions, globals, classes, struct fields, locals; add comments;
+recover & apply struct/enum/RTTI types; consolidate the IDB into a workspace "au petits oignons". Deploy a
+large agent fleet (~75 deployments) + heavy IDAPython batching. `doida.exe` is the source of truth.
+Method/charter: `PLAN.md` (CAMPAIGN 6) + plan file `~/.claude/plans/dans-ce-plan-on-tranquil-panda.md`.
+
+**Scale model (maintainer-chosen):** ~75 agent *deployments* across ~6 sequential waves; at any instant
+**≤3 concurrent IDA readers / exactly 1 serialized IDB writer**. **Wave-by-wave with checkpoints.** Depth =
+"complet pragmatique" (names + comments + struct/enum/RTTI **types + prototypes**; struct fields & call-site
+args auto-named by type propagation; semantic locals only on the `complex` hot-set).
+
+### Evidence baseline (Phase 0, live this session) — supersedes the stale "4,897 named" figure
+- `doida.exe` · sha256 `63fcaf8e…9eb9df` (== `names.yaml` pin) · md5 `81634fe4…` · imagebase `0x400000`.
+- **Live census:** 25,973 functions — **2,993 named** (~1,905 MSVC/CRT library, *never* renamed) —
+  **≈ 21,075 anonymous `sub_` = the work scope** — 3,599 strings, 6 segments, MSVC RTTI present.
+  (Prior campaigns' IDB writes are largely absent from the current i64; **21,075 `sub_` is the true
+  denominator** — risk C6-R8 realised, so all coverage % measure against this live number.)
+- Oracle = the committed clean specs (≈37 specs / 31 formats / 10 structs / 70+ packets). Every proposed
+  name aligns with already-promoted terminology; it extends, never contradicts.
+
+| Phase | Status |
+|---|---|
+| **0 Census / Pre-flight** | ✅ DONE — MCP UP on `?ext=dbg`; SHA == pin; denominator pinned at ≈ 21,075 `sub_`. |
+| **A Cartography** (Pass 1 profile + Pass 2a RTTI → cluster into 16) | ✅ DONE — 22,273 unnamed profiled; **431 RTTI classes** (~1,290 vtable fns) recovered; call-graph (62,410 edges) dumped; partitioned into 16 clusters by anchor/RTTI/import/string seeds + call-graph propagation. C01=1,120 · net C02+C03=67 *(spine already named in C2)* · C11/C16 lumpy (refine before W4/W6). See `_dirty/campaign6/cartography/overview.md`. |
+| **B Comprehend — W1: C01 rtti-class-core · C02 net-transport · C03 net-dispatch** | ✅ DONE — 3 lanes: C01 manifest **1,488** proposals (vtable fns + 615 ctors) + the GU 14-slot semantic map (onDraw/onEvent/onUpdate/hitTest/computeTransform/…) inherited by ~400 widgets + net remainder (mostly STL; the net spine was already named in C2). |
+| **C Reconcile + firewall gate (W1 glossary slice)** | ✅ DONE — gate-passed `glossary.yaml` = **1,551** fns; **288** GU placeholders upgraded to behavioural names; 318 name dups resolved; **0 neutrality violations**. |
+| **D Annotate IDB (W1, serialized dry-run → apply)** | ✅ DONE — dry-run reviewed → applied **1,537** names+comments; **0 failed**; 1 conflict + 13 runtime safely skipped; IDB saved. |
+| **R/Z W1 — re-census + sync + checkpoint** | ◑ re-census PASS — confirmed **1,537** named; **TRIPWIRE = 0 library renamed**; `still_default`=14 (skips). **`journal.md` + `names.yaml` full sync DEFERRED to commit** (IDB is the live source of truth; concurrent writer touched journal). ⏸ awaiting go for **W2 (crypto/VFS/parsers)**. |
+| **W2 — C04 crypto · C05 vfs · C06 parsers** | ✅ DONE — applied **277** names (cumulative **1,815** confirmed; TRIPWIRE 0 lib-renamed); structs recovered & staged for a type pass (secure-ctx 0x2E20, DiskFile 88B, VfsEntry 144B, GHTex 76B, game.ver, wind.bin). **KEY FINDING:** the unnamed mass is heavily **statically-linked 3rd-party libs** — FLINT bignum (~232, the RSA substrate, now tagged), CxImage codec (~400), Lua, zlib, Boost, XTrap, BugTrap. Cartography over-attributes them via call-graph propagation. |
+| **L Library-ID + re-cluster** | ✅ DONE — **572** 3rd-party fns identified (CxImage/STL/FLINT/Boost/Lua/libjpeg/XTrap); **132** newly tagged `<Lib>__`; lib set excluded from game clusters. **Finding:** the big buckets (C11 ui-hud ~5,941 · C16 residual ~8,930) are GAME-code mis-clustering (UI propagation), **not** libs — handled by per-lane analyst flagging (proven W1/W2), not exclusion. Cumulative confirmed **1,938**; TRIPWIRE 0. |
+| **W3 — C07 anim · C08 render · C09 scene** | ✅ DONE — applied **158** (C07 91: PoseNode/`AnimCatalog_ResolveModelClassId` + structs BndBone 72B/PoseNode 88B/SkinWeight36; C08 52 + 663 render leaves family-tagged for a later accessor pass; C09 19 + structs GameState/EngineView/TickScheduler + C2S opcodes 2/0x70,2/0x89,2/0). Cumulative **2,097**; TRIPWIRE 0. **Diminishing returns confirmed** — C09 was ~1,250/1,522 propagation noise. |
+| **T Struct-type pass** | ✅ DONE — **12 structs** declared in the TIL (GameState/EngineView/PoseNode 88B/BndBone 72B/SkinWeight36/Diamond_GUComponent 208B/Diamond_DiskFile 88B/VfsEntry 144B/GHTex/SecureContext 0x2E20/RsaKeyPair/Bignum); **110 functions** this-typed (DiskFile 42·EngineView 22·GUComponent 21·PoseNode 15·BndBone 8·GameState 2); **4 globals** typed (g_GameState/g_EngineView/g_VfsTocBase/g_VfsTocCount). Decompiler field-propagation verified. 0 failures. |
+| **W4–W6** (UI C10+C11 · actor-combat C12 · world/Lua/sound C13-15 · residual C16) · names.yaml/journal sync + commit | PENDING — W4 (UI builders) = largest genuine naming remainder; C16 residual ~8,930 = low-value tail. `names.yaml`/`journal.md` full sync of the ~2,097 names batched for commit (⚠ working tree entangled with other workstreams — commit needs care). |
+
+**16-cluster map & coverage targets** (full table in the plan file): C01 rtti-class-core, C02 net-transport,
+C03 net-dispatch (W1) → C04 crypto, C05 vfs-assetio, C06 asset-parsers (W2) → C07 anim-skinning, C08
+render-pipeline, C09 scene-machine (W3) → C10 ui-toolkit, C11 ui-hud, C12 actor-combat (W4) → C13
+world-systems, C14 lua-config, C15 sound-input (W5) → C16 misc-residual + locals (W6). Cumulative
+function-name coverage targets: **W1 ~19% · W2 ~36% · W3 ~56% · W4 ~79% · W5 ~97% · W6 ~100%.**
+
+**Dirty namespace:** `Docs/RE/_dirty/campaign6/{cartography,profile,rtti,comprehension/<cluster>,debugger,glossary.yaml,applied,census}/`.
 
 ---
 

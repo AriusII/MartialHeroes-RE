@@ -50,19 +50,14 @@ notes: |
   set. The client then sets the latch, copies the slot to a pending-slot field, and sends 1/7 with
   the mode byte set. A generic select-window click SFX plays (NOT a delete-specific cue).
 
-  RESPONSE -- CONFLICT, committed attribution PRESERVED:
-    - The COMMITTED spec attributes the delete/manage RESULT to S2C 3/4 SmsgCharManageResult,
-      subtype 2 = delete-confirmed (see packets/3-4_char_manage_result.yaml; the 3/4 handler also
-      carries the same-day delete-cooldown). This committed 3/4 attribution is AUTHORITATIVE and is
-      NOT overwritten here.
-    - UNVERIFIED ALTERNATIVE: a fresh static read of the manage-response handler suggested the
-      delete result may instead arrive on S2C 3/7 (a manage-response that branches on the subtype
-      and formats the delete cooldown). This 3/7 reading is static-only and out of that lane's
-      outbound reach; it is recorded ONLY as an UNVERIFIED alternative pending a delete capture or
-      live read. Do NOT re-point the spec to 3/7 on static evidence alone. (Separately, note that
-      raw decompiler output is known to MISLABEL the 8-byte 3/4 manage handler as "3/7"; the genuine
-      3/7 opcode is SmsgCharSpawnResult -- see opcodes.md. The two 3/7 mentions must not be conflated
-      with that mislabelling.)
+  RESPONSE -- RESOLVED: the delete/manage RESULT arrives on S2C 3/7 SmsgCharManageResult, the
+  8-byte block (subtype 2 = delete-confirmed; the same handler carries the same-day delete-cooldown
+  and DECREMENTS the account char-count). See packets/3-4_char_manage_result.yaml (legacy filename;
+  it specs the 3/7 manage result). The earlier hedge -- "committed delete attribution stays 3/4
+  with an UNVERIFIED 3/7 alternative" -- is now SETTLED by the front-end deep-fidelity pass
+  (campaign4/frontend-deep), dispatch-table-confirmed: the minor-3 receive ladder routes minor 7 to
+  the 8-byte manage result, minor 4 to a variable SmsgSceneEntityUpdate, and minor 14 to a 16-byte
+  SmsgCharSpawnResponse enter bridge. The local-player world spawn is driven by 4/1, not 3/7.
 
   ROLE / SEQUENCE: the plain-select form (mode 0) pre-stages a slot; world entry is then driven by
   1/9 (cmsg_char_enter.yaml) -- selecting a filled slot emits 1/7 (mode 0/1 select), pressing Enter
@@ -71,7 +66,7 @@ notes: |
 
   UNKNOWNS (capture-only):
     - (RESOLVED) the delete mode-byte value is 1 (code-confirmed literal; the 2 alternative is refuted);
-    - whether the delete result arrives on the committed 3/4 (subtype 2) or the alternative 3/7;
+    - (RESOLVED) the delete result arrives on 3/7 SmsgCharManageResult subtype 2 (not 3/4);
     - whether the plain-select mode value is 0 for view and 1 for select-for-play, or another split;
     - whether any dedicated server reply exists for the plain-select form (none firmly attributed).
 
@@ -79,4 +74,4 @@ notes: |
   select-window net-busy latch.
 
   UNBLOCKS: Client.Application SelectCharacter + DeleteCharacter use-cases (slot pre-stage; delete
-  result via 3/4 subtype 2, pending the 3/4-vs-3/7 capture).
+  result via 3/7 SmsgCharManageResult subtype 2).

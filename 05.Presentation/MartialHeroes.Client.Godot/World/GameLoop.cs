@@ -53,6 +53,14 @@ public sealed partial class GameLoop : Node
     private TerrainNode _terrainNode = null!;
     private RealWorldRenderer? _realWorldRenderer;
 
+    // ---- Region tracking (for zone indicator) ----
+    // Legacy world XZ of the local player; updated on ActorMoved/LocalPlayerSpawned.
+    // Used to call RegionService.UpdatePosition each frame.
+    // spec: Docs/RE/specs/world_systems.md Ch. 16 — 256-unit region grid.
+    private float _localPlayerLegacyX;
+    private float _localPlayerLegacyZ;
+    private bool _hasLocalPlayer;
+
     // Stage-B: world-side effect renderer (3D particle/placeholder casts).
     // spec: Docs/RE/specs/effects.md §15.3 — action codes 0xC8/0xC9/0xCB; CODE-CONFIRMED.
     private EffectRenderer? _effectRenderer;
@@ -277,6 +285,21 @@ public sealed partial class GameLoop : Node
             GD.PrintErr($"[GameLoop] EffectRenderer init failed: {ex.Message}");
         }
 
+        // Load region data for the default starting area (area 0) alongside terrain boot.
+        // This is fire-and-forget: region files may be absent (VFS offline → Unknown zone, no crash).
+        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1–§16.2 — load once per area change.
+        _ = _clientContext.RegionService.LoadAreaAsync(areaId: 0).AsTask().ContinueWith(
+            t =>
+            {
+                if (t.IsFaulted)
+                    GD.PrintErr(
+                        $"[GameLoop] RegionService.LoadAreaAsync(0) failed: {t.Exception?.InnerException?.Message}");
+                else
+                    GD.Print("[GameLoop] RegionService: area 0 region data loaded. " +
+                             "spec: Docs/RE/specs/world_systems.md Ch. 16.");
+            },
+            TaskScheduler.Default);
+
         GD.Print("[GameLoop] Ready.");
     }
 
@@ -338,6 +361,22 @@ public sealed partial class GameLoop : Node
         {
             GD.PrintErr($"[GameLoop] _Process error: {ex.Message}");
         }
+
+        // ---- Region zone poll (once per frame, main thread) ----
+        // Calls RegionService.UpdatePosition with the local player's last-known legacy XZ.
+        // RegionService only fires ZoneChangedEvent when the zone actually changes.
+        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1 (256-unit grid lookup).
+        if (_hasLocalPlayer)
+        {
+            try
+            {
+                _clientContext.RegionService.UpdatePosition(_localPlayerLegacyX, _localPlayerLegacyZ);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[GameLoop] RegionService.UpdatePosition failed: {ex.Message}");
+            }
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -360,6 +399,18 @@ public sealed partial class GameLoop : Node
                 _actorRegistry.OnActorMoved(moved);
                 // Forward to HUD for minimap player-position tracking.
                 _hud.OnActorMoved(moved);
+                // Track local-player legacy XZ for RegionService zone polling.
+                // The local player is the first PlayerCharacter actor that was spawned.
+                // ActorMovedEvent does not carry a sort flag, so we rely on key match.
+                // We store the first move that updates the tracked key.
+                // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1 — legacy XZ lookup.
+                if (_hasLocalPlayer && moved.Key.Sort == MartialHeroes.Client.Domain.Actors.EntitySort.PlayerCharacter)
+                {
+                    var (fx, _, fz) = moved.MoveTarget.ToVector3Float();
+                    _localPlayerLegacyX = fx;
+                    _localPlayerLegacyZ = fz;
+                }
+
                 break;
 
             case ActorDespawnedEvent despawned:
@@ -427,6 +478,15 @@ public sealed partial class GameLoop : Node
 
             // ---- Local player spawn (3/7) ----
             case LocalPlayerSpawnedEvent localSpawn:
+                // Track local player legacy XZ for RegionService zone polling.
+                // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1 — legacy XZ for grid lookup.
+            {
+                var (spawnX, _, spawnZ) = localSpawn.Position.ToVector3Float();
+                _localPlayerLegacyX = spawnX;
+                _localPlayerLegacyZ = spawnZ;
+                _hasLocalPlayer = true;
+            }
+
                 // The local player materialized into the world: spawn the local avatar as an actor
                 // and notify the HUD so it can initialize HP/MP bars and minimap position.
                 // spec: Docs/RE/specs/login_flow.md §3.5 / §5.3 (3/7 SmsgCharSpawnResult → spawn).

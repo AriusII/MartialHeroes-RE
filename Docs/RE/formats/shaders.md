@@ -295,13 +295,129 @@ How it is used:
 
 ### C5.4 Recovered cel vertex-shader constants
 
-**Confidence: HIGH** (all float values were literal in code, decoded from their IEEE-754 bit
+**Confidence: HIGH** (all float values are literal in code, decoded from their IEEE-754 bit
 patterns; none required a debugger). Two sources feed the toon shaders: a block of float defaults
 pre-initialised by the renderer constructor, and a per-frame upload of vertex-shader constant
-registers `c4`–`c10`.
+registers `c4`–`c10`. Each register is uploaded as a four-component float vector with a
+"set-vertex-shader-constant" device call (count = 4 floats per register), the register index being
+the literal first argument to each upload. The values below were **independently re-confirmed** this
+pass by decoding the four 32-bit immediate stores that fill each register's source vector back to
+their IEEE-754 values — so the table is now bit-pattern-backed, not merely "recovered value".
 
 | Register | Recovered value | Role | Confidence |
 |----------|-----------------|------|------------|
+| `c4` | runtime-set light direction; **default `[-1, 0, 0, 0]`** | Configurable light direction. The per-frame upload reads three object slots (x, y, z) and forces w = 0 (a direction, not a point). The scene-object constructor pre-fills those slots with `[-1, 0, 0]` (a unit light direction down the −X axis); any later setter can overwrite the live value, but absent an override the default is `[-1, 0, 0, 0]`. | HIGH (mechanism + default recovered); live value runtime-set |
+| `c5` | `[0, 0, -1, 0]` | Axis / view-Z vector | HIGH |
+| `c6` | `[1, 1, 1, 1]` | White / material-ambient | HIGH |
+| `c7` | `[0, 0, 0, 0]` | Zero vector | HIGH |
+| `c8` | `[0, 1, 1, 1]` | Mask / partial-white | HIGH |
+| **`c9`** | **`[0.299, 0.587, 0.114, 1.0]`** | **Luminance weights — exactly the ITU-R BT.601 luma coefficients (R, G, B) with w = 1.0. Independently re-confirmed: the four float immediates that fill the c9 source vector decode to 0.299 / 0.587 / 0.114 / 1.0 from their bit patterns. This is the signature constant of the cel shader: the dot of the accumulated diffuse colour against `c9` produces the scalar N·L luminance that keys the toon-ramp lookup.** | HIGH (bit-pattern re-confirmed) |
+| `c10` | `[1, 1, 1, 1]` | White | HIGH |
+
+**Note on c9 ordering and a sibling constant.** The c9 register receives the BT.601 weights in **RGB
+order with w = 1.0** (the four immediate stores above). The image also carries a *separate*,
+unrelated luma constant in read-only data storing the same coefficients in **BGR order with w = 0**;
+that block is **not** what register c9 receives and must not be confused with it. Only the four
+immediate stores feed c9.
+
+**The c4 default — additional detail.** The constructor also pre-fills a *second* light/material
+vector (default `[0, 0, -1]`) with an accompanying `[1, 1, 1, 1]` colour. The c4 upload reads only
+the **first** slot, so c4's default is `[-1, 0, 0, 0]`; the second vector is not uploaded to the
+`c4`–`c10` block and is out of scope for the cel VS constants.
+
+### C5.5 Per-skin pixel-shader constants are a character-brightness colour-modulation system — NOT edge/outline params
+
+**Confidence: HIGH. Verdict: there is NO code-set edge-highlight, outline, or rim threshold/width
+constant anywhere in the cel constant block, the cel bind site, or the per-skin pixel-shader
+constant table.** This reclassifies the per-skin pixel-shader constants and removes a residual doubt
+about a hidden numeric "edge" parameter.
+
+What the per-skin pixel-shader constants actually are: once per skinned-character draw, two
+pixel-shader constant registers (registers 0 and 1) are uploaded from a **9-entry table** on the
+renderer object — one multiply triple and one add triple — selected by a per-character **state index**
+in the range 0..8. A display-config loader fills that table from an external display configuration
+file under keys of the form `DISPLAY_CHAR_BRIGHT_{MULTI|ADD}_{R|G|B}_{state}` for the nine states:
+
+| State index | State | Meaning |
+|------------:|-------|---------|
+| 0 | DEFAULT | normal character render |
+| 1 | CHOICE  | character is being selected / targeted |
+| 2 | HIT     | hit-flash |
+| 3 | ALPHA   | semi-transparent |
+| 4 | HIDDEN  | stealth / invisible |
+| 5 | POISON  | poisoned tint |
+| 6 | TYPE    | type / faction tint |
+| 7 | ANGER   | enraged tint |
+| 8 | AUTO    | auto-state tint |
+
+These are a **per-state character brightness / colour-tint modulation system** (a per-state RGB
+multiply plus a per-state RGB add applied to the character's pixels) — a tone/glow colour control,
+**not** an edge, outline, or rim parameter. The in-binary default (when no display config is present)
+is a white multiply `[1, 1, 1]` and a zero add for every state. The numeric per-state tweaks live in
+the external display configuration file, not in the executable.
+
+**Where the cel "outline" actually comes from.** The cel outline look is **not** produced by any
+numeric edge constant in code. It is the bright/edge render-target composite performed in the
+post-process chain (the final composite of the bright-extract render target combined with the bloom
+render target) together with the stepped tone bands baked into the toon ramp file. There is **no
+code-set edge threshold, outline width, or edge-detect constant to recover** — any such math, if it
+exists at all, lives only inside the external composite/cel pixel-shader source. The post-chain pass
+pipeline and its present-blend are owned by `specs/rendering.md`; this spec does not duplicate them.
+
+### C5.6 Load / bind flow + post-process gating (neutral prose)
+
+1. **Device creation** runs the full cel initialiser. It creates three offscreen render targets at
+   backbuffer size (with a 1024×1024 fallback) — a scene/cel RT, a bright/edge RT, and a downscaled
+   glow RT — and opens a render-to-surface helper for each (the post chain is documented in
+   `specs/rendering.md` §6).
+2. It loads the toon ramp LUT (`data/shader/toonramp.bmp`) into its dedicated slot (1-D N·L ramp,
+   bound to **texture stage 1**).
+3. It builds the inline cel vertex declaration (stream-0 stride 32: XYZ at 0, NORMAL at 12,
+   TEXCOORD0 at 24, plus the N·L luminance channel — see `specs/rendering.md` §5.2), then assembles
+   the five shaders in order: `dotoonshading.vsh` → `dotoonshading.psh` → `dotoonshading2.psh` →
+   `finaldx8.psh` → the editable-slot glow shader (default `power1dx8.psh`). Each is created as a
+   device vertex or pixel shader and stored on the renderer; the temporary assembly object is
+   released.
+4. **Per-frame use:** the cel constants `c4`–`c10` (including the BT.601 luma vector `c9`) are
+   uploaded each frame. Once per skinned-character draw, the cel bind site binds the toon ramp to
+   **texture stage 1**, sets the cel vertex shader, then sets the **stealth** cel pixel shader
+   (`dotoonshading2.psh`) when a per-character stealth flag is set, else the **normal** cel pixel
+   shader (`dotoonshading.psh`).
+5. **The whole cel path is gated on the post/offscreen enable flag (default OFF).** The skinned-draw
+   path tests the renderer's offscreen-render-target / post-process enable flag (pre-set to disabled
+   by the scene-object constructor) before taking the cel path. When that flag is off, the skinned
+   character is drawn through the **fixed-function fallback** with **no cel bind** — i.e. the toon
+   look is **coupled to the bloom/post feature being enabled**, and even skinned actors fall back to
+   fixed-function shading when post is off. When the flag is on, both the per-frame cel VS constant
+   upload and the per-draw cel bind (ramp + VS + normal/stealth PS) run.
+6. **Hot reload:** on a device reset, the partial reload re-assembles only the two cel pixel shaders
+   (and clears the stage-1 texture, vertex shader, and pixel shader) without touching the vertex
+   shader or the render targets.
+
+### C5.7 Campaign 5 / 5B known unknowns
+
+- **The actual `.psh` / `.vsh` shader-assembly source text** — external VFS files; not in the
+  executable. The exact per-instruction shader arithmetic (the N·L accumulation, the 1-D ramp lookup
+  math, and any composite/edge math) is recoverable only from the on-disk `data/shader/*.psh|vsh`
+  files. The `power1dx8.psh` internal `c0` scale and the `finaldx8.psh` composite arithmetic
+  (the `saturate(2·edge·c0 + bloom·c1)` form is a prior-lane summary, not re-derived) live there, not
+  in the binary. UNVERIFIED until the on-disk files are read.
+- **The numeric light-step threshold** — there is none in code; the quantisation lives in
+  `toonramp.bmp` (the number of tone steps and the per-step luminance thresholds are in the ramp
+  file's pixels, not in the executable).
+- **A distinct rim / outline / edge colour constant** — REFUTED in code (see §C5.5). There is no
+  numeric edge threshold, outline width, or edge-detect constant; the outline is the post-chain
+  bright/edge render-target composite, not a literal value.
+- **Exact `toonramp.bmp` pixel dimensions and band layout** — prior-lane comment says about
+  256×1×24 bpp; not re-measured (MEDIUM confidence). Confirmable by reading the on-disk file.
+- **The runtime light-direction value (`c4`)** — the default initializer `[-1, 0, 0, 0]` is now
+  recovered (§C5.4); the **live** value (if overwritten by gameplay/config) needs the running client
+  or whatever config feeds the light slot.
+- **The shipped per-state character-brightness numbers** — the `DISPLAY_CHAR_BRIGHT_*` 9-state
+  multiply/add table (§C5.5) defaults to white-multiply / zero-add in the binary; the actual shipped
+  per-state tints live in the external display configuration file, not in the executable.
+
+----------|-----------------|------|------------|
 | `c4` | runtime-set light vector | Configurable light direction (from an editable renderer slot; value set at runtime) | HIGH (mechanism); value runtime-set |
 | `c5` | `[0, 0, -1, 0]` | Axis / view-Z vector | HIGH |
 | `c6` | `[1, 1, 1, 1]` | White / material-ambient | HIGH |

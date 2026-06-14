@@ -111,8 +111,10 @@ public static class BgtextureLstParser
             int recBase = HeaderSize + i * RecordStride;
             ReadOnlySpan<byte> rec = span.Slice(recBase, RecordStride);
 
-            // kind u8 @ record +0. CONFIRMED (value 0x01); semantic UNVERIFIED.
-            // spec: Docs/RE/formats/bgtexture_lst.md §Record / body layout — kind u8 @ +0: CONFIRMED.
+            // kind u8 @ record +0. CONFIRMED (non-constant; 6 distinct values; render-mode tag).
+            // spec: Docs/RE/formats/bgtexture_lst.md §Record / body layout — kind u8 @ +0:
+            //   CONFIRMED (non-constant, 6 values). Render-mode selector, NOT a boolean animated flag.
+            // spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — "earlier boolean reading is retired".
             byte kind = rec[0];
 
             // rel_path char[47] @ record +1. Null-terminated, zero-padded. CONFIRMED.
@@ -125,7 +127,7 @@ public static class BgtextureLstParser
             records[i] = new BgtextureLstRecord
             {
                 Index = i,
-                Kind = kind,
+                KindRaw = kind,
                 RelPath = relPath,
             };
         }

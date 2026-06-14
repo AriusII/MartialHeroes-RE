@@ -941,3 +941,302 @@ Top-Orchestrator session, continued. Firewall held; build 0/0; ~1520 tests green
   / render-state cache / glow-bloom post chain (clean, firewall-verified).
 - **RESIDUAL:** build the ServerList + Loading Godot screens from the recovered display-lists; login bezel
   polish; waterfall; the 3/5-vs-4/1 live-debugger confirm (needs maintainer F9-launch).
+
+---
+
+## 2026-06-14 — CAMPAIGN VFS-DEEP: undocumented VFS file-format gaps closed (hybrid harness + READONLY IDA)
+
+Binary: `doida.exe` sha256 `63fcaf8e…`. Analyst: clean-room fleet (re-cleanroom-orchestrator → vfs-data-analyst ×8 harness + re-asset-format-analyst ×8 IDA, sub-waves of ≤3 on the single IDB; promotion via asset-spec-author ×14). The VFS *container* (`pak.md`) and ~21 prior formats were untouched — this wave targeted only the 13 undocumented extensions + 4 known parser debts surfaced by the 43,347-entry census. Firewall: all raw findings quarantined under `_dirty/campaign-vfs-deep/` (gitignored); every promotion was a REWRITE (self-scrubbed, zero Hex-Rays artifacts/addresses/payload bytes).
+
+- **RECOVERY (harness observation of maintainer's own VFS + READONLY IDA confirm):**
+  - `.scr` family — all 44 `data/script/*.scr` are BINARY fixed/variable-stride struct tables (never line-delimited): `citems.scr` 1052B×512 (cash items, NX price @+0x38, CONFIRMED); `items.scr` ~544–556B variable records (CP949 name/desc CONFIRMED, stats block UNVERIFIED); `events.scr` 520B×1848; `autoquestion_cl.scr` 92B×1300 client-side captcha (answer is server-side).
+  - `.mud` — per-cell **ambient-sound zone grid** (NOT terrain/water): 32768B = 64×64 tiles ×8B (bgm/bge/eff indices); world→tile = 16 units, `col+(row<<6)`, ×8. Both sources agree.
+  - `.tol` / **`region%s.bin`** — map-wide region-id byte grid (256 units/cell). `.tol` = authoring sidecar (origins in front header); the RUNTIME reads `region.bin` (origins trailing) — newly-discovered runtime format.
+  - `.pre` / `.post` — both proved **authoring sidecars the shipped runtime NEVER opens** (`.pre` = full standalone base-format file; `.ted.post` = full drop-in `.ted`). Engineering takeaway: no runtime parser needed.
+  - small `.xdb` — headerless fixed-stride arrays (actor_size 12×15, buff_icon_position 12×134, creature_item 48×921, effectscale 8×2, vehicle 52×58).
+  - `game.ver` 7×u32/28B (matches existing GameVerParser); `mobinfo.mi` 4B count + 28B×21 widget records (fields UNVERIFIED); `.lua` config keys (config/display/uiconfig).
+  - debts resolved: `.mot` LenStr CONFIRMED 4B u32 LE (no terminator); `.xeff` header is 8B and the old "type_flag@+0x08" is element-0 `emitter_type` (1=mesh,2=billboard) — NOT a tagged union; `.sod` quad trailing f32 @+32..+47 are a DEAD edge-line cache, not a plane equation; environment fog/colours packed as D3DCOLOR bytes, LINEAR fog range=s·3.0, too-dark = missing OPTION_BRIGHT ambient floor / K_ambient gate.
+- **CORRECTIONS to prior knowledge:** `.lua` files are CP949, NOT UTF-8 (refutes the earlier B4 note — `specs/lua-config.md §0`); `terrain.md §11` sod plane-equation reading retired; `effects.md` xeff header size 32→8.
+- **PROMOTION (committed specs):** NEW — `formats/scr.md`, `formats/items_scr.md`, `formats/events_scr.md`, `formats/text_tables.md`, `formats/mud.md`, `formats/region_grid.md`, `formats/mi.md`, `formats/game_ver.md`. EXTEND/FIX — `formats/xdb_tables.md`, `formats/terrain.md`, `formats/terrain_layers.md`, `formats/effects.md`, `formats/animation.md`, `formats/environment_bins.md`, `specs/lua-config.md`, `specs/environment.md`.
+- **RESIDUAL / debugger-pending:** `mobinfo.mi` 7-field semantics (UI-panel loader not statically located → live-debugger follow-up); `items.scr` stats block cross-family verify; environment `K_ambient` / `OPTION_BRIGHT` numeric defaults (debugger read). Format-concept glossary names (MudTile, MiWidgetRecord, region-grid, …) are address-less and were NOT added to `names.yaml` — they belong to a later IDB-annotation phase if pursued.
+
+## 2026-06-14 — CAMPAIGN 5: Map-Rendering & VFX fidelity (RE re-confirm + spec fills + C# wiring)
+
+Binary: `doida.exe` sha256 `63fcaf8e…`. Fleet: re-cleanroom-orchestrator (4 READONLY IDA lanes ≤3 concurrent: effects-runtime / render-pipeline / shaders / regions) + vfs-data-analyst (4 non-IDA fills) → asset-spec-author promotion; then clean-room engineers for the C# wiring. Firewall held: raw findings under `_dirty/campaign5/` (gitignored), zero Hex-Rays/addresses/payload bytes in committed files; every offset cites its spec.
+
+- **RE re-confirmed (already documented; no net spec change):** render pipeline draw-order (opaque→alpha-test→transparent→FX→post→UI, no back-to-front Z sort), cel/`dotoonshading` is the SKINNED-CHARACTER path (stride-32, TC1 = N·L luminance, ramp `data/shader/toonramp.bmp`, BT.601 luma c9 = [0.299,0.587,0.114]), 6-pass glow/bloom, regions = `region<area>.bin` byte grid (256u) → `regiontable` zone-type enum @+40 (1=PvP, 2=closed, 0=safe provisional). These were already in `specs/rendering.md`, `formats/shaders.md`, `specs/world_systems.md` Ch.16 from prior work.
+- **Spec FILLS this wave (committed):** `formats/effects.md` §E `particleEmitter.eff` (16B header magic 0x2711 + 2,243×52B records, stride anchor u16 @+0x10); `formats/terrain_layers.md` FX7 (VF_32) / FX4 (VF_44, single-sample UNVERIFIED); `formats/sky.md` `.box` → CONFIRMED-ABSENT (no `.box` in the 43,347-entry VFS; synthetic dome is the correct path); `formats/environment_bins.md` §1 `map_option` reconciled to 10×u32 (0x00 `MOVE_DUNGEON`, 0x04 `SIGHT_FIX`, … 0x20 `MAPHIDE`) — the old `water_enable`/`water_y` labels were a misread; **no water field exists in map_option**.
+- **C# WIRING (clean-room, build 0/0 + ~1484 tests green + headless RC=0):** corrected `XeffParser` 32→8-byte header to the spec (the VFS-DEEP spec fix had left the parser + `XeffJsonConverter` + `FrontEndEffectPlayer` + Mapping test fixtures broken — all reconciled); real `.xeff`-driven `EffectRenderer` (ArrayMesh billboard/mesh emitters + keyframe curves, placeholder fallback) replacing the orange-sphere stub; faithful cel-shading `CelShade.gdshader` + glow/bloom on `WorldEnvironment` (skinned characters only, per spec); `MapOptionBinParser` + consumers (`EnvironmentNode`, `WaterRenderer` placement, vfs-inspect decoder) corrected to the 10×u32 layout with sun/moon dome gating; region runtime (`VfsRegionSource` → `RegionService` → `ZoneChangedEvent` → HUD zone indicator), `ZoneType` in Shared.Kernel + `RegionCatalog` in Domain.
+- **RESIDUAL:** `EffectRenderer` carries a local 8-byte `XeffMiniParser` (functional) pending a switch to the shared `XeffParser`; full skill→effect resolution via `xeffect.lst`/`totalmugong.txt` left as a documented hook; `particleEmitter.eff` per-record field semantics + FX4 second-section boundary remain UNVERIFIED (single sample).
+
+## 2026-06-14 — CAMPAIGN VFS-DEEP-II lane I1: mobinfo.mi field-level enrichment (READONLY IDA + harness re-parse)
+
+Binary: `doida.exe` sha256 `63fcaf8e…`. Analyst: re-asset-format-analyst (READONLY static pass, no IDB writes, no debugger) + harness re-parse of the maintainer's single VFS sample (`data/ui/mobinfo.mi`, 592B); promotion via asset-spec-author. Firewall held: raw finding quarantined at `_dirty/campaign-vfs-deep-ii/ida/mi_loader.raw.md` (gitignored, addresses confined to its DEBUGGER PROBE block and NOT carried across); the committed promotion is a self-scrubbed REWRITE — zero Hex-Rays artifacts, zero addresses, zero payload bytes.
+
+- **PROMOTION (EXTEND):** `formats/mi.md` — re-stated with three independent confidence levels. Container = SAMPLE-VERIFIED (4B `recordCount` + 21×28B records, 7×u32 LE, exact 592B factorization). Per-field meanings upgraded from opaque to a PLAUSIBLE hypothesis table from a full 21-record re-parse: field0 = sequential ordinal; (field1,field2) = ±1 caption/text-id couple; field3/field6 = a small co-varying kind/link couple; (field4,field5) = decimal-packed icon/sprite ids (CONFIRMED NOT pointers; sibling delta +1 or +3 → packed (base,range), not adjacent atlas cells); `0xFFFFFFFF` = none-sentinel (fields 1/2/5/6, never field0). All field meanings remain parser-UNVERIFIED.
+- **LOADER: UNRESOLVED (static) → LIVE-DEBUGGER-PENDING.** Re-confirmed statically unlocatable: no `.mi`/`mobinfo` path literal (only an unrelated MSVC CRT section-name false positive); opened via the generic by-name VFS reader with a non-literal path; the 28-byte stride sweep is swamped by ~28-byte MSVC `std::string` arrays; the located mob-info panel *renderer* uses hard-coded caption ids + screen coords and is NOT the `.mi` consumer (the file's data values never appear as code immediates → read at runtime). Added a neutral-prose LIVE-DEBUGGER PROBE PLAN (no addresses): breakpoint the by-name VFS open router + load-whole-file helper, filter for a path ending `mobinfo.mi` (trigger by targeting a monster), capture the return frame as the real loader, read the 592B buffer, single-step the consume loop to bind each of the 7 u32 fields — expected to upgrade fields 0–6 PLAUSIBLE→CONFIRMED.
+- **RESIDUAL / debugger-pending:** `mobinfo.mi` 7-field semantics + loader identity (the live-debugger pass above is the required next step); single-sample, so stride/header invariants are uncross-checkable. Provisional glossary names (`MiPanelDescriptor`, `MiWidgetRecord`, `EntryId`/`CaptionId`/`KindOrLink`/`IconId`/`LinkOrNext`, …) are address-less and NOT added to `names.yaml` — they belong to a later IDB-annotation phase if pursued.
+
+## 2026-06-14 — asset-spec-author (campaign-vfs-deep-ii residual promotion)
+- binary: none (firewall bridge — no IDA; promoted a black-box harness note, no decompiler input)
+- tool: VFS harness full-record scans (no decompiler); neutral rewrite only
+- analyzed: bgtexture.lst `kind` byte (full scan of both shipped instances, 2,330 records); the
+  five small `.xdb` tables (actor_size, buff_icon_position, effectscale, vehicle, creature_item)
+  by full-record per-column statistics.
+- specs produced/updated:
+  - Docs/RE/formats/bgtexture_lst.md (CORRECTED — `kind` is NOT constant 0x01: promoted to a
+    material render-mode tag with a value→mode table 0x01 static / 0x02 scroll / 0x0A grass /
+    0x0B plant / 0x0C tree-bark / 0x14 foliage, HIGH; mirrored the correction onto bgtexture.txt
+    col1; updated banner + Known unknowns)
+  - Docs/RE/formats/xdb_tables.md (LANDED — actor_size scale_a/scale_b axis inference;
+    buff_icon_position buff_id non-contiguous RESOLVED + sprite_y confirmed pixel-Y;
+    effectscale key hi16 type-tag / lo16 index; vehicle tag_b constant table-stamp +
+    tag_a 3-family discriminator + param_1 always-zero + params 0/2 rider X/Z offset;
+    creature_item attach_probability_f32 + four independent u8 flags + probability const 100 +
+    scale_or_radius two-level collision radius)
+- notes: One residual-promotion wave correcting and characterizing previously UNVERIFIED columns.
+  Firewall held — neutral prose and tables only, no addresses, no pseudo-code, no sample bytes.
+  Concept names flagged for names.yaml (KIND_* render modes, VehicleXdb.tableStamp,
+  CreatureItemXdb.collisionRadius / attachProbability) but NOT written there (orchestrator-owned).
+
+## 2026-06-14 — asset-spec-author (promotion: per-zone sound index tables)
+
+- source (dirty, gitignored): `Docs/RE/_dirty/campaign-vfs-deep-ii/harness/mud_sound_tables.raw.md` (black-box VFS-census harness, no decompiler; IDA cross-check NOT yet staged)
+- method: rewrite-not-copy promotion of harness findings into neutral committed specs
+- specs updated:
+  - `Docs/RE/formats/sound_tables.md` — EXTENDED with the harness-measured on-disk layout: 5 table types (`.bgm`/`.bge`/`.eff`/`.wlk`/`.run`) × ~60 areas (~300 files) under `data/mapNNN/soundtableNNN.*`; **on-disk record stride CORRECTED 48 → 52** (256 records × 52 = 13312, exact division — SAMPLE-VERIFIED across ~300 tables); record now resolved as `sound_entry_id` u32 @+0x00, 24-byte mask @+0x04 (semantics UNVERIFIED), `weight` f32 @+0x1C, EFF-only 3D position `pos_x/pos_y/pos_z` @+0x20/+0x24/+0x28 and `radius` @+0x2C, `tail_unknown` 4 bytes @+0x30 (UNRESOLVED); the prior 48+1024 "editor-metadata" split preserved as a provenance/conflict note; full `.mud`-byte → table-row → `data/sound/{2d|3d}/{sound_id}.ogg` resolution chain wired (0-based direct index).
+  - `Docs/RE/formats/mud.md` — replaced the "BGM/BGE/EFF table sources not traced" known-unknown with the confirmed resolution chain to `sound_tables.md`; recorded the **bytes-0/1 walk/run hypothesis** (byte 0 → `.wlk`, byte 1 → `.run`; previously "reserved") as **PLAUSIBLE**, with a one-line harness/debugger re-verify request (breakpoint the footstep trigger, confirm it indexes `.wlk`/`.run` by mud byte 0/1).
+- confidence: stride=52 / 256 records / sound_id @+0x00 / 0-based direct index / leaf-dir-by-extension = SAMPLE-VERIFIED; 24-byte mask semantics, EFF tail bytes, and the mud bytes-0/1 walk/run source = UNVERIFIED/PLAUSIBLE (flagged for IDA cross-check).
+- firewall: committed files scrubbed — zero addresses / Hex-Rays tokens / autonames / payload bytes. Dirty source left intact.
+- names flagged for names.yaml (orchestrator-owned, NOT edited here): `soundtable_bgm/bge/eff/wlk/run`, `SoundTableRecord` (+ field set), `SOUNDTABLE_FILE_SIZE/RECORD_COUNT/RECORD_STRIDE`; `MudTile` byte-0/1 renamed `wlkZoneId?`/`runZoneId?` (PLAUSIBLE).
+
+## 2026-06-14 — CAMPAIGN VFS-DEEP-II lane I4: terrain height axis + texture idx-1 resolved
+
+- **Spec authoring** (dirty -> clean promotion via re-promote firewall; source note left intact under
+  `_dirty/campaign-vfs-deep-ii/ida/` as gitignored provenance). Three committed specs updated:
+  `Docs/RE/formats/terrain.md`, `Docs/RE/specs/asset_pipeline.md`, `Docs/RE/formats/terrain_layers.md`.
+- **AXIS (terrain.md §5.2) — UNVERIFIED -> PARSER-VERIFIED (CONFIRMED), no residual.** The `.ted`
+  height grid is row-major with **X = column** (inner/fast, stride 1) and **Z = row** (outer/slow,
+  stride 65): `heights[row * 65 + col]`. Proven from the loader's mesh-build nested-loop index
+  arithmetic (`row * 65 + col`) correlated with per-vertex world-X/Z coordinate stamping against the
+  cell-origin bases; corroborated by the independent seam-continuity sample test. Converter (Assets.
+  Mapping terrain -> glTF) may drop the axis caveat.
+- **TEXTURE INDEX (asset_pipeline.md §B; terrain.md §5.6) — raw-vs-`idx-1` CONFLICT resolved to
+  `idx-1`, HIGH.** Per-cell `.ted` texture byte is 1-based; texture resolves as
+  `per_cell_texture_list[byte - 1]`, byte 0 = no-texture sentinel. On-disk block-3 bytes are 1-based
+  (observed 1..11, never 0); the per-cell list is built 0-based by `TEXTURES{}` registration order,
+  forcing the -1 — mirroring the already-CONFIRMED BUILDING `tex_id - 1` path. terrain_layers.md
+  known-unknown #12 aligned to the same resolution.
+- **RESIDUAL (honest, thin):** the literal `- 1` instruction was not pinned to a single site because
+  the draw path resolves patches to texture-node pointers at cell-attach (not re-subscripted per
+  frame); the mapping is structurally certain (HIGH) but the instruction-exact decrement site is the
+  one residual (debugger-pending). The axis finding has **no** residual.
+- **Firewall:** self-scrub PASS — zero decompiler autonames, pseudo-types, mangled symbols, or
+  binary addresses in the committed prose; working symbols and addresses stayed in `_dirty/`.
+
+## 2026-06-14 — asset-spec-author
+- binary: doida.exe (Main.exe) — promotion from neutral `_dirty/` analyst notes only
+- tool: none (firewall bridge — no IDA; rewrote neutral analyst notes by hand)
+- analyzed (by canonical name): MotionClip `track_descriptor`; authoring sidecars `pre` /
+  `post` families (`sod_pre_polygon_list`, `fxN_pre_record_extra`)
+- specs produced/updated:
+  - `Docs/RE/formats/animation.md` — promoted `track_descriptor` upper-3-byte finding to
+    CONFIRMED (loader-direct + sample): low byte = `bone_id`, bits 8–31 reserved/unused padding.
+    Added a byte-decomposition subsection that positively REFUTES the three candidate
+    interpretations (key/keyframe count → driven by separate `key_count`; channel/component mask →
+    fixed unconditional 7-float keyframe; interpolation flag → chosen at runtime sampler). Updated
+    status-summary and resolved-unknowns rows.
+  - `Docs/RE/formats/authoring_sidecars.md` — NEW consolidated index of the content-pipeline
+    sidecar families the shipped runtime never opens. KEY RULE: no `.map` `DATAFILE` ever names a
+    `.pre`/`.post` (incl. the single `.fx7.pre` cell), so `Assets.Parsers` needs no runtime parser.
+    Lands the deep-pass `.sod.pre` lean multi-polygon layout (VERIFIED across 848 files:
+    `u32 polyCount`, per-poly `u32 vertexCount (3..7)` + `vertexCount × (f32 X, f32 Z)`, no Y) and
+    the `.fx<N>.pre` extended 24-byte record header (6 floats) + wider vertex stride (44 vs 36,
+    SAMPLE-UNVERIFIED). Cross-references `terrain.md` §5.10/§8/§10/§11/§16 and
+    `terrain_layers.md` §4/§5 rather than duplicating block tables; reconciles the
+    `terrain_layers.md` §4 single-polygon table as the `polyCount == 1` slice.
+  - `Docs/RE/formats/terrain.md` — added a §16 forward cross-reference to the new sidecar index.
+- notes: self-scrub PASS — zero decompiler autonames, pseudo-types, mangled symbols, or binary
+  addresses in committed prose; `.sod.pre` size formula `4 + Σ(4 + vertexCount×8)` reconciles the
+  observed file sizes (e.g. 40 = 4 + (4 + 4×8)). Names flagged for `names.yaml` (orchestrator-owned):
+  `pre`, `post`, `sod_pre_polygon_list`, `fxN_pre_record_extra`. `_dirty/` sources left intact.
+
+
+---
+
+## 2026-06-14 — config_tables.md: full-record value-distribution promotion (constants -> variables + meanings)
+
+- **Dirty source (gitignored, intact):** `Docs/RE/_dirty/campaign-vfs-deep-ii/harness/config_constants.raw.md`
+  (black-box full-record harness pass over real VFS bytes; no IDA).
+- **Committed spec updated:** `Docs/RE/formats/config_tables.md` (rewritten, never copied; neutral prose + tables).
+- **5 constant->variable corrections** (prior "constant" claims were small-sample artifacts; corrected to
+  variable with the full-record range/distribution, each marked CONFLICT-PENDING pending an IDA loader witness):
+  - skills.scr +1072 (was const 0x00003000 -> interior of a CP949 string field, 54 distinct values)
+  - skills.scr +1176 (was const f32 1.0 -> 8 float values 0.4-2.0; PROPOSED per-tier rate multiplier)
+  - skills.scr +1306 (was const u16 7 -> 10 values, modal 5; PROPOSED max-tier / combo-depth enum)
+  - skills.scr +1328 (was const 0x00010000 -> 8 values (1<<16)..(8<<16); PROPOSED stance/school bitmask)
+  - mobs.scr +60 (was const f32 3.0 -> 31 values 0.5-400; PROPOSED aggro radius / move-speed base),
+    mobs.scr +188 (was const f32 1.0 -> 41 values; PROPOSED HP/combat multiplier),
+    mobs.scr +272 (was "6x1.0" -> 0/3997 records all-1.0; variable region). [counts as the 3 mobs corrections]
+- **Proposed meanings recorded at honest confidence (no overclaim):** exp.scr +2=64 (EXP-rate divisor /
+  sub-system cap, LOW); userpoint.scr +2=25 (character-creation stat-point budget, MEDIUM); exp.scr +12 / +16
+  (secondary/tertiary advancement-track EXP thresholds, MEDIUM); skills.scr +260 (type/version sentinel, MEDIUM);
+  mobs.scr +19 (spawn-zone label, HIGH); mobs.scr +296..+308 (two symmetric spawn variance pairs 0.95/1.05 +
+  1.0 sentinel, uniform across all 3,997 records, HIGH); products.scr body fully structured into zones A-G new
+  Section 2.18 (ingredients / quantities / outputs / costs / prerequisites / type; HIGH structure / MEDIUM names).
+- **Names flagged for names.yaml (orchestrator to apply):** exp_rate_divisor_or_cap, secondary/tertiary_
+  advancement_exp_threshold, creation_stat_budget, spawn_zone_label, spawn_stat_variance_{center,low,high,low_2},
+  recipe_output_quantity, recipe_crafting_fee, recipe_type_flag.
+- **Firewall:** self-scrub PASS — zero decompiler autonames, pseudo-types, mangled symbols, addresses, or pasted
+  payload hex in the committed prose. Dirty note left intact as provenance.
+
+## 2026-06-14 — VFS-DEEP-II residual text-surface promotion (asset-spec-author)
+
+Promoted from gitignored dirty note `_dirty/campaign-vfs-deep-ii/harness/text_residual.raw.md`
+(black-box harness observation of the maintainer's legally-owned VFS; no IDA used). Rewrite, not
+copy; firewall self-scrub PASS (zero autonames / pseudo-types / addresses in the committed prose).
+
+- **NEW: `Docs/RE/formats/items_csv.md`** — `data/script/items.csv`, the only `.csv` in the VFS:
+  comma-delimited, **LF-only**, CP949, no header, ~33 MB. Documents the column layout (name, id,
+  description, archetype/type ids, wide numeric stat tail) and PROMINENTLY flags the two CONFIRMED
+  parser hazards: (A) embedded commas inside the unquoted CP949 name (col 0) and description (col 2)
+  — a naive `Split(',')` corrupts alignment, so the spec gives a numeric-anchor field-splitting rule;
+  (B) at least one numeric column is a float with a period decimal (e.g. `0.26`) — an integer-only
+  parse inserts a phantom column. Includes a hazard-safe parsing recipe and the items.scr relationship
+  (probable authoring/text-parallel export vs binary runtime db; cross-key on item_id, UNVERIFIED).
+- **EXTEND: `Docs/RE/formats/text_tables.md`** — `emoticon.txt` resolved to **12-column CONFIRMED**
+  (count-prefix; emote_id, emote_name(CP949), enter_state, next_state, 8× anim_id per class group;
+  state-machine cols 2/3 HIGH, exact transition semantics IDA-pending). `userjoint.txt` resolved to
+  **5-column CONFIRMED** (count-prefix 40; bone-index-vs-offset of cols 1–4 stays UNVERIFIED, IDA
+  needed). `weather{N}_rain.txt` promoted §4.5 from UNVERIFIED to **CONFIRMED** (identical schema to
+  base `weather{N}.txt`; differs only in cell values). `bmplist.txt` §3.6 alternating-line model
+  CONFIRMED (even line = sequential 0-based ordinal) with the new `.txt`(runtime count) vs `.lst`
+  (binary count, 30-byte stride) 8-record discrepancy documented (counts kept in dirty note, not
+  transcribed). `sameemoticon.txt` promoted to CONFIRMED (§5.3, 2-col, no header/no count prefix).
+- **RE-CONFIRM: `Docs/RE/formats/scr.md`** — all 44 `.scr` plus the one `.sc` sibling are BINARY
+  fixed-stride tables; there is NO line-delimited/text-mode `.scr`. Re-verified this wave by head-byte
+  hexdump of a random sample (non-printable binary at offset 0 on every file). Status CONFIRMED.
+- **Names flagged for `names.yaml` (orchestrator-owned):** `items_csv_table`, plus already-proposed
+  `emoticon_table`, `user_joint_table`, `same_emoticon_alias_table`, `bmp_texture_manifest`,
+  `sky_weather_grid`.
+
+## 2026-06-14 — asset-spec-author
+- binary: doida.exe (campaign VFS-DEEP-II lane I2 — environment lighting apply-path)
+- tool: none (firewall bridge — no IDA; rewrote one neutral analyst note, addresses quarantined in
+  the dirty note's DEBUGGER PROBE block and NOT carried across)
+- analyzed (by canonical name): environment lighting apply-path — ambient gate `K_ambient`, ambient
+  base colour, `OPTION_BRIGHT` brightness slider, device ambient render-state path
+- specs produced/updated:
+  - Docs/RE/formats/environment_bins.md (§10.4 / §10.5 / §10.7 + Status block, Overview, family-level
+    known-unknowns #11, cross-refs)
+  - Docs/RE/specs/environment.md (§6.2a / §6.2b / §6.4 + §1.1 step 4, §3.2 step 5, §5.2, §7 fallback,
+    §8 known-unknowns #11, Status block, cross-refs)
+- notes: Promoted the lighting apply-path recovery that resolves the long-standing UNVERIFIED ambient
+  numeric defaults behind the "EnvironmentNode too dark" debt. Three promotions, statically proven:
+  (1) the ambient gate `K_ambient` is a static 0.0 float with exactly one reader and zero writers ⇒
+  the per-keyframe §B ambient term is always ×0 (inert); the prior "sky-detail option writes it"
+  hypothesis is DENIED. (2) the ambient base colour is static (0,0,0), then driven by a per-keyframe
+  byte colour table. (3) `OPTION_BRIGHT` default is 100, not the previously assumed ~50 (INI default
+  arg 100, clamp [1,100]→100); device additive offset = floor(bright/100×255), so at default the
+  device ambient is full white (255,255,255). Spec consequence stated for the Godot layer: the modern
+  ambient floor should DEFAULT to 1.0 (full), not 0.5 — the concrete root-cause fix for the too-dark
+  scene. One thin residual kept UNVERIFIED: whether a user's on-disk DoOption.ini overrides the 100
+  default at runtime (described as a neutral one-time runtime read; no addresses in the spec). Firewall
+  self-scrub PASS — zero autonames / pseudo-types / addresses in either committed file.
+- Names flagged for `names.yaml` (orchestrator-owned): `K_ambient` (ambient gate multiplier),
+  `OPTION_BRIGHT` (brightness slider) — both already listed for canonicalisation in earlier entries.
+
+## 2026-06-14 — CAMPAIGN 5 (Map Rendering & VFX Fidelity — deepening) — Tier-1 orchestrator
+- binary: doida.exe @ 63fcaf8e
+- tool: IDA Pro via MCP (static READONLY for recovery; serialized WRITE for the IDB-annotation phase);
+  Godot 4.6.3-mono headless verify; dotnet build/test. Addresses quarantined in `_dirty/campaign5b/`,
+  never carried into any committed file.
+- scope: eliminate residual doubt on the map subsystems (effects/VFX, cel-shading/render pipeline,
+  regions/triggers, skybox, music, water) — RE re-confirm + corrections, clean-spec upgrades, C# wiring,
+  and IDB legibility.
+
+### Deep RE closure — per-target verdicts (neutral prose; recovered facts only)
+- Effect resolution: CONFIRMED the runtime resolves a descriptor through a boot-populated registry keyed
+  by the RAW effect_id (the .xeff header's first u32). REFUTED the `{id}.xeff` filename-sprintf / numeric
+  fallback model, and REFUTED the "resource_id − 10000" particle-index guess (resource_id is the verbatim
+  particleEmitter key).
+- particleEmitter.eff: REFUTED the flat 16B+52B×N table. CORRECTED to variable-length entries (28-byte
+  header {entry_id, num_frames, sprite_size_x/y, max_particles} + num_frames×52B sub-record + 64B texture
+  name; loop until num_frames==0). The apparent "magic 0x2711" was entry_id=10001. The 52B sub-record's
+  fields past the +0x08 colour quad remain UNRESOLVED.
+- FX4 terrain layer: RESOLVED (u32 tileCount; per tile a fixed 48-byte header with vertexCount@+0x28,
+  indexCount@+0x2C, VF_44 vertices, u16 indices) — the earlier "second-section boundary" was moot.
+- Cel/toon: CONFIRMED the luma projection c9 = BT.601 [0.299,0.587,0.114,1.0]; recovered the c4..c10 toon
+  constant block (default toon light direction [-1,0,0], distinct from the scene directional light).
+  REFUTED any code-set edge/outline constant — the "outline" look is produced by the post bright/glow RT,
+  not the cel shader. The cel path is bound to SKINNED actors only.
+- Bloom/post: CONFIRMED single-tap (only the power1 pass runs; power2/power4 are absent from the binary),
+  NO bright-pass threshold, composite ≈ base×0.5 + glow×0.5, opaque present (ONE/ZERO). 4 render targets
+  total (1 shadow + 3 glow/cel); NO water-reflection RT.
+- Regions: zone-type enum CONFIRMED-COMPLETE {0 safe, 1 open-PvP, 2 closed}. The regiontable record is
+  {zoneName[40]; zoneType@+40; _tail@+44} (48B × 32). Quest/event triggers are server-authoritative, NOT
+  encoded in client region data.
+- Water: CONFIRMED-NEGATIVE — the original has no water plane, no reflection, no refraction; "water" is
+  generic transparent fx1..fx7 terrain overlay layers, and OPTION_WATER is a dead slider. The Godot water
+  plane is therefore a documented PORT CHOICE, not a 1:1 feature.
+- Sky: sun/moon are billboards orbiting angle=(tod/86400)×360° (sun X=sin×−3200, moon X=sin×+3200, moon
+  phase floor((day mod 30)/2)→moon0..14.dds); the directional light itself stays static. The sky `.box`
+  is CONFIRMED-ABSENT (the synthetic dome is correct).
+- Music: per-map soundtable<id>.{wlk,run,bgm,bge,eff} (256×52); driven per-frame by the `.mud` cell byte
+  at +2 (music-zone id) → `.bgm` cross-fade, with an indoor override; regions do NOT drive music.
+- specs upgraded: Docs/RE/formats/{effects.md §E/§C.2/§F, terrain_layers.md §1.11, shaders.md §C5.4-7,
+  sky.md §D, environment_bins.md §1.4, region_grid.md}; Docs/RE/specs/{effects.md, rendering.md §4-8,
+  world_systems.md Ch.16-17}.
+
+### C# wiring (clean-room engineers, layer ledgers; every offset cites // spec:)
+- Layer 03 (Assets.Parsers): NEW ParticleEmitterParser (corrected variable-length layout; unresolved
+  sub-record bytes preserved verbatim), TerrainLayerParsers.ParseFx4 (48B header), XobjParser
+  .ParseAsMeshParticle (24-byte stride) — +37 xUnit tests.
+- Layer 05 (Client.Godot): EffectRenderer unified onto the shared XeffParser (private mini-parser
+  deleted; alpha-inversion / total-time / UV-scroll derivation preserved) and given the effect_id
+  registry (xeffect.lst → header-keyed map, numeric fallback documented); CelShade.gdshader /
+  CelShadeMaterialFactory set to the recovered toon constants (no fabricated edge term); EnvironmentNode
+  glow corrected to single-tap / no-threshold / 0.5-mix; RealWorldRenderer wires the previously-DEAD
+  per-cell water detection (CellHasWater) so water actually renders. No `using Godot;` below layer 05.
+
+### IDB annotation (serialized single-writer)
+- Applied 22 sub_XXXX→canonical renames + 4 overwrite-refinements + 53 neutral comments + 2 types
+  (struct RegionRecord, enum RegionZoneType) across the effects/render/regions/sky/audio clusters; the
+  headline correction re-labels the render-state setter previously called "fill-mode" as a Z-write-DISABLE
+  setter (byte-proven). A cluster worker confabulation was caught by the orchestrator's post-apply
+  read-back gate and corrected from the gate-passed manifest. IDB saved (never committed). `names.yaml`
+  synced in this entry's companion edit (Campaign-5B block + the two overwrites).
+
+### Verification (gate)
+- Build: 0 errors from a FROM-SCRATCH clean rebuild. NOTE: this environment's incremental build proved
+  unreliable — it masked and surfaced errors inconsistently, so authoritative verdicts required deleting
+  bin/obj. En route, 5 PRE-EXISTING latent build debts (uncommitted, hidden by incremental caching) were
+  fixed: two stale test files reconciled to corrected models (SoundTable 52B stride / ItemsScr Model-A),
+  an ItemsScrParser iterator/Span issue (CS4007), and an ItemsCsvParser nullable-reference misuse (CS1061).
+- Tests: 1593 xUnit pass / 0 fail across 10 suites (Parsers 617). Two area-2 BGM smoke tests surfaced a
+  genuine `.bgm`-vs-`.eff` field-layout conflict (an id field reads 0x3F800000 = the IEEE-754 bit pattern
+  for 1.0f) — deferred + documented in-test and routed to a spec-author; not a campaign regression.
+- Headless: Godot 4.6.3 loads and runs 200 frames with zero SCRIPT ERROR / exception.
+- Firewall: PASS (clean-room-firewall-check exit 0 tracked+staged; leak_scan 0 HIGH; no `_dirty/` tracked;
+  no `.cs` cites `_dirty/`; no originals staged).
+- Architecture: the downward-only DAG and engine-free core hold (engine-free parsers, global::Godot.*
+  qualified, .Pipelines naming, Assets.Mapping bridge — all PASS). The dependency checker additionally
+  flags 5 PRE-EXISTING reference-table edges (Application→Protocol/Crypto, Diagnostics→Kernel,
+  Infrastructure→Parsers/Vfs) — all downward and acyclic, NONE introduced by this campaign.
+- Residual doubt (documented, not closed): particleEmitter 52B sub-record inner fields; external
+  `.psh`/`.vsh` arithmetic + toonramp.bmp quantisation bands + shipped glow config (these live in VFS
+  files, not the binary — recover via asset-chain-trace, not IDA); sun/moon vertical-arc math; lens-flare
+  anchor projection; the `.bgm` soundtable field-layout conflict above.
+
+## 2026-06-14 — CAMPAIGN 6 (IDA-only total IDB legibility): W1-W3 + library-ID + struct types (WRITE to IDB)
+- binary: doida.exe @ 63fcaf8e (sha256 == names.yaml pin)
+- tool: IDA Pro 9.3 via MCP (mcp__ida__*), heavy IDAPython batch (profile / RTTI harvest / call-graph / cluster / annotate / type-apply / pull)
+- scope: industrial IDB legibility. Live census re-pinned the denominator at ~21,075 anonymous sub_ (the prior "4,897 named" ROADMAP figure was stale — prior-campaign IDB writes largely absent from the current i64). Profiled all 22,273 unnamed functions, harvested 431 MSVC RTTI classes (real demangled C++ names) + a 62,410-edge call-graph, partitioned into 16 subsystem clusters by anchor/RTTI/import/string seeds + call-graph propagation.
+- IDB writes (every wave: dry-run -> apply, idempotent, additive, single serialized writer; re-census TRIPWIRE = 0 library functions renamed across the whole campaign; ~2,097 functions confirmed named):
+  - W1 (RTTI class layer): 1,537 functions — vtable-slot functions + 615 ctors across 368 classes; the Diamond:: GU UI hierarchy's 14 vtable slots given behavioural names (setVisible/hitTest/onEvent/onDraw/onUpdate/computeTransform/...) inherited by ~400 derived widget classes.
+  - W2 (crypto / vfs / parsers): 277 — incl. the in-binary FLINT bignum library (the RSA modular-exp substrate) identified to its operators, the DiskFile text-stream family, and asset-parser entry points.
+  - Library-ID pass: 132 functions tagged <Lib>__ (CxImage / STL / Boost / Lua / libjpeg / XTrap); 572 total third-party functions identified and excluded from the game-code clusters. Finding: the big clusters (ui-hud, residual) are GAME-code mis-clustering by call-graph propagation, not third-party libs.
+  - W3 (anim / render / scene): 158 — PoseNode/skinning + the AnimCatalog appearance-id resolver, render-pass callbacks + particle/FX runtime, the scene state-machine + the GameState/EngineView/TickScheduler objects + three C2S transition opcodes.
+  - Struct-type pass: 12 structs declared in the local TIL and applied — 110 functions this-typed + 4 globals typed (g_GameState / g_EngineView / g_VfsTocBase / g_VfsTocCount); Hex-Rays field-name propagation verified.
+- specs produced/updated: Docs/RE/names.yaml — 2,110 names synced from the annotated IDB (cumulative ~2,513). No other committed spec changed this campaign (W1-W3 = IDB legibility only; struct layouts are staged in _dirty/campaign6/comprehension/*/types.proposed.md for later promotion to Docs/RE/structs/). Working artifacts gitignored under _dirty/campaign6/.
+- notes: neutral-prose firewall held (zero pseudo-C / autoname / raw-address tokens in any committed file; a comment-sanitiser neutralised one leaked dword_ reference). Cartography is best-effort — propagation over-attributes the large clusters, handled by per-lane analyst flagging rather than perfect clustering. Source of truth = doida.exe; the annotated IDB is the deliverable and is never committed.

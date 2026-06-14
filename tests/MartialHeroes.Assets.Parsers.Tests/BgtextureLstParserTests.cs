@@ -108,7 +108,10 @@ public sealed class BgtextureLstParserTests
         BgtextureLstCatalog cat = BgtextureLstParser.Parse(new ReadOnlyMemory<byte>(buf));
 
         BgtextureLstRecord rec = cat.Records[0];
-        Assert.Equal(0x01, rec.Kind);
+        Assert.Equal(0x01,
+            rec.KindRaw); // spec: Docs/RE/formats/bgtexture_lst.md §Record / body layout — kind u8 @ +0: CONFIRMED
+        Assert.Equal(BgTextureKind.Static,
+            rec.KindEnum); // spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — 0x01 = KIND_STATIC: HIGH
         Assert.Equal("terrain/g3", rec.RelPath);
     }
 

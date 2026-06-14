@@ -10,7 +10,9 @@
 > `weather%d_rain.bin`. The closely related per-map directional-light, point-light, and wind
 > files (`light%d.bin`, `point_light%d.bin`, `wind%d.bin`) are formally specified in
 > `Docs/RE/formats/terrain_layers.md §6–8`; supplementary sample-verified corrections to
-> those sections are noted at the end of this document (§9).
+> those sections are noted at the end of this document (§9). The **colour domains** of these
+> fields (which colours are byte D3DCOLOR vs. float [0,1]) and how they feed the runtime
+> lighting/fog math are pinned in §10 and consumed by `Docs/RE/specs/environment.md`.
 
 ---
 
@@ -18,9 +20,9 @@
 
 | Attribute         | Value |
 |-------------------|-------|
-| `status`          | `sample-verified` for `map_option%d.bin`, `fog%d.bin`, `material%d.bin`, `stardome%d.bin`, `clouddome%d.bin`, `cloud_cycle%d.bin`; `partial` for `weather%d.bin` / `weather%d_rain.bin`; water renderer: **RESOLVED-NEGATIVE** (see §1.4) |
+| `status`          | `sample-verified` for `map_option%d.bin`, `fog%d.bin`, `material%d.bin`, `stardome%d.bin`, `clouddome%d.bin`, `cloud_cycle%d.bin`; `partial` for `weather%d.bin` / `weather%d_rain.bin`; water renderer: **RESOLVED-NEGATIVE** (see §1.4); lighting apply-path numeric defaults: **CONFIRMED** (see §10.4–§10.5, §10.7) |
 | `sample_verified` | `true` — formats confirmed against real sample files extracted from the live VFS for areas 0 and 1, with additional spot-checks across areas 4–35 for `map_option`. `weather` samples are zero-dominated; full decode awaits an area with active precipitation. |
-| `binary_analysed` | `doida.exe` (legacy 32-bit client build, x86 LE) — used to identify the sky-init call chain, file-read sequences, GRSFog/GRSLighting struct offsets, and exhaustive cross-reference scan confirming the water-renderer negative result. No addresses appear in this spec. |
+| `binary_analysed` | `doida.exe` (legacy 32-bit client build, x86 LE) — used to identify the sky-init call chain, file-read sequences, GRSFog/GRSLighting struct offsets, the lighting/ambient apply-path, and exhaustive cross-reference scan confirming the water-renderer negative result. No addresses appear in this spec. |
 | `confidence`      | `CONFIRMED` = field corroborated by parser read-sequence and real sample bytes. `SAMPLE-VERIFIED` = confirmed by observed sample data alone. `CODE-CONFIRMED` = identified in parser only, no sample cross-check. `PROPOSED` = structurally inferred, no direct evidence. |
 
 ---
@@ -46,7 +48,9 @@ A global quality-tier file (`DoOption.ini`, section `[DO_OPTION]`) gates renderi
 by tier: `OPTION_WATER`, `OPTION_SKY`, `OPTION_WEATHER`, `OPTION_WEATHER_RAIN`, `OPTION_LENS`,
 `OPTION_SUN`. The per-area `map_option%d.bin` flags operate on top of this global gate. Note:
 `OPTION_WATER` is stored and written to disk but has **no confirmed runtime consumer in the
-shipping binary** — see §1.4.
+shipping binary** — see §1.4. A further `DoOption.ini` value, `OPTION_BRIGHT` (a 1–100 player
+brightness slider, default 100 — see §10.5), is the source of the global additive ambient offset
+described in §10.4–§10.5.
 
 **Day/night cycle:** 48 keyframes, each 1800 ms, total period 86 400 ms (one simulated day). The
 active keyframe index and fractional position are derived as:
@@ -142,23 +146,48 @@ established result — that the shipping client has **no water render path** —
 reconciliation and is retained in §1.4 as historical context. Engineers should not look to
 `map_option%d.bin` for any water parameter.
 
-### 1.4 Water renderer — RESOLVED-NEGATIVE (context, unchanged)
+### 1.4 Water renderer — RESOLVED-NEGATIVE (water is a non-feature)
 
-> **Status: RESOLVED-NEGATIVE.** The shipping client contains **no dedicated water render path**.
-> This conclusion is independent of the §1.1 field reconciliation above and remains valid: even if a
-> water enable/height existed somewhere, no renderer consumes it. (As of the Campaign-5
-> reconciliation, no water enable/height is stored in `map_option%d.bin` at all — see §1.1.)
+> **Status: RESOLVED-NEGATIVE — water is a non-feature in the shipping client.** There is **no
+> dedicated water renderer, no water plane (no water-Y and no extent field), and no
+> reflection/refraction render target**. This conclusion is independent of the §1.1 field
+> reconciliation above and is now strengthened by a Campaign-5B render-side census: no water-Y is
+> stored in `map_option%d.bin` (§1.1) **and** nothing in the renderer creates a water surface or a
+> water reflection target.
 
 Key evidence (from cross-reference analysis):
 
-- Searches across all string literals for "water", "reflect", "ripple", and "wave" return no water
-  texture path, water vertex-buffer name, or water draw-function name in the binary.
-- No water texture files (e.g. `water*.dds`) exist anywhere in the VFS.
+- **No water primitive, no water strings.** Searches across all string literals for "water",
+  "reflect", "ripple", "wave", "refract", and "mirror" return no water texture path, no water
+  vertex-buffer name, and no water draw-function name in the binary. The only "water" token anywhere
+  is the INI option key `OPTION_WATER` (see below) — there is no water class string and no
+  `water*.dds` texture in the VFS.
+- **The "water/reflective FX" bucket is just the transparent terrain-overlay FX layer.** What
+  `rendering.md §4.2` calls the "water/reflective FX" transparent bucket is the **generic transparent
+  terrain-overlay FX layer** — the per-cell `fx1`..`fx7` overlay meshes, drawn SRCALPHA/INVSRCALPHA.
+  Those overlay layers are selected per cell by a **texture index** taken from the cell `.map`
+  TEXTURES section (the same mechanism as base/mass terrain texture indices), **not** by a water
+  FX-name and **not** as a dedicated water primitive. Where a "water-looking" surface appears, it is
+  such an FX-textured overlay sitting at the **terrain mesh Y of that overlay layer** — there is **no
+  separate water-Y or extent field anywhere**, consistent with this section finding no water-Y in
+  `map_option%d.bin` or `.map`.
+- **No reflection/refraction render target — exactly four offscreen targets, none for water.** The
+  only render-to-surface creator is called from exactly two systems: the **shadow map** (1 target)
+  and the **cel/glow shading chain** (3 targets) = **4 render targets total**, with **no water
+  reflection or refraction target**. The display/glow config carries the full glow / char-bright /
+  framerate / light-ratio key set and **zero** water or reflection keys.
+- **`OPTION_WATER` is a dead/vestigial INI slot.** `OPTION_WATER` is a real graphics-quality INI
+  option (loaded into the option singleton, saved back, default 1, clamped 1..3), but it has **zero
+  read sites** — nothing in the renderer consumes it. By contrast the sibling quality slots GROUND,
+  SKY, WEATHER, and SHADOW are each consumed by their subsystems; only WATER is orphaned. The option
+  made it *look* like water rendering exists, but the slot drives nothing.
 
-**Implication for Assets.Parsers:** there are no water fields to parse out of this file, and no
-Assets.Parsers code need implement water geometry or texture lookup. Any water surface a
-reimplementation chooses to render in `05.Presentation` is a free engineering decision, not a
-faithful reproduction of an original asset.
+**Implication for Assets.Parsers and a faithful port:** there are no water fields to parse out of this
+file, and no Assets.Parsers code need implement water geometry, a water plane, a reflection probe, or
+a refraction pass. A faithful 1:1 port needs **no water plane, no reflection probe, and no
+refraction** — at most a translucent terrain-overlay FX layer when a cell `.map` assigns a
+translucent FX texture index. Any standalone water surface a reimplementation chooses to render in
+`05.Presentation` is a free engineering decision, not a faithful reproduction of an original asset.
 
 ### 1.5 Remaining known unknowns
 
@@ -181,10 +210,10 @@ faithful reproduction of an original asset.
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| 0x00 | 4 | f32 | `start_dist` | Fog start distance. Observed range 0.0–1.0; interpreted as a fraction of the configured view range. Area 0 sample: 0.5 | CONFIRMED |
-| 0x04 | 4 | f32 | `end_dist` | Fog end distance. Same scale as `start_dist`. Area 0 sample: 0.9 | CONFIRMED |
-| 0x08 | 4 | u32 | `data_load_flag` | 0 = derive fog colour from the material colour table at runtime; 1 = use the `fog_colors[]` array directly. Area 0 and area 1 both have value 0 | CONFIRMED |
-| 0x0C | 192 | u8[192] | `fog_colors[48]` | 48 BGRA colour entries, one per day/night keyframe. Each entry is 4 bytes. See §2.2 | CONFIRMED |
+| 0x00 | 4 | f32 | `start_dist` | Fog start distance. A **float fraction** in 0.0–1.0, interpreted as a fraction of the configured view range. Observed area-1 value: **0.75** (sample-verified; see §10.2 — supersedes the 0.5 stand-in once quoted for area 0/1). | CONFIRMED |
+| 0x04 | 4 | f32 | `end_dist` | Fog end distance, same scale as `start_dist`. Observed area-1 value: **0.98** (sample-verified; see §10.2). | CONFIRMED |
+| 0x08 | 4 | u32 | `data_load_flag` | 0 = `fog_colors[]` is **not read from the file** and is synthesised at load time from the sky/material colour table (the 3:1 blend in §2.4); non-zero = the explicit `fog_colors[]` array is read straight from the file. Areas 0 and 1 both have value 0. | CONFIRMED |
+| 0x0C | 192 | u8[192] | `fog_colors[48]` | 48 BGRA colour entries, one per day/night keyframe. Each entry is 4 bytes. Bytes are used as a packed D3DCOLOR directly — see §2.2 and §10.1 (NO /255 in the client). | CONFIRMED |
 
 Total: 4 + 4 + 4 + 192 = 204 bytes.
 
@@ -197,10 +226,11 @@ Each 4-byte fog colour entry uses BGRA byte order (matching the legacy D3D `D3DC
 | [0] | Blue | u8, 0–255 |
 | [1] | Green | u8, 0–255 |
 | [2] | Red | u8, 0–255 |
-| [3] | Alpha | u8, always 0 in all sampled data |
+| [3] | Alpha | u8, always 0 in all sampled data (forced opaque on apply — §10.1) |
 
 Keyframe 0 corresponds to midnight; keyframe 24 to noon. Colour transitions follow the day/night
-cycle defined in §0.
+cycle defined in §0. These bytes are the D3DCOLOR channels **used directly** (no normalisation) when
+the client pushes the fog colour to the device — see §10.1.
 
 ### 2.3 Fog colour sample (area 0 — illustrative, not an asset reproduction)
 
@@ -214,20 +244,34 @@ atmospheres; exact numeric values are in the dirty-room samples, not in this spe
 | kf 24 (noon) | Muted sky-blue with orange tint |
 | kf 40 (evening) | Dark, near-neutral |
 
-### 2.4 `data_load_flag` semantics
+### 2.4 `data_load_flag` semantics — RESOLVED
 
-When `data_load_flag = 0` the client may override the `fog_colors[]` array by sampling from the
-material colour table (`material%d.bin`). The exact blend or override logic is not confirmed —
-both files contain valid day-night colour sequences in sampled areas regardless of this flag. The
-flag's role in the runtime fog colour pipeline remains a known unknown (§2.5).
+When `data_load_flag = 0` the 192-byte `fog_colors[]` table is **not** read from `fog%d.bin`;
+instead it is **synthesised at load time from the sky/material master colour table** with a per-slot
+**3:1 weighted blend**: for each of the 48 keyframe slots and each colour channel,
+
+```
+fog_byte[slot][chan] = high_band[slot][chan] × 0.75 + low_band[slot][chan] × 0.25
+```
+
+(two source bands from the sky colour LUT, blended, then truncated to a byte via float→int).
+When `data_load_flag` is non-zero, the explicit 192-byte `fog_colors[]` array is read straight from
+the file. CONFIRMED, pinned to the fog loader. The runtime apply of these bytes (whether read or
+synthesised) is the byte-D3DCOLOR path in §10.1. See also `specs/environment.md §1.1`.
+
+> The `0.75` / `0.25` blend weights are CONFIRMED as the blend ratio. The exact mapping of which two
+> sky-LUT source bands play the `high_band` / `low_band` roles per channel is MED confidence — see
+> §2.5 and `specs/environment.md §8`.
 
 ### 2.5 Known unknowns
 
-- **`data_load_flag = 0` vs. `= 1` code path:** Whether the fog colour array is ignored,
-  overwritten, or blended with material table values when `data_load_flag = 0` is unresolved.
-  All sampled areas use value 0 yet contain populated colour arrays.
-- **Fog mode (EXP / EXP2 / LINEAR):** The D3D9 fog type (1 = EXP, 2 = EXP2, 3 = LINEAR) is
-  stored in the runtime `GRSFog` struct but is not loaded from this file; its source is untraced.
+- **`data_load_flag = 0` blend source bands:** the 0.75/0.25 blend ratio is CONFIRMED (§2.4); the
+  exact pair of sky-LUT source bands feeding `high_band` / `low_band` per channel is MED.
+- **Fog mode (EXP / EXP2 / LINEAR):** the D3D9 fog type (1 = EXP, 2 = EXP2, 3 = LINEAR) is stored in
+  the runtime fog struct (with a colour, a start, an end, and a density field) but is **not** loaded
+  from this file. The **observed apply path is LINEAR** (range derived from a per-keyframe scalar —
+  see §10.3 and `specs/environment.md §6`). Whether any area/quality tier ever switches the struct to
+  an exponential-density mode is unverified.
 
 ---
 
@@ -473,7 +517,7 @@ assignments used a narrower read-site scope; the sample-verified interpretation 
 
 | Slot offset | Size | Type | Field | Confidence |
 |:-----------:|-----:|------|-------|------------|
-| +0x00 | 16 | f32[4] | `color_A` (RGBA) | Primary colour — diffuse for section A, ambient for section B. RGBA, alpha always 0. | CONFIRMED |
+| +0x00 | 16 | f32[4] | `color_A` (RGBA) | Primary colour — diffuse for section A, ambient for section B. RGBA, alpha always 0. Float in **[0,1]**, applied directly (no /255) — see §10.4. | CONFIRMED |
 | +0x10 | 16 | f32[4] | `color_B` (RGBA) | Secondary colour — possibly specular for section A. Read by the time-update path. | CODE-CONFIRMED |
 | +0x20 | 16 | f32[4] | `color_C` (RGBA) | All zeros in all sampled data. Reserved or unused. | SAMPLE-VERIFIED (all zeros) |
 
@@ -487,8 +531,11 @@ CODE-CONFIRMED; the float4-group view above is a complementary, sample-verified 
 The f32 values in section C represent a **fog distance scale in world units**, not a normalised
 density. Sampled range for area 1: approximately 8 to 43 world units. The value 1.0 noted in
 `terrain_layers.md §6.4` as a "no-override sentinel" is not observed in real samples; the
-sentinel behaviour may apply only in parser edge cases. Engineers should treat section C as a
-world-unit fog range modifier applied on top of `fog%d.bin` `start_dist` / `end_dist`.
+sentinel behaviour may apply only in parser edge cases. Engineers should treat section C as the
+per-keyframe **world-unit fog scalar `s`** that drives the runtime LINEAR fog range
+(`range = s × 3.0`, `near-scale = 1.0 / s`, fog enabled when `s > 0`) — see §10.3 and
+`specs/environment.md §6`. This per-frame derivation overwrites the static `fog%d.bin`
+`start_dist` / `end_dist` baseline each tick.
 
 ### 9.4 Fallback directional light (bytes 0x14B0–0x14BF)
 
@@ -500,7 +547,150 @@ world-unit fog range modifier applied on top of `fog%d.bin` `start_dist` / `end_
 | [3] | `dir_Z` | 20.0 | CONFIRMED |
 
 This is the unnormalised world-space direction vector used when no runtime light is active. The
-Godot-side normalised vector is `normalize((-7, 7, 20))` ≈ `(-0.322, 0.322, 0.920)`.
+Godot-side normalised vector is `normalize((-7, 7, 20))` ≈ `(-0.322, 0.322, 0.920)`. CONFIRMED that
+the day/night cycle does **not** rotate the sun — the keyframe tables (§A/§B) encode colour only;
+this static fallback is the only light direction the client uses (see §10.5 and
+`specs/environment.md §6`).
+
+---
+
+## Section 10: Colour domains and lighting/fog apply-path field facts
+
+> This section pins **which fields are byte-D3DCOLOR vs. float [0,1]**, and which file fields feed
+> the runtime lighting/fog math. It is the byte/field half of the lighting recovery; the runtime
+> math, the asymmetric ambient gate, the brightness slider, and the Godot "too-dark" fix are in
+> `Docs/RE/specs/environment.md §6`. Apply-paths below are CONFIRMED. As of the campaign VFS-DEEP-II
+> apply-path recovery, the two ambient numeric defaults previously flagged UNVERIFIED are now
+> **CONFIRMED statically** (the ambient gate `K_ambient` = 0.0 with no writer; `OPTION_BRIGHT`
+> default = 100); only a possible user-edited on-disk INI value remains as a thin runtime residual
+> (§10.7).
+
+### 10.1 Colour domains — TWO domains, NOT uniformly /255
+
+The environment colour fields fall into two distinct numeric domains. They are **not** uniformly
+divided by 255 in the original client:
+
+| Field family | Source | On-disk type | Domain | Apply in original | Port note |
+|--------------|--------|--------------|--------|-------------------|-----------|
+| Fog colour | `fog%d.bin` `fog_colors[48]` (§2) | u8 BGRA | bytes 0–255 | packed as a D3DCOLOR (ARGB, alpha forced opaque) and pushed to the device **directly** — NO /255 | a float renderer must `/255` to land in [0,1]; this is a porting step, not original math |
+| Sky / fog / star / cloud colour tables | `material%d.bin`, `stardome%d.bin`, `clouddome%d.bin`, derived fog (§2.4) | u8 BGRA | bytes 0–255 | same packed D3DCOLOR byte path, alpha forced opaque | same `/255` port step |
+| Directional / ambient light colour | `light%d.bin` §A / §B `color_A` | f32 RGBA | float [0,1] | written to render globals and fed to the device's light/material structures as floats **directly** — NO /255 | pass straight through; do NOT multiply or divide by 255 |
+
+CONFIRMED. The byte colour tables and the float light colours must be treated differently by a
+parser/mapping layer: byte tables convert with `/255`, float light colours pass through unchanged.
+
+### 10.2 Fog distance fractions — sample-verified numeric refresh
+
+The `fog%d.bin` `start_dist` / `end_dist` are **float fractions** of the view range (§2.1). The
+live area-1 file decodes to:
+
+| Field | Area-1 value | Confidence |
+|-------|:------------:|------------|
+| `start_dist` (0x00) | **0.75** | SAMPLE-VERIFIED |
+| `end_dist` (0x04) | **0.98** | SAMPLE-VERIFIED |
+
+> **UNVERIFIED stand-in conflict (numeric, not structural):** earlier revisions of
+> `specs/environment.md §6.4` quoted area-1 fog as `start = 0.5`, `end = 0.9` as temporary
+> stand-ins. The live `fog1.bin` decodes to **0.75 / 0.98**. The byte layout is identical; only the
+> stand-in numbers were drift. Engineers should read the parsed file at runtime rather than
+> hard-code either pair. The corrected values are propagated into `specs/environment.md §6.4`.
+
+### 10.3 Fog mode + distances — the applied path is LINEAR from the section-C scalar
+
+The runtime fog struct carries a `type` (1 = EXP, 2 = EXP2, 3 = LINEAR), a fog colour, a `start`,
+an `end`, and a `density`. The **observed applied path is LINEAR**, driven by the per-keyframe fog
+scalar `s` from `light%d.bin` section C (§9.3): when `s > 0` the runtime sets a fog **range**
+`= s × 3.0`, a reciprocal/near-scale `= 1.0 / s`, and **enables** fog on the device. The static
+`fog%d.bin` `start_dist` / `end_dist` seed a baseline but are overwritten by the per-frame
+`s × 3.0` derivation each tick. CODE-CONFIRMED. The runtime math and its Godot mapping are in
+`specs/environment.md §6`.
+
+### 10.4 Light colour domains feeding lighting math (float [0,1]) — ambient gate CONFIRMED 0.0
+
+`light%d.bin` §A (directional) and §B (ambient) `color_A` groups are **float32 in [0,1]** (§9.2) and
+feed the lighting math:
+
+- **Directional** colour is applied **raw** (no multiplier).
+- **Ambient** colour is **gated by a global float multiplier** (the asymmetric ambient gate,
+  canonical name `K_ambient`) before use. This multiplier is a runtime global, NOT an on-disk field —
+  its apply rule is in `specs/environment.md §6`.
+
+> **CONFIRMED (apply-path recovery, campaign VFS-DEEP-II) — `K_ambient` is statically 0.0 with no
+> writer.** The ambient gate is a single global float whose static initialiser is **0.0** (it lives
+> in the zero-initialised data region), and it has **exactly one reader (the per-frame ambient
+> sampler) and ZERO writers anywhere in the binary**. The earlier hypothesis that the sky-detail /
+> quality option writes it at runtime is **DENIED** — nothing writes it. The gate is therefore an
+> effective compile-time constant **0.0**, and the per-keyframe ambient term
+> (`ambient = lerp(B[kf], B[kf_next], frac) × K_ambient`) evaluates to **0 every frame**. The §B
+> ambient keyframe table is loaded and interpolated but contributes nothing to the device. This
+> upgrades the prior "static init 0.0; runtime value UNVERIFIED" to **CONFIRMED 0.0 at runtime**.
+
+> **CONFIRMED — the ambient BASE colour is static (0, 0, 0).** The lighting-manager constructor
+> zeroes the three ambient base colour channels (R = G = B = 0) and forces the base alpha opaque.
+> At area-load time the base channels are subsequently driven from a per-keyframe BYTE colour table
+> inside the loaded `light%d.bin` blob (interpolated each frame), so `(0,0,0)` is the pre-load static
+> default and the live base is the day/night byte colour. Either way the base is added to the
+> brightness offset (§10.5) before the device push.
+
+Consequence: with `K_ambient = 0`, the per-keyframe ambient table is inert in the shipping client.
+The entire ambient floor the device receives is the additive brightness offset of §10.5.
+
+### 10.5 Brightness slider source — `OPTION_BRIGHT` (DoOption.ini), default 100 — CONFIRMED
+
+The global additive ambient offset originates from `OPTION_BRIGHT`, a player brightness value in
+`DoOption.ini` (§Overview). The conversion to a 0–255 additive ambient offset and the device-ambient
+apply are runtime math (in `specs/environment.md §6`); the on-disk facts pinned here are the value
+range, the default, and the apply rule.
+
+| Property | Value | Confidence |
+|----------|-------|------------|
+| Source key | `OPTION_BRIGHT` in `DoOption.ini` `[DO_OPTION]` | CONFIRMED |
+| Stored type / units | i32, percent (player brightness slider) | CONFIRMED |
+| Valid range / clamp | `[1, 100]` — any value `< 1` or `> 100` is reset to **100** on load | CONFIRMED |
+| **Default value** | **100** (the INI-read default argument; not the previously assumed ~50) | CONFIRMED |
+| Additive offset derivation | `offset = floor( (OPTION_BRIGHT / 100.0) × 255.0 )` → 0–255 | CONFIRMED |
+| Device push | packed ARGB (alpha forced opaque) via the device ambient render-state | CONFIRMED |
+
+> **CONFIRMED (apply-path recovery) — `OPTION_BRIGHT` default is 100, NOT ~50.** The consolidated
+> options loader reads the key from the INI with a **default argument of 100** and clamps the result
+> to `[1, 100]` (out-of-range → 100). At the default brightness the additive offset is
+> `floor(100/100 × 255) = 255`; over the static `(0,0,0)` ambient base (§10.4) this makes the device
+> ambient **full white `(255, 255, 255)`**. This is a material correction: earlier spec text assumed
+> mid-slider ~50 (→ +0.5 floor). The faithful default ambient floor is **1.0**, not 0.5 — see
+> `specs/environment.md §6.2b/§6.4`. (The byte offset of the field within the options struct is a
+> dirty-room implementation detail and is intentionally not reproduced here.)
+
+The same brightness conversion (`offset = floor(bright/100 × 255)`, add to the ambient base, clamp
+each channel, pack ARGB, push to the device ambient render-state) is re-applied on three occasions:
+when the user moves the slider (slider-save path), when the per-frame keyframe base colour changes
+(day/night tick), and at the end of each per-area light-data load. So the brightness floor is
+refreshed on slider change, on keyframe base-colour change, and on area load. CONFIRMED.
+
+### 10.6 Sun direction is static (no per-keyframe direction)
+
+CONFIRMED: no per-keyframe sun **direction** is stored anywhere in `light%d.bin` — the keyframe
+tables (§A/§B) encode colour only. The only direction is the static fallback vector at bytes
+0x14B0–0x14BF (§9.4): `(-7, 7, 20)`, normalised ≈ `(-0.322, 0.322, 0.920)`. The day/night cycle does
+not rotate the sun; any sun-arc in a port is a free choice.
+
+### 10.7 Known unknowns (apply-path)
+
+- **Ambient multiplier `K_ambient`:** RESOLVED — **CONFIRMED 0.0** (single reader, zero writers,
+  static init 0.0 — §10.4). The per-keyframe ambient table is inert in the shipping client; the prior
+  "runtime writer suspected (sky-detail option)" hypothesis is DENIED.
+- **Ambient base colour:** RESOLVED — **CONFIRMED static `(0,0,0)`** at init, then driven by the
+  per-keyframe byte colour table at runtime (§10.4).
+- **`OPTION_BRIGHT` default:** RESOLVED — **CONFIRMED 100** (INI default; clamp `[1,100]` → 100 —
+  §10.5). At default brightness the device ambient is full white.
+- **On-disk `DoOption.ini` override (UNVERIFIED — thin runtime residual):** the value **100** is the
+  binary/INI default. If a real `DoOption.ini` on the player's disk carries a user-saved lower value,
+  the live `OPTION_BRIGHT` differs from 100. Settling this requires a single runtime read of the
+  stored brightness value after the options-load step (expected i32, units = percent, default 100);
+  it does not change any layout or apply-path fact above.
+- **EXP/EXP2 fog modes:** supported by the struct but not observed driven on the lighting tick (§2.5).
+- **`fog%d.bin` start/end vs. section-C scalar:** both seed fog distance; the per-frame `s × 3.0`
+  appears to win each tick. Whether start/end are ever used live (e.g. when section C is zero) is
+  unverified (§10.3).
 
 ---
 
@@ -536,8 +726,9 @@ and therefore has no water texture assets (§1.4).
    `water_enable` / `water_y` at 0x00/0x04 were a misread of the dungeon flag and sight-clamp
    distance. No source of a water surface Y is established anywhere; any water a reimplementation
    renders is a free engineering choice, not a reproduced asset value.
-2. **`fog%d.bin` data_load_flag = 0 code path:** Whether `fog_colors[]` is overridden by the
-   material table or used directly when this flag is 0 is not confirmed.
+2. **`fog%d.bin` data_load_flag = 0 code path:** RESOLVED — when the flag is 0 the colour table is
+   synthesised from the sky LUT via a per-slot 0.75/0.25 blend (§2.4); the exact source-band channel
+   grouping in that blend is MED.
 3. **`light%d.bin` gaps at 0x0900 and 0x1230:** All-zero in samples; may be wrap-around
    interpolation slots or alignment padding.
 4. **`light%d.bin` sections D and E:** Section D (secondary fog scalar) contains near-zero
@@ -556,6 +747,10 @@ and therefore has no water texture assets (§1.4).
    configuration has not been fully traced in the binary.
 10. **`material%d.bin` unassigned indices [8..11], [25..28], [33], [37], [41..50]:** Loaded but
     usage not traced.
+11. **Lighting apply-path numeric defaults:** RESOLVED — the ambient gate `K_ambient` is CONFIRMED
+    0.0 (no writer), the ambient base is CONFIRMED static `(0,0,0)`, and the `OPTION_BRIGHT` default
+    is CONFIRMED 100 (§10.4–§10.5). The single remaining residual is whether a user's on-disk
+    `DoOption.ini` overrides the 100 default — a one-time runtime read, layout-neutral (§10.7).
 
 ---
 
@@ -566,9 +761,13 @@ and therefore has no water texture assets (§1.4).
     `point_light%d.bin`, `wind%d.bin` (§9 of this document adds sample-verified corrections)
   - `Docs/RE/formats/terrain.md` — terrain cell formats (`.ted`, `.map`, `.sod`)
   - `Docs/RE/formats/texture.md` — DDS texture container
-- **Runtime assembly spec:** `Docs/RE/specs/environment.md`
+- **Runtime assembly spec:** `Docs/RE/specs/environment.md` (the runtime lighting/fog math, the
+  asymmetric ambient gate `K_ambient` = 0.0, the `OPTION_BRIGHT` brightness slider default 100, and
+  the "too-dark" fix; §6 there consumes the colour domains and apply-path fields pinned in §10 here)
 - **Glossary:** `Docs/RE/names.yaml`
 - **Provenance:** `Docs/RE/journal.md`
 - **Implementation target:** `Assets.Parsers` (layer `03.Storage.Assets`). Cite this file as
   `// spec: Docs/RE/formats/environment_bins.md` on every offset reference in the parser.
-  Conversion of colours to engine types is `Assets.Mapping`'s responsibility.
+  Conversion of colours to engine types is `Assets.Mapping`'s responsibility — and the colour-domain
+  table (§10.1) is exactly what `Assets.Mapping` must honour (byte tables `/255`, float light colours
+  pass-through).

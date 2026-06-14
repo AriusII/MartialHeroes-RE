@@ -6,7 +6,7 @@
 // logic, and NO domain state: it only translates the decoded environment into Godot visuals.
 //
 // Source files (loaded via Adapters/VfsEnvironmentSource, which mirrors VfsTerrainSectorSource):
-//   data/sky/dat/map_option{id}.bin (40 B)   — flags: water enable/Y, sky gate, indoor.
+//   data/sky/dat/map_option{id}.bin (40 B)   — flags: lensflare/stardome/clouddome/sun/moon enables, indoor.
 //   data/sky/dat/fog{id}.bin        (204 B)  — start/end ratios + 48 BGRA fog colours.
 //   data/sky/dat/light{id}.bin      (5312 B) — 48 directional + 48 ambient keyframes + fallback dir.
 //   data/sky/dat/material{id}.bin   (9792 B) — sun/sky material table (sky-tint, optional).
@@ -119,10 +119,14 @@ public sealed partial class EnvironmentNode : Node3D
     public float MinSunEnergy { get; set; } = 1.6f;
 
     /// <summary>
-    /// Multiplier applied to the legacy ambient colour_A luminance to set ambient energy.
-    /// Engineering choice that keeps shadowed areas readable. The ambient COLOUR comes from the data.
+    /// Player brightness floor, matching OPTION_BRIGHT / 100.
+    /// spec: Docs/RE/specs/environment.md §6.2a — OPTION_BRIGHT default = 100 → floor = 1.0 (full).
+    /// The per-keyframe section-B ambient is inert in the original (K_ambient = 0.0, zero writers).
+    /// This is the ONLY live ambient the original device receives at default settings.
+    /// spec: Docs/RE/specs/environment.md §6.2b — root-cause fix for the "too-dark" EnvironmentNode.
     /// </summary>
-    public float AmbientEnergyScale { get; set; } = 2.0f;
+    public float OptionBrightFloor { get; set; } =
+        1.0f; // spec: Docs/RE/specs/environment.md §6.2a — default OPTION_BRIGHT=100 → 1.0
 
     // -------------------------------------------------------------------------
     // Parsed environment state
@@ -279,7 +283,28 @@ public sealed partial class EnvironmentNode : Node3D
         env.SsaoEnabled = false;
         env.SsilEnabled = false;
         env.SdfgiEnabled = false;
-        env.GlowEnabled = false;
+
+        // ---- Glow / bloom — reproduces the legacy 3-RT chain ----
+        // The legacy post chain is: scene capture → bright extract (TEX1) → glow blur at ÷2
+        // downsample (TEX2, power1dx8.psh) → additive composite (finaldx8.psh) onto the backbuffer.
+        // spec: Docs/RE/specs/rendering.md §6 — glow/bloom post chain (CONFIRMED load + execution).
+        // spec: Docs/RE/specs/rendering.md §6.1 — TEX2 downscaled by the glow divisors (default ÷2).
+        // spec: Docs/RE/formats/shaders.md §C5.1 — power1dx8.psh glow blur, finaldx8.psh composite.
+        //
+        // Godot WorldEnvironment Glow stands in for the bright-extract + blur + additive composite:
+        //   HDRThreshold  → equivalent to the bright-pass extract cutoff.
+        //   Intensity/Bloom → the accumulation weight of the blurred pass in the composite.
+        //   BlendMode Additive → matches the additive fullscreen-quad present (pass 5, rendering.md §6.2).
+        //   Levels           → mirror the ÷2 default downsample (levels 1–2 cover that range).
+        //
+        // The power1dx8.psh semantics recovered in the spec: "sample base texture, scale by constant"
+        // → simple 1× downsample blur. That matches Godot's default Glow (Gaussian blur, not quartic).
+        // spec: Docs/RE/formats/shaders.md — power1dx8.psh: "r0 = r0 * c0 — sample base texture, scale."
+        //
+        // Parameter values: aesthetic engineering choices to match the legacy bright look without
+        // blowing out; none are spec-dictated numeric literals (the spec records the pass ORDER and
+        // RT ROLES, not the concrete float values). Declared as aesthetic.
+        ApplyGlow(env);
 
         // ---- Directional sun ----
         ApplyDirectional(kf, kfNext, frac);
@@ -344,30 +369,121 @@ public sealed partial class EnvironmentNode : Node3D
 
     private void ApplyAmbient(global::Godot.Environment env, int kf, int kfNext, float frac)
     {
+        // spec: Docs/RE/specs/environment.md §6.2a — the per-keyframe section-B ambient is multiplied
+        // by K_ambient = 0.0 (static init, zero writers anywhere in the binary — CONFIRMED). It is
+        // therefore inert: ambient_kf = lerp(B[kf], B[kf_next], frac) * K_ambient = 0 every frame.
+        // Do NOT drive ambient brightness from the §B keyframe table; it contributes nothing in the
+        // original and reproducing it as the ambient energy is the root cause of the "too-dark" scene.
+        //
+        // The only live ambient the original device receives is the OPTION_BRIGHT additive floor:
+        //   offset = floor(OPTION_BRIGHT / 100.0 * 255)  →  device_ambient = (offset, offset, offset)
+        // At the default OPTION_BRIGHT = 100, offset = 255 → full white ambient (1.0).
+        // spec: Docs/RE/specs/environment.md §6.2a — "At the default OPTION_BRIGHT=100, device ambient = full white."
+        // spec: Docs/RE/specs/environment.md §6.2b — "Set ambient_light_energy = OPTION_BRIGHT/100 (default 1.0)."
+        // spec: Docs/RE/specs/environment.md §6.2 — root-cause fix: default floor = 1.0, not 0.5.
+
         env.AmbientLightSource = global::Godot.Environment.AmbientSource.Color;
+        // Uniform white, matching the additive (offset, offset, offset) device ambient in the original.
+        // spec: Docs/RE/specs/environment.md §6.2a — ambient base = (0,0,0); floor adds (offset,offset,offset).
+        env.AmbientLightColor = Colors.White;
+        // spec: Docs/RE/specs/environment.md §6.2a — OPTION_BRIGHT default = 100 → floor = 1.0 (full).
+        env.AmbientLightEnergy = OptionBrightFloor; // spec: Docs/RE/specs/environment.md §6.2
+    }
 
-        LightBin? light = _env?.Light;
-        if (light is not null && light.AmbientKeyframes.Length == KeyframeCount)
-        {
-            // Ambient colour_A (RGBA f32) from section B. spec: environment.md §6.1.
-            Color a = ColorAOf(light.AmbientKeyframes[kf]);
-            Color b = ColorAOf(light.AmbientKeyframes[kfNext]);
-            Color amb = a.Lerp(b, frac);
-            env.AmbientLightColor = amb;
-            // Energy from luminance × scale so shadowed areas read. spec: environment.md §6.1 (energy).
-            float lum = Luminance(amb);
-            env.AmbientLightEnergy = Math.Max(0.4f, lum * AmbientEnergyScale);
-            return;
-        }
+    // -------------------------------------------------------------------------
+    // Glow / bloom — 3-RT post chain approximation
+    // -------------------------------------------------------------------------
 
-        // spec: Docs/RE/specs/environment.md §7 — light absent → ambient (0.2,0.2,0.2).
-        env.AmbientLightColor = new Color(0.2f, 0.2f, 0.2f, 1f);
-        env.AmbientLightEnergy = 1.0f;
+    /// <summary>
+    /// Configures Godot's built-in WorldEnvironment Glow to approximate the legacy 3-RT
+    /// bright-extract → blur → composite chain from the original DX8 engine.
+    ///
+    /// CONFIRMED chain (spec: Docs/RE/specs/rendering.md §6):
+    ///   scene → TEX0 (capture) → TEX1 (plain copy, NO bright threshold) →
+    ///   TEX2 (single ÷2 blur via power1dx8 only; power2/power4 are ABSENT from binary) →
+    ///   composite into TEX0 as:  base×(c0=0.5) + glow×(c1=0.5)  →
+    ///   present: opaque copy (SRC=ONE, DEST=ZERO) to backbuffer.
+    ///
+    /// Godot approximation notes (Godot Glow ≠ DX8 RT chain — declared as approximation):
+    ///   • NO bright threshold: spec §6.4 — "no luminance cutoff; every pixel of the scene
+    ///     feeds the blur." → GlowHdrThreshold = 0 (inclusive).
+    ///   • SINGLE-TAP: spec §6.4 — only power1dx8 runs; power2/power4 absent from binary.
+    ///     → ONE level enabled (level 1, Godot's half-res Gaussian), all others off.
+    ///     Level 1 (÷2 in Godot) corresponds to the single TEX2 ÷2 downsample.
+    ///   • COMPOSITE ≈ base×0.5 + glow×0.5: spec §6 — c0=c1=0.5 default.
+    ///     The DX8 composite performs the "glow add" inside the shader into TEX0, then
+    ///     blits TEX0 opaquely. Godot BlendMode.Mix (Screen) mixes rather than pure-adds,
+    ///     approximating the "base + glow contribution" semantics without double-adding.
+    ///     GlowIntensity = 0.5 maps to the glow scalar c1 = 0.5.
+    ///     Additive mode (ONE/ONE) would over-brighten vs the 0.5/0.5 opaque present.
+    ///   spec: Docs/RE/specs/rendering.md §6 — bloom chain confirmed.
+    ///   spec: Docs/RE/specs/rendering.md §6.4 — no bright threshold; single-tap CONFIRMED.
+    ///
+    /// All float values below are AESTHETIC engineering choices matching the spec-confirmed
+    /// semantics (threshold=0, single level, 0.5 composite weight). No spec-dictated concrete
+    /// floats exist for the Godot knobs — the spec records pass order / blend factors, not Godot params.
+    /// </summary>
+    private static void ApplyGlow(global::Godot.Environment env)
+    {
+        env.GlowEnabled = true;
+
+        // Blend mode: Mix (Screen) — approximates base×0.5 + glow×0.5 opaque composite.
+        // The DX8 present is opaque (SRC=ONE, DEST=ZERO); the additive "glow add" happens INSIDE
+        // the composite PS into TEX0 before the opaque blit. Mix avoids pure-additive over-brightening.
+        // spec: Docs/RE/specs/rendering.md §6 — composite blends into RT then opaque-copies to backbuffer.
+        env.GlowBlendMode = global::Godot.Environment.GlowBlendModeEnum.Mix;
+
+        // HDR threshold = 0: no bright-pass cutoff — CONFIRMED (every pixel feeds the blur).
+        // spec: Docs/RE/specs/rendering.md §6.4 — "no luminance cutoff; BLOOM_BRIGHT_THRESHOLD = NONE".
+        env.GlowHdrThreshold = 0.0f; // spec: Docs/RE/specs/rendering.md §6.4 — no threshold CONFIRMED
+
+        // HDR scale: how aggressively pixels above threshold feed the blur (moot with threshold=0 but
+        // still scales the blur kernel energy). Aesthetic: 1.0 = neutral.
+        env.GlowHdrScale = 1.0f;
+
+        // Intensity ≈ glow-bright composite scalar c1 = 0.5.
+        // spec: Docs/RE/specs/rendering.md §6 — c1 = glow-bright-multiplier × 0.5 = 0.5 (default).
+        // Aesthetic mapping: Godot GlowIntensity drives the glow contribution weight in Mix mode.
+        // 0.5 approximates the spec-confirmed default composite scalar c1 = 0.5.
+        env.GlowIntensity = 0.5f; // spec: Docs/RE/specs/rendering.md §6 — c1 = 0.5
+
+        // Bloom spread: tight (power1dx8 is a simple 1× sample — not a multi-tap diffusion).
+        // Aesthetic: 0.0 means no extra diffuse spread beyond the blur kernel.
+        env.GlowBloom = 0.0f;
+
+        // Glow levels — SINGLE-TAP: only level 1 (Godot half-res, equivalent to ÷2 downsample).
+        // spec: Docs/RE/specs/rendering.md §6.4 — "only power1dx8 runs; single blur pass; CONFIRMED."
+        //   BLOOM_CHAIN = single-tap (power2/power4 absent from binary).
+        //   BLOOM_DOWNSAMPLE_DIV = (2,2).
+        // Level 1 in Godot's 7-level stack corresponds to the half-res (÷2) single pass.
+        // All other levels disabled so the bloom does not spread beyond the single pass.
+        env.SetGlowLevel(0, 0.0f); // off — finer than ÷2 (not in original chain)
+        env.SetGlowLevel(1, 1.0f); // ON — half-res ÷2 single blur pass; spec §6.4 CONFIRMED
+        env.SetGlowLevel(2, 0.0f); // off
+        env.SetGlowLevel(3, 0.0f); // off
+        env.SetGlowLevel(4, 0.0f); // off
+        env.SetGlowLevel(5, 0.0f); // off
+        env.SetGlowLevel(6, 0.0f); // off
+
+        // Strength: per-level blur radius weight. Aesthetic: 1.0 full single-pass contribution.
+        env.GlowStrength = 1.0f;
     }
 
     private void ApplyDirectional(int kf, int kfNext, float frac)
     {
         if (_dirLight is null) return;
+
+        // SUN enable flag (map_option 0x14). When the area has the sun disabled (e.g. indoor /
+        // dungeon areas, SUN = 0), suppress the directional sun so the scene reads as enclosed.
+        // RECONCILED Campaign 5: SUN is its own u32 word at 0x14. spec: environment_bins.md §1.1.
+        bool sunEnabled = _env?.MapOption is not { SunEnable: 0 };
+        if (!sunEnabled)
+        {
+            _dirLight.Visible = false;
+            return;
+        }
+
+        _dirLight.Visible = true;
 
         // Direction: fixed fallback vector (no per-keyframe direction — §8.4).
         if (_hasSunDir && _sunDirGodot.LengthSquared() > 1e-6f)
@@ -642,17 +758,22 @@ public sealed partial class EnvironmentNode : Node3D
         if (light is not null && light.DirectionalKeyframes.Length == KeyframeCount)
         {
             Color sun = ColorAOf(light.DirectionalKeyframes[kf]);
-            Color amb = ColorAOf(light.AmbientKeyframes[kf]);
+            // Note: AmbientKeyframes (§B) are inert in original (K_ambient=0.0 — spec §6.2a).
+            // The actual device ambient = OPTION_BRIGHT/100 floor = OptionBrightFloor.
+            // spec: Docs/RE/specs/environment.md §6.2a
             lightStr = $"sunColorA={sun} (energy floor {MinSunEnergy:F1}) " +
-                       $"ambColorA={amb} (×{AmbientEnergyScale:F1}) " +
+                       $"ambFloor(OPTION_BRIGHT/100)={OptionBrightFloor:F2} [§B keyframes inert, K_ambient=0] " +
                        $"fallbackDir=({light.FallbackDirX:F0},{light.FallbackDirY:F0},{light.FallbackDirZ:F0})";
         }
         else
         {
-            lightStr = "none(fallback: dir(-7,7,20), ambient 0.2)";
+            lightStr = $"none(fallback: dir(-7,7,20), ambFloor={OptionBrightFloor:F2})";
         }
 
-        string skyGate = mo is not null ? $"sky_gate={mo.SkyGate} indoor={mo.IndoorFlag}" : "no map_option";
+        string skyGate = mo is not null
+            ? $"indoor={mo.IndoorFlag} sun={mo.SunEnable} moon={mo.MoonEnable} " +
+              $"lensflare={mo.LensFlareEnable} stardome={mo.StarDomeEnable} clouddome={mo.CloudDomeEnable}"
+            : "no map_option";
         string sunDir = _hasSunDir ? $"{_sunDirGodot.Normalized()}" : "default";
 
         GD.Print($"[Environment] area={_areaId} keyframe={kf}(noon) {skyGate} " +

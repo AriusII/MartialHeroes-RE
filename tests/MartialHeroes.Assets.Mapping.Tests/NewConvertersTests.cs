@@ -823,13 +823,20 @@ public sealed class XeffJsonConverterTests
         {
             EffectId = 42u,
             SubEffectCount = 1u,
-            TypeFlag = 1u,
-            Reserved = new byte[16],
-            FirstEntryCount = 1u,
             SubEffects =
             [
                 new XeffSubEffect
                 {
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — emitter_type u32 @ element+0x00: CONFIRMED.
+                    EmitterType = 0u, // billboard
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — resource_id u32 @ element+0x04: CONFIRMED.
+                    ResourceId = 0u,
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — anim_flag u32 @ element+0x08: CONFIRMED.
+                    AnimFlag = 0u, // static (animLoop=0 sub-effect)
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — field_unknown_a u32 @ element+0x0C: UNRESOLVED.
+                    FieldUnknownA = 0u,
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — element_dword2 u32 @ element+0x10: UNRESOLVED.
+                    ElementDword2 = 0u,
                     EntryCount = 1u,
                     // spec: Docs/RE/formats/effects.md §A.4.1 — tex_name char[64]: CONFIRMED.
                     TextureNames = ["fireball"],
@@ -871,6 +878,16 @@ public sealed class XeffJsonConverterTests
     {
         XeffSubEffect sub = new()
         {
+            // spec: Docs/RE/formats/effects.md §A.4.0 — emitter_type u32 @ element+0x00: CONFIRMED.
+            EmitterType = 0u, // billboard
+            // spec: Docs/RE/formats/effects.md §A.4.0 — resource_id u32 @ element+0x04: CONFIRMED.
+            ResourceId = 0u,
+            // spec: Docs/RE/formats/effects.md §A.4.0 — anim_flag u32 @ element+0x08: CONFIRMED.
+            AnimFlag = 1u, // animated (animLoop=1 sub-effect)
+            // spec: Docs/RE/formats/effects.md §A.4.0 — field_unknown_a u32 @ element+0x0C: UNRESOLVED.
+            FieldUnknownA = 0u,
+            // spec: Docs/RE/formats/effects.md §A.4.0 — element_dword2 u32 @ element+0x10: UNRESOLVED.
+            ElementDword2 = 0u,
             EntryCount = 2u,
             TextureNames = ["tex_a", "tex_b"],
             AlphaKeys = [0.0f, 1.0f],
@@ -906,9 +923,6 @@ public sealed class XeffJsonConverterTests
         {
             EffectId = 7u,
             SubEffectCount = 2u,
-            TypeFlag = 1u,
-            Reserved = new byte[16],
-            FirstEntryCount = 2u,
             SubEffects = [sub, sub],
         };
     }
@@ -1101,13 +1115,12 @@ public sealed class XeffJsonConverterTests
     public void WriteJsonBytes_EmptySubEffects_IsValidJson()
     {
         // spec: Docs/RE/formats/effects.md §A.2 — sub_effect_count=0 is valid (stub): VERIFIED.
+        // spec: Docs/RE/formats/effects.md §A.2 — sub_effect_count=0 is valid (stub): VERIFIED.
+        // spec: Docs/RE/formats/effects.md §A.2 File Header (8 bytes): VERIFIED (2026-06-14 correction).
         var effect = new XeffData
         {
             EffectId = 0u,
             SubEffectCount = 0u,
-            TypeFlag = 1u,
-            Reserved = new byte[16],
-            FirstEntryCount = 0u,
             SubEffects = [],
         };
         byte[] json = XeffJsonConverter.WriteJsonBytes(effect);
@@ -1379,13 +1392,20 @@ public sealed class XeffJsonNamedFieldsTests
         {
             EffectId = 100u,
             SubEffectCount = 1u,
-            TypeFlag = 1u,
-            Reserved = new byte[16],
-            FirstEntryCount = 1u,
             SubEffects =
             [
                 new XeffSubEffect
                 {
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — emitter_type u32 @ element+0x00: CONFIRMED.
+                    EmitterType = 0u, // billboard
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — resource_id u32 @ element+0x04: CONFIRMED.
+                    ResourceId = 0u,
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — anim_flag u32 @ element+0x08: CONFIRMED.
+                    AnimFlag = 1u, // animated (animLoop=1 sub-effect)
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — field_unknown_a u32 @ element+0x0C: UNRESOLVED.
+                    FieldUnknownA = 0u,
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — element_dword2 u32 @ element+0x10: UNRESOLVED.
+                    ElementDword2 = 0u,
                     EntryCount = 1u,
                     TextureNames = ["flame"],
                     // Alpha file value 0.3 → opacity = 1 - 0.3 = 0.7.
@@ -1430,13 +1450,20 @@ public sealed class XeffJsonNamedFieldsTests
         {
             EffectId = 200u,
             SubEffectCount = 1u,
-            TypeFlag = 1u,
-            Reserved = new byte[16],
-            FirstEntryCount = 1u,
             SubEffects =
             [
                 new XeffSubEffect
                 {
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — emitter_type u32 @ element+0x00: CONFIRMED.
+                    EmitterType = 0u, // billboard
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — resource_id u32 @ element+0x04: CONFIRMED.
+                    ResourceId = 0u,
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — anim_flag u32 @ element+0x08: CONFIRMED.
+                    AnimFlag = 1u, // animated (animLoop=1 sub-effect)
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — field_unknown_a u32 @ element+0x0C: UNRESOLVED.
+                    FieldUnknownA = 0u,
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — element_dword2 u32 @ element+0x10: UNRESOLVED.
+                    ElementDword2 = 0u,
                     EntryCount = 1u,
                     TextureNames = ["smoke"],
                     AlphaKeys = [],

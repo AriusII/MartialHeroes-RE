@@ -49,7 +49,7 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
     private ArrayMesh? _arrayMesh; // live render mesh (also used for BuildDiagnostics AABB sampling)
     private MeshInstance3D? _meshInstance;
-    private StandardMaterial3D? _material;
+    private Material? _material;
 
     private float _clipDuration;
     private bool _hasClip;
@@ -192,23 +192,38 @@ public sealed partial class SkinnedCharacterNode : Node3D
         _outPos = new Vector3[cornerCount];
         _outNrm = new Vector3[cornerCount];
 
-        // 6) Material — apply the resolved albedo texture when available; neutral skin-tone fallback
-        // when null. The material is set once here and held by the MeshInstance3D for the lifetime
-        // of this node (see step 7 below). The DIAG solid-red placeholder has been removed.
+        // 6) Material — apply cel/toon ShaderMaterial (CelShadeMaterialFactory) when CelEnabled;
+        // fall back to StandardMaterial3D for debugging or when the shader is unavailable.
+        // spec: Docs/RE/specs/rendering.md §5.2 — dotoonshading path = skinned character only.
+        // spec: Docs/RE/formats/shaders.md §C5 — Runtime Cel/Glow Shader Set, Campaign 5.
         // spec: CLAUDE.md asset chain — skin.txt col5 texId → data/char/tex{dir}/{texId}.png.
-        _material = new StandardMaterial3D
+        if (CelShadeMaterialFactory.CelEnabled)
         {
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-            TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
-        };
-        if (albedo is not null)
-        {
-            _material.AlbedoTexture = albedo;
+            try
+            {
+                _material = CelShadeMaterialFactory.Build(albedo);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[Skinning] CelShadeMaterialFactory.Build failed for '{mesh.Name}': {ex.Message} " +
+                            "— falling back to StandardMaterial3D.");
+                _material = null;
+            }
         }
-        else
+
+        if (_material is null)
         {
-            // Neutral warm skin-tone fallback (no texture found in VFS).
-            _material.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+            // Fallback: StandardMaterial3D (non-cel, flat PBR).
+            var stdMat = new StandardMaterial3D
+            {
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
+            };
+            if (albedo is not null)
+                stdMat.AlbedoTexture = albedo;
+            else
+                stdMat.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+            _material = stdMat;
         }
 
         // 7) Build the live render mesh using ArrayMesh (updated per-frame via ClearSurfaces +

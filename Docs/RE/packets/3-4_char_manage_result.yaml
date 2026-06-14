@@ -1,8 +1,14 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+#
+# FILENAME NOTE: the file is named "3-4_*" for legacy/link-stability reasons, but the message it
+# specs is the (3:7) char-MANAGE result. The minor-3 receive ladder was corrected by the front-end
+# deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed: minor 7 = this 8-byte
+# manage/delete result; minor 4 = the variable SmsgSceneEntityUpdate (no field spec); minor 14 =
+# the 16-byte SmsgCharSpawnResponse enter bridge (no field spec). The opcodes.md 3/7 row links here.
 
 name: SmsgCharManageResult
-opcode: 0x30004           # major 3 (CharacterMgmt), minor 4 -> (3 << 16) | 4
+opcode: 0x30007           # major 3 (CharacterMgmt), minor 7 -> (3 << 16) | 7
 direction: S2C
 size: 8                   # fixed 8-byte block read by the char-manage result handler
 spec: packets/3-4_char_manage_result.yaml
@@ -10,11 +16,14 @@ status: hypothesis
 capture_verified: false
 
 summary: >
-  Character create / delete / rename / manage result. An 8-byte block: a result byte, a subtype
+  Character delete / select / rename / manage result. An 8-byte block: a result byte, a subtype
   byte that selects which character operation the result is for (delete / rename / generic
-  refresh), and a 4-byte ready_time used to drive the same-day delete-cooldown timer. NOTE the
-  handler is mislabelled "3/7" in raw decompiler output; behaviour-anchored it is the 3/4 manage
-  result. 3/7 itself is the separate SmsgCharSpawnResult.
+  refresh), and a 4-byte ready_time used to drive the same-day delete-cooldown timer. This is the
+  handler that DECREMENTS the account character count on a delete-confirm. The minor-3 receive
+  ladder routes minor 7 here -- the front-end deep-fidelity pass (campaign4/frontend-deep),
+  dispatch-table-confirmed, settled the prior 3/4-vs-3/7 hedge: 3/7 is THIS manage/delete result,
+  3/4 is the variable SmsgSceneEntityUpdate, and 3/14 is the 16-byte SmsgCharSpawnResponse enter
+  bridge. The local-player WORLD spawn is driven by 4/1, not by this message.
 
 # Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8.
 fields:
@@ -46,15 +55,19 @@ notes: |
                           seconds into hours and minutes. MEDIUM CONFIDENCE on the field; its
                           exact epoch/units need a capture (see unknowns).
 
-  NAMING CAUTION (flag for engineers): the inbound handler that decodes this 8-byte block carries
-  a stale "3/7" label in raw decompiler output. Behaviour-anchored, it is the 3/4 manage result.
-  The genuine 3/7 opcode is SmsgCharSpawnResult (the spawn-into-world response), a DIFFERENT
-  message -- do not conflate them.
+  OPCODE / LADDER (RESOLVED): this 8-byte manage/delete result is opcode (3:7), not (3:4). The
+  front-end deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed, corrected the
+  minor-3 receive ladder:
+    - 3/4  = SmsgSceneEntityUpdate (variable-length slot-scratch refill / scene-clear; no field spec)
+    - 3/7  = SmsgCharManageResult  (THIS 8-byte delete/select/rename manage result)
+    - 3/14 = SmsgCharSpawnResponse (16-byte enter-into-world bridge; no field spec)
+  The prior decompiler-mislabel confusion and the "3/4-vs-3/7 delete carrier" hedge are both
+  settled. The local-player world spawn is driven by 4/1, not by 3/7.
 
   RELATED: this is the inbound counterpart to the C2S char-management senders 1/13 rename and
-  1/14 delete (and the create path 1/6 reading B). The create accept/refuse path also surfaces a
-  distinct 12-byte create result (3/23 SmsgCharCreateResult) and a 19-byte rename result
-  (3/6 SmsgRenameCharResult); those are separate messages owned elsewhere.
+  1/7 manage (delete overloads 1/7 with the mode byte set). The create accept/refuse path also
+  surfaces a distinct 12-byte create result (3/23 SmsgCharCreateResult) and a 19-byte rename
+  result (3/6 SmsgRenameCharResult); those are separate messages owned elsewhere.
 
   UNKNOWNS to resolve with a capture of delete / rename results:
     - the meaning of the two reserved bytes at 0x01 and 0x03 (true padding vs small fields);

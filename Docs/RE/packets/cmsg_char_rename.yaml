@@ -14,7 +14,7 @@ summary: >
   byte then a 17-byte fixed CP949 new-name C-string (NUL-terminated). It is NOT triggered by a
   slot-grid button -- it is sent from the rename dialog's confirm button after the new-name textbox
   passes validation (charset + min length 2). The body is a contiguous 1 + 17 run (slot + name).
-  Server replies S2C 3/6 RenameCharResult (and a 3/4 subtype-1 refresh).
+  Server replies S2C 3/6 RenameCharResult (and a 3/7 manage-result subtype-1 refresh).
 
 # Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 18.
 fields:
@@ -46,7 +46,7 @@ notes: |
   dialog and sets its net-busy latch.
 
   SEQUENCE: client sends 1/13 -> server replies S2C 3/6 RenameCharResult (success carries the applied
-  name). A rename outcome also routes through the 8-byte manage-result handler (3/4, subtype 1) to
+  name). A rename outcome also routes through the 8-byte manage-result handler (3/7, subtype 1) to
   refresh the slot name -- see packets/3-4_char_manage_result.yaml.
 
   UNKNOWNS (capture-only): the exact CP949 length cap the server enforces within the 17-byte field;
@@ -55,4 +55,4 @@ notes: |
   RELATED: 1/0 logout, 1/6 create, 1/7 manage/select (+delete-overload), 1/9 enter, 1/14 slot-move.
   All gated by the single select-window net-busy latch.
 
-  UNBLOCKS: Client.Application RenameCharacter use-case (reply 3/6 / 3/4 subtype 1).
+  UNBLOCKS: Client.Application RenameCharacter use-case (reply 3/6 / 3/7 subtype 1).

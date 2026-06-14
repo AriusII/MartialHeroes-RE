@@ -9,6 +9,7 @@
 //   Layout on the 1024×768 reference canvas (§11.0, §11.4):
 //   [z=1]  A full-background panel    src(0,0,1024,398)   → dst(0,0,1024,398)
 //   [z=2]  A bottom-bar band          src(0,582,1024,442) → dst(0,326,1024,442)  (Y=326 = 326×768/768)
+//   [z=2.5]B ink-wash painting        src(0,0,1024,490)   → dst(0,110,1024,490)  shared with Login §11.2a
 //   [z=3]  D parchment PLATE col0     src(9,6,202,372)    → dst(24,97,202,372)   channel toggle 400
 //   [z=3]  D parchment PLATE col1     src(9,6,202,372)    → dst(257,97,202,372)  channel toggle 401
 //   [z=4]  D parchment BODY  col0     src(448,6,100,372)  → dst(77,97,100,372)   baked calligraphy art
@@ -33,16 +34,30 @@
 //
 // STATUS / LOAD PRESENTATION (§2.3, CODE-CONFIRMED):
 //   load > 1200 → Full (red); > 800 → High (orange); > 500 → Medium (yellow); ≤ 500 → Light (green).
-//   status_code==3 and load==24  → "Preparing"
-//   status_code==3 and open_time!=0 → "HH:MM" clock (load=HH, open_time=MM; §2.4 CODE-CONFIRMED)
-//   status_code==100 → auto-connect sentinel
+//   status 2/3/4 with open_time==0 → fixed label (no clock). spec §2.3. CODE-CONFIRMED.
+//   status_code==3, load==24 → "Preparing" (load==24 is a load sentinel, NOT a status code). spec §2.3.
+//   status_code==3, open_time!=0 → "HH:MM" clock: HH=(load/10,load%10), MM=(open_time/10,open_time%10). §2.4.
+//   status_code==100 → auto-connect sentinel.
+//   NOTE: 24 is a LOAD sentinel under status 3; it is NOT a top-level status code. spec §2.3. CODE-CONFIRMED.
+//
+// NEW BADGE (§2.7, CODE-CONFIRMED):
+//   NEW_SERVER_INDEX = 5 (uiconfig.lua global; hardcoded for offline flow). spec §2.7. CODE-CONFIRMED.
+//   The record whose server_id == NEW_SERVER_INDEX receives the "NEW" badge — resolved at render time.
+//
+// RANDOMIZED ORDER (§2.7, CODE-CONFIRMED):
+//   Display order is shuffled clock-seeded, with Lastserver anchored at slot 0 when present.
+//   Lastserver is persisted via Godot ConfigFile (user://) on selection. spec §2.5. CODE-CONFIRMED.
 //
 // PASSIVE: zero game logic.  Reads a view-model list; turns row clicks into ServerSelected(serverId).
 //
 // spec: Docs/RE/specs/frontend_scenes.md §11.4 (CODE-CONFIRMED literals).
+//       §1.9 (msg.xdb id table — column headers 4029/4030/4031/4032). CODE-CONFIRMED.
 //       §2 (server-selection presentation rules).
 //       §2.3 (status / load color thresholds). CODE-CONFIRMED.
-//       §2.4 (scheduled-open HH:MM clock packing). CODE-CONFIRMED.
+//       §2.4 (scheduled-open HH:MM clock packing — /10,%10 digit-split). CODE-CONFIRMED.
+//       §2.5 (Lastserver persistence). CODE-CONFIRMED.
+//       §2.7 (randomized display order; NEW_SERVER_INDEX badge). CODE-CONFIRMED.
+//       §2.8 (localized server names — string banks 5001..5040). CODE-CONFIRMED.
 //       Docs/RE/specs/login_flow.md §2.1 (8-byte record decode). CODE-CONFIRMED.
 
 using Godot;
@@ -59,16 +74,19 @@ namespace MartialHeroes.Client.Godot.Screens;
 public sealed record ServerEntry(
     /// <summary>Index 1..40 into the client-local name table. spec §2.8.</summary>
     int ServerId,
-    /// <summary>Display name (client-local, never on the wire). spec §2.8.</summary>
+    /// <summary>Display name (client-local, never on the wire). spec §2.8.
+    /// TODO: resolve via string banks 5001..5040 (msg.xdb) when MsgXdbCatalog is wired. spec §2.8.</summary>
     string DisplayName,
-    /// <summary>Availability sentinel. Special: 3=scheduled, 24=check, 100=current. spec §2.3.</summary>
+    /// <summary>Availability sentinel. Special values per §2.3:
+    ///   0 = normal/open; 2/3/4 = status-label variants; 3+open_time!=0 = scheduled clock;
+    ///   100 = auto-connect sentinel. NOTE: 24 is a load sentinel under status 3, NOT a status code.</summary>
     int StatusCode,
-    /// <summary>Population gauge / scheduled HH. Thresholds: 1200/800/500. spec §2.1. CODE-CONFIRMED.</summary>
+    /// <summary>Population gauge / scheduled HH. Thresholds: 1200/800/500. spec §2.1. CODE-CONFIRMED.
+    ///   When status_code==3 and open_time!=0: load is the hours field (HH = load/10, load%10). spec §2.4.</summary>
     int Load,
-    /// <summary>Scheduled open-time MM field (meaningful when status_code==3). spec §2.4.</summary>
-    int OpenTime,
-    /// <summary>True when this server id equals the NEW_SERVER_INDEX Lua global. spec §2.7.</summary>
-    bool IsNew = false);
+    /// <summary>Scheduled open-time minutes field (when status_code==3). spec §2.4.
+    ///   MM = open_time/10, open_time%10 (digit-split). CODE-CONFIRMED.</summary>
+    int OpenTime);
 
 /// <summary>
 /// Server-selection overlay.  Pixel-faithful to §11.4.
@@ -93,6 +111,39 @@ public sealed partial class ServerSelectScreen : Control
     public delegate void BackRequestedEventHandler();
 
     // =========================================================================
+    // NEW_SERVER_INDEX — which server_id receives the "NEW" badge.
+    // uiconfig.lua global (value 5 in the sampled client); hardcoded for offline flow.
+    // spec: Docs/RE/specs/frontend_scenes.md §2.7. CODE-CONFIRMED.
+    // =========================================================================
+    private const int NewServerIndex = 5; // spec: Docs/RE/specs/frontend_scenes.md §2.7. CODE-CONFIRMED.
+
+    // =========================================================================
+    // Lastserver persistence (user:// ConfigFile, layer-05 only).
+    // Written on selection; read on build to anchor the remembered server first.
+    // spec: Docs/RE/specs/frontend_scenes.md §2.5. CODE-CONFIRMED.
+    // =========================================================================
+    private const string LastServerCfgPath = "user://server_select.cfg"; // layer-05 only, never in core.
+    private const string LastServerCfgSection = "server_select";
+    private const string LastServerCfgKey = "Lastserver";
+
+    private static void PersistLastServer(int serverId)
+    {
+        // Write Lastserver to user:// ConfigFile. spec §2.5. CODE-CONFIRMED (registry in legacy;
+        // user:// ConfigFile is the Godot equivalent for layer-05).
+        var cfg = new ConfigFile();
+        cfg.SetValue(LastServerCfgSection, LastServerCfgKey, serverId);
+        cfg.Save(LastServerCfgPath);
+    }
+
+    private static int LoadLastServer()
+    {
+        // Read Lastserver from user:// ConfigFile. Returns 0 (none) if absent. spec §2.5.
+        var cfg = new ConfigFile();
+        if (cfg.Load(LastServerCfgPath) != Error.Ok) return 0;
+        return (int)cfg.GetValue(LastServerCfgSection, LastServerCfgKey, 0);
+    }
+
+    // =========================================================================
     // Server list (view-model)
     // =========================================================================
 
@@ -107,6 +158,8 @@ public sealed partial class ServerSelectScreen : Control
         set
         {
             _servers = value;
+            if (_servers is not null)
+                _displayOrder = BuildDisplayOrder(_servers);
             if (IsInsideTree()) RebuildServerLabels();
         }
     }
@@ -128,6 +181,11 @@ public sealed partial class ServerSelectScreen : Control
 
     // Label container inside the left parchment body (for server list content).
     private Control? _serverListContent;
+
+    // Display-order index array — maps screen slot → servers[] index.
+    // Built per SetServers call: clock-seeded shuffle with Lastserver pinned first when present.
+    // spec: Docs/RE/specs/frontend_scenes.md §2.7. CODE-CONFIRMED.
+    private List<int>? _displayOrder;
 
     // =========================================================================
     // Godot lifecycle
@@ -214,6 +272,40 @@ public sealed partial class ServerSelectScreen : Control
         }
 
         // =======================================================================
+        // [z=2.5] INK-WASH PAINTING BACKDROP — loginwindow.dds (B).
+        // B@(0,110,1024,490) src(0,0) — the same warrior ink-wash painting that backs the Login screen.
+        // Must sit BEHIND the two parchment plates (z=3) and all widgets, but IN FRONT of the
+        // bottom stone bar (z=2) and the full-background art panel (z=1).
+        // Without this layer the parchments float on bare stone — the official client shows
+        // the full painting behind them at all times (spec §11.2a / §11.4 shared backdrop).
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2a "Main panel art". CODE-CONFIRMED.
+        //       dst(0,110,1024,490) src(0,0,1024,490) — loginwindow.dds.
+        // =======================================================================
+        AtlasTexture? paintingBackdrop = _assets.Slice(
+            LoginLayout.AtlasLoginWindow,
+            LoginLayout.MainPanel.SrcX, LoginLayout.MainPanel.SrcY, // src(0,0). spec §11.2a. CODE-CONFIRMED.
+            LoginLayout.MainPanel.W, LoginLayout.MainPanel.H); // 1024×490. spec §11.2a. CODE-CONFIRMED.
+        if (paintingBackdrop is not null)
+        {
+            var paintingRect = new TextureRect
+            {
+                Name = "PaintingBackdrop",
+                Texture = paintingBackdrop,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                MouseFilter = MouseFilterEnum.Ignore,
+                Position = new Vector2(LoginLayout.MainPanel.X,
+                    LoginLayout.MainPanel.Y), // dst(0,110). spec §11.2a. CODE-CONFIRMED.
+                Size = new Vector2(LoginLayout.MainPanel.W,
+                    LoginLayout.MainPanel.H), // 1024×490. spec §11.2a. CODE-CONFIRMED.
+            };
+            AddChild(paintingRect);
+        }
+        else
+        {
+            GD.PrintErr("[ServerSelectScreen] loginwindow.dds Slice returned NULL — painting backdrop missing!");
+        }
+
+        // =======================================================================
         // [z=3] Parchment PLATE × 2 — the 202×372 channel backing plates.
         // D src(9,6,202,372) NORMAL  / src(220,6,202,372) HOVER+PRESSED.
         // col0 dst(24,97,202,372) action 400  /  col1 dst(257,97,202,372) action 401.
@@ -229,9 +321,9 @@ public sealed partial class ServerSelectScreen : Control
                 LoginLayout.AtlasLoginWindow02,
                 plateX[col], 97,
                 202, 372,
-                9, 6,    // NORMAL src(9,6). spec §11.4. CODE-CONFIRMED.
-                220, 6,  // HOVER  src(220,6). spec §11.4. CODE-CONFIRMED.
-                220, 6,  // PRESSED = HOVER.
+                9, 6, // NORMAL src(9,6). spec §11.4. CODE-CONFIRMED.
+                220, 6, // HOVER  src(220,6). spec §11.4. CODE-CONFIRMED.
+                220, 6, // PRESSED = HOVER.
                 plateActions[col]);
             plateTog.Name = $"ParchPlate{col}";
             plateTog.MouseFilter = MouseFilterEnum.Ignore; // passive chrome; row buttons handle input
@@ -244,8 +336,8 @@ public sealed partial class ServerSelectScreen : Control
         // col1: D src(572,6,100,372) → dst(310,97,100,372).
         // spec §11.4 "Parchment scroll BODY". CODE-CONFIRMED.
         // =======================================================================
-        int[] bodySrcU = { 448, 572 };        // spec §11.4 loop srcU start=448 step+124. CODE-CONFIRMED.
-        int[] bodyDstX = { 77, 310 };          // spec §11.4 dst offsets. CODE-CONFIRMED.
+        int[] bodySrcU = { 448, 572 }; // spec §11.4 loop srcU start=448 step+124. CODE-CONFIRMED.
+        int[] bodyDstX = { 77, 310 }; // spec §11.4 dst offsets. CODE-CONFIRMED.
         for (int col = 0; col < 2; col++)
         {
             AtlasTexture? bodyTex = _assets.Slice(
@@ -299,21 +391,24 @@ public sealed partial class ServerSelectScreen : Control
         // =======================================================================
         for (int n = 0; n < 10; n++)
         {
-            int rowX = LoginLayout.ServerRowBtnX0 + n * LoginLayout.ServerRowBtnXStep; // 13+47·n. spec §11.4. CODE-CONFIRMED.
+            int rowX = LoginLayout.ServerRowBtnX0 +
+                       n * LoginLayout.ServerRowBtnXStep; // 13+47·n. spec §11.4. CODE-CONFIRMED.
             // spec §11.4 X bound check: X < 483 (loop condition). All 10 fit. CODE-CONFIRMED.
             int rowActionId = LoginLayout.ServerRowActionBase + n; // 115+n. spec §11.4. CODE-CONFIRMED.
 
             StateButton rowBtn = WidgetFactory.MakeStateButton(
                 _assets,
                 LoginLayout.AtlasLoginWindow,
-                rowX, LoginLayout.ServerRowBtnY,        // dst X, Y=66. spec §11.4. CODE-CONFIRMED.
-                LoginLayout.ServerRowBtnW,              // W=47. spec §11.4. CODE-CONFIRMED.
-                LoginLayout.ServerRowBtnH,              // H=18. spec §11.4. CODE-CONFIRMED.
-                LoginLayout.ServerRowBtnNormalSrcX, LoginLayout.ServerRowBtnNormalSrcY, // NORMAL src(596,985). CODE-CONFIRMED.
-                LoginLayout.ServerRowBtnHoverSrcX,  LoginLayout.ServerRowBtnHoverSrcY,  // HOVER  src(643,985). CODE-CONFIRMED.
-                LoginLayout.ServerRowBtnHoverSrcX,  LoginLayout.ServerRowBtnHoverSrcY,  // PRESSED = HOVER.
+                rowX, LoginLayout.ServerRowBtnY, // dst X, Y=66. spec §11.4. CODE-CONFIRMED.
+                LoginLayout.ServerRowBtnW, // W=47. spec §11.4. CODE-CONFIRMED.
+                LoginLayout.ServerRowBtnH, // H=18. spec §11.4. CODE-CONFIRMED.
+                LoginLayout.ServerRowBtnNormalSrcX,
+                LoginLayout.ServerRowBtnNormalSrcY, // NORMAL src(596,985). CODE-CONFIRMED.
+                LoginLayout.ServerRowBtnHoverSrcX,
+                LoginLayout.ServerRowBtnHoverSrcY, // HOVER  src(643,985). CODE-CONFIRMED.
+                LoginLayout.ServerRowBtnHoverSrcX, LoginLayout.ServerRowBtnHoverSrcY, // PRESSED = HOVER.
                 rowActionId,
-                caption: "",        // label drawn via server-list text overlay (see below)
+                caption: "", // label drawn via server-list text overlay (see below)
                 captionTint: new Color(0.92f, 0.86f, 0.55f)); // parchment-gold text
             rowBtn.Name = $"ServerRowBtn_{n}";
 
@@ -390,10 +485,10 @@ public sealed partial class ServerSelectScreen : Control
             LoginLayout.AtlasLoginSlice1,
             456, -3,
             111, 38,
-            792, 398,   // NORMAL src(792,398). spec §11.4. CODE-CONFIRMED.
-            602, 416,   // HOVER  src(602,416). spec §11.4. CODE-CONFIRMED.
-            602, 416,   // PRESSED = HOVER.
-            105);       // Action 105 = refresh/re-fetch. spec §1.2. CODE-CONFIRMED.
+            792, 398, // NORMAL src(792,398). spec §11.4. CODE-CONFIRMED.
+            602, 416, // HOVER  src(602,416). spec §11.4. CODE-CONFIRMED.
+            602, 416, // PRESSED = HOVER.
+            105); // Action 105 = refresh/re-fetch. spec §1.2. CODE-CONFIRMED.
         refreshBtn.Name = "RefreshBtn";
         refreshBtn.ActionFired += _ => OnRefreshPressed();
         AddChild(refreshBtn);
@@ -473,9 +568,12 @@ public sealed partial class ServerSelectScreen : Control
         }
 
         // Caption ids 4029..4032 — column headers. spec §11.4 / §1.9. CODE-CONFIRMED.
-        AddHdr(4029u, "서버명", 180);  // Server name column
-        AddHdr(4030u, "상태", 70);    // Status column
-        AddHdr(4031u, "부하", 70);    // Load column
+        // NOTE §1.9 CORRECTION: msg 4029 IS the server-list column header (NOT an endpoint-fetch error).
+        // The IDA pass confirmed 4029 is the first column header caption. spec §1.9 CODE-CONFIRMED.
+        // "PLAUSIBLE" label in §1.9 table was the pre-IDA reading; the IDA pass resolved it as confirmed.
+        AddHdr(4029u, "서버명", 180); // Server name column header. spec §11.4 / §1.9. CODE-CONFIRMED.
+        AddHdr(4030u, "상태", 70); // Status column header. spec §11.4 / §1.9. CODE-CONFIRMED.
+        AddHdr(4031u, "부하", 70); // Load column header. spec §11.4 / §1.9. CODE-CONFIRMED.
 
         // Row list (populated on SetServers / Servers setter).
         var rowList = new VBoxContainer
@@ -554,7 +652,58 @@ public sealed partial class ServerSelectScreen : Control
     public void SetServers(IReadOnlyList<ServerEntry> servers)
     {
         _servers = servers;
+        _displayOrder = BuildDisplayOrder(servers);
         if (IsInsideTree()) RebuildServerLabels();
+    }
+
+    /// <summary>
+    /// Builds the display-order index array from the server list.
+    /// When Lastserver is present: clock-seeded shuffle with the remembered server pinned at slot 0.
+    /// When absent: plain sequential order.
+    /// spec: Docs/RE/specs/frontend_scenes.md §2.7. CODE-CONFIRMED.
+    /// </summary>
+    private static List<int> BuildDisplayOrder(IReadOnlyList<ServerEntry> servers)
+    {
+        int count = servers.Count;
+        var order = new List<int>(count);
+        for (int i = 0; i < count; i++) order.Add(i);
+
+        int lastServerId = LoadLastServer();
+        if (lastServerId <= 0)
+        {
+            // No Lastserver — plain sequential order. spec §2.7.
+            return order;
+        }
+
+        // Find the remembered server's index in the server list.
+        int pinnedIdx = -1;
+        for (int i = 0; i < count; i++)
+        {
+            if (servers[i].ServerId == lastServerId)
+            {
+                pinnedIdx = i;
+                break;
+            }
+        }
+
+        if (pinnedIdx < 0)
+        {
+            // Remembered server not in current list — sequential order.
+            return order;
+        }
+
+        // Clock-seeded shuffle of the non-pinned entries. spec §2.7 "seeded from the clock". CODE-CONFIRMED.
+        var rng = new Random((int)(global::Godot.Time.GetTicksMsec() & 0x7FFFFFFF));
+        // Remove the pinned entry from the pool, shuffle the rest, then prepend the pinned entry.
+        order.RemoveAt(pinnedIdx);
+        for (int i = order.Count - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            (order[i], order[j]) = (order[j], order[i]);
+        }
+
+        order.Insert(0, pinnedIdx); // pin Lastserver first. spec §2.7. CODE-CONFIRMED.
+        return order;
     }
 
     private void RebuildServerLabels()
@@ -580,34 +729,42 @@ public sealed partial class ServerSelectScreen : Control
             return;
         }
 
-        // Build one row per server entry (spec §11.4 — labels inside the parchment body area).
-        for (int i = 0; i < _servers.Count; i++)
+        // Build one row per server entry using the display order (shuffled with Lastserver pinned first).
+        // spec §2.7: "randomized display order, Lastserver anchored first". CODE-CONFIRMED.
+        var order = _displayOrder ?? BuildDisplayOrder(_servers);
+        for (int slot = 0; slot < order.Count; slot++)
         {
-            ServerEntry entry = _servers[i];
-            Control row = BuildServerRow(entry, i);
+            int srcIdx = order[slot];
+            ServerEntry entry = _servers[srcIdx];
+            Control row = BuildServerRow(entry, srcIdx, slot);
             rowList.AddChild(row);
         }
 
-        GD.Print($"[ServerSelectScreen] Server list: {_servers.Count} entries populated.");
+        GD.Print($"[ServerSelectScreen] Server list: {_servers.Count} entries populated " +
+                 $"(display order: {string.Join(",", order)}).");
     }
 
-    private Control BuildServerRow(ServerEntry entry, int rowIndex)
+    private Control BuildServerRow(ServerEntry entry, int rowIndex, int displaySlot)
     {
         // Each row is an HBox of: server name label | status label | load label.
         // Row height matches the server-row button height (18px) at the spec scale.
         var row = new HBoxContainer
         {
-            Name = $"ServerRow_{rowIndex}",
+            Name = $"ServerRow_{displaySlot}",
             CustomMinimumSize = new Vector2(450, 22),
         };
 
         // Server name (DisplayName from client-local name table, spec §2.8. CODE-CONFIRMED).
+        // TODO: resolve via string banks 5001..5040 (msg.xdb) when MsgXdbCatalog is wired. spec §2.8.
         bool isActiveRow = (rowIndex == _activeRowIndex);
         Color nameColor = isActiveRow
-            ? new Color(1.0f, 0.95f, 0.60f)   // active/selected: bright gold
-            : new Color(0.85f, 0.78f, 0.50f);  // normal: parchment gold
+            ? new Color(1.0f, 0.95f, 0.60f) // active/selected: bright gold
+            : new Color(0.85f, 0.78f, 0.50f); // normal: parchment gold
 
-        string nameText = entry.DisplayName + (entry.IsNew ? " ★" : "");
+        // "NEW" badge: shown when server_id == NEW_SERVER_INDEX (value 5 from uiconfig.lua).
+        // spec: Docs/RE/specs/frontend_scenes.md §2.7. CODE-CONFIRMED.
+        bool isNew = (entry.ServerId == NewServerIndex); // spec §2.7. CODE-CONFIRMED.
+        string nameText = entry.DisplayName + (isNew ? " ★" : "");
         Label nameLbl = WidgetFactory.MakeLabel(nameText, LoginLayout.FontBodyHeight, nameColor);
         nameLbl.CustomMinimumSize = new Vector2(180, 22);
         nameLbl.MouseFilter = MouseFilterEnum.Ignore;
@@ -645,37 +802,57 @@ public sealed partial class ServerSelectScreen : Control
 
     private static string GetStatusText(ServerEntry entry)
     {
+        // Status special-value rules per §2.3. CODE-CONFIRMED.
+        // IMPORTANT: 24 is a LOAD sentinel under status 3, NOT a top-level status code. spec §2.3.
         return entry.StatusCode switch
         {
-            // status_code==3 and load==24 → "Preparing / under check". spec §2.3. CODE-CONFIRMED.
-            3 when entry.Load == 24 => "Preparing",
-            // status_code==3 and open_time!=0 → HH:MM clock. spec §2.4. CODE-CONFIRMED.
-            // HH = load field (load/10, load%10); MM = open_time field.
-            3 when entry.OpenTime != 0 => $"{entry.Load / 10:D2}:{entry.OpenTime % 60:D2}",
-            3 => "Scheduled",
-            // status_code==100 → auto-connect sentinel. spec §2.3. CODE-CONFIRMED.
+            // status 0 → normal/open, falls through to load-color path.
+            0 => "Open",
+
+            // status 2/3/4 with open_time==0 → fixed "status as label" branch. spec §2.3. CODE-CONFIRMED.
+            (2 or 3 or 4) when entry.OpenTime == 0 && entry.Load == 24
+                => "Preparing", // load==24 is a "preparing / under check" sentinel. spec §2.3. CODE-CONFIRMED.
+            (2 or 3 or 4) when entry.OpenTime == 0
+                => "Scheduled", // fixed status label (no clock available). spec §2.3.
+
+            // status 3 with open_time!=0 → scheduled-open clock. spec §2.4. CODE-CONFIRMED.
+            // HH = load/10, load%10 — DIGIT-SPLIT. MM = open_time/10, open_time%10 — DIGIT-SPLIT.
+            // NOTE: previous code used OpenTime%60 for MM — WRONG. Corrected to /10,%10 per §2.4.
+            3 when entry.OpenTime != 0
+                => $"{entry.Load / 10}{entry.Load % 10}:{entry.OpenTime / 10}{entry.OpenTime % 10}",
+
+            // status 100 → auto-connect sentinel ("this is the connected / current selection"). spec §2.3. CODE-CONFIRMED.
             100 => "Connected",
-            // status_code==24 → under check (use same sentinel check as load==24). spec §2.3.
-            24 => "Checking",
+
+            // Any other positive status → open.
             > 0 => "Open",
+
+            // status 0 or negative → offline.
             _ => "Offline",
         };
     }
 
     private static Color GetStatusColor(ServerEntry entry)
     {
-        return entry.StatusCode is > 0 and not 24
-            ? new Color(0.55f, 0.90f, 0.55f)   // open: green
-            : new Color(0.70f, 0.50f, 0.40f);   // unavailable: brownish
+        // NOTE: 24 is NOT a status code — it is a load sentinel under status 3. spec §2.3. CODE-CONFIRMED.
+        // Status 2/3/4 with open_time==0 and status 3+clock → "scheduled / preparing" coloring.
+        // Status 0 or positive → open (green). Status 100 → connected (green). Others → brownish.
+        return entry.StatusCode switch
+        {
+            (2 or 3 or 4) when entry.OpenTime == 0 => new Color(0.80f, 0.70f, 0.40f), // scheduled/preparing: gold
+            3 when entry.OpenTime != 0 => new Color(0.80f, 0.70f, 0.40f), // scheduled clock: gold
+            0 or 100 or > 0 => new Color(0.55f, 0.90f, 0.55f), // open/connected: green
+            _ => new Color(0.70f, 0.50f, 0.40f), // offline: brownish
+        };
     }
 
     private static (string text, Color color) GetLoadDisplay(int load)
     {
         // spec: login_flow.md §2.1 load thresholds. CODE-CONFIRMED.
-        if (load > 1200) return ("Full",   new Color(0.90f, 0.25f, 0.25f));   // red
-        if (load > 800)  return ("High",   new Color(0.95f, 0.60f, 0.15f));   // orange
-        if (load > 500)  return ("Medium", new Color(0.95f, 0.90f, 0.15f));   // yellow
-        return ("Light", new Color(0.50f, 0.90f, 0.50f));                     // green
+        if (load > 1200) return ("Full", new Color(0.90f, 0.25f, 0.25f)); // red
+        if (load > 800) return ("High", new Color(0.95f, 0.60f, 0.15f)); // orange
+        if (load > 500) return ("Medium", new Color(0.95f, 0.90f, 0.15f)); // yellow
+        return ("Light", new Color(0.50f, 0.90f, 0.50f)); // green
     }
 
     // =========================================================================
@@ -689,11 +866,15 @@ public sealed partial class ServerSelectScreen : Control
         ServerEntry selected = _servers[rowIndex];
         _activeRowIndex = rowIndex;
 
+        // Persist Lastserver on selection. spec §2.5. CODE-CONFIRMED.
+        // Legacy: written to HKLM registry "Lastserver"; layer-05 equivalent: user:// ConfigFile.
+        PersistLastServer(selected.ServerId);
+
         // Rebuild row labels to reflect the active-row highlight.
         RebuildServerLabels();
 
         GD.Print($"[ServerSelectScreen] Row tab {rowIndex} pressed → server id={selected.ServerId} " +
-                 $"name='{selected.DisplayName}'. Action={LoginLayout.ServerRowActionBase + rowIndex}. " +
+                 $"name='{selected.DisplayName}'. Lastserver persisted. Action={LoginLayout.ServerRowActionBase + rowIndex}. " +
                  "spec §11.4 / §2.5. CODE-CONFIRMED.");
 
         // Emit the intent signal. The BootFlow / use-case layer handles the channel-endpoint

@@ -1,10 +1,12 @@
 using Godot;
 using MartialHeroes.Client.Application.Events;
+using MartialHeroes.Client.Application.Hud;
 using MartialHeroes.Client.Domain.Actors;
 using MartialHeroes.Client.Godot.Adapters;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Screens;
 using MartialHeroes.Client.Godot.World;
+using MartialHeroes.Shared.Kernel.Enums;
 using MartialHeroes.Shared.Kernel.Ids;
 
 namespace MartialHeroes.Client.Godot.HUD;
@@ -191,6 +193,16 @@ public sealed partial class GameHud : Control
     // spec: Docs/RE/specs/ui_hud_layout.md §5.8 — ~12 sites; reusable via Open(message).
     private ConfirmDialog? _confirmDialog;
 
+    // Zone indicator: a small label anchored top-right showing Safe / PvP / Closed / Unknown.
+    // Populated by draining IHudEventHub.ZoneChanges in _Process.
+    // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — zone-type enum.
+    private Label? _zoneIndicatorLabel;
+    private Panel? _zoneIndicatorPanel;
+
+    // The HUD event hub — wired in BindStageBComponents (after Initialise).
+    // ZoneChanges is the only channel drained here; other families are drained by their widgets.
+    private IHudEventHub? _hudEventHub;
+
     // ClientContext reference (for catalogue lookups and texture loading).
     private ClientContext? _context;
 
@@ -235,6 +247,9 @@ public sealed partial class GameHud : Control
     private void BindStageBComponents(ClientContext context)
     {
         var hub = context.HudEventHub;
+
+        // Store hub reference so _Process can drain ZoneChanges each frame.
+        _hudEventHub = hub;
 
         // Chat window — always visible; live chat lines arrive via hub.ChatLines.
         if (_chatWindow is not null)
@@ -657,6 +672,19 @@ public sealed partial class GameHud : Control
             GD.PrintErr($"[GameHud] ConfirmDialog attach failed: {ex.Message}");
         }
 
+        // ---- ZoneIndicator (top-right corner, below minimap) ----
+        // Small pill label: "Safe" / "PvP" / "Closed" / "Unknown".
+        // Populated by ZoneChangedEvent from IHudEventHub.ZoneChanges (drained in _Process).
+        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — zone-type enum.
+        try
+        {
+            BuildZoneIndicator();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] ZoneIndicator build failed: {ex.Message}");
+        }
+
         GD.Print("[GameHud] _Ready completed. HUD chrome wired to uitex 0001 (mainwindow.dds). " +
                  $"ActorState at ({HudPanelConfig.StatsX},{HudPanelConfig.StatsY}) W={HudPanelConfig.StatsW} H={HudPanelConfig.StatsH} " + // spec: Docs/RE/specs/ui_hud_layout.md §3.3
                  $"+ 3 sub-panels (A/B/C). " + // spec: Docs/RE/specs/ui_hud_layout.md §3.4
@@ -892,6 +920,87 @@ public sealed partial class GameHud : Control
                  $"W={HudPanelConfig.TradeW} H={HudPanelConfig.TradeH} Y=0. " +
                  "spec: Docs/RE/specs/ui_hud_layout.md §3.3 CODE-CONFIRMED-static.");
     }
+
+    // -------------------------------------------------------------------------
+    // Zone indicator (top-right pill, below minimap)
+    // Shows the current zone type: Safe / PvP / Closed / Unknown (provisional).
+    // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — zone-type enum.
+    // -------------------------------------------------------------------------
+
+    private void BuildZoneIndicator()
+    {
+        // Anchored to top-right corner, below minimap.
+        // Minimap is at screen_width − 200px, Y=10 (HudPanelConfig.MinimapW=200, MinimapY=10).
+        // Zone pill sits below it: X = screen_width − 200, Y = 10 + minimap_height + 4 ~ Y=10+140+4=154.
+        // We anchor to top-right using AnchorRight=1, offsets measured from the right edge.
+        // Width ~120px, height ~20px — compact but readable.
+        // Layout is PLAUSIBLE (minimap height is not byte-confirmed).
+        _zoneIndicatorPanel = new Panel
+        {
+            Name = "ZoneIndicatorPanel",
+            AnchorLeft = 1f,
+            AnchorTop = 0f,
+            AnchorRight = 1f,
+            AnchorBottom = 0f,
+            OffsetLeft = -194f, // screen_width − 194  → ~120px wide pill  // PLAUSIBLE
+            OffsetTop = 154f, // below minimap (10 + 140 + 4)             // PLAUSIBLE
+            OffsetRight = -4f, // 4px from right edge
+            OffsetBottom = 178f, // 24px tall
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+
+        var bg = new StyleBoxFlat();
+        bg.BgColor = new Color(0f, 0f, 0f, 0.65f);
+        bg.SetBorderWidthAll(1);
+        bg.BorderColor = new Color(0.7f, 0.7f, 0.7f, 0.8f);
+        bg.CornerRadiusTopLeft = bg.CornerRadiusTopRight =
+            bg.CornerRadiusBottomLeft = bg.CornerRadiusBottomRight = 3;
+        _zoneIndicatorPanel.AddThemeStyleboxOverride("panel", bg);
+
+        _zoneIndicatorLabel = new Label
+        {
+            Name = "ZoneIndicatorLabel",
+            Text = "Zone: ?",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        _zoneIndicatorLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+
+        _zoneIndicatorPanel.AddChild(_zoneIndicatorLabel);
+        AddChild(_zoneIndicatorPanel);
+
+        GD.Print("[GameHud] ZoneIndicator built (top-right pill, subscribes to ZoneChanges channel). " +
+                 "spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.");
+    }
+
+    /// <summary>
+    /// Converts a <see cref="ZoneType"/> to a short display string for the zone indicator.
+    /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — zone-type enum values 0/1/2.
+    /// </summary>
+    private static string ZoneTypeLabel(ZoneType zone) => zone switch
+    {
+        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 0: PLAUSIBLE (Safe).
+        ZoneType.Safe => "Zone: Safe",
+        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 1: CONFIRMED (OpenPvP).
+        ZoneType.OpenPvp => "Zone: PvP",
+        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 2: CONFIRMED (Closed).
+        ZoneType.Closed => "Zone: Closed",
+        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — values 3+ / missing: UNVERIFIED.
+        _ => "Zone: ?",
+    };
+
+    /// <summary>
+    /// Returns the background colour for the zone pill based on zone type.
+    /// Colours are PLAUSIBLE conventions (no original art recovered for this widget).
+    /// </summary>
+    private static Color ZoneTypeColor(ZoneType zone) => zone switch
+    {
+        ZoneType.Safe => new Color(0f, 0.4f, 0f, 0.75f), // green — safe
+        ZoneType.OpenPvp => new Color(0.6f, 0f, 0f, 0.75f), // red   — PvP
+        ZoneType.Closed => new Color(0.3f, 0.1f, 0.5f, 0.75f), // purple — closed
+        _ => new Color(0f, 0f, 0f, 0.65f), // black — unknown
+    };
 
     // -------------------------------------------------------------------------
     // Skill bar construction (container origin at recovered (349, 13), 9-slot grid)
@@ -1501,6 +1610,54 @@ public sealed partial class GameHud : Control
     {
         // skill.scr records do not have a confirmed name column (spec §2.8 known unknowns).
         return $"Sk#{skillId}";
+    }
+
+    /// <summary>
+    /// Drains the <see cref="IHudEventHub.ZoneChanges"/> channel each frame (main thread).
+    /// All Control mutation happens here — never from a background thread.
+    ///
+    /// Only the ZoneChanges channel is drained here; all other HUD channels are drained by
+    /// their dedicated widgets (ChatWindow, BuffBar, TargetFrame, etc.).
+    ///
+    /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — zone-type enum (Safe/OpenPvp/Closed).
+    /// PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — all Control mutation on the main thread.
+    /// </summary>
+    public override void _Process(double delta)
+    {
+        // Guard: hub not yet wired (before Initialise is called).
+        if (_hudEventHub is null) return;
+
+        // Drain zone-change events (latest-wins capacity=1, so at most one per frame).
+        while (_hudEventHub.ZoneChanges.TryRead(out ZoneChangedEvent? evt))
+        {
+            ApplyZoneChanged(evt);
+        }
+    }
+
+    /// <summary>
+    /// Applies a <see cref="ZoneChangedEvent"/> to the zone-indicator pill.
+    /// Updates both the label text and the background colour.
+    /// PASSIVE: no game logic — reads event payload only.
+    /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.
+    /// </summary>
+    private void ApplyZoneChanged(ZoneChangedEvent evt)
+    {
+        if (_zoneIndicatorLabel is null || _zoneIndicatorPanel is null) return;
+
+        _zoneIndicatorLabel.Text = ZoneTypeLabel(evt.Zone);
+
+        // Update pill background colour to reinforce the zone type at a glance.
+        // Colours are PLAUSIBLE — no original art recovered for this widget.
+        var bg = new StyleBoxFlat();
+        bg.BgColor = ZoneTypeColor(evt.Zone);
+        bg.SetBorderWidthAll(1);
+        bg.BorderColor = new Color(0.7f, 0.7f, 0.7f, 0.8f);
+        bg.CornerRadiusTopLeft = bg.CornerRadiusTopRight =
+            bg.CornerRadiusBottomLeft = bg.CornerRadiusBottomRight = 3;
+        _zoneIndicatorPanel.AddThemeStyleboxOverride("panel", bg);
+
+        GD.Print($"[GameHud] ZoneIndicator → {evt.Zone} ({ZoneTypeLabel(evt.Zone)}). " +
+                 "spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.");
     }
 
     public override void _ExitTree()

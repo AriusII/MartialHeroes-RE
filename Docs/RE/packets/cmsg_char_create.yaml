@@ -17,7 +17,9 @@ summary: >
   (a remap of the UI class-button index), five allocatable stats, and a trailing remaining-points
   counter. The "1/6 login-or-create collision" is RESOLVED: 1/6 is char-create ONLY. The login
   credential is a separate sub-opcode 0x2B on the secure 1/4 frame (packets/login.yaml). Server
-  replies with the S2C create result (3/6 / 3/23) and may also refresh the slot list via 3/4.
+  replies with the S2C create result (3/6 / 3/23) and may also refresh the slot list via the
+  8-byte manage-result handler (3/7 SmsgCharManageResult; ladder corrected by the front-end
+  deep-fidelity pass, campaign4/frontend-deep).
 
 # Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 52 (verified below).
 # The field split is now recovered from the create-form staging buffer (the form edits write each
@@ -86,7 +88,7 @@ notes: |
   request is in flight (blocks re-entrancy across all char-mgmt builders).
 
   SEQUENCE / RESULT: server answers with the create result (S2C 3/6 / 3/23). The 8-byte char-manage
-  result (3/4) may also refresh the slot list.
+  result (3/7 SmsgCharManageResult) may also refresh the slot list.
 
   UNKNOWNS (capture/debugger required):
     - the exact sex-vs-hair distinction at 0x14 / 0x16, and whether 0x16 is hair or pure padding;

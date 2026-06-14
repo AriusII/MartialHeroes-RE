@@ -5,7 +5,8 @@
 >
 > status: sample_verified
 > sample_verified: true  (file size, entry count, stride, entry field layout, and audio container
->                         formats all confirmed against real sample files — 2026-06-11)
+>                         formats all confirmed against real sample files — 2026-06-11;
+>                         on-disk 52-byte stride harness-confirmed across 300 tables — 2026-06-14)
 
 ---
 
@@ -16,7 +17,7 @@ only by VFS directory path:
 
 | Path pattern | File type |
 |---|---|
-| `data/map*/soundtable*.eff` | Per-map sound trigger schedule table (256 × 48 B, same layout as .wlk/.run/.bgm/.bge) |
+| `data/map*/soundtable*.eff` | Per-map sound trigger schedule table (256 records × 52 B on disk, same layout as .wlk/.run/.bgm/.bge) |
 | `data/effect/obj/*.eff` | 3D triangle mesh collision / area shape (variable length, starts with a u32 triangle count) |
 
 An engineer must never assume a `.eff` file is a sound table without first confirming the
@@ -32,12 +33,18 @@ third format and is unrelated to either `.eff` variant above.
 
 - **Extensions:** `.wlk`, `.run`, `.bgm`, `.bge`, `.eff` (sound table variant only)
 - **Found in:**
-  - `data/map<id>/soundtable<id>.<ext>` — runtime (in-game map variant)
+  - `data/map<id>/soundtable<id>.<ext>` — runtime (in-game map variant). `<id>` is a
+    zero-padded 3-digit area number matching the owning cell's `.mud` path (e.g. `map001`,
+    `soundtable001.bgm` for area 1; `map000` / `soundtable000.*` for the global / lobby area).
   - `tool/sound/soundtable<id>.<ext>` — editor / tool variant
+- **Table inventory (VFS census, 2026-06-14):** five table extensions × ~60 areas =
+  ~300 per-area binary tables, plus the `map000` global set. Every table is binary (never
+  CP949 text) and every table is exactly 13312 bytes. — confidence: SAMPLE-VERIFIED
 - **Magic / signature:** none — no file-level magic or version header; first byte of a
-  well-formed file is the low byte of the `sound_entry_id` u32 at entry index 0
+  well-formed file is the low byte of the `sound_entry_id` u32 at record index 0
 - **Endianness:** little-endian (confirmed: f32 1.0 stored as `00 00 80 3F`)
-- **File size:** fixed 13312 bytes (0x3400) — confirmed across 12 real samples
+- **File size:** fixed 13312 bytes (0x3400) — confirmed across 12 runtime samples (2026-06-11)
+  and re-confirmed across all ~300 tables by VFS census (2026-06-14)
 
 ---
 
@@ -48,74 +55,143 @@ differ only in the category of sound event they carry:
 
 | Extension | Semantic role | Terrain-cell index byte(s) |
 |---|---|---|
-| `.wlk` | Walk footstep sounds | Derived from character world position (separate code path; not observed in the ambient-update function) |
-| `.run` | Run footstep sounds | Derived from character world position (same note as `.wlk`) |
+| `.wlk` | Walk footstep sounds | PLAUSIBLY mud-cell byte at cell offset +0 (see `mud.md` bytes-0/1 hypothesis; UNVERIFIED) |
+| `.run` | Run footstep sounds | PLAUSIBLY mud-cell byte at cell offset +1 (see `mud.md` bytes-0/1 hypothesis; UNVERIFIED) |
 | `.bgm` | Background music zones | Mud-cell byte at cell offset +2 |
 | `.bge` | Looped ambient sound effects | Mud-cell bytes at cell offsets +3 and +4 (up to 2 simultaneous per cell) |
 | `.eff` (sound table) | Triggered point-source sound events | Mud-cell bytes at cell offsets +5, +6, and +7 (up to 3 simultaneous per cell) |
 
-The `.wlk` and `.run` files in all available samples contain only null entries (sound_entry_id
+The `.wlk` and `.run` files in all available samples contain only null records (sound_entry_id
 = 0 in every slot). The terrain-cell indexing mechanism for footstep tables is confirmed to
-exist but was not directly observed in the ambient-update runtime path.
+exist but its index source in the `.mud` tile was not directly observed; the leading two mud
+bytes are the leading hypothesis — see the cross-reference to `mud.md`.
 
 ---
 
 ## File layout
 
-### Overall structure
+### Overall structure — on-disk stride reconciliation
+
+A 2026-06-14 black-box VFS census (no decompiler) measured the on-disk record stride directly
+across all ~300 tables and found it to be **52 bytes**, giving exactly **256 records** with no
+trailing region: 256 × 52 = 13312 = the fixed file size, with zero remainder.
+
+This **corrects** the earlier (2026-06-11) interpretation, which split the 13312-byte file into a
+256 × 48 = 12288-byte record table plus a trailing 1024-byte "editor metadata" region. Both
+interpretations reconcile to the same total file size, and both agree on the field layout of the
+first 0x2C bytes of every record (see the per-record table below); they differ only in whether the
+final bytes of each slot are a 4-byte per-record tail (stride 52) or are pooled into one trailing
+block (48 + 1024). The directly-measured 52-byte stride is the authoritative on-disk layout for a
+parser. The "48-byte" figure is retained below as a note because it may correspond to the
+*in-memory* record the runtime loader builds after parsing, not the on-disk record.
 
 | Region | Offset | Size (bytes) | Notes |
 |---|---:|---:|---|
-| Sound entry table | 0 (0x0000) | 12288 (0x3000) | 256 entries × 48 bytes; this is the only region read by the runtime loader |
-| Editor metadata | 12288 (0x3000) | 1024 (0x400) | Written by the map editor tool; ignored at runtime |
-| **Total on disk** | — | **13312 (0x3400)** | Confirmed across all 12 sample files |
+| Record table | 0 (0x0000) | 13312 (0x3400) | 256 records × **52 bytes** on disk (harness-measured) |
+| **Total on disk** | — | **13312 (0x3400)** | Confirmed across 12 runtime samples and ~300 census tables |
 
-The runtime loader opens the file and reads exactly 12288 bytes starting at offset 0. The
-trailing 1024-byte editor metadata region is never consumed at runtime.
+- **Record count source:** fixed at **256** — there is no count field; the count is implied by
+  file size / stride (13312 / 52 = 256). — confidence: SAMPLE-VERIFIED
+- **Record stride:** **52 bytes** on disk. — confidence: SAMPLE-VERIFIED (exact division across
+  ~300 tables)
 
-### Entry count
+> Historical note (do not implement against this): the 2026-06-11 runtime-access analysis
+> described a 48-byte in-memory record and a separate 1024-byte trailing editor-metadata block.
+> The on-disk parser must use the 52-byte stride. The historical 48 + 1024 split and the
+> editor-metadata observations are preserved at the end of this spec for provenance.
 
-Fixed: **256 entries**. There is no entry-count field anywhere in the file; the loader always
-reads exactly 256 × 48 = 12288 bytes. Entry index 0 is the null/disabled sentinel — a terrain
-cell byte value of 0 means "no sound assigned", so the slot at index 0 is never the target of
-a meaningful lookup.
+### Record index 0 — null sentinel
+
+Record index 0 is the null/disabled sentinel — a terrain cell byte value of 0 means
+"no sound assigned", so the slot at index 0 is never the target of a meaningful lookup.
 
 ---
 
-## Per-entry layout (48 bytes, little-endian throughout)
+## Per-record layout (52 bytes on disk, little-endian throughout)
 
-Confidence levels reflect triangulation of two independent sources: runtime access-pattern
-analysis and direct observation of 12 sample files.
+Confidence levels reflect triangulation of three sources: runtime access-pattern analysis,
+direct observation of 12 runtime samples (2026-06-11), and a 256-record field census of
+`.bgm` / `.bge` / `.eff` tables in area 001 (2026-06-14).
+
+The meaningful fields occupy offsets +0x00 .. +0x2F (48 bytes). The remaining bytes of each
+52-byte slot (+0x30 .. +0x33) were not characterised by either analysis and are listed as a
+known unknown.
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| +0x00 | 4 | u32 | `sound_entry_id` | Numeric resource key; 0 = empty/unassigned slot. Active samples carry 9-digit decimal values (see Sound ID section). | CONFIRMED |
-| +0x04 | 24 | u8[24] | `hour_schedule[24]` | One flag byte per in-game hour. `hour_schedule[h]` non-zero → sound active during hour h. h = game_clock_seconds / 3600 (integer division). All 12 samples have every byte = 0x01 (unconditionally active). | CONFIRMED (structure and access pattern); value variation UNOBSERVED in samples |
-| +0x1C | 4 | f32 | `weight` | Always 1.0f in all observed samples. Not accessed in the observed runtime playback path. Likely a blend weight or priority scalar initialized to 1.0 by the editor. | SAMPLE-CONFIRMED as 1.0f; semantic UNVERIFIED |
-| +0x20 | 4 | f32 | `pos_x` | World-space X coordinate of the 3D DirectSound source. Passed directly to `IDirectSound3DBuffer::SetPosition` as the X argument. 0.0 in all observed samples (BGM/ambient sources may be non-positional). | CONFIRMED (runtime semantic); observed value 0.0f in all samples |
-| +0x24 | 4 | u32 | `unknown_36` | Not accessed in the observed runtime playback path. Values across samples: 0x00000000 (most entries), 0x00000001 (one active entry), editor-uninitialized fill pattern (several entries). Purpose UNRESOLVED. | UNRESOLVED |
-| +0x28 | 4 | f32 | `pos_z` | World-space Z coordinate of the 3D DirectSound source. Passed to `IDirectSound3DBuffer::SetPosition` as the Z argument. The Y component used for SetPosition is taken from the player's current world Y, not from this table. 0.0 in all observed samples. | CONFIRMED (runtime semantic); observed value 0.0f in all samples |
-| +0x2C | 4 | f32 | `volume_factor` | Multiplied by 0.7 before being passed to the DirectSound volume control. 0.0f in all observed samples (consistent with unassigned slots; active localized sounds would carry a positive value). | CONFIRMED (f32 type and scaling factor); observed value 0.0f in all samples |
+| +0x00 | 4 | u32 | `sound_entry_id` | Numeric resource key; 0 = empty/unassigned slot. Active records carry 9-digit decimal values (range ~900000000..999999999; see Sound ID section). | CONFIRMED |
+| +0x04 | 24 | u8[24] | `hour_schedule[24]` | One flag byte per in-game hour. `hour_schedule[h]` non-zero → sound active during hour h. h = game_clock_seconds / 3600 (integer division). All runtime samples have every byte = 0x01 (unconditionally active); the area-001 census sees per-byte 0x00/0x01 patterns that vary by record. The semantics of the varying pattern (hour mask vs. sub-area / weather / time-of-day filter) are UNVERIFIED and a candidate for an IDA cross-check. | CONFIRMED (structure and access pattern); value-pattern semantics UNVERIFIED |
+| +0x1C | 4 | f32 | `weight` | Volume / attenuation / blend scalar. 1.0f (`00 00 80 3F`) for BGM and BGE records. Not accessed in the observed runtime playback path. | SAMPLE-VERIFIED type/value; semantic UNVERIFIED |
+| +0x20 | 4 | f32 | `pos_x` | World-space X of the 3D source. Populated (non-zero) only in `.eff` (3D) records; 0.0 for BGM / BGE. Passed to the DirectSound 3D position as the X argument. | CONFIRMED (runtime semantic); EFF-only population SAMPLE-VERIFIED |
+| +0x24 | 4 | f32 | `pos_y` | World-space Y of the 3D source. Populated only in `.eff` records; in BGM / BGE the corresponding bytes are 0 or an editor-uninitialized fill. (The earlier `unknown_36` label maps to this field; for non-EFF tables the runtime does not use it.) | CONFIRMED for EFF (SAMPLE-VERIFIED area 001); UNRESOLVED for non-EFF |
+| +0x28 | 4 | f32 | `pos_z` | World-space Z of the 3D source. Populated only in `.eff` records; 0.0 for BGM / BGE. Passed to the DirectSound 3D position as the Z argument. | CONFIRMED (runtime semantic); EFF-only population SAMPLE-VERIFIED |
+| +0x2C | 4 | f32 | `radius` | Audibility radius of the 3D source (formerly labelled `volume_factor`). Populated only in `.eff` records; 0.0 for BGM / BGE. For the BGM playback path the runtime applies a 0.7 volume scaling at a separate stage. | CONFIRMED f32 type; EFF radius role SAMPLE-VERIFIED area 001 |
+| +0x30 | 4 | — | `tail_unknown` | Trailing 4 bytes of the 52-byte slot. Not characterised by either analysis; observed 0 in non-EFF records. Purpose UNRESOLVED. | UNRESOLVED |
 
-**Entry stride: 48 bytes. Confirmed.** (256 × 48 = 12288 = loader read size.)
+**Record stride: 52 bytes on disk. SAMPLE-VERIFIED.** (256 × 52 = 13312 = file size, exact.)
+
+> Field-naming reconciliation: the 2026-06-11 spec named offsets +0x20 / +0x28 / +0x2C as
+> `pos_x` / `pos_z` / `volume_factor` and +0x24 as `unknown_36`. The 2026-06-14 EFF field census
+> resolves the three-axis position plus a radius: +0x20 = X, +0x24 = Y, +0x28 = Z, +0x2C = radius.
+> These are only populated by `.eff` (3D) records; BGM / BGE records leave them zero, which is why
+> +0x24 read as an "unknown" and +0x2C as a "volume_factor" in the all-2D runtime samples.
 
 ### Byte-level field map (quick reference)
 
 ```
 [+0x00..+0x03]  sound_entry_id   u32 LE    (0 = null/unassigned)
-[+0x04..+0x1B]  hour_schedule    u8 × 24   (index h = game_seconds / 3600; non-zero = active)
-[+0x1C..+0x1F]  weight           f32 LE    (always 1.0f observed; semantic unverified)
-[+0x20..+0x23]  pos_x            f32 LE    (world-space X for DirectSound3D; 0.0 in samples)
-[+0x24..+0x27]  unknown_36       u32 LE    (not accessed at runtime; purpose unresolved)
-[+0x28..+0x2B]  pos_z            f32 LE    (world-space Z for DirectSound3D; 0.0 in samples)
-[+0x2C..+0x2F]  volume_factor    f32 LE    (scaled × 0.7 before DS volume; 0.0f in samples)
+[+0x04..+0x1B]  hour_schedule    u8 × 24   (per-byte 0x00/0x01 mask; semantics unverified)
+[+0x1C..+0x1F]  weight           f32 LE    (1.0f for BGM/BGE; blend/attenuation scalar)
+[+0x20..+0x23]  pos_x            f32 LE    (3D world X; EFF records only, else 0.0)
+[+0x24..+0x27]  pos_y            f32 LE    (3D world Y; EFF records only, else 0.0)
+[+0x28..+0x2B]  pos_z            f32 LE    (3D world Z; EFF records only, else 0.0)
+[+0x2C..+0x2F]  radius           f32 LE    (3D audibility radius; EFF records only, else 0.0)
+[+0x30..+0x33]  tail_unknown     4 bytes   (uncharacterised; observed 0 in non-EFF records)
 ```
+
+---
+
+## Resolution chain — `.mud` tile → soundtable record → leaf audio
+
+The `.mud` per-cell ambient-sound zone grid stores byte indices that select records in these
+tables. The mud byte value is used as a **direct 0-based row index** into the table whose
+extension matches the byte's role. A mud byte of 0 selects record index 0 (the null sentinel)
+and plays nothing. (Cross-map census: max bgmZoneId = 10, max bgeAmbientId = 20, max effId = 154,
+all well under the 256 records per table — SAMPLE-VERIFIED across 1578 `.mud` files.)
+
+```
+.mud tile byte +2 (bgmZoneId = N)
+  └─► data/map<AAA>/soundtable<AAA>.bgm  record[N] (0-based), +0x00 sound_entry_id (u32 LE)
+        └─► data/sound/2d/{sound_entry_id}.ogg          (BGM = 2D / stereo)
+
+.mud tile bytes +3, +4 (bgeAmbientId0/1 = N)
+  └─► data/map<AAA>/soundtable<AAA>.bge  record[N] (0-based), +0x00 sound_entry_id (u32 LE)
+        └─► data/sound/2d/{sound_entry_id}.ogg          (BGE ambient = 2D)
+
+.mud tile bytes +5, +6, +7 (effId0/1/2 = N)
+  └─► data/map<AAA>/soundtable<AAA>.eff  record[N] (0-based), +0x00 sound_entry_id (u32 LE)
+        └─► data/sound/3d/{sound_entry_id}.ogg          (EFF = 3D positional)
+              3D source position = record +0x20 (X), +0x24 (Y), +0x28 (Z) as f32
+              audibility radius  = record +0x2C as f32
+
+.mud tile byte +0  (PLAUSIBLE walk index — UNVERIFIED)
+  └─► data/map<AAA>/soundtable<AAA>.wlk  record[N] (0-based) → footstep walk sound
+
+.mud tile byte +1  (PLAUSIBLE run index — UNVERIFIED)
+  └─► data/map<AAA>/soundtable<AAA>.run  record[N] (0-based) → footstep run sound
+```
+
+`<AAA>` is the zero-padded 3-digit area number from the `.mud` path (e.g. `map001` for area 1).
+The 0-based direct-index rule is SAMPLE-VERIFIED for BGM / BGE / EFF across the full area-001 mud
+census (77 files) and globally corroborated by the cross-map census. The `.wlk` / `.run` index
+source (mud bytes +0 / +1) is PLAUSIBLE only — see `mud.md` and the IDA cross-check request below.
 
 ---
 
 ## Sound ID semantics
 
-Active `sound_entry_id` values observed in samples are 9-digit decimal integers:
+Active `sound_entry_id` values observed in samples are 9-digit decimal integers in the range
+~900000000 .. 999999999:
 
 - 910022000
 - 910033000
@@ -134,10 +210,10 @@ CODE-CONFIRMED; cross-reference `specs/sound.md §13`):
 | Table extension | Audio directory | Confidence |
 |---|---|---|
 | `.bgm` | `data/sound/2d/` | SAMPLE-VERIFIED: `.bgm` IDs confirmed present under `data/sound/2d/` |
+| `.bge` | `data/sound/2d/` | SAMPLE-VERIFIED (2026-06-14): BGE IDs confirmed present under `data/sound/2d/` |
 | `.eff` (sound table) | `data/sound/3d/` | SAMPLE-VERIFIED: `.eff` sound table IDs confirmed present under `data/sound/3d/` |
-| `.bge` | UNDETERMINED | All sampled `.bge` entries are null (sound_entry_id = 0); directory unverifiable from samples |
-| `.wlk` | UNDETERMINED | All sampled `.wlk` entries are null; directory unverifiable from samples |
-| `.run` | UNDETERMINED | All sampled `.run` entries are null; directory unverifiable from samples |
+| `.wlk` | UNDETERMINED | All sampled `.wlk` records are null (sound_entry_id = 0); directory unverifiable |
+| `.run` | UNDETERMINED | All sampled `.run` records are null; directory unverifiable |
 
 The directory selection (`data/sound/2d/` vs `data/sound/3d/`) is encoded in the table
 extension, not in the `sound_entry_id` value itself. The engine selects the directory via an
@@ -152,39 +228,21 @@ in `data/sound/3d/` may be loaded through a different call path.
 
 ---
 
-## Terrain-cell indexing
+## Terrain-cell indexing (summary; full chain above)
 
-The terrain system stores a cell record for each map tile in `.mud` format (not yet fully
-spec'd). The sound table is addressed by bytes within the mud cell record:
+The terrain system stores a per-tile record in `.mud` format (see `mud.md`). The sound table is
+addressed by bytes within the mud tile:
 
-| Extension | Cell offset(s) used as entry index | Max simultaneous sounds per cell |
-|---|---|---|
-| `.bgm` | byte at mud-cell +2 | 1 |
-| `.bge` | bytes at mud-cell +3 and +4, used as separate indices | 2 |
-| `.eff` (sound table) | bytes at mud-cell +5, +6, and +7, used as separate indices | 3 |
-| `.wlk` / `.run` | derived from character world-space position; specific formula UNVERIFIED | 1 (presumed) |
+| Extension | Mud-tile byte offset(s) used as record index | Max simultaneous sounds per tile | Confidence |
+|---|---|---|---|
+| `.bgm` | +2 | 1 | CONFIRMED |
+| `.bge` | +3 and +4 (separate indices) | 2 | CONFIRMED |
+| `.eff` (sound table) | +5, +6, +7 (separate indices) | 3 | CONFIRMED |
+| `.wlk` | +0 (PLAUSIBLE) | 1 (presumed) | PLAUSIBLE / UNVERIFIED |
+| `.run` | +1 (PLAUSIBLE) | 1 (presumed) | PLAUSIBLE / UNVERIFIED |
 
-A cell byte value of 0 selects entry index 0, which is the null sentinel (sound_entry_id =
-0). The runtime checks the cell byte before performing any table lookup and skips the entry
-if the byte is zero.
-
----
-
-## Editor metadata region (bytes 12288–13311, 1024 bytes)
-
-This region is written by the map editor tool and is not read by the runtime loader.
-
-Observed partial structure across samples:
-
-| Offset within region | Size | Notes |
-|---------------------:|-----:|-------|
-| +0x00 | 4 | Always 0x00000000 in all observed files. Possible format version or reserved field. |
-| +0x04 | 4 | Varies: 0, 1, 14, or 50 across samples. Editor-internal state (cursor position, last-edited entry, or similar). |
-| +0x08 | 4 | Values: 0 or 32. Possibly an editor view parameter or entry count. |
-| +0x0C onward | 1012 | All zero in all observed samples. |
-
-The exact semantics of the +0x04 and +0x08 fields are UNRESOLVED. They do not obviously
-correlate with active entry count, entry indices, or map identifiers across the sample set.
+A mud byte value of 0 selects record index 0 (the null sentinel). The runtime checks the mud
+byte before performing any table lookup and skips the slot if the byte is zero.
 
 ---
 
@@ -230,7 +288,7 @@ proprietary header, no encryption, and no additional framing wraps these files.
   - Encoder: Xiph.Org libVorbis I, build 2002-07-17
   - No embedded comment tags
 - **VFS path pattern:** `data/sound/3d/<sound_entry_id>.ogg` (3D positional — `.eff` table
-  IDs); `data/sound/2d/<sound_entry_id>.ogg` (2D non-positional — `.bgm` table IDs; 178
+  IDs); `data/sound/2d/<sound_entry_id>.ogg` (2D non-positional — `.bgm` / `.bge` table IDs; 178
   `.ogg` files confirmed in `data/sound/2d/`, SAMPLE-VERIFIED)
 - **Filename scheme:** plain decimal integer stem matching `sound_entry_id`, no zero-padding
   (e.g. `841390513.ogg`)
@@ -279,68 +337,84 @@ the `.ogg` container format is identical.
 - **VFS path:** `data/effect/xeff/<name>.xeff`; an index file `data/effect/xeffect.lst`
   enumerates available assets
 - **Magic:** ASCII `XEFF` at file offset 0 — confirmed from an engine error string
-- **Status:** NOT documented in this spec; a dedicated `formats/xeff.md` should be
-  produced once the loader is traced
+- **Status:** documented in `formats/effects.md`
 
 ---
 
 ## Known unknowns
 
-1. **`unknown_36` at +0x24** — not accessed in the observed runtime playback path. Observed
-   values include 0, 1, and the MSVC debug-fill pattern 0xCCCCCCCC (editor artifact indicating
-   the field was written to disk uninitialized). Purpose UNRESOLVED.
+1. **`tail_unknown` at +0x30** — the trailing 4 bytes of the 52-byte on-disk slot were not
+   characterised by either the runtime-access analysis or the field census. Observed 0 in
+   non-EFF records. Purpose UNRESOLVED — candidate for an IDA cross-check.
 
-2. **`weight` at +0x1C semantic** — always 1.0f in all 12 samples; not accessed in the
-   observed runtime path. Likely a blend weight, priority, or reserved scalar. Naming is
-   tentative.
+2. **48 vs 52 stride origin** — the on-disk stride is the harness-measured 52 bytes. Whether the
+   runtime builds a 48-byte in-memory record (the 2026-06-11 figure) by dropping the 4-byte tail
+   is plausible but UNVERIFIED. A parser must use 52 on disk regardless.
 
-3. **3D position units** — whether `pos_x` / `pos_z` use the same world-space unit scale as
-   the terrain grid is not established; all values are 0.0f in available samples.
+3. **`weight` at +0x1C semantic** — 1.0f in all BGM / BGE samples; not accessed in the observed
+   runtime path. Likely a blend weight, priority, or attenuation scalar. Naming tentative.
 
-4. **sound_entry_id → filename resolution for .wav** — the engine path-construction code uses
-   a `.ogg` format string unconditionally in the observed path. How `.wav` files are resolved
-   (separate code path, catalog table, or runtime fallback) is UNVERIFIED.
+4. **`hour_schedule` per-byte mask semantics** — every byte is 0x01 in the runtime samples, but
+   the area-001 census shows per-record 0x00/0x01 patterns that vary by record. Whether this is a
+   time-of-day hour mask, a sub-area enable mask, or a weather filter is UNVERIFIED — IDA
+   cross-check requested.
 
-5. **sound_entry_id integer encoding** — whether the 9-digit decimal values represent a
-   direct catalog key, a CRC32, or a composite type+sequence integer is not established.
+5. **EFF 3D position units** — whether `pos_x` / `pos_y` / `pos_z` and `radius` use the same
+   world-space unit scale as the terrain grid is not established; verified populated only in EFF
+   records of one area (001).
 
-6. **Walk/run indexing formula** — the precise mapping from character world position to a
-   `.wlk` / `.run` entry index is not observed; these tables contain only null entries in all
-   available samples.
+6. **`.wlk` / `.run` index source** — the mapping from the `.mud` tile to a `.wlk` / `.run`
+   record index is UNVERIFIED. The leading hypothesis is mud byte +0 (walk) and +1 (run); see
+   `mud.md`. All sampled `.wlk` / `.run` tables are entirely null, so the leaf audio directory is
+   also undetermined. IDA / debugger cross-check requested.
 
-7. **Hour-schedule variation** — every schedule byte in every sample is 0x01. The conditional
-   time-of-day muting behavior is confirmed from access-pattern analysis but has not been
-   exercised by the available samples.
+7. **sound_entry_id integer encoding** — whether the 9-digit decimal values represent a direct
+   catalog key, a CRC32, or a composite type+sequence integer is not established.
 
-8. **Editor metadata region** (+0x3000..+0x33FF) — the values at region+0x04 and +0x08 are
-   unexplained; the region is unused at runtime.
+8. **sound_entry_id → filename resolution for .wav** — the engine path-construction code uses a
+   `.ogg` format string unconditionally in the observed path. How `.wav` files are resolved is
+   UNVERIFIED.
 
-9. **Per-map .eff soundtable samples** — no `data/map*/soundtable*.eff` files were present in
-   the sample set. The soundtable `.eff` format is confirmed as structurally identical to
-   `.bgm`/`.bge` from access-pattern analysis, but byte-level verification against a real
-   `.eff` soundtable is outstanding.
+9. **Per-map .eff soundtable byte-level sample** — RESOLVED (2026-06-14): the area-001 `.eff`
+   table was field-censused (256 records), confirming the 3D position + radius layout.
 
-10. **`data/effect/obj/tringle.eff` encoding variant** — whether this file uses a
-    triangle-strip or triangle-list index scheme is ambiguous from its size alone. Requires
-    a trace of the effect-geometry loader.
+10. **`data/effect/obj/tringle.eff` encoding variant** — triangle-strip vs triangle-list index
+    scheme is ambiguous from size alone. Requires a trace of the effect-geometry loader.
 
-11. **2D audio samples** — RESOLVED (SAMPLE-VERIFIED 2026-06-12): `data/sound/2d/` contains
-    178 `.ogg` files (no `.wav` files present). BGM tracks (stereo, 44100 Hz Vorbis) reside in
-    this directory; a smaller set of non-positional SFX also resides here.
+---
 
-12. **BGM streaming directory** — RESOLVED (SAMPLE-VERIFIED 2026-06-12): BGM tracks reside in
-    `data/sound/2d/`. No separate `data/sound/bgm/` directory exists. Cross-reference
-    `specs/sound.md §13` for the authoritative resolution record.
+## Provenance note — 2026-06-11 runtime-access interpretation (preserved for audit)
+
+The original (2026-06-11) interpretation, recovered from runtime access-pattern analysis and 12
+all-2D runtime samples, described the file as a 256 × 48 = 12288-byte record table followed by a
+1024-byte trailing "editor metadata" region (observed values: +0x00 = 0; +0x04 = 0/1/14/50;
++0x08 = 0/32; remainder 0). The 2026-06-14 black-box census measured a uniform 52-byte on-disk
+stride with no remainder, which is the authoritative on-disk layout. The 48-byte figure most
+plausibly describes the in-memory record the loader builds (see Known unknown #2), and the
+"editor metadata" observations are consistent with the per-record `tail_unknown` bytes
+(+0x30..+0x33) aggregating across records when read as one trailing block. Both are retained here
+so the conflict is auditable; neither contradicts the field layout of the first 0x2C bytes.
 
 ---
 
 ## Cross-references
 
-- Terrain cell format (source of the index bytes into this table): terrain / `.mud` format
-  spec (not yet written; see `Docs/RE/formats/`)
+- Source of the index bytes into these tables (per-cell ambient-sound zone grid): `formats/mud.md`
 - Effect geometry shape variant: `data/effect/obj/*.eff` — a future `formats/eff_geometry.md`
-- Visual/particle effects: `data/effect/xeff/` — a future `formats/xeff.md` (magic "XEFF")
+- Visual/particle effects: `data/effect/xeff/` — `formats/effects.md` (magic "XEFF")
 - VFS container layout: `Docs/RE/formats/pak.md`
-- Configuration and catalogue tables sharing the VFS: `Docs/RE/formats/config_tables.md`
+- Sound-subsystem behaviour (directory resolution, streaming): `Docs/RE/specs/sound.md`
 - Glossary: `Docs/RE/names.yaml`
 - Provenance: `Docs/RE/journal.md`
+
+---
+
+## Names flagged for names.yaml (orchestrator to record)
+
+- Formats: `soundtable_bgm`, `soundtable_bge`, `soundtable_eff`, `soundtable_wlk`,
+  `soundtable_run` (per-area sound index tables)
+- Struct: `SoundTableRecord` (52 bytes): `sound_entry_id` (u32 @+0x00), `hour_schedule` (u8[24]
+  @+0x04), `weight` (f32 @+0x1C), `pos_x`/`pos_y`/`pos_z` (f32 @+0x20/+0x24/+0x28, EFF only),
+  `radius` (f32 @+0x2C, EFF only), `tail_unknown` (4 bytes @+0x30)
+- Constants: `SOUNDTABLE_FILE_SIZE = 13312`, `SOUNDTABLE_RECORD_COUNT = 256`,
+  `SOUNDTABLE_RECORD_STRIDE = 52`

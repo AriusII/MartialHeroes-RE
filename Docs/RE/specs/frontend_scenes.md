@@ -170,9 +170,13 @@ sub-state 1), which belongs to the separate login window — there is no evidenc
   run-flag is cleared, after which the engine tears down the opening window and advances engine
   state **3 → 4** (the interactive form). The fade machine completing phase 4 (after the ~70 s dwell)
   drives this teardown — so the **default behaviour is automatic transition after ~70 s.** The
-  loop-exit and teardown mechanisms are CODE-CONFIRMED; the precise edge from "phase-4 end" into the
-  run-flag clear runs through scene/scroll completion callbacks not fully unwound in static analysis,
-  so that immediate trigger edge is **PLAUSIBLE** (Open question 14).
+  per-frame update is a **two-stage auto-exit**: an **exit-arm flag** (scene object +0x2C9) must be
+  set, then a **final-fade alpha** counter (+0x2C8) ramps to **250**, after which the engine run-flag
+  is cleared and the loop ends (state 3 → 4) — **the run-flag clear is CODE-CONFIRMED.** The 4-phase
+  70 s fade machine itself **never** sets the exit-arm flag, so the **arming write comes from an
+  indirect scene/scroll completion callback** static analysis cannot observe; that arming edge stays
+  **PLAUSIBLE** (Open question 14). (The run-flag is also reachable event-driven via the generic
+  scene event handler.)
 - **Skip-on-input (CODE-CONFIRMED).** The opening's input handler short-circuits the dwell:
 
   | Input | Condition | Action |
@@ -322,31 +326,35 @@ typically numeric, PIN.
   the PIN at.
 - **Capacity.** The PIN is **≤ 4 characters** (the login blob validates it as length `< 5`, i.e.
   ≤ 4 chars plus a NUL — `login_flow.md` §4.2 / §7). It is numeric in practice.
-- **Where its value goes.** The PIN's value becomes the **optional length-prefixed field of the
-  login blob** (`1/6 CmsgLoginRequest`): the blob is `[0x2B][u32len account\0]([u32len PIN\0])`.
-  This is the field a prior reading called the "optional auxiliary string"; a runtime read of the
-  live client identifies it as the PIN / second-password. **The PIN is *not* the account password**
-  — the account password is staged separately as the RSA `1/4` plaintext and never appears in the
-  blob. The byte layout, the u32-LE NUL-inclusive length prefix, and the field capacities are all
+- **Where its value goes.** The PIN's value becomes the **optional length-prefixed field of the login
+  credential blob** — the `[0x2B][u32len account\0]([u32len PIN\0])` structure that is the **RSA
+  pre-image of the `1/4`** secure auth reply (§1.7 / §4.5; **`1/6` is character-create only**, not the
+  login send). This is the field a prior reading called the "optional auxiliary string"; a runtime
+  read of the live client identifies it as the PIN / second-password. **The PIN is *not* the account
+  password** — the account password rides inside the same `1/4` RSA ciphertext separately and the PIN
+  is the optional trailing field of the blob. The byte layout, the u32-LE NUL-inclusive length prefix, and the field capacities are all
   owned by `login_flow.md` §4.2; this spec owns only the UI modal and its place in the flow.
 - **Asset.** The dialog uses the secondary-password art catalogued in `formats/ui_manifests.md`
   (`data/ui/password.dds`, 1024×1024 DXT3 — listed there as "Secondary password dialog"). The
   caption strings are CP949 in the VFS and are not reproduced here.
-- **Show-trigger (UNRESOLVED in static).** The PIN keypad child window is **constructed during the
-  login scene build**, but **no sub-state in the login tick (states 1..41) explicitly shows it**, and
-  the sub-state-40 credential submit proceeds without an in-tick PIN gate. So the modal is **not** a
-  dedicated login sub-state; it is shown either (a) by the login form / action handler as an in-place
-  child widget when the account requires a second password, or (b) by a post-submit net-reply handler
-  in the character-management path (outside the login window's scope). **The exact show-trigger is
-  UNRESOLVED in static analysis** — flag pending a parallel recovery / live confirmation. (Its layout
-  and keypad scramble are separately recovered in §11.3.)
+- **Show-trigger (RESOLVED — ALWAYS-SHOWN, CODE-CONFIRMED by the front-end deep pass).** The PIN keypad
+  child window is constructed during the login-scene build, and it is shown **unconditionally on the
+  login-OK path**: once the ID/PW length checks pass, the login tick advances to **sub-state 31**, whose
+  enter-action calls the PIN modal's show method (a shared visibility tail taking 1 = show / 0 = hide —
+  which is why a coarse scan missed it). **Sub-state 32** then polls the PIN object's *visible* and
+  *submitted* flags and only advances to 33 once the user has entered and confirmed the PIN. There is
+  **no account / config / server-reply gate** — the "is-PIN" accessor exists but has **zero callers** in
+  this build and never gates the modal. The entered PIN is deposited on the billing-state object and
+  rides as field #3 of the sub-state-40 credential blob. (Its layout and keypad scramble are recovered
+  in §11.3; see also the rows-31/32 CONFLICT note in §1.5.)
 
 > **Confidence.** The PIN's existence, its first-class "is-PIN" input modelling, its ≤ 4-char
 > capacity, and the fact that its value lands in the optional login-blob field are **RUNTIME-
 > CONFIRMED** against the live client (read from the client's process at login time; no addresses).
-> The modal's **layout / keypad scramble** is now recovered (§11.3). What remains **UNRESOLVED in
-> static** is the **show-trigger** (Open question 10) — treat the PIN's flow position, wire
-> destination, and layout as confirmed, and the show-trigger as pending.
+> The modal's **layout / keypad scramble** is recovered (§11.3), and the **show-trigger is now RESOLVED
+> (CODE-CONFIRMED): ALWAYS shown on the login-OK path at sub-state 31** (front-end deep pass) — **Open
+> question 10 is closed.** The only residual is one optional live re-confirm of a flag value
+> (DEBUGGER-PENDING, non-blocking).
 
 ## 1.5 The login flow sub-state machine (CODE-CONFIRMED)
 
@@ -363,8 +371,8 @@ the front-end flow. **It supersedes two CODE-CONFIRMED-but-wrong labels in `ui_s
 | 6 | **Login form active** — waiting for user input | the resting state of the form |
 | **29** | **OK-button credential validation** | game.ver verified (mismatch → msg 2204 abort, §1.4); ID len ≥ 4 (else msg **4025** → 6); PW len ≥ 1 (else msg **4026** → 6); persist Save-ID; advance to 31. **(corrects `ui_system.md`: NOT "server-list trigger")** |
 | 30 | Quit-confirm "Yes" path | writes engine state **6 / substate 8** (quit) |
-| **31** | **Show EULA / terms-of-service accept overlay** | advances toward 32. **(corrects `ui_system.md`: NOT "Help screen")** |
-| 32 | Wait for EULA "agree" | overlay visible AND accept flag set → advance to 33 |
+| **31** | **Raises a modal — ⚠️ CONFLICT: PIN vs EULA (see note after table)** | in THIS build, reaching 31 calls the second-password / **PIN** modal's show method (front-end deep pass, CODE-CONFIRMED). The older "EULA / terms-of-service accept overlay" label is retained pending resolution. advances toward 32. |
+| 32 | **Polls the raised modal's flags — ⚠️ CONFLICT** | THIS build polls the **PIN** object's *visible* + *submitted* flags (not an EULA accept flag); → 33 on confirm |
 | 33 | Press-OK transition → begin server-list fetch | sets up the fetch (advance to 34) |
 | 34 | Start the server-list fetch thread (lobby port 10000) | a **blocking worker thread** separate from the main overlapped connection; see `login_flow.md` §2.1 |
 | 35 | Wait for server-list reply | thread sets 36 on completion (or signals an error count) |
@@ -375,14 +383,28 @@ the front-end flow. **It supersedes two CODE-CONFIRMED-but-wrong labels in `ui_s
 | 40 | **Join handoff** | collect the second-password / PIN (§1.4a) if not already entered; build the TAB credential string, rebuild the secure context, start the overlapped net engine, set engine state **7** as a guard, **queue transition effect 10001 scheduled 30000 ms ahead**; advance to 41. The login window then exits. |
 | 41 | Transition complete; login window exits → loading | — |
 
+> **⚠️ CONFLICT (rows 31/32) — PIN modal vs EULA overlay (front-end deep pass; record, do not overwrite).**
+> In this build, reaching sub-state **31** raises the **second-password / PIN** modal (it calls the PIN
+> modal's show method via a shared visibility tail), and sub-state **32** polls the **PIN object's**
+> *visible* + *submitted* flags — **not** an EULA accept flag — advancing to 33 only once the PIN is
+> entered and confirmed. The PIN is shown **unconditionally** on the login-OK path (no account / config /
+> server gate; the "is-PIN" accessor has zero callers). Either the EULA-accept overlay and the PIN share
+> the 31/32 window, or the earlier "EULA" label is a stale reading; the flags actually polled at 32 are
+> the PIN's. **Both readings recorded; an owner resolves which (if any) EULA overlay exists.** (This
+> compounds the `ui_system.md §6.3` 29/31 conflict noted at the end of this section.) The PIN's value
+> rides as field #3 of the sub-state-40 credential blob (§1.4a). A faithful client should NOT build a
+> separate EULA/terms screen for 31/32 — that window is the PIN modal.
+
 > **Sub-state 40 detail.** The TAB string is `account⟨TAB⟩option⟨TAB⟩field⟨TAB⟩"host port"`, where
 > the optional middle field carries the **second-password / PIN** (§1.4a) and the 4th field is the
 > channel endpoint text obtained by the channel-endpoint fetch (§2.6). The secure-context rebuild
-> stages the credential session on the main (overlapped) game connection; from there the
-> `0/0 → 1/4 → 1/6` handshake proceeds. The byte layout of all of those is owned by
-> `login_flow.md` §3–§4 and `crypto.md`; this spec only marks the boundary. (`PLAUSIBLE` for msg id
-> **4029** as the endpoint-fetch-failure analogue at sub-state 39 — not pinned to a call site —
-> Open question 1.)
+> stages the credential session on the main (overlapped) game connection; from there the **login
+> handshake `0/0 → 1/4`** proceeds (inbound `0/0` key exchange → reactive `1/4` credential reply;
+> **`1/6` is character-create only, not part of the login handshake** — §1.7 / §4.5). The byte layout
+> of all of those is owned by `login_flow.md` §3–§4 and `crypto.md`; this spec only marks the boundary.
+> (The sub-state-39
+> endpoint wait has **no in-tick failure toast** — the worker simply advances 39 → 40 on completion;
+> there is no msg-4029 endpoint-error path here. Open question 1 → REFUTED/closed; see §1.9.)
 
 > **Who drives the tick (CODE-CONFIRMED).** The login window is advanced each frame by a **generic
 > per-window frame callback** (registered at scene build) that pumps input/messages, sets 2D/alpha
@@ -441,11 +463,14 @@ For an engineer's mental model only; the byte shapes are owned by `login_flow.md
 - The only client→server traffic in the entire login scene is:
   1. the two **lobby fetches** (synchronous, port 10000 then `10000 + selected id`; no
      `major/minor` opcode — an 8-byte frame wrapper + LZ4 payload), at sub-states 34 and 38, and
-  2. the **game-socket handshake** at sub-state 40: the cryptographic key exchange and reply,
-     then the account-login send (`1/6 CmsgLoginRequest` per `opcodes.md`), whose blob carries the
-     account name and the second-password / PIN (§1.4a) — the account password rides only in the
-     RSA `1/4` reply.
-- **There is no dedicated "login" opcode fired by the button click.**
+  2. the **game-socket handshake** at sub-state 40: the cryptographic key exchange (inbound `0/0`)
+     and the reactive reply — the **account-login credential send is `1/4`** (CODE-CONFIRMED: the
+     reactive reply to the inbound `0/0` key exchange), whose RSA pre-image is the
+     `[0x2B][u32len account\0]([u32len PIN\0])` blob (account name + second-password / PIN, §1.4a).
+     The account password rides inside that same `1/4` RSA ciphertext. **`1/6` is character-create
+     only** (§4.5), **not** the login credential send.
+- **No login widget emits a `(major:minor)` packet; the only outbound game opcode in the login scene
+  is the reactive `1/4` auth reply.** There is no dedicated "login" opcode fired by the button click.
 
 ## 1.8 The quit paths (CODE-CONFIRMED)
 
@@ -455,9 +480,22 @@ Two distinct quit triggers, both terminating at engine state **6 (Quit)** → **
 1. **Version-mismatch quit.** OK/Enter with a `game.ver` mismatch → Win32 modal error box (msg
    **2204**) → on OK, the quit-from-load path: SFX **861010106**, a ~1000 ms UI fade, then engine
    state **6 / substate 2**.
-2. **User quit-confirm.** The login window has a quit-confirm modal (the "Yes" buttons are actions
-   `q`/`r`, captions msg ids **4023 / 4024**). The Yes path drives flow sub-state **30**, which
-   writes engine state **6 / substate 8** directly.
+2. **User quit-confirm.** The login window has a quit-confirm modal. The actual **client-quit**
+   confirm drives flow sub-state **30**, which writes engine state **6 / substate 8** directly. The
+   30 → 6/8 consumption is **CODE-CONFIRMED** in the tick; the **writer of sub-state 30** is a
+   separate child quit dialog action (static-pending).
+
+> **Third loop-exit edge (CODE-CONFIRMED).** Distinct from the two quit terminators above, the login
+> dispatcher **action 101** clears the engine run-flag **directly** (an immediate cancel/back edge),
+> and the loading-complete engine event (id **10001**) clears it as the normal handoff. Neither
+> writes engine state 6 — they are run-flag clears, not quit terminators.
+
+> **⚠️ 113/114 are NOT the client-quit terminator (reconcile with §1.2).** The quit-confirm modal's
+> "Yes" buttons (actions **113 / 114**, captions msg ids **4023 / 4024**) hide the popup and
+> **(re)start the server-list path (advance to sub-state 34)** — they are a **server-list re-fetch
+> confirm**, consistent with §1.2's description of 113/114. The actual **client-quit** confirm writes
+> sub-state **30** from a **separate** dialog action, not from 113/114. Do **not** conflate 113/114
+> with the quit terminator.
 
 The session never returns to the login scene after the first visit — post-in-game logout returns to
 **character select (state 4)**, not login (`client_runtime.md` §4).
@@ -477,11 +515,12 @@ All ids resolve through the message-catalogue lookup against `data/script/msg.xd
 | **4026** | sub-state 29 | password empty (length < 1) | CODE-CONFIRMED |
 | **4027** | sub-state 36 | server list empty / no servers returned | CODE-CONFIRMED |
 | **4028** | sub-state 36 | server-list connection failed | CODE-CONFIRMED |
-| **4029** | adjacent literal | likely the channel-endpoint-fetch failure analogue (sub-state 39) | PLAUSIBLE |
+| **4029** | server-row painter | **server-list column-header caption** (the list headers are 4029 / 4030 / 4031 / 4032, loaded once by the server-row painter) — **NOT** an endpoint-fetch error; not referenced by the login tick | CODE-CONFIRMED (REFUTES the earlier endpoint-error reading) |
 | **101** | every timed in-window popup | the "OK / seconds remaining" countdown suffix (`%s - %d`) | CODE-CONFIRMED |
 
-So the family is: **4001–4024 = login labels & quit prompts**, **4025–4028 (and likely 4029) =
-login error toasts**, **2204 = the version-mismatch error box**, **101 = the timed-popup suffix**.
+So the family is: **4001–4024 = login labels & quit prompts**, **4025–4028 = login error toasts**,
+**4029–4032 = server-list column-header captions** (loaded by the server-row painter, not error
+toasts; see §11.4), **2204 = the version-mismatch error box**, **101 = the timed-popup suffix**.
 
 ---
 
@@ -714,6 +753,16 @@ owned by the struct cartographer). Only the fields the front-end touches are lis
 The slot info line shows, for the active slot: **name**, **level**, and **position** (the two
 floats above). Toggling the enter/create/delete buttons depends on the slot's lock flag.
 
+> **Two occupancy tests, two jobs (CODE-CONFIRMED).** The slot-occupancy decision uses **two distinct
+> reads** for two distinct purposes:
+> - the **render** path (whether to build a preview actor for the slot) tests **`faceA` @ +0x2E
+>   nonzero**;
+> - the **enter / route-to-create** path (whether confirming the slot enters the world or opens the
+>   create form) tests **`name` @ +0x00 == `"@BLANK@"`**.
+>
+> They are two separate reads, but they **agree on well-formed data** (an empty slot has both a zero
+> `faceA` and the `"@BLANK@"` name).
+
 ## 3.3 The live 3D preview actors — placement, facing, pose (CODE-CONFIRMED)
 
 The select scene renders each occupied slot as a **live, animated 3D character** standing in a **row**
@@ -761,7 +810,7 @@ on the placement path.
   §4.2 *does* idle-spin.)
 <!-- source: _dirty/campaign5/charselect3d/stage-assembly-confirm.md, _RECONCILED.md (LANE 1) -->
 
-### 3.3.2 Facing — pure yaw, fixed at build (CODE-CONFIRMED placement; front/back UNVERIFIED)
+### 3.3.2 Facing — pure yaw, fixed at build (CODE-CONFIRMED; yaw 0 = FRONT on the binary side)
 
 Orientation is a **pure-yaw quaternion** (rotation about the world up axis Y only; no pitch, no roll),
 built once at actor creation and not changed by hover. The yaw is chosen from the slot's lock flag:
@@ -773,10 +822,16 @@ built once at actor creation and not changed by hover. The yaw is chosen from th
 
 - The front yaw is **literally 0.0** (not a camera-relative offset); the camera (§3.5) is posed so
   that yaw-0 shows the character's front.
-- **UNVERIFIED (MEDIUM):** the project's mesh-local `.skn` X-negation convention (`formats/mesh.md`)
-  can flip apparent facing. Whether a yaw-0 preview shows the **front** (expected) or the **back**
-  after the importer's X-negation must be confirmed against a live frame; if it shows the back, the
-  importer must add π / mirror consistently with the X-negation. (Open question 13.)
+- **yaw 0 = FRONT (CODE-CONFIRMED on the binary side).** Basis: the engine defines facing as
+  `yaw = atan2(Δx, Δz)`, so forward = **+Z** at yaw 0; the live camera (keyframe 1 at Z = −9652) sits
+  at **greater Z** than the row (≈ −9737) and looks in **−Z**; and the binary's `.skn` loader applies
+  **no X-negation** (that negation is a *Godot-importer* convention, not in the binary). A yaw-0
+  actor's +Z forward therefore points **at the camera** ⇒ **front**. **Open question 13 → closed on
+  the binary side.**
+- **Godot-port note (fidelity-check item, not a binary unknown).** The importer's mesh-local-X
+  negation (`formats/mesh.md`) **+** the world Z-negation (`Helpers/WorldCoordinates`) must be verified
+  to **compose** to "front toward camera"; if the port shows the back, add 180° yaw / mirror
+  consistently. (Open question 13 is reframed as this port-composition check, not a binary unknown.)
 
 ### 3.3.3 Selection is the 3D row itself (CODE-CONFIRMED)
 
@@ -812,8 +867,13 @@ The concrete `g{id}.mot` that each clip resolves to is owned by `specs/skinning.
 animation-catalogue struct, via the same data-table chain as idle: **`data/char/actormotion.txt`
 (col2 == IdB) → `data/char/mot/g{id}.mot`**. For the starter classes the idle clip is `g111100010.mot`
 ("peace", 30 frames @ 10 fps; §3.7.5). The **select** clip is the sibling entry in the **same** visual
-record, read out of the catalogue the same way; the exact IdA=1 select `.mot` filename is a data-table
-lookup (not a printf) and is **not yet pinned** — do not invent it (carried in §3.7.5 / Open questions).
+record. The two clips resolve from **distinct columns** of the actor's `actormotion.txt` row
+(CODE-CONFIRMED path): the **idle** clip reads visual-record field **+0x44** (← `actormotion.txt`
+**column 16**), and the **select / turn-to-front** clip reads visual-record field **+0x58** (←
+`actormotion.txt` **column 21**). So the concrete select `g{id}.mot` is **column 21** of the actor's
+`actormotion.txt` row, resolved through the standard motion-id chain. The **path is no longer unknown**
+— but the **literal id** is a VFS/data read of column 21 (NEEDS-VFS-HARNESS); still **do not invent the
+filename** (carried in §3.7.5 / Open questions).
 
 | State | 3D-actor effect |
 |---|---|
@@ -822,7 +882,7 @@ lookup (not a printf) and is **not yet pinned** — do not invent it (carried in
 | De-hovered / mouse-leave | reverts to idle clip (select pose is **not** sticky) |
 | Locked / new / creating slot | yaw π (faces away); otherwise idle handling |
 <!-- source: _dirty/campaign5/charselect3d/highlight-feedback.md, _RECONCILED.md (LANE 3) -->
-<!-- pending data-table: exact IdA=1 select .mot filename (table lookup, not yet dumped — do not invent) -->
+<!-- pending data-table: exact IdA=1 select .mot LITERAL id (path pinned = actormotion.txt col 21 via visual-record field +0x58; idle = col 16 via +0x44; literal id needs a VFS harness — do not invent) -->
 
 ### 3.3.5 Worn gear & default highlight (CODE-CONFIRMED)
 
@@ -873,12 +933,19 @@ with the **body as overlay slot 3** (the `202`/"b" family) — there is no separ
 
 <!-- source: _dirty/campaign5/character-appearance-assembly.md -->
 
-## 3.4 Slot availability vs lock flags
+## 3.4 Slot availability vs lock flags (CODE-CONFIRMED byte source)
 
-Two per-slot flag arrays gate enter/render. One marks a slot **selectable for enter**; the other
-marks a slot **creating/locked** (which also drives the "faces away" idle facing). The precise
-difference (selectable vs creating/locked/cooldown) is **inferred, not byte-confirmed** (Open
-question 6).
+Two per-slot flag arrays gate enter/render, now pinned to their byte source on the select-window
+object:
+
+- the **lock / creating** flag = select-window field **`+0x1548 + slot`** — drives the yaw-π facing
+  (§3.3.2) **and** blocks enter;
+- the **occupied / selectable** flag = select-window field **`+0x148C + slot`** — the
+  **server-supplied per-slot flag**; gates the `1/7` select/manage click.
+
+**Selectable-for-enter = lock clear AND occupied; creating/locked = lock flag set.** (The exact
+**wire** semantics of the server slot-flag — delete-pending vs rename-cooldown — remain
+capture-pending; Open question 6.)
 
 ## 3.5 The character-select preview camera (CODE-CONFIRMED geometry; framing partly confirmed)
 
@@ -988,7 +1055,7 @@ per-frame millisecond delta when damping manual-orbit input); the **`10.0`** sca
 zoom/yaw/pitch input-rate constant. **Neither drives the automatic keyframe framing** — the keyframe
 tween uses its own normalizer (§3.5.4).
 
-### 3.5.4 Framing law — look-at, eye, easing (CODE-CONFIRMED structure; eye MEDIUM)
+### 3.5.4 Framing law — look-at, eye, easing (CODE-CONFIRMED; eye = orbit point at zoom 0)
 
 The camera manipulator is a scene-graph node, not an explicit eye/target pair. Each frame it computes:
 
@@ -1007,16 +1074,22 @@ locked / new / creating.)
 - **Look-at target (CONFIRMED):** the active (keyframe-1) orbit point ≈ world **(512, 87, −9652)**,
   which sits essentially **over the actor-row pivot ≈ (508, 70, −9759)** (§3.6 / §3.7.2) — slightly
   above and ~100 units in front of the standing row.
-- **Eye (MEDIUM):** the exact eye world coordinate depends on the runtime boom vector and the live
-  yaw/pitch quaternion; the **look-at identity is CONFIRMED**, the precise eye is MEDIUM (debugger-
-  confirmable on a live select frame).
-- **Easing (CONFIRMED constants; duration UNVERIFIED):** when the active keyframe changes, the orbit
+- **Eye (CODE-CONFIRMED — eye = orbit point at zoom 0):** the boom (zoom vector) is seeded
+  **(0,0,0)** with unit boom-direction **(0,0,1)** and the zoom accumulator at **0**; boom-Z is
+  hard-clamped to **[0,22]**. Therefore the **static eye at scene start equals the look-at orbit point
+  exactly** (the camera sits on the orbit point, oriented by the −30° pitch / 0 yaw base) until the
+  player applies wheel/key zoom (which grows boom-Z from 0 to ≤ 22). Keyframe 1 = **(512, 87, −9652)
+  exactly**. The only runtime variable is the player's live zoom ∈ [0,22] (a preference, not a stored
+  value).
+- **Easing (CODE-CONFIRMED constants and duration):** when the active keyframe changes, the orbit
   point is **linearly interpolated** and the orientation **spherically interpolated (slerp)** over a
   normalized progress `t`. For transitions among the inner keyframes (both indices ≥ 2) an extra
   **quadratic ease `(1 − t)·(2t)`** is layered over the linear blend ("linear-then-quadratic" /
-  ease-in-out); the keyframe-0↔1 transition uses the plain linear blend only. The tween normalizer
-  decodes to **≈ 2.0 s** per transition. **UNVERIFIED:** an old note reads "0.5 s"; the decoded
-  constant gives ≈ 2.0 s — resolve by timing the live transition. (Open question 12.)
+  ease-in-out); the keyframe-0↔1 transition uses the plain linear blend only. The tween normalizer is
+  the literal **`0.0005` (= 1/2000)** multiplying the **millisecond** elapsed since the keyframe switch
+  (the engine ms clock), clamped at 1.0 → a full keyframe transition of **2.0 s** (1 / 0.0005 = 2000
+  ms). The earlier "0.5 s" annotation was a stale comment and is **superseded**. **Open question 12 →
+  CLOSED.**
 - **Auto-advance (CONFIRMED — none):** no timer auto-cycles the keyframe index. The per-frame update
   law never re-applies a keyframe; it only reads the active/previous index to drive the blend. The
   index is changed only by an explicit keyframe-apply call — at construction (index 0) and once when
@@ -1036,8 +1109,9 @@ accumulators (each clamped ±1.0) layered on the −30° pitch base / 0 yaw base
 field.
 
 So the **final eye distance = the keyframe-stored boom-depth seed, extended or retracted by the ±4
-wheel/key accumulator along the boom, hard-capped to [0, 22].** (The exact live boom-depth seed for
-keyframe 1 is debugger-pending — see §3.5.5.)
+wheel/key accumulator along the boom, hard-capped to [0, 22].** The **boom-depth seed for keyframe 1
+is 0** (CODE-CONFIRMED: boom seeded (0,0,0), unit boom-direction (0,0,1), zoom accumulator 0), so the
+static eye sits **on** the orbit point until the player zooms — see §3.5.4 (Eye) / §3.5.5.
 
 - **Slot select / hover does NOT re-aim or zoom the camera (CODE-CONFIRMED).** There is no camera
   travelling, dolly-on-select, or focus-on-selected behaviour. The camera holds keyframe 1 for the
@@ -1074,17 +1148,21 @@ keyframe 1 is debugger-pending — see §3.5.5.)
   - **Whether slot selection auto-switches the keyframe** → **no** (no auto-advance; the index is only
     set by an explicit keyframe-apply at construction = 0 and row-build = 1; slot interaction never
     re-aims).
+  - **The live boom-depth (zoom) seed for keyframe 1** → **seed = 0** (CODE-CONFIRMED: boom seeded
+    (0,0,0), unit boom-direction (0,0,1), zoom accumulator 0; boom-Z clamp [0,22]). The static eye
+    therefore sits **on** the orbit point at zoom 0 (§3.5.4).
+  - **The precise eye world coordinate at scene start** → **= the look-at orbit point** = keyframe 1
+    = **(512, 87, −9652)** exactly (boom = 0 at start); the only runtime variable is the player's live
+    zoom ∈ [0,22] (a preference, not a stored value).
+  - **The tween duration** → **2.0 s** (literal `0.0005` = 1/2000 over the ms clock, clamped at 1.0;
+    the "0.5 s" annotation was stale). **Open question 12 → CLOSED** (§3.5.4).
 - **Runtime-pending (still NOT confirmed — debugger-pending, do not invent):**
-  1. **The precise eye world coordinate** (depends on the live boom vector + yaw/pitch quaternion).
-  2. **The live boom-depth (zoom) seed** for keyframe 1 — the actual starting dolly distance before
-     the ±4 wheel delta; the static value is the keyframe-stored boom, the live float is unverified.
-  3. **The exact tween duration** (≈ 2.0 s decoded vs a "0.5 s" annotation — Open question 12).
-  4. **Whether any UI action ever applies a keyframe other than 1** — none was found beyond the
+  1. **Whether any UI action ever applies a keyframe other than 1** — none was found beyond the
      construction (0) and row-build (1) callers, but a live confirmation is left for the debugger.
 
-An implementer should treat the orbit geometry, the live keyframe (1), the look-at target, the
-yaw/pitch axis split, the zoom-dolly law, the no-re-aim rule, and the easing law as authoritative,
-and the precise eye / live boom-depth seed / tween duration as tunable until debugger-confirmed.
+An implementer should treat the orbit geometry, the live keyframe (1), the look-at target = orbit
+point = (512, 87, −9652), the boom seed = 0 (eye on the orbit point at zoom 0), the yaw/pitch axis
+split, the zoom-dolly law, the no-re-aim rule, the 2.0 s tween, and the easing law as authoritative.
 
 <!-- source: _dirty/campaign4/charselect3d/camera-update-law.md §5 and camera-on-select.md (resolved items + residual debugger-pending) -->
 
@@ -1099,7 +1177,7 @@ not a `.box` skybox file (no skybox file exists in the VFS for this scene; §3.7
 files it reads are the **area-0 (`…0.bin`) family**, not the area-015 family — see the supersede in
 §3.6.3.
 
-### 3.6.1 Lighting rig (CODE-CONFIRMED counts; colours UNVERIFIED)
+### 3.6.1 Lighting rig (CODE-CONFIRMED structure; VALUES data-driven — read light0.bin keyframe 29)
 
 The scene attaches the shared **sky/time manager** singleton's render node into the 3D scene as a
 child (the same manager the main world uses). That manager builds the lighting rig:
@@ -1107,17 +1185,27 @@ child (the same manager the main world uses). That manager builds the lighting r
 - **≈ 5 positional lights** (the sun plus fill lights), each with a light range/radius of **≈ 1024**.
 - A **white (1.0) colour-scale baseline** (identity colour multipliers) and a **black, full-alpha
   clear colour** baseline, both later tinted by the time-of-day-driven sky data.
+- **Sun / light state is produced by a 48-keyframe-per-day light table (CODE-CONFIRMED structure).**
+  The day is divided into **48 keyframes (one per 30 minutes = 1800 s)**, **linearly interpolated** by
+  the time-of-day in seconds. Each keyframe is **51 floats = 3 light slots × 17 floats** (sun /
+  secondary / ambient), read from **`data/sky/dat/light0.bin`** — **not** a clock→angle trig formula.
+  At the frozen char-select clock **52200 s = 14:30 the index is keyframe 29 exactly (interpolation
+  fraction 0)** — so the exact 14:30 sun direction / colour is precisely the **51 floats of
+  light-keyframe 29** (no interpolation).
 - **No hard-coded ambient colour literal** exists in the scene builder — the final on-screen sun /
   ambient / fog **colours are data-driven** through the sky/time manager and the area-0 sky data at
-  the frozen 14:30 clock. (Light count, range ≈ 1024, white baseline, black clear = CONFIRMED; the
-  **final colours and the per-light directions are UNVERIFIED here** — they come from the sky data /
-  per-frame update, debugger-confirmable on a live frame.)
+  the frozen 14:30 clock. (Light count, range ≈ 1024, white baseline, black clear, the **48-keyframe
+  table structure** and the **14:30 → keyframe 29** index are CODE-CONFIRMED; the per-keyframe
+  **colour/direction VALUES remain data-driven** — read `light0.bin` keyframe 29, an **asset-analyst
+  lane**, not static-settleable.)
 
-### 3.6.2 Fog / sky (MEDIUM)
+### 3.6.2 Fog / sky (CODE-CONFIRMED field)
 
-The select scene explicitly **zeroes a sky/fog blend scalar** (a fog-density / sky-blend factor set to
-0.0) — i.e. **minimal / no distance fog** behind the preview row, so the row reads clearly. The exact
-visual meaning of the zeroed scalar is MEDIUM (needs a live read of the resulting fog density/colour).
+The select scene explicitly **zeroes the fog-blend OFFSET field** — the sky-param struct's **+8**
+field, set via `base · factor · 1.4` with **factor 0**. The renderer consumes `colour0 − offset0`, so
+this is the **distance-fog blend offset**; zeroing it turns **distance fog off** behind the preview
+row, so the row reads clearly. (The resulting fog **colour** still depends on the area-0 light/material
+data — data-driven.)
 
 ### 3.6.3 Sky-data asset set for the char-select area (CODE-CONFIRMED — area 0, NOT area 015)
 
@@ -1180,15 +1268,18 @@ areas; the char-select cell's is present.)
 The char-select scene's fixed ambient FX come from **two distinct mechanisms**, both feeding the same
 pooled map-effect spawner; the scene also pushes one ambient **sound** cue.
 
-**(a) The single code-spawned ambient effect (CODE-CONFIRMED).** The scene builder spawns **exactly
-one** ambient map effect from a code immediate: effect id **380003000**, which is the internal id of
-**`char_select-u.xeff`** (the composite torch/brazier corona effect, 68 sub-effects). It is spawned at
-world **(508.48, 69.89, −9758.57)** — the **centre of the preview character row**, framed dead-centre by
-the camera (the same point as the terrain-init pivot, §3.7.2) — with **identity orientation** and
-**scale 1.0**. It is pooled and inserted into the active-effect list, so it is a **standing background
-effect for the whole select session**, not a one-shot. This is the **only** effect-id immediate
-reachable from the scene builder; the braziers are this **single composite `.xeff`**, not per-pillar
-spawns and not `.bud`-baked.
+**(a) The single code-spawned ambient effect (CODE-CONFIRMED — re-confirmed: sole spawn, no second).**
+The scene builder spawns **exactly one** ambient map effect from a code immediate: effect id
+**380003000**, which is the internal id of **`char_select-u.xeff`** (the composite torch/brazier corona
+effect, 68 sub-effects). It is spawned at world **(508.483, 69.887, −9758.569)** — the **centre of the
+preview character row**, framed dead-centre by the camera (the same point as the terrain-init pivot,
+§3.7.2) — with **identity quaternion (0,0,0,1)** and **scale 1.0**. It is pooled and inserted into the
+active-effect list, so it is a **standing background effect for the whole select session**, not a
+one-shot. This is the **builder's sole pooled-spawn call** — the **only** effect-id immediate reachable
+from the scene builder, with **no second hidden spawn**; the braziers are this **single composite
+`.xeff`**, not per-pillar spawns and not `.bud`-baked. The per-area ambient manifest path is
+**`data/effect/map000.txt`** (area string "000" from area 0); that file is **absent** in the shipped
+VFS (§(b) below), so no manifest records contribute.
 <!-- source: _dirty/campaign5/charselect3d/fx-spawn-path.md, _RECONCILED.md (LANE 2) -->
 <!-- pending render-time confirm: that ALL visible braziers trace to this single 380003000 spawn (live frame) -->
 
@@ -1410,8 +1501,9 @@ The top-of-screen "character count : N" caption is built by a dedicated helper:
      `+1` on the field and repaints the caption.
   3. **Delete-accept → decrement (floored at 0).** The char-manage response handler, on a delete
      success, decrements the field only while it is `> 0`, then repaints. (The opcode carrying this
-     result — `3/4` vs a `3/7`-shaped branch — is the **UNRESOLVED** carrier of §5; the decrement of
-     this field is independent of that dispute.)
+     result is the **8-byte char-manage result**; the dispatch-ladder verdict of §5 pins it to **`3/7`
+     SmsgCharManageResult** — see the cross-spec ladder-correction note in §5. The decrement of this
+     field is independent of the opcode-renumbering.)
   4. **Enter-game (`3/5 SmsgEnterGameAck`) → overwrite store.** The enter-game response reads a
      **trailing standalone `u32` CharacterCount** from the packet and stores it **directly** into this
      same `+0x80` field (a plain assignment, not an increment). So `3/5`'s trailing CharacterCount is
@@ -1433,7 +1525,9 @@ When the account has no character on a slot, the **Create** path (button id 4, o
 create-shortcut) scans the five spawn descriptors and acts on the **first slot whose name word is
 zero** — the empty slot, marked by the **`"@BLANK@"`** sentinel (§3.2 / §4.1a.1). Create is an
 **in-place sub-form of the same select window** (no new scene, no new window — §4); clicking an empty
-3D slot directly routes through the same open path (cross-ref §4 / §7).
+3D slot directly routes through the same open path (cross-ref §4 / §7). The empty-slot routing is the
+**name == `"@BLANK@"`** branch, which raises the **create-confirm dialog (message id 262)**
+(CODE-CONFIRMED).
 
 ---
 
@@ -1530,18 +1624,19 @@ On a valid name, the client copies the CP949 name into a **52-byte** create buff
 guard, plays click SFX **861010101**, and sends the **create** message: **`major 1 / minor 6`,
 52-byte body** (`{name + class/appearance seed fields}`).
 
-> **CONFLICT to resolve at the wire layer (I do not own `opcodes.md` / `packets`).** `names.yaml`
-> and `login_flow.md` map **`1/6 = CmsgLoginRequest`** (the ~52-byte login blob, first byte `0x2B`).
-> The char-select lane shows the **character-create send is *also* `1/6`, 52 bytes** — and the
-> create body did **not** start with the login `0x2B` sentinel. Two readings: (a) opcode `1/6` is
-> **session-phase-dependent** (login phase = login blob; select phase = create char), or (b) the
-> login analyst conflated the 52-byte create send with the login blob. **This must be disambiguated
-> by the protocol analyst with a capture.** Until then, an engineer must treat `1/6` as carrying
-> **both** meanings by session phase and must **not** assume the create body starts with `0x2B`.
-> Recorded for `conflictsFlagged`; not resolved here. *(Note: the runtime read of the login blob
-> in `login_flow.md` §4.2 resolved the **login-blob structure** and identified its optional field
-> as the second-password / PIN, but it did **not** reach the character-create send and therefore
-> does **not** resolve this collision.)*
+> **STATICALLY RESOLVED — there is no `1/6` collision (CODE-CONFIRMED, no capture needed; cross-spec
+> note, I do not own `opcodes.md` / `packets`).** Earlier readings mapped **`1/6 = CmsgLoginRequest`**
+> *and* the 52-byte character-create send, framed as a two-hypothesis collision. A static read of both
+> send sites dissolves it: the **login credential send is `1/4`** (built by the secure auth-reply
+> builder, header stamped major=1/minor=4 — §1.7), and the **character-create send is `1/6`** (built
+> by a **separate** fixed-body sender, header stamped major=1/minor=6, **exactly 52-byte** body whose
+> offset-0 is the CP949 name, never `0x2B`). **There is no shared opcode and therefore no collision;**
+> the prior "`1/6` = login" attribution was a conflation (the confirmed answer is hypothesis (b)).
+> This was proven by sweeping the whole major-1 fixed-body sender family: exactly one stamps minor=6
+> (create); the others are 1/0, 1/7, 1/9, 1/13, 1/14; none stamps minor=4 — that is solely the secure
+> path. So the create body does **not** start with `0x2B`, and `1/6` carries **create only**. The
+> protocol author should split the catalog rows accordingly (`1/6 = CmsgCreateCharacter`, login
+> credential = `1/4`). Recorded for `conflictsFlagged`.
 
 The create result is the inbound **`3/23 SmsgCharCreateResult`** (owned by `login_flow.md`):
 accept codes drive a scene refresh (and increment the account character count); failure codes map to
@@ -1560,8 +1655,10 @@ for slot select (§7): the **mode byte distinguishes them** — `1/7 {slot, 0}` 
 `1/7 {slot, 1}` = delete. (The mode-byte value `1` for delete is the literal in the binary; the
 earlier static-elimination alternative `2` is refuted.)
 
-The delete result arrives on the inbound **8-byte char-manage result** message (`3/4
-SmsgCharManageResult` per `opcodes.md`; result / subtype / ready-time):
+The delete result arrives on the inbound **8-byte char-manage result** message (committed
+`opcodes.md` currently labels it `3/4 SmsgCharManageResult`, but the dispatch-ladder verdict in the
+cross-spec note below **corrects this to `3/7`** — pending the protocol-author's renumbering; result /
+subtype / ready-time):
 
 - **result == 1, subtype == 2 ⇒ delete confirmed**: the account character count is **decremented**,
   the slot is cleared, and the preview row is rebuilt.
@@ -1570,12 +1667,24 @@ SmsgCharManageResult` per `opcodes.md`; result / subtype / ready-time):
   computed from `(ready_time − now)` (a same-day delete lock). The CP949 format string is in the
   binary's data; the *id/string* is VFS-owned and not reproduced.
 
-> The `3/4`-vs-`3/7` **delete-result carrier remains UNRESOLVED** (capture-pending). The 8-byte
-> result/subtype/ready-time handler is labelled "3/7" by some legacy tooling, while the committed
-> attribution is `3/4 SmsgCharManageResult`; the static read surfaces both shapes and **does not
-> overturn the committed `3/4` row** on static evidence alone — a live delete capture is needed to
-> settle it. **Anchor to behaviour**: whichever minor carries it, this is the handler that decrements
-> the account character count on `result == 1, subtype == 2`. Recorded for `conflictsFlagged`.
+> **⚠️ CROSS-SPEC CONFLICT — the major-3 receive ladder is being CORRECTED (route to the
+> protocol-author; I do not own `opcodes.md`).** A static read of the receive dispatch ladder
+> **resolves** the `3/4`-vs-`3/7` delete carrier: the minor ladder routes minor **7 → the 8-byte
+> char-manage / delete result** (the handler that decrements `+0x80`), and minor **4 → a different,
+> variable-length scene-entity / char-slot update**. The committed `opcodes.md` / this section have
+> **`3/4` and the 8-byte manage result SWAPPED**, and additionally mislabel the **16-byte spawn
+> confirm** as "3/7" when it is actually **3/14**. The correct triple the protocol-author must
+> reconcile (rows `0x30004` / `0x30007` / `0x3000E`):
+> - **`3/4` = SceneEntityUpdate** (variable-length slot-scratch refill / scene-clear),
+> - **`3/7` = SmsgCharManageResult** (8 bytes — the delete / select / rename manage result; **this is
+>   the delete-result carrier**),
+> - **`3/14` = CharSpawnResponse** (16 bytes — the enter-into-world bridge).
+>
+> **This is a genuine conflict for the protocol-author to reconcile, not a silent relabel** — flagged
+> here and routed to **[protocol-spec-author]**. The opcode **renumbering itself is the
+> protocol-author's job in `opcodes.md`**; this spec only flags the ladder correction. **Anchor to
+> behaviour**: whichever minor the catalog lands on, this is the handler that decrements the account
+> character count on `result == 1, subtype == 2`. Recorded for `conflictsFlagged`.
 
 <!-- source: _dirty/campaign5/selectwindow-lifecycle.md (delete = 1/7 {slot,1}, 2 bytes; 1/14 = slot-move; delete mode byte literal = 1, alt 2 refuted); _dirty/campaign5/charcount-billing.md (delete-accept decrements BillingState index 32 / +0x80, floored at 0; 3/4-vs-3/7 carrier UNRESOLVED, do not overwrite committed 3/4 on static) -->
 
@@ -1636,10 +1745,26 @@ empty and the action instead **opens the character-creation form** (§4). So "en
 
 - It does **not** block — it sends `1/9` and the engine advances to **state 2 (Load)** then **state 5
   (In-game)** which builds the real world.
-- It waits for **`3/5 SmsgEnterGameAck`** (entry confirmation), then **`3/7 SmsgCharSpawnResult`**
-  drives the actual local-player spawn **from the cached descriptor**.
-- The spawn X/Z arrive in the server world-state packet (`4/1`), Y forced to 0; the 3×3 terrain ring
-  then streams around the spawn (owned by `client_runtime.md` §7.4).
+- The select → In-game scene exit is **client-local** (the select-window teardown sets engine state
+  5/8 on the confirm-enter flag), **not** opcode-driven.
+- **`3/5 SmsgEnterGameAck`** independently sets **Load (state 2)** and re-syncs the account char count
+  (its trailing `u32` overwrites BillingState `+0x80`, §3.8.2).
+- **`4/1` is the opcode that actually creates the local player** (the `g_LocalPlayer == NULL` create
+  path) **from the cached descriptor**, plus the first 3×3 terrain ring; the spawn X/Z arrive in this
+  server world-state packet (`4/1`), Y forced to 0, and the 3×3 terrain ring streams around the spawn
+  (owned by `client_runtime.md` §7.4).
+
+> **⚠️ CROSS-SPEC note — spawn driver corrected + arrival order (route to the protocol-author; I do
+> not own `opcodes.md`).** Any earlier §7 text attributing the local-player spawn to "`3/7
+> SmsgCharSpawnResult`" is **wrong**: per the dispatch-ladder verdict (§5), **`3/7` is the 8-byte
+> char-manage result** (delete/select/rename), the **local-player spawn is driven by `4/1`**, and the
+> 16-byte server enter-confirm is **`3/14`** (which re-enters the select enter-builder). The major-3
+> ladder renumbering (`3/4` = SceneEntityUpdate var, `3/7` = SmsgCharManageResult 8B, `3/14` =
+> CharSpawnResponse 16B) is the protocol-author's job in `opcodes.md`. The client enforces **NO fixed
+> receive order** between `3/5` and `4/1` (neither handler gates on the other); the strict **wire**
+> arrival order of `3/5` vs `4/1` is **server-determined** and remains **DEBUGGER-PENDING** — settle
+> it by breakpointing the receive dispatcher and the `3/5` / `4/1` handlers and reading engine-state +
+> the local-player pointer before/after each (live pilot only; never `dbg_start`).
 
 > A `1/7 CmsgSelectCharacter` (2-byte `{slot, flag}`) send also exists on the select path; whether it
 > must precede every `1/9` enter, or only the first selection, is **not** resolved without a capture
@@ -1656,7 +1781,7 @@ matching inbound result clears it.
 
 | Action | Message (`major/minor`) | Body size | Trigger |
 |---|---|---|---|
-| Create character | `1/6` (collision — see §4.5) | 52 bytes | Create form confirm (valid name) |
+| Create character | `1/6` (create-only — collision REFUTED, §4.5) | 52 bytes | Create form confirm (valid name) |
 | Select character | `1/7` `{slot, 0}` | 2 bytes | slot select / pre-enter step (mode byte = 0) |
 | Delete character | `1/7` `{slot, 1}` | 2 bytes | delete confirm (mode byte = 1; §5) |
 | Enter game | `1/9` | 40 bytes | confirm a real (non-blank) slot |
@@ -1794,7 +1919,8 @@ next scene.
       → second-password / PIN modal (≤4 chars; value → optional login-blob field)   [§1.4a]
       → 40 build TAB join string (account / PIN / host port) + secure context handoff
            (guard state 7); window exits
-  game socket handshake (0/0 → 1/4 → 1/6 login blob: [0x2B][account\0][PIN\0])  [owned by login_flow.md / crypto.md]
+  game socket handshake: inbound 0/0 key exchange → reactive 1/4 auth reply (RSA pre-image = login blob [0x2B][account\0][PIN\0])  [owned by login_flow.md / crypto.md]
+       (1/6 is CHARACTER-CREATE only, NOT the login send — §1.7/§4.5)
   on auth OK: server sends 3/5 EnterGameAck → write state 2
 
 [state 2: LOAD] → (optional state 3 OPENING) → [state 4: SELECT] on 3/1 CharacterList
@@ -1807,7 +1933,7 @@ next scene.
   per-slot pick = hit-test the 3D row (Y band 70..92)
   Create (action 4) → class 0..3 → internal {4,1,3,2}, face 1..7, sex, starter gear
                       → name validate (min 2; a-z/0-9/Hangul) → send 1/6 (52B) → 3/23 result
-  Delete (action 5) → confirm → send 1/7 {slot,1} (2B) → 3/4 result (subtype 2 = deleted; cooldown msg)
+  Delete (action 5) → confirm → send 1/7 {slot,1} (2B) → 8-byte char-manage result (committed 3/4 → corrected to 3/7 per §5 ladder verdict; subtype 2 = deleted; cooldown msg)
                       (1/14 is a separate slot-move/"location" send, 1B — NOT delete; §5/§8)
   Rename             → name validate → send 1/13 (18B) → 3/6 result
   Enter (confirm slot):
@@ -1815,7 +1941,8 @@ next scene.
       real slot → SFX 920100200; send 1/9 (40B, slot@0, token 21149);
                   cache 880B descriptor + 96B stats; write state 5
 
-[state 5: IN-GAME]  build world; wait 3/5 ack → 3/7 spawn (from cache) → 4/1 world-state X/Z (Y=0)
+[state 5: IN-GAME]  build world; 3/5 ack (sets Load, re-syncs char count) ; 4/1 creates local player from cache + world-state X/Z (Y=0)
+                    (3/5-vs-4/1 wire order DEBUGGER-PENDING; spawn driver = 4/1, NOT 3/7 — §7; ladder 3/4·3/7·3/14 correction owned by opcodes.md)
   logout / disconnect → state 4 (Select), never back to login (state 1)
   explicit quit → state 6 → state 8 (Exit);   fatal error → state 7 → state 8
 ```
@@ -1824,10 +1951,12 @@ next scene.
 
 ## Open questions
 
-1. **Login message id 4029.** An adjacent message-catalogue literal, almost certainly the
-   channel-endpoint-fetch failure analogue (sub-state 39 timeout / endpoint connect fail), but not
-   pinned to a call site. PLAUSIBLE only — confirm by tracing the sub-state 39 → 40 boundary or via
-   a capture.
+1. **Login message id 4029 — REFUTED/CLOSED.** Earlier read PLAUSIBLE as the channel-endpoint-fetch
+   failure analogue (sub-state 39). A static re-read shows **4029 is a server-list column-header
+   caption** (the list headers are 4029 / 4030 / 4031 / 4032, loaded once by the server-row painter;
+   §1.9 / §11.4) — **not** an endpoint-fetch error, and **not** referenced by the login tick. The
+   sub-state-39 endpoint wait has **no in-tick failure toast**. Resolved CODE-CONFIRMED; no capture
+   needed.
 2. **ID-box max length 6.** Surprisingly short for an account name (validation only requires ≥ 4).
    Whether it reflects a legacy fixed-width account id, or is overwritten elsewhere, is unresolved.
    Wants a real `DoOption.ini` / capture. A revival may relax it.
@@ -1839,8 +1968,12 @@ next scene.
 5. **`list.dat` byte layout.** The lobby-host file's 768-byte record (name @ +0, host @ +0x100) is
    `static`-derived and on-disk-unverified; the gap between the name and +0x100 (padding? flags?
    port?) and whether +0x100 also carries a port are unknown without a real file.
-6. **Slot availability flag vs lock flag.** Two per-slot flag arrays both gate enter/render; the
-   precise difference (selectable vs creating/locked vs cooldown) is inferred, not byte-confirmed.
+6. **Slot availability flag vs lock flag — byte source CONFIRMED; wire semantics still open.** The
+   two per-slot flag arrays are now pinned (§3.4): **lock / creating** = select-window field
+   `+0x1548 + slot` (drives yaw-π facing + blocks enter); **occupied / selectable** = `+0x148C + slot`
+   (server-supplied; gates the `1/7` select/manage click); selectable-for-enter = lock clear AND
+   occupied. The only residual is the **wire** semantics of the server slot-flag (delete-pending vs
+   rename-cooldown), which remains capture-pending.
 7. **Class names / labels.** The UI→internal class map `{0,1,2,3} → {4,1,3,2}` is confirmed, but the
    human-readable class names (message ids 14003..14007, CP949, VFS-only) were not decoded. Needs a
    `msg.xdb` extract.
@@ -1864,14 +1997,16 @@ next scene.
     the char-select 2D builder; per-slot class is conveyed by the descriptor-driven 3D preview (§3.3)
     plus the slot frame art (§11.5b). If a 2D class badge is desired in the revival, it must be added
     fresh - there is no legacy class→source-rect lookup to reproduce.
-12. **Char-select camera tween duration.** The keyframe-transition normalizer decodes to ≈ 2.0 s, but
-    an existing tool annotation reads "0.5 s". MEDIUM — resolve by timing the live transition or
-    reading the millisecond deltas at the manipulator's update on a live select frame (§3.5.4).
-13. **Char-select preview front/back facing.** The slot-preview yaw is literally 0 for occupied
-    (front-facing) slots and π for locked slots, but the project's mesh-local `.skn` X-negation can
-    flip apparent facing. Confirm on a live frame whether yaw-0 shows the character's **front**
-    (expected) or back; if back, the importer must add π / mirror consistently with the X-negation
-    (§3.3.2).
+12. **Char-select camera tween duration — CLOSED.** Resolved CODE-CONFIRMED: the normalizer is the
+    literal `0.0005` (= 1/2000) over the millisecond clock, clamped at 1.0 → a **2.0 s** keyframe
+    transition. The "0.5 s" tool annotation was a stale comment and is superseded (§3.5.4).
+13. **Char-select preview front/back facing — CLOSED on the binary side; reframed as a port check.**
+    Resolved CODE-CONFIRMED on the binary side: **yaw 0 = FRONT** (the engine facing is
+    `yaw = atan2(Δx, Δz)` so forward = +Z at yaw 0; the live camera at Z = −9652 looks in −Z at the
+    row ≈ −9737; the binary `.skn` loader applies **no** X-negation). What remains is a **Godot-port
+    composition check** (not a binary unknown): verify the importer's mesh-local-X negation + the world
+    Z-negation **compose** to "front toward camera"; if the port shows the back, add 180° yaw / mirror
+    consistently (§3.3.2).
 
 ### Cross-spec conflicts recorded here (owners must resolve in their files)
 
@@ -1879,17 +2014,22 @@ next scene.
   screen"** as CODE-CONFIRMED. Both are wrong: **29 = OK-button credential validation**, **31 = show
   EULA overlay** (the help button is the separate action `i` / id 105). The owner of `ui_system.md`
   should correct those two rows. (§1.5)
-- **Opcode `1/6` collision** (`opcodes.md` / `names.yaml` / `login_flow.md`): `1/6` is mapped to
-  `CmsgLoginRequest` *and* is the 52-byte character-create send; the create body did not start with
-  the login `0x2B` sentinel. The runtime login-blob read (`login_flow.md` §4.2) resolved the
-  login-blob structure and named its optional field the second-password / PIN, but did **not** reach
-  the character-create send and so does **not** resolve this collision. Still needs protocol-author
-  disambiguation with a capture. (§4.5)
+- **Opcode `1/6` — collision STATICALLY RESOLVED (no capture needed); protocol-author to split the
+  rows** (`opcodes.md` / `names.yaml` / `login_flow.md`): there is **no shared opcode**. The login
+  credential send is **`1/4`** (the secure auth reply to inbound `0/0`); **`1/6` is character-create
+  only** (52-byte body, offset-0 = CP949 name, never `0x2B`). Proven by sweeping the major-1
+  fixed-body sender family (exactly one stamps minor=6 = create; none stamps minor=4 — that is solely
+  the secure path). The protocol author should set `1/6 = CmsgCreateCharacter` and the login credential
+  to `1/4`. (§4.5 / §1.7)
 - **New C2S char-management opcodes** `1/7` (char-manage `{slot, mode}`, 2B — `mode 0` select /
   `mode 1` delete; §5), `1/13` (rename, 18B), and `1/14` (slot-move / "location", 1B — **not** delete)
   may be absent from `names.yaml` / `opcodes.md`; the protocol author owns adding them. (§5, §6, §8)
-- **Naming inconsistency**: the 8-byte char-manage result handler is labelled "3/7" by some legacy
-  tooling but is behaviourally **`3/4 SmsgCharManageResult`** (result/subtype/ready-time). (§5)
+- **Major-3 receive ladder correction (protocol-author owns the renumbering in `opcodes.md`):** the
+  dispatch ladder resolves the carriers to **`3/4` = SceneEntityUpdate (variable)**, **`3/7` =
+  SmsgCharManageResult (8 bytes — the delete / select / rename manage result)**, and **`3/14` =
+  CharSpawnResponse (16 bytes — the enter bridge)**. The committed catalog has `3/4`/`3/7` swapped and
+  mislabels the 16-byte spawn as `3/7`; the local-player spawn is driven by **`4/1`** (not `3/7`). This
+  is a genuine conflict for the protocol-author, not a silent relabel. (§5 / §3.8.2 / §7)
 
 
 ---
@@ -1993,20 +2133,28 @@ shipped DDS headers by a VFS harness (no pixel data extracted).
 distinction on `loginwindow_02.dds` is the load-bearing new fact: a revival must treat its alpha as
 **premultiplied** when compositing, otherwise the variant chrome edges composite incorrectly.
 
-### 11.1a-1 Sub-rect cross-check (PLAUSIBLE — fit the canvas, not pixel-verified)
+### 11.1a-1 Sub-rect cross-check (CODE-CONFIRMED via the construction-call read)
 
-Two of the §11.2 / §11.3 source rects were sanity-checked against the byte-confirmed 1024x1024
-canvas. A DDS header read cannot confirm pixel content, so these are **PLAUSIBLE** (consistent with
-the confirmed canvas size; not positively verified by decoding):
+Two of the §11.2 / §11.3 source rects, previously only sanity-checked against the byte-confirmed
+1024x1024 canvas (PLAUSIBLE), are now **literal-operand CODE-CONFIRMED** from the construction-call
+arguments. The "fit the canvas, not pixel-verified" caveat is **superseded** by the construction-call
+read (a texture-peek of the `(615,404)` pixels remains a *content* question, not a *code* question):
 
-| Sub-rect | Atlas | Region | Fits 1024x1024? | Status |
-|---|---|---|---|---|
-| Server-row plate / channel toggle | `loginwindow_02.dds` | src `(9,6)`, size `202x372` | yes (near-origin panel) | PLAUSIBLE |
-| PIN dragon-frame / notice-dialog frame | `InventWindow.dds` | src `(318,647)`, size `340x190` | yes (lower-right quadrant; V=647 is ~63% down) | PLAUSIBLE |
+| Sub-rect | Atlas | Region | Status |
+|---|---|---|---|
+| **Channel-tab plate (3-state)** | `loginwindow_02.dds` | src `(9,6)`, size `202x372`; hover/pressed src `(220,6)`; the plate draws **stretched** per column | CODE-CONFIRMED |
+| PIN dragon-frame = **shared notice/error/quit/connecting frame** | `InventWindow.dds` | src `(318,647)`, size `340x190`; reused **stretched to 329×422** on-screen for the PIN modal | CODE-CONFIRMED |
 
-These coordinates match the literals already recorded in §11.2b (channel toggle `9,6 ... 202x372`)
-and §11.2d / §11.3 (dialog/PIN frame `318,647 ... 340x190`). The byte-confirmed canvas does not
-contradict them, but a pixel decode would be needed to positively verify the rect content.
+- **Relabel.** The first rect was previously called "Server-row plate"; it is the **channel-tab plate
+  (3-state)** drawn stretched per column. The actual 47×18 server-row buttons are a **separate** atlas-B
+  sprite (`loginwindow.dds` src `596,985` / `643,985`; see §11.2c / §11.4) — do not conflate them.
+- **PIN dragon-frame = the shared dialog frame.** The `(318,647) 340x190` rect is the **shared
+  notice / error / quit / connecting** frame (§11.2d), reused **stretched to 329×422** for the PIN
+  modal (§11.3) — not a PIN-specific texture.
+
+These coordinates match the literals recorded in §11.2b (channel-tab plate `9,6` / `220,6`,
+`202x372`), §11.4 (parchment plate normal `9,6` / hover-pressed `220,6`), and §11.2d / §11.3
+(dialog/PIN frame `318,647 ... 340x190`).
 
 ## 11.2 Login scene - widget layout (CODE-CONFIRMED literals)
 
@@ -2049,7 +2197,7 @@ canvas; "src" = `(U, V)` top-left into the named atlas. Three-state buttons list
 | 3 x small badges / arrows | B | 0,0,60,39 | 500,786 | image | - | - |
 | Scrollbar thumb (dynamic Y) | D | 0,(runtime),46,168 | 700,18 | image | - | - |
 | 8 x server-row select | B | X=13, Y=66, 47x18, X step +47 | 596,985 / 643,985 / 643,985 | 3-state button | 115 + index |
-| Large action button | A | 456,-3,111,38 | 792,398 / 602,416 / 602,416 | 3-state button | - |
+| Large "Refresh" action button | A | 456,-3,111,38 | 792,398 / 602,416 / 602,416 | 3-state button | **105** |
 | Its caption/face image | A | 407,-3,210,70 | 743,398 | image | - |
 
 ### 11.2d Notice / error dialogs (shared dialog panel)
@@ -2087,18 +2235,20 @@ and generic-error dialogs reuse the same rect (see section 11.2f for the trailin
 | Account-label caption art | A | 340,30,38,13 | 0,398 | image | **baked art** | - |
 | Password-label caption art | A | 507,30,49,13 | 38,398 | image | **baked art** | - |
 | Small decoration plate | A | 619,86,67,13 | 87,398 | image | **baked art** | - |
-| **ID input field** | B | 390,32,102,13 | 615,404 | text box | plain text; max length 16 (UI cap, §1.3) | **109** |
-| **Password input field** (masked) | B | 568,32,102,13 | 615,404 | text box | masked, max length 12; mask glyph = ASCII `*` (§11.2e mask note) | **110** |
+| **ID input field** | A | 390,32,102,13 | 615,404 | text box | plain text; max length 16 (UI cap, §1.3). Dest origin `(390,32)`, src `(615,404)`, size `102×13` | **109** |
+| **Password input field** (masked) | A | 568,32,102,13 | 615,404 | text box | masked, max length 12; mask glyph = ASCII `*` (§11.2e mask note). Dest origin `(568,32)`, src `(615,404)`, size `102×13` | **110** |
 | **Save-ID checkbox** | A | 694,86,13,13 | 717,398 (off) / 730,398 (on) | 3-state checkbox | pre-checked from saved-id (§1.6) | **104** |
 | Server-select up arrow | B | 467,86,13,10 | 483,490 | button | scroll/select server up | **106** |
 | Server-select down arrow | B | 467,455,13,10 | 505,490 | button | scroll/select server down | **107** |
 | Server-select confirm dot | B | 469,98,9,9 | 496,490 | button | commit server selection | **108** |
 
-> **Atlas note for the edit fields.** The two edit-field frames are sub-rects of **`loginwindow.dds`**
-> (the primary form chrome atlas — ID frame at src `(390,32)`, PW frame at src `(568,32)`), while the
-> buttons, captions and the background plate are sub-rects of **`login_slice1.dds`**. The earlier
-> table sourced the edit fields from `login_slice1.dds`; the chrome atlas `loginwindow.dds` is the
-> CODE-CONFIRMED source for the `(390,32)` / `(568,32)` edit-field frames.
+> **Atlas note for the edit fields (CORRECTED — CODE-CONFIRMED).** Both edit-field frames are
+> sub-rects of **`login_slice1.dds`** (atlas **A**), sharing source **(615,404)**, size **102×13**.
+> The `(390,32)` and `(568,32)` figures are the **DEST origins** on the 1024×768 canvas, **not** the
+> source UV → dest `(390,32,102,13)` (ID) and `(568,32,102,13)` (PW). The earlier reading that called
+> `loginwindow.dds` the edit-field source and `(390,32)/(568,32)` source rects is **superseded**: the
+> CODE-CONFIRMED source is `login_slice1.dds` (A) at `(615,404)`. (Corroborated by the ctor tails —
+> ID maxlen 16 / plain filter; PW maxlen 12 / masked filter 0x81.)
 
 > **Password masking — one ASCII asterisk per character (CODE-CONFIRMED, corrects "round dot").** The
 > password textbox renders **one ASCII asterisk `*` glyph per entered character** (a fixed-pitch run
@@ -2212,12 +2362,21 @@ Layers 8, 9, 18 and 19 are present in the tree but invisible in the steady login
 when their sub-state shows them, and because they are added late they always composite **over** the
 form when shown. The mouse cursor is a sibling top-level node, above all window content.
 
-**Widget show/hide fade (CODE-CONFIRMED).** Every GU widget runs a generic alpha fade on show/hide:
-its alpha ramps **toward 255 by 64 per frame when becoming visible** and **toward 0 by 64 per frame
-when hidden** — about a **4-frame fade** (0 → 64 → 128 → 192 → 255). A widget may pin a fixed alpha to
-opt out of the fade. So the revealed login form, the notice/error dialogs and the PIN keypad **fade
-in** over ~4 frames rather than popping. This is a generic show/hide transition, **not** a continuous
+**Widget show/hide fade (CODE-CONFIRMED, with offsets).** Every GU widget runs a generic alpha fade
+on show/hide: its alpha ramps **±64 per frame** toward **255** (show) / **0** (hide), clamped
+`[0,255]` — about a **4-frame fade** (0 → 64 → 128 → 192 → 255). The widget fields: **alpha at +4**,
+**visible flag at +0x8C**, **forced-alpha override at +0xF** (any value ≠ 0xFF **pins** the alpha and
+**bypasses** the fade); the composited color = `(alpha<<24)|rgb`. The ramp is **frame-counted, not
+millisecond-timed**, so the wall-clock duration scales with frame rate (≈ 67–83 ms at 60 fps). Per
+transition the **login state machine flips the +0x8C visible flag** on the overlay panels, which is
+what fires the fade. So the revealed login form, the **server-list overlay**, the notice/error/quit
+dialogs and the **PIN keypad** **FADE IN** via this generic ramp (they do **not** snap), unless a
+widget pins a forced alpha. This is a generic show/hide transition, **not** a continuous
 pulse/breathing effect.
+
+- **CODE-CONFIRMED** for the notice / error / quit panels.
+- **PLAUSIBLE-HIGH** for the PIN sub-window — a forced-alpha pin was not exhaustively excluded (the
+  one live-frame tiebreak; carried as residual debugger-pending).
 
 **Hardware cursor (CONFIRMS §11.1).** The hardware cursor sprite is **repositioned to the OS pointer
 every frame** (read the OS pointer, map to client space, drive the cursor widget to it, clamped to the

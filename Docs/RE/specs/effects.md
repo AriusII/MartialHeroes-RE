@@ -96,15 +96,15 @@ Format: `u32 entry_count` then `entry_count × 30-byte` name records. For each e
 
 **Step 5: `data/effect/totalmugong.txt` — martial-arts skill sound overlay table**
 
-Format: `u32 count` then per-record `(u32 class_index, u32 timing_offset, u32 sound_id_1, u32 sound_id_2)`. Stored at `this+147` in the effect manager. Links martial-arts skill animation catalog slots to sound cues. See also §13 for the full manifest format summary.
+Format (text token table, CORRECTED Campaign 5B): `int count` then per-record **4 int tokens**. The stored key is the catalog-resolved value `field2 + AnimCatalog[field1 + 1]`. Links martial-arts skill animation-catalog slots to sound cues. See §13 and `formats/effects.md §F.7` for the per-token schema.
 
 **Step 6: `data/effect/itemjointeff.txt` — item joint-effect binding table**
 
-Format: `u32 count` then per-record `(u32 actor_id, u32 effect_id, u32 bone_id, u32 bone_source, f32 scale, u8 flag)`. Builds a sorted map keyed by `actor_id` to a list of effect-binding records. Used to auto-attach bone-socket effects to items when equipped or spawned. Each in-memory record is 20 bytes (5 × 4-byte fields). See §9.2 for the per-spawn use.
+Format (text token table, CORRECTED Campaign 5B): `int count` then per-record **6 tokens**: `group_key`, `effect_id` (`== 0` skips the record), two ints, one **float**, and a final int stored as a byte. Populates the **item joint-effect manager**, keyed on the **raw** `group_key` (NOT catalog-resolved). Used to auto-attach bone-socket effects to items when equipped or spawned. See §9.2 for the per-spawn use and `formats/effects.md §F.7` for the schema.
 
 **Step 7: `data/effect/mobjointeff.txt` — mob joint-effect binding table**
 
-Same format as `itemjointeff.txt` (Step 6). Applies to mob actors rather than equipment items.
+Text token table (CORRECTED Campaign 5B): `int count` then per-record **6 tokens** — a `(class, offset)` key pair plus an inner `{int, int, float, byte}` node. Populates the **mob joint-effect manager** (the manager OTHER than the item one in Step 6), keyed on the **catalog-resolved** value `offset + AnimCatalog[(class + 1)]`. The `AnimCatalog` internal layout is UNRESOLVED. See `formats/effects.md §F.7`.
 
 **Step 8a: `data/effect/itemswordlight.txt` — item weapon-trail descriptors**
 
@@ -425,22 +425,22 @@ The vertex buffer is written each frame when damage numbers are active. The form
 
 ## 11. `ParticleEffectManager` Sub-System
 
-**Confidence: CODE-CONFIRMED** for the spawn path and validation logic; **PLAUSIBLE** for the `particleEmitter.eff` record layout. See also `formats/effects.md §E`.
+**Confidence: CODE-CONFIRMED** for the spawn path, the validation logic, and the `particleEmitter.eff` file structure (variable-length entry sequence). See `formats/effects.md §E` for the on-disk layout.
 
 The `ParticleEffectManager` is a completely separate sub-system from the `XEffect` class family. It handles true particle systems (fire, smoke, burst emitters) as opposed to the billboard/mesh-primitive emitters in `.xeff`.
 
 ### 11.1 Boot load
 
-At boot the manager loads `data/effect/particle/particleEmitter.eff` (observed size: 116,652 bytes). The file begins with a `u16` record count (observed value: 10,001), then fixed-stride records at a hypothesised stride of 48 bytes starting at offset `0x20`. Record layout is PLAUSIBLE only; see `formats/effects.md §E.2` for the hypothesized field table and the explicit warning not to implement the parser until confirmed.
+At boot the manager lazily loads `data/effect/particle/particleEmitter.eff` the first time a GPU-particle element (`.xeff` `resource_id >= 10000`) is spawned. The file is a **sequence of variable-length entries**, each a 28-byte entry header + (`num_frames` x 52-byte sub-record) + 64-byte trailing texture name; the read loop terminates when an entry header's `num_frames` is 0. There is **no file-level magic** and no flat record count. Each entry is inserted into a sorted map keyed by its `entry_id` (the entry header's first u32). See `formats/effects.md §E.2` for the full layout. (CORRECTED Campaign 5B from the retired "16-byte header + 2,243 x 52-byte flat records" model.)
 
 ### 11.2 Spawn path
 
 `ParticleEffectManager` is invoked from the tick function in §8 when an `XEffect` element has `resource_id ≥ 10000`. The spawn function receives:
-- A descriptor name or id (the `resource_id − 10000` index).
+- The `resource_id` **verbatim** as the map key (CORRECTED Campaign 5B: there is **NO** `resource_id − 10000` subtraction). The `≥ 10000` test is a dispatch gate, not an index base.
 - A world-space origin (3-float position).
 
 It then:
-1. Looks up the `emit_file` record for the given index.
+1. Looks up the entry whose `entry_id == resource_id` (raw-id map lookup; a miss silently abandons the spawn — `formats/effects.md §E.4`).
 2. Validates that the record's texture handle is non-null, that the particle count is greater than zero, and that the particle info pointer is non-null.
 3. If validation passes, allocates a 60-byte `ParticleEffect` object, constructs it with the texture handle, spread, speed, count, type, and particle-info parameters, then sets the world-space spawn origin.
 4. If validation fails, the spawn is silently abandoned.
@@ -498,13 +498,27 @@ All eight boot manifests reside in `data/effect/`. The read mechanism is a mixed
 | `bmplist.lst` | `u32 count` + `count × char[30]` name | Sequential index (slot number) |
 | `xeffect.lst` | `u32 count` + `count × char[30]` name | Sequential index; id from file header |
 | `xobj.lst` | `u32 count` + `count × (u32 id, char[30] name)` | `id` → xobj path |
-| `totalmugong.txt` | `u32 count` + `count × (u32 class_idx, u32 timing_offset, u32 sfx_id_1, u32 sfx_id_2)` | `class_idx` |
-| `itemjointeff.txt` | `u32 count` + `count × (u32 actor_id, u32 effect_id, u32 bone_id, u32 bone_source, f32 scale, u8 flag)` | `actor_id` |
-| `mobjointeff.txt` | Same schema as `itemjointeff.txt` | `actor_id` (mob id) |
+| `totalmugong.txt` | `int count` + `count × 4 int tokens` (text-mode) | `field2 + AnimCatalog[field1 + 1]` (catalog-resolved) |
+| `itemjointeff.txt` | `int count` + `count × 6 tokens`: `group_key, effect_id, int, int, float, byte` (text-mode; `effect_id == 0` skips) → **item manager** | raw `group_key` (NOT catalog-resolved) |
+| `mobjointeff.txt` | `int count` + `count × 6 tokens`: `class, offset` key pair + inner `{int, int, float, byte}` (text-mode) → **mob manager** | `offset + AnimCatalog[(class + 1)]` (catalog-resolved) |
 | `itemswordlight.txt` | `u32 count` + per-record: `(u32 item_id, f32 r, f32 g, f32 b, f32 ox, f32 oy, f32 oz, u8 enabled, char[] tex_name)` | `item_id` |
 | `mobswordlight.txt` | Same schema as `itemswordlight.txt` | `mob_id` |
 
-Note on `totalmugong.txt`: the loader reads 4 fields per record into a 12-byte heap record (3 × u32); the fourth field (`sfx_id_2`) is derived from the animation catalog singleton at load time. Exact semantics of `class_idx` are UNRESOLVED beyond the fact that it is a 0-based index into the animation catalog's martial-arts class table.
+**Schema correction (Campaign 5B, CONFIRMED loader read-order).** These three are **text,
+whitespace/token-delimited** tables, NOT fixed binary — each field is parsed as an int or float token,
+and each file leads with an int record count. Load-bearing facts:
+
+- `itemjointeff.txt` populates the **item joint-effect manager**, keyed on the **raw** `group_key`.
+  Its record carries an explicit **float** token and a final int stored as a single byte; an
+  `effect_id == 0` skips the record.
+- `mobjointeff.txt` populates the **mob joint-effect manager** (the OTHER manager — they are not
+  interchangeable), keyed on the **catalog-resolved** key `offset + AnimCatalog[(class + 1)]`.
+- `totalmugong.txt` stores the catalog-resolved key `field2 + AnimCatalog[field1 + 1]` (4 int tokens
+  per record).
+
+The `AnimCatalog` singleton's internal array layout is **UNRESOLVED** (only its `[index]` access shape
+is known) — a faithful port must reproduce the catalog to compute the mob/mugong keys exactly. See
+`formats/effects.md §F.7` for the per-token schemas.
 
 ---
 
@@ -550,7 +564,8 @@ This section documents the **cast-channel** effect — the looping aura/glow tha
 
 The cast-channel effect is driven by the **actor skill-action** server message (opcode `5/52`, `SmsgActorSkillAction`; see `opcodes.md` and `packets/5-52_actor_skill_action.yaml`). That message carries a server-supplied `skill_id` and an **action code** byte that selects cast-enable vs. cast-disable behaviour (see §15.3).
 
-On cast-enable, the handler resolves the effect id **directly from the per-skill record** — there is **no separate skill-id → effect-id lookup table**:
+On cast-enable, the handler resolves the effect id **directly from the per-skill record** — there is **no separate skill-id → effect-id lookup table**. The effect-id → descriptor step is **Option B (registry lookup), CONFIRMED**: the runtime ALWAYS resolves through the boot-populated sorted registry keyed by the raw numeric `effect_id`; it **never** builds a numeric `data/effect/xeff/{id}.xeff` path at spawn (no integer-to-`.xeff` format string exists). The registry is populated at boot from `xeffect.lst` (`u32 count` + 30-byte NUL-padded names): per record the loader concatenates `data/effect/xeff/<name>` — a **name** concat, not an id format — opens the file, and reads the **first u32 of the header as the `effect_id`** (the registry key comes from the FILE HEADER, not the list order). On a miss the resolver returns invalid (0); there is **no** numeric-name fallback open. See `formats/effects.md §C.2`.
+
 
 ```
 skill_id (from the 5/52 message)
@@ -559,7 +574,7 @@ skill_id (from the 5/52 message)
   → cast_effect_id  =  skill record field at byte offset 1136
                        (indexed by the caster's visual-class byte; see §15.2)
   → CoreXEffect lazy-load resolver (§5.1), keyed by numeric effect_id
-  → CoreXEffect descriptor  (lazy-parsed from data/effect/xeff/<effect_id>.xeff)
+  → CoreXEffect descriptor  (lazy-parsed by reopening the boot-stored path string for that id; the path was built at boot from the xeffect.lst NAME, never re-derived from the decimal id)
   → looping UserXEffect spawn via the UserXEffect factory (§5)
 ```
 
