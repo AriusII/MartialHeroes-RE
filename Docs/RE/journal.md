@@ -622,3 +622,26 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
   specced `.scr`/`.xdb` bulk tables; the Phase-D IDB annotation + `names.yaml` sync (still owed from
   CAMPAIGN 3 + 4). No commit yet (maintainer: continue-then-commit-later). Journal authored by the Top
   Orchestrator (main session).
+
+## 2026-06-14 — CAMPAIGN 4 (continued): VFS-pipeline promotion + binary-format specs + front-end fidelity pass
+
+- VFS deep-dive promoted: refined `formats/pak.md` (the `vfsmode` packed/loose toggle, the 3-branch
+  DiskFile read, no-decompress); created `specs/asset_pipeline.md` (loader-dispatch = call-site/extension
+  with no magic-byte sniffing; the GHTex named-texture cache; the linkage chains A–H; the sequential
+  bulk-loader) and `specs/vfs_overview.md` (directory tree + 49-extension census + manifest-linkage table).
+- New binary-format specs: `formats/bgtexture_lst.md` (the BINARY terrain-texture index — `u32` count +
+  48-byte records = kind byte + `char[47]` relpath; the `.txt` is an authoring mirror; supersedes the
+  earlier inferred 76-byte estimate in `terrain.md`); `formats/xdb_tables.md` (the five small flat `.xdb`
+  tables: actor_size / buff_icon_position / effectscale / vehicle / creature_item); `config_tables.md`
+  refinements (`mapsetting.scr` 84B × 52; `skills.scr` = 1504 + N×8 trailing, NOT a flat array).
+- Front-end: a render-fidelity review (PARTIAL — boot + VFS assets OK; gaps = missing 종료 button,
+  exposed debug pose buttons, generic server rows, missing PIN warning + connecting dialog), then a Godot
+  fidelity-fix pass applied them (atlas server rows from `loginwindow_02.dds`, the centered connecting
+  dialog, the PIN warning line, the 종료 button, debug poses hidden, the Enter button art). Atlas
+  source-UV sub-rects recovered (READONLY) for the PIN dragon-frame (`318,647,340×190` of
+  `InventWindow.dds`, NinePatch-stretched) + the server-row parchment plates (`loginwindow_02.dds`) +
+  the verdict that the login 종료 is button #63 of `login_slice1.dds` (no dedicated bottom-bar sprite) —
+  staged in `_dirty/campaign4/frontend/atlas-subrects.md` for a `frontend_scenes.md §11` refinement.
+- Build 0/0. Remaining: apply the PIN dragon-frame sub-rect, the format-table loaders (bgtexture.lst /
+  .xdb / mapsetting), the char-preview skinning debt, the IDB annotation + `names.yaml` sync. Journal
+  authored by the Top Orchestrator (main session).

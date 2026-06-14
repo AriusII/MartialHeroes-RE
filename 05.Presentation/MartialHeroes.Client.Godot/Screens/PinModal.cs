@@ -184,6 +184,24 @@ public sealed partial class PinModal : Control
             panel.AddChild(border);
         }
 
+        // H3 fix: red warning line near the top of the modal.
+        // The official PIN modal shows a red warning text near the top of the panel.
+        // The exact text is baked atlas art in password.dds (no msg.xdb id; §11.3 "no runtime text").
+        // We render it as a red Label with the offline-fallback text until a sub-rect is catalogued.
+        // Positioned at panel-local (28, 50) based on the keypad layout (first row at Y=170,
+        // so the warning sits in the top section of the 422px-tall panel, approximately Y~50..80).
+        // spec: Docs/RE/specs/frontend_scenes.md §11.3 — "warning line … baked into atlas art".
+        // CODE-CONFIRMED (warning line exists); exact panel-local Y PLAUSIBLE until sub-rect swept.
+        var warningLine = WidgetFactory.MakeLabel(
+            "※ 비밀번호를 입력하세요", // fallback; real text is baked art in password.dds
+            LoginLayout.FontBodyHeight,
+            new Color(1f, 0.20f, 0.20f)); // red — spec §11.3 "red warning line". CODE-CONFIRMED.
+        warningLine.Name = "WarningLine";
+        warningLine.Position = new Vector2(28, 52);
+        warningLine.Size = new Vector2(273, 20);
+        warningLine.HorizontalAlignment = HorizontalAlignment.Left;
+        panel.AddChild(warningLine);
+
         // PIN masked display — shows "****" as the user types.
         // The label position is approximate (no exact coord in spec for the display line).
         // PLAUSIBLE: centred near the top of the form area.

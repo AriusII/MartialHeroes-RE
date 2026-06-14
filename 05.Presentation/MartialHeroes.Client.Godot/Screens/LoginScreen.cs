@@ -453,6 +453,30 @@ public sealed partial class LoginScreen : Control
         widgetCount++;
 
         // =======================================================================
+        // [L13] 종료 (Quit) button — C1 fix.
+        // The official client has a 종료 button in the stone bottom bar that opens the
+        // quit-confirm modal. spec §1.8 "quit paths" / §1.2 action ids 113/114. CODE-CONFIRMED.
+        // We use the secondary-bottom-button atlas art (same stone style) and place it at the
+        // far right of the bottom band. The button text is baked art; we show a text label as
+        // a fallback since we do not have a standalone 종료-only sub-rect catalogued.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.8 / §1.2. CODE-CONFIRMED behaviour.
+        // =======================================================================
+        var quitBtn = WidgetFactory.MakeStateButton(
+            _assets, LoginLayout.AtlasLoginSlice1,
+            LoginLayout.QuitButton.X, LoginLayout.QuitButton.Y,
+            LoginLayout.QuitButton.W, LoginLayout.QuitButton.H,
+            LoginLayout.QuitButton.SrcX, LoginLayout.QuitButton.SrcY, // NORMAL (266,398) — same stone art
+            LoginLayout.OkHoverSrcX, LoginLayout.OkHoverSrcY, // HOVER  (490,398)
+            LoginLayout.OkHoverSrcX, LoginLayout.OkHoverSrcY, // PRESSED = HOVER
+            LoginLayout.ActionQuitBtn,
+            caption: _assets.Text(LoginLayout.MsgQuitConfirm1, "종료"),
+            captionTint: new Color(0.95f, 0.85f, 0.55f));
+        quitBtn.Name = "QuitButton";
+        quitBtn.ActionFired += _ => ShowQuitConfirmModal();
+        bottomBand.AddChild(quitBtn);
+        widgetCount++;
+
+        // =======================================================================
         // [L12] Quit-confirm modal (§11.2d) — initially hidden.
         // C@(342,289,340,190) src(318,647) — InventWindow.dds chrome.
         // spec §11.2d. CODE-CONFIRMED.

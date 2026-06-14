@@ -393,39 +393,55 @@ public sealed partial class ServerSelectScreen : Control
 
     private Control BuildRow(ServerEntry entry)
     {
+        // H1 fix: row uses an atlas button from loginwindow.dds as the click target,
+        // matching the official parchment-row look. spec §11.4 "Server-row buttons x10 (loop):
+        // B@(13,66,47,18) X-step+47, NORMAL src(596,985), HOVER src(643,985)." CODE-CONFIRMED.
+        // In the official client the 47×18 atlas button is the visible row frame; we stretch it
+        // to fill the full row width (472px) so it acts as a parchment background bar.
         var row = new HBoxContainer { CustomMinimumSize = new Vector2(472, 30) };
 
-        // Server name button — click → ServerSelected signal.
-        // In the original: action ids 115..124. spec §11.4. CODE-CONFIRMED.
+        // Atlas button — the loginwindow.dds server-row art (47×18 stretched to row width).
+        // We build it via WidgetFactory.MakeStateButton so it gets normal/hover/pressed states.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §11.2c. CODE-CONFIRMED src rects.
         int captureId = entry.ServerId;
-        var nameBtn = new Button
+        int rowActionId = LoginLayout.ServerRowActionBase + (entry.ServerId - 1); // action 115+idx
+        var rowBtn = WidgetFactory.MakeStateButton(
+            _assets,
+            LoginLayout.AtlasLoginWindow,
+            0, 0, // panel-local position (inside row)
+            472, LoginLayout.ServerRowBtnH, // full row width × spec height (18px; padded via container)
+            LoginLayout.ServerRowBtnNormalSrcX, LoginLayout.ServerRowBtnNormalSrcY, // NORMAL (596,985)
+            LoginLayout.ServerRowBtnHoverSrcX, LoginLayout.ServerRowBtnHoverSrcY, // HOVER  (643,985)
+            LoginLayout.ServerRowBtnHoverSrcX, LoginLayout.ServerRowBtnHoverSrcY, // PRESSED = HOVER
+            rowActionId,
+            caption: entry.DisplayName + (entry.IsNew ? " [NEW]" : ""),
+            captionTint: new Color(0.90f, 0.85f, 0.60f)); // parchment-gold text
+        rowBtn.Name = $"RowBtn{entry.ServerId}";
+        rowBtn.ActionFired += _ =>
         {
-            Text = entry.DisplayName + (entry.IsNew ? "  [NEW]" : ""),
-            SizeFlagsHorizontal = SizeFlags.ExpandFill,
-            CustomMinimumSize = new Vector2(220, 28),
-        };
-        nameBtn.Pressed += () =>
-        {
-            GD.Print($"[ServerSelectScreen] Server selected: id={captureId} name='{entry.DisplayName}'.");
+            GD.Print($"[ServerSelectScreen] Server selected (atlas row): id={captureId} name='{entry.DisplayName}'.");
             EmitSignal(SignalName.ServerSelected, captureId);
         };
-        row.AddChild(nameBtn);
+        row.AddChild(rowBtn);
 
-        // Status label. spec §2.3. CODE-CONFIRMED.
+        // Status, load, and population labels are overlaid on the atlas row button via absolute
+        // positioning within the same HBoxContainer. They do NOT intercept mouse events.
+        // spec §2.3 / §11.4. CODE-CONFIRMED positions (right columns of the row).
         string statusText = GetStatusText(entry);
         Color statusColor = GetStatusColor(entry);
         var statusLbl = WidgetFactory.MakeLabel(statusText, LoginLayout.FontBodyHeight, statusColor);
-        statusLbl.CustomMinimumSize = new Vector2(80, 28);
+        statusLbl.CustomMinimumSize = new Vector2(80, LoginLayout.ServerRowBtnH);
+        statusLbl.MouseFilter = MouseFilterEnum.Ignore;
         row.AddChild(statusLbl);
 
         // Load gauge. spec §2.3 / login_flow.md §2.1. CODE-CONFIRMED.
         (string loadText, Color loadColor) = GetLoadDisplay(entry.Load);
         var loadLbl = WidgetFactory.MakeLabel(loadText, LoginLayout.FontBodyHeight, loadColor);
-        loadLbl.CustomMinimumSize = new Vector2(80, 28);
+        loadLbl.CustomMinimumSize = new Vector2(80, LoginLayout.ServerRowBtnH);
+        loadLbl.MouseFilter = MouseFilterEnum.Ignore;
         row.AddChild(loadLbl);
 
         // Population availability captions 6001..6005. spec §11.4. CODE-CONFIRMED.
-        // We map the load tier to an availability label from msg.xdb if available.
         uint popCapId = entry.Load > 1200 ? 6005u :
             entry.Load > 800 ? 6004u :
             entry.Load > 500 ? 6003u :
@@ -434,12 +450,13 @@ public sealed partial class ServerSelectScreen : Control
         if (!string.IsNullOrEmpty(popText))
         {
             var popLbl = WidgetFactory.MakeLabel(popText, LoginLayout.FontBodyHeight, loadColor);
-            popLbl.CustomMinimumSize = new Vector2(60, 28);
+            popLbl.CustomMinimumSize = new Vector2(60, LoginLayout.ServerRowBtnH);
+            popLbl.MouseFilter = MouseFilterEnum.Ignore;
             row.AddChild(popLbl);
         }
         else
         {
-            var spacer = new Control { CustomMinimumSize = new Vector2(60, 28) };
+            var spacer = new Control { CustomMinimumSize = new Vector2(60, LoginLayout.ServerRowBtnH) };
             row.AddChild(spacer);
         }
 

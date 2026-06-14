@@ -391,12 +391,16 @@ public sealed partial class CharacterSelectScreen : Control
         infoPanel.AddChild(deleteBtn);
         widgetCount++;
 
+        // M1 fix: Enter button uses atlas art (59×20) with no text overlay.
+        // The official client shows the 진입 / Enter baked art at src(236,1004); no text caption.
+        // Passing caption="" lets the atlas glyph speak for itself.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.5c — Enter N src(236,1004). CODE-CONFIRMED.
         var enterBtn = MakeCharButton(
             CharacterSelectLayout.EnterButton,
             CharacterSelectLayout.EnterButtonHover,
             CharacterSelectLayout.AtlasLoginWindow,
             CharacterSelectLayout.EnterActionId, // 6, spec §8.2
-            "Enter");
+            ""); // no text — baked art label. spec §11.5c "Enter" (236,1004). CODE-CONFIRMED.
         enterBtn.ActionFired += OnCharAction;
         infoPanel.AddChild(enterBtn);
         widgetCount++;
@@ -409,12 +413,13 @@ public sealed partial class CharacterSelectScreen : Control
         // --- Slot selector row (text buttons below previews) ---
         widgetCount += BuildSlotSelectorRow();
 
-        // --- Camera keyframe pose selector — 6 pose buttons.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 / §3.5.3 CODE-CONFIRMED (6 keyframes).
-        // Runtime framing / easing law is "runtime-pending" (spec §3.5.4) — a static manual
-        // cycle is the correct scope for this implementation pass.
-        // Initial keyframe = 0, spec §3.5.3. CODE-CONFIRMED.
-        widgetCount += BuildCameraPoseButtons();
+        // C2 fix: camera-pose debug buttons are NOT part of the official client UI.
+        // They were a dev-only exploration aid for the 6-keyframe orbit (spec §3.5.2 / §3.5.3).
+        // Removed from the presentation build; BuildCameraPoseButtons() is kept for potential
+        // dev mode re-enable but is not called here.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.5.4 — "runtime-pending; do not invent UI".
+        // Camera starts at KF0 (spec §3.5.3 "initial active keyframe = 0"). CODE-CONFIRMED.
+        _activeCameraKeyframe = 0;
 
         // --- Corner close button @ (971,610) 23×23, blacksheet.dds src (941,910).
         // spec §8.2 "Corner close". CODE-CONFIRMED. ---

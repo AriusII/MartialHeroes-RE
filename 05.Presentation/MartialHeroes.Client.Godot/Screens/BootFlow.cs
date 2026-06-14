@@ -209,6 +209,7 @@ public sealed partial class BootFlow : Node
                 GD.Print("[BootFlow] dev_skip_intro=1 → skipping intro, going straight to login.");
                 ShowLogin();
             }
+
             return;
         }
 
@@ -318,8 +319,66 @@ public sealed partial class BootFlow : Node
         _audio?.PlayClickSfx();
 
         _selectedServerId = serverId;
-        GD.Print($"[BootFlow] Server selected: id={serverId} → PIN modal.");
+        GD.Print($"[BootFlow] Server selected: id={serverId} → connecting dialog → PIN modal.");
+
+        // H4 fix: show the centered connecting dialog (spec §11.4 / §1.5 sub-state 35) before
+        // jumping to the PIN modal. In the official client this dialog is shown while the
+        // channel-endpoint fetch is in flight (sub-states 35/39). In the offline/revival build
+        // we show it briefly then advance to PIN on the next frame via CallDeferred.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.4 "Connecting dialog (states 35/39)
+        //   C reuses notice panel (318,647 340×190) centered, caption 4023-candidate." CODE-CONFIRMED.
+        ShowConnectingDialog();
+    }
+
+    // -----------------------------------------------------------------------
+    // Connecting dialog (H4 fix) — spec §11.4 sub-states 35 / 39. CODE-CONFIRMED.
+    // -----------------------------------------------------------------------
+
+    private void ShowConnectingDialog()
+    {
+        var dialog = new ConnectingDialog
+        {
+            Name = "ConnectingDialog",
+            SharedAssets = _sharedAssets,
+        };
+        dialog.CancelRequested += OnConnectingCancelled;
+        _uiLayer!.AddChild(dialog);
+        GD.Print("[BootFlow] Connecting dialog shown.");
+
+        // In the offline/revival build: simulate a short "connect" delay then advance to PIN.
+        // We advance on the next frame via a one-shot timer so the connecting dialog is visible
+        // for at least one frame before being dismissed.
+        // spec §1.5 sub-state 35 "wait for server-list reply; thread sets 36 on completion".
+        var t = GetTree().CreateTimer(0.6, processAlways: true);
+        t.Timeout += ShowPinAfterConnect;
+    }
+
+    // Called when the 0.6 s connecting timer fires (H4 fix).
+    private void ShowPinAfterConnect()
+    {
+        // Remove the connecting dialog.
+        if (_uiLayer is not null)
+        {
+            Node? dialog = _uiLayer.FindChild("ConnectingDialog", owned: false);
+            dialog?.QueueFree();
+        }
+
+        GD.Print("[BootFlow] Connecting dialog closed → PIN modal.");
         ShowPinModal();
+    }
+
+    private void OnConnectingCancelled()
+    {
+        // 취소 button on the connecting dialog → go back to server-select.
+        // spec §1.5 sub-state 35 (or 39) — cancel returns to the form.
+        if (_uiLayer is not null)
+        {
+            Node? dialog = _uiLayer.FindChild("ConnectingDialog", owned: false);
+            dialog?.QueueFree();
+        }
+
+        GD.Print("[BootFlow] Connecting cancelled → back to server select.");
+        ShowServerSelect();
     }
 
     // -----------------------------------------------------------------------

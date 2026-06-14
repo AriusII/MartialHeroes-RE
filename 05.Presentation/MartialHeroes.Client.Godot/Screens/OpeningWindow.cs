@@ -51,9 +51,9 @@ public sealed partial class OpeningWindow : Control
     // -------------------------------------------------------------------------
 
     // Scenario crawl. spec: intro_sequence.md §2. CODE-CONFIRMED.
-    private const float ScrollSpeed = 30.0f;      // design-px / second. spec §2.1. CODE-CONFIRMED.
+    private const float ScrollSpeed = 30.0f; // design-px / second. spec §2.1. CODE-CONFIRMED.
     private const float ScrollStartDelayMs = 1000f; // ~1000 ms gate. spec §2.1. CODE-CONFIRMED.
-    private const float ScrollClamp = 1843.0f;    // stop clamp. spec §2.1 / §2.3. CODE-CONFIRMED.
+    private const float ScrollClamp = 1843.0f; // stop clamp. spec §2.1 / §2.3. CODE-CONFIRMED.
 
     // Scenario quad size. spec: intro_sequence.md §1. SAMPLE-VERIFIED.
     private const float ScenarioW = 1024f; // spec §1. SAMPLE-VERIFIED.
@@ -61,8 +61,8 @@ public sealed partial class OpeningWindow : Control
 
     // Slideshow. spec: intro_sequence.md §3. CODE-CONFIRMED.
     private const int SlideshowFrameCount = 4; // 4 panels. spec §3.1. CODE-CONFIRMED.
-    private const double DwellMs = 17500.0;    // ms per panel. spec §3.3. CODE-CONFIRMED.
-    private const int AlphaMax = 250;          // alpha ramp bound. spec §3.3. CODE-CONFIRMED.
+    private const double DwellMs = 17500.0; // ms per panel. spec §3.3. CODE-CONFIRMED.
+    private const int AlphaMax = 250; // alpha ramp bound. spec §3.3. CODE-CONFIRMED.
     // Alpha step is ±1 per rendered frame (frame-gated, not ms-gated). spec §3.2. CODE-CONFIRMED.
 
     // VFS asset paths. spec: intro_sequence.md §1. SAMPLE-VERIFIED.
@@ -93,20 +93,20 @@ public sealed partial class OpeningWindow : Control
 
     // Scroll state.
     private TextureRect? _scenarioRect;
-    private float _scrollPos;         // current Y translate (design-px)
-    private float _scrollStartWait;   // countdown in ms; scroll starts when ≤ 0
-    private bool _scrollDone;         // scroll has reached the clamp
+    private float _scrollPos; // current Y translate (design-px)
+    private float _scrollStartWait; // countdown in ms; scroll starts when ≤ 0
+    private bool _scrollDone; // scroll has reached the clamp
 
     // Slideshow state.
     private TextureRect? _slideshowRect;
-    private int _slideshowState = 1;  // 1..4 (panel index, 1-based). spec §3.1.
+    private int _slideshowState = 1; // 1..4 (panel index, 1-based). spec §3.1.
     private readonly Texture2D?[] _slideshowTextures = new Texture2D?[SlideshowFrameCount];
-    private double _dwellAccumMs;      // ms elapsed in the current dwell
-    private int _alpha;               // 0..250 ramp. spec §3.2.
-    private int _alphaDir = 1;        // +1 = ramp up, -1 = ramp down
-    private bool _panelFadedIn;       // true once alpha first reaches AlphaMax for this panel
-    private bool _sequenceDone;       // all 4 panels shown → ready to transition
-    private bool _finished;           // guard so we emit IntroFinished only once
+    private double _dwellAccumMs; // ms elapsed in the current dwell
+    private int _alpha; // 0..250 ramp. spec §3.2.
+    private int _alphaDir = 1; // +1 = ramp up, -1 = ramp down
+    private bool _panelFadedIn; // true once alpha first reaches AlphaMax for this panel
+    private bool _sequenceDone; // all 4 panels shown → ready to transition
+    private bool _finished; // guard so we emit IntroFinished only once
 
     // Manual-nudge range. spec §2.2.
     // Using arrow key actions for the nudge (no named actions needed — just key detection).

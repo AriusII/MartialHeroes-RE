@@ -115,7 +115,7 @@ traced.
 | `data/script/autoquestion_cl.scr` | 92 (0x5C) | none | SAMPLE-VERIFIED | Anti-bot arithmetic-quiz question pool (see §2.17) |
 | `data/script/discript.sc` | 68 (0x44) | none | SAMPLE-VERIFIED | UI context-menu label table (see §2.17) |
 | `data/script/products.scr` | 212 (0xD4) | none | SAMPLE-VERIFIED (stride) | Crafting recipe catalogue (id + CP949 name verified; body fields UNVERIFIED) |
-| `data/script/mapsetting.scr` | UNVERIFIED | — | UNVERIFIED | Map settings |
+| `data/script/mapsetting.scr` | 84 (0x54) | none | SAMPLE-VERIFIED | Per-zone map settings (52 records: zone id + CP949 name + XZ bounds; see §2.17.6) |
 | `data/script/events.scr` | variable-length (indexed) | offset-table header | SAMPLE-VERIFIED (header only) | Event table — not a flat array; in-file offset table at +0x64 (see §2.17 note) |
 | `data/script/helps.scr` | two-level hierarchical | per-page sub-entries | SAMPLE-VERIFIED (first page) | Help text — outer 16-byte page header + N × 48-byte sub-entries (see §2.17 note) |
 | `data/item/items_extra.do` | 48 | none | CONFIRMED | Item extended / 3D-attachment data |
@@ -491,8 +491,14 @@ plausible category index (< 300). String fields are CP949, null-terminated.
 **SPEC CORRECTION from prior version:** the prior spec listed the entire 1500-byte body as
 UNVERIFIED with only a trailing count byte. The body is now substantially mapped (name, category,
 class flag, type byte, descriptions, SP cost, cooldown, range, chain references). The trailing
-`N × 8` sub-entry mechanism is the same shape as items.scr, but no non-zero trailing count was
-observed in the skill sample, so skills.scr is effectively a fixed-stride file in practice.
+`N × 8` sub-entry mechanism is the same shape as items.scr. Most records carry zero trailing
+sub-entries, but at least some do not: **the campaign-4 harness confirms `skills.scr` is NOT a
+flat array.** The real file size does not divide evenly by 1504 — the 1504-byte figure is the
+**fixed part only**, and a small number of 8-byte trailing sub-entries (on the order of dozens
+across the whole file) account for the remainder. The correct record model is therefore
+`stride = 1504 fixed + N × 8 trailing` per record, identical in shape to `items.scr`, where `N`
+is 0 for most records. A parser must read the per-record trailing count and advance by
+`1504 + N × 8`; it cannot assume a uniform 1504-byte stride.
 
 **Skill category index (+4):**
 
@@ -807,6 +813,28 @@ interaction UI menus (party/guild actions, currency names, window toggles, schoo
 | `helps.scr` | two-level hierarchical | Outer 16-byte page header (`page_id`, `section_id`, reserved, `entry_count`) + `entry_count` × 48-byte sub-entries; first page sample-verified, full page-walk UNVERIFIED |
 | `tiphelp.scr` | variable-length | Loading-screen tip records; `u32` body-size + tip-count header then CP949 tip text; not flat-stride |
 | `dashs.scr` / `minds.scr` | stride 796 / 808 | Movement-skill / inner-cultivation skill reference tables; `u32` id @ +0, CP949 name; 7 / 9 records |
+
+#### 2.17.6 mapsetting.scr — per-zone map settings (stride: 84 bytes, 52 records)
+
+**SPEC CORRECTION:** §2.2 previously listed `mapsetting.scr` as UNVERIFIED. The campaign-4
+harness confirms an **84-byte (0x54) stride with 52 records** by exact divisibility
+(`4,368 / 84 = 52`, exact). This table holds one record per playable zone: a zone id, a CP949
+zone name, and the zone's XZ world bounds. The same 84-byte stride is already assumed by the
+minimap scan tooling described in `misc_data.md`.
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| +0 | 4 | u32 | Zone id (map key) | One record per zone | SAMPLE-VERIFIED |
+| +4 | ? | char[] | Zone name (CP949, null-terminated) | Inline name buffer within the 84-byte record | SAMPLE-VERIFIED (presence) |
+| body | 16 | 4×f32 | XZ world bounds (min/max along X and Z) | The zone's extent; exact float order within the body is UNVERIFIED | SAMPLE-VERIFIED (presence); UNVERIFIED (exact offsets) |
+| tail | — | — | Remaining/zeroed fields to the 84-byte stride | — | UNVERIFIED |
+
+- **Record count source:** `file_size / 84` (no file header, flat array — the common §2.1 pattern).
+- The byte offsets of the name buffer and the four bound floats inside the 84-byte body are not
+  individually pinned in this pass; only the zone-id-at-+0, the CP949 name, and the presence of
+  the XZ bounds are sample-verified. An engineer should treat the inner-offset layout as UNVERIFIED.
+
+---
 
 ---
 

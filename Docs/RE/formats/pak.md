@@ -43,6 +43,54 @@ Opening sequence:
 
 All subsequent asset reads seek within `data/data.vfs` using offsets recorded in the TOC.
 
+## Mount toggle and fixed paths (CONFIRMED)
+
+### Packed-vs-loose is a config toggle, not a success flag
+
+A single process-global **mounted** flag governs whether every file open routes through the archive
+(packed mode) or falls back to a plain OS file (loose mode). The crucial behaviour: **this flag is a
+pure configuration toggle, decided before any archive file is opened — it is NOT a success
+predicate.**
+
+- A boolean named `vfsmode` is read from the boot configuration script (the Lua boot file) early in
+  startup. `vfsmode = true` selects packed (archive) mode; `vfsmode = false` selects loose
+  (developer / flat-file) mode.
+- The mounted flag is set **directly from that `vfsmode` boolean**, *before* the two-file open
+  sequence runs. The single setter has exactly one call site (the startup routine); the flag has one
+  reader API that every I/O consumer consults before deciding where bytes come from. The setter
+  stores its argument byte and returns it, but the **return value is ignored** at the call site — it
+  is a write, not a guard.
+- The archive-open routine is invoked **unconditionally** regardless of `vfsmode`, but its **return
+  value is ignored**. In loose mode the flag is already `0`, so nothing consults the TOC the open
+  routine might build. If `data.inf` is absent in loose mode the open routine returns early without
+  building a TOC — harmless. Loose mode is therefore robust to a missing or unused archive.
+
+This refines an earlier (campaign-3) framing that described the mounted flag as "set elsewhere on
+success." It is set elsewhere (in startup), but **not on success** — it is set unconditionally from
+the config bool with no open-result predicate. (Behaviour of loose mode with a present-but-unused
+archive is UNVERIFIED for lack of a sample, but the static path shows it is inert: the flag is
+already 0 and the TOC, if built, is never consulted.)
+
+| Mode | `vfsmode` | Mounted flag | File opens resolve to |
+|---|---|---|---|
+| **Packed** | `true` | 1 | TOC lookup in `data/data.vfs` (slurp or raw-seek per mode bit2) |
+| **Loose / dev** | `false` | 0 | plain OS file at the given relative virtual path |
+
+### The archive paths are hardcoded literals — no runtime path construction (CONFIRMED)
+
+The two archive file names are **compiled-in string literals** read from static data; there is **no
+runtime path build-up, no base-directory prefixing, and no configuration override** for them. Both
+path globals are read-only at runtime (no writers; every reference feeds them straight to the OS
+file-open call).
+
+| Role | Hardcoded literal | Notes |
+|---|---|---|
+| Index / TOC | `data.inf` | relative to the process working directory |
+| Data blob | `data/data.vfs` | relative to the process working directory |
+
+A reimplementation should treat these as fixed names relative to the client root; there is no
+override mechanism in the original to honour.
+
 ## Index file layout (`data.inf`)
 
 ### Header (24 bytes, little-endian)
@@ -76,7 +124,7 @@ raw-seek router copy).
 | 0 | 100 | char[100] | `name` | Null-terminated ASCII virtual path. Stored lowercased at build time. Serves as the binary-search key. | CONFIRMED |
 | 100 | 4 | u8[4] | `pad_100` | Alignment padding between the name field and the 8-byte-aligned offset field. Never read. Likely zero. | UNVERIFIED (structurally expected) |
 | 104 | 8 | i64 LE | `dataOffset` | Byte offset of this entry's payload within `data/data.vfs`. Passed directly to a 64-bit seek call on the in-memory read path; the raw-seek router path uses only the low 32 bits (see §Open-mode dispatch). | CONFIRMED |
-| 112 | 8 | i64 LE | `dataSize` | Byte count of this entry's payload. Only the low 32 bits are consumed; a non-zero high dword causes the read to fail. Treat as a u32 in practice, stored in a 64-bit field. | CONFIRMED |
+| 112 | 8 | i64 LE | `dataSize` | Byte count of this entry's payload. Only the low 32 bits are consumed; a non-zero high dword causes the read to fail. Treat as a u32 in practice, stored in a 64-bit field. The raw-seek streaming path also copies this size as its per-entry read bound. | CONFIRMED |
 | 120 | 24 | u8[24] | `pad_120` | Trailing bytes never accessed by any examined code path. Purpose entirely unknown — could be flags, a CRC, a timestamp, or reserved padding. | CONFIRMED-never-accessed |
 
 **Total: 144 bytes = 0x90.**
@@ -92,9 +140,12 @@ equals `dataSize` and that the high dword of `dataSize` is zero. There is:
 - **no separate uncompressed-size field** distinct from `dataSize`, and
 - **no per-entry codec or flag** that would select one.
 
-Earlier cartography that referred to a "read/decompress path" is a **misnomer** for this build —
-the entry read is a plain size-checked copy. Per-format decoding (DDS texture, mesh geometry, etc.)
-happens later inside each format's own parser, never in the archive I/O layer.
+This holds for **all three** read branches of the read primitive (see §The DiskFile read primitive):
+the loose-file read, the raw-seek streaming read, and the in-memory slurp are each a plain
+byte-for-byte transfer with no decode stage. Earlier cartography that referred to a
+"read/decompress path" is a **misnomer** for this build — the entry read is a plain size-checked copy.
+Per-format decoding (DDS texture, mesh geometry, etc.) happens later inside each format's own parser,
+never in the archive I/O layer.
 
 ## Lookup algorithm
 
@@ -140,11 +191,54 @@ return buf;
 The result is a freshly-allocated buffer containing the raw asset bytes. The caller owns it. There
 is **no file-level cache** in the original: every open re-reads from disk into a fresh allocation.
 
+## The DiskFile read primitive — three branches (CONFIRMED)
+
+Every per-file read bottoms out in one unified read primitive on a DiskFile object. It takes a
+caller buffer and a byte count and dispatches on the **mounted flag** and the open-mode **bit 2**
+(raw-seek) into one of three branches. The DiskFile object carries a small set of fields used by
+this primitive (field names are descriptive; offsets are relative to the object and are an internal
+detail, not an on-disk layout):
+
+| Field (descriptive) | Role |
+|---|---|
+| mode flags | bit0 read / bit1 write / bit2 raw-seek; the bit2 test selects the streaming branch |
+| in-memory blob base | source pointer for the slurp branch |
+| in-memory blob size | clamp bound for the slurp branch |
+| file handle | OS handle for the loose-file and raw-seek branches |
+| read cursor (u64) | running offset within the entry; advanced by the exact bytes consumed |
+| entry size bound (u64) | per-entry length copied from the TOC `dataSize` at open; clamp for the raw-seek branch |
+
+The three branches:
+
+1. **Archive NOT mounted — loose file.** Read up to `n` bytes from the OS file handle; on success,
+   advance the cursor by the bytes actually read. No explicit size clamp — the read is bounded by OS
+   end-of-file (a short read signals EOF).
+
+2. **Archive mounted, mode bit2 = 1 — raw-seek STREAMING.** **Size-clamp first:** if
+   `cursor + n` would exceed the entry size bound, the read is refused (returns failure, cursor
+   unchanged). Otherwise read up to `n` bytes from a **private** handle on `data/data.vfs` at the
+   current OS file position (the handle was pre-positioned to the entry's data offset at open and is
+   advanced only by prior sequential reads), then advance the cursor. This branch performs **no
+   per-call re-seek** — it relies on the open-time seek plus sequential advance, so it assumes
+   strictly sequential streaming (no random seek between reads). The private handle exists precisely
+   so this streaming reader owns its own file pointer without contending the shared read-path handle
+   and its critical section.
+
+3. **Archive mounted, mode bit2 = 0 — in-memory slurp.** Clamp: if `cursor + n` would exceed the
+   in-memory blob size, fail. Otherwise `memcpy` `n` bytes from `blob_base + cursor` into the caller
+   buffer and advance the cursor. Pure memory copy from the already-slurped payload — no I/O.
+
+Streaming-contract summary: **bytes in** = caller buffer + count; **bytes out** = up to `count`
+copied/read; **cursor** = u64 advanced by exactly the bytes consumed; **size clamp** = the raw-seek
+branch refuses any read crossing the entry size bound (returns failure, cursor unchanged), the
+in-memory branch clamps against the blob size, the loose branch is OS-EOF bounded. **No
+decompression at any branch** — consistent with the RAW verdict above.
+
 ## Open-mode dispatch — how callers request a file (CONFIRMED)
 
 Every file open in the client goes through a single open router that takes a virtual/loose path and
-an integer **mode** value. The router first asks whether the archive is mounted (a process-global
-"mounted" flag set when the two-file open sequence above succeeds), then branches.
+an integer **mode** value. The router first asks whether the archive is mounted (the process-global
+mounted flag described in §Mount toggle and fixed paths), then branches.
 
 ### Mode flag bits
 
@@ -155,6 +249,13 @@ The mode integer is a small bitfield. Three bits are consulted; bits above bit 2
 | 0 | 0x1 | read |
 | 1 | 0x2 | write / create |
 | 2 | 0x4 | **source selector (only relevant when the archive is mounted):** 0 = slurp the whole entry into memory via the lookup algorithm above; 1 = open a private archive handle and raw-seek to the entry, streaming from the archive instead of buffering the whole payload |
+
+> Observed usage: every first-party asset loader examined opens with **mode `1`** (read, bit2 = 0) —
+> i.e. the **slurp** branch when mounted, a loose OS file when not. The **raw-seek streaming** branch
+> (bit2 = 1) is implemented in the router but **no consumer was observed selecting it** across the
+> texture / mesh / terrain / sound / effect / script / table loaders. Whether any caller anywhere
+> uses bit2 = 1 is UNVERIFIED; it appears unused on the asset path. See `specs/asset_pipeline.md` for
+> the per-family loader census.
 
 ### Branch A — archive mounted
 
@@ -191,7 +292,19 @@ It does **not** decide **how to parse** them: there is no extension switch in th
 format consumer obtains bytes through the router (or the by-name lookup) and then drives its own
 reader. Format identity is implicit in the call site, not discriminated centrally. A reimplementation
 should keep the archive/VFS layer (`Assets.Vfs`) format-agnostic and locate all decoding in the
-per-format parsers (`Assets.Parsers`).
+per-format parsers (`Assets.Parsers`). The full verdict — including the confirmation that there is
+**no magic-byte sniffing anywhere** — is documented in `specs/asset_pipeline.md §Loader dispatch`.
+
+## CONFLICT note — `bgtexture.lst` (binary) vs `bgtexture.txt` (text mirror)
+
+The runtime terrain-texture index the client actually loads is a **binary** `bgtexture.lst`, not the
+text `bgtexture.txt` referenced by earlier mappings. The `.txt` form is an authoring/source mirror;
+the **runtime path is the `.lst` binary** (a u32 record count followed by fixed 48-byte records: a
+kind byte plus a NUL-terminated relative name). The end-resolved per-texture path is the same
+(`data/map000/texture/<rel>.dds`), only the intermediary index file name/format differs. The terrain
+texture spec (`formats/terrain.md`) should follow the `.lst` binary, not the `.txt` mirror. The
+`bgtexture.lst` record layout itself is documented in `formats/area_inventory.md` /
+`specs/vfs_overview.md`; this note exists so the I/O layer's consumers point at the binary form.
 
 ## Confidence and open questions
 
@@ -200,17 +313,22 @@ per-format parsers (`Assets.Parsers`).
 | `entry_count` position (offset 12 of header) | CONFIRMED — stored directly into global count variable and used as multiplier |
 | `name[100]` + `dataOffset[104]` + `dataSize[112]` | CONFIRMED — corroborated by three independent call sites and by 64-bit index arithmetic |
 | Record stride = 144 bytes | CONFIRMED — by allocation arithmetic, the byte-exact archive size, and field offsets |
-| Stored RAW / uncompressed | CONFIRMED — single size-checked read, no decompress call, no separate uncompressed-size field |
-| No compression / no encryption on read path | CONFIRMED — no decompress or decrypt call in the hot path |
+| Stored RAW / uncompressed | CONFIRMED — single size-checked read on all three branches, no decompress call, no separate uncompressed-size field |
+| No compression / no encryption on read path | CONFIRMED — no decompress or decrypt call in any read branch |
 | Seek+read serialized under a critical section | CONFIRMED — single shared data handle; seek and read bracketed by one lock |
+| Mounted flag is a config toggle (`vfsmode`), set before open, return-ignored | CONFIRMED — single set-site, single reader-API, set from the Lua `vfsmode` bool, no success predicate |
+| Archive paths `data.inf` / `data/data.vfs` are hardcoded literals | CONFIRMED — read-only path globals, no writers, no override mechanism |
 | Three-way open-mode flag table (bit0 read / bit1 write / bit2 slurp-vs-raw-seek) | CONFIRMED — both router variants agree |
+| Three-branch DiskFile read primitive (loose / raw-seek stream / in-mem slurp) | CONFIRMED — read-order verified per branch |
 | Loose-file fallback disposition matrix | CONFIRMED — selected by the read/write mode bits when not mounted |
 | No central parser-by-extension dispatch | CONFIRMED — multiple independent consumers each own their decode |
+| Any consumer using the bit2 = 1 raw-seek streaming branch | UNVERIFIED — none observed among the asset loaders; branch exists but appears unused on the asset path |
 | Header `unknown_0`, `unknown_4`, `unknown_8`, `unknown_16`, `unknown_20` | CONFIRMED-read-and-discarded — all five are part of the bulk 24-byte read; none is extracted to a register, global, or branch condition; content unknown without a sample |
 | `pad_100` (4 bytes at +100) | UNVERIFIED — expected alignment padding; not accessed |
 | `pad_120` (24 bytes at +120) | CONFIRMED-never-accessed — no code reads these bytes; content unknown without a sample |
 | TOC sort order at build time | CONFIRMED by binary-search usage; ascending by lowercased name |
 | `dataSize` high dword always zero in practice | CONFIRMED in the reference archive (all entries) — a non-zero high dword causes the read to fail |
+| `bgtexture.lst` (binary) is the runtime terrain-texture index; `.txt` is an authoring mirror | CONFIRMED — see CONFLICT note above |
 
 A single `.inf` + `.vfs` sample pair would resolve the content of the unknown header fields and
 the trailing TOC padding. (The reference archive above resolves the structural questions; only the
@@ -218,7 +336,11 @@ the trailing TOC padding. (The reference archive above resolves the structural q
 
 ## Cross-references
 
-- Related formats: `formats/mesh.md` (payload type), `formats/texture.md` (payload type)
+- Related formats: `formats/mesh.md` (payload type), `formats/texture.md` (payload type),
+  `formats/terrain.md` (follows `bgtexture.lst`), `formats/area_inventory.md` (`.lst` index layouts)
+- Related specs: `specs/asset_pipeline.md` (loader dispatch verdict, cache model, linkage chains,
+  bulk loader), `specs/vfs_overview.md` (directory tree + extension census + manifest linkage),
+  `specs/resource_pipeline.md` (runtime resource pipeline, terrain streaming, subsystem caches)
 - Canonical names: see `Docs/RE/names.yaml` (`VfsHeader`, `VfsEntry`, `VfsEntry.name`,
   `VfsEntry.dataOffset`, `VfsEntry.dataSize`)
 - Provenance: see `Docs/RE/journal.md`

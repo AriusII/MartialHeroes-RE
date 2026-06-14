@@ -276,8 +276,8 @@ public sealed partial class FrontEndEffectPlayer : Control
         // style seen in zone_sel and char_select effects. Aesthetic choice.
         var hue = new Color(
             0.95f + (index % 3) * 0.02f, // slight R variation across sub-effects
-            0.75f - index * 0.008f,       // G decreases slightly for variety
-            0.1f + index * 0.005f,        // B increases slightly
+            0.75f - index * 0.008f, // G decreases slightly for variety
+            0.1f + index * 0.005f, // B increases slightly
             startOpacity);
 
         // ── Texture resolution ────────────────────────────────────────────────
@@ -388,7 +388,7 @@ public sealed partial class FrontEndEffectPlayer : Control
         GD.Print($"[FrontEndEffectPlayer] Sub-effect {index}: " +
                  $"pos=({pos.X:F0},{pos.Y:F0}) lifetime={lifetimeSec:F2}s " +
                  $"opacity={startOpacity:F2}→{endOpacity:F2} " +
-                 $"size=({sizeX:F1},{sizeY:F1}) tex={se.TextureNames.FirstOrDefault()??"-"}. " +
+                 $"size=({sizeX:F1},{sizeY:F1}) tex={se.TextureNames.FirstOrDefault() ?? "-"}. " +
                  "spec: Docs/RE/formats/effects.md §A.4, §A.6, §A.8.");
 
         return emitter;

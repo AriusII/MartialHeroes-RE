@@ -237,6 +237,15 @@ public static class LoginLayout
     public const int OkHoverSrcY = 398;
     public const int ActionOk = 103; // spec §1.2 "OK / Login button". CODE-CONFIRMED.
 
+    // 종료 (Quit) button — C1 fix. Placed at the far right of the bottom band.
+    // Uses the same stone art as the secondary button but at x=840 so it sits to the right of
+    // the save-ID area. This is the quit-trigger present in the official client.
+    // spec: Docs/RE/specs/frontend_scenes.md §1.8 "quit paths". CODE-CONFIRMED (button exists).
+    // Exact canvas position is a revival placement (no sub-rect separate from the ok-button art);
+    // art src reuses (266,398) 112×39 — the secondary stone button frame.
+    public static readonly WidgetRect QuitButton = new(840, 64, 112, 39, 266, 398);
+    public const int ActionQuitBtn = 30; // spec §1.5 "sub-state 30 = quit-confirm Yes path". CODE-CONFIRMED.
+
     // =========================================================================
     // §11.2f Trailing controls + quit/error dialogs. CODE-CONFIRMED.
     // =========================================================================
