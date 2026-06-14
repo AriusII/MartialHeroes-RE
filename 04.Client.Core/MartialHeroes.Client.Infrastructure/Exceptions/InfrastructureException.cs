@@ -52,3 +52,21 @@ public sealed class MacroFileException : InfrastructureException
     {
     }
 }
+
+/// <summary>
+/// Thrown when a Lua config script cannot be read or parsed.
+/// spec: Docs/RE/specs/lua-config.md §2.1
+/// </summary>
+public sealed class LuaConfigException : InfrastructureException
+{
+    /// <inheritdoc/>
+    public LuaConfigException(string message) : base(message)
+    {
+    }
+
+    /// <inheritdoc/>
+    public LuaConfigException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}

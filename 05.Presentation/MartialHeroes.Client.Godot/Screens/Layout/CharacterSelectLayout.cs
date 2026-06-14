@@ -68,20 +68,29 @@ public static class CharacterSelectLayout
     public const int SlotLabelW = 157; // per-slot label width. spec §8.2. CODE-CONFIRMED.
     public const int SlotLabelH = 18; // per-slot label height. spec §8.2. CODE-CONFIRMED.
 
-    // --- Server tab button: (67,17) 113×40. NORMAL (675,795), HOVER (483,883). spec §8.2. CODE-CONFIRMED. ---
+    // --- Slot-1 tab button (Server): (67,17) 113×40.
+    // NORMAL (675,795), HOVER (675,795) [=NORMAL], PRESSED (483,883).
+    // spec: Docs/RE/specs/frontend_scenes.md §11.5b Slot1. CODE-CONFIRMED.
     public static readonly WidgetRect ServerTabBtn = new(67, 17, 113, 40, 675, 795);
-    public static readonly WidgetRect ServerTabHov = new(67, 17, 113, 40, 483, 883); // hover src
-    // Server tab actionId = 1. spec §8.2 action-id map.
+    public static readonly WidgetRect ServerTabHov = new(67, 17, 113, 40, 675, 795); // HOVER=NORMAL per §11.5b
+    public static readonly WidgetRect ServerTabPrs = new(67, 17, 113, 40, 483, 883); // PRESSED
+    // Slot-1 tab actionId = 1. spec §11.5b. CODE-CONFIRMED.
 
-    // --- Channel tab button: (232,7) 113×40. NORMAL (640,742), HOVER (483,923). spec §8.2. CODE-CONFIRMED. ---
+    // --- Slot-2 tab button (Channel): (232,7) 113×40.
+    // NORMAL (640,742), HOVER (640,742) [=NORMAL], PRESSED (483,923).
+    // spec: Docs/RE/specs/frontend_scenes.md §11.5b Slot2. CODE-CONFIRMED.
     public static readonly WidgetRect ChannelTabBtn = new(232, 7, 113, 40, 640, 742);
-    public static readonly WidgetRect ChannelTabHov = new(232, 7, 113, 40, 483, 923); // hover src
-    // Channel tab actionId = 2.
+    public static readonly WidgetRect ChannelTabHov = new(232, 7, 113, 40, 640, 742); // HOVER=NORMAL per §11.5b
+    public static readonly WidgetRect ChannelTabPrs = new(232, 7, 113, 40, 483, 923); // PRESSED
+    // Slot-2 tab actionId = 2. spec §11.5b. CODE-CONFIRMED.
 
-    // --- Back tab button: (393,17) 113×40. NORMAL (625,691), HOVER (483,963). spec §8.2. CODE-CONFIRMED. ---
+    // --- Slot-3 tab button (Back): (393,17) 113×40.
+    // NORMAL (625,691), HOVER (625,691) [=NORMAL], PRESSED (483,963).
+    // spec: Docs/RE/specs/frontend_scenes.md §11.5b Slot3. CODE-CONFIRMED.
     public static readonly WidgetRect BackTabBtn = new(393, 17, 113, 40, 625, 691);
-    public static readonly WidgetRect BackTabHov = new(393, 17, 113, 40, 483, 963); // hover src
-    // Back tab actionId = 3.
+    public static readonly WidgetRect BackTabHov = new(393, 17, 113, 40, 625, 691); // HOVER=NORMAL per §11.5b
+    public static readonly WidgetRect BackTabPrs = new(393, 17, 113, 40, 483, 963); // PRESSED
+    // Slot-3 tab actionId = 3. spec §11.5b. CODE-CONFIRMED.
 
     // =========================================================================
     // §8.2 Create / Delete / Enter buttons — ACTION IDs CORRECTED.
@@ -96,21 +105,26 @@ public static class CharacterSelectLayout
     // spec: Docs/RE/specs/frontend_scenes.md §4 correction note (same).
     // =========================================================================
 
-    // Create button: (42,325) 59×20. NORMAL src (354,1004), HOVER src (413,1004). CODE-CONFIRMED.
-    public const int CreateActionId = 4; // spec: ui_system.md §8.2, frontend_scenes.md §4.
-    public static readonly WidgetRect CreateButton = new(42, 325, 59, 20, 354, 1004);
-    public static readonly WidgetRect CreateButtonHover = new(42, 325, 59, 20, 413, 1004);
-    // PRESSED = HOVER for this button (3-state ctor, spec §1.5 table).
+    // Create button: (130,112) 59×20. NORMAL src (0,1004), HOVER src (0,1004), PRESSED src (59,1004).
+    // spec: Docs/RE/specs/frontend_scenes.md §11.5c. CODE-CONFIRMED.
+    public const int CreateActionId = 4; // spec: frontend_scenes.md §11.5c, ui_system.md §8.2.
+    public static readonly WidgetRect CreateButton = new(130, 112, 59, 20, 0, 1004);
+    public static readonly WidgetRect CreateButtonHover = new(130, 112, 59, 20, 0, 1004); // HOVER=NORMAL
+    public static readonly WidgetRect CreateButtonPressed = new(130, 112, 59, 20, 59, 1004);
 
-    // Delete button: (112,325) 59×20. NORMAL src (472,1004), HOVER src (531,1004). CODE-CONFIRMED.
-    public const int DeleteActionId = 5; // spec: ui_system.md §8.2, frontend_scenes.md §5.
-    public static readonly WidgetRect DeleteButton = new(112, 325, 59, 20, 472, 1004);
-    public static readonly WidgetRect DeleteButtonHover = new(112, 325, 59, 20, 531, 1004);
+    // Delete button: (42,112) 59×20. NORMAL src (118,1004), HOVER src (118,1004), PRESSED src (177,1004).
+    // spec: Docs/RE/specs/frontend_scenes.md §11.5c. CODE-CONFIRMED.
+    public const int DeleteActionId = 5; // spec: frontend_scenes.md §11.5c, ui_system.md §8.2.
+    public static readonly WidgetRect DeleteButton = new(42, 112, 59, 20, 118, 1004);
+    public static readonly WidgetRect DeleteButtonHover = new(42, 112, 59, 20, 118, 1004); // HOVER=NORMAL
+    public static readonly WidgetRect DeleteButtonPressed = new(42, 112, 59, 20, 177, 1004);
 
-    // Enter/select button: (112,112) 59×20. NORMAL src (236,1004), HOVER src (295,1004). CODE-CONFIRMED.
-    public const int EnterActionId = 6; // spec: ui_system.md §8.2.
+    // Enter/select button: (112,112) 59×20. NORMAL src (236,1004), HOVER src (236,1004), PRESSED src (295,1004).
+    // spec: Docs/RE/specs/frontend_scenes.md §11.5c. CODE-CONFIRMED.
+    public const int EnterActionId = 6; // spec: frontend_scenes.md §11.5c, ui_system.md §8.2.
     public static readonly WidgetRect EnterButton = new(112, 112, 59, 20, 236, 1004);
-    public static readonly WidgetRect EnterButtonHover = new(112, 112, 59, 20, 295, 1004);
+    public static readonly WidgetRect EnterButtonHover = new(112, 112, 59, 20, 236, 1004); // HOVER=NORMAL
+    public static readonly WidgetRect EnterButtonPressed = new(112, 112, 59, 20, 295, 1004);
 
     // =========================================================================
     // §8.2 / §8.4 Stat-icon grid — CODE-CONFIRMED.

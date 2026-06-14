@@ -32,16 +32,55 @@ these define the area's visual environment:
 | Star colours | `stardome%d.bin` | `stardome_enable = 1` |
 | Cloud colours | `clouddome%d.bin` | `clouddome_enable = 1` |
 | Cloud animation | `cloud_cycle%d.bin` | `clouddome_enable = 1` |
+| Sky-dome geometry | `sky%d.box` | `skybox_enable = 1` (VFS-only; see `formats/sky.md §A`) |
 | Directional + ambient light | `light%d.bin` | always |
 | Point lights | `point_light%d.bin` | always (count may be 0) |
 | Weather | `weather%d.bin` + `weather%d_rain.bin` | OPTION_WEATHER tier ≥ 1 |
 | Wind/foliage | `wind%d.bin` | always (count may be 0) |
 
-All file specifications (offsets, sizes, field types) are in `Docs/RE/formats/environment_bins.md`.
+All file specifications (offsets, sizes, field types) are in `Docs/RE/formats/environment_bins.md`
+(colour `.bin` family) and `Docs/RE/formats/sky.md` (the `sky%d.box` geometry + parser load-order view).
 
 The global `DoOption.ini` quality gates (`OPTION_SKY`, `OPTION_WATER`, etc.) impose additional
 on/off switches on top of the per-area flags. In a clean reimplementation these may be treated as
 optional quality tiers; the spec does not prescribe their implementation.
+
+### 1.1 Environment hub — object identity and construction order
+
+The whole sky/lighting environment for an area is owned by a single **environment hub** object.
+This hub is re-run on two triggers: when the active area changes, and when the in-game SKY option is
+toggled.
+
+> **Object identity (CONFIRMED):** the environment hub object **is** the sky-colour-table singleton
+> (the 48-slot per-time master colour LUT — see §2 and `formats/environment_bins.md`). It is **not**
+> a separate "environment manager" allocation. The sub-domes (star, cloud, sky-box, moon) and the
+> fog parameters are members hung off this one object. Any reimplementation that modelled the
+> environment and the sky-colour table as two distinct objects should merge them.
+
+On activation the hub builds its sub-systems in a fixed order; each sub-init that fails aborts the
+hub, and on full success a "ready" flag is set. The order (code-confirmed):
+
+1. Particle / effect buffer root.
+2. **Star-dome** object → loads `stardome{id}.bin`.
+3. **Cloud-dome** object → loads `clouddome{id}.bin` and `cloud_cycle{id}.bin`.
+4. Read the global **sky detail-level** option (0 / 1 / 2; selects animated vs. static sky textures
+   and a derived detail scalar).
+5. **Moon / particle dome** init (uses `moon{id}.dds`).
+6. **Sky-box** sub-object → conditionally loads `sky{id}.box` when the skybox gate is set
+   (see `formats/sky.md §A`).
+7. Bind the **day/night time manager** to the dome.
+8. **Fog** init → loads `fog{id}.bin`.
+9. Set the environment "ready" flag.
+
+The directional/point-light and wind files (`light{id}.bin`, `point_light{id}.bin`, `wind{id}.bin`)
+are loaded by the surrounding area-activation path rather than by this hub; their formats are in
+`formats/terrain_layers.md` / `formats/environment_bins.md`.
+
+> **Fog colour source (resolves the `data_load_flag = 0` question):** when `fog{id}.bin`'s
+> `data_load_flag` is 0, the fog colour table is **derived from the sky-colour table** — a 48-slot
+> loop that blends two source bands per channel as `high × 0.75 + low × 0.25` (a 3:1 weighted blend
+> sampled per day slot). When the flag is non-zero the file carries an explicit 192-byte colour
+> table instead. See `formats/sky.md §B.2` and `formats/environment_bins.md §2`.
 
 ---
 
@@ -56,6 +95,11 @@ optional quality tiers; the spec does not prescribe their implementation.
 | `SKY_PERIOD_MS` | 86 400 | Total simulated day length (48 × 1800 ms) |
 | `STARDOME_KF_COUNT` | 12 | Keyframe count for stardome and clouddome |
 | `STARDOME_KF_MS` | 7200 | Milliseconds per stardome/clouddome step (4 × 1800) |
+
+The 48-slot model is **CONFIRMED from the runtime colour sampler**: it indexes the master
+sky-colour table by time-of-day at 1800 ms (1800 s of simulated day) per slot, bilinearly
+interpolates between adjacent slots, and pushes the result to the render device. (The colour table
+is the same singleton object the environment hub is built around — see §1.1.)
 
 ### 2.2 Active keyframe and interpolation fraction
 
@@ -118,17 +162,22 @@ steps (one step ≈ 2 simulated hours).
 
 1. Read `map_option{id}.bin` (40 B). Parse the 10 u32 flags. This controls all subsequent
    subsystem gates.
-2. Always read `fog{id}.bin` (204 B). Parse `start_dist`, `end_dist`, `data_load_flag`, and
-   `fog_colors[48]`.
+2. Always read `fog{id}.bin` (12 B or 204 B). Parse `start_dist`, `end_dist`, `data_load_flag`,
+   and — when `data_load_flag ≠ 0` — `fog_colors[48]`. When `data_load_flag = 0` the colour table
+   is **derived** from the sky-colour table (§1.1).
 3. If `sky_gate = 1`: read `material{id}.bin` (9792 B).
 4. If `stardome_enable = 1`: read `stardome{id}.bin` (9216 B).
 5. If `clouddome_enable = 1`: read `clouddome{id}.bin` (23040 B) and `cloud_cycle{id}.bin`
    (70 B).
-6. Always read `light{id}.bin` (5312 B). The fallback at bytes 0x14B0–0x14BF is used if the
+6. If `skybox_enable = 1`: read `sky{id}.box` via the archive by-name lookup (`formats/sky.md §A`).
+7. Always read `light{id}.bin` (5312 B). The fallback at bytes 0x14B0–0x14BF is used if the
    file is absent or unreadable.
-7. Read `point_light{id}.bin` if present.
-8. Read `wind{id}.bin` if present.
-9. If `indoor_flag = 1`: apply indoor lighting override (§5).
+8. Read `point_light{id}.bin` if present.
+9. Read `wind{id}.bin` if present.
+10. If `indoor_flag = 1`: apply indoor lighting override (§5).
+
+(The environment hub's internal construction order is in §1.1; the list above is the per-area file
+load order including the light/point-light/wind files loaded by the surrounding path.)
 
 ### 3.2 Per-frame update
 
@@ -149,7 +198,8 @@ Each game tick (or each rendered frame):
 
 ## 4. Water — RESOLVED-NEGATIVE
 
-> **Status: RESOLVED-NEGATIVE.** The legacy `Main.exe` client contains **no water renderer**.
+> **Status: RESOLVED-NEGATIVE.** The legacy `Main.exe` client contains **no water renderer**, and
+> there is **no asset-IO loader for water** — water is a render-pass / option-toggle concern only.
 > This is the definitive conclusion from an exhaustive cross-reference analysis of the binary.
 > See §4.3 for the full evidence summary. Reimplementations choose their own water visuals freely.
 
@@ -170,15 +220,18 @@ Known water Y values across the VFS:
 
 ### 4.2 Water rendering — RESOLVED-NEGATIVE
 
-The shipping `Main.exe` does **not** contain a dedicated water render path. The evidence for
+The shipping `Main.exe` does **not** contain a dedicated water render path, and there is **no
+standalone water setup or loader routine in the environment neighbourhood**. The evidence for
 this negative result is:
 
 - The `water_y` global variable has exactly two cross-references in the entire binary: one that
   initialises it to zero, and one that passes it to the terrain streaming system as a streaming
   radius parameter. It is never passed to any renderer or D3D draw call.
-- The `OPTION_WATER` INI setting is read from `DoOption.ini` into an options struct field, but
-  no code path was found that reads that field back to alter any rendering mode. The setting has
-  no confirmed runtime consumer.
+- The `OPTION_WATER` INI setting is read from `DoOption.ini` into an options struct field, and
+  written back by the option-save path, but **no code path was found that reads that field back to
+  alter any rendering mode**. The setting has no confirmed runtime consumer beyond load/save. (For
+  comparison, the adjacent `OPTION_SKY` toggle *does* have a consumer — it re-triggers the
+  environment hub of §1.1.)
 - A search across all string literals in the binary for "water", "reflect", "ripple", "wave",
   and related terms returns zero matches other than `"OPTION_WATER"` itself. No water manager
   class, no water texture path, and no water draw function name exists in the binary's string
@@ -192,8 +245,8 @@ separate DLL or plugin not present in the captured client.
 
 ### 4.3 Reimplementation guidance (RESOLVED-NEGATIVE)
 
-Because no original renderer exists, the Godot client is free to implement water visuals
-independently. The only legacy-derived constraints are:
+Because no original renderer and no asset-IO loader exists, the Godot client is free to implement
+water visuals independently. The only legacy-derived constraints are:
 
 - **Enable condition:** `map_option{id}.bin` `water_enable` = 1
 - **Plane Y:** `map_option{id}.bin` `water_y` world-space units (same coordinate system as terrain)
@@ -268,7 +321,8 @@ Color(r / 255.0, g / 255.0, b / 255.0, 1.0)
 ```
 
 where `r = bgra[2]`, `g = bgra[1]`, `b = bgra[0]`. The alpha byte from the file is always 0;
-use 1.0 as the Godot alpha unless transparency is intentional.
+use 1.0 as the Godot alpha unless transparency is intentional. (The runtime sampler likewise forces
+the high byte opaque when it pushes BGRX to the render device — see §2.1 / `formats/sky.md §C`.)
 
 Legacy material colours (`material%d.bin`) are float32 RGBA; pass directly as `Color(r, g, b, 1.0)`.
 Values above 1.0 indicate HDR bloom (sun disk colour); clamp to 1.0 for non-HDR targets or use
@@ -324,8 +378,8 @@ The `EnvironmentNode` debt (D3 in the Godot known-issues list) is:
 
 ### 6.5 Water wiring (D4 in the Godot known-issues list)
 
-The water rendering mechanism does not exist in the original client (§4 — RESOLVED-NEGATIVE).
-The wiring task is therefore:
+The water rendering mechanism does not exist in the original client (§4 — RESOLVED-NEGATIVE); there
+is no asset-IO loader and no render path to be faithful to. The wiring task is therefore:
 
 1. At area load, read `map_option{id}.bin` `water_enable` and `water_y`.
 2. If `water_enable = 1`: position the `WaterRenderer` node at world-space Y = `water_y` and
@@ -351,17 +405,18 @@ If any environment file is absent or unreadable:
 | `stardome%d.bin` | Stars rendered at white |
 | `clouddome%d.bin` | Cloud dome rendered at white |
 | `cloud_cycle%d.bin` | No cloud animation (clouds static or hidden) |
+| `sky%d.box` | No skybox mesh (sky-dome geometry absent); only present when `skybox_enable = 1` |
 
 ---
 
 ## 8. Known unknowns
 
 1. **Water rendering mechanism: RESOLVED-NEGATIVE.** Y-plane placement is confirmed from
-   `map_option%d.bin`. No renderer exists in the legacy binary; Godot layer uses a free-choice
-   shader. See §4 for the full evidence summary.
-2. **`fog%d.bin` `data_load_flag = 0` fog colour source:** Whether `fog_colors[]` is used
-   as-is or overridden by `material%d.bin` colours at runtime is unconfirmed. Both files
-   contain consistent day-night colour sequences in all sampled areas.
+   `map_option%d.bin`. No renderer and no asset-IO loader exist in the legacy binary; Godot layer
+   uses a free-choice shader. See §4 for the full evidence summary.
+2. **`fog%d.bin` `data_load_flag = 0` fog colour source:** RESOLVED — when the flag is 0 the colour
+   table is **derived** from the sky-colour table via a 48-slot 0.75/0.25 blend (§1.1,
+   `formats/sky.md §B.2`). The exact source-band channel grouping in that blend is still MED.
 3. **Indoor fog behaviour:** Whether fog still applies when `indoor_flag = 1` is unverified.
 4. **Per-keyframe directional light *direction*:** The `light%d.bin` keyframes encode colour
    only (confirmed). Whether the sun direction rotates over the day-night cycle is unresolved —
@@ -376,12 +431,14 @@ If any environment file is absent or unreadable:
 9. **Sky object render pass order:** The client renders sky layers as concentric domes in a
    specific draw order (cloud dome, star dome, sun/moon, lens flare). The precise draw-order
    is not relevant to the format spec but is relevant to Godot's sky setup.
+10. **`sky%d.box` geometry:** VFS-only; sample-unverified vertex decode — see `formats/sky.md §A`.
 
 ---
 
 ## Cross-references
 
-- **Format specs:** `Docs/RE/formats/environment_bins.md` (all file byte layouts)
+- **Format specs:** `Docs/RE/formats/environment_bins.md` (all colour `.bin` byte layouts),
+  `Docs/RE/formats/sky.md` (`sky%d.box` geometry + parser load-order / day-cycle view)
 - **Terrain:** `Docs/RE/formats/terrain.md`, `Docs/RE/formats/terrain_layers.md`
 - **Game loop:** `Docs/RE/specs/game_loop.md` (clock, tick rate)
 - **Glossary:** `Docs/RE/names.yaml`

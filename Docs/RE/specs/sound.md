@@ -46,6 +46,9 @@ encoding_note: audio file IDs are plain decimal integers; no text encoding conce
 | `.wlk`/`.run` all-null in this VFS; mud-cell footstep path is editor-only at runtime | CODE-CONFIRMED (runtime trace) + SAMPLE-VERIFIED (all-zero tables) |
 | `SoundManager` object field offsets | CODE-CONFIRMED from binary stores (implementation guide only) |
 | `GSoundOGG` object size (776 bytes) | CODE-CONFIRMED |
+| Front-end cue map (BGM 920100200, UI click 861010101, intro stinger 861010105) | CODE-CONFIRMED (static) |
+| Front-end buttons are silent; owner-window action handler plays the cue | CODE-CONFIRMED (static, absence-scan) |
+| Per-FE-button exact click cue (login / PIN widgets) | UNVERIFIED (debugger-only) |
 
 ---
 
@@ -719,6 +722,73 @@ Items listed in `client_runtime.md §1.9`:
 
 ---
 
+## 15. Front-end (login / PIN / server-list / char-select) cue map
+
+> **Confidence:** the cue ids and the silent-button architecture are CODE-CONFIRMED from static
+> analysis of the front-end scene action handlers; the per-FE-widget exact click cue is
+> UNVERIFIED (debugger-only). VFS presence of each `<id>.ogg` is SAMPLE-VERIFIED. This section
+> records only the durable front-end facts; the intro-scene crawl/slideshow that fires id
+> 910061000 is specified separately in `specs/intro_sequence.md`.
+
+### 15.1 Architecture finding — front-end buttons are silent; the owner window plays the cue
+
+The shared front-end button base (the generic `GUButton` class) plays **no sound at all** — not on
+click, hover, press, or release. An absence-scan of every method of that class (constructors, the
+input/event handler, the press-tracker, the hit/hover test, the render path, the enable/state
+setter, and the focus helpers) found **no call to any sound player** and **no referenced sound id**.
+The string field the button stores is its caption text (consumed by the font draw), never a sound id.
+
+Instead, on a completed click the button packages an **action event** carrying its action id and
+posts it to the input manager, which routes it to the **owning window's action handler**. That
+handler is where any click cue is played, at the **head of each action branch**, via the single
+2D play call shape `play(SoundManager, category, sound_id, loop_flag)`.
+
+**Implementation consequence:** do not attach a click sound to a generic button widget. Model the
+cue as an action-handler concern — the window that owns the button chooses (or omits) the cue per
+action.
+
+### 15.2 Confirmed front-end cues
+
+| Cue | Sound id | Category / dir | Role | Confidence |
+|---|---:|---|---|---|
+| Front-end / title BGM | **920100200** | 2D (`data/sound/2d/920100200.ogg`) | Background music for the map000 "global terrain" zone, which the VFS layout uses for the login/title front-end (no separate title zone directory exists). | CODE-CONFIRMED (sound-table byte-decode, §6) + SAMPLE-VERIFIED |
+| Generic UI click | **861010101** | 2D (`data/sound/2d/861010101.ogg`) | The project's universal "a button did something" click. Fired by the char-create / char-select action handler on essentially every button action (appearance steppers, name/create/delete/rename confirms, slot-select confirm, back/cancel transitions). | CODE-CONFIRMED (static; literal id at the play call) |
+| Enter-world / confirm-slot | **920100200** | 2D | Fired when the player enters the selected character from char-select (the same id as the front-end BGM, played as a 2D one-shot confirm cue on the enter action). | CODE-CONFIRMED (static) |
+| Login intro stinger | **861010105** | 2D (`data/sound/2d/861010105.ogg`) | Auto-fired (not a click) at the login state machine's own intro state. Distinct from the **opening-scene** stinger id 910061000 (see `specs/intro_sequence.md`). | CODE-CONFIRMED (static) |
+| Forced-full-volume cues | **861010109**, **861010110** | 2D | The two music-slider-exempt cues; played at amplitude 1.0 when the system-2D option (index 27) is set, bypassing the music bus gain. See §10.6 / §15.2 cross-reference. | CODE-CONFIRMED (special-cased in the 2D player) |
+
+### 15.3 The 862030101–107 cue pool (registered, not 1:1-bound)
+
+A family of UI/system cues **862030101 … 862030107** (7 ids, all category 2 = 2D) is **registered**
+in the system-cue registry (the registry is keyed by id and played by passing the id to the 2D
+player). However, **no static binding** maps any of these ids to a specific front-end widget event
+(e.g. a particular dialog-open, checkbox, or keypad press). They form a **generic cue pool** drawn
+by id; only the universal click (861010101, §15.2) and the enter cue (920100200) are statically
+1:1-bound to concrete front-end actions. Do not assume a keypad-digit-to-862030xxx mapping; it is
+unestablished. (The 7-file count is a plausible match for 10 digits + special keys, but that is a
+size coincidence, not a confirmed binding.)
+
+### 15.4 What is UNVERIFIED (debugger-only)
+
+- **Per-login-button click cue.** The login window's action handler was walked branch-by-branch
+  (Confirm, Refresh with its cooldown, Cancel, the EULA/save-id gates, server-row select, channel
+  select) and **no play call appears on any login action branch**. If the live login form plays a
+  click, it is not visible statically. Mark the per-login-button cue **UNVERIFIED** — close it with
+  the live debugger by breakpointing the 2D player and clicking Confirm / Refresh / Cancel.
+- **PIN keypad press / OK / cancel cue.** The PIN / second-password class is silent in static
+  analysis (digit append, reset, OK, cancel — no play call seen). Whether any keypad cue exists is
+  **UNVERIFIED**; debugger-only.
+- **Button hover cue.** The button base has no hover sound and no front-end window was seen to play
+  a hover cue; likely none exists. **UNVERIFIED**.
+
+### 15.5 Category → path rule (restatement)
+
+The front-end cues all use the standard rule (§2): `category < 5` → `data/sound/2d/<id>.ogg`. All
+the cues in §15.2 are 2D. The `.ogg` basename form is the project-wide convention (INFERRED from
+the loader prefix rule; debugger-confirmable).
+
+---
+
 ## Open questions
 
 1. **`SOUND_KIND` integer values.** The enum names are recovered from editor debug strings. The
@@ -767,6 +837,10 @@ Items listed in `client_runtime.md §1.9`:
    Whether any graceful "no audio" UI notification exists (a warning dialog, log entry, or options
    panel flag) was not confirmed.
 
+10. **Per-front-end-widget click cue.** The login window and PIN keypad have no static play call on
+    any action branch; whether each plays a click cue at runtime is UNVERIFIED (debugger-only, §15.4).
+    The 862030101–107 pool is registered but not 1:1-bound to any front-end widget (§15.3).
+
 ---
 
 ## Cross-references
@@ -781,6 +855,9 @@ Items listed in `client_runtime.md §1.9`:
 - **Skinning / animation cycle trigger** (the event that fires footstep SFX): `specs/skinning.md`
   (animation cycle-wrap event) and `formats/animation.md` (`.mot` clip timing).
 - **Sound table terrain-cell integration** (mud-cell byte layout): `formats/terrain.md`.
+- **Front-end intro scene** (the opening crawl/slideshow that fires intro sound 910061000):
+  `specs/intro_sequence.md`.
+- **Front-end scene flow** (login state machine, char-select chrome): `specs/frontend_scenes.md`.
 - **Canonical names**: see `Docs/RE/names.yaml` (`SoundManager`, `GSound`, `GSoundOGG`,
   `GSoundThread`, `SoundKind`, `SoundEvent`, `IndoorBgmOverrideId`, `MusicSliderExemptIds`,
   `DecodeScratchBytes`, `StreamRingBytes`, `AmbientReevalMs`).

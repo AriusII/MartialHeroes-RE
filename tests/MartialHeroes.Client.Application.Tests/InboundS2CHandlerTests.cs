@@ -204,6 +204,28 @@ public sealed class InboundS2CHandlerTests
         Assert.Equal(4, minor);
         Assert.True(payload.Length > 4, "1/4 reply must carry a length-prefixed cipher digit body.");
 
+        // --- Verify the 0x2B pre-image is present in the whitened payload ---
+        // The whole payload is per-dword XOR 0x29 whitened (spec: crypto.md §6.4).
+        // First byte of the un-whitened payload = sub-opcode 0x2B; after whitening = 0x2B ^ 0x29 = 0x02.
+        // spec: packets/login.yaml (SubOpcode = 0x2B, DEBUGGER-VERIFIED); crypto.md §6.4.
+        const byte ExpectedFirstByteWhitened = 0x2B ^ 0x29; // 0x02
+        Assert.Equal(ExpectedFirstByteWhitened, payload[0]);
+
+        // The account "account" is 7 bytes; the pre-image is [0x2B][u32 LE 8][7 account bytes][0x00].
+        // De-whiten the first 12 bytes (3 dwords) to verify the account-length prefix.
+        // XOR each 4-byte word with 0x29 (whitening involution). spec: crypto.md §6.4.
+        byte[] dewhitenedHead = new byte[12];
+        payload.AsSpan(0, 12).CopyTo(dewhitenedHead);
+        for (int dw = 0; dw < 3; dw++)
+        {
+            dewhitenedHead[dw * 4] ^= 0x29;
+            // upper 3 bytes of each dword XOR with 0x00 0x00 0x00 (key = 0x00000029 LE). spec §6.4.
+        }
+
+        Assert.Equal(0x2B, dewhitenedHead[0]); // sub-opcode. spec login.yaml off 0x00.
+        uint accountLen = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(dewhitenedHead.AsSpan(1, 4));
+        Assert.Equal(8u, accountLen); // strlen("account") + 1 = 8. spec login.yaml AccountLength = strlen+1.
+
         // Credential is wiped after the reply is built (crypto.md §6.1).
         Assert.False(credentials.HasStagedCredential);
 
@@ -211,6 +233,125 @@ public sealed class InboundS2CHandlerTests
         List<IClientEvent> events = Drain(bus);
         Assert.Contains(events, ev => ev is LoginHandshakeCompletedEvent);
         Assert.Equal(ClientState.CharacterSelection, fsm.Current);
+    }
+
+    [Fact]
+    public void KeyExchange_0_0_with_pin_includes_pin_region_in_1_4_pre_image()
+    {
+        // Synthetic RSA key: same test primes, L1 + L2 = 42. spec: crypto.md §6.2.1.
+        BigInteger p = BigInteger.Parse("75377541258354731458810898159183352769326586247");
+        BigInteger q = BigInteger.Parse("48710038997288231143179367274763024050866548859");
+        BigInteger n = p * q;
+        BigInteger e = 65537;
+        byte[] nDigits = n.ToByteArray(isUnsigned: true, isBigEndian: true);
+        byte[] eDigits = e.ToByteArray(isUnsigned: true, isBigEndian: true);
+
+        var bus = new ClientEventBus(ClientEventBus.Unbounded);
+        var world = new ClientWorld();
+        var fsm = new ClientStateMachine(bus, ClientState.Login);
+        var sink = new FakeOutboundSink();
+
+        var credentials = new LoginCredentialStore();
+        // Stage with PIN — triggers the a7-gate; PIN region must appear in the pre-image.
+        // spec: login.yaml PIN GATE; crypto.md §6.1, §6.6.
+        credentials.Stage("abc", "pw", pin: "1234");
+
+        var loginDriver = new LoginHandshakeDriver(
+            sink, credentials, new SessionId(1),
+            paddingRandom: new SequentialPaddingRandom(start: 0x55), stateMachine: fsm);
+
+        var handler = new GamePacketHandler(world, bus, fsm, new CountingUnhandledOpcodeSink(), loginDriver);
+        var dispatcher = new InboundFrameDispatcher(handler);
+
+        byte[] frame = SyntheticFrames.KeyExchange(nDigits, eDigits, scalar1: 0, scalar2: 0);
+        dispatcher.RouteNow(frame);
+
+        var (major, minor, payload) = Assert.Single(sink.Sends);
+        Assert.Equal(1, major);
+        Assert.Equal(4, minor);
+
+        // De-whiten per-dword XOR 0x29 to inspect the pre-image. spec: crypto.md §6.4 (involution).
+        byte[] plain = (byte[])payload.Clone();
+        for (int dw = 0; dw < plain.Length / 4; dw++)
+        {
+            plain[dw * 4] ^= 0x29; // XOR key 0x00000029 LE: only lowest byte of each dword is 0x29.
+        }
+
+        int i = 0;
+        Assert.Equal(0x2B, plain[i++]); // sub-opcode. spec login.yaml off 0x00.
+
+        uint accLen = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(plain.AsSpan(i, 4));
+        i += 4;
+        Assert.Equal(4u, accLen); // strlen("abc") + 1 = 4. spec login.yaml AccountLength = strlen+1.
+        Assert.True(plain.AsSpan(i, 3).SequenceEqual("abc"u8)); // account bytes
+        i += 3;
+        Assert.Equal(0x00, plain[i++]); // trailing NUL (counted in accLen)
+
+        // PIN region must be present (a7-gate active). spec: login.yaml PIN GATE.
+        uint pinLen = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(plain.AsSpan(i, 4));
+        i += 4;
+        Assert.Equal(5u, pinLen); // strlen("1234") + 1 = 5. spec login.yaml PinLength = strlen+1.
+        Assert.True(plain.AsSpan(i, 4).SequenceEqual("1234"u8)); // PIN bytes
+        i += 4;
+        Assert.Equal(0x00, plain[i++]); // trailing NUL
+
+        // The ciphertext region follows: [u32 LE len][BE RSA digits]. spec: crypto.md §6.3.
+        uint cipherLen = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(plain.AsSpan(i, 4));
+        Assert.True(cipherLen > 0);
+        Assert.Equal((uint)(plain.Length - i - 4), cipherLen);
+
+        Assert.False(credentials.HasStagedCredential);
+        Assert.Contains(Drain(bus), ev => ev is LoginHandshakeCompletedEvent);
+    }
+
+    [Fact]
+    public void LoginCredentialStore_stages_17_byte_M_and_exposes_account_bytes()
+    {
+        var store = new LoginCredentialStore();
+
+        store.Stage("myUser", "myPass");
+
+        // HasStagedCredential reflects the 17-byte M being present.
+        Assert.True(store.HasStagedCredential);
+        Assert.Equal("myUser", store.Username);
+
+        // AccountBytes encodes the account WITHOUT trailing NUL. spec: login.yaml AccountLength = strlen+1.
+        Assert.True(store.AccountBytes.SequenceEqual(System.Text.Encoding.UTF8.GetBytes("myUser")));
+
+        // StagedPasswordM is always 17 bytes, zero-padded. spec: crypto.md §6.1, §6.6, §6b
+        // (DEBUGGER-VERIFIED: the server expects a fixed-width 17-byte password field).
+        Assert.Equal(17, store.StagedPasswordM.Length);
+        Assert.True(store.StagedPasswordM[..6].SequenceEqual(System.Text.Encoding.UTF8.GetBytes("myPass")));
+        for (int i = 6; i < 17; i++)
+        {
+            Assert.Equal(0, store.StagedPasswordM[i]); // trailing zero-padding. spec: crypto.md §6.1.
+        }
+
+        // No PIN staged — IncludePin must be false. spec: login.yaml PIN GATE.
+        Assert.False(store.IncludePin);
+        Assert.Equal(0, store.PinBytes.Length);
+
+        // Clear zeroes everything. spec: crypto.md §6.1 (staged M zeroed and freed).
+        store.Clear();
+        Assert.False(store.HasStagedCredential);
+        Assert.Equal(string.Empty, store.Username);
+        Assert.Equal(0, store.AccountBytes.Length);
+        Assert.Equal(0, store.PinBytes.Length);
+    }
+
+    [Fact]
+    public void LoginCredentialStore_stages_17_byte_M_with_pin_and_sets_include_flag()
+    {
+        var store = new LoginCredentialStore();
+
+        store.Stage("user", "pass", pin: "9876");
+
+        Assert.True(store.HasStagedCredential);
+        Assert.True(store.IncludePin); // a7-gate active. spec: login.yaml PIN GATE.
+        Assert.True(store.PinBytes.SequenceEqual(System.Text.Encoding.UTF8.GetBytes("9876")));
+
+        store.Clear();
+        Assert.False(store.IncludePin);
     }
 
     /// <summary>Deterministic non-zero padding RNG for reproducible 1/4 replies (mirrors the Crypto tests).</summary>

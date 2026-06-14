@@ -133,12 +133,66 @@ public sealed partial class CharPreview3D : Control
     /// </summary>
     public string SlotClassName { get; set; } = string.Empty;
 
+    // =========================================================================
+    // Camera keyframe orbit — spec: Docs/RE/specs/frontend_scenes.md §3.5. CODE-CONFIRMED.
+    // =========================================================================
+
+    /// <summary>
+    /// Active keyframe index (0..5).  Selects which orbit pose the preview camera is placed at.
+    /// Initial value is 0 per the spec constructor (spec §3.5.3 "initial active keyframe index = 0").
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.5.3 CODE-CONFIRMED.
+    /// </summary>
+    public int ActiveKeyframe
+    {
+        get => _activeKeyframe;
+        set
+        {
+            _activeKeyframe = ((value % 6) + 6) % 6; // clamp / wrap 0..5
+            ApplyCameraKeyframe();
+        }
+    }
+
+    private int _activeKeyframe;
+
+    /// <summary>
+    /// The 12 π-scaled angle multipliers from the spec §3.5.3.
+    /// Indices 0..5 = yaw per keyframe; indices 6..11 = pitch per keyframe.
+    /// (yaw/pitch assignment is MEDIUM per spec §3.5.3 — see §3.5.4 note.)
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.5.3 CODE-CONFIRMED (values); yaw/pitch split MEDIUM.
+    /// </summary>
+    private static readonly float[] AngleMultipliers =
+    [
+        // Yaw multipliers (indices 0..5) × π → radians
+        -0.03333334f, // KF0 yaw × π = −0.10472 rad (−6.0°)  spec §3.5.3 CODE-CONFIRMED
+        -0.01483333f, // KF1 yaw × π = −0.04660 rad (−2.67°) spec §3.5.3 CODE-CONFIRMED
+        0.00333333f, // KF2 yaw × π =  0.01047 rad (+0.60°) spec §3.5.3 CODE-CONFIRMED
+        -0.01111111f, // KF3 yaw × π = −0.03491 rad (−2.00°) spec §3.5.3 CODE-CONFIRMED
+        0.04333333f, // KF4 yaw × π =  0.13614 rad (+7.80°) spec §3.5.3 CODE-CONFIRMED
+        -0.07666667f, // KF5 yaw × π = −0.24086 rad (−13.8°) spec §3.5.3 CODE-CONFIRMED
+
+        // Pitch multipliers (indices 6..11) × π → radians (split MEDIUM per spec §3.5.4 note 3)
+        0.01333333f, // KF0 pitch × π =  0.04189 rad (+2.40°) spec §3.5.3 CODE-CONFIRMED
+        0.00436111f, // KF1 pitch × π =  0.01370 rad (+0.79°) spec §3.5.3 CODE-CONFIRMED
+        -0.20333332f, // KF2 pitch × π = −0.63879 rad (−36.6°) spec §3.5.3 CODE-CONFIRMED
+        -0.44444445f, // KF3 pitch × π = −1.39626 rad (−80.0°) spec §3.5.3 CODE-CONFIRMED
+        0.41276109f, // KF4 pitch × π =  1.29673 rad (+74.3°) spec §3.5.3 CODE-CONFIRMED
+        0.29111111f, // KF5 pitch × π =  0.91455 rad (+52.4°) spec §3.5.3 CODE-CONFIRMED
+    ];
+
+    /// <summary>
+    /// Camera orbit distance in SubViewport-local units.  The character is placed at origin,
+    /// scale ×3.0.  A distance of ~12 gives a head-to-toe portrait at FOV 50°.
+    /// TUNABLE: exact look-at framing is runtime-pending (spec §3.5.4 open item 4).
+    /// </summary>
+    private const float OrbitDistance = 12f; // TUNABLE — pending live-client debugger confirmation
+
     // -------------------------------------------------------------------------
     // Runtime state
     // -------------------------------------------------------------------------
 
     private SubViewportContainer? _container;
     private SubViewport? _subViewport;
+    private Camera3D? _camera;
     private Node3D? _charRoot;
     private bool _is3DActive;
 
@@ -291,26 +345,41 @@ public sealed partial class CharPreview3D : Control
             TransparentBg = true,
         };
 
-        // --- Camera framing the character head-to-toe ---
-        // We position the camera looking at the preview stage origin along -Z at a distance that
-        // shows the character head-to-toe. Scale ×3.0 (spec §3.3) means a ~1-unit tall rest-mesh
-        // fills roughly 3 world units; place camera 8 units away on +Z looking at origin.
-        // spec: frontend_scenes.md §3.3 — "camera framed head-to-toe". Preview scale ×3.0. CODE-CONFIRMED.
-        // Camera positioned 10 units away on +Z, angled slightly downward to frame the character.
-        // Use look_at_from_position (works before the node is in the tree) rather than LookAt.
-        // spec: frontend_scenes.md §3.3 — camera framed head-to-toe. Portrait feel.
-        var camera = new Camera3D
+        // --- Camera — 6-keyframe orbit (CODE-CONFIRMED geometry; framing runtime-pending).
+        //
+        // FOV 50°, near 5.0, far 15000.0.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.5.1 CODE-CONFIRMED.
+        //
+        // The camera is placed on an orbit around the rig (at origin, scale ×3.0) using the
+        // 12 π-scaled angle multipliers recovered from the spec §3.5.3.
+        // Indices 0..5 = yaw per keyframe × π; indices 6..11 = pitch per keyframe × π.
+        // Yaw/pitch split is MEDIUM (spec §3.5.4 note 3) — implemented here as the natural split.
+        //
+        // The absolute stage-world positions from §3.5.2 are NOT used directly because in our
+        // isolated SubViewport the rig is at the origin (not at the stage-world centre −1536,0,−3593).
+        // Instead, the 12 angle multipliers drive the orbit pose around the local origin.
+        //
+        // Look-at target is the rig waist (~Y=+4 in SubViewport units for a scale-×3 rig).
+        // TUNABLE: exact look-at framing is runtime-pending (spec §3.5.4 open item 4).
+        //
+        // spec: Docs/RE/specs/frontend_scenes.md §3.5 — orbit geometry CODE-CONFIRMED; framing/easing
+        //       runtime-pending; implement spec FOV/near/far and the 12 angle multipliers.
+        _camera = new Camera3D
         {
             Name = "PreviewCamera",
-            Fov = 22f,
-            Near = 0.1f,
-            Far = 500f,
+            Fov = 50f, // spec: Docs/RE/specs/frontend_scenes.md §3.5.1 CODE-CONFIRMED
+            Near = 5f, // spec: Docs/RE/specs/frontend_scenes.md §3.5.1 CODE-CONFIRMED
+            Far = 15000f, // spec: Docs/RE/specs/frontend_scenes.md §3.5.1 CODE-CONFIRMED
+            KeepAspect = Camera3D.KeepAspectEnum.Height, // vertical FOV + aspect = standard
         };
-        // Set position and rotation explicitly to avoid the "not in tree" LookAt error.
-        camera.Position = new Vector3(0f, 4.0f, 10f);
-        // Pitch the camera slightly down toward the character (approx atan2(1,10) ≈ 5.7°).
-        camera.RotationDegrees = new Vector3(-5.7f, 0f, 0f);
-        _subViewport.AddChild(camera);
+        _subViewport.AddChild(_camera);
+        // Pre-position the camera without LookAt (which requires being in the SceneTree).
+        // We compute position + rotation manually here using the same orbit formula.
+        // After the SubViewport is in the tree, a deferred call corrects the rotation via LookAt.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.5.3 CODE-CONFIRMED (angle multipliers).
+        PositionCameraWithoutLookAt(_activeKeyframe);
+        // Deferred look-at once the SubViewport is in the SceneTree.
+        Callable.From(ApplyCameraKeyframe).CallDeferred();
 
         // --- Simple key light ---
         var light = new DirectionalLight3D
@@ -581,5 +650,88 @@ public sealed partial class CharPreview3D : Control
         }
 
         return null;
+    }
+
+    // -------------------------------------------------------------------------
+    // Camera keyframe application
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 / §3.5.3 CODE-CONFIRMED.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Positions the camera at the orbit pose without calling LookAt (safe before node enters tree).
+    /// Position is set; rotation will be corrected by the deferred <see cref="ApplyCameraKeyframe"/>
+    /// call once the SubViewport is in the SceneTree.
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.5.3 CODE-CONFIRMED.
+    /// </summary>
+    private void PositionCameraWithoutLookAt(int kf)
+    {
+        if (_camera is null) return;
+
+        float yawRad = AngleMultipliers[kf] * Mathf.Pi;
+        float pitchRad = AngleMultipliers[kf + 6] * Mathf.Pi;
+        const float lookAtY = 4f;
+
+        float cosPitch = Mathf.Cos(pitchRad);
+        float camX = Mathf.Sin(yawRad) * cosPitch * OrbitDistance;
+        float camY = Mathf.Sin(pitchRad) * OrbitDistance + lookAtY;
+        float camZ = Mathf.Cos(yawRad) * cosPitch * OrbitDistance;
+
+        _camera.Position = new Vector3(camX, camY, camZ);
+
+        // Compute the look-at rotation manually (no SceneTree required).
+        // Direction from camera toward the target (0, lookAtY, 0).
+        var forward = (new Vector3(0f, lookAtY, 0f) - new Vector3(camX, camY, camZ)).Normalized();
+        // Build a Basis that points -Z toward target (Godot camera looks along -Z).
+        if (forward.LengthSquared() > 0.001f)
+        {
+            var right = Vector3.Up.Cross(forward).Normalized();
+            if (right.LengthSquared() < 0.001f) right = Vector3.Right; // degenerate pole guard
+            var up = forward.Cross(right).Normalized();
+            // Camera forward = -Z in Godot's convention.
+            _camera.Basis = new Basis(-right, up, forward).Orthonormalized();
+        }
+    }
+
+    /// <summary>
+    /// Places <see cref="_camera"/> at the orbit pose for <see cref="ActiveKeyframe"/>
+    /// using the 12 π-scaled angle multipliers from spec §3.5.3.
+    /// <para>
+    /// The rig is at the SubViewport origin (scale ×3.0).  The camera is placed on a sphere of
+    /// radius <see cref="OrbitDistance"/> around a look-at target at Y ≈ +4 (rig waist height).
+    /// Yaw and pitch come from the spec angle-multiplier table; indices 0..5 = yaw, 6..11 = pitch.
+    /// The yaw/pitch assignment is MEDIUM (spec §3.5.4 note 3) — framing is tunable pending a
+    /// live-client debugger confirmation pass.
+    /// </para>
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.5.3 CODE-CONFIRMED (values);
+    ///       §3.5.4 "yaw/pitch assignment MEDIUM; framing runtime-pending".
+    /// </summary>
+    private void ApplyCameraKeyframe()
+    {
+        if (_camera is null) return;
+
+        int kf = _activeKeyframe; // 0..5
+
+        // Yaw and pitch in radians, derived from the spec's 12 π-scaled multipliers.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.5.3 CODE-CONFIRMED values; split MEDIUM.
+        float yawRad = AngleMultipliers[kf] * Mathf.Pi; // indices 0..5
+        float pitchRad = AngleMultipliers[kf + 6] * Mathf.Pi; // indices 6..11
+
+        // Look-at target: rig waist at Y ≈ +4 (tunable — spec §3.5.4 open item 4).
+        const float lookAtY = 4f; // TUNABLE — pending live-client debugger confirmation
+
+        // Orbit: spherical coordinates (yaw around Y axis, pitch around X axis).
+        // x = sin(yaw) * cos(pitch) * D, z = cos(yaw) * cos(pitch) * D, y = sin(pitch) * D.
+        float cosPitch = Mathf.Cos(pitchRad);
+        float camX = Mathf.Sin(yawRad) * cosPitch * OrbitDistance;
+        float camY = Mathf.Sin(pitchRad) * OrbitDistance + lookAtY;
+        float camZ = Mathf.Cos(yawRad) * cosPitch * OrbitDistance;
+
+        // Place the camera and look at the target.
+        _camera.Position = new Vector3(camX, camY, camZ);
+        _camera.LookAt(new Vector3(0f, lookAtY, 0f), Vector3.Up);
+
+        GD.Print($"[CharPreview3D] slot={SlotIndex} camera keyframe {kf}: " +
+                 $"yaw={Mathf.RadToDeg(yawRad):F1}° pitch={Mathf.RadToDeg(pitchRad):F1}° " +
+                 $"pos=({camX:F2},{camY:F2},{camZ:F2})");
     }
 }

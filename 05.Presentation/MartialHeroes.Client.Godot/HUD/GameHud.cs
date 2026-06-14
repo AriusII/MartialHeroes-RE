@@ -175,6 +175,22 @@ public sealed partial class GameHud : Control
     // OptionsWindow: toggled by key O in its own _Input handler.
     private OptionsWindow? _optionsWindow;
 
+    // RightEdgeGaugePanel: stacked HP/MP gauge strips at screen_width−135, Y=200/250.
+    // spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula.
+    private RightEdgeGaugePanel? _rightEdgeGauge;
+
+    // BottomActionBar: 1024×60 bar at centerX(1024), screen_height−60.
+    // spec: Docs/RE/specs/ui_hud_layout.md §5.7 CONFIRMED-formula.
+    private BottomActionBar? _bottomActionBar;
+
+    // TopStatusBar: full-width 20px strip at Y=120.
+    // spec: Docs/RE/specs/ui_hud_layout.md §5.4 CONFIRMED-formula.
+    private TopStatusBar? _topStatusBar;
+
+    // ConfirmDialog: the most common centred modal family (340×190).
+    // spec: Docs/RE/specs/ui_hud_layout.md §5.8 — ~12 sites; reusable via Open(message).
+    private ConfirmDialog? _confirmDialog;
+
     // ClientContext reference (for catalogue lookups and texture loading).
     private ClientContext? _context;
 
@@ -319,18 +335,31 @@ public sealed partial class GameHud : Control
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         MouseFilter = MouseFilterEnum.Ignore;
 
-        // ---- Chrome box — stats/vitals panel, anchored to top-left. ----
-        // A child Control hosts the chrome TextureRect + stats vbox, positioned at the
-        // top-left corner at (4,4) with its original (ChromeW+4) × (ChromeH+4) footprint.
+        // ---- Chrome box — primary ActorState (stats/vitals) panel. ----
+        // Positioned at the recovered HUD coordinates: X=180, Y=95, W=130, H=196 (absolute).
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.3 — "Stats/ActorState: X=180 Y=95 W=130 H=196 Absolute"
+        //       CODE-CONFIRMED-static (plain literal immediates decoded from HUD-assembly call site).
+        // HudPanelConfig.StatsX/Y/W/H carry these constants.
         var chromeBox = new Control
         {
             Name = "ChromeBox",
-            Position = new Vector2(4f, 4f),
-            Size = new Vector2(ChromeW, ChromeH),
-            CustomMinimumSize = new Vector2(ChromeW, ChromeH),
+            Position = new Vector2(HudPanelConfig.StatsX,
+                HudPanelConfig.StatsY), // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+            Size = new Vector2(HudPanelConfig.StatsW,
+                HudPanelConfig.StatsH), // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+            CustomMinimumSize = new Vector2(HudPanelConfig.StatsW, HudPanelConfig.StatsH),
             MouseFilter = MouseFilterEnum.Ignore,
         };
         AddChild(chromeBox);
+
+        // ---- Stat sub-panels A / B / C (absolute sibling panels) ----
+        // Four panels (including the primary above) recovered from the HUD-build routine.
+        // Roles (HP vs MP vs stamina vs status) not yet individually labelled — §4 known unknowns.
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.4 — "three sibling stat sub-panels plus primary"
+        //       CODE-CONFIRMED-static.
+        AddStatSubPanel("StatSubPanelA", HudPanelConfig.StatSubPanelA); // spec: Docs/RE/specs/ui_hud_layout.md §3.4
+        AddStatSubPanel("StatSubPanelB", HudPanelConfig.StatSubPanelB); // spec: Docs/RE/specs/ui_hud_layout.md §3.4
+        AddStatSubPanel("StatSubPanelC", HudPanelConfig.StatSubPanelC); // spec: Docs/RE/specs/ui_hud_layout.md §3.4
 
         // ---- Chrome layer (mainwindow.dds) ----
         // Placed first so stats panel draws on top (paint-order = insertion order,
@@ -408,14 +437,43 @@ public sealed partial class GameHud : Control
         _combatStatsLabel = new Label { Text = "" };
         vbox.AddChild(_combatStatsLabel);
 
-        // ---- Hotbar (bottom of screen) ----
+        // ---- Skill bar (container origin at recovered (349, 13), 9-slot data-driven grid) ----
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.5 — "container origin 349, 13; nine skill slots"
+        //       container origin CODE-CONFIRMED-static; per-slot data-driven from runtime registry.
+        // HudPanelConfig.SkillBarX=349, SkillBarY=13, SkillBarSlotCount=9 carry these constants.
         try
         {
-            BuildHotbar();
+            BuildSkillBar();
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[GameHud] BuildHotbar failed: {ex.Message}");
+            GD.PrintErr($"[GameHud] BuildSkillBar failed: {ex.Message}");
+        }
+
+        // ---- Party panel (off-screen right column — screen_width + 318, Y=0, W=318, H=732) ----
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.3 — "Party: X=screen_width+318, Y=0, W=318, H=732"
+        //       CONFIRMED-formula; starts off-screen (classic slide-in). Visible when party is active.
+        // HudPanelConfig.PartyOffsetFromRight=318, PartyW=318, PartyH=732.
+        try
+        {
+            BuildPartyPanel();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] BuildPartyPanel failed: {ex.Message}");
+        }
+
+        // ---- Trade panel (parent-relative: overlays inventory's right column, Y=0, W=318, H=732) ----
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.3 — "Trade: X=inventory's X, Y=0, W=318, H=732"
+        //       CODE-CONFIRMED-static; hidden by default; shown during a trade session.
+        // HudPanelConfig.TradeW=318, TradeH=732.
+        try
+        {
+            BuildTradePanel();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] BuildTradePanel failed: {ex.Message}");
         }
 
         // ---- Chat (bottom-left corner) — replaced by ChatWindow Stage-B component ----
@@ -441,19 +499,27 @@ public sealed partial class GameHud : Control
         }
 
         // ---- BuffBar (top strip, below chrome) ----
+        // spec: Docs/RE/specs/ui_hud_layout.md §2 — data-driven buff icon positions from
+        //       buff_icon_position.xdb. 30 icon slots; buff_id ≤ 80 = 23×23 flowing;
+        //       buff_id > 80 = 25×25 fixed per-slot. CODE-CONFIRMED.
         try
         {
             _buffBar = new BuffBar
             {
                 Name = "BuffBar",
+                // Left-anchored below the chrome box.
+                // The 4px left-inset and 136px top-inset place the bar immediately below
+                // the 130px-high chrome at (4, 136). Width spans to 800px (covers the
+                // 30-slot strip: 30 × (25+2) = 810px max — truncated at right edge).
+                // Height 36px gives a 5px margin above/below the 25px state cells.
                 AnchorLeft = 0f,
                 AnchorTop = 0f,
                 AnchorRight = 0f,
                 AnchorBottom = 0f,
                 OffsetLeft = 4f,
-                OffsetTop = 140f, // below the chrome box (130 px) — PLAUSIBLE
-                OffsetRight = 800f,
-                OffsetBottom = 170f,
+                OffsetTop = 136f, // just below the 130px chrome box — PLAUSIBLE
+                OffsetRight = 814f, // 30 slots × (25+2)px = 810 + 4px left margin = 814
+                OffsetBottom = 172f, // 36px band: 5px pad + 25px cell + 6px pad (state cells)
             };
             AddChild(_buffBar);
             GD.Print("[GameHud] BuffBar added to scene tree.");
@@ -523,7 +589,81 @@ public sealed partial class GameHud : Control
             GD.PrintErr($"[GameHud] OptionsWindow attach failed: {ex.Message}");
         }
 
+        // ---- RightEdgeGaugePanel (§5.6) — stacked HP/MP strips at screen_width−135, Y=200/250 ----
+        // spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula.
+        // The panel self-anchors in its own _Ready; GameHud only constructs and adds it.
+        // Vitals are forwarded via OnActorSpawned / OnActorVitalsChanged / OnCombatStatsRecomputed.
+        try
+        {
+            _rightEdgeGauge = new RightEdgeGaugePanel { Name = "RightEdgeGaugePanel" };
+            AddChild(_rightEdgeGauge);
+            GD.Print("[GameHud] RightEdgeGaugePanel added. " +
+                     $"Anchor: screen_width−{HudPanelConfig.RightGaugeOffsetFromRight}, " +
+                     $"Y={HudPanelConfig.RightGaugeHpY}/{HudPanelConfig.RightGaugeMpY}, " +
+                     $"W={HudPanelConfig.RightGaugeW} H={HudPanelConfig.RightGaugeH}. " +
+                     "spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] RightEdgeGaugePanel attach failed: {ex.Message}");
+        }
+
+        // ---- BottomActionBar (§5.7) — 1024×60 bar at centerX(1024), screen_height−60 ----
+        // spec: Docs/RE/specs/ui_hud_layout.md §5.7 CONFIRMED-formula.
+        try
+        {
+            _bottomActionBar = new BottomActionBar { Name = "BottomActionBar" };
+            AddChild(_bottomActionBar);
+            GD.Print("[GameHud] BottomActionBar added. " +
+                     $"centerX({HudPanelConfig.ActionBarW}), " +
+                     $"screen_height−{HudPanelConfig.ActionBarH}. " +
+                     "spec: Docs/RE/specs/ui_hud_layout.md §5.7 CONFIRMED-formula.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] BottomActionBar attach failed: {ex.Message}");
+        }
+
+        // ---- TopStatusBar (§5.4) — full-width 20px strip at Y=120 ----
+        // spec: Docs/RE/specs/ui_hud_layout.md §5.4 CONFIRMED-formula.
+        try
+        {
+            _topStatusBar = new TopStatusBar { Name = "TopStatusBar" };
+            AddChild(_topStatusBar);
+            GD.Print("[GameHud] TopStatusBar added. " +
+                     $"X=0, Y={HudPanelConfig.TopStatusBarY}, W=screen_width, H={HudPanelConfig.TopStatusBarH}. " +
+                     "spec: Docs/RE/specs/ui_hud_layout.md §5.4 CONFIRMED-formula.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] TopStatusBar attach failed: {ex.Message}");
+        }
+
+        // ---- ConfirmDialog (§5.8) — centred modal 340×190, the most common dialog family ----
+        // spec: Docs/RE/specs/ui_hud_layout.md §5.8 — "Confirm/info dialog: W=340, H=190, ~12 sites"
+        //       Uses CenteredModal base: center = (screen − size) / 2 on both axes.
+        //       spec: Docs/RE/specs/ui_hud_layout.md §5.1 CONFIRMED-formula.
+        try
+        {
+            _confirmDialog = new ConfirmDialog { Name = "ConfirmDialog" };
+            AddChild(_confirmDialog);
+            GD.Print($"[GameHud] ConfirmDialog added (hidden). " +
+                     $"W={HudPanelConfig.ConfirmDialogW} H={HudPanelConfig.ConfirmDialogH}. " +
+                     "center = (screen − size) / 2. " +
+                     "spec: Docs/RE/specs/ui_hud_layout.md §5.8 §5.1 CONFIRMED-formula.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameHud] ConfirmDialog attach failed: {ex.Message}");
+        }
+
         GD.Print("[GameHud] _Ready completed. HUD chrome wired to uitex 0001 (mainwindow.dds). " +
+                 $"ActorState at ({HudPanelConfig.StatsX},{HudPanelConfig.StatsY}) W={HudPanelConfig.StatsW} H={HudPanelConfig.StatsH} " + // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+                 $"+ 3 sub-panels (A/B/C). " + // spec: Docs/RE/specs/ui_hud_layout.md §3.4
+                 $"SkillBar container at ({HudPanelConfig.SkillBarX},{HudPanelConfig.SkillBarY}) 9-slot. " + // spec: Docs/RE/specs/ui_hud_layout.md §3.5
+                 $"Minimap top-right (screen_width−{HudPanelConfig.MinimapW}, Y={HudPanelConfig.MinimapY}). " + // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+                 $"Party off-screen (screen_width+{HudPanelConfig.PartyOffsetFromRight}). " + // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+                 "Trade overlay (inventory X, Y=0). " + // spec: Docs/RE/specs/ui_hud_layout.md §3.3
                  "Stage-B components (ChatWindow, BuffBar, TargetFrame, FloatingCombatText, " +
                  "MinimapPanel, CharacterStatsWindow, OptionsWindow) added to scene tree.");
     }
@@ -590,7 +730,279 @@ public sealed partial class GameHud : Control
     }
 
     // -------------------------------------------------------------------------
-    // Hotbar construction
+    // Stat sub-panel construction (one helper for A, B, C)
+    // spec: Docs/RE/specs/ui_hud_layout.md §3.4 — three sibling stat sub-panels CODE-CONFIRMED-static.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds and adds one of the three stat sub-panels at the given absolute rect.
+    /// Roles (HP / MP / stamina / status) are not yet individually labelled — §4 known unknowns.
+    /// spec: Docs/RE/specs/ui_hud_layout.md §3.4 CODE-CONFIRMED-static.
+    /// </summary>
+    private void AddStatSubPanel(string name, Rect2 rect)
+    {
+        var ctrl = new Control
+        {
+            Name = name,
+            Position = new Vector2(rect.Position.X, rect.Position.Y), // spec: Docs/RE/specs/ui_hud_layout.md §3.4
+            Size = new Vector2(rect.Size.X, rect.Size.Y), // spec: Docs/RE/specs/ui_hud_layout.md §3.4
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+
+        var panel = new Panel();
+        panel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        var style = new StyleBoxFlat();
+        style.BgColor = new Color(0f, 0f, 0f, 0.25f);
+        style.SetBorderWidthAll(1);
+        style.BorderColor = new Color(0.5f, 0.5f, 0.5f, 0.5f);
+        panel.AddThemeStyleboxOverride("panel", style);
+        ctrl.AddChild(panel);
+
+        var lbl = new Label
+        {
+            Text = $"[{name}]",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        lbl.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        ctrl.AddChild(lbl);
+
+        AddChild(ctrl);
+        GD.Print($"[GameHud] {name} added at ({rect.Position.X},{rect.Position.Y}) " +
+                 $"W={rect.Size.X} H={rect.Size.Y}. " +
+                 "spec: Docs/RE/specs/ui_hud_layout.md §3.4 CODE-CONFIRMED-static.");
+    }
+
+    // -------------------------------------------------------------------------
+    // Party panel construction (off-screen right column, revealed on party join)
+    // spec: Docs/RE/specs/ui_hud_layout.md §3.3 — "X=screen_width+318, Y=0, W=318, H=732"
+    //       CONFIRMED-formula; starts off-screen (slide-in pattern).
+    // -------------------------------------------------------------------------
+
+    private void BuildPartyPanel()
+    {
+        // screen_width + 318 → AnchorLeft=1, OffsetLeft=+318, OffsetRight=+636 (= 318+318)
+        // This positions the panel completely off-screen to the right until revealed.
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.3 CONFIRMED-formula.
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.2 — screen-width-relative anchor convention.
+        var ctrl = new Control
+        {
+            Name = "PartyPanel",
+            AnchorLeft = 1f,
+            AnchorTop = 0f,
+            AnchorRight = 1f,
+            AnchorBottom = 0f,
+            OffsetLeft =
+                HudPanelConfig
+                    .PartyOffsetFromRight, // = +318 → off-screen  // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+            OffsetTop = 0f, // Y=0               // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+            OffsetRight =
+                HudPanelConfig.PartyOffsetFromRight +
+                HudPanelConfig.PartyW, // = +636            // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+            OffsetBottom = HudPanelConfig.PartyH, // = 732             // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+            Visible = false, // hidden until party is active (no party use-case wired yet)
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+
+        var panel = new Panel();
+        panel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        var style = new StyleBoxFlat();
+        style.BgColor = new Color(0.05f, 0.05f, 0.15f, 0.85f);
+        style.SetBorderWidthAll(1);
+        style.BorderColor = new Color(0.4f, 0.5f, 0.8f, 0.9f);
+        panel.AddThemeStyleboxOverride("panel", style);
+        ctrl.AddChild(panel);
+
+        var lbl = new Label
+        {
+            Text = "Party",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        lbl.SetAnchorsAndOffsetsPreset(LayoutPreset.TopWide);
+        ctrl.AddChild(lbl);
+
+        AddChild(ctrl);
+        GD.Print($"[GameHud] PartyPanel added (off-screen, Visible=false). " +
+                 $"Anchor: screen_width+{HudPanelConfig.PartyOffsetFromRight} Y=0 W={HudPanelConfig.PartyW} H={HudPanelConfig.PartyH}. " +
+                 "spec: Docs/RE/specs/ui_hud_layout.md §3.3 CONFIRMED-formula.");
+    }
+
+    // -------------------------------------------------------------------------
+    // Trade panel construction (parent-relative: overlays inventory column, Y=0, W=318, H=732)
+    // spec: Docs/RE/specs/ui_hud_layout.md §3.3 — "X=inventory's X, Y=0, W=318, H=732"
+    //       CODE-CONFIRMED-static; hidden by default, shown during a trade session.
+    // -------------------------------------------------------------------------
+
+    private void BuildTradePanel()
+    {
+        // Trade reads the inventory panel's stored X — same right-column anchor as inventory.
+        // Inventory is right-anchored: AnchorLeft=1, OffsetLeft=-732, OffsetRight=+318.
+        // Trade overlays at the same X: AnchorLeft=1, OffsetLeft=+318−318=0... but spec says
+        // it reads inventory.X directly, which on the 1024 canvas = 1024−732+318 = 610.
+        // In Godot: mirror inventory's right-anchor formula with TradeW=318.
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.3 CODE-CONFIRMED-static.
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.2 — parent-relative anchor convention.
+        var ctrl = new Control
+        {
+            Name = "TradePanel",
+            AnchorLeft = 1f,
+            AnchorTop = 0f,
+            AnchorRight = 1f,
+            AnchorBottom = 0f,
+            // Trade overlays the inventory right column:
+            // inventory: OffsetLeft=-732, OffsetRight=+318 (W=1050 from right edge? No — W=732)
+            // Trade W=318, anchored at OffsetLeft=+318−318=0, but the spec says it reads
+            // inventory's stored X. For the 1024 reference canvas the simplest mapping:
+            // AnchorRight=1, OffsetLeft=+318 (trade starts where inventory ends on-screen),
+            // OffsetRight=+318+318 (trade W=318 past that). Kept Visible=false until session.
+            OffsetLeft =
+                HudPanelConfig
+                    .PartyOffsetFromRight, // +318 → same X as inventory right-anchor  // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+            OffsetTop = 0f, // Y=0  // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+            OffsetRight =
+                HudPanelConfig.PartyOffsetFromRight +
+                HudPanelConfig.TradeW, // +636 // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+            OffsetBottom = HudPanelConfig.TradeH, // 732  // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+            Visible = false, // hidden until a trade session is active
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+
+        var panel = new Panel();
+        panel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        var style = new StyleBoxFlat();
+        style.BgColor = new Color(0.15f, 0.1f, 0.05f, 0.85f);
+        style.SetBorderWidthAll(1);
+        style.BorderColor = new Color(0.8f, 0.6f, 0.3f, 0.9f);
+        panel.AddThemeStyleboxOverride("panel", style);
+        ctrl.AddChild(panel);
+
+        var lbl = new Label
+        {
+            Text = "Trade",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        lbl.SetAnchorsAndOffsetsPreset(LayoutPreset.TopWide);
+        ctrl.AddChild(lbl);
+
+        AddChild(ctrl);
+        GD.Print($"[GameHud] TradePanel added (Visible=false, overlay inventory column). " +
+                 $"W={HudPanelConfig.TradeW} H={HudPanelConfig.TradeH} Y=0. " +
+                 "spec: Docs/RE/specs/ui_hud_layout.md §3.3 CODE-CONFIRMED-static.");
+    }
+
+    // -------------------------------------------------------------------------
+    // Skill bar construction (container origin at recovered (349, 13), 9-slot grid)
+    // spec: Docs/RE/specs/ui_hud_layout.md §3.5 — container origin CODE-CONFIRMED-static;
+    //       per-slot data-driven from runtime registry.
+    // -------------------------------------------------------------------------
+
+    private void BuildSkillBar()
+    {
+        // Thin anchor container at absolute origin (349, 13).
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.5 — "container origin 349, 13"
+        //       CODE-CONFIRMED-static. Anchor strip W~7, H~504 (spec §3.5).
+        // In this first render pass, we use a 9-slot horizontal row as a data-driven placeholder.
+        // Each slot uses the fallback 58×58 cell size (smallest observed branch, spec §3.5).
+        // When the skill-slot registry record layout is recovered (§4 known unknowns), each
+        // slot's base X/Y will be read from the registry instead of the uniform grid here.
+
+        // Total width for 9 × 58px slots = 522px; use that as the container size.
+        float slotSize = HudPanelConfig.SkillBarSlotFallbackSize; // = 58  // spec: Docs/RE/specs/ui_hud_layout.md §3.5
+        int slotCount = HudPanelConfig.SkillBarSlotCount; // = 9   // spec: Docs/RE/specs/ui_hud_layout.md §3.5
+        float containerW = slotSize * slotCount;
+        float containerH = slotSize;
+
+        var container = new Control
+        {
+            Name = "SkillBarContainer",
+            Position = HudPanelConfig.SkillBarOrigin, // (349, 13) spec: Docs/RE/specs/ui_hud_layout.md §3.5
+            Size = new Vector2(containerW, containerH),
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        AddChild(container);
+
+        // Nine skill slots in a horizontal row (placeholder until slot registry is recovered).
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.5 — "nine skill slots; each slot base X/Y from registry".
+        for (int i = 0; i < slotCount; i++)
+        {
+            float slotX = i * slotSize; // placeholder: uniform horizontal layout
+            var slot = new Control
+            {
+                Name = $"SkillSlot{i}",
+                Position = new Vector2(slotX, 0f), // placeholder X; real X from registry §3.5
+                Size = new Vector2(slotSize, slotSize),
+                MouseFilter = MouseFilterEnum.Ignore,
+            };
+            container.AddChild(slot);
+
+            // Slot background.
+            var slotBg = new Panel();
+            slotBg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+            var slotStyle = new StyleBoxFlat();
+            slotStyle.BgColor = new Color(0.1f, 0.1f, 0.1f, 0.7f);
+            slotStyle.SetBorderWidthAll(1);
+            slotStyle.BorderColor = new Color(0.5f, 0.5f, 0.5f, 0.8f);
+            slotBg.AddThemeStyleboxOverride("panel", slotStyle);
+            slot.AddChild(slotBg);
+
+            // Key label ("1"–"9") at top.
+            _hotbarKey[i] = new Label
+            {
+                Text = $"{i + 1}",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                MouseFilter = MouseFilterEnum.Ignore,
+            };
+            _hotbarKey[i].SetAnchorsAndOffsetsPreset(LayoutPreset.TopWide);
+            slot.AddChild(_hotbarKey[i]);
+
+            // Icon TextureRect.
+            _hotbarIcon[i] = new TextureRect
+            {
+                Name = $"SkillIcon{i}",
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                CustomMinimumSize = new Vector2(slotSize - 4f, slotSize - 4f),
+                MouseFilter = MouseFilterEnum.Ignore,
+            };
+            _hotbarIcon[i].SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+            BindHotbarSlotIcon(_hotbarIcon[i], i);
+            slot.AddChild(_hotbarIcon[i]);
+
+            // Skill name at bottom.
+            _hotbarName[i] = new Label
+            {
+                Text = "—",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                CustomMinimumSize = new Vector2(slotSize, 14f),
+                AutowrapMode = TextServer.AutowrapMode.Off,
+                ClipText = true,
+                MouseFilter = MouseFilterEnum.Ignore,
+            };
+            _hotbarName[i].SetAnchorsAndOffsetsPreset(LayoutPreset.BottomWide);
+            slot.AddChild(_hotbarName[i]);
+        }
+
+        // Optional: bind hotbar chrome texture from skillpipe.dds.
+        var chromeBg = new TextureRect
+        {
+            Name = "SkillBarChrome",
+            StretchMode = TextureRect.StretchModeEnum.Tile,
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        chromeBg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        container.AddChild(chromeBg);
+        BindHotbarChromeTexture(chromeBg);
+
+        GD.Print($"[GameHud] SkillBar built: container at ({HudPanelConfig.SkillBarX},{HudPanelConfig.SkillBarY}), " +
+                 $"{slotCount} slots × {slotSize}px (placeholder; registry data-driven pending). " +
+                 "spec: Docs/RE/specs/ui_hud_layout.md §3.5 CODE-CONFIRMED-static origin.");
+    }
+
+    // -------------------------------------------------------------------------
+    // Hotbar construction (legacy method kept for BindHotbarChromeTexture / BindHotbarSlotIcon callers)
+    // The skill bar (BuildSkillBar) replaced the old BuildHotbar as the primary slot builder.
     // -------------------------------------------------------------------------
 
     private void BuildHotbar()
@@ -862,6 +1274,10 @@ public sealed partial class GameHud : Control
 
         // Forward to MinimapPanel so it can identify the local player ActorKey.
         _minimapPanel?.OnActorSpawned(evt);
+
+        // Forward to RightEdgeGaugePanel for §5.6 HP/MP strips.
+        // spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula.
+        _rightEdgeGauge?.OnActorSpawned(evt);
     }
 
     /// <summary>
@@ -886,6 +1302,10 @@ public sealed partial class GameHud : Control
         if (_trackedMaxHp == 0) _trackedMaxHp = evt.CurrentHp;
         if (_trackedMaxMp == 0) _trackedMaxMp = evt.CurrentMp;
         RefreshVitals();
+
+        // Forward to RightEdgeGaugePanel for §5.6 HP/MP strips.
+        // spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula.
+        _rightEdgeGauge?.OnActorVitalsChanged(evt);
     }
 
     /// <summary>
@@ -935,6 +1355,10 @@ public sealed partial class GameHud : Control
 
         RefreshVitals();
         _combatStatsLabel.Text = $"Atk:{s.MinDamage}–{s.MaxDamage}  Def:{s.Defence}";
+
+        // Forward to RightEdgeGaugePanel for §5.6 max-HP/MP updates.
+        // spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula.
+        _rightEdgeGauge?.OnCombatStatsRecomputed(evt);
     }
 
     /// <summary>
@@ -984,11 +1408,14 @@ public sealed partial class GameHud : Control
         _chatLabel.Text = _chatSb.ToString();
     }
 
-    /// <summary>Reacts to a client lifecycle state change: update the state label.</summary>
+    /// <summary>Reacts to a client lifecycle state change: update the state label and top status bar.</summary>
     public void OnClientStateChanged(ClientStateChangedEvent evt)
     {
         if (_stateLabel is null) return;
         _stateLabel.Text = $"State: {evt.Current}";
+        // Forward state text to the top status bar §5.4 strip.
+        // spec: Docs/RE/specs/ui_hud_layout.md §5.4 CONFIRMED-formula.
+        _topStatusBar?.SetStatusText($"State: {evt.Current}");
     }
 
     // -------------------------------------------------------------------------

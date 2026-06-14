@@ -144,7 +144,7 @@ public sealed class UiAssetLoader : IDisposable
         MsgXdbCatalog? cat = EnsureMsg();
         if (cat is null) return fallback;
 
-        string? s = cat.GetText(id);
+        string? s = cat.GetText((int)id);
         return string.IsNullOrEmpty(s) ? fallback : s;
     }
 

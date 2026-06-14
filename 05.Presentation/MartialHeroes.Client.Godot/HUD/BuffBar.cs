@@ -78,6 +78,24 @@ public sealed partial class BuffBar : Control
     private Label? _demoLabel;
 
     // ─────────────────────────────────────────────────────────────────────────
+    //  Dev demo: placeholder slots shown when no real buff data arrives
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Number of dev-placeholder buff slots to show when offline.
+    // DEV ONLY — behind a clear dev seam; never simulates game logic.
+    private const int DevDemoSlotCount = 5;
+
+    // Frames to wait before showing demo slots.
+    // 30 frames ≈ 0.5s at 60 fps — enough for Bind() to be called, but short enough that
+    // dev screenshots (300+ frame warmup) will always see the slots.
+    private const int DevDemoDelayFrames = 30;
+
+    private int _devDemoCountdown = DevDemoDelayFrames;
+
+    // True once real buff data has been received from the hub.
+    private bool _hasReceivedRealData;
+
+    // ─────────────────────────────────────────────────────────────────────────
     //  Godot lifecycle
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -97,13 +115,26 @@ public sealed partial class BuffBar : Control
 
     public override void _Process(double delta)
     {
-        if (_buffStates is null) return;
-
-        // Drain the latest-wins channel. ChannelReader.TryRead is allocation-free.
-        // All Control mutation here is on the main thread (Godot requirement).
-        while (_buffStates.TryRead(out BuffStateEvent? evt))
+        // Drain real buff-state events when bound.
+        if (_buffStates is not null)
         {
-            ApplyBuffState(evt);
+            // Drain the latest-wins channel. ChannelReader.TryRead is allocation-free.
+            // All Control mutation here is on the main thread (Godot requirement).
+            while (_buffStates.TryRead(out BuffStateEvent? evt))
+            {
+                _hasReceivedRealData = true;
+                ApplyBuffState(evt);
+            }
+        }
+
+        // DEV ONLY: show placeholder buff slots after the delay, if no real data arrived.
+        // This ensures the buff bar is visually rendered in world-mode dev screenshots.
+        // spec: Docs/RE/specs/ui_hud_layout.md §2 — buff icons positioned per buff_icon_position.xdb.
+        if (!_hasReceivedRealData && _devDemoCountdown > 0)
+        {
+            _devDemoCountdown--;
+            if (_devDemoCountdown == 0)
+                ApplyDevDemoSlots();
         }
     }
 
@@ -141,9 +172,16 @@ public sealed partial class BuffBar : Control
             GD.Print("[BuffBar] Bound with null hub — offline/demo mode.");
         }
 
-        // Hide the demo label once bound (real data expected).
+        // Keep the demo label visible until real data or dev-demo slots arrive.
+        // The label will be updated/hidden by ApplyBuffState (real data) or ApplyDevDemoSlots (dev).
+        // Do NOT hide it here even when hub is bound — the bar needs to show SOMETHING until
+        // the first real BuffStateEvent arrives (which may never happen in offline-dev mode).
         if (_demoLabel is not null)
-            _demoLabel.Visible = hub is null;
+        {
+            _demoLabel.Text = hub is not null
+                ? "[BuffBar — waiting for server buff data]"
+                : "[BuffBar — offline / no hub]";
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -156,6 +194,18 @@ public sealed partial class BuffBar : Control
         // The parent HUD is responsible for positioning the bar.
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         MouseFilter = MouseFilterEnum.Ignore;
+
+        // Semi-transparent background panel so the buff bar strip is visible against the 3D world.
+        // The legacy client does not have a separate bar background (icons float on the game view)
+        // but we add one for dev legibility. Removed when real atlas chrome is wired.
+        var bg = new ColorRect
+        {
+            Name = "BuffBarBg",
+            Color = new Color(0f, 0f, 0f, 0.45f), // 45% black — readable but not obtrusive
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        bg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        AddChild(bg);
 
         // Container for the 30 slot TextureRects.
         var hbox = new HBoxContainer
@@ -263,5 +313,54 @@ public sealed partial class BuffBar : Control
         // Hide the demo label once we receive real server data.
         if (_demoLabel is { Visible: true })
             _demoLabel.Visible = false;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Dev demo slot population
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// DEV ONLY. Populates the first <see cref="DevDemoSlotCount"/> buff slots with placeholder
+    /// colored squares so the buff bar strip is visibly rendered in dev screenshots.
+    ///
+    /// This fires only when no real buff data has arrived from the hub. It is a pure view
+    /// seam — no game logic, no stat computation, no protocol knowledge.
+    ///
+    /// spec: Docs/RE/specs/ui_hud_layout.md §2 — per-icon screen positions from buff_icon_position.xdb;
+    ///       flowing counter for buff_id ≤ 80; fixed per-slot for buff_id > 80. CODE-CONFIRMED.
+    /// </summary>
+    private void ApplyDevDemoSlots()
+    {
+        // Solid-colour placeholder palette for the dev demo.
+        // These colours represent "buff" slots (flowing, buff_id ≤ 80 class).
+        // spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED — "buff bar has 30 icon slots".
+        Color[] devPalette =
+        [
+            new Color(0.2f, 0.8f, 0.3f, 0.9f), // green  — slot 0
+            new Color(0.3f, 0.5f, 1.0f, 0.9f), // blue   — slot 1
+            new Color(1.0f, 0.7f, 0.1f, 0.9f), // orange — slot 2
+            new Color(0.9f, 0.2f, 0.2f, 0.9f), // red    — slot 3
+            new Color(0.8f, 0.2f, 0.9f, 0.9f), // purple — slot 4
+        ];
+
+        for (int i = 0; i < DevDemoSlotCount && i < SlotCount; i++)
+        {
+            // Build a 1×1 solid-colour Image and upload it as a placeholder texture.
+            var img = Image.CreateEmpty(BuffIconCatalog.BuffCellSize, BuffIconCatalog.BuffCellSize,
+                false, Image.Format.Rgba8);
+            img.Fill(devPalette[i % devPalette.Length]);
+            var tex = ImageTexture.CreateFromImage(img);
+
+            _slots[i].Texture = tex;
+            _slots[i].CustomMinimumSize = new Vector2(BuffIconCatalog.BuffCellSize, BuffIconCatalog.BuffCellSize);
+            _slots[i].Visible = true;
+        }
+
+        // Keep the demo label visible — it labels this as a dev placeholder.
+        if (_demoLabel is not null)
+            _demoLabel.Text = "[BuffBar — DEV placeholder slots]";
+
+        GD.Print($"[BuffBar] DEV demo: applied {DevDemoSlotCount} placeholder buff slots " +
+                 "(no real data from hub). spec: Docs/RE/specs/ui_hud_layout.md §2.");
     }
 }

@@ -317,15 +317,22 @@ public sealed partial class MinimapPanel : Control
 
     private void BuildUi()
     {
-        // Anchor: top-right of the viewport (matching the common minimap corner placement).
+        // Anchor: top-right corner at screen_width − 135, Y=0, W=135, H=195.
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.3 — "Minimap: X=screen_width−135, Y=0, W=135, H=195"
+        //       CONFIRMED-formula; screen-width-relative, top-flush.
+        // Godot mapping: AnchorLeft=AnchorRight=1 (right edge); OffsetLeft=−W; OffsetRight=0; Y=0.
+        // HudPanelConfig.MinimapW=135, MinimapY=0, MinimapH=195 carry these constants.
         AnchorLeft = 1f;
         AnchorTop = 0f;
         AnchorRight = 1f;
         AnchorBottom = 0f;
-        OffsetLeft = -PanelW - 8f;
-        OffsetTop = 8f;
-        OffsetRight = -8f;
-        OffsetBottom = PanelH + 8f;
+        OffsetLeft =
+            -HudPanelConfig.MinimapW; // = -135 → flush to right edge  // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+        OffsetTop = HudPanelConfig
+            .MinimapY; // = 0   → top-flush             // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+        OffsetRight = 0f; // right edge of viewport         // spec: Docs/RE/specs/ui_hud_layout.md §3.3
+        OffsetBottom =
+            HudPanelConfig.MinimapH; // = 195                          // spec: Docs/RE/specs/ui_hud_layout.md §3.3
         MouseFilter = MouseFilterEnum.Pass;
 
         // ── Title bar ────────────────────────────────────────────────────────

@@ -535,8 +535,9 @@ in-world actor build path:
 - **Worn gear** is overlaid by scanning the descriptor's 20×16-byte equipment table at +0x58; each
   slot's first dword is resolved to a visual id and attached, gated by a class/sex check.
 - **Facing:** a new/locked slot faces away (idle yaw ≈ π) if its lock flag is set, else faces front.
-  The idle motion plays from the actor's own motion clip; the select camera (a waypoint path, owned
-  by `client_runtime.md` §7.3) frames the row.
+  The idle motion plays from the actor's own motion clip; the select **preview camera** (the
+  corrected **6-keyframe** orbit — geometry, anchor, FOV/near/far) frames the row and is specified in
+  **§3.5** below (it supersedes the approximate waypoint reading in `client_runtime.md §7.3`).
 - After building, the **default slot** is auto-highlighted and its info line shown.
 
 **Per-slot selection is the 3D row itself.** On a mouse move, the cursor is unprojected and each
@@ -550,6 +551,91 @@ Two per-slot flag arrays gate enter/render. One marks a slot **selectable for en
 marks a slot **creating/locked** (which also drives the "faces away" idle facing). The precise
 difference (selectable vs creating/locked/cooldown) is **inferred, not byte-confirmed** (Open
 question 6).
+
+## 3.5 The character-select preview camera (CODE-CONFIRMED geometry; framing runtime-pending)
+
+The select window builds a dedicated preview camera (a derived "third-person" camera manipulator)
+to frame the row of 3D character previews. Its **orbit geometry is statically recovered in full**;
+the runtime framing law (which keyframe is shown, the easing between keyframes) is **not yet
+confirmed** and is flagged below. This **supersedes** the earlier approximate "7-waypoint" reading
+referenced from `client_runtime.md §7.3`: the orbit is **6 keyframes, not 7**.
+
+### 3.5.1 Scene & projection (CODE-CONFIRMED)
+
+| Property | Value | Notes |
+|---|---|---|
+| Scene name | `"select"` | the char-select preview scene |
+| Active map area | **52200** (sub-area 0x30) | the char-select stage area; a 3×3 first terrain ring is seeded around it |
+| Camera type | perspective | a `GPerspectiveCamera` |
+| Vertical FOV | **50°** | `π · 50 / 180`, then **divided by the aspect ratio** (screen width / screen height) before being set as the projection field-of-view |
+| Near clip | **5.0** | |
+| Far clip | **15000.0** | |
+
+> The FOV-over-aspect form means the legacy projection FOV scales with the window aspect. A
+> reimplementation that uses a standard "vertical FOV + aspect" projection should set vertical FOV =
+> 50° and let the renderer apply aspect normally; the legacy `fov / aspect` is the same framing on a
+> 4:3 reference canvas.
+
+### 3.5.2 The 6-keyframe orbit (CODE-CONFIRMED)
+
+The camera holds a table of **6 position keyframes**, each a 3-float `(x, y, z)` triple. An **anchor
+offset of `(+2048, 0, −6144)`** is added to every raw keyframe to place the orbit in stage-world
+space. The 6 anchored keyframe positions:
+
+| Keyframe | Anchored position (x, y, z) |
+|---|---|
+| 0 | (515.55, 137.27, −9397.71) |
+| 1 | (512.00, 87.00, −9652.00) |
+| 2 | (343.00, 104.00, −9734.00) |
+| 3 | (471.00, 115.00, −9812.00) |
+| 4 | (622.00, 75.00, −9802.50) |
+| 5 | (662.00, 130.00, −9746.00) |
+
+> **Coordinate convention reminder.** These are stage-world coordinates as the legacy client stores
+> them. Apply the project's world-to-engine convention (world geometry negates Z — see
+> `Helpers/WorldCoordinates`) when porting; do not silently re-sign them here.
+
+### 3.5.3 The 12 PI-scaled angle multipliers (CODE-CONFIRMED values; yaw/pitch split MEDIUM)
+
+The camera also holds **12 angle multipliers**, each multiplied by π to yield an angle in radians.
+With 6 keyframes the natural reading is **6 yaw + 6 pitch** (one yaw and one pitch per keyframe),
+but the exact assignment of the second six (indices 6..11) to yaw vs pitch is **MEDIUM** until
+confirmed against the manipulator's update law.
+
+| Index | Multiplier | × π (rad) | ≈ degrees |
+|------:|-----------:|----------:|----------:|
+| 0 | −0.03333334 | −0.104720 | −6.000 |
+| 1 | −0.01483333 | −0.046600 | −2.670 |
+| 2 |  0.00333333 |  0.010472 |  0.600 |
+| 3 | −0.01111111 | −0.034907 | −2.000 |
+| 4 |  0.04333333 |  0.136136 |  7.800 |
+| 5 | −0.07666667 | −0.240855 | −13.800 |
+| 6 |  0.01333333 |  0.041888 |  2.400 |
+| 7 |  0.00436111 |  0.013701 |  0.785 |
+| 8 | −0.20333332 | −0.638790 | −36.600 |
+| 9 | −0.44444445 | −1.396263 | −80.000 |
+| 10 |  0.41276109 |  1.296727 |  74.297 |
+| 11 |  0.29111111 |  0.914553 |  52.400 |
+
+Other constructor scalars (CODE-CONFIRMED): a `1.0` and a `10.0` speed/rate scalar pair (the
+likely interpolation-time and easing-rate constants), identity initial scale/orientation values, and
+an **initial active keyframe index of 0**.
+
+### 3.5.4 Static-complete vs runtime-pending (explicit)
+
+- **Static-complete (CODE-CONFIRMED):** all 6 keyframe positions, the `(+2048, 0, −6144)` anchor
+  offset, the 12 π-scaled angle multipliers, FOV 50° / aspect-divided, near 5.0, far 15000.0, the
+  `1.0` / `10.0` speed scalars, scene name `"select"`, area 52200.
+- **Runtime-pending (NOT yet confirmed — do not invent):**
+  1. **Which keyframe is actually shown** at the live char-select screen (the initial index is 0,
+     but the manipulator may auto-advance).
+  2. **The interpolation / easing law** between keyframes (time-driven via the engine millisecond
+     clock and the `10.0` / `1.0` scalars; the easing curve is not statically obvious).
+  3. **The yaw-vs-pitch assignment** of angle indices 6..11 vs 0..5.
+  4. **The final on-screen framing** (the camera look-at target relative to the preview row's pivot).
+
+These four are deferred to a live-client (debugger) confirmation pass; an implementer should treat
+the orbit geometry as authoritative and the framing/easing as tunable until confirmed.
 
 ---
 
@@ -877,9 +963,14 @@ next scene.
    whether it is shown every launch or only first-run (an INI/registry guard) was not determined.
 10. **Second-password / PIN modal widget tree.** The PIN's existence, its first-class "is-PIN" input
     modelling, its ≤4-char capacity, and the fact that its value becomes the optional login-blob
-    field are RUNTIME-CONFIRMED (§1.4a). What is **not** yet swept is the modal's exact widget
-    layout / action ids / `uiconfig.lua` source and whether it can be skipped/disabled per account.
-    Needs a widget-atlas sweep of the secondary-password dialog (uses `data/ui/password.dds`).
+    field are RUNTIME-CONFIRMED (§1.4a). The modal's **layout is now recovered** (§11.3: modal rect,
+    the 2×5 scrambled keypad, the reset/OK/cancel tags and atlas source rects). What remains open is
+    the live re-roll-on-Reset confirmation (debugger-testable) and whether the modal can be
+    skipped/disabled per account; its labels are baked atlas art (no caption ids).
+11. **Char-select 2D class icon.** No standalone class-icon widget keyed by a class index exists in
+    the char-select 2D builder; per-slot class is conveyed by the descriptor-driven 3D preview (§3.3)
+    plus the slot frame art (§11.5b). If a 2D class badge is desired in the revival, it must be added
+    fresh - there is no legacy class→source-rect lookup to reproduce.
 
 ### Cross-spec conflicts recorded here (owners must resolve in their files)
 
@@ -897,3 +988,363 @@ next scene.
   may be absent from `names.yaml` / `opcodes.md`; the protocol author owns adding them. (§6, §8)
 - **Naming inconsistency**: the 8-byte char-manage result handler is labelled "3/7" by some legacy
   tooling but is behaviourally **`3/4 SmsgCharManageResult`** (result/subtype/ready-time). (§5)
+
+
+---
+
+# 11. Front-end scene layout — pixel-exact implementation tables (CODE-CONFIRMED)
+
+> **What this section adds.** Sections 1-10 specify the front-end *flow* (state machine, validations,
+> message ids, sends). This section adds the **layout/composition** layer an engineer rebuilds the
+> screens from 1:1: the exact on-screen rectangles, the source sub-rectangles into each atlas DDS,
+> the three-state (normal / hover / pressed) frame sources, and which texture each widget reads.
+> Every rect below is a **literal layout constant read off the legacy scene builders** - neutral
+> coordinate facts, not code. **No caption text is reproduced**; widgets that draw runtime text
+> reference a numeric caption id from the section 1.9 / section 9 tables (resolved at runtime from
+> `msg.xdb`). Korean labels that are **baked into the atlas art** are noted as "baked art" and carry
+> no id.
+
+## 11.0 Common composition model (CODE-CONFIRMED)
+
+- **Design canvas:** `1024 x 768`, top-left anchored. The whole layout is **centered on screen**:
+  the scene origin is set to `(screenWidth/2 - 512, screenHeight/2 - 384)` before any widget is
+  placed, so all `(X, Y)` below are canvas-local. A handful of background bars are placed at a
+  height-scaled Y (`Y = 326 * screenHeight / 768`); those are called out per row.
+- **Widget construction convention.** Every widget is built with the same leading argument shape:
+  `(textureId, X, Y, W, H, srcU, srcV, [hoverU, hoverV, pressedU, pressedV], zOrder)`. The literal
+  `(X, Y, W, H)` is the on-screen rectangle; `(srcU, srcV)` is the top-left pixel of the source
+  sub-rectangle in the referenced atlas DDS (its size equals the widget's `W x H` unless a frame is
+  scaled). A three-state button carries three such source origins; a checkbox carries two
+  (off / on). There is **no external rect table** - every rectangle is an inline construction
+  argument, so the tables below are the complete layout source.
+- **Widget kinds:** static image / sprite, container panel, single-frame button, three-state button,
+  two-state checkbox, text label, and editable text box (the last two are the only runtime-text
+  kinds). Dialog wrappers (quit-confirm, error) are panel subclasses.
+- **Texture format.** The login / server-list atlases are loaded as DXT5 (the format selector passed
+  to the loader is the FourCC `"DXT5"`); the char-select dim sheet uses an explicit
+  raw/uncompressed format. Texture file formats and dimensions are catalogued in section 11.1.
+
+## 11.1 Texture inventory - the front-end atlases (CODE-CONFIRMED paths; dims SAMPLE-VERIFIED)
+
+All paths are **concrete VFS paths** (no id resolution). Dimensions/format were read from the
+shipped DDS headers by a VFS harness (no pixel data extracted).
+
+| Atlas (VFS path) | Dims | Format | Role |
+|---|---|---|---|
+| `data/ui/login_slice1.dds` | 1024x1024 | DXT2 | Login background art + stone chrome + **baked Korean label plates** (account / password / confirm / quit / save-id words) + the gold confirm-button face + the bottom bar |
+| `data/ui/loginwindow.dds` | 1024x1024 | DXT5 | Login panel chrome (main panel art, listbox frame, scroll arrows + thumb, server-row buttons, lower confirm/cancel buttons); **also the char-select frame atlas** (shared) |
+| `data/ui/loginwindow_02.dds` | 1024x1024 | DXT2 | Server-list parchment scroll panel + channel-selector tab blocks (the variant chrome) |
+| `data/ui/InventWindow.dds` | 1024x1024 (HUD atlas) | DXT3/DXT5 | Reused for the login notice / error / quit dialogs **and** the PIN modal's framed background quad |
+| `data/ui/password.dds` | 1024x1024 | DXT3 (full mips) | PIN modal: all digit-tile glyph art and the reset / OK / cancel button art |
+| `data/ui/openning_scenario.dds` | 1024x2048 | DXT5 | Intro vertical-panorama scenario strip (pre-login slideshow; the four `openning_00N.dds` 1024x768 frames are the opening slides) |
+| `data/ui/characwindow.dds` | 512x512 | RAW RGBA | Char-select window chrome (standalone char-select atlas; transparent panel) |
+| `data/ui/mainwindow.dds` | (HUD atlas) | - | Char-select composited chrome / conditional overlay button source |
+| `data/ui/CarrierPigeonPerson.dds`, `CarrierPigeonAll.dds`, `tradekeepwindow.dds` | (HUD/sub-window atlases) | - | Char-select composited chrome (reused sub-window atlases) |
+| `data/ui/blacksheet.dds` | - | raw (explicit fmt) | Char-select dim/overlay sheet (dims unhovered slots / fades) |
+| `data/ui/server_icon.dds` | 128x128 | DXT2 | Per-server badge icon in the server list |
+| `data/cursor/stand.dds` | 32x32 | DXT2 | Default arrow cursor (all front-end screens); the in-engine cursor is re-targeted to the OS cursor position each frame |
+
+> **Char-select chrome sourcing note.** The char-select 2D builder loads the seven shared atlases
+> above (`loginwindow`, `mainwindow`, `InventWindow`, `CarrierPigeonPerson`, `CarrierPigeonAll`,
+> `tradekeepwindow`, `blacksheet`); its **slot-frame and button art are sub-rects of
+> `loginwindow.dds`** (the same login chrome family - section 11.5). A standalone
+> `data/ui/characwindow.dds` also exists in the VFS and is the dedicated char-select chrome atlas;
+> the heavily-used builder handles are `loginwindow.dds` and `mainwindow.dds`. No bespoke per-scene
+> login atlas is needed beyond this set.
+
+> **Fonts.** No font files exist in the VFS. Runtime text widgets render with the OS Korean system
+> font (HANGUL charset, code page 949); the specific typeface depends on the host OS's installed
+> Korean fonts. A revival must supply a CP949-capable Korean font.
+
+## 11.2 Login scene - widget layout (CODE-CONFIRMED literals)
+
+Atlas shorthand for this subsection: **A** = `login_slice1.dds`, **B** = `loginwindow.dds`,
+**C** = `InventWindow.dds`, **D** = `loginwindow_02.dds`. Rect = `(X, Y, W, H)` on the 1024x768
+canvas; "src" = `(U, V)` top-left into the named atlas. Three-state buttons list
+`normal / hover / pressed` source origins. Action ids are the section 1.2 flow ids.
+
+### 11.2a Upper window - main panel, server listbox, scroll controls
+
+| Role | Atlas | Rect (X,Y,W,H) | Src (U,V) | Kind | States (N/H/P) | Action / caption |
+|---|---|---|---|---|---|---|
+| Main panel art | B | 0,110,1024,490 | 0,0 | image | - | - |
+| Server dropdown / listbox container | B | 270,85,483,490 | 0,490 | panel | - | - |
+| List scroll-up arrow | B | 467,86,13,10 | 483,490 | button | - | 106 |
+| List scroll-down arrow | B | 467,455,13,10 | 505,490 | button | - | 107 |
+| Scrollbar thumb | B | 469,98,9,9 | 496,490 | button | - | 108 |
+| Listbox header / selection bar | B | 207,44,70,17 | 70,980 | image | - | - |
+| 22 x server/channel row labels | (text) | X=50, Y=100..478 step 18, 383x50 | - | label | - | captions 4001..4022 |
+
+### 11.2b Background + two channel-selector blocks
+
+| Role | Atlas | Rect (X,Y,W,H) | Src (U,V) | Kind | Action |
+|---|---|---|---|---|---|
+| Full background art panel | A | 0,0,1024,398 | 0,0 | panel | - |
+| Second main-panel layer | B | 270,85,483,490 | 0,490 | panel | - |
+| Header strip | B | 207,44,70,17 | 0,980 | image | - |
+| Channel block (loop x2): header | D | X,390,174,21 | per-block | image | - |
+| Channel block: body | D | X+47,97,100,372 | srcV,6 | image | - |
+| Channel block: 3-state toggle | D | X-6,97,202,372 | 9,6 / 220,6 / 220,6 | 3-state button | 400, 401 |
+| Channel block: 2 text labels | (text) | X,410,174,20 and X,430,174,20 | - | label | - |
+
+- **Channel-block loop:** two iterations; block X starts at **30**, step **+233**; the body source V
+  starts at **448**, step **+124**. The two toggles carry actions **400** and **401**.
+
+### 11.2c Decoration sprites + server-row select buttons
+
+| Role | Atlas | Rect (X,Y,W,H) | Src (U,V) | Kind | States (N/H/P) | Action |
+|---|---|---|---|---|---|---|
+| 3 x small badges / arrows | B | 0,0,60,39 | 500,786 | image | - | - |
+| Scrollbar thumb (dynamic Y) | D | 0,(runtime),46,168 | 700,18 | image | - | - |
+| 8 x server-row select | B | X=13, Y=66, 47x18, X step +47 | 596,985 / 643,985 / 643,985 | 3-state button | 115 + index |
+| Large action button | A | 456,-3,111,38 | 792,398 / 602,416 / 602,416 | 3-state button | - |
+| Its caption/face image | A | 407,-3,210,70 | 743,398 | image | - |
+
+### 11.2d Notice / error dialogs (shared dialog panel)
+
+| Role | Atlas | Rect (X,Y,W,H) | Src (U,V) | Kind | States (N/H/P) | Action / caption |
+|---|---|---|---|---|---|---|
+| Dialog #1 panel (notice) | C | 342,289,340,190 | 318,647 | panel | - | - |
+| Dialog #1 body text | (text) | 10,100,330,20 | - | label (center) | - | caption 4023 |
+| Dialog #1 OK | C | 120,136,113,40 | 302,900 / 302,900 / 415,900 | 3-state button | 113 |
+| Dialog #2 panel (error) | C | 342,289,340,190 | 318,647 | panel | - | - |
+| Dialog #2 body text | (text) | 10,100,330,20 | - | label (left) | - | caption 4024 |
+| Dialog #2 OK | C | 120,136,113,40 | 302,860 / 302,860 / 415,860 | 3-state button | 114 |
+
+The dialog panel source `(318,647) 340x190` is the shared notice/error/quit frame; the quit-confirm
+and generic-error dialogs reuse the same rect (see section 11.2f for the trailing quit/error panels).
+
+### 11.2e Bottom login form (the ID/PW box) - core fidelity target
+
+| Role | Atlas | Rect (X,Y,W,H) | Src (U,V) | Kind | States / notes | Action |
+|---|---|---|---|---|---|---|
+| Bottom login-bar panel | A | 0, 326*H/768, 1024,442 | 0,582 | panel | Y scales with screen height | - |
+| **Confirm button** (gold) | A | 456,166,112,39 | 154,398 / 378,398 / 378,398 | 3-state button | login submit; word baked into art | **102** |
+| Confirm-button face plate | A | 265,0,494,113 | 0,469 | image | - | - |
+| Inner form box (layout only) | (none) | 0,0,1024,100 | - | panel | invisible | - |
+| Account-label caption art | A | 340,30,38,13 | 0,398 | image | **baked art** | - |
+| Password-label caption art | A | 507,30,49,13 | 38,398 | image | **baked art** | - |
+| Small decoration plate | A | 619,86,67,13 | 87,398 | image | **baked art** | - |
+| **ID input field** | A | 390,32,102,13 | 615,404 | text box | max length 16 (UI cap; section 1.3) | **109** |
+| **Password input field** | A | 568,32,102,13 | 615,404 | text box | max length 12, masked (password filter) | **110** |
+| **Save-ID checkbox** | A | 694,86,13,13 | 717,398 (off) / 730,398 (on) | 2-state checkbox | pre-checked from saved-id (section 1.6) | **104** |
+| Secondary bottom button | A | 456,64,112,39 | 266,398 / 490,398 / 490,398 | 3-state button | register / find-password | **103** |
+
+> The account / password / confirm / save-id Korean words are **baked into `login_slice1.dds`** (the
+> caption-art plates and the confirm-button face) - they are **not** message-catalogue strings. Only
+> the server-row labels (4001..4022) and the dialog bodies (4023/4024) are runtime text.
+
+### 11.2f Trailing controls + quit/error dialogs
+
+| Role | Atlas | Rect (X,Y,W,H) | Src (U,V) | Kind | States (N/H/P) | Action |
+|---|---|---|---|---|---|---|
+| PIN modal sub-window mount | - | 347,173,329,422 | - | child window | initially hidden (see section 11.3) | - |
+| Small sub-panel | (none) | 356,531,313,132 | - | panel | - | - |
+| Image plate | A | 67,48,178,13 | 0,437 | image | - | - |
+| Image plate | A | 0,100,313,32 | 289,437 | image | - | - |
+| Button | B | 40,82,110,38 | 520,492 / 520,492 / 635,492 | 3-state button | 111 |
+| Button | B | 164,82,110,38 | 750,492 / 750,492 / 865,492 | 3-state button | 112 |
+| Quit-confirm dialog panel | C | 342,289,340,190 | 318,647 | panel | - | - |
+| Generic error dialog panel | C | 342,289,340,190 | 318,647 | panel | - | - |
+
+## 11.3 PIN / second-password modal - layout & keypad behaviour (CODE-CONFIRMED)
+
+The PIN modal (section 1.4a) is the second-password child window mounted over the login background.
+It uses two atlases only: **`password.dds`** (all digit-tile and reset/OK/cancel button art) and the
+shared dialog/frame atlas (`InventWindow.dds`) for the framed background quad (source
+`(318,647) 340x190`).
+
+- **Modal panel rect:** `347, 173, 329, 422` on the canvas (panel-local coordinates below are
+  relative to this panel).
+- **No runtime text.** The number-entry caption, the warning line, and the modal title are all
+  **baked into the atlas art** - the modal calls no caption lookup. The entered PIN is held as an
+  internal string (<= 4 chars) and shown as a masked `*`-per-digit string; there is no text-box
+  widget.
+
+### 11.3a Keypad tile grid (2 rows x 5 columns)
+
+| Property | Value |
+|---|---|
+| Column count | 5 (positions 0..9, row-major) |
+| Tile X (panel-local) | `55 * (p mod 5) + 28` -> columns **28, 83, 138, 193, 248** |
+| Tile Y (panel-local) | **170** for top row (p < 5), **230** for bottom row (p >= 5) |
+| Tile size | **52 x 52** |
+| Column spacing | 55 px |
+| Row spacing | 60 px |
+
+### 11.3b Scrambled-digit glyphs (sourced from `password.dds`)
+
+The keypad does **not** build one button per position. For **each** of the 10 positions it builds a
+stack of **10 overlapping digit-graphic buttons** (one per digit value 0..9) at the same tile rect -
+**100 button widgets total**. Per position, exactly one digit graphic is made visible; the rest are
+hidden. The visible digit at position `p` is `perm[p]` from the scramble (section 11.3c).
+
+- **Digit glyph source.** For digit value `d`, the source **row** is `d * 52` (rows
+  `0, 52, ..., 468`). The three button states read from three source **columns**:
+  **normal = 560, hover = 664, pressed = 612**, each tile `52 x 52`. So digit `d`'s normal-state
+  glyph is `password.dds` source rect `(560, d*52, 52, 52)`.
+
+### 11.3c Keypad scramble (CODE-CONFIRMED; live re-roll-on-reset UNVERIFIED)
+
+The digit->position mapping is produced **entirely client-side** - there is no server permutation and
+no fixed local table:
+
+1. On modal open (and on every Reset press), the C-runtime RNG is seeded from the **current local
+   wall-clock time**.
+2. A textbook **Fisher-Yates shuffle** permutes the digit pool `[0..9]` (each index draws a random
+   value and swaps; the random range is extended past the 15-bit RNG limit).
+3. For each position `p`, the digit-button matching `perm[p]` is set visible and the other nine
+   hidden - so position `p` displays digit `perm[p]`.
+
+Result: a **fresh random permutation of 0-9 every time the modal opens and every time Reset is
+pressed**. The on-open re-roll is statically confirmed; the live re-roll on Reset is debugger-
+testable and currently **UNVERIFIED**.
+
+### 11.3d Reset / OK / Cancel buttons + key tags
+
+Button **tags** are integer ids stored on each widget and read back by the keypad event handler.
+
+| Role | Tag | Rect (panel-local, X,Y,W,H) | `password.dds` src (normal / hover / pressed) | Behaviour |
+|---|---|---|---|---|
+| Digit tiles 0-9 | 0..9 | per section 11.3a (52x52) | 560 / 664 / 612, row = digit*52 | append digit (cap 4), mask `*` |
+| Reset (clear + re-shuffle) | 11 | 243,133,58,30 | 663,8 / 663,88 / 663,48 | re-run scramble (section 11.3c) |
+| OK (submit) | 12 | 90,290,154,58 | 330,0 / 330,116 / 330,58 | submit second password (PIN -> login blob, section 1.4a) |
+| Cancel (close/abort) | 13 | 90,350,154,58 | 486,0 / 486,116 / 486,58 | close / abort modal |
+
+> The OK submit hands the PIN to the protocol layer (the second-password / PIN destination is the
+> optional login-blob field - owned by `login_flow.md` section 4.2; the in-game gift-character
+> variant of this modal routes its submit through the net handler with a separate constant). The
+> modal fires no VFX and no PIN-specific SFX of its own.
+
+## 11.4 Server-list overlay - widget layout (CODE-CONFIRMED literals)
+
+Server selection is a **visibility state (sub-state 37) of the same login window** (section 2), so it
+reuses the same four atlases loaded once at login-scene build. Shorthand: **A**=`login_slice1.dds`,
+**B**=`loginwindow.dds`, **C**=`InventWindow.dds`, **D**=`loginwindow_02.dds`.
+
+| Role | Atlas | Src rect (U,V,W,H) | Dst (X,Y) | Kind | Action / caption |
+|---|---|---|---|---|---|
+| Server-list backdrop band | A/D | 0, 326*.., 1024, 442 | 0, 326*H/768 | image (dimmed band) | - |
+| Parchment scroll panel (server tab) | D | per-row 100x372 / 202x372 plates | ~448 region | panel | - |
+| Channel-tab plates (loop x2) | D | 100x372 / 202x372 | X step +233, dst step +124 | image | row ids 400+ |
+| Server-row buttons x10 (loop) | B | 13,66,47,18, X step +47 | sprite row y=985 | 3-state button | **115..124** (id-115 = index) |
+| List column header labels | (text) | - | in scroll | label | captions 4029..4032 |
+| List up / down arrows | B | 690,985 / 784,985 | window-anchored | button | - |
+| **Refresh button** | A | 456,-3,111,38 | 792,398 | button | **105** (10 s cooldown -> re-enter fetch) |
+| Refresh-button label plate | A | 407,-3,210,70 | 743,398 | image (gold plate) | **baked art** |
+| Availability indicator (per row) | (text) | - | per row | label | population captions 6001..6005 |
+| Connecting dialog (states 35/39) | C | reuses notice panel (318,647 340x190) | centered | panel | caption 4023-candidate |
+| Sword/arrow cursor | `data/cursor/stand.dds` | - | follows mouse | sprite | verified vs `data/cursor/game.ver` |
+
+- **Per-server-row record:** 8 bytes/entry (decode owned by section 2.2 / `login_flow.md`): `+0` u16
+  server id, `+2` i16 status, `+4` i16 population code (color thresholds 500/800/1200), `+6` i16
+  extra/flag. Row count from the window's row-count field. Population captions **6001..6005**; column
+  headers **4029..4032**; unknown-id fallback **5901**.
+- The Refresh and Cancel button **words** may be baked atlas art (gold plates) rather than caption ids
+  - UNVERIFIED which; the rects (Refresh `456,-3,111x38`; Cancel = login action 111) are firm.
+- The left-scroll calligraphy header is a runtime caption (integer id, **UNVERIFIED** exact id -
+  needs a `msg.xdb` extract).
+
+## 11.5 Char-select scene - widget layout (CODE-CONFIRMED literals)
+
+The char-select 2D builder composites its chrome from the shared atlases (section 11.1 note). The
+slot-frame and Create/Delete/Enter button art are **sub-rects of `loginwindow.dds`** (shorthand **T1**
+below); one conditional overlay button is sourced from `mainwindow.dds` (**T2**). The 5 live 3D
+preview actors and the preview camera are owned by sections 3.3-3.5 (not layout art).
+Rect = `(X, Y, W, H)`.
+
+### 11.5a Window chrome / root panels
+
+| Role | Atlas | Rect (X,Y,W,H) | Src (U,V) | Kind |
+|---|---|---|---|---|
+| Root window frame panel | (none) | X=(W/2-288), 575, 244,187 | - | panel |
+| Title/info chrome plate A | T1 | 0,12,200,46 | 608,793 | image |
+| Title/info chrome plate B | T1 | 200,0,176,58 | 608,735 | image |
+| Title/info chrome plate C | T1 | 376,12,201,46 | 608,689 | image |
+| Centered char-info panel | (none) | X=(W-215)/2, 0, 244,187 | - | panel |
+| Char-info background art | T1 | (centered),0,215,147 | 556,542 | image |
+
+### 11.5b Character SLOT tabs (the per-slot frame art) - 3 slots, 113x40, all from `loginwindow.dds`
+
+Each slot-select button **is** the per-slot frame art; its normal-state source rect gives the slot
+frame graphic. Slot occupancy and the per-slot 3D preview / name-level-class display are
+descriptor-driven (sections 3.2-3.3), not layout art.
+
+| Slot | Action id | Rect (X,Y,W,H) | Normal (U,V) | Hover (U,V) | Pressed (U,V) |
+|---|---|---|---|---|---|
+| Slot 1 | 1 | 67,17,113,40 | 675,795 | 675,795 | 483,883 |
+| Slot 2 | 2 | 232,7,113,40 | 640,742 | 640,742 | 483,923 |
+| Slot 3 | 3 | 393,17,113,40 | 625,691 | 625,691 | 483,963 |
+
+### 11.5c Create / Delete / Enter buttons - 59x20, all from `loginwindow.dds`
+
+| Role | Action id | Rect (X,Y,W,H) | Normal (U,V) | Hover (U,V) | Pressed (U,V) |
+|---|---|---|---|---|---|
+| **Create** | **4** | 130,112,59,20 | 0,1004 | 0,1004 | 59,1004 |
+| **Delete** | **5** | 42,112,59,20 | 118,1004 | 118,1004 | 177,1004 |
+| **Enter** | **6** | 112,112,59,20 | 236,1004 | 236,1004 | 295,1004 |
+| Conditional overlay button | 61 | 20,112,95,20 | (T2 `mainwindow.dds`, computed) | - | pressed V=500 |
+
+The conditional overlay button (action 61, from `mainwindow.dds`) is built only when a slot condition
+holds; its role (a "select/play" overlay on the active slot) is **UNVERIFIED**. The Create/Delete/
+Enter rects/actions agree with the section 4/section 5 correction (action ids 4/5/6, not atlas-X
+coordinates).
+
+### 11.5d Per-slot info plates + number cells (chrome detail)
+
+The per-slot info region draws chrome plates plus a grid of **placeholder number-glyph cells** whose
+digits are substituted at runtime from the slot's stat/level values (the build-time source rects are
+placeholders). All from `loginwindow.dds` unless noted.
+
+| Role | Rect (X,Y,W,H) | Src (U,V) |
+|---|---|---|
+| Info plate | 0,142,215,147 | 556,542 |
+| Info plate | 215,0,29,22 | 556,729 |
+| Info plate | 0,352,29,40 | 556,689 |
+| Number-glyph cell | 12,238,34,18 | 297,980 |
+| Number-glyph cell | 12,262,34,18 | 331,980 |
+| Number-glyph cell | 12,286,34,18 | 365,980 |
+| Stat-number cell block (x7) | X=46/51, Y=193..286 step 24, 157x18 | 140,980 (placeholder) |
+
+The per-slot info-line **caption labels** carry caption ids **48001, 48003, 48004, 48005** (the
+name/level/position label set); additional chrome captions are **46001, 46002, 14001, 14002, 2206,
+63030** (all integer ids; text VFS-only, not reproduced). The scene-ambient VFX id is **380003000**
+(section 3.5 / effect catalogue); the enter-world cue is SFX **920100200** (section 9).
+
+> **No standalone class-icon-by-index widget exists in the 2D builder.** Per-slot class is conveyed
+> by the descriptor-driven 3D preview (section 3.3) and the slot frame art (section 11.5b); the
+> inline-source cells in the info region are **number-glyph placeholders**, not class icons. A 2D
+> class badge keyed by a class index is **UNVERIFIED / absent** in this builder (Open question 11).
+
+## 11.6 Intro / opening sequence (CODE-CONFIRMED art; sequencing per section 1.5)
+
+Before the login form (login flow sub-states 1-5), the engine plays a fullscreen slideshow and a
+banner-pan animation:
+
+- **Slides:** four 1024x768 opening frames (`data/ui/openning_001.dds`..`004.dds`) plus the tall
+  1024x2048 scenario strip (`data/ui/openning_scenario.dds`, scrolled vertically).
+- **Banner pan:** two banner panels animate into place (their Y advances from off-canvas to a settled
+  position) - pure procedural positional animation, no external asset.
+- **Intro cue:** the login-enter / intro effect id **861010105** fires at the intro sub-state
+  (SFX/VFX; resolves to `data/sound/2d/<id>.ogg` and/or the effect catalogue - section 9 /
+  `sound_runtime.md`).
+- **Loading transition:** on the credential-submit join (sub-state 40), transition effect ids
+  **30000 / 10001** fire (fade into world-load).
+
+> The exact slideshow timing/sequence is owned by the section 1.5 sub-state machine (states 1-5);
+> section 11.6 records only which art each step composites.
+
+## 11.7 Layout known-unknowns (carried for the engineer)
+
+- **Refresh / Cancel server-list button text:** baked atlas art vs caption id - UNVERIFIED.
+- **Server-list calligraphy header caption id:** an integer caption id, exact value needs a `msg.xdb`
+  extract.
+- **Char-select conditional overlay button (action 61):** role (select vs play overlay) UNVERIFIED;
+  its `mainwindow.dds` source rect is computed at runtime, not a literal.
+- **Char-select number-glyph runtime mapping:** the build-time cell source rects are placeholders;
+  the per-digit atlas mapping at runtime (analogous to the PIN digit/row scheme) was not chased.
+- **2D class-icon-by-index widget:** absent in the char-select 2D builder (descriptor-driven instead)
+  - Open question 11.
+- **Live PIN re-roll on Reset:** static-confirmed, debugger-testable, UNVERIFIED live.
+- **`characwindow.dds` internal frame rects:** the dedicated char-select atlas's sub-rects were not
+  individually catalogued (the builder primarily uses `loginwindow.dds` / `mainwindow.dds` sub-rects).

@@ -1,0 +1,51 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED offsets; slot@0 + version-blob + total 40 are static-HIGH. capture_verified: false.
+
+name: CmsgEnterGameRequest
+opcode: 0x10009           # major 1, minor 9 -> (1 << 16) | 9
+direction: C2S
+size: 40                  # fixed 40-byte (0x28) payload
+spec: packets/cmsg_char_enter.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Enter-world request. Built by the enter-selected-character helper into a zero-initialised
+  40-byte stack buffer: the chosen slot index, a 33-byte client-version blob (the client's
+  game-version string), and a derived 32-bit version-check value computed from the local
+  version table (an anti-tamper / build stamp). Server replies with S2C 3/5 EnterGameAck and the
+  client transitions into the world-enter flow.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 40.
+fields:
+  - { name: SlotIndex,    type: u8 }            # 0x00  selected character slot (0..4)
+  - { name: VersionBlob,  type: "bytes[33]" }   # 0x01  client/game-version string (asciiz within the 33-byte buffer)
+  - { name: Pad,          type: "bytes[2]" }    # 0x22  alignment gap before the version-check int (observed unwritten)
+  - { name: VersionCheck, type: u32 }           # 0x24  derived version-check value (anti-tamper build stamp)
+
+notes: |
+  Static analysis only; no capture or debugger read this lane. The enter-selected-character helper
+  memsets a 40-byte buffer to zero, then partially fills it. Frame = 8-byte header + 40 = 48 bytes.
+
+    0x00 (1B)  SlotIndex    : the chosen character slot, range 0..4. STATIC HIGH. The slot must hold
+                              a real (non-blank) character before this fires.
+    0x01 (33B) VersionBlob  : the client/game-version string, copied as a fixed 33-byte field
+                              (NUL-terminated ASCII within the buffer). STATIC HIGH for the 33-byte
+                              field; the exact string source is the client version resource.
+    0x22 (2B)  Pad          : a 2-byte alignment gap before the u32; observed unwritten (zero).
+                              STATIC MEDIUM (the exact pad-vs-int boundary is capture/debugger work).
+    0x24 (4B)  VersionCheck : a derived 32-bit value computed from the local version table (a
+                              build-stamp / anti-tamper check value). STATIC HIGH for placement,
+                              MEDIUM for the exact derivation.
+
+  SEQUENCE: C2S precursor to S2C 3/5 SmsgEnterGameAck (packets/3-5_enter_game_response.yaml). After
+  sending, the client stages the selected slot's spawn descriptor + stat block locally and enters
+  the world-enter flow.
+
+  UNKNOWNS (capture/debugger required): the exact VersionCheck derivation; whether the 2-byte Pad
+  truly stays zero or carries a small trailing field; the VersionBlob string format.
+
+  RELATED: 1/0 logout, 1/6 create, 1/7 select, 1/13 rename, 1/14 slot-move. All gated by the single
+  select-window net-busy latch.
+
+  UNBLOCKS: Client.Application SelectCharacter / EnterGame use-case (ack 3/5).

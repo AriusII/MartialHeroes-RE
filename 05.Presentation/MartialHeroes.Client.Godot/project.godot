@@ -15,29 +15,17 @@ run/main_scene="res://Scenes/Boot.tscn"
 config/features=PackedStringArray("4.6", "C#", "Forward Plus")
 config/icon="res://icon.svg"
 
-[display]
-
-; spec: Docs/RE/specs/ui_system.md §8.0 — "Reference canvas: 1024 × 768 pixels". CODE-CONFIRMED.
-; spec: Docs/RE/specs/ui_system.md §13.1 — "implement UI root as Control with reference size (1024,768),
-;        then use Godot's CanvasLayer / stretch_mode to scale to the actual window size". CODE-CONFIRMED.
-; stretch/mode="canvas_items": 2D UI (CanvasLayer + Control nodes) is scaled to fill the window
-;   while the 3D viewport (World scene) renders at native resolution. This is the correct mode so
-;   the 2D menus scale but the 3D world is not affected.
-; stretch/aspect="keep": letterbox — preserves the 4:3 ratio of the 1024×768 canvas exactly,
-;   adding black bars on widescreen windows rather than stretching or clipping the form.
-window/size/viewport_width=1024
-window/size/viewport_height=768
-window/size/initial_screen=0
-window/size/mode=0
-window/size/initial_position_type=1
-window/stretch/mode="canvas_items"
-window/stretch/aspect="keep"
-
 [autoload]
 
 FontBootstrap="*res://Autoload/FontBootstrap.cs"
 ClientContext="*res://Autoload/ClientContext.cs"
 McpBridgeGame="*res://mcp_bridge_game.gd"
+
+[display]
+
+window/size/viewport_width=1024
+window/size/viewport_height=768
+window/stretch/mode="canvas_items"
 
 [dotnet]
 

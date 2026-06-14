@@ -1,3 +1,8 @@
+# *** SUPERSEDED -> see packets/cmsg_char_move.yaml ***
+# The workflow-spine analysis re-attributes 1/14 from delete to slot-MOVE (1-byte slot index);
+# see cmsg_char_move.yaml. The opcodes.md 1/14 row points there. move-vs-delete naming is a
+# Tier-1 reconciliation. Retained as historical provenance only.
+#
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
 

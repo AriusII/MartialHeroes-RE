@@ -79,6 +79,12 @@ public sealed partial class BootFlow : Node
     private ScreenHost? _host;
     private UiAssetLoader? _sharedAssets;
 
+    // Front-end audio + cursor manager.
+    // spec: Docs/RE/specs/sound.md — BGM 920100200, UI click 861010101. CODE-CONFIRMED.
+    // spec: Docs/RE/specs/intro_sequence.md §4 — intro stinger 910061000. CODE-CONFIRMED.
+    // spec: Docs/RE/specs/frontend_scenes.md §11 — data/cursor/stand.dds cursor. CODE-CONFIRMED.
+    private FrontEndAudio? _audio;
+
     // Credential stash: held across screen transitions (login → server-select → PIN → char-select).
     // Never domain state; purely view-session state so the flow can reassemble the TAB string.
     private string _account = "";
@@ -156,6 +162,73 @@ public sealed partial class BootFlow : Node
         _host = new ScreenHost { Name = "ScreenHost" };
         _uiLayer.AddChild(_host);
 
+        // Create the audio manager and add it to the scene so it initialises its players.
+        // spec: sound.md — BGM 920100200, click SFX 861010101. CODE-CONFIRMED.
+        // spec: intro_sequence.md §4 — intro stinger 910061000. CODE-CONFIRMED.
+        // spec: frontend_scenes.md §11 — cursor stand.dds. CODE-CONFIRMED.
+        _audio = new FrontEndAudio
+        {
+            Name = "FrontEndAudio",
+            SharedAssets = _sharedAssets,
+        };
+        AddChild(_audio);
+
+        // Boot entry: intro scene before login.
+        // spec: Docs/RE/specs/intro_sequence.md §0 — "pre-login intro". CODE-CONFIRMED.
+        ShowIntro();
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 0: Intro / OpeningWindow
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Shows the pre-login intro (scenario crawl + slideshow) as the first boot screen.
+    /// spec: Docs/RE/specs/intro_sequence.md §0–§6. CODE-CONFIRMED.
+    /// Transitions to login when the sequence completes or is skipped.
+    ///
+    /// When <c>dev_skip_intro=1</c> is set in <c>client_dir.cfg</c> the intro is bypassed
+    /// immediately (useful for screenshot/headless tests where the 70-second dwell is too long).
+    /// DEV ONLY — never active in production.
+    /// </summary>
+    private void ShowIntro()
+    {
+        // Dev skip: bypass the intro if the cfg flag is set.
+        // When combined with dev_offline_flow, also skip login/server/PIN steps and go straight
+        // to char-select so screenshot tests can capture the full char-select screen quickly.
+        if (ReadCfgKey("dev_skip_intro", "0") is "1" or "true" or "yes")
+        {
+            _audio?.PlayBgm();
+            if (IsDevOfflineMode())
+            {
+                GD.Print("[BootFlow] dev_skip_intro=1 + dev_offline_flow=1 → skipping to char-select.");
+                ShowCharacterSelect(pin: "");
+            }
+            else
+            {
+                GD.Print("[BootFlow] dev_skip_intro=1 → skipping intro, going straight to login.");
+                ShowLogin();
+            }
+            return;
+        }
+
+        var intro = new OpeningWindow
+        {
+            Name = "OpeningWindow",
+            SharedAssets = _sharedAssets,
+            Audio = _audio,
+        };
+        intro.IntroFinished += OnIntroFinished;
+        _host!.SetScreen(intro);
+        GD.Print("[BootFlow] Showing OpeningWindow (intro sequence).");
+    }
+
+    private void OnIntroFinished()
+    {
+        GD.Print("[BootFlow] Intro finished → Login screen.");
+        // Start the front-end BGM now that the intro stinger has played.
+        // spec: sound.md front-end cue map — BGM 920100200 loops on front-end screens. CODE-CONFIRMED.
+        _audio?.PlayBgm();
         ShowLogin();
     }
 
@@ -180,6 +253,10 @@ public sealed partial class BootFlow : Node
 
     private void OnLoginAccepted(string account)
     {
+        // UI click SFX on login confirmation.
+        // spec: sound.md — UI click 861010101. CODE-CONFIRMED.
+        _audio?.PlayClickSfx();
+
         // Store account name so it can be forwarded to UseCases.LoginAsync at the join point.
         // The password is NOT stored — it lives only in the PIN modal / flow context
         // (in a real build it travels via RSA 1/4, never in a plain field here).
@@ -236,6 +313,10 @@ public sealed partial class BootFlow : Node
 
     private void OnServerSelected(int serverId)
     {
+        // UI click SFX on server selection.
+        // spec: sound.md — UI click 861010101. CODE-CONFIRMED.
+        _audio?.PlayClickSfx();
+
         _selectedServerId = serverId;
         GD.Print($"[BootFlow] Server selected: id={serverId} → PIN modal.");
         ShowPinModal();
@@ -264,6 +345,10 @@ public sealed partial class BootFlow : Node
 
     private void OnPinSubmitted(string pin)
     {
+        // UI click SFX on PIN submit.
+        // spec: sound.md — UI click 861010101. CODE-CONFIRMED.
+        _audio?.PlayClickSfx();
+
         // Remove the PIN modal (find and free it from the CanvasLayer).
         RemovePinModal();
 
@@ -349,6 +434,10 @@ public sealed partial class BootFlow : Node
 
     private void OnEnterGameRequested(string characterName, int slotIndex)
     {
+        // UI click SFX on Enter Game.
+        // spec: sound.md — UI click 861010101. CODE-CONFIRMED.
+        _audio?.PlayClickSfx();
+
         GD.Print($"[BootFlow] Enter game: character='{characterName}' slot={slotIndex}.");
 
         // Call the use case to advance the FSM and send the 1/9 enter-game request.
@@ -451,6 +540,10 @@ public sealed partial class BootFlow : Node
 
     private void TeardownMenu()
     {
+        // Stop the front-end BGM when leaving the menu flow (entering the world).
+        // spec: sound.md — BGM 920100200 stops on world enter. CODE-CONFIRMED.
+        _audio?.StopBgm();
+
         if (_uiLayer is not null && IsInstanceValid(_uiLayer))
         {
             _uiLayer.QueueFree();

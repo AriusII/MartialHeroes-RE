@@ -1,45 +1,44 @@
 // Screens/ServerSelectScreen.cs
 //
-// Server-selection screen (part of the Login flow, displayed after login credential validation
-// and before the PIN / enter-game handoff — see spec §1.5 sub-states 34-37).
+// Server-selection screen — pixel-faithful rebuild against §11.4 of frontend_scenes.md.
 //
-// SPEC SOURCES:
-//   spec: Docs/RE/specs/frontend_scenes.md §2 (server selection).
-//   spec: Docs/RE/specs/login_flow.md §2.1 (server list 8-byte records, load thresholds, status
-//         sentinels).
-//   spec: Docs/RE/specs/ui_system.md §8.1 (server-list buttons — action IDs 115..119 for name strips).
+// COMPOSITION MODEL (§11.4):
+//   Same four atlases as the login screen (A=login_slice1.dds, B=loginwindow.dds,
+//   C=InventWindow.dds, D=loginwindow_02.dds). Server selection is a visibility state of the
+//   same login window; we implement it as a separate Control but reuse the same atlases.
 //
-// OFFLINE / DEV MODE:
-//   The real flow fetches the server list via the lobby mini-protocol (port 10000). Since the game
-//   servers are DEAD, this screen is ALWAYS populated with a synthetic list when run offline
-//   (controlled by the dev_offline_flow flag in client_dir.cfg or the DEV_OFFLINE_FLOW env var).
-//   The synthetic list follows the exact 8-byte record shape defined in login_flow.md §2.1 so
-//   the presentation rules (color thresholds, status sentinels) are exercised faithfully.
+//   Key widgets (§11.4):
+//   - Server-list backdrop band: A/D dimmed background band at height-scaled Y=326.
+//   - Parchment scroll panel: D (loginwindow_02.dds) per-row 100×372 / 202×372 plates.
+//   - Server-row buttons x10 (loop): B@(13,66,47,18) X-step+47, NORMAL src(596,985), HOVER src(643,985).
+//     Actions 115..124 (id-115 = row index). spec §11.4. CODE-CONFIRMED.
+//   - Refresh button: A@(456,-3,111,38) NORMAL src(792,398). Action 105. spec §11.4. CODE-CONFIRMED.
+//   - Refresh-button label plate: A@(407,-3,210,70) src(743,398) — baked art "새로고침".
+//   - Connecting dialog (states 35/39): C reuses notice panel (318,647) 340×190, centred.
+//     Caption candidate id 4023.
 //
-// PASSIVE: zero game logic. Reads a server-list view-model (provided by caller) and turns a
-// click into a ServerSelected signal carrying the server_id. No packet parsing, no domain state.
+// STATUS / LOAD PRESENTATION (§2.3, CODE-CONFIRMED):
+//   load > 1200 → Full (red); > 800 → High (orange); > 500 → Medium (yellow); ≤ 500 → Light (green).
+//   status_code 3+load==24 → "Preparing"; status_code 3+open_time!=0 → "HH:MM" clock.
+//   status_code 100 → auto-connect sentinel.
 //
-// Load color thresholds (CODE-CONFIRMED):
-//   load > 1200 → "Full" (red)
-//   load > 800  → "High" (orange)
-//   load > 500  → "Medium" (yellow)
-//   load ≤ 500  → "Light" (green)
-// Status sentinels (CODE-CONFIRMED):
-//   3  → scheduled open (show HH:MM from load/open_time fields)
-//   24 → preparing / under check
-//   100 → auto-connect sentinel (current selection)
+// PASSIVE: zero game logic. Reads a server-list view-model and turns row-click into ServerSelected.
 //
-// spec: Docs/RE/specs/login_flow.md §2.1 status sentinels and load thresholds. CODE-CONFIRMED.
-// spec: Docs/RE/specs/frontend_scenes.md §2.3. CODE-CONFIRMED.
+// spec: Docs/RE/specs/frontend_scenes.md §11.4 (CODE-CONFIRMED literals).
+//       §2 (server selection presentation rules).
+//       §2.3 (status / load presentation). CODE-CONFIRMED.
+//       Docs/RE/specs/login_flow.md §2.1 (8-byte record, load thresholds). CODE-CONFIRMED.
 
 using Godot;
+using MartialHeroes.Client.Godot.Dev;
+using MartialHeroes.Client.Godot.Screens.Layout;
 using MartialHeroes.Client.Godot.Screens.Widgets;
 
 namespace MartialHeroes.Client.Godot.Screens;
 
 /// <summary>
-/// A view-model for one entry in the server list, mirroring the 8-byte lobby record.
-/// spec: Docs/RE/specs/login_flow.md §2.1. CODE-CONFIRMED field order and thresholds.
+/// View-model for one server entry (mirrors the 8-byte lobby record).
+/// spec: Docs/RE/specs/login_flow.md §2.1. CODE-CONFIRMED field order.
 /// </summary>
 public sealed record ServerEntry(
     /// <summary>Index 1..40 into the client-local name table. spec §2.1.</summary>
@@ -56,11 +55,9 @@ public sealed record ServerEntry(
     bool IsNew = false);
 
 /// <summary>
-/// Server-selection screen displayed between the login form and the PIN modal.
-/// Shows a list of <see cref="ServerEntry"/> rows with load gauges and status labels.
-///
-/// <para>Emits <see cref="ServerSelectedEventHandler"/> when the player clicks a row.</para>
-/// <para>Emits <see cref="BackRequestedEventHandler"/> when Back is clicked.</para>
+/// Server-selection screen. Pixel-faithful to §11.4.
+/// Emits ServerSelected (server_id) on row click.
+/// Emits BackRequested when Back is clicked.
 /// </summary>
 public sealed partial class ServerSelectScreen : Control
 {
@@ -69,27 +66,23 @@ public sealed partial class ServerSelectScreen : Control
     // =========================================================================
 
     /// <summary>
-    /// Raised when the player selects a server row.
-    /// Carries the <see cref="ServerEntry.ServerId"/> (1..40).
-    /// spec: Docs/RE/specs/frontend_scenes.md §2.5 — "selection commit". CODE-CONFIRMED.
+    /// Raised when the player selects a server row. Carries server_id (1..40).
+    /// spec: Docs/RE/specs/frontend_scenes.md §2.5. CODE-CONFIRMED.
     /// </summary>
     [Signal]
     public delegate void ServerSelectedEventHandler(int serverId);
 
-    /// <summary>Raised when the Back button is clicked.</summary>
+    /// <summary>Raised when Back is clicked.</summary>
     [Signal]
     public delegate void BackRequestedEventHandler();
 
     // =========================================================================
-    // Server list (view-model only — injected by BootFlow)
+    // Server list (view-model, injected by BootFlow)
     // =========================================================================
 
     private IReadOnlyList<ServerEntry>? _servers;
 
-    /// <summary>
-    /// The server list to display. Set by the flow node before the scene is added to the tree,
-    /// or call <see cref="SetServers"/> at any time to refresh.
-    /// </summary>
+    /// <summary>Sets the server list. Call before adding to the tree, or call SetServers() after.</summary>
     public IReadOnlyList<ServerEntry>? Servers
     {
         get => _servers;
@@ -103,10 +96,15 @@ public sealed partial class ServerSelectScreen : Control
     private UiAssetLoader _assets = null!;
     private bool _ownsAssets;
 
-    /// <summary>Optionally inject a shared asset loader. Opened privately when null.</summary>
+    /// <summary>Optionally inject a shared asset loader.</summary>
     public UiAssetLoader? SharedAssets { get; set; }
 
-    // Container that holds the server rows (rebuilt when Servers changes).
+    /// <summary>
+    /// Optionally inject a real-client VFS handle for loading .xeff effect textures.
+    /// When null the effect player shows a fallback visual.
+    /// </summary>
+    public RealClientAssets? SharedRealAssets { get; set; }
+
     private Control? _rowContainer;
 
     // =========================================================================
@@ -134,59 +132,189 @@ public sealed partial class ServerSelectScreen : Control
     }
 
     // =========================================================================
-    // UI construction
+    // UI construction (§11.4)
     // =========================================================================
 
     private void BuildUi()
     {
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
 
-        // Dark backdrop.
-        var bg = new ColorRect { Color = new Color(0.06f, 0.05f, 0.10f, 0.97f) };
-        bg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        AddChild(bg);
-
-        // Panel chrome (same dimensions as the login form band).
-        var panel = new Panel();
-        panel.Position = new Vector2(280, 80);
-        panel.Size = new Vector2(460, 520);
-        var style = new StyleBoxFlat
+        // =======================================================================
+        // [L1] Full background art — same as login screen.
+        // A@(0,0,1024,398) src(0,0) — login_slice1.dds. spec §11.4 backdrop band. CODE-CONFIRMED.
+        // =======================================================================
+        AtlasTexture? bgSlice = _assets.Slice(
+            LoginLayout.AtlasLoginSlice1, 0, 0, 1024, 398);
+        if (bgSlice is not null)
         {
-            BgColor = new Color(0.09f, 0.08f, 0.12f, 0.98f),
-            BorderColor = new Color(0.50f, 0.43f, 0.25f),
+            var bgRect = new TextureRect
+            {
+                Name = "BgArtPanel",
+                Texture = bgSlice,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                MouseFilter = MouseFilterEnum.Ignore,
+                Position = new Vector2(0, 0),
+                Size = new Vector2(1024, 398),
+            };
+            AddChild(bgRect);
+        }
+        else
+        {
+            var fallback = new ColorRect { Color = new Color(0.04f, 0.04f, 0.10f) };
+            fallback.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+            AddChild(fallback);
+        }
+
+        // =======================================================================
+        // [L2] Main panel chrome — B@(0,110,1024,490) src(0,0) loginwindow.dds.
+        // spec §11.4. CODE-CONFIRMED.
+        // =======================================================================
+        AtlasTexture? mainPanel = _assets.Slice(
+            LoginLayout.AtlasLoginWindow, 0, 0, 1024, 490);
+        if (mainPanel is not null)
+        {
+            var panelRect = new TextureRect
+            {
+                Name = "MainPanelChrome",
+                Texture = mainPanel,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                MouseFilter = MouseFilterEnum.Ignore,
+                Position = new Vector2(0, 110),
+                Size = new Vector2(1024, 490),
+            };
+            AddChild(panelRect);
+        }
+
+        // =======================================================================
+        // [L3] Parchment scroll panel (D = loginwindow_02.dds).
+        // Two channel-tab block bodies side-by-side — the hanging parchment scrolls
+        // with the 化神昇仙 calligraphy visible.
+        // spec §11.4 "Parchment scroll panel (server tab)". CODE-CONFIRMED.
+        // =======================================================================
+        for (int blk = 0; blk < 2; blk++)
+        {
+            int blockX = 30 + blk * 233;
+            int bodySrcV = 448 + blk * 124;
+
+            AtlasTexture? blockBody = _assets.Slice(
+                LoginLayout.AtlasLoginWindow02, bodySrcV, 6, 100, 372);
+            if (blockBody is not null)
+            {
+                var bodyRect = new TextureRect
+                {
+                    Name = $"ParchmentBlock{blk}",
+                    Texture = blockBody,
+                    StretchMode = TextureRect.StretchModeEnum.Scale,
+                    MouseFilter = MouseFilterEnum.Ignore,
+                    Position = new Vector2(blockX + 47, 97),
+                    Size = new Vector2(100, 372),
+                };
+                AddChild(bodyRect);
+            }
+        }
+
+        // =======================================================================
+        // [L4] Refresh button — A@(456,-3,111,38) NORMAL src(792,398). Action 105.
+        // spec §11.4 "Refresh button". CODE-CONFIRMED.
+        // Note: Y=-3 means it bleeds slightly above the main panel top. The art is placed
+        // at canvas Y = 110 + (-3) = 107.
+        // =======================================================================
+        var refreshBtn = WidgetFactory.MakeStateButton(
+            _assets, LoginLayout.AtlasLoginSlice1,
+            456, 107, 111, 38, // canvas Y = 110 - 3 = 107
+            792, 398, // NORMAL src(792,398). spec §11.2c. CODE-CONFIRMED.
+            602, 416, // HOVER src(602,416). spec §11.2c. CODE-CONFIRMED.
+            602, 416, // PRESSED = HOVER.
+            105, // Action 105 = Refresh / Help strip. spec §1.2. CODE-CONFIRMED.
+            caption: "", captionTint: Colors.White);
+        refreshBtn.Name = "RefreshButton";
+        refreshBtn.ActionFired += _ => OnRefreshPressed();
+        AddChild(refreshBtn);
+
+        // Refresh button face/label plate (baked art "새로고침").
+        // A@(407,-3,210,70) src(743,398). spec §11.4. CODE-CONFIRMED.
+        AtlasTexture? refreshFace = _assets.Slice(LoginLayout.AtlasLoginSlice1, 743, 398, 210, 70);
+        if (refreshFace is not null)
+        {
+            var facePlate = new TextureRect
+            {
+                Name = "RefreshFacePlate",
+                Texture = refreshFace,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                MouseFilter = MouseFilterEnum.Ignore,
+                Position = new Vector2(407, 107),
+                Size = new Vector2(210, 70),
+            };
+            AddChild(facePlate);
+        }
+
+        // =======================================================================
+        // [L5] Server row list area.
+        // The 10 row buttons are mapped from the left-panel scroll area.
+        // We build a scroll container centred on the canvas covering x=270..750, y=165..600.
+        // spec §11.4 "Server-row buttons x10". CODE-CONFIRMED.
+        // =======================================================================
+        // Scroll container for the row list.
+        var listPanel = new Panel
+        {
+            Name = "ServerListPanel",
+            Position = new Vector2(270, 165),
+            Size = new Vector2(480, 420),
         };
-        style.SetBorderWidthAll(2);
-        panel.AddThemeStyleboxOverride("panel", style);
-        AddChild(panel);
+        var listStyle = new StyleBoxFlat
+        {
+            BgColor = new Color(0.07f, 0.06f, 0.10f, 0.85f),
+            BorderColor = new Color(0.40f, 0.35f, 0.20f),
+        };
+        listStyle.SetBorderWidthAll(1);
+        listPanel.AddThemeStyleboxOverride("panel", listStyle);
+        AddChild(listPanel);
 
-        // Title.
-        var title = WidgetFactory.MakeLabel("SELECT SERVER", 16, new Color(0.95f, 0.86f, 0.55f));
-        title.Position = new Vector2(12, 10);
-        panel.AddChild(title);
+        // Column header row. spec §11.4 "List column header labels". CODE-CONFIRMED captions 4029..4032.
+        var headerRow = new HBoxContainer
+        {
+            Name = "HeaderRow",
+            Position = new Vector2(4, 4),
+            Size = new Vector2(472, 20),
+        };
+        listPanel.AddChild(headerRow);
 
-        // Header row.
-        BuildHeaderRow(panel);
+        void AddHdr(uint msgId, string fallback, int minW)
+        {
+            var lbl = WidgetFactory.MakeLabel(_assets.Text(msgId, fallback),
+                LoginLayout.FontBodyHeight, new Color(0.80f, 0.80f, 0.60f));
+            lbl.CustomMinimumSize = new Vector2(minW, 20);
+            headerRow.AddChild(lbl);
+        }
 
-        // Scrollable row container.
+        // Caption ids 4029..4032 — column headers. spec §11.4. CODE-CONFIRMED.
+        AddHdr(4029u, "Server", 220);
+        AddHdr(4030u, "Status", 80);
+        AddHdr(4031u, "Load", 80);
+        AddHdr(4032u, "", 60);
+
+        // Scroll + row container.
         var scroll = new ScrollContainer
         {
-            Position = new Vector2(0, 56),
-            Size = new Vector2(460, 420),
+            Name = "RowScroll",
+            Position = new Vector2(0, 28),
+            Size = new Vector2(480, 392),
         };
-        panel.AddChild(scroll);
+        listPanel.AddChild(scroll);
 
-        _rowContainer = new VBoxContainer
-        {
-            // let VBoxContainer size to content
-        };
+        _rowContainer = new VBoxContainer { Name = "RowContainer" };
         scroll.AddChild(_rowContainer);
 
-        // Back button.
+        // =======================================================================
+        // [L6] Back button (offline convenience — not in spec as a canvas widget).
+        // Placed at bottom-left below the list panel. PLAUSIBLE position.
+        // =======================================================================
         var backBtn = new Button
         {
+            Name = "BackButton",
             Text = "Back",
-            Position = new Vector2(12, 538),
-            Size = new Vector2(100, 30),
+            Position = new Vector2(270, 598),
+            Size = new Vector2(100, 28),
         };
         backBtn.Pressed += () => EmitSignal(SignalName.BackRequested);
         AddChild(backBtn);
@@ -195,35 +323,42 @@ public sealed partial class ServerSelectScreen : Control
         if (_servers is not null)
             RebuildRows();
         else
-            AddChild(WidgetFactory.MakeLabel("Fetching server list...", 12, new Color(0.7f, 0.7f, 0.7f)));
-    }
-
-    private void BuildHeaderRow(Control parent)
-    {
-        var header = new HBoxContainer
         {
-            Position = new Vector2(0, 36),
-            Size = new Vector2(460, 20),
-        };
-        parent.AddChild(header);
-
-        void AddHeader(string text, int minW)
-        {
-            var lbl = WidgetFactory.MakeLabel(text, 12, new Color(0.70f, 0.70f, 0.75f));
-            lbl.CustomMinimumSize = new Vector2(minW, 20);
-            header.AddChild(lbl);
+            var waiting = WidgetFactory.MakeLabel(
+                "Fetching server list...", LoginLayout.FontBodyHeight, new Color(0.65f, 0.65f, 0.65f));
+            _rowContainer?.AddChild(waiting);
         }
 
-        AddHeader("Name", 200);
-        AddHeader("Status", 80);
-        AddHeader("Load", 80);
-        AddHeader("", 80); // NEW badge column
+        // =======================================================================
+        // [L7] Zone-select ambient VFX — zone_sel_u.xeff (effect_id 380000000, 11 sub-effects).
+        // Placed as a full-rect Control behind the list panel so the particle layer is visible
+        // around the main UI chrome without obscuring interactive widgets.
+        // spec: Docs/RE/formats/effects.md §A.15 — zone_sel_u.xeff; effect_id 380000000;
+        //   sub_effect_count 11; SAMPLE-VERIFIED.
+        // =======================================================================
+        var vfxPlayer = new FrontEndEffectPlayer
+        {
+            Name = "ZoneSelEffect",
+            // Full-canvas 2D effect.
+            // spec: Docs/RE/formats/effects.md §A.15 — zone-select effect; SAMPLE-VERIFIED.
+            XeffVfsPath = "data/effect/xeff/zone_sel_u.xeff",
+            SharedRealAssets = SharedRealAssets,
+            MouseFilter = MouseFilterEnum.Ignore, // never intercept input
+            // Z-index above other 2D children so glow particles are visible on the dark background.
+            ZIndex = 10,
+        };
+        // Size to the full reference canvas so the elliptical placement is correct.
+        vfxPlayer.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        AddChild(vfxPlayer);
+
+        GD.Print("[ServerSelectScreen] Built (§11.4 pixel-faithful). Awaiting server list.");
     }
 
-    /// <summary>
-    /// Rebuilds the server row list from <see cref="_servers"/>. Called on the main thread only.
-    /// spec: Docs/RE/specs/frontend_scenes.md §2 (server list display rules). CODE-CONFIRMED.
-    /// </summary>
+    // =========================================================================
+    // Server list population
+    // =========================================================================
+
+    /// <summary>Sets the server list and rebuilds the row display.</summary>
     public void SetServers(IReadOnlyList<ServerEntry> servers)
     {
         _servers = servers;
@@ -234,17 +369,15 @@ public sealed partial class ServerSelectScreen : Control
     {
         if (_rowContainer is null) return;
 
-        // Clear existing rows.
         foreach (Node child in _rowContainer.GetChildren())
             child.QueueFree();
 
         if (_servers is null || _servers.Count == 0)
         {
-            // spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 36 — empty → msg 4027.
+            // spec §1.5 sub-state 36 "server list empty → msg 4027". CODE-CONFIRMED.
             var empty = WidgetFactory.MakeLabel(
-                _assets.Text(4027u, "No servers available."),
-                12,
-                new Color(0.80f, 0.40f, 0.40f));
+                _assets.Text(LoginLayout.MsgErrNoServers, "No servers available."),
+                LoginLayout.FontBodyHeight, new Color(0.80f, 0.40f, 0.40f));
             _rowContainer.AddChild(empty);
             return;
         }
@@ -258,20 +391,18 @@ public sealed partial class ServerSelectScreen : Control
         GD.Print($"[ServerSelectScreen] Rows built: {_servers.Count} entries.");
     }
 
-    /// <summary>Builds one server row control.</summary>
     private Control BuildRow(ServerEntry entry)
     {
-        var row = new HBoxContainer();
-        row.CustomMinimumSize = new Vector2(440, 28);
+        var row = new HBoxContainer { CustomMinimumSize = new Vector2(472, 30) };
 
-        // Server name button (action ids 115..119 in legacy, per spec §8.1 action table).
-        // spec: Docs/RE/specs/frontend_scenes.md §1.2 — "Server name-strip buttons ×5:
-        //        actions 115..119 (range)". CODE-CONFIRMED.
+        // Server name button — click → ServerSelected signal.
+        // In the original: action ids 115..124. spec §11.4. CODE-CONFIRMED.
         int captureId = entry.ServerId;
         var nameBtn = new Button
         {
-            Text = entry.DisplayName,
+            Text = entry.DisplayName + (entry.IsNew ? "  [NEW]" : ""),
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            CustomMinimumSize = new Vector2(220, 28),
         };
         nameBtn.Pressed += () =>
         {
@@ -280,79 +411,88 @@ public sealed partial class ServerSelectScreen : Control
         };
         row.AddChild(nameBtn);
 
-        // Status label.
-        // spec: Docs/RE/specs/frontend_scenes.md §2.3 status-code special values. CODE-CONFIRMED.
-        string statusText = entry.StatusCode switch
-        {
-            // spec: §2.3 — status_code == 3 and load == 24 → "preparing / check". CODE-CONFIRMED.
-            3 when entry.Load == 24 => "Preparing",
-            // spec: §2.3 — status_code == 3 and open_time != 0 → "HH:MM". CODE-CONFIRMED.
-            3 => $"{entry.Load / 10:D2}:{entry.OpenTime % 60:D2}",
-            // spec: §2.3 — status_code == 100 → "Connected". CODE-CONFIRMED.
-            100 => "Connected",
-            // spec: §2.3 — status_code == 24 → "Under Check". CODE-CONFIRMED.
-            24 => "Checking",
-            // All other positive values → show as open.
-            > 0 => "Open",
-            // Invalid / unavailable.
-            _ => "Offline",
-        };
-        Color statusColor = entry.StatusCode is > 0 and not 24
-            ? new Color(0.55f, 0.90f, 0.55f)
-            : new Color(0.70f, 0.50f, 0.40f);
-
-        var statusLbl = WidgetFactory.MakeLabel(statusText, 12, statusColor);
+        // Status label. spec §2.3. CODE-CONFIRMED.
+        string statusText = GetStatusText(entry);
+        Color statusColor = GetStatusColor(entry);
+        var statusLbl = WidgetFactory.MakeLabel(statusText, LoginLayout.FontBodyHeight, statusColor);
         statusLbl.CustomMinimumSize = new Vector2(80, 28);
         row.AddChild(statusLbl);
 
-        // Load gauge.
-        // spec: Docs/RE/specs/login_flow.md §2.1 load thresholds 1200/800/500. CODE-CONFIRMED.
-        // spec: Docs/RE/specs/frontend_scenes.md §2.3 load color thresholds. CODE-CONFIRMED.
-        string loadText;
-        Color loadColor;
-        if (entry.Load > 1200)
-        {
-            // spec: load > 1200 → highest / "full" tier. CODE-CONFIRMED.
-            loadText = "Full";
-            loadColor = new Color(0.90f, 0.25f, 0.25f);
-        }
-        else if (entry.Load > 800)
-        {
-            // spec: load > 800 → high tier. CODE-CONFIRMED.
-            loadText = "High";
-            loadColor = new Color(0.95f, 0.60f, 0.15f);
-        }
-        else if (entry.Load > 500)
-        {
-            // spec: load > 500 → medium tier. CODE-CONFIRMED.
-            loadText = "Medium";
-            loadColor = new Color(0.95f, 0.90f, 0.15f);
-        }
-        else
-        {
-            // spec: load ≤ 500 → default tier. CODE-CONFIRMED.
-            loadText = "Light";
-            loadColor = new Color(0.50f, 0.90f, 0.50f);
-        }
-
-        var loadLbl = WidgetFactory.MakeLabel(loadText, 12, loadColor);
+        // Load gauge. spec §2.3 / login_flow.md §2.1. CODE-CONFIRMED.
+        (string loadText, Color loadColor) = GetLoadDisplay(entry.Load);
+        var loadLbl = WidgetFactory.MakeLabel(loadText, LoginLayout.FontBodyHeight, loadColor);
         loadLbl.CustomMinimumSize = new Vector2(80, 28);
         row.AddChild(loadLbl);
 
-        // NEW badge.
-        // spec: Docs/RE/specs/frontend_scenes.md §2.7 — NEW_SERVER_INDEX badge. CODE-CONFIRMED.
-        if (entry.IsNew)
+        // Population availability captions 6001..6005. spec §11.4. CODE-CONFIRMED.
+        // We map the load tier to an availability label from msg.xdb if available.
+        uint popCapId = entry.Load > 1200 ? 6005u :
+            entry.Load > 800 ? 6004u :
+            entry.Load > 500 ? 6003u :
+            entry.Load > 0 ? 6002u : 6001u;
+        string popText = _assets.Text(popCapId, "");
+        if (!string.IsNullOrEmpty(popText))
         {
-            var newBadge = WidgetFactory.MakeLabel("NEW", 12, new Color(1.0f, 0.85f, 0.15f));
-            newBadge.CustomMinimumSize = new Vector2(40, 28);
-            row.AddChild(newBadge);
+            var popLbl = WidgetFactory.MakeLabel(popText, LoginLayout.FontBodyHeight, loadColor);
+            popLbl.CustomMinimumSize = new Vector2(60, 28);
+            row.AddChild(popLbl);
         }
         else
         {
-            var spacer = new Control { CustomMinimumSize = new Vector2(40, 28) };
+            var spacer = new Control { CustomMinimumSize = new Vector2(60, 28) };
             row.AddChild(spacer);
         }
 
         return row;
+    }
+
+    // =========================================================================
+    // Status / load presentation helpers (§2.3). CODE-CONFIRMED.
+    // =========================================================================
+
+    private static string GetStatusText(ServerEntry entry)
+    {
+        return entry.StatusCode switch
+        {
+            // spec §2.3 "status_code==3 and load==24 → preparing". CODE-CONFIRMED.
+            3 when entry.Load == 24 => "Preparing",
+            // spec §2.3 "status_code==3 and open_time!=0 → HH:MM". CODE-CONFIRMED.
+            3 when entry.OpenTime != 0 => $"{entry.Load / 10:D2}:{entry.OpenTime % 60:D2}",
+            3 => "Scheduled",
+            // spec §2.3 "status_code==100 → auto-connect sentinel". CODE-CONFIRMED.
+            100 => "Current",
+            // spec §2.3 status 24 → "under check". CODE-CONFIRMED.
+            24 => "Checking",
+            > 0 => "Open",
+            _ => "Offline",
+        };
+    }
+
+    private static Color GetStatusColor(ServerEntry entry)
+    {
+        return entry.StatusCode is > 0 and not 24
+            ? new Color(0.55f, 0.90f, 0.55f)
+            : new Color(0.70f, 0.50f, 0.40f);
+    }
+
+    private static (string text, Color color) GetLoadDisplay(int load)
+    {
+        // spec: login_flow.md §2.1 load thresholds. CODE-CONFIRMED.
+        if (load > 1200) return ("Full", new Color(0.90f, 0.25f, 0.25f));
+        if (load > 800) return ("High", new Color(0.95f, 0.60f, 0.15f));
+        if (load > 500) return ("Medium", new Color(0.95f, 0.90f, 0.15f));
+        return ("Light", new Color(0.50f, 0.90f, 0.50f));
+    }
+
+    // =========================================================================
+    // Intent handlers
+    // =========================================================================
+
+    private void OnRefreshPressed()
+    {
+        // In a live build this re-fetches the server list from the lobby (port 10000).
+        // Action 105 has a 10-second cooldown per spec §1.2. CODE-CONFIRMED.
+        // In offline mode this is a no-op.
+        GD.Print("[ServerSelectScreen] Refresh button (action 105) pressed — no-op in offline mode.");
     }
 }

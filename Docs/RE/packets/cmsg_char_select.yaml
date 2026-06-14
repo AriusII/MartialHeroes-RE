@@ -1,0 +1,43 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED field internals; size + builder identity are static-HIGH. capture_verified: false.
+
+name: CmsgSelectCharacter
+opcode: 0x10007           # major 1, minor 7 -> (1 << 16) | 7
+direction: C2S
+size: 2                   # fixed 2-byte payload
+spec: packets/cmsg_char_select.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Slot select / ack on the character-select screen. Two bytes: a slot index plus a second byte
+  that distinguishes the two emit paths (select-for-play sets the flag to 1; the create-slot ack
+  path sends 0). Two emitters in the select-window action dispatcher. No inbound reply opcode was
+  attributed statically.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 2.
+fields:
+  - { name: SlotIndex, type: u8 }   # 0x00  selected character slot (0..4)
+  - { name: Flag,      type: u8 }   # 0x01  select-confirm/play flag (1 on the play path; 0 on the ack path)
+
+notes: |
+  Static analysis only; no capture. Frame = 8-byte header + 2 = 10 bytes on the wire.
+
+    0x00 (1B) SlotIndex : the chosen/highlighted character slot index (0..4). STATIC HIGH.
+    0x01 (1B) Flag      : the second byte differs by emit path:
+                          - select-for-play path  -> Flag = 1 (select-confirm / play).
+                          - create-slot ack path  -> Flag = 0.
+                          So Flag = 1 means "select this slot to play"; Flag = 0 means "ack /
+                          enter the created slot". STATIC HIGH for both emitter fills.
+
+  ROLE / SEQUENCE: reached from the per-slot select action and from the created-slot ack action.
+  Working model: 1/7 selects/pre-stages a slot; the actual world entry is then driven by 1/9
+  (cmsg_char_enter.yaml). The client holds its net-busy latch while a 1/7 is in flight.
+
+  UNKNOWNS (capture-only): whether 1/7 must precede every 1/9 or only the first selection; whether
+  any dedicated server reply exists for 1/7 (none identified statically).
+
+  RELATED: 1/0 logout, 1/6 create, 1/9 enter, 1/13 rename, 1/14 slot-move. All gated by the single
+  select-window net-busy latch.
+
+  UNBLOCKS: Client.Application SelectCharacter use-case (slot pre-stage).

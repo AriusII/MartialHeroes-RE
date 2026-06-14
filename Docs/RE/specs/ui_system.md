@@ -200,6 +200,83 @@ not to a count of distinct sprites.
 - Hovered → yellow (`0xFFFFFF00`)
 - Normal/pressed → per-widget tint at +0x0C (default white)
 
+### 1.6 Window-manager doctrine — "MainMaster" IS the manager (CODE-CONFIRMED)
+
+There is **no separate "WindowManager" class** in the toolkit. The in-game HUD master window — a
+single global `GUWindow` instance constructed with the name **"MainMaster"** — *is* the window
+manager. Its layout is the multiple-inheritance `GUWindow` shape (`structs/guwindow.md`) plus a
+**flat service-slot pointer table** in its tail region.
+
+- **A singleton accessor with a very high call-count.** Every subsystem reaches the master window
+  through one global accessor ("give me the master HUD window"), which lazily constructs the master
+  window on first use. This accessor is one of the most-called functions in the whole client
+  (on the order of ~1.8k call sites) — the de-facto "HUD orchestrator handle".
+- **A flat service-slot registry.** On construction the master window **zero-initialises** a
+  contiguous run of pointer-width service slots in its tail region. Each subsystem (inventory,
+  skills, chat, map, party, quest, guild, trade, options, …) later **registers its constructed
+  panel pointer into a fixed slot**. The HUD is the sum of those slots hanging off the one
+  "MainMaster" window. The same zero-init routine runs again on teardown to clear the registry.
+- **Slot-table bounds.** The service-slot region spans the master window's tail (~223 pointer-width
+  slots); its exact byte offsets and the ~6 currently-identified slot owners (including the
+  back-reference to the owning HUD handler) are documented in `structs/runtime_singletons.md §3.10`.
+  The full slot→subsystem map is an open item (which subsystem owns which slot index is not yet
+  enumerated).
+
+So the manager is **not** a dispatcher object with a window list — it is a single top-level window
+whose embedded pointer table holds every HUD child panel. A reimplementation can model this as one
+root HUD node owning a fixed-index array of child-panel references, reached through a singleton
+accessor.
+
+### 1.7 RTTI-confirmed widget / panel catalogue (CODE-CONFIRMED class names)
+
+The toolkit's class names were read directly from the binary's own type metadata (MSVC RTTI), so
+these are exact class identities, not heuristics. Roughly **202** distinct widget/panel classes were
+recovered this way. The catalogue below groups them by clean role. Each class has a default and/or a
+sized `(x, y, w, h, …)` constructor; both install the same per-class vtable.
+
+**Leaf widgets** (direct `GUComponent` subclasses unless noted) — the reusable toolkit controls:
+
+| Role group | Classes |
+|---|---|
+| Buttons | `GUButton` (with several sized-constructor overloads of differing arg shapes), `GUCheckBox` (derives `GUButton`) |
+| Text / labels | `GULabel`, `GULabels` (multi-line), `GUShortLabel`, `GUTextbox` (editable, IME-routed) |
+| Lists / scroll | `GUList`, `GUScroll`, `GUScrollEx` (**derives `GUPanel`**, a scroll container that is itself a panel) |
+| Containers | `GUPanel` (base container), `GUComponentEx` (extended-base: float rect, scale, rotation), `GUCanvas3D` (live 3D viewport widget) |
+| Windows | `GUWindow` (top-level; see §1.8 / `structs/guwindow.md`) |
+
+**Game panels** (~165 application screens, each one C++ class deriving from `GUPanel`, named here by
+clean role). This is a representative grouping, not an exhaustive list — the full enumeration is
+class-by-class but the role buckets are what an implementer needs:
+
+| Panel family | Representative panels |
+|---|---|
+| Actor-state / vitals HUD | actor-state (HP/MP) panel, cast-time panel, upgrade-process panel, gauge panel |
+| Map | map panel (minimap), total-map / full-map panel |
+| Chat | chat-output panel |
+| Social | friend panel, mini-party, party panel, relation panel |
+| Stall / market | stall-keeper panel, stall-list panel |
+| Skills / status | skill panels, status panel, war-info panel |
+| War UI | the "brood-war" war-UI family (including nested war map-info / map-state panels) |
+| Guild | the guild panel family |
+| Mail / carrier | the carrier-pigeon (mail/delivery) family |
+| Options | option sub-panels (Character, Graphic, Sound, Other) |
+| Items / trade | item panels, trade panel, product panel, goods panel, gift-character flow |
+| NPC dialog | the NPC-dialog panel family |
+| Menus / misc | default menu, tutorial / help / greeting / announce / lottery panels |
+
+> The exact per-class names are CP949-context Korean-game class identities read from RTTI; the role
+> grouping above is the load-bearing fact for a reimplementation (which panels exist and what they
+> do). Specific panels' widget layouts and atlas bindings are tabulated in §8 where recovered.
+
+### 1.8 GUWindow multiple inheritance (cross-reference)
+
+`GUWindow` is the only class with **two vtable pointers**: the primary component/panel/window chain
+at +0x00 and a secondary event-handler vtable at +0xBC. It embeds a command handler (from +0xBC), an
+auxiliary 3D/scene view (from +0xE8), and a texture/skin-atlas list (from +0x220). Five concrete
+windows derive from it (MainWindow/"MainMaster", the login window, the opening window, the
+character-select window, and a dev/test window). The full offset table is in `structs/guwindow.md`;
+the base-class field layout is in `structs/gucomponent.md`.
+
 ---
 
 ## 2. Vtable method layout (shared slot semantics) (CODE-CONFIRMED)
@@ -1265,6 +1342,9 @@ baking title text, except the inventory title which is part of the `inventwindow
 
 ## 14. Cross-references
 
+- Base widget byte-offset structs: `structs/gucomponent.md`, `structs/guwindow.md`
+- Master window object + service-slot table: `structs/runtime_singletons.md §3.10`
+- In-game HUD panel placement + buff bar: `specs/ui_hud_layout.md`
 - Widget hit-test / IME routing detail: `specs/input_ui.md`
 - Login network flow: `specs/login_flow.md`
 - Front-end scene flow: `specs/frontend_scenes.md`

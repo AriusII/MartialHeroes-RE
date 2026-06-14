@@ -291,8 +291,9 @@ v1.5 type-2 padding.
    **password / credential string** into a fixed-size zero-filled buffer and records that buffer (and
    its declared length) as the object's staged "message". This staged credential is the plaintext
    `M` that will later be RSA-encrypted. (The login form also carries the account name, a login
-   sub-opcode byte, and a host:port — none of which are part of the crypto and none of which are
-   recorded here.)
+   sub-opcode byte `0x2B`, and an optional PIN — these are NOT part of the crypto: they form the
+   plaintext pre-image written ahead of the RSA ciphertext in the SAME 1/4 payload. Their wire
+   layout is owned by `packets/login.yaml`; only the RSA half is owned here.)
 2. **Server → client, opcode `0/0` (KeyExchange).** The server sends the **62-byte** key-exchange
    payload (6.2). The client imports the 54-byte key blob into two bignum slots — **modulus `n`** then
    **exponent `e`** — and stores the two trailing 4-byte scalars; it also stamps its own local
@@ -456,6 +457,81 @@ deliberately not recorded.
 credential to the server. It is **independent of the per-packet byte cipher**, which stays keyless
 regardless. No linkage from the credential or the handshake into the byte cipher exists in this
 client.
+
+---
+
+### 6.6 The 1/4 payload also carries the plaintext credential pre-image
+
+The `1/4` payload is **not** the RSA ciphertext alone. The credential builder writes a short
+**plaintext pre-image** into the secure-context packet buffer *first*, then the encrypt step
+appends the RSA ciphertext after it at the same write cursor. The on-wire `1/4` payload, before
+the whitening of 6.4 and the normal send pipeline, is therefore:
+
+```
+[u8 0x2B] [u32 LE account_len] [account ]  ([u32 LE pin_len] [PIN ])   <- plaintext pre-image
+[u32 LE ciphertext_len] [big-endian RSA digits]                            <- the RSA half (6.3)
+```
+
+The plaintext pre-image (sub-opcode `0x2B`, the length-prefixed account, and the **optional**
+length-prefixed PIN) is **not crypto** and is owned by `packets/login.yaml`. The **password** is
+not in this pre-image: it is the staged RSA plaintext `M` (6.1) -- a **fixed 17-byte zero-padded
+buffer** consumed in full by 6.3, regardless of the actual password length. The per-dword `0x29`
+whitening (6.4) is applied over the **whole** `1/4` payload (pre-image + ciphertext) before the
+normal byte-cipher + LZ4 send.
+
+---
+
+## 6a. Secure-context lifecycle and the anti-tamper page guard
+
+The credential staging, key import, and RSA reply build all happen inside a single
+**secure-context object** -- a dedicated, page-aligned memory region (a fixed-size committed page)
+that holds the embedded outbound packet buffer, the imported modulus/exponent bignum slots, the
+key-blob staging buffer, the two server scalars, and the staged-credential (`M`) pointer + size.
+Its lifecycle:
+
+| Stage | What happens |
+|---|---|
+| Allocate | When the player submits the login form, the client commits a fresh page-sized region (read-write) for the secure context. A prior context, if any, is first torn down (its staged `M` freed, the page zeroed, its embedded locks destroyed, the page released). |
+| Construct | The embedded packet buffer is initialised (write cursor at the 8-byte header), the staged-`M` slots are zeroed, and the padding PRNG family (the PKCS#1 type-2 padding randomness of 6.3) is seeded from time-based sources. The constructor's bignum-slot seed strings are developer placeholders (6.5), overwritten at handshake time. |
+| Stage credential | The password is copied into the fixed 17-byte zero-padded `M` buffer (6.1); the buffer pointer + size are recorded in the context. The plaintext pre-image (6.6) is written into the embedded packet buffer. |
+| Key import (on 0/0) | The 54-byte key blob from the `0/0` packet is parsed into the modulus + exponent slots; the two trailing server scalars and a local timestamp are stored (6.2). |
+| Encrypt + reply | The staged `M` is PKCS#1-padded and exponentiated (6.3), the ciphertext is appended to the packet buffer (6.6), the whole payload is whitened (6.4), copied to a fresh outbound buffer, and sent. The `M` buffer is then secure-zeroed and freed and its slot cleared. |
+| Teardown | On context rebuild or logout, the staged `M` is freed, the page is zeroed, the embedded locks destroyed, and the page released. |
+
+**Anti-tamper page guard (behavioural).** The secure-context page is kept at **no-access**
+protection while idle, and every write to the staged credential / packet buffer is **bracketed**:
+the builder flips the page to **read-write** immediately before the write sequence and back to
+**no-access** immediately after. So the credential plaintext, the staged `M`, and the key slots are
+readable only inside that bracket -- an anti-tamper measure to keep the in-memory credential and
+key material unreadable outside the brief build window.
+
+**Implementation note (interop).** A clean-room `Network.Crypto` does **not** need to reproduce the
+page-guard protection flips -- they are an in-process memory-hardening detail with **no wire
+effect**. They are documented so an analyst reading a live process understands why the credential
+buffer is otherwise unreadable, and so a faithful client may optionally mirror the hardening. What
+*does* have wire effect is the payload composition (6.6), the RSA build (6.3), and the whitening
+(6.4).
+
+---
+
+### 6b. DEBUGGER-VERIFIED handshake facts
+
+A live IDA-debugger login (maintainer-driven; never `dbg_start`) against the live login server
+confirmed, with credential byte VALUES withheld (structure/lengths only):
+
+| Fact | Verified value | Confidence |
+|---|---|---|
+| Credential frame | secure `1/4` (header words read major 1 / minor 4 at encrypt entry) | HIGH (debugger) |
+| Plaintext pre-image leader | sub-opcode `0x2B` as the first payload byte | HIGH (debugger) |
+| Pre-image length-prefix width | u32 little-endian, NUL-inclusive (account + optional PIN) | HIGH (debugger) |
+| Staged `M` | a FIXED 17-byte zero-padded buffer (password bytes then zero padding); consumed in full as the RSA plaintext | HIGH (debugger) -- resolves the prior open item |
+| Ciphertext framing | `[u32 LE length][big-endian digit bytes]`, appended after the pre-image | HIGH (debugger) |
+| Observed ciphertext length | 27 bytes (one less than the modulus byte width) | HIGH (debugger) |
+| RSA modulus size | small (~224-bit / ~28 bytes), consistent with a 2004-era key; PKCS#1 v1.5 type-2 confirmed by the framing/size | HIGH (debugger) |
+| Whitening | the `0x29` per-dword XOR (6.4) applied over the whole `1/4` payload before the send | HIGH (debugger) |
+
+This corroborates the static `0/0`/`1/4` analysis end-to-end on the secure path. The concrete
+modulus/exponent values and the `L1`/`L2` split remain server wire data, still capture-only (8.2).
 
 ---
 

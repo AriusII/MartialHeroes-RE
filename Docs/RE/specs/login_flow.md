@@ -384,10 +384,15 @@ The secure-context builder takes the **TAB-delimited form string** and:
 > the login-blob builder (§4.2). The two-stage account → blob pipeline is observed against the live
 > client, not just inferred.
 
-### 4.2 Login packet body (1/6, C2S)
+### 4.2 Login packet body (secure 1/4, C2S)
 
-`opcodes.md` catalogs the account-login message as **`1/6 CmsgLoginRequest`** (a `~52-byte` form-
-family blob). The body is assembled in this order:
+> **RESOLVED -- prior '1/6' attribution was the false premise.** The deep workflow-spine analysis
+> plus a live debugger login establish that the login credential is **NOT** a 1/6 message: it rides
+> the **secure `1/4`** frame, and **1/6 is character-create only**. `opcodes.md` now catalogs the
+> credential carrier on the `1/4` row (`packets/login.yaml`); `1/6` is `CmsgCreateCharacter`
+> (`packets/cmsg_char_create.yaml`). The plaintext pre-image below is written into the `1/4`
+> payload ahead of the RSA ciphertext (see `specs/crypto.md` section 6.6). The body is assembled in
+> this order:
 
 | Order | Bytes | Field | Notes |
 |---|---|---|---|
@@ -417,9 +422,11 @@ length][bytes…][NUL]`, and the **u32 length includes the trailing NUL byte**. 
 account serializes as prefix `0x00000008` followed by 7 bytes + NUL; a 4-character PIN serializes as
 prefix `0x00000005` followed by 4 bytes + NUL.
 
-So the wire login body is `[0x2B] [u32len account\0] ([u32len PIN\0])`. The **password is never in
-this blob** — it travels only via the RSA `1/4` reply. This is consistent with `specs/crypto.md`
-(RSA plaintext = the staged login credential string itself).
+So the wire login pre-image is `[0x2B] [u32len account ] ([u32len PIN ])`, written into the
+secure **`1/4`** payload ahead of the RSA ciphertext. The **password is never in this pre-image** --
+it is the RSA plaintext `M` (a fixed 17-byte zero-padded buffer) encrypted into the same `1/4`
+payload. This is consistent with `specs/crypto.md` (RSA plaintext = the staged login credential
+string itself) and `packets/login.yaml` (the credential carrier).
 
 > **Resolved (was an open item):** the identity of the optional middle field — it is the
 > **second-password / PIN** — and the length-prefix width (**u32 LE**, NUL-inclusive). These were

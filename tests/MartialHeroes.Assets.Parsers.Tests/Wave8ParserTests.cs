@@ -141,72 +141,90 @@ public sealed class Wave8ParserTests
     // =========================================================================
     // 2. XeffKeyframe — Velocity Vec3, Size Vec3, Rotation Quat
     // =========================================================================
-    // spec: Docs/RE/formats/effects.md §A.3.7 Resolved semantics:
-    //   velocity_x/y/z @ kf+0x04..+0x0F: HIGH.
-    //   size_x/y/z @ kf+0x10..+0x1B: HIGH.
-    //   rotation from kf_rot_x/y/z_deg @ kf+0x1C..+0x27: CONFIRMED.
-    // spec: Docs/RE/formats/effects.md §A.4 Rotation: "degrees × π/180; half-angle XYZ decomposition": CONFIRMED.
+    // spec: Docs/RE/formats/effects.md §A.4.4 — nine-float keyframe layout: CONFIRMED.
+    //   velocity_x/y/z @ positions 1–3: CONFIRMED.
+    //   size_x/y/z @ positions 4–6: CONFIRMED.
+    //   kf_rot_x/y/z_deg @ positions 7–9: CONFIRMED.
+    // spec: Docs/RE/formats/effects.md §A.7 Rotation: "degrees × π/180; half-angle XYZ decomposition": CONFIRMED.
+    // spec: Docs/RE/formats/effects.md §A.2 File Header (32 bytes, CORRECTED): VERIFIED.
 
     /// <summary>
-    /// Builds a minimal .xeff with one element, anim_loop != 0, tex_count = 1, one keyframe.
-    /// spec: Docs/RE/formats/effects.md §A.2 header (8B) + §A.3 element groups.
+    /// Builds a minimal .xeff (32-byte header + one sub-effect with one keyframe).
+    /// The fixture follows the CORRECTED spec: 32-byte header then sequential sub-effect blocks.
+    /// spec: Docs/RE/formats/effects.md §A.2 File Header (32 bytes): VERIFIED.
+    /// spec: Docs/RE/formats/effects.md §A.4 Sub-Effect Block Structure: CONFIRMED.
+    ///
+    /// Sub-effect layout for N=1 entry (one keyframe, frame 0 — no index prefix):
+    ///   entry_count u32 + 64B name + (4+f32) alpha curve + (4+f32)×3 scale curves
+    ///   + 13B track header + 9×f32 frame0 (no index)
     /// </summary>
     private static byte[] BuildXeffWithKeyframe(
-        uint emitterType, float velX, float velY, float velZ,
+        float velX, float velY, float velZ,
         float szX, float szY, float szZ,
         float rotXDeg, float rotYDeg, float rotZDeg)
     {
         using var ms = new System.IO.MemoryStream();
 
-        // File header: effect_id + element_count.
-        // spec: §A.2 — effect_id u32le @ 0x00, element_count u32le @ 0x04: VERIFIED.
-        ms.Write(Le4(12345u)); // effect_id (not anti-magic)
-        ms.Write(Le4(1u)); // element_count = 1
+        // ── 32-byte file header ──────────────────────────────────────────────
+        // spec: §A.2 — effect_id u32le @ 0x00: VERIFIED.
+        ms.Write(Le4(12345u)); // effect_id (not anti-magic 0x46464558)
+        // spec: §A.2 — sub_effect_count u32le @ 0x04: VERIFIED.
+        ms.Write(Le4(1u)); // sub_effect_count = 1
+        // spec: §A.2 — type_flag u32le @ 0x08: SAMPLE-VERIFIED.
+        ms.Write(Le4(1u)); // type_flag = 1
+        // spec: §A.2 — reserved u8[16] @ 0x0C: SAMPLE-VERIFIED.
+        ms.Write(new byte[16]); // reserved, all zero
+        // spec: §A.2 — first_entry_count u32le @ 0x1C: SAMPLE-VERIFIED.
+        ms.Write(Le4(1u)); // first_entry_count = 1 (matches sub-effect[0].entry_count below)
 
-        // Group A — Emitter identity (5 × u32le = 20 bytes).
-        // spec: §A.3.1 — emitter_type, resource_id, anim_flag, tex_count, field_unknown_a: PARSER-CONFIRMED.
-        ms.Write(Le4(emitterType)); // emitter_type
-        ms.Write(Le4(0u)); // resource_id
-        ms.Write(Le4(1u)); // anim_flag != 0 → use animated branch
-        ms.Write(Le4(1u)); // tex_count = 1 → 1 keyframe
-        ms.Write(Le4(0u)); // field_unknown_a (UNRESOLVED)
+        // ── sub-effect block 0 ──────────────────────────────────────────────
+        // entry_count u32le opens each sub-effect block.
+        // spec: §A.4 — entry_count u32 opens each sub-effect block: CONFIRMED.
+        ms.Write(Le4(1u)); // entry_count = 1
 
-        // Group B — Texture names (tex_count × 64 bytes).
-        // spec: §A.3.2 — tex_count × 64 B char[64] names: PARSER-CONFIRMED.
-        ms.Write(new byte[64]); // one 64-byte null name
+        // Name table: 1 × 64 bytes (null-padded ASCII texture name).
+        // spec: §A.4.1 — entry_count × 64 bytes: CONFIRMED.
+        ms.Write(new byte[64]); // one null name
 
-        // Group C — Alpha keyframes (count u32 + count × f32).
-        // spec: §A.3.3 — alpha_key_count u32 + values f32[]: PARSER-CONFIRMED.
-        ms.Write(Le4(1u)); // alpha_key_count = 1
+        // Curve pass 1: alpha (count u32 + 1 × f32).
+        // spec: §A.4.2 Pass 1 alpha — own u32 prefix: CONFIRMED.
+        ms.Write(Le4(1u));
         ms.Write(Le4f(0.0f)); // alpha_key[0]
 
-        // Group D — Scale channels (3 passes: X, Y, Z each with count u32 + values f32[]).
-        // spec: §A.3.4 — three passes: PARSER-CONFIRMED.
+        // Curve pass 2: scale X (count u32 + 1 × f32).
+        // spec: §A.4.2 Pass 2 scale X — own u32 prefix: CONFIRMED.
         ms.Write(Le4(1u));
-        ms.Write(Le4f(1.0f)); // scaleX
-        ms.Write(Le4(1u));
-        ms.Write(Le4f(1.0f)); // scaleY
-        ms.Write(Le4(1u));
-        ms.Write(Le4f(1.0f)); // scaleZ
+        ms.Write(Le4f(1.0f));
 
-        // Group E — Animation timing (9 bytes: anim_loop u8, anim_stride u32, anim_base_time u32).
-        // spec: §A.3.5 — anim_loop u8 @ GrpE+0: CONFIRMED.
-        ms.WriteByte(1); // anim_loop != 0 → Branch A
-        ms.Write(Le4(100u)); // anim_stride (ms)
-        ms.Write(Le4(0u)); // anim_base_time
+        // Curve pass 3: scale Y.
+        // spec: §A.4.2 Pass 3 scale Y — own u32 prefix: CONFIRMED.
+        ms.Write(Le4(1u));
+        ms.Write(Le4f(1.0f));
 
-        // Group F — Branch A: one keyframe (kf_index u32 + 6 × f32 + 3 × f32_rot = 40 bytes).
-        // spec: §A.3.6 Branch A — kf_index u32 + velocity/size 6×f32 + rot_deg 3×f32: PARSER-CONFIRMED.
-        ms.Write(Le4(0u)); // kf_index = 0
-        ms.Write(Le4f(velX)); // velocity_x (file read 2)
-        ms.Write(Le4f(velY)); // velocity_y (file read 3)
-        ms.Write(Le4f(velZ)); // velocity_z (file read 4)
-        ms.Write(Le4f(szX)); // size_x (file read 5)
-        ms.Write(Le4f(szY)); // size_y (file read 6)
-        ms.Write(Le4f(szZ)); // size_z (file read 7)
-        ms.Write(Le4f(rotXDeg)); // kf_rot_x_deg (file read 8): CONFIRMED
-        ms.Write(Le4f(rotYDeg)); // kf_rot_y_deg (file read 9): CONFIRMED
-        ms.Write(Le4f(rotZDeg)); // kf_rot_z_deg (file read 10): CONFIRMED
+        // Curve pass 4: scale Z.
+        // spec: §A.4.2 Pass 4 scale Z — own u32 prefix: CONFIRMED.
+        ms.Write(Le4(1u));
+        ms.Write(Le4f(1.0f));
+
+        // Track header: 13 bytes (u8 anim_loop + u32 unknown_constant + u32 anim_stride + u32 anim_base_time).
+        // spec: §A.4.3 Track header (13 bytes): CONFIRMED.
+        // spec: §A.14 XEFF_TRACK_HEADER_SIZE = 13.
+        ms.WriteByte(1); // anim_loop = 1 (non-zero)
+        ms.Write(Le4(67u)); // unknown_constant = 67 (0x43): SAMPLE-VERIFIED
+        ms.Write(Le4(100u)); // anim_stride = 100 ms
+        ms.Write(Le4(0u)); // anim_base_time = 0
+
+        // Keyframe array: frame 0 (no index prefix) = 9 × f32 = 36 bytes.
+        // spec: §A.4.4 — Frame 0 is a special case: it has NO index prefix: CONFIRMED.
+        ms.Write(Le4f(velX)); // velocity_x (position 1)
+        ms.Write(Le4f(velY)); // velocity_y (position 2)
+        ms.Write(Le4f(velZ)); // velocity_z (position 3)
+        ms.Write(Le4f(szX)); // size_x (position 4)
+        ms.Write(Le4f(szY)); // size_y (position 5)
+        ms.Write(Le4f(szZ)); // size_z (position 6)
+        ms.Write(Le4f(rotXDeg)); // kf_rot_x_deg (position 7): CONFIRMED
+        ms.Write(Le4f(rotYDeg)); // kf_rot_y_deg (position 8): CONFIRMED
+        ms.Write(Le4f(rotZDeg)); // kf_rot_z_deg (position 9): CONFIRMED
 
         return ms.ToArray();
     }
@@ -214,11 +232,11 @@ public sealed class Wave8ParserTests
     [Fact]
     public void XeffKeyframe_Velocity_Vec3_Additif()
     {
-        // spec: Docs/RE/formats/effects.md §A.3.7 — velocity Vec3 (Params[0..2]): HIGH.
-        byte[] data = BuildXeffWithKeyframe(0, 1.5f, 2.5f, 3.5f, 10f, 10f, 10f, 0f, 0f, 0f);
+        // spec: Docs/RE/formats/effects.md §A.8 — velocity Vec3 (velocity_x/y/z @ positions 1–3): HIGH.
+        byte[] data = BuildXeffWithKeyframe(1.5f, 2.5f, 3.5f, 10f, 10f, 10f, 0f, 0f, 0f);
         XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(data));
 
-        XeffKeyframe kf = xeff.Elements[0].AnimKeyframes![0];
+        XeffKeyframe kf = xeff.SubEffects[0].Keyframes[0];
         Assert.Equal(1.5f, kf.Velocity.X, precision: 5);
         Assert.Equal(2.5f, kf.Velocity.Y, precision: 5);
         Assert.Equal(3.5f, kf.Velocity.Z, precision: 5);
@@ -227,11 +245,11 @@ public sealed class Wave8ParserTests
     [Fact]
     public void XeffKeyframe_Size_Vec3_Additif()
     {
-        // spec: Docs/RE/formats/effects.md §A.3.7 — size Vec3 (Params[3..5]): HIGH.
-        byte[] data = BuildXeffWithKeyframe(0, 0f, 0f, 0f, 5.0f, 6.0f, 7.0f, 0f, 0f, 0f);
+        // spec: Docs/RE/formats/effects.md §A.8 — size Vec3 (size_x/y/z @ positions 4–6): HIGH.
+        byte[] data = BuildXeffWithKeyframe(0f, 0f, 0f, 5.0f, 6.0f, 7.0f, 0f, 0f, 0f);
         XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(data));
 
-        XeffKeyframe kf = xeff.Elements[0].AnimKeyframes![0];
+        XeffKeyframe kf = xeff.SubEffects[0].Keyframes[0];
         Assert.Equal(5.0f, kf.Size.X, precision: 5);
         Assert.Equal(6.0f, kf.Size.Y, precision: 5);
         Assert.Equal(7.0f, kf.Size.Z, precision: 5);
@@ -240,11 +258,11 @@ public sealed class Wave8ParserTests
     [Fact]
     public void XeffKeyframe_Rotation_Identity_WhenAllDegreesZero()
     {
-        // spec: Docs/RE/formats/effects.md §A.4 — rotation(0°,0°,0°) = identity (0,0,0,1): CONFIRMED.
-        byte[] data = BuildXeffWithKeyframe(0, 0f, 0f, 0f, 1f, 1f, 1f, 0f, 0f, 0f);
+        // spec: Docs/RE/formats/effects.md §A.7 — rotation(0°,0°,0°) = identity (0,0,0,1): CONFIRMED.
+        byte[] data = BuildXeffWithKeyframe(0f, 0f, 0f, 1f, 1f, 1f, 0f, 0f, 0f);
         XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(data));
 
-        Quat q = xeff.Elements[0].AnimKeyframes![0].Rotation;
+        Quat q = xeff.SubEffects[0].Keyframes[0].Rotation;
         Assert.Equal(0f, q.X, precision: 5);
         Assert.Equal(0f, q.Y, precision: 5);
         Assert.Equal(0f, q.Z, precision: 5);
@@ -255,11 +273,11 @@ public sealed class Wave8ParserTests
     public void XeffKeyframe_Rotation_90DegY_CorrectQuat()
     {
         // Rotation 90° around Y: quat = (0, sin(45°), 0, cos(45°)) ≈ (0, 0.7071, 0, 0.7071).
-        // spec: Docs/RE/formats/effects.md §A.4 — "half-angle Euler-XYZ decomposition": CONFIRMED.
-        byte[] data = BuildXeffWithKeyframe(0, 0f, 0f, 0f, 1f, 1f, 1f, 0f, 90f, 0f);
+        // spec: Docs/RE/formats/effects.md §A.7 — "degrees × π/180; half-angle Euler-XYZ decomposition": CONFIRMED.
+        byte[] data = BuildXeffWithKeyframe(0f, 0f, 0f, 1f, 1f, 1f, 0f, 90f, 0f);
         XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(data));
 
-        Quat q = xeff.Elements[0].AnimKeyframes![0].Rotation;
+        Quat q = xeff.SubEffects[0].Keyframes[0].Rotation;
         Assert.Equal(0f, q.X, precision: 4);
         Assert.Equal(MathF.Sin(MathF.PI / 4f), q.Y, precision: 4);
         Assert.Equal(0f, q.Z, precision: 4);
@@ -267,76 +285,153 @@ public sealed class Wave8ParserTests
     }
 
     [Fact]
-    public void XeffKeyframe_Params_Array_BackwardCompat()
+    public void Xeff_SubEffectCount_And_EntryCount_Decoded()
     {
-        // Ensure the raw Params array still exists and maps correctly.
-        // Velocity = Params[0..2], Size = Params[3..5].
-        byte[] data = BuildXeffWithKeyframe(0, 1f, 2f, 3f, 4f, 5f, 6f, 0f, 0f, 0f);
+        // spec: Docs/RE/formats/effects.md §A.2 — sub_effect_count @ 0x04: VERIFIED.
+        // spec: Docs/RE/formats/effects.md §A.4 — entry_count opens each sub-effect block: CONFIRMED.
+        byte[] data = BuildXeffWithKeyframe(1f, 2f, 3f, 4f, 5f, 6f, 0f, 0f, 0f);
         XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(data));
 
-        XeffKeyframe kf = xeff.Elements[0].AnimKeyframes![0];
-        Assert.Equal(6, kf.Params.Length);
-        Assert.Equal(1f, kf.Params[0]); // velocity_x
-        Assert.Equal(4f, kf.Params[3]); // size_x
+        Assert.Equal(1u, xeff.SubEffectCount);
+        Assert.Single(xeff.SubEffects);
+        Assert.Equal(1u, xeff.SubEffects[0].EntryCount);
     }
 
     [Fact]
-    public void XeffStaticState_Velocity_And_Size_BranchB()
+    public void Xeff_TrackHeader_AnimStrideAndUnknownConstant_Decoded()
     {
-        // Builds a Branch B (anim_loop=0, emitter_type=0) static state.
-        // spec: Docs/RE/formats/effects.md §A.3.6 Branch B: PARSER-CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.3.7 static_velocity/size: HIGH.
-        using var ms = new System.IO.MemoryStream();
-        ms.Write(Le4(9999u)); // effect_id
-        ms.Write(Le4(1u)); // element_count = 1
-
-        // Group A
-        ms.Write(Le4(0u)); // emitter_type = 0 (billboard, no extra rotation)
-        ms.Write(Le4(0u)); // resource_id
-        ms.Write(Le4(0u)); // anim_flag = 0
-        ms.Write(Le4(0u)); // tex_count = 0 (no textures, no keyframes)
-        ms.Write(Le4(0u)); // field_unknown_a
-
-        // Group B: 0 texture entries (tex_count = 0)
-
-        // Group C: alpha keyframes (count=0)
-        ms.Write(Le4(0u));
-
-        // Group D: scale channels (all count=0)
-        ms.Write(Le4(0u)); // scaleX count=0
-        ms.Write(Le4(0u)); // scaleY count=0
-        ms.Write(Le4(0u)); // scaleZ count=0
-
-        // Group E: anim_loop=0, anim_stride, anim_base_time
-        ms.WriteByte(0); // anim_loop = 0 → Branch B
-        ms.Write(Le4(1000u));
-        ms.Write(Le4(0u));
-
-        // Group F Branch B: 6 floats (no rotation for emitter_type=0)
-        // spec: §A.3.6 Branch B — 24 bytes (reads 1–6) when emitter_type != 2: PARSER-CONFIRMED.
-        ms.Write(Le4f(7f)); // static_velocity_x
-        ms.Write(Le4f(8f)); // static_velocity_y
-        ms.Write(Le4f(9f)); // static_velocity_z
-        ms.Write(Le4f(10f)); // static_size_x
-        ms.Write(Le4f(11f)); // static_size_y
-        ms.Write(Le4f(12f)); // static_size_z
-
-        byte[] data = ms.ToArray();
+        // spec: Docs/RE/formats/effects.md §A.4.3 Track header — anim_stride u32 @ +5 (ms): CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.4.3 — unknown_constant u32 @ +1: SAMPLE-VERIFIED (value 67).
+        byte[] data = BuildXeffWithKeyframe(0f, 0f, 0f, 1f, 1f, 1f, 0f, 0f, 0f);
         XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(data));
 
-        XeffStaticState st = xeff.Elements[0].StaticState!;
-        Assert.Equal(7f, st.Velocity.X, precision: 5);
-        Assert.Equal(8f, st.Velocity.Y, precision: 5);
-        Assert.Equal(9f, st.Velocity.Z, precision: 5);
-        Assert.Equal(10f, st.Size.X, precision: 5);
-        Assert.Equal(11f, st.Size.Y, precision: 5);
-        Assert.Equal(12f, st.Size.Z, precision: 5);
-        // No rotation for emitter_type=0.
-        Assert.Null(st.RotXDeg);
-        // Rotation property returns identity.
-        Quat q = st.Rotation;
-        Assert.Equal(0f, q.X, precision: 5);
-        Assert.Equal(1f, q.W, precision: 5);
+        XeffSubEffect sub = xeff.SubEffects[0];
+        Assert.Equal(67u, sub.UnknownConstant); // spec: §A.4.3 SAMPLE-VERIFIED
+        Assert.Equal(100u, sub.AnimStride); // set in fixture above
+        Assert.Equal(0u, sub.AnimBaseTime);
+    }
+
+    [Fact]
+    public void Xeff_Frame0_NoIndexPrefix_VelocityAndSize()
+    {
+        // Validates the frame-0 no-index-prefix rule.
+        // spec: Docs/RE/formats/effects.md §A.4.4 — "Frame 0 is a special case: it has NO index prefix": CONFIRMED.
+        byte[] data = BuildXeffWithKeyframe(7f, 8f, 9f, 10f, 11f, 12f, 0f, 0f, 0f);
+        XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(data));
+
+        XeffKeyframe kf0 = xeff.SubEffects[0].Keyframes[0];
+        Assert.Equal(0u, kf0.KfIndex); // frame 0: index = 0 (no prefix on disk)
+        Assert.Equal(7f, kf0.VelocityX, precision: 5);
+        Assert.Equal(10f, kf0.SizeX, precision: 5);
+    }
+
+    [Fact]
+    public void Xeff_MultipleKeyframes_Frame1HasIndex()
+    {
+        // Validates that frames 1..N-1 have a u32 kf_index prefix.
+        // spec: Docs/RE/formats/effects.md §A.4.4 — frames 1..N-1: u32 kf_index + 9 × f32: CONFIRMED.
+        using var ms2 = new System.IO.MemoryStream();
+
+        // 32-byte header
+        ms2.Write(Le4(55555u)); // effect_id
+        ms2.Write(Le4(1u)); // sub_effect_count = 1
+        ms2.Write(Le4(1u)); // type_flag
+        ms2.Write(new byte[16]); // reserved
+        ms2.Write(Le4(2u)); // first_entry_count = 2
+
+        // sub-effect block: entry_count = 2
+        ms2.Write(Le4(2u)); // entry_count
+
+        // name table: 2 × 64 bytes
+        ms2.Write(new byte[128]);
+
+        // alpha curve: count=2, 2×f32
+        ms2.Write(Le4(2u));
+        ms2.Write(Le4f(0f));
+        ms2.Write(Le4f(0.5f));
+        // scaleX/Y/Z: count=2, 2×f32 each
+        ms2.Write(Le4(2u));
+        ms2.Write(Le4f(1f));
+        ms2.Write(Le4f(2f));
+        ms2.Write(Le4(2u));
+        ms2.Write(Le4f(1f));
+        ms2.Write(Le4f(2f));
+        ms2.Write(Le4(2u));
+        ms2.Write(Le4f(1f));
+        ms2.Write(Le4f(2f));
+
+        // track header: 13 bytes
+        ms2.WriteByte(1); // anim_loop
+        ms2.Write(Le4(67u)); // unknown_constant
+        ms2.Write(Le4(500u)); // anim_stride
+        ms2.Write(Le4(0u)); // anim_base_time
+
+        // frame 0: no index prefix, 9 × f32
+        // spec: §A.4.4 — Frame 0: 9 × f32 (36 bytes), no index: CONFIRMED.
+        ms2.Write(Le4f(1f));
+        ms2.Write(Le4f(0f));
+        ms2.Write(Le4f(0f)); // velocity
+        ms2.Write(Le4f(5f));
+        ms2.Write(Le4f(5f));
+        ms2.Write(Le4f(5f)); // size
+        ms2.Write(Le4f(0f));
+        ms2.Write(Le4f(0f));
+        ms2.Write(Le4f(0f)); // rot degrees
+
+        // frame 1: u32 kf_index + 9 × f32
+        // spec: §A.4.4 — frames 1..N-1: u32 kf_index + 9 × f32 = 40 bytes: CONFIRMED.
+        ms2.Write(Le4(1u)); // kf_index = 1
+        ms2.Write(Le4f(2f));
+        ms2.Write(Le4f(0f));
+        ms2.Write(Le4f(0f)); // velocity
+        ms2.Write(Le4f(10f));
+        ms2.Write(Le4f(10f));
+        ms2.Write(Le4f(10f)); // size
+        ms2.Write(Le4f(0f));
+        ms2.Write(Le4f(90f));
+        ms2.Write(Le4f(0f)); // rot: 90° Y
+
+        byte[] data2 = ms2.ToArray();
+        XeffData xeff2 = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(data2));
+
+        XeffSubEffect sub = xeff2.SubEffects[0];
+        Assert.Equal(2, sub.Keyframes.Length);
+        Assert.Equal(0u, sub.Keyframes[0].KfIndex); // frame 0 has no on-disk prefix; KfIndex = 0
+        Assert.Equal(1u, sub.Keyframes[1].KfIndex); // frame 1 has kf_index = 1
+        Assert.Equal(2f, sub.Keyframes[1].VelocityX, precision: 5);
+        // 90° rotation around Y should give Y-component ≈ 0.7071
+        Assert.Equal(MathF.Sin(MathF.PI / 4f), sub.Keyframes[1].Rotation.Y, precision: 4);
+    }
+
+    [Fact]
+    public void Xeff_AntiMagic_ThrowsInvalidData()
+    {
+        // spec: Docs/RE/formats/effects.md §A.1 — effect_id == 0x46464558 → file invalid: CONFIRMED.
+        using var ms3 = new System.IO.MemoryStream();
+        ms3.Write(Le4(0x46464558u)); // anti-magic
+        ms3.Write(new byte[28]); // rest of the 32-byte header
+
+        byte[] bad = ms3.ToArray();
+        Assert.Throws<InvalidDataException>(() => XeffParser.ParseXeff(new ReadOnlyMemory<byte>(bad)));
+    }
+
+    [Fact]
+    public void Xeff_Stub_ZeroSubEffects_Parsed()
+    {
+        // spec: Docs/RE/formats/effects.md §A.2 — sub_effect_count=0 is valid (stub): VERIFIED.
+        using var ms4 = new System.IO.MemoryStream();
+        ms4.Write(Le4(99u)); // effect_id
+        ms4.Write(Le4(0u)); // sub_effect_count = 0
+        ms4.Write(Le4(1u)); // type_flag
+        ms4.Write(new byte[16]); // reserved
+        ms4.Write(Le4(0u)); // first_entry_count = 0
+
+        byte[] stub = ms4.ToArray();
+        XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(stub));
+
+        Assert.Equal(99u, xeff.EffectId);
+        Assert.Equal(0u, xeff.SubEffectCount);
+        Assert.Empty(xeff.SubEffects);
     }
 
     // =========================================================================

@@ -19,27 +19,34 @@ public static class Opcodes
     /// <summary>0:0 — handshake key exchange. status: draft. spec: Docs/RE/opcodes.md.</summary>
     public const uint SmsgKeyExchange = 0x0;
 
-    // --- major 1: ServerCommand (S2C) / account (C2S) ---
-    /// <summary>
-    /// 1:6 — CONTESTED login-OR-create C2S blob (52 B opaque). status: draft.
-    /// spec: packets/1-6_login_or_create.yaml. UNRESOLVED OPCODE COLLISION: two independent
-    /// ~52-byte send-sites map to 1/6 — the account LOGIN credential blob AND the character-CREATE
-    /// body. The catalog keeps the canonical name CmsgLoginRequest; the spec commits to NEITHER
-    /// field layout and forbids a field-split struct until a capture disambiguates. spec: opcodes.md.
-    /// </summary>
-    public const uint CmsgLoginRequest = 0x10006;
+    // --- major 1: Account / CharacterMgmt (C2S request builders 0/6/7/9/13/14) ---
+    /// <summary>1:0 — client logout / quit-from-in-game request (header-only, 0 B). status: draft. spec: packets/cmsg_logout.yaml.</summary>
+    public const uint CmsgLogout = 0x10000;
 
-    /// <summary>1:7 — client select-character pre-step (2 B: slot + state flag). status: draft. spec: packets/1-7_select_character.yaml.</summary>
+    /// <summary>
+    /// 1:6 — client character-CREATE request (52 B appearance/creation record). status: draft.
+    /// spec: packets/cmsg_char_create.yaml. The prior "1/6 login-or-create collision" is RESOLVED:
+    /// 1/6 is character-create ONLY (single emitter). The login credential is a separate sub-opcode
+    /// 0x2B on the secure 1/4 frame (packets/login.yaml), NOT here. The 52-byte body's intra-payload
+    /// field map is capture-unverified, so the struct models it as one opaque buffer. spec: opcodes.md.
+    /// </summary>
+    public const uint CmsgCreateCharacter = 0x10006;
+
+    /// <summary>1:7 — client select-character / slot-ack request (2 B: slot + flag). status: draft. spec: packets/cmsg_char_select.yaml.</summary>
     public const uint CmsgSelectCharacter = 0x10007;
 
-    /// <summary>1:9 — client enter-world / select-character request (40 B). status: draft. spec: packets/1-9_enter_game_request.yaml.</summary>
+    /// <summary>1:9 — client enter-world request (40 B: slot + version blob + version-check u32). status: draft. spec: packets/cmsg_char_enter.yaml.</summary>
     public const uint CmsgEnterGameRequest = 0x10009;
 
-    /// <summary>1:13 — client rename-character request (18 B CP949 name buffer). status: draft. spec: packets/1-13_rename_character.yaml.</summary>
+    /// <summary>1:13 — client rename-character request (18 B: slot + 17 B CP949 name). status: draft. spec: packets/cmsg_char_rename.yaml.</summary>
     public const uint CmsgRenameCharacter = 0x1000d;
 
-    /// <summary>1:14 — client delete-character request (1 B slot index). status: draft. spec: packets/1-14_delete_character.yaml.</summary>
-    public const uint CmsgDeleteCharacter = 0x1000e;
+    /// <summary>
+    /// 1:14 — client slot-MOVE / relocate request (1 B target slot). status: draft.
+    /// spec: packets/cmsg_char_move.yaml. The workflow-spine analysis re-attributes 1/14 from the
+    /// earlier "delete" reading to slot-move; the move-vs-delete canonical reconciliation is Tier-1's.
+    /// </summary>
+    public const uint CmsgMoveCharacter = 0x1000e;
 
     /// <summary>1:16 — billing deactivated. status: confirmed.</summary>
     public const uint SmsgSrvBillingDeactivated = 0x10010;

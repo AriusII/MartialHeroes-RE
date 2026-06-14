@@ -1,0 +1,69 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED intra-payload offsets; size + name-at-0 are static-HIGH. capture_verified: false.
+
+name: CmsgCreateCharacter
+opcode: 0x10006           # major 1, minor 6 -> (1 << 16) | 6
+direction: C2S
+size: 52                  # fixed 52-byte (0x34) appearance/creation record
+spec: packets/cmsg_char_create.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Character-create request. The single emitter is the create-confirm action of the
+  character-select window; it blits a 52-byte embedded character appearance/creation record
+  (CP949 name at offset 0, plus class/face/four-allocatable-stats/appearance). The "1/6
+  login-or-create collision" is RESOLVED: 1/6 is char-create ONLY (xrefs-to the builder = exactly
+  one site). The login credential is a separate sub-opcode 0x2B on the secure 1/4 frame
+  (packets/login.yaml). Server replies with the S2C 3/6 / 3/23 create result.
+
+# The 52-byte body is an embedded appearance record. Its intra-payload field offsets below the
+# name are STATICALLY MEDIUM/LOW (capture-unverified, debugger-unverified), so the body is modelled
+# as one opaque 52-byte buffer for codegen until a capture/debugger read pins the offsets. The
+# widths sum to size: 52. Do NOT hand-author a field split for the appearance fields yet.
+fields:
+  - { name: Body, type: "bytes[52]" }   # 0x00  52-byte appearance/creation record (see Notes for candidate field map)
+
+notes: |
+  Static analysis only for the intra-payload layout (no capture, no debugger read this lane).
+  Frame = 8-byte header + 52 = 60 bytes on the wire.
+
+  STATIC-HIGH facts:
+    - Total body size = 52 bytes (0x34). The source object region spans a contiguous 52-byte run;
+      the byte immediately after the run is the in-flight latch, confirming the run length.
+    - The CP949 character NAME is at body offset 0 (copied via string-copy in the create-confirm path).
+    - Single emitter: the create-confirm sub-state of the select-window action dispatcher.
+
+  CANDIDATE intra-payload field map (STATIC MEDIUM/LOW -- capture/debugger required to pin exact
+  byte offsets and widths; do NOT codegen these yet):
+    Off (approx) | Field            | Notes
+    -------------|------------------|--------------------------------------------------------------
+    0x00         | Name             | CP949, NUL-terminated; reserved name region within the 52 B. HIGH.
+    ~0x21        | Class / job      | u16; class id 1..4 (gates the create-window stat handlers). MED.
+    (within)     | Face / appearance| u16; driven by the face +/- handlers (clamped 1..7). MED offset.
+    (within)     | Four stats       | four allocatable stat fields (u32 or u16 each), gated by a
+                 |                  | remaining-points counter. Contiguous run; order recovered. MED.
+    (within)     | Sex / hair / misc| remaining appearance bytes of the 52 B. LOW.
+
+  CLIENT-SIDE NAME VALIDATION (applied before send; useful for a faithful server too): minimum
+  length 2; allowed = ASCII lowercase a-z + digits 0-9 + CP949 double-byte Hangul; uppercase Latin
+  and punctuation rejected; a profanity/bad-word filter runs; a duplicate-name check fires an error.
+  Same character rule as the 1/13 rename name field. Only on passing all checks does the send fire.
+
+  IN-FLIGHT GUARD: the select-window net-busy latch must be clear before send and is set while the
+  request is in flight (blocks re-entrancy across all six char-mgmt builders).
+
+  SEQUENCE / RESULT: server answers with the create result (S2C 3/6 / 3/23). The 8-byte char-manage
+  result (3/4) may also refresh the slot list.
+
+  UNKNOWNS (capture/debugger required): the exact intra-payload byte offsets and widths of
+  class / face / the four stats / sex / hair, and the reserved name-region length within the 52 B.
+  Recommended: a debugger read of the 52-byte source buffer pre-send, or a captured 1/6 C2S frame,
+  cross-checked. Hand the exact intra-payload byte map to the struct-cartographer.
+
+  RELATED major-1 char-management senders: 1/0 (logout, cmsg_logout.yaml), 1/7 (select,
+  cmsg_char_select.yaml), 1/9 (enter, cmsg_char_enter.yaml), 1/13 (rename, cmsg_char_rename.yaml),
+  1/14 (slot-move, cmsg_char_move.yaml). All gated by the single select-window net-busy latch.
+
+  UNBLOCKS: a 52-byte opaque-body struct may be codegen'd now (fixed buffer); the appearance field
+  split must wait for a capture/debugger read before the struct is broken into typed fields.

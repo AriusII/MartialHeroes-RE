@@ -1,39 +1,45 @@
 // Screens/LoginScreen.cs
 //
-// The legacy LOGIN screen (master scene state 1), rebuilt as a Godot Control to pixel fidelity
-// against the full 21-site widget table in the spec.
+// LOGIN screen — pixel-faithful rebuild against the §11.2 widget table in frontend_scenes.md.
 //
-// KEY CHANGES FROM THE PRIOR IMPLEMENTATION:
-//   1. ATLAS CORRECTION — form widgets (OK/Login, Server-list, ID/PW textboxes, Save-ID checkbox,
-//      Quit/Help strip) now come from login_slice1.dds (NOT loginwindow.dds), per spec §9.1 and §8.1.
-//   2. ALL 7-STATE BUTTONS now use StateButton (via WidgetFactory.MakeStateButton) with all three
-//      frames (NORMAL/HOVER/PRESSED) sliced from the correct atlas.
-//   3. OPTION TABS — two option/tab buttons added at (40,82) and (164,82) on loginwindow.dds with
-//      corrected NORMAL src (520,492)/(750,492), per spec §8.1 correction note.
-//   4. QUIT BUTTON Y — Y = -3, CODE-CONFIRMED from spec §12 open item 1 RESOLVED.
-//   5. QUIT-CONFIRM MODAL — InventWindow.dds chrome (318,647) 340×190; msg 4023/4024 prompts;
-//      Yes buttons (actions 113/114), per spec §8.3 and §8.1.
-//   6. LOCAL VALIDATION — ID >= 4 chars (msg 4025); PW >= 1 (msg 4026); per spec §1.4 and §1.9.
-//   7. CAPTIONS from msg.xdb (4001–4022 range, 4023/4024, 4025/4026) via UiAssetLoader.Text.
+// COMPOSITION MODEL (spec §11.0):
+//   Design canvas: 1024×768, centered on screen.
+//   Widget shape: (X, Y, W, H) canvas-local; (srcU, srcV) = top-left pixel in atlas DDS.
+//   Atlas A = login_slice1.dds (DXT2 premultiplied); B = loginwindow.dds (DXT5).
+//   C = InventWindow.dds (shared dialog); D = loginwindow_02.dds (DXT2).
 //
-// OFFLINE STUB: no server exists in this revival build. No network, no packet parsing, no
-// credential validation against a server. OK accepts credentials after local validation (len rules)
-// and emits LoginAccepted; quit-confirm emits QuitRequested. Sub-states 34–41 (lobby/server-list
-// fetch, TAB-string, secure-context handshake) belong to the network layer and are absent here.
+// LAYERS (bottom → top, matching the legacy Z-order from §11.2):
+//   1. A — full background art panel (0,0,1024,398) src(0,0)                      §11.2b
+//   2. B — main panel chrome (0,110,1024,490) src(0,0)                             §11.2a
+//   3. D — channel-selector panning strip                                           §11.2b
+//   4. B — server listbox + scrolls                                                 §11.2a
+//   5. A — bottom login bar (height-scaled Y=326) + baked label art plates          §11.2e
+//   6. A — confirm/gold button (456,166,112,39) src(154,398)                       §11.2e
+//   7. A — face plate overlay (265,0,494,113) src(0,469)                           §11.2e
+//   8. B — option/tab buttons 1+2 at (40,82) / (164,82)                            §11.2f
+//   9. LineEdit controls for ID/PW at (390,32) / (568,32) (height-expanded to 22)  §11.2e
+//  10. A — Save-ID checkbox (694,86,13,13)                                          §11.2e
+//  11. A — secondary bottom button (OK / Login) at (456,64,112,39) src(266,398)    §11.2e
+//  12. C — quit-confirm modal (342,289,340,190) src(318,647)                       §11.2d
 //
-// PASSIVE: this is a view. It reads UI atlas chrome + msg.xdb captions (via UiAssetLoader) and
-// turns OK/Quit gestures into C# events the flow node consumes. Zero game logic, zero domain state.
+// ATLAS NOTES:
+//   - DXT2 atlases (login_slice1.dds, loginwindow_02.dds) use premultiplied alpha.
+//     Godot 4 imports DDS DXT2 as BC2 internally (same data as DXT3).
+//     Premultiplied alpha can cause slight colour shifts on transparent edges.
+//     The fallback when the VFS is unavailable is a solid-color backdrop.
+//   - The BottomBar Y position is height-scaled: Y = 326*screenH/768.
+//     On the fixed 1024×768 reference canvas this is simply Y=326.
 //
-// spec: Docs/RE/specs/ui_system.md §8.1 (login BuildScene — 21-site widget table, CODE-CONFIRMED),
-//       §9.1 (login asset manifest, CODE-CONFIRMED),
-//       §8.3 (shared modal chrome — InventWindow.dds 318,647 340×190),
-//       §8.0 (reference canvas 1024×768),
-//       §6.2 (font table, D3DX Height column),
-//       §10  (msg.xdb id ranges, CODE-CONFIRMED),
-//       §13.1 (Godot reconstruction guidance — AtlasTexture, CanvasLayer, scaling).
-// spec: Docs/RE/specs/frontend_scenes.md §1 (login scene flow),
-//       §1.4 (OK button local validation — ID len ≥ 4, PW len ≥ 1, CODE-CONFIRMED),
-//       §1.9 (message-catalogue id table, CODE-CONFIRMED).
+// FLOW / SIGNALS (spec §1.4 / §1.5):
+//   LoginAccepted  — OK pressed, local validation passed (ID≥4, PW≥1). Emits account name.
+//   ServerListRequested — Server-list button (action 102) clicked. Emits account name.
+//   QuitRequested  — Quit-confirm Yes button (actions 113/114). Emits quit.
+//
+// PASSIVE: pure view. Reads VFS atlas textures + msg.xdb captions via UiAssetLoader.
+//          No game logic, no domain state, no packet parsing.
+//
+// spec: Docs/RE/specs/frontend_scenes.md §11.0–§11.2 (CODE-CONFIRMED literals).
+//       §1.2 (action ids), §1.4 (validation), §1.8 (quit), §1.9 (msg ids).
 
 using Godot;
 using MartialHeroes.Client.Godot.Screens.Layout;
@@ -42,56 +48,39 @@ using MartialHeroes.Client.Godot.Screens.Widgets;
 namespace MartialHeroes.Client.Godot.Screens;
 
 /// <summary>
-/// Login screen Control. Built on the 1024×768 reference canvas (spec §8.0) and scaled to the
-/// window by the parent <see cref="ScreenHost"/>'s reference-size container.
-///
-/// <para>Widgets implemented (spec §8.1 full 21-site table):</para>
-/// <list type="bullet">
-///   <item><description>Account textbox @ (390,32) 102×13 — login_slice1.dds src (615,404)</description></item>
-///   <item><description>Password textbox @ (568,32) 102×13 — login_slice1.dds src (615,404), masked</description></item>
-///   <item><description>Save-ID checkbox @ (694,86) 13×13 — login_slice1.dds, unchecked (717,398) / checked (730,398)</description></item>
-///   <item><description>OK/Login button (7-state) @ (456,64) 112×39 — login_slice1.dds N(266,398) H/P(490,398) — action 103</description></item>
-///   <item><description>Server-list button (7-state) @ (456,166) 112×39 — login_slice1.dds N(154,398) H/P(378,398) — action 102 (disabled offline)</description></item>
-///   <item><description>Quit/Help strip button (7-state) @ (456,-3) 111×38 — login_slice1.dds N(792,398) H/P(602,416) — action 105</description></item>
-///   <item><description>Option tab 1 @ (40,82) 110×38 — loginwindow.dds N(520,492) H(635,492) P(520,492) — action 111</description></item>
-///   <item><description>Option tab 2 @ (164,82) 110×38 — loginwindow.dds N(750,492) H(865,492) P(750,492) — action 112</description></item>
-///   <item><description>Quit-confirm modal — InventWindow.dds chrome (318,647) 340×190; msg 4023/4024; Yes btns (113/114)</description></item>
-/// </list>
+/// Login screen Control on the 1024×768 reference canvas (spec §11.0).
+/// Pixel-faithful to the §11.2 widget table: background art, stone chrome, ID/PW fields,
+/// login/server/quit buttons, save-ID checkbox, quit-confirm modal.
 /// </summary>
 public sealed partial class LoginScreen : Control
 {
     // -------------------------------------------------------------------------
-    // Outgoing intent — consumed by the BootFlow node. Zero game logic here.
+    // Outgoing intents (signals consumed by BootFlow — no game logic here).
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Raised when the player presses OK/Login and local validation passes (ID len ≥ 4, PW len ≥ 1).
-    /// Carries the entered account name.
-    /// spec: Docs/RE/specs/frontend_scenes.md §1.4 — local validation then advance.
+    /// Raised when OK/Login is pressed and local validation passes.
+    /// spec: Docs/RE/specs/frontend_scenes.md §1.4 — validation then advance. CODE-CONFIRMED.
     /// </summary>
     [Signal]
     public delegate void LoginAcceptedEventHandler(string account);
 
     /// <summary>
-    /// Raised when the player confirms quit (via the quit-confirm modal's Yes button).
-    /// spec: Docs/RE/specs/frontend_scenes.md §1.8 — user quit-confirm → engine state 6.
-    /// </summary>
-    [Signal]
-    public delegate void QuitRequestedEventHandler();
-
-    /// <summary>
-    /// Raised when the player clicks the Server-list button (action 102).
-    /// Carries the current account name so BootFlow can pre-fill it on return.
-    /// The actual server list is fetched from the lobby (port 10000) in a live build.
-    /// In the offline/dev flow the caller (BootFlow) populates a synthetic list.
-    /// spec: Docs/RE/specs/frontend_scenes.md §2 — "Server-list button opens ServerSelectScreen".
-    /// spec: Docs/RE/specs/login_flow.md §2.1 — lobby port 10000, server-list records.
+    /// Raised when the server-list button (action 102) is clicked.
+    /// spec: Docs/RE/specs/frontend_scenes.md §2 / §1.2 action 102. CODE-CONFIRMED.
     /// </summary>
     [Signal]
     public delegate void ServerListRequestedEventHandler(string account);
 
+    /// <summary>
+    /// Raised when the quit-confirm Yes button (action 113 or 114) is clicked.
+    /// spec: Docs/RE/specs/frontend_scenes.md §1.8. CODE-CONFIRMED.
+    /// </summary>
+    [Signal]
+    public delegate void QuitRequestedEventHandler();
+
     // -------------------------------------------------------------------------
-    // View state (no domain state — positions, focus, modal open/close only)
+    // View state
     // -------------------------------------------------------------------------
 
     private LineEdit _accountEdit = null!;
@@ -102,10 +91,7 @@ public sealed partial class LoginScreen : Control
     private UiAssetLoader _assets = null!;
     private bool _ownsAssets;
 
-    /// <summary>
-    /// Optionally inject a shared asset loader. When null the screen opens its own and
-    /// disposes it on exit.
-    /// </summary>
+    /// <summary>Optionally inject a shared asset loader (disposed externally when set).</summary>
     public UiAssetLoader? SharedAssets { get; set; }
 
     // -------------------------------------------------------------------------
@@ -133,300 +119,371 @@ public sealed partial class LoginScreen : Control
     }
 
     // -------------------------------------------------------------------------
-    // Construction — the full 21-site layout on the 1024×768 reference canvas.
-    // spec: Docs/RE/specs/ui_system.md §8.1 (login BuildScene table, CODE-CONFIRMED).
+    // UI construction — §11.2 layer-by-layer.
     // -------------------------------------------------------------------------
 
     private void BuildUi()
     {
-        // Fill the reference canvas; ScreenHost scales us to the window.
+        // Fill the reference 1024×768 canvas. ScreenHost scales us to the window.
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
 
         int widgetCount = 0;
 
-        // --- [1] Backdrop base — solid colour fallback (shown when VFS is offline). ---
-        //     Dark blue-violet, typical of the legacy MMORPG night/dungeon aesthetic.
-        //     // PLAUSIBLE (no spec for canvas background colour; legacy sets D3D clear colour not captured).
-        var solid = new ColorRect
+        // =======================================================================
+        // [L1] Full background art panel (§11.2b).
+        // A@(0,0,1024,398) src(0,0) — login_slice1.dds — the panoramic background art.
+        // Falls back to a dark solid when VFS is offline.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2b "Full background art panel". CODE-CONFIRMED.
+        // =======================================================================
+        AtlasTexture? bgSlice = _assets.Slice(
+            LoginLayout.AtlasLoginSlice1,
+            LoginLayout.BackgroundPanel.SrcX, LoginLayout.BackgroundPanel.SrcY,
+            LoginLayout.BackgroundPanel.W, LoginLayout.BackgroundPanel.H);
+
+        if (bgSlice is not null)
         {
-            Name = "BackdropBase",
-            Color = new Color(0.04f, 0.04f, 0.10f),
-        };
-        solid.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        AddChild(solid);
+            var bgRect = MakeSprite("BgArtPanel", bgSlice,
+                LoginLayout.BackgroundPanel.X, LoginLayout.BackgroundPanel.Y,
+                LoginLayout.BackgroundPanel.W, LoginLayout.BackgroundPanel.H);
+            AddChild(bgRect);
+        }
+        else
+        {
+            // VFS offline fallback: dark art-noir background.
+            var fallback = new ColorRect
+            {
+                Name = "BgFallback",
+                Color = new Color(0.04f, 0.04f, 0.10f),
+            };
+            fallback.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+            AddChild(fallback);
+        }
+
         widgetCount++;
 
-        // --- [2] Intro banner art — loginwindow_02.dds panning strip.
-        //     spec §8.1 site "Intro banner": dst (—,97,202,372); x is register-fed/centre-computed
-        //     (i.e. the original animates it in from the side; exact x is a runtime value not in spec).
-        //     We place it at x=0 (left side, visible under the option tabs) as a plausible static
-        //     approximation of the animated entry position. Height=372 places it y=97..469 panel-local,
-        //     which maps to y=(BandTopY+97)..(BandTopY+469) absolu on the canvas.
-        //     PLAUSIBLE POSITION (exact x not in spec — runtime animated).
-        //     spec: Docs/RE/specs/ui_system.md §8.1 — "Intro banner BTN7 (—,97,202,372)". CODE-CONFIRMED.
-        //     spec: Docs/RE/specs/ui_system.md §9.1 — loginwindow_02.dds panning banner. CODE-CONFIRMED.
-        Texture2D? bannerArt = _assets.LoadAtlas(LoginLayout.AtlasLoginWindow02);
-        if (bannerArt is not null)
+        // =======================================================================
+        // [L2] Main panel chrome (§11.2a).
+        // B@(0,110,1024,490) src(0,0) — loginwindow.dds — the stone bar that frames the form area.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2a "Main panel art". CODE-CONFIRMED.
+        // =======================================================================
+        AtlasTexture? mainPanel = _assets.Slice(
+            LoginLayout.AtlasLoginWindow,
+            LoginLayout.MainPanel.SrcX, LoginLayout.MainPanel.SrcY,
+            LoginLayout.MainPanel.W, LoginLayout.MainPanel.H);
+
+        if (mainPanel is not null)
         {
-            var artRect = new TextureRect
-            {
-                Name = "BannerStrip",
-                Texture = bannerArt,
-                // Scale within its panel-local rect: spec gives (w=202, h=372) for the strip.
-                // Keep aspect to display faithfully rather than stretching.
-                StretchMode = TextureRect.StretchModeEnum.KeepAspect,
-                // Panel-local position: x=0 (plausible left anchor), y=BandTopY+97 adjusted for
-                // the fact that BannerStrip is added as a child of LoginScreen (not the band).
-                // We add it after the band so it renders on top of the dark backdrop but under widgets.
-                Position = new Vector2(LoginLayout.BannerStripX,
-                    LoginLayout.BandTopY + LoginLayout.BannerStripLocalY),
-                Size = new Vector2(LoginLayout.BannerStripW, LoginLayout.BannerStripH),
-                MouseFilter = MouseFilterEnum.Ignore,
-            };
-            AddChild(artRect);
+            var mainPanelRect = MakeSprite("MainPanelChrome", mainPanel,
+                LoginLayout.MainPanel.X, LoginLayout.MainPanel.Y,
+                LoginLayout.MainPanel.W, LoginLayout.MainPanel.H);
+            AddChild(mainPanelRect);
             widgetCount++;
         }
 
-        // --- [3] Form band — widget local coordinates from spec §8.1 are relative to this panel. ---
-        // spec §8.0 — "Widget coordinates are in pixels, relative to their parent panel's origin."
-        var band = new Control { Name = "LoginBand" };
-        band.Position = new Vector2(0, LoginLayout.BandTopY);
-        band.Size = new Vector2(LoginLayout.RefWidth, LoginLayout.BandHeight);
-        band.CustomMinimumSize = band.Size;
-        AddChild(band);
-
-        // --- [3a] Form panel backing — semi-opaque rect placed behind form widgets only.
-        //     The spec (§8.1, §9.1) does not document a dedicated form-panel chrome sub-rect;
-        //     no form-panel art region was recovered. We add a ColorRect so buttons/textboxes
-        //     remain legible. The backing covers the right half of the band where the form widgets
-        //     live (x=380..810 panel-local, covering ID/PW textboxes, OK, ServerList, SaveId).
-        //     The left zone (x=0..300) is left clear so the loginwindow_02.dds banner strip shows.
-        //     // PLAUSIBLE backing geometry (legacy panel art unrecovered; covers widget cluster)
-        //     spec: Docs/RE/specs/ui_system.md §8.1 (form widget cluster x=390..706). CODE-CONFIRMED coords.
-        var formBacking = new ColorRect
+        // =======================================================================
+        // [L3] Channel-selector / banner strip (§11.2b).
+        // D@two-block loop — loginwindow_02.dds — the panning parchment strip visible to
+        // the left of the form. Body src V starts at 448, step +124 for 2 blocks.
+        // X starts at 30, step +233.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2b "Channel block: body". CODE-CONFIRMED.
+        // =======================================================================
+        for (int blk = 0; blk < 2; blk++)
         {
-            Name = "FormBacking",
-            Color = LoginLayout.FormBackingColor,
-            Position = new Vector2(LoginLayout.FormBackingX, LoginLayout.FormBackingY),
-            Size = new Vector2(LoginLayout.FormBackingW, LoginLayout.FormBackingH),
-        };
-        formBacking.MouseFilter = MouseFilterEnum.Ignore;
-        band.AddChild(formBacking); // inserted first → drawn behind all sibling widgets
+            int blockX = 30 + blk * 233;
+            int bodySrcV = 448 + blk * 124;
+
+            // Block body image: (blockX+47, 97, 100, 372) src (bodySrcV, 6).
+            // spec §11.2b "Channel block: body". CODE-CONFIRMED.
+            AtlasTexture? blockBody = _assets.Slice(
+                LoginLayout.AtlasLoginWindow02,
+                bodySrcV, 6, 100, 372);
+            if (blockBody is not null)
+            {
+                var bodyRect = MakeSprite($"ChannelBlock{blk}Body", blockBody,
+                    blockX + 47, 97, 100, 372);
+                AddChild(bodyRect);
+                widgetCount++;
+            }
+        }
+
+        // =======================================================================
+        // [L4] Server listbox container + scroll controls (§11.2a).
+        // Placed here (above the channel blocks) for correct Z-order.
+        // These are decorative in the offline build; the real server-select is a separate screen.
+        // spec §11.2a. CODE-CONFIRMED positions/src.
+        // =======================================================================
+        {
+            AtlasTexture? listbox = _assets.Slice(
+                LoginLayout.AtlasLoginWindow,
+                LoginLayout.ServerListbox.SrcX, LoginLayout.ServerListbox.SrcY,
+                LoginLayout.ServerListbox.W, LoginLayout.ServerListbox.H);
+            if (listbox is not null)
+            {
+                var listboxRect = MakeSprite("ServerListboxBg", listbox,
+                    LoginLayout.ServerListbox.X, LoginLayout.ServerListbox.Y,
+                    LoginLayout.ServerListbox.W, LoginLayout.ServerListbox.H);
+                // Make it transparent so it doesn't cover the channel blocks entirely.
+                listboxRect.Modulate = new Color(1f, 1f, 1f, 0.7f);
+                AddChild(listboxRect);
+                widgetCount++;
+            }
+        }
+
+        // =======================================================================
+        // [L5] Bottom login bar + baked label art plates (§11.2e).
+        // A@(0, 326, 1024, 442) src(0,582) — login_slice1.dds — the brown/stone bottom band.
+        // Y = 326 on the 1024×768 reference canvas (= 326×768/768).
+        // spec §11.2e "Bottom login-bar panel". CODE-CONFIRMED.
+        // =======================================================================
+        AtlasTexture? bottomBar = _assets.Slice(
+            LoginLayout.AtlasLoginSlice1,
+            LoginLayout.BottomBarSrcX, LoginLayout.BottomBarSrcY,
+            LoginLayout.BottomBarW, LoginLayout.BottomBarH);
+
+        Control bottomBand; // parent for all form widgets below
+        if (bottomBar is not null)
+        {
+            var bottomBarRect = MakeSprite("BottomBar", bottomBar,
+                0, LoginLayout.BottomBarCanvasY,
+                LoginLayout.BottomBarW, LoginLayout.BottomBarH);
+            AddChild(bottomBarRect);
+            widgetCount++;
+
+            // Form widgets are children of this container (panel-local = band-relative coords).
+            bottomBand = new Control
+            {
+                Name = "BottomBand",
+                Position = new Vector2(0, LoginLayout.BottomBarCanvasY),
+                Size = new Vector2(LoginLayout.RefWidth, LoginLayout.BottomBarH),
+            };
+            AddChild(bottomBand);
+        }
+        else
+        {
+            // Offline fallback: solid parchment-tone band.
+            var fallbackBand = new ColorRect
+            {
+                Name = "BottomBandFallback",
+                Color = new Color(0.22f, 0.14f, 0.08f, 0.95f),
+                Position = new Vector2(0, LoginLayout.BottomBarCanvasY),
+                Size = new Vector2(LoginLayout.RefWidth, LoginLayout.BottomBarH),
+            };
+            AddChild(fallbackBand);
+            bottomBand = fallbackBand;
+        }
+
+        // --- Baked label art plates (§11.2e) — "아이디" / "비밀번호" / decoration. ---
+        // These are DDS sub-rects that contain Korean text baked into the atlas art.
+        // No runtime text — just sprites. spec §11.2e "baked art". CODE-CONFIRMED.
+        AddAtlasSprite(bottomBand, "AccountLabelArt",
+            LoginLayout.AtlasLoginSlice1,
+            LoginLayout.AccountLabelArt.SrcX, LoginLayout.AccountLabelArt.SrcY,
+            LoginLayout.AccountLabelArt.X, LoginLayout.AccountLabelArt.Y,
+            LoginLayout.AccountLabelArt.W, LoginLayout.AccountLabelArt.H);
         widgetCount++;
 
-        // --- [4] Account / ID textbox — @ (390,32) 102×13, login_slice1.dds src (615,404).
-        //     spec §8.1 "ID/account textbox" — IME slot 16, maxlen 6. CODE-CONFIRMED.
-        //     13px spec height is too small for a usable Godot LineEdit; we render at 22px for
-        //     legibility. Position (x,y) is spec-exact; width (102) is spec-exact.
-        _accountEdit = MakeTextbox(masked: false, maxLength: 6);
-        PlaceLocal(_accountEdit, LoginLayout.AccountBox, sizeFromRect: false);
-        _accountEdit.Size = new Vector2(LoginLayout.AccountBox.W, LoginLayout.TextboxRenderH);
-        _accountEdit.CustomMinimumSize = new Vector2(LoginLayout.AccountBox.W, LoginLayout.TextboxRenderH);
-        band.AddChild(_accountEdit);
+        AddAtlasSprite(bottomBand, "PasswordLabelArt",
+            LoginLayout.AtlasLoginSlice1,
+            LoginLayout.PasswordLabelArt.SrcX, LoginLayout.PasswordLabelArt.SrcY,
+            LoginLayout.PasswordLabelArt.X, LoginLayout.PasswordLabelArt.Y,
+            LoginLayout.PasswordLabelArt.W, LoginLayout.PasswordLabelArt.H);
         widgetCount++;
 
-        // --- [4a] ID label — "ID:" prefix label to the left of the account textbox. ---
-        //     Not in the widget table (the legacy used a GULabel atlas sprite with text from msg.xdb).
-        //     Added here for legibility in the offline build. PLAUSIBLE.
-        //     msg id 4001 might be "ID" or another caption — exact mapping not confirmed; fall back.
-        var idLabel = WidgetFactory.MakeLabel("ID", LoginLayout.FontBodyHeight,
-            new Color(0.90f, 0.90f, 0.75f));
-        idLabel.Position = new Vector2(LoginLayout.AccountBox.X - 28, LoginLayout.AccountBox.Y + 4);
-        idLabel.Size = new Vector2(26, 16);
-        idLabel.HorizontalAlignment = HorizontalAlignment.Right;
-        band.AddChild(idLabel);
-
-        // --- [5] Password textbox — @ (568,32) 102×13, login_slice1.dds src (615,404), masked.
-        //     spec §8.1 "Password textbox" — IME slot 12, maxlen 129. CODE-CONFIRMED.
-        //     Same height adjustment as the ID textbox (13px → 22px render height).
-        _passwordEdit = MakeTextbox(masked: true, maxLength: 129);
-        PlaceLocal(_passwordEdit, LoginLayout.PasswordBox, sizeFromRect: false);
-        _passwordEdit.Size = new Vector2(LoginLayout.PasswordBox.W, LoginLayout.TextboxRenderH);
-        _passwordEdit.CustomMinimumSize = new Vector2(LoginLayout.PasswordBox.W, LoginLayout.TextboxRenderH);
-        band.AddChild(_passwordEdit);
+        AddAtlasSprite(bottomBand, "DecoPlate",
+            LoginLayout.AtlasLoginSlice1,
+            LoginLayout.SmallDecorPlate.SrcX, LoginLayout.SmallDecorPlate.SrcY,
+            LoginLayout.SmallDecorPlate.X, LoginLayout.SmallDecorPlate.Y,
+            LoginLayout.SmallDecorPlate.W, LoginLayout.SmallDecorPlate.H);
         widgetCount++;
 
-        // --- [5a] PW label — "PW:" prefix label. PLAUSIBLE (as per [4a]). ---
-        // msg id 4001 = "ID", 4002 = "Server List" (used by ServerList button below).
-        // "PW" has no dedicated msg id in the 4001-4022 range; fall back to hardcoded string.
-        var pwLabel = WidgetFactory.MakeLabel("PW", LoginLayout.FontBodyHeight,
-            new Color(0.90f, 0.90f, 0.75f));
-        pwLabel.Position = new Vector2(LoginLayout.PasswordBox.X - 28, LoginLayout.PasswordBox.Y + 4);
-        pwLabel.Size = new Vector2(26, 16);
-        pwLabel.HorizontalAlignment = HorizontalAlignment.Right;
-        band.AddChild(pwLabel);
-
-        // --- [6] Save-ID checkbox — @ (694,86) 13×13, login_slice1.dds.
-        //     Unchecked NORMAL (717,398); checked = PRESSED (730,398).
-        //     spec §8.1 "Save-ID checkbox", action 104. CODE-CONFIRMED. ---
-        var saveIdBtn = WidgetFactory.MakeStateButton(
+        // =======================================================================
+        // [L6] Confirm/gold button (§11.2e) — action 102.
+        // A@(456,166,112,39) NORMAL src(154,398), HOVER/PRESSED src(378,398).
+        // This is the "확인" (confirm) button — its baked art label is inside the atlas.
+        // The action id is 102 (server-list button per §1.2).
+        // In our offline flow we wire it as the "Server List" / "확인" submission.
+        // spec §11.2e "Confirm button" action 102. CODE-CONFIRMED.
+        // =======================================================================
+        var confirmBtn = WidgetFactory.MakeStateButton(
             _assets, LoginLayout.AtlasLoginSlice1,
-            LoginLayout.SaveIdCheck.X, LoginLayout.SaveIdCheck.Y,
-            LoginLayout.SaveIdCheck.W, LoginLayout.SaveIdCheck.H,
-            LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY, // NORMAL (unchecked)
-            LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY, // HOVER = NORMAL
-            LoginLayout.SaveIdCheckedSrcX, LoginLayout.SaveIdCheckedSrcY, // PRESSED (checked)
-            LoginLayout.ActionSaveId,
-            caption: "",
+            LoginLayout.ConfirmButton.X, LoginLayout.ConfirmButton.Y,
+            LoginLayout.ConfirmButton.W, LoginLayout.ConfirmButton.H,
+            LoginLayout.ConfirmButton.SrcX, LoginLayout.ConfirmButton.SrcY, // NORMAL (154,398)
+            LoginLayout.ConfirmHoverSrcX, LoginLayout.ConfirmHoverSrcY, // HOVER  (378,398)
+            LoginLayout.ConfirmHoverSrcX, LoginLayout.ConfirmHoverSrcY, // PRESSED= HOVER
+            LoginLayout.ActionConfirm,
+            caption: "", // No overlay text — word is baked into atlas art. spec §11.2e.
             captionTint: Colors.White);
-        saveIdBtn.Name = "SaveIdCheckbox";
-        // Caption label "Save ID" — inline beside the checkbox.
-        // In the real client this is a GULabel drawn at the same row, not part of the checkbox widget.
-        var saveIdLabel = WidgetFactory.MakeLabel(
-            _assets.Text(4004u, "Save ID"), // msg id 4004 is in the 4001-4022 range
-            LoginLayout.FontLabelHeight,
-            new Color(0.85f, 0.85f, 0.9f));
-        saveIdLabel.Position = new Vector2(
-            LoginLayout.SaveIdCheck.X + LoginLayout.SaveIdCheck.W + 3,
-            LoginLayout.SaveIdCheck.Y);
-        saveIdLabel.Size = new Vector2(60, 14);
-        band.AddChild(saveIdLabel);
-        band.AddChild(saveIdBtn);
-        widgetCount += 2;
+        confirmBtn.Name = "ConfirmButton";
+        confirmBtn.ActionFired += _ => OnServerListPressed();
+        bottomBand.AddChild(confirmBtn);
+        widgetCount++;
 
-        // --- [7] OK / Login button (7-state) — @ (456,64) 112×39.
-        //     NORMAL (266,398)  HOVER/PRESSED (490,398)  login_slice1.dds  action 103.
-        //     spec §8.1 "OK/Login button". CODE-CONFIRMED. ---
-        var okBtn = WidgetFactory.MakeStateButton(
+        // Confirm button face plate (gold plate baked art overlay).
+        // spec §11.2e "Confirm-button face plate". CODE-CONFIRMED.
+        AddAtlasSprite(bottomBand, "ConfirmFacePlate",
+            LoginLayout.AtlasLoginSlice1,
+            LoginLayout.ConfirmFacePlate.SrcX, LoginLayout.ConfirmFacePlate.SrcY,
+            LoginLayout.ConfirmFacePlate.X, LoginLayout.ConfirmFacePlate.Y,
+            LoginLayout.ConfirmFacePlate.W, LoginLayout.ConfirmFacePlate.H);
+        widgetCount++;
+
+        // =======================================================================
+        // [L7] Secondary bottom button (OK / Login) — action 103.
+        // A@(456,64,112,39) NORMAL src(266,398), HOVER/PRESSED src(490,398).
+        // spec §11.2e "Secondary bottom button". CODE-CONFIRMED.
+        // In the original this is the register / find-password button; we use it as the
+        // Login button (send credentials → advance to server select or login).
+        // =======================================================================
+        var loginBtn = WidgetFactory.MakeStateButton(
             _assets, LoginLayout.AtlasLoginSlice1,
             LoginLayout.OkButton.X, LoginLayout.OkButton.Y,
             LoginLayout.OkButton.W, LoginLayout.OkButton.H,
             LoginLayout.OkButton.SrcX, LoginLayout.OkButton.SrcY, // NORMAL (266,398)
             LoginLayout.OkHoverSrcX, LoginLayout.OkHoverSrcY, // HOVER  (490,398)
-            LoginLayout.OkHoverSrcX, LoginLayout.OkHoverSrcY, // PRESSED (490,398) — HOVER==PRESSED per spec
+            LoginLayout.OkHoverSrcX, LoginLayout.OkHoverSrcY, // PRESSED = HOVER
             LoginLayout.ActionOk,
-            caption: _assets.Text(4003u, "Login"),
+            caption: "", // baked art label. spec §11.2e "baked art".
             captionTint: Colors.White);
-        okBtn.Name = "OkButton";
-        okBtn.ActionFired += _ => OnOkPressed();
-        band.AddChild(okBtn);
+        loginBtn.Name = "LoginButton";
+        loginBtn.ActionFired += _ => OnOkPressed();
+        bottomBand.AddChild(loginBtn);
         widgetCount++;
 
-        // --- [8] Server-list button (7-state) — @ (456,166) 112×39.
-        //     NORMAL (154,398)  HOVER/PRESSED (378,398)  login_slice1.dds  action 102.
-        //     OFFLINE STUB: disabled (no lobby server in this build).
-        //     spec §8.1 "Server-list button". CODE-CONFIRMED. ---
-        var serverBtn = WidgetFactory.MakeStateButton(
-            _assets, LoginLayout.AtlasLoginSlice1,
-            LoginLayout.ServerListButton.X, LoginLayout.ServerListButton.Y,
-            LoginLayout.ServerListButton.W, LoginLayout.ServerListButton.H,
-            LoginLayout.ServerListButton.SrcX, LoginLayout.ServerListButton.SrcY, // NORMAL (154,398)
-            LoginLayout.ServerListHoverSrcX, LoginLayout.ServerListHoverSrcY, // HOVER  (378,398)
-            LoginLayout.ServerListHoverSrcX, LoginLayout.ServerListHoverSrcY, // PRESSED (378,398)
-            LoginLayout.ActionServerList,
-            caption: _assets.Text(4002u, "Server List"),
-            captionTint: Colors.White);
-        serverBtn.Name = "ServerListButton";
-        // Server button is now ENABLED — BootFlow handles it (online or dev-offline synthetic list).
-        // spec: Docs/RE/specs/frontend_scenes.md §2 — "Server-list button opens ServerSelectScreen".
-        serverBtn.ActionFired += _ => OnServerListPressed();
-        band.AddChild(serverBtn);
-        widgetCount++;
-
-        // --- [9] Quit/Help strip button (7-state) — @ (456,-3) 111×38.
-        //     Y = -3: CODE-CONFIRMED — spec §12 open item 1 RESOLVED.
-        //     NORMAL (792,398)  HOVER/PRESSED (602,416)  login_slice1.dds  action 105.
-        //     spec §8.1 "Quit/Help strip". CODE-CONFIRMED. ---
-        var quitBtn = WidgetFactory.MakeStateButton(
-            _assets, LoginLayout.AtlasLoginSlice1,
-            LoginLayout.QuitButton.X, LoginLayout.QuitButton.Y,
-            LoginLayout.QuitButton.W, LoginLayout.QuitButton.H,
-            LoginLayout.QuitButton.SrcX, LoginLayout.QuitButton.SrcY, // NORMAL (792,398)
-            LoginLayout.QuitHoverSrcX, LoginLayout.QuitHoverSrcY, // HOVER  (602,416)
-            LoginLayout.QuitHoverSrcX, LoginLayout.QuitHoverSrcY, // PRESSED (602,416)
-            LoginLayout.ActionQuit,
-            caption: _assets.Text(4005u, "Quit"),
-            captionTint: Colors.White);
-        quitBtn.Name = "QuitButton";
-        quitBtn.ActionFired += _ => ShowQuitConfirmModal();
-        band.AddChild(quitBtn);
-        widgetCount++;
-
-        // --- [10] Option/tab button 1 — @ (40,82) 110×38.
-        //     NORMAL (520,492)  HOVER (635,492)  PRESSED (520,492)  loginwindow.dds  action 111.
-        //     spec §8.1 "Option/tab button 1". NORMAL src corrected to (520,492). CODE-CONFIRMED. ---
-        var tab1Btn = WidgetFactory.MakeStateButton(
+        // =======================================================================
+        // [L8] Option / tab buttons (§11.2f).
+        // B@(40,82,110,38) action 111 — "Option 1" tab.
+        // B@(164,82,110,38) action 112 — "Option 2" tab.
+        // spec §11.2f. CODE-CONFIRMED.
+        // =======================================================================
+        var tab1 = WidgetFactory.MakeStateButton(
             _assets, LoginLayout.AtlasLoginWindow,
             LoginLayout.OptionTab1.X, LoginLayout.OptionTab1.Y,
             LoginLayout.OptionTab1.W, LoginLayout.OptionTab1.H,
-            LoginLayout.OptionTab1.SrcX, LoginLayout.OptionTab1.SrcY, // NORMAL (520,492)
-            LoginLayout.OptionTab1HoverSrcX, LoginLayout.OptionTab1HoverSrcY, // HOVER (635,492)
-            LoginLayout.OptionTab1.SrcX, LoginLayout.OptionTab1.SrcY, // PRESSED = NORMAL (520,492)
+            LoginLayout.OptionTab1.SrcX, LoginLayout.OptionTab1.SrcY, // N (520,492)
+            LoginLayout.OptionTab1HoverSrcX, LoginLayout.OptionTab1HoverSrcY, // H (635,492)
+            LoginLayout.OptionTab1.SrcX, LoginLayout.OptionTab1.SrcY, // P = N
             LoginLayout.ActionOptionTab1,
-            caption: _assets.Text(4006u, "Option 1"),
-            captionTint: Colors.White);
-        tab1Btn.Name = "OptionTab1";
-        // Decorative only in offline stub — no option sub-panel implemented.
-        band.AddChild(tab1Btn);
+            caption: "", captionTint: Colors.White);
+        tab1.Name = "OptionTab1";
+        bottomBand.AddChild(tab1);
         widgetCount++;
 
-        // --- [11] Option/tab button 2 — @ (164,82) 110×38.
-        //     NORMAL (750,492)  HOVER (865,492)  PRESSED (750,492)  loginwindow.dds  action 112.
-        //     spec §8.1 "Option/tab button 2". NORMAL src corrected to (750,492). CODE-CONFIRMED. ---
-        var tab2Btn = WidgetFactory.MakeStateButton(
+        var tab2 = WidgetFactory.MakeStateButton(
             _assets, LoginLayout.AtlasLoginWindow,
             LoginLayout.OptionTab2.X, LoginLayout.OptionTab2.Y,
             LoginLayout.OptionTab2.W, LoginLayout.OptionTab2.H,
-            LoginLayout.OptionTab2.SrcX, LoginLayout.OptionTab2.SrcY, // NORMAL (750,492)
-            LoginLayout.OptionTab2HoverSrcX, LoginLayout.OptionTab2HoverSrcY, // HOVER (865,492)
-            LoginLayout.OptionTab2.SrcX, LoginLayout.OptionTab2.SrcY, // PRESSED = NORMAL (750,492)
+            LoginLayout.OptionTab2.SrcX, LoginLayout.OptionTab2.SrcY, // N (750,492)
+            LoginLayout.OptionTab2HoverSrcX, LoginLayout.OptionTab2HoverSrcY, // H (865,492)
+            LoginLayout.OptionTab2.SrcX, LoginLayout.OptionTab2.SrcY, // P = N
             LoginLayout.ActionOptionTab2,
-            caption: _assets.Text(4007u, "Option 2"),
-            captionTint: Colors.White);
-        tab2Btn.Name = "OptionTab2";
-        band.AddChild(tab2Btn);
+            caption: "", captionTint: Colors.White);
+        tab2.Name = "OptionTab2";
+        bottomBand.AddChild(tab2);
         widgetCount++;
 
-        // --- [12] Validation toast line — hidden until a validation error on OK click.
-        //     Captions come from msg.xdb ids 4025/4026 (spec §10). Loaded lazily at click time
-        //     (the strings depend on which field is bad, so we set them then). ---
-        _toast = WidgetFactory.MakeLabel("", LoginLayout.FontBodyHeight + 2, new Color(0.95f, 0.40f, 0.40f));
-        _toast.Position = new Vector2(LoginLayout.RefWidth / 2f - 260f, 220f);
-        _toast.Size = new Vector2(520, 24);
+        // Decoration image plates (§11.2f baked art).
+        AddAtlasSprite(bottomBand, "DecoPlate1",
+            LoginLayout.AtlasLoginSlice1,
+            LoginLayout.DecoPlate1.SrcX, LoginLayout.DecoPlate1.SrcY,
+            LoginLayout.DecoPlate1.X, LoginLayout.DecoPlate1.Y,
+            LoginLayout.DecoPlate1.W, LoginLayout.DecoPlate1.H);
+
+        AddAtlasSprite(bottomBand, "DecoPlate2",
+            LoginLayout.AtlasLoginSlice1,
+            LoginLayout.DecoPlate2.SrcX, LoginLayout.DecoPlate2.SrcY,
+            LoginLayout.DecoPlate2.X, LoginLayout.DecoPlate2.Y,
+            LoginLayout.DecoPlate2.W, LoginLayout.DecoPlate2.H);
+        widgetCount += 2;
+
+        // =======================================================================
+        // [L9] ID and PW text-entry fields (§11.2e).
+        // ID field:  A@(390,32,102,13) src(615,404), max 16, action 109.
+        // PW field:  A@(568,32,102,13) src(615,404), max 12, masked, action 110.
+        // spec §11.2e. CODE-CONFIRMED positions and max-lengths.
+        //
+        // NOTE: The spec DDS frame height is 13px — too small for a usable Godot LineEdit.
+        // We keep the spec X/Y position and width (102) exact; height is expanded to 22px.
+        // The legacy client drew text ON TOP of the atlas frame at the font height, not
+        // clipped inside a 13px box. Our LineEdit approach is the closest Godot equivalent.
+        // =======================================================================
+        _accountEdit = MakeTextbox(masked: false, maxLen: LoginLayout.IdMaxLength);
+        _accountEdit.Name = "AccountEdit";
+        _accountEdit.Position = new Vector2(LoginLayout.AccountBox.X, LoginLayout.AccountBox.Y);
+        _accountEdit.Size = new Vector2(LoginLayout.AccountBox.W, LoginLayout.TextboxRenderH);
+        bottomBand.AddChild(_accountEdit);
+        widgetCount++;
+
+        _passwordEdit = MakeTextbox(masked: true, maxLen: LoginLayout.PwMaxLength);
+        _passwordEdit.Name = "PasswordEdit";
+        _passwordEdit.Position = new Vector2(LoginLayout.PasswordBox.X, LoginLayout.PasswordBox.Y);
+        _passwordEdit.Size = new Vector2(LoginLayout.PasswordBox.W, LoginLayout.TextboxRenderH);
+        bottomBand.AddChild(_passwordEdit);
+        widgetCount++;
+
+        // =======================================================================
+        // [L10] Save-ID checkbox (§11.2e).
+        // A@(694,86,13,13) NORMAL src(717,398), PRESSED/checked src(730,398). action 104.
+        // spec §11.2e. CODE-CONFIRMED.
+        // =======================================================================
+        var saveIdBtn = WidgetFactory.MakeStateButton(
+            _assets, LoginLayout.AtlasLoginSlice1,
+            LoginLayout.SaveIdCheck.X, LoginLayout.SaveIdCheck.Y,
+            LoginLayout.SaveIdCheck.W, LoginLayout.SaveIdCheck.H,
+            LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY, // NORMAL  (717,398) unchecked
+            LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY, // HOVER   = NORMAL
+            LoginLayout.SaveIdCheckedSrcX, LoginLayout.SaveIdCheckedSrcY, // PRESSED (730,398) checked
+            LoginLayout.ActionSaveId,
+            caption: "", captionTint: Colors.White);
+        saveIdBtn.Name = "SaveIdCheckbox";
+        bottomBand.AddChild(saveIdBtn);
+        widgetCount++;
+
+        // =======================================================================
+        // [L11] Toast / validation error line (hidden until error). Not in original layout but
+        // needed to surface msg 4025/4026. Placed near the top of the bottom band.
+        // spec §1.4 / §1.9 — msg 4025 (ID short) / 4026 (PW empty). CODE-CONFIRMED ids.
+        // =======================================================================
+        _toast = WidgetFactory.MakeLabel("", LoginLayout.FontBodyHeight, new Color(1f, 0.40f, 0.40f));
+        _toast.Name = "ToastLabel";
+        _toast.Position = new Vector2(280, 115);
+        _toast.Size = new Vector2(480, 20);
         _toast.HorizontalAlignment = HorizontalAlignment.Center;
-        band.AddChild(_toast);
+        bottomBand.AddChild(_toast);
         widgetCount++;
 
-        // --- [13] Quit-confirm modal — built but initially hidden.
-        //     Shown when the Quit button is clicked.
-        //     spec §8.1 "Quit-confirm Yes #1/#2", §8.3 "shared InventWindow.dds chrome". ---
+        // =======================================================================
+        // [L12] Quit-confirm modal (§11.2d) — initially hidden.
+        // C@(342,289,340,190) src(318,647) — InventWindow.dds chrome.
+        // spec §11.2d. CODE-CONFIRMED.
+        // =======================================================================
         _quitModal = BuildQuitConfirmModal();
         _quitModal.Visible = false;
-        AddChild(_quitModal); // added to LoginScreen root (not band) so it overlays everything
+        AddChild(_quitModal); // added to root so it overlays everything
         widgetCount++;
 
         GD.Print($"[LoginScreen] Built — {widgetCount} widgets; " +
                  $"vfs={(_assets.HasVfs ? "real-atlas" : "offline-fallback")}; " +
-                 $"captions={(HasMsg() ? "msg.xdb" : "en-fallback")}.");
+                 $"captions={(_assets.HasVfs ? "msg.xdb" : "en-fallback")}.");
     }
 
     // -------------------------------------------------------------------------
-    // Quit-confirm modal (spec §8.3 — InventWindow.dds shared chrome)
+    // Quit-confirm modal (§11.2d).
+    // Chrome: C@(342,289,340,190) src(318,647) — InventWindow.dds.
     // -------------------------------------------------------------------------
 
-    /// <summary>
-    /// Builds the quit-confirm modal panel (InventWindow.dds chrome, msg 4023/4024, Yes buttons).
-    /// spec: Docs/RE/specs/ui_system.md §8.3 — "340×190 chrome at src (318,647) InventWindow.dds".
-    /// spec: Docs/RE/specs/ui_system.md §8.1 sites "Quit-confirm Yes #1/#2". CODE-CONFIRMED.
-    /// </summary>
     private Control BuildQuitConfirmModal()
     {
-        // Modal root — centred on the 1024×768 canvas.
-        // Chrome width/height: spec §8.3 — 340×190.
-        int chromeW = LoginLayout.ModalChromeW; // 340
-        int chromeH = LoginLayout.ModalChromeH; // 190
-        int chromeX = (LoginLayout.RefWidth - chromeW) / 2; // 342
-        int chromeY = (LoginLayout.RefHeight - chromeH) / 2; // 289
-
+        // Modal is positioned canvas-absolute (not band-relative).
         var modal = new Control
         {
             Name = "QuitConfirmModal",
-            Position = new Vector2(chromeX, chromeY),
-            Size = new Vector2(chromeW, chromeH),
+            Position = new Vector2(LoginLayout.ModalChromeX, LoginLayout.ModalChromeY),
+            Size = new Vector2(LoginLayout.ModalChromeW, LoginLayout.ModalChromeH),
         };
 
-        // Chrome background — InventWindow.dds sub-rect (318,647) 340×190.
-        // spec §8.3: "same 340×190 chrome at source (318,647) from data/ui/inventwindow.dds".
+        // Chrome background — InventWindow.dds src(318,647) 340×190.
+        // spec §11.2d "Dialog #1 panel (notice)" src(318,647) 340×190. CODE-CONFIRMED.
         AtlasTexture? chrome = _assets.Slice(
             LoginLayout.AtlasInventWindow,
             LoginLayout.ModalChromeSrcX, LoginLayout.ModalChromeSrcY,
@@ -446,7 +503,6 @@ public sealed partial class LoginScreen : Control
         }
         else
         {
-            // VFS offline fallback — solid dark panel so the modal is still readable.
             var fallbackBg = new ColorRect
             {
                 Name = "ModalFallbackBg",
@@ -456,67 +512,63 @@ public sealed partial class LoginScreen : Control
             modal.AddChild(fallbackBg);
         }
 
-        // Prompt label — msg 4023 (quit-confirm prompt #1).
-        // spec §8.1 site "Quit-confirm prompt #1" @ (10,100) 330×20. CODE-CONFIRMED.
+        // Prompt label — msg 4023. spec §11.2d "Dialog #1 body text" @ (10,100) 330×20. CODE-CONFIRMED.
         var prompt1 = WidgetFactory.MakeLabel(
             _assets.Text(LoginLayout.MsgQuitConfirm1, "Are you sure you want to quit?"),
-            LoginLayout.FontBodyHeight,
-            new Color(0.9f, 0.9f, 0.9f));
+            LoginLayout.FontBodyHeight, new Color(0.9f, 0.9f, 0.9f));
         prompt1.Position = new Vector2(10, 80);
         prompt1.Size = new Vector2(320, 20);
         prompt1.HorizontalAlignment = HorizontalAlignment.Center;
         modal.AddChild(prompt1);
 
-        // Second prompt line — msg 4024 (quit-confirm prompt #2).
-        // spec §8.1 site "Quit-confirm prompt #2" @ (10,100) 330×20. CODE-CONFIRMED.
+        // Second prompt line — msg 4024. spec §11.2d. CODE-CONFIRMED.
         var prompt2 = WidgetFactory.MakeLabel(
             _assets.Text(LoginLayout.MsgQuitConfirm2, "Unsaved progress will be lost."),
-            LoginLayout.FontBodyHeight,
-            new Color(0.75f, 0.75f, 0.75f));
+            LoginLayout.FontBodyHeight, new Color(0.75f, 0.75f, 0.75f));
         prompt2.Position = new Vector2(10, 100);
         prompt2.Size = new Vector2(320, 20);
         prompt2.HorizontalAlignment = HorizontalAlignment.Center;
         modal.AddChild(prompt2);
 
-        // Yes button #1 — @ (120,136) 113×40, InventWindow.dds N(302,900) H(415,900) action 113.
-        // spec §8.1 site "Quit-confirm Yes #1". CODE-CONFIRMED.
-        var yes1Btn = WidgetFactory.MakeStateButton(
+        // Yes button #1 — C@(120,136,113,40) NORMAL src(302,900), HOVER src(415,900), action 113.
+        // spec §11.2d "Dialog #1 OK". CODE-CONFIRMED.
+        var yes1 = WidgetFactory.MakeStateButton(
             _assets, LoginLayout.AtlasInventWindow,
             LoginLayout.QuitConfirmYes1.X, LoginLayout.QuitConfirmYes1.Y,
             LoginLayout.QuitConfirmYes1.W, LoginLayout.QuitConfirmYes1.H,
-            LoginLayout.QuitConfirmYes1.SrcX, LoginLayout.QuitConfirmYes1.SrcY, // NORMAL (302,900)
-            LoginLayout.QuitConfirmYes1HoverSrcX, LoginLayout.QuitConfirmYes1HoverSrcY, // HOVER  (415,900)
-            LoginLayout.QuitConfirmYes1.SrcX, LoginLayout.QuitConfirmYes1.SrcY, // PRESSED = NORMAL
+            LoginLayout.QuitConfirmYes1.SrcX, LoginLayout.QuitConfirmYes1.SrcY,
+            LoginLayout.QuitConfirmYes1HoverSrcX, LoginLayout.QuitConfirmYes1HoverSrcY,
+            LoginLayout.QuitConfirmYes1.SrcX, LoginLayout.QuitConfirmYes1.SrcY,
             LoginLayout.ActionQuitConfirmYes1,
-            caption: _assets.Text(4008u, "Yes"),
-            captionTint: Colors.White);
-        yes1Btn.Name = "QuitConfirmYes1";
-        yes1Btn.ActionFired += _ => OnQuitConfirmed();
-        modal.AddChild(yes1Btn);
+            caption: _assets.Text(4008u, "Yes"), captionTint: Colors.White);
+        yes1.Name = "QuitConfirmYes1";
+        yes1.ActionFired += _ => OnQuitConfirmed();
+        modal.AddChild(yes1);
 
-        // Yes button #2 — @ (120,136) 113×40, InventWindow.dds N(302,860) H(415,860) action 114.
-        // spec §8.1 site "Quit-confirm Yes #2". CODE-CONFIRMED.
-        // (Both Yes buttons appear at the same position — the spec shows identical dst rects.
-        //  In the original they alternate visibility; in this offline build they stack; we keep #2
-        //  slightly offset below for legibility when both are visible.)
-        var yes2Btn = WidgetFactory.MakeStateButton(
+        // Yes button #2 — C@(120,136,113,40) NORMAL src(302,860), HOVER src(415,860), action 114.
+        // spec §11.2d "Dialog #2 OK". CODE-CONFIRMED.
+        // Slightly offset (+44) to avoid overlap with #1 in this offline build.
+        var yes2 = WidgetFactory.MakeStateButton(
             _assets, LoginLayout.AtlasInventWindow,
-            LoginLayout.QuitConfirmYes2.X, LoginLayout.QuitConfirmYes2.Y + 44, // offset for readability
+            LoginLayout.QuitConfirmYes2.X, LoginLayout.QuitConfirmYes2.Y + 44,
             LoginLayout.QuitConfirmYes2.W, LoginLayout.QuitConfirmYes2.H,
-            LoginLayout.QuitConfirmYes2.SrcX, LoginLayout.QuitConfirmYes2.SrcY, // NORMAL (302,860)
-            LoginLayout.QuitConfirmYes2HoverSrcX, LoginLayout.QuitConfirmYes2HoverSrcY, // HOVER  (415,860)
-            LoginLayout.QuitConfirmYes2.SrcX, LoginLayout.QuitConfirmYes2.SrcY, // PRESSED = NORMAL
+            LoginLayout.QuitConfirmYes2.SrcX, LoginLayout.QuitConfirmYes2.SrcY,
+            LoginLayout.QuitConfirmYes2HoverSrcX, LoginLayout.QuitConfirmYes2HoverSrcY,
+            LoginLayout.QuitConfirmYes2.SrcX, LoginLayout.QuitConfirmYes2.SrcY,
             LoginLayout.ActionQuitConfirmYes2,
-            caption: _assets.Text(4009u, "OK"),
-            captionTint: Colors.White);
-        yes2Btn.Name = "QuitConfirmYes2";
-        yes2Btn.ActionFired += _ => OnQuitConfirmed();
-        modal.AddChild(yes2Btn);
+            caption: _assets.Text(4009u, "OK"), captionTint: Colors.White);
+        yes2.Name = "QuitConfirmYes2";
+        yes2.ActionFired += _ => OnQuitConfirmed();
+        modal.AddChild(yes2);
 
-        // No / Cancel label — no action id in the spec; we add a plain text button for usability.
-        var noBtn = new Button { Text = _assets.Text(4010u, "No") };
-        noBtn.Position = new Vector2(chromeW - 140, LoginLayout.QuitConfirmYes1.Y);
-        noBtn.Size = new Vector2(100, 36);
+        // No / Cancel — not in the spec as a widget (quit-confirm has only Yes actions 113/114).
+        // Added for usability in offline build. Placed in the right quarter.
+        var noBtn = new Button
+        {
+            Text = _assets.Text(4010u, "No"),
+            Position = new Vector2(LoginLayout.ModalChromeW - 140, LoginLayout.QuitConfirmYes1.Y),
+            Size = new Vector2(100, 36),
+        };
         noBtn.Pressed += HideQuitConfirmModal;
         modal.AddChild(noBtn);
 
@@ -524,66 +576,49 @@ public sealed partial class LoginScreen : Control
     }
 
     // -------------------------------------------------------------------------
-    // Intent handlers (NO game logic — emit signals the flow node consumes).
+    // Intent handlers
     // -------------------------------------------------------------------------
 
     private void OnOkPressed()
     {
-        // Local credential validation — CODE-CONFIRMED from spec §1.4:
-        //   "ID length < 4 → show msg 4025 → return to sub-state 6 (stay on form). No network send."
-        //   "password length < 1 → show msg 4026 → return to sub-state 6. No network send."
-        // spec: Docs/RE/specs/frontend_scenes.md §1.4. CODE-CONFIRMED.
-        // spec: Docs/RE/specs/ui_system.md §10 — msg ids 4025/4026. CODE-CONFIRMED.
-
+        // Local credential validation. spec §1.4. CODE-CONFIRMED.
         _toast.Text = "";
 
         string account = _accountEdit.Text.Trim();
+
+        // spec §1.4: "ID length < 4 → msg 4025 → return to sub-state 6". CODE-CONFIRMED.
         if (account.Length < LoginLayout.MinIdLength)
         {
-            // spec: ID length < 4 → msg 4025.
-            // spec: Docs/RE/specs/frontend_scenes.md §1.4 CODE-CONFIRMED.
             _toast.Text = _assets.Text(LoginLayout.MsgErrShortId,
-                $"ID must be at least {LoginLayout.MinIdLength} characters.");
+                $"Account must be at least {LoginLayout.MinIdLength} characters.");
             GD.Print(
                 $"[LoginScreen] Validation: ID too short ({account.Length} < {LoginLayout.MinIdLength}), msg 4025.");
             return;
         }
 
+        // spec §1.4: "password length < 1 → msg 4026 → return to sub-state 6". CODE-CONFIRMED.
         if (_passwordEdit.Text.Length < LoginLayout.MinPwLength)
         {
-            // spec: password length < 1 → msg 4026.
-            // spec: Docs/RE/specs/frontend_scenes.md §1.4 CODE-CONFIRMED.
-            _toast.Text = _assets.Text(LoginLayout.MsgErrEmptyPassword,
-                "Please enter a password.");
+            _toast.Text = _assets.Text(LoginLayout.MsgErrEmptyPassword, "Please enter a password.");
             GD.Print("[LoginScreen] Validation: password empty, msg 4026.");
             return;
         }
 
-        // OFFLINE STUB: local validation passed. No server, no packet, no handshake.
-        // Emit LoginAccepted so BootFlow advances to char-select (state 4 analogue).
-        // spec: Docs/RE/specs/frontend_scenes.md §1.4 — "persist Save-ID, advance to sub-state 31".
-        //       In this offline build we skip sub-states 31–41 (network absent) and go straight
-        //       to the character-select phase.
-        GD.Print($"[LoginScreen] OK — validation passed (offline stub), account='{account}'. Emitting LoginAccepted.");
+        GD.Print($"[LoginScreen] Login OK (account='{account}'). Emitting LoginAccepted.");
         EmitSignal(SignalName.LoginAccepted, account);
     }
 
     private void OnServerListPressed()
     {
-        // Emit ServerListRequested so BootFlow opens the ServerSelectScreen.
-        // The account field is passed so the server select can display a greeting if desired,
-        // and so BootFlow knows the account credential to forward to LoginAsync.
-        // No local validation required before showing the server list — it is purely informational.
-        // spec: Docs/RE/specs/frontend_scenes.md §2 — server-list button opens selection screen.
-        // spec: Docs/RE/specs/login_flow.md §2.1 — server list fetched from lobby port 10000.
+        // Server-list button (action 102) — open the server-select flow.
+        // spec §1.2 "Server-list button, action 102". CODE-CONFIRMED.
         string account = _accountEdit.Text.Trim();
-        GD.Print($"[LoginScreen] Server List button pressed (account='{account}'). Emitting ServerListRequested.");
+        GD.Print($"[LoginScreen] Server list (action 102, account='{account}'). Emitting ServerListRequested.");
         EmitSignal(SignalName.ServerListRequested, account);
     }
 
     private void ShowQuitConfirmModal()
     {
-        // spec: §1.8 — quit-confirm modal shown on Quit/Help strip click.
         _toast.Text = "";
         _quitModal.Visible = true;
         GD.Print("[LoginScreen] Quit confirm modal shown.");
@@ -596,50 +631,56 @@ public sealed partial class LoginScreen : Control
 
     private void OnQuitConfirmed()
     {
-        // spec: §1.8 "Quit-confirm Yes path → engine state 6 / substate 8 (quit)".
-        // In this presentation build: emit QuitRequested; BootFlow calls GetTree().Quit().
+        // spec §1.8 "Quit-confirm Yes → engine state 6 / substate 8". CODE-CONFIRMED.
         GD.Print("[LoginScreen] Quit confirmed (actions 113/114). Emitting QuitRequested.");
         _quitModal.Visible = false;
         EmitSignal(SignalName.QuitRequested);
     }
 
     // -------------------------------------------------------------------------
-    // Private helpers
+    // Helpers
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Builds an editable text field at the spec-recovered rect.
-    /// spec: Docs/RE/specs/ui_system.md §8.1 — textbox rows; §13.3 — Godot LineEdit guidance.
+    /// Creates a TextureRect sprite at the given canvas-local position/size.
     /// </summary>
-    private static LineEdit MakeTextbox(bool masked, int maxLength)
+    private static TextureRect MakeSprite(string name, AtlasTexture tex, int x, int y, int w, int h)
     {
-        return new LineEdit
+        return new TextureRect
         {
-            // spec §8.1 — masked password field; both accept CP949 Korean via Godot IME.
-            Secret = masked,
-            CaretBlink = true,
-            MaxLength = maxLength,
-            Alignment = HorizontalAlignment.Left,
-            // The recovery rect is 13px tall — too short for a glyph.  We keep the widget for
-            // the control frame and let the theme override the minimum height for readability.
-            // This matches the legacy client where text was rendered over the atlas frame at the
-            // font height rather than inside a clipped 13px box.
-            CustomMinimumSize = new Vector2(102, 18),
+            Name = name,
+            Texture = tex,
+            StretchMode = TextureRect.StretchModeEnum.Scale,
+            MouseFilter = MouseFilterEnum.Ignore,
+            Position = new Vector2(x, y),
+            Size = new Vector2(w, h),
         };
     }
 
     /// <summary>
-    /// Places a control at a recovered panel-local position and optionally sizes it.
-    /// spec §8.0 — "(x,y) is the widget's screen-local position (relative to its immediate parent)."
+    /// Slices an atlas sub-rect and adds a TextureRect sprite to the parent.
+    /// No-op when the VFS is offline (atlas returns null).
     /// </summary>
-    private static void PlaceLocal(Control c, WidgetRect rect, bool sizeFromRect = true)
+    private void AddAtlasSprite(Control parent, string name, string atlasPath,
+        int srcX, int srcY, int dstX, int dstY, int w, int h)
     {
-        c.Position = new Vector2(rect.X, rect.Y);
-        if (sizeFromRect)
-            c.Size = new Vector2(rect.W, rect.H);
-        c.CustomMinimumSize = new Vector2(rect.W, rect.H);
+        AtlasTexture? tex = _assets.Slice(atlasPath, srcX, srcY, w, h);
+        if (tex is null) return;
+        parent.AddChild(MakeSprite(name, tex, dstX, dstY, w, h));
     }
 
-    /// <summary>Returns true if the msg.xdb catalogue loaded at least one record.</summary>
-    private bool HasMsg() => _assets.HasVfs && _assets.Text(4001u, "") != "";
+    /// <summary>
+    /// Creates a single-line text input.
+    /// </summary>
+    private static LineEdit MakeTextbox(bool masked, int maxLen)
+    {
+        return new LineEdit
+        {
+            Secret = masked,
+            CaretBlink = true,
+            MaxLength = maxLen,
+            Alignment = HorizontalAlignment.Left,
+            CustomMinimumSize = new Vector2(102, 18),
+        };
+    }
 }

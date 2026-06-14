@@ -316,6 +316,38 @@ This appears to be an intentional dual use of the frame-count field; intent unve
 | `XEFF_TIME_UNIT` | milliseconds | Engine wall-clock unit for all timing fields |
 | `XEFF_TRACK_UNKNOWN_CONSTANT` | 67 (0x43) | Constant u32 at track header offset +1; purpose UNRESOLVED |
 
+## A.15 Front-end scene VFX mapping (effect id → file)
+
+> **Confidence: SAMPLE-VERIFIED** (file presence, header `effect_id` / `sub_effect_count`, and
+> manifest listing observed in the real VFS). This is purely the front-end **id → file** mapping;
+> the `.xeff` byte format itself is already specified in Sections A.1–A.14. Added for the
+> front-end (login / PIN / server-list / char-select) scene lane.
+
+The front-end screens use named `.xeff` files in the dedicated **`380xxxxxxx` front-end UI effect
+id range** (server-list / zone-select) plus a high-sub-effect-count char-select effect:
+
+| Front-end scene | VFS path | `effect_id` | `sub_effect_count` | Notes |
+|---|---|---:|---:|---|
+| Server-list / zone-select | `data/effect/xeff/zone_sel_u.xeff` | 380000000 | 11 | Listed in `xeffect.txt` / `xeffect.lst` (A.5, A.9). |
+| Server-list / zone-select (variant 2) | `data/effect/xeff/zone_sel2-u.xeff` | 380000001 | 11 | Second variant; same size class as the first. |
+| Char-select | `data/effect/xeff/char_select-u.xeff` | 380003000 | **68** | Rich particle effect (68 sub-effects — the highest front-end count). |
+
+**Login / PIN scenes have NO `.xeff` VFX (CONFIRMED ABSENT).** A VFS census found no `.xeff` file
+whose name contains `login`, `pin`, `title`, `intro`, `server`, or `menu`. The login and PIN
+screens' animated elements are delivered through DDS sprite art and scripted UI, **not** through
+the particle effect system. (The pre-login "red ribbon" intro crawl is a positional DDS scroll, not
+an `.xeff` — see `specs/intro_sequence.md`.)
+
+**Parser caveat (cross-reference, not a new format fact):** the high-`sub_effect_count`
+front-end files (`char_select-u.xeff` at 68, and the `zone_sel*` pair) currently fail the existing
+`.xeff` parser at the scale-curve (Group D) read. The header (A.2) parses cleanly; the failure is
+in the element body for these large-count files. See the Open Questions block — a parser revision
+pass is needed for high-sub-effect-count files before these front-end effects can be instantiated.
+
+Char-class selection within char-select additionally uses 16 `guildmaster_{d|j|mo|mu}_{jung|sa}{05|06}.xeff`
+files (4 classes × 2 levels × 2 event types); these are standard `.xeff` (Section A) and need no
+special mapping beyond their filenames.
+
 ---
 
 # Section B: `.eff` Effect-Object Shape
@@ -854,6 +886,7 @@ The June 2026 black-box pass analyzed both known FX7 files (both exactly 35,202 
 7. **`effect_id` duplicate resolution** — 47 `effect_id` values are shared by more than one file (SAMPLE-VERIFIED). The resolution rule when two files in the sorted map share an id is UNRESOLVED. The second-registered file may silently overwrite the first; no tie-break logic was traced.
 8. **9-digit naming scheme `[CCC][SSS][AB][N]`** — PLAUSIBLE from pattern observation; no manifest confirms the digit-group semantics.
 9. **Frame-0 no-index rule** — CONFIRMED in samples; whether the parser has a conditional or always reads N×(index+9f) starting from frame 1 while treating frame 0 as pure 9f is not traced from the code path.
+10. **High-`sub_effect_count` front-end files fail the current parser (A.15).** `char_select-u.xeff` (68 sub-effects) and the `zone_sel*` pair (11 each) parse their 32-byte header (A.2) cleanly but error out in the element body at the scale-curve (Group D) read. A parser revision pass is needed for large-count files before the front-end VFX can be instantiated; the divergence point is in the curve/keyframe block reader, not the header.
 
 ## From `.eff` geometry (Section B)
 

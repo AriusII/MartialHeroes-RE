@@ -526,7 +526,8 @@ internal static class FormatRegistry
             return ["invalid .xeff (anti-magic sentinel 0x46464558)"];
 
         XeffData fx = XeffParser.ParseXeff(raw);
-        return [$"effect_id={fx.EffectId}  elements={fx.Elements.Length:N0}"];
+        // spec: Docs/RE/formats/effects.md §A.2 — sub_effect_count @ 0x04: VERIFIED.
+        return [$"effect_id={fx.EffectId}  sub_effects={fx.SubEffects.Length:N0}"];
     }
 
     private static IReadOnlyList<string> DecodeEffShape(string path, ReadOnlyMemory<byte> raw)

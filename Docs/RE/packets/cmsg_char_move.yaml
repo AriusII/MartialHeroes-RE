@@ -1,0 +1,47 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED; size + slot@0 are static-HIGH. capture_verified: false.
+
+name: CmsgMoveCharacter
+opcode: 0x1000e           # major 1, minor 14 -> (1 << 16) | 14
+direction: C2S
+size: 1                   # fixed 1-byte payload
+spec: packets/cmsg_char_move.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Slot-MOVE / relocate request from the character-select screen. A single byte: the target slot
+  index. The workflow-spine analysis re-attributes 1/14 from "delete" to "slot-move / location":
+  two emitters in the select-window dispatcher build a 1-byte slot index, gated by slot<=4 and the
+  in-flight latch. NOTE: a prior catalog labelled 1/14 "delete"; the canonical-name reconciliation
+  (move vs delete) is owned by Tier-1 -- this spec records the static slot-move finding.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the width sums to size: 1.
+fields:
+  - { name: SlotIndex, type: u8 }   # 0x00  target slot index (0..4)
+
+notes: |
+  Static analysis only; no capture. Frame = 8-byte header + 1 = 9 bytes on the wire.
+
+    0x00 (1B) SlotIndex : the target slot index, range 0..4. STATIC HIGH for placement; the
+                          slot-move SEMANTIC is the workflow-spine attribution (re-attributed from
+                          the earlier delete reading).
+
+  GUARDS: sent only when the target slot index is <= 4 (valid slot) and the select-window net-busy
+  latch is clear; the client sets the latch while the request is in flight. Two emitter sites (a
+  confirm-move sub-state and an action-id path) build the same 1-byte body.
+
+  NAMING NOTE (load-bearing): the prior committed catalog/spec called 1/14 "CmsgDeleteCharacter".
+  The deep workflow-spine dossier characterizes 1/14 as slot-MOVE / relocate. Whether the original
+  protocol's 1/14 is move or delete (or both, by context) and which canonical name wins is a
+  Tier-1 reconciliation; this file documents the static slot-move builder. The server-side reply
+  for slot-move was not attributed statically.
+
+  UNKNOWNS (capture-only): confirm the slot-move vs delete semantic against a captured 1/14 C2S
+  frame and its S2C reply; whether any confirmation token accompanies the slot byte (none observed).
+
+  RELATED: 1/0 logout, 1/6 create, 1/7 select, 1/9 enter, 1/13 rename. All gated by the single
+  select-window net-busy latch.
+
+  UNBLOCKS: Client.Application character-slot management use-case (pending the move-vs-delete
+  reconciliation).

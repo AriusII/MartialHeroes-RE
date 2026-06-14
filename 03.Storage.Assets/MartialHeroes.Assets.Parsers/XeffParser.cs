@@ -14,20 +14,27 @@ namespace MartialHeroes.Assets.Parsers;
 public static class XeffParser
 {
     // Anti-magic sentinel: if effect_id == 0x46464558, the client treats the file as corrupt.
-    // spec: Docs/RE/formats/effects.md §A.1 Anti-magic — 0x46464558: CONFIRMED.
-    private const uint XeffInvalidMagic = 0x46464558; // "XEFF" LE
+    // spec: Docs/RE/formats/effects.md §A.1 — XEFF_INVALID_MAGIC = 0x46464558 ("XEFF" LE): CONFIRMED.
+    private const uint XeffInvalidMagic = 0x46464558;
 
-    // .xeff header size: 8 bytes.
-    // spec: Docs/RE/formats/effects.md §A.2 File Header (8 bytes): VERIFIED.
-    private const int XeffHeaderSize = 8;
+    // .xeff header size: 32 bytes (0x20).
+    // CORRECTED from prior 8-byte description — spec conflict resolved 2026-06-12.
+    // spec: Docs/RE/formats/effects.md §A.2 XEFF_HEADER_SIZE = 32 (0x20): VERIFIED.
+    // spec: Docs/RE/formats/effects.md §A.14 XEFF_HEADER_SIZE = 32.
+    private const int XeffHeaderSize = 32; // 0x20
 
-    // Texture name field width per Group B entry: 64 bytes.
-    // spec: Docs/RE/formats/effects.md §A.9 XEFF_TEX_NAME_LEN = 64: CONFIRMED.
-    private const int TexNameLen = 64;
+    // Texture name field width per name-table entry: 64 bytes.
+    // spec: Docs/RE/formats/effects.md §A.14 XEFF_TEX_NAME_LEN = 64 (0x40): CONFIRMED.
+    private const int TexNameLen = 64; // 0x40
 
-    // Emitter type value that triggers rotation reads in Branch B.
-    // spec: Docs/RE/formats/effects.md §A.9 XEFF_EMITTER_DIRECTIONAL = 2: CONFIRMED.
-    private const uint EmitterDirectional = 2;
+    // Track header size: 13 bytes (1 + 4 + 4 + 4).
+    // spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 13: CONFIRMED.
+    // spec: Docs/RE/formats/effects.md §A.4.3 Track header — anim_loop u8 @ +0, unknown_constant u32 @ +1, anim_stride u32 @ +5, anim_base_time u32 @ +9.
+    private const int TrackHeaderSize = 13;
+
+    // Reserved padding in file header: 16 bytes.
+    // spec: Docs/RE/formats/effects.md §A.2 — reserved u8[16] @ 0x0C: SAMPLE-VERIFIED.
+    private const int HeaderReservedLen = 16;
 
     /// <summary>
     /// Parses a <c>.xeff</c> particle-effect descriptor file.
@@ -36,8 +43,11 @@ public static class XeffParser
     /// <returns>Decoded effect data.</returns>
     /// <exception cref="InvalidDataException">Thrown when the anti-magic sentinel is found or buffer is truncated.</exception>
     /// <remarks>
-    /// spec: Docs/RE/formats/effects.md §A.2 File Header: VERIFIED (3 samples with element_count=0).
-    /// spec: Docs/RE/formats/effects.md §A.3 Element Array: PARSER-CONFIRMED (no sample with element_count>0).
+    /// spec: Docs/RE/formats/effects.md §A.2 File Header (32 bytes, CORRECTED): VERIFIED.
+    /// spec: Docs/RE/formats/effects.md §A.4 Sub-Effect Block Structure: CONFIRMED by sample byte-walkthrough.
+    /// File-size formula (single sub-effect, N entries):
+    ///   32 (header) + N×64 (name table) + (4+N×4) (alpha curve) + (4+c2×4) (scaleX) + (4+c3×4) (scaleY) + (4+c4×4) (scaleZ)
+    ///   + 13 (track header) + 9×4 (frame 0, no index prefix) + (N−1)×(4+9×4) (frames 1..N-1).
     /// </remarks>
     public static XeffData ParseXeff(ReadOnlyMemory<byte> data) =>
         ParseXeff(data.Span);
@@ -45,199 +55,203 @@ public static class XeffParser
     /// <inheritdoc cref="ParseXeff(ReadOnlyMemory{byte})"/>
     public static XeffData ParseXeff(ReadOnlySpan<byte> span)
     {
+        // ─── 32-byte file header ─────────────────────────────────────────────
+        // spec: Docs/RE/formats/effects.md §A.2 — header is 32 bytes (0x20): VERIFIED.
         if (span.Length < XeffHeaderSize)
             throw new InvalidDataException(
                 $".xeff parse error: buffer too short for {XeffHeaderSize}-byte header (got {span.Length}). " +
                 "spec: Docs/RE/formats/effects.md §A.2.");
 
-        // effect_id u32le @ offset 0x00. Must not equal 0x46464558.
-        // spec: Docs/RE/formats/effects.md §A.2 — effect_id u32 @ +0x00: VERIFIED.
-        uint effectId = BinaryPrimitives.ReadUInt32LittleEndian(span[0..]);
+        // effect_id u32le @ 0x00. Must not equal 0x46464558.
+        // spec: Docs/RE/formats/effects.md §A.2 — effect_id u32 @ 0x00: VERIFIED.
+        uint effectId = BinaryPrimitives.ReadUInt32LittleEndian(span[0x00..]);
         if (effectId == XeffInvalidMagic)
             throw new InvalidDataException(
                 $".xeff parse error: effect_id == 0x{XeffInvalidMagic:X8} (anti-magic sentinel). " +
                 "File is corrupt. spec: Docs/RE/formats/effects.md §A.1.");
 
-        // element_count u32le @ offset 0x04.
-        // spec: Docs/RE/formats/effects.md §A.2 — element_count u32 @ +0x04: VERIFIED.
-        uint elementCount = BinaryPrimitives.ReadUInt32LittleEndian(span[4..]);
+        // sub_effect_count u32le @ 0x04. Zero is valid (stub/empty effect).
+        // spec: Docs/RE/formats/effects.md §A.2 — sub_effect_count u32 @ 0x04: VERIFIED.
+        uint subEffectCount = BinaryPrimitives.ReadUInt32LittleEndian(span[0x04..]);
 
-        int offset = XeffHeaderSize;
-        var elements = new XeffElement[(int)elementCount];
+        // type_flag u32le @ 0x08. Observed: 1 or 2. Semantics UNRESOLVED.
+        // spec: Docs/RE/formats/effects.md §A.2 — type_flag u32 @ 0x08: SAMPLE-VERIFIED.
+        uint typeFlag = BinaryPrimitives.ReadUInt32LittleEndian(span[0x08..]);
 
-        for (int e = 0; e < (int)elementCount; e++)
+        // reserved u8[16] @ 0x0C. Zero in all samples.
+        // spec: Docs/RE/formats/effects.md §A.2 — reserved u8[16] @ 0x0C: SAMPLE-VERIFIED.
+        var reserved = span[0x0C..(0x0C + HeaderReservedLen)].ToArray();
+
+        // first_entry_count u32le @ 0x1C. Convenience copy of sub-effect[0]'s entry_count.
+        // spec: Docs/RE/formats/effects.md §A.2 — first_entry_count u32 @ 0x1C: SAMPLE-VERIFIED.
+        uint firstEntryCount = BinaryPrimitives.ReadUInt32LittleEndian(span[0x1C..]);
+
+        // Immediately after the 32-byte header, sub_effect_count sub-effect blocks follow.
+        // spec: Docs/RE/formats/effects.md §A.2 — "sub_effect_count blocks follow sequentially": CONFIRMED.
+        int offset = XeffHeaderSize; // 0x20
+        var subEffects = new XeffSubEffect[(int)subEffectCount];
+
+        for (int s = 0; s < (int)subEffectCount; s++)
         {
-            elements[e] = ReadElement(span, ref offset, e);
+            subEffects[s] = ReadSubEffect(span, ref offset, s);
         }
 
-        return new XeffData { EffectId = effectId, Elements = elements };
+        return new XeffData
+        {
+            EffectId = effectId,
+            SubEffectCount = subEffectCount,
+            TypeFlag = typeFlag,
+            Reserved = reserved,
+            FirstEntryCount = firstEntryCount,
+            SubEffects = subEffects,
+        };
     }
 
-    private static XeffElement ReadElement(ReadOnlySpan<byte> span, ref int offset, int elementIndex)
+    private static XeffSubEffect ReadSubEffect(ReadOnlySpan<byte> span, ref int offset, int subIndex)
     {
-        // ─── Group A — Emitter identity (20 bytes, 5 × u32le) ─────────────────
-        // spec: Docs/RE/formats/effects.md §A.3.1 Group A (20 bytes): PARSER-CONFIRMED.
-        EnsureBytes(span, offset, 20, $"element[{elementIndex}] Group A");
+        // ─── entry_count u32le — opens each sub-effect block ─────────────────
+        // spec: Docs/RE/formats/effects.md §A.4 — entry_count u32 opens each sub-effect block: CONFIRMED.
+        EnsureBytes(span, offset, 4, $"sub_effect[{subIndex}] entry_count");
+        uint entryCount = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
+        offset += 4;
 
-        // emitter_type @ +0: PARSER-CONFIRMED. Value 2 = directional.
-        uint emitterType = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
-        // emitter_subtype @ +4: PARSER-CONFIRMED, semantics UNRESOLVED.
-        uint emitterSubtype = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]);
-        // anim_flag @ +8: PARSER-CONFIRMED.
-        uint animFlag = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 8)..]);
-        // tex_count @ +12: PARSER-CONFIRMED.
-        uint texCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 12)..]);
-        // field_unknown_a @ +16: PARSER-CONFIRMED (exists), semantics UNRESOLVED.
-        uint fieldUnknownA = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 16)..]);
-        offset += 20;
+        // ─── A.4.1 Name table — entryCount × 64 bytes ────────────────────────
+        // spec: Docs/RE/formats/effects.md §A.4.1 Name table — entry_count × 64 bytes: CONFIRMED.
+        long nameTableBytes = (long)entryCount * TexNameLen;
+        EnsureBytes(span, offset, nameTableBytes, $"sub_effect[{subIndex}] name table");
 
-        // ─── Group B — Texture sub-array (tex_count × 64 bytes) ────────────────
-        // spec: Docs/RE/formats/effects.md §A.3.2 Group B — tex_count × 64 B: PARSER-CONFIRMED.
-        long texBytes = (long)texCount * TexNameLen;
-        EnsureBytes(span, offset, texBytes, $"element[{elementIndex}] Group B texture array");
-
-        var texNames = new string[(int)texCount];
-        for (int t = 0; t < (int)texCount; t++)
+        var texNames = new string[(int)entryCount];
+        for (int t = 0; t < (int)entryCount; t++)
         {
-            // char[64] ASCII null-padded base name.
-            // spec: Docs/RE/formats/effects.md §A.3.2 — tex_name char[64] ASCII: PARSER-CONFIRMED.
+            // 64-byte null-padded ASCII/CP949 base name.
+            // spec: Docs/RE/formats/effects.md §A.4.1 — tex_name char[64] null-padded ASCII (CP949 for Korean): CONFIRMED.
             ReadOnlySpan<byte> nameBytes = span.Slice(offset + t * TexNameLen, TexNameLen);
             int nullIdx = nameBytes.IndexOf((byte)0);
             texNames[t] = System.Text.Encoding.ASCII.GetString(
                 nullIdx >= 0 ? nameBytes[..nullIdx] : nameBytes);
         }
 
-        offset += (int)texBytes;
+        offset += (int)nameTableBytes;
 
-        // ─── Group C — Alpha keyframes ─────────────────────────────────────────
-        // spec: Docs/RE/formats/effects.md §A.3.3 Group C: PARSER-CONFIRMED.
-        EnsureBytes(span, offset, 4, $"element[{elementIndex}] Group C count");
-        uint alphaKeyCount = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
-        offset += 4;
+        // ─── A.4.2 Curve section — four consecutive passes ────────────────────
+        // spec: Docs/RE/formats/effects.md §A.4.2 Curve section — exactly four consecutive float-curve arrays: CONFIRMED.
 
-        EnsureBytes(span, offset, (long)alphaKeyCount * 4, $"element[{elementIndex}] Group C values");
-        var alphaKeys = new float[(int)alphaKeyCount];
-        for (int a = 0; a < (int)alphaKeyCount; a++)
-        {
-            // Stored inverted: 1.0 − file_value at load time.
-            // spec: Docs/RE/formats/effects.md §A.3.3 — alpha stored inverted: HIGH.
-            alphaKeys[a] = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + a * 4)..]);
-        }
+        // Pass 1: alpha channel. Values in [0,1]; stored as 1.0 − opacity.
+        // spec: Docs/RE/formats/effects.md §A.4.2 Pass 1 alpha — own u32 prefix, stored as 1.0−opacity: CONFIRMED.
+        float[] alphaKeys = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] alpha curve");
 
-        offset += (int)alphaKeyCount * 4;
+        // Pass 2: scale X channel.
+        // spec: Docs/RE/formats/effects.md §A.4.2 Pass 2 scale X — own u32 prefix: CONFIRMED.
+        float[] scaleX = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] scaleX curve");
 
-        // ─── Group D — Scale channels (3 passes: X, Y, Z) ─────────────────────
-        // spec: Docs/RE/formats/effects.md §A.3.4 Group D: PARSER-CONFIRMED.
-        float[] scaleX = ReadFloatArray(span, ref offset, $"element[{elementIndex}] Group D scaleX");
-        float[] scaleY = ReadFloatArray(span, ref offset, $"element[{elementIndex}] Group D scaleY");
-        float[] scaleZ = ReadFloatArray(span, ref offset, $"element[{elementIndex}] Group D scaleZ");
+        // Pass 3: scale Y channel.
+        // spec: Docs/RE/formats/effects.md §A.4.2 Pass 3 scale Y — own u32 prefix: CONFIRMED.
+        float[] scaleY = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] scaleY curve");
 
-        // ─── Group E — Animation timing (9 bytes) ─────────────────────────────
-        // spec: Docs/RE/formats/effects.md §A.3.5 Group E (9 bytes): CONFIRMED.
-        EnsureBytes(span, offset, 9, $"element[{elementIndex}] Group E");
+        // Pass 4: scale Z channel.
+        // spec: Docs/RE/formats/effects.md §A.4.2 Pass 4 scale Z — own u32 prefix: CONFIRMED.
+        float[] scaleZ = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] scaleZ curve");
 
-        // anim_loop u8 @ Group E offset 0 (single byte, NOT u32).
-        // spec: Docs/RE/formats/effects.md §A.3.5 — anim_loop u8 CONFIRMED (single-byte read).
+        // ─── A.4.3 Track header — 13 bytes (fixed) ───────────────────────────
+        // spec: Docs/RE/formats/effects.md §A.4.3 Track header (13 bytes, fixed): CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 13.
+        EnsureBytes(span, offset, TrackHeaderSize, $"sub_effect[{subIndex}] track header");
+
+        // anim_loop u8 @ +0. Non-zero enables animated path.
+        // spec: Docs/RE/formats/effects.md §A.4.3 — anim_loop u8 @ +0: CONFIRMED.
         byte animLoop = span[offset];
-        // anim_stride u32le @ Group E offset 1.
-        uint animStride = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 1)..]);
-        // anim_base_time u32le @ Group E offset 5.
-        uint animBaseTime = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 5)..]);
-        offset += 9;
 
-        // ─── Group F — Keyframe / static-state (branched on anim_loop) ────────
-        XeffKeyframe[]? keyframes = null;
-        XeffStaticState? staticState = null;
+        // unknown_constant u32le @ +1. Observed value: 67 (0x43). Purpose UNRESOLVED.
+        // spec: Docs/RE/formats/effects.md §A.4.3 — unknown_constant u32 @ +1: SAMPLE-VERIFIED (value), semantics UNRESOLVED.
+        // spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_UNKNOWN_CONSTANT = 67.
+        uint unknownConstant = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 1)..]);
 
-        if (animLoop != 0)
+        // anim_stride u32le @ +5. Duration of one animation frame in milliseconds.
+        // spec: Docs/RE/formats/effects.md §A.4.3 — anim_stride u32 @ +5 (ms): CONFIRMED.
+        uint animStride = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 5)..]);
+
+        // anim_base_time u32le @ +9. Base time offset in milliseconds.
+        // spec: Docs/RE/formats/effects.md §A.4.3 — anim_base_time u32 @ +9 (ms): CONFIRMED.
+        uint animBaseTime = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 9)..]);
+        offset += TrackHeaderSize; // consume all 13 bytes
+
+        // ─── A.4.4 Keyframe array — entryCount entries ────────────────────────
+        // spec: Docs/RE/formats/effects.md §A.4.4 Keyframe array: CONFIRMED.
+        // Frame 0: NO index prefix — only 9 × f32 = 36 bytes.
+        // Frames 1..entryCount-1: u32 kf_index + 9 × f32 = 40 bytes each.
+        // spec: Docs/RE/formats/effects.md §A.4.4 — "Frame 0 is a special case: it has NO index prefix": CONFIRMED.
+        var keyframes = new XeffKeyframe[(int)entryCount];
+        for (int k = 0; k < (int)entryCount; k++)
         {
-            // Branch A: animated keyframe array. Keyframe count == tex_count.
-            // spec: Docs/RE/formats/effects.md §A.3.6 Branch A: PARSER-CONFIRMED, SAMPLE-UNVERIFIED.
-            keyframes = new XeffKeyframe[(int)texCount];
-            for (int k = 0; k < (int)texCount; k++)
+            uint kfIndex;
+            if (k == 0)
             {
-                // 10 × f32le or u32le fields per keyframe.
-                // spec: Docs/RE/formats/effects.md §A.3.6 Branch A — 10 fields × 4 bytes: PARSER-CONFIRMED.
-                EnsureBytes(span, offset, 40, $"element[{elementIndex}] keyframe[{k}]");
-                uint kfIndex = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
-                float p0 = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 4)..]);
-                float p1 = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 8)..]);
-                float p2 = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 12)..]);
-                float p3 = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 16)..]);
-                float p4 = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 20)..]);
-                float p5 = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 24)..]);
-                // kf_rot_x_deg, kf_rot_y_deg, kf_rot_z_deg in degrees (stored on disk).
-                // spec: Docs/RE/formats/effects.md §A.3.6 Branch A — kf_rot_x_deg CONFIRMED (degrees).
-                float rotXDeg = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 28)..]);
-                float rotYDeg = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 32)..]);
-                float rotZDeg = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 36)..]);
-                offset += 40;
-
-                keyframes[k] = new XeffKeyframe
-                {
-                    KfIndex = kfIndex,
-                    Params = [p0, p1, p2, p3, p4, p5],
-                    RotXDeg = rotXDeg, RotYDeg = rotYDeg, RotZDeg = rotZDeg,
-                };
+                // Frame 0: no index prefix. 9 × f32 = 36 bytes.
+                // spec: Docs/RE/formats/effects.md §A.4.4 — frame 0: 9 × f32 (36 bytes), no index: CONFIRMED.
+                EnsureBytes(span, offset, 36, $"sub_effect[{subIndex}] keyframe[0] (no-index frame)");
+                kfIndex = 0;
             }
-        }
-        else
-        {
-            // Branch B: static state. Always 6 floats; +3 rotation floats only if emitter_type == 2.
-            // spec: Docs/RE/formats/effects.md §A.3.6 Branch B: PARSER-CONFIRMED, SAMPLE-UNVERIFIED.
-            bool hasRotation = emitterType == EmitterDirectional;
-            int branchBytes = hasRotation ? 36 : 24;
-            EnsureBytes(span, offset, branchBytes, $"element[{elementIndex}] Group F Branch B");
-
-            float sp0 = BinaryPrimitives.ReadSingleLittleEndian(span[offset..]);
-            float sp1 = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 4)..]);
-            float sp2 = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 8)..]);
-            float sp3 = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 12)..]);
-            float sp4 = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 16)..]);
-            float sp5 = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 20)..]);
-            offset += 24;
-
-            float sRotX = 0f, sRotY = 0f, sRotZ = 0f;
-            if (hasRotation)
+            else
             {
-                // static_rot_x_deg, static_rot_y_deg, static_rot_z_deg — degrees on disk.
-                // spec: Docs/RE/formats/effects.md §A.3.6 Branch B — static_rot_*_deg: CONFIRMED.
-                sRotX = BinaryPrimitives.ReadSingleLittleEndian(span[offset..]);
-                sRotY = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 4)..]);
-                sRotZ = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 8)..]);
-                offset += 12;
+                // Frames 1..N-1: u32 kf_index + 9 × f32 = 40 bytes.
+                // spec: Docs/RE/formats/effects.md §A.4.4 — frames 1..N-1: u32 kf_index + 9 × f32 = 40 bytes: CONFIRMED.
+                EnsureBytes(span, offset, 40, $"sub_effect[{subIndex}] keyframe[{k}]");
+                kfIndex = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
+                offset += 4;
             }
 
-            staticState = new XeffStaticState
+            // 9-float layout (in file order):
+            // 1: velocity_x, 2: velocity_y, 3: velocity_z
+            // 4: size_x,     5: size_y,     6: size_z
+            // 7: kf_rot_x_deg, 8: kf_rot_y_deg, 9: kf_rot_z_deg
+            // spec: Docs/RE/formats/effects.md §A.4.4 nine-float layout: CONFIRMED.
+            float vx = BinaryPrimitives.ReadSingleLittleEndian(span[offset..]); // position 1
+            float vy = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 4)..]); // position 2
+            float vz = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 8)..]); // position 3
+            float sx = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 12)..]); // position 4
+            float sy = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 16)..]); // position 5
+            float sz = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 20)..]); // position 6
+            float rxd = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 24)..]); // position 7 — degrees
+            float ryd = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 28)..]); // position 8 — degrees
+            float rzd = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 32)..]); // position 9 — degrees
+            offset += 36; // always advance by 9 × f32 regardless of frame index
+
+            keyframes[k] = new XeffKeyframe
             {
-                Params = [sp0, sp1, sp2, sp3, sp4, sp5],
-                RotXDeg = hasRotation ? sRotX : null,
-                RotYDeg = hasRotation ? sRotY : null,
-                RotZDeg = hasRotation ? sRotZ : null,
+                KfIndex = kfIndex,
+                VelocityX = vx,
+                VelocityY = vy,
+                VelocityZ = vz,
+                SizeX = sx,
+                SizeY = sy,
+                SizeZ = sz,
+                RotXDeg = rxd,
+                RotYDeg = ryd,
+                RotZDeg = rzd,
             };
         }
 
-        return new XeffElement
+        return new XeffSubEffect
         {
-            EmitterType = emitterType,
-            EmitterSubtype = emitterSubtype,
-            AnimFlag = animFlag,
-            TexCount = texCount,
-            FieldUnknownA = fieldUnknownA,
+            EntryCount = entryCount,
             TextureNames = texNames,
-            AlphaKeyframes = alphaKeys,
+            AlphaKeys = alphaKeys,
             ScaleX = scaleX,
             ScaleY = scaleY,
             ScaleZ = scaleZ,
             AnimLoop = animLoop,
+            UnknownConstant = unknownConstant,
             AnimStride = animStride,
             AnimBaseTime = animBaseTime,
-            AnimKeyframes = keyframes,
-            StaticState = staticState,
+            Keyframes = keyframes,
         };
     }
 
-    private static float[] ReadFloatArray(ReadOnlySpan<byte> span, ref int offset, string fieldName)
+    /// <summary>
+    /// Reads one float-curve pass: u32 count prefix + count × f32 values.
+    /// spec: Docs/RE/formats/effects.md §A.4.2 — each pass: u32 curve_count + curve_count × f32: CONFIRMED.
+    /// </summary>
+    private static float[] ReadFloatCurve(ReadOnlySpan<byte> span, ref int offset, string fieldName)
     {
         EnsureBytes(span, offset, 4, $"{fieldName} count");
         uint count = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
@@ -338,6 +352,6 @@ public static class XeffParser
             throw new InvalidDataException(
                 $".xeff parse error: truncated reading '{fieldName}' — " +
                 $"need {needed} bytes at offset {offset}, buffer length {span.Length}. " +
-                "spec: Docs/RE/formats/effects.md §A.3.");
+                "spec: Docs/RE/formats/effects.md §A.4.");
     }
 }

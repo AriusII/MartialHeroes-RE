@@ -530,3 +530,95 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
   OQ-EFX-* touchpoints were incidentally resolved during the effects-render cluster walk. The
   dirty room received no new tainted material this session (annotations write only to the IDB,
   not to _dirty/). Journal authored by the preservation-archivist.
+
+## 2026-06-13/14 — CAMPAIGN 3: doida.exe Workflow / UI-UX / VFS — deep reverse → clean specs → client
+
+- scope: continuation of the doida.exe reverse, end-to-end. Six comprehension clusters recovered
+  (READONLY, static IDA on the Campaign-2-annotated IDB; one targeted `define_func` over the in-game
+  HUD-build routine, no other IDB writes), promoted to committed clean specs, then wired into the C#
+  core + Godot client. One live-debugger confirmation pass on the login path. Apparatus: PLAN.md +
+  ROADMAP.md (this campaign's method + run record, which replaced the prior ROADMAP/​*-CAMPAGNE2 docs).
+- comprehension (Docs/RE/_dirty/campaign3/, gitignored — never committed):
+  - B1 workflow-spine: the login credential is payload sub-opcode 0x2B carried on the secure 1/4 frame
+    (the earlier "1/6 collision" was a false premise — 1/6 is char-create only); the CharacterMgmt
+    request family (1/0,1/6,1/7,1/9,1/13,1/14); the boot→login→server-list→PIN→char-select→enter scene
+    sub-state flow; the anti-keylogger PIN keypad.
+  - B2 ui-window-manager/HUD: the main window IS the window manager (flat service-slot table); the
+    GUComponent/GUPanel/GUWindow field model; the in-game HUD layout — first 5 panels, then the FULL
+    sweep of the defined HUD-build routine (152 placement sites, 4 anchor conventions); the char-select
+    6-keyframe preview camera.
+  - B3 vfs-assetio: the 144-byte TOC + RAW/uncompressed storage verdict + three-way open-mode dispatch;
+    the actormotion 136-byte record (col3–14 resolved); the sky/fog/cloud/star formats + day-cycle.
+  - B4 lua-config: one statically-linked Lua 5.1.2 VM (lone cpp_load binding); the vfsmode/launcher/
+    debugmode integer boot flags; LOAD-BEARING — the Lua text tables decode as UTF-8, not CP949.
+  - B5 sound + combat-timers: OGG play-by-kind dispatch; the one-now-ms-per-frame tick spine fanned to
+    four linear active-list managers (not a priority queue); the death FSM.
+  - B6 terrain-stream: LOAD-BEARING — streaming is synchronous per-frame ring-shift; the async worker/
+    FIFO is dormant compiled-in scaffolding.
+- live-debugger confirmation (login path, against the running client; values session-only, never
+  recorded): the 0x2B plaintext field layout byte-exact; the fixed 17-byte zero-padded RSA password M;
+  the __thiscall builder signature; the account\tpassword\tPIN\thost:port login-string contract; the
+  secure 1/4 header set before encrypt; the RSA ciphertext framing [u32 LE len][big-endian digits].
+- committed clean specs produced/refined (neutral prose; no pseudo-code, no addresses; firewall
+  grep PASS across specs/​formats/​structs/​packets):
+  - opcodes.md (1/6 resolution; CharacterMgmt family; 0/0 key-exchange); packets/login.yaml +
+    cmsg_char_create/select/enter/rename/move.yaml + cmsg_logout.yaml; specs/login.md (new);
+    crypto.md + login_flow.md (refined).
+  - structs/gucomponent.md + structs/guwindow.md (new); specs/ui_system.md §1.6–1.8 (refined);
+    specs/ui_hud_layout.md (new — §3 the 5 core panels, §5 the full 152-site HUD inventory);
+    frontend_scenes.md §3.5 (preview camera).
+  - formats/pak.md (RAW verdict), formats/actormotion.md (new), formats/sky.md (new),
+    specs/environment.md (refined).
+  - specs/lua-config.md (new), specs/sound.md §15, specs/effect-scheduling.md (new),
+    specs/terrain-streaming.md (new), structs/terrain-manager.md (new).
+- engineering (re-implemented fresh from the clean specs; full `dotnet build` 0/0, full `dotnet test`
+  1296 green across 10 suites after each wave): Network.Protocol char-mgmt request structs + opcode
+  routing; Network.Crypto login-credential build (17-byte M, 0x2B pre-image, full secure 1/4 payload +
+  whitening); Assets.Parsers sky.box parser + actormotion typed catalogue; Client.Infrastructure
+  LuaConfig reader (UTF-8); Godot client UI — inventory (W=732, populated), buff bar, the 5 HUD panels
+  at recovered coords, the right-edge HP/MP gauge, bottom action bar, top status bar, a reusable
+  CenteredModal base, the char-select 6-keyframe preview camera, login screen (CP949).
+- pending (next): Phase D IDB annotation of the new clusters (apply the proposed names/comments) and
+  the follow-on names.yaml sync — the per-cluster names.proposed.yaml manifests are staged in _dirty/
+  but NOT yet applied to the IDB nor pulled into names.yaml; the layer-04 login-driver migration to the
+  new credential API; the deferred Phase-Dbg live confirmations (preview camera, char-create record,
+  scheduler now-ms). Journal authored by the Top Orchestrator (main session).
+
+## 2026-06-14 — CAMPAIGN 4: Front-End Fidelity (Login · PIN · Server-List · Char-Select) + VFS comprehension
+
+- scope: refocus onto the front-end being 1:1 with the official client (World scene FROZEN). Recovered
+  the exact composition of the four first scenes from `doida.exe` (READONLY static, no IDB writes) + the
+  real VFS (harness observation, no IDA), promoted to committed specs, rebuilt the Godot front-end
+  faithfully, and deepened the VFS-subsystem understanding. Apparatus: `Docs/PLAN.md` + `Docs/ROADMAP.md`
+  (the "CAMPAIGN 4" section).
+- recovery (dirty, `Docs/RE/_dirty/campaign4/`, gitignored): the front-end = the `LoginWindow` state
+  machine (login+PIN+server-list, states 1–41) + the `SelectWindow` (char-select); the widget-factory
+  convention `(texId,X,Y,W,H,srcUV…)` cracked → every widget's screen-rect + atlas-source-UV rect dumped;
+  the atlas DDS inventory (loginwindow / loginwindow_02 / password / characwindow / openning_scenario /
+  server_icon, cursor stand); the PIN keypad time-seeded Fisher-Yates scramble; the SFX architecture (the
+  button base plays nothing — the owning window does; BGM 920100200, UI click 861010101); the "red
+  ribbon" = the `OpeningWindow` pre-login intro crawl (vertical scroll + slideshow), not a login effect;
+  the front-end captions pulled from `msg.xdb`. VFS-subsystem deep dive: the mount/open/read pipeline
+  (hardcoded paths, `vfsmode` packed/loose toggle), the loader-dispatch VERDICT (no magic-sniffing —
+  always by call-site/extension; third-party codecs recognise formats), the GHTex named-texture cache
+  (the only real asset cache, name-keyed, explicit eviction), the cell→texture / skin→bind/motion linkage
+  chains, the sequential bulk-loader; plus a full VFS structure map (43,347 entries, 49 extensions, the
+  manifest-linkage tables, 8 asset-resolution chains, the un-specced extensions `.mud/.pre/.post/.tol`).
+- committed clean specs (neutral; no addresses, no literal Korean — captions resolve from the VFS at
+  runtime; firewall grep PASS): `specs/frontend_scenes.md §11` (the pixel-exact rebuild contract for all
+  four scenes), new `formats/msg_xdb.md` (516-byte caption records) + `specs/intro_sequence.md` (the
+  OpeningWindow intro), refined `specs/sound.md §15` + `formats/effects.md §A.15` (front-end audio/VFX).
+- engineering (re-implemented fresh from the specs; full build 0/0, full test suite green): the `.xeff`
+  parser fixed (header 8→32 bytes — `char_select`/`zone_sel` now parse; +28 tests); `MsgXdbCatalog`
+  (CP949 caption lookup); the Godot front-end REBUILT faithfully — LoginScreen (12 atlas layers from
+  §11.2), PinModal (the Fisher-Yates keypad §11.3), ServerSelectScreen (§11.4), CharacterSelect (§11.5),
+  the `OpeningWindow` intro, `FrontEndAudio` (BGM/SFX/cursor), `FrontEndEffectPlayer` (the front-end VFX);
+  the layer-04 login flow migrated to build the real secure 0x2B credential (`CredentialPlaintext` +
+  `LoginCredentialReply.Build` via `LoginCredentialStore` / `LoginHandshakeDriver`).
+- CONFLICTS for arbitration: `bgtexture` — the binary loads a BINARY `bgtexture.lst` (u32 count + 48-byte
+  records) while CLAUDE.md/text mirror reference `bgtexture.txt`; resolve before promoting a terrain spec.
+- pending: promote the VFS deep-dive (`_dirty/campaign4/vfs/`) into `formats/pak.md` refinements +
+  `specs/asset_pipeline.md`; the front-end render-fidelity review vs the official screenshots; the un-
+  specced `.scr`/`.xdb` bulk tables; the Phase-D IDB annotation + `names.yaml` sync (still owed from
+  CAMPAIGN 3 + 4). No commit yet (maintainer: continue-then-commit-later). Journal authored by the Top
+  Orchestrator (main session).

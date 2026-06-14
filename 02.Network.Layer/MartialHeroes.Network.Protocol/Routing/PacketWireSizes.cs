@@ -96,11 +96,33 @@ public static class PacketWireSizes
                 isVariableLength = true;
                 return true;
 
-            // --- C2S packets the client emits (modelled for the send path) ---
-            case Opcodes.Opcodes.CmsgEnterGameRequest: // spec: packets/1-9_enter_game_request.yaml
+            // --- C2S CharacterMgmt request builders (major 1; modelled for the send path) ---
+            case Opcodes.Opcodes.CmsgLogout: // spec: packets/cmsg_logout.yaml (header-only, 0 B payload)
+                size = CmsgLogout.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.Opcodes.CmsgCreateCharacter: // spec: packets/cmsg_char_create.yaml (52 B opaque body)
+                size = CmsgCreateCharacter.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.Opcodes.CmsgSelectCharacter: // spec: packets/cmsg_char_select.yaml
+                size = CmsgSelectCharacter.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.Opcodes.CmsgEnterGameRequest: // spec: packets/cmsg_char_enter.yaml
                 size = CmsgEnterGameRequest.WireSize;
                 isVariableLength = false;
                 return true;
+            case Opcodes.Opcodes.CmsgRenameCharacter: // spec: packets/cmsg_char_rename.yaml
+                size = CmsgRenameCharacter.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.Opcodes.CmsgMoveCharacter: // spec: packets/cmsg_char_move.yaml
+                size = CmsgMoveCharacter.WireSize;
+                isVariableLength = false;
+                return true;
+
+            // --- other C2S packets the client emits (modelled for the send path) ---
             case Opcodes.Opcodes.CmsgMoveRequest: // spec: packets/2-13_move_request.yaml
                 size = CmsgMoveRequest.WireSize;
                 isVariableLength = false;

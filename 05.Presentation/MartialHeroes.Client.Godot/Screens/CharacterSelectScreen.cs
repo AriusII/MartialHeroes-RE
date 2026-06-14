@@ -228,6 +228,13 @@ public sealed partial class CharacterSelectScreen : Control
     // 3D preview controls (one per slot, null = empty slot placeholder).
     private readonly CharPreview3D?[] _previews = new CharPreview3D?[MaxSlots];
 
+    // Active camera keyframe (0..5) shared across all preview slots.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.3 — "initial active keyframe index = 0". CODE-CONFIRMED.
+    private int _activeCameraKeyframe;
+
+    // Camera pose buttons (one per keyframe).
+    private readonly Button[] _poseButtons = new Button[6];
+
     // Slot row buttons (for the selection highlight).
     private readonly Button?[] _slotButtons = new Button?[MaxSlots];
 
@@ -402,6 +409,13 @@ public sealed partial class CharacterSelectScreen : Control
         // --- Slot selector row (text buttons below previews) ---
         widgetCount += BuildSlotSelectorRow();
 
+        // --- Camera keyframe pose selector — 6 pose buttons.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 / §3.5.3 CODE-CONFIRMED (6 keyframes).
+        // Runtime framing / easing law is "runtime-pending" (spec §3.5.4) — a static manual
+        // cycle is the correct scope for this implementation pass.
+        // Initial keyframe = 0, spec §3.5.3. CODE-CONFIRMED.
+        widgetCount += BuildCameraPoseButtons();
+
         // --- Corner close button @ (971,610) 23×23, blacksheet.dds src (941,910).
         // spec §8.2 "Corner close". CODE-CONFIRMED. ---
         WidgetRect closeR = CharacterSelectLayout.CornerClose;
@@ -420,6 +434,28 @@ public sealed partial class CharacterSelectScreen : Control
         _createForm = BuildCreateForm();
         _createForm.Visible = false;
         AddChild(_createForm);
+        widgetCount++;
+
+        // --- Char-select ambient VFX — char_select-u.xeff (effect_id 380003000, 68 sub-effects).
+        // spec: Docs/RE/formats/effects.md §A.15 — char_select-u.xeff; effect_id 380003000;
+        //   sub_effect_count 68; SAMPLE-VERIFIED.
+        // Parser caveat per spec: the 68-sub-effect file may fail at the scale-curve (Group D) read;
+        // FrontEndEffectPlayer handles this gracefully with a fallback ring effect.
+        // spec: Docs/RE/formats/effects.md §A.15 — "parser caveat: high-sub_effect_count files...
+        //   currently fail the existing .xeff parser at the scale-curve (Group D) read".
+        var charVfxPlayer = new FrontEndEffectPlayer
+        {
+            Name = "CharSelectEffect",
+            XeffVfsPath = "data/effect/xeff/char_select-u.xeff",
+            SharedRealAssets = _realAssets,
+            MouseFilter = MouseFilterEnum.Ignore,
+            // Z-index above other 2D children so particles render in front of the dark
+            // SubViewport preview rects. Additive blend makes them glow without hiding chrome.
+            ZIndex = 10,
+        };
+        charVfxPlayer.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        AddChild(charVfxPlayer);
+        // No MoveChild needed — ZIndex controls draw order regardless of child-list position.
         widgetCount++;
 
         RefreshInfo();
@@ -655,6 +691,95 @@ public sealed partial class CharacterSelectScreen : Control
     {
         if (_slotRowContainer is null || !IsInstanceValid(_slotRowContainer)) return;
         PopulateSlotSelectorRow();
+    }
+
+    // =========================================================================
+    // Camera keyframe pose buttons
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 / §3.5.3 CODE-CONFIRMED (6 keyframes).
+    // The orbit easing / auto-advance law is runtime-pending (spec §3.5.4), so we expose a
+    // simple 6-button selector that sets the active keyframe on all preview slots.
+    // =========================================================================
+
+    /// <summary>
+    /// Builds a row of 6 camera-pose buttons placed just below the slot-selector row.
+    /// Each button sets the <see cref="CharPreview3D.ActiveKeyframe"/> on all preview slots.
+    /// </summary>
+    private int BuildCameraPoseButtons()
+    {
+        // Row geometry: 6 buttons × 120px wide × 22px tall, centred below the preview row.
+        // Placed below the slot selector row (~y=600); above the close button (~y=610).
+        // spec: §3.5.3 "initial active keyframe = 0". CODE-CONFIRMED.
+        const float btnW = 120f;
+        const float btnH = 22f;
+        const float gap = 4f;
+        const float startX = 260f; // aligns with the preview row left edge
+        const float rowY = 596f; // below slot selector row
+
+        // Labels for the 6 camera poses — descriptive only (framing is runtime-pending).
+        // Yaw/pitch values (approximate degrees) from spec §3.5.3.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.5.3 CODE-CONFIRMED (values).
+        string[] poseLabels =
+        [
+            "Pose 1 (−6° yaw)", // KF0: yaw −6°, pitch +2.4°
+            "Pose 2 (−2.7°)", // KF1: yaw −2.7°, pitch +0.8°
+            "Pose 3 (+0.6°)", // KF2: yaw +0.6°, pitch −36.6°
+            "Pose 4 (−2°)", // KF3: yaw −2°, pitch −80°
+            "Pose 5 (+7.8°)", // KF4: yaw +7.8°, pitch +74.3°
+            "Pose 6 (−13.8°)", // KF5: yaw −13.8°, pitch +52.4°
+        ];
+
+        var container = new HBoxContainer
+        {
+            Name = "CameraPoseRow",
+            Position = new Vector2(startX, rowY),
+            Size = new Vector2((btnW + gap) * 6 - gap, btnH),
+        };
+        AddChild(container);
+
+        for (int kf = 0; kf < 6; kf++)
+        {
+            int kfCapture = kf;
+            var btn = new Button
+            {
+                Name = $"PoseBtn{kf}",
+                Text = poseLabels[kf],
+                CustomMinimumSize = new Vector2(btnW, btnH),
+                ToggleMode = true,
+                ButtonPressed = kf == 0, // KF0 active by default (spec §3.5.3)
+            };
+            btn.AddThemeFontSizeOverride("font_size", 10);
+            btn.Pressed += () =>
+            {
+                SetCameraKeyframe(kfCapture);
+                // Un-toggle all other buttons (radio-button semantics).
+                for (int j = 0; j < 6; j++)
+                    if (_poseButtons[j] is Button pb)
+                        pb.ButtonPressed = j == kfCapture;
+            };
+            container.AddChild(btn);
+            _poseButtons[kf] = btn;
+        }
+
+        GD.Print($"[Screens] CharacterSelectScreen: camera pose row built (6 keyframes). " +
+                 $"spec: frontend_scenes.md §3.5.2/§3.5.3 CODE-CONFIRMED.");
+
+        return 7; // 1 container + 6 buttons
+    }
+
+    /// <summary>
+    /// Sets the active camera keyframe on all preview slots.
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.5.3 CODE-CONFIRMED (6 keyframes).
+    /// Runtime easing/auto-advance is runtime-pending (spec §3.5.4).
+    /// </summary>
+    private void SetCameraKeyframe(int keyframe)
+    {
+        _activeCameraKeyframe = ((keyframe % 6) + 6) % 6;
+        GD.Print($"[Screens] CharacterSelectScreen: camera keyframe → {_activeCameraKeyframe}.");
+        foreach (CharPreview3D? preview in _previews)
+        {
+            if (preview is not null && IsInstanceValid(preview))
+                preview.ActiveKeyframe = _activeCameraKeyframe;
+        }
     }
 
     // =========================================================================

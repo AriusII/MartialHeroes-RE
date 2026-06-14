@@ -22,6 +22,14 @@ namespace MartialHeroes.Client.Godot.HUD;
 ///   Window chrome full panel: (318, 647, 340, 190) — spec: §8.3 CONFIRMED (shared modal chrome).
 ///   Caption "닫기" (close) from msg.xdb id 102 — spec: §10 known id range 101–107.
 ///
+/// HUD placement (CODE-CONFIRMED):
+///   W = 732, right-anchored. In Godot terms: AnchorRight=1, OffsetLeft=-732, OffsetRight=+318.
+///   This positions the panel with its left edge 414 px from the right of the viewport
+///   (= 1024 - 732 + 318 - 318 = 1024 - 732 on a 1024-wide canvas). The +318 right-offset
+///   is the recovered "screen_width + 318" right-anchor inset from the HUD-assembly call site —
+///   the 318 px tail extends past the right viewport edge (classic slide-in from right).
+///   spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "W=732, right-anchored at screen_width+318" CODE-CONFIRMED.
+///
 /// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive HUD.
 /// spec: Docs/RE/specs/ui_system.md §8.5 — uitex integer binding; §8.3 — shared modal chrome.
 /// spec: Docs/RE/formats/ui_manifests.md §1.4 — uitex 0002 = data/ui/inventwindow.dds.
@@ -69,11 +77,35 @@ public sealed partial class InventoryWindow : Control
     private const uint MsgIdClose = 102;
 
     // -------------------------------------------------------------------------
+    // HUD placement constants
+    // spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "W=732, right-anchored at screen_width+318" CODE-CONFIRMED.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Panel width recovered from the HUD-assembly call site.
+    /// spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "Width 732 px" CODE-CONFIRMED.
+    /// </summary>
+    private const int InvPanelW = 732; // spec: Docs/RE/specs/ui_hud_layout.md §1.1 CODE-CONFIRMED
+
+    /// <summary>
+    /// Right-anchor inset: positive offset past the right viewport edge.
+    /// In Godot: OffsetRight = +318 (with AnchorLeft/Right = 1.0) positions the panel's right
+    /// border 318 px beyond the viewport's right edge. This matches the legacy "screen_width + 318"
+    /// placement convention observed at the HUD-assembly call site.
+    /// spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "screen_width + 318" CODE-CONFIRMED.
+    /// </summary>
+    private const int InvRightInset = 318; // spec: Docs/RE/specs/ui_hud_layout.md §1.1 CODE-CONFIRMED
+
+    // Height is runtime-derived at the legacy build site (not a literal).
+    // spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "height derived at runtime".
+    // We use a reasonable fixed height for the Godot reimplementation.
+    private const int InvPanelH = 520; // PLAUSIBLE — runtime-derived in legacy
+
+    // -------------------------------------------------------------------------
     // Tunables
     // -------------------------------------------------------------------------
 
     private const int DemoItemCount = 64;
-    private const uint IdScanCeiling = 5_000;
     private const int GridColumns = 4;
     // spec: Docs/RE/formats/config_tables.md §4.1 — "Total rows: 89,712": CONFIRMED.
 
@@ -219,20 +251,27 @@ public sealed partial class InventoryWindow : Control
 
     private void BuildUi()
     {
-        // Anchor: centre-left of the viewport.
-        AnchorLeft = 0f;
-        AnchorTop = 0.5f;
-        AnchorRight = 0f;
-        AnchorBottom = 0.5f;
-        OffsetLeft = 320f;
-        OffsetTop = -260f;
-        OffsetRight = 660f;
-        OffsetBottom = 260f;
+        // Right-anchored placement per recovered HUD-assembly call site.
+        // W=732, anchored to the right viewport edge with a +318 right-inset past the edge.
+        // In Godot anchor terms: both AnchorLeft and AnchorRight = 1.0 (right-edge anchor),
+        //   OffsetLeft  = −InvPanelW  = −732  → panel left edge is 732 px left of viewport right.
+        //   OffsetRight = +InvRightInset = +318 → panel right border extends 318 px past viewport right.
+        // On a 1024-wide canvas this makes the left edge at pixel 1024 − 732 = 292 (abs) and
+        // the right edge at 1024 + 318 = 1342, so 318 px are clipped.
+        // spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "W=732, right-anchored at screen_width+318" CODE-CONFIRMED.
+        AnchorLeft = 1f;
+        AnchorTop = 0f;
+        AnchorRight = 1f;
+        AnchorBottom = 0f;
+        OffsetLeft = -InvPanelW; // spec: Docs/RE/specs/ui_hud_layout.md §1.1 CODE-CONFIRMED
+        OffsetTop = 4f; // PLAUSIBLE — Y origin not recovered; small top margin
+        OffsetRight = InvRightInset; // spec: Docs/RE/specs/ui_hud_layout.md §1.1 CODE-CONFIRMED
+        OffsetBottom = InvPanelH + 4f; // PLAUSIBLE — height not a literal; using InvPanelH
 
         // Window root container.
         var outerPanel = new PanelContainer();
         outerPanel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        outerPanel.CustomMinimumSize = new Vector2(340, 520);
+        outerPanel.CustomMinimumSize = new Vector2(InvPanelW, InvPanelH);
         AddChild(outerPanel);
 
         // ---- Window chrome TextureRect (inventwindow.dds modal chrome) ----
@@ -280,8 +319,10 @@ public sealed partial class InventoryWindow : Control
         vbox.AddChild(_countLabel);
 
         // ---- Scrollable grid ----
+        // Width spans the full panel minus small margins; height fills the remaining space.
+        // spec: Docs/RE/specs/ui_hud_layout.md §1.1 — panel W=732 CODE-CONFIRMED (height PLAUSIBLE).
         var scroll = new ScrollContainer();
-        scroll.CustomMinimumSize = new Vector2(330, 430);
+        scroll.CustomMinimumSize = new Vector2(InvPanelW - 12, 430);
         scroll.SizeFlagsVertical = SizeFlags.ExpandFill;
         vbox.AddChild(scroll);
 
@@ -396,42 +437,39 @@ public sealed partial class InventoryWindow : Control
             return;
         }
 
-        var catalogue = _context?.ItemCatalogue;
-        if (catalogue is null || catalogue.Count == 0)
+        // The item catalogue has 89,712 records with large item_ids (e.g. 202110003+).
+        // We cannot iterate all IDs by range scan — use the icon catalogue's texturelist.txt entries
+        // as the display set, since those are the items with known icons.
+        // The per-item tex_id→item_id join is spec-open (ui_manifests.md §9 item #12), so
+        // we display the tex_id directly as the slot identifier for now.
+        // spec: Docs/RE/formats/ui_manifests.md §10 — texturelist.txt tex_id list. CODE-CONFIRMED.
+        // spec: Docs/RE/formats/ui_manifests.md §9 item #12 — inventory cell layout UNPINNED.
+        if (_demoIcons is not null && _demoIcons.Count > 0)
         {
-            _countLabel.Text = "ItemCatalogue not available (offline mode).";
-            AddSlot(grid, 0, "(no data — VFS offline)", "#888888", slotIndex: 0);
+            int shown = 0;
+            int total = _context?.ItemCatalogue?.Count ?? 0;
+            foreach ((int texId, ImageTexture? icon) in _demoIcons)
+            {
+                if (shown >= DemoItemCount) break;
+                // Display using tex_id as slot id; name is a placeholder until the join is pinned.
+                string displayName = $"tex:{texId}";
+                string colour = "#cccccc";
+
+                AddSlot(grid, (uint)texId, displayName, colour, slotIndex: shown);
+                shown++;
+            }
+
+            _countLabel.Text = $"Showing {shown} icons from texturelist.txt (catalogue: {total} items)";
+            GD.Print($"[InventoryWindow] Populated {shown} icon slots from texturelist.txt. " +
+                     $"ItemCatalogue total={total}. " +
+                     "Note: tex_id→item_id join unpinned (spec: ui_manifests.md §9 item #12).");
             return;
         }
 
-        int shown = 0;
-        for (uint id = 1; id <= IdScanCeiling && shown < DemoItemCount; id++)
-        {
-            var rec = catalogue.TryGet(id);
-            if (rec is null) continue;
-
-            string displayName = string.IsNullOrWhiteSpace(rec.Name)
-                ? $"(id={rec.ItemId})"
-                : $"{rec.Name} (id={rec.ItemId})";
-
-            // Colour-code by tier rank.
-            // spec: Docs/RE/formats/config_tables.md §4.3 col22 item_tier_rank: CONFIRMED.
-            string colour = rec.ItemTierRank switch
-            {
-                0 => "#cccccc",
-                1 => "#44dd44",
-                2 => "#4488ff",
-                3 => "#cc44ff",
-                4 => "#ffaa00",
-                _ => "#ffffff",
-            };
-
-            AddSlot(grid, rec.ItemId, displayName, colour, slotIndex: shown);
-            shown++;
-        }
-
-        _countLabel.Text = $"Showing {shown} of {catalogue.Count} items (first {shown} found in IDs 1–{IdScanCeiling})";
-        GD.Print($"[InventoryWindow] Populated {shown} item slots from ItemCatalogue (total={catalogue.Count}).");
+        // Fallback: no icons available (VFS offline).
+        _countLabel.Text = "VFS offline — no item icons available.";
+        AddSlot(grid, 0, "(VFS offline)", "#888888", slotIndex: 0);
+        GD.Print("[InventoryWindow] No item icons — VFS offline.");
     }
 
     /// <param name="slotIndex">

@@ -1,3 +1,7 @@
+# *** SUPERSEDED -> see packets/cmsg_char_enter.yaml ***
+# Refined enter layout (slot + 33B version blob + pad + version-check u32) lives in
+# cmsg_char_enter.yaml; the opcodes.md 1/9 row points there. Retained as provenance only.
+#
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
 

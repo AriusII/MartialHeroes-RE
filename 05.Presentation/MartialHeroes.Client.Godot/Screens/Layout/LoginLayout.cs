@@ -1,240 +1,422 @@
 // Screens/Layout/LoginLayout.cs
 //
-// Hardcoded pixel layout table for the LOGIN screen, on the 1024×768 reference canvas.
-// Every value here is an INTEROP FACT recovered from the login BuildScene routine.
-// "Interop facts, not guesses." — each constant cites its spec row.
+// Pixel-exact layout constants for the LOGIN scene on the 1024×768 reference canvas.
+// ALL values are CODE-CONFIRMED literals from the legacy scene builder, via:
+//   spec: Docs/RE/specs/frontend_scenes.md §11.0 (common model)
+//         §11.2a–f (login widget table — every widget, every src rect)
+//         §11.1 (texture inventory — atlas paths + formats)
+//         §11.3 (PIN modal)
+//         §11.4 (server-list overlay)
+//         §9   (consolidated SFX / msg-id tables)
+//         §1.2 (action ids)
+//         §1.4 (local validation thresholds)
+//         §1.9 (msg.xdb id table)
 //
-// spec: Docs/RE/specs/ui_system.md §8.0 (reference canvas),
-//       §8.1 (login layout table — 21 ctor sites, CODE-CONFIRMED),
-//       §9.1 (login asset manifest — atlas DDS assignments, CODE-CONFIRMED),
-//       §6.2  (font slot pixel heights, font table),
-//       §10  (msg.xdb id ranges, CODE-CONFIRMED).
+// Coordinate model (§11.0):
+//   - Design canvas: 1024×768, top-left anchored.
+//   - Scene origin: (screenWidth/2 - 512, screenHeight/2 - 384) — widget coords are canvas-local.
+//   - Widget shape: (X, Y, W, H) on canvas; (srcU, srcV) = top-left of the atlas sub-rect.
+//   - A subset of background bars are placed at height-scaled Y = 326 × screenHeight / 768.
+//     Those rows are called out with the suffix "ScaleY" and use the formula at runtime.
+//
+// Atlas shorthand (§11.2):
+//   A = login_slice1.dds   (DXT2 premultiplied — §11.1)
+//   B = loginwindow.dds    (DXT5 — §11.1)
+//   C = InventWindow.dds   (§11.1 — shared dialog / PIN frame)
+//   D = loginwindow_02.dds (DXT2 — §11.1)
 
 namespace MartialHeroes.Client.Godot.Screens.Layout;
 
 /// <summary>
 /// A widget rectangle + atlas source sub-rect (NORMAL frame) on the reference canvas.
-/// <c>X/Y/W/H</c> are screen-local pixels (spec §8.0); <c>SrcX/SrcY</c> are the atlas UV origin
-/// of the widget's NORMAL sprite (spec §8.0 — "sub-rect is (SrcX,SrcY)..(SrcX+W,SrcY+H)").
-/// Hover and pressed frame origins are stored as separate constants in <see cref="LoginLayout"/>.
+/// <c>X/Y/W/H</c> are screen-local pixels (canvas-local, §11.0);
+/// <c>SrcX/SrcY</c> are the top-left pixel of the NORMAL sprite in the atlas DDS.
+/// Hover and pressed source origins are stored as separate constants.
 /// </summary>
 public readonly record struct WidgetRect(int X, int Y, int W, int H, int SrcX, int SrcY);
 
 /// <summary>
-/// Login-screen layout constants. spec: Docs/RE/specs/ui_system.md §8.1 (full 21-site table).
+/// Login-scene layout constants.
+/// spec: Docs/RE/specs/frontend_scenes.md §11.2 (CODE-CONFIRMED literals).
 /// </summary>
 public static class LoginLayout
 {
-    // --- Reference canvas. spec §8.0 — "Reference canvas: 1024 × 768 pixels". CODE-CONFIRMED. ---
-    public const int RefWidth = 1024;
-    public const int RefHeight = 768;
-
-    // --- Login form band — the GUWindow root panel on the 1024×768 canvas.
-    //     spec §8.1 — widget coordinates are *relative to their parent panel* (§8.0).
-    //     The panel's absolute position on the canvas is not in the spec; the value 110 is a
-    //     plausible prior estimate. Evidence: Quit/Help strip at y=−3 must still be on-screen,
-    //     so BandTopY > 3; banner strip at y=97 panel-local → absolu = BandTopY+97; option tabs
-    //     at y=82 panel-local. A panel top of 110 places the Quit strip at y=107 (just visible)
-    //     and the banner at y=207, which fits the legacy screenshot appearance.
-    //     // PLAUSIBLE offset (exact panel y not in spec — use BandTopY=110 as working approximation)
-    //     spec: Docs/RE/specs/ui_system.md §8.1 — coords are panel-local; §8.0 — anchor semantics.
-    public const int BandTopY = 110; // form panel top on the reference canvas — PLAUSIBLE, not in spec
-    public const int BandHeight = 398; // spec §8.1 "Root backdrop panel" h=398
-
-    // --- loginwindow_02.dds banner strip geometry.
-    //     spec §8.1 site "Intro banner" BTN7 (—,97,202,372); x is register-fed (runtime animated).
-    //     We use x=0 (panel-local left) as a static plausible approximation.
-    //     Strip is added directly to LoginScreen (not the band) at canvas-absolute position.
-    //     // PLAUSIBLE x=0 (exact runtime x not in spec)
-    //     spec: Docs/RE/specs/ui_system.md §8.1 "Intro banner (—,97,202,372)". CODE-CONFIRMED dims.
-    public const int BannerStripX = 0; // PLAUSIBLE (register-fed x not in spec)
-    public const int BannerStripLocalY = 97; // spec §8.1 y=97 panel-local. CODE-CONFIRMED.
-    public const int BannerStripW = 202; // spec §8.1 w=202. CODE-CONFIRMED.
-    public const int BannerStripH = 372; // spec §8.1 h=372. CODE-CONFIRMED.
-
-    // --- Form backing geometry — covers the widget cluster (x=380..810, y=−10..400 panel-local).
-    //     No dedicated panel art was recovered; this is a plausible solid backing.
-    //     Spec widget cluster: x range = 390..706 (AccountBox..SaveIdCheck+label), y range = −3..205.
-    //     We pad slightly for visual comfort: x=370, y=−10, w=430, h=220.
-    //     // PLAUSIBLE backing (art not in spec)
-    public const int FormBackingX = 370; // left edge, panel-local, covers form cluster
-    public const int FormBackingY = -10; // top edge, panel-local (Quit strip is at y=-3)
-    public const int FormBackingW = 430; // covers x=370..800 (ID/PW/OK/ServerList/SaveId)
-    public const int FormBackingH = 220; // covers y=-10..210 (all form widgets)
-
-    // Form backing colour — parchment-tinted panel backing behind the form widget cluster.
-    // Must clearly contrast with the full-canvas black backdrop (0.06, 0.05, 0.08).
-    // We use a mid-tone brown (approximately #6B4A2A) that reads as parchment/wood panel and
-    // provides enough contrast for button textures and text to be legible.
-    // // PLAUSIBLE colour (no panel art in spec — legacy used a DDS chrome sub-rect not yet recovered)
-    // global::Godot.Color avoids CS0234 namespace collision with MartialHeroes.Client.Godot.*
-    // spec: CLAUDE.md "Known Godot Pitfalls — Namespace collision".
-    public static readonly global::Godot.Color FormBackingColor = new(0.30f, 0.20f, 0.12f, 0.90f);
-
     // =========================================================================
-    // Atlas path constants. spec §9.1 login asset manifest. CODE-CONFIRMED.
+    // Reference canvas (§11.0). CODE-CONFIRMED.
     // =========================================================================
 
-    // Primary form atlas: OK/Login, Server-list, ID/PW textboxes, Save-ID checkbox, Quit/Help.
-    // spec: Docs/RE/specs/ui_system.md §8.1 "Atlas assignment" table — CODE-CONFIRMED.
+    public const int RefWidth = 1024; // spec §11.0 "design canvas 1024×768". CODE-CONFIRMED.
+    public const int RefHeight = 768; // spec §11.0. CODE-CONFIRMED.
+
+    // =========================================================================
+    // Atlas VFS paths (§11.1). CODE-CONFIRMED paths; dims SAMPLE-VERIFIED.
+    // =========================================================================
+
+    // A — login background art + stone chrome + baked Korean plates + gold confirm button.
+    // Format: DXT2 (premultiplied alpha). spec §11.1 "login_slice1.dds, 1024×1024, DXT2". CODE-CONFIRMED.
     public const string AtlasLoginSlice1 = "data/ui/login_slice1.dds";
 
-    // Option/tab buttons, server name-strip, decorative elements.
-    // spec: Docs/RE/specs/ui_system.md §9.1 CODE-CONFIRMED.
+    // B — main panel chrome, listbox frame, scroll arrows, server-row buttons, confirm buttons.
+    // Also the char-select frame atlas (shared). Format: DXT5. spec §11.1. CODE-CONFIRMED.
     public const string AtlasLoginWindow = "data/ui/loginwindow.dds";
 
-    // Panning intro banner strip (backdrop hero art).
-    // spec: Docs/RE/specs/ui_system.md §9.1 CODE-CONFIRMED.
-    public const string AtlasLoginWindow02 = "data/ui/loginwindow_02.dds";
-
-    // Shared popup/button chrome — quit-confirm modal.
-    // spec: Docs/RE/specs/ui_system.md §8.3, §9.1 CODE-CONFIRMED.
+    // C — shared dialog chrome (notice/error/quit panels) and PIN modal frame.
+    // spec §11.1 "InventWindow.dds". CODE-CONFIRMED.
     public const string AtlasInventWindow = "data/ui/inventwindow.dds";
 
+    // D — server-list parchment scroll panel + channel-selector tab blocks.
+    // Format: DXT2. spec §11.1 "loginwindow_02.dds, 1024×1024, DXT2". CODE-CONFIRMED.
+    public const string AtlasLoginWindow02 = "data/ui/loginwindow_02.dds";
+
+    // Cursor atlas. spec §11.1 "data/cursor/stand.dds, 32×32, DXT2". CODE-CONFIRMED.
+    public const string AtlasCursor = "data/cursor/stand.dds";
+
     // =========================================================================
-    // Widget rects — dest (x,y,w,h) + NORMAL atlas origin (srcX,srcY).
-    // All coordinates are panel-local (relative to the form band origin).
-    // spec: Docs/RE/specs/ui_system.md §8.1 table — CODE-CONFIRMED.
+    // §11.2a Upper window — main panel, server listbox, scroll controls. CODE-CONFIRMED.
     // =========================================================================
 
-    // --- ID / account textbox — @ (390,32) 102×13, src (615,404), IME slot 16, maxlen 6. ---
-    // spec: §8.1 site "ID/account textbox"; atlas login_slice1.dds. CODE-CONFIRMED.
-    public static readonly WidgetRect AccountBox = new(390, 32, 102, 13, 615, 404);
+    // B@(0,110,1024,490) src(0,0) — main background panel art.
+    // spec §11.2a "Main panel art". CODE-CONFIRMED.
+    public static readonly WidgetRect MainPanel = new(0, 110, 1024, 490, 0, 0);
 
-    // --- Password textbox — @ (568,32) 102×13, src (615,404), IME slot 12, maxlen 129, masked. ---
-    // spec: §8.1 site "Password textbox"; atlas login_slice1.dds. CODE-CONFIRMED.
-    public static readonly WidgetRect PasswordBox = new(568, 32, 102, 13, 615, 404);
+    // B@(270,85,483,490) src(0,490) — server dropdown / listbox container.
+    // spec §11.2a "Server dropdown / listbox container". CODE-CONFIRMED.
+    public static readonly WidgetRect ServerListbox = new(270, 85, 483, 490, 0, 490);
 
-    // --- Save-ID checkbox — @ (694,86) 13×13. ---
-    //   NORMAL/unchecked src: (717,398)
-    //   PRESSED/checked  src: (730,398)   (spec §8.1 — "checked state = PRESSED frame")
-    //   atlas: login_slice1.dds.  ACTION: 104 (`h`). CODE-CONFIRMED.
-    public static readonly WidgetRect SaveIdCheck = new(694, 86, 13, 13, 717, 398);
-    public const int SaveIdCheckedSrcX = 730; // PRESSED (checked) frame atlas X
-    public const int SaveIdCheckedSrcY = 398; // PRESSED (checked) frame atlas Y
-    public const int ActionSaveId = 104; // spec §8.1 action table CODE-CONFIRMED
+    // B@(467,86,13,10) src(483,490) — list scroll-up arrow, action 106.
+    // spec §11.2a "List scroll-up arrow". CODE-CONFIRMED.
+    public static readonly WidgetRect ScrollUpArrow = new(467, 86, 13, 10, 483, 490);
 
-    // --- OK / Login button (7-state) — @ (456,64) 112×39. ---
-    //   NORMAL  src: (266,398)
-    //   HOVER   src: (490,398)
-    //   PRESSED src: (490,398)   (HOVER == PRESSED per spec §8.1 table)
-    //   atlas: login_slice1.dds.  ACTION: 103 (`g`). CODE-CONFIRMED.
-    public static readonly WidgetRect OkButton = new(456, 64, 112, 39, 266, 398);
-    public const int OkHoverSrcX = 490;
-    public const int OkHoverSrcY = 398;
-    public const int ActionOk = 103; // spec §8.1 action table CODE-CONFIRMED
+    // B@(467,455,13,10) src(505,490) — list scroll-down arrow, action 107.
+    // spec §11.2a "List scroll-down arrow". CODE-CONFIRMED.
+    public static readonly WidgetRect ScrollDownArrow = new(467, 455, 13, 10, 505, 490);
 
-    // --- Server-list button (7-state) — @ (456,166) 112×39. ---
-    //   NORMAL  src: (154,398)
-    //   HOVER   src: (378,398)
-    //   PRESSED src: (378,398)   (HOVER == PRESSED per spec §8.1 table)
-    //   atlas: login_slice1.dds.  ACTION: 102 (`f`). CODE-CONFIRMED.
-    public static readonly WidgetRect ServerListButton = new(456, 166, 112, 39, 154, 398);
-    public const int ServerListHoverSrcX = 378;
-    public const int ServerListHoverSrcY = 398;
-    public const int ActionServerList = 102; // spec §8.1 action table CODE-CONFIRMED
+    // B@(469,98,9,9) src(496,490) — scrollbar thumb, action 108.
+    // spec §11.2a "Scrollbar thumb". CODE-CONFIRMED.
+    public static readonly WidgetRect ScrollThumb = new(469, 98, 9, 9, 496, 490);
 
-    // --- Quit/Help strip button (7-state) — @ (456,-3) 111×38. ---
-    //   Y coordinate is -3: CODE-CONFIRMED from the widget-sweep literal dump.
-    //   spec: Docs/RE/specs/ui_system.md §12 open item 1 RESOLVED: Y = -3.
-    //   NORMAL  src: (792,398)
-    //   HOVER   src: (602,416)
-    //   PRESSED src: (602,416)   (HOVER == PRESSED per spec §8.1 table)
-    //   atlas: login_slice1.dds.  ACTION: 105 (`i`). CODE-CONFIRMED.
-    public static readonly WidgetRect QuitButton = new(456, -3, 111, 38, 792, 398);
-    public const int QuitHoverSrcX = 602;
-    public const int QuitHoverSrcY = 416;
-    public const int ActionQuit = 105; // spec §8.1 action table CODE-CONFIRMED
+    // B@(207,44,70,17) src(70,980) — listbox header / selection bar.
+    // spec §11.2a "Listbox header / selection bar". CODE-CONFIRMED.
+    public static readonly WidgetRect ListboxHeader = new(207, 44, 70, 17, 70, 980);
 
-    // --- Option/tab button 1 (7-state) — @ (40,82) 110×38. ---
-    //   NORMAL  src: (520,492)   — corrected from earlier spec (was wrong); CODE-CONFIRMED.
-    //   HOVER   src: (635,492)
-    //   PRESSED src: (520,492)   (PRESSED == NORMAL per spec §8.1 table)
-    //   atlas: loginwindow.dds.  ACTION: 111 (`o`). CODE-CONFIRMED.
-    public static readonly WidgetRect OptionTab1 = new(40, 82, 110, 38, 520, 492);
-    public const int OptionTab1HoverSrcX = 635;
-    public const int OptionTab1HoverSrcY = 492;
-    public const int ActionOptionTab1 = 111; // spec §8.1 CODE-CONFIRMED
+    // =========================================================================
+    // §11.2b Background + two channel-selector blocks. CODE-CONFIRMED.
+    // =========================================================================
 
-    // --- Option/tab button 2 (7-state) — @ (164,82) 110×38. ---
-    //   NORMAL  src: (750,492)   — corrected from earlier spec; CODE-CONFIRMED.
-    //   HOVER   src: (865,492)
-    //   PRESSED src: (750,492)   (PRESSED == NORMAL per spec §8.1 table)
-    //   atlas: loginwindow.dds.  ACTION: 112 (`p`). CODE-CONFIRMED.
-    public static readonly WidgetRect OptionTab2 = new(164, 82, 110, 38, 750, 492);
-    public const int OptionTab2HoverSrcX = 865;
-    public const int OptionTab2HoverSrcY = 492;
-    public const int ActionOptionTab2 = 112; // spec §8.1 CODE-CONFIRMED
+    // A@(0,0,1024,398) — full background art panel (below the form band).
+    // spec §11.2b "Full background art panel". CODE-CONFIRMED.
+    public static readonly WidgetRect BackgroundPanel = new(0, 0, 1024, 398, 0, 0);
 
-    // --- Quit-confirm modal chrome (InventWindow.dds). ---
-    //   Shared 340×190 chrome at src (318,647). spec §8.3 CODE-CONFIRMED.
-    public const int ModalChromeSrcX = 318;
-    public const int ModalChromeSrcY = 647;
+    // =========================================================================
+    // §11.2c Decoration sprites + server-row select buttons. CODE-CONFIRMED.
+    // =========================================================================
+
+    // B@(0,0,60,39) src(500,786) — 3x small badges / arrows.
+    // spec §11.2c "3 x small badges / arrows". CODE-CONFIRMED.
+    public static readonly WidgetRect SmallBadges = new(0, 0, 60, 39, 500, 786);
+
+    // B server-row select buttons: 8 × (47×18) starting at X=13, Y=66, X-step=+47.
+    // NORMAL src (596,985), HOVER/PRESSED src (643,985). Actions 115..122.
+    // spec §11.2c "8 x server-row select". CODE-CONFIRMED.
+    public const int ServerRowBtnX0 = 13; // starting X
+    public const int ServerRowBtnY = 66; // Y for all 8 rows
+    public const int ServerRowBtnW = 47; // width
+    public const int ServerRowBtnH = 18; // height
+    public const int ServerRowBtnXStep = 47; // X step between rows
+    public const int ServerRowBtnNormalSrcX = 596; // NORMAL src X
+    public const int ServerRowBtnNormalSrcY = 985; // NORMAL src Y
+    public const int ServerRowBtnHoverSrcX = 643; // HOVER/PRESSED src X
+    public const int ServerRowBtnHoverSrcY = 985; // HOVER/PRESSED src Y
+    public const int ServerRowActionBase = 115; // action id for first row
+
+    // Large action button (the "확인" confirm/gold button in the upper right).
+    // A@(456,-3,111,38) NORMAL src(792,398), HOVER/PRESSED src(602,416).
+    // spec §11.2c "Large action button". CODE-CONFIRMED.
+    public static readonly WidgetRect LargeActionBtn = new(456, -3, 111, 38, 792, 398);
+    public const int LargeActionHoverSrcX = 602; // HOVER/PRESSED src X
+    public const int LargeActionHoverSrcY = 416; // HOVER/PRESSED src Y
+
+    // Large action button caption face plate.
+    // A@(407,-3,210,70) src(743,398) — image (gold plate baked art).
+    // spec §11.2c "Its caption/face image". CODE-CONFIRMED.
+    public static readonly WidgetRect LargeActionFacePlate = new(407, -3, 210, 70, 743, 398);
+
+    // =========================================================================
+    // §11.2d Notice / error dialogs. CODE-CONFIRMED.
+    // =========================================================================
+
+    // Shared dialog chrome: C@(342,289,340,190) src(318,647).
+    // spec §11.2d "Dialog #1 panel (notice)" — same rect for both dialogs. CODE-CONFIRMED.
+    public const int ModalChromeX = 342;
+    public const int ModalChromeY = 289;
     public const int ModalChromeW = 340;
     public const int ModalChromeH = 190;
+    public const int ModalChromeSrcX = 318;
+    public const int ModalChromeSrcY = 647;
 
-    // Quit-confirm "Yes" button #1 — @ (120,136) 113×40, NORMAL (302,900), HOVER (415,900).
-    // spec: §8.1 site "Quit-confirm Yes #1"; atlas InventWindow.dds. ACTION: 113. CODE-CONFIRMED.
+    // Dialog #1 OK button — C@(120,136,113,40) NORMAL src(302,900), HOVER src(415,900), action 113.
+    // spec §11.2d "Dialog #1 OK". CODE-CONFIRMED.
     public static readonly WidgetRect QuitConfirmYes1 = new(120, 136, 113, 40, 302, 900);
     public const int QuitConfirmYes1HoverSrcX = 415;
     public const int QuitConfirmYes1HoverSrcY = 900;
-    public const int ActionQuitConfirmYes1 = 113;
+    public const int ActionQuitConfirmYes1 = 113; // spec §1.2. CODE-CONFIRMED.
 
-    // Quit-confirm "Yes" button #2 — @ (120,136) 113×40, NORMAL (302,860), HOVER (415,860).
-    // spec: §8.1 site "Quit-confirm Yes #2"; atlas InventWindow.dds. ACTION: 114. CODE-CONFIRMED.
+    // Dialog #2 OK button — C@(120,136,113,40) NORMAL src(302,860), HOVER src(415,860), action 114.
+    // spec §11.2d "Dialog #2 OK". CODE-CONFIRMED.
     public static readonly WidgetRect QuitConfirmYes2 = new(120, 136, 113, 40, 302, 860);
     public const int QuitConfirmYes2HoverSrcX = 415;
     public const int QuitConfirmYes2HoverSrcY = 860;
-    public const int ActionQuitConfirmYes2 = 114;
+    public const int ActionQuitConfirmYes2 = 114; // spec §1.2. CODE-CONFIRMED.
 
     // =========================================================================
-    // Font slot pixel heights. spec §6.2 — D3DX Height column. CODE-CONFIRMED.
+    // §11.2e Bottom login form (core fidelity target). CODE-CONFIRMED.
     // =========================================================================
 
-    // Slot 2: DotumChe h=32, w=16, weight 800 — large bold title (see §6.2 slot 2).
-    public const int FontTitleHeight = 32;
+    // Bottom login-bar panel: A@(0, 326*H/768, 1024, 442) src(0,582).
+    // The Y is height-scaled at runtime. spec §11.2e "Bottom login-bar panel". CODE-CONFIRMED.
+    // SrcY = 582 in login_slice1.dds.
+    public const int BottomBarW = 1024; // spec §11.2e
+    public const int BottomBarH = 442; // spec §11.2e
+    public const int BottomBarSrcX = 0; // spec §11.2e
 
-    // Slot 0: DotumChe h=12, w=6 — default small fixed (body text, labels).
-    public const int FontBodyHeight = 12;
+    public const int BottomBarSrcY = 582; // spec §11.2e
 
-    // Slot 4: DotumChe h=12, w=6, weight 800 — used for button captions (bold small).
-    public const int FontLabelHeight = 12;
+    // Runtime Y: (326 × screenHeight) / 768  — but on a fixed 1024×768 canvas, this is always 326.
+    // We use 326 as the canvas-local Y for the 1024×768 reference.
+    public const int BottomBarCanvasY = 326; // = 326 × 768 / 768 — canvas-local Y. CODE-CONFIRMED.
 
-    // --- Textbox render height override.
-    //     The spec-recovered size is (102,13) which is too small for a usable Godot LineEdit.
-    //     We render textboxes at 22px height (the legacy drew text ON TOP of the atlas frame at the
-    //     font height, not inside a clipped 13px box — see LoginScreen.cs MakeTextbox comment).
-    //     The x/width (102) and position (x,y) remain spec-exact.
-    //     // PRESENTATION OVERRIDE — legacy drew text over atlas, not inside a clipped 13px box.
-    public const int TextboxRenderH = 22; // render height for LineEdit widgets (spec=13; not clipped)
+    // Confirm button (gold 확인) — A@(456,166,112,39) NORMAL src(154,398), HOVER/PRESSED src(378,398).
+    // Action 102 (server-list button in §1.2). spec §11.2e. CODE-CONFIRMED.
+    // NOTE: the spec §11.2e labels this "Confirm button", action 102 — this is actually the
+    // "Server-list button" from §1.2. The gold "확인" baked art is the background DDS label.
+    public static readonly WidgetRect ConfirmButton = new(456, 166, 112, 39, 154, 398);
+    public const int ConfirmHoverSrcX = 378;
+    public const int ConfirmHoverSrcY = 398;
+    public const int ActionConfirm = 102; // spec §1.2 "Server-list button". CODE-CONFIRMED.
+
+    // Confirm-button face plate (baked art overlay on the gold button).
+    // A@(265,0,494,113) src(0,469). spec §11.2e. CODE-CONFIRMED.
+    public static readonly WidgetRect ConfirmFacePlate = new(265, 0, 494, 113, 0, 469);
+
+    // Account-label caption art (baked Korean "아이디" plate).
+    // A@(340,30,38,13) src(0,398) — baked art, no runtime text. spec §11.2e. CODE-CONFIRMED.
+    public static readonly WidgetRect AccountLabelArt = new(340, 30, 38, 13, 0, 398);
+
+    // Password-label caption art (baked Korean "비밀번호" plate).
+    // A@(507,30,49,13) src(38,398) — baked art. spec §11.2e. CODE-CONFIRMED.
+    public static readonly WidgetRect PasswordLabelArt = new(507, 30, 49, 13, 38, 398);
+
+    // Small decoration plate (baked art).
+    // A@(619,86,67,13) src(87,398). spec §11.2e. CODE-CONFIRMED.
+    public static readonly WidgetRect SmallDecorPlate = new(619, 86, 67, 13, 87, 398);
+
+    // ID input field — A@(390,32,102,13) src(615,404), max length 16 (UI cap, §1.3). action 109.
+    // spec §11.2e "ID input field". CODE-CONFIRMED.
+    public static readonly WidgetRect AccountBox = new(390, 32, 102, 13, 615, 404);
+    public const int ActionFocusId = 109; // spec §1.2. CODE-CONFIRMED.
+    public const int IdMaxLength = 16; // spec §1.3 "max length 16 (UI cap)". CODE-CONFIRMED.
+
+    // Password input field — A@(568,32,102,13) src(615,404), max length 12, masked. action 110.
+    // spec §11.2e "Password input field". CODE-CONFIRMED.
+    public static readonly WidgetRect PasswordBox = new(568, 32, 102, 13, 615, 404);
+    public const int ActionFocusPw = 110; // spec §1.2. CODE-CONFIRMED.
+    public const int PwMaxLength = 12; // spec §1.3 "max length 12, masked". CODE-CONFIRMED.
+
+    // Save-ID checkbox — A@(694,86,13,13). NORMAL src(717,398), PRESSED/checked src(730,398). action 104.
+    // spec §11.2e "Save-ID checkbox". CODE-CONFIRMED.
+    public static readonly WidgetRect SaveIdCheck = new(694, 86, 13, 13, 717, 398);
+    public const int SaveIdCheckedSrcX = 730; // PRESSED (checked) src X. spec §11.2e.
+    public const int SaveIdCheckedSrcY = 398; // PRESSED (checked) src Y.
+    public const int ActionSaveId = 104; // spec §1.2. CODE-CONFIRMED.
+
+    // Secondary bottom button (register / find-password).
+    // A@(456,64,112,39) NORMAL src(266,398), HOVER/PRESSED src(490,398). action 103.
+    // spec §11.2e "Secondary bottom button". CODE-CONFIRMED.
+    public static readonly WidgetRect OkButton = new(456, 64, 112, 39, 266, 398);
+    public const int OkHoverSrcX = 490;
+    public const int OkHoverSrcY = 398;
+    public const int ActionOk = 103; // spec §1.2 "OK / Login button". CODE-CONFIRMED.
 
     // =========================================================================
-    // msg.xdb caption ids. spec §10 / §1.9. CODE-CONFIRMED (ids); captions VFS-only.
+    // §11.2f Trailing controls + quit/error dialogs. CODE-CONFIRMED.
     // =========================================================================
 
-    // Login form static labels: 4001–4022 range.
-    // spec: Docs/RE/specs/ui_system.md §10 — "4001–4022: login form static label captions". CODE-CONFIRMED.
-    public const uint MsgLabelRangeFirst = 4001;
-    public const uint MsgLabelRangeLast = 4022;
+    // Option/tab button 1 — B@(40,82,110,38). NORMAL src(520,492). HOVER src(635,492). action 111.
+    // spec §11.2f "Button". CODE-CONFIRMED.
+    public static readonly WidgetRect OptionTab1 = new(40, 82, 110, 38, 520, 492);
+    public const int OptionTab1HoverSrcX = 635;
+    public const int OptionTab1HoverSrcY = 492;
+    public const int ActionOptionTab1 = 111; // spec §1.2. CODE-CONFIRMED.
 
-    // Quit-confirm prompts — shown in the modal popup.
-    // spec: Docs/RE/specs/ui_system.md §10 — "4023 / 4024: login quit-confirm prompts". CODE-CONFIRMED.
+    // Option/tab button 2 — B@(164,82,110,38). NORMAL src(750,492). HOVER src(865,492). action 112.
+    // spec §11.2f "Button". CODE-CONFIRMED.
+    public static readonly WidgetRect OptionTab2 = new(164, 82, 110, 38, 750, 492);
+    public const int OptionTab2HoverSrcX = 865;
+    public const int OptionTab2HoverSrcY = 492;
+    public const int ActionOptionTab2 = 112; // spec §1.2. CODE-CONFIRMED.
+
+    // Image plate decorations (baked art).
+    // A@(67,48,178,13) src(0,437). spec §11.2f. CODE-CONFIRMED.
+    public static readonly WidgetRect DecoPlate1 = new(67, 48, 178, 13, 0, 437);
+
+    // A@(0,100,313,32) src(289,437). spec §11.2f. CODE-CONFIRMED.
+    public static readonly WidgetRect DecoPlate2 = new(0, 100, 313, 32, 289, 437);
+
+    // =========================================================================
+    // §11.3 PIN modal. CODE-CONFIRMED layout.
+    // =========================================================================
+
+    // Modal panel rect on the canvas: (347,173,329,422). spec §11.3. CODE-CONFIRMED.
+    public const int PinModalX = 347;
+    public const int PinModalY = 173;
+    public const int PinModalW = 329;
+    public const int PinModalH = 422;
+
+    // password.dds atlas path (§11.1). 1024×1024 DXT3. CODE-CONFIRMED.
+    public const string AtlasPassword = "data/ui/password.dds";
+
+    // Keypad tile layout (panel-local). spec §11.3a. CODE-CONFIRMED.
+    // Tile X: 55*(p%5)+28  → columns 28, 83, 138, 193, 248.
+    // Tile Y: 170 for top row (p<5), 230 for bottom row (p>=5).
+    // Tile size: 52×52. Column spacing: 55. Row spacing: 60.
+    public const int PinKeypadColSpacing = 55; // spec §11.3a. CODE-CONFIRMED.
+    public const int PinKeypadCol0X = 28; // spec §11.3a. CODE-CONFIRMED.
+    public const int PinKeypadRow0Y = 170; // spec §11.3a. CODE-CONFIRMED.
+    public const int PinKeypadRow1Y = 230; // spec §11.3a. CODE-CONFIRMED.
+    public const int PinKeypadTileW = 52; // spec §11.3a. CODE-CONFIRMED.
+    public const int PinKeypadTileH = 52; // spec §11.3a. CODE-CONFIRMED.
+
+    // Digit glyph source columns in password.dds. spec §11.3b. CODE-CONFIRMED.
+    // For digit d: glyph row = d*52. State columns: normal=560, hover=664, pressed=612.
+    public const int PinDigitNormalSrcX = 560; // spec §11.3b. CODE-CONFIRMED.
+    public const int PinDigitHoverSrcX = 664; // spec §11.3b. CODE-CONFIRMED.
+    public const int PinDigitPressedSrcX = 612; // spec §11.3b. CODE-CONFIRMED.
+    public const int PinDigitRowHeight = 52; // per digit d: srcY = d*52. spec §11.3b. CODE-CONFIRMED.
+
+    // Reset button (tag 11): panel-local (243,133,58,30). spec §11.3d. CODE-CONFIRMED.
+    // password.dds src: normal(663,8), hover(663,88), pressed(663,48).
+    public const int PinResetX = 243; // spec §11.3d. CODE-CONFIRMED.
+    public const int PinResetY = 133; // spec §11.3d. CODE-CONFIRMED.
+    public const int PinResetW = 58; // spec §11.3d. CODE-CONFIRMED.
+    public const int PinResetH = 30; // spec §11.3d. CODE-CONFIRMED.
+    public const int PinResetNSrcX = 663;
+    public const int PinResetNSrcY = 8; // normal. spec §11.3d.
+    public const int PinResetHSrcX = 663;
+    public const int PinResetHSrcY = 88; // hover.  spec §11.3d.
+    public const int PinResetPSrcX = 663;
+    public const int PinResetPSrcY = 48; // pressed.spec §11.3d.
+    public const int PinTagReset = 11; // spec §11.3d. CODE-CONFIRMED.
+
+    // OK button (tag 12): panel-local (90,290,154,58). spec §11.3d. CODE-CONFIRMED.
+    // password.dds src: normal(330,0), hover(330,116), pressed(330,58).
+    public const int PinOkX = 90; // spec §11.3d. CODE-CONFIRMED.
+    public const int PinOkY = 290; // spec §11.3d. CODE-CONFIRMED.
+    public const int PinOkW = 154; // spec §11.3d. CODE-CONFIRMED.
+    public const int PinOkH = 58; // spec §11.3d. CODE-CONFIRMED.
+    public const int PinOkNSrcX = 330;
+    public const int PinOkNSrcY = 0; // normal. spec §11.3d.
+    public const int PinOkHSrcX = 330;
+    public const int PinOkHSrcY = 116; // hover.  spec §11.3d.
+    public const int PinOkPSrcX = 330;
+    public const int PinOkPSrcY = 58; // pressed.spec §11.3d.
+    public const int PinTagOk = 12; // spec §11.3d. CODE-CONFIRMED.
+
+    // Cancel button (tag 13): panel-local (90,350,154,58). spec §11.3d. CODE-CONFIRMED.
+    // password.dds src: normal(486,0), hover(486,116), pressed(486,58).
+    public const int PinCancelX = 90; // spec §11.3d. CODE-CONFIRMED.
+    public const int PinCancelY = 350; // spec §11.3d. CODE-CONFIRMED.
+    public const int PinCancelW = 154; // spec §11.3d. CODE-CONFIRMED.
+    public const int PinCancelH = 58; // spec §11.3d. CODE-CONFIRMED.
+    public const int PinCancelNSrcX = 486;
+    public const int PinCancelNSrcY = 0; // normal. spec §11.3d.
+    public const int PinCancelHSrcX = 486;
+    public const int PinCancelHSrcY = 116; // hover.  spec §11.3d.
+    public const int PinCancelPSrcX = 486;
+    public const int PinCancelPSrcY = 58; // pressed.spec §11.3d.
+    public const int PinTagCancel = 13; // spec §11.3d. CODE-CONFIRMED.
+
+    // PIN capacity. spec §1.4a / login_flow.md §4.2. RUNTIME-CONFIRMED.
+    public const int PinMaxLength = 4;
+
+    // =========================================================================
+    // §11.5b Char-select slot tab buttons (from loginwindow.dds). CODE-CONFIRMED.
+    // =========================================================================
+
+    // Slot 1 tab — (67,17,113,40). N src(675,795). P src(483,883). action 1.
+    public static readonly WidgetRect CharSlot1Tab = new(67, 17, 113, 40, 675, 795);
+    public const int CharSlot1PressedSrcX = 483;
+    public const int CharSlot1PressedSrcY = 883;
+    public const int ActionCharSlot1 = 1;
+
+    // Slot 2 tab — (232,7,113,40). N src(640,742). P src(483,923). action 2.
+    public static readonly WidgetRect CharSlot2Tab = new(232, 7, 113, 40, 640, 742);
+    public const int CharSlot2PressedSrcX = 483;
+    public const int CharSlot2PressedSrcY = 923;
+    public const int ActionCharSlot2 = 2;
+
+    // Slot 3 tab — (393,17,113,40). N src(625,691). P src(483,963). action 3.
+    public static readonly WidgetRect CharSlot3Tab = new(393, 17, 113, 40, 625, 691);
+    public const int CharSlot3PressedSrcX = 483;
+    public const int CharSlot3PressedSrcY = 963;
+    public const int ActionCharSlot3 = 3;
+
+    // =========================================================================
+    // §11.5c Char-select Create/Delete/Enter buttons (from loginwindow.dds). CODE-CONFIRMED.
+    // All buttons are 59×20.
+    // =========================================================================
+
+    // Create — (130,112,59,20). N src(0,1004). P src(59,1004). action 4.
+    public static readonly WidgetRect CharCreateBtn = new(130, 112, 59, 20, 0, 1004);
+    public const int CharCreatePressedSrcX = 59;
+    public const int CharCreatePressedSrcY = 1004;
+    public const int ActionCharCreate = 4; // spec §4 / §11.5c. CODE-CONFIRMED.
+
+    // Delete — (42,112,59,20). N src(118,1004). P src(177,1004). action 5.
+    public static readonly WidgetRect CharDeleteBtn = new(42, 112, 59, 20, 118, 1004);
+    public const int CharDeletePressedSrcX = 177;
+    public const int CharDeletePressedSrcY = 1004;
+    public const int ActionCharDelete = 5; // spec §5 / §11.5c. CODE-CONFIRMED.
+
+    // Enter — (112,112,59,20). N src(236,1004). P src(295,1004). action 6.
+    public static readonly WidgetRect CharEnterBtn = new(112, 112, 59, 20, 236, 1004);
+    public const int CharEnterPressedSrcX = 295;
+    public const int CharEnterPressedSrcY = 1004;
+    public const int ActionCharEnter = 6; // spec §7 / §11.5c. CODE-CONFIRMED.
+
+    // =========================================================================
+    // msg.xdb caption ids (§1.9 / §9). CODE-CONFIRMED ids; captions VFS-only.
+    // =========================================================================
+
+    // Quit-confirm prompts. spec §1.9. CODE-CONFIRMED.
     public const uint MsgQuitConfirm1 = 4023;
     public const uint MsgQuitConfirm2 = 4024;
 
-    // Validation error toasts — shown when OK is pressed with bad input.
-    // spec: Docs/RE/specs/frontend_scenes.md §1.4 — "ID len < 4 → msg 4025; PW len < 1 → msg 4026". CODE-CONFIRMED.
-    public const uint MsgErrShortId = 4025; // ID/account too short (len < 4)
+    // Login validation error toasts. spec §1.4 / §1.9. CODE-CONFIRMED.
+    public const uint MsgErrShortId = 4025; // ID length < 4
     public const uint MsgErrEmptyPassword = 4026; // password empty
-
-    // Not-yet-used offline (server-list path absent), retained for completeness.
     public const uint MsgErrNoServers = 4027; // server list empty
-    public const uint MsgErrConnectFailed = 4028; // server-list connection failed
+    public const uint MsgErrConnectFail = 4028; // server-list connection failed
 
-    // Validation thresholds — CODE-CONFIRMED from frontend_scenes.md §1.4.
-    // spec: Docs/RE/specs/frontend_scenes.md §1.4 — "ID length < 4 → show msg 4025". CODE-CONFIRMED.
-    public const int MinIdLength = 4; // minimum account field length; msg 4025 if shorter
+    // Login form static labels (4001–4022 range). spec §1.9. CODE-CONFIRMED.
+    public const uint MsgLabelFirst = 4001;
+    public const uint MsgLabelLast = 4022;
 
-    // spec: Docs/RE/specs/frontend_scenes.md §1.4 — "password length < 1 → show msg 4026". CODE-CONFIRMED.
-    public const int MinPwLength = 1; // minimum password field length; msg 4026 if shorter
+    // =========================================================================
+    // Validation thresholds. spec §1.4. CODE-CONFIRMED.
+    // =========================================================================
+
+    public const int MinIdLength = 4; // ID length < 4 → msg 4025. spec §1.4. CODE-CONFIRMED.
+    public const int MinPwLength = 1; // PW length < 1 → msg 4026. spec §1.4. CODE-CONFIRMED.
+
+    // =========================================================================
+    // Font pixel heights (approximate — Korean system font substitution).
+    // The legacy client used DotumChe 12px / 16px. We use the same pt sizes.
+    // =========================================================================
+
+    public const int FontBodyHeight = 12; // body / caption labels
+    public const int FontTitleHeight = 16; // section title
+    public const int FontLabelHeight = 12; // button captions
+
+    // TextBox render height override (spec says 13px but Godot LineEdit needs ≥18px to render).
+    public const int TextboxRenderH = 22;
 }

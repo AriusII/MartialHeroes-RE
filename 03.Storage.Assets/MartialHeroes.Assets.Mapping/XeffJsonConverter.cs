@@ -8,13 +8,13 @@ namespace MartialHeroes.Assets.Mapping;
 /// Serializes a <see cref="XeffData"/> (.xeff particle effect descriptor) to a neutral JSON
 /// representation using System.Text.Json.
 ///
-/// All fields that are PARSER-CONFIRMED or CONFIRMED are emitted under their documented names.
-/// Fields marked SAMPLE-UNVERIFIED or UNRESOLVED are emitted as-is under their parser property
-/// names so that downstream tooling can access the raw data without further decoding here.
+/// All fields that are CONFIRMED or SAMPLE-VERIFIED are emitted under their documented names.
+/// Fields marked UNRESOLVED are emitted as-is under their parser property names so that
+/// downstream tooling can access the raw data without further decoding here.
 ///
 /// No engine/rendering dependency; this is a pure data serialization step.
-/// spec: Docs/RE/formats/effects.md §A.2 File Header: VERIFIED (3 real samples).
-/// spec: Docs/RE/formats/effects.md §A.3 Element Array: PARSER-CONFIRMED.
+/// spec: Docs/RE/formats/effects.md §A.2 File Header (32 bytes, CORRECTED): VERIFIED.
+/// spec: Docs/RE/formats/effects.md §A.4 Sub-Effect Block Structure: CONFIRMED.
 /// </summary>
 public static class XeffJsonConverter
 {
@@ -62,52 +62,44 @@ public static class XeffJsonConverter
     private static XeffJsonRoot MapToRoot(XeffData effect)
     {
         // spec: Docs/RE/formats/effects.md §A.2 — effect_id @ 0x00: VERIFIED.
-        // spec: Docs/RE/formats/effects.md §A.2 — element_count @ 0x04: VERIFIED.
+        // spec: Docs/RE/formats/effects.md §A.2 — sub_effect_count @ 0x04: VERIFIED.
+        // spec: Docs/RE/formats/effects.md §A.2 — type_flag @ 0x08: SAMPLE-VERIFIED.
         return new XeffJsonRoot(
             EffectId: effect.EffectId,
-            Elements: MapElements(effect.Elements));
+            SubEffectCount: effect.SubEffectCount,
+            TypeFlag: effect.TypeFlag,
+            FirstEntryCount: effect.FirstEntryCount,
+            SubEffects: MapSubEffects(effect.SubEffects));
     }
 
-    private static XeffJsonElement[] MapElements(XeffElement[] elements)
+    private static XeffJsonSubEffect[] MapSubEffects(XeffSubEffect[] subEffects)
     {
-        var result = new XeffJsonElement[elements.Length];
-        for (int i = 0; i < elements.Length; i++)
-            result[i] = MapElement(elements[i]);
+        var result = new XeffJsonSubEffect[subEffects.Length];
+        for (int i = 0; i < subEffects.Length; i++)
+            result[i] = MapSubEffect(subEffects[i]);
         return result;
     }
 
-    private static XeffJsonElement MapElement(XeffElement el)
+    private static XeffJsonSubEffect MapSubEffect(XeffSubEffect sub)
     {
-        // spec: Docs/RE/formats/effects.md §A.3.1 Group A — Emitter identity: PARSER-CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.3.2 Group B — Texture sub-array: PARSER-CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.3.3 Group C — Alpha keyframes (inverted, stored as opacity): CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.3.4 Group D — Scale channels: PARSER-CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.3.5 Group E — Animation timing: PARSER-CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.3.6 Group F — Keyframe/static-state: PARSER-CONFIRMED.
-        return new XeffJsonElement(
-            EmitterType: el.EmitterType,
-            EmitterSubtype: el.EmitterSubtype,
-            AnimFlag: el.AnimFlag,
-            TexCount: el.TexCount,
-            // FieldUnknownA — purpose UNRESOLVED; emitted raw.
-            // spec: Docs/RE/formats/effects.md §A.3.1 — field_unknown_a: PARSER-CONFIRMED (raw value).
-            FieldUnknownA: el.FieldUnknownA,
-            TextureNames: el.TextureNames,
-            // AlphaKeyframes emitted with named opacity; the parser has already applied 1 - file_value.
-            // spec: Docs/RE/formats/effects.md §A.3.3 — "in-memory value is opacity": CONFIRMED.
-            AlphaKeyframes: MapAlphaKeyframes(el.AlphaKeyframes),
-            ScaleX: el.ScaleX,
-            ScaleY: el.ScaleY,
-            ScaleZ: el.ScaleZ,
-            AnimLoop: el.AnimLoop,
-            AnimStride: el.AnimStride,
-            AnimBaseTime: el.AnimBaseTime,
-            AnimKeyframes: el.AnimKeyframes is { Length: > 0 }
-                ? MapKeyframes(el.AnimKeyframes)
-                : null,
-            StaticState: el.StaticState is not null
-                ? MapStaticState(el.StaticState)
-                : null);
+        // spec: Docs/RE/formats/effects.md §A.4.1 Name table: CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.4.2 Curve section (alpha, scaleX/Y/Z): CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.4.3 Track header (anim_loop, unknown_constant, anim_stride, anim_base_time): CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.4.4 Keyframe array (frame-0 no-index special case): CONFIRMED.
+        return new XeffJsonSubEffect(
+            EntryCount: sub.EntryCount,
+            TextureNames: sub.TextureNames,
+            AlphaKeys: MapAlphaKeys(sub.AlphaKeys),
+            ScaleX: sub.ScaleX,
+            ScaleY: sub.ScaleY,
+            ScaleZ: sub.ScaleZ,
+            AnimLoop: sub.AnimLoop,
+            // unknown_constant — value emitted raw; purpose UNRESOLVED.
+            // spec: Docs/RE/formats/effects.md §A.4.3 — unknown_constant u32 @ +1: SAMPLE-VERIFIED (value), semantics UNRESOLVED.
+            UnknownConstant: sub.UnknownConstant,
+            AnimStride: sub.AnimStride,
+            AnimBaseTime: sub.AnimBaseTime,
+            Keyframes: MapKeyframes(sub.Keyframes));
     }
 
     private static XeffJsonKeyframe[] MapKeyframes(XeffKeyframe[] kfs)
@@ -116,20 +108,17 @@ public static class XeffJsonConverter
         for (int i = 0; i < kfs.Length; i++)
         {
             XeffKeyframe kf = kfs[i];
-            // spec: Docs/RE/formats/effects.md §A.3.6 Branch A — kf_index, params, rot_x/y/z_deg: PARSER-CONFIRMED.
-            // spec: Docs/RE/formats/effects.md §A.3.7 — velocity Vec3 (Params[0..2]): HIGH.
-            // spec: Docs/RE/formats/effects.md §A.3.7 — size Vec3 (Params[3..5]): HIGH.
-            // spec: Docs/RE/formats/effects.md §A.4 — Rotation quaternion (Euler degrees → quat): CONFIRMED.
-            // Params array is kept for backward-compat / fallback for fields not yet resolved.
+            // spec: Docs/RE/formats/effects.md §A.4.4 — kf_index, velocity Vec3, size Vec3, rotation degrees: CONFIRMED.
+            // spec: Docs/RE/formats/effects.md §A.8 Resolved semantics: HIGH.
+            // spec: Docs/RE/formats/effects.md §A.7 Rotation Encoding Note: CONFIRMED.
             Vec3 vel = kf.Velocity;
             Vec3 sz = kf.Size;
             Quat rot = kf.Rotation;
             result[i] = new XeffJsonKeyframe(
                 KfIndex: kf.KfIndex,
-                Params: kf.Params,
-                Velocity: new float[] { vel.X, vel.Y, vel.Z },
-                Size: new float[] { sz.X, sz.Y, sz.Z },
-                Rotation: new float[] { rot.X, rot.Y, rot.Z, rot.W },
+                Velocity: [vel.X, vel.Y, vel.Z],
+                Size: [sz.X, sz.Y, sz.Z],
+                Rotation: [rot.X, rot.Y, rot.Z, rot.W],
                 RotXDeg: kf.RotXDeg,
                 RotYDeg: kf.RotYDeg,
                 RotZDeg: kf.RotZDeg);
@@ -138,42 +127,22 @@ public static class XeffJsonConverter
         return result;
     }
 
-    private static XeffJsonStaticState MapStaticState(XeffStaticState s)
-    {
-        // spec: Docs/RE/formats/effects.md §A.3.6 Branch B — 6 params + optional rot (emitter_type==2): PARSER-CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.3.7 — velocity Vec3 (Params[0..2]): HIGH.
-        // spec: Docs/RE/formats/effects.md §A.3.7 — size Vec3 (Params[3..5]): HIGH.
-        // spec: Docs/RE/formats/effects.md §A.4 — Rotation quaternion (identity when emitter_type!=2): CONFIRMED.
-        // Params array kept as fallback.
-        Vec3 vel = s.Velocity;
-        Vec3 sz = s.Size;
-        Quat rot = s.Rotation;
-        return new XeffJsonStaticState(
-            Params: s.Params,
-            Velocity: new float[] { vel.X, vel.Y, vel.Z },
-            Size: new float[] { sz.X, sz.Y, sz.Z },
-            Rotation: new float[] { rot.X, rot.Y, rot.Z, rot.W },
-            RotXDeg: s.RotXDeg,
-            RotYDeg: s.RotYDeg,
-            RotZDeg: s.RotZDeg);
-    }
-
     /// <summary>
-    /// Converts per-keyframe alpha values (stored inverted in the file) to opacity values.
-    /// spec: Docs/RE/formats/effects.md §A.3.3 — "Stored inverted: 0.0 = opaque, 1.0 = transparent.
-    ///   In-memory value is opacity (0.0 = transparent, 1.0 = opaque)." CONFIRMED.
-    /// The parser already stores the inverted (in-memory = opacity) form in AlphaKeyframes.
-    /// We emit both the raw (file) value and the opacity for consumer clarity.
+    /// Converts per-curve alpha values (stored inverted in the file: 0.0=opaque, 1.0=transparent)
+    /// to explicit opacity/file-value pairs for consumer clarity.
+    /// spec: Docs/RE/formats/effects.md §A.4.2 Pass 1 alpha — stored as 1.0−opacity: CONFIRMED.
+    /// spec: Docs/RE/formats/effects.md §A.6 Alpha Inversion Convention: CONFIRMED.
+    /// Note: the parser emits the raw file value (not pre-inverted). Inversion is a mapping concern.
     /// </summary>
-    private static XeffJsonAlpha[] MapAlphaKeyframes(float[] keyframes)
+    private static XeffJsonAlpha[] MapAlphaKeys(float[] keys)
     {
-        var result = new XeffJsonAlpha[keyframes.Length];
-        for (int i = 0; i < keyframes.Length; i++)
+        var result = new XeffJsonAlpha[keys.Length];
+        for (int i = 0; i < keys.Length; i++)
         {
-            // AlphaKeyframes is already the in-memory opacity = (1 - file_value).
-            // spec: Docs/RE/formats/effects.md §A.3.3 — "loads as 1.0 − file_value": CONFIRMED.
-            float opacity = keyframes[i]; // already converted by parser
-            result[i] = new XeffJsonAlpha(Opacity: opacity);
+            // File value is stored inverted: file=0.0 → opaque, file=1.0 → transparent.
+            // spec: Docs/RE/formats/effects.md §A.6 — "file value 0.0 means fully opaque; 1.0 means fully transparent": CONFIRMED.
+            float fileValue = keys[i];
+            result[i] = new XeffJsonAlpha(FileValue: fileValue, Opacity: 1f - fileValue);
         }
 
         return result;
@@ -186,67 +155,46 @@ public static class XeffJsonConverter
     // Root object
     private sealed record XeffJsonRoot(
         uint EffectId,
-        XeffJsonElement[] Elements);
+        uint SubEffectCount,
+        uint TypeFlag,
+        uint FirstEntryCount,
+        XeffJsonSubEffect[] SubEffects);
 
-    // One element / emitter
-    private sealed record XeffJsonElement(
-        uint EmitterType,
-        uint EmitterSubtype,
-        uint AnimFlag,
-        uint TexCount,
-        /// <summary>UNRESOLVED field; emitted raw for downstream tooling.</summary>
-        uint FieldUnknownA,
+    // One sub-effect block
+    private sealed record XeffJsonSubEffect(
+        uint EntryCount,
         string[] TextureNames,
-        // Alpha keyframes emitted as {opacity} objects (parser already holds 1-file_value).
-        // spec: Docs/RE/formats/effects.md §A.3.3 — "in-memory value is opacity": CONFIRMED.
-        XeffJsonAlpha[] AlphaKeyframes,
+        XeffJsonAlpha[] AlphaKeys,
         float[] ScaleX,
         float[] ScaleY,
         float[] ScaleZ,
         byte AnimLoop,
+        /// <summary>Constant u32 at track header +1. Observed: 67. Purpose UNRESOLVED — emitted raw.
+        /// spec: Docs/RE/formats/effects.md §A.4.3 — unknown_constant: SAMPLE-VERIFIED value, semantics UNRESOLVED.</summary>
+        uint UnknownConstant,
         uint AnimStride,
         uint AnimBaseTime,
-        XeffJsonKeyframe[]? AnimKeyframes,
-        XeffJsonStaticState? StaticState);
+        XeffJsonKeyframe[] Keyframes);
 
     /// <summary>
-    /// One alpha keyframe entry. Emits <c>opacity</c> (the in-memory / render-time value).
-    /// spec: Docs/RE/formats/effects.md §A.3.3 — "in-memory value is opacity (0=transparent,1=opaque)": CONFIRMED.
+    /// One alpha key entry. Emits both the raw file value and the derived opacity.
+    /// spec: Docs/RE/formats/effects.md §A.6 Alpha Inversion Convention — file 0.0=opaque, 1.0=transparent: CONFIRMED.
     /// </summary>
-    private sealed record XeffJsonAlpha(float Opacity);
+    private sealed record XeffJsonAlpha(float FileValue, float Opacity);
 
-    // Animated keyframe — velocity/size/rotation are now named; params kept as fallback.
-    // spec: Docs/RE/formats/effects.md §A.3.7 — velocity Vec3 (Params[0..2]): HIGH.
-    // spec: Docs/RE/formats/effects.md §A.3.7 — size Vec3 (Params[3..5]): HIGH.
-    // spec: Docs/RE/formats/effects.md §A.4  — rotation quaternion (from Euler degrees): CONFIRMED.
+    // One keyframe — velocity/size/rotation are named.
+    // spec: Docs/RE/formats/effects.md §A.4.4 nine-float layout: CONFIRMED.
+    // spec: Docs/RE/formats/effects.md §A.8 velocity Vec3 + size Vec3: HIGH.
+    // spec: Docs/RE/formats/effects.md §A.7 rotation quaternion (Euler degrees → quat): CONFIRMED.
     private sealed record XeffJsonKeyframe(
         uint KfIndex,
-        /// <summary>6 float params; kept as raw fallback.</summary>
-        float[] Params,
-        /// <summary>Emission velocity Vec3 [X,Y,Z]. spec: §A.3.7: HIGH.</summary>
+        /// <summary>Emission velocity Vec3 [X,Y,Z]. spec: §A.8: HIGH.</summary>
         float[] Velocity,
-        /// <summary>Billboard/particle size Vec3 [X,Y,Z]. spec: §A.3.7: HIGH.</summary>
+        /// <summary>Billboard/particle size Vec3 [X,Y,Z]. spec: §A.8: HIGH.</summary>
         float[] Size,
-        /// <summary>Rotation quaternion [X,Y,Z,W] derived from Euler degrees. spec: §A.4: CONFIRMED.</summary>
+        /// <summary>Rotation quaternion [X,Y,Z,W] derived from Euler degrees. spec: §A.7: CONFIRMED.</summary>
         float[] Rotation,
         float RotXDeg,
         float RotYDeg,
         float RotZDeg);
-
-    // Static emitter state — velocity/size/rotation are now named; params kept as fallback.
-    // spec: Docs/RE/formats/effects.md §A.3.7 — velocity Vec3 (Params[0..2]): HIGH.
-    // spec: Docs/RE/formats/effects.md §A.3.7 — size Vec3 (Params[3..5]): HIGH.
-    // spec: Docs/RE/formats/effects.md §A.4  — rotation quaternion: CONFIRMED.
-    private sealed record XeffJsonStaticState(
-        /// <summary>6 float params; kept as raw fallback.</summary>
-        float[] Params,
-        /// <summary>Static emission velocity Vec3 [X,Y,Z]. spec: §A.3.7: HIGH.</summary>
-        float[] Velocity,
-        /// <summary>Static billboard/particle size Vec3 [X,Y,Z]. spec: §A.3.7: HIGH.</summary>
-        float[] Size,
-        /// <summary>Rotation quaternion [X,Y,Z,W] (identity when emitter_type!=2). spec: §A.4: CONFIRMED.</summary>
-        float[] Rotation,
-        float? RotXDeg,
-        float? RotYDeg,
-        float? RotZDeg);
 }

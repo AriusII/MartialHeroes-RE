@@ -149,9 +149,10 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         ArgumentNullException.ThrowIfNull(password);
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Stage the credential before any 0/0 arrives; the 1/4 reply is built later by the login
-        // handler when the server's KeyExchange lands. spec: Docs/RE/specs/crypto.md §6.1.
-        _credentials.Stage(username, password);
+        // Stage the credential (account bytes, 17-byte zero-padded M, optional PIN) before any 0/0
+        // arrives; the 1/4 reply is built later by LoginHandshakeDriver when the server's KeyExchange
+        // lands. spec: Docs/RE/specs/crypto.md §6.1, §6.6; packets/login.yaml (CmsgLoginCredential).
+        _credentials.Stage(username, password, pin);
 
         // Drive the FSM from Login toward handshaking. CharacterSelection is the application-state
         // analogue of "secure session established / awaiting auth result".

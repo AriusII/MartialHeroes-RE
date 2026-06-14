@@ -1,3 +1,8 @@
+# *** SUPERSEDED -> see packets/login.yaml ***
+# The login credential carrier is now packets/login.yaml (secure 1/4 frame: 0x2B plaintext
+# pre-image + RSA ciphertext, debugger-verified). The opcodes.md 1/4 row points at login.yaml.
+# This file is retained as historical provenance only -- do not implement from it.
+#
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED and CRYPTO-DEPENDENT: see notes. capture_verified: false.
 

@@ -1,0 +1,105 @@
+# Clean-room field spec. Promoted from neutral analyst notes + a LIVE IDA-debugger
+# confirmation; rewritten, not copied. DEBUGGER-VERIFIED where marked; capture-unverified
+# otherwise. capture_verified: false.
+#
+# This file replaces the contested packets/1-4_auth_reply.yaml as the authoritative login
+# credential carrier. The "1/6 login-or-create collision" is RESOLVED: 1/6 is char-create
+# only; the login credential rides the secure 1/4 frame documented here.
+
+name: CmsgLoginCredential
+opcode: 0x10004           # major 1, minor 4 -> (1 << 16) | 4. The secure auth-reply / credential carrier.
+direction: C2S
+size: var                 # variable: header + plaintext pre-image + [u32 len][RSA ciphertext]; framed size is crypto-dependent
+spec: packets/login.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  The client login-credential message. Emitted from the inbound major-0 branch immediately
+  after the server's 0/0 RSA key exchange is parsed, over the secure-send path, on the secure
+  1/4 frame. ONE 1/4 payload carries two regions back to back: (1) a plaintext login pre-image
+  led by sub-opcode 0x2B (account length-prefixed + optional PIN length-prefixed), then (2) the
+  RSA ciphertext of the password (PKCS#1 v1.5 type-2), framed as [u32 LE length][big-endian
+  digit bytes]. The whole 1/4 payload is then per-dword whitened (XOR 0x29) and sent through the
+  normal byte-cipher + LZ4 outbound pipeline. The password itself is NEVER in the plaintext
+  region -- it is the staged RSA plaintext M (a fixed 17-byte zero-padded buffer).
+
+# This is a VARIABLE-LENGTH, CRYPTO-DEPENDENT carrier, NOT a fixed Pack=1 struct. The fields
+# below document the pre-cipher payload shape for the engineer; do NOT codegen a Pack=1 struct.
+# The fixed crypto constants (modulus parse, PKCS#1 padding, the 0x29 whitening) live in
+# specs/crypto.md section 6; the secure-context lifecycle lives in specs/crypto.md section 6a.
+fields:
+  - { name: SubOpcode, type: u8 }   # 0x00  constant 0x2B (43) -- the login sub-opcode (DEBUGGER-VERIFIED)
+  # followed by: u32 LE account-length (= strlen(account)+1, NUL incl.), then account bytes + NUL
+  # followed by: OPTIONAL u32 LE pin-length (= strlen(pin)+1, NUL incl.), then PIN bytes + NUL  [a7-gated]
+  # then: [u32 LE ciphertext-length][big-endian RSA digit bytes]  -- the password, RSA-encrypted
+
+notes: |
+  DEBUGGER-VERIFIED structural facts (a live IDA-debugger session drove a real login against
+  the live login server and read the assembled secure-context packet buffer through the
+  anti-tamper page guard; credential byte VALUES were NOT recorded -- only structure/lengths):
+
+  FRAME: secure 1/4. At encrypt-entry the frame header words read major = 0x0001, minor = 0x0004.
+  The credential is carried on the secure 1/4 frame (DEBUGGER-VERIFIED).
+
+  PLAINTEXT PRE-IMAGE (written first into the secure-context packet buffer payload, payload
+  offset 0; all length prefixes are u32 little-endian and INCLUDE the trailing NUL):
+
+    Off   | Size | Type   | Field              | Notes
+    ------|------|--------|--------------------|------------------------------------------------
+    0x00  | 1    | u8     | SubOpcode          | constant 0x2B (43). DEBUGGER-VERIFIED.
+    0x01  | 4    | u32 LE | AccountLength      | = strlen(account)+1 (NUL counted). >= 2, < 20.
+    0x05  | N_a  | bytes  | Account            | NUL-terminated; N_a = AccountLength.
+    +...  | 4    | u32 LE | PinLength          | OPTIONAL (a7-gated). = strlen(PIN)+1.
+    +...  | N_p  | bytes  | PIN                | OPTIONAL (a7-gated). NUL-terminated; N_p = PinLength.
+
+  Debugger run example (lengths only, values withheld): AccountLength = 8 (7-char account + NUL),
+  PinLength = 5 (4-char PIN + NUL); total plaintext pre-image written = 1 + 4 + 8 + 4 + 5 = 22 bytes,
+  matching the observed packet-buffer size cursor of 30 = 8-byte header + 22-byte payload.
+
+  PIN GATE: the PIN length-prefixed pair is present only when the second-password / PIN gate is
+  active (the login form passes a max-PIN-length of 5; gate active when nonzero). When no PIN was
+  entered, both the PIN length prefix and the PIN bytes are omitted -- treat the PIN region as
+  OPTIONAL. The PIN value originates from the anti-keylogger scrambled keypad (see specs/login.md).
+
+  RSA CIPHERTEXT (appended after the plaintext pre-image at the same size cursor):
+
+    Off (relative) | Size | Type   | Field            | Notes
+    ---------------|------|--------|------------------|---------------------------------------------
+    +0             | 4    | u32 LE | CiphertextLength | byte count of the big-endian RSA digit array.
+    +4            | L    | bytes  | Ciphertext       | big-endian RSA digit bytes; L = CiphertextLength.
+
+  Debugger run example: CiphertextLength = 27 (0x1B); the size cursor advanced 30 -> 61 (4-byte len
+  + 27-byte ciphertext = 31 appended). The small ~27-byte ciphertext implies a small RSA modulus
+  (~224-bit / ~28 bytes), consistent with a 2004-era key. PKCS#1 v1.5 type-2 padding confirmed by
+  the framing/size. DEBUGGER-VERIFIED.
+
+  STAGED RSA PLAINTEXT M (the password): the password is NOT in the plaintext pre-image. At
+  login-form time the client copies the password into a fixed 17-byte zero-filled buffer (password
+  bytes, no NUL, then zero padding to 17) and stages it as the RSA plaintext M. The encrypt step
+  consumes the FULL 17 bytes as M, so the RSA password field is a FIXED 17-byte zero-padded
+  plaintext regardless of actual password length (trailing zeros ARE part of M -- the server
+  expects a fixed-width 17-byte password field). DEBUGGER-VERIFIED (resolves the prior open item).
+  Password capacity: length >= 2 and < 17.
+
+  WHITENING + SEND: after the ciphertext is appended, the whole 1/4 payload is per-dword XOR
+  whitened with key 0x29 (see crypto.md section 6.4), copied to a fresh outbound buffer, then run
+  through the normal outbound pipeline (byte cipher + LZ4). The on-wire bytes are the whitened +
+  ciphered + compressed form of: [header 1/4][0x2B plaintext pre-image][u32 LE len][BE ciphertext].
+
+  CRYPTO HAND-OFF: the modulus/exponent parse from the 0/0 blob, the PKCS#1 v1.5 type-2 padding,
+  the m^e mod n exponentiation, and the 0x29 whitening are all owned by specs/crypto.md section 6;
+  the secure-context page-guard lifecycle is specs/crypto.md section 6a. Network.Crypto implements
+  the RSA + whitening; this packet spec owns only the plaintext pre-image + ciphertext FRAMING.
+
+  WHY THIS IS NOT A Pack=1 STRUCT: the payload is variable-length (account/PIN lengths vary; the
+  PIN region is optional; the ciphertext length tracks the server modulus). Build it with a writer,
+  not a blittable struct.
+
+  UNKNOWNS (capture-only): the concrete RSA modulus/exponent values and exact L1/L2 split (server
+  wire data, read live from 0/0); the server-side handling of the fixed 17-byte M and the PIN field.
+
+  RELATED: 0/0 SmsgKeyExchange (packets/0-0_key_exchange.yaml) precedes this. The DISTINCT 1/6
+  char-create message is packets/cmsg_char_create.yaml (NOT a login message).
+
+  UNBLOCKS (once crypto lands): Client.Application Login use-case; the Network.Crypto handshake.
