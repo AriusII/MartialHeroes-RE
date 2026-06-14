@@ -64,10 +64,10 @@ public sealed class BgtextureLstParserTests
     /// effect instance: 1108 records → 4 + 1108 × 48 = 53,188 bytes.
     /// </summary>
     [Theory]
-    [InlineData(1222, 58660)]   // data/map000/texture/bgtexture.lst
-    [InlineData(1108, 53188)]   // data/effect/texture/bgtexture.lst
-    [InlineData(0, 4)]          // degenerate: zero records
-    [InlineData(1, 52)]         // single record
+    [InlineData(1222, 58660)] // data/map000/texture/bgtexture.lst
+    [InlineData(1108, 53188)] // data/effect/texture/bgtexture.lst
+    [InlineData(0, 4)] // degenerate: zero records
+    [InlineData(1, 52)] // single record
     public void SizeFormula_RecordCountTimesStride_PlusFourHeader(int recordCount, int expectedSize)
     {
         // spec: Docs/RE/formats/bgtexture_lst.md §Record / body layout —
@@ -204,16 +204,14 @@ public sealed class BgtextureLstParserTests
         byte[] buf = new byte[4 + 48]; // header says 10, body has only 1 record
         BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(0, 4), 10u);
 
-        Assert.Throws<InvalidDataException>(
-            () => BgtextureLstParser.Parse(new ReadOnlyMemory<byte>(buf)));
+        Assert.Throws<InvalidDataException>(() => BgtextureLstParser.Parse(new ReadOnlyMemory<byte>(buf)));
     }
 
     [Fact]
     public void Parse_EmptyBuffer_ThrowsInvalidDataException()
     {
         // Buffer shorter than the 4-byte header must throw.
-        Assert.Throws<InvalidDataException>(
-            () => BgtextureLstParser.Parse(ReadOnlyMemory<byte>.Empty));
+        Assert.Throws<InvalidDataException>(() => BgtextureLstParser.Parse(ReadOnlyMemory<byte>.Empty));
     }
 
     // =========================================================================

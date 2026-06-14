@@ -360,6 +360,32 @@ public sealed class RealClientAssets : IDisposable
                 return null;
             }
 
+            if (img.GetWidth() == 0 || img.GetHeight() == 0)
+            {
+                GD.PrintErr(
+                    $"[RealClientAssets] Image has zero size after load (paletted/unsupported format?): '{virtualPath}'");
+                return null;
+            }
+
+            // Character skin PNGs are RGB8 (no alpha channel). Some GPU backends (D3D12 Forward+)
+            // require RGBA8 for reliable GPU texture creation; convert before upload.
+            // spec: Docs/RE/formats/texture.md §PNG — standard ISO 15948 RGB, no alpha channel.
+            if (img.GetFormat() == Image.Format.Rgb8)
+            {
+                img.Convert(Image.Format.Rgba8);
+            }
+
+            // Generate mipmaps so LinearWithMipmaps filter works correctly.
+            // GenerateMipmaps() only works on uncompressed images — DDS (DXT1/DXT3/DXT5) images
+            // are already compressed and Godot will log an error if we try to generate mips from
+            // them. Guard to Rgba8 only (character skin PNGs convert to Rgba8 above; DDS stays
+            // in its compressed format and Godot handles the mip chain from the DDS header).
+            // spec: Docs/RE/formats/texture.md §DDS — DXT1/DXT5 already contain a mip chain.
+            if (img.GetFormat() == Image.Format.Rgba8)
+            {
+                img.GenerateMipmaps();
+            }
+
             return ImageTexture.CreateFromImage(img);
         }
         catch (Exception ex)

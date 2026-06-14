@@ -97,7 +97,7 @@ The file header is **32 bytes** (0x20).
 | 0x04 | 4 | u32 LE | `sub_effect_count` | Number of sub-effect blocks in the file. Observed range: 1 to 16. Zero is valid (stub/empty effect); 8 stub files observed in the full VFS. Formerly labelled `element_count` in the prior 8-byte spec — semantically the same field. |
 | 0x08 | 4 | u32 LE | `type_flag` | Observed values: 1 and 2. Possible emitter class (1 = particle/skill, 2 = environment). Semantics UNVERIFIED; do not branch on this value until confirmed. |
 | 0x0C | 16 | u8[16] | `reserved` | Zero in all samples. Padding / reserved; read and discard. |
-| 0x1C | 4 | u32 LE | `first_entry_count` | Entry count for the first sub-effect block's name table. This is the `entry_count` field that also opens the first sub-effect data block immediately after the header. It is present in the header as a convenience; parsers that read the sub-effect blocks sequentially will encounter it again at the start of block 0. Observed range: 1–41. SAMPLE-VERIFIED. |
+| 0x1C | 4 | u32 LE | `first_entry_count` | Entry count for sub-effect block 0's name table. **This is the ONLY source of block 0's entry count.** Block 0 has NO entry_count prefix on disk — this header field is NOT duplicated at the start of block 0. Parsers must read block 0's entry_count from this field only. Observed range: 1–41. SAMPLE-VERIFIED. Corrected 2026-06-14: prior description incorrectly stated "parsers will encounter it again at the start of block 0." |
 
 Immediately after the 32-byte header, `sub_effect_count` sub-effect blocks follow sequentially. There is no additional directory or offset table.
 
@@ -133,7 +133,21 @@ The 17 observed `[CCC]` prefix values span the ranges: 311 (PC class A), 331–3
 
 ## A.4 Sub-Effect Block Structure
 
-**Confidence: CONFIRMED by sample byte-walkthrough.** Each sub-effect block consists of four sequential parts: a name table, a curve section (four passes), a track header, and a keyframe array. The block begins with its own `entry_count` u32.
+**Confidence: CONFIRMED by sample byte-walkthrough (2026-06-14 revision).**
+
+Each sub-effect block body consists of four sequential parts: a name table (entry_count × 64 bytes), a curve section (four passes), a track header (13 bytes), and a keyframe array.
+
+**Block 0 (first sub-effect):** body starts immediately after the 32-byte file header — NO entry_count prefix. The entry_count for block 0 is read from the file header's `first_entry_count` field at offset 0x1C.
+
+**Blocks 1..N-1:** each block begins with a **24-byte prefix** before the body:
+
+| Prefix offset | Size | Type | Field | Notes |
+|---:|---:|------|-------|-------|
+| +0 | 4 | u32 LE | `sub_id` | Block ordinal or identifier (observed: sequential values starting at 1). Semantics UNRESOLVED. |
+| +4 | 16 | u8[16] | `reserved` | Zero in all samples (four zero u32s). Read and discard. |
+| +20 | 4 | u32 LE | `entry_count` | This block's own entry count. Drives name table, curve passes, and keyframe array. |
+
+Total prefix size: 24 bytes (6 × u32). CONFIRMED by byte-walk of zone_sel_u.xeff (11 sub-effects, first_entry_count=20) and char_select-u.xeff (68 sub-effects, first_entry_count=2).
 
 ### A.4.1 Name table
 
@@ -197,7 +211,7 @@ The 9-float layout per frame is (in file order):
 
 ### A.4.5 Multi-sub-effect files
 
-For `sub_effect_count > 1`, sub-effects follow sequentially. Each subsequent sub-effect begins with its own `entry_count` u32, then its name table and curve+track+keyframe data. Sub-effect boundaries are identified purely by sequential parsing; there is no offset table.
+For `sub_effect_count > 1`, sub-effects follow sequentially. Block 0 has no prefix (see A.4 header). Blocks 1..N-1 each begin with a 24-byte prefix (sub_id u32 + u32[4] zeros + entry_count u32), followed by the block body. Sub-effect boundaries are identified purely by sequential parsing; there is no offset table. CONFIRMED (2026-06-14) against zone_sel_u.xeff (11 blocks, spacing 2449 bytes) and char_select-u.xeff (68 blocks).
 
 ## A.5 In-Memory Element Layout (104 bytes, 26 dwords)
 
@@ -338,11 +352,12 @@ screens' animated elements are delivered through DDS sprite art and scripted UI,
 the particle effect system. (The pre-login "red ribbon" intro crawl is a positional DDS scroll, not
 an `.xeff` — see `specs/intro_sequence.md`.)
 
-**Parser caveat (cross-reference, not a new format fact):** the high-`sub_effect_count`
-front-end files (`char_select-u.xeff` at 68, and the `zone_sel*` pair) currently fail the existing
-`.xeff` parser at the scale-curve (Group D) read. The header (A.2) parses cleanly; the failure is
-in the element body for these large-count files. See the Open Questions block — a parser revision
-pass is needed for high-sub-effect-count files before these front-end effects can be instantiated.
+**Parser caveat RESOLVED (2026-06-14):** the high-`sub_effect_count` front-end files
+(`char_select-u.xeff` at 68 sub-effects, first_entry_count=2; `zone_sel_u.xeff` / `zone_sel2-u.xeff`
+at 11 sub-effects, first_entry_count=20) previously failed the `.xeff` parser. Root cause confirmed:
+block 0 has NO entry_count prefix on disk — its count comes only from the header's `first_entry_count`
+field (A.2/A.15 corrected). Blocks 1..N-1 carry a 24-byte prefix (A.4). Parser fixed 2026-06-14;
+all 437 fixture tests pass including regression fixtures for both files.
 
 Char-class selection within char-select additionally uses 16 `guildmaster_{d|j|mo|mu}_{jung|sa}{05|06}.xeff`
 files (4 classes × 2 levels × 2 event types); these are standard `.xeff` (Section A) and need no
@@ -886,7 +901,7 @@ The June 2026 black-box pass analyzed both known FX7 files (both exactly 35,202 
 7. **`effect_id` duplicate resolution** — 47 `effect_id` values are shared by more than one file (SAMPLE-VERIFIED). The resolution rule when two files in the sorted map share an id is UNRESOLVED. The second-registered file may silently overwrite the first; no tie-break logic was traced.
 8. **9-digit naming scheme `[CCC][SSS][AB][N]`** — PLAUSIBLE from pattern observation; no manifest confirms the digit-group semantics.
 9. **Frame-0 no-index rule** — CONFIRMED in samples; whether the parser has a conditional or always reads N×(index+9f) starting from frame 1 while treating frame 0 as pure 9f is not traced from the code path.
-10. **High-`sub_effect_count` front-end files fail the current parser (A.15).** `char_select-u.xeff` (68 sub-effects) and the `zone_sel*` pair (11 each) parse their 32-byte header (A.2) cleanly but error out in the element body at the scale-curve (Group D) read. A parser revision pass is needed for large-count files before the front-end VFX can be instantiated; the divergence point is in the curve/keyframe block reader, not the header.
+10. **High-`sub_effect_count` front-end files — RESOLVED (2026-06-14).** `char_select-u.xeff` (68 sub-effects, first_entry_count=2) and `zone_sel_u.xeff` / `zone_sel2-u.xeff` (11 sub-effects, first_entry_count=20) now parse successfully. Root cause was that block 0 has NO entry_count prefix on disk (its count comes from the header `first_entry_count` at 0x1C), while blocks 1..N-1 have a 24-byte prefix (sub_id u32 + u32[4] zeros + entry_count u32). Parser updated; 437/437 fixture tests green.
 
 ## From `.eff` geometry (Section B)
 

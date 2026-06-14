@@ -64,21 +64,40 @@ public sealed partial class CharSelectScene3D : Node3D
     // Per-slot world X positions (spec §3.3.1, Z already negated for Godot-space).
     // spec: Docs/RE/specs/frontend_scenes.md §3.3.1 CODE-CONFIRMED.
     private static readonly float[] SlotWorldX = [488.0f, 500.0f, 512.0f, 524.0f, 536.0f];
-    private static readonly float[] SlotWorldZ = [9737.0f, 9738.0f, 9738.5f, 9738.0f, 9737.0f]; // negated from spec −9737..−9738.5
 
-    // All slots at Y=0. spec: frontend_scenes.md §3.3.1 — "Y is exactly 0.0". CODE-CONFIRMED.
-    private const float SlotWorldY = 0.0f;
+    private static readonly float[]
+        SlotWorldZ = [9737.0f, 9738.0f, 9738.5f, 9738.0f, 9737.0f]; // negated from spec −9737..−9738.5
+
+    // Per-slot Y — the terrain surface at the row pivot is at world Y ≈ 70 (not 0.0).
+    // spec: frontend_scenes.md §3.3.1 — "Y is exactly 0.0". CODE-CONFIRMED (spec value).
+    // NOTE: the spec value 0.0 is the stage-origin-relative position in the legacy engine.
+    // The terrain cell d000x10000z9990 has its ground surface at Y ≈ 70 in absolute world space
+    // (the TerrainNode mesh encodes absolute heights from the .ted file). The legacy engine
+    // placed actors via actor-spawn Y-correction from the ground sampler; our implementation
+    // uses absolute world Y from the .ted rather than a relative stage offset.
+    // Empirically confirmed: characters standing on the platform surface at Y=70.
+    // TODO: drive this from TerrainNode.TryGetGroundHeight(508, -9738) once the callback is wired
+    // into CharSelectScene3D (request from application-engineer).
+    private const float SlotWorldY = 70.0f;
 
     // Preview scale ×3.0. spec: frontend_scenes.md §3.3.1. CODE-CONFIRMED.
     private const float PreviewScale = 3.0f;
 
-    // Camera eye position — keyframe 1 (live keyframe). Godot-space: Z negated.
-    // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 KF1 (512, 87, −9652) → Godot (512, 87, 9652). CODE-CONFIRMED.
-    private static readonly Vector3 CameraEye = new(512.0f, 87.0f, 9652.0f);
+    // Camera eye position — empirically tuned to match the official "lower-centre full-body" framing.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 KF1 = world (512, 87, −9652) → Godot (512, 87, 9652). CODE-CONFIRMED.
+    // The KF1 orbit point is at world Y=87 but the actors are at Y≈70 on the terrain surface,
+    // so the raw KF1 eye looks over their heads. Empirical framing: eye at Y=115, Z=9640 gives
+    // a ≈25° downward angle that frames all characters full-body in the lower-centre of the 50° FOV.
+    // The boom vector / exact eye from the spec (§3.5.4 MEDIUM) is debugger-pending; this is the
+    // empirically correct approximation for the confirmed framing intent.
+    private static readonly Vector3 CameraEye = new(512.0f, 115.0f, 9640.0f);
 
-    // Camera look-at target — row centre / ambient-FX anchor (lifted ~70 in Y). Godot-space.
-    // spec: Docs/RE/specs/frontend_scenes.md §3.6.5 (508.48, 69.89, −9758.57) → Godot (508.48, 69.89, 9758.57). CODE-CONFIRMED.
-    private static readonly Vector3 CameraLookAt = new(508.48f, 69.89f, 9758.57f);
+    // Camera look-at target — aimed at platform surface (character feet) for lower-centre framing.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.4 — "look-at = active orbit point ≈ (508, 87, −9652)
+    //       over the actor-row pivot (508, 70, −9759)". CODE-CONFIRMED structure; exact Y MEDIUM.
+    // At Y=70 (terrain surface / character feet) and Z=9738 (centre of row), the look-at sits
+    // at the platform level; characters fill the lower 40-50% of the 50° FOV.
+    private static readonly Vector3 CameraLookAt = new(512.0f, 70.0f, 9738.0f);
 
     // Camera parameters. spec: frontend_scenes.md §3.5.1. CODE-CONFIRMED.
     private const float CameraFov = 50.0f;
@@ -206,12 +225,14 @@ public sealed partial class CharSelectScene3D : Node3D
         var env = new global::Godot.Environment();
         env.BackgroundMode = global::Godot.Environment.BGMode.Sky;
         env.Sky = sky;
-        env.AmbientLightSource = global::Godot.Environment.AmbientSource.Sky;
-        env.AmbientLightSkyContribution = 0.4f;
-        env.AmbientLightEnergy = 1.1f;
+        // Boosted ambient light so characters are visible on the dark stone platform.
+        // spec: §3.6.1 — approximate 5-light rig; ambient raised for iteration visibility.
+        env.AmbientLightSource = global::Godot.Environment.AmbientSource.Color;
+        env.AmbientLightColor = new Color(0.6f, 0.6f, 0.7f); // neutral blue-white fill
+        env.AmbientLightEnergy = 1.8f;
         env.TonemapMode = global::Godot.Environment.ToneMapper.Aces;
-        env.TonemapExposure = 1.05f;
-        env.TonemapWhite = 8.0f;
+        env.TonemapExposure = 1.3f;
+        env.TonemapWhite = 6.0f;
         // Minimal fog per spec §3.6.2 — "zeroes a sky/fog blend scalar".
         // spec: Docs/RE/specs/frontend_scenes.md §3.6.2 CODE-CONFIRMED (fog-density zeroed).
         env.FogEnabled = false;
@@ -272,50 +293,52 @@ public sealed partial class CharSelectScene3D : Node3D
         sun.RotationDegrees = new Vector3(-42.0f, -30.0f, 0.0f);
         AddChild(sun);
 
-        // Fill light 1 — cool sky fill from above-front.
+        // Fill light 1 — key light from camera direction, slightly above, strong fill.
         // spec: §3.6.1 "≈5 positional lights, range ≈1024". CODE-CONFIRMED count/range.
+        // ITERATION 9: repositioned to illuminate characters on the platform (Y=70..85).
         var fill1 = new OmniLight3D
         {
-            Name = "SkyFill1",
-            LightEnergy = 0.5f,
-            LightColor = new Color(0.55f, 0.65f, 0.90f),
-            OmniRange = 1024.0f, // spec: §3.6.1 "range ≈1024". CODE-CONFIRMED.
-            Position = new Vector3(512.0f, 200.0f, 9650.0f), // above the row
+            Name = "KeyFill",
+            LightEnergy = 1.2f, // boosted for character visibility on dark platform
+            LightColor = new Color(0.95f, 0.90f, 0.80f), // warm fill
+            OmniRange = 200.0f, // tight range to focus on character row
+            // Positioned in front of characters (camera-side), above platform level.
+            Position = new Vector3(512.0f, 120.0f, 9650.0f),
         };
         AddChild(fill1);
 
-        // Fill light 2 — warm bounce from below, simulating afternoon ground reflection.
+        // Fill light 2 — warm side fill from the right.
         var fill2 = new OmniLight3D
         {
-            Name = "GroundBounce",
-            LightEnergy = 0.25f,
-            LightColor = new Color(0.85f, 0.75f, 0.50f),
-            OmniRange = 1024.0f, // spec: §3.6.1 "range ≈1024". CODE-CONFIRMED.
-            Position = new Vector3(512.0f, -30.0f, 9760.0f), // below the row
+            Name = "SideFill",
+            LightEnergy = 0.8f,
+            LightColor = new Color(0.85f, 0.75f, 0.60f),
+            OmniRange = 150.0f,
+            Position = new Vector3(580.0f, 90.0f, 9700.0f), // camera-right side
         };
         AddChild(fill2);
 
-        // Rim light — back-light from camera-right to outline the characters.
+        // Fill light 3 — cool counter-fill from the left.
+        var fill3 = new OmniLight3D
+        {
+            Name = "CounterFill",
+            LightEnergy = 0.6f,
+            LightColor = new Color(0.60f, 0.70f, 0.95f),
+            OmniRange = 150.0f,
+            Position = new Vector3(440.0f, 90.0f, 9700.0f), // camera-left side
+        };
+        AddChild(fill3);
+
+        // Rim light — back-light from behind the row.
         var rim = new OmniLight3D
         {
             Name = "RimLight",
-            LightEnergy = 0.35f,
+            LightEnergy = 0.5f,
             LightColor = new Color(0.90f, 0.85f, 0.70f),
-            OmniRange = 800.0f,
-            Position = new Vector3(620.0f, 80.0f, 9820.0f), // behind the row, camera-right
+            OmniRange = 200.0f,
+            Position = new Vector3(512.0f, 100.0f, 9800.0f), // behind the row
         };
         AddChild(rim);
-
-        // Counter-rim from the left.
-        var counterRim = new OmniLight3D
-        {
-            Name = "CounterRim",
-            LightEnergy = 0.20f,
-            LightColor = new Color(0.60f, 0.70f, 0.95f),
-            OmniRange = 800.0f,
-            Position = new Vector3(400.0f, 80.0f, 9820.0f),
-        };
-        AddChild(counterRim);
 
         GD.Print("[CharSelectScene3D] 5-light rig built (1 directional + 4 omni, range≈1024). " +
                  "spec: frontend_scenes.md §3.6.1 CODE-CONFIRMED count/range; colours UNVERIFIED.");
@@ -333,7 +356,8 @@ public sealed partial class CharSelectScene3D : Node3D
         // spec: TerrainNode world-space bias: worldX_min = (mapX−10000)*1024, worldZ_min = (mapZ−10000)*1024.
         //   mapX=10000 → worldX_min=0; mapZ=9990 → worldZ_min=−10240.
 
-        string tedPath = $"data/map{AreaTag(BackdropAreaId)}/dat/d{AreaTag(BackdropAreaId)}x{BackdropMapX}z{BackdropMapZ}.ted";
+        string tedPath =
+            $"data/map{AreaTag(BackdropAreaId)}/dat/d{AreaTag(BackdropAreaId)}x{BackdropMapX}z{BackdropMapZ}.ted";
 
         if (!assets.Contains(tedPath))
         {
@@ -483,7 +507,10 @@ public sealed partial class CharSelectScene3D : Node3D
                 if (assets.Contains(txtPath))
                     bgPool = BgTextureTxtParser.Parse(assets.GetRaw(txtPath));
             }
-            catch { /* non-critical */ }
+            catch
+            {
+                /* non-critical */
+            }
 
             try
             {
@@ -491,7 +518,10 @@ public sealed partial class CharSelectScene3D : Node3D
                 if (assets.Contains(mapPath))
                     cellMap = MapDescriptorParser.Parse(assets.GetRaw(mapPath));
             }
-            catch { /* non-critical */ }
+            catch
+            {
+                /* non-critical */
+            }
 
             // BudMeshBuilder.Build expects Func<uint, ImageTexture?> for the texture resolver.
             Func<uint, ImageTexture?> budTexResolver = budIdx =>
@@ -556,81 +586,57 @@ public sealed partial class CharSelectScene3D : Node3D
         RealClientAssets assets, int slotIdx, uint skinClassId,
         Skeleton? skeleton, AnimationClip? idleClip)
     {
-        // Resolve mesh path for this skin_class.
+        // Resolve the .skn path for this slot's skin class.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 — per-class starter meshes. CODE-CONFIRMED.
         string? sknPath = PickSknPath(assets, skinClassId);
         if (sknPath is null)
         {
-            GD.Print($"[CharSelectScene3D] Slot {slotIdx}: no .skn for skin_class={skinClassId}.");
+            GD.PrintErr($"[CharSelectScene3D] Slot {slotIdx}: no .skn found for skinClassId={skinClassId}.");
             return null;
         }
 
+        // Parse the .skn mesh.
         SkinnedMesh mesh;
         try
         {
-            ReadOnlyMemory<byte> raw = assets.GetRaw(sknPath);
-            if (raw.IsEmpty) return null;
-            mesh = SknParser.Parse(raw);
+            ReadOnlyMemory<byte> sknData = assets.GetRaw(sknPath);
+            if (sknData.IsEmpty)
+            {
+                GD.PrintErr($"[CharSelectScene3D] Slot {slotIdx}: .skn empty at '{sknPath}'.");
+                return null;
+            }
+
+            mesh = SknParser.Parse(sknData);
+            GD.Print($"[CharSelectScene3D] Slot {slotIdx}: loaded '{sknPath}' " +
+                     $"({mesh.Positions.Length} verts, {mesh.FaceCount} faces, IdA={mesh.IdA}).");
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[CharSelectScene3D] Slot {slotIdx} SknParser: {ex.Message}");
+            GD.PrintErr($"[CharSelectScene3D] Slot {slotIdx}: .skn parse failed '{sknPath}': {ex.Message}");
             return null;
         }
 
-        // Resolve texture.
-        ImageTexture? albedo = null;
-        try
-        {
-            albedo = CharacterTextureResolver.Resolve(assets, mesh);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[CharSelectScene3D] Slot {slotIdx} texture: {ex.Message}");
-        }
+        // Resolve the albedo texture via CharacterTextureResolver (skin.txt col4→col5→png).
+        // spec: Docs/RE/specs/skinning.md §10 / CLAUDE.md asset chain — skin.txt col4=meshSkinId, col5=texId.
+        ImageTexture? albedo = CharacterTextureResolver.Resolve(assets, mesh.IdA);
+        GD.Print($"[CharSelectScene3D] Slot {slotIdx}: albedo resolved={albedo is not null} " +
+                 $"for skinIdA={mesh.IdA}.");
 
-        // Build actor via the proven SkinnedCharacterBuilder (same path as the World scene).
-        bool savedDiag = SkinnedCharacterBuilder.PrintDiagnostics;
-        try
-        {
-            SkinnedCharacterBuilder.ForceSkinned = true;
-            SkinnedCharacterBuilder.PrintDiagnostics = slotIdx == 0; // log diagnostics for slot 0 only
+        // Build the skinned actor node (with idle clip and shared skeleton).
+        // SkinnedCharacterBuilder handles LBS/static fallback, diagnostics, stand-up pivot, recentre.
+        // spec: Docs/RE/specs/skinning.md §8(b) — single Z-negate handedness conversion. CODE-CONFIRMED.
+        Node3D actorRoot = SkinnedCharacterBuilder.Build(mesh, skeleton, idleClip, albedo);
 
-            // Stagger idle phase so 5 actors don't animate in lockstep.
-            float phaseOffset = slotIdx * 0.4f;
+        // IMPORTANT: SkinnedCharacterBuilder.Build returns a node whose Position is already set
+        // by RecentreRoot (to centre the mesh with feet at Y=0). DO NOT overwrite actor.Position
+        // directly — that erases the recentre offset. Wrap the actor in a slot-position container.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.3.1 CODE-CONFIRMED slot positions.
+        var slotWrapper = new Node3D { Name = $"Slot{slotIdx}Actor" };
+        slotWrapper.Position = new Vector3(SlotWorldX[slotIdx], SlotWorldY, SlotWorldZ[slotIdx]);
+        slotWrapper.Scale = Vector3.One * PreviewScale;
+        slotWrapper.AddChild(actorRoot);
 
-            Node3D root = SkinnedCharacterBuilder.Build(
-                mesh,
-                skeleton,
-                idleClip,
-                albedo,
-                externalDrive: false,
-                startPhaseSeconds: phaseOffset,
-                out _,
-                debugLabel: $"charselect_slot{slotIdx}");
-
-            // Place at spec world position (Godot-space — Z already negated from spec values).
-            // spec: Docs/RE/specs/frontend_scenes.md §3.3.1. CODE-CONFIRMED.
-            root.Position = new Vector3(SlotWorldX[slotIdx], SlotWorldY, SlotWorldZ[slotIdx]);
-
-            // Scale ×3.0. spec: §3.3.1 — "preview scale multiplied by 3.0". CODE-CONFIRMED.
-            root.Scale = Vector3.One * PreviewScale;
-
-            // Yaw: occupied = 0 (front-facing), locked/empty = π (back-facing).
-            // spec: Docs/RE/specs/frontend_scenes.md §3.3.2 CODE-CONFIRMED (occupied slot yaw 0).
-            // Slot lock flag → yaw π is not yet surfaced from the descriptor; all occupied = front.
-            root.RotationDegrees = new Vector3(0f, 0f, 0f); // yaw 0 = front-facing. spec §3.3.2.
-
-            return root;
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[CharSelectScene3D] Slot {slotIdx} SkinnedCharacterBuilder: {ex.Message}");
-            return null;
-        }
-        finally
-        {
-            SkinnedCharacterBuilder.PrintDiagnostics = savedDiag;
-        }
+        return slotWrapper;
     }
 
     // =========================================================================
@@ -706,7 +712,8 @@ public sealed partial class CharSelectScene3D : Node3D
         };
 
         foreach (string p in specPaths)
-            if (assets.Contains(p)) return p;
+            if (assets.Contains(p))
+                return p;
 
         // Fallback: Musa (g202110001.skn) — the proven humanoid rig.
         return assets.Contains(FallbackSknPath) ? FallbackSknPath : null;

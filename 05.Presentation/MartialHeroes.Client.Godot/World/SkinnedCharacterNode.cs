@@ -47,7 +47,7 @@ public sealed partial class SkinnedCharacterNode : Node3D
     private Vector3[] _outPos = []; // per corner, Godot space
     private Vector3[] _outNrm = []; // per corner, Godot space
 
-    private ArrayMesh? _arrayMesh;
+    private ArrayMesh? _arrayMesh; // live render mesh (also used for BuildDiagnostics AABB sampling)
     private MeshInstance3D? _meshInstance;
     private StandardMaterial3D? _material;
 
@@ -166,21 +166,37 @@ public sealed partial class SkinnedCharacterNode : Node3D
         _outPos = new Vector3[cornerCount];
         _outNrm = new Vector3[cornerCount];
 
-        // 6) Material.
+        // 6) Material — apply the resolved albedo texture when available; neutral skin-tone fallback
+        // when null. The material is set once here and held by the MeshInstance3D for the lifetime
+        // of this node (see step 7 below). The DIAG solid-red placeholder has been removed.
+        // spec: CLAUDE.md asset chain — skin.txt col5 texId → data/char/tex{dir}/{texId}.png.
         _material = new StandardMaterial3D
         {
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
             TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled, // double-sided safety for thin geometry
         };
-        if (albedo is not null) _material.AlbedoTexture = albedo;
-        else _material.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+        if (albedo is not null)
+        {
+            _material.AlbedoTexture = albedo;
+        }
+        else
+        {
+            // Neutral warm skin-tone fallback (no texture found in VFS).
+            _material.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+        }
 
-        // 7) Build the initial (rest-pose) mesh so the node is visible even before the first tick.
+        // 7) Build the live render mesh using ArrayMesh (updated per-frame via ClearSurfaces +
+        // AddSurfaceFromArrays). The MeshInstance3D owns the ArrayMesh directly so
+        // SetSurfaceOverrideMaterial is valid after the first DeformAndUpload call adds surface 0.
+        // Note: _immMesh was previously referenced here but never populated with vertices — the
+        // DeformAndUpload path always wrote to _arrayMesh. The MeshInstance3D.Mesh is now _arrayMesh.
         _arrayMesh = new ArrayMesh();
-        DeformAndUpload(0f, restPose: true);
-
         _meshInstance = new MeshInstance3D { Name = "LbsMesh", Mesh = _arrayMesh };
         AddChild(_meshInstance);
+        DeformAndUpload(0f, restPose: true); // fills surface 0 on _arrayMesh first
+        // Set the material AFTER DeformAndUpload so surface 0 exists when SetSurfaceOverrideMaterial runs.
+        if (_material is not null)
+            _meshInstance.SetSurfaceOverrideMaterial(0, _material);
 
         // Randomized clip start phase so a town of mobs sharing one idle clip does not animate in
         // lockstep. Wrapped into [0, duration). No-op for the player (default 0). The visible mesh
@@ -243,7 +259,7 @@ public sealed partial class SkinnedCharacterNode : Node3D
     /// </summary>
     private void DeformAndUpload(float t, bool restPose)
     {
-        if (_arrayMesh is null) return;
+        if (_arrayMesh is null || _meshInstance is null) return;
 
         ComputeWorldPoses(t, restPose);
 
@@ -266,20 +282,24 @@ public sealed partial class SkinnedCharacterNode : Node3D
             _outNrm[c] = new Vector3(nx, ny, nz).Normalized();
         }
 
-        // The per-upload Godot.Collections.Array allocation is an ENGINE API CONSTRAINT, not an
-        // oversight: ArrayMesh.AddSurfaceFromArrays takes a Godot.Collections.Array of length
-        // ArrayType.Max, which must be freshly built each upload (it is consumed by the native call
-        // and cannot be safely reused/pooled across frames). The expensive per-vertex work above
-        // already runs in reused buffers; do NOT "optimize" this array away. spec: Godot ArrayMesh API.
+        // Reuse the persistent _arrayMesh: ClearSurfaces then re-add the deformed surface.
+        // The material is held as a SetSurfaceOverrideMaterial on the MeshInstance3D (not on the
+        // ArrayMesh surface), so it survives ClearSurfaces without any per-frame re-assignment.
+        //
+        // The per-upload Godot.Collections.Array allocation is an ENGINE API CONSTRAINT — Godot's
+        // AddSurfaceFromArrays accepts only a Variant-typed Array; keep the reused CPU buffers above.
         var arrays = new global::Godot.Collections.Array();
         arrays.Resize((int)Mesh.ArrayType.Max);
         arrays[(int)Mesh.ArrayType.Vertex] = _outPos;
         arrays[(int)Mesh.ArrayType.Normal] = _outNrm;
         arrays[(int)Mesh.ArrayType.TexUV] = _uvs;
 
-        _arrayMesh.ClearSurfaces();
+        _arrayMesh!.ClearSurfaces();
         _arrayMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
-        if (_material is not null) _arrayMesh.SurfaceSetMaterial(0, _material);
+        // Re-apply the material to surface 0 after ClearSurfaces wipes it.
+        // SetSurfaceOverrideMaterial on MeshInstance3D is NOT called per-frame (it was set once in
+        // Setup after the first DeformAndUpload, and it persists across ClearSurfaces).
+        _arrayMesh.SurfaceSetMaterial(0, _material);
     }
 
     // Rest-pose tracks (all null) reused so the rest path allocates nothing per frame.

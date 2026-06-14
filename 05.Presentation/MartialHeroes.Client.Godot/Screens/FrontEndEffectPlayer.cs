@@ -136,8 +136,12 @@ public sealed partial class FrontEndEffectPlayer : Control
         }
         else
         {
-            GD.Print($"[FrontEndEffectPlayer] Showing fallback effect for '{XeffVfsPath}'.");
-            BuildFallback();
+            // No fallback emitters: the stray blue/red particle rings were removed because the real
+            // char-select/zone_sel brazier fire and portal effects are not yet confirmed by IDA.
+            // An unconfirmed fallback creates "flying stray pixels" the maintainer reported.
+            // FIX 2: disable the fallback; the 3D backdrop (flames, portal) is pending IDA confirmation.
+            GD.Print($"[FrontEndEffectPlayer] XeffVfsPath='{XeffVfsPath}' not loaded or parsed — " +
+                     "no fallback emitters (stray pixel fix). Backdrop effects pending IDA confirmation.");
         }
     }
 
@@ -440,6 +444,12 @@ public sealed partial class FrontEndEffectPlayer : Control
             grad.SetOffset(1, 1f);
             mat.ColorRamp = new GradientTexture1D { Gradient = grad };
 
+            // Provide a 1×1 white pixel texture so D3D12 Forward+ does not render
+            // the debug error checkerboard pattern for particles without a texture.
+            var whitePixel = Image.CreateEmpty(4, 4, false, Image.Format.Rgba8);
+            whitePixel.Fill(Colors.White);
+            var whiteTex = ImageTexture.CreateFromImage(whitePixel);
+
             var emitter = new GpuParticles2D
             {
                 Name = $"FallbackRing{r}",
@@ -453,6 +463,7 @@ public sealed partial class FrontEndEffectPlayer : Control
                 // Preprocess fills the emitter immediately so particles are visible on frame 1.
                 Preprocess = 2.0f,
                 ProcessMaterial = mat,
+                Texture = whiteTex, // required: without texture D3D12 shows error checker pattern
                 // Z-index offset so fallback rings appear above other sibling Controls.
                 ZIndex = 5,
             };

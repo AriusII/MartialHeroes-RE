@@ -214,13 +214,21 @@ typically numeric, PIN.
 - **Asset.** The dialog uses the secondary-password art catalogued in `formats/ui_manifests.md`
   (`data/ui/password.dds`, 1024×1024 DXT3 — listed there as "Secondary password dialog"). The
   caption strings are CP949 in the VFS and are not reproduced here.
+- **Show-trigger (UNRESOLVED in static).** The PIN keypad child window is **constructed during the
+  login scene build**, but **no sub-state in the login tick (states 1..41) explicitly shows it**, and
+  the sub-state-40 credential submit proceeds without an in-tick PIN gate. So the modal is **not** a
+  dedicated login sub-state; it is shown either (a) by the login form / action handler as an in-place
+  child widget when the account requires a second password, or (b) by a post-submit net-reply handler
+  in the character-management path (outside the login window's scope). **The exact show-trigger is
+  UNRESOLVED in static analysis** — flag pending a parallel recovery / live confirmation. (Its layout
+  and keypad scramble are separately recovered in §11.3.)
 
 > **Confidence.** The PIN's existence, its first-class "is-PIN" input modelling, its ≤ 4-char
 > capacity, and the fact that its value lands in the optional login-blob field are **RUNTIME-
 > CONFIRMED** against the live client (read from the client's process at login time; no addresses).
-> The modal's exact widget layout / action ids are not yet swept (its `uiconfig.lua` controls were
-> not catalogued in this pass) — treat the modal's widget tree as **PLAUSIBLE / to-be-swept**
-> (Open question 10) while treating the PIN's flow position and wire destination as confirmed.
+> The modal's **layout / keypad scramble** is now recovered (§11.3). What remains **UNRESOLVED in
+> static** is the **show-trigger** (Open question 10) — treat the PIN's flow position, wire
+> destination, and layout as confirmed, and the show-trigger as pending.
 
 ## 1.5 The login flow sub-state machine (CODE-CONFIRMED)
 
@@ -231,22 +239,23 @@ the front-end flow. **It supersedes two CODE-CONFIRMED-but-wrong labels in `ui_s
 
 | Sub-state | Meaning | Notes |
 |---|---|---|
-| 2 | Connect / play login-enter SFX **861010105**; reset banner Y | scene entry |
-| 3, 4, 5 | Animate the two banner panels into place | banner pan; also the option-page select target |
+| 1 | **Intro start** — seed the curtain/letterbox animation; play login-enter SFX **861010105** | scene entry; the field's initial value. **861010105 is a sound id, not a VFX id**, fired from the tick at the 1→2 edge |
+| 2 | Curtain / letterbox **opening** animation; reset banner Y | the "carved-stone-window / red-ribbon" intro motion is a **widget-reposition / letterbox-curtain animation** (two banner/curtain widgets advance per frame), **NOT** a spawned particle effect |
+| 3, 4, 5 | Intro reposition → settle → **reveal** the login-form widgets | banner pan; also the option-page select target. State 5 stops the intro anim and shows the ID/PW boxes + buttons |
 | 6 | **Login form active** — waiting for user input | the resting state of the form |
-| **29** | **OK-button credential validation** | ID len ≥ 4 (else msg **4025** → 6); PW len ≥ 1 (else msg **4026** → 6); persist Save-ID; advance to 31. **(corrects `ui_system.md`: NOT "server-list trigger")** |
+| **29** | **OK-button credential validation** | game.ver verified (mismatch → msg 2204 abort, §1.4); ID len ≥ 4 (else msg **4025** → 6); PW len ≥ 1 (else msg **4026** → 6); persist Save-ID; advance to 31. **(corrects `ui_system.md`: NOT "server-list trigger")** |
 | 30 | Quit-confirm "Yes" path | writes engine state **6 / substate 8** (quit) |
 | **31** | **Show EULA / terms-of-service accept overlay** | advances toward 32. **(corrects `ui_system.md`: NOT "Help screen")** |
 | 32 | Wait for EULA "agree" | overlay visible AND accept flag set → advance to 33 |
 | 33 | Press-OK transition → begin server-list fetch | sets up the fetch (advance to 34) |
-| 34 | Start the server-list fetch thread (lobby port 10000) | thread = a black box; see `login_flow.md` §2.1 |
-| 35 | Wait for server-list reply | thread sets 36 on completion |
+| 34 | Start the server-list fetch thread (lobby port 10000) | a **blocking worker thread** separate from the main overlapped connection; see `login_flow.md` §2.1 |
+| 35 | Wait for server-list reply | thread sets 36 on completion (or signals an error count) |
 | 36 | Consume server list (§2.3 / §2.4) | empty → msg **4027** → 6; connect-fail → msg **4028** → 6; else render and go 37 |
 | 37 | Server selected | entry click commits the selection + persists `Lastserver` (§2.5) |
-| 38 | Start the channel-endpoint fetch thread (lobby port `10000 + selected id`) | see `login_flow.md` §2.2 |
-| 39 | Wait for endpoint reply | thread sets 40 |
-| 40 | **Join handoff** | collect the second-password / PIN (§1.4a) if not already entered; build the TAB credential string, rebuild the secure context, hand to the game connection; engine state set to **7** as a guard. The login window then exits. |
-| 41 | Transition complete; login window exits | — |
+| 38 | Start the channel-endpoint fetch thread (lobby port `10000 + selected id`) | second blocking worker thread; see `login_flow.md` §2.2 |
+| 39 | Wait for endpoint reply | thread copies a 30-byte `"host port"` string into the window, sets 40 |
+| 40 | **Join handoff** | collect the second-password / PIN (§1.4a) if not already entered; build the TAB credential string, rebuild the secure context, start the overlapped net engine, set engine state **7** as a guard, **queue transition effect 10001 scheduled 30000 ms ahead**; advance to 41. The login window then exits. |
+| 41 | Transition complete; login window exits → loading | — |
 
 > **Sub-state 40 detail.** The TAB string is `account⟨TAB⟩option⟨TAB⟩field⟨TAB⟩"host port"`, where
 > the optional middle field carries the **second-password / PIN** (§1.4a) and the 4th field is the
@@ -256,6 +265,27 @@ the front-end flow. **It supersedes two CODE-CONFIRMED-but-wrong labels in `ui_s
 > `login_flow.md` §3–§4 and `crypto.md`; this spec only marks the boundary. (`PLAUSIBLE` for msg id
 > **4029** as the endpoint-fetch-failure analogue at sub-state 39 — not pinned to a call site —
 > Open question 1.)
+
+> **Who drives the tick (CODE-CONFIRMED).** The login window is advanced each frame by a **generic
+> per-window frame callback** (registered at scene build) that pumps input/messages, sets 2D/alpha
+> render state, updates the IME and the hardware cursor sprite, calls the window's own per-frame
+> update method, and flushes the texture manager. The login-specific work is that update method — a
+> **switch on the flow sub-state field** (`+0x238`). The intro animation, the fetch-wait-consume net
+> sequences, the credential submit, and the loading transition all live in that tick — **not** in the
+> scene builder and **not** in the click/action handler (which only *sets* the sub-state).
+
+> **Two blocking worker threads, not the main connection (CODE-CONFIRMED).** The server-list
+> (34→35→36) and channel-endpoint (38→39→40) fetches each run on their **own blocking worker thread**
+> connecting to port `10000(+offset)`, performing a blocking receive, and posting a result sub-state
+> back to the tick. The tick only **starts** the thread and **consumes** the posted result-state. The
+> lobby mini-protocol bytes (8-byte wrapper + LZ4 payload, the 8-byte server record, the 30-byte
+> endpoint string) are owned by `login_flow.md` §2.
+
+> **No login BGM (CODE-CONFIRMED absence).** No music/stream start was found anywhere in the login
+> tick or in any of its state-enter branches: the tick plays the intro **SFX 861010105** and queues
+> the transition **effect 10001**, and starts the net engine, but **issues no BGM/music start**. If a
+> login BGM exists at all it is started outside the login window (engine/scene level), not by login
+> code. A faithful rebuild should not start a login-scene music track from the login flow.
 
 > **CONFLICT with `specs/ui_system.md` §6.3 (I do not own that file).** That table marks sub-state
 > **29 = "Server-list trigger point"** and **31 = "Help screen"** as CODE-CONFIRMED. The
@@ -734,12 +764,14 @@ The camera manipulator is a scene-graph node, not an explicit eye/target pair. E
 - a current **orbit point** (a keyframe-derived world position), and
 - an **orientation** (yaw/pitch quaternion),
 
-then sets the camera eye to **`eye = orbitPoint + Rotate(orientation, boomVector)`**, where the boom
+then sets the camera eye to **`eye = orbitPoint + Rotate(orientationQuat, boom)`**, where the boom
 vector points from the target out to the eye and its length (the zoom distance) is clamped to **≤ 22
-units**. **The look-at target is the active orbit point** — *not* the stage origin (the stage origin
-is only the anchor the keyframes are added to). The base pitch is **≈ −30°** (downward), modulated by
-each keyframe's stored yaw/pitch; so the camera looks slightly **down at the standing row from in
-front**.
+units**. **The look-at target is the active orbit point** (≈ world `(512, 87, −9652)` over the row
+pivot ≈ `(508, 70, −9759)`) — *not* the stage origin (the stage origin is only the anchor the
+keyframes are added to). The base **pitch ≈ −30°** (downward), modulated by each keyframe's stored
+yaw/pitch; so the camera looks slightly **down at the standing row from in front**. The **live
+keyframe is 1** (§3.5.2). (Recall the per-slot facing rule of §3.3.2: yaw 0 faces the camera; yaw π is
+locked / new / creating.)
 
 - **Look-at target (CONFIRMED):** the active (keyframe-1) orbit point ≈ world **(512, 87, −9652)**,
   which sits essentially **over the actor-row pivot ≈ (508, 70, −9759)** (§3.6 / §3.7.2) — slightly
@@ -747,13 +779,13 @@ front**.
 - **Eye (MEDIUM):** the exact eye world coordinate depends on the runtime boom vector and the live
   yaw/pitch quaternion; the **look-at identity is CONFIRMED**, the precise eye is MEDIUM (debugger-
   confirmable on a live select frame).
-- **Easing (CONFIRMED constants; duration MEDIUM):** when the active keyframe changes, the orbit point
-  is **linearly interpolated** and the orientation **spherically interpolated (slerp)** over a
+- **Easing (CONFIRMED constants; duration UNVERIFIED):** when the active keyframe changes, the orbit
+  point is **linearly interpolated** and the orientation **spherically interpolated (slerp)** over a
   normalized progress `t`. For transitions among the inner keyframes (both indices ≥ 2) an extra
   **quadratic ease `(1 − t)·(2t)`** is layered over the linear blend ("linear-then-quadratic" /
-  ease-in-out); the keyframe-0↔1 transition uses the plain linear blend only. The progress normalizer
-  decodes to **≈ 2000 ms (2.0 s)** per transition. **MEDIUM:** an existing tool annotation says
-  "0.5 s"; the decoded constant gives 2.0 s — resolve by timing the live transition. (Open question 12.)
+  ease-in-out); the keyframe-0↔1 transition uses the plain linear blend only. The tween normalizer
+  decodes to **≈ 2.0 s** per transition. **UNVERIFIED:** an old note reads "0.5 s"; the decoded
+  constant gives ≈ 2.0 s — resolve by timing the live transition. (Open question 12.)
 - **Auto-advance (MEDIUM):** no timer was found that auto-cycles the keyframe index; statically the
   camera rests on keyframe 1 unless an external caller (e.g. a UI/event handler responding to slot
   selection) requests another index. Whether selecting a different slot switches the keyframe was not
@@ -780,8 +812,10 @@ easing law as authoritative, and the precise eye / tween duration as tunable unt
 The select scene does **not** author a bespoke select-only sky or light rig. It activates the **real
 area-0 world environment** (§3.5.1 correction) and **freezes the world clock at 14:30** (time-of-day
 value 52200, weather sub-index 48). The sky, sun direction, fog and ambient colour are therefore
-whatever the **area-0 map + sky data + the 14:30 clock** produce — a **parametric sky**, not a `.box`
-skybox file (no skybox file exists in the VFS for this scene; §3.7.4).
+whatever the **area-0 map + the area-0 sky data + the 14:30 clock** produce — a **parametric sky**,
+not a `.box` skybox file (no skybox file exists in the VFS for this scene; §3.7.4). The sky-parameter
+files it reads are the **area-0 (`…0.bin`) family**, not the area-015 family — see the supersede in
+§3.6.3.
 
 ### 3.6.1 Lighting rig (CODE-CONFIRMED counts; colours UNVERIFIED)
 
@@ -803,32 +837,54 @@ The select scene explicitly **zeroes a sky/fog blend scalar** (a fog-density / s
 0.0) — i.e. **minimal / no distance fog** behind the preview row, so the row reads clearly. The exact
 visual meaning of the zeroed scalar is MEDIUM (needs a live read of the resulting fog density/colour).
 
-### 3.6.3 Sky-data asset set for the char-select area (CODE-CONFIRMED paths; black-box VFS)
+### 3.6.3 Sky-data asset set for the char-select area (CODE-CONFIRMED — area 0, NOT area 015)
 
-The sky/environment system is a **per-area index** of binary `.bin` parameter files under
-`data/sky/map/` (with human-readable `.txt` companions), **not** a single skybox file. The char-select
-area uses the **area-015** sky index. The verified files (sizes are interoperability facts):
+> **SUPERSEDE (CODE-CONFIRMED) — the char-select sky is the area-0 (`…0.bin`) family, NOT the
+> area-015 family.** An earlier version of this section asserted the char-select scene reads the
+> **area-015** sky index (`fog015.bin`, `light015.bin`, `map015.txt`, …). A re-read of the scene
+> builder and of **every** sky/environment loader shows that is wrong: each loader builds its
+> filename from the **raw active-area code 0**, so the char-select scene loads the **`…0.bin`**
+> family (`fog0.bin`, `light0.bin`, `clouddome0.bin`, …) under `data/sky/dat/`. The `…015.*` family
+> belongs to whatever in-game zone maps to area 15 and is **unrelated to char-select**. The earlier
+> "area-015" reading was an existence-inference from on-disk file presence, contradicted by the
+> binary. (The scene builder also derives an `area → region` mapped index, but **no** sky/effect path
+> is ever built from that mapped index — only from the raw area code 0.)
 
-| Role | VFS path | Size | Confidence |
+The sky/environment system is a **per-area family** of binary `.bin` parameter files (with optional
+human-readable `.txt` companions), **not** a single skybox file. Every member's filename is built
+from the **raw active-area code** — char-select = **0** → index string `"0"` (and folder string
+`"000"`, §3.5.1). The sky family the char-select scene actually reads:
+
+| Role | VFS path (area-0) | Id source | Confidence |
 |---|---|---|---|
-| Fog parameters | `data/sky/map/fog015.bin` | 204 B | CONFIRMED |
-| Day-cycle directional light | `data/sky/map/light015.bin` | 5,312 B | CONFIRMED |
-| Per-cell light-map references | `data/sky/map/light_map015.txt` | 14,458 B | CONFIRMED |
-| Per-area effect placement table | `data/sky/map/map015.txt` | 44,091 B | CONFIRMED |
-| Sky render options | `data/sky/map/map_option015.bin` | 40 B | CONFIRMED |
-| Sky material / shader params | `data/sky/map/material015.bin` | 9,792 B | CONFIRMED |
-| Local point-light sources | `data/sky/map/point_light015.bin` | 4,748 B | CONFIRMED |
-| Weather parameters | `data/sky/map/weather015.bin` | 240 B | CONFIRMED |
-| Wind direction/strength | `data/sky/map/wind015.bin` | 8 B | CONFIRMED |
+| Sky render options | `data/sky/dat/map_option0.bin` | raw area code 0 | CODE-CONFIRMED |
+| Fog parameters | `data/sky/dat/fog0.bin` | raw area code 0 | CODE-CONFIRMED |
+| Wind direction / strength | `data/sky/dat/wind0.bin` | raw area code 0 | CODE-CONFIRMED |
+| Cloud dome + cloud cycle | `data/sky/dat/clouddome0.bin`, `data/sky/dat/cloud_cycle0.bin` | raw area code 0 | CODE-CONFIRMED |
+| Star dome | `data/sky/dat/stardome0.bin` | raw area code 0 | CODE-CONFIRMED |
+| Day-cycle directional light | `data/sky/dat/light0.bin` | raw area code 0 | CODE-CONFIRMED |
+| Sky material / colour table | `data/sky/dat/material0.bin` | raw area code 0 | CODE-CONFIRMED |
 
-Per-area light/material parameters are also embedded directly under `data/map000/`
-(`light0.bin` 5,312 B; `material0.bin` 9,792 B). Shared sky textures (cloud / sun / moon / star /
-lens-flare / precipitation) live under `data/sky/texture/` and are global to all areas.
+The per-area region / gather tables are likewise built from the area string `"000"`
+(`map000.bin`, `regiontable000.bin`, `region000.bin`, `gathertable000.bin`). Per-area light/material
+parameters are also embedded directly under `data/map000/` (`light0.bin` 5,312 B; `material0.bin`
+9,792 B). Shared sky textures (cloud / sun / moon / star / lens-flare / precipitation) live under
+`data/sky/texture/` and are global to all areas.
 
-> **UNVERIFIED:** whether the char-select clock value `48` and the area-015 sky index are the same
-> "area/sub" index, and how the area-0 world maps to the area-015 sky files, was not pinned (black-box
-> VFS witness only; no on-disk table mapping was found). The per-family files above are the concrete
-> assets the scene's parametric sky reads.
+> **Two distinct path families — do not confuse them.** The runtime sky family is
+> `data/sky/dat/…0.bin` (id from the raw area code). The separate `data/sky/map/…%d.*` directory
+> (e.g. `data/sky/map/map%d.txt`, `fog015.bin`) is a **different** subsystem and is **not** the file
+> family char-select loads. In particular the `data/sky/map/map%d.txt` template is referenced by
+> **no live code path** in this build (a dead / editor-only slot) — it is **not** the char-select
+> effect placement table. The char-select effect placement table, where one exists, is
+> `data/effect/map%s.txt` with `%s = "000"` → `data/effect/map000.txt` (§3.6.5).
+
+> **The char-select clock is 14:30, weather sub-index 48 (CODE-CONFIRMED).** The triple an earlier
+> reading mistook for "area 52200 / sub 0x30" is the **game-clock / weather** argument, not an area
+> id: `52200` = time-of-day in seconds (= 14:30, ≤ 86400 bounds-checked), `48` = a discrete weather
+> sub-index (bounded at 48). The scene reuses the area-0 world environment frozen at 14:30; the
+> sun / ambient / fog colours are whatever the **area-0** sky data produce at that clock
+> (§3.6.1 / §3.6.2).
 
 ### 3.6.4 Per-cell lightmaps (CODE-CONFIRMED)
 
@@ -837,24 +893,67 @@ The backdrop cell carries a baked lightmap bitmap under `data/effect/map/` named
 are pre-baked ambient/occlusion lighting for the terrain. (~3,791 such lightmaps exist across all
 areas; the char-select cell's is present.)
 
-### 3.6.5 Ambient VFX anchored at the row centre (CODE-CONFIRMED placement)
+### 3.6.5 Ambient FX — one code-spawned effect + the placement engine (CODE-CONFIRMED placement; visual roles UNVERIFIED)
 
-A persistent background **map effect** is spun up once at scene build and lives in the active-effect
-list for the duration of the select screen (it is a standing background effect, not a one-shot). It is
-anchored at world **(508.48, 69.89, −9758.57)** — the **centre of the preview character row**, framed
-dead-centre by the camera (this is the same point as the terrain-init pivot, §3.7.2). The concrete
-VFS asset for this effect is the yellow lens-flare / glow effect file
-`data/effect/xeff/380003001.xeff` (23,675 B) — the client's numeric effect id is the family root
-**380003000** (no file of that exact name exists; the shipped variant is `…001`). A companion ring
-particle effect `data/effect/xeff/zone_sel_u.xeff` (26,947 B) is also part of the char-select ambient
-set, drawn around the platform centre. A map ambient **sound/effect cue** (a numeric map-cue id) is
-also pushed at scene start.
+The char-select scene's fixed ambient FX come from **two distinct mechanisms**, both feeding the same
+pooled map-effect spawner; the scene also pushes one ambient **sound** cue.
 
-> **MEDIUM:** whether the effect-id-to-filename resolution drops the last digit (family `380003000` →
-> first variant `380003001.xeff`) or selects `…001` directly is not byte-pinned; and which of
-> `380003001.xeff` / `char_select-u.xeff` / `zone_sel_u.xeff` fires as the primary ambient vs the ring
-> overlay depends on the scene-config slot (the placement at the row centre is CONFIRMED). The
-> effect-file byte format is owned by `formats/xeff.md` / the effect catalogue — not this spec.
+**(a) The single code-spawned ambient effect (CODE-CONFIRMED).** The scene builder spawns **exactly
+one** ambient map effect from a code immediate: effect id **380003000**, at world
+**(508.48, 69.89, −9758.57)** — the **centre of the preview character row**, framed dead-centre by the
+camera (the same point as the terrain-init pivot, §3.7.2) — with **identity orientation** and **scale
+1.0**. It is pooled and inserted into the active-effect list, so it is a **standing background effect
+for the whole select session**, not a one-shot. This is the only effect-id immediate reachable from
+the scene builder.
+
+> **Effect-id → file resolution is UNVERIFIED.** No `380003000.xeff` file exists in the VFS, and the
+> id→filename mapping is not recoverable from the text tables alone (the `380003xxx` family is
+> labelled "ambient/env" by filename convention only, and the `effect_id` column of the placement
+> manifests does not index `xeffect.txt` by line). The shipped variant is plausibly `380003001.xeff`
+> (a yellow lens-flare / glow), but that is INFERRED-from-filename, not byte-pinned. The effect-file
+> byte format and the id→file resolution are owned by the effect catalogue / `formats/xeff.md`, not
+> this spec.
+
+**(b) The per-area ambient-effect placement engine (CODE-CONFIRMED mechanism; no records for area 0).**
+Beyond the single code-spawned effect, fixed-anchor ambient effects (braziers, waterfalls, portals in
+*other* areas) are placed by a **per-frame, per-area** engine that, on area change, loads a text
+manifest `data/effect/map<area>.txt` and then proximity- and time-of-day-gates each record's
+spawn / despawn through the same pooled map-effect path. For char-select the active area is **0**, so
+the manifest path is **`data/effect/map000.txt`**. The shared manifest format is documented in
+`formats/effect_placement_map.md`: a leading record count, then tab-delimited records
+`effect_id ⟨tab⟩ pos_x ⟨tab⟩ pos_y ⟨tab⟩ pos_z ⟨tab⟩ scale ⟨tab⟩ time_start_hour ⟨tab⟩ time_duration`.
+
+> **`data/effect/map000.txt` is ABSENT from the shipped VFS (CONFIRMED-from-VFS).** The placement
+> engine runs for area 0 but finds **no manifest file** — so it spawns **no** brazier / waterfall /
+> portal records for char-select. A VFS census of all present `data/effect/map*.txt` (19 files, none
+> for area 0) found **zero** records whose XZ anchor falls inside the char-select cell, and **none**
+> of the three char-select-named effect files (`char_select-u.xeff`, `zone_sel_u.xeff`,
+> `zone_sel2-u.xeff`) is referenced by any manifest. So for this build the **only manifest-or-code
+> effect placed in the scene is the single code-spawned 380003000**; everything else visible is cell
+> geometry, the cell water layer, or character-preview motion VFX.
+
+**(c) Ambient sound cue (CODE-CONFIRMED).** The builder also pushes the map-cue id **924000001** on
+the ambient sound channel (kind-3). This is a **sound** cue, not a visual — and in char-select it is
+not even rendered audible, because the per-frame ambient-sound driver bails when there is no local
+player (none exists in the select scene). It effectively registers / stops the ambient channel. (The
+audible char-select music is the BGM cue **920100200** of §3.8, on the separate music slot.)
+
+**Visual-source attribution for the cavern dressing (braziers / waterfall / portal):**
+
+| Visual feature | Source | Confidence |
+|---|---|---|
+| Central ambient FX (row centre) | code-spawned effect **380003000** at (508.48, 69.89, −9758.57), scale 1.0, identity quat | placement CODE-CONFIRMED; visual role UNVERIFIED |
+| Waterfall / blue "portal" behind the row | the cell's own **`.fx3` / `.fx5` water layers** (animated water mesh + water fog; textures `_water_new01/03/04`), rendered by the terrain system independent of the effect engine | INFERRED (water layer present in the cell; full confirm needs an `.fx3` decode) |
+| Brazier flames | **AMBIGUOUS / UNVERIFIED** — no `map000.txt` record exists; either baked into the cell `.bud` mesh, or carried inside the composite `char_select-u.xeff` placed by a path not yet found | UNVERIFIED |
+| Front-end effect files present in the VFS | `char_select-u.xeff` (68 sub-effects, first texture family `lflare-…` = yellow lens-flare / torch corona), `zone_sel_u.xeff` + `zone_sel2-u.xeff` (11 sub-effects each, first texture `ring11b-…` = portal ring; the two differ only in the low byte of their effect id) | files CONFIRMED-present; none referenced by any placement manifest — their spawn path is UNRESOLVED |
+
+> So the cavern look = **the cell geometry + lighting + the cell water layers + the single
+> code-spawned 380003000 effect** — not a different cell and not a 907-entry placement overlay. A
+> faithful rebuild should load `map000` cell `d000x10000z9990`, spawn one ambient effect (family
+> 380003) at world (508.48, 69.89, −9758.57), render the cell `.fx3`/`.fx5` water, and **not** attempt
+> to load a `data/effect/map000.txt` (absent) or any `data/sky/map/map%d.txt` placement table (dead
+> path). The brazier source (`.bud` geometry vs the xeff) and the role of the three front-end `.xeff`
+> files remain UNVERIFIED pending an `.fx3` decode and/or a live-frame effect-list census.
 
 ## 3.7 Char-select 3D scene composition — world, cell, stage, assets (CODE-CONFIRMED + black-box VFS)
 
@@ -963,6 +1062,63 @@ The class → skin → texture / bind / motion chain is the normal in-world chai
 > chain as CONFIRMED-present, the col-index → role mapping of `skin.txt` / `actormotion.txt` as owned
 > by the data-table / skinning specs.
 
+## 3.8 Char-select sound, music & the "character count : N" caption (CODE-CONFIRMED)
+
+### 3.8.1 BGM cue, double-music defect & the fix contract (CODE-CONFIRMED)
+
+The char-select **BGM** is sound cue **920100200**, started **unconditionally** by the select-window
+constructor (the state-4 enter / build path), with the **loop flag set**, on the single kind-0 music
+slot of the global sound manager. There is **no stop-before-play guard** at that start, and the
+select-scene teardown performs **no sound teardown** (no stop, no clear of the music slot).
+
+Because the select scene is **re-enterable** (engine state 5 → 4 on logout, and the `3/1` char-list
+forcing state 4), the BGM cue is **re-issued on every entry**. The single-slot reuse inside the sound
+manager only suppresses a duplicate when the music slot still holds the *same* valid buffer; when an
+intervening in-game session has swapped or orphaned that slot, the re-issued 920100200 starts a
+**second overlapping voice → double music**.
+
+> **SUPERSEDE** the earlier note that "no front-end code starts the char-select BGM." The
+> select-window constructor itself starts it (state-4 enter). **Confidence:** the start call site,
+> the missing stop-on-exit, and the unconditional re-issue are CODE-CONFIRMED; *which* concrete
+> re-entry leaves two voices live depends on the in-game zone-BGM slot handling at runtime
+> (debugger-confirmable).
+
+**Fix contract for a faithful rebuild:** **(1)** stop cue **920100200** on char-select scene-exit, and
+**(2)** guard the re-issue so entering the scene with that cue already playing on the music slot is
+**idempotent** (do not start a second voice). This restores the intended single-BGM-voice behaviour
+without changing the audible track.
+
+> The separate ambient sound cue **924000001** (§3.6.5c, kind-3 channel) is **not** the BGM and is not
+> audible in char-select; do not conflate the two.
+
+### 3.8.2 The "character count : N" top caption (CODE-CONFIRMED)
+
+The top-of-screen "character count : N" caption is built by a dedicated helper:
+
+- **Template:** MessageDB template id **2209** — a `%d`-bearing format string in the message DB
+  (`msg.xdb`, CP949). The id **2209** is a hardcoded immediate (not a config-resolved global), so it
+  is unambiguous; the localized template text is VFS-only and not reproduced here.
+- **Count source `N`:** the **BillingState character-count field** (dword index 32, i.e. byte offset
+  `+0x80` in the BillingState singleton) — the **same field the delete response decrements**
+  (`3/4 SmsgCharManageResult`, subtype 2; §5).
+- **Format / inject:** a single `snprintf` of template 2209 with the one integer `N`, assigned to the
+  caption widget.
+- **Refresh points:** built on the initial select-window build, and re-rendered **after create and
+  after delete** (the count-changed paths re-read BillingState `+0x80` and re-format the caption).
+
+> **SUPERSEDE** the earlier guesses that the count caption was id **48001 / 2206** (or 48003/48004/
+> 48005). Those are **per-slot info-line / chrome label** ids (config-resolved; see §11.5d), **not**
+> the count caption. The top "character count : N" caption is **MessageDB id 2209**, count-bound to
+> **BillingState `+0x80`**. (CODE-CONFIRMED; the literal Korean template behind id 2209 is VFS-only.)
+
+### 3.8.3 No-character → create branch (CODE-CONFIRMED)
+
+When the account has no character on a slot, the **Create** path (button id 4, or the keyboard
+create-shortcut) scans the five spawn descriptors and acts on the **first slot whose name word is
+zero** — the empty slot, marked by the **`"@BLANK@"`** sentinel (§3.2 / §4.1a.1). Create is an
+**in-place sub-form of the same select window** (no new scene, no new window — §4); clicking an empty
+3D slot directly routes through the same open path (cross-ref §4 / §7).
+
 ---
 
 # 4. Character creation
@@ -1012,10 +1168,15 @@ spawn descriptor seeded with the current create choices:
 | +0x34 | class selector | **internal class id (1..4)** |
 
 The create preview is placed at the stage centre (X ≈ origin − 1536.5, Z ≈ origin − 3538 — i.e. between
-slots 2 and 3 in X and ~56 units nearer the camera than the row) and **idle-rotates** (a spin rate is
-set on this single actor, unlike the standing slot previews), so the player sees their would-be
-character before naming it. A per-class **stat preview** (six stat-label groups) is filled from the
-class template (pure display).
+slots 2 and 3 in X and **+56.5 units nearer the camera** than the row, scale **75** vs the slots' 50) so
+the player sees their would-be character before naming it. The preview is **mutually exclusive** with the
+5-slot row (the slot actors are torn down before the single create actor is built). **Rotation is under
+player control — a press-and-hold turntable (≈±2 rad/s while a rotate control is held over the preview),
+NOT a continuous auto-spin** (an earlier note describing a set idle-spin rate is superseded; CODE-CONFIRMED,
+`_dirty/campaign4/cs-flows/create-preview-behavior.md`). Changing the class rebuilds the whole actor;
+the `+`/`−` face buttons rebuild it but the visible 3D face does **not** change (face feeds only a separate
+2D portrait), and there is **no functional sex toggle**. A per-class **stat preview** (six stat-label
+groups) is filled from the class template (pure display).
 
 ## 4.3 Per-class starter equipment (CODE-CONFIRMED)
 
@@ -1182,10 +1343,11 @@ For the presentation/Godot engineer. Sound ids resolve through `sound_runtime.md
 | Id | Where |
 |---|---|
 | 861010101 | generic click / confirm (select scene) |
-| 861010105 | login-scene enter / intro cue (login sub-state 2) |
+| 861010105 | login-scene **intro SFX** (a sound, fired at login sub-state 1→2; §1.5) |
 | 861010106 | quit cue (version-mismatch quit, logout) |
 | 920100100 | loading-screen cue (Load state) |
-| 920100200 | enter-world cue (confirm slot) |
+| **920100200** | **char-select BGM** (kind-0 looping music slot; started by the select-window constructor — §3.8.1) **and** the enter-world cue (confirm slot, §7) |
+| 924000001 | char-select ambient/map cue (kind-3 channel; NOT audible in char-select — no local player; §3.6.5c) |
 | 910062000 / 910063000 / 910064000 / 910065000 | per-class create voice (classes 1 / 2 / 3 / 4 — see §4.1 map) |
 
 **Message-catalogue (`msg.xdb`) ids** (captions VFS-only):
@@ -1198,6 +1360,7 @@ For the presentation/Godot engineer. Sound ids resolve through `sound_runtime.md
 | 4025 / 4026 / 4027 / 4028 / (4029) | login error toasts (ID short / PW empty / no servers / connect fail / endpoint fail) |
 | 101 | timed-popup countdown suffix |
 | 5001–5040 (+ locale banks) | localized server names |
+| **2209** | char-select **"character count : N"** top caption template (N = BillingState char-count field; §3.8.2) |
 | 14003–14007 | class labels (create form) |
 | ~200–212 | character create/rename failure strings |
 
@@ -1228,8 +1391,8 @@ next scene.
 
 ```
 [state 1: LOGIN]
-  build login window from uiconfig.lua
-  flow sub-state: 2 → (3,4,5 banner anim) → 6 (form active)
+  build login window from uiconfig.lua   (NO login BGM is started by login code)
+  flow sub-state: 1 intro+SFX 861010105 → 2 curtain → (3,4,5 reveal) → 6 (form active)
   OK / Enter:
       version gate (msg 2204 on mismatch → quit: state 6/2)
       → sub-state 29 (validate ID≥4 / PW≥1; fail → msg 4025/4026 → sub-state 6)
@@ -1246,8 +1409,11 @@ next scene.
 
 [state 2: LOAD] → (optional state 3 OPENING) → [state 4: SELECT] on 3/1 CharacterList
 
-[state 4: SELECT]   (a 3D GScene "select" on data/map000, frozen at 14:30 — §3.5.1/§3.6/§3.7)
+[state 4: SELECT]   (a 3D GScene "select" on data/map000 area 0, frozen at 14:30 — §3.5.1/§3.6/§3.7)
   build select window + 5 live 3D preview actors from the 3/1 char list
+  start char-select BGM cue 920100200 (re-enterable -> double-music defect + fix contract, §3.8.1)
+  top caption "character count : N" = msg 2209, N = BillingState char-count (§3.8.2)
+  one code-spawned ambient effect 380003000 at (508.48, 69.89, -9758.57); no map000.txt manifest (absent)
   per-slot pick = hit-test the 3D row (Y band 70..92)
   Create (action 4) → class 0..3 → internal {4,1,3,2}, face 1..7, sex, starter gear
                       → name validate (min 2; a-z/0-9/Hangul) → send 1/6 (52B) → 3/23 result
@@ -1292,12 +1458,17 @@ next scene.
    selection, is unclear without a capture or the inbound 2-byte select reply traced.
 9. **EULA gating.** The EULA/accept overlay (sub-states 31/32) gates the server-list fetch, but
    whether it is shown every launch or only first-run (an INI/registry guard) was not determined.
-10. **Second-password / PIN modal widget tree.** The PIN's existence, its first-class "is-PIN" input
-    modelling, its ≤4-char capacity, and the fact that its value becomes the optional login-blob
-    field are RUNTIME-CONFIRMED (§1.4a). The modal's **layout is now recovered** (§11.3: modal rect,
-    the 2×5 scrambled keypad, the reset/OK/cancel tags and atlas source rects). What remains open is
-    the live re-roll-on-Reset confirmation (debugger-testable) and whether the modal can be
-    skipped/disabled per account; its labels are baked atlas art (no caption ids).
+10. **Second-password / PIN modal show-trigger (UNRESOLVED in static).** The PIN's existence, its
+    first-class "is-PIN" input modelling, its ≤4-char capacity, and the fact that its value becomes
+    the optional login-blob field are RUNTIME-CONFIRMED (§1.4a); its **layout / scramble** is recovered
+    (§11.3: modal rect, the 2×5 scrambled keypad, the reset/OK/cancel tags and atlas source rects).
+    What remains **UNRESOLVED in static** is the **show-trigger**: the keypad child window is built at
+    login-scene build, but no login sub-state (1..41) shows it and the sub-state-40 submit has no
+    in-tick PIN gate — so it is shown either by the login form/action handler as an in-place child
+    widget or by a post-submit net-reply handler in the character-management path (§1.4a). Flag pending
+    a parallel recovery / live confirmation; also open: the live re-roll-on-Reset (debugger-testable),
+    and whether the modal can be skipped/disabled per account. Its labels are baked atlas art (no
+    caption ids).
 11. **Char-select 2D class icon.** No standalone class-icon widget keyed by a class index exists in
     the char-select 2D builder; per-slot class is conveyed by the descriptor-driven 3D preview (§3.3)
     plus the slot frame art (§11.5b). If a 2D class badge is desired in the revival, it must be added
@@ -1371,13 +1542,13 @@ shipped DDS headers by a VFS harness (no pixel data extracted).
 | Atlas (VFS path) | Dims | Format | Role |
 |---|---|---|---|
 | `data/ui/login_slice1.dds` | 1024x1024 | DXT2 | Login background art + stone chrome + **baked Korean label plates** (account / password / confirm / quit / save-id words) + the gold confirm-button face + the bottom bar |
-| `data/ui/loginwindow.dds` | 1024x1024 | DXT5 | Login panel chrome (main panel art, listbox frame, scroll arrows + thumb, server-row buttons, lower confirm/cancel buttons); **also the char-select frame atlas** (shared) |
-| `data/ui/loginwindow_02.dds` | 1024x1024 | DXT2 | Server-list parchment scroll panel + channel-selector tab blocks (the variant chrome) |
-| `data/ui/InventWindow.dds` | 1024x1024 (HUD atlas) | DXT3/DXT5 | Reused for the login notice / error / quit dialogs **and** the PIN modal's framed background quad |
-| `data/ui/password.dds` | 1024x1024 | DXT3 (full mips) | PIN modal: all digit-tile glyph art and the reset / OK / cancel button art |
+| `data/ui/loginwindow.dds` | 1024x1024 | DXT5 | (byte-confirmed 1024², DXT5) Login panel chrome (main panel art, listbox frame, scroll arrows + thumb, server-row buttons, lower confirm/cancel buttons); **also the char-select frame atlas** (shared) |
+| `data/ui/loginwindow_02.dds` | 1024x1024 | DXT2 | (byte-confirmed 1024², DXT2) Server-list parchment scroll panel + channel-selector tab blocks (the variant chrome) |
+| `data/ui/InventWindow.dds` | 1024x1024 | DXT3 | Reused for the login notice / error / quit dialogs **and** the PIN modal's framed background quad (byte-confirmed 1024², DXT3) |
+| `data/ui/password.dds` | 1024x1024 | DXT3 (11 mips) | (byte-confirmed 1024², DXT3, 11-level mip chain) PIN modal: all digit-tile glyph art and the reset / OK / cancel button art |
 | `data/ui/openning_scenario.dds` | 1024x2048 | DXT5 | Intro vertical-panorama scenario strip (pre-login slideshow; the four `openning_00N.dds` 1024x768 frames are the opening slides) |
-| `data/ui/characwindow.dds` | 512x512 | RAW RGBA | Char-select window chrome (standalone char-select atlas; transparent panel) |
-| `data/ui/mainwindow.dds` | (HUD atlas) | - | Char-select composited chrome / conditional overlay button source |
+| `data/ui/characwindow.dds` | **512x512** | RAW BGRA8 | (byte-confirmed 512², uncompressed BGRA8 / `A8R8G8B8`) **exists in the VFS but is NOT bound by the catalogued create/select widgets** — likely the in-game character-info window, not the create sub-form atlas (see the CONFLICT note below and §4.6.7) |
+| `data/ui/mainwindow.dds` | 1024x1024 | DXT3 | (byte-confirmed 1024², DXT3) Char-select composited chrome / conditional overlay button source; bound by the create sub-form builder (§4.6.7) |
 | `data/ui/CarrierPigeonPerson.dds`, `CarrierPigeonAll.dds`, `tradekeepwindow.dds` | (HUD/sub-window atlases) | - | Char-select composited chrome (reused sub-window atlases) |
 | `data/ui/blacksheet.dds` | - | raw (explicit fmt) | Char-select dim/overlay sheet (dims unhovered slots / fades) |
 | `data/ui/server_icon.dds` | 128x128 | DXT2 | Per-server badge icon in the server list |
@@ -1390,6 +1561,18 @@ shipped DDS headers by a VFS harness (no pixel data extracted).
 > `data/ui/characwindow.dds` also exists in the VFS and is the dedicated char-select chrome atlas;
 > the heavily-used builder handles are `loginwindow.dds` and `mainwindow.dds`. No bespoke per-scene
 > login atlas is needed beyond this set.
+
+> **`characwindow.dds` — file exists, but the create/select widgets do NOT bind it (CONFLICT
+> logged).** A VFS read confirms `data/ui/characwindow.dds` **physically exists** (512², uncompressed
+> BGRA8) — this resolves the earlier "the string `characwindow.dds` is absent from the binary"
+> reading: the file is on disk but is loaded by a hard-coded path / table lookup rather than an
+> embedded string literal, so the two findings are **not contradictory**. However, the catalogued
+> create-sub-form widgets bind **`loginwindow.dds` / `mainwindow.dds` / `InventWindow.dds`**, **not**
+> `characwindow.dds` (§4.6.7). The most likely role of `characwindow.dds` is the **in-game
+> character-info window**, not the create/select atlas; do **not** promote it as the create atlas.
+> **UV normalization for the Godot rebuild:** divide source-pixel rects by **1024** for the 1024²
+> atlases (`loginwindow`, `loginwindow_02`, `mainwindow`, `InventWindow`, `password`,
+> `login_slice1`), and by **512** for `characwindow.dds` if/when it is used.
 
 > **Fonts.** No font files exist in the VFS. Runtime text widgets render with the OS Korean system
 > font (HANGUL charset, code page 949); the specific typeface depends on the host OS's installed
@@ -1692,9 +1875,12 @@ placeholders). All from `loginwindow.dds` unless noted.
 | Stat-number cell block (x7) | X=46/51, Y=193..286 step 24, 157x18 | 140,980 (placeholder) |
 
 The per-slot info-line **caption labels** carry caption ids **48001, 48003, 48004, 48005** (the
-name/level/position label set); additional chrome captions are **46001, 46002, 14001, 14002, 2206,
-63030** (all integer ids; text VFS-only, not reproduced). The scene-ambient VFX id is **380003000**
-(section 3.6.5 / effect catalogue); the enter-world cue is SFX **920100200** (section 9).
+name/level/position **slot-label** set, config-resolved); additional chrome captions are **46001,
+46002, 14001, 14002, 2206, 63030** (all integer ids; text VFS-only, not reproduced). The **top
+"character count : N" caption is a SEPARATE caption — MessageDB id 2209**, count-bound to the
+BillingState char-count field (§3.8.2); it is **NOT** 48001 / 2206 (those are slot labels). The
+scene-ambient VFX id is **380003000** (section 3.6.5 / effect catalogue); the char-select BGM is
+SFX **920100200** (kind-0 music slot, §3.8.1), which is also the enter-world cue (section 9).
 
 > **No standalone class-icon-by-index widget exists in the 2D builder.** Per-slot class is conveyed
 > by the descriptor-driven 3D preview (section 3.3) and the slot frame art (section 11.5b); the

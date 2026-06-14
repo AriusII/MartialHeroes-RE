@@ -151,11 +151,13 @@ public sealed class Wave8ParserTests
     /// <summary>
     /// Builds a minimal .xeff (32-byte header + one sub-effect with one keyframe).
     /// The fixture follows the CORRECTED spec: 32-byte header then sequential sub-effect blocks.
+    /// Block 0 has NO prefix — entry_count comes from first_entry_count in the header.
     /// spec: Docs/RE/formats/effects.md §A.2 File Header (32 bytes): VERIFIED.
     /// spec: Docs/RE/formats/effects.md §A.4 Sub-Effect Block Structure: CONFIRMED.
+    /// spec: Docs/RE/formats/effects.md §A.15 — block[0] prefix-free: CONFIRMED.
     ///
     /// Sub-effect layout for N=1 entry (one keyframe, frame 0 — no index prefix):
-    ///   entry_count u32 + 64B name + (4+f32) alpha curve + (4+f32)×3 scale curves
+    ///   [NO prefix for block 0] + 64B name + (4+f32) alpha curve + (4+f32)×3 scale curves
     ///   + 13B track header + 9×f32 frame0 (no index)
     /// </summary>
     private static byte[] BuildXeffWithKeyframe(
@@ -175,12 +177,11 @@ public sealed class Wave8ParserTests
         // spec: §A.2 — reserved u8[16] @ 0x0C: SAMPLE-VERIFIED.
         ms.Write(new byte[16]); // reserved, all zero
         // spec: §A.2 — first_entry_count u32le @ 0x1C: SAMPLE-VERIFIED.
-        ms.Write(Le4(1u)); // first_entry_count = 1 (matches sub-effect[0].entry_count below)
+        ms.Write(Le4(1u)); // first_entry_count = 1 — this IS block[0]'s entry count
 
-        // ── sub-effect block 0 ──────────────────────────────────────────────
-        // entry_count u32le opens each sub-effect block.
-        // spec: §A.4 — entry_count u32 opens each sub-effect block: CONFIRMED.
-        ms.Write(Le4(1u)); // entry_count = 1
+        // ── sub-effect block 0 (NO prefix) ──────────────────────────────────
+        // Block 0 has NO entry_count prefix on disk. Its entry_count = first_entry_count above.
+        // spec: §A.15 — block[0] prefix-free; first_entry_count NOT duplicated at block start: CONFIRMED.
 
         // Name table: 1 × 64 bytes (null-padded ASCII texture name).
         // spec: §A.4.1 — entry_count × 64 bytes: CONFIRMED.
@@ -339,10 +340,11 @@ public sealed class Wave8ParserTests
         ms2.Write(new byte[16]); // reserved
         ms2.Write(Le4(2u)); // first_entry_count = 2
 
-        // sub-effect block: entry_count = 2
-        ms2.Write(Le4(2u)); // entry_count
+        // sub-effect block 0: NO prefix — entry_count = 2 from first_entry_count above.
+        // spec: Docs/RE/formats/effects.md §A.15 — block[0] prefix-free: CONFIRMED.
 
         // name table: 2 × 64 bytes
+        // spec: Docs/RE/formats/effects.md §A.4.1 — entry_count × 64 bytes: CONFIRMED.
         ms2.Write(new byte[128]);
 
         // alpha curve: count=2, 2×f32

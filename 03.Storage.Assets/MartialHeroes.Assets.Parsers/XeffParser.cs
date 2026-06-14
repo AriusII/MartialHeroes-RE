@@ -87,13 +87,17 @@ public static class XeffParser
         uint firstEntryCount = BinaryPrimitives.ReadUInt32LittleEndian(span[0x1C..]);
 
         // Immediately after the 32-byte header, sub_effect_count sub-effect blocks follow.
-        // spec: Docs/RE/formats/effects.md §A.2 — "sub_effect_count blocks follow sequentially": CONFIRMED.
+        // Block 0 has NO entry_count prefix — its count comes from first_entry_count @ 0x1C above.
+        // Blocks 1..N-1 each carry a 24-byte prefix: u32 sub_id + u32[4] zeros + u32 entry_count.
+        // spec: Docs/RE/formats/effects.md §A.4 — block[0] prefix-free (entry_count from header): CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.15 — block[0] prefix-free confirmed; blocks 1..N-1 = 24-byte prefix: CONFIRMED.
         int offset = XeffHeaderSize; // 0x20
         var subEffects = new XeffSubEffect[(int)subEffectCount];
 
         for (int s = 0; s < (int)subEffectCount; s++)
         {
-            subEffects[s] = ReadSubEffect(span, ref offset, s);
+            bool isFirstBlock = s == 0;
+            subEffects[s] = ReadSubEffect(span, ref offset, s, isFirstBlock, firstEntryCount);
         }
 
         return new XeffData
@@ -107,13 +111,42 @@ public static class XeffParser
         };
     }
 
-    private static XeffSubEffect ReadSubEffect(ReadOnlySpan<byte> span, ref int offset, int subIndex)
+    private static XeffSubEffect ReadSubEffect(
+        ReadOnlySpan<byte> span, ref int offset, int subIndex,
+        bool isFirstBlock, uint firstEntryCount)
     {
-        // ─── entry_count u32le — opens each sub-effect block ─────────────────
-        // spec: Docs/RE/formats/effects.md §A.4 — entry_count u32 opens each sub-effect block: CONFIRMED.
-        EnsureBytes(span, offset, 4, $"sub_effect[{subIndex}] entry_count");
-        uint entryCount = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
-        offset += 4;
+        // ─── Block prefix / entry_count ───────────────────────────────────────
+        // Block 0 (isFirstBlock == true):
+        //   NO prefix bytes on disk. entry_count comes from the file header's first_entry_count field.
+        //   spec: Docs/RE/formats/effects.md §A.4 — block[0] prefix-free; first_entry_count from header: CONFIRMED.
+        //   spec: Docs/RE/formats/effects.md §A.15 — "block[0] has NO entry_count prefix": CONFIRMED.
+        //
+        // Blocks 1..N-1 (isFirstBlock == false):
+        //   24-byte prefix at start of block:
+        //     u32 sub_id       @ prefix+0   (observed: sequential 1..N-1 ordinal-ish)
+        //     u32[4] zeros     @ prefix+4   (four zero u32s, padding/reserved)
+        //     u32 entry_count  @ prefix+20  (the block's own entry count)
+        //   Total prefix: 6 × u32 = 24 bytes.
+        //   spec: Docs/RE/formats/effects.md §A.4 §A.15 — blocks[1..N-1] 24-byte prefix: CONFIRMED.
+        uint subId;
+        uint entryCount;
+        if (isFirstBlock)
+        {
+            // Block 0: no prefix; use first_entry_count from file header.
+            subId = 0;
+            entryCount = firstEntryCount;
+        }
+        else
+        {
+            // Blocks 1..N-1: read 24-byte prefix.
+            // spec: Docs/RE/formats/effects.md §A.4 — blocks[1..N-1] prefix: u32 sub_id + u32[4] zeros + u32 entry_count = 24 bytes: CONFIRMED.
+            const int BlockPrefixSize = 24; // 6 × u32 = 24 bytes
+            EnsureBytes(span, offset, BlockPrefixSize, $"sub_effect[{subIndex}] 24-byte prefix");
+            subId = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);         // prefix+0
+            // prefix+4..+16: four zero u32s (reserved/padding) — skip without reading.
+            entryCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 20)..]); // prefix+20
+            offset += BlockPrefixSize;
+        }
 
         // ─── A.4.1 Name table — entryCount × 64 bytes ────────────────────────
         // spec: Docs/RE/formats/effects.md §A.4.1 Name table — entry_count × 64 bytes: CONFIRMED.
@@ -233,6 +266,7 @@ public static class XeffParser
 
         return new XeffSubEffect
         {
+            SubId = subId,
             EntryCount = entryCount,
             TextureNames = texNames,
             AlphaKeys = alphaKeys,

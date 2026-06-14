@@ -100,8 +100,8 @@ The core (layers 01–04) is built and covered by **10 xUnit test projects** (on
 ### Recovered asset mappings (the chains that make the world render)
 - **Terrain texture:** cell `.ted` `TextureIndexGrid` byte → cell `.map` `TERRAIN/BUILDING TEXTURES[idx-1].intTexId` → `bgtexture.txt[id]` → `data/map000/texture/<rel>.dds`. Textures are **global under `map000`** for all areas.
 - **Character skin:** `.skn` `IdA` → `data/char/skin.txt` col4 → col5 `tex_id` → `data/char/tex{512512|10241024|…}/{id}.png`.
-- **Character bind/idle:** `.skn` `IdB` → `data/char/bind/g{IdB}.bnd`; idle motion via `data/char/actormotion.txt` (col2 == IdB → col16) → `data/char/mot/g{id}.mot`.
-- **Mob → skin:** `mob_id` → `actormotion.txt` col1 → col2 `skin_class` → `g{skin_class}.bnd` and the `.skn` whose `IdB == skin_class`.
+- **Character skeleton (CORRECTED — there is NO `g{IdB}.bnd` rule):** IDA proved the binary has no `g%d.bnd` printf. Skeletons are pre-loaded by NAME from `data/char/bind/bindlist.txt` (only `g1..g4.bnd` exist: Musa/Salsu/Dosa/Monk), registered into a pose pool, then SELECTED via the AnimCatalog visual map keyed by the appearance slot `IdB = 5·(class + 4·variant) − 24 ∈ {1,11,16,26}` → the skeleton handle in that catalog record. `classGroup` 6/11 is only an outfit/texture-family tag inside the overlay skin gids — it never picks a skeleton, which is why `g6.bnd`/`g11.bnd` don't exist. Idle motion via `data/char/actormotion.txt` (col2 == IdB → col16) → `data/char/mot/g{id}.mot`. spec: `Docs/RE/specs/frontend_scenes.md`, `_dirty/campaign4/charselect3d/skeleton-resolution.md`.
+- **Mob → skin:** `mob_id` → `actormotion.txt` col1 → col2 `skin_class` → the `.skn` whose `IdB == skin_class`; the skeleton resolves through the same catalog/IdB lookup above (not a literal `g{skin_class}.bnd`).
 - **Spawns:** `npc{tag}.arr` = 28-byte records; `mob{tag}.arr` = 20-byte records.
 - **Collision:** `.sod` = 2D XZ wall segments (ray-parity point-in-polygon). Ground height from `.ted` bilinear interpolation.
 

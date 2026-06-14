@@ -670,3 +670,53 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
   char-select rebuild (load the map000 backdrop + the 3D actor row + the camera/environment/VFX + the 2D
   overlay) from the promoted spec; a front-3/4 preview framing; the format-table loaders; the IDB
   annotation + `names.yaml` sync. Journal authored by the Top Orchestrator (main session).
+
+## 2026-06-14 — CAMPAIGN 4: front-end deep comprehension (Login + Char-Scene) + faithful fixes
+
+- RECOVERY (READONLY static IDA on `doida.exe` 0x400000 / sha `63fcaf8e…`, ≤3 readers per sub-wave, no
+  debugger, no IDB writes; `_dirty/campaign4/{login,charselect3d,cs-flows,vfs}/`):
+  - **Char-scene composition TRUTH:** the select/create scene IS map000 (area **0**, CODE-CONFIRMED —
+    every sky/env loader builds its name from raw area 0) — the single cell `d000x10000z9990.bud`
+    (17 objects) + its `.fx3/.fx5` water + exactly **ONE** code-spawned ambient effect **380003000** at
+    (508.48, 69.89, −9758.57). There is NO placement manifest for area 0 (`data/effect/map000.txt`
+    absent; the `data/sky/map/map%d.txt` table is dead). The "cavern" = the cell geometry + lighting +
+    water + that one effect, NOT a different cell. SUPERSEDES the earlier "area 015/52200" inference.
+  - **Caption** `character count : N` = MessageDB id **2209** (SUPERSEDES 48001/2206); N = the
+    BillingState char-count field (also decremented by the delete-response).
+  - **Double-music root cause:** char-select BGM = cue **920100200**, started unconditionally by the
+    select-window ctor with NO stop-before-play guard, teardown does no sound teardown, the scene is
+    re-enterable → the cue re-issues on the single BGM slot → overlap.
+  - **Skeleton resolution (resolves the g6/g11 gap):** the binary has NO `g%d.bnd` printf. `g1..g4.bnd`
+    are pre-loaded by name from `bindlist.txt`; the skeleton is SELECTED via the AnimCatalog visual map
+    keyed by `IdB = 5·(class+4·variant)−24 ∈ {1,11,16,26}`. classGroup 6/11 is only an outfit tag →
+    g6/g11 never needed. CORRECTS the CLAUDE.md `g{IdB}.bnd` rule.
+  - **PIN modal show-trigger (RESOLVED static):** shown UNCONDITIONALLY after login-OK (login tick
+    substates 29→31→32 SetVisible); `DName::isPin` is DEAD (zero xrefs); the PIN rides as the **3rd
+    tab-delimited field** of the state-40 credential blob fed to the secure-context rebuild (no standalone
+    PIN opcode). Login states 29/31/32 are PIN-show/poll, NOT EULA (corrects the prior tick labelling).
+  - **Camera (RESOLVED):** ONE fixed camera (live keyframe 1) frames all 5 slots; slot select/hover does
+    NOT re-aim or zoom (only highlight+anim+labels); the camera `event` is a mouse-wheel dolly only; the
+    create-mode +56.5u is an ACTOR offset, not a camera move. Framing law
+    `eye = orbitPoint + Rotate(quat, boom)`.
+  - **Login state machine 1..41**, credential capture, server/channel fetch (blocking worker threads,
+    LZ4), intro = SFX 861010105 + a curtain/letterbox widget animation (no login BGM), transition effect
+    10001 @ 30000 ms — recovered.
+- PROMOTION (REWRITE, firewall PASS — no addresses/pseudo-C/Korean): `specs/frontend_scenes.md`
+  (§1.5 login flow, §3.5/§3.6/§3.8 char-scene truth + BGM/caption/camera, §4 create sub-form geometry +
+  preview + class permutation `{0,1,2,3}→{4,1,3,2}`, §11 atlas formats), `opcodes.md` +
+  `packets/cmsg_char_{create,enter,rename,select}.yaml` (1/6 create 52B body, 1/9 enter version-token,
+  1/13 rename, 1/7 = dual manage/delete, 1/14 = slot-move), `formats/effects.md` (§A.2/§A.4/§A.15 the
+  block[0]-has-no-prefix correction). `names.yaml`: 0x10007 → `CmsgManageCharacter`, 0x1000e →
+  `CmsgMoveCharacterSlot`.
+- ENGINEERING (build 0/0, 1300+ tests green): **XeffParser fixed** — block[0] carries no entry-count
+  prefix (count comes from header `first_entry_count @ 0x1C`); blocks 1..N-1 have a 24-byte prefix; the
+  front-end `char_select-u.xeff` (68 sub) + `zone_sel_u.xeff` (11) now parse (Parsers 437 tests incl. 5
+  new). **Godot char-select:** the colored-cube bug was `SkinnedCharacterNode.Setup` forcing a RED debug
+  material and ignoring the resolved albedo (+ a `_meshInstance.Mesh` pointing at an empty mesh causing
+  per-frame `p_surface` errors) → fixed, the 4 starters are textured; the stray blue/red "flying pixels"
+  were the xeff-parse-fail fallback emitters → removed; the double-music `_shot.gd` autoload artefact →
+  removed; characters were out of frame (placed at Y=0 under the platform) → placed at the platform
+  surface Y≈70 with the camera reframed (full-body, lower-centre, per the official screenshot).
+- Remaining: wire the now-parsing front-end effects (brazier/portal) into the Godot scene; Login/PIN/
+  ServerList Godot fidelity rebuild from the confirmed atlas/flow; the server/channel reply record layout
+  + enter-world handshake; Phase-D IDB annotation. Journal authored by the Top Orchestrator (main session).

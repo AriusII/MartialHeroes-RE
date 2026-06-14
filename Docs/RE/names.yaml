@@ -743,10 +743,13 @@ opcodes:
   # 1:6 has a CONTESTED second meaning (52-byte character-create body without the 0x2B login
   # sentinel) pending a capture — see Docs/RE/packets/1-6_login_or_create.yaml. Keep ONE row.
   0x10006: { name: "CmsgLoginRequest",     direction: "C2S", tuple: "1:6" }
-  0x10007: { name: "CmsgSelectCharacter",  direction: "C2S", tuple: "1:7" }
+  # 1:7 is the dual-purpose manage opcode: it carries BOTH slot-select and delete, discriminated by a
+  # 2nd "mode" byte (delete mode value UNVERIFIED 1-vs-2 — pending a capture). See cmsg_char_select.yaml.
+  0x10007: { name: "CmsgManageCharacter",  direction: "C2S", tuple: "1:7" }
   0x10009: { name: "CmsgEnterGameRequest", direction: "C2S", tuple: "1:9" }
   0x1000d: { name: "CmsgRenameCharacter",  direction: "C2S", tuple: "1:13" }
-  0x1000e: { name: "CmsgDeleteCharacter",  direction: "C2S", tuple: "1:14" }
+  # 1:14 is slot-MOVE, not delete (delete rides 1:7 above) — see 1-14_delete_character.yaml (SUPERSEDED).
+  0x1000e: { name: "CmsgMoveCharacterSlot", direction: "C2S", tuple: "1:14" }
   0x22710: { name: "CmsgKeepalive",        direction: "C2S", tuple: "2:10000" }  # compressed-only ping, ~20s timer; 10000 = 0x2710
   0x20007: { name: "CmsgChat",             direction: "C2S", tuple: "2:7" }  # single sender for ALL everyday chat; first payload byte = channel code (say/party/guild/shout/alliance/whisper); supersedes the earlier CmsgWhisper label (whisper is one channel, not a separate opcode)
   0x2000d: { name: "CmsgMoveRequest",      direction: "C2S", tuple: "2:13" }

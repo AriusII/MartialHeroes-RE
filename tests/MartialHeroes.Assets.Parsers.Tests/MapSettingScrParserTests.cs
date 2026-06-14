@@ -198,8 +198,7 @@ public sealed class MapSettingScrParserTests
         //   "record count = file_size / 84 (exact multiple required)".
         byte[] bad = new byte[85]; // 85 is not a multiple of 84
 
-        Assert.Throws<InvalidDataException>(
-            () => MapSettingScrParser.Parse(new ReadOnlyMemory<byte>(bad)));
+        Assert.Throws<InvalidDataException>(() => MapSettingScrParser.Parse(new ReadOnlyMemory<byte>(bad)));
     }
 
     [Fact]

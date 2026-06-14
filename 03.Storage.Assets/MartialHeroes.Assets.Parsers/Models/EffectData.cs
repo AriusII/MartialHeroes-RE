@@ -12,15 +12,26 @@ namespace MartialHeroes.Assets.Parsers.Models;
 /// </summary>
 /// <remarks>
 /// spec: Docs/RE/formats/effects.md §A.4 Sub-Effect Block Structure: CONFIRMED by sample byte-walkthrough.
-/// The file header (§A.2) is 32 bytes. After the header, <c>sub_effect_count</c> sub-effect
-/// blocks follow sequentially, each starting with its own <c>entry_count</c> u32.
+/// The file header (§A.2) is 32 bytes. After the header, <c>sub_effect_count</c> sub-effect blocks follow.
+/// Block 0 has NO prefix — its entry_count comes from the file header's first_entry_count field.
+/// Blocks 1..N-1 each begin with a 24-byte prefix: u32 sub_id + u32[4] zeros + u32 entry_count.
+/// spec: Docs/RE/formats/effects.md §A.4 §A.15 — block[0] prefix-free, blocks[1..N-1] 24-byte prefix: CONFIRMED.
 /// </remarks>
 public sealed class XeffSubEffect
 {
     // ─── Name table ─────────────────────────────────────────────────────────
     /// <summary>
+    /// Sub-effect identifier present in the 24-byte prefix of blocks 1..N-1 (u32 at prefix offset +0).
+    /// Always 0 for block 0 (no prefix).
+    /// spec: Docs/RE/formats/effects.md §A.4 — sub_id u32 @ prefix+0 (blocks 1..N-1 only): CONFIRMED.
+    /// </summary>
+    public required uint SubId { get; init; }
+
+    /// <summary>
     /// Number of entries in this sub-effect (drives name table, curve passes, and keyframe array).
-    /// spec: Docs/RE/formats/effects.md §A.4 — entry_count u32 opens each sub-effect block: CONFIRMED.
+    /// For block 0, sourced from the file header's first_entry_count (§A.2). For blocks 1..N-1, read
+    /// from the 24-byte block prefix at offset +20.
+    /// spec: Docs/RE/formats/effects.md §A.4 — entry_count in header for block[0]; prefix+20 for blocks 1..N-1: CONFIRMED.
     /// Observed range: 1–41.
     /// </summary>
     public required uint EntryCount { get; init; }
@@ -235,9 +246,10 @@ public sealed class XeffData
     public required byte[] Reserved { get; init; } // length 16
 
     /// <summary>
-    /// Entry count for the first sub-effect block (convenience copy from header offset 0x1C).
-    /// Also present at the start of sub-effect block 0.
+    /// Entry count for the first sub-effect block (stored in header at offset 0x1C).
+    /// Block 0 has NO entry_count prefix on disk — this header field is the sole source of block 0's count.
     /// spec: Docs/RE/formats/effects.md §A.2 — first_entry_count u32 @ 0x1C: SAMPLE-VERIFIED.
+    /// spec: Docs/RE/formats/effects.md §A.15 — block[0] prefix-free; first_entry_count NOT duplicated at block start: CONFIRMED.
     /// </summary>
     public required uint FirstEntryCount { get; init; }
 

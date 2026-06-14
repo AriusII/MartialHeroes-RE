@@ -1,7 +1,8 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED field internals; size + builder identity are static-HIGH. capture_verified: false.
+# CAPTURE-UNVERIFIED field internals; size + builder identity + delete-overload are static-HIGH;
+# the delete MODE-byte value and the delete RESPONSE opcode are UNVERIFIED. capture_verified: false.
 
-name: CmsgSelectCharacter
+name: CmsgManageCharacter
 opcode: 0x10007           # major 1, minor 7 -> (1 << 16) | 7
 direction: C2S
 size: 2                   # fixed 2-byte payload
@@ -10,34 +11,72 @@ status: hypothesis
 capture_verified: false
 
 summary: >
-  Slot select / ack on the character-select screen. Two bytes: a slot index plus a second byte
-  that distinguishes the two emit paths (select-for-play sets the flag to 1; the create-slot ack
-  path sends 0). Two emitters in the select-window action dispatcher. No inbound reply opcode was
-  attributed statically.
+  Character-MANAGE request on the character-select screen -- a dual-purpose 2-byte op: a slot index
+  plus a MODE byte that discriminates the action. The workflow-spine analysis resolves the open
+  delete-opcode question: there is NO dedicated delete opcode -- DELETE OVERLOADS this 1/7 manage op,
+  discriminated by the second (mode) byte. The plain select-for-view path sends mode 0; the delete
+  path sets the mode byte (value UNVERIFIED: 1 vs 2 -- a capture is needed). Two emitters build the
+  plain-select form in the select-window dispatcher; a third (the delete-confirm Yes path) builds the
+  delete form.
 
 # Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 2.
 fields:
   - { name: SlotIndex, type: u8 }   # 0x00  selected character slot (0..4)
-  - { name: Flag,      type: u8 }   # 0x01  select-confirm/play flag (1 on the play path; 0 on the ack path)
+  - { name: Mode,      type: u8 }   # 0x01  mode discriminator: 0 = select/view; delete sets it (1 vs 2 UNVERIFIED)
 
 notes: |
-  Static analysis only; no capture. Frame = 8-byte header + 2 = 10 bytes on the wire.
+  Static analysis only; no capture. Frame = 8-byte header + 2 = 10 bytes on the wire. Width sum
+  check: 1 + 1 = 2.
 
     0x00 (1B) SlotIndex : the chosen/highlighted character slot index (0..4). STATIC HIGH.
-    0x01 (1B) Flag      : the second byte differs by emit path:
-                          - select-for-play path  -> Flag = 1 (select-confirm / play).
-                          - create-slot ack path  -> Flag = 0.
-                          So Flag = 1 means "select this slot to play"; Flag = 0 means "ack /
-                          enter the created slot". STATIC HIGH for both emitter fills.
+    0x01 (1B) Mode      : the mode discriminator selecting which manage action this is.
+                            - 0  -> plain select / view a slot (STATIC HIGH for the select path).
+                            - delete-confirm -> a non-zero mode (the DELETE request rides this op).
+                          The exact delete mode-byte VALUE is UNVERIFIED: one lane read the actual
+                          delete-confirm sender writing mode = 1; another inferred mode = 2 by
+                          elimination (the inbound manage-result handler branches on a subtype with
+                          three values 0/1/2, and the two select emitters use 0 and 1, leaving 2 as
+                          the unobserved delete value). A live delete capture/read of the 1/7 body is
+                          needed to settle 1 vs 2.
 
-  ROLE / SEQUENCE: reached from the per-slot select action and from the created-slot ack action.
-  Working model: 1/7 selects/pre-stages a slot; the actual world entry is then driven by 1/9
-  (cmsg_char_enter.yaml). The client holds its net-busy latch while a 1/7 is in flight.
+  DELETE OVERLOAD (load-bearing resolution): there is NO dedicated delete opcode in major 1. Delete
+  rides this 1/7 manage op with the mode byte set. This supersedes the old "1/14 = delete" reading:
+  1/14 is slot-MOVE / location (cmsg_char_move.yaml), NOT delete. The 1-14_delete_character.yaml
+  SUPERSEDED marker is correct and stays.
 
-  UNKNOWNS (capture-only): whether 1/7 must precede every 1/9 or only the first selection; whether
-  any dedicated server reply exists for 1/7 (none identified statically).
+  DELETE TRIGGER CHAIN: a slot-grid control arms the selection and shows a delete-confirm window; its
+  Yes button re-enters the dispatcher as the delete sender. Guards before the delete send: the
+  net-busy latch must be clear, the selected slot must be 0..4, and the slot's occupied flag must be
+  set. The client then sets the latch, copies the slot to a pending-slot field, and sends 1/7 with
+  the mode byte set. A generic select-window click SFX plays (NOT a delete-specific cue).
+
+  RESPONSE -- CONFLICT, committed attribution PRESERVED:
+    - The COMMITTED spec attributes the delete/manage RESULT to S2C 3/4 SmsgCharManageResult,
+      subtype 2 = delete-confirmed (see packets/3-4_char_manage_result.yaml; the 3/4 handler also
+      carries the same-day delete-cooldown). This committed 3/4 attribution is AUTHORITATIVE and is
+      NOT overwritten here.
+    - UNVERIFIED ALTERNATIVE: a fresh static read of the manage-response handler suggested the
+      delete result may instead arrive on S2C 3/7 (a manage-response that branches on the subtype
+      and formats the delete cooldown). This 3/7 reading is static-only and out of that lane's
+      outbound reach; it is recorded ONLY as an UNVERIFIED alternative pending a delete capture or
+      live read. Do NOT re-point the spec to 3/7 on static evidence alone. (Separately, note that
+      raw decompiler output is known to MISLABEL the 8-byte 3/4 manage handler as "3/7"; the genuine
+      3/7 opcode is SmsgCharSpawnResult -- see opcodes.md. The two 3/7 mentions must not be conflated
+      with that mislabelling.)
+
+  ROLE / SEQUENCE: the plain-select form (mode 0) pre-stages a slot; world entry is then driven by
+  1/9 (cmsg_char_enter.yaml) -- selecting a filled slot emits 1/7 (mode 0/1 select), pressing Enter
+  emits 1/9. The delete form (mode set) is the delete request. The client holds its net-busy latch
+  while any 1/7 is in flight.
+
+  UNKNOWNS (capture-only):
+    - the exact delete mode-byte value (1 vs 2) -- breakpoint the 1/7 sender on a real delete-confirm;
+    - whether the delete result arrives on the committed 3/4 (subtype 2) or the alternative 3/7;
+    - whether the plain-select mode value is 0 for view and 1 for select-for-play, or another split;
+    - whether any dedicated server reply exists for the plain-select form (none firmly attributed).
 
   RELATED: 1/0 logout, 1/6 create, 1/9 enter, 1/13 rename, 1/14 slot-move. All gated by the single
   select-window net-busy latch.
 
-  UNBLOCKS: Client.Application SelectCharacter use-case (slot pre-stage).
+  UNBLOCKS: Client.Application SelectCharacter + DeleteCharacter use-cases (slot pre-stage; delete
+  result via 3/4 subtype 2, pending the 3/4-vs-3/7 capture).

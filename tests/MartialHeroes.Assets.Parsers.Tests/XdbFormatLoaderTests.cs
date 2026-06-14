@@ -45,6 +45,7 @@ public sealed class XdbFormatLoaderTests
             WriteU32LE(buf, off + 4, records[i].itemId);
             // unknown_8b @ +8 (8 bytes) and zero_region @ +16 (36 bytes): left zero.
         }
+
         return buf;
     }
 
@@ -90,8 +91,7 @@ public sealed class XdbFormatLoaderTests
         // A buffer that is not a multiple of 52 must be rejected.
         // spec: Docs/RE/formats/xdb_tables.md §4 — "record count = file_size / stride (must be exact)".
         byte[] bad = new byte[53]; // 53 is not a multiple of 52
-        Assert.Throws<InvalidDataException>(
-            () => XdbParser.ParseVehicleXdb(new ReadOnlyMemory<byte>(bad)));
+        Assert.Throws<InvalidDataException>(() => XdbParser.ParseVehicleXdb(new ReadOnlyMemory<byte>(bad)));
     }
 
     [Fact]
@@ -254,8 +254,7 @@ public sealed class XdbFormatLoaderTests
     {
         // spec: Docs/RE/formats/xdb_tables.md §5 — "record count = file_size / stride (must be exact)".
         byte[] bad = new byte[49]; // 49 is not a multiple of 48
-        Assert.Throws<InvalidDataException>(
-            () => XdbParser.ParseCreatureItemXdb(new ReadOnlyMemory<byte>(bad)));
+        Assert.Throws<InvalidDataException>(() => XdbParser.ParseCreatureItemXdb(new ReadOnlyMemory<byte>(bad)));
     }
 
     [Fact]
