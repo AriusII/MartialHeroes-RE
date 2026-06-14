@@ -12,11 +12,14 @@ capture_verified: false
 
 summary: >
   Enter-world request. Built by the enter-selected-character helper into a zero-initialised 40-byte
-  buffer: the chosen slot index, a 33-byte identity/session token string copied from a global
-  string, and a 4-byte derived version token. The version token is NOT a hardcoded constant: it is
-  10 x (field 5 of the on-disk data/cursor/game.ver) + 9. The enter path sends ONLY this 1/9 (it
-  does not re-send a select first; the slot was already managed via 1/7 at slot click). Server
-  replies with S2C 3/5 EnterGameAck and the client transitions into the world-enter flow.
+  buffer: the chosen slot index, a 33-byte launcher-supplied session/identity token string, and a
+  4-byte derived version token. The session token is copied from the process command-line/argv0
+  global (a launcher-supplied login token, NUL-bounded), not from the account text field. The
+  version token is NOT a hardcoded constant: it is 10 x (field 5 of the on-disk data/cursor/game.ver)
+  + 9, derived on-disk. The enter path sends ONLY this 1/9 (it does not re-send a select first; the
+  slot was already managed via 1/7 at slot click). The server first replies with S2C 3/5
+  SmsgEnterGameAck (account/billing confirm; flips the scene to the loading state), and the world
+  self-snapshot arrives separately on 4/1.
 
 # Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 40.
 # CODE-CONFIRMED: byte0 = slot, a 33-byte token string, a 4-byte version token, total 40, the rest
@@ -27,7 +30,7 @@ summary: >
 # UNVERIFIED until a capture/debugger read pins them.
 fields:
   - { name: SlotIndex,    type: u8 }            # 0x00  selected character slot (0..4)  -- CODE-CONFIRMED
-  - { name: IdentityToken, type: "bytes[33]" }  # 0x01  33B identity/session token string (asciiz within) -- offset UNVERIFIED
+  - { name: SessionToken, type: "bytes[33]" }   # 0x01  33B launcher session/identity token string (asciiz within) -- offset UNVERIFIED
   - { name: Pad,          type: "bytes[2]" }    # 0x22  alignment gap before the version dword (observed zero) -- UNVERIFIED
   - { name: VersionToken, type: u32 }           # 0x24  derived version token = 10*(game.ver field 5)+9 -- offset UNVERIFIED
 
@@ -39,27 +42,34 @@ notes: |
     0x00 (1B)  SlotIndex     : the chosen character slot, range 0..4. CODE-CONFIRMED. The slot must
                                hold a real (non-blank) character before this fires; the entering
                                latch is set so the request cannot re-fire.
-    0x01 (33B) IdentityToken : a 33-byte identity/session token string copied from a global string
-                               (the account/session name carried into enter-game), NUL-terminated
-                               within the 33-byte field. CODE-CONFIRMED source + 33-byte width; the
-                               exact intra-buffer OFFSET is UNVERIFIED (static-uncertain).
+    0x01 (33B) SessionToken  : a 33-byte session/identity token string copied from the process
+                               command-line / first-argument global -- i.e. a launcher-supplied login
+                               token, NUL-bounded within the 33-byte field. This is NOT the account
+                               text the user typed; it is the token the launcher passes on the
+                               command line. CODE-CONFIRMED source + 33-byte width; the exact
+                               intra-buffer OFFSET is UNVERIFIED (static-uncertain).
     0x22 (2B)  Pad           : a 2-byte alignment gap before the version dword; observed zero.
                                UNVERIFIED -- the exact token/dword boundary is a live-read item.
     0x24 (4B)  VersionToken  : a 4-byte version/build token. DERIVED, not constant: the client opens
                                data/cursor/game.ver from the VFS, reads field index 5, and computes
                                10 * (game.ver field 5) + 9. CODE-CONFIRMED for both the value formula
                                and its on-disk source; the OFFSET inside the 40-byte buffer is
-                               UNVERIFIED (it shares the buffer with the slot byte + token string).
-                               Cross-ref login_flow.md version handling.
+                               UNVERIFIED (it shares the buffer with the slot byte + token string,
+                               and is register-staged in the builder -- needs a debugger byte-pin).
+                               Cross-ref specs/login.md (enter-world handshake) and
+                               login_flow.md version handling.
 
   ENTER SEQUENCE (load-bearing): selecting a filled slot already emitted a 1/7 manage; pressing
   Enter emits ONLY this 1/9 (the enter handler does NOT re-send a select). So the whole select->enter
   flow is two packets: 1/7 at slot click, then 1/9 at Enter.
 
   POST-SEND LOCAL HANDOFF: before any ack, the client caches the chosen slot's per-slot spawn
-  descriptor and stat block into globals, tears down the select scene, then awaits S2C 3/5
-  SmsgEnterGameAck (packets/3-5_enter_game_response.yaml) which flips the client into the world state.
-  The chosen slot is committed locally before the ack.
+  descriptor and stat block into globals, tears down the select scene, then awaits the reply pair:
+  S2C 3/5 SmsgEnterGameAck (packets/3-5_enter_game_response.yaml) which flips the scene state to the
+  loading screen, and S2C 4/1 SmsgGameStateTick which carries the world self-snapshot and builds the
+  local player. The 3/5-vs-4/1 arrival ORDER is the one load-bearing runtime-ordering fact static
+  cannot pin -- see specs/login.md "needs-capture". The chosen slot is committed locally before any
+  ack.
 
   UNKNOWNS (capture/debugger required): the exact intra-buffer OFFSETS of the 33-byte token string
   and the 4-byte version dword; whether the 2-byte Pad truly stays zero or carries a small trailing
@@ -69,4 +79,4 @@ notes: |
   RELATED: 1/0 logout, 1/6 create, 1/7 manage/select (+delete-overload), 1/13 rename, 1/14 slot-move.
   All gated by the single select-window net-busy latch.
 
-  UNBLOCKS: Client.Application SelectCharacter / EnterGame use-case (ack 3/5).
+  UNBLOCKS: Client.Application SelectCharacter / EnterGame use-case (ack 3/5, then world build on 4/1).

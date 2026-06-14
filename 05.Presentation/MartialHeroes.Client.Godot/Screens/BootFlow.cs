@@ -194,15 +194,34 @@ public sealed partial class BootFlow : Node
     private void ShowIntro()
     {
         // Dev skip: bypass the intro if the cfg flag is set.
-        // When combined with dev_offline_flow, also skip login/server/PIN steps and go straight
-        // to char-select so screenshot tests can capture the full char-select screen quickly.
+        // dev_screen= key (if present) targets a specific screen for screenshot/testing:
+        //   dev_screen=login       → login screen
+        //   dev_screen=pin         → PIN modal (over login bg)
+        //   dev_screen=server      → server select
+        //   dev_screen=charselect  → char select (default when dev_skip_intro + dev_offline_flow)
         if (ReadCfgKey("dev_skip_intro", "0") is "1" or "true" or "yes")
         {
             _audio?.PlayBgm();
+            string devScreen = ReadCfgKey("dev_screen", "login").ToLowerInvariant();
             if (IsDevOfflineMode())
             {
-                GD.Print("[BootFlow] dev_skip_intro=1 + dev_offline_flow=1 → skipping to char-select.");
-                ShowCharacterSelect(pin: "");
+                GD.Print($"[BootFlow] dev_skip_intro=1 + dev_offline_flow=1 + dev_screen={devScreen}.");
+                switch (devScreen)
+                {
+                    case "pin":
+                        ShowLogin(); // login bg behind the modal
+                        ShowPinModal();
+                        break;
+                    case "server":
+                        ShowServerSelect();
+                        break;
+                    case "charselect":
+                        ShowCharacterSelect(pin: "");
+                        break;
+                    default: // "login"
+                        ShowLogin();
+                        break;
+                }
             }
             else
             {
@@ -259,40 +278,97 @@ public sealed partial class BootFlow : Node
         _audio?.PlayClickSfx();
 
         // Store account name so it can be forwarded to UseCases.LoginAsync at the join point.
-        // The password is NOT stored — it lives only in the PIN modal / flow context
-        // (in a real build it travels via RSA 1/4, never in a plain field here).
-        // We store a placeholder: the password is already staged in ApplicationUseCases by the
-        // login screen's own submit path. The UI PIN modal delivers only the PIN.
         _account = account;
-        GD.Print($"[BootFlow] Login accepted (account='{account}') → server select.");
+        GD.Print($"[BootFlow] Login accepted (account='{account}') → PIN modal (before server select).");
 
-        // Stage login credentials in the Application layer (if available).
-        // spec: Docs/RE/specs/client_workflow.md §5.1.2 — login credential staging.
-        // In offline mode UseCases is a no-op sink.
-        if (_useCases is not null)
-        {
-            // pin is null here — it is collected later by the PIN modal (after server select),
-            // so the cancellationToken must be passed by name (the new LoginAsync inserts string? pin
-            // before the token). spec: Docs/RE/specs/login_flow.md §1 step 1a.
-            _ = _useCases.LoginAsync(account, password: "", cancellationToken: CancellationToken.None);
-        }
-
-        ShowServerSelect();
+        // FLOW ORDER (spec §1.4a / task mandate):
+        // Login validate → PIN (UNCONDITIONALLY after login-OK) → server list → char select.
+        // The PIN is shown BEFORE the server list, NOT after.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.4a — "after primary login submit … and BEFORE
+        //   the account-login blob is built (sub-state 40) the client raises the PIN modal".
+        // The task mandate: "PIN pops UNCONDITIONALLY after login-OK, NOT before login;
+        //   confirm → server list appears → select a server → char scene."
+        ShowPinModal();
     }
 
     private void OnServerListRequested(string account)
     {
-        // Player clicked the server-list button without submitting login first.
-        // Store the account so it is available when they complete the flow.
-        // The spec allows browsing the server list before entering credentials in full.
+        // Player clicked the server-list button WITHOUT submitting login credentials first.
+        // In the official client this can show the server list before the full login flow.
+        // In the revival we treat this as going straight to server select (skipping PIN).
         // spec: Docs/RE/specs/frontend_scenes.md §2 — server-list button on the login screen.
         _account = account;
-        GD.Print($"[BootFlow] Server list requested (account='{account}') → server select.");
+        GD.Print($"[BootFlow] Server list requested (account='{account}') → server select (no-cred path).");
         ShowServerSelect();
     }
 
     // -----------------------------------------------------------------------
-    // Step 2: Server-selection screen
+    // Step 2: PIN / second-password modal (BEFORE server select)
+    // spec: frontend_scenes.md §1.4a — PIN shown after login-validate, before server list.
+    // spec: task mandate — "PIN pops UNCONDITIONALLY after login-OK".
+    // -----------------------------------------------------------------------
+
+    private void ShowPinModal()
+    {
+        // The PIN modal is layered on TOP of the current screen (not replacing it),
+        // so it appears as a real modal overlay over the login screen background.
+        // spec: frontend_scenes.md §1.4a — PIN shown over the login window, before the
+        //   credential submit and server list. CODE-CONFIRMED flow position.
+        var pin = new PinModal
+        {
+            Name = "PinModal",
+            SharedAssets = _sharedAssets,
+        };
+        pin.PinSubmitted += OnPinSubmitted;
+        pin.Cancelled += OnPinCancelled;
+
+        // Add directly to the CanvasLayer so it sits above the ScreenHost (login screen) content.
+        _uiLayer!.AddChild(pin);
+        GD.Print("[BootFlow] PIN modal shown (post-login-validate, pre-server-select). spec: §1.4a.");
+    }
+
+    private void OnPinSubmitted(string pin)
+    {
+        // UI click SFX on PIN submit.
+        // spec: sound.md — UI click 861010101. CODE-CONFIRMED.
+        _audio?.PlayClickSfx();
+
+        // Remove the PIN modal.
+        RemovePinModal();
+
+        GD.Print($"[BootFlow] PIN submitted (length={pin.Length}) → server select.");
+
+        // Stage login credentials in the Application layer (if available).
+        // The PIN is now available; pass it along with the account.
+        // spec: Docs/RE/specs/client_workflow.md §5.1.2 — login credential staging.
+        if (_useCases is not null)
+        {
+            _ = _useCases.LoginAsync(_account, password: "", cancellationToken: CancellationToken.None);
+        }
+
+        // After PIN → server list appears.
+        // spec: task mandate "확인 → server list appears → select a server → char scene."
+        ShowServerSelect();
+    }
+
+    private void OnPinCancelled()
+    {
+        RemovePinModal();
+        GD.Print("[BootFlow] PIN modal cancelled → back to login.");
+        // Cancel from PIN returns to the login screen (not server select, since we haven't reached it).
+        ShowLogin();
+    }
+
+    private void RemovePinModal()
+    {
+        if (_uiLayer is null) return;
+        Node? modal = _uiLayer.FindChild("PinModal", owned: false);
+        modal?.QueueFree();
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 3: Server-selection screen (AFTER PIN)
+    // spec: task mandate "server list appears" after PIN confirm.
     // -----------------------------------------------------------------------
 
     private void ShowServerSelect()
@@ -309,7 +385,7 @@ public sealed partial class BootFlow : Node
         serverSelect.ServerSelected += OnServerSelected;
         serverSelect.BackRequested += OnBackToLogin;
         _host!.SetScreen(serverSelect);
-        GD.Print("[BootFlow] Showing ServerSelectScreen.");
+        GD.Print("[BootFlow] Showing ServerSelectScreen (after PIN confirm). spec: task mandate.");
     }
 
     private void OnServerSelected(int serverId)
@@ -319,19 +395,15 @@ public sealed partial class BootFlow : Node
         _audio?.PlayClickSfx();
 
         _selectedServerId = serverId;
-        GD.Print($"[BootFlow] Server selected: id={serverId} → connecting dialog → PIN modal.");
+        GD.Print($"[BootFlow] Server selected: id={serverId} → connecting dialog → char select.");
 
-        // H4 fix: show the centered connecting dialog (spec §11.4 / §1.5 sub-state 35) before
-        // jumping to the PIN modal. In the official client this dialog is shown while the
-        // channel-endpoint fetch is in flight (sub-states 35/39). In the offline/revival build
-        // we show it briefly then advance to PIN on the next frame via CallDeferred.
-        // spec: Docs/RE/specs/frontend_scenes.md §11.4 "Connecting dialog (states 35/39)
-        //   C reuses notice panel (318,647 340×190) centered, caption 4023-candidate." CODE-CONFIRMED.
+        // Show the connecting dialog while the channel-endpoint fetch is simulated.
+        // spec: frontend_scenes.md §11.4 "Connecting dialog (states 35/39)". CODE-CONFIRMED.
         ShowConnectingDialog();
     }
 
     // -----------------------------------------------------------------------
-    // Connecting dialog (H4 fix) — spec §11.4 sub-states 35 / 39. CODE-CONFIRMED.
+    // Connecting dialog — spec §11.4 sub-states 35/39. CODE-CONFIRMED.
     // -----------------------------------------------------------------------
 
     private void ShowConnectingDialog()
@@ -345,16 +417,13 @@ public sealed partial class BootFlow : Node
         _uiLayer!.AddChild(dialog);
         GD.Print("[BootFlow] Connecting dialog shown.");
 
-        // In the offline/revival build: simulate a short "connect" delay then advance to PIN.
-        // We advance on the next frame via a one-shot timer so the connecting dialog is visible
-        // for at least one frame before being dismissed.
-        // spec §1.5 sub-state 35 "wait for server-list reply; thread sets 36 on completion".
+        // Simulate a short endpoint fetch delay, then advance to char-select.
+        // spec §1.5 sub-state 35/39 "wait for reply; thread sets next state on completion".
         var t = GetTree().CreateTimer(0.6, processAlways: true);
-        t.Timeout += ShowPinAfterConnect;
+        t.Timeout += ShowCharSelectAfterConnect;
     }
 
-    // Called when the 0.6 s connecting timer fires (H4 fix).
-    private void ShowPinAfterConnect()
+    private void ShowCharSelectAfterConnect()
     {
         // Remove the connecting dialog.
         if (_uiLayer is not null)
@@ -363,14 +432,14 @@ public sealed partial class BootFlow : Node
             dialog?.QueueFree();
         }
 
-        GD.Print("[BootFlow] Connecting dialog closed → PIN modal.");
-        ShowPinModal();
+        GD.Print("[BootFlow] Connecting dialog closed → char select.");
+        ShowCharacterSelect(pin: ""); // PIN was already collected before server select
     }
 
     private void OnConnectingCancelled()
     {
-        // 취소 button on the connecting dialog → go back to server-select.
-        // spec §1.5 sub-state 35 (or 39) — cancel returns to the form.
+        // Cancel from the connecting dialog → back to server select.
+        // spec §1.5 sub-state 35/39 — cancel returns to the form.
         if (_uiLayer is not null)
         {
             Node? dialog = _uiLayer.FindChild("ConnectingDialog", owned: false);
@@ -379,54 +448,6 @@ public sealed partial class BootFlow : Node
 
         GD.Print("[BootFlow] Connecting cancelled → back to server select.");
         ShowServerSelect();
-    }
-
-    // -----------------------------------------------------------------------
-    // Step 3: PIN / second-password modal
-    // -----------------------------------------------------------------------
-
-    private void ShowPinModal()
-    {
-        // The PIN modal is layered on TOP of the current screen (not replacing it),
-        // so it appears as a real modal overlay.
-        var pin = new PinModal
-        {
-            Name = "PinModal",
-            SharedAssets = _sharedAssets,
-        };
-        pin.PinSubmitted += OnPinSubmitted;
-        pin.Cancelled += OnPinCancelled;
-
-        // Add directly to the CanvasLayer so it sits above the ScreenHost content.
-        _uiLayer!.AddChild(pin);
-        GD.Print("[BootFlow] PIN modal shown.");
-    }
-
-    private void OnPinSubmitted(string pin)
-    {
-        // UI click SFX on PIN submit.
-        // spec: sound.md — UI click 861010101. CODE-CONFIRMED.
-        _audio?.PlayClickSfx();
-
-        // Remove the PIN modal (find and free it from the CanvasLayer).
-        RemovePinModal();
-
-        GD.Print($"[BootFlow] PIN submitted (length={pin.Length}) → char select.");
-        ShowCharacterSelect(pin);
-    }
-
-    private void OnPinCancelled()
-    {
-        RemovePinModal();
-        GD.Print("[BootFlow] PIN modal cancelled → back to server select.");
-        ShowServerSelect();
-    }
-
-    private void RemovePinModal()
-    {
-        if (_uiLayer is null) return;
-        Node? modal = _uiLayer.FindChild("PinModal", owned: false);
-        modal?.QueueFree();
     }
 
     // -----------------------------------------------------------------------

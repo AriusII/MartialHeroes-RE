@@ -142,29 +142,43 @@ public sealed partial class PinModal : Control
         };
         AddChild(panel);
 
-        // Panel background: password.dds stretched over the panel.
-        // The full 1024×1024 DDS contains the modal art; we show the whole atlas scaled to fit.
-        // spec §11.3 "password.dds (1024×1024 DXT3)". CODE-CONFIRMED.
-        Texture2D? pwTex = _assets.LoadAtlas(LoginLayout.AtlasPassword);
-        if (pwTex is not null)
+        // Panel background: InventWindow.dds NinePatch frame src(318,647,340,190).
+        // The dragon-frame chrome comes from InventWindow.dds, NOT from password.dds.
+        // password.dds contains only the digit glyphs and the Reset/OK/Cancel button art.
+        // spec §11.3 "Dragon-frame background quad: InventWindow.dds src(318,647,340,190)
+        //   drawn as NinePatch up to the 329×422 panel rect." CODE-CONFIRMED.
+        // spec §11.3 "password.dds: all digit-tile glyph art and the reset/OK/cancel button art".
+        AtlasTexture? frameTex = _assets.Slice(
+            LoginLayout.AtlasInventWindow,
+            LoginLayout.ModalChromeSrcX, LoginLayout.ModalChromeSrcY, // (318,647)
+            LoginLayout.ModalChromeW, LoginLayout.ModalChromeH); // 340×190
+
+        if (frameTex is not null)
         {
-            // The modal art occupies the left half of password.dds approximately.
-            // Since we don't have exact bounds of the modal chrome within the DDS,
-            // we tile/stretch the full atlas over the panel as a background.
-            // PLAUSIBLE: exact chrome sub-rect within password.dds not yet catalogued (§11.7).
-            var pwBg = new TextureRect
+            // NinePatch: preserve corners, stretch the centre to fill the taller panel rect.
+            // The source is 340×190 but the panel is 329×422 — taller than the source.
+            // spec §11.3 "drawn stretched: render it as a NinePatch ... from (318,647,340,190)
+            //   up to the 347,173,329,422 panel rect." CODE-CONFIRMED.
+            var np = new NinePatchRect
             {
-                Name = "PinPanelBg",
-                Texture = pwTex,
-                StretchMode = TextureRect.StretchModeEnum.Scale,
+                Name = "PinFrameNinePatch",
+                Texture = _assets.LoadAtlas(LoginLayout.AtlasInventWindow),
+                // Source region in the atlas (the dragon-frame sub-rect).
+                RegionRect = new Rect2(LoginLayout.ModalChromeSrcX, LoginLayout.ModalChromeSrcY,
+                    LoginLayout.ModalChromeW, LoginLayout.ModalChromeH),
+                // Nine-patch margins: use 20px on all sides so corners are preserved cleanly.
+                PatchMarginLeft = 20,
+                PatchMarginRight = 20,
+                PatchMarginTop = 20,
+                PatchMarginBottom = 20,
                 MouseFilter = MouseFilterEnum.Ignore,
             };
-            pwBg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-            panel.AddChild(pwBg);
+            np.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+            panel.AddChild(np);
         }
         else
         {
-            // VFS offline fallback.
+            // VFS offline fallback: dark panel with gold border.
             var fallback = new ColorRect
             {
                 Name = "PinPanelFallback",
@@ -184,23 +198,25 @@ public sealed partial class PinModal : Control
             panel.AddChild(border);
         }
 
-        // H3 fix: red warning line near the top of the modal.
-        // The official PIN modal shows a red warning text near the top of the panel.
-        // The exact text is baked atlas art in password.dds (no msg.xdb id; §11.3 "no runtime text").
-        // We render it as a red Label with the offline-fallback text until a sub-rect is catalogued.
-        // Positioned at panel-local (28, 50) based on the keypad layout (first row at Y=170,
-        // so the warning sits in the top section of the 422px-tall panel, approximately Y~50..80).
-        // spec: Docs/RE/specs/frontend_scenes.md §11.3 — "warning line … baked into atlas art".
-        // CODE-CONFIRMED (warning line exists); exact panel-local Y PLAUSIBLE until sub-rect swept.
-        var warningLine = WidgetFactory.MakeLabel(
-            "※ 비밀번호를 입력하세요", // fallback; real text is baked art in password.dds
-            LoginLayout.FontBodyHeight,
-            new Color(1f, 0.20f, 0.20f)); // red — spec §11.3 "red warning line". CODE-CONFIRMED.
-        warningLine.Name = "WarningLine";
-        warningLine.Position = new Vector2(28, 52);
-        warningLine.Size = new Vector2(273, 20);
-        warningLine.HorizontalAlignment = HorizontalAlignment.Left;
-        panel.AddChild(warningLine);
+        // Warning line: baked into the InventWindow.dds dragon-frame art (and password.dds title area).
+        // spec §11.3 "No runtime text — the warning line, the red warning line, the button faces, and
+        //   the modal title are all baked into the atlas art." CODE-CONFIRMED.
+        // The NinePatch frame above renders the dragon-frame art which includes the title/warning.
+        // We add a Label ONLY when the VFS is offline (no atlas) as a usability fallback.
+        if (frameTex is null)
+        {
+            // Offline fallback only: the atlas is absent so show a text substitute.
+            // PLAUSIBLE position (panel-local Y≈52 based on keypad at Y=170).
+            var warningLine = WidgetFactory.MakeLabel(
+                "※ 비밀번호를 입력하세요",
+                LoginLayout.FontBodyHeight,
+                new Color(1f, 0.20f, 0.20f));
+            warningLine.Name = "WarningLine";
+            warningLine.Position = new Vector2(28, 52);
+            warningLine.Size = new Vector2(273, 20);
+            warningLine.HorizontalAlignment = HorizontalAlignment.Left;
+            panel.AddChild(warningLine);
+        }
 
         // PIN masked display — shows "****" as the user types.
         // The label position is approximate (no exact coord in spec for the display line).

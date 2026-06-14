@@ -694,11 +694,13 @@ public sealed partial class LoginScreen : Control
     }
 
     /// <summary>
-    /// Creates a single-line text input.
+    /// Creates a single-line text input with a styled dark background for visibility.
+    /// The spec (§11.2e) places ID/PW boxes at 102×13 px canvas-local, but Godot LineEdit
+    /// requires ≥18 px height to render text. We use a flat-style dark input box.
     /// </summary>
     private static LineEdit MakeTextbox(bool masked, int maxLen)
     {
-        return new LineEdit
+        var edit = new LineEdit
         {
             Secret = masked,
             CaretBlink = true,
@@ -706,5 +708,23 @@ public sealed partial class LoginScreen : Control
             Alignment = HorizontalAlignment.Left,
             CustomMinimumSize = new Vector2(102, 18),
         };
+
+        // Dark recessed style matching the spec "recessed dark panel" aesthetic. §11.2e.
+        var style = new StyleBoxFlat
+        {
+            BgColor = new Color(0.04f, 0.04f, 0.08f, 0.90f),
+            BorderColor = new Color(0.45f, 0.38f, 0.22f, 0.80f),
+        };
+        style.SetBorderWidthAll(1);
+        style.ContentMarginLeft = 3;
+        style.ContentMarginRight = 3;
+        style.ContentMarginTop = 2;
+        style.ContentMarginBottom = 2;
+        edit.AddThemeStyleboxOverride("normal", style);
+        edit.AddThemeStyleboxOverride("focus", style);
+        edit.AddThemeColorOverride("font_color", new Color(0.95f, 0.90f, 0.75f));
+        edit.AddThemeColorOverride("caret_color", new Color(0.95f, 0.90f, 0.55f));
+
+        return edit;
     }
 }

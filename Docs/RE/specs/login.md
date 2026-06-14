@@ -171,7 +171,82 @@ field of the credential build.
 
 ---
 
-## 5. Cross-references
+## 5. Server-list fetch + enter-world handshake
+
+This section spans the two out-of-band lobby fetches (server list, channel endpoint) and the
+char-select -> world enter-game handshake. The lobby wire records themselves live in
+`packets/lobby.yaml`; this section gives the scene-level flow and the corrected scene-state model.
+
+### 5.1 The two blocking worker-thread fetches (recap)
+
+Both lobby fetches run on **dedicated blocking-socket worker threads** (NOT the main game
+dispatch loop). Each connects, receives an **8-byte frame wrapper** (`+0 u32 size` = 8 + payload,
+`+4 u16` reinterpreted as the server-entry **record count** on the server-list query, `+6 u16`
+unused), reads `size - 8` payload bytes, and **LZ4-decompresses** them (raw block; NO byte cipher).
+
+- **Server-list fetch:** fixed port **10000**. The decompressed payload is `count` packed 8-byte
+  server-entry records (record shape + caption mapping in `packets/lobby.yaml`).
+- **Channel-endpoint fetch:** port **10000 + selected channel offset**. The decompressed payload's
+  first 30 bytes are copied as a fixed `char[30]` ASCII endpoint token (delimiter is needs-capture).
+
+### 5.2 The GameState scene model (the corrected scene-state machine)
+
+The app's top-level driver is a `while`-loop switch on a single **scene index** value (here called
+GameState). Each value names ONE scene the driver builds and runs; on that scene's main loop
+exiting, the driver re-reads the value to pick the next scene. The recovered scene-index map:
+
+| GameState | Scene | Role |
+|---:|---|---|
+| 1 | Login window | login / server-select / PIN (loads the message catalog) |
+| 2 | **Load handler** | the loading screen (asset preload + progress bar) |
+| 3 | Opening window | opening cinematic (skippable) |
+| 4 | **Char-select** | character selection |
+| 5 | **In-world** | the world scene (FROZEN; not specced here) |
+| 6 / 8 | quit / exit | teardown |
+| 7 | **error** | shows an error message, then exits |
+
+> **CORRECTION (supersedes the earlier reading).** An earlier dirty note read the login
+> credential-submit path as "GameState = 7 = world-entry". Under this scene-index model **7 is the
+> ERROR/abort scene, not world-entry.** The normal forward driver into the world is the handshake
+> chain in 5.3 (3/5 sets scene 2, then 4/1 sets the enter-world-ready flag, then the select scene's
+> end routine sets scene 5), NOT a literal "7 = world". The login-time 7 write is most plausibly a
+> guarded abort path; whether it is ever taken on the happy path is **needs-debugger**.
+
+### 5.3 The happy-path enter-world handshake
+
+After the player presses Enter on a filled char-select slot, the sequence is:
+
+1. **C2S 1/9 CmsgEnterGameRequest** (`packets/cmsg_char_enter.yaml`): 40-byte body (slot index +
+   33-byte launcher session token + 4-byte derived version token). The enter handler also caches the
+   chosen slot's spawn descriptor + stat block into globals and tears down the prior world scene,
+   before any reply.
+2. **S2C 3/5 SmsgEnterGameAck** (`packets/3-5_enter_game_response.yaml`): the account/billing
+   confirm (name + billing flag + account character count). Its side effect sets the scene state to
+   **loading (2)** and ends the char-select scene's main loop. This is NOT spawn data.
+3. **S2C 4/1 SmsgGameStateTick** (`packets/4-1_game_state_tick.yaml`): builds the **LocalPlayer**
+   from the staged spawn descriptor, sets area/region + world X/Z, and sets the select scene's
+   **enter-world-ready flag**.
+4. When the char-select scene's end routine runs and sees the enter-world-ready flag set, it sets
+   the scene state to **in-world (5)**, and the driver builds the world scene.
+
+> **needs-capture / needs-debugger:** (a) the **relative arrival ORDER of 3/5 vs 4/1** -- the single
+> load-bearing ordering fact static cannot pin (the enter-world-ready flag set by 4/1 must arrive
+> before the select-end routine reads it, or the path routes via the loading scene instead);
+> (b) the **1/9 version-dword offset** inside the 40-byte body (register-staged); (c) the
+> **channel endpoint host:port format** (the 30-byte token's delimiter).
+
+### 5.4 The loading screen (its own scene)
+
+The loading screen is its **own scene** (the load handler, scene 2), distinct from the login-state
+fade VFX. On start it picks ONE random background from `data/ui/loading.dds` /
+`data/ui/loading06.dds` / `data/ui/loading08.dds`, plays loading SFX id **920100100**, and draws a
+progress bar. Its progress and its exit gate are driven by the **VFS asset PRELOAD finishing**
+(progress -> 100%) via a bulk asset-loader worker thread -- it is **NOT** a wait on the enter-game
+network ack. The bar fill is the VFS load progress, not a net timer.
+
+---
+
+## 6. Cross-references
 
 - Credential wire layout (0x2B plaintext pre-image + RSA ciphertext framing): `packets/login.yaml`.
 - RSA credential encryption, modulus/exponent parse, PKCS#1 v1.5 type-2, 0x29 whitening, and the

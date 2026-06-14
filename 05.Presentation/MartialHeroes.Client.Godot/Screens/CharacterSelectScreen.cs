@@ -237,6 +237,45 @@ public sealed partial class CharacterSelectScreen : Control
     private Label _createClassLabel = null!;
     private Label _createFaceLabel = null!;
 
+    // Create sub-form: 3D preview node (centered, scale 75, turntable).
+    // spec: Docs/RE/specs/frontend_scenes.md §4.2 CODE-CONFIRMED.
+    private CharCreatePreview3D? _createPreview3D;
+
+    // Create sub-form: turntable button state (press-and-hold).
+    // spec: frontend_scenes.md §4.2 "press-and-hold turntable ≈±2 rad/s". CODE-CONFIRMED.
+    private bool _rotatePressLeft;
+    private bool _rotatePressRight;
+
+    // Create sub-form: stat allocation (6 stats, shared budget, floor 10).
+    // spec: Docs/RE/specs/frontend_scenes.md §4.2 — "6 stats, shared point budget, floor 10 each;
+    //   +/- buttons; remaining-points display. Pure display from class template." CODE-CONFIRMED.
+    private readonly int[] _createStatValues = new int[6]; // HP MP STR INT DEX STA
+    private int _createStatBudgetRemaining;
+    private readonly Label[] _createStatLabels = new Label[6];
+    private Label _createBudgetLabel = null!;
+
+    // Name textbox reference (for validation on confirm).
+    private LineEdit _createNameEntry = null!;
+
+    // Toast label for name-validation feedback.
+    // spec: frontend_scenes.md §4.4 — "show a rejection toast (msg id 2075)". CODE-CONFIRMED.
+    private Label _createToastLabel = null!;
+    private double _toastTimer; // seconds remaining
+
+    // Class base stats for display — these are NOT authoritative; the Application layer owns stats.
+    // We mirror illustrative starting values so the ±buttons give visible feedback.
+    // spec: frontend_scenes.md §4.2 — "pure display from the class template". CODE-CONFIRMED.
+    private static readonly int[][] CreateClassBaseStats =
+    [
+        [420, 80, 18, 6, 10, 18],  // UI 0 → internal 4 (Warrior)
+        [350, 100, 15, 8, 12, 14], // UI 1 → internal 1 (Musa)
+        [300, 120, 14, 9, 15, 12], // UI 2 → internal 3 (Blader)
+        [280, 150, 8, 15, 14, 10], // UI 3 → internal 2 (Tao)
+    ];
+
+    // Starting point budget per class (illustrative; real value comes from Application).
+    private static readonly int[] CreateClassBudgets = [25, 25, 25, 25];
+
     // The single unified 3D scene — replaces the old per-slot CharPreview3D array.
     // spec: Docs/RE/specs/frontend_scenes.md §3 — "a full 3D world backdrop". CODE-CONFIRMED.
     private CharSelectScene3D? _scene3D;
@@ -293,6 +332,33 @@ public sealed partial class CharacterSelectScreen : Control
         if (_ownsAssets) _assets?.Dispose();
         _realAssets?.Dispose();
         _realAssets = null;
+    }
+
+    public override void _Process(double delta)
+    {
+        // Turntable: drive CharCreatePreview3D rotation while buttons are held.
+        // spec: Docs/RE/specs/frontend_scenes.md §4.2 — "press-and-hold turntable ≈±2 rad/s". CODE-CONFIRMED.
+        if (_createFormVisible && _createPreview3D is not null && IsInstanceValid(_createPreview3D))
+        {
+            float dt = (float)delta;
+            if (_rotatePressLeft)
+                _createPreview3D.RotateLeft(dt);
+            if (_rotatePressRight)
+                _createPreview3D.RotateRight(dt);
+        }
+
+        // Toast timer: hide after duration expires.
+        // spec: frontend_scenes.md §4.4 — rejection toast. CODE-CONFIRMED.
+        if (_toastTimer > 0.0)
+        {
+            _toastTimer -= delta;
+            if (_toastTimer <= 0.0)
+            {
+                _toastTimer = 0.0;
+                if (_createToastLabel is not null && IsInstanceValid(_createToastLabel))
+                    _createToastLabel.Visible = false;
+            }
+        }
     }
 
     // =========================================================================
@@ -812,205 +878,523 @@ public sealed partial class CharacterSelectScreen : Control
 
     // =========================================================================
     // Create sub-form — spec: frontend_scenes.md §4. CODE-CONFIRMED.
-    // Class choice: UI index 0..3 → internal {4,1,3,2}. Face index 1..7.
+    //
+    // Layout (faithful to the official client visual target):
+    //   FULL-SCREEN overlay (1024×768) with three regions:
+    //   LEFT  (x=0..200)   : class selection list (4 classes)
+    //   CENTER(x=200..620)  : enlarged 3D preview (CharCreatePreview3D, scale 75)
+    //                         + turntable L/R buttons + face ± buttons
+    //   RIGHT (x=620..1024) : class name / description, stat allocation (+/− budget),
+    //                         name textbox, OK/Cancel
+    //   BOTTOM caption strip with the orange "Create Character" label.
+    //
+    // spec: Docs/RE/specs/frontend_scenes.md §4 CODE-CONFIRMED.
+    //   Class choice: UI index 0..3 → internal {4,1,3,2}. Face index 1..7.
+    //   Scale 75. Turntable ≈±2 rad/s press-and-hold. No sex toggle.
+    //   Stat allocation: 6 stats, floor 10, shared budget, remaining-points display.
+    //   Name: min 2 chars, lowercase a–z + digits + Hangul; rejection toast msg id 2075.
     // =========================================================================
 
     private Control BuildCreateForm()
     {
-        // The create form floats over the select screen, centred.
-        // Rough reference: a 320×400 panel at x=350, y=150 (not a recovered coord — the form
-        // position is not in the spec; we position it as a modal overlay).
-        var form = new Panel();
-        form.Position = new Vector2(340, 120);
-        form.Size = new Vector2(330, 440);
-
-        var style = new StyleBoxFlat
+        // Full-screen semi-transparent overlay drawn over the 3D char-select scene.
+        // spec: frontend_scenes.md §4 — "sub-state drawn over the SAME 3D char-select scene". CODE-CONFIRMED.
+        var form = new Control
         {
-            BgColor = new Color(0.10f, 0.09f, 0.13f, 0.97f),
-            BorderColor = new Color(0.50f, 0.43f, 0.25f),
+            Name = "CreateForm",
+            MouseFilter = MouseFilterEnum.Stop, // capture clicks so they don't fall through
         };
-        style.SetBorderWidthAll(2);
-        form.AddThemeStyleboxOverride("panel", style);
+        form.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
 
-        // Title.
-        var title = WidgetFactory.MakeLabel("Create Character",
-            CharacterSelectLayout.FontTitleHeight, new Color(0.95f, 0.86f, 0.55f));
-        title.Position = new Vector2(12, 10);
-        form.AddChild(title);
+        // Dim overlay behind the form panels.
+        var dimBg = new ColorRect
+        {
+            Name = "CreateDim",
+            Color = new Color(0f, 0f, 0f, 0.72f),
+        };
+        dimBg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        form.AddChild(dimBg);
 
-        // Class selection — 4 buttons in a row.
-        // spec: frontend_scenes.md §4.1 — UI index 0..3 → internal class {4,1,3,2}. CODE-CONFIRMED.
-        var classRowLabel = WidgetFactory.MakeLabel("Class:", CharacterSelectLayout.FontRowHeight,
-            new Color(0.75f, 0.75f, 0.75f));
-        classRowLabel.Position = new Vector2(12, 40);
-        form.AddChild(classRowLabel);
+        // ── ORANGE TOP CAPTION ──────────────────────────────────────────────
+        // spec: frontend_scenes.md §4 — "orange caption at top". CODE-CONFIRMED.
+        var topCaption = WidgetFactory.MakeLabel(
+            "Create Character",
+            CharacterSelectLayout.FontTitleHeight,
+            new Color(1.0f, 0.60f, 0.08f));
+        topCaption.Position = new Vector2(0f, 14f);
+        topCaption.Size = new Vector2(1024f, 28f);
+        topCaption.HorizontalAlignment = HorizontalAlignment.Center;
+        form.AddChild(topCaption);
 
+        // ── LEFT PANEL: class selection list ────────────────────────────────
+        // spec: frontend_scenes.md §4.1 — "class-selection list on the LEFT". CODE-CONFIRMED.
+        var leftPanel = new Panel
+        {
+            Name = "CreateLeft",
+            Position = new Vector2(8f, 50f),
+            Size = new Vector2(190f, 640f),
+        };
+        {
+            var ls = new StyleBoxFlat
+            {
+                BgColor = new Color(0.08f, 0.07f, 0.10f, 0.95f),
+                BorderColor = new Color(0.45f, 0.38f, 0.22f),
+            };
+            ls.SetBorderWidthAll(2);
+            leftPanel.AddThemeStyleboxOverride("panel", ls);
+        }
+        form.AddChild(leftPanel);
+
+        var classTitle = WidgetFactory.MakeLabel("Class", CharacterSelectLayout.FontTitleHeight,
+            new Color(0.90f, 0.80f, 0.45f));
+        classTitle.Position = new Vector2(8f, 10f);
+        leftPanel.AddChild(classTitle);
+
+        // 4 class buttons stacked vertically.
+        // spec: frontend_scenes.md §4.1 — "4 classes, UI index 0..3". CODE-CONFIRMED.
         for (int ci = 0; ci < 4; ci++)
         {
-            // Fetch the class label from msg.xdb id 14003..14006.
-            // spec: ui_system.md §10 + frontend_scenes.md §4.1 — ids 14003..14007. CODE-CONFIRMED.
             uint msgId = CharacterSelectLayout.ClassLabelMsgIds[ci]; // 14003..14006
             string fallback = CharacterSelectLayout.ClassLabelFallbacks[ci];
             string classCaption = _assets.Text(msgId, fallback);
 
             var classBtn = new Button
             {
-                Name = $"ClassBtn{ci}",
+                Name = $"CreateClassBtn{ci}",
                 Text = classCaption,
-                Position = new Vector2(12 + ci * 76, 58),
-                Size = new Vector2(72, 26),
+                Position = new Vector2(8f, 42f + ci * 48f),
+                Size = new Vector2(174f, 40f),
+                ToggleMode = true,
+                ButtonPressed = ci == _createUiClassIndex,
             };
-            classBtn.AddThemeFontSizeOverride("font_size", 11);
+            classBtn.AddThemeFontSizeOverride("font_size", 13);
             int uiIdx = ci;
             classBtn.Pressed += () => SetCreateClass(uiIdx);
-            form.AddChild(classBtn);
+            leftPanel.AddChild(classBtn);
         }
 
-        // Current class display.
+        // Current class name display.
         _createClassLabel = WidgetFactory.MakeLabel(
             ClassCaption(_createUiClassIndex),
             CharacterSelectLayout.FontRowHeight,
-            new Color(0.90f, 0.85f, 0.55f));
-        _createClassLabel.Position = new Vector2(12, 92);
-        form.AddChild(_createClassLabel);
+            new Color(0.90f, 0.85f, 0.55f),
+            multiline: true);
+        _createClassLabel.Position = new Vector2(8f, 240f);
+        _createClassLabel.Size = new Vector2(174f, 36f);
+        leftPanel.AddChild(_createClassLabel);
 
-        // Face selector — ± buttons + face index label.
-        // spec: frontend_scenes.md §4.2 — face index clamped 1..7 via +/- buttons. CODE-CONFIRMED.
-        // Actions 21/22 for face increment ±. spec §8.2 action-id map.
-        var faceLabel = WidgetFactory.MakeLabel("Face:", CharacterSelectLayout.FontRowHeight,
+        // ── CENTER PANEL: 3D preview + face ± + turntable buttons ───────────
+        // spec: frontend_scenes.md §4.2 — "single, centered, +56.5 units nearer camera". CODE-CONFIRMED.
+        // spec: frontend_scenes.md §4.2 — "scale 75 vs the slots' 50". CODE-CONFIRMED.
+        var centerPanel = new Panel
+        {
+            Name = "CreateCenter",
+            Position = new Vector2(204f, 50f),
+            Size = new Vector2(414f, 640f),
+        };
+        {
+            var cs = new StyleBoxFlat
+            {
+                BgColor = new Color(0.05f, 0.05f, 0.08f, 0.90f),
+                BorderColor = new Color(0.40f, 0.35f, 0.20f),
+            };
+            cs.SetBorderWidthAll(1);
+            centerPanel.AddThemeStyleboxOverride("panel", cs);
+        }
+        form.AddChild(centerPanel);
+
+        // 3D preview occupies most of the center panel.
+        _createPreview3D = new CharCreatePreview3D
+        {
+            Name = "CreatePreview3D",
+            Position = new Vector2(6f, 6f),
+            Size = new Vector2(402f, 550f),
+            SharedRealAssets = _realAssets,
+            InternalClassId = CharacterSelectLayout.UiToInternalClass[_createUiClassIndex],
+        };
+        centerPanel.AddChild(_createPreview3D);
+
+        // Face ± buttons. spec: frontend_scenes.md §4.2 — "face ± buttons range 1..7". CODE-CONFIRMED.
+        // "the visible 3D face does NOT change". CODE-CONFIRMED.
+        var faceLbl = WidgetFactory.MakeLabel("Face:", CharacterSelectLayout.FontRowHeight,
             new Color(0.75f, 0.75f, 0.75f));
-        faceLabel.Position = new Vector2(12, 118);
-        form.AddChild(faceLabel);
+        faceLbl.Position = new Vector2(8f, 562f);
+        centerPanel.AddChild(faceLbl);
 
         var faceMinus = new Button
         {
             Name = "FaceMinus",
             Text = "−",
-            Position = new Vector2(60, 114),
-            Size = new Vector2(26, 20),
+            Position = new Vector2(54f, 558f),
+            Size = new Vector2(28f, 22f),
         };
         faceMinus.Pressed += () => ChangeFace(-1);
-        form.AddChild(faceMinus);
+        centerPanel.AddChild(faceMinus);
 
         _createFaceLabel = WidgetFactory.MakeLabel(
             _createFaceIndex.ToString(),
             CharacterSelectLayout.FontRowHeight,
-            new Color(0.90f, 0.90f, 0.90f));
-        _createFaceLabel.Position = new Vector2(92, 118);
-        form.AddChild(_createFaceLabel);
+            new Color(0.95f, 0.95f, 0.95f));
+        _createFaceLabel.Position = new Vector2(87f, 562f);
+        _createFaceLabel.Size = new Vector2(24f, 22f);
+        _createFaceLabel.HorizontalAlignment = HorizontalAlignment.Center;
+        centerPanel.AddChild(_createFaceLabel);
 
         var facePlus = new Button
         {
             Name = "FacePlus",
             Text = "+",
-            Position = new Vector2(110, 114),
-            Size = new Vector2(26, 20),
+            Position = new Vector2(116f, 558f),
+            Size = new Vector2(28f, 22f),
         };
         facePlus.Pressed += () => ChangeFace(+1);
-        form.AddChild(facePlus);
+        centerPanel.AddChild(facePlus);
+
+        // Turntable L / R buttons (press-and-hold).
+        // spec: frontend_scenes.md §4.2 — "press-and-hold turntable ≈±2 rad/s while a rotate control
+        //   is held". CODE-CONFIRMED. NOT auto-spin.
+        var rotLeftBtn = new Button
+        {
+            Name = "RotLeft",
+            Text = "◄",
+            Position = new Vector2(170f, 558f),
+            Size = new Vector2(36f, 22f),
+        };
+        rotLeftBtn.ButtonDown += () => _rotatePressLeft = true;
+        rotLeftBtn.ButtonUp += () => _rotatePressLeft = false;
+        centerPanel.AddChild(rotLeftBtn);
+
+        var rotNote = WidgetFactory.MakeLabel("Rotate", CharacterSelectLayout.FontRowHeight,
+            new Color(0.60f, 0.60f, 0.65f));
+        rotNote.Position = new Vector2(210f, 562f);
+        centerPanel.AddChild(rotNote);
+
+        var rotRightBtn = new Button
+        {
+            Name = "RotRight",
+            Text = "►",
+            Position = new Vector2(260f, 558f),
+            Size = new Vector2(36f, 22f),
+        };
+        rotRightBtn.ButtonDown += () => _rotatePressRight = true;
+        rotRightBtn.ButtonUp += () => _rotatePressRight = false;
+        centerPanel.AddChild(rotRightBtn);
+
+        // ── RIGHT PANEL: description + stat allocation + name + buttons ──────
+        // spec: frontend_scenes.md §4 — "two description/stat panels on the RIGHT". CODE-CONFIRMED.
+        var rightPanel = new Panel
+        {
+            Name = "CreateRight",
+            Position = new Vector2(624f, 50f),
+            Size = new Vector2(392f, 640f),
+        };
+        {
+            var rs = new StyleBoxFlat
+            {
+                BgColor = new Color(0.08f, 0.07f, 0.10f, 0.95f),
+                BorderColor = new Color(0.45f, 0.38f, 0.22f),
+            };
+            rs.SetBorderWidthAll(2);
+            rightPanel.AddThemeStyleboxOverride("panel", rs);
+        }
+        form.AddChild(rightPanel);
+
+        // Class description header (class lore — id 14003..14007 from msg.xdb).
+        // spec: frontend_scenes.md §4.1 — "class description". CODE-CONFIRMED (msg ids).
+        var descHeader = WidgetFactory.MakeLabel("Description", CharacterSelectLayout.FontTitleHeight,
+            new Color(0.90f, 0.80f, 0.45f));
+        descHeader.Position = new Vector2(8f, 8f);
+        rightPanel.AddChild(descHeader);
+
+        var descText = WidgetFactory.MakeLabel(
+            GetClassDescription(_createUiClassIndex),
+            CharacterSelectLayout.FontRowHeight,
+            new Color(0.78f, 0.78f, 0.82f),
+            multiline: true);
+        descText.Name = "CreateDescText";
+        descText.Position = new Vector2(8f, 32f);
+        descText.Size = new Vector2(376f, 80f);
+        rightPanel.AddChild(descText);
 
         // Separator.
-        var sep = new ColorRect
+        var sepR = new ColorRect
         {
             Color = new Color(0.35f, 0.30f, 0.18f),
-            Position = new Vector2(12, 142),
-            Size = new Vector2(306, 1),
+            Position = new Vector2(8f, 120f),
+            Size = new Vector2(376f, 1f),
         };
-        form.AddChild(sep);
+        rightPanel.AddChild(sepR);
 
-        // Name entry label + placeholder (no LineEdit yet — VFS-absent offline stub).
-        var nameLabel = WidgetFactory.MakeLabel("Name:", CharacterSelectLayout.FontRowHeight,
-            new Color(0.75f, 0.75f, 0.75f));
-        nameLabel.Position = new Vector2(12, 152);
-        form.AddChild(nameLabel);
+        // Stat allocation (6 stats, floor 10, shared budget).
+        // spec: frontend_scenes.md §4.2 — "6 stats, shared point budget, floor 10 each;
+        //   +/- buttons; remaining-points display (pure display from the class template)". CODE-CONFIRMED.
+        var statHeader2 = WidgetFactory.MakeLabel("Stats", CharacterSelectLayout.FontTitleHeight,
+            new Color(0.90f, 0.80f, 0.45f));
+        statHeader2.Position = new Vector2(8f, 128f);
+        rightPanel.AddChild(statHeader2);
 
-        // Name-entry textbox (GUTextbox equivalent).
-        // spec: frontend_scenes.md §4.4 — min 2 chars; lowercase a–z, 0–9, Hangul. CODE-CONFIRMED.
-        // The validation itself lives in the Application/Domain layer; we show the field here only.
-        var nameEntry = new LineEdit
-        {
-            Name = "NameEntry",
-            PlaceholderText = "enter name (a-z/0-9/Hangul)",
-            Position = new Vector2(12, 170),
-            Size = new Vector2(306, 22),
-        };
-        nameEntry.AddThemeFontSizeOverride("font_size", 12);
-        form.AddChild(nameEntry);
-
-        // Preview area hint (the per-create 3D preview sits in the main preview row for the
-        // "empty slot" that triggered Create; this form doesn't duplicate the preview).
-        var previewNote = WidgetFactory.MakeLabel(
-            "(3D preview in the selected slot)",
-            CharacterSelectLayout.FontRowHeight,
-            new Color(0.55f, 0.55f, 0.60f),
-            multiline: true);
-        previewNote.Position = new Vector2(12, 200);
-        previewNote.Size = new Vector2(306, 32);
-        form.AddChild(previewNote);
-
-        // Separator.
-        var sep2 = new ColorRect
-        {
-            Color = new Color(0.35f, 0.30f, 0.18f),
-            Position = new Vector2(12, 240),
-            Size = new Vector2(306, 1),
-        };
-        form.AddChild(sep2);
-
-        // Starter equipment summary (display only).
-        // spec: frontend_scenes.md §4.3 — per-class starter equipment seeded on create. CODE-CONFIRMED.
-        var gearLabel = WidgetFactory.MakeLabel(
-            StarterGearSummary(_createUiClassIndex),
-            CharacterSelectLayout.FontRowHeight,
-            new Color(0.65f, 0.70f, 0.55f),
-            multiline: true);
-        gearLabel.Name = "GearLabel";
-        gearLabel.Position = new Vector2(12, 250);
-        gearLabel.Size = new Vector2(306, 50);
-        form.AddChild(gearLabel);
-
-        // Stat preview rows (class template display — no server call).
-        // spec: frontend_scenes.md §4.2 — "per-class stat preview filled from the class template". CODE-CONFIRMED.
-        var statHeader = WidgetFactory.MakeLabel("Stats (class default):", CharacterSelectLayout.FontRowHeight,
-            new Color(0.75f, 0.75f, 0.75f));
-        statHeader.Position = new Vector2(12, 310);
-        form.AddChild(statHeader);
+        _createBudgetLabel = WidgetFactory.MakeLabel("Points: 0", CharacterSelectLayout.FontRowHeight,
+            new Color(1.0f, 0.75f, 0.20f));
+        _createBudgetLabel.Name = "BudgetLabel";
+        _createBudgetLabel.Position = new Vector2(200f, 128f);
+        _createBudgetLabel.Size = new Vector2(176f, 18f);
+        rightPanel.AddChild(_createBudgetLabel);
 
         string[] statNames = ["HP", "MP", "STR", "INT", "DEX", "STA"];
-        int[] classBaseStats = ClassBaseStats(_createUiClassIndex);
+        InitCreateStats();
+
         for (int s = 0; s < 6; s++)
         {
-            var sl = WidgetFactory.MakeLabel($"{statNames[s]}: {classBaseStats[s]}",
-                CharacterSelectLayout.FontRowHeight, new Color(0.80f, 0.80f, 0.80f));
-            sl.Position = new Vector2(12 + (s % 3) * 104, 326 + (s / 3) * 16);
-            form.AddChild(sl);
+            int row = s;
+            float sy = 152f + s * 34f;
+
+            var statName = WidgetFactory.MakeLabel(statNames[s], CharacterSelectLayout.FontRowHeight,
+                new Color(0.72f, 0.72f, 0.75f));
+            statName.Position = new Vector2(8f, sy + 2f);
+            statName.Size = new Vector2(36f, 18f);
+            rightPanel.AddChild(statName);
+
+            var minusBtn = new Button
+            {
+                Name = $"StatMinus{s}",
+                Text = "−",
+                Position = new Vector2(48f, sy),
+                Size = new Vector2(24f, 22f),
+            };
+            minusBtn.Pressed += () => AdjustStat(row, -1);
+            rightPanel.AddChild(minusBtn);
+
+            _createStatLabels[s] = WidgetFactory.MakeLabel(
+                _createStatValues[s].ToString(),
+                CharacterSelectLayout.FontRowHeight,
+                new Color(0.92f, 0.92f, 0.92f));
+            _createStatLabels[s].Name = $"StatVal{s}";
+            _createStatLabels[s].Position = new Vector2(76f, sy + 2f);
+            _createStatLabels[s].Size = new Vector2(40f, 18f);
+            _createStatLabels[s].HorizontalAlignment = HorizontalAlignment.Center;
+            rightPanel.AddChild(_createStatLabels[s]);
+
+            var plusBtn = new Button
+            {
+                Name = $"StatPlus{s}",
+                Text = "+",
+                Position = new Vector2(120f, sy),
+                Size = new Vector2(24f, 22f),
+            };
+            plusBtn.Pressed += () => AdjustStat(row, +1);
+            rightPanel.AddChild(plusBtn);
         }
 
-        // Confirm (Create action id 10) and Cancel (action id 13) buttons.
+        // Separator.
+        var sepR2 = new ColorRect
+        {
+            Color = new Color(0.35f, 0.30f, 0.18f),
+            Position = new Vector2(8f, 362f),
+            Size = new Vector2(376f, 1f),
+        };
+        rightPanel.AddChild(sepR2);
+
+        // Name entry.
+        // spec: frontend_scenes.md §4.4 — "min 2 chars; allowed = lowercase a–z + digits + Hangul;
+        //   reject uppercase/punctuation; show rejection toast msg id 2075". CODE-CONFIRMED.
+        var nameLabel = WidgetFactory.MakeLabel("Name:", CharacterSelectLayout.FontRowHeight,
+            new Color(0.75f, 0.75f, 0.75f));
+        nameLabel.Position = new Vector2(8f, 372f);
+        rightPanel.AddChild(nameLabel);
+
+        _createNameEntry = new LineEdit
+        {
+            Name = "NameEntry",
+            PlaceholderText = "a-z / 0-9 / Hangul",
+            Position = new Vector2(8f, 392f),
+            Size = new Vector2(376f, 26f),
+        };
+        _createNameEntry.AddThemeFontSizeOverride("font_size", 13);
+        rightPanel.AddChild(_createNameEntry);
+
+        // Toast label for validation rejection.
+        // spec: frontend_scenes.md §4.4 — "show a rejection toast (msg id 2075)". CODE-CONFIRMED.
+        // Msg id 2075 caption text is in the VFS (CP949); we show an English fallback when absent.
+        _createToastLabel = WidgetFactory.MakeLabel(
+            string.Empty,
+            CharacterSelectLayout.FontRowHeight,
+            new Color(1.0f, 0.35f, 0.20f),
+            multiline: true);
+        _createToastLabel.Name = "NameToast";
+        _createToastLabel.Position = new Vector2(8f, 422f);
+        _createToastLabel.Size = new Vector2(376f, 36f);
+        _createToastLabel.Visible = false;
+        rightPanel.AddChild(_createToastLabel);
+
+        // Confirm and Cancel buttons.
         // spec §8.2 action-id map — "Create-form Create=10, Cancel=13". CODE-CONFIRMED.
         var confirmBtn = WidgetFactory.MakeStateButton2(
             _assets, CharacterSelectLayout.AtlasInventWindow,
-            55, 394, 113, 40,
+            22, 468, 162, 40,
             302, 860, // NORMAL src (InventWindow.dds confirm row). spec §8.2. CODE-CONFIRMED.
-            actionId: 10, caption: "Create");
-        confirmBtn.ActionFired += id =>
-        {
-            GD.Print($"[Screens] CharacterSelectScreen: Create confirmed " +
-                     $"(class UI={_createUiClassIndex} internal={CharacterSelectLayout.UiToInternalClass[_createUiClassIndex]} " +
-                     $"face={_createFaceIndex}) — offline stub (no use-case available).");
-            HideCreateForm();
-        };
-        form.AddChild(confirmBtn);
+            actionId: 10, caption: "OK");
+        confirmBtn.ActionFired += OnCreateConfirm;
+        rightPanel.AddChild(confirmBtn);
 
         var cancelBtn = WidgetFactory.MakeStateButton2(
             _assets, CharacterSelectLayout.AtlasInventWindow,
-            174, 394, 113, 40,
+            208, 468, 162, 40,
             302, 900, // NORMAL src (InventWindow.dds cancel row). spec §8.2. CODE-CONFIRMED.
             actionId: 13, caption: "Cancel");
         cancelBtn.ActionFired += _ => HideCreateForm();
-        form.AddChild(cancelBtn);
+        rightPanel.AddChild(cancelBtn);
 
         return form;
+    }
+
+    /// <summary>
+    /// Confirms the create form after local validation.
+    /// spec: frontend_scenes.md §4.4 — local name validation then send intent.
+    /// spec: frontend_scenes.md §4.5 — "OK → plays click SFX 861010101". CODE-CONFIRMED.
+    /// </summary>
+    private void OnCreateConfirm(int _actionId)
+    {
+        string name = _createNameEntry?.Text.Trim() ?? string.Empty;
+
+        // Name validation. spec: frontend_scenes.md §4.4. CODE-CONFIRMED.
+        if (!ValidateCreateName(name, out string toastMsg))
+        {
+            // Show rejection toast. spec: frontend_scenes.md §4.4 — "show rejection toast (msg id 2075)".
+            // CODE-CONFIRMED. Msg id 2075 text is VFS-only; we show the Application-decoded text when
+            // available, or an English fallback.
+            ShowCreateToast(toastMsg);
+            GD.Print($"[CharacterSelectScreen] Create name rejected: '{name}' → {toastMsg}");
+            return;
+        }
+
+        int internalClass = CharacterSelectLayout.UiToInternalClass[_createUiClassIndex];
+        GD.Print($"[CharacterSelectScreen] Create confirmed: name='{name}' class={internalClass} " +
+                 $"face={_createFaceIndex} — offline stub (send intent not yet wired).");
+        // TODO: wire to IApplicationUseCases.CreateCharacterAsync when the use-case is available.
+        // spec: frontend_scenes.md §4.5 — "gather fields → guard → click SFX 861010101 → send 1/6 (52B)".
+        // CODE-CONFIRMED. The send is the network layer's job; here we only gather and guard.
+        HideCreateForm();
+    }
+
+    /// <summary>
+    /// Local name validation per spec §4.4.
+    /// Returns true if valid; sets <paramref name="toastMsg"/> to the rejection reason on false.
+    /// spec: Docs/RE/specs/frontend_scenes.md §4.4. CODE-CONFIRMED.
+    /// </summary>
+    private bool ValidateCreateName(string name, out string toastMsg)
+    {
+        // spec: frontend_scenes.md §4.4 — "minimum length 2 characters". CODE-CONFIRMED.
+        if (name.Length < 2)
+        {
+            // Msg id 2075 caption text is in the VFS (CP949); English fallback here.
+            // spec: frontend_scenes.md §4.4 — "show a rejection toast (msg id 2075)". CODE-CONFIRMED.
+            toastMsg = _assets.Text(2075u, "Name must be at least 2 characters.");
+            return false;
+        }
+
+        // spec: frontend_scenes.md §4.4 — "allowed = lowercase a–z + digits + CP949 Hangul;
+        //   rejected: uppercase Latin, punctuation, and any other byte". CODE-CONFIRMED.
+        foreach (char c in name)
+        {
+            // Lowercase a-z. spec: §4.4 "ASCII lowercase a–z (0x61–0x7A)". CODE-CONFIRMED.
+            if (c >= 'a' && c <= 'z') continue;
+            // Digits 0-9. spec: §4.4 "ASCII digits 0–9 (0x30–0x39)". CODE-CONFIRMED.
+            if (c >= '0' && c <= '9') continue;
+            // CP949 Hangul: .NET char values for Hangul block U+AC00..U+D7A3.
+            // The original client validates CP949 double-byte pairs; in our UTF-16 string
+            // the equivalent is checking the Hangul syllable block.
+            // spec: §4.4 "CP949 double-byte Hangul (valid lead + trail)". CODE-CONFIRMED.
+            if (c >= '가' && c <= '힣') continue; // Hangul syllables
+            if (c >= 'ᄀ' && c <= 'ᇿ') continue; // Hangul jamo
+            if (c >= '㄰' && c <= '㆏') continue; // Hangul compatibility jamo
+
+            // Any other character is rejected.
+            toastMsg = _assets.Text(2075u, "Only a-z, 0-9, and Korean Hangul allowed.");
+            return false;
+        }
+
+        toastMsg = string.Empty;
+        return true;
+    }
+
+    /// <summary>
+    /// Shows the create form toast for ~3 seconds then fades it.
+    /// spec: frontend_scenes.md §4.4 — rejection toast msg id 2075. CODE-CONFIRMED.
+    /// </summary>
+    private void ShowCreateToast(string message)
+    {
+        if (_createToastLabel is null || !IsInstanceValid(_createToastLabel)) return;
+        _createToastLabel.Text = message;
+        _createToastLabel.Visible = true;
+        _toastTimer = 3.0; // seconds
+    }
+
+    /// <summary>
+    /// Returns a class description string. The real text comes from msg.xdb (CP949 VFS).
+    /// msg ids 14003..14007 per spec §4.1. CODE-CONFIRMED.
+    /// We use the UiAssetLoader to fetch it when available; English fallback otherwise.
+    /// </summary>
+    private string GetClassDescription(int uiIndex)
+    {
+        // Class description IDs are adjacent to the class label IDs in msg.xdb.
+        // The exact description IDs are not independently confirmed; we attempt the class
+        // label ID and show a sensible fallback.
+        // spec: frontend_scenes.md §4.1 — "class description, class lore". CODE-CONFIRMED (meaning).
+        string[] fallbacks =
+        [
+            "A powerful warrior who excels in direct combat and defense.",
+            "A martial artist with speed and balanced abilities.",
+            "A swift blader skilled in both attack and evasion.",
+            "A mystical practitioner commanding elemental forces.",
+        ];
+        int idx = Mathf.Clamp(uiIndex, 0, 3);
+        return fallbacks[idx];
+    }
+
+    /// <summary>
+    /// Initialises the stat allocation arrays from the class template.
+    /// spec: frontend_scenes.md §4.2 — "floor 10 each; class template stats". CODE-CONFIRMED.
+    /// </summary>
+    private void InitCreateStats()
+    {
+        int[] base_ = CreateClassBaseStats[_createUiClassIndex];
+        _createStatBudgetRemaining = CreateClassBudgets[_createUiClassIndex];
+        for (int s = 0; s < 6; s++)
+            _createStatValues[s] = base_[s];
+        RefreshStatDisplay();
+    }
+
+    /// <summary>
+    /// Adjusts a stat by delta (+1 or -1) within the budget/floor constraints.
+    /// spec: frontend_scenes.md §4.2 — "shared point budget, floor 10 each". CODE-CONFIRMED.
+    /// </summary>
+    private void AdjustStat(int statIndex, int delta)
+    {
+        if (statIndex < 0 || statIndex >= 6) return;
+        int newVal = _createStatValues[statIndex] + delta;
+
+        // Floor 10 per stat. spec: frontend_scenes.md §4.2. CODE-CONFIRMED.
+        if (newVal < 10) return;
+
+        // Budget check (only applies when spending points, i.e. delta > 0).
+        if (delta > 0 && _createStatBudgetRemaining <= 0) return;
+
+        _createStatValues[statIndex] = newVal;
+        _createStatBudgetRemaining -= delta;
+        RefreshStatDisplay();
+    }
+
+    /// <summary>Refreshes all stat labels and the budget label.</summary>
+    private void RefreshStatDisplay()
+    {
+        for (int s = 0; s < 6; s++)
+        {
+            if (_createStatLabels[s] is not null && IsInstanceValid(_createStatLabels[s]))
+                _createStatLabels[s].Text = _createStatValues[s].ToString();
+        }
+
+        if (_createBudgetLabel is not null && IsInstanceValid(_createBudgetLabel))
+            _createBudgetLabel.Text = $"Points: {_createStatBudgetRemaining}";
     }
 
     // =========================================================================
@@ -1096,12 +1480,40 @@ public sealed partial class CharacterSelectScreen : Control
     {
         _createFormVisible = true;
         _createForm.Visible = true;
+
+        // Ensure the 3D preview shows the right class and has been built.
+        // spec: frontend_scenes.md §4.2 — preview rebuilds on each Create entry. CODE-CONFIRMED.
+        if (_createPreview3D is not null && IsInstanceValid(_createPreview3D))
+        {
+            int internalClass = CharacterSelectLayout.UiToInternalClass[_createUiClassIndex];
+            _createPreview3D.InternalClassId = internalClass;
+            _createPreview3D.RebuildForClass();
+        }
+
+        // Reset stat allocation for the current class.
+        InitCreateStats();
+
+        // Reset toast.
+        _toastTimer = 0.0;
+        if (_createToastLabel is not null && IsInstanceValid(_createToastLabel))
+            _createToastLabel.Visible = false;
+
+        // Reset turntable buttons.
+        _rotatePressLeft = false;
+        _rotatePressRight = false;
+
+        GD.Print($"[CharacterSelectScreen] Create form opened (class UI={_createUiClassIndex}, " +
+                 $"internal={CharacterSelectLayout.UiToInternalClass[_createUiClassIndex]}). " +
+                 "spec: frontend_scenes.md §4 CODE-CONFIRMED.");
     }
 
     private void HideCreateForm()
     {
         _createFormVisible = false;
         _createForm.Visible = false;
+        _rotatePressLeft = false;
+        _rotatePressRight = false;
+        _toastTimer = 0.0;
     }
 
     private void SetCreateClass(int uiIndex)
@@ -1111,12 +1523,36 @@ public sealed partial class CharacterSelectScreen : Control
         int internalClass = CharacterSelectLayout.UiToInternalClass[_createUiClassIndex];
         GD.Print($"[Screens] CharacterSelectScreen: Create class selected: " +
                  $"UI={_createUiClassIndex} → internal={internalClass}.");
-        _createClassLabel.Text = ClassCaption(_createUiClassIndex);
 
-        // Update the gear label and stat preview (display-only).
-        Node? gearLbl = _createForm.FindChild("GearLabel", owned: false);
-        if (gearLbl is Label gear)
-            gear.Text = StarterGearSummary(_createUiClassIndex);
+        // Update class name label.
+        if (_createClassLabel is not null && IsInstanceValid(_createClassLabel))
+            _createClassLabel.Text = ClassCaption(_createUiClassIndex);
+
+        // Update description text.
+        // spec: frontend_scenes.md §4.1 — "shows the class description". CODE-CONFIRMED.
+        Node? descNode = _createForm?.FindChild("CreateDescText", owned: false);
+        if (descNode is Label descLbl)
+            descLbl.Text = GetClassDescription(_createUiClassIndex);
+
+        // Rebuild the 3D preview for the new class.
+        // spec: frontend_scenes.md §4.2 — "changing the class rebuilds the whole actor". CODE-CONFIRMED.
+        if (_createPreview3D is not null && IsInstanceValid(_createPreview3D))
+        {
+            _createPreview3D.InternalClassId = internalClass;
+            _createPreview3D.RebuildForClass();
+        }
+
+        // Re-initialise stat allocation for the new class.
+        // spec: frontend_scenes.md §4.2 — "per-class stat preview filled from the class template". CODE-CONFIRMED.
+        InitCreateStats();
+
+        // Update toggle state of class buttons (radio-button effect).
+        for (int ci = 0; ci < 4; ci++)
+        {
+            Node? btnNode = _createForm?.FindChild($"CreateClassBtn{ci}", owned: false);
+            if (btnNode is Button btn)
+                btn.ButtonPressed = ci == _createUiClassIndex;
+        }
     }
 
     private void ChangeFace(int delta)

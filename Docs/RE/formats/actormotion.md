@@ -167,6 +167,10 @@ divisor-guard sites) would settle items 1–4 and 6.
 ## Cross-references
 
 - **Container:** `Docs/RE/formats/pak.md` (how the file bytes are obtained).
+- **Skeleton registry:** `Docs/RE/formats/bindlist.md` — the authoritative list of registered
+  `.bnd` skeletons. The `skin_class` column here joins to `data/char/bind/g<skin_class>.bnd`,
+  whose validity is the membership test in `bindlist.txt`. There is NO computed `g{N}.bnd`
+  numeric rule; registration is by explicit list / `IdB` join.
 - **Asset chains:** the actormotion table is the join point for the **mob → skin** and **idle-motion**
   chains: a `mob_id` / actor maps through this table to a skin class and to a motion id, and the
   motion id resolves to a `data/char/mot/g{id}.mot` file. See the recovered chains documented under

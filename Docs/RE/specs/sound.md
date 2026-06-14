@@ -789,6 +789,49 @@ the loader prefix rule; debugger-confirmable).
 
 ---
 
+### 15.6 Direct cue->file rule and the front-end create/loading cue inventory
+
+> **Confidence:** the cue->path rule and the VFS presence of each `<id>.ogg` are SAMPLE-VERIFIED
+> (direct VFS reads). The exact firing site of each per-class create voice and the loading SFX is
+> INFERRED from the cue family and scene context (not statically pinned to a specific action branch).
+
+**Direct cue->file rule (no lookup table).** A front-end audio cue id resolves to a 2D Ogg file by
+the same implicit decimal-stem convention as every other clip (§3.4): the integer cue id IS the
+filename stem. There is **no front-end audio manifest or lookup table** in the VFS — the path is
+computed directly:
+
+```
+cue_id  ->  data/sound/2d/<cue_id>.ogg        // decimal stem, no zero-padding, .ogg unconditional
+```
+
+**Front-end create / loading cue inventory (SAMPLE-VERIFIED present in the VFS):**
+
+| Cue id | Resolved path | Role | Confidence |
+|---:|---|---|---|
+| **861010105** | `data/sound/2d/861010105.ogg` | Login intro SFX / stinger (auto-fired at the login intro sub-state; also has a `3d/` mirror, but the front-end uses the 2D path). Cross-ref §15.2. | SAMPLE-VERIFIED (present); CODE-CONFIRMED firing (§15.2) |
+| **861010101** | `data/sound/2d/861010101.ogg` | Generic UI click (the project-wide "a button did something" cue). Cross-ref §15.2. | SAMPLE-VERIFIED + CODE-CONFIRMED (§15.2) |
+| **920100200** | `data/sound/2d/920100200.ogg` | Char-select BGM (also the front-end/title BGM and the enter-world confirm cue). Cross-ref §15.2. | SAMPLE-VERIFIED + CODE-CONFIRMED (§15.2) |
+| **920100100** | `data/sound/2d/920100100.ogg` | Loading SFX (the load/transition cue family neighbouring the char-select BGM). | SAMPLE-VERIFIED (present); INFERRED firing |
+| **910062000** | `data/sound/2d/910062000.ogg` | Per-class character-creation voice (class 2 of the four playable classes). | SAMPLE-VERIFIED (present); INFERRED binding |
+| **910063000** | `data/sound/2d/910063000.ogg` | Per-class creation voice (class 3). | SAMPLE-VERIFIED (present) |
+| **910064000** | `data/sound/2d/910064000.ogg` | Per-class creation voice (class 4). | SAMPLE-VERIFIED (present) |
+| **910065000** | `data/sound/2d/910065000.ogg` | Per-class creation voice (class 5 / the fourth playable slot). | SAMPLE-VERIFIED (present) |
+
+The four creation voices fall in the `91006N000` range (the `9100xxxxx` character-voice family,
+§3.4). The `N=2..5` span maps one cue to each playable class at the create step; the exact
+class->cue assignment is INFERRED (the cue family and range are confirmed, the per-class binding is
+not statically pinned). Adjacent ids in the same family exist in the VFS but are not bound to the
+front-end create flow.
+
+### 15.7 No server-endpoint config file exists in the VFS
+
+An exhaustive VFS substring search (`serverlist`, `server`, `host`, `connect`, `.ini`, `.cfg`) found
+**no server-list or host-config file inside `data.vfs`**. The authentication host and port are
+therefore **not VFS-resident** — they are compiled into the client binary or supplied out-of-VFS
+(e.g. a flat file beside the executable, a registry value, or a command-line argument). This is
+consistent with the login flow opening a fixed endpoint rather than reading a VFS config. A revival
+must source the auth endpoint from its own configuration, not from the asset archive.
+
 ## Open questions
 
 1. **`SOUND_KIND` integer values.** The enum names are recovered from editor debug strings. The
@@ -840,6 +883,13 @@ the loader prefix rule; debugger-confirmable).
 10. **Per-front-end-widget click cue.** The login window and PIN keypad have no static play call on
     any action branch; whether each plays a click cue at runtime is UNVERIFIED (debugger-only, §15.4).
     The 862030101–107 pool is registered but not 1:1-bound to any front-end widget (§15.3).
+
+11. **Per-class create-voice binding (§15.6).** The four creation voices (910062000..910065000)
+    are confirmed present in the VFS, but the exact class->cue assignment and the firing site
+    in the create action handler are INFERRED, not statically pinned. Debugger-confirmable.
+
+12. **Loading SFX 920100100 firing site (§15.6).** Confirmed present; the exact trigger
+    (loading transition vs. another front-end step) is INFERRED.
 
 ---
 

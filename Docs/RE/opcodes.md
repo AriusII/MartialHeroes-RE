@@ -64,7 +64,7 @@ family is the high 16 bits; the minor is the low 16 bits.
 | `0x10004` | CmsgAuthReply | C2S | var | packets/login.yaml | draft | (1:4) Client secure auth-reply / **login-credential carrier**; emitted from the inbound major-0 branch right after the 0/0 key exchange, over the secure-send path. The 1/4 frame carries TWO things in one payload: first the plaintext login pre-image (sub-opcode 0x2B + length-prefixed account + optional length-prefixed PIN), then the RSA ciphertext of the password (PKCS#1 v1.5 type-2). **Frame major/minor = 1/4 and the 0x2B credential prefix are debugger-verified.** DISTINCT from CharacterMgmt 1/6 char-create (the prior '1/6 login-or-create collision' is resolved). Layout per packets/login.yaml + crypto.md section 6. |
 | `0x10006` | CmsgCreateCharacter | C2S | 52 | packets/cmsg_char_create.yaml | draft | (1:6) **Character-CREATE only** (collision RESOLVED). The single emitter is the create-confirm control of the character-select window's create sub-form (an in-place transient sub-state, not a separate scene). 52-byte embedded appearance/creation record, field map now recovered: Name @0 (18B CP949, min 2), Face @0x12 (1..7), Sex @0x14, hair/reserved @0x16, INTERNAL ClassId @0x18 (UI button->internal remap {0->1,1->3,2->4,3->2}), 2-byte gap @0x1A, five u32 stats @0x1C, remaining-points u32 @0x30. The login credential is NOT here -- it is sub-opcode 0x2B on the secure 1/4 frame (see 0x10004). Server replies S2C 3/6/3/23 create result. Sex-vs-hair semantics + full class permutation capture-unverified. |
 | `0x10007` | CmsgManageCharacter | C2S | 2 | packets/cmsg_char_select.yaml | draft | (1:7) Character-MANAGE on the char-select screen -- dual-purpose 2-byte body: slot index @0 + a MODE byte @1. Mode 0 = plain select/view; **DELETE OVERLOADS this op** with the mode byte set (value UNVERIFIED: 1 vs 2 -- needs a delete capture). There is NO dedicated delete opcode; the old '1/14 = delete' reading is superseded (1/14 is slot-move). The delete result is attributed to S2C 3/4 subtype 2 (committed, authoritative); a fresh static read suggests an UNVERIFIED 3/7 alternative -- do NOT re-point on static evidence alone. Field internals capture-unverified. |
-| `0x10009` | CmsgEnterGameRequest | C2S | 40 | packets/cmsg_char_enter.yaml | draft | (1:9) Enter-world request: slot index @0 + a 33-byte identity/session token string + a 4-byte derived version token. The version token is NOT a constant: it is 10 x (field 5 of the on-disk data/cursor/game.ver) + 9. Enter sends ONLY 1/9 (the 1/7 manage was already sent at slot click). Single emitter (enter-selected-character helper). Server replies 3/5 EnterGameAck. The intra-buffer offsets of the token string + version dword are capture-unverified. |
+| `0x10009` | CmsgEnterGameRequest | C2S | 40 | packets/cmsg_char_enter.yaml | draft | (1:9) Enter-world request: slot index @0 + a 33-byte launcher-supplied session/identity token string (copied from the process command-line/argv0, not the typed account) + a 4-byte derived version token. The version token is NOT a constant: it is 10 x (field 5 of the on-disk data/cursor/game.ver) + 9. Enter sends ONLY 1/9 (the 1/7 manage was already sent at slot click). Single emitter (enter-selected-character helper). Server replies 3/5 EnterGameAck (scene -> loading), then 4/1 carries the world snapshot. The intra-buffer offsets of the token string + version dword are capture-unverified (version dword offset needs-debugger). |
 | `0x1000d` | CmsgRenameCharacter | C2S | 18 | packets/cmsg_char_rename.yaml | draft | (1:13) Rename-character request: slot index byte @0 + 17-byte CP949 new-name C-string @1 (<=16 usable). Triggered from the rename dialog's confirm button after charset + min-length-2 validation (NOT a slot-grid button). Server replies 3/6 RenameCharResult (and a 3/4 subtype-1 refresh). Field internals capture-unverified. |
 | `0x1000e` | CmsgMoveCharacter | C2S | 1 | packets/cmsg_char_move.yaml | draft | (1:14) Slot-MOVE / relocate request: 1-byte target slot index (the workflow-spine dossier re-attributes 1/14 from delete to slot-move -- delete instead overloads 1/7; gated by slot<=4 and the in-flight latch). Two emitters in the select-window dispatcher. NOTE: prior catalog labelled 1/14 'delete'; canonical-name reconciliation owned by Tier-1. Field internals capture-unverified. |
 | `0x10010` | SmsgSrvBillingDeactivated | S2C | var | - | confirmed | (1:16) Billing turned off. Routing dispatch-table-confirmed; field layout not yet specced. |
@@ -100,7 +100,7 @@ family is the high 16 bits; the minor is the low 16 bits.
 | `0x22710` | CmsgKeepalive | C2S | 4 | packets/2-10000_keepalive.yaml | draft | (2:10000) Keepalive/ping. Timer-driven (~20 s), 4-byte zero body. Compressed-only send path (NOT re-encrypted). The '20' is the interval in seconds, NOT the body size. New major-2 (otherwise C2S GameAction) addition. Layout capture-unverified. |
 | `0x30001` | SmsgCharacterList | S2C | var | packets/3-1_character_list.yaml | draft | (3:1) Character-select list; switches to the select screen. 3-byte header [server, channel, slot mask] + per-slot 981-byte records gated by the slot bitmask. Each set-slot record = 0x370 spawn descriptor + 0x60 stats block + 1 selectable/occupied flag + 4-byte timing = 981 bytes. The inbound handler writes a 5-slot scratch the select-window then copies into the scene before building. |
 | `0x30004` | SmsgCharManageResult | S2C | 8 | packets/3-4_char_manage_result.yaml | confirmed | (3:4) Char create/delete/rename/manage result: result u8 @0, subtype u8 @2 (0 refresh / 1 rename-applied / 2 delete-confirmed), ready_time u32 @4 (same-day delete cooldown). This is the AUTHORITATIVE delete/manage result attribution; a fresh static read suggested an UNVERIFIED 3/7 alternative carrier -- not overwritten here, pending a capture. NOTE: the raw handler is mislabelled '3/7'; behaviour-anchored it is 3/4. Routing dispatch-table-confirmed; field layout capture-unverified. |
-| `0x30005` | SmsgEnterGameAck | S2C | 44 | packets/3-5_enter_game_response.yaml | draft | (3:5) Enter-world acknowledgement; transitions client into the in-world game state. |
+| `0x30005` | SmsgEnterGameAck | S2C | 44 | packets/3-5_enter_game_response.yaml | draft | (3:5) Enter-world acknowledgement -- the direct reply to C2S 1/9. ACCOUNT/BILLING confirm (account/char name + billing flag + account character count), NOT spawn data: it sets the client scene state to LOADING and ends char-select. The world map/position/self snapshot arrives separately on 4/1. 44-byte read = a 40-byte block + a trailing u32 char count. The 3/5-vs-4/1 arrival ORDER is needs-capture. |
 | `0x30006` | SmsgRenameCharResult | S2C | var | - | confirmed | (3:6) Character rename result. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x30007` | SmsgCharSpawnResult | S2C | var | - | confirmed | (3:7) Spawn-into-world response. NOTE: distinct from the 8-byte char-manage result; some raw decompiler output mislabels the 3/4 manage handler as '3/7' -- do not conflate. (A separate UNVERIFIED static read floats 3/7 as a possible delete-result carrier; the committed delete attribution stays 3/4 -- see 0x30004.) Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x30008` | SmsgShopPageUpdate | S2C | var | - | confirmed | (3:8) Shop page update. Routing dispatch-table-confirmed; field layout not yet specced. |
@@ -110,7 +110,7 @@ family is the high 16 bits; the minor is the low 16 bits.
 | `0x30017` | SmsgCharCreateResult | S2C | var | - | confirmed | (3:23) Character create result. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x30064` | SmsgCharActionResult | S2C | var | - | confirmed | (3:100) Generic character action result. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x3c350` | SmsgGmChatMessage | S2C | var | - | confirmed | (3:50000) GM chat / system message. Routing dispatch-table-confirmed; field layout not yet specced. |
-| `0x40001` | SmsgGameStateTick | S2C | var | packets/4-1_game_state_tick.yaml | confirmed | (4:1) Periodic game-state tick + world-entry seed: spawn X/Z (Y forced 0, not on wire), scenario/map-mode int, region index. Creates the local player and clears keepalive-suppress on world entry. Routing dispatch-table-confirmed; field layout capture-unverified. |
+| `0x40001` | SmsgGameStateTick | S2C | var | packets/4-1_game_state_tick.yaml | confirmed | (4:1) Periodic game-state tick + world-entry seed -- the CARRIER of the world spawn/self-snapshot following the 1/9 -> 3/5 handshake: it builds the local player (from the slot spawn descriptor the enter handler staged), sets area/region + spawn X/Z (Y forced 0, not on wire), scenario/map-mode int, and the enter-world-ready flag, then clears keepalive-suppress. Part of the FROZEN world scene -- its per-actor batch body is OWNED elsewhere and NOT specced here. Routing dispatch-table-confirmed; field layout capture-unverified. |
 | `0x40002` | SmsgGameTickConfig | S2C | var | - | confirmed | (4:2) Game-tick configuration. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x40003` | SmsgBillingInfo | S2C | var | - | confirmed | (4:3) Billing info. Routing dispatch-table-confirmed; field layout not yet specced. |
 | `0x40004` | SmsgAreaEntitySnapshot | S2C | var | - | confirmed | (4:4) Area entity snapshot update; carries SpawnDescriptor-family records. Routing dispatch-table-confirmed; field layout not yet specced. |
@@ -303,24 +303,34 @@ split. Full field spec: `packets/lobby.yaml`.
 
 | Query | Port | Response (after LZ4 decompress) |
 |---|---|---|
-| Server list | **10000** | An 8-byte frame wrapper whose "major" field is a **record count**, then that many **8-byte little-endian records** `{server_id u16 @+0, status i16 @+2, load i16 @+4, open_time i16 @+6}`. |
-| Channel endpoint | **10000 + selected `server_id`** | An 8-byte wrapper, then a payload whose **first 30 (0x1E) bytes** are a NUL-padded ASCII **`host port`** string naming the game server. |
+| Server list | **10000** | An 8-byte frame wrapper (`+0 u32 size`, `+4 u16` reinterpreted as the server-entry **record count**, `+6 u16` unused), then that many **8-byte little-endian records** `{id/select-key i16 @+0, status/kind i16 @+2, population i16 @+4, flag i16 @+6}`. |
+| Channel endpoint | **10000 + selected channel offset** | The same 8-byte wrapper, then a payload whose **first 30 (0x1E) bytes** are a fixed `char[30]` ASCII endpoint token naming the game server (consumed opaquely as one string). |
 
 Both responses are **LZ4-compressed and carry NO byte cipher**, and there is **no `(major:minor)`
-dispatch** on the lobby socket. The lobby wrapper's `minor` field (@+6) appears unused (believed
-always 0). The selected `server_id` (1..40) is added directly to 10000 to form the channel port, so
-`server_id` is effectively the channel **port offset** (implying ports 10001..10040).
+dispatch** on the lobby socket. The lobby wrapper's `+6 u16` (the game frame's "minor" word) is
+unused on this path. The selected **channel offset** is added directly to 10000 to form the channel
+query port, so it is effectively the channel **port offset**.
 
-The wire carries only the **numeric `server_id`** (1..40); the localized server **display name** is
-**client-local** (a 41-entry localized name table) and must be supplied by a fresh implementation.
+The wire carries only the numeric **id/select-key** (`+0`) plus a per-row caption message-id; the
+localized server **display name** is **client-local** (a localized name table) and must be supplied
+by a fresh implementation. The full per-entry field roles and the caption message-id mapping are in
+`packets/lobby.yaml` (record shape A).
 
-### `status` / `load` / `open_time` presentation rules (capture-unverified)
+### Server-entry field roles + caption mapping (capture-unverified presentation)
 
-- `status`: `0` = normal/open; `2/3/4` = fixed status labels (when `open_time == 0`); `3` with
-  `open_time != 0` = "scheduled open" (renders an open clock); `100` = "this is the connected /
-  current selection" sentinel. Full enum is capture-only.
-- For scheduled-open, the displayed clock is **HH:MM** with **HH from `load`** and **MM from
-  `open_time`**, each split into two decimal digits. A `load` value of `24` is a "preparing" sentinel.
+- `+0 id/select-key`: the server id; (a) looks up the client-local display name, (b) draws the
+  current-selection highlight when it matches the remembered "last server", (c) the value tested
+  **`== 100`** is the **"available"** gate that unlocks the per-row select buttons (the 100 sentinel
+  is on this `+0` field, NOT on a separate status field).
+- `+2 status/kind`: caption/branch selector. `0` -> derive a population caption from `+4`/`+6`;
+  `3` -> if `+4 == 24` caption message-id **6004**, else a latency caption **6005**; `1..39` ->
+  index a per-value caption-string array (display name from `+0`); out of `1..39` -> fallback
+  message-id **5901** ("unknown id"). Full enum is capture-only.
+- `+4 population` + `+6 flag`: when `+2 == 0`, `+6` nonzero treats `+4` as a NUMERIC population
+  (thresholds 1200/800/500 -> caption message-ids **6001/6002/6003**), `+6` zero treats `+4` as a
+  DISCRETE load level (`+4 == 4/3/2` -> **6001/6002/6003**); `+6` is also reused as a `6005` latency
+  numerator. The four column-header captions are message-ids **4029/4030/4031/4032**.
+- Field signedness (`+0`/`+4`/`+6`) is presentation-only and capture-unverified.
 
 ### Lobby host resolution order (where the lobby host comes from)
 

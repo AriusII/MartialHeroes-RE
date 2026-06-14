@@ -4,26 +4,50 @@
 name: SmsgEnterGameAck
 opcode: 0x30005            # major 3 (CharacterMgmt), minor 5 -> (3 << 16) | 5
 direction: S2C
-size: 44                  # 40-byte block + trailing u32
+size: 44                  # 40-byte account/billing block + trailing u32 char count
 spec: packets/3-5_enter_game_response.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Enter-world acknowledgement; sets billing state and transitions the client into the in-world game state.
+summary: >
+  Enter-world acknowledgement -- the direct reply to the C2S 1/9 enter request. This is an
+  ACCOUNT / BILLING confirmation, NOT the world spawn data: it carries the account/character name,
+  a billing flag, and the account's character count. Its side effect is to leave the char-select
+  scene and move the client to the LOADING scene state -- it does NOT carry the map, position, or
+  self snapshot. The world self-snapshot (area, world X/Z, the 880-byte spawn descriptor) arrives
+  separately on S2C 4/1 SmsgGameStateTick.
 
 fields:
-  - { name: NameBlock,    type: "bytes[28]" }  # 0x00  character/account name region (asciiz within this block)
-  - { name: BillingState, type: u32 }        # 0x1c  billing state, fed to the client BillingState object
+  - { name: NameBlock,    type: "bytes[28]" }  # 0x00  account/character name region (asciiz within this block)
+  - { name: BillingFlag,  type: u32 }          # 0x1c  billing flag/state, fed to the client billing object
   - { name: BlockTail,    type: "bytes[8]" }   # 0x20  remainder of the 40-byte block (unconsumed by the handler)
-  - { name: CharacterCount, type: u32 }      # 0x28  character count, read by a second 4-byte read
+  - { name: CharacterCount, type: u32 }        # 0x28  account character count, read by a second 4-byte read
 
 notes: |
-  Static inference only; no capture available. The handler reads a 40-byte block (0x00..0x27)
-  then one more u32 (0x28). Total = 44 bytes.
-    0x00..0x1b (28B) name region; the account/character name is a NUL-terminated ASCII string
-                     somewhere inside this block. Exact name length is unconfirmed.
-    0x1c (4B) billing state (le u32).
-    0x20..0x27 (8B) unconsumed remainder of the leading block.
-    0x28 (4B) character count (le u32).
-  Side effect: transitions the client to the in-world game state.
-  UNKNOWN: precise name field length within NameBlock; capture required.
+  Static inference only; no capture available. The handler reads one fixed 40-byte (0x28) block
+  wholesale into the billing/session object, then reads one more u32 right after it. Total = 44
+  bytes. Width sum check: 28 + 4 + 8 + 4 = 44.
+
+    0x00..0x1b (28B) NameBlock    : the account/character name region; the name is a NUL-terminated
+                                    ASCII string somewhere inside this block. Exact name length is
+                                    unconfirmed (the whole 40-byte block is consumed wholesale).
+    0x1c (4B)        BillingFlag  : a billing flag/state dword (le u32), at +28 within the block.
+    0x20..0x27 (8B)  BlockTail    : the unconsumed remainder of the leading 40-byte block.
+    0x28 (4B)        CharacterCount : the account's character count (le u32), read by a second 4-byte
+                                    read just past the block; stored into the billing/session object.
+
+  SIDE EFFECT (CODE-CONFIRMED, the gate that leaves char-select): on receipt the handler sets the
+  global scene state to the LOADING scene and requests the current scene's main loop to exit, so the
+  app advances out of char-select toward the world. So 3/5 is the account/char-count confirmation
+  AND the trigger that ends char-select; it is NOT the world snapshot.
+
+  WORLD SNAPSHOT IS SEPARATE: the spawn map/area/position and the self/entity state arrive on S2C
+  4/1 SmsgGameStateTick (packets/4-1_game_state_tick.yaml), which creates the local player from the
+  spawn descriptor the 1/9 enter handler staged locally and sets the enter-world-ready flag.
+
+  ORDERING (needs-capture/needs-debugger): the relative arrival ORDER of 3/5 (sets the scene to
+  loading, ends the loop) vs 4/1 (sets the enter-world-ready flag, builds the local player) is the
+  single load-bearing runtime-ordering fact static cannot pin. See specs/login.md "needs-capture".
+
+  UNKNOWNS (capture required): the precise name field length within NameBlock; the exact meaning of
+  BillingFlag values; whether BlockTail carries small additional fields.

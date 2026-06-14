@@ -249,75 +249,103 @@ public sealed partial class ServerSelectScreen : Control
         }
 
         // =======================================================================
-        // [L5] Server row list area.
-        // The 10 row buttons are mapped from the left-panel scroll area.
-        // We build a scroll container centred on the canvas covering x=270..750, y=165..600.
+        // [L5] Parchment scroll panels (D = loginwindow_02.dds) — the server-list backing.
+        // Two channel-tab PLATE columns, each with a decorative body sub-rect.
+        // spec §11.4 "Parchment row/tab PLATE - normal state: D src(9,6,202,372)
+        //   col0 dst(24,97,202,372) / col1 dst(257,97,202,372)". CODE-CONFIRMED.
+        // spec §11.4 "Parchment scroll BODY: D src(448,6,100,372) col0 / D src(572,6,100,372) col1".
+        // =======================================================================
+        for (int col = 0; col < 2; col++)
+        {
+            int dstX = col == 0 ? 24 : 257;
+
+            // Parchment PLATE (the full 202×372 tab backing).
+            // spec §11.4 PLATE normal src(9,6,202,372). CODE-CONFIRMED.
+            AtlasTexture? plateTex = _assets.Slice(
+                LoginLayout.AtlasLoginWindow02, 9, 6, 202, 372);
+            if (plateTex is not null)
+            {
+                var plate = new TextureRect
+                {
+                    Name = $"ParchPlate{col}",
+                    Texture = plateTex,
+                    StretchMode = TextureRect.StretchModeEnum.Scale,
+                    MouseFilter = MouseFilterEnum.Ignore,
+                    Position = new Vector2(dstX, 97),
+                    Size = new Vector2(202, 372),
+                };
+                AddChild(plate);
+            }
+
+            // Parchment BODY (the calligraphy / decorative inner strip).
+            // spec §11.4 "Parchment scroll BODY - channel column 0/1". CODE-CONFIRMED.
+            int bodySrcU = col == 0 ? 448 : 572;
+            AtlasTexture? bodyTex = _assets.Slice(
+                LoginLayout.AtlasLoginWindow02, bodySrcU, 6, 100, 372);
+            if (bodyTex is not null)
+            {
+                var body = new TextureRect
+                {
+                    Name = $"ParchBody{col}",
+                    Texture = bodyTex,
+                    StretchMode = TextureRect.StretchModeEnum.Scale,
+                    MouseFilter = MouseFilterEnum.Ignore,
+                    Position = new Vector2(dstX + (col == 0 ? 77 : 77), 97),
+                    Size = new Vector2(100, 372),
+                };
+                AddChild(body);
+            }
+        }
+
+        // =======================================================================
+        // [L6] Server row list.
+        // The rows are placed over the left parchment plate (col 0, x=24..226, y=97..469).
+        // Each row uses the loginwindow.dds row button art (47×18, stretched).
         // spec §11.4 "Server-row buttons x10". CODE-CONFIRMED.
         // =======================================================================
-        // Scroll container for the row list.
-        var listPanel = new Panel
+        // Invisible container over the parchment, y=110 to leave room for the header.
+        var listPanel = new Control
         {
             Name = "ServerListPanel",
-            Position = new Vector2(270, 165),
-            Size = new Vector2(480, 420),
+            Position = new Vector2(24, 117),
+            Size = new Vector2(450, 340),
         };
-        var listStyle = new StyleBoxFlat
-        {
-            BgColor = new Color(0.07f, 0.06f, 0.10f, 0.85f),
-            BorderColor = new Color(0.40f, 0.35f, 0.20f),
-        };
-        listStyle.SetBorderWidthAll(1);
-        listPanel.AddThemeStyleboxOverride("panel", listStyle);
         AddChild(listPanel);
 
         // Column header row. spec §11.4 "List column header labels". CODE-CONFIRMED captions 4029..4032.
         var headerRow = new HBoxContainer
         {
             Name = "HeaderRow",
-            Position = new Vector2(4, 4),
-            Size = new Vector2(472, 20),
+            Position = new Vector2(0, 0),
+            Size = new Vector2(450, 20),
         };
         listPanel.AddChild(headerRow);
 
         void AddHdr(uint msgId, string fallback, int minW)
         {
             var lbl = WidgetFactory.MakeLabel(_assets.Text(msgId, fallback),
-                LoginLayout.FontBodyHeight, new Color(0.80f, 0.80f, 0.60f));
+                LoginLayout.FontBodyHeight, new Color(0.85f, 0.78f, 0.50f));
             lbl.CustomMinimumSize = new Vector2(minW, 20);
             headerRow.AddChild(lbl);
         }
 
         // Caption ids 4029..4032 — column headers. spec §11.4. CODE-CONFIRMED.
-        AddHdr(4029u, "Server", 220);
-        AddHdr(4030u, "Status", 80);
-        AddHdr(4031u, "Load", 80);
+        AddHdr(4029u, "서버", 200);
+        AddHdr(4030u, "상태", 70);
+        AddHdr(4031u, "부하", 70);
         AddHdr(4032u, "", 60);
 
-        // Scroll + row container.
+        // Scroll + row container (below the header).
         var scroll = new ScrollContainer
         {
             Name = "RowScroll",
-            Position = new Vector2(0, 28),
-            Size = new Vector2(480, 392),
+            Position = new Vector2(0, 24),
+            Size = new Vector2(450, 310),
         };
         listPanel.AddChild(scroll);
 
         _rowContainer = new VBoxContainer { Name = "RowContainer" };
         scroll.AddChild(_rowContainer);
-
-        // =======================================================================
-        // [L6] Back button (offline convenience — not in spec as a canvas widget).
-        // Placed at bottom-left below the list panel. PLAUSIBLE position.
-        // =======================================================================
-        var backBtn = new Button
-        {
-            Name = "BackButton",
-            Text = "Back",
-            Position = new Vector2(270, 598),
-            Size = new Vector2(100, 28),
-        };
-        backBtn.Pressed += () => EmitSignal(SignalName.BackRequested);
-        AddChild(backBtn);
 
         // Populate rows if already set.
         if (_servers is not null)
@@ -393,55 +421,51 @@ public sealed partial class ServerSelectScreen : Control
 
     private Control BuildRow(ServerEntry entry)
     {
-        // H1 fix: row uses an atlas button from loginwindow.dds as the click target,
-        // matching the official parchment-row look. spec §11.4 "Server-row buttons x10 (loop):
-        // B@(13,66,47,18) X-step+47, NORMAL src(596,985), HOVER src(643,985)." CODE-CONFIRMED.
-        // In the official client the 47×18 atlas button is the visible row frame; we stretch it
-        // to fill the full row width (472px) so it acts as a parchment background bar.
-        var row = new HBoxContainer { CustomMinimumSize = new Vector2(472, 30) };
+        // Server-row button: loginwindow.dds 47×18 stretched to fill the row.
+        // spec §11.4 "Server-row buttons x10: B NORMAL src(596,985,47,18), HOVER src(643,985)."
+        // CODE-CONFIRMED.
+        // Row width = 200px (fits in the 202px parchment plate col 0).
+        var row = new HBoxContainer { CustomMinimumSize = new Vector2(440, 26) };
 
-        // Atlas button — the loginwindow.dds server-row art (47×18 stretched to row width).
-        // We build it via WidgetFactory.MakeStateButton so it gets normal/hover/pressed states.
-        // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §11.2c. CODE-CONFIRMED src rects.
         int captureId = entry.ServerId;
         int rowActionId = LoginLayout.ServerRowActionBase + (entry.ServerId - 1); // action 115+idx
+
+        // Atlas row button (the 47×18 art stretched to full row width).
         var rowBtn = WidgetFactory.MakeStateButton(
             _assets,
             LoginLayout.AtlasLoginWindow,
-            0, 0, // panel-local position (inside row)
-            472, LoginLayout.ServerRowBtnH, // full row width × spec height (18px; padded via container)
+            0, 0,
+            200, 26, // row width matched to parchment plate col width
             LoginLayout.ServerRowBtnNormalSrcX, LoginLayout.ServerRowBtnNormalSrcY, // NORMAL (596,985)
             LoginLayout.ServerRowBtnHoverSrcX, LoginLayout.ServerRowBtnHoverSrcY, // HOVER  (643,985)
             LoginLayout.ServerRowBtnHoverSrcX, LoginLayout.ServerRowBtnHoverSrcY, // PRESSED = HOVER
             rowActionId,
-            caption: entry.DisplayName + (entry.IsNew ? " [NEW]" : ""),
-            captionTint: new Color(0.90f, 0.85f, 0.60f)); // parchment-gold text
+            caption: entry.DisplayName + (entry.IsNew ? " ★" : ""),
+            captionTint: new Color(0.90f, 0.85f, 0.55f)); // parchment-gold text
         rowBtn.Name = $"RowBtn{entry.ServerId}";
         rowBtn.ActionFired += _ =>
         {
-            GD.Print($"[ServerSelectScreen] Server selected (atlas row): id={captureId} name='{entry.DisplayName}'.");
+            GD.Print($"[ServerSelectScreen] Server selected: id={captureId} name='{entry.DisplayName}'.");
             EmitSignal(SignalName.ServerSelected, captureId);
         };
         row.AddChild(rowBtn);
 
-        // Status, load, and population labels are overlaid on the atlas row button via absolute
-        // positioning within the same HBoxContainer. They do NOT intercept mouse events.
-        // spec §2.3 / §11.4. CODE-CONFIRMED positions (right columns of the row).
+        // Status label (右 du button, dans les colonnes 右). spec §2.3. CODE-CONFIRMED.
         string statusText = GetStatusText(entry);
         Color statusColor = GetStatusColor(entry);
         var statusLbl = WidgetFactory.MakeLabel(statusText, LoginLayout.FontBodyHeight, statusColor);
-        statusLbl.CustomMinimumSize = new Vector2(80, LoginLayout.ServerRowBtnH);
+        statusLbl.CustomMinimumSize = new Vector2(70, 26);
         statusLbl.MouseFilter = MouseFilterEnum.Ignore;
         row.AddChild(statusLbl);
 
-        // Load gauge. spec §2.3 / login_flow.md §2.1. CODE-CONFIRMED.
+        // Load indicator. spec §2.3. CODE-CONFIRMED.
         (string loadText, Color loadColor) = GetLoadDisplay(entry.Load);
         var loadLbl = WidgetFactory.MakeLabel(loadText, LoginLayout.FontBodyHeight, loadColor);
-        loadLbl.CustomMinimumSize = new Vector2(80, LoginLayout.ServerRowBtnH);
+        loadLbl.CustomMinimumSize = new Vector2(70, 26);
         loadLbl.MouseFilter = MouseFilterEnum.Ignore;
         row.AddChild(loadLbl);
 
-        // Population availability captions 6001..6005. spec §11.4. CODE-CONFIRMED.
+        // Population caption (6001..6005). spec §11.4. CODE-CONFIRMED.
         uint popCapId = entry.Load > 1200 ? 6005u :
             entry.Load > 800 ? 6004u :
             entry.Load > 500 ? 6003u :
@@ -450,14 +474,9 @@ public sealed partial class ServerSelectScreen : Control
         if (!string.IsNullOrEmpty(popText))
         {
             var popLbl = WidgetFactory.MakeLabel(popText, LoginLayout.FontBodyHeight, loadColor);
-            popLbl.CustomMinimumSize = new Vector2(60, LoginLayout.ServerRowBtnH);
+            popLbl.CustomMinimumSize = new Vector2(60, 26);
             popLbl.MouseFilter = MouseFilterEnum.Ignore;
             row.AddChild(popLbl);
-        }
-        else
-        {
-            var spacer = new Control { CustomMinimumSize = new Vector2(60, LoginLayout.ServerRowBtnH) };
-            row.AddChild(spacer);
         }
 
         return row;

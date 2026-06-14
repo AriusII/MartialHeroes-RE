@@ -1622,6 +1622,52 @@ relevance to the `.scr` / `.do` pipeline.
 
 ---
 
+## Section 7 — game.ver (binary client-version source file)
+
+**Sample verified** (single instance; VFS read). A small fixed-size binary file that supplies the
+client version number consumed by the enter-game token. It is the same shape family as the
+Section 6 version manifest (a small flat array of `u32` with a 7-element minimum), but it lives at
+a fixed VFS path and exactly one field is consumed by the login/enter token formula.
+
+### Identification
+
+- **VFS path:** `data/cursor/game.ver`
+- **Size:** exactly **28 bytes**
+- **Format:** flat array of **7 x `u32`, little-endian** (no header, no magic, no record-count
+  prefix - the field count is fixed at 7)
+- **VFS note:** the archive carries **two index entries for this path** at consecutive offsets;
+  both describe the same 28 identical bytes. The second is a redundant shadow entry (a duplicate
+  TOC row, not a second distinct file). A parser may resolve either entry; both yield the same
+  payload. See `formats/pak.md` for VFS lookup behaviour.
+
+### Layout (7 x u32 LE, 28 bytes)
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| 0x00 | 4 | u32 | field0 | Unknown; possibly a format/version tag | UNVERIFIED (value present) |
+| 0x04 | 4 | u32 | field1 | Unknown | UNVERIFIED |
+| 0x08 | 4 | u32 | field2 | Unknown | UNVERIFIED |
+| 0x0C | 4 | u32 | field3 | Unknown; possibly a build number | UNVERIFIED |
+| 0x10 | 4 | u32 | field4 | Unknown | UNVERIFIED |
+| 0x14 | 4 | u32 | **version_source** (field5) | **The value consumed by the enter-game version token.** | CONFIRMED (role) |
+| 0x18 | 4 | u32 | field6 | Unknown | UNVERIFIED |
+
+### Version token derivation (CONFIRMED math; cross-referenced)
+
+The enter-game / login version token is computed from the single field at offset **0x14**:
+
+```
+version_token = 10 x version_source + 9      // version_source = u32 at offset 0x14
+```
+
+With the observed `version_source = 2114`, the token is `10 x 2114 + 9 = 21149`, matching the
+enter-game token documented in the protocol / front-end specs. Only `version_source` (offset 0x14)
+feeds this formula; the remaining six `u32` are not used by it.
+
+**Record count source:** fixed at 7 (file is always 28 bytes). **Record stride:** 4 bytes per field.
+
+---
+
 ## Known unknowns
 
 ### Resolved since last version (wave-7 and wave-8 unblocks)
@@ -1740,6 +1786,9 @@ relevance to the `.scr` / `.do` pipeline.
     and the identity of the three overlay badges and the 87×13 level/rank strip at +0x20/+0x24 (§3.5).
 57. **Stance `.do` `instanceKey` ↔ `skills.scr` skill id** — whether the join key is identity or a
     transform; needs cross-check against `skills.scr` +0x00 (§3.5, §2.8).
+59. **game.ver fields 0-4 and 6** - only `version_source` at offset 0x14 has a confirmed
+    role (the enter-game token). The other six `u32` (0x00, 0x04, 0x08, 0x0C, 0x10, 0x18)
+    have no traced consumer; 0x0C is a build-number candidate. See Section 7.
 58. **c2s 2/52 slot-index claim is CAPTURE-UNVERIFIED** — the protocol fact that the UseSkill packet
     sends the hotbar slot index (`u8`), not the instanceKey, is static-confirmed only and must be
     validated against a real capture before any wire code relies on it (§3.5).
@@ -1755,5 +1804,6 @@ relevance to the `.scr` / `.do` pipeline.
 - Skill catalogue relates to: `Docs/RE/structs/skill.md`
 - Skill icon source coordinates and stance `.do` file-to-class mapping: `Docs/RE/formats/ui_manifests.md` §2.7 (§3.5 here gives the full `.do` record layout)
 - UseSkill (c2s 2/52) opcode and the skill-use path: `Docs/RE/opcodes.md`, `Docs/RE/specs/skill_system.md`
+- `game.ver` version token feeds the enter-game flow: `Docs/RE/specs/frontend_scenes.md`
 - Glossary: `Docs/RE/names.yaml`
 - Provenance: `Docs/RE/journal.md`

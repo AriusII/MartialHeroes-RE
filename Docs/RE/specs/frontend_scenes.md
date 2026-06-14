@@ -1578,6 +1578,44 @@ shipped DDS headers by a VFS harness (no pixel data extracted).
 > font (HANGUL charset, code page 949); the specific typeface depends on the host OS's installed
 > Korean fonts. A revival must supply a CP949-capable Korean font.
 
+## 11.1a Front-end atlas DDS facts (byte-confirmed FourCC / mips + Godot import flags)
+
+> These are the byte-confirmed pixel-format facts for the §11.1 atlases, read directly from the
+> shipped DDS headers by a VFS harness (header bytes only; no pixel data extracted). They refine the
+> §11.1 inventory table with the exact FourCC, mip count, and the Godot import flags an engineer
+> needs. All four DDS dimensions below are **VERIFIED** at 1024x1024 (or as noted) from the header
+> width/height fields and corroborated by a file-size reconciliation against the block-compression
+> stride.
+
+| Atlas (VFS path) | Dims | FourCC / format | Mips | Godot import note | Confidence |
+|---|---|---|---|---|---|
+| `data/ui/loginwindow.dds` | 1024x1024 | DXT5 (explicit per-texel alpha) | 1 (single level) | Standard DXT5 import; straight alpha | VERIFIED (dims + FourCC) |
+| `data/ui/loginwindow_02.dds` | 1024x1024 | **DXT2 (premultiplied alpha)** | 1 (single level) | **Premultiplied-alpha source** - set the premultiplied-alpha import flag (or unpremultiply on import); compositing differs from DXT3/DXT5 straight alpha. This is the variant server-list / channel chrome. | VERIFIED (dims + FourCC); premultiplied-alpha flag is the key new detail |
+| `data/ui/password.dds` | 1024x1024 | DXT3 (explicit alpha) | **11 mip levels** | Full mip chain present - keep mipmaps on import (atlas is sampled at multiple scales) | VERIFIED (dims + FourCC + mip count) |
+| `data/ui/InventWindow.dds` | 1024x1024 | DXT3 (explicit alpha) | 1 (single level) | Standard DXT3 import; straight alpha | VERIFIED (dims + FourCC) |
+| `data/ui/characwindow.dds` | **512x512** | **RAW BGRA8** (`A8R8G8B8`, uncompressed) | 1 (single level) | Uncompressed 32-bit BGRA; no block decode. UV-normalize by 512, not 1024 (see §11.1 note). | VERIFIED (dims + format) |
+
+**Format-by-FourCC summary (the Godot-import-relevant distinction):** `loginwindow.dds` = DXT5;
+`loginwindow_02.dds` = **DXT2 (premultiplied alpha)**; `password.dds` = DXT3 (11 mips);
+`InventWindow.dds` = DXT3; `characwindow.dds` = uncompressed BGRA8. The DXT2-vs-DXT3/DXT5
+distinction on `loginwindow_02.dds` is the load-bearing new fact: a revival must treat its alpha as
+**premultiplied** when compositing, otherwise the variant chrome edges composite incorrectly.
+
+### 11.1a-1 Sub-rect cross-check (PLAUSIBLE — fit the canvas, not pixel-verified)
+
+Two of the §11.2 / §11.3 source rects were sanity-checked against the byte-confirmed 1024x1024
+canvas. A DDS header read cannot confirm pixel content, so these are **PLAUSIBLE** (consistent with
+the confirmed canvas size; not positively verified by decoding):
+
+| Sub-rect | Atlas | Region | Fits 1024x1024? | Status |
+|---|---|---|---|---|
+| Server-row plate / channel toggle | `loginwindow_02.dds` | src `(9,6)`, size `202x372` | yes (near-origin panel) | PLAUSIBLE |
+| PIN dragon-frame / notice-dialog frame | `InventWindow.dds` | src `(318,647)`, size `340x190` | yes (lower-right quadrant; V=647 is ~63% down) | PLAUSIBLE |
+
+These coordinates match the literals already recorded in §11.2b (channel toggle `9,6 ... 202x372`)
+and §11.2d / §11.3 (dialog/PIN frame `318,647 ... 340x190`). The byte-confirmed canvas does not
+contradict them, but a pixel decode would be needed to positively verify the rect content.
+
 ## 11.2 Login scene - widget layout (CODE-CONFIRMED literals)
 
 Atlas shorthand for this subsection: **A** = `login_slice1.dds`, **B** = `loginwindow.dds`,
@@ -1906,6 +1944,12 @@ banner-pan animation:
 > section 11.6 records only which art each step composites.
 
 ## 11.7 Layout known-unknowns (carried for the engineer)
+
+> **Resolved (byte-confirmed, §11.1a):** atlas FourCC/format and mip counts are now
+> byte-confirmed; `loginwindow_02.dds` is **DXT2 (premultiplied alpha)** - set the
+> premultiplied-alpha import flag. The server-plate `(9,6) 202x372` and PIN/notice frame
+> `(318,647) 340x190` sub-rects are PLAUSIBLE (fit the confirmed 1024x1024 canvas; not
+> pixel-verified).
 
 - **Refresh / Cancel server-list button text:** baked atlas art vs caption id - UNVERIFIED.
 - **Server-list calligraphy header caption id:** an integer caption id, exact value needs a `msg.xdb`

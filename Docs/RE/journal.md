@@ -720,3 +720,44 @@ Entry format (append newest at the bottom; the `re-session-log` skill automates 
 - Remaining: wire the now-parsing front-end effects (brazier/portal) into the Godot scene; Login/PIN/
   ServerList Godot fidelity rebuild from the confirmed atlas/flow; the server/channel reply record layout
   + enter-world handshake; Phase-D IDB annotation. Journal authored by the Top Orchestrator (main session).
+
+## 2026-06-14 — CAMPAIGN 4: login→world bridge RE + Login/Create Godot fidelity
+
+- RECOVERY (READONLY static IDA on `doida.exe` + VFS harness; `_dirty/campaign4/{login,vfs}/`):
+  - **Server-list reply:** 8-byte frame wrapper (`+0 u32 size`=8+payload, `+4 u16`=entry COUNT, `+6 u16`
+    unused); payload is **LZ4-compressed and NOT encrypted**. Each server entry = **8 bytes** =
+    `{+0 i16 id/select-key (also the ==100 available gate), +2 i16 status/kind, +4 i16 population,
+    +6 i16 flag}`. status/population → caption message-ids (headers 4029–4032; population 6001–6003 by
+    thresholds 1200/800/500 or discrete 4/3/2; status==3 → 6004/6005; OOR → 5901). The channel/endpoint
+    reply copies the first **30 bytes** of the decompressed payload as a fixed `char[30]` endpoint; connect
+    target = port **10000 + channelOffset** (literal host:port format = needs-capture).
+  - **Enter-world handshake:** char-select Enter → **C2S 1/9** (40B = slot 1B + 33B launcher session
+    token + 4B version dword `10×game.ver-field5 + 9`) → **3/5 SmsgEnterGameAck** (44B account/billing
+    confirm; sets scene→loading; NOT spawn data) → **4/1 SmsgGameStateTick** (world spawn + self-snapshot
+    CARRIER; FROZEN world scene, not reversed). **Loading screen** = its own LoadHandler scene (random
+    `data/ui/loading{,06,08}.dds`, SFX 920100100, progress = VFS asset PRELOAD, NOT a net wait).
+    **GameState scene model** = 1 login / 2 loading / 3 opening / 4 char-select / 5 in-world / 6,8 quit /
+    7 error — SUPERSEDES the earlier "GameState=7 at login submit" (7 = error/abort). needs-debugger:
+    the 3/5-vs-4/1 arrival ORDER, the 1/9 version-dword offset.
+  - **VFS facts:** `data/char/bind/bindlist.txt` = a one-column explicit list of 349 `.bnd` names (gaps →
+    confirms NO computed `g{N}.bnd` rule; the client reads the explicit list). `data/cursor/game.ver` =
+    28B = 7×u32 LE; field5 @0x14 (=2114) → enter token 21149. NO server-config file in the VFS (auth
+    host:port is compiled-in / out-of-VFS). Atlas: `loginwindow_02.dds` is **DXT2** (premultiplied — Godot
+    import flag), others 1024² DXT5/DXT3, `characwindow.dds` 512² RAW BGRA8. Audio: cue → `data/sound/2d/
+    {cue}.ogg` (direct, no lookup) — 861010105/861010101/920100200/920100100/910062000..910065000.
+- PROMOTION (REWRITE, firewall PASS): `opcodes.md` (1/9, 3/5, 4/1 rows + server-entry appendix) +
+  `packets/cmsg_char_enter.yaml` + `packets/3-5_enter_game_response.yaml` + `packets/lobby.yaml`
+  (server-list framing) + `specs/login.md §5` (fetch + handshake + GameState model); `formats/bindlist.md`
+  (new) + `formats/actormotion.md` xref + `formats/config_tables.md §7` (game.ver) + `specs/sound.md
+  §15.6/§15.7` (front-end audio) + `frontend_scenes.md §11.1a` (atlas DDS formats). names.yaml already
+  carried 0x10009/0x30005/0x40001 (consistent — no change).
+- ENGINEERING (Godot build 0/0): **Login/PIN/ServerList fidelity** — corrected the flow order to
+  Login-validate → PIN → ServerList → CharSelect; PIN modal now the `InventWindow.dds` NinePatch dragon
+  frame (318,647,340×190); ServerList = `loginwindow_02.dds` parchment plates; recessed ID/PW textboxes.
+  **Character-CREATION sub-form** built (`CharCreatePreview3D` + integrated into `CharacterSelectScreen`):
+  class list (left), centered enlarged preview (+56.5u, scale 75, turntable), stat/name/OK-Cancel panels
+  (right), UI→internal class map {0→4,1→1,2→3,3→2}, name validation. Residual DEBT: the create-preview
+  actor shows a non-upright (≈90° lying) pose — a skinning stand-up-basis bug on the preview path, to fix.
+- Remaining: fix the create-preview pose; wire the now-parsing brazier/portal `.xeff` into the cavern;
+  implement the `bindlist.txt`/`game.ver` parsers + the server-list/enter-world network structs; the
+  3/5-vs-4/1 live-debugger order check; Phase-D IDB annotation. Journal authored by the Top Orchestrator.
