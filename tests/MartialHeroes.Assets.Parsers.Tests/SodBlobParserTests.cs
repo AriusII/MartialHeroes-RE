@@ -49,14 +49,15 @@ public sealed class SodBlobParserTests
         int pos = 0;
 
         // solidCount u32le = 1. spec: terrain.md §11.1 — "solidCount u32le @ offset 0: CONFIRMED".
-        WriteU32(buf, pos, 1); pos += 4;
+        WriteU32(buf, pos, 1);
+        pos += 4;
 
         // SolidRecord 108 bytes.
         // AABB +0..+15 (VERIFIED). spec: terrain.md §11.2.
-        WriteF32(buf, pos + 0, aabbXMin);   // aabb_xmin f32 @ +000: VERIFIED
-        WriteF32(buf, pos + 4, aabbZMin);   // aabb_zmin f32 @ +004: VERIFIED
-        WriteF32(buf, pos + 8, aabbXMax);   // aabb_xmax f32 @ +008: VERIFIED
-        WriteF32(buf, pos + 12, aabbZMax);  // aabb_zmax f32 @ +012: VERIFIED
+        WriteF32(buf, pos + 0, aabbXMin); // aabb_xmin f32 @ +000: VERIFIED
+        WriteF32(buf, pos + 4, aabbZMin); // aabb_zmin f32 @ +004: VERIFIED
+        WriteF32(buf, pos + 8, aabbXMax); // aabb_xmax f32 @ +008: VERIFIED
+        WriteF32(buf, pos + 12, aabbZMax); // aabb_zmax f32 @ +012: VERIFIED
         // +016..+059: _reserved_a — all zero (spec: terrain.md §11.2 — all-zero VERIFIED).
         // +060: quad_count_embedded u32 — 1 (matches stream count). spec: §11.2 — VERIFIED.
         WriteU32(buf, pos + 60, 1);
@@ -67,23 +68,24 @@ public sealed class SodBlobParserTests
         pos += SolidStride;
 
         // quadCount u32le = 1. spec: terrain.md §11.1 — "quadCount u32le (stream copy) after flat SolidRecord array: CONFIRMED".
-        WriteU32(buf, pos, 1); pos += 4;
+        WriteU32(buf, pos, 1);
+        pos += 4;
 
         // QuadRecord 48 bytes. Four XZ corners +0..+31 (VERIFIED).
         // spec: terrain.md §11.3 — four XZ corners VERIFIED; trailing scalars +032..+047 VERIFIED NOT READ.
-        WriteF32(buf, pos + 0, qX0);            // x0 f32 @ +000: VERIFIED
-        WriteF32(buf, pos + 4, qZ0);            // z0 f32 @ +004: VERIFIED
-        WriteF32(buf, pos + 8, qX1);            // x1 f32 @ +008: VERIFIED
-        WriteF32(buf, pos + 12, qZ1);           // z1 f32 @ +012: VERIFIED
-        WriteF32(buf, pos + 16, qX2);           // x2 f32 @ +016: VERIFIED
-        WriteF32(buf, pos + 20, qZ2);           // z2 f32 @ +020: VERIFIED
-        WriteF32(buf, pos + 24, qX3);           // x3 f32 @ +024: VERIFIED
-        WriteF32(buf, pos + 28, qZ3);           // z3 f32 @ +028: VERIFIED
+        WriteF32(buf, pos + 0, qX0); // x0 f32 @ +000: VERIFIED
+        WriteF32(buf, pos + 4, qZ0); // z0 f32 @ +004: VERIFIED
+        WriteF32(buf, pos + 8, qX1); // x1 f32 @ +008: VERIFIED
+        WriteF32(buf, pos + 12, qZ1); // z1 f32 @ +012: VERIFIED
+        WriteF32(buf, pos + 16, qX2); // x2 f32 @ +016: VERIFIED
+        WriteF32(buf, pos + 20, qZ2); // z2 f32 @ +020: VERIFIED
+        WriteF32(buf, pos + 24, qX3); // x3 f32 @ +024: VERIFIED
+        WriteF32(buf, pos + 28, qZ3); // z3 f32 @ +028: VERIFIED
         // Dead 2D edge-line cache +032..+047. spec: terrain.md §11.3 — VERIFIED NOT READ.
-        WriteF32(buf, pos + 32, edgeSlope);     // edge_slope @ +032: VERIFIED NOT READ
-        WriteF32(buf, pos + 36, edgePad0);      // edge_pad0 @ +036: VERIFIED (always 0)
+        WriteF32(buf, pos + 32, edgeSlope); // edge_slope @ +032: VERIFIED NOT READ
+        WriteF32(buf, pos + 36, edgePad0); // edge_pad0 @ +036: VERIFIED (always 0)
         WriteF32(buf, pos + 40, edgeIntercept); // edge_intercept @ +040: VERIFIED NOT READ
-        WriteF32(buf, pos + 44, edgePad1);      // edge_pad1 @ +044: VERIFIED (always 0)
+        WriteF32(buf, pos + 44, edgePad1); // edge_pad1 @ +044: VERIFIED (always 0)
 
         return buf;
     }
@@ -213,9 +215,9 @@ public sealed class SodBlobParserTests
 
         // Spec says these are NOT read at runtime; we only assert decode fidelity.
         Assert.Equal(1.5f, q.EdgeSlope, precision: 5);
-        Assert.Equal(0f, q.EdgePad0, precision: 5);     // always 0 per spec
+        Assert.Equal(0f, q.EdgePad0, precision: 5); // always 0 per spec
         Assert.Equal(2.5f, q.EdgeIntercept, precision: 5);
-        Assert.Equal(0f, q.EdgePad1, precision: 5);     // always 0 per spec
+        Assert.Equal(0f, q.EdgePad1, precision: 5); // always 0 per spec
     }
 
     // ── Raw record backward-compat tests ─────────────────────────────────────

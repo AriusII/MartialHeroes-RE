@@ -253,11 +253,12 @@ public static class TerrainLayerParsers
                     $".fx1 parse error: group[{g}] header truncated at offset {offset}. " +
                     "spec: Docs/RE/formats/terrain_layers.md §1.1a.");
 
-            uint groupFlags0  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset)..]);      // +0x00 UNVERIFIED
-            uint groupFlags1  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]);  // +0x04 UNVERIFIED
-            uint renderState  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 8)..]);  // +0x08 CONFIRMED-variable
-            uint vertexCount  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 12)..]);  // +0x0C CONFIRMED
-            uint indexCount   = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 16)..]);  // +0x10 CONFIRMED
+            uint groupFlags0 = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset)..]); // +0x00 UNVERIFIED
+            uint groupFlags1 = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]); // +0x04 UNVERIFIED
+            uint renderState =
+                BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 8)..]); // +0x08 CONFIRMED-variable
+            uint vertexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 12)..]); // +0x0C CONFIRMED
+            uint indexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 16)..]); // +0x10 CONFIRMED
             offset += FxShortGroupHeaderSize;
 
             long geoBytes = (long)vertexCount * 36 + (long)indexCount * 2;
@@ -318,11 +319,11 @@ public static class TerrainLayerParsers
                     $".fx2 parse error: group[{g}] header truncated at offset {offset}. " +
                     "spec: Docs/RE/formats/terrain_layers.md §1.1a.");
 
-            uint groupFlags0  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset)..]);
-            uint groupFlags1  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]);
-            uint renderState  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 8)..]);  // CONFIRMED-variable
-            uint vertexCount  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 12)..]);
-            uint indexCount   = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 16)..]);
+            uint groupFlags0 = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset)..]);
+            uint groupFlags1 = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]);
+            uint renderState = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 8)..]); // CONFIRMED-variable
+            uint vertexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 12)..]);
+            uint indexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 16)..]);
             offset += FxShortGroupHeaderSize;
 
             long geoBytes = (long)vertexCount * 44 + (long)indexCount * 2;
@@ -388,16 +389,17 @@ public static class TerrainLayerParsers
                     $".fx3 parse error: group[{g}] header truncated at offset {offset}. " +
                     "spec: Docs/RE/formats/terrain_layers.md §1.7.");
 
-            uint groupFlags0  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset)..]);      // +0x00 UNVERIFIED
-            uint groupFlags1  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]);  // +0x04 UNVERIFIED
-            uint renderState  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 8)..]);  // +0x08 CONFIRMED-variable
+            uint groupFlags0 = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset)..]); // +0x00 UNVERIFIED
+            uint groupFlags1 = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]); // +0x04 UNVERIFIED
+            uint renderState =
+                BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 8)..]); // +0x08 CONFIRMED-variable
             // Extra words at group+0x0C..+0x23 (32 bytes, unknown_3..unknown_8) — all UNVERIFIED.
             // spec: Docs/RE/formats/terrain_layers.md §1.7 — unknown_3..unknown_8 @ +0x0C..+0x23: UNVERIFIED.
             ReadOnlyMemory<byte> rawExtra = backing.IsEmpty
                 ? span.Slice(offset + 12, 32).ToArray()
                 : backing.Slice(offset + 12, 32);
-            uint vertexCount  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 36)..]);  // +0x24 CONFIRMED
-            uint indexCount   = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 40)..]);  // +0x28 CONFIRMED
+            uint vertexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 36)..]); // +0x24 CONFIRMED
+            uint indexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 40)..]); // +0x28 CONFIRMED
             offset += Fx3GroupHeaderSize;
 
             long geoBytes = (long)vertexCount * 36 + (long)indexCount * 2;

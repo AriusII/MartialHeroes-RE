@@ -34,8 +34,8 @@ public sealed class MiscParserTests
     // spec: Docs/RE/formats/misc_data.md §2 mobinfo.mi: sample_verified.
     // =========================================================================
 
-    private const int MobInfoHeaderSize = 4;       // spec: §2 — count u32 @ 0
-    private const int MobInfoRecordStride = 28;    // spec: §2 — stride 28 bytes: HIGH.
+    private const int MobInfoHeaderSize = 4; // spec: §2 — count u32 @ 0
+    private const int MobInfoRecordStride = 28; // spec: §2 — stride 28 bytes: HIGH.
 
     /// <summary>
     /// Builds a mobinfo.mi buffer with the given records (each: 7 × u32le).
@@ -172,7 +172,7 @@ public sealed class MiscParserTests
         // Header says 4×4 = 16 tiles but buffer is only 20 bytes (< 16 + 16).
         // spec: Docs/RE/formats/misc_data.md §3 — "16 + W×H == file size": HIGH.
         byte[] buf = new byte[20];
-        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(8, 4), 4u);  // width
+        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(8, 4), 4u); // width
         BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(12, 4), 4u); // height
         Assert.Throws<InvalidDataException>(() => MiscParser.ParseTol(new ReadOnlyMemory<byte>(buf)));
     }

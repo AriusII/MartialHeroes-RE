@@ -53,7 +53,8 @@ public sealed class ZoneCatalog
 
     // spec: Docs/RE/formats/region_grid.md §regiontable — "data/mapNNN/regiontableNNN.bin".
     // The three-digit area tag is zero-padded (e.g. "001", "002", "003").
-    private const string RegionTablePathFmt = "data/map{0:D3}/regiontable{0:D3}.bin"; // spec: region_grid.md §regiontable
+    private const string
+        RegionTablePathFmt = "data/map{0:D3}/regiontable{0:D3}.bin"; // spec: region_grid.md §regiontable
 
     // spec: Docs/RE/formats/region_grid.md §Layout A — "data/mapNNN/regionNNN.bin" (the region-id grid).
     // Quantises world XZ into 256-unit cells, each holding a region id (0..31).

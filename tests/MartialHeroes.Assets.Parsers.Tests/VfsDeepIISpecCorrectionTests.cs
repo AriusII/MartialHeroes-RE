@@ -377,8 +377,8 @@ public sealed class VfsDeepIISpecCorrectionTests
         Assert.Equal(13312, SoundTableData.FixedFileSize);
         Assert.Equal(48, SoundTableData.EntryStride);
         Assert.Equal(256, SoundTableData.EntryCount);
-        Assert.Equal(12288, SoundTableData.ReadSize);     // 256 × 48
-        Assert.Equal(1024, SoundTableData.TrailerSize);   // 13312 − 12288
+        Assert.Equal(12288, SoundTableData.ReadSize); // 256 × 48
+        Assert.Equal(1024, SoundTableData.TrailerSize); // 13312 − 12288
     }
 
     [Fact]

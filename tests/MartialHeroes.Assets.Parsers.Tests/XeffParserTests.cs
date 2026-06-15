@@ -474,9 +474,9 @@ public sealed class XeffParserTests
         // track header (9 bytes): anim_loop=1, anim_stride=100, anim_base_time=0.
         // CORRECTED CAMPAIGN VFS-MASTERY: 9 bytes (no "unknown_constant").
         // spec: Docs/RE/formats/effects.md §A.4.3 Track header (9 bytes): CONFIRMED.
-        ms.WriteByte(1);    // anim_loop @ +0
+        ms.WriteByte(1); // anim_loop @ +0
         ms.Write(Le4(100u)); // anim_stride @ +1
-        ms.Write(Le4(0u));   // anim_base_time @ +5
+        ms.Write(Le4(0u)); // anim_base_time @ +5
         // frame 0: u32 kf_index + 9 × f32 = 40 bytes.
         // CORRECTED: frame 0 HAS an index prefix (kf_index = 0).
         // spec: Docs/RE/formats/effects.md §A.4.4 — "every animated frame has u32 kf_index prefix": CONFIRMED.
@@ -742,9 +742,9 @@ public sealed class XeffParserTests
         // track header (9 bytes): anim_loop=1, anim_stride=100, anim_base_time=0.
         // CORRECTED: 9 bytes (no "unknown_constant").
         // spec: Docs/RE/formats/effects.md §A.4.3 Track header (9 bytes): CONFIRMED.
-        ms.WriteByte(1);     // anim_loop @ +0
+        ms.WriteByte(1); // anim_loop @ +0
         ms.Write(Le4(100u)); // anim_stride @ +1
-        ms.Write(Le4(0u));   // anim_base_time @ +5
+        ms.Write(Le4(0u)); // anim_base_time @ +5
 
         // frame 0: u32 kf_index + 9 × f32 = 40 bytes.
         // CORRECTED: frame 0 HAS a kf_index prefix (= 0).
@@ -805,9 +805,9 @@ public sealed class XeffParserTests
         ms.Write(Le4(0u));
         ms.Write(Le4(0u)); // scale counts
         // track header (9 bytes — CORRECTED)
-        ms.WriteByte(1);     // anim_loop @ +0
+        ms.WriteByte(1); // anim_loop @ +0
         ms.Write(Le4(100u)); // anim_stride @ +1
-        ms.Write(Le4(0u));   // anim_base_time @ +5
+        ms.Write(Le4(0u)); // anim_base_time @ +5
         // frame 0: u32 kf_index + 9×f32 (CORRECTED — frame 0 has index prefix)
         ms.Write(Le4(0u)); // kf_index = 0
         ms.Write(Le4f(9f));
@@ -847,9 +847,9 @@ public sealed class XeffParserTests
         ms.Write(Le4(0u));
         ms.Write(Le4(0u));
         // track header (9 bytes — CORRECTED)
-        ms.WriteByte(1);     // anim_loop @ +0
+        ms.WriteByte(1); // anim_loop @ +0
         ms.Write(Le4(100u)); // anim_stride @ +1
-        ms.Write(Le4(0u));   // anim_base_time @ +5
+        ms.Write(Le4(0u)); // anim_base_time @ +5
         // frame 0: u32 kf_index + 9×f32 (CORRECTED — frame 0 has index prefix)
         ms.Write(Le4(0u)); // kf_index = 0
         ms.Write(Le4f(0f));
@@ -920,9 +920,9 @@ public sealed class XeffParserTests
         ms.Write(Le4(0u));
         ms.Write(Le4(0u)); // scale counts
         // track header (9 bytes — CORRECTED: no unknown_constant)
-        ms.WriteByte(1);     // anim_loop @ +0  spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 9
+        ms.WriteByte(1); // anim_loop @ +0  spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 9
         ms.Write(Le4(100u)); // anim_stride @ +1
-        ms.Write(Le4(0u));   // anim_base_time @ +5
+        ms.Write(Le4(0u)); // anim_base_time @ +5
         // missing: frame 0 (40 bytes = u32 kf_index + 9×f32) + frame 1 (40 bytes) — triggers truncation
         Assert.Throws<InvalidDataException>(() => XeffParser.ParseXeff(new ReadOnlyMemory<byte>(ms.ToArray())));
     }
@@ -1185,13 +1185,15 @@ public sealed class XeffParserTests
         // spec: Docs/RE/formats/effects.md §A.4.3 Track header (9 bytes) @ 0xD0: CONFIRMED (CAMPAIGN VFS-MASTERY).
         // CORRECTED: unknown_constant field REFUTED (no read-site) — spec §A.17.
         Assert.Equal(1, b0.AnimLoop); // anim_loop = 1 (animated) @ 0xD0: CONFIRMED
-        Assert.Equal(67u, b0.AnimStride); // anim_stride = 67 ms @ 0xD1 (the live value formerly misread as "unknown_constant"; 9-byte header): CONFIRMED (CAMPAIGN VFS-MASTERY)
+        Assert.Equal(67u,
+            b0.AnimStride); // anim_stride = 67 ms @ 0xD1 (the live value formerly misread as "unknown_constant"; 9-byte header): CONFIRMED (CAMPAIGN VFS-MASTERY)
         Assert.Equal(0u, b0.AnimBaseTime); // anim_base_time = 0 ms @ 0xD5: CONFIRMED (9-byte header)
 
         // Block 0 keyframes: animated path (anim_loop=1), tex_count=2 → 2 keyframes.
         // spec: Docs/RE/formats/effects.md §A.4.4 — animated: tex_count keyframes, ALL have u32 kf_index prefix: CONFIRMED.
         Assert.Equal(2, b0.Keyframes.Length);
-        Assert.Equal(0u, b0.Keyframes[0].KfIndex); // frame 0: u32 kf_index prefix present, value=0: CONFIRMED (CAMPAIGN VFS-MASTERY)
+        Assert.Equal(0u,
+            b0.Keyframes[0].KfIndex); // frame 0: u32 kf_index prefix present, value=0: CONFIRMED (CAMPAIGN VFS-MASTERY)
 
         // Block 65 (emitter_type=2, directional billboard, tex_count=21).
         // spec: Docs/RE/formats/effects.md §A.4.6 emitter_type==2 + animated → same as emitter_type 0/1: CONFIRMED.

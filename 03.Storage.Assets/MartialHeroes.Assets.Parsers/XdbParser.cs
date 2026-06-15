@@ -332,12 +332,12 @@ public static class XdbParser
             // Y is forced to 0 by the runtime; no Y component is stored here.
             // CONFIRMED two-witness. These are NOT bone indices.
             // spec: Docs/RE/formats/xdb_tables.md §5 — "six floats = three XZ offset pairs in facing frame, Y=0: CONFIRMED two-witness".
-            float f0 = BinaryPrimitives.ReadSingleLittleEndian(rec[8..]);   // off0X
-            float f1 = BinaryPrimitives.ReadSingleLittleEndian(rec[12..]);  // off0Z
-            float f2 = BinaryPrimitives.ReadSingleLittleEndian(rec[16..]);  // off1X
-            float f3 = BinaryPrimitives.ReadSingleLittleEndian(rec[20..]);  // off1Z
-            float f4 = BinaryPrimitives.ReadSingleLittleEndian(rec[24..]);  // off2X
-            float f5 = BinaryPrimitives.ReadSingleLittleEndian(rec[28..]);  // off2Z
+            float f0 = BinaryPrimitives.ReadSingleLittleEndian(rec[8..]); // off0X
+            float f1 = BinaryPrimitives.ReadSingleLittleEndian(rec[12..]); // off0Z
+            float f2 = BinaryPrimitives.ReadSingleLittleEndian(rec[16..]); // off1X
+            float f3 = BinaryPrimitives.ReadSingleLittleEndian(rec[20..]); // off1Z
+            float f4 = BinaryPrimitives.ReadSingleLittleEndian(rec[24..]); // off2X
+            float f5 = BinaryPrimitives.ReadSingleLittleEndian(rec[28..]); // off2Z
 
             // scale_or_radius f32LE @ +32. Head value 8.0; semantic UNVERIFIED.
             // spec: Docs/RE/formats/xdb_tables.md §5 — scale_or_radius f32LE @ +32: CONFIRMED (present); semantic UNVERIFIED.

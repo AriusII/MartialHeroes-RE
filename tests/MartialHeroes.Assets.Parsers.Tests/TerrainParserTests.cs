@@ -284,7 +284,7 @@ public sealed class TerrainParserTests
 
         // lookupByte=0xAB was written to index 0; all others remain 0 → clamped to 1.
         Assert.Equal((byte)0xAB, cell.TextureIndexGrid[0]); // >= 1, no clamp
-        Assert.Equal((byte)1, cell.TextureIndexGrid[1]);     // was 0 → clamped to 1
+        Assert.Equal((byte)1, cell.TextureIndexGrid[1]); // was 0 → clamped to 1
     }
 
     [Fact]

@@ -163,14 +163,14 @@ public sealed class TerrainSceneParserTests
         // spec: Docs/RE/formats/terrain_scene.md §File-level header and §Object header: CONFIRMED.
         int vertexOffset = 4 + 1 + 4 + 4; // = 13
 
-        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 0,  4), 1.0f);   // pos_x
-        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 4,  4), 2.0f);   // pos_y
-        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 8,  4), 3.0f);   // pos_z
-        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 12, 4), 0.5f);   // normal_x
-        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 16, 4), 0.75f);  // normal_y
-        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 20, 4), 0.25f);  // normal_z
-        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 24, 4), 0.1f);   // uv_u
-        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 28, 4), 0.9f);   // uv_v
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 0, 4), 1.0f); // pos_x
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 4, 4), 2.0f); // pos_y
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 8, 4), 3.0f); // pos_z
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 12, 4), 0.5f); // normal_x
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 16, 4), 0.75f); // normal_y
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 20, 4), 0.25f); // normal_z
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 24, 4), 0.1f); // uv_u
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(vertexOffset + 28, 4), 0.9f); // uv_v
 
         BudScene scene = TerrainSceneParser.Parse(data.AsSpan());
         BudVertex v = scene.Objects[0].Vertices[0];

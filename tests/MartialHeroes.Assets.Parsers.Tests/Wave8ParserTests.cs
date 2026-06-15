@@ -311,8 +311,8 @@ public sealed class Wave8ParserTests
         XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(data));
 
         XeffSubEffect b0 = xeff.SubEffects[0];
-        Assert.Equal(1, b0.AnimLoop);        // anim_loop = 1 (animated)
-        Assert.Equal(67u, b0.AnimStride);    // anim_stride u32 @ +1
+        Assert.Equal(1, b0.AnimLoop); // anim_loop = 1 (animated)
+        Assert.Equal(67u, b0.AnimStride); // anim_stride u32 @ +1
         Assert.Equal(100u, b0.AnimBaseTime); // anim_base_time u32 @ +5
     }
 

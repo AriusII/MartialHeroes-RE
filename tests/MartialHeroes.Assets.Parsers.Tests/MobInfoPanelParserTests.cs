@@ -18,7 +18,7 @@ public sealed class MobInfoPanelParserTests
 
     // Container: 4-byte header + recordCount × 28-byte records.
     // spec: Docs/RE/formats/mi.md §Container structure — "4 + recordCount × 28 = file size": HIGH.
-    private const int HeaderSize = 4;    // spec: §Header layout — recordCount u32le @ 0x00: HIGH.
+    private const int HeaderSize = 4; // spec: §Header layout — recordCount u32le @ 0x00: HIGH.
     private const int RecordStride = 28; // spec: §Record layout — "Record stride: 28 bytes": HIGH.
 
     /// <summary>

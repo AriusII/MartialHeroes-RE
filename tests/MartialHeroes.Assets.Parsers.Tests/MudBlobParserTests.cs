@@ -19,10 +19,10 @@ public sealed class MudBlobParserTests
 {
     // Grid constants.
     // spec: terrain.md §6.1 — "64 columns × 64 rows × 8 bytes = 32768 bytes": CONFIRMED.
-    private const int GridCols = MudBlob.GridCols;     // 64
-    private const int GridRows = MudBlob.GridRows;     // 64
+    private const int GridCols = MudBlob.GridCols; // 64
+    private const int GridRows = MudBlob.GridRows; // 64
     private const int RecordStride = MudBlob.RecordStride; // 8
-    private const int FixedSize = MudBlob.FixedSize;   // 32768
+    private const int FixedSize = MudBlob.FixedSize; // 32768
 
     // ── Fixture helpers ───────────────────────────────────────────────────────
 

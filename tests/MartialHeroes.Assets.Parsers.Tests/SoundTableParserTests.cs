@@ -474,16 +474,16 @@ public sealed class SoundTableParserTests
     /// spec: Docs/RE/formats/sound_tables.md §File layout — ReadSize (12288) + TrailerSize (1024) = FixedFileSize (13312): CONFIRMED
     /// </summary>
     [Theory]
-    [InlineData(0)]        // empty
-    [InlineData(48)]       // one 48-byte record — not 13312
+    [InlineData(0)] // empty
+    [InlineData(48)] // one 48-byte record — not 13312
     [InlineData(48 * 256)] // 12288 — only the read region, no trailer — rejected
-    [InlineData(52)]       // one 52-byte record (old stride) — rejected
+    [InlineData(52)] // one 52-byte record (old stride) — rejected
     [InlineData(52 * 256)] // 13312? No: 52×256=13312 = FixedFileSize — filtered below (valid)
     [InlineData(52 * 255)] // 255 records at old stride — rejected
     [InlineData(52 * 257)] // 257 records at old stride — rejected
-    [InlineData(100)]      // arbitrary non-13312 length
-    [InlineData(13311)]    // off-by-one below
-    [InlineData(13313)]    // off-by-one above
+    [InlineData(100)] // arbitrary non-13312 length
+    [InlineData(13311)] // off-by-one below
+    [InlineData(13313)] // off-by-one above
     public void Parse_LengthNotExactly13312_ThrowsInvalidData(int length)
     {
         // The parser enforces exactly 13312 bytes. No other length is valid.

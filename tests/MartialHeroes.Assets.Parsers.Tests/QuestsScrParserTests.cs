@@ -64,6 +64,7 @@ public sealed class QuestsScrParserTests
             p.CopyTo(buf, pos);
             pos += p.Length;
         }
+
         return buf;
     }
 

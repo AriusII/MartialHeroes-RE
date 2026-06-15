@@ -52,7 +52,12 @@ public sealed class MobSpawnParserTests
         foreach (var a in arrays) total += a.Length;
         var result = new byte[total];
         int pos = 0;
-        foreach (var a in arrays) { a.CopyTo(result, pos); pos += a.Length; }
+        foreach (var a in arrays)
+        {
+            a.CopyTo(result, pos);
+            pos += a.Length;
+        }
+
         return result;
     }
 

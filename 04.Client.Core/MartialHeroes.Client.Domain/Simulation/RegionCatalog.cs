@@ -51,7 +51,9 @@ public sealed class RegionCatalog
     // ── state ─────────────────────────────────────────────────────────────────
 
     private readonly uint _width;
+
     private readonly uint _height;
+
     // Origins are SIGNED (i32): region<area>.bin stores originX/originZ as i32le so maps with
     // negative world extents address correctly.
     // spec: Docs/RE/formats/region_grid.md §Layout A — "originX i32 signed / originZ i32 signed": CONFIRMED.

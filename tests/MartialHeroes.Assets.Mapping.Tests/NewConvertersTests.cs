@@ -1400,7 +1400,7 @@ public sealed class XeffJsonNamedFieldsTests
                     ScaleX = [],
                     ScaleY = [],
                     ScaleZ = [],
-                    AnimLoop = 1,                    AnimStride = 100u,
+                    AnimLoop = 1, AnimStride = 100u,
                     AnimBaseTime = 0u,
                     Keyframes =
                     [
@@ -1454,7 +1454,7 @@ public sealed class XeffJsonNamedFieldsTests
                     ScaleX = [],
                     ScaleY = [],
                     ScaleZ = [],
-                    AnimLoop = 1,                    AnimStride = 100u,
+                    AnimLoop = 1, AnimStride = 100u,
                     AnimBaseTime = 0u,
                     Keyframes =
                     [

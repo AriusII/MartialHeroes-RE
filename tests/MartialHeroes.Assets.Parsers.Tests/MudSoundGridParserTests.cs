@@ -21,9 +21,9 @@ public sealed class MudSoundGridParserTests
     // Grid constants.
     // spec: mud.md §Identification — "File size: fixed 32768 bytes (0x8000)": CONFIRMED.
     private const int FixedFileSize = MudSoundGrid.FixedFileSize; // 32768
-    private const int TileCount = MudSoundGrid.TileCount;         // 4096
-    private const int Cols = MudSoundGrid.Cols;                    // 64
-    private const int Rows = MudSoundGrid.Rows;                    // 64
+    private const int TileCount = MudSoundGrid.TileCount; // 4096
+    private const int Cols = MudSoundGrid.Cols; // 64
+    private const int Rows = MudSoundGrid.Rows; // 64
     private const int TileStride = 8; // struct MudSoundTile is 8 bytes
 
     // ── Fixture helpers ───────────────────────────────────────────────────────
