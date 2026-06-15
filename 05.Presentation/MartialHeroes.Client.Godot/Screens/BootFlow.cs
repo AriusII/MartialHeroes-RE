@@ -384,9 +384,9 @@ public sealed partial class BootFlow : Node
             SharedAssets = _sharedAssets,
         };
 
-        // Populate with synthetic or real server list.
-        serverSelect.SetServers(BuildServerList());
-
+        // The server list is driven by the real lobby server-list response (port 10000); with no
+        // server connected there is none, so the list stays EMPTY — NO synthetic servers.
+        // spec: Docs/RE/specs/login_flow.md §2. (Removed the synthetic 2-server seed.)
         serverSelect.ServerSelected += OnServerSelected;
         serverSelect.BackRequested += OnBackToLogin;
         _host!.SetScreen(serverSelect);
@@ -511,13 +511,9 @@ public sealed partial class BootFlow : Node
             StartEventBusDrain(select);
         }
 
-        // In dev offline mode, seed the roster synthetically after a brief delay (mimics the
-        // server latency before the 3/1 packet arrives).
-        if (IsDevOfflineMode())
-        {
-            GD.Print("[BootFlow] DEV OFFLINE MODE — seeding synthetic CharacterListEvent.");
-            SeedSyntheticCharacterList(select);
-        }
+        // The roster is driven by the real CharacterListEvent (opcode 3/1) via the event-bus drain;
+        // with no server the slots stay BLANK — NO synthetic roster.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.1. (Removed the synthetic 3-char seed.)
 
         // Advance the FSM toward CharacterSelection.
         // spec: Docs/RE/specs/client_workflow.md §4 — Login → CharacterSelection on auth.

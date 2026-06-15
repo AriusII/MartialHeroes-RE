@@ -914,12 +914,32 @@ selector; 14003 is the default), independent of npc.scr. See `formats/msg_xdb.md
 
 ##### Create-form stat / appearance grid (key families)
 
-The 18-cell stat/appearance grid in the create form reads the **same** keyed map under a different
-family of computed keys, derived from an appearance/discipline discriminator `disc`:
-`2·disc + {110, 111, 120, 121, 130, 131, 140, 141}` and `disc + {210, 220, 230, 240}`. These are the
-appearance/equipment rows of the same table, not the class keys. Confidence: **CONFIRMED (high-level)
-— the key scheme is confirmed; the per-cell field assignment within each looked-up record is not
-fully enumerated here.**
+The create-form stat/appearance grid reads the **same** keyed CP949 string table under a family of
+computed keys derived from an appearance/discipline discriminator `disc`. The grid-key formula is:
+
+```
+key  =  2·disc + {110, 111, 120, 121, 130, 131, 140, 141}
+```
+
+i.e. a fixed set of eight literal base offsets {110, 111, 120, 121, 130, 131, 140, 141} added to
+`2·disc`, each producing one key into the keyed string table (the appearance/equipment STRING rows
+of the same table, not the class keys). The eight literal bases were observed feeding the keyed
+string-table lookup. Confidence: **CONFIRMED (two-witness)** for the key formula; the per-cell field
+assignment within each looked-up record is not fully enumerated here.
+
+> **REFUTED — `disc + {210, 220, 230, 240}` is NOT a stat-grid key formula.** An earlier pass listed
+> a second `disc + {210..240}` family as grid keys; this is **wrong** and must not be used. Those
+> `210xxx`-shaped values are **full equipment ITEM ids** — the committed character's gear written
+> into the new character's slot record at creation (weapon ids in the `210xxx` band, armor in the
+> `207`/`208` band, accessory `281`, body `201`), **not keys into this string table**. They are
+> written to the slot record, not looked up here. An engineer binding the stat grid must use **only**
+> the `2·disc + {110..141}` keyed-string lookups above; do **not** derive any grid cell from the
+> `disc + {210..240}` family. Confidence: **CONFIRMED (two-witness)**.
+>
+> Related distinction (CONFIRMED): the create-form 3D **preview** gear is a different id family again
+> (the `202`/`203`/`206`/`209xxx` preview bands) and is not the same as the **committed** slot gear
+> (`210`/`207`/`281`/`201xxx`) — two separate tables. The stat-grid string lookup (this section) is
+> independent of both gear families.
 
 The three `0x30`-valued bytes the earlier pass placed at +0xD0 / +0x110 / +0x150 are simply the
 leading `'0'` empty-string sentinels of string fields 3 / 4 / 5 — not a `quests.scr`-style "value-48

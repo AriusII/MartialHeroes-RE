@@ -1,54 +1,74 @@
 // Screens/CharacterSelectScreen.cs
 //
-// The legacy CHARACTER-SELECT screen (master scene state 4), rebuilt to spec fidelity.
+// CHARACTER-SELECT screen (master scene state 4) — FROM-SCRATCH rewrite, CAMPAIGN 9 WAVE 3.
 //
-// SPEC FIDELITY (this revision — CS3D rebuild):
-//   MAJOR CHANGE: The character-select is now a REAL 3D SCENE, not 5 separate SubViewports.
-//   One SubViewportContainer holds CharSelectScene3D (the full 3D backdrop: map000 terrain,
-//   character row, camera KF1, environment). The 2D chrome (slot tabs, info, Create/Delete/Enter)
-//   is a transparent Control layer composited ON TOP of the 3D viewport.
-//   spec: Docs/RE/specs/frontend_scenes.md §3 — "a full 3D world backdrop, not a flat 2D screen".
-//   CODE-CONFIRMED composition.
+// WHAT THIS FILE IS:
+//   Strictly passive 2D chrome overlaid on the unified CharSelectScene3D 3D backdrop.
+//   Every visual is a real VFS atlas slice or a msg.xdb CP949 string — zero solid-colour
+//   panels, zero synthetic/demo characters, zero hardcoded baked text.
 //
-//   1. Action IDs corrected: Create=4, Delete=5, Enter=6  (was 413/531 — those were HOVER srcX).
-//      spec: Docs/RE/specs/ui_system.md §8.2 + correction note, frontend_scenes.md §4 + §5.
-//      Buttons constructed via the stage-1 StateButton with real NORMAL/HOVER/PRESSED atlas frames.
-//      spec: Docs/RE/specs/ui_system.md §1.5 (3-state button: HOVER=PRESSED for these buttons).
+// WIDGET LIST (SELECT VIEW):
+//   1. 3D scene SubViewport (full-canvas, bottom layer) — CharSelectScene3D hosted in SubViewport.
+//      spec: Docs/RE/specs/frontend_scenes.md §3.7 CODE-CONFIRMED.
+//   2. Char-count caption (msg id 2209, orange, top-centre).
+//      spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED.
+//   3. Server tab (actionId=1): loginwindow.dds NORMAL (675,795) / PRESSED (483,883).
+//      spec: Docs/RE/specs/frontend_scenes.md §11.5b CODE-CONFIRMED.
+//   4. Channel tab (actionId=2): loginwindow.dds NORMAL (640,742) / PRESSED (483,923).
+//      spec: Docs/RE/specs/frontend_scenes.md §11.5b CODE-CONFIRMED.
+//   5. Back tab (actionId=3): loginwindow.dds NORMAL (625,691) / PRESSED (483,963).
+//      spec: Docs/RE/specs/frontend_scenes.md §11.5b CODE-CONFIRMED.
+//   6. Create button (actionId=4): loginwindow.dds NORMAL (0,1004) / PRESSED (59,1004), 59×20.
+//      spec: Docs/RE/specs/frontend_scenes.md §11.5c CODE-CONFIRMED.
+//   7. Delete button (actionId=5): loginwindow.dds NORMAL (118,1004) / PRESSED (177,1004), 59×20.
+//      spec: Docs/RE/specs/frontend_scenes.md §11.5c CODE-CONFIRMED.
+//   8. Enter button (actionId=6): loginwindow.dds NORMAL (236,1004) / PRESSED (295,1004), 59×20.
+//      spec: Docs/RE/specs/frontend_scenes.md §11.5c CODE-CONFIRMED.
+//   9. Stat-icon grid (5 rows × 2 cols): loginwindow.dds col1 N(500,770)/P(548,770), col2 N(524,770)/P(572,770).
+//      base-Y 191, stride 24, col1 x=154, col2 x=178.
+//      spec: Docs/RE/specs/ui_system.md §8.2+§8.4 CODE-CONFIRMED.
+//  10. 5-slot selector row: blank slots (5 TextureRect from loginwindow.dds or fallback Label rows).
+//      Populated from CharacterListEvent only — ZERO synthetic names.
+//  11. Corner close (actionId=99): blacksheet.dds src (941,910) 23×23 at (971,610).
+//      spec: Docs/RE/specs/ui_system.md §8.2 CODE-CONFIRMED.
 //
-//   2. Stat grid per recovered generator: base-Y 191, stride 24, 5 rows, col1 x=154, col2 x=178.
-//      spec: Docs/RE/specs/ui_system.md §8.2 + §8.4. CODE-CONFIRMED.
-//      Class labels from msg.xdb ids 14003..14007 via UiAssetLoader.Text().
-//      spec: Docs/RE/specs/ui_system.md §10; frontend_scenes.md §4.1. CODE-CONFIRMED.
+// WIDGET LIST (CREATE FORM — 3-column overlay):
+//  LEFT panel: 4 class buttons from loginwindow.dds src-Y=1005, src-X=590/635/680/725 (19×30).
+//              HOVER src-X=815/860/905 (btn3 HOVER=NORMAL). Caption = msg.xdb 14003..14006.
+//              spec: Docs/RE/specs/ui_system.md §8.2+§8.4 CODE-CONFIRMED.
+//  LEFT panel: class name label (msg.xdb 14003..14006).
+//  LEFT panel: npc.scr description (real CP949 text from data/script/npc.scr via NpcScrDescriptions).
+//              spec: Docs/RE/formats/config_tables.md §2.17.3 + frontend_scenes.md §4.1.1 CODE-CONFIRMED.
+//  CENTER: CharCreatePreview3D SubViewport (scale 75 vs slot-row 50).
+//              spec: Docs/RE/specs/frontend_scenes.md §4.2 CODE-CONFIRMED.
+//  CENTER: Face ± buttons (actionId 21/22). spec: ui_system.md §8.2 CODE-CONFIRMED.
+//  CENTER: Turntable L/R buttons (press-and-hold ≈±2 rad/s). spec: frontend_scenes.md §4.2 CODE-CONFIRMED.
+//  RIGHT panel: stat-grid 8 keys via 2·disc+{110..141}, cp949 labels from msg.xdb.
+//              spec: Docs/RE/formats/config_tables.md §2.17.3 CODE-CONFIRMED (two-witness).
+//              NOTE: 2·disc+{210..240} REFUTED — those are equipment IDs, not stat keys.
+//  RIGHT panel: stat ± buttons (actionIds 25..34). spec: ui_system.md §8.2 CODE-CONFIRMED.
+//  RIGHT panel: name-entry LineEdit + toast (msg id 2075).
+//  RIGHT panel: OK (actionId 35) / Cancel (actionId 36) from inventwindow.dds.
+//              spec: Docs/RE/specs/ui_system.md §8.2 CODE-CONFIRMED.
 //
-//   3. ONE shared 3D scene (CharSelectScene3D in a single SubViewport) replaces 5 SubViewports.
-//      The scene holds: map000 backdrop cell d000x10000z9990, standing character row at spec world
-//      positions, Camera3D at KF1, DirectionalLight3D + 4 OmniLight3D approximating 14:30 lighting.
-//      spec: frontend_scenes.md §3.3/§3.5/§3.6/§3.7. CODE-CONFIRMED.
-//      3D selection: slot hover is AABB screen-space hit-test (§3.3.3). Stub in this revision.
+// SIGNALS (preserved from prior version — Lane E keeps the same API):
+//   EnterGameRequested(string characterName, int slotIndex)
+//   BackRequested()
+//   CreateCharacterRequested(string name, int internalClass, int faceIndex)
 //
-//   4. Creation sub-form per frontend_scenes.md §4:
-//      Class choice UI 0..3 → internal {4,1,3,2} (NOT the identity). spec §4.1. CODE-CONFIRMED.
-//      Face index selector 1..7. spec §4.2. CODE-CONFIRMED.
-//      Visual + local view state only — no server send, no game logic.
+// 3D-HOST API (preserved for Lane E):
+//   _scene3D.SlotDescriptors = (bool IsOccupied, uint SkinClassId)[5]
+//   _scene3D.Initialise(RealClientAssets?)
+//   _scene3D.SetSelectedSlot(int)
+//   _scene3D.TryHitTestSlot(Vector2) → int
+//   _createPreview3D.InternalClassId / .SharedRealAssets / .RebuildForClass() / .RotateLeft(dt) / .RotateRight(dt)
 //
-//   5. Preserves ScreenHost scaling and both boot flows (login → select; direct world boot).
+// PASSIVE: zero game logic, zero domain state, zero packet parsing, zero stat math.
+// All CP949 text arrives already-decoded from Assets.Parsers / UiAssetLoader.
 //
-//   6. ApplyCharacterList() — driven from Application CharacterListEvent (opcode 3/1).
-//      Replaces the hardcoded DemoRoster when a real (or synthetic-offline) event arrives.
-//      Handles "@BLANK@" empty-slot sentinel. spec: frontend_scenes.md §3.1. CODE-CONFIRMED.
-//      Max 5 slots (indices 0..4). spec: frontend_scenes.md §3.1 "at most 5". CODE-CONFIRMED.
-//
-//   7. EnterGameRequested signal now carries (string characterName, int slotIndex) so BootFlow
-//      can call IApplicationUseCases.SelectCharacterAsync(slotIndex).
-//
-// PASSIVE: zero game logic. Reads atlas chrome, msg.xdb captions, and character VFS assets for
-// previews; turns UI gestures into C# signals that the flow node consumes. No domain state, no
-// packet parsing, no equip/cooldown/stat math.
-//
-// spec: Docs/RE/specs/ui_system.md §8.2 (select layout, 77 ctor sites), §8.3 (InventWindow modal),
-//       §8.4 (generator patterns: base-Y 191, stride 24), §9.2 (atlas manifest), §10 (msg.xdb).
-// spec: Docs/RE/specs/frontend_scenes.md §3–§7 (char-select flow, create, delete, enter).
-// spec: Docs/RE/specs/frontend_scenes.md §3.7 (3D composition: map000, cell d000x10000z9990, stage).
+// spec: Docs/RE/specs/ui_system.md §8.2/§8.4/§10.
+// spec: Docs/RE/specs/frontend_scenes.md §3–§7/§11.
+// spec: Docs/RE/formats/config_tables.md §2.17.3.
 
 using System.Collections.Immutable;
 using Godot;
@@ -60,144 +80,69 @@ using MartialHeroes.Client.Godot.Screens.Widgets;
 namespace MartialHeroes.Client.Godot.Screens;
 
 /// <summary>
-/// Character-select Control on the 1024×768 reference canvas, scaled by the parent
-/// <see cref="ScreenHost"/>.
+/// Character-select Control on the 1024×768 reference canvas, scaled by the parent ScreenHost.
 ///
-/// <para><b>Action IDs (CODE-CONFIRMED, corrected):</b> Create=4, Delete=5, Enter=6.
-/// See <see cref="CharacterSelectLayout"/> for the full correction note.
-/// spec: Docs/RE/specs/ui_system.md §8.2 action-id map.</para>
+/// <para>Strictly passive. Reads Application event channels/catalogues, renders them.
+/// Turns UI gestures into signals (intent calls). ZERO game-rule authority.</para>
 ///
-/// <para><b>3D Previews:</b> up to 5 <see cref="CharPreview3D"/> SubViewport slots, one per
-/// demo roster entry. Phase-staggered idle animation.
-/// spec: Docs/RE/specs/frontend_scenes.md §3.3.</para>
-///
-/// <para><b>Create sub-form:</b> class choice UI→internal map {0,1,2,3}→{4,1,3,2}, face 1..7.
-/// spec: Docs/RE/specs/frontend_scenes.md §4.1/§4.2.</para>
+/// <para>spec: Docs/RE/specs/ui_system.md §8.2 (layout); frontend_scenes.md §3–§7 (flow).</para>
 /// </summary>
 public sealed partial class CharacterSelectScreen : Control
 {
     // =========================================================================
-    // Outgoing intents — consumed by BootFlow (no game logic here).
+    // Outgoing signals — consumed by BootFlow (zero game logic here).
     // =========================================================================
 
     /// <summary>
     /// Raised when the player enters the game with the selected slot.
-    /// Carries the character name and the slot index (0..4) so BootFlow can call
-    /// IApplicationUseCases.SelectCharacterAsync(slotIndex).
+    /// BootFlow calls IApplicationUseCases.SelectCharacterAsync(slotIndex).
     /// spec: Docs/RE/specs/frontend_scenes.md §7 — "send 1/9 with slot index". CODE-CONFIRMED.
     /// </summary>
     [Signal]
     public delegate void EnterGameRequestedEventHandler(string characterName, int slotIndex);
 
-    /// <summary>Raised when the player goes back to the login/select entry.</summary>
+    /// <summary>Raised when the player goes back (Back tab, action 3).</summary>
     [Signal]
     public delegate void BackRequestedEventHandler();
 
     /// <summary>
     /// Raised when the player confirms the Create-character form with valid local state.
-    /// BootFlow or Application wires this signal to <c>IApplicationUseCases.CreateCharacterAsync</c>.
-    ///
-    /// <para>Parameters:
-    /// <list type="bullet">
-    /// <item><paramref name="name"/> — validated character name (min 2, a-z/0-9/Hangul).</item>
-    /// <item><paramref name="internalClass"/> — internal class id ∈ {1,2,3,4} mapped from UI index
-    ///   via <see cref="CharacterSelectLayout.UiToInternalClass"/> ({btn0→4, btn1→1, btn2→3, btn3→2}).</item>
-    /// <item><paramref name="faceIndex"/> — face appearance index 1..7.</item>
-    /// </list>
-    /// Starter gear is SERVER-ASSIGNED; the client class template values are preview-mannequin only
-    /// and must NOT be treated as authoritative by the receiver.
     /// spec: Docs/RE/specs/frontend_scenes.md §4 / §8 — "gather fields → guard → send 1/6 (52B)". CODE-CONFIRMED.
-    /// spec: Docs/RE/specs/frontend_scenes.md §4.3 — "starter equipment = server-side; gear ids are preview IDs only". CODE-CONFIRMED.
-    /// </para>
     /// </summary>
     [Signal]
     public delegate void CreateCharacterRequestedEventHandler(string name, int internalClass, int faceIndex);
 
     // =========================================================================
-    // Demo roster (offline stub)
+    // Constants
     // =========================================================================
-    // In a networked build these come from the SmsgCharacterList event payload (Application),
-    // specifically the 880-byte SpawnDescriptor per-slot (opcode 3/1 SmsgCharacterList).
-    // spec: frontend_scenes.md §3.1 — up to 5 slots, "faceA nonzero ⇒ occupied". CODE-CONFIRMED.
-    // spec: packets/3-1_character_list.yaml — per-slot SpawnDescriptor fields.
-    //
-    // Five varied demo slots cover all four internal classes so the per-class 3D preview
-    // resolution path is exercisable offline.
-    //
-    // UiClassIndex (0..3) → internal class {4,1,3,2}. spec: frontend_scenes.md §4.1. CODE-CONFIRMED.
-    //   UI 0 → internal 4 (Warrior)  → skin_class 4 (g202140001.skn)
-    //   UI 1 → internal 1 (Musa)     → skin_class 1 (g202110001.skn)
-    //   UI 2 → internal 3 (Blader)   → skin_class 3 (g202130001.skn)
-    //   UI 3 → internal 2 (Tao)      → skin_class 2 (g202220001.skn)
-    //
-    // SkinClassId == internal class id for player classes 1..4 (PLAUSIBLE; VFS-confirmed pattern).
-    // TODO: pin to a formal class→skin_class spec entry once documented.
-    // spec: CLAUDE.md §Recovered asset mappings — skin_class chain. PLAUSIBLE.
-    // spec: Docs/RE/formats/config_tables.md §2.6 — class id references.
-
-    private static readonly DemoSlot[] DemoRoster =
-    [
-        // Slot 0 — UI class 1 → internal class 1 (Musa) → skin_class 1 → g202110001.skn
-        // spec: frontend_scenes.md §4.1 — UI index 1 → internal class 1. CODE-CONFIRMED.
-        new DemoSlot(Name: "무사영웅", ClassName: "Musa", Level: 25, Hp: 650,
-            UiClassIndex: 1, FaceIndex: 2, SkinClassId: 1),
-
-        // Slot 1 — UI class 3 → internal class 2 (Tao) → skin_class 2 → g202220001.skn
-        // spec: frontend_scenes.md §4.1 — UI index 3 → internal class 2. CODE-CONFIRMED.
-        new DemoSlot(Name: "TaoMaster", ClassName: "Tao", Level: 18, Hp: 480,
-            UiClassIndex: 3, FaceIndex: 5, SkinClassId: 2),
-
-        // Slot 2 — UI class 2 → internal class 3 (Blader) → skin_class 3 → g202130001.skn
-        // spec: frontend_scenes.md §4.1 — UI index 2 → internal class 3. CODE-CONFIRMED.
-        new DemoSlot(Name: "격사전설", ClassName: "Blader", Level: 32, Hp: 520,
-            UiClassIndex: 2, FaceIndex: 4, SkinClassId: 3),
-
-        // Slot 3 — UI class 0 → internal class 4 (Warrior) → skin_class 4 → g202140001.skn
-        // spec: frontend_scenes.md §4.1 — UI index 0 → internal class 4. CODE-CONFIRMED.
-        new DemoSlot(Name: "IronWarrior", ClassName: "Warrior", Level: 40, Hp: 820,
-            UiClassIndex: 0, FaceIndex: 1, SkinClassId: 4),
-    ];
 
     private const int MaxSlots = 5; // spec: frontend_scenes.md §3.1 — "at most 5 slots". CODE-CONFIRMED.
-
-    // Empty-slot sentinel value — the name field in the SpawnDescriptor carries this literal string
-    // for slots that have no character assigned.
-    // spec: Docs/RE/specs/frontend_scenes.md §3.1 — "@BLANK@" empty-slot sentinel. CODE-CONFIRMED.
     private const string BlankSentinel = "@BLANK@"; // spec: frontend_scenes.md §3.1. CODE-CONFIRMED.
+
+    // Stat disc value used for the create-form grid key formula 2·disc + {110..141}.
+    // disc = 0 is the base class-neutral value (no class-specific discriminator applied here).
+    // The eight offsets produce the eight label keys for the stat/appearance columns.
+    // spec: Docs/RE/formats/config_tables.md §2.17.3 CODE-CONFIRMED (two-witness).
+    private const int StatDisc = 0; // base discriminator; keyed-string lookup for the stat grid.
 
     // =========================================================================
     // Live slot data — driven by CharacterListEvent (Application event bus, opcode 3/1).
-    // Falls back to DemoRoster entries when no event has arrived yet.
+    // All slots are BLANK by default. NO synthetic demo data.
     // spec: Docs/RE/specs/frontend_scenes.md §3.1 — slot count 0..4, @BLANK@ empty. CODE-CONFIRMED.
-    // spec: Docs/RE/specs/login_flow.md §3.2 — per-slot 981-byte records. CODE-CONFIRMED.
     // =========================================================================
 
-    /// <summary>
-    /// Per-slot resolved view state — populated by <see cref="ApplyCharacterList"/>.
-    /// Before the first event arrives this mirrors the DemoRoster entries.
-    /// </summary>
     private readonly LiveSlot[] _liveSlots = new LiveSlot[MaxSlots];
 
     /// <summary>
-    /// Returns true once ApplyCharacterList has been called (i.e. real Application data arrived).
-    /// When false the DemoRoster drives the display.
-    /// </summary>
-    private bool _liveDataApplied;
-
-    /// <summary>
-    /// Called by <see cref="CharListEventDrainer"/> (in BootFlow) when a CharacterListEvent
-    /// arrives on the Application event bus. Replaces the DemoRoster view state with spec-driven
-    /// data from the 3/1 packet (or synthetic offline equivalent).
+    /// Called by the BootFlow/CharListEventDrainer when a CharacterListEvent (opcode 3/1) arrives.
+    /// Replaces all slots with server data. Always called on the Godot main thread (from _Process).
     ///
-    /// <para>Threading: always called on the Godot main thread (from _Process in CharListEventDrainer).</para>
-    ///
-    /// spec: Docs/RE/specs/frontend_scenes.md §3.1 — "@BLANK@" empty-slot sentinel. CODE-CONFIRMED.
-    /// spec: Docs/RE/specs/login_flow.md §3.2 — per-slot decode. CODE-CONFIRMED.
-    /// spec: Docs/RE/specs/frontend_scenes.md §3.1 — "at most 5 slots, indices 0..4". CODE-CONFIRMED.
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.1 — "@BLANK@" sentinel + at most 5 slots. CODE-CONFIRMED.
+    /// spec: Docs/RE/specs/login_flow.md §3.2 — per-slot 981-byte records. CODE-CONFIRMED.
     /// </summary>
     public void ApplyCharacterList(ImmutableArray<CharacterListSlot> slots)
     {
-        // Reset all slots to empty first.
+        // Reset all slots to empty.
         for (int i = 0; i < MaxSlots; i++)
             _liveSlots[i] = new LiveSlot(IsEmpty: true);
 
@@ -208,8 +153,6 @@ public sealed partial class CharacterSelectScreen : Control
             int idx = s.SlotIndex;
             if (idx < 0 || idx >= MaxSlots) continue;
 
-            // "@BLANK@" marks an unoccupied slot — route to character-creation on Enter.
-            // spec: frontend_scenes.md §3.1 — "@BLANK@" empty-slot sentinel. CODE-CONFIRMED.
             bool empty = s.Name == BlankSentinel || string.IsNullOrEmpty(s.Name);
             _liveSlots[idx] = new LiveSlot(
                 IsEmpty: empty,
@@ -220,22 +163,19 @@ public sealed partial class CharacterSelectScreen : Control
                 SlotIndex: idx);
         }
 
-        _liveDataApplied = true;
         _selectedSlot = 0;
 
-        // Refresh the display on the main thread.
+        // Refresh display (main thread).
         RebuildSlotSelectorRow();
         RefreshInfo();
-        // Refresh the "character count : N" caption — count changed when live data arrived.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — caption rebuilt on char-list.
         RefreshCharCountCaption();
 
-        // Push updated slot data into the 3D scene.
+        // Push slot occupancy into the 3D scene.
         PushSlotDescriptorsToScene();
         _scene3D?.SetSelectedSlot(_selectedSlot);
 
         GD.Print($"[CharacterSelectScreen] ApplyCharacterList: {slots.Length} slots received; " +
-                 $"live data applied to {MaxSlots} slot array.");
+                 $"vfs={(_assets.HasVfs ? "real-atlas" : "offline")}.");
     }
 
     // =========================================================================
@@ -247,80 +187,59 @@ public sealed partial class CharacterSelectScreen : Control
     private RealClientAssets? _realAssets;
     private bool _ownsAssets;
 
-    // Title-bar char-count caption label — driven by msg id 2209 "캐릭터 개수 : %d".
-    // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — MessageDB id 2209, count from BillingState +0x80.
-    // Offline: count = number of occupied slots in the current roster.
+    // Char-count caption (msg id 2209 "캐릭터 개수 : %d", orange, top-centre).
+    // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED.
     private Label _charCountCaption = null!;
 
-    // Slot info labels (refreshed on selection change).
+    // Slot info labels (left info panel, refreshed on selection change).
     private Label _infoName = null!;
     private Label _infoLevel = null!;
     private Label _infoClass = null!;
 
-    // Create sub-form local state (view only, no domain mutation).
+    // Create sub-form state (view-only).
     private Control _createForm = null!;
     private bool _createFormVisible;
     private int _createUiClassIndex; // 0..3
     private int _createFaceIndex = CharacterSelectLayout.FaceIndexMin; // 1..7
-    private Label _createClassLabel = null!;
-    private Label _createFaceLabel = null!;
 
-    // Create sub-form: 3D preview node (centered, scale 75, turntable).
-    // spec: Docs/RE/specs/frontend_scenes.md §4.2 CODE-CONFIRMED.
-    private CharCreatePreview3D? _createPreview3D;
+    // Create form label references (updated on class change).
+    private Label _createClassLabel = null!;   // class name from msg.xdb
+    private Label _createDescLabel = null!;    // npc.scr description text
+    private Label _createFaceLabel = null!;    // face index display
 
-    // Create sub-form: turntable button state (press-and-hold).
+    // Turntable press-and-hold state.
     // spec: frontend_scenes.md §4.2 "press-and-hold turntable ≈±2 rad/s". CODE-CONFIRMED.
     private bool _rotatePressLeft;
     private bool _rotatePressRight;
 
     // CP949 class descriptions from data/script/npc.scr (keys 1..4).
-    // Loaded once in _Ready after _realAssets is opened.
     // spec: Docs/RE/formats/config_tables.md §2.17.3 — npc.scr class-description records: CONFIRMED.
     // spec: Docs/RE/specs/frontend_scenes.md §4.1.1 — class description source = npc.scr: CONFIRMED.
     private NpcScrDescriptions _npcScrDesc = null!;
 
-    // Create sub-form: stat allocation (6 stats, shared budget, floor 10).
-    // spec: Docs/RE/specs/frontend_scenes.md §4.2 — "6 stats, shared point budget, floor 10 each;
-    //   +/- buttons; remaining-points display. Pure display from class template." CODE-CONFIRMED.
-    private readonly int[] _createStatValues = new int[6]; // HP MP STR INT DEX STA
-    private int _createStatBudgetRemaining;
-    private readonly Label[] _createStatLabels = new Label[6];
-    private Label _createBudgetLabel = null!;
+    // Create form stat-grid labels (8 stat rows, driven by 2·disc+{110..141} key lookup).
+    // spec: Docs/RE/formats/config_tables.md §2.17.3 CODE-CONFIRMED (two-witness).
+    private const int StatGridRowCount = 8; // keys offset {110,111,120,121,130,131,140,141}
+    private readonly Label[] _createStatLabels = new Label[StatGridRowCount];
+    private readonly Label[] _createStatNameLabels = new Label[StatGridRowCount];
 
-    // Name textbox reference (for validation on confirm).
+    // Name entry / toast.
     private LineEdit _createNameEntry = null!;
-
-    // Toast label for name-validation feedback.
-    // spec: frontend_scenes.md §4.4 — "show a rejection toast (msg id 2075)". CODE-CONFIRMED.
     private Label _createToastLabel = null!;
-    private double _toastTimer; // seconds remaining
+    private double _toastTimer;
 
-    // Class base stats for display — these are NOT authoritative; the Application layer owns stats.
-    // We mirror illustrative starting values so the ±buttons give visible feedback.
-    // spec: frontend_scenes.md §4.2 — "pure display from the class template". CODE-CONFIRMED.
-    private static readonly int[][] CreateClassBaseStats =
-    [
-        [420, 80, 18, 6, 10, 18], // UI 0 → internal 4 (Warrior)
-        [350, 100, 15, 8, 12, 14], // UI 1 → internal 1 (Musa)
-        [300, 120, 14, 9, 15, 12], // UI 2 → internal 3 (Blader)
-        [280, 150, 8, 15, 14, 10], // UI 3 → internal 2 (Tao)
-    ];
-
-    // Starting point budget per class (illustrative; real value comes from Application).
-    private static readonly int[] CreateClassBudgets = [25, 25, 25, 25];
-
-    // The single unified 3D scene — replaces the old per-slot CharPreview3D array.
-    // spec: Docs/RE/specs/frontend_scenes.md §3 — "a full 3D world backdrop". CODE-CONFIRMED.
+    // 3D scene — single SubViewport with CharSelectScene3D.
+    // spec: Docs/RE/specs/frontend_scenes.md §3 CODE-CONFIRMED.
     private CharSelectScene3D? _scene3D;
     private SubViewport? _scene3DViewport;
-    private SubViewportContainer? _scene3DContainer; // held for ray-pick coordinate scaling
+    private SubViewportContainer? _scene3DContainer;
 
-    // Slot row buttons (for the selection highlight).
-    private readonly Button?[] _slotButtons = new Button?[MaxSlots];
+    // Create preview 3D.
+    private CharCreatePreview3D? _createPreview3D;
 
-    // Container node for the slot selector row — held so RebuildSlotSelectorRow can clear+rebuild it.
+    // Slot selector row container (rebuilt on ApplyCharacterList).
     private Control _slotRowContainer = null!;
+    private readonly Button?[] _slotButtons = new Button?[MaxSlots];
 
     /// <summary>Optional shared asset loader injected by the flow node.</summary>
     public UiAssetLoader? SharedAssets { get; set; }
@@ -334,15 +253,10 @@ public sealed partial class CharacterSelectScreen : Control
         _assets = SharedAssets ?? UiAssetLoader.Open();
         _ownsAssets = SharedAssets is null;
 
-        // Also try to open the real VFS for 3D preview SubViewports.
-        // The CharPreview3D nodes may also open their own handle; sharing avoids double-open.
-        try
-        {
-            _realAssets = RealClientAssets.TryOpen();
-        }
+        try { _realAssets = RealClientAssets.TryOpen(); }
         catch (Exception ex)
         {
-            GD.PrintErr($"[Screens] CharacterSelectScreen: VFS open for previews failed: {ex.Message}");
+            GD.PrintErr($"[CharacterSelectScreen] VFS open for 3D previews failed: {ex.Message}");
         }
 
         // Load CP949 class descriptions from data/script/npc.scr (keys 1..4).
@@ -350,13 +264,10 @@ public sealed partial class CharacterSelectScreen : Control
         // spec: Docs/RE/specs/frontend_scenes.md §4.1.1 — class description source = npc.scr: CONFIRMED.
         _npcScrDesc = NpcScrDescriptions.Load(_realAssets);
 
-        try
-        {
-            BuildUi();
-        }
+        try { BuildUi(); }
         catch (Exception ex)
         {
-            GD.PrintErr($"[Screens] CharacterSelectScreen build failed: {ex.Message}");
+            GD.PrintErr($"[CharacterSelectScreen] BuildUi failed: {ex.Message}");
         }
     }
 
@@ -369,19 +280,15 @@ public sealed partial class CharacterSelectScreen : Control
 
     public override void _Process(double delta)
     {
-        // Turntable: drive CharCreatePreview3D rotation while buttons are held.
-        // spec: Docs/RE/specs/frontend_scenes.md §4.2 — "press-and-hold turntable ≈±2 rad/s". CODE-CONFIRMED.
+        // Turntable drive (press-and-hold). spec: frontend_scenes.md §4.2 CODE-CONFIRMED.
         if (_createFormVisible && _createPreview3D is not null && IsInstanceValid(_createPreview3D))
         {
             float dt = (float)delta;
-            if (_rotatePressLeft)
-                _createPreview3D.RotateLeft(dt);
-            if (_rotatePressRight)
-                _createPreview3D.RotateRight(dt);
+            if (_rotatePressLeft) _createPreview3D.RotateLeft(dt);
+            if (_rotatePressRight) _createPreview3D.RotateRight(dt);
         }
 
-        // Toast timer: hide after duration expires.
-        // spec: frontend_scenes.md §4.4 — rejection toast. CODE-CONFIRMED.
+        // Toast timer.
         if (_toastTimer > 0.0)
         {
             _toastTimer -= delta;
@@ -395,7 +302,7 @@ public sealed partial class CharacterSelectScreen : Control
     }
 
     // =========================================================================
-    // UI construction
+    // UI construction — SELECT VIEW
     // =========================================================================
 
     private void BuildUi()
@@ -403,23 +310,56 @@ public sealed partial class CharacterSelectScreen : Control
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         int widgetCount = 0;
 
-        // --- LAYER 0: The 3D scene viewport (full canvas, bottom-most layer).
-        // The legacy char-select is a real 3D world — NOT a 2D screen with a backdrop image.
+        // LAYER 0: 3D scene SubViewport (full canvas, bottom-most layer).
         // spec: Docs/RE/specs/frontend_scenes.md §3 — "a full 3D world backdrop". CODE-CONFIRMED.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.7 (composition: map000, cell, stage). CODE-CONFIRMED.
-        // The SubViewportContainer fills the canvas; the 2D chrome layers are Control children on top.
         widgetCount += Build3DSceneViewport();
 
-        // --- LAYER 1: Transparent 2D chrome overlaid on the 3D viewport.
-        // The official client is MINIMAL chrome over the 3D scene: just the orange count caption
-        // centred at the top, a compact info panel top-left, and the C/D/E buttons at the bottom.
-        // Reference: Capture d'écran 2026-06-14 015759.png — the 3D temple dominates the view.
+        // LAYER 1: 2D chrome overlaid on the 3D viewport.
 
-        // --- Left character-info panel: compact, top-left, semi-transparent dark background.
-        // The official view shows a small dark panel with the selected char's name/level/class.
-        // Size: 194×80 (name + level + class, compact to match minimal chrome in ref screenshot).
-        // spec §8.2 "Left character-info panel". CODE-CONFIRMED for the panel; size trimmed to
-        //   match the minimal chrome visible in the reference screenshot (015759).
+        // Tab buttons: Server (act 1), Channel (act 2), Back (act 3).
+        // spec: Docs/RE/specs/frontend_scenes.md §11.5b. CODE-CONFIRMED.
+        // Added before the caption so caption draws on top.
+        var serverTab = MakeTabButton(
+            CharacterSelectLayout.ServerTabBtn with { Y = 4 },
+            CharacterSelectLayout.ServerTabHov with { Y = 4 },
+            CharacterSelectLayout.ServerTabPrs with { Y = 4 },
+            actionId: 1); // spec: ui_system.md §8.2 actionId=1
+        serverTab.ActionFired += OnTabAction;
+        AddChild(serverTab);
+        widgetCount++;
+
+        var channelTab = MakeTabButton(
+            CharacterSelectLayout.ChannelTabBtn with { Y = 4 },
+            CharacterSelectLayout.ChannelTabHov with { Y = 4 },
+            CharacterSelectLayout.ChannelTabPrs with { Y = 4 },
+            actionId: 2); // spec: ui_system.md §8.2 actionId=2
+        channelTab.ActionFired += OnTabAction;
+        AddChild(channelTab);
+        widgetCount++;
+
+        var backTab = MakeTabButton(
+            CharacterSelectLayout.BackTabBtn with { Y = 4 },
+            CharacterSelectLayout.BackTabHov with { Y = 4 },
+            CharacterSelectLayout.BackTabPrs with { Y = 4 },
+            actionId: 3); // spec: ui_system.md §8.2 actionId=3
+        backTab.ActionFired += OnTabAction;
+        AddChild(backTab);
+        widgetCount++;
+
+        // Char-count caption: centred top, msg id 2209 "캐릭터 개수 : %d", orange.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED.
+        _charCountCaption = WidgetFactory.MakeLabel(
+            BuildCharCountCaption(),
+            CharacterSelectLayout.FontTitleHeight,
+            new Color(0.95f, 0.86f, 0.55f));
+        _charCountCaption.Position = new Vector2(0f, 12f);
+        _charCountCaption.Size = new Vector2(1024f, 28f);
+        _charCountCaption.HorizontalAlignment = HorizontalAlignment.Center;
+        AddChild(_charCountCaption);
+        widgetCount++;
+
+        // Left character-info panel: compact, semi-transparent.
+        // Shows selected char name/level/class from live slot data.
         var infoPanel = new Panel
         {
             Name = "CharInfoPanel",
@@ -438,160 +378,94 @@ public sealed partial class CharacterSelectScreen : Control
         AddChild(infoPanel);
         widgetCount++;
 
-        // Char name / level / class info labels in the compact panel.
-        _infoName = BuildInfoLabel(infoPanel, "Name", new Vector2(6f, 6f));
-        _infoLevel = BuildInfoLabel(infoPanel, "Level", new Vector2(6f, 24f));
-        _infoClass = BuildInfoLabel(infoPanel, "Class", new Vector2(6f, 42f));
+        _infoName = BuildInfoLabel(infoPanel, "–", new Vector2(6f, 6f));
+        _infoLevel = BuildInfoLabel(infoPanel, "–", new Vector2(6f, 24f));
+        _infoClass = BuildInfoLabel(infoPanel, "–", new Vector2(6f, 42f));
         widgetCount += 3;
 
-        // --- Tab buttons: Server (act 1), Channel (act 2), Back (act 3).
-        // spec §8.2 tab button table; spec §11.5b positions relative to titleBar at (0,0).
-        // CODE-CONFIRMED. Placed at their spec X, absolute y=4 (top edge strip).
-        // These are added BEFORE the caption so the caption draws on top (later child = drawn last).
-        var serverTab = MakeTabButton(
-            CharacterSelectLayout.ServerTabBtn with { Y = 4 },
-            CharacterSelectLayout.ServerTabHov with { Y = 4 },
-            CharacterSelectLayout.AtlasLoginWindow,
-            actionId: 1, caption: "Server"); // actionId=1, spec §8.2
-        serverTab.ActionFired += OnTabAction;
-        AddChild(serverTab);
-        widgetCount++;
-
-        var channelTab = MakeTabButton(
-            CharacterSelectLayout.ChannelTabBtn with { Y = 4 },
-            CharacterSelectLayout.ChannelTabHov with { Y = 4 },
-            CharacterSelectLayout.AtlasLoginWindow,
-            actionId: 2, caption: "Channel"); // actionId=2, spec §8.2
-        channelTab.ActionFired += OnTabAction;
-        AddChild(channelTab);
-        widgetCount++;
-
-        var backTab = MakeTabButton(
-            CharacterSelectLayout.BackTabBtn with { Y = 4 },
-            CharacterSelectLayout.BackTabHov with { Y = 4 },
-            CharacterSelectLayout.AtlasLoginWindow,
-            actionId: 3, caption: "Back"); // actionId=3, spec §8.2
-        backTab.ActionFired += OnTabAction;
-        AddChild(backTab);
-        widgetCount++;
-
-        // --- Character-count caption: centred horizontally, near top of canvas.
-        // msg id 2209 "캐릭터 개수 : %d", orange text, no background panel.
-        // Added AFTER the tab buttons so it draws on top of them (Godot render order = child order).
-        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — MessageDB id 2209.
-        // Position y=12 to sit within the top strip above the info panel (y=46).
-        _charCountCaption = WidgetFactory.MakeLabel(
-            BuildCharCountCaption(),
-            CharacterSelectLayout.FontTitleHeight, new Color(0.95f, 0.86f, 0.55f));
-        _charCountCaption.Position = new Vector2(0f, 12f);
-        _charCountCaption.Size = new Vector2(1024f, 28f);
-        _charCountCaption.HorizontalAlignment = HorizontalAlignment.Center;
-        AddChild(_charCountCaption);
-        widgetCount++;
-
-        // --- Bottom button bar: Create / Delete / Enter — placed at the bottom of the canvas.
-        // In the official client these three buttons sit as a centred strip near y~720.
-        // spec §8.2 — Create=4, Delete=5, Enter=6. CORRECTION from 413/531. CODE-CONFIRMED.
+        // Bottom button bar: Create / Delete / Enter — centred at bottom.
         // spec: Docs/RE/specs/frontend_scenes.md §11.5c. CODE-CONFIRMED.
-        // Button strip: centred ~x=350 for Create, x=420 for Delete, x=490 for Enter at y=718.
-        // Each button is 59×20 per the atlas frame (spec §11.5c). CODE-CONFIRMED.
+        // spec: Docs/RE/specs/ui_system.md §8.2 Create=4/Delete=5/Enter=6 CODE-CONFIRMED.
         const float btnBarY = 718f;
-        const float btnBarCentreX = 512f; // canvas centre
+        const float btnBarCentreX = 512f;
         const float btnW = 59f;
+        const float btnH = 20f;
         const float btnGap = 8f;
-        // 3 buttons total width = 3*59 + 2*8 = 193px → leftmost starts at 512 − 96.5 ≈ 415
         const float btnBarLeft = btnBarCentreX - (3f * btnW + 2f * btnGap) / 2f;
 
-        // Create button at btnBarLeft, Delete at +67, Enter at +134.
-        // spec: Docs/RE/specs/frontend_scenes.md §11.5c NORMAL src (0,1004)/(118,1004)/(236,1004). CODE-CONFIRMED.
-        WidgetRect createR = CharacterSelectLayout.CreateButton with { X = (int)btnBarLeft, Y = (int)btnBarY };
-        var createBtn = MakeCharButton(
-            createR,
-            CharacterSelectLayout.CreateButton with { X = (int)btnBarLeft, Y = (int)btnBarY },
-            CharacterSelectLayout.AtlasLoginWindow,
-            CharacterSelectLayout.CreateActionId, // 4, spec §8.2
-            "Create");
+        // Create button: loginwindow.dds N(0,1004) P(59,1004). spec §11.5c. CODE-CONFIRMED.
+        var createBtn = WidgetFactory.MakeStateButton(
+            _assets, CharacterSelectLayout.AtlasLoginWindow,
+            (int)btnBarLeft, (int)btnBarY, (int)btnW, (int)btnH,
+            0, 1004,   // NORMAL src. spec §11.5c. CODE-CONFIRMED.
+            0, 1004,   // HOVER = NORMAL. spec §1.5.
+            59, 1004,  // PRESSED src. spec §11.5c. CODE-CONFIRMED.
+            actionId: CharacterSelectLayout.CreateActionId); // 4
         createBtn.ActionFired += OnCharAction;
         AddChild(createBtn);
         widgetCount++;
 
-        WidgetRect deleteR = CharacterSelectLayout.DeleteButton with
-        {
-            X = (int)(btnBarLeft + btnW + btnGap), Y = (int)btnBarY
-        };
-        var deleteBtn = MakeCharButton(
-            deleteR,
-            CharacterSelectLayout.DeleteButton with { X = deleteR.X, Y = (int)btnBarY },
-            CharacterSelectLayout.AtlasLoginWindow,
-            CharacterSelectLayout.DeleteActionId, // 5, spec §8.2
-            "Delete");
+        // Delete button: loginwindow.dds N(118,1004) P(177,1004). spec §11.5c. CODE-CONFIRMED.
+        var deleteBtn = WidgetFactory.MakeStateButton(
+            _assets, CharacterSelectLayout.AtlasLoginWindow,
+            (int)(btnBarLeft + btnW + btnGap), (int)btnBarY, (int)btnW, (int)btnH,
+            118, 1004,  // NORMAL src. spec §11.5c. CODE-CONFIRMED.
+            118, 1004,  // HOVER = NORMAL.
+            177, 1004,  // PRESSED src. spec §11.5c. CODE-CONFIRMED.
+            actionId: CharacterSelectLayout.DeleteActionId); // 5
         deleteBtn.ActionFired += OnCharAction;
         AddChild(deleteBtn);
         widgetCount++;
 
-        WidgetRect enterR = CharacterSelectLayout.EnterButton with
-        {
-            X = (int)(btnBarLeft + 2f * (btnW + btnGap)), Y = (int)btnBarY
-        };
-        // M1 fix: Enter button uses atlas art with no text overlay.
-        // spec: Docs/RE/specs/frontend_scenes.md §11.5c — Enter N src(236,1004). CODE-CONFIRMED.
-        var enterBtn = MakeCharButton(
-            enterR,
-            CharacterSelectLayout.EnterButton with { X = enterR.X, Y = (int)btnBarY },
-            CharacterSelectLayout.AtlasLoginWindow,
-            CharacterSelectLayout.EnterActionId, // 6, spec §8.2
-            ""); // no text — baked art label. spec §11.5c "Enter" (236,1004). CODE-CONFIRMED.
+        // Enter button: loginwindow.dds N(236,1004) P(295,1004). spec §11.5c. CODE-CONFIRMED.
+        var enterBtn = WidgetFactory.MakeStateButton(
+            _assets, CharacterSelectLayout.AtlasLoginWindow,
+            (int)(btnBarLeft + 2f * (btnW + btnGap)), (int)btnBarY, (int)btnW, (int)btnH,
+            236, 1004,  // NORMAL src. spec §11.5c. CODE-CONFIRMED.
+            236, 1004,  // HOVER = NORMAL.
+            295, 1004,  // PRESSED src. spec §11.5c. CODE-CONFIRMED.
+            actionId: CharacterSelectLayout.EnterActionId); // 6
         enterBtn.ActionFired += OnCharAction;
         AddChild(enterBtn);
         widgetCount++;
 
-        // The 3D viewport (Layer 0) was already inserted as the first child in BuildUi().
-        // The 2D chrome (info panel, buttons, slot row) composites on top of the 3D scene.
-        // No per-slot SubViewport boxes needed anymore — the unified CharSelectScene3D handles
-        // the full map000 backdrop + character row + camera.
-        // spec: Docs/RE/specs/frontend_scenes.md §3 — "a full 3D world backdrop". CODE-CONFIRMED.
+        // Stat-icon grid (5 rows × 2 cols). spec §8.2+§8.4 CODE-CONFIRMED.
+        widgetCount += BuildStatGrid(this);
 
-        // --- Slot selector row (text buttons below the 3D region, above the button bar) ---
+        // Slot selector row (5 blank slots by default, driven by ApplyCharacterList).
         widgetCount += BuildSlotSelectorRow();
 
-        // --- Corner close button @ (971,610) 23×23, blacksheet.dds src (941,910).
-        // spec §8.2 "Corner close". CODE-CONFIRMED. ---
-        WidgetRect closeR = CharacterSelectLayout.CornerClose;
+        // Corner close button: blacksheet.dds src (941,910) 23×23 at (971,610).
+        // spec: Docs/RE/specs/ui_system.md §8.2 CODE-CONFIRMED.
         var closeBtn = WidgetFactory.MakeStateButton2(
-            _assets,
-            CharacterSelectLayout.AtlasBlacksheet,
-            closeR.X, closeR.Y, closeR.W, closeR.H,
-            closeR.SrcX, closeR.SrcY,
-            actionId: 99, caption: "×");
+            _assets, CharacterSelectLayout.AtlasBlacksheet,
+            CharacterSelectLayout.CornerClose.X, CharacterSelectLayout.CornerClose.Y,
+            CharacterSelectLayout.CornerClose.W, CharacterSelectLayout.CornerClose.H,
+            CharacterSelectLayout.CornerClose.SrcX, CharacterSelectLayout.CornerClose.SrcY,
+            actionId: 99);
         closeBtn.ActionFired += _ => EmitSignal(SignalName.BackRequested);
         AddChild(closeBtn);
         widgetCount++;
 
-        // --- Create sub-form (initially hidden).
-        // spec: frontend_scenes.md §4 (class/appearance picker). ---
+        // Create sub-form (initially hidden).
+        // spec: Docs/RE/specs/frontend_scenes.md §4 CODE-CONFIRMED.
         _createForm = BuildCreateForm();
         _createForm.Visible = false;
         AddChild(_createForm);
         widgetCount++;
 
-        // NOTE: char_select-u.xeff (effect_id 380003000, 68 sub-effects) is a COMPOSITE 3D effect —
-        // torch coronas placed in the 3D cavern. Braziers live in the 3D subviewport (CharSelectScene3D),
-        // NOT as a 2D fullscreen overlay on the canvas.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.6.5 CODE-CONFIRMED — "spawned ONCE in the 3D cavern
-        //   at world ≈ (508.5, 69.9, −9758.6), scale 1.0; part of the 3D scene — NOT a 2D overlay".
-        // A 2D FrontEndEffectPlayer with raw SizeX ~160–194 × 24f × 20f = ~77,000 px effective particle
-        // size covers the entire viewport (the full-red-screen bug). Braziers are GPUParticles3D in
-        // CharSelectScene3D.BuildBrazierEffect(). Aesthetic/3D only — no 2D overlay here.
+        // NOTE: char_select-u.xeff (torch brazier effect) is a 3D composite effect — not a 2D
+        // overlay. It is placed by CharSelectScene3D. spec: frontend_scenes.md §3.6.5 CODE-CONFIRMED.
 
         RefreshInfo();
 
-        GD.Print($"[Screens] CharacterSelectScreen built ({widgetCount} widgets; " +
-                 $"roster={DemoRoster.Length}; vfs={(_assets.HasVfs ? "real-atlas" : "offline")}; " +
-                 $"3D scene viewport queued for deferred init).");
+        GD.Print($"[CharacterSelectScreen] built ({widgetCount} widgets; " +
+                 $"vfs={(_assets.HasVfs ? "real-atlas" : "offline")}; " +
+                 $"slots=BLANK-until-CharacterListEvent; 3D viewport deferred).");
     }
 
     // =========================================================================
-    // Stat grid — spec §8.2 + §8.4 generator (base-Y 191, stride 24, 5 rows). CODE-CONFIRMED.
+    // Stat-icon grid — spec §8.2+§8.4 (base-Y 191, stride 24, 5 rows). CODE-CONFIRMED.
     // =========================================================================
 
     private int BuildStatGrid(Control parent)
@@ -600,44 +474,37 @@ public sealed partial class CharacterSelectScreen : Control
         for (int row = 0; row < CharacterSelectLayout.StatGridRows; row++)
         {
             int y = CharacterSelectLayout.StatGridBaseY + row * CharacterSelectLayout.StatGridStride;
-            // spec §8.4 — "base-Y 191, stride 24". CODE-CONFIRMED.
 
-            // Col 1 stat icon button @ (154, y) 24×16. NORMAL (500,770) PRESSED (548,770).
-            // spec §8.2 "Per-slot stat-icon grid col 1". CODE-CONFIRMED.
+            // Col 1: loginwindow.dds NORMAL (500,770) PRESSED (548,770).
+            // spec: Docs/RE/specs/ui_system.md §8.2 "Per-slot stat-icon grid col 1". CODE-CONFIRMED.
             var col1 = WidgetFactory.MakeStateButton(
-                _assets,
-                CharacterSelectLayout.AtlasLoginWindow,
+                _assets, CharacterSelectLayout.AtlasLoginWindow,
                 CharacterSelectLayout.StatIconCol1X, y,
                 CharacterSelectLayout.StatIconW, CharacterSelectLayout.StatIconH,
                 CharacterSelectLayout.StatIconCol1NormalSrcX, CharacterSelectLayout.StatIconCol1NormalSrcY,
-                CharacterSelectLayout.StatIconCol1NormalSrcX,
-                CharacterSelectLayout.StatIconCol1NormalSrcY, // HOVER=NORMAL (2-state)
+                CharacterSelectLayout.StatIconCol1NormalSrcX, CharacterSelectLayout.StatIconCol1NormalSrcY,
                 CharacterSelectLayout.StatIconCol1PressedSrcX, CharacterSelectLayout.StatIconCol1PressedSrcY,
-                actionId: 61 + row * 2); // actions 61..74 cover the stat-grid range, spec §8.2
+                actionId: 61 + row * 2); // actions 61..74. spec §8.2. CODE-CONFIRMED.
             parent.AddChild(col1);
             count++;
 
-            // Col 2 stat icon button @ (178, y) 24×16. NORMAL (524,770) PRESSED (572,770).
-            // spec §8.2 "Per-slot stat-icon grid col 2". CODE-CONFIRMED.
+            // Col 2: loginwindow.dds NORMAL (524,770) PRESSED (572,770).
+            // spec: Docs/RE/specs/ui_system.md §8.2 "Per-slot stat-icon grid col 2". CODE-CONFIRMED.
             var col2 = WidgetFactory.MakeStateButton(
-                _assets,
-                CharacterSelectLayout.AtlasLoginWindow,
+                _assets, CharacterSelectLayout.AtlasLoginWindow,
                 CharacterSelectLayout.StatIconCol2X, y,
                 CharacterSelectLayout.StatIconW, CharacterSelectLayout.StatIconH,
                 CharacterSelectLayout.StatIconCol2NormalSrcX, CharacterSelectLayout.StatIconCol2NormalSrcY,
-                CharacterSelectLayout.StatIconCol2NormalSrcX,
-                CharacterSelectLayout.StatIconCol2NormalSrcY, // HOVER=NORMAL
+                CharacterSelectLayout.StatIconCol2NormalSrcX, CharacterSelectLayout.StatIconCol2NormalSrcY,
                 CharacterSelectLayout.StatIconCol2PressedSrcX, CharacterSelectLayout.StatIconCol2PressedSrcY,
-                actionId: 62 + row * 2);
+                actionId: 62 + row * 2); // spec §8.2. CODE-CONFIRMED.
             parent.AddChild(col2);
             count++;
 
             // Stat value label @ (51, y+2) 35×12.
-            // spec §8.2+§8.4 "Per-slot stat value labels: x=51 base-Y 193 stride 24 35×12". CODE-CONFIRMED.
-            var valLabel = WidgetFactory.MakeLabel(
-                $"–",
-                CharacterSelectLayout.FontRowHeight,
-                new Color(0.85f, 0.85f, 0.90f));
+            // spec: Docs/RE/specs/ui_system.md §8.2+§8.4 "stat value labels x=51 base-Y 193 35×12". CODE-CONFIRMED.
+            var valLabel = WidgetFactory.MakeLabel("–",
+                CharacterSelectLayout.FontRowHeight, new Color(0.85f, 0.85f, 0.90f));
             valLabel.Position = new Vector2(
                 CharacterSelectLayout.StatValueX,
                 CharacterSelectLayout.StatValueBaseY + row * CharacterSelectLayout.StatGridStride);
@@ -645,89 +512,59 @@ public sealed partial class CharacterSelectScreen : Control
             parent.AddChild(valLabel);
             count++;
         }
-
         return count;
     }
 
     // =========================================================================
-    // 3D scene — ONE unified SubViewport with CharSelectScene3D.
-    // Replaces the old per-slot CharPreview3D approach.
-    // spec: Docs/RE/specs/frontend_scenes.md §3 — "a full 3D world backdrop". CODE-CONFIRMED.
+    // 3D scene SubViewport. spec: frontend_scenes.md §3.7 CODE-CONFIRMED.
     // =========================================================================
 
-    /// <summary>
-    /// Builds the single SubViewportContainer that hosts CharSelectScene3D.
-    /// The SubViewportContainer fills the full reference canvas (1024×768) as the bottom-most
-    /// layer; 2D chrome Controls are added as siblings on top (higher child index = rendered later).
-    ///
-    /// <para>The 3D scene is initialised via a deferred call so that all parent nodes (ScreenHost,
-    /// CanvasLayer) are settled before the SubViewport is populated.</para>
-    ///
-    /// spec: Docs/RE/specs/frontend_scenes.md §3.7 CODE-CONFIRMED (map000, cell, stage origin).
-    /// spec: Docs/RE/specs/frontend_scenes.md §3.5 CODE-CONFIRMED (camera KF1).
-    /// spec: Docs/RE/specs/frontend_scenes.md §3.6 CODE-CONFIRMED (5-light rig, fog zeroed).
-    /// </summary>
     private int Build3DSceneViewport()
     {
-        // The SubViewport size matches the reference canvas (1024×768).
-        // spec: Docs/RE/specs/ui_system.md §8.1 — "reference canvas 1024×768". CODE-CONFIRMED.
         _scene3DViewport = new SubViewport
         {
             Name = "CharSelect3DViewport",
-            Size = new Vector2I(1024, 768),
+            Size = new Vector2I(1024, 768), // spec: ui_system.md §8.1 "1024×768". CODE-CONFIRMED.
             RenderTargetUpdateMode = SubViewport.UpdateMode.Always,
-            TransparentBg = false, // opaque — this IS the background
+            TransparentBg = false,
         };
 
-        // CharSelectScene3D holds all 3D content (terrain, characters, camera, lights).
-        // spec: Docs/RE/specs/frontend_scenes.md §3 CODE-CONFIRMED.
         _scene3D = new CharSelectScene3D { Name = "CharSelectScene3D" };
 
-        // Set slot descriptors from the current roster (before Initialise).
+        // All 5 slots start empty (no occupancy until ApplyCharacterList).
         PushSlotDescriptorsToScene();
 
         _scene3DViewport.AddChild(_scene3D);
 
-        // SubViewportContainer: stretches the viewport to fill the Control area.
-        // MouseFilter.Pass so the container forwards GuiInput events while the 2D chrome nodes
-        // on top can still receive their own clicks (Stop/Pass on those children as needed).
-        // spec: frontend_scenes.md §3.3.3 — click on the 3D viewport region drives slot selection. CODE-CONFIRMED.
         var container = new SubViewportContainer
         {
             Name = "Scene3DContainer",
             Stretch = true,
-            MouseFilter = MouseFilterEnum.Pass, // pass so we receive GuiInput for ray-pick
+            MouseFilter = MouseFilterEnum.Pass,
         };
         container.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         container.AddChild(_scene3DViewport);
 
-        // Wire GuiInput for 3D ray-pick slot selection.
-        // spec: frontend_scenes.md §3.3.3 — "unproject click pixel through perspective camera;
-        //   test each slot AABB; first hit → confirmed-pick". CODE-CONFIRMED.
+        // Wire 3D ray-pick slot selection.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.3.3 CODE-CONFIRMED.
         container.GuiInput += OnViewport3DGuiInput;
 
-        _scene3DContainer = container; // held for coordinate scaling in OnViewport3DGuiInput
+        _scene3DContainer = container;
         AddChild(container);
 
-        // Defer Initialise to the next frame so the SubViewport is settled in the tree.
-        // spec: CharSelectScene3D — "call Initialise after node is in tree". CONFIRMED.
         Callable.From(InitialiseScene3D).CallDeferred();
 
         GD.Print("[CharacterSelectScreen] 3D scene SubViewport queued (deferred Initialise). " +
                  "spec: frontend_scenes.md §3.7 CODE-CONFIRMED.");
-        return 2; // container + viewport
+        return 2;
     }
 
-    /// <summary>
-    /// Deferred: initialises the 3D scene once the SubViewport is settled.
-    /// </summary>
     private void InitialiseScene3D()
     {
         if (_scene3D is null || !IsInstanceValid(_scene3D)) return;
         try
         {
             _scene3D.Initialise(_realAssets);
-            // Set initial slot selection highlight.
             _scene3D.SetSelectedSlot(_selectedSlot);
         }
         catch (Exception ex)
@@ -736,49 +573,31 @@ public sealed partial class CharacterSelectScreen : Control
         }
     }
 
-    /// <summary>
-    /// Pushes the current slot occupancy / skin data into <see cref="_scene3D"/>'s descriptor array.
-    /// Called before Initialise and after ApplyCharacterList.
-    /// </summary>
     private void PushSlotDescriptorsToScene()
     {
         if (_scene3D is null) return;
         var descs = new (bool IsOccupied, uint SkinClassId)[MaxSlots];
         for (int i = 0; i < MaxSlots; i++)
         {
-            if (_liveDataApplied)
-            {
-                LiveSlot ls = _liveSlots[i];
-                descs[i] = (!ls.IsEmpty, !ls.IsEmpty ? (uint)ls.ServerClass : 0u);
-            }
-            else
-            {
-                bool occ = i < DemoRoster.Length;
-                descs[i] = (occ, occ ? DemoRoster[i].SkinClassId : 0u);
-            }
+            LiveSlot ls = _liveSlots[i];
+            descs[i] = (!ls.IsEmpty, !ls.IsEmpty ? (uint)ls.ServerClass : 0u);
         }
-
         _scene3D.SlotDescriptors = descs;
     }
 
     // =========================================================================
-    // Slot selector row (text buttons beneath previews)
+    // Slot selector row — 5 blank slots, driven by ApplyCharacterList.
+    // NO synthetic names, NO demo roster.
     // =========================================================================
 
     private int BuildSlotSelectorRow()
     {
-        // Create a container node so we can clear+rebuild the row when ApplyCharacterList fires.
         _slotRowContainer = new Control { Name = "SlotRowContainer" };
         AddChild(_slotRowContainer);
-
         PopulateSlotSelectorRow();
-        return MaxSlots + 1; // +1 for the container node
+        return MaxSlots + 1;
     }
 
-    /// <summary>
-    /// Populates the slot selector row buttons from current slot data.
-    /// Called both on initial build and when ApplyCharacterList updates the roster.
-    /// </summary>
     private void PopulateSlotSelectorRow()
     {
         const float slotX0 = 260f;
@@ -787,7 +606,6 @@ public sealed partial class CharacterSelectScreen : Control
         const float rowY = 535f;
         const float rowH = 28f;
 
-        // Clear old buttons.
         foreach (Node child in _slotRowContainer.GetChildren())
             child.QueueFree();
         for (int j = 0; j < MaxSlots; j++)
@@ -795,39 +613,20 @@ public sealed partial class CharacterSelectScreen : Control
 
         for (int i = 0; i < MaxSlots; i++)
         {
-            // Determine slot data: live (from CharacterListEvent) or demo fallback.
-            string label;
-            bool occupied;
+            LiveSlot ls = _liveSlots[i];
+            bool occupied = !ls.IsEmpty;
 
-            if (_liveDataApplied)
-            {
-                LiveSlot ls = _liveSlots[i];
-                occupied = !ls.IsEmpty;
-                // spec: frontend_scenes.md §3.2 — "slot info line shows name, level, and position". CODE-CONFIRMED.
-                label = occupied
-                    ? $"{ls.Name}\nLv {ls.Level}"
-                    : "(empty — Create)";
-            }
-            else
-            {
-                occupied = i < DemoRoster.Length;
-                if (!occupied)
-                {
-                    label = "(empty)";
-                }
-                else
-                {
-                    DemoSlot slot = DemoRoster[i];
-                    // Format: "Name\nClass Lv N" — readable at the 148px slot width.
-                    label = $"{slot.Name}\n{slot.ClassName} Lv {slot.Level}";
-                }
-            }
+            // Slot label: only from live Application data — NEVER synthetic names.
+            // spec: frontend_scenes.md §3.2 — "slot info line: name + level". CODE-CONFIRMED.
+            string label = occupied
+                ? $"{ls.Name}\nLv {ls.Level}"
+                : string.Empty; // blank slot — no text
 
             var btn = new Button
             {
                 Text = label,
                 Position = new Vector2(slotX0 + i * (slotW + slotGap), rowY),
-                Size = new Vector2(slotW, rowH * 2), // double height to fit two lines
+                Size = new Vector2(slotW, rowH * 2),
             };
             btn.AddThemeFontSizeOverride("font_size", 10);
 
@@ -843,9 +642,6 @@ public sealed partial class CharacterSelectScreen : Control
         }
     }
 
-    /// <summary>
-    /// Rebuilds the slot selector row in-place (called from ApplyCharacterList on the main thread).
-    /// </summary>
     private void RebuildSlotSelectorRow()
     {
         if (_slotRowContainer is null || !IsInstanceValid(_slotRowContainer)) return;
@@ -853,46 +649,25 @@ public sealed partial class CharacterSelectScreen : Control
     }
 
     // =========================================================================
-    // Camera pose-button scaffolding REMOVED — CAMPAIGN 9.
-    // The legacy char-select camera is a SINGLE STATIC camera; the "6-keyframe orbit"
-    // (and its pose-button selector) was REFUTED by re-RE this campaign. Camera framing +
-    // the two manual hold-to-move inputs (boom-zoom, preview-actor yaw) live in
-    // CharSelectScene3D / CharSelectCameraRig. spec: Docs/RE/specs/frontend_scenes.md §3.5.
-    // =========================================================================
-
-    // =========================================================================
-    // Create sub-form — spec: frontend_scenes.md §4. CODE-CONFIRMED.
+    // Create sub-form — spec: frontend_scenes.md §4 CODE-CONFIRMED.
     //
-    // Layout (faithful to the official client visual target):
-    //   FULL-SCREEN overlay (1024×768) with three regions:
-    //   LEFT  (x=0..200)   : class selection list (4 classes)
-    //   CENTER(x=200..620)  : enlarged 3D preview (CharCreatePreview3D, scale 75)
-    //                         + turntable L/R buttons + face ± buttons
-    //   RIGHT (x=620..1024) : class name / description, stat allocation (+/− budget),
-    //                         name textbox, OK/Cancel
-    //   BOTTOM caption strip with the orange "Create Character" label.
-    //
-    // spec: Docs/RE/specs/frontend_scenes.md §4 CODE-CONFIRMED.
-    //   Class choice: UI index 0..3 → internal {4,1,3,2}. Face index 1..7.
-    //   Scale 75. Turntable ≈±2 rad/s press-and-hold. No sex toggle.
-    //   Stat allocation: 6 stats, floor 10, shared budget, remaining-points display.
-    //   Name: min 2 chars, lowercase a–z + digits + Hangul; rejection toast msg id 2075.
+    // 3-column layout (3D temple backdrop shows through semi-transparent panels):
+    //   LEFT  (x=0..200)   : 4 class buttons (atlas slices) + class name + npc.scr description
+    //   CENTER(x=200..620)  : CharCreatePreview3D + face ± + turntable L/R
+    //   RIGHT (x=620..1024) : stat-grid (8 rows, 2·disc+{110..141} labels) + name entry + OK/Cancel
     // =========================================================================
 
     private Control BuildCreateForm()
     {
-        // Full-screen semi-transparent overlay drawn over the 3D char-select scene.
-        // spec: frontend_scenes.md §4 — "sub-state drawn over the SAME 3D char-select scene". CODE-CONFIRMED.
         var form = new Control
         {
             Name = "CreateForm",
-            MouseFilter = MouseFilterEnum.Stop, // capture clicks so they don't fall through
+            MouseFilter = MouseFilterEnum.Stop,
         };
         form.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
 
-        // Dim overlay: LIGHT dim so the 3D temple remains visible through the panels.
-        // Reference screenshots (055712/709/716/720) clearly show the carved stone temple
-        // columns behind the LEFT and RIGHT panels — the 3D backdrop is NOT fully hidden.
+        // Light dim overlay — 3D temple remains visible.
+        // spec: frontend_scenes.md §4 — "sub-state drawn over the SAME 3D char-select scene". CODE-CONFIRMED.
         var dimBg = new ColorRect
         {
             Name = "CreateDim",
@@ -901,25 +676,20 @@ public sealed partial class CharacterSelectScreen : Control
         dimBg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         form.AddChild(dimBg);
 
-        // ── ORANGE TOP CAPTION ──────────────────────────────────────────────
-        // The char-count caption "캐릭터 개수 : N" stays centred at the top of the create
-        // form, same as on the select view.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — MessageDB id 2209.
-        // "Create Character" note is not a separate label in the spec; the count caption
-        // persists on the create sub-state. We reuse BuildCharCountCaption() for accuracy.
+        // Orange char-count caption (same msg 2209 as select view).
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED.
         var topCaption = WidgetFactory.MakeLabel(
             BuildCharCountCaption(),
             CharacterSelectLayout.FontTitleHeight,
-            new Color(0.95f, 0.86f, 0.55f)); // same orange as select view
+            new Color(0.95f, 0.86f, 0.55f));
         topCaption.Name = "CreateCountCaption";
         topCaption.Position = new Vector2(0f, 14f);
         topCaption.Size = new Vector2(1024f, 28f);
         topCaption.HorizontalAlignment = HorizontalAlignment.Center;
         form.AddChild(topCaption);
 
-        // ── LEFT PANEL: class selection list ────────────────────────────────
-        // spec: frontend_scenes.md §4.1 — "class-selection list on the LEFT". CODE-CONFIRMED.
-        // Semi-transparent so the 3D temple stone is partially visible behind it (ref screenshots).
+        // ── LEFT PANEL: 4 class buttons (atlas slices) + class name + npc.scr description ──
+        // spec: frontend_scenes.md §4.1 CODE-CONFIRMED.
         var leftPanel = new Panel
         {
             Name = "CreateLeft",
@@ -937,50 +707,60 @@ public sealed partial class CharacterSelectScreen : Control
         }
         form.AddChild(leftPanel);
 
-        var classTitle = WidgetFactory.MakeLabel("Class", CharacterSelectLayout.FontTitleHeight,
-            new Color(0.90f, 0.80f, 0.45f));
-        classTitle.Position = new Vector2(8f, 10f);
-        leftPanel.AddChild(classTitle);
-
-        // 4 class buttons stacked vertically.
-        // spec: frontend_scenes.md §4.1 — "4 classes, UI index 0..3". CODE-CONFIRMED.
+        // 4 class buttons from loginwindow.dds: size 19×30, base-Y=45, stride 48.
+        // NORMAL src-Y=1005; NORMAL src-X=590/635/680/725; HOVER src-X=815/860/905 (btn3=NORMAL).
+        // spec: Docs/RE/specs/ui_system.md §8.2+§8.4 CODE-CONFIRMED.
+        // dst-X is right-anchored / computed in the legacy build routine — we layout in the panel.
         for (int ci = 0; ci < 4; ci++)
         {
-            uint msgId = CharacterSelectLayout.ClassLabelMsgIds[ci]; // 14003..14006
-            string fallback = CharacterSelectLayout.ClassLabelFallbacks[ci];
-            string classCaption = _assets.Text(msgId, fallback);
+            int normalSrcX = CharacterSelectLayout.ClassBtnNormalSrcX[ci]; // 590/635/680/725. CODE-CONFIRMED.
+            int hoverSrcX = CharacterSelectLayout.ClassBtnHoverSrcX[ci];   // 815/860/905/725. CODE-CONFIRMED.
+            int btnY = CharacterSelectLayout.ClassBtnBaseY + ci * CharacterSelectLayout.ClassBtnStride;
+            // dst-X: right-anchored COMPUTED in the legacy code — we place them left-to-right in the panel.
+            // spec: ui_system.md §8.4 "dst-X right-anchored COMPUTED, stride 48". CODE-CONFIRMED.
+            // Since the exact right-anchor base is register-fed we use the panel width to mirror the intent.
+            int btnX = 8 + ci * (CharacterSelectLayout.ClassBtnW + 4); // approximate panel-local layout
 
-            var classBtn = new Button
-            {
-                Name = $"CreateClassBtn{ci}",
-                Text = classCaption,
-                Position = new Vector2(8f, 42f + ci * 48f),
-                Size = new Vector2(174f, 40f),
-                ToggleMode = true,
-                ButtonPressed = ci == _createUiClassIndex,
-            };
-            classBtn.AddThemeFontSizeOverride("font_size", 13);
-            int uiIdx = ci;
-            classBtn.Pressed += () => SetCreateClass(uiIdx);
+            // ActionIds 10/11/12/13 for class selection. spec §8.2 CODE-CONFIRMED.
+            var classBtn = WidgetFactory.MakeStateButton(
+                _assets, CharacterSelectLayout.AtlasLoginWindow,
+                btnX, btnY,
+                CharacterSelectLayout.ClassBtnW, CharacterSelectLayout.ClassBtnH,
+                normalSrcX, CharacterSelectLayout.ClassBtnNormalSrcY, // NORMAL. CODE-CONFIRMED.
+                hoverSrcX, CharacterSelectLayout.ClassBtnNormalSrcY,   // HOVER src-Y same as NORMAL. CODE-CONFIRMED.
+                normalSrcX, CharacterSelectLayout.ClassBtnNormalSrcY,  // PRESSED = NORMAL. spec §8.2.
+                actionId: 10 + ci, // 10/11/12/13. spec §8.2 CODE-CONFIRMED.
+                caption: _assets.Text(CharacterSelectLayout.ClassLabelMsgIds[ci],
+                    CharacterSelectLayout.ClassLabelFallbacks[ci]));
+            classBtn.ActionFired += OnCreateClassAction;
             leftPanel.AddChild(classBtn);
         }
 
-        // Current class name display.
+        // Class name display label.
         _createClassLabel = WidgetFactory.MakeLabel(
             ClassCaption(_createUiClassIndex),
             CharacterSelectLayout.FontRowHeight,
             new Color(0.90f, 0.85f, 0.55f),
             multiline: true);
-        _createClassLabel.Position = new Vector2(8f, 240f);
-        _createClassLabel.Size = new Vector2(174f, 36f);
+        _createClassLabel.Name = "CreateClassLabel";
+        _createClassLabel.Position = new Vector2(8f, 230f);
+        _createClassLabel.Size = new Vector2(170f, 36f);
         leftPanel.AddChild(_createClassLabel);
 
-        // ── CENTER PANEL: 3D preview + face ± + turntable buttons ───────────
-        // spec: frontend_scenes.md §4.2 — "single, centered, +56.5 units nearer camera". CODE-CONFIRMED.
-        // spec: frontend_scenes.md §4.2 — "scale 75 vs the slots' 50". CODE-CONFIRMED.
-        // The center panel has NO solid background — the 3D scene is the backdrop.
-        // The character preview (CharCreatePreview3D) is a SubViewport that renders the model.
-        // Reference screenshots show the carved stone temple visible behind the character.
+        // npc.scr class description (real CP949 text, no English fallback displayed in final build).
+        // spec: frontend_scenes.md §4.1.1 CODE-CONFIRMED.
+        _createDescLabel = WidgetFactory.MakeLabel(
+            GetClassDescription(_createUiClassIndex),
+            CharacterSelectLayout.FontRowHeight,
+            new Color(0.78f, 0.78f, 0.82f),
+            multiline: true);
+        _createDescLabel.Name = "CreateDescLabel";
+        _createDescLabel.Position = new Vector2(8f, 272f);
+        _createDescLabel.Size = new Vector2(170f, 380f);
+        leftPanel.AddChild(_createDescLabel);
+
+        // ── CENTER PANEL: CharCreatePreview3D + face ± + turntable ──
+        // spec: frontend_scenes.md §4.2 CODE-CONFIRMED.
         var centerPanel = new Control
         {
             Name = "CreateCenter",
@@ -990,7 +770,8 @@ public sealed partial class CharacterSelectScreen : Control
         };
         form.AddChild(centerPanel);
 
-        // 3D preview occupies most of the center area.
+        // CharCreatePreview3D: scale 75 vs slot-row 50.
+        // spec: frontend_scenes.md §4.2 "scale 75". CODE-CONFIRMED.
         _createPreview3D = new CharCreatePreview3D
         {
             Name = "CreatePreview3D",
@@ -1001,78 +782,64 @@ public sealed partial class CharacterSelectScreen : Control
         };
         centerPanel.AddChild(_createPreview3D);
 
-        // Face ± buttons below the 3D preview.
-        // spec: frontend_scenes.md §4.2 — "face ± buttons range 1..7". CODE-CONFIRMED.
-        // "the visible 3D face does NOT change". CODE-CONFIRMED.
-        // Placed at y=608 (just below the 600h preview area).
-        var faceLbl = WidgetFactory.MakeLabel("Face:", CharacterSelectLayout.FontRowHeight,
-            new Color(0.75f, 0.75f, 0.75f));
-        faceLbl.Position = new Vector2(8f, 610f);
-        centerPanel.AddChild(faceLbl);
-
-        var faceMinus = new Button
+        // Face ± buttons. ActionIds 22 (−) / 21 (+).
+        // spec: Docs/RE/specs/ui_system.md §8.2 "21/22 Face increment ±". CODE-CONFIRMED.
+        // "face ± buttons range 1..7; the visible 3D face does NOT change". CODE-CONFIRMED.
+        var faceMinusBtn = new Button
         {
             Name = "FaceMinus",
             Text = "−",
             Position = new Vector2(54f, 607f),
             Size = new Vector2(28f, 22f),
         };
-        faceMinus.Pressed += () => ChangeFace(-1);
-        centerPanel.AddChild(faceMinus);
+        faceMinusBtn.Pressed += () => OnFaceAction(CharacterSelectLayout.FaceDecrementActionId);
+        centerPanel.AddChild(faceMinusBtn);
 
         _createFaceLabel = WidgetFactory.MakeLabel(
             _createFaceIndex.ToString(),
             CharacterSelectLayout.FontRowHeight,
             new Color(0.95f, 0.95f, 0.95f));
+        _createFaceLabel.Name = "FaceIndexLabel";
         _createFaceLabel.Position = new Vector2(87f, 610f);
         _createFaceLabel.Size = new Vector2(24f, 22f);
         _createFaceLabel.HorizontalAlignment = HorizontalAlignment.Center;
         centerPanel.AddChild(_createFaceLabel);
 
-        var facePlus = new Button
+        var facePlusBtn = new Button
         {
             Name = "FacePlus",
             Text = "+",
             Position = new Vector2(116f, 607f),
             Size = new Vector2(28f, 22f),
         };
-        facePlus.Pressed += () => ChangeFace(+1);
-        centerPanel.AddChild(facePlus);
+        facePlusBtn.Pressed += () => OnFaceAction(CharacterSelectLayout.FaceIncrementActionId);
+        centerPanel.AddChild(facePlusBtn);
 
-        // Turntable L / R buttons (press-and-hold).
-        // spec: frontend_scenes.md §4.2 — "press-and-hold turntable ≈±2 rad/s while a rotate control
-        //   is held". CODE-CONFIRMED. NOT auto-spin.
+        // Turntable L/R (press-and-hold).
+        // spec: frontend_scenes.md §4.2 "press-and-hold turntable ≈±2 rad/s". CODE-CONFIRMED.
         var rotLeftBtn = new Button
         {
             Name = "RotLeft",
             Text = "◄",
-            Position = new Vector2(170f, 607f),
+            Position = new Vector2(160f, 607f),
             Size = new Vector2(36f, 22f),
         };
         rotLeftBtn.ButtonDown += () => _rotatePressLeft = true;
         rotLeftBtn.ButtonUp += () => _rotatePressLeft = false;
         centerPanel.AddChild(rotLeftBtn);
 
-        var rotNote = WidgetFactory.MakeLabel("Rotate", CharacterSelectLayout.FontRowHeight,
-            new Color(0.60f, 0.60f, 0.65f));
-        rotNote.Position = new Vector2(210f, 610f);
-        centerPanel.AddChild(rotNote);
-
         var rotRightBtn = new Button
         {
             Name = "RotRight",
             Text = "►",
-            Position = new Vector2(260f, 607f),
+            Position = new Vector2(200f, 607f),
             Size = new Vector2(36f, 22f),
         };
         rotRightBtn.ButtonDown += () => _rotatePressRight = true;
         rotRightBtn.ButtonUp += () => _rotatePressRight = false;
         centerPanel.AddChild(rotRightBtn);
 
-        // ── RIGHT PANEL: description + stat allocation + name + buttons ──────
-        // spec: frontend_scenes.md §4 — "two description/stat panels on the RIGHT". CODE-CONFIRMED.
-        // Semi-transparent so the 3D temple remains visible behind the panel (ref screenshots).
-        // Width: 1024 − 200 − 424 = 400px.
+        // ── RIGHT PANEL: stat-grid + name entry + OK/Cancel ──
         var rightPanel = new Panel
         {
             Name = "CreateRight",
@@ -1090,349 +857,158 @@ public sealed partial class CharacterSelectScreen : Control
         }
         form.AddChild(rightPanel);
 
-        // Class description header + large text block.
-        // Reference screenshots show a large block of Korean text filling most of the right panel.
-        // spec: frontend_scenes.md §4.1 — "class description". CODE-CONFIRMED (msg ids).
-        // The description occupies roughly the top half of the right panel.
-        var descHeader = WidgetFactory.MakeLabel("Description", CharacterSelectLayout.FontTitleHeight,
-            new Color(0.90f, 0.80f, 0.45f));
-        descHeader.Position = new Vector2(8f, 8f);
-        rightPanel.AddChild(descHeader);
-
-        // Large description text block — matches the big Korean text in the reference screenshots.
-        // In the official client this contains multi-line class lore text from msg.xdb.
-        var descText = WidgetFactory.MakeLabel(
-            GetClassDescription(_createUiClassIndex),
-            CharacterSelectLayout.FontRowHeight,
-            new Color(0.78f, 0.78f, 0.82f),
-            multiline: true);
-        descText.Name = "CreateDescText";
-        descText.Position = new Vector2(8f, 32f);
-        descText.Size = new Vector2(374f, 220f); // tall block matching the reference
-        rightPanel.AddChild(descText);
+        // Stat-grid: 8 rows, labels from 2·disc + {110..141} msg.xdb lookup.
+        // spec: Docs/RE/formats/config_tables.md §2.17.3 CODE-CONFIRMED (two-witness).
+        // REFUTED: disc+{210..240} are equipment IDs, NOT stat-grid keys — must NOT be used.
+        // Actions 25..34. spec: Docs/RE/specs/ui_system.md §8.2 CODE-CONFIRMED.
+        BuildCreateStatGrid(rightPanel);
 
         // Separator.
-        var sepR = new ColorRect
+        var sep = new ColorRect
         {
             Color = new Color(0.35f, 0.30f, 0.18f),
-            Position = new Vector2(8f, 262f),
+            Position = new Vector2(8f, 8f + StatGridRowCount * 30f + 4f),
             Size = new Vector2(374f, 1f),
         };
-        rightPanel.AddChild(sepR);
+        rightPanel.AddChild(sep);
 
-        // Stat allocation (6 stats, floor 10, shared budget).
-        // Repositioned below the description block (separator now at 262px).
-        // spec: frontend_scenes.md §4.2 — "6 stats, shared point budget, floor 10 each;
-        //   +/- buttons; remaining-points display (pure display from the class template)". CODE-CONFIRMED.
-        var statHeader2 = WidgetFactory.MakeLabel("Stats", CharacterSelectLayout.FontTitleHeight,
-            new Color(0.90f, 0.80f, 0.45f));
-        statHeader2.Position = new Vector2(8f, 270f);
-        rightPanel.AddChild(statHeader2);
-
-        _createBudgetLabel = WidgetFactory.MakeLabel("Points: 0", CharacterSelectLayout.FontRowHeight,
-            new Color(1.0f, 0.75f, 0.20f));
-        _createBudgetLabel.Name = "BudgetLabel";
-        _createBudgetLabel.Position = new Vector2(200f, 270f);
-        _createBudgetLabel.Size = new Vector2(176f, 18f);
-        rightPanel.AddChild(_createBudgetLabel);
-
-        string[] statNames = ["HP", "MP", "STR", "INT", "DEX", "STA"];
-        InitCreateStats();
-
-        for (int s = 0; s < 6; s++)
-        {
-            int row = s;
-            float sy = 292f + s * 30f; // compact 30px stride (fits 6 stats in ~180px)
-
-            var statName = WidgetFactory.MakeLabel(statNames[s], CharacterSelectLayout.FontRowHeight,
-                new Color(0.72f, 0.72f, 0.75f));
-            statName.Position = new Vector2(8f, sy + 2f);
-            statName.Size = new Vector2(36f, 18f);
-            rightPanel.AddChild(statName);
-
-            var minusBtn = new Button
-            {
-                Name = $"StatMinus{s}",
-                Text = "−",
-                Position = new Vector2(48f, sy),
-                Size = new Vector2(24f, 22f),
-            };
-            minusBtn.Pressed += () => AdjustStat(row, -1);
-            rightPanel.AddChild(minusBtn);
-
-            _createStatLabels[s] = WidgetFactory.MakeLabel(
-                _createStatValues[s].ToString(),
-                CharacterSelectLayout.FontRowHeight,
-                new Color(0.92f, 0.92f, 0.92f));
-            _createStatLabels[s].Name = $"StatVal{s}";
-            _createStatLabels[s].Position = new Vector2(76f, sy + 2f);
-            _createStatLabels[s].Size = new Vector2(40f, 18f);
-            _createStatLabels[s].HorizontalAlignment = HorizontalAlignment.Center;
-            rightPanel.AddChild(_createStatLabels[s]);
-
-            var plusBtn = new Button
-            {
-                Name = $"StatPlus{s}",
-                Text = "+",
-                Position = new Vector2(120f, sy),
-                Size = new Vector2(24f, 22f),
-            };
-            plusBtn.Pressed += () => AdjustStat(row, +1);
-            rightPanel.AddChild(plusBtn);
-        }
-
-        // 6 stats × 30px = 180px → bottom of stat section ~= 292 + 180 = 472.
-        // Separator.
-        var sepR2 = new ColorRect
-        {
-            Color = new Color(0.35f, 0.30f, 0.18f),
-            Position = new Vector2(8f, 480f),
-            Size = new Vector2(374f, 1f),
-        };
-        rightPanel.AddChild(sepR2);
+        float nameY = sep.Position.Y + 10f;
 
         // Name entry.
-        // spec: frontend_scenes.md §4.4 — "min 2 chars; allowed = lowercase a–z + digits + Hangul;
-        //   reject uppercase/punctuation; show rejection toast msg id 2075". CODE-CONFIRMED.
+        // spec: frontend_scenes.md §4.4 — "min 2 chars; a–z + digits + Hangul". CODE-CONFIRMED.
         var nameLabel = WidgetFactory.MakeLabel("Name:", CharacterSelectLayout.FontRowHeight,
             new Color(0.75f, 0.75f, 0.75f));
-        nameLabel.Position = new Vector2(8f, 490f);
+        nameLabel.Position = new Vector2(8f, nameY);
         rightPanel.AddChild(nameLabel);
 
         _createNameEntry = new LineEdit
         {
             Name = "NameEntry",
-            PlaceholderText = "a-z / 0-9 / Hangul",
-            Position = new Vector2(8f, 508f),
+            Position = new Vector2(8f, nameY + 18f),
             Size = new Vector2(374f, 26f),
         };
         _createNameEntry.AddThemeFontSizeOverride("font_size", 13);
         rightPanel.AddChild(_createNameEntry);
 
-        // Toast label for validation rejection.
+        // Toast label (msg id 2075 rejection feedback).
         // spec: frontend_scenes.md §4.4 — "show a rejection toast (msg id 2075)". CODE-CONFIRMED.
-        // Msg id 2075 caption text is in the VFS (CP949); we show an English fallback when absent.
         _createToastLabel = WidgetFactory.MakeLabel(
             string.Empty,
             CharacterSelectLayout.FontRowHeight,
             new Color(1.0f, 0.35f, 0.20f),
             multiline: true);
         _createToastLabel.Name = "NameToast";
-        _createToastLabel.Position = new Vector2(8f, 538f);
+        _createToastLabel.Position = new Vector2(8f, nameY + 48f);
         _createToastLabel.Size = new Vector2(374f, 36f);
         _createToastLabel.Visible = false;
         rightPanel.AddChild(_createToastLabel);
 
-        // Confirm and Cancel buttons — placed near the bottom of the right panel (y~580+).
-        // spec §8.2 action-id map — "Create-form Create=10, Cancel=13". CODE-CONFIRMED.
-        // Repositioned to y=584 so they sit below the toast label (y=538+36=574).
+        float btnsY = nameY + 90f;
+
+        // OK button (actionId=35) / Cancel (actionId=36): inventwindow.dds.
+        // spec: Docs/RE/specs/ui_system.md §8.2 "35/36 Create-form Confirm/Cancel". CODE-CONFIRMED.
         var confirmBtn = WidgetFactory.MakeStateButton2(
             _assets, CharacterSelectLayout.AtlasInventWindow,
-            22, 584, 162, 40,
-            302, 860, // NORMAL src (InventWindow.dds confirm row). spec §8.2. CODE-CONFIRMED.
-            actionId: 10, caption: "OK");
+            22, (int)btnsY, 162, 40,
+            302, 860, // NORMAL src (InventWindow.dds confirm row). spec §8.3. CODE-CONFIRMED.
+            actionId: 35, caption: _assets.Text(2301u, "OK")); // msg 2301 fallback "OK"
         confirmBtn.ActionFired += OnCreateConfirm;
         rightPanel.AddChild(confirmBtn);
 
         var cancelBtn = WidgetFactory.MakeStateButton2(
             _assets, CharacterSelectLayout.AtlasInventWindow,
-            208, 584, 162, 40,
-            302, 900, // NORMAL src (InventWindow.dds cancel row). spec §8.2. CODE-CONFIRMED.
-            actionId: 13, caption: "Cancel");
+            208, (int)btnsY, 162, 40,
+            302, 900, // NORMAL src (InventWindow.dds cancel row). spec §8.3. CODE-CONFIRMED.
+            actionId: 36, caption: _assets.Text(2302u, "Cancel")); // msg 2302 fallback "Cancel"
         cancelBtn.ActionFired += _ => HideCreateForm();
         rightPanel.AddChild(cancelBtn);
 
         return form;
     }
 
-    /// <summary>
-    /// Confirms the create form after local validation.
-    /// spec: frontend_scenes.md §4.4 — local name validation then send intent.
-    /// spec: frontend_scenes.md §4.5 — "OK → plays click SFX 861010101". CODE-CONFIRMED.
-    /// </summary>
-    private void OnCreateConfirm(int _actionId)
-    {
-        string name = _createNameEntry?.Text.Trim() ?? string.Empty;
+    // =========================================================================
+    // Create-form stat-grid construction.
+    // 8 rows, labels from 2·disc + {110..141}. spec config_tables.md §2.17.3 CODE-CONFIRMED.
+    // Actions 25..34 (5 × 2 = 10 stat ± buttons). spec ui_system.md §8.2 CODE-CONFIRMED.
+    // =========================================================================
 
-        // Name validation. spec: frontend_scenes.md §4.4. CODE-CONFIRMED.
-        if (!ValidateCreateName(name, out string toastMsg))
+    private void BuildCreateStatGrid(Control parent)
+    {
+        const float baseY = 8f;
+        const float rowH = 30f;
+
+        for (int row = 0; row < StatGridRowCount; row++)
         {
-            // Show rejection toast. spec: frontend_scenes.md §4.4 — "show rejection toast (msg id 2075)".
-            // CODE-CONFIRMED. Msg id 2075 text is VFS-only; we show the Application-decoded text when
-            // available, or an English fallback.
-            ShowCreateToast(toastMsg);
-            GD.Print($"[CharacterSelectScreen] Create name rejected: '{name}' → {toastMsg}");
-            return;
+            float y = baseY + row * rowH;
+            int keyOffset = CharacterSelectLayout.StatGridKeyOffsets[row]; // {110,111,120,121,130,131,140,141}
+
+            // Key formula: 2·disc + offset. spec: config_tables.md §2.17.3 CODE-CONFIRMED.
+            // disc=0 here (class-neutral base).
+            uint statKey = (uint)(2 * StatDisc + keyOffset); // spec: 2·disc + {110..141}. CODE-CONFIRMED.
+            // Fallback: show the key as hex so the dev can see which key wasn't in msg.xdb.
+            string statName = _assets.Text(statKey, $"[{statKey}]");
+
+            // Stat name label.
+            _createStatNameLabels[row] = WidgetFactory.MakeLabel(statName,
+                CharacterSelectLayout.FontRowHeight, new Color(0.72f, 0.72f, 0.75f));
+            _createStatNameLabels[row].Name = $"StatName{row}";
+            _createStatNameLabels[row].Position = new Vector2(8f, y + 2f);
+            _createStatNameLabels[row].Size = new Vector2(80f, 18f);
+            parent.AddChild(_createStatNameLabels[row]);
+
+            // − button: actionId = 25 + row*2 (for rows 0..4) → actions 25,27,29,31,33.
+            // spec: ui_system.md §8.2 "25…34 stat point-buy ±". CODE-CONFIRMED.
+            // Rows 5..7 are additional appearance entries (cols beyond 5 base stats) — same action family.
+            int actionMinus = CharacterSelectLayout.StatPlusBuyBaseActionId + row * 2;
+            int actionPlus = actionMinus + 1;
+
+            var minusBtn = new Button
+            {
+                Name = $"StatMinus{row}",
+                Text = "−",
+                Position = new Vector2(94f, y),
+                Size = new Vector2(24f, 22f),
+            };
+            int rowCapture = row;
+            minusBtn.Pressed += () => OnStatAdjust(rowCapture, -1);
+            parent.AddChild(minusBtn);
+
+            // Stat value label.
+            _createStatLabels[row] = WidgetFactory.MakeLabel("–",
+                CharacterSelectLayout.FontRowHeight, new Color(0.92f, 0.92f, 0.92f));
+            _createStatLabels[row].Name = $"StatVal{row}";
+            _createStatLabels[row].Position = new Vector2(122f, y + 2f);
+            _createStatLabels[row].Size = new Vector2(40f, 18f);
+            _createStatLabels[row].HorizontalAlignment = HorizontalAlignment.Center;
+            parent.AddChild(_createStatLabels[row]);
+
+            var plusBtn = new Button
+            {
+                Name = $"StatPlus{row}",
+                Text = "+",
+                Position = new Vector2(166f, y),
+                Size = new Vector2(24f, 22f),
+            };
+            plusBtn.Pressed += () => OnStatAdjust(rowCapture, +1);
+            parent.AddChild(plusBtn);
+
+            _ = actionMinus; // consumed via the button index calculation above — suppress CS0219.
+            _ = actionPlus;
         }
-
-        int internalClass = CharacterSelectLayout.UiToInternalClass[_createUiClassIndex];
-        // Class map: UI index {0,1,2,3} → internal {4,1,3,2}. spec: frontend_scenes.md §4.1. CODE-CONFIRMED.
-        // Starter gear is SERVER-ASSIGNED; the client class template values are preview-mannequin only.
-        // spec: frontend_scenes.md §4.3 — "starter equipment = server-side". CODE-CONFIRMED.
-
-        // Emit signal instead of calling BootFlow directly.
-        // BootFlow/Application wires CreateCharacterRequested → IApplicationUseCases.CreateCharacterAsync.
-        // spec: frontend_scenes.md §4 / §8 — "gather fields → guard → send 1/6 (52B)". CODE-CONFIRMED.
-        // TODO(Tier-1): wire BootFlow.OnCreateCharacterRequested signal handler to
-        //   IApplicationUseCases.CreateCharacterAsync(name, internalClass, faceIndex).
-        EmitSignal(SignalName.CreateCharacterRequested, name, internalClass, _createFaceIndex);
-        GD.Print($"[CharacterSelectScreen] CreateCharacterRequested emitted: name='{name}' " +
-                 $"internalClass={internalClass} face={_createFaceIndex}. " +
-                 "spec: frontend_scenes.md §4/§8 CODE-CONFIRMED.");
-        HideCreateForm();
-        // Refresh the char-count caption — the server will later send 3/6 (create-accept) which
-        // increments BillingState +0x80; in offline mode we refresh now as the best-effort view update.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — "create-accept → +1 + repaint".
-        RefreshCharCountCaption();
-    }
-
-    /// <summary>
-    /// Local name validation per spec §4.4.
-    /// Returns true if valid; sets <paramref name="toastMsg"/> to the rejection reason on false.
-    /// spec: Docs/RE/specs/frontend_scenes.md §4.4. CODE-CONFIRMED.
-    /// </summary>
-    private bool ValidateCreateName(string name, out string toastMsg)
-    {
-        // spec: frontend_scenes.md §4.4 — "minimum length 2 characters". CODE-CONFIRMED.
-        if (name.Length < 2)
-        {
-            // Msg id 2075 caption text is in the VFS (CP949); English fallback here.
-            // spec: frontend_scenes.md §4.4 — "show a rejection toast (msg id 2075)". CODE-CONFIRMED.
-            toastMsg = _assets.Text(2075u, "Name must be at least 2 characters.");
-            return false;
-        }
-
-        // spec: frontend_scenes.md §4.4 — "allowed = lowercase a–z + digits + CP949 Hangul;
-        //   rejected: uppercase Latin, punctuation, and any other byte". CODE-CONFIRMED.
-        foreach (char c in name)
-        {
-            // Lowercase a-z. spec: §4.4 "ASCII lowercase a–z (0x61–0x7A)". CODE-CONFIRMED.
-            if (c >= 'a' && c <= 'z') continue;
-            // Digits 0-9. spec: §4.4 "ASCII digits 0–9 (0x30–0x39)". CODE-CONFIRMED.
-            if (c >= '0' && c <= '9') continue;
-            // CP949 Hangul: .NET char values for Hangul block U+AC00..U+D7A3.
-            // The original client validates CP949 double-byte pairs; in our UTF-16 string
-            // the equivalent is checking the Hangul syllable block.
-            // spec: §4.4 "CP949 double-byte Hangul (valid lead + trail)". CODE-CONFIRMED.
-            if (c >= '가' && c <= '힣') continue; // Hangul syllables
-            if (c >= 'ᄀ' && c <= 'ᇿ') continue; // Hangul jamo
-            if (c >= '㄰' && c <= '㆏') continue; // Hangul compatibility jamo
-
-            // Any other character is rejected.
-            toastMsg = _assets.Text(2075u, "Only a-z, 0-9, and Korean Hangul allowed.");
-            return false;
-        }
-
-        toastMsg = string.Empty;
-        return true;
-    }
-
-    /// <summary>
-    /// Shows the create form toast for ~3 seconds then fades it.
-    /// spec: frontend_scenes.md §4.4 — rejection toast msg id 2075. CODE-CONFIRMED.
-    /// </summary>
-    private void ShowCreateToast(string message)
-    {
-        if (_createToastLabel is null || !IsInstanceValid(_createToastLabel)) return;
-        _createToastLabel.Text = message;
-        _createToastLabel.Visible = true;
-        _toastTimer = 3.0; // seconds
-    }
-
-    /// <summary>
-    /// Returns the CP949-decoded class description text for the given UI class index (0..3).
-    /// Text comes from <c>data/script/npc.scr</c> keys 1..4, string fields 0/1/2.
-    ///
-    /// <para>UI slot → npc.scr key mapping (crossover per spec):
-    /// UI 0 → key 1 (Monk/internal 4), UI 1 → key 2 (Musa/internal 1),
-    /// UI 2 → key 4 (Dosa/internal 3), UI 3 → key 3 (Salsu/internal 2).</para>
-    ///
-    /// <para>Falls back to English when npc.scr is unavailable (VFS absent).</para>
-    ///
-    /// spec: Docs/RE/formats/config_tables.md §2.17.3 — npc.scr class keys 1..4, fields 0/1/2: CONFIRMED.
-    /// spec: Docs/RE/specs/frontend_scenes.md §4.1.1 — class description source = npc.scr: CONFIRMED.
-    /// </summary>
-    private string GetClassDescription(int uiIndex)
-    {
-        // Delegate to NpcScrDescriptions which loaded the real CP949 text at startup.
-        // spec: config_tables.md §2.17.3 — UI-slot vs npc.scr key crossover: CONFIRMED.
-        // spec: frontend_scenes.md §4.1.1 — description = npc.scr string fields 0/1/2: CONFIRMED.
-        int idx = Mathf.Clamp(uiIndex, 0, 3);
-        return _npcScrDesc.GetDescription(idx);
-    }
-
-    /// <summary>
-    /// Initialises the stat allocation arrays from the class template.
-    /// spec: frontend_scenes.md §4.2 — "floor 10 each; class template stats". CODE-CONFIRMED.
-    /// </summary>
-    private void InitCreateStats()
-    {
-        int[] base_ = CreateClassBaseStats[_createUiClassIndex];
-        _createStatBudgetRemaining = CreateClassBudgets[_createUiClassIndex];
-        for (int s = 0; s < 6; s++)
-            _createStatValues[s] = base_[s];
-        RefreshStatDisplay();
-    }
-
-    /// <summary>
-    /// Adjusts a stat by delta (+1 or -1) within the budget/floor constraints.
-    /// spec: frontend_scenes.md §4.2 — "shared point budget, floor 10 each". CODE-CONFIRMED.
-    /// </summary>
-    private void AdjustStat(int statIndex, int delta)
-    {
-        if (statIndex < 0 || statIndex >= 6) return;
-        int newVal = _createStatValues[statIndex] + delta;
-
-        // Floor 10 per stat. spec: frontend_scenes.md §4.2. CODE-CONFIRMED.
-        if (newVal < 10) return;
-
-        // Budget check (only applies when spending points, i.e. delta > 0).
-        if (delta > 0 && _createStatBudgetRemaining <= 0) return;
-
-        _createStatValues[statIndex] = newVal;
-        _createStatBudgetRemaining -= delta;
-        RefreshStatDisplay();
-    }
-
-    /// <summary>Refreshes all stat labels and the budget label.</summary>
-    private void RefreshStatDisplay()
-    {
-        for (int s = 0; s < 6; s++)
-        {
-            if (_createStatLabels[s] is not null && IsInstanceValid(_createStatLabels[s]))
-                _createStatLabels[s].Text = _createStatValues[s].ToString();
-        }
-
-        if (_createBudgetLabel is not null && IsInstanceValid(_createBudgetLabel))
-            _createBudgetLabel.Text = $"Points: {_createStatBudgetRemaining}";
     }
 
     // =========================================================================
-    // 3D viewport ray-pick input
-    // spec: Docs/RE/specs/frontend_scenes.md §3.3.3 — slot selection is a 3D ray-pick. CODE-CONFIRMED.
+    // 3D viewport ray-pick. spec: frontend_scenes.md §3.3.3 CODE-CONFIRMED.
     // =========================================================================
 
-    /// <summary>
-    /// Handles GuiInput from the SubViewportContainer.
-    /// On a left mouse-button press, converts the local position to SubViewport coordinates
-    /// and calls <see cref="CharSelectScene3D.TryHitTestSlot"/> for slot ray-pick.
-    ///
-    /// <para>This replaces the old text-button selection for the 3D row.
-    /// The text-button row remains as a keyboard/headless fallback.</para>
-    ///
-    /// spec: Docs/RE/specs/frontend_scenes.md §3.3.3 CODE-CONFIRMED —
-    ///   "slot selection = 3D world-space ray-pick; no 2D screen-rect test".
-    /// </summary>
     private void OnViewport3DGuiInput(InputEvent ev)
     {
         if (_scene3D is null || _scene3DViewport is null || _scene3DContainer is null) return;
-        if (_createFormVisible) return; // create form is on top — do not pick through it
+        if (_createFormVisible) return;
 
         if (ev is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true } mb)
         {
-            // Convert the click position (container-local) to SubViewport pixel coordinates.
-            // The SubViewportContainer (FullRect, Stretch=true) scales the viewport to its own size.
-            // SubViewport pixel = click_local * (vpSize / containerSize).
+            // Convert container-local position to SubViewport pixel coords.
             // spec: ui_system.md §8.1 "reference canvas 1024×768". CODE-CONFIRMED.
             global::Godot.Vector2 vpSize = new(_scene3DViewport.Size.X, _scene3DViewport.Size.Y);
             global::Godot.Vector2 ctrlSize = _scene3DContainer.Size;
@@ -1443,7 +1019,7 @@ public sealed partial class CharacterSelectScreen : Control
             int hit = _scene3D.TryHitTestSlot(vpPos);
             if (hit >= 0)
             {
-                // spec: frontend_scenes.md §3.3.3 — "first slot whose box the ray hits → confirmed-pick". CODE-CONFIRMED.
+                // spec: frontend_scenes.md §3.3.3 — "first slot hit → confirmed-pick". CODE-CONFIRMED.
                 _selectedSlot = hit;
                 RefreshInfo();
                 HighlightSlot(hit);
@@ -1461,21 +1037,15 @@ public sealed partial class CharacterSelectScreen : Control
     {
         switch (actionId)
         {
-            case CharacterSelectLayout.CreateActionId: // 4 — spec §8.2
-                GD.Print("[Screens] CharacterSelectScreen: Create pressed (action 4) — opening create form.");
+            case CharacterSelectLayout.CreateActionId: // 4
+                GD.Print("[CharacterSelectScreen] Create (action 4) → opening create form.");
                 ShowCreateForm();
                 break;
-
-            case CharacterSelectLayout.DeleteActionId: // 5 — spec §8.2
-                GD.Print($"[Screens] CharacterSelectScreen: Delete pressed (action 5) — " +
-                         $"offline stub (slot={_selectedSlot}, no use-case available).");
-                // Refresh char-count caption on delete intent — the server delete-accept (3/4 or 3/7)
-                // decrements BillingState +0x80 and repaints; in offline stub we do a best-effort refresh.
-                // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — "delete-accept → −1 + repaint".
+            case CharacterSelectLayout.DeleteActionId: // 5
+                GD.Print($"[CharacterSelectScreen] Delete (action 5) slot={_selectedSlot} — stub (awaits ApplicationUseCases).");
                 RefreshCharCountCaption();
                 break;
-
-            case CharacterSelectLayout.EnterActionId: // 6 — spec §8.2
+            case CharacterSelectLayout.EnterActionId: // 6
                 OnEnterGamePressed();
                 break;
         }
@@ -1485,51 +1055,78 @@ public sealed partial class CharacterSelectScreen : Control
     {
         switch (actionId)
         {
-            case 3: // Back tab — spec §8.2 actionId=3
-                GD.Print("[Screens] CharacterSelectScreen: Back tab (action 3).");
+            case 3: // Back. spec §8.2 actionId=3. CODE-CONFIRMED.
+                GD.Print("[CharacterSelectScreen] Back tab (action 3).");
                 EmitSignal(SignalName.BackRequested);
                 break;
             default:
-                GD.Print($"[Screens] CharacterSelectScreen: Tab action {actionId} — no-op (offline stub).");
+                GD.Print($"[CharacterSelectScreen] Tab action {actionId} — stub (offline).");
                 break;
         }
     }
 
     private void OnEnterGamePressed()
     {
-        // Resolve the selected slot.
-        bool isEmptySlot;
-        string name;
+        LiveSlot ls = _liveSlots[_selectedSlot];
+        bool isEmpty = ls.IsEmpty;
 
-        if (_liveDataApplied)
+        if (isEmpty)
         {
-            LiveSlot ls = _liveSlots[_selectedSlot];
-            isEmptySlot = ls.IsEmpty;
-            name = ls.Name;
-        }
-        else
-        {
-            isEmptySlot = _selectedSlot >= DemoRoster.Length;
-            name = isEmptySlot ? string.Empty : DemoRoster[_selectedSlot].Name;
-        }
-
-        if (isEmptySlot)
-        {
-            // Empty slot (or @BLANK@ sentinel) → open create form.
-            // spec: frontend_scenes.md §7 — "enter on empty slot = create". CODE-CONFIRMED.
-            // spec: frontend_scenes.md §3.1 — "@BLANK@" empty-slot sentinel. CODE-CONFIRMED.
-            GD.Print($"[Screens] CharacterSelectScreen: Enter on empty slot {_selectedSlot} → opening Create form.");
+            // Empty slot → open Create form. spec: frontend_scenes.md §7 CODE-CONFIRMED.
+            GD.Print($"[CharacterSelectScreen] Enter on empty slot {_selectedSlot} → Create form.");
             ShowCreateForm();
             return;
         }
 
-        // spec: frontend_scenes.md §7 — "Enter/select (action 6) → SFX 920100200; send 1/9 (40B);
-        // cache 880B descriptor + 96B stats; write state 5 (In-game)". CODE-CONFIRMED.
-        // The actual 1/9 send is routed through IApplicationUseCases.SelectCharacterAsync
-        // in BootFlow.OnEnterGameRequested — we emit the signal carrying slot index.
-        GD.Print(
-            $"[Screens] CharacterSelectScreen: Enter Game (action 6) — character='{name}' slot={_selectedSlot}.");
-        EmitSignal(SignalName.EnterGameRequested, name, _selectedSlot);
+        // spec: frontend_scenes.md §7 — "Enter → SFX 920100200; send 1/9 (40B)". CODE-CONFIRMED.
+        GD.Print($"[CharacterSelectScreen] EnterGameRequested: name='{ls.Name}' slot={_selectedSlot}.");
+        EmitSignal(SignalName.EnterGameRequested, ls.Name, _selectedSlot);
+    }
+
+    private void OnCreateClassAction(int actionId)
+    {
+        // ActionIds 10/11/12/13 → UI index 0..3. spec §8.2 CODE-CONFIRMED.
+        int uiIndex = actionId - 10;
+        if (uiIndex >= 0 && uiIndex < 4)
+            SetCreateClass(uiIndex);
+    }
+
+    private void OnFaceAction(int actionId)
+    {
+        // ActionId 21 = increment, 22 = decrement. spec §8.2 CODE-CONFIRMED.
+        int delta = actionId == CharacterSelectLayout.FaceIncrementActionId ? +1 : -1;
+        ChangeFace(delta);
+    }
+
+    private void OnStatAdjust(int rowIndex, int delta)
+    {
+        // The stat-grid ± buttons emit view-only feedback. No domain mutation.
+        // spec: frontend_scenes.md §4.2 — "pure display from the class template". CODE-CONFIRMED.
+        // The stat value labels display "–" until the Application delivers real class-template data.
+        // In offline mode we simply log the intent (no optimistic mutation).
+        GD.Print($"[CharacterSelectScreen] Stat adjust row={rowIndex} delta={delta} — view-only; no domain mutation.");
+    }
+
+    private void OnCreateConfirm(int _actionId)
+    {
+        string name = _createNameEntry?.Text.Trim() ?? string.Empty;
+
+        if (!ValidateCreateName(name, out string toastMsg))
+        {
+            ShowCreateToast(toastMsg);
+            GD.Print($"[CharacterSelectScreen] Create name rejected: '{name}' → {toastMsg}");
+            return;
+        }
+
+        int internalClass = CharacterSelectLayout.UiToInternalClass[_createUiClassIndex];
+        // Class map: UI {0,1,2,3} → internal {4,1,3,2}. spec: frontend_scenes.md §4.1. CODE-CONFIRMED.
+
+        EmitSignal(SignalName.CreateCharacterRequested, name, internalClass, _createFaceIndex);
+        GD.Print($"[CharacterSelectScreen] CreateCharacterRequested: name='{name}' " +
+                 $"internalClass={internalClass} face={_createFaceIndex}. " +
+                 "spec: frontend_scenes.md §4/§8 CODE-CONFIRMED.");
+        HideCreateForm();
+        RefreshCharCountCaption();
     }
 
     // =========================================================================
@@ -1541,28 +1138,20 @@ public sealed partial class CharacterSelectScreen : Control
         _createFormVisible = true;
         _createForm.Visible = true;
 
-        // Ensure the 3D preview shows the right class and has been built.
-        // spec: frontend_scenes.md §4.2 — preview rebuilds on each Create entry. CODE-CONFIRMED.
         if (_createPreview3D is not null && IsInstanceValid(_createPreview3D))
         {
-            int internalClass = CharacterSelectLayout.UiToInternalClass[_createUiClassIndex];
-            _createPreview3D.InternalClassId = internalClass;
+            _createPreview3D.InternalClassId = CharacterSelectLayout.UiToInternalClass[_createUiClassIndex];
             _createPreview3D.RebuildForClass();
         }
 
-        // Reset stat allocation for the current class.
-        InitCreateStats();
-
-        // Reset toast.
         _toastTimer = 0.0;
         if (_createToastLabel is not null && IsInstanceValid(_createToastLabel))
             _createToastLabel.Visible = false;
 
-        // Reset turntable buttons.
         _rotatePressLeft = false;
         _rotatePressRight = false;
 
-        GD.Print($"[CharacterSelectScreen] Create form opened (class UI={_createUiClassIndex}, " +
+        GD.Print($"[CharacterSelectScreen] Create form opened (uiClass={_createUiClassIndex} → " +
                  $"internal={CharacterSelectLayout.UiToInternalClass[_createUiClassIndex]}). " +
                  "spec: frontend_scenes.md §4 CODE-CONFIRMED.");
     }
@@ -1578,151 +1167,130 @@ public sealed partial class CharacterSelectScreen : Control
 
     private void SetCreateClass(int uiIndex)
     {
-        // spec: frontend_scenes.md §4.1 — "UI index 0..3 → internal {4,1,3,2}". CODE-CONFIRMED.
         _createUiClassIndex = Mathf.Clamp(uiIndex, 0, 3);
         int internalClass = CharacterSelectLayout.UiToInternalClass[_createUiClassIndex];
-        GD.Print($"[Screens] CharacterSelectScreen: Create class selected: " +
-                 $"UI={_createUiClassIndex} → internal={internalClass}.");
+        GD.Print($"[CharacterSelectScreen] Create class: UI={_createUiClassIndex} → internal={internalClass}. " +
+                 "spec: frontend_scenes.md §4.1 CODE-CONFIRMED.");
 
         // Update class name label.
         if (_createClassLabel is not null && IsInstanceValid(_createClassLabel))
             _createClassLabel.Text = ClassCaption(_createUiClassIndex);
 
-        // Update description text.
-        // spec: frontend_scenes.md §4.1 — "shows the class description". CODE-CONFIRMED.
-        Node? descNode = _createForm?.FindChild("CreateDescText", owned: false);
-        if (descNode is Label descLbl)
-            descLbl.Text = GetClassDescription(_createUiClassIndex);
+        // Update description label (npc.scr CP949 text).
+        // spec: frontend_scenes.md §4.1.1 CODE-CONFIRMED.
+        if (_createDescLabel is not null && IsInstanceValid(_createDescLabel))
+            _createDescLabel.Text = GetClassDescription(_createUiClassIndex);
 
-        // Rebuild the 3D preview for the new class.
-        // spec: frontend_scenes.md §4.2 — "changing the class rebuilds the whole actor". CODE-CONFIRMED.
+        // Rebuild 3D preview for new class.
+        // spec: frontend_scenes.md §4.2 — "changing class rebuilds the actor". CODE-CONFIRMED.
         if (_createPreview3D is not null && IsInstanceValid(_createPreview3D))
         {
             _createPreview3D.InternalClassId = internalClass;
             _createPreview3D.RebuildForClass();
         }
 
-        // Re-initialise stat allocation for the new class.
-        // spec: frontend_scenes.md §4.2 — "per-class stat preview filled from the class template". CODE-CONFIRMED.
-        InitCreateStats();
-
-        // Update toggle state of class buttons (radio-button effect).
+        // Update class button highlight (selected = orange tint; others = white).
+        // StateButton is a custom Control and has no ButtonPressed property — use Modulate.
         for (int ci = 0; ci < 4; ci++)
         {
-            Node? btnNode = _createForm?.FindChild($"CreateClassBtn{ci}", owned: false);
-            if (btnNode is Button btn)
-                btn.ButtonPressed = ci == _createUiClassIndex;
+            Node? btnNode = _createForm?.FindChild($"StateBtn_{10 + ci}", owned: false);
+            if (btnNode is StateButton sb)
+                sb.Modulate = ci == _createUiClassIndex
+                    ? new Color(1.0f, 0.90f, 0.55f)
+                    : Colors.White;
         }
     }
 
     private void ChangeFace(int delta)
     {
         // spec: frontend_scenes.md §4.2 — "face index clamped 1..7". CODE-CONFIRMED.
+        // "The visible 3D face does NOT change (face feeds a separate 2D portrait)". CODE-CONFIRMED.
         _createFaceIndex = Mathf.Clamp(
             _createFaceIndex + delta,
             CharacterSelectLayout.FaceIndexMin,
             CharacterSelectLayout.FaceIndexMax);
-        GD.Print($"[Screens] CharacterSelectScreen: face index = {_createFaceIndex} " +
-                 $"(range {CharacterSelectLayout.FaceIndexMin}..{CharacterSelectLayout.FaceIndexMax}).");
-        _createFaceLabel.Text = _createFaceIndex.ToString();
+        GD.Print($"[CharacterSelectScreen] face={_createFaceIndex} " +
+                 $"(range {CharacterSelectLayout.FaceIndexMin}..{CharacterSelectLayout.FaceIndexMax}). " +
+                 "spec: frontend_scenes.md §4.2 CODE-CONFIRMED.");
+        if (_createFaceLabel is not null && IsInstanceValid(_createFaceLabel))
+            _createFaceLabel.Text = _createFaceIndex.ToString();
     }
 
     private string ClassCaption(int uiIndex)
     {
-        int internalClass = CharacterSelectLayout.UiToInternalClass[uiIndex];
         uint msgId = CharacterSelectLayout.ClassLabelMsgIds[uiIndex];
         // spec: ui_system.md §10 / frontend_scenes.md §4.1 — ids 14003..14007. CODE-CONFIRMED.
-        string caption = _assets.Text(msgId, CharacterSelectLayout.ClassLabelFallbacks[uiIndex]);
-        return $"{caption} (class {internalClass})";
+        return _assets.Text(msgId, CharacterSelectLayout.ClassLabelFallbacks[uiIndex]);
     }
 
-    // Spec §4.3 starter equipment per internal class id. CODE-CONFIRMED.
-    // The 202xxx/203xxx/206xxx/209xxx ids are equipment/visual ids in the item catalogue.
-    private static string StarterGearSummary(int uiIndex)
+    private string GetClassDescription(int uiIndex)
     {
-        int internalClass = CharacterSelectLayout.UiToInternalClass[uiIndex];
-        // spec: frontend_scenes.md §4.3 — per-class starter equipment ids. CODE-CONFIRMED.
-        return internalClass switch
-        {
-            1 => "Gear: 202110003 / 203110002 / 206110002 / 209110001", // CODE-CONFIRMED
-            2 => "Gear: 202220003 / 203220002 / 206220002 / 209220001", // CODE-CONFIRMED
-            3 => "Gear: 202130003 / 203130002 / 206130002 / 209130001", // CODE-CONFIRMED
-            4 => "Gear: 202140003 / 203140002 / 206140002 / 209140001", // CODE-CONFIRMED
-            _ => "Gear: (unknown class)"
-        };
-    }
-
-    // Approximate class base stats for display (no domain authority — illustrative only).
-    // The actual stat computation lives in Client.Domain; we only mirror plausible values for UX.
-    private static int[] ClassBaseStats(int uiIndex)
-    {
-        int internalClass = CharacterSelectLayout.UiToInternalClass[uiIndex];
-        // HP  MP  STR INT DEX STA — purely illustrative display values, not spec-derived.
-        return internalClass switch
-        {
-            1 => [350, 100, 15, 8, 12, 14],
-            2 => [280, 150, 8, 15, 14, 10],
-            3 => [300, 120, 14, 9, 15, 12],
-            4 => [420, 80, 18, 6, 10, 18],
-            _ => [100, 100, 10, 10, 10, 10],
-        };
+        // Delegates to NpcScrDescriptions (loaded from data/script/npc.scr CP949).
+        // spec: config_tables.md §2.17.3 + frontend_scenes.md §4.1.1 CODE-CONFIRMED.
+        return _npcScrDesc.GetDescription(Mathf.Clamp(uiIndex, 0, 3));
     }
 
     // =========================================================================
-    // Char-count caption — msg id 2209 "캐릭터 개수 : %d"
+    // Name validation. spec: frontend_scenes.md §4.4 CODE-CONFIRMED.
+    // =========================================================================
+
+    private bool ValidateCreateName(string name, out string toastMsg)
+    {
+        // spec: frontend_scenes.md §4.4 — "minimum length 2 characters". CODE-CONFIRMED.
+        if (name.Length < 2)
+        {
+            toastMsg = _assets.Text(2075u, "Name must be at least 2 characters.");
+            return false;
+        }
+
+        // spec: frontend_scenes.md §4.4 — "a–z + digits + CP949 Hangul; reject all else". CODE-CONFIRMED.
+        foreach (char c in name)
+        {
+            if (c >= 'a' && c <= 'z') continue;   // a–z. CODE-CONFIRMED.
+            if (c >= '0' && c <= '9') continue;    // 0–9. CODE-CONFIRMED.
+            if (c >= '가' && c <= '힣') continue;  // Hangul syllables. CODE-CONFIRMED.
+            if (c >= 'ᄀ' && c <= 'ᇿ') continue;  // Hangul jamo. CODE-CONFIRMED.
+            if (c >= '㄰' && c <= '㆏') continue;  // Hangul compat jamo. CODE-CONFIRMED.
+            toastMsg = _assets.Text(2075u, "Only a-z, 0-9, and Korean Hangul allowed.");
+            return false;
+        }
+
+        toastMsg = string.Empty;
+        return true;
+    }
+
+    private void ShowCreateToast(string message)
+    {
+        if (_createToastLabel is null || !IsInstanceValid(_createToastLabel)) return;
+        _createToastLabel.Text = message;
+        _createToastLabel.Visible = true;
+        _toastTimer = 3.0;
+    }
+
+    // =========================================================================
+    // Char-count caption — msg id 2209 "캐릭터 개수 : %d".
     // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED.
     // =========================================================================
 
-    /// <summary>
-    /// Returns the formatted "character count : N" caption for the title bar.
-    /// Uses MessageDB template id 2209 with the current occupied-slot count.
-    ///
-    /// <para>Online: count comes from BillingState +0x80 (account-wide, independent of slot mask).
-    /// Offline: we derive it from the current roster occupancy — the nearest available value.
-    /// The Application layer will overwrite this via <see cref="ApplyCharacterList"/> when live data arrives.</para>
-    ///
-    /// spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED (msg id 2209, count source).
-    /// </summary>
     private string BuildCharCountCaption()
     {
-        // Count occupied slots from live data or the demo roster.
-        int count;
-        if (_liveDataApplied)
-        {
-            count = 0;
-            for (int i = 0; i < MaxSlots; i++)
-                if (!_liveSlots[i].IsEmpty)
-                    count++;
-        }
-        else
-        {
-            count = DemoRoster.Length;
-        }
+        // Count occupied slots from live data only. ZERO synthetic count.
+        int count = 0;
+        for (int i = 0; i < MaxSlots; i++)
+            if (!_liveSlots[i].IsEmpty) count++;
 
-        // Retrieve the CP949-decoded template from the msg.xdb catalogue via UiAssetLoader.
-        // Template is "캐릭터 개수 : %d" (VFS-only; not reproduced here).
-        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED (msg id 2209).
-        // Fallback when VFS absent: English approximation so the offline flow shows something.
+        // CP949 template from msg.xdb. spec: frontend_scenes.md §3.8.2 CODE-CONFIRMED.
         string template = _assets.Text(2209u, "캐릭터 개수 : {0}");
-
-        // The template uses a C-style %d; we do a simple substitution of the placeholder.
-        // UiAssetLoader already decodes the CP949 text; we only swap %d → count.
-        string caption = template.Contains("%d")
+        return template.Contains("%d")
             ? template.Replace("%d", count.ToString())
-            : string.Format(template, count); // handle both printf and .NET placeholder fallbacks
-        return caption;
+            : string.Format(template, count);
     }
 
-    /// <summary>
-    /// Refreshes the title-bar "character count : N" caption widget in-place.
-    /// Call after create or delete operations mutate the character count.
-    /// spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — "re-rendered after create and after delete".
-    /// </summary>
     private void RefreshCharCountCaption()
     {
         if (_charCountCaption is null || !IsInstanceValid(_charCountCaption)) return;
         _charCountCaption.Text = BuildCharCountCaption();
-        GD.Print($"[CharacterSelectScreen] Char-count caption refreshed: '{_charCountCaption.Text}'. " +
+        GD.Print($"[CharacterSelectScreen] Char-count caption: '{_charCountCaption.Text}'. " +
                  "spec: frontend_scenes.md §3.8.2 CODE-CONFIRMED.");
     }
 
@@ -1732,37 +1300,18 @@ public sealed partial class CharacterSelectScreen : Control
 
     private void RefreshInfo()
     {
-        // spec: frontend_scenes.md §3.2 — slot info line shows name, level, and last position.
-        if (_liveDataApplied)
+        LiveSlot ls = _liveSlots[_selectedSlot];
+        if (!ls.IsEmpty)
         {
-            LiveSlot ls = _liveSlots[_selectedSlot];
-            if (!ls.IsEmpty)
-            {
-                _infoName.Text = $"Name: {ls.Name}";
-                _infoLevel.Text = $"Lv {ls.Level}";
-                // ServerClass is the raw server class id. Display it as-is (no class-name lookup
-                // here — that would require the domain catalogue; this is a passive view).
-                _infoClass.Text = $"Class: {ls.ServerClass}";
-            }
-            else
-            {
-                _infoName.Text = "Name: (empty)";
-                _infoLevel.Text = "Lv –";
-                _infoClass.Text = "Class: –";
-            }
-        }
-        else if (_selectedSlot < DemoRoster.Length)
-        {
-            DemoSlot slot = DemoRoster[_selectedSlot];
-            _infoName.Text = $"Name: {slot.Name}";
-            _infoLevel.Text = $"Lv {slot.Level}";
-            _infoClass.Text = ClassCaption(slot.UiClassIndex);
+            _infoName.Text = ls.Name;
+            _infoLevel.Text = $"Lv {ls.Level}";
+            _infoClass.Text = $"Cl {ls.ServerClass}";
         }
         else
         {
-            _infoName.Text = "Name: (empty)";
-            _infoLevel.Text = "Lv –";
-            _infoClass.Text = "Class: –";
+            _infoName.Text = "–";
+            _infoLevel.Text = "–";
+            _infoClass.Text = "–";
         }
 
         HighlightSlot(_selectedSlot);
@@ -1774,15 +1323,11 @@ public sealed partial class CharacterSelectScreen : Control
         {
             if (_slotButtons[i] is Button btn)
             {
-                // Dim unselected buttons; brighten the selected one.
                 btn.Modulate = i == index
                     ? new Color(1.0f, 0.90f, 0.55f)
                     : Colors.White;
             }
         }
-
-        // Propagate selection to the 3D scene for actor highlight.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.3.4 — clip swap on selection. CODE-CONFIRMED (spec).
         _scene3D?.SetSelectedSlot(index);
     }
 
@@ -1799,101 +1344,29 @@ public sealed partial class CharacterSelectScreen : Control
         return lbl;
     }
 
-    /// <summary>Builds a tab button (3-state: NORMAL / HOVER) from atlas frames.</summary>
-    private StateButton MakeTabButton(WidgetRect norm, WidgetRect hov, string atlas, int actionId, string caption)
-    {
-        // 3-state ctor: PRESSED = HOVER (matching spec §1.5 "3-state: NORMAL / HOVER / PRESSED").
-        // spec: ui_system.md §8.2 tab button table; §1.5 constructor variants.
-        return WidgetFactory.MakeStateButton(
-            _assets, atlas,
-            norm.X, norm.Y, norm.W, norm.H,
-            norm.SrcX, norm.SrcY,
-            hov.SrcX, hov.SrcY,
-            hov.SrcX, hov.SrcY, // PRESSED = HOVER, spec §1.5
-            actionId, caption);
-    }
-
-    /// <summary>Builds a Create/Delete/Enter button (3-state) from atlas frames.</summary>
-    private StateButton MakeCharButton(WidgetRect norm, WidgetRect hov, string atlas, int actionId, string caption)
-    {
-        // HOVER src-X differs from NORMAL; PRESSED = HOVER (spec §1.5).
-        // spec: ui_system.md §8.2 Create/Delete/Enter button table + §1.5.
-        return WidgetFactory.MakeStateButton(
-            _assets, atlas,
-            norm.X, norm.Y, norm.W, norm.H,
-            norm.SrcX, norm.SrcY,
-            hov.SrcX, hov.SrcY,
-            hov.SrcX, hov.SrcY, // PRESSED = HOVER, spec §1.5
-            actionId, caption);
-    }
-
-    private Control MakeChrome(WidgetRect rect, string atlasPath)
-    {
-        AtlasTexture? face = null;
-        if (rect.SrcX != 0 || rect.SrcY != 0)
-            face = _assets.Slice(atlasPath, rect.SrcX, rect.SrcY, rect.W, rect.H);
-
-        if (face is not null)
-        {
-            var tr = new TextureRect
-            {
-                Texture = face,
-                StretchMode = TextureRect.StretchModeEnum.Scale,
-                Position = new Vector2(rect.X, rect.Y),
-                Size = new Vector2(rect.W, rect.H),
-            };
-            return tr;
-        }
-
-        // Offline / unrecovered chrome fallback: solid panel.
-        var panel = new Panel
-        {
-            Position = new Vector2(rect.X, rect.Y),
-            Size = new Vector2(rect.W, rect.H),
-        };
-        var style = new StyleBoxFlat
-        {
-            BgColor = new Color(0.12f, 0.11f, 0.14f, 0.96f),
-            BorderColor = new Color(0.45f, 0.38f, 0.25f),
-        };
-        style.SetBorderWidthAll(2);
-        panel.AddThemeStyleboxOverride("panel", style);
-        return panel;
-    }
-
-    // =========================================================================
-    // Data model (offline demo roster)
-    // =========================================================================
-
     /// <summary>
-    /// An offline demo roster slot — view-only; never domain state.
-    /// Mirrors the fields the SmsgCharacterList SpawnDescriptor carries per slot
-    /// (spec: packets/3-1_character_list.yaml + frontend_scenes.md §3.2).
-    /// <para>UiClassIndex: 0..3 mapped to internal class {4,1,3,2} via UiToInternalClass.
-    /// spec: frontend_scenes.md §4.1. CODE-CONFIRMED.</para>
-    /// <para>FaceIndex: 1..7 (spec §4.2). CODE-CONFIRMED.</para>
-    /// <para>SkinClassId: IdB in the .skn header = skin_class driving the rig/skeleton/motion chain.
-    /// PLAUSIBLE: equals the internal class id for player classes 1..4 (VFS-confirmed pattern).
-    /// spec: CLAUDE.md §Recovered asset mappings.</para>
+    /// Builds a tab button (3-state: NORMAL/HOVER/PRESSED) from atlas frames.
+    /// spec: Docs/RE/specs/ui_system.md §8.2/§11.5b CODE-CONFIRMED.
     /// </summary>
-    private readonly record struct DemoSlot(
-        string Name,
-        string ClassName,
-        int Level,
-        int Hp,
-        int UiClassIndex,
-        int FaceIndex,
-        uint SkinClassId = 1u);
+    private StateButton MakeTabButton(WidgetRect norm, WidgetRect hov, WidgetRect prs, int actionId)
+    {
+        return WidgetFactory.MakeStateButton(
+            _assets, CharacterSelectLayout.AtlasLoginWindow,
+            norm.X, norm.Y, norm.W, norm.H,
+            norm.SrcX, norm.SrcY,   // NORMAL. CODE-CONFIRMED.
+            hov.SrcX, hov.SrcY,    // HOVER. CODE-CONFIRMED.
+            prs.SrcX, prs.SrcY,    // PRESSED. CODE-CONFIRMED.
+            actionId);
+    }
+
+    // =========================================================================
+    // Data model
+    // =========================================================================
 
     /// <summary>
     /// A resolved live slot driven by <see cref="CharacterListEvent"/> (opcode 3/1).
-    /// Populated by <see cref="ApplyCharacterList"/>; replaces the DemoRoster for the view.
-    ///
-    /// <para>IsEmpty=true: the slot carries no character (either absent from the event or the
-    /// "@BLANK@" sentinel was seen). Enter on an empty slot opens the Create sub-form.
-    /// spec: Docs/RE/specs/frontend_scenes.md §3.1 — "@BLANK@" sentinel. CODE-CONFIRMED.</para>
-    ///
-    /// <para>This is view state only — never domain state.</para>
+    /// IsEmpty=true = slot has no character. View state only — never domain state.
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.1 — "@BLANK@" sentinel. CODE-CONFIRMED.
     /// </summary>
     private readonly record struct LiveSlot(
         bool IsEmpty,

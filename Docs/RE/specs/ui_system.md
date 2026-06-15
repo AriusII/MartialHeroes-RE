@@ -638,6 +638,18 @@ pixel arguments. The coordinate tables below are **interop facts** extracted fro
 > quit-confirm popups plus exit/error composites). The "21" front-form roles are the table below;
 > the remaining objects are decorative/container/looped widgets folded into the role groups.
 
+> **Master widget manifest — single image-component constructor (CODE-CONFIRMED).** All **73**
+> login widgets are produced through a small set of factory helpers that all funnel through **one
+> shared image-component constructor** with the fixed argument order **(tex, x, y, w, h, srcX, srcY,
+> alpha)**. The displayed atlas sub-rect of each widget is therefore `(srcX, srcY)` to
+> `(srcX + w, srcY + h)` in the bound atlas, with no scaling. The load-bearing literal rectangles on
+> the form atlas `data/ui/login_slice1.dds` are: **ID textbox** dst `(390, 32, 102, 13)` action
+> **109** maxlen 6; **password textbox** dst `(568, 32, 102, 13)` action **110** maxlen 129;
+> **OK/Login button** dst `(456, 64, 112, 39)` action **103**; **Save-ID checkbox** dst
+> `(694, 86, 13, 13)` action **104**. These match the front-form table below — that table remains
+> the authoritative per-widget src-rect source; this note records only the count and the
+> constructor's argument contract.
+
 **Atlas assignment (CODE-CONFIRMED from builder source):**
 
 | Atlas DDS | Used for |
@@ -735,33 +747,40 @@ The two intro-banner pager buttons additionally carry their own EULA/intro banne
 |---|---|---|---|---|---|---|
 | Top title bar panel | 0 | 0 | 577 | 58 | `mainwindow.dds` | CODE-CONFIRMED |
 | Left character-info panel | 0 | 0 | 244 | 187 | `mainwindow.dds` | CODE-CONFIRMED |
-| Server tab button | 67 | 17 | 113 | 40 | `loginwindow.dds` 3-state | CODE-CONFIRMED |
-| Channel tab button | 232 | 7 | 113 | 40 | `loginwindow.dds` 3-state | CODE-CONFIRMED |
-| Back tab button | 393 | 17 | 113 | 40 | `loginwindow.dds` 3-state | CODE-CONFIRMED |
-| **Per-slot stat-icon grid col 1** | 154 | **191** (base), stride **24** | 24 | 16 | `loginwindow.dds` | CODE-CONFIRMED |
-| **Per-slot stat-icon grid col 2** | 178 | 191 (base), stride 24 | 24 | 16 | `loginwindow.dds` | CODE-CONFIRMED |
+| Server tab button | 67 | 17 | 113 | 40 | `loginwindow.dds` 3-state; PRESSED src `(483, 883)` | CODE-CONFIRMED |
+| Channel tab button | 232 | 7 | 113 | 40 | `loginwindow.dds` 3-state; PRESSED src `(483, 923)` | CODE-CONFIRMED |
+| Back tab button | 393 | 17 | 113 | 40 | `loginwindow.dds` 3-state; PRESSED src `(483, 963)` | CODE-CONFIRMED |
+| **Per-slot stat-icon grid col 1** | 154 | **191** (base), stride **24** | 24 | 16 | `loginwindow.dds`; HOVER src-X **548** | CODE-CONFIRMED |
+| **Per-slot stat-icon grid col 2** | 178 | 191 (base), stride 24 | 24 | 16 | `loginwindow.dds`; HOVER src-X **572** | CODE-CONFIRMED |
 | Per-slot stat value labels | 51 | 193 (base), stride 24 | 35 | 12 | text-only | CODE-CONFIRMED |
-| **Create button** | 42 | 325 | 59 | 20 | `loginwindow.dds` | CODE-CONFIRMED |
-| **Delete button** | 112 | 325 | 59 | 20 | `loginwindow.dds` | CODE-CONFIRMED |
-| **Enter/select button** | 112 | 112 | 59 | 20 | `loginwindow.dds` | CODE-CONFIRMED |
+| **Create button** | 42 | 325 | 59 | 20 | create name-plate atlas; src V=1004 — NORMAL `(0, 1004)` / PRESSED `(59, 1004)` | CODE-CONFIRMED |
+| **Delete button** | 112 | 325 | 59 | 20 | create name-plate atlas; src V=1004 — NORMAL `(118, 1004)` / PRESSED `(177, 1004)` | CODE-CONFIRMED |
+| **Enter/select button** | 112 | 112 | 59 | 20 | create name-plate atlas; src V=1004 — NORMAL `(236, 1004)` / PRESSED `(295, 1004)` | CODE-CONFIRMED |
 | Confirm modal (Yes/No) | 55 / 174 | 136 | 113 | 40 | `InventWindow.dds` | CODE-CONFIRMED |
 | Name-entry textbox | 60 | 80 | 274 | 18 | `GUTextbox`; CP949 character name | CODE-CONFIRMED |
 | Name-entry OK | 55 | — | 113 | 40 | `InventWindow.dds` | CODE-CONFIRMED |
 | Name-entry Cancel | 174 | — | 113 | 40 | `InventWindow.dds` | CODE-CONFIRMED |
-| Corner close | 610 | 23 | 23 | 23 | `blacksheet.dds` | CODE-CONFIRMED |
+| Corner close | 610 | 23 | 23 | 23 | `blacksheet.dds`; dst is LITERAL, src origin is register-fed (runtime) — **debugger-pending** | CODE-CONFIRMED (dst) / debugger-pending (src) |
 | Detail / confirm dialog frames | 318 | 190 | 647 | 340 | `InventWindow.dds` (×5 near-identical panels) | CODE-CONFIRMED |
 
 **Stat grid (CODE-CONFIRMED).** The left-column character-info stat grid is a fixed block of
 icon strips + value labels populated from table lookups: stat-icon buttons in two columns (col 1
-x = 154, col 2 x = 178) at base-Y **191** stride **24**, with paired value labels at x = 51 base-Y
-**193** stride **24**. An appearance-string loader fills the ~18 label cells per appearance branch.
+x = 154, **HOVER src-X 548**; col 2 x = 178, **HOVER src-X 572**) at base-Y **191** stride **24**,
+with paired value labels at x = 51 base-Y **193** stride **24**. An appearance-string loader fills
+the ~18 label cells per appearance branch. The per-cell NORMAL/PRESSED glyph `(srcX, srcY)` for the
+18-cell grid is **chosen at runtime from a stat table** and is **not a build-time literal** — those
+per-cell origins are **debugger-pending** (only the two column X positions and their HOVER src-X are
+build-time literals).
 
 **Create-form layout (CODE-CONFIRMED).** The new-character create sub-form is a self-contained
 panel tree shown/hidden as a unit by the scene-reset path:
 - **Four class buttons** (3-state, 19 × 30, y = 45, on `loginwindow.dds`) selecting the playable
   class. The four buttons emit class-button command ids 10, 11, 12, 13 (left-to-right) into an
   internal class selector; selecting a class rebuilds the 3D preview actor with that class's
-  starter gear and BGM, and sets the class-name caption (msg.xdb 14003–14007).
+  starter gear and BGM, and sets the class-name caption (msg.xdb 14003–14007). **Src rects (LITERAL):
+  NORMAL src-Y = 1005** for all four, NORMAL src-X **590 / 635 / 680 / 725** (buttons 1–4); HOVER
+  src-X **815 / 860 / 905** for buttons 1–3. The destination X is **right-anchored and COMPUTED**
+  (stride 48 between buttons), so the per-button dst-X is not a build-time literal.
 - **Name input** — a `GUTextbox` (with an underlay image) for the CP949 character name.
 - **Appearance face ± steppers** — a small +/- pair driving a face/appearance index (range 1–7),
   plus a point-buy stepper grid for the create stats. Cycling the face index updates only the 2D
@@ -778,8 +797,8 @@ panel tree shown/hidden as a unit by the scene-reset path:
 | 1 | Server tab | — |
 | 2 | Channel tab | — |
 | 3 | Back tab | — |
-| **4** | **Create button** | older notes showed 413 — that was the HOVER src-X, not the action id |
-| **5** | **Delete button** | older notes showed 531 — that was the HOVER src-X, not the action id |
+| **4** | **Create button** | older notes showed 413 — see correction below: 413 is a create-form stepper HOVER src-X, not this id |
+| **5** | **Delete button** | older notes showed 531 — see correction below: 531 is a create-form stepper HOVER src-X, not this id |
 | **6** | **Enter/select button** | — |
 | 10 / 11 / 12 / 13 | Create-form class buttons (4) | class selector 0..3 left-to-right |
 | 21 / 22 | Face increment ± | 2D portrait only; no 3D rebuild |
@@ -788,9 +807,12 @@ panel tree shown/hidden as a unit by the scene-reset path:
 | 54 / 55, 59 / 60 | Name-entry OK / Cancel pairs | — |
 | 61…74 | Per-slot / stat-grid actions | selection and stat-grid interactive buttons |
 
-> **Correction.** The values 413 and 531 that appeared in earlier versions of this spec are the
-> **atlas src-X coordinates** of the Create-button HOVER frame and the Delete-button HOVER frame,
-> not action ids. The actual ids are **Create = 4, Delete = 5, Enter = 6** (CODE-CONFIRMED).
+> **Correction (settled, CODE-CONFIRMED).** The values **413 and 531** that appeared in earlier
+> versions of this spec are **not action ids at all** — they are the **HOVER src-X of the create-form
+> stat / appearance ± stepper buttons** (the increment/decrement controls on the new-character create
+> form), read from the stepper builder's literal arguments. The Create/Delete/Enter action ids are
+> **Create = 4, Delete = 5, Enter = 6**. Do not treat 413 / 531 as ids and do not bind them to the
+> Create or Delete buttons; they belong to the stepper-control atlas sub-rects.
 
 **Slot hit-test is a 3D ray-pick — NOT 2D rects (CODE-CONFIRMED).** Selecting one of the five
 character preview actors is a **3D camera-unproject ray test against a per-slot axis-aligned
@@ -818,7 +840,9 @@ literal for those coordinates. The recovered generator rules:
 | Login server name-strip / pager set | Base (13,66,47,18); NORMAL src (596,985), HOVER (643,985); X advances **+47** per entry (`x = 13 + 47·i`); each registers action **115 + i** (see §8.4.1 for the confirmed live range) |
 | Char-select stat-icon grid | Base-Y **191**, stride **24**, 5 rows; col 1 at x=154, col 2 at x=178 |
 | Char-select stat value labels | Base-Y **193**, stride **24**, 5 rows; x=51, w=35, h=12 |
+| Char-select class buttons | NORMAL src-Y **1005**; NORMAL src-X **590/635/680/725**; HOVER src-X **815/860/905** (buttons 1–3); dst-X right-anchored COMPUTED, stride **48** |
 | Char-select appearance selector | Base y=30, w=45, h=19; NORMAL src-X base **590** stepping **+45** (590/635/680/725); HOVER base **815** (+45) |
+| Char-select Create/Delete/Enter | src V=**1004** on the create name-plate atlas: Create N(0,1004)/P(59,1004); Delete N(118,1004)/P(177,1004); Enter N(236,1004)/P(295,1004) |
 
 #### 8.4.1 Login server-strip / pager range (CODE-CONFIRMED)
 
@@ -1209,23 +1233,54 @@ window-owned, no shared cache**:
 
 ### 9.1 Login screen
 
+The login window owns **two separate texture lists**, not one shared list (CODE-CONFIRMED load
+model; VFS-VERIFIED paths):
+
+- The **LoginWindow texture list** holds **four atlases**, all loaded **eagerly** in `BuildScene`
+  (append-only, load-order keyed, no dedup, no ref-count).
+- The **PIN / second-password window** owns its **own separate list of two atlases**, loaded
+  **lazily** when the PIN modal is built — it does **not** share the LoginWindow list.
+
+**LoginWindow list (4 atlases, eager):**
+
 | Path | Role | Confidence |
 |---|---|---|
-| `data/ui/login_slice1.dds` | **Primary form atlas**: OK/Login, Server-list, ID/PW textboxes, Save-ID checkbox, Quit/Help strip | CODE-CONFIRMED |
-| `data/ui/loginwindow.dds` | Option/tab buttons, server name-strip, decorative elements | CODE-CONFIRMED |
-| `data/ui/loginwindow_02.dds` | Panning intro banner source | CODE-CONFIRMED |
-| `data/ui/inventwindow.dds` | Shared popup / button chrome (quit-confirm modal) | CODE-CONFIRMED |
+| `data/ui/login_slice1.dds` | **Primary form atlas** (slot 0): OK/Login, Server-list, ID/PW textboxes, Save-ID checkbox, Quit/Help strip | VFS-VERIFIED (path) / CODE-CONFIRMED (role) |
+| `data/ui/loginwindow.dds` | (slot 1) Backdrop, EULA panel background, plate base, version image, option/tab buttons, server name-strip, decorative elements | VFS-VERIFIED / CODE-CONFIRMED |
+| `data/ui/InventWindow.dds` | (slot 2) Modal chrome (quit-confirm / exit / error composites) — shared with the in-game inventory window | VFS-VERIFIED / CODE-CONFIRMED |
+| `data/ui/loginwindow_02.dds` | (slot 3) Server-plate parchment + spinner column; panning intro banner strips | VFS-VERIFIED / CODE-CONFIRMED |
+
+**PIN-window list (2 atlases, lazy):**
+
+| Path | Role | Confidence |
+|---|---|---|
+| `data/ui/password.dds` | PIN keypad sprite-sheet (its own texture list, separate from the LoginWindow list) | VFS-VERIFIED / CODE-CONFIRMED |
+| `data/ui/InventWindow.dds` | PIN modal chrome (loaded again into the PIN window's own list — not reused from the LoginWindow list) | VFS-VERIFIED / CODE-CONFIRMED |
+
+**Version gate asset:** `data/cursor/game.ver` — a 28-byte binary blob (7 × u32 LE) that is the
+source of the login version GATE (not a displayed label). The OK/Login click compares the
+VFS-embedded `data/cursor/game.ver` against the on-disk `game.ver` at the client root; a mismatch
+raises the version-error modal (msg id 2204) and may quit. The field-level byte layout is specified
+in `formats/config_tables.md §7`; here it is referenced only as the login-gate asset. Confidence:
+VFS-VERIFIED (path/size) / CODE-CONFIRMED (gate role).
 
 ### 9.2 Character-select screen
 
+The character-select view, the character-create form, and the live 3D preview are all one window
+object; its 2D chrome composites from **four atlases** (VFS-VERIFIED paths):
+
 | Path | Role | Confidence |
 |---|---|---|
-| `data/ui/loginwindow.dds` | Tab buttons, stat-icon grids, Create/Delete/Enter button strips | CODE-CONFIRMED |
-| `data/ui/mainwindow.dds` | Slot-row action buttons + create-form widgets | CODE-CONFIRMED |
-| `data/ui/inventwindow.dds` | Popup panels + buttons (confirm / delete / name-entry chrome) | CODE-CONFIRMED |
-| `data/ui/blacksheet.dds` | Corner close button; dim/blackout overlay | CODE-CONFIRMED |
-| `data/ui/carrierpigeonperson.dds`, `data/ui/carrierpigeonall.dds`, `data/ui/tradekeepwindow.dds` | Appearance selector ±, gender/class preview swatches, create-form accents | CODE-CONFIRMED |
+| `data/ui/loginwindow.dds` | **Primary** chrome: backgrounds, slot-row plates, stat-icon grids, appearance ± steppers, tab buttons, Create/Delete | VFS-VERIFIED / CODE-CONFIRMED |
+| `data/ui/mainwindow.dds` | Slot-row plates + the **create name-plate** atlas (Create/Delete/Enter button strips at src V=1004) and other create-form widgets | VFS-VERIFIED / CODE-CONFIRMED |
+| `data/ui/InventWindow.dds` | Modal chrome (confirm / delete / name-entry dialog frames), shared with login | VFS-VERIFIED / CODE-CONFIRMED |
+| `data/ui/blacksheet.dds` | Corner-close button; dim/blackout overlay | VFS-VERIFIED / CODE-CONFIRMED |
 | (GUCanvas3D live 3D viewports) | Character previews; not a 2D atlas | CODE-CONFIRMED |
+
+> **Correction.** Earlier versions of this section listed `carrierpigeonperson.dds`,
+> `carrierpigeonall.dds`, and `tradekeepwindow.dds` as char-select atlases. The reconciled builder
+> walk shows **no character-select reference** to those three — they are dropped from the
+> char-select manifest. The char-select chrome is the four atlases above.
 
 ### 9.3 Opening cinematic (state 3) screen
 
@@ -1238,9 +1293,9 @@ window-owned, no shared cache**:
 
 | Path | Role | Confidence |
 |---|---|---|
-| `data/ui/loading.dds` | Generic loading screen | SAMPLE-VERIFIED |
-| `data/ui/loading01.dds` through `loading08.dds` | Area-specific loading screens (8 variants) | SAMPLE-VERIFIED |
-| `data/ui/loadingbar.dds` | Progress bar texture (256 × 256) | SAMPLE-VERIFIED |
+| `data/ui/loading.dds` | Generic loading screen (DXT3) | VFS-VERIFIED |
+| `data/ui/loading01.dds` through `loading08.dds` | Area-specific loading screens (8 variants, DXT2) | VFS-VERIFIED |
+| `data/ui/loadingbar.dds` | Progress bar texture (256 × 256) | VFS-VERIFIED |
 
 ### 9.5 In-game — confirmed atlas set (selected; not exhaustive)
 
@@ -1278,6 +1333,44 @@ Solid-colour fill patches: `p_green.dds`, `p_red.dds`, `p_white.dds`, `p_blue.dd
 
 ---
 
+### 9.6 Front-end sound cues (id list)
+
+The front-end screens drive their audio by **integer sound id** through the 2D sound subsystem; the
+id → file resolution rule and the full cue catalogue live in `specs/sound.md` (do not duplicate that
+table). The cue ids the login / opening / loading / character-select screens use are listed here so
+an implementer can wire the triggers (all VFS-VERIFIED present under `data/sound/2d/`; the
+trigger/event role is SPEC-CARRIED from `sound.md` / `frontend_scenes.md`):
+
+| Cue id | Where used | Confidence |
+|---|---|---|
+| `910061000` | Opening / intro looped BGM (opening-cinematic state) | VFS-VERIFIED + SPEC-CARRIED |
+| `910062000` … `910065000` | Per-class create-form preview BGM (one per class; replaces the scene BGM on the single category-0 voice) | VFS-VERIFIED + SPEC-CARRIED |
+| `920100100` | Loading-screen looped BGM | VFS-VERIFIED + SPEC-CARRIED |
+| `920100200` | Character-select looped BGM (also the enter-world confirm cue on the same category-0 voice) | VFS-VERIFIED + SPEC-CARRIED |
+| `861010101` | Generic UI click / confirm SFX (char-select dispatch, stepper/confirm clicks) | VFS-VERIFIED + SPEC-CARRIED |
+| `861010105` | Login intro stinger (fired at login-window intro sub-state) | VFS-VERIFIED + SPEC-CARRIED |
+
+> Per-class preview cues and the scene/loading BGM all play on a **single category-0 music voice**,
+> so a later cue **replaces** the earlier one rather than overlaying it (see `sound.md`). The exact
+> per-class id↔class mapping (it is **not** the identity) is owned by `frontend_scenes.md`.
+
+### 9.7 Cursors (front-end and in-game)
+
+Cursors live under `data/cursor/` as **DXT2-compressed DDS textured quads** — there is **no `.cur`
+or `.ani`** file anywhere in the VFS (the cursor is drawn as a textured quad, not registered as a
+Win32 cursor resource). VFS-VERIFIED cursor set:
+
+| Path | Role | Confidence |
+|---|---|---|
+| `data/cursor/stand.dds` | Default / pointer cursor (front-end default) | VFS-VERIFIED |
+| `data/cursor/battle.dds` | Combat / attack cursor | VFS-VERIFIED |
+| `data/cursor/hand-jap-01.dds` … `hand-jap-04.dds` | Hand / interact cursor variants (4) | VFS-VERIFIED |
+| `data/cursor/repaircursor.dds` | Repair / craft cursor | VFS-VERIFIED |
+| `data/cursor/rotate.dds` | Camera-rotate cursor | VFS-VERIFIED |
+
+> The exact cursor-state → DDS routing table is not pinned from the VFS alone (the per-state binding
+> is **debugger-pending**); the texture set above is VFS-confirmed complete.
+
 ## 10. String database — msg.xdb
 
 All visible UI captions are fetched by numeric ID from `data/script/msg.xdb` (loaded at the start
@@ -1293,7 +1386,7 @@ Known ID ranges in use:
 - `101` — timed-popup countdown suffix
 - `5001–5040` (+ locale banks) — localized server names
 - `14003–14007` — character class labels (create form)
-- `0xC8`–`0xD4` (200–212 decimal) — character create / rename error messages
+- `0xC8`–`0xD4` (200–212 decimal) — time / duration format-strings (VFS-VERIFIED correction; an earlier version of this spec mislabelled this range as "character create / rename error messages", which is wrong — the strings at ids 200–212 are time/duration format templates, not create/rename errors)
 
 > **Format:** `msg.xdb` is a flat binary array of 516-byte records: `u32 id` + `u8[512]` CP949
 > NUL-terminated string. Record count = `file_size / 516`. The file has no header and no magic.

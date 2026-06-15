@@ -180,6 +180,25 @@ public static class CharacterSelectLayout
     public static readonly WidgetRect CornerClose = new(971, 610, 23, 23, 941, 910);
 
     // =========================================================================
+    // §8.2 / §8.4 Create-form class buttons — 4 buttons (3-state), on loginwindow.dds.
+    //   Size 19×30, base Y = 45, dst-X is right-anchored COMPUTED (stride 48, register-fed).
+    //   NORMAL src-Y = 1005 (CODE-CONFIRMED literal).
+    //   NORMAL src-X per button: 590 / 635 / 680 / 725 (buttons 0..3). CODE-CONFIRMED.
+    //   HOVER  src-X per button: 815 / 860 / 905 (buttons 0..2); button 3 HOVER = NORMAL. CODE-CONFIRMED.
+    //   PRESSED = NORMAL (3-state NORMAL,PRESSED,HOVER builder; PRESSED pair is NORMAL pair here).
+    //   spec: Docs/RE/specs/ui_system.md §8.2 + §8.4 "Char-select class buttons". CODE-CONFIRMED.
+    // =========================================================================
+    public const int ClassBtnW = 19; // spec: ui_system.md §8.2. CODE-CONFIRMED.
+    public const int ClassBtnH = 30; // spec: ui_system.md §8.2. CODE-CONFIRMED.
+    public const int ClassBtnBaseY = 45; // spec: ui_system.md §8.2. CODE-CONFIRMED.
+    public const int ClassBtnStride = 48; // dst-X stride between buttons. spec: ui_system.md §8.4. CODE-CONFIRMED.
+    public const int ClassBtnNormalSrcY = 1005; // spec: ui_system.md §8.2 "NORMAL src-Y = 1005". CODE-CONFIRMED.
+    // NORMAL src-X per button index (0..3). spec: ui_system.md §8.2/§8.4. CODE-CONFIRMED.
+    public static readonly int[] ClassBtnNormalSrcX = [590, 635, 680, 725]; // CODE-CONFIRMED
+    // HOVER src-X per button index (0..3); index 3 = NORMAL (no distinct hover art). CODE-CONFIRMED.
+    public static readonly int[] ClassBtnHoverSrcX = [815, 860, 905, 725]; // CODE-CONFIRMED (btn3 HOVER=NORMAL)
+
+    // =========================================================================
     // §8.4 Appearance selector (create form) — generator pattern. CODE-CONFIRMED.
     //   Base y=30, w=45, h=19; NORMAL src-X base 590 stepping +45; HOVER base 815 (+45).
     // spec: Docs/RE/specs/ui_system.md §8.4 "Char-select appearance selector". CODE-CONFIRMED.
@@ -204,6 +223,32 @@ public static class CharacterSelectLayout
     public const int FaceIndexMax = 7; // CODE-CONFIRMED
 
     // =========================================================================
+    // §8.2 Create-form stat/appearance point-buy action IDs. CODE-CONFIRMED.
+    //   Actions 25..34 = per-stat increment/decrement with class floor.
+    //   spec: Docs/RE/specs/ui_system.md §8.2 action-id table "25…34 Create stat point-buy ±".
+    // Face increment ± IDs 21/22. spec §8.2 "21 / 22 Face increment ±". CODE-CONFIRMED.
+    // =========================================================================
+    public const int FaceIncrementActionId = 21; // spec: ui_system.md §8.2. CODE-CONFIRMED.
+    public const int FaceDecrementActionId = 22; // spec: ui_system.md §8.2. CODE-CONFIRMED.
+
+    // Stat ± base action id. Actions 25..34 = 5 stats × 2 (decrement/increment pairs).
+    // spec: Docs/RE/specs/ui_system.md §8.2 "25…34 stat point-buy ±". CODE-CONFIRMED.
+    public const int StatPlusBuyBaseActionId = 25; // first increment action. CODE-CONFIRMED.
+
+    // =========================================================================
+    // §8.2 / §8.4 Create-form stat-grid string keys: 2·disc + {110..141}.
+    //
+    // The stat/appearance grid reads CP949 strings from a keyed string table using the formula:
+    //   key = 2·disc + base_offset
+    // where base_offset ∈ {110, 111, 120, 121, 130, 131, 140, 141}.
+    //
+    // spec: Docs/RE/formats/config_tables.md §2.17.3:
+    //   "key = 2·disc + {110, 111, 120, 121, 130, 131, 140, 141}" CONFIRMED (two-witness).
+    //   NOTE: the REFUTED formula "disc + {210..240}" must NOT be used — those are equipment IDs.
+    // =========================================================================
+    public static readonly int[] StatGridKeyOffsets = [110, 111, 120, 121, 130, 131, 140, 141]; // CODE-CONFIRMED
+
+    // =========================================================================
     // §10 msg.xdb caption ids. spec: ui_system.md §10 + frontend_scenes.md §9.
     // =========================================================================
 
@@ -218,10 +263,6 @@ public static class CharacterSelectLayout
     // is given by <see cref="UiToInternalClass"/> (NOT the identity — see §8.2 action-id map).
     //   UI index 0 → internal 4, UI index 1 → internal 1 (Musa), UI index 2 → internal 3,
     //   UI index 3 → internal 2.  spec: frontend_scenes.md §4.1. CODE-CONFIRMED.
-    //
-    // NOTE: CharacterSelectScreen.cs carries the same roster convention and should carry an
-    // equivalent one-line note on its DemoRoster definition for clarity (not edited here per
-    // task scope — see task finding 5 note).
     public static readonly uint[] ClassLabelMsgIds = [14003u, 14004u, 14005u, 14006u, 14007u]; // CODE-CONFIRMED
 
     // English fallbacks for class labels (used when VFS is absent; IDs 14003..14007 in msg.xdb).

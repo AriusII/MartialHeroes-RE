@@ -813,16 +813,17 @@ cue_id  ->  data/sound/2d/<cue_id>.ogg        // decimal stem, no zero-padding, 
 | **861010105** | `data/sound/2d/861010105.ogg` | Login intro SFX / stinger (auto-fired at the login intro sub-state; also has a `3d/` mirror, but the front-end uses the 2D path). Cross-ref §15.2. | SAMPLE-VERIFIED (present); CODE-CONFIRMED firing (§15.2) |
 | **861010101** | `data/sound/2d/861010101.ogg` | Generic UI click (the project-wide "a button did something" cue). Cross-ref §15.2. | SAMPLE-VERIFIED + CODE-CONFIRMED (§15.2) |
 | **920100200** | `data/sound/2d/920100200.ogg` | Char-select BGM (also the front-end/title BGM and the enter-world confirm cue). Cross-ref §15.2. | SAMPLE-VERIFIED + CODE-CONFIRMED (§15.2) |
+| **910061000** | `data/sound/2d/910061000.ogg` | Opening / intro BGM (**looped**), started at the opening (title-curtain) scene build; distinct from the login intro stinger 861010105 and from char-select BGM 920100200. See §15.6c and `specs/intro_sequence.md`. OGG stereo 22,050 Hz. | SAMPLE-VERIFIED (path/header); SPEC-CARRIED (opening-scene firing, §15.2) |
 | **920100100** | `data/sound/2d/920100100.ogg` | Loading-screen BGM (**category 0, looped**), fired by the loading-screen builder (a game-state transition with a random loading-art pick), NOT by login or char-select; never explicitly stopped (see §15.6a and `frontend_scenes.md` §3.8.1). | SAMPLE-VERIFIED (present); CODE-CONFIRMED firing scene (loading) |
-| **910062000** | `data/sound/2d/910062000.ogg` | Per-class character-creation preview BGM, create-form class selector arg 1. Played on the char-select **category-0 music slot** (replaces the scene BGM, §15.6b). | SAMPLE-VERIFIED (present); CODE-CONFIRMED binding (§15.6b) |
-| **910063000** | `data/sound/2d/910063000.ogg` | Per-class creation preview BGM, create-form class selector arg 3 (the else branch). | SAMPLE-VERIFIED (present); CODE-CONFIRMED binding (§15.6b) |
-| **910064000** | `data/sound/2d/910064000.ogg` | Per-class creation preview BGM, create-form class selector arg 2. | SAMPLE-VERIFIED (present); CODE-CONFIRMED binding (§15.6b) |
-| **910065000** | `data/sound/2d/910065000.ogg` | Per-class creation preview BGM, create-form class selector arg 0. | SAMPLE-VERIFIED (present); CODE-CONFIRMED binding (§15.6b) |
+| **910062000** | `data/sound/2d/910062000.ogg` | Per-class character-creation preview BGM — **UI button 1 -> Musa** (internal class 1). Played on the char-select **category-0 music slot** (replaces, not overlays, the scene BGM — §15.6b). OGG stereo 22,050 Hz. | SAMPLE-VERIFIED (path/header); CODE-CONFIRMED binding (§15.6b) |
+| **910063000** | `data/sound/2d/910063000.ogg` | Per-class creation preview BGM — **UI button 3 -> Dosa** (internal class 2). Char-select category-0 slot (replace, §15.6b). OGG stereo 22,050 Hz. | SAMPLE-VERIFIED (path/header); CODE-CONFIRMED binding (§15.6b) |
+| **910064000** | `data/sound/2d/910064000.ogg` | Per-class creation preview BGM — **UI button 2 -> Salsu** (internal class 3). Char-select category-0 slot (replace, §15.6b). OGG stereo 22,050 Hz. | SAMPLE-VERIFIED (path/header); CODE-CONFIRMED binding (§15.6b) |
+| **910065000** | `data/sound/2d/910065000.ogg` | Per-class creation preview BGM — **UI button 0 -> Monk** (internal class 4). Char-select category-0 slot (replace, §15.6b). OGG stereo 22,050 Hz. | SAMPLE-VERIFIED (path/header); CODE-CONFIRMED binding (§15.6b) |
 
 The four creation preview-BGM cues fall in the `91006N000` range (the `9100xxxxx` character-voice
 family, §3.4). The per-class binding is **CODE-CONFIRMED** (the create-form builder selects the id by
-its class argument, §15.6b): arg 0 -> 910065000, arg 1 -> 910062000, arg 2 -> 910064000,
-arg 3/else -> 910063000. All four play on the char-select category-0 music slot, so a class selection
+its UI button index, §15.6b): UI 0 -> 910065000 (Monk), UI 1 -> 910062000 (Musa), UI 2 -> 910064000 (Salsu),
+UI 3 -> 910063000 (Dosa). The UI index is NOT the cue-id ordinal (a non-identity crossover, §15.6b). All four play on the char-select category-0 music slot, so a class selection
 replaces the scene BGM rather than overlaying it (§15.6b). Adjacent ids in the same family exist in the
 VFS but are not bound to the front-end create flow.
 
@@ -850,25 +851,75 @@ stop-previous contract.
 
 ### 15.6b Char-select category-0 music slot and per-class preview BGM
 
-> **Confidence:** CODE-CONFIRMED (static, CAMPAIGN 9).
+> **Confidence:** the firing/selection logic and the single-slot replace-not-overlay behaviour are
+> CODE-CONFIRMED (static, CAMPAIGN 9). The file paths, container, channel count, and sample rate are
+> SAMPLE-VERIFIED (direct VFS header reads, CAMPAIGN 9 Wave 3).
 
 Char-select plays its BGM **920100200** on the single **category-0** music slot (free-on-id-mismatch).
 Login has no BGM of its own. On the character-creation form, a per-class **preview BGM** in the
-`91006xxxx` family replaces the scene BGM on that same single category-0 slot, selected by the create-form
-class selector argument:
+`91006xxxx` family replaces the scene BGM on that same single category-0 slot, selected by the
+class button the player presses. The four class buttons are **UI indices 0..3**, and the UI index is
+**NOT** the internal class id — it is a fixed non-identity crossover (UI 0 -> Monk, UI 1 -> Musa,
+UI 2 -> Salsu, UI 3 -> Dosa). Equally, the UI index is **NOT** the preview-BGM id ordinal: the cue
+ids do not increase with the UI index. Bind the cue strictly through the table below; do not assume
+`910062000 + index`.
 
-| Class slot (create-form selector) | Preview BGM id | Confidence |
-|---|---:|---|
-| class arg 0 | **910065000** | CODE-CONFIRMED |
-| class arg 1 | **910062000** | CODE-CONFIRMED |
-| class arg 2 | **910064000** | CODE-CONFIRMED |
-| class arg 3 (else) | **910063000** | CODE-CONFIRMED |
+| UI button index | Internal class | Class name | Preview BGM id | Resolved 2D path | Confidence |
+|---:|---:|---|---:|---|---|
+| 0 | 4 | Monk | **910065000** | `data/sound/2d/910065000.ogg` | CODE-CONFIRMED (binding) + SAMPLE-VERIFIED (path/header) |
+| 1 | 1 | Musa | **910062000** | `data/sound/2d/910062000.ogg` | CODE-CONFIRMED (binding) + SAMPLE-VERIFIED (path/header) |
+| 2 | 3 | Salsu | **910064000** | `data/sound/2d/910064000.ogg` | CODE-CONFIRMED (binding) + SAMPLE-VERIFIED (path/header) |
+| 3 | 2 | Dosa | **910063000** | `data/sound/2d/910063000.ogg` | CODE-CONFIRMED (binding) + SAMPLE-VERIFIED (path/header) |
 
-Because the preview BGM shares the scene BGM's single category-0 slot, the only audible artefact possible
-within char-select is a **brief drop to silence** on the first class press (the scene BGM is freed by the
-mismatch path before the class track is acquired on the next event) — the opposite of a double-voice. The
-single-slot self-guard means a double-BGM cannot originate WITHIN char-select; the only double-music source
-is the cross-scene loading->char-select contention described in §15.6a.
+All four preview-BGM files are present in the VFS and were header-read: OGG Vorbis container,
+**stereo (2 channels)**, **22,050 Hz** sample rate, stored at `data/sound/2d/<id>.ogg`
+(SAMPLE-VERIFIED). The internal-class column matches the create-form UI->class remap documented in
+`frontend_scenes.md` §4.1; this spec restates it only so the audio binding is unambiguous.
+
+**Replace-not-overlay rule (CODE-CONFIRMED).** A per-class preview cue is played on the **single
+category-0 music voice** — the same voice that carries the char-select BGM 920100200. A category-0
+play does **not** stop the previous track explicitly; the slot frees the prior track on an
+id-mismatch as the new one is acquired. The audible consequence is therefore a **replacement**, not
+an overlay: pressing a class button **displaces** 920100200 (and any prior class preview) rather than
+layering on top of it. The only audible artefact possible WITHIN char-select is a **brief drop to
+silence** on the first class press (the scene BGM is freed by the mismatch path before the class
+track is acquired on the next event) — the opposite of a double-voice. The single-slot self-guard
+means a double-BGM cannot originate within char-select; the only double-music source is the
+cross-scene loading->char-select contention described in §15.6a.
+
+### 15.6c Opening/intro BGM and VFS-present-but-unaccounted ids
+
+> **Confidence:** the opening-BGM scene assignment is SPEC-CARRIED (from the opening-scene build,
+> see §15.2 and `specs/intro_sequence.md`); the file path/container/channels/sample-rate are
+> SAMPLE-VERIFIED (direct VFS header read, CAMPAIGN 9 Wave 3).
+
+**Opening / intro BGM — 910061000.** The opening (title-curtain) scene starts a **looped** 2D
+background-music cue **910061000** at scene build. SAMPLE-VERIFIED present at
+`data/sound/2d/910061000.ogg`, OGG Vorbis, stereo, 22,050 Hz. This is distinct from the login-window
+**intro stinger 861010105** (§15.2) and from the char-select BGM 920100200. The opening crawl/slideshow
+that fires it is specified in `specs/intro_sequence.md`.
+
+**Front-end OGG header facts (SAMPLE-VERIFIED).** Every front-end cue in §15 resolves to a 2D OGG
+Vorbis file under `data/sound/2d/<id>.ogg` and was header-read as **stereo (2 channels)** at
+**22,050 Hz**. This applies to the generic UI click **861010101** (category 2), the login intro
+stinger **861010105**, the opening BGM **910061000**, the loading BGM **920100100**, the char-select
+BGM **920100200**, and the four per-class preview cues **910062000–910065000** (§15.6b). The login
+intro stinger 861010105 also has a `data/sound/3d/` mirror, but the front-end consumes the 2D path.
+
+**Unaccounted ids present in the VFS (UNVERIFIED scene role).** The character-voice family and the
+`9201003xx` neighbourhood contain a few additional OGG files adjacent to the bound cues whose
+scene roles are **not** established by any recovered spec. They are listed here only so an engineer
+does not mistake them for bound front-end cues — **do not wire them**:
+
+| Sound id | Resolved 2D path | Confidence |
+|---:|---|---|
+| 910060001 | `data/sound/2d/910060001.ogg` | SAMPLE-VERIFIED (present); scene role UNVERIFIED |
+| 910066000 | `data/sound/2d/910066000.ogg` | SAMPLE-VERIFIED (present); scene role UNVERIFIED |
+| 910067000 | `data/sound/2d/910067000.ogg` | SAMPLE-VERIFIED (present); scene role UNVERIFIED |
+| 920100300 | `data/sound/2d/920100300.ogg` | SAMPLE-VERIFIED (present); scene role UNVERIFIED |
+
+These four are **not** bound to any front-end scene event in the current analysis; assigning them a
+role is debugger-pending (live-trace the front-end/opening scene builders).
 
 ### 15.7 No server-endpoint config file exists in the VFS
 

@@ -2,39 +2,48 @@
 //
 // The pre-login intro scene (OpeningWindow) — the "red ribbon" crawl + splash slideshow.
 //
-// TWO INDEPENDENT ANIMATED LAYERS, per spec:
-//   1. SCENARIO CRAWL  — openning_scenario.dds (1024×2048), scrolls UPWARD (credits-style).
-//      spec: Docs/RE/specs/frontend_scenes.md §1.0.1/§1.0.3 — "scrolled upward". CODE-CONFIRMED.
-//      Speed: 30 design-px/s after a ~1000 ms gate; clamp/stop at 1843.
-//      Sprite starts at Y=CanvasH (off the bottom); Y = CanvasH − _scrollPos as _scrollPos grows.
-//   2. SPLASH SLIDESHOW — openning_001..004.dds (1024×768), 4-state machine, 17500 ms dwell.
+// TWO INDEPENDENT ANIMATED LAYERS per spec:
+//   1. SPLASH SLIDESHOW — openning_001..004.dds (1024×768), 4-state machine, 17500 ms dwell per
+//      panel, alpha ramp 0→250 (±1 per rendered frame), full-screen, drawn beneath the crawl.
 //      spec: Docs/RE/specs/intro_sequence.md §3. CODE-CONFIRMED.
-//      Alpha ramp 0→250 (frame-gated ±1 step) per panel.
+//
+//   2. SCENARIO CRAWL — openning_scenario.dds (1024×2048), single quad translated vertically.
+//      Scrolls UPWARD (credits-style): sprite Y = CanvasH − _scrollPos as _scrollPos grows 0→1843.
+//      Speed 30 design-px/s after a ~1000 ms gate; clamp/stop at 1843; no wrap.
+//      Centred horizontally: left edge at screen-width/2 − 512 (≈0 on a 1024-wide canvas).
+//      spec: Docs/RE/specs/intro_sequence.md §2, frontend_scenes.md §1.0.3. CODE-CONFIRMED.
 //
 // SOUND:
-//   Fires intro stinger 910061000 once at scene start via FrontEndAudio.PlayIntroBgm().
+//   Fires looped intro cue 910061000 once at scene start via FrontEndAudio.PlayIntroBgm().
 //   spec: Docs/RE/specs/intro_sequence.md §4. CODE-CONFIRMED.
 //
 // SKIP:
-//   Any mouse click or any key press short-circuits to the login screen immediately.
-//   This makes the normally-long intro (4×17.5 s = 70 s) skip-friendly for testing.
+//   Enter / ESC / Space, or any mouse click on the skip-button area (action id 100) → Finish().
+//   spec: Docs/RE/specs/frontend_scenes.md §1.0.5. CODE-CONFIRMED.
+//   (This implementation treats any keyboard or mouse press as the skip gate for simplicity;
+//    the exact action-id 100 widget is mainwindow.dds chrome not yet wired.)
 //
-// ASSETS:
-//   All textures loaded from the real VFS via UiAssetLoader.LoadAtlas().
-//   When offline (no VFS) the intro is a solid dim panel that immediately skips to login.
-//   spec: Docs/RE/specs/intro_sequence.md §1 — VFS paths. SAMPLE-VERIFIED.
+// ASSETS (all real VFS DDS — no solid-colour fallback):
+//   data/ui/openning_scenario.dds  — 1024×2048 scenario crawl strip. SAMPLE-VERIFIED.
+//   data/ui/openning_001..004.dds  — 1024×768 full-screen splash panels. SAMPLE-VERIFIED.
+//   data/ui/mainwindow.dds         — chrome layer (skip-button sprite). SAMPLE-VERIFIED.
+//   Missing asset → log the path and skip/continue; no crash, no solid-colour substitute.
+//   spec: Docs/RE/specs/intro_sequence.md §1. SAMPLE-VERIFIED.
 //
-// PASSIVE: zero game logic. Reads VFS textures; emits one signal (IntroFinished) when done.
+// NOTE on legacy typo: the original client spells the stem "openning" (double-n) — that is the
+// exact VFS filename; preserve it.
+// spec: Docs/RE/specs/intro_sequence.md §0 note. CODE-CONFIRMED.
 //
-// spec: Docs/RE/specs/intro_sequence.md §0–§6 (CODE-CONFIRMED static; on-screen rate UNVERIFIED).
+// PASSIVE: zero game logic. Reads VFS textures; emits IntroFinished when done.
+// spec: Docs/RE/specs/intro_sequence.md §0–§6.
 
 using Godot;
 
 namespace MartialHeroes.Client.Godot.Screens;
 
 /// <summary>
-/// The pre-login opening/intro Control: scenario crawl ("red ribbon") + 4-panel slideshow.
-/// Emits <see cref="IntroFinishedEventHandler"/> when the sequence ends (or is skipped).
+/// The pre-login opening/intro Control: splash slideshow + scenario crawl ("red ribbon").
+/// Emits <see cref="IntroFinishedEventHandler"/> when the sequence ends or the player skips.
 /// <para>spec: Docs/RE/specs/intro_sequence.md §0–§6.</para>
 /// </summary>
 public sealed partial class OpeningWindow : Control
@@ -48,31 +57,30 @@ public sealed partial class OpeningWindow : Control
     public delegate void IntroFinishedEventHandler();
 
     // -------------------------------------------------------------------------
-    // Constants — all CODE-CONFIRMED from spec intro_sequence.md §2 / §3.
+    // Constants — spec: intro_sequence.md §2 / §3. CODE-CONFIRMED.
     // -------------------------------------------------------------------------
 
     // Scenario crawl. spec: intro_sequence.md §2. CODE-CONFIRMED.
-    private const float ScrollSpeed = 30.0f; // design-px / second. spec §2.1. CODE-CONFIRMED.
-    private const float ScrollStartDelayMs = 1000f; // ~1000 ms gate. spec §2.1. CODE-CONFIRMED.
-    private const float ScrollClamp = 1843.0f; // stop clamp. spec §2.1 / §2.3. CODE-CONFIRMED.
+    private const float ScrollSpeed       = 30.0f;   // design-px / second. spec §2.1/§2.3. CODE-CONFIRMED.
+    private const float ScrollStartDelayMs = 1000f;  // ~1000 ms startup gate. spec §2.1. CODE-CONFIRMED.
+    private const float ScrollClamp       = 1843.0f; // stop clamp; no wrap. spec §2.1/§2.3. CODE-CONFIRMED.
 
     // Scenario quad size. spec: intro_sequence.md §1. SAMPLE-VERIFIED.
-    private const float ScenarioW = 1024f; // spec §1. SAMPLE-VERIFIED.
-    private const float ScenarioH = 2048f; // spec §1. SAMPLE-VERIFIED.
+    private const float ScenarioW = 1024f; // spec §1 "width 1024". SAMPLE-VERIFIED.
+    private const float ScenarioH = 2048f; // spec §1 "height 2048". SAMPLE-VERIFIED.
 
-    // Reference canvas height (matching ScreenHost 1024×768 design canvas).
-    // Used to anchor the crawl sprite at the bottom of the viewport so it rises upward.
-    // spec: intro_sequence.md §2 / frontend_scenes.md §11.0 "design canvas 1024×768". CODE-CONFIRMED.
+    // Design canvas height — the base used for the upward-scroll anchor.
+    // spec: frontend_scenes.md §11.0 / §1.5a "canvas 1024×768". CODE-CONFIRMED.
     private const float CanvasH = 768f;
 
     // Slideshow. spec: intro_sequence.md §3. CODE-CONFIRMED.
-    private const int SlideshowFrameCount = 4; // 4 panels. spec §3.1. CODE-CONFIRMED.
-    private const double DwellMs = 17500.0; // ms per panel. spec §3.3. CODE-CONFIRMED.
-    private const int AlphaMax = 250; // alpha ramp bound. spec §3.3. CODE-CONFIRMED.
-    // Alpha step is ±1 per rendered frame (frame-gated, not ms-gated). spec §3.2. CODE-CONFIRMED.
+    private const int    SlideshowFrameCount = 4;        // four panels. spec §3.1/§3.3. CODE-CONFIRMED.
+    private const double DwellMs             = 17500.0;  // ms per panel. spec §3.3. CODE-CONFIRMED.
+    private const int    AlphaMax            = 250;      // alpha ramp bound (not 255). spec §3.3. CODE-CONFIRMED.
+    // Alpha step ±1 per rendered frame (frame-gated, NOT ms-gated). spec §3.2. CODE-CONFIRMED.
 
     // VFS asset paths. spec: intro_sequence.md §1. SAMPLE-VERIFIED.
-    // NOTE: legacy typo "openning" (double-n) — exact VFS filename. spec §0 note. CODE-CONFIRMED.
+    // "openning" (double-n) is the exact VFS spelling. spec §0 note. CODE-CONFIRMED.
     private const string ScenarioPath = "data/ui/openning_scenario.dds"; // spec §1. SAMPLE-VERIFIED.
 
     private static readonly string[] SlideshowPaths =
@@ -84,10 +92,10 @@ public sealed partial class OpeningWindow : Control
     ];
 
     // -------------------------------------------------------------------------
-    // Injection
+    // Injection — set by BootFlow before AddChild
     // -------------------------------------------------------------------------
 
-    /// <summary>Shared asset loader injected by BootFlow (has VFS open already).</summary>
+    /// <summary>Shared asset loader (has VFS open). Injected by BootFlow.</summary>
     public UiAssetLoader? SharedAssets { get; set; }
 
     /// <summary>Shared audio node — used to fire the intro stinger.</summary>
@@ -97,25 +105,24 @@ public sealed partial class OpeningWindow : Control
     // View state — NO domain state
     // -------------------------------------------------------------------------
 
-    // Scroll state.
+    // Scenario crawl node and state.
     private TextureRect? _scenarioRect;
-    private float _scrollPos; // current Y translate (design-px)
-    private float _scrollStartWait; // countdown in ms; scroll starts when ≤ 0
-    private bool _scrollDone; // scroll has reached the clamp
+    private float        _scrollPos;         // current scroll position in design-px (0 → 1843)
+    private float        _scrollStartWait;   // countdown ms; crawl starts when ≤ 0
+    private bool         _scrollDone;        // latch: crawl reached 1843
 
-    // Slideshow state.
-    private TextureRect? _slideshowRect;
-    private int _slideshowState = 1; // 1..4 (panel index, 1-based). spec §3.1.
+    // Slideshow node and state.
+    private TextureRect?     _slideshowRect;
+    private int              _slideshowState = 1;        // 1..4 (1-based panel index). spec §3.1.
     private readonly Texture2D?[] _slideshowTextures = new Texture2D?[SlideshowFrameCount];
-    private double _dwellAccumMs; // ms elapsed in the current dwell
-    private int _alpha; // 0..250 ramp. spec §3.2.
-    private int _alphaDir = 1; // +1 = ramp up, -1 = ramp down
-    private bool _panelFadedIn; // true once alpha first reaches AlphaMax for this panel
-    private bool _sequenceDone; // all 4 panels shown → ready to transition
-    private bool _finished; // guard so we emit IntroFinished only once
+    private double           _dwellAccumMs;              // ms elapsed in current dwell
+    private int              _alpha;                     // 0..250 ramp. spec §3.2.
+    private int              _alphaDir = 1;              // +1 ramp-up, −1 ramp-down
+    private bool             _panelFadedIn;              // latched when alpha first reaches AlphaMax
+    private bool             _sequenceDone;              // all 4 panels complete
 
-    // Manual-nudge range. spec §2.2.
-    // Using arrow key actions for the nudge (no named actions needed — just key detection).
+    // Global finish guard.
+    private bool _finished;
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -124,9 +131,9 @@ public sealed partial class OpeningWindow : Control
     public override void _Ready()
     {
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        // Accept input so clicks/keys can skip the intro.
-        MouseFilter = MouseFilterEnum.Stop;
+        MouseFilter = MouseFilterEnum.Stop; // catch clicks/keys for the skip gate
 
+        // Open the asset loader (or use the shared one from BootFlow).
         UiAssetLoader assets = SharedAssets ?? UiAssetLoader.Open();
         bool ownsAssets = SharedAssets is null;
 
@@ -136,8 +143,7 @@ public sealed partial class OpeningWindow : Control
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[OpeningWindow] Build failed: {ex.Message}");
-            // If the UI build fails, skip directly to login.
+            GD.PrintErr($"[OpeningWindow] Build failed: {ex.Message} — skipping intro.");
             Finish();
             return;
         }
@@ -146,19 +152,19 @@ public sealed partial class OpeningWindow : Control
             if (ownsAssets) assets.Dispose();
         }
 
-        // Init scroll wait. spec §2.1 — "~1000 ms startup gate". CODE-CONFIRMED.
-        _scrollStartWait = ScrollStartDelayMs; // spec: intro_sequence.md §2.1. CODE-CONFIRMED.
-        _scrollPos = 0f;
-        _alpha = 0;
-        _alphaDir = 1;
+        // Initialise crawl and slideshow state.
+        _scrollStartWait = ScrollStartDelayMs; // spec §2.1 "~1000 ms startup gate". CODE-CONFIRMED.
+        _scrollPos   = 0f;
+        _alpha       = 0;
+        _alphaDir    = 1;
         _dwellAccumMs = 0.0;
         _panelFadedIn = false;
         _slideshowState = 1;
 
-        // Fire intro stinger. spec: intro_sequence.md §4. CODE-CONFIRMED.
+        // Fire the intro BGM once at scene start. spec: intro_sequence.md §4. CODE-CONFIRMED.
         Audio?.PlayIntroBgm();
 
-        GD.Print("[OpeningWindow] Intro sequence started (scroll + slideshow active).");
+        GD.Print("[OpeningWindow] Intro sequence started (slideshow + scenario crawl active).");
     }
 
     // -------------------------------------------------------------------------
@@ -169,18 +175,19 @@ public sealed partial class OpeningWindow : Control
     {
         if (_finished) return;
 
-        float dt = (float)delta;
+        float dt   = (float)delta;
         float dtMs = dt * 1000f;
 
-        // --- Scenario crawl update. spec: intro_sequence.md §2.1. CODE-CONFIRMED. ---
+        // Update scenario crawl. spec: intro_sequence.md §2.1. CODE-CONFIRMED.
         UpdateScroll(dtMs, dt);
 
-        // --- Slideshow update. spec: intro_sequence.md §3.1/§3.2. CODE-CONFIRMED. ---
+        // Update splash slideshow. spec: intro_sequence.md §3.1/§3.2. CODE-CONFIRMED.
         UpdateSlideshow(dtMs);
     }
 
     // -------------------------------------------------------------------------
-    // Input — skip on any click or key
+    // Input — skip on Enter/ESC/Space or any mouse button press
+    // spec: frontend_scenes.md §1.0.5. CODE-CONFIRMED.
     // -------------------------------------------------------------------------
 
     public override void _Input(InputEvent ev)
@@ -189,102 +196,95 @@ public sealed partial class OpeningWindow : Control
 
         bool skip = ev switch
         {
+            // spec §1.0.5: key codes 10 (Enter), 27 (ESC), 32 (Space). CODE-CONFIRMED.
+            InputEventKey { Pressed: true, KeyLabel: Key.Enter  } => true,
+            InputEventKey { Pressed: true, KeyLabel: Key.Escape } => true,
+            InputEventKey { Pressed: true, KeyLabel: Key.Space  } => true,
+            // spec §1.0.5: mouse left-click on the skip button (action id 100). CODE-CONFIRMED.
+            // Treat any mouse button press as the skip gate (skip-button widget from mainwindow.dds
+            // is not yet wired; the spec allows the full canvas to act as a click target).
             InputEventMouseButton { Pressed: true } => true,
-            InputEventKey { Pressed: true } => true,
             _ => false,
         };
 
         if (skip)
         {
-            GD.Print("[OpeningWindow] Intro skipped by user input.");
+            GD.Print("[OpeningWindow] Skip input received — ending intro.");
+            // spec §1.0.5: "persist skip + stop scene". In this revival, SKIP persistence is handled
+            // by the options-INI layer (not yet wired); the scene teardown proceeds unconditionally.
             Finish();
         }
     }
 
     // -------------------------------------------------------------------------
-    // UI construction
+    // UI construction — real VFS assets only; missing asset → log + skip, no solid-colour fallback
+    // spec: intro_sequence.md §1. SAMPLE-VERIFIED.
     // -------------------------------------------------------------------------
 
     private void BuildUi(UiAssetLoader assets)
     {
-        // Dark backdrop (full canvas).
-        var bg = new ColorRect { Color = Colors.Black };
-        bg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        AddChild(bg);
-
-        // --- Layer 1: slideshow panels (rendered below the crawl so the crawl overlays it).
-        // spec: intro_sequence.md §3 — "full-screen DDS panels". SAMPLE-VERIFIED. ---
+        // ── Layer 1: splash slideshow (full-screen DDS panels, drawn below the crawl) ──
+        // spec: intro_sequence.md §3 "full-screen DDS panels". SAMPLE-VERIFIED.
         _slideshowRect = new TextureRect
         {
-            Name = "SlideshowRect",
+            Name        = "SlideshowRect",
             StretchMode = TextureRect.StretchModeEnum.Scale,
-            Modulate = new Color(1f, 1f, 1f, 0f), // start transparent
+            Modulate    = new Color(1f, 1f, 1f, 0f), // start transparent; alpha ramp drives fade
         };
         _slideshowRect.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        _slideshowRect.MouseFilter = MouseFilterEnum.Ignore;
         AddChild(_slideshowRect);
 
-        // Pre-load all 4 slideshow textures. spec: intro_sequence.md §1. SAMPLE-VERIFIED.
+        // Pre-load all four slideshow textures.
+        // spec: intro_sequence.md §1 "loaded once at scene build". SAMPLE-VERIFIED.
         for (int i = 0; i < SlideshowFrameCount; i++)
         {
             _slideshowTextures[i] = assets.LoadAtlas(SlideshowPaths[i]);
             if (_slideshowTextures[i] is not null)
-                GD.Print($"[OpeningWindow] Slideshow panel {i + 1} loaded: {SlideshowPaths[i]}");
+                GD.Print($"[OpeningWindow] Slideshow panel {i + 1}: {SlideshowPaths[i]}");
             else
-                GD.Print($"[OpeningWindow] Slideshow panel {i + 1} not found: {SlideshowPaths[i]}");
+                GD.Print($"[OpeningWindow] Slideshow panel {i + 1} not found in VFS: {SlideshowPaths[i]} — panel will be blank.");
         }
 
-        // Set initial panel.
-        _slideshowRect.Texture = _slideshowTextures[0]; // state 1 → panel 001
+        // Wire the first panel (state 1 → openning_001.dds). spec §3.1. CODE-CONFIRMED.
+        _slideshowRect.Texture = _slideshowTextures[0];
 
-        // --- Layer 2: scenario crawl ("red ribbon").
-        // spec: intro_sequence.md §2 — single 1024×2048 sprite; positional Y translate.
-        // CODE-CONFIRMED. ---
+        // ── Layer 2: scenario crawl ("red ribbon") — 1024×2048 positional Y translate ──
+        // spec: intro_sequence.md §2 "destination-Y translate; not UV-scroll; not a shader".
+        // CODE-CONFIRMED.
         _scenarioRect = new TextureRect
         {
-            Name = "ScenarioRect",
-            StretchMode = TextureRect.StretchModeEnum.KeepAspect, // keep the 2048 height
+            Name        = "ScenarioRect",
+            StretchMode = TextureRect.StretchModeEnum.KeepAspect,
         };
+        _scenarioRect.MouseFilter = MouseFilterEnum.Ignore;
 
         Texture2D? scenarioTex = assets.LoadAtlas(ScenarioPath);
         if (scenarioTex is not null)
         {
             _scenarioRect.Texture = scenarioTex;
-            // Position: centred horizontally on the 1024-wide reference canvas.
-            // VERTICAL START: place sprite top at Y = CanvasH so the image begins off the bottom.
-            // As _scrollPos grows 0→1843, the sprite rises (Y = CanvasH − _scrollPos), revealing
-            // successive rows of the tall 2048-px strip from the bottom upward — credits-style scroll.
-            // spec: intro_sequence.md §1 — "scrolled upward". §1.0.1 CODE-CONFIRMED.
-            // spec: frontend_scenes.md §11.0 — design canvas 1024×768. CODE-CONFIRMED.
-            _scenarioRect.Position = new Vector2(0f, CanvasH); // start: sprite bottom-edge at canvas bottom
-            _scenarioRect.Size = new Vector2(ScenarioW, ScenarioH);
             GD.Print($"[OpeningWindow] Scenario crawl loaded: {ScenarioPath}");
         }
         else
         {
-            // Offline fallback: a dim coloured rect that fades out quickly.
-            _scenarioRect.Texture = null;
-            _scenarioRect.Position = new Vector2(0f, CanvasH);
-            _scenarioRect.Size = new Vector2(ScenarioW, ScenarioH);
-            GD.Print($"[OpeningWindow] Scenario not found in VFS: {ScenarioPath} — using placeholder.");
+            // Missing asset → log and leave the rect with no texture (it renders as nothing).
+            // spec: intro_sequence.md §1; rule: "missing asset → log + skip, no fallback".
+            GD.Print($"[OpeningWindow] Scenario crawl not found in VFS: {ScenarioPath} — crawl layer will be blank.");
         }
 
+        // Place the scenario sprite: centred horizontally, starting just below the canvas bottom
+        // so the first frame has the sprite off-screen. As _scrollPos grows 0→1843 the sprite
+        // rises upward (credits-style). spec §1.0.3 "scrolled upward". CODE-CONFIRMED.
+        // Horizontal centre: left edge at (canvasW/2 − ScenarioW/2). For the 1024-wide canvas
+        // that is 0 (sprite fills the width exactly). spec §1 "centred horizontally". CODE-CONFIRMED.
+        _scenarioRect.Position = new Vector2(0f, CanvasH); // start: sprite top-left at Y=768 (off-screen below)
+        _scenarioRect.Size     = new Vector2(ScenarioW, ScenarioH);
         AddChild(_scenarioRect);
-
-        // --- Skip-hint label (shown bottom-centre). ---
-        var skipLabel = new Label
-        {
-            Text = "Press any key or click to skip",
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Bottom,
-        };
-        skipLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        skipLabel.AddThemeFontSizeOverride("font_size", 11);
-        skipLabel.AddThemeColorOverride("font_color", new Color(0.6f, 0.6f, 0.6f, 0.7f));
-        AddChild(skipLabel);
     }
 
     // -------------------------------------------------------------------------
-    // Crawl logic — spec: intro_sequence.md §2.1/§2.2. CODE-CONFIRMED.
+    // Scenario crawl logic
+    // spec: intro_sequence.md §2.1/§2.2. CODE-CONFIRMED.
     // -------------------------------------------------------------------------
 
     private void UpdateScroll(float dtMs, float dt)
@@ -293,92 +293,85 @@ public sealed partial class OpeningWindow : Control
 
         if (_scrollStartWait > 0f)
         {
-            // spec: intro_sequence.md §2.1 — "~1000 ms startup gate". CODE-CONFIRMED.
+            // spec §2.1 "~1000 ms startup gate before scroll begins". CODE-CONFIRMED.
             _scrollStartWait -= dtMs;
             return;
         }
 
         if (!_scrollDone)
         {
-            // Auto-crawl: advance pos at 30 design-px/s. spec §2.1. CODE-CONFIRMED.
-            _scrollPos += dt * ScrollSpeed; // spec: intro_sequence.md §2.1. CODE-CONFIRMED.
+            // Auto-crawl: advance at 30 design-px/s. spec §2.1. CODE-CONFIRMED.
+            _scrollPos += dt * ScrollSpeed; // spec §2.3 "30 design-px/s". CODE-CONFIRMED.
 
             if (_scrollPos >= ScrollClamp)
             {
-                // spec: intro_sequence.md §2.1 — "stop clamp 1843; no wrap-around". CODE-CONFIRMED.
-                _scrollPos = ScrollClamp; // spec: intro_sequence.md §2.3. CODE-CONFIRMED.
+                _scrollPos = ScrollClamp; // spec §2.1/§2.3 "stop clamp 1843; no wrap". CODE-CONFIRMED.
                 _scrollDone = true;
-                GD.Print("[OpeningWindow] Scenario crawl reached clamp 1843 — auto-scroll stopped.");
+                GD.Print("[OpeningWindow] Scenario crawl reached clamp 1843 — stopped.");
             }
         }
         else
         {
-            // Manual nudge mode after auto-scroll completes. spec: intro_sequence.md §2.2.
-            // _scrollPos is a logical "how far up from the start" counter (0 = bottom, 1843 = top).
-            // Arrow-up nudges forward (more of the strip revealed = _scrollPos increases = sprite Y decreases).
-            // Arrow-down nudges backward (_scrollPos decreases = sprite Y increases = scrolls back down).
+            // Manual-nudge review mode after auto-crawl latches done. spec §2.2. CODE-CONFIRMED.
             if (global::Godot.Input.IsActionPressed("ui_up"))
-            {
-                _scrollPos = Mathf.Min(ScrollClamp, _scrollPos + dt * ScrollSpeed); // nudge forward (up). spec §2.2.
-            }
+                _scrollPos = Mathf.Min(ScrollClamp, _scrollPos + dt * ScrollSpeed);
             else if (global::Godot.Input.IsActionPressed("ui_down"))
-            {
-                _scrollPos = Mathf.Max(0f, _scrollPos - dt * ScrollSpeed); // nudge back (down). spec §2.2.
-            }
+                _scrollPos = Mathf.Max(0f, _scrollPos - dt * ScrollSpeed);
         }
 
-        // Drive the sprite's on-screen Y position. spec §1.0.3 / §1.0.1 — "scrolled upward". CODE-CONFIRMED.
-        // Godot +Y is DOWN. To scroll upward (credits-style) the sprite must RISE, i.e. its Y
-        // decreases as _scrollPos grows. Starting position = CanvasH (sprite anchored at canvas
-        // bottom); as _scrollPos increases 0 → 1843 the sprite moves to Y = CanvasH − 1843 = −1075,
-        // pulling successive rows of the 2048-px strip up through the viewport from bottom to top.
+        // Drive the sprite's on-screen Y.
+        // Godot +Y is DOWN. To scroll upward (credits-style), Y must DECREASE as _scrollPos grows.
+        // Start: Y = CanvasH (sprite anchored at canvas bottom, content off-screen).
+        // End:   Y = CanvasH − 1843 ≈ −1075 (sprite top-left well above the canvas).
+        // spec §1.0.3 "positional translate; upward direction". CODE-CONFIRMED (upward PLAUSIBLE).
         _scenarioRect.Position = new Vector2(_scenarioRect.Position.X, CanvasH - _scrollPos);
     }
 
     // -------------------------------------------------------------------------
-    // Slideshow logic — spec: intro_sequence.md §3. CODE-CONFIRMED.
+    // Slideshow logic
+    // spec: intro_sequence.md §3.1/§3.2. CODE-CONFIRMED.
     // -------------------------------------------------------------------------
 
     private void UpdateSlideshow(float dtMs)
     {
         if (_sequenceDone || _slideshowRect is null) return;
 
-        // Alpha ramp: ±1 per rendered frame. spec §3.2. CODE-CONFIRMED.
-        _alpha = Mathf.Clamp(_alpha + _alphaDir, 0, AlphaMax); // spec §3.3. CODE-CONFIRMED.
-        float alphaF = _alpha / (float)AlphaMax;
-        _slideshowRect.Modulate = new Color(1f, 1f, 1f, alphaF);
+        // Alpha ramp: ±1 per rendered frame (frame-gated). spec §3.2. CODE-CONFIRMED.
+        _alpha = Mathf.Clamp(_alpha + _alphaDir, 0, AlphaMax); // spec §3.3 "0…250". CODE-CONFIRMED.
+        _slideshowRect.Modulate = new Color(1f, 1f, 1f, _alpha / (float)AlphaMax);
 
-        // Latch "faded in" once alpha reaches max. spec §3.1. CODE-CONFIRMED.
+        // Latch "faded in" when alpha first reaches AlphaMax. spec §3.1. CODE-CONFIRMED.
         if (!_panelFadedIn && _alpha >= AlphaMax)
             _panelFadedIn = true;
 
-        // Dwell counter: only accumulate after the panel has faded in.
-        // spec §3.1 — "when the dwell expires AND the panel has fully faded in". CODE-CONFIRMED.
+        // Accumulate dwell only after the panel has fully faded in.
+        // spec §3.1 "when dwell expires AND panel fully faded in". CODE-CONFIRMED.
         if (_panelFadedIn)
             _dwellAccumMs += dtMs;
 
         if (!_panelFadedIn || !(_dwellAccumMs >= DwellMs)) return;
 
-        // Dwell expired → advance state. spec §3.1. CODE-CONFIRMED.
+        // Dwell expired → advance to the next panel. spec §3.1. CODE-CONFIRMED.
         _slideshowState++;
         if (_slideshowState > SlideshowFrameCount)
         {
-            // After state 4, the sequence is done. spec §3.1 — "after state 4, transition to login". CODE-CONFIRMED.
+            // After state 4 completes, transition to the login scene.
+            // spec §3.1 "after state 4, transition to login". CODE-CONFIRMED.
             _sequenceDone = true;
-            GD.Print("[OpeningWindow] Slideshow complete — transitioning to login.");
+            GD.Print("[OpeningWindow] Slideshow complete — transitioning.");
             Finish();
             return;
         }
 
-        // Swap texture for the new panel. spec §3.1 — "paging four whole textures". CODE-CONFIRMED.
+        // Swap texture for the new panel. spec §3.1 "paging four whole textures". CODE-CONFIRMED.
         _slideshowRect.Texture = _slideshowTextures[_slideshowState - 1];
         GD.Print($"[OpeningWindow] Slideshow → state {_slideshowState} ({SlideshowPaths[_slideshowState - 1]}).");
 
-        // Reset for next panel.
+        // Reset for the next panel.
         _dwellAccumMs = 0.0;
         _panelFadedIn = false;
-        _alpha = 0;
-        _alphaDir = 1;
+        _alpha        = 0;
+        _alphaDir     = 1;
     }
 
     // -------------------------------------------------------------------------

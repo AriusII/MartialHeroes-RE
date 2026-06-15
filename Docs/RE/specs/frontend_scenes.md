@@ -306,8 +306,16 @@ The OK/Login button (and the Enter key on the form page) run this exact sequence
 network send to the game server**; the only sends in the whole login scene are the lobby fetches and
 the post-handoff handshake (§1.7).
 
-1. **Version gate (local, runs first).** If the VFS is mounted, the client compares the version file
-   inside the VFS (`data/cursor/game.ver`) against the on-disk `game.ver`.
+1. **Version gate (local, runs first) — a client-up-to-date GATE, not a displayed label.** If the VFS
+   is mounted, the client compares the version file inside the VFS (`data/cursor/game.ver`) against the
+   external client-root on-disk `game.ver`. This is a **gate on the login action only**; the scene draws
+   **no on-screen version / build text** (there is no version-label widget — §1.4b).
+   - **File format (CODE-CONFIRMED gate; field semantics UNVERIFIED).** `game.ver` is a **binary
+     28-byte** blob = **7 × u32 little-endian** (no ASCII string, no NUL terminator, no magic). The
+     VFS-embedded copy (`data/cursor/game.ver`) and the external client-root copy may differ
+     field-by-field; a mismatch fails the gate. (The exact field semantics — which u32 is build vs patch
+     vs revision — are UNVERIFIED; the gate's compare granularity, full-blob vs a single field, is also
+     UNVERIFIED. The raw 28-byte stamp layout is owned by `formats/game_ver.md`.)
    - On **mismatch**: a Win32 modal error box is shown using message id **2204**; pressing OK runs
      the quit-from-load path (plays SFX **861010106**, writes engine state **6 / substate 2**, i.e.
      quits the client). See §1.8.
@@ -319,12 +327,12 @@ the post-handoff handshake (§1.7).
      sub-state 6 (stay on the form). **No network send.**
    - Else if **password length < 1** (empty) → show message id **4026**, return to sub-state 6.
      **No network send.**
-   - Else → persist Save-ID again, advance to sub-state **31** (the EULA/accept overlay).
-5. The EULA → server-list → channel-endpoint → submit chain then runs (sub-states 31 → 41, §1.5).
-   The actual account-login wire send and the cryptographic reply happen only at the **tail** of
-   that chain (sub-state 40), on the main game connection — owned by `login_flow.md`. The
-   **second-password / PIN** modal (§1.4a) is collected as part of this tail, before the login blob
-   is built.
+   - Else → persist Save-ID again, advance the drive sequence toward the server-list / channel-endpoint fetch chain (§1.5). The EULA panel itself lives at MAIN substate **6** (§1.4c), and the PIN child panel is shown by a runtime predicate after the submit point (§1.4a) — **neither is sub-state 31**.
+5. The server-list → channel-endpoint → submit chain then runs along the **tick/drive substate**
+   (advancing through {34..41}, §1.5). The actual account-login wire send and the cryptographic reply
+   happen only at the **tail** of that chain (drive sub-state 40), on the main game connection — owned
+   by `login_flow.md`. The **second-password / PIN** child panel (§1.4a) is collected as part of this
+   tail, before the login blob is built.
 
 The version check is **inline in the Login handler only** — there is no separate startup version
 popup, and no background patch dialog (patching is the external launcher's job; see
@@ -358,42 +366,93 @@ typically numeric, PIN.
 - **Asset.** The dialog uses the secondary-password art catalogued in `formats/ui_manifests.md`
   (`data/ui/password.dds`, 1024×1024 DXT3 — listed there as "Secondary password dialog"). The
   caption strings are CP949 in the VFS and are not reproduced here.
-- **Show-trigger (RESOLVED — ALWAYS-SHOWN, CODE-CONFIRMED by the front-end deep pass).** The PIN keypad
-  child window is constructed during the login-scene build, and it is shown **unconditionally on the
-  login-OK path**: once the ID/PW length checks pass, the login tick advances to **sub-state 31**, whose
-  enter-action calls the PIN modal's show method (a shared visibility tail taking 1 = show / 0 = hide —
-  which is why a coarse scan missed it). **Sub-state 32** then polls the PIN object's *visible* and
-  *submitted* flags and only advances to 33 once the user has entered and confirmed the PIN. There is
-  **no account / config / server-reply gate** — the "is-PIN" accessor exists but has **zero callers** in
-  this build and never gates the modal. The entered PIN is deposited on the billing-state object and
-  rides as field #3 of the sub-state-40 credential blob. (Its layout and keypad scramble are recovered
-  in §11.3; see also the rows-31/32 CONFLICT note in §1.5.)
+- **Show-trigger — CONDITIONAL CHILD PANEL, not a numbered sub-state (CODE-CONFIRMED structure;
+  scramble debugger-pending; CORRECTS the campaign-4 "31/32 = PIN modal" reading).** The PIN keypad
+  child window is constructed during the login-scene build (its own 2-atlas texture list, separate from
+  the main login form's) and is shown by a **runtime predicate AFTER the channel-fetch / submit point
+  (logically after the §1.5 server/channel join, sub-state 38)** — **NOT** by entering a numbered login
+  sub-state. **Neither 31 nor 32 is a login sub-state value in this build** (the MAIN workflow substate
+  field never holds 31 or 32 — see §1.5): the campaign-4 "31/32 = PIN modal" attribution is
+  **REFUTED**. The PIN panel is driven by **two LoginWindow-side child-panel actions — 111 (confirm) /
+  112 (cancel)** — and the keypad builder carries its **own internal action ids in the {11, 12, 13}
+  range** (two different scopes: 111/112 at the window level route to the child panel; the {11,12,13}
+  tags are inside the keypad's own dispatcher — their exact tag↔role assignment (OK / Clear / Cancel)
+  is reconciled in §11.3d, where one tag re-runs the scramble and one submits). The entered PIN rides as field #3 of the credential blob
+  built at the join handoff. (Its keypad tile geometry is recovered in §11.3; the **digit→slot scramble
+  permutation and its RNG seed live in the modal controller** — not in the keypad builder — and are
+  **debugger-pending**, do not invent them.)
 
 > **Confidence.** The PIN's existence, its first-class "is-PIN" input modelling, its ≤ 4-char
 > capacity, and the fact that its value lands in the optional login-blob field are **RUNTIME-
-> CONFIRMED** against the live client (read from the client's process at login time; no addresses).
-> The modal's **layout / keypad scramble** is recovered (§11.3), and the **show-trigger is now RESOLVED
-> (CODE-CONFIRMED): ALWAYS shown on the login-OK path at sub-state 31** (front-end deep pass) — **Open
-> question 10 is closed.** The only residual is one optional live re-confirm of a flag value
-> (DEBUGGER-PENDING, non-blocking).
+> CONFIRMED** against the live client (read from the client's process at login time; no addresses). The
+> panel's **structure** — a conditional child panel shown by a runtime predicate after the submit point,
+> with LoginWindow-side actions **111/112** and keypad-internal action ids **11/12/13** — is
+> **CODE-CONFIRMED**. The **digit→slot scramble permutation + RNG seed** are **DEBUGGER-PENDING** (they
+> are not code immediates in the keypad builder). The exact runtime predicate that shows the panel is
+> likewise **DEBUGGER-PENDING**.
 
-## 1.5 The login flow sub-state machine (CODE-CONFIRMED)
+## 1.4b The version check is a GATE, not a label; 3-state button source mapping (CODE-CONFIRMED)
 
-Stored in a single window field (the flow counter at `+0x238`; the field is named in
-`ui_system.md` §6.3). The table below is the corrected, authoritative meaning of each sub-state for
-the front-end flow. **It supersedes two CODE-CONFIRMED-but-wrong labels in `ui_system.md` §6.3**
-(sub-state 29 and 31) — see the conflict note at the end of this section and in §6.
+Two presentation facts that affect a faithful rebuild of the login form:
+
+- **No on-screen version text.** The version check (§1.4) is a **client-up-to-date GATE on the login
+  action** — it does **not** draw a version / build label anywhere on the login screen. A reimplementation
+  must **not** add a visible version string to the login scene; the only version artefact is the binary
+  `game.ver` consulted at OK-click time, and a mismatch surfaces only as the msg-2204 error modal.
+- **3-state button source-rect mapping is INVERTED vs the obvious call order (CODE-CONFIRMED).** The
+  generic 3-state button builder stores the **HOVER** and **PRESSED** source sub-rects in two different
+  widget fields, and the naive builder call-order maps them the **opposite** way to the obvious labelling:
+  the **2nd source (srcX,srcY) pair supplied is the PRESSED frame**, and the **3rd source pair is the
+  HOVER frame**. (So the order is NORMAL, then PRESSED, then HOVER — not NORMAL/HOVER/PRESSED.) This is
+  **moot for every login button** because their hover and pressed art are identical, but a rebuild that
+  ever uses **distinct** hover-vs-pressed art must apply this corrected mapping or the two states will
+  render swapped.
+
+## 1.4c The EULA panel (MAIN substate 6) — it EXISTS (CODE-CONFIRMED, CORRECTS campaign-4 "NO EULA")
+
+The login window **constructs a full EULA / terms panel**, contradicting the campaign-4 "NO EULA"
+reading. The panel is a child of the login window, shown at **MAIN workflow substate 6** (the
+EULA-read state):
+
+- **Body.** Approximately **22 body labels**, populated from message catalogue ids **4001..4022**
+  (the CP949 terms text lives in `msg.xdb` and is not reproduced here).
+- **Actions.** Scroll / accept controls at actions **106 / 107 / 108** (scroll up / scroll down /
+  accept, exact split owned by the action table).
+- **Gating.** While the EULA panel is shown the **login form is gated** (the ID/PW boxes and the
+  Login button are not the active input target until the panel is dismissed/accepted).
+- **Not a numbered 31/32 sub-state.** The EULA is MAIN substate 6, not the refuted 31/32 (§1.5); a
+  faithful client builds it as a child panel of the login window, not as a separate scene.
+
+## 1.5 The login flow sub-state machine — TWO state fields (CODE-CONFIRMED, HEADLINE CORRECTION)
+
+> **HEADLINE CORRECTION — there are TWO distinct login-window state fields, not one.** The earlier
+> "single sub-state field" model is **partly wrong**. The login window carries **two** separate state
+> values that must BOTH be modelled (described here by ROLE; the concrete field offsets belong to the
+> struct map, not this behavioural spec — see §1.5b and the login-window struct doc):
+> 1. **MAIN input/workflow substate** — written only by the input/action router. It holds the values
+>    **{4, 5, 6, 29, 34, 35, 37, 38}** and gates **which widgets are interactive and which input
+>    branches run**. (Notably it never holds 31 or 32 — see the refutation below and §1.4a.)
+> 2. **TICK / drive animation substate** — read and written only by the per-frame tick. It holds the
+>    full range **1..41**, is **seeded to 1 by the window constructor** (intro start), is **advanced
+>    by the tick** as the intro/curtain/drive sequence plays, and is **also written by the two lobby
+>    fetch worker threads**, which deposit completion **sentinels {35, 36, 39, 40}** into it for the
+>    tick to consume.
+>
+> The table below enumerates the **TICK / drive substate** (the 1..41 field) since that is the field
+> that sequences the whole flow; the MAIN-substate values it interleaves with are called out per row.
+> This table **supersedes two CODE-CONFIRMED-but-wrong labels in `ui_system.md` §6.3** (sub-state 29
+> and 31) — see the conflict note at the end of this section and in §6.
 
 | Sub-state | Meaning | Notes |
 |---|---|---|
 | 1 | **Intro start** — seed the curtain/letterbox animation; play login-enter SFX **861010105** | scene entry; the field's initial value. **861010105 is a sound id, not a VFX id**, fired from the tick at the 1→2 edge |
 | 2 | Curtain / letterbox **opening** animation; reset banner Y | the "carved-stone-window / red-ribbon" intro motion is a **widget-reposition / letterbox-curtain animation** (two banner/curtain widgets advance per frame), **NOT** a spawned particle effect |
 | 3, 4, 5 | Intro reposition → settle → **reveal** the login-form widgets | banner pan; also the option-page select target. State 5 stops the intro anim and shows the ID/PW boxes + buttons |
-| 6 | **Login form active** — waiting for user input | the resting state of the form |
-| **29** | **OK-button credential validation** | game.ver verified (mismatch → msg 2204 abort, §1.4); ID len ≥ 4 (else msg **4025** → 6); PW len ≥ 1 (else msg **4026** → 6); persist Save-ID; advance to 31. **(corrects `ui_system.md`: NOT "server-list trigger")** |
+| 6 | **Login form active / EULA-read** — the resting state, waiting for user input. **An EULA panel EXISTS at MAIN substate 6** (CORRECTS the campaign-4 "NO EULA"): a full terms panel of ~22 body labels (message ids **4001..4022**) with scroll/accept actions **106/107/108**; the login form is **gated while the EULA panel is shown** | the EULA panel is a child of the login window built at scene build; see §1.4c |
+| **29** | **OK-button credential validation** (MAIN substate) | game.ver gate verified (mismatch → msg 2204 abort, §1.4); ID len ≥ 4 (else msg **4025** → 6); PW len ≥ 1 (else msg **4026** → 6); persist Save-ID; then advance the drive sequence toward the server/channel fetch chain (34..41). **(corrects `ui_system.md`: NOT "server-list trigger"; the EULA is substate 6 and the PIN is a post-submit child panel — NOT a "31" step)** |
 | 30 | Quit-confirm "Yes" path | writes engine state **6 / substate 8** (quit) |
-| **31** | **Raises a modal — ⚠️ CONFLICT: PIN vs EULA (see note after table)** | in THIS build, reaching 31 calls the second-password / **PIN** modal's show method (front-end deep pass, CODE-CONFIRMED). The older "EULA / terms-of-service accept overlay" label is retained pending resolution. advances toward 32. |
-| 32 | **Polls the raised modal's flags — ⚠️ CONFLICT** | THIS build polls the **PIN** object's *visible* + *submitted* flags (not an EULA accept flag); → 33 on confirm |
+| ~~31~~ | **NOT a login sub-state in this build (REFUTED)** | The campaign-4 "31 = PIN/EULA modal" reading is **REFUTED**: neither the MAIN nor the tick/drive field holds 31 here. The second-password / PIN dialog is a **conditional child panel** (LoginWindow actions **111/112**, keypad-internal **11/12/13**) shown by a runtime predicate after the submit point — **not** a numbered sub-state (§1.4a). The EULA panel is MAIN substate **6**, not 31 (§1.4c). |
+| ~~32~~ | **NOT a login sub-state in this build (REFUTED)** | likewise not held by either state field; the PIN child panel's confirm/cancel is event-driven (actions 111/112), not a polled sub-state (§1.4a). |
 | 33 | Press-OK transition → begin server-list fetch | sets up the fetch (advance to 34) |
 | 34 | Start the server-list fetch thread (lobby port 10000) | a **blocking worker thread** separate from the main overlapped connection; see `login_flow.md` §2.1 |
 | 35 | Wait for server-list reply | thread sets 36 on completion (or signals an error count) |
@@ -404,17 +463,22 @@ the front-end flow. **It supersedes two CODE-CONFIRMED-but-wrong labels in `ui_s
 | 40 | **Join handoff** | collect the second-password / PIN (§1.4a) if not already entered; build the TAB credential string, rebuild the secure context, start the overlapped net engine, set engine state **7** as a guard, **queue transition effect 10001 scheduled 30000 ms ahead**; advance to 41. The login window then exits. |
 | 41 | Transition complete; login window exits → loading | — |
 
-> **⚠️ CONFLICT (rows 31/32) — PIN modal vs EULA overlay (front-end deep pass; record, do not overwrite).**
-> In this build, reaching sub-state **31** raises the **second-password / PIN** modal (it calls the PIN
-> modal's show method via a shared visibility tail), and sub-state **32** polls the **PIN object's**
-> *visible* + *submitted* flags — **not** an EULA accept flag — advancing to 33 only once the PIN is
-> entered and confirmed. The PIN is shown **unconditionally** on the login-OK path (no account / config /
-> server gate; the "is-PIN" accessor has zero callers). Either the EULA-accept overlay and the PIN share
-> the 31/32 window, or the earlier "EULA" label is a stale reading; the flags actually polled at 32 are
-> the PIN's. **Both readings recorded; an owner resolves which (if any) EULA overlay exists.** (This
-> compounds the `ui_system.md §6.3` 29/31 conflict noted at the end of this section.) The PIN's value
-> rides as field #3 of the sub-state-40 credential blob (§1.4a). A faithful client should NOT build a
-> separate EULA/terms screen for 31/32 — that window is the PIN modal.
+> **✅ RESOLVED (rows 31/32) — neither is a login sub-state; EULA and PIN are SEPARATE child panels
+> (CODE-CONFIRMED).** The earlier "31/32 = PIN-vs-EULA modal" conflict is now resolved by an
+> IDA-exact re-walk: **neither 31 nor 32 is ever held by either login state field** in this build, so
+> the dispute was over a non-existent sub-state. Both panels are **conditional child panels**, not
+> numbered sub-states:
+> - **EULA panel** — exists at **MAIN substate 6** (the EULA-read state): a full terms panel of ~22
+>   body labels (message ids **4001..4022**) with scroll/accept actions **106/107/108**; the login form
+>   is gated while it is shown (§1.4c). The campaign-4 "NO EULA" reading is **CONTRADICTED** — the build
+>   constructs the EULA panel.
+> - **Second-password / PIN panel** — a conditional child panel shown by a runtime predicate **after**
+>   the submit point (logically after server/channel join), driven by LoginWindow actions **111/112** and
+>   keypad-internal action ids **11/12/13** (§1.4a). Its value rides as field #3 of the credential blob
+>   built at the join handoff.
+>
+> A faithful client builds **both** as child panels of the login window (EULA at substate 6, PIN as a
+> post-submit conditional panel) and routes **neither** through a numbered 31/32 sub-state.
 
 > **Sub-state 40 detail.** The TAB string is `account⟨TAB⟩option⟨TAB⟩field⟨TAB⟩"host port"`, where
 > the optional middle field carries the **second-password / PIN** (§1.4a) and the 4th field is the
@@ -431,9 +495,10 @@ the front-end flow. **It supersedes two CODE-CONFIRMED-but-wrong labels in `ui_s
 > per-window frame callback** (registered at scene build) that pumps input/messages, sets 2D/alpha
 > render state, updates the IME and the hardware cursor sprite, calls the window's own per-frame
 > update method, and flushes the texture manager. The login-specific work is that update method — a
-> **switch on the flow sub-state field** (`+0x238`). The intro animation, the fetch-wait-consume net
-> sequences, the credential submit, and the loading transition all live in that tick — **not** in the
-> scene builder and **not** in the click/action handler (which only *sets* the sub-state).
+> **switch on the tick / drive substate** (the 1..41 field of §1.5; the concrete field offset is in the
+> login-window struct map, not here). The intro animation, the fetch-wait-consume net sequences, the
+> credential submit, and the loading transition all live in that tick — **not** in the scene builder
+> and **not** in the click/action handler (which only *sets* the MAIN workflow substate that gates input).
 
 > **Two blocking worker threads, not the main connection (CODE-CONFIRMED).** The server-list
 > (34→35→36) and channel-endpoint (38→39→40) fetches each run on their **own blocking worker thread**
@@ -462,10 +527,11 @@ the front-end flow. **It supersedes two CODE-CONFIRMED-but-wrong labels in `ui_s
 > **CONFLICT with `specs/ui_system.md` §6.3 (I do not own that file).** That table marks sub-state
 > **29 = "Server-list trigger point"** and **31 = "Help screen"** as CODE-CONFIRMED. The
 > login-scene lane shows both are wrong: **29 = OK-button credential validation** (ID/PW length
-> checks → msg 4025/4026), and **31 = show EULA/accept overlay** (the help button is a *separate*
-> control, action id 105 `i`, not a sub-state). The remaining `ui_system.md` rows (2–6, 30,
-> 32–41) agree with this spec. **An orchestrator/owner should correct `ui_system.md` §6.3 rows 29
-> and 31.** Recorded here, not edited there.
+> checks → msg 4025/4026), and **31 is NOT a login sub-state at all** in this build (REFUTED, §1.5 /
+> §1.4a) — the EULA panel is **MAIN substate 6** (§1.4c) and the PIN is a **post-submit conditional
+> child panel** (§1.4a), neither at a numbered 31; the help button is a *separate* control (action id
+> 105 `i`), not a sub-state. **An orchestrator/owner should correct `ui_system.md` §6.3 rows 29 and
+> 31** (and drop any "31 = EULA/Help" labelling). Recorded here, not edited there.
 
 ## 1.5a Login-window curtain — the two-edge letterbox OPEN geometry (CODE-CONFIRMED)
 
@@ -476,30 +542,48 @@ the front-end flow. **It supersedes two CODE-CONFIRMED-but-wrong labels in `ui_s
 > the "§1.0.2 NEW letterbox" deep-pass delta; the content belongs to the login curtain, so it is
 > recorded here with §1.5.)
 
-The curtain is a **two-edge letterbox that OPENS OUTWARD** to uncover the form. Exactly **two**
-horizontal edge widgets move, driven together by **one shared frame counter** that resets to 0 and
-advances by **+2 per frame** up to a bound of **222**:
+The curtain is a **two-panel vertical slide that OPENS OUTWARD** to uncover the form. Exactly **two**
+horizontal panel widgets move, driven together by a **global offset accumulator** that resets to 0 and
+advances by **+5 pixels per tick** (no easing, no frame-delta — a **frame-locked** step) up to a bound
+of **222**. The two panels are placed at the SAME offset each tick from this one shared accumulator:
 
-| Edge | Start Y | End Y | Motion |
+| Panel | Start Y | End Y | Motion |
 |---|---|---|---|
-| **TOP** child | **0** | **−222** | slides **up**, off the top of the canvas |
-| **BOTTOM** child | **326** | **548** | slides **down**, off the bottom of the canvas |
+| **TOP** panel | **0** | **−222** | slides **up**, off the top of the canvas (Y = −offset) |
+| **BOTTOM** panel | **326** | **548** | slides **down**, off the bottom of the canvas (Y = offset + 326) |
 
-- During the sweep the per-frame counter `C` (0, +2/frame, while `C ≤ 222`) drives **TOP Y = −C** and
-  **BOTTOM Y = C + 326**. Both edges sweep **222 units symmetrically** at **2 units/frame**, so they
-  open **together** (~111 frames in the original). A secondary inner widget is revealed **late** (placed
-  once `C` passes ~200 of the 222 sweep). When `C` exceeds 222 the end positions are written explicitly
-  (TOP Y = −222, BOTTOM Y = 548).
-- **Sub-state binding:** state **1** seeds the closed/start positions **and plays the login-enter SFX
-  id 861010105** (a sound id, not a VFX id); state **2** sweeps the open until `C > 222`; states **3/4**
-  settle; state **5** reveals the ID/PW boxes + buttons and **stops** the animation; state **6** is the
-  resting form.
-- The per-frame step is **frame-gated** (+2/frame), so the original open duration is frame-rate
-  dependent; a faithful port may keep the **±222 sweep** but pick a fixed wall-clock duration for
+- The per-tick offset `C` (0, **+5/tick**) drives **TOP Y = −C** and **BOTTOM Y = C + 326**; the curtain
+  **completes when the offset exceeds 222** (≈ **45 ticks** at +5/tick). At completion the end positions
+  are TOP Y = −222, BOTTOM Y = 548.
+- **ID textbox reveal seat.** Once the offset exceeds **200**, the ID/account textbox **snaps to
+  (494, 469)** (its open-state seat) — a single reposition late in the sweep, not a per-tick slide.
+- **Sub-state binding (tick/drive substate, §1.5):** drive state **1** seeds the closed/start positions
+  **and plays the login-enter SFX id 861010105** (a sound id, not a VFX id); state **2** runs the slide
+  until offset > 222; states **3/4** settle; state **5** reveals the ID/PW boxes + buttons and **stops**
+  the animation; state **6** is the resting form.
+- The step is **frame-locked** (+5/tick, not wall-clock), so the original open duration is frame-rate
+  dependent; a faithful port may keep the **222 sweep** but pick a fixed wall-clock duration for
   determinism. The canvas convention is **top-left-origin, +Y-down, 1024 × 768**.
 
-**Confidence:** CODE-CONFIRMED (the two edges, the 0 → −222 / 326 → 548 endpoints, the shared
-+2/frame counter bound 222, the open-outward motion, and the sub-state 1 → 5 binding).
+> **DEBUGGER-PENDING — flat-vs-scaled curtain base.** The bottom panel's base **326** is a **768p
+> literal** read inside the per-tick law, but the build-time placement of that panel scales the same
+> base by screen height (`326 × scrH / 768`). Whether the running client uses the flat 326 (the tick
+> literal) or the resolution-scaled value at runtime is **not statically determinable** and must be
+> confirmed on the live client. The endpoints in the table above are the tick-literal (768p) values.
+
+### 1.5a.1 Per-widget alpha fade (CODE-CONFIRMED)
+
+Each login widget fades its own alpha independently of the curtain slide:
+
+- Alpha steps by **±64 per tick** toward the target — **0** when the widget is hidden, **255** when shown
+  — **clamped to [0, 255]** (so a full fade-in/out takes ≈ **4 ticks**).
+- A **forced-alpha override byte** exists per widget: when set, it **PINS the alpha to a fixed value**
+  and **overrides** the ±64/tick fade entirely (the fade does not run while the override is engaged).
+
+**Confidence:** CODE-CONFIRMED (the two panels, the 0 → −222 / 326 → 548 endpoints, the shared
+**+5/tick** global accumulator bound 222 with **completion at offset > 222** (≈ 45 ticks), the ID-box
+snap to (494, 469) at offset > 200, the open-outward motion, the **±64/tick alpha fade with forced-alpha
+override**, and the drive-state 1 → 5 binding). The flat-vs-scaled 326 base is DEBUGGER-PENDING (above).
 
 ## 1.6 Save-ID persistence (CODE-CONFIRMED)
 
@@ -625,18 +709,38 @@ its packet YAML are owned by `login_flow.md` / `packets`:
 
 A `server_id` outside 1..40 is treated as an error/invalid entry.
 
+> **UI-side 8-byte record decode (CODE-CONFIRMED) — note for the renderer.** The login window's
+> own server-list painter reads each 8-byte record with a slightly different field decomposition than
+> the presentation table above (which is carried verbatim from `login_flow.md`): the UI decode is
+> **server id (i16) @ +0, name-key (i16) @ +2, status (u8) | load (u8) packed @ +4, flags (u8) @ +6**.
+> In the UI decode `status` and `load` are a **single packed `u8|u8` pair** at +4 (not two separate
+> i16 fields), and +2 is a **name-key** index (into the localized-name table, §2.8) rather than a
+> status field. The byte *total* is the same 8 bytes and the wire authority remains `login_flow.md`;
+> this note records the UI painter's exact view so a faithful renderer extracts status/load/name-key
+> from the right bytes. (Where the two decompositions disagree on field widths, the UI painter's
+> packed `u8|u8` status/load is what drives the §2.3 colour rules on screen.) **The 8-byte UI record
+> is NOT the 16-byte char-spawn record** — any prior "16-byte server record" reference is wrong for
+> the server list.
+
 ## 2.3 Status & load presentation rules (CODE-CONFIRMED; wire bytes capture-unverified)
 
 These rules are **UI-only** — they color and label an entry; they are not part of any codec.
 
-**Load color thresholds** (population gauge):
+**Load colour thresholds (CODE-CONFIRMED, EXACT)** (population gauge). Each bucket has an exact display
+colour and an exact message-catalogue id; colours are named below as opaque ARGB so no raw hex is
+reproduced:
 
-| `load` value | Bucket |
-|---|---|
-| > 1200 | highest / "full" tier |
-| > 800 | high tier |
-| > 500 | medium tier |
-| ≤ 500 | default tier |
+| `load` value | Bucket | Display colour (opaque ARGB) | Message id |
+|---|---|---|---|
+| > 1200 | highest / "full" tier | **red** | **6001** |
+| > 800 | high tier | **orange** | **6002** |
+| > 500 | medium tier | **yellow** | **6003** |
+| ≤ 500 | default tier | **green** | (default, no special msg) |
+
+Two further status message ids belong to the same family: **6004 = "maintenance"** (the under-check /
+unavailable label), and **6005 = the load read-out**, formatted `"%4d / %4d"` (current load / capacity).
+The thresholds are strict greater-than comparisons evaluated top-down (so `load == 1200` is the high
+tier, not the full tier). These are UI-only colour/label rules and are not part of any codec.
 
 **Status-code special values:**
 
@@ -976,10 +1080,17 @@ on the placement path.
   scale** (below) the on-screen separation is **36 units**.
 - **Z arc:** the Z offsets `{−3593, −3594, −3594.5, −3594, −3593}` dip to the centre slot, bowing the
   row very slightly toward the camera. (This refines the earlier "Z ≈ −3593" approximation.)
-- **Scale:** the per-slot preview actor's scale factor is **multiplied** by **3.0** (a relative scale
-  multiply, not an absolute scale).
+- **Scale (LEGACY units — reconcile before porting).** The legacy code's per-slot scale literal is
+  ≈ **70** (the create-preview literal is ≈ **81**, §4.2). **These are LEGACY-space values, NOT a
+  ready-to-use Godot multiplier** — the Godot-space equivalent must be unit-reconciled against the
+  importer's mesh scale. The empirical **Godot × 3.0** the current port uses may already be the
+  correct reconciliation, but treat the **70 (lineup) / 81 (create)** legacy literals as the source of
+  truth and verify the Godot factor against them rather than hard-coding 3.0. (Flagged for fidelity
+  reconciliation, not a binary unknown.)
+- **Idle animation rate.** The lineup actors play their idle clip at rate **× 3.0**; the single
+  create-preview actor plays at rate **× 12** (§4.2).
 - **Spin:** the slot previews do **not** auto-rotate. (The separate single **create-preview** actor at
-  §4.2 *does* idle-spin.)
+  §4.2 *does* idle-spin under player control.)
 <!-- source: _dirty/campaign5/charselect3d/stage-assembly-confirm.md, _RECONCILED.md (LANE 1) -->
 
 ### 3.3.2 Facing — pure yaw, fixed at build (CODE-CONFIRMED; yaw 0 = FRONT on the binary side)
@@ -1129,6 +1240,30 @@ supplies the lens. The realised motion is an **entry dolly**: on scene-enter the
 keyframe 0 to keyframe 1 over ~2.0 s (position-lerp + orientation-slerp), then holds keyframe 1 for the
 rest of the screen, responding only to the player's manual boom/yaw input overlay.
 
+> **HEADLINE CORRECTION — FREE-LOOK keyframed camera, NO look-at point (CODE-CONFIRMED values;
+> KF2..5 arming DEBUGGER-PENDING).** The rig is a **free-look keyframed camera**, **not** a target-orbit
+> rig: the orbit / pivot offset is baked to **(0, 0, 0)**, so there is **no look-at point** and no
+> separate target node. Each keyframe carries an absolute eye position **and** an explicit
+> **orientation as Euler (yaw, pitch)** — the view direction comes from the per-keyframe Euler angles,
+> not from aiming at a world point. This supersedes the earlier "look-at orbit point" framing in
+> §3.5.4 (the boom/orbit-point language below is retained only as a redirect; read it as: eye =
+> keyframe position, orientation = keyframe Euler, manual zoom is a small forward/back dolly on the
+> view axis). The exact values:
+>
+> - **KF0 (entry-dolly start) = world (515.549, 137.266, −9397.710)** — EXACT (this was only
+>   approximate in the prior reading). KF0 faces **yaw 2.40° / pitch −6.00°**.
+> - **KF1 (entry-dolly end / resting pose) = world (512, 87, −9652)**, faces **yaw 0.785° /
+>   pitch −2.67°**.
+> - **KF2 = (343, 104, −9734); KF3 = (471, 115, −9812); KF4 = (622, 75, −9802.5);
+>   KF5 = (662, 130, −9746)** (absolute).
+> - **Entry blend** = a single **2.0 s KF0→KF1** transition: position **lerp** + orientation **slerp**,
+>   with blend progress `dt = elapsed × 0.0005` (clamped to 1.0 → 2000 ms). The entry leg is a
+>   **plain lerp/slerp — NO parabolic mid-arc bow**; the parabolic-bow weight only activates when **both**
+>   keyframe indices are ≥ 2, which never happens on the KF0→KF1 entry.
+> - **Arming:** only index **0** (rig constructor) and index **1** (scene reset) are armed in char-select.
+>   **KF2..KF5 have no static arm site in this scene and are likely dead here (DEBUGGER-PENDING).**
+> - **Projection (EXACT):** vertical **FOV 50°**, **near 5.0**, **far 15000.0**.
+
 > **CORRECTION — UN-REFUTE the camera path (CODE-CONFIRMED, exhaustive static re-walk).** A prior
 > reading concluded "single static camera; the orbit is REFUTED — no keyframes, no index, no
 > lerp/slerp/ease." **That reading analysed only the bare projection camera (FOV/near/far/anchor) and
@@ -1210,11 +1345,13 @@ the path in stage-world space. The anchored keyframe positions:
 > full multi-waypoint orbit and no select-focus camera move** — only the KF0→KF1 entry dolly plus the
 > manual input overlay.
 
-> **KF0 is approximate.** KF1 = `(512, 87, −9652)` is exact and is the pose the player rests at (it is
-> the value an earlier pass captured and mislabelled "the static camera" — it was keyframe 1 of the
-> path all along). KF0 ≈ `(516.55, 137.27, −9386.65)` and KF2 ≈ `(341.00, 104.00, −9734.00)` are
-> anchored decodes; KF3–KF5 are present in the table but, being dormant, their exact anchored values
-> are not load-bearing for the realised motion.
+> **All six keyframes are now EXACT (CODE-CONFIRMED).** KF0 = `(515.549, 137.266, −9397.710)` (the
+> entry-dolly start, previously only approximate); KF1 = `(512, 87, −9652)` (the resting pose the
+> player holds at — the value an earlier pass captured and mislabelled "the static camera"); KF2 =
+> `(343, 104, −9734)`, KF3 = `(471, 115, −9812)`, KF4 = `(622, 75, −9802.5)`, KF5 = `(662, 130,
+> −9746)`. Only KF0 and KF1 are armed in char-select; **KF2..KF5 have no static arm site in this
+> scene and are likely dead here (DEBUGGER-PENDING).** Per the §3.5 headline correction, each keyframe's
+> orientation is an explicit **Euler (yaw, pitch)**, not an aim at a look-at point.
 
 > **Coordinate convention reminder.** These are stage-world coordinates as the legacy client stores
 > them. Apply the project's world-to-engine convention (world geometry negates Z — see
@@ -1265,6 +1402,16 @@ zoom/yaw/pitch input-rate constant. **Neither drives the automatic keyframe fram
 tween uses its own normalizer (§3.5.4).
 
 ### 3.5.4 Framing law — look-at, eye, easing (CODE-CONFIRMED; eye = orbit point at zoom 0)
+
+> **SUPERSEDED FRAMING — read this as a FREE-LOOK camera (see the §3.5 headline correction).** The
+> "orbit point + look-at target" language in this subsection is an older model. The IDA-exact re-walk
+> shows the rig is **free-look**: the orbit/pivot offset is baked to **(0,0,0)**, so the "orbit point"
+> IS simply the keyframe's eye position, and there is **no look-at target** — the view direction is the
+> keyframe's explicit **Euler (yaw, pitch)**. The boom/zoom detail below is still correct as a small
+> forward/back dolly on the view axis (manual zoom), but wherever this subsection says "look-at target =
+> orbit point", read it as "eye = keyframe position; orientation = keyframe Euler". The entry KF0→KF1
+> blend is a **plain lerp/slerp with no parabolic bow** (the bow only applies between inner keyframes
+> ≥ 2, which never occurs on entry).
 
 The camera manipulator is a scene-graph node, not an explicit eye/target pair. Each frame it computes:
 
@@ -1487,7 +1634,8 @@ The scene builder spawns **exactly one** ambient map effect from a code immediat
 **380003000**, which is the internal id of **`char_select-u.xeff`** (the composite torch/brazier corona
 effect, 68 sub-effects). It is spawned at world **(508.483, 69.887, −9758.569)** — the **centre of the
 preview character row**, framed dead-centre by the camera (the same point as the terrain-init pivot,
-§3.7.2) — with **identity quaternion (0,0,0,1)** and **scale 1.0**. The builder **first clears the
+§3.7.2) — with **identity orientation (0,0,0 / quaternion 0,0,0,1)**, **scale 1.0**, and **loop = 1** (a
+standing looped effect). The builder **first clears the
 active-effect list and resets the particle manager**, *then* inserts this one pooled effect — so it is
 a **standing background effect for the whole select session**, not a one-shot, and starts from a known
 empty state. This is the **builder's sole pooled-spawn call** — the **only** effect-id immediate
@@ -1942,8 +2090,12 @@ The create form's right-hand panel has two separate text sources:
 The key↔class mapping carries the same UI-slot vs internal-class crossover as the voice cue above
 (npc.scr key → internal class): key 1 → Monk (4), key 2 → Musa (1), key 3 → Salsu (2),
 key 4 → Dosa (3). The full record layout, the per-class BGM, and the 18-cell stat-grid key families
-(`2·disc+{110,111,120,121,130,131,140,141}` and `disc+{210..240}`) are documented in
-`formats/config_tables.md §2.17.3`. `npc.scr` is loaded once at boot and persists for the session
+(`2·disc+{110,111,120,121,130,131,140,141}`, VERIFIED) are documented in
+`formats/config_tables.md §2.17.3`. **REFUTED key formula:** the earlier `disc+{210..240}` "key"
+family is **NOT** a stat-grid key formula — those `210xxxxxxx` values are full **equipment ITEM ids**
+(weapon / armor / accessory / body ids written into the committed slot record), not keyed-string
+lookups. The stat grid binds **only** via the `2·disc+{110..141}` keyed-string lookups. (Owned by the
+config-tables spec; recorded here as a frontend-binding correction.) `npc.scr` is loaded once at boot and persists for the session
 (no per-area reload), so keys 1..4 are always resolvable on the create form.
 
 ## 4.2 The create preview & appearance seeds (CODE-CONFIRMED)
@@ -1959,15 +2111,27 @@ spawn descriptor seeded with the current create choices:
 | +0x34 | class selector | **internal class id (1..4)** |
 
 The create preview is placed at the stage centre (X ≈ origin − 1536.5, Z ≈ origin − 3538 — i.e. between
-slots 2 and 3 in X and **+56.5 units nearer the camera** than the row, scale **75** vs the slots' 50) so
-the player sees their would-be character before naming it. The preview is **mutually exclusive** with the
-5-slot row (the slot actors are torn down before the single create actor is built). **Rotation is under
-player control — a press-and-hold turntable (≈±2 rad/s while a rotate control is held over the preview),
-NOT a continuous auto-spin** (an earlier note describing a set idle-spin rate is superseded; CODE-CONFIRMED,
-`_dirty/campaign4/cs-flows/create-preview-behavior.md`). Changing the class rebuilds the whole actor;
-the `+`/`−` face buttons rebuild it but the visible 3D face does **not** change (face feeds only a separate
-2D portrait), and there is **no functional sex toggle**. A per-class **stat preview** (six stat-label
-groups) is filled from the class template (pure display).
+slots 2 and 3 in X) so the player sees their would-be character before naming it. **The create-preview
+nudge toward the camera is on the Z axis** — the create actor sits **≈ +55.5..+56.5 units in Z toward
+the camera** versus the lineup row (NOT an X or Y offset). Its scale literal is ≈ **81** in LEGACY units
+(versus the lineup's ≈ **70**, §3.3.1) — a legacy value to be **unit-reconciled** into Godot space, not a
+ready-made multiplier. The idle clip plays at rate **× 12** (versus the lineup's × 3.0). The preview is
+**mutually exclusive** with the 5-slot row (the slot actors are torn down before the single create actor
+is built). **Rotation is under player control** — a press-and-hold turntable (≈±2 rad/s while a rotate
+control is held over the preview), NOT a continuous auto-spin.
+
+- **Face ± does NOT rebuild the 3D actor (CODE-CONFIRMED, CORRECTION).** The face `+`/`−` handlers only
+  **increment / decrement the face index** (clamped **1..7**); they do **not** re-spawn or rebuild the
+  preview mesh. **Only a class change rebuilds the preview actor** (via the apply-class-selection path,
+  §4.1). An earlier reading that said "the face buttons rebuild the actor" is **superseded** — the visible
+  3D character is unchanged by face stepping (the face value feeds the create descriptor / a 2D portrait,
+  not a live mesh rebuild). There is **no functional sex toggle**.
+- **PREVIEW gear ≠ COMMITTED slot gear (CODE-CONFIRMED).** The equipment the create **preview** displays
+  is drawn from a **different table** than the gear written into the **committed** character slot record
+  on create (§4.3). A faithful rebuild must not assume the preview's visual ids equal the slot record's
+  starter-equipment ids — they are two separate id sets.
+
+A per-class **stat preview** (six stat-label groups) is filled from the class template (pure display).
 
 ## 4.3 Per-class starter equipment (CODE-CONFIRMED)
 
@@ -1988,7 +2152,10 @@ descriptor slot is which equipment category is for the asset/struct authors to p
 
 On create-confirm (and on rename, §6), the entered name is validated locally before any send:
 
-- **Minimum length: 2** characters; an empty first character fails.
+- **Minimum length: 2** characters; an empty first character fails. **DEBUGGER-PENDING:** whether
+  the "2" is measured in **bytes or in CP949 characters** is not statically settleable (a single
+  double-byte Hangul syllable is 2 bytes but 1 character) — confirm the exact byte-vs-char semantics
+  of the minimum-length check on the live client before relying on it.
 - **Allowed characters only:**
   - ASCII **lowercase `a`–`z`** (0x61–0x7A),
   - ASCII **digits `0`–`9`** (0x30–0x39),
@@ -2310,7 +2477,7 @@ next scene.
   OK / Enter:
       version gate (msg 2204 on mismatch → quit: state 6/2)
       → sub-state 29 (validate ID≥4 / PW≥1; fail → msg 4025/4026 → sub-state 6)
-      → 31 raise PIN modal → 32 poll PIN visible+submitted → 33 → 34 server-list fetch (lobby :10000)
+      → drive substate advances (EULA panel is substate 6; NO 31/32 PIN-substate) → 34 server-list fetch (lobby :10000)
       → 35 wait → 36 consume (empty → 4027; fail → 4028; else render)
   [SERVER SELECT, same window]
       → 37 server selected (persist Lastserver; randomized order; NEW badge)
@@ -2379,17 +2546,18 @@ next scene.
 8. **`1/7 CmsgSelectCharacter` role.** The 2-byte select send sets the net-busy flag; whether it is
    a "lock this slot / fetch detail" pre-step that must precede every `1/9` enter, or only the first
    selection, is unclear without a capture or the inbound 2-byte select reply traced.
-9. **EULA gating.** The EULA/accept overlay (sub-states 31/32) gates the server-list fetch, but
-   whether it is shown every launch or only first-run (an INI/registry guard) was not determined.
+9. **EULA gating (CORRECTED).** The EULA panel is **MAIN substate 6** (§1.4c), **not** "sub-states
+   31/32" (that earlier framing is REFUTED, §1.5). It gates the login form while shown. Whether it is
+   shown every launch or only first-run (an INI/registry guard) is still **DEBUGGER-PENDING**.
 10. **Second-password / PIN modal show-trigger (UNRESOLVED in static).** The PIN's existence, its
     first-class "is-PIN" input modelling, its ≤4-char capacity, and the fact that its value becomes
     the optional login-blob field are RUNTIME-CONFIRMED (§1.4a); its **layout / scramble** is recovered
     (§11.3: modal rect, the 2×5 scrambled keypad, the reset/OK/cancel tags and atlas source rects).
-    What remains **UNRESOLVED in static** is the **show-trigger**: the keypad child window is built at
-    login-scene build, but no login sub-state (1..41) shows it and the sub-state-40 submit has no
-    in-tick PIN gate — so it is shown either by the login form/action handler as an in-place child
-    widget or by a post-submit net-reply handler in the character-management path (§1.4a). Flag pending
-    a parallel recovery / live confirmation; also open: the live re-roll-on-Reset (debugger-testable),
+    What remains **DEBUGGER-PENDING** is (a) the exact **runtime predicate** that shows the PIN child
+    panel after the submit point (it is a conditional child panel driven by LoginWindow actions
+    111/112 with keypad-internal ids 11/12/13, NOT a numbered 31/32 sub-state — §1.4a), and (b) the
+    **digit→slot scramble permutation + RNG seed**, which live in the modal controller (not the keypad
+    builder) and are not code immediates. Also open: the live re-roll-on-Reset (debugger-testable),
     and whether the modal can be skipped/disabled per account. Its labels are baked atlas art (no
     caption ids).
 11. **Char-select 2D class icon.** No standalone class-icon widget keyed by a class index exists in
@@ -2410,9 +2578,10 @@ next scene.
 ### Cross-spec conflicts recorded here (owners must resolve in their files)
 
 - **`specs/ui_system.md` §6.3** marks sub-state **29 = "Server-list trigger"** and **31 = "Help
-  screen"** as CODE-CONFIRMED. Both are wrong: **29 = OK-button credential validation**, **31 = show
-  EULA overlay** (the help button is the separate action `i` / id 105). The owner of `ui_system.md`
-  should correct those two rows. (§1.5)
+  screen"** as CODE-CONFIRMED. Both are wrong: **29 = OK-button credential validation**, and **31 is
+  NOT a login sub-state in this build** (REFUTED) — the EULA panel is **MAIN substate 6** and the PIN is
+  a **post-submit conditional child panel**, neither at a numbered 31 (the help button is the separate
+  action `i` / id 105). The owner of `ui_system.md` should correct those two rows. (§1.5 / §1.4a / §1.4c)
 - **Opcode `1/6` — collision STATICALLY RESOLVED (no capture needed); protocol-author to split the
   rows** (`opcodes.md` / `names.yaml` / `login_flow.md`): there is **no shared opcode**. The login
   credential send is **`1/4`** (the secure auth reply to inbound `0/0`); **`1/6` is character-create
@@ -2932,6 +3101,18 @@ Button **tags** are integer ids stored on each widget and read back by the keypa
 > optional login-blob field - owned by `login_flow.md` section 4.2; the in-game gift-character
 > variant of this modal routes its submit through the net handler with a separate constant). The
 > modal fires no VFX and no PIN-specific SFX of its own.
+
+> **DISCREPANCY to reconcile (tag↔role labelling).** A separate IDA-exact re-walk (campaign-9 wave-3)
+> reports the **keypad-internal action ids** as **11 = OK, 12 = Clear, 13 = Cancel**, mapping tag 11 to
+> the **(243,133,58,30)** button (which this table labels "Reset") and tag 12 to the **(90,290,154,58)**
+> button (labelled "OK" here). The **rects are identical between the two readings** — only the *role*
+> name attached to tags 11 and 12 differs (this table: 11=Reset / 12=OK; the wave-3 read: 11=OK /
+> 12=Clear). The behaviours are not in dispute: one button **re-runs the scramble** and one **submits**.
+> A faithful rebuild should wire behaviour-to-rect (the (243,133,58,30) small button vs the
+> (90,290,154,58) wide button) and treat the **tag-number↔role assignment as DEBUGGER-PENDING** until a
+> live read settles which numeric tag the submit handler actually compares against. The LoginWindow-side
+> child-panel actions are **111 (confirm) / 112 (cancel)** (§1.4a), a different scope from these
+> keypad-internal tags.
 
 ### 11.3e Two distinct numeric keypads — do NOT conflate them
 
