@@ -4,68 +4,87 @@
 name: SmsgActorVitalsAndPairState
 opcode: 0x50035           # major 5 (Push), minor 53 -> (5 << 16) | 53
 direction: S2C
-size: 32                 # fixed 32-byte payload block
+size: 32                 # fixed 32-byte payload block (corroborated by the Wave E handler read)
 spec: packets/5-53_actor_vitals_and_pair_state.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Server pushes an actor's current vitals (HP / stamina / a third vital) plus level/state, and a pairing (couple) relationship when the actor sort marks a paired entity. The current-HP value is the canonical HP-bar source.
+summary: Server pushes an actor's current vitals (HP / MP / stamina / a third vital) plus a level/state byte, written onto the looked-up actor; the local player is additionally clamped against its client-computed stat caps. A pair/couple sub-mode (when the actor sort marks a paired entity) forms or breaks a partner link and posts a paired/unpaired notice. The current-HP value is the canonical HP-bar source.
 
 # Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 32.
 fields:
-  - { name: Sort,        type: u8 }          # 0x00  actor sort (a value of 8 is remapped to 1 on read)
-  - { name: Pad0,        type: "bytes[3]" }    # 0x01  alignment padding to the next dword
-  - { name: ActorId,     type: u32 }         # 0x04  target actor id
-  - { name: Byte08,      type: u8 }          # 0x08  read into the record; meaning not decoded
-  - { name: Byte09,      type: u8 }          # 0x09  read into the record; meaning not decoded
-  - { name: LevelOrState, type: u8 }         # 0x0a  level / state byte
-  - { name: StateByte,   type: u8 }          # 0x0b  secondary state byte
-  - { name: PartnerId,   type: u32 }         # 0x0c  partner / pair actor id (used when Sort == 2)
-  - { name: CurrentHp,   type: u32 }         # 0x10  current HP (absolute; written to actor+176, the HP-bar source)
-  - { name: VitalB,      type: u32 }         # 0x14  secondary vital
-  - { name: Stamina,     type: u32 }         # 0x18  current stamina
-  - { name: VitalC,      type: u32 }         # 0x1c  third vital (e.g. MP / special); mirrored to the local-player global when this is the local actor
+  - { name: Sort,         type: u8 }          # 0x00  actor sort (a wire value of 8 is remapped to 1 on read)
+  - { name: Pad0,         type: "bytes[3]" }    # 0x01  alignment padding to the next dword
+  - { name: ActorId,      type: u32 }         # 0x04  target actor id
+  - { name: Filler0,      type: u8 }          # 0x08  read but never consumed (unused filler)
+  - { name: Filler1,      type: u8 }          # 0x09  read but never consumed (unused filler)
+  - { name: LevelOrState, type: u8 }          # 0x0a  level / state byte
+  - { name: StateByte,    type: u8 }          # 0x0b  secondary state byte
+  - { name: PartnerId,    type: u32 }         # 0x0c  partner / pair (couple) actor id (used when Sort == 2)
+  - { name: CurrentHp,    type: u32 }         # 0x10  current HP (absolute; the HP-bar source)
+  - { name: CurrentMp,    type: u32 }         # 0x14  current MP
+  - { name: Stamina,      type: u32 }         # 0x18  current stamina
+  - { name: VitalC,       type: u32 }         # 0x1c  third vital (special); mirrored to the local-player global when this is the local actor
 
 notes: |
-  Static inference only; no capture available. Total = 32 bytes (matches the handler's single
-  32-byte read). The handler looks the actor up by (Sort, ActorId) and writes the vitals into the
-  actor record. CAPTURE-UNVERIFIED.
+  Static inference only; no capture available. Total = 32 bytes, corroborated independently by
+  two recon passes: the original handler read a single 32-byte block, and the Campaign-7 Wave E
+  pass re-read the same fixed 32-byte payload. CAPTURE-UNVERIFIED for the exact byte positions.
 
-    0x00 (1B) Sort         : actor sort; the value 8 is normalised to 1 on read.
+  The handler looks the actor up by the (Sort, ActorId) key, writes the vitals/level/state onto
+  that actor record, clamps the local player against its stat caps, and (in the pair sub-mode)
+  forms or breaks a partner link and posts a paired/unpaired notice.
+
+    0x00 (1B) Sort         : actor sort; the wire value 8 is normalised to 1 on read.
     0x04 (4B) ActorId      : actor id (le u32) for the lookup.
-    0x08 (1B) / 0x09 (1B)  : read into the struct but not decoded this pass.
+    0x08 (1B) / 0x09 (1B)  : Filler0 / Filler1 -- read off the wire but never consumed by the
+                             handler (true filler). A prior draft modelled these as named record
+                             fields; the Wave E pass establishes they are unused.
     0x0a (1B) LevelOrState : a level/state byte (written to the actor's level/state slot).
     0x0b (1B) StateByte    : a secondary state byte.
-    0x0c (4B) PartnerId    : partner/pair actor id. When Sort == 2 the handler treats this as a
-                             couple-relationship partner and emits couple-status UI text (the
-                             10025..10032 string ids are UI strings, NOT wire data).
-    0x10 (4B) CurrentHp    : current HP. HIGH CONFIDENCE. This is the ABSOLUTE current-HP value and
-                             the canonical "damage lands here" observable -- it is the source the
-                             overhead HP bar reads.
-    0x14 (4B) VitalB       : a secondary vital. Order unconfirmed -- see unknowns.
+    0x0c (4B) PartnerId    : partner / pair (couple) actor id. When Sort == 2 the handler treats
+                             this as a couple-relationship partner: it FORMS or BREAKS the partner
+                             link on the actor and posts a paired/unpaired notice. (The couple
+                             status-UI string ids, e.g. the 10025..10032 range, are UI strings,
+                             NOT wire data.) See RELATED below for the companion pair messages.
+    0x10 (4B) CurrentHp    : current HP. HIGH CONFIDENCE. The ABSOLUTE current-HP value and the
+                             canonical "damage lands here" observable -- the overhead HP bar reads
+                             this value.
+    0x14 (4B) CurrentMp    : current MP. HIGH CONFIDENCE on placement (resolves the earlier
+                             "secondary vital order unconfirmed" question: this slot is MP).
     0x18 (4B) Stamina      : current stamina. HIGH CONFIDENCE.
-    0x1c (4B) VitalC       : a third vital (MP / special); for the local player it is mirrored to a
+    0x1c (4B) VitalC       : a third vital (special); for the local player it is mirrored to a
                              client global and clamped to live values.
 
-  HP-BAR SOURCE & WRITE TARGETS (CODE-CONFIRMED -- destination actor-struct offsets, for engineer
-  context; these are where the handler STORES the wire vitals, not extra wire fields):
-    - CurrentHp (wire 0x10) is written as the ABSOLUTE current HP into the target actor at byte
-      offset actor+176. That actor+176 slot is exactly what the overhead HP bar reads, so this message
-      is where a hit visibly "lands" as a new HP number.
-    - the secondary vital lands at actor+180, current stamina at actor+184, and the level/state byte
-      at actor+172 (with the secondary state byte at actor+173).
-    - LOCAL-PLAYER CLAMP: when the updated actor is the local player, the handler mirrors the values
-      into the local-player vital globals and CLAMPS each to the CLIENT-COMPUTED maximum (current HP
-      to a client-side MaxHP, stamina to MaxStamina, the third vital to its own client max), and
-      floors negative values to 0. So the maximum is computed locally (from the client stat model)
-      while the current value is server-authoritative -- the server sends only the current vitals,
-      never the maxima, and HP reaching 0 (after the floor) is the death condition.
+  The final field order HP / MP / Stamina / VitalC (0x10 / 0x14 / 0x18 / 0x1c) is HIGH confidence
+  from the second recon pass; the leading actor-key prefix (Sort@0x00, ActorId@0x04) follows the
+  common Push actor-handler idiom -- the lookup-argument order was recovered uniformly as
+  (sort@+0, id@+4) for Push actor handlers (specs/handlers.md sections 4 and 5), but the on-wire
+  byte order of the (sort, id) pair is itself UNVERIFIED until a capture confirms it
+  (specs/handlers.md section 5 caveat).
+
+  HP-BAR SOURCE & LOCAL-PLAYER CLAMP (handler behaviour, for engineer context -- these describe
+  where the handler STORES the wire vitals, not extra wire fields):
+    - CurrentHp (wire 0x10) is stored as the ABSOLUTE current HP onto the target actor. That slot
+      is exactly what the overhead HP bar reads, so this message is where a hit visibly "lands" as
+      a new HP number.
+    - the remaining vitals (MP / stamina / the third vital) and the level/state byte are written
+      into the adjacent actor vital/state slots.
+    - LOCAL-PLAYER CLAMP: when the updated actor is the local player, the handler mirrors the
+      values into the local-player vital globals and CLAMPS each to the CLIENT-COMPUTED maximum
+      (current HP to a client-side MaxHP, MP/stamina/third vital to their own client maxima) and
+      floors negative values to 0. The maximum is computed locally (from the client stat model)
+      while the current value is server-authoritative -- the server sends only the current
+      vitals, never the maxima, and HP reaching 0 (after the floor) is the death condition.
 
   UNKNOWNS to resolve with a capture of an HP/MP/stamina-changing event:
-    - the semantics of bytes 0x08/0x09;
-    - the precise ordering of the vital fields (HP / VitalB / Stamina / VitalC) -- only the CurrentHp
-      and Stamina placements are high confidence.
+    - the on-wire byte order of the (Sort, ActorId) key (call-argument order is (sort, id) but
+      the wire order is unconfirmed);
+    - whether Filler0/Filler1 (0x08/0x09) ever carry meaningful data on some server build
+      (current evidence: read but unused).
 
   RELATED: this is one of the inbound vitals/state messages alongside 5/32 SmsgLevelUp
   (packets/5-32_level_up.yaml); per-hit HP deltas also arrive in the 36-byte records of
-  5/52 SmsgActorSkillAction (packets/5-52_actor_skill_action.yaml).
+  5/52 SmsgActorSkillAction (packets/5-52_actor_skill_action.yaml). The couple/pair link is
+  companioned by the player-pair notice family (5/42 SmsgPlayerPairSystemNotice and
+  5/64 SmsgRemoteActorRelationPair per specs/handlers.md).

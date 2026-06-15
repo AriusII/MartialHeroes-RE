@@ -7,15 +7,19 @@
 > records the campaign-specific decisions, the orchestrator→phase assignment, the cluster taxonomy,
 > and the master deliverables. The live run record is [`ROADMAP.md`](ROADMAP.md).
 
-> **▶ ACTIVE CAMPAIGN (2026-06-14): CAMPAIGN 6 — Total IDB Legibility (IDA-only).** Mandate: work
-> exclusively in IDA Pro 9.3 (the `ida` MCP) on `doida.exe` and make the whole IDB legible — name /
-> comment / type every meaningful function, global, class, struct field and (where it pays) local — via a
-> ~75-deployment fleet across ~6 sequential waves with heavy IDAPython batching. It **reuses this file's
-> apparatus verbatim** (the tiers in §2, the concurrency ledger, the firewall, the
-> comprehension→annotation pipeline) but replaces the cluster taxonomy with a **16-cluster partition of
-> the ≈ 21,075 anonymous `sub_`** and the Engineering (E) phase with a **serialized-WRITE annotation (D)**
-> phase. Charter detail: `~/.claude/plans/dans-ce-plan-on-tranquil-panda.md`; live record: the
-> **CAMPAIGN 6** section of [`ROADMAP.md`](ROADMAP.md). CAMPAIGN 3/4 below are paused (kept for provenance).
+> **▶ ACTIVE CAMPAIGN (2026-06-14): CAMPAIGN 7 — Re-anchor & Total IDB Legibility on the NEW `doida.exe`
+> build (IDA-only).** The prior IDB crashed unrecoverably and was rebuilt from scratch on a **DIFFERENT
+> build** (input sha256 `263bd994…6fd8ee` ≠ the old `names.yaml` pin `63fcaf8e…9eb9df`); all prior
+> addresses are stale, so Campaign 6's IDB-resident naming is gone. Mandate: work exclusively in IDA Pro
+> (the `ida` MCP) — rename / comment / type only, never patch — and re-establish full legibility by
+> **re-anchoring the prior corpus by CONTENT** (RTTI / strings / imports / constants), then comprehending
+> the residual. It **reuses this file's apparatus verbatim** (the §2 tiers, the concurrency ledger, the
+> firewall, the comprehension→annotation pipeline) and the Campaign-6 16-cluster partition, adding one new
+> tool — the **content re-anchor matcher** — and one new phase **A′ (re-anchor)** before comprehension.
+> ~80–100 deployments / ~6 waves / ≤3 readers / 1 serialized writer / autonomous with ONE pre-write
+> checkpoint; genuine version-deltas promoted clean (Phase S); end-state `names.yaml` re-pinned to
+> `263bd994…`. Charter/plan file: `~/.claude/plans/tr-s-bien-je-vais-melodic-sketch.md`; live record: the
+> **CAMPAIGN 7** section of [`ROADMAP.md`](ROADMAP.md). CAMPAIGN 3/4/6 below are paused (kept for provenance).
 
 ---
 

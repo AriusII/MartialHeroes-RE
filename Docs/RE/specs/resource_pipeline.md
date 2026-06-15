@@ -95,6 +95,133 @@ scene loop). If `vfsmode = false`, the entire packed path is bypassed and all op
 filesystem directly. The Godot/.NET loader already exposes this toggle via the VFS mount +
 loose-file fallback in `Assets.Vfs`.
 
+## 1.5 Campaign 7 re-confirmation — VFS runtime access path on build 263bd994 — (CODE-CONFIRMED)
+
+The full VFS open/read/find machinery in §1.1–§1.4 was **re-confirmed against the newer client
+build (SHA-256 prefix `263bd994`) in Campaign 7** by re-anchoring the VFS core globals and
+re-reading the open router, the entry reader, the find chokepoint, the seek path, and the mount /
+teardown sequence. The prior facts hold. The items below are either freshly pinned **runtime**
+details or sharper statements of behaviour the earlier pass described only generally. None of them
+change or contradict the on-disk container byte layout, which remains owned by `formats/pak.md`.
+
+### 1.5.1 Mount sequence (runtime) — newly pinned
+
+The VFS-mount routine performs, in order:
+
+1. Open the **index file** (`data.inf`) for reading.
+2. Read a **24-byte header** from the index file. (Header field meanings are owned by
+   `formats/pak.md`; here the runtime fact is the fixed 24-byte read at mount.)
+3. Take an **entry count** from that header. This count drives the next allocation.
+4. Allocate the in-memory **table-of-contents (TOC) array** sized **144 bytes per entry**
+   (`144 × entry_count`). The **144-byte TOC stride is a runtime fact** confirmed here; the
+   per-field on-disk record layout remains owned by `formats/pak.md`.
+5. Read the TOC records into that array.
+6. Open the **data archive** (`data.vfs`) and **retain the OS handle** for the lifetime of the
+   mount (it is the handle every subsequent entry read seeks within). The handle is initialised
+   to an invalid sentinel before mount.
+
+This sequence corroborates the existing "directory index loaded once at startup into memory"
+statement (§1.2) and adds the concrete mount steps a clean-room loader can mirror.
+
+### 1.5.2 Find (metadata-only) — re-confirmed
+
+The find operation is a **pure metadata lookup**: it lowercases the requested path, then performs
+a **binary search over the 144-byte-stride TOC by string comparison**, returning the matching
+entry (offset + size) or a miss. When progress tracking is enabled (§2.4), the find/read paths
+accumulate load progress as a side effect. This matches §1.2 exactly; the 144-byte stride is the
+newly explicit runtime detail.
+
+### 1.5.3 Read one entry under the read lock — re-confirmed and sharpened
+
+Reading a single TOC entry's payload follows a **critical-section-bracketed** sequence:
+
+1. Allocate a heap buffer of exactly the entry size.
+2. **Enter** the VFS read critical section (the lock catalogued in §5.3).
+3. Seek to the entry's offset within the retained data-archive handle (64-bit file pointer).
+4. Read the entry's bytes into the buffer.
+5. **Leave** the critical section.
+6. On a **short read** (fewer bytes than the entry size), free the buffer and fail.
+
+The caller owns the returned buffer (consistent with §1.2). The lock brackets only the
+seek-and-read pair, as already noted in §5.3.
+
+### 1.5.4 Find-and-read chokepoint — newly pinned detail
+
+A combined **find-and-read chokepoint** is the single entry point most callers use. It:
+
+1. **Zeroes a 16-byte output block** (the caller-supplied descriptor that receives the buffer
+   pointer and size) before doing anything else.
+2. Lowercases the requested path and binary-searches the TOC (the §1.5.2 find).
+3. Reads the entry's bytes (the §1.5.3 read).
+4. Accumulates load progress when tracking is on.
+
+The **16-byte zero-initialised out-block** is the new runtime detail; a clean-room implementation
+should return an explicit "found + buffer + size" result and treat a miss as a zeroed/empty
+descriptor rather than an exception.
+
+### 1.5.5 Mount flag selects packed vs. loose — re-confirmed
+
+A single **global mount-flag byte** selects packed-archive access versus loose-file access; an
+`is-mounted` predicate simply returns that byte. This is the same flag described as `vfsmode` in
+§1.1/§1.4 — re-confirmed on this build as a one-byte global read by the open router.
+
+### 1.5.6 Three-way open router and the 64-bit three-backend seek — newly pinned
+
+The open router (§1.1) was re-confirmed as a **three-way branch** on the mount flag and a
+**raw/seek mode bit**, choosing among: a VFS TOC find (in-memory path), a loose file opened with a
+VFS byte-offset, or a plain OS file open with read/write/create flags. Two predicates gate the
+loose-file open flags by testing the request's **read bit** and **write/create bit**. (Two router
+variants exist — one taking the path by value, one copying it by name first — with the same
+branching body.)
+
+Newly pinned in this pass is the **seek behaviour**, which the earlier spec did not document. A
+single **64-bit seek** (set / current / end origins) spans **three backends**, dispatched by the
+file object's open mode:
+
+| Backend | Seek mechanism |
+|---|---|
+| Plain OS file | OS 64-bit file-pointer set on the OS handle |
+| Packed VFS entry | OS file-pointer set on the retained data-archive handle, **biased by the entry's base offset** within the archive |
+| In-memory blob | Arithmetic on an in-memory cursor over a heap buffer |
+
+The resolved position is **bounds-checked against the backing size**. The owning file object
+carries **dual-path state** (an OS handle initialised to an invalid sentinel, plus an in-memory
+blob pointer and cursor); its constructor zeroes this state and installs the file vtable. This
+three-backend seek is the model a clean-room `Assets.Vfs` stream abstraction should reproduce so
+that callers seek uniformly regardless of whether bytes come from a loose file, a packed entry, or
+an already-slurped buffer.
+
+### 1.5.7 Progress tracking (normalized) — re-confirmed
+
+Load-progress tracking was re-confirmed as: a **cumulative bytes-loaded counter** (incremented per
+read while a tracking flag is set) divided by an **expected-total denominator**, yielding the
+**normalized progress value** the loading-screen bar reads (§2.3). Enabling tracking **resets the
+counter to zero**; disabling tracking clears the per-read accumulation flag; a getter returns the
+normalized value. This matches §2.4; the hardcoded denominator constant stays as documented there.
+
+### 1.5.8 Teardown / unmount — newly pinned
+
+VFS teardown (unmount) **drains the subscriber list, closes the retained data-archive handle, and
+frees the TOC array base**. A clean-room loader should release the archive handle and the TOC on
+unmount; nothing persists across an unmount.
+
+### 1.5.9 Loaders route through the same open router — re-confirmed
+
+The terrain **stream worker thread** (§4.3) and per-asset loaders — the `.map` descriptor text
+parser (§4.5) and the `items.scr` record loader (boot set, §2.1) — all open their files through the
+**same open router** documented above, so they inherit the mount-flag / raw-mode / progress
+behaviour uniformly. The `.map` parser token-reads the terrain / extra-terrain / up-terrain /
+building / FX / solid blocks, each with its own datafile + textures sub-blocks, opening each
+referenced datafile via the router (block contents owned by `formats/terrain_scene.md`).
+
+### 1.5.10 Delta check
+
+No Campaign-7 runtime fact contradicts the existing spec or `formats/pak.md`. The 24-byte header
+read, the 144-byte TOC stride, the 16-byte find-and-read out-block, and the three-backend 64-bit
+seek are **additive runtime details**, not corrections. The denominator constant, the critical-
+section-locked read, the binary-search find, and the three-way open router all **re-confirm** the
+prior pass on the newer build.
+
 ---
 
 # 2. Boot loading — state 2 (`LoadHandler`)

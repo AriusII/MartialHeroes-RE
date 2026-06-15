@@ -5,14 +5,76 @@
 > Fresh start by maintainer decision (G2): prior Cycles 1–4 + Campaign 2 live in git history and
 > `Docs/RE/journal.md`. Generic doctrine: [`CAMPAIGN_TEMPLATE.md`](CAMPAIGN_TEMPLATE.md).
 >
-> **▶ RESUME ANCHOR (2026-06-14):** active campaign = **CAMPAIGN 6 — Total IDB Legibility** (IDA-only deep
-> RE of `doida.exe`; see the section directly below). CAMPAIGN 4 (Front-End Fidelity) and CAMPAIGN 3 are
-> **paused**, their records preserved below for provenance. **The World scene remains FROZEN.** No commit
-> yet (continue-then-commit-later).
+> **▶ RESUME ANCHOR (2026-06-14):** active campaign = **CAMPAIGN 7 — Re-anchor & Total IDB Legibility on
+> the NEW `doida.exe` build** (see the section directly below). The prior IDA database crashed
+> irrecoverably and was rebuilt from scratch on a **DIFFERENT build** (input sha256 `263bd994…6fd8ee` ≠ the
+> old `names.yaml` pin `63fcaf8e…9eb9df`) — so **all prior addresses are stale** and Campaign 6's
+> IDB-resident naming is gone. CAMPAIGN 6/4/3 are **paused**, their records preserved below for provenance.
+> **The World scene remains FROZEN.** No commit yet.
+
+---
+
+## CAMPAIGN 7 — Re-anchor & Total IDB Legibility on the NEW `doida.exe` build (IDA-only)
+
+**Mandate (maintainer, 2026-06-14):** the prior `doida.exe` IDB crashed unrecoverably; a fresh IDB was
+rebuilt (auto-analysis + `decompile_all`). Work **EXCLUSIVELY in IDA Pro** (the `ida` MCP) — rename /
+comment / type only, **never patch**. Re-establish full IDB legibility on the new build by **re-anchoring
+the prior corpus by CONTENT** (the addresses no longer transfer), then comprehending the residual. Reuse
+the Campaign-6 apparatus; deploy a large agent fleet (~80–100 deployments) with heavy IDAPython batching.
+Method/charter: `PLAN.md` (CAMPAIGN 7) + plan file `~/.claude/plans/tr-s-bien-je-vais-melodic-sketch.md`.
+
+**The decisive different-build fact (Phase 0, verified live this session):**
+- New `doida.exe` · input **sha256 `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`**
+  · md5 `a1437026…` · imagebase `0x400000` · `.text` `0x401000–0x71e000`.
+- **≠ the old pin** `63fcaf8e…9eb9df`. **All 14 sampled prior-anchor addresses miss** (not function starts,
+  unnamed). → **addresses do NOT transfer**; a blind `names.yaml`-by-address apply would mislabel ~3,417
+  functions (forbidden). The fast "restore by address" path is dead.
+- **Content DOES transfer** (verified): **459 RTTI `.?AV` class descriptors** (incl. exact `.?AVNetHandler`);
+  signature strings (`items.scr`, `bgtexture`, `actormotion`, `skin.txt`, `bindlist`, `data.vfs`, `.ted`);
+  library markers (`Vorbis`, `XTrap`, `Lua`, `D3DXMatrix`). Unpacked PE, hexrays ready.
+- **Live census:** **25,791 functions** — 1,688 auto-named — 1,901 FLIRT library — **22,202 unnamed `sub_`
+  = the work scope** — 4,800 strings — 6 segments.
+- Reuse dictionary/oracle: the prior corpus (`names.yaml` 3,417 entries + campaign6 glossaries ~3,007) as a
+  **content-anchored name dictionary** (addresses discarded) + the committed clean specs (≈37 specs / 32
+  formats / 10 structs / 71 packets / 193 opcodes) as the comprehension oracle.
+
+**Scale model:** ~80–100 deployments across ~6 waves; **≤3 concurrent IDA readers / exactly 1 serialized
+IDB writer**. Depth = **deep / ROI-aware** (re-anchor + comprehend all high-value + bulk-tag lib noise; the
+long leaf/thunk/STL tail is NOT chased — it plateaus ~3k, per Campaign 6). **Autonomous with ONE
+checkpoint** before the first mass IDB write. Genuine **version-deltas** vs the committed specs are promoted
+clean (Phase S). End-state: `names.yaml` re-pinned to `263bd994…`.
+
+| Phase | Status |
+|---|---|
+| **0 Pre-flight & setup** | ✅ DONE — MCP UP; new SHA pinned & asserted ≠ old; census (22,202 `sub_`); `_dirty/campaign7/` tree created; apparatus inventoried. |
+| **A Cartography & feature dumps** | ✅ DONE — RTTI harvest (431 classes) + profile_all over 23,811 (+const histogram) + string-xref/import indexes + callgraph (62,393 edges) → `_dirty/campaign7/`. |
+| **T Tooling** | ✅ DONE — `content_reanchor.py` (string/RTTI/const matcher) + `cg_propagate.py` (BinDiff-style call-graph propagation) + filter/QA/census/build scripts in `_dirty/campaign7/tools/`. |
+| **A′ Re-anchor matcher** | ✅ DONE — 728 HIGH (RTTI-deterministic) @ 0% FP / 56 audited. |
+| **🔶 CHECKPOINT** | ✅ DONE — re-anchor report + dry-run (728/728 would-apply, 0 TRIPWIRE) presented; maintainer GO = "apply + Phase B spec-guided". |
+| **D0 Anchor-apply (serialized WRITE)** | ✅ DONE — **721 applied** (7 `j_` thunks skipped), 0 fail, TRIPWIRE 0, read-back OK, IDB saved. |
+| **B Comprehension / re-anchor (residual)** | ◑ AUTO-PHASE SATURATED — B1 call-graph propagation **+1,122** (margin≥0.16, audited, floor band demoted); MED-verify **+322** of 504 (ground-truth ctor check); ctor-QA fixed **11** wrong-class ctors; B2 expanded re-run = saturated (Panel-ctor blind spot). **Manual spine comprehension of ~1,057 unplaced names = open worklist.** |
+| **C Reconcile HARD GATE** | ✅ DONE (rolling per-batch) — neutrality + adversarial audit gated every write; no batch applied without a clean dry-run + FP check. |
+| **D Serialized annotation** | ✅ DONE (batches) — cumulative **≈2,176 re-anchored & applied**; named census ≈4,574; TRIPWIRE 0; exactly one writer throughout. |
+| **S Spec-delta promotion** | ✅ DONE — 5-lane spec-author promotion (firewall PASS): opcodes.md (~120 S2C handler roles + 2 new opcodes), NEW specs/network_dispatch.md (S2C dispatch architecture + NetClient lifecycle), crypto.md (cipher/RSA reconfirmed + secure-ctx 0x2E20 + tab login), packets/5-53 (32B vitals/pair), resource_pipeline.md (VFS runtime). Deltas flagged: 5/28 position in-body, 4/143-4 observed. |
+| **E Sync-back** | ✅ DONE — durability via NEW committed-tree **`Docs/RE/names.build2.yaml`** (re-pinned `263bd994…`, 2,591 fns + 19 globals, neutrality PASS); `journal.md` CAMPAIGN-7 entry appended. Old `names.yaml` left intact (curated); merge/re-pin decision surfaced to maintainer. |
+| **R/Z Re-census & verify** | ✅ DONE — firewall PASS (0 pseudo-C in committed files, no `_dirty/` tracked); census recorded; ROADMAP updated. |
+
+**FINAL STATE (2026-06-15):** the new-build IDB is legible at **≈4,685 user/FLIRT-named functions of 25,791** (≈2,467 canonical game + 848 library-tagged), all gains adversarially audited with **0 surviving structural FP** and **TRIPWIRE 0** throughout. Path: content re-anchor (721 RTTI + 1,122 call-graph propagation + 322 verified-MED + 11 ctor-fixes) → à-fond residual waves A1/B/C/D (+385 placed; **~509 mislabeled-library priors correctly REFUTED**) → **two ~20-agent fan-out Workflows: Wave E (+207, the full S2C handler family `Smsg*` + scene singletons) and Wave F (+138, highest-value unnamed game functions)**. **Durability + merge done:** `Docs/RE/names.yaml` re-pinned to `263bd994…` — **3,315 functions + 19 globals**, neutrality PASS; old build-1 corpus preserved in git history (8918ece). Remaining = the low-ROI tail (leaf/thunk/STL) + rtti-MED ctor variants (63) + optional spec-promotion (Phase S) of the recovered S2C/crypto/vfs interop knowledge. No commit yet (awaiting maintainer).
+
+**16-cluster taxonomy** (reused from Campaign 6, re-clustered for the new build): C01 rtti-class-core · C02
+net-transport · C03 net-dispatch · C04 crypto · C05 vfs-assetio · C06 asset-parsers · C07 anim-skinning ·
+C08 render-pipeline · C09 scene-machine · C10 ui-toolkit · C11 ui-hud · C12 actor-combat · C13
+world-systems · C14 lua-config · C15 sound-input · C16 misc-residual + LIB 3rd-party.
+
+**Dirty namespace:** `Docs/RE/_dirty/campaign7/{rtti,profile,anchor,cartography,comprehension/<cluster>,glossary,applied,census,tools}/`.
 
 ---
 
 ## CAMPAIGN 6 — Total IDB Legibility: name/comment/type the whole `doida.exe` (IDA-only)
+
+> ⏸ **PAUSED — superseded by CAMPAIGN 7.** Its IDB-resident naming was lost when the database crashed; the
+> work survives as the `names.yaml` corpus + `_dirty/campaign6/` glossaries, which CAMPAIGN 7 re-anchors
+> onto the new build. Record preserved below for provenance.
 
 **Mandate (maintainer, 2026-06-14):** work **EXCLUSIVELY in IDA Pro 9.3** (the `ida` MCP) on `doida.exe`.
 Deep-analyse the whole client; rename functions, globals, classes, struct fields, locals; add comments;
