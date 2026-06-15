@@ -135,7 +135,8 @@ functions:
   "0x428c9d": { name: "Actor_SetInterpTargetAndFaceRecursive", note: "> [actor-combat]" }
   "0x428f13": { name: "SceneNode_SetPositionRecursive", note: "" }
   "0x429e5c": { name: "Actor_IsRelevantForLocalView", note: "> [actor-combat]" }
-  "0x429fd1": { name: "Region_ResolveCombatMode", note: "resolves combat mode {0 safe, 1 PvP, 2 closed}; enum CONFIRMED-COMPLETE [network-dispatch]" }
+  "0x429204": { name: "Region_ResolveCombatMode", note: "resolves combat mode {0 safe, 1 PvP, 2 closed} via zoneType@+0x28; body-confirmed canonical address [world-systems] (CAMPAIGN VFS-MASTERY)" }
+  "0x429fd1": { name: "Region_ResolveCombatMode_Prior", note: "prior/secondary routine reading two region records via RegionTable_GetRecord; canonical resolver is 0x429204 [world-systems] (CAMPAIGN VFS-MASTERY)" }
   "0x42a129": { name: "ActorManager_TickCooldownSlots", note: "> [actor-combat]" }
   "0x42a673": { name: "PlayerMarkerSet_TreeLowerBound", note: "Red-black-tree lower-bound lookup (walks child links comparing key); caller is the PlayerMarkerSet node-pair builder. \\\"NodeLeft\\\" mislabels a search routine." }
   "0x42a69c": { name: "PlayerMarkerSet_NodeRight", note: "[world-systems]" }
@@ -294,7 +295,7 @@ functions:
   "0x455505": { name: "Sound2D_CreateAndPlay", note: "2D track from data/sound/2d/ [scene-machine]" }
   "0x4558a6": { name: "SoundMusic_PlayCrossfade", note: "BGM play+crossfade; no restart on same id [scene-machine]" }
   "0x455afa": { name: "SoundRouter_PlayActorEventSfx", note: "" }
-  "0x4571bc": { name: "RegionTable_FindRowById", note: "linear scan of g_RegionTable (28-byte stride) -> parallel value [world-systems]" }
+  "0x4571bc": { name: "NpcArr_FindRecordById", note: "linear scan of an npc.arr record array (28-byte stride) by id; was mislabeled RegionTable_FindRowById [world-systems] (CAMPAIGN VFS-MASTERY)" }
   "0x457220": { name: "World_FindNearbyPortalForLocalPlayer", note: "> [actor-combat]" }
   "0x4572e0": { name: "RegionGrid_LookupIdByWorldXZ", note: "world XZ -> region-id byte; cell stride 256; OOB -> 0 [network-dispatch]" }
   "0x457725": { name: "Map_SelectAreaByDateTime", note: "Validates (id, year<13, month<31, day<24, hour<60) and computes the area index 30*(12*(id-1)+month-1)+day-1 and a time-of-day seed, then calls Map_SetActiveArea. Map-scene selector, not a... [asset-parsers]" }
@@ -1653,7 +1654,7 @@ functions:
   "0x5f7f98": { name: "GXProtect__VFunc_05", note: "GXProtect vtable slot 5. [rtti-class-core]" }
   "0x5f7f9b": { name: "GXProtect__VFunc_00", note: "GXProtect vtable slot 0. [rtti-class-core]" }
   "0x5f7fb7": { name: "GXProtect__VFunc_06", note: "GXProtect vtable slot 6. [rtti-class-core]" }
-  "0x5f92e3": { name: "SkillGidList_AddEntry", note: "" }
+  "0x5f92e3": { name: "SoundTable_IndexEntry", note: "generic keyed-id-list insert used by the sound-table loader; was mislabeled SkillGidList_AddEntry [sound] (CAMPAIGN VFS-MASTERY)" }
   "0x5f9f34": { name: "LoginSecondPassword__ctor", note: "LoginSecondPassword constructor (vtable-write xref pattern). [rtti-class-core]" }
   "0x5f9f90": { name: "LoginSecondPassword__VFunc_00", note: "LoginSecondPassword vtable slot 0. [rtti-class-core]" }
   "0x5fa056": { name: "Diamond_LoginSecondPassword_SubmitOk", note: "LoginSecondPassword vtable slot 14. [rtti-class-core]" }
@@ -1718,7 +1719,7 @@ functions:
   "0x608527": { name: "Diamond_GGeode__VFunc_01", note: "Diamond::GGeode vtable slot 1 (shared by 2 classes). [rtti-class-core]" }
   "0x608f5c": { name: "Diamond_DiskFile__ctor", note: "Diamond::DiskFile constructor (vtable-write xref pattern). [rtti-class-core]" }
   "0x609082": { name: "Diamond_DiskFile__VFunc_02", note: "Diamond::DiskFile vtable slot 2. [rtti-class-core]" }
-  "0x6090ec": { name: "DiskFile_CloseAndReset", note: "" }
+  "0x6090ec": { name: "DiskFile_Close", note: "DiskFile close primitive (corrected from the imprecise CloseAndReset) [vfs-assetio] (CAMPAIGN VFS-MASTERY)" }
   "0x60914b": { name: "Diamond_DiskFile__VFunc_06", note: "Diamond::DiskFile vtable slot 6. [rtti-class-core]" }
   "0x60915b": { name: "DiskFile_Seek", note: "64-bit seek (set/current/end origins) over either the OS handle or the in-memory cursor... [vfs-assetio]" }
   "0x609404": { name: "Diamond_DiskFile__VFunc_04", note: "Diamond::DiskFile vtable slot 4. [rtti-class-core]" }
@@ -3334,6 +3335,16 @@ functions:
   "0x6f304b": { name: "libVorbis__6f2c9b", note: "Third-party libVorbis 1.3.2 OGG decoder (out of game-RE scope). [lib:libVorbis]" }
   "0x71dd17": { name: "NetHandler_AtexitDestroy", note: "atexit thunk: destructs the global NetHandler singleton at process exit [network-dispatch]" }
   "0x71defc": { name: "LuaConfig_Singleton_atexit", note: "atexit/_onexit thunk that tears down the process-wide LuaConfig singleton (frees the shared Lua state) on shutdown. [lua-config]" }
+
+  # CAMPAIGN VFS-MASTERY (2026-06-15): new VFS read-path / loader function names — two-witness confirmed (loader + black-box). Build 263bd994.
+  "0x608c70": { name: "Render_SubmitDrawBatch", note: "graphics render-submission helper; refutes the prior 'DiskFile I/O gap' hypothesis at this range — NOISE w.r.t. VFS [render-pipeline] (CAMPAIGN VFS-MASTERY)" }
+  "0x608f8f": { name: "DiskFile_ReadBytes", note: "DiskFile bulk read primitive (corrected EA) [vfs-assetio] (CAMPAIGN VFS-MASTERY)" }
+  "0x609369": { name: "DiskFile_ReadByte", note: "DiskFile single-byte read primitive (corrected EA; prior 0x609082 was the WriteFile vtable slot) [vfs-assetio] (CAMPAIGN VFS-MASTERY)" }
+  "0x6094be": { name: "DiskFile_IsGood", note: "DiskFile good/valid predicate (corrected EA) [vfs-assetio] (CAMPAIGN VFS-MASTERY)" }
+  "0x6094e2": { name: "DiskFile_GetSize", note: "DiskFile size getter (corrected EA) [vfs-assetio] (CAMPAIGN VFS-MASTERY)" }
+  "0x42f2ca": { name: "CoreMot_LoadHeader", note: ".mot header loader (was mislabeled opaque actor-pose) [anim-skinning] (CAMPAIGN VFS-MASTERY)" }
+  "0x42f839": { name: "CoreMot_LoadFullData", note: ".mot full-data loader (was mislabeled opaque actor-pose) [anim-skinning] (CAMPAIGN VFS-MASTERY)" }
+  "0x456a35": { name: "SoundTable_LoadFiveTables", note: "loads the 5 per-area sound tables (.bgm/.bge/.eff/.wlk/.run); distinct from SoundTable_LoadArea@0x5f9348 [sound] (CAMPAIGN VFS-MASTERY)" }
 
 # NOTE: globals below carry OLD-BUILD addresses — re-anchoring is pending.
 # They are preserved verbatim for continuity but SHOULD NOT be applied to the new IDB
