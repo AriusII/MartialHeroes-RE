@@ -429,40 +429,51 @@ public sealed partial class ServerSelectScreen : Control
             AddChild(btn);
             _plateButtons[col] = btn;
 
-            // --- Server name label (top of plate) ---
+            // --- Server name label — centred vertically on the parchment plate ---
+            // The parchment plate runs from Y=97 to Y=97+372=469.
+            // Vertical centre of plate ≈ Y=283. The name label sits at Y=240 (upper-centre zone),
+            // matching the area of the plate where the baked calligraphy body art appears.
+            // The label width is 194 px (plate width minus 8 px margin = 202−8), centred.
+            // Font size 14 for readability on the parchment.
+            // spec §11.4 "8-byte record painted onto plate: name → plate header label". CODE-CONFIRMED.
             var nameLabel = new Label
             {
                 Name = $"PlateNameLabel{col}",
-                Position = new Vector2(plateX[col] + 4, 104),
-                Size = new Vector2(194, 22),
+                Position = new Vector2(plateX[col] + 4, 240),
+                Size = new Vector2(194, 26),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 MouseFilter = MouseFilterEnum.Ignore,
             };
-            nameLabel.AddThemeColorOverride("font_color", new Color(0.85f, 0.78f, 0.50f)); // parchment gold
+            nameLabel.AddThemeColorOverride("font_color", new Color(0.92f, 0.82f, 0.50f)); // parchment gold
+            nameLabel.AddThemeFontSizeOverride("font_size", 14);
             AddChild(nameLabel);
             _plateNameLabels[col] = nameLabel;
 
-            // --- Status label (below name) ---
+            // --- Status label (below name, Y=270) ---
+            // spec §11.4 "status/load → plate status+load label". CODE-CONFIRMED.
             var statusLabel = new Label
             {
                 Name = $"PlateStatusLabel{col}",
-                Position = new Vector2(plateX[col] + 4, 128),
+                Position = new Vector2(plateX[col] + 4, 270),
                 Size = new Vector2(194, 20),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 MouseFilter = MouseFilterEnum.Ignore,
             };
+            statusLabel.AddThemeFontSizeOverride("font_size", 12);
             AddChild(statusLabel);
             _plateStatusLabels[col] = statusLabel;
 
-            // --- Load label (below status) ---
+            // --- Load label (below status, Y=292) ---
+            // spec §11.4 "population captions 6001..6005". CODE-CONFIRMED.
             var loadLabel = new Label
             {
                 Name = $"PlateLoadLabel{col}",
-                Position = new Vector2(plateX[col] + 4, 150),
+                Position = new Vector2(plateX[col] + 4, 292),
                 Size = new Vector2(194, 20),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 MouseFilter = MouseFilterEnum.Ignore,
             };
+            loadLabel.AddThemeFontSizeOverride("font_size", 12);
             AddChild(loadLabel);
             _plateLoadLabels[col] = loadLabel;
         }

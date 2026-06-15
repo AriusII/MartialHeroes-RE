@@ -93,6 +93,26 @@ public sealed partial class CharacterSelectScreen : Control
     [Signal]
     public delegate void BackRequestedEventHandler();
 
+    /// <summary>
+    /// Raised when the player confirms the Create-character form with valid local state.
+    /// BootFlow or Application wires this signal to <c>IApplicationUseCases.CreateCharacterAsync</c>.
+    ///
+    /// <para>Parameters:
+    /// <list type="bullet">
+    /// <item><paramref name="name"/> — validated character name (min 2, a-z/0-9/Hangul).</item>
+    /// <item><paramref name="internalClass"/> — internal class id ∈ {1,2,3,4} mapped from UI index
+    ///   via <see cref="CharacterSelectLayout.UiToInternalClass"/> ({btn0→4, btn1→1, btn2→3, btn3→2}).</item>
+    /// <item><paramref name="faceIndex"/> — face appearance index 1..7.</item>
+    /// </list>
+    /// Starter gear is SERVER-ASSIGNED; the client class template values are preview-mannequin only
+    /// and must NOT be treated as authoritative by the receiver.
+    /// spec: Docs/RE/specs/frontend_scenes.md §4 / §8 — "gather fields → guard → send 1/6 (52B)". CODE-CONFIRMED.
+    /// spec: Docs/RE/specs/frontend_scenes.md §4.3 — "starter equipment = server-side; gear ids are preview IDs only". CODE-CONFIRMED.
+    /// </para>
+    /// </summary>
+    [Signal]
+    public delegate void CreateCharacterRequestedEventHandler(string name, int internalClass, int faceIndex);
+
     // =========================================================================
     // Demo roster (offline stub)
     // =========================================================================
@@ -254,6 +274,12 @@ public sealed partial class CharacterSelectScreen : Control
     private bool _rotatePressLeft;
     private bool _rotatePressRight;
 
+    // CP949 class descriptions from data/script/npc.scr (keys 1..4).
+    // Loaded once in _Ready after _realAssets is opened.
+    // spec: Docs/RE/formats/config_tables.md §2.17.3 — npc.scr class-description records: CONFIRMED.
+    // spec: Docs/RE/specs/frontend_scenes.md §4.1.1 — class description source = npc.scr: CONFIRMED.
+    private NpcScrDescriptions _npcScrDesc = null!;
+
     // Create sub-form: stat allocation (6 stats, shared budget, floor 10).
     // spec: Docs/RE/specs/frontend_scenes.md §4.2 — "6 stats, shared point budget, floor 10 each;
     //   +/- buttons; remaining-points display. Pure display from class template." CODE-CONFIRMED.
@@ -288,13 +314,7 @@ public sealed partial class CharacterSelectScreen : Control
     // spec: Docs/RE/specs/frontend_scenes.md §3 — "a full 3D world backdrop". CODE-CONFIRMED.
     private CharSelectScene3D? _scene3D;
     private SubViewport? _scene3DViewport;
-
-    // Active camera keyframe (0..5) — kept for potential runtime switching; KF1 is the live frame.
-    // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 — "live keyframe = 1". CODE-CONFIRMED.
-    private int _activeCameraKeyframe = 1; // KF1 is live per spec.
-
-    // Camera pose buttons (one per keyframe).
-    private readonly Button[] _poseButtons = new Button[6];
+    private SubViewportContainer? _scene3DContainer; // held for ray-pick coordinate scaling
 
     // Slot row buttons (for the selection highlight).
     private readonly Button?[] _slotButtons = new Button?[MaxSlots];
@@ -324,6 +344,11 @@ public sealed partial class CharacterSelectScreen : Control
         {
             GD.PrintErr($"[Screens] CharacterSelectScreen: VFS open for previews failed: {ex.Message}");
         }
+
+        // Load CP949 class descriptions from data/script/npc.scr (keys 1..4).
+        // spec: Docs/RE/formats/config_tables.md §2.17.3 — npc.scr class-description records: CONFIRMED.
+        // spec: Docs/RE/specs/frontend_scenes.md §4.1.1 — class description source = npc.scr: CONFIRMED.
+        _npcScrDesc = NpcScrDescriptions.Load(_realAssets);
 
         try
         {
@@ -386,105 +411,138 @@ public sealed partial class CharacterSelectScreen : Control
         widgetCount += Build3DSceneViewport();
 
         // --- LAYER 1: Transparent 2D chrome overlaid on the 3D viewport.
-        // NOTE: No solid dim backdrop (the 3D viewport IS the background).
-        // The left info panel and buttons are semi-transparent panels so the 3D scene shows through.
+        // The official client is MINIMAL chrome over the 3D scene: just the orange count caption
+        // centred at the top, a compact info panel top-left, and the C/D/E buttons at the bottom.
+        // Reference: Capture d'écran 2026-06-14 015759.png — the 3D temple dominates the view.
 
-        // --- Title bar panel @ (0,0) 577×58.
-        // spec §8.2 "Top title bar panel". CODE-CONFIRMED. ---
-        var titleBar = MakeChrome(CharacterSelectLayout.TitleBar, CharacterSelectLayout.AtlasMainWindow);
-        AddChild(titleBar);
-        // Title caption: msg id 2209 "캐릭터 개수 : %d" formatted with occupied-slot count.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — MessageDB id 2209,
-        //   count from BillingState +0x80 (account-wide char count). Offline: count = occupied slots.
-        // The literal CP949 template text is VFS-only; _assets.Text(2209, ...) decodes it already.
-        _charCountCaption = WidgetFactory.MakeLabel(
-            BuildCharCountCaption(),
-            CharacterSelectLayout.FontTitleHeight, new Color(0.95f, 0.86f, 0.55f));
-        _charCountCaption.Position = new Vector2(16, 16);
-        titleBar.AddChild(_charCountCaption);
-        widgetCount += 2;
-
-        // --- Tab buttons: Server (act 1), Channel (act 2), Back (act 3).
-        // spec §8.2 tab button table; loginwindow.dds atlas. CODE-CONFIRMED. ---
-        var serverTab = MakeTabButton(
-            CharacterSelectLayout.ServerTabBtn,
-            CharacterSelectLayout.ServerTabHov,
-            CharacterSelectLayout.AtlasLoginWindow,
-            actionId: 1, caption: "Server"); // actionId=1, spec §8.2
-        serverTab.ActionFired += OnTabAction;
-        titleBar.AddChild(serverTab);
-        widgetCount++;
-
-        var channelTab = MakeTabButton(
-            CharacterSelectLayout.ChannelTabBtn,
-            CharacterSelectLayout.ChannelTabHov,
-            CharacterSelectLayout.AtlasLoginWindow,
-            actionId: 2, caption: "Channel"); // actionId=2, spec §8.2
-        channelTab.ActionFired += OnTabAction;
-        titleBar.AddChild(channelTab);
-        widgetCount++;
-
-        var backTab = MakeTabButton(
-            CharacterSelectLayout.BackTabBtn,
-            CharacterSelectLayout.BackTabHov,
-            CharacterSelectLayout.AtlasLoginWindow,
-            actionId: 3, caption: "Back"); // actionId=3, spec §8.2
-        backTab.ActionFired += OnTabAction;
-        titleBar.AddChild(backTab);
-        widgetCount++;
-
-        // --- Left character-info panel @ (8,64) 244×187.
-        // spec §8.2 "Left character-info panel". CODE-CONFIRMED. ---
-        var infoPanel = MakeChrome(CharacterSelectLayout.CharInfoPanel, CharacterSelectLayout.AtlasMainWindow);
-        infoPanel.Position = new Vector2(8, 64);
+        // --- Left character-info panel: compact, top-left, semi-transparent dark background.
+        // The official view shows a small dark panel with the selected char's name/level/class.
+        // Size: 194×80 (name + level + class, compact to match minimal chrome in ref screenshot).
+        // spec §8.2 "Left character-info panel". CODE-CONFIRMED for the panel; size trimmed to
+        //   match the minimal chrome visible in the reference screenshot (015759).
+        var infoPanel = new Panel
+        {
+            Name = "CharInfoPanel",
+            Position = new Vector2(8f, 46f),
+            Size = new Vector2(194f, 80f),
+        };
+        {
+            var ps = new StyleBoxFlat
+            {
+                BgColor = new Color(0.08f, 0.07f, 0.10f, 0.78f),
+                BorderColor = new Color(0.45f, 0.38f, 0.22f),
+            };
+            ps.SetBorderWidthAll(1);
+            infoPanel.AddThemeStyleboxOverride("panel", ps);
+        }
         AddChild(infoPanel);
         widgetCount++;
 
-        // Stat rows per spec §8.2 + §8.4 generator:
-        // base-Y 191, stride 24, 5 rows; col1 x=154 (icon), col2 x=178 (icon), x=51 value labels.
-        // spec: ui_system.md §8.2+§8.4. CODE-CONFIRMED.
-        widgetCount += BuildStatGrid(infoPanel);
-
-        // Char name / level / class info labels.
-        _infoName = BuildInfoLabel(infoPanel, "Name", new Vector2(8, 8));
-        _infoLevel = BuildInfoLabel(infoPanel, "Level", new Vector2(8, 22));
-        _infoClass = BuildInfoLabel(infoPanel, "Class", new Vector2(8, 36));
+        // Char name / level / class info labels in the compact panel.
+        _infoName = BuildInfoLabel(infoPanel, "Name", new Vector2(6f, 6f));
+        _infoLevel = BuildInfoLabel(infoPanel, "Level", new Vector2(6f, 24f));
+        _infoClass = BuildInfoLabel(infoPanel, "Class", new Vector2(6f, 42f));
         widgetCount += 3;
 
-        // Create / Delete / Enter buttons using StateButton with CORRECT action IDs.
+        // --- Tab buttons: Server (act 1), Channel (act 2), Back (act 3).
+        // spec §8.2 tab button table; spec §11.5b positions relative to titleBar at (0,0).
+        // CODE-CONFIRMED. Placed at their spec X, absolute y=4 (top edge strip).
+        // These are added BEFORE the caption so the caption draws on top (later child = drawn last).
+        var serverTab = MakeTabButton(
+            CharacterSelectLayout.ServerTabBtn with { Y = 4 },
+            CharacterSelectLayout.ServerTabHov with { Y = 4 },
+            CharacterSelectLayout.AtlasLoginWindow,
+            actionId: 1, caption: "Server"); // actionId=1, spec §8.2
+        serverTab.ActionFired += OnTabAction;
+        AddChild(serverTab);
+        widgetCount++;
+
+        var channelTab = MakeTabButton(
+            CharacterSelectLayout.ChannelTabBtn with { Y = 4 },
+            CharacterSelectLayout.ChannelTabHov with { Y = 4 },
+            CharacterSelectLayout.AtlasLoginWindow,
+            actionId: 2, caption: "Channel"); // actionId=2, spec §8.2
+        channelTab.ActionFired += OnTabAction;
+        AddChild(channelTab);
+        widgetCount++;
+
+        var backTab = MakeTabButton(
+            CharacterSelectLayout.BackTabBtn with { Y = 4 },
+            CharacterSelectLayout.BackTabHov with { Y = 4 },
+            CharacterSelectLayout.AtlasLoginWindow,
+            actionId: 3, caption: "Back"); // actionId=3, spec §8.2
+        backTab.ActionFired += OnTabAction;
+        AddChild(backTab);
+        widgetCount++;
+
+        // --- Character-count caption: centred horizontally, near top of canvas.
+        // msg id 2209 "캐릭터 개수 : %d", orange text, no background panel.
+        // Added AFTER the tab buttons so it draws on top of them (Godot render order = child order).
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — MessageDB id 2209.
+        // Position y=12 to sit within the top strip above the info panel (y=46).
+        _charCountCaption = WidgetFactory.MakeLabel(
+            BuildCharCountCaption(),
+            CharacterSelectLayout.FontTitleHeight, new Color(0.95f, 0.86f, 0.55f));
+        _charCountCaption.Position = new Vector2(0f, 12f);
+        _charCountCaption.Size = new Vector2(1024f, 28f);
+        _charCountCaption.HorizontalAlignment = HorizontalAlignment.Center;
+        AddChild(_charCountCaption);
+        widgetCount++;
+
+        // --- Bottom button bar: Create / Delete / Enter — placed at the bottom of the canvas.
+        // In the official client these three buttons sit as a centred strip near y~720.
         // spec §8.2 — Create=4, Delete=5, Enter=6. CORRECTION from 413/531. CODE-CONFIRMED.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.5c. CODE-CONFIRMED.
+        // Button strip: centred ~x=350 for Create, x=420 for Delete, x=490 for Enter at y=718.
+        // Each button is 59×20 per the atlas frame (spec §11.5c). CODE-CONFIRMED.
+        const float btnBarY = 718f;
+        const float btnBarCentreX = 512f; // canvas centre
+        const float btnW = 59f;
+        const float btnGap = 8f;
+        // 3 buttons total width = 3*59 + 2*8 = 193px → leftmost starts at 512 − 96.5 ≈ 415
+        const float btnBarLeft = btnBarCentreX - (3f * btnW + 2f * btnGap) / 2f;
+
+        // Create button at btnBarLeft, Delete at +67, Enter at +134.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.5c NORMAL src (0,1004)/(118,1004)/(236,1004). CODE-CONFIRMED.
+        WidgetRect createR = CharacterSelectLayout.CreateButton with { X = (int)btnBarLeft, Y = (int)btnBarY };
         var createBtn = MakeCharButton(
-            CharacterSelectLayout.CreateButton,
-            CharacterSelectLayout.CreateButtonHover,
+            createR,
+            CharacterSelectLayout.CreateButton with { X = (int)btnBarLeft, Y = (int)btnBarY },
             CharacterSelectLayout.AtlasLoginWindow,
             CharacterSelectLayout.CreateActionId, // 4, spec §8.2
             "Create");
         createBtn.ActionFired += OnCharAction;
-        infoPanel.AddChild(createBtn);
+        AddChild(createBtn);
         widgetCount++;
 
+        WidgetRect deleteR = CharacterSelectLayout.DeleteButton with
+        {
+            X = (int)(btnBarLeft + btnW + btnGap), Y = (int)btnBarY
+        };
         var deleteBtn = MakeCharButton(
-            CharacterSelectLayout.DeleteButton,
-            CharacterSelectLayout.DeleteButtonHover,
+            deleteR,
+            CharacterSelectLayout.DeleteButton with { X = deleteR.X, Y = (int)btnBarY },
             CharacterSelectLayout.AtlasLoginWindow,
             CharacterSelectLayout.DeleteActionId, // 5, spec §8.2
             "Delete");
         deleteBtn.ActionFired += OnCharAction;
-        infoPanel.AddChild(deleteBtn);
+        AddChild(deleteBtn);
         widgetCount++;
 
-        // M1 fix: Enter button uses atlas art (59×20) with no text overlay.
-        // The official client shows the 진입 / Enter baked art at src(236,1004); no text caption.
-        // Passing caption="" lets the atlas glyph speak for itself.
+        WidgetRect enterR = CharacterSelectLayout.EnterButton with
+        {
+            X = (int)(btnBarLeft + 2f * (btnW + btnGap)), Y = (int)btnBarY
+        };
+        // M1 fix: Enter button uses atlas art with no text overlay.
         // spec: Docs/RE/specs/frontend_scenes.md §11.5c — Enter N src(236,1004). CODE-CONFIRMED.
         var enterBtn = MakeCharButton(
-            CharacterSelectLayout.EnterButton,
-            CharacterSelectLayout.EnterButtonHover,
+            enterR,
+            CharacterSelectLayout.EnterButton with { X = enterR.X, Y = (int)btnBarY },
             CharacterSelectLayout.AtlasLoginWindow,
             CharacterSelectLayout.EnterActionId, // 6, spec §8.2
             ""); // no text — baked art label. spec §11.5c "Enter" (236,1004). CODE-CONFIRMED.
         enterBtn.ActionFired += OnCharAction;
-        infoPanel.AddChild(enterBtn);
+        AddChild(enterBtn);
         widgetCount++;
 
         // The 3D viewport (Layer 0) was already inserted as the first child in BuildUi().
@@ -493,12 +551,8 @@ public sealed partial class CharacterSelectScreen : Control
         // the full map000 backdrop + character row + camera.
         // spec: Docs/RE/specs/frontend_scenes.md §3 — "a full 3D world backdrop". CODE-CONFIRMED.
 
-        // --- Slot selector row (text buttons below the 3D region) ---
+        // --- Slot selector row (text buttons below the 3D region, above the button bar) ---
         widgetCount += BuildSlotSelectorRow();
-
-        // Camera is at KF1 (the live keyframe per spec).
-        // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 — "live keyframe = 1". CODE-CONFIRMED.
-        _activeCameraKeyframe = 1; // KF1 is the scene's active camera.
 
         // --- Corner close button @ (971,610) 23×23, blacksheet.dds src (941,910).
         // spec §8.2 "Corner close". CODE-CONFIRMED. ---
@@ -635,14 +689,24 @@ public sealed partial class CharacterSelectScreen : Control
         _scene3DViewport.AddChild(_scene3D);
 
         // SubViewportContainer: stretches the viewport to fill the Control area.
+        // MouseFilter.Pass so the container forwards GuiInput events while the 2D chrome nodes
+        // on top can still receive their own clicks (Stop/Pass on those children as needed).
+        // spec: frontend_scenes.md §3.3.3 — click on the 3D viewport region drives slot selection. CODE-CONFIRMED.
         var container = new SubViewportContainer
         {
             Name = "Scene3DContainer",
             Stretch = true,
-            MouseFilter = MouseFilterEnum.Ignore, // 2D chrome handles input
+            MouseFilter = MouseFilterEnum.Pass, // pass so we receive GuiInput for ray-pick
         };
         container.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         container.AddChild(_scene3DViewport);
+
+        // Wire GuiInput for 3D ray-pick slot selection.
+        // spec: frontend_scenes.md §3.3.3 — "unproject click pixel through perspective camera;
+        //   test each slot AABB; first hit → confirmed-pick". CODE-CONFIRMED.
+        container.GuiInput += OnViewport3DGuiInput;
+
+        _scene3DContainer = container; // held for coordinate scaling in OnViewport3DGuiInput
         AddChild(container);
 
         // Defer Initialise to the next frame so the SubViewport is settled in the tree.
@@ -789,92 +853,12 @@ public sealed partial class CharacterSelectScreen : Control
     }
 
     // =========================================================================
-    // Camera keyframe pose buttons
-    // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 / §3.5.3 CODE-CONFIRMED (6 keyframes).
-    // The orbit easing / auto-advance law is runtime-pending (spec §3.5.4), so we expose a
-    // simple 6-button selector that sets the active keyframe on all preview slots.
+    // Camera pose-button scaffolding REMOVED — CAMPAIGN 9.
+    // The legacy char-select camera is a SINGLE STATIC camera; the "6-keyframe orbit"
+    // (and its pose-button selector) was REFUTED by re-RE this campaign. Camera framing +
+    // the two manual hold-to-move inputs (boom-zoom, preview-actor yaw) live in
+    // CharSelectScene3D / CharSelectCameraRig. spec: Docs/RE/specs/frontend_scenes.md §3.5.
     // =========================================================================
-
-    /// <summary>
-    /// Builds a row of 6 camera-pose buttons placed just below the slot-selector row.
-    /// Each button sets the <see cref="CharPreview3D.ActiveKeyframe"/> on all preview slots.
-    /// </summary>
-    private int BuildCameraPoseButtons()
-    {
-        // Row geometry: 6 buttons × 120px wide × 22px tall, centred below the preview row.
-        // Placed below the slot selector row (~y=600); above the close button (~y=610).
-        // spec: §3.5.3 "initial active keyframe = 0". CODE-CONFIRMED.
-        const float btnW = 120f;
-        const float btnH = 22f;
-        const float gap = 4f;
-        const float startX = 260f; // aligns with the preview row left edge
-        const float rowY = 596f; // below slot selector row
-
-        // Labels for the 6 camera poses — descriptive only (framing is runtime-pending).
-        // Yaw/pitch values (approximate degrees) from spec §3.5.3.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.5.3 CODE-CONFIRMED (values).
-        string[] poseLabels =
-        [
-            "Pose 1 (−6° yaw)", // KF0: yaw −6°, pitch +2.4°
-            "Pose 2 (−2.7°)", // KF1: yaw −2.7°, pitch +0.8°
-            "Pose 3 (+0.6°)", // KF2: yaw +0.6°, pitch −36.6°
-            "Pose 4 (−2°)", // KF3: yaw −2°, pitch −80°
-            "Pose 5 (+7.8°)", // KF4: yaw +7.8°, pitch +74.3°
-            "Pose 6 (−13.8°)", // KF5: yaw −13.8°, pitch +52.4°
-        ];
-
-        var container = new HBoxContainer
-        {
-            Name = "CameraPoseRow",
-            Position = new Vector2(startX, rowY),
-            Size = new Vector2((btnW + gap) * 6 - gap, btnH),
-        };
-        AddChild(container);
-
-        for (int kf = 0; kf < 6; kf++)
-        {
-            int kfCapture = kf;
-            var btn = new Button
-            {
-                Name = $"PoseBtn{kf}",
-                Text = poseLabels[kf],
-                CustomMinimumSize = new Vector2(btnW, btnH),
-                ToggleMode = true,
-                ButtonPressed = kf == 0, // KF0 active by default (spec §3.5.3)
-            };
-            btn.AddThemeFontSizeOverride("font_size", 10);
-            btn.Pressed += () =>
-            {
-                SetCameraKeyframe(kfCapture);
-                // Un-toggle all other buttons (radio-button semantics).
-                for (int j = 0; j < 6; j++)
-                    if (_poseButtons[j] is Button pb)
-                        pb.ButtonPressed = j == kfCapture;
-            };
-            container.AddChild(btn);
-            _poseButtons[kf] = btn;
-        }
-
-        GD.Print($"[Screens] CharacterSelectScreen: camera pose row built (6 keyframes). " +
-                 $"spec: frontend_scenes.md §3.5.2/§3.5.3 CODE-CONFIRMED.");
-
-        return 7; // 1 container + 6 buttons
-    }
-
-    /// <summary>
-    /// Sets the active camera keyframe on all preview slots.
-    /// spec: Docs/RE/specs/frontend_scenes.md §3.5.3 CODE-CONFIRMED (6 keyframes).
-    /// Runtime easing/auto-advance is runtime-pending (spec §3.5.4).
-    /// </summary>
-    private void SetCameraKeyframe(int keyframe)
-    {
-        _activeCameraKeyframe = ((keyframe % 6) + 6) % 6;
-        GD.Print($"[Screens] CharacterSelectScreen: camera keyframe → {_activeCameraKeyframe}. " +
-                 "(CharSelectScene3D uses a single camera; keyframe switching is runtime-pending. " +
-                 "spec: frontend_scenes.md §3.5.4 — keyframe orbit auto-advance: MEDIUM.)");
-        // The unified CharSelectScene3D uses one camera fixed at KF1.
-        // Full keyframe orbit switching is runtime-pending (spec §3.5.4 open item 4).
-    }
 
     // =========================================================================
     // Create sub-form — spec: frontend_scenes.md §4. CODE-CONFIRMED.
@@ -906,21 +890,28 @@ public sealed partial class CharacterSelectScreen : Control
         };
         form.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
 
-        // Dim overlay behind the form panels.
+        // Dim overlay: LIGHT dim so the 3D temple remains visible through the panels.
+        // Reference screenshots (055712/709/716/720) clearly show the carved stone temple
+        // columns behind the LEFT and RIGHT panels — the 3D backdrop is NOT fully hidden.
         var dimBg = new ColorRect
         {
             Name = "CreateDim",
-            Color = new Color(0f, 0f, 0f, 0.72f),
+            Color = new Color(0f, 0f, 0f, 0.30f),
         };
         dimBg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         form.AddChild(dimBg);
 
         // ── ORANGE TOP CAPTION ──────────────────────────────────────────────
-        // spec: frontend_scenes.md §4 — "orange caption at top". CODE-CONFIRMED.
+        // The char-count caption "캐릭터 개수 : N" stays centred at the top of the create
+        // form, same as on the select view.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED — MessageDB id 2209.
+        // "Create Character" note is not a separate label in the spec; the count caption
+        // persists on the create sub-state. We reuse BuildCharCountCaption() for accuracy.
         var topCaption = WidgetFactory.MakeLabel(
-            "Create Character",
+            BuildCharCountCaption(),
             CharacterSelectLayout.FontTitleHeight,
-            new Color(1.0f, 0.60f, 0.08f));
+            new Color(0.95f, 0.86f, 0.55f)); // same orange as select view
+        topCaption.Name = "CreateCountCaption";
         topCaption.Position = new Vector2(0f, 14f);
         topCaption.Size = new Vector2(1024f, 28f);
         topCaption.HorizontalAlignment = HorizontalAlignment.Center;
@@ -928,16 +919,17 @@ public sealed partial class CharacterSelectScreen : Control
 
         // ── LEFT PANEL: class selection list ────────────────────────────────
         // spec: frontend_scenes.md §4.1 — "class-selection list on the LEFT". CODE-CONFIRMED.
+        // Semi-transparent so the 3D temple stone is partially visible behind it (ref screenshots).
         var leftPanel = new Panel
         {
             Name = "CreateLeft",
-            Position = new Vector2(8f, 50f),
-            Size = new Vector2(190f, 640f),
+            Position = new Vector2(8f, 46f),
+            Size = new Vector2(186f, 660f),
         };
         {
             var ls = new StyleBoxFlat
             {
-                BgColor = new Color(0.08f, 0.07f, 0.10f, 0.95f),
+                BgColor = new Color(0.06f, 0.05f, 0.08f, 0.82f),
                 BorderColor = new Color(0.45f, 0.38f, 0.22f),
             };
             ls.SetBorderWidthAll(2);
@@ -986,46 +978,43 @@ public sealed partial class CharacterSelectScreen : Control
         // ── CENTER PANEL: 3D preview + face ± + turntable buttons ───────────
         // spec: frontend_scenes.md §4.2 — "single, centered, +56.5 units nearer camera". CODE-CONFIRMED.
         // spec: frontend_scenes.md §4.2 — "scale 75 vs the slots' 50". CODE-CONFIRMED.
-        var centerPanel = new Panel
+        // The center panel has NO solid background — the 3D scene is the backdrop.
+        // The character preview (CharCreatePreview3D) is a SubViewport that renders the model.
+        // Reference screenshots show the carved stone temple visible behind the character.
+        var centerPanel = new Control
         {
             Name = "CreateCenter",
-            Position = new Vector2(204f, 50f),
-            Size = new Vector2(414f, 640f),
+            Position = new Vector2(200f, 46f),
+            Size = new Vector2(424f, 660f),
+            MouseFilter = MouseFilterEnum.Pass,
         };
-        {
-            var cs = new StyleBoxFlat
-            {
-                BgColor = new Color(0.05f, 0.05f, 0.08f, 0.90f),
-                BorderColor = new Color(0.40f, 0.35f, 0.20f),
-            };
-            cs.SetBorderWidthAll(1);
-            centerPanel.AddThemeStyleboxOverride("panel", cs);
-        }
         form.AddChild(centerPanel);
 
-        // 3D preview occupies most of the center panel.
+        // 3D preview occupies most of the center area.
         _createPreview3D = new CharCreatePreview3D
         {
             Name = "CreatePreview3D",
-            Position = new Vector2(6f, 6f),
-            Size = new Vector2(402f, 550f),
+            Position = new Vector2(2f, 2f),
+            Size = new Vector2(420f, 600f),
             SharedRealAssets = _realAssets,
             InternalClassId = CharacterSelectLayout.UiToInternalClass[_createUiClassIndex],
         };
         centerPanel.AddChild(_createPreview3D);
 
-        // Face ± buttons. spec: frontend_scenes.md §4.2 — "face ± buttons range 1..7". CODE-CONFIRMED.
+        // Face ± buttons below the 3D preview.
+        // spec: frontend_scenes.md §4.2 — "face ± buttons range 1..7". CODE-CONFIRMED.
         // "the visible 3D face does NOT change". CODE-CONFIRMED.
+        // Placed at y=608 (just below the 600h preview area).
         var faceLbl = WidgetFactory.MakeLabel("Face:", CharacterSelectLayout.FontRowHeight,
             new Color(0.75f, 0.75f, 0.75f));
-        faceLbl.Position = new Vector2(8f, 562f);
+        faceLbl.Position = new Vector2(8f, 610f);
         centerPanel.AddChild(faceLbl);
 
         var faceMinus = new Button
         {
             Name = "FaceMinus",
             Text = "−",
-            Position = new Vector2(54f, 558f),
+            Position = new Vector2(54f, 607f),
             Size = new Vector2(28f, 22f),
         };
         faceMinus.Pressed += () => ChangeFace(-1);
@@ -1035,7 +1024,7 @@ public sealed partial class CharacterSelectScreen : Control
             _createFaceIndex.ToString(),
             CharacterSelectLayout.FontRowHeight,
             new Color(0.95f, 0.95f, 0.95f));
-        _createFaceLabel.Position = new Vector2(87f, 562f);
+        _createFaceLabel.Position = new Vector2(87f, 610f);
         _createFaceLabel.Size = new Vector2(24f, 22f);
         _createFaceLabel.HorizontalAlignment = HorizontalAlignment.Center;
         centerPanel.AddChild(_createFaceLabel);
@@ -1044,7 +1033,7 @@ public sealed partial class CharacterSelectScreen : Control
         {
             Name = "FacePlus",
             Text = "+",
-            Position = new Vector2(116f, 558f),
+            Position = new Vector2(116f, 607f),
             Size = new Vector2(28f, 22f),
         };
         facePlus.Pressed += () => ChangeFace(+1);
@@ -1057,7 +1046,7 @@ public sealed partial class CharacterSelectScreen : Control
         {
             Name = "RotLeft",
             Text = "◄",
-            Position = new Vector2(170f, 558f),
+            Position = new Vector2(170f, 607f),
             Size = new Vector2(36f, 22f),
         };
         rotLeftBtn.ButtonDown += () => _rotatePressLeft = true;
@@ -1066,14 +1055,14 @@ public sealed partial class CharacterSelectScreen : Control
 
         var rotNote = WidgetFactory.MakeLabel("Rotate", CharacterSelectLayout.FontRowHeight,
             new Color(0.60f, 0.60f, 0.65f));
-        rotNote.Position = new Vector2(210f, 562f);
+        rotNote.Position = new Vector2(210f, 610f);
         centerPanel.AddChild(rotNote);
 
         var rotRightBtn = new Button
         {
             Name = "RotRight",
             Text = "►",
-            Position = new Vector2(260f, 558f),
+            Position = new Vector2(260f, 607f),
             Size = new Vector2(36f, 22f),
         };
         rotRightBtn.ButtonDown += () => _rotatePressRight = true;
@@ -1082,16 +1071,18 @@ public sealed partial class CharacterSelectScreen : Control
 
         // ── RIGHT PANEL: description + stat allocation + name + buttons ──────
         // spec: frontend_scenes.md §4 — "two description/stat panels on the RIGHT". CODE-CONFIRMED.
+        // Semi-transparent so the 3D temple remains visible behind the panel (ref screenshots).
+        // Width: 1024 − 200 − 424 = 400px.
         var rightPanel = new Panel
         {
             Name = "CreateRight",
-            Position = new Vector2(624f, 50f),
-            Size = new Vector2(392f, 640f),
+            Position = new Vector2(626f, 46f),
+            Size = new Vector2(390f, 660f),
         };
         {
             var rs = new StyleBoxFlat
             {
-                BgColor = new Color(0.08f, 0.07f, 0.10f, 0.95f),
+                BgColor = new Color(0.06f, 0.05f, 0.08f, 0.82f),
                 BorderColor = new Color(0.45f, 0.38f, 0.22f),
             };
             rs.SetBorderWidthAll(2);
@@ -1099,13 +1090,17 @@ public sealed partial class CharacterSelectScreen : Control
         }
         form.AddChild(rightPanel);
 
-        // Class description header (class lore — id 14003..14007 from msg.xdb).
+        // Class description header + large text block.
+        // Reference screenshots show a large block of Korean text filling most of the right panel.
         // spec: frontend_scenes.md §4.1 — "class description". CODE-CONFIRMED (msg ids).
+        // The description occupies roughly the top half of the right panel.
         var descHeader = WidgetFactory.MakeLabel("Description", CharacterSelectLayout.FontTitleHeight,
             new Color(0.90f, 0.80f, 0.45f));
         descHeader.Position = new Vector2(8f, 8f);
         rightPanel.AddChild(descHeader);
 
+        // Large description text block — matches the big Korean text in the reference screenshots.
+        // In the official client this contains multi-line class lore text from msg.xdb.
         var descText = WidgetFactory.MakeLabel(
             GetClassDescription(_createUiClassIndex),
             CharacterSelectLayout.FontRowHeight,
@@ -1113,30 +1108,31 @@ public sealed partial class CharacterSelectScreen : Control
             multiline: true);
         descText.Name = "CreateDescText";
         descText.Position = new Vector2(8f, 32f);
-        descText.Size = new Vector2(376f, 80f);
+        descText.Size = new Vector2(374f, 220f); // tall block matching the reference
         rightPanel.AddChild(descText);
 
         // Separator.
         var sepR = new ColorRect
         {
             Color = new Color(0.35f, 0.30f, 0.18f),
-            Position = new Vector2(8f, 120f),
-            Size = new Vector2(376f, 1f),
+            Position = new Vector2(8f, 262f),
+            Size = new Vector2(374f, 1f),
         };
         rightPanel.AddChild(sepR);
 
         // Stat allocation (6 stats, floor 10, shared budget).
+        // Repositioned below the description block (separator now at 262px).
         // spec: frontend_scenes.md §4.2 — "6 stats, shared point budget, floor 10 each;
         //   +/- buttons; remaining-points display (pure display from the class template)". CODE-CONFIRMED.
         var statHeader2 = WidgetFactory.MakeLabel("Stats", CharacterSelectLayout.FontTitleHeight,
             new Color(0.90f, 0.80f, 0.45f));
-        statHeader2.Position = new Vector2(8f, 128f);
+        statHeader2.Position = new Vector2(8f, 270f);
         rightPanel.AddChild(statHeader2);
 
         _createBudgetLabel = WidgetFactory.MakeLabel("Points: 0", CharacterSelectLayout.FontRowHeight,
             new Color(1.0f, 0.75f, 0.20f));
         _createBudgetLabel.Name = "BudgetLabel";
-        _createBudgetLabel.Position = new Vector2(200f, 128f);
+        _createBudgetLabel.Position = new Vector2(200f, 270f);
         _createBudgetLabel.Size = new Vector2(176f, 18f);
         rightPanel.AddChild(_createBudgetLabel);
 
@@ -1146,7 +1142,7 @@ public sealed partial class CharacterSelectScreen : Control
         for (int s = 0; s < 6; s++)
         {
             int row = s;
-            float sy = 152f + s * 34f;
+            float sy = 292f + s * 30f; // compact 30px stride (fits 6 stats in ~180px)
 
             var statName = WidgetFactory.MakeLabel(statNames[s], CharacterSelectLayout.FontRowHeight,
                 new Color(0.72f, 0.72f, 0.75f));
@@ -1185,12 +1181,13 @@ public sealed partial class CharacterSelectScreen : Control
             rightPanel.AddChild(plusBtn);
         }
 
+        // 6 stats × 30px = 180px → bottom of stat section ~= 292 + 180 = 472.
         // Separator.
         var sepR2 = new ColorRect
         {
             Color = new Color(0.35f, 0.30f, 0.18f),
-            Position = new Vector2(8f, 362f),
-            Size = new Vector2(376f, 1f),
+            Position = new Vector2(8f, 480f),
+            Size = new Vector2(374f, 1f),
         };
         rightPanel.AddChild(sepR2);
 
@@ -1199,15 +1196,15 @@ public sealed partial class CharacterSelectScreen : Control
         //   reject uppercase/punctuation; show rejection toast msg id 2075". CODE-CONFIRMED.
         var nameLabel = WidgetFactory.MakeLabel("Name:", CharacterSelectLayout.FontRowHeight,
             new Color(0.75f, 0.75f, 0.75f));
-        nameLabel.Position = new Vector2(8f, 372f);
+        nameLabel.Position = new Vector2(8f, 490f);
         rightPanel.AddChild(nameLabel);
 
         _createNameEntry = new LineEdit
         {
             Name = "NameEntry",
             PlaceholderText = "a-z / 0-9 / Hangul",
-            Position = new Vector2(8f, 392f),
-            Size = new Vector2(376f, 26f),
+            Position = new Vector2(8f, 508f),
+            Size = new Vector2(374f, 26f),
         };
         _createNameEntry.AddThemeFontSizeOverride("font_size", 13);
         rightPanel.AddChild(_createNameEntry);
@@ -1221,16 +1218,17 @@ public sealed partial class CharacterSelectScreen : Control
             new Color(1.0f, 0.35f, 0.20f),
             multiline: true);
         _createToastLabel.Name = "NameToast";
-        _createToastLabel.Position = new Vector2(8f, 422f);
-        _createToastLabel.Size = new Vector2(376f, 36f);
+        _createToastLabel.Position = new Vector2(8f, 538f);
+        _createToastLabel.Size = new Vector2(374f, 36f);
         _createToastLabel.Visible = false;
         rightPanel.AddChild(_createToastLabel);
 
-        // Confirm and Cancel buttons.
+        // Confirm and Cancel buttons — placed near the bottom of the right panel (y~580+).
         // spec §8.2 action-id map — "Create-form Create=10, Cancel=13". CODE-CONFIRMED.
+        // Repositioned to y=584 so they sit below the toast label (y=538+36=574).
         var confirmBtn = WidgetFactory.MakeStateButton2(
             _assets, CharacterSelectLayout.AtlasInventWindow,
-            22, 468, 162, 40,
+            22, 584, 162, 40,
             302, 860, // NORMAL src (InventWindow.dds confirm row). spec §8.2. CODE-CONFIRMED.
             actionId: 10, caption: "OK");
         confirmBtn.ActionFired += OnCreateConfirm;
@@ -1238,7 +1236,7 @@ public sealed partial class CharacterSelectScreen : Control
 
         var cancelBtn = WidgetFactory.MakeStateButton2(
             _assets, CharacterSelectLayout.AtlasInventWindow,
-            208, 468, 162, 40,
+            208, 584, 162, 40,
             302, 900, // NORMAL src (InventWindow.dds cancel row). spec §8.2. CODE-CONFIRMED.
             actionId: 13, caption: "Cancel");
         cancelBtn.ActionFired += _ => HideCreateForm();
@@ -1268,11 +1266,19 @@ public sealed partial class CharacterSelectScreen : Control
         }
 
         int internalClass = CharacterSelectLayout.UiToInternalClass[_createUiClassIndex];
-        GD.Print($"[CharacterSelectScreen] Create confirmed: name='{name}' class={internalClass} " +
-                 $"face={_createFaceIndex} — offline stub (send intent not yet wired).");
-        // TODO: wire to IApplicationUseCases.CreateCharacterAsync when the use-case is available.
-        // spec: frontend_scenes.md §4.5 — "gather fields → guard → click SFX 861010101 → send 1/6 (52B)".
-        // CODE-CONFIRMED. The send is the network layer's job; here we only gather and guard.
+        // Class map: UI index {0,1,2,3} → internal {4,1,3,2}. spec: frontend_scenes.md §4.1. CODE-CONFIRMED.
+        // Starter gear is SERVER-ASSIGNED; the client class template values are preview-mannequin only.
+        // spec: frontend_scenes.md §4.3 — "starter equipment = server-side". CODE-CONFIRMED.
+
+        // Emit signal instead of calling BootFlow directly.
+        // BootFlow/Application wires CreateCharacterRequested → IApplicationUseCases.CreateCharacterAsync.
+        // spec: frontend_scenes.md §4 / §8 — "gather fields → guard → send 1/6 (52B)". CODE-CONFIRMED.
+        // TODO(Tier-1): wire BootFlow.OnCreateCharacterRequested signal handler to
+        //   IApplicationUseCases.CreateCharacterAsync(name, internalClass, faceIndex).
+        EmitSignal(SignalName.CreateCharacterRequested, name, internalClass, _createFaceIndex);
+        GD.Print($"[CharacterSelectScreen] CreateCharacterRequested emitted: name='{name}' " +
+                 $"internalClass={internalClass} face={_createFaceIndex}. " +
+                 "spec: frontend_scenes.md §4/§8 CODE-CONFIRMED.");
         HideCreateForm();
         // Refresh the char-count caption — the server will later send 3/6 (create-accept) which
         // increments BillingState +0x80; in offline mode we refresh now as the best-effort view update.
@@ -1334,25 +1340,25 @@ public sealed partial class CharacterSelectScreen : Control
     }
 
     /// <summary>
-    /// Returns a class description string. The real text comes from msg.xdb (CP949 VFS).
-    /// msg ids 14003..14007 per spec §4.1. CODE-CONFIRMED.
-    /// We use the UiAssetLoader to fetch it when available; English fallback otherwise.
+    /// Returns the CP949-decoded class description text for the given UI class index (0..3).
+    /// Text comes from <c>data/script/npc.scr</c> keys 1..4, string fields 0/1/2.
+    ///
+    /// <para>UI slot → npc.scr key mapping (crossover per spec):
+    /// UI 0 → key 1 (Monk/internal 4), UI 1 → key 2 (Musa/internal 1),
+    /// UI 2 → key 4 (Dosa/internal 3), UI 3 → key 3 (Salsu/internal 2).</para>
+    ///
+    /// <para>Falls back to English when npc.scr is unavailable (VFS absent).</para>
+    ///
+    /// spec: Docs/RE/formats/config_tables.md §2.17.3 — npc.scr class keys 1..4, fields 0/1/2: CONFIRMED.
+    /// spec: Docs/RE/specs/frontend_scenes.md §4.1.1 — class description source = npc.scr: CONFIRMED.
     /// </summary>
     private string GetClassDescription(int uiIndex)
     {
-        // Class description IDs are adjacent to the class label IDs in msg.xdb.
-        // The exact description IDs are not independently confirmed; we attempt the class
-        // label ID and show a sensible fallback.
-        // spec: frontend_scenes.md §4.1 — "class description, class lore". CODE-CONFIRMED (meaning).
-        string[] fallbacks =
-        [
-            "A powerful warrior who excels in direct combat and defense.",
-            "A martial artist with speed and balanced abilities.",
-            "A swift blader skilled in both attack and evasion.",
-            "A mystical practitioner commanding elemental forces.",
-        ];
+        // Delegate to NpcScrDescriptions which loaded the real CP949 text at startup.
+        // spec: config_tables.md §2.17.3 — UI-slot vs npc.scr key crossover: CONFIRMED.
+        // spec: frontend_scenes.md §4.1.1 — description = npc.scr string fields 0/1/2: CONFIRMED.
         int idx = Mathf.Clamp(uiIndex, 0, 3);
-        return fallbacks[idx];
+        return _npcScrDesc.GetDescription(idx);
     }
 
     /// <summary>
@@ -1399,6 +1405,52 @@ public sealed partial class CharacterSelectScreen : Control
 
         if (_createBudgetLabel is not null && IsInstanceValid(_createBudgetLabel))
             _createBudgetLabel.Text = $"Points: {_createStatBudgetRemaining}";
+    }
+
+    // =========================================================================
+    // 3D viewport ray-pick input
+    // spec: Docs/RE/specs/frontend_scenes.md §3.3.3 — slot selection is a 3D ray-pick. CODE-CONFIRMED.
+    // =========================================================================
+
+    /// <summary>
+    /// Handles GuiInput from the SubViewportContainer.
+    /// On a left mouse-button press, converts the local position to SubViewport coordinates
+    /// and calls <see cref="CharSelectScene3D.TryHitTestSlot"/> for slot ray-pick.
+    ///
+    /// <para>This replaces the old text-button selection for the 3D row.
+    /// The text-button row remains as a keyboard/headless fallback.</para>
+    ///
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.3.3 CODE-CONFIRMED —
+    ///   "slot selection = 3D world-space ray-pick; no 2D screen-rect test".
+    /// </summary>
+    private void OnViewport3DGuiInput(InputEvent ev)
+    {
+        if (_scene3D is null || _scene3DViewport is null || _scene3DContainer is null) return;
+        if (_createFormVisible) return; // create form is on top — do not pick through it
+
+        if (ev is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true } mb)
+        {
+            // Convert the click position (container-local) to SubViewport pixel coordinates.
+            // The SubViewportContainer (FullRect, Stretch=true) scales the viewport to its own size.
+            // SubViewport pixel = click_local * (vpSize / containerSize).
+            // spec: ui_system.md §8.1 "reference canvas 1024×768". CODE-CONFIRMED.
+            global::Godot.Vector2 vpSize = new(_scene3DViewport.Size.X, _scene3DViewport.Size.Y);
+            global::Godot.Vector2 ctrlSize = _scene3DContainer.Size;
+            float scaleX = ctrlSize.X > 0f ? vpSize.X / ctrlSize.X : 1f;
+            float scaleY = ctrlSize.Y > 0f ? vpSize.Y / ctrlSize.Y : 1f;
+            global::Godot.Vector2 vpPos = new(mb.Position.X * scaleX, mb.Position.Y * scaleY);
+
+            int hit = _scene3D.TryHitTestSlot(vpPos);
+            if (hit >= 0)
+            {
+                // spec: frontend_scenes.md §3.3.3 — "first slot whose box the ray hits → confirmed-pick". CODE-CONFIRMED.
+                _selectedSlot = hit;
+                RefreshInfo();
+                HighlightSlot(hit);
+                GD.Print($"[CharacterSelectScreen] 3D ray-pick → slot {hit}. " +
+                         "spec: frontend_scenes.md §3.3.3 CODE-CONFIRMED.");
+            }
+        }
     }
 
     // =========================================================================

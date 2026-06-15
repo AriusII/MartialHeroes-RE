@@ -131,7 +131,7 @@ traced.
 | `data/script/viplevels.scr` | 92 (0x5C) | none | CONFIRMED | VIP level table |
 | `data/script/itemscale.scr` | 8 | none | CONFIRMED | Item scale table |
 | `data/script/itemeffect.scr` | 4 | none | CONFIRMED | Item effect table |
-| `data/script/npc.scr` | 404 (0x194) | none | SAMPLE-VERIFIED | NPC description-text table (see §2.17; distinct from npcs.scr) |
+| `data/script/npc.scr` | 404 (0x194) | none | CONFIRMED (two-witness) | Keyed CP949 string table; keys 1..4 = class create-descriptions (see §2.17.3; distinct from npcs.scr) |
 | `data/script/quests.scr` | 3720 (0xE88), sparse | none | SAMPLE-VERIFIED | Quest template catalogue (see §2.17; 488 slots / 122 occupied) |
 | `data/script/autoquestion_cl.scr` | 92 (0x5C) | none | SAMPLE-VERIFIED | Anti-bot arithmetic-quiz question pool (see §2.17) |
 | `data/script/discript.sc` | 68 (0x44) | none | SAMPLE-VERIFIED | UI context-menu label table (see §2.17) |
@@ -850,29 +850,81 @@ answer is checked server-side and is not stored on the client.
 | ~+0x20 | var | char[] | Answer-hint text (CP949) | "정답을 숫자로 입력해주세요" ("enter the answer as a number") | SAMPLE-VERIFIED |
 | tail | — | — | Zero pad to the 92-byte stride | — | SAMPLE-VERIFIED |
 
-#### 2.17.3 npc.scr — NPC description-text table (stride: 404 bytes, 2510 records)
+#### 2.17.3 npc.scr — keyed CP949 string table (stride: 404 bytes, 2510 records) — CONFIRMED (two-witness)
 
-**SPEC CORRECTION:** §2.2 previously listed `npc.scr` as UNVERIFIED. The sample confirms a
-**404-byte (0x194) stride, 2510 records**, sequential `u32` id at +0 mirrored at +4. This file
-holds the multi-paragraph **NPC class/archetype description text** (and is the dialogue-body
-store referenced by the quest dialogs); it is distinct from the `npcs.scr` catalogue (stride
-1916, §2.10). The key linking the two id spaces is UNVERIFIED.
+> **SPEC CORRECTION (CAMPAIGN 9, two-witness: client loader + real-VFS byte dump).** §2.2 once
+> listed `npc.scr` as UNVERIFIED, and an earlier sample pass modelled the trailing region as an
+> "id mirror" plus three "value-48 sub-section markers". The two-witness pass refutes that model:
+> the record is a **20-byte header followed by six 64-byte CP949 string fields**, and the byte
+> read as a "value-48 marker" is the leading ASCII `'0'` (= 0x30) **empty-string sentinel** of the
+> (empty) trailing string fields. The corrected layout below is CONFIRMED by both witnesses.
+
+`data/script/npc.scr` is a **generic keyed CP949 string table**, not an NPC-specific catalogue.
+The whole file is **1 014 040 bytes = 404 × 2510** (mod 0), so the **404-byte (0x194) stride** and
+**2510-record** count are exact. It is **loaded once at boot** into a single global key->record map
+(an in-memory red-black tree keyed on each record's first integer field) and persists for the whole
+session — there is **no per-area reload**. The same table is reused by several consumers: the
+character-create form (keys 1..4, the per-class description; and the appearance/stat-grid key
+families), and the NPC-dialogue / appearance-pager subsystem (higher keys). It is distinct from the
+`npcs.scr` catalogue (stride 1916, §2.10).
+
+**Record count source:** `record_count = file_size / 404`. **Endianness:** little-endian. **String
+encoding:** CP949, NUL-terminated within each 64-byte field, zero-padded; a field whose **first byte
+is ASCII `'0'` (0x30)** is the **empty-string sentinel** — the loader force-terminates each field's
+last byte and treats a leading `'0'` as "empty".
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| +0x000 | 4 | u32 | NPC class/descriptor id (map key) | Sequential 1..2510 | SAMPLE-VERIFIED |
-| +0x004 | 4 | u32 | Id mirror | Equals +0x000 in all records (possible second lookup key) | SAMPLE-VERIFIED |
-| +0x008 | 8 | — | Reserved | Zero in observed records | SAMPLE-VERIFIED (value=0) |
-| +0x014 | ≤36 | char[] | Description paragraph 0 (CP949) | First archetype paragraph | SAMPLE-VERIFIED |
-| +0x050 | ≤28 | char[] | Description paragraph 1 (CP949) | Second paragraph | SAMPLE-VERIFIED |
-| +0x090 | ≤28 | char[] | Description paragraph 2 (CP949) | Third paragraph | SAMPLE-VERIFIED |
-| +0x0D0 | 4 | u32 | Sub-section marker (value 48 / 0x30) | 100% occupancy | SAMPLE-VERIFIED (value=48) |
-| +0x110 | 4 | u32 | Sub-section marker (value 48) | 100% occupancy | SAMPLE-VERIFIED (value=48) |
-| +0x150 | 4 | u32 | Sub-section marker (value 48) | 100% occupancy | SAMPLE-VERIFIED (value=48) |
-| other | — | — | Mostly zero / sparse | — | UNVERIFIED |
+| +0x000 | 4 | u32 | record key (map key) | The lookup key; class-description records use keys 1/2/3/4 | CONFIRMED |
+| +0x004 | 16 | bytes | header tail | Mostly zero. For class records the first 4 bytes mirror the key; for the key=1 record the bytes at +0x08 hold the value 0x64 (=100) — semantics UNVERIFIED. Not read as strings by the create form. | CONFIRMED layout; semantics UNVERIFIED |
+| +0x014 | 64 | char[64] | string field 0 (CP949) | Create form: description line 1 | CONFIRMED |
+| +0x054 | 64 | char[64] | string field 1 (CP949) | Create form: description line 2 | CONFIRMED |
+| +0x094 | 64 | char[64] | string field 2 (CP949) | Create form: description line 3 | CONFIRMED |
+| +0x0D4 | 64 | char[64] | string field 3 (CP949) | Empty (`'0'` sentinel) for class records; non-empty in later records | CONFIRMED |
+| +0x114 | 64 | char[64] | string field 4 (CP949) | Empty for class records; used by other consumers | CONFIRMED |
+| +0x154 | 64 | char[64] | string field 5 (CP949) | Empty for class records; used by other consumers | CONFIRMED |
 
-The three `48`-markers at +0xD0 / +0x110 / +0x150 (spacing 0x40 = 64) mirror the `quests.scr`
-sub-record pattern: each 404-byte record carries three 64-byte description "pages".
+Total = 20 + 6 × 64 = **404 bytes (0x194)**. A reader should read up to the first NUL (or 64 bytes)
+in each field, CP949-decode, and treat a leading `'0'` as an empty string.
+
+##### Character-create class descriptions (keys 1..4)
+
+The four playable classes occupy the first four records of the table (keys 1, 2, 3, 4). For each
+class record, **string fields 0/1/2 (offsets +0x14 / +0x54 / +0x94) are the three CP949 lines of the
+class DESCRIPTION** shown in the create form's right-hand panel; fields 3/4/5 are empty for class
+records. The three lines are concatenated to form the displayed description block.
+
+The mapping from the UI class buttons to table keys carries a **UI-slot vs internal-class crossover**
+(the on-screen button order is not the internal class order, and keys 3/4 are swapped relative to the
+button order). Each class also has a per-class preview BGM played on the shared music slot when its
+button is pressed. Both the key->class map and the per-class BGM are CONFIRMED by both witnesses:
+
+| npc.scr key | UI slot | Internal class id | Class (Korean) | Preview BGM |
+|---:|---:|---:|---|---:|
+| 1 | 0 | 4 | Monk (승려) | 910065000 |
+| 2 | 1 | 1 | Musa (무사) | 910062000 |
+| 3 | 3 | 2 | Salsu (살수) | 910063000 |
+| 4 | 2 | 3 | Dosa (도사) | 910064000 |
+
+**The class NAME is NOT in npc.scr.** The create-name modal's class name/title is read from the
+message database `data/text/msg.xdb` at message ids **14003..14007** (keyed by the internal class
+selector; 14003 is the default), independent of npc.scr. See `formats/msg_xdb.md` and
+`specs/frontend_scenes.md §4`. The description fields of keys 1..4 contain class-archetype text
+(weapons and martial-arts style per class); they do not repeat the class name.
+
+##### Create-form stat / appearance grid (key families)
+
+The 18-cell stat/appearance grid in the create form reads the **same** keyed map under a different
+family of computed keys, derived from an appearance/discipline discriminator `disc`:
+`2·disc + {110, 111, 120, 121, 130, 131, 140, 141}` and `disc + {210, 220, 230, 240}`. These are the
+appearance/equipment rows of the same table, not the class keys. Confidence: **CONFIRMED (high-level)
+— the key scheme is confirmed; the per-cell field assignment within each looked-up record is not
+fully enumerated here.**
+
+The three `0x30`-valued bytes the earlier pass placed at +0xD0 / +0x110 / +0x150 are simply the
+leading `'0'` empty-string sentinels of string fields 3 / 4 / 5 — not a `quests.scr`-style "value-48
+sub-record marker". Treat that earlier framing as superseded.
+
 
 #### 2.17.4 discript.sc — UI context-menu labels (stride: 68 bytes, 33 records)
 

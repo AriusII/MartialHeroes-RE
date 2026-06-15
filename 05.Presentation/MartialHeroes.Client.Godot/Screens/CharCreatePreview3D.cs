@@ -1,48 +1,67 @@
 // Screens/CharCreatePreview3D.cs
 //
-// A SubViewport-backed Control that renders the single, enlarged character preview
-// for the character-CREATION sub-form.
+// A SubViewport-backed Control that renders the single, enlarged character-CREATION preview
+// IN FRONT OF the real carved-stone-relief temple backdrop — the SAME cell as character-select.
 //
-// SPEC FACTS (frontend_scenes.md §4.2 CODE-CONFIRMED):
-//   - ONE actor, centered, placed +56.5 units NEARER the camera than the slot row.
-//   - Scale 75 (vs slot-row scale 50).  spec: §4.2 "scale 75 vs the slots' 50".
+// BACKDROP TRUTH (recovered CAMPAIGN 9, WAVE 2 — frontend_scenes.md §3.7.6 VFS-VERIFIED):
+//   Character CREATION reuses the IDENTICAL cell / stage / camera / environment as character
+//   SELECT. There is NO separate creation stage anywhere in the VFS — `data/map000` contains
+//   exactly one cell, `d000x10000z9990`. The carved stone-relief wall (suksang01..04.dds) and
+//   the bright portal/archway the player sees behind the create character are BAKED into that
+//   one cell's `.bud` building geometry. Select→create differs only by:
+//     - the camera STAYS put (KF1 rest pose; §3.5.4 — the camera does not move), and
+//     - a single create-preview actor is placed ≈56 units NEARER the camera (a Z shift only,
+//       §3.5.4 / §4.2) in place of the 5-slot row.
+//   So this preview loads `map000` cell `d000x10000z9990` ONCE (terrain .ted + props .bud =
+//   the carved wall), frames the camera on the KF1 rest pose, and builds the single forward-
+//   placed create actor — exactly mirroring the CharSelectScene3D backdrop path (TerrainNode +
+//   BudMeshBuilder), but inside this SubViewport so it shows as the create form's centre panel.
+//   spec: Docs/RE/specs/frontend_scenes.md §3.7.6 VFS-VERIFIED (same cell, actor Z only).
+//   spec: Docs/RE/specs/frontend_scenes.md §3.7.1 / §3.7.3 (cell files + carved-wall textures).
+//
+// CAMERA / ACTOR placement (frontend_scenes.md §3.5.2 / §3.5.4 / §4.2 CODE-CONFIRMED):
+//   - The camera holds keyframe 1, anchored Godot-space rest pose (Z negated from legacy):
+//       legacy KF1 eye (512, 87, −9652) → Godot (512, 87, 9652); look-at over the row pivot.
+//     spec: §3.5.2 (KF1 = (512,87,−9652) exact) / §3.5.4 (held rest pose). CODE-CONFIRMED.
+//   - The single create actor sits at the row pivot (508.48, 69.89, −9758.57 legacy →
+//     Godot (508.48, 69.89, 9758.57)) shifted +56.5 NEARER the camera. In Godot-space the
+//     camera (Z≈9652) is at SMALLER Z than the row (Z≈9758.6), so "nearer the camera" = a
+//     56.5-unit DECREASE in Godot Z.  spec: §3.5.4 / §4.2 "+56.5 units nearer the camera".
+//
+// ACTOR (frontend_scenes.md §4.2 CODE-CONFIRMED):
+//   - ONE actor, centred, scale 75 (vs slot-row scale 50). Here we reuse the slot-row Godot
+//     PreviewScale=3.0 so the actor matches the backdrop's world scale (the .bud/.ted are at
+//     native world units; the actor must scale to the same world frame, exactly like the slot
+//     row in CharSelectScene3D).  spec: §4.2 "scale 75 vs the slots' 50" (slot-row scale).
 //   - Rotation is PRESS-AND-HOLD turntable only (≈±2 rad/s while a rotate control is held).
-//     NOT a continuous auto-spin.  spec: §4.2 "turntable ≈±2 rad/s while a rotate control is held.
-//     NOT a continuous auto-spin."  CODE-CONFIRMED.
-//   - Changing the class rebuilds the actor; the ±face buttons rebuild it too but the
-//     visible 3D face does NOT change (face feeds a separate 2D portrait).  spec: §4.2.
-//   - No sex toggle.  spec: §4.2 "no functional sex toggle".
-//   - Per-class binding table (IdB), reusing the same SkinnedCharacterBuilder + texture path.
-//     spec: §4.2 + §3.7.5.  Per-class IdB / .skn:
-//       class 1 → g202110001.skn   (Musa)
-//       class 2 → g202220001.skn   (Tao)
-//       class 3 → g202130001.skn   (Blader)
-//       class 4 → g202140001.skn   (Warrior)
-//     Shared skeleton: data/char/bind/g1.bnd  spec: §3.7.5 CODE-CONFIRMED.
-//     Shared idle:     data/char/mot/g111100010.mot  spec: §3.7.5 CODE-CONFIRMED.
-//   - Per-class starter overlay skin gids (§4.3 table, CODE-CONFIRMED):
-//       class 1: 202110003 / 203110002 / 206110002 / 209110001
-//       class 2: 202220003 / 203220002 / 206220002 / 209220001
-//       class 3: 202130003 / 203130002 / 206130002 / 209130001
-//       class 4: 202140003 / 203140002 / 206140002 / 209140001
+//     NOT a continuous auto-spin.  spec: §4.2 CODE-CONFIRMED.
+//   - Changing the class rebuilds the actor; the ±face buttons rebuild it too but the visible
+//     3D face does NOT change (face feeds a separate 2D portrait).  spec: §4.2 CODE-CONFIRMED.
+//   - Per-class IdB / .skn (§4.2 + §3.7.5):
+//       class 1 → g202110001.skn  /  class 2 → g202220001.skn
+//       class 3 → g202130001.skn  /  class 4 → g202140001.skn
 //
 // RIG/CLIP IDENTITY (the class-mismatch shatter fix):
 //   A .skn mesh is authored against ONE skeleton named by its OWN id_b. That id_b selects BOTH
 //   the skeleton (data/char/bind/g{id_b}.bnd) AND the matched idle clip (actormotion.txt
 //   col2 == id_b → col16 → data/char/mot/g{...}.mot). The four creatable classes do NOT share a
-//   rig: class 1 has id_b=1 (g1, 84 bones); class 4 (Warrior) has id_b=4 (g4, 89 bones). Binding a
-//   class-4 mesh to the g1 rig + g1 idle is clean AT REST but SHATTERS the instant the wrong-rig
-//   clip rotates bones off bind. We therefore resolve the rig AND clip from the mesh's own id_b,
-//   PER class — never a single shared rig/clip.
+//   rig: class 1 has id_b=1 (g1, 84 bones); class 4 (Warrior) has id_b=4 (g4, 89 bones). We
+//   resolve the rig AND clip from the mesh's own id_b, PER class — never a single shared rig.
 //   spec: Docs/RE/specs/skinning.md §8(e) "Rig/clip identity" — SAMPLE-VERIFIED / CODE-CONFIRMED.
+//
+// ENVIRONMENT (frontend_scenes.md §3.6 CODE-CONFIRMED — area-0 truth, identical to select):
+//   The create backdrop is the SAME achromatic "dark stone temple" as select: achromatic dark
+//   background + a WHITE ambient floor (OPTION_BRIGHT=100 → energy 1.0) + a very faint achromatic
+//   directional key (~0.047) — NO coloured lamps. This is the recovered fix for the historical
+//   "too dark / grey void" debt and keeps create lighting consistent with select.
 //
 // PASSIVE: zero game logic. View state only (which class/face, turntable angle).
 // Reads VFS assets via RealClientAssets; rebuilds the actor node when the class changes.
 // All Control mutation on the main thread.
 //
-// spec: Docs/RE/specs/frontend_scenes.md §4.2  CODE-CONFIRMED.
-// spec: Docs/RE/specs/frontend_scenes.md §3.7.5 CODE-CONFIRMED (assets).
-// spec: Docs/RE/specs/skinning.md §8(e) — select skeleton AND clip by the skin's id_b, per class.
+// COORDINATE CONVENTION:
+//   WorldCoordinates.ToGodot: (x, y, z) → (x, y, −z). spec: Helpers/WorldCoordinates.
+//   All world positions below are already Godot-space (Z negated from spec/legacy values).
 
 using Godot;
 using MartialHeroes.Assets.Parsers;
@@ -53,59 +72,87 @@ using MartialHeroes.Client.Godot.World;
 namespace MartialHeroes.Client.Godot.Screens;
 
 /// <summary>
-/// The enlarged, turntable-rotatable character preview shown during character creation.
+/// The enlarged, turntable-rotatable character-creation preview shown during character creation,
+/// rendered in front of the real carved-stone-relief temple backdrop (cell <c>d000x10000z9990</c>,
+/// the SAME cell as character-select — frontend_scenes.md §3.7.6).
 ///
 /// <para>Set <see cref="InternalClassId"/> (1..4) then call <see cref="RebuildForClass"/>.
-/// The node hosts a <see cref="SubViewport"/> with the character actor at spec scale 75.</para>
+/// The node hosts a <see cref="SubViewport"/> with the backdrop cell (terrain + .bud carved wall),
+/// the area-0 environment, the static KF1 camera, and the single create actor placed ≈56 units
+/// nearer the camera than the select row.</para>
 ///
 /// <para>Turntable: the owning form calls <see cref="RotateLeft"/>/<see cref="RotateRight"/>
-/// while the rotate button is held; ~2 rad/s at 60 fps = ~0.0333 rad/frame.</para>
+/// while the rotate button is held; ~2 rad/s.</para>
 ///
-/// spec: Docs/RE/specs/frontend_scenes.md §4.2 CODE-CONFIRMED.
+/// spec: Docs/RE/specs/frontend_scenes.md §3.7.6 / §3.5.4 / §4.2 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class CharCreatePreview3D : Control
 {
     // =========================================================================
-    // Spec constants
+    // Spec constants — backdrop cell identity (the carved-wall temple cell).
+    // spec: Docs/RE/specs/frontend_scenes.md §3.7.1 / §3.7.6. CODE-CONFIRMED / VFS-VERIFIED.
     // =========================================================================
 
-    // Scale for the SubViewport preview. CharSelectScene3D uses PreviewScale=3.0 for slot actors.
-    // Spec §4.2 says "scale 75 vs slots' 50" — a ratio of 1.5× in legacy units.
-    // Our Godot implementation uses scale=3 for slot actors (CharSelectScene3D PreviewScale=3.0),
-    // so the spec ratio implies create-preview scale = 3.0 * 1.5 = 4.5.
-    // For this SubViewport (isolated from the world scene), scale=3 is used with auto-aimed camera.
-    // TODO: increase to 4.5 once the skinning stand-up rotation is confirmed correct.
-    // spec: Docs/RE/specs/frontend_scenes.md §4.2 "scale 75 vs the slots' 50" (ratio 1.5×). CODE-CONFIRMED.
-    private const float CreatePreviewScale = 3.0f; // calibrated; spec ratio implies 4.5
+    private const int BackdropAreaId = 0; // map000. spec: §3.7.1 CODE-CONFIRMED
+    private const int BackdropMapX = 10000; // cell d000x10000z9990. spec: §3.7.1 CODE-CONFIRMED
+    private const int BackdropMapZ = 9990; // cell d000x10000z9990. spec: §3.7.1 CODE-CONFIRMED
 
-    // Turntable rate: ≈±2 rad/s → at ~60 fps, ≈0.0333 rad/frame.
-    // spec: Docs/RE/specs/frontend_scenes.md §4.2 "≈±2 rad/s". CODE-CONFIRMED.
+    // =========================================================================
+    // Spec constants — camera (KF1 rest pose) and actor placement (Godot-space).
+    // =========================================================================
+
+    // Camera resting eye = keyframe 1, anchored. Legacy (512, 87, −9652) → Godot (512, 87, 9652)
+    // (Z negated). The camera holds this pose for both select and create (it does not move).
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 (KF1 exact) / §3.5.4 (held). CODE-CONFIRMED.
+    private static readonly Vector3 CameraEyeGodot = new(512.0f, 87.0f, 9652.0f);
+
+    // Row pivot — the focal point of the backdrop. Legacy (508.48, 69.89, −9758.57) →
+    // Godot (508.48, 69.89, 9758.57). The camera looks over this point; the create actor is
+    // placed here, then shifted toward the camera (see CreateActorZNudgeGodot).
+    // spec: Docs/RE/specs/frontend_scenes.md §3.6.5 / §3.7.2 — row pivot. CODE-CONFIRMED.
+    private const float RowPivotGodotX = 508.48f;
+    private const float RowPivotLegacyZ = -9758.57f; // legacy Z (TerrainNode samples in legacy space)
+    private const float RowPivotGodotZ = 9758.57f; // = −RowPivotLegacyZ
+    private const float RowPivotYFallback = 70.0f; // spec: §3.3.1 fallback row base Y. CODE-CONFIRMED
+
+    // Camera look-at — over the row pivot at mid-torso height of the ×3 actor (base ≈70 → top ≈94).
+    // Matches CharSelectScene3D's resting look-at so create frames the same temple view.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.4 — look-at over the row centre. CODE-CONFIRMED.
+    private static readonly Vector3 CameraLookAtGodot = new(508.48f, 82.0f, 9738.0f);
+
+    // The create actor sits +56.5 units NEARER the camera than the select row (a Z shift only).
+    // In Godot-space the camera (Z≈9652) is at SMALLER Z than the row (Z≈9758.6), so "nearer the
+    // camera" = a 56.5-unit DECREASE in Godot Z.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.4 / §4.2 — "+56.5 units nearer the camera". CODE-CONFIRMED.
+    private const float CreateActorZNudgeGodot = -56.5f;
+
+    // Camera projection — identical to select.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.1 — FOV 50° / near 5 / far 15000. CODE-CONFIRMED.
+    private const float CameraFov = 50.0f; // spec: §3.5.1 vertical FOV 50°. CODE-CONFIRMED
+    private const float CameraNear = 5.0f; // spec: §3.5.1 near clip 5.0. CODE-CONFIRMED
+    private const float CameraFar = 15000.0f; // spec: §3.5.1 far clip 15000.0. CODE-CONFIRMED
+
+    // =========================================================================
+    // Spec constants — actor scale and turntable.
+    // =========================================================================
+
+    // Actor scale — reuse the slot-row Godot PreviewScale=3.0 so the create actor matches the
+    // backdrop's native world scale (the .ted/.bud are at world units). spec §4.2 says "scale 75
+    // vs the slots' 50"; in our Godot frame the slot row is scale 3.0 (CharSelectScene3D.PreviewScale),
+    // so the create actor uses the same 3.0 to share the world frame with the carved-wall backdrop.
+    // spec: Docs/RE/specs/frontend_scenes.md §4.2 "scale 75 vs the slots' 50". CODE-CONFIRMED (slot scale).
+    private const float CreatePreviewScale = 3.0f;
+
+    // Turntable rate: ≈±2 rad/s. spec: Docs/RE/specs/frontend_scenes.md §4.2. CODE-CONFIRMED.
     private const float TurntableRadPerSec = 2.0f;
-
-    // Camera orbit distance (SubViewport-local).
-    // At scale=3, the actor is ~3 units tall (SKN meshes are ~1 unit un-scaled).
-    // Wrapper scale is applied, so effective actor height = scale * unscaled_height ≈ 3 units.
-    // Visible height at distance D with FOV=50°: 2*D*tan(25°) ≈ 0.932*D.
-    // To frame 3-unit character with headroom: D = 3.5 / 0.932 ≈ 3.75 → use 8 for more margin.
-    // Minimum camera distance floor. The real framing distance is derived per-build from the actor's
-    // scaled height in FrameCameraOnActor (height × 1.6), so this is only a lower bound for tiny rigs.
-    // spec: Docs/RE/specs/frontend_scenes.md §4.2 — front-on full-body framing. CODE-CONFIRMED intent.
-    private const float OrbitDistance = 6.0f; // TUNABLE floor — height-based framing dominates
-
-    // Look-at Y (unused now — camera is auto-aimed in BuildActorInWrapper).
-    private const float LookAtY = 1.5f; // TUNABLE (kept for initial position only)
 
     // =========================================================================
     // Per-class skin path table (§4.2 / §3.7.5). CODE-CONFIRMED.
     // =========================================================================
 
-    // NOTE: there is NO shared g1.bnd / g111100010.mot any more. The rig AND the idle clip are
-    // resolved PER CLASS from the parsed .skn's own id_b (see TryBuildActorForClass), because a
-    // skin is authored against exactly one skeleton named by its id_b and shatters on the wrong rig.
-    // spec: Docs/RE/specs/skinning.md §8(e) — rig/clip identity, per class.
-
-    // Starter base-skin mesh per internal class id 1..4.
-    // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 CODE-CONFIRMED.
+    // Starter base-skin mesh per internal class id 1..4 (each mesh carries a DISTINCT id_b that
+    // drives its own rig + idle clip — see TryBuildActorForClass).
+    // spec: Docs/RE/specs/frontend_scenes.md §4.2 / §3.7.5 CODE-CONFIRMED.
     private static string SknPathForClass(int internalClass) => internalClass switch
     {
         1 => "data/char/skin/g202110001.skn",
@@ -128,14 +175,20 @@ public sealed partial class CharCreatePreview3D : Control
     // Current turntable Y-rotation (radians). View state only, no domain meaning.
     private float _turntableYRot;
 
-    // The 3D actor wrapper node (at origin, scale 75). We rotate this for turntable.
+    // The 3D actor wrapper node (at the forward-placed world position). We rotate this for turntable.
     private Node3D? _actorWrapper;
 
     // SubViewport references.
     private SubViewport? _subViewport;
     private Camera3D? _camera;
 
-    // Whether the SubViewport has been built.
+    // Terrain node for ground-height sampling (the create actor's base Y).
+    private TerrainNode? _backdropTerrain;
+
+    // Sampled ground Y at the row pivot (filled after the .ted loads); fallback until then.
+    private float _rowGroundY = RowPivotYFallback;
+
+    // Whether the SubViewport (backdrop + camera + env) has been built.
     private bool _builtOnce;
 
     // =========================================================================
@@ -144,7 +197,7 @@ public sealed partial class CharCreatePreview3D : Control
 
     public override void _Ready()
     {
-        // Build the viewport and initial character.
+        // Build the viewport, backdrop and initial character.
         CallDeferred(MethodName.DeferredBuild);
     }
 
@@ -160,6 +213,7 @@ public sealed partial class CharCreatePreview3D : Control
         _actorWrapper = null;
         _subViewport = null;
         _camera = null;
+        _backdropTerrain = null;
     }
 
     // =========================================================================
@@ -167,8 +221,8 @@ public sealed partial class CharCreatePreview3D : Control
     // =========================================================================
 
     /// <summary>
-    /// Rebuilds the 3D actor for the current <see cref="InternalClassId"/>.
-    /// Must be called on the Godot main thread.
+    /// Rebuilds the 3D actor for the current <see cref="InternalClassId"/> (the backdrop, camera
+    /// and environment persist — only the actor is rebuilt, per §4.2). Main thread only.
     /// </summary>
     public void RebuildForClass()
     {
@@ -178,12 +232,11 @@ public sealed partial class CharCreatePreview3D : Control
             return;
         }
 
-        ReplaceActorInViewport();
+        BuildActorInWrapper();
     }
 
     /// <summary>
-    /// Rotates the preview left (ccw when viewed from above).
-    /// Call once per frame while the rotate-left button is held.
+    /// Rotates the preview left. Call once per frame while the rotate-left button is held.
     /// spec: Docs/RE/specs/frontend_scenes.md §4.2 "≈±2 rad/s turntable". CODE-CONFIRMED.
     /// </summary>
     public void RotateLeft(float deltaSeconds)
@@ -193,8 +246,7 @@ public sealed partial class CharCreatePreview3D : Control
     }
 
     /// <summary>
-    /// Rotates the preview right (cw when viewed from above).
-    /// Call once per frame while the rotate-right button is held.
+    /// Rotates the preview right. Call once per frame while the rotate-right button is held.
     /// spec: Docs/RE/specs/frontend_scenes.md §4.2 "≈±2 rad/s turntable". CODE-CONFIRMED.
     /// </summary>
     public void RotateRight(float deltaSeconds)
@@ -224,83 +276,23 @@ public sealed partial class CharCreatePreview3D : Control
 
     private void BuildViewport()
     {
-        // Determine control size (fallback 280×420 if not yet laid out).
-        int vpW = Size.X > 4 ? (int)Size.X : 280;
-        int vpH = Size.Y > 4 ? (int)Size.Y : 420;
+        // Determine control size (fallback 420×600 if not yet laid out — matches the centre panel).
+        int vpW = Size.X > 4 ? (int)Size.X : 420;
+        int vpH = Size.Y > 4 ? (int)Size.Y : 600;
 
         _subViewport = new SubViewport
         {
             Name = "CreatePreviewVP",
             Size = new Vector2I(vpW, vpH),
             RenderTargetUpdateMode = SubViewport.UpdateMode.Always,
-            TransparentBg = true,
+            // Opaque BG: the backdrop cell IS the background (the carved temple), like the select
+            // scene — not a transparent cut-out over the 2D form.
+            TransparentBg = false,
         };
 
-        // Camera — FOV 50° as per the select-scene camera; near/far tuned for the SubViewport scale.
-        // At scale=3 the actor is ~3 units; near=0.05 avoids clipping at close range.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.5.1 CODE-CONFIRMED FOV+far; near tuned for SubVP scale.
-        _camera = new Camera3D
-        {
-            Name = "CreatePreviewCam",
-            Fov = 50f, // spec: §3.5.1 CODE-CONFIRMED
-            Near = 0.05f, // tuned: at scale=3 units the near plane must be small (spec near=5 is world-space)
-            Far = 500f, // sufficient for this SubViewport
-            KeepAspect = Camera3D.KeepAspectEnum.Height,
-        };
-        // Place camera looking at the rig origin from the front.
-        // Position camera at (0, LookAtY, OrbitDistance) — facing the actor at origin.
-        _camera.Position = new Vector3(0f, LookAtY, OrbitDistance);
-        // LookAt is called deferred after the camera is in-tree (see ApplyCameraLookAt).
-        _subViewport.AddChild(_camera);
-
-        // Key light (strong directional, boosted for diagnostic).
-        var sun = new DirectionalLight3D
-        {
-            Name = "CreateLight",
-            LightEnergy = 2.5f,
-            LightColor = new Color(1.0f, 0.95f, 0.88f),
-        };
-        sun.RotationDegrees = new Vector3(-30f, 0f, 0f); // overhead, hitting front face
-        _subViewport.AddChild(sun);
-
-        // Soft fill light — positioned near the camera to illuminate the front of the actor.
-        // Range tuned for scale=3 (actor at origin, camera at distance ~4 units).
-        var fill = new OmniLight3D
-        {
-            Name = "CreateFill",
-            LightEnergy = 0.6f,
-            LightColor = new Color(0.6f, 0.7f, 1.0f),
-            OmniRange = 20f,
-            Position = new Vector3(-1f, LookAtY, OrbitDistance - 1f),
-        };
-        _subViewport.AddChild(fill);
-
-        // Ambient environment (neutral grey so character colours read clean).
-        var skyMat = new ProceduralSkyMaterial();
-        skyMat.SkyTopColor = new Color(0.15f, 0.20f, 0.40f);
-        skyMat.SkyHorizonColor = new Color(0.25f, 0.25f, 0.35f);
-        var env = new global::Godot.Environment();
-        env.BackgroundMode = global::Godot.Environment.BGMode.Sky;
-        env.Sky = new Sky { SkyMaterial = skyMat };
-        env.AmbientLightSource = global::Godot.Environment.AmbientSource.Color;
-        env.AmbientLightColor = new Color(0.8f, 0.8f, 0.9f); // brighter ambient for diagnostic
-        env.AmbientLightEnergy = 2.5f; // high ambient so textures are visible regardless of directional
-        env.TonemapMode = global::Godot.Environment.ToneMapper.Aces;
-        env.TonemapExposure = 1.2f;
-        var wEnv = new WorldEnvironment { Environment = env };
-        _subViewport.AddChild(wEnv);
-
-        // Actor wrapper for turntable rotation.
-        _actorWrapper = new Node3D { Name = "ActorWrapper" };
-        _subViewport.AddChild(_actorWrapper);
-
-        // Build the initial character actor.
-        BuildActorInWrapper();
-
-        // Apply camera look-at once camera is in tree.
-        Callable.From(ApplyCameraLookAt).CallDeferred();
-
-        // SubViewportContainer.
+        // Add the SubViewport (inside its container) to the tree FIRST, so every child built below
+        // (camera, lights, terrain) is in-tree — Camera3D.LookAt and DirectionalLight3D.LookAt*
+        // require the node to be inside the scene tree.
         var container = new SubViewportContainer
         {
             Name = "CreatePreviewContainer",
@@ -311,15 +303,376 @@ public sealed partial class CharCreatePreview3D : Control
         container.AddChild(_subViewport);
         AddChild(container);
 
-        GD.Print($"[CharCreatePreview3D] Viewport {vpW}×{vpH} built for class={InternalClassId}. " +
-                 "spec: frontend_scenes.md §4.2 CODE-CONFIRMED (scale 75, turntable).");
+        // ── Environment — area-0 "dark stone temple", identical to CharSelectScene3D ──────────
+        BuildEnvironment();
+
+        // ── Camera — static KF1 rest pose (the camera does NOT move; same as select) ──────────
+        BuildCamera();
+
+        // ── Lighting — faint achromatic directional key (no coloured lamps) ───────────────────
+        BuildLighting();
+
+        // ── Backdrop cell d000x10000z9990 (terrain .ted + props .bud = the carved wall) ───────
+        RealClientAssets? assets = SharedRealAssets;
+        if (assets is null)
+        {
+            try { assets = RealClientAssets.TryOpen(); }
+            catch (Exception ex) { GD.PrintErr($"[CharCreatePreview3D] VFS open failed: {ex.Message}"); }
+        }
+
+        if (assets is not null)
+        {
+            BuildBackdropTerrain(assets);
+            BuildBackdropProps(assets);
+        }
+        else
+        {
+            GD.Print("[CharCreatePreview3D] VFS offline — no carved-wall backdrop; actor placeholder only.");
+        }
+
+        // ── Actor wrapper for the single create actor (turntable rotation applied here) ───────
+        _actorWrapper = new Node3D { Name = "ActorWrapper" };
+        _subViewport.AddChild(_actorWrapper);
+
+        // Build the initial character actor at the forward-placed world position.
+        BuildActorInWrapper();
+
+        GD.Print($"[CharCreatePreview3D] Viewport {vpW}×{vpH} built for class={InternalClassId} " +
+                 "(carved-wall backdrop cell d000x10000z9990 + KF1 camera + area-0 env). " +
+                 "spec: frontend_scenes.md §3.7.6 / §3.5.4 / §4.2 CODE-CONFIRMED.");
     }
 
-    private void ApplyCameraLookAt()
+    // =========================================================================
+    // Environment — area-0 "dark stone temple" (mirrors CharSelectScene3D.BuildEnvironment)
+    // =========================================================================
+
+    private void BuildEnvironment()
     {
-        if (_camera is null || !IsInstanceValid(_camera)) return;
-        _camera.LookAt(new Vector3(0f, LookAtY, 0f), Vector3.Up);
+        if (_subViewport is null) return;
+
+        // Area-0 environment TRUTH (CAMPAIGN 9): the create backdrop is the SAME achromatic,
+        // statically-lit "dark stone temple" as select — NOT a blue sky and NOT a torchlit cavern.
+        // Achromatic dark background + a WHITE ambient floor (OPTION_BRIGHT=100 → energy 1.0) is the
+        // scene's main illuminant; the directional is a faint achromatic key. No coloured lamps.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6 + formats/environment_bins.md (area-0). CODE-CONFIRMED.
+
+        // global::Godot.Environment to avoid the sibling-namespace collision (CS0234).
+        var env = new global::Godot.Environment
+        {
+            BackgroundMode = global::Godot.Environment.BGMode.Color,
+            BackgroundColor = new Color(0.04f, 0.04f, 0.04f), // achromatic dark. spec: environment_bins.md §11.6
+            AmbientLightSource = global::Godot.Environment.AmbientSource.Color,
+            AmbientLightColor = new Color(1.0f, 1.0f, 1.0f), // white floor — OPTION_BRIGHT=100. spec: §3.6.2 CODE-CONFIRMED
+            AmbientLightEnergy = 1.0f, // spec: §3.6.2 OPTION_BRIGHT/100 default = 1.0. CODE-CONFIRMED
+            TonemapMode = global::Godot.Environment.ToneMapper.Linear, // faithful D3D9 output (no ACES darkening)
+            TonemapExposure = 1.0f,
+            FogEnabled = false, // spec: §3.6.2 — distance fog OFF (the invisible-chars fix). CODE-CONFIRMED
+            GlowEnabled = true,
+            GlowIntensity = 0.6f, // Aesthetic
+            GlowStrength = 1.0f, // Aesthetic
+            GlowBloom = 0.05f, // Aesthetic
+            GlowHdrThreshold = 0.8f, // only HDR sun blooms — avoids haloing the white-ambient scene
+        };
+        env.Set("glow_levels/1", 1.0f);
+        env.Set("glow_levels/2", 0.0f);
+        env.Set("glow_levels/3", 0.0f);
+        env.Set("glow_levels/4", 0.0f);
+        env.Set("glow_levels/5", 0.0f);
+        env.Set("glow_levels/6", 0.0f);
+        env.Set("glow_levels/7", 0.0f);
+
+        var worldEnv = new WorldEnvironment { Environment = env };
+        _subViewport.AddChild(worldEnv);
+
+        GD.Print("[CharCreatePreview3D] Area-0 environment built: achromatic dark BG + WHITE ambient floor " +
+                 "(energy 1.0) + fog OFF. spec: frontend_scenes.md §3.6 CODE-CONFIRMED.");
     }
+
+    // =========================================================================
+    // Camera — single static KF1 rest pose (the camera does NOT move; §3.5.4)
+    // =========================================================================
+
+    private void BuildCamera()
+    {
+        if (_subViewport is null) return;
+
+        // SINGLE STATIC perspective camera, built once. No orbit, no keyframes, no animation.
+        // The camera holds keyframe 1 for both select and create.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 / §3.5.4 CODE-CONFIRMED.
+        _camera = new Camera3D
+        {
+            Name = "CreatePreviewCam",
+            Fov = CameraFov, // spec: §3.5.1 FOV 50°. CODE-CONFIRMED
+            Near = CameraNear, // spec: §3.5.1 near 5.0. CODE-CONFIRMED
+            Far = CameraFar, // spec: §3.5.1 far 15000.0. CODE-CONFIRMED
+            KeepAspect = Camera3D.KeepAspectEnum.Height,
+        };
+        _subViewport.AddChild(_camera);
+
+        // Position and orient: the KF1 resting eye looking over the row pivot (the one fixed pose).
+        _camera.Position = CameraEyeGodot;
+        _camera.LookAt(CameraLookAtGodot, Vector3.Up);
+
+        GD.Print($"[CharCreatePreview3D] Static KF1 camera built: eye={CameraEyeGodot} look-at={CameraLookAtGodot} " +
+                 $"(Godot-space). FOV {CameraFov}/near {CameraNear}/far {CameraFar}. " +
+                 "spec: frontend_scenes.md §3.5.2/§3.5.4 CODE-CONFIRMED (KF1 rest pose, camera does not move).");
+    }
+
+    // =========================================================================
+    // Lighting — faint achromatic directional key (mirrors CharSelectScene3D, no coloured lamps)
+    // =========================================================================
+
+    private void BuildLighting()
+    {
+        if (_subViewport is null) return;
+
+        // Area-0 lighting TRUTH: the scene fill is the WHITE ambient floor (built in BuildEnvironment).
+        // The directional is a very FAINT ACHROMATIC key (~0.047 grey), NOT a warm torch rig. We add a
+        // couple of dim achromatic fills for gentle local shaping of the create actor only — they must
+        // not re-introduce any colour. Consistent with the select scene's lighting.
+        // spec: Docs/RE/formats/environment_bins.md §11.3/§9.4 SAMPLE-VERIFIED (energy + light vector);
+        //       Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED (count ~5, range ~1024).
+
+        // Faint achromatic directional key — area-0 kf-29 directional ~0.047 with the static light
+        // vector (-7,7,20) legacy world; Godot-space negates Z → (-7,7,-20).
+        // spec: Docs/RE/formats/environment_bins.md §9.4/§10.6/§11.3. SAMPLE-VERIFIED.
+        var sun = new DirectionalLight3D
+        {
+            Name = "Area0Directional",
+            LightEnergy = 0.047f, // spec: environment_bins.md §11.3 SAMPLE-VERIFIED (area-0 kf-29 directional)
+            LightColor = new Color(1.0f, 1.0f, 1.0f), // achromatic — area-0 is grey. spec: §11.2 R=G=B
+            ShadowEnabled = false,
+        };
+        _subViewport.AddChild(sun);
+        var sunPivot = new Vector3(512.0f, 200.0f, 9738.0f);
+        sun.LookAtFromPosition(sunPivot, sunPivot + new Vector3(-7.0f, 7.0f, -20.0f).Normalized(), Vector3.Up);
+
+        // Dim achromatic fills, range 1024 (§3.6.1 count/range CONFIRMED; colours UNVERIFIED → white).
+        // Positioned around the forward-placed create actor (≈56 nearer the camera than the row).
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED (range ~1024).
+        float actorZ = RowPivotGodotZ + CreateActorZNudgeGodot; // ≈ 9702
+        (string name, Vector3 pos, float energy)[] fills =
+        [
+            ("FillCharacterKey", new Vector3(512.0f, 95.0f, actorZ - 40.0f), 0.9f),
+            ("FillLeftPillar", new Vector3(480.5f, 89.0f, RowPivotGodotZ), 0.6f),
+            ("FillRightPillar", new Vector3(536.5f, 89.0f, RowPivotGodotZ), 0.6f),
+        ];
+        foreach ((string name, Vector3 pos, float energy) in fills)
+        {
+            var fill = new OmniLight3D
+            {
+                Name = name,
+                LightEnergy = energy, // Aesthetic (dim achromatic fill; the ambient floor dominates)
+                LightColor = new Color(1.0f, 1.0f, 1.0f), // achromatic — area-0 is grey
+                OmniRange = 1024.0f, // spec: frontend_scenes.md §3.6.1 CODE-CONFIRMED range ~1024
+                OmniAttenuation = 1.0f,
+                ShadowEnabled = false,
+                Position = pos, // Aesthetic positions
+            };
+            _subViewport.AddChild(fill);
+        }
+
+        GD.Print("[CharCreatePreview3D] Area-0 lighting built: faint achromatic directional (0.047) + dim " +
+                 "achromatic fills (range 1024); white ambient floor is the main illuminant (no coloured lamps). " +
+                 "spec: environment_bins.md §11.3 + frontend_scenes.md §3.6.1 CODE-CONFIRMED.");
+    }
+
+    // =========================================================================
+    // Backdrop terrain — single cell d000x10000z9990 (reuses TerrainNode, like CharSelectScene3D)
+    // =========================================================================
+
+    private void BuildBackdropTerrain(RealClientAssets assets)
+    {
+        if (_subViewport is null) return;
+
+        // spec: Docs/RE/specs/frontend_scenes.md §3.7.1 — backdrop cell d000x10000z9990. CODE-CONFIRMED.
+        string tag = AreaTag(BackdropAreaId);
+        string tedPath = $"data/map{tag}/dat/d{tag}x{BackdropMapX}z{BackdropMapZ}.ted";
+
+        if (!assets.Contains(tedPath))
+        {
+            GD.Print($"[CharCreatePreview3D] Backdrop terrain not found: {tedPath} — skipping .ted.");
+            return;
+        }
+
+        try
+        {
+            ReadOnlyMemory<byte> tedData = assets.GetRaw(tedPath);
+            if (tedData.IsEmpty)
+            {
+                GD.Print($"[CharCreatePreview3D] Backdrop .ted is empty: {tedPath}");
+                return;
+            }
+
+            // Resolve terrain textures via the confirmed two-hop chain (TERRAIN section).
+            // spec: terrain.md §5.6 Block 3 — 1-based TextureIndexGrid → .map TERRAIN TEXTURES → bgtexture → .dds.
+            Func<int, ImageTexture?> texResolver = BuildTerrainTextureResolver(assets);
+
+            var terrainNode = new TerrainNode
+            {
+                Name = "BackdropTerrain",
+                TextureResolver = texResolver,
+            };
+            _subViewport.AddChild(terrainNode);
+            _backdropTerrain = terrainNode;
+
+            // Feed the single sector directly (no streaming needed for one backdrop cell).
+            var evt = new MartialHeroes.Client.Application.World.SectorLoadedEvent(
+                MapX: BackdropMapX,
+                MapZ: BackdropMapZ,
+                Payload: tedData);
+            terrainNode.OnSectorLoaded(evt);
+
+            // The terrain sampler returns the .ted soil/rock floor (~26), NOT the .bud platform top.
+            // Place the actor on the PLATFORM at the spec row-pivot Y (≈70), matching CharSelectScene3D
+            // (which also uses the fixed pivot Y for placement and the sampler for diagnostics only).
+            // spec: frontend_scenes.md §3.6.5 — row pivot Y = 69.89 ≈ 70.0. CODE-CONFIRMED.
+            _rowGroundY = RowPivotYFallback;
+            if (terrainNode.TryGetGroundHeight(RowPivotGodotX, RowPivotLegacyZ, out float sampledY, RowPivotYFallback))
+            {
+                GD.Print($"[CharCreatePreview3D] Terrain sampler at pivot: {sampledY:F3} (soil/floor, NOT platform top). " +
+                         $"Using spec row pivot Y={RowPivotYFallback} for actor placement. spec §3.6.5 CODE-CONFIRMED.");
+            }
+
+            GD.Print($"[CharCreatePreview3D] Backdrop terrain cell ({BackdropMapX},{BackdropMapZ}) loaded. " +
+                     "spec: frontend_scenes.md §3.7.1 CODE-CONFIRMED.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[CharCreatePreview3D] Backdrop terrain failed: {ex.Message}");
+        }
+    }
+
+    private void BuildBackdropProps(RealClientAssets assets)
+    {
+        if (_subViewport is null) return;
+
+        // The carved stone-relief wall + portal are baked into this cell's .bud building geometry.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.7.6 — suksang*/walll04* baked into the .bud. VFS-VERIFIED.
+        string tag = AreaTag(BackdropAreaId);
+        string budPath = $"data/map{tag}/dat/d{tag}x{BackdropMapX}z{BackdropMapZ}.bud";
+
+        if (!assets.Contains(budPath))
+        {
+            GD.Print($"[CharCreatePreview3D] Backdrop .bud (carved wall) not found: {budPath} — skipping props.");
+            return;
+        }
+
+        try
+        {
+            BudScene? scene = assets.LoadBud(budPath);
+            if (scene is null || scene.Objects.Length == 0)
+            {
+                GD.Print("[CharCreatePreview3D] Backdrop .bud empty — no carved-wall props.");
+                return;
+            }
+
+            BgTextureCatalog? bgPool = null;
+            MapDescriptor? cellMap = null;
+
+            try
+            {
+                string txtPath = "data/map000/texture/bgtexture.txt";
+                if (assets.Contains(txtPath))
+                    bgPool = BgTextureTxtParser.Parse(assets.GetRaw(txtPath));
+            }
+            catch { /* non-critical */ }
+
+            try
+            {
+                string mapPath = $"data/map{tag}/dat/d{tag}x{BackdropMapX}z{BackdropMapZ}.map";
+                if (assets.Contains(mapPath))
+                    cellMap = MapDescriptorParser.Parse(assets.GetRaw(mapPath));
+            }
+            catch { /* non-critical */ }
+
+            // Building textures use the same two-hop chain via the BUILDING section of the .map.
+            Func<uint, ImageTexture?> budTexResolver = budIdx =>
+                ResolveTexture(assets, bgPool, cellMap, "BUILDING", (int)budIdx);
+
+            Node3D propsRoot = BudMeshBuilder.Build(scene, budTexResolver);
+            propsRoot.Name = "BackdropProps";
+            _subViewport.AddChild(propsRoot);
+
+            GD.Print($"[CharCreatePreview3D] Carved-wall backdrop props built ({scene.Objects.Length} objects). " +
+                     "spec: frontend_scenes.md §3.7.6 CODE-CONFIRMED (suksang*/walll04* baked into .bud).");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[CharCreatePreview3D] Backdrop props failed: {ex.Message}");
+        }
+    }
+
+    private Func<int, ImageTexture?> BuildTerrainTextureResolver(RealClientAssets assets)
+    {
+        // Two-hop chain: 1-based tex byte → cell .map TERRAIN TEXTURES[idx-1].intTexId → bgtexture pool → .dds.
+        // spec: Docs/RE/formats/terrain.md §5.6 Block 3 + §3.5 + §4.2. CONFIRMED.
+        BgTextureCatalog? bgPool = null;
+        MapDescriptor? cellMap = null;
+        var cache = new Dictionary<int, ImageTexture?>();
+
+        try
+        {
+            string txtPath = "data/map000/texture/bgtexture.txt";
+            if (assets.Contains(txtPath))
+                bgPool = BgTextureTxtParser.Parse(assets.GetRaw(txtPath));
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[CharCreatePreview3D] bgtexture.txt load failed: {ex.Message}");
+        }
+
+        try
+        {
+            string tag = AreaTag(BackdropAreaId);
+            string mapPath = $"data/map{tag}/dat/d{tag}x{BackdropMapX}z{BackdropMapZ}.map";
+            if (assets.Contains(mapPath))
+                cellMap = MapDescriptorParser.Parse(assets.GetRaw(mapPath));
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[CharCreatePreview3D] backdrop .map load failed: {ex.Message}");
+        }
+
+        return texByte =>
+        {
+            if (cache.TryGetValue(texByte, out ImageTexture? cached)) return cached;
+            ImageTexture? tex = ResolveTexture(assets, bgPool, cellMap, "TERRAIN", texByte);
+            cache[texByte] = tex;
+            return tex;
+        };
+    }
+
+    private static ImageTexture? ResolveTexture(
+        RealClientAssets assets, BgTextureCatalog? pool, MapDescriptor? map,
+        string section, int oneBasedIdx)
+    {
+        if (pool is null || map is null || oneBasedIdx <= 0) return null;
+
+        (int Flag, int TexId)[]? list = null;
+        foreach (var s in map.Sections)
+        {
+            if (string.Equals(s.Keyword, section, StringComparison.OrdinalIgnoreCase))
+            {
+                list = s.Textures;
+                break;
+            }
+        }
+
+        if (list is null) return null;
+        int li = oneBasedIdx - 1;
+        if ((uint)li >= (uint)list.Length) return null;
+
+        string? rel = pool.GetRelPath(list[li].TexId);
+        if (rel is null) return null;
+
+        string ddsPath = $"data/map000/texture/{rel}.dds";
+        return assets.Contains(ddsPath) ? assets.LoadTexture(ddsPath) : null;
+    }
+
+    // =========================================================================
+    // Create actor — single forward-placed actor (+56.5 nearer the camera than the row)
+    // =========================================================================
 
     private void BuildActorInWrapper()
     {
@@ -344,18 +697,24 @@ public sealed partial class CharCreatePreview3D : Control
             }
         }
 
+        // Position the actor wrapper at the row pivot, shifted +56.5 NEARER the camera (Godot −Z),
+        // at the sampled ground Y, scaled to match the backdrop's world frame. The wrapper carries
+        // the turntable rotation. spec: frontend_scenes.md §4.2 / §3.5.4 CODE-CONFIRMED.
+        float actorZ = RowPivotGodotZ + CreateActorZNudgeGodot;
+        _actorWrapper.Position = new Vector3(RowPivotGodotX, _rowGroundY, actorZ);
+        _actorWrapper.Scale = Vector3.One * CreatePreviewScale;
+        ApplyTurntableRotation();
+
         if (assets is null)
         {
-            GD.Print("[CharCreatePreview3D] VFS offline — placeholder only.");
-            // Add a visible placeholder box.
+            GD.Print("[CharCreatePreview3D] VFS offline — placeholder actor only.");
             var box = new MeshInstance3D
             {
                 Name = "Placeholder",
                 Mesh = new BoxMesh { Size = new Vector3(2f, 4f, 1f) },
                 Position = new Vector3(0f, 2f, 0f),
             };
-            var mat = new StandardMaterial3D();
-            mat.AlbedoColor = new Color(0.35f, 0.30f, 0.50f);
+            var mat = new StandardMaterial3D { AlbedoColor = new Color(0.35f, 0.30f, 0.50f) };
             box.MaterialOverride = mat;
             _actorWrapper.AddChild(box);
             return;
@@ -366,32 +725,15 @@ public sealed partial class CharCreatePreview3D : Control
             Node3D? actor = TryBuildActorForClass(assets, InternalClassId);
             if (actor is not null)
             {
-                // spec: frontend_scenes.md §4.2 — "scale 3 (matching slot-row scale)". CODE-CONFIRMED.
-                //
-                // SkinnedCharacterBuilder applies the SAME upright stand-up pivot (DeriveStandUpBasis)
-                // and the SAME RecentreRoot used by the slot row in CharSelectScene3D — so the actor
-                // already stands VERTICALLY (head → +Y) with its FEET at local Y≈0 and its body
-                // CENTRED on local X≈0 / Z≈0. The mesh therefore renders near the wrapper ORIGIN,
-                // NOT at actor.Position (which is only the recentre OFFSET that produced that layout).
-                //
-                // ROOT-CAUSE FIX: the previous code aimed the camera at actor.Position * scale — i.e.
-                // at the recentre offset, far from where the mesh actually is — so the upright actor
-                // fell outside the frame and only a skewed sliver was visible (read as "lying ~90°").
-                // We now frame the camera on the actor's ACTUAL rendered AABB (its recentred,
-                // pivot-stood mesh), exactly mirroring the slot row which looks at the real mesh
-                // location (its row pivot), not at any recentre offset.
-                // spec: frontend_scenes.md §3.3.1 / §4.2 — preview reuses the slot stand-up + framing.
-                _actorWrapper.Scale = Vector3.One * CreatePreviewScale;
+                // SkinnedCharacterBuilder applies the SAME upright stand-up pivot + RecentreRoot the
+                // slot row uses, so the actor stands vertically with feet at local Y≈0 centred on X/Z.
+                // Its Position is the recentre OFFSET — keep it; the wrapper supplies the world placement.
+                // spec: frontend_scenes.md §4.2 / §3.3.1 — preview reuses the slot stand-up + framing.
                 _actorWrapper.AddChild(actor);
 
-                // Frame the camera once the actor's transform is settled in-tree, using its real
-                // global AABB (centre + height). The actor is upright, so its tallest extent is Y.
-                Callable.From(FrameCameraOnActor).CallDeferred();
-
-                ApplyTurntableRotation();
-                GD.Print($"[CharCreatePreview3D] Actor built for class={InternalClassId} scale={CreatePreviewScale}, " +
-                         $"localRecentreOffset={actor.Position} (camera frames the recentred mesh, not this offset). " +
-                         "spec: frontend_scenes.md §4.2 CODE-CONFIRMED.");
+                GD.Print($"[CharCreatePreview3D] Create actor built for class={InternalClassId} at world " +
+                         $"({RowPivotGodotX:F1}, {_rowGroundY:F3}, {actorZ:F1}) Godot-space (+56.5 nearer camera), " +
+                         $"scale={CreatePreviewScale}. spec: frontend_scenes.md §4.2 / §3.5.4 CODE-CONFIRMED.");
             }
             else
             {
@@ -406,80 +748,6 @@ public sealed partial class CharCreatePreview3D : Control
         {
             if (ownsAssets) assets?.Dispose();
         }
-    }
-
-    private void ReplaceActorInViewport()
-    {
-        // Called on class change — rebuild the actor inside the existing wrapper.
-        // BuildActorInWrapper already defers FrameCameraOnActor, which re-frames the camera on the
-        // new (possibly differently-proportioned) class mesh. No stale fixed look-at re-apply here.
-        BuildActorInWrapper();
-    }
-
-    /// <summary>
-    /// Aims the camera at the actor's ACTUAL rendered location, computed from its in-tree global
-    /// AABB (centre + height). The actor is built upright by SkinnedCharacterBuilder (the same
-    /// stand-up pivot the slot row uses) and recentred so its feet sit at the wrapper origin, so
-    /// the correct look-at is the AABB centre — NOT the recentre offset that the old code used.
-    ///
-    /// <para>Deferred so the wrapper scale and the actor's recentre <c>Position</c> are settled in
-    /// the tree before the global AABB is read.</para>
-    ///
-    /// spec: Docs/RE/specs/frontend_scenes.md §4.2 — front-on framing, scale 75 (here scale 3),
-    ///       camera placed +OrbitDistance toward the viewer; up = +Y so the actor stands vertically.
-    /// </summary>
-    private void FrameCameraOnActor()
-    {
-        if (_camera is null || !IsInstanceValid(_camera) || _actorWrapper is null) return;
-
-        Aabb world = ComputeWorldAabb(_actorWrapper);
-        Vector3 centre = world.Position + world.Size * 0.5f;
-
-        // Distance to comfortably frame the actor's height in the FOV, with headroom.
-        float height = Mathf.Max(world.Size.Y, 0.001f);
-        float dist = Mathf.Max(OrbitDistance, height * 1.6f);
-
-        // Front-on eye: same X/Y as the look-at centre, pulled +Z toward the viewer.
-        // Up = +Y keeps the upright (head→+Y) actor standing vertically on screen.
-        var eye = new Vector3(centre.X, centre.Y, centre.Z + dist);
-        _camera.Position = eye;
-        _camera.LookAt(centre, Vector3.Up);
-
-        GD.Print($"[CharCreatePreview3D] Camera framed: actor AABB centre={centre} size={world.Size} " +
-                 $"eye={eye} dist={dist:F1}. spec: frontend_scenes.md §4.2 CODE-CONFIRMED (front-on, up=+Y).");
-    }
-
-    /// <summary>
-    /// Walks a node subtree and unions the GLOBAL AABBs of every <see cref="VisualInstance3D"/>
-    /// (e.g. the LBS <see cref="MeshInstance3D"/>). Returns an empty AABB when none are found.
-    /// Global (not local) so the wrapper scale and the actor's recentre offset are included — this
-    /// is the actor's true rendered extent, which is what the camera must frame.
-    /// </summary>
-    private static Aabb ComputeWorldAabb(Node3D root)
-    {
-        var result = new Aabb();
-        bool any = false;
-        var stack = new Stack<Node>();
-        stack.Push(root);
-        while (stack.Count > 0)
-        {
-            Node n = stack.Pop();
-            if (n is VisualInstance3D vis && vis.IsInsideTree())
-            {
-                Aabb local = vis.GetAabb();
-                if (local.Size != Vector3.Zero)
-                {
-                    Aabb global = vis.GlobalTransform * local;
-                    result = any ? result.Merge(global) : global;
-                    any = true;
-                }
-            }
-
-            foreach (Node child in n.GetChildren())
-                stack.Push(child);
-        }
-
-        return result;
     }
 
     private static Node3D? TryBuildActorForClass(RealClientAssets assets, int internalClass)
@@ -507,9 +775,8 @@ public sealed partial class CharCreatePreview3D : Control
             return null;
         }
 
-        // Skeleton — resolved from the MESH'S OWN id_b (NOT a shared g1.bnd). The skin's
-        // bind-local vertex offsets are baked against exactly this skeleton's rest pose; binding it
-        // to any other same-ID-range rig is clean at rest but shatters on play.
+        // Skeleton — resolved from the MESH'S OWN id_b (NOT a shared g1.bnd). The skin's bind-local
+        // vertex offsets are baked against exactly this skeleton's rest pose; the wrong rig shatters.
         // spec: Docs/RE/specs/skinning.md §8(e) — data/char/bind/g{id_b}.bnd, per class.
         Skeleton? skeleton = null;
         string bndPath = $"data/char/bind/g{mesh.IdB}.bnd";
@@ -531,9 +798,7 @@ public sealed partial class CharCreatePreview3D : Control
             GD.PrintErr($"[CharCreatePreview3D] .bnd not found for id_b={mesh.IdB}: {bndPath}");
         }
 
-        // Idle animation — the MATCHED clip for this rig, keyed by the mesh's own id_b via
-        // actormotion.txt (col2 == id_b → col16). Each class's idle clip targets ITS rig's bones;
-        // playing the wrong-rig clip is the direct cause of the create-preview shatter.
+        // Idle animation — the MATCHED clip for this rig (actormotion.txt col2 == id_b → col16).
         // spec: Docs/RE/specs/skinning.md §8(e) — actormotion col2==id_b → col16, per class.
         AnimationClip? idleClip = TryLoadIdleClip(assets, mesh.IdB);
 
@@ -553,9 +818,8 @@ public sealed partial class CharCreatePreview3D : Control
             GD.PrintErr($"[CharCreatePreview3D] texture resolve failed: {ex.Message}");
         }
 
-        // Build via the standard SkinnedCharacterBuilder.
-        // Reuses the same path as the slot previews.
-        // spec: frontend_scenes.md §4.2 "reuse the same SkinnedCharacterBuilder + texture-resolution path". CODE-CONFIRMED.
+        // Build via the standard SkinnedCharacterBuilder (same path as the slot previews).
+        // spec: frontend_scenes.md §4.2 "reuse the same SkinnedCharacterBuilder + texture path". CODE-CONFIRMED.
         bool savedDiag = SkinnedCharacterBuilder.PrintDiagnostics;
         try
         {
@@ -582,8 +846,7 @@ public sealed partial class CharCreatePreview3D : Control
     /// <summary>
     /// Loads the idle <c>.mot</c> clip MATCHED to a skin's <paramref name="actorClassId"/> (its
     /// id_b) from <c>actormotion.txt</c>: the row whose col2 == id_b gives the idle motion id in
-    /// col16, resolved to <c>data/char/mot/g{idle}.mot</c>. This guarantees the clip's track bone
-    /// IDs address the SAME skeleton the mesh was baked against (per-class rig/clip identity).
+    /// col16, resolved to <c>data/char/mot/g{idle}.mot</c>.
     /// spec: Docs/RE/specs/skinning.md §8(e); CLAUDE.md §Recovered asset mappings (actormotion idle).
     /// </summary>
     private static AnimationClip? TryLoadIdleClip(RealClientAssets assets, uint actorClassId)
@@ -628,7 +891,9 @@ public sealed partial class CharCreatePreview3D : Control
     private void ApplyTurntableRotation()
     {
         if (_actorWrapper is null || !IsInstanceValid(_actorWrapper)) return;
-        // Rotate the actor wrapper around world Y-axis.
+        // Rotate the actor wrapper around world Y-axis (turntable). View state only.
         _actorWrapper.RotationDegrees = new Vector3(0f, Mathf.RadToDeg(_turntableYRot), 0f);
     }
+
+    private static string AreaTag(int areaId) => areaId.ToString("D3");
 }

@@ -201,7 +201,8 @@ public sealed partial class BootFlow : Node
         //   dev_screen=charselect  → char select (default when dev_skip_intro + dev_offline_flow)
         if (ReadCfgKey("dev_skip_intro", "0") is "1" or "true" or "yes")
         {
-            _audio?.PlayBgm();
+            // No BGM here — login/server are BGM-absent; char-select owns 920100200 and starts it itself.
+            // spec: Docs/RE/specs/sound.md — login BGM-absent. CONFIRMED CAMPAIGN 9.
             string devScreen = ReadCfgKey("dev_screen", "login").ToLowerInvariant();
             if (IsDevOfflineMode())
             {
@@ -214,6 +215,11 @@ public sealed partial class BootFlow : Node
                         break;
                     case "server":
                         ShowServerSelect();
+                        break;
+                    case "loading":
+                        // Dev shortcut: jump directly to the loading screen (engine state 2).
+                        // spec: frontend_scenes.md §2L. CODE-CONFIRMED entry point.
+                        ShowLoadingScreen();
                         break;
                     case "charselect":
                         ShowCharacterSelect(pin: "");
@@ -246,9 +252,8 @@ public sealed partial class BootFlow : Node
     private void OnIntroFinished()
     {
         GD.Print("[BootFlow] Intro finished → Login screen.");
-        // Start the front-end BGM now that the intro stinger has played.
-        // spec: sound.md front-end cue map — BGM 920100200 loops on front-end screens. CODE-CONFIRMED.
-        _audio?.PlayBgm();
+        // Login is BGM-absent — the front-end BGM (920100200) starts only at char-select.
+        // spec: Docs/RE/specs/sound.md — login BGM-absent; char-select owns 920100200. CONFIRMED CAMPAIGN 9.
         ShowLogin();
     }
 
@@ -394,7 +399,7 @@ public sealed partial class BootFlow : Node
         // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (de-duplicate click path).
 
         _selectedServerId = serverId;
-        GD.Print($"[BootFlow] Server selected: id={serverId} → connecting dialog → char select.");
+        GD.Print($"[BootFlow] Server selected: id={serverId} → connecting dialog → loading screen → char select.");
 
         // Show the connecting dialog while the channel-endpoint fetch is simulated.
         // spec: frontend_scenes.md §11.4 "Connecting dialog (states 35/39)". CODE-CONFIRMED.
@@ -416,13 +421,13 @@ public sealed partial class BootFlow : Node
         _uiLayer!.AddChild(dialog);
         GD.Print("[BootFlow] Connecting dialog shown.");
 
-        // Simulate a short endpoint fetch delay, then advance to char-select.
+        // Simulate a short endpoint fetch delay, then advance to the loading screen.
         // spec §1.5 sub-state 35/39 "wait for reply; thread sets next state on completion".
         var t = GetTree().CreateTimer(0.6, processAlways: true);
-        t.Timeout += ShowCharSelectAfterConnect;
+        t.Timeout += ShowLoadingScreenAfterConnect;
     }
 
-    private void ShowCharSelectAfterConnect()
+    private void ShowLoadingScreenAfterConnect()
     {
         // Remove the connecting dialog.
         if (_uiLayer is not null)
@@ -431,8 +436,8 @@ public sealed partial class BootFlow : Node
             dialog?.QueueFree();
         }
 
-        GD.Print("[BootFlow] Connecting dialog closed → char select.");
-        ShowCharacterSelect(pin: ""); // PIN was already collected before server select
+        GD.Print("[BootFlow] Connecting dialog closed → loading screen.");
+        ShowLoadingScreen();
     }
 
     private void OnConnectingCancelled()
@@ -450,6 +455,35 @@ public sealed partial class BootFlow : Node
     }
 
     // -----------------------------------------------------------------------
+    // Loading screen — spec: frontend_scenes.md §2L. CODE-CONFIRMED.
+    //   Engine state 2 (Loading): shown between server-select and char-select.
+    //   Background: rand()%3 over loading.dds / loading06.dds / loading08.dds (V-crop 0..0.75).
+    //   Progress bar: 223 × percent/100 fill, left-to-right, design rect [−499,−170]×[−363,−140].
+    //   BGM: 920100100 looping (explicitly stopped before char-select, §3.8.1 fix contract).
+    //   Advance: LoadingComplete signal (preload-done + 500 ms grace), NOT bar == 100%.
+    // -----------------------------------------------------------------------
+
+    private void ShowLoadingScreen()
+    {
+        var loading = new LoadingScreen
+        {
+            Name = "LoadingScreen",
+            SharedAssets = _sharedAssets,
+        };
+        loading.LoadingComplete += OnLoadingComplete;
+        _host!.SetScreen(loading);
+        GD.Print("[BootFlow] Showing LoadingScreen (engine state 2 Loading). spec: frontend_scenes.md §2L.");
+    }
+
+    private void OnLoadingComplete()
+    {
+        GD.Print("[BootFlow] LoadingComplete received → char select. spec: frontend_scenes.md §2L.3.");
+        // The loading screen already stopped its BGM (§3.8.1 fix contract).
+        // Now show char-select; its constructor will start 920100200 on the category-0 slot.
+        ShowCharacterSelect(pin: ""); // PIN was already collected before server select
+    }
+
+    // -----------------------------------------------------------------------
     // Step 4: Character-select screen
     // -----------------------------------------------------------------------
 
@@ -464,6 +498,9 @@ public sealed partial class BootFlow : Node
         select.BackRequested += OnBackToLogin;
 
         _host!.SetScreen(select);
+        // Front-end BGM starts HERE — login/server are BGM-absent; char-select owns 920100200.
+        // spec: Docs/RE/specs/sound.md — char-select BGM cue. CONFIRMED CAMPAIGN 9.
+        _audio?.PlayBgm();
         GD.Print("[BootFlow] Showing CharacterSelectScreen (awaiting CharacterListEvent or dev seed).");
 
         // Subscribe to the Application event bus so CharacterListEvent drives the roster.

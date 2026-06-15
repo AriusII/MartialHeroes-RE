@@ -11,6 +11,7 @@
 >         path, hit-test/capture/drag, font table, atlas-frame layout, state machine, widget tables);
 >         SAMPLE-VERIFIED (atlas file presence in VFS — see formats/ui_manifests.md);
 >         coordinates are CODE-CONFIRMED interop facts extracted from the per-screen build routines.
+
 >
 > Implementation targets: `05.Presentation/MartialHeroes.Client.Godot`; string lookups via
 > `Assets.Parsers`; scene flow lives in `Client.Application` use-case boundaries.
@@ -120,6 +121,13 @@ These are instance-field offsets on the base `GUComponent`, shared by all subcla
 | +0x9C | 4 | u32 | Timer interval (default 3000 ms) | CODE-CONFIRMED |
 | +0xA0 | 4 | ptr | Timer callback pointer (null if unused) | CODE-CONFIRMED |
 
+Per-text-widget font-slot fields (see §6.3):
+
+| Offset | Size | Type | Role | Confidence |
+|---|---|---|---|---|
+| +0xDC | 4 | i32 | **`GUTextbox` font-slot index** — zero-initialised by the textbox constructor; selects the font-table slot at draw time | CODE-CONFIRMED |
+| +0xE4 | 4 | i32 | **`GULabel` font-slot index** — zero-initialised by the label constructor; selects the font-table slot at draw time | CODE-CONFIRMED |
+
 Panel additions:
 
 | Offset | Size | Role | Confidence |
@@ -194,6 +202,12 @@ So **all three constructors produce at most 3 distinct sprite frames** (normal, 
 Where HOVER equals NORMAL the button gives caption-only feedback on hover; where both equal
 NORMAL the sprite never changes. The "7-state" label refers to the state-count field value,
 not to a count of distinct sprites.
+
+> **Front-end 3-state argument order (CODE-CONFIRMED).** The 3-state button builder used by the
+> login and character-select scenes takes its three frame origins in the order
+> **NORMAL, PRESSED, HOVER** (`(N_x, N_y, P_x, P_y, H_x, H_y)`). When reading a front-end widget
+> table (§8.1 / §8.2), apply this order: the second pair is the PRESSED frame and the third is
+> HOVER. On most front-end buttons PRESSED equals NORMAL, so the only distinct extra frame is HOVER.
 
 **Caption colour by interaction state:**
 - Disabled → grey (`0xFF666666`)
@@ -459,7 +473,7 @@ Column definitions:
 - **D3DX Width** — the `Width` parameter (the character cell width in pixels).
 - **Weight** — the GDI weight value (0 = default, 400 = regular, 700 = bold, 800 = extra-bold).
 
-### 6.3 Text rendering — fixed-advance grid
+### 6.3 Text rendering — fixed-advance grid; per-widget font-slot selection
 
 `Font_DrawString(table, x, y, str, color, fontSlot, scale)` computes a bounding rect as
 `{x, y, x + charWidth(slot)*strlen, y + rowHeight(slot)*scale}` and calls
@@ -468,8 +482,28 @@ therefore **fixed-advance** (charWidth per character, not proportional metrics),
 laid out on a monospace grid even with proportional faces. This matters for matching legacy text
 positioning.
 
-> The per-widget font-slot index (which slot each `GULabel` / `GUTextbox` draws with) lives in
-> the instance data and was not exhaustively recovered — see Section 9, open item 4.
+**Per-widget font-slot index (CODE-CONFIRMED).** Each text widget stores its font slot as an
+instance field and supplies it to the shared text-draw helper at draw time:
+- `GULabel` — slot at **+0xE4**.
+- `GUTextbox` — slot at **+0xDC**.
+- `GUButton` caption — the button's own caption-slot field (offset not byte-pinned; see §12 open
+  item 4); the caption draws through the same shared font helper.
+
+Both label and textbox constructors **zero-initialise** their slot field, so the default slot is
+**0** (DotumChe, height 12 / width 6 / weight 0 — §6.2 slot 0).
+
+**Front-end resolution (CODE-CONFIRMED — closes the long-open "per-widget font slot" question for
+login and character-select).** A full sweep of the login `BuildScene` found **no write** to any
+text widget's font-slot field after construction; the label/textbox slot fields are left at their
+ctor default. Therefore **every login label, caption, and textbox draws with font slot 0**
+(DotumChe 12 / 6 / weight 0). Button captions on the login window are mostly sprite-only or empty,
+so slot 0 is the default for any caption that does draw. The same field mechanism applies on the
+character-select scene; the front-end as a whole uses slot 0 universally for its text — there is
+no per-widget font differentiation on the login or character-select screens at the build level.
+
+> **In-game caveat.** In-game windows (Section 8.7+) DO use larger / bold slots (e.g. titles via
+> slots 2 / 3 / 10 per §6.2); per-widget font variety lives in those builders, not the front-end.
+> The slot-0-universal finding is scoped to the **front-end** (login + character-select).
 
 ### 6.4 Effect bitmap fonts (not UI body text)
 
@@ -488,10 +522,30 @@ not part of the UI text system:
   chases it ±64 per tick (±32 for `GUComponentEx`). A hidden widget fades to alpha 0; the parent's
   draw loop skips children whose target is 0 (or alpha is 0). So hide is a **fade-out**, not an
   instant disappearance.
-- The **forced-alpha byte at +0x0F** (≠ 0xFF) pins alpha immediately, bypassing the fade —
-  used for dimmed/blackout overlays.
+- **Fade law (CODE-CONFIRMED).** Each frame, the leaf draw integrates alpha toward the target:
+  when the target byte is 1 (showing) and alpha < 255, alpha increases by 64; when the target is 0
+  (hiding) and alpha > 0, alpha decreases by 64. After the step, alpha is explicitly clamped to
+  the range **[0, 255]**. The `GUComponentEx` variant uses **±32 per tick** (slower fade). So the
+  base step is **±64/tick** and the `Ex` step is **±32/tick**, both clamped [0, 255].
+- The `SetShown(bool)` call (vtable slot 1) additionally **snaps** alpha to the endpoint on the
+  state change — it writes the target byte and immediately sets alpha to 255 (showing) or 0
+  (hiding). The ±64 integrator in the draw then merely holds it at the endpoint. So a SetShown
+  toggle jumps to the final alpha at once; the per-tick fade is the steady-state maintainer.
 
-### 7.2 Z-order
+### 7.2 Forced-alpha override (present but unarmed on the front-end)
+
+- The **forced-alpha byte at +0x0F** is a per-widget override field. After the ±64 fade integrator
+  runs and clamps, the leaf draw reads this byte: if it is **not 0xFF**, it pins the current alpha
+  to that value immediately, **bypassing the fade** — the mechanism used for dimmed / blackout
+  overlays. **0xFF = no override** (the default).
+- **Front-end status (CODE-CONFIRMED): present but UNARMED.** The login `BuildScene` writes **no**
+  non-0xFF value into +0x0F for any login widget — every login widget keeps the default 0xFF, so
+  the login screen never uses the forced-alpha blackout path; its show/hide is the ordinary ±64
+  fade plus the SetShown alpha-snap. The forced-alpha mechanism is real and fully wired, but the
+  front-end does not arm it. (The earlier "forced-alpha on some login widgets" hypothesis is
+  REFUTED for the front-end; the mechanism exists engine-wide for in-game overlays.)
+
+### 7.3 Z-order
 
 - **Paint order = insertion order:** later children paint on top.
 - **Input order = reverse:** hit-test walks children end → front; the topmost-painted child
@@ -499,7 +553,7 @@ not part of the UI text system:
 - There is **no z-index field**. Reordering means removing and re-adding a child, or using the
   active-child index (+0xB4) for tab panels.
 
-### 7.3 Child management
+### 7.4 Child management
 
 - `Panel_AddChildWithAction(parent, child, actionId)`: sets `child[+0x84] = parent`,
   `child[+0x10] = actionId`, pushes into the parent's child vector at +0xA8.
@@ -507,12 +561,55 @@ not part of the UI text system:
 - `RemoveMarkedChildren` (vtable slot 13): sweeps children with remove-flag +0x8D == 1 and
   compacts the vector — the deferred-removal mechanism.
 
-### 7.4 GUList vertical scroll
+### 7.5 GUList vertical scroll
 
 The list draws self, then for each child computes visibility against the scroll offset (+0xDC) and
 viewport height (+0x20): children outside the viewport are hidden (SetShown(0)); visible ones have
 their draw position offset by `childY − scrollY`. Clipping is by show/hide + position offset,
 not a hardware scissor.
+
+### 7.6 Login scene draw / z-order (CODE-CONFIRMED)
+
+The login window's Draw (vtable slot 7) is the generic container walk of §3.1: it draws itself
+(alpha-fade submit), then iterates its child-pointer vector front → end, drawing each child whose
+show/hide target (+0x8C) is 1. There is **no per-state draw branch** — the per-state appearance is
+produced entirely by the state machine (§11.3) toggling child visibility. Z-order is therefore the
+child-insertion order of the login `BuildScene`.
+
+**Top-level paint order (back → front).** The login window adds its top-level panels directly, in
+this order (index 1 paints first / furthest back; the last paints on top):
+
+| Paint order | Top-level panel | Notes |
+|---|---|---|
+| 1 | Full-screen background image (loginwindow.dds, ~`1024 × 490` at y 110) | added hidden, revealed by the flow |
+| 2 | Login-form / option-EULA container (`270, 85, 483 × 490`) | hosts decorative spinners/dots + the EULA-style label block |
+| 3 | Upper intro-curtain panel (login_slice1.dds, `0, 0, 1024 × 398`) | animated Y; see §7.7 intro curtain |
+| 4 | Server-name-strip / intro-banner container (`270, 85, 483 × 490`) | hosts the server-strip buttons + the panning banner + Quit/Help strip |
+| 5 | Quit-confirm popup #1 (InventWindow.dds, `342, 289, 340 × 190`) | prompt + Yes |
+| 6 | Quit-confirm popup #2 (same chrome) | prompt + Yes |
+| 7 | Lower panel (login_slice1.dds, screen-height-scaled, `1024 × 442`) | hosts the Server-list button + the account/PW form sub-panel |
+| 8 | Server-list widget (`347, 173, 329 × 422`) | the list-like server picker |
+| 9 | Option-page panel (`356, 531, 313 × 132`) | option tab buttons |
+| 10 | Exit-confirm modal panel (InventWindow.dds, `342, 289, 340 × 190`) | quit-confirm composite |
+| 11 | Error modal panel (InventWindow.dds, same chrome) | drawn last = topmost |
+
+The account/PW form sub-panel, the Server-list button, and the panning banner image are **nested**
+inside the lower panel (#7); the server-name-strip buttons and the banner are nested inside the
+banner container (#4) — so they paint within their parent's slot in this order, not as top-level
+siblings.
+
+### 7.7 Login intro curtain (CODE-CONFIRMED)
+
+The login opening "split" animation is **not an alpha ramp** — it is a **two-panel vertical slide**
+driven by the login state machine (§11.3, sub-states 1→2→3). A module-global slide accumulator
+starts at 0; on the slide sub-state it increases by **+5 per tick**, and each tick the upper curtain
+panel's local Y is set to `−accumulator` (slides up/off-screen) while the lower panel's local Y is
+set to `accumulator + 326` (slides down). When the accumulator passes **200** the server-list
+widget is repositioned to begin revealing; when it passes **222** the slide is complete (~45 ticks)
+and the machine advances. There is a **curtain instant-open / skip path**: when the flow leaves the
+intro sub-state before the slide finishes (an action fires, or the screen is re-entered), the
+curtain is **snapped** to its open position at once (upper Y = 0, lower Y = 326; background shown,
+form/option/popup panels hidden) rather than animated.
 
 ---
 
@@ -530,76 +627,107 @@ pixel arguments. The coordinate tables below are **interop facts** extracted fro
 - `srcX`, `srcY` is the atlas **UV origin** for the widget's sprite sub-rect; the sprite
   sub-rect is `(srcX, srcY)` to `(srcX + w, srcY + h)` within the named atlas.
 
-### 8.1 Login screen — `BuildScene` — 21 ctor sites (CODE-CONFIRMED)
+### 8.1 Login screen — `BuildScene` (CODE-CONFIRMED)
+
+> **Widget-object count (CODE-CONFIRMED, corrected).** The login `BuildScene` constructs
+> **73 widget objects** in total. An earlier version of this spec listed "21 ctor sites" — that
+> figure counted only the *visible distinct widget roles* on the front login form. The full object
+> count includes the EULA-style scroller label block (~25 labels), the per-strand EULA group loop
+> (×2), the intro/banner slide images (4), the five server-name-strip buttons, two server pager
+> spinners, the banner-overlay images, the version-info panel, and three modal sub-panels (two
+> quit-confirm popups plus exit/error composites). The "21" front-form roles are the table below;
+> the remaining objects are decorative/container/looped widgets folded into the role groups.
 
 **Atlas assignment (CODE-CONFIRMED from builder source):**
 
 | Atlas DDS | Used for |
 |---|---|
-| `data/ui/login_slice1.dds` | OK/Login button, Server-list button, ID/PW textboxes, Save-ID checkbox, Quit/Help strip |
-| `data/ui/loginwindow.dds` | Option/tab buttons, server name-strip buttons, decorative spinners/dots, EULA panel background |
-| `data/ui/loginwindow_02.dds` | Panning intro banner strip |
-| `data/ui/InventWindow.dds` | Quit-confirm modal chrome and buttons |
+| `data/ui/login_slice1.dds` | OK/Login button, Server-list button, ID/PW textboxes, Save-ID checkbox, Quit/Help strip, account/PW form chrome |
+| `data/ui/loginwindow.dds` | Option/tab buttons, server name-strip buttons, decorative spinners/dots, server pager spinners, EULA panel background, intro image backdrop |
+| `data/ui/loginwindow_02.dds` | Intro / EULA panning banner slide strips + the version/build strip |
+| `data/ui/InventWindow.dds` | Quit-confirm modal chrome and buttons; exit/error modal composites (shared 340 × 190 chrome at src 318, 647) |
 
 > **Correction:** the OK/Login button, Server-list button, ID/PW textboxes, and Save-ID checkbox
 > are bound to **`login_slice1.dds`**, not `loginwindow.dds`. An earlier version of this spec
 > attributed them to `loginwindow.dds` in error.
 
-**Widget table (full 21 ctor sites, CODE-CONFIRMED):**
+**Front-form widget table (CODE-CONFIRMED):**
 
 | Site | Type | dst (x,y,w,h) | NORMAL (srcX,srcY) | HOVER (srcX,srcY) | PRESSED (srcX,srcY) | Atlas | actionId / role |
 |---|---|---|---|---|---|---|---|
-| Intro banner | BTN7 | (—,97,202,372)¹ | (9,6) | (220,6) | (220,6) | loginwindow_02.dds | panning banner strip |
-| Quit/Help strip | BTN7 | (456,**−3**,111,38) | (792,398) | (602,416) | (602,416) | login_slice1.dds | **act 105** |
+| Intro banner | BTN7 | (—,97,202,372)¹ | (9,6) | (220,6) | (9,6) | loginwindow_02.dds | panning banner strip |
+| Quit/Help strip | BTN7 | (456,**−3**,111,38) | (792,398) | (602,416) | (792,398) | login_slice1.dds | **act 105** |
 | Quit-confirm "Yes" #1 | BTN7 | (120,136,113,40) | (302,900) | (415,900) | (302,900) | InventWindow.dds | **act 113** |
 | Quit-confirm "Yes" #2 | BTN7 | (120,136,113,40) | (302,860) | (415,860) | (302,860) | InventWindow.dds | **act 114** |
-| **Server-list button** | BTN7 | (456,166,112,39) | (154,398) | (378,398) | (378,398) | login_slice1.dds | **act 102** |
-| **ID/account textbox** | TEXTBOX | (390,32,102,13) | (615,404) | — | — | login_slice1.dds | IME 16, maxlen 6 |
-| **Password textbox** | TEXTBOX | (568,32,102,13) | (615,404) | — | — | login_slice1.dds | IME 12, maxlen 129 |
+| **Server-list button** | BTN7 | (456,166,112,39) | (154,398) | (378,398) | (154,398) | login_slice1.dds | **act 102** |
+| **ID/account textbox** | TEXTBOX | (390,32,102,13) | (615,404) | — | — | login_slice1.dds | IME 16, maxlen 6, act 109 |
+| **Password textbox** | TEXTBOX | (568,32,102,13) | (615,404) | — | — | login_slice1.dds | IME 12, maxlen 129, act 110 |
 | **Save-ID checkbox** | CHECK | (694,86,13,13) | (717,398) unchecked | — | (730,398) checked | login_slice1.dds | **act 104** |
-| **OK / Login button** | BTN7 | (456,64,112,39) | (266,398) | (490,398) | (490,398) | login_slice1.dds | **act 103** |
-| **Option/tab button 1** | BTN7 | (40,82,110,38) | **(520,492)** | (635,492) | (520,492) | loginwindow.dds | **act 111** |
-| **Option/tab button 2** | BTN7 | (164,82,110,38) | **(750,492)** | (865,492) | (750,492) | loginwindow.dds | **act 112** |
-| Decorative spinner/arrow A | BTN2 | (467,86,13,10) | (483,490) | =N | =N | loginwindow.dds | decorative |
-| Decorative spinner/arrow B | BTN2 | (467,455,13,10) | (505,490) | =N | =N | loginwindow.dds | decorative |
-| Decorative dot | BTN2 | (469,98,9,9) | (496,490) | =N | =N | loginwindow.dds | decorative |
-| **Server name-strip** | BTN7 | (13+47·i,66,47,18) | (596,985) | (643,985) | (643,985) | loginwindow.dds | **acts 115..119** (generator, see §8.4) |
-| Banner/title label | LABEL | (50,100,383,50) | (0,0) | — | — | — | text from msg.xdb |
+| **OK / Login button** | BTN7 | (456,64,112,39) | (266,398) | (490,398) | (266,398) | login_slice1.dds | **act 103** |
+| **Option/tab button 1** | BTN7 | (40,82,110,38) | (520,492) | (635,492) | (520,492) | loginwindow.dds | **act 111** |
+| **Option/tab button 2** | BTN7 | (164,82,110,38) | (750,492) | (865,492) | (750,492) | loginwindow.dds | **act 112** |
+| Decorative spinner/arrow A | BTN2 | (467,86,13,10) | (483,490) | =N | =N | loginwindow.dds | decorative (EULA scroll) |
+| Decorative spinner/arrow B | BTN2 | (467,455,13,10) | (505,490) | =N | =N | loginwindow.dds | decorative (EULA scroll) |
+| Decorative dot | BTN2 | (469,98,9,9) | (496,490) | =N | =N | loginwindow.dds | decorative (EULA grip) |
+| **Server name-strip** | BTN7 | (13+47·i,66,47,18) | (596,985) | (643,985) | (596,985) | loginwindow.dds | **acts 115…** (generator, see §8.4) |
+| Banner/title label | LABEL | (50,100,383,50) | — | — | — | — | text from msg.xdb |
 | EULA notice label A | LABEL | (—,390,174,21)² | — | — | — | — | EULA/notice |
 | EULA notice label B | LABEL | (—,410,174,20)² | — | — | — | — | EULA/notice |
 | EULA notice label C | LABEL | (—,430,174,20)² | — | — | — | — | EULA/notice |
 | Quit-confirm prompt #1 | LABEL | (10,100,330,20) | — | — | — | — | msg 4023 |
 | Quit-confirm prompt #2 | LABEL | (10,100,330,20) | — | — | — | — | msg 4024 |
 
-¹ x is register-fed (centre-computed).
+¹ x is register-fed (centre-computed); resolves to a fixed value on the 1024 × 768 reference canvas.
 ² x is the EULA-panel-relative computed position.
+
+> **Frame-order note.** The BTN7 rows above are written in the front-end builder's
+> **NORMAL, PRESSED, HOVER** argument order (§1.5). On these front-form buttons PRESSED equals
+> NORMAL, so the only distinct extra frame is HOVER (the middle column above). The intro-banner and
+> server-name-strip generators likewise carry only NORMAL + HOVER distinct.
 
 **Login action-id / ASCII-char map (CODE-CONFIRMED):**
 
 | actionId | Widget | Behaviour |
 |---|---|---|
 | 102 (`f`) | Server-list button | reveal server-list panel |
-| 103 (`g`) | OK/Login button | version gate → sub-state 29 |
-| 104 (`h`) | Save-ID checkbox | persist/clear `OPTION_ID` in DoOption.ini |
-| 105 (`i`) | Quit/Help strip | throttled re-fetch (sub-state 34) |
+| 103 (`g`) | OK/Login button | version gate → credential-validation sub-state |
+| 104 (`h`) | Save-ID checkbox | persist/clear saved account id |
+| 105 (`i`) | Quit/Help strip | throttled re-fetch |
 | 109 (`m`) | Focus ID box | clear PW focus, focus ID |
 | 110 (`n`) | Focus PW box | clear ID focus, focus PW |
-| 111 (`o`) | Option/tab 1 | option page select |
-| 112 (`p`) | Option/tab 2 | option page toggle |
-| 113 (`q`) | Quit-confirm Yes #1 | hide popup, advance to sub-state 34 |
+| 111 (`o`) | Option/tab 1 | option page select / intro reveal |
+| 112 (`p`) | Option/tab 2 | option page toggle / reveal list |
+| 113 (`q`) | Quit-confirm Yes #1 | hide popup, restart server-list fetch |
 | 114 (`r`) | Quit-confirm Yes #2 | same |
-| 115–119 | Server name-strip ×5 | server entry select (active at sub-state 37) |
+| 115…124 | Server pager / name-strip set | server entry select + paging (see §8.4 / §8.4.1) |
 
-### 8.2 Character-select screen — `InitFromCharListAndBuildUI` — 77 ctor sites (CODE-CONFIRMED)
+The two intro-banner pager buttons additionally carry their own EULA/intro banner-pager action ids
+(distinct from the 102–124 front-form range); they advance the panning banner panes.
 
-**Atlas assignment:**
+### 8.2 Character-select screen — `BuildUI` (CODE-CONFIRMED)
+
+> **Widget-object count (CODE-CONFIRMED, corrected).** The character-select build path constructs
+> roughly **124 widget objects** (the full enumeration of the select-window chrome builder), not the
+> "~77" figure an earlier version of this spec cited. The extra mass over the ~77 front-of-screen
+> roles is the per-cell stat-grid icon strips and the appearance stepper grid. The load-bearing
+> structural rectangles (tabs, slot plates, stat grid, Create/Delete/Enter, the create-form, the
+> confirm modals) are tabulated below; the per-cell decorative strips are summarised, not row-listed.
+
+**Atlas assignment (CODE-CONFIRMED — the chrome composites from several shared atlases):**
 
 | Atlas DDS | Used for |
 |---|---|
-| `data/ui/loginwindow.dds` | Tab buttons, stat-icon grids, Create/Delete buttons, appearance selector strip |
-| `data/ui/InventWindow.dds` | Confirm/modal chrome and buttons (shared with login) |
-| `data/ui/CarrierPigeonPerson.dds` | Appearance selector ±, gender/class preview swatches |
-| `data/ui/blacksheet.dds` | Corner close button |
+| `data/ui/loginwindow.dds` | **Primary** chrome: backgrounds, slot-row plates, stat-grid icons, appearance ± steppers, tab buttons, Create/Delete |
+| `data/ui/mainwindow.dds` | Several slot-row action buttons + create-form widgets (steppers, confirm/cancel, name title) |
+| `data/ui/InventWindow.dds` | Detail / confirm sub-panels (647 × 340 dialog frames) shared with login |
+| `data/ui/CarrierPigeonPerson.dds` | Appearance selector accents; gender/class preview swatches |
+| `data/ui/CarrierPigeonAll.dds`, `data/ui/tradekeepwindow.dds`, `data/ui/blacksheet.dds` | Small create-form accents; a 23 × 23 corner close button (blacksheet) |
+
+> **§8.2 atlas correction.** The character-select chrome is **not** a single dedicated atlas. It
+> composites from at least three primary shared UI atlases (`loginwindow.dds` dominant, plus
+> `mainwindow.dds` and `InventWindow.dds`) and four small accent atlases. Each widget binds a source
+> sub-rect of its atlas via `(srcX, srcY)` with the slice size equal to the widget's `w × h` (no
+> scaling).
 
 **Structural recovery — key rectangles (CODE-CONFIRMED):**
 
@@ -607,20 +735,41 @@ pixel arguments. The coordinate tables below are **interop facts** extracted fro
 |---|---|---|---|---|---|---|
 | Top title bar panel | 0 | 0 | 577 | 58 | `mainwindow.dds` | CODE-CONFIRMED |
 | Left character-info panel | 0 | 0 | 244 | 187 | `mainwindow.dds` | CODE-CONFIRMED |
-| Server tab button | 67 | 17 | 113 | 40 | NORMAL (675,795), HOVER (483,883) | CODE-CONFIRMED |
-| Channel tab button | 232 | 7 | 113 | 40 | NORMAL (640,742), HOVER (483,923) | CODE-CONFIRMED |
-| Back tab button | 393 | 17 | 113 | 40 | NORMAL (625,691), HOVER (483,963) | CODE-CONFIRMED |
-| **Per-slot stat-icon grid col 1** | 154 | **191** (base), stride **24** | 24 | 16 | NORMAL (500,770), PRESSED (548,770) | CODE-CONFIRMED (base Y resolved) |
-| **Per-slot stat-icon grid col 2** | 178 | 191 (base), stride 24 | 24 | 16 | NORMAL (524,770), PRESSED (572,770) | CODE-CONFIRMED |
-| Per-slot stat value labels | 51 | 193 (base), stride 24 | 35 | 12 | — | CODE-CONFIRMED |
-| **Create button** | 42 | 325 | 59 | 20 | NORMAL (354,1004), HOVER (413,1004) | CODE-CONFIRMED |
-| **Delete button** | 112 | 325 | 59 | 20 | NORMAL (472,1004), HOVER (531,1004) | CODE-CONFIRMED |
-| **Enter/select button** | 112 | 112 | 59 | 20 | NORMAL (236,1004), HOVER (295,1004) | CODE-CONFIRMED |
-| Confirm modal (Yes/No) | 55 / 174 | 136 | 113 | 40 | `InventWindow.dds` (302,860)/(302,900) | CODE-CONFIRMED |
+| Server tab button | 67 | 17 | 113 | 40 | `loginwindow.dds` 3-state | CODE-CONFIRMED |
+| Channel tab button | 232 | 7 | 113 | 40 | `loginwindow.dds` 3-state | CODE-CONFIRMED |
+| Back tab button | 393 | 17 | 113 | 40 | `loginwindow.dds` 3-state | CODE-CONFIRMED |
+| **Per-slot stat-icon grid col 1** | 154 | **191** (base), stride **24** | 24 | 16 | `loginwindow.dds` | CODE-CONFIRMED |
+| **Per-slot stat-icon grid col 2** | 178 | 191 (base), stride 24 | 24 | 16 | `loginwindow.dds` | CODE-CONFIRMED |
+| Per-slot stat value labels | 51 | 193 (base), stride 24 | 35 | 12 | text-only | CODE-CONFIRMED |
+| **Create button** | 42 | 325 | 59 | 20 | `loginwindow.dds` | CODE-CONFIRMED |
+| **Delete button** | 112 | 325 | 59 | 20 | `loginwindow.dds` | CODE-CONFIRMED |
+| **Enter/select button** | 112 | 112 | 59 | 20 | `loginwindow.dds` | CODE-CONFIRMED |
+| Confirm modal (Yes/No) | 55 / 174 | 136 | 113 | 40 | `InventWindow.dds` | CODE-CONFIRMED |
 | Name-entry textbox | 60 | 80 | 274 | 18 | `GUTextbox`; CP949 character name | CODE-CONFIRMED |
-| Name-entry OK | 55 | — | 113 | 40 | `InventWindow.dds` (302,860) | CODE-CONFIRMED |
-| Name-entry Cancel | 174 | — | 113 | 40 | `InventWindow.dds` (302,900) | CODE-CONFIRMED |
-| Corner close | 971 | 610 | 23 | 23 | `blacksheet.dds` (941,910) | CODE-CONFIRMED |
+| Name-entry OK | 55 | — | 113 | 40 | `InventWindow.dds` | CODE-CONFIRMED |
+| Name-entry Cancel | 174 | — | 113 | 40 | `InventWindow.dds` | CODE-CONFIRMED |
+| Corner close | 610 | 23 | 23 | 23 | `blacksheet.dds` | CODE-CONFIRMED |
+| Detail / confirm dialog frames | 318 | 190 | 647 | 340 | `InventWindow.dds` (×5 near-identical panels) | CODE-CONFIRMED |
+
+**Stat grid (CODE-CONFIRMED).** The left-column character-info stat grid is a fixed block of
+icon strips + value labels populated from table lookups: stat-icon buttons in two columns (col 1
+x = 154, col 2 x = 178) at base-Y **191** stride **24**, with paired value labels at x = 51 base-Y
+**193** stride **24**. An appearance-string loader fills the ~18 label cells per appearance branch.
+
+**Create-form layout (CODE-CONFIRMED).** The new-character create sub-form is a self-contained
+panel tree shown/hidden as a unit by the scene-reset path:
+- **Four class buttons** (3-state, 19 × 30, y = 45, on `loginwindow.dds`) selecting the playable
+  class. The four buttons emit class-button command ids 10, 11, 12, 13 (left-to-right) into an
+  internal class selector; selecting a class rebuilds the 3D preview actor with that class's
+  starter gear and BGM, and sets the class-name caption (msg.xdb 14003–14007).
+- **Name input** — a `GUTextbox` (with an underlay image) for the CP949 character name.
+- **Appearance face ± steppers** — a small +/- pair driving a face/appearance index (range 1–7),
+  plus a point-buy stepper grid for the create stats. Cycling the face index updates only the 2D
+  portrait/labels — it does **not** rebuild the 3D preview actor.
+- **Confirm / Cancel** buttons (on `mainwindow.dds`). Confirm validates the name client-side (min
+  length 2; lowercase ASCII + digits + CP949 Korean only; banned-word filter; no client duplicate
+  check) and, on success, sends the create-character request; Cancel returns to the slot view via
+  the scene-reset path.
 
 **Char-select action-id map (CODE-CONFIRMED — corrected from prior notes):**
 
@@ -629,24 +778,29 @@ pixel arguments. The coordinate tables below are **interop facts** extracted fro
 | 1 | Server tab | — |
 | 2 | Channel tab | — |
 | 3 | Back tab | — |
-| **4** | **Create button** | **Note: older notes showed 413 — that was the HOVER src-X, not the action id** |
-| **5** | **Delete button** | **Note: older notes showed 531 — that was the HOVER src-X, not the action id** |
+| **4** | **Create button** | older notes showed 413 — that was the HOVER src-X, not the action id |
+| **5** | **Delete button** | older notes showed 531 — that was the HOVER src-X, not the action id |
 | **6** | **Enter/select button** | — |
-| 10 | Create-form Create | inside create sub-form |
-| 11 | Create-form Delete | inside create sub-form |
-| 12 | Create-form OK | — |
-| 13 | Create-form Cancel | — |
-| 21 / 22 | Face/gender increment ± | — |
-| 25..36 | Appearance increments | appearance selector range |
-| 54 / 55 | Name-entry OK / Cancel | first pair |
-| 59 / 60 | Name-entry OK / Cancel | second pair |
-| 61..74 | Per-slot / stat-grid actions | selection and stat-grid interactive buttons |
+| 10 / 11 / 12 / 13 | Create-form class buttons (4) | class selector 0..3 left-to-right |
+| 21 / 22 | Face increment ± | 2D portrait only; no 3D rebuild |
+| 25…34 | Create stat point-buy ± | per-stat increment/decrement with class floor |
+| 35 / 36 | Create-form Confirm / Cancel | Confirm validates + sends; Cancel returns |
+| 54 / 55, 59 / 60 | Name-entry OK / Cancel pairs | — |
+| 61…74 | Per-slot / stat-grid actions | selection and stat-grid interactive buttons |
 
-> **Correction.** The values 413 and 531 that appeared in earlier versions of this spec
-> (§2.2, char-select Create/Delete action ids) are the **atlas src-X coordinates** of the
-> Create-button HOVER frame (354+59 = 413) and the Delete-button HOVER frame (472+59 = 531),
-> not action ids. The actual `Panel_AddChildWithAction` ids are **Create = 4, Delete = 5,
-> Enter = 6** (CODE-CONFIRMED from the widget-sweep literal dump).
+> **Correction.** The values 413 and 531 that appeared in earlier versions of this spec are the
+> **atlas src-X coordinates** of the Create-button HOVER frame and the Delete-button HOVER frame,
+> not action ids. The actual ids are **Create = 4, Delete = 5, Enter = 6** (CODE-CONFIRMED).
+
+**Slot hit-test is a 3D ray-pick — NOT 2D rects (CODE-CONFIRMED).** Selecting one of the five
+character preview actors is a **3D camera-unproject ray test against a per-slot axis-aligned
+bounding box**, not a 2D rectangle hit-test and not a viewport-column partition. The click pixel is
+unprojected through the perspective camera into a world ray; that ray is intersected (3-axis slab
+test) against one small box per preview slot. Each box is centered on its character's world X/Z
+(half-extent ±6 in X and Z), with a fixed vertical band (Y 70…92); because the five slots are 12
+units apart in X and each box is ±6 wide, the boxes tile edge-to-edge with no gap/overlap. The first
+slot whose box the ray hits becomes the selection. See `specs/frontend_scenes.md §3.3.3` for the
+camera/ray geometry and the five stage positions; this refines any earlier "2D rect" assumption.
 
 ### 8.3 Shared panel chrome — `InventWindow.dds` modal
 
@@ -661,10 +815,22 @@ literal for those coordinates. The recovered generator rules:
 
 | Widget group | Rule |
 |---|---|
-| Login server name-strip | Base (13,66,47,18); NORMAL src (596,985); X advances **+47** per entry (`x = 13 + 47·i`) for up to 5 server entries (acts 115..119) |
+| Login server name-strip / pager set | Base (13,66,47,18); NORMAL src (596,985), HOVER (643,985); X advances **+47** per entry (`x = 13 + 47·i`); each registers action **115 + i** (see §8.4.1 for the confirmed live range) |
 | Char-select stat-icon grid | Base-Y **191**, stride **24**, 5 rows; col 1 at x=154, col 2 at x=178 |
 | Char-select stat value labels | Base-Y **193**, stride **24**, 5 rows; x=51, w=35, h=12 |
 | Char-select appearance selector | Base y=30, w=45, h=19; NORMAL src-X base **590** stepping **+45** (590/635/680/725); HOVER base **815** (+45) |
+
+#### 8.4.1 Login server-strip / pager range (CODE-CONFIRMED)
+
+The server-strip generator builds the strip buttons from the same base and stride, each registering
+action `115 + i`. The **confirmed live action range is 115…124 inclusive (10 entries)** — this is
+the contiguous pager/strip family the server-select sub-state handles (it supersedes an earlier
+"115–119, 5 entries" reading). On the server-select sub-state, the two server **plates** carry
+distinct selection action ids (the left and right server records of the current page), and the
+115…124 buttons are the **pager** controls: clicking a pager re-pages the two-plate view (page index
+= action − 115) without committing a selection. Plate select commits a server, persists the selected
+server id, and advances the flow. The plate/pager record-resolution and the server-record layout are
+the server-select sub-window's concern — see §11.4.1.
 
 ### 8.5 In-game windows — `uitex.txt` integer texture binding (CODE-CONFIRMED)
 
@@ -1009,6 +1175,38 @@ All paths are VFS-relative. All large UI sheet atlases are DDS with DXT3 pixel f
 1024 × 1024 (or occasionally 512 × 512) mip-0 surface. See `formats/ui_manifests.md` for the
 file-level format of `uitex.txt` and related manifests.
 
+### 9.0 Front-end atlas loader lifecycle (CODE-CONFIRMED)
+
+The front-end scenes (login and character-select) load their atlas sheets through one shared loader
+with a deliberately simple lifecycle. An implementer should model it as **append-only,
+window-owned, no shared cache**:
+
+- **No cache, no dedup.** The loader performs **no name-keyed lookup** before creating a texture.
+  Every call unconditionally reads the named DDS and creates a brand-new GPU texture. Two calls with
+  the same path therefore produce **two independent textures** — there is no path-keyed map and no
+  re-use across windows.
+- **No ref-count.** Acquiring a texture does not increment a reference count, and releasing it does
+  not decrement-and-test — each handle is released exactly once. Lifetime is tied to the **owning
+  window**, not shared/ref-counted across windows.
+- **Eager preload.** All of a scene's atlases are loaded **up front, in one burst at the top of the
+  window's `BuildScene`**, before any widget is constructed. There is no lazy / first-draw load;
+  every later widget simply references an already-loaded handle. (Login preloads four atlases:
+  `login_slice1.dds`, `loginwindow.dds`, `InventWindow.dds`, `loginwindow_02.dds`; character-select
+  preloads its primary + accent set per §8.2.)
+- **Handles held on the window object.** Each loaded handle is appended to a **texture-handle list
+  embedded in the owning window object** (the `GUTextureList` holder at window offset +0x220). The
+  list is a plain append-only ownership vector — not a cache index.
+- **Released when the window Ends.** On window teardown the embedded texture-handle list's
+  destructor walks the list and releases each texture outright (once per handle, no ref-count
+  decrement), then frees the list's backing storage. Release is **automatic on scene-exit** via the
+  window's own teardown, not an explicit "End" call on the loader. The decode path (VFS find-and-read
+  when the archive is mounted, else loose-disk fallback) is the generic engine texture loader, so
+  this lifecycle is **shared by all UI windows**, not login-specific.
+
+> **Godot mapping.** Load each front-end scene's atlases once at scene build, hold them on the scene
+> node, and free them on scene exit. Do **not** emulate a shared texture cache or ref-counting — the
+> original's model is per-window, append-only ownership.
+
 ### 9.1 Login screen
 
 | Path | Role | Confidence |
@@ -1023,9 +1221,10 @@ file-level format of `uitex.txt` and related manifests.
 | Path | Role | Confidence |
 |---|---|---|
 | `data/ui/loginwindow.dds` | Tab buttons, stat-icon grids, Create/Delete/Enter button strips | CODE-CONFIRMED |
+| `data/ui/mainwindow.dds` | Slot-row action buttons + create-form widgets | CODE-CONFIRMED |
 | `data/ui/inventwindow.dds` | Popup panels + buttons (confirm / delete / name-entry chrome) | CODE-CONFIRMED |
 | `data/ui/blacksheet.dds` | Corner close button; dim/blackout overlay | CODE-CONFIRMED |
-| `data/ui/carrierpigeonperson.dds` | Appearance selector ±, gender/class preview swatches | CODE-CONFIRMED |
+| `data/ui/carrierpigeonperson.dds`, `data/ui/carrierpigeonall.dds`, `data/ui/tradekeepwindow.dds` | Appearance selector ±, gender/class preview swatches, create-form accents | CODE-CONFIRMED |
 | (GUCanvas3D live 3D viewports) | Character previews; not a 2D atlas | CODE-CONFIRMED |
 
 ### 9.3 Opening cinematic (state 3) screen
@@ -1144,33 +1343,66 @@ main loop until done, then ended and destroyed before the next scene is created.
 ### 11.3 Login window internal sub-state machine (CODE-CONFIRMED, corrected)
 
 Stored at offset `+0x238` on the login window object. This drives the lobby discovery and
-credential flow described in `specs/login_flow.md` and `specs/frontend_scenes.md`.
+credential flow described in `specs/login_flow.md` and `specs/frontend_scenes.md`. The machine spans
+sub-state values 1..6 and 29..41 (with gaps); the field is initialised to 1.
 
 | Sub-state | Meaning | Confidence |
 |---|---|---|
-| 2 | Connect / play login-enter SFX **861010105**; reset banner Y | CODE-CONFIRMED |
-| 3, 4, 5 | Animate the two banner panels into place | CODE-CONFIRMED |
+| 1 | Intro start — play login-enter SFX **861010105**; seed curtain (upper panel Y = 0, lower panel Y = 326, reset slide accumulator) | CODE-CONFIRMED |
+| 2 | Curtain open slide — accumulator +5/tick; upper Y = −acc, lower Y = acc + 326; reveal server list past 200; complete past 222 (see §7.7) | CODE-CONFIRMED |
+| 3, 4, 5 | Settle the curtain and reveal the login form widgets | CODE-CONFIRMED |
 | 6 | **Login form active** — waiting for user input | CODE-CONFIRMED |
 | **29** | **OK-button credential validation** — checks ID len ≥ 4 (else msg **4025** → 6); PW len ≥ 1 (else msg **4026** → 6); persist Save-ID; advance to 31. **Correction: this was incorrectly labelled "server-list trigger" in an earlier version of this spec.** | CODE-CONFIRMED |
 | 30 | Quit-confirm "Yes" path — writes engine state **6 / substate 8** (quit) | CODE-CONFIRMED |
-| **31** | **Show EULA / terms-of-service accept overlay** — advances toward 32. **Correction: this was incorrectly labelled "Help screen" in an earlier version of this spec.** The Help button is the separate control at action id 105 (`i`), not a sub-state. | CODE-CONFIRMED |
-| 32 | Wait for EULA "agree" — overlay visible AND accept flag set → advance to 33 | CODE-CONFIRMED |
+| **31** | **Raise the second-password (PIN) modal** — shows the PIN keypad child, hides the login buttons; advances toward 32. **Correction: this was previously labelled "Help screen" and later "EULA/terms accept"; this build raises the PIN/second-password keypad child here, with no separate EULA-accept flag. The Help button is the separate control at action id 105 (`i`), not a sub-state.** | CODE-CONFIRMED |
+| 32 | Poll the PIN modal — keypad visible AND submitted/confirmed → advance to 33 | CODE-CONFIRMED |
 | 33 | Press-OK transition → begin server-list fetch (set 34) | CODE-CONFIRMED |
 | 34 | Start server-list fetch thread (port 10000) | CODE-CONFIRMED |
 | 35 | Wait for server-list reply | CODE-CONFIRMED |
 | 36 | Consume server list: empty → msg **4027** → 6; connect-fail → msg **4028** → 6; else render + set 37 | CODE-CONFIRMED |
-| 37 | Server selected | CODE-CONFIRMED |
-| 38 | Start channel-endpoint fetch thread (port 10000 + selected offset) | CODE-CONFIRMED |
+| 37 | Server selected (resting on the plate list) — plates and pagers are live only here | CODE-CONFIRMED |
+| 38 | Start channel-endpoint fetch thread (port 10000 + selected offset); persist selected server id | CODE-CONFIRMED |
 | 39 | Wait for endpoint reply | CODE-CONFIRMED |
 | 40 | Consume endpoint; build TAB-delimited credential string; rebuild secure context; hand off to game connection | CODE-CONFIRMED |
 | 41 | Transition complete — login window exits | CODE-CONFIRMED |
 
+> **Note on the corrected literal indices.** The server-select branch keys on literal sub-state
+> values 32–38 as above; an earlier brief that quoted 34/35/36 for fetch/wait/consume was off by
+> one against the live machine (fetch-start = 33, request = 34, wait = 35, consume = 36 → 37, pick =
+> 37, endpoint = 38). The values above are the live ones.
+
 ### 11.4 Character-select screen lifecycle note
 
-The `InitFromCharListAndBuildUI` builder is not called at scene creation. It is invoked when the
+The character-select widget builder is not called at scene creation. It is invoked when the
 `SmsgCharacterList` (opcode 3/1) packet arrives on the network — the packet handler forces the
 primary scene state into the select scene and triggers the builder. This means the select screen
-widget tree does not exist until the packet is received.
+widget tree does not exist until the packet is received. The server character list is ingested into
+five 880-byte per-slot records, and the five 3D preview actors are materialised (deferred to an
+early tick frame) from those records by the scene-reset path; subsequent rebuilds run whenever the
+character-manage result packet arrives.
+
+### 11.4.1 Server-select sub-window (CODE-CONFIRMED)
+
+The server-select surface is a **visibility sub-state of the single login window** (sub-state 37 of
+§11.3), not a separate window. All its widgets are built once at login scene build; the tick toggles
+them. The selectable servers are presented as **two "plates" per page** (the left and right server
+records of the current page), with the **115…124 pager buttons** (§8.4.1) walking the server-record
+array in two-record windows. A plate click commits its server only when the record passes the
+selection guard, persists the selected server id, and advances the flow (sub-state 38); a pager click
+only re-pages (no commit). The server-record array is a list of **8-byte records**:
+
+| Offset | Size | Field | Notes | Confidence |
+|---|---|---|---|---|
+| +0 | 2 (u16) | server_id | valid range 1..40 (`(id − 1) ≤ 39`), else a fallback caption; compared against the persisted "last server" id for the highlight | CODE-CONFIRMED |
+| +2 | 2 (i16) | status_code | drives the status label; special values 3 (open-time), 24 (preparing), 100 (current-selection sentinel); plate commit requires status_code == 0 | CODE-CONFIRMED |
+| +4 | 2 (i16) | load / population | when status_code == 0, thresholded to a coloured load label | CODE-CONFIRMED |
+| +6 | 2 (i16) | open_time / extra | used only for the open-time schedule presentation (status 3) | MEDIUM (static-only; CAPTURE-UNVERIFIED) |
+
+Load thresholds (applied when status_code == 0): `load > 1200` → red label; `800 < load ≤ 1200` →
+orange; `500 < load ≤ 800` → yellow; `load ≤ 500` → green. Plate commit additionally requires
+`load < 2400` (a separate hard cap distinct from the colour thresholds). The threshold constants
+(1200 / 800 / 500 / 2400) and the four label colours are CODE-CONFIRMED; the exact wire packing of
+the +6 open-time field is static-only and CAPTURE-UNVERIFIED.
 
 ---
 
@@ -1189,8 +1421,13 @@ widget tree does not exist until the packet is received.
    scale ×3.0. Built by the select window's slot-actor builder. The preview is a live in-world
    actor (same player actor factory as in-game) — not a 2D atlas sprite. No new asset path.
 
-4. **Per-widget font-slot index.** Which of the 15 slots each `GULabel` or `GUTextbox` instance
-   uses lives in the instance data and was not exhaustively extracted.
+4. **Per-widget font-slot index: RESOLVED for the front-end; in-game residual.** The slot is an
+   instance field (`GULabel` +0xE4, `GUTextbox` +0xDC), zero-init by the ctor → default slot 0.
+   The **entire front-end** (login + character-select) uses **slot 0 universally** for text (§6.3):
+   the login `BuildScene` writes no slot, so every login label/caption/textbox draws with slot 0
+   (DotumChe 12 / 6 / weight 0). The remaining residual is purely in-game: the exact GUButton
+   caption-slot offset was not byte-pinned, and the in-game windows that use larger/bold slots
+   (titles via slots 2 / 3 / 10) were not individually swept for which slot each label uses.
 
 5. **`msg.xdb` format: RESOLVED.** The format is CODE-CONFIRMED (flat binary, 516-byte records,
    `u32 id` + `u8[512]` CP949 text, no header, count from `file_size / 516`, red-black tree at
@@ -1246,6 +1483,10 @@ widget tree does not exist until the packet is received.
     / (296, 128) / (296, 192)) is assigned to the panel per-instance after build. The exact runtime
     bind site and DDS (PLAUSIBLE `inventwindow.dds`) were not traced.
 
+17. **Server-record +6 open-time wire packing.** The +6 field of the 8-byte server-select record
+    (§11.4.1) is used only for the open-time schedule presentation; its exact wire packing is
+    static-only (CAPTURE-UNVERIFIED — no live lobby capture).
+
 ---
 
 ## 13. Godot reconstruction guidance
@@ -1264,7 +1505,8 @@ For each GUButton (7-state), keep **three** separate `AtlasTexture` regions: NOR
 PRESSED. DISABLED reuses the NORMAL region with a grey caption tint (`Color(0.4, 0.4, 0.4)`).
 HOVER tints the caption yellow (`Color(1, 1, 0)`). Normal/pressed use the per-widget tint (default
 white). The NORMAL region is the `Rect2(srcX, srcY, w, h)` from the ctor arguments; the HOVER
-and PRESSED regions use their respective `(srcX, srcY)` origins at the same `(w, h)` size.
+and PRESSED regions use their respective `(srcX, srcY)` origins at the same `(w, h)` size. For the
+front-end widget tables, read the three frame origins in **NORMAL, PRESSED, HOVER** order (§1.5).
 
 ### 13.3 Login textboxes
 
@@ -1287,7 +1529,9 @@ requires fonts covering the Hangul Syllables Unicode block (U+AC00–U+D7A3). Tr
 to Unicode strings in `Assets.Parsers` and pass them to Godot as UTF-8.
 
 All text drawing is **fixed-advance** (charWidth per character); use `charWidth * strlen` for the
-horizontal extent of any label, not measured glyph widths.
+horizontal extent of any label, not measured glyph widths. On the **front-end** (login + character-
+select), every label/caption/textbox uses **font slot 0** (DotumChe, height 12 / width 6, weight 0)
+— there is no per-widget font variety to model there (§6.3).
 
 ### 13.5 Scene flow
 
@@ -1302,9 +1546,11 @@ Model the 9 primary states as a Godot `SceneTree` scene-change sequence or as an
 ### 13.6 Char-select 3D preview
 
 Build 5 `SubViewport` + scene nodes from each slot's SpawnDescriptor using the same actor build
-path as in-world. Empty slot (`@BLANK@`) → create form (class 1..4, face 1..7, gender). Stage X
+path as in-world. Empty slot → create form (class 1..4, face 1..7, gender). Stage X
 offsets per slot: {−1560, −1548, −1536, −1524, −1512}; Z ≈ −3593; scale ×3.0. Cache the 880-byte
-descriptor on enter-confirm and spawn from it after the server ack.
+descriptor on enter-confirm and spawn from it after the server ack. The **slot hit-test is a 3D
+ray-pick** against per-slot AABBs (±6 in X/Z, Y band 70…92), not 2D rectangles — replicate the
+camera-unproject + AABB test rather than placing 2D click regions (§8.2, `frontend_scenes.md §3.3.3`).
 
 ### 13.7 Chat window
 
@@ -1338,6 +1584,13 @@ DDS). For each 7-state button keep NORMAL / HOVER / PRESSED regions (§8.7–§8
 see §8.11), so the Godot side should fetch those captions through `Assets.Parsers` rather than
 baking title text, except the inventory title which is part of the `inventwindow.dds` chrome art.
 
+### 13.10 Front-end atlas loading
+
+Match the front-end loader lifecycle of §9.0: load each scene's atlas set **once, eagerly, at scene
+build**, hold the handles on the scene node, and free them on scene exit. Do **not** build a shared
+texture cache or reference-count atlas handles across scenes — the original model is per-window,
+append-only ownership with an outright release on window teardown.
+
 ---
 
 ## 14. Cross-references
@@ -1347,7 +1600,7 @@ baking title text, except the inventory title which is part of the `inventwindow
 - In-game HUD panel placement + buff bar: `specs/ui_hud_layout.md`
 - Widget hit-test / IME routing detail: `specs/input_ui.md`
 - Login network flow: `specs/login_flow.md`
-- Front-end scene flow: `specs/frontend_scenes.md`
+- Front-end scene flow (incl. char-select 3D slot ray-pick §3.3.3): `specs/frontend_scenes.md`
 - Cryptography: `specs/crypto.md`
 - UI asset file formats: `formats/ui_manifests.md` (uitex.txt, skillicon.txt, crestlist.txt)
 - Texture format: `formats/texture.md`

@@ -180,6 +180,53 @@ public sealed class UiAssetLoader : IDisposable
     }
 
     // -------------------------------------------------------------------------
+    // Eager atlas preload (spec: ui_system.md §9.0 / frontend_scenes.md §1.10.1)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Eagerly loads the four login-screen UI atlases into the internal cache,
+    /// in the order mandated by the spec. Must be called at scene-build time,
+    /// before any widget construction, so every subsequent Slice() hits the cache.
+    ///
+    /// Order: login_slice1 → loginwindow → InventWindow → loginwindow_02.
+    /// spec: Docs/RE/specs/frontend_scenes.md §1.10.1
+    ///   "At scene build the login window loads its four DDS atlases up-front,
+    ///    back-to-back, before any widget is constructed. No lazy / first-draw load."
+    ///   CODE-CONFIRMED (four atlases, fixed order).
+    /// spec: Docs/RE/specs/ui_system.md §9.0 (atlas-loader lifecycle: eager preload).
+    /// </summary>
+    public void PreloadLoginAtlases()
+    {
+        // Preload order per spec §1.10.1.
+        // "data/ui/login_slice1.dds → data/ui/loginwindow.dds → data/ui/inventwindow.dds → data/ui/loginwindow_02.dds"
+        // CODE-CONFIRMED: preload order is fixed; two calls with same path share the cache entry.
+        LoadAtlas("data/ui/login_slice1.dds"); // spec §1.10.1 slot 1. CODE-CONFIRMED.
+        LoadAtlas("data/ui/loginwindow.dds"); // spec §1.10.1 slot 2. CODE-CONFIRMED.
+        LoadAtlas("data/ui/inventwindow.dds"); // spec §1.10.1 slot 3. CODE-CONFIRMED.
+        LoadAtlas("data/ui/loginwindow_02.dds"); // spec §1.10.1 slot 4. CODE-CONFIRMED.
+    }
+
+    /// <summary>
+    /// Returns the raw bytes for a VFS entry at <paramref name="vfsPath"/>,
+    /// or an empty span when the VFS is offline or the file is absent.
+    ///
+    /// Used for the game.ver version gate (spec: frontend_scenes.md §1.4).
+    /// </summary>
+    public ReadOnlyMemory<byte> GetRaw(string vfsPath)
+    {
+        if (_assets is null) return ReadOnlyMemory<byte>.Empty;
+        try
+        {
+            return _assets.GetRaw(vfsPath);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[UiAssetLoader] GetRaw('{vfsPath}') failed: {ex.Message}");
+            return ReadOnlyMemory<byte>.Empty;
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // IDisposable
     // -------------------------------------------------------------------------
 

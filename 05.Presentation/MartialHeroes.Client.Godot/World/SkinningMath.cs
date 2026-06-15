@@ -491,9 +491,17 @@ public static class SkinningMath
     /// Deforms one render vertex by the animated bone world transforms via linear blend skinning.
     ///
     /// spec: Docs/RE/specs/skinning.md §0 / §5.3 —
-    ///   pos    = Σ_i w_i · ( boneWorldQuat_i ⊗ (localPos_i)    + boneWorldTrans_i )
+    ///   pos    = Σ_i w_i · ( boneWorldQuat_i ⊗ (localPos_i · scale) + boneWorldTrans_i )
     ///   normal = Σ_i w_i · ( boneWorldQuat_i ⊗  localNormal_i )
-    /// (scale assumed 1.0 for characters — spec §5.3 / §9 open item).
+    ///
+    /// Per-mesh `scale` (spec §5.3/§9, RESOLVED CAMPAIGN 9): the legacy per-mesh scale is a real,
+    /// generally non-unit skin-object field set at attach as `meshScale · nodeScale`. It multiplies
+    /// the bone-local POSITION before rotation (never the normal, never the rotation). Here the
+    /// deform runs at unit scale because the live consumers (CharSelectScene3D / RealWorldRenderer /
+    /// CharPreview3D) carry the per-actor scale on the returned root Node3D's transform instead —
+    /// exactly the equivalent the spec sanctions for an engine that lets its node transform size the
+    /// rig ("the importer must still apply this mesh scale to the … node transform"). The cancellation
+    /// invariant (§0) is unaffected: a uniform scalar commutes through the convex weighted sum.
     /// </summary>
     public static (Vec3 Pos, Vec3 Nrm) DeformVertex(VertexInfluences vi, BoneTransform[] world)
     {

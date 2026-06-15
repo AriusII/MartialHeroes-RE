@@ -754,6 +754,135 @@ not rotate the sun; any sun-arc in a port is a free choice.
 
 ---
 
+## Section 11: Area-0 keyframe-29 reference VALUE TABLE (sample-verified)
+
+> **Status:** SAMPLE-VERIFIED — decoded directly from the real area-0 binaries
+> (`light0.bin`, `fog0.bin`, `material0.bin`) in the live VFS and cross-checked byte-decode against
+> the production parser. Recovered via the black-box harness, CAMPAIGN 9. These are concrete numeric
+> values; they are neutral facts an engineer may use as a fixture / plausibility reference. The
+> companion `.txt` files for area 0 are **editorial / out of sync** with the `.bin` and must NOT be
+> trusted — the `.bin` floats are ground truth.
+>
+> This section is the value half of the area-0 char-select scene; the loader/apply contract is the
+> same one specified in section 2 (fog), section 3 (material), section 9 (`light%d.bin`), and
+> section 10 (apply-path). The char-select scene consumes **exactly this area-0 set at keyframe 29**.
+
+### 11.1 Keyframe index derivation (no interpolation)
+
+The char-select scene drives the environment with a **fixed literal time-of-day value** rather than a
+live clock. With that literal time = **52200 ms** and the 48-keyframe / 1800-ms-per-keyframe cycle
+(section 0), the active keyframe index and fraction are:
+
+```
+keyframe_index = floor( 52200 / 1800 )          = 29
+frac           = ( 52200 mod 1800 ) / 1800.0     = 0.0   (exact -- neighbour keyframe never weighted)
+```
+
+(The same derivation at the alternate millisecond scale used elsewhere in the recon -
+`52200000 / 1800000 = 29`, remainder 0 - yields the identical index 29, fraction 0.) Because the
+fraction is exactly 0, the keyframe-29 row is consumed verbatim with no blend.
+
+### 11.2 STATIC + ACHROMATIC finding (CONFIRMED for area 0)
+
+Two area-0-specific facts make keyframe 29 representative of the entire day:
+
+- **STATIC.** All 48 keyframe rows of `light0.bin` Section A (directional) and all 48 rows of
+  `material0.bin` are **byte-for-byte identical**. Area 0 has **no day/night variation** - every
+  keyframe index resolves to the same values, so the scene looks the same at any time of day. This
+  confirms the section 3.3 "area-0 static table" note.
+- **ACHROMATIC.** Every non-zero colour group in the area-0 material table has **R = G = B** (pure
+  grey). The sky is a neutral grey tone throughout. The only channel asymmetry is in alpha
+  components, which are not colour.
+
+### 11.3 `light0.bin` keyframe-29 values (directional, ambient, fog scalar)
+
+Float colours are in the **[0, 1]** domain, applied directly (no /255) - section 10.1. Section A is
+the directional light, Section B the ambient light, Section C the per-keyframe fog-distance scalar.
+
+| Quantity | Section / slot | R | G | B | A | Notes |
+|---|---|---:|---:|---:|---:|---|
+| Directional `color_A` (diffuse) | A, +0x00 | 0.047333 | 0.047333 | 0.047333 | 0.047333 | very dark grey; all channels equal |
+| Directional `color_B` (specular) | A, +0x10 | 0.511818 | 0.511818 | 0.511818 | 0.580667 | medium grey; alpha differs |
+| Directional `color_C` (unread) | A, +0x20 | 0.0 | 0.0 | 0.0 | 0.0 | present-but-unread (section 9.2) - do NOT feed to the math |
+| Ambient `color_A` | B, +0x00 | 0.207843 | 0.207843 | 0.207843 | 0.787091 | RGB equal; **inert at runtime** (see note below) |
+| Ambient `color_B` (secondary) | B, +0x10 | 0.752666 | 0.752666 | 0.752666 | 0.752666 | inert at runtime |
+| Ambient `color_C` (unread) | B, +0x20 | 0.0 | 0.0 | ~ -0.0196 | 0.0 | unread; the tiny non-zero B is unconsumed noise |
+
+| Scalar quantity | Section / offset | Value | Derived |
+|---|---|---:|---|
+| Fog-distance scalar `s` | C, keyframe 29 | 25.0 (world units) | LINEAR fog range = `s x 3.0` = **75.0**; near-scale = `1/s` = 0.04 (section 10.3) |
+| Secondary fog scalar | D, keyframe 29 | 0.0 | no haze contribution at keyframe 29 |
+
+**fog-scalar synthesis note (`data_load_flag = 0`):** see section 11.4. **Ambient-inert note:** the
+Section-B ambient table is loaded and interpolated but the per-keyframe ambient is multiplied by the
+global ambient gate `K_ambient`, which is **CONFIRMED 0.0** at runtime (section 10.4). So the
+keyframe-29 ambient table **contributes nothing** to the device; the entire device-ambient floor
+comes from the brightness slider (section 11.5).
+
+The static fallback sun direction (the only sun direction the client uses - section 9.4, section
+10.6) is unchanged in area 0: scale 1.0, direction `(-7, 7, 20)`, normalised approx
+`(-0.3137, 0.3137, 0.8962)`. There is no per-keyframe sun rotation.
+
+### 11.4 `fog0.bin` keyframe-29 values (LUT-synthesis branch)
+
+| Field | Offset | Value | Notes |
+|---|---|---:|---|
+| `start_dist` | 0x00 | 0.500000 | fraction of view range (area-0 baseline) |
+| `end_dist` | 0x04 | 0.900000 | fraction of view range (area-0 baseline) |
+| `data_load_flag` | 0x08 | 0 | **synthesise** - the in-file `fog_colors[]` are NOT read (section 2.4) |
+| `fog_colors[29]` (on-disk only) | 0x80 | BGRA = (57, 101, 155, 0) | author's reference colour (R=155, G=101, B=57 approx float 0.608/0.396/0.224); **NOT consumed** because the flag is 0 |
+
+Because `data_load_flag = 0`, the 192-byte `fog_colors[]` table is **synthesised at load time from the
+sky-material LUT** via the per-slot 0.75/0.25 blend (section 2.4); the on-disk BGRA above is an
+editorial artefact that survives only as a plausibility check on the synthesis result. The area-0 fog
+`start`/`end` fractions are confirmed as **0.5 / 0.9** (these are the real area-0 values, not the
+area-1 pair 0.75 / 0.98 in section 10.2). Per section 10.3 the per-frame Section-C scalar (75.0-unit
+range) overwrites these static fractions each tick, so the fractions are a secondary baseline only.
+
+### 11.5 Device-ambient floor at keyframe 29
+
+With the per-keyframe ambient inert (section 11.3) and the ambient base static `(0, 0, 0)` (section
+10.4), the **entire** device-ambient floor for the char-select scene is the additive brightness offset
+(section 10.5): at the default `OPTION_BRIGHT = 100` the offset is `floor(100/100 x 255) = 255`, i.e.
+the device ambient saturates to **full white `(1.0, 1.0, 1.0)`**. So the area-0 char-select scene is
+lit primarily by this white ambient floor, **not** by the dark directional keyframe colour. (A
+user-saved lower `OPTION_BRIGHT` in `DoOption.ini` would lower this floor - a layout-neutral runtime
+residual, section 10.7.)
+
+### 11.6 `material0.bin` keyframe-29 values (sun / sky / cloud colour groups)
+
+Row 29 (identical to every other row in area 0). Float groups in **RGBA** order (section 3.2). The sun
+colour exceeds 1.0 - that is the **intended HDR bloom** value (section 3.2), not an error.
+
+| Group | Indices | R | G | B | A | Notes |
+|---|---|---:|---:|---:|---:|---|
+| `sky_haze` | [0..3] | 0.004303 | 0.004303 | 0.004303 | 0.004303 | achromatic near-zero (approx 1/232) |
+| `sun_color` | [4..7] | **1.260243** | **1.260243** | **1.148363** | 1.200000 | **HDR > 1.0** - intentional bloom |
+| `secondary_sky_color` | [12..15] | 0.004303 | 0.004303 | 0.004303 | 0.004303 | equals `sky_haze` |
+| `cloud_color_A` | [17..20] | 0.331212 | 0.331212 | 0.331212 | 0.331212 | mid grey (approx 84/255) |
+| `cloud_color_B` | [21..24] | 0.795697 | 0.795697 | 0.795697 | 0.795697 | light grey (approx 203/255) |
+| `ambient_sky_color` | [29..32] | 0.219333 | 0.219333 | 0.219333 | 0.219333 | grey (approx 56/255) |
+| `emissive_sky` | [34..36] | 0.298039 | 0.298039 | 0.298039 | - | grey (approx 76/255), no alpha |
+| `specular_sky` | [38..40] | 0.800000 | 0.800000 | 0.800000 | - | pure grey, no alpha |
+
+All other indices ([8..11], [16], [25..28], [33], [37], [41..50]) are **0.0** in area 0 - consistent
+with the section 3.2 "loaded but usage not traced / proposed reserved" entries.
+
+### 11.7 Known unknowns (area-0 value table)
+
+- The area-0 `.txt` companions (`light0.txt`, `fog0.txt`, `material0.txt`) **disagree** with the
+  `.bin` for the colour tables. `fog0.txt` matches the `.bin` scalar fields (`FOG_START=0.5`,
+  `FOG_END=0.9`), but `light0.txt` and `material0.txt` colour columns use an integer / signed-byte
+  editorial encoding that does **not** map linearly to the `.bin` floats (the `.bin` appears to be a
+  constant table the editor `.txt` was never re-baked into). The `.bin` is authoritative; the `.txt`
+  must not be used to derive runtime values. UNVERIFIED whether any other area exhibits the same
+  `.txt`/`.bin` divergence.
+- The exact pair of sky-LUT source bands feeding the section 2.4 fog 0.75/0.25 blend is still MED
+  (section 2.5); the on-disk `fog_colors[29]` reference colour above can sanity-check the synthesis
+  result but does not pin the source bands.
+
+---
+
 ## Sky texture assets
 
 All sky textures are **DDS** files under `data/sky/texture/`. Confirmed entries in the VFS:

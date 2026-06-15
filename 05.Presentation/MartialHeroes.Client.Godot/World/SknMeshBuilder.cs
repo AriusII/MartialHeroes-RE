@@ -1,11 +1,20 @@
 // World/SknMeshBuilder.cs
 //
 // Converts a SkinnedMesh (Assets.Parsers) into a static-pose Godot ArrayMesh WITHOUT using GltfDocument.
-// Animation is deferred (TODO); this gives a crash-free static pose display.
+//
+// STATUS (CAMPAIGN 9 L6): this static-pose builder is SUPERSEDED by SkinnedCharacterBuilder /
+// SkinnedCharacterNode, which now render the full animated CPU-LBS rig (skin deforms + idle .mot
+// plays without exploding — verified on the §8(d) g1/g2048 specimen trios). No live caller invokes
+// SknMeshBuilder.Build any more (RealWorldRenderer routes through SkinnedCharacterBuilder). It is
+// kept only as a minimal crash-free static fallback reference.
 //
 // Coordinate conventions (D3D9 left-handed → Godot right-handed):
-//   Negate X: consistent with BudMeshBuilder and BudSceneGltfConverter.
-//   spec: WorldCoordinates.ToGodot — negate X for D3D9→Godot handedness flip.
+//   ONE unified handedness conversion — the world Z-negate — applied via WorldCoordinates.SkinToGodot,
+//   identical to the live skinned path (SkinnedCharacterNode). The previous ad-hoc per-asset X-negate
+//   here was inconsistent with the skinned path and is removed: the spec mandates ONE conversion
+//   applied uniformly so the static and skinned renders of the same mesh are oriented identically.
+//   spec: Docs/RE/specs/skinning.md §8(b) — "Pick one handedness conversion — the world Z-negate —
+//         and apply it uniformly … drop the ad-hoc per-asset X/Z flips for skinned characters."
 //   spec: Docs/RE/formats/mesh.md §Vertex record — "pos_x stored second on disk at sub-offset 12": CONFIRMED.
 //   spec: Docs/RE/formats/mesh.md §Vertex record — "normal_x stored first on disk at sub-offset 0": CONFIRMED.
 //
@@ -16,14 +25,10 @@
 // Winding order:
 //   SknCorner[] from the parser is in D3D9 CW order (per GltfConverter). We apply CCW swap.
 //   spec: Docs/RE/formats/mesh.md §Face table — corner order CW: CONFIRMED (via GltfConverter winding swap).
-//
-// Skinning / animation:
-//   SknWeight[] is available but not applied here (static bind pose only).
-//   Runtime animation is a future TODO — the Skeleton/AnimationPlayer pipeline needs further
-//   design work to safely integrate with the Godot main-thread constraint.
 
 using Godot;
 using MartialHeroes.Assets.Parsers.Models;
+using MartialHeroes.Client.Godot.Helpers;
 
 namespace MartialHeroes.Client.Godot.World;
 
@@ -113,14 +118,16 @@ public static class SknMeshBuilder
                 Vec3 p = srcPos[vi];
                 Vec3 n = srcNrm.Length > vi ? srcNrm[vi] : new Vec3(0f, 1f, 0f);
 
-                // Handedness flip: negate X (D3D9 left-handed → Godot right-handed).
-                // spec: WorldCoordinates.ToGodot — negate X.
+                // ONE unified handedness conversion (world Z-negate), identical to the live skinned
+                // path (SkinnedCharacterNode.DeformAndUpload). spec: Docs/RE/specs/skinning.md §8(b).
                 // spec: Docs/RE/formats/mesh.md §Vertex record — pos_x @ sub-offset 12: CONFIRMED.
-                positions[vBase + j] = new Vector3(-p.X, p.Y, p.Z);
+                var (gx, gy, gz) = WorldCoordinates.SkinToGodot(p.X, p.Y, p.Z);
+                positions[vBase + j] = new Vector3(gx, gy, gz);
 
-                // Normal: negate X.
+                // Normal: same single conversion.
                 // spec: Docs/RE/formats/mesh.md §Vertex record — normal_x @ sub-offset 0: CONFIRMED.
-                normals[vBase + j] = new Vector3(-n.X, n.Y, n.Z).Normalized();
+                var (nx, ny, nz) = WorldCoordinates.SkinToGodot(n.X, n.Y, n.Z);
+                normals[vBase + j] = new Vector3(nx, ny, nz).Normalized();
 
                 // UV: already v-flipped by the parser (1.0 - uv_v_on_disk).
                 // spec: Docs/RE/formats/mesh.md §Face record — uv_v: "engine applies 1.0 - uv_v". CONFIRMED.

@@ -104,9 +104,12 @@ public sealed partial class LoginScreen : Control
     // Bar height = |endY − startY| = 222 px (both bars same height). spec §1.5. CODE-CONFIRMED.
     private const int CurtainH = 222;
 
-    // Advance speed — legacy is +2 px per frame (~120 px/s at 60 fps ≈ ~1.85 s full open).
-    // We use wall-clock at 120 px/s so it is frame-rate independent. spec §1.5. CODE-CONFIRMED.
-    private const float CurtainSpeed = 120f; // px/s — equivalent of +2/frame at 60 fps. spec §1.5. CODE-CONFIRMED.
+    // Advance speed — spec §1.5a CODE-CONFIRMED: the accumulator advances +5 per tick.
+    // "+5/tick" at 60 fps = 300 px/s wall-clock.  We keep the sweep wall-clock-deterministic
+    // per spec §1.5a: "a faithful port may keep the 0→222 sweep … but pick a fixed wall-clock
+    // duration for determinism."  The thresholds (200 reveal / 222 complete) remain exact.
+    // spec: Docs/RE/specs/frontend_scenes.md §1.5a. CODE-CONFIRMED (corrects prior +2/frame reading).
+    private const float CurtainSpeed = 300f; // px/s — +5/tick at 60 fps. spec §1.5a. CODE-CONFIRMED.
 
     // -------------------------------------------------------------------------
     // View state
@@ -125,13 +128,27 @@ public sealed partial class LoginScreen : Control
     private int _quitModalAlpha; // current modulated alpha [0..255]
     private int _quitModalTarget; // 255 = showing, 0 = hiding
 
-    // Letterbox curtain bars (two-edge reveal). spec §1.5 sub-state 2. CODE-CONFIRMED.
-    private ColorRect? _curtainTop; // top black bar — slides off the top
-    private ColorRect? _curtainBot; // bottom black bar — slides off the bottom
+    // Letterbox curtain bars (two-panel vertical OPEN slide). spec §1.5a. CODE-CONFIRMED.
+    private ColorRect? _curtainTop; // top panel — slides up off the canvas
+    private ColorRect? _curtainBot; // bottom panel — slides down off the canvas
 
-    private bool _curtainOpen; // true once both bars have reached their end positions
+    private bool _curtainOpen; // true once accumulator > 222 (both panels at end positions)
+
+    // Shared accumulator C — advanced +5/tick (300 px/s wall-clock).
+    // TOP Y = −C. BOTTOM Y = C + 326.
+    // Reveal threshold: C > 200 (server-list reveals). Complete: C > 222.
+    // spec: Docs/RE/specs/frontend_scenes.md §1.5a. CODE-CONFIRMED (accumulator model).
+    private float _curtainAccum; // shared accumulator C (px advanced since sub-state 1).
+
+    // Expose whether the accumulator has passed 200 — BootFlow reads this to reveal the server-list.
+    // spec: Docs/RE/specs/frontend_scenes.md §1.5a "server-list widget begins to reveal once C>200".
+    // CODE-CONFIRMED (reveal threshold 200).
+    public bool CurtainRevealThresholdPassed => _curtainAccum > CurtainRevealThreshold;
+    private const float CurtainRevealThreshold = 200f; // spec §1.5a. CODE-CONFIRMED.
+    private const float CurtainCompleteThreshold = 222f; // spec §1.5a. CODE-CONFIRMED.
 
     // Current animated Y positions (float for sub-pixel smoothness).
+    // Derived from accumulator: topY = −accum, botY = accum + 326.
     private float _curtainTopY = CurtainTopStartY;
     private float _curtainBotY = CurtainBotStartY;
 
@@ -156,6 +173,14 @@ public sealed partial class LoginScreen : Control
     {
         _assets = SharedAssets ?? UiAssetLoader.Open();
         _ownsAssets = SharedAssets is null;
+
+        // Eager-preload the four login atlases BEFORE any widget construction.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.10.1
+        //   "At scene build the login window loads its four DDS atlases up-front,
+        //    back-to-back, before any widget is constructed — there is no lazy / first-draw load."
+        //   Order: login_slice1 → loginwindow → InventWindow → loginwindow_02. CODE-CONFIRMED.
+        // spec: Docs/RE/specs/ui_system.md §9.0 (atlas-loader lifecycle). CODE-CONFIRMED.
+        _assets.PreloadLoginAtlases();
 
         // Load saved id BEFORE building UI so BuildUi can pre-fill and set default focus.
         // spec: Docs/RE/specs/frontend_scenes.md §1.6 — DoOption.ini [DO_OPTION] OPTION_ID. CODE-CONFIRMED.
@@ -229,38 +254,45 @@ public sealed partial class LoginScreen : Control
     {
         float dt = (float)delta;
 
-        // --- Curtain (letterbox) open animation. spec §1.5 sub-state 2. CODE-CONFIRMED. ---
-        // Top bar moves from Y=0 → Y=−222 (off top); bottom bar from Y=326 → Y=548 (off bottom).
-        // Speed: CurtainSpeed px/s (= +2 px/frame equivalent at 60 fps). spec §1.5. CODE-CONFIRMED.
+        // --- Curtain two-panel vertical OPEN slide. spec §1.5a. CODE-CONFIRMED. ---
+        // Shared accumulator C: advanced by +5/tick = CurtainSpeed px/s (wall-clock deterministic).
+        // TOP Y = −C. BOTTOM Y = C + 326.
+        // Reveal (C>200): server-list begins to become visible (managed by BootFlow via CurtainRevealThresholdPassed).
+        // Complete (C>222): write end positions, hide panels.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.5a. CODE-CONFIRMED.
         if (!_curtainOpen)
         {
-            bool topDone = _curtainTopY <= CurtainTopEndY;
-            bool botDone = _curtainBotY >= CurtainBotEndY;
+            // Advance shared accumulator.
+            _curtainAccum = Math.Min(_curtainAccum + CurtainSpeed * dt, CurtainCompleteThreshold);
 
-            if (!topDone)
-            {
-                _curtainTopY -= CurtainSpeed * dt; // slide upward (Y decreases). spec §1.5.
-                if (_curtainTopY < CurtainTopEndY) _curtainTopY = CurtainTopEndY;
-            }
-
-            if (!botDone)
-            {
-                _curtainBotY += CurtainSpeed * dt; // slide downward (Y increases). spec §1.5.
-                if (_curtainBotY > CurtainBotEndY) _curtainBotY = CurtainBotEndY;
-            }
+            // Derive panel Y from accumulator: TOP = −C, BOTTOM = C + 326.
+            // spec §1.5a: "TOP Y = −C", "BOTTOM Y = C + 326". CODE-CONFIRMED.
+            _curtainTopY = -_curtainAccum; // top panel moves up.
+            _curtainBotY = _curtainAccum + CurtainBotStartY; // bottom panel moves down (+326 base).
 
             if (_curtainTop is not null)
                 _curtainTop.Position = new Vector2(0, _curtainTopY);
             if (_curtainBot is not null)
                 _curtainBot.Position = new Vector2(0, _curtainBotY);
 
-            if (topDone && botDone)
+            if (_curtainAccum >= CurtainCompleteThreshold)
             {
+                // Write explicit end positions per spec §1.5a "end positions written explicitly".
+                // TOP Y = −222, BOTTOM Y = 548 = 222+326. CODE-CONFIRMED.
+                if (_curtainTop is not null)
+                {
+                    _curtainTop.Position = new Vector2(0, CurtainTopEndY); // −222. spec §1.5a.
+                    _curtainTop.Visible = false; // fully off-screen — hide. spec §1.5a.
+                }
+
+                if (_curtainBot is not null)
+                {
+                    _curtainBot.Position = new Vector2(0, CurtainBotEndY); // 548. spec §1.5a.
+                    _curtainBot.Visible = false;
+                }
+
                 _curtainOpen = true;
-                // Hide the bars entirely once fully off-screen (they never return).
-                if (_curtainTop is not null) _curtainTop.Visible = false;
-                if (_curtainBot is not null) _curtainBot.Visible = false;
-                GD.Print("[LoginScreen] Curtain letterbox fully open — bars hidden.");
+                GD.Print("[LoginScreen] Curtain fully open (C>222) — both panels hidden. spec §1.5a.");
             }
         }
 
@@ -299,42 +331,33 @@ public sealed partial class LoginScreen : Control
         int widgetCount = 0;
 
         // =======================================================================
-        // CONFIRMED VISUAL LAYER ORDER (pixel-confirmed 2026-06-14 from atlas analysis):
+        // SPEC-CORRECT Z-ORDER (spec: Docs/RE/specs/frontend_scenes.md §11.2g / §11.2h):
         //
-        // login_slice1.dds (atlas A) src(0,0..398):
-        //   Entirely OPAQUE dark-stone backdrop (alpha=255 throughout Y=0..330, fading
-        //   transparent only at Y=330..398). Provides the dark frame background behind the
-        //   painting, plus the visible top ornaments (rings, red flag, URL) in canvas Y=0..110
-        //   where no painting sits.
+        //   z=0  Dark canvas fill (ColorRect, bottommost fallback backdrop).
+        //   z=1  UPPER BACKDROP: login_slice1.dds A@(0,0,1024,398) src(0,0) — the carved bezel
+        //          frame, hanging rings, red flag (top-left), URL (top-right), stone rails.
+        //          All ring/flag/URL detail is BAKED ART; no separate child sprites. §11.2h.
+        //   z=2  MAIN PANEL PAINTING: loginwindow.dds B@(0,110,1024,490) src(0,0) — ink-wash
+        //          warrior+landscape. Covers the upper backdrop from canvas Y=110..600.
+        //   z=3..9  Server listbox + channel blocks (hidden at boot).
+        //   z=10 LOWER BACKDROP (bottom login-bar): login_slice1.dds A@(0,326,1024,442) src(0,582).
+        //          MUST come ABOVE the painting so the stone form-band overlays the painting
+        //          in the overlap zone Y=326..600. spec §11.2h "Y scales with screen height". §11.2g z=10.
+        //   z=11+ Form controls (BottomBand container → buttons, textboxes, labels).
+        //   z=19 Quit-confirm modal (always above form controls).
+        //   z=100 Curtain bars (above everything during the opening animation).
         //
-        // loginwindow.dds (atlas B): fully OPAQUE painting (alpha=255, Y=0..490).
-        //   PLACED ABOVE the A backdrop: the painting covers the dark stone from canvas Y=110..600.
-        //   Above Y=110, only login_slice1.dds is visible (rings, flag, URL).
-        //
-        // login_slice1.dds (atlas A) BottomBar src(0,582..1024):
-        //   The login form band, transparent at the central opening (src Y=582..606 transparent,
-        //   then partially transparent to ~Y=800), opaque stone at the very bottom (Y=800..1024)
-        //   which maps to canvas Y≈630..768. This stone band reveals the login form widgets.
-        //
-        // Layer order (bottom → top):
-        //   1. Dark bg fill (ColorRect, always-visible backdrop).
-        //   2. BottomBar (login_slice1.dds src 0,582, canvas Y=326, H=442) — Z=LOWEST backdrop.
-        //   3. BackgroundPanel (login_slice1.dds src 0,0, canvas Y=0, H=398) — Z=MIDDLE.
-        //   4. MainPanelChrome (loginwindow.dds painting, canvas Y=110, H=490) — Z=HIGHEST art.
-        //   5. Form widgets (buttons, textboxes, etc.) — added last, always topmost.
-        //
-        // Result: painting visible from canvas Y=110..600 (covers dark stone). Dark stone
-        //         visible Y=0..110 (frame top with rings/flag). Form band visible Y=600..768
-        //         (painting ends there, stone bottom band shows). Form widgets float above all.
-        //
-        // spec: Docs/RE/specs/frontend_scenes.md §11.2a–b, §11.2e (layer order, CODE-CONFIRMED).
-        //       Atlas alpha analysis 2026-06-14: loginwindow.dds alpha=255 Y=0..490;
-        //       login_slice1.dds src(0..398) alpha=255 Y=0..330 (opaque dark stone backdrop).
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2g (back-to-front z-order table). CODE-CONFIRMED.
+        //       §11.2h (two baked-art backdrop panels). CODE-CONFIRMED.
+        //       §11.2a (main panel art B@(0,110)). CODE-CONFIRMED.
+        //       §11.2e (bottom login-bar panel A@(0,326*H/768,1024,442) src(0,582)). CODE-CONFIRMED.
         // =======================================================================
 
         // =======================================================================
-        // BASE BACKGROUND: solid dark fill covering the entire canvas.
-        // spec: Docs/RE/specs/frontend_scenes.md §11.2b.
+        // z=0 BASE BACKGROUND: solid dark fill covering the entire canvas.
+        // Ensures a near-black base when the atlas textures have transparent areas
+        // (e.g. canvas area outside the 1024×768 reference region in non-4:3 windows).
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2b (bottommost layer). CODE-CONFIRMED.
         // =======================================================================
         {
             var bgFill = new ColorRect
@@ -348,47 +371,16 @@ public sealed partial class LoginScreen : Control
         }
 
         // =======================================================================
-        // [Z=1] LOWER BACKDROP — bottom carved-metal panel. ADDED FIRST so it is Z-LOWEST
-        // art. The painting (Z=3, added later) will cover it from Y=110..600. It remains
-        // visible only at Y=600..768 where the painting alpha fades, revealing the stone
-        // login-form band.
-        // A@(0, 326, 1024, 442) src(0,582) — login_slice1.dds — the brown/stone bottom band.
-        // Y = 326 on the 1024×768 reference canvas (= 326×768/768).
-        // spec §11.2e "Bottom login-bar panel". CODE-CONFIRMED.
-        // =======================================================================
-        AtlasTexture? bottomBar = _assets.Slice(
-            LoginLayout.AtlasLoginSlice1,
-            LoginLayout.BottomBarSrcX, LoginLayout.BottomBarSrcY,
-            LoginLayout.BottomBarW, LoginLayout.BottomBarH);
-
-        if (bottomBar is not null)
-        {
-            var bottomBarRect = MakeSprite("BottomBar", bottomBar,
-                0, LoginLayout.BottomBarCanvasY,
-                LoginLayout.BottomBarW, LoginLayout.BottomBarH);
-            AddChild(bottomBarRect);
-            widgetCount++;
-        }
-        else
-        {
-            // Offline fallback: solid parchment-tone band.
-            var fallbackBand = new ColorRect
-            {
-                Name = "BottomBarFallback",
-                Color = new Color(0.22f, 0.14f, 0.08f, 0.95f),
-                Position = new Vector2(0, LoginLayout.BottomBarCanvasY),
-                Size = new Vector2(LoginLayout.RefWidth, LoginLayout.BottomBarH),
-            };
-            AddChild(fallbackBand);
-        }
-
-        // =======================================================================
-        // [Z=2] UPPER BACKDROP — login_slice1.dds (A), MIDDLE LAYER.
-        // A@(0,0,1024,398) src(0,0) — dark-stone carved backdrop:
-        //   Opaque stone texture behind the painting. Visible at canvas Y=0..110 (top frame
-        //   area with rings, red flag, URL). Hidden by painting from Y=110..398. The frame
-        //   ornaments (rings/flag) are baked art at Y=0..110 of the atlas.
-        // spec: Docs/RE/specs/frontend_scenes.md §11.2b "Full background art panel". CODE-CONFIRMED.
+        // z=1 UPPER BACKDROP — login_slice1.dds (atlas A), BOTTOMMOST ART LAYER.
+        // A@(0,0,1024,398) src(0,0) — the full dark-stone carved backdrop:
+        //   Contains (baked) the iron bezel frame top/left/right rails + corners,
+        //   the hanging metal rings / chains below the top edge, the small red flag (top-left),
+        //   and the URL text (top-right). FLAG/RINGS/URL ARE BAKED — not separate widgets. §11.2h.
+        //   The painting (z=2) covers this from canvas Y=110..398. Above Y=110 the backdrop
+        //   is visible (rings, flag, URL, carved top-frame). Below the stone fades transparent
+        //   toward Y=398 so the painting blends naturally.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2h "Upper backdrop". CODE-CONFIRMED.
+        //       §11.2b "Full background art panel". CODE-CONFIRMED.
         // =======================================================================
         AtlasTexture? bgSlice = _assets.Slice(
             LoginLayout.AtlasLoginSlice1,
@@ -405,15 +397,11 @@ public sealed partial class LoginScreen : Control
         }
 
         // =======================================================================
-        // [Z=3] CENTRAL PANEL PAINTING — loginwindow.dds (B), HIGHEST ART LAYER.
-        // B@(0,110,1024,490) src(0,0) — the ink-wash painting: warrior + landscape.
-        // Fully opaque (alpha=255 Y=0..490). Placed above the dark stone backdrop so the
-        // painting covers it from canvas Y=110..600. Only the top frame ornaments (canvas
-        // Y=0..110) remain visible from the backdrop below.
-        // Also covers the BottomBar (Z=1) from canvas Y=326..600. The painting and BottomBar
-        // share the zone Y=326..600; painting wins (higher Z). At Y=600..768, painting ends
-        // (alpha goes to 0) and BottomBar stone form-band becomes visible.
+        // z=2 CENTRAL PANEL PAINTING — loginwindow.dds (atlas B), ART LAYER.
+        // B@(0,110,1024,490) src(0,0) — the ink-wash painting: warrior + ribbon + landscape.
+        // Covers the upper backdrop from canvas Y=110..600.
         // spec: Docs/RE/specs/frontend_scenes.md §11.2a "Main panel art". CODE-CONFIRMED.
+        //       §11.2h "Main panel (painting) at z=2". CODE-CONFIRMED.
         // =======================================================================
         AtlasTexture? mainPanel = _assets.Slice(
             LoginLayout.AtlasLoginWindow,
@@ -434,7 +422,7 @@ public sealed partial class LoginScreen : Control
         }
 
         // =======================================================================
-        // [Z=4..N] Widgets: server listbox + channel-selector blocks (hidden at boot).
+        // z=3..9 Server listbox + channel-selector blocks (hidden at boot).
         // Hidden at boot — only shown when the server-list sub-state is active.
         // spec: Docs/RE/specs/frontend_scenes.md §1.5. CODE-CONFIRMED.
         // =======================================================================
@@ -478,10 +466,48 @@ public sealed partial class LoginScreen : Control
         }
 
         // =======================================================================
-        // Form-widget band: a transparent container at canvas Y=326 that holds all
-        // interactive form controls (textboxes, buttons). Added AFTER the painting so
-        // these widgets are ALWAYS topmost (Z=N). The BottomBar art beneath provides
-        // the stone frame look; these widgets float above the painting + BottomBar.
+        // z=10 LOWER BACKDROP — login_slice1.dds (atlas A), bottom form-band stone panel.
+        // A@(0, round(326*H/768), 1024, 442) src(0,582) — the carved stone bottom bar:
+        //   Contains the stone frame for the ID/PW form band. Y scales with screen height;
+        //   on the 1024×768 reference canvas Y=326 exactly.
+        //   CRITICAL: MUST come AFTER the painting (z=2) so the stone band overlays
+        //   the painting in the overlap zone canvas Y=326..600. The form controls (z=11+)
+        //   are added in the BottomBand container that comes after this.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2h "Lower backdrop". CODE-CONFIRMED.
+        //       §11.2e "Bottom login-bar panel". CODE-CONFIRMED. §11.2g z=10. CODE-CONFIRMED.
+        // =======================================================================
+        AtlasTexture? bottomBar = _assets.Slice(
+            LoginLayout.AtlasLoginSlice1,
+            LoginLayout.BottomBarSrcX, LoginLayout.BottomBarSrcY,
+            LoginLayout.BottomBarW, LoginLayout.BottomBarH);
+
+        if (bottomBar is not null)
+        {
+            var bottomBarRect = MakeSprite("BottomBar", bottomBar,
+                0, LoginLayout.BottomBarCanvasY,
+                LoginLayout.BottomBarW, LoginLayout.BottomBarH);
+            AddChild(bottomBarRect);
+            widgetCount++;
+        }
+        else
+        {
+            // Offline fallback: solid parchment-tone band.
+            var fallbackBand = new ColorRect
+            {
+                Name = "BottomBarFallback",
+                Color = new Color(0.22f, 0.14f, 0.08f, 0.95f),
+                Position = new Vector2(0, LoginLayout.BottomBarCanvasY),
+                Size = new Vector2(LoginLayout.RefWidth, LoginLayout.BottomBarH),
+            };
+            AddChild(fallbackBand);
+        }
+
+        // =======================================================================
+        // z=11+ Form-widget band: transparent container at canvas Y=326 holding all
+        // interactive form controls (textboxes, buttons, labels). Added AFTER the lower
+        // backdrop stone art (z=10) so form controls are topmost of all non-modal content.
+        // The lower backdrop provides the stone frame look; form widgets float above it.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2g z=11–17 (form controls). CODE-CONFIRMED.
         // =======================================================================
         Control bottomBand = new Control
         {
@@ -764,9 +790,12 @@ public sealed partial class LoginScreen : Control
         };
         AddChild(_curtainBot);
 
-        // Initialise animation state — curtain starts closed (in starting positions).
-        _curtainTopY = CurtainTopStartY;
-        _curtainBotY = CurtainBotStartY;
+        // Initialise animation state — accumulator at 0 (curtain fully closed).
+        // TOP Y = −0 = 0 (CurtainTopStartY). BOTTOM Y = 0+326 = 326 (CurtainBotStartY).
+        // spec §1.5a "state 1 seeds the closed/start positions, resets C=0". CODE-CONFIRMED.
+        _curtainAccum = 0f;
+        _curtainTopY = CurtainTopStartY; // 0. spec §1.5a. CODE-CONFIRMED.
+        _curtainBotY = CurtainBotStartY; // 326. spec §1.5a. CODE-CONFIRMED.
         _curtainOpen = false;
 
         GD.Print($"[LoginScreen] Built — {widgetCount} widgets; " +
@@ -946,19 +975,108 @@ public sealed partial class LoginScreen : Control
     // spec: Docs/RE/specs/frontend_scenes.md §1.4 "Version gate". CODE-CONFIRMED.
     // -------------------------------------------------------------------------
 
+    // VFS path for the client version file. spec: frontend_scenes.md §1.4. CODE-CONFIRMED.
+    // spec: login_flow.md §3.3 "data/cursor/game.ver, 28 bytes, 7 little-endian u32 fields". SAMPLE-VERIFIED.
+    private const string GameVerVfsPath = "data/cursor/game.ver"; // spec §1.4. CODE-CONFIRMED.
+
     /// <summary>
-    /// Compares VFS game.ver against on-disk game.ver.
-    /// Returns true when they match (or VFS is unavailable).
-    /// Returns false on mismatch — caller must show msg 2204 and abort.
-    /// spec: Docs/RE/specs/frontend_scenes.md §1.4. CODE-CONFIRMED gate; stub = always true.
+    /// Compares the VFS copy of data/cursor/game.ver against the on-disk copy.
+    /// Returns true when they match byte-for-byte, or when the VFS is not mounted (offline
+    /// play allowed), or when the VFS has the file but the on-disk copy is absent (degrade
+    /// gracefully — allow login, log a note).
+    /// Returns false only when both copies exist AND differ — caller shows msg 2204 and aborts.
+    ///
+    /// spec: Docs/RE/specs/frontend_scenes.md §1.4
+    ///   "If the VFS is mounted, the client compares the version file inside the VFS
+    ///    (data/cursor/game.ver) against the on-disk game.ver.
+    ///    On mismatch: Win32 modal error box msg 2204; OK runs the quit-from-load path.
+    ///    On match (or VFS not mounted): continue."
+    ///   CODE-CONFIRMED.
+    /// spec: Docs/RE/specs/login_flow.md §3.3 — 28-byte / 7 LE-u32 format. SAMPLE-VERIFIED.
     /// </summary>
     private bool CheckGameVersion()
     {
-        // Offline/dev stub: always pass.
-        // When VFS is mounted: read data/cursor/game.ver from VFS and compare to local on-disk file.
-        // On mismatch → return false so the caller shows msg 2204 and aborts. spec §1.4. CODE-CONFIRMED.
-        // TODO (VFS online): _assets.ReadVfsText("data/cursor/game.ver") vs FileAccess.ReadFileAsString("game.ver").
-        return true; // stub: treat as equal. spec §1.4 "match or VFS not mounted → continue". CODE-CONFIRMED.
+        // --- Step 1: read the VFS copy. ---
+        // If VFS is offline (HasVfs == false) the gate trivially passes — spec §1.4 "or VFS not mounted".
+        if (!_assets.HasVfs)
+        {
+            GD.Print("[LoginScreen] Version gate: VFS offline — gate passes (§1.4 'VFS not mounted → continue').");
+            return true;
+        }
+
+        ReadOnlyMemory<byte> vfsBytes = _assets.GetRaw(GameVerVfsPath);
+        if (vfsBytes.IsEmpty)
+        {
+            // VFS mounted but file absent — unusual; degrade gracefully (allow, log).
+            GD.Print("[LoginScreen] Version gate: data/cursor/game.ver absent in VFS — degrading gracefully (allow).");
+            return true;
+        }
+
+        // --- Step 2: read the on-disk copy. ---
+        // The on-disk game.ver lives beside the client executable or in the client root.
+        // In Godot we probe two locations: the project res:// root and the OS executable dir.
+        // spec: frontend_scenes.md §1.4 "the on-disk game.ver". CODE-CONFIRMED path (relative to cwd).
+        const string DiskRelPath = "data/cursor/game.ver"; // on-disk path relative to client dir.
+        ReadOnlyMemory<byte> diskBytes = ReadDiskGameVer(DiskRelPath);
+
+        if (diskBytes.IsEmpty)
+        {
+            // On-disk file absent (offline/portable install) — degrade gracefully per spec §1.4 intent.
+            GD.Print("[LoginScreen] Version gate: on-disk game.ver not found — degrading gracefully (allow).");
+            return true;
+        }
+
+        // --- Step 3: byte-level comparison. ---
+        // spec §1.4 "compare the version file inside the VFS against the on-disk game.ver". CODE-CONFIRMED.
+        if (vfsBytes.Length != diskBytes.Length ||
+            !vfsBytes.Span.SequenceEqual(diskBytes.Span))
+        {
+            GD.Print("[LoginScreen] Version gate: game.ver MISMATCH (VFS vs on-disk differ). Aborting (msg 2204).");
+            return false; // → caller shows msg 2204 and aborts. spec §1.4. CODE-CONFIRMED.
+        }
+
+        GD.Print("[LoginScreen] Version gate: game.ver match — gate passes.");
+        return true;
+    }
+
+    /// <summary>
+    /// Attempts to read the on-disk game.ver from several candidate locations relative to the
+    /// client data directory.  Returns empty when not found.
+    ///
+    /// spec: frontend_scenes.md §1.4 "on-disk game.ver". CODE-CONFIRMED concept;
+    ///       on-disk candidate paths are a revival-specific heuristic (no literal path in spec).
+    /// </summary>
+    private static ReadOnlyMemory<byte> ReadDiskGameVer(string relPath)
+    {
+        // Try three candidate roots in order:
+        // 1. The client data directory resolved by ClientPathResolver (canonical).
+        // 2. The Godot user:// data dir (portable install).
+        // 3. res:// project root (dev/editor only).
+        string[] candidates =
+        [
+            // Candidate 1 — alongside the executable / working directory (original client layout).
+            System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), relPath),
+            // Candidate 2 — user data dir (Godot user://).
+            System.IO.Path.Combine(global::Godot.OS.GetUserDataDir(), relPath),
+        ];
+
+        foreach (string candidate in candidates)
+        {
+            try
+            {
+                if (System.IO.File.Exists(candidate))
+                {
+                    byte[] bytes = System.IO.File.ReadAllBytes(candidate);
+                    return bytes;
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[LoginScreen] ReadDiskGameVer: could not read '{candidate}': {ex.Message}");
+            }
+        }
+
+        return ReadOnlyMemory<byte>.Empty;
     }
 
     // -------------------------------------------------------------------------

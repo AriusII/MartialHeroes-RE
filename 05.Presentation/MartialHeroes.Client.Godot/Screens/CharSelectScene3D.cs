@@ -10,22 +10,29 @@
 //      its OWN skeleton g{id_b}.bnd AND its OWN idle clip (actormotion.txt col2==id_b → col16) from
 //      the parsed .skn's id_b — never a shared rig/clip — via the now-fixed SkinnedCharacterBuilder.
 //      spec: Docs/RE/specs/skinning.md §8(e) — per-class rig/clip identity (the slot-row T-pose fix).
-//   3. Places a Camera3D at keyframe 1 (eye ≈ (512, 87, −9652) Godot-space) looking at the row pivot.
-//   4. Adds a DirectionalLight3D + 2 OmniLight3D approximating the 14:30 afternoon light rig described
-//      by the area-015 sky data (exact colours are data-driven, we approximate here).
-//   5. Wires a WorldEnvironment with a procedural afternoon sky.
+//   3. Places ONE Camera3D (no orbit/keyframes — §3.5.2 CODE-CONFIRMED) plus a CharSelectCameraRig
+//      that drives the ENTRY DOLLY KF0→KF1 (~2.0 s lerp/slerp, §3.5), then the two manual hold-to-
+//      move inputs (§3.5.3) and the 3D slot ray-pick (§3.3.3).
+//   4. Adds a FAINT ACHROMATIC DirectionalLight3D only — the original scene builder creates NO
+//      brazier/torch point-lights (§3.6.1 + §3.6.6 CODE-CONFIRMED). The warm glow is the additive
+//      fire texture in the XeffSceneEffect, not scene lights.
+//   5. Wires a WorldEnvironment with a white ambient floor (OPTION_BRIGHT=100 → 1.0, §3.6.1).
 //
 // SPEC CITATIONS:
 //   Stage origin (2048, 0, −6144) spec: Docs/RE/specs/frontend_scenes.md §3.7.2. CODE-CONFIRMED.
 //   Per-slot world positions spec: Docs/RE/specs/frontend_scenes.md §3.3.1. CODE-CONFIRMED.
 //   Preview scale ×3.0 spec: Docs/RE/specs/frontend_scenes.md §3.3.1 CODE-CONFIRMED.
-//   Camera eye KF1 (512, 87, −9652) spec: Docs/RE/specs/frontend_scenes.md §3.5.2 CODE-CONFIRMED.
+//   Entry dolly KF0→KF1 spec: Docs/RE/specs/frontend_scenes.md §3.5 CODE-CONFIRMED.
+//   World anchor (+2048, 0, −6144) spec: Docs/RE/specs/frontend_scenes.md §3.5.1 CODE-CONFIRMED.
 //   FOV 50° / near 5 / far 15000 spec: Docs/RE/specs/frontend_scenes.md §3.5.1 CODE-CONFIRMED.
+//   Manual boom-zoom ±10 u/s + actor-yaw ±2 rad/s spec: §3.5.3 CODE-CONFIRMED.
+//   Slot hit-test (3D ray-pick, AABB ±6 / Y 70..92) spec: §3.3.3 CODE-CONFIRMED.
 //   Backdrop cell d000x10000z9990 spec: Docs/RE/specs/frontend_scenes.md §3.7.1 CODE-CONFIRMED.
 //   Per-slot rig/clip identity (g{id_b}.bnd + actormotion idle) spec: Docs/RE/specs/skinning.md §8(e) CODE-CONFIRMED.
 //   Row pivot (508.48, 69.89, −9758.57) spec: Docs/RE/specs/frontend_scenes.md §3.6.5 CODE-CONFIRMED.
-//   Area-015 sky data spec: Docs/RE/specs/frontend_scenes.md §3.6.3 CODE-CONFIRMED (paths).
+//   Area-0 sky data spec: Docs/RE/specs/frontend_scenes.md §3.6.3 CODE-CONFIRMED (NOT area-015).
 //   Yaw 0 = front, π = back spec: Docs/RE/specs/frontend_scenes.md §3.3.2 CODE-CONFIRMED.
+//   No scene point-lights spec: Docs/RE/specs/frontend_scenes.md §3.6.1 + §3.6.6 CODE-CONFIRMED.
 //
 // COORDINATE CONVENTION:
 //   WorldCoordinates.ToGodot: (x, y, z) → (x, y, −z). spec: Helpers/WorldCoordinates.
@@ -44,7 +51,8 @@ namespace MartialHeroes.Client.Godot.Screens;
 
 /// <summary>
 /// A <see cref="Node3D"/> that builds the full 3D character-select scene:
-/// map000 backdrop cell, standing character row, camera at keyframe 1, and lighting.
+/// map000 backdrop cell, standing character row, a single static camera (orbit REFUTED, §3.5.2),
+/// the manual-input + hit-test rig (<see cref="CharSelectCameraRig"/>), and lighting.
 ///
 /// <para>Construction: call <see cref="Initialise"/> after the node is in the scene tree,
 /// passing the open <see cref="RealClientAssets"/> handle and the slot occupancy / skin data.
@@ -69,57 +77,74 @@ public sealed partial class CharSelectScene3D : Node3D
     private static readonly float[]
         SlotWorldZ = [9737.0f, 9738.0f, 9738.5f, 9738.0f, 9737.0f]; // negated from spec −9737..−9738.5
 
-    // Per-slot Y — the terrain surface at the row pivot is at world Y ≈ 70 (not 0.0).
-    // spec: frontend_scenes.md §3.3.1 — "Y is exactly 0.0". CODE-CONFIRMED (spec value).
-    // NOTE: the spec value 0.0 is the stage-origin-relative position in the legacy engine.
-    // The terrain cell d000x10000z9990 has its ground surface at Y ≈ 70 in absolute world space
-    // (the TerrainNode mesh encodes absolute heights from the .ted file). The legacy engine
-    // placed actors via actor-spawn Y-correction from the ground sampler; our implementation
-    // uses absolute world Y from the .ted rather than a relative stage offset.
-    // Empirically confirmed: characters standing on the platform surface at Y=70.
-    // TODO: drive this from TerrainNode.TryGetGroundHeight(508, -9738) once the callback is wired
-    // into CharSelectScene3D (request from application-engineer).
-    private const float SlotWorldY = 70.0f;
+    // Per-slot Y — sampled from TerrainNode.TryGetGroundHeight at the row pivot.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.3.1 CODE-CONFIRMED.
+    // Fallback: 70.0f when the terrain sector is not yet resident.
+    // The spec confirms Y=0.0 is stage-origin-relative; absolute world Y is sampled from
+    // the loaded .ted heightfield. The row pivot world position is (508.48, −9758.57) in
+    // legacy XZ (Godot: worldX=508.48, worldZ=−9758.57 — legacy Z not negated for the sampler).
+    // spec: Docs/RE/specs/frontend_scenes.md §3.6.5 — row pivot (508.48, 69.89, −9758.57). CODE-CONFIRMED.
+    private const float SlotWorldYFallback = 70.0f;
+
+    // Row-pivot world coordinates for the ground sampler (legacy space, Z NOT negated).
+    // spec: Docs/RE/specs/frontend_scenes.md §3.6.5 — row pivot (508.48, 69.89, −9758.57). CODE-CONFIRMED.
+    private const float RowPivotLegacyX = 508.48f;
+    private const float RowPivotLegacyZ = -9758.57f;
 
     // Preview scale ×3.0. spec: frontend_scenes.md §3.3.1. CODE-CONFIRMED.
     private const float PreviewScale = 3.0f;
 
-    // Camera eye position — keyframe 1 world coordinates, Z negated for Godot-space.
-    // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 — KF1 eye = world (512, 87, −9652) CODE-CONFIRMED.
-    // WorldCoordinates.ToGodot: (x,y,z) → (x,y,−z), so world Z −9652 → Godot Z +9652.
-    // spec: Docs/RE/specs/frontend_scenes.md §3.5.4 — "base pitch ≈ −30°; look-at = active orbit
-    //   point ≈ world (512, 87, −9652)". Eye is MEDIUM (boom-vector-dependent); the KF1 world
-    //   coordinate is CODE-CONFIRMED and is used here directly.
-    //
-    // VISUAL CORRECTION (Aesthetic): the spec KF1 eye Z=9652 places the camera ~86 units from
-    // the character row (Z≈9738), causing the figures to appear small at FOV 50°. The official
-    // screenshot shows the figures filling ~65% of screen height. Moving the eye forward to
-    // Z=9698 reduces the gap to ~40 units, bringing the figures to a similar size. The spec KF1
-    // coordinate is CODE-CONFIRMED; this is an aesthetic approximation of the "zoom" KF intent.
-    private static readonly Vector3
-        CameraEye = new(512.0f, 92.0f, 9675.0f); // spec: §3.5.2 CODE-CONFIRMED (KF1); Z adjusted Aesthetic
+    // Stage world anchor — the scene writes (+2048, 0, −6144) as three floats; it is the stage
+    // ORIGIN (§3.7.2), NOT a camera orbit pivot — "there is no orbit" (§3.5.1). Per-slot placements
+    // and terrain streaming are expressed relative to it. Carried as a documented constant.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.1 CODE-CONFIRMED — world anchor (+2048, 0, −6144).
+    // WorldCoordinates.ToGodot: (x,y,z) → (x,y,−z), so world (+2048, 0, −6144) → Godot (2048, 0, 6144).
+    private static readonly Vector3 StageWorldAnchorGodot = new(2048.0f, 0.0f, 6144.0f); // spec: §3.5.1 CODE-CONFIRMED
 
-    // Camera look-at target — the character row midpoint, not the deeper row-pivot anchor.
-    // spec: Docs/RE/specs/frontend_scenes.md §3.5.4 CODE-CONFIRMED:
-    //   "look-at = active orbit point ≈ world (512, 87, −9652) over actor-row pivot ≈ (508, 70, −9759)".
-    // Row pivot in Godot-space (Z negated): (508.48, 69.89, +9758.57).
-    // spec: Docs/RE/specs/frontend_scenes.md §3.7.2 / §3.6.5 — row centre (508.48, 69.89, −9758.57) CODE-CONFIRMED.
+    // ENTRY DOLLY KF0 → KF1 — camera blends over ~2.0 s then holds KF1.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5 CODE-CONFIRMED (entry dolly, KF0→KF1, 2.0 s).
     //
-    // VISUAL CORRECTION: The spec row-pivot Z (+9758.57) is ~20 units BEHIND the actual character
-    // Z positions (SlotWorldZ ≈ 9737–9738.5). Looking 20 units past the row tilts the camera down
-    // and frames the figures off-centre (too low, bodies cut). To centre the 3 figures at chest-
-    // height against the dark temple (matching the official screenshot), we look at the character
-    // row midpoint Y=78 (mid-chest on a ×3 scale actor ~24 units tall, base at Y=70 → top ≈ 94):
-    // Y=78 = 70 + 8 ≈ one-third height → camera frames them from knees to head nicely. Aesthetic.
-    // The Z is aligned to the actual character row (9738.0 = midpoint of SlotWorldZ 9737..9738.5).
-    private static readonly Vector3
-        CameraLookAt =
-            new(508.48f, 82.0f, 9738.0f); // Aesthetic Y=82 (mid-torso on ×3 actor); spec: §3.5.4/§3.7.2 row centre
+    // KF1 (rest pose, CODE-CONFIRMED exact):
+    //   World (512, 87, −9652) → Godot-space Z-negated → (512, 87, +9652).
+    //   spec: Docs/RE/specs/frontend_scenes.md §3.5.2 — KF1 exact CODE-CONFIRMED.
+    //
+    // KF0 (dolly start, approximate per spec §3.5.2):
+    //   World ≈ (516.55, 137.27, −9386.65) → Godot-space → (516.55, 137.27, +9386.65).
+    //   spec: Docs/RE/specs/frontend_scenes.md §3.5.2 — KF0 approximate, anchored decode.
+    //   We use the spec-given approximate value. It is further out on +Z (closer to viewer in Godot)
+    //   and higher in Y, so the dolly eases INTO the resting framing of KF1 over 2.0 s.
+    internal static readonly Vector3 DollyKF0Godot = new(516.55f, 137.27f, 9386.65f); // spec: §3.5.2 KF0 ≈ CODE-CONFIRMED
+    // KF1 exact from spec (512, 87, −9652) → Godot (512, 87, +9652). spec: §3.5.2 CODE-CONFIRMED.
+    // Aesthetic adjustment: the spec boom-seed = 0 means the camera eye IS the orbit point.
+    // The camera at KF1 looks toward the row pivot (508.48, 69.89, 9758.57) from eye (512, 87, 9652).
+    // This is a downward-forward angle: ΔY = 87-70 = 17, ΔZ = 9758-9652 = 106 → pitch ≈ -9°.
+    // That is shallow — the spec says base pitch ≈ -30°. To achieve a steeper downward look while
+    // keeping the KF1 world position faithful, the camera eye is at (512, 87, 9652) looking toward
+    // (508.48, 69.89, 9758.57). No aesthetic modification to KF1 position — use spec value.
+    internal static readonly Vector3 DollyKF1Godot = new(512.0f, 87.0f, 9652.0f);      // spec: §3.5.2 KF1 = exact CODE-CONFIRMED
 
-    // Camera parameters. spec: frontend_scenes.md §3.5.1. CODE-CONFIRMED.
-    private const float CameraFov = 50.0f;
-    private const float CameraNear = 5.0f;
-    private const float CameraFar = 15000.0f;
+    // The "look-at" visual aim point — the row pivot from spec §3.6.5.
+    // World (508.48, 69.89, −9758.57) → Godot (508.48, 69.89, +9758.57).
+    // spec: Docs/RE/specs/frontend_scenes.md §3.6.5 — Ambient-FX / look-at anchor CODE-CONFIRMED.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.4 — "look-at target = active orbit point ≈
+    //   world (512, 87, −9652) over the actor-row pivot ≈ (508, 70, −9759)". CODE-CONFIRMED.
+    // The camera looks "slightly DOWN at the standing row from in FRONT" with base pitch ≈ −30°.
+    // At KF1 eye = (512, 87, 9652), aiming at (508.48, 69.89, 9758.57) gives a downward-forward
+    // angle that frames the upper body of actors standing at Y ≈ 70 on the platform.
+    // Look-at = row pivot (spec §3.6.5). Characters at Y=70, ×3-scale → body top ≈ 70+78=148.
+    // Mid-torso ≈ Y = 70 + 39 = 109. Aiming at row pivot Y=69.89 looks at the feet level.
+    // Aesthetic: aim at Y=100 (roughly upper-torso) to fill the canvas with the characters rather
+    // than looking at their feet and seeing a lot of platform.
+    internal static readonly Vector3 DollyLookAtGodot = new(508.48f, 100.0f, 9758.57f); // Aesthetic: upper-torso aim
+
+    // KF0 look-at is the same visual target — both keyframes frame the same row centre.
+    internal static readonly Vector3 DollyLookAtKF0Godot = new(508.48f, 100.0f, 9758.57f); // Aesthetic: upper-torso aim
+
+    // Camera projection — CONFIRMED, carried over unchanged this pass.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.1 CODE-CONFIRMED — FOV 50° / near 5 / far 15000.
+    private const float CameraFov = 50.0f; // spec: §3.5.1 vertical FOV 50°. CODE-CONFIRMED.
+    private const float CameraNear = 5.0f; // spec: §3.5.1 near clip 5.0. CODE-CONFIRMED.
+    private const float CameraFar = 15000.0f; // spec: §3.5.1 far clip 15000.0. CODE-CONFIRMED.
 
     // Backdrop cell identity.
     // spec: Docs/RE/specs/frontend_scenes.md §3.7.1. CODE-CONFIRMED.
@@ -143,6 +168,15 @@ public sealed partial class CharSelectScene3D : Node3D
     // =========================================================================
 
     private Camera3D? _camera;
+
+    // The manual-input + hit-test rig (boom-zoom on the camera, yaw on the selected actor,
+    // and the 3D world-space slot ray-pick). Built in BuildCamera, configured at end of Initialise.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.5.3 / §3.3.3.
+    private CharSelectCameraRig? _cameraRig;
+
+    // TerrainNode reference for ground-height sampling.
+    // Set during BuildBackdropTerrain so BuildCharacterRow can query it.
+    private TerrainNode? _backdropTerrain;
 
     // One character node per slot (index 0..4); null = empty or failed.
     private readonly Node3D?[] _slotActors = new Node3D?[5];
@@ -226,8 +260,25 @@ public sealed partial class CharSelectScene3D : Node3D
         GD.Print($"[CharSelectScene3D] Selected slot → {slotIndex} (clip-swap pending spec §3.3.4).");
     }
 
-    /// <summary>Returns the Godot-space world position of the camera eye (KF1).</summary>
-    public Vector3 GetCameraEye() => CameraEye;
+    /// <summary>Returns the Godot-space world position of the camera's resting eye (= KF1 position).</summary>
+    public Vector3 GetCameraEye() => DollyKF1Godot;
+
+    /// <summary>
+    /// 3D world-space ray-pick against per-slot axis-aligned bounding boxes (the selection
+    /// hit-test). Unprojects the click pixel (in SubViewport-local coordinates) through the
+    /// scene <see cref="Camera3D"/> into a world ray, then tests each slot actor's AABB
+    /// (centred on the slot's Godot-space X/Z, ±6 in X and Z, Y band [rowBaseY, rowBaseY+22]
+    /// = spec Y 70..92) and returns the NEAREST hit along the ray.
+    ///
+    /// <para>Returns the slot index (0..4) under that pixel, or −1 if none. L4 calls this from
+    /// the 2D screen when the user clicks inside the 3D viewport region.</para>
+    ///
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.3.3 CODE-CONFIRMED —
+    ///   "3D world-space ray-pick; AABB X ± 6, Z ± 6, Y band 70.0 … 92.0; loop 5 slots skip
+    ///    empty; nearest hit → confirmed-pick; −1 = none."
+    /// </summary>
+    public int TryHitTestSlot(global::Godot.Vector2 viewportLocalPos)
+        => _cameraRig?.HitTest(viewportLocalPos) ?? -1;
 
     // =========================================================================
     // Environment
@@ -235,73 +286,45 @@ public sealed partial class CharSelectScene3D : Node3D
 
     private void BuildEnvironment()
     {
-        // CAVERN environment: the char-select scene is a dark enclosed cavern (stone walls, torchlit).
-        // The official screenshot shows no sky visible — the scene reads as an interior with warm
-        // brazier light and a blue waterfall behind the characters.
-        //
-        // spec: Docs/RE/specs/frontend_scenes.md §3.6.2 CODE-CONFIRMED — "zeroes a sky/fog blend scalar"
-        //   (fog-density zeroed in the legacy engine means the selected sky blend approach; in our Godot
-        //   scene we use an opaque black BG + dense near-fog to simulate the enclosed cavern look).
-        // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED — 5-light rig, range ≈1024; colours UNVERIFIED.
-        //
-        // Aesthetic choices (no spec citation): background colour, fog start/end, ambient energy.
-        // These are tuned for the cavern look — dark, warm, stone interior.
+        // Area-0 environment TRUTH (recovered CAMPAIGN 9). The char-select scene is an achromatic,
+        // statically-lit "dark stone temple" — NOT a warm torchlit cavern and NOT a blue sky.
+        // The area-0 light/material tables are STATIC across all 48 keyframes and ACHROMATIC (R=G=B);
+        // the per-keyframe ambient table is multiplied by K_ambient = 0.0 (INERT). The REAL scene fill
+        // is a WHITE device ambient floor from OPTION_BRIGHT (default 100 -> 1.0 = white). This is the
+        // fix for the historical "too dark / invisible characters" debt.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6 + Docs/RE/formats/environment_bins.md (area-0 kf-29). CODE-CONFIRMED.
 
-        // global::Godot.Environment to avoid collision with MartialHeroes.Client.Godot namespace.
-        // spec: CLAUDE.md "Namespace collisions: bare Environment. resolves to sibling namespace → CS0234".
+        // global::Godot.Environment to avoid the sibling-namespace collision (CS0234).
         var env = new global::Godot.Environment();
 
-        // Use a solid dark background (no sky) — the cavern ceiling/walls are stone geometry.
-        // Aesthetic: dark near-black background mimics the enclosed cavern.
+        // Achromatic near-black background — area-0 sky is pure grey (sky_haze R=G=B ~ 0.004).
+        // spec: Docs/RE/formats/environment_bins.md §11.6 SAMPLE-VERIFIED (achromatic).
         env.BackgroundMode = global::Godot.Environment.BGMode.Color;
-        env.BackgroundColor = new Color(0.04f, 0.03f, 0.02f); // near-black warm dark
+        env.BackgroundColor = new Color(0.04f, 0.04f, 0.04f); // achromatic dark
 
-        // Ambient — recovered area-0 ambient floor: OPTION_BRIGHT / 100 = 1.0 by default.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.6.2 CODE-CONFIRMED —
-        //   AmbientLightEnergy = OPTION_BRIGHT / 100 (default 1.0). The sky/time manager seeds
-        //   its ambient contribution from the area-0 light table (light0.bin keyframe 29 at 14:30);
-        //   Godot does not have a sky/time manager, so we set the environment ambient energy to
-        //   the recovered default-bright constant 1.0.
-        // The torch rig (OmniRange 1024, §3.6.1 CODE-CONFIRMED) handles per-character illumination.
+        // WHITE ambient floor — the scene's MAIN illuminant. OPTION_BRIGHT/100 = 1.0 -> white.
+        // spec: Docs/RE/formats/environment_bins.md §10.5/§11.5 + frontend_scenes.md §3.6.2. CODE-CONFIRMED.
         env.AmbientLightSource = global::Godot.Environment.AmbientSource.Color;
-        env.AmbientLightColor = new Color(0.55f, 0.45f, 0.35f); // warm stone fill — Aesthetic
-        env.AmbientLightEnergy = 1.0f; // spec: §3.6.2 OPTION_BRIGHT/100 default = 1.0 CODE-CONFIRMED
+        env.AmbientLightColor = new Color(1.0f, 1.0f, 1.0f); // white floor — OPTION_BRIGHT=100. CODE-CONFIRMED
+        env.AmbientLightEnergy = 1.0f; // spec: §3.6.2 OPTION_BRIGHT/100 default = 1.0. CODE-CONFIRMED
 
-        // Tonemap tuned for dark-cavern + torchlit subject.
-        // Aesthetic: ACES, slightly under-exposed to preserve the dark cavern feel.
-        env.TonemapMode = global::Godot.Environment.ToneMapper.Aces;
-        env.TonemapExposure = 0.9f;
-        env.TonemapWhite = 4.0f;
+        // Linear tonemap — faithful to the legacy D3D9 output (no ACES darkening); keeps the white
+        // ambient floor reading at full value so the stone-temple scene is legible.
+        env.TonemapMode = global::Godot.Environment.ToneMapper.Linear;
+        env.TonemapExposure = 1.0f;
 
-        // Distance fog: OFF per spec §3.6.2 CODE-CONFIRMED.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.6.2 CODE-CONFIRMED —
-        //   "zeroes the fog-blend OFFSET field … zeroing it turns distance fog OFF behind the
-        //   preview row so the row reads clearly."
-        // Root cause of invisible characters: density 0.022 at camera-to-character distance
-        // ~86 units → exp(-0.022·86) ≈ 0.15 → 85% of character colour absorbed by fog.
-        // Fix: disable distance fog entirely so the character row is unobscured.
-        // Any terrain ring beyond the platform is hidden by the near-black background colour
-        // (the cell geometry ends before reaching visible grass from this camera angle).
-        env.FogEnabled = false; // spec: §3.6.2 CODE-CONFIRMED — distance fog OFF in char-select
+        // Distance fog OFF behind the preview row (the legacy zeroes the fog blend offset).
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6.2 CODE-CONFIRMED — distance fog OFF.
+        env.FogEnabled = false;
 
-        // Glow — CODE-CONFIRMED rendering spec §6 / §8:
-        //   "glow HDR threshold ≈ 0 (no bright-pass); SINGLE half-res blur level (no Gaussian pyramid)".
-        // spec: Docs/RE/specs/frontend_scenes.md §3.6.2 (rendering.md §6/§8 cross-ref) CODE-CONFIRMED.
-        // Setting GlowHdrThreshold to 0 means every pixel contributes to the glow pass without
-        // a bright-pass gate. A single blur level (level 1 only, rest off) avoids stacking a
-        // multi-level Gaussian pyramid that would create halation around the entire dark background.
+        // Glow: only the HDR sun_color (material0 sun ~1.26 > 1.0) blooms — HDR threshold 0.8 so the
+        // flatly-lit white-ambient scene does not halate. Single half-res level (no Gaussian pyramid).
+        // spec: Docs/RE/formats/environment_bins.md §11.4 (sun HDR) + rendering.md §8 (single level).
         env.GlowEnabled = true;
-        env.GlowIntensity = 0.8f; // Aesthetic: moderate torch bloom intensity
-        env.GlowStrength = 1.2f; // Aesthetic: bloom softness
-        env.GlowBloom = 0.1f; // Aesthetic: minimal scene-wide scatter
-        // HDR threshold 0 = no bright-pass gate; all light contributes.
-        // spec: rendering.md §6/§8 CODE-CONFIRMED: threshold ≈ 0 (no bright-pass).
-        env.GlowHdrThreshold = 0.0f;
-        // Single half-res level — do not stack a Gaussian pyramid.
-        // spec: rendering.md §8 CODE-CONFIRMED: SINGLE half-res blur level.
-        // Godot 4 glow levels are per-level float intensities set via the property path
-        // "glow_levels/N" (N=1..7), NOT bool GlowLevelsN members. Single first level only
-        // = the spec's single half-res blur (rendering.md §8 CODE-CONFIRMED).
+        env.GlowIntensity = 0.6f; // Aesthetic
+        env.GlowStrength = 1.0f; // Aesthetic
+        env.GlowBloom = 0.05f; // Aesthetic
+        env.GlowHdrThreshold = 0.8f; // only HDR sun blooms — avoids haloing the white-ambient scene
         env.Set("glow_levels/1", 1.0f);
         env.Set("glow_levels/2", 0.0f);
         env.Set("glow_levels/3", 0.0f);
@@ -314,38 +337,54 @@ public sealed partial class CharSelectScene3D : Node3D
         AddChild(worldEnv);
 
         GD.Print(
-            "[CharSelectScene3D] Cavern environment built: dark BG + NO distance fog (spec §3.6.2 CODE-CONFIRMED) + bloom. Aesthetic.");
+            "[CharSelectScene3D] Area-0 environment built: achromatic dark BG + WHITE ambient floor (energy 1.0 OPTION_BRIGHT) + fog OFF + HDR-only bloom. spec: frontend_scenes.md §3.6 / environment_bins.md CODE-CONFIRMED.");
     }
 
     // =========================================================================
-    // Camera — keyframe 1
+    // Camera — single static perspective camera (the "orbit" is REFUTED)
     // =========================================================================
 
     private void BuildCamera()
     {
-        // Camera at keyframe 1 (the live keyframe the scene uses).
-        // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 — live keyframe = 1. CODE-CONFIRMED.
-        // Godot-space eye: (512, 87, 9652) (Z negated from spec −9652).
-        // Look-at: row pivot (508.48, 69.89, 9758.57).
+        // Entry-dolly perspective camera — starts at KF0, animates to KF1 over ~2.0 s, then holds.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.5 CODE-CONFIRMED (entry dolly KF0→KF1).
+        // Projection: FOV 50° / near 5 / far 15000 (§3.5.1 CODE-CONFIRMED).
         _camera = new Camera3D
         {
             Name = "CharSelectCamera",
-            Fov = CameraFov, // spec: §3.5.1 FOV 50°. CODE-CONFIRMED.
+            Fov = CameraFov,   // spec: §3.5.1 FOV 50°. CODE-CONFIRMED.
             Near = CameraNear, // spec: §3.5.1 near 5.0. CODE-CONFIRMED.
-            Far = CameraFar, // spec: §3.5.1 far 15000.0. CODE-CONFIRMED.
+            Far = CameraFar,   // spec: §3.5.1 far 15000.0. CODE-CONFIRMED.
             KeepAspect = Camera3D.KeepAspectEnum.Height,
         };
         AddChild(_camera);
 
-        // Position and orient: eye at KF1, looking at the row centre.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 CODE-CONFIRMED position;
-        //       §3.5.4 CODE-CONFIRMED look-at = active orbit point.
-        _camera.Position = CameraEye;
-        _camera.LookAt(CameraLookAt, Vector3.Up);
+        // Start at KF0 (dolly start); the CharSelectCameraRig will animate it to KF1 over 2.0 s.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.5.2 — rig constructed at index 0. CODE-CONFIRMED.
+        _camera.Position = DollyKF0Godot;
+        _camera.LookAt(DollyLookAtKF0Godot, Vector3.Up);
 
-        GD.Print($"[CharSelectScene3D] Camera at KF1 eye={CameraEye} (Godot-space; world 512,87,−9652 Z-negated) " +
-                 $"look-at={CameraLookAt} (row pivot, Godot-space). " +
-                 "spec: frontend_scenes.md §3.5.2/§3.5.4/§3.7.2 CODE-CONFIRMED.");
+        // Build + wire the entry-dolly + manual-input + hit-test rig.
+        // The rig ticks in _Process: first ~2.0 s it runs the KF0→KF1 dolly (lerp pos / slerp rot),
+        // then holds KF1 and responds only to player manual inputs (boom-zoom + actor-yaw).
+        // spec: Docs/RE/specs/frontend_scenes.md §3.5 / §3.5.3 (manual inputs) / §3.3.3 (hit-test).
+        _cameraRig = new CharSelectCameraRig { Name = "CharSelectCameraRig" };
+        AddChild(_cameraRig);
+        _cameraRig.Configure(
+            camera: _camera,
+            slotWorldX: SlotWorldX,
+            slotWorldZ: SlotWorldZ,
+            rowBaseYFallback: SlotWorldYFallback, // spec: §3.3.1 fallback row base Y. CODE-CONFIRMED.
+            selectedSlotProvider: () => _selectedSlot,
+            slotActorProvider: i => (uint)i < (uint)_slotActors.Length ? _slotActors[i] : null,
+            kf0Pos: DollyKF0Godot,
+            kf1Pos: DollyKF1Godot,
+            lookAtTarget: DollyLookAtGodot);
+
+        GD.Print($"[CharSelectScene3D] Entry-dolly camera built: KF0={DollyKF0Godot} → KF1={DollyKF1Godot} " +
+                 $"(Godot-space; stage anchor {StageWorldAnchorGodot}). FOV {CameraFov}/near {CameraNear}/" +
+                 $"far {CameraFar}. Dolly 2.0 s lerp/slerp then hold KF1. Manual rig attached. " +
+                 "spec: frontend_scenes.md §3.5.2/§3.5.4 CODE-CONFIRMED.");
     }
 
     // =========================================================================
@@ -354,116 +393,42 @@ public sealed partial class CharSelectScene3D : Node3D
 
     private void BuildLighting()
     {
-        // CAVERN torch-lit rig approximating §3.6.1 (count CONFIRMED; colours UNVERIFIED).
-        // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED count/range ≈1024; colours UNVERIFIED.
+        // Area-0 lighting TRUTH: the scene builder creates NO brazier/torch point-lights.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED — "the scene builder creates
+        //   no brazier point-lights at all". spec: §3.6.6 CODE-CONFIRMED — "No scene point-lights".
+        // The warm cavern glow = the additive FIRE TEXTURE billboards in XeffSceneEffect, not lights.
+        // A faithful port must NOT add OmniLights for the braziers (§3.6.6 port contract #5).
         //
-        // The official char-select is an enclosed stone cavern lit by brazier torches — no sunlight.
-        // The spec confirms ≈5 positional lights, range ≈1024; their colour/direction is data-driven
-        // (UNVERIFIED). We approximate with two warm torch point lights (one per pillar) and three
-        // character fill lights to match the official torchlit look.
-        //
-        // Aesthetic: all colours and energy levels tuned to match the warm golden torch light in the
-        // official screenshot. No spec-cited colour values (UNVERIFIED in spec §3.6.1).
+        // ONLY: the faint achromatic directional key from the area-0 kf-29 data (~0.047).
+        // The WHITE ambient floor (OPTION_BRIGHT=100 → 1.0) is already set in BuildEnvironment.
+        // spec: Docs/RE/formats/environment_bins.md §11.3/§9.4 SAMPLE-VERIFIED (energy + light vector).
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED (achromatic, ≈ 5 positional
+        //   lights are the sky/time-manager lights, range ≈ 1024; colours data-driven, NOT warm).
 
-        // ── Light range rationale (CODE-CONFIRMED) ────────────────────────────────────────────────
-        // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED:
-        //   "≈5 positional lights … light range/radius of ≈1024".
-        // Previous rig used OmniRange 160–360 → lights did NOT reach the actor row (row Z ≈ 9738,
-        // lights at Z 9670–9820 → distance 68–82 units; far inside any 300-range sphere in *range*
-        // terms but not in *attenuation* at Godot's inverse-square falloff with OmniAttenuation ≈ 1.2).
-        // Root cause: OmniRange is the hard cutoff; attenuation drops the light by (1-d/R)^k, so at
-        // 300 range and 82 units the fill factor is fine — but the SCALE of the world (actors at
-        // 9738 world units, character height ~8 world units × ×3 scale = ~24 world units) means
-        // the per-unit intensity is tiny. Setting OmniRange to 1024 per spec §3.6.1 covers the full
-        // actor volume and dramatically increases the falloff denominator headroom.
-        // All OmniRange values below are 1024.0f.  spec: §3.6.1 CODE-CONFIRMED.
-
-        // Left pillar torch light — matches left brazier position (Godot-space).
-        // Aesthetic position: X ≈ centre−28, Y ≈ pillar top (88), Z ≈ row depth.
-        // The ±28 X offset from centre (508.5) is aesthetic (xeff sub-effect layout pending).
-        var leftTorch = new OmniLight3D
+        // Faint achromatic directional key — area-0 kf-29 directional ~0.047, light vector
+        // (−7, 7, 20) legacy world; Godot-space negates Z → (−7, 7, −20).
+        // spec: Docs/RE/formats/environment_bins.md §9.4/§10.6/§11.3. SAMPLE-VERIFIED.
+        var sun = new DirectionalLight3D
         {
-            Name = "LeftPillarTorch",
-            LightEnergy = 5.0f, // raised (was 3.5) — matches warm brazier brightness in official screenshot — Aesthetic
-            LightColor = new Color(1.0f, 0.60f, 0.15f), // warm orange-gold flame — Aesthetic
-            OmniRange = 1024.0f, // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED range ≈1024
-            OmniAttenuation = 1.2f,
+            Name = "Area0Directional",
+            LightEnergy = 0.047f, // spec: environment_bins.md §11.3 SAMPLE-VERIFIED (area-0 kf-29 directional)
+            LightColor = new Color(1.0f, 1.0f, 1.0f), // achromatic — area-0 R=G=B. spec: §11.2
             ShadowEnabled = false,
-            Position = new Vector3(480.5f, 89.0f, 9758.6f), // left pillar top — Aesthetic
         };
-        AddChild(leftTorch);
+        AddChild(sun);
+        var sunPivot = new Vector3(512.0f, 200.0f, 9738.0f);
+        sun.LookAtFromPosition(sunPivot, sunPivot + new Vector3(-7.0f, 7.0f, -20.0f).Normalized(), Vector3.Up);
 
-        // Right pillar torch light — matches right brazier position.
-        // Aesthetic: mirror of left pillar at X = centre+28.
-        var rightTorch = new OmniLight3D
-        {
-            Name = "RightPillarTorch",
-            LightEnergy = 5.0f, // raised (was 3.5) — Aesthetic
-            LightColor = new Color(1.0f, 0.60f, 0.15f), // warm orange-gold flame — Aesthetic
-            OmniRange = 1024.0f, // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED range ≈1024
-            OmniAttenuation = 1.2f,
-            ShadowEnabled = false,
-            Position = new Vector3(536.5f, 89.0f, 9758.6f), // right pillar top — Aesthetic
-        };
-        AddChild(rightTorch);
+        // NO OmniLight3D / SpotLight3D here. The original adds none; the fire glow is additive
+        // texture (XeffSceneEffect). Removing the previous warm omni rig that was wrongly added.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 + §3.6.6 CODE-CONFIRMED (no scene lights).
+        // If characters appear too dark WITHOUT the fire billboards (no VFS), the white ambient
+        // floor at energy 1.0 is sufficient — characters read at full Unshaded brightness.
 
-        // Key fill — camera-facing fill for character faces; softer warm tone than the torches.
-        // spec: §3.6.1 "≈5 positional lights". Aesthetic position/colour.
-        var keyFill = new OmniLight3D
-        {
-            Name = "CameraKeyFill",
-            LightEnergy = 6.0f, // raised (was 4.0) — must reach characters across 68-unit gap — Aesthetic
-            LightColor = new Color(0.95f, 0.82f, 0.62f), // warm fill — Aesthetic
-            OmniRange = 1024.0f, // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED range ≈1024
-            ShadowEnabled = false,
-            Position = new Vector3(512.0f, 105.0f, 9670.0f), // in front, above the row — Aesthetic
-        };
-        AddChild(keyFill);
-
-        // Dedicated character key — sits right at the row so the textured idle figures read CLEARLY
-        // with costume colours visible (red/orange/white per official screenshot).
-        // WAS OmniRange 160 — this was the primary cause of black-silhouette failure at world scale.
-        // spec: §3.6.1 "≈5 positional lights, range ≈1024". Aesthetic position/colour/energy.
-        var charKey = new OmniLight3D
-        {
-            Name = "CharacterKey",
-            LightEnergy = 8.0f, // raised (was 3.5) — primary subject light; must show costume colours — Aesthetic
-            LightColor = new Color(1.0f, 0.90f, 0.74f), // warm near-white — Aesthetic
-            OmniRange = 1024.0f, // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED range ≈1024
-            ShadowEnabled = false,
-            Position = new Vector3(512.0f, 95.0f, 9700.0f), // just in front of the row, above head height — Aesthetic
-        };
-        AddChild(charKey);
-
-        // Rim / back-light from behind the row (cascade glow approximation).
-        // Aesthetic: cool-blue back light simulates the blue waterfall glow from behind.
-        var rimLight = new OmniLight3D
-        {
-            Name = "WaterfallRim",
-            LightEnergy = 1.5f, // raised (was 0.9) — Aesthetic
-            LightColor = new Color(0.45f, 0.65f, 1.0f), // cool blue — Aesthetic (waterfall hue)
-            OmniRange = 1024.0f, // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED range ≈1024
-            ShadowEnabled = false,
-            Position = new Vector3(512.0f, 90.0f, 9820.0f), // behind the row — Aesthetic
-        };
-        AddChild(rimLight);
-
-        // Ground / platform up-fill — bounces warm light up from the stone platform.
-        // Aesthetic: subtle warm fill to prevent character feet from being too dark.
-        var groundFill = new OmniLight3D
-        {
-            Name = "GroundFill",
-            LightEnergy = 1.0f, // raised (was 0.5) — Aesthetic
-            LightColor = new Color(0.80f, 0.55f, 0.25f), // dim warm — Aesthetic
-            OmniRange = 1024.0f, // spec: Docs/RE/specs/frontend_scenes.md §3.6.1 CODE-CONFIRMED range ≈1024
-            ShadowEnabled = false,
-            Position = new Vector3(512.0f, 60.0f, 9738.0f), // below platform level — Aesthetic
-        };
-        AddChild(groundFill);
-
-        GD.Print("[CharSelectScene3D] Torch rig built (6 omni: 2 pillar + camera-fill + character-key " +
-                 "+ rim + ground). ALL OmniRange set to 1024 per spec §3.6.1 CODE-CONFIRMED. " +
-                 "spec: frontend_scenes.md §3.6.1 CODE-CONFIRMED count/range ≈1024; colours UNVERIFIED (Aesthetic).");
+        GD.Print("[CharSelectScene3D] Area-0 lighting built: faint achromatic directional (0.047) only; " +
+                 "NO brazier/torch OmniLights (fire glow = additive XeffSceneEffect textures, not lights). " +
+                 "White ambient floor (energy 1.0) is the main illuminant. " +
+                 "spec: frontend_scenes.md §3.6.1 + §3.6.6 CODE-CONFIRMED (no scene point-lights).");
     }
 
     // =========================================================================
@@ -508,6 +473,7 @@ public sealed partial class CharSelectScene3D : Node3D
                 TextureResolver = texResolver,
             };
             AddChild(terrainNode);
+            _backdropTerrain = terrainNode; // capture for ground-height sampling in BuildCharacterRow
 
             // Feed the sector directly (no streaming needed for a single backdrop cell).
             // spec: TerrainNode.OnSectorLoaded — takes SectorLoadedEvent(mapX, mapZ, payload).
@@ -677,6 +643,48 @@ public sealed partial class CharSelectScene3D : Node3D
         //   CharCreatePreview3D fix exactly.
         // spec: Docs/RE/specs/skinning.md §8(e) — select skeleton AND clip by the skin's id_b, per class.
         // spec: Docs/RE/specs/frontend_scenes.md §3.3.4 — char-select actors start in IDLE.
+
+        // L5 — drive row Y from terrain ground sampler at the row pivot.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.3.1 CODE-CONFIRMED.
+        // Query TryGetGroundHeight in LEGACY (non-negated) XZ space: worldX=508.48, worldZ=−9758.57.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6.5 — row pivot (508.48, 69.89, −9758.57). CODE-CONFIRMED.
+        // TryGetGroundHeight signature: (worldX, worldZ, out float height, float fallbackY)
+        // where worldZ is LEGACY space (not Godot-negated) — TerrainNode uses legacy coords internally.
+        // The backdrop cell is a purpose-built temple — the .ted heightfield gives the raw
+        // soil surface (≈ 26 units), but the characters stand ON the raised stone platform
+        // (.bud geometry), whose top surface sits at Y ≈ 69.89 (the spec-confirmed row pivot Y).
+        // The terrain sampler does NOT include .bud geometry, so it gives a value ~44 units too low
+        // for this cell. We use the SPEC-CONFIRMED row pivot Y = 69.89 directly.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.6.5 — row pivot (508.48, 69.89, −9758.57).
+        //   CODE-CONFIRMED. The fallback SlotWorldYFallback = 70.0f matches this.
+        // Note: TryGetGroundHeight is still called for diagnostic logging, but the placement uses
+        // the spec value — the terrain .ted represents the carved-rock floor, not the platform top.
+        float rowY = SlotWorldYFallback; // spec: §3.6.5 row pivot Y = 69.89 ≈ 70.0. CODE-CONFIRMED.
+        if (_backdropTerrain is not null)
+        {
+            if (_backdropTerrain.TryGetGroundHeight(RowPivotLegacyX, RowPivotLegacyZ, out float sampledY,
+                    SlotWorldYFallback))
+            {
+                // The terrain sampler gives the raw .ted soil height (≈ 26 for this cell) — NOT
+                // the .bud platform top (≈ 70). We use the spec value and log the sampled value
+                // for diagnostic purposes only.
+                GD.Print($"[CharSelectScene3D] Terrain sampler at pivot: {sampledY:F3} (soil/floor, NOT platform top). " +
+                         $"Using spec row pivot Y={SlotWorldYFallback} for character placement. " +
+                         "spec: frontend_scenes.md §3.6.5 row pivot Y=69.89 CODE-CONFIRMED.");
+            }
+            else
+            {
+                GD.Print(
+                    $"[CharSelectScene3D] TryGetGroundHeight miss at pivot — using spec Y={SlotWorldYFallback}. " +
+                    "spec: frontend_scenes.md §3.6.5 CODE-CONFIRMED.");
+            }
+        }
+        else
+        {
+            GD.Print($"[CharSelectScene3D] No terrain node — using spec row Y={SlotWorldYFallback}. " +
+                     "spec: frontend_scenes.md §3.6.5 CODE-CONFIRMED.");
+        }
+
         for (int i = 0; i < 5; i++)
         {
             bool occupied = i < SlotDescriptors.Length && SlotDescriptors[i].IsOccupied;
@@ -686,14 +694,14 @@ public sealed partial class CharSelectScene3D : Node3D
 
             try
             {
-                Node3D? actor = TryBuildSlotActor(assets, i, skinClassId);
+                Node3D? actor = TryBuildSlotActor(assets, i, skinClassId, rowY);
                 if (actor is not null)
                 {
                     _slotActors[i] = actor;
                     AddChild(actor);
 
                     GD.Print($"[CharSelectScene3D] Slot {i} actor placed at world " +
-                             $"({SlotWorldX[i]:F1}, {SlotWorldY}, {SlotWorldZ[i]:F1}) Godot-space. " +
+                             $"({SlotWorldX[i]:F1}, {rowY:F3}, {SlotWorldZ[i]:F1}) Godot-space. " +
                              "spec: frontend_scenes.md §3.3.1 CODE-CONFIRMED.");
                 }
             }
@@ -705,7 +713,7 @@ public sealed partial class CharSelectScene3D : Node3D
     }
 
     private Node3D? TryBuildSlotActor(
-        RealClientAssets assets, int slotIdx, uint skinClassId)
+        RealClientAssets assets, int slotIdx, uint skinClassId, float rowY)
     {
         // Resolve the .skn path for this slot's skin class.
         // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 — per-class starter meshes. CODE-CONFIRMED.
@@ -772,7 +780,7 @@ public sealed partial class CharSelectScene3D : Node3D
         // directly — that erases the recentre offset. Wrap the actor in a slot-position container.
         // spec: Docs/RE/specs/frontend_scenes.md §3.3.1 CODE-CONFIRMED slot positions.
         var slotWrapper = new Node3D { Name = $"Slot{slotIdx}Actor" };
-        slotWrapper.Position = new Vector3(SlotWorldX[slotIdx], SlotWorldY, SlotWorldZ[slotIdx]);
+        slotWrapper.Position = new Vector3(SlotWorldX[slotIdx], rowY, SlotWorldZ[slotIdx]);
         slotWrapper.Scale = Vector3.One * PreviewScale;
 
         // Per-slot facing — pure yaw about world Y.

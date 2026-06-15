@@ -750,6 +750,91 @@ the names are localized resources, not protocol data. (Corroborated by `login_fl
 
 ---
 
+# 2L. The loading screen (Diamond_LoadingWindow) — CODE-CONFIRMED
+
+**Engine state: 2 (Loading).** A full-screen progress screen shown **between server-select/login and
+char-select** on the boot path, and again — reusing the same window class — on the **enter-world**
+path. One window class and one preload worker serve both entries; they differ only in the game-state
+value left when the loop exits, which routes the next scene.
+
+## 2L.1 Composition
+
+- **Background.** One full-screen background image is chosen **uniformly at random** (`rand()%3`,
+  re-rolled each time the window is built) from three DDS files: `data/ui/loading.dds`,
+  `data/ui/loading06.dds`, `data/ui/loading08.dds`. It is drawn as a **single full-screen quad sized
+  to the live backbuffer** (centred, `±liveW/2` × `±liveH/2`), under an orthographic projection over
+  the live width/height, sampling **U[0, 1] and V[0, 0.75]** of the DDS (the texture's top three
+  quarters in height; the V=0.75 crop is CONFIRMED, the exact DDS dimensions are asset-side and not
+  load-bearing).
+- **Progress bar.** Laid out at a **1024×768 design resolution** and stretched to the live window by
+  **liveW/1024 on X and liveH/768 on Y**. The track rect in design space is
+  **x ∈ [−499, −170], y ∈ [−363, −140]** (lower-left of centre). Two layers are drawn: a static
+  **track** quad (always) and a dynamic **fill** quad (only when percent > 0). The **fill width =
+  223 · percent / 100**, clamped to 223, growing **left-to-right** as the percentage rises. (The
+  exact on-screen axis of the 223 fill length is debugger-pending.)
+- **BGM.** A looping track, sound id **920100100**, on **music category 0** (the single direct voice
+  slot — a new category-0 sound frees the prior one). Started on scene enter; it stops implicitly
+  when the next scene (char-select / world) takes the category-0 slot. *(Whether an explicit Stop
+  also runs on teardown is debugger-pending.)*
+- **Pacing.** The render/update tick runs at roughly **10 fps** (≈100 ms per frame).
+
+## 2L.2 The preload worker & progress
+
+A background worker thread bulk-loads the **global data-table corpus** from the VFS — roughly **47
+global tables** (system/control, items, skills, mobs, npcs/npc, quests, the char manifest batch,
+skin list, emoticon/textcommand tables, the `.xdb` tables, etc.) read sequentially. This is the
+**static/global** corpus the client needs before either char-select or the world; **per-area zone
+geometry** (terrain / `.sod` / `.arr`) is **not** loaded here. The same worker runs on both entry
+paths.
+
+Progress is reported as a **cumulative-bytes-loaded ÷ fixed-total-bytes** ratio yielding an
+**integer 0..100 percent** — NOT an N-of-M file count. The denominator is a tuned constant total
+(asset-side; a revival can drive its own 0..1 float from its own preload byte/step count and need not
+reproduce the exact denominator). The bar reads this percent each frame to size the fill.
+
+## 2L.3 Advance trigger — loading-done + 500 ms grace, NOT bar == 100% (CONFIRMED)
+
+The loading window runs inside the engine modal scene loop (pump-events → tick → render while the
+engine run flag is set). The scene advances when that run flag is cleared, by **either** of two
+paths, both leading to the same handoff:
+
+1. **Worker-done flag + 500 ms grace (primary).** When the worker finishes all loads it **sleeps
+   500 ms** (a deliberate grace delay) and then clears its "worker running" flag. The next render
+   frame observes the cleared flag and ends the modal loop. The transition is therefore gated on
+   **loading-complete + a 500 ms grace**, **not** on the progress bar reaching 100% (the percent only
+   drives the fill geometry and is never compared for the transition).
+2. **Engine loading-complete event (id 10001).** The window's command/event handler also ends the
+   scene on receipt of the engine event with id **10001** (the "loading-complete" signal, see §1.1).
+   Which of the two paths fires first per entry is debugger-pending.
+
+The **grace constant is 500 ms**; the per-frame pace is ≈100 ms (~10 fps).
+
+## 2L.4 Entry points & routing
+
+The loading window is reached when the engine scene state is set to **2 (Loading)** in two cases:
+
+- **Entry A — post-login (boot path).** The login scene sets the state to 2 on completion; after its
+  loop returns, the state machine builds the loading window. It runs the boot data-table preload,
+  then (after the grace) reads the opening skip flag and routes onward to the opening movie or
+  char-select.
+- **Entry B — enter-world ack (`3/5`).** The enter-game ack handler sets the engine scene state to 2
+  and breaks the currently-running scene loop, so the state machine rebuilds the loading window for
+  the **enter-world** transition. The same global-corpus worker runs; after completion the state
+  machine proceeds into world-scene init (downstream of this scene). *(Any additional per-zone
+  preload on the 3/5 path would be in world-scene init, outside this scene — UNVERIFIED here.)*
+
+Both entries use the **same** loading-window class and the **same** global-corpus worker; only the
+post-loop game-state value differs, which selects the next scene. The "loads a different corpus per
+entry" idea is **not** supported — both load the same global tables.
+
+> **For the revival Loading scene:** insert it between ServerList and CharScene; pick the background
+> by `rand()%3` over the three DDS as a full-screen quad cropped to V[0, 0.75]; lay the progress bar
+> out at 1024×768 design and stretch by liveW/1024 × liveH/768 (fill = 223·pct/100, clamped, growing
+> left-to-right); drive the percent from the client's own preload (a 0..1 float is fine); loop BGM
+> **920100100**; and **advance on preload-done + ~500 ms grace, not at bar == 100%**.
+
+---
+
 # 3. Character selection
 
 **Engine state: 4 (Select)** — entered when the character-list packet arrives. The select scene is
@@ -1034,14 +1119,32 @@ object:
 **wire** semantics of the server slot-flag — delete-pending vs rename-cooldown — remain
 capture-pending; Open question 6.)
 
-## 3.5 The character-select preview camera (CODE-CONFIRMED geometry; framing partly confirmed)
+## 3.5 The character-select preview camera — ENTRY DOLLY KF0→KF1 (CODE-CONFIRMED)
 
-The select window builds a dedicated preview camera (a derived "third-person" camera manipulator) to
-frame the row of 3D character previews. Its **orbit geometry is statically recovered in full**; the
-runtime **framing law** (which keyframe is live, the easing, the look-at target) is now largely
-recovered too — see §3.5.4. This **supersedes** the earlier approximate "7-waypoint" reading
-referenced from `client_runtime.md §7.3`: the orbit is **6 keyframes, not 7**, and the **live keyframe
-is index 1** (§3.5.2).
+The select window builds a dedicated preview camera as **two distinct objects**: a bare **projection
+camera** (holding only FOV / near / far) and a **separate camera-PATH rig** (holding the keyframe
+table, the per-keyframe angle channels, the live keyframe index, and the per-frame interpolation). The
+rig is ticked every frame and is what actually drives the on-screen view; the projection camera only
+supplies the lens. The realised motion is an **entry dolly**: on scene-enter the rig blends from
+keyframe 0 to keyframe 1 over ~2.0 s (position-lerp + orientation-slerp), then holds keyframe 1 for the
+rest of the screen, responding only to the player's manual boom/yaw input overlay.
+
+> **CORRECTION — UN-REFUTE the camera path (CODE-CONFIRMED, exhaustive static re-walk).** A prior
+> reading concluded "single static camera; the orbit is REFUTED — no keyframes, no index, no
+> lerp/slerp/ease." **That reading analysed only the bare projection camera (FOV/near/far/anchor) and
+> never chased the separate path rig** — it is wrong. The 6 position keyframes, the 12 π-scaled
+> yaw/pitch angle channels, the live keyframe index, and the position-lerp + orientation-slerp + ease
+> blend over ~2.0 s **all exist and are CONFIRMED** in this build; they were simply on the object the
+> prior pass missed. The corrected truth is an **entry dolly KF0→KF1** — which is **neither a full
+> orbit nor a static camera**. Trig also exists: the quaternion builder uses half-angle trig (it was
+> hidden behind mislabelled library routines). What genuinely does NOT happen in *this* scene's
+> realised motion is a **full multi-waypoint orbit**, any **auto-advance through keyframes 2–5**, and
+> any **select-focus camera retarget** — see §3.5.2 (only indices 0 and 1 are ever armed) and §3.5.5.
+
+This **supersedes** the earlier approximate "7-waypoint" reading referenced from
+`client_runtime.md §7.3`: the keyframe table is **6 keyframes, not 7**; the rig is **constructed at
+index 0** and the entry scene-reset arms **index 1**, so the player sees the **KF0→KF1 dolly** then a
+hold at index 1 (§3.5.2).
 
 ### 3.5.1 Scene & projection (CODE-CONFIRMED)
 
@@ -1076,26 +1179,42 @@ is index 1** (§3.5.2).
 > 50° and let the renderer apply aspect normally; the legacy `fov / aspect` is the same framing on a
 > 4:3 reference canvas.
 
-### 3.5.2 The 6-keyframe orbit (CODE-CONFIRMED; live keyframe = 1)
+### 3.5.2 The keyframe table & the armed-index model — entry dolly only (CODE-CONFIRMED)
 
-The camera holds a table of **6 position keyframes**, each a 3-float `(x, y, z)` triple. An **anchor
-offset of `(+2048, 0, −6144)`** (= the stage origin, §3.7.2) is added to every raw keyframe to place
-the orbit in stage-world space. The 6 anchored keyframe positions:
+The path rig holds a table of **6 position keyframes**, each a 3-float `(x, y, z)` triple. A **base
+anchor of `(+2048, 0, −6144)`** (= the stage origin, §3.7.2) is added to every raw keyframe to place
+the path in stage-world space. The anchored keyframe positions:
 
-| Keyframe | Anchored position (x, y, z) |
-|---|---|
-| 0 | (515.55, 137.27, −9397.71) |
-| **1 (live)** | **(512.00, 87.00, −9652.00)** |
-| 2 | (343.00, 104.00, −9734.00) |
-| 3 | (471.00, 115.00, −9812.00) |
-| 4 | (622.00, 75.00, −9802.50) |
-| 5 | (662.00, 130.00, −9746.00) |
+| Keyframe | Anchored position (x, y, z) | Status in this scene |
+|---|---|---|
+| 0 | ≈ (516.55, 137.27, −9386.65) | **armed at construction** (dolly start) |
+| **1** | **(512.00, 87.00, −9652.00)** | **armed by the entry scene-reset** (dolly end / held) |
+| 2 | ≈ (341.00, 104.00, −9734.00) | present in the table, **never armed** (dormant) |
+| 3 | (anchored from the table) | present, **never armed** (dormant) |
+| 4 | (anchored from the table) | present, **never armed** (dormant) |
+| 5 | (anchored from the table) | present, **never armed** (dormant) |
 
-> **Live keyframe (CODE-CONFIRMED).** The camera constructor's default active keyframe is **0**, but
-> after the scene is built the camera-wire step sets the active keyframe to **1**. That wire step runs
-> on the character-management response path and the select-window rebuild paths, so the keyframe the
-> player actually sees is **index 1** ≈ world `(512, 87, −9652)`. (Earlier versions of this spec
-> recorded only the constructor default of 0.)
+> **Only indices 0 and 1 are ever armed (CODE-CONFIRMED, exhaustive).** The keyframe index is written
+> by exactly one routine (the keyframe-apply call), reached by exactly two constant-argument call
+> sites: the rig **constructor arms index 0**, and the **entry scene-reset arms index 1** (it runs once
+> at tick frame ~5, after the scenery actor is spawned). Because the per-frame update blends from the
+> current transform toward the armed target over the ~2.0 s window (§3.5.4), the scene **opens at KF0
+> and travels to KF1**, then holds. This index-writer set is **closed and complete** — no third caller,
+> no indirect reach — so KF1 is the resting pose.
+>
+> **Keyframes 2–5 are dormant in this scene.** The per-frame update **never advances the index itself**
+> (no auto-play sequencer), and the slot-select / command dispatcher **never touches the rig at all**
+> (it changes the active preview actor / highlight, not the camera). So keyframes 2–5 exist in the
+> rig's tables but are **never armed by any char-select code path**; the parabolic-ease branch that
+> only fires for target indices ≥ 2 (§3.5.4) is therefore **dead code for this scene**. There is **no
+> full multi-waypoint orbit and no select-focus camera move** — only the KF0→KF1 entry dolly plus the
+> manual input overlay.
+
+> **KF0 is approximate.** KF1 = `(512, 87, −9652)` is exact and is the pose the player rests at (it is
+> the value an earlier pass captured and mislabelled "the static camera" — it was keyframe 1 of the
+> path all along). KF0 ≈ `(516.55, 137.27, −9386.65)` and KF2 ≈ `(341.00, 104.00, −9734.00)` are
+> anchored decodes; KF3–KF5 are present in the table but, being dormant, their exact anchored values
+> are not load-bearing for the realised motion.
 
 > **Coordinate convention reminder.** These are stage-world coordinates as the legacy client stores
 > them. Apply the project's world-to-engine convention (world geometry negates Z — see
@@ -1114,8 +1233,11 @@ easing law (§3.5.4).
 
 The per-keyframe **pitch** deltas are small (about ±6° to ±14°), refining the −30° base tilt; the
 per-keyframe **yaw** deltas are large for the inner keyframes (keyframes 2/3/4 swing roughly
-−37° / −80° / +74°), i.e. the framing slews mostly in azimuth between presets. For the live keyframe
-(index 1) the seed angles are **pitch ≈ −2.67°** and **yaw ≈ +0.785°**.
+−37° / −80° / +74°), i.e. the table *would* slew mostly in azimuth between presets **if those
+keyframes were ever armed** — but they are **not** in this scene (§3.5.2: only indices 0 and 1 are
+armed). For the realised entry dolly the only two angle entries that matter are **keyframe 0** (start)
+and **keyframe 1** (rest): for keyframe 1 the seed angles are **pitch ≈ −2.67°** and
+**yaw ≈ +0.785°**. The keyframe 2–5 angle channels remain in the table but are dormant here.
 
 | Index | Axis | Keyframe | Multiplier | × π (rad) | ≈ degrees |
 |------:|:----:|:--------:|-----------:|----------:|----------:|
@@ -1270,6 +1392,10 @@ The scene attaches the shared **sky/time manager** singleton's render node into 
 child (the same manager the main world uses). That manager builds the lighting rig:
 
 - **≈ 5 positional lights** (the sun plus fill lights), each with a light range/radius of **≈ 1024**.
+  These are the **achromatic** area-0 sky/time lights (white baseline, grey-tinted by the 14:30 data),
+  **not** a warm torch/brazier point-light rig: the scene builder creates **no** brazier point-lights
+  at all (§3.6.5). The warm character of the cavern is the **additive FIRE BILLBOARDS of the ambient
+  effect**, not a light source — do not model the braziers as warm point-lights (§3.6.5 render model).
 - A **white (1.0) colour-scale baseline** (identity colour multipliers) and a **black, full-alpha
   clear colour** baseline, both later tinted by the time-of-day-driven sky data.
 - **Sun / light state is produced by a 48-keyframe-per-day light table (CODE-CONFIRMED structure).**
@@ -1431,6 +1557,82 @@ audible char-select music is the BGM cue **920100200** of §3.8, on the separate
 > live-frame count.
 <!-- source: _dirty/campaign5/charselect3d/fx-spawn-path.md, _RECONCILED.md (LANE 2) -->
 
+### 3.6.6 Ambient-effect render model — alpha-blended textured billboards; NO scene point-lights (CODE-CONFIRMED + VFS-VERIFIED)
+
+This subsection pins **how** the single ambient effect `char_select-u.xeff` (id **380003000**) must be
+rendered, and the **root cause** of the stray "flying blue / red pixels" a naive port produces.
+
+**No scene point-lights (CODE-CONFIRMED).** The scene builder creates a camera, the terrain handle,
+the environment (clock pinned to 14:30), the named "select" scene object, and **exactly one** ambient
+XEffect — and **nothing else**. There is **no light-creation call** in the builder and the particle
+build path creates no light. The warm brazier glow is the **additive fire texture on the sprites**,
+not a light source. A faithful port must **not** add OmniLights for the braziers expecting the
+original look (a tasteful warm light per brazier is a legitimate *enhancement* but is not what the
+original does and is not required for fidelity).
+
+**The effect is 68 textured-sprite sub-effects (VFS-VERIFIED).** `char_select-u.xeff` is 75,372 B and
+carries **68 sub-effects**, every one animated (frame strides ≈ 59–160 ms per keyframe). Decode of the
+real file shows the emitter-type distribution **6 billboard / 51 mesh-particle / 11 directional-
+billboard**, and **all 68 carry `resource_id = 0`** — so their textures are resolved from each
+sub-effect's own 64-byte name slots to `data/effect/texture/<name>.tga` (32-bit uncompressed TGA with
+alpha), **not** from `particleEmitter.eff`. The 16 distinct textures group into families:
+
+| Family | Texture(s) (`data/effect/texture/<name>.tga`) | Role |
+|---|---|---|
+| Brazier fire | `fire_4-01` … `fire_4-06`, `fire_piece1b-01` | torch / brazier flames + burning fragments (warm) |
+| Waterfall | `waterfall-pie-01` … `waterfall-pie-04` | cascading water sprites (blue/white) |
+| Smoke / dust | `hit-center13(dustl2)-03` … `-05` | rising smoke / dust puffs |
+| Ember sparks | `imot-gu-tung06-01` | rising ember / heat-shimmer directional streams |
+| Yellow corona | `lflare-l-yellow-01` | tight yellow lens-flare highlight coronas at brazier positions |
+
+(The `fire_*` / `lflare-*` / `imot-*` / `waterfall-*` textures are 128×128; the `hit-center13*` dust
+textures are 64×64. All 16 confirmed present in the VFS.)
+
+**Two waterfall contributors (CODE-CONFIRMED split).** The waterfall has **two** sources a faithful
+port must reproduce: **(1)** the cell's horizontal **terrain water plane** (`.fx3`/`.fx5`, textures
+`_water_new01/03/04.dds`, 256² DXT3 with 4-bit alpha — a scrolling flat plane, §3.6.5 / §3.7.3), and
+**(2)** the **XEffect's vertical water sprites** (the `waterfall-pie-*` sub-effects — the falling
+sheet / spray). The scrolling-UV-over-time on the water texture gives the falling-water illusion.
+
+**FLYING-PIXELS ROOT CAUSE (decisive).** The stray scattered specks are the fire and water particle
+sprites being drawn **as bare points / without their alpha / opaque** instead of as alpha-blended
+textured sprites: each particle collapses to a ~1-pixel dot at its own animated world position — **red
+= the brazier-fire emitters, blue = the waterfall emitters**. The original expands each particle into
+a screen-facing **textured sprite** (with the sprite's alpha and an additive/transparent blend), so it
+reads as a soft glow rather than a hard speck.
+
+> **Render-mechanism note (two witnesses diverge — DEBUGGER-PENDING).** The low-level expansion
+> mechanism differs between the two recovery witnesses: a static reading describes a dual fixed-
+> function dispatch (legacy point-sprite expansion for small sizes vs a billboard-quad path for large
+> sizes), while a black-box decode of the actual file finds all 68 sub-effects on the mesh-particle /
+> name-table path with emitter types 0/1/2. Do **not** over-assert a single fixed-function point-sprite
+> path as the only mechanism — the port guidance below is correct under **both** readings; which exact
+> expansion the original GPU takes (point-sprite vs billboard) is the implementation's free choice and
+> is DEBUGGER-PENDING.
+
+**PORT CONTRACT (correct under both witnesses).** For each particle:
+
+1. **Billboard it.** Render each particle as a **camera-facing, alpha-blended, textured quad** sized by
+   the emitter's sprite size — never as a bare point, never as an opaque quad.
+2. **Bind the per-sub-effect texture.** Resolve the sub-effect's name-table entry to
+   `data/effect/texture/<name>.tga` and bind it (with its alpha). A missing texture / ignored alpha is
+   the other half of "bare pixels".
+3. **Additive / transparent blend.** Fire and water sprites read as a glow — use additive/transparent
+   blend, not opaque.
+4. **Animate via the XEffect track.** Step keyframes by the per-sub-effect frame stride (≈ 59–160 ms)
+   and apply the UV-scroll flags where set, so the water/fire animate rather than sit static.
+5. **No scene point-lights** for the braziers — the original has none; the glow is the additive
+   texture (optional enhancement only).
+
+The single highest-impact fix is #1 + #2: expanding each particle into a textured, alpha-blended
+camera-facing quad converts the scattered dots into the brazier flames and the waterfall sheet.
+
+**DEBUGGER-PENDING residuals (live read only):** the exact per-emitter fire-vs-water label across all
+68 sub-effects (read each element's resolved texture at runtime), the exact additive-blend factors,
+and the two brazier elements' ±X offsets around the spawn pivot.
+
+<!-- source: campaign9/wave2 ida effect-brazier-waterfall + vfs effect-assets (render model, no point-lights, 68 sub-effects, billboard port contract) -->
+
 ## 3.7 Char-select 3D scene composition — world, cell, stage, assets (CODE-CONFIRMED + black-box VFS)
 
 This section is the implementable composition of the char-select 3D backdrop: the world, the single
@@ -1538,49 +1740,82 @@ The class → skin → texture / bind / motion chain is the normal in-world chai
 > chain as CONFIRMED-present, the col-index → role mapping of `skin.txt` / `actormotion.txt` as owned
 > by the data-table / skinning specs.
 
+### 3.7.6 Character-creation backdrop — the SAME cell as selection (VFS-VERIFIED)
+
+**Character-CREATION reuses the IDENTICAL cell, stage, camera and environment as character-selection.**
+There is **no separate creation stage anywhere in the VFS** — an exhaustive enumeration of all 43,347
+entries found `data/map000` contains exactly one cell, **`d000x10000z9990`** (the same backdrop cell of
+§3.7.1), and no `create`/`creation`/`portal`/`relief`/`temple`-named distinct 3D stage. There is also
+only one `d000*` lightmap (`data/effect/map/d000x10000z9990.bmp`), confirming a single shared stage.
+
+The carved stone-relief wall (`suksang01..04.dds`) and the bright portal/archway the player sees behind
+the create character are **baked into that one cell's `.bud` building geometry** (the `suksang*` /
+`walll04*` stone textures of §3.7.3), already present in the select view. What differs between select
+and create is therefore **not the backdrop** but:
+
+- **the camera framing** stays put (the entry dolly's rest pose, KF1 — the camera does not move,
+  §3.5.4), and
+- **a single create-preview actor** is placed **≈ 56 units nearer the camera** (a Z shift only, §3.5.4
+  / §4.2) in place of the 5-slot row, plus the 2D chrome swaps to the create form.
+
+So a 1:1 port must **not** load a second cell or different terrain for creation: load `map000` cell
+`d000x10000z9990` once, keep the same camera and environment, tear down the 5-actor row, and build the
+single forward-placed create-preview actor. (VFS-VERIFIED, exhaustive — agrees with the §3.5.4
+CODE-CONFIRMED "create moves the actor, not the camera" verdict.)
+
+<!-- source: campaign9/wave2 vfs charselect-creation-assets (no distinct creation cell; same d000x10000z9990; difference is actor Z, not backdrop) -->
+
 ## 3.8 Char-select sound, music & the "character count : N" caption (CODE-CONFIRMED)
 
-### 3.8.1 BGM cue, double-music defect & the fix contract (CODE-CONFIRMED)
+### 3.8.1 BGM cue & the double-music defect — REAL (the loading→select handoff) (CODE-CONFIRMED)
 
 The char-select **BGM** is sound cue **920100200**, started **unconditionally** by the select-window
-constructor (the state-4 enter / build path), with the **loop flag set**, on the single kind-0 music
-slot of the global sound manager. There is **no stop-before-play guard** at that start, and the
-select-scene teardown performs **no sound teardown** (no stop, no clear of the music slot).
+constructor (the state-4 enter / build path), with the **loop flag set**, on the single **category-0**
+(kind-0) music slot of the global sound manager. That slot is a **single direct voice** — at most one
+voice at a time.
 
-Because the select scene is **re-enterable** (engine state 5 → 4 on logout, and the `3/1` char-list
-forcing state 4), the BGM cue is **re-issued** at more than one site. A whole-binary search for cue
-**920100200** finds **three PLAY firings**, all on the **single kind-0 music slot**, plus one STOP and
-one precache registration:
+> **CORRECTION — the persistent double-music is REAL (un-refute).** A prior pass concluded the
+> double-voice defect was REFUTED because, *within* the SelectWindow, all music is category 0 on one
+> slot so two SelectWindow tracks cannot persistently stack. That within-SelectWindow fact still holds,
+> but the prior pass **missed the cross-scene loading handoff** — which is where the double actually
+> comes from. The double-music is **REAL**.
 
-| Site | Where | Loop | Role |
-|---|---|---|---|
-| **PLAY #1 (canonical)** | the state-4 build path (select-window constructor / init-from-char-list) | **loop = 1** | the single intended BGM start |
-| PLAY #2 | the dispatch **sub-form-return** case (a create/delete sub-form dismissed back to the 3D scene, after the scene reset) | loop = 0 | re-fires on sub-form return |
-| PLAY #3 | the **`3/6` create-result tail** (after the char-count increment, on a create) | loop = 0 | re-fires on character create |
-| STOP | enter-world (enter-selected-character) | — | stops the slot **only** if it still holds 920100200 |
-| (registration) | the system-cue precache table | — | not a play |
+**The real source — the loading screen's looping BGM contends across the scene boundary (CODE-CONFIRMED):**
 
-The PLAY helper's **only** de-dup is "reuse the slot buffer if one is present" — there is **no
-already-playing test** — and the select-scene teardown performs **no sound teardown** (no stop, no
-clear of the music slot). So an in-session re-fire (PLAY #2 / #3) replays while the constructor voice
-is still on the slot; and across scenes, entering select (PLAY #1) → entering the game (state 5, whose
-in-game zone-BGM orphans the shared slot) → returning to select (5 → 4, PLAY #1 again) starts a
-**second overlapping voice → double music**. (The structure — three unguarded plays + missing stop — is
-CODE-CONFIRMED; *which* concrete re-entry leaves two voices live at runtime is PLAUSIBLE /
-debugger-confirmable.)
+- The **loading screen** (engine state 2, §9.1) plays cue **920100100 as a category-0 LOOP** (loop = 1)
+  — **not** a category-2 SFX (an earlier note that called 920100100 a "cat-2 SFX" is corrected). It is
+  started on a **background loading-audio worker thread** and is **never explicitly stopped** anywhere
+  in the binary; its only release is the implicit free when something else seizes the category-0 slot.
+- When char-select starts **920100200** it relies on simply **overwriting** the single category-0 slot.
+  But the still-looping 920100100 is being driven by a **detached loading-audio worker thread that is
+  not joined** when the loading screen ends. The overwrite **frees** the 920100100 buffer and returns
+  without immediately acquiring the new one (the next event re-acquires it) — and a freed *looping*
+  voice can still be **draining** in the mixer, or be left **orphaned** if the un-joined worker thread
+  interleaves with the main-thread slot-replace.
+- For a short (or, if the worker interleaves, lasting) window **both** the dying 920100100 and the new
+  920100200 are audible → the **intermittent / occasional double BGM**. The non-determinism is exactly
+  why the maintainer observes it only sometimes: it depends on the timing of the free vs the mixer
+  release vs the next re-acquire, and on whether the loading worker outlived the modal screen.
 
-> **SUPERSEDE** the earlier note that "no front-end code starts the char-select BGM." The
-> select-window constructor itself starts it (state-4 enter). **Confidence:** the start call site,
-> the missing stop-on-exit, and the unconditional re-issue are CODE-CONFIRMED; *which* concrete
-> re-entry leaves two voices live depends on the in-game zone-BGM slot handling at runtime
-> (debugger-confirmable).
+So the defect is **not** two SelectWindow voices (those overwrite one slot and cannot persistently
+stack) — it is the **un-stopped, un-joined looping LOADING track (920100100, category-0 loop)
+contending with char-select's 920100200** across the loading→select boundary.
 
-**Fix contract for a faithful rebuild:** treat **920100200** as **one owned BGM voice on one music
-slot** whose **canonical start is PLAY #1 (the build-path loop)**; then **(1)** make the start
-**idempotent** — if the cue is already playing on the slot, do nothing (this neutralises PLAY #2, PLAY
-#3, and the cross-scene re-entry); and **(2)** **stop** cue **920100200** on char-select scene-exit (the
-stop the original omits). This restores the intended single-BGM-voice behaviour without changing the
-audible track.
+> **Confidence.** That 920100100 is a category-0 loop started on an un-joined worker and never
+> explicitly stopped, and that char-select overwrites the same single category-0 slot, are
+> **CODE-CONFIRMED** (static). *Which* exact route manifests — a brief free/acquire overlap vs a
+> persistent orphaned voice when the worker interleaves — is **DEBUGGER-PENDING**; but the double **is
+> real**, not refuted.
+
+**Fix contract for a faithful rebuild (un-refute and restate):** the front-end music state machine must
+**explicitly STOP the previous track at each scene boundary** — specifically **stop 920100100 before
+char-select starts 920100200** (and **quiesce/join the loading-audio worker thread** on a single thread
+before the next scene's BGM starts) — rather than relying on the unsynchronized single-slot overwrite.
+Then treat **920100200** as **one owned BGM voice on one slot**: make PLAY **idempotent** (if already
+playing, do nothing) and **stop it on char-select scene-exit** (the stop the original omits). This
+removes the audible double without changing the audible track. char-select BGM remains **920100200**;
+the per-class create-form preview cues are **91006xxxx** (§4.1), which play on the same single category-0
+slot and therefore **replace** the scene BGM rather than overlay it.
 
 > The separate ambient sound cue **924000001** (§3.6.5c, kind-3 channel) is **not** the BGM and is not
 > audible in char-select; do not conflate the two.
@@ -1627,15 +1862,35 @@ The top-of-screen "character count : N" caption is built by a dedicated helper:
 > the count caption. The top "character count : N" caption is **MessageDB id 2209**, count-bound to
 > **BillingState `+0x80`**. (CODE-CONFIRMED; the literal Korean template behind id 2209 is VFS-only.)
 
-### 3.8.3 No-character → create branch (CODE-CONFIRMED)
+### 3.8.3 No-character → create branch — NOT auto-opened on a zero-character account (CODE-CONFIRMED)
 
-When the account has no character on a slot, the **Create** path (button id 4, or the keyboard
-create-shortcut) scans the five spawn descriptors and acts on the **first slot whose name word is
-zero** — the empty slot, marked by the **`"@BLANK@"`** sentinel (§3.2 / §4.1a.1). Create is an
-**in-place sub-form of the same select window** (no new scene, no new window — §4); clicking an empty
-3D slot directly routes through the same open path (cross-ref §4 / §7). The empty-slot routing is the
-**name == `"@BLANK@"`** branch, which raises the **create-confirm dialog (message id 262)**
-(CODE-CONFIRMED).
+**A zero-character account does NOT auto-open creation.** It shows the **normal char-select scene with
+five BLANK slots**. There is no scene-entry slot-count test that forces the create form:
+
+- The **`3/1` character-list handler** writes the **Select** state (engine state 4) for **any** slot
+  mask — zero or non-zero. It zero-clears all five slot records, fills only the slots whose mask bit is
+  set, and then unconditionally advances to Select. There is **no mask-value test, no slot-count
+  compare, and no create-form call** in this handler. An empty (zero-character) account therefore lands
+  in the same Select scene as a full one, just with all five slots blank and no preview actors spawned
+  (the per-slot render gate fails for blank slots).
+- The account **character-count caption** (§3.8.2) is **displayed but never used to route** to
+  creation.
+
+**Creation opens per-slot, on confirming an empty slot.** The empty slot is marked by the **`"@BLANK@"`**
+sentinel (§3.2 / §4.1a.1). When the user confirms / enters on a highlighted slot, the enter-world path
+tests the slot's name against `"@BLANK@"`:
+
+- **name == `"@BLANK@"`** (empty slot) → instead of entering the world, it **registers and shows the
+  create-character modal** (the create panel held on the select window) and sets that modal's
+  **mode/message id to 262** — i.e. it raises the create-confirm dialog. Then it bails (no enter-game
+  send).
+- **name != `"@BLANK@"`** (a real character) → it builds and sends the enter-game request.
+
+Create is an **in-place sub-form of the same select window** (no new scene, no new window — §4); the
+**Create** button (UI action 4, §4) and a keyboard create-shortcut route through the same modal open
+path. (CODE-CONFIRMED.)
+
+<!-- source: campaign9/wave2 ida flow-and-nochar-branch (zero-char shows 5 blank slots; 3/1 writes Select for any mask; per-slot confirm-on-@BLANK@ raises modal id 262; count caption never routes) -->
 
 ---
 
@@ -1669,9 +1924,27 @@ maps the UI index to an **internal class id** and plays a per-class voice cue:
 > create packet, regardless of how the four buttons are laid out in the UI.
 
 Selecting a class also sets the class **label** from message ids **14003..14007**, shows the class
-name/description strings from the class template, plays the voice cue, and rebuilds the create
-preview (§4.2). *(Human-readable class names are CP949 in `msg.xdb`, not reproduced — Open
-question 7.)*
+description strings, plays the voice cue, and rebuilds the create preview (§4.2). *(Human-readable
+class names are CP949 in `msg.xdb`, not reproduced — Open question 7.)*
+
+### 4.1.1 Class description & name — the two text sources (CONFIRMED, two-witness)
+
+The create form's right-hand panel has two separate text sources:
+
+- **Class NAME** (the name-entry modal's title / class caption): message database
+  `data/text/msg.xdb`, ids **14003..14007** (selected by the internal class id; 14003 is the
+  default). NOT taken from the class description table. See `formats/msg_xdb.md`.
+- **Class DESCRIPTION** (the three-line archetype blurb in the right panel): keyed string table
+  `data/script/npc.scr`, records **keys 1..4**. For the selected class's key, the form copies the
+  three CP949 lines at record offsets **+0x14 / +0x54 / +0x94** (string fields 0/1/2) onto the three
+  description labels, top to bottom. The trailing string fields (3/4/5) are empty for class records.
+
+The key↔class mapping carries the same UI-slot vs internal-class crossover as the voice cue above
+(npc.scr key → internal class): key 1 → Monk (4), key 2 → Musa (1), key 3 → Salsu (2),
+key 4 → Dosa (3). The full record layout, the per-class BGM, and the 18-cell stat-grid key families
+(`2·disc+{110,111,120,121,130,131,140,141}` and `disc+{210..240}`) are documented in
+`formats/config_tables.md §2.17.3`. `npc.scr` is loaded once at boot and persists for the session
+(no per-area reload), so keys 1..4 are always resolvable on the create form.
 
 ## 4.2 The create preview & appearance seeds (CODE-CONFIRMED)
 
@@ -1983,14 +2256,22 @@ the state-2 LOAD node in §10 and `client_runtime.md` §7). This sub-block is th
   above and makes **zero font/text/string render calls** — there is **no `msg.xdb` caption id** and no
   numeric percent overlay. Any "loading…" wording the player sees is **baked into the DDS art** itself.
 
-- **SFX.** A **looping** cue `920100100` (source dir `data/sound/2d/`) plays for the duration of the
-  LOAD state (stopped at teardown), on the **kind-0 music slot — the same slot the char-select BGM
-  920100200 reuses** (§3.8.1); the abort/leave path plays `861010106`.
+- **SFX (a looping BGM, NOT stopped at teardown).** A **looping** cue `920100100` (a **category-0**
+  music track, source dir `data/sound/2d/`, loop = 1) plays while the LOAD state is up, started on a
+  **background loading-audio worker thread**, on the **kind-0 music slot — the same slot the char-select
+  BGM 920100200 later reuses**. **It is NOT explicitly stopped** anywhere — its only release is the
+  implicit free when the next scene seizes the category-0 slot, and the worker thread is **not joined**.
+  This un-stopped, un-joined looping track is the source of the occasional **double BGM** at the
+  loading→char-select boundary (§3.8.1). The abort/leave path plays `861010106`. (Earlier wording that
+  said this cue was "stopped at teardown" is corrected — there is no such stop.)
 
-- **Timing.** The bar tracks the VFS bulk-preload counter (0..100, accumulated by the ~50-table
-  worker). Loop-exit is gated by the scene running-flag clear **+ a ~500 ms grace**, not by the bar
-  reaching 100% — so the bar can finish visually slightly before the state exits. No network signal is
-  involved.
+- **Timing / advance edge.** The bar tracks the VFS bulk-preload counter (0..100, accumulated by the
+  ~50-table worker). The LOAD state advances on the **loading-complete engine event (id 10001)** that
+  clears the scene running-flag (plus a ~500 ms grace) — **NOT on the bar reaching 100%** — so the bar
+  can finish visually slightly before the state exits, and conversely the state can exit on the event
+  before the bar visually completes. No network signal directly advances the bar. On exit the engine
+  routes to the next state (Opening/Select on the post-login path; the world build on the enter-world
+  path).
 
 > The UV→pixel crops (background `[0..0.75]`, bar fill strip) are derived from the renderer's f32 UV
 > constants; **no original `loading*.dds` was available** to confirm the pixel mapping. The screen
@@ -2029,7 +2310,7 @@ next scene.
   OK / Enter:
       version gate (msg 2204 on mismatch → quit: state 6/2)
       → sub-state 29 (validate ID≥4 / PW≥1; fail → msg 4025/4026 → sub-state 6)
-      → 31 EULA overlay → 32 wait-agree → 33 → 34 server-list fetch (lobby :10000)
+      → 31 raise PIN modal → 32 poll PIN visible+submitted → 33 → 34 server-list fetch (lobby :10000)
       → 35 wait → 36 consume (empty → 4027; fail → 4028; else render)
   [SERVER SELECT, same window]
       → 37 server selected (persist Lastserver; randomized order; NEW badge)
@@ -2045,7 +2326,7 @@ next scene.
 
 [state 4: SELECT]   (a 3D GScene "select" on data/map000 area 0, frozen at 14:30 — §3.5.1/§3.6/§3.7)
   build select window + 5 live 3D preview actors from the 3/1 char list
-  start char-select BGM cue 920100200 (re-enterable -> double-music defect + fix contract, §3.8.1)
+  start char-select BGM cue 920100200 on the single cat-0 slot (double-music = un-stopped loading loop 920100100 contends across the loading->select handoff; fix = stop 920100100 + join loading audio worker before play, §3.8.1)
   top caption "character count : N" = msg 2209, N = BillingState char-count (§3.8.2)
   one code-spawned ambient effect 380003000 at (508.48, 69.89, -9758.57); no map000.txt manifest (absent)
   per-slot pick = hit-test the 3D row (Y band 70..92)

@@ -285,12 +285,40 @@ Per-mode detail notes:
   - The exact 17 curve triples can be recovered from the binary table if cut-scene support is
     ever needed; they are **not required for normal town/field play**, which uses only Third-person.
 
-- **Select (char-select preview).** Out-of-world. Its constructor clears yaw/pitch/eye-offset and
-  builds a **multi-waypoint camera path** from a literal world-position table baked into the
-  constructor. Approximate waypoints: **(−1532, 137, −3254)**, **(−1705, −3508, 87)**,
-  **(−1577, −3590, 104)**, with span constants **2048 / 6144 / −1536**. These are the char-select
-  stage's framing positions (the "fly-around the character" select-screen feel), not gameplay
-  tuning. Not part of the in-world mode set. (CODE-CONFIRMED for values; visual framing INFERRED)
+- **Select (char-select preview). ENTRY DOLLY — see `frontend_scenes.md` §3.5 for the authoritative model.**
+
+  > **Two prior readings retracted (CAMPAIGN 9 re-walk).**
+  > 1. The **multi-waypoint / orbiting** reading — a literal world-position waypoint table with
+  >    framing positions and span constants — is **retracted and NOT the model**. Do **not** implement
+  >    the old waypoints (−1532, 137, −3254) / (−1705, −3508, 87) / (−1577, −3590, 104) or the
+  >    2048 / 6144 / −1536 span constants; there is **no full orbit** and **no multi-waypoint travel**
+  >    armed in the char-select scene.
+  > 2. The follow-on **single static camera** reading is **also retracted** — it was itself an
+  >    over-correction that examined only the bare projection camera and missed the separate
+  >    camera-path rig. The char-select camera is **neither a full orbit nor a static camera**.
+
+  **What the char-select preview camera actually is (authoritative model lives in
+  `frontend_scenes.md` §3.5):** an **entry dolly**. On scene-enter the camera-path rig blends from
+  keyframe **KF0 → KF1** over **~2.0 s** — a **position-Lerp** plus an **orientation-Slerp** — then
+  holds at KF1. The rig is a 6-keyframe path object, but only keyframes 0 and 1 are ever armed in
+  char-select (the scene constructs at KF0 and the entry reset arms KF1); the remaining keyframes
+  exist but are never advanced — there is **no auto-orbit and no select-focus retarget**. It has:
+
+  - a fixed projection — **50° vertical FOV, near 5.0, far 15000.0** (note: this differs from the
+    in-world gameplay camera's 65° — §A.7);
+  - a fixed path base anchor at **(2048, 0, −6144)** (the select-stage backdrop anchor);
+  - the recovered destination keyframe **KF1 = (512, 87, −9652)** (the eye the entry dolly settles to);
+  - a continuous **manual overlay** that rides on top of the keyframe transform: a hold-to-zoom
+    **camera boom/zoom** and a manual **preview-character turn** (the previewed actor — *not* the
+    camera — yaws while a turn key is held). **Slot-select moves the ACTOR, not the camera** — the
+    "focus" on a chosen character is the preview actor turning to face, not a camera move.
+
+  This is **out-of-world** and is **not** part of the in-world mode set. **For the complete, current
+  char-select camera/preview spec, defer to `frontend_scenes.md` §3.5** — it owns this scene (and is
+  being updated to this entry-dolly model in the same wave); the rows here are only a cross-link.
+  (CODE-CONFIRMED: entry dolly KF0 → KF1, pos-Lerp + orient-Slerp over ~2.0 s; FOV 50 / near 5 /
+  far 15000; path anchor (2048,0,−6144); KF1 (512,87,−9652); manual boom/yaw overlay; slot-select
+  moves the actor not the camera. Recovered via static RE, CAMPAIGN 9.)
 
 ## A.6 Terrain collision for the Third-person camera
 
@@ -654,7 +682,7 @@ Rewritten (not copied) from dirty-room recon notes (subsystem keys `camera_views
 CODE-CONFIRMED), fixed-radius orbit model explicitly stated, per-mode parameter tables
 with confirmed numbers added, Event camera model corrected (built-in binary curve
 table, not data-file/Lua/`.scr`), mode-switch trigger call sites enumerated, default
-mode and OPTION_VIEW_CHAR persistence documented, Select camera waypoints added,
+mode and OPTION_VIEW_CHAR persistence documented, Select camera model re-corrected in a CAMPAIGN 9 re-walk to an entry dolly KF0 → KF1 (per frontend_scenes §3.5) - pos-lerp + orient-slerp over ~2.0 s, KF1 (512,87,−9652); both the old multi-waypoint/orbit reading and the follow-on single-static-camera reading are retracted (it is neither a full orbit nor a static camera), with the manual boom/yaw overlay and actor-not-camera slot focus retained,
 enter-world camera placement clarified. All legacy addresses, decompiler-style
 identifiers, RTTI class names, vtable offsets, and raw struct offsets were
 **deliberately omitted**; only neutral behaviour, formulas, role-keyed constants,

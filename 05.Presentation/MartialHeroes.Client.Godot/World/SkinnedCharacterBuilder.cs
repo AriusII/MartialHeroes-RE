@@ -163,17 +163,22 @@ public static class SkinnedCharacterBuilder
     // -------------------------------------------------------------------------
     //
     // The single handedness conversion (world Z-negate) brings the rig into Godot space with skin
-    // and skeleton perfectly consistent, BUT the legacy characters are authored with their body
-    // "up" (head-to-foot) axis NOT along Godot +Y. A standing humanoid's bounding box is tallest
-    // along its head-to-foot axis, so after the pure Z-negate we find that axis as the rest AABB's
-    // LONGEST extent and rotate it onto Godot +Y.
+    // and skeleton perfectly consistent. spec: Docs/RE/specs/skinning.md §8(b).
     //
-    // This was VALIDATED on the canonical g1 player rig: its rest AABB is ~5.0 on X vs ~2.4 on Y
-    // and ~1.7 on Z, so the authored up-axis is X and a +90° rotation about Z maps local +X → +Y.
-    // Rather than HARDCODE g1's +90°-about-Z, we now derive the basis from each rig's own AABB so
-    // the heuristic is re-evaluated for every mob skeleton (e.g. g2048). When X is the tallest axis
-    // the result is exactly g1's +90°-about-Z; when Y is already tallest (already upright) the basis
-    // is identity; when Z is tallest a −90°-about-X maps local +Z → +Y.
+    // VERIFIED (CAMPAIGN 9 L6) on the canonical §8(d) specimen trios: after the pure Z-negate BOTH
+    // the g1 player rig (rest AABB Y=7.20 > X=5.02 > Z=1.75) and the g2048 mob rig (Y=7.84 > X=7.38 >
+    // Z=1.49) are already TALLEST ON Y, so this heuristic returns IDENTITY for both and the rigs stand
+    // upright with no extra rotation — the Z-negate alone is sufficient (a windowed screenshot of the
+    // trio shows two coherent, upright humanoids, NOT an exploded star of triangles). The earlier note
+    // that g1 was X-tallest (~5.0 X vs ~2.4 Y) reflected an OLD pre-unification convention and no longer
+    // holds under the single Z-negate; the +90°-about-Z branch is therefore now a DORMANT defensive
+    // fallback, not the live path for any recovered rig.
+    //
+    // The branch is retained only as a safety net for a hypothetical malformed rig authored with its
+    // head-to-foot axis off +Y: when X is the tallest axis it maps local +X → +Y (+90° about Z); when
+    // Y is tallest (the verified humanoid case) the basis is identity; when Z is tallest a −90°-about-X
+    // maps local +Z → +Y. Behaviour is unchanged from the prior implementation, so the FROZEN World
+    // scene cannot regress.
     //
     // The pivot is a rigid isometry applied AFTER all skinning, so it can never break the
     // skin↔skeleton consistency or the rest-pose cancellation.

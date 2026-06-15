@@ -47,6 +47,8 @@ encoding_note: audio file IDs are plain decimal integers; no text encoding conce
 | `SoundManager` object field offsets | CODE-CONFIRMED from binary stores (implementation guide only) |
 | `GSoundOGG` object size (776 bytes) | CODE-CONFIRMED |
 | Front-end cue map (BGM 920100200, UI click 861010101, intro stinger 861010105) | CODE-CONFIRMED (static) |
+| Login BGM-absent; char-select 920100200 on a single category-0 voice (free-on-id-mismatch); per-class preview BGM 91006xxxx | CODE-CONFIRMED (static, CAMPAIGN 9) |
+| Loading-screen BGM 920100100 (category 0, looped) fired by the loading-screen builder; never explicitly stopped — front-end must stop-previous at each scene boundary | CODE-CONFIRMED (static) |
 | Front-end buttons are silent; owner-window action handler plays the cue | CODE-CONFIRMED (static, absence-scan) |
 | Per-FE-button exact click cue (login / PIN widgets) | UNVERIFIED (debugger-only) |
 
@@ -792,8 +794,8 @@ the loader prefix rule; debugger-confirmable).
 ### 15.6 Direct cue->file rule and the front-end create/loading cue inventory
 
 > **Confidence:** the cue->path rule and the VFS presence of each `<id>.ogg` are SAMPLE-VERIFIED
-> (direct VFS reads). The exact firing site of each per-class create voice and the loading SFX is
-> INFERRED from the cue family and scene context (not statically pinned to a specific action branch).
+> (direct VFS reads). The per-class create-voice binding and the loading-screen BGM firing scene are
+> CODE-CONFIRMED (static, CAMPAIGN 9); see §15.6a / §15.6b.
 
 **Direct cue->file rule (no lookup table).** A front-end audio cue id resolves to a 2D Ogg file by
 the same implicit decimal-stem convention as every other clip (§3.4): the integer cue id IS the
@@ -811,17 +813,62 @@ cue_id  ->  data/sound/2d/<cue_id>.ogg        // decimal stem, no zero-padding, 
 | **861010105** | `data/sound/2d/861010105.ogg` | Login intro SFX / stinger (auto-fired at the login intro sub-state; also has a `3d/` mirror, but the front-end uses the 2D path). Cross-ref §15.2. | SAMPLE-VERIFIED (present); CODE-CONFIRMED firing (§15.2) |
 | **861010101** | `data/sound/2d/861010101.ogg` | Generic UI click (the project-wide "a button did something" cue). Cross-ref §15.2. | SAMPLE-VERIFIED + CODE-CONFIRMED (§15.2) |
 | **920100200** | `data/sound/2d/920100200.ogg` | Char-select BGM (also the front-end/title BGM and the enter-world confirm cue). Cross-ref §15.2. | SAMPLE-VERIFIED + CODE-CONFIRMED (§15.2) |
-| **920100100** | `data/sound/2d/920100100.ogg` | Loading SFX (the load/transition cue family neighbouring the char-select BGM). | SAMPLE-VERIFIED (present); INFERRED firing |
-| **910062000** | `data/sound/2d/910062000.ogg` | Per-class character-creation voice (class 2 of the four playable classes). | SAMPLE-VERIFIED (present); INFERRED binding |
-| **910063000** | `data/sound/2d/910063000.ogg` | Per-class creation voice (class 3). | SAMPLE-VERIFIED (present) |
-| **910064000** | `data/sound/2d/910064000.ogg` | Per-class creation voice (class 4). | SAMPLE-VERIFIED (present) |
-| **910065000** | `data/sound/2d/910065000.ogg` | Per-class creation voice (class 5 / the fourth playable slot). | SAMPLE-VERIFIED (present) |
+| **920100100** | `data/sound/2d/920100100.ogg` | Loading-screen BGM (**category 0, looped**), fired by the loading-screen builder (a game-state transition with a random loading-art pick), NOT by login or char-select; never explicitly stopped (see §15.6a and `frontend_scenes.md` §3.8.1). | SAMPLE-VERIFIED (present); CODE-CONFIRMED firing scene (loading) |
+| **910062000** | `data/sound/2d/910062000.ogg` | Per-class character-creation preview BGM, create-form class selector arg 1. Played on the char-select **category-0 music slot** (replaces the scene BGM, §15.6b). | SAMPLE-VERIFIED (present); CODE-CONFIRMED binding (§15.6b) |
+| **910063000** | `data/sound/2d/910063000.ogg` | Per-class creation preview BGM, create-form class selector arg 3 (the else branch). | SAMPLE-VERIFIED (present); CODE-CONFIRMED binding (§15.6b) |
+| **910064000** | `data/sound/2d/910064000.ogg` | Per-class creation preview BGM, create-form class selector arg 2. | SAMPLE-VERIFIED (present); CODE-CONFIRMED binding (§15.6b) |
+| **910065000** | `data/sound/2d/910065000.ogg` | Per-class creation preview BGM, create-form class selector arg 0. | SAMPLE-VERIFIED (present); CODE-CONFIRMED binding (§15.6b) |
 
-The four creation voices fall in the `91006N000` range (the `9100xxxxx` character-voice family,
-§3.4). The `N=2..5` span maps one cue to each playable class at the create step; the exact
-class->cue assignment is INFERRED (the cue family and range are confirmed, the per-class binding is
-not statically pinned). Adjacent ids in the same family exist in the VFS but are not bound to the
-front-end create flow.
+The four creation preview-BGM cues fall in the `91006N000` range (the `9100xxxxx` character-voice
+family, §3.4). The per-class binding is **CODE-CONFIRMED** (the create-form builder selects the id by
+its class argument, §15.6b): arg 0 -> 910065000, arg 1 -> 910062000, arg 2 -> 910064000,
+arg 3/else -> 910063000. All four play on the char-select category-0 music slot, so a class selection
+replaces the scene BGM rather than overlaying it (§15.6b). Adjacent ids in the same family exist in the
+VFS but are not bound to the front-end create flow.
+
+### 15.6a Loading-screen BGM 920100100 and the front-end stop-previous contract
+
+> **Confidence:** CODE-CONFIRMED (static, CAMPAIGN 9). The loading-screen builder starts sound id
+> **920100100** on the single **category-0** music slot with **loop = 1** — a looping background-music
+> track, NOT a category-2 one-shot SFX (this corrects the earlier "loading SFX, category 2" reading).
+
+The loading screen (a game-state transition with a random loading-art pick) starts the looping
+**920100100** BGM on the shared category-0 music slot, from a **background loading-audio worker**, and
+**never explicitly stops it**. The only category-0 music slot is a single voice that frees the previous
+track on an id mismatch (the same free-on-id-mismatch slot used by char-select 920100200 and the per-class
+preview BGM 91006xxxx, §15.6b). Because 920100100 is never stopped, it can **contend** with the char-select
+BGM 920100200 on that single category-0 slot across the loading->char-select boundary: the next scene
+relies on slot-overwrite rather than an explicit stop, which can leave a brief window where the
+freed-but-draining loading voice and the new char-select voice are both audible (occasionally a lasting
+overlap if the loading-audio worker is not quiesced before char-select starts).
+
+**Port requirement (not a bug to reproduce):** the front-end music state machine must **stop the previous
+front-end track at each scene boundary** rather than relying on slot-overwrite — explicitly stop 920100100
+before char-select starts 920100200, and quiesce/join the loading-audio worker on a single thread before
+the next scene's BGM starts. See `frontend_scenes.md` §3.8.1 for the full double-music / scene-boundary
+stop-previous contract.
+
+### 15.6b Char-select category-0 music slot and per-class preview BGM
+
+> **Confidence:** CODE-CONFIRMED (static, CAMPAIGN 9).
+
+Char-select plays its BGM **920100200** on the single **category-0** music slot (free-on-id-mismatch).
+Login has no BGM of its own. On the character-creation form, a per-class **preview BGM** in the
+`91006xxxx` family replaces the scene BGM on that same single category-0 slot, selected by the create-form
+class selector argument:
+
+| Class slot (create-form selector) | Preview BGM id | Confidence |
+|---|---:|---|
+| class arg 0 | **910065000** | CODE-CONFIRMED |
+| class arg 1 | **910062000** | CODE-CONFIRMED |
+| class arg 2 | **910064000** | CODE-CONFIRMED |
+| class arg 3 (else) | **910063000** | CODE-CONFIRMED |
+
+Because the preview BGM shares the scene BGM's single category-0 slot, the only audible artefact possible
+within char-select is a **brief drop to silence** on the first class press (the scene BGM is freed by the
+mismatch path before the class track is acquired on the next event) — the opposite of a double-voice. The
+single-slot self-guard means a double-BGM cannot originate WITHIN char-select; the only double-music source
+is the cross-scene loading->char-select contention described in §15.6a.
 
 ### 15.7 No server-endpoint config file exists in the VFS
 
@@ -884,12 +931,18 @@ must source the auth endpoint from its own configuration, not from the asset arc
     any action branch; whether each plays a click cue at runtime is UNVERIFIED (debugger-only, §15.4).
     The 862030101–107 pool is registered but not 1:1-bound to any front-end widget (§15.3).
 
-11. **Per-class create-voice binding (§15.6).** The four creation voices (910062000..910065000)
-    are confirmed present in the VFS, but the exact class->cue assignment and the firing site
-    in the create action handler are INFERRED, not statically pinned. Debugger-confirmable.
+11. **Per-class create-voice binding (§15.6/§15.6b).** RESOLVED: the four preview BGM ids
+    (910062000..910065000) are CODE-CONFIRMED bound by the create-form class selector arg
+    (arg 0 -> 910065000, arg 1 -> 910062000, arg 2 -> 910064000, else -> 910063000), all played on the
+    char-select category-0 music slot. The remaining residual is the exact audible free/acquire behaviour
+    on the very first class press (brief silence vs. overlap), which is debugger-only.
 
-12. **Loading SFX 920100100 firing site (§15.6).** Confirmed present; the exact trigger
-    (loading transition vs. another front-end step) is INFERRED.
+12. **Loading-screen BGM 920100100 firing site (§15.6).** RESOLVED: fired by the loading-screen
+    builder (a game-state transition with a random loading-art pick) as a **category-0, looped
+    background-music track** (not a category-2 SFX), not by login or char-select. It is never
+    explicitly stopped, so it contends with the char-select BGM 920100200 on the single category-0
+    music slot across the loading->char-select boundary; the port must stop the previous track at each
+    scene boundary (see §15.6a and `frontend_scenes.md` §3.8.1). CODE-CONFIRMED (static).
 
 ---
 

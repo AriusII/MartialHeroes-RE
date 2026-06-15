@@ -11,6 +11,74 @@
 > old `names.yaml` pin `63fcaf8e…9eb9df`) — so **all prior addresses are stale** and Campaign 6's
 > IDB-resident naming is gone. CAMPAIGN 6/4/3 are **paused**, their records preserved below for provenance.
 > **The World scene remains FROZEN.** No commit yet.
+>
+> **▶ CAMPAIGN 9 landed (2026-06-15):** front-end fidelity — `Diamond::LoginWindow` + `Diamond::CharactersWindow`
+> total comprehension → 7 specs promoted → IDB annotated (104 names) → Godot wave (both scenes). Ran in
+> parallel to C7 on disjoint paths. **Load-bearing correction: the char-select "6-keyframe camera orbit" is
+> REFUTED — it is a single static camera + 2 manual inputs.** Build 0/0 · 1848 tests · clean-room PASS. See the
+> CAMPAIGN 9 section directly below. Uncommitted.
+
+---
+
+## CAMPAIGN 9 — LoginScene + CharactersScene: total comprehension → 1:1 Godot port (2026-06-15) ✅
+
+**Mandate (maintainer):** deeply understand the two front-end scene classes — `Diamond::LoginWindow` (2D
+UI/UX, asset management) and `Diamond::CharactersWindow`/`SelectWindow` (3D map000 scene: camera, UI, music,
+effects) — then update/improve both scenes in Godot from the findings. Scope chosen: EXHAUSTIVE comprehension
++ IDB annotation + skinning + autonomous one-shot. Method specialises `CAMPAIGN_TEMPLATE.md`; plan file
+`~/.claude/plans/nous-voulons-pleins-d-agents-gleaming-dijkstra.md`.
+
+| Phase | What | Status |
+|---|---|---|
+| **0 — preflight** | IDA MCP + IDB doida.exe@263bd994 confirmed (`Diamond_LoginWindow_BuildScene`, `SelectWindow_*`); build baseline 0/0; `_dirty/campaign9/{login,chars,skinning}` | ✅ |
+| **A/B — comprehension** | READONLY sub-waves ≤3: LoginWindow 10 lanes + CharactersWindow 10 lanes + skinning 1 lane + VFS black-box 3 lanes. All landed; firewall clean | ✅ |
+| **Dbg — live confirms** | camera resting eye/target, SKIP-curtain branch, fog-OFF site — documented **debugger-pending** (needs maintainer F9); non-blocking | ⏸ deferred |
+| **C — promotion** | 7 specs rewritten (frontend_scenes, ui_system, sound, environment_bins, camera_movement, skinning, login_flow); firewall PASS | ✅ |
+| **D — IDB annotation** | 1 serialized writer: 104 renames + 147 comments + 4 struct types; sub_ −95; 0 lib symbols touched; IDB not committed | ✅ |
+| **E — Godot wave** | 6 lanes: env area-0 truth (fixes "too dark"), row-Y from ground, static camera + 2 inputs + 3D ray-pick hit-test (+ dead 6-pose-button scaffolding removed), login curtain-slide/version-gate/eager-preload, BGM moved to char-select, skinning spec-aligned (mesh-explosion already retired) | ✅ |
+| **R — gates** | build 0/0 (incl. `--no-incremental`) · `dotnet test` **1848/0** · clean-room **PASS** · headless boot clean · render-review (env-limited screenshots) | ✅ |
+| **Z — consolidation** | journal + ROADMAP + memory updated | ✅ |
+
+**Key recovered truths:** LoginWindow = font slot 0 universally · no atlas cache/ref-count (eager preload of 4) ·
+curtain = 2-panel vertical slide +5px/tick · substate set {1–6,29–41}=19 · PIN Fisher-Yates scramble-on-show
+≤4 → 2nd-password TAB token. CharactersWindow = **single static camera (anchor +2048,0,−6144; FOV 50)** + boom-zoom
+±10/s + actor-yaw ±2 rad/s · slot select = 3D ray-pick (5 AABBs ±6 X/Z, Y 70..92) · env keyframe-29 PINNED with
+inert ambient table → real fill = white OPTION_BRIGHT floor (achromatic "dark stone temple"), fog OFF · single
+XEffect 380003000 · char-select BGM 920100200 single-voice (double-voice REFUTED) · create 1/6, slot-select 1/7,
+class map {0→4,1→1,2→3,3→2}, gear server-assigned. Skinning = quaternion LBS, inverse-bind computed, .mot 10fps
+lerp+slerp, single uniform handedness conversion.
+
+**FOLLOW-UP:** (1) `names.yaml` sync of the 104 campaign9 IDB names (staged `_dirty/campaign9/applied/`; via
+`ida-naming-sync`); (2) Phase-Dbg live confirmations; (3) wire the new `CreateCharacterRequested` Godot signal
+to the Application create use-case. **Uncommitted on campaign3 (targeted-paths commit on maintainer request).**
+
+### CAMPAIGN 9 — WAVE 2 (screenshot-grounded, 2026-06-15) ✅
+
+Maintainer supplied official-client screenshots (login/PIN/server-list/char-select/4×creation) as the visual
+oracle and flagged three behaviours my Wave-1 pass got wrong. IDA (source of truth) re-investigated and
+**reversed two over-corrections**:
+
+- 🎥 **Camera = ENTRY DOLLY KF0→KF1** (~2.0 s pos-lerp + orient-slerp on scene-enter, then holds KF1=(512,87,−9652)),
+  NOT static and NOT a full orbit. The Wave-1 "static camera" reading analysed the bare projection camera (+6200)
+  and missed the camera-PATH rig (+6204). Implemented in `CharSelectCameraRig`.
+- 🔴 **Flying blue/red pixels = D3D9 point-sprites** (no Godot equivalent): red=brazier fire, blue=waterfall. Fixed
+  in `XeffSceneEffect` (alpha-blended camera-facing billboards; untextured emitters dropped). **No scene point-lights** —
+  the warm glow is the additive fire texture (the Wave-1 warm-omni rig was removed).
+- 🎵 **Double-music is REAL** (loading-screen BGM 920100100 cat-0 loop) — the Wave-1 "refuted" was wrong. The port
+  already guards it (idempotent `PlayBgm`, never plays 920100100; the new Loading screen stops it before char-select).
+- **No-char → 5 BLANK slots** (creation on `@BLANK@`-confirm, not auto); **creation = SAME cell** d000x10000z9990
+  (carved wall `suksang*` + portal baked); **class descriptions = `data/script/npc.scr`** keys 1-4 (real CP949,
+  two-witness CONFIRMED); the **Loading screen** (`Diamond_LoadingWindow`, state 2) was fully recovered.
+
+**Godot delivered (disjoint-file lanes, build 0/0):** login z-order vs screenshot · PIN keypad 2×5 + server-list
+parchment · char-select 2D chrome + creation 3-column form · camera entry-dolly · flying-pixels billboard fix ·
+lighting corrected · creation carved-wall backdrop · actors on the platform (Y≈70) · the **Loading screen**
+(bg rand()%3 + fill bar 223·pct/100 + BGM) · real **npc.scr CP949 class descriptions**.
+
+**Specs re-corrected (firewall PASS):** `frontend_scenes.md` §3.5 (dolly), §3.6.1/§3.6.6 (billboard FX, no point-lights),
+§3.7.6 (creation same cell), §3.8.1 (double-music real), §4.1.1 (npc.scr description source), new §2L (loading screen);
+`sound.md` (920100100 cat-0 loop); `camera_movement.md` §A.5.2 (→ dolly); `config_tables.md` §2.17.3 (npc.scr table).
+**Uncommitted on campaign3.**
 
 ---
 

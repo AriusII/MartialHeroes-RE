@@ -52,9 +52,11 @@ shared login/create opcode and no collision. See Section 4.2 and Section 9.)
 | Login blob (rides the secure 1/4) starts with sub-opcode byte **`0x2B` (43)** then a length-prefixed account string and a length-prefixed **second-password / PIN** string; the account password travels via the RSA 1/4 ciphertext. | HIGH (runtime) | RUNTIME-CONFIRMED — the assembled blob was read out of the live client's packet buffer; field order, prefix width, and field identities observed directly (no addresses). |
 | Login blob length-prefix width = **u32 little-endian**, and each string's prefixed length **includes its trailing NUL**. | HIGH (runtime) | RUNTIME-CONFIRMED — observed in the assembled bytes. |
 | Login field capacities: account **< 20** chars, password **< 17** (staged in an exactly-17-byte zero-padded buffer), second-password / PIN **< 5** (≤ 4 chars + NUL). | HIGH (runtime) | RUNTIME-CONFIRMED — observed validation bounds + the staged buffer size. |
+| PIN modal scrambles its on-screen keypad on every show: a time-seeded shuffle of a 10-digit permutation (anti-keylogger); PIN is masked, capped at 4 digits, and becomes the optional second-password blob field. | HIGH | Static control-flow recovery (recovered via static RE, CAMPAIGN 9); see §4.2a. |
 | Server-list record (8 bytes) decodes to **{server id, status, load, open-time}** with the load thresholds and status sentinels of Section 2.1. | MEDIUM–HIGH | Static — recovered from the server-list render path plus a debug format literal; the open-time packing and full status enum are **capture-unverified**. |
 | Character-list (3/1) shape: 3-byte header + per-slot **981-byte** records gated by a slot bitmask. | MEDIUM–HIGH | 981-byte stride is dispatch-path-confirmed; field internals capture-unverified. |
 | The character list supports a **maximum of 5 slots** (slot indices 0..4). | HIGH (static) | The parse loop is a **hard, bounded iteration of exactly 5**, not an open-ended scan — promoted from "inferred ≤5" to a fixed constant. |
+| Character-select C2S create = **1/6** (52-byte body), slot-select = **1/7** (2-byte body). | HIGH (static) | Static control-flow recovery (recovered via static RE, CAMPAIGN 9); see §3.6 and `specs/frontend_scenes.md` §4 / §8. |
 | Enter-game request (1/9) = **40-byte** body; slot index at +0; version token elsewhere in the buffer. | MEDIUM | 40-byte total + slot@0 are firm; token offset capture-unverified. |
 | Enter-game version token derivation `10 × versionField + 9`, and its concrete value **21149** for the sampled `game.ver`. | HIGH (sample) | `sample_verified` — computed from the real on-disk `data/cursor/game.ver` field value 2114. |
 | Enter-game ack (3/5) = **44-byte** block; name@0, billing u32 @ +28, char-count u32 @ +40. | MEDIUM–HIGH | 44-byte total dispatch-confirmed; block internals partly capture-unverified. |
@@ -92,7 +94,8 @@ The ordered lifecycle is:
    of the login blob** (Section 4.2); it is *not* the account password (the password is staged
    separately as the RSA 1/4 plaintext). The front-end shape of this modal is owned by
    `specs/frontend_scenes.md` §1 (its "Second-password / PIN" subsection); this spec owns where the
-   PIN lands on the wire.
+   PIN lands on the wire. The modal's **anti-keylogger scrambled keypad** and the PIN → wire hand-off
+   mechanism are described in §4.2a.
 
 2. **Server-list fetch (lobby).** A background worker performs a **synchronous, blocking** connect
    to the lobby on **port 10000** (Section 2.1), reads an 8-byte frame wrapper plus an LZ4-compressed
@@ -370,6 +373,29 @@ spawn. After spawn, the world entity is maintained by the major-5 Push handlers 
 > transition to the in-world state → on the `4/1` world-entry snapshot, spawn the local player into
 > the world from the cached descriptor.
 
+### 3.6 Character-select C2S senders (create / slot-select) — cross-reference
+
+The character-select scene emits two additional C2S messages whose **field layouts are authoritative
+in their own `packets/*.yaml`**; this is a brief cross-reference only (see also
+`specs/frontend_scenes.md` §4 / §8):
+
+- **Create character — `1/6 CmsgCreateCharacter` (52-byte body).** Sent when the player confirms the
+  new-character form (after the client-side name gates: a min-length-2 charset rule allowing
+  lowercase ASCII + digits + CP949 double-byte pairs, a banned-word filter, and an in-flight
+  double-submit guard). The 52-byte body carries the CP949 name at offset 0 plus appearance and
+  point-buy stat fields. Authoritative field spec: `packets/cmsg_char_create.yaml`. (The legacy
+  `packets/1-6_login_or_create.yaml` is a **resolved tombstone** — opcode 1/6 is character-create
+  only and never the login credential, which rides the secure `1/4`; see §4.2.)
+- **Select / pre-stage a slot — `1/7` (2-byte body).** A short two-byte select/pre-stage message
+  emitted from the per-slot select action before the enter-world request. Authoritative field spec:
+  `packets/cmsg_char_select.yaml` (the legacy `packets/1-7_select_character.yaml` is a superseded
+  tombstone that points there).
+
+> Both senders are gated by the select screen's single net-busy guard, so only one character
+> operation is ever in flight. The full per-field byte tables live in those packet YAMLs — they are
+> the single source of truth; this spec does not restate them. The actual world-entry request is the
+> separate `1/9` enter-game message (§3.3).
+
 ---
 
 ## 4. Account login and credential staging (C2S)
@@ -447,6 +473,61 @@ string itself) and `packets/login.yaml` (the credential carrier).
 > sender stamps `major=1 / minor=6` for the 52-byte create body. Authored field specs:
 > `packets/login.yaml` (the `1/4` credential carrier) and `packets/cmsg_char_create.yaml` (the `1/6`
 > 52-byte create body). See Section 6 and Section 9 item 4.
+
+### 4.2a PIN modal — scrambled keypad and the PIN → wire hand-off
+
+This subsection documents the **mechanism** by which the second-password / PIN of §1a is collected
+and how its value reaches the optional blob field of §4.2. It is the recovered behaviour behind the
+previously-noted "optional second-password blob" / `isPin` gap. Recovered via static RE, CAMPAIGN 9
+(static control-flow recovery, no addresses, no debugger).
+
+**Anti-keylogger scrambled keypad (per-show).** The PIN modal presents a 10-digit on-screen keypad
+(digits 0–9) whose **on-screen positions are reshuffled every time the modal opens**, so a digit's
+screen location is unpredictable from one show to the next (defeating fixed-position keyloggers /
+shoulder-surfing). The scramble works as follows, on each show:
+
+1. **Seed the random generator with a 64-bit wall-clock time** (`srand` seeded from a 64-bit time
+   value) — a fresh seed per show.
+2. **Fisher-Yates shuffle a 10-element digit permutation** (the integers 0–9). The shuffle is the
+   classic in-place Fisher-Yates / random-shuffle over the 10-entry permutation array.
+3. **Apply the permutation to the keypad layout:** of the stacked digit buttons available at each of
+   the 10 on-screen positions, exactly the one whose digit equals `permutation[position]` is made
+   visible; the others are hidden. The net result is the digits 0–9 laid out in a fresh random order
+   each show.
+
+Because the permutation is regenerated every show, no static digit→position map exists; a faithful
+re-implementation must reshuffle on every modal open.
+
+**Entry and masking.** Pressing a visible digit key appends that digit to an entry buffer; the
+on-screen field shows only a **masked `*` per entered digit**, never the digits themselves. The
+entry is **capped at 4 digits** (a hard guard rejects a 5th), matching the §4.2 capacity rule
+"second-password / PIN length **< 5** (≤ 4 chars + NUL)". A clear/backspace control and a cancel
+control are distinct from the digit keys; an **OK / submit** control finalizes the entry.
+
+**Submit and the wire hand-off (the `isPin` mechanism).** On submit:
+
+1. The entered digits are serialized into a short numeric **PIN string** (0..4 characters).
+2. That PIN string is stored as the login window's **second/middle login-key token**, i.e. it becomes
+   the **third TAB-delimited token** of the TAB login-key string assembled at join
+   (`account ⟨TAB⟩ password ⟨TAB⟩ PIN ⟨TAB⟩ host␠port`, §1 / §4.1).
+3. The secure-context builder (§4.1) splits that TAB string; the PIN (its middle token) is the value
+   that **populates the optional length-prefixed second-password blob field of the `1/4` login
+   pre-image** (§4.2 field order, table row 3). The account password remains the separate RSA
+   plaintext (§4.2) — the PIN is **not** the password.
+
+So the end-to-end PIN path is: **scrambled keypad → masked 0..4-digit entry → submit → third TAB
+token of the login-key string → optional second-password blob field of the secure `1/4` pre-image.**
+This is the previously-noted `isPin` / "optional second-password blob" gap, now described as a
+concrete mechanism.
+
+> **Confidence.** The scramble mechanism (time-seeded Fisher-Yates per show), the 4-digit cap, the
+> `*`-masking, and the submit → TAB-third-token → optional `1/4` blob hand-off are **recovered via
+> static control-flow analysis (CAMPAIGN 9)** and are graded HIGH for the structural/mechanism
+> claims. The exact on-wire **byte layout** of the optional blob field is the runtime-confirmed §4.2
+> layout (u32-LE NUL-inclusive prefix). One detail remains **UNVERIFIED / debugger-pending**: the
+> precise width and field offset of the login window's PIN-token storage slot (asserted to hold ≤ 4
+> chars + NUL) — a single live read would byte-confirm it; it does not change the wire layout, which
+> §4.2 already pins.
 
 ### 4.3 Secure send
 
@@ -612,6 +693,7 @@ The behavior-anchored opcode subset for this flow:
 | 0:0 | SmsgKeyExchange | S2C | 62 (cited) | RSA key material; triggers `1/4` (see `crypto.md`) |
 | 1:4 | CmsgAuthReply | C2S | var (cited) | **THE login credential send** — secure auth-reply to `0/0`; plaintext pre-image `[0x2B][u32len account\0]([u32len PIN\0])` + RSA ciphertext of the account password (runtime-confirmed) |
 | 1:6 | CmsgCreateCharacter | C2S | 52 | **Character-create ONLY** — fixed 52-byte body, offset-0 is the CP949 name; NOT the login credential (that is `1/4`) |
+| 1:7 | CmsgSelectCharacter | C2S | 2 | character-slot select / pre-stage on the select screen; see `packets/cmsg_char_select.yaml` |
 | 1:9 | CmsgEnterGameRequest | C2S | 40 | slot@0 + version token (value 21149 for this build); server → `3/5` |
 | 3:1 | SmsgCharacterList | S2C | 3 + N×981 (N ≤ 5) | header[srv, chan, mask] + per-slot {descriptor 880 + stats 96 + flag 1 + time 4}; enters select scene |
 | 3:4 | SmsgSceneEntityUpdate | S2C | var | scene / entity / char-slot scratch refill / scene-clear; not yet specced |
@@ -647,6 +729,7 @@ The behavior-anchored opcode subset for this flow:
 | Login account capacity | length **≥ 2** and **< 20** | Length-prefixed (incl. NUL) into the login blob. Runtime-confirmed. |
 | Login password capacity | length **≥ 2** and **< 17** | **Not** in the plaintext blob; staged in an **exactly-17-byte zero-padded buffer** for the RSA `1/4` ciphertext. Runtime-confirmed. |
 | Login second-password / PIN capacity | length **< 5** (≤ 4 chars + NUL) | The optional length-prefixed login-blob field. Runtime-confirmed. |
+| PIN keypad scramble | **time-seeded Fisher-Yates shuffle of a 10-digit (0–9) permutation, per show** | Anti-keylogger random on-screen keypad layout; PIN masked with `*`, capped at 4 digits; submit → 3rd TAB token → optional `1/4` blob field. Static recovery, CAMPAIGN 9. See §4.2a. |
 | Channel-endpoint copy length | **30 (0x1E) bytes** | The leading `host port` ASCII string. |
 | Server-list record size | **8 bytes** | Count = `wrapper.major`. |
 | Server-list record fields | id u16 @+0 (1..40), status u16 @+2, load u16 @+4, open-time u16 @+6 | See Section 2.1. |
@@ -657,6 +740,8 @@ The behavior-anchored opcode subset for this flow:
 | Char-list header | **3 bytes** | server-id, channel-id, slot bitmask. |
 | Char-list maximum slots | **5** (slot indices 0..4) | Hard loop bound; also the enter-game slot-range guard (`slot ≤ 4`). |
 | Display-name length (char list) | **17 bytes** | CP949, cleaned/truncated. |
+| CreateCharacter body (1/6) | **52 (0x34) bytes** | CP949 name @ offset 0 + appearance + point-buy stats; see `packets/cmsg_char_create.yaml` (§3.6). |
+| SelectCharacter body (1/7) | **2 bytes** | Slot select / pre-stage; see `packets/cmsg_char_select.yaml` (§3.6). |
 | EnterGameRequest body (1/9) | **40 (0x28) bytes** | Slot index at offset 0. |
 | Version token | `10 × versionField + 9` = **21149** (this build) | Derived from `data/cursor/game.ver` (field index 5 = 2114). `sample_verified`. |
 | EnterGameAck (3/5) | **44 bytes** | 40-byte block + trailing char-count u32; billing u32 @ +28. |
@@ -738,7 +823,12 @@ The behavior-anchored opcode subset for this flow:
 11. **Opcode-naming inconsistency** (Section 6) — legacy handler names disagree with the dispatch
     arithmetic and `opcodes.md`. Anchored to behavior + `opcodes.md` here; flagged for `names.yaml`
     review. Do **not** promote minor→name mappings from legacy names.
-12. **No live network capture was loaded for this analysis.** All wire offsets/sizes are static reads,
+12. **PIN-token storage slot width/offset** (§4.2a) — the login window's slot that holds the entered
+    PIN string before the join hand-off (asserted ≤ 4 chars + NUL). The scramble mechanism and the
+    submit → TAB-third-token → optional `1/4` blob path are static-confirmed (CAMPAIGN 9); the exact
+    storage slot width/offset is **UNVERIFIED / debugger-pending** (a single live read would confirm
+    it). This does not change the §4.2 wire layout.
+13. **No live network capture was loaded for this analysis.** All wire offsets/sizes are static reads,
     **except** the login blob (carried by `1/4`) field layout, which is corroborated by a runtime read
     of the live client's assembled packet buffer (still not a network capture). The only on-disk
     real-byte corroboration is the local `data/cursor/game.ver` file (item 5 / Section 3.3). The lobby
@@ -756,6 +846,13 @@ The behavior-anchored opcode subset for this flow:
   (static, from the render path + a debug literal; `open_time` packing and the full status enum are
   capture-unverified).
 - Handshake (`0/0` → `1/4`) and credential staging: **HIGH confidence** (cited — `specs/crypto.md`).
+- PIN modal scrambled keypad (time-seeded Fisher-Yates per show), `*`-masking, 4-digit cap, and the
+  submit → TAB-third-token → optional `1/4` second-password blob hand-off (§4.2a): **HIGH** for the
+  mechanism (static control-flow recovery, CAMPAIGN 9); the exact PIN-token storage slot width/offset
+  is debugger-pending.
+- Character-select C2S create (`1/6`, 52 B) / slot-select (`1/7`, 2 B) cross-reference (§3.6): **HIGH**
+  (static control-flow recovery, CAMPAIGN 9); per-field byte layouts are authoritative in
+  `packets/cmsg_char_create.yaml` / `packets/cmsg_char_select.yaml`.
 - Character-list 981-byte slot stride **and the hard 5-slot loop bound**; the major-3 response sizes
   (3/1, 3/5, 3/6, 3/7, 3/14, 3/23): **MEDIUM–HIGH** (dispatch-confirmed sizes / bound; field internals
   capture-unverified).

@@ -46,7 +46,17 @@ documented in the container spec.
 | Quaternion convention: XYZW (scalar W last), Hamilton product, active rotation, parent-on-left | HIGH |
 | Native space is left-handed D3D9; NO axis flip inside the skinning math | HIGH |
 | Exact Godot quaternion remap under Z-negation | PROPOSED — validate on one sample bone |
-| Per-node `scale` source (assumed 1.0 for characters) | PROPOSED — setter not traced |
+| Per-mesh `scale` has a real source (read at attach as `meshScale · nodeScale`) | CONFIRMED — resolves the prior "assumed 1.0" open item |
+| Whole deform/bind/mot/world-walk chain re-derived end-to-end | RATIFIED — an independent CAMPAIGN 9 re-derivation reproduced §0–§7 and corrected nothing |
+
+> **Ratification (CAMPAIGN 9).** An independent dirty-room re-derivation read the actual deform,
+> bind-pose, `.mot`, and world-walk routines (and their math primitives) from scratch and
+> **confirmed this spec is correct** — the deform equation, the quaternion product order
+> (parent-on-left, XYZW Hamilton), the active-rotation `q ⊗ v ⊗ q⁻¹` vector transform, the `.mot`
+> 10 fps / 28-byte-keyframe / raw-seconds-alpha sampling, the animated world walk
+> `parentWorld ⊗ bindLocal ⊗ animLocal`, and the no-axis-flip-inside-the-math finding were all
+> reproduced and **nothing was corrected**. The pass additionally resolved the per-mesh `scale`
+> source (see §5.3 / §9). Recovered via static RE, CAMPAIGN 9.
 
 Open items are consolidated in §9. Korean strings referenced indirectly (bind/skin names) are
 **CP949 / EUC-KR** (no BOM), consistent with `formats/config_tables.md`.
@@ -372,10 +382,18 @@ dst.position += placed_pos    · influence.weight
 dst.normal   += placed_normal · influence.weight
 ```
 
-Because weights are normalized at load, the weighted sum is convex. `scale` (a uniform per-mesh /
-per-node scalar) multiplies the bone-local position **before** rotation; its source is not traced and
-is assumed 1.0 for characters (§9). The quaternion-vector product is the active rotation
-`q ⊗ v ⊗ q⁻¹` for a unit quaternion.
+Because weights are normalized at load, the weighted sum is convex. `scale` (a uniform per-mesh
+scalar) multiplies the bone-local position **before** rotation; the quaternion-vector product is the
+active rotation `q ⊗ v ⊗ q⁻¹` for a unit quaternion.
+
+> **`scale` has a real source — do NOT assume 1.0 (CONFIRMED, CAMPAIGN 9).** The per-mesh scale is a
+> field on the skin object, populated **at attach time** as the product `meshScale · nodeScale` (with
+> an optional override factor). It is therefore **generally non-unit** and must be read from the skin
+> object, not hard-coded to 1.0. The deform loop and the animated world walk (§6.6) both multiply by
+> this same scale (positions only — never normals, never rotations). This resolves the prior §9 open
+> item that listed `scale` as "assumed 1.0; setter not traced." An importer that lets the engine skin
+> (Godot `Skeleton3D`, §8(a)) must still apply this mesh scale to the rest geometry / node transform;
+> dropping it shrinks or inflates the whole character.
 
 ### 5.4 Influences per vertex are unbounded by the format
 
@@ -672,7 +690,7 @@ shared default. This is the recovered cause of the char-create preview shatter c
 | Item | Status | Impact |
 |---|---|---|
 | Exact Godot quaternion remap under Z-negation | PROPOSED — `(x,y,z,w) → (−x,−y,z,w)` is the expected mapping but must be checked against one real bone rotation | Get it wrong and the rig twists; validate before mass import |
-| Per-node `scale` (§5.3, §6.6) | PROPOSED — assumed 1.0 for characters; the setter was not traced | If a hidden non-unit mesh scale exists, the importer must apply it; assert it is 1.0 during bring-up |
+| Per-mesh `scale` (§5.3, §6.6) | RESOLVED (CAMPAIGN 9) — the scale is a real skin-object field set at attach as `meshScale · nodeScale` (× optional override); it is generally non-unit | The importer **must read and apply** the mesh scale to positions (not normals, not rotations); do NOT assume 1.0 |
 | Faithful vs. renormalized interpolation alpha (§6.1) | PROPOSED choice — both are documented; pick one per project taste | Affects playback feel, not correctness; document the choice |
 | `actormotion.txt` columns 3–14 semantics | PROPOSED — offsets/types confirmed, meanings inferred (see `formats/animation.md` §`actormotion.txt` layout) | Not needed to deform; do not branch on these until confirmed |
 | Multi-bone character `.skn`/`.bnd` byte-level cross-check of the inverse-bind bake | PARTIALLY VERIFIED — corpus confirms multi-weight skins exist (§5.2); the bake math is code-recovered, not yet byte-validated end-to-end on a real character | Validate against the §8(d) player trio; assert the cancellation invariant |
