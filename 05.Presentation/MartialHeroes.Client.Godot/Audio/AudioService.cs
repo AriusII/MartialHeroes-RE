@@ -308,10 +308,30 @@ public sealed partial class AudioService : Node
         switch (currentState)
         {
             case MartialHeroes.Client.Application.Events.ClientState.CharacterSelection:
-                // spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — ID 920100200. SAMPLE-VERIFIED.
-                // char-select enter SFX: played when entering the character-selection state.
-                GD.Print($"[AudioService] State→CharacterSelection: playing char-select SFX {CharSelectEnterSfxId}.");
-                Play2dById(CharSelectEnterSfxId, MusicBusName, loop: false);
+                // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 — char-select BGM 920100200 is started
+                // by the select-window constructor (state-4 enter); the looping front-end BGM from
+                // FrontEndAudio.PlayBgm() is ALREADY playing this same cue when the state transition fires.
+                // The fix contract (§3.8.1): guard re-issue so entering the scene with the cue already
+                // playing on the music slot is IDEMPOTENT — do not start a second voice.
+                // FrontEndAudio has already started 920100200 looping via StartBgm-equivalent; the
+                // AudioService one-shot here would cause the double-music defect: two voices on the
+                // Music bus for the same cue. Drop the one-shot; the looping BGM continues seamlessly.
+                // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (double-music defect + fix contract).
+                if (_activeBgmId == CharSelectEnterSfxId && _bgmPlayer is not null && _bgmPlayer.Playing)
+                {
+                    GD.Print($"[AudioService] State→CharacterSelection: BGM {CharSelectEnterSfxId} already " +
+                             "looping — idempotent skip (§3.8.1 fix contract). No second voice started.");
+                }
+                else
+                {
+                    // BGM is not yet playing (e.g. VFS absent / FrontEndAudio not initialised).
+                    // Start it now to fulfil the spec requirement that the cue plays on char-select entry.
+                    // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 — 920100200 looped on state-4 enter.
+                    GD.Print($"[AudioService] State→CharacterSelection: BGM not yet playing — " +
+                             $"starting {CharSelectEnterSfxId} via StartBgm (dedup guard inside). §3.8.1.");
+                    StartBgm(CharSelectEnterSfxId);
+                }
+
                 break;
 
             case MartialHeroes.Client.Application.Events.ClientState.World:

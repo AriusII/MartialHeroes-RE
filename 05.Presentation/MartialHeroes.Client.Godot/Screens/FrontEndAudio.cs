@@ -10,6 +10,8 @@
 //             spec: Docs/RE/specs/sound.md §front-end cue map. CODE-CONFIRMED.
 //   Intro BGM: data/sound/2d/910061000.ogg — one-shot at OpeningWindow scene start.
 //             spec: Docs/RE/specs/intro_sequence.md §4. CODE-CONFIRMED.
+//   Login curtain SFX: data/sound/2d/861010105.ogg — one-shot at login-curtain sub-state 1→2.
+//             spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1. CODE-CONFIRMED.
 //   Sound path rule: category < 5 → data/sound/2d/<id>.ogg.
 //             spec: Docs/RE/specs/sound.md §BGM in data/sound/2d/. CODE-CONFIRMED.
 //
@@ -50,6 +52,10 @@ public sealed partial class FrontEndAudio : Node
     // UI click SFX. spec: sound.md front-end cue map. CODE-CONFIRMED.
     private const string ClickSfxPath = "data/sound/2d/861010101.ogg"; // spec: sound.md. CODE-CONFIRMED.
 
+    // Login curtain SFX — fired at login sub-state 1→2 (letterbox open starts).
+    // spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1. CODE-CONFIRMED.
+    private const string LoginCurtainSfxPath = "data/sound/2d/861010105.ogg"; // spec §1.5. CODE-CONFIRMED.
+
     // Front-end cursor. spec: frontend_scenes.md §11. CODE-CONFIRMED.
     private const string CursorPath = "data/cursor/stand.dds"; // spec: frontend_scenes.md §11. CODE-CONFIRMED.
 
@@ -60,6 +66,7 @@ public sealed partial class FrontEndAudio : Node
     private AudioStreamPlayer? _bgmPlayer;
     private AudioStreamPlayer? _clickPlayer;
     private AudioStreamPlayer? _introPlayer;
+    private AudioStreamPlayer? _curtainPlayer;
 
     // -------------------------------------------------------------------------
     // Injection point (set by BootFlow before AddChild)
@@ -81,9 +88,11 @@ public sealed partial class FrontEndAudio : Node
         _bgmPlayer = new AudioStreamPlayer { Name = "BgmPlayer", VolumeDb = 0f };
         _clickPlayer = new AudioStreamPlayer { Name = "ClickPlayer", VolumeDb = 0f };
         _introPlayer = new AudioStreamPlayer { Name = "IntroPlayer", VolumeDb = 0f };
+        _curtainPlayer = new AudioStreamPlayer { Name = "CurtainPlayer", VolumeDb = 0f };
         AddChild(_bgmPlayer);
         AddChild(_clickPlayer);
         AddChild(_introPlayer);
+        AddChild(_curtainPlayer);
 
         // Load assets. Try the shared loader first; fall back to our own VFS open.
         RealClientAssets? ra = null;
@@ -108,6 +117,7 @@ public sealed partial class FrontEndAudio : Node
                 LoadBgm(ra);
                 LoadClickSfx(ra);
                 LoadIntroBgm(ra);
+                LoadLoginCurtainSfx(ra);
                 LoadCursor(ra);
             }
             else
@@ -168,6 +178,19 @@ public sealed partial class FrontEndAudio : Node
     }
 
     /// <summary>
+    /// Plays the login-curtain intro SFX (<c>861010105.ogg</c>) as a one-shot.
+    /// Fired at login sub-state 1→2 (the letterbox/two-edge curtain open begins).
+    /// spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1. CODE-CONFIRMED.
+    /// </summary>
+    public void PlayLoginCurtainSfx()
+    {
+        if (_curtainPlayer is null || _curtainPlayer.Stream is null) return;
+        if (_curtainPlayer.Playing) _curtainPlayer.Stop();
+        _curtainPlayer.Play();
+        GD.Print("[FrontEndAudio] Login curtain SFX 861010105 played.");
+    }
+
+    /// <summary>
     /// Plays the UI-click SFX (<c>861010101.ogg</c>) as a one-shot.
     /// Call from any front-end button handler (login, server-select, PIN, char-select).
     /// spec: Docs/RE/specs/sound.md front-end cue map. CODE-CONFIRMED.
@@ -223,6 +246,21 @@ public sealed partial class FrontEndAudio : Node
         else
         {
             GD.Print($"[FrontEndAudio] Intro BGM not found in VFS: {IntroBgmPath}");
+        }
+    }
+
+    private void LoadLoginCurtainSfx(RealClientAssets ra)
+    {
+        // spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1 "play login-enter SFX 861010105". CODE-CONFIRMED.
+        AudioStream? stream = LoadOgg(ra, LoginCurtainSfxPath, looping: false);
+        if (stream is not null && _curtainPlayer is not null)
+        {
+            _curtainPlayer.Stream = stream;
+            GD.Print($"[FrontEndAudio] Login curtain SFX loaded: {LoginCurtainSfxPath}");
+        }
+        else
+        {
+            GD.Print($"[FrontEndAudio] Login curtain SFX not found in VFS: {LoginCurtainSfxPath}");
         }
     }
 

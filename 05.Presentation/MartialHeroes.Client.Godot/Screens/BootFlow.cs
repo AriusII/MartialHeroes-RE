@@ -258,7 +258,7 @@ public sealed partial class BootFlow : Node
 
     private void ShowLogin()
     {
-        var login = new LoginScreen { Name = "LoginScreen", SharedAssets = _sharedAssets };
+        var login = new LoginScreen { Name = "LoginScreen", SharedAssets = _sharedAssets, Audio = _audio };
         // LoginAccepted: OK button passed local validation (ID ≥ 4, PW ≥ 1).
         // → Stage credentials in Application layer, then advance to server select.
         login.LoginAccepted += OnLoginAccepted;
@@ -273,9 +273,10 @@ public sealed partial class BootFlow : Node
 
     private void OnLoginAccepted(string account)
     {
-        // UI click SFX on login confirmation.
-        // spec: sound.md — UI click 861010101. CODE-CONFIRMED.
-        _audio?.PlayClickSfx();
+        // UI click SFX is handled centrally by AudioService.OnButtonActionFired (NodeAdded
+        // subscription on StateButton.ActionFired). Calling _audio?.PlayClickSfx() here as well
+        // would play cue 861010101 TWICE on the same button press — removed to fix the double-click
+        // defect. spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (de-duplicate click path).
 
         // Store account name so it can be forwarded to UseCases.LoginAsync at the join point.
         _account = account;
@@ -329,9 +330,8 @@ public sealed partial class BootFlow : Node
 
     private void OnPinSubmitted(string pin)
     {
-        // UI click SFX on PIN submit.
-        // spec: sound.md — UI click 861010101. CODE-CONFIRMED.
-        _audio?.PlayClickSfx();
+        // UI click SFX is handled centrally by AudioService.OnButtonActionFired — no call here.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (de-duplicate click path).
 
         // Remove the PIN modal.
         RemovePinModal();
@@ -390,9 +390,8 @@ public sealed partial class BootFlow : Node
 
     private void OnServerSelected(int serverId)
     {
-        // UI click SFX on server selection.
-        // spec: sound.md — UI click 861010101. CODE-CONFIRMED.
-        _audio?.PlayClickSfx();
+        // UI click SFX is handled centrally by AudioService.OnButtonActionFired — no call here.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (de-duplicate click path).
 
         _selectedServerId = serverId;
         GD.Print($"[BootFlow] Server selected: id={serverId} → connecting dialog → char select.");
@@ -514,9 +513,8 @@ public sealed partial class BootFlow : Node
 
     private void OnEnterGameRequested(string characterName, int slotIndex)
     {
-        // UI click SFX on Enter Game.
-        // spec: sound.md — UI click 861010101. CODE-CONFIRMED.
-        _audio?.PlayClickSfx();
+        // UI click SFX is handled centrally by AudioService.OnButtonActionFired — no call here.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (de-duplicate click path).
 
         GD.Print($"[BootFlow] Enter game: character='{characterName}' slot={slotIndex}.");
 
@@ -655,37 +653,30 @@ public sealed partial class BootFlow : Node
     /// The entries follow the exact 8-byte record shape (server_id, status_code, load, open_time)
     /// defined in login_flow.md §2.1, so the presentation rules are exercised faithfully.
     ///
+    /// CORRECT MODEL (CODE-CONFIRMED): exactly 2 servers seed the 2-plate display.
+    ///   Server 1 → LEFT plate (action 400).
+    ///   Server 2 → RIGHT plate (action 401).
+    /// With ≤ 2 servers the pager buttons (115..124, page = action-115) are hidden/disabled.
     /// In a live build the list comes from the lobby mini-protocol (port 10000).
+    ///
+    /// spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED (1 plate = 1 server, MAX 2).
+    /// spec: Docs/RE/specs/frontend_scenes.md §1.2. CODE-CONFIRMED (pager buttons 115..124).
     /// spec: Docs/RE/specs/login_flow.md §2.1. CODE-CONFIRMED record shape.
-    /// spec: Docs/RE/specs/frontend_scenes.md §2 (load-color thresholds, status sentinels).
     /// DEV ONLY.
     /// </summary>
     private static IReadOnlyList<ServerEntry> BuildServerList()
     {
-        // Synthetic data that exercises all load tiers, the NEW badge, and the status sentinels.
-        // Entries are spec-shaped (server_id 1..40, status_code, load, open_time).
-        // IsNew is NO LONGER a constructor arg — derived at render time: server_id == NEW_SERVER_INDEX (5).
-        // spec: Docs/RE/specs/frontend_scenes.md §2.7. CODE-CONFIRMED.
-        // spec: Docs/RE/specs/login_flow.md §2.1. CODE-CONFIRMED thresholds.
+        // Exactly 2 synthetic servers matching the 2-plate model.
+        // Server 1 = LEFT plate (action 400); Server 2 = RIGHT plate (action 401).
+        // spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED.
+        // Both servers have StatusCode=0 and load<2400 so the plate-click guard passes.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 37 / §11.4 guard. CODE-CONFIRMED.
         return
         [
-            // Light load (≤ 500). spec: login_flow.md §2.1 load threshold 500. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 1, DisplayName: "Jade Dragon", StatusCode: 1, Load: 120, OpenTime: 0),
-            // Medium load (>500). spec: load threshold 500. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 2, DisplayName: "Iron Phoenix", StatusCode: 1, Load: 650, OpenTime: 0),
-            // High load (>800). spec: load threshold 800. CODE-CONFIRMED.
-            // NOTE: ServerId 3 does NOT get the NEW badge; NEW_SERVER_INDEX=5 triggers it (§2.7).
-            new ServerEntry(ServerId: 3, DisplayName: "Azure Tiger", StatusCode: 1, Load: 980, OpenTime: 0),
-            // Full load (>1200). spec: load threshold 1200. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 4, DisplayName: "Shadow Crane", StatusCode: 1, Load: 1450, OpenTime: 0),
-            // Scheduled open with clock (status=3, open_time!=0). spec §2.3/§2.4. CODE-CONFIRMED.
-            // Load=10 → HH digits = (10/10=1, 10%10=0) → "10"; open_time=30 → MM digits = (30/10=3, 30%10=0) → "30".
-            // Display: "10:30". ServerId=5 = NEW_SERVER_INDEX → gets NEW badge. spec §2.7. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 5, DisplayName: "Thunder Snake", StatusCode: 3, Load: 10, OpenTime: 30),
-            // Preparing / under check: status=3, open_time==0, load==24. spec §2.3. CODE-CONFIRMED.
-            // NOTE: 24 is a LOAD sentinel under status 3, NOT a top-level status code. spec §2.3.
-            // Previous synthetic had StatusCode:24 which was WRONG — corrected to StatusCode:3, Load:24.
-            new ServerEntry(ServerId: 6, DisplayName: "Crimson Wolf", StatusCode: 3, Load: 24, OpenTime: 0),
+            // Server 1 — LEFT plate (action 400). Light load (≤ 500). spec login_flow.md §2.1. CODE-CONFIRMED.
+            new ServerEntry(ServerId: 1, DisplayName: "Jade Dragon", StatusCode: 0, Load: 120, OpenTime: 0),
+            // Server 2 — RIGHT plate (action 401). Medium load (>500). spec load threshold 500. CODE-CONFIRMED.
+            new ServerEntry(ServerId: 2, DisplayName: "Iron Phoenix", StatusCode: 0, Load: 650, OpenTime: 0),
         ];
     }
 

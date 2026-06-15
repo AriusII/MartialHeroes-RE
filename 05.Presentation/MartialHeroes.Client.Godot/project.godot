@@ -1,4 +1,4 @@
-﻿; Engine configuration file.
+; Engine configuration file.
 ; It's best edited using the editor UI and not directly,
 ; since the parameters that go here are not all obvious.
 ;
@@ -35,13 +35,13 @@ project/assembly_name="MartialHeroes.Client.Godot"
 
 enabled=PackedStringArray("res://addons/mcp_bridge/plugin.cfg")
 
-[physics]
-
-3d/physics_engine="Jolt Physics"
-
 [environment]
 
 defaults/default_clear_color=Color(0, 0, 0, 1)
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
 
 [rendering]
 

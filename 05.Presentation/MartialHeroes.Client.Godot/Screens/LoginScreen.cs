@@ -84,6 +84,31 @@ public sealed partial class LoginScreen : Control
     public delegate void QuitRequestedEventHandler();
 
     // -------------------------------------------------------------------------
+    // Letterbox curtain constants — two-edge reveal animation.
+    // spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1–2.
+    // "Curtain / letterbox opening animation" — two banner/curtain widgets advance ±2 per frame.
+    // Top bar: Y 0 → −222. Bottom bar: Y 326 → 548. Symmetric ±222.
+    // CODE-CONFIRMED (sub-state 2: widget-reposition / letterbox-curtain animation).
+    // -------------------------------------------------------------------------
+
+    // Top bar: slides from Y=0 up to Y=−222 (off the top of the 768-high canvas).
+    // spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 2. CODE-CONFIRMED direction.
+    private const int CurtainTopStartY = 0; // spec §1.5. CODE-CONFIRMED.
+    private const int CurtainTopEndY = -222; // off the top. spec §1.5. CODE-CONFIRMED.
+
+    // Bottom bar: slides from Y=326 down to Y=548 (off the bottom of the visible zone).
+    // spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 2. CODE-CONFIRMED.
+    private const int CurtainBotStartY = 326; // spec §1.5. CODE-CONFIRMED.
+    private const int CurtainBotEndY = 548; // off the bottom. spec §1.5. CODE-CONFIRMED.
+
+    // Bar height = |endY − startY| = 222 px (both bars same height). spec §1.5. CODE-CONFIRMED.
+    private const int CurtainH = 222;
+
+    // Advance speed — legacy is +2 px per frame (~120 px/s at 60 fps ≈ ~1.85 s full open).
+    // We use wall-clock at 120 px/s so it is frame-rate independent. spec §1.5. CODE-CONFIRMED.
+    private const float CurtainSpeed = 120f; // px/s — equivalent of +2/frame at 60 fps. spec §1.5. CODE-CONFIRMED.
+
+    // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
 
@@ -100,11 +125,28 @@ public sealed partial class LoginScreen : Control
     private int _quitModalAlpha; // current modulated alpha [0..255]
     private int _quitModalTarget; // 255 = showing, 0 = hiding
 
+    // Letterbox curtain bars (two-edge reveal). spec §1.5 sub-state 2. CODE-CONFIRMED.
+    private ColorRect? _curtainTop; // top black bar — slides off the top
+    private ColorRect? _curtainBot; // bottom black bar — slides off the bottom
+
+    private bool _curtainOpen; // true once both bars have reached their end positions
+
+    // Current animated Y positions (float for sub-pixel smoothness).
+    private float _curtainTopY = CurtainTopStartY;
+    private float _curtainBotY = CurtainBotStartY;
+
     private UiAssetLoader _assets = null!;
     private bool _ownsAssets;
 
     /// <summary>Optionally inject a shared asset loader (disposed externally when set).</summary>
     public UiAssetLoader? SharedAssets { get; set; }
+
+    /// <summary>
+    /// Optionally inject the shared front-end audio node.
+    /// When set, <see cref="FrontEndAudio.PlayLoginCurtainSfx"/> is called at curtain-open start.
+    /// spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1 "play login-enter SFX 861010105". CODE-CONFIRMED.
+    /// </summary>
+    public FrontEndAudio? Audio { get; set; }
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -127,6 +169,11 @@ public sealed partial class LoginScreen : Control
         {
             GD.PrintErr($"[LoginScreen] Build failed: {ex.Message}");
         }
+
+        // Fire the login-curtain SFX (861010105) at sub-state 1→2 edge (on LoginScreen reveal).
+        // spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1 — "play login-enter SFX 861010105". CODE-CONFIRMED.
+        Audio?.PlayLoginCurtainSfx();
+        GD.Print("[LoginScreen] Curtain SFX fired; two-edge letterbox opening animation started.");
 
         // Default focus: ID box when no saved id, PW box when id is pre-filled.
         // spec: Docs/RE/specs/frontend_scenes.md §11.2e "Default input focus". CODE-CONFIRMED.
@@ -174,11 +221,50 @@ public sealed partial class LoginScreen : Control
     }
 
     /// <summary>
-    /// Per-frame: advance dialog alpha ramps.
+    /// Per-frame: advance dialog alpha ramps + curtain letterbox open animation.
     /// spec: Docs/RE/specs/frontend_scenes.md §11.2g — ±64 alpha per frame toward 255/0. CODE-CONFIRMED.
+    /// spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 2 — curtain/letterbox opening animation. CODE-CONFIRMED.
     /// </summary>
     public override void _Process(double delta)
     {
+        float dt = (float)delta;
+
+        // --- Curtain (letterbox) open animation. spec §1.5 sub-state 2. CODE-CONFIRMED. ---
+        // Top bar moves from Y=0 → Y=−222 (off top); bottom bar from Y=326 → Y=548 (off bottom).
+        // Speed: CurtainSpeed px/s (= +2 px/frame equivalent at 60 fps). spec §1.5. CODE-CONFIRMED.
+        if (!_curtainOpen)
+        {
+            bool topDone = _curtainTopY <= CurtainTopEndY;
+            bool botDone = _curtainBotY >= CurtainBotEndY;
+
+            if (!topDone)
+            {
+                _curtainTopY -= CurtainSpeed * dt; // slide upward (Y decreases). spec §1.5.
+                if (_curtainTopY < CurtainTopEndY) _curtainTopY = CurtainTopEndY;
+            }
+
+            if (!botDone)
+            {
+                _curtainBotY += CurtainSpeed * dt; // slide downward (Y increases). spec §1.5.
+                if (_curtainBotY > CurtainBotEndY) _curtainBotY = CurtainBotEndY;
+            }
+
+            if (_curtainTop is not null)
+                _curtainTop.Position = new Vector2(0, _curtainTopY);
+            if (_curtainBot is not null)
+                _curtainBot.Position = new Vector2(0, _curtainBotY);
+
+            if (topDone && botDone)
+            {
+                _curtainOpen = true;
+                // Hide the bars entirely once fully off-screen (they never return).
+                if (_curtainTop is not null) _curtainTop.Visible = false;
+                if (_curtainBot is not null) _curtainBot.Visible = false;
+                GD.Print("[LoginScreen] Curtain letterbox fully open — bars hidden.");
+            }
+        }
+
+        // --- Quit-confirm modal alpha ramp. spec §11.2g. CODE-CONFIRMED. ---
         if (_quitModal is null) return;
 
         if (_quitModalAlpha != _quitModalTarget)
@@ -651,6 +737,38 @@ public sealed partial class LoginScreen : Control
         AddChild(_quitModal); // added to root so it overlays everything
         widgetCount++;
 
+        // =======================================================================
+        // [LETTERBOX] Two-edge curtain bars — added LAST so they render on top of all art.
+        // Top bar: full-width black rect, starts at Y=0, slides to Y=−222 (off-top).
+        // Bottom bar: full-width black rect, starts at Y=326, slides to Y=548 (off-bottom).
+        // spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1–2. CODE-CONFIRMED.
+        // ======================================================================
+
+        _curtainTop = new ColorRect
+        {
+            Name = "CurtainTop",
+            Color = Colors.Black,
+            Position = new Vector2(0, CurtainTopStartY),
+            Size = new Vector2(LoginLayout.RefWidth, CurtainH),
+            ZIndex = 100, // above all art and form widgets
+        };
+        AddChild(_curtainTop);
+
+        _curtainBot = new ColorRect
+        {
+            Name = "CurtainBot",
+            Color = Colors.Black,
+            Position = new Vector2(0, CurtainBotStartY),
+            Size = new Vector2(LoginLayout.RefWidth, CurtainH),
+            ZIndex = 100,
+        };
+        AddChild(_curtainBot);
+
+        // Initialise animation state — curtain starts closed (in starting positions).
+        _curtainTopY = CurtainTopStartY;
+        _curtainBotY = CurtainBotStartY;
+        _curtainOpen = false;
+
         GD.Print($"[LoginScreen] Built — {widgetCount} widgets; " +
                  $"vfs={(_assets.HasVfs ? "real-atlas" : "offline-fallback")}; " +
                  $"captions={(_assets.HasVfs ? "msg.xdb" : "en-fallback")}.");
@@ -736,10 +854,11 @@ public sealed partial class LoginScreen : Control
 
         // Yes button #2 — C@(120,136,113,40) NORMAL src(302,860), HOVER src(415,860), action 114.
         // spec §11.2d "Dialog #2 OK". CODE-CONFIRMED.
-        // Slightly offset (+44) to avoid overlap with #1 in this offline build.
+        // Both Yes buttons share the same canvas position (120,136,113,40) per the spec — they
+        // overlap intentionally; the user clicks either sprite rect and both call OnQuitConfirmed.
         var yes2 = WidgetFactory.MakeStateButton(
             _assets, LoginLayout.AtlasInventWindow,
-            LoginLayout.QuitConfirmYes2.X, LoginLayout.QuitConfirmYes2.Y + 44,
+            LoginLayout.QuitConfirmYes2.X, LoginLayout.QuitConfirmYes2.Y,
             LoginLayout.QuitConfirmYes2.W, LoginLayout.QuitConfirmYes2.H,
             LoginLayout.QuitConfirmYes2.SrcX, LoginLayout.QuitConfirmYes2.SrcY,
             LoginLayout.QuitConfirmYes2HoverSrcX, LoginLayout.QuitConfirmYes2HoverSrcY,
@@ -750,13 +869,14 @@ public sealed partial class LoginScreen : Control
         yes2.ActionFired += _ => OnQuitConfirmed();
         modal.AddChild(yes2);
 
-        // No / Cancel — not in the spec as a widget (quit-confirm has only Yes actions 113/114).
-        // Added for usability in offline build. Placed in the right quarter.
+        // No / Cancel — not in the original spec (§11.2d: only Yes actions 113/114 exist there).
+        // Added as a usability affordance so the player can dismiss the modal without quitting.
+        // Placed below the Yes button row to avoid covering the spec-position Yes sprites.
         var noBtn = new Button
         {
-            Text = _assets.Text(4010u, "No"),
-            Position = new Vector2(LoginLayout.ModalChromeW - 140, LoginLayout.QuitConfirmYes1.Y),
-            Size = new Vector2(100, 36),
+            Text = _assets.Text(4010u, "Cancel"),
+            Position = new Vector2(LoginLayout.QuitConfirmYes1.X, LoginLayout.QuitConfirmYes1.Y + 50),
+            Size = new Vector2(LoginLayout.QuitConfirmYes1.W, 36),
         };
         noBtn.Pressed += HideQuitConfirmModal;
         modal.AddChild(noBtn);

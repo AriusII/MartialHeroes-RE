@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!-- THROWAWAY harness — V11 lane validation for .sod/.mud/.bud — NOT in MartialHeroes.slnx, never committed -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>14.0</LangVersion>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="C:\Users\Arius\RiderProjects\MartialHeroes\03.Storage.Assets\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj" />
+        <ProjectReference Include="C:\Users\Arius\RiderProjects\MartialHeroes\03.Storage.Assets\MartialHeroes.Assets.Parsers\MartialHeroes.Assets.Parsers.csproj" />
+    </ItemGroup>
+</Project>

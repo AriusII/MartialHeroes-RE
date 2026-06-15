@@ -3,9 +3,10 @@
 // The pre-login intro scene (OpeningWindow) — the "red ribbon" crawl + splash slideshow.
 //
 // TWO INDEPENDENT ANIMATED LAYERS, per spec:
-//   1. SCENARIO CRAWL  — openning_scenario.dds (1024×2048), positional Y-translate downward.
-//      spec: Docs/RE/specs/intro_sequence.md §2. CODE-CONFIRMED.
+//   1. SCENARIO CRAWL  — openning_scenario.dds (1024×2048), scrolls UPWARD (credits-style).
+//      spec: Docs/RE/specs/frontend_scenes.md §1.0.1/§1.0.3 — "scrolled upward". CODE-CONFIRMED.
 //      Speed: 30 design-px/s after a ~1000 ms gate; clamp/stop at 1843.
+//      Sprite starts at Y=CanvasH (off the bottom); Y = CanvasH − _scrollPos as _scrollPos grows.
 //   2. SPLASH SLIDESHOW — openning_001..004.dds (1024×768), 4-state machine, 17500 ms dwell.
 //      spec: Docs/RE/specs/intro_sequence.md §3. CODE-CONFIRMED.
 //      Alpha ramp 0→250 (frame-gated ±1 step) per panel.
@@ -58,6 +59,11 @@ public sealed partial class OpeningWindow : Control
     // Scenario quad size. spec: intro_sequence.md §1. SAMPLE-VERIFIED.
     private const float ScenarioW = 1024f; // spec §1. SAMPLE-VERIFIED.
     private const float ScenarioH = 2048f; // spec §1. SAMPLE-VERIFIED.
+
+    // Reference canvas height (matching ScreenHost 1024×768 design canvas).
+    // Used to anchor the crawl sprite at the bottom of the viewport so it rises upward.
+    // spec: intro_sequence.md §2 / frontend_scenes.md §11.0 "design canvas 1024×768". CODE-CONFIRMED.
+    private const float CanvasH = 768f;
 
     // Slideshow. spec: intro_sequence.md §3. CODE-CONFIRMED.
     private const int SlideshowFrameCount = 4; // 4 panels. spec §3.1. CODE-CONFIRMED.
@@ -243,10 +249,13 @@ public sealed partial class OpeningWindow : Control
         if (scenarioTex is not null)
         {
             _scenarioRect.Texture = scenarioTex;
-            // Position: centred horizontally on the 1024-wide reference canvas;
-            // vertical position starts at Y=0 and is scrolled downward.
-            // spec: intro_sequence.md §1 — "centred horizontally". CODE-CONFIRMED.
-            _scenarioRect.Position = new Vector2(0f, 0f);
+            // Position: centred horizontally on the 1024-wide reference canvas.
+            // VERTICAL START: place sprite top at Y = CanvasH so the image begins off the bottom.
+            // As _scrollPos grows 0→1843, the sprite rises (Y = CanvasH − _scrollPos), revealing
+            // successive rows of the tall 2048-px strip from the bottom upward — credits-style scroll.
+            // spec: intro_sequence.md §1 — "scrolled upward". §1.0.1 CODE-CONFIRMED.
+            // spec: frontend_scenes.md §11.0 — design canvas 1024×768. CODE-CONFIRMED.
+            _scenarioRect.Position = new Vector2(0f, CanvasH); // start: sprite bottom-edge at canvas bottom
             _scenarioRect.Size = new Vector2(ScenarioW, ScenarioH);
             GD.Print($"[OpeningWindow] Scenario crawl loaded: {ScenarioPath}");
         }
@@ -254,7 +263,7 @@ public sealed partial class OpeningWindow : Control
         {
             // Offline fallback: a dim coloured rect that fades out quickly.
             _scenarioRect.Texture = null;
-            _scenarioRect.Position = new Vector2(0f, 0f);
+            _scenarioRect.Position = new Vector2(0f, CanvasH);
             _scenarioRect.Size = new Vector2(ScenarioW, ScenarioH);
             GD.Print($"[OpeningWindow] Scenario not found in VFS: {ScenarioPath} — using placeholder.");
         }
@@ -304,26 +313,26 @@ public sealed partial class OpeningWindow : Control
         }
         else
         {
-            // Manual nudge mode. spec: intro_sequence.md §2.2.
-            // Arrow-up = scroll up; arrow-down = scroll down.
+            // Manual nudge mode after auto-scroll completes. spec: intro_sequence.md §2.2.
+            // _scrollPos is a logical "how far up from the start" counter (0 = bottom, 1843 = top).
+            // Arrow-up nudges forward (more of the strip revealed = _scrollPos increases = sprite Y decreases).
+            // Arrow-down nudges backward (_scrollPos decreases = sprite Y increases = scrolls back down).
             if (global::Godot.Input.IsActionPressed("ui_up"))
             {
-                _scrollPos = Mathf.Max(0f, _scrollPos - dt * ScrollSpeed); // spec §2.2. CODE-CONFIRMED.
+                _scrollPos = Mathf.Min(ScrollClamp, _scrollPos + dt * ScrollSpeed); // nudge forward (up). spec §2.2.
             }
             else if (global::Godot.Input.IsActionPressed("ui_down"))
             {
-                _scrollPos = Mathf.Min(ScrollClamp, _scrollPos + dt * ScrollSpeed); // spec §2.2. CODE-CONFIRMED.
+                _scrollPos = Mathf.Max(0f, _scrollPos - dt * ScrollSpeed); // nudge back (down). spec §2.2.
             }
         }
 
-        // Drive the sprite's on-screen Y position. spec §2.1 — "set destination Y". CODE-CONFIRMED.
-        // The sprite's native size is 1024×2048; we translate it upward (negative Y offset)
-        // so that as _scrollPos increases the image scrolls downward on-screen:
-        //   Y_screen = -_scrollPos keeps the top of the image at the top while the
-        //   content revealed below increases as pos grows.
-        // Actually the spec says "destination Y is translated downward" — the sprite Y is pushed
-        // positively to bring more of the bottom portion into view:
-        _scenarioRect.Position = new Vector2(_scenarioRect.Position.X, _scrollPos);
+        // Drive the sprite's on-screen Y position. spec §1.0.3 / §1.0.1 — "scrolled upward". CODE-CONFIRMED.
+        // Godot +Y is DOWN. To scroll upward (credits-style) the sprite must RISE, i.e. its Y
+        // decreases as _scrollPos grows. Starting position = CanvasH (sprite anchored at canvas
+        // bottom); as _scrollPos increases 0 → 1843 the sprite moves to Y = CanvasH − 1843 = −1075,
+        // pulling successive rows of the 2048-px strip up through the viewport from bottom to top.
+        _scenarioRect.Position = new Vector2(_scenarioRect.Position.X, CanvasH - _scrollPos);
     }
 
     // -------------------------------------------------------------------------

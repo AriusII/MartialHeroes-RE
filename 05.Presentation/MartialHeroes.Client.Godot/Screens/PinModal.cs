@@ -13,8 +13,9 @@
 //   Each position builds a STACK of 10 overlapping 52×52 buttons (one per digit 0..9);
 //   exactly one per position is visible (the one matching perm[p]).
 //
-//   Digit glyph source (password.dds):
-//     digit d: srcY = d*52; columns: normal=560, hover=664, pressed=612.
+//   Digit glyph source (password.dds) — CORRECTED per spec §11.3b:
+//     digit d: srcX = d*52 (U/column axis); state rows: normal=560, hover=664, pressed=612 (V/row axis).
+//     Normal-state rect: (d*52, 560, 52, 52). Previous revision had the axes swapped; corrected in §11.3b.
 //
 //   Scramble: Fisher-Yates shuffle of [0..9] seeded from the wall-clock time.
 //     Re-rolled on every open AND on Reset.

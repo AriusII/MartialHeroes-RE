@@ -356,3 +356,21 @@ firewall grep found zero pseudo-C/addresses across all committed specs.*
 
 *Maintained by the Top Orchestrator (main session). Update phase statuses in place as waves land.
 Commit only on explicit maintainer request.*
+
+---
+
+## CAMPAIGN VFS-MASTERY (VFS-DEEP-III) — exhaustive two-witness re-derivation of every `data.vfs` format — **STATUS: DELIVERED (uncommitted)**
+
+> Run 2026-06-15. Full record in `Docs/RE/journal.md` (same date) and `_dirty/campaign8/`. Specialises `CAMPAIGN_TEMPLATE.md`.
+
+- **Mandate (maintainer):** re-derive **every** VFS file format INDEPENDENTLY from its IDA loader (a second witness for ALL formats, not just residuals); cross-validate against ALL real instances; full C# hardening. Static-only (no debugger this cycle).
+- **W0 pré-vol — ✅.** IDA MCP up (doida.exe 263bd994); VFS on disk (clientdata 3.8GB); baseline build green; `_dirty/campaign8/` + ledger created.
+- **W1 Phase A cartography (3 IDA readers) ∥ Phase V black-box (16 lanes) — ✅.** Read path mapped; caller→format census = 8 loader families; C05 denoised (53 genuine / 40 GHTex / 11 noise); gap-0x608C70 refuted; 16-family cross-instance validation with a "fields-awaiting-loader-witness" ledger.
+- **W2 Phase B comprehension (12 IDA lanes, sub-waves ≤3) — ✅.** Independent loader re-derivation + adjudication. Headline: sound stride **48 confirmed** (spec 52 wrong, C# fixed); regiontable **48 vindicated** (black-box "32" was a false correction → gate prevented a regression).
+- **W3 Phase C HARD GATE — ✅.** Two-witness reconciliation → `_dirty/campaign8/reconcile/W3-promotion-map.md` (drives P/D/E).
+- **W4 Phase P promotion (≈18 asset-spec-author, 1 spec/file) — ✅.** 21 committed `formats/*.md` corrected; firewall PASS (no address/pseudo-C leaked).
+- **W5 Phase D IDB annotation (1 serialized writer) — ✅.** 172 renames + 240 comments + 1 define_func; TRIPWIRE 0; IDB saved (never committed).
+- **W6 Phase E C# hardening — ✅.** Parsers corrected per two-witness verdicts; Models updated in lockstep; **+~220 new test facts**; downstream consumers migrated (Mapping/Domain/Godot adapters). DBG-pending fields kept opaque (never fabricated).
+- **W7 Phase R gates — ✅.** Nuked full build **0/0**; **1848 tests / 0 failed**; clean-room audit **PASS**.
+- **W8 Phase Z — ✅ (this entry + journal).** `names.yaml` function-name sync deferred to `ida-naming-sync` (names durable in the IDB). **Commit: pending maintainer go (targeted paths — tree entangled with prior campaign3 work).**
+- **Deferred follow-up (Godot presentation TODOs):** class→skin_class formal table, audio per-bus option store, EnvironmentNode lighting-from-env-bin, inventory-title msg.xdb id (unrecovered), water unwired-by-choice memo.

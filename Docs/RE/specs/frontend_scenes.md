@@ -141,20 +141,40 @@ The backdrop is governed by a 4-phase fade machine, ticked from the per-frame up
 The fade machine reaching the end of phase 4 is what drives the scene toward teardown and the
 auto-transition (§1.0.5). The 70.0 s figure is exact (4 × 17.5 s).
 
-### 1.0.3 Scroll crawl — runs alongside (CODE-CONFIRMED rate/bound; seconds arithmetic)
+### 1.0.3 Scroll crawl — a positional translate; screen-direction must be inverted to read UPWARD (CODE-CONFIRMED rate/bound/mechanism; UPWARD direction PLAUSIBLE / optional-live-confirm)
 
 The `openning_scenario` crawl is an independent machine, also ticked every frame:
 
 - a one-time **1 000 ms** start delay before scrolling begins;
-- the scroll position advances at **30.0 units per second** (wall-clock based);
-- it stops at a bound of **1843.0 units**, where a "scroll complete" flag is set;
-- after completion, two input events (a back / forward nudge pair) allow manual nudging of the scroll
-  position, clamped to roughly **30 … 1833**.
+- a **single scroll-position value** advances at **30.0 units per second** (wall-clock based — each
+  frame adds `dt_seconds × 30.0`, so it is frame-rate independent; the position **increments**);
+- it stops at a bound of **1843.0 units**, where a "scroll complete" flag is set; there is **no wrap**;
+- after completion, two held-input events (a back / forward nudge pair) allow manual nudging of the
+  scroll position at the same 30 u/s, clamped to roughly **0 … 1843**.
+
+**Mechanism — how the position becomes motion (CODE-CONFIRMED).** The scenario texture is drawn as a
+single tall (1024 × 2048) image quad, centred horizontally (left edge at `screen-width/2 − 512`). The
+crawl is a **positional translate of that whole quad**: each active frame the scroll-position value is
+written directly as the quad's **destination vertical placement** (the destination top-left Y) — it is
+**not** a texture-UV / source-rect offset. The only animated quantity is the quad's screen position,
+0 → 1843.
+
+**Screen direction — the literal read is +Y-DOWN; it must be inverted to match the official UPWARD
+crawl.** The UI sprite-batch this quad draws through uses a **top-left-origin, +Y-down** pixel
+convention, so a naive port that copies the literal "position increases" rule translates the quad
+**downward**. The official client's crawl reads **upward** (credits-style). A faithful port must drive
+the same single monotonic parameter **0 → 1843 at 30 u/s** (1 s delay, latch at 1843, centred X), but
+**invert the screen-direction sign** relative to the literal +Y-down reading so the visible texture
+content **rises** on screen. Preserve the 30 u/s rate, the 1 s start delay, the 1843 bound, and the
+centred X **exactly** — only the on-screen scroll direction must be UPWARD.
 
 Derived run length ≈ **1843 / 30 ≈ 61 s** (plus the 1 s start delay). Because this is shorter than the
 70 s fade dwell, the crawl finishes first and idles (or is hand-nudged) until the fade machine ends
-the scene. The 30 u/s rate and 1843 bound are CODE-CONFIRMED; the human-readable seconds are
-arithmetic over a wall-clock timer (robust, but reported as derived).
+the scene. The 30 u/s rate, the 1843 bound, and the positional-translate mechanism are **CODE-CONFIRMED**;
+the human-readable seconds are arithmetic over a wall-clock timer (derived). The **UPWARD on-screen
+direction is PLAUSIBLE** (observed-ground-truth-driven; the binary literal describes a +Y-down downward
+translate) — one optional live-debugger read of the sprite's on-screen Y over a few seconds would
+promote it to CODE-CONFIRMED (non-blocking).
 
 ### 1.0.4 Audio cue (CODE-CONFIRMED)
 
@@ -246,8 +266,9 @@ parentheses). Decorative widgets (labels, banner slices, option backdrops) carry
 | **Help button** | 105 (`i`) | throttled (~10 s) server-list re-fetch path (advance to sub-state 34) |
 | **Option strip tab 1** | 111 (`o`) | option-page select |
 | **Option strip tab 2** | 112 (`p`) | option-page select / sub-panel toggle |
-| **Server name-strip buttons ×5** | 115..119 (range) | server entry select; active only when the server list is shown (sub-state 37). Covered in §2.4. |
-| **Help-strip range** | 115..124 | contextual help-strip ids |
+| ~~**Server name-strip buttons ×5** (115..119)~~ | — | **SUPERSEDED** — there are no 5 server name-strip selectors. In the login window, **115..124 are the server-list PAGER buttons** (active only at sub-state 37; page = action − 115; they re-paint the 2-plate view and never carry a server record or commit a selection — §11.4). The actual server selectors are the **two parchment plates, actions 400/401** (§2.4 / §11.4). |
+| ~~**Help-strip range** (115..124)~~ | — | **SUPERSEDED** — not a help strip; these are the server-list pager buttons (see the superseded row above and §11.4). |
+| **Server plates ×2** | 400 / 401 | **the two selectable SERVERS** (1 plate = 1 server, max 2 per page); active only when the server list is shown (sub-state 37). Action **400 = LEFT** = record `2·page`; **401 = RIGHT** = record `2·page + 1`. Commits the selection (§2.4 / §2.5 / §11.4). |
 
 Keyboard/system class (event-class byte = 1): id **9** swaps the focused textbox (ID ↔ PW); id
 **10** on the login form page runs the same logic as the OK button (version gate → sub-state 29),
@@ -422,13 +443,15 @@ the front-end flow. **It supersedes two CODE-CONFIRMED-but-wrong labels in `ui_s
 > endpoint string) are owned by `login_flow.md` §2.
 
 > **Server-list widgets are built ONCE, toggled by visibility (CODE-CONFIRMED).** The server-list
-> overlay (states 35/36/37) is not a separate scene — all its widgets (the 10 server-row buttons
-> actions **115..124**, the two channel-block parchment plates actions 400/401, scroll arrows, refresh
-> button action 105, and the two shared notice/error dialogs) are constructed by the single login
-> window builder at scene build and merely shown/hidden by the tick. A clicked row (action 115+idx) at
-> state **37** commits the selection, persists `Lastserver`, and derives the channel-endpoint port as
-> `10000 + selected server id` for the state-**38** fetch — consistent with the §11.4 layout.
-> <!-- source: _dirty/structs/serverlist-displaylist.md -->
+> overlay (states 35/36/37) is not a separate scene — all its widgets (the **two server plates**,
+> actions **400/401**, which **are the selectable servers**, LEFT plate = first record; the **ten pager
+> buttons**, actions **115..124**, which **page the 2-plate view** (page = action − 115) and are reset
+> to a blank UV by the painter — **not** server rows; scroll arrows; refresh button action 105; and the
+> two shared notice/error dialogs) are constructed by the single login window builder at scene build and
+> merely shown/hidden by the tick. A clicked **plate** (action 400/401) at state **37** commits the
+> selection, persists `Lastserver`, and derives the channel-endpoint port as `10000 + selected server id`
+> for the state-**38** fetch — consistent with the corrected §11.4 layout.
+> <!-- source: _dirty/structs/serverlist-displaylist.md, _dirty/campaign4/frontend-deep2/laneB -->
 >
 > **No login BGM (CODE-CONFIRMED absence).** No music/stream start was found anywhere in the login
 > tick or in any of its state-enter branches: the tick plays the intro **SFX 861010105** and queues
@@ -444,16 +467,60 @@ the front-end flow. **It supersedes two CODE-CONFIRMED-but-wrong labels in `ui_s
 > 32–41) agree with this spec. **An orchestrator/owner should correct `ui_system.md` §6.3 rows 29
 > and 31.** Recorded here, not edited there.
 
+## 1.5a Login-window curtain — the two-edge letterbox OPEN geometry (CODE-CONFIRMED)
+
+> This is the exact geometry behind the §1.5 sub-states **1–5** intro curtain (the row-2 "carved-stone
+> window / red-ribbon" motion). It is the **login window's own curtain**, driven by the login per-frame
+> **sub-state** machine — **NOT** the opening-window scene's 4-phase fade machine of §1.0.2, and **NOT**
+> a spawned particle effect. (This subsection resolves the open-direction/magnitude question raised as
+> the "§1.0.2 NEW letterbox" deep-pass delta; the content belongs to the login curtain, so it is
+> recorded here with §1.5.)
+
+The curtain is a **two-edge letterbox that OPENS OUTWARD** to uncover the form. Exactly **two**
+horizontal edge widgets move, driven together by **one shared frame counter** that resets to 0 and
+advances by **+2 per frame** up to a bound of **222**:
+
+| Edge | Start Y | End Y | Motion |
+|---|---|---|---|
+| **TOP** child | **0** | **−222** | slides **up**, off the top of the canvas |
+| **BOTTOM** child | **326** | **548** | slides **down**, off the bottom of the canvas |
+
+- During the sweep the per-frame counter `C` (0, +2/frame, while `C ≤ 222`) drives **TOP Y = −C** and
+  **BOTTOM Y = C + 326**. Both edges sweep **222 units symmetrically** at **2 units/frame**, so they
+  open **together** (~111 frames in the original). A secondary inner widget is revealed **late** (placed
+  once `C` passes ~200 of the 222 sweep). When `C` exceeds 222 the end positions are written explicitly
+  (TOP Y = −222, BOTTOM Y = 548).
+- **Sub-state binding:** state **1** seeds the closed/start positions **and plays the login-enter SFX
+  id 861010105** (a sound id, not a VFX id); state **2** sweeps the open until `C > 222`; states **3/4**
+  settle; state **5** reveals the ID/PW boxes + buttons and **stops** the animation; state **6** is the
+  resting form.
+- The per-frame step is **frame-gated** (+2/frame), so the original open duration is frame-rate
+  dependent; a faithful port may keep the **±222 sweep** but pick a fixed wall-clock duration for
+  determinism. The canvas convention is **top-left-origin, +Y-down, 1024 × 768**.
+
+**Confidence:** CODE-CONFIRMED (the two edges, the 0 → −222 / 326 → 548 endpoints, the shared
++2/frame counter bound 222, the open-outward motion, and the sub-state 1 → 5 binding).
+
 ## 1.6 Save-ID persistence (CODE-CONFIRMED)
 
 Toggling the Save-ID checkbox (action `h`) and a successful credential validation persist the
 account id to a loose client INI file:
 
-- **File:** `DoOption.ini`, section `[DO_OPTION]`, key `OPTION_ID`.
+- **File:** `DoOption.ini`, section `[DO_OPTION]`, key `OPTION_ID` (an **INI file** string, written via
+  the Win32 private-profile-string API).
 - On scene build the box is pre-filled from this key (unless it holds the literal `"(null)"`).
 - Clearing the checkbox clears/over-writes the key.
 
 This is a **client-local convenience only** — never sent on the wire.
+
+> **Save-ID (INI) vs remembered-server (registry) — two SEPARATE persistences; do not conflate
+> (CODE-CONFIRMED).** The Save-ID **account string** is persisted to the loose **`DoOption.ini`**
+> (`[DO_OPTION] OPTION_ID`, a string). The **remembered server id** is a different persistence entirely:
+> it is written to the **registry** value **`Lastserver`** (a `u32` under `HKLM\software\crspace\do`) at
+> server-selection commit (sub-state 37, §2.5). Save-ID **never** touches the registry, and `Lastserver`
+> **never** holds the account id. (An earlier dirty note loosely described the Save-ID write as a
+> registry write — that conflated the two; the account id is the INI write, the server id is the
+> registry write.)
 
 ## 1.7 What the Login click sends (cross-reference, not owned here)
 
@@ -598,18 +665,38 @@ the presentation rule.)*
 
 ## 2.5 Selection commit and `Lastserver` (CODE-CONFIRMED)
 
-When a server is selected (flow sub-state 37, or auto-selected when the list has exactly one entry):
+> **Display model — two PLATES are the servers; the ten 115..124 buttons are PAGERS (CODE-CONFIRMED;
+> supersedes the old "10 server-rows" reading).** The server list is presented as **two parchment
+> plates** (UI actions **400/401**), and **each plate is one server** — 1 plate = 1 server, **max 2
+> shown per page**. **Action 400 = LEFT plate = record `2·page`; action 401 = RIGHT plate = record
+> `2·page + 1`.** The 8-byte server record (§2.2) is painted **onto a plate** (localized name → plate
+> header label; status/load → plate label line). The ten widgets at **actions 115..124 are PAGER
+> buttons**, not server rows and not selectable servers: clicking one sets **page = action − 115** and
+> **re-paints the same 2-plate view** at that 2-record offset; the painter **resets all ten to a blank
+> UV** (which is why they never show server content). With ≤ 2 records only the left plate is live; the
+> pagers exist as capacity to step through a list longer than two. (This corrects the earlier model that
+> read the ten buttons as server rows and the two plates as channel toggles — see §11.4 and the
+> superseded §1.2 rows.)
 
-- The selected `server_id` is written into the window's **selected-server field** (it is later added
-  to 10000 to derive the channel-fetch port — §2.6).
+A server is committed by a **plate click** (flow sub-state 37, or auto-selected when the list has
+exactly one entry):
+
+- The clicked **plate** (action 400/401), **gated to sub-state 37** and guarded by **`status_code == 0
+  && load < 2400`**, resolves the record index `(action − 400) + 2·page` and writes that record's
+  **`server_id`** into the window's **selected-server field** (it is later added to 10000 to derive the
+  channel-fetch port — §2.6).
 - The selected id is persisted to the registry value **`Lastserver`** under
   `HKLM\software\crspace\do` (a `u32`).
+- The commit advances the flow **37 → 38** and fetches the per-server channel endpoint on port
+  **`10000 + server_id`** — **there is no intermediate channel-picker step** (channel resolution is
+  entirely post-selection on that fetch).
 - On the **next** visit, if `Lastserver` is present, the list is shown in a **randomized display
   order that pins the remembered server** (§2.7); otherwise a plain sequential order is used.
 
 `status_code == 100` plus an auto-advance flag drives the **single-server auto-connect** path:
-when the list has one entry whose status is "current", the client persists `Lastserver` and advances
-straight to the channel-endpoint fetch (sub-state 38) without a manual click.
+when the list has one entry whose status is "current", the client forces the (left) plate visible,
+persists `Lastserver`, and advances straight to the channel-endpoint fetch (sub-state 38) without a
+manual click.
 
 ## 2.6 Channel-endpoint resolve → join (CODE-CONFIRMED; payload capture-unverified)
 
@@ -1202,10 +1289,11 @@ child (the same manager the main world uses). That manager builds the lighting r
 ### 3.6.2 Fog / sky (CODE-CONFIRMED field)
 
 The select scene explicitly **zeroes the fog-blend OFFSET field** — the sky-param struct's **+8**
-field, set via `base · factor · 1.4` with **factor 0**. The renderer consumes `colour0 − offset0`, so
-this is the **distance-fog blend offset**; zeroing it turns **distance fog off** behind the preview
-row, so the row reads clearly. (The resulting fog **colour** still depends on the area-0 light/material
-data — data-driven.)
+field, set via `base · factor · 1.4` with **factor 0**. **This is now CODE-CONFIRMED directly in the
+select-scene build helper** (a deep re-walk found the builder calls the sky module's fog-blend-offset
+setter with the literal argument **0.0**), **promoted from the earlier inferred reading**. The renderer consumes `colour0 − offset0`, so this is the **distance-fog blend offset**;
+zeroing it turns **distance fog off** behind the preview row, so the row reads clearly. (The resulting
+fog **colour** still depends on the area-0 light/material data — data-driven.)
 
 ### 3.6.3 Sky-data asset set for the char-select area (CODE-CONFIRMED — area 0, NOT area 015)
 
@@ -1273,11 +1361,13 @@ The scene builder spawns **exactly one** ambient map effect from a code immediat
 **380003000**, which is the internal id of **`char_select-u.xeff`** (the composite torch/brazier corona
 effect, 68 sub-effects). It is spawned at world **(508.483, 69.887, −9758.569)** — the **centre of the
 preview character row**, framed dead-centre by the camera (the same point as the terrain-init pivot,
-§3.7.2) — with **identity quaternion (0,0,0,1)** and **scale 1.0**. It is pooled and inserted into the
-active-effect list, so it is a **standing background effect for the whole select session**, not a
-one-shot. This is the **builder's sole pooled-spawn call** — the **only** effect-id immediate reachable
-from the scene builder, with **no second hidden spawn**; the braziers are this **single composite
-`.xeff`**, not per-pillar spawns and not `.bud`-baked. The per-area ambient manifest path is
+§3.7.2) — with **identity quaternion (0,0,0,1)** and **scale 1.0**. The builder **first clears the
+active-effect list and resets the particle manager**, *then* inserts this one pooled effect — so it is
+a **standing background effect for the whole select session**, not a one-shot, and starts from a known
+empty state. This is the **builder's sole pooled-spawn call** — the **only** effect-id immediate
+reachable from the scene builder, with **no second hidden spawn** (the whole-binary immediate count for
+**380003000** is exactly one); the braziers are this **single composite `.xeff`**, not per-pillar
+spawns and not `.bud`-baked. **There are ZERO other code-spawned effects** in the build path. The per-area ambient manifest path is
 **`data/effect/map000.txt`** (area string "000" from area 0); that file is **absent** in the shipped
 VFS (§(b) below), so no manifest records contribute.
 <!-- source: _dirty/campaign5/charselect3d/fx-spawn-path.md, _RECONCILED.md (LANE 2) -->
@@ -1458,10 +1548,26 @@ slot of the global sound manager. There is **no stop-before-play guard** at that
 select-scene teardown performs **no sound teardown** (no stop, no clear of the music slot).
 
 Because the select scene is **re-enterable** (engine state 5 → 4 on logout, and the `3/1` char-list
-forcing state 4), the BGM cue is **re-issued on every entry**. The single-slot reuse inside the sound
-manager only suppresses a duplicate when the music slot still holds the *same* valid buffer; when an
-intervening in-game session has swapped or orphaned that slot, the re-issued 920100200 starts a
-**second overlapping voice → double music**.
+forcing state 4), the BGM cue is **re-issued** at more than one site. A whole-binary search for cue
+**920100200** finds **three PLAY firings**, all on the **single kind-0 music slot**, plus one STOP and
+one precache registration:
+
+| Site | Where | Loop | Role |
+|---|---|---|---|
+| **PLAY #1 (canonical)** | the state-4 build path (select-window constructor / init-from-char-list) | **loop = 1** | the single intended BGM start |
+| PLAY #2 | the dispatch **sub-form-return** case (a create/delete sub-form dismissed back to the 3D scene, after the scene reset) | loop = 0 | re-fires on sub-form return |
+| PLAY #3 | the **`3/6` create-result tail** (after the char-count increment, on a create) | loop = 0 | re-fires on character create |
+| STOP | enter-world (enter-selected-character) | — | stops the slot **only** if it still holds 920100200 |
+| (registration) | the system-cue precache table | — | not a play |
+
+The PLAY helper's **only** de-dup is "reuse the slot buffer if one is present" — there is **no
+already-playing test** — and the select-scene teardown performs **no sound teardown** (no stop, no
+clear of the music slot). So an in-session re-fire (PLAY #2 / #3) replays while the constructor voice
+is still on the slot; and across scenes, entering select (PLAY #1) → entering the game (state 5, whose
+in-game zone-BGM orphans the shared slot) → returning to select (5 → 4, PLAY #1 again) starts a
+**second overlapping voice → double music**. (The structure — three unguarded plays + missing stop — is
+CODE-CONFIRMED; *which* concrete re-entry leaves two voices live at runtime is PLAUSIBLE /
+debugger-confirmable.)
 
 > **SUPERSEDE** the earlier note that "no front-end code starts the char-select BGM." The
 > select-window constructor itself starts it (state-4 enter). **Confidence:** the start call site,
@@ -1469,10 +1575,12 @@ intervening in-game session has swapped or orphaned that slot, the re-issued 920
 > re-entry leaves two voices live depends on the in-game zone-BGM slot handling at runtime
 > (debugger-confirmable).
 
-**Fix contract for a faithful rebuild:** **(1)** stop cue **920100200** on char-select scene-exit, and
-**(2)** guard the re-issue so entering the scene with that cue already playing on the music slot is
-**idempotent** (do not start a second voice). This restores the intended single-BGM-voice behaviour
-without changing the audible track.
+**Fix contract for a faithful rebuild:** treat **920100200** as **one owned BGM voice on one music
+slot** whose **canonical start is PLAY #1 (the build-path loop)**; then **(1)** make the start
+**idempotent** — if the cue is already playing on the slot, do nothing (this neutralises PLAY #2, PLAY
+#3, and the cross-scene re-entry); and **(2)** **stop** cue **920100200** on char-select scene-exit (the
+stop the original omits). This restores the intended single-BGM-voice behaviour without changing the
+audible track.
 
 > The separate ambient sound cue **924000001** (§3.6.5c, kind-3 channel) is **not** the BGM and is not
 > audible in char-select; do not conflate the two.
@@ -1831,7 +1939,16 @@ For the presentation/Godot engineer. Sound ids resolve through `sound_runtime.md
 **Loading-screen textures** (chosen at random on entering the Load state): `loading.dds`,
 `loading06.dds`, `loading08.dds`.
 
-### 9.1 Loading screen — visual composition (CODE-CONFIRMED)
+### 9.1 Loading screen — visual composition (CODE-CONFIRMED — VERIFIED by deep re-walk)
+
+> **VERIFIED (deep re-walk, CODE-CONFIRMED).** A fresh static re-walk of the LOAD-state start/draw
+> handlers re-confirms every constant in this section: the background is `rand() % 3` over exactly the
+> three candidates `loading.dds` / `loading06.dds` / `loading08.dds` (no dedicated `srand` at the pick
+> site — the process-global PRNG); the looping cue **920100100** plays on the **kind-0 music slot — the
+> SAME music slot the char-select BGM (920100200, §3.8.1) later reuses** (so the loading cue and the
+> char-select BGM contend for one slot); and the progress-bar frame rect is **X ∈ [−499, −170], Y ∈
+> [−363, −140]** under the screen-scale model **scaleX = liveW/1024, scaleY = liveH/768**. §9.1 is
+> accurate. <!-- source: _dirty/campaign4/frontend-deep2/laneC -->
 
 Cross-links the loading **mechanics** (engine state 2 LOAD — the VFS bulk-preload gate driven by a
 worker loading ~50 global data tables, exited on the running-flag clear + grace, NOT on the bar; see
@@ -1867,7 +1984,8 @@ the state-2 LOAD node in §10 and `client_runtime.md` §7). This sub-block is th
   numeric percent overlay. Any "loading…" wording the player sees is **baked into the DDS art** itself.
 
 - **SFX.** A **looping** cue `920100100` (source dir `data/sound/2d/`) plays for the duration of the
-  LOAD state (stopped at teardown); the abort/leave path plays `861010106`.
+  LOAD state (stopped at teardown), on the **kind-0 music slot — the same slot the char-select BGM
+  920100200 reuses** (§3.8.1); the abort/leave path plays `861010106`.
 
 - **Timing.** The bar tracks the VFS bulk-preload counter (0..100, accumulated by the ~50-table
   worker). Loop-exit is gated by the scene running-flag clear **+ a ~500 ms grace**, not by the bar
@@ -2553,6 +2671,14 @@ The binary builds **two different** on-screen numeric keypads. Only the first is
 
 ## 11.4 Server-list overlay - widget layout (CODE-CONFIRMED literals)
 
+> **CORRECTED DISPLAY MODEL (CODE-CONFIRMED; supersedes the prior "10 rows + 2 channel plates"
+> reading).** The two parchment **PLATES (actions 400/401) ARE the selectable servers** — 1 plate = 1
+> server, max 2 shown per page, action **400 = LEFT** = record `2·page`, action **401 = RIGHT** = record
+> `2·page + 1`; the 8-byte record (§2.2) paints **onto a plate**. The ten **115..124 widgets are PAGER
+> buttons** — page = action − 115, re-paint the 2-plate view, reset to a blank UV by the painter — **NOT
+> server rows and NOT selectable servers**. The old reading (ten server rows + two channel toggles) is
+> **superseded**; the rows/notes below are corrected accordingly. <!-- source: _dirty/campaign4/frontend-deep2/laneB -->
+
 Server selection is a **visibility sub-state (35/36/37) of the same login window** (section 2): all of
 its widgets are built ONCE at login-scene build by the same single window builder and toggled
 visible/hidden by the per-frame tick (§1.5). There is **one builder, not two** — the "classic vs new"
@@ -2565,12 +2691,12 @@ build. Shorthand: **A**=`login_slice1.dds`, **B**=`loginwindow.dds`, **C**=`Inve
 |---|---|---|---|---|---|
 | Full background art panel | A | 0,0,1024,398 | 0,0,1024,398 | panel (full-bg) | - |
 | Bottom-bar band | A | 0,582,1024,442 | 0,(runtime),1024,442 | panel (Y scales w/ screen) | - |
-| Parchment row/tab PLATE - normal state | D | 9,6,202,372 | col0 dst 24,97,202,372 / col1 dst 257,97,202,372 | 3-state plate | channel toggles **400/401** |
-| Parchment row/tab PLATE - hover/pressed state | D | 220,6,202,372 | (same dst as normal) | 3-state plate | channel toggles **400/401** |
+| Server PLATE (the SELECTABLE SERVER) - normal state | D | 9,6,202,372 | col0 dst 24,97,202,372 / col1 dst 257,97,202,372 | 3-state plate | **400** = LEFT (record `2·page`) / **401** = RIGHT (record `2·page+1`) — **one plate = one server, max 2/page** |
+| Server PLATE - hover/pressed state | D | 220,6,202,372 | (same dst as normal) | 3-state plate | **400/401** (header label shares the plate's action) |
 | Parchment scroll BODY - channel column 0 | D | 448,6,100,372 | dst 77,97,100,372 | image | - |
 | Parchment scroll BODY - channel column 1 | D | 572,6,100,372 | dst 310,97,100,372 | image | - |
 | Parchment scrollbar thumb | D | 700,18,46,168 | dst 0,(runtime),46,168 | image (dynamic Y) | - |
-| Server-row buttons x10 (loop) | B | 596,985,47,18 / hover-pressed 643,985 | X=13+47n, 66,47,18 | 3-state button | **115..124** (115 + row index) |
+| Server-list PAGER buttons x10 (loop) | B | 596,985,47,18 / hover-pressed 643,985 | X=13+47n, 66,47,18 | 3-state button | **115..124** — **PAGER** (page = action − 115; re-paints the 2-plate view; reset to blank UV by the painter; **NOT** server rows, **NOT** selectable servers) |
 | List scroll-UP arrow | B | 483,490,13,10 | 467,86,13,10 | 1-state button | - |
 | List scroll-DOWN arrow | B | 505,490,13,10 | 467,455,13,10 | 1-state button | - |
 | Scrollbar thumb / commit dot | B | 496,490,9,9 | 469,98,9,9 | 1-state button | - |
@@ -2582,12 +2708,16 @@ build. Shorthand: **A**=`login_slice1.dds`, **B**=`loginwindow.dds`, **C**=`Inve
 | Error dialog #2 FRAME | C | 318,647,340,190 (== shared notice panel) | 342,289,340,190 (centered) | panel (hidden) | runtime body caption (msg.xdb id) + OK button |
 | Sword/arrow cursor | `data/cursor/stand.dds` | - | follows mouse | sprite | verified vs `data/cursor/game.ver` |
 
-- **Server-row count = exactly 10 (CODE-CONFIRMED).** The row-button loop runs X from 13 in steps of
+- **Pager-button count = exactly 10 (CODE-CONFIRMED).** The button loop runs X from 13 in steps of
   +47 while X < 483 → 10 iterations → X ∈ {13,60,107,154,201,248,295,342,389,436}, each at dst
-  `(X,66,47,18)`. Each row registers action id **115 + row index** → the contiguous range **115..124**.
-  These small clickable row sprites (`loginwindow.dds` src `596,985` normal / `643,985` hover-pressed,
-  `47x18`) are DISTINCT from the parchment row/tab PLATE — see the parchment-plate note below.
-  <!-- source: _dirty/structs/serverlist-displaylist.md -->
+  `(X,66,47,18)`. Each registers action id **115 + index** → the contiguous range **115..124**. **These
+  ten are PAGER buttons, not server rows:** at sub-state 37 a click sets **page = action − 115** and
+  re-invokes the server-record painter to re-paint the **two plates** at that 2-record page offset; the
+  painter **resets all ten to a blank UV** (which is why they carry no server content), and a pager
+  click **selects nothing and changes no sub-state** (pure paging). They are capacity for paging a list
+  longer than the two plates ever show. These small sprites (`loginwindow.dds` src `596,985` normal /
+  `643,985` hover-pressed, `47x18`) are DISTINCT from the server PLATE — see the plate note below.
+  <!-- source: _dirty/structs/serverlist-displaylist.md, _dirty/campaign4/frontend-deep2/laneB -->
 - **Per-server-row record:** 8 bytes/entry, little-endian (decode owned by section 2.2 /
   `login_flow.md`): `+0` u16 server id (valid range 1..40), `+2` i16 status, `+4` i16 population /
   load code (color thresholds 500/800/1200), `+6` i16 open-time / extra flag. Row count from the
@@ -2595,18 +2725,26 @@ build. Shorthand: **A**=`login_slice1.dds`, **B**=`loginwindow.dds`, **C**=`Inve
   client-local localized name table (string banks **5001..5040** + locale banks). Population captions
   **6001..6005**; column headers **4029..4032**; unknown-id fallback **5901**.
   <!-- source: _dirty/structs/serverlist-displaylist.md -->
-- **Row click → channel-endpoint flow (cross-ref §1.5 / `login_flow.md` §2):** a clicked row button
-  (action 115+idx) sets the window's selected-server field; the selected server id is persisted to the
-  client `Lastserver` setting and added to **10000** to derive the channel-endpoint fetch port
-  (`10000 + server_id`) — the sub-state advance **37 → 38**. The two channel-block parchment plates
-  (actions **400/401**) are the channel/sub-list toggles revealed once a server is selected.
-  <!-- source: _dirty/structs/serverlist-displaylist.md -->
-- **Channel-block geometry (CODE-CONFIRMED loop, 2 iterations):** the two parchment channel columns
-  are built by a loop of count 2. Block X base starts **30** and steps **+233** → block X {30, 263};
-  the scroll-BODY source-U starts **448** and steps **+124** → src-U {448, 572} (the two columns
-  already tabulated above). `srcV = 6` is fixed for both parchment quads; the PLATE source-UV is FIXED
-  (normal `9,6` / hover-pressed `220,6`) and does NOT advance per column.
-  <!-- source: _dirty/structs/serverlist-displaylist.md -->
+- **Plate click → channel-endpoint flow (cross-ref §1.5 / §2.5 / `login_flow.md` §2):** a clicked
+  **plate** (action **400/401**), gated to sub-state **37** and guarded by **`status_code == 0 &&
+  load < 2400`**, resolves the record index `(action − 400) + 2·page` (action 400 = LEFT = record
+  `2·page`; action 401 = RIGHT = record `2·page + 1`) and sets the window's selected-server field to
+  that record's `server_id`. The selected id is persisted to the client `Lastserver` setting and added
+  to **10000** to derive the channel-endpoint fetch port (`10000 + server_id`) — the sub-state advance
+  **37 → 38**. **The two parchment plates (actions 400/401) ARE the two selectable SERVERS, not channel
+  toggles** — channel resolution is post-selection on the `10000 + server_id` fetch; there is **no
+  intermediate channel picker**. The 8-byte record is painted **onto a plate** (name → plate header
+  label, status/load → plate label line), **not** onto the 115..124 pager buttons.
+  <!-- source: _dirty/structs/serverlist-displaylist.md, _dirty/campaign4/frontend-deep2/laneB -->
+- **Two-plate geometry (CODE-CONFIRMED loop, 2 iterations):** the two parchment **server plates** (the
+  selectable servers, not channels) are built by a loop of count 2 — one "channel-block" group per plate
+  (the legacy "channel-block" name describes the **parchment art only**, not a channel concept). Each
+  group = a header label + parchment body image + 3-state PLATE button (actions 400/401) + 2 labels.
+  Block X base starts **30** and steps **+233** → block X {30, 263}; the scroll-BODY source-U starts
+  **448** and steps **+124** → src-U {448, 572} (the two columns already tabulated above). `srcV = 6` is
+  fixed for both parchment quads; the PLATE source-UV is FIXED (normal `9,6` / hover-pressed `220,6`)
+  and does NOT advance per plate.
+  <!-- source: _dirty/structs/serverlist-displaylist.md, _dirty/campaign4/frontend-deep2/laneB -->
 - The Refresh and Cancel button **words** may be baked atlas art (gold plates) rather than caption ids
   - UNVERIFIED which; the rects (Refresh `456,-3,111x38`; Cancel = login action 111) are firm.
 - **CORRECTION — list scroll arrows / thumb source (CODE-CONFIRMED).** Earlier drafts placed the list
@@ -2625,14 +2763,15 @@ build. Shorthand: **A**=`login_slice1.dds`, **B**=`loginwindow.dds`, **C**=`Inve
   exact per-row render-path draw of `server_icon` / the NEW badge, and the integer caption id of the
   calligraphy header, are not pinned here — they need a render-tick read / `msg.xdb` extract.
   <!-- source: _dirty/structs/serverlist-displaylist.md -->
-- **Parchment plate vs server-row button (do not confuse).** The `202x372` row/tab PLATE
-  (`loginwindow_02.dds` src normal `9,6` / hover-pressed `220,6`) is the parchment BACKING the row
-  face draws over - it is DISTINCT from the small clickable server-row button sprite
-  (`loginwindow.dds` src `596,985` / `643,985`, `47x18`, actions 115..124 above). The plate's source-UV
-  is FIXED (does not advance per channel column). The `100x372` scroll BODY source-U advances **+124**
-  per channel column (`448` -> `572`); `srcV = 6` is fixed for both parchment quads; only two channel
-  columns are built (channel-tab count = 2). The parchment chrome lives entirely on
-  `loginwindow_02.dds`.
+- **Server PLATE vs pager button (do not confuse).** The `202x372` server PLATE
+  (`loginwindow_02.dds` src normal `9,6` / hover-pressed `220,6`, actions **400/401**) **IS the
+  selectable server** (one plate = one server; the 8-byte record paints onto it) — it is DISTINCT from
+  the small clickable **pager** button sprite (`loginwindow.dds` src `596,985` / `643,985`, `47x18`,
+  actions **115..124** above), which only **pages** the 2-plate view and carries no server record. The
+  plate's source-UV is FIXED (does not advance per plate). The `100x372` scroll BODY source-U advances
+  **+124** per plate column (`448` -> `572`); `srcV = 6` is fixed for both parchment quads; only two
+  plate columns are built (plate count = 2 = max servers per page). The parchment chrome lives entirely
+  on `loginwindow_02.dds`.
 - **Two notice/error dialogs are built (not one), both == the shared notice panel.** The server-list
   set instantiates the shared `InventWindow.dds` frame sub-rect `(318,647,340,190)` TWICE — a notice
   dialog #1 and an error dialog #2 — each drawn (hidden) at on-screen `342,289,340,190`, each with its

@@ -10,13 +10,14 @@
 //   [z=1]  A full-background panel    src(0,0,1024,398)   → dst(0,0,1024,398)
 //   [z=2]  A bottom-bar band          src(0,582,1024,442) → dst(0,326,1024,442)  (Y=326 = 326×768/768)
 //   [z=2.5]B ink-wash painting        src(0,0,1024,490)   → dst(0,110,1024,490)  shared with Login §11.2a
-//   [z=3]  D parchment PLATE col0     src(9,6,202,372)    → dst(24,97,202,372)   channel toggle 400
-//   [z=3]  D parchment PLATE col1     src(9,6,202,372)    → dst(257,97,202,372)  channel toggle 401
+//   [z=3]  D parchment PLATE col0     src(9,6,202,372)    → dst(24,97,202,372)   server 1 (action 400)
+//   [z=3]  D parchment PLATE col1     src(9,6,202,372)    → dst(257,97,202,372)  server 2 (action 401)
 //   [z=4]  D parchment BODY  col0     src(448,6,100,372)  → dst(77,97,100,372)   baked calligraphy art
 //   [z=4]  D parchment BODY  col1     src(572,6,100,372)  → dst(310,97,100,372)
 //   [z=5]  D scrollbar thumb          src(700,18,46,168)  → dst(0,runtime,46,168)
-//   [z=6]  B server-row buttons ×10  src(596,985,47,18) / hover(643,985)
+//   [z=6]  B pager buttons ×10        src(596,985,47,18) / hover(643,985)
 //              loop: X = 13+47·n (n=0..9), Y=66, 47×18   → actions 115..124
+//              page = action-115; page re-paints the 2-plate view with records [2·page, 2·page+1]
 //   [z=7]  B scroll-UP   src(483,490,13,10) → dst(467,86,13,10)
 //   [z=7]  B scroll-DOWN src(505,490,13,10) → dst(467,455,13,10)
 //   [z=7]  B thumb-dot   src(496,490,9,9)   → dst(469,98,9,9)
@@ -25,12 +26,28 @@
 //   [z=8]  C notice dialog  src(318,647,340,190) → dst(342,289,340,190)  hidden
 //   [z=9]  C error  dialog  src(318,647,340,190) → dst(342,289,340,190)  hidden
 //
-//   Server-row content list:  placed inside the left parchment body (dst 77,97..469).
-//   The selected server's channel info appears in the right parchment body (dst 310,97..469).
+// CORRECT SERVER MODEL (CODE-CONFIRMED):
+//   The TWO parchment PLATES (actions 400/401) ARE the selectable servers.
+//   1 plate = 1 server; MAX 2 servers visible at once.
+//   action 400 = LEFT plate  = server at display slot (2·page).
+//   action 401 = RIGHT plate = server at display slot (2·page + 1).
+//   The 8-byte server record is PAINTED ONTO the plate:
+//     server name  → plate's header label
+//     status+load  → plate's status+load label (status text + load colour, thresholds 1200/800/500)
+//   The ten 115-124 buttons are PAGER buttons:
+//     page = action − 115; they re-paint the 2-plate view with records [2·page, 2·page+1].
+//     They are NOT server rows and NOT a help strip.
+//   A plate CLICK (gated to ready state, guard status==0 && load<2400) commits record.server_id,
+//   persists Lastserver (user://server_select.cfg), and joins (channel-endpoint port 10000+server_id).
+//   spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED.
+//   spec: Docs/RE/specs/frontend_scenes.md §1.2. CODE-CONFIRMED (action 105 = refresh).
+//   spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 37. CODE-CONFIRMED (selection commit).
+//   spec: Docs/RE/specs/frontend_scenes.md §2.5. CODE-CONFIRMED (Lastserver persistence).
 //
-// ROW BUTTON GEOMETRY (CODE-CONFIRMED §11.4 loop):
+// PAGER GEOMETRY (CODE-CONFIRMED §11.4 loop):
 //   n=0..9 → X = 13+47·n ∈ {13,60,107,154,201,248,295,342,389,436}  Y=66  W=47 H=18
 //   Action id = 115 + n   → range 115..124
+//   page = action − 115   → shows records [2·n, 2·n+1]
 //
 // STATUS / LOAD PRESENTATION (§2.3, CODE-CONFIRMED):
 //   load > 1200 → Full (red); > 800 → High (orange); > 500 → Medium (yellow); ≤ 500 → Light (green).
@@ -48,10 +65,11 @@
 //   Display order is shuffled clock-seeded, with Lastserver anchored at slot 0 when present.
 //   Lastserver is persisted via Godot ConfigFile (user://) on selection. spec §2.5. CODE-CONFIRMED.
 //
-// PASSIVE: zero game logic.  Reads a view-model list; turns row clicks into ServerSelected(serverId).
+// PASSIVE: zero game logic.  Reads a view-model list; turns plate clicks into ServerSelected(serverId).
 //
 // spec: Docs/RE/specs/frontend_scenes.md §11.4 (CODE-CONFIRMED literals).
-//       §1.9 (msg.xdb id table — column headers 4029/4030/4031/4032). CODE-CONFIRMED.
+//       §1.2 (action 105 refresh; actions 115..124 as pager). CODE-CONFIRMED.
+//       §1.5 (sub-state 37 selection commit). CODE-CONFIRMED.
 //       §2 (server-selection presentation rules).
 //       §2.3 (status / load color thresholds). CODE-CONFIRMED.
 //       §2.4 (scheduled-open HH:MM clock packing — /10,%10 digit-split). CODE-CONFIRMED.
@@ -90,8 +108,11 @@ public sealed record ServerEntry(
 
 /// <summary>
 /// Server-selection overlay.  Pixel-faithful to §11.4.
-/// Emits <see cref="ServerSelected"/> (server_id) on row click.
+/// Renders exactly 2 server plates (left=server1, right=server2) at a time.
+/// Pager buttons (actions 115-124) re-paint the plate pair from the ordered list.
+/// Emits <see cref="ServerSelected"/> (server_id) when a PLATE is clicked.
 /// Emits <see cref="BackRequested"/> when Back is clicked.
+/// spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED.
 /// </summary>
 public sealed partial class ServerSelectScreen : Control
 {
@@ -100,7 +121,7 @@ public sealed partial class ServerSelectScreen : Control
     // =========================================================================
 
     /// <summary>
-    /// Raised when the player selects a server row.  Carries server_id (1..40).
+    /// Raised when the player selects a server plate.  Carries server_id (1..40).
     /// spec: Docs/RE/specs/frontend_scenes.md §2.5. CODE-CONFIRMED.
     /// </summary>
     [Signal]
@@ -116,6 +137,12 @@ public sealed partial class ServerSelectScreen : Control
     // spec: Docs/RE/specs/frontend_scenes.md §2.7. CODE-CONFIRMED.
     // =========================================================================
     private const int NewServerIndex = 5; // spec: Docs/RE/specs/frontend_scenes.md §2.7. CODE-CONFIRMED.
+
+    // =========================================================================
+    // Guard threshold: a plate click is accepted only when load < 2400 and status == 0.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §1.5 sub-state 37. CODE-CONFIRMED.
+    // =========================================================================
+    private const int LoadGuardThreshold = 2400; // spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED.
 
     // =========================================================================
     // Lastserver persistence (user:// ConfigFile, layer-05 only).
@@ -144,10 +171,19 @@ public sealed partial class ServerSelectScreen : Control
     }
 
     // =========================================================================
-    // Server list (view-model)
+    // Server list (view-model) and pager state
     // =========================================================================
 
     private IReadOnlyList<ServerEntry>? _servers;
+
+    // Display-order index array — maps screen slot → servers[] index.
+    // Built per SetServers call: clock-seeded shuffle with Lastserver pinned first when present.
+    // spec: Docs/RE/specs/frontend_scenes.md §2.7. CODE-CONFIRMED.
+    private List<int>? _displayOrder;
+
+    // Current pager page (0-based). Page n shows display slots [2n, 2n+1].
+    // spec: Docs/RE/specs/frontend_scenes.md §1.2 / §11.4 pager buttons 115..124. CODE-CONFIRMED.
+    private int _currentPage;
 
     /// <summary>
     /// Sets the server list.  Call before adding to the tree, or call <see cref="SetServers"/> after.
@@ -159,8 +195,12 @@ public sealed partial class ServerSelectScreen : Control
         {
             _servers = value;
             if (_servers is not null)
+            {
                 _displayOrder = BuildDisplayOrder(_servers);
-            if (IsInsideTree()) RebuildServerLabels();
+                _currentPage = 0;
+            }
+
+            if (IsInsideTree()) PaintPlates();
         }
     }
 
@@ -176,16 +216,19 @@ public sealed partial class ServerSelectScreen : Control
     /// </summary>
     public RealClientAssets? SharedRealAssets { get; set; }
 
-    // Internal state: which of the 10 row-tabs is currently "active" (selected/highlighted).
-    private int _activeRowIndex = -1; // -1 = none selected yet
+    // =========================================================================
+    // Live plate widgets — filled in BuildUi, painted in PaintPlates.
+    // Two plates: index 0 = LEFT (action 400), index 1 = RIGHT (action 401).
+    // spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED.
+    // =========================================================================
+    private Button?[] _plateButtons = new Button?[2];
+    private Label?[] _plateNameLabels = new Label?[2];
+    private Label?[] _plateStatusLabels = new Label?[2];
+    private Label?[] _plateLoadLabels = new Label?[2];
 
-    // Label container inside the left parchment body (for server list content).
-    private Control? _serverListContent;
-
-    // Display-order index array — maps screen slot → servers[] index.
-    // Built per SetServers call: clock-seeded shuffle with Lastserver pinned first when present.
-    // spec: Docs/RE/specs/frontend_scenes.md §2.7. CODE-CONFIRMED.
-    private List<int>? _displayOrder;
+    // Pager button nodes (10 of them, actions 115..124).
+    // spec: Docs/RE/specs/frontend_scenes.md §1.2 / §11.4. CODE-CONFIRMED.
+    private readonly StateButton?[] _pagerButtons = new StateButton?[10];
 
     // =========================================================================
     // Godot lifecycle
@@ -306,40 +349,46 @@ public sealed partial class ServerSelectScreen : Control
         }
 
         // =======================================================================
-        // [z=3] Parchment PLATE × 2 — the 202×372 channel backing plates.
+        // [z=3+4] Parchment PLATE × 2 — the 202×372 selectable server plates.
+        //
+        // CORRECT MODEL (CODE-CONFIRMED):
+        //   action 400 = LEFT plate  = server at display index (2·page).
+        //   action 401 = RIGHT plate = server at display index (2·page+1).
+        //   Each plate is a clickable Button; the server record is painted onto it via labels.
+        //   Guard: status==0 && load < 2400. spec §11.4 / §1.5. CODE-CONFIRMED.
+        //
         // D src(9,6,202,372) NORMAL  / src(220,6,202,372) HOVER+PRESSED.
         // col0 dst(24,97,202,372) action 400  /  col1 dst(257,97,202,372) action 401.
-        // spec §11.4 "Parchment row/tab PLATE". CODE-CONFIRMED.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED.
         // =======================================================================
-        int[] plateX = { 24, 257 };
-        int[] plateActions = { 400, 401 };
-        for (int col = 0; col < 2; col++)
-        {
-            // Using StateButton so the plate responds to hover/pressed states as per spec.
-            StateButton plateTog = WidgetFactory.MakeStateButton(
-                _assets,
-                LoginLayout.AtlasLoginWindow02,
-                plateX[col], 97,
-                202, 372,
-                9, 6, // NORMAL src(9,6). spec §11.4. CODE-CONFIRMED.
-                220, 6, // HOVER  src(220,6). spec §11.4. CODE-CONFIRMED.
-                220, 6, // PRESSED = HOVER.
-                plateActions[col]);
-            plateTog.Name = $"ParchPlate{col}";
-            plateTog.MouseFilter = MouseFilterEnum.Ignore; // passive chrome; row buttons handle input
-            AddChild(plateTog);
-        }
+        int[] plateX = { 24, 257 }; // spec §11.4 col0/col1 dst X. CODE-CONFIRMED.
+        int[] plateActions = { 400, 401 }; // spec §11.4 channel toggles. CODE-CONFIRMED.
+        int[] bodyDstX = { 77, 310 }; // spec §11.4 body dst X offsets. CODE-CONFIRMED.
+        int[] bodySrcU = { 448, 572 }; // spec §11.4 body src U start=448 step+124. CODE-CONFIRMED.
 
-        // =======================================================================
-        // [z=4] Parchment scroll BODY × 2 — the baked calligraphy art panels.
-        // col0: D src(448,6,100,372) → dst(77,97,100,372).
-        // col1: D src(572,6,100,372) → dst(310,97,100,372).
-        // spec §11.4 "Parchment scroll BODY". CODE-CONFIRMED.
-        // =======================================================================
-        int[] bodySrcU = { 448, 572 }; // spec §11.4 loop srcU start=448 step+124. CODE-CONFIRMED.
-        int[] bodyDstX = { 77, 310 }; // spec §11.4 dst offsets. CODE-CONFIRMED.
         for (int col = 0; col < 2; col++)
         {
+            // --- Parchment backing plate (passive chrome behind the clickable button) ---
+            AtlasTexture? plateTex = _assets.Slice(
+                LoginLayout.AtlasLoginWindow02, 9, 6, 202, 372);
+            if (plateTex is not null)
+            {
+                var plateRect = new TextureRect
+                {
+                    Name = $"ParchPlate{col}",
+                    Texture = plateTex,
+                    StretchMode = TextureRect.StretchModeEnum.Scale,
+                    MouseFilter = MouseFilterEnum.Ignore,
+                    Position = new Vector2(plateX[col], 97),
+                    Size = new Vector2(202, 372),
+                };
+                AddChild(plateRect);
+            }
+
+            // --- Parchment scroll BODY (baked calligraphy art, passive) ---
+            // col0: D src(448,6,100,372) → dst(77,97,100,372).
+            // col1: D src(572,6,100,372) → dst(310,97,100,372).
+            // spec §11.4 "Parchment scroll BODY". CODE-CONFIRMED.
             AtlasTexture? bodyTex = _assets.Slice(
                 LoginLayout.AtlasLoginWindow02, bodySrcU[col], 6, 100, 372);
             if (bodyTex is not null)
@@ -355,6 +404,67 @@ public sealed partial class ServerSelectScreen : Control
                 };
                 AddChild(bodyRect);
             }
+
+            // --- Clickable transparent plate button (covers the plate, captures input) ---
+            // This is the actual selectable server button.
+            // When clicked: commits record.server_id, persists Lastserver, emits ServerSelected.
+            // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §1.5 / §2.5. CODE-CONFIRMED.
+            var btn = new Button
+            {
+                Name = $"PlateBtn{col}",
+                Position = new Vector2(plateX[col], 97),
+                Size = new Vector2(202, 372),
+                Flat = true, // transparent — the parchment TextureRect is the visual
+                FocusMode = FocusModeEnum.None,
+            };
+            // Make the button visually transparent (no theme chrome, just hitbox).
+            btn.AddThemeStyleboxOverride("normal", new StyleBoxEmpty());
+            btn.AddThemeStyleboxOverride("hover", new StyleBoxEmpty());
+            btn.AddThemeStyleboxOverride("pressed", new StyleBoxEmpty());
+            btn.AddThemeStyleboxOverride("disabled", new StyleBoxEmpty());
+            btn.AddThemeStyleboxOverride("focus", new StyleBoxEmpty());
+
+            int capturedCol = col;
+            btn.Pressed += () => OnPlatePressed(capturedCol);
+            AddChild(btn);
+            _plateButtons[col] = btn;
+
+            // --- Server name label (top of plate) ---
+            var nameLabel = new Label
+            {
+                Name = $"PlateNameLabel{col}",
+                Position = new Vector2(plateX[col] + 4, 104),
+                Size = new Vector2(194, 22),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                MouseFilter = MouseFilterEnum.Ignore,
+            };
+            nameLabel.AddThemeColorOverride("font_color", new Color(0.85f, 0.78f, 0.50f)); // parchment gold
+            AddChild(nameLabel);
+            _plateNameLabels[col] = nameLabel;
+
+            // --- Status label (below name) ---
+            var statusLabel = new Label
+            {
+                Name = $"PlateStatusLabel{col}",
+                Position = new Vector2(plateX[col] + 4, 128),
+                Size = new Vector2(194, 20),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                MouseFilter = MouseFilterEnum.Ignore,
+            };
+            AddChild(statusLabel);
+            _plateStatusLabels[col] = statusLabel;
+
+            // --- Load label (below status) ---
+            var loadLabel = new Label
+            {
+                Name = $"PlateLoadLabel{col}",
+                Position = new Vector2(plateX[col] + 4, 150),
+                Size = new Vector2(194, 20),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                MouseFilter = MouseFilterEnum.Ignore,
+            };
+            AddChild(loadLabel);
+            _plateLoadLabels[col] = loadLabel;
         }
 
         // =======================================================================
@@ -379,24 +489,21 @@ public sealed partial class ServerSelectScreen : Control
         }
 
         // =======================================================================
-        // [z=6] Server-row buttons × 10 (the horizontal tab strip above the parchment).
-        // B src(596,985,47,18) / hover(643,985). Loop: X=13+47·n, Y=66, W=47, H=18. Actions 115..124.
-        // spec §11.4 "Server-row buttons x10 (loop)". CODE-CONFIRMED.
-        //
-        // Each button displays the selected server's DISPLAY NAME (resolved from ServerId 1..40 via
-        // the client-local name table, spec §2.8 / string banks 5001..5040).  In dev-offline mode the
-        // ServerEntry.DisplayName field carries the synthetic names.
-        //
-        // Row index n: action = 115+n; maps to servers[n] if n < servers.Count.
+        // [z=6] Pager buttons × 10 (actions 115..124).
+        // CORRECT MODEL (CODE-CONFIRMED): these are PAGER buttons — page = action−115.
+        // page n re-paints the 2-plate view with server records [2·n, 2·n+1].
+        // They are NOT server rows. Shown only when more than 2 servers exist.
+        // B src(596,985,47,18) / hover(643,985). Loop: X=13+47·n, Y=66, W=47, H=18.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.2 / §11.4. CODE-CONFIRMED.
         // =======================================================================
         for (int n = 0; n < 10; n++)
         {
             int rowX = LoginLayout.ServerRowBtnX0 +
                        n * LoginLayout.ServerRowBtnXStep; // 13+47·n. spec §11.4. CODE-CONFIRMED.
             // spec §11.4 X bound check: X < 483 (loop condition). All 10 fit. CODE-CONFIRMED.
-            int rowActionId = LoginLayout.ServerRowActionBase + n; // 115+n. spec §11.4. CODE-CONFIRMED.
+            int pageActionId = LoginLayout.ServerRowActionBase + n; // 115+n. spec §1.2/§11.4. CODE-CONFIRMED.
 
-            StateButton rowBtn = WidgetFactory.MakeStateButton(
+            StateButton pagerBtn = WidgetFactory.MakeStateButton(
                 _assets,
                 LoginLayout.AtlasLoginWindow,
                 rowX, LoginLayout.ServerRowBtnY, // dst X, Y=66. spec §11.4. CODE-CONFIRMED.
@@ -407,14 +514,15 @@ public sealed partial class ServerSelectScreen : Control
                 LoginLayout.ServerRowBtnHoverSrcX,
                 LoginLayout.ServerRowBtnHoverSrcY, // HOVER  src(643,985). CODE-CONFIRMED.
                 LoginLayout.ServerRowBtnHoverSrcX, LoginLayout.ServerRowBtnHoverSrcY, // PRESSED = HOVER.
-                rowActionId,
-                caption: "", // label drawn via server-list text overlay (see below)
+                pageActionId,
+                caption: $"{n + 1}", // page number label (1-based)
                 captionTint: new Color(0.92f, 0.86f, 0.55f)); // parchment-gold text
-            rowBtn.Name = $"ServerRowBtn_{n}";
+            pagerBtn.Name = $"PagerBtn_{n}";
 
             int capturedN = n; // capture for lambda
-            rowBtn.ActionFired += _ => OnRowButtonPressed(capturedN);
-            AddChild(rowBtn);
+            pagerBtn.ActionFired += _ => OnPagerButtonPressed(capturedN);
+            AddChild(pagerBtn);
+            _pagerButtons[n] = pagerBtn;
         }
 
         // =======================================================================
@@ -478,6 +586,8 @@ public sealed partial class ServerSelectScreen : Control
         // [z=7d] Refresh button.
         // A src(792,398,111,38) → dst(456,-3,111,38). Action 105.
         // spec §11.4 "Refresh button". CODE-CONFIRMED.
+        // spec §1.2 "Help button (105): throttled ~10s server-list re-fetch path, advance sub-state 34".
+        // CODE-CONFIRMED.
         // Canvas Y: -3 = above the main panel top (panel starts at 0 here, so Y=-3 is slightly above).
         // =======================================================================
         StateButton refreshBtn = WidgetFactory.MakeStateButton(
@@ -531,72 +641,13 @@ public sealed partial class ServerSelectScreen : Control
         errorDialog.Visible = false;
         AddChild(errorDialog);
 
-        // =======================================================================
-        // Server list content overlay — floated over the left parchment body area.
-        // The server names, status and load labels are drawn here, inside the parchment body.
-        // Bounds: left parchment body dst(77,97) size(226,372) (spans both PLATE + BODY widths).
-        // spec §11.4 "Server-row content list" / "List column header labels". CODE-CONFIRMED.
-        // =======================================================================
-        _serverListContent = new Control
-        {
-            Name = "ServerListContent",
-            // Position inside the left parchment plate area.
-            // Plate col0 dst(24,97,202,372). Content sits just inside the top of the plate.
-            Position = new Vector2(26, 120),
-            Size = new Vector2(460, 340),
-            MouseFilter = MouseFilterEnum.Ignore,
-        };
-        AddChild(_serverListContent);
+        // Initial plate paint (empty / waiting if no servers yet).
+        PaintPlates();
 
-        // Column headers (msg.xdb ids 4029..4032; §11.4 / §1.9 CODE-CONFIRMED).
-        var headerRow = new HBoxContainer
-        {
-            Name = "ColumnHeaders",
-            Position = Vector2.Zero,
-            Size = new Vector2(460, 18),
-        };
-        _serverListContent.AddChild(headerRow);
-
-        void AddHdr(uint msgId, string fallback, int minW)
-        {
-            Label lbl = WidgetFactory.MakeLabel(
-                _assets.Text(msgId, fallback),
-                LoginLayout.FontBodyHeight,
-                new Color(0.85f, 0.78f, 0.50f));
-            lbl.CustomMinimumSize = new Vector2(minW, 18);
-            headerRow.AddChild(lbl);
-        }
-
-        // Caption ids 4029..4032 — column headers. spec §11.4 / §1.9. CODE-CONFIRMED.
-        // NOTE §1.9 CORRECTION: msg 4029 IS the server-list column header (NOT an endpoint-fetch error).
-        // The IDA pass confirmed 4029 is the first column header caption. spec §1.9 CODE-CONFIRMED.
-        // "PLAUSIBLE" label in §1.9 table was the pre-IDA reading; the IDA pass resolved it as confirmed.
-        AddHdr(4029u, "서버명", 180); // Server name column header. spec §11.4 / §1.9. CODE-CONFIRMED.
-        AddHdr(4030u, "상태", 70); // Status column header. spec §11.4 / §1.9. CODE-CONFIRMED.
-        AddHdr(4031u, "부하", 70); // Load column header. spec §11.4 / §1.9. CODE-CONFIRMED.
-
-        // Row list (populated on SetServers / Servers setter).
-        var rowList = new VBoxContainer
-        {
-            Name = "RowList",
-            Position = new Vector2(0, 22),
-            Size = new Vector2(460, 316),
-        };
-        _serverListContent.AddChild(rowList);
-
-        // Populate rows if servers were set before _Ready.
-        if (_servers is not null)
-            RebuildServerLabels();
-        else
-        {
-            var waitingLbl = WidgetFactory.MakeLabel(
-                "Fetching server list…", LoginLayout.FontBodyHeight,
-                new Color(0.65f, 0.65f, 0.65f));
-            rowList.AddChild(waitingLbl);
-        }
-
-        GD.Print("[ServerSelectScreen] Built (§11.4 pixel-faithful). " +
-                 "10 row-tabs at Y=66 step+47; 2 parchment plates at Y=97; server list overlaid.");
+        GD.Print("[ServerSelectScreen] Built (§11.4 pixel-faithful, CODE-CONFIRMED 2-plate model). " +
+                 "2 parchment plates at Y=97 (left=action 400, right=action 401). " +
+                 "10 pager buttons at Y=66 step+47 (actions 115..124). " +
+                 "Plate click → ServerSelected(server_id). spec §11.4/§1.2/§1.5/§2.5.");
     }
 
     // =========================================================================
@@ -648,12 +699,13 @@ public sealed partial class ServerSelectScreen : Control
     // Server list population
     // =========================================================================
 
-    /// <summary>Sets the server list and rebuilds the row display.</summary>
+    /// <summary>Sets the server list and rebuilds the plate display.</summary>
     public void SetServers(IReadOnlyList<ServerEntry> servers)
     {
         _servers = servers;
         _displayOrder = BuildDisplayOrder(servers);
-        if (IsInsideTree()) RebuildServerLabels();
+        _currentPage = 0;
+        if (IsInsideTree()) PaintPlates();
     }
 
     /// <summary>
@@ -706,94 +758,115 @@ public sealed partial class ServerSelectScreen : Control
         return order;
     }
 
-    private void RebuildServerLabels()
+    /// <summary>
+    /// Paints the two plates from the current page of the display order.
+    /// Page <c>_currentPage</c> shows display slots [2·page, 2·page+1].
+    /// spec: Docs/RE/specs/frontend_scenes.md §11.4 / §1.2. CODE-CONFIRMED.
+    /// </summary>
+    private void PaintPlates()
     {
-        if (_serverListContent is null) return;
+        // Determine how many pages exist and whether pagers should be visible.
+        int serverCount = _servers?.Count ?? 0;
+        // Number of pages = ceil(serverCount / 2). At most 10 pager buttons (pages 0..9).
+        // spec: Docs/RE/specs/frontend_scenes.md §1.2 (actions 115..124, page = action-115). CODE-CONFIRMED.
+        int pageCount = serverCount == 0 ? 0 : (serverCount + 1) / 2;
 
-        // Find the RowList VBoxContainer inside the content panel.
-        Node? rowListNode = _serverListContent.FindChild("RowList", owned: false);
-        if (rowListNode is not VBoxContainer rowList) return;
-
-        // Clear existing rows.
-        foreach (Node child in rowList.GetChildren())
-            child.QueueFree();
-
-        if (_servers is null || _servers.Count == 0)
+        // Show pager buttons only when there are more than 2 servers (i.e., multiple pages).
+        // spec: Docs/RE/specs/frontend_scenes.md §1.2 / §11.4. CODE-CONFIRMED.
+        bool showPagers = pageCount > 1;
+        for (int n = 0; n < 10; n++)
         {
-            // spec §1.5 sub-state 36: "server list empty → msg 4027". CODE-CONFIRMED.
-            Label emptyLbl = WidgetFactory.MakeLabel(
-                _assets.Text(LoginLayout.MsgErrNoServers, "No servers available."),
-                LoginLayout.FontBodyHeight,
-                new Color(0.80f, 0.40f, 0.40f));
-            rowList.AddChild(emptyLbl);
-            return;
+            if (_pagerButtons[n] is { } pb)
+                pb.Visible = showPagers && n < pageCount;
         }
 
-        // Build one row per server entry using the display order (shuffled with Lastserver pinned first).
-        // spec §2.7: "randomized display order, Lastserver anchored first". CODE-CONFIRMED.
-        var order = _displayOrder ?? BuildDisplayOrder(_servers);
-        for (int slot = 0; slot < order.Count; slot++)
+        // Paint each plate (col 0 = left = display slot 2·page; col 1 = right = 2·page+1).
+        for (int col = 0; col < 2; col++)
         {
-            int srcIdx = order[slot];
-            ServerEntry entry = _servers[srcIdx];
-            Control row = BuildServerRow(entry, srcIdx, slot);
-            rowList.AddChild(row);
+            int displaySlot = 2 * _currentPage + col;
+            ServerEntry? entry = GetEntryAtDisplaySlot(displaySlot);
+            PaintOnePlate(col, entry);
         }
-
-        GD.Print($"[ServerSelectScreen] Server list: {_servers.Count} entries populated " +
-                 $"(display order: {string.Join(",", order)}).");
     }
 
-    private Control BuildServerRow(ServerEntry entry, int rowIndex, int displaySlot)
+    /// <summary>
+    /// Returns the server entry at display slot <paramref name="displaySlot"/>, or null if out of range.
+    /// Uses the display-order index array. spec §2.7. CODE-CONFIRMED.
+    /// </summary>
+    private ServerEntry? GetEntryAtDisplaySlot(int displaySlot)
     {
-        // Each row is an HBox of: server name label | status label | load label.
-        // Row height matches the server-row button height (18px) at the spec scale.
-        var row = new HBoxContainer
+        if (_servers is null || _displayOrder is null) return null;
+        if (displaySlot < 0 || displaySlot >= _displayOrder.Count) return null;
+        int srcIdx = _displayOrder[displaySlot];
+        if (srcIdx < 0 || srcIdx >= _servers.Count) return null;
+        return _servers[srcIdx];
+    }
+
+    /// <summary>
+    /// Paints the server record <paramref name="entry"/> onto plate <paramref name="col"/> (0=left, 1=right).
+    /// When entry is null the plate shows an empty/"no server" state and is disabled.
+    /// spec: Docs/RE/specs/frontend_scenes.md §11.4 "server record painted onto a plate". CODE-CONFIRMED.
+    /// </summary>
+    private void PaintOnePlate(int col, ServerEntry? entry)
+    {
+        if (_plateButtons[col] is { } btn)
         {
-            Name = $"ServerRow_{displaySlot}",
-            CustomMinimumSize = new Vector2(450, 22),
-        };
+            // Plate is clickable only when entry exists, status==0, and load < 2400.
+            // Guard: status==0 && load < LoadGuardThreshold. spec §11.4 / §1.5. CODE-CONFIRMED.
+            bool isReady = entry is { StatusCode: 0 } && entry.Load < LoadGuardThreshold;
+            btn.Disabled = !isReady;
+        }
 
-        // Server name (DisplayName from client-local name table, spec §2.8. CODE-CONFIRMED).
-        // TODO: resolve via string banks 5001..5040 (msg.xdb) when MsgXdbCatalog is wired. spec §2.8.
-        bool isActiveRow = (rowIndex == _activeRowIndex);
-        Color nameColor = isActiveRow
-            ? new Color(1.0f, 0.95f, 0.60f) // active/selected: bright gold
-            : new Color(0.85f, 0.78f, 0.50f); // normal: parchment gold
+        if (_plateNameLabels[col] is { } nameLbl)
+        {
+            if (entry is null)
+            {
+                nameLbl.Text = "";
+            }
+            else
+            {
+                // "NEW" badge: server_id == NEW_SERVER_INDEX (value 5). spec §2.7. CODE-CONFIRMED.
+                bool isNew = entry.ServerId == NewServerIndex; // spec §2.7. CODE-CONFIRMED.
+                nameLbl.Text = entry.DisplayName + (isNew ? " ★" : "");
+            }
+        }
 
-        // "NEW" badge: shown when server_id == NEW_SERVER_INDEX (value 5 from uiconfig.lua).
-        // spec: Docs/RE/specs/frontend_scenes.md §2.7. CODE-CONFIRMED.
-        bool isNew = (entry.ServerId == NewServerIndex); // spec §2.7. CODE-CONFIRMED.
-        string nameText = entry.DisplayName + (isNew ? " ★" : "");
-        Label nameLbl = WidgetFactory.MakeLabel(nameText, LoginLayout.FontBodyHeight, nameColor);
-        nameLbl.CustomMinimumSize = new Vector2(180, 22);
-        nameLbl.MouseFilter = MouseFilterEnum.Ignore;
-        row.AddChild(nameLbl);
+        if (_plateStatusLabels[col] is { } statusLbl)
+        {
+            if (entry is null)
+            {
+                statusLbl.Text = "";
+                statusLbl.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.55f));
+            }
+            else
+            {
+                string statusText = GetStatusText(entry);
+                Color statusColor = GetStatusColor(entry);
+                statusLbl.Text = statusText;
+                statusLbl.AddThemeColorOverride("font_color", statusColor);
+            }
+        }
 
-        // Status (§2.3, CODE-CONFIRMED).
-        string statusText = GetStatusText(entry);
-        Color statusColor = GetStatusColor(entry);
-        Label statusLbl = WidgetFactory.MakeLabel(statusText, LoginLayout.FontBodyHeight, statusColor);
-        statusLbl.CustomMinimumSize = new Vector2(70, 22);
-        statusLbl.MouseFilter = MouseFilterEnum.Ignore;
-        row.AddChild(statusLbl);
-
-        // Load / population (§2.3 thresholds, CODE-CONFIRMED; population captions 6001..6005, §11.4).
-        (string loadText, Color loadColor) = GetLoadDisplay(entry.Load);
-
-        // Try msg.xdb population caption id (6001..6005). spec §11.4. CODE-CONFIRMED.
-        uint popCapId = entry.Load > 1200 ? 6005u :
-            entry.Load > 800 ? 6004u :
-            entry.Load > 500 ? 6003u :
-            entry.Load > 0 ? 6002u : 6001u;
-        string popText = _assets.Text(popCapId, loadText);
-
-        Label loadLbl = WidgetFactory.MakeLabel(popText, LoginLayout.FontBodyHeight, loadColor);
-        loadLbl.CustomMinimumSize = new Vector2(70, 22);
-        loadLbl.MouseFilter = MouseFilterEnum.Ignore;
-        row.AddChild(loadLbl);
-
-        return row;
+        if (_plateLoadLabels[col] is { } loadLbl)
+        {
+            if (entry is null)
+            {
+                loadLbl.Text = "";
+                loadLbl.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.55f));
+            }
+            else
+            {
+                (string loadText, Color loadColor) = GetLoadDisplay(entry.Load);
+                // Try msg.xdb population caption id (6001..6005). spec §11.4. CODE-CONFIRMED.
+                uint popCapId = entry.Load > 1200 ? 6005u :
+                    entry.Load > 800 ? 6004u :
+                    entry.Load > 500 ? 6003u :
+                    entry.Load > 0 ? 6002u : 6001u;
+                string popText = _assets.Text(popCapId, loadText);
+                loadLbl.Text = popText;
+                loadLbl.AddThemeColorOverride("font_color", loadColor);
+            }
+        }
     }
 
     // =========================================================================
@@ -856,30 +929,65 @@ public sealed partial class ServerSelectScreen : Control
     }
 
     // =========================================================================
-    // Row-tab click handler (action 115+n, spec §11.4 / §2.5. CODE-CONFIRMED)
+    // Plate click handler (action 400/401, spec §11.4 / §1.5 / §2.5. CODE-CONFIRMED)
+    //
+    // CORRECT MODEL: clicking a plate selects the server painted onto that plate.
+    // Guard: entry.StatusCode==0 && entry.Load < LoadGuardThreshold.
+    // On selection: persist Lastserver, emit ServerSelected(server_id).
+    // Channel-endpoint port = 10000 + server_id (handled by BootFlow / use-case layer).
+    // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §1.5 sub-state 37 / §2.5. CODE-CONFIRMED.
     // =========================================================================
 
-    private void OnRowButtonPressed(int rowIndex)
+    private void OnPlatePressed(int col)
     {
-        if (_servers is null || rowIndex >= _servers.Count) return;
+        // col 0 = LEFT plate = action 400; col 1 = RIGHT plate = action 401.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED.
+        int displaySlot = 2 * _currentPage + col;
+        ServerEntry? entry = GetEntryAtDisplaySlot(displaySlot);
+        if (entry is null) return;
 
-        ServerEntry selected = _servers[rowIndex];
-        _activeRowIndex = rowIndex;
+        // Guard: status==0 && load < 2400.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §1.5. CODE-CONFIRMED.
+        if (entry.StatusCode != 0 || entry.Load >= LoadGuardThreshold)
+        {
+            GD.Print($"[ServerSelectScreen] Plate {col} (action {400 + col}) blocked — " +
+                     $"status={entry.StatusCode} load={entry.Load} (guard: status==0 && load<{LoadGuardThreshold}). " +
+                     "spec §11.4/§1.5. CODE-CONFIRMED.");
+            return;
+        }
 
         // Persist Lastserver on selection. spec §2.5. CODE-CONFIRMED.
         // Legacy: written to HKLM registry "Lastserver"; layer-05 equivalent: user:// ConfigFile.
-        PersistLastServer(selected.ServerId);
+        PersistLastServer(entry.ServerId);
 
-        // Rebuild row labels to reflect the active-row highlight.
-        RebuildServerLabels();
-
-        GD.Print($"[ServerSelectScreen] Row tab {rowIndex} pressed → server id={selected.ServerId} " +
-                 $"name='{selected.DisplayName}'. Lastserver persisted. Action={LoginLayout.ServerRowActionBase + rowIndex}. " +
-                 "spec §11.4 / §2.5. CODE-CONFIRMED.");
+        GD.Print($"[ServerSelectScreen] Plate {col} (action {400 + col}) pressed → server id={entry.ServerId} " +
+                 $"name='{entry.DisplayName}'. Lastserver persisted. " +
+                 $"Channel-endpoint port={10000 + entry.ServerId}. " +
+                 "spec §11.4/§1.5 sub-state 37/§2.5. CODE-CONFIRMED.");
 
         // Emit the intent signal. The BootFlow / use-case layer handles the channel-endpoint
         // fetch (sub-state 37→38). spec §1.5 sub-state 37. CODE-CONFIRMED.
-        EmitSignal(SignalName.ServerSelected, selected.ServerId);
+        EmitSignal(SignalName.ServerSelected, entry.ServerId);
+    }
+
+    // =========================================================================
+    // Pager button handler (actions 115..124, spec §1.2 / §11.4. CODE-CONFIRMED)
+    // page = action − 115; re-paints the 2-plate view with records [2·page, 2·page+1].
+    // spec: Docs/RE/specs/frontend_scenes.md §1.2 / §11.4. CODE-CONFIRMED.
+    // =========================================================================
+
+    private void OnPagerButtonPressed(int page)
+    {
+        int serverCount = _servers?.Count ?? 0;
+        int pageCount = serverCount == 0 ? 0 : (serverCount + 1) / 2;
+        if (page < 0 || page >= pageCount) return;
+
+        _currentPage = page;
+        PaintPlates();
+
+        GD.Print($"[ServerSelectScreen] Pager button {page} (action {115 + page}) pressed → " +
+                 $"showing display slots [{2 * page}, {2 * page + 1}]. " +
+                 "spec §1.2/§11.4. CODE-CONFIRMED.");
     }
 
     // =========================================================================
