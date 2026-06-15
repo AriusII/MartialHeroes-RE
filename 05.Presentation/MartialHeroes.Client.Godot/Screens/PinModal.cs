@@ -172,10 +172,10 @@ public sealed partial class PinModal : Control
                 // Source region: the dragon-frame sub-rect within the 1024×1024 atlas.
                 // spec: Docs/RE/specs/frontend_scenes.md §11.3 src(318,647,340,190). CODE-CONFIRMED.
                 RegionRect = new Rect2(
-                    LoginLayout.ModalChromeSrcX,  // 318. spec §11.3. CODE-CONFIRMED.
-                    LoginLayout.ModalChromeSrcY,  // 647. spec §11.3. CODE-CONFIRMED.
-                    LoginLayout.ModalChromeW,     // 340. spec §11.3. CODE-CONFIRMED.
-                    LoginLayout.ModalChromeH),    // 190. spec §11.3. CODE-CONFIRMED.
+                    LoginLayout.ModalChromeSrcX, // 318. spec §11.3. CODE-CONFIRMED.
+                    LoginLayout.ModalChromeSrcY, // 647. spec §11.3. CODE-CONFIRMED.
+                    LoginLayout.ModalChromeW, // 340. spec §11.3. CODE-CONFIRMED.
+                    LoginLayout.ModalChromeH), // 190. spec §11.3. CODE-CONFIRMED.
                 PatchMarginTop = NinePatchMargin,
                 PatchMarginLeft = NinePatchMargin,
                 PatchMarginRight = NinePatchMargin,
@@ -206,8 +206,8 @@ public sealed partial class PinModal : Control
         _pinDisplay = new Label
         {
             Name = "PinDisplay",
-            Position = new Vector2(81, 138),   // panel-local. spec §11.3. CODE-CONFIRMED.
-            Size = new Vector2(150, 22),        // panel-local. spec §11.3. CODE-CONFIRMED.
+            Position = new Vector2(81, 138), // panel-local. spec §11.3. CODE-CONFIRMED.
+            Size = new Vector2(150, 22), // panel-local. spec §11.3. CODE-CONFIRMED.
             HorizontalAlignment = HorizontalAlignment.Center,
             MouseFilter = MouseFilterEnum.Ignore,
         };
@@ -296,11 +296,11 @@ public sealed partial class PinModal : Control
                 // spec: Docs/RE/specs/frontend_scenes.md §11.3b. CODE-CONFIRMED.
                 AtlasTexture? normalTex = _assets.Slice(
                     LoginLayout.AtlasPassword,
-                    srcU, LoginLayout.PinDigitNormalSrcY,  // srcV=560 (normal). spec §11.3b. CODE-CONFIRMED.
+                    srcU, LoginLayout.PinDigitNormalSrcY, // srcV=560 (normal). spec §11.3b. CODE-CONFIRMED.
                     LoginLayout.PinKeypadTileW, LoginLayout.PinKeypadTileH);
                 AtlasTexture? hoverTex = _assets.Slice(
                     LoginLayout.AtlasPassword,
-                    srcU, LoginLayout.PinDigitHoverSrcY,   // srcV=664 (hover). spec §11.3b. CODE-CONFIRMED.
+                    srcU, LoginLayout.PinDigitHoverSrcY, // srcV=664 (hover). spec §11.3b. CODE-CONFIRMED.
                     LoginLayout.PinKeypadTileW, LoginLayout.PinKeypadTileH);
                 AtlasTexture? pressedTex = _assets.Slice(
                     LoginLayout.AtlasPassword,

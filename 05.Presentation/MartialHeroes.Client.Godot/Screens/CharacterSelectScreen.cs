@@ -203,9 +203,9 @@ public sealed partial class CharacterSelectScreen : Control
     private int _createFaceIndex = CharacterSelectLayout.FaceIndexMin; // 1..7
 
     // Create form label references (updated on class change).
-    private Label _createClassLabel = null!;   // class name from msg.xdb
-    private Label _createDescLabel = null!;    // npc.scr description text
-    private Label _createFaceLabel = null!;    // face index display
+    private Label _createClassLabel = null!; // class name from msg.xdb
+    private Label _createDescLabel = null!; // npc.scr description text
+    private Label _createFaceLabel = null!; // face index display
 
     // Turntable press-and-hold state.
     // spec: frontend_scenes.md §4.2 "press-and-hold turntable ≈±2 rad/s". CODE-CONFIRMED.
@@ -253,7 +253,10 @@ public sealed partial class CharacterSelectScreen : Control
         _assets = SharedAssets ?? UiAssetLoader.Open();
         _ownsAssets = SharedAssets is null;
 
-        try { _realAssets = RealClientAssets.TryOpen(); }
+        try
+        {
+            _realAssets = RealClientAssets.TryOpen();
+        }
         catch (Exception ex)
         {
             GD.PrintErr($"[CharacterSelectScreen] VFS open for 3D previews failed: {ex.Message}");
@@ -264,7 +267,10 @@ public sealed partial class CharacterSelectScreen : Control
         // spec: Docs/RE/specs/frontend_scenes.md §4.1.1 — class description source = npc.scr: CONFIRMED.
         _npcScrDesc = NpcScrDescriptions.Load(_realAssets);
 
-        try { BuildUi(); }
+        try
+        {
+            BuildUi();
+        }
         catch (Exception ex)
         {
             GD.PrintErr($"[CharacterSelectScreen] BuildUi failed: {ex.Message}");
@@ -397,9 +403,9 @@ public sealed partial class CharacterSelectScreen : Control
         var createBtn = WidgetFactory.MakeStateButton(
             _assets, CharacterSelectLayout.AtlasLoginWindow,
             (int)btnBarLeft, (int)btnBarY, (int)btnW, (int)btnH,
-            0, 1004,   // NORMAL src. spec §11.5c. CODE-CONFIRMED.
-            0, 1004,   // HOVER = NORMAL. spec §1.5.
-            59, 1004,  // PRESSED src. spec §11.5c. CODE-CONFIRMED.
+            0, 1004, // NORMAL src. spec §11.5c. CODE-CONFIRMED.
+            0, 1004, // HOVER = NORMAL. spec §1.5.
+            59, 1004, // PRESSED src. spec §11.5c. CODE-CONFIRMED.
             actionId: CharacterSelectLayout.CreateActionId); // 4
         createBtn.ActionFired += OnCharAction;
         AddChild(createBtn);
@@ -409,9 +415,9 @@ public sealed partial class CharacterSelectScreen : Control
         var deleteBtn = WidgetFactory.MakeStateButton(
             _assets, CharacterSelectLayout.AtlasLoginWindow,
             (int)(btnBarLeft + btnW + btnGap), (int)btnBarY, (int)btnW, (int)btnH,
-            118, 1004,  // NORMAL src. spec §11.5c. CODE-CONFIRMED.
-            118, 1004,  // HOVER = NORMAL.
-            177, 1004,  // PRESSED src. spec §11.5c. CODE-CONFIRMED.
+            118, 1004, // NORMAL src. spec §11.5c. CODE-CONFIRMED.
+            118, 1004, // HOVER = NORMAL.
+            177, 1004, // PRESSED src. spec §11.5c. CODE-CONFIRMED.
             actionId: CharacterSelectLayout.DeleteActionId); // 5
         deleteBtn.ActionFired += OnCharAction;
         AddChild(deleteBtn);
@@ -421,9 +427,9 @@ public sealed partial class CharacterSelectScreen : Control
         var enterBtn = WidgetFactory.MakeStateButton(
             _assets, CharacterSelectLayout.AtlasLoginWindow,
             (int)(btnBarLeft + 2f * (btnW + btnGap)), (int)btnBarY, (int)btnW, (int)btnH,
-            236, 1004,  // NORMAL src. spec §11.5c. CODE-CONFIRMED.
-            236, 1004,  // HOVER = NORMAL.
-            295, 1004,  // PRESSED src. spec §11.5c. CODE-CONFIRMED.
+            236, 1004, // NORMAL src. spec §11.5c. CODE-CONFIRMED.
+            236, 1004, // HOVER = NORMAL.
+            295, 1004, // PRESSED src. spec §11.5c. CODE-CONFIRMED.
             actionId: CharacterSelectLayout.EnterActionId); // 6
         enterBtn.ActionFired += OnCharAction;
         AddChild(enterBtn);
@@ -512,6 +518,7 @@ public sealed partial class CharacterSelectScreen : Control
             parent.AddChild(valLabel);
             count++;
         }
+
         return count;
     }
 
@@ -582,6 +589,7 @@ public sealed partial class CharacterSelectScreen : Control
             LiveSlot ls = _liveSlots[i];
             descs[i] = (!ls.IsEmpty, !ls.IsEmpty ? (uint)ls.ServerClass : 0u);
         }
+
         _scene3D.SlotDescriptors = descs;
     }
 
@@ -714,7 +722,7 @@ public sealed partial class CharacterSelectScreen : Control
         for (int ci = 0; ci < 4; ci++)
         {
             int normalSrcX = CharacterSelectLayout.ClassBtnNormalSrcX[ci]; // 590/635/680/725. CODE-CONFIRMED.
-            int hoverSrcX = CharacterSelectLayout.ClassBtnHoverSrcX[ci];   // 815/860/905/725. CODE-CONFIRMED.
+            int hoverSrcX = CharacterSelectLayout.ClassBtnHoverSrcX[ci]; // 815/860/905/725. CODE-CONFIRMED.
             int btnY = CharacterSelectLayout.ClassBtnBaseY + ci * CharacterSelectLayout.ClassBtnStride;
             // dst-X: right-anchored COMPUTED in the legacy code — we place them left-to-right in the panel.
             // spec: ui_system.md §8.4 "dst-X right-anchored COMPUTED, stride 48". CODE-CONFIRMED.
@@ -727,8 +735,8 @@ public sealed partial class CharacterSelectScreen : Control
                 btnX, btnY,
                 CharacterSelectLayout.ClassBtnW, CharacterSelectLayout.ClassBtnH,
                 normalSrcX, CharacterSelectLayout.ClassBtnNormalSrcY, // NORMAL. CODE-CONFIRMED.
-                hoverSrcX, CharacterSelectLayout.ClassBtnNormalSrcY,   // HOVER src-Y same as NORMAL. CODE-CONFIRMED.
-                normalSrcX, CharacterSelectLayout.ClassBtnNormalSrcY,  // PRESSED = NORMAL. spec §8.2.
+                hoverSrcX, CharacterSelectLayout.ClassBtnNormalSrcY, // HOVER src-Y same as NORMAL. CODE-CONFIRMED.
+                normalSrcX, CharacterSelectLayout.ClassBtnNormalSrcY, // PRESSED = NORMAL. spec §8.2.
                 actionId: 10 + ci, // 10/11/12/13. spec §8.2 CODE-CONFIRMED.
                 caption: _assets.Text(CharacterSelectLayout.ClassLabelMsgIds[ci],
                     CharacterSelectLayout.ClassLabelFallbacks[ci]));
@@ -1042,7 +1050,8 @@ public sealed partial class CharacterSelectScreen : Control
                 ShowCreateForm();
                 break;
             case CharacterSelectLayout.DeleteActionId: // 5
-                GD.Print($"[CharacterSelectScreen] Delete (action 5) slot={_selectedSlot} — stub (awaits ApplicationUseCases).");
+                GD.Print(
+                    $"[CharacterSelectScreen] Delete (action 5) slot={_selectedSlot} — stub (awaits ApplicationUseCases).");
                 RefreshCharCountCaption();
                 break;
             case CharacterSelectLayout.EnterActionId: // 6
@@ -1246,11 +1255,11 @@ public sealed partial class CharacterSelectScreen : Control
         // spec: frontend_scenes.md §4.4 — "a–z + digits + CP949 Hangul; reject all else". CODE-CONFIRMED.
         foreach (char c in name)
         {
-            if (c >= 'a' && c <= 'z') continue;   // a–z. CODE-CONFIRMED.
-            if (c >= '0' && c <= '9') continue;    // 0–9. CODE-CONFIRMED.
-            if (c >= '가' && c <= '힣') continue;  // Hangul syllables. CODE-CONFIRMED.
-            if (c >= 'ᄀ' && c <= 'ᇿ') continue;  // Hangul jamo. CODE-CONFIRMED.
-            if (c >= '㄰' && c <= '㆏') continue;  // Hangul compat jamo. CODE-CONFIRMED.
+            if (c >= 'a' && c <= 'z') continue; // a–z. CODE-CONFIRMED.
+            if (c >= '0' && c <= '9') continue; // 0–9. CODE-CONFIRMED.
+            if (c >= '가' && c <= '힣') continue; // Hangul syllables. CODE-CONFIRMED.
+            if (c >= 'ᄀ' && c <= 'ᇿ') continue; // Hangul jamo. CODE-CONFIRMED.
+            if (c >= '㄰' && c <= '㆏') continue; // Hangul compat jamo. CODE-CONFIRMED.
             toastMsg = _assets.Text(2075u, "Only a-z, 0-9, and Korean Hangul allowed.");
             return false;
         }
@@ -1277,7 +1286,8 @@ public sealed partial class CharacterSelectScreen : Control
         // Count occupied slots from live data only. ZERO synthetic count.
         int count = 0;
         for (int i = 0; i < MaxSlots; i++)
-            if (!_liveSlots[i].IsEmpty) count++;
+            if (!_liveSlots[i].IsEmpty)
+                count++;
 
         // CP949 template from msg.xdb. spec: frontend_scenes.md §3.8.2 CODE-CONFIRMED.
         string template = _assets.Text(2209u, "캐릭터 개수 : {0}");
@@ -1328,6 +1338,7 @@ public sealed partial class CharacterSelectScreen : Control
                     : Colors.White;
             }
         }
+
         _scene3D?.SetSelectedSlot(index);
     }
 
@@ -1353,9 +1364,9 @@ public sealed partial class CharacterSelectScreen : Control
         return WidgetFactory.MakeStateButton(
             _assets, CharacterSelectLayout.AtlasLoginWindow,
             norm.X, norm.Y, norm.W, norm.H,
-            norm.SrcX, norm.SrcY,   // NORMAL. CODE-CONFIRMED.
-            hov.SrcX, hov.SrcY,    // HOVER. CODE-CONFIRMED.
-            prs.SrcX, prs.SrcY,    // PRESSED. CODE-CONFIRMED.
+            norm.SrcX, norm.SrcY, // NORMAL. CODE-CONFIRMED.
+            hov.SrcX, hov.SrcY, // HOVER. CODE-CONFIRMED.
+            prs.SrcX, prs.SrcY, // PRESSED. CODE-CONFIRMED.
             actionId);
     }
 

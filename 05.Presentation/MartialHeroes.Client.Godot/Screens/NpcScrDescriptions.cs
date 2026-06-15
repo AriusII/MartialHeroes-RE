@@ -66,7 +66,9 @@ internal sealed class NpcScrDescriptions
     // Whether the VFS load succeeded (used for diagnostics).
     private bool _loadedFromVfs;
 
-    private NpcScrDescriptions() { }
+    private NpcScrDescriptions()
+    {
+    }
 
     /// <summary>
     /// Attempts to load npc.scr from the VFS.  Returns a ready instance.
@@ -126,7 +128,8 @@ internal sealed class NpcScrDescriptions
 
                 if (string.IsNullOrWhiteSpace(joined))
                 {
-                    GD.PrintErr($"[NpcScrDescriptions] npc.scr key {key} has empty description — using English fallback.");
+                    GD.PrintErr(
+                        $"[NpcScrDescriptions] npc.scr key {key} has empty description — using English fallback.");
                     continue;
                 }
 

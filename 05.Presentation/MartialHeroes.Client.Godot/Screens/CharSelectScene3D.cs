@@ -224,7 +224,8 @@ public sealed partial class CharSelectScene3D : Node3D
             }
             else
             {
-                GD.Print("[CharSelectScene3D] No VFS — backdrop cell / actors / ambient effect skipped; env + camera only.");
+                GD.Print(
+                    "[CharSelectScene3D] No VFS — backdrop cell / actors / ambient effect skipped; env + camera only.");
             }
 
             GD.Print("[CharSelectScene3D] 3D scene initialised from real assets (no procedural sky, no omni rig). " +
@@ -332,9 +333,9 @@ public sealed partial class CharSelectScene3D : Node3D
         _camera = new Camera3D
         {
             Name = "CharSelectCamera",
-            Fov = CameraFov,   // spec: §3.5.1 vertical FOV 50°
+            Fov = CameraFov, // spec: §3.5.1 vertical FOV 50°
             Near = CameraNear, // spec: §3.5.1 near 5.0
-            Far = CameraFar,   // spec: §3.5.1 far 15000.0
+            Far = CameraFar, // spec: §3.5.1 far 15000.0
             KeepAspect = Camera3D.KeepAspectEnum.Height, // vertical FOV is the reference (§3.5.1)
         };
         AddChild(_camera);
@@ -402,7 +403,8 @@ public sealed partial class CharSelectScene3D : Node3D
             terrainNode.OnSectorLoaded(new MartialHeroes.Client.Application.World.SectorLoadedEvent(
                 MapX: BackdropMapX, MapZ: BackdropMapZ, Payload: tedData));
 
-            GD.Print($"[CharSelectScene3D] Backdrop terrain cell ({BackdropMapX},{BackdropMapZ}) loaded. spec: §3.7.1.");
+            GD.Print(
+                $"[CharSelectScene3D] Backdrop terrain cell ({BackdropMapX},{BackdropMapZ}) loaded. spec: §3.7.1.");
         }
         catch (Exception ex)
         {
@@ -446,7 +448,8 @@ public sealed partial class CharSelectScene3D : Node3D
             propsRoot.Name = "BackdropProps";
             AddChild(propsRoot);
 
-            GD.Print($"[CharSelectScene3D] Backdrop props built ({scene.Objects.Length} objects, carved wall). spec: §3.7.1 / §3.7.3.");
+            GD.Print(
+                $"[CharSelectScene3D] Backdrop props built ({scene.Objects.Length} objects, carved wall). spec: §3.7.1 / §3.7.3.");
         }
         catch (Exception ex)
         {
@@ -495,7 +498,8 @@ public sealed partial class CharSelectScene3D : Node3D
                 {
                     _slotActors[i] = actor;
                     AddChild(actor);
-                    GD.Print($"[CharSelectScene3D] Slot {i} actor at Godot ({SlotLegacyX[i]:F1}, {rowY:F2}, {SlotGodotZ[i]:F1}). spec: §3.3.1.");
+                    GD.Print(
+                        $"[CharSelectScene3D] Slot {i} actor at Godot ({SlotLegacyX[i]:F1}, {rowY:F2}, {SlotGodotZ[i]:F1}). spec: §3.3.1.");
                 }
             }
             catch (Exception ex)
@@ -510,7 +514,8 @@ public sealed partial class CharSelectScene3D : Node3D
         string? sknPath = PickSknPath(assets, skinClassId);
         if (sknPath is null)
         {
-            GD.PrintErr($"[CharSelectScene3D] Slot {slotIdx}: no .skn present for skinClassId={skinClassId} — skipped.");
+            GD.PrintErr(
+                $"[CharSelectScene3D] Slot {slotIdx}: no .skn present for skinClassId={skinClassId} — skipped.");
             return null;
         }
 
@@ -523,6 +528,7 @@ public sealed partial class CharSelectScene3D : Node3D
                 GD.PrintErr($"[CharSelectScene3D] Slot {slotIdx}: .skn empty '{sknPath}' — skipped.");
                 return null;
             }
+
             mesh = SknParser.Parse(sknData);
         }
         catch (Exception ex)
@@ -568,6 +574,7 @@ public sealed partial class CharSelectScene3D : Node3D
             GD.PrintErr($"[CharSelectScene3D] .bnd absent for id_b={idB}: {bndPath} — rest pose.");
             return null;
         }
+
         try
         {
             ReadOnlyMemory<byte> data = assets.GetRaw(bndPath);
@@ -610,6 +617,7 @@ public sealed partial class CharSelectScene3D : Node3D
         {
             GD.PrintErr($"[CharSelectScene3D] TryLoadIdleClipForIdB(id_b={idB}) failed: {ex.Message}");
         }
+
         return null;
     }
 
@@ -681,6 +689,7 @@ public sealed partial class CharSelectScene3D : Node3D
                 break;
             }
         }
+
         if (list is null) return null;
 
         int li = oneBasedIdx - 1; // 1-based index → 0-based table slot. spec: terrain.md §5.6 Block 3

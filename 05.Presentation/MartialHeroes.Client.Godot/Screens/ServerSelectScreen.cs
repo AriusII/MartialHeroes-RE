@@ -137,9 +137,11 @@ public sealed partial class ServerSelectScreen : Control
     // =========================================================================
 
     private IReadOnlyList<ServerEntry>? _servers;
+
     // Display-order index array: maps screen slot → _servers[] index.
     // spec: Docs/RE/specs/frontend_scenes.md §2.7. CODE-CONFIRMED.
     private List<int>? _displayOrder;
+
     // Current pager page (0-based). Page n shows display slots [2n, 2n+1].
     // spec: Docs/RE/specs/frontend_scenes.md §1.2 / §11.4. CODE-CONFIRMED.
     private int _currentPage;
@@ -177,6 +179,7 @@ public sealed partial class ServerSelectScreen : Control
                 _displayOrder = BuildDisplayOrder(_servers);
                 _currentPage = 0;
             }
+
             if (IsInsideTree()) PaintPlates();
         }
     }
@@ -237,8 +240,8 @@ public sealed partial class ServerSelectScreen : Control
         // -----------------------------------------------------------------------
         AddImageSlice("PaintingBackdrop", LoginLayout.AtlasLoginWindow,
             LoginLayout.MainPanel.SrcX, LoginLayout.MainPanel.SrcY, // src(0,0). CODE-CONFIRMED.
-            LoginLayout.MainPanel.W, LoginLayout.MainPanel.H,        // 1024×490. CODE-CONFIRMED.
-            LoginLayout.MainPanel.X, LoginLayout.MainPanel.Y,        // dst(0,110). CODE-CONFIRMED.
+            LoginLayout.MainPanel.W, LoginLayout.MainPanel.H, // 1024×490. CODE-CONFIRMED.
+            LoginLayout.MainPanel.X, LoginLayout.MainPanel.Y, // dst(0,110). CODE-CONFIRMED.
             LoginLayout.MainPanel.W, LoginLayout.MainPanel.H,
             "B src(0,0,1024,490) §11.2a/§11.4");
 
@@ -251,9 +254,9 @@ public sealed partial class ServerSelectScreen : Control
         //        col1 D src(572,6,100,372) → dst(310,97,100,372).
         // spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED.
         // -----------------------------------------------------------------------
-        int[] plateDstX  = { 24,  257 }; // spec §11.4. CODE-CONFIRMED.
-        int[] bodyDstX   = { 77,  310 }; // spec §11.4. CODE-CONFIRMED.
-        int[] bodySrcU   = { 448, 572 }; // spec §11.4 src U start=448 step+124. CODE-CONFIRMED.
+        int[] plateDstX = { 24, 257 }; // spec §11.4. CODE-CONFIRMED.
+        int[] bodyDstX = { 77, 310 }; // spec §11.4. CODE-CONFIRMED.
+        int[] bodySrcU = { 448, 572 }; // spec §11.4 src U start=448 step+124. CODE-CONFIRMED.
 
         for (int col = 0; col < 2; col++)
         {
@@ -284,11 +287,11 @@ public sealed partial class ServerSelectScreen : Control
                 FocusMode = FocusModeEnum.None,
             };
             // Invisible style so the parchment TextureRect underneath is the only visual.
-            btn.AddThemeStyleboxOverride("normal",   new StyleBoxEmpty());
-            btn.AddThemeStyleboxOverride("hover",    new StyleBoxEmpty());
-            btn.AddThemeStyleboxOverride("pressed",  new StyleBoxEmpty());
+            btn.AddThemeStyleboxOverride("normal", new StyleBoxEmpty());
+            btn.AddThemeStyleboxOverride("hover", new StyleBoxEmpty());
+            btn.AddThemeStyleboxOverride("pressed", new StyleBoxEmpty());
             btn.AddThemeStyleboxOverride("disabled", new StyleBoxEmpty());
-            btn.AddThemeStyleboxOverride("focus",    new StyleBoxEmpty());
+            btn.AddThemeStyleboxOverride("focus", new StyleBoxEmpty());
             int capturedCol = col;
             btn.Pressed += () => OnPlatePressed(capturedCol);
             AddChild(btn);
@@ -391,6 +394,7 @@ public sealed partial class ServerSelectScreen : Control
                 pb.TextureHover = pagerHover;
                 pb.TexturePressed = pagerHover; // PRESSED = HOVER per spec §11.4. CODE-CONFIRMED.
             }
+
             int capturedN = n;
             pb.Pressed += () => OnPagerPressed(capturedN);
             AddChild(pb);
@@ -441,6 +445,7 @@ public sealed partial class ServerSelectScreen : Control
                 refreshBtn.TextureHover = refreshH;
                 refreshBtn.TexturePressed = refreshH;
             }
+
             refreshBtn.Pressed += OnRefreshPressed;
             AddChild(refreshBtn);
         }
@@ -496,6 +501,7 @@ public sealed partial class ServerSelectScreen : Control
             GD.PrintErr($"[ServerSelectScreen] Slice null: {nodeName} ({specNote}) — absent (VFS offline).");
             return;
         }
+
         var rect = new TextureRect
         {
             Name = nodeName,
@@ -526,7 +532,7 @@ public sealed partial class ServerSelectScreen : Control
         AtlasTexture? frameTex = _assets.Slice(
             LoginLayout.AtlasInventWindow,
             LoginLayout.ModalChromeSrcX, LoginLayout.ModalChromeSrcY, // src(318,647). CODE-CONFIRMED.
-            LoginLayout.ModalChromeW, LoginLayout.ModalChromeH);      // 340×190. CODE-CONFIRMED.
+            LoginLayout.ModalChromeW, LoginLayout.ModalChromeH); // 340×190. CODE-CONFIRMED.
 
         if (frameTex is not null)
         {
@@ -580,7 +586,11 @@ public sealed partial class ServerSelectScreen : Control
         int pinnedIdx = -1;
         for (int i = 0; i < count; i++)
         {
-            if (servers[i].ServerId == lastId) { pinnedIdx = i; break; }
+            if (servers[i].ServerId == lastId)
+            {
+                pinnedIdx = i;
+                break;
+            }
         }
 
         if (pinnedIdx < 0) return order; // not found — sequential.
@@ -593,6 +603,7 @@ public sealed partial class ServerSelectScreen : Control
             int j = rng.Next(i + 1);
             (order[i], order[j]) = (order[j], order[i]);
         }
+
         order.Insert(0, pinnedIdx); // pin at slot 0. spec §2.7. CODE-CONFIRMED.
         return order;
     }
@@ -741,9 +752,9 @@ public sealed partial class ServerSelectScreen : Control
     {
         // spec: Docs/RE/specs/frontend_scenes.md §2.3. CODE-CONFIRMED thresholds (strict >).
         if (load > 1200) return (new Color(0.90f, 0.25f, 0.25f), 6001u); // red
-        if (load > 800)  return (new Color(0.95f, 0.60f, 0.15f), 6002u); // orange
-        if (load > 500)  return (new Color(0.95f, 0.90f, 0.15f), 6003u); // yellow
-        return (new Color(0.50f, 0.90f, 0.50f), 0u);                       // green (no special msg)
+        if (load > 800) return (new Color(0.95f, 0.60f, 0.15f), 6002u); // orange
+        if (load > 500) return (new Color(0.95f, 0.90f, 0.15f), 6003u); // yellow
+        return (new Color(0.50f, 0.90f, 0.50f), 0u); // green (no special msg)
     }
 
     // =========================================================================
@@ -787,7 +798,7 @@ public sealed partial class ServerSelectScreen : Control
     private void OnPagerPressed(int page)
     {
         int serverCount = _servers?.Count ?? 0;
-        int pageCount   = serverCount == 0 ? 0 : (serverCount + 1) / 2;
+        int pageCount = serverCount == 0 ? 0 : (serverCount + 1) / 2;
         if (page < 0 || page >= pageCount) return;
 
         _currentPage = page;

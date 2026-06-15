@@ -67,8 +67,8 @@ public sealed partial class LoadingScreen : Control
     // =========================================================================
 
     // Design canvas dimensions. spec: frontend_scenes.md §11.0. CODE-CONFIRMED.
-    private const float RefWidth  = 1024f; // spec §11.0. CODE-CONFIRMED.
-    private const float RefHeight = 768f;  // spec §11.0. CODE-CONFIRMED.
+    private const float RefWidth = 1024f; // spec §11.0. CODE-CONFIRMED.
+    private const float RefHeight = 768f; // spec §11.0. CODE-CONFIRMED.
 
     // Track rect in design-space (centre-origin, +Y up).
     // spec: frontend_scenes.md §2L.1 / §9.1 "x ∈ [−499,−170], y ∈ [−363,−140]". CODE-CONFIRMED.
@@ -85,7 +85,7 @@ public sealed partial class LoadingScreen : Control
     // spec: frontend_scenes.md §2L.1 / §9.1. CODE-CONFIRMED.
     private static readonly string[] BgPaths =
     [
-        "data/ui/loading.dds",   // index 0. spec §9.1. CODE-CONFIRMED.
+        "data/ui/loading.dds", // index 0. spec §9.1. CODE-CONFIRMED.
         "data/ui/loading06.dds", // index 1. spec §9.1. CODE-CONFIRMED.
         "data/ui/loading08.dds", // index 2. spec §9.1. CODE-CONFIRMED.
     ];
@@ -128,17 +128,17 @@ public sealed partial class LoadingScreen : Control
     private TextureRect? _barFillTex;
 
     // Progress.
-    private float _progressT;    // 0..1 elapsed fraction of SimPreloadSeconds
-    private int   _percent;      // 0..100 integer bar value
-    private bool  _preloadDone;
-    private bool  _gracePending;
+    private float _progressT; // 0..1 elapsed fraction of SimPreloadSeconds
+    private int _percent; // 0..100 integer bar value
+    private bool _preloadDone;
+    private bool _gracePending;
 
     // BGM player.
     private AudioStreamPlayer? _bgmPlayer;
 
     // Asset loader.
     private UiAssetLoader? _sharedAssets;
-    private bool           _ownsAssets;
+    private bool _ownsAssets;
 
     // =========================================================================
     // Public API
@@ -183,13 +183,14 @@ public sealed partial class LoadingScreen : Control
         else
         {
             _sharedAssets = UiAssetLoader.Open();
-            _ownsAssets   = true;
+            _ownsAssets = true;
         }
 
         BuildCanvas(bgIndex);
         StartBgm();
 
-        GD.Print($"[LoadingScreen] Built. BG={BgPaths[bgIndex]}, simulating preload over {SimPreloadSeconds}s. spec §2L.");
+        GD.Print(
+            $"[LoadingScreen] Built. BG={BgPaths[bgIndex]}, simulating preload over {SimPreloadSeconds}s. spec §2L.");
     }
 
     public override void _ExitTree()
@@ -260,9 +261,9 @@ public sealed partial class LoadingScreen : Control
 
         _canvas = new Control
         {
-            Name       = "LoadingCanvas",
-            Position   = Vector2.Zero,
-            Size       = new Vector2(RefWidth, RefHeight),
+            Name = "LoadingCanvas",
+            Position = Vector2.Zero,
+            Size = new Vector2(RefWidth, RefHeight),
             MouseFilter = MouseFilterEnum.Ignore,
         };
         AddChild(_canvas);
@@ -273,9 +274,9 @@ public sealed partial class LoadingScreen : Control
         // If the DDS is absent: the TextureRect has no texture → renders transparent.
         _bgRect = new TextureRect
         {
-            Name        = "BgRect",
-            Position    = Vector2.Zero,
-            Size        = new Vector2(RefWidth, RefHeight),
+            Name = "BgRect",
+            Position = Vector2.Zero,
+            Size = new Vector2(RefWidth, RefHeight),
             StretchMode = TextureRect.StretchModeEnum.Scale,
             MouseFilter = MouseFilterEnum.Ignore,
         };
@@ -299,11 +300,11 @@ public sealed partial class LoadingScreen : Control
         //   canvas_y_top   = 384 − (−140) = 524
         //   canvas_y_bot   = 384 − (−363) = 747
 
-        float cx = RefWidth  / 2f; // 512
+        float cx = RefWidth / 2f; // 512
         float cy = RefHeight / 2f; // 384
 
-        float trackX = cx + TrackDesignX1;           // 13
-        float trackY = cy - TrackDesignY2;            // 524
+        float trackX = cx + TrackDesignX1; // 13
+        float trackY = cy - TrackDesignY2; // 524
         float trackH = TrackDesignY2 - TrackDesignY1; // 223 (note: track height ≈ max fill width)
 
         // Fill bar: textured sub-rect of the loading DDS.
@@ -311,12 +312,12 @@ public sealed partial class LoadingScreen : Control
         // NO solid-colour fallback. spec §9.1 / brief rule.
         _barFillTex = new TextureRect
         {
-            Name        = "BarFillTex",
-            Position    = new Vector2(trackX, trackY),
-            Size        = new Vector2(0f, trackH), // width starts at 0 (invisible at 0%). spec §9.1. CODE-CONFIRMED.
+            Name = "BarFillTex",
+            Position = new Vector2(trackX, trackY),
+            Size = new Vector2(0f, trackH), // width starts at 0 (invisible at 0%). spec §9.1. CODE-CONFIRMED.
             StretchMode = TextureRect.StretchModeEnum.Scale,
             MouseFilter = MouseFilterEnum.Ignore,
-            Visible     = false, // hidden until DDS is wired and percent > 0
+            Visible = false, // hidden until DDS is wired and percent > 0
         };
         _canvas.AddChild(_barFillTex);
     }
@@ -336,7 +337,7 @@ public sealed partial class LoadingScreen : Control
 
         if (_barFillTex is not null)
         {
-            _barFillTex.Size    = _barFillTex.Size with { X = fillW };
+            _barFillTex.Size = _barFillTex.Size with { X = fillW };
             _barFillTex.Visible = visible;
         }
     }
@@ -359,7 +360,8 @@ public sealed partial class LoadingScreen : Control
             Texture2D? tex = _sharedAssets.LoadAtlas(BgPaths[bgIndex]);
             if (tex is null)
             {
-                GD.Print($"[LoadingScreen] Loading DDS not found in VFS: {BgPaths[bgIndex]} — background will be transparent.");
+                GD.Print(
+                    $"[LoadingScreen] Loading DDS not found in VFS: {BgPaths[bgIndex]} — background will be transparent.");
                 return;
             }
 
@@ -374,7 +376,8 @@ public sealed partial class LoadingScreen : Control
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[LoadingScreen] LoadBackgroundTexture failed: {ex.Message} — background will be transparent.");
+            GD.PrintErr(
+                $"[LoadingScreen] LoadBackgroundTexture failed: {ex.Message} — background will be transparent.");
         }
     }
 
@@ -391,12 +394,12 @@ public sealed partial class LoadingScreen : Control
 
         var atlas = new AtlasTexture
         {
-            Atlas      = tex,
-            Region     = new Rect2(0f, 0f, texW, cropH),
+            Atlas = tex,
+            Region = new Rect2(0f, 0f, texW, cropH),
             FilterClip = false,
         };
 
-        _bgRect.Texture     = atlas;
+        _bgRect.Texture = atlas;
         _bgRect.StretchMode = TextureRect.StretchModeEnum.Scale;
         GD.Print($"[LoadingScreen] BG applied ({texW}×{texH}, V-crop to {cropH:F0}px). spec §2L.1.");
     }
@@ -410,21 +413,22 @@ public sealed partial class LoadingScreen : Control
 
         // Fill sub-rect: u ∈ [0.754, 0.969], v ∈ [0.432, 0.75].
         // spec: frontend_scenes.md §9.1. PLAUSIBLE/sample-unverified.
-        float srcX = texW * FillUMin;                 // spec §9.1. PLAUSIBLE.
-        float srcW = texW * (FillUMax - FillUMin);    // spec §9.1. PLAUSIBLE.
-        float srcY = texH * FillVMin;                 // spec §9.1. PLAUSIBLE.
-        float srcH = texH * (FillVMax - FillVMin);    // spec §9.1. PLAUSIBLE.
+        float srcX = texW * FillUMin; // spec §9.1. PLAUSIBLE.
+        float srcW = texW * (FillUMax - FillUMin); // spec §9.1. PLAUSIBLE.
+        float srcY = texH * FillVMin; // spec §9.1. PLAUSIBLE.
+        float srcH = texH * (FillVMax - FillVMin); // spec §9.1. PLAUSIBLE.
 
         var fillAtlas = new AtlasTexture
         {
-            Atlas      = tex,
-            Region     = new Rect2(srcX, srcY, srcW, srcH),
+            Atlas = tex,
+            Region = new Rect2(srcX, srcY, srcW, srcH),
             FilterClip = false,
         };
 
         _barFillTex.Texture = fillAtlas;
         // _barFillTex remains invisible until UpdateBar() is called with percent > 0.
-        GD.Print($"[LoadingScreen] Fill bar sub-rect applied (U[{FillUMin:F3},{FillUMax:F3}] V[{FillVMin:F3},{FillVMax:F3}]). spec §9.1 PLAUSIBLE.");
+        GD.Print(
+            $"[LoadingScreen] Fill bar sub-rect applied (U[{FillUMin:F3},{FillUMax:F3}] V[{FillVMin:F3},{FillVMax:F3}]). spec §9.1 PLAUSIBLE.");
     }
 
     // =========================================================================
@@ -437,9 +441,9 @@ public sealed partial class LoadingScreen : Control
         // spec: frontend_scenes.md §2L.1 / §9.1 "920100100 looping". CODE-CONFIRMED.
         _bgmPlayer = new AudioStreamPlayer
         {
-            Name     = "LoadingBgmPlayer",
+            Name = "LoadingBgmPlayer",
             VolumeDb = 0f,
-            Bus      = "Master",
+            Bus = "Master",
         };
         AddChild(_bgmPlayer);
 
@@ -455,7 +459,7 @@ public sealed partial class LoadingScreen : Control
                     var stream = AudioStreamOggVorbis.LoadFromBuffer(raw.ToArray());
                     if (stream is not null)
                     {
-                        stream.Loop       = true; // spec §2L.1 "looping cue". CODE-CONFIRMED.
+                        stream.Loop = true; // spec §2L.1 "looping cue". CODE-CONFIRMED.
                         _bgmPlayer.Stream = stream;
                         _bgmPlayer.Play();
                         GD.Print($"[LoadingScreen] BGM 920100100 started (looping). spec §2L.1. CODE-CONFIRMED.");

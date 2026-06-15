@@ -58,7 +58,7 @@ public sealed partial class CharSelectCameraRig : Node
     // Manual boom-zoom (a forward/back dolly on the view axis); boom depth clamped [0, 22].
     // spec: §3.5.4 — boom-Z clamp [0,22], boom seed 0. CODE-CONFIRMED.
     private const float BoomZoomUnitsPerSecond = 10.0f; // the §3.5.3 manual-zoom input-rate scalar (10.0)
-    private const float BoomMinZ = 0.0f;  // spec: §3.5.4 CODE-CONFIRMED
+    private const float BoomMinZ = 0.0f; // spec: §3.5.4 CODE-CONFIRMED
     private const float BoomMaxZ = 22.0f; // spec: §3.5.4 CODE-CONFIRMED
 
     // Manual actor yaw — the legacy create-preview turntable rate ≈±2 rad/s. spec: §4.2.
@@ -72,9 +72,9 @@ public sealed partial class CharSelectCameraRig : Node
     // Dolly state (set by Configure, animated by _Process).
     // =========================================================================
 
-    private Vector3 _kf0Pos;          // Godot-space KF0 (= world (515.549,137.266,−9397.710), Z negated)
-    private Vector3 _kf1Pos;          // Godot-space KF1 (= world (512,87,−9652), Z negated)
-    private Vector3 _lookAtTarget;    // the row pivot (constant through the dolly). spec: §3.5.4 / §3.6.5
+    private Vector3 _kf0Pos; // Godot-space KF0 (= world (515.549,137.266,−9397.710), Z negated)
+    private Vector3 _kf1Pos; // Godot-space KF1 (= world (512,87,−9652), Z negated)
+    private Vector3 _lookAtTarget; // the row pivot (constant through the dolly). spec: §3.5.4 / §3.6.5
     private Quaternion _kf0Orientation;
     private Quaternion _kf1Orientation;
 
@@ -150,15 +150,16 @@ public sealed partial class CharSelectCameraRig : Node
         _dollyElapsedMs += dt * 1000.0f; // delta is seconds; the spec normalizer is over the ms clock
         float t = Mathf.Clamp(_dollyElapsedMs * DollyRatePerMs, 0.0f, 1.0f); // spec: §3.5.4 literal 0.0005
 
-        _camera!.Position = _kf0Pos.Lerp(_kf1Pos, t);                  // position LERP. spec: §3.5.4
+        _camera!.Position = _kf0Pos.Lerp(_kf1Pos, t); // position LERP. spec: §3.5.4
         _camera.Quaternion = _kf0Orientation.Slerp(_kf1Orientation, t); // orientation SLERP. spec: §3.5.4
 
         if (t >= 1.0f)
         {
             _dollyComplete = true;
-            _camera.Position = _kf1Pos;             // snap to exact KF1
+            _camera.Position = _kf1Pos; // snap to exact KF1
             _camera.Quaternion = _kf1Orientation;
-            GD.Print("[CharSelectCameraRig] Entry dolly complete — holding KF1. spec: §3.5.2 (only indices 0/1 armed).");
+            GD.Print(
+                "[CharSelectCameraRig] Entry dolly complete — holding KF1. spec: §3.5.2 (only indices 0/1 armed).");
         }
     }
 
@@ -227,8 +228,10 @@ public sealed partial class CharSelectCameraRig : Node
             if (actor is null) continue;
 
             float rowBaseY = actor.Position.Y;
-            var boxMin = new Vector3(_slotGodotX[i] - HitBoxHalfExtentXZ, rowBaseY, _slotGodotZ[i] - HitBoxHalfExtentXZ);
-            var boxMax = new Vector3(_slotGodotX[i] + HitBoxHalfExtentXZ, rowBaseY + HitBoxYHeight, _slotGodotZ[i] + HitBoxHalfExtentXZ);
+            var boxMin = new Vector3(_slotGodotX[i] - HitBoxHalfExtentXZ, rowBaseY,
+                _slotGodotZ[i] - HitBoxHalfExtentXZ);
+            var boxMax = new Vector3(_slotGodotX[i] + HitBoxHalfExtentXZ, rowBaseY + HitBoxYHeight,
+                _slotGodotZ[i] + HitBoxHalfExtentXZ);
 
             if (TryRayAabb(rayOrigin, rayDir, boxMin, boxMax, out float t) && t < bestT)
             {
@@ -236,6 +239,7 @@ public sealed partial class CharSelectCameraRig : Node
                 bestSlot = i;
             }
         }
+
         return bestSlot;
     }
 

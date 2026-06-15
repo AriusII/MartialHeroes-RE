@@ -56,9 +56,9 @@ public sealed partial class CharCreatePreview3D : Control
     // Backdrop cell identity (§3.7.1 / §3.7.6).
     // =========================================================================
 
-    private const int BackdropAreaId = 0;   // map000. spec: §3.7.1
+    private const int BackdropAreaId = 0; // map000. spec: §3.7.1
     private const int BackdropMapX = 10000; // cell d000x10000z9990. spec: §3.7.1
-    private const int BackdropMapZ = 9990;  // cell d000x10000z9990. spec: §3.7.1
+    private const int BackdropMapZ = 9990; // cell d000x10000z9990. spec: §3.7.1
 
     // =========================================================================
     // Camera (held KF1) & row pivot — all from the spec, converted to Godot-space (Z negated once).
@@ -101,9 +101,9 @@ public sealed partial class CharCreatePreview3D : Control
     private const float TurntableRadPerSec = 2.0f;
 
     // Environment — the area-0 values (identical to select; §3.6).
-    private const float AmbientFloorEnergy = 1.0f;                       // OPTION_BRIGHT/100 = 1.0. spec: §3.6.2
+    private const float AmbientFloorEnergy = 1.0f; // OPTION_BRIGHT/100 = 1.0. spec: §3.6.2
     private static readonly Color BackgroundColorAchromatic = new(0.04f, 0.04f, 0.04f); // achromatic. spec: §3.6.3
-    private const float DirectionalEnergy = 0.047f;                      // area-0 kf-29 directional. spec: §11.3
+    private const float DirectionalEnergy = 0.047f; // area-0 kf-29 directional. spec: §11.3
     private static readonly Vector3 DirectionalDirGodot = ToGodotVec(-7.0f, 7.0f, 20.0f).Normalized(); // spec: §11.2
 
     // =========================================================================
@@ -231,8 +231,15 @@ public sealed partial class CharCreatePreview3D : Control
         bool ownsAssets = false;
         if (assets is null)
         {
-            try { assets = RealClientAssets.TryOpen(); ownsAssets = assets is not null; }
-            catch (Exception ex) { GD.PrintErr($"[CharCreatePreview3D] VFS open failed: {ex.Message}"); }
+            try
+            {
+                assets = RealClientAssets.TryOpen();
+                ownsAssets = assets is not null;
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[CharCreatePreview3D] VFS open failed: {ex.Message}");
+            }
         }
 
         if (assets is not null)
@@ -266,20 +273,21 @@ public sealed partial class CharCreatePreview3D : Control
         var env = new global::Godot.Environment
         {
             BackgroundMode = global::Godot.Environment.BGMode.Color,
-            BackgroundColor = BackgroundColorAchromatic,                 // spec: §3.6.3 (achromatic, no skybox)
+            BackgroundColor = BackgroundColorAchromatic, // spec: §3.6.3 (achromatic, no skybox)
             AmbientLightSource = global::Godot.Environment.AmbientSource.Color,
             AmbientLightColor = new Color(1.0f, 1.0f, 1.0f),
-            AmbientLightEnergy = AmbientFloorEnergy,                     // spec: §3.6.2 OPTION_BRIGHT/100 = 1.0
-            TonemapMode = global::Godot.Environment.ToneMapper.Linear,  // faithful D3D9 linear output
+            AmbientLightEnergy = AmbientFloorEnergy, // spec: §3.6.2 OPTION_BRIGHT/100 = 1.0
+            TonemapMode = global::Godot.Environment.ToneMapper.Linear, // faithful D3D9 linear output
             TonemapExposure = 1.0f,
-            FogEnabled = false,                                          // spec: §3.6.2 distance fog OFF
+            FogEnabled = false, // spec: §3.6.2 distance fog OFF
         };
 
         var worldEnv = new WorldEnvironment { Environment = env };
         _subViewport.AddChild(worldEnv);
 
-        GD.Print("[CharCreatePreview3D] Area-0 environment: achromatic dark BG + WHITE ambient floor (1.0) + fog OFF. " +
-                 "NO procedural sky. spec: §3.6 + environment_bins.md.");
+        GD.Print(
+            "[CharCreatePreview3D] Area-0 environment: achromatic dark BG + WHITE ambient floor (1.0) + fog OFF. " +
+            "NO procedural sky. spec: §3.6 + environment_bins.md.");
     }
 
     // =========================================================================
@@ -296,7 +304,7 @@ public sealed partial class CharCreatePreview3D : Control
         var sun = new DirectionalLight3D
         {
             Name = "Area0Directional",
-            LightEnergy = DirectionalEnergy,          // spec: environment_bins.md §11.3 (≈0.047)
+            LightEnergy = DirectionalEnergy, // spec: environment_bins.md §11.3 (≈0.047)
             LightColor = new Color(1.0f, 1.0f, 1.0f), // achromatic — area-0 R=G=B. spec: §11.2
             ShadowEnabled = false,
         };
@@ -320,18 +328,19 @@ public sealed partial class CharCreatePreview3D : Control
         _camera = new Camera3D
         {
             Name = "CreatePreviewCam",
-            Fov = CameraFov,   // spec: §3.5.1 FOV 50°
+            Fov = CameraFov, // spec: §3.5.1 FOV 50°
             Near = CameraNear, // spec: §3.5.1 near 5.0
-            Far = CameraFar,   // spec: §3.5.1 far 15000.0
+            Far = CameraFar, // spec: §3.5.1 far 15000.0
             KeepAspect = Camera3D.KeepAspectEnum.Height,
         };
         _subViewport.AddChild(_camera);
 
-        _camera.Position = CameraEyeGodot;                 // held at KF1
-        _camera.LookAt(CameraLookAtGodot, Vector3.Up);     // toward the row pivot
+        _camera.Position = CameraEyeGodot; // held at KF1
+        _camera.LookAt(CameraLookAtGodot, Vector3.Up); // toward the row pivot
 
-        GD.Print($"[CharCreatePreview3D] Held-KF1 camera: eye={CameraEyeGodot} look-at(row pivot)={CameraLookAtGodot}; " +
-                 $"FOV {CameraFov}/near {CameraNear}/far {CameraFar}. spec: §3.5.2/§3.5.4 (camera does not move).");
+        GD.Print(
+            $"[CharCreatePreview3D] Held-KF1 camera: eye={CameraEyeGodot} look-at(row pivot)={CameraLookAtGodot}; " +
+            $"FOV {CameraFov}/near {CameraNear}/far {CameraFar}. spec: §3.5.2/§3.5.4 (camera does not move).");
     }
 
     // =========================================================================
@@ -374,9 +383,11 @@ public sealed partial class CharCreatePreview3D : Control
             // the raw soil floor (NOT the platform top), used for diagnostics only. spec: §3.6.5.
             _rowGroundY = RowPivotLegacyY;
             if (terrainNode.TryGetGroundHeight(RowPivotLegacyX, RowPivotLegacyZ, out float sampledY, RowPivotLegacyY))
-                GD.Print($"[CharCreatePreview3D] Terrain sampler at pivot = {sampledY:F3} (soil floor); placing actor on platform Y={_rowGroundY:F2}. spec: §3.6.5.");
+                GD.Print(
+                    $"[CharCreatePreview3D] Terrain sampler at pivot = {sampledY:F3} (soil floor); placing actor on platform Y={_rowGroundY:F2}. spec: §3.6.5.");
 
-            GD.Print($"[CharCreatePreview3D] Backdrop terrain cell ({BackdropMapX},{BackdropMapZ}) loaded. spec: §3.7.1.");
+            GD.Print(
+                $"[CharCreatePreview3D] Backdrop terrain cell ({BackdropMapX},{BackdropMapZ}) loaded. spec: §3.7.1.");
         }
         catch (Exception ex)
         {
@@ -419,7 +430,8 @@ public sealed partial class CharCreatePreview3D : Control
             propsRoot.Name = "BackdropProps";
             _subViewport.AddChild(propsRoot);
 
-            GD.Print($"[CharCreatePreview3D] Carved-wall props built ({scene.Objects.Length} objects). spec: §3.7.6 / §3.7.3.");
+            GD.Print(
+                $"[CharCreatePreview3D] Carved-wall props built ({scene.Objects.Length} objects). spec: §3.7.6 / §3.7.3.");
         }
         catch (Exception ex)
         {
@@ -450,8 +462,15 @@ public sealed partial class CharCreatePreview3D : Control
         bool ownsAssets = false;
         if (assets is null)
         {
-            try { assets = RealClientAssets.TryOpen(); ownsAssets = assets is not null; }
-            catch (Exception ex) { GD.PrintErr($"[CharCreatePreview3D] VFS open failed: {ex.Message}"); }
+            try
+            {
+                assets = RealClientAssets.TryOpen();
+                ownsAssets = assets is not null;
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[CharCreatePreview3D] VFS open failed: {ex.Message}");
+            }
         }
 
         if (assets is null)
@@ -471,7 +490,8 @@ public sealed partial class CharCreatePreview3D : Control
             }
             else
             {
-                GD.Print($"[CharCreatePreview3D] No create actor built for class={InternalClassId} (asset absent — skipped).");
+                GD.Print(
+                    $"[CharCreatePreview3D] No create actor built for class={InternalClassId} (asset absent — skipped).");
             }
         }
         catch (Exception ex)
@@ -512,8 +532,14 @@ public sealed partial class CharCreatePreview3D : Control
         AnimationClip? idleClip = TryLoadIdleClipForIdB(assets, mesh.IdB);
 
         ImageTexture? albedo = null;
-        try { albedo = CharacterTextureResolver.Resolve(assets, mesh.IdA); }
-        catch (Exception ex) { GD.PrintErr($"[CharCreatePreview3D] texture resolve failed: {ex.Message}"); }
+        try
+        {
+            albedo = CharacterTextureResolver.Resolve(assets, mesh.IdA);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[CharCreatePreview3D] texture resolve failed: {ex.Message}");
+        }
 
         bool savedDiag = SkinnedCharacterBuilder.PrintDiagnostics;
         try
@@ -545,6 +571,7 @@ public sealed partial class CharCreatePreview3D : Control
             GD.PrintErr($"[CharCreatePreview3D] .bnd absent for id_b={idB}: {bndPath} — rest pose.");
             return null;
         }
+
         try
         {
             ReadOnlyMemory<byte> data = assets.GetRaw(bndPath);
@@ -586,6 +613,7 @@ public sealed partial class CharCreatePreview3D : Control
         {
             GD.PrintErr($"[CharCreatePreview3D] TryLoadIdleClipForIdB(id_b={idB}) failed: {ex.Message}");
         }
+
         return null;
     }
 
@@ -655,6 +683,7 @@ public sealed partial class CharCreatePreview3D : Control
                 break;
             }
         }
+
         if (list is null) return null;
 
         int li = oneBasedIdx - 1;

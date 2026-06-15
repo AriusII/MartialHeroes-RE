@@ -96,10 +96,10 @@ public sealed partial class LoginScreen : Control
     // spec §1.5a. CODE-CONFIRMED.
     // -------------------------------------------------------------------------
 
-    private const float CurtainSpeed         = 300f; // px/s (+5/tick @ 60 fps). spec §1.5a.
+    private const float CurtainSpeed = 300f; // px/s (+5/tick @ 60 fps). spec §1.5a.
     private const float CurtainCompleteThresh = 222f; // spec §1.5a. CODE-CONFIRMED.
-    private const int   CurtainH             = 222;   // bar height = |endY − startY|. spec §1.5a.
-    private const int   CurtainBotBase       = 326;   // bottom bar base Y. spec §1.5a. CODE-CONFIRMED.
+    private const int CurtainH = 222; // bar height = |endY − startY|. spec §1.5a.
+    private const int CurtainBotBase = 326; // bottom bar base Y. spec §1.5a. CODE-CONFIRMED.
 
     // -------------------------------------------------------------------------
     // Public read: BootFlow queries whether the curtain has passed Y>200.
@@ -130,17 +130,17 @@ public sealed partial class LoginScreen : Control
 
     // Quit-confirm modal alpha ramp state. spec §11.2g. CODE-CONFIRMED.
     private Control? _quitModal;
-    private int _quitModalAlpha;  // current [0..255]
+    private int _quitModalAlpha; // current [0..255]
     private int _quitModalTarget; // 255 = showing, 0 = hiding
 
     // Two curtain bars. spec §1.5a. CODE-CONFIRMED.
     private ColorRect? _curtainTop;
     private ColorRect? _curtainBot;
-    private float      _curtainAccum;
-    private bool       _curtainOpen;
+    private float _curtainAccum;
+    private bool _curtainOpen;
 
     private UiAssetLoader _assets = null!;
-    private bool          _ownsAssets;
+    private bool _ownsAssets;
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -148,7 +148,7 @@ public sealed partial class LoginScreen : Control
 
     public override void _Ready()
     {
-        _assets     = SharedAssets ?? UiAssetLoader.Open();
+        _assets = SharedAssets ?? UiAssetLoader.Open();
         _ownsAssets = SharedAssets is null;
 
         // Preload the four login atlases before any widget construction.
@@ -209,7 +209,7 @@ public sealed partial class LoginScreen : Control
         {
             GetViewport().SetInputAsHandled();
             if (_accountEdit.HasFocus()) _passwordEdit.GrabFocus();
-            else                         _accountEdit.GrabFocus();
+            else _accountEdit.GrabFocus();
         }
     }
 
@@ -233,8 +233,18 @@ public sealed partial class LoginScreen : Control
 
             if (_curtainAccum >= CurtainCompleteThresh)
             {
-                if (_curtainTop is not null) { _curtainTop.Position = new Vector2(0, -222f); _curtainTop.Visible = false; }
-                if (_curtainBot is not null) { _curtainBot.Position = new Vector2(0, 548f);  _curtainBot.Visible = false; }
+                if (_curtainTop is not null)
+                {
+                    _curtainTop.Position = new Vector2(0, -222f);
+                    _curtainTop.Visible = false;
+                }
+
+                if (_curtainBot is not null)
+                {
+                    _curtainBot.Position = new Vector2(0, 548f);
+                    _curtainBot.Visible = false;
+                }
+
                 _curtainOpen = true;
                 GD.Print("[LoginScreen] Curtain fully open (C>222). spec §1.5a. CODE-CONFIRMED.");
             }
@@ -252,8 +262,8 @@ public sealed partial class LoginScreen : Control
 
         _quitModal.Modulate = new Color(1f, 1f, 1f, _quitModalAlpha / 255f);
 
-        if (_quitModalAlpha > 0 && !_quitModal.Visible)  _quitModal.Visible = true;
-        if (_quitModalAlpha == 0 && _quitModal.Visible)  _quitModal.Visible = false;
+        if (_quitModalAlpha > 0 && !_quitModal.Visible) _quitModal.Visible = true;
+        if (_quitModalAlpha == 0 && _quitModal.Visible) _quitModal.Visible = false;
     }
 
     // -------------------------------------------------------------------------
@@ -306,7 +316,7 @@ public sealed partial class LoginScreen : Control
         // =======================================================================
         for (int blk = 0; blk < 2; blk++)
         {
-            int blockX   = 30 + blk * 233;  // spec §11.2b "block X starts 30, step +233". CODE-CONFIRMED.
+            int blockX = 30 + blk * 233; // spec §11.2b "block X starts 30, step +233". CODE-CONFIRMED.
             int bodySrcU = 448 + blk * 124; // spec §11.2b "body src-U starts 448, step +124". CODE-CONFIRMED.
 
             // Channel block body — D@(X+47,97,100,372) src(bodySrcU,6).
@@ -352,8 +362,8 @@ public sealed partial class LoginScreen : Control
                 LoginLayout.ConfirmButton.X, LoginLayout.ConfirmButton.Y,
                 LoginLayout.ConfirmButton.W, LoginLayout.ConfirmButton.H,
                 LoginLayout.ConfirmButton.SrcX, LoginLayout.ConfirmButton.SrcY, // NORMAL (154,398)
-                LoginLayout.ConfirmHoverSrcX,   LoginLayout.ConfirmHoverSrcY,   // HOVER  (378,398)
-                LoginLayout.ConfirmHoverSrcX,   LoginLayout.ConfirmHoverSrcY,   // PRESSED(378,398)
+                LoginLayout.ConfirmHoverSrcX, LoginLayout.ConfirmHoverSrcY, // HOVER  (378,398)
+                LoginLayout.ConfirmHoverSrcX, LoginLayout.ConfirmHoverSrcY, // PRESSED(378,398)
                 LoginLayout.ActionConfirm,
                 caption: "", captionTint: Colors.White);
             noticeBtn.Name = "NoticeBtn";
@@ -368,9 +378,9 @@ public sealed partial class LoginScreen : Control
         // =======================================================================
         var formBand = new Control
         {
-            Name     = "FormBand",
+            Name = "FormBand",
             Position = new Vector2(0, LoginLayout.BottomBarCanvasY),
-            Size     = new Vector2(LoginLayout.RefWidth, LoginLayout.BottomBarH),
+            Size = new Vector2(LoginLayout.RefWidth, LoginLayout.BottomBarH),
         };
         AddChild(formBand);
 
@@ -410,9 +420,9 @@ public sealed partial class LoginScreen : Control
                 _assets, LoginLayout.AtlasLoginWindow,
                 LoginLayout.OptionTab1.X, LoginLayout.OptionTab1.Y,
                 LoginLayout.OptionTab1.W, LoginLayout.OptionTab1.H,
-                LoginLayout.OptionTab1.SrcX, LoginLayout.OptionTab1.SrcY,         // NORMAL (520,492)
+                LoginLayout.OptionTab1.SrcX, LoginLayout.OptionTab1.SrcY, // NORMAL (520,492)
                 LoginLayout.OptionTab1HoverSrcX, LoginLayout.OptionTab1HoverSrcY, // HOVER  (635,492)
-                LoginLayout.OptionTab1.SrcX,     LoginLayout.OptionTab1.SrcY,     // PRESSED = NORMAL
+                LoginLayout.OptionTab1.SrcX, LoginLayout.OptionTab1.SrcY, // PRESSED = NORMAL
                 LoginLayout.ActionOptionTab1,
                 caption: "", captionTint: Colors.White);
             tab1.Name = "OptionTab1";
@@ -426,9 +436,9 @@ public sealed partial class LoginScreen : Control
                 _assets, LoginLayout.AtlasLoginWindow,
                 LoginLayout.OptionTab2.X, LoginLayout.OptionTab2.Y,
                 LoginLayout.OptionTab2.W, LoginLayout.OptionTab2.H,
-                LoginLayout.OptionTab2.SrcX, LoginLayout.OptionTab2.SrcY,         // NORMAL (750,492)
+                LoginLayout.OptionTab2.SrcX, LoginLayout.OptionTab2.SrcY, // NORMAL (750,492)
                 LoginLayout.OptionTab2HoverSrcX, LoginLayout.OptionTab2HoverSrcY, // HOVER  (865,492)
-                LoginLayout.OptionTab2.SrcX,     LoginLayout.OptionTab2.SrcY,     // PRESSED = NORMAL
+                LoginLayout.OptionTab2.SrcX, LoginLayout.OptionTab2.SrcY, // PRESSED = NORMAL
                 LoginLayout.ActionOptionTab2,
                 caption: "", captionTint: Colors.White);
             tab2.Name = "OptionTab2";
@@ -465,9 +475,9 @@ public sealed partial class LoginScreen : Control
         // --- ID input field (§11.2e). dest(390,32,102,13). plain text. maxlen 16. action 109. ---
         // spec §11.2e. CODE-CONFIRMED.
         _accountEdit = MakeTextbox(masked: false, maxLen: LoginLayout.IdMaxLength);
-        _accountEdit.Name     = "AccountEdit";
+        _accountEdit.Name = "AccountEdit";
         _accountEdit.Position = new Vector2(LoginLayout.AccountBox.X, LoginLayout.AccountBox.Y);
-        _accountEdit.Size     = new Vector2(LoginLayout.AccountBox.W, LoginLayout.TextboxRenderH);
+        _accountEdit.Size = new Vector2(LoginLayout.AccountBox.W, LoginLayout.TextboxRenderH);
         if (!string.IsNullOrEmpty(savedId))
             _accountEdit.Text = savedId;
         formBand.AddChild(_accountEdit);
@@ -475,9 +485,9 @@ public sealed partial class LoginScreen : Control
         // --- PW input field (§11.2e). dest(568,32,102,13). masked *. maxlen 12. action 110. ---
         // spec §11.2e "Password masking — one ASCII asterisk per character". CODE-CONFIRMED.
         _passwordEdit = MakeTextbox(masked: true, maxLen: LoginLayout.PwMaxLength);
-        _passwordEdit.Name            = "PasswordEdit";
-        _passwordEdit.Position        = new Vector2(LoginLayout.PasswordBox.X, LoginLayout.PasswordBox.Y);
-        _passwordEdit.Size            = new Vector2(LoginLayout.PasswordBox.W, LoginLayout.TextboxRenderH);
+        _passwordEdit.Name = "PasswordEdit";
+        _passwordEdit.Position = new Vector2(LoginLayout.PasswordBox.X, LoginLayout.PasswordBox.Y);
+        _passwordEdit.Size = new Vector2(LoginLayout.PasswordBox.W, LoginLayout.TextboxRenderH);
         _passwordEdit.SecretCharacter = "*"; // ASCII * per spec §11.2e. CODE-CONFIRMED.
         formBand.AddChild(_passwordEdit);
 
@@ -486,8 +496,8 @@ public sealed partial class LoginScreen : Control
         {
             var cbx = WidgetFactory.MakeStateButton(
                 _assets, LoginLayout.AtlasLoginSlice1,
-                LoginLayout.SaveIdCheck.X,    LoginLayout.SaveIdCheck.Y,
-                LoginLayout.SaveIdCheck.W,    LoginLayout.SaveIdCheck.H,
+                LoginLayout.SaveIdCheck.X, LoginLayout.SaveIdCheck.Y,
+                LoginLayout.SaveIdCheck.W, LoginLayout.SaveIdCheck.H,
                 LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY, // NORMAL off (717,398)
                 LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY, // HOVER  = NORMAL
                 LoginLayout.SaveIdCheckedSrcX, LoginLayout.SaveIdCheckedSrcY, // PRESSED on (730,398)
@@ -511,8 +521,8 @@ public sealed partial class LoginScreen : Control
                 LoginLayout.OkButton.X, LoginLayout.OkButton.Y,
                 LoginLayout.OkButton.W, LoginLayout.OkButton.H,
                 LoginLayout.OkButton.SrcX, LoginLayout.OkButton.SrcY, // NORMAL  (266,398)
-                LoginLayout.OkHoverSrcX,   LoginLayout.OkHoverSrcY,   // HOVER   (490,398)
-                LoginLayout.OkHoverSrcX,   LoginLayout.OkHoverSrcY,   // PRESSED (490,398)
+                LoginLayout.OkHoverSrcX, LoginLayout.OkHoverSrcY, // HOVER   (490,398)
+                LoginLayout.OkHoverSrcX, LoginLayout.OkHoverSrcY, // PRESSED (490,398)
                 LoginLayout.ActionOk,
                 caption: "", captionTint: Colors.White);
             loginBtn.Name = "LoginButton";
@@ -527,7 +537,7 @@ public sealed partial class LoginScreen : Control
         _quitModal = BuildQuitConfirmModal();
         _quitModal.Visible = false;
         _quitModal.Modulate = new Color(1f, 1f, 1f, 0f);
-        _quitModalAlpha  = LoginLayout.DialogAlphaHidden;
+        _quitModalAlpha = LoginLayout.DialogAlphaHidden;
         _quitModalTarget = LoginLayout.DialogAlphaHidden;
         AddChild(_quitModal);
 
@@ -539,26 +549,26 @@ public sealed partial class LoginScreen : Control
         // =======================================================================
         _curtainTop = new ColorRect
         {
-            Name     = "CurtainTop",
-            Color    = Colors.Black,
+            Name = "CurtainTop",
+            Color = Colors.Black,
             Position = new Vector2(0, 0),
-            Size     = new Vector2(LoginLayout.RefWidth, CurtainH),
-            ZIndex   = 100,
+            Size = new Vector2(LoginLayout.RefWidth, CurtainH),
+            ZIndex = 100,
         };
         AddChild(_curtainTop);
 
         _curtainBot = new ColorRect
         {
-            Name     = "CurtainBot",
-            Color    = Colors.Black,
+            Name = "CurtainBot",
+            Color = Colors.Black,
             Position = new Vector2(0, CurtainBotBase),
-            Size     = new Vector2(LoginLayout.RefWidth, CurtainH),
-            ZIndex   = 100,
+            Size = new Vector2(LoginLayout.RefWidth, CurtainH),
+            ZIndex = 100,
         };
         AddChild(_curtainBot);
 
         _curtainAccum = 0f;
-        _curtainOpen  = false;
+        _curtainOpen = false;
     }
 
     // -------------------------------------------------------------------------
@@ -574,9 +584,9 @@ public sealed partial class LoginScreen : Control
     {
         var modal = new Control
         {
-            Name     = "QuitConfirmModal",
+            Name = "QuitConfirmModal",
             Position = new Vector2(LoginLayout.ModalChromeX, LoginLayout.ModalChromeY),
-            Size     = new Vector2(LoginLayout.ModalChromeW, LoginLayout.ModalChromeH),
+            Size = new Vector2(LoginLayout.ModalChromeW, LoginLayout.ModalChromeH),
         };
 
         // Chrome background — C src(318,647) 340×190.
@@ -590,8 +600,8 @@ public sealed partial class LoginScreen : Control
         {
             var chromeBg = new TextureRect
             {
-                Name        = "ModalChrome",
-                Texture     = chrome,
+                Name = "ModalChrome",
+                Texture = chrome,
                 StretchMode = TextureRect.StretchModeEnum.Scale,
                 MouseFilter = MouseFilterEnum.Ignore,
             };
@@ -609,9 +619,9 @@ public sealed partial class LoginScreen : Control
             {
                 var lbl = WidgetFactory.MakeLabel(caption, LoginLayout.FontBodyHeight,
                     new Color(0.9f, 0.9f, 0.9f));
-                lbl.Position             = new Vector2(10, 80);
-                lbl.Size                 = new Vector2(320, 20);
-                lbl.HorizontalAlignment  = HorizontalAlignment.Center;
+                lbl.Position = new Vector2(10, 80);
+                lbl.Size = new Vector2(320, 20);
+                lbl.HorizontalAlignment = HorizontalAlignment.Center;
                 modal.AddChild(lbl);
             }
         }
@@ -624,9 +634,9 @@ public sealed partial class LoginScreen : Control
             {
                 var lbl = WidgetFactory.MakeLabel(caption, LoginLayout.FontBodyHeight,
                     new Color(0.75f, 0.75f, 0.75f));
-                lbl.Position             = new Vector2(10, 100);
-                lbl.Size                 = new Vector2(320, 20);
-                lbl.HorizontalAlignment  = HorizontalAlignment.Left;
+                lbl.Position = new Vector2(10, 100);
+                lbl.Size = new Vector2(320, 20);
+                lbl.HorizontalAlignment = HorizontalAlignment.Left;
                 modal.AddChild(lbl);
             }
         }
@@ -638,8 +648,8 @@ public sealed partial class LoginScreen : Control
                 _assets, LoginLayout.AtlasInventWindow,
                 LoginLayout.QuitConfirmYes1.X, LoginLayout.QuitConfirmYes1.Y,
                 LoginLayout.QuitConfirmYes1.W, LoginLayout.QuitConfirmYes1.H,
-                LoginLayout.QuitConfirmYes1.SrcX,     LoginLayout.QuitConfirmYes1.SrcY,     // NORMAL (302,900)
-                LoginLayout.QuitConfirmYes1.SrcX,     LoginLayout.QuitConfirmYes1.SrcY,     // HOVER  = NORMAL
+                LoginLayout.QuitConfirmYes1.SrcX, LoginLayout.QuitConfirmYes1.SrcY, // NORMAL (302,900)
+                LoginLayout.QuitConfirmYes1.SrcX, LoginLayout.QuitConfirmYes1.SrcY, // HOVER  = NORMAL
                 LoginLayout.QuitConfirmYes1HoverSrcX, LoginLayout.QuitConfirmYes1HoverSrcY, // PRESSED(415,900)
                 LoginLayout.ActionQuitConfirmYes1,
                 caption: "", captionTint: Colors.White);
@@ -655,8 +665,8 @@ public sealed partial class LoginScreen : Control
                 _assets, LoginLayout.AtlasInventWindow,
                 LoginLayout.QuitConfirmYes2.X, LoginLayout.QuitConfirmYes2.Y,
                 LoginLayout.QuitConfirmYes2.W, LoginLayout.QuitConfirmYes2.H,
-                LoginLayout.QuitConfirmYes2.SrcX,     LoginLayout.QuitConfirmYes2.SrcY,     // NORMAL (302,860)
-                LoginLayout.QuitConfirmYes2.SrcX,     LoginLayout.QuitConfirmYes2.SrcY,     // HOVER  = NORMAL
+                LoginLayout.QuitConfirmYes2.SrcX, LoginLayout.QuitConfirmYes2.SrcY, // NORMAL (302,860)
+                LoginLayout.QuitConfirmYes2.SrcX, LoginLayout.QuitConfirmYes2.SrcY, // HOVER  = NORMAL
                 LoginLayout.QuitConfirmYes2HoverSrcX, LoginLayout.QuitConfirmYes2HoverSrcY, // PRESSED(415,860)
                 LoginLayout.ActionQuitConfirmYes2,
                 caption: "", captionTint: Colors.White);
@@ -694,7 +704,8 @@ public sealed partial class LoginScreen : Control
         // ID length < 4 → msg 4025 → return to sub-state 6. spec §1.4 / §1.9. CODE-CONFIRMED.
         if (account.Length < LoginLayout.MinIdLength)
         {
-            GD.Print($"[LoginScreen] ID too short ({account.Length} < {LoginLayout.MinIdLength}), msg 4025. spec §1.4.");
+            GD.Print(
+                $"[LoginScreen] ID too short ({account.Length} < {LoginLayout.MinIdLength}), msg 4025. spec §1.4.");
             return;
         }
 
@@ -731,6 +742,7 @@ public sealed partial class LoginScreen : Control
         {
             ClearSavedId();
         }
+
         GD.Print($"[LoginScreen] Save-ID toggled: {_saveIdChecked}. spec §1.6.");
     }
 
@@ -749,8 +761,8 @@ public sealed partial class LoginScreen : Control
     // -------------------------------------------------------------------------
 
     // VFS path for the version file. spec §1.4. CODE-CONFIRMED.
-    private const string GameVerVfsPath  = "data/cursor/game.ver"; // spec §1.4.
-    private const int    GameVerSizeBytes = 28; // 7 × u32 LE. spec §1.4b. CODE-CONFIRMED.
+    private const string GameVerVfsPath = "data/cursor/game.ver"; // spec §1.4.
+    private const int GameVerSizeBytes = 28; // 7 × u32 LE. spec §1.4b. CODE-CONFIRMED.
 
     private bool CheckGameVersion()
     {
@@ -784,7 +796,8 @@ public sealed partial class LoginScreen : Control
 
         if (diskBytes.Length != GameVerSizeBytes)
         {
-            GD.PrintErr($"[LoginScreen] Version gate: on-disk game.ver wrong size ({diskBytes.Length}). Degrading (allow).");
+            GD.PrintErr(
+                $"[LoginScreen] Version gate: on-disk game.ver wrong size ({diskBytes.Length}). Degrading (allow).");
             return true;
         }
 
@@ -794,11 +807,12 @@ public sealed partial class LoginScreen : Control
         for (int f = 0; f < 7; f++)
         {
             int o = f * 4;
-            uint vf = (uint)(v[o] | (v[o+1] << 8) | (v[o+2] << 16) | (v[o+3] << 24));
-            uint df = (uint)(d[o] | (d[o+1] << 8) | (d[o+2] << 16) | (d[o+3] << 24));
+            uint vf = (uint)(v[o] | (v[o + 1] << 8) | (v[o + 2] << 16) | (v[o + 3] << 24));
+            uint df = (uint)(d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24));
             if (vf != df)
             {
-                GD.Print($"[LoginScreen] Version gate: MISMATCH field[{f}] VFS=0x{vf:X8} disk=0x{df:X8} → msg 2204. spec §1.4b.");
+                GD.Print(
+                    $"[LoginScreen] Version gate: MISMATCH field[{f}] VFS=0x{vf:X8} disk=0x{df:X8} → msg 2204. spec §1.4b.");
                 return false;
             }
         }
@@ -826,6 +840,7 @@ public sealed partial class LoginScreen : Control
                 GD.PrintErr($"[LoginScreen] ReadDiskGameVer '{c}': {ex.Message}");
             }
         }
+
         return ReadOnlyMemory<byte>.Empty;
     }
 
@@ -897,6 +912,7 @@ public sealed partial class LoginScreen : Control
             GD.PrintErr($"[LoginScreen] Atlas slice null: {atlasPath} src({srcX},{srcY},{w},{h}) — '{name}' skipped.");
             return;
         }
+
         parent.AddChild(MakeSprite(name, tex, dstX, dstY, w, h));
     }
 
@@ -904,12 +920,12 @@ public sealed partial class LoginScreen : Control
     {
         return new TextureRect
         {
-            Name        = name,
-            Texture     = tex,
+            Name = name,
+            Texture = tex,
             StretchMode = TextureRect.StretchModeEnum.Scale,
             MouseFilter = MouseFilterEnum.Ignore,
-            Position    = new Vector2(x, y),
-            Size        = new Vector2(w, h),
+            Position = new Vector2(x, y),
+            Size = new Vector2(w, h),
         };
     }
 
@@ -923,28 +939,28 @@ public sealed partial class LoginScreen : Control
     {
         var edit = new LineEdit
         {
-            Secret    = masked,
+            Secret = masked,
             CaretBlink = true,
-            MaxLength  = maxLen,
-            Alignment  = HorizontalAlignment.Left,
+            MaxLength = maxLen,
+            Alignment = HorizontalAlignment.Left,
             CustomMinimumSize = new Vector2(102, 18),
         };
 
         // Transparent background — the atlas frame art behind renders the visual frame.
         var style = new StyleBoxFlat
         {
-            BgColor     = new Color(0f, 0f, 0f, 0f), // transparent — frame art is behind
+            BgColor = new Color(0f, 0f, 0f, 0f), // transparent — frame art is behind
             BorderColor = new Color(0f, 0f, 0f, 0f),
         };
         style.SetBorderWidthAll(0);
-        style.ContentMarginLeft   = 2;
-        style.ContentMarginRight  = 2;
-        style.ContentMarginTop    = 1;
+        style.ContentMarginLeft = 2;
+        style.ContentMarginRight = 2;
+        style.ContentMarginTop = 1;
         style.ContentMarginBottom = 1;
         edit.AddThemeStyleboxOverride("normal", style);
-        edit.AddThemeStyleboxOverride("focus",  style);
-        edit.AddThemeColorOverride("font_color",   new Color(0.95f, 0.90f, 0.75f));
-        edit.AddThemeColorOverride("caret_color",  new Color(0.95f, 0.90f, 0.55f));
+        edit.AddThemeStyleboxOverride("focus", style);
+        edit.AddThemeColorOverride("font_color", new Color(0.95f, 0.90f, 0.75f));
+        edit.AddThemeColorOverride("caret_color", new Color(0.95f, 0.90f, 0.55f));
         edit.AddThemeColorOverride("selection_color", new Color(0.35f, 0.35f, 0.55f, 0.8f));
 
         return edit;

@@ -61,9 +61,9 @@ public sealed partial class OpeningWindow : Control
     // -------------------------------------------------------------------------
 
     // Scenario crawl. spec: intro_sequence.md §2. CODE-CONFIRMED.
-    private const float ScrollSpeed       = 30.0f;   // design-px / second. spec §2.1/§2.3. CODE-CONFIRMED.
-    private const float ScrollStartDelayMs = 1000f;  // ~1000 ms startup gate. spec §2.1. CODE-CONFIRMED.
-    private const float ScrollClamp       = 1843.0f; // stop clamp; no wrap. spec §2.1/§2.3. CODE-CONFIRMED.
+    private const float ScrollSpeed = 30.0f; // design-px / second. spec §2.1/§2.3. CODE-CONFIRMED.
+    private const float ScrollStartDelayMs = 1000f; // ~1000 ms startup gate. spec §2.1. CODE-CONFIRMED.
+    private const float ScrollClamp = 1843.0f; // stop clamp; no wrap. spec §2.1/§2.3. CODE-CONFIRMED.
 
     // Scenario quad size. spec: intro_sequence.md §1. SAMPLE-VERIFIED.
     private const float ScenarioW = 1024f; // spec §1 "width 1024". SAMPLE-VERIFIED.
@@ -74,9 +74,9 @@ public sealed partial class OpeningWindow : Control
     private const float CanvasH = 768f;
 
     // Slideshow. spec: intro_sequence.md §3. CODE-CONFIRMED.
-    private const int    SlideshowFrameCount = 4;        // four panels. spec §3.1/§3.3. CODE-CONFIRMED.
-    private const double DwellMs             = 17500.0;  // ms per panel. spec §3.3. CODE-CONFIRMED.
-    private const int    AlphaMax            = 250;      // alpha ramp bound (not 255). spec §3.3. CODE-CONFIRMED.
+    private const int SlideshowFrameCount = 4; // four panels. spec §3.1/§3.3. CODE-CONFIRMED.
+    private const double DwellMs = 17500.0; // ms per panel. spec §3.3. CODE-CONFIRMED.
+    private const int AlphaMax = 250; // alpha ramp bound (not 255). spec §3.3. CODE-CONFIRMED.
     // Alpha step ±1 per rendered frame (frame-gated, NOT ms-gated). spec §3.2. CODE-CONFIRMED.
 
     // VFS asset paths. spec: intro_sequence.md §1. SAMPLE-VERIFIED.
@@ -107,19 +107,19 @@ public sealed partial class OpeningWindow : Control
 
     // Scenario crawl node and state.
     private TextureRect? _scenarioRect;
-    private float        _scrollPos;         // current scroll position in design-px (0 → 1843)
-    private float        _scrollStartWait;   // countdown ms; crawl starts when ≤ 0
-    private bool         _scrollDone;        // latch: crawl reached 1843
+    private float _scrollPos; // current scroll position in design-px (0 → 1843)
+    private float _scrollStartWait; // countdown ms; crawl starts when ≤ 0
+    private bool _scrollDone; // latch: crawl reached 1843
 
     // Slideshow node and state.
-    private TextureRect?     _slideshowRect;
-    private int              _slideshowState = 1;        // 1..4 (1-based panel index). spec §3.1.
+    private TextureRect? _slideshowRect;
+    private int _slideshowState = 1; // 1..4 (1-based panel index). spec §3.1.
     private readonly Texture2D?[] _slideshowTextures = new Texture2D?[SlideshowFrameCount];
-    private double           _dwellAccumMs;              // ms elapsed in current dwell
-    private int              _alpha;                     // 0..250 ramp. spec §3.2.
-    private int              _alphaDir = 1;              // +1 ramp-up, −1 ramp-down
-    private bool             _panelFadedIn;              // latched when alpha first reaches AlphaMax
-    private bool             _sequenceDone;              // all 4 panels complete
+    private double _dwellAccumMs; // ms elapsed in current dwell
+    private int _alpha; // 0..250 ramp. spec §3.2.
+    private int _alphaDir = 1; // +1 ramp-up, −1 ramp-down
+    private bool _panelFadedIn; // latched when alpha first reaches AlphaMax
+    private bool _sequenceDone; // all 4 panels complete
 
     // Global finish guard.
     private bool _finished;
@@ -154,9 +154,9 @@ public sealed partial class OpeningWindow : Control
 
         // Initialise crawl and slideshow state.
         _scrollStartWait = ScrollStartDelayMs; // spec §2.1 "~1000 ms startup gate". CODE-CONFIRMED.
-        _scrollPos   = 0f;
-        _alpha       = 0;
-        _alphaDir    = 1;
+        _scrollPos = 0f;
+        _alpha = 0;
+        _alphaDir = 1;
         _dwellAccumMs = 0.0;
         _panelFadedIn = false;
         _slideshowState = 1;
@@ -175,7 +175,7 @@ public sealed partial class OpeningWindow : Control
     {
         if (_finished) return;
 
-        float dt   = (float)delta;
+        float dt = (float)delta;
         float dtMs = dt * 1000f;
 
         // Update scenario crawl. spec: intro_sequence.md §2.1. CODE-CONFIRMED.
@@ -197,9 +197,9 @@ public sealed partial class OpeningWindow : Control
         bool skip = ev switch
         {
             // spec §1.0.5: key codes 10 (Enter), 27 (ESC), 32 (Space). CODE-CONFIRMED.
-            InputEventKey { Pressed: true, KeyLabel: Key.Enter  } => true,
+            InputEventKey { Pressed: true, KeyLabel: Key.Enter } => true,
             InputEventKey { Pressed: true, KeyLabel: Key.Escape } => true,
-            InputEventKey { Pressed: true, KeyLabel: Key.Space  } => true,
+            InputEventKey { Pressed: true, KeyLabel: Key.Space } => true,
             // spec §1.0.5: mouse left-click on the skip button (action id 100). CODE-CONFIRMED.
             // Treat any mouse button press as the skip gate (skip-button widget from mainwindow.dds
             // is not yet wired; the spec allows the full canvas to act as a click target).
@@ -227,9 +227,9 @@ public sealed partial class OpeningWindow : Control
         // spec: intro_sequence.md §3 "full-screen DDS panels". SAMPLE-VERIFIED.
         _slideshowRect = new TextureRect
         {
-            Name        = "SlideshowRect",
+            Name = "SlideshowRect",
             StretchMode = TextureRect.StretchModeEnum.Scale,
-            Modulate    = new Color(1f, 1f, 1f, 0f), // start transparent; alpha ramp drives fade
+            Modulate = new Color(1f, 1f, 1f, 0f), // start transparent; alpha ramp drives fade
         };
         _slideshowRect.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         _slideshowRect.MouseFilter = MouseFilterEnum.Ignore;
@@ -243,7 +243,8 @@ public sealed partial class OpeningWindow : Control
             if (_slideshowTextures[i] is not null)
                 GD.Print($"[OpeningWindow] Slideshow panel {i + 1}: {SlideshowPaths[i]}");
             else
-                GD.Print($"[OpeningWindow] Slideshow panel {i + 1} not found in VFS: {SlideshowPaths[i]} — panel will be blank.");
+                GD.Print(
+                    $"[OpeningWindow] Slideshow panel {i + 1} not found in VFS: {SlideshowPaths[i]} — panel will be blank.");
         }
 
         // Wire the first panel (state 1 → openning_001.dds). spec §3.1. CODE-CONFIRMED.
@@ -254,7 +255,7 @@ public sealed partial class OpeningWindow : Control
         // CODE-CONFIRMED.
         _scenarioRect = new TextureRect
         {
-            Name        = "ScenarioRect",
+            Name = "ScenarioRect",
             StretchMode = TextureRect.StretchModeEnum.KeepAspect,
         };
         _scenarioRect.MouseFilter = MouseFilterEnum.Ignore;
@@ -278,7 +279,7 @@ public sealed partial class OpeningWindow : Control
         // Horizontal centre: left edge at (canvasW/2 − ScenarioW/2). For the 1024-wide canvas
         // that is 0 (sprite fills the width exactly). spec §1 "centred horizontally". CODE-CONFIRMED.
         _scenarioRect.Position = new Vector2(0f, CanvasH); // start: sprite top-left at Y=768 (off-screen below)
-        _scenarioRect.Size     = new Vector2(ScenarioW, ScenarioH);
+        _scenarioRect.Size = new Vector2(ScenarioW, ScenarioH);
         AddChild(_scenarioRect);
     }
 
@@ -370,8 +371,8 @@ public sealed partial class OpeningWindow : Control
         // Reset for the next panel.
         _dwellAccumMs = 0.0;
         _panelFadedIn = false;
-        _alpha        = 0;
-        _alphaDir     = 1;
+        _alpha = 0;
+        _alphaDir = 1;
     }
 
     // -------------------------------------------------------------------------

@@ -192,9 +192,12 @@ public static class CharacterSelectLayout
     public const int ClassBtnH = 30; // spec: ui_system.md §8.2. CODE-CONFIRMED.
     public const int ClassBtnBaseY = 45; // spec: ui_system.md §8.2. CODE-CONFIRMED.
     public const int ClassBtnStride = 48; // dst-X stride between buttons. spec: ui_system.md §8.4. CODE-CONFIRMED.
+
     public const int ClassBtnNormalSrcY = 1005; // spec: ui_system.md §8.2 "NORMAL src-Y = 1005". CODE-CONFIRMED.
+
     // NORMAL src-X per button index (0..3). spec: ui_system.md §8.2/§8.4. CODE-CONFIRMED.
     public static readonly int[] ClassBtnNormalSrcX = [590, 635, 680, 725]; // CODE-CONFIRMED
+
     // HOVER src-X per button index (0..3); index 3 = NORMAL (no distinct hover art). CODE-CONFIRMED.
     public static readonly int[] ClassBtnHoverSrcX = [815, 860, 905, 725]; // CODE-CONFIRMED (btn3 HOVER=NORMAL)
 
