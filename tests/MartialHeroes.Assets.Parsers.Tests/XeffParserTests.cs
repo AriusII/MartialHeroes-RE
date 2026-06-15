@@ -12,13 +12,17 @@ namespace MartialHeroes.Assets.Parsers.Tests;
 /// Layout rules encoded in these fixtures (confirmed against spec A.17 correction history):
 ///   File header: EXACTLY 8 bytes — effect_id u32 + sub_effect_count u32.
 ///   Every block (block 0 included): 24-byte element fixed head (6 × u32) + variable body.
-///   Body: tex_count × 64 name table + 4 curve passes + 13-byte track header + keyframes.
+///   Body: tex_count × 64 name table + 4 curve passes + 9-byte track header + keyframes.
 ///   Block 0 starts at file offset 0x08 (immediately after the 8-byte header) — NO special prefix.
+///   Track header is 9 bytes (anim_loop u8 + anim_stride u32 + anim_base_time u32).
+///   EVERY animated keyframe (including frame 0) has a u32 kf_index prefix + 9 × f32 = 40 bytes.
 ///
 /// spec: Docs/RE/formats/effects.md §A.2 File Header (8 bytes): VERIFIED (2026-06-14 correction).
 /// spec: Docs/RE/formats/effects.md §A.4.0 Element fixed head (24 bytes): CONFIRMED.
+/// spec: Docs/RE/formats/effects.md §A.4.3 Track header (9 bytes): CONFIRMED (CAMPAIGN VFS-MASTERY).
 /// spec: Docs/RE/formats/effects.md §A.4.5 — every block (block 0 included) uses the same read sequence: CONFIRMED.
-/// spec: Docs/RE/formats/effects.md §A.4.4 — Frame 0: no index prefix; frames 1..N-1: u32+9×f32: CONFIRMED.
+/// spec: Docs/RE/formats/effects.md §A.4.4 — EVERY animated frame (including frame 0) has u32 kf_index + 9×f32 = 40 bytes: CONFIRMED (CAMPAIGN VFS-MASTERY).
+/// spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 9, XEFF_KEYFRAME_ONDISK_STRIDE = 40.
 /// spec: Docs/RE/formats/effects.md §A.17 Correction history — header is 8 bytes, not 32.
 /// </summary>
 public sealed class XeffParserTests
@@ -121,13 +125,13 @@ public sealed class XeffParserTests
         ms.Write(Le4(0u)); // scaleY count=0
         ms.Write(Le4(0u)); // scaleZ count=0
 
-        // ── Body: track header (13 bytes) ────────────────────────────────────
-        // spec: Docs/RE/formats/effects.md §A.4.3 Track header (13 bytes): CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 13.
+        // ── Body: track header (9 bytes) ─────────────────────────────────────
+        // CORRECTED CAMPAIGN VFS-MASTERY: track header is 9 bytes (no "unknown_constant").
+        // spec: Docs/RE/formats/effects.md §A.4.3 Track header (9 bytes): CONFIRMED (CAMPAIGN VFS-MASTERY).
+        // spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 9.
         ms.WriteByte(animLoop); // anim_loop u8 @ +0
-        ms.Write(Le4(67u)); // unknown_constant u32 @ +1
-        ms.Write(Le4(469u)); // anim_stride u32 @ +5
-        ms.Write(Le4(0u)); // anim_base_time u32 @ +9
+        ms.Write(Le4(469u)); // anim_stride u32 @ +1
+        ms.Write(Le4(0u)); // anim_base_time u32 @ +5
 
         // ── Body: keyframes ──────────────────────────────────────────────────
         // spec: Docs/RE/formats/effects.md §A.4.4 Keyframe array: CONFIRMED.
@@ -135,22 +139,17 @@ public sealed class XeffParserTests
 
         if (animLoop != 0)
         {
-            // Animated path: frame 0 = 9×f32 (no index), frames 1..N-1 = u32 + 9×f32.
-            // spec: Docs/RE/formats/effects.md §A.4.4 — frame 0: 9 × f32 (no index): CONFIRMED.
-            WriteNineFloats(ms, 0u,
-                velocityX: 1f, velocityY: 0f, velocityZ: 0f,
-                sizeX: 1f, sizeY: 1f, sizeZ: 1f,
-                rotX: 0f, rotY: 0f, rotZ: 0f,
-                includeIndex: false);
-
-            // spec: Docs/RE/formats/effects.md §A.4.4 — frames 1..N-1: u32 kf_index + 9 × f32: CONFIRMED.
-            for (uint k = 1; k < n; k++)
+            // Animated path: EVERY frame has u32 kf_index + 9 × f32 = 40 bytes (including frame 0).
+            // CORRECTED CAMPAIGN VFS-MASTERY: frame 0 is NOT a special no-index case.
+            // spec: Docs/RE/formats/effects.md §A.4.4 — "every animated keyframe carries a u32 index prefix": CONFIRMED.
+            // spec: Docs/RE/formats/effects.md §A.14 XEFF_KEYFRAME_ONDISK_STRIDE = 40 (u32 + 9×f32), every frame.
+            for (uint k = 0; k < n; k++)
             {
                 WriteNineFloats(ms, k,
-                    velocityX: (float)k, velocityY: 0f, velocityZ: 0f,
+                    velocityX: (float)(k == 0 ? 1u : k), velocityY: 0f, velocityZ: 0f,
                     sizeX: 1f, sizeY: 1f, sizeZ: 1f,
                     rotX: 0f, rotY: 0f, rotZ: 0f,
-                    includeIndex: true);
+                    includeIndex: true); // ALL frames have an index prefix
             }
         }
         else
@@ -392,29 +391,32 @@ public sealed class XeffParserTests
     [Fact]
     public void TrackHeader_AllFields_Decoded()
     {
-        // anim_loop u8 @ +0, unknown_constant u32 @ +1, anim_stride u32 @ +5, anim_base_time u32 @ +9.
-        // spec: Docs/RE/formats/effects.md §A.4.3 Track header (13 bytes, fixed): CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 13.
-        // spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_UNKNOWN_CONSTANT = 67.
+        // Track header is 9 bytes: anim_loop u8 @ +0, anim_stride u32 @ +1, anim_base_time u32 @ +5.
+        // CORRECTED CAMPAIGN VFS-MASTERY: the "unknown_constant" field is DELETED (no read-site).
+        // spec: Docs/RE/formats/effects.md §A.4.3 Track header (9 bytes): CONFIRMED (CAMPAIGN VFS-MASTERY).
+        // spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 9.
         byte[] data = BuildXeff(1u, 1u, 1u);
         XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(data));
         XeffSubEffect sub = xeff.SubEffects[0];
         Assert.Equal(1, sub.AnimLoop); // anim_loop = 1 in BuildXeff
-        Assert.Equal(67u, sub.UnknownConstant); // observed value 67 (0x43)
-        Assert.Equal(469u, sub.AnimStride); // 469 ms per frame
-        Assert.Equal(0u, sub.AnimBaseTime); // base time = 0 ms
+        // UnknownConstant field no longer exists — it was REFUTED (spec A.4.3 / A.17).
+        Assert.Equal(469u, sub.AnimStride); // 469 ms per frame (now at +1)
+        Assert.Equal(0u, sub.AnimBaseTime); // base time = 0 ms (now at +5)
     }
 
     // ─── tests: animated keyframe array (A.4.4) ────────────────────────────────
 
     [Fact]
-    public void AnimatedPath_Frame0_NoIndexPrefix_KfIndexIsZero()
+    public void AnimatedPath_Frame0_HasKfIndexPrefix_IndexIsZero()
     {
-        // Frame 0 has NO index prefix on disk. KfIndex is set to 0 by the parser.
-        // spec: Docs/RE/formats/effects.md §A.4.4 — "Frame 0 is a special case: it has NO index prefix": CONFIRMED.
+        // Frame 0 has a u32 kf_index prefix on disk (like all other frames). kf_index for frame 0 = 0.
+        // CORRECTED CAMPAIGN VFS-MASTERY: frame 0 is NOT a special no-index case.
+        // spec: Docs/RE/formats/effects.md §A.4.4 — "every animated keyframe carries a u32 index prefix": CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.14 XEFF_KEYFRAME_ONDISK_STRIDE = 40 — every frame incl. frame 0.
         byte[] data = BuildXeff(1u, 1u, 1u);
         XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(data));
         XeffKeyframe kf0 = xeff.SubEffects[0].Keyframes[0];
+        // Frame 0 kf_index = 0 (written by BuildXeff).
         Assert.Equal(0u, kf0.KfIndex);
     }
 
@@ -429,16 +431,17 @@ public sealed class XeffParserTests
     }
 
     [Fact]
-    public void AnimatedPath_TwoEntries_Frame1_HasKfIndex()
+    public void AnimatedPath_TwoEntries_BothFramesHaveKfIndex()
     {
-        // Frames 1..N-1: u32 kf_index + 9 × f32 = 40 bytes.
-        // spec: Docs/RE/formats/effects.md §A.4.4 — frames 1..N-1: u32 index + 9 × f32: CONFIRMED.
+        // ALL frames (0 and 1): u32 kf_index + 9 × f32 = 40 bytes each.
+        // CORRECTED CAMPAIGN VFS-MASTERY: frame 0 is NOT a special no-index case.
+        // spec: Docs/RE/formats/effects.md §A.4.4 — "every animated keyframe carries a u32 index prefix": CONFIRMED.
         byte[] data = BuildXeff(1u, 1u, 2u);
         XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(data));
         XeffSubEffect sub = xeff.SubEffects[0];
         Assert.Equal(2, sub.Keyframes.Length);
-        Assert.Equal(0u, sub.Keyframes[0].KfIndex); // frame 0: no prefix → 0
-        Assert.Equal(1u, sub.Keyframes[1].KfIndex); // frame 1: explicit kf_index = 1
+        Assert.Equal(0u, sub.Keyframes[0].KfIndex); // frame 0: kf_index = 0 (written by BuildXeff)
+        Assert.Equal(1u, sub.Keyframes[1].KfIndex); // frame 1: kf_index = 1 (written by BuildXeff)
         Assert.Equal(1f, sub.Keyframes[1].VelocityX, precision: 5); // velocityX = (float)k = 1.0
     }
 
@@ -468,12 +471,16 @@ public sealed class XeffParserTests
         ms.Write(Le4(0u));
         ms.Write(Le4(0u));
         ms.Write(Le4(0u));
-        // track header (13 bytes): anim_loop=1, unknown=67, stride=100, base=0
-        ms.WriteByte(1);
-        ms.Write(Le4(67u));
-        ms.Write(Le4(100u));
-        ms.Write(Le4(0u));
-        // frame 0 (no index): 9 × f32
+        // track header (9 bytes): anim_loop=1, anim_stride=100, anim_base_time=0.
+        // CORRECTED CAMPAIGN VFS-MASTERY: 9 bytes (no "unknown_constant").
+        // spec: Docs/RE/formats/effects.md §A.4.3 Track header (9 bytes): CONFIRMED.
+        ms.WriteByte(1);    // anim_loop @ +0
+        ms.Write(Le4(100u)); // anim_stride @ +1
+        ms.Write(Le4(0u));   // anim_base_time @ +5
+        // frame 0: u32 kf_index + 9 × f32 = 40 bytes.
+        // CORRECTED: frame 0 HAS an index prefix (kf_index = 0).
+        // spec: Docs/RE/formats/effects.md §A.4.4 — "every animated frame has u32 kf_index prefix": CONFIRMED.
+        ms.Write(Le4(0u)); // kf_index = 0
         ms.Write(Le4f(1.1f)); // velocity_x
         ms.Write(Le4f(2.2f)); // velocity_y
         ms.Write(Le4f(3.3f)); // velocity_z
@@ -647,19 +654,22 @@ public sealed class XeffParserTests
 
     /// <summary>
     /// Byte-math verification: 1 sub-effect, N=5 entries, animated path, scale curves empty.
-    /// File-size formula per spec A.2:
+    /// File-size formula per spec A.2 (CORRECTED CAMPAIGN VFS-MASTERY):
     ///   8                   header (effect_id + sub_effect_count)
     ///   + 24                element fixed head (A.4.0): 6 × u32
     ///   + N×64              name table (A.4.1)
     ///   + (4 + N×4)         alpha curve (A.4.2)
     ///   + 3×4               scaleX/Y/Z count-only prefixes (A.4.2)
-    ///   + 13                track header (A.4.3)
-    ///   + 9×4               frame 0, no index (A.4.4)
-    ///   + (N−1)×(4+9×4)     frames 1..N-1 (A.4.4)
-    /// With N=5: 8 + 24 + 320 + 24 + 12 + 13 + 36 + 160 = 597 bytes.
+    ///   + 9                 track header (A.4.3) — CORRECTED: 9 bytes (no unknown_constant)
+    ///   + N×(4+9×4)         N keyframes, each u32 kf_index + 9×f32 = 40 bytes (ALL frames incl. frame 0)
+    /// With N=5: 8 + 24 + 320 + 24 + 12 + 9 + 5×40 = 597 bytes.
+    /// (Same total as the old formula because the 4 bytes dropped from the track header
+    ///  are now the frame-0 kf_index prefix — the total is unchanged.)
     /// spec: Docs/RE/formats/effects.md §A.2 File-size formula: VERIFIED.
     /// spec: Docs/RE/formats/effects.md §A.14 XEFF_HEADER_SIZE = 8 (0x08): VERIFIED.
     /// spec: Docs/RE/formats/effects.md §A.14 XEFF_ELEMENT_FIXED_HEAD = 24 (0x18): CONFIRMED.
+    /// spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 9: CONFIRMED (CAMPAIGN VFS-MASTERY).
+    /// spec: Docs/RE/formats/effects.md §A.14 XEFF_KEYFRAME_ONDISK_STRIDE = 40: CONFIRMED (CAMPAIGN VFS-MASTERY).
     /// </summary>
     [Fact]
     public void FileSizeFormula_N5_SingleSubEffect_MatchesSpec()
@@ -671,9 +681,8 @@ public sealed class XeffParserTests
             + N * 64 // name table (A.4.1 XEFF_TEX_NAME_LEN = 64 per entry)
             + (4 + N * 4) // alpha curve (A.4.2)
             + 3 * 4 // scaleX/Y/Z count prefixes (A.4.2)
-            + 13 // track header (A.4.3 XEFF_TRACK_HEADER_SIZE = 13)
-            + 36 // frame 0: 9 × f32, no index (A.4.4)
-            + (N - 1) * (4 + 36); // frames 1..N-1: u32 + 9×f32 (A.4.4)
+            + 9 // track header (A.4.3 XEFF_TRACK_HEADER_SIZE = 9, CORRECTED)
+            + N * (4 + 36); // N keyframes each 40 bytes: u32 kf_index + 9×f32 (ALL frames, CORRECTED)
 
         byte[] data = BuildXeff(1u, 1u, (uint)N);
         Assert.Equal(expectedSize, data.Length);
@@ -689,9 +698,8 @@ public sealed class XeffParserTests
             + N * 64 // name table (A.4.1)
             + (4 + N * 4) // alpha curve (A.4.2)
             + 3 * 4 // scale curves count prefixes (A.4.2)
-            + 13 // track header (A.4.3)
-            + 36 // frame 0 (A.4.4)
-            + (N - 1) * (4 + 36); // frames 1..N-1 (A.4.4)
+            + 9 // track header (A.4.3 CORRECTED: 9 bytes)
+            + N * (4 + 36); // N keyframes each 40 bytes (ALL frames incl. frame 0, CORRECTED)
         int expectedSize = 8 + 2 * blockSize; // 8-byte header + 2 identical blocks
 
         byte[] data = BuildXeff(1u, 2u, (uint)N);
@@ -731,13 +739,17 @@ public sealed class XeffParserTests
         ms.Write(Le4(0u));
         ms.Write(Le4(0u));
 
-        // track header (13 bytes): anim_loop=1, unknown=67, stride=100, base=0
-        ms.WriteByte(1);
-        ms.Write(Le4(67u));
-        ms.Write(Le4(100u));
-        ms.Write(Le4(0u));
+        // track header (9 bytes): anim_loop=1, anim_stride=100, anim_base_time=0.
+        // CORRECTED: 9 bytes (no "unknown_constant").
+        // spec: Docs/RE/formats/effects.md §A.4.3 Track header (9 bytes): CONFIRMED.
+        ms.WriteByte(1);     // anim_loop @ +0
+        ms.Write(Le4(100u)); // anim_stride @ +1
+        ms.Write(Le4(0u));   // anim_base_time @ +5
 
-        // frame 0 (no index): velocity=0, size=1, rotation=(0, 90, 0) degrees
+        // frame 0: u32 kf_index + 9 × f32 = 40 bytes.
+        // CORRECTED: frame 0 HAS a kf_index prefix (= 0).
+        // spec: Docs/RE/formats/effects.md §A.4.4 — "every animated frame has u32 kf_index prefix": CONFIRMED.
+        ms.Write(Le4(0u)); // kf_index = 0
         ms.Write(Le4f(0f));
         ms.Write(Le4f(0f));
         ms.Write(Le4f(0f)); // velocity_x/y/z
@@ -792,10 +804,12 @@ public sealed class XeffParserTests
         ms.Write(Le4(0u));
         ms.Write(Le4(0u));
         ms.Write(Le4(0u)); // scale counts
-        ms.WriteByte(1);
-        ms.Write(Le4(67u));
-        ms.Write(Le4(100u));
-        ms.Write(Le4(0u));
+        // track header (9 bytes — CORRECTED)
+        ms.WriteByte(1);     // anim_loop @ +0
+        ms.Write(Le4(100u)); // anim_stride @ +1
+        ms.Write(Le4(0u));   // anim_base_time @ +5
+        // frame 0: u32 kf_index + 9×f32 (CORRECTED — frame 0 has index prefix)
+        ms.Write(Le4(0u)); // kf_index = 0
         ms.Write(Le4f(9f));
         ms.Write(Le4f(8f));
         ms.Write(Le4f(7f)); // velocity
@@ -832,10 +846,12 @@ public sealed class XeffParserTests
         ms.Write(Le4(0u));
         ms.Write(Le4(0u));
         ms.Write(Le4(0u));
-        ms.WriteByte(1);
-        ms.Write(Le4(67u));
-        ms.Write(Le4(100u));
-        ms.Write(Le4(0u));
+        // track header (9 bytes — CORRECTED)
+        ms.WriteByte(1);     // anim_loop @ +0
+        ms.Write(Le4(100u)); // anim_stride @ +1
+        ms.Write(Le4(0u));   // anim_base_time @ +5
+        // frame 0: u32 kf_index + 9×f32 (CORRECTED — frame 0 has index prefix)
+        ms.Write(Le4(0u)); // kf_index = 0
         ms.Write(Le4f(0f));
         ms.Write(Le4f(0f));
         ms.Write(Le4f(0f)); // velocity
@@ -903,11 +919,11 @@ public sealed class XeffParserTests
         ms.Write(Le4(0u));
         ms.Write(Le4(0u));
         ms.Write(Le4(0u)); // scale counts
-        ms.WriteByte(1);
-        ms.Write(Le4(67u));
-        ms.Write(Le4(100u));
-        ms.Write(Le4(0u)); // track header
-        // missing: frame 0 (36 bytes) + frame 1 (40 bytes)
+        // track header (9 bytes — CORRECTED: no unknown_constant)
+        ms.WriteByte(1);     // anim_loop @ +0  spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 9
+        ms.Write(Le4(100u)); // anim_stride @ +1
+        ms.Write(Le4(0u));   // anim_base_time @ +5
+        // missing: frame 0 (40 bytes = u32 kf_index + 9×f32) + frame 1 (40 bytes) — triggers truncation
         Assert.Throws<InvalidDataException>(() => XeffParser.ParseXeff(new ReadOnlyMemory<byte>(ms.ToArray())));
     }
 
@@ -1031,5 +1047,175 @@ public sealed class XeffParserTests
         Assert.Equal(11u, xeff.SubEffectCount);
         Assert.Equal(11, xeff.SubEffects.Length);
         Assert.All(xeff.SubEffects, sub => Assert.Equal(3, sub.Keyframes.Length));
+    }
+
+    // ─── live VFS integration test (skipped if clientdata absent) ─────────────
+
+    /// <summary>
+    /// Real-file integration: extracts char_select-u.xeff from the VFS and parses it
+    /// via the actual XeffParser. Validates byte-exact known values from the file header
+    /// and block 0 (confirmed by hexdump trace on 2026-06-14).
+    ///
+    /// Skipped when the VFS pair (data.inf + data/data.vfs) is absent — the test suite
+    /// must remain runnable without real game files (mandated design constraint).
+    ///
+    /// spec: Docs/RE/formats/effects.md §A.15 — char_select-u.xeff: effect_id=380003000,
+    ///   sub_effect_count=68, file_size=75372 bytes; zero residual after parsing all 68 blocks.
+    ///   Block 0: emitter_type=1 (mesh-particle), tex_count=2, anim_loop=1, anim_stride=0,
+    ///   texture name[0]="lflare-l-yellow-01".
+    ///   All confirmed by hexdump trace (2026-06-14).
+    /// spec: Docs/RE/formats/pak.md — VFS layout (name@+0 100B, pad@+100 4B, dataOffset i64@+104,
+    ///   dataSize i64@+112). CONFIRMED.
+    /// </summary>
+    [Fact]
+    public void LiveVfs_CharSelectU_ParsesCorrectly_IfVfsAvailable()
+    {
+        // Resolve the VFS pair using the same priority order as ClientPathResolver:
+        // project-local clientdata/ → D:/MartialHeroesClient (no env/cfg scan in tests).
+        // spec: Docs/RE/formats/pak.md — data.inf + data/data.vfs pair: CONFIRMED.
+        const string RelInf = @"05.Presentation/MartialHeroes.Client.Godot/clientdata/data.inf";
+        const string RelVfs = @"05.Presentation/MartialHeroes.Client.Godot/clientdata/data/data.vfs";
+
+        // Try to find the repo root (go up from the test assembly's location).
+        string? repoRoot = FindRepoRoot(AppContext.BaseDirectory);
+        string? infPath = null;
+        string? vfsPath = null;
+
+        if (repoRoot != null)
+        {
+            string candidate = Path.Combine(repoRoot, RelInf);
+            if (File.Exists(candidate))
+            {
+                infPath = candidate;
+                vfsPath = Path.Combine(repoRoot, RelVfs);
+            }
+        }
+
+        // Fallback: D:/MartialHeroesClient
+        if (infPath == null)
+        {
+            const string ExtInf = @"D:\MartialHeroesClient\data.inf";
+            const string ExtVfs = @"D:\MartialHeroesClient\data\data.vfs";
+            if (File.Exists(ExtInf))
+            {
+                infPath = ExtInf;
+                vfsPath = ExtVfs;
+            }
+        }
+
+        if (infPath == null || vfsPath == null || !File.Exists(infPath) || !File.Exists(vfsPath!))
+        {
+            // VFS not present in this environment — skip gracefully.
+            // spec: Design constraint — no real .pak required for unit tests.
+            return;
+        }
+
+        // Minimal inline VFS lookup (replicates VfsDirectory.cs / VfsEntry.cs logic).
+        // spec: Docs/RE/formats/pak.md — header 24 bytes, entry_count @ +12 u32 LE: CONFIRMED.
+        // spec: Docs/RE/formats/pak.md — record 144 bytes (name[100] @ +0, pad @ +100, dataOffset i64 @ +104, dataSize i64 @ +112): CONFIRMED.
+        byte[] infBytes = File.ReadAllBytes(infPath);
+        uint entryCount = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(infBytes.AsSpan(12, 4));
+
+        const int HeaderSize = 24;
+        const int RecordSize = 144;
+        const int NameCap = 100;
+        const string TargetName = "data/effect/xeff/char_select-u.xeff";
+
+        long dataOffset = -1, dataSize = -1;
+        for (int i = 0; i < (int)entryCount; i++)
+        {
+            int rOff = HeaderSize + i * RecordSize;
+            var nameSpan = infBytes.AsSpan(rOff, NameCap);
+            int nullIdx = nameSpan.IndexOf((byte)0);
+            string name = System.Text.Encoding.ASCII
+                .GetString(nullIdx >= 0 ? nameSpan[..nullIdx] : nameSpan)
+                .ToLowerInvariant();
+            if (name != TargetName) continue;
+            dataOffset = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(infBytes.AsSpan(rOff + 104, 8));
+            dataSize = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(infBytes.AsSpan(rOff + 112, 8));
+            break;
+        }
+
+        if (dataOffset < 0)
+        {
+            // File absent from this VFS build — skip.
+            return;
+        }
+
+        // Extract raw bytes from data.vfs.
+        byte[] raw = new byte[dataSize];
+        using (var vfs = File.OpenRead(vfsPath!))
+        {
+            vfs.Seek(dataOffset, SeekOrigin.Begin);
+            vfs.ReadExactly(raw);
+        }
+
+        // ─── Parse and assert known byte-exact values ────────────────────────────
+        // All values confirmed by hexdump trace on 2026-06-14 (see dirty-room notes).
+        // spec: Docs/RE/formats/effects.md §A.15 — char_select-u.xeff byte-confirmed values: VERIFIED.
+        XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(raw));
+
+        // File-level header assertions.
+        // spec: Docs/RE/formats/effects.md §A.2 — effect_id u32 @ 0x00, sub_effect_count u32 @ 0x04: VERIFIED.
+        Assert.Equal(380003000u, xeff.EffectId); // 0x16A662B8 in LE bytes b8 62 a6 16
+        Assert.Equal(68u, xeff.SubEffectCount); // 0x00000044 in LE bytes 44 00 00 00
+        Assert.Equal(75372, raw.Length); // file size CONFIRMED by extraction
+        Assert.Equal(68, xeff.SubEffects.Length);
+
+        // Block 0 assertions (element fixed head @ file offset 0x08).
+        // spec: Docs/RE/formats/effects.md §A.4.0 Element fixed head (24 bytes): CONFIRMED.
+        XeffSubEffect b0 = xeff.SubEffects[0];
+        Assert.Equal(1u, b0.EmitterType); // emitter_type = 1 (mesh-particle) @ 0x08: CONFIRMED
+        Assert.Equal(0u, b0.ResourceId); // resource_id = 0 @ 0x0C: CONFIRMED
+        Assert.Equal(0u, b0.AnimFlag); // anim_flag = 0 @ 0x10: CONFIRMED
+        Assert.Equal(2u, b0.EntryCount); // tex_count = 2 @ 0x1C: CONFIRMED
+        Assert.Equal(2, b0.TextureNames.Length);
+        // spec: Docs/RE/formats/effects.md §A.4.1 Name table @ 0x20: CONFIRMED.
+        Assert.Equal("lflare-l-yellow-01", b0.TextureNames[0]); // name[0] @ 0x20: CONFIRMED
+        Assert.Equal("lflare-l-yellow-01", b0.TextureNames[1]); // name[1] @ 0x60: CONFIRMED
+
+        // Block 0 curve section.
+        // spec: Docs/RE/formats/effects.md §A.4.2 Curve section: CONFIRMED.
+        Assert.Equal(2, b0.AlphaKeys.Length); // alpha count = 2 @ 0xA0: CONFIRMED
+        Assert.Equal(2, b0.ScaleX.Length); // scaleX count = 2 @ 0xAC: CONFIRMED
+        Assert.Equal(2, b0.ScaleY.Length); // scaleY count = 2 @ 0xB8: CONFIRMED
+        Assert.Equal(2, b0.ScaleZ.Length); // scaleZ count = 2 @ 0xC4: CONFIRMED
+
+        // Block 0 track header.
+        // spec: Docs/RE/formats/effects.md §A.4.3 Track header (9 bytes) @ 0xD0: CONFIRMED (CAMPAIGN VFS-MASTERY).
+        // CORRECTED: unknown_constant field REFUTED (no read-site) — spec §A.17.
+        Assert.Equal(1, b0.AnimLoop); // anim_loop = 1 (animated) @ 0xD0: CONFIRMED
+        Assert.Equal(67u, b0.AnimStride); // anim_stride = 67 ms @ 0xD1 (the live value formerly misread as "unknown_constant"; 9-byte header): CONFIRMED (CAMPAIGN VFS-MASTERY)
+        Assert.Equal(0u, b0.AnimBaseTime); // anim_base_time = 0 ms @ 0xD5: CONFIRMED (9-byte header)
+
+        // Block 0 keyframes: animated path (anim_loop=1), tex_count=2 → 2 keyframes.
+        // spec: Docs/RE/formats/effects.md §A.4.4 — animated: tex_count keyframes, ALL have u32 kf_index prefix: CONFIRMED.
+        Assert.Equal(2, b0.Keyframes.Length);
+        Assert.Equal(0u, b0.Keyframes[0].KfIndex); // frame 0: u32 kf_index prefix present, value=0: CONFIRMED (CAMPAIGN VFS-MASTERY)
+
+        // Block 65 (emitter_type=2, directional billboard, tex_count=21).
+        // spec: Docs/RE/formats/effects.md §A.4.6 emitter_type==2 + animated → same as emitter_type 0/1: CONFIRMED.
+        XeffSubEffect b65 = xeff.SubEffects[65];
+        Assert.Equal(2u, b65.EmitterType); // emitter_type=2 (directional billboard): CONFIRMED
+        Assert.Equal(21u, b65.EntryCount); // tex_count=21: CONFIRMED
+        Assert.Equal(1, b65.AnimLoop); // animated path: CONFIRMED
+        Assert.Equal(21, b65.Keyframes.Length);
+    }
+
+    /// <summary>
+    /// Walks up the directory tree from <paramref name="startDir"/> to find the repo root
+    /// (identified by the presence of MartialHeroes.slnx).
+    /// Returns null if not found within 8 levels.
+    /// </summary>
+    private static string? FindRepoRoot(string startDir)
+    {
+        string? dir = startDir;
+        for (int i = 0; i < 8 && dir != null; i++, dir = Path.GetDirectoryName(dir))
+        {
+            if (File.Exists(Path.Combine(dir, "MartialHeroes.slnx")))
+                return dir;
+        }
+
+        return null;
     }
 }

@@ -122,9 +122,8 @@ element `emitter_type` (A.12). See the Correction history note at the end of Sec
 + (4 + curve2_count × 4)    curve 2 (scale_x); count may differ from N
 + (4 + curve3_count × 4)    curve 3 (scale_y)
 + (4 + curve4_count × 4)    curve 4 (scale_z)
-+ 13                         track header
-+ 9 × 4                      frame 0 (no index prefix)
-+ (N − 1) × (4 + 9 × 4)    frames 1 to N-1 (each has a u32 index prefix)
++ 9                          track header (anim_loop + anim_stride + anim_base_time)
++ N × (4 + 9 × 4)           N keyframes, each = u32 index prefix + 9 × f32 = 40 B (frame 0 included)
 ```
 
 **Byte-math verification:** `331120721.xeff` (1 sub-effect, N=5 entries, 621 bytes) parses with zero
@@ -152,7 +151,7 @@ The 17 observed `[CCC]` prefix values span the ranges: 311 (PC class A), 331–3
 
 **Every** sub-effect block — including block 0 — is parsed by one and the same read sequence: a
 24-byte **element fixed head**, then a variable body of four sequential parts (a name table of
-`tex_count × 64` bytes, a curve section of four passes, a 13-byte track header, and a keyframe
+`tex_count × 64` bytes, a curve section of four passes, a 9-byte track header, and a keyframe
 array). Block 0 starts at file offset `0x08` (immediately after the 8-byte file header); block `k+1`
 starts immediately where block `k` ended. There is **no** offset table, and there is **no** distinct
 per-block prefix separate from the element's own fields — the bytes that an earlier revision called a
@@ -169,8 +168,8 @@ they map to the in-memory dword order, which differs.)
 | +0x00 | 4 | u32 LE | `emitter_type` | 0 = billboard, 1 = mesh-particle, 2 = directional billboard (A.12). For block 0 this is the value at file offset `0x08` formerly mislabelled `type_flag`. |
 | +0x04 | 4 | u32 LE | `resource_id` | Dispatch gate, NOT an index base: `< 10000` = direct index into the shared mesh table (24-byte stride, §A.11 / §E.4); `≥ 10000` = GPU particle id selected by **raw equality** (NO `−10000` subtraction) against the `particleEmitter.eff` entry map (Section E.4). |
 | +0x08 | 4 | u32 LE | `anim_flag` | Consumed as a boolean (value ≠ 0) by the element constructor. |
-| +0x0C | 4 | u32 LE | `field_unknown_a` | Element flags; semantics UNRESOLVED (no read-site found). |
-| +0x10 | 4 | u32 LE | `element_dword2` | Written ahead of `tex_count` in the in-memory record (reverse of file order); role beyond that ordering UNRESOLVED. |
+| +0x0C | 4 | u32 LE | `field_unknown_a` | Bulk-read, not field-decoded; no read-site isolated. Keep as an opaque dword. Semantics **DBG-pending** (live-debugger confirmation required) — do NOT invent a meaning. |
+| +0x10 | 4 | u32 LE | `element_dword2` | Written ahead of `tex_count` in the in-memory record (reverse of file order); bulk-read, not field-decoded. Keep as an opaque dword. Role beyond that ordering is **DBG-pending** (live-debugger confirmation required) — do NOT invent a meaning. |
 | +0x14 | 4 | u32 LE | `tex_count` | This element's entry count; drives the name table, the keyframe count, and (low byte) the UV-scroll flags (A.13). For block 0 this is the value at file offset `0x1C` formerly mislabelled `first_entry_count`. Observed range across samples: 1–41. |
 
 CONFIRMED by byte-walk of `zone_sel_u.xeff` (11 sub-effects, block-0 `tex_count` = 20),
@@ -200,28 +199,41 @@ Follows the name table. Contains exactly four consecutive float-curve arrays, ea
 
 Each pass reads `u32 curve_count` then `curve_count × f32`. The four passes map to: `alpha_key_count + alpha_key[i]`, then scale channels X/Y/Z (matching the legacy Group C/D parser specification). The per-pass count may differ from `entry_count`; the scale vector is resized to the largest of the three scale counts, with shorter passes zero-padded.
 
-### A.4.3 Track header (13 bytes, fixed)
+### A.4.3 Track header (9 bytes, fixed)
 
-Follows the curve section.
+Follows the curve section. The track header is **9 bytes** in BOTH the static and the animated
+path; the loader branches on the 1-byte `anim_loop` field but the header byte count is identical on
+either branch.
 
 | Sub-offset | Size | Type | Field | Notes | Confidence |
 |---:|---:|------|-------|-------|-----------|
-| +0 | 1 | u8 | `anim_loop` | Non-zero enables animated (multi-keyframe) path. Observed value: `0x01` in all samples. | CONFIRMED |
-| +1 | 4 | u32 LE | `unknown_constant` | Value `67` (0x43) observed in all samples. Not identified in prior parser analysis. Candidates: version tag, sub-effect class id, or rendering pipeline selector. Do NOT assign a meaning. | SAMPLE-VERIFIED (value), semantics UNRESOLVED |
-| +5 | 4 | u32 LE | `anim_stride` | Duration of one animation frame in milliseconds. Observed: 469 ms, 871 ms. | CONFIRMED |
-| +9 | 4 | u32 LE | `anim_base_time` | Base time offset in milliseconds. Observed value: 0 in all samples. | CONFIRMED |
+| +0 | 1 | u8 | `anim_loop` | Non-zero enables the animated (multi-keyframe) path; zero selects the single static-state entry. Observed value: `0x01` in all samples. | CONFIRMED |
+| +1 | 4 | u32 LE | `anim_stride` | Duration of one animation frame in milliseconds. Observed: 469 ms, 871 ms. | CONFIRMED |
+| +5 | 4 | u32 LE | `anim_base_time` | Base time offset in milliseconds. Observed value: 0 in all samples. | CONFIRMED |
 
 Derived value (not in file): `total_time = entry_count × anim_stride + anim_base_time` (milliseconds). The loader stores this in the in-memory descriptor.
 
-**Note on `unknown_constant = 67`:** the prior parser analysis described a 9-byte Group E reading `(u8 anim_loop, u32 anim_stride, u32 anim_base_time)` = 9 bytes, consistent with 1+4+4 = 9. Sample observation confirms the same 9-byte count with an extra u32 value at position +1. The reconciled reading is that the prior analysis skipped documenting this field because its role was not traced. The field physically exists in the file and must be consumed.
+**Correction (CAMPAIGN VFS-MASTERY — two-witness: loader + black-box):** an earlier revision
+described this header as **13 bytes**, inserting a 4-byte `unknown_constant` (value `67`) at
+position +1. That 4-byte field **does not exist** — no read-site consumes it, and the two-witness
+review (loader read-order plus black-box byte-walk) found no header member there. The four bytes
+that were mislabelled `unknown_constant` are in fact the **first keyframe's u32 index prefix**
+(A.4.4): the keyframe array begins immediately after this 9-byte header, and its frame-0 entry
+carries its own index prefix like every other frame. The `unknown_constant` field is therefore
+**deleted** from this spec. The header is 9 bytes on both the static and animated branch; parsers
+must not read a fourth header dword.
 
 ### A.4.4 Keyframe array
 
 Follows the track header. In the **animated** path (`anim_loop` ≠ 0, A.4.3) it contains `tex_count` keyframe entries; in the **static** path (`anim_loop` = 0) it contains a single static-state entry whose size depends on the element's `emitter_type` (see A.4.6).
 
-**Frame 0 is a special case (animated path):** it has NO index prefix — only 9 × f32 (36 bytes). This is CONFIRMED by sample byte-math; the prior spec did not state this explicitly.
-
-**Frames 1 through `tex_count − 1` (animated path):** each has `u32 kf_index` + 9 × f32 = 40 bytes.
+**Every animated keyframe carries a u32 index prefix (CORRECTED):** each of the `tex_count`
+keyframe entries in the animated path is `u32 kf_index` + 9 × f32 = **40 bytes**, INCLUDING
+keyframe 0. An earlier revision wrongly described keyframe 0 as a special 36-byte case with no
+index prefix; that "missing" 4-byte prefix was being absorbed into a phantom 13-byte track header
+(the deleted `unknown_constant`, A.4.3). With the header corrected to 9 bytes, keyframe 0 is a
+normal 40-byte entry. Confidence: CONFIRMED (CAMPAIGN VFS-MASTERY two-witness: loader read-order +
+black-box byte-walk).
 
 The 9-float layout per frame is (in file order):
 
@@ -237,7 +249,9 @@ The 9-float layout per frame is (in file order):
 | 8 | f32 | `kf_rot_y_deg` | Euler Y rotation in degrees |
 | 9 | f32 | `kf_rot_z_deg` | Euler Z rotation in degrees |
 
-**Confidence: CONFIRMED** for the frame-0 no-index rule and the 9-float count; **SAMPLE-VERIFIED (partial)** for individual field semantics.
+**Confidence: CONFIRMED** for the uniform 40-byte keyframe stride (every animated frame, frame 0
+included, has the u32 index prefix) and the 9-float count; **SAMPLE-VERIFIED (partial)** for
+individual field semantics.
 
 ### A.4.6 The one real `emitter_type`-dependent branch (NOT a header tagged union)
 
@@ -248,7 +262,7 @@ micro-variation, **not** a file-level tagged union and **not** keyed by any head
 
 | `anim_loop` | `emitter_type` | Section read |
 |---:|---:|---|
-| ≠ 0 (animated) | any | `tex_count` frames: frame 0 = 9 × f32 (36 B, no index prefix); frames 1..N-1 = `u32 index + 9 × f32` (40 B each). Last 3 floats are Euler degrees → quaternion. |
+| ≠ 0 (animated) | any | `tex_count` frames, each `u32 index + 9 × f32` = 40 B (frame 0 included — it is NOT a special no-index case; see A.4.4 correction). Last 3 floats are Euler degrees → quaternion. |
 | 0 (static) | 0 or 1 | one entry: 6 × f32 (velocity Vec3 + size Vec3), 24 B, no rotation read. |
 | 0 (static) | 2 | one entry: 6 × f32 **plus 3 extra f32 Euler rotation** (→ quaternion), 36 B read. |
 
@@ -273,7 +287,7 @@ This is the in-memory layout the loader builds; it is provided so an engineer un
 | [0] | +0x00 | u32 | `emitter_type` | from element's emitter class |
 | [1] | +0x04 | u32 | `resource_id` | < 10000 = mesh index; ≥ 10000 = particle id |
 | [2] | +0x08 | u8 bool | `anim_flag` | low byte; upper 3 bytes unused |
-| [3] | +0x0C | u32 | `field_unknown_a` (`element_flags`) | UNRESOLVED; no semantic read-site found |
+| [3] | +0x0C | u32 | `field_unknown_a` (`element_flags`) | Bulk-read; no semantic read-site found. Semantics **DBG-pending** — keep opaque, do not assign a meaning |
 | [4] | +0x10 | u32 | `tex_count` | drives keyframe count; low byte also tested as UV-scroll flags (A.10) |
 | [5..7] | +0x14..+0x1C | ptr×3 | texture-handle vector | resolved texture handles (no file bytes) |
 | [8] | +0x20 | u32 | `alpha_key_count` | curve-pass-1 count |
@@ -349,7 +363,16 @@ These files in `data/effect/xobj/` are **plain text** (CRLF line endings), not b
 | `0` | Billboard sprite — flat camera-facing quad | CONFIRMED |
 | `1` | Mesh-particle object — per-vertex transform of shared mesh | CONFIRMED |
 | `2` | Directional billboard — camera-facing quad with fixed 90° Y pre-rotation; reads extra rotation in static-state branch (A.4.6) | CONFIRMED |
-| other | Behavior undetermined | UNRESOLVED |
+| `20` | Parse-inert at load — the value `20` is read and stored but changes nothing in the parse path. Its **render meaning is DBG-pending** (needs live-debugger confirmation); do not assign one. | parse: CONFIRMED inert · render: DBG-pending |
+| other | Behaviour undetermined | UNRESOLVED |
+
+**Parse-time effect of `emitter_type` (CAMPAIGN VFS-MASTERY — two-witness: loader + black-box).**
+Only the value `2` changes how the file is parsed: it gates the +12-byte extra Euler-rotation read
+in the **static** branch (A.4.6). Every other `emitter_type` value — including `0`, `1`, and `20` —
+is **parse-inert**: read and retained, but it does not alter the byte layout the loader consumes.
+In particular `emitter_type == 20` does NOT gate any branch in the parser; its only effect is at
+render time, which was not traced and is therefore **DBG-pending** (live-debugger confirmation
+required). A faithful parser stores the value verbatim and branches on it nowhere.
 
 The four bytes at file offset `0x08` — formerly mislabelled a header `type_flag` — are the
 `emitter_type` of sub-effect block 0, drawn from this same enum (A.2 / A.4.0). The "type_flag = 1 vs
@@ -374,7 +397,8 @@ This appears to be an intentional dual use of the frame-count field; intent unve
 | `XEFF_STATIC_STRIDE` | 48 (0x30) | In-memory static-state allocation |
 | `XEFF_TEX_NAME_LEN` | 64 (0x40) | Bytes per texture name entry in name table |
 | `XEFF_LST_NAME_LEN` | 30 (0x1E) | Bytes per record in `xeffect.lst` and `bmplist.lst` |
-| `XEFF_TRACK_HEADER_SIZE` | 13 | Bytes: 1 (anim_loop) + 4 (unknown_constant) + 4 (anim_stride) + 4 (anim_base_time) |
+| `XEFF_TRACK_HEADER_SIZE` | 9 | Bytes: 1 (anim_loop) + 4 (anim_stride) + 4 (anim_base_time). Identical on the static and animated branch. (Corrected from a wrong 13 — there is no 4-byte header field at +1; those four bytes are keyframe 0's u32 index prefix, A.4.3 / A.4.4.) |
+| `XEFF_KEYFRAME_ONDISK_STRIDE` | 40 (0x28) | On-disk size of one animated keyframe entry: u32 index prefix + 9 × f32 = 40 B, for EVERY frame including frame 0 (A.4.4). Distinct from the 44-byte in-memory keyframe stride. |
 | `XEFF_EMITTER_BILLBOARD` | 0 | `emitter_type`: flat billboard sprite |
 | `XEFF_EMITTER_MESH` | 1 | `emitter_type`: mesh-particle object |
 | `XEFF_EMITTER_DIRECTIONAL` | 2 | `emitter_type`: directional billboard |
@@ -382,7 +406,6 @@ This appears to be an intentional dual use of the frame-count field; intent unve
 | `XEFF_UV_SCROLL_PERIOD_MS` | 5000 | Loop period for UV-scroll flags |
 | `XEFF_INVALID_MAGIC` | 0x46464558 | `effect_id` sentinel; file invalid if header equals this |
 | `XEFF_TIME_UNIT` | milliseconds | Engine wall-clock unit for all timing fields |
-| `XEFF_TRACK_UNKNOWN_CONSTANT` | 67 (0x43) | Constant u32 at track header offset +1; purpose UNRESOLVED |
 
 ## A.15 Front-end scene VFX mapping (effect id → file)
 
@@ -843,17 +866,19 @@ trailing name (E.2.3).
 52-byte stride is CONFIRMED (the loader allocates `num_frames × 52` and a separate tool-preview path
 strides by 52). Of the 52 bytes, **only the 4-byte colour-like quad near +0x08 has an identified
 read-site** (the default constructor zeroes three bytes and sets the high byte to 0xFF). The
-remaining ~48 bytes are per-particle simulation parameters that were **not traced**; they are
-UNRESOLVED and must NOT be invented.
+remaining bytes — the first 8 (+0x00..+0x07) and the 40-byte tail (+0x0C..+0x33) — are **bulk-read,
+not field-decoded** by the loader: they are copied into the sub-record but no routine sub-reads
+individual fields out of them. Their semantics are **DBG-pending** (live-debugger confirmation
+required); keep them as opaque byte slices and do NOT invent field meanings.
 
 | Rec offset | Size | Type | Field | Notes | Confidence |
 |-----------:|-----:|------|-------|-------|------------|
-| +0x00 | 8 | bytes | _unresolved_lead_ | First 8 bytes; no isolated read-site. | UNRESOLVED |
+| +0x00 | 8 | bytes | _opaque_lead_ | First 8 bytes; bulk-read, no isolated read-site. Keep as an opaque slice. Semantics **DBG-pending** (live-debugger confirmation required). | DBG-pending |
 | +0x08 | 1 | u8 | `color_r` | Default constructor zeroes this byte. | MEDIUM |
 | +0x09 | 1 | u8 | `color_g` | Default constructor zeroes this byte. | MEDIUM |
 | +0x0A | 1 | u8 | `color_b` | Default constructor zeroes this byte. | MEDIUM |
 | +0x0B | 1 | u8 | `color_a` (or active sentinel) | Default constructor sets this byte to `0xFF` — looks like an alpha channel or an "active = 0xFF" sentinel. | MEDIUM |
-| +0x0C | 40 | bytes | _unresolved_tail_ | Remaining 40 bytes (+0x0C..+0x33); no read-sites captured. Likely per-particle velocity/size/time fields (by analogy to the §A.16 runtime element) but NOT proven. | UNRESOLVED |
+| +0x0C | 40 | bytes | _opaque_tail_ | Remaining 40 bytes (+0x0C..+0x33): bulk-read into the sub-record, never field-decoded by the loader; no read-sites captured. Keep as one opaque byte slice. Semantics **DBG-pending** (live-debugger confirmation required); likely per-particle velocity/size/time fields by analogy to the §A.16 runtime element but NOT proven — do NOT invent field meanings. | DBG-pending |
 
 - **Sub-record stride:** 52 bytes (CONFIRMED).
 - **Sub-record count source:** the entry header's `num_frames` (CONFIRMED).
@@ -864,13 +889,15 @@ UNRESOLVED and must NOT be invented.
 
 | Sub-offset | Size | Type | Field | Notes | Confidence |
 |-----------:|-----:|------|-------|-------|------------|
-| +0x00 | 64 | char[64] | `texture_name` | Read immediately after the sub-record array; NUL-padded ASCII/CP949. Resolved through the texture manager **by name** to a texture handle (written back into the entry header's `tex_handle_slot`, 0x14). A name that does not resolve falls back to a default texture slot. | CONFIRMED |
+| +0x00 | 64 | char[64] | `texture_name` | Read immediately after the sub-record array; NUL-padded ASCII/CP949. **The stored string is the FULL texture path, used verbatim** (loader-resolved, CAMPAIGN VFS-MASTERY): the texture manager looks it up by an **exact string compare** — no directory prefix is prepended and no extension is stripped or appended. The resolved handle is written back into the entry header's `tex_handle_slot` (0x14). A name that does not resolve falls back to a default texture slot. | CONFIRMED (loader-resolved) |
 
 ## E.3 Known unknowns (Section E)
 
-- **52-byte sub-record inner semantics (PRIMARY GAP).** Only the +0x08..+0x0B colour-like quad has a
-  read-site. The other ~48 bytes (likely velocity / size / time / rotation, by analogy to §A.16) need
-  the per-particle simulation loop traced. Do not invent these fields.
+- **52-byte sub-record inner semantics (PRIMARY GAP — DBG-pending).** Only the +0x08..+0x0B
+  colour-like quad has a read-site. The lead bytes (+0x00..+0x07) and the 40-byte tail
+  (+0x0C..+0x33) are bulk-read, not field-decoded; their meaning is **DBG-pending** (live-debugger
+  confirmation required). They are likely velocity / size / time / rotation by analogy to §A.16 but
+  that is NOT proven. Keep them opaque and do not invent these fields.
 - **`sprite_size_x` / `sprite_size_y` axis mapping.** CONFIRMED to feed the sprite-size setter; the
   "x then y" vs "width/height" naming is HIGH, not CONFIRMED.
 - **On-disk values of the two overwritten dwords (0x14, 0x18).** Ignored on load; what the writer
@@ -1248,15 +1275,15 @@ The June 2026 black-box pass analyzed both known FX7 files (both exactly 35,202 
 
 ## From `.xeff` (Section A)
 
-1. **`field_unknown_a` / `element_flags` (in-memory byte +0x0C)** — no semantic runtime read-site isolated. Confidence: LOW. Do not assign a meaning.
+1. **`field_unknown_a` / `element_flags` (element/in-memory +0x0C)** — bulk-read, no semantic read-site isolated. **DBG-pending** (live-debugger confirmation required). Do not assign a meaning.
 2. **`type_flag` — RETIRED (2026-06-14).** The value at file offset 0x08 is NOT a header field; it is sub-effect block 0's `emitter_type` (values 1 = mesh-particle, 2 = directional billboard; A.2 / A.4.0 / A.12). No open question remains.
-3. **`unknown_constant = 67` in track header** — value confirmed in two samples; purpose UNRESOLVED. Do not branch on it.
-4. **`emitter_type` values beyond 0, 1, 2** — behavior and conditional reads unknown.
+3. **`unknown_constant = 67` — REFUTED and DELETED (CAMPAIGN VFS-MASTERY).** No read-site consumes a 4-byte field at track-header offset +1, and the two-witness review found no such header member. The four bytes are keyframe 0's u32 index prefix (A.4.3 / A.4.4). The track header is 9 bytes; the field no longer appears in this spec. No open question remains.
+4. **`emitter_type` values beyond 0, 1, 2 (e.g. `20`)** — parse-inert (only `== 2` gates the static-branch rotation read, A.4.6 / A.12); the **render meaning is DBG-pending** (live-debugger confirmation required). Do not branch on these values in the parser and do not assign a render meaning.
 5. **`tex_count` low byte as UV-scroll flags (A.13)** — MEDIUM confidence; dual use of frame count as flags is unusual.
 6. **In-memory dword[19] dual use (`start_time_or_total`)** — parser writes `total_time`; tick reads it as the spawn timestamp. Likely overwritten at spawn; UNCONFIRMED.
 7. **`effect_id` duplicate resolution** — 47 `effect_id` values are shared by more than one file (SAMPLE-VERIFIED). The resolution rule when two files in the sorted map share an id is UNRESOLVED. The second-registered file may silently overwrite the first; no tie-break logic was traced.
 8. **9-digit naming scheme `[CCC][SSS][AB][N]`** — PLAUSIBLE from pattern observation; no manifest confirms the digit-group semantics.
-9. **Frame-0 no-index rule** — CONFIRMED in samples; whether the parser has a conditional or always reads N×(index+9f) starting from frame 1 while treating frame 0 as pure 9f is not traced from the code path.
+9. **Keyframe index prefix — RESOLVED (CAMPAIGN VFS-MASTERY).** The earlier "frame 0 has no index prefix (36 B)" reading is corrected: every animated keyframe, frame 0 included, is `u32 index + 9 × f32` = 40 B (A.4.4). The parser reads `tex_count` uniform 40-byte entries with no frame-0 special case. No open question remains.
 10. **High-`sub_effect_count` front-end files — RESOLVED (2026-06-14).** `char_select-u.xeff` (68 sub-effects, block-0 `tex_count` = 2) and `zone_sel_u.xeff` / `zone_sel2-u.xeff` (11 sub-effects, block-0 `tex_count` = 20) now parse successfully. Root cause was a mislabelled header: the header is 8 bytes and EVERY block (block 0 included) is parsed by the same element read sequence — a 24-byte fixed head (A.4.0) then the variable body — with each block's entry count being its own `tex_count` at element offset +0x14. There is no header `first_entry_count` and no distinct per-block prefix.
 
 ## From `.eff` geometry (Section B)
@@ -1277,7 +1304,7 @@ The June 2026 black-box pass analyzed both known FX7 files (both exactly 35,202 
 
 ## From `particleEmitter.eff` (Section E)
 
-1. **52-byte sub-record inner fields** — only the colour-like quad at sub-record +0x08..+0x0B has a read-site (the default constructor). The other ~48 bytes are UNRESOLVED and must not be invented (E.2.2). This is the primary gap.
+1. **52-byte sub-record inner fields — DBG-pending.** Only the colour-like quad at sub-record +0x08..+0x0B has a read-site (the default constructor). The lead bytes +0x00..+0x07 and the tail +0x0C..+0x33 are bulk-read, not field-decoded; their semantics need live-debugger confirmation and must not be invented (E.2.2). This is the primary gap.
 2. **Entry-header sprite-size axis mapping** — the two header f32 at 0x08/0x0C feed the sprite-size setter (CONFIRMED), but "x then y" naming is HIGH only.
 3. **(RESOLVED, Campaign 5B)** The prior "flat 16-byte header + 2,243×52-byte records" model and the "record index = `resource_id − 10000`" guess are both RETIRED. The file is a variable-length entry sequence terminated by `num_frames == 0`, keyed by raw `entry_id`; selection is by raw-id map lookup against a `.xeff` element's `resource_id` (E.0, E.2, E.4).
 

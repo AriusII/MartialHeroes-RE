@@ -6,12 +6,15 @@
 > Promoted from dirty-room analyst notes under EU Software Directive 2009/24/EC Art. 6.
 > No decompiler output and no binary virtual addresses appear anywhere in this file.
 >
-> status: sample-verified layout / one field semantically confirmed — see per-field confidence.
+> status: layout confirmed (28 bytes, seven u32LE) / exactly one field semantically confirmed
+> (`version_source` at offset 0x14) / the remaining six fields are UNVERIFIED (single-sample) —
+> see per-field confidence.
 
 `game.ver` is a tiny fixed-size binary blob that stamps the client build with a set of integers.
 Only one of those integers has a confirmed runtime role: it is the source value the client folds
-into the enter-game version token. The remaining six integers are structurally fixed but their
-individual meanings are unconfirmed.
+into the enter-game version token. The remaining six integers are structurally fixed (their offset,
+size, and order are confirmed), but their individual meanings are not — they rest on a single
+effective sample and are deliberately left opaque rather than guessed.
 
 ## Identification
 
@@ -22,7 +25,7 @@ individual meanings are unconfirmed.
 - **Version field:** None as a self-describing field; the file *is* a version stamp but carries no
   format-version tag of its own.
 - **Endianness:** Little-endian throughout.
-- **File size:** Exactly 28 bytes (fixed). — confidence: HIGH (sample-verified)
+- **File size:** Exactly 28 bytes (fixed). — confidence: CONFIRMED
 
 ## File layout
 
@@ -34,18 +37,19 @@ no repeating record — the file is a single fixed structure, not an array of re
 
 | Offset | Size | Type  | Field           | Notes                                                                 | Confidence |
 |-------:|-----:|-------|-----------------|------------------------------------------------------------------------|------------|
-| 0x00   | 4    | u32LE | field0          | Small integer; candidate format/protocol-version tag. Role unconfirmed | LOW / UNVERIFIED |
-| 0x04   | 4    | u32LE | field1          | Small integer; candidate minor-version or build-date component. Role unconfirmed | LOW / UNVERIFIED |
-| 0x08   | 4    | u32LE | field2          | Small integer; candidate build increment / week index. Role unconfirmed | LOW / UNVERIFIED |
-| 0x0C   | 4    | u32LE | field3          | Mid-range integer; candidate packed build number or packed date. Role unconfirmed | LOW / UNVERIFIED |
-| 0x10   | 4    | u32LE | field4          | Small integer; candidate patch / sub-build level. Role unconfirmed     | LOW / UNVERIFIED |
-| 0x14   | 4    | u32LE | version_source  | Source value for the enter-game version token (see formula below)      | HIGH / CONFIRMED |
-| 0x18   | 4    | u32LE | field6          | Small integer at the tail; candidate reserved / checksum-seed. Role unconfirmed | LOW / UNVERIFIED |
+| 0x00   | 4    | u32LE | field0          | Role unknown. Not read by the version-token path; not interpreted here. | UNVERIFIED (single-sample) |
+| 0x04   | 4    | u32LE | field1          | Role unknown. Not read by the version-token path; not interpreted here. | UNVERIFIED (single-sample) |
+| 0x08   | 4    | u32LE | field2          | Role unknown. Not read by the version-token path; not interpreted here. | UNVERIFIED (single-sample) |
+| 0x0C   | 4    | u32LE | field3          | Role unknown. Not read by the version-token path; not interpreted here. | UNVERIFIED (single-sample) |
+| 0x10   | 4    | u32LE | field4          | Role unknown. Not read by the version-token path; not interpreted here. | UNVERIFIED (single-sample) |
+| 0x14   | 4    | u32LE | version_source  | Source value for the enter-game version token (see formula below).     | CONFIRMED |
+| 0x18   | 4    | u32LE | field6          | Role unknown. Not read by the version-token path; not interpreted here. | UNVERIFIED (single-sample) |
 
 > **Confirmed field — `version_source` (offset 0x14):** this is the only field with a confirmed
 > functional role. The client derives the enter-game version token from it via a fixed formula
-> (see below). This was established by cross-checking the existing `GameVerParser` and its test
-> suite against the observed file, which agree on both the field offset and the resulting token.
+> (see below). Two witnesses agree on this field: the loader path that folds the value into the
+> token, and a black-box check of the resulting token against the observed file. Both agree on the
+> offset (0x14) and on the derived token.
 
 ## Derived value — enter-game version token
 
@@ -56,19 +60,17 @@ enter-game handshake. The formula is:
 version_token = 10 × version_source + 9
 ```
 
-This token derivation is CONFIRMED (it matches `GameVerParser` and its tests). The other six
-fields are not known to participate in any derived value.
+This token derivation is CONFIRMED (loader and black-box witnesses agree). The other six fields are
+not known to participate in any derived value.
 
 ## Field semantics discussion
 
-Only `version_source` (offset 0x14) has a confirmed role. The other six fields all hold small,
-plausible version/build-stamp components, but with a single effective file instance and no protocol
-trace identifying which fields the server validates, their individual meanings cannot be confirmed
-from the bytes alone. Plausible-but-unverified readings include a format/protocol-version tag, a
-packed build date, a build/patch counter, and a reserved/checksum tail. None of these is graded
-above LOW until a second `game.ver` with different field values (e.g. from another client patch) or
-a handshake trace is available. **The structural layout (seven u32LE, 28 bytes) is fully confirmed;
-all field semantics except `version_source` are UNVERIFIED.**
+Only `version_source` (offset 0x14) has a confirmed role. The other six fields are structurally
+fixed 32-bit integers at the offsets tabled above, but their individual meanings cannot be
+established from a single effective file instance with no protocol trace identifying which fields
+the server validates. No semantic reading is assigned to them here — assigning one would be a guess
+on one sample. **The structural layout (seven u32LE, 28 bytes) is CONFIRMED; every field semantic
+except `version_source` is UNVERIFIED (single-sample).**
 
 ## Census / sample notes
 
@@ -93,9 +95,9 @@ agree those six fields are unknown.
 
 ## Known unknowns
 
-- The semantic roles of `field0`–`field4` and `field6` are UNVERIFIED. Confirming them needs a
-  second `game.ver` with differing field values (a different client patch) or a server-side trace
-  showing which fields the enter-game handshake validates.
+- The semantic roles of `field0`–`field4` and `field6` are UNVERIFIED (single-sample). Confirming
+  them needs a second `game.ver` with differing field values (a different client patch) or a
+  server-side trace showing which fields the enter-game handshake validates.
 - No magic / signature prefix exists; identification depends entirely on the known VFS path and the
   fixed 28-byte size.
 - The reason the same logical file appears as two consecutive archive entries (packing artefact vs.
@@ -109,4 +111,6 @@ agree those six fields are unknown.
 - Consumer: `Assets.Parsers` `GameVerParser`; the enter-game handshake that carries `version_token`
   is protocol-spec material under `Docs/RE/packets/` / `Docs/RE/opcodes.md`.
 - Glossary: see `Docs/RE/names.yaml` (canonical names: `version_source`, `version_token`).
-- Provenance: see `Docs/RE/journal.md` (add an entry for this spec).
+- Provenance: see `Docs/RE/journal.md`. Promoted under CAMPAIGN VFS-MASTERY (two-witness gate:
+  loader path + black-box token check) — layout 28 B / seven u32LE confirmed; `version_source`
+  at offset 0x14 confirmed; the other six fields held UNVERIFIED (single-sample).

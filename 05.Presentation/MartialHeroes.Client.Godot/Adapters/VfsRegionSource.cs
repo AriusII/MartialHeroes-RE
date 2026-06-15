@@ -110,6 +110,9 @@ internal sealed class VfsRegionSource : IRegionSource
                 rawZoneTypes[i] = records[i].ZoneTypeRaw;
 
             // ── Construct the catalog ─────────────────────────────────────────
+            // Origins are SIGNED i32 (region<area>.bin stores them as i32le); RegionCatalog now
+            // accepts int origins so negative world extents address correctly — no cast needed.
+            // spec: Docs/RE/formats/region_grid.md §Layout A — "originX i32 signed / originZ i32 signed": CONFIRMED.
             var catalog = new RegionCatalog(
                 width: grid.Width,
                 height: grid.Height,

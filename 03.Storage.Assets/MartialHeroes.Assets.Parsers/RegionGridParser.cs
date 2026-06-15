@@ -48,9 +48,10 @@ public static class RegionGridParser
     // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1 — "grid buffer width × height bytes, 1 byte per cell": CONFIRMED.
     private const int CellsOffset = 8;
 
-    // World-X origin u32le @ CellsOffset + (width × height).
-    // World-Z origin u32le @ CellsOffset + (width × height) + 4.
-    // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1 — "world-X origin / world-Z origin u32": CONFIRMED.
+    // World-X origin i32le (signed) @ CellsOffset + (width × height).
+    // World-Z origin i32le (signed) @ CellsOffset + (width × height) + 4.
+    // Signed so maps with negative world extents decode correctly.
+    // spec: Docs/RE/formats/region_grid.md §Layout A — "originX i32 signed @ 0x08 + W×H": CONFIRMED.
     private const int OriginSize = 4; // each origin field = 4 bytes
 
     // Minimum valid file size: 4 (width) + 4 (height) + 0 (cells) + 4 (originX) + 4 (originZ).
@@ -106,13 +107,13 @@ public static class RegionGridParser
 
         int originXOffset = CellsOffset + (int)cellCount;
 
-        // world-X origin u32le.
-        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1 — "world-X origin u32 … subtracted before the 256-unit quantize": CONFIRMED.
-        uint originX = BinaryPrimitives.ReadUInt32LittleEndian(span[originXOffset..]);
+        // world-X origin i32le (signed) — subtracted before the 256-unit cell quantisation.
+        // spec: Docs/RE/formats/region_grid.md §Layout A — "originX i32 signed": CONFIRMED.
+        int originX = BinaryPrimitives.ReadInt32LittleEndian(span[originXOffset..]);
 
-        // world-Z origin u32le.
-        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1 — "world-Z origin u32 … subtracted before the 256-unit quantize": CONFIRMED.
-        uint originZ = BinaryPrimitives.ReadUInt32LittleEndian(span[(originXOffset + OriginSize)..]);
+        // world-Z origin i32le (signed) — subtracted before the 256-unit cell quantisation.
+        // spec: Docs/RE/formats/region_grid.md §Layout A — "originZ i32 signed": CONFIRMED.
+        int originZ = BinaryPrimitives.ReadInt32LittleEndian(span[(originXOffset + OriginSize)..]);
 
         return new RegionGridData
         {

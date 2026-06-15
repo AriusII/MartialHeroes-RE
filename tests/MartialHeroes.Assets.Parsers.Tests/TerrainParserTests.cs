@@ -258,6 +258,36 @@ public sealed class TerrainParserTests
     }
 
     [Fact]
+    public void Ted_Parse_TextureIndexGrid_ZeroClampsToOne()
+    {
+        // The legacy loader applies: if (b < 1) b = 1. Value 0 is NOT a no-texture sentinel.
+        // A byte of 0 in the TextureIndexGrid must become 1 after parse.
+        // spec: Docs/RE/formats/terrain.md §5.9 — "if (b < 1) b = 1 (clamp, no-sentinel branch)": CONFIRMED (two-witness, 2026-06-15).
+        // spec: Docs/RE/formats/terrain.md §14 (promoted 2026-06-15) — "0 = no-texture sentinel REFUTED".
+        byte[] data = BuildTed(lookupByte: 0); // lookup[0] = 0, all others = 0 (default byte array)
+        TerrainCell cell = TedTerrainParser.Parse(data.AsSpan());
+
+        // Every byte was 0 in the fixture; after clamp-to-1, every byte must be >= 1.
+        foreach (byte b in cell.TextureIndexGrid)
+            Assert.True(b >= 1,
+                $"TextureIndexGrid byte {b} should have been clamped to 1. " +
+                "spec: Docs/RE/formats/terrain.md §5.9.");
+    }
+
+    [Fact]
+    public void Ted_Parse_TextureIndexGrid_NonZeroNotClamped()
+    {
+        // Values >= 1 must pass through unchanged.
+        // spec: Docs/RE/formats/terrain.md §5.9 — "clamp applies only when b < 1": CONFIRMED.
+        byte[] data = BuildTed(lookupByte: 0xAB);
+        TerrainCell cell = TedTerrainParser.Parse(data.AsSpan());
+
+        // lookupByte=0xAB was written to index 0; all others remain 0 → clamped to 1.
+        Assert.Equal((byte)0xAB, cell.TextureIndexGrid[0]); // >= 1, no clamp
+        Assert.Equal((byte)1, cell.TextureIndexGrid[1]);     // was 0 → clamped to 1
+    }
+
+    [Fact]
     public void Ted_Parse_BlockOffsets_AreCorrect()
     {
         // Verify block boundaries via distinct sentinel values in each block.

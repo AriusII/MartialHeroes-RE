@@ -9,10 +9,31 @@ namespace MartialHeroes.Assets.Parsers;
 /// and (tier-2) <c>stardome%d.bin</c>, <c>clouddome%d.bin</c>, <c>cloud_cycle%d.bin</c>.
 /// </summary>
 /// <remarks>
+/// <para>
 /// All files are little-endian, have no magic number, and have no version field.
 /// spec: Docs/RE/formats/environment_bins.md — overview paragraph.
 /// spec: Docs/RE/specs/environment.md §1 Overview — file family and activation conditions.
 /// ZERO rendering/engine dependencies.
+/// </para>
+/// <para>
+/// <b>Sibling tolerance — default-tolerate absent siblings (LOADER-RESOLVED).</b>
+/// The environment hub does NOT abort the area load when any one of the per-area sibling
+/// files is absent. It leaves that subsystem at its built-in default and proceeds.
+/// A faithful C# port must therefore use the <c>TryParse*</c> overloads rather than
+/// <c>Parse*</c> at call sites that might see a missing file — those overloads return
+/// <see langword="null"/> when the buffer is empty and always skip-and-default rather than
+/// throwing.
+/// spec: Docs/RE/formats/environment_bins.md §Overview Sibling tolerance — LOADER-RESOLVED.
+/// </para>
+/// <para>
+/// <b><c>weather%d_rain.bin</c> — NO LOADER (dead editor data).</b>
+/// The shipping client has NO loader for these files. A cross-reference scan finds no
+/// read-site that opens or parses them. Rain is generated at runtime from hard-coded
+/// constants and a RNG; the 33 <c>_rain.bin</c> files present in the VFS are dead editor
+/// data. A faithful 1:1 port must NOT load <c>weather%d_rain.bin</c>; no parser exists
+/// for it and none should be created.
+/// spec: Docs/RE/formats/environment_bins.md §8 — NO LOADER: LOADER-RESOLVED.
+/// </para>
 /// </remarks>
 public static class EnvironmentBinParsers
 {
@@ -82,6 +103,20 @@ public static class EnvironmentBinParsers
         };
     }
 
+    /// <summary>
+    /// Tolerant sibling overload: returns <see langword="null"/> if the buffer is empty or absent,
+    /// rather than throwing. Used when the hub default-tolerates a missing <c>map_option%d.bin</c>.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/environment_bins.md §Overview Sibling tolerance —
+    ///   "default-tolerate a missing sibling: skip-and-default, never throw": LOADER-RESOLVED.
+    /// </remarks>
+    public static MapOptionBin? TryParseMapOption(ReadOnlyMemory<byte> data)
+    {
+        if (data.IsEmpty) return null;
+        return ParseMapOption(data.Span);
+    }
+
     // ─── fog%d.bin ───────────────────────────────────────────────────────────
 
     /// <summary>
@@ -140,6 +175,19 @@ public static class EnvironmentBinParsers
         };
     }
 
+    /// <summary>
+    /// Tolerant sibling overload: returns <see langword="null"/> if the buffer is empty or absent.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/environment_bins.md §Overview Sibling tolerance —
+    ///   "default-tolerate a missing sibling: skip-and-default, never throw": LOADER-RESOLVED.
+    /// </remarks>
+    public static FogBin? TryParseFog(ReadOnlyMemory<byte> data)
+    {
+        if (data.IsEmpty) return null;
+        return ParseFog(data.Span);
+    }
+
     // ─── material%d.bin ──────────────────────────────────────────────────────
 
     /// <summary>
@@ -186,6 +234,19 @@ public static class EnvironmentBinParsers
         }
 
         return new MaterialBin { ColorTable = table };
+    }
+
+    /// <summary>
+    /// Tolerant sibling overload: returns <see langword="null"/> if the buffer is empty or absent.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/environment_bins.md §Overview Sibling tolerance —
+    ///   "default-tolerate a missing sibling: skip-and-default, never throw": LOADER-RESOLVED.
+    /// </remarks>
+    public static MaterialBin? TryParseMaterial(ReadOnlyMemory<byte> data)
+    {
+        if (data.IsEmpty) return null;
+        return ParseMaterial(data.Span);
     }
 
     // ─── light%d.bin ─────────────────────────────────────────────────────────
@@ -310,6 +371,19 @@ public static class EnvironmentBinParsers
         };
     }
 
+    /// <summary>
+    /// Tolerant sibling overload: returns <see langword="null"/> if the buffer is empty or absent.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/environment_bins.md §Overview Sibling tolerance —
+    ///   "default-tolerate a missing sibling: skip-and-default, never throw": LOADER-RESOLVED.
+    /// </remarks>
+    public static LightBin? TryParseLight(ReadOnlyMemory<byte> data)
+    {
+        if (data.IsEmpty) return null;
+        return ParseLight(data.Span, data);
+    }
+
     private static LightingKeyframe[] ReadLightKeyframes(
         ReadOnlySpan<byte> span, int sectionOffset, int count)
     {
@@ -334,7 +408,14 @@ public static class EnvironmentBinParsers
             colorB[2] = BinaryPrimitives.ReadSingleLittleEndian(span[(slotBase + 0x18)..]);
             colorB[3] = BinaryPrimitives.ReadSingleLittleEndian(span[(slotBase + 0x1C)..]);
 
-            // color_C f32×4 @ slot+0x20. spec: §9.2 — color_C RGBA @ slot+0x20: SAMPLE-VERIFIED (all zeros)
+            // color_C f32×4 @ slot+0x20.
+            // PRESENT-BUT-UNREAD (LOADER-RESOLVED): the loader/time-update read-sequence touches
+            // color_A (+0x00) and color_B (+0x10) and stops — there is NO read-site for the
+            // third float4 group at +0x20. All zeros in all sampled data.
+            // A faithful parser surfaces the bytes (done here for completeness) but must NOT
+            // feed color_C to any lighting math; the original ignores it entirely.
+            // spec: Docs/RE/formats/environment_bins.md §9.2 — color_C f32×4 @ slot+0x20:
+            //   "Present-but-UNREAD; no read-site; unconsumed": LOADER-RESOLVED.
             var colorC = new float[4];
             colorC[0] = BinaryPrimitives.ReadSingleLittleEndian(span[(slotBase + 0x20)..]);
             colorC[1] = BinaryPrimitives.ReadSingleLittleEndian(span[(slotBase + 0x24)..]);
@@ -401,6 +482,19 @@ public static class EnvironmentBinParsers
         return new StarDomeBin { StarColors = starColors };
     }
 
+    /// <summary>
+    /// Tolerant sibling overload: returns <see langword="null"/> if the buffer is empty or absent.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/environment_bins.md §Overview Sibling tolerance —
+    ///   "default-tolerate a missing sibling: skip-and-default, never throw": LOADER-RESOLVED.
+    /// </remarks>
+    public static StarDomeBin? TryParseStarDome(ReadOnlyMemory<byte> data)
+    {
+        if (data.IsEmpty) return null;
+        return ParseStarDome(data.Span);
+    }
+
     // ─── clouddome%d.bin (Tier 2) ────────────────────────────────────────────
 
     /// <summary>
@@ -441,6 +535,19 @@ public static class EnvironmentBinParsers
             Layer1Colors = layer1,
             Layer2Colors = layer2,
         };
+    }
+
+    /// <summary>
+    /// Tolerant sibling overload: returns <see langword="null"/> if the buffer is empty or absent.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/environment_bins.md §Overview Sibling tolerance —
+    ///   "default-tolerate a missing sibling: skip-and-default, never throw": LOADER-RESOLVED.
+    /// </remarks>
+    public static CloudDomeBin? TryParseCloudDome(ReadOnlyMemory<byte> data)
+    {
+        if (data.IsEmpty) return null;
+        return ParseCloudDome(data.Span);
     }
 
     private static BgraColor[][] ReadCloudDomeLayer(ReadOnlySpan<byte> span, int offset)
@@ -517,5 +624,18 @@ public static class EnvironmentBinParsers
         }
 
         return new CloudCycleBin { Rows = rows };
+    }
+
+    /// <summary>
+    /// Tolerant sibling overload: returns <see langword="null"/> if the buffer is empty or absent.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/environment_bins.md §Overview Sibling tolerance —
+    ///   "default-tolerate a missing sibling: skip-and-default, never throw": LOADER-RESOLVED.
+    /// </remarks>
+    public static CloudCycleBin? TryParseCloudCycle(ReadOnlyMemory<byte> data)
+    {
+        if (data.IsEmpty) return null;
+        return ParseCloudCycle(data.Span);
     }
 }

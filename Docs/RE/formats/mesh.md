@@ -165,8 +165,15 @@ so all sections after the header have no fixed absolute offsets.
 | Rel. offset | Size | Type | Field | Notes | Confidence |
 |---:|---|---|---|---|---|
 | 0 | 4 | u32 LE | `id_a` | Numeric identifier for this mesh object. In item-skin files this matches the numeric suffix of the filename (e.g. `gi213050001.skn` → `id_a = 213050001`). | CONFIRMED |
-| 4 | 4 | u32 LE | `id_b` | **Bind-pose reference ID (= SkinClassId).** Selects the `.bnd` skeleton this skin binds to: the loader resolves the bind pose whose `actor_id` equals `id_b`. Item-skin samples carry `id_b = 0` (rigid, no skeleton). For character body skins `id_b != 0` is **universal** (all 1,269 `data/char/skin/` files), and the set of distinct `id_b` values is exactly the set of `.bnd` `actor_id` values — a confirmed bijection (see §id_b ↔ skeleton bijection). | CONFIRMED (structure); CONFIRMED (non-zero bijection, census-verified) |
+| 4 | 4 | u32 LE | `id_b` | **Skeleton pointer into the bindlist registry (the 349-valued skeleton selector).** This field's value is a `.bnd` skeleton key: the loader resolves the bind pose whose `actor_id` equals `id_b`. It is drawn from the same 349-valued domain as the `.bnd` `actor_id` set registered by `bindlist.txt` (see `formats/bindlist.md`). Item-skin samples carry `id_b = 0` (rigid, no skeleton). For character body skins `id_b != 0` is **universal** (all 1,269 `data/char/skin/` files), and the set of distinct `id_b` values is exactly the set of `.bnd` `actor_id` values — a confirmed bijection (see §id_b ↔ skeleton bijection). **Do NOT conflate this field with the `skin.txt` `col2` class tag.** That is a separate, 6-value outfit / class-family tag that lives in `skin.txt`, not in the `.skn` mesh; it indexes a base-offset table and never selects a skeleton. The `.skn` `id_b` is the 349-valued skeleton pointer; the `skin.txt` `col2` is the 6-value class tag — two distinct fields that happen to share the legacy label "IdB". | CONFIRMED (structure); CONFIRMED (two distinct fields — skeleton pointer vs class tag); CONFIRMED (non-zero bijection, census-verified) |
 | 8 | 4 + N | LenStr | `name` | Length-prefixed name string. Wire format: 4-byte u32 LE length, then N bytes of body with no null terminator. Observed item values: `"book"` (N=4), `"seven_gift"` (N=10). | CONFIRMED |
+
+> **Naming disambiguation (firewall note).** The legacy label "IdB" was historically applied to BOTH
+> the `.skn` `id_b` skeleton pointer documented above AND the `skin.txt` `col2` class tag. These are
+> two distinct fields with two distinct value domains (349 skeleton keys vs 6 class tags) and two
+> distinct consumers (skeleton resolution vs a base-offset table). This spec names the `.skn` field
+> `id_b` exclusively as the skeleton pointer. The canonical glossary split of these two meanings is
+> owned by Tier-1 in `Docs/RE/names.yaml`; this spec does not edit that glossary.
 
 ### Face table
 
@@ -278,8 +285,14 @@ recovered sample skeletons `base_id == 0`, so ID equals array index — but a pa
 Every character body skin (`data/char/skin/`) carries a non-zero `id_b`, and the set of distinct
 `id_b` values across all character skins is **exactly the set of `.bnd` `actor_id` values** — **349
 distinct `id_b` values matching 349 `.bnd` files**, a confirmed one-to-one correspondence. This makes
-`id_b` the reliable skin→skeleton link: to find a character skin's skeleton, load
-`data/char/bind/g{id_b}.bnd`. (`id_b = 0` means rigid / no skeleton, used by item props.) SAMPLE-VERIFIED.
+`id_b` the reliable skin→skeleton link: to find a character skin's skeleton, resolve the registered
+`.bnd` whose `actor_id` equals `id_b` (the bindlist registry holds all 349 such entries — see
+`formats/bindlist.md`). (`id_b = 0` means rigid / no skeleton, used by item props.) SAMPLE-VERIFIED.
+
+> **`id_b` is the skeleton pointer, not the class tag.** The 349-valued `id_b` domain documented here
+> is the skeleton-selection domain. It must not be confused with the 6-value `skin.txt` `col2` class
+> tag (a separate field, a separate file, a separate consumer). Both were historically labelled "IdB";
+> they are split into two distinct fields. See the Header naming-disambiguation note above.
 
 ### End of file
 
@@ -437,7 +450,8 @@ None identified in these formats.
 
 | Former item | Resolution |
 |---|---|
-| `.skn` `id_b` non-zero semantics | RESOLVED — `id_b` is the SkinClassId / bind-pose reference; non-zero is universal for character skins and the distinct `id_b` set is a bijection with the 349 `.bnd` `actor_id`s (§id_b ↔ skeleton bijection). |
+| `.skn` `id_b` non-zero semantics | RESOLVED — `id_b` is the 349-valued skeleton pointer into the bindlist registry; non-zero is universal for character skins and the distinct `id_b` set is a bijection with the 349 `.bnd` `actor_id`s (§id_b ↔ skeleton bijection). |
+| `.skn` `id_b` vs `skin.txt col2` ("IdB") naming collision | RESOLVED — two distinct fields: `.skn` `id_b` = 349-valued skeleton pointer; `skin.txt col2` = 6-value outfit/class tag (separate file, base-offset table). See the Header naming-disambiguation note. (Canonical glossary split owned by Tier-1.) |
 | `.skn` multi-bone weight records | RESOLVED — 1,140 multi-bone/multi-weight skins census-verified (§Multi-bone weighted skinning). |
 | `.skn` weight skip threshold | RESOLVED — minimum observed weight = 0.010; records below 0.01 are dropped (SAMPLE-VERIFIED). |
 | Weights addressing bones by index vs ID | RESOLVED — `bone_index` is a **bone ID** resolved by `id − base_id`, no indirection table (§Bone addressing). |
@@ -448,9 +462,13 @@ None identified in these formats.
 ## Cross-references
 
 - Related formats: `formats/pak.md` (container), `formats/animation.md` (`.mot` clips that drive
-  these skeletons), `formats/texture.md` (co-referenced assets)
+  these skeletons), `formats/texture.md` (co-referenced assets), `formats/bindlist.md` (the
+  authoritative registry of all 349 `.bnd` skeletons keyed by `actor_id` — the resolution target for
+  `.skn` `id_b`)
 - Deform / skinning math: `specs/skinning.md` (linear-blend skinning, inverse-bind bake, pose
   composition, quaternion/handedness conventions, Godot import guidance, canonical test specimens)
 - Canonical names: see `Docs/RE/names.yaml` (`XobjFile`, `SkinFile`, `BindPoseFile`, `SknFace`,
-  `SknCorner`, `SknVertex`, `SknWeight`, `BndBone`)
-- Provenance: see `Docs/RE/journal.md`
+  `SknCorner`, `SknVertex`, `SknWeight`, `BndBone`; the `id_b` skeleton-pointer vs `skin.txt col2`
+  class-tag split is owned by Tier-1)
+- Provenance: see `Docs/RE/journal.md`. This `id_b` skeleton-pointer / class-tag split was promoted
+  under CAMPAIGN VFS-MASTERY (two-witness: loader + black-box).

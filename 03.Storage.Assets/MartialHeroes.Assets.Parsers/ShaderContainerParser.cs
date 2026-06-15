@@ -74,7 +74,10 @@ public static class ShaderContainerParser
 
     /// <inheritdoc cref="Parse(ReadOnlyMemory{byte})"/>
     public static ShaderSource Parse(ReadOnlySpan<byte> span) =>
-        Parse(span.ToArray());
+        // Explicitly target the ReadOnlyMemory<byte> overload to avoid infinite recursion:
+        // byte[].ToArray() converts to both ReadOnlyMemory<byte> and ReadOnlySpan<byte>,
+        // and the compiler would prefer the span overload (infinite loop) without the cast.
+        Parse(new ReadOnlyMemory<byte>(span.ToArray()));
 
     private static int FindLineEnd(ReadOnlySpan<char> text)
     {

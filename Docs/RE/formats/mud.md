@@ -26,9 +26,8 @@ Each grid tile carries a small set of byte indices that select, for the area the
 standing on:
 
 - the **background-music (BGM) zone**,
-- two layers of **background-environment / ambient (BGE) sounds**,
-- up to three **3D positional sound effects (EFF)**, and
-- (PLAUSIBLE, see below) the **walk / run footstep sound zones**.
+- two layers of **background-environment / ambient (BGE) sounds**, and
+- up to three **3D positional sound effects (EFF)**.
 
 At runtime the sound manager samples this grid every frame from the local player's world `(X, Z)`
 position and starts/stops/crossfades audio as the player crosses tile boundaries. If the grid is
@@ -49,8 +48,8 @@ base path; see `terrain.md` for the cell streaming model.
   and `.map` (text scene descriptor), which share the same base path with a different extension.
 - **Magic / signature:** **none.** Headerless raw blob — no file-level magic, no version field,
   no length field, no compression, no encryption. — confidence: CONFIRMED
-- **Endianness:** little-endian. Only relevant to bytes 0/1 if they prove to be multi-byte; the
-  audio consumer reads all meaningful fields as individual bytes. — confidence: CONFIRMED
+- **Endianness:** little-endian. The audio consumer reads all meaningful fields as individual
+  bytes. — confidence: CONFIRMED
 - **File size:** fixed **32768 bytes (0x8000)** for every `.mud` — the loader allocates exactly
   0x8000 bytes and reads exactly 0x8000 bytes in a single read. — confidence: CONFIRMED
 
@@ -89,71 +88,62 @@ see `terrain.md` for the full cell coordinate model.
 ## Tile layout (8 bytes)
 
 Each tile is a fixed 8-byte record. Per-byte usage was recovered from the sound-manager
-consumer's byte reads and cross-checked against the sample's value distribution.
+consumer's byte reads and cross-checked against the sample's value distribution. The sole consumer
+that walks this grid reads **only bytes 2–7**; bytes 0 and 1 are never read by it (see below).
 
 | Offset | Size | Type | Field          | Notes / meaning                                                   | Confidence |
 |-------:|-----:|------|----------------|------------------------------------------------------------------|------------|
-| 0      | 1    | u8   | wlkZoneId?     | PLAUSIBLY walk-footstep zone index → `.wlk` table. Was previously labelled `reserved0`. Not read by the analysed ambient-update path; observed 0 in available samples. See hypothesis below. | PLAUSIBLE (was MED/unused) |
-| 1      | 1    | u8   | runZoneId?     | PLAUSIBLY run-footstep zone index → `.run` table. Was previously labelled `reserved1`. Not read by the analysed ambient-update path; observed 0 in available samples. See hypothesis below. | PLAUSIBLE (was MED/unused) |
+| 0      | 1    | u8   | unread0        | Not read by the located consumer. Meaning unknown; treat as opaque/ignored. Was previously hypothesised as a walk-footstep zone index — that reading is REFUTED (see below). Observed 0 in available samples. | REFUTED-hypothesis / unconsumed |
+| 1      | 1    | u8   | unread1        | Not read by the located consumer. Meaning unknown; treat as opaque/ignored. Was previously hypothesised as a run-footstep zone index — that reading is REFUTED (see below). Observed 0 in available samples. | REFUTED-hypothesis / unconsumed |
 | 2      | 1    | u8   | bgmZoneId      | Background-music zone index → `.bgm` table (per-zone music)       | CONFIRMED |
 | 3      | 1    | u8   | bgeAmbientId0  | Background-environment ambient index, layer 0 → `.bge` table      | CONFIRMED |
 | 4      | 1    | u8   | bgeAmbientId1  | Background-environment ambient index, layer 1 → `.bge` table      | CONFIRMED |
 | 5      | 1    | u8   | effId0         | 3D positional sound-effect index, slot 0 → `.eff` table           | CONFIRMED |
 | 6      | 1    | u8   | effId1         | 3D positional sound-effect index, slot 1 → `.eff` table           | CONFIRMED |
-| 7      | 1    | u8   | effId2         | 3D positional sound-effect index, slot 2 → `.eff` table           | CONFIRMED |
+| 7      | 1    | u8   | effId2         | 3D positional sound-effect index, slot 2 → `.eff` table. Confirmed consumed: read and used as a direct index into the per-area EFF sound table by the effect-sound-table loader. | CONFIRMED |
 
 - **Record count source:** fixed by geometry — always 64 × 64 = 4096 tiles. Not stored in the
   file; derived from the constant grid dimensions. — confidence: CONFIRMED
 - **Record stride:** 8 bytes. — confidence: CONFIRMED
 - **Sentinel value:** index value `0` in any audio field means "no sound / silence" for that slot;
-  the consumer stops the previously-playing entry when a tile's value transitions to 0. The same
-  0 = null-row rule applies to bytes 0/1 under the walk/run hypothesis. — confidence: CONFIRMED
-  for bytes 2–7; PLAUSIBLE for bytes 0/1.
+  the consumer stops the previously-playing entry when a tile's value transitions to 0. This rule
+  applies to bytes 2–7. — confidence: CONFIRMED
 
-### Bytes 0 and 1 — walk/run footstep hypothesis (PLAUSIBLE — needs verify)
+### Bytes 0 and 1 — walk/run footstep hypothesis REFUTED
 
-The VFS census proves exactly **five** per-area sound-table types exist: `.bgm`, `.bge`, `.eff`,
-`.wlk`, `.run` (footstep walk / run). The `.bgm`, `.bge` and `.eff` index families map cleanly to
-tile bytes 2, 3–4, and 5–7 respectively, accounting for six of the eight tile bytes. That leaves
-exactly **two** unaccounted-for tile bytes (0 and 1) and exactly **two** unaccounted-for table
-families (`.wlk` and `.run`). The natural one-to-one pairing is:
-
-- **byte 0 → `.wlk` (walk footstep) zone index**,
-- **byte 1 → `.run` (run footstep) zone index**,
-
-each used as a direct 0-based row index into the area's `soundtable<AAA>.wlk` / `.run` table, with
-0 = null/silence. This is **PLAUSIBLE only** — bytes 0/1 are not read by the ambient-update path
-that was analysed, and all sampled `.wlk` / `.run` tables are entirely null, so neither the index
-source nor the leaf audio could be exercised. **Verify with a one-line harness/debugger check:
-breakpoint the footstep-sound trigger and confirm it indexes a `.wlk` / `.run` table by mud byte
-0 / 1.** Until then do not treat bytes 0/1 as confirmed footstep indices, and do not treat them as
-hard "reserved" either. See `sound_tables.md` (`.wlk` / `.run` index-source known unknown).
+An earlier hypothesis paired bytes 0 and 1 with the per-area `.wlk` (walk) and `.run` (run)
+footstep sound tables, on the arithmetic that exactly two tile bytes and exactly two unmapped
+sound-table families remained. **That hypothesis is REFUTED.** The sole consumer that walks this
+grid reads only bytes 2 through 7; bytes 0 and 1 are never read by it. There is therefore no
+evidence that these two bytes carry walk/run footstep zone indices, and this spec makes no such
+claim. Both bytes are left as **unconsumed by the located consumer** — meaning unknown, to be
+treated as opaque/ignored by a faithful port. Footstep audio, if it exists, is sourced elsewhere
+and is not driven by these `.mud` tile bytes.
 
 ---
 
 ## Enumerations / flags
 
-No bitflag fields. All meaningful bytes are small integer indices into the per-area sound tables
-(`.bgm` / `.bge` / `.eff`, and PLAUSIBLY `.wlk` / `.run`), each entry of which is selected by the
-byte's value used directly as a 0-based row index, with `0` reserved as the silence sentinel. The
-on-disk format of those tables and the full leaf-audio resolution chain are documented in
-`sound_tables.md`.
+No bitflag fields. All consumed bytes are small integer indices into the per-area sound tables
+(`.bgm` / `.bge` / `.eff`), each entry of which is selected by the byte's value used directly as a
+0-based row index, with `0` reserved as the silence sentinel. The on-disk format of those tables
+and the full leaf-audio resolution chain are documented in `sound_tables.md`.
 
 ---
 
 ## Resolution chain (mud tile byte → sound table → leaf audio)
 
-Each tile byte is used as a **direct 0-based row index** into the matching per-area sound table for
-the cell's area (`<AAA>` = zero-padded 3-digit area number from the `.mud` path, e.g. `map001`).
-The table record's `sound_entry_id` (u32 LE at record offset +0x00) names the leaf `.ogg`.
+Each consumed tile byte is used as a **direct 0-based row index** into the matching per-area sound
+table for the cell's area (`<AAA>` = zero-padded 3-digit area number from the `.mud` path, e.g.
+`map001`). The table record's `sound_entry_id` (u32 LE at record offset +0x00) names the leaf
+`.ogg`.
 
 ```
 byte 2 (bgmZoneId)     → soundtable<AAA>.bgm[N] → sound_id → data/sound/2d/{sound_id}.ogg
 byte 3,4 (bgeAmbientId)→ soundtable<AAA>.bge[N] → sound_id → data/sound/2d/{sound_id}.ogg
 byte 5,6,7 (effId)     → soundtable<AAA>.eff[N] → sound_id → data/sound/3d/{sound_id}.ogg
                           + 3D position (record +0x20 X / +0x24 Y / +0x28 Z) and radius (+0x2C)
-byte 0 (wlkZoneId?)    → soundtable<AAA>.wlk[N] → footstep walk sound   [PLAUSIBLE — unverified]
-byte 1 (runZoneId?)    → soundtable<AAA>.run[N] → footstep run sound    [PLAUSIBLE — unverified]
+byte 0, byte 1         → NOT read by the located consumer (no resolution chain)
 ```
 
 A mud byte of 0 selects record index 0 (the null sentinel) and plays nothing. The 0-based direct
@@ -173,9 +163,10 @@ well under the 256 records per table). Full table layout and chain detail: `soun
      a fixed indoor music id when the player is flagged as indoors.
    - **BGE (bytes 3, 4):** two ambient/environment sound layers via the `.bge` table, started and
      stopped as the player crosses tiles.
-   - **EFF (bytes 5, 6, 7):** up to three 3D positional sound effects via the `.eff` table.
-   - **Walk / run (bytes 0, 1 — PLAUSIBLE):** footstep sounds via the `.wlk` / `.run` tables,
-     keyed on the tile surface zone (hypothesis; not in the analysed ambient path).
+   - **EFF (bytes 5, 6, 7):** up to three 3D positional sound effects via the `.eff` table;
+     byte 7 (`effId2`) is confirmed read and used as an EFF-table index by the effect-sound-table
+     loader.
+   - **Bytes 0, 1:** not read by this consumer — no audio behaviour is driven by them.
    - A periodic forced re-pick (long-interval timer) re-evaluates the current tile even without
      movement.
 
@@ -188,11 +179,9 @@ sound-subsystem spec, not to this format doc.
 
 - **Acronym / origin of "mud":** the content is audio-zone data; the extension name's meaning is
   not proven from the binary. Do not over-read the name.
-- **Bytes 0 and 1 — walk/run hypothesis:** PLAUSIBLY the `.wlk` / `.run` footstep zone indices
-  (byte 0 → walk, byte 1 → run), based on the exact 2-byte / 2-table-family pairing. Not read by
-  the analysed ambient path and not exercised by samples (all `.wlk` / `.run` tables are null).
-  Needs a one-line harness/debugger re-verify (breakpoint the footstep trigger, confirm it indexes
-  `.wlk` / `.run` by mud byte 0 / 1).
+- **Bytes 0 and 1:** not read by the located consumer; their meaning is unknown. The former
+  walk/run footstep reading is REFUTED — do not reintroduce it. A faithful port treats these two
+  bytes as opaque/ignored.
 - **Exact crossfade / stop semantics and the indoor override id:** observed but behavioural; out
   of scope for this format spec.
 
@@ -202,17 +191,27 @@ sound-subsystem spec, not to this format doc.
 
 - Cell streaming model and `(mapX, mapZ)` origin biasing: `terrain.md`
 - On-disk sound tables and the full mud-byte → table → leaf-audio resolution chain:
-  `sound_tables.md` (CONFIRMED for BGM / BGE / EFF; `.wlk` / `.run` index source PLAUSIBLE)
+  `sound_tables.md` (CONFIRMED for BGM / BGE / EFF)
 - Companion per-cell files sharing the base path: `.gad` (no-op stub), `.map` (text scene)
 - Glossary: see Docs/RE/names.yaml
 - Provenance: see Docs/RE/journal.md (entry paired with this spec)
 
 ---
 
+## Provenance
+
+- **CAMPAIGN VFS-MASTERY** two-witness gate (loader read-order witness + black-box sample witness):
+  - `effId2` (byte 7) CONFIRMED consumed — read and indexed into the per-area EFF sound table by
+    the effect-sound-table loader.
+  - Bytes 0–1 walk/run hypothesis REFUTED — the sole consumer reads only bytes 2–7; bytes 0 and 1
+    are never read.
+
+---
+
 ## Names flagged for names.yaml (orchestrator to record)
 
 - Format: `mud` → "Ambient Sound Zone Grid" / `MudSoundGrid`
-- Struct: `MudTile` (8 bytes): `wlkZoneId?` (byte 0, PLAUSIBLE), `runZoneId?` (byte 1, PLAUSIBLE),
+- Struct: `MudTile` (8 bytes): `unread0` (byte 0, unconsumed), `unread1` (byte 1, unconsumed),
   `bgmZoneId`, `bgeAmbientId0`, `bgeAmbientId1`, `effId0`, `effId1`, `effId2`
 - Constants: `MUD_GRID_DIM = 64`, `MUD_TILE_STRIDE = 8`, `MUD_FILE_SIZE = 32768`,
   `MUD_TILE_WORLD_SIZE = 16`

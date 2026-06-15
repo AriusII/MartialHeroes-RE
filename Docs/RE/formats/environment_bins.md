@@ -20,10 +20,10 @@
 
 | Attribute         | Value |
 |-------------------|-------|
-| `status`          | `sample-verified` for `map_option%d.bin`, `fog%d.bin`, `material%d.bin`, `stardome%d.bin`, `clouddome%d.bin`, `cloud_cycle%d.bin`; `partial` for `weather%d.bin` / `weather%d_rain.bin`; water renderer: **RESOLVED-NEGATIVE** (see §1.4); lighting apply-path numeric defaults: **CONFIRMED** (see §10.4–§10.5, §10.7) |
+| `status`          | `sample-verified` for `map_option%d.bin`, `fog%d.bin`, `material%d.bin`, `stardome%d.bin`, `clouddome%d.bin`, `cloud_cycle%d.bin`; `partial` for `weather%d.bin`; `weather%d_rain.bin`: **NO LOADER — dead editor data** (see §8); water renderer: **RESOLVED-NEGATIVE** (see §1.4); lighting apply-path numeric defaults: **CONFIRMED** (see §10.4–§10.5, §10.7) |
 | `sample_verified` | `true` — formats confirmed against real sample files extracted from the live VFS for areas 0 and 1, with additional spot-checks across areas 4–35 for `map_option`. `weather` samples are zero-dominated; full decode awaits an area with active precipitation. |
 | `binary_analysed` | `doida.exe` (legacy 32-bit client build, x86 LE) — used to identify the sky-init call chain, file-read sequences, GRSFog/GRSLighting struct offsets, the lighting/ambient apply-path, and exhaustive cross-reference scan confirming the water-renderer negative result. No addresses appear in this spec. |
-| `confidence`      | `CONFIRMED` = field corroborated by parser read-sequence and real sample bytes. `SAMPLE-VERIFIED` = confirmed by observed sample data alone. `CODE-CONFIRMED` = identified in parser only, no sample cross-check. `PROPOSED` = structurally inferred, no direct evidence. |
+| `confidence`      | `CONFIRMED` = field corroborated by parser read-sequence and real sample bytes. `SAMPLE-VERIFIED` = confirmed by observed sample data alone. `CODE-CONFIRMED` = identified in parser only, no sample cross-check. `LOADER-RESOLVED` = the loader read-sequence settled an interpretation the bytes left opaque. `PROPOSED` = structurally inferred, no direct evidence. |
 
 ---
 
@@ -41,8 +41,24 @@ filename. Together these files define:
 - the cloud animation schedule and weather effects.
 
 All files in this family are **little-endian**, have **no magic number**, and have **no version
-field** unless explicitly noted below. Missing files are silently ignored — the client falls back
-to defaults for any subsystem whose file is absent.
+field** unless explicitly noted below.
+
+> ### Sibling tolerance — the environment hub default-tolerates absent siblings (LOADER-RESOLVED)
+>
+> On area activation a single environment hub drives the loads of the sibling family files
+> (`map_option%d.bin`, `light%d.bin`, the stardome grid, `fog016`/the fog file, and the other
+> per-area `.bin` siblings). The hub **default-tolerates a missing sibling**: when any one of these
+> files is absent the hub does not abort the area load — it leaves that subsystem at its built-in
+> default and proceeds. This is the confirmed behaviour for at least the `map_option`, `light`,
+> stardome, and fog siblings. **A faithful C# port must default-tolerate every absent sibling**
+> (skip-and-default, never throw) rather than requiring the full set to be present.
+>
+> **DBG-pending:** exactly one indoor area takes a distinct sky-init bypass path when its fog
+> sibling is absent (a single-area special case in the sky-init routine). The behaviour of that
+> bypass — what it substitutes, and whether it suppresses the fog subsystem entirely — is **not
+> resolved statically and is documented honestly as DBG-pending**. Do not invent its behaviour;
+> the general default-tolerant rule above is the safe port baseline until the bypass is confirmed
+> live.
 
 A global quality-tier file (`DoOption.ini`, section `[DO_OPTION]`) gates rendering subsystems
 by tier: `OPTION_WATER`, `OPTION_SKY`, `OPTION_WEATHER`, `OPTION_WEATHER_RAIN`, `OPTION_LENS`,
@@ -198,6 +214,9 @@ translucent FX texture index. Any standalone water surface a reimplementation ch
   sun/moon, and lens flare. Whether fog parameters still apply indoors is unverified.
 - **Area-0 ordering anomaly:** the cause of area 0's mismatch between `.bin` words and `.txt` values
   is unresolved (template/default candidate).
+- **Indoor-area sky-init bypass (DBG-pending):** one indoor area takes a distinct sky-init bypass
+  when its fog sibling is absent (see Overview "Sibling tolerance"). Its substituted behaviour is
+  DBG-pending; the default-tolerant rule is the safe baseline until confirmed live.
 
 ---
 
@@ -212,7 +231,7 @@ translucent FX texture index. Any standalone water surface a reimplementation ch
 |-------:|-----:|------|-------|-------|------------|
 | 0x00 | 4 | f32 | `start_dist` | Fog start distance. A **float fraction** in 0.0–1.0, interpreted as a fraction of the configured view range. Observed area-1 value: **0.75** (sample-verified; see §10.2 — supersedes the 0.5 stand-in once quoted for area 0/1). | CONFIRMED |
 | 0x04 | 4 | f32 | `end_dist` | Fog end distance, same scale as `start_dist`. Observed area-1 value: **0.98** (sample-verified; see §10.2). | CONFIRMED |
-| 0x08 | 4 | u32 | `data_load_flag` | 0 = `fog_colors[]` is **not read from the file** and is synthesised at load time from the sky/material colour table (the 3:1 blend in §2.4); non-zero = the explicit `fog_colors[]` array is read straight from the file. Areas 0 and 1 both have value 0. | CONFIRMED |
+| 0x08 | 4 | u32 | `data_load_flag` | Selects the **source** of `fog_colors[]`, NOT whether fog renders. **0 = synthesise** the colour table at load time from the sky/material colour table (the 3:1 blend in §2.4) — the in-file `fog_colors[]` bytes are NOT read. **1 (non-zero) = read** the explicit `fog_colors[]` array straight from the file and use it verbatim — including, if those bytes are all zero, a **literal black** fog colour (§2.4). Areas 0 and 1 both have value 0. | CONFIRMED |
 | 0x0C | 192 | u8[192] | `fog_colors[48]` | 48 BGRA colour entries, one per day/night keyframe. Each entry is 4 bytes. Bytes are used as a packed D3DCOLOR directly — see §2.2 and §10.1 (NO /255 in the client). | CONFIRMED |
 
 Total: 4 + 4 + 4 + 192 = 204 bytes.
@@ -244,19 +263,31 @@ atmospheres; exact numeric values are in the dirty-room samples, not in this spe
 | kf 24 (noon) | Muted sky-blue with orange tint |
 | kf 40 (evening) | Dark, near-neutral |
 
-### 2.4 `data_load_flag` semantics — RESOLVED
+### 2.4 `data_load_flag` semantics — RESOLVED (flag selects source; flag==1 + zero = literal black)
 
-When `data_load_flag = 0` the 192-byte `fog_colors[]` table is **not** read from `fog%d.bin`;
-instead it is **synthesised at load time from the sky/material master colour table** with a per-slot
-**3:1 weighted blend**: for each of the 48 keyframe slots and each colour channel,
+`data_load_flag` selects **where the fog colour table comes from** — it does NOT decide whether fog
+is enabled, and it is NOT a "synthesise the colour when it is missing" toggle.
 
-```
-fog_byte[slot][chan] = high_band[slot][chan] × 0.75 + low_band[slot][chan] × 0.25
-```
+- **`data_load_flag = 0` — synthesise.** The 192-byte `fog_colors[]` table is **not** read from
+  `fog%d.bin`; instead it is **synthesised at load time from the sky/material master colour table**
+  with a per-slot **3:1 weighted blend**: for each of the 48 keyframe slots and each colour channel,
 
-(two source bands from the sky colour LUT, blended, then truncated to a byte via float→int).
-When `data_load_flag` is non-zero, the explicit 192-byte `fog_colors[]` array is read straight from
-the file. CONFIRMED, pinned to the fog loader. The runtime apply of these bytes (whether read or
+  ```
+  fog_byte[slot][chan] = high_band[slot][chan] × 0.75 + low_band[slot][chan] × 0.25
+  ```
+
+  (two source bands from the sky colour LUT, blended, then truncated to a byte via float→int).
+  **Synthesis happens ONLY on this `flag == 0` branch.**
+
+- **`data_load_flag = 1` (non-zero) — read verbatim, no synthesis.** The explicit 192-byte
+  `fog_colors[]` array is read straight from the file and used as-is. **There is no synthesis on this
+  branch.** In particular, when the flag is `1` **and** the in-file colour bytes are all zero, the
+  result is **literal black** fog — the client renders the black it was given; it does **not** fall
+  back to the sky-LUT blend. (REFUTES any earlier "synthesise when flag == 1" / "synthesise on a
+  zero colour" reading — the synthesis path is exclusively the `flag == 0` branch.)
+
+CONFIRMED, pinned to the fog loader read-sequence (two witnesses: loader source-of-table branch +
+black-box behaviour on a zero-colour flag-1 file). The runtime apply of these bytes (whether read or
 synthesised) is the byte-D3DCOLOR path in §10.1. See also `specs/environment.md §1.1`.
 
 > The `0.75` / `0.25` blend weights are CONFIRMED as the blend ratio. The exact mapping of which two
@@ -339,12 +370,17 @@ star-dome step), covering one simulated day in 86 400 ms.
 
 Same byte order as fog colours (§2.2): Blue, Green, Red, Alpha. Alpha is always 0.
 
-### 4.3 Usage notes
+### 4.3 Usage notes — tint is PER-STAR (CONFIRMED)
 
-In all sampled data all 192 star instances within a given keyframe share the **same** BGRA value
-(uniform tint across all stars per sky-hour). Whether per-instance colour variation is possible
-(i.e. whether individual stars can have different colours) is not determinable from the available
-samples — the tint may simply be overridden by a single per-frame colour read.
+**The star tint is per-star, NOT a single per-keyframe tint.** The consumer walks the 192 star
+instances of the active keyframe and **advances 4 bytes (one BGRA entry) per star**, reading a
+distinct colour for each star instance. Each of the 192 entries in a keyframe is therefore the tint
+of an individual star, and per-instance colour variation is fully supported by the format and by the
+consumer. **CONFIRMED** (two witnesses: the consumer's 4-byte-per-star advance + the per-instance
+array layout). This **refutes** the earlier "uniform tint across all stars per keyframe" reading
+(§4.3 previously inferred a single per-frame colour from samples in which the 192 entries happened to
+share a value — that uniformity is a property of those particular samples, not a constraint of the
+format or the consumer).
 
 Stars are point-sprite particles textured from `data/sky/texture/star.dds`.
 
@@ -457,30 +493,45 @@ particle intensity, and related parameters. All sampled files (areas 0 and 1) co
 
 - **Full field layout:** No populated sample has been decoded. At minimum 60 u32 or 60 f32 values
   fit in 240 bytes; the actual type and semantics are unverified.
-- **Interaction with `weather%d_rain.bin`:** Whether both files must be present simultaneously
-  for weather to activate is unconfirmed.
+- **Relationship to `weather%d_rain.bin`:** none at runtime — the `_rain.bin` companion has **no
+  loader** and is never read by the shipping client (§8). Whether `weather%d.bin` itself has a live
+  runtime consumer is unverified (its samples are all-zero).
 
 ---
 
-## Section 8: `weather%d_rain.bin` — Rain Weather Variant
+## Section 8: `weather%d_rain.bin` — Rain Editor Data (NO LOADER — dead data)
 
-**Status:** PARTIAL — file size confirmed, content sparse  
-**File size:** exactly **240 bytes** (fixed)
+**Status:** NO LOADER — rain is generated at runtime from constants + RNG; the on-disk
+`weather%d_rain.bin` files are dead editor data. (LOADER-RESOLVED.)  
+**File size:** exactly **240 bytes** (fixed)  
+**Count in VFS:** 33 `_rain.bin` files
 
-### 8.1 File layout
+### 8.1 No runtime loader — the files are not consumed
 
-Layout identical in size to `weather%d.bin`. Present as a companion for areas with explicit
-rain configurations.
+> **The shipping client has NO loader for `weather%d_rain.bin`.** A cross-reference scan finds no
+> read-site that opens or parses these files. Instead, rain is **built at runtime from hard-coded
+> constants and a random-number generator** (drop counts, spawn positions, fall velocity, and streak
+> appearance are produced procedurally — they are not read from disk). The 33 `_rain.bin` files
+> present in the VFS are therefore **dead editor data**: authoring-tool output that the runtime never
+> reads. **LOADER-RESOLVED** (the absence of a read-site is the witness).
+>
+> **A faithful 1:1 port must NOT load `weather%d_rain.bin`.** Reproduce rain procedurally
+> (constants + RNG) exactly as the original does; do not build a parser for these files and do not
+> drive rain from their contents. Treating them as live input would diverge from original behaviour.
+
+### 8.2 File layout (for archival completeness only — not parsed by the client)
+
+The on-disk record is the same 240-byte size as `weather%d.bin`. Because the runtime never reads it,
+no field semantics are pinned and none are needed for a faithful port.
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| 0x00 | 240 | u8[240] | _body_ | Largely zeros; first few bytes non-zero in some sampled files (character consistent with a small header or colour value) | SAMPLE-VERIFIED (size only) |
+| 0x00 | 240 | u8[240] | _body_ | Editor-authored; **never read by the shipping client**. Largely zeros; first few bytes non-zero in some files. Not consumed — do not parse. | LOADER-RESOLVED (no read-site) |
 
-### 8.2 Known unknowns
+### 8.3 Known unknowns
 
-- **Full field layout:** Awaiting a sample from an area with active rain for decode.
-- **`weather%d.bin` vs. `weather%d_rain.bin` relationship:** May be a base + variant pair, or
-  the rain file may entirely replace the base file for rain areas.
+- **Editor field layout:** unrecovered and intentionally not pursued — the runtime never reads these
+  files, so their internal layout has no bearing on a faithful port.
 
 ---
 
@@ -517,14 +568,19 @@ assignments used a narrower read-site scope; the sample-verified interpretation 
 
 | Slot offset | Size | Type | Field | Confidence |
 |:-----------:|-----:|------|-------|------------|
-| +0x00 | 16 | f32[4] | `color_A` (RGBA) | Primary colour — diffuse for section A, ambient for section B. RGBA, alpha always 0. Float in **[0,1]**, applied directly (no /255) — see §10.4. | CONFIRMED |
-| +0x10 | 16 | f32[4] | `color_B` (RGBA) | Secondary colour — possibly specular for section A. Read by the time-update path. | CODE-CONFIRMED |
-| +0x20 | 16 | f32[4] | `color_C` (RGBA) | All zeros in all sampled data. Reserved or unused. | SAMPLE-VERIFIED (all zeros) |
+| +0x00 | 16 | f32[4] | `color_A` (RGBA) | Primary colour — diffuse for section A, ambient for section B. RGBA, alpha always 0. Float in **[0,1]**, applied directly (no /255) — see §10.4. **CONSUMED** (read and applied by the time-update path). | CONFIRMED |
+| +0x10 | 16 | f32[4] | `color_B` (RGBA) | Secondary colour — specular for section A. **CONSUMED** (read by the time-update path). | CODE-CONFIRMED |
+| +0x20 | 16 | f32[4] | `color_C` (RGBA) | **Present-but-UNREAD.** Only `color_A` (the diffuse colour at +0x00) and `color_B` (the specular colour at +0x10) are read by the consumer; the third group at +0x20 has **no read-site** and is never consumed. All zeros in all sampled data. A faithful parser may surface the bytes but must NOT feed them to the lighting math (the original ignores them). | LOADER-RESOLVED (no read-site; unconsumed) |
 
 The per-field sun/moon color assignments from `terrain_layers.md §6.2` (indices 0–2 as
 `sun_colour`, index 5 as `moon_colour[1]`, etc.) remain the best parser-side interpretation and
 are not contradicted by the sample bytes. They are retained in `terrain_layers.md` as
 CODE-CONFIRMED; the float4-group view above is a complementary, sample-verified structural view.
+
+> **color_C consumption — LOADER-RESOLVED.** Two witnesses settle that only the first two colour
+> groups are consumed: the loader/time-update read-sequence touches `color_A` (+0x00) and `color_B`
+> (+0x10) and stops — there is no read of the third group — and the sampled bytes for `color_C` are
+> uniformly zero. The third group is **present in the layout but unread**; treat it as reserved/dead.
 
 ### 9.3 Section C fog scalar — revised interpretation
 
@@ -691,6 +747,10 @@ not rotate the sun; any sun-arc in a port is a free choice.
 - **`fog%d.bin` start/end vs. section-C scalar:** both seed fog distance; the per-frame `s × 3.0`
   appears to win each tick. Whether start/end are ever used live (e.g. when section C is zero) is
   unverified (§10.3).
+- **Indoor-area sky-init bypass (DBG-pending):** one indoor area takes a distinct sky-init bypass
+  path when its fog sibling is absent (Overview "Sibling tolerance" / §1.5). The substituted
+  behaviour of that single-area bypass is not resolved statically; document it honestly, do not
+  guess it.
 
 ---
 
@@ -705,8 +765,8 @@ All sky textures are **DDS** files under `data/sky/texture/`. Confirmed entries 
 | `data/sky/texture/cloud%d.dds` | Cloud dome textures | Ping-pong 2-frame (layer 1) / 4-frame (layer 2) | Indexed by `cloud_cycle%d.bin` |
 | `data/sky/texture/star.dds` | Star point-sprite texture | No | Single file |
 | `data/sky/texture/lensflare%d.dds` | Lens-flare layers | No | Numbered; gated by `lensflare_enable` |
-| `data/sky/texture/rain_drop.dds` | Rain drop splash | No | Weather only |
-| `data/sky/texture/rains.dds` | Rain streak | No | Weather only |
+| `data/sky/texture/rain_drop.dds` | Rain drop splash | No | Weather only; rain built procedurally at runtime (§8) |
+| `data/sky/texture/rains.dds` | Rain streak | No | Weather only; rain built procedurally at runtime (§8) |
 | `data/sky/texture/snow.dds` | Snow particle | No | Weather only |
 
 Note: `.box` skybox mesh files (`data/sky/dat/sky%d.box`) are **not** present in the VFS.
@@ -728,23 +788,27 @@ and therefore has no water texture assets (§1.4).
    renders is a free engineering choice, not a reproduced asset value.
 2. **`fog%d.bin` data_load_flag = 0 code path:** RESOLVED — when the flag is 0 the colour table is
    synthesised from the sky LUT via a per-slot 0.75/0.25 blend (§2.4); the exact source-band channel
-   grouping in that blend is MED.
+   grouping in that blend is MED. When the flag is non-zero the table is read verbatim (an all-zero
+   table renders literal black — synthesis is the `flag==0` branch only).
 3. **`light%d.bin` gaps at 0x0900 and 0x1230:** All-zero in samples; may be wrap-around
    interpolation slots or alignment padding.
 4. **`light%d.bin` sections D and E:** Section D (secondary fog scalar) contains near-zero
    values; its exact influence on the rendered haze intensity is not quantified. Section E is
-   all-zero.
+   all-zero. (Section A/B's third colour group `color_C` is present-but-unread — §9.2 — and is not
+   an unknown but a resolved no-op.)
 5. **`cloud_cycle%d.bin` cloud ID 101:** No matching texture found. Likely a "no cloud" sentinel
    but unconfirmed.
-6. **`weather%d.bin` and `weather%d_rain.bin` full layout:** Zero-dominated samples; needs a
-   rain/snow area sample for decode.
+6. **`weather%d.bin` full layout:** Zero-dominated samples; needs a rain/snow area sample for
+   decode. (`weather%d_rain.bin` is NOT in this category — it has no loader and is dead editor data,
+   §8.)
 7. **`wind%d.bin` keyframe field layout:** Documented in `terrain_layers.md §8`; no non-zero
    samples available.
 8. **`point_light%d.bin` record position fields (+0x24–+0x30):** Documented in
    `terrain_layers.md §7`; positional interpretation (scaled coordinates vs. normalised index)
    unverified.
 9. **Indoor area lighting path:** When `indoor_flag = 1`, the exact ambient-only lighting
-   configuration has not been fully traced in the binary.
+   configuration has not been fully traced in the binary. One indoor area's sky-init fog-absent
+   bypass is DBG-pending (§1.5, §10.7).
 10. **`material%d.bin` unassigned indices [8..11], [25..28], [33], [37], [41..50]:** Loaded but
     usage not traced.
 11. **Lighting apply-path numeric defaults:** RESOLVED — the ambient gate `K_ambient` is CONFIRMED
@@ -771,3 +835,17 @@ and therefore has no water texture assets (§1.4).
   Conversion of colours to engine types is `Assets.Mapping`'s responsibility — and the colour-domain
   table (§10.1) is exactly what `Assets.Mapping` must honour (byte tables `/255`, float light colours
   pass-through).
+
+---
+
+## Provenance note (this revision)
+
+CAMPAIGN VFS-MASTERY — Phase P promotion (two-witness gate: loader read-sequence + black-box
+behaviour). Surgical deltas applied this revision: (1) `light%d.bin` `color_C` (+0x20) marked
+present-but-unread / LOADER-RESOLVED (§9.2); (2) `fog%d.bin` `data_load_flag` clarified — synthesis
+is the `flag==0` branch only, `flag==1` + all-zero colour renders literal black, refuting "synthesise
+when flag==1" (§2.4); (3) `weather%d_rain.bin` — NO LOADER, rain built from constants + RNG, the 33
+files are dead editor data, do not parse (§8); (4) stardome tint is PER-STAR (consumer advances 4
+bytes BGRA per star), CONFIRMED, refuting the "uniform per keyframe" reading (§4.3); (5) environment
+hub default-tolerates absent siblings (skip-and-default), with the single indoor-area sky-init bypass
+marked DBG-pending (Overview, §1.5, §10.7). No addresses, no pseudo-code.

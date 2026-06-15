@@ -310,98 +310,103 @@ public sealed class VfsDeepIISpecCorrectionTests
     }
 
     // =========================================================================
-    // 3. SoundTable: 52-byte stride record parse (stride correction)
+    // 3. SoundTable: stride-48 record parse (two-witness correction, 2026-06-15)
     // =========================================================================
-    // spec: Docs/RE/formats/sound_tables.md -- stride 52 bytes (corrected from 48).
+    // CORRECTION: stride is 48 bytes (CONFIRMED two-witness), NOT 52.
+    // The loader advances 0x30 bytes per record, reads 256 × 48 = 12288 bytes, and leaves a
+    // 1024-byte unread trailer at the end of the 13312-byte file.
+    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — "stride 48 bytes": CONFIRMED (two-witness).
+    // Field at +0x24 (4 bytes) is NOT read by the loader on any path — labeled Unlabeled24.
+    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — "unlabeled_24 @ +0x24: NOT-READ by loader".
 
     /// <summary>
-    /// Builds a sound table fixture: exactly 256 x 52 = 13312 bytes.
-    /// spec: Docs/RE/formats/sound_tables.md §File layout -- "256 records x 52 = 13312 bytes": SAMPLE-VERIFIED.
+    /// Builds a sound table fixture: exactly 13312 bytes (256 × 48 read + 1024 unread trailer).
+    /// spec: Docs/RE/formats/sound_tables.md §File layout — "fixed 13312 bytes (0x3400)": CONFIRMED.
     /// </summary>
     private static byte[] BuildSoundTable(
         uint soundEntryId = 101u,
         float weight = 1.0f,
-        float posX = 500.0f, float posY = 10.5f, float posZ = -200.0f,
-        float radius = 128.0f,
-        uint tailUnknown = 0u)
+        float posX = 500.0f, uint unlabeled24 = 0u, float posZ = -200.0f,
+        float radius = 128.0f)
     {
-        // spec: Docs/RE/formats/sound_tables.md -- "FixedFileSize: 256 x 52 = 13312 (0x3400) bytes."
-        const int fixedSize = 13312; // 256 x 52
+        // Fixed file size: 13312 = 256 × 48 + 1024 (unread trailer).
+        // spec: Docs/RE/formats/sound_tables.md §File layout — "13312 bytes (0x3400)": CONFIRMED.
+        const int fixedSize = 13312;
         byte[] buf = new byte[fixedSize];
 
         // Record 0 is written with supplied values; remaining 255 records are all-zero.
 
         // sound_entry_id u32LE @ +0x00.
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout -- sound_entry_id u32 @+0x00.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — sound_entry_id u32 @+0x00: CONFIRMED.
         WriteU32LE(buf, 0x00, soundEntryId);
 
-        // hour_schedule u8[24] @ +0x04 -- left zero (all hours inactive).
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout -- hour_schedule u8[24] @+0x04.
+        // hour_schedule u8[24] @ +0x04 — left zero (all hours inactive).
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — hour_schedule u8[24] @+0x04: CONFIRMED.
 
         // weight f32 @ +0x1C.
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout -- weight f32 @+0x1C.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — weight f32 @+0x1C: SAMPLE-VERIFIED.
         WriteF32LE(buf, 0x1C, weight);
 
         // pos_x f32 @ +0x20.
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout -- pos_x f32 @+0x20.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — pos_x f32 @+0x20: CONFIRMED.
         WriteF32LE(buf, 0x20, posX);
 
-        // pos_y f32 @ +0x24. CORRECTION: was mislabeled unknown_36.
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout -- pos_y f32 @+0x24: SAMPLE-VERIFIED.
-        WriteF32LE(buf, 0x24, posY);
+        // unlabeled_24 u32 @ +0x24 — NOT read by the loader; carried verbatim.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — unlabeled_24 @ +0x24: NOT-READ.
+        WriteU32LE(buf, 0x24, unlabeled24);
 
         // pos_z f32 @ +0x28.
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout -- pos_z f32 @+0x28.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — pos_z f32 @+0x28: CONFIRMED.
         WriteF32LE(buf, 0x28, posZ);
 
-        // radius f32 @ +0x2C. CORRECTION: was mislabeled volume_factor.
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout -- radius f32 @+0x2C: SAMPLE-VERIFIED.
+        // radius f32 @ +0x2C.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — radius f32 @+0x2C: SAMPLE-VERIFIED.
         WriteF32LE(buf, 0x2C, radius);
 
-        // tail_unknown u32 @ +0x30. NEW: 4-byte field completing the 52-byte stride.
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout -- tail_unknown u32 @+0x30: SAMPLE-VERIFIED.
-        WriteU32LE(buf, 0x30, tailUnknown);
+        // Bytes 0x30..end of record = part of 48-byte stride (already zero; record ends at 0x30).
+        // The 1024-byte unread trailer (bytes 0x3000..0x33FF) is all-zero.
 
         return buf;
     }
 
     [Fact]
-    public void SoundTable_Stride52_FixedFileSize13312()
+    public void SoundTable_Stride48_FixedFileSize13312()
     {
-        // Regression: stride must be 52 (not 48); 256 records x 52 = 13312.
-        // spec: Docs/RE/formats/sound_tables.md -- stride 52: SAMPLE-VERIFIED.
-        Assert.Equal(0, 13312 % 52);
-        Assert.Equal(256, 13312 / 52);
+        // Stride is 48 bytes (CONFIRMED two-witness). 256 × 48 = 12288 bytes read; 1024 trailer = 13312 total.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — "stride 48 bytes": CONFIRMED (two-witness, 2026-06-15).
         Assert.Equal(13312, SoundTableData.FixedFileSize);
-        Assert.Equal(52, SoundTableData.EntryStride);
+        Assert.Equal(48, SoundTableData.EntryStride);
         Assert.Equal(256, SoundTableData.EntryCount);
+        Assert.Equal(12288, SoundTableData.ReadSize);     // 256 × 48
+        Assert.Equal(1024, SoundTableData.TrailerSize);   // 13312 − 12288
     }
 
     [Fact]
-    public void SoundTable_Record0_PosY_Radius_TailUnknown_Decoded()
+    public void SoundTable_Record0_Unlabeled24_Radius_Decoded()
     {
-        // Regression: pos_y (@0x24, formerly unknown_36) and radius (@0x2C, formerly volume_factor)
+        // Regression: unlabeled_24 (@0x24, formerly pos_y — WITHDRAWN) and radius (@0x2C)
         // must decode to the correct typed fields.
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout -- pos_y @+0x24, radius @+0x2C: SAMPLE-VERIFIED.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — "unlabeled_24 @ +0x24: NOT-READ (WITHDRAWN from pos_y)".
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — "radius f32 @ +0x2C": SAMPLE-VERIFIED.
         byte[] buf = BuildSoundTable(
             soundEntryId: 55u,
             weight: 2.5f,
-            posX: 1024.0f, posY: 33.75f, posZ: -512.0f,
-            radius: 256.0f,
-            tailUnknown: 0xDEADBEEFu);
+            posX: 1024.0f, unlabeled24: 0xABABABABu, posZ: -512.0f,
+            radius: 256.0f);
 
-        // Use SoundTableExtension.Bgm as a representative extension for this structural test.
-        // spec: Docs/RE/formats/sound_tables.md -- all five variants share the same binary layout.
+        // All five table variants share the same binary layout.
+        // spec: Docs/RE/formats/sound_tables.md — all five variants share the same binary layout.
         SoundTableData table = SoundTableParser.Parse(new ReadOnlyMemory<byte>(buf), SoundTableExtension.Bgm);
 
         SoundTableEntry e = table.Entries[0];
         Assert.Equal(55u, e.SoundEntryId);
         Assert.Equal(2.5f, e.Weight);
         Assert.Equal(1024.0f, e.PosX);
-        Assert.Equal(33.75f, e.PosY, precision: 4); // VFS-DEEP-II correction: was unknown_36
+        // Unlabeled24 is NOT read by the loader but the parser surfaces it verbatim.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — unlabeled_24 @ +0x24: NOT-READ.
+        Assert.Equal(0xABABABABu, e.Unlabeled24);
         Assert.Equal(-512.0f, e.PosZ);
-        Assert.Equal(256.0f, e.Radius, precision: 4); // VFS-DEEP-II correction: was volume_factor
-        Assert.Equal(0xDEADBEEFu, e.TailUnknown); // VFS-DEEP-II new field
+        Assert.Equal(256.0f, e.Radius, precision: 4);
     }
 
     [Fact]

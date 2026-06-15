@@ -21,11 +21,14 @@ namespace MartialHeroes.Assets.Parsers;
 ///   +0x00            u32le  width      (columns, cells along X)
 ///   +0x04            u32le  height     (rows, cells along Z)
 ///   +0x08            u8[]   cells      (width × height bytes; row-major region IDs 0..31)
-///   +0x08 + W×H      u32le  originX    (world-space X origin)
-///   +0x08 + W×H + 4  u32le  originZ    (world-space Z origin)
+///   +0x08 + W×H      i32le  originX    (world-space X origin, SIGNED)
+///   +0x08 + W×H + 4  i32le  originZ    (world-space Z origin, SIGNED)
 ///   Total size = 16 + width × height bytes
 /// </code>
+/// Origins are signed so maps with negative world extents (origin at negative coordinates)
+/// decode correctly.
 /// spec: Docs/RE/formats/region_grid.md §Layout A — region&lt;NNN&gt;.bin (RUNTIME): HIGH (parser).
+/// spec: Docs/RE/formats/region_grid.md §Layout A — "originX i32 signed / originZ i32 signed": CONFIRMED.
 /// </para>
 /// <para>ZERO rendering/engine dependencies.</para>
 /// </remarks>
@@ -35,17 +38,20 @@ public static class RegionBinParser
     // spec: Docs/RE/formats/region_grid.md §Size derivation — "total = 16 + width × height".
     private const int MinFileSize = 16;
 
-    // Width field offset.
+    // Width field offset — u32le.
     // spec: Docs/RE/formats/region_grid.md §Layout A — "width u32le @ 0x00": HIGH.
     private const int WidthOffset = 0x00;
 
-    // Height field offset.
+    // Height field offset — u32le.
     // spec: Docs/RE/formats/region_grid.md §Layout A — "height u32le @ 0x04": HIGH.
     private const int HeightOffset = 0x04;
 
     // Cell buffer starts immediately after the two u32 dimension fields.
     // spec: Docs/RE/formats/region_grid.md §Layout A — "regionIdGrid u8[] @ 0x08": HIGH.
     private const int CellsOffset = 0x08;
+
+    // Origins are i32le (signed) — trailing after the cell buffer.
+    // spec: Docs/RE/formats/region_grid.md §Layout A — "originX i32 signed / originZ i32 signed": CONFIRMED.
 
     /// <summary>
     /// Parses the raw bytes of a <c>region&lt;NNN&gt;.bin</c> file into a <see cref="RegionGrid"/>.
@@ -101,21 +107,21 @@ public static class RegionBinParser
 
         int originXOffset = CellsOffset + (int)cellCount;
 
-        // originX u32le trailing after the cell buffer.
-        // spec: Docs/RE/formats/region_grid.md §Layout A — "originX u32le @ 0x08 + W×H": HIGH.
-        uint originX = BinaryPrimitives.ReadUInt32LittleEndian(span[originXOffset..]);
+        // originX i32le (signed) trailing after the cell buffer.
+        // spec: Docs/RE/formats/region_grid.md §Layout A — "originX i32 signed @ 0x08 + W×H": CONFIRMED.
+        int originX = BinaryPrimitives.ReadInt32LittleEndian(span[originXOffset..]);
 
-        // originZ u32le trailing 4 bytes after originX.
-        // spec: Docs/RE/formats/region_grid.md §Layout A — "originZ u32le @ 0x08 + W×H + 4": HIGH.
-        uint originZ = BinaryPrimitives.ReadUInt32LittleEndian(span[(originXOffset + 4)..]);
+        // originZ i32le (signed) trailing 4 bytes after originX.
+        // spec: Docs/RE/formats/region_grid.md §Layout A — "originZ i32 signed @ 0x08 + W×H + 4": CONFIRMED.
+        int originZ = BinaryPrimitives.ReadInt32LittleEndian(span[(originXOffset + 4)..]);
 
         return new RegionGrid
         {
             Width = (int)rawWidth,
             Height = (int)rawHeight,
             Cells = cells,
-            OriginX = (int)originX,
-            OriginZ = (int)originZ,
+            OriginX = originX,
+            OriginZ = originZ,
         };
     }
 }

@@ -28,6 +28,18 @@ shipped runtime **never parses** are now explicitly documented and require **no 
 scalars at +032..+047 are **re-labelled**: they are a dead 2D edge-line cache, **not** a plane
 equation (§11.3, correction below). Confidence markers preserved per source.
 
+**Recently promoted (2026-06-15, CAMPAIGN VFS-MASTERY — two-witness gate: loader + black-box).**
+Four `.ted`/`.sod` verdicts settled against two independent witnesses (the legacy loader read-path
+and a black-box census of the real VFS samples): (1) the `.ted` blob is **five fixed block reads
+summing 46 987 bytes with no header** — CONFIRMED across all instances (§5.1, §5.3); (2) the block-3
+TextureIndexGrid `idx − 1` decrement is **real and loader-resolved** (the resolved list base is
+one-decremented) — upgraded to CONFIRMED, residual closed (§5.6); (3) a block-3 byte value below 1
+is **clamped up to 1** (renders slot 1) — the prior "0 = no-texture sentinel" reading is **REFUTED**;
+there is no sentinel branch (§5.6, §5.9, §14); (4) the `.sod` `QuadRecord` `edge_pad0` lane at +036
+is **opaque ignored padding** — no routine reads offset +036, and the ~14.6 % non-zero fraction in
+the wider VFS census is **dead authoring residue**, loader-resolved (§11.3, §14). Confidence markers
+updated per finding below.
+
 ---
 
 ## Overview
@@ -335,7 +347,10 @@ The `.ted` blob is the binary payload referenced by `DATAFILE` inside a `TERRAIN
 `EXTRA_TERRAIN`, or `UP_TERRAIN` section. It has **no file header**: offset 0 of the file is
 always the first height value of the heightmap. This is CONFIRMED — the loader issues its first
 read at file offset 0 with no preceding header read, and all three sample files begin with valid
-IEEE 754 height values at byte 0.
+IEEE 754 height values at byte 0. The loader consumes the file as **exactly five fixed-size block
+reads with no header, no version prefix, and no inter-block padding** (§5.3); the five block sizes
+sum to a constant 46 987 bytes — CONFIRMED across every observed instance (two-witness:
+loader read-path + black-box VFS census).
 
 An editor-only sidecar named `*.ted.post` shares this exact layout but is never read by the
 runtime — see §5.10.
@@ -347,7 +362,7 @@ runtime — see §5.10.
 | Vertex grid       | 65 × 65 vertices          | CONFIRMED  |
 | Quad grid         | 64 × 64 quads per cell    | CONFIRMED  |
 | Vertex spacing    | 16.0 world units          | CONFIRMED (derived: 1024 / 64 = 16; literal constant in loader) |
-| Total file size   | 46 987 bytes (0xB78B)     | CONFIRMED (three samples, all identical size; sum of the five block sizes) |
+| Total file size   | 46 987 bytes (0xB78B)     | CONFIRMED (five fixed block reads summing to 46 987 B, no header; all instances identical size — two-witness: loader + black-box) |
 
 ### 5.2 Axis orientation — `heights[row * 65 + col]`, X = column
 
@@ -386,7 +401,9 @@ same row-major, Z-as-row, X-as-column convention -- the loader addresses every b
 ### 5.3 Sequential block layout
 
 The file is read as five contiguous fixed-size blocks with no padding or alignment between them.
-Client error strings name four of the five blocks directly.
+The reader issues **five fixed block reads and nothing else** — no header, no count fields, no
+inter-block seek — so the five sizes below sum to the constant 46 987-byte file. Client error
+strings name four of the five blocks directly.
 
 | Block | Byte offset | Size (bytes) | Hex size | Client name / evidence         | Element type | Elements    | Confidence |
 |------:|------------:|-------------:|----------|--------------------------------|--------------|-------------|------------|
@@ -396,8 +413,9 @@ Client error strings name four of the five blocks directly.
 | 4     | 29 831      | 256          | 0x100    | `direction_map` (error string) | u8           | 256         | CONFIRMED |
 | 5     | 30 087      | 16 900       | 0x4204   | `diffuse_map` (error string)   | u8 × 4      | 65 × 65 = 4 225 | CONFIRMED |
 
-Block 5 offset 30 087 is independently confirmed by the editor writer, which seeks explicitly
-to that offset before patching the diffuse block.
+Sum check: `16900 + 12675 + 256 + 256 + 16900 = 46987` bytes — equals the fixed file size with zero
+remainder (CONFIRMED). Block 5 offset 30 087 is independently confirmed by the editor writer, which
+seeks explicitly to that offset before patching the diffuse block.
 
 ### 5.4 Block 1 — Heightmap
 
@@ -439,25 +457,26 @@ to that offset before patching the diffuse block.
 
   CONFIRMED: the loader stashes each registered texture into the section's per-cell array as the
   `.map` is parsed (one entry appended per `TEXTURES{}` line, in file order, starting at slot 0),
-  and stores this block-3 byte RAW (no decrement, no zero-check) alongside each tile for later
-  lookup against that array. The two-hop resolution (per-cell list, then global pool) is confirmed;
-  the per-cell list caps at 128 entries. Sample `d036` exercises values 1..11 across distinct
-  texture zones; `d000` uses only value 1.
-- **The decrement is `[byte - 1]` (idx-1), HIGH confidence.** The on-disk block-3 byte is **1-based**
-  (never 0 in any sample, max observed 11) while the per-cell texture list is **0-based,
-  registration-order** (first registered texture at slot 0). The only consistent mapping of a
-  1-based selector onto a 0-based list is `per_cell_texture_list[byte - 1]`. This is the same
-  machinery as the already-CONFIRMED BUILDING object path (`BUILDING TEXTURES[tex_id - 1]`, §4.2):
-  the building `tex_id` is likewise a 1-based index into its own per-section registration-order
-  list, so the identical `- 1` applies to the terrain tile path. Confidence: HIGH (structurally
-  forced by the 1-based-byte / 0-based-list mismatch and the BUILDING analog). **Residual:** the
-  literal decrement was not pinned to a single instruction, because the runtime draw resolves each
-  patch to a texture-node pointer at cell-attach time (it does not re-subscript the per-cell list
-  per frame); the mapping is structurally certain but the instruction-exact decrement site is the
-  one thin residual (a debugger pass would make it instruction-exact). Use `texlist[byte - 1]`.
-- **Value 0:** no sample tile carries value 0. A 0 byte cannot be a valid 1-based index and is the
-  **no-texture / fallback sentinel**; this fallback meaning is PARTIAL (inferred, not yet seen in a
-  sample).
+  and stores this block-3 byte alongside each tile for later lookup against that array. The two-hop
+  resolution (per-cell list, then global pool) is confirmed; the per-cell list caps at 128 entries.
+  Sample `d036` exercises values 1..11 across distinct texture zones; `d000` uses only value 1.
+- **The decrement is `[byte - 1]` (idx-1), CONFIRMED (loader-resolved).** The on-disk block-3 byte
+  is **1-based** (never 0 in any sample, max observed 11) while the per-cell texture list is
+  **0-based, registration-order** (first registered texture at slot 0). The loader resolves each
+  patch byte against the per-cell list with the list base already decremented by one, so the on-disk
+  1-based selector lands on `per_cell_texture_list[byte - 1]`. This matches the already-CONFIRMED
+  BUILDING object path (`BUILDING TEXTURES[tex_id - 1]`, §4.2): the building `tex_id` is likewise a
+  1-based index into its own per-section registration-order list, so the identical `- 1` applies to
+  the terrain tile path. The earlier "thin residual" (decrement not pinned to a single read) is now
+  closed: the decrement is real and the resolved-list base is one-decremented. Use `texlist[byte - 1]`.
+  Confidence: CONFIRMED (loader-resolved).
+- **Value 0 — clamp-to-1, NOT a sentinel (REFUTED).** No sample tile carries value 0, but a 0 (or
+  any value below 1) is **clamped up to 1 by the loader** (`if byte < 1: byte = 1`) and therefore
+  renders texture slot 1 — it does **not** select a no-texture / fallback path. The earlier reading
+  that "0 = a no-texture / fallback sentinel" is **REFUTED**: there is no sentinel branch; an
+  out-of-range low byte is silently floored to the first texture. A faithful parser must reproduce
+  this clamp — treat any byte `< 1` as 1 before applying the `- 1` decrement, so a 0 byte resolves to
+  `texlist[0]` (the first registered texture). Confidence: CONFIRMED (loader-resolved).
 
 ### 5.7 Block 4 — Quad split / UV orientation flags
 
@@ -511,8 +530,9 @@ to that offset before patching the diffuse block.
 ### 5.9 Known unknowns
 
 - Block 3 reference target: RESOLVED — the 1-based byte indexes the per-cell `TEXTURES{}` list,
-  which itself indexes the global `bgtexture.lst` pool (§5.6). Open (PARTIAL): the fallback meaning
-  of a value-0 byte, never seen in a sample.
+  which itself indexes the global `bgtexture.lst` pool (§5.6). The `idx − 1` decrement is CONFIRMED
+  (loader-resolved). Value-0 handling is RESOLVED: a byte below 1 is **clamped to 1** (renders slot
+  1); it is NOT a no-texture sentinel (that reading is REFUTED). No outstanding sub-question.
 - Block 4 flag mapping: RESOLVED for texture orientation — bit `0x01` mirrors S (U), bit `0x02`
   mirrors T (V) (§5.7). Open (PARTIAL): whether a flip combination also re-selects the quad
   triangulation diagonal rather than only re-orienting the texture.
@@ -891,6 +911,13 @@ exactly.
 > at most a 2-value pair). They are a **dead 2D edge-line cache** (a slope-like coefficient and an
 > intercept-like term for one quad edge), authored at build time and **never read at runtime**. The
 > fields are re-labelled `edge_slope / edge_pad0 / edge_intercept / edge_pad1` below.
+>
+> **Correction (2026-06-15, CAMPAIGN VFS-MASTERY):** the `edge_pad0` lane at +036 is confirmed
+> **opaque ignored padding** — no runtime routine sub-reads offset +036, and across the wider VFS
+> census this lane is non-zero in a small fraction (~14.6 %) of quads, i.e. dead authoring residue
+> rather than a clean zero lane. CONFIRMED (loader-resolved). A faithful parser keeps it as an
+> opaque, ignored field (allocate the stride; never read or depend on the value). The same opaque
+> treatment applies to `edge_pad1` at +044.
 
 Each record stores one 2D collision quad in the XZ world-space plane as four corner points,
 followed by four unused authoring scalars. There is no Y (height) component — collision is
@@ -908,24 +935,28 @@ the four corner points (ray-parity point-in-polygon); the trailing scalars are d
 | +024   | 4    | f32le | `x3`             | Corner 3 world X                                                                | VERIFIED   |
 | +028   | 4    | f32le | `z3`             | Corner 3 world Z                                                                | VERIFIED   |
 | +032   | 4    | f32le | `edge_slope`     | Dead authoring residue: slope-like coefficient of a precomputed 2D edge line. NOT a plane coefficient. Never read by any runtime routine; a parser should skip it | VERIFIED (not read) / MODERATE (slope reading) |
-| +036   | 4    | f32le | `edge_pad0`      | Always `0.0` in every sampled quad; unused lane                                 | VERIFIED   |
+| +036   | 4    | f32le | `edge_pad0`      | Opaque ignored padding. No runtime routine sub-reads offset +036; non-zero in a minority (~14.6 %) of quads across the VFS census = dead authoring residue, not a clean lane. Allocate the stride; never read it | CONFIRMED (loader-resolved — not read) |
 | +040   | 4    | f32le | `edge_intercept` | Dead authoring residue: intercept-like term of the same 2D edge line. NOT a plane-distance term. Never read by any runtime routine; a parser should skip it | VERIFIED (not read) / MODERATE (intercept reading) |
-| +044   | 4    | f32le | `edge_pad1`      | Always `0.0` in every sampled quad; unused lane                                 | VERIFIED   |
+| +044   | 4    | f32le | `edge_pad1`      | Opaque ignored padding, same class as `edge_pad0`; never read at runtime. Allocate the stride; never read it | CONFIRMED (loader-resolved — not read) |
 
 **Corner verification:** the four XZ corners of each sampled quad form a geometrically valid
 rectangle whose min/max X and Z equal the owning `SolidRecord` AABB to within float rounding. This
 was confirmed for all four quads of the 4-quad sample cell and all three quads of the 3-quad sample
 cell — the corners are unambiguously world-space XZ positions, not line-equation parameters.
 
-**Trailing scalars (+032..+047) — dead edge-line cache:** the alternating `nonzero, 0, nonzero, 0`
-layout is a precomputed 2D edge line (a `z = m·x + c`-style parameterisation of one quad edge),
-left over from the authoring/export step. **No runtime collision or quadtree routine reads any of
-these four scalars** — the maximum offset any of them touches inside a QuadRecord is +028 (the last
-corner). A plane-equation interpretation would require a signed-distance read of this region, and
-no such read exists. The values are also far outside unit-normal range, ruling out a packed normal.
-Treat +032..+047 as **disregarded authoring residue**: a parser allocates the 48-byte stride but
-ignores these four floats. Confidence: HIGH that it is not a plane equation; MODERATE on the exact
-slope/intercept reading (the value shape fits; no runtime read ties it down).
+**Trailing scalars (+032..+047) — dead edge-line cache:** the layout is a precomputed 2D edge line
+(a `z = m·x + c`-style parameterisation of one quad edge), left over from the authoring/export step.
+**No runtime collision or quadtree routine reads any of these four scalars** — the maximum offset
+any of them touches inside a QuadRecord is +028 (the last corner); in particular **no routine
+sub-reads offset +036** (`edge_pad0`). A plane-equation interpretation would require a signed-distance
+read of this region, and no such read exists. The values are also far outside unit-normal range,
+ruling out a packed normal. The `edge_pad0`/`edge_pad1` lanes are not guaranteed zero on disk — the
+VFS census shows `edge_pad0` non-zero in ~14.6 % of quads — but the runtime ignores them regardless,
+so they are dead authoring residue. Treat +032..+047 as **disregarded authoring residue**: a parser
+allocates the 48-byte stride but ignores these four floats. Confidence: HIGH that it is not a plane
+equation; the no-read of `edge_pad0`/`edge_pad1` is CONFIRMED (loader-resolved); MODERATE on the
+exact slope/intercept reading of `edge_slope`/`edge_intercept` (the value shape fits; no runtime read
+ties it down).
 
 **Terminology note:** the game code calls these records "triangles" (count field "triCount"). The
 on-disk record is a four-corner XZ quad; this spec uses "quad" to avoid confusion with 3D triangle
@@ -942,9 +973,11 @@ is chosen — is not confirmed.
   skipped by a parser.
 - `QuadRecord` trailing scalars +032..+047 (`edge_slope`/`edge_pad0`/`edge_intercept`/`edge_pad1`):
   RESOLVED that they are a **dead 2D edge-line cache, not a plane equation**, and are never read at
-  runtime (§11.3). Only the exact authoring formula behind the slope/intercept pair (which edge it
-  parameterises, sign convention) remains open — not recoverable from the runtime because the
-  runtime never reads it, and not required to reproduce collision (use the corners).
+  runtime (§11.3). The `edge_pad0` lane at +036 is CONFIRMED opaque ignored padding (no routine
+  sub-reads +036; ~14.6 % non-zero is dead authoring residue, not a clean lane). Only the exact
+  authoring formula behind the slope/intercept pair (which edge it parameterises, sign convention)
+  remains open — not recoverable from the runtime because the runtime never reads it, and not
+  required to reproduce collision (use the corners).
 - `QuadRecord` quad-to-triangle split: whether the runtime tests the four-corner quad directly or
   splits it into two triangles, and which diagonal it picks, is unknown.
 - All available samples have `solidCount = 1`. Behaviour with multiple solids per cell is
@@ -1042,8 +1075,9 @@ The following items remain unverified and represent the highest-risk unknowns fo
    Needs a `.map` file containing an `EXTRA_TERRAIN` section.
 
 2. **`.ted` block 3 reference target:** RESOLVED — the 1-based texture index resolves first into
-   the per-cell `TEXTURES{}` list, then into the global `bgtexture.lst` pool (§5.6). Remaining
-   sub-question (PARTIAL): the fallback meaning of a value-0 byte, never seen in a sample.
+   the per-cell `TEXTURES{}` list (`idx − 1`, CONFIRMED / loader-resolved), then into the global
+   `bgtexture.lst` pool (§5.6). Value-0 handling RESOLVED: a byte below 1 is **clamped to 1**
+   (renders slot 1); the prior "0 = no-texture sentinel" reading is REFUTED. No open sub-question.
 
 3. **`.ted` block 4 bit-to-geometry mapping:** RESOLVED for texture orientation — bit `0x01`
    mirrors S (U), bit `0x02` mirrors T (V) (§5.7). Remaining sub-question (PARTIAL): whether a flip
@@ -1062,9 +1096,11 @@ The following items remain unverified and represent the highest-risk unknowns fo
    become apparent in files with `solidCount > 1`.
 
 8. **`.sod` `QuadRecord` trailing scalars (+032..+047):** RESOLVED — they are a **dead 2D edge-line
-   cache, not a plane equation**, and are never read at runtime (§11.3). Collision is reproduced
-   from the four explicit corners; the exact authoring formula behind the slope/intercept pair is
-   out of scope (the original editor is not in the binary).
+   cache, not a plane equation**, and are never read at runtime (§11.3). The `edge_pad0` lane at
+   +036 is CONFIRMED opaque ignored padding (no routine sub-reads +036; the ~14.6 % non-zero is
+   dead authoring residue). Collision is reproduced from the four explicit corners; the exact
+   authoring formula behind the slope/intercept pair is out of scope (the original editor is not in
+   the binary).
 
 9. **`.gad` format:** Loader is a no-op stub; purpose and format entirely unknown.
 
@@ -1081,7 +1117,10 @@ The following items remain unverified and represent the highest-risk unknowns fo
   `Docs/RE/formats/terrain_layers.md` (per-cell overlay/lighting sidecars: `.fx<N>`, `.up`, `.exd`,
   `.sod.pre`, `.ted.post`, plus the `.fx<N>.pre` note)
 - **Glossary:** `Docs/RE/names.yaml`
-- **Provenance:** `Docs/RE/journal.md`
+- **Provenance:** `Docs/RE/journal.md`. The 2026-06-15 `.ted`/`.sod` verdicts (five-block sum,
+  `idx − 1` decrement, value-0 clamp-to-1, `.sod` `edge_pad0` opaque padding) were settled under
+  **CAMPAIGN VFS-MASTERY** by a **two-witness gate** (legacy loader read-path + black-box VFS
+  census); the prior "0 = no-texture sentinel" reading is REFUTED.
 
 ---
 

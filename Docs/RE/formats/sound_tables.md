@@ -6,7 +6,9 @@
 > status: sample_verified
 > sample_verified: true  (file size, entry count, stride, entry field layout, and audio container
 >                         formats all confirmed against real sample files — 2026-06-11;
->                         on-disk 52-byte stride harness-confirmed across 300 tables — 2026-06-14)
+>                         on-disk 48-byte record stride two-witness-confirmed — 2026-06-15:
+>                         the loader advances 48 bytes per record across 256 records and reads
+>                         exactly 12288 bytes, leaving a 1024-byte unread trailer.)
 
 ---
 
@@ -17,7 +19,7 @@ only by VFS directory path:
 
 | Path pattern | File type |
 |---|---|
-| `data/map*/soundtable*.eff` | Per-map sound trigger schedule table (256 records × 52 B on disk, same layout as .wlk/.run/.bgm/.bge) |
+| `data/map*/soundtable*.eff` | Per-map sound trigger schedule table (256 records × 48 B read by the loader, then a 1024-byte unread trailer; same layout as .wlk/.run/.bgm/.bge) |
 | `data/effect/obj/*.eff` | 3D triangle mesh collision / area shape (variable length, starts with a u32 triangle count) |
 
 An engineer must never assume a `.eff` file is a sound table without first confirming the
@@ -44,7 +46,8 @@ third format and is unrelated to either `.eff` variant above.
   well-formed file is the low byte of the `sound_entry_id` u32 at record index 0
 - **Endianness:** little-endian (confirmed: f32 1.0 stored as `00 00 80 3F`)
 - **File size:** fixed 13312 bytes (0x3400) — confirmed across 12 runtime samples (2026-06-11)
-  and re-confirmed across all ~300 tables by VFS census (2026-06-14)
+  and re-confirmed across all ~300 tables by VFS census (2026-06-14). Of this, the loader reads
+  only the first 12288 bytes (0x3000); see File layout.
 
 ---
 
@@ -70,35 +73,31 @@ bytes are the leading hypothesis — see the cross-reference to `mud.md`.
 
 ## File layout
 
-### Overall structure — on-disk stride reconciliation
+### Overall structure — loader stride reconciliation (two-witness)
 
-A 2026-06-14 black-box VFS census (no decompiler) measured the on-disk record stride directly
-across all ~300 tables and found it to be **52 bytes**, giving exactly **256 records** with no
-trailing region: 256 × 52 = 13312 = the fixed file size, with zero remainder.
+A 2026-06-15 two-witness reconciliation (a static loader reading plus an independent black-box
+file measurement) settled the record stride. The loader advances **48 bytes (0x30)** per record
+and iterates over **256 records**, reading exactly **12288 bytes (0x3000 = 256 × 48)** from the
+start of the file. The remaining **1024 bytes** of the fixed 13312-byte file form a trailer that
+the loader never reads.
 
-This **corrects** the earlier (2026-06-11) interpretation, which split the 13312-byte file into a
-256 × 48 = 12288-byte record table plus a trailing 1024-byte "editor metadata" region. Both
-interpretations reconcile to the same total file size, and both agree on the field layout of the
-first 0x2C bytes of every record (see the per-record table below); they differ only in whether the
-final bytes of each slot are a 4-byte per-record tail (stride 52) or are pooled into one trailing
-block (48 + 1024). The directly-measured 52-byte stride is the authoritative on-disk layout for a
-parser. The "48-byte" figure is retained below as a note because it may correspond to the
-*in-memory* record the runtime loader builds after parsing, not the on-disk record.
+This **corrects** an earlier (2026-06-14) on-disk reading that proposed a uniform 52-byte stride
+with no trailer (256 × 52 = 13312). That 52-byte figure is wrong: the loader's per-record advance
+is 48 bytes, not 52, and the final 1024 bytes are a separate unread region rather than a 4-byte
+per-record tail. Both readings reconcile to the same 13312-byte total file size, and both agree on
+the field layout of the first 0x2C bytes of every record (see the per-record table below). The
+48-byte record stride plus the 1024-byte unread trailer is the authoritative layout for a parser.
 
 | Region | Offset | Size (bytes) | Notes |
 |---|---:|---:|---|
-| Record table | 0 (0x0000) | 13312 (0x3400) | 256 records × **52 bytes** on disk (harness-measured) |
+| Record table (read) | 0 (0x0000) | 12288 (0x3000) | 256 records × **48 bytes** — loader reads this region |
+| Unread trailer | 12288 (0x3000) | 1024 (0x0400) | Present in every file; the loader never reads it. Purpose UNRESOLVED. |
 | **Total on disk** | — | **13312 (0x3400)** | Confirmed across 12 runtime samples and ~300 census tables |
 
-- **Record count source:** fixed at **256** — there is no count field; the count is implied by
-  file size / stride (13312 / 52 = 256). — confidence: SAMPLE-VERIFIED
-- **Record stride:** **52 bytes** on disk. — confidence: SAMPLE-VERIFIED (exact division across
-  ~300 tables)
-
-> Historical note (do not implement against this): the 2026-06-11 runtime-access analysis
-> described a 48-byte in-memory record and a separate 1024-byte trailing editor-metadata block.
-> The on-disk parser must use the 52-byte stride. The historical 48 + 1024 split and the
-> editor-metadata observations are preserved at the end of this spec for provenance.
+- **Record count source:** fixed at **256** — there is no count field; the loader iterates 256
+  times. (12288 / 48 = 256, exact.) — confidence: CONFIRMED
+- **Record stride:** **48 bytes**. — confidence: CONFIRMED (two-witness: loader advance + file
+  measurement)
 
 ### Record index 0 — null sentinel
 
@@ -107,47 +106,50 @@ Record index 0 is the null/disabled sentinel — a terrain cell byte value of 0 
 
 ---
 
-## Per-record layout (52 bytes on disk, little-endian throughout)
+## Per-record layout (48 bytes, little-endian throughout)
 
-Confidence levels reflect triangulation of three sources: runtime access-pattern analysis,
-direct observation of 12 runtime samples (2026-06-11), and a 256-record field census of
-`.bgm` / `.bge` / `.eff` tables in area 001 (2026-06-14).
+Confidence levels reflect triangulation of three sources: a static reading of the loader's
+record-advance and field accesses, direct observation of 12 runtime samples (2026-06-11), and a
+256-record field census of `.bgm` / `.bge` / `.eff` tables in area 001 (2026-06-14).
 
-The meaningful fields occupy offsets +0x00 .. +0x2F (48 bytes). The remaining bytes of each
-52-byte slot (+0x30 .. +0x33) were not characterised by either analysis and are listed as a
-known unknown.
+The record is exactly 48 bytes (offsets +0x00 .. +0x2F). There is no per-record tail beyond
++0x2F; the bytes formerly attributed to a per-record tail belong to the file-level 1024-byte
+unread trailer (see File layout).
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | +0x00 | 4 | u32 | `sound_entry_id` | Numeric resource key; 0 = empty/unassigned slot. Active records carry 9-digit decimal values (range ~900000000..999999999; see Sound ID section). | CONFIRMED |
-| +0x04 | 24 | u8[24] | `hour_schedule[24]` | One flag byte per in-game hour. `hour_schedule[h]` non-zero → sound active during hour h. h = game_clock_seconds / 3600 (integer division). All runtime samples have every byte = 0x01 (unconditionally active); the area-001 census sees per-byte 0x00/0x01 patterns that vary by record. The semantics of the varying pattern (hour mask vs. sub-area / weather / time-of-day filter) are UNVERIFIED and a candidate for an IDA cross-check. | CONFIRMED (structure and access pattern); value-pattern semantics UNVERIFIED |
+| +0x04 | 24 | u8[24] | `hour_schedule[24]` | One byte per slot, indexed 0..23. All runtime samples have every byte = 0x01; the area-001 census sees per-byte 0x00/0x01 patterns that vary by record. The gating consumer that reads this mask is a separate function not located statically, so the mask **semantics are DBG-pending** — do NOT assume an hour-of-day meaning until the consumer is confirmed live. | CONFIRMED (structure and presence); mask semantics DBG-pending |
 | +0x1C | 4 | f32 | `weight` | Volume / attenuation / blend scalar. 1.0f (`00 00 80 3F`) for BGM and BGE records. Not accessed in the observed runtime playback path. | SAMPLE-VERIFIED type/value; semantic UNVERIFIED |
 | +0x20 | 4 | f32 | `pos_x` | World-space X of the 3D source. Populated (non-zero) only in `.eff` (3D) records; 0.0 for BGM / BGE. Passed to the DirectSound 3D position as the X argument. | CONFIRMED (runtime semantic); EFF-only population SAMPLE-VERIFIED |
-| +0x24 | 4 | f32 | `pos_y` | World-space Y of the 3D source. Populated only in `.eff` records; in BGM / BGE the corresponding bytes are 0 or an editor-uninitialized fill. (The earlier `unknown_36` label maps to this field; for non-EFF tables the runtime does not use it.) | CONFIRMED for EFF (SAMPLE-VERIFIED area 001); UNRESOLVED for non-EFF |
+| +0x24 | 4 | — | `unlabeled_24` | The loader does NOT read these 4 bytes. The earlier `pos_y` label is incorrect — no read site assigns a meaning to this offset. Left unlabeled; observed values are EFF-record fills in one area but their role is unestablished. | NOT-READ by loader; meaning UNRESOLVED |
 | +0x28 | 4 | f32 | `pos_z` | World-space Z of the 3D source. Populated only in `.eff` records; 0.0 for BGM / BGE. Passed to the DirectSound 3D position as the Z argument. | CONFIRMED (runtime semantic); EFF-only population SAMPLE-VERIFIED |
 | +0x2C | 4 | f32 | `radius` | Audibility radius of the 3D source (formerly labelled `volume_factor`). Populated only in `.eff` records; 0.0 for BGM / BGE. For the BGM playback path the runtime applies a 0.7 volume scaling at a separate stage. | CONFIRMED f32 type; EFF radius role SAMPLE-VERIFIED area 001 |
-| +0x30 | 4 | — | `tail_unknown` | Trailing 4 bytes of the 52-byte slot. Not characterised by either analysis; observed 0 in non-EFF records. Purpose UNRESOLVED. | UNRESOLVED |
 
-**Record stride: 52 bytes on disk. SAMPLE-VERIFIED.** (256 × 52 = 13312 = file size, exact.)
+**Record stride: 48 bytes. CONFIRMED.** (256 × 48 = 12288 = bytes read by the loader; the
+remaining 1024 bytes are the unread file trailer.)
 
-> Field-naming reconciliation: the 2026-06-11 spec named offsets +0x20 / +0x28 / +0x2C as
-> `pos_x` / `pos_z` / `volume_factor` and +0x24 as `unknown_36`. The 2026-06-14 EFF field census
-> resolves the three-axis position plus a radius: +0x20 = X, +0x24 = Y, +0x28 = Z, +0x2C = radius.
-> These are only populated by `.eff` (3D) records; BGM / BGE records leave them zero, which is why
-> +0x24 read as an "unknown" and +0x2C as a "volume_factor" in the all-2D runtime samples.
+> Field-naming reconciliation: an earlier spec named offsets +0x20 / +0x28 / +0x2C as
+> `pos_x` / `pos_z` / `volume_factor` and +0x24 as `unknown_36` (later mislabelled `pos_y`). The
+> 2026-06-14 EFF field census resolved the runtime-read axes as +0x20 = X (read), +0x28 = Z
+> (read), +0x2C = radius (read). The two-witness loader reading confirms +0x24 is NOT read by the
+> loader on any path, so it carries no recovered position meaning — it is left unlabeled. These
+> read fields are only populated by `.eff` (3D) records; BGM / BGE records leave them zero.
 
 ### Byte-level field map (quick reference)
 
 ```
 [+0x00..+0x03]  sound_entry_id   u32 LE    (0 = null/unassigned)
-[+0x04..+0x1B]  hour_schedule    u8 × 24   (per-byte 0x00/0x01 mask; semantics unverified)
+[+0x04..+0x1B]  hour_schedule    u8 × 24   (per-byte 0x00/0x01 mask; consumer not located → semantics DBG-pending)
 [+0x1C..+0x1F]  weight           f32 LE    (1.0f for BGM/BGE; blend/attenuation scalar)
-[+0x20..+0x23]  pos_x            f32 LE    (3D world X; EFF records only, else 0.0)
-[+0x24..+0x27]  pos_y            f32 LE    (3D world Y; EFF records only, else 0.0)
-[+0x28..+0x2B]  pos_z            f32 LE    (3D world Z; EFF records only, else 0.0)
-[+0x2C..+0x2F]  radius           f32 LE    (3D audibility radius; EFF records only, else 0.0)
-[+0x30..+0x33]  tail_unknown     4 bytes   (uncharacterised; observed 0 in non-EFF records)
+[+0x20..+0x23]  pos_x            f32 LE    (3D world X; read; EFF records only, else 0.0)
+[+0x24..+0x27]  unlabeled_24     4 bytes   (NOT read by the loader; meaning unresolved)
+[+0x28..+0x2B]  pos_z            f32 LE    (3D world Z; read; EFF records only, else 0.0)
+[+0x2C..+0x2F]  radius           f32 LE    (3D audibility radius; read; EFF records only, else 0.0)
+--- end of 48-byte record; next record begins at +0x30 ---
 ```
+
+After the 256th record the file carries a 1024-byte trailer the loader never reads (see File layout).
 
 ---
 
@@ -171,7 +173,7 @@ all well under the 256 records per table — SAMPLE-VERIFIED across 1578 `.mud` 
 .mud tile bytes +5, +6, +7 (effId0/1/2 = N)
   └─► data/map<AAA>/soundtable<AAA>.eff  record[N] (0-based), +0x00 sound_entry_id (u32 LE)
         └─► data/sound/3d/{sound_entry_id}.ogg          (EFF = 3D positional)
-              3D source position = record +0x20 (X), +0x24 (Y), +0x28 (Z) as f32
+              3D source position = record +0x20 (X), +0x28 (Z) as f32 (note: +0x24 is NOT read)
               audibility radius  = record +0x2C as f32
 
 .mud tile byte +0  (PLAUSIBLE walk index — UNVERIFIED)
@@ -343,25 +345,26 @@ the `.ogg` container format is identical.
 
 ## Known unknowns
 
-1. **`tail_unknown` at +0x30** — the trailing 4 bytes of the 52-byte on-disk slot were not
-   characterised by either the runtime-access analysis or the field census. Observed 0 in
-   non-EFF records. Purpose UNRESOLVED — candidate for an IDA cross-check.
+1. **1024-byte unread trailer** — the final 1024 bytes (file offset 0x3000 .. 0x33FF) are present
+   in every file but the loader never reads them. Their content/purpose is UNRESOLVED — plausibly
+   editor-side metadata or reserved padding. A faithful parser may skip them.
 
-2. **48 vs 52 stride origin** — the on-disk stride is the harness-measured 52 bytes. Whether the
-   runtime builds a 48-byte in-memory record (the 2026-06-11 figure) by dropping the 4-byte tail
-   is plausible but UNVERIFIED. A parser must use 52 on disk regardless.
+2. **`unlabeled_24` at +0x24** — these 4 bytes are NOT read by the loader on any path. The earlier
+   `pos_y` / `unknown_36` labels are withdrawn; no recovered meaning is assigned. Candidate for an
+   IDA cross-check only if a consumer is ever found.
 
 3. **`weight` at +0x1C semantic** — 1.0f in all BGM / BGE samples; not accessed in the observed
    runtime path. Likely a blend weight, priority, or attenuation scalar. Naming tentative.
 
-4. **`hour_schedule` per-byte mask semantics** — every byte is 0x01 in the runtime samples, but
-   the area-001 census shows per-record 0x00/0x01 patterns that vary by record. Whether this is a
-   time-of-day hour mask, a sub-area enable mask, or a weather filter is UNVERIFIED — IDA
-   cross-check requested.
+4. **`hour_schedule` per-byte mask semantics** — DBG-pending. Every byte is 0x01 in the runtime
+   samples, but the area-001 census shows per-record 0x00/0x01 patterns that vary by record. The
+   gating consumer that reads this mask is a separate function not located statically, so its
+   meaning (time-of-day mask, sub-area enable mask, weather filter, …) stays opaque pending a live
+   debugger confirmation. Do not implement a meaning for it.
 
-5. **EFF 3D position units** — whether `pos_x` / `pos_y` / `pos_z` and `radius` use the same
-   world-space unit scale as the terrain grid is not established; verified populated only in EFF
-   records of one area (001).
+5. **EFF 3D position units** — whether `pos_x` / `pos_z` and `radius` use the same world-space
+   unit scale as the terrain grid is not established; verified populated only in EFF records of one
+   area (001).
 
 6. **`.wlk` / `.run` index source** — the mapping from the `.mud` tile to a `.wlk` / `.run`
    record index is UNVERIFIED. The leading hypothesis is mud byte +0 (walk) and +1 (run); see
@@ -376,24 +379,24 @@ the `.ogg` container format is identical.
    UNVERIFIED.
 
 9. **Per-map .eff soundtable byte-level sample** — RESOLVED (2026-06-14): the area-001 `.eff`
-   table was field-censused (256 records), confirming the 3D position + radius layout.
+   table was field-censused (256 records), confirming the read 3D-position axes plus radius.
 
 10. **`data/effect/obj/tringle.eff` encoding variant** — triangle-strip vs triangle-list index
     scheme is ambiguous from size alone. Requires a trace of the effect-geometry loader.
 
 ---
 
-## Provenance note — 2026-06-11 runtime-access interpretation (preserved for audit)
+## Provenance note — stride correction (preserved for audit)
 
 The original (2026-06-11) interpretation, recovered from runtime access-pattern analysis and 12
 all-2D runtime samples, described the file as a 256 × 48 = 12288-byte record table followed by a
-1024-byte trailing "editor metadata" region (observed values: +0x00 = 0; +0x04 = 0/1/14/50;
-+0x08 = 0/32; remainder 0). The 2026-06-14 black-box census measured a uniform 52-byte on-disk
-stride with no remainder, which is the authoritative on-disk layout. The 48-byte figure most
-plausibly describes the in-memory record the loader builds (see Known unknown #2), and the
-"editor metadata" observations are consistent with the per-record `tail_unknown` bytes
-(+0x30..+0x33) aggregating across records when read as one trailing block. Both are retained here
-so the conflict is auditable; neither contradicts the field layout of the first 0x2C bytes.
+1024-byte trailing region. A later (2026-06-14) black-box file measurement proposed a uniform
+52-byte stride with no trailer (256 × 52 = 13312). The 2026-06-15 two-witness reconciliation — a
+static reading of the loader's per-record advance together with an independent file measurement —
+settled the matter in favour of the original split: the loader advances **48 bytes** per record,
+iterates **256 records**, reads **12288 bytes (0x3000)**, and leaves a **1024-byte trailer
+unread**. The 52-byte reading is therefore withdrawn, and the per-record `tail_unknown` it implied
+does not exist. The first 0x2C bytes of every record are unaffected by the correction.
 
 ---
 
@@ -413,8 +416,9 @@ so the conflict is auditable; neither contradicts the field layout of the first 
 
 - Formats: `soundtable_bgm`, `soundtable_bge`, `soundtable_eff`, `soundtable_wlk`,
   `soundtable_run` (per-area sound index tables)
-- Struct: `SoundTableRecord` (52 bytes): `sound_entry_id` (u32 @+0x00), `hour_schedule` (u8[24]
-  @+0x04), `weight` (f32 @+0x1C), `pos_x`/`pos_y`/`pos_z` (f32 @+0x20/+0x24/+0x28, EFF only),
-  `radius` (f32 @+0x2C, EFF only), `tail_unknown` (4 bytes @+0x30)
+- Struct: `SoundTableRecord` (48 bytes): `sound_entry_id` (u32 @+0x00), `hour_schedule` (u8[24]
+  @+0x04), `weight` (f32 @+0x1C), `pos_x`/`pos_z` (f32 @+0x20/+0x28, EFF only), `radius`
+  (f32 @+0x2C, EFF only), `unlabeled_24` (4 bytes @+0x24, not read by the loader)
 - Constants: `SOUNDTABLE_FILE_SIZE = 13312`, `SOUNDTABLE_RECORD_COUNT = 256`,
-  `SOUNDTABLE_RECORD_STRIDE = 52`
+  `SOUNDTABLE_RECORD_STRIDE = 48`, `SOUNDTABLE_READ_SIZE = 12288`,
+  `SOUNDTABLE_TRAILER_SIZE = 1024`

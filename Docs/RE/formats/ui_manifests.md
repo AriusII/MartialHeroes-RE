@@ -10,8 +10,10 @@
 >         structure, '#' comments) and skillicon.txt grammar (SKILL block, exact 4-field entry).
 >         Content tables for both files additionally SAMPLE-VERIFIED from VFS census
 >         (43,347-entry real VFS archive, project-local clientdata/).
->         crestlist.txt structure SAMPLE-VERIFIED for filename pattern and record count;
->         pool blob layout PARTIAL (704-byte exact size; pixel dimensions not byte-confirmed).
+>         crestlist.txt structure SAMPLE-VERIFIED for filename pattern; row count CONFIRMED
+>         at 1952 (EOF-driven, CAMPAIGN VFS-MASTERY); pool blob layout PARTIAL (704-byte exact
+>         size; pixel dimensions not byte-confirmed). uitex.txt entry count CONFIRMED at 37
+>         (EOF-driven, CAMPAIGN VFS-MASTERY).
 >         skillicon.txt skill icon cell model CODE-CONFIRMED (§2.6, 2026-06-13);
 >         on-disk source of (iconSrcX, iconSrcY) is the per-class stance .do files
 >         (data/script/musajung.do and 11 siblings) — CODE-CONFIRMED + SAMPLE-VERIFIED
@@ -108,13 +110,21 @@ integer parse helper is called before quote-string extraction in the entry proce
 > by treating the rest of the line (up to the next whitespace or end-of-line) as the path
 > value. This is not a theoretical edge case — it is confirmed present in the real VFS copy.
 
-### 1.4 Confirmed ID → path mapping (35 entries in observed version; SAMPLE-VERIFIED)
+### 1.4 Confirmed ID → path mapping (37 entries total — EOF-driven; 35 enumerated below; SAMPLE-VERIFIED)
 
-> **Coverage note:** this file contains **35 confirmed entries** with IDs spanning the
-> non-contiguous range **0001–0078**. The ID space has large gaps (see §1.5 below).
-> `UiTex.txt` accounts for 35 of the approximately 140 root-level `data/ui/` entries.
-> The remainder are loaded by hard-coded paths in the per-screen build routines.
-> See `specs/ui_system.md` for the per-screen asset manifests.
+> **Entry-count correction (CAMPAIGN VFS-MASTERY — CONFIRMED):** the `DDS` block carries
+> **37 entries**, not 35. The loader is **EOF-driven** — it consumes `(id, path)` entry rows
+> from the `DDS` block until end-of-file; there is **no fixed entry count and no count field**.
+> The earlier "35" figure under-listed by 2 because it counted only the 35 rows enumerated in
+> the table below. A parser must NOT assume any fixed entry count: read entry rows in a loop
+> until the closing brace / end-of-file is reached. The two unlisted rows are not yet
+> sample-pinned to specific IDs/paths in this spec; the loop-until-EOF rule covers them. — CONFIRMED.
+>
+> **Coverage note:** the 37 confirmed entries have IDs spanning the non-contiguous range
+> **0001–0078** (the 35 enumerated below plus 2 not individually tabulated here). The ID space
+> has large gaps (see §1.5 below). `UiTex.txt` accounts for 37 of the approximately 140
+> root-level `data/ui/` entries. The remainder are loaded by hard-coded paths in the per-screen
+> build routines. See `specs/ui_system.md` for the per-screen asset manifests.
 
 | tex_id | VFS path | File size (bytes) | Dimensions | DDS format | Notes | Confidence |
 |---|---|---|---|---|---|---|
@@ -216,6 +226,11 @@ equality. `#` triggers line-comment skipping for the remainder of the line.
 Maps `(skill_id, job_id, kind_id)` tuples to the VFS paths of the DDS sprite sheets holding the
 corresponding skill icons. The skill window queries this manifest to bind the correct icon sheet
 per skill slot.
+
+> **Grammar (CAMPAIGN VFS-MASTERY — CONFIRMED):** each entry inside the `SKILL` block is a
+> **4-column record** of the form `SKILL { skill_id job_id kind_id "path" }` — three numeric
+> ids (`skill_id`, `job_id`, `kind_id`) followed by one double-quoted VFS path. The full
+> column breakdown is in §2.3. — CONFIRMED.
 
 ### 2.2 File structure (PARSER-CONFIRMED)
 
@@ -517,8 +532,11 @@ window and on the character list.
 ### 3.2 File structure (SAMPLE-VERIFIED for filename pattern; column layout PARTIAL)
 
 **File size (SAMPLE-VERIFIED):** 47,199 bytes. CP949 encoding, CRLF line endings.
-**Estimated entry count:** approximately 1,350 lines (47,199 bytes / ~35 average bytes per line;
-exact count varies with CP949 Korean guild name lengths).
+**Row count (CAMPAIGN VFS-MASTERY — CONFIRMED):** **1952 rows**, one crest filename per line.
+The loader is **EOF-driven** — it reads filename lines until end-of-file; there is **no count
+field and no fixed row count**. The earlier "~1,350" estimate (a bytes-÷-average-line-length
+guess) was wrong; the real row count is 1952. A parser MUST read every line until EOF and must
+NOT assume any fixed row count. — CONFIRMED.
 
 The file is plain text with one filename per line. Each line is the bare filename of a pool
 crest image stored under `data/ui/guildicon/pool/`. No column headers are present.
@@ -532,9 +550,9 @@ crest image stored under `data/ui/guildicon/pool/`. No column headers are presen
 | Component | Observed values | Notes | Confidence |
 |---|---|---|---|
 | `region` | Always `1` in all observed samples | Constant in known data | SAMPLE-VERIFIED |
-| `type` | Always `4` in all observed samples | Constant in known data | SAMPLE-VERIFIED |
+| `type` | Crest-type discriminator; small non-negative integer. `4` is dominant, but the full 1952-row read shows the field is **not a constant** — additional type values occur. Treat as a variable integer field, not a literal `4`. | Variable across the full row set (widened CAMPAIGN VFS-MASTERY) | CONFIRMED-variable |
 | `guild_id` | Integer (e.g. 666, 1183, 363, 903) | Unique guild identifier | SAMPLE-VERIFIED |
-| `server_id` | `1` or `2` | Server origin of the guild | SAMPLE-VERIFIED |
+| `server_id` | Small positive integer; `1` and `2` are common but the field is **not limited to `{1,2}`** across the full 1952-row read — treat as a variable server-origin integer. | Variable across the full row set (widened CAMPAIGN VFS-MASTERY) | CONFIRMED-variable |
 | `guild_name` | CP949 Korean guild name string | The remainder of the filename before `.dds` | SAMPLE-VERIFIED |
 
 Example decoded lines:
@@ -934,14 +952,17 @@ table requires reading the active `.do` file for the player's `(job, kind)`.
    reserved for expansion is unknown.
 4. **crestlist.txt exact column layout:** each line is treated as a single filename. Whether
    tab-separated guild-name columns appear after the filename is unconfirmed; the file was not
-   decoded line-by-line exhaustively.
+   decoded line-by-line exhaustively. (Row count is now CONFIRMED at 1952, EOF-driven — §3.2;
+   the within-line component value ranges for `type`/`server_id` are widened to variable.)
 5. **Pool crest pixel dimensions:** the 704-byte pool entry exact resolution (probable 12×12
    ARGB8888 = 576 + 128 = 704) is unconfirmed without reading the pool DDS header bytes at
    offsets 0x0C–0x13.
 6. **Path fallback order:** whether the loader tries DDS → TGA → BMP when the manifest-specified
    extension is not found is UNVERIFIED.
 7. **uitex.txt IDs above 0078:** whether IDs above 0078 exist in other client versions is
-   unknown. Only the 35 entries in the analysed version are confirmed.
+   unknown. The analysed version has **37 EOF-driven entries** (§1.4, CONFIRMED); 35 of them
+   are individually enumerated in §1.4, the remaining 2 are covered by the loop-until-EOF rule
+   but are not yet sample-pinned to specific IDs/paths.
 8. **Item texture manifest format — CLOSED 2026-06-13.** `data/item/texturelist.txt` is a
    flat newline-delimited filename list (not a braced block); the leading decimal digits of
    each filename are the tex_id; path resolves to `data/item/texture/<filename>`; one DDS
@@ -1098,3 +1119,9 @@ when the same tex_id appears in both 2D and 3D contexts.
 - Message caption strings: `formats/misc_data.md` §6 (msg.xdb)
 - Glossary: `Docs/RE/names.yaml`
 - Provenance: `Docs/RE/journal.md`
+
+> **Provenance — CAMPAIGN VFS-MASTERY (two-witness: loader + black-box):** uitex.txt entry
+> count corrected to **37 (EOF-driven, no fixed count)**; crestlist.txt row count corrected to
+> **1952 (EOF-driven)** with `type`/`server_id` value sets widened to variable; skillicon.txt
+> grammar confirmed as the 4-column record `SKILL { skill_id job_id kind_id "path" }`. Promoted
+> as neutral prose; no addresses or decompiler output crossed the firewall.

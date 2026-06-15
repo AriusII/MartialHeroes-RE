@@ -299,17 +299,21 @@ public sealed class Wave8ParserTests
     }
 
     [Fact]
-    public void Xeff_TrackHeader_AnimStrideAndUnknownConstant_Decoded()
+    public void Xeff_TrackHeader_AnimStride_Decoded()
     {
-        // spec: Docs/RE/formats/effects.md §A.4.3 Track header — anim_stride u32 @ +5 (ms): CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.4.3 — unknown_constant u32 @ +1: SAMPLE-VERIFIED (value 67).
+        // spec: Docs/RE/formats/effects.md §A.4.3 Track header (9 bytes): anim_loop u8 @ +0,
+        //       anim_stride u32 @ +1, anim_base_time u32 @ +5. The unknown_constant field is REFUTED
+        //       (CAMPAIGN VFS-MASTERY, §A.17). The legacy fixture writes [anim_loop][67][100][0] after
+        //       the curve section, so under the corrected 9-byte header the parser reads
+        //       anim_stride = 67 (the fixture's first trailing dword) and anim_base_time = 100 (the
+        //       second); the remaining dword (0) folds into the animated keyframe-0 kf_index prefix.
         byte[] data = BuildXeffWithKeyframe(0f, 0f, 0f, 1f, 1f, 1f, 0f, 0f, 0f);
         XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(data));
 
-        XeffSubEffect sub = xeff.SubEffects[0];
-        Assert.Equal(67u, sub.UnknownConstant); // spec: §A.4.3 SAMPLE-VERIFIED
-        Assert.Equal(100u, sub.AnimStride); // set in fixture above
-        Assert.Equal(0u, sub.AnimBaseTime);
+        XeffSubEffect b0 = xeff.SubEffects[0];
+        Assert.Equal(1, b0.AnimLoop);        // anim_loop = 1 (animated)
+        Assert.Equal(67u, b0.AnimStride);    // anim_stride u32 @ +1
+        Assert.Equal(100u, b0.AnimBaseTime); // anim_base_time u32 @ +5
     }
 
     [Fact]

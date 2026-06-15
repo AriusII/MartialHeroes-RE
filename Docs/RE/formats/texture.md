@@ -56,6 +56,40 @@ Both paths share the same format auto-detection and produce equivalent output.
 
 ---
 
+## Single-call texture passthrough — all image formats share ONE loader (CONFIRMED)
+
+**CAMPAIGN VFS-MASTERY — CONFIRMED (two-witness: loader + black-box).**
+
+The four raster image formats used by the client — **`.dds`, `.png`, `.tga`, and `.bmp`** — are
+**all loaded through a single texture-creation call** that auto-detects the container from the
+file's own header bytes. There is **no per-extension branch and no extension-keyed dispatch**: the
+loader does not inspect the filename extension to choose a decoder, and there is no separate DDS
+loader vs. PNG loader vs. TGA loader vs. BMP loader. One call receives the raw in-memory byte
+buffer plus its length and returns a decoded texture, regardless of which of the four containers
+the bytes actually are.
+
+- The public API symbol for this call is **`D3DXCreateTextureFromFileInMemoryEx`** (the standard
+  Direct3D 9 extension-library in-memory texture creator). The format is recognised from the
+  buffer's leading magic bytes (`DDS ` / PNG signature / `BM` / TGA heuristic), not from the
+  `.dds` / `.png` / `.tga` / `.bmp` extension.
+- **Implication for `Assets.Parsers`:** a faithful re-implementation does NOT need four separate
+  format dispatchers keyed on extension. It may identify the container from the leading magic
+  bytes (as documented per-format below) and route to the matching decoder, but it must accept a
+  `.dds`-named file that is really a TGA (and vice-versa) — extension is a hint, header bytes are
+  authoritative. This is consistent with the `do.dds` mislabelled-extension caveat documented in
+  `formats/ui_manifests.md §7`.
+
+### Shaders are a SEPARATE path — `.psh` / `.vsh` never reach the texture loader (CONFIRMED)
+
+The compiled shader files `.psh` (pixel shader) and `.vsh` (vertex shader) are **not** image
+textures and are **not** loaded through the texture-creation call above. They travel a **separate
+shader-loading path** with **no cross-reference into the texture loader** — the texture passthrough
+described here neither reads nor dispatches on `.psh`/`.vsh`. An engineer must keep the shader
+pipeline and the texture pipeline as two independent loaders; the texture loader handles only the
+four raster containers (`.dds`/`.png`/`.tga`/`.bmp`). — CONFIRMED.
+
+---
+
 ## Format: DDS — primary format for game-world, item, and effect textures
 
 **Overall status: SAMPLE-VERIFIED** (UI DXT1 samples; DXT5 confirmed by call-site analysis only)
@@ -736,3 +770,9 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
 - Canonical constants: see `Docs/RE/names.yaml` (`DDS_MAGIC`, `TGA_V2_FOOTER_SIGNATURE`,
   `DDS_HEADER_SIZE`, `DXT1_BLOCK_BYTES`, `DXT3_BLOCK_BYTES`, `DXT5_BLOCK_BYTES`)
 - Provenance: see `Docs/RE/journal.md`
+
+> **Provenance — CAMPAIGN VFS-MASTERY (two-witness: loader + black-box):** confirmed that
+> `.dds`/`.png`/`.tga`/`.bmp` all pass through ONE in-memory texture-creation call
+> (`D3DXCreateTextureFromFileInMemoryEx`, header auto-detect, no per-extension branch), and that
+> `.psh`/`.vsh` shaders take a SEPARATE loading path with no cross-reference into the texture
+> loader. Promoted as neutral prose; no addresses or decompiler output crossed the firewall.

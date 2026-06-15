@@ -11,23 +11,28 @@
 ```
 items.scr:   framing CONFIRMED   # fixed 548-byte (0x224) record + optional 8-byte effect tail;
                                   # stride = 0x224 + 8*effect_count; 90,937 records; EOF-terminated.
-                                  # Stat-field ROLES (beyond the item-type tag) remain UNVERIFIED.
+                                  # +0x80/+0x84 = model/anim ref keys (loader-resolved);
+                                  # record discriminator = +0xBA (!=14) on the 0x18 buffer base.
+                                  # Remaining stat-field ROLES remain UNVERIFIED / DBG-pending.
 citems.scr:  CONFIRMED           # fixed stride 1052 B × 512 records; name@0x04, 6×81-byte desc paragraphs.
 ```
 
 The `items.scr` framing (record stride, termination, and the leading name/uid/effect-count fields)
 is now CONFIRMED on two independent grounds: a full-file black-box walk of all 90,937 records
 (EOF-clean, zero residual) and the runtime loader's own cursor arithmetic (a single fixed-size read
-of the leading block followed by a count-driven tail read). The per-record numeric stat ROLES inside
-the fixed block — apart from the packed item-type tag — are still UNVERIFIED; they are best assigned
-by a later cross-family debugger pass that dumps complete fixed records across weapon / armour /
-consumable / quest families. The `citems.scr` schema is fully fixed-stride and boundary-confirmed
-across all 512 records.
+of the leading block followed by a count-driven tail read). Two reference fields inside the fixed
+block — `+0x80` and `+0x84` — are now **loader-resolved** as model-reference and animation-reference
+keys (the loader resolves them against asset-lookup paths). The per-record **discriminator** the
+loader branches on is at **+0xBA** (tested `!= 14`), correcting an earlier mis-located `+0xB8`
+item-type branch. The remaining numeric stat ROLES inside the fixed block are still
+UNVERIFIED / DBG-pending; they are best assigned by a later cross-family debugger pass that dumps
+complete fixed records across weapon / armour / consumable / quest families. The `citems.scr` schema
+is fully fixed-stride and boundary-confirmed across all 512 records.
 
 Both files were classified by black-box byte observation of the user-supplied reference VFS, with the
-`items.scr` framing corroborated by the runtime loader. These are two distinct schemas that happen to
-share the same extension; they are NOT interchangeable, and a parser must dispatch on the logical
-filename.
+`items.scr` framing and the `+0x80/+0x84/+0xBA` findings corroborated by the runtime loader. These
+are two distinct schemas that happen to share the same extension; they are NOT interchangeable, and a
+parser must dispatch on the logical filename.
 
 ---
 
@@ -100,22 +105,45 @@ A parser walks the file by: read the 548-byte block, read `effect_count` at +0x2
 
 All offsets are absolute within the 548-byte (0x224) record block. Endianness: little-endian.
 
+> **Loader buffer base.** When the runtime loader stages a record into memory it does so against a
+> working buffer whose base sits **0x18 bytes** ahead of the record start, and its branch/flag
+> offsets are expressed relative to that **0x18 buffer base** (for example, dispatch flags cluster
+> around **+0xCD** relative to that base). The on-disk offsets in the table below are absolute within
+> the 548-byte record block; the discriminator note in §1.4.1 maps the loader's branch offset onto
+> the on-disk position so an engineer needs only this file.
+
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | 0x000 | 52 | CP949[] | `item_name` | Fixed window 0x000..0x033 (52 bytes); CP949 text, NUL-terminated then zero-padded. Enchant variants of one base item carry a `+N` suffix inside this buffer. | CONFIRMED (90,937/90,937) |
 | 0x034 | 4 | u32 | `item_uid` | Per-record id; increments by 1 within a family (e.g. across enchant levels). Observed high-byte families: 0x0B,0x0C,0x0D,0x0E,0x0F,0x10,0x11. | CONFIRMED (90,937/90,937) |
 | 0x038 | variable extent within block | CP949[] | `item_desc` | CP949 description, NUL-terminated, beginning at +0x038 and bounded by the fixed block. Its exact end offset within the block is UNVERIFIED. | CONFIRMED present; exact extent UNVERIFIED |
-| 0x080 | 4 | u32 | `template_ref` (inferred) | Non-zero for weapon families (carries a UID-shaped value); zero for non-weapon families. Identical across enchant variants of one base item. Role UNVERIFIED. | PARTIAL; role UNVERIFIED |
-| 0x084 | 4 | u32 | `template_ref_b` (inferred) | Second UID-shaped reference; identical across enchant variants of one base item. Varies by item template/category. Role UNVERIFIED. | PARTIAL; role UNVERIFIED |
-| 0x0A4 | 4 | f32 | numeric stat (inferred) | Reads as a plausible float for weapons (e.g. small magnitudes such as 1.0, 4.0, 40.0); zero for non-weapon families. Candidate attack/speed stat. Semantic UNVERIFIED. | PARTIAL; semantic UNVERIFIED |
-| 0x0B8 | 4 | u32 | `item_type_tag` (inferred) | Packed value that tracks item category: e.g. one value for swords, another for tier-2 weapons/armour, another for skills/books, another for consumables. Strong candidate for an item-type / equip-slot indicator. Role UNVERIFIED. | PARTIAL; role UNVERIFIED |
-| 0x200 | 4 | u32 | sequential template/index ref (inferred) | Sequential u32 that increases across weapon/armour tiers; zero for some special/event families. Candidate base-stats or template index. Role UNVERIFIED. | UNVERIFIED |
-| 0x21C | 4 | u32 | rare-nonzero field | Zero in the vast majority of records; non-zero in a small subset. Meaning UNVERIFIED. | UNVERIFIED |
+| 0x080 | 4 | u32 | `model_ref_key` | Model-reference key. The loader resolves this value against the model/asset-lookup path (a reference into the visual-asset set, not a free numeric stat). Non-zero for families that carry a visual model; identical across enchant variants of one base item. | loader-resolved |
+| 0x084 | 4 | u32 | `anim_ref_key` | Animation-reference key. The loader resolves this value against the animation/asset-lookup path. Identical across enchant variants of one base item; varies by item template/category. | loader-resolved |
+| 0x0A4 | 4 | bytes | (opaque) | Read into the staged record but no consumer semantics are settled. Reads as a plausible small float for some weapon families, but its role is unconfirmed. Keep OPAQUE — needs live-debugger confirmation; do not assign a stat meaning. | DBG-pending |
+| 0x0BA | — | — | record discriminator | The value the loader branches on to select per-record handling — see §1.4.1. Tested `!= 14`. (Supersedes the earlier `+0x0B8 item_type_tag` claim, which is REFUTED; see §1.7.) | loader-resolved |
+| 0x200 | 4 | bytes | (opaque) | Read into the staged record but no consumer semantics are settled. Keep OPAQUE — needs live-debugger confirmation; do not assign a meaning. | DBG-pending |
+| 0x21C | 4 | bytes | (opaque) | Read into the staged record but no consumer semantics are settled (non-zero in only a small subset of records). Keep OPAQUE — needs live-debugger confirmation; do not assign a meaning. | DBG-pending |
 | 0x220 | 1 | u8 | `effect_count` | Count of trailing 8-byte effect/upgrade entries; drives the per-record stride (see §1.2). | CONFIRMED (90,937/90,937) |
 | 0x221 | 3 | bytes | reserved / padding | Not individually sampled; assumed zero. | UNVERIFIED |
 
-Region +0x038..+0x07F (between the description start and the first inferred reference field) and the
-remaining bytes of the block that are not tabled above are not yet mapped. See Known Unknowns.
+Region +0x038..+0x07F (between the description start and the first reference field) and the remaining
+bytes of the block that are not tabled above are not yet mapped. See Known Unknowns.
+
+#### 1.4.1 Record discriminator — at +0xBA, tested `!= 14`
+
+The runtime loader stages each record into a working buffer whose **base is 0x18 bytes ahead of the
+record start** and expresses its branch offsets relative to that **0x18 buffer base**. The field the
+loader uses to select per-record handling is a **discriminator at on-disk offset +0xBA** of the
+record block (equivalently, the position the loader reads relative to its 0x18 buffer base). The
+loader's primary branch tests this discriminator for **`!= 14`**: one handling path is taken when the
+value is 14, the other when it is not. Dispatch flags consulted alongside the discriminator cluster
+around **+0xCD relative to the 0x18 buffer base**.
+
+This **corrects** the prior model that placed an `item_type_tag` branch at `+0xB8`: that offset and
+that branch are REFUTED (see §1.7). The discriminator is at **+0xBA** and the test is **`!= 14`**.
+The full enumeration of discriminator values and what each selected handling path does is
+**DBG-pending** — only the offset and the `!= 14` split are established; do not invent the remaining
+category meanings.
 
 ### 1.5 Trailing effect entries — on-disk 8-byte layout
 
@@ -142,19 +170,32 @@ across an enchant series). A cross-family debugger pass is the way to assign the
 
 - Exact end offset of the `item_desc` field within the 548-byte block.
 - Layout of region +0x038..+0x07F beyond the description text.
-- Roles of `template_ref` (+0x080), `template_ref_b` (+0x084), the f32 at +0x0A4, the packed
-  `item_type_tag` (+0x0B8), the sequential ref at +0x200, and the rare-nonzero field at +0x21C —
-  all single/few-family inference, no confirmed semantics.
+- The full enumeration of `record discriminator` (+0x0BA) values beyond the established `!= 14` split,
+  and what each selected handling path does — DBG-pending.
+- Consumer semantics of the opaque fields at +0x0A4, +0x200, and +0x21C — DBG-pending (read their
+  bytes, assign no meaning until a live-debugger pass settles them).
 - Semantic layout of the trailing 8-byte effect entries (§1.5); which field, if any, carries
   per-enchant stat deltas.
 - Reserved bytes at +0x221..+0x223.
 
 ### 1.7 SUPERSEDED / REFUTED — do not reintroduce
 
-Two earlier models of `items.scr` were proven wrong and must NOT be revived. They are recorded here
-only so the same mistakes are not made again.
+Earlier models of `items.scr` were proven wrong and must NOT be revived. They are recorded here only
+so the same mistakes are not made again.
 
-1. **Variable-stride "stats block at `0x38 + desc_width`" (former §1.4).** An earlier spec treated
+1. **`item_type_tag` discriminator at `+0x0B8`.** An earlier spec placed the record's category /
+   dispatch field at `+0x0B8` and treated it as a packed item-type tag. This is **REFUTED**. The
+   field the loader actually branches on is the **discriminator at +0x0BA**, tested **`!= 14`**, read
+   against the loader's **0x18 buffer base** (see §1.4.1). No branch reads `+0x0B8`. Do not reintroduce
+   a `+0x0B8 item_type_tag`. (Authority: CAMPAIGN VFS-MASTERY two-witness gate — loader branch +
+   black-box.)
+
+2. **Free numeric stats at `+0x080` / `+0x084`.** An earlier spec read these as inferred
+   `template_ref` / `template_ref_b` numeric stats of UNVERIFIED role. They are now **loader-resolved**
+   as the **model-reference** (`+0x080`) and **animation-reference** (`+0x084`) keys (§1.4) — they are
+   asset-lookup keys the loader resolves, not free numeric stats.
+
+3. **Variable-stride "stats block at `0x38 + desc_width`" (former §1.4).** An earlier spec treated
    the description as a variable-width buffer whose width drove the record size, and placed a
    floating "stats block" (with inferred fields `template_ref_a`/`template_ref_b`/`price_gold`/
    `weight`/`stat_1..stat_4`, etc.) at `record_start + 0x38 + desc_buffer_width`. This is **REFUTED**.
@@ -168,7 +209,7 @@ only so the same mistakes are not made again.
    fixed offsets above. (Authority: items_scr_reconcile.raw.md; corroborated by the loader's
    single-fixed-read framing.)
 
-2. **Three-sub-record "[A, B, C]" group model.** An earlier harness pass modelled each logical item
+4. **Three-sub-record "[A, B, C]" group model.** An earlier harness pass modelled each logical item
    as a group of three consecutive variable-length sub-records (an "item" sub-record A, a "filler"
    sub-record B, and a "stats" sub-record C), reporting ~32,402 groups. This is **REFUTED**. That
    harness detected record boundaries by scanning for CP949 lead bytes at offset +0x00; because the
@@ -267,9 +308,10 @@ present in fewer records); an empty paragraph is all-zero.
 | Name buffer | +0x000, 52 B fixed (CP949) | +0x004, 48 B fixed (CP949) |
 | Per-record unique id | `item_uid` u32 at +0x034 | `item_uid` u32 at +0x048 |
 | Description | CP949 from +0x038, bounded within the fixed block | 6 × 81-byte paragraphs from +0x0E4 |
-| Price field | candidate numeric stat(s); roles UNVERIFIED | NX cash points at +0x038 |
+| Asset refs / discriminator | `model_ref_key` +0x080, `anim_ref_key` +0x084 (loader-resolved); discriminator +0x0BA `!= 14` | — |
+| Price field | none confirmed (asset-ref keys at +0x080/+0x084; +0x0A4 opaque) | NX cash points at +0x038 |
 | Schema | regular item master | cash-shop item master |
-| Overall confidence | framing CONFIRMED; stat ROLES UNVERIFIED | CONFIRMED |
+| Overall confidence | framing CONFIRMED; +0x80/+0x84/+0xBA settled; other stat ROLES UNVERIFIED/DBG-pending | CONFIRMED |
 
 The two files are NOT the same schema. They share the concept of CP949 name + CP949 description +
 numeric fields but organise them differently.
@@ -283,10 +325,13 @@ numeric fields but organise them differently.
 - **items.scr** is now safe to *walk* and to read its confirmed leading fields: for each record, read
   the 548-byte block, read `effect_count` (u8 at +0x220), then read `effect_count × 8` trailing
   bytes; advance by `0x224 + 8 * effect_count`; stop at EOF. Read `item_name` (+0x000, 52 B),
-  `item_uid` (+0x034, u32), and `item_desc` (CP949 from +0x038) as CONFIRMED. Treat every numeric
-  stat field (+0x080, +0x084, +0x0A4, +0x0B8, +0x200, +0x21C) and the trailing effect-entry fields as
-  UNVERIFIED — read their bytes but do not rely on their semantics until a cross-family debugger pass
-  assigns roles.
+  `item_uid` (+0x034, u32), and `item_desc` (CP949 from +0x038) as CONFIRMED. Read `model_ref_key`
+  (+0x080) and `anim_ref_key` (+0x084) as the loader-resolved asset-reference keys. The per-record
+  **discriminator** is at **+0x0BA** with the loader's branch testing `!= 14` (the loader works on a
+  buffer base 0x18 ahead of the record start; flags cluster ~+0xCD relative to that base) — read it,
+  but the full meaning of each discriminator value is DBG-pending. Treat the fields at **+0x0A4,
+  +0x200, +0x21C** as **OPAQUE / DBG-pending** — read their bytes but assign no semantics until a
+  live-debugger pass settles them. Do NOT read a field at +0x0B8 (REFUTED).
 - **citems.scr** is safe to implement: iterate 512 records at 1052-byte stride; read the confirmed
   leading fields and the 6 description paragraphs (`0x0E4 + i*81`, 81 bytes each, CP949
   NUL-terminated).
@@ -303,8 +348,12 @@ numeric fields but organise them differently.
 | `pak.md` | `data.inf` / `data/data.vfs` | VFS container that holds `.scr` files |
 
 - **Glossary (proposed names — orchestrator records in `names.yaml`):** `ItemRecord` (the 548+8N
-  block), `item_name`, `item_uid`, `item_desc`, `item_type_tag` (u32 at +0x0B8), `template_ref`,
+  block), `item_name`, `item_uid`, `item_desc`, `model_ref_key` (u32 at +0x080),
+  `anim_ref_key` (u32 at +0x084), `record_discriminator` (at +0x0BA, tested `!= 14`),
   `effect_count` (u8 at +0x220), `EffectEntry` (8-byte trailing record), `cash_price_nx`,
   `slot_index`, `slot_seq_2`, `citems_stride = 1052`, `citems_desc_para_width = 81`,
   `citems_desc_para_count = 6`.
-- **Provenance:** see `Docs/RE/journal.md`
+- **Provenance:** see `Docs/RE/journal.md` — promotion entry: CAMPAIGN VFS-MASTERY (two-witness:
+  loader + black-box) settled `+0x80/+0x84` as model/anim ref keys, relocated the record discriminator
+  to `+0x0BA` (`!= 14`, on the 0x18 buffer base) and REFUTED the `+0x0B8 item_type_tag` branch, and
+  left `+0x0A4 / +0x200 / +0x21C` opaque (DBG-pending).

@@ -111,7 +111,13 @@ public sealed class XeffSubEffect
     /// </summary>
     public required float[] ScaleZ { get; init; }
 
-    // ─── Track header (13 bytes) ─────────────────────────────────────────────
+    // ─── Track header (9 bytes) ──────────────────────────────────────────────
+    // CORRECTED CAMPAIGN VFS-MASTERY (two-witness: loader + black-box):
+    //   Header is 9 bytes on BOTH the static and animated branch.
+    //   The "unknown_constant" field at +1 has been DELETED — it is REFUTED (no read-site).
+    //   Those 4 bytes are the first keyframe's u32 index prefix (immediately after the header).
+    // spec: Docs/RE/formats/effects.md §A.4.3 Track header (9 bytes): CONFIRMED.
+    // spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 9.
 
     /// <summary>
     /// Non-zero enables animated (multi-keyframe) path.
@@ -120,23 +126,15 @@ public sealed class XeffSubEffect
     public required byte AnimLoop { get; init; }
 
     /// <summary>
-    /// Constant u32 at track header offset +1. Observed value: 67 (0x43) in all samples.
-    /// Purpose UNRESOLVED — do not branch on this value.
-    /// spec: Docs/RE/formats/effects.md §A.4.3 — unknown_constant u32 @ +1: SAMPLE-VERIFIED (value), semantics UNRESOLVED.
-    /// spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_UNKNOWN_CONSTANT = 67.
-    /// </summary>
-    public required uint UnknownConstant { get; init; }
-
-    /// <summary>
     /// Duration of one animation frame in milliseconds.
-    /// spec: Docs/RE/formats/effects.md §A.4.3 Track header — anim_stride u32 @ +5 (ms): CONFIRMED.
+    /// spec: Docs/RE/formats/effects.md §A.4.3 Track header — anim_stride u32 @ +1 (ms): CONFIRMED.
     /// spec: Docs/RE/formats/effects.md §A.14 XEFF_TIME_UNIT = milliseconds.
     /// </summary>
     public required uint AnimStride { get; init; }
 
     /// <summary>
     /// Base time offset in milliseconds. Observed value: 0 in all samples.
-    /// spec: Docs/RE/formats/effects.md §A.4.3 Track header — anim_base_time u32 @ +9 (ms): CONFIRMED.
+    /// spec: Docs/RE/formats/effects.md §A.4.3 Track header — anim_base_time u32 @ +5 (ms): CONFIRMED.
     /// </summary>
     public required uint AnimBaseTime { get; init; }
 
@@ -144,9 +142,11 @@ public sealed class XeffSubEffect
 
     /// <summary>
     /// Keyframe array (length == EntryCount in the animated path; length == 1 in the static path).
-    /// Animated path (anim_loop != 0): Frame 0 has no index prefix on disk; frames 1..N-1 each have a u32 kf_index prefix.
+    /// Animated path (anim_loop != 0): EVERY frame (including frame 0) has a u32 kf_index prefix + 9 × f32 = 40 bytes.
     /// Static path (anim_loop == 0): exactly one entry; size depends on emitter_type (see A.4.6).
-    /// spec: Docs/RE/formats/effects.md §A.4.4 Keyframe array — frame 0 special case (no index): CONFIRMED.
+    /// CORRECTED CAMPAIGN VFS-MASTERY: frame 0 is NOT a special no-index case.
+    /// spec: Docs/RE/formats/effects.md §A.4.4 Keyframe array (CORRECTED): CONFIRMED (CAMPAIGN VFS-MASTERY).
+    /// spec: Docs/RE/formats/effects.md §A.14 XEFF_KEYFRAME_ONDISK_STRIDE = 40 — every animated frame incl. frame 0.
     /// spec: Docs/RE/formats/effects.md §A.4.6 emitter_type-dependent static branch: CONFIRMED.
     /// </summary>
     public required XeffKeyframe[] Keyframes { get; init; }
@@ -154,12 +154,13 @@ public sealed class XeffSubEffect
 
 /// <summary>
 /// One keyframe within a <c>.xeff</c> sub-effect block.
-/// Animated path — Frame 0 carries no index prefix on disk (9 × f32 = 36 bytes).
-/// Animated path — Frames 1..N-1 each carry a u32 kf_index prefix (u32 + 9 × f32 = 40 bytes).
+/// Animated path — EVERY frame (including frame 0) carries a u32 kf_index prefix: u32 + 9 × f32 = 40 bytes.
+/// (CORRECTED CAMPAIGN VFS-MASTERY: frame 0 is NOT a special no-index case — see A.4.4 correction.)
 /// Static path — a single entry; 6 × f32 (24 B) if emitter_type != 2, 9 × f32 (36 B) if emitter_type == 2.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/effects.md §A.4.4 Keyframe array: CONFIRMED.
+/// spec: Docs/RE/formats/effects.md §A.4.4 Keyframe array (CORRECTED): CONFIRMED (CAMPAIGN VFS-MASTERY).
+/// spec: Docs/RE/formats/effects.md §A.14 XEFF_KEYFRAME_ONDISK_STRIDE = 40 — every animated frame, frame 0 included.
 /// spec: Docs/RE/formats/effects.md §A.4.6 emitter_type == 2 adds +12 bytes Euler rotation in static branch: CONFIRMED.
 /// The 9-float layout: velocity Vec3 (1–3) + size Vec3 (4–6) + rotation degrees Euler-XYZ (7–9).
 /// spec: Docs/RE/formats/effects.md §A.4.4 nine-float layout: CONFIRMED.

@@ -44,13 +44,14 @@ public static class NpcSpawnParser
             int offset = i * RecordStride;
             ReadOnlySpan<byte> rec = span.Slice(offset, RecordStride);
 
-            // mob_id u16le @ +0.
+            // mob_id u16le @ +0. Primary key resolves mob template.
             // spec: Docs/RE/formats/npc_spawns.md — mob_id u16 @ +0: CONFIRMED.
             ushort mobId = BinaryPrimitives.ReadUInt16LittleEndian(rec[0..]);
 
-            // field_02 u16le @ +2. Purpose unknown; value 67 in all examined samples.
-            // spec: Docs/RE/formats/npc_spawns.md — field_02 u16 @ +2: UNVERIFIED.
-            ushort field02 = BinaryPrimitives.ReadUInt16LittleEndian(rec[2..]);
+            // field_02 u16le @ +2. INERT — present but unconsumed by the spawn loader.
+            // No runtime consumer accesses this offset. Read past it to maintain stride.
+            // spec: Docs/RE/formats/npc_spawns.md — field_02 u16 @ +2: CONFIRMED inert.
+            ushort field02Inert = BinaryPrimitives.ReadUInt16LittleEndian(rec[2..]);
 
             // world_x f32le @ +4.
             // spec: Docs/RE/formats/npc_spawns.md — world_x f32 @ +4: CONFIRMED.
@@ -60,32 +61,36 @@ public static class NpcSpawnParser
             // spec: Docs/RE/formats/npc_spawns.md — world_z f32 @ +8: CONFIRMED.
             float worldZ = BinaryPrimitives.ReadSingleLittleEndian(rec[8..]);
 
-            // rotation_y f32le @ +12. Yaw in radians, sample-inference only.
-            // spec: Docs/RE/formats/npc_spawns.md — rotation_y f32 @ +12: PARTIAL.
-            float rotationY = BinaryPrimitives.ReadSingleLittleEndian(rec[12..]);
+            // facing f32le @ +12. Base orientation in radians.
+            // IMPORTANT: the runtime adds a quarter-turn (π/2) to this value on use.
+            // Applied facing = stored_value + π/2. Do NOT apply raw.
+            // spec: Docs/RE/formats/npc_spawns.md — facing f32 @ +12: CONFIRMED.
+            float facing = BinaryPrimitives.ReadSingleLittleEndian(rec[12..]);
 
             // spawn_type u32le @ +16.
             // spec: Docs/RE/formats/npc_spawns.md — spawn_type u32 @ +16: CONFIRMED.
             uint spawnType = BinaryPrimitives.ReadUInt32LittleEndian(rec[16..]);
 
-            // unknown_20 u32le @ +20. Always zero in observed samples.
-            // spec: Docs/RE/formats/npc_spawns.md — unknown_20 u32 @ +20: UNVERIFIED.
-            uint unknown20 = BinaryPrimitives.ReadUInt32LittleEndian(rec[20..]);
+            // field_20 u32le @ +20. INERT — present but unconsumed by the spawn loader.
+            // No runtime consumer accesses this offset. Read past it to maintain stride.
+            // spec: Docs/RE/formats/npc_spawns.md — field_20 u32 @ +20: CONFIRMED inert.
+            uint field20Inert = BinaryPrimitives.ReadUInt32LittleEndian(rec[20..]);
 
-            // unknown_24 u32le @ +24. Always zero in observed samples.
-            // spec: Docs/RE/formats/npc_spawns.md — unknown_24 u32 @ +24: UNVERIFIED.
-            uint unknown24 = BinaryPrimitives.ReadUInt32LittleEndian(rec[24..]);
+            // field_24 u32le @ +24. INERT — present but unconsumed by the spawn loader.
+            // No runtime consumer accesses this offset. Read past it to maintain stride.
+            // spec: Docs/RE/formats/npc_spawns.md — field_24 u32 @ +24: CONFIRMED inert.
+            uint field24Inert = BinaryPrimitives.ReadUInt32LittleEndian(rec[24..]);
 
             records[i] = new NpcSpawnRecord
             {
                 MobId = mobId,
-                Field02 = field02,
+                Field02Inert = field02Inert,
                 WorldX = worldX,
                 WorldZ = worldZ,
-                RotationY = rotationY,
+                Facing = facing,
                 SpawnType = spawnType,
-                Unknown20 = unknown20,
-                Unknown24 = unknown24,
+                Field20Inert = field20Inert,
+                Field24Inert = field24Inert,
             };
         }
 

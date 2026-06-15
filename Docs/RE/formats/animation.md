@@ -15,7 +15,7 @@
 | `.mot` header (`id_a`, `id_b`, `name_length`, `name_body`, `frame_count`) | Resolved | CONFIRMED (sample-verified) |
 | `.mot` corpus is real, not stubs (3877/3891 are real clips) | Resolved | SAMPLE-VERIFIED (full census of 3,891 files) |
 | `.mot` BANI-magic variant (11 files; different header) | Header fully recovered | SAMPLE-VERIFIED (all header fields cross-checked on 3 of 11 files; body layout PROPOSED) |
-| `.mot` track / keyframe layout | Resolved | CONFIRMED (parser-derived; corpus census confirms full-payload clips exist) |
+| `.mot` track / keyframe layout | Resolved | CONFIRMED (CAMPAIGN VFS-MASTERY two-witness: loader + black-box corpus census) |
 | LenStr 4-byte u32 LE prefix, no on-disk terminator | Resolved | CONFIRMED (loader + sample) |
 | `track_descriptor` upper-3-byte padding (key-count / channel-mask / interp-flag all refuted) | Resolved | CONFIRMED (loader-direct + sample-verified) |
 | `id_a` vs `id_b` roles (load key vs runtime clip handle) | Resolved | CONFIRMED |
@@ -227,7 +227,12 @@ variable-length keyframe block.
 | 4                          | 4                   | u32 LE  | `key_count`        | Number of keyframes in this track. **Sole driver** of the keyframe-array length — it is a field of its own, never derived from `track_descriptor`. | CONFIRMED |
 | 8                          | `key_count × 28`   | bytes   | `keyframes`        | Inline array of keyframe records, each 28 bytes. See §Keyframe record.                                                                  | CONFIRMED |
 
-**Track record stride:** variable — `8 + key_count × 28` bytes.
+**Track record stride:** variable — `8 + key_count × 28` bytes. The fixed 8-byte preamble
+(`track_descriptor` + `key_count`) is immediately followed by exactly `key_count` keyframes of
+28 bytes each; no padding or alignment is inserted between the preamble and the keyframe block,
+nor between consecutive tracks. **CONFIRMED (CAMPAIGN VFS-MASTERY two-witness gate — the full-data
+loader and a black-box corpus census of real clips agree on the 8-byte per-track header followed by
+`key_count × 28` bytes of keyframes).**
 
 ### `track_descriptor` byte decomposition (CONFIRMED — loader-direct)
 
@@ -262,8 +267,12 @@ upper three bytes (or assert them zero for a strict validator), then read `key_c
 
 ### Keyframe record — 28 bytes, little-endian
 
-Each keyframe encodes one sample in time: a 3-component translation vector and a 4-component
-rotation quaternion. There is no scale channel in this format.
+Each keyframe encodes one sample in time as exactly **7 little-endian f32 values (28 bytes)**: a
+3-component local translation vector followed by a 4-component rotation quaternion (XYZW, scalar
+last). There is **no scale channel** and **no on-disk interpolation flag** — the record is fixed and
+unconditional. **CONFIRMED (CAMPAIGN VFS-MASTERY two-witness gate — the full-data loader reads the
+fixed 7-float / 28-byte record, and a black-box corpus census of real clips reconciles file sizes
+against the `8 + key_count × 28` track stride).**
 
 | Sub-offset | Size | Type   | Field            | Notes                            | Confidence |
 |-----------:|-----:|--------|------------------|----------------------------------|------------|
@@ -275,7 +284,8 @@ rotation quaternion. There is no scale channel in this format.
 | 20         | 4    | f32 LE | `rotation_z`     | Quaternion Z component.          | CONFIRMED |
 | 24         | 4    | f32 LE | `rotation_w`     | Quaternion W (scalar) component. | CONFIRMED |
 
-**Keyframe stride: 28 bytes. Component order: XYZ translation, then XYZW quaternion.**
+**Keyframe stride: 28 bytes (7 × f32). Component order: XYZ translation, then XYZW quaternion.**
+There is no eighth float and no trailing flag byte — the next keyframe begins immediately at +28.
 
 The quaternion component order (X, Y, Z, W) with the scalar W last is consistent with the
 quaternion representation used in `.bnd` bind-pose records (see `formats/mesh.md`,
@@ -283,6 +293,10 @@ quaternion representation used in `.bnd` bind-pose records (see `formats/mesh.md
 
 **Scale:** there is no scale channel. The keyframe record carries only translation and rotation.
 Scale is not animated in this format.
+
+**Interpolation flag:** there is no on-disk interpolation-mode byte or bit in the keyframe (or in the
+per-track header). Interpolation is fixed at runtime (lerp for translation, slerp for rotation) — see
+§Timing and interpolation.
 
 **Pose semantics (cross-reference):** a sampled keyframe is a **local replacement pose** for the
 named bone, not an additive delta — it overwrites the bone's animated local translation/rotation.
@@ -429,8 +443,8 @@ file census):
 
 > **Conclusion: the shipping client cannot load BANI files. All 11 are dead/unused data.**
 
-The standard loader (`CoreMot_LoadFromFile_Header`) reads the first four bytes as a u32 LE
-`id_a` field with no magic check. When fed a BANI file:
+The standard loader reads the first four bytes as a u32 LE `id_a` field with no magic check. When
+fed a BANI file:
 
 1. The four magic bytes `42 41 4E 49` are read as a bogus `id_a` value.
 2. The u32 at offset 4 (the `version` field, value 1 or 3) is read as `id_b`.
@@ -798,10 +812,11 @@ created and appended to the Cycle list. Stopping all layers sets every layer's t
 ## Enumerations / flags
 
 No enumerated fields or bitflag fields exist in the on-disk standard `.mot` format. The upper three
-bytes of `track_descriptor` (bits 8–31) are reserved padding and carry no enumerated meaning. The
-`flags` column in `actormotion.txt` (§`actormotion.txt` layout, column 7) is a bitfield whose bit
-assignments are UNVERIFIED. The BANI variant's `version` field (offset 4) takes the discrete values
-1 and 3 (§BANI variant) but its full enumeration and effect on payload layout are not characterized.
+bytes of `track_descriptor` (bits 8–31) are reserved padding and carry no enumerated meaning. There
+is no on-disk interpolation-mode enumeration in the keyframe record either. The `flags` column in
+`actormotion.txt` (§`actormotion.txt` layout, column 7) is a bitfield whose bit assignments are
+UNVERIFIED. The BANI variant's `version` field (offset 4) takes the discrete values 1 and 3
+(§BANI variant) but its full enumeration and effect on payload layout are not characterized.
 
 ---
 
@@ -833,6 +848,7 @@ unknowns table:
 | "All `.mot` samples are stubs" | RESOLVED — a full census of 3,891 files shows 3,877 (99.7%) are real full-payload clips; only 3 are stubs and 11 are the BANI variant (§Corpus census). The track/keyframe layout is exercised by the corpus, not just by parser inference. |
 | LenStr prefix width (1-byte vs 4-byte) | CONFIRMED 4-byte u32 LE prefix, no on-disk terminator — verified independently against both the loader and a real sample, which agree exactly. |
 | Upper 3 bytes of `track_descriptor` | CONFIRMED unused padding — the loader reads the 4-byte word and extracts only the low byte (`bone_id`); bits 8–31 are discarded with no shift, mask, comparison, or storage. The three candidate interpretations (key/keyframe count, channel/component mask, interpolation flag) are positively REFUTED: keyframe length is driven by the separate `key_count` field, the 7-float keyframe set is fixed and unconditional, and interpolation mode is chosen at the runtime sampler. See §`track_descriptor` byte decomposition. |
+| Keyframe is 7 floats / 28 B (trans XYZ + quat XYZW; no scale; no on-disk interp flag) and track stride = 8 + key_count×28 | CONFIRMED — CAMPAIGN VFS-MASTERY two-witness gate (full-data loader + black-box corpus census agree). The keyframe has no eighth scale float and no trailing interpolation byte; the track is an 8-byte preamble followed by `key_count × 28` bytes with no inter-record padding. See §Keyframe record and §Track array layout. |
 | `id_a` vs `id_b` as catalogue key | CONFIRMED — `id_b` is the load-time catalogue / group key; `id_a` is the per-file UID matching the filename integer, returned as the clip handle and used by the runtime mixer as the per-clip lookup ID. |
 | Wrap-to-first at clip end | CONFIRMED — no loop flag exists in the `.mot` binary; wrap is a runtime property of `AnimationCycleLayer` (modulo on local time), not of the file. |
 | `actormotion.txt` column layout | CONFIRMED (record layout) — 33 columns, count-prefixed, parsed into a 136-byte record; offsets and types documented in §`actormotion.txt` layout. Per-column semantic names for cols 3–14 remain PROPOSED; col2 (SkinClassId) and col15 (idle motion) are now sample-verified. |

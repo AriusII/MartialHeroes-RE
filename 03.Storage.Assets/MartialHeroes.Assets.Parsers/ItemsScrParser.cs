@@ -59,17 +59,35 @@ public static class ItemsScrParser
     // spec: Docs/RE/formats/items_scr.md §1.4 — item_desc CP949 @0x038: CONFIRMED present; extent UNVERIFIED.
     private const int OffItemDesc = 0x038;
 
-    // stat_f32 f32 @ 0x0A4 — PARTIAL; semantic UNVERIFIED.
-    // spec: Docs/RE/formats/items_scr.md §1.4 — stat_f32 f32 @0x0A4: PARTIAL; semantic UNVERIFIED.
-    private const int OffStatF32 = 0x0A4;
+    // model_ref_key u32 @ 0x080 — loader-resolved as model-reference key.
+    // spec: Docs/RE/formats/items_scr.md §1.4 — model_ref_key u32 @0x080: loader-resolved.
+    // spec: Docs/RE/formats/items_scr.md §1.7 — "free numeric stats at +0x080/+0x084" REFUTED; they are asset-lookup keys.
+    private const int OffModelRefKey = 0x080;
 
-    // item_type_tag u32 @ 0x0B8 — PARTIAL; role UNVERIFIED.
-    // spec: Docs/RE/formats/items_scr.md §1.4 — item_type_tag u32 @0x0B8: PARTIAL; role UNVERIFIED.
-    private const int OffItemTypeTag = 0x0B8;
+    // anim_ref_key u32 @ 0x084 — loader-resolved as animation-reference key.
+    // spec: Docs/RE/formats/items_scr.md §1.4 — anim_ref_key u32 @0x084: loader-resolved.
+    private const int OffAnimRefKey = 0x084;
 
-    // template_ref u32 @ 0x200 — UNVERIFIED.
-    // spec: Docs/RE/formats/items_scr.md §1.4 — template_ref u32 @0x200: UNVERIFIED.
-    private const int OffTemplateRef = 0x200;
+    // opaque_0a4 4 bytes @ 0x0A4 — read and retained; no consumer semantics settled.
+    // spec: Docs/RE/formats/items_scr.md §1.4 — +0x0A4 (opaque): DBG-pending.
+    private const int OffOpaque0A4 = 0x0A4;
+
+    // record_discriminator u8 @ 0x0BA — tested != 14 by the loader.
+    // CORRECTED CAMPAIGN VFS-MASTERY (two-witness: loader + black-box):
+    //   The prior "+0x0B8 item_type_tag" is REFUTED (see §1.7). The actual loader branch
+    //   is on the discriminator at +0xBA, tested != 14. Dispatch flags cluster around
+    //   +0xCD relative to the loader's 0x18 buffer base. Full discriminator value enumeration is DBG-pending.
+    // spec: Docs/RE/formats/items_scr.md §1.4.1 — discriminator @+0xBA tested != 14: loader-resolved.
+    // spec: Docs/RE/formats/items_scr.md §1.7 — "+0x0B8 item_type_tag" REFUTED.
+    private const int OffRecordDiscriminator = 0x0BA;
+
+    // opaque_200 4 bytes @ 0x200 — read and retained; no consumer semantics settled.
+    // spec: Docs/RE/formats/items_scr.md §1.4 — +0x200 (opaque): DBG-pending.
+    private const int OffOpaque200 = 0x200;
+
+    // opaque_21c 4 bytes @ 0x21C — read and retained; no consumer semantics settled.
+    // spec: Docs/RE/formats/items_scr.md §1.4 — +0x21C (opaque): DBG-pending.
+    private const int OffOpaque21C = 0x21C;
 
     // effect_count u8 @ 0x220. CONFIRMED (90,937/90,937).
     // spec: Docs/RE/formats/items_scr.md §1.4 — effect_count u8 @0x220: CONFIRMED.
@@ -172,17 +190,37 @@ public static class ItemsScrParser
             ? Cp949.GetString(descRegion[..descNul])
             : Cp949.GetString(descRegion);
 
-        // stat_f32 f32 @ 0x0A4. PARTIAL; semantic UNVERIFIED.
-        // spec: Docs/RE/formats/items_scr.md §1.4 — stat_f32 f32 @0x0A4: PARTIAL; semantic UNVERIFIED.
-        float statF32 = BinaryPrimitives.ReadSingleLittleEndian(fixedBlock[OffStatF32..]);
+        // model_ref_key u32 @ 0x080. Loader-resolved as model-reference key.
+        // spec: Docs/RE/formats/items_scr.md §1.4 — model_ref_key u32 @0x080: loader-resolved.
+        // spec: Docs/RE/formats/items_scr.md §1.7 — free-stat reading at +0x080 REFUTED; it is an asset-lookup key.
+        uint modelRefKey = BinaryPrimitives.ReadUInt32LittleEndian(fixedBlock[OffModelRefKey..]);
 
-        // item_type_tag u32 @ 0x0B8. PARTIAL; role UNVERIFIED.
-        // spec: Docs/RE/formats/items_scr.md §1.4 — item_type_tag u32 @0x0B8: PARTIAL; role UNVERIFIED.
-        uint itemTypeTag = BinaryPrimitives.ReadUInt32LittleEndian(fixedBlock[OffItemTypeTag..]);
+        // anim_ref_key u32 @ 0x084. Loader-resolved as animation-reference key.
+        // spec: Docs/RE/formats/items_scr.md §1.4 — anim_ref_key u32 @0x084: loader-resolved.
+        uint animRefKey = BinaryPrimitives.ReadUInt32LittleEndian(fixedBlock[OffAnimRefKey..]);
 
-        // template_ref u32 @ 0x200. UNVERIFIED.
-        // spec: Docs/RE/formats/items_scr.md §1.4 — template_ref u32 @0x200: UNVERIFIED.
-        uint templateRef = BinaryPrimitives.ReadUInt32LittleEndian(fixedBlock[OffTemplateRef..]);
+        // opaque_0a4: 4 bytes @ 0x0A4. Read and retained; no consumer semantics settled — DBG-pending.
+        // spec: Docs/RE/formats/items_scr.md §1.4 — +0x0A4 (opaque): DBG-pending.
+        // Dispatch offset base note: the loader stages records against a working buffer 0x18 bytes ahead;
+        // its internal branch offsets are relative to that 0x18 base. On-disk offsets here are absolute.
+        // spec: Docs/RE/formats/items_scr.md §1.4 "Loader buffer base" note.
+        ReadOnlyMemory<byte> opaque0A4 = data.Slice(recordOffset + OffOpaque0A4, 4);
+
+        // record_discriminator u8 @ 0x0BA. Tested != 14 by the loader for per-record routing.
+        // CORRECTED CAMPAIGN VFS-MASTERY: prior "+0x0B8 item_type_tag" is REFUTED (see §1.7).
+        // spec: Docs/RE/formats/items_scr.md §1.4.1 — discriminator @+0xBA tested != 14: loader-resolved.
+        // spec: Docs/RE/formats/items_scr.md §1.7 — "+0x0B8 item_type_tag" REFUTED; DO NOT reintroduce.
+        // Full discriminator value enumeration is DBG-pending; read the byte, assign no meaning.
+        byte recordDiscriminator = fixedBlock[OffRecordDiscriminator];
+
+        // opaque_200: 4 bytes @ 0x200. Read and retained; no consumer semantics settled — DBG-pending.
+        // spec: Docs/RE/formats/items_scr.md §1.4 — +0x200 (opaque): DBG-pending.
+        ReadOnlyMemory<byte> opaque200 = data.Slice(recordOffset + OffOpaque200, 4);
+
+        // opaque_21c: 4 bytes @ 0x21C. Read and retained; no consumer semantics settled — DBG-pending.
+        // Non-zero in only a small subset of records.
+        // spec: Docs/RE/formats/items_scr.md §1.4 — +0x21C (opaque): DBG-pending.
+        ReadOnlyMemory<byte> opaque21C = data.Slice(recordOffset + OffOpaque21C, 4);
 
         // effect_count u8 @ 0x220. CONFIRMED.
         // spec: Docs/RE/formats/items_scr.md §1.4 — effect_count u8 @0x220: CONFIRMED (90,937/90,937).
@@ -241,9 +279,12 @@ public static class ItemsScrParser
             ItemName = itemName,
             ItemUid = itemUid,
             ItemDesc = itemDesc,
-            StatF32 = statF32,
-            ItemTypeTag = itemTypeTag,
-            TemplateRef = templateRef,
+            ModelRefKey = modelRefKey,
+            AnimRefKey = animRefKey,
+            Opaque0A4 = opaque0A4,
+            RecordDiscriminator = recordDiscriminator,
+            Opaque200 = opaque200,
+            Opaque21C = opaque21C,
             EffectCount = effectCount,
             Effects = effects,
             FixedBlockRaw = data.Slice(recordOffset, FixedBlockSize),

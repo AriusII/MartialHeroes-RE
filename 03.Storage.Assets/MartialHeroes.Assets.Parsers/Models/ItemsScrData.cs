@@ -60,20 +60,54 @@ public sealed class ItemsScrRecord
     /// <summary>Item description string; CP949, NUL-terminated from offset 0x038 within the fixed block.</summary>
     public required string ItemDesc { get; init; }
 
-    // spec: Docs/RE/formats/items_scr.md §1.4 — stat_f32 f32 @0x0A4: PARTIAL; semantic UNVERIFIED.
+    // spec: Docs/RE/formats/items_scr.md §1.4 — model_ref_key u32 @0x080: loader-resolved as model-reference key.
+    // spec: Docs/RE/formats/items_scr.md §1.7 — "free numeric stat at +0x080" REFUTED; this is an asset-lookup key.
     /// <summary>
-    /// Inferred float stat at +0x0A4 (e.g. small magnitudes for weapons: 1.0, 4.0, 40.0).
-    /// Semantic UNVERIFIED.
+    /// Model-reference key at +0x080. Loader-resolved against the model/asset-lookup path.
+    /// Non-zero for item families that carry a visual model; identical across enchant variants.
+    /// spec: Docs/RE/formats/items_scr.md §1.4 — model_ref_key u32 @0x080: loader-resolved.
     /// </summary>
-    public required float StatF32 { get; init; }
+    public required uint ModelRefKey { get; init; }
 
-    // spec: Docs/RE/formats/items_scr.md §1.4 — item_type_tag u32 @0x0B8: PARTIAL; role UNVERIFIED.
-    /// <summary>Packed item-type tag; candidate equip-slot/category indicator. Role UNVERIFIED.</summary>
-    public required uint ItemTypeTag { get; init; }
+    // spec: Docs/RE/formats/items_scr.md §1.4 — anim_ref_key u32 @0x084: loader-resolved as animation-reference key.
+    /// <summary>
+    /// Animation-reference key at +0x084. Loader-resolved against the animation/asset-lookup path.
+    /// Identical across enchant variants of one base item; varies by item template/category.
+    /// spec: Docs/RE/formats/items_scr.md §1.4 — anim_ref_key u32 @0x084: loader-resolved.
+    /// </summary>
+    public required uint AnimRefKey { get; init; }
 
-    // spec: Docs/RE/formats/items_scr.md §1.4 — template_ref u32 @0x200: UNVERIFIED.
-    /// <summary>Sequential template/index reference; increases across weapon/armour tiers. Role UNVERIFIED.</summary>
-    public required uint TemplateRef { get; init; }
+    // spec: Docs/RE/formats/items_scr.md §1.4 — +0x0A4 (opaque): DBG-pending.
+    /// <summary>
+    /// Opaque 4 bytes at +0x0A4. Read and retained; no consumer semantics settled.
+    /// Reads as a plausible small float for some weapon families, but role unconfirmed.
+    /// spec: Docs/RE/formats/items_scr.md §1.4 — +0x0A4 (opaque): DBG-pending.
+    /// </summary>
+    public required ReadOnlyMemory<byte> Opaque0A4 { get; init; }
+
+    // spec: Docs/RE/formats/items_scr.md §1.4.1 — record_discriminator u8 @+0xBA: loader-resolved (tested != 14).
+    // CORRECTED CAMPAIGN VFS-MASTERY: prior "+0xB8 item_type_tag" is REFUTED (see §1.7).
+    /// <summary>
+    /// Record discriminator byte at +0x0BA. The loader branches on this value != 14.
+    /// Full discriminator value enumeration is DBG-pending.
+    /// DO NOT confuse with +0x0B8 (REFUTED — see items_scr.md §1.7).
+    /// spec: Docs/RE/formats/items_scr.md §1.4.1 — discriminator @+0xBA tested != 14: loader-resolved.
+    /// </summary>
+    public required byte RecordDiscriminator { get; init; }
+
+    // spec: Docs/RE/formats/items_scr.md §1.4 — +0x200 (opaque): DBG-pending.
+    /// <summary>
+    /// Opaque 4 bytes at +0x200. Read and retained; no consumer semantics settled.
+    /// spec: Docs/RE/formats/items_scr.md §1.4 — +0x200 (opaque): DBG-pending.
+    /// </summary>
+    public required ReadOnlyMemory<byte> Opaque200 { get; init; }
+
+    // spec: Docs/RE/formats/items_scr.md §1.4 — +0x21C (opaque): DBG-pending.
+    /// <summary>
+    /// Opaque 4 bytes at +0x21C. Read and retained; non-zero in only a small subset of records.
+    /// spec: Docs/RE/formats/items_scr.md §1.4 — +0x21C (opaque): DBG-pending.
+    /// </summary>
+    public required ReadOnlyMemory<byte> Opaque21C { get; init; }
 
     // spec: Docs/RE/formats/items_scr.md §1.4 — effect_count u8 @0x220: CONFIRMED (90,937/90,937).
     /// <summary>Count of trailing 8-byte effect/upgrade entries; drives per-record stride.</summary>

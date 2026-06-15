@@ -204,164 +204,225 @@ public static class TerrainLayerParsers
         return arr;
     }
 
-    // ─── .fx1 ─────────────────────────────────────────────────────────────────
+    // ─── FX1/FX2/FX3 group-array sizes ───────────────────────────────────────
 
-    // FX1 header size: 24 bytes.
-    // spec: Docs/RE/formats/terrain_layers.md §1.5 FX1 Header (24 bytes): CONFIRMED.
-    private const int Fx1HeaderSize = 24;
+    // FX1/FX2 per-group header: 20 bytes (5 × u32: group_flags_0, group_flags_1, render_state, vertex_count, index_count).
+    // spec: Docs/RE/formats/terrain_layers.md §1.5 FX1 — group header 20 B: CONFIRMED.
+    // spec: Docs/RE/formats/terrain_layers.md §1.1a — universal group-array model: CONFIRMED (two-witness).
+    private const int FxShortGroupHeaderSize = 20; // FX1, FX2
+
+    // FX3 per-group header: 44 bytes (5 × base + 6 × extra = 11 × u32).
+    // spec: Docs/RE/formats/terrain_layers.md §1.7 FX3 — group header 44 B: CONFIRMED.
+    private const int Fx3GroupHeaderSize = 44; // FX3 extended group header
+
+    // ─── .fx1 ─────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Parses an <c>.fx1</c> terrain overlay layer file.
-    /// Header: 24 bytes. Vertex format: VF_36 (36 B). UV channels: 1.
+    /// Universal group-array layout: u32 group_count, then group_count × [20-byte group header + VF_36 vertices + u16 indices].
     /// </summary>
     /// <param name="data">Raw file bytes from VFS.</param>
     /// <returns>Decoded FX1 layer.</returns>
     /// <exception cref="InvalidDataException">Thrown on truncation.</exception>
     /// <remarks>
     /// spec: Docs/RE/formats/terrain_layers.md §1.5 FX1 Format: CONFIRMED (3 samples, exact size match).
-    /// File-size formula: 24 + mesh_count × 36 + index_count × 2.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count is the leading u32 (NOT a constant): CONFIRMED (two-witness).
+    /// render_state @ group+0x08 is CONFIRMED-variable (NOT a fixed constant=15).
+    /// File-size formula: 4 + Σ over groups (20 + vertex_count × 36 + index_count × 2).
     /// </remarks>
     public static Fx1Layer ParseFx1(ReadOnlyMemory<byte> data) =>
         ParseFx1(data.Span, data);
 
     private static Fx1Layer ParseFx1(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
     {
-        EnsureFx("fx1", span, Fx1HeaderSize);
-        // spec: Docs/RE/formats/terrain_layers.md §1.5 Header:
-        //   type_tag u32 @ 0x00: CONFIRMED. unknown_1 @ 0x04: UNVERIFIED. unknown_2 @ 0x08: UNVERIFIED.
-        //   render_state @ 0x0C: UNVERIFIED. mesh_count @ 0x10: CONFIRMED. index_count @ 0x14: CONFIRMED.
-        uint typeTag = BinaryPrimitives.ReadUInt32LittleEndian(span[0..]);
-        uint unknown1 = BinaryPrimitives.ReadUInt32LittleEndian(span[4..]);
-        uint unknown2 = BinaryPrimitives.ReadUInt32LittleEndian(span[8..]);
-        uint renderState = BinaryPrimitives.ReadUInt32LittleEndian(span[12..]);
-        uint meshCount = BinaryPrimitives.ReadUInt32LittleEndian(span[16..]);
-        uint indexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[20..]);
+        // group_count u32 @ file offset 0x00. NOT a constant and NOT a sub-format selector.
+        // spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count: CONFIRMED (two-witness; corpus 1..61).
+        // spec: Docs/RE/formats/terrain_layers.md §1.5 FX1.
+        EnsureFx("fx1", span, 4);
+        uint groupCount = BinaryPrimitives.ReadUInt32LittleEndian(span[0..]);
+        int offset = 4;
 
-        long expectedSize = Fx1HeaderSize + (long)meshCount * 36 + (long)indexCount * 2;
-        if (span.Length < expectedSize)
-            throw new InvalidDataException(
-                $".fx1 parse error: expected {expectedSize} bytes, got {span.Length}. " +
-                "spec: Docs/RE/formats/terrain_layers.md §1.5.");
-
-        var vertices = ReadVf36Array(span, Fx1HeaderSize, (int)meshCount);
-        int idxOffset = Fx1HeaderSize + (int)meshCount * 36;
-        var indices = ReadU16Indices(span, idxOffset, (int)indexCount);
-
-        return new Fx1Layer
+        var groups = new Fx1Group[(int)groupCount];
+        for (uint g = 0; g < groupCount; g++)
         {
-            TypeTag = typeTag,
-            Unknown1 = unknown1,
-            Unknown2 = unknown2,
-            RenderState = renderState,
-            Vertices = vertices,
-            Indices = indices,
-        };
+            // Per-group header: 20 bytes.
+            // spec: Docs/RE/formats/terrain_layers.md §1.1a — per-group header: group_flags_0 @ +0x00,
+            //   group_flags_1 @ +0x04, render_state @ +0x08 (CONFIRMED-variable), vertex_count @ +0x0C, index_count @ +0x10.
+            if (offset + FxShortGroupHeaderSize > span.Length)
+                throw new InvalidDataException(
+                    $".fx1 parse error: group[{g}] header truncated at offset {offset}. " +
+                    "spec: Docs/RE/formats/terrain_layers.md §1.1a.");
+
+            uint groupFlags0  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset)..]);      // +0x00 UNVERIFIED
+            uint groupFlags1  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]);  // +0x04 UNVERIFIED
+            uint renderState  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 8)..]);  // +0x08 CONFIRMED-variable
+            uint vertexCount  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 12)..]);  // +0x0C CONFIRMED
+            uint indexCount   = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 16)..]);  // +0x10 CONFIRMED
+            offset += FxShortGroupHeaderSize;
+
+            long geoBytes = (long)vertexCount * 36 + (long)indexCount * 2;
+            if (offset + geoBytes > span.Length)
+                throw new InvalidDataException(
+                    $".fx1 parse error: group[{g}] geometry truncated at offset {offset} " +
+                    $"(need {geoBytes} bytes). spec: Docs/RE/formats/terrain_layers.md §1.5.");
+
+            var vertices = ReadVf36Array(span, offset, (int)vertexCount);
+            offset += (int)vertexCount * 36;
+            var indices = ReadU16Indices(span, offset, (int)indexCount);
+            offset += (int)indexCount * 2;
+
+            groups[g] = new Fx1Group
+            {
+                GroupFlags0 = groupFlags0,
+                GroupFlags1 = groupFlags1,
+                RenderState = renderState,
+                RawHeaderExtra = ReadOnlyMemory<byte>.Empty, // no extra header for FX1
+                Vertices = vertices,
+                Indices = indices,
+            };
+        }
+
+        return new Fx1Layer { GroupCount = groupCount, Groups = groups };
     }
 
     // ─── .fx2 ─────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Parses an <c>.fx2</c> terrain overlay layer file.
-    /// Header: 24 bytes (same as FX1). Vertex format: VF_44 (44 B). UV channels: 2.
+    /// Universal group-array layout: u32 group_count, then group_count × [20-byte group header + VF_44 vertices + u16 indices].
     /// </summary>
     /// <remarks>
     /// spec: Docs/RE/formats/terrain_layers.md §1.6 FX2 Format: CONFIRMED (3 samples, exact size match).
-    /// File-size formula: 24 + mesh_count × 44 + index_count × 2.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count is the leading u32: CONFIRMED (two-witness).
+    /// render_state @ group+0x08 is CONFIRMED-variable (NOT a fixed constant).
+    /// File-size formula: 4 + Σ over groups (20 + vertex_count × 44 + index_count × 2).
     /// </remarks>
     public static Fx2Layer ParseFx2(ReadOnlyMemory<byte> data) =>
         ParseFx2(data.Span);
 
     private static Fx2Layer ParseFx2(ReadOnlySpan<byte> span)
     {
-        EnsureFx("fx2", span, Fx1HeaderSize);
-        // spec: Docs/RE/formats/terrain_layers.md §1.6 Header — same fields as FX1: CONFIRMED.
-        uint typeTag = BinaryPrimitives.ReadUInt32LittleEndian(span[0..]);
-        uint unknown1 = BinaryPrimitives.ReadUInt32LittleEndian(span[4..]);
-        uint unknown2 = BinaryPrimitives.ReadUInt32LittleEndian(span[8..]);
-        uint renderState = BinaryPrimitives.ReadUInt32LittleEndian(span[12..]);
-        uint meshCount = BinaryPrimitives.ReadUInt32LittleEndian(span[16..]);
-        uint indexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[20..]);
+        // group_count u32 @ file offset 0x00.
+        // spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count: CONFIRMED. §1.6 FX2.
+        EnsureFx("fx2", span, 4);
+        uint groupCount = BinaryPrimitives.ReadUInt32LittleEndian(span[0..]);
+        int offset = 4;
 
-        long expectedSize = Fx1HeaderSize + (long)meshCount * 44 + (long)indexCount * 2;
-        if (span.Length < expectedSize)
-            throw new InvalidDataException(
-                $".fx2 parse error: expected {expectedSize} bytes, got {span.Length}. " +
-                "spec: Docs/RE/formats/terrain_layers.md §1.6.");
-
-        var vertices = new FxVertex44[(int)meshCount];
-        for (int i = 0; i < (int)meshCount; i++)
-            vertices[i] = ReadFxVertex44(span.Slice(Fx1HeaderSize + i * 44, 44));
-        int idxOffset = Fx1HeaderSize + (int)meshCount * 44;
-        var indices = ReadU16Indices(span, idxOffset, (int)indexCount);
-
-        return new Fx2Layer
+        var groups = new Fx2Group[(int)groupCount];
+        for (uint g = 0; g < groupCount; g++)
         {
-            TypeTag = typeTag,
-            Unknown1 = unknown1,
-            Unknown2 = unknown2,
-            RenderState = renderState,
-            Vertices = vertices,
-            Indices = indices,
-        };
+            // Per-group header: 20 bytes (same as FX1).
+            // spec: Docs/RE/formats/terrain_layers.md §1.6 — same group header as FX1 (§1.1a): CONFIRMED.
+            if (offset + FxShortGroupHeaderSize > span.Length)
+                throw new InvalidDataException(
+                    $".fx2 parse error: group[{g}] header truncated at offset {offset}. " +
+                    "spec: Docs/RE/formats/terrain_layers.md §1.1a.");
+
+            uint groupFlags0  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset)..]);
+            uint groupFlags1  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]);
+            uint renderState  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 8)..]);  // CONFIRMED-variable
+            uint vertexCount  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 12)..]);
+            uint indexCount   = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 16)..]);
+            offset += FxShortGroupHeaderSize;
+
+            long geoBytes = (long)vertexCount * 44 + (long)indexCount * 2;
+            if (offset + geoBytes > span.Length)
+                throw new InvalidDataException(
+                    $".fx2 parse error: group[{g}] geometry truncated at offset {offset} " +
+                    $"(need {geoBytes} bytes). spec: Docs/RE/formats/terrain_layers.md §1.6.");
+
+            var vertices = new FxVertex44[(int)vertexCount];
+            for (int v = 0; v < (int)vertexCount; v++)
+                vertices[v] = ReadFxVertex44(span.Slice(offset + v * 44, 44));
+            offset += (int)vertexCount * 44;
+            var indices = ReadU16Indices(span, offset, (int)indexCount);
+            offset += (int)indexCount * 2;
+
+            groups[g] = new Fx2Group
+            {
+                GroupFlags0 = groupFlags0,
+                GroupFlags1 = groupFlags1,
+                RenderState = renderState,
+                RawHeaderExtra = ReadOnlyMemory<byte>.Empty,
+                Vertices = vertices,
+                Indices = indices,
+            };
+        }
+
+        return new Fx2Layer { GroupCount = groupCount, Groups = groups };
     }
 
     // ─── .fx3 ─────────────────────────────────────────────────────────────────
 
-    // FX3 header size: 48 bytes.
-    // spec: Docs/RE/formats/terrain_layers.md §1.7 FX3 Header (48 bytes): CONFIRMED.
-    private const int Fx3HeaderSize = 48;
-
     /// <summary>
     /// Parses an <c>.fx3</c> terrain overlay layer file.
-    /// Header: 48 bytes (extended). Vertex format: VF_36.
+    /// Universal group-array layout: u32 group_count, then group_count × [44-byte extended group header + VF_36 vertices + u16 indices].
     /// </summary>
     /// <remarks>
     /// spec: Docs/RE/formats/terrain_layers.md §1.7 FX3 Format: CONFIRMED (3 samples, exact size match).
-    /// File-size formula: 48 + mesh_count × 36 + index_count × 2.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count is the leading u32: CONFIRMED (two-witness).
+    /// The FX3 group header is wider (44 bytes) than FX1/FX2 (20 bytes) due to extra leading words.
+    /// render_state @ group+0x08 is CONFIRMED-variable (NOT a fixed constant=5).
+    /// File-size formula: 4 + Σ over groups (44 + vertex_count × 36 + index_count × 2).
     /// </remarks>
     public static Fx3Layer ParseFx3(ReadOnlyMemory<byte> data) =>
         ParseFx3(data.Span, data);
 
     private static Fx3Layer ParseFx3(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
     {
-        EnsureFx("fx3", span, Fx3HeaderSize);
-        // spec: Docs/RE/formats/terrain_layers.md §1.7 Header:
-        //   type_tag @ 0x00: CONFIRMED. unknown_1 @ 0x04, unknown_2 @ 0x08: UNVERIFIED.
-        //   render_state @ 0x0C: UNVERIFIED. unknown_3..8 @ 0x10–0x27: UNVERIFIED.
-        //   mesh_count @ 0x28: CONFIRMED. index_count @ 0x2C: CONFIRMED.
-        uint typeTag = BinaryPrimitives.ReadUInt32LittleEndian(span[0..]);
-        uint unknown1 = BinaryPrimitives.ReadUInt32LittleEndian(span[4..]);
-        uint unknown2 = BinaryPrimitives.ReadUInt32LittleEndian(span[8..]);
-        uint renderState = BinaryPrimitives.ReadUInt32LittleEndian(span[12..]);
-        // Extended header bytes 0x10–0x27 (32 bytes) — all UNVERIFIED.
-        // spec: Docs/RE/formats/terrain_layers.md §1.7 — unknown_3..unknown_8: UNVERIFIED.
-        ReadOnlyMemory<byte> rawExtra = backing.IsEmpty
-            ? span.Slice(16, 32).ToArray()
-            : backing.Slice(16, 32);
+        // group_count u32 @ file offset 0x00.
+        // spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count: CONFIRMED. §1.7 FX3.
+        EnsureFx("fx3", span, 4);
+        uint groupCount = BinaryPrimitives.ReadUInt32LittleEndian(span[0..]);
+        int offset = 4;
 
-        uint meshCount = BinaryPrimitives.ReadUInt32LittleEndian(span[40..]);
-        uint indexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[44..]);
-
-        long expectedSize = Fx3HeaderSize + (long)meshCount * 36 + (long)indexCount * 2;
-        if (span.Length < expectedSize)
-            throw new InvalidDataException(
-                $".fx3 parse error: expected {expectedSize} bytes, got {span.Length}. " +
-                "spec: Docs/RE/formats/terrain_layers.md §1.7.");
-
-        var vertices = ReadVf36Array(span, Fx3HeaderSize, (int)meshCount);
-        int idxOffset = Fx3HeaderSize + (int)meshCount * 36;
-        var indices = ReadU16Indices(span, idxOffset, (int)indexCount);
-
-        return new Fx3Layer
+        var groups = new Fx3Group[(int)groupCount];
+        for (uint g = 0; g < groupCount; g++)
         {
-            TypeTag = typeTag,
-            Unknown1 = unknown1,
-            Unknown2 = unknown2,
-            RenderState = renderState,
-            RawHeaderExtra = rawExtra,
-            Vertices = vertices,
-            Indices = indices,
-        };
+            // Per-group header: 44 bytes (extended).
+            // spec: Docs/RE/formats/terrain_layers.md §1.7 — group header 44 B: CONFIRMED.
+            //   group_flags_0 @ +0x00, group_flags_1 @ +0x04, render_state @ +0x08 (CONFIRMED-variable),
+            //   unknown_3..unknown_8 @ +0x0C..+0x23 (UNVERIFIED), vertex_count @ +0x24, index_count @ +0x28.
+            if (offset + Fx3GroupHeaderSize > span.Length)
+                throw new InvalidDataException(
+                    $".fx3 parse error: group[{g}] header truncated at offset {offset}. " +
+                    "spec: Docs/RE/formats/terrain_layers.md §1.7.");
+
+            uint groupFlags0  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset)..]);      // +0x00 UNVERIFIED
+            uint groupFlags1  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]);  // +0x04 UNVERIFIED
+            uint renderState  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 8)..]);  // +0x08 CONFIRMED-variable
+            // Extra words at group+0x0C..+0x23 (32 bytes, unknown_3..unknown_8) — all UNVERIFIED.
+            // spec: Docs/RE/formats/terrain_layers.md §1.7 — unknown_3..unknown_8 @ +0x0C..+0x23: UNVERIFIED.
+            ReadOnlyMemory<byte> rawExtra = backing.IsEmpty
+                ? span.Slice(offset + 12, 32).ToArray()
+                : backing.Slice(offset + 12, 32);
+            uint vertexCount  = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 36)..]);  // +0x24 CONFIRMED
+            uint indexCount   = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 40)..]);  // +0x28 CONFIRMED
+            offset += Fx3GroupHeaderSize;
+
+            long geoBytes = (long)vertexCount * 36 + (long)indexCount * 2;
+            if (offset + geoBytes > span.Length)
+                throw new InvalidDataException(
+                    $".fx3 parse error: group[{g}] geometry truncated at offset {offset} " +
+                    $"(need {geoBytes} bytes). spec: Docs/RE/formats/terrain_layers.md §1.7.");
+
+            var vertices = ReadVf36Array(span, offset, (int)vertexCount);
+            offset += (int)vertexCount * 36;
+            var indices = ReadU16Indices(span, offset, (int)indexCount);
+            offset += (int)indexCount * 2;
+
+            groups[g] = new Fx3Group
+            {
+                GroupFlags0 = groupFlags0,
+                GroupFlags1 = groupFlags1,
+                RenderState = renderState,
+                RawHeaderExtra = rawExtra,
+                Vertices = vertices,
+                Indices = indices,
+            };
+        }
+
+        return new Fx3Layer { GroupCount = groupCount, Groups = groups };
     }
 
     // ─── .fx4 ─────────────────────────────────────────────────────────────────

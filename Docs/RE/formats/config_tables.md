@@ -28,6 +28,17 @@
 > and never overclaimed. The skills.scr / mobs.scr corrections conflict with the earlier
 > small-sample spec and are flagged CONFLICT-PENDING until an IDA loader witness confirms them;
 > the corrected value distributions themselves are full-record observations.
+>
+> CAMPAIGN VFS-MASTERY update (two-witness: loader + black-box): the constant->variable
+> corrections for skills.scr +1072/+1176/+1306/+1328 (§2.8) and mobs.scr +60/+188/+272 (§2.9) are
+> now CONFIRMED-variable and no longer CONFLICT-PENDING — they sit inside a verbatim-copied record
+> body with no branch, so the values genuinely vary and the fields are real; their SEMANTICS stay
+> DBG-pending and honestly opaque. users.scr (§2.6) is corrected to a SINGLE 496-byte (0x1F0)
+> structure read in one read with NO per-record loop and NO stride — the four "class blocks" are a
+> post-load grid-formula access pattern, not a record stride (both the prior "4 x 124" and the
+> "124/124/128/120" framings are refuted; structure size CONFIRMED). userpoint.scr (§2.5) tertiary
+> onset is corrected to key index 250 (the loader stores +24/+28 verbatim; the prior "296" was
+> stale), with the stored values' semantic DBG-pending.
 
 ---
 
@@ -104,7 +115,7 @@ traced.
 | `data/script/exp.scr` | 20 | none | CONFIRMED | EXP required per level |
 | `data/script/userlevel.scr` | 60 | none | CONFIRMED | Per-level stat-scaling coefficients |
 | `data/script/userpoint.scr` | 32 | none | CONFIRMED | Stat-point allocation budget curve |
-| `data/script/users.scr` | 496 (4 × 124-byte class blocks) | none | CONFIRMED | Per-class stat-ratio grid |
+| `data/script/users.scr` | 496 (0x1F0) — single structure, no record stride (see §2.6) | none | CONFIRMED | Per-class stat-ratio grid |
 | `data/script/items.scr` | 548 | N × 8 B (each → 12 B runtime) | CONFIRMED | Item catalogue (binary) |
 | `data/script/skills.scr` | 1504 | none in sample (trailing count byte present but typically 0) | CONFIRMED | Skill catalogue |
 | `data/script/skillcategory.scr` | 564 | none | CONFIRMED | Skill category table |
@@ -289,8 +300,8 @@ spec are subsumed by the wider cumulative fields.
 | +16 | 4 | u32 | Stat-group-2 cumulative total (running sum of +12) | Verified 301/301; reaches ~38,941 at key=300 | CONFIRMED |
 | +20 | 2 | u16 | Secondary curve — low word | key=0–5→0; key=6→282; increments ~3/step; plateaus near key≈150 at 696 | CONFIRMED |
 | +22 | 2 | u16 | Secondary curve — high word | key=0–5→0; key=6→20; grows slowly; plateaus near 56 by key≈150 | CONFIRMED |
-| +24 | 4 | u32 | Tertiary value 1 | key=0–295→0; key=296→235,000; key=300→255,000; equals +28 in all checked records | CONFIRMED |
-| +28 | 4 | u32 | Tertiary value 2 | Equals +24 in all checked records | CONFIRMED |
+| +24 | 4 | u32 | Tertiary value 1 (stored verbatim by the loader) | Onset at key index 250 (the loader stores the +24/+28 pair verbatim from that index; the prior "296" onset is stale and is corrected to 250); rises to 255,000 by key 300; equals +28 in all checked records. SEMANTIC is DBG-pending — do not assign meaning from bytes alone | CONFIRMED (value present, onset index 250); semantic DBG-pending |
+| +28 | 4 | u32 | Tertiary value 2 (stored verbatim by the loader) | Equals +24 in all checked records; same onset (key index 250). SEMANTIC is DBG-pending | CONFIRMED (value present); semantic DBG-pending |
 
 **Semantic interpretation:**
 
@@ -307,33 +318,51 @@ spec are subsumed by the wider cumulative fields.
 - **Secondary curve at +20/+22** — a 32-bit value pair encoding a secondary allocation curve
   (possibly martial energy: 내공 / 내력, or a third stat type). Zero for keys 0–5, begins at
   key 6, plateaus around key 150 with no further growth to key 300.
-- **Tertiary values at +24/+28** — identical in all checked records; begin at key 296 and rise by
-  5,000/step to 255,000 at key 300. Likely a high-level cap bonus or prestige reward pool.
+- **Tertiary values at +24/+28** — identical in all checked records; the loader stores the
+  pair verbatim with an onset at **key index 250** (corrected from the prior stale "296"),
+  rising to 255,000 by key 300. The MEANING of these stored values is **DBG-pending**: the
+  loader copies them without interpreting them, so no game-mechanic role (cap bonus, prestige
+  pool, etc.) can be asserted from the bytes alone — this is left honestly opaque pending a
+  live debugger witness on the consumer.
 
 **Open questions:**
 - Which named stat (STR/AGI/DEX/INT/CON) maps to group-1 vs group-2
 - Semantic of constant 25 at +2
 - Whether the secondary curve at +20/+22 is a martial-energy (내공 / 내력) budget
-- Whether the tertiary values at +24/+28 are a third stat pool or a max-cap schedule
+- Semantic of the tertiary values at +24/+28 (onset key index 250; stored verbatim) — DBG-pending; whether a third stat pool, a max-cap schedule, or something else cannot be settled from bytes
 - Meaning of the large gains at keys 285–300 (post-standard-level reward bursts?)
 
 ---
 
-### 2.6 users.scr — Per-class stat-ratio grid (496-byte file, 4 × 124-byte class blocks)
+### 2.6 users.scr — Per-class stat-ratio grid (single 496-byte / 0x1F0 structure, one read)
 
 **Wave-7 blocker: RESOLVED. Record body columns RESOLVED. Sample verified: all 4 class blocks.**
 
-**Structure:** the file is four sequential 124-byte blocks, one per character class. Each block
-is a 4-byte header followed by 30 × f32 values (120 bytes). Total: 4 × 124 = 496 bytes. These
-floats are the inputs to a `(10 / A) × B` formula grid evaluated after the file loads (the
-`(7.0, 24.0, 0.0)` triplets are `B` inputs; the `A` divisors come from a separate runtime table
-not stored in this file).
+**Structure (CORRECTED — no per-record loop, no stride):** the whole file is a SINGLE
+fixed-size structure of **496 bytes (0x1F0)** loaded in one read. There is no record stride and
+no per-record loop — earlier framings of this file as "4 × 124-byte records" (a 124-byte stride)
+or as four heterogeneous "124/124/128/120" blocks are BOTH wrong: neither stride is real. The
+apparent four "class blocks" are a **post-load grid-formula access pattern**, not an on-disk
+record stride. After the single read, the runtime indexes into the 496-byte blob with a grid
+formula (a base offset plus a per-class step) so that each of the four character classes resolves
+to its own 124-byte window inside the one structure — but the file is never iterated as a record
+array, and a parser must read it as one 496-byte block, not loop over a stride. The float values
+inside the blob are the inputs to a `(10 / A) × B` formula grid evaluated after the file loads
+(the `(7.0, 24.0, 0.0)` triplets are `B` inputs; the `A` divisors come from a separate runtime
+table not stored in this file).
 
-**Per-block layout:**
+The 496-byte structure size is **CONFIRMED** (two-witness: the loader reads exactly this many
+bytes in one read, and the on-disk size matches). The four-way "block" view below is **CONFIRMED
+as a grid-formula access pattern**, not a record stride: read the whole 496-byte structure, then
+apply the per-class window offset to address each class's 124-byte region.
 
-| Offset within block | Size | Type | Field | Notes | Confidence |
+**Per-class window layout** (the byte offsets below are relative to the start of one
+124-byte class window inside the single 496-byte structure — they are NOT a record
+stride; the grid formula supplies the window base):
+
+| Offset within window | Size | Type | Field | Notes | Confidence |
 |--------------------:|-----:|------|-------|-------|------------|
-| +0 | 1 | u8 | Class ID (1..4) | Block 0→1, 1→2, 2→3, 3→4; see class-name table below | CONFIRMED |
+| +0 | 1 | u8 | Class ID (1..4) | Window 0→1, 1→2, 2→3, 3→4; see class-name table below | CONFIRMED |
 | +1 | 1 | u8 | Constant 0x13 (19) in all 4 blocks | Semantic UNVERIFIED (count or version marker?) | CONFIRMED (value); UNVERIFIED (semantic) |
 | +2 | 1 | u8 | Constant 0x43 (67) in all 4 blocks | Semantic UNVERIFIED | CONFIRMED (value); UNVERIFIED (semantic) |
 | +3 | 1 | u8 | Always zero (header pad) | Zero in all 4 blocks | CONFIRMED (value=0) |
@@ -347,10 +376,16 @@ not stored in this file).
 | +72 | 20 | 5×f32 | Zero group | All 0.0; all 4 classes | CONFIRMED (value=0) |
 | +92 | 32 | 8×f32 | Class-specific multiplier group | Mostly 1.0; per-class deviations (table below) | CONFIRMED |
 
-**SPEC CORRECTION from prior version:** the prior spec listed the block header as a 1-byte class
-ID at +0 followed by an opaque 3-byte pad. The two constant bytes at +1 (0x13 / 19) and +2
-(0x43 / 67) are now documented explicitly; only +3 is a true zero pad. The prior spec also placed
-the class-specific deviations on the wrong float positions; the corrected positions are below.
+**SPEC CORRECTION from prior version (two corrections):**
+1. **No record stride.** The prior spec (and an alternative survey) framed this file as a record
+   array — either "4 × 124-byte records" or four heterogeneous "124/124/128/120" blocks. Both are
+   REFUTED: the file is one 496-byte (0x1F0) structure read in a single read with no per-record
+   loop. The four-way split is a grid-formula access pattern over the one blob, not an on-disk
+   stride (see Structure above).
+2. **Window header.** The prior spec listed the window header as a 1-byte class ID at +0 followed
+   by an opaque 3-byte pad. The two constant bytes at +1 (0x13 / 19) and +2 (0x43 / 67) are now
+   documented explicitly; only +3 is a true zero pad. The class-specific deviations were placed on
+   the wrong float positions; the corrected positions are below.
 
 **Class names (CONFIRMED):**
 
@@ -366,7 +401,7 @@ the class-specific deviations on the wrong float positions; the corrected positi
 > and use 승려 (monk) for class 4. The discrepancy in the class-4 label (monk vs. archer) between
 > the two sources is an open question (see open list).
 
-**Class-specific multiplier group (block offsets +92..+123, eight f32 at indices [22..29]):**
+**Class-specific multiplier group (window offsets +92..+123, eight f32 at indices [22..29]):**
 
 | Float index | Byte offset | Class 1 (무사) | Class 2 (자객) | Class 3 (도사) | Class 4 (승려) |
 |---|---|---|---|---|---|
@@ -385,6 +420,9 @@ class 3 has 15% at [24] and 10% at [25]; class 4 has 10% at [24] and 15% at [25]
 because only 2–4 positions deviate from 1.0.
 
 **Open questions:**
+- The exact grid formula that maps a class index onto its 124-byte window base inside the 496-byte
+  structure (the window step is implied by the four-class layout; the precise base/step constants
+  are a runtime detail, not stored on disk)
 - Which named stat maps to each of the 8 multiplier positions [22..29]
 - Semantic of the header constants 0x13 (19) and 0x43 (67)
 - Class-4 label discrepancy: `users.scr` calls it 승려 (monk); `items.csv` calls the fourth
@@ -481,14 +519,14 @@ plausible category index (< 300). String fields are CP949, null-terminated.
 | +520 | 1 | u8 | Skill type / tier byte | 0=passive/unknown, 1=movement-base, 2=tier-3, 3=tier-3/5 chain, 4=tier-2, 5=tier-5 chain, 6=tier-6 chain (see table below) | CONFIRMED |
 | +521 | ≤512 | char[] | Long description text (CP949, null-terminated) | Confirmed for all checked records; descriptions up to 52+ bytes | CONFIRMED |
 | +1032 | ≤8+ | char[] | Short description / action label (CP949) | Text begins shortly after +1032 (≈+1033); buffer width UNVERIFIED | CONFIRMED (presence); PARTIALLY CONFIRMED (exact offset) |
-| +1072 | 4 | (string) | **CORRECTED: variable, not a constant** | WAS: "constant 0x00003000 (12288) in all real records". Full-record pass found 54 distinct u32 values here, many of which decode as CP949 text bytes read little-endian. This offset falls INSIDE a CP949 string field (an intermediate description / sub-label), not a numeric constant. The earlier 0x00003000 was a small-sample artifact | CORRECTED to variable; PROPOSED: interior of a CP949 string field. CONFLICT-PENDING (needs loader witness) |
+| +1072 | 4 | (string) | **CONFIRMED-variable** (was misread as a constant) | Two-witness CONFIRMED-variable: the loader copies this region verbatim with no branch, and a full-record pass found 54 distinct u32 values here, many of which decode as CP949 text bytes read little-endian — i.e. this offset falls INSIDE a CP949 string field (an intermediate description / sub-label), not a numeric constant. The earlier 0x00003000 was a small-sample artifact. The field SEMANTIC (which string field, and its extent) is DBG-pending | CONFIRMED-variable (values vary, field is real); semantic DBG-pending |
 | +1116 | 4 | u32 | Skill chain reference [0] | Decimal-digit composite (e.g. 141100041 for skill 11, slot 0); encoding schema UNVERIFIED | CONFIRMED (presence); UNVERIFIED (encoding) |
 | +1120 | 4 | u32 | Skill chain reference [1] | Same pattern | CONFIRMED (presence) |
 | +1124 | 4 | u32 | Skill chain reference [2] | Same pattern | CONFIRMED (presence) |
 | +1128 | 4 | u32 | Skill chain reference [3] | Same pattern | CONFIRMED (presence) |
 | +1132 | 4 | u32 | Skill chain reference [4] | Same pattern | CONFIRMED (presence) |
 | +1136 | 4 | u32 | Skill chain reference [5] | Different decimal prefix (3xxxxxxxx vs 1xxxxxxxx), e.g. 341100111 | CONFIRMED (presence); UNVERIFIED (encoding) |
-| +1176 | 4 | f32 | **CORRECTED: variable, not a constant** | WAS: "constant 1.0 in all real records". Full-record pass found 8 distinct float values {0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.5, 2.0}. The 0.4-2.0 spread is a per-tier scaling ratio (base = 1.0, upgraded = 1.5/2.0, reduced-power = 0.4/0.6). PROPOSED: a skill damage / range multiplier per skill tier | CORRECTED to variable; PROPOSED: per-tier rate multiplier (MEDIUM). CONFLICT-PENDING (needs loader witness) |
+| +1176 | 4 | f32 | **CONFIRMED-variable** (was misread as a constant) | Two-witness CONFIRMED-variable: the loader copies this region verbatim with no branch, and a full-record pass found 8 distinct float values {0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.5, 2.0}. The field is real and its value varies per skill. The field SEMANTIC is DBG-pending — the 0.4-2.0 spread is consistent with a per-tier scaling ratio but no meaning is asserted from bytes alone | CONFIRMED-variable (values vary, field is real); semantic DBG-pending |
 | +1180 | 4 | u32 | Skill chain reference [6] | Third prefix type (8xxxxxxxx), e.g. 841100111 | CONFIRMED (presence) |
 | +1280 | 4 | u32 | Prerequisite / parent skill ID | 0 for base skills; e.g. skill 13 → 11 | CONFIRMED (pattern) |
 | +1292 | 2 | u16 | Skill-point (SP) cost to learn | Per-tier values 4, 8, 12 | CONFIRMED (pattern) |
@@ -496,8 +534,8 @@ plausible category index (< 300). String fields are CP949, null-terminated.
 | +1296 | 4 | u32 | Second chain / upgrade-path reference | Single ID or composite chain ID | CONFIRMED (presence); UNVERIFIED (encoding) |
 | +1300 | 4 | u32 | Third chain / upgrade-path reference | Same as +1296 | CONFIRMED (presence); UNVERIFIED (encoding) |
 | +1304 | 2 | u16 | Motion / animation index A | Full-record pass: 15 distinct values; MODAL value is 1 (481 records, = passive / no-motion); active skills use larger motion-index values {6,12,18,20,24,30,36,42,46,48,54,60,66,72}. The earlier "increments by 26 (20,46,72)" pattern holds only for class-1 skills 11/12/13 and is NOT a general rule | CONFIRMED (motion index, full record set); name UNVERIFIED |
-| +1306 | 2 | u16 | **CORRECTED: variable, not a constant** | WAS: "constant 7 in all checked records". Full-record pass found 10 distinct values; the MODAL value is 5 (477 records), with 0/1/2/3/5/6/7/11/14/17 all observed; 7 occurs only 12 times. PROPOSED: a small enum, most likely a max upgrade-tier / combo-depth count (5 tiers for most skills, more for advanced ones) | CORRECTED to variable; PROPOSED: max upgrade tier / combo depth (MEDIUM). CONFLICT-PENDING (needs loader witness) |
-| +1328 | 4 | u32 | **CORRECTED: variable, not a constant** | WAS: "constant 0x00010000 (65536) in all real records". Full-record pass found 8 distinct values 0x00010000..0x00080000 (i.e. (1<<16)..(8<<16)). These mirror the bit-shifted shape of the class flag at +516 but are INDEPENDENT of it (724 records have class flag != 0x00010000 while +1328 = 0x00010000). PROPOSED: a stance / school unlock bitmask (which of 8 stance/school combinations may learn the skill) | CORRECTED to variable; PROPOSED: stance/school unlock bitmask (MEDIUM). CONFLICT-PENDING (needs loader witness) |
+| +1306 | 2 | u16 | **CONFIRMED-variable** (was misread as a constant) | Two-witness CONFIRMED-variable: the loader copies this region verbatim with no branch, and a full-record pass found 10 distinct values (modal 5 in 477 records; 0/1/2/3/5/6/7/11/14/17 all observed; 7 occurs only 12 times). The field is real and small-enum-shaped. The field SEMANTIC is DBG-pending — consistent with a max upgrade-tier / combo-depth count, but no meaning is asserted from bytes alone | CONFIRMED-variable (values vary, field is real); semantic DBG-pending |
+| +1328 | 4 | u32 | **CONFIRMED-variable** (was misread as a constant) | Two-witness CONFIRMED-variable: the loader copies this region verbatim with no branch, and a full-record pass found 8 distinct values (1<<16)..(8<<16). These mirror the bit-shifted shape of the class flag at +516 but are INDEPENDENT of it (724 records have class flag != (1<<16) while +1328 = (1<<16)). The field is real and its value varies per skill. The field SEMANTIC is DBG-pending — consistent with a stance/school unlock bitmask, but no meaning is asserted from bytes alone | CONFIRMED-variable (values vary, field is real); semantic DBG-pending |
 | +1372 | 4 | u32 | Cooldown (seconds) | 8–16 for movement skills; 0 for passive skills | CONFIRMED (plausible range) |
 | +1412 | 4 | f32 | Range (game units) | 30.0–40.0 for movement skills; 0.0 for passive skills | CONFIRMED (plausible range) |
 | +1496 | 4 | u32 | Tail field | Sparse | UNVERIFIED |
@@ -515,14 +553,18 @@ across the whole file) account for the remainder. The correct record model is th
 is 0 for most records. A parser must read the per-record trailing count and advance by
 `1504 + N × 8`; it cannot assume a uniform 1504-byte stride.
 
-**FULL-RECORD CORRECTION (value distributions).** A subsequent full-record value-distribution
-pass corrected four fields that the earlier survey had marked as constants from a small sample —
-they are VARIABLE across the real record set: +1072 (interior of a CP949 string field, 54 distinct
-values), +1176 (8 float values 0.4-2.0, a per-tier rate multiplier), +1306 (10 values, modal 5, a
-small enum / max-tier count), and +1328 (8 values (1<<16)..(8<<16), an independent stance/school
-bitmask). +260 (0x30000000) remains a genuine constant across all real records. These four
-corrections conflict with the prior small-sample spec and are **CONFLICT-PENDING** until an IDA
-loader witness confirms them.
+**FULL-RECORD CORRECTION — now CONFIRMED-variable (two-witness).** A full-record
+value-distribution pass corrected four fields that the earlier survey had marked as constants from
+a small sample. The two-witness gate (loader witness + full-record black-box) has since CONFIRMED
+all four as genuine variable fields: they sit inside a region the loader copies verbatim with no
+branch, so the values legitimately vary and the fields are real — they are no longer
+CONFLICT-PENDING. The fields are: +1072 (interior of a CP949 string field, 54 distinct values),
++1176 (8 float values 0.4-2.0), +1306 (10 values, modal 5), and +1328 (8 values (1<<16)..(8<<16),
+independent of the +516 class flag). +260 (0x30000000) remains a genuine constant across all real
+records. The four fields' VALUES are CONFIRMED-variable; their SEMANTICS remain **DBG-pending** —
+the loader stores them without interpreting them, so the proposed meanings (string-field interior,
+per-tier multiplier, max-tier enum, stance/school bitmask) are left as honest hypotheses pending a
+live debugger witness on the consumer, not asserted from bytes.
 
 **Skill category index (+4):**
 
@@ -561,9 +603,9 @@ is UNVERIFIED.
 - Full decimal-composite encoding of the chain references (+1116..+1136, +1180, +1294)
 - Whether +1296/+1300 are prerequisite or successor chain IDs
 - Meaning of motion index at +1304 (now confirmed variable; modal 1 = passive)
-- Exact enum for +1306 (corrected to variable; PROPOSED max-tier / combo-depth count)
-- The string-field extent that +1072 falls inside, and the rate-multiplier scaling at +1176
-- The stance/school bitmask semantics at +1328 (independent of the +516 class flag)
+- Semantic of +1306 (CONFIRMED-variable; small enum, modal 5) — DBG-pending
+- Semantic of +1072 (CONFIRMED-variable; CP949 string-field interior) and +1176 (CONFIRMED-variable; float spread 0.4-2.0) — both DBG-pending
+- Semantic of +1328 (CONFIRMED-variable; values (1<<16)..(8<<16), independent of the +516 class flag) — DBG-pending
 - Tail fields between +1496 and +1503
 
 ---
@@ -582,12 +624,12 @@ two separate fields: an `i32` mob-level at +244 and a `u32` spawn timer at +248.
 | +19 | <=19 | char[] | Secondary name = SPAWN-ZONE / AREA LABEL | CP949, null-terminated. Full-record pass: 214 distinct values across 3,997 records; values are recognisable game location names (most-frequent non-event value is a starting-zone place name; low-ID mobs 11-141 all carry the same starting-zone tag) plus event tags ('event', '이벤트 몹', seasonal-event strings) and dungeon-floor tags. PROPOSED: a spawn-area descriptor, NOT a monster category | CONFIRMED (presence); PROPOSED meaning: spawn-zone label (HIGH) |
 | +2..+51 | 50 | mixed | Additional name/tag fields | Region between primary name end and +52; mixed zero and text; UNVERIFIED | UNVERIFIED |
 | +52 | 2 | u16 | Unknown field | Observed value 379 (0x017B) in first record; other records UNVERIFIED | UNVERIFIED |
-| +60 | 4 | f32 | **CORRECTED: variable, not a constant** | WAS: "constant 3.0 in all observed records". Full-record pass found 31 distinct float values; MODAL is 3.0 (1046 records) but the range spans 0.5..400 (e.g. 4=894, 9=756, 2=243, 5=199, 8.4=197). Boss default also = 3.0. The mostly small integer-ish spread suggests a per-mob distance/scale figure. PROPOSED: aggro/detection radius or base movement speed (small 2-10 for standard mobs; large 40/400 for rare area mobs) | CORRECTED to variable; PROPOSED: aggro radius or movement-speed base (MEDIUM). CONFLICT-PENDING (needs loader witness) |
-| +188 | 4 | f32 | **CORRECTED: variable, not a constant** | WAS: "constant 1.0 in all observed records" (single-record observation). Full-record pass: modal 1.0 (3081/3997 = 77%) but 40 other values exist (2=332, 0=191, 2.2=101, 80=42, 100=36, ... 6000=11). PROPOSED: an HP / combat-stat multiplier relative to baseline (1.0 standard; 2.0-2.5 elite; 80/100 boss-scale; the 6000 outliers possibly raw-HP world-boss entries) | CORRECTED to variable; PROPOSED: HP / combat-stat multiplier (MEDIUM). CONFLICT-PENDING (needs loader witness) |
+| +60 | 4 | f32 | **CONFIRMED-variable** (was misread as a constant) | Two-witness CONFIRMED-variable: the value sits inside a verbatim-copied record body with no branch, and a full-record pass found 31 distinct float values (modal 3.0 in 1046 records; range 0.5..400). The field is real and varies per mob. The field SEMANTIC is DBG-pending — the small integer-ish spread is consistent with a per-mob distance/scale figure (aggro radius or movement-speed base) but no meaning is asserted from bytes alone | CONFIRMED-variable (values vary, field is real); semantic DBG-pending |
+| +188 | 4 | f32 | **CONFIRMED-variable** (was misread as a constant) | Two-witness CONFIRMED-variable: the value sits inside a verbatim-copied record body with no branch, and a full-record pass found 41 distinct values (modal 1.0 at 3081/3997 = 77%; outliers up to 6000). The field is real and varies per mob. The field SEMANTIC is DBG-pending — consistent with an HP / combat-stat multiplier relative to baseline, but no meaning is asserted from bytes alone | CONFIRMED-variable (values vary, field is real); semantic DBG-pending |
 | +244 | 4 | i32 | Mob level | −1 = not set; 0 = trivial; boss range 36..46 for ID range 14000–14009; regular mobs 87..249 for high-ID range | CONFIRMED (boss validation path) |
 | +248 | 4 | u32 | Spawn timer in seconds | Range 33..41,006 in sample; boss default ≈ 40 s | CONFIRMED (plausible range) |
 | +252 | ? | ? | Unknown fields | UNVERIFIED | UNVERIFIED |
-| +272 | 24 | 6xf32 | **CORRECTED: variable, not all-1.0** | WAS: "all 1.0" (single first-record observation). Full-record pass: 0 of 3,997 records have all six f32 in this region equal to 1.0 — the region holds variable data across the file. Individual field meanings UNVERIFIED | CORRECTED: variable (the all-1.0 claim was a single-sample artifact). CONFLICT-PENDING (needs loader witness) |
+| +272 | 24 | 6xf32 | **CONFIRMED-variable** (was misread as all-1.0) | Two-witness CONFIRMED-variable: the region sits inside a verbatim-copied record body with no branch, and a full-record pass found 0 of 3,997 records with all six f32 equal to 1.0 — the region holds variable data across the file. The six fields are real and vary per mob. Their individual SEMANTICS are DBG-pending — no meaning asserted from bytes alone | CONFIRMED-variable (values vary, fields are real); semantics DBG-pending |
 | +296 | 4 | f32 | Spawn-variance: center / sentinel = 1.0 | Full-record pass: the four-value group at +296..+308 holds exactly (1.0, 0.95, 1.05, 0.95) UNIFORMLY across ALL 3,997 records — no per-mob or per-type variation | CONFIRMED (value, full record set); PROPOSED meaning (HIGH) |
 | +300 | 4 | f32 | Spawn-variance: low bound = 0.95 | Low multiplier of a symmetric (0.95, 1.05) variance pair applied to a stat at spawn time (e.g. HP = base x rand(0.95,1.05)) | CONFIRMED (value, full record set); PROPOSED meaning (HIGH) |
 | +304 | 4 | f32 | Spawn-variance: high bound = 1.05 | High multiplier of the same variance pair | CONFIRMED (value, full record set); PROPOSED meaning (HIGH) |
@@ -608,14 +650,20 @@ two separate fields: an `i32` mob-level at +244 and a `u32` spawn timer at +248.
 Boss-type mobs (type byte = 11) are inserted into a separate runtime index in addition to the
 main map. Mobs with mob-level = -1 may be special scripted or data-anomaly entries.
 
-**FULL-RECORD CORRECTION (value distributions).** A full-record value-distribution pass over all
-3,997 records corrected three fields previously marked as constants from a single-record sample —
-they are VARIABLE: +60 (31 float values 0.5..400; modal 3.0), +188 (41 float values; modal 1.0 at
-77%), and +272 (the prior "6 x 1.0" holds in 0 of 3,997 records). The same pass elevated two
-previously-opaque fields to PROPOSED-with-evidence: +19 (secondary name = spawn-zone label, HIGH)
-and +296..+308 (two symmetric spawn-time variance pairs (0.95/1.05) with a 1.0 sentinel, uniform
-across ALL records, HIGH). The three constant->variable corrections conflict with the prior
-small-sample spec and are **CONFLICT-PENDING** until an IDA loader witness confirms them.
+**FULL-RECORD CORRECTION — now CONFIRMED-variable (two-witness).** A full-record
+value-distribution pass over all 3,997 records corrected three fields previously marked as
+constants from a single-record sample. The two-witness gate (loader witness + full-record
+black-box) has since CONFIRMED all three as genuine variable fields: they sit inside a region the
+loader copies verbatim with no branch, so the values legitimately vary and the fields are real —
+they are no longer CONFLICT-PENDING. The fields are +60 (31 float values 0.5..400; modal 3.0),
++188 (41 float values; modal 1.0 at 77%), and +272 (the prior "6 x 1.0" holds in 0 of 3,997
+records). The same pass elevated two previously-opaque fields to PROPOSED-with-evidence: +19
+(secondary name = spawn-zone label, HIGH) and +296..+308 (two symmetric spawn-time variance pairs
+(0.95/1.05) with a 1.0 sentinel, uniform across ALL records, HIGH). The three fields' VALUES are
+CONFIRMED-variable; their SEMANTICS remain **DBG-pending** — the loader stores them without
+interpreting them, so the proposed meanings (aggro/scale at +60, HP/combat multiplier at +188, and
+the +272 group) are honest hypotheses pending a live debugger witness on the consumer, not
+asserted from bytes.
 
 ---
 

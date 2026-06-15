@@ -52,8 +52,11 @@ public sealed class RegionCatalog
 
     private readonly uint _width;
     private readonly uint _height;
-    private readonly uint _originX;
-    private readonly uint _originZ;
+    // Origins are SIGNED (i32): region<area>.bin stores originX/originZ as i32le so maps with
+    // negative world extents address correctly.
+    // spec: Docs/RE/formats/region_grid.md §Layout A — "originX i32 signed / originZ i32 signed": CONFIRMED.
+    private readonly int _originX;
+    private readonly int _originZ;
     private readonly byte[] _cells; // length = _width × _height
     private readonly ZoneType[] _zoneTypes; // length = 32, indexed by region id
 
@@ -70,12 +73,12 @@ public sealed class RegionCatalog
     /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1 — "1 byte per cell = region id (0..31)": CONFIRMED.
     /// </param>
     /// <param name="originX">
-    /// World-X origin subtracted before the 256-unit quantise.
-    /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1 — "world-X origin": CONFIRMED.
+    /// World-X origin (SIGNED i32) subtracted before the 256-unit quantise.
+    /// spec: Docs/RE/formats/region_grid.md §Layout A — "originX i32 signed": CONFIRMED.
     /// </param>
     /// <param name="originZ">
-    /// World-Z origin subtracted before the 256-unit quantise.
-    /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1 — "world-Z origin": CONFIRMED.
+    /// World-Z origin (SIGNED i32) subtracted before the 256-unit quantise.
+    /// spec: Docs/RE/formats/region_grid.md §Layout A — "originZ i32 signed": CONFIRMED.
     /// </param>
     /// <param name="rawZoneTypes">
     /// Array of exactly 32 raw u32 zone-type values, one per region id (0..31), as read from
@@ -90,8 +93,8 @@ public sealed class RegionCatalog
         uint width,
         uint height,
         ReadOnlySpan<byte> cells,
-        uint originX,
-        uint originZ,
+        int originX,
+        int originZ,
         ReadOnlySpan<uint> rawZoneTypes)
     {
         long expectedCells = (long)width * height;

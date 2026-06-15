@@ -78,8 +78,10 @@ public sealed class RegionParsersTests
         // Assert
         Assert.Equal(width, result.Width);
         Assert.Equal(height, result.Height);
-        Assert.Equal(1000u, result.OriginX);
-        Assert.Equal(2000u, result.OriginZ);
+        // OriginX/Z are int (signed i32) — positive values round-trip identically.
+        // spec: Docs/RE/formats/region_grid.md §Layout A — "originX i32 signed": CONFIRMED.
+        Assert.Equal(1000, result.OriginX);
+        Assert.Equal(2000, result.OriginZ);
         Assert.Equal(cells, result.Cells.ToArray());
     }
 

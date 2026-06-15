@@ -41,10 +41,15 @@ public static class XeffParser
     // spec: Docs/RE/formats/effects.md §A.14 XEFF_TEX_NAME_LEN = 64 (0x40): CONFIRMED.
     private const int TexNameLen = 64; // 0x40
 
-    // Track header size: 13 bytes (1 + 4 + 4 + 4).
-    // spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 13: CONFIRMED.
-    // spec: Docs/RE/formats/effects.md §A.4.3 Track header — anim_loop u8 @ +0, unknown_constant u32 @ +1, anim_stride u32 @ +5, anim_base_time u32 @ +9.
-    private const int TrackHeaderSize = 13;
+    // Track header size: 9 bytes (1 + 4 + 4).
+    // CORRECTED CAMPAIGN VFS-MASTERY (two-witness: loader + black-box):
+    //   The prior 13-byte header (with a phantom "unknown_constant" u32 at +1) is REFUTED.
+    //   No read-site consumes a 4-byte constant at +1. Those four bytes ARE the first keyframe's
+    //   u32 index prefix (A.4.4), which begins immediately after this 9-byte header.
+    //   Frame 0 is a NORMAL 40-byte animated entry (u32 kf_index + 9 × f32), not a special case.
+    // spec: Docs/RE/formats/effects.md §A.4.3 Track header (9 bytes): CONFIRMED (CAMPAIGN VFS-MASTERY).
+    // spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 9.
+    private const int TrackHeaderSize = 9;
 
     // emitter_type values.
     // spec: Docs/RE/formats/effects.md §A.12 emitter_type enum: CONFIRMED.
@@ -195,61 +200,56 @@ public static class XeffParser
         // spec: Docs/RE/formats/effects.md §A.4.2 Pass 4 scale Z — own u32 prefix: CONFIRMED.
         float[] scaleZ = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] scaleZ curve");
 
-        // ─── A.4.3 Track header — 13 bytes (fixed) ───────────────────────────
-        // spec: Docs/RE/formats/effects.md §A.4.3 Track header (13 bytes, fixed): CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 13.
+        // ─── A.4.3 Track header — 9 bytes (fixed) ────────────────────────────
+        // CORRECTED CAMPAIGN VFS-MASTERY (two-witness: loader + black-box):
+        //   Header is 9 bytes on BOTH the static and animated branch.
+        //   The "unknown_constant" field at +1 IS DELETED — it is REFUTED (no read-site).
+        //   The four bytes previously mislabelled "unknown_constant" are the first keyframe's
+        //   u32 index prefix, which starts immediately after this 9-byte header.
+        // spec: Docs/RE/formats/effects.md §A.4.3 Track header (9 bytes): CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_HEADER_SIZE = 9.
         EnsureBytes(span, offset, TrackHeaderSize, $"sub_effect[{subIndex}] track header");
 
         // anim_loop u8 @ +0. Non-zero enables animated path.
         // spec: Docs/RE/formats/effects.md §A.4.3 — anim_loop u8 @ +0: CONFIRMED.
         byte animLoop = span[offset];
 
-        // unknown_constant u32le @ +1. Observed value: 67 (0x43). Purpose UNRESOLVED.
-        // spec: Docs/RE/formats/effects.md §A.4.3 — unknown_constant u32 @ +1: SAMPLE-VERIFIED (value), semantics UNRESOLVED.
-        // spec: Docs/RE/formats/effects.md §A.14 XEFF_TRACK_UNKNOWN_CONSTANT = 67.
-        uint unknownConstant = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 1)..]);
+        // anim_stride u32le @ +1. Duration of one animation frame in milliseconds.
+        // spec: Docs/RE/formats/effects.md §A.4.3 — anim_stride u32 @ +1 (ms): CONFIRMED.
+        uint animStride = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 1)..]);
 
-        // anim_stride u32le @ +5. Duration of one animation frame in milliseconds.
-        // spec: Docs/RE/formats/effects.md §A.4.3 — anim_stride u32 @ +5 (ms): CONFIRMED.
-        uint animStride = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 5)..]);
-
-        // anim_base_time u32le @ +9. Base time offset in milliseconds.
-        // spec: Docs/RE/formats/effects.md §A.4.3 — anim_base_time u32 @ +9 (ms): CONFIRMED.
-        uint animBaseTime = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 9)..]);
-        offset += TrackHeaderSize; // consume all 13 bytes
+        // anim_base_time u32le @ +5. Base time offset in milliseconds.
+        // spec: Docs/RE/formats/effects.md §A.4.3 — anim_base_time u32 @ +5 (ms): CONFIRMED.
+        uint animBaseTime = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 5)..]);
+        offset += TrackHeaderSize; // consume all 9 bytes
 
         // ─── A.4.4 / A.4.6 Keyframe array ────────────────────────────────────
         // Animated path (animLoop != 0): texCount frames.
-        //   Frame 0: NO index prefix — only 9 × f32 = 36 bytes.
-        //   Frames 1..texCount-1: u32 kf_index + 9 × f32 = 40 bytes each.
+        //   EVERY frame (including frame 0): u32 kf_index + 9 × f32 = 40 bytes.
+        //   CORRECTED CAMPAIGN VFS-MASTERY: frame 0 is NOT a special no-index case.
+        //   The "missing" 4-byte index prefix for frame 0 was absorbed into the phantom
+        //   13-byte track header (the deleted "unknown_constant"). With the track header
+        //   corrected to 9 bytes, frame 0 is a normal 40-byte entry with its own u32 kf_index.
         // Static path (animLoop == 0): exactly one entry.
         //   emitter_type != 2: 6 × f32 (velocity Vec3 + size Vec3) = 24 bytes, NO rotation.
         //   emitter_type == 2: 9 × f32 (velocity Vec3 + size Vec3 + Euler rotation) = 36 bytes.
-        // spec: Docs/RE/formats/effects.md §A.4.4 Keyframe array: CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.4.4 Keyframe array (CORRECTED): CONFIRMED (CAMPAIGN VFS-MASTERY).
+        // spec: Docs/RE/formats/effects.md §A.14 XEFF_KEYFRAME_ONDISK_STRIDE = 40 (0x28): u32 index + 9 × f32, every frame.
         // spec: Docs/RE/formats/effects.md §A.4.6 emitter_type-dependent static branch: CONFIRMED.
         XeffKeyframe[] keyframes;
         if (animLoop != 0)
         {
-            // Animated path.
+            // Animated path: EVERY frame has u32 kf_index + 9 × f32 = 40 bytes.
+            // spec: Docs/RE/formats/effects.md §A.4.4 — "every animated keyframe carries a u32 index prefix": CONFIRMED.
+            // spec: Docs/RE/formats/effects.md §A.14 XEFF_KEYFRAME_ONDISK_STRIDE = 40.
             keyframes = new XeffKeyframe[(int)texCount];
             for (int k = 0; k < (int)texCount; k++)
             {
-                uint kfIndex;
-                if (k == 0)
-                {
-                    // Frame 0: no index prefix. 9 × f32 = 36 bytes.
-                    // spec: Docs/RE/formats/effects.md §A.4.4 — "Frame 0 is a special case: it has NO index prefix": CONFIRMED.
-                    EnsureBytes(span, offset, 36, $"sub_effect[{subIndex}] keyframe[0] (no-index frame)");
-                    kfIndex = 0;
-                }
-                else
-                {
-                    // Frames 1..N-1: u32 kf_index + 9 × f32 = 40 bytes.
-                    // spec: Docs/RE/formats/effects.md §A.4.4 — "frames 1..N-1: u32 index + 9 × f32": CONFIRMED.
-                    EnsureBytes(span, offset, 40, $"sub_effect[{subIndex}] keyframe[{k}]");
-                    kfIndex = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
-                    offset += 4;
-                }
+                // All frames (including frame 0): u32 kf_index + 9 × f32 = 40 bytes.
+                // spec: Docs/RE/formats/effects.md §A.4.4 — "frame 0 is a normal 40-byte entry": CONFIRMED.
+                EnsureBytes(span, offset, 40, $"sub_effect[{subIndex}] keyframe[{k}]");
+                uint kfIndex = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
+                offset += 4;
 
                 keyframes[k] = ReadNineFloats(span, ref offset, kfIndex, subIndex, k);
             }
@@ -315,7 +315,6 @@ public static class XeffParser
             ScaleY = scaleY,
             ScaleZ = scaleZ,
             AnimLoop = animLoop,
-            UnknownConstant = unknownConstant,
             AnimStride = animStride,
             AnimBaseTime = animBaseTime,
             Keyframes = keyframes,

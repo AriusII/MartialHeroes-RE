@@ -442,7 +442,7 @@ contain CP949 characters is unknown; treat as ASCII unless evidence to the contr
 
 ---
 
-## Section 5 — `discript.sc` — UI Descriptor Script Table
+## Section 5 — `discript.sc` — UI Context-Menu Label Table
 
 **sample_verified: true**
 
@@ -452,9 +452,17 @@ contain CP949 characters is unknown; treat as ASCII unless evidence to the contr
 - **Endianness:** Little-endian (u32 fields).
 - **Version field:** None observed.
 
-**Role:** UI descriptor table. Maps integer IDs to Korean display names and (for hotkey-capable
-windows) to a keyboard shortcut string. Covers party commands, currency labels, UI window names,
-and guild/faction actions.
+**Role (CONFIRMED — two-witness: loader + black-box):** Right-click context-menu label table for
+the UI. Maps integer IDs to the CP949 menu-item display name shown in pop-up/context menus and (for
+hotkey-capable windows) to a keyboard shortcut string. Covers party commands, currency labels, UI
+window names, and guild/faction actions. The context-menu label loader walks this file as a flat
+array of 68-byte records.
+
+> **Corrected (CONFIRMED): these are UI context-menu labels, not "district/zone" names.** An
+> earlier reading treated `discript.sc` as a district/region table; that reading is refuted. The
+> consumer is the context-menu label loader, and the records carry menu-item captions plus optional
+> hotkey strings, with no world-geometry or zone-bounds fields. (Zone bounding boxes and zone names
+> live in `mapsetting.scr`, §7.1 — a distinct file with a 84-byte stride.)
 
 ### File layout
 
@@ -901,6 +909,20 @@ not yet decoded:
 - The eight bytes at offset 0x08 (zero in all samples).
 - The layouts of the companion `region<NNN>.bin` and `map<NNN>.bin` files.
 
+## Section 8 — `chatfilter` — ABSENT from this build
+
+> **Verification status: CONFIRMED absent (two-witness: loader + black-box).**
+
+There is **no `chatfilter` asset format in this client build.** The only trace of a chat-filter
+feature is a single type-name string belonging to a class identifier in the binary's runtime
+type metadata. There is **no VFS path, no file extension, and no loader routine** that reads any
+such file: a black-box scan of the asset tree finds no matching asset, and no consumer reads one.
+
+Accordingly, **this document deliberately does not model a `chatfilter` format** — there is no
+layout, no stride, and no record structure to describe. An implementor must not invent one. If a
+chat word-filter behaviour is ever required, it has to be sourced elsewhere (a server-side rule
+set or a later client build), because the analysed build ships none.
+
 ---
 
 ## Cross-format summary
@@ -913,7 +935,7 @@ not yet decoded:
 | `mobinfo.mi`    | 4-byte u32 count | 28 B  | stored `count` field  | none (refs only) | NO        |
 | `.tol`          | 16-byte header  | 1 B/tile | `width × height`    | none          | NO            |
 | `descript.ion`  | none            | variable | until EOF (CRLF delimited) | ASCII  | NO            |
-| `discript.sc`   | none            | 68 B   | `file_size / 68`      | CP949 (display_name) | YES (stride) |
+| `discript.sc`   | none            | 68 B   | `file_size / 68`      | CP949 (display_name) | YES (context-menu label loader + stride) |
 | `msg.xdb`       | none            | 516 B  | `file_size / 516` = 2,644 records | CP949 (text, 0xEE fill) | YES (loader + stride + content SAMPLE-VERIFIED) |
 | `mapsetting.scr` | none           | 84 B   | `file_size / 84` = 52 records | CP949 (zone_name) | NO (sample-verified stride) |
 | `regiontableNNN.bin` | none       | 32 B   | `file_size / 32` = 52 records | CP949 (sub_zone_name) | NO (sample-verified stride) |
@@ -950,4 +972,6 @@ not yet decoded:
   `data/ui/broodwarmap.dds`, `data/ui/direction.dds`, `data/ui/map_userpoint.tga`) is catalogued in
   `formats/ui_manifests.md`; world-coordinate conventions are documented in `terrain.md`.
 - Glossary: see `Docs/RE/names.yaml`
-- Provenance: see `Docs/RE/journal.md`
+- Provenance: see `Docs/RE/journal.md`. §5 `discript.sc` role correction and §8
+  `chatfilter`-absent finding promoted under CAMPAIGN VFS-MASTERY (two-witness: loader +
+  black-box).

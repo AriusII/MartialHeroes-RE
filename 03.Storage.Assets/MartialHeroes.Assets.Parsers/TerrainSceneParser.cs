@@ -20,9 +20,12 @@ namespace MartialHeroes.Assets.Parsers;
 /// </remarks>
 public static class TerrainSceneParser
 {
-    // Max vertex count enforced by legacy loader.
-    // spec: Docs/RE/formats/terrain_scene.md §vertex_count — "Must be ≤ 3072 (0xC00)": CONFIRMED.
-    private const uint MaxVertexCount = 3072; // 0xC00
+    // Vertex count cap from legacy loader — warn-only, NOT enforced as a hard limit.
+    // The loader allocates and reads the FULL vertex_count, then logs a warning if count > 3072.
+    // It never throws, clamps, or truncates at this cap. Real VFS files exceed it.
+    // spec: Docs/RE/formats/terrain_scene.md §vertex_count — "cap behaviour: loader-resolved: warn-and-continue on full count": CONFIRMED.
+    // spec: Docs/RE/formats/terrain_scene.md §9 (implementor checklist) §10.3 (open question).
+    private const uint VertexCountWarnThreshold = 3072; // 0xC00 — log-only, never enforce
 
     // Vertex stride: 32 bytes (8 × f32le).
     // spec: Docs/RE/formats/terrain_scene.md §Vertex record (32 bytes): CONFIRMED.
@@ -33,7 +36,11 @@ public static class TerrainSceneParser
     /// </summary>
     /// <param name="data">Raw file content from the VFS.</param>
     /// <returns>Decoded scene containing all static objects.</returns>
-    /// <exception cref="InvalidDataException">Thrown on truncation or vertex-count overflow.</exception>
+    /// <exception cref="InvalidDataException">Thrown on buffer truncation only.
+    /// A vertex_count above 3072 does NOT throw — the legacy loader warns and continues,
+    /// reading the full declared count.
+    /// spec: Docs/RE/formats/terrain_scene.md §vertex_count — warn-and-continue: CONFIRMED (loader-resolved).
+    /// </exception>
     public static BudScene Parse(ReadOnlyMemory<byte> data) =>
         Parse(data.Span, data);
 
@@ -69,15 +76,25 @@ public static class TerrainSceneParser
             uint texId = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
             offset += 4;
 
-            // vertex_count u32le @ +0x05. Must be ≤ 3072.
-            // spec: Docs/RE/formats/terrain_scene.md §Object header — vertex_count u32 @ +0x05: CONFIRMED.
+            // vertex_count u32le @ +0x05.
+            // The legacy loader reads the FULL declared vertex_count and logs a warning if > 3072.
+            // It never throws, clamps, or truncates. This parser mirrors that behaviour.
+            // spec: Docs/RE/formats/terrain_scene.md §3.2.1 vertex_count — warn-and-continue: CONFIRMED (loader-resolved).
+            // spec: Docs/RE/formats/terrain_scene.md §9 implementor checklist point 2.
             uint vertexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
             offset += 4;
 
-            if (vertexCount > MaxVertexCount)
-                throw new InvalidDataException(
-                    $".bud parse error: object[{i}] vertex_count {vertexCount} exceeds max " +
-                    $"{MaxVertexCount}. spec: Docs/RE/formats/terrain_scene.md §vertex_count.");
+            if (vertexCount > VertexCountWarnThreshold)
+            {
+                // Mirror the legacy loader's log-only guard: warn and continue reading the full count.
+                // Do NOT throw, clamp, or truncate — real VFS files legitimately exceed 3072.
+                // spec: Docs/RE/formats/terrain_scene.md §vertex_count — "log-only and runs AFTER the full-count read": CONFIRMED.
+                System.Diagnostics.Debug.WriteLine(
+                    $"[TerrainSceneParser] .bud object[{i}] vertex_count {vertexCount} " +
+                    $"exceeds the legacy warn-threshold {VertexCountWarnThreshold} — continuing " +
+                    "(warn-only, not an error). " +
+                    "spec: Docs/RE/formats/terrain_scene.md §vertex_count warn-and-continue.");
+            }
 
             // ─── Vertex array (32 bytes × vertexCount) ─────────────────────────
             // spec: Docs/RE/formats/terrain_scene.md §Vertex array (32 bytes per vertex): CONFIRMED.

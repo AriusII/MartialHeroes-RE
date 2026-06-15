@@ -43,7 +43,9 @@ The **large catalogues** are documented in their own specs and are NOT duplicate
 - **Endianness:** little-endian (all integer and float fields).
 - **String encoding:** all text fields are CP949 / EUC-KR (legacy Korean code page),
   null-terminated and zero-padded to a fixed field width. Strings are **embedded inside binary
-  records**, not delimiter-separated rows.
+  records**, not delimiter-separated rows. The embedded text is **single-byte/CP949 (NOT UCS-2 /
+  UTF-16)** across every triaged member, including the wide `npcs.scr` records (see the per-file
+  note below). Confidence: CONFIRMED.
 
 > Important triage result: **all 44 `.scr` entries (and the one `.sc` sibling) are binary
 > fixed-stride struct tables.** None is plain CP949 line-delimited text — there is **no**
@@ -71,6 +73,11 @@ Every `.scr` (and the `.sc` sibling) in this family shares one loader shape:
 - **Non-flat variants exist** in the family: some files use a small file header followed by a
   fixed slot count, or a two-level (page + sub-entry) hierarchy, or an in-file offset table
   rather than a uniform stride. These are flagged per file below and in `config_tables.md`.
+- **Partial trailing record:** when `file_size` is not an exact multiple of `record_stride`, the
+  loader stops at the last whole record — it attempts the next read, gets a short read, and
+  breaks. The leftover bytes are an **unconsumed partial final record**, never a header, a
+  terminator, or a second format. A faithful parser must consume only whole records and discard
+  any sub-stride tail. (See `npcs.scr` below for the confirmed instance.)
 
 A parser that assumes a uniform stride for every `.scr` will be wrong for the non-flat members
 (`helps.scr`, `helps_1.scr`, `events.scr`, and the trailing-sub-entry catalogues `items.scr` /
@@ -110,7 +117,7 @@ internal-layout conflict. **(other lane)** files are large catalogues documented
 | `data/script/skills.scr` | 1504 B + N×8 trailing | ~194 real | yes | (config_tables.md) | Skill database |
 | `data/script/mobs.scr` | 488 B flat | 3997 | yes | (config_tables.md) | Mob stat table |
 | `data/script/mobsitem.scr` | flat (large) | — | yes | UNVERIFIED (stride) | Mob drop-item table |
-| `data/script/npcs.scr` | 1916 B flat | — | yes | (config_tables.md) | NPC stat/placement table |
+| `data/script/npcs.scr` | 1916 B flat (partial tail) | — | yes | CONFIRMED (stride) | NPC stat/placement table (see config_tables.md + note below) |
 | `data/script/minds.scr` | flat | — | yes | UNVERIFIED (stride) | Mind/inner-skill table |
 | `data/script/letters.scr` | flat | — | yes | UNVERIFIED (stride) | Letter/mail templates |
 | `data/script/nicktofame.scr` | flat | — | yes | UNVERIFIED (stride) | Nickname-to-fame table |
@@ -137,6 +144,47 @@ internal-layout conflict. **(other lane)** files are large catalogues documented
 > authoritatively documented in those specs; they are listed here only so the family inventory is
 > complete. Files marked **UNVERIFIED (stride)** were size-and-role triaged only — a parser MUST
 > determine and confirm their stride before reading record bodies.
+
+---
+
+## npcs.scr — NPC stat/placement table (stride 1916 B, flat)
+
+> Stride and tail-handling were established by a two-witness pass (loader behaviour plus
+> black-box file-geometry observation). Field-level body layout remains in `config_tables.md`'s
+> lane; this section pins only the stride, the tail rule, and the text encoding.
+
+- **Record stride:** 1916 bytes. Confidence: **CONFIRMED** (loader stride and file geometry agree).
+- **Record count source:** `record_count = floor(file_size / 1916)` — the loader reads whole
+  records until the next read comes up short.
+- **Trailing 732-byte tail:** the file's total size is **not** an exact multiple of 1916; the
+  final 732 bytes are an **unconsumed partial final record**. The loader attempts to read the next
+  record, gets a short read, and stops — those 732 bytes are never parsed or stored. This tail is a
+  **truncated/partial last record, NOT a different format and NOT a "new-server variant" structure.**
+  Confidence: **CONFIRMED**. A faithful parser MUST read only whole 1916-byte records and discard
+  the sub-stride remainder; it must not attempt to interpret the 732-byte tail as a record, a
+  header, or an alternate layout.
+- **Embedded text encoding:** the CP949/EUC-KR single-byte legacy Korean code page, null-terminated
+  and zero-padded — the same encoding as the rest of the family. The body text is **NOT** UCS-2 /
+  UTF-16 wide characters. Any earlier UCS-2 reading is corrected to CP949. Confidence: **CONFIRMED**.
+
+The full field breakdown of the 1916-byte record body is the authority of `config_tables.md`; this
+section governs only the stride, the partial-tail rule, and the encoding so a parser does not
+mis-size records or mis-decode the strings.
+
+---
+
+## citems.scr — Billing/premium item catalogue (stride 1052 B, 512 records)
+
+> Field-level body layout is the authority of `items_scr.md` (item-system lane). Pinned here only
+> for the key/index field clarified by the two-witness pass.
+
+- **Field at +0 = `item_id`.** This leading u32 serves as **both the map key and the catalogue
+  index** for the record — the loader resolves a billing/premium item by this id and the same value
+  also positions the record within the catalogue. It is not a separate "row number" distinct from a
+  key; the one field plays both roles. Confidence: **loader-resolved** (settled by observed loader
+  behaviour, not a static guess).
+
+See `formats/items_scr.md` for the remaining `citems.scr` body fields.
 
 ---
 
@@ -321,6 +369,10 @@ probed and must NOT be guessed; whether it contains CP949 text is UNKNOWN.
   `config_tables.md` for the deeper (secondary/tertiary curve) model.
 - **itemeffect.scr** code→effect mapping — UNVERIFIED, belongs to the item-system lane.
 - **discript.sc** body bytes +4..+67 and its true role — UNVERIFIED (not probed).
+- **npcs.scr** body field layout (within the confirmed 1916-byte record) — the authority is
+  `config_tables.md`; the stride, the partial-tail rule, and CP949 encoding are CONFIRMED here.
+- **citems.scr** body fields beyond `item_id` at +0 — UNVERIFIED here; the authority is
+  `items_scr.md`.
 - **UNVERIFIED-stride family members** (`mobsitem.scr`, `minds.scr`, `letters.scr`,
   `nicktofame.scr`, `productrandname.scr`, `productcollect.scr`, `playtime_reward.scr`,
   `repair.scr`, `system_control.scr`, `tiphelp.scr`, `upgradeitems.scr`): stride/layout not yet
@@ -341,6 +393,10 @@ probed and must NOT be guessed; whether it contains CP949 text is UNKNOWN.
 - Proposed canonical names (flag for `names.yaml`, orchestrator-owned): `exp_level_record` (20 B),
   `guild_crest_record` (20 B), `guild_pos_record` (88 B), `item_effect_id_entry` (4 B),
   `chivalry_rank_record` (24 B), `dash_skill_record` (199 B), `help_entry_record` (48 B),
-  `help_chapter_header` (16 B), `district_desc_record` (68 B).
+  `help_chapter_header` (16 B), `district_desc_record` (68 B), `npcs_stat_record` (1916 B).
 - Glossary: see Docs/RE/names.yaml
-- Provenance: see Docs/RE/journal.md (add an entry for this spec)
+- Provenance: see Docs/RE/journal.md (add an entry for this spec).
+  - CAMPAIGN VFS-MASTERY (two-witness: loader + black-box): `npcs.scr` stride 1916 CONFIRMED with
+    a 732-byte partial trailing record (unconsumed short read, NOT a new-server variant); `npcs.scr`
+    body text CP949 (UCS-2 reading corrected); `citems.scr` +0 = `item_id` dual key/index
+    (loader-resolved).

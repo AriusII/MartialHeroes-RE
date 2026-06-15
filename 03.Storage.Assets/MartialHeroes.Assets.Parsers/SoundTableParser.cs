@@ -11,14 +11,16 @@ namespace MartialHeroes.Assets.Parsers;
 /// spec: Docs/RE/formats/sound_tables.md
 ///
 /// All five variants share an identical binary layout:
-///   256 records × 52 bytes = 13312 bytes total (the entire file).
-/// spec: Docs/RE/formats/sound_tables.md §File layout §Overall structure —
-///   "Record stride: 52 bytes on disk. SAMPLE-VERIFIED."
+///   256 records × 48 bytes = 12288 bytes read by the loader, followed by a 1024-byte unread
+///   trailer, totalling 13312 bytes on disk.
+/// spec: Docs/RE/formats/sound_tables.md §File layout §Overall structure — loader stride reconciliation (two-witness):
+///   "Record stride: 48 bytes. CONFIRMED (two-witness: loader advance + file measurement)."
 /// <para>
-/// On-disk stride correction (2026-06-14): the on-disk stride is 52 bytes, NOT 48.
-/// The prior "48-byte record table + 1024-byte editor-metadata" model is SUPERSEDED.
-/// The on-disk file is a flat 256 × 52 = 13312 byte table with no trailing region.
-/// spec: Docs/RE/formats/sound_tables.md §File layout §Overall structure — stride 52: SAMPLE-VERIFIED.
+/// Two-witness stride correction (2026-06-15): the loader advances 48 bytes (0x30) per record,
+/// iterates 256 records, reads 12288 bytes, and leaves a 1024-byte unread trailer.
+/// The prior 52-byte stride reading (2026-06-14) is REFUTED — the per-record tail_unknown field
+/// at +0x30 does NOT exist; those bytes belong to the file-level unread trailer.
+/// spec: Docs/RE/formats/sound_tables.md §Provenance note — stride correction (preserved for audit).
 /// </para>
 ///
 /// Zero rendering/engine dependencies.  Span-based reading, no LINQ, no per-entry boxing.
@@ -42,30 +44,25 @@ public static class SoundTableParser
     private const int OffHourSchedule = 0x04;
 
     // weight f32 @ entry+0x1C
-    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — weight f32 @ +0x1C: SAMPLE-VERIFIED
+    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — weight f32 @ +0x1C: SAMPLE-VERIFIED type/value; semantic UNVERIFIED
     private const int OffWeight = 0x1C;
 
     // pos_x f32 @ entry+0x20
-    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — pos_x f32 @ +0x20: CONFIRMED
+    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — pos_x f32 @ +0x20: CONFIRMED (runtime semantic); EFF-only population SAMPLE-VERIFIED
     private const int OffPosX = 0x20;
 
-    // pos_y f32 @ entry+0x24 — formerly labelled 'unknown_36'; resolved 2026-06-14.
-    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — pos_y f32 @ +0x24:
-    //   CONFIRMED for EFF (SAMPLE-VERIFIED area 001); UNRESOLVED for non-EFF.
-    private const int OffPosY = 0x24;
+    // +0x24 (4 bytes) — NOT read by the loader on any path. Meaning UNRESOLVED.
+    // The earlier 'pos_y' label is WITHDRAWN.
+    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — unlabeled_24 @ +0x24: NOT-READ; meaning UNRESOLVED.
+    private const int OffUnlabeled24 = 0x24;
 
     // pos_z f32 @ entry+0x28
-    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — pos_z f32 @ +0x28: CONFIRMED
+    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — pos_z f32 @ +0x28: CONFIRMED (runtime semantic); EFF-only population SAMPLE-VERIFIED
     private const int OffPosZ = 0x28;
 
-    // radius f32 @ entry+0x2C — formerly labelled 'volume_factor'; resolved 2026-06-14.
-    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — radius f32 @ +0x2C:
-    //   CONFIRMED f32 type; EFF radius role SAMPLE-VERIFIED area 001.
+    // radius f32 @ entry+0x2C
+    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — radius f32 @ +0x2C: CONFIRMED f32 type; EFF radius role SAMPLE-VERIFIED area 001.
     private const int OffRadius = 0x2C;
-
-    // tail_unknown 4B @ entry+0x30. Purpose UNRESOLVED; observed 0 in non-EFF records.
-    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — tail_unknown @ +0x30: UNRESOLVED.
-    private const int OffTailUnknown = 0x30;
 
     // ─── public API ───────────────────────────────────────────────────────────
 
@@ -83,7 +80,7 @@ public static class SoundTableParser
     /// spec: Docs/RE/formats/sound_tables.md §File layout — "fixed 13312 bytes (0x3400)".
     /// </exception>
     /// <remarks>
-    /// spec: Docs/RE/formats/sound_tables.md §File layout — 256 records × 52 bytes on disk: SAMPLE-VERIFIED.
+    /// spec: Docs/RE/formats/sound_tables.md §File layout — 256 records × 48 bytes read; 1024-byte unread trailer: CONFIRMED (two-witness).
     /// </remarks>
     public static SoundTableData Parse(ReadOnlyMemory<byte> data, SoundTableExtension extension) =>
         Parse(data.Span, extension);
@@ -94,23 +91,25 @@ public static class SoundTableParser
     /// <inheritdoc cref="Parse(ReadOnlyMemory{byte}, SoundTableExtension)"/>
     public static SoundTableData Parse(ReadOnlySpan<byte> span, SoundTableExtension extension)
     {
-        // Validate exact file size: 256 × 52 = 13312 (0x3400).
+        // Validate exact file size: 13312 (0x3400) bytes.
+        // The loader reads the first 12288 bytes (256 × 48); the final 1024 bytes are an unread trailer.
         // spec: Docs/RE/formats/sound_tables.md §File layout — "fixed 13312 bytes (0x3400)": CONFIRMED.
-        // spec: Docs/RE/formats/sound_tables.md §Overall structure — "256 records × 52 bytes = 13312": SAMPLE-VERIFIED.
+        // spec: Docs/RE/formats/sound_tables.md §File layout — "Record stride: 48 bytes. CONFIRMED (two-witness)."
         if (span.Length != SoundTableData.FixedFileSize)
             throw new InvalidDataException(
                 $"Sound table parse error: buffer is {span.Length} bytes; " +
                 $"expected exactly {SoundTableData.FixedFileSize} (0x{SoundTableData.FixedFileSize:X4}) bytes " +
-                $"(= {SoundTableData.EntryCount} records × {SoundTableData.EntryStride} bytes). " +
+                $"(= {SoundTableData.EntryCount} records × {SoundTableData.EntryStride} bytes + " +
+                $"{SoundTableData.TrailerSize} bytes unread trailer). " +
                 "spec: Docs/RE/formats/sound_tables.md §File layout.");
 
-        // Decode all 256 entries. stride = 52.
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — "Record stride: 52 bytes on disk": SAMPLE-VERIFIED.
+        // Decode all 256 entries. Stride = 48 bytes (0x30) per record.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — "Record stride: 48 bytes. CONFIRMED (two-witness)."
         var entries = new SoundTableEntry[SoundTableData.EntryCount];
         for (int i = 0; i < SoundTableData.EntryCount; i++)
         {
-            // Entry i starts at byte i × 52.
-            // spec: Docs/RE/formats/sound_tables.md §Per-record layout — "Entry stride: 52 bytes": SAMPLE-VERIFIED.
+            // Entry i starts at byte i × 48.
+            // spec: Docs/RE/formats/sound_tables.md §Per-record layout — stride 48 bytes: CONFIRMED (two-witness, 2026-06-15).
             int entryBase = i * SoundTableData.EntryStride;
             entries[i] = DecodeEntry(span, entryBase);
         }
@@ -138,36 +137,35 @@ public static class SoundTableParser
             .CopyTo(hourSchedule.AsSpan());
 
         // weight f32 LE @ entry+0x1C
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — weight f32 @ +0x1C: SAMPLE-VERIFIED as 1.0f
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — weight f32 @ +0x1C: SAMPLE-VERIFIED type/value; semantic UNVERIFIED
         float weight = BinaryPrimitives.ReadSingleLittleEndian(
             span[(entryBase + OffWeight)..]);
 
         // pos_x f32 LE @ entry+0x20
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — pos_x f32 @ +0x20: CONFIRMED
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — pos_x f32 @ +0x20: CONFIRMED (runtime semantic); EFF-only population SAMPLE-VERIFIED
         float posX = BinaryPrimitives.ReadSingleLittleEndian(
             span[(entryBase + OffPosX)..]);
 
-        // pos_y f32 LE @ entry+0x24 (formerly 'unknown_36'; resolved 2026-06-14)
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — pos_y f32 @ +0x24:
-        //   CONFIRMED for EFF (SAMPLE-VERIFIED area 001); UNRESOLVED for non-EFF.
-        float posY = BinaryPrimitives.ReadSingleLittleEndian(
-            span[(entryBase + OffPosY)..]);
+        // +0x24 (4 bytes) — read verbatim for round-trip fidelity but NOT consumed by the loader.
+        // The earlier 'pos_y' label is WITHDRAWN. Meaning UNRESOLVED.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — unlabeled_24 @ +0x24: NOT-READ by loader; meaning UNRESOLVED.
+        uint unlabeled24 = BinaryPrimitives.ReadUInt32LittleEndian(
+            span[(entryBase + OffUnlabeled24)..]);
 
         // pos_z f32 LE @ entry+0x28
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — pos_z f32 @ +0x28: CONFIRMED
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — pos_z f32 @ +0x28: CONFIRMED (runtime semantic); EFF-only population SAMPLE-VERIFIED
         float posZ = BinaryPrimitives.ReadSingleLittleEndian(
             span[(entryBase + OffPosZ)..]);
 
-        // radius f32 LE @ entry+0x2C (formerly 'volume_factor'; resolved 2026-06-14)
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — radius f32 @ +0x2C:
-        //   CONFIRMED f32 type; EFF radius role SAMPLE-VERIFIED area 001.
+        // radius f32 LE @ entry+0x2C
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — radius f32 @ +0x2C: CONFIRMED f32 type; EFF radius role SAMPLE-VERIFIED area 001.
         float radius = BinaryPrimitives.ReadSingleLittleEndian(
             span[(entryBase + OffRadius)..]);
 
-        // tail_unknown u32 LE @ entry+0x30. Purpose UNRESOLVED.
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — tail_unknown @ +0x30: UNRESOLVED.
-        uint tailUnknown = BinaryPrimitives.ReadUInt32LittleEndian(
-            span[(entryBase + OffTailUnknown)..]);
+        // End of 48-byte record at entryBase+0x2F. The next record begins at entryBase+0x30.
+        // There is NO tail field after +0x2C in the 48-byte record — the +0x30 bytes belong
+        // to the file-level 1024-byte unread trailer (after the 256th record).
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — "end of 48-byte record; next record begins at +0x30": CONFIRMED.
 
         return new SoundTableEntry
         {
@@ -175,10 +173,9 @@ public static class SoundTableParser
             HourSchedule = hourSchedule,
             Weight = weight,
             PosX = posX,
-            PosY = posY,
+            Unlabeled24 = unlabeled24,
             PosZ = posZ,
             Radius = radius,
-            TailUnknown = tailUnknown,
         };
     }
 

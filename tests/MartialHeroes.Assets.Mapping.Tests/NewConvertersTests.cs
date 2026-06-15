@@ -847,8 +847,6 @@ public sealed class XeffJsonConverterTests
                     ScaleZ = [1.0f, 2.0f],
                     // spec: Docs/RE/formats/effects.md §A.4.3 — anim_loop u8 @ +0: CONFIRMED.
                     AnimLoop = 0,
-                    // spec: Docs/RE/formats/effects.md §A.4.3 — unknown_constant u32 @ +1: SAMPLE-VERIFIED.
-                    UnknownConstant = 67u,
                     AnimStride = 469u,
                     AnimBaseTime = 0u,
                     // 1 keyframe (frame 0, no index prefix on disk).
@@ -895,7 +893,6 @@ public sealed class XeffJsonConverterTests
             ScaleY = [1.0f, 1.5f],
             ScaleZ = [1.0f, 1.5f],
             AnimLoop = 1, // non-zero → animated path
-            UnknownConstant = 67u,
             AnimStride = 500u,
             AnimBaseTime = 0u,
             // frame 0 (no index prefix) + frame 1 (u32 index + 9 floats).
@@ -1036,17 +1033,6 @@ public sealed class XeffJsonConverterTests
         // file value = 0.0 → opacity = 1 - 0.0 = 1.0
         Assert.Equal(0.0f, key0.GetProperty("fileValue").GetSingle(), precision: 5);
         Assert.Equal(1.0f, key0.GetProperty("opacity").GetSingle(), precision: 5);
-    }
-
-    [Fact]
-    public void WriteJsonBytes_SubEffect_HasUnknownConstant()
-    {
-        // spec: Docs/RE/formats/effects.md §A.4.3 — unknown_constant u32 @ +1: SAMPLE-VERIFIED (value 67).
-        // Emitted raw; purpose UNRESOLVED.
-        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeSyntheticXeff());
-        using var doc = JsonDocument.Parse(json);
-        var sub = doc.RootElement.GetProperty("subEffects")[0];
-        Assert.Equal(67u, sub.GetProperty("unknownConstant").GetUInt32());
     }
 
     [Fact]
@@ -1414,9 +1400,7 @@ public sealed class XeffJsonNamedFieldsTests
                     ScaleX = [],
                     ScaleY = [],
                     ScaleZ = [],
-                    AnimLoop = 1,
-                    UnknownConstant = 67u,
-                    AnimStride = 100u,
+                    AnimLoop = 1,                    AnimStride = 100u,
                     AnimBaseTime = 0u,
                     Keyframes =
                     [
@@ -1470,9 +1454,7 @@ public sealed class XeffJsonNamedFieldsTests
                     ScaleX = [],
                     ScaleY = [],
                     ScaleZ = [],
-                    AnimLoop = 1,
-                    UnknownConstant = 67u,
-                    AnimStride = 100u,
+                    AnimLoop = 1,                    AnimStride = 100u,
                     AnimBaseTime = 0u,
                     Keyframes =
                     [

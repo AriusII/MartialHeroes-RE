@@ -97,9 +97,6 @@ public static class XeffJsonConverter
             ScaleY: sub.ScaleY,
             ScaleZ: sub.ScaleZ,
             AnimLoop: sub.AnimLoop,
-            // unknown_constant — value emitted raw; purpose UNRESOLVED.
-            // spec: Docs/RE/formats/effects.md §A.4.3 — unknown_constant u32 @ +1: SAMPLE-VERIFIED (value), semantics UNRESOLVED.
-            UnknownConstant: sub.UnknownConstant,
             AnimStride: sub.AnimStride,
             AnimBaseTime: sub.AnimBaseTime,
             Keyframes: MapKeyframes(sub.Keyframes));
@@ -175,9 +172,6 @@ public static class XeffJsonConverter
         float[] ScaleY,
         float[] ScaleZ,
         byte AnimLoop,
-        /// <summary>Constant u32 at track header +1. Observed: 67. Purpose UNRESOLVED — emitted raw.
-        /// spec: Docs/RE/formats/effects.md §A.4.3 — unknown_constant: SAMPLE-VERIFIED value, semantics UNRESOLVED.</summary>
-        uint UnknownConstant,
         uint AnimStride,
         uint AnimBaseTime,
         XeffJsonKeyframe[] Keyframes);

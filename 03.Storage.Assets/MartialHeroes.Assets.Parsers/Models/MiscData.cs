@@ -444,36 +444,52 @@ public sealed class MapZoneRecord
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// One record from <c>data/mapNNN/regiontableNNN.bin</c>. Stride: 32 bytes (0x20).
+/// One record from <c>data/mapNNN/regiontableNNN.bin</c>.
+/// Stride: <b>48 bytes</b> (0x30). Fixed 32 records = 1,536 bytes total.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/misc_data.md §7.2 regiontableNNN.bin: SAMPLE-VERIFIED (stride and name field).
-/// No header; record count = file_size / 32. Known: 52 records per area (1 664 bytes).
-/// Coordinate fields: PLAUSIBLE (may contain garbage for some sub-types — validate before use).
+/// <para>
+/// Record layout (48 bytes):
+/// <code>
+///   +0x00  char[40]  zoneName   NUL-terminated CP949 zone display-name (minimap sub-zone caption)
+///   +0x28  u32 LE    zoneType   Zone-type enum {0=Safe, 1=OpenPvP, 2=Closed}
+///   +0x2C  u32 LE    _tail      No reader found; UNVERIFIED meaning
+/// </code>
+/// </para>
+/// <para>
+/// <b>Stride correction:</b> an earlier revision of this record used a 32-byte stride. That
+/// figure is REFUTED. The confirmed stride is <b>48 bytes</b>, which is the only value that
+/// reconciles 32 records to the 1,536-byte table block.
+/// spec: Docs/RE/formats/region_grid.md §regiontable — "stride 48 bytes — CONFIRMED (RE-AFFIRMED)".
+/// spec: Docs/RE/formats/region_grid.md §regiontable — "Stride is 48 not 32 (conflation note)".
+/// </para>
 /// </remarks>
 public sealed class RegionTableRecord
 {
     /// <summary>
-    /// World-space X of sub-zone label. PLAUSIBLE — validate within area bounding box before use.
-    /// spec: Docs/RE/formats/misc_data.md §7.2 — center_x f32 @ 0x00: PLAUSIBLE.
+    /// Index of this record in the table (0..31), equal to the region id.
+    /// spec: Docs/RE/formats/region_grid.md §regiontable — "indexed directly by region id (0..31)".
     /// </summary>
-    public required float CenterX { get; init; }
+    public required int RegionId { get; init; }
 
     /// <summary>
-    /// World-space Z of sub-zone label. PLAUSIBLE.
-    /// spec: Docs/RE/formats/misc_data.md §7.2 — center_z f32 @ 0x04: PLAUSIBLE.
+    /// NUL-terminated CP949 zone display-name string (minimap sub-zone caption).
+    /// Read from the 40-byte field starting at record offset +0x00.
+    /// spec: Docs/RE/formats/region_grid.md §regiontable — "zoneName char[40] @ +0x00": HIGH.
     /// </summary>
-    public required float CenterZ { get; init; }
+    public required string ZoneName { get; init; }
 
     /// <summary>
-    /// Unknown 8 bytes at 0x08. Zero in all observed records.
-    /// spec: Docs/RE/formats/misc_data.md §7.2 — unknown_0x08 u8[8] @ 0x08: UNKNOWN.
+    /// Zone-type enum value: 0 = Safe, 1 = OpenPvP, 2 = Closed.
+    /// Read from record offset +0x28 (= +40).
+    /// The only numeric field any region-gating path reads.
+    /// spec: Docs/RE/formats/region_grid.md §regiontable zoneType enum — CONFIRMED.
     /// </summary>
-    public required ReadOnlyMemory<byte> Unknown0x08 { get; init; }
+    public required uint ZoneType { get; init; }
 
     /// <summary>
-    /// CP949-encoded sub-zone landmark name, NUL-terminated within the 16-byte field.
-    /// spec: Docs/RE/formats/misc_data.md §7.2 — sub_zone_name char[16] CP949 @ 0x10: PLAUSIBLE.
+    /// Opaque trailing dword at record offset +0x2C (= +44). No reader found.
+    /// spec: Docs/RE/formats/region_grid.md §regiontable — "_tail u32 @ +0x2C: UNVERIFIED".
     /// </summary>
-    public required string SubZoneName { get; init; }
+    public required uint TailOpaque { get; init; }
 }

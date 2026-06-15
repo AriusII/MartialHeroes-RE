@@ -82,28 +82,29 @@ public struct HourSchedule24
 }
 
 /// <summary>
-/// One 52-byte on-disk entry in a per-map sound table file.
+/// One 48-byte on-disk entry in a per-map sound table file.
 /// Entry index 0 is always the null/unassigned sentinel (sound_entry_id = 0).
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/sound_tables.md §Per-record layout (52 bytes on disk, little-endian throughout)
+/// spec: Docs/RE/formats/sound_tables.md §Per-record layout (48 bytes on disk, little-endian throughout)
 /// <para>
-/// Stride correction (2026-06-14): on-disk stride is <b>52 bytes</b> (SAMPLE-VERIFIED).
-/// The earlier (2026-06-11) interpretation of 48 bytes per record plus a trailing 1024-byte
-/// "editor metadata" region is superseded; both agree on the total file size (13312) and on the
-/// first 0x2C bytes of every record, but the on-disk parser must use stride 52.
-/// spec: Docs/RE/formats/sound_tables.md §File layout §Overall structure — 52-byte stride: SAMPLE-VERIFIED.
+/// Two-witness stride correction (2026-06-15): on-disk stride is <b>48 bytes</b> (CONFIRMED).
+/// The loader advances 0x30 bytes per record, iterates 256 records, reads exactly 12288 bytes,
+/// and leaves a 1024-byte unread trailer at the end of the 13312-byte file.
+/// The prior 52-byte reading (2026-06-14) is REFUTED; the per-record `tail_unknown` field at +0x30
+/// does NOT exist — it belongs to the file-level unread trailer.
+/// spec: Docs/RE/formats/sound_tables.md §File layout §Overall structure — loader stride reconciliation (two-witness).
 /// </para>
 /// Byte-level field map (quick reference):
 /// <code>
 /// [+0x00..+0x03]  sound_entry_id   u32 LE    (0 = null/unassigned)
-/// [+0x04..+0x1B]  hour_schedule    u8 × 24   (per-byte 0x00/0x01 mask)
-/// [+0x1C..+0x1F]  weight           f32 LE    (1.0f for BGM/BGE)
-/// [+0x20..+0x23]  pos_x            f32 LE    (3D world X; EFF only, else 0.0)
-/// [+0x24..+0x27]  pos_y            f32 LE    (3D world Y; EFF only, else 0.0)
-/// [+0x28..+0x2B]  pos_z            f32 LE    (3D world Z; EFF only, else 0.0)
-/// [+0x2C..+0x2F]  radius           f32 LE    (3D audibility radius; EFF only, else 0.0)
-/// [+0x30..+0x33]  tail_unknown     4 bytes   (uncharacterised; observed 0 in non-EFF records)
+/// [+0x04..+0x1B]  hour_schedule    u8 × 24   (per-byte 0x00/0x01 mask; semantics DBG-pending)
+/// [+0x1C..+0x1F]  weight           f32 LE    (1.0f for BGM/BGE; semantic UNVERIFIED)
+/// [+0x20..+0x23]  pos_x            f32 LE    (3D world X; read; EFF records only, else 0.0)
+/// [+0x24..+0x27]  unlabeled_24     4 bytes   (NOT read by the loader; meaning UNRESOLVED)
+/// [+0x28..+0x2B]  pos_z            f32 LE    (3D world Z; read; EFF records only, else 0.0)
+/// [+0x2C..+0x2F]  radius           f32 LE    (3D audibility radius; read; EFF records only, else 0.0)
+/// --- end of 48-byte record ---
 /// </code>
 /// </remarks>
 public sealed class SoundTableEntry
@@ -154,15 +155,14 @@ public sealed class SoundTableEntry
     public required float PosX { get; init; }
 
     /// <summary>
-    /// World-space Y coordinate of the DirectSound 3D source.
-    /// Populated only in <c>.eff</c> records; 0.0 (or editor-uninitialized fill) for BGM/BGE.
-    /// (Previously labelled <c>unknown_36</c> — resolved 2026-06-14 via EFF field census.)
+    /// 4 bytes at record offset +0x24 that are NOT read by the loader on any path.
+    /// The earlier <c>pos_y</c> label is WITHDRAWN — no read site assigns a meaning to this offset.
+    /// Preserved verbatim for round-trip fidelity; do not interpret.
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/formats/sound_tables.md — pos_y f32 @ +0x24: CONFIRMED for EFF (SAMPLE-VERIFIED area 001); UNRESOLVED for non-EFF.
-    /// The earlier 'unknown_36' label at this offset has been superseded.
+    /// spec: Docs/RE/formats/sound_tables.md §Per-record layout — unlabeled_24 @ +0x24: NOT-READ by loader; meaning UNRESOLVED.
     /// </remarks>
-    public required float PosY { get; init; }
+    public required uint Unlabeled24 { get; init; }
 
     /// <summary>
     /// World-space Z coordinate of the DirectSound 3D source.
@@ -175,25 +175,14 @@ public sealed class SoundTableEntry
     public required float PosZ { get; init; }
 
     /// <summary>
-    /// Audibility radius of the 3D source (formerly labelled <c>volume_factor</c>).
+    /// Audibility radius of the 3D source.
     /// Populated only in <c>.eff</c> records; 0.0 for BGM/BGE.
     /// For BGM, the runtime applies a 0.7 volume scaling at a separate stage.
     /// </summary>
     /// <remarks>
     /// spec: Docs/RE/formats/sound_tables.md — radius f32 @ +0x2C: CONFIRMED f32 type; EFF radius role SAMPLE-VERIFIED area 001.
-    /// The earlier 'volume_factor' label at this offset has been superseded.
     /// </remarks>
     public required float Radius { get; init; }
-
-    /// <summary>
-    /// Trailing 4 bytes of the 52-byte on-disk slot (+0x30..+0x33).
-    /// Not characterised by either analysis; observed 0 in non-EFF records. Purpose UNRESOLVED.
-    /// Preserved verbatim for round-trip fidelity.
-    /// </summary>
-    /// <remarks>
-    /// spec: Docs/RE/formats/sound_tables.md — tail_unknown 4 bytes @ +0x30: UNRESOLVED.
-    /// </remarks>
-    public required uint TailUnknown { get; init; }
 
     /// <summary>Returns true when this entry represents a real (non-null) sound assignment.</summary>
     public bool IsAssigned => SoundEntryId != 0;
@@ -201,17 +190,18 @@ public sealed class SoundTableEntry
 
 /// <summary>
 /// Decoded result of a per-map sound table file (.bgm / .bge / .eff / .wlk / .run).
-/// Contains exactly 256 entries. All 256 records occupy the full 13312-byte file (256 × 52 bytes).
+/// Contains exactly 256 entries. The loader reads 256 × 48 = 12288 bytes; the remaining 1024 bytes
+/// of the fixed 13312-byte on-disk file are an unread trailer.
 /// </summary>
 /// <remarks>
 /// spec: Docs/RE/formats/sound_tables.md §File layout — "fixed 13312 bytes (0x3400), confirmed across 12 real samples and ~300 census tables"
 /// spec: Docs/RE/formats/sound_tables.md §Entry count — "256 entries fixed; no count field in file"
-/// spec: Docs/RE/formats/sound_tables.md §Per-record layout — "52 bytes per record on disk (SAMPLE-VERIFIED)"
+/// spec: Docs/RE/formats/sound_tables.md §Per-record layout — "Record stride: 48 bytes. CONFIRMED (two-witness: loader advance + file measurement)."
 /// <para>
-/// On-disk stride correction (2026-06-14): stride is 52 bytes (not 48). There is NO separate
-/// trailing "editor metadata" region — the 256 × 52 = 13312 accounts for the entire file.
-/// The old <c>EntryTableSize</c> / <c>EditorMetadataSize</c> split is no longer used.
-/// spec: Docs/RE/formats/sound_tables.md §File layout §Overall structure — stride 52: SAMPLE-VERIFIED.
+/// Two-witness stride correction (2026-06-15): stride is 48 bytes (not 52). The loader advances
+/// 0x30 = 48 bytes per record, reads 256 × 48 = 12288 bytes, and the remaining 1024 bytes are an
+/// unread trailer. The prior 52-byte reading (2026-06-14) is REFUTED.
+/// spec: Docs/RE/formats/sound_tables.md §File layout §Overall structure — loader stride reconciliation (two-witness).
 /// </para>
 /// </remarks>
 public sealed class SoundTableData
@@ -221,7 +211,7 @@ public sealed class SoundTableData
     /// <summary>
     /// Fixed total file size: 13312 bytes (0x3400).
     /// Confirmed across 12 real-file samples and re-confirmed across ~300 tables by VFS census (2026-06-14).
-    /// The entire file is the record table: 256 records × 52 bytes = 13312.
+    /// The loader reads only the first 12288 bytes (256 × 48); the remaining 1024 are an unread trailer.
     /// </summary>
     /// <remarks>spec: Docs/RE/formats/sound_tables.md §File layout — "fixed 13312 bytes (0x3400)": CONFIRMED</remarks>
     public const int FixedFileSize = 0x3400; // 13312
@@ -234,16 +224,29 @@ public sealed class SoundTableData
     public const int EntryCount = 256;
 
     /// <summary>
-    /// Byte stride of one on-disk record: 52 bytes.
-    /// 256 × 52 = 13312 = <see cref="FixedFileSize"/>. SAMPLE-VERIFIED.
+    /// Byte stride of one on-disk record: 48 bytes (0x30).
+    /// The loader advances 48 bytes per record and reads 256 × 48 = 12288 bytes total.
+    /// The remaining 1024 bytes of the 13312-byte file are an unread trailer.
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/formats/sound_tables.md §Per-record layout — "Record stride: 52 bytes on disk. SAMPLE-VERIFIED."
-    /// The earlier (2026-06-11) value of 48 corresponded to the estimated in-memory record size; the
-    /// on-disk parser must use 52. The old 48 + 1024 "editor metadata" split is superseded.
+    /// spec: Docs/RE/formats/sound_tables.md §Per-record layout — "Record stride: 48 bytes. CONFIRMED (two-witness: loader advance + file measurement)."
+    /// spec: Docs/RE/formats/sound_tables.md §File layout — "Record table (read): 12288 bytes (0x3000); Unread trailer: 1024 bytes (0x0400)".
+    /// Two-witness correction (2026-06-15): the prior 52-byte stride reading (2026-06-14) is REFUTED.
     /// </remarks>
-    public const int
-        EntryStride = 52; // CORRECTED from 48 — spec: sound_tables.md §File layout §Overall structure (2026-06-14)
+    public const int EntryStride = 48; // 0x30 — spec: sound_tables.md §File layout (two-witness, 2026-06-15)
+
+    /// <summary>
+    /// Total bytes read by the loader from the start of the file: 256 × 48 = 12288 (0x3000).
+    /// </summary>
+    /// <remarks>spec: Docs/RE/formats/sound_tables.md §File layout — "Record table (read): 12288 bytes (0x3000)": CONFIRMED</remarks>
+    public const int ReadSize = 0x3000; // 12288
+
+    /// <summary>
+    /// Size of the unread trailer at the end of the file: 1024 bytes (0x0400).
+    /// The loader never reads this region. Its purpose is UNRESOLVED.
+    /// </summary>
+    /// <remarks>spec: Docs/RE/formats/sound_tables.md §File layout — "Unread trailer: 1024 bytes (0x0400)": CONFIRMED</remarks>
+    public const int TrailerSize = 0x0400; // 1024
 
     /// <summary>
     /// Number of per-hour schedule bytes per record.
