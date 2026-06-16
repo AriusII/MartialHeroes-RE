@@ -1,9 +1,30 @@
 # World-scene gameplay systems — master index (clean-room spec)
 
+<!--
+verification:          confirmed (client-side routing/sizes/offsets/timing constants are control-flow-confirmed
+                       against the IDB); capture/debugger-pending (server-authored magnitudes — damage, cooldown
+                       wall-clock, XP rates, HP scale — and on-wire VALUE meanings / exact field boundaries).
+ida_reverified:        2026-06-16
+ida_anchor:            263bd994
+evidence:              [static-ida]
+conflicts:             (1) 5/53 routing CONFIRMED at family-5 slot 1453; the recovered handler NAME is contested —
+                           the IDB emphasises an actor-pair-relation role, this index emphasises absolute vitals
+                           (HP/MP/stamina). Routing is settled; the canonical NAME + the body's full semantics are
+                           capture/debugger-pending (Chapter 1, §14).
+                       (2) F1 attack-in-progress flag: on build 263bd994 the clear/re-arm is observed in
+                           SmsgLocalPlayerStateSync (4/13), NOT a 4/2 handler. Which push arms-vs-releases the swing
+                           window is capture/debugger-pending (Chapter 1).
+-->
+
 > Clean-room neutral spec — a navigable **overview / index** of the in-world ("World scene")
-> gameplay systems recovered in Cycle 3. No legacy symbols, no binary addresses, no decompiler
-> pseudo-code. Promoted by synthesising the already-firewall-clean detail specs under `Docs/RE/`;
-> every chapter cross-links to the committed spec that owns its byte tables.
+> gameplay systems. No legacy symbols, no binary addresses, no decompiler pseudo-code. Promoted by
+> synthesising the already-firewall-clean detail specs under `Docs/RE/`; every chapter cross-links to
+> the committed spec that owns its byte tables. **Re-verified against build `263bd994` (Campaign 10,
+> Block F) — every World-scene opcode→handler binding in §14 maps EXACTLY to the **two flat 154-slot
+> dispatch tables** (family-4 / family-5, base minor 0 each, pre-filled with a default no-op and
+> selectively overwritten — §0.1); the GameState-5 in-game roster (§13.1) and the Chapter-16 region
+> byte claims are control-flow confirmed. No routing, size, or model claim was refuted; only two
+> NAME-level items remain contested (see the banner above).**
 >
 > This document is the one-stop map for the **protocol engineer** (`Network.Protocol`), the
 > **application engineer** (`Client.Application` use cases / handlers), the **domain engineer**
@@ -58,6 +79,36 @@ header: `size` @+0, `major` @+4, `minor` @+6, payload @+8). **All wire field off
 detail specs are payload-relative** (relative to frame +8) unless explicitly stated as in-memory
 struct offsets.
 
+### 0.1 The dispatcher is two flat indexed handler tables (not a switch) — CONFIRMED
+
+The inbound router is **not** a `switch`. The network handler singleton installs exactly **two
+receive tables — one for family 4, one for family 5** — and **no family-2 receive table exists
+anywhere** (this is the structural proof of the "family 2 is entirely client-emitted" claim in
+§0). Each table is a **flat array of 154 handler slots indexed directly by the minor opcode**
+(family-4 slot base = minor 0; family-5 slot base = minor 0; the two tables sit 154 slots apart in
+the singleton). On construction **every slot in both tables is pre-filled with one shared default
+no-op handler**, then the two installers selectively overwrite the slots that have a real handler.
+A minor opcode with no installed handler therefore resolves to the no-op, not to a crash. A
+re-implementation should model the major-4 / major-5 routers as **two flat 154-entry dispatch
+arrays with a default fallback**, indexed by minor — not as a switch and not as a hash map.
+[CONFIRMED]
+
+The **family-3** handlers are **separate named routines**, not entries in either of these two
+tables; their install path sits in the char-select / billing / scene-management band and was not
+re-walked in the Campaign-10 Block-F re-verification (flagged for a follow-up lane if `3/8` /
+`3/50000` need slot-exact confirmation). [CONFIRMED handler exists; family-3 install path
+static-hypothesis]
+
+### 0.2 The network handler is a guest/member pair, with a keep-alive arming — CONFIRMED
+
+The singleton that owns the two dispatch tables is itself a **pair**: it constructs a **guest
+sub-handler** and a **member sub-handler** (two instances of the same handler interface — the
+likely pre-auth-vs-in-world split), and on construction it **arms a compressed keep-alive** (a
+periodic 20-byte `major-2 / minor-10000` packet) that feeds the connection-state model (the
+disconnect / conn-state path also funnels into the shared chat-log/notice sink — see §2 and §13.1).
+A re-implementation models the connection as guest→member handler promotion plus a periodic
+keep-alive heartbeat. [CONFIRMED]
+
 ---
 
 ## 1. Combat loop (target → attack → result → cadence)
@@ -79,7 +130,13 @@ swing-ready timestamp gated by the per-tick resync pulse / combat-phase update).
 | `5/53` | S2C | `SmsgActorVitalsAndPairState` — **absolute** current HP/MP/stamina (the "damage lands here" observable). |
 | `4/100` | S2C | `SmsgCombatAttackUpdate` — combat-phase / attack-swing timing (server pacing). |
 | `4/99` | S2C | `SmsgCombatResultMessage` — combat/training session result (reward/EXP strings). |
-| `4/2` | S2C | per-tick server resync pulse — releases the local "attack in progress" flag. |
+| `4/2` | S2C | per-tick server game-tick/resync pulse (server pacing). |
+
+> **Attack-in-progress flag (capture/debugger-pending).** The local "swing in progress" flag's
+> clear/re-arm is **observed in the local-player state-sync push (`5/13`, the movement/state
+> update)** on build `263bd994`, **not** in a `4/2` handler. Which push *arms* versus *releases*
+> the swing window is capture/debugger-pending; treat `4/2` as the server cadence/tick pulse and
+> `5/13` as the observed flag-clear site (see the banner, conflict 2).
 
 - **Driving VFS data:** `items.csv` (`attack_speed`, weapon attack columns), `users.scr` /
   `userlevel.scr` / `userpoint.scr` / `exp.scr` (stat & XP curves) — all in `formats/config_tables.md`.
@@ -414,6 +471,38 @@ fetched by numeric id from `msg.xdb` (CP949); text is GPU-side Korean system fon
 not a shipped glyph atlas. The master scene machine has 9 states; in-game (state 5) returns to
 character-select (state 4).
 
+### 13.1 The GameState-5 in-game roster (how the World scene is built) — CONFIRMED
+
+The program entry point is a single **`while(1) switch(GameState)`** scene machine over **states
+0..8** (the ~9 states above). The VFS is mounted once before the loop; each state builds (and on
+exit tears down) its scene. State **4** is character-select, which sets the state to **5** and
+builds the in-game HUD host; state **5** is the in-game World scene and, on teardown, **sets the
+state back to 4** (return to character-select). States **6** (quit-prep → 8), **7** (error → 8), and
+**8** (exit) close the machine. This is the same entry-point state machine the front-end specs
+describe — see `specs/game_loop.md` / `specs/client_runtime.md`; this chapter records only the
+in-game (state-5) members. [CONFIRMED]
+
+The in-game scene is built from a small set of cooperating objects:
+
+| Member | Size | Role | Confidence |
+|---|---|---|---|
+| **HUD host window** (the in-game `MainWindow`) | 6280-byte object | The retained-mode root that hosts every World-scene panel in Chapters 1–12 (chat, inventory, stat window, minimap, buff bar, …). Built in the char-select→in-game transition; the buff/state window is one of its children (the `4/102` rebuild target — see §9, §13.2). | CONFIRMED |
+| **In-game handler** (`MainHandler`) | 200-byte object | Constructed last in the scene sequence and attached to the HUD host; drives the in-game frame logic. | CONFIRMED |
+| **In-game scene-graph builder** | — | A separate routine that allocates the 3D scene: a perspective camera (**FOV 65°, near 5, far 15000**), **5 view-platform objects** (consistent with the 5 camera view modes — Chapter 15 / `specs/camera_movement.md`), a GScene root, the terrain-manager singleton, and **4 layer nodes resolved by `msg.xdb` ids 2004 / 2005 / 2006 / 2148**. | CONFIRMED (count + constants); view-mode semantics owned by `camera_movement.md` |
+| **Local-player actor singleton** | pointer | The hub the Actor family (visual refresh, motion, buff release) reads; destroyed on scene exit. The combat / movement / chat / buff chapters all converge on this actor. | CONFIRMED (local-player/Actor singleton) |
+| **Skill/hotbar state hub** | global | The table the HUD skill/hotbar panels (skill-panel toggle, combo / link panels) read; consistent with the one 240×8-byte hotbar record array (id @+0, points @+4 — Tier-1 fact). | CONFIRMED (HUD skill-panel hub) |
+
+### 13.2 The World HUD event hub (the synthesis headline) — CONFIRMED
+
+The in-game HUD host (§13.1) owns **one shared chat-log / notice sink** that S2C handlers **and**
+local system events both funnel into: the disconnect / connection-state path (§0.2), the region
+type-2 movement-gate denial (§16.3, localized message id 74309), and the chat / coloured-system-text
+paths (§2) all fetch the in-game handler singleton and **broadcast into this same sink**. This is the
+"World HUD event hub" the chapters above keep referring back to: routing fans **in** to one notice
+log regardless of source. The buff/state window is a **child of the HUD host** that the `4/102`
+handler reaches by fixed child index, **clears, then rebuilds** from the 476-byte snapshot (§9).
+[CONFIRMED]
+
 | Opcode | Dir | Role |
 |---|---|---|
 | (none) | — | The UI toolkit is local presentation; it carries no opcode of its own. It hosts the windows that emit/consume every opcode in Chapters 1–12 (action-id → window dispatcher → the relevant C2S send). |
@@ -656,7 +745,13 @@ through every site to the default and are treated like the safe (type-0) case.
   active region against `== 1` / `!= 1` / `== 2`, refusing with a localized message when the zone does
   not permit the action. [CONFIRMED]
 - **Movement gate.** If the destination cell's region type is `2`, the move is denied: a localized
-  message is shown (message id 74309) and the actor is snapped back. [CONFIRMED]
+  message is shown (message id 74309) and the actor is snapped back; otherwise the normal facing /
+  move proceeds and the client emits the movement intent. [CONFIRMED] On build `263bd994` the
+  per-move gate and the combat-mode selection are observed in the **same routine** (the move-gate
+  body both rejects type-2 destinations and selects the combat mode), so the "movement gate" and
+  "combat/PvP arbiter" described separately here may be **one fused site** plus its callers rather
+  than two independent functions — a structural-naming detail, not a behavioural change. The
+  type-2 deny + msg 74309 + snap-back behaviour is exactly what that routine does. [CONFIRMED]
 - **Minimap overlay.** The minimap reads the active region's +40 word and switches `{0,1,2,default}`
   to pick the caption text and colour (the three captions are localized zone-type labels; the default
   is an unlabeled white zone). It separately prints the `zoneName` string (16.2) as the sub-zone

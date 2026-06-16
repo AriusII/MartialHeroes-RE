@@ -3,6 +3,23 @@
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code.
 > Consumed by Assets.Parsers. Every offset an engineer cites must reference this file.
 
+<!--
+verification: sample-verified
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida, vfs-sample]
+conflicts: none
+-->
+
+> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-16` · `ida_anchor: 263bd994` ·
+> `evidence: [static-ida, vfs-sample]` · `conflicts: none`. Re-verified two-witness against build
+> `263bd994` (the `.skn` / `.bnd` byte parsers in the loader chain) AND a real VFS sample: a rigid
+> item skin (`data/item/skin/*.skn`), a weighted character skin (`data/char/skin/*.skn`), a player
+> rig (`data/char/bind/g1.bnd`), and `data/char/bindlist.txt`. Every prior offset, stride, count and
+> rule re-confirmed exactly; the only delta is a cosmetic ordering refinement in `formats/bindlist.md`
+> (lexicographic, not numeric). Tier policy: a fact also matched against the real VFS sample is
+> `[sample-verified]`; a loader-control-flow-only fact is `[confirmed]`.
+
 ## Overview
 
 Three file types carry geometry and skeletal data. All are opened through the VFS chokepoint
@@ -114,10 +131,18 @@ Normals are not carried into the in-memory vertex buffer. The 24-byte record lay
 
 ### Status
 
-- **sample_verified:** true
-- **Samples analysed (byte-level):** 3 item-skin files (`gi213050001.skn`, `gi213062382.skn`,
+- **sample_verified:** true · **ida_anchor:** `263bd994` · **ida_reverified:** 2026-06-16
+- **Samples analysed (byte-level):** 3 rigid item-skin files (`gi213050001.skn`, `gi213062382.skn`,
   `gi292020105.skn`) from `data/item/skin/`. All three exhausted exactly at the predicted end of the
   weight table (zero residual bytes). All are simple rigid prop meshes (single-bone, weight = 1.0).
+- **Re-verified two-witness (build `263bd994`):** the byte parser was walked in the loader (header →
+  face table → vertex table → weight table, each as a `count` u32 followed by `count × stride` raw
+  bytes via the bulk slurp), AND re-checked against two fresh VFS samples — a **rigid item skin**
+  (46 faces / 25 vertices / 25 weights, 1 bone, weight 1.0) and a **weighted character skin**
+  (1,432 faces / 786 vertices / 1,136 weights across **52 distinct bones**, ≈1.45 weights/vertex,
+  `id_b` = a real sparse `actor_id`). Both samples exhaust to EOF with **zero residual**, and every
+  weight/corner `vertex_index` lands in range. The 36-byte face, 24-byte vertex and 12-byte weight
+  strides each walk exactly to the next section. All re-confirmed; no drift.
 - **Census-verified (corpus):** the full corpus of **2,786 `.skn` files** parses with 0 errors.
   **1,140** are multi-bone / multi-weight skins (true weighted blending, not rigid). The 1,269 files
   under `data/char/skin/` all carry **`id_b != 0`** (every character body skin references a skeleton).
@@ -144,6 +169,17 @@ Both `.skn` and `.bnd` use a length-prefixed string encoding throughout. The on-
 The length field is a 4-byte unsigned integer in little-endian order. The body is exactly `length`
 bytes with no trailing null byte on disk.
 
+> **Binary-mode witness (why the prefix is 4 raw bytes).** The asset-stream primitives that read
+> `.skn` and `.bnd` are **dual-mode**: each branches on a per-stream mode bit (a single flag bit in
+> the stream object's state word — the `& 8` mode flag). When the bit is **set** the stream is in
+> TEXT mode (line-parse + decimal-string conversion, as used for `.xobj` and the `.txt` tables); when
+> the bit is **clear** the stream is in BINARY mode (a raw 4-byte little-endian read). `.skn` and
+> `.bnd` are opened in BINARY mode, so every "u32" below — including each LenStr length prefix — is a
+> raw 4-byte read, never a parsed decimal string. This is the loader-side proof behind the 4-byte
+> (not 1-byte) prefix warning: the same primitives that text-parse `.xobj` raw-read `.skn`/`.bnd`.
+> | Confidence: [confirmed] — the mode branch is in the shared asset-stream reader; the binary branch
+> drives both `.skn` and `.bnd`.
+
 **Encoding:** ASCII for the item samples examined. Korean class/character names in `data/char/` files
 are expected to be encoded as CP949 / EUC-KR (no BOM). The census confirms character skins exist in
 quantity; embedded names in `data/char/bind/` include both ASCII labels and source-path fragments.
@@ -155,7 +191,7 @@ quantity; embedded names in `data/char/bind/` include both ASCII labels and sour
 
 | Confidence |
 |---|
-| CONFIRMED — 4-byte prefix validated against three samples including one 10-byte name body |
+| [sample-verified] — 4-byte prefix two-witness re-confirmed on build `263bd994`: the binary-mode reader takes a raw 4-byte length, and on a real VFS rigid item skin (name length 13) and a weighted character skin (name length 11) the 4-byte-prefix walk lands every later face/vertex/weight stride exactly, exhausting both files with zero residual. A 1-byte prefix misplaces `face_count` by 3 bytes. |
 
 ### Header
 
@@ -165,12 +201,12 @@ so all sections after the header have no fixed absolute offsets.
 | Rel. offset | Size | Type | Field | Notes | Confidence |
 |---:|---|---|---|---|---|
 | 0 | 4 | u32 LE | `id_a` | Numeric identifier for this mesh object. In item-skin files this matches the numeric suffix of the filename (e.g. `gi213050001.skn` → `id_a = 213050001`). | CONFIRMED |
-| 4 | 4 | u32 LE | `id_b` | **Skeleton pointer into the bindlist registry (the 349-valued skeleton selector).** This field's value is a `.bnd` skeleton key: the loader resolves the bind pose whose `actor_id` equals `id_b`. It is drawn from the same 349-valued domain as the `.bnd` `actor_id` set registered by `bindlist.txt` (see `formats/bindlist.md`). Item-skin samples carry `id_b = 0` (rigid, no skeleton). For character body skins `id_b != 0` is **universal** (all 1,269 `data/char/skin/` files), and the set of distinct `id_b` values is exactly the set of `.bnd` `actor_id` values — a confirmed bijection (see §id_b ↔ skeleton bijection). **Do NOT conflate this field with the `skin.txt` `col2` class tag.** That is a separate, 6-value outfit / class-family tag that lives in `skin.txt`, not in the `.skn` mesh; it indexes a base-offset table and never selects a skeleton. The `.skn` `id_b` is the 349-valued skeleton pointer; the `skin.txt` `col2` is the 6-value class tag — two distinct fields that happen to share the legacy label "IdB". | CONFIRMED (structure); CONFIRMED (two distinct fields — skeleton pointer vs class tag); CONFIRMED (non-zero bijection, census-verified) |
+| 4 | 4 | u32 LE | `id_b` | **Skeleton pointer — an `actor_id`, NOT a small "349-valued index".** This field's value is a `.bnd` skeleton `actor_id`: the loader resolves the bind pose whose `actor_id` equals `id_b`. The value is a **sparse `actor_id` in the range 1..8892** (`id_b = 0` = no skeleton, rigid). It is **not** a dense 0..348 index — there are exactly 349 registered skeletons, but their `actor_id`s are spread sparsely across the 1..8892 span, so a parser must resolve `id_b` by `actor_id` lookup against the bindlist registry and must NOT treat it as an array index into a 349-slot table. Item-skin samples carry `id_b = 0`. For character body skins `id_b != 0` is **universal** (all 1,269 `data/char/skin/` files); across the whole corpus 350 distinct `id_b` values occur (including 0), and the 349 non-zero values are exactly the 349 `.bnd` `actor_id`s — a confirmed bijection (see §id_b ↔ skeleton bijection). **Do NOT conflate this field with the `skin.txt` `col2` class tag.** That is a separate, 6-value outfit / class-family tag that lives in `skin.txt`, not in the `.skn` mesh; it indexes a base-offset table and never selects a skeleton. The `.skn` `id_b` is the `actor_id` skeleton pointer; the `skin.txt` `col2` is the 6-value class tag — two distinct fields that happen to share the legacy label "IdB". Re-verified on build `263bd994`: the rigid item sample carries `id_b = 0` (no skeleton) and a fresh weighted character sample carries a non-zero `id_b` that is a sparse `actor_id` (a value well inside 1..8892, not a 0..348 subscript) — both regimes observed together. | [sample-verified] (structure; `id_b = 0` rigid AND non-zero sparse `actor_id` both observed on build `263bd994`); CONFIRMED (actor_id 1..8892, not a 349-index — two-witness); CONFIRMED (two distinct fields — skeleton pointer vs class tag); CONFIRMED (non-zero bijection, census-verified) |
 | 8 | 4 + N | LenStr | `name` | Length-prefixed name string. Wire format: 4-byte u32 LE length, then N bytes of body with no null terminator. Observed item values: `"book"` (N=4), `"seven_gift"` (N=10). | CONFIRMED |
 
 > **Naming disambiguation (firewall note).** The legacy label "IdB" was historically applied to BOTH
 > the `.skn` `id_b` skeleton pointer documented above AND the `skin.txt` `col2` class tag. These are
-> two distinct fields with two distinct value domains (349 skeleton keys vs 6 class tags) and two
+> two distinct fields with two distinct value domains (`actor_id` skeleton keys in 1..8892 vs 6 class tags) and two
 > distinct consumers (skeleton resolution vs a base-offset table). This spec names the `.skn` field
 > `id_b` exclusively as the skeleton pointer. The canonical glossary split of these two meanings is
 > owned by Tier-1 in `Docs/RE/names.yaml`; this spec does not edit that glossary.
@@ -223,8 +259,21 @@ All normal vectors in observed samples have magnitude 1.000000 (within 1e-6 floa
 Position coordinates in item-skin samples range approximately −1.1 to +1.1 on all axes (small
 prop mesh scale); character skins span the full body extent.
 
+> **Normal-first disk order — two-witness (build `263bd994`).** The render-vertex assembly copies
+> disk float indices 3/4/5 into the render *position* slot and disk indices 0/1/2 into the render
+> *normal* slot — i.e. the disk layout is normal then position. The sample witness: in BOTH fresh VFS
+> samples the **leading float triple of the first vertex has magnitude exactly 1.00000**, which only
+> the unit surface normal (never an arbitrary position) can have. Disk order = normal (0..11), then
+> position (12..23). | Confidence: [sample-verified].
+
 Parser note: when mapping to a standard vertex buffer (position first), read floats at
 sub-offsets 12–23 as position and floats at sub-offsets 0–11 as normal.
+
+> Handedness note (cross-reference, NOT an on-disk transform): positions are stored verbatim in
+> the file's own coordinate frame. The project's **mesh-local X-negation** for `.skn` geometry is an
+> importer/render-domain handedness conversion applied downstream — it is not applied by the byte
+> reader. Apply it (and the world Z-negation) once, at the importer layer; see `specs/skinning.md`.
+> The `Assets.Parsers` byte decoder must NOT pre-negate any axis.
 
 > Render-vertex note (cross-reference): the loader builds a deduplicated 32-byte render vertex
 > (position[0..11], normal[12..23], uv[24..31]) from the 24-byte disk vertex plus the per-corner UVs,
@@ -246,7 +295,7 @@ Immediately follows the vertex table (no alignment padding).
 |---:|---|---|---|---|---|
 | 0 | 4 | u32 LE | `vertex_index` | Zero-based index of the vertex this weight influences. | CONFIRMED |
 | 4 | 4 | u32 LE | `bone_index` | **Bone ID** — addresses the bind-pose bone by `id − base_id` (see §Bone addressing), NOT a palette slot, NOT an indirection-table index, NOT a `.mot` track index. Item-skin samples carry `bone_index = 0` (the root); character skins carry many distinct bone IDs (up to 242 distinct bones in one census skin). | CONFIRMED |
-| 8 | 4 | f32 LE | `weight` | Influence weight. Item-skin samples carry `weight = 1.0`. **Records where `weight < 0.01` are skipped by the loader** — SAMPLE-VERIFIED: the minimum observed weight across the multi-weight corpus is exactly **0.010** (records at 0.010 are kept; the threshold drops anything below 0.010). | CONFIRMED (structure); CONFIRMED (skip threshold, census-verified) |
+| 8 | 4 | f32 LE | `weight` | Influence weight. Item-skin samples carry `weight = 1.0`. **Records where `weight < 0.01` are skipped by the loader** — the keep test is `weight >= ~0.01` (a single-precision near-`0.01` constant), so records at or above `0.01` are kept and anything below is dropped. SAMPLE-VERIFIED two ways: the corpus minimum observed weight is exactly **0.010**, and a fresh weighted character skin on build `263bd994` carries a minimum weight of **0.011377** — both ≥ the threshold, both kept. | CONFIRMED (structure); [sample-verified] (skip threshold — keep-constant + two distinct min-weight observations agree) |
 
 Post-load invariant: the engine **normalizes weights per vertex so the per-vertex sum equals 1.0**,
 then splits each vertex's influences into a single dominant (MAJOR) influence and the remainder
@@ -262,15 +311,17 @@ math that consumes these normalized influences is specified in `specs/skinning.m
 | Finding | Evidence | Status |
 |---|---|---|
 | Multi-bone / multi-weight skins exist in quantity | 1,140 of 2,786 `.skn` files are multi-bone or multi-weight-per-vertex | SAMPLE-VERIFIED |
-| `weight_count > vertex_count` for character skins | e.g. ~5,066 weights for ~1,950 vertices (≈2.6 wt/vert); newer skins hit exactly 4.0 wt/vert (e.g. 23,236 weights / 5,809 verts) | SAMPLE-VERIFIED |
+| `weight_count > vertex_count` for character skins | e.g. ~5,066 weights for ~1,950 vertices (≈2.6 wt/vert); newer skins hit exactly 4.0 wt/vert (e.g. 23,236 weights / 5,809 verts); a fresh sample on build `263bd994` shows an *intermediate* ≈1.45 wt/vert (1,136 weights / 786 verts, 52 bones) | SAMPLE-VERIFIED |
 | Fractional weights down to the skip boundary | minimum observed weight = 0.010 exactly; records below 0.01 are dropped | SAMPLE-VERIFIED |
 | Many distinct bones per skin | up to 242 distinct bone IDs referenced by one skin's weight records | SAMPLE-VERIFIED |
 | Weights address bones by **bone ID**, no indirection | the `bone_index` field is a bone ID resolved by `id − base_id`; there is no palette/indirection table between weight and bone | CONFIRMED (code) |
 
-Two weight-distribution styles appear: an older variable-influence style (~2.6 influences/vertex) and
-a newer fixed-4-influence style (exactly 4.0 weights/vertex). Both are multi-bone weighted skinning;
-neither is rigid. An importer must therefore support an **arbitrary** influence count per vertex (then
-re-normalize if it must cap to its engine's limit — see `specs/skinning.md` §5.4).
+Multiple weight-distribution densities appear: an older variable-influence style (~2.6
+influences/vertex), a newer fixed-4-influence style (exactly 4.0 weights/vertex), and intermediate
+densities in between — a fresh build-`263bd994` sample lands at ≈1.45 weights/vertex (786 verts /
+1,136 weights / 52 bones). All are multi-bone weighted skinning; none is rigid. An importer must
+therefore support an **arbitrary** influence count per vertex (then re-normalize if it must cap to
+its engine's limit — see `specs/skinning.md` §5.4).
 
 ### Bone addressing (shared with `.bnd` and `.mot`)
 
@@ -284,13 +335,17 @@ recovered sample skeletons `base_id == 0`, so ID equals array index — but a pa
 
 Every character body skin (`data/char/skin/`) carries a non-zero `id_b`, and the set of distinct
 `id_b` values across all character skins is **exactly the set of `.bnd` `actor_id` values** — **349
-distinct `id_b` values matching 349 `.bnd` files**, a confirmed one-to-one correspondence. This makes
-`id_b` the reliable skin→skeleton link: to find a character skin's skeleton, resolve the registered
-`.bnd` whose `actor_id` equals `id_b` (the bindlist registry holds all 349 such entries — see
-`formats/bindlist.md`). (`id_b = 0` means rigid / no skeleton, used by item props.) SAMPLE-VERIFIED.
+distinct non-zero `id_b` values matching 349 `.bnd` files** (the corpus shows 350 distinct `id_b`
+values in total, the extra value being `0`), a confirmed one-to-one correspondence. The matching
+`actor_id`s are **sparse over the range 1..8892**, not a dense 0..348 index. This makes `id_b` the
+reliable skin→skeleton link: to find a character skin's skeleton, resolve the registered `.bnd`
+whose `actor_id` equals `id_b` (the bindlist registry holds all 349 such entries — see
+`formats/bindlist.md`); never use `id_b` as an array subscript into a 349-slot table.
+(`id_b = 0` means rigid / no skeleton, used by item props.) CONFIRMED — two-witness (loader read
+order + black-box census of all 2,786 `.skn` files, zero residual).
 
-> **`id_b` is the skeleton pointer, not the class tag.** The 349-valued `id_b` domain documented here
-> is the skeleton-selection domain. It must not be confused with the 6-value `skin.txt` `col2` class
+> **`id_b` is the skeleton pointer, not the class tag.** The `id_b` `actor_id` domain documented here
+> (sparse over 1..8892, 349 non-zero values) is the skeleton-selection domain. It must not be confused with the 6-value `skin.txt` `col2` class
 > tag (a separate field, a separate file, a separate consumer). Both were historically labelled "IdB";
 > they are split into two distinct fields. See the Header naming-disambiguation note above.
 
@@ -305,14 +360,27 @@ item samples have exactly zero residual bytes after the weight table.
 
 ### Status
 
-- **sample_verified:** true
+- **sample_verified:** true · **ida_anchor:** `263bd994` · **ida_reverified:** 2026-06-16
 - **Samples analysed (byte-level):** 3 files (`g2036.bnd`, `g2039.bnd`, `g2040.bnd`) from
   `data/char/bind/`. All three are 56 bytes and contain exactly 1 bone each (root-only skeleton,
   identity transform).
-- **Census-verified (corpus):** the full corpus of **349 `.bnd` files** parses with 0 errors.
-  **327** are multi-bone (`bone_count > 1`), the typical character skeleton having 31–80 bones. The
-  **player rigs** are `g1.bnd`–`g4.bnd` (84 / 87 / 82 / 89 bones; embedded labels `M_musa`, `salsu`,
-  `dosa`, `Monk` — the base playable classes). The largest census skeleton is 244 bones.
+- **Re-verified two-witness (build `263bd994`):** the byte parser (header → bone records →
+  hierarchy build) was walked in the loader and re-checked against a fresh **player rig** sample
+  (`g1.bnd`). That sample reads `actor_id = 1`, an ASCII `actor_name` LenStr of length 10, and a
+  `bone_count` whose **low byte is 84 with the upper three bytes zero** (an 84-bone player rig). Its
+  84 bone records of 36 bytes each (3,024 bytes) walk **exactly** to the bone-array end, after which
+  the file carries a **+4 trailing block of zero bytes** (one of the 236/349 files that do — see
+  §File trailer). The root bone reads `self_id` low 0 / `parent_id` low 0 (root sentinel) with an
+  identity rest quaternion whose W component at sub-offset +32 ≈ 1.0000, confirming XYZW order on a
+  real bone. All re-confirmed; no drift.
+- **Census-verified (corpus):** the full corpus of **349 `.bnd` files** parses with 0 errors —
+  **349 distinct `actor_id`s, sparse over the range 1..8892** (matching the 349 `.skn` `id_b`
+  skeleton pointers, see §id_b ↔ skeleton bijection). **327** are multi-bone (`bone_count > 1`), the
+  typical character skeleton having 31–80 bones. The **player rigs** are `g1.bnd`–`g4.bnd`
+  (84 / 87 / 82 / 89 bones; embedded labels `M_musa`, `salsu`, `dosa`, `Monk` — the base playable
+  classes). The largest census skeleton is 244 bones. **Of the 349 files, 113 end exactly at the last
+  bone record and 236 carry +4 trailing zero bytes** after the bone array (an old-serializer name
+  terminator — see §File trailer); the loader correctly leaves these unconsumed in both cases.
 
 ### Identification
 
@@ -327,7 +395,7 @@ item samples have exactly zero residual bytes after the weight table.
 |---:|---|---|---|---|---|
 | 0 | 4 | u32 LE | `actor_id` | Numeric ID for this skeleton. Matched against the `id_b` field in `.skn` headers to associate a skin with its skeleton (see §id_b ↔ skeleton bijection). Typically corresponds to the numeric suffix of the filename (e.g. `g2036.bnd` → `actor_id = 2036`), though this is a naming convention, not a format invariant. | CONFIRMED |
 | 4 | 4 + N | LenStr | `actor_name` | Length-prefixed name string. Wire format: 4-byte u32 LE length, then N bytes with no null terminator. This is a free-form human-assigned label and does NOT reliably encode the numeric `actor_id`. Observed: `g2039.bnd` has `actor_id = 2039` but `actor_name = "a123"`; player rigs carry labels like `"M_musa(84)"`. See String encoding in the `.skn` section above. | CONFIRMED |
-| after name | 4 | u32 LE | `bone_count` | Number of bone records that follow. The loader reads a full 4-byte u32 but discards the upper three bytes, giving an effective maximum of 255 bones. SAMPLE-VERIFIED across 349 files: all observed bone counts fit in one byte (max 244), consistent with the low-byte-only semantic. | CONFIRMED |
+| after name | 4 | u32 LE | `bone_count` | Number of bone records that follow. The loader reads a full 4-byte u32 but discards the upper three bytes (the loop bound is the low byte only), giving an effective maximum of 255 bones. SAMPLE-VERIFIED across 349 files: all observed bone counts fit in one byte (max 244), consistent with the low-byte-only semantic. Build `263bd994` witness: `g1.bnd` stores the raw u32 little-endian with low byte 84 and upper three bytes all zero (84-bone rig). | [sample-verified] |
 
 Note: a previous revision of this spec described `bone_count` as a 1-byte on-disk field.
 That was incorrect. The on-disk representation is a full 4-byte u32 LE; only the low byte is
@@ -373,7 +441,7 @@ math (`specs/skinning.md` §7).
 
 | Confidence |
 |---|
-| CONFIRMED — the loader does not reorder components; confirmed by analysis of the quaternion multiply routine used during world-transform accumulation |
+| [sample-verified] — the loader does not reorder components (confirmed by analysis of the quaternion multiply routine used during world-transform accumulation); on build `263bd994` the `g1.bnd` root bone is an identity rest quaternion whose **W (scalar) ≈ 1.0000 at sub-offset +32**, i.e. stored last, proving XYZW order on a real bone |
 
 ### Root bone sentinel
 
@@ -383,30 +451,33 @@ matches no other bone's `self_id` low byte causes a fatal abort in the original 
 
 | Confidence |
 |---|
-| CONFIRMED — resolved by analysis of the hierarchy-build routine |
+| [sample-verified] — resolved by analysis of the hierarchy-build routine (it resolves each parent by low-byte match against the other bones' `self_id` low bytes); on build `263bd994` the `g1.bnd` root bone reads `self_id` low byte 0 and `parent_id` low byte 0, satisfying the sentinel |
 
 ### File trailer
 
-All three validated single-bone samples have 4 bytes of `0x00` after the last bone record that are
-not consumed by the `.bnd` parser. The parser reads the header and `bone_count × 36` bytes, then
-performs post-load hierarchy and world-transform passes and returns. No additional read occurs.
+**Corpus finding (two-witness):** of the 349 `.bnd` files, **113 end exactly at the last bone record
+(zero residual)** and **236 carry exactly +4 trailing bytes of `0x00`** after the bone array. The
+shipping loader consumes neither case incorrectly: it reads the header and `bone_count × 36` bytes,
+runs the post-load hierarchy / world-transform passes, and returns — it never reads past the bone
+array, so the 4 extra bytes (when present) are correctly left unconsumed.
 
-The origin of these 4 trailing bytes is unclear. Three hypotheses are open:
+**Origin (now identified):** the +4 trailing bytes are an **old-serializer artifact — a residual
+4-byte string terminator left over from how the export tool wrote the `actor_name` LenStr** in an
+earlier file-format generation. They are not a bone record, not a count, not a required field. The
+two earlier alternative hypotheses (alignment padding, checksum) are no longer the working
+explanation given the corpus split (a fixed +4 block on a majority of files, always all-zero, with
+no relationship to bone content), and the "null LenStr sentinel for a concatenated variant" reading
+is consistent with the serializer-terminator origin (a zero word after the name) but no
+concatenated-file variant is observed.
 
-1. **Tool-generation padding** — the export tool appended 4 zero bytes as alignment padding or a
-   fencepost marker. Most likely for all-zero values.
-2. **Null LenStr sentinel** — a u32 = 0 that would signify "no further records" in a hypothetical
-   concatenated-file variant of the format.
-3. **Checksum** — a XOR or byte-sum checksum; the value is 0 for identity-only bones, so a
-   checksum cannot be ruled out from these samples alone.
-
-**Recommended parser behaviour:** read `bone_count × 36` bytes after the header. Tolerate and
-silently skip up to 4 trailing bytes if the end of the bone array does not align with EOF. Do not
-interpret the trailing bytes as a bone record or as a required field.
+**Recommended parser behaviour:** read the header and `bone_count × 36` bytes, then stop. Do **not**
+require the bone array to end exactly at EOF, and do **not** read or interpret any trailing bytes.
+Tolerate 0 or 4 residual bytes after the last bone record (both are valid; ~32% of files end exactly,
+~68% carry the +4 block). Never treat a trailing block as a bone record or a required field.
 
 | Confidence |
 |---|
-| CONFIRMED present in all 3 single-bone samples; semantics UNVERIFIED |
+| [sample-verified] — corpus split 113 exact / 236 with +4 zero bytes (two-witness: loader read order + black-box census of all 349 files); build `263bd994` spot-check: the `g1.bnd` player rig is one of the 236 "+4 trailing zero" files (84 bones × 36B walk exactly to the bone-array end, then 4 zero residual bytes the loader never reads). Origin = old-serializer name terminator (CONFIRMED behaviourally; exact byte-generation provenance not byte-traced) |
 
 ---
 
@@ -427,17 +498,20 @@ None identified in these formats.
 - **`.xobj` maximum index:** u16 ceiling is 65535; no sample has more than 13 vertices.
   Off-by-one behaviour at the u16 boundary is untested.
 - **`.skn` name field CP949 encoding:** item-skin names in available byte-level samples are pure
-  ASCII. Korean-encoded names are expected in some character skins; no Korean-encoded sample byte
-  block has been inspected.
+  ASCII, and the fresh build-`263bd994` weighted **character** skin sample (name length 11) is also
+  pure ASCII. Korean-encoded names are expected in some character skins; no Korean-encoded sample
+  byte block has yet been inspected. The Known Unknown stands (D-2).
 - **`.skn` / `.bnd` `self_id` / `parent_id` upper bytes:** the loader discards the upper three
   bytes after reading the full u32. Whether these bytes are always zero in real files, or whether
   they carry information consumed by other code paths, is not confirmed (census bone counts and IDs
   all fit in the low byte, consistent with the discard).
 - **`.bnd` `actor_id` upper 3 bytes:** the parser stores the full u32 `actor_id`. Whether the
   upper bytes carry meaning or are always zero in practice is unknown.
-- **`.bnd` trailing 4 bytes:** three hypotheses remain open (tool padding, null sentinel,
-  checksum). The semantics cannot be determined from the available single-bone samples; the
-  multi-bone trailer has not been byte-inspected.
+- **`.bnd` trailing 4 bytes — origin downgraded, not fully open:** the corpus split (113 files end
+  exact, 236 carry +4 zero bytes) and the all-zero, content-independent nature of the block identify
+  it as an old-serializer name-terminator artifact (see §File trailer). What remains unverified is
+  only the exact byte-generation provenance in the original export tool; the parser handling is
+  settled (read `bone_count × 36`, ignore any trailing bytes).
 - **`.bnd` multi-bone byte-level cross-check:** the 36-byte stride per bone is confirmed by parser
   analysis and the corpus census parses cleanly, but a full byte-level offset cross-check on a
   multi-bone rig (e.g. the §canonical player trio in `specs/skinning.md`) is the recommended next
@@ -450,12 +524,13 @@ None identified in these formats.
 
 | Former item | Resolution |
 |---|---|
-| `.skn` `id_b` non-zero semantics | RESOLVED — `id_b` is the 349-valued skeleton pointer into the bindlist registry; non-zero is universal for character skins and the distinct `id_b` set is a bijection with the 349 `.bnd` `actor_id`s (§id_b ↔ skeleton bijection). |
-| `.skn` `id_b` vs `skin.txt col2` ("IdB") naming collision | RESOLVED — two distinct fields: `.skn` `id_b` = 349-valued skeleton pointer; `skin.txt col2` = 6-value outfit/class tag (separate file, base-offset table). See the Header naming-disambiguation note. (Canonical glossary split owned by Tier-1.) |
+| `.skn` `id_b` non-zero semantics | RESOLVED — `id_b` is an `actor_id` skeleton pointer (sparse range 1..8892, 0 = no skeleton), resolved by `actor_id` lookup against the bindlist registry — NOT a dense 0..348 index. Non-zero is universal for character skins and the 349 distinct non-zero `id_b` values are a bijection with the 349 `.bnd` `actor_id`s (§id_b ↔ skeleton bijection). |
+| `.skn` `id_b` vs `skin.txt col2` ("IdB") naming collision | RESOLVED — two distinct fields: `.skn` `id_b` = `actor_id` skeleton pointer (1..8892, resolved by `actor_id`, not a 349-index); `skin.txt col2` = 6-value outfit/class tag (separate file, base-offset table). See the Header naming-disambiguation note. (Canonical glossary split owned by Tier-1.) |
 | `.skn` multi-bone weight records | RESOLVED — 1,140 multi-bone/multi-weight skins census-verified (§Multi-bone weighted skinning). |
 | `.skn` weight skip threshold | RESOLVED — minimum observed weight = 0.010; records below 0.01 are dropped (SAMPLE-VERIFIED). |
 | Weights addressing bones by index vs ID | RESOLVED — `bone_index` is a **bone ID** resolved by `id − base_id`, no indirection table (§Bone addressing). |
 | `.bnd` multi-bone skeletons exist | RESOLVED — 327 multi-bone `.bnd` files; player rigs g1–g4 (82–89 bones); largest 244 bones. |
+| `.bnd` trailing 4 bytes present-in-all? | RESOLVED (corpus) — present in 236/349 files; absent (exact end) in 113. Always all-zero, content-independent → old-serializer name terminator. Parser ignores it (§File trailer). Only the exact tool provenance remains unverified. |
 
 ---
 
@@ -471,4 +546,6 @@ None identified in these formats.
   `SknCorner`, `SknVertex`, `SknWeight`, `BndBone`; the `id_b` skeleton-pointer vs `skin.txt col2`
   class-tag split is owned by Tier-1)
 - Provenance: see `Docs/RE/journal.md`. This `id_b` skeleton-pointer / class-tag split was promoted
-  under CAMPAIGN VFS-MASTERY (two-witness: loader + black-box).
+  under CAMPAIGN VFS-MASTERY (two-witness: loader + black-box). Re-verified under CAMPAIGN 10 Block D
+  against build `263bd994` + a fresh VFS sample set (rigid + weighted `.skn`, player-rig `.bnd`,
+  `bindlist.txt`) on 2026-06-16 — all offsets/strides/counts re-confirmed, zero conflicts.

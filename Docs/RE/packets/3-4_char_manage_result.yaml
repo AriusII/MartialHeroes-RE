@@ -1,78 +1,77 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
 #
-# FILENAME NOTE: the file is named "3-4_*" for legacy/link-stability reasons, but the message it
-# specs is the (3:7) char-MANAGE result. The minor-3 receive ladder was corrected by the front-end
-# deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed: minor 7 = this 8-byte
-# manage/delete result; minor 4 = the variable SmsgSceneEntityUpdate (no field spec); minor 14 =
-# the 16-byte SmsgCharSpawnResponse enter bridge (no field spec). The opcodes.md 3/7 row links here.
+# VERIFICATION BANNER
+#   verification: confirmed-routing  (opcode->handler dispatch arm is control-flow-confirmed);
+#                 field-layout: not-decoded (this message has no fixed field table -- variable
+#                 slot-scratch refill, body layout owned by the slot-decode path);
+#                 wire VALUE semantics: capture/debugger-pending (no live capture this campaign).
+#   ida_reverified: 2026-06-16
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: RESOLVES the prior 3/4-vs-3/7 mislabel -- this file (keyed by its 3-4 filename) now
+#              specs opcode (3:4) SmsgSceneEntityUpdate; SmsgCharManageResult moved to (3:7).
+#
+# FILENAME NOTE: the file is named "3-4_char_manage_result.yaml" for legacy/link-stability reasons,
+# but it has been CORRECTED to spec opcode (3:4) = SmsgSceneEntityUpdate. The minor-3 receive ladder
+# is dispatch-confirmed (Campaign-10 Block E, control-flow): minor 4 = THIS variable SmsgSceneEntityUpdate;
+# minor 7 = the 8-byte SmsgCharManageResult (delete/select/rename manage result -- now its OWN message,
+# the opcodes.md 3/7 row points to the catalogue, no separate field YAML this pass); minor 14 = the
+# 16-byte SmsgCharSpawnResponse enter bridge (no field spec). The old content of this file (the 8-byte
+# manage/delete result) was MISFILED here and has been relocated under opcode (3:7).
 
-name: SmsgCharManageResult
-opcode: 0x30007           # major 3 (CharacterMgmt), minor 7 -> (3 << 16) | 7
+name: SmsgSceneEntityUpdate
+opcode: 0x30004           # major 3 (CharacterMgmt), minor 4 -> (3 << 16) | 4
 direction: S2C
-size: 8                   # fixed 8-byte block read by the char-manage result handler
+size: var                 # variable-length; no fixed field table (slot-scratch refill / scene refresh)
 spec: packets/3-4_char_manage_result.yaml
 status: hypothesis
 capture_verified: false
 
 summary: >
-  Character delete / select / rename / manage result. An 8-byte block: a result byte, a subtype
-  byte that selects which character operation the result is for (delete / rename / generic
-  refresh), and a 4-byte ready_time used to drive the same-day delete-cooldown timer. This is the
-  handler that DECREMENTS the account character count on a delete-confirm. The minor-3 receive
-  ladder routes minor 7 here -- the front-end deep-fidelity pass (campaign4/frontend-deep),
-  dispatch-table-confirmed, settled the prior 3/4-vs-3/7 hedge: 3/7 is THIS manage/delete result,
-  3/4 is the variable SmsgSceneEntityUpdate, and 3/14 is the 16-byte SmsgCharSpawnResponse enter
-  bridge. The local-player WORLD spawn is driven by 4/1, not by this message.
+  Character-select / character-management scene refresh. Opcode (3:4). A variable-length message the
+  inbound dispatcher routes through the major-3 inline minor ladder; its handler refills the
+  per-slot scene scratch and refreshes the char-management scene's displayed entities. It carries NO
+  fixed field block this pass -- the body is consumed by the slot-decode path, so there is no
+  promotable offset table here. Routing (opcode -> handler) is control-flow-confirmed; the body field
+  layout and any wire VALUE semantics are capture/debugger-pending.
 
-# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8.
-fields:
-  - { name: Result,    type: u8 }    # 0x00  result code (1 = success path, 0 = blocked/cooldown)
-  - { name: Reserved1, type: u8 }    # 0x01  unmapped byte between Result and Subtype
-  - { name: Subtype,   type: u8 }    # 0x02  which character op this result is for (0/1/2 -- see notes)
-  - { name: Reserved3, type: u8 }    # 0x03  unmapped byte; pads to the 4-byte boundary before ready_time
-  - { name: ReadyTime, type: u32 }   # 0x04  delete-cooldown ready timestamp (used when Result == 0)
+# No fixed field table. SmsgSceneEntityUpdate is variable-length and its body is decoded by the
+# scene/slot refill path rather than read as one fixed struct, so this spec intentionally has no
+# `fields:` block. The engineer must NOT generate a packed struct from this file.
+fields: []
 
 notes: |
-  Static inference only; no capture available. The char-manage result handler reads three fixed
-  fields out of an 8-byte block at the offsets below. Frame = 8-byte header + 8 = 16 bytes.
+  Routing CONFIRMED (control-flow), body layout NOT decoded, wire VALUE semantics capture-pending.
+  No live capture available this campaign.
 
-    0x00 (1B) Result    : result code. Observed branches: 1 = success path; 0 = blocked, where a
-                          future ReadyTime drives a cooldown message. HIGH CONFIDENCE on the two
-                          observed values; the full enum is not enumerated.
-    0x01 (1B) Reserved1 : a byte between Result and Subtype not consumed by the traced handler.
-                          Model as reserved/padding until a capture clarifies it.
-    0x02 (1B) Subtype   : selects which character operation the result applies to. Observed:
-                            0 -> generic slot refresh,
-                            1 -> rename applied (refresh the slot's displayed name),
-                            2 -> DELETE confirmed (decrement account char count, clear the slot).
-                          HIGH CONFIDENCE on {0,1,2}.
-    0x03 (1B) Reserved3 : a byte before the 4-byte ReadyTime; not consumed by the traced handler.
-                          Model as reserved/padding.
-    0x04 (4B) ReadyTime : a timestamp (le u32). Used on the Result == 0 path to compute a
-                          same-day delete-cooldown: the client shows "deletion forbidden today,
-                          HH hours MM minutes" from (ReadyTime - now), splitting the remaining
-                          seconds into hours and minutes. MEDIUM CONFIDENCE on the field; its
-                          exact epoch/units need a capture (see unknowns).
-
-  OPCODE / LADDER (RESOLVED): this 8-byte manage/delete result is opcode (3:7), not (3:4). The
-  front-end deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed, corrected the
-  minor-3 receive ladder:
-    - 3/4  = SmsgSceneEntityUpdate (variable-length slot-scratch refill / scene-clear; no field spec)
-    - 3/7  = SmsgCharManageResult  (THIS 8-byte delete/select/rename manage result)
+  OPCODE / LADDER (RESOLVED, dispatch-confirmed): the major-3 inbound arm is an inline minor ladder.
+  The Campaign-10 Block E re-confirmation (control-flow) settles the long-standing 3/4-vs-3/7 hedge:
+    - 3/1  = SmsgCharacterList     (3-byte header + 5 x 981-byte slot records; see 3-1_character_list.yaml)
+    - 3/4  = SmsgSceneEntityUpdate (THIS message -- variable-length slot-scratch refill / scene refresh)
+    - 3/5  = SmsgEnterGameAck      (44-byte account/billing ack; see 3-5_enter_game_response.yaml)
+    - 3/7  = SmsgCharManageResult  (8-byte delete/select/rename manage result -- RELOCATED; opcodes.md
+                                    3/7 row owns it; the 8-byte block was previously misfiled in THIS file)
     - 3/14 = SmsgCharSpawnResponse (16-byte enter-into-world bridge; no field spec)
-  The prior decompiler-mislabel confusion and the "3/4-vs-3/7 delete carrier" hedge are both
-  settled. The local-player world spawn is driven by 4/1, not by 3/7.
+  Any doc/YAML that places SmsgSceneEntityUpdate at 3/14 or SmsgCharManageResult at 3/4 is WRONG.
 
-  RELATED: this is the inbound counterpart to the C2S char-management senders 1/13 rename and
-  1/7 manage (delete overloads 1/7 with the mode byte set). The create accept/refuse path also
-  surfaces a distinct 12-byte create result (3/23 SmsgCharCreateResult) and a 19-byte rename
-  result (3/6 SmsgRenameCharResult); those are separate messages owned elsewhere.
+  WHAT IT DOES (CONFIRMED behaviour, for engineer context -- not wire fields): on receipt the handler
+  refills the character-management scene's per-slot scratch / refreshes the displayed scene entities.
+  It is part of the char-select / char-management presentation flow, not the world spawn (the
+  local-player WORLD spawn is driven by 4/1 SmsgGameStateTick).
 
-  UNKNOWNS to resolve with a capture of delete / rename results:
-    - the meaning of the two reserved bytes at 0x01 and 0x03 (true padding vs small fields);
-    - the epoch and units of ReadyTime (the client treats the delta as seconds and splits into
-      HH:MM, but the absolute base is not confirmed);
-    - the full Result enum beyond {0, 1}.
+  WHY NO FIELD TABLE: the body is variable-length and is consumed by the slot/scene decode path, not
+  read as a single fixed struct at the dispatch site, so no fixed offset table is promotable from the
+  routing handler alone. A capture of a char-management scene refresh is required to decode the body.
 
-  UNBLOCKS: Client.Application delete / rename result handling + the delete-cooldown UX.
+  RELATED:
+    - SmsgCharManageResult (3:7) -- the 8-byte manage/delete result that USED to live in this file.
+      Its model: Result@0x00 (u8), Subtype@0x02 (u8: 0 generic refresh / 1 rename applied /
+      2 delete confirmed -> decrement account char count + clear slot), ReadyTime@0x04 (u32, drives the
+      same-day delete-cooldown HH:MM message on the Result==0 path); reserved bytes @0x01/@0x03.
+      That 8-byte block read is control-flow-confirmed; its field VALUE semantics (reserved-byte
+      meaning, ReadyTime epoch/units, full Result enum) stay capture/debugger-pending.
+    - C2S counterparts: 1/13 rename, 1/7 manage (delete overloads 1/7 with the mode byte).
+
+  UNKNOWNS to resolve with a capture of a char-management scene refresh:
+    - the full body layout of SmsgSceneEntityUpdate (no fixed offset table recovered statically);
+    - which scene/slot fields the refill path consumes and their wire types.

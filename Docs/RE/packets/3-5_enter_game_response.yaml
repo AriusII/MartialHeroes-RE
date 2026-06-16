@@ -1,5 +1,14 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the 40-byte block read + the trailing 4-byte
+#                 read (total 44), BillingFlag@0x1C, CharacterCount@0x28, and the GameState=LOADING
+#                 side effect are control-flow-confirmed); field VALUE semantics (name length within
+#                 NameBlock, BillingFlag value enum, BlockTail content) are capture/debugger-pending.
+#   ida_reverified: 2026-06-16
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none (re-confirmed against the 3/5 handler read site).
 
 name: SmsgEnterGameAck
 opcode: 0x30005            # major 3 (CharacterMgmt), minor 5 -> (3 << 16) | 5

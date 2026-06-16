@@ -21,27 +21,51 @@
 
 ## Status and verification banner
 
+> **verification:** `confirmed` for client-side routing / record framing / runtime offsets / cast-gate
+> ordering / cooldown & buff logic (control-flow-confirmed); `static-hypothesis` for single-inference
+> field meanings; `capture/debugger-pending` for server-authored magnitudes (skill damage, cooldown
+> wall-clock, skill-point/XP rates, HP/stamina scale) and the actual on-wire VALUE bytes of 5/33, 4/41,
+> 4/150, 5/52, 5/31.
+> **ida_reverified:** 2026-06-16
+> **ida_anchor:** 263bd994
+> **evidence:** [static-ida]
+> **conflicts:** none — Campaign-10 Lane-F2 re-verification reproduced every framing constant
+> (1504 / +1500 / N×8 / 1508 / +0 SkillId / +4 GlobalCategory / 240 / 8-byte stride / i16 points /
+> slot<240) from the loader and handler code. Refinements only (the hotbar "two parallel arrays" are
+> physically ONE 240×8-byte record array; new concrete string-id / message-id tables; 4/102 is a
+> 476-byte snapshot rebuild). All applied below.
+
 Confidence tags used throughout:
 
 - `CONFIRMED` — consistent across multiple call sites / corroborated by the game's own debug
-  strings or a recovered name.
-- `LIKELY` — single consistent site, plausible, not independently cross-checked.
+  strings or a recovered name (control-flow-confirmed on build 263bd994).
+- `LIKELY` — single consistent site, plausible, not independently cross-checked (static-hypothesis).
 - `UNVERIFIED` — inferred from static analysis only; boundary, units, or semantics not pinned.
+- `CAPTURE-PENDING` — server-authored magnitude or on-wire VALUE byte; the client-side routing/size
+  is confirmed but the live value needs a capture / debugger run.
 
-**Global caveat: `capture_verified: false`.** No live network capture was available. Every claim
-here is a static inference from the legacy client; numeric record offsets, field widths, and the
-HP-vs-MP cost question in particular must be reconciled against a capture before an engineer treats
-them as settled. Korean text in `skills.scr` and related data files is **CP949 (Korean ANSI code
-page)**, not UTF-8 — decode accordingly.
+**Global caveat: `capture_verified: false`.** No live network capture was available. Client-side
+routing, record offsets, field widths, and gate ordering are control-flow-confirmed on build
+263bd994; but server-authored magnitudes (skill damage, real cooldown wall-clock, skill-point / XP
+rates, HP/stamina scale) and the actual on-wire VALUE bytes of the pushes are **capture/debugger-pending**.
+The HP-vs-MP cost question in particular must be reconciled against a capture of a known MP-cost cast.
+Korean text in `skills.scr` and related data files is **CP949 (Korean ANSI code page)**, not UTF-8 —
+decode accordingly.
 
 ### UNVERIFIED — open questions (do not treat as settled)
+
+> **RESOLVED (Campaign 10, build 263bd994):** the prior open question "the unused second int of each
+> 8-byte hotbar slot pair" is **closed** — there is only ONE 240×8-byte hotbar record array; the
+> "second int" is **not unused**: its low word (record +4) is the skill-rank / points value and only
+> its high word (record +6) is pad. See §1.5. The per-rank sub-row count byte was also pinned to
+> fixed-block **+1500** (see §1.2).
 
 1. **Cast cost field — HP or MP?** The cast-confirm path subtracts the skill-data "consumed cost"
    field from the local player's **current-HP 64-bit vital**, yet the field is labelled a generic
    cost and the *cast-gate* affordability check uses a **different** skill-data field (the MP-cost
    factor). Two distinct cost fields exist. Whether the game truly has HP-cost skills, or whether
    the consumed-cost field is an MP/ki value stored into the HP vital, **needs a capture of a known
-   MP-cost cast**. Do not collapse these into a single "cost" until confirmed.
+   MP-cost cast** (`CAPTURE-PENDING`). Do not collapse these into a single "cost" until confirmed.
 2. **`skills.scr` per-rank sub-rows.** Each skill record ends with a count-prefixed table of small
    fixed-width sub-rows (per-rank / per-level effect rows). Their individual fields were not decoded;
    they are most likely per-rank coefficients / durations. Needs the data file or a dedicated parser
@@ -70,7 +94,16 @@ page)**, not UTF-8 — decode accordingly.
   sequence, alongside the item, mob, and map-setting scripts. `CONFIRMED`.
 - The file is a sequence of **variable-length** skill records that the loader iterates one at a
   time; records cannot be bulk-read as a fixed array, because each record carries a trailing
-  per-rank sub-table.
+  per-rank sub-table. The loader reads exactly **1504 bytes** for the fixed block, then (gated on
+  `count != 0`) reads `8 × count` trailing bytes. `CONFIRMED`.
+- **Two catalog containers** are built from the same records (both balanced-tree maps, not the
+  world-actor registry): a **primary id-keyed catalog** keyed on **SkillId (+0)**, and a **secondary
+  category-keyed index** keyed on **GlobalCategory (+4)** that is populated **only for records whose
+  `+4 != 0`** (mob / universal skills are skipped from the secondary index). The secondary index lets
+  the client enumerate skills by family / tree without scanning by id. `CONFIRMED`.
+- **Catalog id-validity is consumer-side, not loader-side.** The loader inserts every record it
+  parses; the "skip id 0 / id ≥ 10,000,000 (padding / obsolete)" rule cited elsewhere is a black-box
+  file-walk heuristic, **not** enforced by the loader code. `static-hypothesis`.
 
 ### 1.2 Record format (on disk)
 
@@ -79,19 +112,31 @@ Each skill record is:
 | Part | Size | Meaning |
 |---|---|---|
 | Fixed header block | **1504 bytes** | The skill-data fields (see §1.4). |
-| Sub-row count | **1 byte (u8)**, near the end of the block | Number of trailing per-rank sub-rows. |
+| Sub-row count | **1 byte (u8) at fixed-block +1500** | Number of trailing per-rank sub-rows. When `0`, the record is exactly 1504 bytes and nothing trails. |
 | Trailing sub-rows | **count × 8 bytes** | Per-rank / per-level effect rows (raw on-disk form). |
 
-`CONFIRMED` for the 1504-byte fixed block and the count-prefixed 8-byte sub-rows; `UNVERIFIED` for
-the field meaning of each sub-row.
+`CONFIRMED` for the 1504-byte fixed block, the **count byte at +1500**, and the count-prefixed
+8-byte sub-rows; `UNVERIFIED` for the field meaning of each sub-row.
 
 ### 1.3 Runtime expansion
 
-At load, each 8-byte on-disk sub-row is expanded into a **12-byte runtime row** of shape roughly
-`[u16][i32 (sign-extended from an i16)][u16][u8]` — interpreted as a per-rank effect row. The
-runtime skill object is **1508 bytes** (the 1504-byte record plus a small runtime tail). The domain
-model should treat the per-rank rows as opaque coefficient/duration data until they are decoded.
-`LIKELY`.
+At load, each 8-byte on-disk sub-row is expanded into a **12-byte runtime row**. The expansion is
+exact (confirmed in the loader):
+
+| Disk field | Disk size | → Runtime field | Runtime size |
+|---|---|---|---|
+| disk +0 | u16 | runtime +0 | u16 |
+| (pad) | — | runtime +2 | u16 = 0 |
+| disk +2 | i16 | runtime +4 | i32 (**sign-extended** from the i16) |
+| disk +4 | u16 | runtime +8 | u16 |
+| disk +6 | u8 | runtime +10 | u8 |
+| (pad) | — | runtime +11 | u8 = 0 |
+
+Disk stride 8, runtime stride 12. The runtime skill object is **1508 bytes** = the 1504-byte record
+plus a **4-byte runtime tail at +1504** holding a pointer to the expanded sub-entry array. The object
+is allocated at 1508 bytes; its constructor copies the 1504-byte record then stores the sub-entry
+array pointer at +1504. `CONFIRMED` for the layout / sizes; the domain model should treat the per-rank
+rows as opaque coefficient / duration data until they are decoded (`UNVERIFIED` field meaning).
 
 ### 1.4 Skill-data field table (offsets within the 1504-byte record)
 
@@ -100,7 +145,11 @@ binary addresses. They are read directly by the cast / effect / cooldown logic.
 
 | Offset | Type | Field (neutral name) | Conf | Meaning / evidence |
 |---|---|---|---|---|
-| +1306 | u16 | `category` (skill sort) | CONFIRMED | Skill category. Observed values: 1, 2, 3, 5, 6, 7, 11, 14, 17. **14 = REVIVE** (named by the game's own debug string). Category 1 = basic-attack class. Mirrors `structs/skill.md` `skill_category`. |
+| +0 | i32 | `skill_id` (catalog primary key) | CONFIRMED | The skill id; primary key of the id-keyed catalog (§1.1). |
+| +4 | i32 | `global_category` (family / tree index) | CONFIRMED | Secondary catalog key (§1.1) — the skill *family / tree* index, distinct from the per-cast `category` at +1306. Indexed only when non-zero. Drives the hotbar de-dup rule (§4.1). Mirrors `structs/skill.md`. |
+| +520 | u8 | `tier_byte` (tier / chain-form) | CONFIRMED | Per-form tier discriminator within a family; used as the `< form` comparison key in the hotbar de-dup path (§4.1). |
+| +1292 | u16 | `skill_rank` | CONFIRMED | The skill rank; copied into the hotbar points array when a slot is applied (§1.5). |
+| +1306 | u16 | `category` (per-cast sort) | CONFIRMED | Per-cast skill category (the cast/effect discriminator, distinct from `global_category` at +4). Observed values: 1, 2, 3, 5, 6, 7, 11, 14, 17. **14 = REVIVE** (named by the game's own debug string). Category 1 = basic-attack class. Mirrors `structs/skill.md` `skill_category`. |
 | +1308 | u8 | `target_mode` (shape) | CONFIRMED | Selects target-resolution / area shape. Enumerated in §3. |
 | +1312 | f32 | `base_range` (cone length) | LIKELY | Base cast range; for cone/line shapes, the cone length. Combined with caster body radius for the range check. |
 | +1316 | f32 | `aoe_radius` (cast distance) | LIKELY | AoE radius / cast distance. Squared for distance gating. Doubled in area when the boost flag is set. |
@@ -117,6 +166,24 @@ binary addresses. They are read directly by the cast / effect / cooldown logic.
 > warm-up / valid-window globals; an out-of-window cast fails with the cast result code for "timing"
 > (see §2.3, code 11). Whether these reuse the cost fields or are separate adjacent values is
 > `UNVERIFIED`.
+
+### 1.5 Skill hotbar — ONE 240×8-byte record array (was "two parallel arrays")
+
+The skill hotbar is a single contiguous array of **240 eight-byte records** (total 1920 bytes). It is
+**not** two independent parallel arrays — the two "arrays" the code touches are simply two *views* into
+the **same** backing storage:
+
+| Record offset | Type | Field | Written by |
+|---|---|---|---|
+| +0 | i32 | `skill_id` (the skill occupying the slot; `0` = empty) | hotbar-set / quick-slot apply |
+| +4 | i16 | `points` (the skill's rank — `skill_rank` from skill-data +1292) | hotbar-set / quick-slot apply |
+| +6 | i16 | pad (the only unwritten part of the record) | — |
+
+`CONFIRMED`. This **resolves the prior open question** ("the unused second int of each 8-byte slot
+pair"): the second int is not unused — its **low word is the points value** (record +4); only its
+**high word (record +6) is pad**. Slot index is a `u8` in `0..239`; every reader/writer gates
+`slot < 240 (0xF0)` and skips/returns otherwise. The cooldown ("recast") arrays in §4 are indexed by
+the same 240-slot scheme. Mirrors `structs/skill.md` Part D (dual-view refinement).
 
 ---
 
@@ -284,10 +351,23 @@ Operations (each was named by the client's own debug format strings):
 discriminator (certain categories are blocked while a flag is set) and then calls the ready-check
 above. This is the hotbar quick-slot filter feeding the cast pipeline.
 
+### 4.1 Hotbar assignment de-duplication (family / tier rule)
+
+The quick-slot **apply-or-clear** path enforces a family de-dup rule when placing a skill into a
+hotbar slot (`CONFIRMED`, pure client logic — no capture needed):
+
+- It resolves the slot's skill via the id-keyed catalog (§1.1), then scans the other 240 hotbar slots.
+- **A skill is refused if another hotbar slot already holds a skill of the same `global_category`
+  (+4) at a *higher* `tier_byte` (+520)** — i.e. **you cannot slot a lower form of a family when a
+  higher form of the same family is already slotted.** The comparison is `candidate.tier_byte <
+  occupant.tier_byte` for occupants sharing the candidate's `global_category`.
+- On success the path writes `skill_id` (+0) and `points` = `skill_rank` (skill-data +1292) into the
+  record (§1.5) and refreshes the relevant panels; otherwise it clears the slot.
+
 > Implementation note: 240 parallel arrays is a flat structure-of-arrays. The .NET model can use a
 > single `CooldownSlot[240]` (struct-of-arrays or array-of-structs) keyed by hotbar slot index;
 > category 1 (basic attack) and category 5 are **exempt from arming a cooldown** (see §2 gate 13 and
-> §5.2).
+> §5.2). The hotbar de-dup gate (§4.1) belongs in `Client.Domain` as part of hotbar assignment.
 
 ---
 
@@ -442,6 +522,72 @@ code into two slot indices to stack it is `UNVERIFIED` (open question 4).
 
 ---
 
+## 6A. Hotbar, skill-point, and skill-window pushes (5/33, 4/41, 4/150, 4/102)
+
+These S2C pushes drive the hotbar / skill-point / skill-window UI. **Structure and routing are
+control-flow-confirmed on build 263bd994; the actual on-wire VALUE bytes are `CAPTURE-PENDING`** (no
+capture available). Payload-relative offsets below are the field positions within each push body
+(wire field positions / widths are owned by `packets/*.yaml` / `opcodes.md` — referenced here, not
+re-derived).
+
+### 6A.1 `SmsgSkillHotbarSlotSet` (5/33) — set one hotbar slot
+
+A 20-byte push, **gated to the local player**: the actor is resolved by a composite (sort, actor-id)
+key and must equal the local-player handle. On `slot < 240` it writes the slot record (§1.5):
+
+| Payload offset | Field | Action |
+|---|---|---|
+| +0 / +4 | sort / actor-id | composite key → must resolve to the local player |
+| +8 | `slot` (u8, 0..239) | target hotbar slot |
+| +0x0C | `skill_id` (i32) | written to record +0 |
+| +0x10 | `points` (i16) | written to record +4 |
+
+### 6A.2 `SmsgSkillHotbarAssignResult` (4/41) — assignment result + reason-string table
+
+A 24-byte push. A **gate byte at +0x08** (`1` = ok) decides apply-vs-clear: on `1` the assignment is
+applied; otherwise the echoed slot (slot at **+0x0C**) is **cleared** (record +0 set to `0`). A
+**reason byte at +0x09** (values `1..8`) selects a localized notice broadcast to chat / notice via the
+message database:
+
+| Reason byte | Message-DB string id |
+|---|---|
+| 1 | 3020 |
+| 2 | 3021 |
+| 3 | 3022 |
+| 4 | 3023 |
+| 5 | 3024 |
+| 6 | 3025 |
+| 7 | 3026 |
+| 8 | 3032 |
+
+`CONFIRMED` (the reason→id table is concrete in the binary).
+
+### 6A.3 `SmsgSkillPointUpdate` (4/150) — skill-point pool / level-up
+
+Gated on the local player: a **valid byte at +0** must be `1` **and** an **idkey at +4** must equal the
+**local-player id stored at player struct +92 (0x5C)** (the id field, *not* the player object pointer).
+A **mode byte at +8** then branches:
+
+- **mode == 1 (set total):** stores `value` (payload **+0x0C**) as the displayed skill-point pool
+  (the local-player skill-point total field). `CONFIRMED`.
+- **mode == 2 (level-up):** shows a level-up notice via the message database — string **74313** on the
+  `value == 0` path and string **74314** on the `value != 0` path — formatted with class / level data
+  read from the local player (a gate word and a class byte). `CONFIRMED`.
+
+> The display-only **255 skill-point cap** (if applied) lives in the window-render formatter, **not**
+> in this store path — the handler stores the raw `value`. `static-hypothesis`. The actual numeric
+> skill-point / level values on the wire are `CAPTURE-PENDING`.
+
+### 6A.4 `SmsgSkillWindowStateUpdate` (4/102) — 476-byte snapshot rebuild
+
+**Not a window toggle:** 4/102 carries a **476-byte snapshot** (the player stat block plus a set of
+fixed active-buff records) and **fully rebuilds** the skill / state window and the buff bar via a large
+UI formatter (`%d / %d` text). `CONFIRMED` for the size / role; the **internal layout of the 476-byte
+snapshot** (per-stat / per-buff-record offsets) is out of scope here — flagged for the
+struct-cartographer (`static-hypothesis`), and the live values are `CAPTURE-PENDING`.
+
+---
+
 ## 7. Related opcodes in this subsystem (cross-reference)
 
 These are cited from `opcodes.md` (canonical names) — not re-derived. Major:minor pairs are the
@@ -454,17 +600,19 @@ client's transport opcodes (`(major << 16) | minor`).
 | 5:31 | `SmsgBuffSlotUpdate` | S2C | Writes the 12-byte status slots (§6.1). |
 | 5:136 | `SmsgActorTimedStateUpdate` | S2C | Timed transform/stance state (§6.4). |
 | 4:109 | `SmsgLocalActorSkillStateFlag` | S2C | Local skill-state flag (§6.4). |
-| 5:33 | `SmsgSkillHotbarSlotSet` | S2C | Hotbar slot assignment (see `structs/skill.md`). |
-| 4:41 | `SmsgSkillHotbarAssignResult` | S2C | Hotbar assignment result. |
-| 4:150 | `SmsgSkillPointUpdate` | S2C | Skill-point pool update. |
+| 5:33 | `SmsgSkillHotbarSlotSet` | S2C | Sets one hotbar slot (local-player-gated); writes the 8-byte record (§1.5, §6A.1). |
+| 4:41 | `SmsgSkillHotbarAssignResult` | S2C | Hotbar assignment result; reason byte → string-id table 3020..3032 (§6A.2). |
+| 4:150 | `SmsgSkillPointUpdate` | S2C | Skill-point pool set / level-up (msgs 74313/74314); idkey @ player+92 (§6A.3). |
 | 4:97 | `SmsgAreaSkillEffectPanel` | S2C | Area skill-effect result panel. |
-| 4:102 | `SmsgSkillWindowStateUpdate` | S2C | Skill window state. |
+| 4:102 | `SmsgSkillWindowStateUpdate` | S2C | 476-byte stat/buff snapshot that rebuilds the skill/state window + buff bar (§6A.4). |
 | 5:51 | `SmsgSkillGuideState` | S2C | Skill guide state. |
 
-**Related runtime structs:** `structs/skill.md` (hotbar arrays, `category` +1306, rank field),
-`structs/actor.md` (last-known position, current-HP vital, lifecycle/alive word, the buff-table and
-timed-state regions), `structs/stats.md` (HP/MP auras — a **different** mechanism from the §6 buff
-slots: auras feed the max-HP/MP multiplier, buff slots drive visual / control state).
+**Related runtime structs:** `structs/skill.md` (the 240×8-byte hotbar record array — §1.5 dual-view
+refinement; the catalog primary/secondary indexes; `skill_id` +0 / `global_category` +4 / `tier_byte`
++520 / `skill_rank` +1292 / `category` +1306), `structs/actor.md` (last-known position, current-HP
+vital, lifecycle/alive word, the buff-table and timed-state regions; the local-player id field at
+player +92), `structs/stats.md` (HP/MP auras — a **different** mechanism from the §6 buff slots: auras
+feed the max-HP/MP multiplier, buff slots drive visual / control state).
 
 **Related data / asset files** (for the asset and data-parsing passes): `data/script/skills.scr`
 (this spec, §1), `data/script/skillcategory.scr`, `data/script/skillneedset.scr`,
@@ -479,13 +627,24 @@ slots: auras feed the max-HP/MP multiplier, buff slots drive visual / control st
 - **Cast pipeline** → `Client.Application` use-case + `Client.Domain` gates. Model the ordered gate
   chain (§2.1) and the `SkillCastResult` enum (§2.3) in the domain layer; keep the localized-string
   mapping in the UI layer.
+- **Skill catalog** → `Client.Domain` / data-tables: model the runtime skill object as the 1504-byte
+  record + per-rank rows (§1.2–1.4). Build **two indexes** — id-keyed (`skill_id` +0) and
+  family-keyed (`global_category` +4, skip `+4 == 0`) — mirroring §1.1.
+- **Hotbar** → `Client.Domain`: a single `HotbarSlot[240]` array of 8-byte records (`{int32 skill_id;
+  int16 points; int16 pad}`, §1.5), **not** two parallel arrays. Implement the §4.1 family/tier de-dup
+  gate (refuse a lower `tier_byte` form when a higher form of the same `global_category` is slotted) as
+  part of hotbar assignment.
 - **Cooldown table** → `Client.Domain`: a flat 240-slot cooldown model keyed by hotbar slot, with the
   category-1 / category-5 exemptions.
 - **Effect / buff model** → `Client.Domain`: a 31-slot per-actor status array with a parallel
   magnitude array, a single-decrement tick, and refresh-by-slot semantics (no stack counter). The
   effect-code applicator (§6.2) is a switch on the effect code.
-- **Wire decoding** → `Network.Protocol` decodes `CmsgUseSkill` / `SmsgActorSkillAction` / the status
-  pushes per their `packets/*.yaml`; cite `// spec: Docs/RE/packets/<name>.yaml` on each offset.
+- **Wire decoding** → `Network.Protocol` decodes `CmsgUseSkill` / `SmsgActorSkillAction` / the hotbar /
+  skill-point / window pushes per their `packets/*.yaml`; cite `// spec: Docs/RE/packets/<name>.yaml`
+  on each offset. The 4/41 reason→string-id table (§6A.2) and the 4/150 level-up message ids (§6A.3)
+  map to the project's own message-DB / string table.
 - **Do not** implement the HP-vs-MP cost (§5.2) as a single value, the `skills.scr` per-rank rows
   (§1.3), or any effect-code-> meaning beyond the table in §6.2 without first resolving the
-  corresponding UNVERIFIED item. Mark them as TODO with a pointer back to this spec.
+  corresponding UNVERIFIED item. The actual on-wire VALUE bytes (5/33, 4/41, 4/150, 5/52, 5/31) and
+  all server-authored magnitudes are `CAPTURE-PENDING` — gate any magnitude assumption on a capture.
+  Mark them as TODO with a pointer back to this spec.

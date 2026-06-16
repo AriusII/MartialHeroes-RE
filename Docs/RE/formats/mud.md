@@ -6,6 +6,18 @@
 
 ---
 
+## Re-verification banner (2026-06-16, CAMPAIGN 10 / Block D)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | `sample-verified` — fixed 0x8000 size, grid geometry, world→tile indexer, and the byte-2/3-4/5-7 BGM/BGE/EFF consumer reads are all matched against a real VFS sample **and** the legacy loader/indexer/consumer read-path (two-witness). RE-CONFIRMED in full on this build with no drift. |
+| `ida_reverified` | `2026-06-16` |
+| `ida_anchor`     | `263bd994` |
+| `evidence`       | `[static-ida, vfs-sample]` — loader (raw 0x8000 single read), tile indexer, and the sole ambient-sound consumer (witness 1) + black-box census over the real `data.vfs` (witness 2) |
+| `conflicts`      | None. Re-confirmed: headerless fixed 32 768 B (all 1 578 `.mud` files in the VFS are exactly this size); 64 × 64 tiles, 8-byte stride, 16-unit tiles; the sole consumer reads **only bytes 2–7** (byte 2 = BGM, bytes 3–4 = BGE, bytes 5–7 = EFF, byte 7 `effId2` confirmed consumed); **bytes 0 and 1 are never read** — the walk/run footstep hypothesis stays REFUTED. Two minor enrichments folded in (not conflicts): the consumer's forced re-pick interval is exactly **600 000 ms (10 min)** (§Runtime usage), and the null-blob (missing-file) fallback resolves to a single fixed **static default tile** (§Runtime usage). |
+
+---
+
 ## Status block
 
 | Attribute         | Value |
@@ -51,7 +63,9 @@ base path; see `terrain.md` for the cell streaming model.
 - **Endianness:** little-endian. The audio consumer reads all meaningful fields as individual
   bytes. — confidence: CONFIRMED
 - **File size:** fixed **32768 bytes (0x8000)** for every `.mud` — the loader allocates exactly
-  0x8000 bytes and reads exactly 0x8000 bytes in a single read. — confidence: CONFIRMED
+  0x8000 bytes and reads exactly 0x8000 bytes in a single read, with **no load-time parse** (raw
+  fixed blob; the grid is interpreted lazily by the audio consumer). VFS census (2026-06-16,
+  two-witness): **all 1 578 `.mud` files are exactly 0x8000 bytes.** — confidence: CONFIRMED
 
 ---
 
@@ -167,8 +181,12 @@ well under the 256 records per table). Full table layout and chain detail: `soun
      byte 7 (`effId2`) is confirmed read and used as an EFF-table index by the effect-sound-table
      loader.
    - **Bytes 0, 1:** not read by this consumer — no audio behaviour is driven by them.
-   - A periodic forced re-pick (long-interval timer) re-evaluates the current tile even without
-     movement.
+   - A periodic forced re-pick re-evaluates the current tile even without movement. The interval is
+     **600 000 ms (exactly 10 minutes)** — the consumer compares the elapsed time since the last
+     re-pick against this constant.
+4. **Missing `.mud` (null blob):** when no `.mud` is loaded for the cell, the indexer returns a
+   single fixed **static default tile** rather than reading the grid, so audio falls back to that
+   tile's indices.
 
 Crossfade/stop timing and the indoor override id are behavioural details that belong to a
 sound-subsystem spec, not to this format doc.
@@ -205,6 +223,14 @@ sound-subsystem spec, not to this format doc.
     the effect-sound-table loader.
   - Bytes 0–1 walk/run hypothesis REFUTED — the sole consumer reads only bytes 2–7; bytes 0 and 1
     are never read.
+- **CAMPAIGN VFS-MASTERY-B** reconcile (2026-06-16): full-corpus census confirms the fixed 0x8000
+  size on all 1 578 `.mud` files and the no-load-time-parse / lazy-consumer model
+  (byte 2 = BGM, bytes 3–4 = BGE, bytes 5–7 = EFF with byte 7 = `effId2`; bytes 0–1 never read).
+- **CAMPAIGN 10 / Block D** re-verification (2026-06-16, anchor 263bd994): two-witness re-confirm
+  (loader raw 0x8000 single read + tile indexer + sole ambient-sound consumer, against a real VFS
+  sample). No drift. Two minor enrichments added: the forced re-pick interval is exactly 600 000 ms
+  (10 min), and the missing-`.mud` (null-blob) lookup falls back to a single fixed static default
+  tile (both noted under §Runtime usage).
 
 ---
 

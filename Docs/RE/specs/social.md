@@ -1,5 +1,17 @@
 # Social systems: chat, whisper, party, guild, friend/relation (clean-room spec)
 
+> **Verification banner.** verification: confirmed (control-flow-confirmed) for every opcode→routing
+> link, the `(major:minor)` tuples, the total message sizes, the (2:7) 19-byte header, the
+> (2:35/2:36/2:37) party-submit shapes, the (2:30) guild-action size, the per-opcode text-length
+> NUL convention, and the (2:84) header-only-plus-30 s-cooldown shape; capture/debugger-pending for
+> the absolute on-wire byte-order/endianness of each length prefix, the inner field meanings of the
+> larger context/blob headers, and the on-wire VALUE meanings (mode/op/selector enumerations,
+> auto-accept event codes). ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida].
+> conflicts resolved this pass: (a) the (2:7) text-length prefix EXCLUDES the NUL — `(3:21)`/`(2:83)`
+> INCLUDE it (per-opcode, not the prior uniform "verify the off-by-one"); (b) `(2:84)` carries NO
+> text in its builder and is 30-second rate-limited (corrected from the prior "19 + text" catalog
+> entry); (c) a 2-byte `(2:21)` sender exists and is distinct from `(3:21)`.
+
 Neutral, data-only model of the legacy *Martial Heroes* client's **social wire protocol** and the
 **membership state** it maintains locally: chat channels, whispers, party/group, guild, and the
 combined friend/block/relation ("FATE") system. Promoted from dirty-room recon and rewritten in our
@@ -31,15 +43,16 @@ payload @+8). **All field offsets in this document are payload-relative** (relat
 
 | Area | Confidence |
 |---|---|
-| Frame model and `(major:minor)` opcode tuples for every message listed | HIGH — read from buffer-header writes / dispatch installers |
-| Total payload sizes (the literal byte counts) | HIGH — literal copy/read sizes |
-| Whisper (2:7) field layout | MEDIUM-HIGH — clean header walk; text cap and self-guard observed |
+| Frame model and `(major:minor)` opcode tuples for every message listed | CONFIRMED — read from buffer-header writes / dispatch installers |
+| Total payload sizes (the literal byte counts) | CONFIRMED — literal copy/read sizes |
+| `(2:7)` chat/whisper 19-byte header layout + EXCLUDES-NUL text prefix | CONFIRMED — clean header walk; text cap, self-guard, and prefix arithmetic observed |
+| `(3:21)`/`(2:83)` chat builders (sizes, INCLUDES-NUL prefix, gates) and `(2:84)` header-only + 30 s cooldown | CONFIRMED — each builder's `+1` and cooldown gate read directly |
 | Guild full-sync (4:65) 50-member array layout | MEDIUM — offsets walked; field meanings inferred |
 | Guild member roster patch (5:65) and party stats (5:38) layouts | MEDIUM |
 | Party roster event (5:21) and relation slot (5:26) layouts | MEDIUM |
 | Party member-remove result (4:36) layout and auto-disband behaviour | MEDIUM — offsets walked; self-leave vs expel submode read |
-| Chat context headers for 2:82 / 2:83 / 3:21 (per-field breakdown) | LOW — only channel selector + text trailer decoded |
-| C2S 2:35/36/37 are genuine party (not relation/FATE) | HIGH — pinned to party-panel action handlers (corrected 2026-06-13) |
+| Chat context headers for 2:82 / 2:83 / 3:21 (per-field breakdown) | LOW — header sizes + 3:21 channel selector + text trailer confirmed; remaining inner sender/target/scope fields not broken out |
+| C2S 2:35/36/37 are genuine party (not relation/FATE) | CONFIRMED — pinned to party-panel action handlers + "party healing actor ok" debug marker (corrected 2026-06-13, re-verified 2026-06-16) |
 | "Relation vs FATE" labelling of the remaining C2S 2:60–2:76 cluster | LOW — flagged UNVERIFIED #2 |
 | 2:122 short-name field width; auto-accept event codes | LOW — flagged UNVERIFIED #6/#7 |
 
@@ -58,10 +71,17 @@ implementer can rely on:
   text-bearing chat/whisper messages, by a **length-prefixed text body**: a `u32` byte-length
   prefix immediately after the fixed header, then that many CP949 bytes. Messages without text are
   pure fixed-size payloads.
-- **Text length prefix convention.** Where a text tail is present, the prefix is the text length
-  (the client computes it as string length, generally including the terminating NUL — model it as
-  "prefix = number of bytes that follow", and verify the off-by-one NUL inclusion against a capture,
-  UNVERIFIED #5). The body itself is copied with a hard cap (see per-message caps below).
+- **Text length prefix convention — PER-OPCODE (CONFIRMED).** Where a text tail is present, the
+  `u32` prefix is the text length, but the NUL-inclusion is **opcode-specific**, not uniform:
+  - `(2:7)` whisper/chat — prefix = **string length, EXCLUDES** the terminating NUL.
+  - `(3:21)` channel chat and `(2:83)` contextual chat — prefix = **string-length-plus-one, INCLUDES**
+    the NUL.
+
+  This supersedes the earlier "generally including the NUL — verify the off-by-one against a capture"
+  framing: the `+1` is literally present (3:21, 2:83) or absent (2:7) in each builder, so the
+  arithmetic is control-flow-confirmed. The only remaining capture-pending detail is the absolute
+  on-wire byte-order/endianness of the prefix. The body itself is copied with a hard cap (see
+  per-message caps below).
 - **Self-target guard (key invariant).** The relation/guild/party *submit* (C2S) paths resolve the
   intended **target** actor id from the UI/command arguments and compare it against the **local
   player's own actor id**. On a self/stale mismatch they display a shared error message
@@ -87,11 +107,12 @@ suggestions for `names.yaml`; confirm before committing.
 
 | Opcode | Proposed name | Dir | Size | Tail | Purpose / confidence |
 |--------|---------------|-----|------|------|----------------------|
-| 2:7  | `CmsgWhisper`        | C2S | 19 | +text | Private whisper to a named target. MEDIUM-HIGH (Section 3). |
-| 2:82 | `CmsgChatContext82`  | C2S | 28 | (caller-appended) | Chat variant; 28-byte context header, no text in the builder itself. Purpose UNVERIFIED #3. |
-| 2:83 | `CmsgChatContextual` | C2S | 24 | +text | Contextual chat (catalog 2:83); text gated `0 < len < 200`. MEDIUM. |
-| 2:84 | `CmsgChatVariant84`  | C2S | 19 | +text | Chat variant; channel/scope UNVERIFIED #4. |
-| 3:21 | `CmsgChannelChat`    | C2S | 56 | +text | General/channel chat (catalog 3:21); channel selector in header (Section 4). MEDIUM. |
+| 2:7  | `CmsgChat` (was `CmsgWhisper`) | C2S | 19 | +text (prefix EXCLUDES NUL) | Say-box chat for all everyday channels incl. whisper (ch 9); channel code at payload +0 (see `chat.md`). CONFIRMED shape (Section 3). |
+| 2:21 | `CmsgChat21` (purpose tbd)     | C2S | 2  | — | 2-byte sender; distinct from 3:21, easy to confuse. Purpose unrecovered (likely a small toggle/ack). STATIC-HYPOTHESIS. |
+| 2:82 | `CmsgChatContext82`  | C2S | 28 | (caller-appended) | Dispatcher chat variant; 28-byte context header, no text in the builder itself. Purpose UNVERIFIED #3. |
+| 2:83 | `CmsgChatContextual` | C2S | 24 | +text (prefix INCLUDES NUL) | Dispatcher contextual chat; text gated `0 < len < 200`. CONFIRMED shape. |
+| 2:84 | `CmsgChatVariant84_RateLimited` | C2S | 19 | **NONE** (header-only) | Dispatcher chat variant; **no text tail in the builder**, gated by a **30000 ms (30 s) client-side cooldown**. Purpose (plausibly an emote/macro broadcast trigger) capture-pending. CONFIRMED shape (corrected this pass — was "19 +text"). |
+| 3:21 | `CmsgChannelChat`    | C2S | 56 | +text (prefix INCLUDES NUL) | Dispatcher general/channel chat; channel selector at header +4, `selector mod 10 == 5` bypasses the length gate (Section 4). CONFIRMED shape. |
 
 ### 2.2 Chat & system display (S2C — layouts not re-derived here, cite catalog)
 
@@ -337,6 +358,11 @@ The submit wrapper resolves the target id from the payload, applies the **self-t
 valid non-self target sends the 8 bytes verbatim. The full enumeration of `Op` values is not
 recovered (UNVERIFIED).
 
+> **Tier note (re-verified this pass).** The **8-byte size** and the **2:30 opcode** are
+> control-flow-confirmed. The **`Op`/`Id` two-dword split** is a STATIC-HYPOTHESIS: the wire builder
+> copies an 8-byte caller-side struct verbatim, so the split is set by the *caller* and is inferred
+> from the calling convention, not visible in the builder itself.
+
 ---
 
 ## 6. Party subsystem (genuine party — S2C confirmed)
@@ -576,9 +602,17 @@ Caps and gates to model:
    2:60–2:76 ambiguity with captures of couple/training vs friend-add.
 3. **2:82 (28-byte chat variant) purpose** — party chat? guild chat? trade chat? The builder writes
    a 28-byte header and no text in the thunk itself; a caller may append text separately.
-4. **2:84 (19-byte + text chat variant) channel/scope** — unknown.
-5. **Text length-prefix off-by-one** — whether the `u32` prefix includes the terminating NUL.
-   Model "prefix = bytes that follow" and confirm against a capture.
+4. **2:84 purpose (RESOLVED shape; capture-pending meaning).** Corrected this pass: 2:84 is a
+   **header-only, 19-byte message with NO text tail in its builder**, gated by a **30000 ms (30 s)
+   client-side cooldown** (not the prior "19-byte + text" reading). Its *purpose* (plausibly an
+   emote / macro broadcast trigger) is the only remaining unknown — **capture-pending**.
+5. **Text length-prefix convention — RESOLVED (per-opcode), only on-wire byte-order pending.** The
+   NUL-inclusion of the `u32` text-length prefix is **opcode-specific**, not a single global
+   convention: `(2:7)` uses the string length and **EXCLUDES** the NUL; `(3:21)` and `(2:83)` use
+   length-plus-one and **INCLUDE** the NUL (the `+1` is literally present/absent in each builder —
+   control-flow-confirmed; see Section 1). The earlier "model prefix = bytes that follow, verify the
+   off-by-one against a capture" framing is superseded. The only residual is the absolute on-wire
+   byte-order / endianness of the prefix — **capture-pending**.
 6. **2:122 name field width** — a 4-byte copy into a 5-byte buffer implies a short tag rather than a
    full 16/17-char character name; unusual, verify.
 7. **2:123 auto-accept event codes** — the inbound relation-event numbering that drives auto-accept

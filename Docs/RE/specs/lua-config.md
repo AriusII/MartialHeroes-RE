@@ -1,9 +1,14 @@
 ---
 status: confirmed
-sample_verified: true    # C++ consumption surface CODE-CONFIRMED; real config.lua / display.lua / uiconfig.lua samples now inspected on disk (§9)
+verification: confirmed   # the entire C++ consumption surface (VM, single binding, loader, reader family, table API, boot triad, script source path) is control-flow-confirmed on build 263bd994; nothing here is server-authored or on-wire, so no item is capture/debugger-pending
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida]
+sample_verified: true    # C++ consumption surface CODE-CONFIRMED; real config.lua / display.lua / uiconfig.lua samples inspected on disk (§9). NOTE: config.lua / tableString / CONFIG_* are NOT host-referenced by name in this build — they arrive only via cpp_load (see §2.3)
 subsystems: [lua_vm, config_scripts, string_tables, boot_flags]
 networked: false          # Lua is a client-side config/text-table engine; nothing on the wire
-encoding_note: The shipped .lua source files are CP949 (code page 949), NOT UTF-8 — this CORRECTS the earlier UTF-8 claim. See §0 (Encoding correction) and §9.
+encoding_note: The shipped .lua source files are CP949 (code page 949), NOT UTF-8 — this CORRECTS the earlier UTF-8 claim. The in-binary tutorial row-decode runs code page 65001 ONLY on the name-based loader; the ID-based loader pushes raw bytes. See §0, §5.2, §9.
+conflicts: lua_scripting.md §6.2's old "plain on-disk, NOT the VFS" claim is refuted (this file's §2.2 was already correct and lua_scripting.md is now reconciled to it); the int-reader "bool" name is a misnomer (§6). RESOLVED this pass (F11 re-verification): the two addiction-timing knobs are disentangled (§3 — the ×1000 site reads the DISPLAY_* key, not a game.lua global); the name-vs-ID decode asymmetry and the 102400-byte name-loader scratch buffer pinned (§5.1); msg.xdb boot adjacency noted (§8 item 7).
 ---
 
 # Lua configuration & string-table engine (in-process VM, config scripts, table API)
@@ -72,20 +77,29 @@ the inline Korean comments and any Korean string literal.
 
 ## Status banner
 
+> Re-verified on build **263bd994** (2026-06-16, static IDA). Every C++ consumption-surface row
+> below is control-flow-confirmed; the only `static-hypothesis` items are read sites not individually
+> re-walked this pass (noted inline). Nothing in this subsystem is server-authored or on-wire, so no
+> item is capture/debugger-pending.
+
 | Area | Confidence |
 |---|---|
 | One process-wide Lua state, lazily created, standard libraries opened | CODE-CONFIRMED |
 | Exactly one custom C function registered (`cpp_load`); no gameplay objects exposed | CODE-CONFIRMED |
 | `cpp_load` = script-side include (chain-loads another `.lua` through the same loader) | CODE-CONFIRMED |
-| Four named config scripts and their loader call sites | CODE-CONFIRMED |
+| Four named config scripts (`game.lua`, `uiconfig.lua`, `display.lua`, `tutor.lua`) + their loader call sites | CODE-CONFIRMED |
 | Boot globals `vfsmode` / `launcher` / `debugmode` (read, gate, and downstream effect) | CODE-CONFIRMED |
 | `uiconfig.lua` global `NEW_SERVER_INDEX` | CODE-CONFIRMED / SAMPLE-CONFIRMED |
-| `display.lua` `DISPLAY_*` global set (ints, the per-status float brightness matrix, one string) | CODE-CONFIRMED / SAMPLE-CONFIRMED |
+| `display.lua` `DISPLAY_*` global set (~71 keys: ints, the per-status float brightness matrix, one string) | CODE-CONFIRMED / SAMPLE-CONFIRMED |
 | `getTableSize` / `getTableString` / `getTableStringByID` Lua API contract | CODE-CONFIRMED |
 | **Shipped `.lua` source files are CP949 (code page 949), NOT UTF-8** (corrects prior claim) | SAMPLE-CONFIRMED |
+| **Encoding split: in-binary 65001 (UTF-8) round-trip is applied ONLY on the name-based table loader; the ID-based loader pushes raw bytes** | CODE-CONFIRMED |
 | The global config reader returns a Lua *number as a full int* (the "bool" name is a misnomer) | CODE-CONFIRMED |
-| Scripts are sourced through the same VFS-vs-disk router as every other asset | CODE-CONFIRMED |
+| Scripts are sourced through the same VFS-vs-disk router as every other asset (gated by `vfsmode`) | CODE-CONFIRMED |
+| **`config.lua` / `tableString` / `CONFIG_*` are NOT referenced by name in this build's binary — they arrive only via `cpp_load`** | SAMPLE-CONFIRMED (on-disk) / NOT IDB-present |
 | `config.lua` developer bootstrap keys + the `tableString` lookup library | SAMPLE-CONFIRMED |
+| `DISPLAY_POWERSHADER` host buffer is 260 bytes (MAX_PATH), filled via a bounded string copy | CODE-CONFIRMED |
+| `DISPLAY_GLOW_RANGE_X` / `_Y` host fallback to **2** when read as 0 | CODE-CONFIRMED |
 | Concrete shipped values inside each `.lua` (matrix numbers, exact key values) | SAMPLE-OBSERVED (single sample) |
 
 ---
@@ -169,7 +183,7 @@ undefined (the host then falls back to its compiled-in defaults, see §3).
 | Script (relative path) | Loaded at | What the host reads back |
 |---|---|---|
 | `game.lua` | Boot (early startup) | Boot flags `vfsmode`, `launcher`, `debugmode` (§3); later a game-addiction warning timing value. `game.lua` defines these as plain global numbers. |
-| `data/script/config.lua` | Boot / pre-script environment | Developer bootstrap flags `CONFIG_*` (§3.1) plus the shared `tableString` table-read library (§5 / §5.3). The leading comment marks these as developer defaults not to be patched to users. |
+| `data/script/config.lua` | Boot / pre-script environment — **no direct host load site in this build's binary; arrives only via `cpp_load` from another script** (the string `config.lua` is absent from the binary's string table on build 263bd994 — see the caveat below) | Developer bootstrap flags `CONFIG_*` (§3.1) plus the shared `tableString` table-read library (§5 / §5.3). The leading comment marks these as developer defaults not to be patched to users. |
 | `data/script/uiconfig.lua` | Login-window scene build | Exactly one global: **`NEW_SERVER_INDEX`** (an integer index used to pre-select the default / newest server entry in the login server list). The remaining login widgets are built from compiled-in constants + the message database, not from Lua. |
 | `data/script/display.lua` | Renderer display-config load | A large `DISPLAY_*` global set fed into renderer state (§4), including a derived shader-path string. |
 | `data/script/tutor.lua` | Tutorial panel open/refresh | Tutorial text content, pulled row-by-row via the Lua table-read helpers `getTableString` / `getTableStringByID` (§5). |
@@ -177,6 +191,15 @@ undefined (the host then falls back to its compiled-in defaults, see §3).
 > The C++ consumption surface fully constrains *which* globals/functions each script must define.
 > The concrete *values* in `config.lua` / `display.lua` / `uiconfig.lua` are now corroborated by a
 > single on-disk sample (§9); `game.lua` / `tutor.lua` shipped contents remain UNVERIFIED.
+>
+> **Build-263bd994 caveat (load-bearing).** Only **four** script paths are referenced *by name* in
+> the binary string table: `game.lua`, `data/script/uiconfig.lua`, `data/script/display.lua`, and
+> `data/script/tutor.lua` (plus `data/script/msg.xdb`, the message database — which is **not** a
+> `.lua` file; see §8.5). **`config.lua` is NOT among them**, nor are `tableString` or any `CONFIG_*`
+> key string. `config.lua`'s keys/library are recovered from the on-disk file (§9), not from the
+> binary; the host therefore does **not** load `config.lua` directly — if it is loaded at all, it is
+> chain-loaded via `cpp_load` from one of the named scripts (not visible statically). A reader must
+> not expect a `config.lua` load call site in the binary. (See §9 for the on-disk sample provenance.)
 
 ---
 
@@ -198,6 +221,14 @@ asset source, whether to bounce through the launcher, and windowed-vs-fullscreen
 A fourth value read out of `game.lua` later is a game-addiction-warning timing number (a plain
 integer, read by the same number reader as the flags above); it is a localisation/legal timing knob
 and is outside the boot-flag triad.
+
+> **Disentanglement of the two addiction-timing knobs (CORRECTION, build 263bd994).** There are
+> **two distinct** addiction-warning timing values and they must not be conflated:
+> 1. a `game.lua` integer read alongside the boot triad (the legal timing knob described above), and
+> 2. the **`DISPLAY_GAME_ADDICTION_WARNING_CHECK_TIME`** key, which lives in `display.lua` (§4.2) and
+>    is read in the **boot/login glue** by the same number-as-int reader and **scaled ×1000** at that
+>    read site. The ×1000 site reads the **`DISPLAY_*` key**, not a `game.lua` global. §6's mention of
+>    a "×1000 timing" refers to this `DISPLAY_*` read, not to the `game.lua` value.
 
 ### 3.1 Developer bootstrap flags read from `config.lua` (SAMPLE-CONFIRMED)
 
@@ -312,6 +343,13 @@ The host's name-based loader iterates `getTableSize(name)` then `getTableString(
 row. The ID-based loader iterates `getTableStringByID(id)` for the count then
 `getTableStringByID(id, i)` per row. Each returned string is pushed into a host-side string list.
 
+> **Decode asymmetry (build 263bd994, load-bearing — see §0/§5.2).** The two loaders convert rows
+> differently: the **name-based** loader runs each returned row through a wide-char round-trip
+> configured for code page 65001 (UTF-8) into a fixed 102400-byte scratch buffer before pushing it;
+> the **ID-based** loader pushes the returned row bytes **directly**, with no wide-char round-trip.
+> Regardless of either in-binary conversion, the shipped `.lua` *file* bytes are CP949 — a clean-room
+> reader treats the on-disk bytes as ground truth and decodes the file as CP949.
+
 Calls into these globals follow the standard `lua_tinker` typed-call pattern: the host looks up the
 global by name, verifies it is a function (logging "attempt to call global … (not a function)" if
 not), pushes the arguments, performs a protected call, and reads the typed return.
@@ -414,7 +452,11 @@ integer"**, not as a 0/1 boolean. For 0/1 flags, compare the returned integer `!
    included set is not enumerable from the binary, and no `cpp_load` / `dofile` calls were observed in
    the three inspected files (each is self-contained).
 7. **The `.xdb` filename-pointer block** adjacent to the `tutor.lua` path pointer is **NOT
-   Lua-bound** — out of scope here; defer to the `.xdb` / asset lanes.
+   Lua-bound** — out of scope here; defer to the `.xdb` / asset lanes. Separately, the message
+   database **`data/script/msg.xdb`** is loaded at the same early boot/login point as the Lua scene
+   build (right beside the `uiconfig.lua` login-window load), so it sits *adjacent in the boot flow*
+   to the Lua config tree. It is **not** a `.lua` file and is not part of the Lua subsystem; a reader
+   should not conflate it with the config scripts. (Cross-ref: the message-database `.xdb` spec.)
 
 ---
 

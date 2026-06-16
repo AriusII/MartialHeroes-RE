@@ -1,31 +1,48 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: routing is a static fact; the field layout is a static inference. capture_verified: false.
+# CAPTURE-UNVERIFIED VALUE semantics; routing + the FIXED 12-byte body size are control-flow
+# CONFIRMED from the send site. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: builder writes header 2/28 + appends a FIXED 0xC = 12-byte body;
+#                        the prior `size: var` is REFUTED -- it is a fixed 12-byte body, NOT variable)
+#   field shape:         confirmed   (a leading selector field @0x00, then two 4-byte values @0x04 and @0x08;
+#                        callers = NPC quest-talk-panel confirm/onEvent + quest give-up-panel onEvent)
+#   wire VALUE semantics: capture/debugger-pending (the full SubAction enum -- only give-up==4 is named; the
+#                        per-verb meaning of the two trailing ids)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: RESOLVED -- 2/28 size corrected from `var` to a FIXED 12 (also reconcile the opcodes.md 2/28 row).
 
 name: CmsgQuestAction
 opcode: 0x2001c           # major 2 (GameAction), minor 28 -> (2 << 16) | 28
 direction: C2S
-size: var                 # small fixed body driven by a sub-action selector; modelled as 12 bytes below
+size: 12                  # FIXED 12-byte (0xC) body: selector slot @0x00 + two 4-byte values @0x04/@0x08
 spec: packets/2-28_quest_action.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Client quest action request. A single send-only message that carries the player's quest-flow command (accept / proceed / give-up), chosen by a sub-action selector. Major 2 is C2S-only, so this message has no inbound dispatch slot by design and the server answers through unrelated push channels (5/68 quest list, 5/73 quest complete).
+summary: Client quest action request. A single send-only message that carries the player's quest-flow command (accept / proceed / give-up), chosen by a sub-action selector. The body is a FIXED 12 bytes (the send site always appends 0xC), NOT variable. Major 2 is C2S-only, so this message has no inbound dispatch slot by design and the server answers through unrelated push channels (5/68 quest list, 5/73 quest complete).
 
-# Wire order, offset 0 = first payload byte. Pack=1.
-# The send-site assembles a small fixed body whose meaning is selected by SubAction. The modelled
-# 12-byte form below sums to a fixed block, but the true total is selector-dependent -- treat the
-# trailing two ids as present-or-omitted per sub-action and verify against a capture.
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 12.
+# CONTROL-FLOW CONFIRMED: the send site appends a fixed 0xC-byte block -- a leading selector field
+# at +0x00 (the builder writes a byte into the first 4-byte slot), then two 4-byte values at +0x04
+# and +0x08. Modeled as three u32 slots so the widths sum to the confirmed 12; the SubAction value
+# originates as a byte but occupies the first dword slot.
 fields:
-  - { name: SubAction, type: u32 }   # 0x00  quest sub-action selector (e.g. accept / proceed / give-up)
+  - { name: SubAction, type: u32 }   # 0x00  quest sub-action selector (byte-origin value in a 4-byte slot; accept/proceed/give-up)
   - { name: QuestId,   type: u32 }   # 0x04  target quest id the action applies to
   - { name: ParamA,    type: u32 }   # 0x08  auxiliary parameter (NPC kind / objective slot, sub-action dependent)
 
 notes: |
-  CODE-CONFIRMED, CAPTURE-UNVERIFIED. The send path for this message is identified in the client by
-  role: it is the quest-action sender invoked from the quest-log window's give-up confirm button and
-  from the NPC quest-dialog accept/proceed flow. Major family 2 (GameAction) is strictly client-to-
-  server; the dispatch installer wires no inbound handler for 2/28, which is correct and expected,
-  not an omission.
+  CONTROL-FLOW CONFIRMED routing + size; CAPTURE-UNVERIFIED VALUE semantics. The send path for this
+  message is identified in the client by role: it is the quest-action sender invoked from the NPC
+  quest-talk panel's confirm / onEvent paths and from the quest give-up panel's onEvent (the give-up
+  confirm). Major family 2 (GameAction) is strictly client-to-server; the dispatch installer wires no
+  inbound handler for 2/28, which is correct and expected, not an omission.
+
+  SIZE CORRECTION (load-bearing): the send site appends EXACTLY 0xC (12) bytes -- the body is a FIXED
+  12-byte block, not the variable/selector-dependent length the earlier `size: var` row assumed. The
+  three 4-byte slots are always present on the wire; only their VALUE meaning varies by sub-action.
+  Reconcile the opcodes.md 2/28 row to size 12.
 
   SEND-ONLY -- NO ACK ON THIS OPCODE. There is no 2/28 reply. The server's response to a quest action
   arrives later on the push channels:
@@ -43,22 +60,24 @@ notes: |
   value (4) is named in the source note. Model SubAction as a u32 and resolve the full enum from a
   quest-flow capture.
 
-  FIELD MODEL (provisional, 12-byte form):
-    0x00 (4B) SubAction : the quest verb selector (accept / proceed / give-up; give-up == 4).
+  FIELD MODEL (FIXED 12-byte form, control-flow confirmed):
+    0x00 (4B) SubAction : the quest verb selector (accept / proceed / give-up; give-up == 4). The
+                          builder writes a byte value into this first 4-byte slot.
     0x04 (4B) QuestId   : the quest the action targets.
     0x08 (4B) ParamA    : an auxiliary parameter. For the give-up path the window also carries an NPC
                           "kind" byte alongside the quest id; ParamA is the modelled home for that
-                          auxiliary value. May be absent for verbs that need no parameter.
+                          auxiliary value. The slot is ALWAYS present on the wire (the body is fixed
+                          12 bytes); whether a given verb populates it is a value question, not a
+                          length one.
 
   RELATED, NOT THIS OPCODE: the quest-log window also drives a SECOND, distinct C2S quest channel for
   per-row "request detail / claim" round-trips (the list-row request path). That sender's opcode tuple
   and body were not traced and are NOT 2/28; do not fold it into this spec. A future protocol pass
   must trace it separately.
 
-  UNKNOWNS to resolve with a quest-flow capture:
+  UNKNOWNS to resolve with a quest-flow capture (wire VALUE semantics; the body length is settled at 12):
     - the full SubAction enum (accept / proceed values; only give-up == 4 is named);
-    - whether QuestId and ParamA are always present or selector-dependent (true body length);
-    - the meaning and width of ParamA per sub-action (NPC kind vs objective index).
+    - the meaning of QuestId vs ParamA per sub-action (NPC kind vs objective index in ParamA).
 
   UNBLOCKS: the Client.Application quest accept / proceed / give-up use-cases (send-only), paired with
   the 5/68 and 5/73 push consumers.

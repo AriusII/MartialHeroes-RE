@@ -1,5 +1,14 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED; size + slot@0 are static-HIGH. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: builder writes header 1/14 + appends a fixed 1-byte slot body)
+#   slot@0x00 placement: confirmed   (the single body byte is the slot index)
+#   move-vs-delete name: static-hypothesis (the IDB log strings on the path read "is sending location" / "...error",
+#                        favouring slot-MOVE/location; delete is on 1/7. The canonical name is a Tier-1 call)
+#   wire VALUE semantics: capture/debugger-pending (the slot-move S2C reply; whether any token accompanies the slot byte)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: none (cmsg_char_move.yaml re-confirmed; the 1-14_delete_character.yaml tombstone is correct)
 
 name: CmsgMoveCharacter
 opcode: 0x1000e           # major 1, minor 14 -> (1 << 16) | 14

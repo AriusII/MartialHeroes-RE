@@ -1,5 +1,14 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the single 12-byte read, and the read offsets
+#                 Sort@0x00 / ActorId@0x04 / Flags@0x08 used as the (sort,id) actor-lookup key + the
+#                 leave-FX flag are control-flow-confirmed); field VALUE semantics (Sort wire width
+#                 u32-vs-u8+3pad, full Flags enum) are capture/debugger-pending.
+#   ida_reverified: 2026-06-16
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none (re-confirmed against the 5/0 handler read site).
 
 name: SmsgCharDespawn
 opcode: 0x50000             # major 5 (Push), minor 0 -> (5 << 16) | 0

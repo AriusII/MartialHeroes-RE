@@ -6,6 +6,23 @@
 > Client.Application (effect dispatch) and Assets.Parsers (descriptor loading). Every field
 > offset an engineer cites must reference this file or `formats/effects.md`.
 
+> **Verification banner.**
+> - **Status mix:** *confirmed* where control-flow was traced (the 104-byte element, the per-frame
+>   sampler, the spawn/registry resolve, the emitter dispatch, the `<10000`/`≥10000` split, the
+>   −0.5 billboard half-extents, the 5000 ms UV loop, the alpha `1−v` storage inversion, the
+>   effectscale REPLACE-at-parse, the diffuse-RGB three-pass assembly, the Euler-degrees rotation
+>   source); *static-hypothesis* where a single inference stands (type-tag write sites, blend-state
+>   ownership on the drawable); *capture/debugger-pending* where a runtime witness is needed
+>   (billboard up-axis / handedness, matrix major-order, the on-screen diffuse colour given the
+>   B,G,R,A pack order).
+> - **ida_reverified:** 2026-06-16
+> - **ida_anchor:** 263bd994
+> - **evidence:** [static-ida]
+> - **conflicts:** none with the runtime claims here — every spot-checked runtime constant matches
+>   the binary. The one campaign9c correction (sub-effect offset Z-negation) is reclassified as a
+>   **port-side Godot convention only**, not an original behaviour (§8.2 step 8, §17.4); the
+>   `effectscale.xdb` open question (§14.9) is now **CLOSED** to REPLACE-at-parse.
+
 ---
 
 ## Status
@@ -26,6 +43,7 @@
 | SwordLight sub-system | CODE-CONFIRMED for boot and descriptor layout. See §12. |
 | Skill-cast effect chain | CODE-CONFIRMED but CAPTURE-UNVERIFIED — the network half (opcode `5/52`, action codes) is read statically from the binary; no live capture has confirmed the on-wire action-code values. See §15. |
 | Campaign-5 runtime deep-dive | 104-byte element CONFIRMED; emitter dispatch + keyframe math CONFIRMED; bone-attach overlay CONFIRMED; blend-state and draw-order internals PLAUSIBLE; AnimCatalog weapon-slot meaning PLAUSIBLE. See §17. |
+| Campaign-10 runtime re-verification | All spot-checked runtime constants re-confirmed against the binary (104-byte element, emitter dispatch, `<10000`/`≥10000` split, active-frame window, −0.5 billboard half-extents, 5000 ms UV loop, alpha `1−v` inversion). NEW/CORRECTED: effectscale.xdb is REPLACE-at-parse (closes §14.9); diffuse-RGB curve assembled from THREE sequential file passes; Euler rotation keys are DEGREES (×π/180); vertex diffuse packed B,G,R,A; the `.xeff` header is id-first and a literal "XEFF" magic is REJECTED; the campaign9c "sub-effect offset Z-negation" is PORT-SIDE only (the original applies no Z-negation). See §17.3, §8.2, §14.9. |
 
 ---
 
@@ -152,8 +170,8 @@ All three spawn paths call the same **lazy-load resolver**. The resolver:
 
 1. Looks up the requested `effect_id` in the manager's sorted map.
 2. If not found → writes an invalid flag into the new instance object, calls its destructor (returns to pool without entering the active list), and the spawn is silently abandoned.
-3. If found but `CoreXEffect.loaded_flag` is clear → calls the load callback via the virtual dispatch table (slot 1). This triggers the full element parse: reads all sub-effect elements, resolves textures, loads alpha and scale curves, and reads the keyframe array into heap-allocated arrays within the `CoreXEffect`.
-4. On success → records the load timestamp in the `CoreXEffect` and returns the descriptor pointer.
+3. If found but `CoreXEffect.loaded_flag` is clear → calls the load callback via the virtual dispatch table. This triggers the full element parse: reads all sub-effect elements, resolves textures, loads alpha and scale curves, and reads the keyframe array into heap-allocated arrays within the `CoreXEffect`. The parser reads the **first u32 of the file header as the `effect_id` directly** — the header is **id-first, NOT magic-prefixed**. A loader that begins the file with a literal `"XEFF"` ASCII magic is treated as an **error**: if that first u32 equals the little-endian value of the four bytes `"XEFF"`, the parser emits an "id error … maybe start with XEFF" diagnostic and aborts the parse. A faithful reimplementation must NOT expect or skip an `"XEFF"` magic; it must read the id-first header. (Block D owns the byte layout in `formats/effects.md §A.2`; this is the behavioural rejection rule.) CONFIRMED.
+4. On success → records the load timestamp in the `CoreXEffect`, applies the `effectscale.xdb` override as a REPLACE of `scale_default` (§14.9), and returns the descriptor pointer.
 
 ### 5.2 Active-list management
 
@@ -315,7 +333,18 @@ For each active element within a live instance:
    ```
    world_pos = effect_origin + rotate(orientation_quat, velocity) × effective_scale
    ```
-   `effective_scale` = `CoreXEffect.scale_default × caller_scale × effectscale.xdb override (if present)`.
+   `effective_scale` = `CoreXEffect.scale_default × caller_scale`. The `effectscale.xdb` override is
+   **NOT a third multiply here** — it has already **REPLACED** `CoreXEffect.scale_default` at lazy-parse
+   time (§14.9), so it is baked into the descriptor before any spawn. CONFIRMED.
+
+   **No Z-negation in the original.** The binary rotates the keyframe `velocity` by the element
+   orientation quaternion and adds it to the `effect_origin` in the original world convention —
+   **identically for the anchor and for the sub-effect/velocity offset**, with **no axis negation
+   applied to either**. The campaign9c note that "the sub-effect offset Z must be negated like the
+   anchor" describes a **port-side requirement only**: the Godot port negates Z in
+   `Helpers/WorldCoordinates.ToGodot`, and to stay consistent it must apply that negation to **both**
+   the anchor and the offset (do not negate one and not the other). This is a convention of the port,
+   NOT a behaviour of `doida.exe`. CONFIRMED (binary applies no negation).
 
 9. **Geometry build by emitter type.**
 
@@ -540,7 +569,15 @@ is known) — a faithful port must reproduce the catalog to compute the mob/mugo
 
 8. **SwordLight trail geometry generation.** The per-frame ribbon construction — transforming bone position + color-offset → screen-space ribbon vertices — was not traced in this pass. The trail width, fade duration, and vertex count are entirely UNVERIFIED. The Campaign-5 pass (§17.6) adds the head/tail alpha-gradient bytes and the in-pipeline draw, but the full ribbon vertex generation and its exact blend state (additive vs alpha) remain UNVERIFIED.
 
-9. **`effectscale.xdb` application site.** The per-effect scale override table (`formats/effects.md §D`) is loaded at boot. Whether the override multiplier is applied in addition to, or instead of, `CoreXEffect.scale_default` during the effective-scale computation in §8.2 step 8 was not confirmed.
+9. **`effectscale.xdb` application site. — RESOLVED (Campaign 10): REPLACE at lazy-parse.** The
+   per-effect scale override table (`formats/effects.md §D`) is loaded at boot. The override is applied
+   as a **REPLACE** (a direct assignment), **at lazy-parse time**, keyed by `effect_id`: when a record
+   exists for the effect, its scale field **overwrites** `CoreXEffect.scale_default` (replacing the
+   constructor's default of 1.0); when no record exists, `scale_default` keeps its 1.0 default. Because
+   this happens during the first parse, the override is **baked into the descriptor before any spawn**,
+   and the per-instance effective scale in §8.2 step 8 is simply `scale_default × caller_scale` with
+   **no third multiply** by the xdb at spawn. This closes the earlier open question; the override is
+   NOT additive and is NOT applied per-spawn. CONFIRMED. (See §5.1 step 4 and §8.2 step 8.)
 
 10. **Effect cleanup on area transition.** When the player enters a new area, it is unknown whether the effect manager flushes all active `UserXEffect` and `JointXEffect` objects, or only the `MapXEffect` objects. The area-transition call chain was not traced past the `EffectCache_SaveIDs` call at shutdown.
 
@@ -564,7 +601,7 @@ This section documents the **cast-channel** effect — the looping aura/glow tha
 
 The cast-channel effect is driven by the **actor skill-action** server message (opcode `5/52`, `SmsgActorSkillAction`; see `opcodes.md` and `packets/5-52_actor_skill_action.yaml`). That message carries a server-supplied `skill_id` and an **action code** byte that selects cast-enable vs. cast-disable behaviour (see §15.3).
 
-On cast-enable, the handler resolves the effect id **directly from the per-skill record** — there is **no separate skill-id → effect-id lookup table**. The effect-id → descriptor step is **Option B (registry lookup), CONFIRMED**: the runtime ALWAYS resolves through the boot-populated sorted registry keyed by the raw numeric `effect_id`; it **never** builds a numeric `data/effect/xeff/{id}.xeff` path at spawn (no integer-to-`.xeff` format string exists). The registry is populated at boot from `xeffect.lst` (`u32 count` + 30-byte NUL-padded names): per record the loader concatenates `data/effect/xeff/<name>` — a **name** concat, not an id format — opens the file, and reads the **first u32 of the header as the `effect_id`** (the registry key comes from the FILE HEADER, not the list order). On a miss the resolver returns invalid (0); there is **no** numeric-name fallback open. See `formats/effects.md §C.2`.
+On cast-enable, the handler resolves the effect id **directly from the per-skill record** — there is **no separate skill-id → effect-id lookup table**. The effect-id → descriptor step is **Option B (registry lookup), CONFIRMED**: the runtime ALWAYS resolves through the boot-populated sorted registry keyed by the raw numeric `effect_id`; it **never** builds a numeric `data/effect/xeff/{id}.xeff` path at spawn (no integer-to-`.xeff` format string exists). The registry is populated at boot from `xeffect.lst` (`u32 count` + 30-byte NUL-padded names): per record the loader concatenates `data/effect/xeff/<name>` — a **name** concat, not an id format — opens the file, and reads the **first u32 of the header as the `effect_id`** (the registry key comes from the FILE HEADER, not the list order). The header is **id-first, NOT magic-prefixed**: a file that begins with a literal `"XEFF"` ASCII magic is **rejected** — when the first u32 equals the little-endian value of the bytes `"XEFF"`, the parser emits an "id error … maybe start with XEFF" diagnostic and aborts that record's parse. A faithful loader reads the id directly and must not expect or skip an `"XEFF"` magic. On a miss the resolver returns invalid (0); there is **no** numeric-name fallback open. See `formats/effects.md §C.2` (Block D owns the byte layout; the rejection is the behavioural rule).
 
 
 ```
@@ -741,11 +778,25 @@ is then sampled as:
 | Colour (RGB Vec3) | **Linear, component-wise**; defaults to (1, 1, 1) when no keys. |
 | Velocity / position-delta (Vec3) | **Linear.** |
 | Size / half-extents (Vec3) | **Linear.** |
-| Rotation (quaternion) | **Slerp** between adjacent keys. |
+| Rotation (quaternion) | **Slerp** between adjacent keys. See the Euler-degrees source note below. |
 
 So: **scale, colour, alpha, position, and velocity are straight piecewise-linear lerps between
 adjacent keys; rotation is slerp; the discrete sprite-frame channel is stepped.** There is no spline
 / curve table — only linear sampling with frame-index stepping for the sprite channel.
+
+**Colour curve is assembled from three sequential file passes (CONFIRMED).** The per-key diffuse-RGB
+curve is stored on disk as **three separate sequential passes** and assembled component-wise into one
+`Vec3`-per-key array at parse time: the first pass fills the **R (x)** component of every key, the
+second pass fills **G (y)**, the third fills **B (z)**. This is the parse-level form of the campaign9c
+"curve passes 2/3/4 = diffuse R/G/B" finding (the file's pass indices 2/3/4 map to the R/G/B
+components). The per-frame sampler then lerps that assembled `Vec3` linearly, defaulting to white
+`(1, 1, 1)` when a key count is 0. The colour channel is a **per-keyframe diffuse tint**, not a scale.
+
+**Rotation keys are stored as Euler degrees (CONFIRMED).** Each rotation key is read as an Euler
+triple in **degrees** and multiplied by `π/180` (≈ 0.0174532925) to radians, then converted to a
+**quaternion** in **XYZW (scalar-last, `w` in the 4th lane)** order before the slerp above. A faithful
+reimplementation must convert degrees → radians and build an XYZW quaternion from the Euler triple; it
+must not treat the stored values as radians or as a quaternion directly.
 
 **Texture scroll (independent of keyframes):** a per-component render flag byte enables a continuous
 texture scroll on top of the keyframes — if its low bit is set, each vertex's U texture coordinate is
@@ -759,6 +810,15 @@ times 255 — with the alpha additionally scaled for mesh particles by a global 
 factor (a configurable brightness setting blended with a base constant). This is ordinary per-vertex
 alpha modulation, not an inversion flag (the on-disk **storage** of alpha is inverted; see §17.5 and
 `formats/effects.md §A.6`).
+
+**Diffuse channel byte order is reversed at the pack site (CONFIRMED — load-bearing for on-screen
+colour).** The packed diffuse word lays the channels out **B, G, R, A** — i.e. byte 0 = the colour
+`Vec3.z` (blue) × 255, byte 1 = `Vec3.y` (green) × 255, byte 2 = `Vec3.x` (red) × 255, byte 3 =
+alpha × 255 — which is the **reverse** of the sampled `Vec3` `(x = R, y = G, z = B)` order from the
+colour curve. A reimplementation that copies the sampled `Vec3` straight into a diffuse word without
+this channel reversal will render the wrong colour (red/blue swapped). The exact D3D vertex-format
+(FVF) channel meaning of the packed word is **capture/debugger-pending**; the **byte-order reversal at
+the pack site** relative to the sampled `Vec3` is confirmed.
 
 ### 17.4 `JointXEffect` bone attachment (overlay of the attachment region)
 
@@ -870,6 +930,12 @@ walked this pass. This refines §8.2 step 12.
 | Emitter dispatch (billboard / oriented-quad / mesh) and the `< 10000` CPU-mesh vs `≥ 10000` GPU split | CONFIRMED |
 | Per-component active-frame window gating | CONFIRMED |
 | Keyframe sampling: linear lerp for scale/colour/alpha/position/velocity, slerp for rotation, stepped sprite-frame index | CONFIRMED |
+| Diffuse-RGB colour curve assembled from three sequential file passes (pass→R, pass→G, pass→B) into one Vec3-per-key | CONFIRMED |
+| Rotation keys stored as Euler **degrees**, ×π/180 → XYZW (scalar-last) quaternion before slerp | CONFIRMED |
+| Vertex diffuse packed **B,G,R,A** (reversed vs the sampled R,G,B Vec3) | CONFIRMED (byte order) / on-screen FVF meaning capture-pending |
+| `effectscale.xdb` is a **REPLACE** of `scale_default` at lazy-parse (not additive, not per-spawn) | CONFIRMED |
+| Original applies **no Z-negation** to anchor or sub-effect offset (campaign9c negation is port-side only) | CONFIRMED |
+| `.xeff` header is id-first; a literal `"XEFF"` magic is rejected as an id | CONFIRMED |
 | UV scroll on a 5000 ms loop via a per-component flag | CONFIRMED |
 | `JointXEffect` bone attachment by bone id; world translation + quaternion copied from the live pose | CONFIRMED |
 | AnimCatalog weapon-hand slot meaning (which slot = which hand/weapon) | PLAUSIBLE |

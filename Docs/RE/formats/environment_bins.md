@@ -18,6 +18,33 @@
 
 ## Status block
 
+```
+verification:   sample-verified   # all 8 env-bin family sizes + fog start/end + ambient-floor chain matched against a real VFS sample
+ida_reverified: 2026-06-16
+ida_anchor:     263bd994
+evidence:       [static-ida, vfs-sample]
+conflicts:      none-open         # campaign-10 D6 found NO conflicts on the env-bin tables; all core numerics RE-CONFIRMED
+```
+
+> **CAMPAIGN 10 Block D6 two-witness re-verification (build `263bd994`).** Every CORE numeric claim of
+> this document RE-CONFIRMS **[sample-verified]** against a real VFS sample and the build-`263bd994`
+> loaders, with **NO conflicts on any env-bin byte table**:
+> - **All eight env-bin family sizes are byte-exact** across the full per-area corpus (no size drift):
+>   `fog%d.bin` 204 B (82 files), `material%d.bin` 9792 B (82), `stardome%d.bin` 9216 B (55),
+>   `clouddome%d.bin` 23040 B (59), `cloud_cycle%d.bin` 70 B (59), `light%d.bin` 5312 B (164),
+>   `map_option%d.bin` 40 B (83), `weather%d.bin` 240 B (83), `weather%d_rain.bin` 240 B (34).
+> - **Fog** `start_dist`/`end_dist` are f32 fractions (area-1 = 0.75 / 0.98; area-0 = 0.5 / 0.9), and
+>   the `data_load_flag = 0` synthesis is the 48-iteration, 192-byte-per-slot, 0.75/0.25 sky-LUT blend.
+>   **NEW witness:** `data_load_flag = 1` (verbatim-read branch) is now seen in real data — `fog11.bin`
+>   ships flag = 1 (start 0.5 / end 0.98) — so the verbatim branch (§2.4) is live, not merely inferred.
+> - **Ambient floor = 1.0 at default** RE-CONFIRMED end-to-end: `OPTION_BRIGHT` is read from the INI
+>   with a literal default of **100**; the sampled `DoOption.ini` **omits the key** (so the default 100
+>   applies); `floor(100/100 × 255) = 255` → device ambient **full white** (§10.4–§10.5, §11.5).
+> - **Carried, not re-witnessed this lane (flagged honestly):** the `K_ambient` = 0.0
+>   single-reader/zero-writer global, the `OPTION_WATER` dead-consumer search, and the per-field
+>   interior layouts of `material`/`light`/`stardome`/`clouddome` (only their fixed total sizes were
+>   re-verified here). These stand from the campaign VFS-DEEP-II recovery (§10).
+
 | Attribute         | Value |
 |-------------------|-------|
 | `status`          | `sample-verified` for `map_option%d.bin`, `fog%d.bin`, `material%d.bin`, `stardome%d.bin`, `clouddome%d.bin`, `cloud_cycle%d.bin`; `partial` for `weather%d.bin`; `weather%d_rain.bin`: **NO LOADER — dead editor data** (see §8); water renderer: **RESOLVED-NEGATIVE** (see §1.4); lighting apply-path numeric defaults: **CONFIRMED** (see §10.4–§10.5, §10.7) |
@@ -52,6 +79,16 @@ field** unless explicitly noted below.
 > default and proceeds. This is the confirmed behaviour for at least the `map_option`, `light`,
 > stardome, and fog siblings. **A faithful C# port must default-tolerate every absent sibling**
 > (skip-and-default, never throw) rather than requiring the full set to be present.
+>
+> **Tolerance is PER-LOADER, not a hub-level ignore (CORRECTED, LOADER-RESOLVED).** The
+> skip-and-default behaviour is implemented **inside each sibling loader** — each loader synthesises
+> or skips its own subsystem when its file is absent, and then returns success to the hub. The hub
+> itself is **not** lenient about a sub-init *failure*: the sky-system init step **hard-fails the
+> area load if any sub-init returns a failure (returns 0)**. The distinction matters for a port: do
+> not model a single hub-level "ignore all missing files" flag — model per-loader synth/skip that
+> still reports success, and treat a genuine sub-init failure as fatal to the area load (the safe
+> port baseline mirrors the original: absent-file → per-loader default + success; real failure →
+> abort).
 >
 > **DBG-pending:** exactly one indoor area takes a distinct sky-init bypass path when its fog
 > sibling is absent (a single-area special case in the sky-init routine). The behaviour of that
@@ -289,6 +326,13 @@ is enabled, and it is NOT a "synthesise the colour when it is missing" toggle.
 CONFIRMED, pinned to the fog loader read-sequence (two witnesses: loader source-of-table branch +
 black-box behaviour on a zero-colour flag-1 file). The runtime apply of these bytes (whether read or
 synthesised) is the byte-D3DCOLOR path in §10.1. See also `specs/environment.md §1.1`.
+
+> **Real-data witness of the `data_load_flag = 1` branch (sample-verified, build `263bd994`).** Areas
+> 0 and 1 both ship `data_load_flag = 0`, so the earlier revision could only describe the flag = 1
+> verbatim-read branch behaviourally. A corpus scan now finds **`fog11.bin` ships
+> `data_load_flag = 1`** (with `start = 0.5`, `end = 0.98`), so the verbatim-read branch is **live in
+> production data**, not merely inferred. The synthesis branch (flag = 0) and the verbatim branch
+> (flag = 1) are both exercised by shipping areas.
 
 > The `0.75` / `0.25` blend weights are CONFIRMED as the blend ratio. The exact mapping of which two
 > sky-LUT source bands play the `high_band` / `low_band` roles per channel is MED confidence — see
@@ -541,6 +585,27 @@ no field semantics are pinned and none are needed for a faithful port.
 false`). Real samples are now available for areas 0 and 1. The following corrections and
 additions are **sample-verified** and should be considered authoritative over the earlier
 parser-only entries in `terrain_layers.md §6`:
+
+> ### ⚠️ 9.0 CORRECTION — the `light%d.bin` LOADER is an opaque verbatim slurp (LOADER-RESOLVED)
+>
+> The file-loading step for `light%d.bin` **does not parse fields at all.** The loader performs a
+> single **opaque verbatim slurp** of the whole **5312-byte (0x14C0)** file into one memory block and
+> stops — it reads no offsets, decodes no colours, and makes no per-field decisions at load time. The
+> region map in §9.1 and every per-field offset in §9.2–§9.4 (the directional/ambient `color_A`,
+> `color_B`, `color_C` groups, the fog scalars, the fallback light vector) describe **how a downstream
+> CONSUMER interprets the slurped blob**, recovered by sample-byte decode and the per-frame
+> apply-path — **not** how the loader reads the file (the loader treats it as one byte block).
+>
+> **Consequence for confidence grading:** any field below tagged as "read/consumed by the loader" or
+> "CONFIRMED by the loader read-sequence" is reframed as a **CONSUMER/render-side** fact. The byte
+> layout itself stays **SAMPLE-VERIFIED** (it is decoded from real area-0/area-1 files); but the exact
+> per-field roles inside the keyframe groups — specifically the diffuse / specular / `color_C`
+> assignments in §9.2 — are **DBG-pending**: they are best confirmed by breakpointing the per-frame
+> apply under a real area load (maintainer-driven F9; never `dbg_start`). A faithful parser should
+> **slurp the 5312 bytes verbatim** and may surface the regions below as SAMPLE-VERIFIED structure,
+> but must not assert the diffuse/specular/`color_C` *meanings* as loader-proven until that live
+> witness lands. (Two witnesses settle the slurp: the load step's single bounded read of 0x14C0
+> bytes, and the constant 5312-byte size across all 61 sampled files.)
 
 ### 9.1 Revised section layout
 
@@ -969,8 +1034,20 @@ and therefore has no water texture assets (§1.4).
 
 ## Provenance note (this revision)
 
-CAMPAIGN VFS-MASTERY — Phase P promotion (two-witness gate: loader read-sequence + black-box
-behaviour). Surgical deltas applied this revision: (1) `light%d.bin` `color_C` (+0x20) marked
+**CAMPAIGN 10 — Block D6 two-witness re-verification (build `263bd994`; area/sky loaders + a full
+per-area VFS sample scan + a `DoOption.ini` sample).** NO conflicts found on any env-bin byte table;
+every core numeric claim RE-CONFIRMED [sample-verified]. Deltas applied this revision (all
+affirmations / enrichments, no layout change): banner added (Status block); all eight env-bin family
+sizes RE-CONFIRMED byte-exact across the full corpus (counts in the Status block); the
+`data_load_flag = 1` verbatim-read branch is now a real-data witness (`fog11.bin` ships flag = 1),
+upgrading §2.4 from behaviourally-inferred to sample-verified; the ambient-floor chain
+(`OPTION_BRIGHT` default 100 → `floor(100/100 × 255) = 255` → white) RE-CONFIRMED against a sampled
+`DoOption.ini` that omits the key (§10.4–§10.5, §11.5). Carried-not-re-witnessed this lane (flagged):
+`K_ambient` = 0.0, the `OPTION_WATER` dead-consumer search, and the per-field interiors of
+`material`/`light`/`stardome`/`clouddome` (sizes only re-verified). No addresses, no pseudo-code.
+
+**CAMPAIGN VFS-MASTERY — Phase P promotion (two-witness gate: loader read-sequence + black-box
+behaviour).** Surgical deltas applied that revision: (1) `light%d.bin` `color_C` (+0x20) marked
 present-but-unread / LOADER-RESOLVED (§9.2); (2) `fog%d.bin` `data_load_flag` clarified — synthesis
 is the `flag==0` branch only, `flag==1` + all-zero colour renders literal black, refuting "synthesise
 when flag==1" (§2.4); (3) `weather%d_rain.bin` — NO LOADER, rain built from constants + RNG, the 33

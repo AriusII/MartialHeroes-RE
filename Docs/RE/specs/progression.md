@@ -17,25 +17,36 @@ actor/stat storage model.
 
 ## Status header (read first)
 
-> **Every claim here is CODE-CONFIRMED but CAPTURE-UNVERIFIED.** The findings were read statically
-> from the legacy client (handler flow, payload read sizes, stack-frame field placement, asset ids,
-> and struct offsets are all recovered directly from the binary). **No live network capture was
-> available**, so the exact on-wire byte placement of multi-field payloads — in particular the
-> rank-XP tail of the level-up message and the dual use of the experience message's source-sort byte
-> — must be reconciled against a capture before an engineer treats those offsets as settled. Wire
-> structs are owned by the packet specs (below); this document describes the *client behaviour* those
-> packets drive and the runtime state they mutate.
+> **Verification:** the client-side routing, payload read sizes, handler control-flow, stack-frame
+> field placement, asset ids, and progression-window field offsets here are **[confirmed]** — read
+> from the binary's control flow and operands. The **server-authored magnitudes** (XP rates, rank-XP
+> divisor/cap table contents, the XP/rank percentage-bonus rate values, level boundaries) and the
+> exact **on-wire byte packing** of two multi-field tails (the level-up rank-XP region and the dual
+> use of the experience message's source-sort field) are **[capture/debugger-pending]** — the client
+> only reads those values; their meaning on the wire and their runtime magnitudes need a live witness.
+>
+> - **ida_reverified:** 2026-06-16
+> - **ida_anchor:** 263bd994
+> - **evidence:** [static-ida]
+> - **conflicts:** none open. This pass re-pinned the stat-editor delta-offset labels and the
+>   `+`/`-` action-id → stat ordering (both had drifted in the prior committed doc; the on-wire
+>   `2/29` commit order STR,INT,AGI,DEX,CON was already correct and is unchanged).
+
+Wire structs are owned by the packet specs (below); this document describes the *client behaviour*
+those packets drive and the runtime state they mutate.
 
 | Area | Confidence |
 |---|---|
-| Six progression channels (five S2C + one C2S) and their routing | HIGH (CODE-CONFIRMED) |
-| Experience accumulation into the 64-bit current-XP and lifetime-XP accumulators | HIGH (CODE-CONFIRMED) |
-| Server XP percentage-bonus split and the floating-text / exp-orb FX | HIGH (CODE-CONFIRMED for ids and flow) |
-| Level-up vitals/level/points write, FX id, sound id, class-evolution gating | HIGH (CODE-CONFIRMED) |
-| Stat-allocation editor: pending-delta model, `+`/`-` action ids, modifier-key step, auto-repeat | HIGH (CODE-CONFIRMED) |
-| Stat-allocation commit body = five ABSOLUTE u32 stats, order STR, INT, AGI, DEX, CON | HIGH (CODE-CONFIRMED static; the absolute-vs-delta semantics and ordering are CAPTURE-UNVERIFIED) |
-| Level-up payload rank-XP tail packing (the last 16 bytes) | LOW — PROVISIONAL, capture-gated (see §9 open questions) |
-| Whether the experience message's source-sort field is one byte-field or two | LOW — PROVISIONAL, capture-gated (see §9) |
+| Six progression channels (five S2C + one C2S) and their routing | [confirmed] |
+| Experience accumulation into the 64-bit current-XP and lifetime-XP accumulators | [confirmed] |
+| Server XP percentage-bonus split mechanism, and the floating-text / exp-orb FX ids + flow | [confirmed] |
+| Level-up vitals/level/points write, FX id, sound id, chat id 10081, class-evolution gating | [confirmed] |
+| Stat-allocation editor: pending-delta model, delta offsets, `+`/`-` action ids, modifier-key step | [confirmed] |
+| Stat-allocation commit body = five ABSOLUTE u32 stats, build is self-consistent | [confirmed] (build); on-wire order / absolute-vs-delta semantics [capture/debugger-pending] |
+| 1.0-second auto-repeat threshold (in the window per-frame tick) | [static-hypothesis] (tick not deep-walked) |
+| Level-up payload rank-XP 16-byte tail packing | [capture/debugger-pending] (see §12, Q1) |
+| Whether the experience message's source-sort field is one byte-field or two | [capture/debugger-pending] (see §12, Q2) |
+| Server-authored values: XP/rank bonus rates, rank-XP divisor & cap tables, level boundaries | [capture/debugger-pending] (client reads only) |
 
 Korean strings referenced here (rank titles, karma labels) are **CP949 / EUC-KR** encoded, consistent
 with the rest of the client.
@@ -100,13 +111,24 @@ the window object, recovered from the editor's read/write sites):
 |---|---|---|
 | +180 | `action_id` | Action id of the most recently clicked widget (300–312). |
 | +376 | `delta_STR` | Pending STR allocation (signed; built up by `+`/`-`). |
-| +380 | `delta_INT` | Pending INT allocation. |
-| +384 | `delta_AGI` | Pending AGI allocation. |
-| +388 | `delta_DEX` | Pending DEX allocation. |
+| +380 | `delta_DEX` | Pending DEX allocation. |
+| +384 | `delta_INT` | Pending INT allocation. |
+| +388 | `delta_AGI` | Pending AGI allocation. |
 | +392 | `delta_CON` | Pending CON allocation. |
 | +396 | `avail_points` | Remaining unspent points after subtracting the in-progress deltas. |
 | +402 | `held_action` | Currently-held `+`/`-` action id (the auto-repeat driver; 0 = none). |
 | +404 / +408 | hold timer / accumulator | Auto-repeat timing, compared against a 1.0-second threshold. |
+
+> **Delta-offset → stat mapping (re-pinned, anchor 263bd994).** The five pending-delta fields are
+> **not** laid out in `STR, INT, AGI, DEX, CON` order. The order is **STR (+376), DEX (+380),
+> INT (+384), AGI (+388), CON (+392)**. This was proven independently two ways: (1) each editable
+> row's base-value getter reads exactly one stat-base cache (the five caches map cleanly to descriptor
+> stat ids 70–74 = STR, INT, AGI, DEX, CON), and the `2/29` Apply build pairs each cache with a
+> specific window delta offset so that every slot is a self-consistent `base + delta` of **one** stat
+> (§8.1); (2) the per-row repaint in the `+`/`-` handler and in the reset handler pairs the same row
+> base getter with the same delta offset, internally consistent only with this mapping. The on-wire
+> `2/29` body remains `STR, INT, AGI, DEX, CON` (§8.1) — the editor delta layout and the wire layout
+> are different orderings; keep them distinct.
 
 The window also holds the row-label widgets for the five editable stats and for the read-only current
 stat / HP / MP display labels; those are display-only and are repainted by the per-frame tick (§7).
@@ -118,8 +140,8 @@ the editor opens:
 - Five cached absolute stats `STR, INT, AGI, DEX, CON` (these mirror `structs/stats.md`).
 - `remaining_stat_points` — the authoritative count of unspent points.
 - A second progression counter written by the level-up message ("secondary value"), whose readers
-  were not located this pass (see §9, Q4).
-- The rank-XP pair: a rank/honor accumulator and a within-rank value.
+  were not located this pass (see §12, Q4).
+- The rank-XP pair: a rank/honor accumulator and a within-rank remainder value.
 - The lifetime-XP accumulator.
 - Level, packed HP:MP, and stamina caches for the local player.
 - Rank/title byte, class index byte, sub-class/promotion byte, and the skill-point class/current
@@ -149,10 +171,12 @@ shown_base = 100 * amount / (rate + 100)
 bonus      = amount - shown_base
 ```
 
-rendered as `"<base> + <bonus>"`. When the mode field is not `2`, the full amount is shown plain. The
-bonus split is a **display** transformation only; the full `amount` is what is added to the
-accumulator. (Whether the source-sort field is genuinely one byte-field reused as the mode, or two
-adjacent fields, is CAPTURE-UNVERIFIED — see §9, Q2.)
+composed as a `"<base> + <bonus>"` piece that is then fed into the 10085 floating-text message. When
+the mode field is not `2`, the full amount is shown plain. The bonus split is a **display**
+transformation only; the full `amount` is what is added to the accumulator. (Whether the source-sort
+field is genuinely one byte-field reused as the mode, or two adjacent fields, is
+**[capture/debugger-pending]** — see §12, Q2. The split mechanism itself is **[confirmed]**; the
+server-set `rate` value is **[capture/debugger-pending]**.)
 
 ### 3.2 Floating text and exp-orb FX
 
@@ -170,7 +194,7 @@ The payload's two trailing 32-bit fields (offsets 24 and 28) are proficiency/mas
 to the local player's stat-channel writer at indices 3 and 4 (weapon / skill proficiency XP). A
 sentinel value of `-1` means "no slot" and skips the write.
 
-### 3.4 `5/9 ExpGain` payload (32 bytes) — CODE-CONFIRMED, CAPTURE-UNVERIFIED
+### 3.4 `5/9 ExpGain` payload (32 bytes) — layout [confirmed]; source-sort field semantics [capture/debugger-pending]
 
 | Off | Size | Type | Meaning |
 |---|---|---|---|
@@ -189,16 +213,33 @@ sentinel value of `-1` means "no slot" and skips the write.
 `5/11` is a **separate progression channel** distinct from character XP and performs no HP/MP/level
 math. It carries a **20-byte** payload, applied to the local player only.
 
-- A **rank accumulator** and a **within-rank** value are the two pieces of state.
+- A **rank accumulator** and a **within-rank remainder** value are the two pieces of state.
 - When the payload mode is `2`, the amount is added directly to the rank accumulator (no level math).
   Otherwise the amount is run through a **per-level rank-XP table** to increment the rank, carrying the
-  remainder into the within-rank value. The rank is capped at **25**.
+  remainder into the within-rank value. The rank progression caps at **25**.
 - A server-set **rank-XP percentage-bonus rate** (a sibling of the XP-bonus rate in §3.1) governs the
   displayed bonus.
 - Floating chat text uses message-string id **10017** (rank-XP gain, with optional bonus) and **10015**
   (no gain).
 
-### 4.1 `5/11 RankXpGain` payload (20 bytes) — CODE-CONFIRMED, CAPTURE-UNVERIFIED
+> **The accumulation engine is shared, not in the `5/11` handler (re-pinned, anchor 263bd994).** The
+> cap-25 logic and the per-level rank-XP table math do **not** live inside the `5/11` handler — they
+> live in a **shared rank-XP accumulation routine** that `5/11` calls (and which has at least one
+> other caller). That routine uses **two i64-stride tables** indexed by the local-player **level
+> cache**: a *divisor* ("level") table that gives the XP-per-rank-step, and a *cap* table that bounds
+> the within-rank value. The non-mode-2 path computes `rank_acc += (remainder + amount) / divisor[idx]`
+> and `within = (remainder + amount) % divisor[idx]`. If the divisor for a level is `0`, a
+> "leveltable error" diagnostic fires. The table contents and the divisor/cap values are
+> **[capture/debugger-pending]** (server-config / data-driven; no client VFS table drives them).
+>
+> **The table index is the level cache, not an independent rank counter (clarification).** The index
+> into both tables — and the value tested against `25` for the cap special-case — is the **local-player
+> level cache** (the same `u16` the level-up message writes as the new level, and the same value the
+> class-evolution gate tests against `12` / `24` in §5.2). So this is effectively a **per-level** table
+> keyed by level; the "25" is a level-cache value, not a standalone rank value. The exact server-side
+> rank-vs-level semantics are **[capture/debugger-pending]**.
+
+### 4.1 `5/11 RankXpGain` payload (20 bytes) — layout [confirmed]; on-wire VALUE meanings [capture/debugger-pending]
 
 | Off | Size | Type | Meaning |
 |---|---|---|---|
@@ -223,16 +264,20 @@ When the actor is the **local player**, it additionally updates the level/HP:MP/
 re-writes the local-player record, and updates these progression globals:
 
 - `remaining_stat_points` — the count of unspent points.
-- The "secondary value" counter (purpose unconfirmed; see §9, Q4).
-- The rank-XP pair (rank accumulator and within-rank value).
+- The "secondary value" counter (purpose unconfirmed; see §12, Q4).
+- The rank-XP pair (rank accumulator and within-rank remainder value).
 
 ### 5.1 Level-up presentation
 
 - **FX:** a UserXEffect, id **310000002** (the level-up burst), is spawned on the leveled actor.
 - **Sound:** a level-up jingle, sound id **800000002** (sound kind 5).
 - A class-name string is resolved from the class index and shown.
+- **Chat broadcast:** a level-up notice using message-string id **10081** is broadcast to the chat log
+  / notice channel, gated on a window condition flag. (This is in addition to the FX and sound.)
 - The character window is refreshed by the rebuild path, which **first resets any pending allocation
   deltas** and then fully rebuilds. A level-up therefore **cancels any in-progress stat allocation**.
+  (The rebuild path itself was not deep-walked this pass; the delta-reset behaviour matches the
+  editor's reset handler — **[static-hypothesis]**.)
 
 ### 5.2 Class-evolution panels
 
@@ -243,11 +288,13 @@ and the panels open by level:
 - **Level 12:** class-evolution panel **id 100** opens (and the class form is opened).
 - **Level 24:** class-evolution panel **id 101** opens.
 
-### 5.3 `5/32 LevelUp` payload (48 bytes) — core CODE-CONFIRMED; rank-XP tail PROVISIONAL
+### 5.3 `5/32 LevelUp` payload (48 bytes) — core [confirmed]; rank-XP tail [capture/debugger-pending]
 
-This matches `packets/5-32_level_up.yaml`. The HP/MP/stamina/level core is high confidence; the last
-16 bytes (the rank-XP region) are modelled provisionally — the handler reads two 64-bit rank-XP values
-there, but their exact packing against the 48-byte boundary is CAPTURE-UNVERIFIED (see §9, Q1).
+This matches `packets/5-32_level_up.yaml`. The frame field layout (sort, id, level, points, secondary
+value, packed HP:MP, stamina) is **[confirmed]** from the handler's stack-frame reads; the last 16
+bytes (the rank-XP region) hold two 64-bit rank-XP values (a within-rank value and a total), but their
+exact on-wire packing against the 48-byte boundary is **[capture/debugger-pending]** — verify against
+a level-up capture (see §12, Q1).
 
 | Off | Size | Type | Meaning |
 |---|---|---|---|
@@ -260,7 +307,7 @@ there, but their exact packing against the 48-byte boundary is CAPTURE-UNVERIFIE
 | 16 | 4 | i32 | Secondary value (local player). |
 | 20 | 8 | i64 | HP:MP packed → actor vitals + HP:MP cache. |
 | 28 | 4 | i32 | Current stamina → actor + stamina cache. |
-| 32 | 16 | — | Rank-XP region: a within-rank value and a total. **PROVISIONAL packing** — verify against a level-up capture. |
+| 32 | 16 | — | Rank-XP region: two 64-bit values (a within-rank value and a total). On-wire packing **[capture/debugger-pending]** — verify against a level-up capture. |
 
 ---
 
@@ -271,6 +318,16 @@ stats into the actor descriptor and also writes the **current-XP** accumulator (
 mirrors the stats for the local player through the stat-channel writers, then invokes the
 character-window rebuild. It is authoritative — the re-implementation should treat `5/67` as the
 source of truth for the five primary stats and reset any locally-cached values to match.
+
+> **Field map and writer indices (re-pinned, anchor 263bd994).** The five stats land in the actor
+> descriptor at a mix of widths — two of them as **bytes**, three as **dwords** — and the current-XP
+> 64-bit accumulator is written alongside. The local-player mirror does **not** use contiguous
+> stat-channel writer indices `0..4`: it issues only **four** stat-channel writes, at non-contiguous
+> indices **{0, 5, 2, 6}** (two through one writer entry point, two through another). Because five
+> stat values are reconciled through four non-contiguous channel indices, the full **writer-index →
+> stat / proficiency map is not yet resolved**; it belongs to the struct cartographer (`structs/stats.md`)
+> and relates to the same writer used for the proficiency slots in `5/9` (§3.3, and §12 Q5). The exact
+> per-field actor offsets are owned by `structs/actor.md`.
 
 ---
 
@@ -290,30 +347,37 @@ invalidates the window.
 
 ### 7.2 Action-id map
 
-The editor's action dispatch switches on the clicked widget's action id:
+The editor's action dispatch switches on the clicked widget's action id. The action-id → stat
+mapping is **re-pinned (anchor 263bd994)** from the `+`/`-` handler, using the corrected delta-offset
+layout above (§2) — each action id pairs a specific window delta offset with its row's stat:
 
-| Action id | Stat | Operation |
-|---|---|---|
-| 300 | STR | `+` increment |
-| 301 | INT | `+` increment |
-| 302 | AGI | `+` increment |
-| 303 | CON | `+` increment |
-| 304 | DEX | `+` increment |
-| 305 | STR | `-` decrement |
-| 306 | INT | `-` decrement |
-| 307 | AGI | `-` decrement |
-| 308 | CON | `-` decrement |
-| 309 | DEX | `-` decrement |
-| 310 | —   | Reset / cancel: clears all five deltas, restores available points, re-enables the `+`/`-` widgets. |
-| 311 | —   | **Apply**: builds and sends `2/29` (§8), then disables the "Apply" widget. |
-| 312 | —   | Opens the help/info message (message-string id 16006). |
+| Action id | Stat | Window delta offset | Operation |
+|---|---|---|---|
+| 300 | STR | +376 | `+` increment |
+| 301 | DEX | +380 | `+` increment |
+| 302 | INT | +384 | `+` increment |
+| 303 | CON | +392 | `+` increment |
+| 304 | AGI | +388 | `+` increment |
+| 305 | STR | +376 | `-` decrement |
+| 306 | DEX | +380 | `-` decrement |
+| 307 | INT | +384 | `-` decrement |
+| 308 | CON | +392 | `-` decrement |
+| 309 | AGI | +388 | `-` decrement |
+| 310 | —   | —   | Reset / cancel: clears all five deltas, restores available points, re-enables the `+`/`-` widgets. |
+| 311 | —   | —   | **Apply**: builds and sends `2/29` (§8), then disables the "Apply" widget. |
+| 312 | —   | —   | Opens the help/info message (message-string id 16006). |
 
-> **Note the action-id stat ordering.** The `+`/`-` action ids are laid out
-> `STR, INT, AGI, CON, DEX` (id 303 is **CON**, id 304 is **DEX**). This differs from the **wire
-> order** of the commit body, which is `STR, INT, AGI, DEX, CON` (§8). Keep the two orderings distinct.
+> **Note the action-id stat ordering (corrected).** The editor's `+`/`-` action ids are laid out in
+> stat order **STR, DEX, INT, CON, AGI** (id 301 is **DEX**, id 302 is **INT**, id 304 is **AGI**).
+> This is yet a third ordering, distinct from both the delta-field layout (STR, DEX, INT, AGI, CON —
+> §2) and the **wire order** of the commit body (STR, INT, AGI, DEX, CON — §8). A Godot stat-editor
+> UI that mapped its `+`/`-` buttons by the *previous* (mislabeled) order would label three rows wrong;
+> the downstream protocol / domain path (the `2/29` body) is unaffected because the wire order was
+> always correct. Keep all three orderings distinct.
 
 A click plays the increment sound (id **862020102**, sound kind 2). A hover draws a tooltip from
-message-string id **2221**.
+message-string id **2221** (the tooltip is **[confirmed]**; the help action 312 / info string 16006
+pairing is **[static-hypothesis]** — not re-located this pass).
 
 ### 7.3 Modifier-key step
 
@@ -333,8 +397,12 @@ For `+` operations the step is clamped so it never exceeds the available points.
 
 The window's per-frame tick repaints the read-only current-value labels (current stats, max HP, max MP,
 etc., via the formula getters) and implements **auto-repeat**: while a `+`/`-` button is held (the
-`held_action` field is non-zero), once the accumulated hold time exceeds **1.0 second** the tick
-re-fires the per-click increment continuously for as long as the button stays held.
+`held_action` field at window+402 is non-zero — set on mouse-down for action ids 300–309, cleared on
+mouse-up, both **[confirmed]**), once the accumulated hold time exceeds the threshold the tick
+re-fires the per-click increment continuously for as long as the button stays held. The threshold is
+modelled as **1.0 second** — that value lives in the window per-frame tick routine, which was **not
+deep-walked** this pass (the threshold is **[static-hypothesis]**; the held-action field and the
+mouse-down/up arming are **[confirmed]**).
 
 ---
 
@@ -344,10 +412,18 @@ re-fires the per-click increment continuously for as long as the button stays he
 
 "Apply" (action id 311) builds a **20-byte** body of **five contiguous little-endian u32 ABSOLUTE
 target stats** — each value is the **cached base stat plus its pending delta**, not the delta itself.
-The body is gated on **two conditions**: the remaining-points counter must be greater than zero **and**
-at least one of the five deltas must be non-zero. The wire order is **STR, INT, AGI, DEX, CON**.
+The body is gated on **two conditions**: the remaining-points counter must be **non-zero** (the
+instruction is a zero-test — for a non-negative unspent-points count "non-zero" and "> 0" coincide)
+**and** at least one of the five deltas must be non-zero. The wire order is **STR, INT, AGI, DEX, CON**.
 
-#### `2/29 StatAllocate` body (20 bytes, absolute) — CODE-CONFIRMED, CAPTURE-UNVERIFIED
+Each slot is built by pairing a window delta offset with its matching stat-base cache, so that every
+slot is a self-consistent `base + delta` of one stat. With the re-pinned delta offsets (§2), the build
+reads `STR(+376), INT(+384), AGI(+388), DEX(+380), CON(+392)` — i.e. the build deliberately reorders
+the editor delta fields into the wire order STR, INT, AGI, DEX, CON. The build is **[confirmed]**; the
+on-wire byte order and the absolute-vs-delta semantics remain **[capture/debugger-pending]** (no live
+`2/29` capture this pass).
+
+#### `2/29 StatAllocate` body (20 bytes, absolute) — build [confirmed]; on-wire order / absolute-vs-delta [capture/debugger-pending]
 
 | Off | Size | Type | Meaning |
 |---|---|---|---|
@@ -373,7 +449,7 @@ at offset 8: when that flag equals `1` the ack is applied. On success the handle
 3. Plays the confirm sound (id **800000002**, the same id as the level-up jingle).
 4. Refreshes and closes the editor (re-rebuilds the window and exits edit mode).
 
-#### `4/29 StatUpdate` ack payload (36 bytes) — CODE-CONFIRMED, CAPTURE-UNVERIFIED
+#### `4/29 StatUpdate` ack payload (36 bytes) — layout [confirmed]; on-wire VALUE meanings [capture/debugger-pending]
 
 | Off | Size | Type | Meaning |
 |---|---|---|---|
@@ -399,7 +475,7 @@ allocation but sharing the window. The handler gates on a result flag and then b
 - **Mode 1:** set the total skill-point value (stored for the skill subsystem; see `specs/skills.md`).
 - **Mode 2:** a skill level-up notice, with floating chat text (message-string ids 74313 / 74314).
 
-### `4/150 SkillPointUpdate` payload — CODE-CONFIRMED, CAPTURE-UNVERIFIED
+### `4/150 SkillPointUpdate` payload — [confirmed] layout; on-wire VALUE meanings [capture/debugger-pending]
 
 | Off | Size | Type | Meaning |
 |---|---|---|---|
@@ -410,7 +486,7 @@ allocation but sharing the window. The handler gates on a result flag and then b
 
 ---
 
-## 10. Asset ids (FX / sound / strings) — CODE-CONFIRMED
+## 10. Asset ids (FX / sound / strings) — [confirmed]
 
 For the FX, sound, and message-string spec authors. These ids are recovered directly from the client
 and resolve to entries in the effect / sound / message tables.
@@ -423,8 +499,9 @@ and resolve to entries in the effect / sound / message tables.
 | `5/9` exp gain | UserXEffect | 380001011 / 380001012 | Exp-orb ring on the XP source (selected by a descriptor flag). |
 | `5/9` exp gain | UserXEffect | 380002011 / 380002012 | Exp-orb ring on the local player. |
 | `+`/`-` click | Sound (kind 2) | 862020102 | Stat-increment click. |
-| `5/9` exp gain | Chat string | 10085 `"+%s xp"` / 10086 `"-%s xp"` | Floating XP text (gain / loss). |
+| `5/9` exp gain | Chat string | 10085 `"+%s xp"` / 10086 `"-%s xp"` | Floating XP text (gain / loss). The base+bonus split (§3.1) composes a `"<base> + <bonus>"` piece into the 10085 message. |
 | `5/11` rank XP | Chat string | 10017 / 10015 | Rank-XP gain / no-gain text. |
+| `5/32` level-up | Chat string | 10081 | Level-up notice broadcast to the chat log / notice channel (gated on a window condition flag). |
 | `5/32` evolve | Panel id | 100 (level 12) / 101 (level 24) | Class-evolution panels. |
 | Editor help | String id | 2221 (tooltip) / 16006 (info) | Stat-window help text. |
 | Skill level-up | Chat string | 74313 / 74314 | Skill level-up notices. |
@@ -447,25 +524,40 @@ and resolve to entries in the effect / sound / message tables.
   at-least-one-nonzero-delta, and applies the `4/29` echo on success.
 - **Presentation** (`Client.Godot`): strictly passive — render the XP/rank bars, the editable stat
   rows, the available-points and skill-point labels, the level-up burst FX + jingle, and the
-  class-evolution panels. No progression authority in layer 05.
+  class-evolution panels. No progression authority in layer 05. **Bind the `+`/`-` editor buttons by
+  the corrected action-id → stat map (§7.2): 300/305 = STR, 301/306 = DEX, 302/307 = INT, 303/308 =
+  CON, 304/309 = AGI.** Mapping the buttons by the *previous* ordering would mislabel three rows.
+  Keep the three orderings distinct: the editor delta-field layout (STR, DEX, INT, AGI, CON — §2), the
+  editor action-id order (STR, DEX, INT, CON, AGI — §7.2), and the `2/29` wire order (STR, INT, AGI,
+  DEX, CON — §8.1).
 
 ---
 
-## 12. Open questions (capture-gated)
+## 12. Open questions ([capture/debugger-pending])
 
-- **Q1 — level-up rank-XP tail (PROVISIONAL).** The last 16 bytes of the 48-byte `5/32` payload hold
-  two 64-bit rank-XP values (within-rank and total), but their exact byte placement against the
-  48-byte boundary is unverified. Confirm with a capture of a level-up. (See `packets/5-32_level_up.yaml`.)
-- **Q2 — experience source-sort field (PROVISIONAL).** In `5/9`, offset 8 is read both as the
-  XP-source actor sort and as the bonus-split mode (low byte `== 2`). Confirm whether this is one
-  byte-field or two adjacent fields with a capture.
+- **Q1 — level-up rank-XP tail.** The last 16 bytes of the 48-byte `5/32` payload hold two 64-bit
+  rank-XP values (within-rank and total), but their exact on-wire byte placement against the 48-byte
+  boundary is **[capture/debugger-pending]**. Confirm with a capture of a level-up.
+  (See `packets/5-32_level_up.yaml`.)
+- **Q2 — experience source-sort field.** In `5/9`, offset 8 is read both as the XP-source actor sort
+  and as the bonus-split mode (low byte `== 2`). Whether this is one byte-field reused as the mode or
+  two adjacent fields is **[capture/debugger-pending]** — confirm with a `5/9` capture.
 - **Q3 — HUD exp-bar gage.** The character-window rebuild refreshes the XP bar on the character panel.
   The streaming on-HUD exp-bar gage widget (the filled bar separate from the character window) was not
-  isolated this pass; it is likely driven by a separate gage-progress message. Hand to a HUD-widget
-  pass.
+  isolated this pass; it is likely driven by a separate gage-progress message. Two situational `5/9`
+  side-writes (a UI-state branch that writes the XP amount into a main-window field, and another that
+  writes it into a UI object) feed HUD / quest-progress side-channels — out of progression scope but
+  part of this same HUD-widget pass. Hand to a HUD-widget pass.
 - **Q4 — the "secondary value" counter.** The second points/counter value written by `5/32` is not
-  read by the stat editor; its purpose (a level-up-pending marker? a skill-point grant?) is unconfirmed.
-  Trace its readers.
-- **Q5 — stat-channel writer indices.** The stat-channel writer is invoked with several indices
-  (including 3 and 4 for proficiency in `5/9`); the full index → stat/proficiency map belongs to the
-  struct cartographer (`structs/stats.md`).
+  read by the stat editor and no readers were located this pass; its purpose (a level-up-pending
+  marker? a skill-point grant?) is unconfirmed — **[static-hypothesis: written-but-unread]**. Trace
+  its readers.
+- **Q5 — stat-channel writer indices.** The stat-channel writer is invoked with non-contiguous indices
+  — `{0, 5, 2, 6}` from the `5/67` resync (four writes for five stat values, §6) and `{3, 4}` for the
+  proficiency slots in `5/9` (§3.3). The full index → stat / proficiency map is unresolved and belongs
+  to the struct cartographer (`structs/stats.md`).
+- **Q6 — server-authored magnitudes.** The XP and rank-XP percentage-bonus rate values, the rank-XP
+  per-level divisor and cap table contents, and the level boundaries are **server-authored / config**
+  — the client only reads them, and no client VFS table drives them. Level-boundary numbers are not
+  present in the client binary as constants (they arrive via the `5/32` level/points fields and the
+  server's XP tables). All **[capture/debugger-pending]**.

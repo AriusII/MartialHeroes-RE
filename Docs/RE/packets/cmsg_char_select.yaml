@@ -1,6 +1,15 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED field internals; size + builder identity + delete-overload are static-HIGH;
 # the delete MODE-byte value is now code-confirmed = 1; the delete RESPONSE opcode stays UNVERIFIED. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: builder writes header 1/7 + appends a fixed 2-byte body)
+#   Mode delete-literal: confirmed   (the delete-confirm path writes the literal 1 into body byte @0x01 before send:
+#                        body = {slot, 1}; the earlier "2 by elimination" reading is REFUTED)
+#   delete RESULT opcode: confirmed-by-routing on the RECEIVE side (3/7 SmsgCharManageResult subtype 2; see below)
+#   wire VALUE semantics: capture/debugger-pending (whether the plain-select mode value 0=view vs another split)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: none (cmsg_char_select.yaml re-confirmed ACCURATE incl. the mode==1 delete literal)
 
 name: CmsgManageCharacter
 opcode: 0x10007           # major 1, minor 7 -> (1 << 16) | 7

@@ -6,19 +6,34 @@
 
 ---
 
-## ⚠ CAPTURE-UNVERIFIED BANNER
+## Verification banner
 
-**`capture_verified: false`.** The cipher constants, the LZ4 variant, and the handshake reply
-whitening below are now **pinned** from static analysis, but no claim here has yet been confirmed
-end-to-end against a live Wireshark capture. The remaining load-bearing open items are: (a) the
-**inbound direction asymmetry** (Section 5) — this client applies the byte cipher only on its send
-path, which implies server→client payloads may be **compressed-only, not enciphered** — and (b) the
-**dynamic handshake modulus/exponent values** (Section 6, capture-gated: the concrete `n`, `e`, and
-the `L1`/`L2` split are read live off the wire, not hardcoded). Do not trust the inbound path until a
-capture confirms it. The numeric constants are sufficient for a round-tripping cipher and for the
-full handshake reply build; treat the items above as the only blockers to closing this spec
-(Section 8). All static facts in this spec were **re-confirmed on build 263bd994** (Campaign 7,
-Wave B) — see Section 9.
+- **verification: confirmed** — the byte-cipher structure and all seven constants, the LZ4 variant /
+  acceleration / inbound capacity, the send-chain ordering, the full `0/0`→`1/4` handshake field
+  layout, the PKCS#1 v1.5 type-2 reply build, the big-endian digit order, the per-dword reply
+  whitening, and the secure-context lifecycle + page guard are all **control-flow-confirmed** (the
+  cipher, both gates, the dispatcher, the importer, the padder, the modexp, the whitening helper, and
+  the reply builder were each re-confronted to the binary by control flow + operands). **Open
+  question #1 is RESOLVED statically** (see Section 5): the byte-cipher routine has **exactly one
+  cross-reference — the outbound send gate** — so it is structurally unreachable on the receive path;
+  inbound is **LZ4-decompress only, then route**, with no inverse cipher.
+- **ida_reverified: 2026-06-16**
+- **ida_anchor: 263bd994**
+- **evidence: [static-ida]** (this campaign carried no live capture).
+- **capture/debugger-pending (the only residuals):** the **concrete server modulus `n` and exponent
+  `e`**, the individual **`L1`/`L2` split** (only the sum `L1 + L2 = 42` is a client constant), the
+  **meaning of the two 4-byte server scalars**, and generalizing "server→client payloads were not
+  enciphered server-side" across **multiple** inbound packet types. These are wire-VALUE semantics and
+  remain capture-only; they do **not** block the cipher, the LZ4 codec, or the full handshake reply
+  build, all of which are implementable from this spec alone (the reply reads `n`, `e`, and the split
+  live off the `0/0` wire at runtime).
+- **conflicts: none.** No constant or structure recovered this campaign contradicts the spec; the
+  earlier Campaign-7 re-confirmation and the Section 6b debugger-verified facts are all consistent.
+
+> Provenance note: `capture_verified` (end-to-end Wireshark round-trip) is still **false** — every
+> claim here is static-IDA confirmed, not yet exercised against a captured stream. "verification:
+> confirmed" above means **control-flow / operand confirmed in the binary**, the strongest tier
+> available without a capture.
 
 ---
 
@@ -40,12 +55,11 @@ now recovered and tabulated (Section 8.1).
 
 The wire frame begins with an **8-byte header that is never transformed**:
 
-| Header field | Width | Meaning |
-|---|---|---|
-| Total frame size | 2 bytes (u16, little-endian) | Size of the entire frame including the header. |
-| Opcode — major | 2 bytes | High part of the message opcode. |
-| Opcode — minor | 2 bytes | Low part of the message opcode. |
-| (remainder of header) | 2 bytes | Completes the 8-byte header region. |
+| Header field | Offset | Width | Meaning |
+|---|---|---|---|
+| Total frame size | +0 | 4 bytes (**u32**, little-endian) | Size of the entire frame including the 8-byte header. (**u32 — RESOLVED**; this settles the old u16-vs-u32 size question. The three transform gates test the size word against the constant `8` to detect header-only frames.) |
+| Opcode — major | +4 | 2 bytes (u16) | High part of the message opcode. |
+| Opcode — minor | +6 | 2 bytes (u16) | Low part of the message opcode. |
 
 Key facts:
 
@@ -260,33 +274,43 @@ important fact for the engineer.
 
 ---
 
-## 5. ⚠ Direction asymmetry — open question #1
+## 5. Direction asymmetry — open question #1 (RESOLVED, client side)
 
 Observed in the legacy **client** binary:
 
 | Path | Cipher applied? | Compression applied? |
 |---|---|---|
 | **Send (client → server)** | **Yes** — enciphered, then compressed. | Yes (after cipher). |
-| **Receive (server → client)** | **No inverse cipher call exists on the client receive path.** | Yes — LZ4-decompress only, then dispatch. |
+| **Receive (server → client)** | **No inverse cipher. None exists anywhere on the receive path.** | Yes — LZ4-decompress only, then dispatch. |
 
-**Implication:** in this build the byte cipher protects **client-originated** payloads only.
-Server→client payloads reaching this client appear to be **compressed-only, not enciphered**. If
-that holds, the client's inbound path needs LZ4-decompress and **no inverse cipher at all.**
+**Resolution (single-caller positive proof — `[confirmed]`).** The byte-cipher routine has **exactly
+one cross-reference in the whole binary: the outbound send gate.** That gate is reached only from the
+send-chain convergence point (≈105 call sites converge there). The inbound dispatcher, by contrast,
+calls the LZ4 **decompress** stage and then routes straight by `(major, minor)` to the message
+handlers, with **no cipher call anywhere between decompress and dispatch.** Because the cipher has a
+single send-side caller, it is **structurally impossible to reach on the receive path** — this is a
+*positive* structural proof (the routine is provably never invoked inbound), strictly stronger than
+the earlier "no inverse cipher call observed" wording.
 
-**This decision is unresolved and load-bearing:** it determines whether `Network.Crypto` must
-implement an inbound decrypt for the client at all.
+**Implication (now settled for the client):** in this build the byte cipher protects
+**client-originated** payloads only. The client's inbound path is **LZ4-decompress and route, with no
+inverse cipher at all.** Therefore **`Network.Crypto` does not need an inbound decrypt for this
+client** — the inbound stage is decompress-only.
 
-- **It MUST be confirmed against a live capture before the inbound path is trusted.** Concretely:
-  verify that server→client payloads decode as sensible packets after LZ4-decompress *without* the
-  byte cipher, and that client→server payloads only make sense after de-compress *and* de-cipher.
-  A single live `0/0` capture already corroborates the inbound `0/0` payload was *not* whitened/
-  ciphered (62 bytes, plain after decompress), but a **multi-packet** inbound capture is still needed
-  to generalize "no inverse cipher" to all server→client traffic.
-- Until confirmed: **`capture_verified: false`** for the inbound path.
+- **Scope of the resolution.** The *client-side implementation* question — "must the client invert the
+  byte cipher on receive?" — is **answered: no** (control-flow confirmed). What stays
+  **capture/debugger-pending** is the *wire-VALUE semantics* generalization: whether
+  **server→client payloads were enciphered server-side** across **all** inbound packet types. A static
+  binary cannot settle that (it can only show this client never inverts a cipher). A single live `0/0`
+  capture already corroborates the inbound `0/0` payload was plain after decompress (62 bytes, not
+  whitened/ciphered), but a **multi-packet** inbound capture is still needed to generalize across
+  every server→client message type.
+- **`capture_verified: false`** remains for that wire-semantics generalization (and for the concrete
+  key values of Section 6) — but the client-side routing fact above is `[confirmed]`.
 - **Server-side note:** a future `MartialHeroes.Server.Console` must run the **inverse cipher** to
   *read* client packets. Therefore **both `Encrypt` and `Decrypt` should exist** in the shared crypto
-  surface even though this client only ever exercises `Encrypt`. The open question is only about
-  whether the *client's inbound* path invokes `Decrypt`.
+  surface even though this client only ever exercises `Encrypt`. The resolved point is only that the
+  *client's inbound* path does **not** invoke `Decrypt`.
 
 ---
 
@@ -531,10 +555,14 @@ the whitening of 6.4 and the normal send pipeline, is therefore:
 
 The plaintext pre-image (sub-opcode `0x2B`, the length-prefixed account, and the **optional**
 length-prefixed PIN) is **not crypto** and is owned by `packets/login.yaml`. The **password** is
-not in this pre-image: it is the staged RSA plaintext `M` (6.1) -- a **fixed 17-byte zero-padded
-buffer** consumed in full by 6.3, regardless of the actual password length. The per-dword `0x29`
-whitening (6.4) is applied over the **whole** `1/4` payload (pre-image + ciphertext) before the
-normal byte-cipher + LZ4 send.
+not in this pre-image: it is the staged RSA plaintext `M` (6.1) -- a **zero-padded buffer whose width
+is parameter-driven** (it equals the password-field cap passed to the login builder), consumed in
+full by 6.3 regardless of the actual password length. **Statically the width is a caller-supplied
+argument, not a literal**; the concrete cap was **17 bytes** in the debugger-observed session (§6b),
+so "17-byte zero-padded buffer" is the runtime value, while the structural fact an implementer should
+carry is "the staged-`M` width = the password-field cap". The per-dword `0x29` whitening (6.4) is
+applied over the **whole** `1/4` payload (pre-image + ciphertext) before the normal byte-cipher +
+LZ4 send.
 
 Re-confirmed on build 263bd994: the login-packet builder writes sub-opcode `0x2B` as the first
 payload byte, validates the account and password fields (each ≥ 2 chars and below its cap — see
@@ -559,7 +587,7 @@ Section 3.2 — the two are unrelated constants and must not be conflated.) Its 
 |---|---|
 | Allocate | When the player submits the login form, the client commits a fresh **`0x2E20` = 11808-byte** region (committed, read-write) for the secure context. A prior context, if any, is first torn down (its staged `M` freed, the page zeroed, its embedded locks destroyed, the page released). |
 | Construct | The embedded packet buffer is initialised (write cursor at the 8-byte header), the staged-`M` slots are zeroed, and the padding PRNG family (the PKCS#1 type-2 padding randomness of 6.3) is seeded from time-based sources. The constructor's bignum-slot seed strings are developer placeholders (6.5), overwritten at handshake time. |
-| Stage credential | The login-form fields are split from a **TAB-delimited key string** (build 263bd994); the account/password are length-validated (each ≥ 2 chars, below cap — see 6.1); the password is copied into the fixed 17-byte zero-padded `M` buffer (6.1); the buffer pointer + size are recorded in the context. The plaintext pre-image (6.6) is written into the embedded packet buffer. |
+| Stage credential | The login-form fields are split from a **TAB-delimited key string** (build 263bd994); the account/password are length-validated (each ≥ 2 chars, below cap — see 6.1); the password is copied into a freshly allocated, zero-filled `M` buffer **sized to the password-field cap** (a caller-supplied width — `17` bytes in the debugger-observed session, see 6.1/6.6/6b); the buffer pointer + size are recorded in the context. The plaintext pre-image (6.6) is written into the embedded packet buffer. |
 | Key import (on 0/0) | The 54-byte key blob from the `0/0` packet is parsed into the modulus + exponent slots; the two trailing server scalars and a local timestamp are stored (6.2). |
 | Encrypt + reply | The staged `M` is PKCS#1-padded and exponentiated (6.3), the ciphertext is appended to the packet buffer (6.6), the whole payload is whitened (6.4), copied to a fresh outbound buffer, and sent. The `M` buffer is then secure-zeroed and freed and its slot cleared. |
 | Teardown | On context rebuild or logout, the staged `M` is freed, the page is zeroed, the embedded locks destroyed, and the page released. |
@@ -592,7 +620,7 @@ confirmed, with credential byte VALUES withheld (structure/lengths only):
 | Credential frame | secure `1/4` (header words read major 1 / minor 4 at encrypt entry) | HIGH (debugger) |
 | Plaintext pre-image leader | sub-opcode `0x2B` as the first payload byte | HIGH (debugger) |
 | Pre-image length-prefix width | u32 little-endian, NUL-inclusive (account + optional PIN) | HIGH (debugger) |
-| Staged `M` | a FIXED 17-byte zero-padded buffer (password bytes then zero padding); consumed in full as the RSA plaintext | HIGH (debugger) -- resolves the prior open item |
+| Staged `M` | a zero-padded buffer (password bytes then zero padding), **17 bytes** in this session; consumed in full as the RSA plaintext. Statically the width is the password-field cap (caller-supplied), not a literal; `17` is the runtime cap (see §6.1 / §6.6 / §8.1). | HIGH (debugger for the value `17`; static for "width = field cap") -- resolves the prior open item |
 | Ciphertext framing | `[u32 LE length][big-endian digit bytes]`, appended after the pre-image | HIGH (debugger) |
 | Observed ciphertext length | 27 bytes (one less than the modulus byte width) | HIGH (debugger) |
 | RSA modulus size | small (~224-bit / ~28 bytes), consistent with a 2004-era key; PKCS#1 v1.5 type-2 confirmed by the framing/size | HIGH (debugger) |
@@ -676,6 +704,7 @@ server-exchanged keys), consistent with offline file authentication. Out of inte
 | Context page size | **`0x2E20` = 11808 bytes** (committed read-write; distinct from the `0x2DA0`/11680 inbound LZ4 capacity). Re-confirmed build 263bd994. |
 | Bignum word buffer | `0x202`-byte fixed buffer (scrubbed before free) — implementation detail of the binary's big-integer library, no wire effect. |
 | Login-form input | A **TAB-delimited key string** split into account / password / optional PIN; account & password each **≥ 2 chars and below cap** or the login build fails (build 263bd994). |
+| Staged-`M` (RSA plaintext) buffer width | **Parameter-driven** = the password-field cap (a caller-supplied argument, not a literal). Runtime cap **17 bytes** in the debugger-observed session (§6b). Zero-filled, password-copied, consumed in full by the RSA pad/modexp (6.3). |
 
 **Handshake structure & reply build (now fully pinned — no capture needed for the algorithm):**
 
@@ -703,7 +732,8 @@ modular parameters live from the `0/0` wire, so only the **concrete server value
 | Concrete `n` and `e` values | Carried in the `0/0` blob; server data, never hardcoded by the client. Needed only for a static fixture/test, not for the algorithm. | One live `0/0` capture. |
 | Individual `L1`/`L2` split | Only the **sum** `L1 + L2 = 42` is a client constant; the modulus/exponent byte split is server wire data. | Same live `0/0` capture (the split is implied by the captured `n`/`e` lengths). |
 | Meaning of the two server scalars (#1 / #2) | Read and stored by the client (token / nonce / session-id / timestamp class) but their server-side use cannot be inferred from the client. | Behavioral / capture. |
-| Inbound "no inverse cipher" generalization | Structurally absent on the client receive path, and corroborated for `0/0` by a single capture; not yet confirmed across **multiple** inbound packet types. | A **multi-packet** inbound capture oracle (Section 5). |
+| Inbound "no inverse cipher" — *wire-semantics* generalization only | The **client-side** fact is now `[confirmed]`: the cipher has a single send-side caller, so the client provably never inverts it on receive (Section 5). What remains open is whether **server→client payloads were enciphered server-side** across **all** inbound packet types — a wire-VALUE statement the static binary cannot settle. `0/0` is corroborated plain-after-decompress by a single capture; multi-packet generalization is still open. | A **multi-packet** inbound capture oracle (Section 5). |
+| Literal staged-`M` width (`17`) | Structurally the staged-credential buffer is sized to the **password-field cap** (caller-supplied); the concrete value `17` is debugger-observed, not a static literal. The algorithm does not depend on it. | Debugger / capture (value only). |
 
 These open items do **not** block `Network.Crypto` from implementing `Encrypt` / `Decrypt`, the LZ4
 codec, the reply whitening, **or the full handshake reply build** — the build reads `n`, `e`, and the
@@ -723,9 +753,12 @@ false`** until a live capture supplies concrete `(n, e)` and closes the inbound-
   split remain capture-only (Section 8.2).
 - Cipher keyless / stateless; handshake separate; CryptoAPI = anti-cheat/config: **HIGH confidence**
   (static).
-- Direction asymmetry (inbound compressed-only): **observed statically, single `0/0` capture
-  corroboration, multi-packet capture-unverified.**
-- End-to-end confirmation against captures: **not yet performed.** `capture_verified: false`.
+- Direction asymmetry — **open question #1 RESOLVED for the client (`[confirmed]`)**: the cipher has a
+  **single send-side caller**, so the client provably never inverts it on receive; inbound is
+  LZ4-decompress only. Only the *wire-semantics* generalization (were server→client payloads
+  enciphered server-side across all packet types?) stays capture-pending.
+- End-to-end confirmation against captures: **not yet performed.** `capture_verified: false` (for the
+  concrete server `n`/`e`, the `L1`/`L2` split, and the multi-packet inbound wire-semantics).
 
 ### 9.1 Campaign 7 re-confirmation (build 263bd994)
 
@@ -742,3 +775,38 @@ contradicted.** Two refinements were folded in from this build: the secure-conte
 string** whose account & password must each be **≥ 2 chars and below cap** (Section 6.1 / 6.6).
 Nothing in this re-confirmation overrides the Section 6b debugger-verified facts, with which it is
 fully consistent.
+
+### 9.2 Campaign 10 re-verification (build 263bd994, static-only)
+
+A **third** independent static pass on build 263bd994 re-confronted every load-bearing claim in this
+spec to the binary by control flow + operands. **No constant or structure was contradicted; no
+conflict was found.** Each of the byte-cipher facts (R = 3 rounds; forward ROL 3 / add countdown /
+fold feedback / `0x48`-complement whitening; backward ROL 4 / add countdown / fold feedback / XOR
+`0x13` then ROR 3; the remaining-length countdown; the per-sweep feedback reset), the header-only
+(length-8) pass-through at all three gates, the send-chain ordering (timestamp → cipher → compress →
+queue), the stock raw-block LZ4 (acceleration 1, inbound `0x2DA0`/11680 capacity), and the whole
+`0/0`→`1/4` RSA handshake (54-byte / `0x36` blob, `L1 + L2 = 42`, big-endian FLINT bignum digits with
+little-endian length prefixes, the two opaque stored-not-read 2-byte per-value headers, PKCS#1 v1.5
+type-2 padded to `modulus_bytes − 1` with `PS ≥ 8`, `c = m^e mod n`, big-endian serialize, then the
+per-dword `0x29` / selector-`0x40` whitening, then the normal send) were re-confirmed present with
+matching operands.
+
+This pass produced one **resolution** and two **provenance refinements** (none of which change a wire
+fact):
+
+1. **Open question #1 RESOLVED on the client side** (Section 5): the byte-cipher routine has **exactly
+   one cross-reference — the outbound send gate** (a positive single-caller proof), so it is
+   structurally unreachable on the receive path. The client's inbound stage is LZ4-decompress only.
+   The only residual is the *wire-semantics* generalization across multiple inbound packet types,
+   which is honestly `[capture-pending]`.
+2. **Staged-`M` width is parameter-driven** (Sections 6.1 / 6.6 / 6a / 8.1): statically the
+   staged-credential buffer is sized to the **password-field cap** (a caller-supplied argument), not a
+   hardcoded literal. The "17-byte" figure remains correct as the **debugger-observed runtime cap**;
+   implementers should treat the staged-`M` width as "the password field cap".
+3. **Bignum importer error-class tags** are FLINT-style library diagnostics raised on malformed input
+   (a "constructor"-class error with class codes) — provenance only, with **no wire effect**.
+
+Overall this campaign's confidence is **control-flow-confirmed static** for every byte-level constant,
+field offset, size, and routing fact; only the concrete server key values, the `L1`/`L2` split, the
+two server scalars' meanings, and multi-packet inbound wire-semantics remain `[capture-pending]`,
+exactly as the banner and Section 8.2 state.

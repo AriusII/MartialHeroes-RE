@@ -1,444 +1,253 @@
-# ROADMAP — CAMPAIGN 3 · `doida.exe`: Workflow · UI/UX · VFS
+# Docs/ROADMAP.md — Live Campaign Run Record
 
-> **Live run record for the project's single active campaign.** The *method* lives in
-> [`PLAN.md`](PLAN.md); this file is the *record* — phase statuses updated **in place** as waves land.
-> Fresh start by maintainer decision (G2): prior Cycles 1–4 + Campaign 2 live in git history and
-> `Docs/RE/journal.md`. Generic doctrine: [`CAMPAIGN_TEMPLATE.md`](CAMPAIGN_TEMPLATE.md).
->
-> **▶ RESUME ANCHOR (2026-06-14):** active campaign = **CAMPAIGN 7 — Re-anchor & Total IDB Legibility on
-> the NEW `doida.exe` build** (see the section directly below). The prior IDA database crashed
-> irrecoverably and was rebuilt from scratch on a **DIFFERENT build** (input sha256 `263bd994…6fd8ee` ≠ the
-> old `names.yaml` pin `63fcaf8e…9eb9df`) — so **all prior addresses are stale** and Campaign 6's
-> IDB-resident naming is gone. CAMPAIGN 6/4/3 are **paused**, their records preserved below for provenance.
-> **The World scene remains FROZEN.** No commit yet.
->
-> **▶ CAMPAIGN 9 landed (2026-06-15):** front-end fidelity — `Diamond::LoginWindow` + `Diamond::CharactersWindow`
-> total comprehension → 7 specs promoted → IDB annotated (104 names) → Godot wave (both scenes). Ran in
-> parallel to C7 on disjoint paths. **Load-bearing correction: the char-select "6-keyframe camera orbit" is
-> REFUTED — it is a single static camera + 2 manual inputs.** Build 0/0 · 1848 tests · clean-room PASS. See the
-> CAMPAIGN 9 section directly below. Uncommitted.
+> The dated, in-place record of every campaign run. The **method** is `Docs/CAMPAIGN_TEMPLATE.md`;
+> the **active charter** is `Docs/PLAN.md`. Update phase/block statuses **in place** as waves land.
+> Prior cycles live in git history + `Docs/RE/journal.md`.
 
 ---
 
-## CAMPAIGN 9 — LoginScene + CharactersScene: total comprehension → 1:1 Godot port (2026-06-15) ✅
+# CAMPAIGN 10 — Total Client Comprehension & Doc Re-Verification (`doida.exe`) (launched 2026-06-16)
 
-**Mandate (maintainer):** deeply understand the two front-end scene classes — `Diamond::LoginWindow` (2D
-UI/UX, asset management) and `Diamond::CharactersWindow`/`SelectWindow` (3D map000 scene: camera, UI, music,
-effects) — then update/improve both scenes in Godot from the findings. Scope chosen: EXHAUSTIVE comprehension
-+ IDB annotation + skinning + autonomous one-shot. Method specialises `CAMPAIGN_TEMPLATE.md`; plan file
-`~/.claude/plans/nous-voulons-pleins-d-agents-gleaming-dijkstra.md`.
+**Mandate (maintainer):** "Deploy lots of agents to deep-analyze the whole `doida.exe` client —
+how it is constructed and boots, what it does, the management of functions/modules/scopes, every
+scene (= window), with ultra-precise attention to the UI/UX (GUI) window construction, plus a deep
+refinement of the `data.vfs` pipeline. Don't trust the current docs — IDA Pro 9.3 (MCP) is the source
+of truth. Re-verify and rewrite the entire `Docs/RE/` to 100% certainty; then align the code."
 
-| Phase | What | Status |
-|---|---|---|
-| **0 — preflight** | IDA MCP + IDB doida.exe@263bd994 confirmed (`Diamond_LoginWindow_BuildScene`, `SelectWindow_*`); build baseline 0/0; `_dirty/campaign9/{login,chars,skinning}` | ✅ |
-| **A/B — comprehension** | READONLY sub-waves ≤3: LoginWindow 10 lanes + CharactersWindow 10 lanes + skinning 1 lane + VFS black-box 3 lanes. All landed; firewall clean | ✅ |
-| **Dbg — live confirms** | camera resting eye/target, SKIP-curtain branch, fog-OFF site — documented **debugger-pending** (needs maintainer F9); non-blocking | ⏸ deferred |
-| **C — promotion** | 7 specs rewritten (frontend_scenes, ui_system, sound, environment_bins, camera_movement, skinning, login_flow); firewall PASS | ✅ |
-| **D — IDB annotation** | 1 serialized writer: 104 renames + 147 comments + 4 struct types; sub_ −95; 0 lib symbols touched; IDB not committed | ✅ |
-| **E — Godot wave** | 6 lanes: env area-0 truth (fixes "too dark"), row-Y from ground, static camera + 2 inputs + 3D ray-pick hit-test (+ dead 6-pose-button scaffolding removed), login curtain-slide/version-gate/eager-preload, BGM moved to char-select, skinning spec-aligned (mesh-explosion already retired) | ✅ |
-| **R — gates** | build 0/0 (incl. `--no-incremental`) · `dotnet test` **1848/0** · clean-room **PASS** · headless boot clean · render-review (env-limited screenshots) | ✅ |
-| **Z — consolidation** | journal + ROADMAP + memory updated | ✅ |
+**Master deliverable:** `Docs/RE/specs/client_architecture.md` — the top-level synthesis (entry →
+init scopes → `GameState` scene machine → window framework → VFS/resource pipeline → frame loop),
+cross-linking every re-verified subject spec.
 
-**Key recovered truths:** LoginWindow = font slot 0 universally · no atlas cache/ref-count (eager preload of 4) ·
-curtain = 2-panel vertical slide +5px/tick · substate set {1–6,29–41}=19 · PIN Fisher-Yates scramble-on-show
-≤4 → 2nd-password TAB token. CharactersWindow = **single static camera (anchor +2048,0,−6144; FOV 50)** + boom-zoom
-±10/s + actor-yaw ±2 rad/s · slot select = 3D ray-pick (5 AABBs ±6 X/Z, Y 70..92) · env keyframe-29 PINNED with
-inert ambient table → real fill = white OPTION_BRIGHT floor (achromatic "dark stone temple"), fog OFF · single
-XEffect 380003000 · char-select BGM 920100200 single-voice (double-voice REFUTED) · create 1/6, slot-select 1/7,
-class map {0→4,1→1,2→3,3→2}, gear server-assigned. Skinning = quaternion LBS, inverse-bind computed, .mot 10fps
-lerp+slerp, single uniform handedness conversion.
+**Out of scope (deferred):** the game server; live debugger / capture confirmation; blanket-naming
+all ~19k unnamed functions.
 
-**FOLLOW-UP:** (1) `names.yaml` sync of the 104 campaign9 IDB names (staged `_dirty/campaign9/applied/`; via
-`ida-naming-sync`); (2) Phase-Dbg live confirmations; (3) wire the new `CreateCharacterRequested` Godot signal
-to the Application create use-case. **Uncommitted on campaign3 (targeted-paths commit on maintainer request).**
-
-### CAMPAIGN 9 — WAVE 2 (screenshot-grounded, 2026-06-15) ✅
-
-Maintainer supplied official-client screenshots (login/PIN/server-list/char-select/4×creation) as the visual
-oracle and flagged three behaviours my Wave-1 pass got wrong. IDA (source of truth) re-investigated and
-**reversed two over-corrections**:
-
-- 🎥 **Camera = ENTRY DOLLY KF0→KF1** (~2.0 s pos-lerp + orient-slerp on scene-enter, then holds KF1=(512,87,−9652)),
-  NOT static and NOT a full orbit. The Wave-1 "static camera" reading analysed the bare projection camera (+6200)
-  and missed the camera-PATH rig (+6204). Implemented in `CharSelectCameraRig`.
-- 🔴 **Flying blue/red pixels = D3D9 point-sprites** (no Godot equivalent): red=brazier fire, blue=waterfall. Fixed
-  in `XeffSceneEffect` (alpha-blended camera-facing billboards; untextured emitters dropped). **No scene point-lights** —
-  the warm glow is the additive fire texture (the Wave-1 warm-omni rig was removed).
-- 🎵 **Double-music is REAL** (loading-screen BGM 920100100 cat-0 loop) — the Wave-1 "refuted" was wrong. The port
-  already guards it (idempotent `PlayBgm`, never plays 920100100; the new Loading screen stops it before char-select).
-- **No-char → 5 BLANK slots** (creation on `@BLANK@`-confirm, not auto); **creation = SAME cell** d000x10000z9990
-  (carved wall `suksang*` + portal baked); **class descriptions = `data/script/npc.scr`** keys 1-4 (real CP949,
-  two-witness CONFIRMED); the **Loading screen** (`Diamond_LoadingWindow`, state 2) was fully recovered.
-
-**Godot delivered (disjoint-file lanes, build 0/0):** login z-order vs screenshot · PIN keypad 2×5 + server-list
-parchment · char-select 2D chrome + creation 3-column form · camera entry-dolly · flying-pixels billboard fix ·
-lighting corrected · creation carved-wall backdrop · actors on the platform (Y≈70) · the **Loading screen**
-(bg rand()%3 + fill bar 223·pct/100 + BGM) · real **npc.scr CP949 class descriptions**.
-
-**Specs re-corrected (firewall PASS):** `frontend_scenes.md` §3.5 (dolly), §3.6.1/§3.6.6 (billboard FX, no point-lights),
-§3.7.6 (creation same cell), §3.8.1 (double-music real), §4.1.1 (npc.scr description source), new §2L (loading screen);
-`sound.md` (920100100 cat-0 loop); `camera_movement.md` §A.5.2 (→ dolly); `config_tables.md` §2.17.3 (npc.scr table).
-**Uncommitted on campaign3.**
-
----
-
-## CAMPAIGN 7 — Re-anchor & Total IDB Legibility on the NEW `doida.exe` build (IDA-only)
-
-**Mandate (maintainer, 2026-06-14):** the prior `doida.exe` IDB crashed unrecoverably; a fresh IDB was
-rebuilt (auto-analysis + `decompile_all`). Work **EXCLUSIVELY in IDA Pro** (the `ida` MCP) — rename /
-comment / type only, **never patch**. Re-establish full IDB legibility on the new build by **re-anchoring
-the prior corpus by CONTENT** (the addresses no longer transfer), then comprehending the residual. Reuse
-the Campaign-6 apparatus; deploy a large agent fleet (~80–100 deployments) with heavy IDAPython batching.
-Method/charter: `PLAN.md` (CAMPAIGN 7) + plan file `~/.claude/plans/tr-s-bien-je-vais-melodic-sketch.md`.
-
-**The decisive different-build fact (Phase 0, verified live this session):**
-- New `doida.exe` · input **sha256 `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`**
-  · md5 `a1437026…` · imagebase `0x400000` · `.text` `0x401000–0x71e000`.
-- **≠ the old pin** `63fcaf8e…9eb9df`. **All 14 sampled prior-anchor addresses miss** (not function starts,
-  unnamed). → **addresses do NOT transfer**; a blind `names.yaml`-by-address apply would mislabel ~3,417
-  functions (forbidden). The fast "restore by address" path is dead.
-- **Content DOES transfer** (verified): **459 RTTI `.?AV` class descriptors** (incl. exact `.?AVNetHandler`);
-  signature strings (`items.scr`, `bgtexture`, `actormotion`, `skin.txt`, `bindlist`, `data.vfs`, `.ted`);
-  library markers (`Vorbis`, `XTrap`, `Lua`, `D3DXMatrix`). Unpacked PE, hexrays ready.
-- **Live census:** **25,791 functions** — 1,688 auto-named — 1,901 FLIRT library — **22,202 unnamed `sub_`
-  = the work scope** — 4,800 strings — 6 segments.
-- Reuse dictionary/oracle: the prior corpus (`names.yaml` 3,417 entries + campaign6 glossaries ~3,007) as a
-  **content-anchored name dictionary** (addresses discarded) + the committed clean specs (≈37 specs / 32
-  formats / 10 structs / 71 packets / 193 opcodes) as the comprehension oracle.
-
-**Scale model:** ~80–100 deployments across ~6 waves; **≤3 concurrent IDA readers / exactly 1 serialized
-IDB writer**. Depth = **deep / ROI-aware** (re-anchor + comprehend all high-value + bulk-tag lib noise; the
-long leaf/thunk/STL tail is NOT chased — it plateaus ~3k, per Campaign 6). **Autonomous with ONE
-checkpoint** before the first mass IDB write. Genuine **version-deltas** vs the committed specs are promoted
-clean (Phase S). End-state: `names.yaml` re-pinned to `263bd994…`.
-
-| Phase | Status |
-|---|---|
-| **0 Pre-flight & setup** | ✅ DONE — MCP UP; new SHA pinned & asserted ≠ old; census (22,202 `sub_`); `_dirty/campaign7/` tree created; apparatus inventoried. |
-| **A Cartography & feature dumps** | ✅ DONE — RTTI harvest (431 classes) + profile_all over 23,811 (+const histogram) + string-xref/import indexes + callgraph (62,393 edges) → `_dirty/campaign7/`. |
-| **T Tooling** | ✅ DONE — `content_reanchor.py` (string/RTTI/const matcher) + `cg_propagate.py` (BinDiff-style call-graph propagation) + filter/QA/census/build scripts in `_dirty/campaign7/tools/`. |
-| **A′ Re-anchor matcher** | ✅ DONE — 728 HIGH (RTTI-deterministic) @ 0% FP / 56 audited. |
-| **🔶 CHECKPOINT** | ✅ DONE — re-anchor report + dry-run (728/728 would-apply, 0 TRIPWIRE) presented; maintainer GO = "apply + Phase B spec-guided". |
-| **D0 Anchor-apply (serialized WRITE)** | ✅ DONE — **721 applied** (7 `j_` thunks skipped), 0 fail, TRIPWIRE 0, read-back OK, IDB saved. |
-| **B Comprehension / re-anchor (residual)** | ◑ AUTO-PHASE SATURATED — B1 call-graph propagation **+1,122** (margin≥0.16, audited, floor band demoted); MED-verify **+322** of 504 (ground-truth ctor check); ctor-QA fixed **11** wrong-class ctors; B2 expanded re-run = saturated (Panel-ctor blind spot). **Manual spine comprehension of ~1,057 unplaced names = open worklist.** |
-| **C Reconcile HARD GATE** | ✅ DONE (rolling per-batch) — neutrality + adversarial audit gated every write; no batch applied without a clean dry-run + FP check. |
-| **D Serialized annotation** | ✅ DONE (batches) — cumulative **≈2,176 re-anchored & applied**; named census ≈4,574; TRIPWIRE 0; exactly one writer throughout. |
-| **S Spec-delta promotion** | ✅ DONE — 5-lane spec-author promotion (firewall PASS): opcodes.md (~120 S2C handler roles + 2 new opcodes), NEW specs/network_dispatch.md (S2C dispatch architecture + NetClient lifecycle), crypto.md (cipher/RSA reconfirmed + secure-ctx 0x2E20 + tab login), packets/5-53 (32B vitals/pair), resource_pipeline.md (VFS runtime). Deltas flagged: 5/28 position in-body, 4/143-4 observed. |
-| **E Sync-back** | ✅ DONE — durability via NEW committed-tree **`Docs/RE/names.build2.yaml`** (re-pinned `263bd994…`, 2,591 fns + 19 globals, neutrality PASS); `journal.md` CAMPAIGN-7 entry appended. Old `names.yaml` left intact (curated); merge/re-pin decision surfaced to maintainer. |
-| **R/Z Re-census & verify** | ✅ DONE — firewall PASS (0 pseudo-C in committed files, no `_dirty/` tracked); census recorded; ROADMAP updated. |
-
-**FINAL STATE (2026-06-15):** the new-build IDB is legible at **≈4,685 user/FLIRT-named functions of 25,791** (≈2,467 canonical game + 848 library-tagged), all gains adversarially audited with **0 surviving structural FP** and **TRIPWIRE 0** throughout. Path: content re-anchor (721 RTTI + 1,122 call-graph propagation + 322 verified-MED + 11 ctor-fixes) → à-fond residual waves A1/B/C/D (+385 placed; **~509 mislabeled-library priors correctly REFUTED**) → **two ~20-agent fan-out Workflows: Wave E (+207, the full S2C handler family `Smsg*` + scene singletons) and Wave F (+138, highest-value unnamed game functions)**. **Durability + merge done:** `Docs/RE/names.yaml` re-pinned to `263bd994…` — **3,315 functions + 19 globals**, neutrality PASS; old build-1 corpus preserved in git history (8918ece). Remaining = the low-ROI tail (leaf/thunk/STL) + rtti-MED ctor variants (63) + optional spec-promotion (Phase S) of the recovered S2C/crypto/vfs interop knowledge. No commit yet (awaiting maintainer).
-
-**16-cluster taxonomy** (reused from Campaign 6, re-clustered for the new build): C01 rtti-class-core · C02
-net-transport · C03 net-dispatch · C04 crypto · C05 vfs-assetio · C06 asset-parsers · C07 anim-skinning ·
-C08 render-pipeline · C09 scene-machine · C10 ui-toolkit · C11 ui-hud · C12 actor-combat · C13
-world-systems · C14 lua-config · C15 sound-input · C16 misc-residual + LIB 3rd-party.
-
-**Dirty namespace:** `Docs/RE/_dirty/campaign7/{rtti,profile,anchor,cartography,comprehension/<cluster>,glossary,applied,census,tools}/`.
-
----
-
-## CAMPAIGN 6 — Total IDB Legibility: name/comment/type the whole `doida.exe` (IDA-only)
-
-> ⏸ **PAUSED — superseded by CAMPAIGN 7.** Its IDB-resident naming was lost when the database crashed; the
-> work survives as the `names.yaml` corpus + `_dirty/campaign6/` glossaries, which CAMPAIGN 7 re-anchors
-> onto the new build. Record preserved below for provenance.
-
-**Mandate (maintainer, 2026-06-14):** work **EXCLUSIVELY in IDA Pro 9.3** (the `ida` MCP) on `doida.exe`.
-Deep-analyse the whole client; rename functions, globals, classes, struct fields, locals; add comments;
-recover & apply struct/enum/RTTI types; consolidate the IDB into a workspace "au petits oignons". Deploy a
-large agent fleet (~75 deployments) + heavy IDAPython batching. `doida.exe` is the source of truth.
-Method/charter: `PLAN.md` (CAMPAIGN 6) + plan file `~/.claude/plans/dans-ce-plan-on-tranquil-panda.md`.
-
-**Scale model (maintainer-chosen):** ~75 agent *deployments* across ~6 sequential waves; at any instant
-**≤3 concurrent IDA readers / exactly 1 serialized IDB writer**. **Wave-by-wave with checkpoints.** Depth =
-"complet pragmatique" (names + comments + struct/enum/RTTI **types + prototypes**; struct fields & call-site
-args auto-named by type propagation; semantic locals only on the `complex` hot-set).
-
-### Evidence baseline (Phase 0, live this session) — supersedes the stale "4,897 named" figure
-- `doida.exe` · sha256 `63fcaf8e…9eb9df` (== `names.yaml` pin) · md5 `81634fe4…` · imagebase `0x400000`.
-- **Live census:** 25,973 functions — **2,993 named** (~1,905 MSVC/CRT library, *never* renamed) —
-  **≈ 21,075 anonymous `sub_` = the work scope** — 3,599 strings, 6 segments, MSVC RTTI present.
-  (Prior campaigns' IDB writes are largely absent from the current i64; **21,075 `sub_` is the true
-  denominator** — risk C6-R8 realised, so all coverage % measure against this live number.)
-- Oracle = the committed clean specs (≈37 specs / 31 formats / 10 structs / 70+ packets). Every proposed
-  name aligns with already-promoted terminology; it extends, never contradicts.
-
-| Phase | Status |
-|---|---|
-| **0 Census / Pre-flight** | ✅ DONE — MCP UP on `?ext=dbg`; SHA == pin; denominator pinned at ≈ 21,075 `sub_`. |
-| **A Cartography** (Pass 1 profile + Pass 2a RTTI → cluster into 16) | ✅ DONE — 22,273 unnamed profiled; **431 RTTI classes** (~1,290 vtable fns) recovered; call-graph (62,410 edges) dumped; partitioned into 16 clusters by anchor/RTTI/import/string seeds + call-graph propagation. C01=1,120 · net C02+C03=67 *(spine already named in C2)* · C11/C16 lumpy (refine before W4/W6). See `_dirty/campaign6/cartography/overview.md`. |
-| **B Comprehend — W1: C01 rtti-class-core · C02 net-transport · C03 net-dispatch** | ✅ DONE — 3 lanes: C01 manifest **1,488** proposals (vtable fns + 615 ctors) + the GU 14-slot semantic map (onDraw/onEvent/onUpdate/hitTest/computeTransform/…) inherited by ~400 widgets + net remainder (mostly STL; the net spine was already named in C2). |
-| **C Reconcile + firewall gate (W1 glossary slice)** | ✅ DONE — gate-passed `glossary.yaml` = **1,551** fns; **288** GU placeholders upgraded to behavioural names; 318 name dups resolved; **0 neutrality violations**. |
-| **D Annotate IDB (W1, serialized dry-run → apply)** | ✅ DONE — dry-run reviewed → applied **1,537** names+comments; **0 failed**; 1 conflict + 13 runtime safely skipped; IDB saved. |
-| **R/Z W1 — re-census + sync + checkpoint** | ◑ re-census PASS — confirmed **1,537** named; **TRIPWIRE = 0 library renamed**; `still_default`=14 (skips). **`journal.md` + `names.yaml` full sync DEFERRED to commit** (IDB is the live source of truth; concurrent writer touched journal). ⏸ awaiting go for **W2 (crypto/VFS/parsers)**. |
-| **W2 — C04 crypto · C05 vfs · C06 parsers** | ✅ DONE — applied **277** names (cumulative **1,815** confirmed; TRIPWIRE 0 lib-renamed); structs recovered & staged for a type pass (secure-ctx 0x2E20, DiskFile 88B, VfsEntry 144B, GHTex 76B, game.ver, wind.bin). **KEY FINDING:** the unnamed mass is heavily **statically-linked 3rd-party libs** — FLINT bignum (~232, the RSA substrate, now tagged), CxImage codec (~400), Lua, zlib, Boost, XTrap, BugTrap. Cartography over-attributes them via call-graph propagation. |
-| **L Library-ID + re-cluster** | ✅ DONE — **572** 3rd-party fns identified (CxImage/STL/FLINT/Boost/Lua/libjpeg/XTrap); **132** newly tagged `<Lib>__`; lib set excluded from game clusters. **Finding:** the big buckets (C11 ui-hud ~5,941 · C16 residual ~8,930) are GAME-code mis-clustering (UI propagation), **not** libs — handled by per-lane analyst flagging (proven W1/W2), not exclusion. Cumulative confirmed **1,938**; TRIPWIRE 0. |
-| **W3 — C07 anim · C08 render · C09 scene** | ✅ DONE — applied **158** (C07 91: PoseNode/`AnimCatalog_ResolveModelClassId` + structs BndBone 72B/PoseNode 88B/SkinWeight36; C08 52 + 663 render leaves family-tagged for a later accessor pass; C09 19 + structs GameState/EngineView/TickScheduler + C2S opcodes 2/0x70,2/0x89,2/0). Cumulative **2,097**; TRIPWIRE 0. **Diminishing returns confirmed** — C09 was ~1,250/1,522 propagation noise. |
-| **T Struct-type pass** | ✅ DONE — **12 structs** declared in the TIL (GameState/EngineView/PoseNode 88B/BndBone 72B/SkinWeight36/Diamond_GUComponent 208B/Diamond_DiskFile 88B/VfsEntry 144B/GHTex/SecureContext 0x2E20/RsaKeyPair/Bignum); **110 functions** this-typed (DiskFile 42·EngineView 22·GUComponent 21·PoseNode 15·BndBone 8·GameState 2); **4 globals** typed (g_GameState/g_EngineView/g_VfsTocBase/g_VfsTocCount). Decompiler field-propagation verified. 0 failures. |
-| **W4 — C10 ui-toolkit · C11 ui-hud · C12 actor-combat** | ✅ DONE — applied **100** (C10 28: GUScroll/GUScrollEx + GUTextureList/GUCmdHandler structs; C11 49: chat slash-cmd interpreter + 1000×36B chat ring + 5×8 trade grid; C12 24: actor-sim + ActorBuffArray 30×12 + SkillActionRecord 1468B + **closed actor.md level@+0xBA**). Cumulative **2,197**; TRIPWIRE 0. Plateau confirmed (C11 = ~185 genuine of 5,941). **New 3rd-party lib found: libVorbis 1.3.2 (~115 fns @0x6dd000-0x6f2fff)** — to tag. |
-| **Consolidation** | ✅ DONE — **2,110** names synced to `names.yaml` (cumulative ~2,513); CAMPAIGN 6 entry appended to `journal.md`. (W4's +100 pending a re-sync at commit.) |
-| **W5 — C13 world · C14 lua · C15 sound + libVorbis** | ✅ DONE — applied **522** (C13 80 world/NPC/quest + ItemSlotRt/QuestTemplateRt; C14 31 lua_tinker glue + **391 LIB-Lua VM**; C15 20 sound/input + settings persistence) + **libVorbis 1.3.2 = 273** band-tagged. `names.yaml` re-synced (+895 → ~3,417 total); `journal.md` updated. |
-| **Campaign 6: HIGH-VALUE NAMING COMPLETE** | ✅ ~**2,992** functions named/tagged (5 waves + library-ID + struct types: 12 structs / 110 this-typed / 4 globals); **TRIPWIRE 0** throughout. All 15 game clusters + 3rd-party libs (FLINT/CxImage/Lua/libVorbis/zlib/libjpeg/STL/Boost/XTrap) identified. **Remaining:** C16 residual ~8,900 low-value leaf/thunk/STL tail (optional bulk auto-name) + git commit (⚠ entangled tree — targeted only). |
-
-**16-cluster map & coverage targets** (full table in the plan file): C01 rtti-class-core, C02 net-transport,
-C03 net-dispatch (W1) → C04 crypto, C05 vfs-assetio, C06 asset-parsers (W2) → C07 anim-skinning, C08
-render-pipeline, C09 scene-machine (W3) → C10 ui-toolkit, C11 ui-hud, C12 actor-combat (W4) → C13
-world-systems, C14 lua-config, C15 sound-input (W5) → C16 misc-residual + locals (W6). Cumulative
-function-name coverage targets: **W1 ~19% · W2 ~36% · W3 ~56% · W4 ~79% · W5 ~97% · W6 ~100%.**
-
-**Dirty namespace:** `Docs/RE/_dirty/campaign6/{cartography,profile,rtti,comprehension/<cluster>,debugger,glossary.yaml,applied,census}/`.
-
----
-
-## CAMPAIGN 4 — Front-End Fidelity: Login · PIN · Server-List · Char-Select (1:1 with the official client)
-
-**Mandate (maintainer, 2026-06-14):** stop the World scene; refocus entirely on making the very first
-scenes (Login → PIN/2nd-password → Server-List → Character-Select) **pixel-faithful to the official
-client** (reference screenshots supplied). Pull everything from the VFS and `doida.exe` — understand how
-the UI/UX, VFX and SFX are assembled/linked/used — and **rework the Godot front-end cleanly to match**.
-Deploy many phases / orchestrators / agents in parallel.
-
-| Phase | Status |
-|---|---|
-| **FE-1 Recovery** (doida scene composition + VFS textures + VFS audio/VFX) | ✅ DONE — 2 window classes + 1 modal; the widget-factory convention `(texId,X,Y,W,H,srcUV…)` cracked; atlas DDS inventory (`loginwindow.dds`, `password.dds`, `characwindow.dds`, `openning_scenario.dds`, …); BGM 920100200, UI SFX 861010101; the **red ribbon = the OpeningWindow intro crawl**, not a login effect; `.xeff` parser bug found. |
-| **FE-2 Recovery (exact layout)** | ✅ DONE — the complete per-widget screen-rect + source-UV-rect dump (Login 74 widgets, PIN modal+keypad, Server-List rows, Char-Select slots/buttons); the SFX-event map (GUButton plays nothing; the owning window does); the ribbon mechanism (vertical crawl 30 px/s + slideshow); the front-end captions pulled from `msg.xdb`. |
-| **FE-3 Promotion** | ✅ DONE — `frontend_scenes.md §11` (pixel-exact rebuild contract), new `formats/msg_xdb.md` + `specs/intro_sequence.md`, refined `sound.md §15` + `effects.md §A.15`. Firewall PASS (no addresses, no literal Korean — captions resolve from the VFS at runtime). The `.xeff` parser fixed (header 8→32B; char_select/zone_sel parse; +28 tests). |
-| **FE-4 Faithful Godot rebuild** | ◑ IN PROGRESS — LoginScreen (12 faithful layers §11.2), PinModal (§11.3 Fisher-Yates keypad), ServerSelectScreen (§11.4), CharacterSelect (§11.5) rebuilt from the spec; `MsgXdbCatalog` (CP949) wired so labels read real text from `msg.xdb`. **Full build 0/0**; login screenshot now shows the real stone chrome + background art + gold buttons (major step up from the placeholder). **Next:** PIN/server-list/char-select screenshots; wire BGM 920100200 + SFX 861010101; the cursor; the front-end VFX (`zone_sel`/`char_select` xeff → Godot); the intro crawl; per-scene fidelity polish vs the official. |
-| **FE-5 VFX/SFX + intro** | PENDING — front-end particle effects, audio, the OpeningWindow intro. |
-| **FE-R Render-fidelity review** | PENDING — `godot-render-reviewer` screenshots vs the 4 official references. |
-
----
-
-## Mandate (maintainer, verbatim)
-
-> « On veux poursuivre les travaux pour faire les travaux qui sont de REVERSE le client de jeu
-> "doida.exe" dans IDA et meme si on a besoin tu peux partir en "debugger" avec IDA. On veux donc
-> poursuivre la gestion de le WORKFLOW, que ça soit le démarage du CLIENT de jeu, et faire attention
-> à la partie UI/UX (GUI) et poursuivre proprement les configurations de la partie "UI" du jeu. et
-> ensuite poursuivre la compréhension et ajustement des travaux pour lire le "VFS" et les fichiers
-> (format de fichiers) à l'intérieur ainsi que leurs liaisons leurs fonctionnement. Il faut
-> poursuivre très très fortement les configurations et aller vraiment plus loin, et donc poursuivre
-> le reverse. »
-
-**Theme:** deep reverse of the workflow / UI-UX / VFS gaps → clean specs → annotated IDB → wired
-client. **Scope (G1):** Reverse + Specs + Client (full pipeline). **Lead (G4):** CAMPAIGN 3 owns IDB
-naming. See `PLAN.md §1`.
-
----
+**Command structure:** Tier-1 (main session) drives phase sequencing + gates + the Tier-1 serialized
+files. Tier-2 `re-cleanroom-orchestrator` (per-block dirty→spec RE) and `re-annotation-orchestrator`
+(Phase-D IDB writes). Research/engineering fan-outs run via the `Workflow` tool over the §13 fleet.
 
 ## Evidence baseline (Phase 0)
+- **IDB:** `doida.exe` SHA `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`;
+  imagebase `0x400000`; image `0x64d000`; **25,792 functions** (4,801 named / 1,901 lib /
+  19,090 unnamed); entry `start` @ `0x66959c`; 4,800 strings. `names.yaml` pinned to this build.
+- **Tool baseline (2026-06-16):** IDA MCP **UP** · build **0 err / 1 pre-existing warn**
+  (`RealWorldRenderer.cs:1058` CS8600, Godot, not from this campaign) · tests **1855 green / 0 fail /
+  0 skip** (10 suites) · VFS reachable.
+- **Corpus to re-verify:** 37 `specs/` + 32 `formats/` + 10 `structs/` + ~80 `packets/` + `opcodes.md`.
 
-- **Binary:** `doida.exe` · sha256 `63fcaf8e81a6…9eb9df` (== `names.yaml.binary.sha256`) · md5
-  `81634fe4d6b0667ea23a184ab2a90e2e` · imagebase `0x400000` · image size `0x64d000` · 831 segments ·
-  entry `start`.
-- **Function census (post-Campaign-2):** 25,973 total — **4,897 named**, **21,076 unnamed (`sub_`)**,
-  ~1,905 library. 3,904 strings.
-- **`names.yaml` state:** **380** address→name mappings (361 functions + 19 globals) from Campaign 2's
-  spine clusters. CAMPAIGN 3 grows this into the new clusters.
-- **Recovered baseline:** boot→login→PIN→char-select workflow ~95%; login/char-select UI ~95%; VFS
-  container + 16 format specs (23 extensions) confirmed. See `PLAN.md §0`.
-- **Tools:** IDA MCP **UP** on the dbg-extended endpoint; `dotnet build` / `dotnet test` to be greened
-  at pre-flight; VFS reachable via `Assets.Vfs`.
-
----
-
-## Known blockers & open questions (carried into the waves)
-
-| # | Item | Target phase | Note |
-|---|------|--------------|------|
-| OQ-1 | ~~Opcode `1/6` collision~~ — **RESOLVED in Phase A (static):** `1/6` is char-create only; the login credential is a distinct sub-opcode (PIN = its optional blob). The "collision" was a 52-byte size coincidence. | ~~B1/Dbg~~ → **C** | Only residual: protocol-spec lane re-checks the capture's major/minor bytes before rewriting the spec. |
-| OQ-2 | **In-game HUD coordinates** — inventory/chat extracted in B2; **5 panels** (stats/minimap/party/skill/trade) blocked on a Phase-D `define_func` over the undefined HUD-build blob. | B2 ✅ partial → D → E(05) | Inventory W=732 right-anchored, chat 290×18; buff bar data-driven via `buff_icon_position.xdb`. |
-| OQ-3 | **Char-select preview camera** — Canvas3D framing; B2 found **6 keyframes**, interpolation law UNVERIFIED. | B2 → **Dbg** → C | Needs the live debugger to confirm which keyframe shows + the easing. |
-| OQ-4 | ~~`environment_bins` semantics~~ — **RESOLVED in B3:** fog 192B colour table, sky.box 20B vertex stride, 48-slot 86400 s day cycle; env hub = sky-colour-table singleton. | B3 ✅ → C | Water = render-pass concern (C5), no asset-IO loader. |
-| OQ-5 | ~~`actormotion.txt` col3–14~~ — **RESOLVED in B3:** int/float column types authoritative; two 9-element directional sub-arrays; 15 fps X/Y rates. | B3 ✅ → C | New `formats/actormotion.md` in Phase C. |
-| OQ-6 | **Lua pipeline** — `game.lua`/`uiconfig.lua` entry + config keys + table layouts. | **B4** → C | Phase A: Lua is **statically linked** (its `.rdata` "imports" are string literals). |
-| OQ-7 | **Scheduler now-ms split** — Campaign-2 deferred; debugger lane recommended. | **B5** → Dbg | Lock the comment only after debugger confirm. |
+## The "100% sure" gate — verification banner (added to every touched doc)
+`verification: confirmed | sample-verified | static-hypothesis | capture/debugger-pending` +
+`ida_reverified` + `ida_anchor: 263bd994` + `evidence` + `conflicts`. Phase-R fails any touched doc
+without it. (Schema in `Docs/PLAN.md`.)
 
 ---
 
-## Phases
-
-Each phase: ÉTAPES / OBJECTIFS / Tier-2 owner / done-when. Statuses updated in place.
-
-### Phase 0 — Mandate & Pre-flight — **STATUS: ✅ DONE (2026-06-13)**
-*Owner: Tier-1 (main session).*
-- [x] Mandate captured (above).
-- [x] IDA MCP green on `?ext=dbg`; `D:\IDAPro\doida.exe.i64` open, hexrays ready, imagebase `0x400000`,
-  auto-analysis ready (`server_health` OK, uptime confirmed).
-- [x] `dotnet build MartialHeroes.slnx` **0 warning / 0 error** (13.5s). `dotnet test` deferred to Phase R
-  (no C# touched until Phase E).
-- [ ] VFS reachable (`Assets.Vfs`) — verified on demand during Phase B3 / Phase E.
-- [x] Evidence baseline recorded (above).
-- [x] Single-writer rules confirmed (one IDB writer, `names.yaml`/`journal.md` Tier-1-only).
-- [x] `_dirty/campaign3/{cartography,comprehension,debugger,applied}/` namespace — created by Phase A.
-- **DONE-WHEN:** pre-flight checklist green; master deliverables named (`PLAN.md §7`). ✅
-
-### Phase A — Cartography refresh — **STATUS: ✅ DONE (2026-06-13)**
-*Owner: `re-cleanroom-orchestrator` (READONLY, bounded to dirty cartography — no spec promotion this phase).*
-- Re-mapped the `doida.exe` spine from the Campaign-2 named anchors; located + tagged the B1–B6 anchors.
-- 6 READONLY lanes in 2 sub-waves of 3 (`re-static-analyst` ×5 + `ida-script-author` ×1). No IDB writes.
-- **Backlog:** B1 workflow-spine (HIGH, 3 lanes) · B2 ui-window+HUD (HIGH/MED, **heaviest**, 2 lanes) ·
-  B3 vfs-assetio (HIGH, 2 lanes) · B4 lua (HIGH, 1 lane) · B5 sound+combat (HIGH, 2 lanes) · B6
-  terrain-stream (HIGH, 1 lane). **Total ~9–10 Phase-B Tier-3 lanes.**
-- **Headline — OQ-1 dissolved statically:** the `1/6` "collision" premise is **false per the binary**.
-  `1/6` is **char-create only** (single emitter, single readable phase branch); the login credential is
-  a **distinct sub-opcode** on the auth/secure path whose optional field is the PIN/second-password blob.
-  "Both 52 bytes" is a size coincidence. *Caveat (→ Phase C):* the protocol-spec lane must re-check the
-  motivating capture's actual major/minor bytes before any spec rewrite.
-- **10 CONFLICT flags reconciled** (carried to Phase B/C) — e.g. a HUD-build blob is **undefined code**
-  (needs `define_func` before coordinate extraction); a seed "VFS open worker" is an MSVC GS-cookie stub
-  (drop it); Lua is **statically linked** (its `.rdata` "imports" are string literals); the SOUND_* tab
-  table is a dev serializer, not a runtime parser; combat scheduler is a linear active-list walk.
-- **Phase-Dbg targets reduced:** B5 now-ms deadline split (`Time_GetMs`→`timeGetTime`, confirm the gate
-  live) and B2 char-select preview-camera matrices. B1 needs no debugger (only the capture re-check).
-- **DONE-WHEN:** ✅ backlog + reconciled CONFLICT register under `_dirty/campaign3/cartography/`
-  (`overview.md`, `cluster-backlog.md`, `b1`–`b6` lane files, `scripts/b4_lua_census.py`).
-
-### Phase B — Deep comprehension (lanes B1–B6) — **STATUS: ✅ DONE (all 6, 2026-06-13)**
-*Owner: `re-cleanroom-orchestrator` (READONLY, IDA sub-waves of ≤3). Two sub-waves: B1/B2/B3 (mandate
-priorities) then B4/B5/B6. ~11 Tier-3 lanes; zero IDB writes; ≈410 manifest entries.*
-- **B1 workflow-spine-deep — ✅ DONE.** Login = **sub-opcode 0x2B** (account len-prefixed + optional
-  PIN/second-password + RSA PKCS#1 v1.5 17-byte plaintext; `account\tpassword\tPIN\thost:port`
-  contract); PIN keypad → `BillingState+72`; scene sub-state table (connect→form→server-list→select
-  →submit→enter-load); char-mgmt family (1/0 logout · 1/6 create 52B · 1/7 select · 1/9 enter 40B ·
-  1/13 rename · 1/14 move). OQ-1 confirmed dissolved.
-- **B2 ui-window-manager + HUD — ✅ DONE.** `MainWindow("MainMaster")` IS the window manager;
-  GUComponent/GUPanel/GUWindow byte-offset field tables; HUD coords extracted (inventory W=732
-  right-anchored, chat 290×18); **202 widget ctors named from RTTI**; C3 resolved (`buff_icon_position.xdb`).
-  *Caveat:* 5 HUD panels' coords live in an undefined-code blob → blocked on a Phase-D `define_func`.
-- **B3 vfs-assetio-deep — ✅ DONE.** 144-byte TOC stride pinned; **RAW/uncompressed verdict** (no
-  codec); 3-way open-mode flag table; `actormotion.txt` col3–14 resolved (int/float types, directional
-  sub-arrays); fog/sky/cloud/star formats tabulated. C4 GS-cookie false anchor dropped.
-- **B4 lua-scripting — ✅ DONE.** One process-wide **statically-linked Lua 5.1.2 VM** (lazy open; the
-  only C binding is `cpp_load`; no gameplay objects exposed); config globals `vfsmode`/`launcher`/
-  `debugmode`. **N-B4-2 (load-bearing): Lua text tables decode as UTF-8, NOT CP949.**
-- **B5 sound-effects + combat-timers — ✅ DONE.** Sound = OGG play-by-kind (2D/3D, distance²-culled);
-  combat = one now-ms/frame → 4 linear-walk managers (NOT a heap), +48 start-gate vs +64 elapsed-origin
-  reconciled, death FSM 11 states.
-- **B6 terrain-stream — ✅ DONE. N-B6-2 (load-bearing): streaming is SYNCHRONOUS per-frame ring-shift;
-  the async worker/FIFO is dormant compiled-in scaffolding.** Fixed cell ring (3×3≤1000/5×5>1000),
-  25-object pool, `.lst` key = mapZ + 100000·mapX.
-- **DONE-WHEN:** ✅ all 6 lanes — dossiers + `names.proposed` + `comments.proposed` under
-  `_dirty/campaign3/comprehension/`; conflicts flagged (10 from A + 4 from B1–3 + 4 from B4–6).
-
-### Phase Dbg — Debugger confirmation — **STATUS: ◑ IN PROGRESS (B1a ✅ 2026-06-13)**
-*Owner: Tier-1 via the live `?ext=dbg` session (maintainer F9-launched; never `dbg_start`).*
-- **B1a login 0x2B — ✅ CONFIRMED live** (`_dirty/campaign3/debugger/b1a-login-0x2b-confirm.md`):
-  byte-exact 0x2B plaintext (sub-opcode + len-prefixed account + a7-gated len-prefixed PIN); **M = fixed
-  17-byte zero-padded** RSA password field (OPEN ITEM resolved); builder is **__thiscall (ctx in ECX)**
-  — a live correction; login string = `account\tpassword\tPIN\thost:port`. Credential VALUES not recorded.
-- **Remaining (need server-driven progression / specific screens):** encrypt BP + RSA ciphertext framing
-  `[u32 LE len][BE digits]` + header set to secure `1/4`; B1b 52-byte char-create; B1c port-10000 server-
-  list worker threads; B2 char-select preview-camera matrices (OQ-3); B5 scheduler now-ms split (OQ-7,
-  after B5 comprehension).
-- **DONE-WHEN:** each load-bearing hypothesis marked *"verified under the IDA debugger"* in
-  `_dirty/campaign3/debugger/`.
-
-### Phase C — Reconciliation & Promotion — **STATUS: ✅ DONE (all batches, 2026-06-13/14 · HARD GATE PASS)**
-*Owner: Tier-1 + `asset-spec-author` ×4 + `protocol-spec-author`. Every batch self-scrubbed; Tier-1
-firewall grep found zero pseudo-C/addresses across all committed specs.*
-- **UI/UX:** new `structs/gucomponent.md` + `structs/guwindow.md`; new `specs/ui_hud_layout.md`
-  (inventory W=732, chat W=290×18, buff bar, **+ §3 the 5 panels' recovered coords** from the b2c
-  define_func extraction); refined `specs/ui_system.md` §1.6–1.8 + `frontend_scenes.md` §3.5.
-- **Protocol (B1, debugger-verified):** `opcodes.md` (1/6 resolved = char-create only; login = secure
-  1/4 carrying 0x2B; 0/0 key-exchange 62B), new `packets/login.yaml` + `packets/cmsg_char_*.yaml` +
-  `cmsg_logout.yaml`, new `specs/login.md`, refined `specs/crypto.md` + `login_flow.md`.
-- **VFS/formats (B3):** refined `formats/pak.md` (144B TOC, RAW verdict), new `formats/actormotion.md`
-  (OQ-5 resolved), new `formats/sky.md` (OQ-4 resolved), refined `specs/environment.md`.
-- **Lua/sound (B4/B5):** new `specs/lua-config.md` (**N-B4-2 UTF-8 not CP949**), `specs/sound.md` §15.
-- **Combat/terrain (B5/B6):** new `specs/effect-scheduling.md`, `specs/terrain-streaming.md`
-  (**N-B6-2 synchronous**), `structs/terrain-manager.md`.
-- **Full HUD sweep:** `ui_hud_layout.md` §5 — the complete in-game HUD (**152 placement sites** from the
-  defined HUD-build routine, grouped by region + the 4 anchor conventions; screen-centred modals are the
-  dominant idiom). Pixel resolution of screen-relative panels pending a known-resolution read.
-- **Tier-1 owed before commit:** `journal.md` provenance entries + `names.yaml` sync for all promoted
-  names (incl. the **1/14 move-vs-delete** reconciliation) — deferred to Phase Z.
-- **DONE-WHEN:** ✅ firewall PASS; every promoted constant citable; engineers have specs.
-
-### Phase D — IDA annotation (WRITE, serialized) — **STATUS: PENDING**
-*Owner: `re-annotation-orchestrator` → one `re-ida-annotator` at a time.*
-- `/ida-annotate-batch` dry-run → apply the reconciled renames/comments/types for the new clusters.
-- Sync-back the live IDB names into `names.yaml`; append `journal.md` provenance.
-- **DONE-WHEN:** apply-set applied 0-failed; `sub_` count down; `names.yaml` synced; firewall PASS.
-
-### Phase E — Engineering wave (parallel disjoint lanes) — **STATUS: ◑ IN PROGRESS (multi-lane, 2026-06-13/14)**
-*Owners (parallel, disjoint paths): `godot-ui-engineer` · `network-protocol-engineer` · `data-tables-engineer`.*
-**Integration verified after the concurrent wave: full `dotnet build MartialHeroes.slnx` 0/0 · full
-`dotnet test` GREEN (all 10 suites — 49+120+92+347+21+71+… , 0 failures).**
-- **Godot UI/UX (05) — ◑ active (4 cycles).** Cycle 1: inventory **W=732 right-anchored**, ChatWindow
-  reconciled, `HudPanelConfig.cs`. Cycle 2: buff bar made visible; World HUD renders with real assets
-  (hotbar `musajung.dds`, minimap). Cycle 3: inventory grid populated (64 `texturelist.txt` icons; the
-  9-digit item-id scan bug fixed), login captions fixed (4001–4022 are EULA not button labels), preview
-  camera FOV 50°/near 5/far 15000. Cycle 4: **the 5 HUD panels implemented at recovered coords** —
-  minimap top-right (screenW−135), stats (180,95) + 3 sub-panels, party/trade off-screen slide-in,
-  skill bar (349,13) 9-slot; screenshot-verified. Login renders CP949 Korean from the real VFS.
-- **Network.Protocol (02) — ✅ char-mgmt lane done.** `[Pack=1]`/`[InlineArray]` structs for the
-  CharacterMgmt request family (1/0,1/6,1/7,1/9,1/13,1/14) + opcode router arms, all spec-cited; 92 tests
-  green. `login.yaml` (var-length RSA carrier) deferred to a joint protocol+crypto lane.
-- **Assets (03) — ✅ actormotion lane done.** Typed 136-byte `ActormotionEntry` record + parser +
-  queryable catalogue, spec-cited; 347 tests green (compat shims kept layer-05 `NpcRenderer` working).
-- **Network.Crypto (02) — ✅ login credential cipher done.** `CredentialPlaintext` (17-byte zero-padded
-  M) + `LoginCredentialReply.Build` (full secure 1/4 payload: 0x2B pre-image + RSA `[u32 len][BE]` +
-  whole-payload 0x29 whitening); RSA PKCS#1 v1.5 modexp + key-exchange parse already present; 85 tests
-  green. Runtime server key + the layer-04 driver migration deferred (joint hand-off).
-- **Assets.Parsers (03) — ✅ sky.box parser done.** `SkyBoxParser`/`SkyBoxData` (texture table + 20-byte
-  vertex stride + u16 indices, caps 300/900); 16 new tests (363 total green).
-- **Client.Infrastructure (04) — ✅ lua-config reader done.** `LuaConfigReader`/`LuaConfigRecord` (typed
-  boot flags vfsmode/launcher/debugmode + DISPLAY_*; **UTF-8 decode per N-B4-2**; orthogonal to the
-  SQLite settings store); 13 new tests green.
-- **Godot char-select (05) — ✅ cycle 5.** `CharPreview3D` 6-keyframe orbit (FOV 50°/near 5/far 15000 +
-  12 angle multipliers) with a manual pose selector; `CharacterSelectScreen` 6 pose buttons +
-  Korean-named slots. Screenshot-verified (slots, Korean names, pose buttons). *Known debt: the
-  SubViewport 3D preview renders dark — pre-existing skinning/WorldEnvironment debt, out of scope.*
-- **Godot HUD (05) — cycle 6.** Key full-HUD elements from §5: `RightEdgeGaugePanel` (HP/MP, screenW−135
-  @ Y200/250), `BottomActionBar` (centerX(1024)/screenH−60), `TopStatusBar` (full-width), and a reusable
-  **`CenteredModal`** base (`center=(screen−size)/2`) + a representative `ConfirmDialog` (340×190 family).
-  Screenshot-verified. The other ~79 centred modals derive from the helper.
-- **Code hygiene — ✅.** `csharp-modernizer` swept the Campaign-3 C# (02/03/04): removed dead code +
-  redundant usings, C#14 idiom polish; behaviour-preserving (wire layouts byte-identical); 1296 tests
-  still green, 0 warnings.
-- **Pending lanes:** the layer-04 login driver migration to the new credential API; Application
-  use-cases for the full workflow; the sound/combat/terrain-streaming specs into engine code; the
-  SubViewport char-preview env/skinning fix; a full-HUD Godot pass deriving all centred modals.
-- **DONE-WHEN:** build 0/0; DAG downward-only; specs cited; tests green; Godot headless boot clean.
-  *(full-solution build + test re-verified after each concurrent wave.)*
-
-### Phase T — Tooling (parallel with A–E) — **STATUS: PENDING**
-*Owner: `tooling-orchestrator`.*
-- Deepen `vfs-inspect` subcommands; add a HUD-coordinate dump skill; refine `ida-debugger-drive`.
-- **DONE-WHEN:** `tooling-auditor` PASS; smoke-tested; no copyrighted bytes.
-
-### Phase R — Review & Hard Gates — **STATUS: PENDING**
-*Owner: `quality-gate-orchestrator`.*
-- Parallel read-only review: firewall, DAG, C# idioms, perf hot paths, build/test, render, 1:1 fidelity.
-- **DONE-WHEN:** one PASS/FAIL verdict; blockers separated from advisories; gates green.
-
-### Phase Z — Consolidation & Commit — **STATUS: PENDING**
-*Owner: Tier-1.*
-- Update ROADMAP statuses, `journal.md`, `names.yaml`, auto-memory; `preservation-archivist` pre-commit.
-- **DONE-WHEN:** docs coherent; commit **only on explicit maintainer request** (branch first if on
-  default).
+## Phase 0 — Mandate & Pre-flight — **DONE 2026-06-16**
+- [x] `Docs/PLAN.md` (charter) + `Docs/ROADMAP.md` (this record) created.
+- [x] Baseline captured: build 0/1(pre-existing) · 1855 tests green · IDA MCP UP.
+- [x] `_dirty/campaign10/{A..G}/` + `glossary.yaml` scaffolded.
+- Pre-existing baseline note: `RealWorldRenderer.cs:1058` CS8600 warning (carry; fix opportunistically in E).
 
 ---
 
-*Maintained by the Top Orchestrator (main session). Update phase statuses in place as waves land.
-Commit only on explicit maintainer request.*
+## Phase W — Giga-research (dirty room, blocks A→G) — **IN PROGRESS**
+Massively-parallel static-IDA + VFS lanes. One analyst lane per doc → `_dirty/campaign10/<block>/<lane>.md`.
+Ledger: one writer per `_dirty` path. Each lane re-confronts the current doc to the IDB: marks every
+claim/constant/offset confirmed / sample-verified / static-hypothesis / capture-pending; raises
+`CONFLICT:` on any disagreement; surfaces what the doc MISSED.
+
+### Block A — Boot & Runtime Construction ★ — **W+P DONE 2026-06-16 (firewall PASS); D deferred(batched)**
+| # | Lane (re-verify) | Type | Agent | Deliverable | Status |
+|---|---|---|---|---|---|
+| A0 | `WinMain` entry + scene machine + init tiers (the spine) | IDA-S | re-static-analyst | `_dirty/campaign10/A/winmain_state_machine.md` | ✓ |
+| A1 | `specs/client_runtime.md` (boot + runtime engine behaviour) | IDA-S | re-static-analyst | `_dirty/campaign10/A/client_runtime.md` | ✓ |
+| A2 | `specs/game_loop.md` (per-frame ordering + timing) | IDA-S | re-static-analyst | `_dirty/campaign10/A/game_loop.md` | ✓ |
+| A3 | `specs/intro_sequence.md` (boot/logo/intro sequence) | IDA-S | re-static-analyst | `_dirty/campaign10/A/intro_sequence.md` | ✓ |
+| A4 | `specs/client_workflow.md` (scene transitions end-to-end) | IDA-S | re-static-analyst | `_dirty/campaign10/A/client_workflow.md` | ✓ |
+| A5 | `specs/resource_pipeline.md` (boot-load worker / loading screen, init side) | IDA-S | re-static-analyst | `_dirty/campaign10/A/resource_pipeline.md` | ✓ |
+| A6 | `structs/runtime_singletons.md` (global singletons / service slots / scopes) | IDA-S | re-struct-cartographer | `_dirty/campaign10/A/runtime_singletons.md` | ✓ |
+
+**A — reconciled findings (the docs were ~90% accurate but had real, load-bearing errors):**
+- **Scene machine = exactly 8 cases, GameState 0..7** (`WinMain` switch `cmp eax,7; ja default; jmp jpt[eax*4]`) — the docs' "0..8" is WRONG; the value **8 is a sub-state** (`GameState+4`), not a 9th case. `[confirmed]` (Tier-1 disasm of `0x5fe34a`).
+- **Frame loop is software-capped at a FIXED 60 FPS** (QPC limiter; engine ctor seeds the rate field = `60.0f`, never overwritten) — the docs say "uncapped." `DISPLAY_FRAMERATE` has **no consumer reaching the throttle** (inert, static). Loop has **4 phases not 3**. (A1+A2 concur.)
+- **VFS:** `data.inf` 24-byte header, **entry_count at header +0xC (+12)** not +8; opened **RANDOM_ACCESS** not SEQUENTIAL_SCAN. (A0+A6 concur; byte-witness deferred to Block C.)
+- **Login sub-state 31 = PIN/second-password modal, NOT EULA**; keepalive = **C2S 2/112** not 2/10000; login credential = tab-separated **KEY-string secure-context** (account/password/PIN/host port) not literal 2/1; **no 4/3 BillingInfo** (4/1 is two-form). (A4 — wire-level items capture-pending → Block E.)
+- **Intro:** Opening = **GameState 3**; alpha inits **250** (fade-out first) applied via **D3D TEXTUREFACTOR RS60** (not per-vertex); skip button **top-right**; second mouse-scrub path.
+- **Singletons:** MainWindow (1464 B, 223 slots) is a **separate object** from the 16-B MainHandler hub — the doc conflates them; VFS state = **4 globals + 3-word progress block** (not 3 flat); undocumented **AppService** singleton (136 B); MainWindow **+0xBC** secondary vtable.
+- **Resource:** boot worker INSTALLED in LoadHandler ctor but STARTED in the loading-window sub-init (ABOVE_NORMAL); progress is an **integer quotient → near-static bar**, completion driven by the thread-flag; OPENNING/SKIP resolved (`GetPrivateProfileIntA`).
+- ~80 name proposals captured → `_dirty/campaign10/glossary.yaml` (block A). Notable rename: `0x5fe063` (mis-named `Diamond_OpeningWindow_ctor`) is the **window-manager registration / cleanup-push helper**; the real Opening ctor is `0x54581a`.
+- **P (promotion): DONE** — 6 Block-A specs (`client_runtime`, `game_loop`, `intro_sequence`, `client_workflow`, `resource_pipeline`, `structs/runtime_singletons`) rewritten to 100% + verification banners; **Tier-1 firewall scan PASS** (no decompiler artifacts / image-range addresses leaked). Phase-D IDB annotation for A's cluster deferred to the batched annotation wave.
+
+### Block B — Scene/Window State Machine & UI Framework ★ — **W+P DONE 2026-06-16 (firewall PASS); D deferred(batched)**
+Covered `specs/ui_system`, `ui_hud_layout`, `input_ui`, `frontend_scenes`, `login`;
+`structs/guwindow`, `gucomponent`; `formats/ui_manifests` + 3 deep `construct()` element walks
+(LoginWindow 73 widgets, SelectWindow 279 elements, MainMaster HUD 178 slots).
+
+**B — reconciled findings (the UI docs had real, load-bearing errors):**
+- **GUComponent geometry was TRANSPOSED** (SEVERE): correct is **+0x1C=width, +0x20=height, +0x24=posX, +0x28=posY** (+0x14/+0x18 local, +0x2C/+0x30 world, +0x44 64B transform matrix, +0x0C tint+forced-alpha@+0x0F, +0x84 parent). **No sized ctor exists** (only a default zero-init; geometry via setters). Auto-hide timer pinned (+0x95/+0x98/+0x9C=3000ms/+0xA0). — would have mis-laid-out every Godot widget.
+- **UI event taxonomy was WRONG**: full = **1=key-down, 2=key-up, 3=move, 4=press, 5=release, 6=click(synth, same-widget = click-vs-drag), 7=dbl-click, 8=wheel** (doc had {3,5,7,8}, mislabeled 5 as press). **DirectInput8 is the KEYBOARD path** (doc inverted it). Wheel delta at record +4. Recovered all prior-UNVERIFIED constants (dbl-click 300ms/2px, modifier bits).
+- **UI layout is CODE-BAKED** — NO on-disk layout manifest. Each window's `BuildScene` (vtable slot 14 / +56) builds children with integer-literal coords via `Build*(tex,dstX,dstY,w,h,srcX,srcY,color)` (1:1 src/dst). Registries (uitex.txt) map id→path only.
+- **NO EULA panel** (B9 construct walk supersedes a B7 inference): the msg ids 4001–4022 are the **server-list/channel row captions**.
+- **Cross-block CONFLICT resolved (Tier-1):** A3's "login=4" REFUTED → **Login=GameState 1, Opening=3, char-select=4**; the Opening is **post-login** (login→load→opening→char-select→in-game). `intro_sequence.md` corrected accordingly.
+- **MainMaster HUD = 3 routines** (docs blurred into 1): ctor (vtables+zeroed 223 slots, builds nothing) / `BuildAndRegisterPanels` (178 slots) / per-GameState reconfig (text/sound, no rects). Inventory **W=318 not 732**. ~150 named panel ctors de-anonymized.
+- **`0x5fe063`** finally pinned: **SceneDisposeList_Push** (std::list teardown push), NOT a ctor and NOT window-manager attach (the manager is MainMaster's ~223-slot table). game.ver gate = **single u32 index-5 equality**. login sub-states 29/30/31 recovered (31 = PIN modal show, 32 = PIN poll). password field cap 129 (validate at submit).
+- ~35 curated name proposals → `_dirty/campaign10/glossary.yaml` (block B). Full element tables in `_dirty/campaign10/B/construct_{login,select,hud}.md`.
+- **P (promotion): DONE** — 8 Block-B specs (`structs/gucomponent`, `structs/guwindow`, `ui_system`, `ui_hud_layout`, `input_ui`, `frontend_scenes`, `login`, `formats/ui_manifests`) rewritten to 100% + verification banners; **Tier-1 firewall scan PASS** (zero decompiler artifacts / image-range addresses). The geometry-transposition + event-taxonomy fixes are load-bearing for the Godot UI port (Phase E). Phase-D annotation deferred to the batched wave.
+
+### Block C — VFS / Asset I/O & Resource Pipeline ★ — **W+P DONE 2026-06-16 (firewall PASS, sample-verified); D deferred(batched)**
+Covered `formats/pak`, `specs/vfs_overview`, `asset_pipeline`, `structs/terrain-manager` (read side).
+The two-witness gate (IDB loader + real `data.inf`/`data.vfs` sample) delivered **sample-verified** results.
+
+**C — reconciled findings:**
+- **VFS `data.inf`/`data.vfs` header DECODED** (the doc said "magic cannot be inferred"): **24-byte header = magic `"VFS001"` (8B null-padded) + u32(=39, role TBD) + u32 entry_count + u32 blob-size**. The same header is **echoed at `data.vfs` offset 0** (entry-0 payload at offset 24). **Sample-verified.**
+- **Entry-count +0xC RESOLVED both ways** (IDB stack-offset proof + `24+144×43347 = 6,241,992` = exact `data.inf` size); the `+0x08` reading is **refuted**. Vindicates Block A.
+- **TOC entry = 144 B**: name[100], pad_100 (≈0; ~14/43347 nonzero = build-tool residue), dataOffset i64@104, dataSize i64@112 (low dword only), **3× FILETIME** (ctime/atime/mtime)@120/128/136 — NOT padding.
+- **Storage is RAW** (no compression/encryption/codec flag) via **ReadFile-into-buffer, NOT mmap** (the only `MapViewOfFile` user is an unrelated anti-tamper self-check). One global read lock. Named class `CVFSManager`. Mount = `game.lua vfsmode` toggle.
+- **terrain-manager.md conflated TWO singletons** → split into **TerrainLoader** (streamer; worker thread **DORMANT** after init; FIFO; **34-slot** pool; cell-key RB-tree) and **TerrainManager** (9 grid sub-objects; **25-slot** ring; 2 GFrustum; stream-radius clamp ≥15000→1000; map-option/region @+464/+468, NOT spawn coords). Cell = 24,712 B; key = `mapZ+100000*mapX`.
+- **Loading bar is near-static** (normalized = bytes / 9,395,240 **integer**; bar px = `223*v/100`; fills only ~939 MB-in) — completion driven by the worker done-flag, **not** the bar (cross-confirms A5). The "~9.4 MB → 100%" framing was wrong.
+- ~30 curated name proposals → glossary (block C). Full notes in `_dirty/campaign10/C/`.
+- **P (promotion): DONE** — 4 Block-C specs (`formats/pak`, `vfs_overview`, `asset_pipeline`, `structs/terrain-manager`) rewritten to 100% with **sample-verified** banners; **Tier-1 firewall scan PASS** (zero artifacts). The `pak.md` header decode (`VFS001` magic, FILETIME TOC, RAW storage) and the terrain two-singleton split are the load-bearing corrections. Phase-D annotation deferred to the batched wave.
+
+### Block D — Asset Format Corpus (two-witness) ★ — **W+P DONE 2026-06-16 (firewall PASS, sample-verified); D-annot deferred(batched)**
+Re-confirmed every `formats/*.md` against the IDA loader AND a real VFS sample. The corpus **RE-CONFIRMS
+sample-verified** on build `263bd994` (vindicates the campaign-8 two-witness work) with mostly minor drifts.
+
+**D — reconciled findings (corrections, not rewrites):**
+- **terrain:** `.ted` = 46987 B (5 reads, no header); texidx stored **RAW** (re-confirms the render-domain fix); **EXTRA_TERRAIN → `.exd`** (not `.ted`); `.map` WIDTH/HEIGHT/GRID/ORIGIN present-on-disk but **not parser-consumed**; `.mud` confirmed.
+- **mesh/anim:** `.skn` **normal-first** verified, LenStr **4-byte** prefix (binary-mode bit); bindlist **string-sorted**, 349 entries; BANI drifts (name_len 10, frame_count 24); `+0x40/+0x64` int[9] arrays naming reconciled across animation/actormotion.
+- **texture/effects:** no header test (both loaders feed D3DX); **effectscale.xdb REPLACES** the .xeff base-scale at parse; `.xeff` **9-byte** track header; particleEmitter.eff variable-length.
+- **env/region:** region cell byte = **INDEX (0..31)** not a 0/1 mask; zoneType `{0,1,2,9}`; per-map = **`map<NNN>.bin` (520B)** not `mapsetting<NNN>.bin`; 3 `.tol` **inside** the VFS; fog always 204B; ambient floor 1.0 (white); all env-bin sizes byte-exact.
+- **sound:** stride **48** DEFINITIVE (52 refuted by both witnesses); ~301 tables; two loader entry points.
+- **items/config:** `items.csv` **NOT runtime-loaded** (authoring-only, now CONFIRMED); items.scr discriminator on-disk **+0xD2**; citems `+0` = **item_id** (not slot_index); **`.do` stride 116** confirmed (166 refuted); citems desc paragraphs **6-vs-10 UNRESOLVED** (carried open).
+- **scr:** strides resolved by arithmetic (helps=48, dashs=199/28, userlevel=60/300); events.scr 520B/1848, 4 consumed fields; 6 new record counts.
+- **xdb/mi:** msg.xdb 516B/2644 confirmed; **`mobinfo.mi` IS in the VFS** (`data/ui/mobinfo.mi`, 592B = 4+21×28) — the doc's "absent" verdict REVERTED (no client loader still holds); buff-icon spacing **25** not 27.
+- **npc:** `npc.arr` 28B/559 records; spawn_type enum **0..11** (not {0,7}); `mob.arr` 20B has **no client loader** (client uses `mobs.scr`); map207 240B anomaly.
+- **indices:** area count **60** (not 63), 2503 cells; game.ver 28B/7-u32 (index-5 compare); bgtexture.lst 48B, kind byte → 2 pools.
+- ~28 curated loader name proposals → glossary (block D). Full notes in `_dirty/campaign10/D/`.
+- **P (promotion): DONE** — 14 Block-D lanes rewrote the formats corpus to 100% with **sample-verified** banners; **Tier-1 firewall scan PASS** (zero real artifacts; the only grep hits were the field name `sub_effect_count` and the neutral label `unk_dist`, both legitimate). **★ MILESTONE: all four priority blocks A/B/C/D are now W+P+firewall complete.**
+
+### Block E — Network / Protocol / Crypto — **W+P DONE 2026-06-16 (firewall PASS); D-annot deferred(batched)**
+Covered `specs/network_dispatch`, `crypto`, `handlers`; `opcodes.md`; the C2S+S2C `packets/*.yaml`;
+entity + item/skill/npc structs. Static + VFS only — packet field **VALUE** semantics stay capture-pending
+(no wire this campaign); routing/sizes/offsets are control-flow **confirmed**.
+
+**E — reconciled findings:**
+- **Frame header RESOLVED = 8 B `[u32 size @0][u16 major @4][u16 minor @6]`** — the size is **u32** (settles the long-standing u16-vs-u32 question).
+- **Crypto open-question #1 RESOLVED (open since June):** the **inbound path applies NO inverse cipher** — it is LZ4-decompress-only; the byte cipher has **exactly one xref** (the outbound send gate), a positive single-caller proof. `crypto.md` was otherwise **already correct** (3-round keyless cipher; FLINT-bignum handshake 0/0→1/4, PKCS#1 v1.5, XOR-whitened, does not key the cipher).
+- **Major-3 opcode ladder CORRECTED** (matches Block A): **3/4 = SceneEntityUpdate, 3/7 = CharManageResult (8B), 3/14 = CharSpawnResponse (16B)**, 3/100 = generic action-result (no case 32). The doc/YAMLs had these swapped (incl. the misnamed `3-4_char_manage_result.yaml`).
+- **Keepalive = TWO mechanisms**: the armed `(2,10000)`@20s compressed frame AND the C2S **2/112** 1-byte toggle (g_KeepaliveEnabled). Both real; on-wire cadence capture-pending. `opcodes.md` gains a 2/112 row.
+- **Dispatch shape:** majors 1/3 inline switches; 4/5 **table-driven** (two 154-slot tables, base+1246/+1400, inert no-op default, minor≥154 undispatched, 4/500+4/50000 outside); major-0 = hardwired (0,0) handshake branch. Response ~99 / Push 65 slots.
+- **Packet sizes/offsets confirmed** at send/handler sites (1/6=52, 1/9=40, 2/13=16, **2/28=12 fixed** not "var", 2/52=24+arrays, 5/13=40, **5/52 header offsets fixed** ActionCode@0x10/TargetCount@0x14, 3/1=3B+5×981B, 3/5=44B, 4/29=36B, 4/102=476B). Text length-prefix: 2/7 EXCLUDES NUL, 3/21 INCLUDES it. ~60 additional major-2 C2S senders found (coverage gap noted).
+- **Structs:** Actor/SpawnDescriptor confirmed (local-player global, spatial index +0x3EC, equip table 20×16@+0xCC); skills.scr 1504+N×8 / 1508B obj; mobs.scr 488B / +0xF8 HP+=10 / +0x144==11 boss.
+- ~35 curated network/crypto/handler name proposals → glossary (block E). Full notes in `_dirty/campaign10/E/`.
+- **P (promotion): DONE** — 8 Block-E lanes (network_dispatch, crypto, handlers, `opcodes.md`, C2S+S2C packet YAMLs, entity + item/skill/npc structs) rewritten to 100%; **Tier-1 firewall scan PASS** after fixing one real leak (a Hex-Rays `_QWORD` type name in `structs/npc.md` → neutral "64-bit value (`u64`)"). The crypto OQ#1 resolution + the 3/4·3/7·3/14 opcode ladder are the load-bearing corrections. (Pre-existing minor: `journal.md` carries a `__thiscall` provenance mention from a prior campaign — append-only, left intact; flag for the Phase-R clean-room-auditor.)
+
+### Block F — Gameplay Systems — **W+P DONE 2026-06-16 (12/12, firewall PASS); D-annot deferred(batched)**
+Covered combat, skills, inventory_trade, equipment_visuals, progression, quests, npc_interaction,
+chat, social, minimap, camera_movement, lua_scripting/lua-config, world_systems. Static + VFS only —
+client-side routing/sizes/offsets/formulas **confirmed**; server-authored magnitudes + wire VALUE
+semantics stay capture-pending.
+
+**F — reconciled findings (largely confirmed; offsets re-pinned from prior-build drift):**
+- **Combat:** melee = **C2S 2/52 slot 0xFF** (slot byte = `(stance!=1)-56`); cadence = **100ms×skill_cadence** (rec +1332), **550ms** lockout; 4/100 = 188B. Default basic-attack skill **121100050**. CONFLICT: the attack-flag clear is **4/13** (LocalPlayerStateSync) on this build, not 4/2 (capture-pending which arms vs releases). Controller offsets re-pinned (+136/+140 → +36/+40).
+- **Skills:** the hotbar is **ONE 240×8B record array** (id@+0, points@+4) — resolves the old "two parallel arrays / second-int unverified" open question; skills.scr 1504+N×8 / 1508B obj; 4/102 = 476B snapshot.
+- **Inventory/trade:** **THREE** item arrays (bag `40*(bag_count+3)` / equip 20 / a new 120-entry @lp+1260). Two offset fixes: 4/23 reads selector@+8 + reason@+9 + phase@+10 (all live); 4/25 phase@+8 / count@+0x18.
+- **Equipment→visual:** off-hand node **flag = 1** (flag-2 = main-hand); slot-15 rebuild byte @+0x0C (16B) vs +0x0B (20B); both GID formulas confirmed.
+- **Progression:** **the stat-EDITOR row labels were swapped** (correct: +376=STR/+380=DEX/+384=INT/+388=AGI/+392=CON) — BUT the **2/29 WIRE body (STR,INT,AGI,DEX,CON) is CORRECT and untouched**; 5/32 also broadcasts chat 10081; rank cap-25 per-level table.
+- **Others (quests/npc/chat/minimap/camera/lua/world):** confirmed with offset re-pins; events.scr quest model; chat length-prefix rule (2/7 excl-NUL / 3/21 incl-NUL); 5 camera modes; region cell = INDEX (cross-confirms Block D).
+- ~28 curated name proposals → glossary (block F). Full notes in `_dirty/campaign10/F/`.
+- **P (promotion): DONE 12/12** (resumed after the session reset — the 5 stalled lanes completed). All 14 F specs rewritten to 100% + verification banners; **Tier-1 firewall scan PASS** (zero artifacts). Several F specs were found already-reconciled from a prior pass and only needed surgical residual fixes (e.g. camera FOV no-/2, the chat NUL off-by-one resolution). Phase-D annotation deferred to the batched wave.
+
+### Block G — Rendering / Effects / Terrain / Skinning / Environment / Sound — **W+P DONE 2026-06-16 (6/6, firewall PASS); D-annot deferred(batched)**
+Covered `specs/rendering`, `effects`+`effect-scheduling`, `terrain-streaming`, `environment`,
+`skinning`, `sound` (behaviour/runtime; the on-disk formats are Block D). Notes in `_dirty/campaign10/G/`.
+
+**G — reconciled findings (research done; promotion pending on resume):**
+- **Rendering:** glow/bloom = 3 RTs, bright-extract is a **plain fixed-function copy (no PS, no threshold)**, one downscaled glow-blur, composite TEX1+TEX2 with code-uploaded c0/c1; cel/toon gated on the **offscreen** path (**TWO** cel pixel shaders dotoonshading.psh+2.psh). Anchor fixes: `0x61bd42` = device-step+**Present**+device-lost recovery (not "render frame"); real draw fork `0x61139E` → offscreen `0x6104cb` / direct `0x610f7c`. **Frame-cap reconciliation with Block A: the rate field is `engine+0x30` = `scene+48` (0x30 hex = 48 dec, SAME field), seeded 60.0f & never overwritten → effective fixed ~60, but mechanically a configurable per-scene rate** (QPC Sleep to 1/rate). Device-lost lifecycle (TestCooperativeLevel → Reset/Sleep) newly documented.
+- **Effects:** keyframe sampler (sprite STEPPED, alpha/color/vel/size LERP, rotation SLERP); **passes 2/3/4 = diffuse R/G/B** confirmed at parse; effectscale.xdb **REPLACE at lazy-parse** (closes effects §14.9); **the campaign9c "sub-effect Z-negation" is PORT-SIDE only — the binary applies NO Z-negation** (treats anchor & offset uniformly); vertex diffuse pack order is **B,G,R,A** (load-bearing for on-screen colour); Euler keys are DEGREES. The **10001 timed-event** is a **sorted RB-tree** scene/connection deferred trigger (NOT an effect spawn) — distinct from the linear effect lists.
+- **Terrain-streaming:** worker thread **DORMANT** (init clears keep_running); synchronous per-frame main-thread streaming; cell pool **34** vs spatial ring **25** (confirms Block C two-singleton split); cell key `mapZ+100000*mapX` + a **+10000 cell-index origin offset** the doc omitted; radius clamp ≥15000→1000; 5×5-vs-3×3 by radius>1000; 4-function ring (cold 3×3/5×5 + per-frame 3×3/5×5).
+- **Environment / Skinning / Sound (G4/G5/G6):** research complete (`_dirty/campaign10/G/`); **skinning** (the load-bearing Godot avatar-explosion debt) consolidated — bind-pose / inverse-bind-baked-into-vertex / LBS deform math for the Phase-E fix; details to be folded in at G promotion.
+
+**W EXIT (per block):** all lanes returned; confidence rated; conflicts flagged; promotion map drafted.
 
 ---
 
-## CAMPAIGN VFS-MASTERY (VFS-DEEP-III) — exhaustive two-witness re-derivation of every `data.vfs` format — **STATUS: DELIVERED (uncommitted)**
+## Phase P — Promotion / rewrite to 100% + master synthesis — **DONE 2026-06-16**
+- All 7 blocks promoted (one author per spec file, verification banner on each); **Tier-1 firewall scan PASS per block.**
+- **Master synthesis `specs/client_architecture.md` written** (478 lines, 12 sections, firewall PASS) — the top-level vision: entry → init scopes → GameState 0..7 scene machine → Diamond UI framework → VFS/resource pipeline → frame loop → network/gameplay/render subsystems, cross-linking every re-verified subject spec.
+- Tier-1 serialized: `opcodes.md` reconciled (Block-E lane); `journal.md` CAMPAIGN-10 provenance entry appended. **`names.yaml` merge** = the one remaining mechanical step (pull the ~195 live IDB names via `ida-naming-sync` + adjudicate the 6 ctor collisions) — do at Consolidation/commit.
 
-> Run 2026-06-15. Full record in `Docs/RE/journal.md` (same date) and `_dirty/campaign8/`. Specialises `CAMPAIGN_TEMPLATE.md`.
+## Phase D — IDB annotation (legibility) — **DONE 2026-06-16 (batched)**
+`re-annotation-orchestrator` applied `_dirty/campaign10/glossary.yaml` to the live IDB (build `263bd994`,
+SHA-gate passed) — 216 entries → **201 unique addresses** (183 functions + 18 globals): **113 renamed**
+(sub_ → canonical), 82 already-canonical (CRT `start`/`g_GameState` left as-is), **201 repeatable comments
+set**, **0 unresolved / 0 failures**. `sub_` count **19,090 → 19,020** (−70 made legible). IDB not committed.
+- **⚖️ 6 cross-campaign name collisions — TIER-1 ADJUDICATION at the names.yaml sync:** the campaign
+  re-identified the REAL address of 6 ctors and the prior-campaign holder still owns the unsuffixed name,
+  so the C10 addresses got a non-destructive `_0`/`_2` suffix. Re-point + demote the stale holders:
+  `Diamond_GUComponent__ctor` 0x615135 (vs prior 0x52db68), `Diamond_GUWindow__ctor` 0x61d852 (vs 0x61d71e),
+  `Diamond_GULabel__ctor` 0x6162be (vs 0x61626c), `Diamond_GUTextbox__ctor` 0x616df7 (vs 0x616d90),
+  `Diamond_GUCheckBox__ctor` 0x617d2e (vs 0x617cbc), `TerrainManager_GetSingleton` 0x445694 (vs 0x445890).
+  The comments DID land on the correct C10 addresses, so the IDB reads correctly regardless.
+- **Next:** `ida-naming-sync` pulls the 195 live IDB names → `Docs/RE/names.yaml` (Consolidation).
 
-- **Mandate (maintainer):** re-derive **every** VFS file format INDEPENDENTLY from its IDA loader (a second witness for ALL formats, not just residuals); cross-validate against ALL real instances; full C# hardening. Static-only (no debugger this cycle).
-- **W0 pré-vol — ✅.** IDA MCP up (doida.exe 263bd994); VFS on disk (clientdata 3.8GB); baseline build green; `_dirty/campaign8/` + ledger created.
-- **W1 Phase A cartography (3 IDA readers) ∥ Phase V black-box (16 lanes) — ✅.** Read path mapped; caller→format census = 8 loader families; C05 denoised (53 genuine / 40 GHTex / 11 noise); gap-0x608C70 refuted; 16-family cross-instance validation with a "fields-awaiting-loader-witness" ledger.
-- **W2 Phase B comprehension (12 IDA lanes, sub-waves ≤3) — ✅.** Independent loader re-derivation + adjudication. Headline: sound stride **48 confirmed** (spec 52 wrong, C# fixed); regiontable **48 vindicated** (black-box "32" was a false correction → gate prevented a regression).
-- **W3 Phase C HARD GATE — ✅.** Two-witness reconciliation → `_dirty/campaign8/reconcile/W3-promotion-map.md` (drives P/D/E).
-- **W4 Phase P promotion (≈18 asset-spec-author, 1 spec/file) — ✅.** 21 committed `formats/*.md` corrected; firewall PASS (no address/pseudo-C leaked).
-- **W5 Phase D IDB annotation (1 serialized writer) — ✅.** 172 renames + 240 comments + 1 define_func; TRIPWIRE 0; IDB saved (never committed).
-- **W6 Phase E C# hardening — ✅.** Parsers corrected per two-witness verdicts; Models updated in lockstep; **+~220 new test facts**; downstream consumers migrated (Mapping/Domain/Godot adapters). DBG-pending fields kept opaque (never fabricated).
-- **W7 Phase R gates — ✅.** Nuked full build **0/0**; **1848 tests / 0 failed**; clean-room audit **PASS**.
-- **W8 Phase Z — ✅ (this entry + journal).** `names.yaml` function-name sync deferred to `ida-naming-sync` (names durable in the IDB). **Commit: pending maintainer go (targeted paths — tree entangled with prior campaign3 work).**
-- **Deferred follow-up (Godot presentation TODOs):** class→skin_class formal table, audio per-bus option store, EnvironmentNode lighting-from-env-bin, inventory-title msg.xdb id (unrecovered), water unwired-by-choice memo.
+## Phase E — Engineering: align code to corrected specs — PENDING
+Staged pipeline (contracts → components → integration), one engineer per project per wave. Only where
+a spec changed. `test-engineer` coverage alongside.
+
+## Phase T — Tooling (parallel) — PENDING
+Fold scanners into `vfs-inspect`; register the missing orchestrator agent-types
+(`godot-client-`, `network-stack-`, `assets-pipeline-`, `client-core-`, `tooling-`, `quality-gate-`);
+new parsers for any newly-found format. `tooling-auditor` PASS.
+
+## Phase R — Review + Fix + Hard Gates — PENDING
+4 reviewers (render / C# / clean-room / architecture; + perf if hot paths) → fix wave → hard gates:
+build 0/0 (`--no-incremental`) · tests green · firewall PASS · verification-banner audit · headless boot.
+
+## Phase C — Consolidation — **IN PROGRESS 2026-06-16**
+- [x] ROADMAP statuses updated in place (all blocks W+P+firewall; Phase D done).
+- [x] `journal.md` — CAMPAIGN-10 provenance entry appended.
+- [x] memory — `campaign10-doc-reverification.md` written + `MEMORY.md` index line.
+- [ ] `names.yaml` — sync the ~195 live IDB names (`ida-naming-sync`) + adjudicate the 6 ctor collisions (do at commit).
+- [ ] `preservation-archivist` pass + **commit ONLY on maintainer request** (targeted paths; never `_dirty/`, `.godot/`, or originals).
+
+**DOCUMENTATION MILESTONE REACHED:** the user's core ask — re-understand all of `doida.exe` against IDA and
+re-work every `Docs/RE/*.md` to 100% — is COMPLETE (7 blocks W+P+firewall, master synthesis, IDB annotated).
+**Phase E (engineering) is the next stage** (align C#/Godot to the corrected specs; needs build/test/Godot gates).
+
+### ⏸ RESUME ANCHOR — paused 2026-06-16 on a session limit (resets ~04:50 Europe/Paris)
+
+**Where we are:** all 7 research blocks (W) are COMPLETE (A,B,C,D,E,F,G — every `_dirty/campaign10/*` note
+written). Promotion (P) is done + **firewall PASS** for **A, B, C, D, E**; **F is 7/12 promoted**
+(firewall scan still pending on those 7); **G is researched but not promoted**. The glossary
+`_dirty/campaign10/glossary.yaml` holds ~190 reconciled name proposals across all 7 blocks.
+
+**To resume (in order):**
+1. **Finish Block-F promotion** — the 5 stalled lanes: `camera_movement`, `chat`+`social`,
+   `lua_scripting`+`lua-config`, `minimap`, `world_systems` (resume `campaign10-block-f-promote` via
+   `resumeFromRunId: wf_6c8bf579-1a7` so the 7 done lanes return cached). Then **firewall-scan all 12 F specs**.
+2. **Promote Block G** (6 lanes from `_dirty/campaign10/G/`): `rendering`, `effects`+`effect-scheduling`,
+   `terrain-streaming`, `environment`, `skinning`, `sound`. Then firewall-scan.
+3. **Master synthesis** — write `Docs/RE/specs/client_architecture.md` (the top-level map: entry → init
+   scopes → GameState 0..7 scene machine → Diamond GU* window framework → VFS/resource pipeline → frame
+   loop → network/gameplay/render subsystems), cross-linking every re-verified subject spec.
+4. **Tier-1 serialized post-promotion** — reconcile `opcodes.md` (final sort/dedup), merge the glossary's
+   canonical names into `Docs/RE/names.yaml`, append the CAMPAIGN-10 `journal.md` provenance entry.
+5. **Phase D — IDB annotation** (batched, now that all research is done): `re-annotation-orchestrator`
+   → `re-ida-annotator` applies `_dirty/campaign10/glossary.yaml` to the live IDB via `/ida-annotate-batch`
+   (dry-run → apply; unbridled; idempotent). Raises the named-function count on the construction/UI/VFS/net clusters.
+6. **Phase E — engineering alignment** — only where a spec CHANGED: the load-bearing ones are the **GUComponent
+   geometry transposition** (UI layout), the **skinning** math (avatar explosion), the **3/4·3/7·3/14 opcode
+   ladder** + frame-header u32, the **VFS header** (`VFS001`/FILETIME), and the inbound-no-cipher fact.
+   One engineer per project; staged; `test-engineer` alongside.
+7. **Phase R — review + hard gates** — 4 reviewers + the **verification-banner audit** (every touched doc
+   stamped) + build 0/0 (`--no-incremental`) + tests green + clean-room PASS. (Pre-existing minor for the
+   clean-room-auditor: a `__thiscall` provenance mention in `journal.md`.)
+8. **Phase C — consolidation** — finalize ROADMAP, journal, names.yaml, memory; **commit only on the
+   maintainer's explicit request** (targeted paths).
+
+**Do NOT restart from Phase 0** — the campaign is ~85% through W+P. Resume at step 1 above.
+
+### ⚖️ PENDING MAINTAINER DECISION
+(none yet)
+
+— *Maintained by the orchestrator (Tier-1). Update block/phase statuses in place as waves complete.*

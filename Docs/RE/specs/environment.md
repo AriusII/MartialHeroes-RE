@@ -5,6 +5,37 @@
 > `05.Presentation/MartialHeroes.Client.Godot` (rendering). Every value an engineer cites
 > must reference this file or `Docs/RE/formats/environment_bins.md`.
 
+<!--
+verification:
+  confirmed:               # control-flow + operand level in the static IDB
+    - environment hub IS the 48-slot sky-colour LUT singleton; sub-domes hung off it
+    - hub construction order; material + light + fog are hub-internal (NOT a separate path)
+    - day/night = 48 keyframes × 1800 ms, period 86 400 ms; linear lerp(table[kf], table[kf_next], frac)
+    - K_ambient = 0.0 (single reader, zero writers) → per-keyframe ambient term is inert
+    - directional light applied RAW (no multiplier, no /255, float [0,1])
+    - OPTION_BRIGHT additive floor: offset = floor((BRIGHT/100)·255), clamp 255; default 100, clamp [1,100]
+    - BRIGHT=100 → offset 255 → full-white ambient floor over the (0,0,0) base
+    - device-ambient re-applied on slider move / per-frame byte-base change / end of light load
+    - fog colour byte-domain lerp, ARGB alpha forced 0xFF, pushed via render-state token 34
+    - fog data_load_flag==0 → synthesize 48 keyframes from sky-LUT via high·0.75 + low·0.25
+    - fog mode LINEAR: far = s·3.0, near-recip = 1/s, enabled when s>0 (per-keyframe section-C scalar)
+    - device-ambient render-state token = 139; fog-colour render-state token = 34
+    - OPTION_BRIGHT at options-struct offset +116 (field index 29); cached offset reused per frame
+    - per-area env files keyed by the current-area-id global
+  static-hypothesis:       # single static inference, not yet control-flow-tight
+    - exact fallback direction numerals (-7, 7, 20) — fallback dwords present, not byte-decoded this pass
+    - lighting-manager constructor zeroing the ambient base to (0,0,0) — carried, not re-read this pass
+    - indoor suppression mechanism + indoor fog behaviour — outside this pass' anchor set
+  capture/debugger-pending:  # needs the live client / a frame capture to settle
+    - on-screen ambient pixel colour at default brightness (the math proves white; the pixel does not)
+    - matrix major-order / up-axis / unit scale
+    - whether a player's saved DoOption.ini carries a brightness below 100
+  ida_reverified: 2026-06-16
+  ida_anchor: 263bd994
+  evidence: [static-ida]
+  conflicts: none of substance (one §3.1/§1.1 wording tightening — material + light are hub-internal)
+-->
+
 ---
 
 ## Status block
@@ -63,25 +94,36 @@ toggled.
 > environment and the sky-colour table as two distinct objects should merge them.
 
 On activation the hub builds its sub-systems in a fixed order; each sub-init that fails aborts the
-hub, and on full success a "ready" flag is set. The order (code-confirmed):
+hub (the sub-init returns 0 → the hub returns 0), and only the all-pass path sets a "ready" flag and
+returns success. The order (code-confirmed):
 
 1. Particle / effect buffer root.
 2. **Star-dome** object → loads `stardome{id}.bin`.
 3. **Cloud-dome** object → loads `clouddome{id}.bin` and `cloud_cycle{id}.bin`.
-4. Read the global **sky detail-level** option (0 / 1 / 2; selects animated vs. static sky textures
-   and a derived detail scalar). NOTE: this option was previously suspected to be the runtime writer
-   of the ambient gate `K_ambient` (§6.2a). That hypothesis is **DENIED** — `K_ambient` has zero
-   writers anywhere; the sky-detail option does not touch it (`formats/environment_bins.md §10.4`).
-5. **Moon / particle dome** init (uses `moon{id}.dds`).
-6. **Sky-box** sub-object → conditionally loads `sky{id}.box` when the skybox gate is set
+4. **Sun** sub-object init.
+5. Read the global **sky detail-level** option (0 / 1 / 2; selects animated vs. static sky textures
+   and a derived detail scalar stored on the hub). It reads the **options-struct index 7** and branches
+   the detail scalar (1.0 / a constant / 2.0). NOTE: this option was previously suspected to be the
+   runtime writer of the ambient gate `K_ambient` (§6.2a). That hypothesis is **DENIED** — `K_ambient`
+   has zero writers anywhere; the sky-detail option reads index 7 only and does not touch `K_ambient`
+   (`formats/environment_bins.md §10.4`).
+6. **Moon / particle dome** init (uses `moon{id}.dds`).
+7. **Sky-box** sub-object → conditionally loads `sky{id}.box` when the skybox gate is set
    (see `formats/sky.md §A`).
-7. Bind the **day/night time manager** to the dome.
-8. **Fog** init → loads `fog{id}.bin`.
-9. Set the environment "ready" flag.
+8. Bind the **day/night time manager** to the dome.
+9. **Material** init → loads `material{id}.bin` (hub-internal — see the note below).
+10. **Light** init → loads `light{id}.bin` (hub-internal — see the note below).
+11. **Fog** init → loads `fog{id}.bin` (the last sub-init before the ready flag).
+12. Set the environment "ready" flag.
 
-The directional/point-light and wind files (`light{id}.bin`, `point_light{id}.bin`, `wind{id}.bin`)
-are loaded by the surrounding area-activation path rather than by this hub; their formats are in
-`formats/terrain_layers.md` / `formats/environment_bins.md`.
+> **Hub-internal vs. surrounding-path loads (CONFIRMED — wording tightened):** `material{id}.bin` and
+> `light{id}.bin` are loaded **inside the hub body**, immediately before fog and the ready flag — they
+> are NOT loaded by a separate "surrounding area-activation path". The light loader is fault-tolerant:
+> on a missing file it synthesises a default 48-keyframe grey ramp plus the fallback direction and
+> still succeeds (§6.2a, §7). Only `point_light{id}.bin` and `wind{id}.bin` (and `weather{id}.bin`) are
+> loaded outside the hub: the point-light map data is loaded as a sub-step of the light loader, and the
+> wind/weather files are loaded by separate routines on the area-activation path. Their formats are in
+> `formats/terrain_layers.md` / `formats/environment_bins.md`.
 
 > **Fog colour source (resolves the `data_load_flag = 0` question):** when `fog{id}.bin`'s
 > `data_load_flag` is 0, the fog colour table is **derived from the sky-colour table** — a 48-slot
@@ -178,14 +220,17 @@ steps (one step ≈ 2 simulated hours).
 5. If `clouddome_enable = 1`: read `clouddome{id}.bin` (23040 B) and `cloud_cycle{id}.bin`
    (70 B).
 6. If `skybox_enable = 1`: read `sky{id}.box` via the archive by-name lookup (`formats/sky.md §A`).
-7. Always read `light{id}.bin` (5312 B). The fallback at bytes 0x14B0–0x14BF is used if the
-   file is absent or unreadable.
-8. Read `point_light{id}.bin` if present.
-9. Read `wind{id}.bin` if present.
+7. Always read `light{id}.bin` (5312 B) — **loaded by the hub itself** (§1.1). The fallback at
+   bytes 0x14B0–0x14BF is used if the file is absent or unreadable; the loader never fails (it
+   synthesises a default grey ramp + fallback direction on a missing file). At the end of the light
+   load the device ambient is recomputed and pushed via the `OPTION_BRIGHT` floor (§6.2a).
+8. Read `point_light{id}.bin` if present — loaded as a sub-step of the light loader.
+9. Read `wind{id}.bin` if present — loaded by a separate routine on the area-activation path.
 10. If `indoor_flag = 1`: apply indoor lighting override (§5).
 
-(The environment hub's internal construction order is in §1.1; the list above is the per-area file
-load order including the light/point-light/wind files loaded by the surrounding path.)
+(The environment hub's internal construction order is in §1.1; `material{id}.bin` and `light{id}.bin`
+are loaded inside the hub, immediately before fog. `point_light{id}.bin` / `wind{id}.bin` are the only
+environment files loaded outside the hub.)
 
 ### 3.2 Per-frame update
 
@@ -361,7 +406,7 @@ interpolation `lerp(table[kf], table[kf_next], frac)`. The star/cloud domes use 
 R/G/B at `fog_colors[kf]` / `fog_colors[kf_next]` (`fog%d.bin`, or the synthesised table when
 `data_load_flag = 0` — §1.1), lerps each channel **in the byte domain** (result stays 0–255), packs
 `ARGB = (0xFF << 24) | (R << 16) | (G << 8) | B` (alpha forced opaque), and pushes it as the device
-fog colour. No /255 in the original.
+fog colour via **D3D render-state token 34** (`D3DRS_FOGCOLOR`). No /255 in the original.
 
 **Fog mode + distance — LINEAR from the section-C scalar (CODE-CONFIRMED).** The runtime fog struct
 holds `type` (1 = EXP, 2 = EXP2, 3 = LINEAR), a fog colour, `start`, `end`, and `density`. The
@@ -376,9 +421,18 @@ if s > 0:
 ```
 
 The static `fog%d.bin` `start_dist` / `end_dist` fractions seed a baseline but the **per-frame
-`s × 3.0` derivation overwrites the live fog range each tick**. EXP/EXP2 modes are supported by the
-struct but were not observed driven on the lighting tick (UNVERIFIED whether any quality tier uses
-them — see §8).
+`s × 3.0` derivation overwrites the live fog range each tick**. The scalar `s` is the lerp of a
+**per-keyframe float table** (`light%d.bin` section C); the previously applied value is cached and the
+distance commit is **skipped when `s` is unchanged**. The commit setter is **shared** — the same single
+fog-distance setter is also called from the post-load fog apply and the light-save neighbourhood; it is
+the one place fog far/near are written.
+
+The `s > 0` guard means a non-positive `s` leaves the fog struct untouched — fog is effectively
+disabled until a positive `s` is sampled. **EXP/EXP2 modes are confirmed NOT driven on the lighting
+tick:** the distance setter only ever writes the LINEAR shape (it sets the mode field to LINEAR and the
+density field to 0.0). The struct still carries `type` (1 = EXP, 2 = EXP2, 3 = LINEAR) and a density
+field, so the modes exist in layout, but no quality tier was observed switching to exponential density
+on this path — see §8.
 
 **Directional light — float, applied RAW (CONFIRMED).** The directional sampler interpolates the
 float32 `color_A` of `light%d.bin` section A and writes it to the render globals **without any
@@ -424,11 +478,17 @@ device_ambient = (0xFF << 24) | (R << 16) | (G << 8) | B
 ```
 
 This device ambient is the only ambient the device actually receives (the per-keyframe term above is
-zeroed by `K_ambient = 0`). **At the default brightness `OPTION_BRIGHT = 100`, `offset = 255`, and
-over a `(0,0,0)` base the device ambient is full white `(255, 255, 255)`.** (Prior status "assumed
-mid-slider ~50 → +0.5 floor" is now CONFIRMED 100 → +1.0 floor — this is the resolved "too-dark"
-suspect #2.) The same conversion is re-applied on three occasions: when the user moves the slider,
-when the per-frame keyframe base colour changes, and at the end of each per-area light-data load.
+zeroed by `K_ambient = 0`), and it is pushed via **D3D render-state token 139** (`D3DRS_AMBIENT`).
+**At the default brightness `OPTION_BRIGHT = 100`, `offset = 255`, and over a `(0,0,0)` base the device
+ambient is full white `(255, 255, 255)`.** (Prior status "assumed mid-slider ~50 → +0.5 floor" is now
+CONFIRMED 100 → +1.0 floor — this is the resolved "too-dark" suspect #2.)
+
+The same conversion is re-applied on three occasions: when the user moves the slider, when the per-frame
+keyframe byte base colour changes, and at the end of each per-area light-data load. The computed
+**offset is cached on the hub object** after the first computation, so the per-frame re-push on a byte-
+base change reuses the cached offset rather than re-reading and re-converting the slider value every
+frame. The slider value itself lives at a known **options-struct offset (field index 29, byte offset
++116)**: the INI-load path writes it there, and the light loader reads it from there to seed the floor.
 
 **Sun direction is static (CONFIRMED).** No per-keyframe sun direction is stored — the keyframe tables
 encode colour only. The sun/light direction is the static fallback vector `(-7, 7, 20)` (normalised
@@ -611,8 +671,10 @@ If any environment file is absent or unreadable:
       brightness after options-load settles it (expected i32, percent, default 100); layout-neutral.
     - **Fog fractions** — observed live area-1 `0.75 / 0.98` (corrected in §6.4) vs. the previous
       `0.5 / 0.9` stand-ins; read the parsed file at runtime.
-    - **EXP/EXP2 fog modes** — supported by the runtime struct but not observed driven on the
-      lighting tick; whether any quality tier switches to exponential density is unverified.
+    - **EXP/EXP2 fog modes** — **confirmed NOT driven on the lighting tick** (the shared fog-distance
+      setter only ever writes the LINEAR shape — LINEAR mode + density 0.0). The modes exist in the
+      runtime struct layout, but no path was observed switching to exponential density on this tick;
+      whether any other quality-tier path does remains unverified.
 
 ---
 

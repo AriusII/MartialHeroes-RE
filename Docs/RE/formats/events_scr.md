@@ -8,11 +8,22 @@
 > appear anywhere in this file.
 > C# parsers MUST cite this spec on every offset / magic / stride: `// spec: Docs/RE/formats/events_scr.md`.
 >
-> status: sample_verified + loader-confirmed. The runtime client loader for `events.scr` has been
-> characterized from neutral RE notes (which fields it actually dereferences); the per-field VALUE
-> distributions come from a full-file black-box harness pass over 1848 records. Where the two
-> disagree on a field's ROLE, the loader is authoritative for "what the client consumes" and the
-> harness is authoritative for "what values appear in the blob".
+> status: sample-verified (the events.scr stride, 1848 record count, all field offsets/sizes, and
+>   the four consumed fields match real VFS bytes) + loader-confirmed (the runtime loader's
+>   field-consumption contract is established from neutral static control-flow notes). Genuinely
+>   ambiguous items (mode_flag's exact 0/1 semantics; the 5 anomalous records' @0x08 sub-block) stay
+>   capture/debugger-pending.
+> ida_reverified: 2026-06-16
+> ida_anchor: 263bd994
+> evidence: [static-ida, vfs-sample]
+> conflicts: none open in §1/§2. §3 is an estimate index only — its `userlevel.scr` stride estimate
+>   (120) is REFUTED (see §3); the authoritative value is 60 B / 300 records (scr.md / config_tables.md).
+>
+> The runtime client loader for `events.scr` has been characterized from neutral RE notes (which
+> fields it actually dereferences); the per-field VALUE distributions come from a full-file black-box
+> harness pass over 1848 records. Where the two disagree on a field's ROLE, the loader is
+> authoritative for "what the client consumes" and the harness is authoritative for "what values
+> appear in the blob".
 
 The `.scr` extension is used throughout `data/script/` for a large family of unrelated flat data
 tables (no shared wire format). This document fully specifies the two `.scr` tables owned by this
@@ -25,10 +36,11 @@ and the `discript.sc` / help / guild text group) are out of scope here and only 
 
 ## Section 1 — `events.scr` (timed game-event definition table)
 
-**Confidence: CONFIRMED that the client has a runtime loader for this file and that it consumes
-only four record fields (see §1.6). Stride and record-count rule CONFIRMED by the loader's own
-size-validation. Per-field value distributions SAMPLE-VERIFIED across all 1848 records of one
-sample.**
+**Confidence: CONFIRMED (static loader) that the client has a runtime loader for this file and that
+it consumes only four record fields (see §1.6). Stride 520 B and the record-count rule are CONFIRMED
+by the loader's own size-validation AND SAMPLE-VERIFIED by VFS geometry (file size ÷ 520 = 1848
+records, remainder 0). Per-field offsets, sizes and value distributions SAMPLE-VERIFIED across all
+1848 records of one sample (re-verified 2026-06-16, build 263bd994).**
 
 ### 1.1 Identification
 
@@ -238,17 +250,25 @@ the displayed question is server-pushed (see §2.4).
 ## Section 3 — Role-classification index of the remaining `.scr` tables
 
 This is a routing aid, NOT a byte-layout spec. It tells an engineer what each `.scr` table is for
-and how reliably that role was determined, so a parser is written against the right table. Strides
-listed here are first-pass divisor estimates, NOT confirmed layouts; treat every stride in this
-table as UNVERIFIED until promoted into its own spec section. The role guesses derive from CP949
-name decoding, first-field patterns, and clean file-size divisors.
+and how reliably that role was determined, so a parser is written against the right table. Most
+strides listed here are first-pass divisor estimates; treat any row still tagged UNVERIFIED as
+unconfirmed until promoted into its own spec section. The role guesses derive from CP949 name
+decoding, first-field patterns, and clean file-size divisors.
+
+> **Re-verification note (2026-06-16, build 263bd994, VFS sample):** several rows below were
+> corroborated by VFS geometry and are now tagged **SAMPLE-VERIFIED** — `userlevel.scr` (60 B / 300,
+> the 120/150 estimate REFUTED), `userpoint.scr` (32 B / 301), `system_control.scr` (8 B / 114),
+> `playtime_reward.scr` (32 B / 5), `viplevels.scr` (92 B / 9), `mobs.scr` (488 B / 3997),
+> `statue.scr` (36 B / 430), `skillcategory.scr` (564 B / 17). The remaining UNVERIFIED rows were
+> not re-surveyed. The authoritative byte layouts for these tables live in `scr.md` /
+> `config_tables.md`, not here.
 
 Out of scope (owned elsewhere): `items.scr`, `citems.scr`, `npc.scr`, `quests.scr`,
 `mapsetting.scr`, and the `discript.sc` / help / guild-text group.
 
 | Filename | Text/Binary | Stride / records (estimate) | Role guess | Confidence |
 |----------|-------------|-----------------------------|------------|------------|
-| `mobs.scr` | binary + CP949 | stride 488 | Monster definition table (mob_id, name, stats, AI params). | HIGH |
+| `mobs.scr` | binary + CP949 | 488 B / 3997 records | Monster definition table (mob_id, name, stats, AI params). | SAMPLE-VERIFIED (stride + count) |
 | `mobsitem.scr` | binary + CP949 | variable (UNVERIFIED) | Mob drop / loot table (per-mob item lists). Shares the `mobs.scr` name header; likely variable-length records. | HIGH (role) / UNVERIFIED (stride) |
 | `skills.scr` | binary + CP949 | stride 280 | Skill definition table (skill_id, name, stats, class tags). | MEDIUM |
 | `npcs.scr` | binary + CP949 | UNVERIFIED | NPC stat / profile table (shop + AI info), distinct from `npc.scr` dialogues. | HIGH (role) |
@@ -257,23 +277,23 @@ Out of scope (owned elsewhere): `items.scr`, `citems.scr`, `npc.scr`, `quests.sc
 | `productrandname.scr` | binary + CP949 | small table | Random-craft affix (prefix/suffix) name table. | MEDIUM |
 | `upgradeitems.scr` | binary | variable (UNVERIFIED) | Item upgrade / enhancement recipe table (materials + success-rate floats per step). Likely variable-length records. | HIGH (role) / UNVERIFIED (stride) |
 | `itemscale.scr` | binary | stride ~8 (u32 + f32 pairs) | Item visual-scale parameter table (scale per item_id). | HIGH |
-| `userlevel.scr` | binary | stride 120, ~150 records | Per-character-level stat / multiplier table. | HIGH |
-| `userpoint.scr` | binary | UNVERIFIED | Loyalty / point-reward threshold table. | MEDIUM |
-| `viplevels.scr` | binary | UNVERIFIED | VIP tier definition (thresholds + benefits); very small file. | HIGH (role) |
+| `userlevel.scr` | binary | **60 B / 300 records** (the earlier 120/150 estimate is REFUTED) | Per-character-level stat / multiplier table. See scr.md / config_tables.md. | SAMPLE-VERIFIED |
+| `userpoint.scr` | binary | 32 B / 301 records | Loyalty / point-reward threshold table (stat-point allocation curve). | SAMPLE-VERIFIED (stride + count) |
+| `viplevels.scr` | binary | 92 B / 9 records | VIP tier definition (thresholds + benefits); very small file. | SAMPLE-VERIFIED (stride + count) |
 | `nicktofame.scr` | binary + CP949 | UNVERIFIED | Title / fame-rank name table (rank → title). | HIGH (role) |
 | `minds.scr` | binary + CP949 | UNVERIFIED | Mind-technique / inner-cultivation definition table. | HIGH (role) |
-| `setitemname.scr` | binary + CP949 | small table | Set-item group name table. | HIGH (role) |
-| `skillcategory.scr` | binary + CP949 | UNVERIFIED | Skill-category / skill-tree name table. | HIGH (role) |
+| `setitemname.scr` | binary + CP949 | 36 B / 61 records | Set-item group name table. | SAMPLE-VERIFIED (stride + count) |
+| `skillcategory.scr` | binary + CP949 | 564 B / 17 records | Skill-category / skill-tree name table. | SAMPLE-VERIFIED (stride + count) |
 | `skillneedset.scr` | binary | stride ~8 (u16 pairs) | Skill prerequisite-link table (skill-ID requirement pairs). | MEDIUM |
-| `statue.scr` | binary | UNVERIFIED | World statue / monument definition (ID + coordinates). | MEDIUM |
+| `statue.scr` | binary | 36 B / 430 records | World statue / monument definition (ID + coordinates). | SAMPLE-VERIFIED (stride + count) |
 | `tiphelp.scr` | binary + CP949 | UNVERIFIED | Loading-screen tip / help text table. | HIGH (role) |
 | `tutor.scr` | binary + CP949 | UNVERIFIED | Tutorial step / narrative text table. | HIGH (role) |
 | `letters.scr` | binary + CP949 | UNVERIFIED | In-game mail / letter template table. | HIGH (role) |
 | `warstoneinfo.scr` | binary + CP949 | small (~5 records) | War-stone / warshard item info lookup. | MEDIUM |
-| `system_control.scr` | binary | stride 8, ~114 entries | Global game-rate table (id + f32 multiplier pairs). | HIGH |
+| `system_control.scr` | binary | 8 B / 114 records | Global game-rate table (id + f32 multiplier pairs). | SAMPLE-VERIFIED (stride + count) |
 | `repair.scr` | binary | UNVERIFIED | Item repair-cost / durability table; small file. | MEDIUM |
 | `oblist.scr` | binary | single 12-byte record | Object list / global limit or enable flag; purpose unclear. | LOW |
-| `playtime_reward.scr` | binary | stride ~32 | Play-time reward table (online-time thresholds → item rewards). | HIGH |
+| `playtime_reward.scr` | binary | 32 B / 5 records | Play-time reward table (online-time thresholds → item rewards). | SAMPLE-VERIFIED (stride + count) |
 | `users.scr` | binary | UNVERIFIED | Account-type definition table; purpose unclear, possibly unused. | LOW |
 | `script_newserver/items.scr` | binary + CP949 | same schema as `items.scr` | "New server" config override of the items table (same format, different data). | HIGH (role) |
 | `script_newserver/npcs.scr` | binary + CP949 | same schema as `npcs.scr` | "New server" config override of the NPC table. | HIGH (role) |
@@ -298,3 +318,14 @@ Out of scope (owned elsewhere): `items.scr`, `citems.scr`, `npc.scr`, `quests.sc
   `ids_array_b` → `actor_array`; former `record_trailer` retained; the live u16 @0x64 (previously
   inside `reserved_b`/padding) → `mode_flag`.
 - Provenance: see `Docs/RE/journal.md` (a provenance entry pairs this spec).
+  - CAMPAIGN 10 / D9 (ida_reverified 2026-06-16, ida_anchor 263bd994; two-witness: static loader +
+    VFS sample): `events.scr` re-confirmed end-to-end — stride **520 B**, **1848 records** (size ÷ 520
+    remainder 0), all field offsets/sizes byte-matched, and the four CONSUMED fields
+    (`event_id`@0x00, `mode_flag`@0x64, `rate_array` u32[50]@0x68, `actor_array` u32[52]@0x130)
+    re-verified [sample-verified]; record-0 `rate_array` raw values (≈824760–950000 ÷ 1e6 = 0.82–0.95%)
+    and `actor_array` 9-digit IDs corroborated; the 5 anomalous records (event_ids 30133–30137,
+    `reserved_a`@0x08 = 1,000,000 / @0x0C = 20) located, their empty-array/zero-trailer status not
+    re-probed (carried as static-hypothesis). `autoquestion_cl.scr` stride **92 B / 1300 records**
+    [sample-verified]; no-client-loader claim [confirmed]. §3 estimate index re-surveyed: **the
+    `userlevel.scr` 120 B / 150-record estimate is REFUTED** — authoritative is 60 B / 300 records;
+    several other §3 strides promoted to sample-verified (see §3 note).

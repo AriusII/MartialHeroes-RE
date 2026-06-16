@@ -6,6 +6,22 @@
 
 ---
 
+## Re-verification banner (2026-06-16, CAMPAIGN 10 / Block D)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | `mixed` — see per-format rows. This pass re-confirmed only the **routing/identification** layer (which decoder each extension reaches) two-witness; the per-format byte tables (FX VF_36/44/32 strides, group headers, `.up`/`.exd` 40-byte triangle record, light/wind/point_light layouts) were **not** re-dumped this pass and hold at their committed tiers. |
+| `ida_reverified` | `2026-06-16` |
+| `ida_anchor`     | `263bd994` |
+| `evidence`       | `[static-ida, vfs-sample]` — routing/dispatch from the located runtime `.map` parser (witness 1) + VFS census file-count corroboration (witness 2) |
+| `conflicts`      | None. Routing re-confirmed with no drift: (1) **`.up` and `.exd` are ONE shared, distinct format** — `count(u32) + count × 40-byte triangle`, decoded by the same record decoder; `EXTRA_TERRAIN → .exd`, `UP_TERRAIN → .up`. This is structurally **distinct** from the FX group-array model of §1 — any reading that lumps `.exd`/`.up` in with the FX channels is REFUTED. (2) Each FX channel `.fx1`–`.fx7` has its **own** group decoder and its **own** per-channel texture register; the per-channel header width + vertex stride (§1.13) are mandatory. (3) Each FX channel's texture index is **1-based with a `< 1 \|\| > max` guard** (corroborated by per-channel `fx<N> texture index(%d) < 1 \|\| > max(%d)` client error strings) — confirming the shared building/terrain 1-based + clamp texture-index convention without needing the render path. |
+
+**Census this pass (witness 2, full VFS mount, routing-level corroboration):** `.up` 222 files,
+`.exd` 1 384 files (both 40-byte-triangle format, zero residual); FX channel counts in the same
+ballpark as §1.13's table. File counts are corpus observations, not load-bearing layout facts.
+
+---
+
 ## Status block
 
 | Attribute         | Value |
@@ -489,6 +505,27 @@ a group count rather than a selector.
 All seven share the universal group-array model (§1.1a): a `group_count` word, then that many group
 records; the only structural difference is the vertex stride.
 
+### 1.13 Per-channel header width and stride are MANDATORY (reconfirmed 2026-06-16, two-witness)
+
+The leading `u32` is the group/tile count for **every** channel (branchless), **but the header width
+and the vertex stride are PER-CHANNEL** — a single hard-coded FX stride or header size is a parser
+bug. The VFS census (two-witness: per-channel loader read-path + black-box, zero residual on each
+channel) pins the following:
+
+| Ext  | Header        | Vertex format | Census files |
+|------|---------------|---------------|-------------:|
+| fx1  | 20 B group hdr | VF_36 (36 B) | 226 |
+| fx2  | 20 B group hdr | VF_44 (44 B) | 595 |
+| fx3  | 44 B group hdr | VF_36 (36 B) | 160 |
+| fx4  | 48 B tile hdr  | VF_44 (44 B) | 1 |
+| fx5  | 48 B tile hdr  | VF_36 (36 B) | 89 |
+| fx6  | 32 B global hdr + VF_32 sub-chunks + 28 B footer | VF_32 (32 B) | 6 |
+| fx7  | 52 B hdr (`vertex_count` @ +0x2C, `index_count` @ +0x30) | VF_32 (32 B) | 2 |
+
+(The §§1.5–1.11 worked layouts are these same per-channel instances; the table above is the
+authoritative stride/header index. Census file counts are corpus observations, not load-bearing
+layout facts.)
+
 ---
 
 ## Section 2: Upper Terrain File  (`.up`)
@@ -499,6 +536,12 @@ records; the only structural difference is the vertex stride.
 
 **Purpose:** Stores the triangle mesh of **overhanging terrain surfaces** (bridges, raised platforms,
 overhangs) for one cell. The client tests player position against these triangles for collision at runtime.
+
+> **`.up` / `.exd` are a SHARED, DISTINCT format — NOT FX group-array files (reconfirmed 2026-06-16).**
+> Both `.up` and `.exd` use the **one** layout `count(u32) + count × 40-byte triangle` (3 × vec3 + 1
+> trailing f32) and are decoded by the **same** record decoder. This is structurally **distinct** from
+> the FX group-array model of §1; any reading that lumps `.exd`/`.up` in with the FX channels is
+> **REFUTED**. VFS census (two-witness, zero residual): **`.up` 222 files, `.exd` 1 384 files**.
 
 **Path pattern:** `data/map{MAP}/dat/d{MAP}x1{TX:04d}z1{TZ:04d}.up`
 

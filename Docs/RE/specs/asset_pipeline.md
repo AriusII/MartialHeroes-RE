@@ -1,9 +1,14 @@
 ---
 status: confirmed
-sample_verified: partial   # loader-selection mechanism and cache model CODE-CONFIRMED; per-table byte layouts and a few off-by-ones UNVERIFIED
+verification: confirmed    # control-flow + operand facts; the bgtexture/msg.xdb byte layouts also corroborated against a real VFS sample (sample-verified, see banner)
+sample_verified: partial   # loader-selection mechanism, cache model and table strides CODE-CONFIRMED; the progress-bar visual outcome is debugger-pending
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida, vfs-sample]
 subsystems: [loader_dispatch, ghtex_cache, asset_linkage, bulk_loader]
 networked: false           # the asset pipeline is entirely client-side; no wire traffic
 encoding_note: Korean in-game text and config strings are CP949 (MS-949 code page), not UTF-8.
+conflicts: progress-bar visual outcome (does the ~9 MB boot set ever visibly fill the bar?) is debugger-pending — the arithmetic is confirmed, the on-screen result is not.
 ---
 
 # Asset Loading Model — Clean-Room Specification
@@ -27,12 +32,22 @@ encoding_note: Korean in-game text and config strings are CP949 (MS-949 code pag
 
 ## Verification banner
 
-- **CONFIRMED** — recovered directly from control-flow / global wiring; safe to implement.
-- **parser-verified** — additionally cross-checked against a known mapping or a second consumer.
-- **UNVERIFIED** — hypothesis / single-source / off-by-one not yet pinned; do not hard-code.
-
-No live sample was mounted while these findings were recovered, so byte *values* are
-sample-unverified; the *selection mechanism*, *cache behaviour* and *global wiring* are read directly.
+- **verification: confirmed** — `ida_reverified: 2026-06-16` against `ida_anchor: 263bd994`;
+  `evidence: [static-ida, vfs-sample]`.
+- Tiers used inline below:
+  - **[confirmed]** — recovered directly from control-flow + operand facts (the dispatch verdict,
+    the cache model, the global wiring, the boot-thread order, the progress arithmetic).
+  - **[sample-verified]** — a control-flow fact *also* matched against a real VFS sample (the
+    bgtexture.lst 48-byte record stride / `data/map000/texture/<rel>.dds` path, the msg.xdb 516-byte
+    record stride, the terrain `idx-1` cell-byte chain). This is the strongest tier.
+  - **[static-hypothesis]** — heap-layout / single-source items with no second witness (e.g. the
+    "no budget sweep" claim rests on the absence of any reader of the accounting counters).
+  - **[debugger-pending]** — genuinely runtime outcomes a live session would settle (the progress
+    bar's on-screen fill behaviour during a real boot — see §4.4 / CONFLICT).
+- The Campaign-10 re-verification (lane C3) re-drove every claim below against control-flow; the
+  *selection mechanism*, *cache behaviour*, *global wiring*, *boot order*, and *progress arithmetic*
+  are read directly from operands. No live debugger pass was taken this lane, so the *visual* progress
+  outcome is the one debugger-pending residual.
 
 ---
 
@@ -52,10 +67,14 @@ Three independent confirmations:
    byte-reverse) returns **zero matches** anywhere in the image. The client never compares a loaded
    buffer's leading bytes against a texture signature. (byte-search-verified)
 2. **Format recognition, where it happens at all, lives inside a third-party codec.** The texture
-   path slurps the whole entry and hands the raw bytes to the D3DX "create texture from file in
-   memory" API, which inspects the in-memory header itself to decide DDS-vs-other. OGG audio is
-   handed to the Vorbis library (which reads its own `OggS` magic internally). Lua source is handed
-   to the Lua loader. The client itself performs no header test in any of these paths. (CONFIRMED)
+   path slurps the whole entry and hands the raw bytes to the D3DX "create texture from file **in
+   memory**" API, which inspects the in-memory header itself to decide DDS-vs-other. The two precise
+   D3DX entry points are now pinned: the **VFS-mounted slurp branch** uses
+   `D3DXCreateTextureFromFileInMemoryEx` (the *Ex* variant, fed the full option list from the texture
+   element's option block), while the **loose-file branch** uses `D3DXCreateTextureFromFileExA`. OGG
+   audio is handed to the Vorbis library (which reads its own `OggS` magic internally). Lua source is
+   handed to the Lua loader. The client itself performs no header test in any of these paths.
+   [confirmed]
 3. **Every first-party loader picks its reader by the call site.** Each consumer formats a hardcoded
    path template (e.g. a skybox path, a numbered OGG path, an effect manifest path), opens it through
    the format-agnostic router, then drives its own structure-aware reader. The extension in the
@@ -102,7 +121,27 @@ call-site logic (the parser hardcodes the section order), not a magic sniff. (Pe
 texture assets referenced *by* the map config are then resolved by their own hardcoded path templates
 through the same router — again call-site selection.)
 
-### 1.3 Implication for the reimplementation
+### 1.3 The concrete open router (where the three-way branch lives) [confirmed]
+
+The format-agnostic router is a single open function (with a by-name sibling) that answers **only**
+where the bytes come from. It branches on the VFS-mounted flag crossed with a request **mode bit**:
+
+| Branch | Condition | Behaviour |
+|---|---|---|
+| **Slurp** | mounted, read mode | TOC find-and-read: locate the entry, read its whole payload into a heap buffer (the `formats/pak.md` read primitive — global lock, 64-bit seek, `ReadFile`). |
+| **Loose + VFS offset seek** | mounted, raw-seek mode bit set | open the packed `data.vfs` as a loose handle, read the entry's `dataOffset` / `dataSize` from the TOC record, and `SetFilePointer` to that 64-bit offset inside the archive (this is the concrete wiring of the "raw archive seek" branch referenced by `formats/pak.md`). |
+| **Plain file** | not mounted | ordinary `CreateFileA` (read / write / create) against a loose on-disk path. |
+
+Format identity is **not** decided here. The TOC offset/size fields the loose-offset branch reads
+are the same `dataOffset` (+0x68) / `dataSize` (+0x70) fields of the 144-byte TOC record documented
+in `formats/pak.md` / `specs/vfs_overview.md`.
+
+> **Progress hook lives in this router.** The boot progress accumulator (§4.4) is incremented from
+> **inside the open router** on every tracked read — this is the concrete tie between the read path
+> and the boot progress meter. The accumulation is gated by the tracking flag, so reads outside the
+> loading screen do not move the meter. Cross-reference `formats/pak.md` (read primitive) ↔ §4.4.
+
+### 1.4 Implication for the reimplementation
 
 `Assets.Vfs` stays format-agnostic (it returns bytes). `Assets.Parsers` selects a parser **at the
 call site** — never by sniffing a header. A modern reimplementation may use the file extension as a
@@ -111,7 +150,7 @@ selector for convenience, but must understand that the original derives format i
 
 ---
 
-## 2. The GHTex named-texture cache (CONFIRMED)
+## 2. The GHTex named-texture cache [confirmed]
 
 This is the **only real asset cache** in the client (the file-level VFS layer has no cache — every
 fetch re-reads from disk, per `formats/pak.md`). It caches GPU textures by **logical name**.
@@ -121,9 +160,26 @@ fetch re-reads from disk, per `formats/pak.md`). It caches GPU textures by **log
 - A single shared manager singleton holds the cache. **The named-texture manager and the visual
   effect manager are the same singleton object** — effect/billboard manifests and named textures
   share one name-keyed container. Most callers reach it through the effect/visual paths.
+- **The sorted name pool is the `bmplist`-derived effect texture-name pool.** The name-keyed vector
+  the binary search walks is the one populated from the `bmplist` manifest at effect-boot; i.e. the
+  named-texture cache is keyed primarily off `bmplist.lst` entries. (This pins the provenance the
+  earlier "name pool" phrasing left generic — cross-reference `formats/effects.md`.) [confirmed]
 - Each cache element is a small object that owns: the logical name (the cache key), an
   "enabled" gate, a "loaded" flag, a last-use timestamp, the bound GPU texture handle (null until
-  loaded), a VRAM byte count, and a pointer to the texture-create option block.
+  loaded), a VRAM byte count, and a pointer to the texture-create option block. The recovered element
+  layout (offsets relative to the element base) is:
+
+  | Offset | Field | Notes |
+  |---|---|---|
+  | +0x08 / +0x1C | logical name (key) | small-string layout: length at +0x1C; inline buffer at +0x08 when `len < 0x10`, else a heap pointer at +0x08 |
+  | +0x20 | enabled gate | 1 = element may load |
+  | +0x21 | loaded flag | 1 = texture is bound |
+  | +0x3C | last-use / option stamp field | written by the lazy resolver (see §2.4) |
+  | +0x40 | bound GPU texture handle | `IDirect3DTexture9*`, null until loaded |
+  | +0x44 | VRAM byte count | subtracted from the global VRAM total on unload |
+  | +0x48 | texture-create option-block pointer | drives the D3DX *Ex* option list |
+
+  (Offset table only — a fuller `structs/ghtex.md` is flagged for the struct cartographer.)
 
 ### 2.2 Keying — name string, binary-searched
 
@@ -155,7 +211,7 @@ handle after the first resolve; the named lookup is used comparatively rarely.
 - Unload releases the GPU texture, clears the loaded flag and the bound handle, **decrements the live
   counter**, and **subtracts the element's VRAM byte count** from a global VRAM accounting total.
 
-### 2.5 Eviction — EXPLICIT / bulk-flush, NOT an LRU budget sweep (CONFIRMED)
+### 2.5 Eviction — EXPLICIT / bulk-flush, NOT an LRU budget sweep [confirmed]
 
 - The last-use timestamp is **written** by the lazy resolver but **no consumer reads it** — there is
   **no evictor that scans timestamps**. The LRU stamp is **vestigial / diagnostic in this build**.
@@ -163,9 +219,12 @@ handle after the first resolve; the named lookup is used comparatively rarely.
   - **Per-element explicit unload**, called by visual/effect teardown.
   - **Bulk flush-all**, which walks a secondary name-keyed container, frees each node's payload, and
     resets the name map. It is invoked at **scene / login transitions and shutdown**.
-- The live-texture and VRAM-byte totals are **accounting counters**; no budget threshold drives an
-  automatic unload (none found). They appear informational/debug only. (UNVERIFIED whether any budget
-  sweep exists; none observed statically.)
+- The live-texture and VRAM-byte totals are **accounting counters**, each mutated *only* by the load
+  (increment / add VRAM) and the unload (decrement / subtract VRAM); no budget threshold drives an
+  automatic unload. The "no sweep" conclusion rests on the absence of any *reader* of these two
+  globals among their cross-references — load and unload are their only touchers. They appear
+  informational/debug only. [static-hypothesis] (no scanning evictor was found; a reader could in
+  principle exist on an un-walked path.)
 
 > **Net cache policy: register at load, hold for the scene, bulk-flush on transition.** A
 > reimplementation can model this as a name-keyed dictionary populated at manifest load, with an
@@ -184,8 +243,9 @@ caches.
 ## 3. Linkage chains (the asset dependency graph)
 
 These are the inter-asset stitches the parser/renderer must follow. Each is expressed as
-key → resolved file. Several are corroborated against the project's recovered mappings
-(parser-verified); the terrain chain carries a CONFLICT note.
+key → resolved file. Several are corroborated against the project's recovered mappings and the real
+VFS layout ([sample-verified]); the terrain chain carries a resolved CONFLICT note on its runtime
+index source.
 
 ### A. UI scene → atlas
 ```
@@ -193,22 +253,31 @@ UI widget descriptor → tex_id → uitex.txt → data/ui/<name>.dds
 ```
 `uitex.txt` is the single root of UI texture resolution: a 4-digit tex_id maps to a VFS DDS path.
 
-### B. Terrain cell → bgtexture → DDS  (CONFLICT: the runtime index is BINARY `.lst`)
+### B. Terrain cell → bgtexture → DDS  (RESOLVED: the runtime index is BINARY `bgtexture.lst`)
 ```
 cell (area, cx, cz)
   → .ted TextureIndexGrid byte  → integer index into the terrain texture POOL
   → pool element[idx]           → GHTex( data/map000/texture/<rel>.dds )
 ```
 - The runtime index table is the **binary `bgtexture.lst`** under `data/map000/texture/`, **NOT** the
-  text `bgtexture.txt`. The `.txt` is an authoring mirror; the loader reads the `.lst`. (CONFLICT vs
-  earlier "bgtexture.txt" framing — recorded in `formats/pak.md` and `specs/vfs_overview.md`.)
-- `bgtexture.lst` layout: a u32 `count` (rejected if 0 or unreasonably large), then `count` records
-  of **48 bytes** each; record byte[0] = a kind selector, bytes[1..] = a NUL-terminated relative
-  name. Per record the loader builds a terrain-texture element into an **index-keyed pool** and
-  resolves the texture path as `data/map000/texture/<rel>.dds`. (parser-verified — matches the known
-  final terrain path.)
+  text `bgtexture.txt`. The string `bgtexture.lst` is present in the image; `bgtexture.txt` is
+  **absent** from the image — there is no `.txt` mirror referenced at runtime. The loader opens
+  `data/map000/texture/` + `bgtexture.lst`. (Resolved vs the earlier "bgtexture.txt" framing — also
+  recorded in `formats/pak.md` and `specs/vfs_overview.md`.) [confirmed]
+- `bgtexture.lst` layout: a u32 `count`, **rejected if `count == 0` or `count >= 2000`** (the exact
+  bound), then `count` **on-disk records of 48 bytes each**; record byte[0] = a kind selector,
+  bytes[1..] = a NUL-terminated relative name. Per non-zero record the loader builds a terrain-texture
+  element into an **index-keyed pool** and resolves the texture path as
+  `data/map000/texture/<rel>.dds`. [sample-verified — the 48-byte stride and the resolved path match
+  the real VFS terrain layout.]
+- **The 48-byte figure is the DISK record. The in-memory pool element is a SEPARATE, larger
+  structure (76 bytes / 0x4C), with the index stored at element +0x38.** The loader allocates and
+  reads `48 * count` bytes of disk records, then constructs one 76-byte pool element per non-zero
+  record. Do **not** conflate the two strides: parse the file with a 48-byte stride; the 76 is purely
+  the runtime object size and never appears on disk. [confirmed]
 - Kind selector: 1 ⇒ animated texture options; ≥ 2 ⇒ static options; 0 ⇒ slot skipped (no element
-  built). The `count` is propagated to the terrain layer renderers (tile / mass / overlay layers).
+  built). The `count` is propagated to the terrain layer renderers (the loader passes it to all nine
+  tile / mass / overlay layer-renderer inits). [confirmed]
 - **Cell index byte is `idx-1` (RESOLVED in favour of `idx-1`).** The earlier raw-vs-`idx-1`
   question is settled: the per-cell `.ted` texture-index byte is **1-based**, and the texture is
   resolved as `per_cell_texture_list[byte - 1]`, with byte value **0 = no-texture sentinel**. The
@@ -228,7 +297,7 @@ cell (area, cx, cz)
   repository under `data/map000/texture/` serves **all** areas — terrain textures are not
   area-local.
 
-### C. Character → skin → bind → motion  (parser-verified)
+### C. Character → skin → bind → motion  [sample-verified]
 ```
 PC class+sex+age → skin.txt → tex_ids → data/char/tex{res}/{id}.png   (skin texture)
                  → skin_class
@@ -240,9 +309,10 @@ PC class+sex+age → skin.txt → tex_ids → data/char/tex{res}/{id}.png   (ski
 - Boot priming loads, in order: `bindlist.txt`, `motlist.txt`, `skin.txt`, `actormotion.txt` (plus
   emoticon / userjoint tables) to populate the keyed manager maps below.
 - **Skin cache** — keyed by integer **gid** (the `.skn` group id), a find-or-load-on-demand tree map.
-  On a miss it formats `data/char/skin/g{gid}.skn`, loads and registers, then re-looks-up. Loading a
-  skin performs the **bind-pose stitch**: it resolves the skin's bind pose **by IdB** (weight
-  dedup/normalise math is part of the skin loader). (parser-verified — matches `.skn IdB → bind`.)
+  On a miss it formats `data/char/skin/g{gid}.skn`, loads and registers, then re-looks-up (returning
+  the cached element thereafter). Loading a skin performs the **bind-pose stitch**: it resolves the
+  skin's bind pose **by IdB** (weight dedup/normalise math is part of the skin loader). [sample-verified
+  — matches the `.skn IdB → bind` chain and the on-disk `data/char/skin/g{gid}.skn` layout.]
 - **Bind-pose pool** — a *separate* cache, keyed by bind id, **pre-registered at boot** from
   `bindlist.txt` (path prefix `data/char/bind/`, names of the form `g{IdB}.bnd`).
 - **Motion** — a motion-id-keyed tree map, primed from `motlist.txt` (path prefix `data/char/mot/`),
@@ -251,12 +321,13 @@ PC class+sex+age → skin.txt → tex_ids → data/char/tex{res}/{id}.png   (ski
   through the named-texture cache. (The exact actormotion column → catalogue-index mapping is owned
   by the animation analyst / `formats/actormotion.md`, not re-derived here.)
 
-> Motion pre-warm side-channel: a `data/motion.cache` file (a u32 count + that many motion ids) is
+> Motion pre-warm side-channel: a `motion.cache` file (a u32 count + that many motion ids) is
 > read **as a loose OS file (not via the VFS)** to force-load a recorded set of motions at startup; a
 > companion writer records which motion ids were touched so the next launch pre-warms them. This is a
-> launch-to-launch warm cache, distinct from the in-memory caches above.
+> launch-to-launch warm cache, distinct from the in-memory caches above. [static-hypothesis — the
+> `motion.cache` literal is present in the image; the loader body was not re-walked this lane.]
 
-### D. Mob → skin (same chain via actormotion)  (parser-verified)
+### D. Mob → skin (same chain via actormotion)  [sample-verified]
 ```
 mob_id → actormotion.txt (col1=mob_id → col2=skin_class) → same skin/bind/motion chain as C
 ```
@@ -282,12 +353,16 @@ The effect manifests (`xeffect.lst`/`.txt`, `bmplist.lst`/`.txt`, `xobj.lst`) ar
 path literal; the `.lst` binaries are the runtime form (count + fixed-stride records), the `.txt`
 forms are mirrors.
 
-### G. Caption id → display string
+### G. Caption id → display string  [sample-verified]
 ```
 caption_id (u32) → data/script/msg.xdb (516-byte records: u32 id + CP949 string) → displayed string
 ```
 All UI strings, item names, quest text, error messages and NPC dialog flow through this catalogue
-(model: `MsgXdbCatalog`). Owned by `formats/msg_xdb.md`.
+(model: `MsgXdbCatalog`). The loader reads fixed **516-byte (0x204)** records, derives the record
+count as `file_size / 516`, and inserts the first u32 of each record as the map key. Owned by
+`formats/msg_xdb.md`. **Loaded on the WinMain state-machine path — NOT inside the bulk boot thread**
+(see §4): the caption catalogue is primed directly during scene-machine startup, separately from the
+~47-table corpus thread. [confirmed]
 
 ### H. Item equip → effect attachment
 ```
@@ -296,12 +371,25 @@ item in slot S → itemjointeff.txt (slot_id → effect_code) → xeffect.txt (e
 
 ---
 
-## 4. The bulk asset loader (boot pre-warm thread) (CONFIRMED)
+## 4. The bulk asset loader (boot pre-warm thread) [confirmed]
+
+### 4.0 There are TWO loading-handler classes — only one spawns the thread
+
+The client has **two distinct loading-screen handler classes**, both of which enable progress
+tracking; they must not be conflated:
+
+| Handler | Spawns the bulk corpus thread? | Role |
+|---|---|---|
+| **Full load handler** | **Yes** | The heavy boot loading screen (game state 2): its constructor sets the running flag, spawns the corpus thread, and enables progress tracking. This is the one §4.1–§4.3 describe. |
+| **Simple load handler** | **No** | A lighter loading handler with **no thread spawn** — it enables progress tracking but loads nothing on a background thread. Used for lighter transition screens. |
+
+Earlier text spoke of "the loading-screen handler" as one object; in fact only the **full** handler
+owns the corpus thread. [confirmed]
 
 ### 4.1 Thread identity, spawn, and gate
 
 - A **dedicated single thread** pre-loads the global data tables and warms the subsystems. It is
-  spawned by the **loading-screen handler's constructor** (game state 2), which also flips a
+  spawned by the **full loading-screen handler's constructor** (game state 2), which also flips a
   per-handler **"running" flag to 1** just before spawning and enabling progress tracking.
 - The thread, at the very end, **sleeps ~500 ms** (a grace period), then **clears the running flag to
   0** and exits.
@@ -309,16 +397,21 @@ item in slot S → itemjointeff.txt (slot_id → effect_code) → xeffect.txt (e
   when it clears, the render loop signals the engine main loop to terminate the load state, after
   which the state machine advances out of the loading screen (toward the opening/select window). So
   **the boot blocks on the loading screen until the bulk thread finishes** — no gameplay state
-  proceeds while the bulk thread runs.
+  proceeds while the bulk thread runs. The render loop reads the normalised progress through a
+  dedicated getter (the *only* consumer of that value); the actual gate is the running flag, **not**
+  the progress value.
 
 ### 4.2 Concurrency — sequential, single thread
 
 The thread body is **straight-line sequential** (the only branch is an optional input-method texture
-step). It calls **~50 loaders one after another in a fixed compiled order**, then a handful of
+step). It calls **~47 loaders one after another in a fixed compiled order**, then a handful of
 subsystem inits, then sleeps, clears the flag, exits. There is **no fan-out, no worker pool, no
 parallelism inside the thread** — it is purely sequential preloading, running concurrently only with
 the loading-screen render loop (which just draws the bar and waits). All reads bottom out at the same
 VFS open path; there is no special bulk I/O channel.
+
+> Note: the caption catalogue `msg.xdb` (chain G) is **not** in this thread's table run — it is
+> loaded on the WinMain state-machine path, separately from the corpus thread.
 
 ### 4.3 What it preloads (families, in rough compiled order)
 
@@ -337,47 +430,80 @@ VFS open path; there is no special bulk I/O channel.
    effect-boot asset init (on the named-texture/effect manager), terrain-world singleton touch, and a
    few one-shot engine warm-ups.
 
-### 4.4 Progress meter — fixed compiled denominator
+### 4.4 Progress meter — fixed compiled denominator + the exact arithmetic [confirmed]
 
-- A process-global **progress denominator is a compiled-in constant** (≈ 9.4 million bytes). It is
-  **NOT** computed at runtime from a sum of entry sizes or an entry count — it is a fixed expected
-  total baked into the binary.
-- During the load, every **tracked** VFS read accumulates the bytes read into a cumulative total; the
-  **normalised progress = accumulated_bytes / denominator**, consumed downstream as a **0..100
-  percentage** and drawn as a fixed-width pixel bar.
-- Tracking is **enabled** when the loading-screen handler is constructed and **disabled** when it is
-  destroyed. Enabling resets the normalised value (but does **not** reset the cumulative byte total).
-- A real load reaching ~9.4 MB of tracked reads drives the bar toward 100. (UNVERIFIED that a real
-  load lands exactly at 100; the bar clamps regardless.) The *reason* for that exact denominator
-  (presumably the original packer's measured total tracked-read bytes for a reference build) is
-  UNVERIFIED. A separate, **unreferenced** alternate accumulator with a different constant exists in
-  the binary but has no callers — it is dead in this build and not part of the live path.
+- A process-global **progress denominator is a compiled-in constant — exactly `9,395,240` bytes**
+  (stored as a 64-bit value with the high dword = 0). It is **NOT** computed at runtime from a sum of
+  entry sizes or an entry count — it is a fixed expected total baked into the binary.
+- During the load, every **tracked** VFS read accumulates the bytes read into a **cumulative 64-bit
+  byte total**, and the accumulator recomputes a **normalised value** on each read.
+- **The exact arithmetic (this is the load-bearing correction):**
+  ```
+  cumulativeBytes += bytesRead                          // 64-bit cumulative tracked-read total
+  value            = cumulativeBytes / 9,395,240        // INTEGER division
+  barPx            = clamp( 223 * value / 100 , 223 )   // loading-bar pixel width, max 223 px
+  ```
+  Because both steps are integer, the `value` produced for the boot corpus (~9 MB of tracked reads)
+  is only about **1**, which yields `barPx = 223*1/100 = 2` — i.e. the bar is **effectively
+  near-static / near-empty for the whole boot read-set**. The bar fills meaningfully only when
+  `value` approaches 100, which would require on the order of **~939 MB** of tracked reads — far
+  beyond the boot set. **The earlier framing — "normalised progress is a 0..100 percentage" and
+  "~9.4 MB of tracked reads drives the bar toward 100" — is WRONG** under this arithmetic.
+- **Completion is driven by the worker done-flag, not by the bar.** The loading screen ends when the
+  boot thread clears its running flag (§4.1), *regardless* of the bar pixel width. The progress value
+  is read by exactly one consumer (the loading-screen render, via the getter) and is best understood
+  as a cosmetic/near-static indicator in this build, not the gate.
+- Tracking is **enabled** when a loading-screen handler is constructed (both the full and simple
+  handlers enable it) and **disabled** when it is destroyed. Enabling **resets the normalised value
+  to 0** but does **not** reset the cumulative byte total.
+- The *reason* for that exact denominator (presumably the original packer's measured total
+  tracked-read bytes for some reference build) is unexplained. A separate, **unreferenced** alternate
+  accumulator with a different constant exists in the binary but has no callers — it is dead in this
+  build and not part of the live path. [static-hypothesis — re-confirmation of the dead accumulator
+  was not re-driven this lane.]
+
+> **Residual (debugger-pending):** whether the bar ever *visibly* moves during a real boot is a
+> runtime outcome the arithmetic alone cannot settle. The arithmetic above is [confirmed] from
+> operands; a live session watching the byte total / normalised value during a real boot would
+> confirm the on-screen near-static behaviour (pilot only — never `dbg_start`).
 
 > Reimplementation guidance: parallelising the boot loaders is safe **provided the completion gate is
-> preserved** (do not advance past the loading screen until all preloads finish). The fixed-byte
-> progress denominator can be replaced by a real total-bytes or item-count denominator for an
-> accurate bar.
+> preserved** (advance only when the boot worker signals done — do **not** key the transition off the
+> bar). For a faithful 1:1 loading screen, reproduce the near-static bar (the original genuinely
+> barely moves); for a *nicer* bar, replace the fixed denominator with a real total-bytes or
+> item-count denominator. Bar geometry for a 1:1 port: max width **223 px**, `barPx = 223*value/100`.
 
 ---
 
 ## 5. Cross-references
 
 - `formats/pak.md` — `.inf`/`.vfs` container, open-mode dispatch, three-branch read primitive,
-  `vfsmode` toggle, `bgtexture.lst` CONFLICT note.
+  `vfsmode` toggle, `bgtexture.lst` CONFLICT note. **The progress accumulator (§4.4) lives inside the
+  open router described here (§1.3) — see the read-path ↔ progress-meter cross-link.**
 - `specs/vfs_overview.md` — directory tree, per-extension census, manifest-linkage table, format gaps.
 - `specs/resource_pipeline.md` — boot worker timing, loading-screen rendering, terrain streaming,
-  the high-level universal cache pattern, locking model.
-- `formats/terrain.md` — terrain cell formats (follow `bgtexture.lst`, see chain B).
+  the high-level universal cache pattern, locking model. **The progress-bar arithmetic correction in
+  §4.4 (value = bytes / 9,395,240 integer; bar = clamp(223·value/100); near-static for the boot set;
+  completion via the worker done-flag) is cross-confirmed by this lane.**
+- `formats/terrain.md` — terrain cell formats (follow `bgtexture.lst`, see chain B; §5.6 block-3
+  `idx-1` chain).
 - `formats/actormotion.md`, `formats/animation.md`, `formats/mesh.md` — character chain interiors.
-- `formats/msg_xdb.md` — caption catalogue (chain G).
-- `formats/effects.md`, `formats/sound_tables.md` — effect and sound chains (F, E).
+- `formats/msg_xdb.md` — caption catalogue (chain G; 516-byte records).
+- `formats/effects.md` — the GHTex name pool is the `bmplist`-derived effect texture-name pool (§2.1);
+  effect chain F.
+- `formats/sound_tables.md` — sound chain E.
+- `structs/ghtex.md` (flagged for the struct cartographer) — the recovered GHTex element offset table
+  (§2.1).
 - Canonical names: see `Docs/RE/names.yaml`.
 - Provenance: see `Docs/RE/journal.md`.
 
 ## 6. Names to flag for `names.yaml` (selection only — not applied here)
 
 Loader/cache concepts worth canonicalising: the named-texture manager / cache (`GHTexManager`,
-`GHTex`), the terrain texture pool, the bulk asset-loader boot thread, the progress denominator, the
-gid-keyed skin cache, the bind-pose pool, the motion map, the animation catalogue, and the asset
-chain entry points (UI atlas, terrain bgtexture, character skin/bind/motion, sound table, effect
-xeff, caption catalogue). The glossary is orchestrator-owned; these are flagged, not edited.
+`GHTex`) and its load/unload pair, the terrain texture pool (`bgtexture.lst` parser), the **two**
+loading-handler classes (full vs simple), the bulk asset-loader boot thread, the progress denominator
+(`9,395,240`) + the byte-total / normalised-value / tracking-gate globals + the live-texture and
+VRAM-byte accounting counters, the open router with its progress hook, the gid-keyed skin cache, the
+bind-pose pool, the motion map, the animation catalogue, the `msg.xdb` caption loader, and the asset
+chain entry points (UI atlas, terrain bgtexture, character skin/bind/motion, sound table, effect xeff,
+caption catalogue). The glossary is orchestrator-owned; these are flagged, not edited.

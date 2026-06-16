@@ -1,5 +1,15 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the 3-byte header read, the 5-slot loop bound,
+#                 and the per-slot 981-byte sub-block read sizes 880/96/1/4 are all control-flow-confirmed);
+#                 field VALUE semantics (descriptor interior, SlotFlag/Timestamp meaning, ServerId/
+#                 ChannelId real values) are capture/debugger-pending (no live capture this campaign).
+#   ida_reverified: 2026-06-16
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: CORRECTED the prior "loops ~8 slots" reading -> the handler loops EXACTLY 5 slots
+#              (the account character-slot count); the 5x981 record model is confirmed.
 
 name: SmsgCharacterList
 opcode: 0x30001           # major 3 (CharacterMgmt), minor 1 -> (3 << 16) | 1
@@ -9,14 +19,14 @@ spec: packets/3-1_character_list.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Character-select list. A 3-byte header with a slot bitmask, followed by one 981-byte slot record per populated slot. Each slot record is an 880-byte SpawnDescriptor + a 96-byte stat block + a flag + a timestamp. The descriptor drives the slot's rendered appearance (skin/skeleton/outfit) -- a list slot shows the REAL character, not a placeholder.
+summary: Character-select list. A 3-byte header with a slot bitmask, followed by one 981-byte slot record per populated slot. The handler loops EXACTLY 5 slot indices (the account character-slot count) and reads a record per set bit. Each slot record is an 880-byte SpawnDescriptor + a 96-byte stat block + a flag + a timestamp. The descriptor drives the slot's rendered appearance (skin/skeleton/outfit) -- a list slot shows the REAL character, not a placeholder.
 
 # Fixed header only is modelled as the codegen struct. The variable per-slot records are described
 # in notes as their own field tables (the engineer hand-codes the repeat loop driven by SlotMask).
 fields:
   - { name: ServerId,  type: u8 }   # 0x00  server id / list context byte
   - { name: ChannelId, type: u8 }   # 0x01  channel id / context byte
-  - { name: SlotMask,  type: u8 }   # 0x02  slot bitmask: bit i set => slot i record follows (loop ~8 slots)
+  - { name: SlotMask,  type: u8 }   # 0x02  slot bitmask: bit i set => slot i record follows (loop is EXACTLY 5 slots)
 
 notes: |
   Static inference only; no capture available. VARIABLE-LENGTH packet.
@@ -25,7 +35,10 @@ notes: |
     0x00 (1B) ServerId  : server id / list context byte.
     0x01 (1B) ChannelId : channel id / context byte.
     0x02 (1B) SlotMask  : slot bitmask. Bit i set => slot i has a record that follows. The handler
-                          loops ~8 slot indices and reads a record for each set bit.
+                          loops EXACTLY 5 slot indices (the account character-slot count; index 0..4,
+                          LSB-first) and reads a record for each set bit. CONFIRMED 5 (control-flow:
+                          the per-slot scratch is a 5-entry array). The prior "~8 slots" reading was
+                          wrong -- only 5 slots are scanned.
 
   PER-SLOT RECORD (981 bytes, appended once per set bit in SlotMask). The handler reads it as four
   sequential sub-blocks, in this fixed order:
@@ -95,8 +108,15 @@ notes: |
   first N slots). Owned by frontend_scenes.md SS3.1 (BIT-POSITION placement). LSB-first.
 
   IMPLEMENTATION GUIDANCE: read the 3-byte header, then for each set bit in SlotMask (LSB-first,
-  ~8 slots) decode one 981-byte record by stepping the four sub-blocks above. Drive the
-  SpawnDescriptor decode from structs/actor.md.
+  scan bits 0..4 -- 5 slots) decode one 981-byte record by stepping the four sub-blocks above. Drive
+  the SpawnDescriptor decode from structs/actor.md.
+
+  PER-SLOT SCRATCH GEOMETRY (corroboration, CONFIRMED control-flow; NOT wire fields): the 5 decoded
+  slot records land in distinct scratch regions of the char-select handler singleton -- the 880-byte
+  descriptors occupy a contiguous descriptor block (stride 880 bytes per slot), the 96-byte stat
+  blocks a contiguous 5 x 96 = 480-byte block, the 5 flag bytes a 5-byte run, and the 5 timing words
+  a stride-4 run. This independently confirms BOTH the 5-slot count and the 981-byte (880+96+1+4)
+  per-record layout.
 
   CONFLICT (level boundary): the level u16 at descriptor +0x3A may overlap the two state bytes at
   desc +0x38/+0x39. Do NOT promote a clean u16 level without a 5/53 vitals capture for a character

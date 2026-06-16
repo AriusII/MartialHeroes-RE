@@ -1,5 +1,12 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED; size 0 (header-only) + single emitter are static-HIGH. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: builder writes header words 1/0, makes NO body-append call)
+#   no-net-busy-latch:   confirmed   (unique among major-1: the +82364 latch store is absent)
+#   wire VALUE semantics: n/a        (header-only frame; no payload bytes carry meaning)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: none (cmsg_logout.yaml re-confirmed ACCURATE)
 
 name: CmsgLogout
 opcode: 0x10000           # major 1, minor 0 -> (1 << 16) | 0

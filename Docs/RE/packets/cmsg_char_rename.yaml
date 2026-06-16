@@ -1,5 +1,14 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED field internals; size + slot+name split + trigger are static-HIGH. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: builder writes header 1/13 + appends a fixed 0x12 = 18-byte body)
+#   field split:         confirmed   (caller writes the slot byte first, then strcpy of the new-name C-string one byte
+#                        after: slot@0x00 + 17B name@0x01; sum 1+17 = 18)
+#   wire VALUE semantics: capture/debugger-pending (the exact CP949 length cap the server enforces in the 17-byte field)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: none (the refined cmsg_char_rename.yaml re-confirmed ACCURATE; the 18B name-only 1-13_rename_character.yaml
+#              tombstone is correct)
 
 name: CmsgRenameCharacter
 opcode: 0x1000d           # major 1, minor 13 -> (1 << 16) | 13

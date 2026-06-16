@@ -1,5 +1,14 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED intra-payload offsets; size + name-at-0 + class-word are static-HIGH. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: builder writes header 1/6 + appends a fixed 0x34 = 52-byte body)
+#   Name@0x00 placement: confirmed   (the validated name is string-copied to body offset 0 at create-confirm)
+#   intra-body offsets:  static-hypothesis (the builder blits one opaque 0x34 staging blob; sub-field offsets
+#                        are the create-form's per-control stores, not witnessed at the send site)
+#   wire VALUE semantics: capture/debugger-pending (sex-vs-hair distinction @0x14/0x16; per-stat semantic order)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: none (size 52 + Name@0 re-confirmed; intra-offsets remain single-source inference)
 
 name: CmsgCreateCharacter
 opcode: 0x10006           # major 1, minor 6 -> (1 << 16) | 6

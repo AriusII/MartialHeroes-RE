@@ -4,8 +4,21 @@
 > Consumed by `Assets.Parsers` — but only as a **negative** instruction: build NO runtime parser
 > for these families. Every offset an engineer cites must reference this file or the cross-referenced
 > detail sections.
->
-> status: sample_verified (census + layout)
+
+<!--
+verification: sample-verified (census + .sod.pre / .ted.post layout against the real VFS); the
+              .fx<N>.pre vertex stride remains static-hypothesis (arithmetic ambiguity)
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida, vfs-sample]
+conflicts: none
+-->
+
+> **status: sample_verified** — census + `.sod.pre` polygon-list layout + `.ted.post` byte count
+> re-confirmed against the real VFS mount (43 347 entries) on build `263bd994`. The
+> `.fx<N>.pre` extended vertex stride is the only item still static-hypothesis (see §Known
+> unknowns). LIVE/DEAD verdicts unchanged: both families are authoring/editor-only and the runtime
+> never opens them.
 
 ---
 
@@ -53,6 +66,12 @@ Therefore: an engineer wiring `Assets.Parsers` resolves the base extension only 
 |--------------|------:|-----------------------------------------------------------------------------------|
 | `.pre` total | 2 014 | `.sod` 848 · `.bud` 757 · `.fx2` 170 · `.fx1` 127 · `.fx3` 82 · `.fx5` 29 · `.fx7` 1 (no `.fx4`/`.fx6` `.pre` observed) |
 | `.post` total | 852  | all `*.ted.post`; every entry exactly 46 987 bytes (= a full `.ted`)               |
+
+Every count above was re-matched **exactly** against the VFS mount on build `263bd994` (`.pre`
+2 014, `.post` 852, and the full per-base breakdown), with **zero drift** from the prior campaign.
+The `.post` family additionally re-confirms by aggregate byte volume: the VFS reports 40 032 924
+bytes for the `.post` extension, and 40 032 924 / 852 = 46 987.0 exactly — every `.post` entry is a
+full-size `.ted`.
 
 `.pre` sizes range from tiny (a 40-byte `.sod.pre`, a 195-byte `.bud.pre`) to 800 KB+ — consistent
 with **full files of varying content**, not fixed-size patch headers. No compression, no encryption;
@@ -129,6 +148,16 @@ structure; this is two stages of the same pipeline, not a conflict.
 - **File-size formula:** `4 + Σ over polygons (4 + vertexCount_i × 8)`. For a uniform-vertex-count
   file this collapses to `4 + polyCount × (4 + vertexCount × 8)`. Spot-checked exact across tri,
   quad, pentagon, hexagon, heptagon files and across mixed-polygon files.
+
+**Re-verification (build `263bd994`, two distinct files):** the formula was re-confirmed on the real
+VFS against both ends of the size range:
+- A **40-byte** all-quad file: `polyCount = 1`, the single polygon's `vertexCount = 4`, followed by
+  4 XZ corner pairs (32 bytes). `4 + 4 + 32 = 40` — exact.
+- A **1 048-byte** all-quad file: `polyCount = 29`, first polygon `vertexCount = 4`.
+  `4 + 29 × (4 + 4×8) = 4 + 29 × 36 = 1 048` — exact.
+
+These bracket the n=1 and the multi-polygon cases and re-pin `polyCount` as the leading u32, the
+per-polygon `vertexCount` u32, and the 8-byte (X,Z) corner pair with no Y stored.
 
 Files with uniform vertex counts and files with mixed counts both occur; small files tend to be
 uniform (all-quads or all-tris), larger files mix shapes.

@@ -1,3 +1,11 @@
+---
+verification: confirmed
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida]
+conflicts: texture-load flag 0x35540004 semantics (value confirmed, meaning capture/debugger-pending); first-paint font slot index (capture/debugger-pending); .do class-stance stride 116B here vs 166B in config_tables.md (config-table-lane fix, open)
+---
+
 # Format: .txt (UI manifest files) — uitex.txt, skillicon.txt, crestlist.txt, texturelist.txt
 
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code.
@@ -37,6 +45,42 @@
 - **No magic / no version field.** Files are identified by their VFS path.
 - **Endianness:** not applicable (text format).
 - **Line endings:** CRLF (Windows).
+
+---
+
+## 0. Scope — these are texture-ID REGISTRIES, not window-layout manifests (CONFIRMED)
+
+> **Read this first.** The file title says "UI manifest files," which a reader could mistake
+> for "the files that lay out the windows." They are **not** that. Every file documented here is
+> a **texture-id → VFS-path registry** (`UiTex.txt`, `skillicon.txt`, item `texturelist.txt`) or a
+> **per-guild crest pool list** (`crestlist.txt`). They tell the engine *which DDS file* to load
+> for a given integer id. **They never carry an element's on-screen position or its atlas
+> source-rect.**
+>
+> **There is NO on-disk UI layout manifest anywhere in the VFS.** A window's per-element layout
+> (each widget's destination position, width/height, and atlas source rectangle) is **code-baked**
+> — it is constructed at runtime by that window's `BuildScene` method (the primary vtable slot 14 /
+> byte offset +56), invoked once from the engine's scene state machine immediately after the window
+> ctor, by calling the shared GU-widget builders with **integer-literal coordinates**. The
+> construction model, the builder coordinate contract, and a worked element census are documented
+> in **§14** below; the authoritative per-window layout (the literal coordinate tables) lives in
+> **`specs/ui_system.md`** (the window-construction authority). [confirmed]
+>
+> **What is genuinely data-driven for UI rendering** is a narrow set of inputs, summarised so an
+> engineer does not go hunting for a layout file that does not exist:
+>
+> | Data-driven input | What it supplies | Source | This doc |
+> |---|---|---|---|
+> | Texture-id registries | id → DDS path (atlas *selection* only) | `UiTex.txt`, `skillicon.txt`, item `texturelist.txt` | §1, §2, §10 |
+> | Per-skill icon sub-rect | `(iconSrcX, iconSrcY)` 23×23 atlas cell | per-class stance `.do` files | §2.6, §2.7 |
+> | Guild crest pool | per-guild uploaded crest blobs | `crestlist.txt` | §3 |
+> | Caption text | widget caption strings by numeric id | message DB (`msg.xdb`) | §8, §14.4 |
+> | UI scalar tunables | e.g. `NEW_SERVER_INDEX` | `data/script/uiconfig.lua` | §14.5 |
+> | UI font slots | 15 code-defined font faces (not a file) | startup code | §12 |
+>
+> The per-skill `(iconSrcX, iconSrcY)` pair (§2.6/§2.7) is the **one and only genuine data-driven
+> source-rect in the entire UI** — the exception that proves the rule that every other element's
+> source-rect is a code literal.
 
 ---
 
@@ -1098,8 +1142,359 @@ when the same tex_id appears in both 2D and 3D contexts.
 
 ---
 
+## 12. UI font slot table (15 fixed slots) — CONFIRMED
+
+**CAMPAIGN VFS-MASTERY-B — CONFIRMED (V1 loader: init loops over 15 slots, WinMain populates
+exactly 15). NOT file-observable (the table is built in code; there is no font `.txt` in the VFS),
+so this is a code-defined fixed table, not a parsed file format — documented here so the front-end
+text renderer reproduces it exactly.**
+
+The client builds a fixed array of **15 font slots** at startup. Each slot is a small record
+describing one font face the UI can draw with; a widget selects a slot by index. There is no
+on-disk font manifest — the slots are populated from constants in the startup path and the per-slot
+font object is created with a HANGEUL (CP949) character set so Korean glyphs render.
+
+### 12.1 Per-slot record (logical fields)
+
+Each of the 15 slots carries the following fields (order as built in code; sizes are the logical
+field widths a re-implementation needs, not an on-disk stride — this table is never serialised):
+
+| Field | Type | Role | Confidence |
+|---|---|---|---|
+| `face_name` | string pointer | Font face name passed to the font-creation call (e.g. the front-end default is the Korean `DotumChe` family) | CONFIRMED |
+| `size` | int | Nominal point/pixel size requested when the font object is created | CONFIRMED |
+| `char_width` | int | Advance width per character used by the UI text-layout math (see §12.3) | CONFIRMED |
+| `row_height` | int | Line height used to advance to the next text row | CONFIRMED |
+| `weight` | int | Font weight passed to the font-creation call (0 = normal/default) | CONFIRMED |
+
+The font object itself is created with the **HANGEUL character set** so the CP949 game text draws
+correctly. A re-implementation should request a Korean-capable font with the same family/size and
+fall back gracefully if the exact face is unavailable.
+
+### 12.2 Slot 0 — the front-end default (CONFIRMED)
+
+Slot **0** is the default font used by the front-end (login / server-list / character-select):
+
+| Field | Value | Confidence |
+|---|---|---|
+| `face_name` | `DotumChe` (Korean fixed-pitch family) | CONFIRMED |
+| `size` | 12 | CONFIRMED |
+| `char_width` | 6 | CONFIRMED |
+| `row_height` | (per-slot; row advance for slot 0) | CONFIRMED (field present) |
+| `weight` | 0 (normal) | CONFIRMED |
+
+The remaining 14 slots (1..14) are distinct face/size/weight combinations used by other UI surfaces;
+their individual face/size values are part of the recovered table but are not enumerated row-by-row
+here beyond the slot-0 default and the per-field shape above. The **count of exactly 15 slots** is
+the load-bearing fact for an engineer (allocate 15, index by slot).
+
+### 12.3 Text layout math (CONFIRMED)
+
+The UI text layout uses the slot's own metrics, not per-glyph measurement:
+
+- **Horizontal extent** of a single-line string = `char_width * strlen` (the slot's `char_width`
+  times the string length), i.e. a fixed advance per character.
+- **Vertical advance** between lines = the slot's `row_height` per line.
+
+Because the advance is a fixed `char_width` (not per-glyph kerning), a faithful re-implementation
+should lay out text monospaced at the slot's `char_width`/`row_height` rather than relying on the
+host font's natural metrics, or front-end text alignment will drift from the original.
+
+> **DBG-pending:** which slot index paints the very first login frame (the first-paint default) is
+> not settled from static analysis; confirm against the live client under the maintainer's debugger.
+
+---
+
+## 13. Manifest loader vs texture loader — `Icon_LoadFileVFSorDisk` loads TEXT, not pixels (CORRECTION)
+
+**CAMPAIGN VFS-MASTERY-B — CONFIRMED correction (supersedes the campaign-8 baseline framing).**
+
+The loader named `Icon_LoadFileVFSorDisk` is **NOT a texture/pixel loader**. It byte-slurps a
+**text manifest file** (e.g. a `uitex` / `skillicon`-family registry) into memory and feeds the
+manifest **text tokenizer** described in this document; it never decodes image pixels. The earlier
+baseline that listed it among the texture loaders was wrong.
+
+- **What it loads:** the raw bytes of a *text* manifest (the braced-block `UiTex.txt` /
+  `skillicon.txt` grammars of §1 and §2), which it then hands to the text parser.
+- **What it does NOT do:** it does not call the in-memory texture-creation path and does not produce
+  a decoded image. Pixel decoding for the DDS files those manifests *reference* happens later, via
+  the single unified texture loader documented in `formats/texture.md`.
+- **Implication for `Assets.Parsers`:** keep the manifest-text path (this document) and the
+  texture-pixel path (`formats/texture.md`) as two distinct loaders. Do not treat
+  `Icon_LoadFileVFSorDisk` as a decoder of DDS/PNG/TGA/BMP — it only delivers manifest *text*.
+
+This is a names/framing correction only; it does not change the manifest grammar tabled above.
+
+---
+
+## 14. The code-baked element-construction model (CONFIRMED — 2026-06-16)
+
+> **The other half of the picture.** §1–§13 above cover the *registries* (id → texture path) and
+> the *content tables* an engineer loads from disk. This section documents how a window's per-element
+> **layout** is actually produced — and the load-bearing fact is that it is **not loaded from any
+> file at all**. It is constructed in code. This section is the bridge from "which texture" (the
+> registries) to "where on screen / which sub-rect" (the code), with `specs/ui_system.md` holding the
+> authoritative per-window literal tables.
+
+### 14.1 Window construction model — `BuildScene` (CONFIRMED)
+
+Each front-end and HUD window is a Diamond UI window object. Its layout is built by a single
+virtual method — **`BuildScene`, the primary vtable slot 14 (byte offset +56)** — invoked **once**
+from the engine scene state machine immediately after the window's constructor runs. (The state
+machine is the 8-case game loop: 0 = cold bootstrap, 1 = LOGIN, 2 = load/opening-skip gate,
+3 = OPENING cinematic, 4 = CHARACTER-SELECT, 5 = in-game, 6 = quit, 7 = error; the LoginWindow is
+built in the LOGIN case, the SelectWindow in the CHARACTER-SELECT case. See `specs/game_loop.md`.)
+
+The constructor itself builds **no widgets** — it only zero-inits fields, registers the window's
+command name, installs its vtables (primary at object +0x00, a secondary interface vtable), and
+seeds an initial sub-state field. All widget construction happens in `BuildScene`. [confirmed]
+
+`BuildScene` is one long straight-line routine that:
+
+1. Optionally loads a single scalar tunable from `data/script/uiconfig.lua` (see §14.5) — the only
+   data-file input to layout, and it is a scalar **index**, not coordinates.
+2. Computes the window origin from screen metrics — e.g. the LoginWindow centres a 1024×768 canvas:
+   `originX = screenW/2 − 512`, `originY = screenH/2 − 384`. [confirmed]
+3. **Eagerly preloads the window's texture atlases** into the window's own embedded texture list
+   (a `GUTextureList` sub-object at a fixed object offset), each via a single texture-load call
+   that returns a per-window texture handle (§14.6). HUD windows may resolve an atlas through the
+   `UiTex.txt` id; front-end windows hardcode the paths (§14.5).
+4. **Constructs every child widget** — allocates the widget object, then makes one GU-builder call
+   carrying **literal `dstX, dstY, w, h, srcX, srcY`** values, then parents the widget onto its
+   container with the add-child / add-child-with-action helper.
+5. Installs a render callback and performs an initial relayout/show.
+
+There is **no per-element file read** in this routine other than the one `uiconfig.lua` scalar and
+the hardcoded atlas paths. No element table, no per-element manifest, no source-rect file exists on
+disk. [confirmed]
+
+> **General-pattern scope note (capture/debugger-pending for non-Login windows):** the shared GU
+> builders and the `BuildScene` slot-14 mechanism are confirmed identical across windows; the full
+> element census below is enumerated for the LoginWindow. The claim that *every* window's literals
+> follow this exact pattern is confirmed for the builder mechanism and confirmed per-window only as
+> each window's `BuildScene` is enumerated (the CharSelect/Main/Loading windows are enumerated in
+> `specs/ui_system.md`). The mechanism itself is [confirmed].
+
+### 14.2 GU-builder coordinate contract (CONFIRMED)
+
+Every widget ctor chains a shared base image-component builder first, then appends its own state.
+The canonical builder signature is:
+
+```
+Build*(self, texHandle, dstX, dstY, w, h, srcX, srcY, color)
+```
+
+- **Destination rect** = `(dstX, dstY, w, h)` in the window-local canvas (the 1024×768 front-end
+  space, offset by the computed window origin).
+- **Atlas source rect** = `(srcX, srcY, w, h)` on the named atlas — **the same `w, h` as the
+  destination**. UI blits are strictly **1:1; there is no scaling**. The builder derives the source
+  *right* edge as `srcX + w` and the source *bottom* edge as `srcY + h`.
+- `color` is a packed tint; `−1` means untinted (draw the atlas pixels as-is).
+
+[confirmed]
+
+The base builder writes the supplied arguments into the GUComponent fields described in §14.3.
+
+### 14.3 GUComponent geometry fields (CONFIRMED — corrects an earlier transposition)
+
+The GU widget base object lays its geometry out as follows. **Width and position were transposed in
+an earlier draft; the corrected layout is:**
+
+| Offset | Field | Notes |
+|---|---|---|
+| +0x0C | packed RGB tint | low 24 bits = RGB; forced-alpha byte at +0x0F |
+| +0x14 | local x | builder `dstX` source before world-compute |
+| +0x18 | local y | builder `dstY` source before world-compute |
+| +0x1C | **WIDTH** | destination/source width `w` |
+| +0x20 | **HEIGHT** | destination/source height `h` |
+| +0x24 | posX | computed destination left |
+| +0x28 | posY | computed destination top |
+| +0x2C | computed world x | resolved against parent |
+| +0x30 | computed world y | resolved against parent |
+| +0x34 | (width span / src-W seed) | seeded from `w` |
+| +0x44..+0x83 | 64-byte D3D transform matrix | per-widget transform |
+| +0x84 | parent pointer | owning container |
+
+There is **no sized constructor** — only a default zero-init ctor. Geometry is applied afterwards
+through the setters/builders, never via constructor arguments. [confirmed]
+
+### 14.4 Multi-state widgets bake every state as an atlas origin (CONFIRMED)
+
+Widgets with visual states store **each state as its own `(srcX, srcY)` literal on a single atlas**.
+There is no separate per-state texture and no runtime tinting to fake states — each state is a
+distinct sub-rect on the same sheet, baked as code literals:
+
+- **3-state button** — three `(srcX, srcY)` origins: **normal / hover / pressed**, all the same
+  `w, h`. A post-construction `SetFrameOrigins(self, nX,nY, hX,hY, pX,pY)` helper can override the
+  three origins after the ctor (used where a strip wants per-instance frames). [confirmed]
+- **Checkbox** — two `(srcX, srcY)` origins: **off / on**. [confirmed]
+- **Label** — no texture (texture handle 0); its caption is set separately from the message DB by
+  numeric id (see §14.4 caption note below and §8). [confirmed]
+- **Textbox** — base geometry plus an IME-mode field and a max-length field, both set by literal
+  immediately after construction. [confirmed]
+- **Panel** — base geometry plus an opaque/clip flag. [confirmed]
+
+> **Caption binding.** Label/text captions are bound **at build time** by numeric id from the
+> message DB (`msg.xdb`). The LoginWindow row captions use ids 4001..4028 (see §14.7 / §8). This is
+> the only "text" a window pulls from disk during build; it is not layout data.
+
+> **Relationship to §2.6.** §2.6's chrome table (icon backplate, frame rings, cooldown sprites) is
+> the *skill-window-specific* application of this general model — those are fixed `(srcX, srcY)`
+> literals on `mainwindow.dds`. §14.4 states the general button/checkbox frame model that §2.6 is a
+> specific instance of.
+
+### 14.5 Front-end windows preload atlases by HARDCODED PATH (bypassing UiTex.txt) (CONFIRMED)
+
+The LoginWindow does **not** resolve its atlases through the `UiTex.txt` id registry. Its
+`BuildScene` preloads **exactly four atlases by hardcoded VFS path** into the window's embedded
+texture list, in this order, and the builders thereafter reference the returned per-window handles
+directly:
+
+| Order | Hardcoded path | Census alias |
+|---|---|---|
+| 1 | `data/ui/login_slice1.dds` | A1 |
+| 2 | `data/ui/loginwindow.dds` | LW |
+| 3 | `data/ui/InventWindow.dds` | IW |
+| 4 | `data/ui/loginwindow_02.dds` | L2 |
+
+So for the front-end windows even the *texture binding* is code-baked, not registry-driven. §5 lists
+several of these files as "hard-coded path" windows; §14.5 states the *mechanism*: preload into the
+window's embedded texture list, then build with the returned handles. [confirmed]
+
+**`data/script/uiconfig.lua` — a data-driven UI input.** The LoginWindow `BuildScene` loads this Lua
+config and reads a scalar integer key `NEW_SERVER_INDEX`. It is **not** a layout manifest (it carries
+no element coordinates) — it is a small scalar-tunables file. It belongs in the cross-reference list
+as a genuine data-driven UI input. [confirmed]
+
+### 14.6 Per-window texture-list ownership (CONFIRMED)
+
+Each window embeds its own `GUTextureList` sub-object at a fixed object offset (the LoginWindow's is
+at object +0x220). Every atlas is added with one texture-load call,
+`Texture_LoadFromVfsOrDisk(textureList, path, flag, -1)`, which appends the atlas and returns a
+per-window handle that the element builders reference. The flag argument is the constant
+`0x35540004` (decimal 894720068), passed identically for every atlas in the front-end build path.
+
+> **`0x35540004` semantics — capture/debugger-pending.** The flag *value* is confirmed (it is the
+> immediate operand of every front-end texture-load call); its *meaning* (a format/usage flag) is a
+> static hypothesis not yet confirmed against the running loader. [value confirmed; meaning
+> capture/debugger-pending]
+
+### 14.7 Worked element census — LoginWindow (CONFIRMED)
+
+All coordinates below are **source-code integer literals** read from `BuildScene`. Destination =
+`(dstX, dstY, w, h)` in the window-local 1024×768 space; Source = `(srcX, srcY)` (the width/height
+of the source rect equal the destination `w, h` — see §14.2). The `tex` column names the atlas (see
+§14.5 aliases: A1 = login_slice1, LW = loginwindow, IW = InventWindow, L2 = loginwindow_02). The
+`action` column is the command id bound at parent time and routed to the LoginWindow event handler.
+The window builds **73 widgets** in total (the construction counter runs 0..73). [confirmed]
+
+> **Captioned-row identity — RECONCILED:** rows 1–5 and the 22-label loop are the **server-list /
+> channel selection container** (the listbox panel, its scroll-up/down/thumb, its banner, and its
+> 22 channel-row captions), **not** an EULA/terms panel. The message-db ids **4001..4022 are the
+> server-list / channel ROW CAPTIONS** parented to that container. There is **no EULA/terms panel**
+> in the LoginWindow construct (an earlier "EULA" reading and any "built-but-hidden EULA" inference
+> are superseded by this element-by-element construct walk). [confirmed]
+
+| # | widget | tex | dst (x, y, w, h) | src (x, y) | action | role |
+|---|---|---|---|---|---|---|
+| 0 | Image | LW | 0, 110, 1024, 490 | 0, 0 | — | full login backdrop (initially hidden) |
+| 1 | Panel | LW | 270, 85, 483, 490 | 0, 490 | — | server-list / channel container |
+| 2 | Button | LW | 467, 86, 13, 10 | 483, 490 | 106 | channel list scroll-up |
+| 3 | Button | LW | 467, 455, 13, 10 | 505, 490 | 107 | channel list scroll-down |
+| 4 | Button | LW | 469, 98, 9, 9 | 496, 490 | 108 | channel list scroll thumb |
+| 5 | Image | LW | 207, 44, 70, 17 | 70, 980 | — | server-list / channel banner |
+| 6..27 | Label ×22 | (text) | x = 50, y = 100 step +18, 383×50 | — | — | channel row captions; loop while y < 496; captions = msg ids 4001..4022 |
+| 30 | Panel | A1 | 0, 0, 1024, 398 | 0, 0 | — | top backdrop band (shown) |
+| 31 | Panel | LW | 270, 85, 483, 490 | 0, 490 | — | server-select panel |
+| 32 | Image | LW | 207, 44, 70, 17 | 0, 980 | — | server-select banner |
+| 33..37 (loop ×2) | Label/Image/Btn3/Label/Label | L2/A1 | per-iter (x = 30 step +233; src x = 448 step +124) | varies | 400+i | server "plate" rows (loop count 2) |
+| 38 | Image | LW | 0, 0, 60, 39 | 500, 786 | — | server-status glyph (hidden) |
+| 39 | Image | LW | 0, 0, 60, 39 | 500, 786 | — | server-status glyph |
+| 40 | Image | LW | 0, 0, 60, 39 | 500, 786 | — | server-status glyph |
+| 41 | Image | L2 | 0, (dynamic), 46, 168 | 700, 18 | — | dynamic-Y selection highlight |
+| 42 (loop) | Button3State ×N | LW | x = 13 step +47, y = 66, 47×18 | normal(596,985) / hover(643,985) | 115+i | server name-strips; loop while x < 483 |
+| — | (frame-origin override) | — | — | 690,985 / 737,985 | — | `SetFrameOrigins` on strip[0] |
+| — | (frame-origin override) | — | — | 784,985 / 831,985 | — | `SetFrameOrigins` on strip[1] |
+| 43 | Button3State | A1 | 456, -3, 111, 38 | normal(792,398) / hover(602,416) | 105 | quit/help strip |
+| 44 | Image | A1 | 407, -3, 210, 70 | 743, 398 | — | title art |
+| 45 | Panel | IW | 342, 289, 340, 190 | 318, 647 | — | message/confirm dialog A |
+| 46 | Label | (text) | 10, 100, 330, 20 | — | — | dialog A body; msg 4023; centre-aligned |
+| 48 | Button3State | IW | 120, 136, 113, 40 | normal(302,900) / hover(415,900) | 113 | dialog A confirm |
+| 49 | Panel | IW | 342, 289, 340, 190 | 318, 647 | — | message/confirm dialog B |
+| 50 | Label | (text) | 10, 100, 330, 20 | — | — | dialog B body; msg 4024 |
+| 52 | Button3State | IW | 120, 136, 113, 40 | normal(302,860) / hover(415,860) | 114 | dialog B confirm |
+| 53 | Panel | A1 | 0, 326·screenH/768, 1024, 442 | 0, 582 | — | bottom login-form band |
+| 54 | Button3State | A1 | 456, 166, 112, 39 | normal(154,398) / hover(378,398) | 102 | "server list" button |
+| 55 | Image | A1 | 265, 0, 494, 113 | 0, 469 | — | login form chrome |
+| 56 | Panel | (none) | 0, 0, 1024, 100 | — | — | login-fields sub-panel (hidden) |
+| 57 | Image | A1 | 340, 30, 38, 13 | 0, 398 | — | "ID" label glyph |
+| 58 | Image | A1 | 507, 30, 49, 13 | 38, 398 | — | "password" label glyph |
+| 59 | Image | A1 | 619, 86, 67, 13 | 87, 398 | — | "save id" label glyph |
+| 60 | Textbox | A1 | 390, 32, 102, 13 | 615, 404 | 109 | account field; IME = 16, maxlen = 6 |
+| 61 | Textbox | A1 | 568, 32, 102, 13 | 615, 404 | 110 | password field; IME = 12, maxlen = 129 |
+| 62 | CheckBox | A1 | 694, 86, 13, 13 | off(717,398) / on(730,398) | 104 | save-ID checkbox |
+| 65 | Button3State | A1 | 456, 64, 112, 39 | normal(266,398) / hover(490,398) | 103 | OK / login button |
+| 66 | (SecondPassword / PIN keypad) | — | 347, 173, 329, 422 | 0, 0 | — | PIN modal; keypad built by its own sub-builder |
+| 67 | Panel | A1 | 356, 531, 313, 132 | 0, 0 | — | bottom button-bar panel |
+| 68 | Image | A1 | 67, 48, 178, 13 | 0, 437 | — | bar label glyph |
+| 69 | Image | A1 | 0, 100, 313, 32 | 289, 437 | — | bar chrome |
+| 70 | Button3State | LW | 40, 82, 110, 38 | normal(520,492) / hover(635,492) | 111 | bar button 1 |
+| 71 | Button3State | LW | 164, 82, 110, 38 | normal(750,492) / hover(865,492) | 112 | bar button 2 |
+| 72 | ExitPanel | IW | 342, 289, 340, 190 | 318, 647 | — | exit-confirm panel (own sub-builder) |
+| 73 | ErrorPanel | IW | 342, 289, 340, 190 | 318, 647 | — | error panel (own BuildScene slot +56) |
+
+**Action-id → command** is also code-baked (the third argument of the add-child-with-action helper):
+102 = server list, 103 = login, 104 = save-id, 105 = quit/help, 106/107/108 = channel-list scroll,
+109 = account field, 110 = password field, 111/112 = bar buttons, 113/114 = dialog confirms,
+115+i = server name-strips, 400+i = server plates. These route through the LoginWindow event handler.
+[confirmed]
+
+**Sub-panels recurse into their own code-baked builders** with the same literal pattern: the PIN
+second-password keypad has its own keypad sub-builder; the exit-confirm panel and the error panel
+each build their own children (the error panel via its own slot-14 `BuildScene`). [confirmed]
+
+### 14.8 Parenting helper is add-child, not "register into a window manager" (CONFIRMED — framing correction)
+
+The helper that attaches each built widget to its container is the GU panel **add-child** /
+**add-child-with-action** call — it parents the child widget under its panel and, in the
+with-action form, binds the routed command id. It is **not** a "register this window into the window
+manager" call. The window *manager* is the application MainMaster (the MainWindow) and its
+~223-slot service-slot table (service slots reached from object +0x238); a separate per-scene helper
+PUSHes scene objects onto a `std::list` teardown/**dispose** list used to tear the scene down — that
+dispose-list push is **not** manager attachment either. Keep the three distinct: (a) parent a widget
+onto its panel (this §14.8 helper), (b) push a scene object onto the dispose list, (c) the MainMaster
+service-slot table. [confirmed]
+
+### 14.9 UI event-record types (CONFIRMED)
+
+For completeness of the construction/dispatch model an engineer reproduces: a UI event record's
+type byte at record offset +0 takes these values, and the wheel delta is at record +4.
+
+| Type byte | Event | Source |
+|---|---|---|
+| 1 | key-down | DirectInput8 keyboard thread |
+| 2 | key-up | DirectInput8 keyboard thread |
+| 3 | mouse-move | WndProc |
+| 4 | button-press | WndProc |
+| 5 | button-release | WndProc |
+| 6 | CLICK (synthesised) | synthesised only when a release lands on the **same** widget that was pressed — the click-vs-drag discriminator |
+| 7 | double-click | WndProc |
+| 8 | wheel | WndProc; delta at record +4 |
+
+UI dispatch is **topmost-child-first, first-consumer-wins**, and runs **before** the 3D world view
+gets the event. [confirmed]
+
+---
+
 ## 11. Cross-references
 
+- **Window-layout AUTHORITY (the code-baked per-element coordinate tables):** `specs/ui_system.md`.
+  The registries documented here select *which* atlas; `ui_system.md` holds the authoritative
+  per-window element layout (positions, source-rects) baked in each window's `BuildScene` (vtable
+  slot 14 / +56). See §0 (scope) and §14 (construction model) above.
+- Scene state machine that invokes each window's `BuildScene`: `specs/game_loop.md`
+- UI scalar tunables (`NEW_SERVER_INDEX`, etc.): `data/script/uiconfig.lua` — a data-driven UI
+  input (scalar config, **not** a layout manifest); read in the front-end `BuildScene` (§14.5)
 - Widget binding and screen usage: `specs/ui_system.md`
 - Texture format (DDS/TGA physical layout): `formats/texture.md`
 - VFS file lookup: `formats/pak.md`
@@ -1125,3 +1520,25 @@ when the same tex_id appears in both 2D and 3D contexts.
 > **1952 (EOF-driven)** with `type`/`server_id` value sets widened to variable; skillicon.txt
 > grammar confirmed as the 4-column record `SKILL { skill_id job_id kind_id "path" }`. Promoted
 > as neutral prose; no addresses or decompiler output crossed the firewall.
+
+> **Provenance — CAMPAIGN VFS-MASTERY-B (two-witness reconcile):** added §12 the 15-slot UI font
+> table (per-slot face/size/char_width/row_height/weight; slot 0 = DotumChe 12, char_width 6,
+> weight 0, HANGEUL charset; layout math = char_width*strlen wide / row_height per line) and §13
+> the `Icon_LoadFileVFSorDisk` correction (loads manifest TEXT, not pixels). Reconfirmed the
+> EOF-driven (no count field) uitex/crestlist loaders and the 4-token skillicon entry. Promoted as
+> neutral prose; no addresses, no decompiler output, and no sample bytes crossed the firewall.
+
+> **Provenance — CAMPAIGN 10 Block B (static-only, anchor 263bd994, 2026-06-16):** added §0
+> (scope: these are texture-id registries, not layout manifests) and §14 (the code-baked
+> element-construction model — `BuildScene` vtable slot 14 / +56; the GU-builder coordinate
+> contract `Build*(tex, dstX, dstY, w, h, srcX, srcY, color)` with a 1:1 src/dst rect; multi-state
+> widgets bake every state as an atlas origin; the corrected GUComponent geometry layout
+> +0x1C=width/+0x20=height/+0x24=posX/+0x28=posY; front-end hardcoded-atlas preload bypassing
+> UiTex.txt; `uiconfig.lua` `NEW_SERVER_INDEX`; the LoginWindow 73-widget element census;
+> add-child vs window-manager/dispose-list framing; UI event-record type bytes). **RECONCILED:
+> the LoginWindow has NO EULA/terms panel — the captioned container is the server-list/channel
+> selection box and msg ids 4001..4022 are its channel row captions** (an earlier EULA reading is
+> superseded by the construct walk). Per-element layout authority cross-linked to
+> `specs/ui_system.md`. Residuals flagged in the banner: `0x35540004` flag meaning, first-paint
+> font slot, and the §11 `.do` 116B-vs-166B config-table stride. Promoted as neutral prose; no
+> addresses, no decompiler output, and no sample bytes crossed the firewall.

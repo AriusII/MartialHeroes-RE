@@ -1,9 +1,22 @@
 ---
-status: hypothesis
+status: confirmed
 sample_verified: partial
+verification: confirmed (client-side routing/sizes/offsets/control-flow); capture/debugger-pending (server-authored quest values + on-wire VALUE meanings)
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida]
+conflicts:
+  - "2/110 quest NPC step is unsupported by static evidence; the real second quest channel is 2/152 (capture/protocol-pending)."
+  - "Quest record stride: on-disk quests.scr sample measures 3720 B, but the RUNTIME in-memory quest record spans to >=4957 B (~4960 B). Reconcile on-disk vs runtime (VFS re-measure warranted)."
 ---
 
 # Quest & NPC Dialog — Clean-Room Specification
+
+> **Verification banner (re-verified 2026-06-16 against build `263bd994`, static IDA only — no live capture/debugger this pass).**
+> - **[confirmed]** (control-flow-confirmed at the handler/sender/panel sites on `263bd994`): the opcode routing (2/28 C2S, 5/68 + 5/73 S2C, 2/152 second C2S channel), the 2/28 **12-byte** body, the 5/68 **452-byte** parse + every snapshot offset, the 5/73 **344-byte** parse, the accept-gate **threshold 26** and its branch polarity, the give-up `abandonable` gate, the quest-log window action map, and the runtime quest-record gate-field map.
+> - **[static-hypothesis]** (single inference, not control-flow-locked): the 2/28 body field split beyond the leading bytes, the 5/68 `+0` header / `+4` owner_id semantics, the meaning of `panel_b`/`panel_c`.
+> - **[capture/debugger-pending]** (server-authored magnitudes + on-wire VALUE meanings need a live capture): the 2/28 & 2/152 framed wire sizes and `quest_id` endianness, the 5/73 body remainder (+13..+343 — whether it carries a reward list), the exact provenance of the level-gate word, and the on-disk-vs-runtime quest-record stride reconciliation.
+> - **Conflicts:** (1) the mission's **2/110 quest NPC step** has no static support — the real second quest channel is **2/152**; (2) the quest-record stride disagrees between the on-disk sample (3720 B) and the runtime record (~4960 B).
 
 > Neutral, rewritten behavioural specification. No legacy symbols, no binary
 > addresses, no decompiler pseudo-code. Describes the *observed behaviour*, state
@@ -32,16 +45,20 @@ sample_verified: partial
 
 ## Status & confidence
 
-- **No live network capture was available for this pass.** Every wire field offset
-  and message size below is a **static inference** from the client's parse/send
-  behaviour. Treat all payload offsets/sizes as hypotheses to confirm against a
-  capture before relying on them.
+- **Re-verified 2026-06-16 against build `263bd994` (static IDA only).** The opcode
+  routing, the message body **sizes** (2/28 = 12 B, 5/68 = 452 B, 5/73 = 344 B), and
+  every 5/68 / 5/73 parse offset were read directly at the handler/sender/panel sites
+  and are **CONFIRMED** for the client side. **No live network capture or debugger was
+  used this pass:** the on-wire *framed* total sizes, `quest_id` endianness, the 5/73
+  body remainder, and any server-authored quest *values* (reward magnitudes, level
+  thresholds beyond the literal compares below) remain **capture/debugger-pending**.
 - **Opcode → handler routing is a hard static fact.** The `(major:minor)` tuples
   below were observed at the client's dispatch / send sites; their *direction* and
-  *family* are reliable. The *payload field layouts* are the hypotheses.
+  *family* are reliable. The message body **sizes** are now confirmed; the per-field
+  *meanings* of undecoded blocks are the hypotheses.
 - **Per-claim confidence** is tagged inline as `CONFIRMED` (proven at the relevant
-  code site or cross-checked against an existing committed spec), `LIKELY` (single
-  consistent site), or `UNVERIFIED` (inferred / boundary not pinned).
+  code site on `263bd994` or cross-checked against an existing committed spec),
+  `LIKELY` (single consistent site), or `UNVERIFIED` (inferred / boundary not pinned).
 - **Korean text fields use the CP949 (EUC-KR) code page.** All inbound and on-disk
   text in this subsystem (NPC names, quest names, dialog/objective lines, tutorial
   text) must be decoded as CP949, never UTF-8.
@@ -89,14 +106,23 @@ counting the frame header), matching `opcodes.md` convention.
 
 | Opcode | Dir | Size | Proposed name | Role | Conf (routing) |
 |---|---|---|---|---|---|
-| 2/28 | C2S | see §4 | `CmsgQuestAction` | Unified quest-dialog action (accept / proceed / give-up). | CONFIRMED |
+| 2/28 | C2S | 12 (body) | `CmsgQuestAction` | Unified quest-dialog action (accept / proceed / give-up). See §4. | CONFIRMED |
+| 2/152 | C2S | 8 (body) | quest list-row request | Second quest channel — AVAILABLE-tab list-row request (two u32 args). See §4.4. | CONFIRMED |
 | 5/68 | S2C | 452 | `SmsgQuestList` | Full quest-log snapshot push. See §6. | CONFIRMED |
 | 5/73 | S2C | 344 | `SmsgQuestComplete` | Quest-completion + reward verdict. See §7. | CONFIRMED |
 
-> **2/28 is a newly-identified C2S opcode** not previously in the catalog. Family 2
-> (game-action) is entirely client-emitted; there is no inbound major-2 handler. The
-> outbound send-builder hard-codes the major and the minor (28); only a small body is
-> filled (see §4).
+> **2/28 is a C2S opcode** not previously in the catalog. Family 2 (game-action) is
+> entirely client-emitted; there is no inbound major-2 handler. The outbound
+> send-builder hard-codes the major and the minor (28) and appends a **fixed 12-byte
+> body** (see §4).
+>
+> **2/152 is the "second quest channel"** that earlier passes recorded as *untraced*
+> (the old §13a/§15.5 open item). It is now RESOLVED: a distinct C2S send-builder
+> emitting a **two-u32 body**, fired only from the quest-log window's AVAILABLE-tab
+> list-row actions (see §4.4, §15.5). The earlier mission note of a "2/110 quest NPC
+> step" has **no static support** — there is no quest send-builder for minor 110
+> (2/152 = 0x98, 2/110 = 0x6E are distinct minors); the real second channel is 2/152.
+> This is flagged as a conflict for protocol/capture re-confirmation (§13a).
 
 ### 2.2 Related opcodes consumed via the shared NPC dispatcher (already cataloged)
 
@@ -165,54 +191,107 @@ an alternate (event/tutorial) selector when a record condition holds together wi
 global event flags. This is an **event/tutorial gating hook**; its precise trigger
 condition is `UNVERIFIED` and not required for the baseline quest flow.
 
+The event/spawn-rate definitions that feed this gating live in the on-disk **`events.scr`**
+table — a fixed-record file of **520-byte records** with this confirmed shape (the full
+stride/field byte table is owned by `formats/config_tables.md`; the offsets are recorded
+here only as the interoperability facts that link the event hook to the data):
+
+| Off | Type | Field | Meaning | Conf |
+|----:|------|-------|---------|------|
+| +0x00 | u32 | `event_id` | Event identifier (map key). | CONFIRMED |
+| +0x64 | u32 | `mode_flag` | Event mode / enable flag. | CONFIRMED |
+| +0x68 | u32[50] | `rate_array` | 50 spawn/rate weights. | CONFIRMED |
+| +0x130 | u32[52] | `actor_array` | 52 actor/spawn references. | CONFIRMED |
+
+> The `events.scr` **record size (520 B)** and the field offsets above are CONFIRMED on
+> `263bd994`; they are an on-disk data-table layout, not a wire packet. The server-authored
+> *values* in the rate/actor arrays (which actors spawn at what rate per event) are
+> data-driven and capture/debugger-pending at the gameplay level. See
+> `formats/config_tables.md` for the full byte table.
+
 ---
 
 ## 4. C2S quest-action request (2/28)
 
 A single unified message carries all three quest-dialog button actions. The send
-builder writes `major = 2`, `minor = 28`, a fixed frame size, and fills a small body.
+builder writes `major = 2`, `minor = 28`, and appends a **fixed 12-byte body** (the
+send copies exactly `0xC` bytes from a stack struct). Three call sites send
+`sub_action` 2 / 3 / 4.
 
-### 4.1 Body layout (static inference — capture-UNVERIFIED)
+### 4.1 Body layout (12 bytes — body size CONFIRMED on 263bd994; field split static-hypothesis)
 
 | Off | Type | Field | Meaning | Conf |
 |----:|------|-------|---------|------|
-| +0 | u8  | `sub_action` | Selects the quest action — see table 4.2. | LIKELY |
-| +1 | u8  | `npc_kind`   | The NPC KIND / slot byte taken from the active dialog panel instance. | LIKELY |
-| +2 | u32 | `quest_id`   | The active quest id (from the local player/selection state). | LIKELY |
+| +0 | u8  | `sub_action` | Selects the quest action — see table 4.2. | CONFIRMED |
+| +1 | u8  | `npc_kind`   | The NPC KIND / slot byte taken from the active dialog panel instance. | CONFIRMED (is a panel u8); static-hypothesis (that it is the KIND) |
+| +2 | u32 | `quest_id`   | The active quest id (from the local player/selection state). | CONFIRMED |
+| +6 | u8[6] | `reserved` | Trailing reserved bytes (within the 12-byte body); not individually populated, assumed zero/alignment. | static-hypothesis |
 
-The send builder reserves a fixed frame and only fills the leading body bytes; the
-remaining bytes of the frame are alignment / zero. The meaningful body is the three
-fields above (a u8, a u8, and a u32 = 6 logical bytes packed into the reserved block).
+**The body is exactly 12 bytes** *(corrected 2026-06-16: the earlier "6 logical bytes
+packed into a reserved frame" was a static size-inference; the send appends `0xC`
+bytes from a stack struct)*. The leading `{ u8 sub_action, u8 npc_kind, u32 quest_id }`
+occupy the first 6 bytes; the remaining 6 are reserved/zero within the 12-byte body.
 
-> **UNVERIFIED:** the exact total payload size, the endianness of `quest_id`, the exact
-> width of `npc_kind` on the wire, and whether the trailing reserved bytes are required
-> to be zero. The send builder reserves a frame larger than the 6 logical bytes; treat
-> the surplus as alignment until a capture pins the real on-wire size. **Do not commit a
-> `packets/2-28_*.yaml` until at least the total size is capture-confirmed.**
+> **Capture/debugger-pending:** the exact *framed* total wire size (the 12 B is the
+> appended body, not the full frame), the endianness of `quest_id`, the exact width of
+> `npc_kind` on the wire, and whether the trailing reserved bytes are required to be
+> zero. **Do not commit a `packets/2-28_*.yaml` until the framed total size is
+> capture-confirmed.**
 
 ### 4.2 `sub_action` enumeration
 
 | Value | Meaning | Sent from | Conf |
 |------:|---------|-----------|------|
-| 2 | **Accept** — accept the offered quest. | NPC quest-talk panel, "accept" widget (after gates pass). | LIKELY |
-| 3 | **Proceed / continue** — advance an in-progress quest dialog. | NPC quest panel, when the panel's phase byte equals 2. | LIKELY |
-| 4 | **Give up / abandon** — abandon the active quest. | Quest give-up panel, on confirm. | LIKELY |
+| 2 | **Accept** — accept the offered quest. | NPC quest-talk panel, "accept" widget (after gates pass). | CONFIRMED |
+| 3 | **Proceed / continue** — advance an in-progress quest dialog. | NPC quest panel, when the panel's phase byte equals 2. | CONFIRMED |
+| 4 | **Give up / abandon** — abandon the active quest. | Quest give-up panel, on confirm. | CONFIRMED |
 
+> The three send sites are confirmed on `263bd994`: the accept path sends `(2, …)`, the
+> proceed path sends `(3, …)`, and the give-up path sends `(4, …)`.
+>
 > **UNVERIFIED:** whether `sub_action` 0 and 1 exist (e.g. open / refuse). They were not
 > observed at any send site; they may be server-only or unused.
 
 ### 4.3 Field sourcing (client-side state, for the implementer)
 
-- `quest_id` always comes from the **active quest id** held in the local player/selection
-  state (the same value the give-up path clears on abandon).
+- `quest_id` always comes from the **active / selected quest id** held in the local
+  player/selection state (the same value the give-up path clears on abandon). All three
+  sends source it from the same selected-quest accessor. CONFIRMED.
 - `npc_kind` comes from the **active dialog panel instance** (the panel stores the KIND /
-  slot byte that opened it).
-- On **accept**, the client applies a **level / billing gate** before sending: a
-  threshold of **26** is compared against a runtime status field (see §10). If the gate
-  fails the client shows a notice and does **not** send. Whether the gated quantity is
-  character level or a cash/VIP status is `UNVERIFIED`; only the literal threshold 26 is
-  proven.
-- On **give-up**, after the send the client also clears its local active-quest state.
+  slot byte that opened it): the accept path passes the panel's instance byte; the
+  give-up path passes the give-up panel's npc-kind byte. CONFIRMED (a panel u8).
+- **Proceed** is sent only when the panel's **phase byte equals 2** (the confirm handler
+  reads the panel phase byte and emits `sub_action = 3` only on `phase == 2`). CONFIRMED.
+- On **accept**, the client applies a **level gate with an account/billing bypass** before
+  sending. The branch is: the send is taken when a **billing/account bypass predicate is
+  set** OR the level word is **below 26**; the **block-and-show-notice** path runs when the
+  bypass is **clear** AND the level word is **>= 26**.
+  *(corrected 2026-06-16 — POLARITY: the earlier text said "blocks when the value is below
+  26"; that is the inverse of the code. `>= 26` is the **blocking** side, conditioned on the
+  bypass being clear.)* The literal threshold **26** is CONFIRMED. The gated word is used as
+  the **character level**: it is compared against the quest record's min-level and max-level
+  fields in the eligibility evaluator (§10), strongly resolving the old "level vs cash/VIP"
+  open question toward **level**. The exact raw provenance of the level word (raw level vs a
+  derived status) is capture/debugger-pending.
+- On **give-up**, after the send the client also clears its local active-quest marker state
+  and re-highlights nearby mobs. CONFIRMED.
+
+### 4.4 C2S 2/152 — second quest channel (AVAILABLE-tab list-row request)
+
+The quest-log window's AVAILABLE-tab list-row "request" buttons drive a **second, distinct
+C2S send-builder** (not 2/28). It is now RESOLVED on `263bd994` as **opcode 2/152** with a
+**two-u32 body** (the builder appends two `u32` args; there is no fixed 12-byte form). It is
+fired only from the quest-log window's AVAILABLE-tab row actions.
+
+| Off | Type | Field | Meaning | Conf |
+|----:|------|-------|---------|------|
+| +0 | u32 | `arg0` | First request arg, sourced from the window's per-row table (28-byte row stride). | CONFIRMED (two-u32 body); static-hypothesis (field meaning) |
+| +4 | u32 | `arg1` | Second request arg, sourced from a second per-row table (44-byte stride). | CONFIRMED (two-u32 body); static-hypothesis (field meaning) |
+
+> This retires the earlier "untraced second channel" / "2/110" notes. Most plausibly a
+> "request quest detail / claim row" round-trip, but the **semantic meaning of the two
+> u32 args and the framed wire size are capture/debugger-pending**. Do **not** assume it
+> reuses 2/28's body shape. See §13a and §15.5.
 
 ---
 
@@ -265,29 +344,34 @@ After parse, if the **active/tracking flag** transitions 0 → non-zero, the cli
 the tracking panel and plays the **quest-tracking-on** sound (`862300001`); a non-zero →
 0 transition closes the panel.
 
-### 6.1 Wire payload layout (452 bytes — static inference, capture-UNVERIFIED)
+### 6.1 Wire payload layout (452 bytes — every offset CONFIRMED against the parser on 263bd994)
 
-Offsets are payload-relative.
+Offsets are payload-relative. The mirror-copy routine was fully read on `263bd994`; the
+handler reads exactly `0x1C4` (452) bytes into a stack block and every offset below matches
+the parser's reads. The exact name stride (17) and the per-entry loops are confirmed.
 
 | Off | Type | Field | Meaning | Conf |
 |----:|------|-------|---------|------|
-| +0   | u32 | `header` | Header / reserved. | UNVERIFIED |
-| +4   | u32 | `owner_id` | Actor / owner id. | LIKELY |
-| +8   | u8  | `panel_c` | Stored into quest-log state (UI selector C). | UNVERIFIED |
-| +9   | u8  | `tracking_flag` | Active / tracking flag — drives the tracking panel open/close. | LIKELY |
-| +10  | u8  | `panel_b` | Stored into quest-log state (UI selector B). | UNVERIFIED |
-| +11  | u8[10]  | `slot_a_flags` | One flag per tracked slot → slot-A table. | LIKELY |
-| +21  | u8[10]  | `slot_b_flags` | One flag per tracked slot → slot-B table. | LIKELY |
-| +32  | u32[20] | `quest_ids` | 20 quest ids (parallel to the name table). | LIKELY |
-| +112 | char[20][17] | `quest_names` | 20 quest names, CP949, 16 chars + forced NUL terminator at index 16. | LIKELY |
+| +0   | u32 | `header` | Header / reserved — **not read** by the mirror-copy (`+0..+7` untouched there). | static-hypothesis |
+| +4   | u32 | `owner_id` | Actor / owner id — not read by the mirror-copy; meaning undecoded. | static-hypothesis |
+| +8   | u8  | `panel_c` | Stored into quest-log state (UI selector C). | CONFIRMED (stored); static-hypothesis (meaning) |
+| +9   | u8  | `tracking_flag` | Active / tracking flag — this is the flag the handler diffs to open/close the tracking panel. | CONFIRMED |
+| +10  | u8  | `panel_b` | Stored into quest-log state (UI selector B). | CONFIRMED (stored); static-hypothesis (meaning) |
+| +11  | u8[10]  | `slot_a_flags` | One flag per tracked slot → slot-A table (10-entry loop). | CONFIRMED |
+| +21  | u8[10]  | `slot_b_flags` | One flag per tracked slot → slot-B table (10-entry loop). | CONFIRMED |
+| +32  | u32[20] | `quest_ids` | 20 quest ids (parallel loop into the quest-entry table). | CONFIRMED |
+| +112 | char[20][17] | `quest_names` | 20 quest names, CP949, stride **17** (16 chars + forced NUL written at index 16). | CONFIRMED |
 
 Summed: 4 + 4 + 1 + 1 + 1 + 10 + 10 + 80 + 340 = 451 bytes of described content within a
 452-byte payload (one trailing/alignment byte unaccounted — treat as reserved until a
 capture confirms the exact field span).
 
-> **Total payload size 452 (0x1C4) is a static inference from the parser's read extent.**
-> The endianness of `quest_ids`, the exact name stride (17 vs an aligned value), and the
-> meaning of `panel_b`/`panel_c` are `UNVERIFIED`.
+> **Total payload size 452 (0x1C4) is CONFIRMED** from the parser's read extent on
+> `263bd994`. The name stride (**17**) and all `+8..+451` field offsets are confirmed
+> against the parser reads. Still **capture/debugger-pending:** the endianness of
+> `quest_ids` on the wire, and the semantics of `header` (+0), `owner_id` (+4) and
+> `panel_b`/`panel_c` (the latter three are stored/untouched, not interpreted by the
+> client this pass).
 
 ### 6.2 Client-side quest-log state model
 
@@ -295,12 +379,17 @@ The parser mirrors the snapshot into a local quest-log state object. The impleme
 model it as the following logical tables (exact base offsets are an internal layout
 detail — model the *shape*, not the legacy offsets):
 
-- **Slot-A table:** 10 entries, fixed stride; each entry stores its flag.
-- **Slot-B table:** 10 entries, fixed stride; each entry stores its flag.
-- **Quest-entries table:** 20 entries, fixed stride; each entry stores a `quest_id`
-  (u32) and the CP949 quest name.
+- **Slot-A table:** 10 entries, **32-byte stride**; each entry stores its flag.
+- **Slot-B table:** 10 entries, **32-byte stride**; each entry stores its flag.
+- **Quest-entries table:** 20 entries, **32-byte stride**; each entry stores a `quest_id`
+  (u32, in-memory at entry `+8`) and the CP949 quest name (in-memory at entry `+12`).
 - **Scalar fields:** `tracking_flag` (u8), `panel_b` (u8), `panel_c` (u8).
-- Two small slot-table header blocks are zero-cleared on every refresh.
+- Two small slot-table header blocks (two 12-byte blocks) are zero-cleared on every refresh.
+
+> The in-memory mirror uses a **32-byte entry stride** (id at entry `+8`, name at entry
+> `+12`); this is the *in-memory* stride and is distinct from the **17-byte wire name
+> stride** of §6.1. Both are confirmed on `263bd994`; model the shape, not the literal
+> offsets.
 
 > Implementer note: model this as `QuestLogEntry[20]` (id + name) plus two
 > `bool[10]`/`byte[10]` flag tables and three scalar selectors. After applying a snapshot,
@@ -317,38 +406,50 @@ The server pushes a **quest-completion verdict**. The client acts on it only whe
 and play audio. **The reward itself (items / exp / gold) is applied server-side**; this
 push is the UI verdict, not the reward payload.
 
-### 7.1 Wire payload layout (344 bytes — static inference, capture-UNVERIFIED)
+### 7.1 Wire payload layout (344 bytes — size + read fields CONFIRMED on 263bd994)
 
 Only two leading fields are read by the handler; the remainder of the body is copied
-wholesale into the result panel.
+wholesale into the result panel. The handler reads exactly `0x158` (344) bytes and acts
+only when `apply == 1`.
 
 | Off | Type | Field | Meaning | Conf |
 |----:|------|-------|---------|------|
-| +0  | u8[8] | `header` | Leading header / context (not individually decoded). | UNVERIFIED |
-| +8  | u32 | `apply` | Apply selector — the handler acts only when this equals **1**. | LIKELY |
-| +12 | u8  | `reward_state` | Verdict — see table 7.2. | LIKELY |
-| +13 | u8[331] | `body_remainder` | Remaining bytes, copied wholesale into the result panel; not field-decoded by the client. | UNVERIFIED |
+| +0  | u8[8] | `header` | Leading header / context (not individually decoded; `+0..+7` not read). | static-hypothesis |
+| +8  | u32 | `apply` | Apply selector — the handler acts only when this equals **1**. | CONFIRMED |
+| +12 | u8  | `reward_state` | Verdict — see table 7.2. | CONFIRMED |
+| +13 | u8[331] | `body_remainder` | Remaining bytes, copied wholesale into the result panel; not field-decoded by the client. | capture/debugger-pending |
 
-Summed: 8 + 4 + 1 + 331 = 344 bytes (0x158). The body remainder (331 bytes) is **not**
-decoded by the client beyond the wholesale copy into the result panel.
+Summed: 8 + 4 + 1 + 331 = 344 bytes (0x158). **The total size (344) and the read of
+`apply` (+8) and `reward_state` (+12) are CONFIRMED** on `263bd994`. The body remainder
+(331 bytes) is **not** decoded by the client beyond the wholesale copy into the result
+panel; whether it carries a reward list is **capture/debugger-pending**.
 
 ### 7.2 `reward_state` verdict
 
 | Value | Meaning | Client reaction | Conf |
 |------:|---------|-----------------|------|
-| 1 | **Grant** | Open the completion/result panel; play the **positive** completion sound (`910036000`). | LIKELY |
-| 2 | **Deny / fail** | Play the **negative** variant of the completion sound (`910036000` with the fail path). | LIKELY |
+| 1 | **Grant** | Call the actor-manager hook, then **play** the completion sound (`910036000`, positive variant). | CONFIRMED |
+| 2 | **Deny / fail** | **STOP** the matching completion sound (`910036000`) — it does **not** play a negative cue. | CONFIRMED |
+
+> *(corrected 2026-06-16)* The earlier text said `reward_state == 2` "plays the negative
+> variant of `910036000`". That is wrong: on `263bd994` the deny path **stops** the
+> matching sound id rather than playing anything. Only the grant path (`reward_state == 1`)
+> plays a sound.
 
 In both apply cases the full 344-byte body is handed to the completion-result panel.
 
 ### 7.3 Completion-result panel behaviour
 
 - The panel **double-buffers** the previous body and copies the new 344-byte body into
-  its own storage.
-- It tracks a **phase** byte: `0 = idle`, `1 = showing result (open)`, `2 = closed`.
-- When the previous body's `apply` byte equals 1 and the phase is idle, it advances to
-  phase 1 and **auto-shows** the result panel (open animation), with the close animation
-  on dismiss.
+  its own storage (two `memcpy`s of `0x158` bytes — old ← stored, then stored ← new).
+- It tracks a **phase** byte: `0 = idle`, `1 = showing result (open)`, `2 = closed`. On
+  `phase == 1` it builds + shows (open-animation slot); on `phase == 2` it runs the
+  close animation.
+- When the **previous body's `+12` byte (the `reward_state`) equals 1** and the phase is
+  idle, it advances to phase 1 and **auto-shows** the result panel (open animation), with
+  the close animation on dismiss.
+  *(corrected 2026-06-16: the auto-show key is the prior body's `+12` reward_state field,
+  not its `apply` byte — confirmed on `263bd994`.)*
 - Result captions use **localized string table ids 309 and 618**.
 
 ### 7.4 Reward delivery (cross-reference)
@@ -370,18 +471,29 @@ access point used across the quest-dialog cluster.
 | Property | Value | Conf |
 |---|---|---|
 | Logical path | `data/script/quests.scr` | CONFIRMED |
-| Record size | **3720 bytes (0xE88), fixed** *(corrected 2026-06-13: a real `quests.scr` sample measures a 3720-byte stride, not the 4960-byte value inferred this earlier pass)* | SAMPLE-VERIFIED |
+| **On-disk** record size | **3720 bytes (0xE88), fixed** (measured from a real `quests.scr` VFS sample) | SAMPLE-VERIFIED |
+| **Runtime** record size | **≥4957 bytes (~4960 / 0x1360)** — the in-memory quest record the runtime keys by `quest_id` is read at offsets up to +4956 (gate fields, §15.7) *(re-verified 2026-06-16 on `263bd994`)* | CONFIRMED (offsets) |
 | Slot count | **488 slots, 122 occupied** (366 empty); a slot is empty when its leading `u16` quest id is 0 | SAMPLE-VERIFIED |
 | Lookup key | `quest_id` (sparse `u16`, range 1..617; the file is a sparse flat array, not index-keyed — the runtime keys a map on the id) | SAMPLE-VERIFIED |
 | Title | Localized message-string id **18022** (not stored inline as text) | LIKELY |
 
-> **Record-size correction.** The earlier value `4960 bytes (0x1360), ~366 quests`
-> was a static size-inference and is superseded by the sample: stride **3720 bytes
-> (0xE88)**, **488 slots / 122 occupied**. The field tables below that cited
-> offsets beyond 0xE88 (e.g. a give-up `abandonable` flag described from the world
-> lane at a higher offset) cannot both be true of a 3720-byte record; that conflict
-> is tracked as an open item in §13 and §19.4. The full sample-verified field/stride
-> table for `quests.scr` lives in `formats/config_tables.md` (quest-data family).
+> **On-disk vs runtime stride — CONFLICT (re-stated 2026-06-16).** There are **two
+> distinct record layouts** and they must not be conflated:
+> - The **on-disk** `quests.scr` record measures **3720 bytes (0xE88)** in the VFS sample
+>   (488 slots / 122 occupied). This is correct *as an on-disk measurement* and supersedes
+>   the very early 4960-byte file-size *guess*.
+> - The **runtime in-memory** quest record (the object the quest-id keyed registry returns)
+>   is read at offsets up to **+4956 (~4960 B)** on `263bd994` — the give-up `abandonable`
+>   flag (+4905), the min/max level (+4944/+4946), class/stat/prereq fields (§15.7) all live
+>   in this high region. A 3720-byte record cannot hold them.
+>
+> So the runtime record is **larger** than the on-disk record (the loader expands/pads the
+> on-disk record, **or** the on-disk sample stride was mis-measured). The earlier note that
+> the abandonable offset is "inconsistent with the 3720-byte stride" was the symptom of this
+> on-disk-vs-runtime split, not a flag mystery (§15.4, §15.7). **Reconciling the two strides
+> needs a VFS re-measure** and is `re-struct-cartographer`/`vfs-data-analyst` work; the
+> runtime offsets belong to `structs/`. The on-disk field/stride table lives in
+> `formats/config_tables.md` (quest-data family). Tracked as a conflict in the banner and §19.4.
 
 ### 8.1 Known record fields
 
@@ -402,13 +514,15 @@ sees *offsets* — so both are recorded:
 | +0x0E4, +0x1D4, +0x248, … | u32 | `sub_section_markers` | A `u32` = 48 (0x30) recurs at 100% occupancy at regular spacing (≈240 B then ≈124 B apart), consistent with embedded 48-byte sub-records (objective/reward sub-arrays). | SAMPLE-VERIFIED |
 | ~+72 (0x48) | handle | `step_list` (runtime view) | The quest-dialog/detail code path reaches the per-quest objective/dialog **step list** through a record handle and iterates it for the up-to-6 dialog lines and the objective counter (§5.1, §16). The runtime "handle" maps onto the on-disk step/objective region above; the exact byte correspondence is not pinned. | LIKELY |
 
-> **Most of the 3720-byte record is still semantically undecoded** *(corrected
-> 2026-06-13: size was 4960; it is 3720)*. Reward item ids, required level,
-> prerequisite-quest chain, and per-objective target counts are not yet labelled,
-> though the `48`-marker spacing strongly implies embedded fixed-stride
-> objective/reward sub-records. The title is a message-string id (18022), not inline
-> text. Do **not** guess reward or prerequisite fields from this spec; consult the
-> sample-verified table in `formats/config_tables.md`.
+> **Most of the on-disk 3720-byte record is still semantically undecoded.** Reward item
+> ids and per-objective target counts are not yet labelled, though the `48`-marker spacing
+> strongly implies embedded fixed-stride objective/reward sub-records. The title is a
+> message-string id (18022), not inline text. **Required level, the class/stat gates, and
+> the prerequisite-quest chain DO have confirmed offsets — but in the *runtime* record
+> (§15.7), not in this on-disk view.** The on-disk-vs-runtime mapping is unreconciled (§8
+> conflict note); do **not** guess reward/prereq fields from this spec — consult the
+> sample-verified on-disk table in `formats/config_tables.md` for on-disk fields and §15.7
+> for the runtime gate fields.
 
 ---
 
@@ -460,18 +574,20 @@ The per-area NPC placement array is the 28-byte `.arr` record fully specified in
 
 | Constant | Meaning | Conf |
 |---|---|---|
-| 2/28 `sub_action` 2 / 3 / 4 | accept / proceed / give-up. | LIKELY |
-| Accept gate threshold = 26 | Client blocks "accept" and shows a notice when a runtime status value is below 26. Whether the gated value is character level or cash/VIP status is unknown. | LIKELY (threshold); UNVERIFIED (meaning) |
-| Quest-dialog max text lines = 6 | Up to 6 dialog/objective lines populated per quest dialog. | LIKELY |
-| Quest-name field = 16 chars + NUL (17 bytes) | Per-entry name in the 5/68 snapshot; CP949. | LIKELY |
-| Quest-log entries = 20 | 20 quest ids + 20 names in the snapshot and local table. | LIKELY |
-| Quest-log slot flag tables = 10 + 10 | Two 10-entry flag tables (slot-A, slot-B). | LIKELY |
-| 5/68 payload = 452 bytes (0x1C4) | Quest-log snapshot size. | LIKELY |
-| 5/73 payload = 344 bytes (0x158) | Quest-completion verdict size. | LIKELY |
-| 5/73 `apply` == 1 | Handler acts only when the apply selector is 1. | LIKELY |
-| 5/73 `reward_state` 1 / 2 | grant / deny verdict. | LIKELY |
-| 5/73 phase 0 / 1 / 2 | result-panel phase: idle / showing / closed. | LIKELY |
-| `quests.scr` = **3720-byte records, 488 slots / 122 occupied** | Quest template table *(corrected 2026-06-13: was 4960 B / ~366)*. | SAMPLE-VERIFIED |
+| 2/28 body = 12 bytes | Fixed `0xC`-byte body appended by the send-builder *(corrected 2026-06-16: was "6 logical bytes")*. | CONFIRMED |
+| 2/28 `sub_action` 2 / 3 / 4 | accept / proceed / give-up. | CONFIRMED |
+| 2/152 body = 8 bytes (two u32) | Second quest channel (AVAILABLE-tab list-row request). | CONFIRMED |
+| Accept gate threshold = 26 | Client **blocks** "accept" + shows a notice when (account/billing bypass clear) **AND** the level word is **>= 26**; the send goes through when the bypass is set **OR** the level word is **< 26** *(corrected 2026-06-16 — polarity)*. The gated word is used as character level (compared vs the record min/max level). | CONFIRMED (threshold + branch); capture/debugger-pending (raw provenance) |
+| Quest-dialog max text lines = 6 | Up to 6 dialog/objective lines populated per quest dialog (6-label build loop confirmed). | CONFIRMED |
+| Quest-name field = 16 chars + NUL (17 bytes) | Per-entry name **wire** stride in the 5/68 snapshot; CP949 (in-memory mirror uses a 32-byte stride). | CONFIRMED |
+| Quest-log entries = 20 | 20 quest ids + 20 names in the snapshot and local table. | CONFIRMED |
+| Quest-log slot flag tables = 10 + 10 | Two 10-entry flag tables (slot-A, slot-B). | CONFIRMED |
+| 5/68 payload = 452 bytes (0x1C4) | Quest-log snapshot size. | CONFIRMED |
+| 5/73 payload = 344 bytes (0x158) | Quest-completion verdict size. | CONFIRMED |
+| 5/73 `apply` == 1 | Handler acts only when the apply selector (+8) is 1. | CONFIRMED |
+| 5/73 `reward_state` 1 / 2 | grant (plays 910036000) / deny (**stops** 910036000) *(corrected 2026-06-16)*. | CONFIRMED |
+| 5/73 phase 0 / 1 / 2 | result-panel phase: idle / showing / closed; auto-show keyed off the prior body's `+12` reward_state. | CONFIRMED |
+| `quests.scr` **on-disk** = **3720-byte records, 488 slots / 122 occupied**; **runtime** record ≥4957 B (~4960) | Quest template table — on-disk vs runtime stride is a tracked conflict (§8, §15.7). | SAMPLE-VERIFIED (on-disk); CONFIRMED (runtime offsets) |
 | `npc.scr` = 404-byte records, 2510 entries, **3 CP949 paragraphs @ +0x14/+0x50/+0x90** | NPC description table *(corrected 2026-06-13: was "6 × 64-byte strings")*. | SAMPLE-VERIFIED |
 | `autoquestion_cl.scr` = 92-byte records, 1300 entries | Anti-bot arithmetic-quiz question pool (CP949 question @ +4). | SAMPLE-VERIFIED |
 | `discript.sc` = 68-byte records, 33 entries | UI context-menu label table (u32 menu id @ +0, u32 category @ +4, CP949 label @ +8). | SAMPLE-VERIFIED |
@@ -496,22 +612,25 @@ Click NPC ─► interaction dispatcher switches on KIND
                                   │
    quest-dialog panel populated from quests.scr[quest_id] (title id 18022, up to 6 lines)
                                   │
-        ┌── "accept"  (gate: status >= 26) ─► C2S 2/28 { sub_action=2, npc_kind, quest_id }
-   user ├── "proceed" (panel phase == 2)   ─► C2S 2/28 { sub_action=3, npc_kind, quest_id }
-        └── "give up"  (confirm)            ─► C2S 2/28 { sub_action=4, npc_kind, quest_id }
+        ┌── "accept"  (gate: send when bypass||level<26;   ─► C2S 2/28 (12B) { sub_action=2, npc_kind, quest_id }
+   user │              blocked when !bypass && level>=26)
+        ├── "proceed" (panel phase == 2)   ─► C2S 2/28 (12B) { sub_action=3, npc_kind, quest_id }
+        └── "give up"  (confirm, abandonable set) ─► C2S 2/28 (12B) { sub_action=4, npc_kind, quest_id }
                                                   + clear local active-quest state
+   (AVAILABLE-tab row request) ───────────► C2S 2/152 (8B) { u32 arg0, u32 arg1 }
                                   │
    server ─► S2C 5/68 QuestList (452B) ─► parse into quest-log state, rebuild list,
                                           refresh tracking HUD; tracking 0→non-zero
                                           opens tracking panel + plays 862300001
    server ─► S2C 5/73 QuestComplete (344B), apply==1 ─►
-                 reward_state==1 GRANT ─► result panel + positive 910036000
-                 reward_state==2 DENY  ─► negative 910036000
+                 reward_state==1 GRANT ─► result panel + plays 910036000
+                 reward_state==2 DENY  ─► stops 910036000 (no negative cue)
              (actual items/exp/gold arrive via side-channel opcodes)
 ```
 
-`LIKELY` for the overall shape; the **quest-giver KIND value** and the exact 2/28 body
-size are the unpinned edges.
+The overall shape and the body sizes are CONFIRMED on `263bd994`; the **quest-giver KIND
+value** and the **framed wire sizes** of 2/28 / 2/152 are the unpinned (capture-pending)
+edges.
 
 ---
 
@@ -536,23 +655,26 @@ Tutorials are a parallel system to quests, summarised here; full Lua linkage is 
 
 ## 13. UNVERIFIED / open questions
 
-1. **No live capture this pass.** Every wire field offset/size (2/28 body, 5/68 452-byte
-   layout, 5/73 344-byte layout) is a **static inference**. All sizes and offsets must be
-   byte-confirmed against a capture before implementation.
-2. **2/28 total payload size and packing** — the send builder reserves a fixed frame and
-   fills only the leading `{ u8, u8, u32 }` body; the exact total size, the endianness of
-   `quest_id`, the wire width of `npc_kind`, and whether trailing bytes must be zero are
-   unknown. **Do not commit `packets/2-28_*.yaml` until at least the total size is
-   capture-confirmed.**
+1. **No live capture/debugger this pass.** The client-side parse extents and offsets are
+   CONFIRMED from static IDA on `263bd994` (2/28 = 12 B body; 5/68 = 452 B layout;
+   5/73 = 344 B layout), but the **framed on-wire totals**, `quest_id`/`quest_ids`
+   endianness, and the 5/73 body remainder still need a real capture before implementation.
+2. **2/28 framed wire size** — *body resolved to 12 bytes* (the send appends `0xC` bytes;
+   leading `{ u8 sub_action, u8 npc_kind, u32 quest_id }` + 6 reserved). Still unknown: the
+   exact *framed* total on the wire, the endianness of `quest_id`, the wire width of
+   `npc_kind`, and whether trailing bytes must be zero. **Do not commit `packets/2-28_*.yaml`
+   until the framed total size is capture-confirmed.**
 3. **2/28 `sub_action` 0 and 1** — not observed at any send site; may be server-only or
-   unused. Only 2 (accept), 3 (proceed), 4 (give-up) are proven.
-4. **5/68 trailing byte** — 451 of 452 bytes are accounted for; the final byte and the
-   exact name-field stride (17 vs an aligned value) need capture confirmation.
-5. **5/68 `panel_b` / `panel_c` semantics** — stored into quest-log state but their UI
-   meaning is unknown; `header` (+0) likewise.
+   unused. Only 2 (accept), 3 (proceed), 4 (give-up) are proven (CONFIRMED at the 3 sends).
+4. **5/68 trailing byte** — 451 of 452 bytes are accounted for; the final byte is reserved.
+   The wire name stride (**17**) is now CONFIRMED against the parser (no longer open).
+5. **5/68 `panel_b` / `panel_c` semantics** — stored into quest-log state (CONFIRMED stored)
+   but their UI meaning is unknown; `header` (+0) and `owner_id` (+4) are not read by the
+   mirror-copy at all.
 6. **5/73 body remainder (331 bytes)** — copied wholesale into the result panel, not
    field-decoded by the client. Whether it carries any reward item list (or is purely a
-   display blob) is unknown; only `apply` (+8) and `reward_state` (+12) are read.
+   display blob) is **capture/debugger-pending**; only `apply` (+8) and `reward_state` (+12)
+   are read.
 7. **Quest-giver KIND value** — the interaction dispatcher handles ~35 KIND values but
    only a subset map to identified panels; which KIND opens the quest dialog (vs guild /
    confession / gather / repair / merchant) is not resolved. Needs the `npc.scr` field
@@ -567,18 +689,24 @@ Tutorials are a parallel system to quests, summarised here; full Lua linkage is 
    at +4, and the three CP949 description paragraphs at +0x14/+0x50/+0x90 are sample-verified
    (§9.1). Still unresolved: the key that links `npc.scr` (2510 descriptor records) to
    `npcs.scr` (812 catalogue records), and the non-string fields.
-10. **Accept gate (threshold 26)** — whether the gated runtime value is character level
-    or a cash / VIP status is a guess; only the literal threshold 26 is proven.
+10. **Accept gate (threshold 26)** — *largely resolved*. The branch polarity is now
+    CONFIRMED (blocks on the `!bypass && level >= 26` side); the literal threshold **26** is
+    proven; the gated word is used as **character level** (compared vs the quest record's
+    min/max level in the eligibility evaluator, §10). Still capture/debugger-pending: the
+    raw provenance of that level word (raw character level vs a derived status).
 11. **Reward delivery** — assumed server-authoritative via side-channel item/exp/gold
     opcodes; not directly proven that 5/73 carries no reward list (related to item 6).
 12. **Event/tutorial gating hook (§3.3)** — the precise placement-record + global-flag
     condition that promotes an NPC's dialog kind is not pinned.
 
-13a. **Second C2S quest channel (window list-row actions)** — the quest-log window's
-    list-row "request" buttons (the AVAILABLE-tab per-row actions, §15.3) drive a network
-    send that is **distinct from 2/28**, through a different send-builder. Its opcode tuple
-    and body were **not traced** this pass. Treat it as a separate, unmapped C2S quest
-    request until an analyst recovers its tuple. See §15.5.
+13a. **Second C2S quest channel (window list-row actions) — RESOLVED to 2/152.** The
+    quest-log window's AVAILABLE-tab list-row "request" buttons (§15.3) drive a network send
+    that is **distinct from 2/28**: it is **opcode 2/152**, with a **two-u32 body** (see
+    §4.4, §15.5), fired only from the AVAILABLE-tab row actions. The earlier "untraced"
+    note and the mission's "2/110 quest NPC step" are both superseded — there is **no quest
+    send-builder for minor 110** (2/152 = 0x98 ≠ 2/110 = 0x6E). The 2/110 claim has no static
+    support and is raised as a **conflict** for protocol/capture re-confirmation; the
+    semantic meaning of the two 2/152 u32 args and its framed wire size are capture-pending.
 
 ---
 
@@ -637,33 +765,40 @@ Buttons and list rows are bound to numeric **action ids**. The behaviourally imp
 | **Close** | Closes the window. | CODE-CONFIRMED |
 | **Help** | Shows a help/info sub-panel; caption = message id **16003**. | CODE-CONFIRMED |
 | **HUD-track checkbox** | Toggles quest tracking and persists the flag (§15.6). | CODE-CONFIRMED |
-| **List-row network request** | A per-row request through a **second C2S send-builder** distinct from 2/28 — opcode untraced (§15.5, §13a). | CODE-CONFIRMED (that a send occurs); UNVERIFIED (tuple/body) |
+| **List-row network request** | The AVAILABLE-tab per-row request actions send via the **second C2S send-builder = opcode 2/152** (two u32 args; §4.4, §15.5). *(resolved 2026-06-16 — was "untraced".)* | CODE-CONFIRMED (tuple 2/152 + two-u32 body); capture-pending (arg semantics) |
 
 ### 15.4 Abandon / give-up panel (gated by an `abandonable` flag)
 
 The **Give up** action does not abandon directly. It first looks up the selected active
-quest and reads a one-byte **`abandonable` flag** from the quest's template record. **Only
-when the flag is set** does the abandon-confirm panel open: the panel is filled with the
-quest id and an NPC-kind byte, its prompt caption is message id **18027** and its confirm
-button caption is message id **18028**, and it is shown. Confirming on that panel is what
-emits the C2S **give-up** action (`sub_action = 4`, §4.2) and clears the local active-quest
-state. If the `abandonable` flag is clear, the window shows a "cannot abandon this quest"
-notice and nothing is sent.
+quest's **runtime quest record** (via the quest-id keyed registry) and reads a one-byte
+**`abandonable` flag** at **runtime offset +4905 (0x1329)**. **Only when the flag is set**
+does the abandon-confirm panel open: the panel is filled with the quest id and an NPC-kind
+byte, its prompt caption is message id **18027** and its confirm button caption is message
+id **18028**, and it is shown. Confirming on that panel is what emits the C2S **give-up**
+action (`sub_action = 4`, §4.2) and clears the local active-quest state. If the
+`abandonable` flag is clear, the window shows a "cannot abandon this quest" notice and
+nothing is sent. CONFIRMED on `263bd994`.
 
-> The `abandonable` flag was read at a record offset (the world lane observed it well past
-> 0x1300) that is **inconsistent with the now-confirmed 3720-byte (0xE88) `quests.scr`
-> stride** (§8). Either the flag lives within the 3720-byte record at an offset not yet
-> mapped to the sample, or it is read from a different runtime structure. The *behaviour*
-> (an `abandonable` gate on the give-up panel, captions 18027/18028) is CODE-CONFIRMED; the
-> exact source byte is an open item (§19.4). Do not hard-code the flag offset from this spec.
+> *(resolved 2026-06-16)* The `abandonable` flag lives at **runtime offset +4905 (0x1329)**
+> of the **in-memory** quest record. This is consistent with a **~4960-byte runtime record**,
+> **not** the 3720-byte on-disk `quests.scr` sample of §8. This is not a "flag-offset
+> mystery" — it is the **on-disk vs runtime stride conflict** (§9 / §19.4): the runtime
+> record is the larger structure (the loader expands/pads the on-disk record, or the on-disk
+> sample was mis-measured). The give-up gate (captions 18027/18028, the `abandonable` byte)
+> is CODE-CONFIRMED. Do not hard-code the +4905 offset into the on-disk `quests.scr` parser —
+> it belongs to the runtime record, which `structs/` owns.
 
-### 15.5 Second C2S quest channel (list-row request) — UNVERIFIED tuple
+### 15.5 Second C2S quest channel (list-row request) — RESOLVED: opcode 2/152
 
-The AVAILABLE-tab list-row request buttons drive a network send through a **different
-send-builder than the unified 2/28 quest action**. It is most plausibly a "request quest
-detail / claim row" round-trip, but its **opcode tuple and body were not traced** this pass.
-This is a genuinely new, second quest C2S path beyond 2/28; it is tracked as an open item
-(§13a) and handed to protocol analysis. Do not assume it reuses 2/28.
+The AVAILABLE-tab list-row request actions (window action ids in the 100..105 group) drive
+a network send through a **different send-builder than the unified 2/28 quest action**. It
+is now RESOLVED on `263bd994` as **opcode 2/152** with a **two-u32 body** (see §4.4): the
+two args are sourced from the window's per-row tables (a 28-byte-stride row table for the
+first arg, a 44-byte-stride table for the second). It is most plausibly a "request quest
+detail / claim row" round-trip. The tuple and body shape are CONFIRMED; the **semantic
+meaning of the two u32 args and the framed wire size are capture/debugger-pending**. The
+earlier "untraced" note and the mission's "2/110 quest NPC step" are superseded — there is
+no quest send-builder for minor 110 (§4.4, §13a). Do not assume it reuses 2/28's body shape.
 
 ### 15.6 HUD quest-tracking checkbox (per-character INI flag)
 
@@ -673,6 +808,41 @@ marker, and **persists the on/off state to the per-character configuration**: it
 `CHAR_QUEST_TRACKING` key under a per-character section named `<billing_id>_<player_name>_CHARACTER`.
 So the tracking preference is config-backed and scoped to the specific character. This is
 the same `CHAR_QUEST_TRACKING` key that identifies the window (§15).
+
+### 15.7 Quest eligibility / status-color evaluator and the runtime quest-record gate map
+
+The client carries a substantial **quest eligibility evaluator** (used by the AVAILABLE tab
+and the NPC quest menus to color/grade each quest). Given a quest id it looks up the
+**runtime quest record** (via the quest-id keyed registry) and returns one of ~13 distinct
+**status / color state ids** after checking, in order: record-exists, **min level**, **max
+level**, an accepted/availability flag, **class/race match**, two **secondary-stat bounds**,
+a **tertiary-stat bound**, a scan over the active-quest id table for a same-category quest
+already active, a scan over a second active range for the same quest id, and finally a
+**prerequisite-chain** compare. This is the single best map of the **runtime** quest-record
+gate fields. CONFIRMED on `263bd994`.
+
+The runtime quest-record gate fields (offsets into the **in-memory** record, the same object
+the give-up gate reads — see §9 / §15.4 for the on-disk-vs-runtime stride conflict):
+
+| Runtime off | Field role | Conf |
+|----:|---|---|
+| +2 | category/class byte (used in the already-accepted scan). | CONFIRMED |
+| +4905 (0x1329) | `abandonable` flag (the give-up gate, §15.4). | CONFIRMED |
+| +4936 (0x1348) | prerequisite-chain reference (u32, compared against a global prereq state). | CONFIRMED |
+| +4944 (0x1350) | **min level** (u16) — compared against the character-level word (the accept-gate "26" word, §4.3). | CONFIRMED |
+| +4946 (0x1352) | **max level** (u16). | CONFIRMED |
+| +4948 (0x1354) | per-index accepted/availability flag (indexed by an active-quest index). | CONFIRMED |
+| +4953 (0x1359) | class/race match byte. | CONFIRMED |
+| +4954 (0x135A) | secondary-stat minimum. | CONFIRMED |
+| +4955 (0x135B) | secondary-stat maximum. | CONFIRMED |
+| +4956 (0x135C) | tertiary-stat bound. | CONFIRMED |
+
+> These are **runtime in-memory offsets**, NOT on-disk `quests.scr` offsets. The record spans
+> to at least +4956 (~4960 bytes), which is why §9 records the on-disk-vs-runtime stride
+> conflict. The runtime structure is `structs/`-owned; do not map these offsets onto the
+> 3720-byte on-disk parser. The server-authored *magnitudes* these gate against (the actual
+> level/stat thresholds a player must meet) are quest-data values and capture/debugger-pending
+> at the data-table level; the *gate fields and their order* are client-side CONFIRMED.
 
 ---
 
@@ -699,7 +869,8 @@ behaviour and pins the source: the **6 body lines come from the NPC-script dialo
 
 > The three dialogue handles correspond to the quest record's offer / active / turn-in
 > dialogue references (the §8 "step-list handle" family). The exact byte offsets of these
-> handles inside the 3720-byte record are not pinned against the sample (§19.4).
+> handles inside the quest record are not pinned against the sample, and live in the
+> *runtime* record whose stride differs from the on-disk 3720-byte view (§8, §15.7, §19.4).
 
 ---
 
@@ -754,13 +925,15 @@ which strengthens the routing claims of §2 from "observed at a dispatch/send si
 |---|---|---|---|---|
 | **5/68** | `SmsgQuestList` | S2C | 452 B | Installed in the major-5 push table (quest-log snapshot handler). CODE-CONFIRMED. |
 | **5/73** | `SmsgQuestComplete` | S2C | 344 B | Installed in the major-5 push table (quest-completion verdict handler). CODE-CONFIRMED. |
-| **2/28** | `CmsgQuestAction` | C2S | see §4 | Major-2 is **send-only**; there is correctly **no inbound handler slot**. The send-builder fills `sub_action` 2/3/4. CODE-CONFIRMED. |
-| (2nd C2S) | quest list-row request | C2S | — | A separate send-builder (§15.5); **opcode/body not traced**. UNVERIFIED. |
+| **2/28** | `CmsgQuestAction` | C2S | 12 B body | Major-2 is **send-only**; there is correctly **no inbound handler slot**. The send-builder appends a 12-byte body and fills `sub_action` 2/3/4. CODE-CONFIRMED. |
+| **2/152** | quest list-row request | C2S | 8 B body | The "second channel" (§4.4, §15.5) — a separate send-builder appending two u32 args; AVAILABLE-tab row actions only. *(resolved 2026-06-16 — was "untraced".)* CODE-CONFIRMED (tuple + body shape). |
 
-> **These are static routing facts and remain CAPTURE-UNVERIFIED.** The install table
-> proves the handlers exist and are wired to these minors; it does **not** validate the
-> payload field offsets/sizes of §§4/6/7. The 452 B / 344 B / body layouts are still static
-> inferences to be byte-confirmed against a real capture (§13 #1).
+> **These routing facts are CONFIRMED on `263bd994`; the on-wire body *sizes* (12 B / 8 B /
+> 452 B / 344 B) are confirmed from the client parse/send extents.** What remains
+> capture/debugger-pending is the **framed** wire totals, field endianness, the 5/73 body
+> remainder, and any server-authored quest *values* (§13 #1, #6, #10). The 2/110 "quest NPC
+> step" tuple was searched for and **not found** — there is no quest send-builder for minor
+> 110 (conflict, see banner / §4.4 / §13a).
 
 ---
 
@@ -771,11 +944,14 @@ This spec keeps them **behavioural**; the **full stride / field byte tables live
 `formats/config_tables.md`** (quest-data family). Summary:
 
 ### 19.1 `quests.scr` — quest template catalogue
-Sparse flat array, **stride 3720 B (0xE88)**, **488 slots / 122 occupied**. Quest id is a
-`u16` at +0 (range 1..617; 0 = empty), CP949 name at +2, six step-code bytes at +0x040,
+**On-disk:** sparse flat array, **stride 3720 B (0xE88)**, **488 slots / 122 occupied**. Quest
+id is a `u16` at +0 (range 1..617; 0 = empty), CP949 name at +2, six step-code bytes at +0x040,
 decimal-composite chain references at +0x054/+0x058, and a recurring `u32 = 48` sub-section
-marker implying embedded objective/reward sub-records (§8.1). Replaces the earlier 4960-byte
-estimate.
+marker implying embedded objective/reward sub-records (§8.1). **Runtime:** the in-memory quest
+record the runtime keys by `quest_id` is **≥4957 B (~4960)** and carries the level/class/stat/
+prereq gate fields and the `abandonable` flag in its high region (§15.7). The on-disk-vs-runtime
+stride is a tracked **conflict** (§8) — the runtime record is larger than the on-disk record;
+reconciliation needs a VFS re-measure.
 
 ### 19.2 `autoquestion_cl.scr` — anti-bot quiz pool
 Flat array, **stride 92 B, 1300 records**. Sequential `u32` question id at +0, CP949 question
@@ -795,11 +971,13 @@ from the `npcs.scr` catalogue.
   template references? (Three distinct patterns across 122 quests.)
 - The embedded 48-byte `quests.scr` sub-records — objective NPC ids, kill/collect counts,
   reward item ids and EXP are the expected contents but are not yet field-decoded.
-- The `abandonable` flag source byte — the world lane read it at an offset inconsistent with
-  the 3720-byte stride (§15.4); reconcile against the sample.
+- **The `abandonable` flag source is RESOLVED** *(2026-06-16)*: it is at **runtime offset
+  +4905 (0x1329)** of the **in-memory** quest record — see §9 and §15.7. What remains open is
+  the **on-disk-vs-runtime stride reconciliation** (the runtime record spans to ≥+4956 / ~4960 B,
+  whereas the on-disk `quests.scr` sample measured 3720 B; a VFS re-measure is warranted — §9).
 - The `npc.scr` ↔ `npcs.scr` linking key (the 1..2510 description id space vs the catalogue
   NPC ids).
-- The three quest dialogue handles' exact byte offsets inside the 3720-byte record.
+- The three quest dialogue handles' exact byte offsets inside the quest record.
 
 ### 19.5 `discript.sc` — UI context-menu labels (sibling table)
 Flat array, **stride 68 B, 33 records**. `u32` menu id at +0, `u32` category code at +4, CP949

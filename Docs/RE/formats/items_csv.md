@@ -5,23 +5,49 @@
 > table must cite `// spec: Docs/RE/formats/items_csv.md`.
 >
 > Promoted from dirty-room harness observation of the maintainer's legally-owned client VFS
-> under EU Software Directive 2009/24/EC Art. 6. No IDA used; no decompiler output appears here.
+> under EU Software Directive 2009/24/EC Art. 6. No decompiler output appears here.
+
+---
+
+## Verification banner
+
+```
+verification:   sample-verified   # delimiter/encoding/line-ending/headerlessness/hazards corroborated
+                                   # against the real VFS sample (first 512 B of line 1); the
+                                   # runtime non-loading is confirmed from the boot data-loader's
+                                   # callee set (loader-control-flow only).
+ida_reverified: 2026-06-16
+ida_anchor:     263bd994
+evidence:       [static-ida, vfs-sample]
+conflicts:      none open          # the prior "runtime role UNVERIFIED" is now resolved:
+                                   #   items.csv is CONFIRMED not loaded by the shipping client
+                                   #   (authoring/dev export only).
+```
 
 ---
 
 ## Status
 
 ```
-items.csv:  PARTIAL   # delimiter/encoding/line-ending/headerlessness CONFIRMED;
-                      # leading columns (0..6) role-inferred from observed value patterns;
-                      # full column count and per-stat-column roles UNVERIFIED;
-                      # the TWO parser hazards below are CONFIRMED and load-bearing.
+items.csv:  CONFIRMED  # delimiter/encoding/line-ending/headerlessness SAMPLE-VERIFIED;
+                       # runtime non-loading CONFIRMED (authoring/dev export only, not read by the client);
+                       # leading columns (0..6) role-inferred from observed value patterns;
+                       # column count >= 139 SAMPLE-VERIFIED (exact total still UNVERIFIED);
+                       # the TWO parser hazards below are SAMPLE-VERIFIED and load-bearing.
 ```
 
 This is the **only `.csv` file in the VFS** and is **not** referenced by any prior spec
 (`items_scr.md`, `text_tables.md`, `scr.md`). It was discovered during the VFS-DEEP-II residual
 text sweep. It is a flat, comma-separated, line-oriented text table — distinct from the binary
 `data/script/items.scr` item database (see §6, Relationship).
+
+> **Runtime role (RESOLVED — authoring/dev export only).** The shipping client does **NOT** load
+> `data/script/items.csv` at runtime. The IDB string table holds **zero** references to any `.csv`
+> path, and the authoritative boot data-loader (which fans out to 60+ `.scr`/`.do`/`.xdb` table
+> loaders) has **no CSV reader** among its callees. `items.csv` is therefore a developer/authoring
+> export of the binary `items.scr` master database — a tooling artifact, not runtime game data. A
+> faithful re-implementation MUST read `items.scr` for runtime item data and treat `items.csv` as a
+> human-editable side export only. (Witness: boot-loader callee set, loader-control-flow only.)
 
 ---
 
@@ -30,19 +56,21 @@ text sweep. It is a flat, comma-separated, line-oriented text table — distinct
 - **Extension:** `.csv`
 - **Found in:** the engine VFS (`data.inf` + `data/data.vfs`); logical path `data/script/items.csv`.
   Identified by path, not by content magic. See `formats/pak.md` for the VFS container.
-- **Magic / signature:** none — byte 0 is the first character of the first data field. CONFIRMED.
+- **Magic / signature:** none — byte 0 is the first character of the first data field (a CP949 lead
+  byte). SAMPLE-VERIFIED.
 - **Version field:** none.
-- **Header row:** **NONE.** The file begins directly with data; there is no column-name row.
-  CONFIRMED.
-- **Delimiter:** comma (`,`). CONFIRMED.
+- **Header row:** **NONE.** The file begins directly with data (the first item-name field), not a
+  column-name row. SAMPLE-VERIFIED.
+- **Delimiter:** comma (`,`, byte `0x2C`). SAMPLE-VERIFIED (separates fields throughout).
 - **Line ending:** **LF only** (`0x0A`) — note this differs from the CRLF used by the other VFS
-  text tables. CONFIRMED.
+  text tables. SAMPLE-VERIFIED (LF, no preceding `0x0D`, at the end of line 1).
 - **Encoding:** CP949 (EUC-KR superset). The name and description fields hold Korean text; numeric
-  fields are the ASCII subset of CP949. CONFIRMED.
+  fields are the ASCII subset of CP949. SAMPLE-VERIFIED (first fields decode to a valid Korean item
+  name).
 - **Endianness:** not applicable (text format).
-- **Size class:** the largest text table in the VFS (~33 MB). At an estimated ~1 KB per row this is
-  on the order of tens of thousands of rows; the exact row count is UNVERIFIED and should be derived
-  by counting LF line terminators at load time, not assumed.
+- **Size class:** the largest text table in the VFS (~33 MB; ~33,069,300 bytes). At an estimated
+  ~1 KB per row this is on the order of tens of thousands of rows; the exact row count is UNVERIFIED
+  and should be derived by counting LF line terminators at load time, not assumed.
 
 ---
 
@@ -55,9 +83,9 @@ correctly resolved** — a naive split shifts every index after column 0.
 
 | col# | type   | role (inferred)                                              | confidence |
 |------|--------|-------------------------------------------------------------|------------|
-| 0    | string | `item_name` — CP949; **MAY CONTAIN EMBEDDED COMMAS** (hazard) | HIGH (type); HAZARD |
-| 1    | u32    | `item_id` — 9–12 digit numeric id                            | HIGH       |
-| 2    | string | `item_description` — CP949; **MAY CONTAIN EMBEDDED COMMAS** (hazard) | HIGH (type); HAZARD |
+| 0    | string | `item_name` — CP949; **MAY CONTAIN EMBEDDED COMMAS** (hazard) | HIGH (type, SAMPLE-VERIFIED); HAZARD |
+| 1    | u32    | `item_id` — 9–12 digit numeric id                            | HIGH (SAMPLE-VERIFIED) |
+| 2    | string | `item_description` — CP949; **MAY CONTAIN EMBEDDED COMMAS** (hazard) | HIGH (type, SAMPLE-VERIFIED); HAZARD |
 | 3    | u32    | small int (0 in all observed rows)                          | LOW        |
 | 4    | u32    | `base_item_id` / archetype id (9-digit)                     | HIGH       |
 | 5    | u32    | secondary type id (9-digit)                                 | MEDIUM     |
@@ -67,10 +95,14 @@ correctly resolved** — a naive split shifts every index after column 0.
 - **Record count source:** number of LF-terminated lines (no count prefix, no header). UNVERIFIED
   exact value; derive at load.
 - **Record structure:** `{name},{id},{description},{numeric columns…}`. The first two text fields
-  (cols 0 and 2) carry the embedded-comma hazard; everything from col 3 onward is numeric.
-- **Full column count UNVERIFIED** — rows span well over 100 comma-separated fields. A complete
-  column census requires a dedicated pass that counts commas per row **after** correcting for the
-  embedded commas in cols 0 and 2.
+  (cols 0 and 2) carry the embedded-comma hazard; everything from col 3 onward is numeric. The full
+  ordered shape `name → id → description → small-int → base_item_id → secondary-type-id → flag →
+  numeric-tail` was SAMPLE-VERIFIED against line 1 of the real VFS sample.
+- **Full column count — at least 139, SAMPLE-VERIFIED lower bound; exact total UNVERIFIED.** The
+  first 512 bytes of line 1 already contain 138 commas (≥ 139 fields) and the line continues past the
+  observed window, so the true column count is higher. A complete column census still requires a
+  dedicated pass that counts commas per row **after** correcting for the embedded commas in cols 0
+  and 2.
 
 ---
 
@@ -169,18 +201,19 @@ float column (the period is kept inside its value and parsed under invariant cul
 
 ## 5. Known unknowns
 
-- **Full column count** — rows exceed ~100 fields; only cols 0–6 are role-inferred. The wide numeric
-  tail (col 7+) is an item-stat array (attack/defense/required-level/etc., by analogy to the binary
-  `items.scr` stats block) but per-column roles are UNVERIFIED. IMPACT: MEDIUM.
-- **Exact float-column position(s)** — at least one float column exists; which fixed index (or
-  indices) it occupies is UNVERIFIED because the embedded-comma hazard must be resolved first to
-  establish a stable index. IMPACT: MEDIUM. The recipe in §3 handles it positionally without needing
-  the fixed index.
+- **Full column count** — at least 139 fields (SAMPLE-VERIFIED lower bound); exact total UNVERIFIED.
+  Only cols 0–6 are role-inferred. The wide numeric tail (col 7+) is an item-stat array
+  (attack/defense/required-level/etc., by analogy to the binary `items.scr` stats block) but
+  per-column roles are UNVERIFIED. IMPACT: MEDIUM.
+- **Exact float-column position(s)** — at least one float column exists (`0.26` was SAMPLE-VERIFIED
+  in line 1); which fixed index (or indices) it occupies is UNVERIFIED because the embedded-comma
+  hazard must be resolved first to establish a stable index. IMPACT: MEDIUM. The recipe in §3 handles
+  it positionally without needing the fixed index.
 - **Row count** — file is ~33 MB; exact record count UNVERIFIED (derive by counting LF lines).
-- **Runtime role** — whether the shipping client loads `items.csv` at all, or whether it is a
-  developer/authoring export superseded at runtime by binary `items.scr`, is UNVERIFIED (see §6).
 - **Col 3 / col 6 flag semantics** — UNVERIFIED.
-- No IDA cross-check was performed (black-box lane).
+- **Runtime role — RESOLVED (no longer a known unknown):** `items.csv` is CONFIRMED **not** loaded
+  by the shipping client (zero `.csv` string references; absent from the boot data-loader callee
+  set). It is an authoring/dev export. See §6.
 
 ---
 
@@ -193,10 +226,12 @@ appears to be a **flat text parallel** of the same item data, formatted for huma
 - The `item_id` in CSV col 1 is expected to correspond to the item id in `items.scr` records,
   making the two parallel views of one dataset rather than independent sources. (Cross-key
   correspondence is **inferred, not byte-verified** — UNVERIFIED.)
-- Which one the shipping client loads at runtime is UNVERIFIED. The binary form is smaller and faster
-  to parse, so `items.scr` is the **probable runtime loader** and `items.csv` is plausibly an
-  authoring/developer export. A faithful loader should prefer `items.scr` unless a CSV-only field is
-  needed; if both are read, reconcile on `item_id`.
+- Which one the shipping client loads at runtime is now **RESOLVED**: the client loads **`items.scr`**
+  (it is among the boot data-loader's callees) and does **not** load `items.csv` at all (zero `.csv`
+  string references; no CSV reader in the loader callee set). `items.csv` is therefore an
+  authoring/developer export of the binary master, not a runtime source. A faithful loader MUST read
+  `items.scr` for runtime data; treat `items.csv` strictly as a human-editable side export. If a tool
+  reconciles the two for export/diff purposes, key on `item_id`.
 
 **Proposed canonical name:** `items_csv_table` (flag for `names.yaml`, orchestrator-owned).
 
@@ -212,6 +247,8 @@ appears to be a **flat text parallel** of the same item data, formatted for huma
 - Glossary: see `Docs/RE/names.yaml` (proposed name above; orchestrator-owned).
 - Provenance: see `Docs/RE/journal.md` (add an entry for this spec).
 
-> **Engineering note:** a C# loader for this table must cite
-> `// spec: Docs/RE/formats/items_csv.md` and must use the §3 hazard-safe recipe — a generic
-> `Split(',')` or integer-only numeric parse will silently corrupt the table.
+> **Engineering note:** `items.csv` is an authoring/dev export and is **not loaded by the shipping
+> client** (CONFIRMED) — runtime item data comes from `items.scr` (see `formats/items_scr.md`). If a
+> developer tool nonetheless parses this CSV, it must cite `// spec: Docs/RE/formats/items_csv.md`
+> and use the §3 hazard-safe recipe — a generic `Split(',')` or integer-only numeric parse will
+> silently corrupt the table.

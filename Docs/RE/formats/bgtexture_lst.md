@@ -3,7 +3,14 @@
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code.
 > Consumed by Assets.Parsers. Every offset an engineer cites must reference this file.
 >
-> status: sample_verified
+> verification: sample-verified — both shipped `bgtexture.lst` instances verify the size formula
+>               exactly, AND the loader control flow (count validation, 48-byte record stride,
+>               kind byte at +0, 47-byte relpath at +1, path construction) was independently
+>               re-confirmed in the IDB.
+> ida_reverified: 2026-06-16
+> ida_anchor: 263bd994
+> evidence: [static-ida, vfs-sample]
+> conflicts: none unresolved.
 > sample_verified: true — both shipped `bgtexture.lst` instances verify the size formula
 >                  exactly; the per-record kind byte and the relpath layout are cross-checked
 >                  against the matching `bgtexture.txt` text mirror. A full-file scan of every
@@ -51,9 +58,18 @@ array and no 76-byte record.
 
 | Offset | Size | Type   | Field          | Notes / observed values                              | Confidence |
 |-------:|-----:|--------|----------------|------------------------------------------------------|------------|
-| 0      | 4    | u32 LE | `record_count` | Number of records that follow; `map000`=1222, `effect`=1108 | CONFIRMED  |
+| 0      | 4    | u32 LE | `record_count` | Number of records that follow; `map000`=1222, `effect`=1108 | CONFIRMED + SAMPLE-VERIFIED |
 
 No further file-level header fields. The record array begins immediately at offset 4.
+
+**Count validation (loader-enforced).** The loader range-checks `record_count` before allocating:
+it **rejects a count of 0** and **rejects a count `>= 2000` (0x7D0)**. A count outside the half-open
+range `[1, 2000)` aborts the load with an error rather than allocating. Both shipped instances
+(1222, 1108) fall inside the valid range. **CODE-CONFIRMED** (the bounds are read directly from the
+loader's two comparison guards); the in-range values are **SAMPLE-VERIFIED**. A parser that mirrors
+the client should apply the same `1 <= record_count < 2000` guard. (Contrast the per-area
+`d<NNN>.lst` manifest loader, which performs **no** count validation — see
+`area_inventory.md §1.2`.)
 
 ---
 
@@ -81,6 +97,18 @@ file_size = 4 + record_count * 48
 |---------------------------------------|-------------:|-------------------------|----------|
 | `data/map000/texture/bgtexture.lst`   | 1222         | 4 + 1222 × 48 = 58,660  | exact    |
 | `data/effect/texture/bgtexture.lst`   | 1108         | 4 + 1108 × 48 = 53,188  | exact    |
+
+**I/O pattern (informational).** The client reads the body as a **single bulk read** of
+`record_count × 48` bytes into a temporary buffer, then walks that buffer in a per-record loop
+(stepping 48 bytes per iteration) to populate its in-memory pool — it does **not** issue one read
+per record. This is an I/O optimization detail, not a format fact; a parser may read the whole
+body in one shot or stream record-by-record with identical results. **CODE-CONFIRMED.**
+
+In memory each record expands to a larger fixed-size pool entry (a 76-byte in-memory stride, distinct
+from the 48-byte on-disk stride). The 76-byte figure is an in-memory layout detail and does **not**
+affect on-disk parsing; the on-disk record is always 48 bytes. This is noted so an engineer does not
+confuse the in-memory pool-entry size with the file record size (see also `terrain.md §4.1`, whose
+earlier "76-byte record" estimate referred to this in-memory entry, not the on-disk record).
 
 ---
 
@@ -137,6 +165,15 @@ static ground).
 | 0x0C |  12 | `KIND_TREE_BARK`  | Tree-bark / trunk patch                                          |
 | 0x14 |  20 | `KIND_FOLIAGE`    | Dense tree foliage, branches, canopy                            |
 
+- **Runtime pool dispatch (binary, CODE-CONFIRMED).** At load time the `kind` byte gates a binary
+  branch that decides which of **two** texture-pool initialization paths each record's in-memory
+  entry is wired to: `kind == 0x01` selects one pool; **any** `kind != 0x01` selects the other. The
+  byte therefore does more than label a render mode — it **selects a texture-pool init path** at
+  parse time. The loader's branch only distinguishes "is it 1 or not"; the finer 6-value
+  enumeration above is the observed *data* spread, while the runtime *code* split is just the
+  `==1` / `!=1` dichotomy. An engineer wiring the kind byte should treat `0x01` as the default
+  (static-ground) pool and route every other value to the alternate pool, then layer the
+  render-mode bucket on top.
 - The render-mode **categories** are HIGH confidence (the value→relpath-family correlation holds
   across the full scan of both files). The **exact rendering behaviour** behind each mode
   (scroll speed, sway parameters, alpha-test vs. billboard) is INFERRED from the relpath families
@@ -172,3 +209,12 @@ static ground).
   `BgtextureLstRecord.relPath`, `BgtextureTxt`; render-mode labels `KIND_STATIC`, `KIND_SCROLL`,
   `KIND_GRASS`, `KIND_PLANT`, `KIND_TREE_BARK`, `KIND_FOLIAGE`).
 - Provenance: see `Docs/RE/journal.md` (add an entry for this spec).
+- **Campaign 10 re-verification (2026-06-16, IDB anchor 263bd994):** re-confirmed against both the
+  IDB loader control flow and the two real VFS samples. No layout drift. Enrichments folded in this
+  pass: the loader's explicit count-validation guard (**reject 0**, **reject `>= 2000`**); the
+  runtime **two-pool dispatch** on the kind byte (`== 0x01` vs `!= 0x01`); the **single bulk read**
+  I/O pattern; and the clarification that the 76-byte figure is the in-memory pool-entry stride, not
+  the 48-byte on-disk record. The `kind` byte's six-value enumeration and per-mode rendering
+  behaviour remain as previously tiered (enumeration sample-verified from the prior full-file scan;
+  per-bucket behaviour INFERRED). No addresses, decompiler output, or sample bytes crossed the
+  firewall.

@@ -10,6 +10,22 @@
 > subsystem; each has its own section with an independent status block. The sound-trigger `.eff`
 > files that share the same extension are **out of scope** — see `sound_tables.md`.
 
+> **verification:** sample-verified (two-witness) — every load-bearing `.xeff` / `particleEmitter.eff` /
+> `effectscale.xdb` claim re-confirmed against the live loader (control flow + operands) AND a byte-walk
+> of real VFS entries; three `.xeff` files (1 / 11 / 68 sub-effect blocks) parse to RESIDUAL = 0, the
+> particleEmitter walk reaches its `num_frames == 0` tail over 146 variable-length entries, and every
+> manifest / `.xdb` size formula is byte-exact. The Section B `.eff` geometry shape and Section F
+> link-tables remain at their prior sample-verified status (not re-walked this pass).
+> **ida_reverified:** 2026-06-16
+> **ida_anchor:** 263bd994
+> **evidence:** [static-ida, vfs-sample]
+> **conflicts:** NONE structural — the loader and the real sample contradict no committed claim on this
+> build. Two carried items: (1) the on-disk `effectscale.xdb` sample on this build holds different
+> *record values* than the values recorded in §D (a newer build's table) — the **layout is identical**,
+> so this is NOT a conflict; (2) the `.fx` terrain-layer `type_tag == group_count` claim is OUT-OF-LANE
+> (owned by `terrain_layers.md`) and was NOT re-walked here — see the Terrain FX section, status
+> capture/debugger-pending → terrain.
+
 ---
 
 ## Status
@@ -18,7 +34,7 @@
 
 | Item | Value |
 |------|-------|
-| `sample_verified` | **partial** — 8-byte file header VERIFIED against multiple real samples including byte-math proof on `331120721.xeff`; element body and sub-effect block layout CONFIRMED by sample byte-walkthrough; alpha/scale curve layout CONFIRMED; track header CONFIRMED; keyframe frame-0 special case CONFIRMED |
+| `sample_verified` | **true (two-witness, build 263bd994, 2026-06-16)** — 8-byte file header, 24-byte element fixed head, name table, four-pass curve section, 9-byte track header, and uniform 40-byte keyframe stride ALL re-confirmed against the live body parser AND a byte-walk of `331120721.xeff` (621 B, 1 block), `zone_sel_u.xeff` (26,947 B, 11 blocks), and `char_select-u.xeff` (75,372 B, 68 blocks) — **all three parse to RESIDUAL = 0**. The earlier "partial" tag (header verified, body still being walked) is upgraded: the body is now byte-exact on three files spanning the full block-count range. |
 | Endianness | Little-endian throughout |
 | Magic / signature | None — format identified by file extension and directory only |
 | Anti-magic | If `effect_id` at offset 0 equals `0x46464558` the client treats the file as invalid |
@@ -52,7 +68,7 @@
 
 | Item | Value |
 |------|-------|
-| `loader_confirmed` | **CONFIRMED — variable-length entry sequence** (loader read-order, byte-symmetric with the writer). The file is a SEQUENCE of variable-length entries — each a 28-byte entry header + (`num_frames` × 52-byte sub-record) + 64-byte trailing texture name — and the read loop terminates when an entry header's `num_frames` is 0. There is NO file-level magic check. The earlier "16-byte header + 2,243 × 52-byte flat records" model is REFUTED (see E.0 Correction). |
+| `loader_confirmed` | **SAMPLE-VERIFIED (two-witness, build 263bd994) — variable-length entry sequence** (loader read-order, byte-symmetric with the writer, AND a byte-walk of the real `particleEmitter.eff`, 116,652 B: **146 variable-length entries walked to a clean `num_frames == 0`/EOF tail with no desync**). The file is a SEQUENCE of variable-length entries — each a 28-byte entry header + (`num_frames` × 52-byte sub-record) + 64-byte trailing texture name — and the read loop terminates when an entry header's `num_frames` is 0 (or fewer than 28 bytes remain). There is NO file-level magic check (the first dword is data — `entry_id = 10001`, the value the old flat model misread as "magic 0x2711"). The earlier "16-byte header + 2,243 × 52-byte flat records" model is REFUTED (see E.0 Correction). |
 | Endianness | Little-endian |
 | Field semantics | Entry-header fields CONFIRMED/HIGH (`entry_id`, `num_frames`, `sprite_size_x/y`, `max_particles`, trailing texture name). The 52-byte sub-record is UNRESOLVED except a 4-byte colour-like quad near its +0x08. |
 | Note | This is a distinct `.eff` sub-type at `data/effect/particle/particleEmitter.eff` (VFS-lowercased `particleemitter.eff`); must NOT be parsed with the Section B geometry parser. Entry-record selection is by **raw `entry_id` equality** to a `.xeff` element's `resource_id` (no `−10000` subtraction) — see E.4 and A.4.0. |
@@ -190,14 +206,31 @@ padding.
 
 Follows the name table. Contains exactly four consecutive float-curve arrays, each prefixed by its own count:
 
-| Pass | Semantic | Count source | Notes |
-|------|----------|--------------|-------|
-| 1 | Alpha channel | own u32 prefix | CONFIRMED: values in `[0, 1]`; stored as `1.0 − opacity` (see A.6) |
-| 2 | Scale X channel | own u32 prefix | CONFIRMED: constant-zero pass observed |
-| 3 | Scale Y channel | own u32 prefix | CONFIRMED: opacity fall-off values observed |
-| 4 | Scale Z channel | own u32 prefix | CONFIRMED: scale ramp values observed |
+| Pass | Loader-level role | Count source | Notes |
+|------|-------------------|--------------|-------|
+| A (pass 1) | Single-float inverse/alpha track | own u32 prefix | CONFIRMED: each value stored as `1.0 − file_value` (see A.6). This is a one-float-per-keyframe track, distinct from the Vec3 curve below. |
+| 2 | Vec3 curve, component +0 | own u32 prefix | CONFIRMED layout: fills component +0 of each Vec3 entry (stride 12). Loader assigns NO colour/scale meaning. |
+| 3 | Vec3 curve, component +4 | own u32 prefix | CONFIRMED layout: fills component +4 of each Vec3 entry. |
+| 4 | Vec3 curve, component +8 | own u32 prefix | CONFIRMED layout: fills component +8 of each Vec3 entry. |
 
-Each pass reads `u32 curve_count` then `curve_count × f32`. The four passes map to: `alpha_key_count + alpha_key[i]`, then scale channels X/Y/Z (matching the legacy Group C/D parser specification). The per-pass count may differ from `entry_count`; the scale vector is resized to the largest of the three scale counts, with shorter passes zero-padded.
+Each pass reads `u32 curve_count` then `curve_count × f32`.
+
+**CURVE SEMANTICS DOWNGRADED TO DBG-PENDING (CAMPAIGN VFS-MASTERY — two-witness: loader read-order + black-box byte-walk).** At the loader level, passes 2/3/4 are NOT three independent named channels: they are one **generic component-major Vec3 curve**. The loader walks the same destination Vec3 array three times — pass 2 writes component `+0` of each Vec3, pass 3 writes component `+4`, pass 4 writes component `+8` (Vec3 stride 12). **The loader assigns NO colour or scale meaning to these three components**; it simply scatters the three passes into the three lanes of a Vec3 array. Pass A (formerly "pass 1") is a separate single-float track, stored inverted as `1.0 − file_value` (A.6).
+
+The earlier reading that labelled passes 2/3/4 as the per-keyframe **DIFFUSE R/G/B multiplier** is a **render-side interpretation**, not parser-provable: it describes how the render path consumes the Vec3 lanes, not what the file loader knows. That interpretation is therefore **DBG-pending** — the RGB-vs-XYZ (colour vs scale) semantic of the three Vec3 components must be confirmed against the live render path before it can be promoted as CONFIRMED.
+
+What IS settled at the loader level (CONFIRMED, two-witness):
+- The curve section is exactly four count-prefixed `f32` arrays.
+- Passes 2/3/4 land as the three components of a component-major Vec3 array (stride 12), in component order +0 / +4 / +8.
+- The loader attaches no colour/scale meaning; that is a downstream (render) concern.
+- A per-pass count may differ from `tex_count`; shorter passes leave the unfilled lanes at their
+  default. **Concrete witness (SAMPLE-VERIFIED, build 263bd994):** in `char_select-u.xeff` block 67
+  the four pass counts are `alpha / pass2 / pass3 / pass4 = 9 / 9 / 4 / 4` — the alpha track and
+  pass 2 carry 9 entries while passes 3 and 4 carry only 4, proving the counts genuinely vary
+  within a single block. A parser must read each pass's own `u32` count prefix and never assume the
+  four counts are equal or equal to `tex_count`.
+
+The render-side observations that motivated the "diffuse RGB" reading (e.g. distinct per-effect triplets folded into the sprite's per-vertex diffuse) are retained as **render-domain notes for the presentation lane**, tagged DBG-pending here; do not promote them as a loader fact. The element's real SIZE/scale is the keyframe `size_x/y/z` floats (positions 4–6 of the 9-float keyframe, A.4.4), independent of this curve section. The in-memory model's `ScaleX/Y/Z` fields therefore hold this Vec3 curve regardless of whether its render meaning turns out to be colour or scale (a field-naming follow-up).
 
 ### A.4.3 Track header (9 bytes, fixed)
 
@@ -208,8 +241,8 @@ either branch.
 | Sub-offset | Size | Type | Field | Notes | Confidence |
 |---:|---:|------|-------|-------|-----------|
 | +0 | 1 | u8 | `anim_loop` | Non-zero enables the animated (multi-keyframe) path; zero selects the single static-state entry. Observed value: `0x01` in all samples. | CONFIRMED |
-| +1 | 4 | u32 LE | `anim_stride` | Duration of one animation frame in milliseconds. Observed: 469 ms, 871 ms. | CONFIRMED |
-| +5 | 4 | u32 LE | `anim_base_time` | Base time offset in milliseconds. Observed value: 0 in all samples. | CONFIRMED |
+| +1 | 4 | u32 LE | `anim_stride` | Duration of one animation frame in milliseconds. **Per-block and clearly variable** — observed values include 67 ms (`zone_sel_u`, `char_select-u` block 0), 100 ms and 140 ms (other `char_select-u` blocks), and 469 ms / 871 ms (earlier samples). The observed list is a distribution sample, NOT an enumeration of legal values. | CONFIRMED |
+| +5 | 4 | u32 LE | `anim_base_time` | Base time offset in milliseconds. **Commonly 0, but a non-zero value IS used in the wild** — `331120721.xeff` carries `anim_base_time = 469 ms` while `zone_sel_u` / `char_select-u` carry 0. (Earlier revisions said "0 in all samples"; that absolute is dropped — treat the field as ordinarily 0 with non-zero values legal and observed.) | CONFIRMED |
 
 Derived value (not in file): `total_time = entry_count × anim_stride + anim_base_time` (milliseconds). The loader stores this in the in-memory descriptor.
 
@@ -293,8 +326,8 @@ This is the in-memory layout the loader builds; it is provided so an engineer un
 | [8] | +0x20 | u32 | `alpha_key_count` | curve-pass-1 count |
 | [9..11] | +0x24..+0x2C | ptr×3 | alpha-key vector (f32) | stored as `1.0 − file_value` |
 | [12] | +0x30 | u32 | (constructor-zeroed; no confirmed write) | likely padding/reserved |
-| [13] | +0x34 | u32 | `scale_key_count` | high-water mark of the three scale-curve counts |
-| [14..16] | +0x38..+0x40 | ptr×3 | scale-Vec3 vector | curve passes 2/3/4 triplets |
+| [13] | +0x34 | u32 | `vec3_curve_key_count` | high-water mark of the three component-curve counts (passes 2/3/4, A.4.2) |
+| [14..16] | +0x38..+0x40 | ptr×3 | component-major Vec3 curve vector | curve passes 2/3/4 scattered into Vec3 lanes +0/+4/+8 (A.4.2). Loader assigns no colour/scale meaning; the RGB-vs-XYZ render semantic is DBG-pending. |
 | [17] | +0x44 | u32 | (constructor-zeroed; no confirmed write) | likely padding |
 | [18] | +0x48 | u32 | `anim_base_time` | track header field, milliseconds |
 | [19] | +0x4C | u32 | `start_time_or_total` | DUAL USE: parser writes derived `total_time`; at runtime overwritten with spawn timestamp |
@@ -320,11 +353,15 @@ The six floats form two 3-component vectors. Both are HIGH confidence (parser la
 
 ## A.9 Companion Manifest: `xeffect.lst`
 
-**Confidence: HIGH**
+**Confidence: SAMPLE-VERIFIED** (build 263bd994: `entry_count = 3669`, record stride 30; the size
+formula `4 + 3669 × 30 = 110,074` matches the on-disk file size exactly). The boot loader reads the
+`u32` count, then `count` 30-byte NUL-padded name records, building `data/effect/xeff/<name>` per
+record. (The 85-entry surplus over the 3,584 `.xeff` files in the VFS is recorded in Open Questions
+— stale manifest rows or names served from a secondary archive; the structure itself is exact.)
 
 | Offset | Size | Type | Field | Notes |
 |-------:|-----:|------|-------|-------|
-| 0x00 | 4 | u32 LE | `entry_count` | Number of effect name records |
+| 0x00 | 4 | u32 LE | `entry_count` | Number of effect name records. SAMPLE-VERIFIED = 3669 on this build. |
 | 0x04 | `entry_count × 30` | Record[] | `entries[]` | One 30-byte record per effect |
 
 **Name record (30 bytes, zero-padded):**
@@ -478,7 +515,7 @@ per-component descriptor element; this §A.16 table is the per-instance runtime 
 | +0x40 | 4 | u32 | `start_ms` | Spawn time stamp = `delay_arg + clock_ms`; per-tick update is skipped while `now < start_ms`. | CONFIRMED |
 | +0x44 | 1 | u8 | `visible` | "Drawn this frame" flag; cleared while before the start time. | CONFIRMED |
 | +0x45 | 1 | u8 | `in_range` | Cleared when distance-culled vs the local player. | CONFIRMED |
-| +0x48 | 4 | f32 | `effect_scale` | Per-instance scale; multiplied into every component extent each tick. = descriptor base scale × spawn `effectscale` argument. | CONFIRMED |
+| +0x48 | 4 | f32 | `effect_scale` | Per-instance scale; multiplied into every component extent each tick. = descriptor base scale × spawn `effectscale` argument. The **descriptor base scale** is itself the `effectscale.xdb` override value where one exists (it REPLACES the ctor default `1.0` at parse — see Section D), else `1.0`. | CONFIRMED |
 | +0x4C | 4 | f32 | `y_offset` | Height offset added to the anchor actor's Y when placing the effect. | CONFIRMED |
 | +0x50 | 4 | f32 | `time_rate` | Elapsed-ms multiplier: `local_ms = (now − start_ms) × time_rate`. | CONFIRMED |
 | +0x54 | 4 | i32 | `anchor_id` | Actor sort/id used to look up the anchor actor (`UserXEffect`). | CONFIRMED |
@@ -761,12 +798,14 @@ Fixed 48-byte payload (key fields):
 
 # Section D: `effectscale.xdb` — Per-Effect Scale Override Table
 
-**Confidence: VERIFIED** — byte-exact against one 16-byte, two-record sample; size formula exact.
+**Confidence: SAMPLE-VERIFIED (two-witness, build 263bd994)** — byte-exact against a 16-byte,
+two-record sample (`16 = 2 × 8`, size formula exact), AND the loader + application site re-walked.
 
 - **Path:** `data/script/effectscale.xdb`
 - **Endianness:** Little-endian
 - **Magic / signature:** None
 - **Layout:** flat array of fixed 8-byte records, no header, no count prefix; record count = `file_size / 8`
+- **In-memory form:** the loader builds a map / red-black tree keyed by `effect_id`, each node holding the `f32 scale` at node-relative `+0x04`. Lookup is by `effect_id`.
 
 **Record (8 bytes):**
 
@@ -775,17 +814,35 @@ Fixed 48-byte payload (key fields):
 | +0x00 | 4 | u32 LE | `effect_id` | Matches a `.xeff` `effect_id` (Section A.2) |
 | +0x04 | 4 | f32 LE | `scale` | Scale multiplier for that effect |
 
-Observed sample records: `(353100201 → 3.0)`, `(353100202 → 2.0)`.
+**Observed sample records.** Earlier recorded: `(353100201 → 3.0)`, `(353100202 → 2.0)`. The
+build-263bd994 sample holds **different content** — `(360021705 → 3.0)`, `(360021706 → 2.0)` — i.e.
+a newer build's table with the **identical 8-byte layout and size formula**. This content difference
+is a per-build table edit, **NOT a structural conflict**: the format holds on both builds.
 
-This is a per-effect-id scale-override table that augments the descriptor base-scale. Whether the runtime multiplies it in addition to, or instead of, the descriptor base-scale is unconfirmed (application site not isolated).
+**Application (RESOLVED, two-witness — supersedes the prior "unconfirmed application site").** The
+override is applied **at parse time, inside the `.xeff` body parser** (the §A lazy-parse path),
+**before** the descriptor is marked loaded: the parser looks up the descriptor's `effect_id` in this
+table and, on a hit, **REPLACES** the descriptor's base-scale field (the ctor default of `1.0`,
+§A.16 / the descriptor base) with the table's `scale` value. It does **NOT** stack / multiply with
+the base-scale — it overwrites it. The per-instance spawn `effectscale` argument (§A.16 `+0x48`
+`effect_scale`) then multiplies *that* resolved base-scale at spawn. So the scale chain is:
+`effectscale.xdb scale` (replaces the `1.0` ctor default at parse) `×` per-instance spawn argument
+(at runtime). A miss leaves the `1.0` ctor default in place.
 
 ---
 
 # Section E: `particleEmitter.eff` — GPU Particle Emitter Descriptor Table
 
-**Confidence: file structure CONFIRMED (variable-length entry sequence, established from the
-loader read-order and confirmed byte-symmetric with the writer); entry-header fields CONFIRMED/HIGH;
-52-byte sub-record inner fields UNRESOLVED except one colour-like quad.**
+**Confidence: file structure SAMPLE-VERIFIED (two-witness, build 263bd994) — the variable-length
+entry sequence is established from the loader read-order, byte-symmetric with the writer, AND
+re-confirmed by a byte-walk of the real `particleEmitter.eff` (116,652 B): 146 entries walked to a
+clean tail with no desync. Entry-header fields CONFIRMED/HIGH; the 52-byte sub-record inner fields
+remain UNRESOLVED except one colour-like quad (DBG-pending).**
+
+> **Sample-walk witness (SAMPLE-VERIFIED, build 263bd994):** entry 0 carries `entry_id = 10001`,
+> `num_frames = 10`, `sprite_size = (64.0, 1.0)`, `max_particles = 1`; entries 1.. continue with
+> contiguous ids `10002, 10003, …`. Each entry body of `28 + num_frames × 52 + 64` bytes consumes
+> the file exactly across all 146 entries — the variable-length model is byte-exact.
 
 ## E.0 CORRECTION (Campaign 5B) — the flat-table model is RETIRED
 
@@ -1116,6 +1173,16 @@ is unchanged and reinforced.
 
 ## Terrain FX Layer Formats — Cross-Format Deltas
 
+> **Status (build 263bd994, 2026-06-16): OUT-OF-LANE — re-confirmation deferred to the terrain lane.**
+> The `.fx1`–`.fx7` layer loaders are NOT reachable from any `.fx` / `fx%d` / `%s.fx` format string in
+> the binary; the per-cell base path is built by the **terrain** subsystem (which appends the layer
+> extension), not the effect subsystem. The `.fx` `type_tag == group_count` / per-group-header correction
+> recorded below was **CODE-CONFIRMED + 595-file census SAMPLE-VERIFIED in a prior campaign**, but it was
+> **NOT re-walked in this (effects/shaders) lane** to avoid asserting a layout outside this lane's
+> two-witness scope. For build 263bd994 this claim is therefore **[capture/debugger-pending → terrain]**:
+> authoritative ownership stays with `terrain_layers.md` + the terrain analyst. The notes below are
+> retained as the prior-campaign record; do NOT treat them as re-verified on this build.
+
 The per-cell terrain layer mesh files (`.fx1` through `.fx7`) are documented in full in
 `Docs/RE/formats/terrain_layers.md §Section 1`. That file is authoritative for the FX format
 byte layouts; do NOT duplicate its tables here.
@@ -1300,7 +1367,11 @@ The June 2026 black-box pass analyzed both known FX7 files (both exactly 35,202 
 
 ## From `effectscale.xdb` (Section D)
 
-1. **Application site** — which spawn step multiplies by it, and whether it stacks with or replaces descriptor base-scale, was not located.
+1. **Application site — RESOLVED (two-witness, build 263bd994).** The override is applied at parse
+   time inside the `.xeff` body parser, before the descriptor is marked loaded, and it **REPLACES**
+   (overwrites) the descriptor base-scale ctor default of `1.0` — it does NOT stack/multiply with it.
+   The per-instance spawn `effectscale` argument (§A.16 `+0x48`) then multiplies the resolved base.
+   No open question remains. (See Section D.)
 
 ## From `particleEmitter.eff` (Section E)
 

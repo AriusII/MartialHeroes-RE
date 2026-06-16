@@ -1,5 +1,16 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: routing + size are static facts; the field layout is a static inference. capture_verified: false.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the single 476-byte (0x1DC) block read, the
+#                 116-byte stat-block + 30 x 12-byte buff-record partition (116 + 30*12 = 476), the
+#                 record base @+116 and the 12-byte stride, and the clear+hide-all-then-reshow-active
+#                 behaviour are control-flow-confirmed); the per-record 12-byte FIELD shape and the
+#                 stat-block sub-offsets are capture/debugger-pending (two competing readings flagged).
+#   ida_reverified: 2026-06-16
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: the 12-byte record interior ({id,X,Y} vs {id,?,duration,stack,flag}) is unresolved --
+#              both readings are 12 bytes; capture required. Size/stride/base are NOT in conflict.
 
 name: SmsgSkillWindowStateUpdate   # canonical name (names.yaml); this message is the buff/state-bar snapshot
 opcode: 0x40066           # major 4 (Response), minor 102 -> (4 << 16) | 102

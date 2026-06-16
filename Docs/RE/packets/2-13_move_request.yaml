@@ -1,5 +1,15 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# CAPTURE-UNVERIFIED VALUE semantics; size + the first three floats + the ModeFlags byte split are
+# control-flow CONFIRMED from the move send site. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: builder writes header 2/13 + appends a fixed 0x10 = 16-byte body)
+#   field offsets:       confirmed   (Heading@0x00 from atan2(dz,dx), TargetX@0x04, TargetZ@0x08; XZ only, no Y)
+#   ModeFlags split:     confirmed   (byte @0x0c = constant 3; byte @0x0d = run-flag bool from the player run state;
+#                        bytes @0x0e/0x0f undefined -- the prior "low byte = move-mode 1" reading is REFINED)
+#   wire VALUE semantics: capture/debugger-pending (Heading angular unit; exact @0x0c mode-byte semantics across callers)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: none (size + first 3 floats re-confirmed; ModeFlags sub-layout refined to the @0x0c=3 / @0x0d run-flag split)
 
 name: CmsgMoveRequest
 opcode: 0x2000d           # major 2 (GameAction), minor 13 -> (2 << 16) | 13
@@ -9,37 +19,45 @@ spec: packets/2-13_move_request.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Client click-to-move / position-sync request. Sends a computed facing angle, a target XZ point, and a movement-mode/run region. The server re-broadcasts the result via S2C 5/13 ActorMovementUpdate.
+summary: Client click-to-move / position-sync request. Sends a computed facing angle, a target XZ point, and a movement-mode/run-flag region. The server re-broadcasts the result via S2C 5/13 ActorMovementUpdate.
 
 # Wire order, offset 0 = first payload byte. Pack=1; the 16 widths sum to size: 16.
+# The 0x0c..0x0f region is CONTROL-FLOW CONFIRMED to split into bytes (not a single packed u32):
+# @0x0c = a constant 3, @0x0d = the run-flag bool, @0x0e/@0x0f undefined. Modeled as discrete bytes.
 fields:
   - { name: Heading,  type: f32 }        # 0x00  facing angle, computed by the client from (target - current) delta
   - { name: TargetX,  type: f32 }        # 0x04  requested target X in world coordinates
   - { name: TargetZ,  type: f32 }        # 0x08  requested target Z in world coordinates (world Y not sent)
-  - { name: ModeFlags, type: u32 }       # 0x0c  move-mode + run-flag region (see notes for the byte split)
+  - { name: ModeByte, type: u8 }         # 0x0c  move-mode byte; observed constant 3 at this send site
+  - { name: RunFlag,  type: u8 }         # 0x0d  run/walk flag (1 when the local player run state == 1)
+  - { name: Reserved0E, type: "bytes[2]" } # 0x0e  undefined trailing region (not written; treat as reserved/pad)
 
 notes: |
-  Static inference only; no capture available. The client move sender builds a fixed 16-byte
+  Static analysis only; no capture available. The client move sender builds a fixed 16-byte
   payload, so total payload = 16 bytes. Frame = 8-byte header + 16 = 24 bytes on the wire.
+  Width sum check: 4 + 4 + 4 + 1 + 1 + 2 = 16.
 
-    0x00 (4B) Heading  : the client derives a facing/heading angle (atan2-style) from the vector
-                         between the local player's current position and the requested target.
-    0x04 (4B) TargetX  : requested destination X (world, le f32).
+    0x00 (4B) Heading  : the client derives a facing/heading angle (atan2-style, from a (dz, dx)
+                         delta) between the local player's current position and the requested target.
+    0x04 (4B) TargetX  : requested destination X (world, le f32). CONFIRMED.
     0x08 (4B) TargetZ  : requested destination Z (world, le f32). Only X and Z travel on the wire;
                          the vertical axis is not sent (consistent with the S2C 5/13 ack, which is
-                         also XZ-only).
-    0x0c (4B) ModeFlags: a packed mode/run region. The low byte is a move-mode selector (the
-                         click-to-move caller passes 1). A run/walk state bit (derived from the
-                         local player's run state) is also packed into this region.
+                         also XZ-only). CONFIRMED.
+    0x0c (1B) ModeByte : a move-mode byte. CONTROL-FLOW CONFIRMED to be written as the constant 3 at
+                         this send site (the earlier "low byte = move-mode 1" reading is corrected).
+                         Whether the value varies by caller is a WIRE VALUE -> capture/debugger-pending.
+    0x0d (1B) RunFlag  : a run/walk flag, written from the local player's run state (1 when running).
+                         CONTROL-FLOW CONFIRMED as a distinct byte at @0x0d.
+    0x0e (2B) Reserved0E : the trailing two bytes of the old 0x0c..0x0f region; not written by the
+                         sender. Treat as reserved/padding (observed undefined).
 
   RELATIONSHIP: the periodic position heartbeat the client emits while moving reuses this same
-  sender with mode = 1, so a moving client emits a stream of 2/13 frames. The server echoes each
-  with S2C 5/13 SmsgActorMovementUpdate (packets/5-13_actor_movement_update.yaml).
+  sender, so a moving client emits a stream of 2/13 frames. The server echoes each with S2C 5/13
+  SmsgActorMovementUpdate (packets/5-13_actor_movement_update.yaml).
 
-  UNKNOWNS to resolve with a capture of a click-to-move sequence:
-    - the exact byte split inside ModeFlags (mode byte vs run flag vs padding). It is modelled here
-      as a single u32 so the engineer can mask the bytes once a capture pins them down; do not
-      assume a particular sub-layout yet.
-    - whether Heading is radians or another angular unit.
+  UNKNOWNS to resolve with a capture of a click-to-move sequence (wire VALUE semantics):
+    - the exact semantics of the @0x0c mode byte across callers (this site writes the constant 3);
+    - whether Heading is radians or another angular unit;
+    - whether the @0x0e reserved region ever carries a field.
 
   UNBLOCKS: Client.Application RequestMove use-case.

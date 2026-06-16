@@ -1,5 +1,20 @@
 # Format: sky data files  (sky-dome geometry `.box` + sky `.bin` family — parser view)
 
+```
+verification:   sample-verified   # .box absence + fog file size + cloud_cycle size matched against a real VFS sample; orbit/day-cycle math carried [confirmed] from prior IDA
+ida_reverified: 2026-06-16
+ida_anchor:     263bd994
+evidence:       [static-ida, vfs-sample]
+conflicts:      none-open         # campaign-10 conflict C5 (fog "12 or 204 bytes") RESOLVED into §B.2 below
+```
+
+> Two-witness re-verification on build `263bd994` (fog loader read-sequence + VFS sample scans)
+> RE-CONFIRMED the `.box` absence, the fog colour-derivation loop, and the env-bin sizes, and applied
+> one wording correction (C5): **fog files are always 204 bytes on disk** — the "either 12 or 204
+> bytes" the earlier §B.2 quoted describes the loader's READ VOLUME when `data_load_flag = 0` (it reads
+> only the leading 12 bytes), not the on-disk file size. The authoring tool always writes the full
+> 204-byte record; the trailing 192 bytes are simply unread on the `flag = 0` branch.
+
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code,
 > NO binary addresses. Consumed by `Assets.Parsers`. Every offset an engineer cites must
 > reference this file.
@@ -163,10 +178,20 @@ and the fog parameters and colour table are stored inline on it.
 
 `fog%d.bin` is read as: two leading 4-byte values (`start_dist`, `end_dist`), then a 4-byte
 `data_load_flag`, then — **only when `data_load_flag` is non-zero** — a **192-byte (0xC0) colour
-table**. So the file is **either 12 bytes** (flag = 0, colour derived at runtime) **or 204 bytes**
-(flag ≠ 0, explicit 192-byte colour table). The canonical byte table (the 48-entry 4-byte BGRA
-layout of the 192-byte block, and the confirmed `start_dist`/`end_dist` float typing) is in
-`environment_bins.md §2`.
+table**. So the loader's **read volume** is **either 12 bytes** (flag = 0, the trailing colour table is
+not read and the colour is derived at runtime) **or 204 bytes** (flag ≠ 0, explicit 192-byte colour
+table read verbatim).
+
+> **CORRECTED (sample-verified, build `263bd994`, conflict C5) — on-disk size is always 204 bytes.**
+> Every `fog%d.bin` on disk is **uniformly 204 bytes regardless of the flag** (a flag = 0 file still
+> carries the unused 192-byte block on disk — the authoring tool always writes the full record). The
+> "either 12 or 204 bytes" above describes the loader's **read volume** (12 bytes consumed when
+> flag = 0), NOT two on-disk file sizes. A real-data witness of the flag = 1 branch exists
+> (`fog11.bin` ships `data_load_flag = 1`), so the verbatim-read branch is live, not merely inferred.
+> Sample scan: **82 fog files, all exactly 204 bytes.**
+
+The canonical byte table (the 48-entry 4-byte BGRA layout of the 192-byte block, and the confirmed
+`start_dist`/`end_dist` float typing) is in `environment_bins.md §2`.
 
 **Fog colour derivation when `data_load_flag = 0` (parser-confirmed):** the fog colour table is
 **derived from the sky-colour table** rather than read from the file. The derivation loop runs
@@ -363,4 +388,11 @@ for a faithful port (a port sizes the sprites to taste) and are not reproduced a
   `CloudDome_Init`, `StarDome_Init`, `SkyColorTable_GetSingleton`, `SkyColor_SampleByTime`;
   Section D adds the sun/moon billboard-orbit, moon-phase-load, and lens-flare-host subsystems —
   flag canonical names for the glossary, do not edit it here).
-- **Provenance:** see `Docs/RE/journal.md` (add an entry for this spec).
+- **Provenance:** see `Docs/RE/journal.md` (add an entry for this spec). **CAMPAIGN 10 Block D6
+  two-witness re-verification (build `263bd994`)** RE-CONFIRMED: `.box` absent (0 of 43,347 VFS
+  entries); the fog colour-derivation loop (48 iterations, 192-byte per-slot stride, 0.75/0.25 blend);
+  `cloud_cycle%d.bin` = 70 bytes (10 × 7). One wording correction (C5): fog files are **always 204
+  bytes on disk**; the "12-byte" form is the loader's read volume when `data_load_flag = 0`, not an
+  on-disk size — and `data_load_flag = 1` is now witnessed in real data (`fog11.bin`). The day-cycle
+  (§C) and sun/moon orbit (§D) facts were not re-traced this lane and are carried [confirmed] from the
+  prior IDA reading.

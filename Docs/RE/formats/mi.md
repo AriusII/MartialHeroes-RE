@@ -1,4 +1,4 @@
-# Format: .mi  (mob-info data file — tool/editor format, NO client loader)
+# Format: .mi  (mob-info data file — PRESENT in the VFS at `data/ui/mobinfo.mi`, but NO client loader)
 
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code.
 > Consumed by Assets.Parsers. Every offset an engineer cites must reference this file
@@ -12,151 +12,159 @@
 ## Status
 
 ```
-container_layout: SAMPLE-VERIFIED         # 4-byte count + N×28-byte records — exact factorization
-loader: RESOLVED — NO CLIENT LOADER       # CAMPAIGN VFS-MASTERY: the shipped client never parses .mi
-record_field_semantics: OUT-OF-SCOPE      # no client consumer => meanings un-recoverable from the client (DBG-pending, likely permanent)
-sample_count: 1                           # single VFS instance; no second sample to cross-check invariants
+verification: sample-verified            # mobinfo.mi IS in the VFS at data/ui/mobinfo.mi; 592 B = 4 + 21 x 28 confirmed by stride arithmetic and the count-header byte
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida, vfs-sample]
+conflicts: D10-C2 RESOLVED — prior "ABSENT from VFS" verdict REVERTED; file is present. "No client loader" verdict UNCHANGED (no path literal in the executable).
+file_presence: PRESENT at data/ui/mobinfo.mi  # 592 bytes; the prior "ABSENT" verdict is WITHDRAWN/REVERTED
+loader: RESOLVED — NO CLIENT LOADER          # the shipped client has no .mi path literal; it never opens/parses this file by name
+container_layout: SAMPLE-VERIFIED            # 4-byte u32 count (=21) + 21 x 28-byte records; 7 u32 fields per record
+record_field_semantics: OUT-OF-CLIENT-SCOPE  # no client consumer => per-field meanings are not recoverable from the client (single-sample provisional reading only)
 ```
 
-> **CAMPAIGN VFS-MASTERY verdict (two-witness: loader read-set + black-box runtime).** The
-> reconciliation pass settled the long-open loader question: **the shipped client has no loader for
-> `mobinfo.mi`.** No part of the runtime parses or consumes it. The mob-info / target-info HUD panel
-> the client actually renders is driven by other data and by hard-coded layout — not by this file.
-> `mobinfo.mi` is therefore a **tool / editor format only**.
+> **CAMPAIGN 10 Block D re-verify (build 263bd994, 2026-06-16; two-witness: VFS sample + static IDA).
+> The earlier "ABSENT FROM VFS" verdict is REVERTED.** A black-box pass over the 43,347-entry VFS
+> located the file at **`data/ui/mobinfo.mi`** (not under `data/script/` — the prior census missed it
+> by searching the wrong path/pattern), **592 bytes**. The two witnesses now read as follows:
 >
-> The consequence is decisive for the field set: because **no client code reads the records**, the
-> meanings of the per-record fields **cannot be recovered from the client**. They are
-> **OUT-OF-CLIENT-SCOPE / DBG-pending** and, absent the original content tool, likely permanently
-> un-recoverable. This spec deliberately **does not assign meanings** to those fields — the earlier
-> hypothesised names/meanings are withdrawn as unverifiable.
+> 1. **PRESENT in the VFS (witness 1 — VFS sample).** `data/ui/mobinfo.mi`, 592 bytes. The container
+>    shape that an earlier draft had *withdrawn* — `4-byte count + N × 28-byte records` — is
+>    **re-instated** as [sample-verified]: the leading `u32` count is **21** and `(592 − 4) / 28 = 21`
+>    exactly (zero remainder). Each record is 7 × `u32 LE`.
+> 2. **No client loader (witness 2 — static IDA).** The shipped client contains **no `.mi` path
+>    literal** (`mobinfo`, `mobinfo.mi`, `ui/mob…`, `%s.mi`) — re-confirmed on build 263bd994 (the path
+>    string is absent from the executable). The only superficial `.mi` substring elsewhere is an
+>    unrelated runtime section-name fragment (a false positive). The mob-info / target-info HUD panel
+>    the client renders is driven by other data and hard-coded layout, **not** by this file.
+>
+> Net: the file **ships in the VFS and its container shape is sample-verified**, but the **shipped
+> client has no code path that opens it by name** — it loads/uses no runtime path for `.mi`. It is, in
+> effect, a present-but-unloaded VFS artefact (consistent with a tool / editor data file packed into
+> the archive). Because there is **no client consumer**, the per-record field *meanings* cannot be
+> confirmed from the client side and remain **OUT-OF-CLIENT-SCOPE** (a single-sample provisional
+> reading is given below for archival/interoperability completeness only).
 
 ---
 
 ## Identification
 
 - **Extension:** `.mi`
-- **Found in:** the VFS archive (`data.inf` + `data/data.vfs`); see `formats/pak.md` for VFS
-  lookup. The single observed instance is `data/ui/mobinfo.mi` (592 bytes).
-- **Role:** **tool / editor data file** associated with the mob-info / target-info HUD panel. It is
-  **not loaded by the shipped client** (see Status / Loader). Its precise intended use lives with the
-  original content tooling, which is out of scope.
-- **Magic / signature:** none — the file has no magic bytes. It is identified by its VFS path.
-- **Version field:** none.
-- **Endianness:** little-endian throughout (32-bit x86 client). All fields read cleanly as 32-bit
-  values. Endianness is inferred from the container shape, not debugger-confirmed.
-- **Census:** exactly one `.mi` file exists in the 43,347-entry VFS. The extension is effectively
-  single-purpose.
+- **Found in:** the VFS (`data.inf` + `data/data.vfs`; see `formats/pak.md` for VFS lookup), at the
+  logical path **`data/ui/mobinfo.mi`** — SAMPLE-VERIFIED (build 263bd994). Exactly **one** `.mi` file
+  is present in the shipped data set.
+- **File size:** **592 bytes** (SAMPLE-VERIFIED).
+- **Role:** mob-info / target-info data, by name. The file **ships in the VFS** but is **not opened by
+  the shipped client** (no path literal). Its precise intended use lives with the original content
+  tooling; the runtime mob-info / target-info HUD is rendered from other, in-code data.
+- **Magic / signature:** none — the file begins directly with a `u32` record-count header (no magic
+  bytes, no version field).
+- **Version field:** none observed.
+- **Endianness:** little-endian (the count header and all record fields are `u32 LE`).
+- **Census:** **one** `.mi` file in the 43,347-entry VFS (`data/ui/mobinfo.mi`).
 
 ---
 
-## Container structure — SAMPLE-VERIFIED
+## Loader — RESOLVED: NO CLIENT LOADER (file present, but never opened by name)
 
-The file is a 4-byte header (a single record count) followed by a flat array of fixed-size
-28-byte records. The container shape is sample-verified by exact factorization against the full
-592-byte instance:
+The shipped client has **no `.mi` loader** and **no `.mi` path literal**. This was re-confirmed on
+build 263bd994: there is no `mobinfo`, `mobinfo.mi`, `ui/mob…`, or `%s.mi` string in the executable,
+and no code path that opens, parses, or consumes a `.mi` file by name. The mob-info / target-info HUD
+panel the client renders is driven by other data and by hard-coded layout (hard-coded captions and
+screen positions), not by this file.
 
-```
-4 (header recordCount) + recordCount × 28 = file size
-4 + 21 × 28 = 4 + 588 = 592 bytes   (exact, zero residual)
-```
-
-The header count and the record stride are mutually self-consistent and reconcile the observed
-file size exactly with no leftover bytes, so the header field is confidently the record count and
-the stride is confidently 28 bytes (= 7 × u32).
-
-> **Note:** the container *shape* (4-byte count + 28-byte stride) is the only part of this format
-> that is established. It tells a parser how to walk the bytes — it does **not** establish what the
-> bytes mean, and since no client loader consumes them, their meaning is out of client scope.
+The correction this pass is **only** to the file's *presence*: the file **is** packed in the VFS at
+`data/ui/mobinfo.mi`, but the client has **no code to open it**. The two facts are not in tension — a
+VFS can carry an asset the shipped client never references. Net: the loader question is settled as
+**"file present in the VFS, but no client loader / no path literal."** The associated parser
+(`Assets.Parsers`) need implement nothing for a faithful 1:1 client port — the original consumes no
+`.mi` at runtime. The container layout below is documented for archival / interoperability
+completeness (it is a real, decodable VFS artefact), **not** because the shipped client reads it.
 
 ---
 
-## Header layout
+## Container layout — SAMPLE-VERIFIED (count header + fixed-stride records)
 
-| Offset | Size | Type | Field        | Notes                                          | Confidence       |
-|-------:|-----:|------|--------------|------------------------------------------------|------------------|
-| 0x00   | 4    | u32  | recordCount  | number of records that follow (= 21 in the sample) | SAMPLE-VERIFIED |
+The file is a **count-prefixed flat array of fixed 28-byte records**.
 
-- **Record count source:** the header `recordCount` field at 0x00.
-- Body starts at 0x04.
+- **Header:** a single **`u32 LE` record count** at file offset +0. Observed value **21**. SAMPLE-VERIFIED.
+- **Records:** **21 records × 28 bytes** immediately following the header. SAMPLE-VERIFIED via stride
+  arithmetic: `(592 − 4) / 28 = 21` exactly (zero remainder).
+- **Record stride:** **28 bytes** = **7 × `u32 LE`**. SAMPLE-VERIFIED (field width); the per-field
+  *roles* are single-sample provisional (see below).
 
----
+| Offset | Size | Type   | Field         | Notes |
+|-------:|-----:|--------|---------------|-------|
+| +0     | 4    | u32 LE | `record_count`| Number of records that follow (observed **21**). The records begin at +4. |
 
-## Record layout — 28 bytes per record (7 × u32) — field SEMANTICS OUT-OF-CLIENT-SCOPE / DBG-pending
+### Per-record layout (28 bytes, stride = 0x1C) — SINGLE-SAMPLE / OUT-OF-CLIENT-SCOPE roles
 
-The record is exactly seven consecutive 32-bit little-endian fields. The **stride (28 bytes) and
-the field boundaries (7 × u32) are SAMPLE-VERIFIED** by the container factorization above.
+Each record is **7 consecutive `u32 LE`** fields. The field *widths and count* are SAMPLE-VERIFIED;
+the *roles* below are a **single-file provisional reading** only — there is **no client consumer**, so
+the meanings cannot be confirmed from the client side.
 
-**The meaning of each field is NOT recoverable from the shipped client**, because the client has no
-loader that reads these records (loader-resolved: no client loader exists). The seven slots are
-therefore documented **only as opaque u32 cells** with no assigned semantics. A parser that needs to
-walk this format must read seven u32s per record and **must not** attach any behaviour to them.
+| Offset within record | Size | Type   | Proposed role (provisional)                                  | Confidence |
+|---------------------:|-----:|--------|--------------------------------------------------------------|------------|
+| +0  | 4 | u32 LE | entry index or resource id                                       | SINGLE-SAMPLE |
+| +4  | 4 | u32 LE | resource / text id A (e.g. a string-table reference)             | SINGLE-SAMPLE |
+| +8  | 4 | u32 LE | nullable field — `0xFFFFFFFF` observed as an absent/optional sentinel; otherwise a secondary resource id | SINGLE-SAMPLE |
+| +12 | 4 | u32 LE | sub-id or category code                                          | SINGLE-SAMPLE |
+| +16 | 4 | u32 LE | **paired field A** — large value; in every observed record this and the next field are **consecutive integers** (field[5] = field[4] + 1) | SINGLE-SAMPLE |
+| +20 | 4 | u32 LE | **paired field B** — `= field[4] + 1` across all observed records (a consecutive pair with +16) | SINGLE-SAMPLE |
+| +24 | 4 | u32 LE | secondary sub-id or link code                                    | SINGLE-SAMPLE |
 
-| Field | Offset | Size | Type | Meaning | Confidence |
-|------:|-------:|-----:|------|---------|------------|
-| 0 | +0x00 | 4 | u32 | opaque — out-of-client-scope (no client consumer) | structure SAMPLE-VERIFIED / meaning DBG-pending |
-| 1 | +0x04 | 4 | u32 | opaque — out-of-client-scope (no client consumer) | structure SAMPLE-VERIFIED / meaning DBG-pending |
-| 2 | +0x08 | 4 | u32 | opaque — out-of-client-scope (no client consumer) | structure SAMPLE-VERIFIED / meaning DBG-pending |
-| 3 | +0x0C | 4 | u32 | opaque — out-of-client-scope (no client consumer) | structure SAMPLE-VERIFIED / meaning DBG-pending |
-| 4 | +0x10 | 4 | u32 | opaque — out-of-client-scope (no client consumer) | structure SAMPLE-VERIFIED / meaning DBG-pending |
-| 5 | +0x14 | 4 | u32 | opaque — out-of-client-scope (no client consumer) | structure SAMPLE-VERIFIED / meaning DBG-pending |
-| 6 | +0x18 | 4 | u32 | opaque — out-of-client-scope (no client consumer) | structure SAMPLE-VERIFIED / meaning DBG-pending |
+- **Field[2] (+8)** frequently carries `0xFFFFFFFF`, consistent with an absent/optional reference
+  (a null sentinel). SINGLE-SAMPLE.
+- **Field[4] / field[5] (+16 / +20)** are a **consecutive pair** (the second equals the first plus 1)
+  across the observed records — the signature of a `[start, end)` index pair into a separate resource
+  array (e.g. a contiguous run of resource/text ids), though this cannot be confirmed without a
+  consumer. SINGLE-SAMPLE.
 
-- **Record stride:** 28 bytes (SAMPLE-VERIFIED).
-- **No field meanings are assigned.** Any prior hypothesised names (ordinal / caption-id /
-  icon-id / kind-link) are withdrawn: with no client loader they cannot be confirmed from the
-  client and would be guesses. They are left blank by design.
-
----
-
-## Loader — RESOLVED: NO CLIENT LOADER
-
-The CAMPAIGN VFS-MASTERY two-witness pass resolved the previously-open loader question. The
-resolution is that **no client loader exists**: the shipped client never opens, parses, or consumes
-`mobinfo.mi`. The reasons it has no client consumer are consistent with the earlier static findings:
-
-- **No path literal exists** for the file in the client (no `mobinfo`, `mobinfo.mi`, `%s.mi`,
-  `data/ui/...mi`, or any `.mi` path literal). The only superficial `.mi` substring hit is an
-  unrelated C-runtime section-name fragment (a false positive).
-- **The mob-info / target-info HUD panel the client renders is driven by other data and by
-  hard-coded layout** (hard-coded captions and hard-coded screen positions), not by this file. None
-  of the data values inside `mobinfo.mi` appear as compiled-in immediates, and no runtime code reads
-  them — consistent with the file simply not being a client asset.
-
-Net: the loader question is **resolved as "no client loader."** This is not a deferred unknown about
-*which* function loads it; it is the settled conclusion that **the shipped client loads nothing from
-this file.** `mobinfo.mi` is a tool / editor artefact. The associated parser (`Assets.Parsers`) need
-implement nothing for it; a faithful 1:1 client port does **not** consume `.mi`.
+> All record-field roles are **SINGLE-SAMPLE and UNVERIFIED** (one file, no second instance, no client
+> consumer). They are recorded for interoperability/archival completeness only. A port must **not**
+> branch on these provisional roles. The **container shape** (count header + 21 × 28-byte records,
+> 7 `u32` per record) is the sample-verified, load-bearing fact; the field *meanings* are not.
 
 ---
 
 ## Implications for a faithful port
 
-- **Do not implement a runtime `.mi` consumer.** The original client does not, so a 1:1 port must
-  not either. The mob-info panel is rendered from its other, in-code data path.
-- If a future toolchain (a content editor) needs to read `.mi`, the **container shape** (4-byte
-  count + 28-byte stride) above is the only confirmed contract; the field meanings would have to be
-  recovered from the original tool, not the client.
+- **Do not implement a runtime `.mi` consumer.** The original client opens no `.mi` file by name
+  (no path literal), so a 1:1 port must not either. The mob-info / target-info panel is rendered from
+  its other, in-code data path.
+- **The file is present in the VFS** (`data/ui/mobinfo.mi`, 592 B). A VFS-level tool may decode its
+  container (count + 28-byte records) for inspection, but the shipped game does not read it — keep it
+  out of the runtime path.
 
 ---
 
 ## Known unknowns
 
-- **All seven record fields' meanings** are OUT-OF-CLIENT-SCOPE / DBG-pending. With no client
-  loader, they cannot be recovered from the client; they are likely permanently un-recoverable
-  unless the original content tool surfaces. They are intentionally left unnamed and unassigned
-  above.
-- **Endianness** is inferred from the clean 32-bit container factorization, not debugger-confirmed.
-- **Single sample.** Only one `.mi` file exists, so the stride/header invariants cannot be
-  cross-checked against a second instance.
+- **Per-record field semantics.** With **no client consumer**, the meaning of each of the 7 `u32`
+  fields is **OUT-OF-CLIENT-SCOPE / single-sample provisional** (the pointer/index-pair reading at
+  +16/+20 and the `0xFFFFFFFF` sentinel at +8 are inferences from one file). Likely un-recoverable
+  from the client; would need the original content tool to confirm.
+- **Whether the 21-record count is stable** across any other VFS revision (only one instance exists in
+  this build). The container shape itself is sample-verified for this build.
 
 ---
 
 ## Cross-references
 
 - Container/VFS lookup: `Docs/RE/formats/pak.md`.
-- Companion spawn-data spec (also notes `mobinfo.mi` has no client loader):
-  `Docs/RE/formats/npc_spawns.md`.
+- Companion spawn-data spec (also notes `mobinfo.mi` has no client loader and `mob.arr` is a
+  present-but-dead tool format): `Docs/RE/formats/npc_spawns.md`.
 - The client's actual mob-data / mob-info path is data-driven from other sources (e.g.
-  `Docs/RE/formats/config_tables.md` for `mobs.scr`); `.mi` is not part of it.
+  `Docs/RE/formats/config_tables.md` for the mob template tables); `.mi` is not part of the runtime
+  path.
 - Glossary: see `Docs/RE/names.yaml`.
 - Provenance: see `Docs/RE/journal.md`.
+
+> **Provenance — CAMPAIGN 10 Block D (build 263bd994, 2026-06-16; two-witness: VFS sample + static
+> IDA).** REVERTED the prior "ABSENT FROM VFS / container WITHDRAWN" verdict: the file **is** present
+> at `data/ui/mobinfo.mi` (592 B), and the container shape **`4-byte u32 count (=21) + 21 × 28-byte
+> records`, 7 `u32`/record** is re-instated as [sample-verified] (CONFLICT D10-C2 resolved in favour of
+> the sample). The **"no client loader / no path literal"** verdict is UNCHANGED — re-confirmed on
+> build 263bd994 (no `.mi` path string in the executable). Per-record field meanings remain
+> OUT-OF-CLIENT-SCOPE (single-sample provisional). No addresses, no decompiler output, and no sample
+> payload bytes crossed the firewall.

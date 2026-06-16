@@ -1,8 +1,13 @@
 ---
-status: confirmed
+status: sample-verified
+verification: sample-verified   # control-flow+operand facts [confirmed]; structure also matched against the real 43,347-entry archive [sample-verified]; only the +0x08 dword role and the unexercised raw-seek branch remain [static-hypothesis]
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida, vfs-sample]   # real data.inf (6,241,992 B) + data/data.vfs (3,802,182,193 B) corroborate header, TOC stride/offsets, RAW 100%-tiling
 sample_verified: yes        # tree, counts and extension census come from a real archive enumeration (43,347 entries, 49 extensions)
-subsystems: [vfs_structure, extension_census, manifest_linkage]
+subsystems: [vfs_structure, vfs_io_subsystem, extension_census, manifest_linkage]
 networked: false
+conflicts: none   # header magic resolved to "VFS001" (the +0x08=39 dword is NOT the entry_count); all I/O-mechanics claims re-confirmed against the IDB + sample
 encoding_note: All in-game text is CP949 (MS-949 code page), not UTF-8.
 ---
 
@@ -13,12 +18,17 @@ encoding_note: All in-game text is CP949 (MS-949 code page), not UTF-8.
 >
 > **Scope.** The shape of the mounted asset tree: the top-level directory layout, what each directory
 > holds, the per-extension census (count + purpose + owning format spec), the manifest/index files
-> that stitch assets together, and the explicit list of still-unspecced (gap) extensions.
+> that stitch assets together, and the explicit list of still-unspecced (gap) extensions. **§0.1 now
+> also carries a behaviour summary of the VFS I/O subsystem** (mount → lookup → read → RAW storage,
+> the load-progress accumulator, and the `vfsmode` mount toggle) so a reader of the overview has the
+> runtime mechanics in one place.
 >
-> **Out of scope / cross-references.** The `.inf`/`.vfs` container byte layout and the open-mode
-> dispatch belong to `formats/pak.md`. Loader selection, the GHTex cache, the linkage *chains* and the
-> bulk loader belong to `specs/asset_pipeline.md`. Per-format byte layouts belong to the individual
-> `formats/*.md` docs cited per row below.
+> **Out of scope / cross-references.** The authoritative `.inf`/`.vfs` container byte layout (header
+> fields, the 144-byte TOC record offsets) and the full open-mode dispatch tables live in
+> `formats/pak.md`; §0.1 here summarises and cross-links them rather than duplicating the offset
+> tables. Loader selection, the GHTex cache, the linkage *chains* and the bulk loader belong to
+> `specs/asset_pipeline.md`. Per-format byte layouts belong to the individual `formats/*.md` docs
+> cited per row below.
 
 ---
 
@@ -31,6 +41,164 @@ reference archive `formats/pak.md` validates byte-exact). Totals (SAMPLE-VERIFIE
 - **49** distinct extensions
 - **60** map areas (`map000`–`map047`, `map100`, `map201`–`map210`, `map300`)
 - All virtual paths begin with the single root prefix `data/`.
+
+---
+
+## 0.1 VFS I/O subsystem — runtime behaviour (mount → lookup → read → RAW)
+
+The asset tree above is served by a small, self-contained subsystem. Its container byte layout
+(header fields, the 144-byte TOC record offsets) is owned by `formats/pak.md`; this section
+summarises the **runtime behaviour** so the overview stands alone, and folds in the facts that the
+detailed re-verification recovered. The slurp manager is a named C++ class, **`CVFSManager`**
+(`Diamond::CVFSManager`); the design is a simple ReadFile-into-buffer archive with no compression,
+no encryption, and no per-entry codec.
+
+### Container header — 24 bytes (the same header is echoed verbatim at `data.vfs` offset 0)
+
+The `data.inf` index opens with a 24-byte header. The mount routine reads the whole 24 bytes in one
+bulk call but consumes **only `entry_count`**; the other fields are read-and-discarded. Their on-disk
+content (resolved from a real sample) is:
+
+| Offset | Size | Type | Field | Sample value | Role | Tier |
+|---:|---:|------|-------|---|------|------|
+| +0x00 | 8 | char[8] | `magic` | ASCII **`VFS001`** (null-padded) | archive signature | [sample-verified] |
+| +0x08 | 4 | u32 LE | `header_field_8` | 39 | role unknown (sub-version / build / area-group?); **NOT** the entry count | [static-hypothesis] |
+| +0x0C | 4 | u32 LE | `entry_count` | 43,347 | the **only consumed** field — drives the `144 × entry_count` alloc and the TOC bulk read | [sample-verified] |
+| +0x10 | 4 | u32 LE | `data_size` | 3,802,182,193 | total `data.vfs` blob size in bytes; equals the on-disk blob length exactly | [sample-verified] |
+| +0x14 | 4 | u32 LE | `data_size_high` | 0 | high dword of the blob size (the +0x10/+0x14 pair is a u64) | [sample-verified] |
+
+> **Magic is `VFS001`, read as a single 8-byte null-padded ASCII field at +0x00.** Earlier readings
+> that split this into a 4-byte `"VFS0"` plus a 2-byte version `"01"` were mis-splits of these same 8
+> bytes — the authoritative direct byte-read is the one 8-byte field `VFS001`. **`entry_count` is at
+> +0x0C (the 4th dword), not +0x08** — sample-verified both ways: a stack-frame proof in the mount
+> routine (header buffer at one frame slot, the extracted dword 0x0C bytes in) **and** the byte
+> arithmetic `24 + 144 × 43,347 = 6,241,992` = the exact `data.inf` file size. The `header_field_8`
+> (=39) reading is therefore **refuted as the count**. The client asserts none of these fields (not
+> even the magic); a reimplementation may optionally assert `magic == "VFS001"` and use `data_size`
+> as a blob-length sanity check, but the original does neither. Because the 24-byte header is echoed
+> at `data.vfs` offset 0, every entry `dataOffset` begins at **>= 24** (entry-0 = 24).
+
+### Mount
+
+The mount routine (`CVFSManager` open path) runs the two-file sequence:
+
+1. Open `data.inf` (a hardcoded literal path; no runtime build-up, no override). If it is absent in
+   loose mode the routine early-returns harmlessly — the mount flag is already 0 and no TOC is built.
+2. One bulk `ReadFile` of the 24-byte header; take `entry_count` from +0x0C.
+3. Allocate `144 × entry_count` bytes on the heap (the multiply is **overflow-checked**; this TOC
+   array is the one `operator new` allocation in the subsystem — the per-entry payload buffers use the
+   CRT `malloc`/`free`, see Read below).
+4. One bulk `ReadFile` of the whole `144 × entry_count`-byte TOC at offset 24; **close `data.inf`**.
+5. Open `data/data.vfs` (hardcoded literal) and **retain its handle for the entire process lifetime**
+   as a process-global. The blob handle is never closed on this path.
+
+All subsequent reads seek within the retained `data.vfs` handle using TOC offsets. The entry count is
+treated as a **signed i32** in the search loops (a `count <= 0` guard); not a practical concern at
+43,347, but a reimplementation should treat it as a positive i32.
+
+### Lookup (metadata only)
+
+A virtual path is resolved by: lowercasing the caller's path into a local buffer, then an **ascending
+binary search** over the 144-byte-stride TOC using a byte-for-byte `strcmp` on the 100-byte `name`
+field (the stored names are already lowercase, so the compare is effectively case-insensitive). The
+TOC is sorted ascending by lowercased name at build time — required by the search and confirmed by the
+real archive (zero ordering violations; entry-0 is `data...`, which sorts first). There is **no hash
+table**. The lookup returns the entry pointer (its `dataOffset` / `dataSize` metadata); reading the
+payload is a separate step.
+
+### Read (the entry read primitive — RAW, ReadFile-into-buffer)
+
+The find-and-read chokepoint zeroes a 16-byte output descriptor `{dataPtr, sizeLow, sizeHigh,
+status}`, binary-searches the TOC, and on a hit calls the read primitive, which:
+
+1. `malloc`s exactly `dataSize` (low 32 bits) bytes from the CRT heap. If the descriptor already holds
+   a buffer it `free`s the previous one first (per-object buffer recycling — not a shared cache).
+2. **Enters one process-global critical section** (the single read lock).
+3. 64-bit `SetFilePointerEx` to `dataOffset` from the start of `data.vfs`.
+4. One `ReadFile` of `dataSize` bytes.
+5. **Leaves** the critical section.
+6. Succeeds only if bytes-read == `dataSize` low **and** the `dataSize` high dword is 0; on any
+   mismatch it frees the buffer and reports zero bytes.
+
+This is a **ReadFile-into-buffer transfer, NOT a memory-mapped view.** The only `CreateFileMapping` /
+`MapViewOfFile` user in the binary is an unrelated anti-tamper self-integrity check that maps the
+*executable image* and compares a keyed trailing-signature block — it touches no archive entry.
+There is **no decompression, no decryption, no second (uncompressed) size, and no per-entry codec
+flag**: the engine receives the raw on-disk payload verbatim, exactly `dataSize` bytes. The seek+read
+pair is serialized under the one global lock because all in-memory loaders share the one retained
+`data.vfs` handle (whose file pointer is global). A reimplementation that keeps a shared handle must
+serialize seek+read together, or give each reader its own handle / a position-explicit (`pread`-style)
+read, in which case the lock is unnecessary.
+
+**Decode is downstream and per-format.** The VFS layer is format-agnostic. The representative texture
+loader, for example, slurps the entry bytes, hands the raw buffer + size to the in-memory D3DX texture
+create (which parses the DDS), then `free`s the buffer. "Decompressing" a DDS / PNG / OGG is the
+codec's job in `Assets.Parsers`, never the archive layer's.
+
+### Open-mode router — bit dispatch (bit0 read / bit1 write / bit2 raw-seek-vs-slurp)
+
+Every open goes through an open router (two variants — one taking the path by value, one by
+`std::string` — with identical logic). It first consults the mount flag, then branches on the mode
+bitfield. Three bits are examined; bits above bit2 are ignored:
+
+| Bit | Mask | Meaning |
+|---:|---:|---------|
+| 0 | 0x1 | read |
+| 1 | 0x2 | write / create |
+| 2 | 0x4 | **source selector (only when mounted):** 0 = slurp the whole entry into memory; 1 = open a *private* `data.vfs` handle and raw-seek to the entry to stream it |
+
+- **Mounted, bit2 = 0 (slurp):** the normal asset path — lookup → locked read → fully-buffered
+  payload handed to the caller.
+- **Mounted, bit2 = 1 (raw-seek stream):** open a private handle on `data/data.vfs`, find the entry,
+  copy its offset/size into the file object, and pre-position the private handle with a **32-bit**
+  `SetFilePointer` (low dword of `dataOffset` only — consistent with the high-dword-must-be-zero read
+  guard). The branch is **implemented but no asset consumer was observed selecting it** across the
+  texture / mesh / terrain / sound / effect / script / table loaders — flag **[static-hypothesis]**
+  (would need a debugger census to close). Note the seek-width split: slurp placement uses the 64-bit
+  `SetFilePointerEx`, the raw-seek stream uses the 32-bit `SetFilePointer`.
+- **Not mounted (loose / dev):** the TOC is bypassed; a plain OS file is opened at the given relative
+  path, disposition chosen by the read/write bits. This is what lets the client run against an
+  un-packed asset tree.
+
+The router decides only **where bytes come from** — there is **no central parse-by-extension switch**;
+each consumer drives its own decode (see `specs/asset_pipeline.md §Loader dispatch`).
+
+> Note on observed mode values: the load-bearing predicate is "bit0 = read, bit2 = 0 (slurp)". At
+> least one first-party table loader opens with the literal mode value `9` (`0x9` = bit0 + bit3);
+> since bit3 is not examined, that is behaviourally identical to mode `1`. The exact integer is not
+> load-bearing — the consulted bits are.
+
+### Mount toggle — `vfsmode` from `game.lua` (config switch, not a success flag)
+
+The mount flag is a process-global byte set **directly from a `vfsmode` boolean**, read from the boot
+config script `game.lua` early in startup (`vfsmode` defaults to **packed** when the Lua load fails).
+The setter has exactly **one call site** (the startup routine) and its **return value is ignored** —
+it is a write, not a guard. The flag has one reader API consulted by every I/O consumer (~34 call
+sites across ~27 functions) before deciding where bytes come from. The archive-open routine is invoked
+**unconditionally** regardless of `vfsmode`, but **its return is also ignored**: in loose mode the flag
+is already 0, so the TOC (if any) is never consulted. Packed (`vfsmode` true → flag 1) routes through
+the TOC; loose (false → flag 0) routes to plain OS files. (The full mode/disposition tables are in
+`formats/pak.md §Open-mode dispatch`.)
+
+### Load-progress accumulator (byte-cumulative)
+
+Layered onto the lookup/read functions is a loading-bar mechanism, gated by a progress-enable byte.
+When enabled, the lookup and the slurp chokepoint **accumulate each entry's `dataSize` into a 64-bit
+counter**, and recompute a normalized value as `accumulated_bytes / 9,395,240` (**integer** division)
+against a fixed denominator. The loose-file open path feeds OS file sizes into the same accumulator.
+The loading-bar **pixel width** is `clamp(223 × normalized / 100, 223)`. Consequence: for the modest
+~9 MB boot read-set the bar is effectively near-static — it only fills near `normalized = 100`, i.e.
+around ~939 MB of cumulative bytes touched — so boot **completion is driven by the boot worker's
+done-flag, not by the progress bar reaching full**. (The earlier framing that "~9.4 MB drives the bar
+toward 100%" is wrong; see `specs/resource_pipeline.md`.)
+
+> **Provenance of §0.1.** Control-flow + operand facts (mount sequence, lookup, the three read
+> branches, RAW/no-decode, the bit-dispatch, the single-set-site `vfsmode` toggle, the progress
+> arithmetic) are **[confirmed]** from static analysis of the 263bd994 IDB. The header field values,
+> the TOC stride/offsets, the `entry_count` position, and the 100% RAW tiling of `data.vfs` are
+> additionally **[sample-verified]** against the real archive. The `header_field_8` (=39) role and the
+> bit2 = 1 raw-seek branch's use are **[static-hypothesis]** (single-sample / unexercised on the asset
+> path). No payload bytes were copied — only counts, offsets, sizes, and the header magic string.
 
 ---
 
@@ -281,15 +449,21 @@ flagged. The `.mud`/`.pre`/`.post`/`.tol`/bulk-`.scr`/small-`.xdb` families are 
 
 ## 7. Cross-references
 
-- `formats/pak.md` — container byte layout, open-mode dispatch, `vfsmode` toggle, `bgtexture.lst`
-  CONFLICT.
+- `formats/pak.md` — the **authoritative** container byte layout (header field table, the 144-byte
+  TOC record offsets), the full open-mode dispatch / loose-file disposition tables, the `vfsmode`
+  toggle, and the `bgtexture.lst` CONFLICT. §0.1 here summarises the runtime behaviour and cross-links
+  back to it rather than duplicating the offset tables.
 - `specs/asset_pipeline.md` — loader dispatch verdict, GHTex cache, linkage chains, bulk loader.
 - `specs/resource_pipeline.md` — runtime resource pipeline, terrain streaming, subsystem caches,
-  per-area census detail.
+  per-area census detail, and the load-progress accumulator's role in boot (the bar is near-static
+  for the boot read-set; completion is the worker done-flag).
 - Per-format docs: `formats/{terrain,terrain_layers,terrain_scene,mesh,animation,texture,effects,`
   `sound_tables,npc_spawns,environment_bins,misc_data,config_tables,msg_xdb,ui_manifests,shaders,`
   `actormotion,sky,area_inventory}.md`.
 - Proposed canonical names to flag for `names.yaml`: `bgtexture_index` (the `.lst` runtime index),
   `effect_catalogue` (`xeffect.lst`), `bmplist_index` (`bmplist.lst`), `uitex_manifest` (`uitex.txt`),
-  `caption_catalogue` (`msg.xdb`). Glossary is orchestrator-owned; flagged, not edited.
+  `caption_catalogue` (`msg.xdb`), plus the I/O subsystem types/members surfaced in §0.1:
+  `CVFSManager` (`Diamond::CVFSManager`, the slurp manager class), and the header field `magic`
+  (`VFS001`) / `entry_count` (+0x0C) / `data_size` (+0x10). Glossary is orchestrator-owned; flagged,
+  not edited.
 - Provenance: see `Docs/RE/journal.md`.

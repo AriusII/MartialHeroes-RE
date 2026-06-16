@@ -1,5 +1,19 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the 24-byte header read, the per-record stride
+#                 36, the record-array base @0x18, and the corrected header offsets -- SkillId@0x0C,
+#                 ActionCode@0x10, TargetCount@0x14 (bounded (0,0x28]) -- are control-flow-confirmed;
+#                 the bulk read destination is +4 within the work buffer, so the 24 header bytes occupy
+#                 payload @0x00..0x17 and records begin at payload @0x18); per-record FIELD meanings and
+#                 the @0x11..0x13 / @0x15..0x17 pad-vs-subfield split are capture/debugger-pending.
+#   ida_reverified: 2026-06-16
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: CORRECTED a real offset conflict -- ActionCode is payload @0x10 (NOT @0x14) and
+#              TargetCount is payload @0x14 (NOT conflated into a 0x14..0x17 dword with ActionCode).
+#              There is NO separate "SkillArg" dword between SkillId (@0x0C) and ActionCode (@0x10);
+#              the prior "SkillArg@0x10" was actually ActionCode.
 
 name: SmsgActorSkillAction
 opcode: 0x50034           # major 5 (Push), minor 52 -> (5 << 16) | 52
@@ -15,8 +29,8 @@ summary: >
   queue and that drive the floating damage numbers over each victim's head. Pairs with the C2S 2/52
   request.
 
-# Fixed 24-byte header. The repeating 36-byte target records are described in notes; the engineer
-# hand-codes the loop driven by TargetCount.
+# Fixed 24-byte header (payload 0x00..0x17). The repeating 36-byte target records begin at payload
+# offset 0x18; the engineer hand-codes the loop driven by TargetCount. Widths sum to 24.
 fields:
   - { name: CasterSort,    type: u8 }        # 0x00  caster actor sort
   - { name: Pad0,          type: "bytes[3]" }  # 0x01  padding
@@ -24,27 +38,36 @@ fields:
   - { name: CastFlag,      type: u8 }        # 0x08  0 => cancel/idle branch; nonzero => active cast
   - { name: BasicSelector, type: u8 }        # 0x09  basic/alias selector (0xFF => basic attack)
   - { name: Pad1,          type: "bytes[2]" }  # 0x0a  padding
-  - { name: SkillId,       type: u32 }       # 0x0c  skill id (resolved against the client skill table)
-  - { name: SkillArg,      type: u32 }       # 0x10  secondary skill/effect argument
-  - { name: ActionCode,    type: u8 }        # 0x14  action code (0=single target; 0xC8..0xCB=motion sub-ops; 0xCC=AoE)
-  - { name: Pad2,          type: "bytes[3]" }  # 0x15  pad / TargetCount region (see notes)
+  - { name: SkillId,       type: u32 }       # 0x0c  skill id / entity key (resolved against the client skill/entity table)
+  - { name: ActionCode,    type: u8 }        # 0x10  action code (0=single target; 0xC8..0xCB=motion sub-ops; 0xCC=AoE)
+  - { name: Pad2,          type: "bytes[3]" }  # 0x11  pad-vs-subfield UNRESOLVED (see notes)
+  - { name: TargetCount,   type: u8 }        # 0x14  number of 36-byte target records that follow; bounded (0, 0x28]
+  - { name: Pad3,          type: "bytes[3]" }  # 0x15  pad-vs-subfield UNRESOLVED (see notes)
 
 notes: |
-  Static inference only; no capture available. VARIABLE-LENGTH packet. CAPTURE-UNVERIFIED.
+  Routing + header offsets + record stride CONFIRMED (control-flow); per-record FIELD meanings and the
+  pad-vs-subfield split capture-pending. VARIABLE-LENGTH packet. No live capture this campaign.
 
-  Header = 24 bytes (0x00..0x17), matching the handler's fixed 0x18-byte read. After the header the
-  handler reads a target count and then that many 36-byte target records.
+  Header = 24 bytes (payload 0x00..0x17), matching the handler's fixed 0x18-byte read. NOTE the handler
+  copies the 24 header bytes into a work buffer at WORK+4, so a work-buffer offset W maps back to payload
+  W-4. The offsets below are stated in PAYLOAD coordinates. After the header the handler reads
+  TargetCount, bounds it to (0, 0x28] (at most 40 records), then reads TargetCount * 36 bytes of records
+  starting at payload @0x18.
 
-  TARGET-COUNT HEADER (PLAUSIBLE position). CODE-CONFIRMED that the handler reads a per-target count,
-  bounds it to (0, 0x28] (i.e. at most 40 records), and then reads target_count * 36 bytes of records.
-  The count is read from the 0x14..0x17 region of the header (the handler copies the 24-byte header
-  into a work buffer offset by +4 and then reads its count from work+0x18, which maps back to the
-  payload's 0x14..0x17 dword). This spec places ActionCode at 0x14 and treats the target count as
-  living in the same 4-byte region (modeled inside Pad2). The exact byte split between ActionCode and
-  TargetCount within 0x14..0x17 is NOT pinned -- grade PLAUSIBLE -- so the engineer must confirm which
-  byte is the record count before trusting the loop bound. A reasonable reading is: ActionCode at 0x14
-  selects the action shape (single / motion sub-op / AoE) and a small TargetCount (<= 0x28) sits
-  alongside it; in the common single-target case both encode "one record follows".
+  HEADER OFFSETS (CONFIRMED, corrected from the prior conflated reading):
+    @0x0c (u32) SkillId / EntityKey : the skill/entity key resolved against the client skill/entity table.
+    @0x10 (u8)  ActionCode          : selects the action shape -- 0 = single target; 0xC8..0xCB = motion
+                                      sub-ops; 0xCC = AoE. CONFIRMED at payload @0x10 (handler tests
+                                      this byte >= 0xC8 / == 0xCC / in 0xC8..0xCB). This is where the prior
+                                      spec's mislabelled "SkillArg@0x10" actually sits -- there is NO
+                                      separate SkillArg dword between SkillId and ActionCode.
+    @0x11..0x13 (3B) : UNRESOLVED -- true padding or sub-fields (e.g. a secondary skill arg / hit flags).
+                       Capture-pending.
+    @0x14 (u8)  TargetCount         : the number of 36-byte records that follow; bounded (0, 0x28].
+                                      CONFIRMED at payload @0x14 (distinct from ActionCode, NOT co-located
+                                      in one 0x14..0x17 dword). Drives the 36 * count record read.
+    @0x15..0x17 (3B) : UNRESOLVED -- true padding or sub-fields. Capture-pending.
+    @0x18 : the first 36-byte target record begins here.
 
   TARGET RECORD (36 bytes each, repeated target_count times). CODE-CONFIRMED stride 36; each record is
   forwarded to the target actor's per-actor animation/FX queue (the hit-animation / hit-FX driver) and
@@ -72,9 +95,10 @@ notes: |
   motion sub-ops (animation toggles only, typically with no damage records).
 
   UNKNOWNS to resolve with a capture (single-target hit, multi-hit combo, and an AoE cast):
-    - the precise byte that carries the record count within 0x14..0x17 (ActionCode vs TargetCount);
-    - the meaning of the two reserved record words (+0x10, +0x20);
-    - whether SkillArg is an effect id or a secondary target.
+    - whether the header bytes @0x11..0x13 and @0x15..0x17 are true padding or carry sub-fields
+      (e.g. a secondary skill argument, hit flags);
+    - the meaning of the two reserved record words (record +0x10, +0x20);
+    - the exact wire types of the per-record fields.
 
   RELATED: paired request C2S 2/52 CmsgUseSkill (packets/2-52_use_skill.yaml); absolute HP also
   arrives via S2C 5/53 SmsgActorVitalsAndPairState (packets/5-53_actor_vitals_and_pair_state.yaml).

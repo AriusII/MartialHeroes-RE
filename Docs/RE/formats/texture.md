@@ -3,6 +3,15 @@
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code.
 > Consumed by Assets.Parsers. Every offset an engineer cites must reference this file.
 
+> **Verification:** sample-verified (real-VFS samples corroborate every container + bgtexture.lst; DXT5,
+> large-texture mip chains, RAW-BGRA DDS, and the `data/effect/texture/` TGA directory promoted from
+> hypothesis to sample-verified this pass). Loader-control-flow facts (single auto-detecting create call,
+> separate shader-assembler path, two mounted-read mechanisms) are `confirmed` from the loader witness.
+> ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida, vfs-sample]
+> conflicts: C1 — the "200+ call sites" figure is the fan-in of the single texture **wrapper**
+> (217 distinct call sites on this build), NOT 200+ raw D3DX import calls (the D3DX import itself has
+> only 2 direct callers). Reworded below; no structural conflicts remain.
+
 ## Identification
 
 - **Extensions:** `.dds` (dominant, game-world/item/effect), `.tga` (effect/particle textures),
@@ -21,12 +30,29 @@
 
 ## There is no proprietary texture format
 
-The client contains no custom texture header parser and no custom pixel decoder. All four
-formats are standard containers. The engine extracts raw bytes from the VFS, then passes them
-directly to the standard D3DX9 in-memory decode call
-(`D3DXCreateTextureFromFileInMemoryEx` on the VFS path;
+The client contains no custom texture header parser and no custom pixel decoder, and there is
+**no client-side header test or magic compare before the decode call** — the engine hands the raw
+buffer straight to D3DX9 and lets D3DX9 recognise the container. All four formats are standard
+containers. The engine extracts raw bytes from the VFS, then passes them directly to the standard
+D3DX9 in-memory decode call (`D3DXCreateTextureFromFileInMemoryEx` on the VFS path;
 `D3DXCreateTextureFromFileExA` on the disk-fallback path). The shared wrapper function routes
 both paths to the same D3DX9 format auto-detection.
+
+**Two distinct mounted-read mechanisms reach the same in-memory create call (CONFIRMED).** The
+codebase has two texture loaders that both terminate at `D3DXCreateTextureFromFileInMemoryEx`:
+
+- The **central texture wrapper** (the high-fan-in create routine) constructs a file handle *by
+  name* — which, when the VFS is mounted, resolves through the VFS chokepoint — then reads the whole
+  entry into memory via a slurp accessor that returns `{buffer pointer, length}`, and feeds that to
+  the in-memory create call. When the VFS is *not* mounted, the same wrapper instead calls the
+  file-from-disk variant `D3DXCreateTextureFromFileExA` with the on-disk path string.
+- The **inline UI / icon loader** calls the VFS read-entry chokepoint directly (the same chokepoint
+  documented in `formats/pak.md`), obtaining `{buffer, length}`, then calls the in-memory create
+  call; on failure it delegates to the central wrapper.
+
+Both mechanisms produce identical results — they differ only in *how* the in-memory buffer is
+obtained, not in the decode. A re-implementation may model this as a single "load bytes → decode"
+path; the two-mechanism detail is recorded only so the loader fan-in counts below make sense.
 
 `Assets.Parsers` responsibilities for textures:
 
@@ -81,18 +107,28 @@ the bytes actually are.
 
 ### Shaders are a SEPARATE path — `.psh` / `.vsh` never reach the texture loader (CONFIRMED)
 
-The compiled shader files `.psh` (pixel shader) and `.vsh` (vertex shader) are **not** image
+The shader files `.psh` (pixel shader) and `.vsh` (vertex shader) are **not** image
 textures and are **not** loaded through the texture-creation call above. They travel a **separate
 shader-loading path** with **no cross-reference into the texture loader** — the texture passthrough
 described here neither reads nor dispatches on `.psh`/`.vsh`. An engineer must keep the shader
 pipeline and the texture pipeline as two independent loaders; the texture loader handles only the
 four raster containers (`.dds`/`.png`/`.tga`/`.bmp`). — CONFIRMED.
 
+**Precise shader API — the D3DX9 assembler, not a texture call (CONFIRMED).** The shader path uses
+the D3DX9 **assembler** family — `D3DXAssembleShader` / `D3DXAssembleShaderFromFileA` — which means
+`.psh`/`.vsh` are shader **assembly source** (text), assembled at load time, *not* pre-compiled
+bytecode blobs and *not* anything that reaches `D3DXCreateTextureFromFileInMemoryEx`. The toon-shading
+setup routine is a good example of the split: in the same routine it loads `toonramp.bmp` (a LUT
+*texture*) **through the central texture wrapper**, but loads `dotoonshading.psh`/`.vsh` (the
+*shaders*) through the assembler. Implementors: assemble `.psh`/`.vsh` as source; never route them
+through a texture decoder.
+
 ---
 
 ## Format: DDS — primary format for game-world, item, and effect textures
 
-**Overall status: SAMPLE-VERIFIED** (UI DXT1 samples; DXT5 confirmed by call-site analysis only)
+**Overall status: SAMPLE-VERIFIED** (UI DXT1 swatches; DXT5 64² and a DXT1 1024² mip-11 surface
+byte-verified this pass)
 
 ### Identification
 
@@ -100,11 +136,20 @@ four raster containers (`.dds`/`.png`/`.tga`/`.bmp`). — CONFIRMED.
 |-------|-------|------------|
 | Magic (bytes 0–3) | `44 44 53 20` (ASCII `DDS `, space included) | SAMPLE-VERIFIED |
 | Endianness | Little-endian | SAMPLE-VERIFIED |
-| Usage | 200+ explicit call sites across UI, item, and effect texture loaders | CONFIRMED-from-routine |
+| Usage | 200+ call sites funnel through the single texture **wrapper** (217 distinct call sites on this build); the raw D3DX9 import itself has only 2 direct callers | CONFIRMED |
 
-DXT5 is specified by the dominant loader (200+ call sites for item/effect textures); DXT1 is
-confirmed from UI palette-swatch samples. DXT3 constants appear in the binary but no
-DXT3 samples have been inspected.
+> **Note on the "200+" figure.** Every texture create in the client centralizes through ONE wrapper
+> routine; that wrapper has 217 distinct call sites on this build. The underlying D3DX9 import
+> (`D3DXCreateTextureFromFileInMemoryEx`) is called from only 2 places (the central wrapper and the
+> inline UI/icon loader). So "200+ call sites" means *callers of the wrapper*, not 200 separate D3DX
+> import calls — the wrapper centralizes all texture creation. This corrects the earlier "200+ raw
+> callers" reading.
+
+DDS is the dominant container. DXT5 is now byte-level sample-verified from an item/effect texture;
+DXT1 is sample-verified from both UI palette swatches *and* a large character texture with a full
+mip chain. DXT2/DXT3 are sample-verified from the front-end UI atlases. RAW (uncompressed BGRA8888)
+DDS is sample-verified from effect and front-end surfaces. No DXT3-with-non-UI-asset category has
+been individually sampled, but the DXT3 BC2 layout is verified from UI atlases.
 
 ### DDS_HEADER layout (128 bytes total: 4-byte magic + 124-byte DDS_HEADER)
 
@@ -114,15 +159,15 @@ All integer fields are little-endian unsigned 32-bit unless otherwise noted.
 |-------:|-----:|------|-------|-------------------------|------------|
 | 0x00 | 4 | ASCII | magic | `44 44 53 20` ("DDS "); invariant | SAMPLE-VERIFIED |
 | 0x04 | 4 | u32-LE | dwSize | 124 (0x7C); invariant per MS spec | SAMPLE-VERIFIED |
-| 0x08 | 4 | u32-LE | dwFlags | 0x00001007 in UI samples (CAPS\|HEIGHT\|WIDTH\|PIXELFORMAT) | SAMPLE-VERIFIED |
-| 0x0C | 4 | u32-LE | dwHeight | Image height in pixels | SAMPLE-VERIFIED |
-| 0x10 | 4 | u32-LE | dwWidth | Image width in pixels | SAMPLE-VERIFIED |
-| 0x14 | 4 | u32-LE | dwPitchOrLinearSize | 0 when DDSD_LINEARSIZE not set (all UI samples) | SAMPLE-VERIFIED |
+| 0x08 | 4 | u32-LE | dwFlags | 0x00001007 in single-mip UI samples (CAPS\|HEIGHT\|WIDTH\|PIXELFORMAT); **0x000A1007** on the large mipped DXT1 sample (adds LINEARSIZE 0x80000 + MIPMAPCOUNT 0x20000) | SAMPLE-VERIFIED |
+| 0x0C | 4 | u32-LE | dwHeight | Image height in pixels (1024 on the large sample) | SAMPLE-VERIFIED |
+| 0x10 | 4 | u32-LE | dwWidth | Image width in pixels (1024 on the large sample) | SAMPLE-VERIFIED |
+| 0x14 | 4 | u32-LE | dwPitchOrLinearSize | 0 when DDSD_LINEARSIZE not set (single-mip UI samples); **524288** (top-mip linear size) on the large DXT1 sample where LINEARSIZE is set | SAMPLE-VERIFIED |
 | 0x18 | 4 | u32-LE | dwDepth | 0 (not a volume texture in samples) | SAMPLE-VERIFIED |
-| 0x1C | 4 | u32-LE | dwMipMapCount | 0 in UI samples (single mip; larger textures unverified) | SAMPLE-VERIFIED |
+| 0x1C | 4 | u32-LE | dwMipMapCount | 0 in single-mip UI samples; **11** (full chain) on the large 1024² DXT1 sample | SAMPLE-VERIFIED |
 | 0x20–0x4B | 44 | u32-LE[11] | dwReserved1 | All zeros in samples | SAMPLE-VERIFIED |
 | 0x4C | 32 | struct | DDS_PIXELFORMAT | See embedded struct below | SAMPLE-VERIFIED |
-| 0x6C | 4 | u32-LE | dwCaps | 0x00001000 (TEXTURE only; no MIPMAP/COMPLEX) in UI samples | SAMPLE-VERIFIED |
+| 0x6C | 4 | u32-LE | dwCaps | 0x00001000 (TEXTURE only) in single-mip UI samples; **0x00401008** (TEXTURE\|MIPMAP\|COMPLEX) on the mipped sample; **0x00001002** on the RAW BGRA sample | SAMPLE-VERIFIED |
 | 0x70 | 4 | u32-LE | dwCaps2 | 0 (no cubemap, no volume texture) | SAMPLE-VERIFIED |
 | 0x74 | 4 | u32-LE | dwCaps3 | 0 (unused) | SAMPLE-VERIFIED |
 | 0x78 | 4 | u32-LE | dwCaps4 | 0 (unused) | SAMPLE-VERIFIED |
@@ -145,13 +190,13 @@ All integer fields are little-endian unsigned 32-bit unless otherwise noted.
 | Rel offset | Size | Type | Field | Notes / observed values | Confidence |
 |-----------:|-----:|------|-------|-------------------------|------------|
 | +0x00 | 4 | u32-LE | dwSize | 32; invariant per MS spec | SAMPLE-VERIFIED |
-| +0x04 | 4 | u32-LE | dwFlags | 0x00000004 (DDPF_FOURCC only, in DXT samples) | SAMPLE-VERIFIED |
-| +0x08 | 4 | ASCII | dwFourCC | `44 58 54 31` ("DXT1") in UI samples; "DXT3"/"DXT5" expected elsewhere | SAMPLE-VERIFIED (DXT1); UNVERIFIED (DXT3, DXT5) |
-| +0x0C | 4 | u32-LE | dwRGBBitCount | 0 (not used for block-compressed formats) | SAMPLE-VERIFIED |
-| +0x10 | 4 | u32-LE | dwRBitMask | 0 (not used for block-compressed formats) | SAMPLE-VERIFIED |
-| +0x14 | 4 | u32-LE | dwGBitMask | 0 (not used for block-compressed formats) | SAMPLE-VERIFIED |
-| +0x18 | 4 | u32-LE | dwBBitMask | 0 (not used for block-compressed formats) | SAMPLE-VERIFIED |
-| +0x1C | 4 | u32-LE | dwABitMask | 0 (not used for block-compressed formats) | SAMPLE-VERIFIED |
+| +0x04 | 4 | u32-LE | dwFlags | 0x00000004 (DDPF_FOURCC) in block-compressed samples; **0x00000041** (DDPF_RGB\|DDPF_ALPHAPIXELS) in RAW uncompressed BGRA8888 samples | SAMPLE-VERIFIED |
+| +0x08 | 4 | ASCII | dwFourCC | `44 58 54 31` ("DXT1"), `DXT2`, and `DXT5` all observed across samples; **`00 00 00 00`** (zero, no FourCC) in RAW BGRA8888 samples | SAMPLE-VERIFIED (DXT1, DXT2, DXT5, RAW); DXT3 verified from UI atlases |
+| +0x0C | 4 | u32-LE | dwRGBBitCount | 0 for block-compressed formats; **32** for RAW BGRA8888 (A8R8G8B8) | SAMPLE-VERIFIED |
+| +0x10 | 4 | u32-LE | dwRBitMask | 0 for block-compressed; 0x00FF0000 for A8R8G8B8 | SAMPLE-VERIFIED |
+| +0x14 | 4 | u32-LE | dwGBitMask | 0 for block-compressed; 0x0000FF00 for A8R8G8B8 | SAMPLE-VERIFIED |
+| +0x18 | 4 | u32-LE | dwBBitMask | 0 for block-compressed; 0x000000FF for A8R8G8B8 | SAMPLE-VERIFIED |
+| +0x1C | 4 | u32-LE | dwABitMask | 0 for block-compressed; 0xFF000000 for A8R8G8B8 | SAMPLE-VERIFIED |
 
 ### DXT block layout and file-size formula
 
@@ -162,16 +207,23 @@ Pixel data begins immediately after the 128-byte header (offset 0x80).
 | Variant | Bytes per 4×4 block | Status |
 |---------|---------------------|--------|
 | DXT1 | 8 | SAMPLE-VERIFIED |
-| DXT3 | 16 | UNVERIFIED (standard value; not sampled) |
-| DXT5 | 16 | UNVERIFIED from samples (confirmed via call-site analysis) |
+| DXT2 | 16 | SAMPLE-VERIFIED (BC2; premultiplied alpha — see front-end atlas table) |
+| DXT3 | 16 | SAMPLE-VERIFIED from UI atlases (BC2; straight alpha) |
+| DXT5 | 16 | SAMPLE-VERIFIED (BC3) — byte-verified from an item/effect texture this pass |
 
-**File-size formula (SAMPLE-VERIFIED for DXT1):**
+**File-size formula (SAMPLE-VERIFIED — single-mip AND full mip-chain):**
 
 ```
-total_bytes = 128 + ceil(width / 4) * ceil(height / 4) * bytes_per_block
+single-mip:  total_bytes = 128 + ceil(width / 4) * ceil(height / 4) * bytes_per_block
+mip-chain:   total_bytes = 128 + Σ over each mip level of
+                            ceil(w_i / 4) * ceil(h_i / 4) * bytes_per_block
 ```
 
-All three DXT1 UI samples satisfy this formula exactly.
+- All three DXT1 UI swatches satisfy the single-mip formula exactly.
+- The DXT5 64×64 item/effect sample satisfies the single-mip formula exactly:
+  `128 + 16·16·16 = 4224` bytes.
+- The DXT1 1024×1024 / 11-mip character sample satisfies the mip-chain formula exactly:
+  the 11-level block-byte sum + 128 = the on-disk file size.
 
 **DXT1 block internal structure (8 bytes per 4×4 texel block):**
 
@@ -193,16 +245,75 @@ Corner texels of each palette swatch are transparent; interior texels carry the 
 
 | Variant | Status | Notes |
 |---------|--------|-------|
-| DXT5 | CONFIRMED-from-routine | Primary variant per 200+ loader call sites (item/effect textures); no DXT5 sample inspected |
-| DXT1 | SAMPLE-VERIFIED | Used in `data/ui/` palette/color-swatch textures; punch-through alpha active |
-| DXT3 | MEDIUM | FourCC string constant present in binary; specific use categories unknown |
-| DDS uncompressed | UNVERIFIED | Not ruled out; possible for special-purpose surfaces |
+| DXT5 | SAMPLE-VERIFIED | Dominant variant for item/effect textures. Byte-verified from a `data/item/effect/` 64×64 DXT5 surface (FourCC `DXT5`, pf_flags 0x4, LINEARSIZE flag set, file size = single-mip formula exact). |
+| DXT1 | SAMPLE-VERIFIED | `data/ui/` palette/color-swatch textures (single-mip, punch-through alpha active) **and** large character textures in `data/char/tex10241024/` (1024² with a full 11-level mip chain). |
+| DXT2 | SAMPLE-VERIFIED | Front-end UI atlases (see front-end atlas table below). FourCC `DXT2`; same 16-byte BC2 block as DXT3, but with **premultiplied alpha** semantics. |
+| DXT3 | SAMPLE-VERIFIED | Front-end UI atlases (see front-end atlas table below) and HUD chrome. FourCC `DXT3`; 16-byte BC2 block with **straight (non-premultiplied) alpha**. |
+| DDS uncompressed (RAW) | SAMPLE-VERIFIED | Uncompressed BGRA8888 (A8R8G8B8). Found in front-end surfaces (login base plate, character-window backing) **and** in the effects directory (`data/effect/tex/`). pf_flags = DDPF_RGB\|DDPF_ALPHAPIXELS (0x41), FourCC = `00 00 00 00`, caps 0x1002, no FourCC. Requires a BGRA→RGBA swap on import (see RAW-DDS note in the front-end atlas section). |
+
+### DXT2 vs DXT3 — both are BC2, alpha convention differs (CONFIRMED)
+
+**CAMPAIGN VFS-MASTERY — CONFIRMED (two-witness: loader + black-box over all `data/ui/` entries).**
+
+The FourCC values `DXT2` and `DXT3` denote the **same block-compressed layout** — Direct3D BC2:
+a 16-byte block holding a 64-bit explicit 4-bit-per-texel alpha section followed by a DXT1-style
+64-bit colour section (no punch-through; the colour endpoints are always treated as the four-colour
+opaque case). The **only** difference is the alpha convention the bytes carry:
+
+- **DXT2** — alpha is **premultiplied** into the colour channels (colour already scaled by alpha).
+- **DXT3** — alpha is **straight** (non-premultiplied); colour and alpha are independent.
+
+Both decode through the same in-memory texture-creation call (header auto-detect); a re-implementation
+that decodes BC2 may treat DXT2 and DXT3 with one BC2 decoder, but must record which convention each
+file uses so the compositor un-premultiplies DXT2 surfaces (or blends them with a premultiplied-alpha
+blend mode) and blends DXT3 surfaces with straight alpha. Mixing the two conventions produces dark
+or haloed edges on the UI atlases.
+
+### Front-end UI atlas container table (SAMPLE-VERIFIED)
+
+**CAMPAIGN VFS-MASTERY — SAMPLE-VERIFIED (black-box over the real `data/ui/` entries).**
+
+The login / character-select / inventory front-end is composited from a small set of named DDS
+atlases referenced by **literal path string** in the per-scene build routines (there is no manifest
+that lists them - see `formats/ui_manifests.md` for the manifest-driven atlases, which are a
+*different* set). Each atlas's container format, dimensions, and mip presence are tabled below so
+the importer applies the correct decoder and does not expect mips where none exist.
+
+| Atlas (logical name under `data/ui/`) | Container | Dimensions | Mips | Alpha convention | Confidence |
+|---|---|---|---|---|---|
+| `login_slice1` | DXT2 (BC2) | 1024x1024 | none | premultiplied | SAMPLE-VERIFIED |
+| `loginwindow` | DXT5 (BC3) | 1024x1024 | none | straight (interpolated alpha) | SAMPLE-VERIFIED |
+| `loginwindow_02` | DXT2 (BC2) | 1024x1024 | none | premultiplied | SAMPLE-VERIFIED |
+| `InventWindow` | DXT3 (BC2) | 1024x1024 | none | straight | SAMPLE-VERIFIED |
+| `password` (PIN modal art) | DXT3 (BC2) | 1024x1024 | **11 (full chain)** | straight | SAMPLE-VERIFIED |
+| `blacksheet` | DXT5 (BC3) | 512x512 | **10 (full chain)** | straight | SAMPLE-VERIFIED |
+| `loading` (`loading.dds`) | DXT3 (BC2) | 1024x1024 | none | straight | SAMPLE-VERIFIED |
+| `loading01`-`loading05`, `loading07` | DXT2 (BC2) | per-file | none | premultiplied | SAMPLE-VERIFIED |
+| `loading06`, `loading08` | DXT3 (BC2) | per-file | none | straight | SAMPLE-VERIFIED |
+| `loadingbar` | DXT2 (BC2) | 256x256 | none | premultiplied | SAMPLE-VERIFIED |
+
+- **Mips:** Only `password` (11 levels) and `blacksheet` (10 levels) carry a mip chain; **every other
+  front-end UI atlas is single-mip**. The importer must NOT request generated mips for these
+  single-mip atlases (doing so changes their byte-size assumptions and softens crisp UI edges).
+- **RAW (uncompressed) DDS atlases** - a subset of front-end surfaces (e.g. the login base plate and
+  the character-window backing among others) are **uncompressed BGRA8888** (`DDS_PIXELFORMAT` flags =
+  DDPF_RGB|DDPF_ALPHAPIXELS = 0x41, format A8R8G8B8, FourCC field = `00 00 00 00`). These are stored in
+  Windows/D3D9 native **B,G,R,A** byte order and require a **BGRA->RGBA byte swap** on import for engines
+  that expect RGBA (consistent with the TGA/BMP BGRA handling already documented in this spec). See the
+  BGRA discussion in the TGA section. **RAW DDS is not limited to the front-end:** the effects directory
+  carries RAW BGRA8888 too — sample-verified from `data/effect/tex/` (e.g. an attack-font surface, 240×30,
+  caps 0x1002, no FourCC). So the importer must handle the RAW-BGRA case wherever DDS is loaded, not only
+  for login/char-window atlases.
+- The DXT2/DXT3 split above is exactly the BC2 alpha-convention split documented in the section above;
+  the unified loader auto-detects which from the FourCC, so a re-implementation needs one BC2 decoder
+  plus a per-file premultiplied/straight flag.
 
 ---
 
 ## Format: TGA — effect and particle textures
 
-**Overall status: SAMPLE-VERIFIED** (UI sub-directory samples; `data/effect/texture/` not yet sampled)
+**Overall status: SAMPLE-VERIFIED** (UI sub-directory swatches **and** a `data/effect/texture/` sample —
+the effect TGA directory is now sample-verified this pass)
 
 ### Identification
 
@@ -215,6 +326,12 @@ on file extension or D3DX9 auto-detection heuristics.
 | Endianness | Little-endian (all multi-byte header fields) | SAMPLE-VERIFIED |
 | imageType observed | 2 (uncompressed true-color) | SAMPLE-VERIFIED |
 | TGA version | 2.0 (TRUEVISION-XFILE footer present) | SAMPLE-VERIFIED |
+| Directories sampled | `data/ui/` (4×4 swatches) **and** `data/effect/texture/` (128×128) — both type-2 / 32bpp / footer | SAMPLE-VERIFIED |
+
+> **`data/effect/texture/` now sample-verified (this pass).** A real sample from that directory is a
+> 128×128 32bpp type-2 TGA with the standard 26-byte TRUEVISION-XFILE footer — same header/footer
+> convention as the 4×4 UI swatches, confirming TGA dimensions are variable and the convention is
+> directory-independent. This promotes the directory that the earlier spec flagged as "not yet sampled."
 
 ### TGA header layout (18 bytes)
 
@@ -280,13 +397,15 @@ area or developer directory is present.
 
 ---
 
-## Format: BMP — terrain lightmap tiles and toon-shading ramp LUT
+## Format: BMP — terrain lightmap tiles, toon-shading ramp LUT, and (some) character textures
 
-**Overall status: SAMPLE-VERIFIED** (terrain tiles + toonramp; bigmap tiles not sampled)
+**Overall status: SAMPLE-VERIFIED** (terrain tiles + toonramp + a 512×512 character-bucket BMP;
+bigmap tiles not sampled)
 
-BMP is not a minor format in this client. It serves two distinct and important roles:
+BMP is not a minor format in this client. It serves three distinct roles:
 (1) terrain/effect lightmap tiles tiled across the world map; (2) a 1D cel-shading lookup
-table (LUT) bound as a texture sampler in the toon-shading pipeline.
+table (LUT) bound as a texture sampler in the toon-shading pipeline; (3) some **character texture
+bucket** entries are stored as BMP rather than PNG (see "Character buckets are container-mixed" below).
 
 ### Identification
 
@@ -328,7 +447,14 @@ Notes on observed values:
 
 - `ImageSize = 0` is legal for BI_RGB compression; the decoder derives the size as
   `stride * abs(Height)`. One terrain tile has ImageSize=0; another has the correct
-  value 49152; both are valid.
+  value 49152; both are valid. (The 512×512 character-bucket BMP carries ImageSize=786434,
+  and the toonramp carries 770 — see those sub-sections; all decode by `stride * abs(Height)`.)
+- **FileSize field includes the 2 trailing pad bytes.** Across all three BMP samples the
+  BITMAPFILEHEADER `FileSize` field counts the 2 trailing null bytes that the art team's encoder
+  appends after the pixel region: terrain tile FileSize=49208 (= 54 + 49152 + 2), toonramp FileSize=824
+  (= 54 + 768 + 2), 512² char BMP FileSize=786488 (= 54 + 786432 + 2). Loaders read exactly
+  `stride * abs(Height)` from `PixelDataOffset` and ignore the trailing bytes; the `FileSize` field is
+  informational only. This is a stable encoder artifact, not specific to toonramp.
 - `HorizPixelsPerMeter` and `VertPixelsPerMeter` vary between samples (72 DPI vs 96 DPI),
   reflecting different source tool settings. D3DX9 ignores these fields at runtime.
 - `Height` is positive in all samples, which means rows are stored bottom-to-top (standard
@@ -388,11 +514,24 @@ The non-zero shadow floor (0xDD = approximately 87% white) produces a "bright-bu
 shadow characteristic typical of anime-style cel shading from this era. Input luminance U=0
 maps to a soft shadow tone, not to black.
 
+### Sub-format: character texture bucket BMP (`data/char/tex512512/…bmp`)
+
+**Dimensions sampled:** 512 × 512 pixels, 24bpp RGB, BI_RGB, `PixelDataOffset` = 54.
+FileSize field = 786488 (= 54 + 1536 stride × 512 rows + 2 trailing pad bytes); stride 1536.
+
+A real character-bucket sample is a standard 24bpp BMP — i.e. the character texture buckets
+(`data/char/tex512512/` etc.) are **not** PNG-exclusive; they can hold BMP too. This is consistent
+with the texture-id-registry loading rule documented in the PNG section: the list-file registration
+strips the extension and takes whatever the line names, and the central texture create call is
+container-agnostic (D3DX9 auto-detects from the leading bytes). See "Character buckets are
+container-mixed" in the PNG section for the full implication.
+
 ---
 
 ## Format: PNG — character and item skin textures
 
-**Overall status: SAMPLE-VERIFIED** (tex256256 bucket; other resolution buckets not yet sampled)
+**Overall status: SAMPLE-VERIFIED** (tex256256 bucket **and** a tex10241024 1024² sample this pass;
+remaining buckets confirmed from the loader)
 
 ### Identification
 
@@ -420,10 +559,10 @@ Chunk wrapper fields are standard (4-byte big-endian length, 4-byte ASCII type, 
 | 0 | 8 | bytes | PNG signature | `89 50 4E 47 0D 0A 1A 0A` | Invariant | SAMPLE-VERIFIED |
 | 8 | 4 | u32-BE | IHDR chunk length | 13 (0x0000000D) | Fixed by spec | SAMPLE-VERIFIED |
 | 12 | 4 | ASCII | IHDR chunk type | `IHDR` | Fixed by spec | SAMPLE-VERIFIED |
-| 16 | 4 | u32-BE | Image width | 256 (0x00000100) | For tex256256 bucket | SAMPLE-VERIFIED |
-| 20 | 4 | u32-BE | Image height | 256 (0x00000100) | For tex256256 bucket | SAMPLE-VERIFIED |
+| 16 | 4 | u32-BE | Image width | 256 (tex256256) / 1024 (tex10241024) | matches bucket dimensions | SAMPLE-VERIFIED |
+| 20 | 4 | u32-BE | Image height | 256 (tex256256) / 1024 (tex10241024) | matches bucket dimensions | SAMPLE-VERIFIED |
 | 24 | 1 | u8 | Bit depth | 8 | 8 bits per channel | SAMPLE-VERIFIED |
-| 25 | 1 | u8 | Color type | 2 (RGB truecolor) | No alpha in samples | SAMPLE-VERIFIED |
+| 25 | 1 | u8 | Color type | 2 (RGB truecolor) | No alpha in any sampled bucket (incl. 1024²) | SAMPLE-VERIFIED |
 | 26 | 1 | u8 | Compression method | 0 (deflate/inflate) | Fixed by PNG spec | SAMPLE-VERIFIED |
 | 27 | 1 | u8 | Filter method | 0 (adaptive) | Fixed by PNG spec | SAMPLE-VERIFIED |
 | 28 | 1 | u8 | Interlace method | 0 (non-interlaced) | No interlacing | SAMPLE-VERIFIED |
@@ -463,10 +602,10 @@ dimensions per bucket.
 
 | VFS directory | Dimensions | D3DX hint (width × height) | Status |
 |---------------|------------|---------------------------|--------|
-| `data/char/tex256256/` | 256 × 256 | 256 × 256 | SAMPLE-VERIFIED |
+| `data/char/tex256256/` | 256 × 256 | 256 × 256 | SAMPLE-VERIFIED (PNG) |
 | `data/char/tex256512/` | 256 × 512 | 256 × 512 | CONFIRMED-from-routine (no sample) |
-| `data/char/tex512512/` | 512 × 512 | 512 × 512 | CONFIRMED-from-routine (no sample) |
-| `data/char/tex10241024/` | 1024 × 1024 | 1024 × 1024 | CONFIRMED-from-routine (no sample) |
+| `data/char/tex512512/` | 512 × 512 | 512 × 512 | SAMPLE-VERIFIED (a 512² **BMP** sampled — bucket is container-mixed) |
+| `data/char/tex10241024/` | 1024 × 1024 | 1024 × 1024 | SAMPLE-VERIFIED (a 1024² PNG **and** a 1024² DXT1 DDS sampled) |
 | `data/item/texture/` | unknown | unknown | CONFIRMED-from-routine (no sample) |
 
 Each bucket directory contains a companion `*list.txt` index file. A list-index loader reads
@@ -512,6 +651,15 @@ extension are incidental. The 9-digit numeric filenames seen in `data/char/tex25
 queries the same registry by the numeric id carried on the part (for characters this id is the
 `tex_id` recovered through the skin chain -- see below) and binds the returned texture to the render
 node. No filename is formatted at this point; the lookup is purely id -> registry entry.
+
+**Character buckets are container-mixed (SAMPLE-VERIFIED).** Because the list-file registration takes
+the extension from the line (not hardcoded) and the central create call auto-detects the container
+from the leading bytes, a single character texture bucket may hold a mixture of containers. This is
+sample-verified: `data/char/tex10241024/` holds both PNG (`*.png`) and DXT1 DDS (`*.dds`) 1024² files,
+and `data/char/tex512512/` holds 24bpp BMP (`*.bmp`) as well. A faithful re-implementation must
+therefore decode each bucket entry by its actual header bytes (PNG / DDS / BMP), not assume the bucket
+is single-container. The id mapped to a registry entry is identical regardless of the on-disk
+container.
 
 ### The skin chain that populates the per-part texture id (CODE-CONFIRMED)
 
@@ -668,14 +816,18 @@ aid only.
 
 | Format | Status | Sample count | Confirmed use |
 |--------|--------|-------------|---------------|
-| DDS (DXT1) | SAMPLE-VERIFIED | 3 | UI palette swatches (`data/ui/`) |
-| DDS (DXT5) | CONFIRMED-from-routine | 0 | Item, effect, and general textures (200+ call sites) |
-| DDS (DXT3) | MEDIUM | 0 | Binary constant present; use unknown |
-| TGA (uncompressed 32bpp) | SAMPLE-VERIFIED | 3 | UI palette swatches (`data/ui/`); also `data/effect/texture/` per call-site analysis |
+| DDS (DXT1) | SAMPLE-VERIFIED | 3 UI + 1 large mipped | UI palette swatches (`data/ui/`); large mipped char textures (`data/char/tex10241024/`) |
+| DDS (DXT5) | SAMPLE-VERIFIED | 1 | Item/effect/general textures; byte-verified `data/item/effect/` 64² surface (formula exact) |
+| DDS (DXT2) | SAMPLE-VERIFIED | (front-end atlases) | Front-end UI atlases (BC2, premultiplied alpha) |
+| DDS (DXT3) | SAMPLE-VERIFIED | (front-end atlases) | Front-end UI atlases + HUD chrome (BC2, straight alpha) |
+| DDS (RAW BGRA8888) | SAMPLE-VERIFIED | ≥1 | Front-end surfaces **and** `data/effect/tex/` (uncompressed A8R8G8B8; needs BGRA→RGBA swap) |
+| TGA (uncompressed 32bpp) | SAMPLE-VERIFIED | 3 UI + 1 effect | UI palette swatches (`data/ui/`) **and** `data/effect/texture/` (128² sample byte-verified) |
 | BMP (terrain tile 128×128) | SAMPLE-VERIFIED | 2 | `data/effect/map/` lightmap tiles |
 | BMP (toonramp LUT 256×1) | SAMPLE-VERIFIED | 1 | `data/shader/toonramp.bmp` — cel-shading LUT |
+| BMP (char bucket 512×512) | SAMPLE-VERIFIED | 1 | `data/char/tex512512/` — character textures (buckets are container-mixed) |
 | PNG (char skin 256×256) | SAMPLE-VERIFIED | 3 | `data/char/tex256256/` character skin textures |
-| PNG (other resolutions) | CONFIRMED-from-routine | 0 | Higher-resolution char buckets and item textures |
+| PNG (char skin 1024×1024) | SAMPLE-VERIFIED | 1 | `data/char/tex10241024/` (1024², color type 2, no alpha) |
+| PNG (other resolutions) | CONFIRMED-from-routine | 0 | tex256512 char bucket and item textures |
 | bgtexture.lst (binary catalogue) | SAMPLE-VERIFIED | 1 file (1222 records) | `data/map000/texture/bgtexture.lst` — global terrain/building texture index |
 
 ---
@@ -692,20 +844,26 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
 
 ## Known unknowns
 
-- **DXT5 samples:** No DXT5 file has been inspected at byte level. DXT5 is confirmed as the
-  dominant format from call-site analysis (200+ sites) but the DDS_PIXELFORMAT block, mip
-  layout, and per-category path assignment have not been validated against a real asset.
-- **DXT3 use:** The DXT3 constant appears in the binary but the specific asset category
-  using it is unknown.
-- **Per-directory DXT variant breakdown:** Only `data/ui/` has been sampled (DXT1 confirmed).
-  The DXT variant used in `data/item/effect/`, `data/char/`, and terrain DDS assets is
-  UNVERIFIED from samples.
-- **Mip-map presence:** All sampled DDS files are single-mip (DDSD_MIPMAPCOUNT not set).
-  Larger world textures likely have pre-generated mipmaps but this has not been verified.
+- **DXT5 samples:** RESOLVED this pass — a `data/item/effect/` 64×64 DXT5 surface was byte-verified
+  (FourCC `DXT5`, pf_flags 0x4, LINEARSIZE flag set, single-mip file-size formula exact). The DXT5
+  DDS_PIXELFORMAT block and single-mip layout are now sample-verified. Per-category path assignment
+  beyond `data/item/effect/` is still only partially sampled.
+- **DXT3 use outside UI:** The DXT3 BC2 layout is sample-verified from front-end UI atlases. A
+  non-UI asset category using DXT3 has not been individually sampled.
+- **Per-directory DXT variant breakdown:** Sampled directories now include `data/ui/` (DXT1/DXT2/DXT3),
+  `data/item/effect/` (DXT5), `data/char/tex10241024/` (DXT1 mipped + PNG), and `data/effect/tex/`
+  (RAW BGRA). The exhaustive per-directory variant census across the whole VFS is still not complete.
+- **Mip-map presence:** RESOLVED this pass — large character textures DO carry full pre-generated mip
+  chains (`data/char/tex10241024/` DXT1 1024² with dwMipMapCount=11, dwCaps TEXTURE|MIPMAP|COMPLEX,
+  dwFlags MIPMAPCOUNT|LINEARSIZE set, mip-chain file-size formula exact). UI swatches and the sampled
+  DXT5 surface remain single-mip. Which specific categories ship mips is established (large char
+  textures yes, small UI no); a full census is not done.
 - **D3DX9 color-key transparency:** Whether any non-zero color-key value is configured at
   load time cannot be determined from file bytes alone.
-- **PNG alpha in higher-resolution buckets:** The tex256256 samples use color type 2 (RGB,
-  no alpha). Whether tex512512 or tex10241024 PNG files use RGBA (color type 6) is UNVERIFIED.
+- **PNG alpha in higher-resolution buckets:** The tex256256 samples and the one tex10241024 sample both
+  use color type 2 (RGB, no alpha). Whether any tex512512 or tex10241024 PNG uses RGBA (color type 6)
+  is still UNVERIFIED — the 1024² sample inspected this pass has no alpha, but the bucket was not
+  exhaustively scanned for color type 6.
 - **PNG filename encoding:** The 9-digit numeric name decomposition (class/sub/variation)
   needs cross-reference against a character or items data table.
 - **Bigmap BMP tiles (`data/bigmap/d%sx%dz%d.bmp`):** Path template confirmed from binary
@@ -736,9 +894,14 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
    - TGA: no magic; use file extension. If extension is `.tga`, treat as TGA regardless of
      first-byte value.
    - bgtexture.lst: identified by VFS path `data/map000/texture/bgtexture.lst`; no magic.
-3. For DDS: parse the standard 128-byte header, read `DDS_PIXELFORMAT.dwFourCC` to determine
-   the block compression variant, and compute pixel data length using the file-size formula
-   above. Report dimensions, variant, and mip count to `Assets.Mapping`.
+3. For DDS: parse the standard 128-byte header, read `DDS_PIXELFORMAT.dwFlags`/`dwFourCC` to
+   determine the variant. If `dwFlags` has DDPF_FOURCC (0x4), it is block-compressed (DXT1/DXT2/
+   DXT3/DXT5) — use the appropriate block size and the single-mip *or* mip-chain file-size formula
+   (read `dwMipMapCount`; large char textures carry full chains). If `dwFlags` has DDPF_RGB|
+   DDPF_ALPHAPIXELS (0x41) and `dwFourCC` is zero, it is **uncompressed BGRA8888 (A8R8G8B8)** —
+   apply a **BGRA→RGBA byte swap** on import. Treat DXT2 as premultiplied-alpha BC2 and DXT3 as
+   straight-alpha BC2 (one BC2 decoder + a per-file premultiplied flag). Report dimensions, variant,
+   mip count, and alpha convention to `Assets.Mapping`.
 4. For TGA: parse the 18-byte header, note `imageDescriptor` bit 5 = 0 (bottom-up row order;
    vertical flip is required for top-down output). `pixelDepth = 32` means BGRA channel order.
 5. For BMP: parse the 14-byte BITMAPFILEHEADER and 40-byte BITMAPINFOHEADER. Skip to
@@ -748,6 +911,10 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
 6. For PNG: decode the standard chunk stream. Concatenate all consecutive IDAT chunk data
    before zlib decompression. After decompression, remove the leading filter byte from each
    scanline before presenting pixel data.
+   **Do not assume a character texture bucket is single-container.** The list-file registration is
+   extension-free, so `data/char/tex*/` (and item) buckets are container-mixed — a registry entry may
+   be a PNG, a DDS, or a BMP. Always dispatch on the actual header bytes of each entry, not on the
+   directory or a presumed extension.
 7. For bgtexture.lst: read `count` (u32-LE at offset 0); validate `1 ≤ count < 2000`. Then
    read `count` records of 48 bytes each. Each record: `kind` (u8 at `+0x00`) and `path_stem`
    (null-terminated char[47] at `+0x01`). Construct the full DDS path as
@@ -776,3 +943,25 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
 > (`D3DXCreateTextureFromFileInMemoryEx`, header auto-detect, no per-extension branch), and that
 > `.psh`/`.vsh` shaders take a SEPARATE loading path with no cross-reference into the texture
 > loader. Promoted as neutral prose; no addresses or decompiler output crossed the firewall.
+
+> **Provenance — CAMPAIGN VFS-MASTERY-B (two-witness reconcile: loader + black-box over `data/ui/`):**
+> added the front-end UI atlas container table (login_slice1 / loginwindow / loginwindow_02 /
+> InventWindow / password / blacksheet / loading* / loadingbar with per-file container, dimensions,
+> and mip presence), the DXT2-vs-DXT3 BC2 alpha-convention split (premultiplied vs straight), and the
+> RAW-DDS = BGRA8888 (needs BGRA->RGBA swap) note. Promoted as neutral prose; no addresses, no
+> decompiler output, and no sample bytes crossed the firewall.
+
+> **Provenance — CAMPAIGN 10 · Block D (two-witness re-verification, ida_anchor 263bd994, static-only):**
+> re-confirmed every prior CONFIRMED/SAMPLE-VERIFIED offset, stride, count, and formula against the
+> loader witness and real-VFS header-only samples, and PROMOTED several hypotheses to sample-verified:
+> DXT5 (byte-verified `data/item/effect/` 64² surface, single-mip formula exact); large-texture full
+> mip chains (`data/char/tex10241024/` DXT1 1024² with dwMipMapCount=11, mip-chain formula exact);
+> RAW-BGRA8888 DDS also present in `data/effect/tex/` (not only front-end); the `data/effect/texture/`
+> TGA directory (128² type-2/32bpp/footer); and a 1024² PNG. Added: the precise shader API is the
+> D3DX9 **assembler** (`D3DXAssembleShader` / `D3DXAssembleShaderFromFileA`) — `.psh`/`.vsh` are
+> assembly source, not textures; the texture wrapper has two distinct mounted-read mechanisms reaching
+> one in-memory create call; character texture buckets are container-mixed (PNG / DDS / BMP via
+> extension-free list registration); the BMP `FileSize` field includes the 2 trailing pad bytes in all
+> samples. Corrected the "200+ raw callers" wording to "200+ call sites funnel through the single
+> texture wrapper" (217 wrapper call sites on this build; the D3DX import itself has 2 direct callers).
+> Promoted as neutral prose; no addresses or decompiler output crossed the firewall.

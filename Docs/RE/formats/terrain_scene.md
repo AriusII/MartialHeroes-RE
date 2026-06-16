@@ -15,6 +15,23 @@
 
 ---
 
+## Re-verification banner (2026-06-16, CAMPAIGN 10 / Block D)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | `sample-verified` for the `.map`+`.bud` scene model. This pass re-confirmed the **scene/routing** layer (BUILDING section → `.bud` loader; SOLID section → `.sod` loader; `.bud`↔`.sod` independence; the BUILDING `TEXTURES` pool and 1-based `tex_id`) two-witness. The `.bud` byte-internal tables (9-byte object header, 32-byte FVF-0x112 vertex, warn-and-continue 0xC00 cap) were **not** re-dumped this pass and hold at their committed (sample-verified) tier. |
+| `ida_reverified` | `2026-06-16` |
+| `ida_anchor`     | `263bd994` |
+| `evidence`       | `[static-ida, vfs-sample]` — `.map` parser dispatch (witness 1) + prior `.bud` sample verification (committed tier) |
+| `conflicts`      | None. RE-confirmed with no drift: the BUILDING section is reached only via the `.map` `BUILDING` block and loads `.bud`; the `BUILDING TEXTURES` pool registers in slot order (same discard-first-int / read-`intTexId` logic as `TERRAIN`), and `tex_id` is a 1-based index into it; `.bud` and `.sod` are independent blobs with no in-file cross-reference (SOLID → `.sod`). The geometry directives `WIDTH`/`HEIGHT`/`GRID`/`MAX_HEIGHTFILED`/`MIN_HEIGHTFILED`/`ORIGIN` are present on disk but **not consumed by the located runtime `.map` parser** (see `terrain.md §3.4`). |
+
+> **Building-mesh lane flag (deferred):** the `.bud` 32-byte vertex / 9-byte object header / 0xC00
+> warn-and-continue cap were carried forward at their committed tier this pass; a dedicated
+> building-mesh re-verification against the `.bud` loader and a multi-object sample is the place to
+> re-open those tables, not this terrain-core pass.
+
+---
+
 ## Status block
 
 | Attribute          | Value |
@@ -145,7 +162,7 @@ Each record is variable-length and laid out as:
 |---------------------:|-----:|------|----------------|-------------------------|-----------|
 | `+0x00` | 1 | u8  | `type_byte`    | Object sub-class tag. Confirmed-variable: values 0, 1 and 2 occur across the asset set. The byte is read from the file and retained in memory, but no read-site branches on it in the building render path — the consumer takes no decision from its value (see §5 and open questions). Expose it as a raw `byte`. | CONFIRMED-variable |
 | `+0x01` | 4 | u32 | `tex_id`       | **1-based** index into the `BUILDING` `TEXTURES` pool declared in the cell's `.map`. Smallest legal value is 1. A value of 0, or a value greater than the pool size, is treated by the legacy client as an error and clamped to 1. Observed value: 1. | CONFIRMED |
-| `+0x05` | 4 | u32 | `vertex_count` | Number of vertices in this record's vertex array. The legacy loader applies a **log-only, warn-and-continue** cap check at **3072 (0xC00)**: it allocates and reads the *full* `vertex_count` first, then merely logs a warning if the count exceeded the cap — it never throws, clamps, or truncates. A faithful parser must read all `vertex_count` vertices regardless of the cap (see §9 and §10). Observed values: 5 (small samples); up to 2017 (17-object sample); some real files exceed the cap. | CONFIRMED (cap behaviour: loader-resolved) |
+| `+0x05` | 4 | u32 | `vertex_count` | Number of vertices in this record's vertex array. The legacy loader applies a **log-only, warn-and-continue** cap check at **3072 (0xC00)**: it allocates and reads the *full* `vertex_count` first, then merely logs a warning if the count exceeded the cap — it never throws, clamps, or truncates. A faithful parser must read all `vertex_count` vertices regardless of the cap (see §9 and §10). Observed values: 5 (small samples); up to 2017 (17-object sample). **VFS census (2026-06-16, two-witness over all 2 296 `.bud` files):** the file-size formula reproduces with zero residual on every file; **exactly 4 files breach the 3 072 cap** (maps 17/18/27/33 at cell `x10034z10038`, max `vertex_count = 3328`) — confirming the warn-and-continue path is exercised by real data and that a clamping parser would desync the stream on those 4 files. | CONFIRMED (cap behaviour: loader-resolved; census-verified) |
 
 #### 3.2.2 Vertex array
 
@@ -415,8 +432,9 @@ in the legacy asset set.
 1. Read `object_count` (u32) at `+0x00`. May be 0.
 2. For each object, read the 9-byte header: `type_byte` (u8), `tex_id` (u32), `vertex_count`
    (u32). The `vertex_count` cap (3072 / 0xC00) is **warn-only**: read the full `vertex_count`
-   regardless — never throw, clamp, or truncate at the cap (real files exceed it). Optionally
-   emit a log warning to mirror the legacy loader, then continue.
+   regardless — never throw, clamp, or truncate at the cap (4 real files breach it, max 3328; a
+   clamp/skip desyncs the stream on those files). Optionally emit a log warning to mirror the legacy
+   loader, then continue.
 3. Read `vertex_count` × 32-byte vertices. Each vertex is 8 × f32: position(3), normal(3),
    uv(2). Normals are unit-length (magnitude 1.0 ± 1e-3). UVs may be tiled world-scale
    (values outside [0,1] are normal) or atlas-normalized ([0,1]); both are valid and the same

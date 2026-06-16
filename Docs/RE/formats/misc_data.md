@@ -5,12 +5,29 @@
 >
 > Promoted from dirty-room analyst notes under EU Software Directive 2009/24/EC Art. 6.
 > No decompiler output and no binary virtual addresses appear anywhere in this file.
->
-> status: sample_verified — see per-section confidence notes.
 
-This document covers five distinct file types that share no common wire format but are all small
-script/data assets extracted from `.pak` archives. They are grouped here because none warrants a
-standalone spec file. Each section is self-contained.
+<!--
+verification: sample-verified (every documented format re-decoded against the real VFS on build
+              263bd994 — strides divide file sizes with zero remainder, CP949 text decodes
+              coherently); a handful of field semantics remain capture/debugger-pending
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida, vfs-sample]
+conflicts: mobinfo.mi portrait_res_3 — sampled values (99, 103) are inconsistent with the
+           "large portrait resource ID" model; field role re-flagged UNVERIFIED (open, §2)
+-->
+
+> **status: sample_verified** — every format below was re-confronted with the real VFS mount
+> (43 347 entries) on build `263bd994`: `actor_size.xdb`, `buff_icon_position.xdb`,
+> `effectscale.xdb`, `mobinfo.mi`, `.tol`, `descript.ion`, `discript.sc`, `msg.xdb`,
+> `mapsetting.scr`, and `regiontableNNN.bin` all re-decoded cleanly (strides divide their file
+> sizes with zero remainder; CP949 names decode coherently). One UNRESOLVED conflict is carried:
+> `mobinfo.mi` `portrait_res_3` (§2). Two undocumented `.xdb` variants present in the VFS are now
+> covered: `creature_item.xdb` (§8) and `vehicle.xdb` (§9). See per-section confidence notes.
+
+This document covers the miscellaneous script and data file types that share no common wire format
+but are all small script/data assets extracted from the `.pak` / VFS container. They are grouped
+here because none warrants a standalone spec file. Each section is self-contained.
 
 ---
 
@@ -26,8 +43,22 @@ standalone spec file. Each section is self-contained.
 - **Record count:** Derived from file size divided by the per-variant stride (no stored count).
   The file size must be an exact multiple of the stride; any remainder is an error.
 
-Three named variants are documented. They share the headerless flat-array structure but differ
-in record stride and field types.
+**`.xdb` VFS census (build `263bd994`, SAMPLE-VERIFIED):** six `.xdb` files live under
+`data/script/`. Each is a headerless flat array; the stride differs per variant and is the only way
+to know how to read a given file (the parser must already know which variant it is loading).
+
+| Path | Size (bytes) | Stride | Records | Section |
+|---|---:|---:|---:|---|
+| `data/script/actor_size.xdb` | 180 | 12 | 15 | §1.2 |
+| `data/script/buff_icon_position.xdb` | 1 608 | 12 | 134 | §1.3 |
+| `data/script/effectscale.xdb` | 16 | 8 | 2 | §1.4 |
+| `data/script/creature_item.xdb` | 44 208 | 48 | 921 | §9 |
+| `data/script/vehicle.xdb` | 3 016 | 52 | 58 | §10 |
+| `data/script/msg.xdb` | 1 364 304 | 516 | 2 644 | §6 |
+
+All six strides divide their file sizes with zero remainder. The first three plus `msg.xdb` carry
+full documented layouts; `creature_item.xdb` and `vehicle.xdb` (§9, §10) carry head-only layouts
+recovered in the 2026-06-16 re-verification pass and are graded accordingly.
 
 ---
 
@@ -281,10 +312,20 @@ Total file size = 4 + (`count` × 28).
 | 12     | 4    | u32LE | icon_index     | UI sprite index for this mob's icon; range 55 – 173 observed | HIGH     |
 | 16     | 4    | u32LE | portrait_res_1 | Resource ID for the primary portrait image; 0xFFFFFFFF = none | PARTIAL |
 | 20     | 4    | u32LE | portrait_res_2 | Resource ID for the hover/alternate portrait frame; 0xFFFFFFFF = none | PARTIAL |
-| 24     | 4    | u32LE | portrait_res_3 | Resource ID for a third portrait state; 0xFFFFFFFF = none | PARTIAL |
+| 24     | 4    | u32LE | field6 (was `portrait_res_3`) | **Role UNRESOLVED** — see conflict below. Either a large resource ID (0xFFFFFFFF = none) or a small index; sampled values do not fit a single model. | UNVERIFIED |
 
-**Sentinel:** 0xFFFFFFFF indicates "not present" for all optional reference fields
-(`name_str_id`, `alt_name_str_id`, `portrait_res_1`, `portrait_res_2`, `portrait_res_3`).
+**Sentinel:** 0xFFFFFFFF indicates "not present" for the optional reference fields
+(`name_str_id`, `alt_name_str_id`, `portrait_res_1`, `portrait_res_2`). It is also one of the
+values seen in `field6`, but `field6`'s overall role is unresolved (next note).
+
+> **UNRESOLVED CONFLICT — `field6` (offset +24, was `portrait_res_3`):** the re-verification sample
+> on build `263bd994` shows record 0 = 103 and record 1 = 99 (small integers) while record 2 =
+> 0xFFFFFFFF. The small values (99, 103) are **inconsistent with** the large ~5 080 000-range
+> resource IDs that `portrait_res_1` / `portrait_res_2` hold in the same records, so this field is
+> almost certainly **not** a third portrait resource ID. Two open hypotheses: (1) a small index
+> (e.g. a UI sprite or colour index, or a second `icon_index`); (2) the 7-field stride is correct
+> but field[6] carries a different semantic entirely. No loader was traced for `mobinfo.mi`, so this
+> is left **OPEN** — sample-probe / IDB-pending. Do not assume "portrait resource" for this field.
 
 ### Field notes
 
@@ -296,21 +337,34 @@ Total file size = 4 + (`count` × 28).
 - No CP949 text is stored directly in this file; names are resolved at runtime via the string table.
 - String IDs in this file resolve against `data/script/msg.xdb` (see §6 of this document).
 
-**Portrait resource IDs (`portrait_res_1/2/3`):**
+**Portrait resource IDs (`portrait_res_1` / `portrait_res_2`):**
 - Large 32-bit values. A pattern of the form `(group × 1_000_000) + index` is consistent with the
   observed values (e.g. values in the 5,080,000 range with adjacent IDs differing by 1 – 3).
   This encoding formula is unconfirmed.
-- Adjacent frames often differ by 1 – 3, suggesting sequential resource allocation per mob.
+- In the re-verification sample, `portrait_res_1` and `portrait_res_2` are **adjacent IDs**
+  (`portrait_res_2 = portrait_res_1 + 1`), consistent with sequential resource allocation per mob
+  (e.g. `5 079 876` / `5 079 877`; `5 013 620` / `5 013 621`; `5 099 990` / `5 099 991`).
+- `field6` (offset +24) does **not** follow this pattern (small values 99 / 103) — see the
+  UNRESOLVED conflict above; it is not treated as a third portrait resource.
 
-**Size verification:** 4 + 21 × 28 = 592 bytes — confirmed against a known sample.
+**Size verification (SAMPLE-VERIFIED, build `263bd994`):** the single VFS instance at
+`data/ui/mobinfo.mi` is **592 bytes**: a 4-byte header `count = 21` (`0x15`) followed by 21 × 28-byte
+records (`4 + 21 × 28 = 592` exactly). The container shape — present-on-disk, 21 records, 28-byte
+stride of 7 × u32 — is sample-verified. (No client loader / path literal was found, so the runtime
+does not appear to read it via a path; the on-disk shape stands regardless.)
 
 ### Known unknowns
 
-- No loader routine located in the binary; the file path was not found as a string literal in the binary.
-  Format is confirmed by sample arithmetic alone.
+- No loader routine located in the binary; the file path was not found as a string literal in the
+  binary. The container shape (count + 28-byte records) is **sample-verified**; the runtime
+  consumption path is not (no loader / no path literal).
 - The exact string-table structure that `name_str_id` / `alt_name_str_id` index is not documented
   here; see §6 of this document (`msg.xdb`) for the resolved record format.
-- The portrait resource ID encoding (group × 1e6 + index vs another scheme) is unconfirmed.
+- **`field6` (offset +24) role is UNRESOLVED** — sampled values 99 / 103 / 0xFFFFFFFF do not fit
+  the "large portrait resource ID" model; OPEN (sample-probe / IDB-pending). See the conflict note
+  in the record layout above.
+- The portrait resource ID encoding (group × 1e6 + index vs another scheme) for
+  `portrait_res_1` / `portrait_res_2` is unconfirmed.
 - Whether files with `mob_class_id` ranges outside 101 – 121 exist is unknown (single sample).
 
 ---
@@ -363,9 +417,16 @@ Each byte encodes one tile:
 Only values 0 and 1 have been observed. Any other value should be treated as blocked by a
 defensive parser.
 
-**Size verification:**
-- A 2048 × 2048 map: 16 + 4,194,304 = 4,194,320 bytes — confirmed against two known samples.
-- A 256 × 256 map: 16 + 65,536 = 65,552 bytes — confirmed against one known sample.
+**Size verification (SAMPLE-VERIFIED, build `263bd994`):** three `.tol` files live in the VFS
+(`data/map009/009.tol`, `data/map013/013.tol`, `data/map100/100.tol`).
+- A 2048 × 2048 map: 16 + 4 194 304 = 4 194 320 bytes — confirmed against `map009` **and** `map013`
+  (both exactly 4 194 320).
+- A 256 × 256 map: 16 + 65 536 = 65 552 bytes — confirmed against `map100`.
+- Header re-decode bears out the layout and the ×256 world-origin divisibility:
+  `map009` reads `world_origin_x = 8192` (8192 / 256 = 32), `world_origin_y = 57344` (57344 / 256 =
+  224), `width = height = 2048`; `map100` reads `world_origin_x = 23552` (23552 / 256 = 92),
+  `world_origin_y = 55296` (55296 / 256 = 216), `width = height = 256`. Both origins are exact
+  multiples of 256, consistent with the `tile_col = world_origin_x / 256 + i` model below.
 
 ### Known unknowns
 
@@ -382,7 +443,12 @@ defensive parser.
 
 ## Section 4 — `descript.ion` — Texture Description / Directory File
 
-**sample_verified: false** (single-record sample; field1/field2 semantics unconfirmed)
+**sample_verified: true** (record structure + sizing, build `263bd994`); **UNVERIFIED**
+(field1 / field2 semantics). The single VFS instance is **29 bytes = exactly one record**, and the
+record decodes end-to-end against the structure below: a `.tga` texture filename, an ASCII space
+separator, two u32LE values (each ~30–32 MB, consistent with pak byte offsets but unconfirmed), a
+`name_length` byte that equals the filename length, and a CRLF terminator —
+`len(filename) + 1 + 4 + 4 + 1 + 2 = 29`, exact. The multi-record question (below) remains open.
 
 - **Extension:** `.ion`
 - **Found in:** `.pak` archive; logical path: `data/effect/texture/descript.ion`
@@ -427,8 +493,9 @@ Records are delimited by CR LF (0x0D 0x0A). Each record has the following fixed 
 contain CP949 characters is unknown; treat as ASCII unless evidence to the contrary emerges.
 
 **Field1 / field2 interpretations (UNVERIFIED):**
-- Candidate A: pak archive byte offset (field1 = start, field2 = end or size). Values of ~28 – 32 MB
-  are plausible for late entries in a large archive.
+- Candidate A: pak archive byte offset (field1 = start, field2 = end or size). The sampled record
+  reads `field1 ≈ 30.4 MB` and `field2 ≈ 32.6 MB` with `field1 < field2`, which fits a
+  start/end-offset pair for a late entry in a large archive — but it is not confirmed.
 - Candidate B: one field is a CRC32 checksum, one is a file size. Not confirmed.
 - Windows FILETIME encoding was tested and rejected (values do not map to plausible dates).
 
@@ -468,6 +535,14 @@ array of 68-byte records.
 
 Flat array of fixed 68-byte records. No header. Record count = `file_size / 68`. The file size
 must be an exact multiple of 68; any remainder is an error.
+
+**Size verification (SAMPLE-VERIFIED, build `263bd994`):** the VFS instance at
+`data/script/discript.sc` is **2 244 bytes = exactly 33 records** (2 244 / 68 = 33.0). The first two
+records re-confirm the layout and the corrected role: both have `category = 3` (party command), the
+30-byte `display_name` decodes cleanly as CP949 party-action labels ("Join Party" / "Leave Party"),
+and the `keyboard_shortcut` field is the no-shortcut placeholder (`'0'` then NUL bytes) for these
+non-hotkey records. The party-action content is decisive evidence that these are UI context-menu
+labels, not district/zone names.
 
 #### Per-record layout (68 bytes = 0x44)
 
@@ -863,8 +938,12 @@ and a CP949 label, used to place sub-zone name captions on the world map.
 
 Flat array of fixed 32-byte records. No header. Record count = `file_size / 32`.
 
-**Size verification:** the area-1, area-2, and area-3 instances are each 1,664 bytes = exactly
-**52 records** with no remainder, confirmed identical across all three instances.
+**Size verification (SAMPLE-VERIFIED, build `263bd994`):** the VFS holds **60** `regiontable*.bin`
+files (one per area). The area-1 instance was re-decoded this pass: 1 664 bytes = exactly
+**52 records** (1 664 / 32 = 52.0). Record 1 reads `center_x = -1574.0`, `center_z = 2698.0` (both
+inside the area-1 bounding box from `mapsetting.scr`) with `sub_zone_name` decoding cleanly as a
+CP949 landmark name; record 0 is all-zero (the empty / second-sub-type case noted below). The
+area-1/2/3 instances are each 1 664 bytes (52 records), consistent across instances.
 
 #### Per-record layout (32 bytes = 0x20)
 
@@ -911,7 +990,8 @@ not yet decoded:
 
 ## Section 8 — `chatfilter` — ABSENT from this build
 
-> **Verification status: CONFIRMED absent (two-witness: loader + black-box).**
+> **Verification status: CONFIRMED absent (two-witness: loader + black-box; re-confirmed on build
+> `263bd994`, 2026-06-16 — a VFS scan returns zero entries matching `chatfilter`).**
 
 There is **no `chatfilter` asset format in this client build.** The only trace of a chat-filter
 feature is a single type-name string belonging to a class identifier in the binary's runtime
@@ -925,14 +1005,112 @@ set or a later client build), because the analysed build ships none.
 
 ---
 
+## Section 9 — `creature_item.xdb` — Creature-to-item binding table
+
+> **Verification status: sample_verified** (stride + record count, build `263bd994`);
+> **static-hypothesis** (field roles — head-only, single-pass; no loader traced). Newly covered in
+> the 2026-06-16 re-verification pass; previously undocumented.
+
+- **Extension:** `.xdb` (a fourth flat-array `.xdb` variant; distinguished by its VFS path)
+- **Found in:** VFS; logical path: `data/script/creature_item.xdb`
+- **Magic / signature:** None. No file-level header.
+- **Endianness:** Little-endian throughout.
+- **Version field:** None observed.
+
+**Role (HYPOTHESIS):** binds a large creature/object id to an item reference plus a 3D extent
+(a capture/pickup bounding volume or per-creature drop region). The role is inferred from the field
+shapes only and is not loader-confirmed.
+
+### File layout
+
+Flat array of fixed 48-byte records. No header. Record count = `file_size / 48`. The file size must
+be an exact multiple of 48; any remainder is an error.
+
+**Size verification (SAMPLE-VERIFIED):** the VFS instance is **44 208 bytes = exactly 921 records**
+(44 208 / 48 = 921.0).
+
+#### Per-record layout (48 bytes — head-only, single-pass)
+
+| Offset | Size | Type   | Field        | Notes                                                              | Confidence |
+|-------:|-----:|--------|--------------|--------------------------------------------------------------------|------------|
+| 0      | 4    | u32LE  | creature_id  | Large non-sequential creature/object id (the lookup key)           | sample-verified (shape) |
+| 4      | 4    | u32LE  | item_ref     | Item / reference id (small values observed)                        | static-hypothesis |
+| 8      | 4    | f32LE  | extent_a     | First of a set of f32 extent values; same across head records      | static-hypothesis |
+| 12     | 4    | f32LE  | extent_b     | f32 extent                                                          | static-hypothesis |
+| 16     | 4    | f32LE  | extent_c     | f32 extent                                                          | static-hypothesis |
+| 20     | 4    | f32LE  | extent_d     | f32 extent                                                          | static-hypothesis |
+| 24     | 4    | f32LE  | extent_e     | f32 extent (repeats `extent_a` in head records)                    | static-hypothesis |
+| 28     | 4    | f32LE  | extent_f     | f32 extent (repeats `extent_b` in head records)                    | static-hypothesis |
+| 32     | 4    | f32LE  | extent_g     | f32 extent (a height/scale-like value)                             | static-hypothesis |
+| 36     | 4    | u32LE  | field9       | Zero in head records (flag / padding)                              | static-hypothesis |
+| 40     | 4    | u32LE  | field10      | Small packed value (a u32 reading ~256, or a u16 pair)             | static-hypothesis |
+| 44     | 4    | u32LE  | field11      | Small value (~100; count / tier candidate)                         | static-hypothesis |
+
+**Notes:**
+- Across the inspected head records, the seven f32 fields (+8…+32) are constant while only
+  `creature_id` (+0), `item_ref` (+4), and the two trailing small fields (+40, +44) vary — i.e. the
+  per-record identity is `(creature_id, item_ref)` and the f32 block is a shared geometric template.
+- Field roles are head-only inferences with no loader trace; treat the whole record beyond the
+  stride/count as **static-hypothesis**. The first u32 (`creature_id`) keys the table per the
+  cross-variant rule in §1.5.
+
+---
+
+## Section 10 — `vehicle.xdb` — Vehicle registry table
+
+> **Verification status: sample_verified** (stride + record count, build `263bd994`);
+> **static-hypothesis** (field roles — head-only, single-pass; no loader traced). Newly covered in
+> the 2026-06-16 re-verification pass; previously undocumented.
+
+- **Extension:** `.xdb` (a fifth flat-array `.xdb` variant; distinguished by its VFS path)
+- **Found in:** VFS; logical path: `data/script/vehicle.xdb`
+- **Magic / signature:** None. No file-level header.
+- **Endianness:** Little-endian throughout.
+- **Version field:** None observed.
+
+**Role (HYPOTHESIS):** a registry of ride / mount / vehicle entries, each binding a sequential
+vehicle id to a resource id, followed by a per-file constant stamp and a large reserved tail.
+Inferred from field shapes only; not loader-confirmed.
+
+### File layout
+
+Flat array of fixed 52-byte records. No header. Record count = `file_size / 52`. The file size must
+be an exact multiple of 52; any remainder is an error.
+
+**Size verification (SAMPLE-VERIFIED):** the VFS instance is **3 016 bytes = exactly 58 records**
+(3 016 / 52 = 58.0).
+
+#### Per-record layout (52 bytes — head-only, single-pass)
+
+| Offset | Size | Type    | Field        | Notes                                                              | Confidence |
+|-------:|-----:|---------|--------------|--------------------------------------------------------------------|------------|
+| 0      | 4    | u32LE   | vehicle_id   | Sequential vehicle id (1, 2, …; the lookup key)                    | sample-verified (shape) |
+| 4      | 4    | u32LE   | resource_id  | Resource / type id; increments by 1 in step with `vehicle_id`      | sample-verified (shape) |
+| 8      | 8    | u8[8]   | const_stamp  | **Byte-for-byte identical across all sampled records** — a file-level constant (hash / version stamp), not per-record data | sample-verified (constant) |
+| 16     | 36   | u8[36]  | reserved     | All zero in the sampled records; role unknown                      | static-hypothesis |
+
+**Notes:**
+- The 8-byte block at +8 is **constant across every inspected record**, so it is best read as a
+  per-file stamp baked into each record rather than meaningful per-record data; a parser should not
+  interpret it as `vehicle_id`-varying content.
+- `vehicle_id` and `resource_id` both increment by 1 across the head records (a dense, sequentially
+  allocated table).
+- Beyond the stride/count and the constant stamp, the field roles are head-only inferences with no
+  loader trace; grade them **static-hypothesis**. The first u32 (`vehicle_id`) keys the table per
+  the cross-variant rule in §1.5.
+
+---
+
 ## Cross-format summary
 
 | Format          | Header          | Stride | Count source          | Text encoding | Loader confirmed |
 |-----------------|-----------------|--------|-----------------------|---------------|---------------|
-| `actor_size.xdb` | none           | 12 B   | `file_size / 12`      | none          | stride only   |
-| `buff_icon_position.xdb` | none  | 12 B   | `file_size / 12`      | none          | YES (loader + stride) |
-| `effectscale.xdb` | none          | 8 B    | `file_size / 8`       | none          | stride only   |
-| `mobinfo.mi`    | 4-byte u32 count | 28 B  | stored `count` field  | none (refs only) | NO        |
+| `actor_size.xdb` | none           | 12 B   | `file_size / 12` = 15 records | none      | stride only   |
+| `buff_icon_position.xdb` | none  | 12 B   | `file_size / 12` = 134 records | none     | YES (loader + stride) |
+| `effectscale.xdb` | none          | 8 B    | `file_size / 8` = 2 records | none        | stride only   |
+| `creature_item.xdb` | none        | 48 B   | `file_size / 48` = 921 records | none (numeric) | NO (head-only; sample-verified stride) |
+| `vehicle.xdb`   | none            | 52 B   | `file_size / 52` = 58 records | none (numeric) | NO (head-only; sample-verified stride) |
+| `mobinfo.mi`    | 4-byte u32 count | 28 B  | stored `count` field (= 21) | none (refs only) | NO        |
 | `.tol`          | 16-byte header  | 1 B/tile | `width × height`    | none          | NO            |
 | `descript.ion`  | none            | variable | until EOF (CRLF delimited) | ASCII  | NO            |
 | `discript.sc`   | none            | 68 B   | `file_size / 68`      | CP949 (display_name) | YES (context-menu label loader + stride) |
@@ -943,9 +1121,15 @@ set or a later client build), because the analysed build ships none.
 ## Known unknowns (cross-format)
 
 - Whether any `.xdb` variant can vary in stride across game patches.
+- **`mobinfo.mi` `field6` (offset +24, was `portrait_res_3`)** — sampled values (99, 103,
+  0xFFFFFFFF) are inconsistent with the "large portrait resource ID" model; role UNRESOLVED, OPEN
+  (§2).
 - Whether `mobinfo.mi` files covering mob class IDs outside the range 101 – 121 exist.
-- The semantics of `descript.ion` `field1` / `field2` — pak offset vs checksum vs size.
-- Whether `descript.ion` can have multiple records; only a single-record sample was examined.
+- The full field semantics of `creature_item.xdb` (§9) and `vehicle.xdb` (§10) — stride and count
+  are sample-verified, but the per-record field roles are head-only inferences with no loader trace.
+- The semantics of `descript.ion` `field1` / `field2` — pak offset vs checksum vs size (the sampled
+  record reads `field1 < field2`, both ~30–32 MB).
+- Whether `descript.ion` can have multiple records; the only VFS instance is a single 29-byte record.
 - The world-origin sub-tile scale factor (256) in `.tol` files is inferred, not confirmed from
   the engine's internal constants.
 - The `reserved` 27-byte region in `discript.sc` records.

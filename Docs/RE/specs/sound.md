@@ -1,12 +1,28 @@
 ---
 status: confirmed
-sample_verified: partial   # VFS census SAMPLE-VERIFIED; runtime logic CODE-CONFIRMED from binary
+verification: confirmed     # device-init, curve, ambient driver, worker opcodes, table loader = control-flow-confirmed; SOUND_KIND integer values + option-store index decode + per-widget click cue = capture/debugger-pending
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida]
+conflicts: resolved         # C1 coop-level NORMAL not PRIORITY; C2 primary caps 0x11 not 0x10011; C3 five tables loaded (3 read / 2 dead) not three; C4 per-area soundtable path; C5 ambient EFF = kind 6 via a separate helper
+sample_verified: partial   # VFS census SAMPLE-VERIFIED; runtime logic CODE-CONFIRMED from binary control-flow
 subsystems: [sound_runtime, audio_device, ambient_driver, sfx_router, worker_thread, volume_buses]
 networked: false            # sound is purely client-side; no sound opcodes on the wire
 encoding_note: audio file IDs are plain decimal integers; no text encoding concerns
 ---
 
 # Sound subsystem (runtime audio engine)
+
+> **Verification banner (re-verified 2026-06-16, ida_anchor 263bd994, evidence [static-ida]).**
+> The audio architecture, device-init constants, the volume curve, the ambient mud-tile driver, the
+> worker-thread opcode set, the per-area table loader, and the actor-event SFX router are all
+> **control-flow-confirmed** from the binary's control flow + operands (static IDA, no debugger this
+> lane). What remains **capture/debugger-pending**: the `SOUND_KIND` name→integer mapping, the
+> option-store index decode, the per-front-end-widget click cues, and the `GSoundOGG` object byte
+> size (carried, not re-measured). **Conflicts resolved this pass:** the cooperative level is
+> `DSSCL_NORMAL`, not `DSSCL_PRIORITY` (§1); the primary buffer caps are `0x11`, not `0x10011`
+> (§1); **five** tables are loaded into RAM (three read, two dead), not three (§6); the per-area
+> table path and the ambient 3D-point kind (6) are now stated explicitly (§6).
 
 > **Clean-room specification.** Neutral description only — no decompiler identifiers, no binary
 > virtual addresses, no pseudo-code. Promoted from dirty-room analyst notes under EU Software
@@ -32,11 +48,15 @@ encoding_note: audio file IDs are plain decimal integers; no text encoding conce
 | Audio API (DirectSound only, no third-party middleware) | CODE-CONFIRMED |
 | Codec (statically linked Ogg Vorbis 1.3.2; all clips `.ogg`) | CODE-CONFIRMED |
 | Class family (`SoundManager`, `GSound`, `GSoundOGG`, `GSoundThread`) | CODE-CONFIRMED (RTTI + log strings) |
-| Device init: PRIORITY coop level, 3D listener, five WAVEFORMATEX templates | CODE-CONFIRMED |
+| Device init: **NORMAL** coop level (corrected from PRIORITY), 3D listener, five WAVEFORMATEX templates | CODE-CONFIRMED |
+| Primary-buffer caps **0x11** (PRIMARYBUFFER \| CTRL3D — corrected from 0x10011; no CTRLVOLUME) | CODE-CONFIRMED |
 | Codec rule: 3D MUST be mono, 2D MUST be stereo | CODE-CONFIRMED |
 | 512 KiB scratch / 1 MiB streaming ring; 3D over-size reject | CODE-CONFIRMED |
 | Volume curve: −10000 at X=0, nested-log form ×3000+0.5 otherwise | CODE-CONFIRMED (exact expression) |
+| Per-area table loader reads **FIVE** files (`.wlk .run .bgm .bge .eff`, `data/map<area>/soundtable<area>.<ext>`, 0x3000 each); 3 read at runtime, 2 (`.wlk`/`.run`) dead | CODE-CONFIRMED |
 | Ambient driver: 600 000 ms cadence, hour/3600, ×0.7 volume, indoor id 863500002 | CODE-CONFIRMED |
+| Ambient 3D-point (`.eff`) play uses **kind 6** via a separate play helper (not the SFX router) | CODE-CONFIRMED |
+| Deferred/scheduled actor-event SFX dispatcher (time-gated list feeding the router) | CODE-CONFIRMED |
 | Footstep id source: actor-visual fields (+108 walk, +112 run), NOT mud cells | CODE-CONFIRMED |
 | Async worker: 9 opcodes, >200 ms tick interval, 100 ms sleep | CODE-CONFIRMED |
 | Four volume buses (music / terrain+ambient / char / mob); value/100 linear | CODE-CONFIRMED |
@@ -90,30 +110,47 @@ create factory and the worker thread early-out, silencing all audio at negligibl
 On startup `SoundManager::initialize` calls the DirectSound device-init routine, which performs:
 
 1. `DirectSoundCreate(NULL, &device, NULL)` — creates the default DirectSound device.
-2. `device.SetCooperativeLevel(hwnd, DSSCL_PRIORITY)` — **PRIORITY cooperative level** (required
-   for primary buffer manipulation).
-3. `CreateSoundBuffer` for a **primary buffer** with capability flags `0x10011`:
-   `DSBCAPS_PRIMARYBUFFER` | `DSBCAPS_CTRL3D` | `DSBCAPS_CTRLVOLUME`.
+2. `device.SetCooperativeLevel(hwnd, DSSCL_NORMAL)` — **NORMAL cooperative level** (the cooperative-
+   level argument is the constant **1 = DSSCL_NORMAL**). The legacy client does **not** request the
+   PRIORITY or EXCLUSIVE mode; it does not take priority/exclusive control of the primary buffer.
+   *(Corrected: an earlier pass read this as `DSSCL_PRIORITY`. The on-wire argument is `1`, which is
+   `DSSCL_NORMAL`. A port must use NORMAL cooperative mode to match behaviour — do not request
+   priority/exclusive.)*
+3. `CreateSoundBuffer` for a **primary buffer** with capability flags `0x11`:
+   `DSBCAPS_PRIMARYBUFFER` (0x01) | `DSBCAPS_CTRL3D` (0x10). **No `DSBCAPS_CTRLVOLUME` on the primary
+   buffer.** *(Corrected: an earlier pass read `0x10011` including CTRLVOLUME. The primary-buffer
+   descriptor's flag word is `0x11`. Volume control is carried on the **secondary** buffers — their
+   descriptor sets the 0x80 `DSBCAPS_CTRLVOLUME` bit — not on the primary, so all `SetVolume` calls
+   target secondary buffers.)* The descriptor `dwSize` is 36.
 4. `QueryInterface(IID_IDirectSound3DListener)` on the primary buffer → stored as the global 3D
    listener. The listener interface is acquired here at init, not lazily.
 
-If any step fails the device is shut down and initialisation returns failure.
+If any step fails the device is torn down (the audio-enabled byte is cleared and the engine
+continues silently) and initialisation returns failure.
 
 ### 1.1 Five WAVEFORMATEX templates
 
 Five PCM `WAVEFORMATEX` descriptors are pre-built once at init and kept as globals. They are
-selected at sound-create time by channel count and sample rate:
+selected at sound-create time by channel count and sample rate. All are `wFormatTag = 1` (PCM),
+16-bit:
 
-| Role | Channels | Sample rate | Bit depth | Block align | Notes |
-|---|---:|---:|---:|---:|---|
-| 3D mono 22.05 kHz | 1 | 22050 | 16 | 2 | **3D default** |
-| 3D mono 44.1 kHz  | 1 | 44100 | 16 | 2 | 3D alternate |
-| 2D stereo 22.05 kHz | 2 | 22050 | 16 | 4 | **2D default** |
-| 2D stereo 44.1 kHz | 2 | 44100 | 16 | 4 | 2D alternate (also used for primary buffer) |
-| 2D stereo 44.1 kHz | 2 | 44100 | 16 | 4 | (duplicate; primary-buffer variant) |
+| # | Role | Channels | Sample rate | Avg bytes/s | Block align | cbSize | Notes |
+|---:|---|---:|---:|---:|---:|---:|---|
+| 1 | 3D mono 44.1 kHz | 1 | 44100 | 88200 | 2 | 18 | 3D alternate |
+| 2 | 3D mono 22.05 kHz | 1 | 22050 | 44100 | 2 | 18 | **3D default** |
+| 3 | stereo 44.1 kHz | 2 | 44100 | 176400 | 4 | **0** | primary-buffer variant (cbSize 0) |
+| 4 | 2D stereo 22.05 kHz | 2 | 22050 | 88200 | 4 | 18 | 2D alternate |
+| 5 | 2D stereo 44.1 kHz | 2 | 44100 | 176400 | 4 | 18 | **2D default** |
+
+The two stereo-44.1 kHz descriptors (#3 and #5) are otherwise identical and differ only by `cbSize`
+(0 vs 18): #3 is the primary-buffer variant, #5 the 2D-secondary default.
 
 Two `DSBUFFERDESC` templates wrap the appropriate `WAVEFORMATEX` — one for 2D secondary buffers,
-one for 3D secondary buffers.
+one for 3D secondary buffers. The 2D secondary descriptor's `dwFlags` carries `DSBCAPS_CTRLVOLUME`
+(0x80) (plus a global-focus bit); the 3D secondary descriptor's `dwFlags` carries the 3D-control,
+frequency-control, and deferred-localisation bits. Both descriptors have `dwSize = 36`. (The exact
+constant decode of the secondary-descriptor flag words beyond CTRLVOLUME is a static hypothesis; the
+load-bearing facts are that the **primary** has no CTRLVOLUME and the **2D secondary** does.)
 
 ### 1.2 Hard codec rule (CODE-CONFIRMED)
 
@@ -309,11 +346,42 @@ The driver reads the local player's world XYZ, updates the DirectSound 3D listen
 index into the sound tables are at cell offsets **+2**, **+3**, **+4**, **+5**, **+6**, and **+7**
 (see `formats/sound_tables.md` for the per-extension mapping).
 
-### 6.3 Three in-memory sound tables
+### 6.3 The per-area table loader — FIVE tables loaded, THREE read (CODE-CONFIRMED)
 
-The ambient driver maintains three runtime arrays in memory (one per sound table family), each
-holding the deserialized contents of the corresponding on-disk table. Each array uses a **48-byte
-stride** per entry (matching the on-disk record size from `formats/sound_tables.md`). The entry
+When the map/area is set, a per-area loader opens and reads the per-area sound-schedule files into
+**five** distinct in-memory globals, in this exact order, **0x3000 (12288) bytes each** (= 256
+entries × 48-byte stride):
+
+| Order | Path | Extension | Read at runtime? |
+|---:|---|---|---|
+| 1 | `data/map<area>/soundtable<area>.wlk` | `.wlk` (walk footsteps) | **No — dead** |
+| 2 | `data/map<area>/soundtable<area>.run` | `.run` (run footsteps) | **No — dead** |
+| 3 | `data/map<area>/soundtable<area>.bgm` | `.bgm` (background music) | Yes |
+| 4 | `data/map<area>/soundtable<area>.bge` | `.bge` (looped ambient) | Yes |
+| 5 | `data/map<area>/soundtable<area>.eff` | `.eff` (3D point sources) | Yes |
+
+The `<area>` placeholder is the map/area id string; the path is built per area, so the BGM/BGE/EFF
+schedule lives under each area's own `data/map<area>/` directory. (The map000 "global terrain" zone
+used by the login/title front-end, §15.2, is a front-end-zone special case, not the general rule.)
+
+Two important consequences:
+
+- **The `.wlk` and `.run` tables are loaded into RAM but never read by any runtime path.** This is
+  why every `.wlk`/`.run` table sampled in the VFS is all-null, and why footsteps come from the
+  actor-visual fields (§8.5) rather than from these tables at runtime. The ambient driver reads only
+  the `.bgm`/`.bge`/`.eff` globals (mud-tile bytes +2 / +3,+4 / +5,+6,+7).
+- The on-disk file is 13312 bytes; the loader reads only the first 0x3000 = 256×48 bytes — the
+  trailing 1024 bytes are never read (the on-disk file layout is a `formats/sound_tables.md`
+  concern).
+
+There is a **separate, editor-only** table loader (the `SoundTester::loadTerrainSound` variant) that
+keys on a `<map><cell><cell>` triple and touches only the three `.bgm`/`.bge`/`.eff` tables. It has
+**no callers** in the shipped client and must not be confused with the live per-area loader above.
+
+### 6.3.1 In-memory entry layout (the three READ tables)
+
+For the three read tables, the ambient driver treats each runtime array as a sequence of **48-byte
+stride** entries (matching the on-disk record size from `formats/sound_tables.md`). The entry
 fields read at runtime are:
 
 - `sound_entry_id` at entry+0x00 (u32): the audio resource ID to play.
@@ -370,7 +438,8 @@ byte for the new entry.
 
 ### 6.8 3D point source slot change (`.eff`)
 
-When any of the three 3D-point slots changes (mud+0x05–+0x07), `playEffPoint` is called:
+When any of the three 3D-point slots changes (mud+0x05–+0x07), the ambient 3D-point play helper is
+called:
 
 - The 3D play position is **(entry.pos_x, playerY, entry.pos_z)** — X and Z come from the table
   entry, Y is taken from the player's current world Y. This anchors the point sound to the
@@ -379,6 +448,12 @@ When any of the three 3D-point slots changes (mud+0x05–+0x07), `playEffPoint` 
 - The clip is played **looped** with a min-distance sourced from the table entry.
 - The terrain/ambient bus gain (`this+0x78`) is applied.
 - Hour-gated by the entry's 24-byte hour schedule.
+- **The play kind used here is `6` (CODE-CONFIRMED).** Crucially, this ambient 3D-point path runs
+  through a **dedicated ambient play helper**, *not* through the actor-event SFX router of §8. The
+  router (§8.4) treats `kind 6` as "rejected (any other value)" — but that exclusion is only for the
+  router's own dispatch. The ambient path is a different function, so there is **no contradiction**:
+  `kind 6` *is* used at runtime, by the ambient EFF helper alone. The actor-event router never emits
+  or accepts `kind 6`.
 
 ---
 
@@ -470,9 +545,16 @@ The `kind` argument is the integer `SOUND_KIND` value (§9). The router dispatch
 
 | Kind values | Pool | Concurrent cap | Notes |
 |---|---|---:|---|
-| **5, 10, 11** | Directional / voice 3D pool | ~3 | Character voice, skill sounds, NPC audio |
+| **5, 10, 11** | Directional / voice 3D pool | ~3 | Character voice, skill sounds, NPC audio (the `>3` concurrent check drops the new sound) |
 | **7, 8, 9** | Footstep pool | pool-sized | Walk and run footsteps |
-| Any other value | Rejected | — | Not routed; no sound created |
+| Any other value (incl. 0..4 and 6) | Rejected | — | Not routed by **this** function; no sound created |
+
+The dispatch is a range ladder: kind 5 takes the directional branch; kinds in `[7,9]` take the
+footstep pool (with the `>3`-concurrent drop); kinds 10 and 11 also take the directional pool; every
+other value (0..4, 6, and >11) falls through to a no-op return. **Note `kind 6` specifically:** it is
+rejected *here* only because the ambient 3D-point sounds reach the engine through a different,
+ambient-only play helper (see §6.8), not through this router. Do not infer that `kind 6` is unused —
+it is used, just not by this function.
 
 Sounds are instantiated via `createSound(sound_id, 3, "data/sound/3d/")`, then positioned
 (`setPosition`, `setMinDistance`), volume-set, and played via `GSound::play`.
@@ -504,6 +586,31 @@ The source of the values at visual+108 and visual+112 (which config file or wire
 these fields) is outside the scope of this spec — it belongs to the struct/asset cartographers
 responsible for the actor-visual layout.
 
+### 8.6 Deferred / scheduled actor-event SFX dispatcher (CODE-CONFIRMED)
+
+The synchronous router (§8.1) is fed not only by direct calls but also by a **time-gated scheduler**
+— a deferred-SFX dispatcher that runs each tick and emits queued actor-event sounds when their fire
+time arrives. This is the mechanism behind the router's 5th argument (the "block"/deferred flag): a
+caller that wants a sound to fire later (e.g. an animation- or effect-synchronised cue) enqueues it
+rather than playing it immediately.
+
+The dispatcher maintains a list of pending entries; each entry carries:
+
+- a **fire time** (a millisecond timestamp),
+- a **kind** byte (the `SOUND_KIND`, §9),
+- a **sound id**, and
+- an **actor composite key** identifying the actor the sound belongs to.
+
+Each tick the dispatcher walks the list; for every entry whose fire time has been reached
+(`current_ms >= entry.fire_time`), it resolves the actor from the composite key (via a cached actor
+lookup) and calls the synchronous router (§8.1) with the entry's kind / id / actor. Entries whose
+actor can no longer be resolved are dropped. Once fired, the entry is removed from the list.
+
+This means a faithful port needs **two** actor-SFX paths: an immediate path (the router called
+directly) and a scheduled path (enqueue now, fire when the timestamp elapses, then route exactly as
+the immediate path would). The scheduled path shares the same distance cull, bus selection, and kind
+dispatch as §8.2–§8.4 — it differs only in *when* the router is invoked.
+
 ---
 
 ## 9. SOUND_KIND enumeration (names CODE-CONFIRMED; values UNVERIFIED)
@@ -528,9 +635,13 @@ was not fully traced. The names themselves are the developers' own labels.
 | `SOUND_SYSTEM2D` | — | System 2D sounds |
 | `SOUND_BG` | — | 2D background |
 
-The router's confirmed play-kind integers are **5, 7, 8, 9, 10, 11**. The mapping of name to
-integer must be confirmed by tracing the editor-tool enum loader before any implementation
-hard-codes a specific integer for a named kind.
+The **actor-event SFX router** (§8) is confirmed to dispatch the play-kind integers **5, 7, 8, 9,
+10, 11**. Separately, the **ambient 3D-point path** (§6.8) is confirmed to use **kind 6** through its
+own play helper (the router rejects 6, but the ambient helper is a different function). So the full
+set of runtime-used kind integers is **5, 6, 7, 8, 9, 10, 11** — but kind 6 reaches the engine only
+via the ambient driver, never via the router. The mapping of name to integer must still be confirmed
+by tracing the editor-tool enum loader before any implementation hard-codes a specific integer for a
+named kind (capture/debugger-pending).
 
 ---
 
@@ -705,6 +816,8 @@ resolved by the dirty-room sound-system lane and are recorded here for cross-ref
 | §known-unknown 2: weight +0x1C semantic | CONFIRMED unused at runtime (no traced consumer) |
 | §known-unknown 1: unknown_36 at +0x24 | CONFIRMED unused at runtime (no traced consumer) |
 | `sound_tables.md` sound ID path (`data/sound/3d/` unconditional) | CORRECTED: `.bgm` IDs resolve via `data/sound/2d/`; `.eff` IDs via `data/sound/3d/`; the 2D branch was present but untraced in the earlier spec pass |
+| Per-area table file path / count | CONFIRMED (runtime): the live loader reads **five** files `data/map<area>/soundtable<area>.{wlk,run,bgm,bge,eff}`, 0x3000 bytes each, in that order; the `.wlk`/`.run` tables are loaded into RAM but never read at runtime (§6.3) |
+| Which loader is the shipped one | CONFIRMED: the per-area loader (called from the map-set/area-load path) is the runtime loader; the `<map><cell><cell>`-keyed `SoundTester::loadTerrainSound` variant has no callers and is editor-only |
 
 ---
 

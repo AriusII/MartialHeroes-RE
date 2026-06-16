@@ -1,9 +1,14 @@
 ---
-status: hypothesis
+status: confirmed-routing-capture-pending-semantics
 sample_verified: false
 build: 263bd994   # static-recovered on doida.exe build 263bd994 (Campaign 7 Wave B)
 subsystems: [receive_dispatch, handler_table_install, netclient_lifecycle, connection_state, pipeline_placement]
 networked: yes
+verification: confirmed (routing opcode->handler, frame-header layout, packet read sizes, struct field offsets, table bases, install counts, pipeline-stage placement are all control-flow-confirmed) · static-hypothesis (the blanket "every installed handler opens with a bounded read") · capture/debugger-pending (every packet field VALUE SEMANTICS, the connection-state code meanings 201/202/203/232, the keepalive on-wire cadence, the inbound-cipher-omission generalised across all inbound types)
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida]
+conflicts: RESOLVED this pass — (a) major-0 is a hardwired (0,0) handshake branch, NOT an inline switch (doc reworded); (b) Response install count refined ~98 -> ~99 (101 stores - 2 zero-clears); (c) keepalive duality recorded — the ctor-armed (2,10000)@20s frame AND the runtime C2S 2/112 toggle are BOTH real, neither's on-wire cadence pinned (capture-pending)
 ---
 
 # Network Dispatch & Connection Lifecycle — Clean-Room Specification
@@ -38,19 +43,29 @@ networked: yes
 
 ## Status header — confidence and build delta
 
+- **Re-verified 2026-06-16, anchor `263bd994`, evidence `[static-ida]`.** The dispatch architecture
+  was re-confronted against the live IDB on the current build this pass. Routing (opcode→handler),
+  the frame-header layout, packet read sizes/offsets, the two table bases, the install counts, and
+  the pipeline-stage placement are all **control-flow-confirmed**. What a wire byte *means* (field
+  value semantics) is NOT — it stays capture/debugger-pending.
 - **Build delta.** Every fact below is **static-recovered on build `263bd994`** (Campaign 7,
   Wave B). Earlier campaign notes targeted a different build and are treated as stale; the
   structures here were re-located by behavioural signal on the current build. Facts that are solid
   structural reads on this build are tagged **`verified on build 263bd994`**.
 - **No live capture this pass.** No network capture (`.pcapng`/`.tsv`) was decoded for the
-  dispatch architecture. The routing/lifecycle structure is a static read; wire-byte confirmation
-  is deferred. `sample_verified: false`.
+  dispatch architecture. The routing/lifecycle structure is a static read; **wire-byte VALUE
+  confirmation is deferred**. `sample_verified: false`.
+- **Tier rule (honest scoping).** ROUTING (which `(major, minor)` reaches which handler), packet
+  **sizes**, and field **offsets** are `[confirmed]` from control flow. Packet field **VALUE
+  semantics** (what a given byte *means*) are `[capture/debugger-pending]` — this campaign has no
+  wire. The spec deliberately does not over-claim the meaning of any wire value.
 - **Connection-state code meanings are UNVERIFIED beyond the bare numeric codes.** The codes
   themselves (`201 / 202 / 203 / 232`, plus the timed-event tag `10001`) are recovered facts; the
   precise game-state semantics attached to each code are inferred and tagged `UNVERIFIED`.
-- **Confidence tags used below:** `STRUCTURE-HIGH` (the routine's shape / counts / control
-  surface are unambiguous on this build) · `LIKELY` (one consistent read, plausible role) ·
-  `UNVERIFIED` (inferred meaning, not pinned — needs a capture or a debugger trace).
+- **Confidence tags used below:** `STRUCTURE-HIGH` / `[confirmed]` (the routine's shape / counts /
+  control surface are unambiguous on this build) · `LIKELY` / `[static-hypothesis]` (one consistent
+  read, plausible role) · `UNVERIFIED` / `[capture/debugger-pending]` (inferred meaning or wire
+  value, not pinned — needs a capture or a debugger trace).
 
 ---
 
@@ -67,7 +82,18 @@ header. The header layout (total size, major, minor) is owned by `opcodes.md`, "
 header" — this spec does not re-derive it. In header-relative terms the dispatcher takes the
 **major** from header offset `+4` and the **minor** from header offset `+6`, matching the
 `opcodes.md` header table exactly. A full message opcode is the `(major, minor)` pair, written on
-the wire as `[u16 major][u16 minor]` and reasoned about as `(major << 16) | minor`.
+the wire as `[u16 major][u16 minor]` and reasoned about as `(major << 16) | minor`. *([confirmed]:
+the dispatcher reads major as the u16 at `+4` and minor as the u16 at `+6`.)*
+
+**Frame header total = 8 bytes: `[u32 size @+0][u16 major @+4][u16 minor @+6]`. *([confirmed]* —
+this resolves the long-standing u16-vs-u32 size question: the size is a **u32 at offset +0**, not a
+u16.)** This is independently witnessed at three sites that all key the header-only/payload split on
+the **u32 at `+0`**: the inbound decompress stage (§6.2), the outbound compress stage, and the
+outbound cipher gate (§6.1) each compare `size == 8` (the u32 at `+0`) to decide the bypass, and
+each treats the payload as the bytes from `+8` over `size − 8`. The total header is therefore
+`4 + 2 + 2 = 8`. *(In-process detail only: when the codec stages rebuild a frame they copy just the
+major+minor words; the new buffer's size word is set from the appended payload length, not copied
+from the source — no wire effect.)*
 
 ### 1.2 Decompress-then-route
 
@@ -83,23 +109,101 @@ low and character-management families, and **table-driven** lookups for the two 
 families. This agrees with the dispatch model summarised in `handlers.md` §1 — that section owns
 the per-opcode list; the structure is repeated here only to anchor the installer/lifecycle facts.
 
+The dispatcher's top-level shape is **decompress-first → `if (major != 0) switch(major)` →
+else the `(0,0)` handshake branch**, always ending with a free of the working buffer. *([confirmed].)*
+
 | Major family | Routing style | Notes (cross-ref `handlers.md` §1) |
 |---|---|---|
-| `0` (KeyExchange) | inline switch | small fixed set of minors wired |
-| `1` (ServerCommand) | inline switch | only a fixed set of inbound minors is wired |
-| `3` (CharacterMgmt) | inline switch | a fully enumerated set of minors (no hidden minors) |
-| `4` (Response) | **table-driven** | fixed 154-slot table; unset slots are inert no-ops |
+| `0` (KeyExchange) | **hardwired `(0,0)` branch — NOT a switch** | the single `major==0 && minor==0` pair is handled in the else-branch of the `major != 0` test; no per-minor switch exists for major-0 (see §5) |
+| `1` (Server/Billing) | inline switch on minor | only a fixed set of inbound minors is wired (see §1.3a) |
+| `3` (CharacterMgmt) | inline if/else cascade (compiler-lowered switch) | a fully enumerated set of minors (no hidden minors) (see §1.3b) |
+| `4` (Response) | **table-driven** | fixed 154-slot table; unset slots are inert no-ops; `4/500` and `4/50000` routed outside the table |
 | `5` (Push) | **table-driven** | fixed 154-slot table; unset slots are inert no-ops |
 
+- **Major-0 is a hardwired `(0,0)` handshake, not a routing family.** *([confirmed].)* There is no
+  inline switch over major-0 minors. Only the exact pair `(0,0)` is handled — and that single
+  branch does more than route: it *parses the inbound key-exchange blob and sends the `1/4`
+  credential reply*. It is documented in full in §1.4. (Earlier prose called major-0 "an inline
+  switch with a small fixed set of minors"; that overstated it and has been corrected.)
 - The **major-4 (Response)** and **major-5 (Push)** families are each dispatched through a
-  **fixed-bound handler table of 154 slots**. A minor below the bound that was never installed
-  resolves to an **inert no-op handler** (a slot pre-filled to do nothing — not a crash); a minor
+  **fixed-bound handler table of 154 slots** (`0x9A`). *([confirmed]:* major-4 takes the table path
+  when `minor < 154`, major-5 likewise; the two tables are physically adjacent inside the handler
+  object — see §2). A minor below the bound that was never installed resolves to an **inert no-op
+  handler** (a slot pre-filled to a routine that simply returns success — not a crash); a minor
   **at or above 154 is out of range and is not dispatched at all**. This caps the legal minor
   space per family at `0..153`. The per-handler enumeration of which slots are installed, and the
   recovered install counts, live in `handlers.md` §1 — see §2 below for the installer machinery
   that fills these tables.
-- Two major-4 minors are routed **outside** the table by special-case branches (one shows a popup,
-  one discards a text payload), per `handlers.md` §1; the machinery here is the table path.
+- Two major-4 minors are routed **outside** the table by special-case branches — `4/500` (shows a
+  popup by code) and `4/50000` (discards a text payload) — per `handlers.md` §1; the machinery here
+  is the table path. *([confirmed]* routing; popup/discard roles are the handler behaviours owned by
+  `handlers.md`.)
+
+### 1.3a Major-1 inline switch (Server / Billing, S2C)
+
+The major-1 family is a small inline switch; only four inbound minors are wired, all others fall
+through to a no-op. *([confirmed]* routing; what each notice *means* is `handlers.md` territory.)*
+
+| Minor (dec / hex) | Role (per `handlers.md`) |
+|---|---|
+| 16 / `0x10` | billing-deactivated notice |
+| 17 / `0x11` | billing-activated notice |
+| 19 / `0x13` | billing-expiry notice |
+| 20 / `0x14` | letter-received notice |
+
+### 1.3b Major-3 inline cascade (CharacterMgmt, S2C)
+
+The major-3 minor switch is compiler-lowered into a subtract-chain but is a **fully enumerated**
+set — there are no hidden minors. *([confirmed]* routing — this is the authoritative major-3 ladder;
+it agrees with `opcodes.md`/`handlers.md`. Field value semantics stay capture-pending.)
+
+| Minor | Routed handler (name per `handlers.md`) |
+|---|---|
+| 1 | `SmsgCharacterList` |
+| 4 | `SmsgSceneEntityUpdate` |
+| 5 | `SmsgEnterGameAck` (login-success ack) |
+| 6 | `SmsgRenameCharResult` |
+| 7 | `SmsgCharManageResult` |
+| 8 | `SmsgShopPageUpdate` |
+| 13 | `SmsgCharStatusUpdate` |
+| 14 | `SmsgCharSpawnResponse` |
+| 23 | major-3 minor-23 handler (behaviour TBD) |
+| 100 | `SmsgCharActionResult` (generic result codes) |
+| 50000 | `SmsgGmChatMessage` (high-minor GM channel) |
+
+> **Anchor alignment (load-bearing).** `3/4 = SmsgSceneEntityUpdate` and `3/7 = SmsgCharManageResult`
+> — *not* the reverse. Any neighbour doc that places `SceneEntityUpdate` at `3/14` or
+> `CharManageResult` at `3/4` is wrong. `3/14 = SmsgCharSpawnResponse` (16-byte read). The packet
+> sizes/offsets for these are owned by `handlers.md` / the `packets/*.yaml`.
+
+### 1.4 The `(0,0)` key-exchange handshake branch
+
+The `(0,0)` else-branch is **not** a routing stub — it is the **client's half of the secure
+handshake**. *([confirmed]* control flow; the *meaning* of each blob field is
+`[capture/debugger-pending]`.)* When the dispatcher sees `major == 0 && minor == 0` it, in order:
+
+1. **Parses the inbound S2C key-exchange blob.** The parser reads, from the packet body in order: a
+   **54-byte key blob** (imported as an RSA modulus/exponent), then **two trailing `u32` server
+   scalars**, and stamps a local time. On a parse failure it logs a "read packet version" style
+   diagnostic. So the **S2C `(0,0)` body read order is `[54-byte key blob][u32][u32]`**. *([confirmed]
+   read order / sizes; the field MEANINGS are `[capture/debugger-pending]`.)*
+2. **Builds and sends the C2S credential reply stamped opcode `(1, 4)`.** It constructs the secure
+   auth reply (an RSA-encrypted credential, then a per-`u32` whitening pass) and hands it to the send
+   convergence (§6.1). This is the structural link **dispatch `(0,0)` → emits the `1/4` login
+   credential** — the same `1/4` opcode the login-credential spec documents. *([confirmed]* routing /
+   send path; payload field semantics are `[capture/debugger-pending]`.)
+3. **Sets a "key-exchange complete" flag** on the network-client object.
+
+> **S2C `(0,0)` body — interoperability summary** (read order; sizes confirmed, semantics pending):
+>
+> | Field | Width | Note |
+> |---|---|---|
+> | RSA key blob | 54 bytes | imported as the RSA modulus/exponent for the credential encrypt |
+> | server scalar A | `u32` | trailing value 1 — meaning capture-pending |
+> | server scalar B | `u32` | trailing value 2 — meaning capture-pending |
+>
+> The whitening / RSA details of the outbound `1/4` reply are owned by `crypto.md` and the
+> login-credential packet spec; cited here, not re-derived.
 
 ---
 
@@ -111,18 +215,32 @@ that `handlers.md` enumerates. *(STRUCTURE-HIGH; build 263bd994.)*
 
 | Installer | Family | Recovered installed slots | Role |
 |---|---|---|---|
-| Response-family installer | major 4 | **~98 slots** | Wires each Response per-opcode handler into the client handler table at boot. |
-| Push-family installer | major 5 | **~65 slots** | Wires each Push per-opcode handler into the client handler table at boot. |
+| Response-family installer | major 4 | **~99 slots** | Wires each Response per-opcode handler into the client handler table at boot. |
+| Push-family installer | major 5 | **65 slots** | Wires each Push per-opcode handler into the client handler table at boot. |
 
-- The two install counts (**~98 Response / ~65 Push**) are the same counts reported in
-  `handlers.md` §1; they are reproduced here to characterise the installer routines, not to
-  re-enumerate the handlers. Every minor not installed by these two routines keeps the inert no-op
-  fill from §1.3.
+- The two install counts (**~99 Response / 65 Push**) are control-flow counts on this build.
+  *([confirmed].)* The Response figure is refined from the earlier `~98`: the installer issues 101
+  store instructions, of which **2 are zero-clears** (slots `0` and `27`) and **99 install handler
+  pointers** — and one of those handlers is written to **two adjacent slots** (`143` and `144`), so
+  the installer wires ~99 live Response handlers. The Push installer issues 66 stores (65 handler
+  installs + a final return). These are the same counts `handlers.md` §1 reports; they are
+  reproduced here to characterise the installer routines, not to re-enumerate the handlers. Every
+  minor not installed by these two routines keeps the inert no-op fill from §1.3.
+- **The two tables are physically adjacent** inside the handler object: the Response (major-4) table
+  begins at pointer-index `1246`, the Push (major-5) table at pointer-index `1400`, and
+  `1400 − 1246 = 154 = 0x9A` — i.e. the two 154-slot tables abut, Response then Push. *([confirmed].)*
+- **Single pre-fill loop.** In the handler-object constructor, **one 154-iteration loop pre-sets
+  *every* slot of *both* tables to the inert no-op handler** (a routine that simply returns success)
+  before either installer runs. The installers then overwrite only the live slots; any slot they do
+  not touch keeps the no-op. *([confirmed]* — this is the concrete mechanism behind §1.3's "unset
+  slots are inert no-ops".)
 - Each **installed handler** opens by reading from a **bounded receive buffer** — the handler's
   first act is a length-bounded read of its fixed payload prefix out of the inbound buffer. This
   "open with a bounded read" stereotype is what `handlers.md` records as each handler's
   *minimum fixed payload* / *fixed read* length; it is a structural property of the installed
-  handler, and the bound is what makes an over-short frame safe to dispatch.
+  handler, and the bound is what makes an over-short frame safe to dispatch. *([static-hypothesis]
+  as a blanket claim across all installed handlers; `handlers.md` owns the per-handler read sizes,
+  several of which are control-flow-confirmed there.)*
 - The installers run **once at network-client boot**, before any traffic is dispatched, so by the
   time the master dispatcher (§1) runs, both tables are fully populated.
 
@@ -139,6 +257,22 @@ A single network-event entry point receives dispatch events (the events the rece
 see §4.4) and the connection/scene state events (§5), and routes each to the matching handling
 path on the handler object. It is the convergence point between the worker-thread side (which only
 *posts* events) and the dispatch side (which *acts* on them).
+
+**The gate is a precise type+sub-code discriminator.** *([confirmed].)* The entry reads an
+**event-type byte at the event's offset `+0`** and, when that type is **`15`** (the network-event
+umbrella), reads a **sub-code word at `+4`**:
+
+| Event type @+0 | Sub-code @+4 | Routed to |
+|---|---|---|
+| `15` | `100` | the master receive dispatcher (§1) — a received packet to route |
+| `15` | `102` | the connection-state machine (§5) — a connection-state transition |
+| (anything else) | — | ignored (returns without action) |
+
+So **type `15` is the umbrella; sub-code `100` vs `102` discriminates packet-dispatch from
+connection-state**. This is distinct from the close-event *factory* tag also numbered `15` in §4.6
+(that tag identifies the disconnect event the teardown path *builds*; the `+0` type byte here is the
+*umbrella* under which the `100`/`102` sub-codes live). Field value semantics carried inside a
+dispatched packet remain `[capture/debugger-pending]`.
 
 ### 3.2 The handler object and its embedded sub-objects
 
@@ -214,13 +348,30 @@ So the worker thread never decodes packets itself — it is a pure producer that
 packet into a dispatch event and then releases the buffer; all decode/routing happens on the
 dispatcher side.
 
-### 4.5 Keepalive
+### 4.5 Keepalive — TWO distinct mechanisms
 
-The client arms a **periodic compressed keepalive**: a supplied keepalive packet is run once
-through the outbound compress stage (§6), the compressed buffer is stored in a client slot, the
-original buffer is released if a new one was produced, and a **periodic interval** is recorded
-(the recovered interval is `1000 ×` the routine's argument — i.e. a per-second-scaled period).
-Thereafter the pre-compressed keepalive frame is sent on that interval. *(LIKELY; build 263bd994.)*
+There are **two separate keepalive mechanisms**, both real; which one is actually sent on-wire (and
+at what cadence) is `[capture/debugger-pending]`. Record both.
+
+**(a) Ctor-armed compressed periodic frame.** *([confirmed]* it is armed; the period value is read
+from the routine).* The client arms a **periodic compressed keepalive**: a supplied keepalive
+packet is run once through the outbound compress stage (§6), the compressed buffer is stored in a
+client slot, the original buffer is released if a new one was produced, and a **periodic interval**
+is recorded (the recovered interval is `1000 ×` the routine's argument — i.e. a per-second-scaled
+period). Thereafter the pre-compressed keepalive frame is sent on that interval. As constructed in
+the network-handler constructor, this armed frame carries opcode **`(2, 10000)`** with an interval
+argument of **20**, i.e. a **20000 ms (20 s) period**.
+
+**(b) Runtime C2S `2/112` toggle.** *([confirmed]* it exists as a 1-byte C2S send gated by a master
+flag; its cadence is capture-pending.)* A separate **C2S `2/112` one-byte toggle** is gated by a
+**master-enable flag** that is *set on world-enter and cleared on leave*. This is the runtime,
+in-session keepalive path, distinct from the `(2,10000)` frame armed at construction.
+
+> These are **two distinct mechanisms**, not one read two ways: `(2,10000)@20 s` is the
+> construction-time armed periodic frame; `2/112` is the world-session 1-byte toggle. They are
+> **not reconciled to a single on-wire cadence** — the actual keepalive traffic and timing is
+> `[capture/debugger-pending]`. The `opcodes.md` catalogue carries **both** rows (`2/10000` and a
+> `2/112` keepalive-toggle row).
 
 ### 4.6 Disconnect
 
@@ -243,12 +394,26 @@ its inputs are **timed events and numeric state codes**, not wire payload fields
 a *state machine*, not a packet handler. *(STRUCTURE-HIGH on "no body reads"; code meanings
 UNVERIFIED; build 263bd994.)*
 
+The state machine is reached via the network-event entry's **type-15 / sub-code-102** branch
+(§3.1). Internally it **switches on the current game-state code** (a small enumerated set) and drives
+connect/scene transitions from there — confirming the "no packet-body read" property: its inputs are
+the game-state code, the timed-event tag, and the numeric state codes, never a wire payload field.
+*([confirmed]* on the "no body read" control flow; code *meanings* `[capture/debugger-pending]`.)
+
 ### 5.1 Inputs
 
 - A **timed-event tag `10001`** drives the time-based transitions (e.g. a connection-attempt
-  timeout / retry tick). *(LIKELY role; UNVERIFIED meaning.)*
-- A small set of **numeric state codes** select the transition. These codes are the recovered
-  facts; their precise game-state meaning is inferred.
+  timeout / retry tick); the machine arms `10001` timers (recovered as a ~5000 ms tick) on several
+  state branches. *(LIKELY role; meaning `[capture/debugger-pending]`.)*
+- The **current game-state code** selects which transition branch runs (the top-level switch).
+- A small set of **numeric state codes** (§5.2) select the transition outcome. These codes are the
+  recovered facts; their precise game-state meaning is inferred.
+
+> **Confirmed control-flow detail (meaning inferred).** On one game-state branch, when the pending
+> result is clear the machine *publishes* state code **`201`** (via a manager method) and arms a
+> `10001` timer; codes **`202` / `203` / `232`** instead *clear* the pending-result slot. This is
+> the shape of the transition logic; the game-meaning attached to publishing `201` vs clearing on
+> `202/203/232` is inferred, not pinned.
 
 ### 5.2 Recovered state codes
 
@@ -292,22 +457,34 @@ An outbound packet passes through, in order:
 
 ```
 plaintext payload
+   → timestamp            (GetTickCount stamped at the head of the send convergence)
    → byte cipher          (crypto.md §3.1 — keyless byte transform over the payload)
    → LZ4 compress         (crypto.md §3.2 — raw-block LZ4 over the post-header payload)
    → enqueue → send
 ```
 
-The send-chain convergence point (the single routine ~all send sites flow through) runs the cipher
-gate, then the compress stage (swapping in the compressed buffer and freeing the original), then
-hands the frame to the queue/transport writer. **Header-only frames bypass both stages.**
+The send-chain convergence point (the single routine that ~all send sites flow through) stamps a
+`GetTickCount` timestamp, runs the **cipher gate**, then the **compress stage** (swapping in the
+compressed buffer and freeing the original), then hands the frame to the queue/transport writer.
+**The order is cipher THEN compress.** **Header-only frames (`size == 8`) bypass both stages.**
+*([confirmed].)*
 
 ### 6.2 Inbound (server → client), before dispatch
 
 An inbound packet is **LZ4-decompressed before dispatch** (the expand step of §1.2), then handed
-to the master dispatcher. **Header-only frames bypass decompression.** Per `crypto.md` §5, this
-client's *receive* path applies **no inverse byte cipher** — inbound is decompress-only before
-dispatch (this asymmetry is a `crypto.md`-owned, capture-gated open question; it is noted here only
-to place the stage).
+to the master dispatcher. **Header-only frames bypass decompression** (the `size == 8` check on the
+u32 at `+0`). The decompressor reads the LZ4 input from `+8` over `size − 8` and decodes into a
+**fixed 11680-byte (`0x2DA0`) output buffer** — a concrete capacity bound (useful for sizing the
+C# receive buffer). The decoder is a genuine raw-block LZ4 (token literal/match nibbles, the
+255-extension scheme, little-endian `u16` match offsets, bounded output). *([confirmed].)*
+
+**Inbound is decompress-only — there is NO inverse byte cipher on receive.** *([confirmed]* on the
+client side, by a *positive single-caller proof*: the byte-cipher routine has **exactly one
+cross-reference — the outbound send gate** — so it is structurally unreachable on the receive path.
+This is stronger than "no inverse call was observed".) Send = encrypt **then** compress; receive =
+decompress **only**. Whether the *server* likewise omits an inverse cipher on every inbound type,
+generalised across the whole protocol, is the `crypto.md` §5 open question and remains
+`[capture/debugger-pending]`; this spec only places the stage and records the client-side proof.
 
 ### 6.3 Pipeline diagram
 
@@ -328,26 +505,50 @@ SEND:     handler builds payload → byte cipher (crypto.md §3.1)
 | This spec covers | Owned elsewhere — cite, don't duplicate |
 |---|---|
 | Master dispatcher routing fan-out (§1) | Per-opcode routing list + dispatch-model summary → `handlers.md` §1; wire header → `opcodes.md` |
+| `(0,0)` key-exchange handshake + emitted `1/4` reply (§1.4) | RSA / whitening of the `1/4` reply → `crypto.md` + the login-credential packet spec |
 | Handler-table installers + install counts (§2) | Per-handler behaviour and the same counts → `handlers.md` §1 |
-| Network-event entry + handler object (§3) | (machinery only here) |
-| Network-client lifecycle (§4) | — |
+| Network-event entry (type-15 / 100 vs 102) + handler object (§3) | (machinery only here) |
+| Network-client lifecycle + keepalive duality (§4) | `2/112` keepalive-toggle row + `2/10000` armed frame → `opcodes.md` |
 | Connection-state machine + codes (§5) | Lobby action-code mapping (shared numbers, different path) → `handlers.md` §12 |
-| Cipher/LZ4 placement (§6) | Cipher + LZ4 algorithms → `crypto.md` §3; inbound asymmetry → `crypto.md` §5 |
+| Cipher/LZ4 placement (§6) | Cipher + LZ4 algorithms → `crypto.md` §3; inbound cipher-omission generalisation → `crypto.md` §5 |
 
 ---
 
-## 8. Unverified / open questions
+## 8. Status of prior open questions (this pass)
+
+### Resolved this pass (control-flow-confirmed)
+
+- **Frame-header size width — RESOLVED.** The size is a **u32 at `+0`** (witnessed at three codec
+  sites), settling the long-standing u16-vs-u32 question. Header = `[u32 size][u16 major][u16 minor]`
+  = 8 bytes (§1.1).
+- **Major-0 shape — RESOLVED (conflict).** Major-0 is a **hardwired `(0,0)` handshake branch, not an
+  inline switch**; it parses the inbound key blob and emits the `1/4` reply (§1.4). The earlier
+  "inline switch / small fixed set of minors" wording was an overstatement and is corrected.
+- **Response install count — RESOLVED (conflict).** Refined from `~98` to **~99** (101 stores − 2
+  zero-clears, one handler shared across slots `143`/`144`) (§2).
+- **Inbound cipher omission on the CLIENT side — RESOLVED (positive single-caller proof).** The byte
+  cipher has exactly one cross-reference (the outbound send gate), so it is structurally unreachable
+  on receive; client inbound is **decompress-only** (§6.2). Crypto OQ#1 is resolved for the client
+  receive path. (Generalising the omission across *all* inbound types on the wire stays
+  capture-pending — `crypto.md` §5.)
+
+### Still open (capture / debugger-pending)
 
 - **No capture this pass.** The routing/lifecycle structure is a static read on build `263bd994`;
-  wire-byte and timing confirmation are deferred.
+  **all packet field VALUE semantics** — what each wire byte *means* — are deferred to a live
+  capture/debugger session. Routing, sizes, and offsets are confirmed; meanings are not.
+- **`(0,0)` body field meanings.** The read order/sizes `[54B key blob][u32][u32]` are confirmed
+  (§1.4); the meaning of the two trailing `u32` server scalars is `[capture/debugger-pending]`.
 - **Connection-state code semantics.** `201 / 202 / 203 / 232` and the timed tag `10001` are
   recovered numeric facts; the precise meaning attached to each (connecting / connected /
   disconnected / error) is an inferred grouping and is `UNVERIFIED`. A debugger trace of a
   connect→play→disconnect cycle would pin each code to an observed transition.
-- **Keepalive interval scaling.** The `1000 ×` argument scaling (§4.5) is read from the routine;
-  the actual configured argument (and therefore the wall-clock keepalive period) is not pinned.
-- **Inbound cipher asymmetry.** The "decompress-only, no inverse cipher" inbound placement (§6.2)
-  is structurally observed but capture-gated — see `crypto.md` §5. This spec inherits that open
-  question, it does not resolve it.
+- **Keepalive duality — on-wire cadence not pinned.** Two keepalive mechanisms are both real (§4.5):
+  the ctor-armed `(2,10000)@20 s` frame and the runtime `2/112` toggle. Which is actually sent on the
+  wire, and at what cadence, is `[capture/debugger-pending]`. (The `1000 ×` interval scaling is read
+  from the routine; the wall-clock keepalive period is unconfirmed.)
+- **Inbound cipher asymmetry (generalisation).** The client-side "decompress-only" placement is
+  proven (§6.2); whether the server omits an inverse cipher across *every* inbound type is the
+  `crypto.md` §5 open question this spec inherits but does not resolve.
 - **Second worker's exact duties.** The receive worker is fully characterised (§4.4); the second
   spawned worker is the connection's I/O-side thread, but its loop is not decomposed here.

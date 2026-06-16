@@ -12,13 +12,22 @@
 
 ## Status
 
+```
+verification: sample-verified            # stride, record count, file size, +0x000 id, +0x004 CP949 text, 0xEE padding all byte-exact against the real VFS sample
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida, vfs-sample]
+conflicts: none
+```
+
 | Item | Value |
 |------|-------|
-| `sample_verified` | **true** — record stride, record count, and file size are byte-exact from VFS-harness observation; record layout cross-checked against the targeted front-end caption IDs |
+| `sample_verified` | **true** — record stride, record count, and file size are byte-exact from VFS-harness observation; record layout cross-checked against the targeted front-end caption IDs. RE-CONFIRMED on build 263bd994 (2026-06-16): size 1,364,304 = 2,644 × 516 exactly; record 0 `caption_id = 1`, CP949 text at +0x004 with a `0x00` terminator inside the buffer and `0xEE` fill after. |
 | Endianness | Little-endian |
 | Magic / signature | **None** — there is no file header; the first record begins at byte 0 |
 | Version field | None |
 | Encoding | CP949 (code page 949) for the string payload |
+| Loaded from | The boot path opens `data/script/msg.xdb` directly during the main-window startup sequence (NOT via the shared boot data-table corpus loader that handles the five small `.xdb` tables). The loader follows the generic fixed-stride disk-file read pattern (open-by-name → size → read-virtual → close). CONFIRMED (loader control flow). |
 
 ---
 
@@ -44,7 +53,9 @@ byte 0. There is no count prefix, no directory, and no footer.
 - **Record stride:** **516 bytes** (0x204). CONFIRMED.
 - **Record count source:** derived from file size — `record_count = file_size / 516`. CONFIRMED
   (file size is an exact integer multiple of the stride with zero remainder).
-- **Observed record count:** approximately **2,644** records in the sampled VFS. SAMPLE-VERIFIED.
+- **File size:** **1,364,304 bytes** in the sampled VFS. SAMPLE-VERIFIED (build 263bd994).
+- **Observed record count:** exactly **2,644** records (`1,364,304 / 516 = 2,644`, zero remainder).
+  SAMPLE-VERIFIED. Record 0 carries `caption_id = 1`; the first IDs ascend `1, 2, 3, 4, …`.
 
 ---
 
@@ -53,10 +64,15 @@ byte 0. There is no count prefix, no directory, and no footer.
 | Sub-offset | Size | Type | Field | Notes | Confidence |
 |---:|---:|------|-------|-------|------------|
 | +0x000 | 4 | i32 LE | `caption_id` | Numeric caption identifier (the lookup key). | CONFIRMED |
-| +0x004 | 512 | char[512] | `text` | CP949-encoded caption string, null-terminated within the fixed 512-byte field; trailing bytes after the terminator are unused (padding). An empty string is valid (a record may carry a zero-length caption). | CONFIRMED (layout); CP949 CONFIRMED |
+| +0x004 | 512 | char[512] | `text` | CP949-encoded caption string, NUL-terminated (`0x00`) within the fixed 512-byte field. The bytes AFTER the terminator are filled with the client sentinel **`0xEE`**, NOT `0x00` (see padding note below) — a decoder must stop at the first `0x00` and must not assume the tail is zero-filled. An empty string is valid (a record may carry a zero-length caption). | CONFIRMED (layout, padding byte); CP949 CONFIRMED |
 
 - The string field is a **fixed 512-byte buffer**, not a length-prefixed or variable-length string.
-  Decode it as CP949 up to the first null byte (or the full 512 bytes if no null is present).
+  Decode it as CP949 up to the first NUL byte (`0x00`).
+- **Padding byte = `0xEE` (CONFIRMED).** The bytes following the NUL terminator inside the 512-byte
+  buffer are filled with the client sentinel value `0xEE`, not `0x00`. This is a deliberate fill, not
+  garbage. A decoder MUST terminate the string at the first `0x00`; it must NOT scan for `0xEE`, treat
+  `0xEE` as content, or assume a zero-filled tail. (Practical effect: read CP949 up to the first
+  `0x00`; everything after is `0xEE` padding and is discarded.)
 - The four-byte key at +0x000 plus the 512-byte text buffer at +0x004 sum to the 516-byte stride
   exactly; there are no other fields and no inter-record padding.
 
@@ -66,6 +82,10 @@ byte 0. There is no count prefix, no directory, and no footer.
 
 - Records are stored in **ascending `caption_id` order**; the runtime resolves a caption by
   **ordered-map lower-bound (binary search) on `caption_id`**. CONFIRMED.
+- **The key comparison is UNSIGNED.** Although `caption_id` is stored as a 32-bit integer at +0x000,
+  the ordered map orders and searches keys with an **unsigned** comparison. A re-implementation must
+  use unsigned key ordering (e.g. a `uint`-keyed sorted map); using signed comparison would mis-order
+  any caption ID with the high bit set. CONFIRMED.
 - A reimplementation may load the whole table into a sorted dictionary keyed by `caption_id`; the
   on-disk ascending order is what makes a binary search valid, but an engineer is free to index it
   in any structure that preserves key→text resolution.
@@ -145,3 +165,16 @@ that texture, not from a caption lookup. CONFIRMED (absence).
   code page 949 (project-wide convention).
 - **Glossary:** see `Docs/RE/names.yaml`.
 - **Provenance:** see `Docs/RE/journal.md` (add an entry for this spec).
+
+> **Provenance — CAMPAIGN VFS-MASTERY-B (two-witness reconcile: loader + black-box over `msg.xdb`):**
+> re-confirmed stride 516 (0x204), header-less, `caption_id` i32 @+0x000, CP949 text @+0x004 (512-byte
+> buffer); added the **`0xEE` padding-byte** fact (post-terminator fill is the client sentinel `0xEE`,
+> not `0x00`) and the **unsigned key-comparison** fact for the ordered map. Promoted as neutral prose;
+> no addresses, no decompiler output, and no caption strings/sample bytes crossed the firewall.
+>
+> **Provenance — CAMPAIGN 10 Block D (re-verify on build 263bd994, 2026-06-16; two witnesses: static
+> loader read + VFS sample):** ALL claims RE-CONFIRMED [sample-verified] with zero drift — file size
+> 1,364,304 = 2,644 × 516 exactly, record 0 `caption_id = 1`, CP949 text terminated by `0x00` inside the
+> buffer with `0xEE` fill after, ascending ids. New fact folded in: `msg.xdb` is loaded **directly from
+> the main-window startup path** (not through the shared boot data-table corpus loader that handles the
+> five small `.xdb` tables — see `xdb_tables.md`). No addresses or decompiler output crossed the firewall.

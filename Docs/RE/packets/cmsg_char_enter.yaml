@@ -1,6 +1,16 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # Intra-buffer offsets are now statically PINNED: slot@0x00 + 33B token@0x01 + 2B pad@0x22 +
 # 4B version-token@0x24, total 40 -- all code-confirmed off the stack frame. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: builder writes header 1/9, memsets a 40-byte buffer, appends 0x28=40)
+#   intra-buffer offsets: confirmed   (slot@0x00, 33B token@0x01, 2B pad@0x22, version dword@0x24 -- all read off the
+#                        enter builder's stack frame; sum 1+33+2+4 = 40)
+#   VersionToken formula: confirmed   (= 10*(data/cursor/game.ver field index 5)+9; on-disk source + arithmetic in code)
+#   SessionToken source: confirmed   (33B memcpy from the launcher command-line/argv0 global, NOT the typed account)
+#   wire VALUE semantics: capture/debugger-pending (the 33-byte token's exact format/content; whether Pad ever carries a field)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: none (cmsg_char_enter.yaml re-confirmed FULLY CONFIRMED)
 
 name: CmsgEnterGameRequest
 opcode: 0x10009           # major 1, minor 9 -> (1 << 16) | 9

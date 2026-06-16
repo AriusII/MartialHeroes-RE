@@ -1,5 +1,18 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# CAPTURE-UNVERIFIED VALUE semantics; header size + the two count words @0x14/@0x16 + 4-byte stride +
+# SkillSlot=0xFF basic-melee are control-flow CONFIRMED. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: the full builder writes header 2/52 + appends a fixed 0x18 = 24-byte
+#                        header, then conditionally appends 4*CountA + 4*CountB)
+#   target arrays:       confirmed   (CountA = u16 @0x14, CountB = u16 @0x16; each entry is a 4-byte u32 actor id;
+#                        an array is appended only when its count != 0)
+#   SkillSlot/melee:     confirmed   (SkillSlot @0x00; the basic-melee path passes 0xFF and sends header-only, counts 0)
+#   @0x01 selector:      static-hypothesis (the short builder writes a DERIVED byte (a2!=1)-56, NOT a clean 0/1 enum)
+#   aim fields 0x04..0x13: static-hypothesis (caller-staged in the full form; only the count words are builder-visible)
+#   wire VALUE semantics: capture/debugger-pending (array A vs B meaning; AimMode enum; the @0x01 selector meaning)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: RESOLVED -- the @0x01 byte is a DERIVED selector ((a2!=1)-56), not a 0/1 enum; do not codegen a 0/1 field.
 
 name: CmsgUseSkill
 opcode: 0x20034           # major 2 (GameAction), minor 52 -> (2 << 16) | 52
@@ -9,25 +22,28 @@ spec: packets/2-52_use_skill.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Client skill-activate / battle-action request. A 24-byte header (skill slot + aim) followed by two optional arrays of target actor ids. The server replies with the S2C 5/52 ActorSkillAction broadcast.
+summary: Client skill-activate / battle-action request. A 24-byte header (skill slot + aim) followed by two optional arrays of target actor ids. Basic melee is the same opcode with SkillSlot=0xFF and both counts 0. The server replies with the S2C 5/52 ActorSkillAction broadcast.
 
-# The C2S send-site is now analyzed (it was previously unknown). Fixed 24-byte header below; the
-# two trailing target arrays are variable and described in notes (the engineer hand-codes the loop
-# driven by CountA / CountB).
+# Fixed 24-byte header below; the two trailing target arrays are variable and described in notes
+# (the engineer hand-codes the loop driven by CountA / CountB). CONTROL-FLOW CONFIRMED: the header
+# size (0x18), the two count words @0x14/@0x16, and the 4-byte per-entry stride. The @0x04..0x13 aim
+# sub-fields are caller-staged (not written by the builder) -> static-hypothesis offsets.
 fields:
-  - { name: SkillSlot, type: u8 }          # 0x00  skill slot index; 0xFF = basic melee attack
-  - { name: Pad0,      type: "bytes[3]" }    # 0x01  selector/pad region (0x01 carries a basic/alias selector; rest zeroed in the short form)
-  - { name: AimMode,   type: u32 }         # 0x04  aim mode selector
-  - { name: AimScale,  type: f32 }         # 0x08  aim scale / radius factor
-  - { name: AimX,      type: f32 }         # 0x0c  aim point X (world)
-  - { name: AimZ,      type: f32 }         # 0x10  aim point Z (world)
-  - { name: CountA,    type: u16 }         # 0x14  number of entries in target array A
-  - { name: CountB,    type: u16 }         # 0x16  number of entries in target array B
+  - { name: SkillSlot, type: u8 }          # 0x00  skill slot index; 0xFF = basic melee attack  (CONFIRMED)
+  - { name: Selector,  type: u8 }          # 0x01  DERIVED selector byte ((a2!=1)-56 in the short builder); NOT a 0/1 enum
+  - { name: Pad0,      type: "bytes[2]" }   # 0x02  zeroed in the short form (rest of the 0x01..0x03 region)
+  - { name: AimMode,   type: u32 }         # 0x04  aim mode selector (caller-staged; static-hypothesis)
+  - { name: AimScale,  type: f32 }         # 0x08  aim scale / radius factor (caller-staged; static-hypothesis)
+  - { name: AimX,      type: f32 }         # 0x0c  aim point X (world; caller-staged; static-hypothesis)
+  - { name: AimZ,      type: f32 }         # 0x10  aim point Z (world; caller-staged; static-hypothesis)
+  - { name: CountA,    type: u16 }         # 0x14  number of entries in target array A  (CONFIRMED)
+  - { name: CountB,    type: u16 }         # 0x16  number of entries in target array B  (CONFIRMED)
 
 notes: |
-  Static inference only; no capture available. VARIABLE-LENGTH packet. The send-site builder was
-  recovered this pass (it previously was not analyzed -- the old "do not implement" caveat is now
-  replaced by the layout below).
+  CONTROL-FLOW CONFIRMED header/arrays; CAPTURE-UNVERIFIED VALUE semantics. VARIABLE-LENGTH packet.
+  TWO builders share 2/52: a SHORT builder (header-only / basic-melee form) and a FULL builder
+  (header + the two target arrays). Both write the same 24-byte header layout; the full builder then
+  conditionally appends the arrays.
 
   BASIC MELEE == THIS OPCODE (no separate attack message). CODE-CONFIRMED: a plain melee swing is
   NOT its own opcode -- it is just this 2/52 with SkillSlot == 0xFF. The client resolves a skill id to
@@ -40,15 +56,18 @@ notes: |
   needs no distinct "attack" packet: emit 2/52 with SkillSlot=0xFF for a melee swing.
 
   Header = 24 bytes (0x00..0x17), matching the fixed block the sender writes before any arrays.
-    0x00 (1B) SkillSlot : which skill the client is activating; 0xFF marks the basic-melee form.
-    0x01 (1B) selector  : a basic/alias selector byte (the basic-attack builders write 0 or 1 here);
-                          the remaining bytes of the 0x01..0x03 region are zeroed. Modeled inside the
-                          Pad0 buffer above to keep the header an even 24 bytes -- split it into an
-                          explicit u8 selector + 2-byte pad if a capture warrants it.
-    0x04 (4B) AimMode   : aim-mode selector (u32; set to 1.0 by the basic-attack builders).
-    0x08 (4B) AimScale  : aim scale / radius factor (le f32).
-    0x0c (4B) AimX / 0x10 (4B) AimZ : the aim point in world XZ.
-    0x14 (2B) CountA / 0x16 (2B) CountB : entry counts for the two target arrays that follow.
+    0x00 (1B) SkillSlot : which skill the client is activating; 0xFF marks the basic-melee form. CONFIRMED.
+    0x01 (1B) Selector  : a DERIVED selector byte. The short builder writes (a2 != 1) - 56 here, i.e. a
+                          small NEGATIVE byte (e.g. -56 / -55), NOT a clean 0/1 flag. Treat it as an
+                          opaque derived selector pending capture -- do NOT codegen a 0/1 enum. The
+                          remaining bytes of the 0x01..0x03 region (modeled as Pad0) are zeroed in the
+                          short form.
+    0x04 (4B) AimMode   : aim-mode selector (u32; set to 1.0 by the basic-attack builders). CALLER-STAGED
+                          in the full form -> the offset is a static-hypothesis (not witnessed at the builder).
+    0x08 (4B) AimScale  : aim scale / radius factor (le f32). Caller-staged; static-hypothesis offset.
+    0x0c (4B) AimX / 0x10 (4B) AimZ : the aim point in world XZ. Caller-staged; static-hypothesis offsets.
+    0x14 (2B) CountA / 0x16 (2B) CountB : entry counts for the two target arrays that follow. CONFIRMED
+                          (control-flow: the full builder branches on these u16 words and appends 4*Count each).
 
   TRAILER (variable, appended only when the counts are non-zero):
     array A : CountA entries, each a 4-byte target actor id (u32). Appended first.
@@ -62,11 +81,12 @@ notes: |
 
   Server reply: S2C 5/52 SmsgActorSkillAction (packets/5-52_actor_skill_action.yaml).
 
-  UNKNOWNS to resolve with a capture of a single-target cast vs an AoE cast:
+  UNKNOWNS to resolve with a capture of a single-target cast vs an AoE cast (wire VALUE semantics;
+  the header size, the count words, and the 4-byte stride are control-flow confirmed):
     - the precise meaning of array A vs array B (primary targets vs splash targets is the leading
       hypothesis);
-    - confirm the 4-byte element stride against the u16 counts;
-    - whether the 0x01 byte is a stable selector (basic vs alias) or part of the pad;
+    - the meaning of the DERIVED @0x01 selector byte ((a2!=1)-56);
+    - the meaning/values of the caller-staged aim sub-fields (0x04..0x13);
     - whether AimMode is an enum worth lifting into Shared.Kernel.
 
   UNBLOCKS: Client.Application UseSkill use-case (ack/echo 5/52) and the basic-melee attack path.

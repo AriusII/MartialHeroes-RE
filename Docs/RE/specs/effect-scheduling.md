@@ -22,10 +22,28 @@ subsystems: [effects, combat, game_loop]
 >
 > **Scope.** This file documents the *scheduling architecture* of timed visual effects: the
 > single per-frame clock sample, the four-manager fan-out, the deadline-arm primitive, the two
-> distinct deadline-field conventions, the explicit non-priority-queue model, and the
+> distinct deadline-field conventions, the non-priority-queue model **of the effect lists**, the
+> separate **sorted-tree** timed-EVENT queue (the universal 10001 deferred trigger), and the
 > death/respawn timing state machine. It does **not** restate the effect class hierarchy, the
 > pool layout, or the descriptor formats — for those see `specs/effects.md` and
 > `formats/effects.md`. Citing engineers: `// spec: Docs/RE/specs/effect-scheduling.md`.
+
+> **Verification banner.**
+> - **Status mix:** *confirmed* where control-flow was traced (the single per-frame now-ms sample,
+>   the four-manager linear fan-out, the `+64` arm = `now + delay`, the `+48` particle start-gate +
+>   1-second life, the spawn-and-arm factory append, and the enqueue + container of the 10001
+>   sorted-tree timed-event queue); *static-hypothesis* where one inference stands (the 10001 queue
+>   DRAIN/dispatch consumer was not isolated this pass); *capture/debugger-pending* where a runtime
+>   witness is needed (the two death-FSM in-state clock reads' precise role; the per-kind particle
+>   colour/semantic labels).
+> - **ida_reverified:** 2026-06-16
+> - **ida_anchor:** 263bd994
+> - **evidence:** [static-ida]
+> - **conflicts:** none with the stated effect-list claims — the §3 "NOT a priority queue" model is
+>   correct **for the effect element lists**. The newly documented **universal 10001 timed-EVENT
+>   queue IS a sorted tree** keyed by fire-time; it is a **distinct sibling mechanism** hosted on the
+>   effect manager, not a contradiction of the effect-list model. §3 is now scoped accordingly and
+>   §5A documents the tree.
 
 ---
 
@@ -35,6 +53,7 @@ subsystems: [effects, combat, game_loop]
 |------|------------|
 | Single now-ms capture per frame, fanned by value to four managers | CODE-CONFIRMED |
 | Four managers are linear active-list walks (NOT a heap / priority queue) | CODE-CONFIRMED |
+| Universal 10001 timed-EVENT queue IS a sorted tree keyed by fire-time (distinct sibling of the effect lists) | CODE-CONFIRMED (enqueue + container) / drain UNVERIFIED |
 | Deadline-arm primitive (`baseline = now + delay`) | CODE-CONFIRMED |
 | Effect-object `+64` elapsed-origin convention | CODE-CONFIRMED |
 | Particle-element `+48` start-gate + 1-second life convention | CODE-CONFIRMED |
@@ -100,14 +119,22 @@ inline reap of cleared elements.
 
 ---
 
-## 3. NOT a Priority Queue — the iteration model (load-bearing)
+## 3. NOT a Priority Queue — the iteration model (load-bearing), for the EFFECT lists
 
 **Confidence: CODE-CONFIRMED.**
 
-> **The combat-timer scheduler is a linear active-list walk with inline now-ms-vs-deadline gates.
-> It is NOT a min-heap, NOT a sorted timer queue, and NOT a timer wheel. Do not model it as one.**
+> **The combat-timer / effect-element scheduler is a linear active-list walk with inline
+> now-ms-vs-deadline gates. It is NOT a min-heap, NOT a sorted timer queue, and NOT a timer wheel.
+> Do not model it as one.**
 
-The evidence that fixes this model:
+> **Scope note (load-bearing).** This non-priority-queue statement applies to the **effect element
+> lists** (the spine's shared list and the four subordinate managers of §2). It does **NOT** describe
+> the *separate* **universal 10001 timed-EVENT queue**, which IS a sorted tree keyed by fire-time —
+> a distinct sibling mechanism hosted on the same effect manager. See **§5A**. Do not assume every
+> timer in the effect subsystem is an unordered list: the per-frame effect ticks are unordered walks;
+> the deferred scene/connection event scheduler is an ordered tree.
+
+The evidence that fixes this model (for the effect lists):
 
 - The spine and all four managers **iterate doubly-linked active lists in list order**, ticking
   *every live element every frame*. There is no sorted insert, no top-of-heap pop, and no
@@ -256,6 +283,59 @@ which input.
 
 ---
 
+## 5A. The Universal 10001 Timed-EVENT Queue — a SORTED TREE (distinct from the effect lists)
+
+**Confidence: CODE-CONFIRMED** for the enqueue primitive and the container shape; **UNVERIFIED** for
+the per-frame DRAIN/dispatch consumer (not isolated this pass).
+
+Separate from the unordered effect-element active lists (§2–§4), the effect manager **hosts** a second,
+**ordered** timer mechanism: a **sorted tree** (a red-black-tree-style ordered container) keyed by an
+absolute **fire-time** millisecond value. This is the **universal 10001 deferred-event scheduler** —
+a general "do this scene/connection action when the deadline arrives" mechanism that merely lives on
+the effect-manager singleton; **it is NOT an effect-spawn list.**
+
+> **Do not conflate this with the effect lists.** The effect element lists are **unordered linear
+> walks** ticked every frame (§2, §3). The 10001 timed-event queue is an **ordered tree** keyed by
+> fire-time. They are different data structures with different traversal models, both hosted on the
+> same manager object.
+
+### 5A.1 The enqueue primitive
+
+An enqueue routine builds a **24-byte event record** and inserts it into the manager's sorted tree:
+
+| Offset | Size | Type | Field | Meaning |
+|-------:|-----:|------|-------|---------|
+| +0  | 4 | u32 | `fire_time` | The armed deadline: `delay + now_ms` (captured at the enqueue site). This is the **tree's sort key** — entries are ordered by fire-time. |
+| +4  | 4 | u32 | `event_id` | The deferred event selector — `10001` for the scene/connection-state deferred trigger. |
+| +8  | 16 | u32×4 | `payload` | Four payload dwords passed through from the enqueuing site (zero for the bare 10001 trigger). |
+
+The `10001` event id is a **generic deferred SCENE / CONNECTION-state trigger**, not an effect: it is
+enqueued from network/scene state sites (for example a connection-state transition, and a character
+action-result handler) to **defer** a scene or connection action by a fixed delay (observed delays
+include 5000 ms and 10000 ms — e.g. a login-curtain / logout / action-result delay). The effect
+manager is merely the **host** of the timer queue; the event itself drives scene/connection logic, not
+the effect renderer.
+
+### 5A.2 The arm convention matches §4.1
+
+The fire-time is armed with the **same `now + delay` primitive** used for effect objects (§4.1): the
+now-ms is sampled at the enqueue site, the caller's delay is added, and the sum becomes `fire_time`.
+The difference is the **container** — here the armed record is inserted into a **sorted tree by
+fire-time**, so the earliest-due event is at the tree's front, whereas effect elements are appended to
+an **unordered** list and gated inline per element.
+
+### 5A.3 The drain/dispatch consumer — UNVERIFIED
+
+The per-frame consumer that **pops** entries whose `fire_time ≤ now_ms` and **dispatches** the
+`event_id` (advancing the scene/connection state for the 10001 trigger) was **not isolated** in this
+analysis pass — only the enqueue primitive and the tree container are confirmed. An interoperable
+reimplementation should model the queue as an ordered (by fire-time) collection on the effect manager,
+drained each frame against the single per-frame now-ms (§1) by popping all entries with
+`fire_time ≤ now_ms` and dispatching each. The exact pop/dispatch site and whether dispatch is
+in-order-only-until-the-first-future-entry remain **UNVERIFIED** (capture/debugger-pending). See §8.
+
+---
+
 ## 6. Reconciliation — `+48` vs `+64` are two different objects
 
 **Confidence: HIGH.** The two deadline conventions are **not a contradiction**; they belong to two
@@ -271,6 +351,12 @@ different object layouts owned by two different active lists:
 
 Both are now-ms-domain comparisons; **neither is a heap.** An engineer must keep these as two
 distinct object types with two distinct timing semantics.
+
+> **A third, ordered mechanism also exists** — the universal **10001 timed-EVENT queue** (§5A) — but
+> it is **not** an effect-element layout. It is a 24-byte event record in a **sorted tree** keyed by
+> fire-time, hosted on the same manager, driving deferred scene/connection actions rather than
+> rendering an effect. It uses the **same `now + delay` arm** as the `+64` effect baseline, but an
+> **ordered tree** container instead of an unordered list. Keep all three distinct.
 
 ---
 
@@ -343,6 +429,11 @@ those two reads pace the death phase or merely seed a debounce is **MED** pendin
 - **The exact armed value of the particle `+48` start-deadline** relative to the captured now-ms,
   and that the `+45` clear fires ~1000 ms later, is statically derived; not live-confirmed.
 - **The two death-FSM clock reads (states 2/3):** death-phase pacing vs debounce is unresolved.
+- **The 10001 timed-EVENT queue drain (§5A.3):** the per-frame consumer that pops `fire_time ≤ now_ms`
+  entries from the sorted tree and dispatches `event_id 10001` (advancing the scene/connection state)
+  was not isolated this pass; only the enqueue primitive and the tree container are confirmed. The
+  exact pop/dispatch site and whether it stops at the first future-dated entry are
+  capture/debugger-pending.
 - The per-kind RGBA constants and size tables are render detail and are not exhaustively documented
   here (they are FX tuning, not scheduling).
 

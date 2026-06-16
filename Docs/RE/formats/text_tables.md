@@ -1,5 +1,21 @@
 # Format: .txt (bulk CP949 data tables — census + per-table column specs)
 
+> ```
+> verification: sample-verified            # 619-file .txt census re-confirmed against the real VFS; key paths present; tokenizer rules CONFIRMED (prior IDA, carried)
+> ida_reverified: 2026-06-16
+> ida_anchor: 263bd994
+> evidence: [static-ida, vfs-sample]
+> conflicts: none
+> ```
+>
+> **CAMPAIGN 10 Block D re-verify (build 263bd994, 2026-06-16, two-witness: VFS sample + carried IDA).**
+> The `.txt` population total RE-CONFIRMED at **619 files** [sample-verified] (exact match); the key
+> count-prefixed/tokenized tables (`actormotion.txt`, `skin.txt`, `emoticon.txt`, …) all present at
+> their documented paths; no census anomaly, no new conflict, no drift. The shared-tokenizer findings
+> (§1A) and the count-prefixed table set are [confirmed] from prior campaigns (the tokenizer at the
+> shared boot data-table corpus loader and its callees); no new IDA path-literal sweep was required for
+> this pass. No addresses or decompiler output appear below.
+>
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code,
 > NO binary addresses. Consumed by `Assets.Parsers`. Every loader an engineer writes for a
 > table described here must cite `// spec: Docs/RE/formats/text_tables.md`.
@@ -31,6 +47,40 @@
 - **Three broad classes:** (a) already-specced manifests/tables — §2; (b) human-readable companions
   to the sky/environment `.bin` family — §4 / cross-ref `environment_bins.md`; (c) standalone tables
   documented for the first time here — §3, §5.
+
+---
+
+## 1A. Shared tokenizer (authoritative — governs every TAB-delimited table here)
+
+> **CONFIRMED (two-witness: loader read order + black-box sweep over the real VFS).** The character
+> text tables (and the other TAB tables documented in this file) are read by **one shared tokenizer**.
+> Every loader that splits a `.txt` table into fields uses these rules. A parser that splits on
+> whitespace generically — or that treats a space as a field separator — will mis-segment the CP949
+> rows. The tokenizer is **token-sequential**, not row-structured: it walks the whole file emitting
+> tokens, and each loader consumes a fixed number of tokens per record (it does not require a record
+> to fit on one physical line).
+
+| Rule | Behaviour | Confidence |
+|------|-----------|------------|
+| **Field separators** | **TAB (`0x09`) and LF (`0x0A`) ONLY.** A run of separators collapses (consecutive TAB/LF do not emit empty tokens). | CONFIRMED |
+| **SPACE is NOT a separator** | A space (`0x20`) is an ordinary content byte **inside** a token. Korean/CP949 string fields may contain spaces; the tokenizer keeps them. **Never split a field on space.** | CONFIRMED |
+| **CR normalization** | A carriage return (`0x0D`) is normalized to LF before tokenizing, so CRLF files behave exactly like LF files (CR never appears in a token). | CONFIRMED |
+| **High bytes pass through** | Bytes `>= 0x80` are passed through verbatim — the tokenizer is **codepage-agnostic**. String content is CP949; numeric/keyword fields are the ASCII subset. | CONFIRMED |
+
+**Consequences for a parser:**
+- Split on TAB and LF only; collapse consecutive separators; do not emit empty tokens for blank lines
+  (this is why count-prefixed tables can declare more rows than non-empty lines yield — blank lines
+  produce no tokens; see `actormotion.txt`'s 1084-declared vs 1080-parsed discrepancy in
+  `formats/animation.md`).
+- Treat space as data inside string fields (emote triggers, item names, zone names, etc.).
+- Decode string tokens as CP949; numeric tokens are ASCII decimal.
+- Count-prefixed tables (`skin.txt`, `actormotion.txt`, `emoticon.txt`, `userjoint.txt`,
+  `effect/mapNNN.txt`) read a leading **u32 count token**, then consume `fields_per_record` tokens
+  per record; the count is the header, not a column header row.
+
+This shared-tokenizer note is authoritative for the `.txt` tables in this document. The per-table
+column specs below (and in the covering specs in §2) describe which tokens map to which fields; the
+tokenization itself is governed by the rules above.
 
 ---
 
@@ -73,8 +123,8 @@ knows the canonical source. **Do not re-document them in this file.**
 | `data/char/bindlist.txt`                  | `formats/bindlist.md`                            | CONFIRMED  |
 | `data/char/skin.txt`                      | `formats/bgtexture_lst.md` (skin chain)         | CONFIRMED  |
 | `data/char/motlist.txt`                   | `formats/animation.md`                           | CONFIRMED  |
-| `data/map000/texture/bgtexture.txt`       | `formats/bgtexture_lst.md` (text mirror)        | CONFIRMED  |
-| `data/effect/texture/bgtexture.txt`       | `formats/bgtexture_lst.md` (text mirror)        | CONFIRMED  |
+| `data/map000/texture/bgtexture.txt`       | `formats/bgtexture_lst.md` (authoring sidecar — NOT loaded; see note below) | CONFIRMED  |
+| `data/effect/texture/bgtexture.txt`       | `formats/bgtexture_lst.md` (authoring sidecar — NOT loaded; see note below) | CONFIRMED  |
 | `data/ui/uitex.txt`                       | `formats/ui_manifests.md §1`                     | CONFIRMED  |
 | `data/ui/skillicon/skillicon.txt`         | `formats/ui_manifests.md §2`                     | CONFIRMED  |
 | `data/ui/guildicon/crestlist.txt`         | `formats/ui_manifests.md §3`                     | SAMPLE-VERIFIED |
@@ -85,6 +135,42 @@ knows the canonical source. **Do not re-document them in this file.**
 | `data/effect/itemswordlight.txt`          | `formats/effects.md §F.5`                         | CONFIRMED  |
 | `data/effect/mobswordlight.txt`           | `formats/effects.md §F.6`                         | CONFIRMED  |
 | `data/sky/dat/cloud_cycle*.txt`           | `formats/environment_bins.md` (TSV companion)    | CONFIRMED  |
+
+> **skin.txt — 6 integer tokens per record, count-prefixed (CONFLICT→adjudicated, CORRECTED).**
+> Header = a **u32 count token**, then **6 TAB tokens per record** (all integers; tokenized per §1A).
+> `col0` is a **3-valued category selector `{0,1,2}`** that indexes a per-category base-offset table
+> (the catalogue base table at `col0 + 1`); `col1` is the hundreds-group addend, `col2` the
+> millions-group addend, `col3` the low remainder, and `col4`/`col5` form the 8-byte value payload.
+> The composite lookup key is built from `col0..col3` against the base table, and `{col4,col5}` is the
+> value. **The category index is `col0`, NOT `col2`** — this corrects an earlier "col2 index" reading.
+> The full composite-key formula and the skin→texture chain live in the covering spec
+> `formats/bgtexture_lst.md` (skin chain) — do not re-derive it here. CONFIRMED two-witness
+> (loader token map + black-box: 6 TAB tokens on 100% of rows). The `col0` 3-value category selector
+> is a **distinct field** from the `.skn` `id_b` skeleton pointer (`formats/mesh.md`).
+>
+> **actormotion.txt — 33 tokens per record, count-prefixed (CONFIRMED).** Header = a **u32 count
+> token**, then **33 TAB tokens per record** (per §1A; ~4 blank lines normalized → declared 1084 vs
+> 1080 parsed). `col0` = the **skin_class catalogue index**; `col1` = the **IdB offset** (the stored
+> actor id = `base[skin_class] + col1`); `col15` begins a 9-int motion-id block; `col31` is a real but
+> unlabeled field. The semantics of the integer blocks (cols 3–14 and the col31 field) are
+> **DBG-pending**. The full record/offset layout is the covering spec `formats/animation.md`
+> (§`actormotion.txt` layout) — do not re-document it here. CONFIRMED two-witness (parser-derived
+> record + black-box: 33 TAB tokens on 100% of rows).
+>
+> **bindlist.txt — path and count (CONFIRMED).** Whole-line reader (not TAB-split), EOF-bounded;
+> the runtime path is **`data/char/bindlist.txt`** (NOT `data/char/bind/bindlist.txt`), with
+> **349 entries** (1:1 with the 349 `.bnd` files). Covering spec: `formats/bindlist.md`.
+
+> **bgtexture — runtime is the BINARY `.lst`, the `.txt` is a dead authoring sidecar (CONFLICT→adjudicated, CORRECTED).**
+> The shipping client resolves background textures from **`data/map000/texture/bgtexture.lst`**, a
+> **binary** file (u32 record count followed by fixed 48-byte on-disk records: a leading flag byte,
+> then a NUL-terminated name in the remaining bytes that resolves to `<name>.dds`; the texture id is
+> the record's 0-based index). There is **no `bgtexture.txt` load path in the binary** — the
+> `.txt` files under `data/map000/texture/` and `data/effect/texture/` are **authoring sidecars the
+> client never opens**. A faithful loader reads the `.lst` and ignores the `.txt`. The authoritative
+> `.lst` record spec is `formats/bgtexture_lst.md` (covering spec; owned outside this document).
+> CONFIRMED two-witness (loader path-build over the `.lst` + black-box: the `.lst` size reconciles
+> exactly as `4 + count × 48`).
 
 Sky/environment `.bin`-family **companions** (`fog`, `material`, `stardome`, `clouddome`,
 `map_option`, `weather`, `wind`, `point_light`, `light`) are covered as a group in §4 of this file
@@ -605,3 +691,9 @@ These files were packed into the VFS during asset compilation and are not consum
 
 > **Engineering note:** every C# loader for a table described above must cite
 > `// spec: Docs/RE/formats/text_tables.md` on the magic constants / column indices it hard-codes.
+
+> **Provenance — CAMPAIGN 10 Block D (build 263bd994, 2026-06-16; two-witness: VFS sample + carried
+> IDA):** the 619-file `.txt` census RE-CONFIRMED [sample-verified] (exact); `actormotion.txt`,
+> `skin.txt`, `emoticon.txt` and the other count-prefixed tables present at their documented paths;
+> no drift, no new conflict. Tokenizer / count-prefix findings carried [confirmed] from prior campaigns.
+> No addresses or decompiler output crossed the firewall.

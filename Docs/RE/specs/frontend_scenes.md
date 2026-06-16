@@ -1,4 +1,9 @@
 ---
+verification: confirmed
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida]
+conflicts: KF2..5 camera-keyframe arming (camera dolly) and the digit→slot PIN scramble seed/permutation remain debugger-pending; the EXE-window-close quit edge at Login is debugger-pending; which physical credential box is account vs password (join-string field #1 vs #2) is a static-hypothesis pending a capture
 status: confirmed
 sample_verified: partial   # game.ver version-token sample-verified (login_flow.md); all UI flow/constants are CODE-CONFIRMED; wire bytes capture-unverified
 subsystems: [login_scene, server_select, character_select, enter_world, frontend_state_flow]
@@ -78,10 +83,13 @@ in-process. It is built once on entering state 1, from the UI config script
 The login window carries **two independent internal counters** that must not be confused:
 
 - a **UI page index** (which form/option page is visible), and
-- a **flow sub-state** (the connect → animate → validate → EULA → server-list → endpoint → submit
+- a **flow sub-state** (the connect → animate → validate → PIN → server-list → endpoint → submit
   machine). The flow sub-state is the load-bearing one for this spec; its values are catalogued in
   §1.5. (Both are *below* the engine state and are never visible as an engine-state value — a point
-  already reconciled in `client_runtime.md` §7.1 and `ui_system.md` §6.)
+  already reconciled in `client_runtime.md` §7.1 and `ui_system.md` §6.) A **third** init/idle value is
+  seeded once by the constructor (a page-index / base counter — set to **5** at construction, distinct
+  from both the MAIN page state and the TICK drive state; its concrete field offset belongs to the
+  login-window struct map, not this behavioural spec).
 
 ## 1.0 The opening intro — a standalone scene *before* the login form (CODE-CONFIRMED)
 
@@ -98,6 +106,21 @@ The login window carries **two independent internal counters** that must not be 
 > `openning_001..004` backdrops and the `openning_scenario` crawl are owned **exclusively** by the
 > opening-window scene described here, and the opening-window cue is a **different** sound id from the
 > login curtain SFX (§1.0.4 vs §1.5 sub-state 1).
+
+<!-- source: _dirty/campaign-frontend/A6-winmain-statemachine.md -->
+> **Engine state-machine context — owned by `client_runtime.md` §7, summarised here (CODE-CONFIRMED).**
+> The process entry point mounts the data archive **exactly once**, then runs a single
+> `while(1) { switch(GameState) }` engine loop with states **0..8**; each case builds the front-end
+> form for its phase. The states relevant to this spec are: **0 = cold bootstrap** (net handler + top
+> window + display-mode select); **1 = Login** (the LoginWindow and its font table are constructed here
+> — Login is the **state-1 init case**, not state 4); **2 = opening-or-skip gate** (reads
+> `[OPENNING]`/`SKIP`, builds the LoadingWindow, routes to 3 or 4 per §1.0.0); **3 = Opening
+> cinematic** (the opening-window scene of this section); **4 = character-select form
+> specifically** (NOT login); **5 = in-game** (returns to **4**, never to login); **6 = Quit → 8**;
+> **7 = net-engine guard → 8**; **8 = Exit**. (Earlier §1.0 wording omitted states **0** and **2** and
+> conflated "login/char-select" — corrected here: Login is state 1, char-select is state 4.) Full
+> ownership of the engine state ladder and the launcher gate stays in `client_runtime.md` §7; this is a
+> cross-reference only.
 
 ### 1.0.0 Launch gate — the opening can be skipped at boot (CODE-CONFIRMED)
 
@@ -258,6 +281,9 @@ parentheses). Decorative widgets (labels, banner slices, option backdrops) carry
 | **Password textbox** | input only | editable, masked; second credential token (see §1.3) |
 | **OK / Login button** | 103 (`g`) | run the `game.ver` version gate (§1.4), then advance flow sub-state to **29** (credential validation). **Sends no packet itself.** |
 | **Server-list button** | 102 (`f`) | reveal the server-list panel |
+| **Server-list scroll-up arrow** | 106 (`j`) | scroll the server listbox up (server-listbox container control, §11.2a). *Not* an EULA control — the earlier "EULA scroll/accept" reading is dropped (§1.4c) |
+| **Server-list scroll-down arrow** | 107 (`k`) | scroll the server listbox down (§11.2a) |
+| **Server-list scrollbar thumb** | 108 (`l`) | the scrollbar thumb / drag dot of the server listbox (§11.2a) |
 | **Save-ID checkbox** | 104 (`h`) | toggle; persist/clear the saved id (§1.6) |
 | **Focus ID box** | 109 (`m`) | focus the ID box, clear PW focus (mutually exclusive) |
 | **Focus PW box** | 110 (`n`) | focus the PW box, clear ID focus |
@@ -272,9 +298,37 @@ parentheses). Decorative widgets (labels, banner slices, option backdrops) carry
 
 Keyboard/system class (event-class byte = 1): id **9** swaps the focused textbox (ID ↔ PW); id
 **10** on the login form page runs the same logic as the OK button (version gate → sub-state 29),
-i.e. **Enter = Login**; id **10** on the option page advances the option page. The action ids
-`106` (`j`), `107`, `108` are registered on the panning intro-banner sub-buttons but their handler
-cases are no-ops / page-advance only — the intro banner is decorative, not a control.
+i.e. **Enter = Login**; id **10** on the option page advances the option page. **The action ids
+`106` / `107` / `108` are the server-listbox scroll controls** (scroll-up arrow / scroll-down arrow /
+scrollbar thumb dot built into the server-listbox container — §11.2a), **not** intro-banner no-ops
+and **not** EULA scroll/accept controls (the earlier "EULA / intro-banner" readings are both
+superseded — §1.4c, construct walk).
+
+## 1.2a Resting login chrome — nothing top-level paints in the bottom-left quadrant (CODE-CONFIRMED build-time visibility; absolute pixel attribution DEBUGGER-PENDING)
+
+<!-- source: _dirty/campaign-frontend/A1-login-bottomleft-quit.md, _RECONCILED.md §A1.1 -->
+
+The login window's top-level child panels were mapped back to their construction sites to settle the
+earlier UNVERIFIED question of what (if anything) renders in the **bottom-left** of the resting login
+form. At the **resting login-form state** (tick/drive substate **6**):
+
+- The **option-page panel** (destination `(356, 531, 313, 132)`, atlas `loginwindow.dds`, host of the
+  option tabs at actions **111 / 112**) is **HIDDEN at rest** — the login code only ever calls
+  *SetVisible(0)* on it (during the intro transitions); nothing shows it at rest. The option tab
+  coordinates `(40,82)` / `(164,82)` are **relative to this hidden panel**, not absolute bottom-left
+  screen positions.
+- The **server-name-strip / banner container** and the **PIN modal** are also hidden at rest.
+- The resting-visible top-level panels are the **central login-form container** (≈ `265,113`) and a
+  **full-width top panel** (`y = 0`).
+
+**Resolution (CODE-CONFIRMED).** **No top-level child whose destination rect lands in the bottom-left
+quadrant is shown at rest** — the bottom-left element is a **NON-resting / opt-in element** (the
+option page and/or the server-list overlay) that must **NOT** render on the base login form. A
+faithful base-login render shows only the central form container + the top panel; the option page and
+the server list appear only when their actions / sub-states arm them. The **absolute pixel attribution
+of the runtime Draw walk** (exactly which widget paints in that quadrant once an opt-in element is
+armed) stays **DEBUGGER-PENDING**, but the build-time visibility proves nothing resting-visible lands
+bottom-left.
 
 ## 1.3 The ID and password editboxes (CODE-CONFIRMED)
 
@@ -310,12 +364,18 @@ the post-handoff handshake (§1.7).
    is mounted, the client compares the version file inside the VFS (`data/cursor/game.ver`) against the
    external client-root on-disk `game.ver`. This is a **gate on the login action only**; the scene draws
    **no on-screen version / build text** (there is no version-label widget — §1.4b).
-   - **File format (CODE-CONFIRMED gate; field semantics UNVERIFIED).** `game.ver` is a **binary
-     28-byte** blob = **7 × u32 little-endian** (no ASCII string, no NUL terminator, no magic). The
-     VFS-embedded copy (`data/cursor/game.ver`) and the external client-root copy may differ
-     field-by-field; a mismatch fails the gate. (The exact field semantics — which u32 is build vs patch
-     vs revision — are UNVERIFIED; the gate's compare granularity, full-blob vs a single field, is also
-     UNVERIFIED. The raw 28-byte stamp layout is owned by `formats/game_ver.md`.)
+   - **File format & compare granularity (CODE-CONFIRMED gate; other-field semantics owned elsewhere).**
+     <!-- source: _dirty/campaign-frontend/A1A3-gamever-saveid-status.md, _RECONCILED.md §A1.3 -->
+     `game.ver` is a **binary 28-byte** blob = **7 × u32 little-endian** (no ASCII string, no NUL
+     terminator, no magic). The gate **requires the file to hold ≥ 7 u32s** (it loads the full 28-byte /
+     7×u32 blob) but **does NOT compare the whole blob**: it extracts **only u32 INDEX 5 (file byte
+     offset 20)** from each copy and runs a **single integer equality** `client[5] == vfs[5]`. A
+     mismatch on that one field fails the gate; the other six u32s are not compared. **This REFUTES the
+     earlier "full 28-byte blob compare" model and resolves the prior "compare granularity UNVERIFIED"
+     item: the granularity is a single u32 field (index 5 / byte offset 20), CODE-CONFIRMED.** The
+     field semantics of the other six u32s (which is build vs patch vs revision) remain owned by
+     `formats/game_ver.md`. On mismatch the gate raises the msg-2204 error box and quits; the substate
+     never advances to 29.
    - On **mismatch**: a Win32 modal error box is shown using message id **2204**; pressing OK runs
      the quit-from-load path (plays SFX **861010106**, writes engine state **6 / substate 2**, i.e.
      quits the client). See §1.8.
@@ -327,7 +387,7 @@ the post-handoff handshake (§1.7).
      sub-state 6 (stay on the form). **No network send.**
    - Else if **password length < 1** (empty) → show message id **4026**, return to sub-state 6.
      **No network send.**
-   - Else → persist Save-ID again, advance the drive sequence toward the server-list / channel-endpoint fetch chain (§1.5). The EULA panel itself lives at MAIN substate **6** (§1.4c), and the PIN child panel is shown by a runtime predicate after the submit point (§1.4a) — **neither is sub-state 31**.
+   - Else → persist Save-ID again, advance the drive sequence toward the server-list / channel-endpoint fetch chain (§1.5). MAIN substate **6** is the resting login form (there is **no** EULA panel — §1.4c), and the PIN child panel is raised on the **TICK workflow substate 31 → 32 edge** after the credential gate (§1.4a / §1.5 rows 31/32).
 5. The server-list → channel-endpoint → submit chain then runs along the **tick/drive substate**
    (advancing through {34..41}, §1.5). The actual account-login wire send and the cryptographic reply
    happen only at the **tail** of that chain (drive sub-state 40), on the main game connection — owned
@@ -366,30 +426,51 @@ typically numeric, PIN.
 - **Asset.** The dialog uses the secondary-password art catalogued in `formats/ui_manifests.md`
   (`data/ui/password.dds`, 1024×1024 DXT3 — listed there as "Secondary password dialog"). The
   caption strings are CP949 in the VFS and are not reproduced here.
-- **Show-trigger — CONDITIONAL CHILD PANEL, not a numbered sub-state (CODE-CONFIRMED structure;
-  scramble debugger-pending; CORRECTS the campaign-4 "31/32 = PIN modal" reading).** The PIN keypad
-  child window is constructed during the login-scene build (its own 2-atlas texture list, separate from
-  the main login form's) and is shown by a **runtime predicate AFTER the channel-fetch / submit point
-  (logically after the §1.5 server/channel join, sub-state 38)** — **NOT** by entering a numbered login
-  sub-state. **Neither 31 nor 32 is a login sub-state value in this build** (the MAIN workflow substate
-  field never holds 31 or 32 — see §1.5): the campaign-4 "31/32 = PIN modal" attribution is
-  **REFUTED**. The PIN panel is driven by **two LoginWindow-side child-panel actions — 111 (confirm) /
-  112 (cancel)** — and the keypad builder carries its **own internal action ids in the {11, 12, 13}
-  range** (two different scopes: 111/112 at the window level route to the child panel; the {11,12,13}
-  tags are inside the keypad's own dispatcher — their exact tag↔role assignment (OK / Clear / Cancel)
-  is reconciled in §11.3d, where one tag re-runs the scramble and one submits). The entered PIN rides as field #3 of the credential blob
-  built at the join handoff. (Its keypad tile geometry is recovered in §11.3; the **digit→slot scramble
-  permutation and its RNG seed live in the modal controller** — not in the keypad builder — and are
-  **debugger-pending**, do not invent them.)
+- **Show-trigger — the TICK workflow substate 31 → 32 edge (CODE-CONFIRMED, CONFLICT C1 resolved).**
+  <!-- source: _dirty/campaign-frontend/A2-pin-modal.md, _RECONCILED.md C1 -->
+  The PIN keypad child window is constructed during the login-scene build (its own 2-atlas texture
+  list, separate from the main login form's). Its visibility is set on the **TICK / drive workflow
+  substate 31 → 32 edge**, reachable **only after the substate-29 credential gate** (account-id length
+  ≥ 4, password present, + an account/save flag). **31 = raise the PIN modal; 32 = poll the PIN modal
+  `(visible && submitted)` → 33** (§1.5 rows 31/32). **This CORRECTS the earlier "NOT a numbered
+  sub-state" wording**: the *FORM/PAGE* (MAIN) state indeed never holds 31/32 (that is the field the
+  campaign-4 reading examined), but the **TICK workflow state DOES** — two independent witnesses agree
+  (this re-walk + `ui_system.md` §11.3). At the **window level** the panel is also wired to two
+  LoginWindow child-panel actions — **111 (confirm) / 112 (cancel)** — and the keypad builder carries
+  its **own internal tags `{11 = Reset, 12 = OK, 13 = Cancel}`**: **both scopes are real** (111/112
+  route the child panel; 11/12/13 drive the keypad's own dispatcher — reconciled in §11.3d). The
+  entered PIN rides as **field #3 of the credential pre-image** built at the join handoff (byte layout
+  owned by `login_flow.md`).
+- **Digit→slot scramble — a clock-seeded shuffle (MECHANISM CODE-CONFIRMED; seed + permutation
+  DEBUGGER-PENDING).** <!-- source: _dirty/campaign-frontend/A2-pin-modal.md §A2.1 -->
+  The keypad is **not** a static table and **not** a constant-seeded shuffle. The routine **seeds the
+  C runtime RNG from the system clock**, then runs a textbook **Fisher–Yates** shuffle of the 10-digit
+  pool using the standard MSVC **15-bit-RNG range-extension** (`(prev << 15) | (next & 0x7FFF)`), so
+  tile position `p` shows `perm[p]`. It **re-rolls on open, on Reset (tag 11), and after OK-submit
+  (tag 12)**. The **MECHANISM is now CODE-CONFIRMED**; only the **runtime seed value and the resulting
+  permutation** remain **DEBUGGER-PENDING** (clock-seeded — not a code immediate; do not invent them).
+- **Keypad layout literals (CODE-CONFIRMED).** <!-- source: _dirty/campaign-frontend/A2-pin-modal.md §A2.2 -->
+  Tiles are **52 × 52** at **X = 55·(p % 5) + 28** (X ∈ {28, 83, 138, 193, 248}), **Y = 170** (top
+  row) / **Y = 230** (bottom row). **Reset (tag 11) @ `(243, 133, 58, 30)`; OK (tag 12) @
+  `(90, 290, 154, 58)`; Cancel (tag 13) @ `(90, 350, 154, 58)`.** Dragon frame quad `(318, 647, 340,
+  190)`. **PIN cap = 4** digits. (Full tile-glyph source rects are in §11.3.)
+- **is-PIN modelling (CODE-CONFIRMED).** The "this is a secret input" flag is a **masked-secret bit
+  on the textbox flag word** (renders the content as `*`), and the PIN is additionally its own
+  **dedicated second-password widget class**. The value lands as **field #3 of the `1/4` credential
+  pre-image** (byte layout owned by `login_flow.md`). **CAUTION:** the IDB's `DName::isPin*` /
+  `setIsPin*` symbols are **MSVC C++ name-demangler runtime** (`__based`/`__pin` pointer modelling),
+  **unrelated** to the login PIN — do **not** propagate them as a login concept.
+  <!-- source: _dirty/campaign-frontend/A2-pin-modal.md §A2.4 -->
 
 > **Confidence.** The PIN's existence, its first-class "is-PIN" input modelling, its ≤ 4-char
 > capacity, and the fact that its value lands in the optional login-blob field are **RUNTIME-
 > CONFIRMED** against the live client (read from the client's process at login time; no addresses). The
-> panel's **structure** — a conditional child panel shown by a runtime predicate after the submit point,
-> with LoginWindow-side actions **111/112** and keypad-internal action ids **11/12/13** — is
-> **CODE-CONFIRMED**. The **digit→slot scramble permutation + RNG seed** are **DEBUGGER-PENDING** (they
-> are not code immediates in the keypad builder). The exact runtime predicate that shows the panel is
-> likewise **DEBUGGER-PENDING**.
+> panel's **structure** — shown on the **TICK workflow substate 31 → 32 edge** (31 = raise, 32 =
+> poll-to-33), with LoginWindow-side actions **111/112** and keypad-internal tags **11/12/13**, the
+> clock-seeded Fisher–Yates scramble **mechanism**, and the keypad layout literals — is **CODE-
+> CONFIRMED** (two witnesses: this re-walk + `ui_system.md` §11.3). The **digit→slot scramble seed
+> value + the resulting permutation** are **DEBUGGER-PENDING** (clock-seeded, not code immediates), as
+> is the exact **account/save flag** that gates entry into substate 31.
 
 ## 1.4b The version check is a GATE, not a label; 3-state button source mapping (CODE-CONFIRMED)
 
@@ -408,20 +489,37 @@ Two presentation facts that affect a faithful rebuild of the login form:
   ever uses **distinct** hover-vs-pressed art must apply this corrected mapping or the two states will
   render swapped.
 
-## 1.4c The EULA panel (MAIN substate 6) — it EXISTS (CODE-CONFIRMED, CORRECTS campaign-4 "NO EULA")
+## 1.4c There is NO EULA / terms panel — the 4001..4022 labels are the server-list row captions (CODE-CONFIRMED, SUPERSEDES the earlier "EULA EXISTS" reading)
 
-The login window **constructs a full EULA / terms panel**, contradicting the campaign-4 "NO EULA"
-reading. The panel is a child of the login window, shown at **MAIN workflow substate 6** (the
-EULA-read state):
+> **CORRECTION (CODE-CONFIRMED, element-by-element construct walk).** An earlier draft of this section
+> asserted the login window "constructs a full EULA / terms panel" at MAIN substate 6, built from
+> message ids **4001..4022**. **A full walk of the login window's scene builder (every one of its 73
+> widgets, in build order) refutes that reading: no terms/agreement panel is constructed anywhere in
+> the login build.** The auto-labelling that produced "EULA body labels" was a decompiler heuristic on
+> a label-build loop; the loop's 22 labels are in fact added to the **server-listbox container**, are
+> the **same 22 widgets** the layout tables already catalogue as the **server / channel row captions**
+> (§11.2a), and have **no scroll/accept/agree gating**. There is no EULA in the login flow.
+> <!-- source: _dirty/campaign10/B/construct_login.md §2.1 (lane B9), _dirty/campaign10/B/frontend_scenes.md (lane B6) -->
 
-- **Body.** Approximately **22 body labels**, populated from message catalogue ids **4001..4022**
-  (the CP949 terms text lives in `msg.xdb` and is not reproduced here).
-- **Actions.** Scroll / accept controls at actions **106 / 107 / 108** (scroll up / scroll down /
-  accept, exact split owned by the action table).
-- **Gating.** While the EULA panel is shown the **login form is gated** (the ID/PW boxes and the
-  Login button are not the active input target until the panel is dismissed/accepted).
-- **Not a numbered 31/32 sub-state.** The EULA is MAIN substate 6, not the refuted 31/32 (§1.5); a
-  faithful client builds it as a child panel of the login window, not as a separate scene.
+What the construct walk actually builds in this area, and what each former "EULA" claim really is:
+
+- **The 22 labels (message ids `4001..4022`) are the server-list ROW CAPTIONS, not EULA body text.**
+  They are built in a loop of 22 iterations (caption id = `4001 + i`, `i = 0..21`) and **added to the
+  server-listbox container** — the same 270×85 panel that hosts the list scroll controls and header
+  strip (§11.2a). Each label seat is `(X = 50, Y = 100 + 18·i, W = 383, H = 50)` (Y steps +18 per row,
+  building until Y < 496). The CP949 caption text lives in `msg.xdb` and is not reproduced here.
+- **Actions `106 / 107 / 108` are the server-listbox SCROLL controls, not EULA scroll/accept.**
+  `106 = list scroll-UP arrow`, `107 = list scroll-DOWN arrow`, `108 = scrollbar thumb dot` — three
+  small atlas-B button sprites built into the server-listbox container (rects in §11.2a / §11.4). They
+  scroll the server list; they do **not** scroll or accept any terms panel.
+- **The only modal panels the login build constructs** are: two shared notice/error dialogs (bodies
+  `4023 / 4024`, OK actions `113 / 114`), the **quit-confirm `ExitPanel`** and a generic **ErrorPanel**
+  (both added last, topmost, on the shared dragon-frame quad), the **PIN / second-password modal**
+  (§1.4a), and a small **option sub-panel** (actions `111 / 112`). **None of these is an EULA panel.**
+- **MAIN substate 6 is simply the resting login form** — not an "EULA-read" state. A faithful client
+  must **not** build a terms/agreement panel into the login scene, and must **not** gate the form on
+  one. The campaign-4 "NO EULA" reading is therefore **vindicated**; the intervening "EULA EXISTS"
+  reading was an auto-label artefact and is dropped here.
 
 ## 1.5 The login flow sub-state machine — TWO state fields (CODE-CONFIRMED, HEADLINE CORRECTION)
 
@@ -429,9 +527,11 @@ EULA-read state):
 > "single sub-state field" model is **partly wrong**. The login window carries **two** separate state
 > values that must BOTH be modelled (described here by ROLE; the concrete field offsets belong to the
 > struct map, not this behavioural spec — see §1.5b and the login-window struct doc):
-> 1. **MAIN input/workflow substate** — written only by the input/action router. It holds the values
->    **{4, 5, 6, 29, 34, 35, 37, 38}** and gates **which widgets are interactive and which input
->    branches run**. (Notably it never holds 31 or 32 — see the refutation below and §1.4a.)
+> 1. **MAIN input/workflow substate** (the FORM/PAGE state) — written only by the input/action
+>    router. It holds the values **{4, 5, 6, 29, 34, 35, 37, 38}** and gates **which widgets are
+>    interactive and which input branches run**. (This FORM/PAGE field never holds 31 or 32 — the
+>    campaign-4 "31/32" reading was about *this* field. The **TICK workflow field below DOES hold 31
+>    and 32** — see §1.4a and the C1 resolution.)
 > 2. **TICK / drive animation substate** — read and written only by the per-frame tick. It holds the
 >    full range **1..41**, is **seeded to 1 by the window constructor** (intro start), is **advanced
 >    by the tick** as the intro/curtain/drive sequence plays, and is **also written by the two lobby
@@ -448,11 +548,11 @@ EULA-read state):
 | 1 | **Intro start** — seed the curtain/letterbox animation; play login-enter SFX **861010105** | scene entry; the field's initial value. **861010105 is a sound id, not a VFX id**, fired from the tick at the 1→2 edge |
 | 2 | Curtain / letterbox **opening** animation; reset banner Y | the "carved-stone-window / red-ribbon" intro motion is a **widget-reposition / letterbox-curtain animation** (two banner/curtain widgets advance per frame), **NOT** a spawned particle effect |
 | 3, 4, 5 | Intro reposition → settle → **reveal** the login-form widgets | banner pan; also the option-page select target. State 5 stops the intro anim and shows the ID/PW boxes + buttons |
-| 6 | **Login form active / EULA-read** — the resting state, waiting for user input. **An EULA panel EXISTS at MAIN substate 6** (CORRECTS the campaign-4 "NO EULA"): a full terms panel of ~22 body labels (message ids **4001..4022**) with scroll/accept actions **106/107/108**; the login form is **gated while the EULA panel is shown** | the EULA panel is a child of the login window built at scene build; see §1.4c |
-| **29** | **OK-button credential validation** (MAIN substate) | game.ver gate verified (mismatch → msg 2204 abort, §1.4); ID len ≥ 4 (else msg **4025** → 6); PW len ≥ 1 (else msg **4026** → 6); persist Save-ID; then advance the drive sequence toward the server/channel fetch chain (34..41). **(corrects `ui_system.md`: NOT "server-list trigger"; the EULA is substate 6 and the PIN is a post-submit child panel — NOT a "31" step)** |
-| 30 | Quit-confirm "Yes" path | writes engine state **6 / substate 8** (quit) |
-| ~~31~~ | **NOT a login sub-state in this build (REFUTED)** | The campaign-4 "31 = PIN/EULA modal" reading is **REFUTED**: neither the MAIN nor the tick/drive field holds 31 here. The second-password / PIN dialog is a **conditional child panel** (LoginWindow actions **111/112**, keypad-internal **11/12/13**) shown by a runtime predicate after the submit point — **not** a numbered sub-state (§1.4a). The EULA panel is MAIN substate **6**, not 31 (§1.4c). |
-| ~~32~~ | **NOT a login sub-state in this build (REFUTED)** | likewise not held by either state field; the PIN child panel's confirm/cancel is event-driven (actions 111/112), not a polled sub-state (§1.4a). |
+| 6 | **Login form active** — the resting state, waiting for user input | **NO EULA panel exists** (§1.4c, SUPERSEDES the earlier "EULA-read" reading). The construct walk builds no terms/agreement panel; the labels once read as "EULA body" (ids **4001..4022**) are the **server-list row captions** parented to the server-listbox, and actions **106/107/108** are the server-list **scroll** controls (up/down/thumb), not EULA scroll/accept. See §1.4c / §11.2a |
+| **29** | **OK-button credential validation** (MAIN substate) | game.ver gate verified (mismatch → msg 2204 abort, §1.4); ID len ≥ 4 (else msg **4025** → 6); PW len ≥ 1 (else msg **4026** → 6); persist Save-ID; then advance the drive sequence toward the server/channel fetch chain (34..41). **(corrects `ui_system.md`: NOT "server-list trigger"; substate 6 is the resting form — there is NO EULA panel, §1.4c — and the PIN is a post-submit child panel raised on the TICK 31→32 edge, NOT a single "31" step)** |
+| ~~30~~ | **DEAD / UNREACHABLE in this build** | A `substate 30 → engine 6/8` (quit) branch is *consumed* by the tick, but **nothing in the whole binary ever writes value 30** (CODE-CONFIRMED exhaustive writer scan), so the branch is unreachable here. The genuine login quit-confirm is the shared ExitPanel, whose Yes is **inert at Login** (no GameState-1 case) — §1.8. <!-- source: _dirty/campaign-frontend/A1-login-bottomleft-quit.md §A1.2 --> |
+| **31** | **Raise the PIN modal** (TICK/drive substate) | On the **31 → 32 edge** the second-password / PIN child panel's visibility is set, reachable **only after the substate-29 credential gate** (account-id length ≥ 4, password present, + an account/save flag). **CORRECTS the earlier "NOT a login sub-state" wording**: the *FORM/PAGE* (MAIN) state never holds 31/32 (the campaign-4 reading was about the form/page state), but the **TICK workflow substate DOES** hold 31 and 32. <!-- source: _dirty/campaign-frontend/A2-pin-modal.md, _RECONCILED.md C1 --> |
+| **32** | **Poll the PIN modal → 33** (TICK/drive substate) | Substate 32 polls `(panel visible && submitted)` and advances to **33** on submit. The keypad-internal tags `{11 = Reset, 12 = OK, 13 = Cancel}` and the LoginWindow child-panel actions `{111 = confirm, 112 = cancel}` drive the keypad internals — **both scopes are real** (window-level 111/112 route to the child panel; the keypad's own dispatcher uses 11/12/13). CODE-CONFIRMED (two independent witnesses: this re-walk + `ui_system.md` §11.3). |
 | 33 | Press-OK transition → begin server-list fetch | sets up the fetch (advance to 34) |
 | 34 | Start the server-list fetch thread (lobby port 10000) | a **blocking worker thread** separate from the main overlapped connection; see `login_flow.md` §2.1 |
 | 35 | Wait for server-list reply | thread sets 36 on completion (or signals an error count) |
@@ -463,26 +563,39 @@ EULA-read state):
 | 40 | **Join handoff** | collect the second-password / PIN (§1.4a) if not already entered; build the TAB credential string, rebuild the secure context, start the overlapped net engine, set engine state **7** as a guard, **queue transition effect 10001 scheduled 30000 ms ahead**; advance to 41. The login window then exits. |
 | 41 | Transition complete; login window exits → loading | — |
 
-> **✅ RESOLVED (rows 31/32) — neither is a login sub-state; EULA and PIN are SEPARATE child panels
-> (CODE-CONFIRMED).** The earlier "31/32 = PIN-vs-EULA modal" conflict is now resolved by an
-> IDA-exact re-walk: **neither 31 nor 32 is ever held by either login state field** in this build, so
-> the dispute was over a non-existent sub-state. Both panels are **conditional child panels**, not
-> numbered sub-states:
-> - **EULA panel** — exists at **MAIN substate 6** (the EULA-read state): a full terms panel of ~22
->   body labels (message ids **4001..4022**) with scroll/accept actions **106/107/108**; the login form
->   is gated while it is shown (§1.4c). The campaign-4 "NO EULA" reading is **CONTRADICTED** — the build
->   constructs the EULA panel.
-> - **Second-password / PIN panel** — a conditional child panel shown by a runtime predicate **after**
->   the submit point (logically after server/channel join), driven by LoginWindow actions **111/112** and
->   keypad-internal action ids **11/12/13** (§1.4a). Its value rides as field #3 of the credential blob
->   built at the join handoff.
+> **✅ RESOLVED (rows 31/32) — the PIN IS the TICK substate 31→32 edge; there is NO EULA panel
+> (CODE-CONFIRMED, CONFLICT C1).** <!-- source: _dirty/campaign-frontend/A2-pin-modal.md, _RECONCILED.md C1; _dirty/campaign10/B/construct_login.md §2.1 -->
+> A fresh independent re-walk resolves the long-standing 31/32 dispute by separating the **two** state
+> fields (§1.5 headline): the **FORM/PAGE (MAIN) state never holds 31/32** (that is what the campaign-4
+> reading was about), but the **TICK / drive workflow state DOES** hold 31 and 32. Concretely:
+> - **No EULA panel (SUPERSEDES the earlier "EULA at MAIN substate 6" reading).** A full element-by-
+>   element walk of the login scene builder constructs **no terms/agreement panel**. The 22 labels once
+>   read as "EULA body" (message ids **4001..4022**) are the **server-list row captions** added to the
+>   server-listbox container (§11.2a), and actions **106/107/108** are the server-list **scroll**
+>   controls (scroll-up / scroll-down / scrollbar-thumb), not EULA scroll/accept. The campaign-4
+>   "NO EULA" reading is **CONFIRMED**; MAIN substate 6 is the plain resting login form (§1.4c).
+> - **Second-password / PIN panel** — driven by the **TICK workflow substate**: **31 = raise the PIN
+>   modal** (the child panel is shown on the **31 → 32 edge**, after the substate-29 credential gate),
+>   **32 = poll the PIN modal `(visible && submitted)` → 33**. The keypad-internal tags
+>   `{11 = Reset, 12 = OK, 13 = Cancel}` and the LoginWindow child-panel actions `{111 = confirm,
+>   112 = cancel}` drive the keypad internals — **both scopes are real**. Its value rides as field #3 of
+>   the credential blob built at the join handoff. (Two independent witnesses agree: this re-walk +
+>   `ui_system.md` §11.3.)
 >
-> A faithful client builds **both** as child panels of the login window (EULA at substate 6, PIN as a
-> post-submit conditional panel) and routes **neither** through a numbered 31/32 sub-state.
+> A faithful client builds **no EULA panel**, and drives the PIN modal off the
+> **TICK substate 31→32 edge** (raise at 31, poll-to-33 at 32), with the keypad's own {11/12/13} tags
+> and the window-level {111/112} actions both wired.
 
-> **Sub-state 40 detail.** The TAB string is `account⟨TAB⟩option⟨TAB⟩field⟨TAB⟩"host port"`, where
-> the optional middle field carries the **second-password / PIN** (§1.4a) and the 4th field is the
-> channel endpoint text obtained by the channel-endpoint fetch (§2.6). The secure-context rebuild
+> **Sub-state 40 detail.** The TAB string is `<first credential box>⟨TAB⟩<second credential box>⟨TAB⟩
+> PIN⟨TAB⟩"host port"`. The first two fields are read **from the two credential edit boxes** (the
+> handler reads the two box fields directly), so the field identity is **box-keyed, not label-keyed**:
+> field #1 = the first credential box, field #2 = the second. The conventional reading is
+> account-first / password-second, but **which physical box is account vs password is a
+> static-hypothesis** (the binary names neither box) pending a capture — keep the order pinned to the
+> boxes. The third field carries the **second-password / PIN** (§1.4a) and the 4th field is the
+> channel endpoint text obtained by the channel-endpoint fetch (§2.6). The capacity bounds the
+> secure-context builder applies are account `< 20`, password `< 17`, PIN `< 5` (owned by
+> `login_flow.md` §4.2). The secure-context rebuild
 > stages the credential session on the main (overlapped) game connection; from there the **login
 > handshake `0/0 → 1/4`** proceeds (inbound `0/0` key exchange → reactive `1/4` credential reply;
 > **`1/6` is character-create only, not part of the login handshake** — §1.7 / §4.5). The byte layout
@@ -527,11 +640,13 @@ EULA-read state):
 > **CONFLICT with `specs/ui_system.md` §6.3 (I do not own that file).** That table marks sub-state
 > **29 = "Server-list trigger point"** and **31 = "Help screen"** as CODE-CONFIRMED. The
 > login-scene lane shows both are wrong: **29 = OK-button credential validation** (ID/PW length
-> checks → msg 4025/4026), and **31 is NOT a login sub-state at all** in this build (REFUTED, §1.5 /
-> §1.4a) — the EULA panel is **MAIN substate 6** (§1.4c) and the PIN is a **post-submit conditional
-> child panel** (§1.4a), neither at a numbered 31; the help button is a *separate* control (action id
-> 105 `i`), not a sub-state. **An orchestrator/owner should correct `ui_system.md` §6.3 rows 29 and
-> 31** (and drop any "31 = EULA/Help" labelling). Recorded here, not edited there.
+> checks → msg 4025/4026), and **31 is the PIN-modal RAISE step on the TICK workflow substate** (31 →
+> 32 = poll-to-33), **not** "Help screen" (§1.5 rows 31/32 / §1.4a) — MAIN substate 6 is the resting
+> login form, **not** an EULA panel (the construct walk builds none — §1.4c); the help button is a
+> *separate* control (action id 105 `i`),
+> not a sub-state. **An orchestrator/owner should correct `ui_system.md` §6.3 row 29** (= credential
+> validation, not "server-list trigger") and confirm row 31 = "raise PIN modal" (drop any
+> "31 = Help screen" labelling). Recorded here, not edited there.
 
 ## 1.5a Login-window curtain — the two-edge letterbox OPEN geometry (CODE-CONFIRMED)
 
@@ -590,9 +705,17 @@ override**, and the drive-state 1 → 5 binding). The flat-vs-scaled 326 base is
 Toggling the Save-ID checkbox (action `h`) and a successful credential validation persist the
 account id to a loose client INI file:
 
-- **File:** `DoOption.ini`, section `[DO_OPTION]`, key `OPTION_ID` (an **INI file** string, written via
-  the Win32 private-profile-string API).
-- On scene build the box is pre-filled from this key (unless it holds the literal `"(null)"`).
+- **File:** `DoOption.ini`, section `[DO_OPTION]`, key `OPTION_ID` (an **INI file** string).
+- **Exact round-trip (CODE-CONFIRMED).** <!-- source: _dirty/campaign-frontend/A1A3-gamever-saveid-status.md §A1.4 -->
+  - **READ on scene build:** the Win32 private-profile-string read pulls `[DO_OPTION] OPTION_ID` into a
+    short buffer with the **default `"(null)"`**; the builder compares the value against the literal
+    `"(null)"` and **skips the pre-fill** when it equals that default. The id is copied into the ID box
+    (and the Save-ID box is ticked) **only when it is non-empty and shorter than 16 characters**.
+  - **WRITE on the Login action:** the private-profile-string write stores the current id back to
+    `[DO_OPTION] OPTION_ID`.
+- `DoOption.ini` is **EXE-relative and Hidden** (its path is built by stripping the module path). It is
+  one of **FIVE Hidden client INIs** the client maintains: **`DoOption.ini`, `option.ini`, `panel.ini`,
+  `combo.ini`, `TSIDX.ini`**.
 - Clearing the checkbox clears/over-writes the key.
 
 This is a **client-local convenience only** — never sent on the wire.
@@ -605,6 +728,11 @@ This is a **client-local convenience only** — never sent on the wire.
 > **never** holds the account id. (An earlier dirty note loosely described the Save-ID write as a
 > registry write — that conflated the two; the account id is the INI write, the server id is the
 > registry write.)
+>
+> **A SECOND registry value lives beside `Lastserver` (CODE-CONFIRMED).** Under the same key
+> `HKLM\software\crspace\do`, alongside the `u32` **`Lastserver`**, the client also persists a
+> registry **string** value **`servername`** (read back on launch). §1.6 previously listed only
+> `Lastserver`; both registry values share that key. <!-- source: _dirty/campaign-frontend/A1A3-gamever-saveid-status.md §A1.4 -->
 
 ## 1.7 What the Login click sends (cross-reference, not owned here)
 
@@ -631,22 +759,36 @@ Two distinct quit triggers, both terminating at engine state **6 (Quit)** → **
 1. **Version-mismatch quit.** OK/Enter with a `game.ver` mismatch → Win32 modal error box (msg
    **2204**) → on OK, the quit-from-load path: SFX **861010106**, a ~1000 ms UI fade, then engine
    state **6 / substate 2**.
-2. **User quit-confirm.** The login window has a quit-confirm modal. The actual **client-quit**
-   confirm drives flow sub-state **30**, which writes engine state **6 / substate 8** directly. The
-   30 → 6/8 consumption is **CODE-CONFIRMED** in the tick; the **writer of sub-state 30** is a
-   separate child quit dialog action (static-pending).
+2. **User quit-confirm — the shared ExitPanel (CODE-CONFIRMED; login Yes is INERT).**
+   <!-- source: _dirty/campaign-frontend/A1-login-bottomleft-quit.md, _RECONCILED.md §A1.2 -->
+   The genuine quit-confirm is a **shared `ExitPanel`** (caption **msg 2007**, **Yes = action 50**,
+   **No = action 51**). Its "Yes" runs a **GameState-keyed dispatcher** that quits for **Load
+   (engine 6/2)**, **In-game (engine 6/8)**, and **Select (net logout 2/137)** — but it has **NO case
+   for GameState 1 (Login)**. Therefore at the login scene the ExitPanel's "Yes" is **inert** (it
+   resolves to no quit action). The actual user-facing quit at the login scene is consequently an
+   **OS-level window-close / Alt-F4 path outside the widget tree** — **DEBUGGER-PENDING** to confirm
+   the exact Win32 close edge.
+   - **The substate-30 → engine 6/8 branch is DEAD/UNREACHABLE in this build (CODE-CONFIRMED).** The
+     tick *does* consume a `substate 30 → engine 6/8` branch, but an exhaustive scan of **every writer**
+     of the tick/drive substate field across the whole binary found **NOTHING ever writes value 30**.
+     The prior "writer of sub-state 30 is static-pending" item is therefore resolved to **no writer
+     exists in this build** — the row is dead (see §1.5 row 30).
 
 > **Third loop-exit edge (CODE-CONFIRMED).** Distinct from the two quit terminators above, the login
-> dispatcher **action 101** clears the engine run-flag **directly** (an immediate cancel/back edge),
-> and the loading-complete engine event (id **10001**) clears it as the normal handoff. Neither
-> writes engine state 6 — they are run-flag clears, not quit terminators.
+> dispatcher **action 101** clears the engine run-flag **directly** (an immediate cancel/back edge,
+> CODE-CONFIRMED), and the loading-complete engine event (id **10001**) clears it as the normal
+> handoff. Neither writes engine state 6 — they are run-flag clears, not quit terminators. **Actions
+> 113/114 are NOT quit either**: they hide their popup and **write tick substate 34 (server-list
+> re-fetch)** — CODE-CONFIRMED. <!-- source: _dirty/campaign-frontend/A1-login-bottomleft-quit.md §A1.2 -->
 
-> **⚠️ 113/114 are NOT the client-quit terminator (reconcile with §1.2).** The quit-confirm modal's
-> "Yes" buttons (actions **113 / 114**, captions msg ids **4023 / 4024**) hide the popup and
-> **(re)start the server-list path (advance to sub-state 34)** — they are a **server-list re-fetch
-> confirm**, consistent with §1.2's description of 113/114. The actual **client-quit** confirm writes
-> sub-state **30** from a **separate** dialog action, not from 113/114. Do **not** conflate 113/114
-> with the quit terminator.
+> **⚠️ 113/114 are NOT the client-quit terminator (reconcile with §1.2).** Actions **113 / 114**
+> (captions msg ids **4023 / 4024**) hide the popup and **(re)start the server-list path (advance to
+> tick substate 34)** — they are a **server-list re-fetch confirm**, consistent with §1.2's
+> description of 113/114 (CODE-CONFIRMED). The genuine client-quit confirm is the shared **ExitPanel**
+> (Yes = action 50 / No = action 51), whose Yes is **inert at Login** because the GameState-keyed
+> dispatcher has no Login case; the previously-cited "writes sub-state 30 from a separate dialog
+> action" path is **DEAD in this build** (no writer of value 30 — §1.5 row 30 / §1.8). Do **not**
+> conflate 113/114 with the quit terminator.
 
 The session never returns to the login scene after the first visit — post-in-game logout returns to
 **character select (state 4)**, not login (`client_runtime.md` §4).
@@ -659,7 +801,7 @@ All ids resolve through the message-catalogue lookup against `data/script/msg.xd
 | Message id | Used at | Meaning | Confidence |
 |---|---|---|---|
 | **2204** | version gate | `game.ver` mismatch / wrong client version (Win32 error box) | CODE-CONFIRMED |
-| **4001–4022** | builder static labels | the 22 login-form label captions (ID / PW / server / option labels) | CODE-CONFIRMED (ids) |
+| **4001–4022** | server-listbox row captions | the **22 server / channel row-label captions** — built in a 22-iteration loop (`4001 + i`, `i = 0..21`) and parented to the **server-listbox container** (§11.2a), **not** ID/PW/option form labels and **not** an EULA terms body (§1.4c) | CODE-CONFIRMED (ids) |
 | **4023** | quit-confirm popup #1 | quit-confirm prompt | CODE-CONFIRMED |
 | **4024** | quit-confirm popup #2 | second quit-confirm prompt | CODE-CONFIRMED |
 | **4025** | sub-state 29 | ID / account too short (length < 4) | CODE-CONFIRMED |
@@ -669,9 +811,11 @@ All ids resolve through the message-catalogue lookup against `data/script/msg.xd
 | **4029** | server-row painter | **server-list column-header caption** (the list headers are 4029 / 4030 / 4031 / 4032, loaded once by the server-row painter) — **NOT** an endpoint-fetch error; not referenced by the login tick | CODE-CONFIRMED (REFUTES the earlier endpoint-error reading) |
 | **101** | every timed in-window popup | the "OK / seconds remaining" countdown suffix (`%s - %d`) | CODE-CONFIRMED |
 
-So the family is: **4001–4024 = login labels & quit prompts**, **4025–4028 = login error toasts**,
-**4029–4032 = server-list column-header captions** (loaded by the server-row painter, not error
-toasts; see §11.4), **2204 = the version-mismatch error box**, **101 = the timed-popup suffix**.
+So the family is: **4001–4022 = server-listbox row captions** (parented to the server-listbox, §11.2a —
+NOT login-form labels and NOT EULA body), **4023–4024 = the two shared notice/quit-confirm prompts**,
+**4025–4028 = login error toasts**, **4029–4032 = server-list column-header captions** (loaded by the
+server-row painter, not error toasts; see §11.4), **2204 = the version-mismatch error box**,
+**101 = the timed-popup suffix**.
 
 ---
 
@@ -721,49 +865,81 @@ A `server_id` outside 1..40 is treated as an error/invalid entry.
 > packed `u8|u8` status/load is what drives the §2.3 colour rules on screen.) **The 8-byte UI record
 > is NOT the 16-byte char-spawn record** — any prior "16-byte server record" reference is wrong for
 > the server list.
+>
+> **The presentation painter's own field view is FOUR u16s (CODE-CONFIRMED — authoritative for
+> on-screen presentation).** <!-- source: _dirty/campaign-frontend/A3-status-painter.md §A3.5 -->
+> The §11.4 server-list painter decodes each record as **four 16-bit fields**: **`+0` id (u16), `+2`
+> status (u16), `+4` load (u16), `+6` open-time (u16)** — and the §2.3 status/load/clock rules are
+> evaluated against *these* fields. This differs from the packed `u8|u8`-status/load model in the note
+> just above; **for the on-screen presentation rules the painter's four-u16 view is authoritative**
+> (whether an earlier decode expands packed wire bytes into these u16 slots is debugger-pending). The
+> wire byte authority remains `login_flow.md`.
 
 ## 2.3 Status & load presentation rules (CODE-CONFIRMED; wire bytes capture-unverified)
 
 These rules are **UI-only** — they color and label an entry; they are not part of any codec.
 
 **Load colour thresholds (CODE-CONFIRMED, EXACT)** (population gauge). Each bucket has an exact display
-colour and an exact message-catalogue id; colours are named below as opaque ARGB so no raw hex is
-reproduced:
+colour and an exact message-catalogue id. The recovered opaque-ARGB display values (CAMPAIGN 9b,
+two-witness IDA) are:
 
 | `load` value | Bucket | Display colour (opaque ARGB) | Message id |
 |---|---|---|---|
-| > 1200 | highest / "full" tier | **red** | **6001** |
-| > 800 | high tier | **orange** | **6002** |
-| > 500 | medium tier | **yellow** | **6003** |
-| ≤ 500 | default tier | **green** | (default, no special msg) |
+| > 1200 | highest / "full" tier | **red** `0xFFFF0000` | **6001** |
+| > 800 | high tier | **orange** `0xFFED6806` | **6002** |
+| > 500 | medium tier | **yellow** `0xFFFFFF00` | **6003** |
+| ≤ 500 | default tier | **green** `0xFFB5FF7A` | (default, no special msg) |
 
-Two further status message ids belong to the same family: **6004 = "maintenance"** (the under-check /
-unavailable label), and **6005 = the load read-out**, formatted `"%4d / %4d"` (current load / capacity).
-The thresholds are strict greater-than comparisons evaluated top-down (so `load == 1200` is the high
-tier, not the full tier). These are UI-only colour/label rules and are not part of any codec.
+The thresholds are **strict greater-than** comparisons evaluated top-down (so `load == 1200` is the
+high tier, not the full tier). The four ARGB values are **literal in-code immediates** written into the
+label's tint slot — the earlier "colours come from a data table" suspicion is **REFUTED** (CODE-
+CONFIRMED). These are UI-only colour/label rules and are not part of any codec.
+<!-- source: _dirty/campaign-frontend/A3-status-painter.md, _RECONCILED.md §A3.1-§A3.4 -->
 
-**Status-code special values:**
+**Status field is a multi-field if-ladder, NOT a flat status-code switch (CODE-CONFIRMED — CORRECTS the
+old "status_code special values" table).** The painter is a **nested if-ladder keyed on the record's
+STATUS field** with only **two real cases**, plus a default:
 
-| `status_code` | Presentation |
-|---|---|
-| 0 | normal/open — falls through to the load-color path |
-| 2 / 3 / 4 (when `open_time == 0`) | fixed "status as label" branch (alternate labels with fixed text colors) — used when there is no scheduled open time |
-| 3 (when `open_time != 0`) | **scheduled open**. If `load == 24` → show a "preparing / under check" label; else render a clock `HH:MM` (§2.4) |
-| 100 | **auto-connect sentinel** — "this is the connected / current selection"; combined with the auto-advance flag it enables a connect-confirm cluster and re-renders. Used by the single-server auto-connect path (§2.4). |
+| Branch | Condition (on the record fields) | Presentation |
+|---|---|---|
+| **active** | `status == 0` | normal/open — runs the load-colour path (red/orange/yellow/green per the table above) |
+| **scheduled-open** | `status == 3` | scheduled-open path: if `load == 24` → show the "preparing" caption (msg **6004**); else render a scheduled clock `HH:MM` via the format string msg **6005** (§2.4) |
+| **default** | any other status value | **index-selects one of the 4 column-header captions** (msg **4029..4032**) |
 
-> The full status enum beyond `{0, 2, 3, 4, 24, 100}` is unknown without a capture (Open question 3).
+So the **CODE's handled status set is `{0, 3}`** only. The values `{2, 4, 24, 100}` that an earlier
+reading attributed to `status_code` actually belong to **other record fields**:
+- **2 / 4 / 24** are comparisons on the **LOAD** field (not status) — `load == 24` is the
+  "preparing" diversion inside the scheduled branch; the 2/4 comparisons are other load gates.
+- **100** is a comparison on the **SERVER-ID** field (not status).
+
+**Status message ids (CODE-CONFIRMED roles, CORRECTS the prior labels).** The ids are **table-resident
+DWORD slots** (read-only, from a contiguous global block holding `{5901, 6001, 6002, 6003, 6004,
+6005}`) — **not** in-code immediates and **not** base+offset:
+- **6001 / 6002 / 6003** = the load buckets (full / high / medium), as in the colour table above.
+- **6004** = the **"preparing" / scheduled caption** (NOT "maintenance" — corrects the prior label).
+- **6005** = the **scheduled-clock FORMAT STRING** (NOT `"%4d / %4d"` — corrects the prior label).
+- The `"%4d / %4d"`-style **load read-out** uses a **separate in-code literal**, not a message id.
+- **5901** = the **unknown-id / out-of-range fallback** caption.
+
+> **Capture-bound open question (Open question 3).** What the **server actually emits** as the status
+> enum is distinct from what the **code branches on**: the code only handles `{0, 3}` on the status
+> field, but the wire may carry other status values. The full server-emitted status enum is unknown
+> without a capture.
 
 ## 2.4 Scheduled-open clock packing (CODE-CONFIRMED math; capture-unverified semantics)
 
-When `status_code == 3` and `load != 24`, the entry shows a four-digit `HH:MM` clock formatted as
-`HH:MM` where each half is a two-digit decimal produced by a `/10`, `%10` split:
+The scheduled clock is gated by **`status == 3 && load != 24`** (a `load == 24` value diverts to the
+"preparing" caption, msg **6004**, instead of a clock). When shown, the entry renders a four-digit
+`HH:MM` clock into the **msg-6005 format string**, where each half is a two-digit decimal produced by a
+`/10`, `%10` split:
+<!-- source: _dirty/campaign-frontend/A3-status-painter.md §A3.4 -->
 
 - **HH** (hours) = two digits from the **`load`** field (`load/10`, `load%10`),
 - **MM** (minutes) = two digits from the **`open_time`** field (`open_time/10`, `open_time%10`).
 
-So for `status_code == 3`, the `load` field is repurposed as the hours of the scheduled open time
-and `open_time` as the minutes. The `load == 24` case (a 24-hours sentinel) instead shows the
-"preparing" label. *(The render math is firm; whether the server truly packs HH into the load field
+So for `status == 3`, the `load` field is repurposed as the hours of the scheduled open time and
+`open_time` as the minutes. The `load == 24` case (a 24-hours sentinel) instead shows the
+"preparing" label (msg 6004). *(The render math is firm; whether the server truly packs HH into the load field
 this way is `PLAUSIBLE` and capture-unverified — Open question in `login_flow.md`; carried here as
 the presentation rule.)*
 
@@ -797,10 +973,11 @@ exactly one entry):
 - On the **next** visit, if `Lastserver` is present, the list is shown in a **randomized display
   order that pins the remembered server** (§2.7); otherwise a plain sequential order is used.
 
-`status_code == 100` plus an auto-advance flag drives the **single-server auto-connect** path:
-when the list has one entry whose status is "current", the client forces the (left) plate visible,
-persists `Lastserver`, and advances straight to the channel-endpoint fetch (sub-state 38) without a
-manual click.
+A **server-id comparison against 100** (NOT a status value — the 100 literal is a comparison on the
+record's **server-id** field, §2.3) plus an auto-advance flag drives the **single-server auto-connect**
+path: when the list has one entry that the client treats as "current", it forces the (left) plate
+visible, persists `Lastserver`, and advances straight to the channel-endpoint fetch (sub-state 38)
+without a manual click. <!-- source: _dirty/campaign-frontend/A3-status-painter.md §A3.1 -->
 
 ## 2.6 Channel-endpoint resolve → join (CODE-CONFIRMED; payload capture-unverified)
 
@@ -1419,8 +1596,21 @@ The camera manipulator is a scene-graph node, not an explicit eye/target pair. E
 - an **orientation** (yaw/pitch quaternion),
 
 then sets the camera eye to **`eye = orbitPoint + Rotate(orientationQuat, boom)`**, where the boom
-vector points from the target out to the eye and its length (the zoom distance) is clamped to **≤ 22
-units**. **The look-at target is the active orbit point** (≈ world `(512, 87, −9652)` over the row
+vector points from the target out to the eye and its length (the zoom distance) is hard-clamped on the
+manual-zoom path.
+
+> **CONFLICT C3 — boom-Z clamp literal: 26.0 vs 22 (manual-zoom path only, DEBUGGER-PENDING).**
+> <!-- source: _dirty/campaign-frontend/A4-charselect-camera-fx.md, _RECONCILED.md C3 -->
+> A re-walk reads the **static clamp literal as `26.0`**, not the `22` recorded earlier in this
+> subsection. Record **`26.0` as the static literal** (with the note that an earlier reading said 22);
+> the **realised cap on the running client is DEBUGGER-PENDING**. Low impact: this only bounds how far
+> the player can wheel-zoom (the boom seed for keyframe 1 is **0**, so the static eye sits on the orbit
+> point regardless; the clamp only matters once the player drives the zoom). Other `[0, 22]`/`≤ 22`
+> mentions in §3.5.4 / §3.5.5 below are the earlier reading and are superseded by this C3 note for the
+> clamp magnitude.
+
+(Below, `≤ 22` / `[0, 22]` refer to the older reading of this same clamp; see C3 — the static literal
+is now `26.0`.) **The look-at target is the active orbit point** (≈ world `(512, 87, −9652)` over the row
 pivot ≈ `(508, 70, −9759)`) — *not* the stage origin (the stage origin is only the anchor the
 keyframes are added to). The base **pitch ≈ −30°** (downward), modulated by each keyframe's stored
 yaw/pitch; so the camera looks slightly **down at the standing row from in front**. The **live
@@ -1512,13 +1702,37 @@ static eye sits **on** the orbit point until the player zooms — see §3.5.4 (E
     zoom ∈ [0,22] (a preference, not a stored value).
   - **The tween duration** → **2.0 s** (literal `0.0005` = 1/2000 over the ms clock, clamped at 1.0;
     the "0.5 s" annotation was stale). **Open question 12 → CLOSED** (§3.5.4).
-- **Runtime-pending (still NOT confirmed — debugger-pending, do not invent):**
-  1. **Whether any UI action ever applies a keyframe other than 1** — none was found beyond the
-     construction (0) and row-build (1) callers, but a live confirmation is left for the debugger.
+- **NOW CODE-CONFIRMED (was runtime-pending residual 1) — KF2..KF5 are never armed.**
+  <!-- source: _dirty/campaign-frontend/A4-charselect-camera-fx.md §A4.1 -->
+  The keyframe-apply method has **exactly two callers**: construction (constant index **0**) and the
+  actor-row build / scene-reset (constant index **1**). **No slot-click, hover, or create path passes
+  an index ≥ 2** (the only other write to the "to" index is the tween-end self-snap "to" = "from", not
+  a new arm). **KF2..KF5 (and their inner yaw/pitch channels) are dead data in this scene** — no UI
+  action ever applies a keyframe other than 1.
+- **Slot ray-pick AABB (CODE-CONFIRMED — NEW).** <!-- source: _dirty/campaign-frontend/A4-charselect-camera-fx.md §A4.2 -->
+  The command handler's mouse branch unprojects the click pixel to a world ray, then tests each of the
+  five actors against an **axis-aligned box** with **half-extents ±6 in X and ±6 in Z** and a **fixed
+  world-Y band `[70.0, 92.0]`** (the Y band is not actor-centred). **First hit wins.** The ±6 X boxes
+  tile edge-to-edge against the **12-unit** slot spacing.
+- **Five slot world placements (CODE-CONFIRMED — NEW).** <!-- source: _dirty/campaign-frontend/A4-charselect-camera-fx.md §A4.3 -->
+  Anchor **(2048, 0, −6144)** + per-slot offset → absolute **X = {488, 500, 512, 524, 536}** at
+  **Y = 0**, with a shallow Z bow **{−9737, −9738, −9738.5, −9738, −9737}**. **X spacing 12.0**,
+  centred ≈ 512, **lineup scale 70.0**. **Facing yaw = π** if the per-slot facing byte is `1`, **else
+  yaw = 0** (default front, +Z forward) — the default lineup faces front.
+- **Double-music guard = category-0 single-voice replace (CODE-CONFIRMED).**
+  <!-- source: _dirty/campaign-frontend/A4-charselect-camera-fx.md §A4.4 -->
+  The scene BGM is sound **category 0**, single-voice by construction: a second BGM start on a
+  mismatched id **frees + replaces** the prior voice (a matching id does nothing) — it **overwrites,
+  does not stack**. The guard is the category-0 single-slot replace semantics, not a window flag.
+- **Runtime-pending (still NOT confirmed — debugger-pending, do not invent):** none remaining for the
+  keyframe-arm question (it is now CODE-CONFIRMED above). The manual-zoom boom-Z realised cap is the
+  only residual (§3.5.4 / C3 below).
 
 An implementer should treat the orbit geometry, the live keyframe (1), the look-at target = orbit
 point = (512, 87, −9652), the boom seed = 0 (eye on the orbit point at zoom 0), the yaw/pitch axis
-split, the zoom-dolly law, the no-re-aim rule, the 2.0 s tween, and the easing law as authoritative.
+split, the zoom-dolly law, the no-re-aim rule, the 2.0 s tween, the easing law, the **ray-pick AABB
+(±6 X/Z, Y∈[70,92])**, the **five slot placements + per-slot yaw**, and the **category-0 single-voice
+BGM guard** as authoritative.
 
 <!-- source: _dirty/campaign4/charselect3d/camera-update-law.md §5 and camera-on-select.md (resolved items + residual debugger-pending) -->
 
@@ -1532,6 +1746,31 @@ whatever the **area-0 map + the area-0 sky data + the 14:30 clock** produce — 
 not a `.box` skybox file (no skybox file exists in the VFS for this scene; §3.7.4). The sky-parameter
 files it reads are the **area-0 (`…0.bin`) family**, not the area-015 family — see the supersede in
 §3.6.3.
+
+### 3.5.6 Create-form close-up framing — ACTOR-ONLY in this build (CODE-CONFIRMED; boom-dolly DEMOTED, CONFLICT C2)
+
+<!-- source: _dirty/campaign-frontend/A5-creation.md, A4-charselect-camera-fx.md, _RECONCILED.md C2 -->
+
+The character-CREATE view is a CLOSE-UP of one character — but it is the **SAME 3D scene with the SAME
+fixed camera (KF1)**; the close-up is achieved by **moving the actor, NOT the camera**.
+
+- **CODE-CONFIRMED mechanism (actor-only).** In this build (SHA 263bd994) an **exhaustive float-literal
+  scan of the create paths found NO camera boom write** — no `−1.0`/`+15.0` pair, no FOV / near / far
+  change on any create path. The single create-preview actor is placed **≈ 56.5 units nearer the lineup
+  centre** (at anchor + `(−1536.5, 0, −3538.0)`) and **scaled 81.0** (vs the lineup's **70.0**; the
+  **81/70** ratio is confirmed by both lanes). The camera keyframe, orbit point and boom are identical
+  between select and create.
+- **DEMOTED claim (CONFLICT C2).** The campaign-9c "create-open writes a camera **boom Y = −1.0,
+  Z = +15.0**" reading is **NOT supported by this build's code** and is **DEMOTED to DEBUGGER-PENDING /
+  possibly-stale-from-another-build**. (The realised sign of `eye = orbit + Rotate(quat, boom)` cannot
+  be read statically; a live read could differ, but the static evidence in this build is actor-only.)
+- **Engineer guidance (explicit).** Keep **one fixed camera (KF1)** for both select and create; **never
+  tween the camera on create** (or on slot click). For create-mode, move the **single preview actor
+  +56.5 in world −Z** (toward the camera) and **scale it 81.0** — that is what fills the frame.
+
+Both the **81/70 scale ratio** and the **≈ 56.5u-nearer actor placement** are **CODE-CONFIRMED** (both
+lanes agree); the boom-dolly literals are DEBUGGER-PENDING (C2). The KF2..KF5 dead-arm is now
+CODE-CONFIRMED (§3.5.5).
 
 ### 3.6.1 Lighting rig (CODE-CONFIRMED structure; VALUES data-driven — read light0.bin keyframe 29)
 
@@ -1558,6 +1797,22 @@ child (the same manager the main world uses). That manager builds the lighting r
   table structure** and the **14:30 → keyframe 29** index are CODE-CONFIRMED; the per-keyframe
   **colour/direction VALUES remain data-driven** — read `light0.bin` keyframe 29, an **asset-analyst
   lane**, not static-settleable.)
+
+**CAMPAIGN 9c — the warm/bright recipe + the "too dark" cause (IDA two-witness).** The scene has ZERO
+light objects; the dominant light is a near-WHITE DEVICE AMBIENT floor: `floor = (OPTION_BRIGHT/100) ×
+255`, at default BRIGHT=100 → device ambient = white (1,1,1), committed to the D3D ambient render-state.
+The per-keyframe ambient table is INERT (multiplier 0.0). The cell geometry carries NO baked vertex
+colour (the `.bud` FVF lacks a diffuse channel; the `.ted` vertex block is uniformly neutral-white) — so
+warmth is white ambient on neutral-white geometry at FULL luminance, plus the additive emissive
+brazier/glow/waterfall sprites. The `data/effect/map/<cell>.bmp` is the 2D MINIMAP bitmap, NOT a runtime
+lightmap (never sampled by the char-select builder). The waterfall's BLUE comes from per-particle BGRA
+diffuse in the `.xeff` (the `waterfall-pie` textures are pure white) — NOT from the texture. THE "TOO
+DARK" CAUSE in a Godot port: PBR ambient at energy 1.0 lands Lambert-attenuated, so the unit-white floor
+reads darker than the original flat full-bright ambient — drive the WorldEnvironment ambient brighter
+(energy parity) with sky-contribution 0 and neutral/unshaded materials; do NOT add scene point-lights
+(the original has none).
+
+<!-- source: campaign9c scene_lighting.md + scene_lighting_assets.md (IDA two-witness; white device ambient, no lightmap, neutral-white geometry, waterfall blue = per-particle diffuse) -->
 
 ### 3.6.2 Fog / sky (CODE-CONFIRMED field)
 
@@ -1780,6 +2035,57 @@ camera-facing quad converts the scattered dots into the brazier flames and the w
 and the two brazier elements' ±X offsets around the spawn pivot.
 
 <!-- source: campaign9/wave2 ida effect-brazier-waterfall + vfs effect-assets (render model, no point-lights, 68 sub-effects, billboard port contract) -->
+
+### 3.6.7 Ambient-effect BUILD RECIPE — per-emitter-type placement (CAMPAIGN 9c, two-witness: IDA spawn/render + black-box bytes)
+
+CAMPAIGN 9c resolved the §3.6.6 debugger-pending residuals (the two brazier ±X offsets, the
+emitter-type render model, and the per-emitter blend) STATICALLY, with a two-witness gate (IDA static
+recovery of the spawn/render path + a black-box byte-parse of the real `char_select-u.xeff`) agreeing
+with zero residual over all 68 sub-effects. This is the engineer build recipe.
+
+**Single placement.** The effect is spawned ONCE at world (508.483, 69.887, −9758.569) → Godot
+(508.483, 69.887, +9758.569), **IDENTITY orientation (no yaw)**, scale 1.0, looping, anchored to a
+fixed world point that does NOT follow the camera. Because the instance orientation is identity and
+scale 1.0, each sub-effect's local offset (the first track triplet — `velocity_x/y/z`, the §A.8 field
+the parser exposes as `XeffKeyframe.Velocity*`) is **added directly to the anchor with no rotation**.
+So each quad/mesh CENTER sits at `anchor + offset`; only a billboard's *facing* tracks the camera.
+**The flying-pixels correction: do NOT collapse all 68 to one camera-tracking point — place each at
+`anchor + its own offset`, identity-oriented.** (The braziers therefore separate along world ±X.)
+
+**Render each emitter type DISTINCTLY (not all as camera-facing billboards):**
+- `emitter_type == 0` (billboard): camera-facing flat quad, full size = `size_x·2 × size_y·2`
+  (size = half-extents), at `anchor + offset`. (Use the per-axis size — NOT a square `max()`.)
+- `emitter_type == 1` (mesh-particle): a real ORIENTED quad/mesh tile (the `.xobj` template, here a
+  quad), oriented by the keyframe Euler rotation, scaled by size, at `anchor + offset` — **NOT a
+  camera-facing billboard**. The 28 waterfall tiles are oriented quads forming a flat curtain sheet.
+- `emitter_type == 2` (directional billboard): an oriented quad with an explicit **+90° Y
+  pre-rotation** plus the keyframe Euler rotation (used here for the large `imot-gu-tung06-01`
+  corona glows).
+
+**Feature grouping (byte-confirmed local offsets; full per-row table is dirty-only):**
+| Feature | Texture family | offset_x | offset_z |
+|---|---|---|---|
+| RIGHT foreground brazier | `fire_4-*` core + `lflare-l-yellow-01` + smoke | **+28.6** | +36.8 |
+| LEFT foreground brazier | `fire_4-*` core + `lflare-l-yellow-01` + smoke | **−23.9** | +36.8 |
+| Secondary/background braziers (flank both sides) | `fire_4-*` + `lflare` | ±46 / ±51 / ±119 / ±123 | −35 … +18 |
+| WATERFALL curtain (wide sheet, 28 tiles) | `waterfall-pie-01..04` | −147 … +118 (centroid ≈ 0) | **−95 … −116** |
+| Waterfall-foot / sparks (10) | `fire_piece1b-01` | −142 … +106 | −44 … −107 |
+| Corona / glow overlays (11, directional) | `imot-gu-tung06-01` | −136 … +118 | −108 … +31 |
+
+The two foreground braziers are **~52.5 world-units apart on X**, both ~+36.8 forward, flame height
+~+16…+24. The waterfall is a **wide ~265-unit curtain** behind stage centre (z ≈ −105), curtain-top
+tiles high (+Y 45…82) and splash tiles lower — NOT a narrow column.
+
+**Blend (per sub-effect).** A per-sub-effect flag selects the blend pair: straight alpha
+(SRC-ALPHA / INV-SRC-ALPHA) vs **additive** (SRC-ALPHA / ONE). The brazier fire, lens-flare, corona
+and waterfall spray use the **additive** pair, so they ADD light onto the framebuffer (brightening
+the dark stone temple). **None of the emitters is a real light source** — do NOT port as point-lights.
+
+**Animation.** Each sub-effect cycles on its own `tex_count`/`anim_stride` (fire ≈ 18×67 ms,
+waterfall 4-frame, sparks 9-frame, corona 21-frame); size/alpha lerp, the sprite frame steps, alpha
+is inverted (in-memory = 1.0 − file). UV-scroll bit0=U / bit1=V over a 5000 ms period.
+
+<!-- source: campaign9c effects_format.md + char_select_effect.md + char_select_effect_bytes.md (two-witness; resolves §3.6.6 ±X + emitter-type + blend residuals) -->
 
 ## 3.7 Char-select 3D scene composition — world, cell, stage, assets (CODE-CONFIRMED + black-box VFS)
 
@@ -2106,8 +2412,8 @@ spawn descriptor seeded with the current create choices:
 | Descriptor offset | Source | Meaning |
 |---|---|---|
 | +0x2C | sex selector | **sex/gender** — `1`, or `2` for internal class 2 (the female/alt-gender class) |
-| +0x2E | face selector | **faceA** — face index, clamped to **1..7** (the `+`/`−` face buttons) |
-| +0x30 | second appearance selector | **faceB** — hair / alt appearance seed (exact meaning unresolved, Open question 4) |
+| +0x2E | face selector | **faceA** — face index, the `+`/`−` buttons clamp it to **[1, 7]**, default **1**; nonzero ⇒ slot occupied (CODE-CONFIRMED) |
+| +0x30 | second appearance selector | **faceB** — **set-once (`= 1`) on create-open, NO `+`/`−` stepper in the create form** (CODE-CONFIRMED); packed into the descriptor / create blob but **read by no create widget** — its meaning is downstream (skin chain / server), consumer DEBUGGER-PENDING (Open question 4 resolved on the client side) |
 | +0x34 | class selector | **internal class id (1..4)** |
 
 The create preview is placed at the stage centre (X ≈ origin − 1536.5, Z ≈ origin − 3538 — i.e. between
@@ -2150,21 +2456,32 @@ descriptor slot is which equipment category is for the asset/struct authors to p
 
 ## 4.4 Name validation (CODE-CONFIRMED)
 
-On create-confirm (and on rename, §6), the entered name is validated locally before any send:
+On create-confirm (cmd 35, and on rename §6), the entered name is validated locally before any send.
+Each failure surfaces a distinct message-catalogue toast (CODE-CONFIRMED ids):
+<!-- source: _dirty/campaign-frontend/A5-creation.md §A5.5 -->
+
+| Check | Failure id | Notes |
+|---|---|---|
+| empty / `@BLANK@` | msg **2190** | a blank or sentinel name |
+| banned word | msg **2075** | matched against the banned-word list |
+| charset / length predicate | msg **12012** | the rule below |
 
 - **Minimum length: 2** characters; an empty first character fails. **DEBUGGER-PENDING:** whether
   the "2" is measured in **bytes or in CP949 characters** is not statically settleable (a single
   double-byte Hangul syllable is 2 bytes but 1 character) — confirm the exact byte-vs-char semantics
-  of the minimum-length check on the live client before relying on it.
+  on the live client before relying on it.
 - **Allowed characters only:**
   - ASCII **lowercase `a`–`z`** (0x61–0x7A),
   - ASCII **digits `0`–`9`** (0x30–0x39),
   - **CP949 double-byte Hangul** (a valid lead byte + valid trail byte; a lone lead byte with an
     out-of-range trail fails).
-- **Rejected:** uppercase Latin, punctuation, and any other byte.
+- **Rejected:** uppercase Latin, spaces, punctuation, and any other byte.
+- **Length bound: 17 bytes including the NUL terminator** (16 payload bytes).
 
-So legacy character names are **Korean Hangul and/or lowercase-alphanumeric only**. A revival should
-keep the same rule (or deliberately relax it) and surface the rejection as a message-id toast.
+So legacy character names are **Korean Hangul and/or lowercase-alphanumeric only** (no uppercase, no
+spaces). A revival should keep the same rule (or deliberately relax it) and surface the rejection as a
+message-id toast. On a valid name the create-character send is **`major 1 / minor 6` (`1/6`)** — byte
+layout owned by `login_flow.md` (§4.5).
 
 ## 4.5 Create send & result (cross-reference, not owned here)
 
@@ -2367,8 +2684,8 @@ For the presentation/Godot engineer. Sound ids resolve through `sound_runtime.md
 | Ids | Meaning |
 |---|---|
 | 2204 | version-mismatch error box (login) |
-| 4001–4022 | login form labels |
-| 4023 / 4024 | quit-confirm prompts (login) |
+| 4001–4022 | server-listbox row captions (parented to the server-listbox; NOT form labels, NOT EULA — §1.4c / §11.2a) |
+| 4023 / 4024 | shared notice / quit-confirm prompts (login) |
 | 4025 / 4026 / 4027 / 4028 / (4029) | login error toasts (ID short / PW empty / no servers / connect fail / endpoint fail) |
 | 101 | timed-popup countdown suffix |
 | 5001–5040 (+ locale banks) | localized server names |
@@ -2477,7 +2794,7 @@ next scene.
   OK / Enter:
       version gate (msg 2204 on mismatch → quit: state 6/2)
       → sub-state 29 (validate ID≥4 / PW≥1; fail → msg 4025/4026 → sub-state 6)
-      → drive substate advances (EULA panel is substate 6; NO 31/32 PIN-substate) → 34 server-list fetch (lobby :10000)
+      → drive substate advances (MAIN substate 6 = resting form, NO EULA; PIN modal = TICK substate 31→32) → 34 server-list fetch (lobby :10000)
       → 35 wait → 36 consume (empty → 4027; fail → 4028; else render)
   [SERVER SELECT, same window]
       → 37 server selected (persist Lastserver; randomized order; NEW badge)
@@ -2526,11 +2843,16 @@ next scene.
 2. **ID-box max length 6.** Surprisingly short for an account name (validation only requires ≥ 4).
    Whether it reflects a legacy fixed-width account id, or is overwritten elsewhere, is unresolved.
    Wants a real `DoOption.ini` / capture. A revival may relax it.
-3. **Full `status_code` enum.** Only `{0, 2, 3, 4, 24, 100}` are special-cased; the meaning of other
-   in-range status values (and whether the server ever sends them) is capture-only.
-4. **`faceA` vs `faceB` semantics.** Descriptor +0x2E is the face index (clamped 1..7); +0x30 is a
-   second appearance seed (plausibly hair or skin tone) but is not labelled. Needs the other
-   appearance increment buttons decoded and/or a create capture.
+3. **Full server-emitted status enum (capture-bound).** The painter's status field branches on only
+   `{0, 3}` (active / scheduled-open); the `{2, 4, 24}` literals are LOAD-field gates and `100` is a
+   SERVER-ID-field gate, not status values (§2.3, CORRECTED). What the **server actually emits** as the
+   status enum is distinct from what the code branches on and is capture-only.
+4. **`faceB` semantics — RESOLVED on the client side (consumer DEBUGGER-PENDING).** Descriptor +0x2E
+   is **faceA**, the face index the `+`/`−` buttons clamp to **[1, 7]** (default 1). Descriptor +0x30
+   is **faceB**, which the create form **sets once to `1` on open and never exposes a `+`/`−` stepper
+   for**; it is packed into the descriptor / create blob but **read by no create widget**, so its
+   meaning is **downstream** (skin chain / server). The on-client behaviour is CODE-CONFIRMED; the
+   downstream **consumer** is DEBUGGER-PENDING.
 5. **`list.dat` byte layout.** The lobby-host file's 768-byte record (name @ +0, host @ +0x100) is
    `static`-derived and on-disk-unverified; the gap between the name and +0x100 (padding? flags?
    port?) and whether +0x100 also carries a port are unknown without a real file.
@@ -2546,20 +2868,23 @@ next scene.
 8. **`1/7 CmsgSelectCharacter` role.** The 2-byte select send sets the net-busy flag; whether it is
    a "lock this slot / fetch detail" pre-step that must precede every `1/9` enter, or only the first
    selection, is unclear without a capture or the inbound 2-byte select reply traced.
-9. **EULA gating (CORRECTED).** The EULA panel is **MAIN substate 6** (§1.4c), **not** "sub-states
-   31/32" (that earlier framing is REFUTED, §1.5). It gates the login form while shown. Whether it is
-   shown every launch or only first-run (an INI/registry guard) is still **DEBUGGER-PENDING**.
-10. **Second-password / PIN modal show-trigger (UNRESOLVED in static).** The PIN's existence, its
-    first-class "is-PIN" input modelling, its ≤4-char capacity, and the fact that its value becomes
-    the optional login-blob field are RUNTIME-CONFIRMED (§1.4a); its **layout / scramble** is recovered
-    (§11.3: modal rect, the 2×5 scrambled keypad, the reset/OK/cancel tags and atlas source rects).
-    What remains **DEBUGGER-PENDING** is (a) the exact **runtime predicate** that shows the PIN child
-    panel after the submit point (it is a conditional child panel driven by LoginWindow actions
-    111/112 with keypad-internal ids 11/12/13, NOT a numbered 31/32 sub-state — §1.4a), and (b) the
-    **digit→slot scramble permutation + RNG seed**, which live in the modal controller (not the keypad
-    builder) and are not code immediates. Also open: the live re-roll-on-Reset (debugger-testable),
-    and whether the modal can be skipped/disabled per account. Its labels are baked atlas art (no
-    caption ids).
+9. **EULA gating — CLOSED (NO EULA exists).** Resolved CODE-CONFIRMED by the element-by-element login
+   construct walk: the login scene builds **no terms/agreement panel** (§1.4c). The labels once read as
+   "EULA body" (ids **4001..4022**) are the **server-list row captions** (§11.2a) and actions
+   **106/107/108** are the server-list **scroll** controls — there is nothing to gate the form. MAIN
+   substate 6 is the plain resting login form; the **PIN** modal is the separate TICK substate
+   **31 → 32** edge (§1.4a / §1.5). No EULA-show guard to chase.
+10. **Second-password / PIN modal show-trigger (NOW RESOLVED to the 31→32 edge).** The PIN's
+    existence, its first-class "is-PIN" input modelling, its ≤4-char capacity, and the fact that its
+    value becomes field #3 of the credential pre-image are RUNTIME-CONFIRMED (§1.4a); its **layout +
+    the scramble mechanism** are CODE-CONFIRMED (§1.4a / §11.3: modal rect, the 2×5 clock-seeded
+    Fisher–Yates keypad, the reset/OK/cancel tags and atlas source rects). The **show-trigger is the
+    TICK workflow substate 31 → 32 edge** (31 = raise, 32 = poll-to-33), wired at the window level to
+    LoginWindow actions **111/112** and to the keypad's own tags **11/12/13** (§1.4a / §1.5 rows
+    31/32) — CONFLICT C1 resolved. What remains **DEBUGGER-PENDING** is (a) the **account/save flag**
+    that gates entry into substate 31, and (b) the **digit→slot scramble seed value + the resulting
+    permutation** (clock-seeded, not code immediates). Also open: whether the modal can be
+    skipped/disabled per account. Its labels are baked atlas art (no caption ids).
 11. **Char-select 2D class icon.** No standalone class-icon widget keyed by a class index exists in
     the char-select 2D builder; per-slot class is conveyed by the descriptor-driven 3D preview (§3.3)
     plus the slot frame art (§11.5b). If a 2D class badge is desired in the revival, it must be added
@@ -2578,10 +2903,13 @@ next scene.
 ### Cross-spec conflicts recorded here (owners must resolve in their files)
 
 - **`specs/ui_system.md` §6.3** marks sub-state **29 = "Server-list trigger"** and **31 = "Help
-  screen"** as CODE-CONFIRMED. Both are wrong: **29 = OK-button credential validation**, and **31 is
-  NOT a login sub-state in this build** (REFUTED) — the EULA panel is **MAIN substate 6** and the PIN is
-  a **post-submit conditional child panel**, neither at a numbered 31 (the help button is the separate
-  action `i` / id 105). The owner of `ui_system.md` should correct those two rows. (§1.5 / §1.4a / §1.4c)
+  screen"**. The **29 = "Server-list trigger"** label is wrong (**29 = OK-button credential
+  validation**); the **31 = "Help screen"** label is wrong (**31 = raise the PIN modal** on the TICK
+  workflow substate — 31 → 32 poll-to-33; CONFLICT C1 resolved in favour of ui_system §11.3's PIN
+  reading, not the §6.3 "Help" label). **There is no EULA panel** (the construct walk builds none —
+  §1.4c); MAIN substate 6 is the resting form, and the help button is the separate action `i` / id 105.
+  The owner of `ui_system.md` should correct §6.3 row 29 and reconcile row 31 to "raise PIN modal."
+  (§1.5 / §1.4a / §1.4c)
 - **Opcode `1/6` — collision STATICALLY RESOLVED (no capture needed); protocol-author to split the
   rows** (`opcodes.md` / `names.yaml` / `login_flow.md`): there is **no shared opcode**. The login
   credential send is **`1/4`** (the secure auth reply to inbound `0/0`); **`1/6` is character-create
@@ -2731,6 +3059,16 @@ Atlas shorthand for this subsection: **A** = `login_slice1.dds`, **B** = `loginw
 canvas; "src" = `(U, V)` top-left into the named atlas. Three-state buttons list
 `normal / hover / pressed` source origins. Action ids are the section 1.2 flow ids.
 
+> **Construct-walk provenance (CODE-CONFIRMED).** A full element-by-element walk of the login window's
+> scene builder — its **73 widgets, in build order** — re-confirms every rect / source-UV / action id in
+> §11.2a–§11.2g, the **4-atlas preload order** (`login_slice1.dds` → `loginwindow.dds` →
+> `InventWindow.dds` → `loginwindow_02.dds`, §11.1), the window's centred **1024×768** canvas
+> (`x = screenW/2 − 512`, `y = screenH/2 − 384`), and the build contract: the builder is the window's
+> primary-vtable build slot (invoked once after the constructor; the constructor builds **no** widgets
+> and only seeds the init/idle field — §1.5). The **22 server-listbox row captions** (ids 4001..4022)
+> and the **server-list scroll controls** (106/107/108) are confirmed parented to the server-listbox
+> container — there is **no** EULA panel (§1.4c). <!-- source: _dirty/campaign10/B/construct_login.md (lane B9) -->
+
 ### 11.2a Upper window - main panel, server listbox, scroll controls
 
 | Role | Atlas | Rect (X,Y,W,H) | Src (U,V) | Kind | States (N/H/P) | Action / caption |
@@ -2786,19 +3124,21 @@ and generic-error dialogs reuse the same rect (see section 11.2f for the trailin
 
 > **Action-id correction (CODE-CONFIRMED, supersedes the earlier confirm/notice swap).** The
 > login-form action handler dispatches **103 = login OK / confirm** (submit the ID+PW, run the version
-> gate then advance to credential validation, §1.4) and **102 = notice / agreement** (toggle the
-> notice/agreement panel). The two gold 3-state buttons below carry these ids exactly: the
-> `login_slice1.dds` button at **src (456, 64, 112, 39)** is the **login-OK** (action **103**), and the
-> button at **src (456, 166, 112, 39)** is the **notice / agreement** (action **102**). The login-OK
-> button, the two edit fields (109/110), the save-ID checkbox (104) and the server-select trio
-> (106/107/108) are the load-bearing form controls.
+> gate then advance to credential validation, §1.4) and **102 = server-list reveal** (show the
+> server-list / channel panel — the construct walk builds this as the "server-list reveal button", not
+> a "notice / agreement" toggle, and there is no agreement panel — §1.4c). The two gold 3-state buttons
+> below carry these ids exactly: the `login_slice1.dds` button at **src (456, 64, 112, 39)** is the
+> **login-OK** (action **103**), and the button at **src (456, 166, 112, 39)** is the **server-list
+> reveal** (action **102**). The login-OK button, the two edit fields (109/110), the save-ID checkbox
+> (104), and the server-listbox scroll controls (106 scroll-up / 107 scroll-down / 108 thumb) are the
+> load-bearing form controls.
 
 | Role | Atlas | Rect (X,Y,W,H) | Src (U,V) | Kind | States / notes | Action |
 |---|---|---|---|---|---|---|
 | Bottom login-bar panel | A | 0, 326*H/768, 1024,442 | 0,582 | panel | Y scales with screen height | - |
 | Login background plate image | A | 0,469,494,113 | 265,0 | image | the plate the ID/PW row sits on | - |
 | **Login / confirm button** (gold) | A | 456,64,112,39 (on-screen y=398) | 266,398 / 490,398 / 490,398 | 3-state button | submit ID+PW (version gate → validation, §1.4); word baked into art | **103** |
-| **Notice / agreement button** (gold) | A | 456,166,112,39 (on-screen y=398) | 154,398 / 378,398 / 378,398 | 3-state button | toggle notice / agreement panel; word baked into art | **102** |
+| **Server-list reveal button** (gold) | A | 456,166,112,39 (on-screen y=398) | 154,398 / 378,398 / 378,398 | 3-state button | reveal the server-list / channel panel (NOT a "notice / agreement" toggle — there is no agreement panel, §1.4c); word baked into art | **102** |
 | Inner form box (layout only) | (none) | 0,0,1024,100 | - | panel | invisible container | - |
 | Account-label caption art | A | 340,30,38,13 | 0,398 | image | **baked art** | - |
 | Password-label caption art | A | 507,30,49,13 | 38,398 | image | **baked art** | - |
@@ -2806,9 +3146,9 @@ and generic-error dialogs reuse the same rect (see section 11.2f for the trailin
 | **ID input field** | A | 390,32,102,13 | 615,404 | text box | plain text; max length 16 (UI cap, §1.3). Dest origin `(390,32)`, src `(615,404)`, size `102×13` | **109** |
 | **Password input field** (masked) | A | 568,32,102,13 | 615,404 | text box | masked, max length 12; mask glyph = ASCII `*` (§11.2e mask note). Dest origin `(568,32)`, src `(615,404)`, size `102×13` | **110** |
 | **Save-ID checkbox** | A | 694,86,13,13 | 717,398 (off) / 730,398 (on) | 3-state checkbox | pre-checked from saved-id (§1.6) | **104** |
-| Server-select up arrow | B | 467,86,13,10 | 483,490 | button | scroll/select server up | **106** |
-| Server-select down arrow | B | 467,455,13,10 | 505,490 | button | scroll/select server down | **107** |
-| Server-select confirm dot | B | 469,98,9,9 | 496,490 | button | commit server selection | **108** |
+| Server-list scroll-up arrow | B | 467,86,13,10 | 483,490 | button | scroll the server listbox up | **106** |
+| Server-list scroll-down arrow | B | 467,455,13,10 | 505,490 | button | scroll the server listbox down | **107** |
+| Server-list scrollbar thumb dot | B | 469,98,9,9 | 496,490 | button | scrollbar thumb / drag dot of the server listbox | **108** |
 
 > **Atlas note for the edit fields (CORRECTED — CODE-CONFIRMED).** Both edit-field frames are
 > sub-rects of **`login_slice1.dds`** (atlas **A**), sharing source **(615,404)**, size **102×13**.
@@ -3026,6 +3366,13 @@ shared dialog/frame atlas (`InventWindow.dds`) for the framed background quad - 
   (`X=81, Y=138, W=150, H=22`); it carries no tag and takes no input (the keypad buttons drive entry).
   Render it as the masked-echo display surface above the keypad.
   <!-- source: _dirty/structs/pin-modal-displaylist.md -->
+- **Nested close ExitPanel inside the keypad (CODE-CONFIRMED, folded from the construct walk).** The
+  keypad builder constructs **one additional** centred close/X panel **inside** the modal — its own
+  `ExitPanel` on the shared dragon-frame sub-rect (`InventWindow.dds` src `(318,647)`, `340×190`),
+  placed centred at `((W−340)/2, (H−190)/2, 340, 190)`. It is the modal's own close frame and is built
+  in addition to the digit tiles + Reset/OK/Cancel buttons. A faithful rebuild includes this nested
+  close panel as a distinct child of the PIN modal.
+  <!-- source: _dirty/campaign10/B/construct_login.md §2.6 (lane B9) -->
 
 ### 11.3a Keypad tile grid (2 rows x 5 columns)
 
@@ -3062,7 +3409,7 @@ hidden. The visible digit at position `p` is `perm[p]` from the scramble (sectio
   source-rect arguments are `srcU = d*52`, `srcV = 560` — the axes were swapped.)
   <!-- source: _dirty/structs/pin-modal-displaylist.md -->
 
-### 11.3c Keypad scramble (CODE-CONFIRMED; live re-roll-on-reset UNVERIFIED)
+### 11.3c Keypad scramble (CODE-CONFIRMED; on-Reset re-roll CODE-CONFIRMED — CAMPAIGN 9b)
 
 The digit->position mapping is produced **entirely client-side** - there is no server permutation and
 no fixed local table:
@@ -3075,8 +3422,8 @@ no fixed local table:
    hidden - so position `p` displays digit `perm[p]`.
 
 Result: a **fresh random permutation of 0-9 every time the modal opens and every time Reset is
-pressed**. The on-open re-roll is statically confirmed; the live re-roll on Reset is debugger-
-testable and currently **UNVERIFIED**.
+pressed**. Both the on-open re-roll AND the on-Reset re-roll are now **CODE-CONFIRMED** — the keypad
+OnEvent tag-11 (Reset) handler re-invokes the scramble routine (CAMPAIGN 9b, IDA re-walk).
 
 - **Digit-key behaviour — the TAG is the true digit, the POSITION is scrambled.** The on-screen digit
   positions are re-rolled on open and on Reset, but each digit button's **tag is its true digit value
@@ -3102,17 +3449,12 @@ Button **tags** are integer ids stored on each widget and read back by the keypa
 > variant of this modal routes its submit through the net handler with a separate constant). The
 > modal fires no VFX and no PIN-specific SFX of its own.
 
-> **DISCREPANCY to reconcile (tag↔role labelling).** A separate IDA-exact re-walk (campaign-9 wave-3)
-> reports the **keypad-internal action ids** as **11 = OK, 12 = Clear, 13 = Cancel**, mapping tag 11 to
-> the **(243,133,58,30)** button (which this table labels "Reset") and tag 12 to the **(90,290,154,58)**
-> button (labelled "OK" here). The **rects are identical between the two readings** — only the *role*
-> name attached to tags 11 and 12 differs (this table: 11=Reset / 12=OK; the wave-3 read: 11=OK /
-> 12=Clear). The behaviours are not in dispute: one button **re-runs the scramble** and one **submits**.
-> A faithful rebuild should wire behaviour-to-rect (the (243,133,58,30) small button vs the
-> (90,290,154,58) wide button) and treat the **tag-number↔role assignment as DEBUGGER-PENDING** until a
-> live read settles which numeric tag the submit handler actually compares against. The LoginWindow-side
-> child-panel actions are **111 (confirm) / 112 (cancel)** (§1.4a), a different scope from these
-> keypad-internal tags.
+> **DISCREPANCY RESOLVED (CAMPAIGN 9b, IDA — the keypad OnEvent switch is ground truth).** The handler
+> maps **tag 11 = Reset (re-shuffle)**, **tag 12 = OK (submit)**, **tag 13 = Cancel** — i.e. THIS table
+> is correct. The earlier campaign-9 wave-3 reading (11 = OK / 12 = Clear) was WRONG. The rects were
+> never in dispute (the (243,133,58,30) small button re-runs the scramble; the (90,290,154,58) wide
+> button submits). The LoginWindow-side child-panel actions are **111 (confirm) / 112 (cancel)**
+> (§1.4a), a different scope from these keypad-internal tags.
 
 ### 11.3e Two distinct numeric keypads — do NOT conflate them
 
@@ -3318,6 +3660,119 @@ SFX **920100200** (kind-0 music slot, §3.8.1), which is also the enter-world cu
 > by the descriptor-driven 3D preview (section 3.3) and the slot frame art (section 11.5b); the
 > inline-source cells in the info region are **number-glyph placeholders**, not class icons. A 2D
 > class badge keyed by a class index is **UNVERIFIED / absent** in this builder (Open question 11).
+
+### 11.5e Create-form construction refinements (CAMPAIGN 9b, IDA re-walk)
+
+The character-CREATE sub-form (a sub-state of the same window, drawn over the same 3D temple cell,
+§4 / §3.7.6) adds these CODE-CONFIRMED widgets, recovered byte-exact from the create-form builder.
+Note this is the CREATE form — it is distinct from the select-screen info region (§11.5d), which
+correctly has no 2D class badge.
+
+- **Create sub-form chrome atlas = `data/ui/InventWindow.dds`** — a THIRD atlas beyond
+  `loginwindow.dds` and `mainwindow.dds`, loaded into its own texture list for the create panel.
+- **Class-select button strip** (the 4 class-picker buttons): source row **V = 1005** (distinct from
+  the 1004 row used by Create/Delete/Enter), with a per-class source-X highlight matrix — idle
+  `{590, 635, 680, 725}` <-> selected `{770, 815, 860, 905}` for UI classes `{0,1,2,3}`. Class-pick
+  button **actions = 10 / 11 / 12 / 13** (UI index = action - 10).
+- **Create / Delete / Enter buttons**: actions **4 / 5 / 6**, all at source row **V = 1004**. The
+  conditional overlay button is action **61**.
+- **Face appearance steppers**: actions **21 (face +) / 22 (face -)**, 2D-only — they re-page a 2D
+  face index and do NOT rebuild the 3D preview actor (only a class change rebuilds it, §3.3).
+- **Class NAME** = `msg.xdb` ids **14003..14007** keyed by internal class id (14003 default). **Class
+  DESCRIPTION** = `npc.scr` keyed records, keys 1..4, three CP949 lines at record fields +0x14 /
+  +0x54 / +0x94 (§4.1.1 / `config_tables.md` §2.17.3).
+- **UI-index -> internal-class map**: UI `{0,1,2,3}` -> internal `{4,1,3,2}`; per-class create BGM
+  `{910065000, 910062000, 910064000, 910063000}` for UI `{0,1,2,3}`.
+- **Stat grid** binds the keyed-string map at `2·discipline + {110,111,120,121,130,131,140,141}`
+  (the `discipline + {210..240}` alternative is REFUTED — those are equipment item ids). Stat values
+  are **pure display** from the class template, NOT interactive point-buy.
+
+### 11.5f Char-select construct walk — full element ledger (CODE-CONFIRMED, folds in the 279-element walk)
+
+> A complete element-by-element walk of the char-select window's scene builder (every builder call in
+> build order, ~279 elements) confirms the §11.5a–§11.5e tables byte-for-byte and adds the elements
+> below, which the earlier draft did not enumerate. The select window is allocated as a 6280-byte
+> object; its scene builder is invoked once from the engine state-4 case (see §1.0 / `client_runtime.md`
+> §7). Build order = paint / Z order. All these are children of the same select window — the create
+> form is an **in-place hidden sub-tree of the same window**, not a separate scene.
+> <!-- source: _dirty/campaign10/B/construct_select.md (lane B10) -->
+
+**Atlas texture-list (load order = handle slots; loaded into the window's own texture list, NO global
+cache).** The earlier tables named only three (`loginwindow.dds`, `mainwindow.dds`, `InventWindow.dds`);
+the construct loads **four more** for the bottom mail/pigeon/letter cluster:
+
+| Slot | VFS path | Role |
+|---|---|---|
+| T1 | `data/ui/loginwindow.dds` | primary chrome / slot tabs / Create-Delete-Enter / info plates |
+| T2 | `data/ui/mainwindow.dds` | conditional overlay button (action 61); pigeon / letter buttons |
+| T3 | `data/ui/InventWindow.dds` | CREATE-form panels, class strip, name textbox, confirm popups |
+| — | `data/ui/CarrierPigeonPerson.dds` | mail / pigeon cluster art |
+| — | `data/ui/CarrierPigeonAll.dds` | mail / pigeon cluster art |
+| — | `data/ui/tradekeepwindow.dds` | mail / pigeon cluster art |
+| — | `data/ui/blacksheet.dds` | mail / pigeon cluster art |
+
+**Char-list block-copy at build entry.** The builder's first act is an index-preserving copy of the
+server char list from the net-handler object into the window: **5 × 880-byte spawn descriptors**,
+**5 × 96-byte stat blocks**, and a **5-byte per-slot state/lock flag** array; the selected-slot index
+is initialised to 0 and a mode/visible byte to 1. (Confirms §3.1 / §3.4.)
+
+**Active-slot DETAIL plate (a SECOND, larger info region — distinct from the §11.5d per-slot info).**
+A 474×244 panel holds the detailed stat readout: a multi-piece info background (T1/T2 plates), a wide
+number-glyph bank (placeholder cells, src `(980,140)`, runtime-substituted digits), and **7 stat
+caption labels** (config-resolved stat names). This is the active-slot detail panel; §11.5d's smaller
+region is the per-slot tab info.
+
+**Five distinct confirm / notice MODAL sub-panels (model them as panels, not loose labels).** The
+caption ids §11.5d lists flat — `{48001, 48003, 48004, 48005, 46001, 46002, 14001, 14002, 2206,
+63030}` — are in fact the bodies of **five separate modal sub-panels**, each on the shared dragon-frame
+quad (`InventWindow.dds` src `(318,647)`, `340×190`, drawn centred at `(342,289,340,190)`, hidden until
+raised), with these Yes/No action pairs:
+
+| Panel role | Frame | Buttons (action ids) | Caption (msg.xdb id) |
+|---|---|---|---|
+| Generic 2-button confirm | 318,647,340,190 | Yes **62** / No **63** | 63030 |
+| 1-button notice (centre-aligned body) | 318,647,340,190 | OK **74** | 48001 / 48003 |
+| Confirm (single action) | 318,647,340,190 | **64** | 48004 / 48005 |
+| **DELETE-confirm** popup | 318,647,340,190 | Yes **54** / No **55** | 14001 / 14002 |
+| Second confirm | 318,647,340,190 | Yes **59** / No **60** | 46001 / 46002 |
+
+These feed the create / delete / enter / rename senders (§4 / §5).
+
+**Create-form appearance / stat sub-steppers — actions 25..36 (a 14-button matrix).** Beyond the face
+steppers (21/22, §11.5e) the create form builds a 2-row matrix of small 16×24 increment/decrement
+buttons (T1, source columns stepping `{0BF,0D7,0EF,107,11F}`, source-V `{1F4, 20C}`) bound to
+**actions 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36**. Their exact create-form bindings are a
+**static-hypothesis** (appearance / stat sub-controls). Two further class-detail +/- stepper pairs are
+bound to **actions 66/67** (source col 388) and **68/69** (source col 576).
+
+**Create-form name entry — TWO `GUTextbox` editors, both seeded with msg-db 14001.** An action-**65**
+name-edit **host panel** (T2 mainwindow, `176×42` at `(100,430)`, src `(295,132)`) hosts the name
+field. The build constructs **two** edit boxes, each seeded with `MessageDB(14001)` as the default /
+placeholder caption: a smaller editor (the mail / letter input) and the visible **create-form
+name-entry field** (`274` wide, at `(80,60)`). A class-strip overlay image at the create class-title
+seat (T3, `(75,55,274,18)`, src `(1003,419)`) corroborates the create-form class-strip **src-Y 1005**
+family (§11.5e / §9b).
+
+**Bottom mail / pigeon / letter button cluster — actions 70..73 + a mail icon (NEW; role
+debugger-pending).** Built from T2 + the four extra atlases above:
+
+| Element | Action | Atlas | Rect (X,Y,W,H) | Notes |
+|---|---|---|---|---|
+| Pigeon button A | 70 | T2 | 50,?,60,80 | src col 334/3AC/370 |
+| Pigeon button B | 71 | T2 | (same geom, alt src) | |
+| Letter button A | 72 | T2 | ?,?,30,30 | src col 258/294/276 |
+| Letter button B | 73 | T2 | (alt src) | |
+| Mail icon | (75) | pigeon atlases | 3CB,262,23,23 | src `(610,971)` |
+
+These appear to be the **carrier-pigeon / letter (mail)** shortcut cluster on the char-select screen;
+the exact behaviour and when each is shown are **debugger-pending**.
+
+**Build-tail captions, scene + sound.** The slot-count caption uses font slot **4** with text
+`MessageDB(2206)`; a second label uses font slot **2**; the top **"character count : N" caption =
+`MessageDB(2209)`**, the `N` bound to the billing-state char-count field (§3.8.2). The builder then
+calls the **3D scene builder** (scene "select", map000 area 0, clock 52200 s = 14:30, perspective
+camera, single ambient effect id **380003000** — §3.5 / §3.6.5 / §3.7) and starts the char-select BGM
+on the kind-0 music slot (§3.8.1).
 
 ## 11.6 Intro / opening sequence (CODE-CONFIRMED art; sequencing per §1.0 and §1.5)
 

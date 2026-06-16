@@ -1,4 +1,9 @@
 ---
+verification: confirmed
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida, vfs-sample]   # sound tables, toonramp LUT, npc.arr, .sod/.ted byte-samples corroborate; the boot/loop/scene-machine/world-scene backbone is static-IDA CODE-CONFIRMED
+conflicts: frame-limiter target-FPS source (display FRAMERATE config is statically inert — is it truly unused?); data.inf entry-count header offset (+0x0C, VFS byte-witness pending in formats/pak.md); reserved 6th view-platform slot (not in the world builder); GameTime opcode-5/18 apply site; per-area sky-rate floats; 200 ms move heartbeat hard-cap — all (capture/debugger-pending)
 status: confirmed
 sample_verified: partial   # sound tables, toonramp LUT, npc.arr, .sod/.ted bytes verified; runtime logic IDA-derived; boot/loop/scene-machine/world-scene CODE-CONFIRMED
 subsystems: [boot_startup, frame_loop, sound_runtime, ui_system, render_pipeline, camera_constants, movement_constants, quest_data, scene_lifecycle, world_scene]
@@ -90,7 +95,7 @@ The ordered sequence from process start to the first interactive frame:
 
 6. **Launcher gate.** If `launcher` is `true` **and** the command line is **not** exactly `-Start`,
    the engine does **not** boot itself — it launches the external updater/launcher program
-   (`dostart.exe`) via `WinExec` and returns immediately. The entire 9-state machine only runs when
+   (`dostart.exe`) via `WinExec` and returns immediately. The entire scene machine only runs when
    the client is invoked with `-Start` (or when `launcher` is set to `false`).
 
 7. **VFS archive open.** The index file (`data.inf`) and the data archive (`data/data.vfs`) are
@@ -98,8 +103,10 @@ The ordered sequence from process start to the first interactive frame:
    before the state loop.
 
 8. **State-machine loop begins.** `WinMain` **is** the state machine — the application entry point
-   body is the 8-case dispatch loop. It starts at **state 0 (Initialisation)**, which transitions
-   immediately to **state 1 (LoginWindow)** — the first real interactive screen.
+   body is an infinite `while(1) switch(engineState)` over **exactly 8 cases (states 0..7)** plus a
+   `default`. (The switch is bounds-checked `<= 7` against an 8-entry jump table; the value `8` is a
+   *sub-state* value, not a 9th top-level case — see §7.) It starts at **state 0 (Initialisation)**,
+   which transitions immediately to **state 1 (LoginWindow)** — the first real interactive screen.
 
 ## 0.2 `DoOption.ini` — persistent settings — (CODE-CONFIRMED)
 
@@ -168,15 +175,33 @@ The engine creates a single Win32 window with these properties:
 | **Window title** | `"Do"` |
 | **Window procedure** | the engine WndProc |
 | **Single-instance guard** | in fullscreen mode, if another window of the same class already exists the new instance bails immediately |
-| **Window style** | `OPTION_SCREENMODE < 1` → popup/borderless style; else → overlapped (standard) style |
+| **Window style** | `OPTION_SCREENMODE < 1` → a popup/borderless style word; else → an overlapped/visible style word (the two exact style bit-words are pinned in §0.3.1) |
 | **Client size** | from the renderer's configured width/height (the `OPTION_WIDTH`/`OPTION_HEIGHT` values) |
 | **Centred** via | `GetSystemMetrics` |
 
 After `CreateWindowExA`: the window is registered with the IME pre-translate hook, shown, and
-focused. A **manual-reset event** is created and a **worker thread** is started (`_beginthreadex`);
+focused. An **auto-reset event** is created and a **worker thread** is started (`_beginthreadex`);
 if the event creation fails the engine message-boxes `"CreateEvent() is failed in main thread"` and
 calls `exit(1)`. For `OPTION_SCREENMODE == 1` the window is additionally `SetWindowPos`'d to the
 configured client size.
+
+> **Event correction (confirmed).** The main-thread sync event is created with the manual-reset
+> argument set to `0`, i.e. it is an **auto-reset** event (an earlier note read it as manual-reset).
+
+### 0.3.1 Window-style and fullscreen-path constants — (CODE-CONFIRMED)
+
+The window style word is selected directly from `OPTION_SCREENMODE`:
+
+| Condition | Style word | Character |
+|---|---|---|
+| `OPTION_SCREENMODE < 1` | `0x10CA0000` | a popup/borderless family (no title bar / sizing border) |
+| `OPTION_SCREENMODE ≥ 1` | `0x90000000` | a visible + popup family (`WS_POPUP \| WS_VISIBLE`-style) |
+
+Fullscreen path (`OPTION_SCREENMODE == 2`): the window is additionally created with the
+extended-style **topmost** bit (`WS_EX_TOPMOST`, value `0x00040000`), and the display device mode is
+switched via `ChangeDisplaySettingsA` (the matching device path in §0.4). Windowed-sized path
+(`OPTION_SCREENMODE == 1`): the post-create `SetWindowPos` resizes the client area to the configured
+width/height. The exact behaviour of value `0` is not byte-pinned (see §0.9 open item 1).
 
 > The window class name `"diamond engine application"` and title `"Do"` are the actual string literals
 > in the code. "Martial Heroes" appears only in the BugTrap application name and in the window
@@ -219,11 +244,19 @@ See also §3.1 for the full device/present-mode description.
 
 VFS mount is performed once, just before the state loop begins. Steps:
 
-1. Open `data.inf` (the index file) with `FILE_FLAG_SEQUENTIAL_SCAN`.
-2. Read a **24-byte header**; the **entry count is the third dword (byte offset +8)** of that header.
+1. Open `data.inf` (the index file) with **`FILE_FLAG_RANDOM_ACCESS`** (combined with a read-only
+   attribute). It is **not** `FILE_FLAG_SEQUENTIAL_SCAN` — an earlier note had this backwards.
+2. Read a **24-byte header**; the **entry count is the 4th dword (byte offset +0x0C)** of that header.
+   (An earlier note placed it at +0x08 / the 3rd dword.)
 3. Allocate `144 × count` bytes for the TOC array and read the full TOC.
 4. Close the index file handle.
-5. Open `data/data.vfs` (the data archive) and **keep its handle open** for the lifetime of the process.
+5. Open `data/data.vfs` (the data archive) — also with `FILE_FLAG_RANDOM_ACCESS` — and **keep its
+   handle open** for the lifetime of the process.
+
+> **Byte-layout authority.** The on-disk header byte map (including the +0x0C entry-count field and
+> the 144-byte TOC stride) is owned by `formats/pak.md`; the values above are confirmed via the mount
+> routine's control flow, with the raw-byte witness of the header offset pending in that spec
+> (capture/debugger-pending → VFS byte-witness).
 
 TOC entry layout (144 bytes each):
 
@@ -247,7 +280,27 @@ path. Korean text support is handled entirely at use-sites:
 - **Rendered Hangul:** 15 font slots (ids 0..14) at fixed point sizes and weights are created during
   the state-0→1 transition using **`D3DXCreateFontA`** with Korean typefaces
   (`DotumChe`, `Dotum`, `BatangChe`). These Win32-backed fonts resolve the HANGEUL charset at render
-  time.
+  time. The exact slot table — (CODE-CONFIRMED), one row per `D3DXCreateFontA`-equivalent call (the
+  three numeric columns are the registered height / a paired half-height / a render height; the last
+  is the weight):
+
+  | Slot | Typeface | Heights | Weight |
+  |---:|---|---|---:|
+  | 0 | DotumChe | 12 / 6 / 12 | 0 |
+  | 1 | Dotum | 10 / 5 / 10 | 0 |
+  | 2 | DotumChe | 32 / 16 / 32 | 800 |
+  | 3 | DotumChe | 18 / 12 / 24 | 800 |
+  | 4 | DotumChe | 12 / 6 / 12 | 800 |
+  | 5 | BatangChe | 12 / 6 / 12 | 0 |
+  | 6 | BatangChe | 18 / 12 / 24 | 700 |
+  | 7 | BatangChe | 12 / 6 / 12 | 700 |
+  | 8 | BatangChe | 12 / 6 / 12 | 700 |
+  | 9 | DotumChe | 12 / 6 / 12 | 700 |
+  | 10 | Dotum | 16 / 10 / 20 | 800 |
+  | 11 | DotumChe | 10 / 5 / 10 | 400 |
+  | 12 | DotumChe | 12 / 6 / 12 | 400 |
+  | 13 | DotumChe | 14 / 7 / 14 | 400 |
+  | 14 | DotumChe | 16 / 8 / 16 | 400 |
 - **String conversions:** `MultiByteToWideChar(949, …)` is called at individual use-sites. There is
   no global narrow → wide conversion layer.
 - **Conclusion for the reimplementation:** model CP949 as a **per-string decode** (code page 949),
@@ -299,8 +352,19 @@ The observed first-touch order during a normal boot:
 4. Passes the billing/anti-cheat scheduler gate (Tier A static object — `exit(1)` on failure).
 5. Creates the OS window (§0.3).
 6. Creates the D3D9 device (§0.4).
-7. Creates the **15 Korean font slots** (DotumChe/Dotum/BatangChe, fixed sizes/weights).
-8. Enters **`Engine_MainLoop`** — the per-screen frame pump.
+7. Creates the **15 Korean font slots** (the exact table is in §0.6).
+8. Reads the **addiction-warning check interval** (§0.8.1) and stores its millisecond value into the
+   billing/scheduler singleton.
+9. Enters **`Engine_MainLoop`** — the per-screen frame pump. (Note: `Engine_MainLoop` itself raises
+   the timer resolution with `timeBeginPeriod(1)` on every entry — see §8.1.)
+
+### 0.8.1 Addiction-warning check time — (CODE-CONFIRMED)
+
+During state 1, the client reads the integer Lua global
+**`DISPLAY_GAME_ADDICTION_WARNING_CHECK_TIME`** (a value in **seconds**), multiplies it by **1000**
+to get milliseconds, and stores the result into a field of the billing/scheduler singleton. This is
+the period of the mandated Korean play-time/health-warning prompt (a legal requirement for Korean
+online games of the era). It is not a rendering or loop-pacing value — purely a billing-side timer.
 
 ## 0.9 Boot — open items
 
@@ -616,8 +680,11 @@ back-buffer path runs. Per-frame loop ordering is owned by `specs/game_loop.md`;
   **hardware vertex processing + multithreaded** behaviour flags.
 - Back-buffer format default **X8R8G8B8**; depth/stencil chosen from the fallback chain
   **D32 → D24X8 → D24S8 → D16**.
-- **Presentation interval = IMMEDIATE → NO VSYNC.** The render loop is genuinely uncapped (this resolves the
-  game-loop "is present a de-facto FPS cap" question: it is not).
+- **Presentation interval = IMMEDIATE → NO GPU VSYNC.** The GPU does not gate on the vertical blank.
+  **This does not mean the frame rate is uncapped:** the engine main loop applies a *software* frame
+  cap with a QueryPerformanceCounter-based limiter that `Sleep()`s each iteration (see §8.1, §8.3.1).
+  So presentation is vsync-off, but the CPU paces frames to a fixed target rate. (This corrects an
+  earlier reading that called the loop "genuinely uncapped".)
 - **Device-lost recovery:** on `DEVICELOST`, sleep ~1000 ms and retry; on `DEVICENOTRESET`, run a three-step
   recovery (release default-pool resources → reset device with saved present params → recreate default-pool
   resources, e.g. fonts).
@@ -667,7 +734,7 @@ composite → post-scene transparent overlay`, then
 |---|---:|---|
 | Back-buffer format | X8R8G8B8 | default colour format |
 | Depth fallback chain | D32 → D24X8 → D24S8 → D16 | depth/stencil selection |
-| Present interval | IMMEDIATE (no vsync) | uncapped loop |
+| Present interval | IMMEDIATE (no GPU vsync) | frame rate is instead software-capped — see §8.1 |
 | Skinned-actor vertex stride | **32 bytes** | XYZ + normal + UV |
 | Toonramp LUT | **256 × 1, 24-bpp, uncompressed** | 1D cel-quantisation gradient, dark→bright |
 | Terrain FVF | `0x152` | animated multi-texture terrain vertex format |
@@ -822,6 +889,13 @@ horizontal radial pull** (the radius is fixed).
 **The authoritative in-world gameplay camera uses vertical FOV = 65°, near = 5.0, far = 15000.0.** These values
 are constructed in the in-world scene-build path at the same time the five manipulators are wired to the camera
 object. This is the camera engineers must implement. (CODE-CONFIRMED)
+
+**Aspect correction — (CODE-CONFIRMED).** The 65° figure is the base vertical field of view, but the value
+actually handed to the camera's projection setup is **aspect-corrected**: it is divided by the live render
+aspect ratio `renderWidth / renderHeight` (the same configured render width/height the window/device use, from
+`OPTION_WIDTH` / `OPTION_HEIGHT`, §0.2). The projection initializer receives `(65° / aspect, aspect, near 5.0,
+far 15000.0)`. Implementations targeting a non-4:3 surface must reproduce this aspect division, or the apparent
+vertical field of view will drift from the original at other resolutions.
 
 Two additional projection values appear in the binary but belong to a **separate generic projection initializer**,
 not the camera the in-world manipulators drive: a seed of **60°** vertical FOV with a near-constant of
@@ -1122,8 +1196,19 @@ This matches the overall Lua model (scripts = data/config/i18n; host C++ = logic
 
 The master scene lifecycle is implemented as the body of the application entry point itself — the
 `WinMain` function **is** the state machine. It is an infinite dispatch loop over a single
-engine-state integer. Every interactive screen is modelled as one state in this nine-value
-enumeration (0..8). Cross-spec ownership: the UI control flow inside each front-end screen is
+engine-state integer. The dispatch is a **bounds-checked (`engineState <= 7`) `switch` with exactly
+8 cases (states 0..7) plus a `default` arm** — an 8-entry jump table. Every interactive screen is
+modelled as one of these 8 states.
+
+> **State-count correction (confirmed).** Earlier text framed this as a "nine-value enumeration
+> (0..8)". It is **8 top-level cases, states 0..7.** The value **8 is a *sub-state* value** (the
+> `GameState` sub-field defaults to 8, and the terminal/teardown paths set field 0 to 7 with the
+> sub-field at 8 — e.g. state 6 → sub 8, state 7 → sub 8). It is **not** a 9th top-level case: the
+> exit/teardown logic lives in the shared tail reached from cases 6/7/`default`, keyed on the
+> sub-field value 8, not on a `case 8:`. Read every "states 0..8 / nine-state lifecycle" mention in
+> this and sibling docs as "states 0..7 (8 cases); 8 is a sub-state value".
+
+Cross-spec ownership: the UI control flow inside each front-end screen is
 detailed in `specs/frontend_scenes.md`; the resource loading pipeline driven by state 2 is
 detailed in `specs/resource_pipeline.md`. This section pins the engine-level transition mechanics.
 
@@ -1133,10 +1218,18 @@ A three-integer struct (`GameState`) is the sole source of truth for which scene
 
 | Field index | Offset | Type | Role |
 |---:|---:|---|---|
-| 0 | +0x00 | i32 | **engine state** (0..8 — the current scene enum value) |
-| 1 | +0x04 | i32 | **sub-state / error code** (transition context; 0 = none) |
+| 0 | +0x00 | i32 | **engine state** (0..7 — the current scene enum value; the `switch` dispatches on this) |
+| 1 | +0x04 | i32 | **sub-state / error code** (transition context; **ctor default = 8**) |
 | 2 | +0x08 | i32 | **error detail** (the offending result code, when state = 7) |
 | — | +0x0C | u8 | **debugmode flag** (set once at startup from `game.lua`; read-only thereafter) |
+
+The constructor initialises the struct to `{ state = 0, sub-state = 8, error-detail = 0, debugmode = 0 }`.
+
+> **Sub-state default correction (confirmed).** The sub-state field (index 1) constructs to **8**,
+> not 0 — an earlier "0 = none" framing was inaccurate at construction. The value 8 is the engine's
+> "no specific sub-state" default and is also the sub-field carried into the terminal teardown tail
+> (states 6/7 → sub 8). Because the field is overwritten on most transitions, the boot default is
+> rarely observed, but it is **8**.
 
 The debugmode byte gates floating damage-text overlays and other developer-visible UI. It is never
 a transition driver; all transitions are driven by writes to field 0 (and optionally field 1).
@@ -1159,21 +1252,27 @@ Each `switch` case is a **"build + run" block**, not a passive state. The case f
 calls `Engine_MainLoop`, and on loop-exit tears the handler down. The next iteration of the outer
 `while(1)` then dispatches the case matching whatever state was written last.
 
+The `switch` has **8 cases (states 0..7) plus a `default` arm** (bounds-checked `engineState <= 7`).
+The teardown value **8 is not a switch case** — cases 6/7 and `default` write field 0 to **8** and
+then the **shared exit tail** (reached when the loop returns) keys on field-0 `== 8` to run the final
+teardown and `return` from `WinMain`. (A field-0 value of 8 also falls to `default` on any further
+dispatch.)
+
 | State | Name | Writes next state | Constructs (approx. size) | Loop | On exit / teardown |
 |---|---|---|---|---|---|
 | **0** | Initialisation | `= 1` | sizes window from display config; stores `16` in an engine constant | falls to state-1 body | — |
 | **1** | Login | `= 2` | `LoginWindow` (~1368 B); loads `msg.xdb`; builds 15 Hangul font slots | `Engine_MainLoop` | `LoginWindow_End`; reads billing username/server; destructor |
-| **2** | Load | `= 4` or `= 3` | `LoadHandler` (~536 B); spawns async worker thread; starts loading SFX | `Engine_MainLoop` | `LoadHandler_End`; stamps billing timestamp |
+| **2** | Load | `= 4` or `= 3` | `LoadHandler` (~536 B); spawns async worker thread; starts loading SFX | `Engine_MainLoop` | `LoadHandler_End`; stamps billing timestamp (billing field = current ms) |
 | **3** | Opening | `= 4` | `COpeningWindow` (~720 B); builds intro window | `Engine_MainLoop` | `COpeningWindow_End` (unregisters scene view only); destructor |
 | **4** | Select | `= 5` | `SelectWindow` (~6280 B); character-select UI + preview actor + Select camera | `Engine_MainLoop` | `SelectWindow_End`; clears SelectWindow singleton |
 | **5** | In-game | `= 4` | `MainHandler` (~200 B) + `BuildGameWorld` (camera rig + scene graph + services + HUD); enables networking | `Engine_MainLoop` | `MainHandler_End`; unregisters three event targets; destructor |
-| **6** | Quit | `= 8` | — (calls engine shutdown routine) | — | falls to shared exit tail |
-| **7** | Error | `= 8` | — builds error string from sub-state/detail; hides window; drops net connection; writes `error.log` (module list, timestamp, language, build date); shows modal dialog | — | falls to shared exit tail |
-| **8** | Exit | (terminal) | — final teardown: scheduler release, crash-logger close, OS resource cleanup | — | `return` from `WinMain` |
-| default | (unknown) | `= 8` | engine shutdown | — | shared exit tail |
+| **6** | Quit | `= 8` (sub 8) | — (calls engine shutdown routine) | — | falls to shared exit tail |
+| **7** | Error | `= 8` (sub 8) | — builds error string from sub-state/detail; hides window; drops net connection; writes `error.log` (module list, timestamp, language, build date); shows modal dialog | — | falls to shared exit tail |
+| default | (unknown / field-0 == 8) | `= 8` | engine shutdown | — | shared exit tail |
 
-**Shared exit tail (states 6/7 converge here):** if engine state is `8`, run final teardown and
-return; otherwise clear the per-iteration scene pointer and loop again.
+**Shared exit tail (states 6/7/`default` converge here):** when the loop returns, if engine state
+field 0 is `8` run the final teardown (scheduler release, crash-logger close, OS resource cleanup)
+and `return` from `WinMain`; otherwise clear the per-iteration scene pointer and loop again.
 
 > **`OPENNING/SKIP` INI key** (the typo is authentic): when state 2 pre-decides the next state,
 > it reads an integer from an INI section `OPENNING`, key `SKIP`. If true, state 2 writes `= 4`
@@ -1195,8 +1294,11 @@ return; otherwise clear the per-iteration scene pointer and loop again.
 | → 6/7 | error string / modal dialog | net connection dropped; engine shutdown |
 | → 8 | — | final teardown: scheduler, crash logger, OS |
 
-The **reserved sixth GViewPlatform slot** is allocated in the in-world scene build but never
-assigned to any view mode — provision for a future mode not present in this build.
+A previously-noted **reserved sixth GViewPlatform slot** — supposedly allocated in the in-world
+scene build but never assigned — was **not** confirmed in this pass: the world scene-graph builder
+allocates exactly **five** view-platform objects plus one switch node. If a sixth slot exists it is a
+field allocated elsewhere, not in this builder. (static-hypothesis / capture-debugger-pending — see
+§9.4 and §9.5.)
 
 ## 7.5 Complete transition table — (CODE-CONFIRMED)
 
@@ -1272,18 +1374,137 @@ the run-flag. Full detail lives in `specs/frontend_scenes.md`.
 - **`SimpleLoadHandler`**: an RTTI class with a complete constructor exists in the binary but has
   **zero callers** — it is never instantiated. A dead alternate loader, not part of the live machine.
 - **The `-Start` / `launcher` gate** (see §0.1): without `-Start` and with `launcher = true`,
-  `WinMain` shells out to the external launcher and returns immediately — the entire nine-state
-  machine never executes.
+  `WinMain` shells out to the external launcher and returns immediately — the entire scene
+  machine (states 0..7) never executes.
 - **State 7 error logging**: before the modal dialog, the error path writes `error.log` (module
   list, timestamp, language setting, build date).
 
-## 7.8 Scene machine — open items
+## 7.9 Front-end scene state machine (states 0..7) — the load-bearing model — (CODE-CONFIRMED)
+
+> **The application entry point IS the front-end scene state machine.** There is no separate
+> scene-manager class. The entry point mounts the VFS exactly once, then runs an infinite
+> `while(1) switch(engineState)` over **8 cases — states 0..7 — plus a `default`** (the value 8 is
+> the terminal sub-state value handled by the shared exit tail, not a 9th case; §7.1, §7.3). Each
+> case constructs **that state's window/scene object** and **re-enters the shared per-frame engine
+> loop** to tick it until the engine-state value changes underneath it. The first window the user
+> sees is the **LoginWindow** (state 1) — no splash, no separate EULA scene. This subsection states
+> that model explicitly, with the state×event transition table and the catalogue of state writers;
+> §7.1–§7.7 above hold the supporting per-case and per-machine detail. The engine bring-up that
+> precedes the state loop (VFS mount, device, fonts) is in `specs/game_loop.md §0`; the per-frame
+> loop the cases re-enter is in `specs/game_loop.md §7` and §8 below.
+
+### 7.9.1 How the machine is built
+
+The whole front-end is one driver loop living directly in the application entry point:
+
+1. The VFS is mounted **once**, before the loop (§0.5, `specs/game_loop.md §0.1`).
+2. `while(1) switch(engineState)` dispatches on the engine-state value (the `GameState` struct
+   field 0, §7.1).
+3. Each case writes the *next* state at the **top** of the case body (its pre-loop intent),
+   constructs its scene window, registers that window for teardown, and enters the per-frame
+   engine loop (`Engine_MainLoop`). The loop **blocks** until the scene asks to exit.
+4. The scene's own tick, or an arriving **server message**, rewrites the engine-state value to
+   redirect the outer `while(1) switch`. When the loop returns, control falls to the bottom of
+   the case, which checks for the teardown state (8) and otherwise loops back and re-dispatches on
+   the new state value.
+
+So the per-frame loop **is** the engine heartbeat; the **scene object** or an **arriving server
+message** is what mutates the engine state. There is **no separate scene-manager object** — the
+switch statement is the manager. The first per-scene loop runs inside state 1 for the LoginWindow;
+each later state constructs its own scene and runs its own instance of the same loop.
+
+### 7.9.2 Disposable-tracking vs. widget-attach — (CODE-CONFIRMED — corrected)
+
+Each case registers its freshly-constructed window/sub-object with a per-scene **cleanup-list push**
+helper (it appends the object pointer into a vector held on the driver object) so the scene's owned
+objects are released together when its tick loop returns. This is a **teardown/ownership
+registration**, **not** how a widget joins a parent's child list.
+
+> **Correction (Campaign 9D `_RECONCILE`).** Earlier notes described this per-case registration as a
+> generic "widget-attach helper". It is **not** — it is a **disposable-tracking push** onto the
+> driver's per-scene cleanup vector. The real widget-tree attach primitives are **AddChild** and
+> **AddChildWithAction** (`specs/ui_system.md §1.4 / §7.4`); the per-case helper only registers a
+> scene object for coordinated teardown. Read every "attach helper" mention in the startup lane as
+> "register-for-teardown".
+
+### 7.9.3 State × event transition table
+
+The complete engine-internal, network-driven, and user-action transition tables are in §7.5.1–§7.5.3.
+The condensed state×role view (state → role → scene object → tick handler → exit transitions):
+
+| State | Role | Scene object (approx. size) | Tick handler | Exit transitions |
+|---:|---|---|---|---|
+| 0 | pre-init / display-config | inline (no window) | — | always → 1 |
+| 1 | init / LoginWindow create + boot | `LoginWindow` (~1368 B); loads `msg.xdb`; builds 15 fonts | per-frame loop; LoginWindow internal sub-machine | window-create fail → 7 (reason 1); device fail → 7 (reason 3); login submit → 7 (connect-wait); quit → 6 |
+| 2 | opening-decision / LoadingWindow | `LoadHandler` (~536 B) | per-frame loop; boot/data-table thread runs behind it | `OPENNING/SKIP` true → 4, false → 3; server messages (enter-game-ack / character-list / conn-state) flip state out of 2 |
+| 3 | opening / scenario movie | opening window (~720 B) | per-frame loop; played once | pre-set next = 4; movie end returns from loop |
+| 4 | character select | `SelectWindow` (~6280 B) | per-frame loop; per-frame post-tick + command handler | enter-world flag → 5; connect-timeout in select → 6; enter-game sends request then waits for enter-game-ack |
+| 5 | in-game / world | in-game scene (~200 B) wired into the master window | per-frame loop; pre/post-tick; starts the net engine path | logout / leave-world → 6; natural loop return → 4 |
+| 6 | quit request | inline (engine shutdown) | — | always → field-0 8 (shared exit tail) |
+| 7 | error / message box | inline (build error string, drop net, modal) | — | always → field-0 8 (shared exit tail) |
+| default | unknown state / field-0 == 8 | inline (final teardown in the shared exit tail) | — | returns from the entry point |
+
+> **No `case 8:`.** Field-0 value **8** is the terminal value cases 6/7/`default` write; the actual
+> final teardown + `return` is the **shared exit tail** keyed on field-0 `== 8` when the loop
+> returns. The `switch` itself has 8 arms: cases 0..7 and `default`.
+
+> **First window at launch.** State 0 runs first (the engine-state global is zero at process start),
+> sizes the window and configures the display, and shows **no** window. The **first window the user
+> sees is the LoginWindow (state 1)** — the OS window and device are created in state 1 and the
+> LoginWindow is the live scene for the first per-frame loop. There is **no splash/EULA scene** before
+> login; what older notes called an "EULA" is the LoginWindow's own PIN/second-password sub-state
+> (§7.6, `specs/frontend_scenes.md`).
+
+> **Login does not jump straight to char-select.** The login submit kicks off the network connect
+> (engine state → connect-wait, with a 30 s connect-timeout scheduled), and the **server** then drives
+> loading → char-select via the character-list message (engine state → 4). The login window never
+> writes the select state directly.
+
+### 7.9.4 Catalogue of state writers
+
+Every writer of the engine-state value, by trigger family (the engine-internal, network, and
+user-action rows are tabulated in §7.5.1–§7.5.3). Summary of the writers **outside** the entry-point
+driver itself:
+
+| Writer (role) | Sets state | Trigger |
+|---|---:|---|
+| Login tick / internal sub-machine | 7 (connect-wait) or 6 (quit) | login submit (→ connect-wait, schedule connect-timeout) / login exit (→ quit) |
+| Char-select per-frame post-tick | 5 | "enter world confirmed" flag set |
+| Char-select command handler | 6 | connect-timeout event fires while in select |
+| `SmsgCharacterList` handler | 4 | character roster received → show char-select |
+| `SmsgEnterGameAck` handler | 2 | enter-world accepted → loading |
+| `SmsgCharActionResult` handler | 6 / 7 / 2 | per result code: logout (6), error/kick (7, with the result code carried in the error-detail field), reconnect-to-loading (2) |
+| `SmsgGameStateTick` handler | 4 | **only** on local-player spawn failure; on success it builds the world and does **not** change state (the select post-tick later promotes to 5) |
+| Connection-state-event handler | 7 / 2 | low-level connection state: connecting (7, reason "waiting") / dropped (7, reason "disconnect"); clears the error-detail in states 1/2 |
+| In-world leave/logout family | 6 | in-world logout / leave-world (entered-world flag set, state not 5/6); each schedules the loading-done event |
+| Crash-handler | reads only | reads the engine state to log it on a crash; not a normal transition |
+
+> **Net-driven transitions mutate the state from inside a tick.** A server message handler runs on the
+> frame thread (the message-bus hop, §6.4 of `specs/client_workflow.md`) and can rewrite the engine
+> state; the outer `while(1) switch` then re-dispatches when the current scene's loop returns. This is
+> how the server drives the front-end forward (login → loading → char-select → world) without the
+> client polling.
+
+### 7.9.5 Confirmed happy path (launch → in world)
+
+`0 (display config) → 1 (boot + LoginWindow) → [login tick: user logs in → connect-wait + 30 s
+timeout] → [conn-state/loading: server connects] → 2 (loading) → 3 or 4 by OPENNING/SKIP → (if 3,
+opening movie → 4) → 4 (char-select; character-list confirms the roster) → [select: enter-game request
+→ enter-game-ack → 2 loading → game-state-tick seeds the world; the select post-tick flag flips → 5]
+→ 5 (in world) → [logout → 6] → 8 → return`.
+
+The loop intentionally re-enters char-select (state 5 pre-sets next = 4; world-leave sets 6), so
+quitting the world returns the player toward the select/quit path rather than straight to exit.
+
+## 7.10 Scene machine — open items
 
 1. **LoginWindow sub-states 2..41 full enumeration.** The network/handshake machine transitions
    are partially traced; the exact action at each sub-state needs a focused pass or a live lobby
    capture.
-2. **`OPENNING/SKIP` INI file path.** Built from a settings-object internal buffer at a fixed byte
-   offset; the literal filename was not resolved in this pass.
+2. **`OPENNING/SKIP` INI file path** — (partly closed). The `GetPrivateProfileIntA` call reads the
+   path from the **settings/config object's path-buffer field** (an internal char buffer on that
+   object). The buffer-field location is pinned (it is the same per-object path field used elsewhere
+   for INI access); the *literal filename* stored in that buffer was not resolved in this pass.
 3. **Opening (state 3) exit trigger.** Whether the intro ends on a movie-complete event, the
    loading-done event (type 13, id 10001), or a timer is not confirmed.
 4. **Disconnect routing for states 0/1/3.** The scene-aware disconnect router handles states 2/4/5/6
@@ -1302,20 +1523,28 @@ and in-game all share one loop body. A screen builds its handler, registers it a
 target, and calls `Engine_MainLoop`; on exit it tears the handler down. Cross-spec: the reference
 spec for game-loop ordering is `specs/game_loop.md`; this section confirms and extends it.
 
-## 8.1 Three-step iteration order — (CODE-CONFIRMED)
+## 8.1 Four-phase iteration order — (CODE-CONFIRMED)
 
-Each loop iteration performs exactly three top-level steps in this fixed sequence:
+> **Correction (this pass).** Earlier text described "exactly three top-level steps" and called the
+> loop "genuinely uncapped". Both are wrong: the loop body makes **four** top-level calls per
+> iteration, and the fourth is a **software frame-rate limiter** that `Sleep()`s to hold a fixed
+> target period. Before the loop begins, `Engine_MainLoop` also raises the timer resolution with
+> **`timeBeginPeriod(1)`** (so the limiter's `Sleep` has 1 ms granularity); this is re-issued on
+> **every** per-scene loop entry, not once at boot.
+
+Each loop iteration performs exactly four top-level steps in this fixed sequence:
 
 1. **Message pump + deferred input dispatch.** Win32 messages are drained (`PeekMessage` /
    `GetMessage` / `TranslateMessage` / `DispatchMessage`). `WM_QUIT` clears the run-flag and
    exits the loop. After the Win32 drain, a **double-buffered deferred-event list** is swapped
-   and each queued UI/input event is dispatched through the input manager. A **raw mouse/keyboard
-   DirectInput thread** is spawned once on the first pump iteration and runs concurrently thereafter.
+   under a critical section and each queued UI/input event is dispatched through the input manager.
+   A **raw mouse/keyboard DirectInput thread** is spawned once (one-shot guarded) at loop entry and
+   runs concurrently thereafter.
 
 2. **Frame step (render one frame).** For each active scene node: update the camera matrix and
    build the view frustum (frustum cull walk); execute the 3D draw pass (offscreen-RT toon/bloom
    path or direct-to-back-buffer path). After all scenes: `Present` (whole back-buffer, D3D9
-   `IMMEDIATE` — no vsync). Then device-lost recovery: on `DEVICELOST` sleep **1000 ms** and
+   `IMMEDIATE` — no GPU vsync). Then device-lost recovery: on `DEVICELOST` sleep **1000 ms** and
    retry; on `DEVICENOTRESET` release default-pool resources → reset device → recreate default-pool
    resources (including fonts).
 
@@ -1324,13 +1553,20 @@ Each loop iteration performs exactly three top-level steps in this fixed sequenc
    of `count × 0.011`); for each reached subscriber, fire its callback if elapsed time exceeds
    its configured interval. **No leftover-time carry:** a missed tick cannot be caught up the next
    frame. A "full sweep" override flag forces the count to equal the full subscriber list for one
-   frame.
+   frame. (A DirectInput poll is folded into this phase via the input handle threaded through it.)
 
-**The loop is genuinely uncapped.** The presentation interval is `IMMEDIATE` (no vsync). The only
-`Sleep` is the 1000 ms device-lost retry. There is no frame-gate sleep on the normal path.
+4. **Frame-rate limiter (the software FPS cap).** Reads `QueryPerformanceFrequency` /
+   `QueryPerformanceCounter`, computes the real elapsed frame seconds, compares against the target
+   period **`1.0 / targetFps`** (the target-FPS float on the engine-view object), and if the frame
+   finished early `Sleep((targetPeriod − elapsed) × 1000)` ms, then re-stamps the QPC baseline for
+   the next frame. See §8.3.1 for the cap rate.
+
+**The frame rate is software-capped, not uncapped.** The GPU present interval is `IMMEDIATE` (no
+vsync), but step 4 paces the CPU to a fixed target frame period each iteration. The 1000 ms `Sleep`
+in step 2 is only the device-lost retry; the per-frame pacing `Sleep` lives in step 4.
 
 **Net one-line ordering per iteration:**
-`pump + deferred-input → [per scene: camera/cull → pre-draw callbacks → scene draw → (glow/bloom/composite) → transparent overlay → UI/HUD → FPS] → Present → device-recovery → logic-tick-sweep → repeat`.
+`pump + deferred-input → [per scene: camera/cull → pre-draw callbacks → scene draw → (glow/bloom/composite) → transparent overlay → UI/HUD → FPS] → Present → device-recovery → logic-tick-sweep (+ DirectInput poll) → frame-rate-limiter (Sleep to target period) → repeat`.
 
 ## 8.2 Render-pass inner order — (CODE-CONFIRMED)
 
@@ -1351,15 +1587,37 @@ Both draw paths invoke scene callbacks in the same order. Full detail for the in
 
 ## 8.3 Millisecond clock and time-scale — (CODE-CONFIRMED)
 
-The authoritative engine clock is `timeGetTime()` (Win32 multimedia millisecond timer). Its raw
-return is optionally multiplied by a global **time-scale float** (default 1.0; values below 1.0
-produce slow-motion; values above 1.0 produce fast-forward) and offset by a small float constant.
+The authoritative engine **logic** clock is `timeGetTime()` (Win32 multimedia millisecond timer).
+Its raw return is optionally multiplied by a global **time-scale float** (default 1.0; values below
+1.0 produce slow-motion; values above 1.0 produce fast-forward) and offset by a small float constant.
 This is the single clock used by animation, network throttling, FX timers, and the logic scheduler.
-Neither `GetTickCount` nor `QueryPerformanceCounter` feeds the logic delta.
+`GetTickCount` does not feed any timing here.
 
-A **separate high-resolution (nanosecond-resolution) profiling timer** exists in the scene-draw
-path to accumulate average cull-time and draw-time readouts. This timer does **not** feed
-simulation and is a profiling-only concern.
+> **QPC clarification (corrected).** An earlier blanket statement said "neither `GetTickCount` nor
+> `QueryPerformanceCounter` feeds the logic delta". That is true **only for the logic/animation
+> delta** (which is `timeGetTime`-based). `QueryPerformanceCounter` **does** drive the per-frame
+> pacing limiter (§8.1 step 4, §8.3.1) — it is not purely a profiling concern. So: logic time =
+> `timeGetTime`; frame pacing = QPC.
+
+A **separate high-resolution (nanosecond-resolution) profiling timer** also exists in the scene-draw
+path to accumulate average cull-time and draw-time readouts. That profiling timer does **not** feed
+simulation.
+
+## 8.3.1 Software frame-rate cap — (CODE-CONFIRMED; config source capture/debugger-pending)
+
+The per-frame limiter (§8.1 step 4) holds a **fixed target frame rate**. The target lives in the
+**engine-view object's framerate field**, which the engine constructor seeds to **60.0** and which
+no traced path overwrites — so the effective cap is a **hardcoded ~60 FPS**. Each frame the limiter
+sleeps `(1/60 − elapsedSeconds) × 1000` ms when the frame finished early. With `timeBeginPeriod(1)`
+in effect the sleep resolves at ~1 ms granularity, so the loop holds close to 60 FPS regardless of
+how fast the GPU presents.
+
+> **Residual (capture/debugger-pending).** The display-configuration `FRAMERATE` value (a float
+> global in the renderer config, e.g. `display.lua`) was **not** found to reach the limiter's
+> framerate field on any static path — the framerate field stays at its constructor-seeded 60.0.
+> Whether the display `FRAMERATE` config is genuinely inert (dead) or is wired through a path this
+> static pass missed needs a live capture/debugger confirmation. Treat the cap as a hardcoded 60 FPS
+> and flag the display `FRAMERATE` config as **statically inert** until proven otherwise.
 
 ## 8.4 Day/night clock — location and mechanics — (CODE-CONFIRMED)
 
@@ -1425,6 +1683,11 @@ free-running local timer as the sole source of day/night time.
    run-flag that could interfere with the scene-machine transition.
 6. **The `16` constant** stored in the engine struct during state-0 initialisation. Likely a
    default subscriber interval seed in ms, not a frame-rate cap; no proven per-frame reader found.
+   (Confirmed not the frame cap — that is the constructor-seeded 60.0 framerate field, §8.3.1.)
+7. **Frame-limiter target-FPS config source** (capture/debugger-pending). The limiter reads the
+   engine-view object's framerate field, which the engine constructor seeds to **60.0** and which no
+   static path overwrites. Whether the display-config `FRAMERATE` value is wired in by some path this
+   pass missed, or is genuinely inert, needs a live capture/debugger pass (§8.3.1).
 
 ---
 
@@ -1443,7 +1706,7 @@ enter-game request was sent; the engine advanced through state 2 (Load) to state
 | Step | Phase | What happens (neutral) |
 |--:|---|---|
 | 1 | **World-build** (synchronous) | `WinMain` case 5 constructs the `MainHandler` and calls `BuildGameWorld`. |
-| 2 | **Camera rig + scene graph** | `BuildSceneGraph` assembles: one `GPerspectiveCamera` (FOV 65°/near 5/far 15000), five `GViewPlatform` slots (Third/First/Static/Gamble/Event) plus one reserved sixth slot (allocated, never assigned), a scene root node labelled "charater scene" (typo authentic), a `GSwitch` node, and five camera manipulators. Manipulator string-catalogue label ids: 2006/2004/2005/2148/2148. |
+| 2 | **Camera rig + scene graph** | `BuildSceneGraph` assembles: one `GPerspectiveCamera` (FOV 65° base, aspect-corrected by render width/height; near 5; far 15000 — §4.5), **five** `GViewPlatform` slots (Third/First/Static/Gamble/Event), a scene root node labelled "charater scene" (typo authentic), a `GSwitch` node, and five camera manipulators. Manipulator string-catalogue label ids: 2006/2004/2005/2148/2148. (A previously-claimed reserved sixth view-platform slot was **not** seen in this builder — see §9.5.) |
 | 3 | **Environment node + render callbacks** | An environment/light node group and a second node group are parented into the scene. Five scene render-callback function-pointer/context pairs are installed. Approximately 17 world-manager singletons are cached. |
 | 4 | **World services + per-frame update** | Four world service managers (terrain, actor, effect, sound) are activated. A **per-frame world-update callback** is installed into the handler. HUD panel tree activated: community panel, character-billboard panel, link-combo panel, rank-progress panel, and slot panels. |
 | 5 | **Network: GameStateTick (4/1)** | Server sends the world-state packet (~9100-byte body). Spawn **X** at body offset +0x2374 (f32); spawn **Z** at +0x2378 (f32). **Y is never on the wire.** Packet also carries map/scenario code (+0x00C), hour-of-day, area id, and bulk actor mirror blocks. |
@@ -1486,9 +1749,10 @@ item (see §9.5).
 | 4 | 3D scene render pass | Five render callbacks in the order of §9.3. |
 | 5 | UI / HUD draw | 2D widget tree, screen-ortho space, after the 3D composite. |
 | 6 | FPS overlay (debug) | Optional; debug flag gated. |
-| 7 | Present | D3D9 `Present`, whole back-buffer, `IMMEDIATE` (no vsync). |
+| 7 | Present | D3D9 `Present`, whole back-buffer, `IMMEDIATE` (no GPU vsync). |
 | 8 | Device-lost recovery | Reset on lost device; 1000 ms retry sleep. |
 | 9 | Logic-tick sweep | Round-robin ~1.1% of subscribers per frame (network apply, AI, FX timers). |
+| 10 | Frame-rate limiter | QPC software cap: sleep to hold the fixed ~60 FPS target period (§8.1 step 4, §8.3.1). |
 
 ### 9.2.1 Ambient sound + world-clock tick (inside world-update, step 2)
 
@@ -1537,8 +1801,8 @@ environment/day-night setup → sky/star/cloud dome → ground-shadow + actor sh
 | Tutorial intro cue | **910001000** | extra cue when map = 1 and tutorial state = 12 |
 | Tutorial scenario code | **6** | value at 4/1 body +0x00C |
 | GameStateTick (4/1) body size | ~9100 bytes (0x238C) | spawn X at body +0x2374, Z at body +0x2378 (both f32) |
-| Camera FOV / near / far | 65° vertical / 5.0 / 15000.0 | built in `BuildSceneGraph` |
-| Reserved 6th view platform slot | allocated, never assigned | future mode provision |
+| Camera FOV / near / far | 65° vertical (base; aspect-corrected, §4.5) / 5.0 / 15000.0 | built in `BuildSceneGraph` |
+| View platforms built | **5** (Third/First/Static/Gamble/Event) | a 6th "reserved" slot was not confirmed in this builder (capture/debugger-pending — §9.5) |
 
 ## 9.5 World scene — open items
 
@@ -1559,3 +1823,7 @@ environment/day-night setup → sky/star/cloud dome → ground-shadow + actor sh
    confirmed. Other values (instanced dungeon, PvP, event) are not enumerated.
 6. **Local player actor world-position struct.** The full actor-position field layout belongs to
    the struct/cartographer lane.
+7. **Reserved sixth view-platform slot** (capture/debugger-pending). Earlier notes claimed a sixth
+   `GViewPlatform` slot was allocated-but-never-assigned; this pass found only **five** allocations
+   in the world scene-graph builder. Whether a sixth slot exists as a field allocated elsewhere needs
+   the struct/cartographer lane or a live confirmation.

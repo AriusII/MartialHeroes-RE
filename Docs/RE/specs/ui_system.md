@@ -1,3 +1,11 @@
+---
+verification: confirmed
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida]
+conflicts: server-record +6 open-time wire packing (capture-unverified); PIN keypad runtime seed/permutation (debugger-pending — clock-seeded shuffle, mechanism confirmed); account/save flag gating entry into login sub-state 31 (debugger-pending); GUCanvas3D render-target wiring untraced; in-game GUButton caption font-slot byte offset not pinned
+---
+
 # UI System — Widget Toolkit, Screen Layouts, and Scene State Machine
 
 > Clean-room neutral spec. Promoted from dirty-room analyst notes by the asset-spec-author.
@@ -223,23 +231,40 @@ manager. Its layout is the multiple-inheritance `GUWindow` shape (`structs/guwin
 
 - **A singleton accessor with a very high call-count.** Every subsystem reaches the master window
   through one global accessor ("give me the master HUD window"), which lazily constructs the master
-  window on first use. This accessor is one of the most-called functions in the whole client
-  (on the order of ~1.8k call sites) — the de-facto "HUD orchestrator handle".
+  window on first use (a Meyers/one-shot-guarded singleton). This accessor is **the single busiest
+  UI accessor in the whole client — exactly 1874 code call sites** — the de-facto "HUD orchestrator
+  handle".
 - **A flat service-slot registry.** On construction the master window **zero-initialises** a
   contiguous run of pointer-width service slots in its tail region. Each subsystem (inventory,
   skills, chat, map, party, quest, guild, trade, options, …) later **registers its constructed
   panel pointer into a fixed slot**. The HUD is the sum of those slots hanging off the one
   "MainMaster" window. The same zero-init routine runs again on teardown to clear the registry.
-- **Slot-table bounds.** The service-slot region spans the master window's tail (~223 pointer-width
-  slots); its exact byte offsets and the ~6 currently-identified slot owners (including the
+- **Slot-table bounds (re-pinned, CODE-CONFIRMED).** The service-slot region is a contiguous
+  dword run from byte **+0x238 (568)** through byte **~0x5B0 (1456)** — i.e. **~222–223 pointer-width
+  slots** plus a short tail of small zeroing memsets to ~+1460. The very same zero-init routine runs
+  from **both** the master ctor and the master teardown. One concrete slot owner is now anchored:
+  the **in-game scene/HUD handler is registered at slot index 320 = byte +0x500 (1280)** — the
+  state-5 in-game build re-reads that slot to drive `BuildScene` on the in-game scene graph (§11.2
+  state 5, §15.2). The full slot→subsystem map is otherwise still an open item (the other slot owners
+  are not yet enumerated). These offsets and the ~6 currently-identified slot owners (including the
   back-reference to the owning HUD handler) are documented in `structs/runtime_singletons.md §3.10`.
-  The full slot→subsystem map is an open item (which subsystem owns which slot index is not yet
-  enumerated).
+- **MI shape re-pinned (CODE-CONFIRMED).** The master window's ctor writes its primary
+  component/panel/window vtable at **+0x00** and the secondary event-handler vtable at **+0xBC (188)**,
+  confirming the two-vtable `GUWindow` multiple-inheritance shape (§1.8). The embedded sub-objects sit
+  at the same `GUWindow` offsets as every other window: command handler +0xBC, auxiliary view +0xE8,
+  texture list +0x220.
 
 So the manager is **not** a dispatcher object with a window list — it is a single top-level window
 whose embedded pointer table holds every HUD child panel. A reimplementation can model this as one
 root HUD node owning a fixed-index array of child-panel references, reached through a singleton
 accessor.
+
+> **Two registries, neither is a dispatcher (CODE-CONFIRMED).** The client has exactly two pointer
+> registries and **no global "WindowManager" dispatcher object** between them. (1) the master window's
+> flat service-slot table above (the live HUD), and (2) a **per-scene disposable `std::list`** used only
+> for teardown ordering (§15.1, §11.2). The helper sometimes framed elsewhere as "register the window
+> into the manager" is in fact a push onto that disposable teardown list — it is **not** manager
+> attachment and **not** a window-tree attach. See §15.1 and the IDB-symbol note in §15.6.
 
 ### 1.7 RTTI-confirmed widget / panel catalogue (CODE-CONFIRMED class names)
 
@@ -315,6 +340,13 @@ authoritative "what is each virtual" map for the toolkit engine.
 | 12 | +0x30 | **OnHoverExit()** | base no-op; Button = un-press if the widget is the current capture target |
 | 13 | +0x34 | **RemoveMarkedChildren()** | Panel/Window/ScrollEx only; sweeps children with remove-flag +0x8D == 1 |
 | 14 | +0x38 | **BuildScene()** | Window only; the concrete subclass overrides with its hardcoded widget tree |
+| 15 | +0x3C | **SetShown alias** | a secondary show/hide entry that targets the same +0x8C visible byte as slot 1 (CODE-CONFIRMED — the vtable has **16** slots; slot 15 is the second SetShown entry) |
+
+> **Slot count (CODE-CONFIRMED, Campaign 9D).** The shared vtable has **16** slots (0..15), not 15.
+> Slot 15 is a secondary `SetShown` alias writing the same visible byte (+0x8C) as slot 1. Slot 14
+> (`BuildScene`) is where each concrete window/panel installs its hardcoded widget tree (the per-class
+> build override — e.g. the login and char-select build routines of §8). The container `Draw` (slot 7)
+> calls each child's slot 9 (`UpdateTransform`) then slot 7 (`Draw`), matching this table exactly.
 
 ---
 
@@ -823,6 +855,67 @@ test) against one small box per preview slot. Each box is centered on its charac
 units apart in X and each box is ±6 wide, the boxes tile edge-to-edge with no gap/overlap. The first
 slot whose box the ray hits becomes the selection. See `specs/frontend_scenes.md §3.3.3` for the
 camera/ray geometry and the five stage positions; this refines any earlier "2D rect" assumption.
+
+**Lineup placement, ray-pick box, and facing (CODE-CONFIRMED — campaign-frontend re-walk).**
+The five preview actors stand at fixed world positions on the select stage:
+
+| Slot | World X | World Y | World Z (shallow bow) | Confidence |
+|---|---|---|---|---|
+| 0 | 488 | 0 | ≈ −9737 | CODE-CONFIRMED |
+| 1 | 500 | 0 | ≈ −9738 | CODE-CONFIRMED |
+| 2 | 512 | 0 | ≈ −9738.5 | CODE-CONFIRMED |
+| 3 | 524 | 0 | ≈ −9738 | CODE-CONFIRMED |
+| 4 | 536 | 0 | ≈ −9737 | CODE-CONFIRMED |
+
+- **Slot spacing** is **12.0** in X (centred near X = 512); **lineup scale** is **70.0**.
+- **Per-slot facing:** a per-slot facing byte selects the actor yaw — **yaw = π when the byte is 1,
+  else yaw = 0** (front-facing, +Z forward). The default lineup faces front.
+- **Ray-pick box (refines §8.2 above):** each slot's box has **half-extents ±6 in X and ±6 in Z**
+  (centred on the actor's X/Z) and a **fixed world-Y band [70.0, 92.0]** (the Y band is *not*
+  actor-centred). The first box the unprojected click ray hits wins; because the boxes are ±6 wide and
+  the slots are 12 apart, they tile edge-to-edge with no gap or overlap.
+- These world-absolute placements are the campaign-frontend re-walk view; the camera/ray geometry and
+  any mesh-local stage offsets are owned by `specs/frontend_scenes.md §3.3.3` and must not be restated
+  here (this spec records only the values the select-window build/hit-test code uses directly).
+<!-- source: _dirty/campaign-frontend/A4-charselect-camera-fx.md -->
+
+**Class button → class enum (CODE-CONFIRMED).** The four create-form class buttons (command ids
+10/11/12/13, left-to-right → selector index 0/1/2/3, §8.2 above) map to the playable classes as:
+
+| Button index | Class (enum value) |
+|---|---|
+| 0 | Monk (4) |
+| 1 | Musa (1) |
+| 2 | Dosa (3) |
+| 3 | Salsu (2) |
+
+So the left-to-right button order is **Monk / Musa / Dosa / Salsu** with enum values **4 / 1 / 3 / 2**.
+The class-name caption is set from msg.xdb ids **14003…14007**; the per-class description text comes
+from `data/script/npc.scr` keys **1…4** (loaded into the keyed node map at boot; the class-select
+handler assigns three description labels per class). <!-- source: _dirty/campaign-frontend/A5-creation.md -->
+
+**Create-preview actor placement (CODE-CONFIRMED — ACTOR-ONLY, no camera move).** Entering the create
+sub-form does **not** move, dolly, or re-aim the camera in this build (no boom/FOV/near/far write on any
+create path). Instead the single create-preview actor is placed **≈ 56.5 units nearer** the lineup
+centre (toward the camera, in world −Z) and **scaled 81.0** versus the lineup's **70.0** (ratio 81/70).
+Reimplementations should keep one fixed camera and move/scale only the preview actor.
+<!-- source: _dirty/campaign-frontend/A5-creation.md -->
+
+**Name validation message ids and bound (CODE-CONFIRMED — extends the create-form validation note).**
+On create-confirm the client validates the name before sending: **min length 2**; allowed bytes are
+lowercase ASCII (`a`–`z`) and digits (`0`–`9`) — **no uppercase, no spaces** — or valid CP949 lead+trail
+double-byte pairs; a banned-word filter; no client-side duplicate check. The failure paths raise these
+msg.xdb ids:
+
+| Condition | msg.xdb id |
+|---|---|
+| Empty / `@BLANK@` name | 2190 |
+| Banned word match | 2075 |
+| Charset or length violation | 12012 |
+
+The name field is bounded to **17 bytes including the NUL terminator (16 payload bytes)**. On a clean
+validation the name is staged and the create-character request is sent (wire layout owned by
+`specs/login_flow.md` / packets, not this spec). <!-- source: _dirty/campaign-frontend/A5-creation.md -->
 
 ### 8.3 Shared panel chrome — `InventWindow.dds` modal
 
@@ -1424,14 +1517,58 @@ main loop until done, then ended and destroyed before the next scene is created.
 | 2 | Load / opening gate | Allocates a load handler (size 0x218); runs the loading screen; reads INI key `[OPENNING] SKIP` to decide whether to skip the cinematic | → 4 when `SKIP` is set; → 3 otherwise | CODE-CONFIRMED |
 | 3 | Opening cinematic | Allocates the opening window (size 0x2D0); plays the `openning_*.dds` intro sequence; ends and destroys | → 4 | CODE-CONFIRMED |
 | 4 | **Character select** | Allocates the select window (size 0x1888); registers it as an event target; runs the engine main loop; on completion ends, unregisters, and destroys | → 5 on enter-game | CODE-CONFIRMED |
-| 5 | **In-game** | Allocates the main handler (size 0xC8); builds the game world; registers three event targets (main handler, sub-handler, view); runs the engine main loop; on logout/return ends and destroys | **→ 4** (returns to character select, NOT to login) | CODE-CONFIRMED |
+| 5 | **In-game** | Allocates the main handler (size 0xC8); builds the game world; registers **three** event targets (the master window, the main handler, and a third "view" object) onto the per-scene disposable list, each with a matched un-register; runs the engine main loop; on logout/return ends and destroys | **→ 4** (returns to character select, NOT to login) | CODE-CONFIRMED |
 | 6 | Quit | Tears down the engine | → 8 | CODE-CONFIRMED |
-| 7 | Error | Builds an error string from the state-name table (msg ID = 9001 + `[1]`), shows a message box, closes the network connection | → 8 | CODE-CONFIRMED |
-| 8 | Exit | Engine shutdown; WinMain returns | (loop ends) | CODE-CONFIRMED |
+| 7 | Error | Closes the network connection and shows a message box. The message id is **branchy** (not a flat `9001 + [1]`) — see the note below | → 8 | CODE-CONFIRMED |
+| 8 | Exit | Engine shutdown; WinMain returns (the `default` case also forces state 8) | (loop ends) | CODE-CONFIRMED |
 
 > **Key non-obvious edge:** in-game (state 5) transitions **back to character select (state 4)**,
 > not to login. Login is only visited once per process lifetime. The load / opening gate (state 2)
 > is also visited only once, after the first successful login.
+
+> **Re-walk confirmation (CODE-CONFIRMED).** An independent campaign-frontend re-walk of the master
+> loop re-confirms this table exactly: the loop mounts the data archive once, then runs a switch on the
+> primary scene state. **State 0 = cold bootstrap** (net-handler + top window + display-mode select),
+> **state 1 = Login** (where the login window and the 15-slot font table are built and the engine/device
+> is brought up; a device/window failure routes to 7), **state 2 = the opening-or-skip gate** (reads
+> INI `[OPENNING] SKIP`: skip → 4, otherwise build the loading window → 3), **state 3 = Opening
+> cinematic**, **state 4 = character-select specifically** (the login window is built at the state-1
+> init case, not here), **state 5 = in-game → returns to 4 (never to Login)**, **state 6 = Quit → 8**,
+> **state 7 = net/engine guard** (closes the connection, shows a message box → 8), **state 8 =
+> clean Exit** (the `default` case also forces 8). The switch selector is effectively off-by-one from
+> destination-named labels: each case writes the state for the phase it is about to build (state 0
+> writes 1, state 1 writes 2, state 2 writes 3 or 4, state 3 writes 4, state 4 writes 5, state 5 writes
+> 4, state 6 writes 8, state 7 writes 8). The state-8 check lives in the shared loop tail: when the
+> selector reads 8, the loop performs the final shutdown and returns.
+> <!-- source: _dirty/campaign-frontend/A6-winmain-statemachine.md -->
+
+> **State-7 error message-id is branchy, not a flat `9001 + [1]` (CODE-CONFIRMED).** The error case
+> has **two** id paths: (a) if the secondary-state slot `[1] == 8` **and** the explicit error-id slot
+> `[2]` is non-zero, it shows the message keyed by `[2]` directly (an arbitrary caller-supplied id);
+> (b) otherwise it maps the secondary state `[1]` through a **state-name / error-string mapper** to
+> obtain the caption. The "`9001 + [1]`" form quoted in an earlier brief is the *effect* of one branch
+> only, not the universal formula. After the message box it closes the network connection (via the net
+> client's release vtable entry) and advances to state 8.
+
+> **Per-scene engine main-loop runner (CODE-CONFIRMED).** "Runs the engine main loop" in the table
+> above is a single shared runner the loop calls once per scene. Its shape: it raises timer resolution
+> (`timeBeginPeriod(1)`), sets a module-global **run flag** to 1, then spins
+> `do { tick(scene_driver); render-step; } while(run-flag)` — ticking the active scene driver and
+> rendering each frame until the run flag is cleared (a type-13 loop-break event, §15.4, clears it).
+> This is the literal "ticked by the engine's main loop until done" contract; an `Application`-layer
+> reimplementation should model the per-scene tick/exit-flag loop, not a single global frame pump.
+
+> **State-5 in-game build / three-object registration (CODE-CONFIRMED).** State 5 first sets the
+> *next* state to 4, allocates the in-game main handler (size 0xC8), then obtains two more objects: the
+> master window (via its singleton accessor) and a third **in-world "view"** object. All **three** are
+> pushed onto the per-scene disposable list (§15.1) — the master window's secondary handler, the main
+> handler, and the view — each paired with a matching un-register on scene exit. The concrete HUD is
+> then materialised by a large **in-game build/activation routine** that invokes `BuildScene`
+> (vtable slot 14 / byte +56) on the master window's embedded sub-windows and builds the in-game scene
+> graph from the **service slot 320 (byte +0x500 / 1280)** handler (§1.6). That activation routine is
+> what turns the zero-initialised service-slot table into a populated HUD; the matching teardown re-zeros
+> the slot registry (§1.6) and releases the world refs. The identity of the third "view" object is
+> static-tentative (likely the in-game world / 3D view) and is the lone residual here.
 
 ### 11.3 Login window internal sub-state machine (CODE-CONFIRMED, corrected)
 
@@ -1463,6 +1600,49 @@ sub-state values 1..6 and 29..41 (with gaps); the field is initialised to 1.
 > values 32–38 as above; an earlier brief that quoted 34/35/36 for fetch/wait/consume was off by
 > one against the live machine (fetch-start = 33, request = 34, wait = 35, consume = 36 → 37, pick =
 > 37, endpoint = 38). The values above are the live ones.
+
+> **PIN show-gate confirmation (CODE-CONFIRMED — independent re-walk).** An independent campaign-frontend
+> re-walk confirms that the field driving this Tick/workflow machine (the same substate field this table
+> documents) **does** hold the values **31** and **32**, and that the PIN/second-password child panel's
+> visibility is set on the **31 → 32 edge** (reachable only after the substate-29 credential gate).
+> Substate 32 polls `(panel visible AND submitted)` and advances to 33. **This Tick/workflow substate is
+> the field that gates PIN visibility.** This resolves a cross-spec conflict in which `frontend_scenes.md`
+> had stated "neither 31 nor 32 is a login sub-state" — that observation was about a *separate form/page*
+> state (which indeed never holds 31/32); the *Tick/workflow* substate documented in this table does. The
+> account/save flag that gates entry into substate 31 is debugger-pending.
+> <!-- source: _dirty/campaign-frontend/A2-pin-modal.md -->
+
+> **PIN keypad digit→slot scramble (mechanism CODE-CONFIRMED; runtime seed + permutation
+> DEBUGGER-PENDING).** The mapping of which digit appears on which keypad tile is **not** a static table
+> and **not** a constant-seeded shuffle. It is a **clock-seeded Fisher–Yates shuffle** of the 10-digit
+> pool: the routine seeds the standard library RNG from the current wall-clock time, then shuffles the
+> pool, applying the platform 15-bit-RNG range-extension to widen each draw, so tile position `p` displays
+> `permutation[p]`. The pool is **re-rolled on modal open, on Reset (keypad tag 11), and after an
+> OK-submit (keypad tag 12)**. The keypad-internal control tags are **11 = Reset / reshuffle, 12 = OK /
+> submit, 13 = Cancel**. The shuffle **mechanism** is code-confirmed; the **runtime seed value and the
+> resulting permutation are clock-derived and therefore debugger-pending** (not a recoverable code
+> immediate).
+> <!-- source: _dirty/campaign-frontend/A2-pin-modal.md -->
+
+> **Two coupled state fields — workflow `+0x238` vs handler page-state `+0x17C` (CODE-CONFIRMED).**
+> There are **two** state fields on the login window, and they are coupled. (1) the **Tick/workflow
+> sub-state at +0x238** — the field this table documents, driven and consumed by the per-frame Tick.
+> (2) a **handler page-state at +0x17C** on the embedded event-handler sub-object — the field the
+> **click/key OnEvent override writes**. On this build the OnEvent handler writes the workflow targets
+> (the literal values **29, 34, 37, 38, 5**) into the **+0x17C** page-state, and the Tick loop reflects
+> them into / consumes them from **+0x238**; the two move together (the handler drives, the Tick
+> follows). The earlier "separate form/page state" footnote is now pinned: that separate field is
+> **+0x17C**, and it is the one the OnEvent switch mutates. A reimplementation that prefers a single
+> state enum can collapse both, but must drive the enum from the OnEvent click/key path the way +0x17C
+> is driven here. The OnEvent edges confirmed on this build: Enter/OK at the form-active state advances
+> to **29** (only after the version gate, below); plate-pick at the server state advances to **37→38**;
+> the help/quit control advances to **34**; the option-tab path advances to **5**.
+
+> **Sub-state 29 entry is gated by the `game.ver` version check (CODE-CONFIRMED).** The OK/Login
+> action (id 103 / `g`) and the Enter key at the form-active state set the workflow sub-state to **29**
+> **only after** a `data/cursor/game.ver` version gate passes; a failed gate raises the version-mismatch
+> error modal (msg **2204**) instead of advancing. This confirms the 103/`g` → version-gate → credential
+> sub-state path (§8.1 action map).
 
 ### 11.4 Character-select screen lifecycle note
 
@@ -1703,3 +1883,193 @@ append-only ownership with an outright release on window teardown.
 - Skinning / character preview: `specs/skinning.md`, `formats/mesh.md`
 - Glossary: `Docs/RE/names.yaml`
 - Provenance: `Docs/RE/journal.md`
+
+---
+
+## 15. Diamond UI framework — verified lifecycle, attach primitives, and event model (CODE-CONFIRMED)
+
+> Campaign 9D promoted a byte-exact re-verification of the whole toolkit against the binary. The base
+> component, the 16-slot vtable, Panel/Button/Label, the sprite render path, and the click→action
+> dispatch all **confirm** §1–§7 at the byte level (offsets re-pinned, no contradictions). This section
+> records the additions that the §1–§7 tables did not already state: the universal **attach
+> primitives**, the **two-phase widget destroy/End** lifecycle, and the **input-event struct** the
+> dispatch reads. All confirmed unless noted.
+
+### 15.1 The universal widget-attach primitives — (CODE-CONFIRMED)
+
+There is **no widget-manager object** — a parent panel owns its children directly. Two helpers are
+the only universal attach primitives (both already named in §7.4; restated here as the framework
+contract):
+
+| Primitive | Effect | Use |
+|---|---|---|
+| **AddChild(parent, child)** | sets `child.parent (+0x84) = parent`; pushes the child pointer into the parent's child vector (+0xA4). Paint order = insertion order. | decorative / non-clickable widgets |
+| **AddChildWithAction(parent, child, actionId)** | same, **plus** `child.actionId (+0x10) = actionId`. | clickable widgets — this is how a widget gets its command id |
+
+Both are extremely high-frequency call sites (each in the four-figure range), which is why every
+hardcoded `BuildScene` is a long sequence of these two calls. The action id stored by the second
+primitive at **+0x10** is exactly the id the slot-10 getter returns and the window dispatcher routes
+on a click (§1.4, §15.4).
+
+> **Disposable-tracking is NOT attach — (CODE-CONFIRMED, corrected).** A separate per-scene helper
+> pushes a freshly-constructed window/sub-object onto a **scene-teardown list** so a scene's owned
+> objects are released together when its tick loop returns. Earlier notes mislabelled that helper a
+> "universal attach helper" (and one IDB symbol still mis-names it an "OpeningWindow ctor", §15.6); it
+> is a **register-for-teardown / disposable-tracking push**, not a widget-tree attach. The real attach
+> primitives are the two AddChild* functions above. (See `specs/client_runtime.md §7.9.2`.)
+>
+> **The teardown list is a `std::list`, held by a process-global singleton (CODE-CONFIRMED).** The
+> registry is a `std::list<void*>` reached through a one-shot-guarded **process-global singleton**
+> (atexit-registered), **not** a per-window field. The push helper builds a 12-byte intrusive
+> `{next, prev, ptr}` node and bumps a count (the count-grow path throws the standard
+> `length_error("list<T> too long")` — the definitive proof it is `std::list`, not a manager); the
+> matched erase walks the list head, matches the node's pointer key, unlinks, frees, and decrements.
+> WinMain pairs every push with an erase. The singleton has **~35 registration sites** — the loading,
+> opening, character-select, and main windows, **plus several network S2C handlers** (the enter-game
+> ack, the character-list handler, and a game-state-tick handler). So some UI objects that are
+> constructed in response to a server packet are torn down through this same per-process scene-object
+> list. This is the concrete identity behind §11.2's "ticked … until done, then ended and destroyed".
+
+### 15.2 Widget lifecycle — create → attach → show/hide → End/destroy — (CODE-CONFIRMED)
+
+- **Create.** `new(classSize)` then the class constructor: the constructor calls the shared base
+  image-component constructor (sets the common fields of §1.2), overwrites +0x00 with the class
+  vtable, then inits the class-specific fields. Construction is complete after the constructor — there
+  is no separate "init" call. A concrete window additionally overrides **slot 14 (BuildScene)**, which
+  is invoked once to populate the widget tree **eagerly** (e.g. the login window preloads its atlases
+  into its per-scene texture list, then constructs all of its widgets in one BuildScene pass — §8.1,
+  §9.0).
+- **Attach.** via the two §15.1 primitives.
+- **Show / hide.** `SetShown(bool)` (vtable slot 1, or its slot-15 alias) writes the visible byte
+  (+0x8C) and the edge byte (+0x8D) to the bool, and **snaps** alpha (+0x04) to 255 (show) or 0 (hide);
+  the per-frame leaf draw then maintains/animates alpha ±64/tick (±32 for the Ex variant), clamped
+  [0, 255]. A parent's draw loop skips any child whose visible byte ≠ 1. Slide-in / curtain transitions
+  (e.g. the login curtain, §7.7) are **not** a vtable feature — they are the per-state machine moving a
+  child's local Y each tick, distinct from the alpha fade.
+- **Destroy / End — two phases.** Teardown is **(1) a panel-specific `End`/reset, then (2) the base
+  destructor chain**:
+  1. **`End`/reset.** A panel walks its child vector clearing each child's active byte, then **chains
+     the base End** (via the per-class hook, vtable slot 8); if the panel holds an auxiliary object
+     (e.g. a 3D view), it releases that aux (the aux object's own release call) and nulls the slot.
+     This is the standard "reset children → chain base → release held aux" shape.
+  2. **Scalar-deleting destructor (slot 0).** Resets the vtable and frees the object if the
+     deleting-flag is set. A window's teardown also walks its per-scene texture list (+0x220) and
+     releases each atlas handle once (no ref-count) — see `specs/resource_pipeline.md §"Per-scene
+     window texture lists"` and §9.0.
+
+### 15.3 The 2D render path and insertion-order z-model — (CODE-CONFIRMED — confirms §3, §7.3)
+
+The container `Draw` (slot 7) does: `UpdateTransform(self)` (slot 9) → leaf draw of the panel's own
+sprite → then, **forward** from the child-vector begin to end, for each child call slot 9
+(`UpdateTransform`) and — if the child's visible byte (+0x8C) == 1 — slot 7 (`Draw`). **Forward
+iteration = back-to-front paint; later-added children paint on top. There is no z-index field.** The
+leaf draw integrates alpha toward the visible target, then (if a texture is bound and visible) submits
+one sprite via the shared `ID3DXSprite` batch path: `SetState(alpha-blend)` → `SetTransform(matrix
+@+0x44)` → `Draw(texId @+0x90, srcRect @+0x34, color = (alpha<<24)|(tint @+0x0C & 0xFFFFFF))` →
+`Flush()`. The src-RECT selects the atlas sub-rect; the matrix is a pure translation to the world
+(x, y) on the 1024×768 reference canvas. This is the **D3DXSprite batch path**, not manual vertex
+quads (confirms §3.3). The ortho/2D projection is the engine's frame-begin, not per-widget.
+
+### 15.4 Click → hit-test → action-id → OnEvent dispatch chain — (CODE-CONFIRMED)
+
+The complete dispatch pipeline, end to end:
+
+1. **Input-event struct (CODE-CONFIRMED event-type catalogue).** The event the dispatch reads is a
+   small struct whose first byte is the **event type**. The full type catalogue:
+
+   | Type byte +0 | Event | Notes |
+   |---|---|---|
+   | 1 | key-down | dword[+4] = key code |
+   | 2 | key-up | dword[+4] = key code |
+   | 3 | mouse-move | broadcast to all children for hover update |
+   | 4 | button-press | pointer down |
+   | 5 | button-release | pointer up |
+   | 6 | **CLICK** | **synthesised** only when the release lands on the same widget that was pressed (the click-vs-drag discriminator); dword[+12] is a button/flag value gated `== 1` |
+   | 7 | double-click | (the front-end repurposes the second pointer-hit branch for plate-pick, below) |
+   | 8 | wheel | wheel delta at dword[+4] |
+
+   **Source of each class:** **keyboard events (1/2) come from a DirectInput8 keyboard thread**;
+   **mouse events come from the window message handler (WndProc)**. The type-6 click is never raw — it
+   is manufactured by the capture logic (§4.2) only on a same-widget press-then-release, which is what
+   makes it the genuine click-vs-drag discriminator. **Dispatch is topmost-child-first, first-consumer-
+   wins, and runs before the 3D world view** so a UI click never falls through to world-entity
+   selection while a widget consumes it. Move/key events (1/2/3) are broadcast to all children for
+   hover-state update; the pointer/click events (4/5/6/7) consume on the first hit.
+   - **This-build specifics (login window).** The key path reads the key code at dword[+4]: **9 =
+     field-swap / Tab**, **10 = Enter / OK**; **27 = ESC** drives the window's cancel/close path when
+     the cancel-enabled byte is set. The login window also uses the second pointer-hit branch (type 7)
+     as a **server-plate pick**, and recognises an internal **type-13 "loop-break" event (key value
+     10001)** that clears the engine run-flag to exit the scene loop (§11.2 main-loop runner).
+2. **Panel hit-test route (slot 6, the shared panel/window dispatch).** If the panel is invisible
+   (+0x8C == 0) it returns "not consumed". For move/key events it iterates children **in reverse**
+   (end → begin) calling each child's slot 6; on a child returning consumed, it stores that child's
+   `GetActionId()` (slot 10, = field +0x10) into the panel's active-child index (+0xB4) and returns
+   consumed. **Reverse order = topmost-painted child wins input** (the inverse of the forward paint
+   walk). Click events do the same reverse hit-test and read the first consuming child's action id.
+3. **Mouse-down/up capture.** Mouse-down on a focus-eligible widget sets the global click-capture
+   pointer to that widget (§4.2). Mouse-up while still captured by the **same** widget builds a
+   synthetic **type-6** "click-released" event (with dword[+12] = 1) and routes it back through the
+   window's OnEvent.
+4. **Window OnEvent switch.** The window-level event override calls the base panel dispatch first; if
+   it consumed a type-6 click (and dword[+12] == 1) it reads the window's selected command field and
+   **switches on the action id**, invoking the matching handler (e.g. char-select Create = 4 /
+   Delete = 5 / Enter = 6, §8.2). For a key event (type 1/2) with code 27 (ESC) and the window's
+   cancel-enabled byte set, it invokes the cancel/close path. On the login window the same switch
+   reads key code 9 (field-swap / Tab) and 10 (Enter / OK) — see §15.4 step 1 this-build specifics.
+
+So the one-line chain is: **click pixel → reverse child hit-test → first-hit child's GetActionId
+(+0x10) → synthetic type-6 event → window OnEvent switch on the action id → concrete handler.**
+
+### 15.5 D3DXFont / MessageDB text path — (CODE-CONFIRMED — confirms §6)
+
+Text is drawn through the 15 D3DX font slots (§6.2), created once at boot from Korean system typefaces
+with the Hangul charset (**no VFS glyph atlas for body text**). The shared text helper computes a
+fixed-advance destination rect (`charWidth(slot) × strlen` wide, `rowHeight(slot) × scale` tall — a
+**monospace grid even with proportional faces**) and calls the font's draw-text. Captions are resolved
+through the message catalogue (`msg.xdb`, 516-byte records keyed by id, §10) and are raw CP949 byte
+strings; the OS code page handles the Hangul composition via the Hangul charset. Caption colour by
+state: disabled = grey, hovered = yellow, else the per-widget highlight (+0xF4 if set) or the tint
+(+0x0C). The front-end uses font **slot 0** universally (no per-widget slot write in the front-end
+build routines — §6.3); in-game windows select larger/bold slots in their own builders.
+
+### 15.6 Modal / focus model — global input-focus manager, not a modal window class — (CODE-CONFIRMED)
+
+There is **no separate "modal window" class or modal-layer object**. "Modal focus" is a small,
+uniform protocol applied by a shared **show-modal helper** on `GUPanel` that virtually every concrete
+panel (the login ID/PW textboxes, chat input, stall, guild, GM, …) calls at show-time:
+
+1. Fetch the single **process-global UI input/focus manager** (one singleton — the IME-target owner).
+2. **Register `this`** panel into that manager (so it becomes the focused input target).
+3. **Enable IME composition** (the IME-context enable call) so CP949 Hangul composition routes here.
+4. **Set the focused byte at +0x8B = 1** on the panel.
+5. Run a manager refresh and assign the panel's class-name caption.
+
+So focus/modality = **register-into-the-global-input-manager + focused byte (+0x8B) + IME-on**, with
+no z-locking or input-eating layer beyond the ordinary "topmost-painted child wins the reverse
+hit-test" rule (§15.4 step 2) plus this focused-input registration. Only one panel is the focus /
+IME target at a time (registering a new one supersedes the previous). This refines §5.1 (textbox IME
+registration) and §4.2 (global click-capture): the click-capture pointer is the *pointer* capture for
+the press/release click discriminator, while this focus registration is the *keyboard/IME* target —
+two independent global pointers. The login window arms this path through the field-focus actions
+(`m`/`n`) and the Tab key (code 9).
+
+### 15.7 IDB-symbol mislabels (analyst note — NOT spec errors) — (CODE-CONFIRMED)
+
+The semantics above are confirmed; this note records that **three IDB symbol names** are misleading
+so a future reader of the database is not misled. These are database-symbol issues only — **the spec
+framing in §1.6 / §11.2 / §15.1 / §15.4 is correct** and needs no change:
+
+- The function the IDB currently names as an **"OpeningWindow constructor"** is **not** a constructor
+  and **not** opening-window-specific — it is the **scene-dispose-list push** of §15.1 (insert a
+  `{next, prev, ptr}` node into the per-process scene-teardown `std::list`). Proposed rename:
+  `Diamond_SceneDisposeList_Push`.
+- The two functions the IDB currently names as a **"GUCmdHandler" dispatch/find pair** are **not**
+  an action-id command table — they are **generic intrusive-list find/erase plumbing** (walk a list
+  head, match a node key, act), invoked from window/handler ctors with the dispose-list singleton as
+  `this`. They are the same disposable-registry plumbing, **not** the per-window command dispatch.
+  The real action-id dispatch is the **inline window `OnEvent` switch** (§15.4 step 4) — it must
+  **not** be associated with these two list helpers. Proposed renames:
+  `Diamond_List_FindByKey_Wrapper` / `Diamond_List_FindByKey`.
+
+(The renames belong to `ida-naming-sync` / `names.yaml`; this spec only records that the symbols are
+stale so the §1.4 "embedded command handler" / §15.1 "disposable push" prose stays authoritative.)
