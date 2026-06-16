@@ -274,7 +274,8 @@ public sealed class EnterGameSpawnTests
         const string koreanName = "무사"; // 무사
         byte[] descriptor = new byte[SpawnDescriptorReader.Size];
         byte[] nameBytes = cp949.GetBytes(koreanName);
-        Assert.True(nameBytes.Length is > 2 and <= 16, "Korean name must be multi-byte CP949 within the 16-byte field.");
+        Assert.True(nameBytes.Length is > 2 and <= 16,
+            "Korean name must be multi-byte CP949 within the 16-byte field.");
         Array.Copy(nameBytes, 0, descriptor, 0x00, nameBytes.Length); // +0x00 name; rest stays NUL
 
         var reader = new SpawnDescriptorReader(descriptor);

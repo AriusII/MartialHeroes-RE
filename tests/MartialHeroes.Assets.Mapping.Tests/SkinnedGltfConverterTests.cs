@@ -496,8 +496,8 @@ public sealed class SkinnedGltfConverterTests
         float emittedX = BinaryPrimitives.ReadSingleLittleEndian(binData.AsSpan(off));
         float emittedY = BinaryPrimitives.ReadSingleLittleEndian(binData.AsSpan(off + 4));
         float emittedZ = BinaryPrimitives.ReadSingleLittleEndian(binData.AsSpan(off + 8));
-        Assert.Equal(0f, emittedX, precision: 5);  // X unchanged
-        Assert.Equal(0f, emittedY, precision: 5);  // Y unchanged
+        Assert.Equal(0f, emittedX, precision: 5); // X unchanged
+        Assert.Equal(0f, emittedY, precision: 5); // Y unchanged
         Assert.Equal(-2f, emittedZ, precision: 5); // Z negated
     }
 
@@ -550,17 +550,17 @@ public sealed class SkinnedGltfConverterTests
         // Column-major: ibm[12], ibm[13], ibm[14] are the translation column.
         // Child bone world translation (under Z-negate of (0,1,0)) = (0,1,0).
         // Inverse-bind translation should be (0,−1,0).
-        Assert.Equal(0f, ibm[12], precision: 5);  // tx
+        Assert.Equal(0f, ibm[12], precision: 5); // tx
         Assert.Equal(-1f, ibm[13], precision: 5); // ty = −bindWorldTy
-        Assert.Equal(0f, ibm[14], precision: 5);  // tz
+        Assert.Equal(0f, ibm[14], precision: 5); // tz
 
         // Rotation block (upper-left 3×3 = identity for identity quaternion after Z-negate).
         // Column 0: [1,0,0,0], Column 1: [0,1,0,0], Column 2: [0,0,1,0].
-        Assert.Equal(1f, ibm[0], precision: 5);   // r[0,0]
-        Assert.Equal(0f, ibm[1], precision: 5);   // r[1,0]
-        Assert.Equal(0f, ibm[2], precision: 5);   // r[2,0]
-        Assert.Equal(1f, ibm[5], precision: 5);   // r[1,1]
-        Assert.Equal(1f, ibm[10], precision: 5);  // r[2,2]
+        Assert.Equal(1f, ibm[0], precision: 5); // r[0,0]
+        Assert.Equal(0f, ibm[1], precision: 5); // r[1,0]
+        Assert.Equal(0f, ibm[2], precision: 5); // r[2,0]
+        Assert.Equal(1f, ibm[5], precision: 5); // r[1,1]
+        Assert.Equal(1f, ibm[10], precision: 5); // r[2,2]
     }
 
     // -------------------------------------------------------------------------

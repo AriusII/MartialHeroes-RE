@@ -247,14 +247,20 @@ public static class LoginLayout
     // NOTE: §1.3 table has TWO columns: "IME composition slot = 16" and "Max length = 6". The cap is 6.
     public static readonly WidgetRect AccountBox = new(390, 32, 102, 13, EditFieldFrameSrcX, EditFieldFrameSrcY);
     public const int ActionFocusId = 109; // spec §1.2. CODE-CONFIRMED.
-    public const int IdMaxLength = 6; // spec §1.3 "Max length = 6" (the 16 is the IME composition slot, not the cap). CODE-CONFIRMED.
+
+    public const int
+        IdMaxLength =
+            6; // spec §1.3 "Max length = 6" (the 16 is the IME composition slot, not the cap). CODE-CONFIRMED.
 
     // Password input field — dest (568,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 129, masked. action 110.
     // Same shared source rect as ID field (both at login_slice1.dds src 615,404). spec §11.2e. CODE-CONFIRMED.
     // NOTE: §1.3 table has TWO columns: "IME composition slot = 12" and "Max length = 129". The cap is 129.
     public static readonly WidgetRect PasswordBox = new(568, 32, 102, 13, EditFieldFrameSrcX, EditFieldFrameSrcY);
     public const int ActionFocusPw = 110; // spec §1.2. CODE-CONFIRMED.
-    public const int PwMaxLength = 129; // spec §1.3 "Max length = 129" (the 12 is the IME composition slot, not the cap). CODE-CONFIRMED.
+
+    public const int
+        PwMaxLength =
+            129; // spec §1.3 "Max length = 129" (the 12 is the IME composition slot, not the cap). CODE-CONFIRMED.
 
     // Save-ID checkbox — A@(694,86,13,13). NORMAL src(717,398), PRESSED/checked src(730,398). action 104.
     // spec §11.2e "Save-ID checkbox". CODE-CONFIRMED.
@@ -278,6 +284,7 @@ public static class LoginLayout
     // Exact canvas position is a revival placement (no sub-rect separate from the ok-button art);
     // art src reuses (266,398) 112×39 — the secondary stone button frame.
     public static readonly WidgetRect QuitButton = new(840, 64, 112, 39, 266, 398);
+
     // NOTE: substate 30 is DEAD/UNREACHABLE in this build — an exhaustive writer scan found nothing ever
     // writes value 30. The genuine quit-confirm is the shared ExitPanel (Yes=action 50/No=51).
     // spec: frontend_scenes.md §1.5 row 30 / §1.8. CODE-CONFIRMED (dead branch).

@@ -350,7 +350,7 @@ public sealed partial class OpeningWindow : Control
                 AnchorTop = 0f,
                 AnchorBottom = 0f,
                 OffsetLeft = -120f, // x = clientWidth − 120; spec intro_sequence.md §2.2. CODE-CONFIRMED.
-                OffsetTop = 10f,    // y = 10; spec intro_sequence.md §2.2. CODE-CONFIRMED.
+                OffsetTop = 10f, // y = 10; spec intro_sequence.md §2.2. CODE-CONFIRMED.
                 OffsetRight = -10f, // right edge 10px from right edge (110px wide)
                 OffsetBottom = 42f, // y + 32 height
                 TextureNormal = skipNormal,

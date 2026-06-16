@@ -37,7 +37,9 @@ internal sealed class SyntheticArchive : IDisposable
     private const int NameCapacity = 100; // sample-verified
 
     // spec: Docs/RE/formats/pak.md §Header — magic "VFS001" (null-padded to 8 bytes), field_08 = 39.
-    private static readonly byte[] Vfs001Magic = [(byte)'V', (byte)'F', (byte)'S', (byte)'0', (byte)'0', (byte)'1', 0, 0];
+    private static readonly byte[] Vfs001Magic =
+        [(byte)'V', (byte)'F', (byte)'S', (byte)'0', (byte)'0', (byte)'1', 0, 0];
+
     private const uint SampleFieldO8 = 39; // sample value of field_08
 
     // Non-zero FILETIME-shaped sample values for the three trailing TOC timestamps. Arbitrary but

@@ -969,10 +969,10 @@ public sealed partial class GameHud : Control
             return s;
         }
 
-        _zonePillUnknown = MakePillStyle(new Color(0f, 0f, 0f, 0.65f));   // black — unknown
-        _zonePillSafe    = MakePillStyle(new Color(0f, 0.4f, 0f, 0.75f)); // green — safe
-        _zonePillPvp     = MakePillStyle(new Color(0.6f, 0f, 0f, 0.75f)); // red   — PvP
-        _zonePillClosed  = MakePillStyle(new Color(0.3f, 0.1f, 0.5f, 0.75f)); // purple — closed
+        _zonePillUnknown = MakePillStyle(new Color(0f, 0f, 0f, 0.65f)); // black — unknown
+        _zonePillSafe = MakePillStyle(new Color(0f, 0.4f, 0f, 0.75f)); // green — safe
+        _zonePillPvp = MakePillStyle(new Color(0.6f, 0f, 0f, 0.75f)); // red   — PvP
+        _zonePillClosed = MakePillStyle(new Color(0.3f, 0.1f, 0.5f, 0.75f)); // purple — closed
         _zoneIndicatorPanel.AddThemeStyleboxOverride("panel", _zonePillUnknown);
 
         _zoneIndicatorLabel = new Label
@@ -1594,10 +1594,10 @@ public sealed partial class GameHud : Control
         // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.
         StyleBoxFlat? pillStyle = evt.Zone switch
         {
-            ZoneType.Safe    => _zonePillSafe,
+            ZoneType.Safe => _zonePillSafe,
             ZoneType.OpenPvp => _zonePillPvp,
-            ZoneType.Closed  => _zonePillClosed,
-            _                => _zonePillUnknown,
+            ZoneType.Closed => _zonePillClosed,
+            _ => _zonePillUnknown,
         };
         if (pillStyle is not null)
             _zoneIndicatorPanel.AddThemeStyleboxOverride("panel", pillStyle);

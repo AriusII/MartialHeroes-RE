@@ -152,8 +152,7 @@ public sealed class SessionHandshakeTests
         BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(cursor), 10); // L2 = 10 (sum 20 != 42)
         // Both digit arrays fit; the failure is the L1 + L2 invariant, not an overrun.
 
-        ArgumentException ex = Assert.Throws<ArgumentException>(
-            () => SessionHandshake.ParseKeyExchange(payload));
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => SessionHandshake.ParseKeyExchange(payload));
         Assert.Contains("L1 + L2", ex.Message);
         Assert.Contains("42", ex.Message);
     }
@@ -166,8 +165,7 @@ public sealed class SessionHandshakeTests
         // After headerA+headerB (4) + L1 prefix (4) = cursor 8; a declared L1 = 100 overruns 62 bytes.
         BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4), 100);
 
-        ArgumentException ex = Assert.Throws<ArgumentException>(
-            () => SessionHandshake.ParseKeyExchange(payload));
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => SessionHandshake.ParseKeyExchange(payload));
         Assert.Contains("L1", ex.Message);
         Assert.Contains("overruns", ex.Message);
     }
@@ -183,8 +181,7 @@ public sealed class SessionHandshakeTests
         cursor += 4 + 10;
         BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(cursor), 200); // L2 = 200 overruns
 
-        ArgumentException ex = Assert.Throws<ArgumentException>(
-            () => SessionHandshake.ParseKeyExchange(payload));
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => SessionHandshake.ParseKeyExchange(payload));
         Assert.Contains("L2", ex.Message);
         Assert.Contains("overruns", ex.Message);
     }

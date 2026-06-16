@@ -182,7 +182,8 @@ public sealed class NpcSpawnParserTests
     public void Parse_Field20Inert_RoundTrip()
     {
         // spec: npc_spawns.md — field_20 u32 @ +20: CONFIRMED inert.
-        byte[] buf = BuildRecord(mobId: 1, field02Inert: 0, worldX: 0f, worldZ: 0f, facing: 0f, spawnType: 0, field20Inert: 0xDEAD1234u);
+        byte[] buf = BuildRecord(mobId: 1, field02Inert: 0, worldX: 0f, worldZ: 0f, facing: 0f, spawnType: 0,
+            field20Inert: 0xDEAD1234u);
         NpcSpawnArray result = NpcSpawnParser.Parse(buf.AsSpan());
         Assert.Equal(0xDEAD1234u, result.Records[0].Field20Inert);
     }
@@ -191,7 +192,8 @@ public sealed class NpcSpawnParserTests
     public void Parse_Field24Inert_RoundTrip()
     {
         // spec: npc_spawns.md — field_24 u32 @ +24: CONFIRMED inert.
-        byte[] buf = BuildRecord(mobId: 1, field02Inert: 0, worldX: 0f, worldZ: 0f, facing: 0f, spawnType: 0, field24Inert: 0xCAFEBABEu);
+        byte[] buf = BuildRecord(mobId: 1, field02Inert: 0, worldX: 0f, worldZ: 0f, facing: 0f, spawnType: 0,
+            field24Inert: 0xCAFEBABEu);
         NpcSpawnArray result = NpcSpawnParser.Parse(buf.AsSpan());
         Assert.Equal(0xCAFEBABEu, result.Records[0].Field24Inert);
     }
