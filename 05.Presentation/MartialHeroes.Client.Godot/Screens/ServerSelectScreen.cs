@@ -77,30 +77,37 @@ namespace MartialHeroes.Client.Godot.Screens;
 
 /// <summary>
 /// View-model for one 8-byte lobby server record.
-/// spec: Docs/RE/specs/login_flow.md §2.1 / Docs/RE/specs/frontend_scenes.md §2.2. CODE-CONFIRMED.
+/// spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A (the code-confirmed wire spec — supersedes the
+/// earlier login_flow.md §2.1 "Load/OpenTime/open-clock" framing). CODE-CONFIRMED.
 /// </summary>
 public sealed record ServerEntry(
-    /// <summary>Index 1..40 into the client-local name table. spec §2.8.</summary>
+    /// <summary>
+    /// Server id / select-key (wire +0). Also the AVAILABILITY gate: <c>ServerId == 100</c> unlocks the
+    /// select button. Otherwise an index into the client-local name table (resolved from msg banks
+    /// 5001..5040) when <see cref="StatusCode"/> is in 1..39. spec: §RECORD SHAPE A +0.
+    /// </summary>
     int ServerId,
-    /// <summary>Client-local display name (resolved from msg banks 5001..5040). spec §2.8.</summary>
+    /// <summary>Client-local display name (resolved from msg banks 5001..5040). spec §RECORD SHAPE A +0.</summary>
     string DisplayName,
     /// <summary>
-    /// Availability sentinel. spec §2.3 special values:
-    ///   0 = normal/open; 2/3/4 = status-label variants; 3+open_time!=0 = HH:MM clock;
-    ///   100 = auto-connect sentinel.
+    /// Caption / branch selector (wire +2, <c>status_kind</c>). spec: §RECORD SHAPE A +2:
+    ///   0 = derive a population label/color from <see cref="Population"/> / <see cref="Flag"/>;
+    ///   3 = special (caption 6004 when Population==24, else 6005 latency digit-split from Population/Flag);
+    ///   1..39 = per-value caption-string array; &lt; 1 or &gt; 39 = fallback caption 5901.
     /// </summary>
     int StatusCode,
     /// <summary>
-    /// Population gauge / scheduled-open hours (when status_code==3).
-    /// Colour thresholds: 1200/800/500. spec §2.3. CODE-CONFIRMED.
-    /// When status_code==3 and open_time!=0: HH = load/10, load%10. spec §2.4. CODE-CONFIRMED.
+    /// Population / count value (wire +4). In numeric mode (Flag != 0) thresholded 500/800/1200 (strict
+    /// greater-than). In discrete mode (Flag == 0) a discrete load level (2/3/4). In the status==3 branch
+    /// it is the 6005 latency numerator (and == 24 selects caption 6004). spec: §RECORD SHAPE A +4.
     /// </summary>
-    int Load,
+    int Population,
     /// <summary>
-    /// Scheduled-open minutes (when status_code==3, open_time!=0).
-    /// MM = open_time/10, open_time%10. spec §2.4. CODE-CONFIRMED.
+    /// Mode flag (wire +6): nonzero = treat <see cref="Population"/> as a numeric population (apply
+    /// thresholds); zero = treat it as a discrete load level. Also a 6005 latency numerator in the
+    /// status==3 branch. NOT an HH:MM open-clock. spec: §RECORD SHAPE A +6.
     /// </summary>
-    int OpenTime);
+    int Flag);
 
 /// <summary>
 /// Server-selection overlay — pixel-faithful to §11.4.
@@ -762,9 +769,9 @@ public sealed partial class ServerSelectScreen : Control
 
     private void PaintOnePlate(int col, ServerEntry? entry)
     {
-        // Plate is clickable only when entry exists, status==0, and load < 2400.
+        // Plate is clickable only when entry exists, status==0, and population < 2400.
         // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §1.5. CODE-CONFIRMED.
-        bool isReady = entry is { StatusCode: 0 } && entry.Load < LoadGuardThreshold;
+        bool isReady = entry is { StatusCode: 0 } && entry.Population < LoadGuardThreshold;
         if (_plateButtons[col] is { } btn) btn.Disabled = !isReady;
 
         // Name label.
@@ -813,10 +820,11 @@ public sealed partial class ServerSelectScreen : Control
             }
         }
 
-        // Load label — colour thresholds and tier caption per §2.3. CODE-CONFIRMED.
-        // Tier caption: msg 6001 (> 1200 red) / 6002 (> 800 orange) / 6003 (> 500 yellow).
-        // Load read-out format: msg 6005 = "%4d / %4d " (current / capacity).
-        // spec: Docs/RE/specs/frontend_scenes.md §2.3. CODE-CONFIRMED.
+        // Population label — colour band + tier caption per lobby.yaml §RECORD SHAPE A.
+        // Numeric mode (Flag != 0): thresholds msg 6001 (> 1200 red) / 6002 (> 800 orange) /
+        // 6003 (> 500 yellow). Discrete mode (Flag == 0): level 4/3/2 -> 6001/6002/6003.
+        // Population read-out: msg 6005 = "%4d / %4d " (current / capacity).
+        // spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A (POPULATION caption mapping). CODE-CONFIRMED.
         if (_plateLoadLabels[col] is { } loadLbl)
         {
             if (entry is null)
@@ -825,15 +833,15 @@ public sealed partial class ServerSelectScreen : Control
             }
             else
             {
-                (Color loadColor, uint msgId) = GetLoadColor(entry.Load);
+                (Color loadColor, uint msgId) = GetPopulationColor(entry.Population, entry.Flag);
                 // Tier caption from msg.xdb (6001/6002/6003). Empty when catalogue absent.
-                // spec §2.3 "population captions 6001..6005". CODE-CONFIRMED.
+                // spec §RECORD SHAPE A "population captions 6001..6003". CODE-CONFIRMED.
                 string tierCaption = msgId > 0 ? _assets.Text(msgId, "") : "";
-                // Load read-out: msg 6005 = "%4d / %4d " — current load / capacity.
-                // ServerEntry carries only the load gauge; capacity is not in this record.
-                // Render the current load right-aligned to width 4 as the first field.
-                // spec §2.3 msg 6005 format. CODE-CONFIRMED format; capacity field absent from view model.
-                string loadReadout = $"{entry.Load,4} /     ";
+                // Population read-out: msg 6005 = "%4d / %4d " — current population / capacity.
+                // ServerEntry carries only the population gauge; capacity is not in this record.
+                // Render the current population right-aligned to width 4 as the first field.
+                // spec §RECORD SHAPE A msg 6005 format. CODE-CONFIRMED format; capacity absent from view model.
+                string loadReadout = $"{entry.Population,4} /     ";
                 loadLbl.Text = string.IsNullOrEmpty(tierCaption)
                     ? loadReadout
                     : $"{tierCaption} {loadReadout}";
@@ -848,50 +856,67 @@ public sealed partial class ServerSelectScreen : Control
 
     private (string text, Color color) GetStatusPresentation(ServerEntry e)
     {
-        // spec: Docs/RE/specs/frontend_scenes.md §2.3. CODE-CONFIRMED status rules.
-        // NOTE: load==24 is a LOAD sentinel only under status_code==3 with open_time!=0,
-        //       not a separate top-level status code. The earlier duplicated branch
-        //       (case 2 or 3 or 4 when OpenTime==0 && Load==24) was unreachable (subsumed by
-        //       the OpenTime==0 branch below) and has been removed. spec §2.3. CODE-CONFIRMED.
+        // Caption branch driven by status_kind (wire +2). The earlier "open-clock" framing
+        // (HH = load/10 : MM = open_time/10) is SUPERSEDED by lobby.yaml §RECORD SHAPE A: status==3
+        // is a 6004/6005 latency caption (digit-split from Population and Flag), NOT an HH:MM clock.
+        // spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A (status_kind branch). CODE-CONFIRMED.
         switch (e.StatusCode)
         {
             case 0:
-                // Normal/open → falls through to load-colour path. spec §2.3. CODE-CONFIRMED.
-                // Status text from msg.xdb; empty when catalogue absent.
-                return ("", Color.FromHtml("#B5FF7A")); // green 0xFFB5FF7A spec §2.3
+                // Population branch → falls through to the population-colour path; no status text.
+                // spec: §RECORD SHAPE A status_kind == 0. CODE-CONFIRMED.
+                return ("", Color.FromHtml("#B5FF7A")); // green 0xFFB5FF7A
 
-            case 2 or 3 or 4 when e.OpenTime == 0:
-                // Fixed status-as-label branch (no scheduled clock). spec §2.3. CODE-CONFIRMED.
-                // Caption id 6004 = "maintenance". spec §2.3. CODE-CONFIRMED.
-                return (_assets.Text(6004u, ""), Color.FromHtml("#C8B266")); // spec §2.3 (revival)
+            case 3 when e.Population == 24:
+                // Special branch, Population == 24 → caption 6004. spec: §RECORD SHAPE A. CODE-CONFIRMED.
+                return (_assets.Text(6004u, ""), Color.FromHtml("#C8B266"));
 
-            case 3 when e.OpenTime != 0:
-                // Scheduled-open clock. HH = load/10, load%10; MM = open_time/10, open_time%10.
-                // load==24 sentinel ("preparing/under check") uses the maintenance caption 6004.
-                // spec: Docs/RE/specs/frontend_scenes.md §2.4. CODE-CONFIRMED (digit-split math).
-                if (e.Load == 24)
-                    return (_assets.Text(6004u, ""), Color.FromHtml("#C8B266")); // spec §2.3/§2.4
-                string hh = $"{e.Load / 10}{e.Load % 10}";
-                string mm = $"{e.OpenTime / 10}{e.OpenTime % 10}";
-                return ($"{hh}:{mm}", Color.FromHtml("#C8B266")); // spec §2.4. CODE-CONFIRMED.
+            case 3:
+                // Special branch → 6005 latency caption, digit-split from Population and Flag
+                // (each value/10 and value%10). NOT an HH:MM open-clock.
+                // spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A (6005 latency format). CODE-CONFIRMED.
+                string popDigits = $"{e.Population / 10}{e.Population % 10}";
+                string flagDigits = $"{e.Flag / 10}{e.Flag % 10}";
+                string latencyCaption = _assets.Text(6005u, "");
+                // 6005 template absent offline → render the recovered digit-split fields directly.
+                string latencyText = string.IsNullOrEmpty(latencyCaption)
+                    ? $"{popDigits} {flagDigits}"
+                    : latencyCaption;
+                return (latencyText, Color.FromHtml("#C8B266")); // spec §RECORD SHAPE A. CODE-CONFIRMED.
 
-            case 100:
-                // Auto-connect sentinel ("connected / current selection"). spec §2.3. CODE-CONFIRMED.
-                return ("", Color.FromHtml("#B5FF7A")); // green 0xFFB5FF7A spec §2.3
+            case >= 1 and <= 39:
+                // Caption-array branch (1..39, excluding the special 3). The display name is looked up
+                // from server_id; no extra status label is recovered. spec: §RECORD SHAPE A. CODE-CONFIRMED.
+                return ("", Color.FromHtml("#C8B266")); // caption colour // UNVERIFIED exact hex
 
             default:
-                return ("", Color.FromHtml("#B3804D")); // spec §2.3 (revival — exact hex unconfirmed)
+                // status_kind < 1 or > 39 → fallback caption 5901 ("unknown id").
+                // spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A. CODE-CONFIRMED.
+                return (_assets.Text(5901u, ""), Color.FromHtml("#B3804D")); // exact hex // UNVERIFIED
         }
     }
 
-    private static (Color color, uint msgId) GetLoadColor(int load)
+    private static (Color color, uint msgId) GetPopulationColor(int population, int flag)
     {
-        // Exact ARGB values from IDA ground truth. Strict greater-than, evaluated top-down.
-        // spec: Docs/RE/specs/frontend_scenes.md §2.3. CODE-CONFIRMED thresholds (strict >).
-        if (load > 1200) return (Color.FromHtml("#FF0000"), 6001u); // 0xFFFF0000 red   spec §2.3
-        if (load > 800) return (Color.FromHtml("#ED6806"), 6002u); // 0xFFED6806 orange spec §2.3
-        if (load > 500) return (Color.FromHtml("#FFFF00"), 6003u); // 0xFFFFFF00 yellow spec §2.3
-        return (Color.FromHtml("#B5FF7A"), 0u); // 0xFFB5FF7A green  spec §2.3 (default tier)
+        // Exact ARGB values from IDA ground truth. spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A.
+        // Numeric mode (flag != 0): strict greater-than thresholds 1200/800/500.
+        // Discrete mode (flag == 0): discrete level 4/3/2 maps to the same captions/colours.
+        if (flag != 0)
+        {
+            if (population > 1200) return (Color.FromHtml("#FF0000"), 6001u); // 0xFFFF0000 red
+            if (population > 800) return (Color.FromHtml("#ED6806"), 6002u); // 0xFFED6806 orange
+            if (population > 500) return (Color.FromHtml("#FFFF00"), 6003u); // 0xFFFFFF00 yellow
+            return (Color.FromHtml("#B5FF7A"), 0u); // 0xFFB5FF7A green (default tier)
+        }
+
+        // Discrete load level (flag == 0). spec: §RECORD SHAPE A discrete switch +4 == 4/3/2.
+        return population switch
+        {
+            4 => (Color.FromHtml("#FF0000"), 6001u), // red
+            3 => (Color.FromHtml("#ED6806"), 6002u), // orange
+            2 => (Color.FromHtml("#FFFF00"), 6003u), // yellow
+            _ => (Color.FromHtml("#B5FF7A"), 0u), // green (default tier)
+        };
     }
 
     // =========================================================================
@@ -906,12 +931,12 @@ public sealed partial class ServerSelectScreen : Control
         ServerEntry? entry = GetEntryAtDisplaySlot(displaySlot);
         if (entry is null) return;
 
-        // Guard: status==0 && load < 2400.
+        // Guard: status==0 && population < 2400.
         // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §1.5. CODE-CONFIRMED.
-        if (entry.StatusCode != 0 || entry.Load >= LoadGuardThreshold)
+        if (entry.StatusCode != 0 || entry.Population >= LoadGuardThreshold)
         {
             GD.Print($"[ServerSelectScreen] Plate {col} (action {400 + col}) blocked — " +
-                     $"status={entry.StatusCode} load={entry.Load} guard=status==0&&load<{LoadGuardThreshold}. " +
+                     $"status={entry.StatusCode} population={entry.Population} guard=status==0&&pop<{LoadGuardThreshold}. " +
                      "spec §11.4/§1.5. CODE-CONFIRMED.");
             return;
         }

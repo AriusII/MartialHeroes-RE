@@ -150,17 +150,18 @@ public sealed class RegionCatalogTests
     }
 
     [Fact]
-    public void Resolve_RawZoneType3_ReturnsUnknown()
+    public void Resolve_RawZoneType3_ReturnsSafe()
     {
-        // A raw zone-type value ≥ 3 maps to ZoneType.Unknown.
-        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — values 3+: UNVERIFIED.
+        // A raw zone-type value ≥ 3 falls through to ZoneType.Safe — the enum is CONFIRMED-COMPLETE
+        // at three values and 3..31 behave as the default (safe) case.
+        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — values 3..31 = default (safe): CONFIRMED-COMPLETE.
         byte[] cells = UniformGrid(1, 1, regionId: 5);
         uint[] zoneTypes = ZoneTypeArray(defaultType: 0, (5, 3u)); // region 5 = raw 3
         var catalog = new RegionCatalog(1, 1, cells, originX: 0, originZ: 0, zoneTypes);
 
         ZoneType result = catalog.Resolve(worldX: 100f, worldZ: 100f);
 
-        Assert.Equal(ZoneType.Unknown, result);
+        Assert.Equal(ZoneType.Safe, result);
     }
 
     // =========================================================================

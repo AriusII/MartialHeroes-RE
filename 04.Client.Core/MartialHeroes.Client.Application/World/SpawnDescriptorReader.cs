@@ -1,5 +1,5 @@
 using System.Buffers.Binary;
-using System.Text;
+using MartialHeroes.Client.Application.Hud;
 
 namespace MartialHeroes.Client.Application.World;
 
@@ -46,18 +46,14 @@ public readonly ref struct SpawnDescriptorReader
         _data = descriptor;
     }
 
-    /// <summary>Decodes the NUL-terminated name (ASCII). spec: actor.md SpawnDescriptor.name (+0x00, char[17]).</summary>
-    public string ReadName()
-    {
-        ReadOnlySpan<byte> nameBytes = _data.Slice(OffName, NameMaxBytes);
-        int nul = nameBytes.IndexOf((byte)0);
-        if (nul >= 0)
-        {
-            nameBytes = nameBytes[..nul];
-        }
-
-        return nameBytes.IsEmpty ? string.Empty : Encoding.ASCII.GetString(nameBytes);
-    }
+    /// <summary>
+    /// Decodes the NUL-terminated actor name as CP949 / EUC-KR (NOT ASCII — earlier drafts said
+    /// ASCII/UTF-8, corrected here). Decoded through <see cref="Cp949Text.Decode"/>, which owns the
+    /// single CodePagesEncodingProvider registration and trims at the first NUL. ASCII-only names
+    /// round-trip identically; Korean glyphs decode correctly. spec: Docs/RE/structs/actor.md
+    /// (SpawnDescriptor.name at +0x00 is CP949 / EUC-KR; "Decode with CP949, not UTF-8/ASCII").
+    /// </summary>
+    public string ReadName() => Cp949Text.Decode(_data.Slice(OffName, NameMaxBytes));
 
     /// <summary>Character level. spec: actor.md SpawnDescriptor.level (+0x3A, u16; boundary unverified).</summary>
     public ushort ReadLevel() => BinaryPrimitives.ReadUInt16LittleEndian(_data.Slice(OffLevel, 2));

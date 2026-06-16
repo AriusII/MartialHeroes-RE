@@ -209,7 +209,7 @@ public sealed partial class XeffSceneEffect : Node3D
             // warm-yellow; smoke is black (adds nothing under additive). This drops the earlier interim
             // blue-tint hack and renders each sub-effect by its REAL recovered diffuse.
             // spec: Docs/RE/formats/effects.md §A.4.2 (passes 2/3/4 = diffuse R/G/B) / frontend_scenes.md
-            //   §3.6.1 + _dirty/campaign9c/xeff_diffuse.md (CAMPAIGN 9c two-witness).
+            //   §3.6.1.
             float diffR = sub.DiffuseR.Length > 0 ? Math.Clamp(sub.DiffuseR[0], 0f, 1f) : 1.0f;
             float diffG = sub.DiffuseG.Length > 0 ? Math.Clamp(sub.DiffuseG[0], 0f, 1f) : 1.0f;
             float diffB = sub.DiffuseB.Length > 0 ? Math.Clamp(sub.DiffuseB[0], 0f, 1f) : 1.0f;

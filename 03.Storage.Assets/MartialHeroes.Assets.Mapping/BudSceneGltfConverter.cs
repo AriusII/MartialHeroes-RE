@@ -460,35 +460,6 @@ public static class BudSceneGltfConverter
         }
     }
 
-    private static void ComputeNrmMinMax(
-        BudVertex[] vertices,
-        out float minX, out float minY, out float minZ,
-        out float maxX, out float maxY, out float maxZ)
-    {
-        if (vertices.Length == 0)
-        {
-            minX = minY = minZ = 0f;
-            maxX = maxY = maxZ = 0f;
-            return;
-        }
-
-        minX = maxX = -vertices[0].NormalX; // X negated
-        minY = maxY = vertices[0].NormalY;
-        minZ = maxZ = vertices[0].NormalZ;
-
-        for (int i = 1; i < vertices.Length; i++)
-        {
-            BudVertex v = vertices[i];
-            float nx = -v.NormalX;
-            if (nx < minX) minX = nx;
-            if (nx > maxX) maxX = nx;
-            if (v.NormalY < minY) minY = v.NormalY;
-            if (v.NormalY > maxY) maxY = v.NormalY;
-            if (v.NormalZ < minZ) minZ = v.NormalZ;
-            if (v.NormalZ > maxZ) maxZ = v.NormalZ;
-        }
-    }
-
     // -------------------------------------------------------------------------
     // Per-object buffer section descriptor (layout within the shared binary buffer)
     // -------------------------------------------------------------------------

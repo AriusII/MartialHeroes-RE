@@ -237,10 +237,6 @@ public static class CharacterSelectLayout
     public const int FaceIncrementActionId = 21; // spec: ui_system.md §8.2. CODE-CONFIRMED.
     public const int FaceDecrementActionId = 22; // spec: ui_system.md §8.2. CODE-CONFIRMED.
 
-    // Stat ± base action id. Actions 25..34 = 5 stats × 2 (decrement/increment pairs).
-    // spec: Docs/RE/specs/ui_system.md §8.2 "25…34 stat point-buy ±". CODE-CONFIRMED.
-    public const int StatPlusBuyBaseActionId = 25; // first increment action. CODE-CONFIRMED.
-
     // =========================================================================
     // §8.2 / §8.4 Create-form stat-grid string keys: 2·disc + {110..141}.
     //

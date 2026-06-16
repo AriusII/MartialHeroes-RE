@@ -129,9 +129,8 @@ public sealed partial class FloatingCombatText : Control
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         MouseFilter = MouseFilterEnum.Ignore;
 
-        // DEMO mode: when no hub is bound, show a sample number so the overlay is testable.
-        if (_hub is null)
-            SpawnDemoEntry();
+        // Overlay starts empty — synthetic demo numbers removed per no-invented-data discipline.
+        // spec: layer-05 — no synthetic data without an explicit DEV_OFFLINE_FLOW guard.
 
         GD.Print("[FloatingCombatText] Ready. Pool overlay active (full-rect, mouse-ignore).");
     }

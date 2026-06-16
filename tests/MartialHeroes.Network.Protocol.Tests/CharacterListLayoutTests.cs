@@ -230,6 +230,47 @@ public sealed class CharacterListLayoutTests
         Assert.False(reader.IsSlotPopulated(0));
     }
 
+    [Fact] // spec: Docs/RE/packets/3-1_character_list.yaml 37-41 — handler scans EXACTLY 5 slots (bits 0..4); bits 5..7 ignored.
+    public void Reader_scans_exactly_five_slots_and_ignores_high_bits()
+    {
+        // SlotCount is the recovered slot count: exactly 5 (bit indices 0..4). The prior "~8" reading
+        // was wrong; the per-slot scratch is a 5-entry array.
+        Assert.Equal(5, SmsgCharacterListReader.SlotCount);
+
+        // Mask with bit 0 set (a real slot 0 record) PLUS bits 5, 6 and 7 set. The high bits are NOT
+        // scanned, so popcount-over-scanned-bits = 1 and only ONE 981-byte record is consumed/required.
+        const byte slotMask = 0b1110_0001; // bits 0,5,6,7
+        const int headerSize = SmsgCharacterListHeader.HeaderSize;
+        const int recSize = CharacterListSlotRecord.WireSize;
+
+        byte[] frame = new byte[headerSize + recSize]; // room for ONLY one record
+        frame[0x02] = slotMask;
+
+        var reader = new SmsgCharacterListReader(frame);
+
+        // Only slot 0 is populated; the high bits contribute nothing despite being set.
+        Assert.Equal(1, reader.PopulatedCount);
+        Assert.True(reader.IsSlotPopulated(0));
+
+        // Bits 5..7 are out of the scanned 0..4 range -> never reported as populated.
+        Assert.False(reader.IsSlotPopulated(5));
+        Assert.False(reader.IsSlotPopulated(6));
+        Assert.False(reader.IsSlotPopulated(7));
+
+        // Indexing a high (unscanned) slot throws (out of range / not populated).
+        bool threwHigh = false;
+        try
+        {
+            _ = reader[5].CurrentHp;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            threwHigh = true;
+        }
+
+        Assert.True(threwHigh);
+    }
+
     [Fact] // spec: Docs/RE/packets/3-1_character_list.yaml — reader clamps to bytes actually present.
     public void Reader_clamps_count_to_available_record_bytes()
     {

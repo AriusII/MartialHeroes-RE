@@ -103,6 +103,39 @@ public sealed class LuaConfigReaderTests
         Assert.Equal(144, cfg.DisplayFramerate);
     }
 
+    [Fact]
+    public void Parse_DisplayGlowRange_ReadAsZero_ClampedToTwo()
+    {
+        // spec: Docs/RE/specs/lua-config.md status-banner — "DISPLAY_GLOW_RANGE_X / _Y host fallback to 2 when read as 0 | CODE-CONFIRMED"
+        // An explicit 0 in the config must be treated as 2, matching the original host behaviour.
+        const string source =
+            """
+            DISPLAY_GLOW_RANGE_X = 0
+            DISPLAY_GLOW_RANGE_Y = 0
+            """;
+
+        var cfg = _reader.Parse(source);
+
+        Assert.Equal(2, cfg.DisplayGlowRangeX);
+        Assert.Equal(2, cfg.DisplayGlowRangeY);
+    }
+
+    [Fact]
+    public void Parse_DisplayGlowRange_NonZero_NotClamped()
+    {
+        // spec: Docs/RE/specs/lua-config.md §4.2 — valid set {1,2,4,8}; only 0 is clamped.
+        const string source =
+            """
+            DISPLAY_GLOW_RANGE_X = 1
+            DISPLAY_GLOW_RANGE_Y = 8
+            """;
+
+        var cfg = _reader.Parse(source);
+
+        Assert.Equal(1, cfg.DisplayGlowRangeX);
+        Assert.Equal(8, cfg.DisplayGlowRangeY);
+    }
+
     // ────────────────────────────────────────────────────────────────────────
     // display.lua float globals (spec: Docs/RE/specs/lua-config.md §4)
     // ────────────────────────────────────────────────────────────────────────
@@ -153,10 +186,24 @@ public sealed class LuaConfigReaderTests
     }
 
     [Fact]
-    public void Parse_DisplayPowerShader_DefaultsToEmptyWhenAbsent()
+    public void Parse_DisplayPowerShader_DerivedFromDisplayPower_WhenAbsent()
     {
+        // spec: Docs/RE/specs/lua-config.md §4.3 — DISPLAY_POWERSHADER is computed from DISPLAY_POWER.
+        // When neither key is present, DISPLAY_POWER defaults to 1, so the derived path is power1dx8.psh.
         var cfg = _reader.Parse(string.Empty);
-        Assert.Equal(string.Empty, cfg.DisplayPowerShader);
+        Assert.Equal("data/shader/power1dx8.psh", cfg.DisplayPowerShader);
+    }
+
+    [Fact]
+    public void Parse_DisplayPowerShader_DerivedFromDisplayPower_WhenPowerSet()
+    {
+        // spec: Docs/RE/specs/lua-config.md §4.3 — derived path "data/shader/power<N>dx8.psh"
+        const string source = "DISPLAY_POWER = 8";
+
+        var cfg = _reader.Parse(source);
+
+        Assert.Equal(8, cfg.DisplayPower);
+        Assert.Equal("data/shader/power8dx8.psh", cfg.DisplayPowerShader);
     }
 
     /// <summary>

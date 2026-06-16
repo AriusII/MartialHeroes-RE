@@ -519,13 +519,15 @@ public sealed class SoundTableParserTests
     }
 
     [Fact]
-    public void AudioDirectory_Bge_IsNull_Undetermined()
+    public void AudioDirectory_Bge_Is_data_sound_2d()
     {
-        // spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — .bge → UNDETERMINED: SAMPLE-VERIFIED
+        // CAMPAIGN 11 correction: .bge resolves to data/sound/2d/ (SAMPLE-VERIFIED 2026-06-14).
+        // The previous "UNDETERMINED / null" reading is REFUTED — BGE IDs are confirmed under data/sound/2d/.
+        // spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — .bge → data/sound/2d/: SAMPLE-VERIFIED
         byte[] data = BuildNullTable();
         SoundTableData result = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Bge);
 
-        Assert.Null(result.AudioDirectory);
+        Assert.Equal("data/sound/2d/", result.AudioDirectory);
     }
 
     [Fact]

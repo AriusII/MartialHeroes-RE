@@ -37,6 +37,22 @@ public static class LoginCredentialReply
     private const int SubOpcodeBytes = 1;
 
     /// <summary>
+    /// Minimum account-name character count the login-packet builder accepts. The client-side gate
+    /// requires the account (like the password) to be at least 2 characters before any 0/0 is sent.
+    /// spec: Docs/RE/specs/crypto.md §6.1 ("both the account and the password to be at least 2
+    /// characters long"); packets/login.yaml ("AccountLength ... >= 2").
+    /// </summary>
+    public const int MinAccountLength = 2;
+
+    /// <summary>
+    /// Exclusive upper bound on the account name's NUL-inclusive length (AccountLength = strlen + 1).
+    /// login.yaml declares <c>AccountLength &gt;= 2, &lt; 20</c>; this is the field's fixed buffer cap
+    /// and is itself capture/static (not capture-verified end to end).
+    /// spec: packets/login.yaml ("AccountLength ... >= 2, < 20"); Docs/RE/specs/crypto.md §6.1.
+    /// </summary>
+    public const int MaxAccountLengthExclusive = 20;
+
+    /// <summary>
     /// Builds the whole whitened <c>1/4</c> reply payload from its structured parts.
     /// </summary>
     /// <param name="keyExchange">The parsed server 0/0 KeyExchange (live n, e, modulus width k). spec §6.2.</param>
@@ -53,8 +69,9 @@ public static class LoginCredentialReply
     /// Whether the PIN length-prefixed pair is present (the a7 / second-password gate). spec: login.yaml.
     /// </param>
     /// <param name="stagedPassword">
-    /// The fixed 17-byte zero-padded RSA plaintext <c>M</c> (see <see cref="CredentialPlaintext"/>). The
-    /// RSA build consumes all 17 bytes. spec: Docs/RE/specs/crypto.md §6.1, §6.6.
+    /// The zero-padded RSA plaintext <c>M</c> (see <see cref="CredentialPlaintext"/>), whose width is the
+    /// password-field cap (caller-supplied; 17 observed). The RSA build consumes the whole buffer.
+    /// spec: Docs/RE/specs/crypto.md §6.1, §6.6 (width = password-field cap, not a literal).
     /// </param>
     /// <param name="paddingRng">RNG for the PKCS#1 type-2 padding (the only randomness, §6.3).</param>
     /// <returns>
@@ -62,7 +79,8 @@ public static class LoginCredentialReply
     /// LZ4 + 8-byte plaintext header carrying opcode 1/4).
     /// </returns>
     /// <exception cref="ArgumentException">
-    /// If the staged password is not 17 bytes, or the credential is too long to leave PS ≥ 8 in PKCS#1 (§6.3).
+    /// If the staged password is shorter than the minimum field cap, the account length is out of range
+    /// (§6.1 / login.yaml), or the credential is too long to leave PS ≥ 8 in PKCS#1 (§6.3).
     /// </exception>
     public static byte[] Build(
         in SessionHandshake.KeyExchange keyExchange,
@@ -74,12 +92,25 @@ public static class LoginCredentialReply
     {
         ArgumentNullException.ThrowIfNull(paddingRng);
 
-        if (stagedPassword.Length != CredentialPlaintext.StagedPasswordLength)
+        // The staged M width is parameter-driven (the password-field cap), not a literal — it must hold
+        // at least a 2-char password plus one trailing zero. spec: crypto.md §6.6, §8.1, §9.2 point 2.
+        if (stagedPassword.Length < CredentialPlaintext.MinPasswordLength + 1)
         {
             throw new ArgumentException(
-                $"Staged RSA plaintext M must be exactly {CredentialPlaintext.StagedPasswordLength} bytes " +
-                $"(use CredentialPlaintext.StagePassword), got {stagedPassword.Length}.",
+                $"Staged RSA plaintext M must be at least {CredentialPlaintext.MinPasswordLength + 1} bytes " +
+                $"(the password-field cap; use CredentialPlaintext.StagePassword), got {stagedPassword.Length}.",
                 nameof(stagedPassword));
+        }
+
+        // Client-side account-length gate: >= 2 chars and below the declared field cap (NUL-inclusive
+        // length strictly < 20). A faithful client reproduces the same accept/reject behavior.
+        // spec: Docs/RE/specs/crypto.md §6.1; packets/login.yaml (AccountLength >= 2, < 20).
+        if (account.Length < MinAccountLength || account.Length + 1 >= MaxAccountLengthExclusive)
+        {
+            throw new ArgumentException(
+                $"Account length {account.Length} is out of range: must be >= {MinAccountLength} chars and " +
+                $"its NUL-inclusive length < {MaxAccountLengthExclusive}.",
+                nameof(account));
         }
 
         // RSA half first (un-whitened): [u32 LE len(c)] ‖ BE digits of c, c = M_padded^e mod n.

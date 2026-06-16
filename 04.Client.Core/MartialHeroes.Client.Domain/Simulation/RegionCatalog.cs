@@ -33,8 +33,9 @@ namespace MartialHeroes.Client.Domain.Simulation;
 ///     (1), matching the combat arbiter's documented fallback.<br/>
 ///     spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — "missing record treated as type 1": CONFIRMED.</item>
 ///   <item>If the raw zone-type value is 0, 1, or 2 → maps to the corresponding
-///     <see cref="ZoneType"/> member. Values ≥ 3 map to <see cref="ZoneType.Unknown"/>.<br/>
-///     spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — values 0 (PLAUSIBLE), 1 (CONFIRMED), 2 (CONFIRMED), 3+ (UNVERIFIED).</item>
+///     <see cref="ZoneType"/> member. Values ≥ 3 fall through to <see cref="ZoneType.Safe"/>
+///     (the enum is CONFIRMED-COMPLETE at three values; 3..31 = default = safe).<br/>
+///     spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — values 0/1/2 CONFIRMED, 3..31 = default (safe) CONFIRMED-COMPLETE.</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -118,7 +119,7 @@ public sealed class RegionCatalog
         _cells = cells.ToArray();
 
         // Convert raw u32 values to ZoneType enum.
-        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — enum values 0/1/2 (3+ = Unknown).
+        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — enum values 0/1/2 (3..31 = default = safe).
         _zoneTypes = new ZoneType[32];
         for (int i = 0; i < 32; i++)
             _zoneTypes[i] = ToZoneType(rawZoneTypes[i]);
@@ -185,18 +186,19 @@ public sealed class RegionCatalog
 
     /// <summary>
     /// Converts a raw u32 zone-type value to a <see cref="ZoneType"/> enum member.
-    /// Values ≥ 3 map to <see cref="ZoneType.Unknown"/> (UNVERIFIED territory).
+    /// Values ≥ 3 fall through to <see cref="ZoneType.Safe"/> — the enum is CONFIRMED-COMPLETE at
+    /// three values and no consuming site branches on any value ≥ 3 (3..31 = default = safe).
     /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.
     /// </summary>
     private static ZoneType ToZoneType(uint raw) => raw switch
     {
-        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 0: PLAUSIBLE (Safe).
+        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 0: CONFIRMED (Safe).
         0 => ZoneType.Safe,
         // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 1: CONFIRMED (OpenPvp).
         1 => ZoneType.OpenPvp,
         // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 2: CONFIRMED (Closed).
         2 => ZoneType.Closed,
-        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — values 3+: UNVERIFIED.
-        _ => ZoneType.Unknown,
+        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — values 3..31 = default (safe): CONFIRMED-COMPLETE.
+        _ => ZoneType.Safe,
     };
 }

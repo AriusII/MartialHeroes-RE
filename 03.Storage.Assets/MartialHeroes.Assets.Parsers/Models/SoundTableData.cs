@@ -21,8 +21,8 @@ public enum SoundTableExtension : byte
     /// <remarks>spec: Docs/RE/formats/sound_tables.md — .bgm → data/sound/2d/: SAMPLE-VERIFIED</remarks>
     Bgm,
 
-    /// <summary>Looped ambient sound effects; directory UNDETERMINED (all observed entries are null).</summary>
-    /// <remarks>spec: Docs/RE/formats/sound_tables.md — .bge → directory UNDETERMINED: SAMPLE-VERIFIED</remarks>
+    /// <summary>Looped ambient sound effects; IDs resolve under <c>data/sound/2d/</c> (category 0, 2D). SAMPLE-VERIFIED.</summary>
+    /// <remarks>spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — .bge → data/sound/2d/: SAMPLE-VERIFIED (2026-06-14)</remarks>
     Bge,
 
     /// <summary>Triggered 3-D point-source sound events; IDs resolve under <c>data/sound/3d/</c>.</summary>
@@ -276,18 +276,22 @@ public sealed class SoundTableData
     /// <summary>
     /// Returns the canonical audio directory path prefix for this table's extension.
     /// Returns <see langword="null"/> for extensions whose directory is UNDETERMINED in the spec
-    /// (.bge, .wlk, .run — all observed entries are null in samples).
+    /// (.wlk, .run — all observed entries are null in samples).
+    /// <c>.bge</c> resolves to <c>data/sound/2d/</c> (SAMPLE-VERIFIED 2026-06-14).
     /// </summary>
     /// <remarks>
     /// spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — directory table: SAMPLE-VERIFIED
     /// </remarks>
     public string? AudioDirectory => Extension switch
     {
-        // spec: .bgm → data/sound/2d/: SAMPLE-VERIFIED
+        // spec: sound_tables.md §Sound ID semantics — .bgm → data/sound/2d/: SAMPLE-VERIFIED
         SoundTableExtension.Bgm => "data/sound/2d/",
-        // spec: .eff (sound table) → data/sound/3d/: SAMPLE-VERIFIED
+        // spec: sound_tables.md §Sound ID semantics — .bge → data/sound/2d/: SAMPLE-VERIFIED (2026-06-14)
+        // BGE IDs confirmed present under data/sound/2d/ (category 0, 2D same as BGM).
+        SoundTableExtension.Bge => "data/sound/2d/",
+        // spec: sound_tables.md §Sound ID semantics — .eff (sound table) → data/sound/3d/: SAMPLE-VERIFIED
         SoundTableExtension.Eff => "data/sound/3d/",
-        // spec: .bge, .wlk, .run → UNDETERMINED
+        // spec: sound_tables.md §Sound ID semantics — .wlk, .run → UNDETERMINED (all observed entries are null)
         _ => null,
     };
 }

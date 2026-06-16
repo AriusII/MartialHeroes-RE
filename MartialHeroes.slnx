@@ -33,10 +33,13 @@
         <Project Path="tests/MartialHeroes.Client.Domain.Tests/MartialHeroes.Client.Domain.Tests.csproj"/>
         <Project
                 Path="tests/MartialHeroes.Client.Infrastructure.Tests/MartialHeroes.Client.Infrastructure.Tests.csproj"/>
+        <Project
+                Path="tests/MartialHeroes.Shared.Diagnostics.Tests/MartialHeroes.Shared.Diagnostics.Tests.csproj"/>
         <Project Path="tests/MartialHeroes.Network.Crypto.Tests/MartialHeroes.Network.Crypto.Tests.csproj"/>
         <Project Path="tests/MartialHeroes.Network.Protocol.Tests/MartialHeroes.Network.Protocol.Tests.csproj"/>
         <Project
                 Path="tests/MartialHeroes.Network.Transport.Pipelines.Tests/MartialHeroes.Network.Transport.Pipelines.Tests.csproj"/>
         <Project Path="tests/MartialHeroes.Shared.Kernel.Tests/MartialHeroes.Shared.Kernel.Tests.csproj"/>
+        <Project Path="tests/MartialHeroes.Network.Abstractions.Tests/MartialHeroes.Network.Abstractions.Tests.csproj"/>
     </Folder>
 </Solution>

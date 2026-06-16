@@ -30,7 +30,8 @@ namespace MartialHeroes.Client.Application.World;
 /// <para>
 /// <b>Graceful degradation:</b> if the region files are absent for an area (VFS offline, file
 /// missing, parse error), <see cref="LoadAreaAsync"/> clears the catalog to null; every subsequent
-/// <see cref="UpdatePosition"/> call resolves to <see cref="ZoneType.Unknown"/> and fires one
+/// <see cref="UpdatePosition"/> call resolves to <see cref="ZoneType.Safe"/> (the "no catalog
+/// loaded / default" value, per §16.3 "anything else = safe") and fires one
 /// <see cref="ZoneChangedEvent"/> to inform the HUD.
 /// </para>
 /// <para>
@@ -86,7 +87,7 @@ public sealed class RegionService
     /// </summary>
     /// <remarks>
     /// If either file is absent or fails to parse, the catalog is set to null and the next
-    /// <see cref="UpdatePosition"/> will publish <see cref="ZoneType.Unknown"/>.
+    /// <see cref="UpdatePosition"/> will publish <see cref="ZoneType.Safe"/> (the no-catalog default).
     /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1–§16.2.
     /// </remarks>
     /// <param name="areaId">The map area to load region data for.</param>
@@ -101,7 +102,7 @@ public sealed class RegionService
             RegionCatalog? catalog =
                 await _source.LoadRegionCatalogAsync(areaId, cancellationToken).ConfigureAwait(false);
 
-            _catalog = catalog; // null means "files absent / parse error" → Unknown zone
+            _catalog = catalog; // null means "files absent / parse error" → Safe zone (no-catalog default)
         }
         catch (OperationCanceledException)
         {
@@ -109,7 +110,7 @@ public sealed class RegionService
         }
         catch
         {
-            // Any other error: keep _catalog null → Unknown zone on next UpdatePosition.
+            // Any other error: keep _catalog null → Safe zone (no-catalog default) on next UpdatePosition.
         }
     }
 
@@ -126,7 +127,8 @@ public sealed class RegionService
     /// <param name="worldZ">Legacy world-space Z coordinate.</param>
     public void UpdatePosition(float worldX, float worldZ)
     {
-        ZoneType zone = _catalog?.Resolve(worldX, worldZ) ?? ZoneType.Unknown;
+        ZoneType zone = _catalog?.Resolve(worldX, worldZ) ?? ZoneType.Safe;
+        // No catalog loaded → Safe (the §16.3 default: "anything else = safe").
         // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — ZoneType values.
 
         // Skip publish if zone is unchanged since last publish AND we have published at least once
@@ -139,8 +141,8 @@ public sealed class RegionService
     }
 
     /// <summary>
-    /// The most recently resolved zone type, or <see cref="ZoneType.Unknown"/> before the first
-    /// <see cref="UpdatePosition"/> call after a <see cref="LoadAreaAsync"/>.
+    /// The most recently resolved zone type, or <see cref="ZoneType.Safe"/> (the default) before the
+    /// first <see cref="UpdatePosition"/> call after a <see cref="LoadAreaAsync"/>.
     /// </summary>
-    public ZoneType CurrentZone => _everPublished ? _lastPublished : ZoneType.Unknown;
+    public ZoneType CurrentZone => _everPublished ? _lastPublished : ZoneType.Safe;
 }

@@ -16,7 +16,9 @@ namespace MartialHeroes.Client.Application.Ingestion;
 /// on one logical owner and stays deterministic. The channel is <c>SingleReader = true</c>,
 /// <c>SingleWriter = true</c>. It is <b>unbounded</b>: inbound game frames are authoritative state
 /// transitions that must not be silently dropped (unlike UI events, which are coalescible). The
-/// transport already framed on the 16-bit size field, so the volume is bounded by the socket; if
+/// transport already framed on the 32-bit size field (the frame header `size` is a true u32 — the
+/// long-standing u16-vs-u32 question is resolved in favour of u32; spec: Docs/RE/opcodes.md "Wire
+/// frame header"), so the volume is bounded by the socket; if
 /// future profiling shows unbounded growth, switch to a bounded channel with
 /// <see cref="BoundedChannelFullMode.Wait"/> to apply real backpressure rather than dropping state.
 /// </para>

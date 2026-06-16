@@ -1,8 +1,8 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
-using System.Text;
 using MartialHeroes.Client.Application.Diagnostics;
 using MartialHeroes.Client.Application.Events;
+using MartialHeroes.Client.Application.Hud;
 using MartialHeroes.Client.Application.Login;
 using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.UseCases;
@@ -98,7 +98,7 @@ public sealed class GamePacketHandler : IPacketHandler
         _unhandled = unhandled ?? throw new ArgumentNullException(nameof(unhandled));
         _loginDriver = loginDriver; // optional: only needed for the login handshake flow
         _localPlayer = localPlayer; // optional: only needed for the skill/buff/combat subsystems
-        _characterSelection = characterSelection; // optional: only needed for the 3/1 cache + 3/7 spawn
+        _characterSelection = characterSelection; // optional: only needed for the 3/1 cache + 3/14 spawn
         _accountCharacters = accountCharacters; // optional: tracks the create/delete char-count deltas
     }
 
@@ -916,7 +916,7 @@ public sealed class GamePacketHandler : IPacketHandler
                 slot, reader.ReadName(), reader.ReadLevel(), reader.ReadServerClass(), reader.ReadCurrentHp()));
 
             // Retain the RAW per-slot record (880 descriptor + 96 stats + 1 flag byte) so SelectCharacterAsync
-            // can detect "@BLANK@", and the 3/7 handler can materialize the local player. spec: login_flow.md §3.5.
+            // can detect "@BLANK@", and the 3/14 handler can materialize the local player. spec: login_flow.md §3.5.
             // The 880 + 96 = 976-byte descriptor+stats span; the flag byte is at record +976. spec: §3.2.
             const int descriptorAndStatsSize = SpawnDescriptorReader.Size + 96; // 976
             byte slotFlag = record.Length > descriptorAndStatsSize ? record[descriptorAndStatsSize] : (byte)0;
@@ -933,11 +933,12 @@ public sealed class GamePacketHandler : IPacketHandler
     }
 
     // -------------------------------------------------------------------------
-    // 3/7 — char-spawn result (the actual local-player spawn)
+    // 3/14 — char-spawn result (the actual local-player spawn)
+    // spec: opcodes.md (CAMPAIGN-10 ladder de-swap — 3/14 SmsgCharSpawnResponse is the 16-byte spawn confirm)
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// 3/7 — enter-game spawn result. On Result != 0 the client materializes the local player from the
+    /// 3/14 — enter-game spawn result. On Result != 0 the client materializes the local player from the
     /// slot descriptor cached at select time (Section 3.5) and publishes <see cref="LocalPlayerSpawnedEvent"/>;
     /// on Result == 0 it publishes <see cref="LocalPlayerSpawnFailedEvent"/> (a timed failure message).
     /// The local player is registered as the controlled actor (<see cref="ClientWorld.LocalActorKey"/>),
@@ -945,6 +946,12 @@ public sealed class GamePacketHandler : IPacketHandler
     /// </summary>
     private void HandleCharSpawnResult(in SmsgCharSpawnResult packet)
     {
+        // NOTE (debugger-pending): opcodes.md notes the local-player WORLD spawn is ultimately driven by
+        // 4/1, not the 3/14 enter/spawn-confirm bridge, and the 3/14-vs-4/1 ARRIVAL ORDER is the single
+        // load-bearing fact static analysis cannot pin (needs a capture). This handler materializes the
+        // local player from the cached descriptor on 3/14; reconcile against 4/1 once a capture lands.
+        // spec: Docs/RE/opcodes.md (3/14 row); Docs/RE/specs/login_flow.md §3.5 / §5.3.
+
         // Result 0 = failure (a timed message is shown). spec: login_flow.md §5.3.
         if (packet.Result == 0)
         {
@@ -961,7 +968,7 @@ public sealed class GamePacketHandler : IPacketHandler
             return;
         }
 
-        // The local player's actor id is not carried by the 16-byte 3/7 block (only result + slot + 3
+        // The local player's actor id is not carried by the 16-byte 3/14 block (only result + slot + 3
         // opaque spawn-param u32s; their meaning is UNVERIFIED — spec §5.3). Key the local player on the
         // PlayerCharacter sort with the unassigned-id sentinel until a self-spawn (5/3) supplies the real
         // id. spec: Docs/RE/structs/actor.md (id initialised to 0xFFFFFFFF before spawn).
@@ -985,14 +992,16 @@ public sealed class GamePacketHandler : IPacketHandler
     }
 
     // -------------------------------------------------------------------------
-    // 3/4 — char manage / delete result
+    // 3/7 — char manage / delete result (8-byte block)
+    // spec: opcodes.md (CAMPAIGN-10 ladder de-swap — 3/7 SmsgCharManageResult is the 8-byte manage result)
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// 3/4 — character manage / delete result. Classifies the subtype (subtype 2 = delete-confirm,
+    /// 3/7 — character manage / delete result. Classifies the subtype (subtype 2 = delete-confirm,
     /// which decrements the account char count) and forwards the ReadyTime so the presentation can
     /// format a "wait HH:MM" delete-cooldown message on the blocked path. spec:
-    /// Docs/RE/specs/login_flow.md §5.5; Docs/RE/packets/3-4_char_manage_result.yaml.
+    /// Docs/RE/specs/login_flow.md §5.5; Docs/RE/packets/3-4_char_manage_result.yaml (the yaml retains
+    /// the stale pre-de-swap "3-4" filename; its content describes the 3/7 manage result).
     /// </summary>
     private void HandleCharManageResult(in SmsgCharManageResult packet)
     {
@@ -1098,17 +1107,14 @@ public sealed class GamePacketHandler : IPacketHandler
         _eventBus.Publish(new CombatStatsRecomputedEvent(key, recomputed));
     }
 
-    /// <summary>Decodes a NUL-terminated CP949 fixed buffer to a managed string. spec: handlers.md (CP949 text fields).</summary>
-    private static string DecodeFixedText(ReadOnlySpan<byte> buffer)
-    {
-        int nul = buffer.IndexOf((byte)0);
-        if (nul >= 0)
-        {
-            buffer = buffer[..nul];
-        }
-
-        return buffer.IsEmpty ? string.Empty : DecodeCp949(buffer);
-    }
+    /// <summary>
+    /// Decodes a NUL-terminated CP949 fixed buffer to a managed string. Routed through
+    /// <see cref="Cp949Text.Decode"/>, the single site that registers
+    /// <c>CodePagesEncodingProvider.Instance</c> (code page 949 is not built into .NET) and trims at the
+    /// first NUL. spec: handlers.md (Korean text fields are CP949-encoded); CLAUDE.md (register the
+    /// code-pages provider once).
+    /// </summary>
+    private static string DecodeFixedText(ReadOnlySpan<byte> buffer) => Cp949Text.Decode(buffer);
 
     /// <summary>
     /// Decodes the variable chat-body region: a leading length-prefixed <c>[u32 len][text]</c> block when
@@ -1129,41 +1135,13 @@ public sealed class GamePacketHandler : IPacketHandler
             uint len = BinaryPrimitives.ReadUInt32LittleEndian(body[..sizeof(uint)]);
             if (len >= 1 && len <= (uint)(body.Length - sizeof(uint)))
             {
-                ReadOnlySpan<byte> text = body.Slice(sizeof(uint), (int)len);
-                int nul = text.IndexOf((byte)0);
-                if (nul >= 0)
-                {
-                    text = text[..nul];
-                }
-
-                return text.IsEmpty ? string.Empty : DecodeCp949(text);
+                // Cp949Text.Decode trims at the first NUL and decodes via the registered code page 949.
+                return Cp949Text.Decode(body.Slice(sizeof(uint), (int)len));
             }
         }
 
         // Fall back to the printable run from the body start.
         return DecodeFixedText(body);
-    }
-
-    /// <summary>
-    /// Decodes a CP949 (EUC-KR) byte span to UTF-16 at the presentation boundary. spec: handlers.md
-    /// ("Korean text fields are CP949-encoded ... Decode CP949 → UTF-16 only at the presentation boundary").
-    /// Falls back to Latin-1 when the CP949 code page is unavailable (it is not on every runtime).
-    /// </summary>
-    private static string DecodeCp949(ReadOnlySpan<byte> bytes)
-    {
-        try
-        {
-            return Encoding.GetEncoding(949).GetString(bytes);
-        }
-        catch (ArgumentException)
-        {
-            // CP949 not registered on this runtime: ASCII/Latin-1 round-trips the ASCII subset losslessly.
-            return Encoding.Latin1.GetString(bytes);
-        }
-        catch (NotSupportedException)
-        {
-            return Encoding.Latin1.GetString(bytes);
-        }
     }
 
     private static EntitySort ToEntitySort(byte sort) => sort switch

@@ -7,7 +7,8 @@ namespace MartialHeroes.Assets.Parsers;
 /// <summary>
 /// Parsers for terrain layer sidecar files:
 /// <c>.up</c>, <c>.exd</c>, <c>.sod.pre</c>, <c>.fx1</c>–<c>.fx6</c>,
-/// <c>light*.bin</c>, <c>point_light*.bin</c>, <c>wind*.bin</c>.
+/// <c>point_light*.bin</c>, <c>wind*.bin</c>.
+/// Note: <c>light*.bin</c> is decoded by <see cref="EnvironmentBinParsers.ParseLight"/>.
 /// </summary>
 /// <remarks>
 /// spec: Docs/RE/formats/terrain_layers.md
@@ -843,90 +844,13 @@ public static class TerrainLayerParsers
         };
     }
 
-    // ─── light*.bin ───────────────────────────────────────────────────────────
-
-    // light*.bin: fixed size 5312 bytes (0x14C0).
-    // spec: Docs/RE/formats/terrain_layers.md §6.1 Blob layout — "exactly 5312 bytes": CONFIRMED (parser).
-    private const int LightBinFixedSize = 5312; // 0x14C0
-    private const int LightKeyframeCount = 48;
-    private const int LightKeyframeStride = 48;
-
-    // Section offsets.
-    // spec: Docs/RE/formats/terrain_layers.md §6.1:
-    //   Section A (directional) @ 0x0000, 2304 bytes: CONFIRMED (parser).
-    //   Section B (ambient) @ 0x0930, 2304 bytes: CONFIRMED (parser).
-    //   Section C (fog) @ 0x1260, 192 bytes: MEDIUM.
-    //   Trailing @ 0x1320: UNVERIFIED.
-    private const int SectionAOffset = 0x0000; // 2304 bytes directional
-    private const int SectionBOffset = 0x0930; // 2304 bytes ambient
-    private const int SectionCOffset = 0x1260; // 192 bytes fog (48 × f32)
-    private const int TrailingOffset = 0x1320;
-    private const int TrailingSize = LightBinFixedSize - TrailingOffset; // 416
-
-    /// <summary>
-    /// Parses a <c>light%d.bin</c> sky-lighting keyframe file.
-    /// Fixed size: 5312 bytes. No magic, no version.
-    /// </summary>
-    /// <remarks>
-    /// spec: Docs/RE/formats/terrain_layers.md §6.1 Blob layout: CONFIRMED (parser-analysis; no samples).
-    /// </remarks>
-    public static LightBinData ParseLightBin(ReadOnlyMemory<byte> data) =>
-        ParseLightBin(data.Span, data);
-
-    private static LightBinData ParseLightBin(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
-    {
-        if (span.Length < LightBinFixedSize)
-            throw new InvalidDataException(
-                $"light*.bin parse error: expected {LightBinFixedSize} bytes, got {span.Length}. " +
-                "spec: Docs/RE/formats/terrain_layers.md §6.1.");
-
-        var dirKf = ReadLightKeyframes(span, SectionAOffset, LightKeyframeCount, backing);
-        var ambKf = ReadLightKeyframes(span, SectionBOffset, LightKeyframeCount, backing);
-
-        var fog = new float[LightKeyframeCount];
-        for (int i = 0; i < LightKeyframeCount; i++)
-            fog[i] = BinaryPrimitives.ReadSingleLittleEndian(span[(SectionCOffset + i * 4)..]);
-
-        ReadOnlyMemory<byte> rawTrailing = backing.IsEmpty
-            ? span.Slice(TrailingOffset, TrailingSize).ToArray()
-            : backing.Slice(TrailingOffset, TrailingSize);
-
-        return new LightBinData
-        {
-            DirectionalKeyframes = dirKf,
-            AmbientKeyframes = ambKf,
-            FogDensity = fog,
-            RawTrailing = rawTrailing,
-        };
-    }
-
-    private static LightKeyframe[] ReadLightKeyframes(
-        ReadOnlySpan<byte> span, int sectionOffset, int count, ReadOnlyMemory<byte> backing)
-    {
-        var kf = new LightKeyframe[count];
-        for (int i = 0; i < count; i++)
-        {
-            int slotOffset = sectionOffset + i * LightKeyframeStride;
-            // sun_colour[0..2] f32×3 @ slot+0x00: CONFIRMED.
-            // spec: Docs/RE/formats/terrain_layers.md §6.2.
-            float c0 = BinaryPrimitives.ReadSingleLittleEndian(span[(slotOffset)..]);
-            float c1 = BinaryPrimitives.ReadSingleLittleEndian(span[(slotOffset + 4)..]);
-            float c2 = BinaryPrimitives.ReadSingleLittleEndian(span[(slotOffset + 8)..]);
-            // Remaining 36 bytes (9 floats) PARTIALLY UNVERIFIED.
-            ReadOnlyMemory<byte> rawRest = backing.IsEmpty
-                ? span.Slice(slotOffset + 12, 36).ToArray()
-                : backing.Slice(slotOffset + 12, 36);
-            kf[i] = new LightKeyframe
-            {
-                SunColour0 = c0,
-                SunColour1 = c1,
-                SunColour2 = c2,
-                RawRest = rawRest,
-            };
-        }
-
-        return kf;
-    }
+    // ─── light*.bin (SUPERSEDED) ──────────────────────────────────────────────
+    // ParseLightBin / LightBinData / LightKeyframe were removed (CAMPAIGN 11 Phase 3a).
+    // The canonical light*.bin parser is EnvironmentBinParsers.ParseLight which implements
+    // the corrected sample-verified §9.1 layout (sections A/B/C/D/E + fallback @0x14B0).
+    // All production consumers (VfsEnvironmentSource, FormatRegistry) already use
+    // EnvironmentBinParsers.ParseLight. There is no remaining consumer of the old parser.
+    // spec: Docs/RE/formats/environment_bins.md §9.1 — canonical layout.
 
     // ─── point_light*.bin ─────────────────────────────────────────────────────
 

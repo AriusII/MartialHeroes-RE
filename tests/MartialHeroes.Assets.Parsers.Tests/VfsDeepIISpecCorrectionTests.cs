@@ -202,6 +202,32 @@ public sealed class VfsDeepIISpecCorrectionTests
         Assert.Equal(0x224, records[0].FixedBlockRaw.Length);
     }
 
+    [Fact]
+    public void ItemsScr_RecordDiscriminator_ReadFromOnDiskOffset0xD2()
+    {
+        // Regression guard: the record_discriminator must be read from ON-DISK offset +0xD2 (210 decimal).
+        // CAMPAIGN 10 correction: +0xD2 (NOT +0xBA or +0xB8).
+        //   The loader's internal "+0xBA" is relative to a working buffer whose base is 0x18 bytes
+        //   INTO the record: +0xBA + 0x18 = +0xD2 (on-disk).
+        //   The old "+0xB8 item_type_tag" reading is REFUTED.
+        // spec: Docs/RE/formats/items_scr.md §1.4.1 — on-disk +0xD2 tested != 14: loader-resolved.
+        // spec: Docs/RE/formats/items_scr.md §1.7 — "+0x0B8 item_type_tag" REFUTED.
+        const byte sentinelValue = 0x2A;
+        byte[] buf = BuildItemsScrRecord("DiscriminatorTest", uid: 0u);
+
+        // Write sentinel at on-disk offset +0xD2; ensure +0xB8 and +0xBA differ.
+        buf[0xD2] = sentinelValue;
+        buf[0xB8] = 0xCC; // should NOT be read
+        buf[0xBA] = 0xDD; // loader-internal offset (should NOT be read directly from disk)
+
+        var records = ItemsScrParser.Parse(new ReadOnlyMemory<byte>(buf)).ToArray();
+
+        // RecordDiscriminator must reflect +0xD2, not +0xB8 or +0xBA.
+        Assert.Equal(sentinelValue, records[0].RecordDiscriminator);
+        Assert.NotEqual((byte)0xCC, records[0].RecordDiscriminator);
+        Assert.NotEqual((byte)0xDD, records[0].RecordDiscriminator);
+    }
+
     // =========================================================================
     // 2. citems.scr: 6-paragraph description + item_name at 0x04 (spec correction)
     // =========================================================================

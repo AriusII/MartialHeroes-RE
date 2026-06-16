@@ -179,8 +179,8 @@ public sealed record TargetChangedEvent(
 /// </summary>
 /// <param name="Zone">
 /// The new zone type.
-/// <see cref="MartialHeroes.Shared.Kernel.Enums.ZoneType.Unknown"/> is emitted when region data
-/// is absent (VFS offline or files missing).
+/// <see cref="MartialHeroes.Shared.Kernel.Enums.ZoneType.Safe"/> (the §16.3 default) is emitted
+/// when region data is absent (VFS offline or files missing).
 /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.
 /// </param>
 public sealed record ZoneChangedEvent(

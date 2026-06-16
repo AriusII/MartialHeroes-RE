@@ -16,8 +16,9 @@ namespace MartialHeroes.Client.Application.Tests;
 
 /// <summary>
 /// Covers E4-c sub-wave 2: lobby orchestration use-cases (against a fake <see cref="ILobbyClient"/>),
-/// the 3/4 / 3/6 / 3/23 character-management result handlers (synthetic frames -&gt; events), and the
-/// feature-flagged 1/6 login-blob emit (flag on -&gt; right bytes to a fake sink).
+/// the 3/7 / 3/6 / 3/23 character-management result handlers (synthetic frames -&gt; events), and login
+/// credential staging (no outbound frame — the credential rides the secure 1/4 reply, 1/6 is
+/// character-create only; spec: login_flow.md §4.2).
 /// </summary>
 public sealed class LobbyAndCharManagementTests
 {
@@ -67,8 +68,11 @@ public sealed class LobbyAndCharManagementTests
     // =====================================================================================================
 
     [Fact]
-    public async Task FetchServerList_publishes_view_with_load_and_status_hints()
+    public async Task FetchServerList_publishes_view_with_population_and_caption_hints()
     {
+        // Corrected lobby record model (spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A):
+        //   +0 ServerId (==100 = AVAILABLE gate), +2 Status (caption/branch selector),
+        //   +4 Population (thresholds 500/800/1200), +6 Flag (nonzero = numeric, zero = discrete).
         var sink = new FakeOutboundSink();
         var bus = new ClientEventBus(ClientEventBus.Unbounded);
         var fsm = new ClientStateMachine(bus, ClientState.Login);
@@ -77,12 +81,18 @@ public sealed class LobbyAndCharManagementTests
         {
             ServerList =
             [
-                new LobbyServerRecord(ServerId: 1, Status: 1, Load: 1300,
-                    OpenTime: 0), // Full, Normal (status 1 = in-range)
-                new LobbyServerRecord(ServerId: 2, Status: 3, Load: 900, OpenTime: 30), // Busy, ScheduledOpen
-                new LobbyServerRecord(ServerId: 3, Status: 24, Load: 600, OpenTime: 0), // Moderate, Preparing
-                new LobbyServerRecord(ServerId: 4, Status: 100, Load: 100, OpenTime: 0), // Light, CurrentSelection
-                new LobbyServerRecord(ServerId: 5, Status: -1, Load: 0, OpenTime: 0), // Light, Invalid
+                // Status 0 + Flag nonzero (numeric mode): Population 1300 > 1200 -> Full; branch Normal.
+                new LobbyServerRecord(ServerId: 1, Status: 0, Population: 1300, Flag: 1),
+                // Status 0 + Flag zero (discrete mode): Population 3 -> Busy; branch Normal.
+                new LobbyServerRecord(ServerId: 2, Status: 0, Population: 3, Flag: 0),
+                // Status 3: special branch (6004/6005). Population/Flag are latency digit-split, not bands.
+                new LobbyServerRecord(ServerId: 3, Status: 3, Population: 24, Flag: 0),
+                // ServerId == 100: AVAILABLE gate on the id field (not on Status).
+                new LobbyServerRecord(ServerId: 100, Status: 0, Population: 100, Flag: 1),
+                // Status 5 (in 1..39): caption-array branch.
+                new LobbyServerRecord(ServerId: 5, Status: 5, Population: 0, Flag: 0),
+                // Status -1 (< 1): fallback 5901 -> Invalid.
+                new LobbyServerRecord(ServerId: 6, Status: -1, Population: 0, Flag: 0),
             ],
         };
         var useCases = new ApplicationUseCases(
@@ -91,25 +101,32 @@ public sealed class LobbyAndCharManagementTests
 
         IReadOnlyList<LobbyServerRecord> raw = await useCases.FetchServerListAsync();
 
-        Assert.Equal(5, raw.Count);
+        Assert.Equal(6, raw.Count);
         var evt = Assert.IsType<ServerListReceivedEvent>(Assert.Single(Drain(bus)));
         ImmutableArray<ServerListEntryView> v = evt.Servers;
-        Assert.Equal(5, v.Length);
+        Assert.Equal(6, v.Length);
 
+        // Numeric-mode population band (Flag nonzero).
         Assert.Equal(ServerLoadBand.Full, v[0].LoadHint);
         Assert.Equal(ServerStatusHint.Normal, v[0].StatusHint);
 
+        // Discrete-mode population band (Flag zero, Population == 3).
         Assert.Equal(ServerLoadBand.Busy, v[1].LoadHint);
-        Assert.Equal(ServerStatusHint.ScheduledOpen, v[1].StatusHint);
-        Assert.Equal((short)30, v[1].OpenTime);
+        Assert.Equal(ServerStatusHint.Normal, v[1].StatusHint);
 
-        Assert.Equal(ServerLoadBand.Moderate, v[2].LoadHint);
-        Assert.Equal(ServerStatusHint.Preparing, v[2].StatusHint);
+        // Status == 3 -> Special branch; the wire Population/Flag are forwarded verbatim.
+        Assert.Equal(ServerStatusHint.Special, v[2].StatusHint);
+        Assert.Equal((short)24, v[2].Population);
+        Assert.Equal((short)0, v[2].Flag);
 
-        Assert.Equal(ServerLoadBand.Light, v[3].LoadHint);
-        Assert.Equal(ServerStatusHint.CurrentSelection, v[3].StatusHint);
+        // ServerId == 100 -> Available gate (regardless of Status).
+        Assert.Equal(ServerStatusHint.Available, v[3].StatusHint);
 
-        Assert.Equal(ServerStatusHint.Invalid, v[4].StatusHint);
+        // Status in 1..39 -> Caption branch.
+        Assert.Equal(ServerStatusHint.Caption, v[4].StatusHint);
+
+        // Status < 1 -> Invalid (fallback 5901).
+        Assert.Equal(ServerStatusHint.Invalid, v[5].StatusHint);
     }
 
     [Fact]
@@ -298,12 +315,16 @@ public sealed class LobbyAndCharManagementTests
     }
 
     // =====================================================================================================
-    // 1/6 login-blob emit (feature-flagged)
+    // Login credential staging (no outbound frame — the credential rides the secure 1/4 reply)
     // =====================================================================================================
 
     [Fact]
-    public async Task Login_with_flag_off_emits_no_1_6_frame()
+    public async Task Login_stages_credential_and_emits_no_frame()
     {
+        // The former feature-flagged 1/6 "login blob" was removed: the 1/6-vs-credential collision is
+        // RESOLVED — the credential (0x2B pre-image + RSA password) rides the secure 1/4 reply built by
+        // the login handshake driver, and 1/6 is character-create only. LoginAsync only STAGES the
+        // credential and emits nothing on the wire. spec: Docs/RE/specs/login_flow.md §4.2.
         var sink = new FakeOutboundSink();
         var bus = new ClientEventBus(ClientEventBus.Unbounded);
         var fsm = new ClientStateMachine(bus, ClientState.Login);
@@ -314,72 +335,6 @@ public sealed class LobbyAndCharManagementTests
         await useCases.LoginAsync("account", "secret", pin: "1234");
 
         Assert.True(credentials.HasStagedCredential);
-        Assert.Empty(sink.Sends); // default flag off: no 1/6
-    }
-
-    [Fact]
-    public async Task Login_with_flag_on_emits_1_6_blob_with_subopcode_and_length_prefixes()
-    {
-        var sink = new FakeOutboundSink();
-        var bus = new ClientEventBus(ClientEventBus.Unbounded);
-        var fsm = new ClientStateMachine(bus, ClientState.Login);
-        var credentials = new LoginCredentialStore();
-        var useCases = new ApplicationUseCases(
-            sink, fsm, new ClientWorld(), credentials, new SessionId(1),
-            emitLoginBlob16: true);
-
-        await useCases.LoginAsync("account", "secret", pin: "1234");
-
-        // Password still goes via the RSA 1/4 reply only — never in the blob.
-        Assert.True(credentials.HasStagedCredential);
-
-        var (major, minor, payload) = Assert.Single(sink.Sends);
-        Assert.Equal(1, major);
-        Assert.Equal(6, minor);
-
-        // [0x2B][u32len account\0]["account"][\0][u32len PIN\0]["1234"][\0]
-        Assert.Equal(0x2B, payload[0]);
-
-        int cursor = 1;
-        uint accountLen = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(cursor, 4));
-        Assert.Equal((uint)("account".Length + 1), accountLen); // length INCLUDES the NUL
-        cursor += 4;
-        string account = System.Text.Encoding.ASCII.GetString(payload, cursor, "account".Length);
-        Assert.Equal("account", account);
-        Assert.Equal(0, payload[cursor + "account".Length]); // trailing NUL
-        cursor += (int)accountLen;
-
-        uint pinLen = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(cursor, 4));
-        Assert.Equal((uint)("1234".Length + 1), pinLen);
-        cursor += 4;
-        string pin = System.Text.Encoding.ASCII.GetString(payload, cursor, "1234".Length);
-        Assert.Equal("1234", pin);
-        Assert.Equal(0, payload[cursor + "1234".Length]); // trailing NUL
-        cursor += (int)pinLen;
-
-        // The blob is exactly [sub-op][account field][pin field] with no trailing bytes.
-        Assert.Equal(cursor, payload.Length);
-
-        // The password ("secret") must NOT appear anywhere in the blob.
-        string blobText = System.Text.Encoding.ASCII.GetString(payload);
-        Assert.DoesNotContain("secret", blobText, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task Login_with_flag_on_and_no_pin_omits_the_optional_pin_field()
-    {
-        var sink = new FakeOutboundSink();
-        var bus = new ClientEventBus(ClientEventBus.Unbounded);
-        var fsm = new ClientStateMachine(bus, ClientState.Login);
-        var useCases = new ApplicationUseCases(
-            sink, fsm, new ClientWorld(), new LoginCredentialStore(), new SessionId(1),
-            emitLoginBlob16: true);
-
-        await useCases.LoginAsync("account", "secret", pin: null);
-
-        var (_, _, payload) = Assert.Single(sink.Sends);
-        // [0x2B] + [u32 len][account][NUL] only — no PIN field.
-        int expected = 1 + 4 + "account".Length + 1;
-        Assert.Equal(expected, payload.Length);
+        Assert.Empty(sink.Sends); // no outbound frame: the credential rides the later 1/4 reply
     }
 }

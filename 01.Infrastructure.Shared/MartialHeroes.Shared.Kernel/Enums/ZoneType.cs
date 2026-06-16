@@ -13,6 +13,14 @@ namespace MartialHeroes.Shared.Kernel.Enums;
 /// site does an equality compare".
 /// </para>
 /// <para>
+/// The enum is <b>complete at exactly three values</b> (0, 1, 2). A census of every consuming
+/// site (movement gate, combat-mode arbiter, attack/target-validity gates, skill-use validator,
+/// minimap switch) found no comparison against any value ≥ 3 and no bitmask test. Raw values
+/// 3..31 behave as the default arm (Safe) — they are not modelled as a named member.
+/// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — "CONFIRMED-COMPLETE at three values;
+/// 3..31 = default (safe)".
+/// </para>
+/// <para>
 /// A region id ≥ 32 has no record; the combat arbiter defaults to <see cref="OpenPvp"/> (1) in
 /// that case.
 /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — "A missing record (region id >= 32) is
@@ -21,18 +29,20 @@ namespace MartialHeroes.Shared.Kernel.Enums;
 /// <para>
 /// Confidence per value:
 /// <list type="bullet">
-///   <item><see cref="Safe"/> (0) — PLAUSIBLE (not observed at any examined site).</item>
+///   <item><see cref="Safe"/> (0) — CONFIRMED (default / safe branch in minimap switch and arbiter).</item>
 ///   <item><see cref="OpenPvp"/> (1) — CONFIRMED (1 = combat-permitted).</item>
 ///   <item><see cref="Closed"/> (2) — CONFIRMED (2 = movement-restricted).</item>
-///   <item><see cref="Unknown"/> (255) — fallback for values ≥ 3; UNVERIFIED.</item>
 /// </list>
 /// </para>
 /// </remarks>
 public enum ZoneType : byte
 {
     /// <summary>
-    /// Safe / no-combat zone — the combat arbiter yields the "denied" result.
-    /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 0: PLAUSIBLE.
+    /// Safe / no-combat zone — the combat arbiter yields the "denied" result; the minimap
+    /// renders a distinct safe caption/colour. Raw values ≥ 3 also resolve to this member
+    /// because no consuming site branches on any value ≥ 3.
+    /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 0: CONFIRMED (behaviour);
+    /// label PLAUSIBLE; 3..31 = default (Safe): CONFIRMED-COMPLETE.
     /// </summary>
     Safe = 0,
 
@@ -48,10 +58,4 @@ public enum ZoneType : byte
     /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 2: CONFIRMED (2 = movement-restricted).
     /// </summary>
     Closed = 2,
-
-    /// <summary>
-    /// Fallback for any raw value ≥ 3 not observed at any examined site.
-    /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — values 3+: UNVERIFIED.
-    /// </summary>
-    Unknown = 255,
 }

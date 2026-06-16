@@ -356,8 +356,12 @@ public static class CharacterAppearance
 /// </summary>
 public readonly ref struct SmsgCharacterListReader
 {
-    /// <summary>Number of slot bits the original loop scans (~8). spec: packets/3-1_character_list.yaml.</summary>
-    public const int SlotCount = 8;
+    /// <summary>
+    /// Number of slot bits the original handler scans: EXACTLY 5 (the account character-slot count,
+    /// bit indices 0..4, LSB-first; the per-slot scratch is a 5-entry array). Bits 5..7, if set in the
+    /// mask, are NOT scanned and consume no record. spec: packets/3-1_character_list.yaml.
+    /// </summary>
+    public const int SlotCount = 5;
 
     private readonly ReadOnlySpan<byte> _records; // packed 981-byte records, one per set bit, in bit order
 
@@ -400,14 +404,14 @@ public readonly ref struct SmsgCharacterListReader
     /// </summary>
     public readonly int PopulatedCount => _records.Length / CharacterListSlotRecord.WireSize;
 
-    /// <summary>True if slot <paramref name="slot"/> (0..7) is populated. spec: packets/3-1_character_list.yaml.</summary>
+    /// <summary>True if slot <paramref name="slot"/> (0..4) is populated. spec: packets/3-1_character_list.yaml.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public readonly bool IsSlotPopulated(int slot)
         => (uint)slot < (uint)SlotCount && (Header.SlotMask & (1 << slot)) != 0;
 
     /// <summary>
     /// Returns an in-place <c>ref readonly</c> view of the record occupying <paramref name="slot"/>
-    /// (0..7). The record's position in the packed tail is the count of SET bits BELOW
+    /// (0..4). The record's position in the packed tail is the count of SET bits BELOW
     /// <paramref name="slot"/> (LSB-first bit-position placement). Zero copy.
     /// spec: Docs/RE/packets/3-1_character_list.yaml (SLOT ORDERING — BIT-POSITION placement).
     /// </summary>

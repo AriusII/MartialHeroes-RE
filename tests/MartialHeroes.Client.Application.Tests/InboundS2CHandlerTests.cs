@@ -229,10 +229,44 @@ public sealed class InboundS2CHandlerTests
         // Credential is wiped after the reply is built (crypto.md §6.1).
         Assert.False(credentials.HasStagedCredential);
 
-        // A handshake-completed event was published, and the FSM advanced out of Login.
+        // A handshake-completed event was published EXACTLY ONCE (the handler is the single publisher;
+        // the driver no longer publishes, so there is no double-fire), and the FSM advanced out of Login.
         List<IClientEvent> events = Drain(bus);
-        Assert.Contains(events, ev => ev is LoginHandshakeCompletedEvent);
+        Assert.Single(events, ev => ev is LoginHandshakeCompletedEvent);
         Assert.Equal(ClientState.CharacterSelection, fsm.Current);
+    }
+
+    [Fact]
+    public void KeyExchange_0_0_publishes_handshake_completed_exactly_once()
+    {
+        // Regression guard for the former double-publish: the handler and the driver both used to be able
+        // to publish LoginHandshakeCompletedEvent. The driver no longer publishes — the handler is the
+        // single owner — so even with the same bus reachable from both, the event fires exactly once.
+        BigInteger p = BigInteger.Parse("75377541258354731458810898159183352769326586247");
+        BigInteger q = BigInteger.Parse("48710038997288231143179367274763024050866548859");
+        BigInteger n = p * q;
+        BigInteger e = 65537;
+        byte[] nDigits = n.ToByteArray(isUnsigned: true, isBigEndian: true);
+        byte[] eDigits = e.ToByteArray(isUnsigned: true, isBigEndian: true);
+
+        var bus = new ClientEventBus(ClientEventBus.Unbounded);
+        var world = new ClientWorld();
+        var fsm = new ClientStateMachine(bus, ClientState.Login);
+        var sink = new FakeOutboundSink();
+
+        var credentials = new LoginCredentialStore();
+        credentials.Stage("account", "hunter2");
+
+        var loginDriver = new LoginHandshakeDriver(
+            sink, credentials, new SessionId(1),
+            paddingRandom: new SequentialPaddingRandom(start: 1), stateMachine: fsm);
+        var handler = new GamePacketHandler(world, bus, fsm, new CountingUnhandledOpcodeSink(), loginDriver);
+        var dispatcher = new InboundFrameDispatcher(handler);
+
+        dispatcher.RouteNow(SyntheticFrames.KeyExchange(nDigits, eDigits, scalar1: 0, scalar2: 0));
+
+        int handshakeEvents = Drain(bus).Count(ev => ev is LoginHandshakeCompletedEvent);
+        Assert.Equal(1, handshakeEvents);
     }
 
     [Fact]

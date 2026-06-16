@@ -35,10 +35,11 @@ namespace MartialHeroes.Client.Application.UseCases;
 /// <b>Version token (sample-verified).</b> The 1/9 version token is derived via
 /// <see cref="ClientVersionToken.Derive"/> (<c>10 × versionField + 9</c>) from the injected
 /// <see cref="IClientVersionSource"/>. The default source yields the sampled field 2114 → token 21149
-/// (<c>sample_verified</c> from the real <c>game.ver</c>). spec: login_flow.md §3.3 / §7. The pre-0/0
-/// username send (1/6) is not specced; <see cref="LoginAsync"/> stages the credential but emits no 1/6
-/// frame. The chat/credential text charset is UNKNOWN per the chat specs; UTF-8 is the documented
-/// provisional choice.
+/// (<c>sample_verified</c> from the real <c>game.ver</c>). spec: login_flow.md §3.3 / §7.
+/// <see cref="LoginAsync"/> only STAGES the credential and emits no outbound frame: the credential
+/// rides the secure 1/4 reply built later by the login handshake driver (1/6 is character-create only).
+/// spec: login_flow.md §4.2. The chat text charset is CP949 per the chat specs; the body bytes here are
+/// still UTF-8 (PROVISIONAL — ASCII round-trips identically).
 /// </para>
 /// </remarks>
 public sealed class ApplicationUseCases : IApplicationUseCases
@@ -53,7 +54,6 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     private readonly CharacterSelectionStore? _characterSelection;
     private readonly IClientEventBus? _eventBus;
     private readonly ILobbyClient? _lobbyClient;
-    private readonly bool _emitLoginBlob16;
 
     /// <summary>The 1/9 version-token length: a fixed 33-byte buffer. spec: 1-9_enter_game_request.yaml.</summary>
     public const int VersionTokenLength = 33;
@@ -75,7 +75,7 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     /// </param>
     /// <param name="characterSelection">
     /// The session-scoped store the 3/1 handler fills and <see cref="SelectCharacterAsync"/> reads to
-    /// detect "@BLANK@" and cache the chosen descriptor for the 3/7 spawn. spec: login_flow.md §3.5.
+    /// detect "@BLANK@" and cache the chosen descriptor for the 3/14 spawn. spec: login_flow.md §3.5.
     /// </param>
     /// <param name="eventBus">
     /// Used to publish <see cref="CreateCharacterRequestedEvent"/> when an empty slot is confirmed, and
@@ -88,12 +88,6 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     /// never references the concrete transport. Required only for the lobby use-cases. spec:
     /// Docs/RE/specs/login_flow.md §2.
     /// </param>
-    /// <param name="emitLoginBlob16">
-    /// FEATURE FLAG (default <see langword="false"/>) for emitting the optional 1/6 login blob in
-    /// <see cref="LoginAsync"/>. Kept OFF because the 1/6 opcode collision (login blob vs character
-    /// create) is unresolved pending a capture. spec: Docs/RE/packets/1-6_login_or_create.yaml;
-    /// Docs/RE/specs/login_flow.md §4.2.
-    /// </param>
     public ApplicationUseCases(
         IOutboundPacketSink outbound,
         ClientStateMachine stateMachine,
@@ -105,8 +99,7 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         IClientVersionSource? versionSource = null,
         CharacterSelectionStore? characterSelection = null,
         IClientEventBus? eventBus = null,
-        ILobbyClient? lobbyClient = null,
-        bool emitLoginBlob16 = false)
+        ILobbyClient? lobbyClient = null)
     {
         _outbound = outbound ?? throw new ArgumentNullException(nameof(outbound));
         _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
@@ -117,7 +110,6 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         _characterSelection = characterSelection; // optional: needed for @BLANK@ + descriptor cache
         _eventBus = eventBus; // optional: publishes CreateCharacterRequested + lobby events
         _lobbyClient = lobbyClient; // optional: only the lobby use-cases need it
-        _emitLoginBlob16 = emitLoginBlob16; // FEATURE FLAG: off by default (1/6 collision unresolved)
 
         _versionToken = new byte[VersionTokenLength];
         if (!versionToken.IsEmpty)
@@ -150,27 +142,20 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         cancellationToken.ThrowIfCancellationRequested();
 
         // Stage the credential (account bytes, 17-byte zero-padded M, optional PIN) before any 0/0
-        // arrives; the 1/4 reply is built later by LoginHandshakeDriver when the server's KeyExchange
-        // lands. spec: Docs/RE/specs/crypto.md §6.1, §6.6; packets/login.yaml (CmsgLoginCredential).
+        // arrives. The credential — account + optional PIN (its 0x2B-prefixed plaintext pre-image) plus
+        // the RSA-encrypted password — rides the SECURE 1/4 reply, built later by LoginHandshakeDriver
+        // when the server's KeyExchange lands. There is NO separate 1/6 login frame: the prior "1/6
+        // login blob" attribution was a false premise — 1/6 is character-create only. spec:
+        // Docs/RE/specs/login_flow.md §4.2 (RESOLVED); Docs/RE/specs/crypto.md §6.1, §6.6;
+        // packets/login.yaml (CmsgLoginCredential).
         _credentials.Stage(username, password, pin);
 
         // Drive the FSM from Login toward handshaking. CharacterSelection is the application-state
         // analogue of "secure session established / awaiting auth result".
         _stateMachine.OnAuthenticated();
 
-        // OPT-IN 1/6 login-blob emit, OFF by default. The 1/6 opcode is a known UNRESOLVED collision
-        // (login credential blob vs character-create body) — a capture is needed to disambiguate, so
-        // this path stays gated behind the feature flag. The password is NEVER in this blob; it travels
-        // only via the RSA 1/4 reply. spec: Docs/RE/packets/1-6_login_or_create.yaml;
-        // Docs/RE/specs/login_flow.md §4.2 / §7.
-        if (_emitLoginBlob16)
-        {
-            byte[] blob = BuildLoginBlob16(username, pin);
-            return SendAsync(major: 1, minor: 6, blob, cancellationToken);
-        }
-
-        // Default (flag OFF): we do NOT fabricate a 1/6 frame; the handshake proceeds from the inbound
-        // 0/0. Documented gap pending capture resolution of the 1/6 collision.
+        // No outbound frame here: the handshake proceeds from the inbound 0/0 KeyExchange, which the
+        // driver answers with the secure 1/4 reply carrying the staged credential. spec: login_flow.md §4.2.
         return ValueTask.CompletedTask;
     }
 
@@ -185,14 +170,17 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         IReadOnlyList<LobbyServerRecord> records =
             await lobby.FetchServerListAsync(cancellationToken).ConfigureAwait(false);
 
-        // Map each decoded record to a presentation view, attaching the load-color band + status-sentinel
-        // hints so the ServerSelect screen does not re-derive the spec constants. spec: login_flow.md §2.1.
+        // Map each decoded record to a presentation view, attaching the population-color band + caption
+        // branch hints so the ServerSelect screen does not re-derive the spec constants. The availability
+        // gate is ServerId == 100 (wire +0), the caption branch is Status (wire +2), the population band
+        // comes from Population (wire +4) gated by the Flag mode (wire +6).
+        // spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A.
         var builder = ImmutableArray.CreateBuilder<ServerListEntryView>(records.Count);
         foreach (LobbyServerRecord r in records)
         {
             builder.Add(new ServerListEntryView(
-                r.ServerId, r.Status, r.Load, r.OpenTime,
-                ClassifyLoad(r.Load), ClassifyStatus(r.Status)));
+                r.ServerId, r.Status, r.Population, r.Flag,
+                ClassifyPopulation(r.Population, r.Flag), ClassifyStatus(r.ServerId, r.Status)));
         }
 
         _eventBus?.Publish(new ServerListReceivedEvent(builder.ToImmutable()));
@@ -261,7 +249,7 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         cancellationToken.ThrowIfCancellationRequested();
 
         // Confirm the slot against the cached 3/1 roster: detect the "@BLANK@" empty-slot sentinel,
-        // re-check the range, and on a real character cache the chosen descriptor for the 3/7 spawn.
+        // re-check the range, and on a real character cache the chosen descriptor for the 3/14 spawn.
         // spec: login_flow.md §3.3 / §3.5.
         if (_characterSelection is not null)
         {
@@ -545,71 +533,62 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     /// <summary>An idle scratch cooldown table for the cast gate when no local-player state is wired (tests).</summary>
     private readonly CooldownTable _scratchCooldowns = new();
 
-    /// <summary>
-    /// First payload byte of the 1/6 login blob: sub-opcode 0x2B (43). spec:
-    /// Docs/RE/specs/login_flow.md §4.2 / §7 (login sub-opcode byte = 0x2B).
-    /// </summary>
-    private const byte LoginBlobSubOpcode = 0x2B;
-
     // -------------------------------------------------------------------------
-    // 1/6 login blob (feature-flagged) + lobby presentation classification
+    // Lobby presentation classification
     // -------------------------------------------------------------------------
+    // NOTE: the former feature-flagged 1/6 "login blob" builder was removed — the 1/6-vs-login-credential
+    // collision is RESOLVED: the credential (0x2B pre-image + RSA password) rides the secure 1/4 reply
+    // built by LoginHandshakeReply / LoginCredentialReply, and 1/6 is CmsgCreateCharacter only.
+    // spec: Docs/RE/specs/login_flow.md §4.2.
 
     /// <summary>
-    /// Builds the optional 1/6 login blob: <c>[0x2B][u32len account\0]([u32len PIN\0])</c>. Each
-    /// length-prefixed field is <c>[u32 LE length][bytes][NUL]</c> where the length INCLUDES the
-    /// trailing NUL (so prefix = byte-count + 1). The PIN field is omitted entirely when no PIN is
-    /// supplied. The password is NEVER serialized here — it rides only the RSA 1/4 reply. spec:
-    /// Docs/RE/specs/login_flow.md §4.2 / §7; Docs/RE/packets/1-6_login_or_create.yaml (collision-gated).
+    /// Classifies a lobby server's population into a presentation color band. In numeric mode
+    /// (<paramref name="flag"/> nonzero) the population is thresholded against 500 / 800 / 1200
+    /// (strict greater-than); in discrete mode (<paramref name="flag"/> == 0) the population carries a
+    /// discrete load level (4 = Full, 3 = Busy, 2 = Moderate, else Light). Presentation-only; not a wire
+    /// decode. spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A (POPULATION caption mapping when
+    /// status_kind == 0).
     /// </summary>
-    private static byte[] BuildLoginBlob16(string account, string? pin)
-    {
-        // Field bytes are CP949 in the Korean client; ASCII account/PIN round-trip losslessly. We use
-        // the same length-prefixed encoder as the chat path (u32 LE length incl. NUL). spec: §4.2.
-        byte[] accountField = BuildLengthPrefixedText(account);
-        byte[]? pinField = string.IsNullOrEmpty(pin) ? null : BuildLengthPrefixedText(pin);
-
-        int size = sizeof(byte) + accountField.Length + (pinField?.Length ?? 0);
-        var blob = new byte[size];
-        Span<byte> w = blob;
-        w[0] = LoginBlobSubOpcode; // 0x2B sub-opcode. spec: §4.2 order 1.
-        int cursor = 1;
-        accountField.CopyTo(w[cursor..]); // [u32len account\0]. spec: §4.2 order 2.
-        cursor += accountField.Length;
-        if (pinField is not null)
+    private static ServerLoadBand ClassifyPopulation(short population, short flag) => flag != 0
+        ? population switch
         {
-            pinField.CopyTo(w[cursor..]); // optional [u32len PIN\0]. spec: §4.2 order 3.
+            > 1200 => ServerLoadBand.Full, // spec: §RECORD SHAPE A +4 > 1200 -> 6001
+            > 800 => ServerLoadBand.Busy, // spec: §RECORD SHAPE A +4 > 800 -> 6002
+            > 500 => ServerLoadBand.Moderate, // spec: §RECORD SHAPE A +4 > 500 -> 6003
+            _ => ServerLoadBand.Light, // default tier
+        }
+        : population switch
+        {
+            4 => ServerLoadBand.Full, // spec: §RECORD SHAPE A discrete +4 == 4 -> 6001
+            3 => ServerLoadBand.Busy, // spec: §RECORD SHAPE A discrete +4 == 3 -> 6002
+            2 => ServerLoadBand.Moderate, // spec: §RECORD SHAPE A discrete +4 == 2 -> 6003
+            _ => ServerLoadBand.Light, // default tier
+        };
+
+    /// <summary>
+    /// Classifies a lobby server's caption branch + availability for presentation. The AVAILABILITY gate
+    /// is <paramref name="serverId"/> == 100 (wire +0), NOT a status value. The caption branch comes from
+    /// <paramref name="status"/> (wire +2, <c>status_kind</c>): 0 = numeric/discrete population, 3 =
+    /// special (6004/6005), 1..39 = caption array, else = fallback 5901. Presentation-only; not a wire
+    /// decode. spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A.
+    /// </summary>
+    private static ServerStatusHint ClassifyStatus(ushort serverId, short status)
+    {
+        // Availability sentinel is on the id/select-key (+0), not status_kind (+2).
+        // spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A, offset +0 [CODE-CONFIRMED].
+        if (serverId == 100)
+        {
+            return ServerStatusHint.Available;
         }
 
-        return blob;
+        return status switch
+        {
+            0 => ServerStatusHint.Normal, // spec: §RECORD SHAPE A status_kind == 0 (population branch)
+            3 => ServerStatusHint.Special, // spec: §RECORD SHAPE A status_kind == 3 (6004/6005)
+            >= 1 and <= 39 => ServerStatusHint.Caption, // spec: §RECORD SHAPE A 1..39 caption array
+            _ => ServerStatusHint.Invalid, // spec: §RECORD SHAPE A < 1 or > 39 -> 5901 fallback
+        };
     }
-
-    /// <summary>
-    /// Classifies a lobby server's load into a presentation color band from the spec thresholds
-    /// 1200 / 800 / 500 (presentation-only; not a wire decode). spec: Docs/RE/specs/login_flow.md
-    /// §2.1 / §7 (load-color thresholds).
-    /// </summary>
-    private static ServerLoadBand ClassifyLoad(short load) => load switch
-    {
-        >= 1200 => ServerLoadBand.Full, // spec: §2.1 high threshold 1200
-        >= 800 => ServerLoadBand.Busy, // spec: §2.1 threshold 800
-        >= 500 => ServerLoadBand.Moderate, // spec: §2.1 threshold 500
-        _ => ServerLoadBand.Light,
-    };
-
-    /// <summary>
-    /// Classifies a lobby server's status sentinel for presentation (3 = scheduled open, 24 =
-    /// preparing, 100 = current selection; in-range otherwise = normal; ≤ 0 or &gt; 40 = invalid).
-    /// Presentation-only; not a wire decode. spec: Docs/RE/specs/login_flow.md §2.1 / §7.
-    /// </summary>
-    private static ServerStatusHint ClassifyStatus(short status) => status switch
-    {
-        3 => ServerStatusHint.ScheduledOpen, // spec: §2.1 sentinel 3
-        24 => ServerStatusHint.Preparing, // spec: §2.1 sentinel 24
-        100 => ServerStatusHint.CurrentSelection, // spec: §2.1 sentinel 100
-        <= 0 or > 40 => ServerStatusHint.Invalid, // spec: §2.1 (≤ 0 or > 40 is invalid/unavailable)
-        _ => ServerStatusHint.Normal,
-    };
 
     // -------------------------------------------------------------------------
     // Chat helpers
@@ -617,9 +596,11 @@ public sealed class ApplicationUseCases : IApplicationUseCases
 
     private ValueTask SendWhisperAsync(uint channel, string recipientName, string text, CancellationToken ct)
     {
-        // 2/7: 19-byte header + [u32 textLength][text bytes]; textLength includes the terminating NUL.
-        // spec: Docs/RE/packets/2-7_whisper.yaml.
-        byte[] body = BuildLengthPrefixedText(text);
+        // 2/7: 19-byte header + [u32 textLength][text bytes][NUL]; textLength EXCLUDES the terminating
+        // NUL (it is built from strlen(text), not strlen+1). This DIFFERS from 3/21, whose prefix
+        // INCLUDES the NUL. spec: Docs/RE/packets/2-7_whisper.yaml (TEXT BODY: "textLength EXCLUDES the
+        // terminating NUL ... Contrast 3/21 ... whose length prefix INCLUDES the NUL").
+        byte[] body = BuildLengthPrefixedText(text, includeNulInLength: false);
         var payload = new byte[CmsgWhisperHeader.HeaderSize + body.Length];
         Span<byte> p = payload;
         p.Clear();
@@ -636,9 +617,11 @@ public sealed class ApplicationUseCases : IApplicationUseCases
 
     private ValueTask SendChannelChatAsync(uint channel, string text, CancellationToken ct)
     {
-        // 3/21: 56-byte context header + [u32 textLength][text bytes]; textLength = strlen + 1.
-        // spec: Docs/RE/packets/3-21_chat_channel.yaml.
-        byte[] body = BuildLengthPrefixedText(text);
+        // 3/21: 56-byte context header + [u32 textLength][text bytes][NUL]; textLength INCLUDES the
+        // terminating NUL (= strlen + 1). This DIFFERS from 2/7, whose prefix excludes it.
+        // spec: Docs/RE/packets/3-21_chat_channel.yaml; opcodes.md 3/21 row ("length prefix INCLUDES
+        // the trailing NUL ... DIFFERS from 2/7").
+        byte[] body = BuildLengthPrefixedText(text, includeNulInLength: true);
         var payload = new byte[CmsgChatChannelHeader.HeaderSize + body.Length];
         Span<byte> p = payload;
         p.Clear();
@@ -652,16 +635,25 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     }
 
     /// <summary>
-    /// Builds a chat text body: <c>[u32 LE textLength][UTF-8 text][0x00]</c> where textLength includes
-    /// the terminating NUL (spec: 2-7 / 3-21 length-prefix includes NUL). UTF-8 is PROVISIONAL (wire
-    /// charset UNKNOWN per the specs).
+    /// Builds a chat text body: <c>[u32 LE textLength][UTF-8 text][0x00]</c>. The text bytes are always
+    /// followed by a NUL, but whether the u32 length COUNTS that NUL differs by opcode:
+    /// <list type="bullet">
+    /// <item>2/7 CmsgChat (whisper / everyday chat) — <paramref name="includeNulInLength"/> is
+    /// <see langword="false"/>: length = byte-count (strlen). spec: Docs/RE/packets/2-7_whisper.yaml.</item>
+    /// <item>3/21 CmsgChatChannel — <paramref name="includeNulInLength"/> is <see langword="true"/>:
+    /// length = byte-count + 1 (strlen + 1, NUL counted). spec: Docs/RE/packets/3-21_chat_channel.yaml.</item>
+    /// </list>
+    /// UTF-8 is PROVISIONAL for the body bytes (the specs mark the wire charset CP949, but ASCII text
+    /// round-trips identically; charset correction is tracked separately).
     /// </summary>
-    private static byte[] BuildLengthPrefixedText(string text)
+    private static byte[] BuildLengthPrefixedText(string text, bool includeNulInLength)
     {
         int textByteCount = Encoding.UTF8.GetByteCount(text);
-        uint lengthWithNul = checked((uint)(textByteCount + 1)); // +1 for the terminating NUL
+        // 2/7 excludes the NUL (length = strlen); 3/21 includes it (length = strlen + 1).
+        // spec: 2-7_whisper.yaml (excludes) vs 3-21_chat_channel.yaml (includes).
+        uint length = checked((uint)(textByteCount + (includeNulInLength ? 1 : 0)));
         var body = new byte[sizeof(uint) + textByteCount + 1];
-        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(0, 4), lengthWithNul);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(0, 4), length);
         Encoding.UTF8.GetBytes(text, body.AsSpan(sizeof(uint), textByteCount));
         // trailing NUL already present (zeroed array).
         return body;

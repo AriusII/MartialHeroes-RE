@@ -6,7 +6,10 @@ namespace MartialHeroes.Network.Crypto;
 /// <summary>
 /// The LZ4 compression stage of the wire pipeline. Stock <b>raw-block</b> LZ4 — no frame format,
 /// no magic, no block-size prefix, no checksum. On the outbound path this runs <i>after</i> the byte
-/// cipher; on the inbound path it runs <i>before</i> any (currently unverified) inverse cipher.
+/// cipher; on the inbound path the client runs <i>decompress only</i> — there is <b>no inverse cipher
+/// on the client receive path</b> (crypto.md §5, open-question #1 RESOLVED: the byte-cipher routine
+/// has a single send-side cross-reference, so it is structurally unreachable inbound). A future server
+/// runs the inverse cipher to read client packets, but the client inbound stage is decompress-and-route.
 /// <para>
 /// LZ4 carries no length of its own — the (compressed) payload length comes from the 8-byte frame
 /// header's size field, and the decompressed length is bounded by a fixed inbound cap. Callers own

@@ -427,10 +427,17 @@ public sealed partial class SkyDomeNode : Node3D
         // phi goes from 0 to 2π (full circle).
         // The inverted flag reverses index winding so faces point inward.
 
-        var vertices = new System.Collections.Generic.List<Vector3>();
-        var normals = new System.Collections.Generic.List<Vector3>();
-        var uvs = new System.Collections.Generic.List<Vector2>();
-        var indices = new System.Collections.Generic.List<int>();
+        // Vertex/index counts are fully deterministic: (stacks+1)×(sectors+1) ring vertices and
+        // stacks×sectors×6 indices (two triangles per quad). Pre-size and write by index to avoid the
+        // List growth + ToArray() copies — this is one-time build cost, but the counts are known up front.
+        int stride = sectors + 1;
+        int vertCount = (stacks + 1) * stride;
+        int indexCount = stacks * sectors * 6;
+
+        var vertices = new Vector3[vertCount];
+        var normals = new Vector3[vertCount];
+        var uvs = new Vector2[vertCount];
+        var indices = new int[indexCount];
 
         // Theta from π/2 (equator) up to π (top). stacks+1 rings including equator and zenith.
         for (int stack = 0; stack <= stacks; stack++)
@@ -455,17 +462,15 @@ public sealed partial class SkyDomeNode : Node3D
                 Vector3 pos = new(x, y, z);
                 // Inward-pointing normal (negated outward normal) for inverted dome.
                 Vector3 outward = pos.Normalized();
-                Vector3 normal = inverted ? -outward : outward;
-                Vector2 uv = new((float)sec / sectors, (float)stack / stacks);
-
-                vertices.Add(pos);
-                normals.Add(normal);
-                uvs.Add(uv);
+                int vi = stack * stride + sec;
+                vertices[vi] = pos;
+                normals[vi] = inverted ? -outward : outward;
+                uvs[vi] = new Vector2((float)sec / sectors, (float)stack / stacks);
             }
         }
 
         // Generate quad indices (two triangles per quad), reversed winding if inverted.
-        int stride = sectors + 1;
+        int idx = 0;
         for (int stack = 0; stack < stacks; stack++)
         {
             for (int sec = 0; sec < sectors; sec++)
@@ -478,31 +483,31 @@ public sealed partial class SkyDomeNode : Node3D
                 if (inverted)
                 {
                     // Reversed winding: face points inward.
-                    indices.Add(tl);
-                    indices.Add(bl);
-                    indices.Add(tr);
-                    indices.Add(tr);
-                    indices.Add(bl);
-                    indices.Add(br);
+                    indices[idx++] = tl;
+                    indices[idx++] = bl;
+                    indices[idx++] = tr;
+                    indices[idx++] = tr;
+                    indices[idx++] = bl;
+                    indices[idx++] = br;
                 }
                 else
                 {
-                    indices.Add(tl);
-                    indices.Add(tr);
-                    indices.Add(bl);
-                    indices.Add(tr);
-                    indices.Add(br);
-                    indices.Add(bl);
+                    indices[idx++] = tl;
+                    indices[idx++] = tr;
+                    indices[idx++] = bl;
+                    indices[idx++] = tr;
+                    indices[idx++] = br;
+                    indices[idx++] = bl;
                 }
             }
         }
 
         var arrays = new global::Godot.Collections.Array();
         arrays.Resize((int)Mesh.ArrayType.Max);
-        arrays[(int)Mesh.ArrayType.Vertex] = vertices.ToArray();
-        arrays[(int)Mesh.ArrayType.Normal] = normals.ToArray();
-        arrays[(int)Mesh.ArrayType.TexUV] = uvs.ToArray();
-        arrays[(int)Mesh.ArrayType.Index] = indices.ToArray();
+        arrays[(int)Mesh.ArrayType.Vertex] = vertices;
+        arrays[(int)Mesh.ArrayType.Normal] = normals;
+        arrays[(int)Mesh.ArrayType.TexUV] = uvs;
+        arrays[(int)Mesh.ArrayType.Index] = indices;
 
         var mesh = new ArrayMesh();
         mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);

@@ -227,9 +227,9 @@ public sealed partial class ChatWindow : Control
             GD.PrintErr($"[ChatWindow] _Ready BuildUi failed: {ex.Message}");
         }
 
-        // Demo mode: inject sample lines so the window is not blank before a hub is bound.
-        // Mirrors the InventoryWindow / SkillWindow "self-populate when no hub" pattern.
-        AppendDemoLines();
+        // Demo lines removed — window starts empty until a live hub is bound.
+        // Synthetic data does not ship outside an explicit dev-offline guard.
+        // spec: layer-05 discipline — no invented data without DEV_OFFLINE_FLOW.
 
         GD.Print("[ChatWindow] Ready. " +
                  $"Ring capacity {RingCapacity} (spec §6.2 CODE-CONFIRMED). " +

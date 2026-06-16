@@ -539,64 +539,10 @@ public sealed class Fx6Layer
 //  light*.bin / point_light*.bin / wind*.bin  sky-lighting blobs
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// <summary>
-/// One directional-light or ambient-light keyframe slot from <c>light%d.bin</c>.
-/// 48 bytes (12 × f32).
-/// </summary>
-/// <remarks>
-/// spec: Docs/RE/formats/terrain_layers.md §6.2 Section A keyframe slot (48 bytes).
-/// Fields sun_colour[0..2] CONFIRMED; others UNVERIFIED.
-/// </remarks>
-public sealed class LightKeyframe
-{
-    /// <summary>sun_colour[0] f32 @ slot+0x00. CONFIRMED.</summary>
-    public required float SunColour0 { get; init; }
-
-    /// <summary>sun_colour[1] f32 @ slot+0x04. CONFIRMED.</summary>
-    public required float SunColour1 { get; init; }
-
-    /// <summary>sun_colour[2] f32 @ slot+0x08. CONFIRMED.</summary>
-    public required float SunColour2 { get; init; }
-
-    /// <summary>Remaining 9 floats (offsets +0x0C..+0x2C) — raw bytes. Partially UNVERIFIED.</summary>
-    public required ReadOnlyMemory<byte> RawRest { get; init; }
-}
-
-/// <summary>
-/// Decoded result of a <c>light%d.bin</c> sky-lighting keyframe file.
-/// Fixed size: 5312 bytes. No magic, no version.
-/// </summary>
-/// <remarks>
-/// spec: Docs/RE/formats/terrain_layers.md §6.1 Blob layout: CONFIRMED (parser-analysis only; no samples).
-/// 48 directional slots + 48 ambient slots + 48 fog scalars.
-/// </remarks>
-public sealed class LightBinData
-{
-    /// <summary>
-    /// 48 directional-light keyframe slots.
-    /// spec: Docs/RE/formats/terrain_layers.md §6.1 Section A (0x0000–0x08FF): CONFIRMED (parser).
-    /// </summary>
-    public required LightKeyframe[] DirectionalKeyframes { get; init; }
-
-    /// <summary>
-    /// 48 ambient-light keyframe slots.
-    /// spec: Docs/RE/formats/terrain_layers.md §6.1 Section B (0x0930–0x122F): CONFIRMED (parser).
-    /// </summary>
-    public required LightKeyframe[] AmbientKeyframes { get; init; }
-
-    /// <summary>
-    /// 48 fog density scalars (f32 each).
-    /// Value 1.0 is the no-override sentinel.
-    /// spec: Docs/RE/formats/terrain_layers.md §6.4 Section C (0x1260): MEDIUM confidence.
-    /// </summary>
-    public required float[] FogDensity { get; init; }
-
-    /// <summary>
-    /// Trailing 416 bytes (0x1320–0x14BF). Purpose UNVERIFIED.
-    /// spec: Docs/RE/formats/terrain_layers.md §6.1 trailing region: UNVERIFIED.
-    /// </summary>
-    public required ReadOnlyMemory<byte> RawTrailing { get; init; }
-}
+// LightKeyframe and LightBinData were removed (CAMPAIGN 11 Phase 3a).
+// The canonical types are LightingKeyframe / LightBin in EnvironmentBinData.cs,
+// produced by EnvironmentBinParsers.ParseLight (§9.1 sample-verified layout).
+// spec: Docs/RE/formats/environment_bins.md §9.1.
 
 /// <summary>
 /// One point-light record from <c>point_light%d.bin</c>.

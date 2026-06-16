@@ -6,6 +6,60 @@
 
 ---
 
+# CAMPAIGN 11 — C# Excellence & Fidelity (core layers 01–04 + Godot 05) (launched 2026-06-16)
+
+**Mandate (maintainer):** "With all the IDA Pro comprehension (the source of truth) and the now
+re-verified `Docs/` SPEC behind us, focus on the C# — both the core projects AND Godot. (1) Delete
+useless elements that should not be there. (2) Improve, correct, optimise the code so it is the
+cleanest and TRUEST possible vs IDA / the spec. (3) Deploy lots of agents — use all needed agents and
+skills. (4) Improve the plan/roadmap/campaign as needed. Make the C# part the cleanest, most
+excellent, most optimised and functional possible."
+
+**North stars:** N1 = total clean-room RE of `doida.exe` (DONE through C10 — specs are the truth);
+**N2 = the faithful 1:1 re-implementation is now the focus** — the C# (core + Godot) must match the
+re-verified specs exactly, be clean-room-pure, zero-alloc on hot paths, idiomatic C#14/.NET10, and
+carry no cruft.
+
+**Method:** the `Workflow` tool drives every phase as a massively-parallel fan-out (Ultracode).
+Audit → adversarially verify → fix (one writer per project) → hard gates. Clean-room firewall, the
+downward-only DAG, zero-alloc discipline, and the build/test/headless gates all hold throughout.
+
+**Out of scope:** the game server; re-RE of already-verified specs (read them, do not re-derive);
+live debugger/capture (flagged-pending facts stay pending).
+
+## Phase 0 — Baseline & charter — **DONE 2026-06-16**
+- [x] Authoritative gate: build **0 err / 1 pre-existing warn** (`RealWorldRenderer.cs:1058` CS8600) ·
+  **1859 tests green** (10 suites).
+- [x] Baseline commit **`b236830`** (banks campaign3 front-end WIP + C10 Stage-C BootFlow fix + kit/doc
+  updates) → clean tree for the C# pass. Local `client_dir.cfg` left unstaged.
+- [x] CAMPAIGN 11 charter recorded (this section).
+
+## Phase 1 — Audit (Workflow, read-only, massively parallel) — **IN PROGRESS**
+`campaign11-csharp-audit` (run `wf_4551aa3c-544`): 20 lanes — one auditor per core project (12) + 4
+Godot sub-areas + 4 cross-cutting reviewers (clean-room-auditor, architecture-guardian, perf-reviewer,
+test-gap). Each returns structured findings across: **delete / fidelity / optimize / cleanroom / bug /
+modernize / test-gap / arch**, grounded in the governing spec. Fidelity is the priority category.
+
+## Phase 2 — Verify & prioritise (Workflow, adversarial) — pending Phase 1
+Dedup the findings; adversarially verify every proposed deletion (no live consumer) and every fidelity
+claim (re-confront to the spec/IDB); drop low-confidence noise; emit a prioritised, owner-assigned
+work-list (one owner per project).
+
+## Phase 3 — Fix (Workflow, one writer per project) — pending Phase 2
+Fan out the per-project clean-room engineers + Godot engineers to apply the verified
+deletions/corrections/optimizations. One writer per project (parallel ACROSS disjoint projects).
+Every constant cites a spec; no new clean-room leaks.
+
+## Phase 4 — Hard gates (Tier-1 + Workflow) — pending Phase 3
+Nuke build + test (`--no-incremental`); firewall PASS; DAG downward-only + engine-free; headless boot
+clean + windowed screenshot for any Godot change. Fix regressions until green.
+
+## Phase 5 — Consolidate & commit — pending Phase 4
+Targeted commits per project; update this ROADMAP in place; `names.yaml` sync (the deferred C10 ctor
+collisions); journal + memory; reconcile the stale CLAUDE.md skeleton claim vs `skinning.md §8(e)`.
+
+---
+
 # CAMPAIGN 10 — Total Client Comprehension & Doc Re-Verification (`doida.exe`) (launched 2026-06-16)
 
 **Mandate (maintainer):** "Deploy lots of agents to deep-analyze the whole `doida.exe` client —

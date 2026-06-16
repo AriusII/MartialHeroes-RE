@@ -134,7 +134,7 @@ public static class AnimationParser
             // spec: Docs/RE/formats/animation.md §Per-track record — key_count u32 LE: CONFIRMED.
             uint keyCount = ReadU32LE(data, ref offset, $"track[{t}].key_count");
 
-            // Validate buffer before reading keyframes.
+            // Validate buffer before reading keyframes (single pre-loop bounds check).
             // spec: Docs/RE/formats/animation.md §Per-track record — "key_count × 28 bytes": CONFIRMED.
             long keyframeBytesNeeded = (long)keyCount * KeyframeStride;
             if (offset + keyframeBytesNeeded > data.Length)
@@ -149,34 +149,42 @@ public static class AnimationParser
             {
                 // Keyframe layout: translation XYZ (f32[3]) + rotation XYZW (f32[4]) = 28 bytes.
                 // spec: Docs/RE/formats/animation.md §Keyframe record — 28 bytes LE.
+                // Bounds already checked above; read 7 × f32 without per-element string allocation.
 
                 // translation_x f32 @ sub-offset +0
                 // spec: Docs/RE/formats/animation.md §Keyframe record — translation_x @ +0: CONFIRMED.
-                float tx = ReadF32LE(data, ref offset, $"track[{t}].key[{k}].translation_x");
+                float tx = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 // translation_y f32 @ sub-offset +4
                 // spec: Docs/RE/formats/animation.md §Keyframe record — translation_y @ +4: CONFIRMED.
-                float ty = ReadF32LE(data, ref offset, $"track[{t}].key[{k}].translation_y");
+                float ty = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 // translation_z f32 @ sub-offset +8
                 // spec: Docs/RE/formats/animation.md §Keyframe record — translation_z @ +8: CONFIRMED.
-                float tz = ReadF32LE(data, ref offset, $"track[{t}].key[{k}].translation_z");
+                float tz = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 // rotation_x f32 @ sub-offset +12
                 // spec: Docs/RE/formats/animation.md §Keyframe record — rotation_x @ +12: CONFIRMED.
-                float rx = ReadF32LE(data, ref offset, $"track[{t}].key[{k}].rotation_x");
+                float rx = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 // rotation_y f32 @ sub-offset +16
                 // spec: Docs/RE/formats/animation.md §Keyframe record — rotation_y @ +16: CONFIRMED.
-                float ry = ReadF32LE(data, ref offset, $"track[{t}].key[{k}].rotation_y");
+                float ry = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 // rotation_z f32 @ sub-offset +20
                 // spec: Docs/RE/formats/animation.md §Keyframe record — rotation_z @ +20: CONFIRMED.
-                float rz = ReadF32LE(data, ref offset, $"track[{t}].key[{k}].rotation_z");
+                float rz = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 // rotation_w f32 @ sub-offset +24 (scalar W last — XYZW order)
                 // spec: Docs/RE/formats/animation.md §Keyframe record — rotation_w @ +24: CONFIRMED.
-                float rw = ReadF32LE(data, ref offset, $"track[{t}].key[{k}].rotation_w");
+                float rw = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 keyframes[k] = new Keyframe
                 {
@@ -205,6 +213,7 @@ public static class AnimationParser
 
     // -------------------------------------------------------------------------
     // Private binary reader helpers (little-endian, bounds-checked)
+    // Used for header-level fields only (not the hot per-keyframe loop).
     // -------------------------------------------------------------------------
 
     private static uint ReadU32LE(ReadOnlySpan<byte> span, ref int offset, string fieldName)
@@ -215,18 +224,6 @@ public static class AnimationParser
                 $"(buffer length {span.Length}).");
 
         uint value = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
-        offset += 4;
-        return value;
-    }
-
-    private static float ReadF32LE(ReadOnlySpan<byte> span, ref int offset, string fieldName)
-    {
-        if (offset + 4 > span.Length)
-            throw new InvalidDataException(
-                $".mot parse error: buffer truncated reading '{fieldName}' f32 at offset {offset} " +
-                $"(buffer length {span.Length}).");
-
-        float value = BinaryPrimitives.ReadSingleLittleEndian(span[offset..]);
         offset += 4;
         return value;
     }

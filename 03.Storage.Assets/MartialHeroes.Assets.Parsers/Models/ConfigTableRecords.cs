@@ -251,68 +251,9 @@ public sealed class UsersBlock
     public required ReadOnlyMemory<byte> RawData { get; init; }
 }
 
-/// <summary>
-/// One record from <c>data/script/items.scr</c> — item catalogue.
-/// Main record stride: 548 bytes (0x224). May be followed by N × 8 trailing sub-entries.
-/// </summary>
-/// <remarks>
-/// spec: Docs/RE/formats/config_tables.md §2.7 items.scr — "stride: 548 bytes + N×8 trailing": CONFIRMED.
-/// </remarks>
-public sealed class ItemCatalogEntry
-{
-    // The item ID width (u16 or u32) is UNVERIFIED.
-    // spec: Docs/RE/formats/config_tables.md §2.7 — "item ID at +0: exact size UNVERIFIED".
-    // We expose the first 2 bytes as u16 (confirmed position, unconfirmed width).
-
-    /// <summary>
-    /// Raw main record body (548 bytes). The full 548-byte record is exposed because the majority
-    /// of fields have UNVERIFIED layouts. Only the confirmed fields below are additionally exposed.
-    /// spec: Docs/RE/formats/config_tables.md §2.7 — "All other offsets: UNVERIFIED".
-    /// </summary>
-    public required ReadOnlyMemory<byte> RawRecord { get; init; }
-
-    /// <summary>
-    /// Sub-type flag at record offset +0xD2.
-    /// spec: Docs/RE/formats/config_tables.md §2.7 — "+0xD2 u8 Sub-type flag": CONFIRMED.
-    /// </summary>
-    public required byte SubTypeFlag { get; init; }
-
-    /// <summary>
-    /// Category flag 1 at offset +0xE5. Value 1 = weapon.
-    /// spec: Docs/RE/formats/config_tables.md §2.7 — "+0xE5 u8 Category flag 1 (1=weapon)": CONFIRMED.
-    /// </summary>
-    public required byte CategoryFlag1 { get; init; }
-
-    /// <summary>
-    /// Category flag 2 at offset +0xE6. Value 1 = armour.
-    /// spec: Docs/RE/formats/config_tables.md §2.7 — "+0xE6 u8 Category flag 2 (1=armour)": CONFIRMED.
-    /// </summary>
-    public required byte CategoryFlag2 { get; init; }
-
-    /// <summary>
-    /// Category flag 3 at offset +0xE7. Value 1 = type-11.
-    /// spec: Docs/RE/formats/config_tables.md §2.7 — "+0xE7 u8 Category flag 3 (1=type-11)": CONFIRMED.
-    /// </summary>
-    public required byte CategoryFlag3 { get; init; }
-
-    /// <summary>
-    /// Category flag 4 at offset +0xE8. Value 1 = type-16.
-    /// spec: Docs/RE/formats/config_tables.md §2.7 — "+0xE8 u8 Category flag 4 (1=type-16)": CONFIRMED.
-    /// </summary>
-    public required byte CategoryFlag4 { get; init; }
-
-    /// <summary>
-    /// Count of trailing 8-byte sub-entries at offset +0x220.
-    /// spec: Docs/RE/formats/config_tables.md §2.7 — "+0x220 u8 Trailing entry count N": CONFIRMED.
-    /// </summary>
-    public required byte TrailingCount { get; init; }
-
-    /// <summary>
-    /// Trailing upgrade/effect sub-entries, each 8 bytes. All fields UNVERIFIED.
-    /// spec: Docs/RE/formats/config_tables.md §2.7 — "trailing N×8 bytes, all fields UNVERIFIED".
-    /// </summary>
-    public required ReadOnlyMemory<byte>[] TrailingEntries { get; init; }
-}
+// ItemCatalogEntry was removed (CAMPAIGN 11 Phase 3a) — superseded by ItemsScrRecord in ItemsScrData.cs.
+// Use ItemsScrParser.Parse for all items.scr decoding.
+// spec: Docs/RE/formats/items_scr.md §4 — canonical parser is ItemsScrParser.
 
 /// <summary>
 /// One record from <c>data/script/skills.scr</c> — skill catalogue.

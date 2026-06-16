@@ -128,9 +128,12 @@ public sealed class ApplicationUseCasesTests
         // TargetName @0x02 (16 bytes, NUL-padded).
         string name = System.Text.Encoding.ASCII.GetString(payload, 0x02, 6);
         Assert.Equal("Master", name);
-        // Body: [u32 len incl NUL]["hi"][0x00].
+        // Body: [u32 len EXCLUDING NUL]["hi"][0x00]. 2/7's length prefix is strlen, NOT strlen+1
+        // (contrast 3/21). spec: Docs/RE/packets/2-7_whisper.yaml (textLength EXCLUDES the NUL).
         uint len = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(CmsgWhisperHeader.HeaderSize, 4));
-        Assert.Equal(3u, len); // "hi" + NUL
+        Assert.Equal(2u, len); // "hi" (NUL excluded)
+        // The NUL terminator is still physically present after the 2 text bytes.
+        Assert.Equal(0, payload[CmsgWhisperHeader.HeaderSize + 4 + 2]);
     }
 
     [Fact]

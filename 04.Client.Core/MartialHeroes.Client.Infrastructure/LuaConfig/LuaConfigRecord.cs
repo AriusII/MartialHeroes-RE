@@ -50,10 +50,20 @@ public sealed record LuaConfigRecord
     public int DebugMode { get; init; } = 1;
 
     /// <summary>
-    /// Game-addiction warning timing value (integer seconds × 1000 or similar unit).
-    /// Read by the same integer reader as the boot flags.
+    /// Game-addiction warning timing value read from <c>game.lua</c> (integer, same reader as boot flags).
+    /// <para>
+    /// <b>UNVERIFIED:</b> the Lua global name for this value has NOT been pinned by spec.
+    /// <c>lua-config.md §3</c> documents "a game-addiction-warning timing number … read by the same
+    /// number reader" but does not give the key name. The current key string (<c>"addiction_warning"</c>)
+    /// is unconfirmed and will likely not match a real <c>game.lua</c>. When the name is pinned, update
+    /// <see cref="LuaConfigReader"/> (the <c>ReadInt</c> call for this field).
+    /// </para>
+    /// <para>
+    /// Note: the ×1000-scaled variant (<c>DISPLAY_GAME_ADDICTION_WARNING_CHECK_TIME</c>) lives in
+    /// <c>display.lua</c> (§4.2) and is a separate, distinct knob.
+    /// </para>
     /// Default: <c>1</c>.
-    /// spec: Docs/RE/specs/lua-config.md §3
+    /// spec: Docs/RE/specs/lua-config.md §3 (timing value), correction box (disentanglement of two knobs)
     /// </summary>
     public int AddictionWarningTiming { get; init; } = 1;
 
@@ -87,12 +97,20 @@ public sealed record LuaConfigRecord
     /// <summary>Lighting ratio. spec: Docs/RE/specs/lua-config.md §4</summary>
     public float DisplayLightRatio { get; init; } = 1.0f;
 
+    /// <summary>
+    /// Glow shader intensity level (valid set: 1, 2, 4, 8, 16, 32).
+    /// Selects which glow pixel-shader file is used (see DisplayPowerShader).
+    /// spec: Docs/RE/specs/lua-config.md §4.2, §4.3
+    /// </summary>
+    public int DisplayPower { get; init; } = 1;
+
     // ── display.lua string global (spec: Docs/RE/specs/lua-config.md §4) ──────
 
     /// <summary>
-    /// Shader filename string.
-    /// Decoded as UTF-8 (code page 65001), NOT CP949.
-    /// spec: Docs/RE/specs/lua-config.md §4, §5.2 (N-B4-2)
+    /// Path to the active glow pixel-shader <c>.psh</c> file, derived from
+    /// <see cref="DisplayPower"/> via the <c>if/elseif</c> chain in <c>display.lua</c>.
+    /// Form: <c>data/shader/power&lt;N&gt;dx8.psh</c>.
+    /// spec: Docs/RE/specs/lua-config.md §4.3 — computed, not a bare assignment in the file.
     /// </summary>
-    public string DisplayPowerShader { get; init; } = string.Empty;
+    public string DisplayPowerShader { get; init; } = "data/shader/power1dx8.psh";
 }

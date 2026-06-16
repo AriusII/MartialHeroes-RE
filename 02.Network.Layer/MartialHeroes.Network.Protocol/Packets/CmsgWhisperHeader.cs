@@ -6,9 +6,13 @@
 // live capture confirms it. Only the 16-byte TargetName is high-confidence per the spec.
 //
 // THIS IS THE FIXED 19-BYTE HEADER ONLY. The variable text body — a length-prefixed block
-// [u32 textLength][text bytes] (length includes the terminating NUL, text <= 119 chars) — is NOT
-// modelled as a struct; the caller (Client.Application) hand-codes it. No fixed WireSize / size
-// assertion: this packet has no fixed size.
+// [u32 textLength][text bytes] — is NOT modelled as a struct; the caller (Client.Application)
+// hand-codes it. No fixed WireSize / size assertion: this packet has no fixed size.
+//
+// textLength for 2/7 EXCLUDES the terminating NUL: it is strlen(text), NOT strlen+1. (Contrast 3/21
+// CmsgChatChannel, whose length prefix INCLUDES the NUL.) The text is strncpy-capped at 0x77 = 119
+// bytes at the send site, CP949 — never a managed UTF-16 string on the wire.
+// spec: Docs/RE/packets/2-7_whisper.yaml (TEXT BODY — EXCLUDES NUL, cap 119).
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;

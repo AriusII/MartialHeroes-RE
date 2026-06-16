@@ -206,10 +206,15 @@ public static class ItemsCsvParser
         if (string.IsNullOrEmpty(token)) return false;
 
         int start = 0;
-        // Accept an optional single leading '-' for signed values.
-        // A bare "-" (no following digits) is NOT numeric.
+        // Accept an optional single leading '-' ONLY for float tokens (those containing a period).
+        // Integer (unsigned) tokens with a leading '-' are NOT recognised as numeric because
+        // ParseUInt/ParseUShort/ParseByte use NumberStyles.None (no AllowLeadingSign) and would
+        // silently return 0 for a negative value, causing a recognition/decoding asymmetry.
+        // A bare "-" (no following digits) is never numeric.
         // spec: Docs/RE/formats/items_csv.md §HAZARD-A — signed values guarded defensively.
-        if (token[0] == '-')
+        // spec: Docs/RE/formats/items_csv.md §HAZARD-B — float column allows sign (NumberStyles.Float).
+        bool hasLeadingMinus = token[0] == '-';
+        if (hasLeadingMinus)
         {
             if (token.Length == 1) return false; // bare "-" is not numeric
             start = 1;
@@ -230,6 +235,11 @@ public static class ItemsCsvParser
                 return false;
             }
         }
+
+        // Reject negative integer tokens: '-' is only valid when a period is also present (float).
+        // This aligns IsNumericToken with ParseUInt/ParseUShort/ParseByte (NumberStyles.None = no sign).
+        if (hasLeadingMinus && !hasPeriod)
+            return false;
 
         return true;
     }

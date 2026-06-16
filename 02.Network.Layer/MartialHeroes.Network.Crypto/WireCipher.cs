@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using static MartialHeroes.Network.Crypto.ByteRotate;
 
 namespace MartialHeroes.Network.Crypto;

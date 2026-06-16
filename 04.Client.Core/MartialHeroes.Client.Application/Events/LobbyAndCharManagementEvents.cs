@@ -9,66 +9,97 @@ namespace MartialHeroes.Client.Application.Events;
 /// <summary>
 /// Presentation-facing snapshot of one lobby server-list entry, mapped from the network
 /// <see cref="MartialHeroes.Network.Abstractions.Lobby.LobbyServerRecord"/>. The decoded wire fields
-/// are forwarded verbatim and supplemented with the spec's presentation HINTS (load color band +
-/// status sentinel classification) so a faithful select screen can render without re-deriving the
-/// constants. spec: Docs/RE/specs/login_flow.md §2.1 / §7 (load thresholds 1200/800/500; status
-/// sentinels 3/24/100, presentation-only).
+/// are forwarded verbatim and supplemented with the spec's presentation HINTS (population color band +
+/// caption-branch classification) so a faithful select screen can render without re-deriving the
+/// constants. spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A (population thresholds 500/800/1200;
+/// availability gate on ServerId == 100; caption branch from Status; presentation-only).
 /// </summary>
-/// <param name="ServerId">Index (1..40) into the client-local localized server-name table (wire +0).</param>
-/// <param name="Status">Server availability / status code (wire +2). See <see cref="StatusHint"/>.</param>
-/// <param name="Load">Population / load gauge (wire +4). Drives <see cref="LoadHint"/>.</param>
-/// <param name="OpenTime">Scheduled-open minute component, only meaningful when Status == 3 (wire +6).</param>
-/// <param name="LoadHint">Presentation color band classified from the load thresholds (presentation hint).</param>
-/// <param name="StatusHint">Presentation classification of the status sentinels (presentation hint).</param>
+/// <param name="ServerId">
+/// Server id / select-key (wire +0). Also the AVAILABILITY gate: <c>ServerId == 100</c> unlocks the
+/// per-row select button (see <see cref="StatusHint"/>). Otherwise an index into the client-local
+/// localized server-name table when <see cref="Status"/> is in 1..39.
+/// spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A, offset +0.
+/// </param>
+/// <param name="Status">Caption / branch selector (wire +2, <c>status_kind</c>). See <see cref="StatusHint"/>.</param>
+/// <param name="Population">Population / count value (wire +4). Drives <see cref="LoadHint"/> in numeric mode.</param>
+/// <param name="Flag">
+/// Mode flag (wire +6): nonzero = treat <see cref="Population"/> as a numeric value (apply thresholds);
+/// zero = discrete load level. NOT an open-clock. spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A, offset +6.
+/// </param>
+/// <param name="LoadHint">Presentation color band classified from the population thresholds (presentation hint).</param>
+/// <param name="StatusHint">Presentation classification of the caption branch + availability (presentation hint).</param>
 public readonly record struct ServerListEntryView(
     ushort ServerId,
     short Status,
-    short Load,
-    short OpenTime,
+    short Population,
+    short Flag,
     ServerLoadBand LoadHint,
     ServerStatusHint StatusHint);
 
 /// <summary>
-/// Presentation color band for a lobby server's load gauge, classified from the spec thresholds
-/// 1200 / 800 / 500. Pure presentation hint — NOT a wire field. spec: Docs/RE/specs/login_flow.md
-/// §2.1 / §7 (load-color thresholds 1200/800/500).
+/// Presentation color band for a lobby server's population gauge, classified from the spec thresholds
+/// 1200 / 800 / 500 (strict greater-than). Pure presentation hint — NOT a wire field. spec:
+/// Docs/RE/packets/lobby.yaml §RECORD SHAPE A (POPULATION caption mapping; thresholds 500/800/1200).
 /// </summary>
 public enum ServerLoadBand
 {
-    /// <summary>Load &lt; 500 (lightest band).</summary>
+    /// <summary>Population ≤ 500 (lightest band).</summary>
     Light,
 
-    /// <summary>500 ≤ load &lt; 800.</summary>
+    /// <summary>500 &lt; population ≤ 800.</summary>
     Moderate,
 
-    /// <summary>800 ≤ load &lt; 1200.</summary>
+    /// <summary>800 &lt; population ≤ 1200.</summary>
     Busy,
 
-    /// <summary>Load ≥ 1200 (the high / red band).</summary>
+    /// <summary>Population &gt; 1200 (the high / red band).</summary>
     Full,
 }
 
 /// <summary>
-/// Presentation classification of a lobby server's status sentinel. Pure presentation hint — NOT a
-/// wire field. spec: Docs/RE/specs/login_flow.md §2.1 / §7 (status sentinels 3 = scheduled open,
-/// 24 = preparing/check, 100 = current selection; other in-range = normal; out of range = invalid).
+/// Presentation classification of a lobby server's caption branch (the <c>status_kind</c> selector at
+/// wire +2) plus the availability gate. Pure presentation hint — NOT a wire field.
+/// <para>
+/// The AVAILABILITY sentinel lives on <see cref="ServerListEntryView.ServerId"/> (wire +0) == 100, NOT
+/// on Status; that classifies as <see cref="Available"/>. Status (wire +2) is the caption/branch
+/// selector. spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A.
+/// </para>
 /// </summary>
 public enum ServerStatusHint
 {
-    /// <summary>Status ≤ 0 or &gt; 40: invalid / unavailable (an error label is shown). spec: §2.1.</summary>
+    /// <summary>
+    /// Status &lt; 1 or &gt; 39 (and not the special 3): fallback caption 5901 ("unknown id").
+    /// spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A (else → 5901).
+    /// </summary>
     Invalid,
 
-    /// <summary>A normal, selectable server (in range, no special sentinel). spec: §2.1.</summary>
+    /// <summary>
+    /// Status == 0: derive a population label/color from <see cref="ServerListEntryView.Population"/> /
+    /// <see cref="ServerListEntryView.Flag"/> (the numeric/discrete population branch).
+    /// spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A (status_kind == 0).
+    /// </summary>
     Normal,
 
-    /// <summary>Status == 3: open-time scheduled (render the open clock from Load:OpenTime). spec: §2.1.</summary>
-    ScheduledOpen,
+    /// <summary>
+    /// Status == 3: special branch — caption 6004 (when Population == 24) or a 6005 latency caption
+    /// digit-split from Population and Flag. NOT an open-clock.
+    /// spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A (status_kind == 3).
+    /// </summary>
+    Special,
 
-    /// <summary>Status == 24: preparing / check fixed label. spec: §2.1.</summary>
-    Preparing,
+    /// <summary>
+    /// Status in 1..39 (other than the special 3): index a per-value caption-string array; the display
+    /// name is looked up from <see cref="ServerListEntryView.ServerId"/>.
+    /// spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A (status_kind in 1..39).
+    /// </summary>
+    Caption,
 
-    /// <summary>Status == 100: the connected / current-selection sentinel. spec: §2.1.</summary>
-    CurrentSelection,
+    /// <summary>
+    /// <see cref="ServerListEntryView.ServerId"/> == 100: the AVAILABLE gate — the per-row select button
+    /// is unlocked. spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A, offset +0 (the 100 sentinel is on
+    /// id_selectkey, not status_kind).
+    /// </summary>
+    Available,
 }
 
 /// <summary>

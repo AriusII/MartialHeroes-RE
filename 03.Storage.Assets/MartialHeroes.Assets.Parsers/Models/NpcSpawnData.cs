@@ -49,6 +49,17 @@ public sealed class NpcSpawnRecord
     public required float Facing { get; init; }
 
     /// <summary>
+    /// The entity's on-screen facing angle in radians, after applying the runtime transform.
+    /// The runtime computes <c>π/2 − Facing</c> (NOT <c>π/2 + Facing</c>).
+    /// Simply adding π/2 would mirror the orientation.
+    /// Engine consumers MUST use this property instead of <see cref="Facing"/> directly.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/npc_spawns.md §Record layout — "runtime applies π/2 − value": sample-verified.
+    /// </remarks>
+    public float AppliedFacing => MathF.PI / 2f - Facing;
+
+    /// <summary>
     /// Spawn-group link ID and spawn-type modifier.
     /// Value 7 triggers elite/boss modifier (10% bonus multiplier).
     /// spec: Docs/RE/formats/npc_spawns.md — spawn_type u32 @ +16: CONFIRMED.

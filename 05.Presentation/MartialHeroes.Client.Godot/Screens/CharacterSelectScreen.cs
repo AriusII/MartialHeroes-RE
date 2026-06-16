@@ -1230,15 +1230,6 @@ public sealed partial class CharacterSelectScreen : Control
         ChangeFace(delta);
     }
 
-    private void OnStatAdjust(int rowIndex, int delta)
-    {
-        // The stat-grid ± buttons emit view-only feedback. No domain mutation.
-        // spec: frontend_scenes.md §4.2 — "pure display from the class template". CODE-CONFIRMED.
-        // The stat value labels display "–" until the Application delivers real class-template data.
-        // In offline mode we simply log the intent (no optimistic mutation).
-        GD.Print($"[CharacterSelectScreen] Stat adjust row={rowIndex} delta={delta} — view-only; no domain mutation.");
-    }
-
     private void OnCreateConfirm(int _actionId)
     {
         string name = _createNameEntry?.Text.Trim() ?? string.Empty;
@@ -1435,7 +1426,8 @@ public sealed partial class CharacterSelectScreen : Control
         // spec: frontend_scenes.md §4.4 — "minimum length 2 characters". CODE-CONFIRMED.
         if (name.Length < 2)
         {
-            toastMsg = _assets.Text(2075u, "Name must be at least 2 characters.");
+            // Faithfully empty offline — no invented English fallback text. spec §4.4 / campaign-9 rule.
+            toastMsg = _assets.Text(2075u, string.Empty);
             return false;
         }
 
@@ -1447,7 +1439,8 @@ public sealed partial class CharacterSelectScreen : Control
             if (c >= '가' && c <= '힣') continue; // Hangul syllables. CODE-CONFIRMED.
             if (c >= 'ᄀ' && c <= 'ᇿ') continue; // Hangul jamo. CODE-CONFIRMED.
             if (c >= '㄰' && c <= '㆏') continue; // Hangul compat jamo. CODE-CONFIRMED.
-            toastMsg = _assets.Text(2075u, "Only a-z, 0-9, and Korean Hangul allowed.");
+            // Faithfully empty offline — no invented English fallback text. spec §4.4 / campaign-9 rule.
+            toastMsg = _assets.Text(2075u, string.Empty);
             return false;
         }
 

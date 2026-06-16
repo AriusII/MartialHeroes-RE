@@ -68,7 +68,7 @@ public static class SknParser
         // spec: Docs/RE/formats/mesh.md §Face table — face_count u32 LE: CONFIRMED.
         uint faceCount = ReadU32LE(data, ref offset, "face_count");
 
-        // Validate buffer length for face data.
+        // Validate buffer length for face data (single pre-loop bounds check).
         long faceDataBytes = (long)faceCount * FaceStride;
         if (offset + faceDataBytes > data.Length)
             throw new InvalidDataException(
@@ -86,12 +86,15 @@ public static class SknParser
             {
                 // Corner sub-record: vertIdx u32 + uv_u f32 + uv_v f32 = 12 bytes.
                 // spec: Docs/RE/formats/mesh.md §Face record — corner sub-record @ each 12 bytes: CONFIRMED.
-                uint vIdx = ReadU32LE(data, ref offset, $"face[{f}].corner[{c}].vertex_index");
-                float uvU = ReadF32LE(data, ref offset, $"face[{f}].corner[{c}].uv_u");
+                // Bounds already checked above; read without per-element string allocation.
+                uint vIdx = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
+                offset += 4;
+                float uvU = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
                 // V-flip: engine applies 1.0 - uv_v when building the render vertex.
                 // spec: Docs/RE/formats/mesh.md §Face record — uv_v: "engine applies 1.0 - uv_v". CONFIRMED.
-                float uvVDisk = ReadF32LE(data, ref offset, $"face[{f}].corner[{c}].uv_v");
-                float uvV = 1.0f - uvVDisk;
+                float uvV = 1.0f - BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 corners[f * 3 + c] = new SknCorner(vIdx, uvU, uvV);
             }
@@ -115,12 +118,19 @@ public static class SknParser
             // On-disk layout: normal (sub-offsets 0–11) THEN position (sub-offsets 12–23).
             // IMPORTANT: re-order when building the output.
             // spec: Docs/RE/formats/mesh.md §Vertex record — "normal first, then position": CONFIRMED.
-            float normX = ReadF32LE(data, ref offset, $"vertex[{v}].normal_x"); // sub-offset 0
-            float normY = ReadF32LE(data, ref offset, $"vertex[{v}].normal_y"); // sub-offset 4
-            float normZ = ReadF32LE(data, ref offset, $"vertex[{v}].normal_z"); // sub-offset 8
-            float posX = ReadF32LE(data, ref offset, $"vertex[{v}].pos_x"); // sub-offset 12
-            float posY = ReadF32LE(data, ref offset, $"vertex[{v}].pos_y"); // sub-offset 16
-            float posZ = ReadF32LE(data, ref offset, $"vertex[{v}].pos_z"); // sub-offset 20
+            // Bounds already checked above; read 6×f32 without per-element string allocation.
+            float normX = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]); // sub-offset 0
+            offset += 4;
+            float normY = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]); // sub-offset 4
+            offset += 4;
+            float normZ = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]); // sub-offset 8
+            offset += 4;
+            float posX = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]); // sub-offset 12
+            offset += 4;
+            float posY = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]); // sub-offset 16
+            offset += 4;
+            float posZ = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]); // sub-offset 20
+            offset += 4;
 
             positions[v] = new Vec3(posX, posY, posZ);
             normals[v] = new Vec3(normX, normY, normZ);
@@ -140,9 +150,13 @@ public static class SknParser
         for (int w = 0; w < (int)weightCount; w++)
         {
             // spec: Docs/RE/formats/mesh.md §Weight record — vertIdx u32 + boneIdx u32 + weight f32 = 12 bytes: CONFIRMED.
-            uint wVertIdx = ReadU32LE(data, ref offset, $"weight[{w}].vertex_index");
-            uint wBoneIdx = ReadU32LE(data, ref offset, $"weight[{w}].bone_index");
-            float wVal = ReadF32LE(data, ref offset, $"weight[{w}].weight");
+            // Bounds already checked above; read without per-element string allocation.
+            uint wVertIdx = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
+            offset += 4;
+            uint wBoneIdx = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
+            offset += 4;
+            float wVal = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+            offset += 4;
             weights[w] = new SknWeight(wVertIdx, wBoneIdx, wVal);
         }
 
@@ -161,6 +175,7 @@ public static class SknParser
 
     // -------------------------------------------------------------------------
     // Private binary reader helpers (little-endian, bounds-checked)
+    // Used for header-level fields only (not hot per-element loops).
     // -------------------------------------------------------------------------
 
     private static uint ReadU32LE(ReadOnlySpan<byte> span, ref int offset, string fieldName)
@@ -171,18 +186,6 @@ public static class SknParser
                 $"(buffer length {span.Length}).");
 
         uint value = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
-        offset += 4;
-        return value;
-    }
-
-    private static float ReadF32LE(ReadOnlySpan<byte> span, ref int offset, string fieldName)
-    {
-        if (offset + 4 > span.Length)
-            throw new InvalidDataException(
-                $".skn parse error: buffer truncated reading '{fieldName}' f32 at offset {offset} " +
-                $"(buffer length {span.Length}).");
-
-        float value = BinaryPrimitives.ReadSingleLittleEndian(span[offset..]);
         offset += 4;
         return value;
     }

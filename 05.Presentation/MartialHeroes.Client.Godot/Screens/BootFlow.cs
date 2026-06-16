@@ -411,7 +411,7 @@ public sealed partial class BootFlow : Node
         // client connects and the Loading screen (engine state 2) covers the transition into
         // char-select. There is NO separate asset-backed "connecting" dialog in the recovered client
         // (the prior ConnectingDialog was built on an unconfirmed caption id — removed as noise).
-        // spec: Docs/RE/_dirty/campaign9b/aux.md §1 (server-select commit) / frontend_scenes.md §2L.
+        // spec: Docs/RE/specs/frontend_scenes.md §2L.
         ShowLoadingScreen();
     }
 
@@ -718,8 +718,8 @@ public sealed partial class BootFlow : Node
     // real flow uses the lobby server-list + the 3/1 CharacterList from a connected server.
     private static IReadOnlyList<ServerEntry> DevServerList() =>
     [
-        new ServerEntry(ServerId: 1, DisplayName: "무신", StatusCode: 0, Load: 120, OpenTime: 0),
-        new ServerEntry(ServerId: 2, DisplayName: "천마", StatusCode: 0, Load: 640, OpenTime: 0),
+        new ServerEntry(ServerId: 1, DisplayName: "무신", StatusCode: 0, Population: 120, Flag: 1),
+        new ServerEntry(ServerId: 2, DisplayName: "천마", StatusCode: 0, Population: 640, Flag: 1),
     ];
 
     private static System.Collections.Immutable.ImmutableArray<CharacterListSlot> DevCharacterList() =>

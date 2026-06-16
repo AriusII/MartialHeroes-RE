@@ -73,7 +73,7 @@ public static class BndParser
         uint boneCountRaw = ReadU32LE(data, ref offset, "bone_count");
         int boneCount = (int)(boneCountRaw & 0xFF); // low byte only
 
-        // Validate buffer length for bone records.
+        // Validate buffer length for bone records (single pre-loop bounds check).
         // spec: Docs/RE/formats/mesh.md §Bone array — "36 bytes per record": CONFIRMED.
         long boneDataBytes = (long)boneCount * BoneRecordStride;
         if (offset + boneDataBytes > data.Length)
@@ -85,38 +85,41 @@ public static class BndParser
 
         for (int b = 0; b < boneCount; b++)
         {
-            int boneStart = offset;
+            // Bounds already validated above; read 9 fields (2×u32 + 7×f32) without per-element strings.
 
             // sub-offset 0: self_id u32 LE (low byte is the effective bone ID)
             // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — self_id @ +0: CONFIRMED.
-            uint selfId = ReadU32LE(data, ref offset, $"bone[{b}].self_id");
+            uint selfId = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
+            offset += 4;
 
             // sub-offset 4: parent_id u32 LE (low byte is the effective parent ID)
             // Root bone: self_id == 0 && parent_id == 0 (both low bytes zero).
             // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — parent_id @ +4: CONFIRMED.
             // spec: Docs/RE/formats/mesh.md §Root bone sentinel: CONFIRMED.
-            uint parentId = ReadU32LE(data, ref offset, $"bone[{b}].parent_id");
+            uint parentId = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
+            offset += 4;
 
             // sub-offset 8: local_translation f32[3] LE — X at +8, Y at +12, Z at +16
             // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — local_translation @ +8: CONFIRMED.
-            float tX = ReadF32LE(data, ref offset, $"bone[{b}].translation.x");
-            float tY = ReadF32LE(data, ref offset, $"bone[{b}].translation.y");
-            float tZ = ReadF32LE(data, ref offset, $"bone[{b}].translation.z");
+            float tX = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+            offset += 4;
+            float tY = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+            offset += 4;
+            float tZ = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+            offset += 4;
 
             // sub-offset 20: local_rotation f32[4] LE — XYZW order (scalar W at +32)
             // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — local_rotation @ +20: CONFIRMED.
             // spec: Docs/RE/formats/mesh.md §Quaternion component order:
             //   "XYZW order: X at sub-offset +20, Y at +24, Z at +28, W (scalar) at +32." CONFIRMED.
-            float rX = ReadF32LE(data, ref offset, $"bone[{b}].rotation.x");
-            float rY = ReadF32LE(data, ref offset, $"bone[{b}].rotation.y");
-            float rZ = ReadF32LE(data, ref offset, $"bone[{b}].rotation.z");
-            float rW = ReadF32LE(data, ref offset, $"bone[{b}].rotation.w");
-
-            // Confirm we consumed exactly BoneRecordStride bytes (36) for this bone.
-            // spec: Docs/RE/formats/mesh.md §Bone array — "Total on-disk per bone: 36 bytes." CONFIRMED.
-            System.Diagnostics.Debug.Assert(
-                offset - boneStart == BoneRecordStride,
-                $"BndParser: bone[{b}] consumed {offset - boneStart} bytes, expected {BoneRecordStride}.");
+            float rX = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+            offset += 4;
+            float rY = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+            offset += 4;
+            float rZ = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+            offset += 4;
+            float rW = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+            offset += 4;
 
             bones[b] = new Bone(
                 selfId: selfId,
@@ -135,6 +138,7 @@ public static class BndParser
 
     // -------------------------------------------------------------------------
     // Private binary reader helpers (little-endian, bounds-checked)
+    // Used for header-level fields only (not the hot per-bone loop).
     // -------------------------------------------------------------------------
 
     private static uint ReadU32LE(ReadOnlySpan<byte> span, ref int offset, string fieldName)
@@ -145,18 +149,6 @@ public static class BndParser
                 $"(buffer length {span.Length}).");
 
         uint value = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
-        offset += 4;
-        return value;
-    }
-
-    private static float ReadF32LE(ReadOnlySpan<byte> span, ref int offset, string fieldName)
-    {
-        if (offset + 4 > span.Length)
-            throw new InvalidDataException(
-                $".bnd parse error: buffer truncated reading '{fieldName}' f32 at offset {offset} " +
-                $"(buffer length {span.Length}).");
-
-        float value = BinaryPrimitives.ReadSingleLittleEndian(span[offset..]);
         offset += 4;
         return value;
     }

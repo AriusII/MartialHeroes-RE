@@ -62,13 +62,21 @@ public static class XobjParser
         // --- Index list: num_triangles × 3 tokens, u32 → u16 ---
         // spec: Docs/RE/formats/mesh.md §Index list — vertex_index[n]: CONFIRMED.
         int indexCount = checked((int)(numTriangles * 3));
+
+        // Pre-loop bounds check for index block (includes num_vertices token at the end).
+        if (pos + indexCount + 1 > tokens.Length)
+            throw new InvalidDataException(
+                $".xobj parse error: index block truncated — need {indexCount} index tokens + vertex_count, " +
+                $"but only {tokens.Length - pos} tokens remain. " +
+                "spec: Docs/RE/formats/mesh.md §Index list.");
+
         ushort[] indices = new ushort[indexCount];
         for (int i = 0; i < indexCount; i++)
         {
-            uint raw = NextU32(tokens, ref pos, $"index[{i}]");
+            // Bounds checked above; read without per-element string allocation.
             // Truncate from u32 to u16 as specified.
             // spec: Docs/RE/formats/mesh.md §Index list: "in-memory representation stores each index as a u16".
-            indices[i] = (ushort)(raw & 0xFFFF);
+            indices[i] = (ushort)(NextU32Unchecked(tokens, ref pos) & 0xFFFF);
         }
 
         // --- num_vertices ---
@@ -78,29 +86,35 @@ public static class XobjParser
         Vec3[] positions = new Vec3[numVertices];
         Vec2[] uvs = new Vec2[numVertices];
 
-        // --- Vertex list: 8 tokens per vertex ---
+        // Pre-loop bounds check: each vertex needs 8 tokens.
         // spec: Docs/RE/formats/mesh.md §Vertex list — 8 tokens each.
+        int tokensNeeded = pos + checked((int)numVertices * 8);
+        if (tokensNeeded > tokens.Length)
+            throw new InvalidDataException(
+                $".xobj parse error: vertex block truncated — need {numVertices} vertices × 8 tokens " +
+                $"({tokensNeeded} total), but only {tokens.Length} tokens available. " +
+                "spec: Docs/RE/formats/mesh.md §Vertex list.");
+
         for (uint v = 0; v < numVertices; v++)
         {
-            // Tokens 1-3: position
+            // Tokens 1-3: position. Bounds checked above; read without per-element string allocation.
             // spec: Docs/RE/formats/mesh.md §Vertex list — pos_x, pos_y, pos_z: CONFIRMED.
-            float posX = NextF32(tokens, ref pos, $"vertex[{v}].pos_x");
-            float posY = NextF32(tokens, ref pos, $"vertex[{v}].pos_y");
-            float posZ = NextF32(tokens, ref pos, $"vertex[{v}].pos_z");
+            float posX = NextF32Unchecked(tokens, ref pos);
+            float posY = NextF32Unchecked(tokens, ref pos);
+            float posZ = NextF32Unchecked(tokens, ref pos);
 
             // Tokens 4-6: normals — read and discard.
             // spec: Docs/RE/formats/mesh.md §Vertex list — norm_x/y/z: "read then discarded; not kept in memory". CONFIRMED.
-            _ = NextF32(tokens, ref pos, $"vertex[{v}].norm_x");
-            _ = NextF32(tokens, ref pos, $"vertex[{v}].norm_y");
-            _ = NextF32(tokens, ref pos, $"vertex[{v}].norm_z");
+            _ = NextF32Unchecked(tokens, ref pos);
+            _ = NextF32Unchecked(tokens, ref pos);
+            _ = NextF32Unchecked(tokens, ref pos);
 
             // Tokens 7-8: UV coordinates.
             // spec: Docs/RE/formats/mesh.md §Vertex list — tex_u: CONFIRMED.
-            float texU = NextF32(tokens, ref pos, $"vertex[{v}].tex_u");
+            float texU = NextF32Unchecked(tokens, ref pos);
             // V-flip: engine stores 1.0 - tex_v in memory.
             // spec: Docs/RE/formats/mesh.md §Vertex list — tex_v: "engine transforms it to 1.0 - tex_v in-memory". CONFIRMED.
-            float texVDisk = NextF32(tokens, ref pos, $"vertex[{v}].tex_v");
-            float texV = 1.0f - texVDisk;
+            float texV = 1.0f - NextF32Unchecked(tokens, ref pos);
 
             positions[v] = new Vec3(posX, posY, posZ);
             uvs[v] = new Vec2(texU, texV);
@@ -164,11 +178,19 @@ public static class XobjParser
         // Index list: face_count × 3 tokens.
         // spec: Docs/RE/formats/mesh.md §Index list — vertex_index[n]: CONFIRMED.
         int indexCount = checked((int)(numTriangles * 3));
+
+        // Pre-loop bounds check for index block (includes vertex_count token at end).
+        if (pos + indexCount + 1 > tokens.Length)
+            throw new InvalidDataException(
+                $".xobj parse error: index block truncated — need {indexCount} index tokens + vertex_count, " +
+                $"but only {tokens.Length - pos} tokens remain. " +
+                "spec: Docs/RE/formats/mesh.md §Index list.");
+
         ushort[] indices = new ushort[indexCount];
         for (int i = 0; i < indexCount; i++)
         {
-            uint raw = NextU32(tokens, ref pos, $"index[{i}]");
-            indices[i] = (ushort)(raw & 0xFFFF);
+            // Bounds checked above; read without per-element string allocation.
+            indices[i] = (ushort)(NextU32Unchecked(tokens, ref pos) & 0xFFFF);
         }
 
         // vertex_count.
@@ -176,28 +198,37 @@ public static class XobjParser
         uint numVertices = NextU32(tokens, ref pos, "vertex_count");
 
         var vertices = new XobjVertex[numVertices];
+
+        // Pre-loop bounds check: each vertex needs 8 tokens.
+        // spec: Docs/RE/formats/mesh.md §Vertex list — 8 tokens each.
+        int vertexTokensNeeded = pos + checked((int)numVertices * 8);
+        if (vertexTokensNeeded > tokens.Length)
+            throw new InvalidDataException(
+                $".xobj parse error: vertex block truncated — need {numVertices} vertices × 8 tokens " +
+                $"({vertexTokensNeeded} total), but only {tokens.Length} tokens available. " +
+                "spec: Docs/RE/formats/mesh.md §Vertex list.");
+
         for (uint v = 0; v < numVertices; v++)
         {
-            // Tokens 1-3: position.
+            // Tokens 1-3: position. Bounds checked above; read without per-element string allocation.
             // spec: Docs/RE/formats/mesh.md §Vertex data rows — pos_x/y/z @ col 0/1/2: CONFIRMED.
-            float px = NextF32(tokens, ref pos, $"vertex[{v}].pos_x");
-            float py = NextF32(tokens, ref pos, $"vertex[{v}].pos_y");
-            float pz = NextF32(tokens, ref pos, $"vertex[{v}].pos_z");
+            float px = NextF32Unchecked(tokens, ref pos);
+            float py = NextF32Unchecked(tokens, ref pos);
+            float pz = NextF32Unchecked(tokens, ref pos);
 
             // Tokens 4-6: normals — read and discard.
             // spec: Docs/RE/formats/mesh.md §Vertex data rows — norm_x/y/z @ col 3/4/5: "discarded": CONFIRMED.
             // spec: Docs/RE/formats/effects.md §A.11 — normals not in the shared mesh table: CONFIRMED.
-            _ = NextF32(tokens, ref pos, $"vertex[{v}].norm_x");
-            _ = NextF32(tokens, ref pos, $"vertex[{v}].norm_y");
-            _ = NextF32(tokens, ref pos, $"vertex[{v}].norm_z");
+            _ = NextF32Unchecked(tokens, ref pos);
+            _ = NextF32Unchecked(tokens, ref pos);
+            _ = NextF32Unchecked(tokens, ref pos);
 
             // Tokens 7-8: UV coordinates.
             // spec: Docs/RE/formats/mesh.md §Vertex data rows — tex_u @ col 6, tex_v @ col 7: CONFIRMED.
-            float tu = NextF32(tokens, ref pos, $"vertex[{v}].tex_u");
-            float tvDisk = NextF32(tokens, ref pos, $"vertex[{v}].tex_v");
+            float tu = NextF32Unchecked(tokens, ref pos);
             // V-flip: in-memory tex_v = 1.0 − disk_tex_v.
             // spec: Docs/RE/formats/mesh.md §Vertex list — tex_v: "engine transforms it to 1.0 - tex_v in-memory": CONFIRMED.
-            float tvMem = 1.0f - tvDisk;
+            float tvMem = 1.0f - NextF32Unchecked(tokens, ref pos);
 
             // DIFFUSE4 at in-memory offset +12 is uninitialised (always 0 per spec).
             // spec: Docs/RE/formats/mesh.md §In-memory vertex layout — offset +12 "(uninitialised / padding)": CONFIRMED.
@@ -213,6 +244,7 @@ public static class XobjParser
     // Private token-reader helpers
     // -------------------------------------------------------------------------
 
+    // Named helpers — used for header-level fields (cold path, small count).
     private static uint NextU32(string[] tokens, ref int pos, string fieldName)
     {
         if (pos >= tokens.Length)
@@ -229,19 +261,25 @@ public static class XobjParser
         return value;
     }
 
-    private static float NextF32(string[] tokens, ref int pos, string fieldName)
+    // Unchecked helpers — used inside per-element loops after a pre-loop bounds check.
+    // These omit the bounds guard and the per-element name to avoid hot-path allocations.
+    private static uint NextU32Unchecked(string[] tokens, ref int pos)
     {
-        if (pos >= tokens.Length)
+        string token = tokens[pos++];
+        if (!uint.TryParse(token, NumberStyles.None, CultureInfo.InvariantCulture, out uint value))
             throw new InvalidDataException(
-                $".xobj parse error: token under-run reading '{fieldName}' " +
-                $"(expected token at position {pos}, file has {tokens.Length} tokens total).");
+                $".xobj parse error: expected unsigned integer, got \"{token}\" at token position {pos - 1}. " +
+                "spec: Docs/RE/formats/mesh.md §Index list.");
+        return value;
+    }
 
+    private static float NextF32Unchecked(string[] tokens, ref int pos)
+    {
         string token = tokens[pos++];
         if (!float.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out float value))
             throw new InvalidDataException(
-                $".xobj parse error: expected float for '{fieldName}', " +
-                $"got \"{token}\" at token position {pos - 1}.");
-
+                $".xobj parse error: expected float, got \"{token}\" at token position {pos - 1}. " +
+                "spec: Docs/RE/formats/mesh.md §Vertex list.");
         return value;
     }
 }

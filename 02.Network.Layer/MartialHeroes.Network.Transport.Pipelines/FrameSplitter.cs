@@ -155,7 +155,7 @@ internal static class FrameSplitter
 
         // Use SequenceReader for zero-alloc prefix parsing across segment boundaries.
         var seqReader = new SequenceReader<byte>(buffer);
-        // spec: Docs/RE/opcodes.md — SizeFieldOffset = 0, u32, little-endian.
+        // spec: Docs/RE/opcodes.md + Docs/RE/specs/crypto.md §2 — size field at +0, u32, little-endian.
         if (!seqReader.TryReadLittleEndian(out int rawSize))
         {
             frameLength = 0;

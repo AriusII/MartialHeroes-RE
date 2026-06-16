@@ -31,8 +31,8 @@ namespace MartialHeroes.Client.Godot.Screens;
 /// <para>VFS path: <c>data/script/npc.scr</c>.
 /// spec: Docs/RE/formats/config_tables.md §2.17.3 — stride 404 bytes, 2510 records: CONFIRMED.</para>
 ///
-/// <para>When the VFS is absent, returns the English fallback strings so the offline
-/// flow remains functional.</para>
+/// <para>When the VFS is absent, returns empty strings (faithfully empty offline — no
+/// invented English fallback text).</para>
 /// </summary>
 internal sealed class NpcScrDescriptions
 {
@@ -61,8 +61,8 @@ internal sealed class NpcScrDescriptions
     }
 
     /// <summary>
-    /// Attempts to load npc.scr from the VFS.  Returns a ready instance.
-    /// On any failure, falls back to English strings — never throws.
+    /// Attempts to load npc.scr from the VFS. Returns a ready instance.
+    /// On any failure, returns an instance with empty strings — faithfully empty offline; never throws.
     /// </summary>
     public static NpcScrDescriptions Load(RealClientAssets? realAssets)
     {
@@ -106,7 +106,7 @@ internal sealed class NpcScrDescriptions
                 if (!byKey.TryGetValue(key, out NpcScrRecord? rec))
                 {
                     GD.PrintErr($"[NpcScrDescriptions] npc.scr key {key} (UI slot {uiIdx}) not found in " +
-                                "parsed records — using English fallback. spec: config_tables.md §2.17.3.");
+                                "parsed records — slot will be empty (faithfully offline). spec: config_tables.md §2.17.3.");
                     continue;
                 }
 
@@ -136,7 +136,7 @@ internal sealed class NpcScrDescriptions
         catch (Exception ex)
         {
             GD.PrintErr($"[NpcScrDescriptions] Failed to load/parse npc.scr: {ex.Message} — " +
-                        "using English fallbacks.");
+                        "descriptions will be empty (faithfully offline).");
         }
 
         return inst;

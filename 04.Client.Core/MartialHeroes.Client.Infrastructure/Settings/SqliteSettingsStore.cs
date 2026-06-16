@@ -273,7 +273,7 @@ public sealed class SqliteSettingsStore : ISettingsStore
     {
         var currentVersion = await GetUserVersionAsync(conn, ct);
 
-        if (currentVersion < 1)
+        if (currentVersion < SchemaVersion)
         {
             // ── Migration v0 → v1 ────────────────────────────────────────────
             // Creates the client_settings key/value store and the keybinds table.
@@ -296,10 +296,11 @@ public sealed class SqliteSettingsStore : ISettingsStore
             cmd.CommandText = v1Ddl;
             await cmd.ExecuteNonQueryAsync(ct);
 
-            await SetUserVersionAsync(conn, 1, ct);
+            await SetUserVersionAsync(conn, SchemaVersion, ct);
         }
 
         // Future migrations: add `if (currentVersion < 2) { ... }` blocks here.
+        // Increment SchemaVersion above and add the matching migration block.
     }
 
     private static async Task<int> GetUserVersionAsync(SqliteConnection conn, CancellationToken ct)

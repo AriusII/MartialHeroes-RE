@@ -49,7 +49,7 @@ public sealed class CharacterSelectionStore
 
     /// <summary>
     /// The slot the player confirmed via <see cref="ApplicationUseCases.SelectCharacterAsync"/>, cached
-    /// for the 3/7 spawn. <see langword="null"/> until a real (non-blank, in-range) slot is confirmed.
+    /// for the 3/14 spawn. <see langword="null"/> until a real (non-blank, in-range) slot is confirmed.
     /// spec: Docs/RE/specs/login_flow.md §3.5.
     /// </summary>
     public CharacterSlotRecord? Chosen { get; private set; }
@@ -101,7 +101,7 @@ public sealed class CharacterSelectionStore
     /// <summary>
     /// Validates and confirms a slot selection. Enforces the slot-range guard (≤ 4), detects the
     /// "@BLANK@" empty-slot sentinel, and on a real character caches the slot's record as
-    /// <see cref="Chosen"/> for the 3/7 spawn. spec: Docs/RE/specs/login_flow.md §3.3 / §3.5.
+    /// <see cref="Chosen"/> for the 3/14 spawn. spec: Docs/RE/specs/login_flow.md §3.3 / §3.5.
     /// </summary>
     public SelectOutcome Confirm(int slotIndex)
     {
@@ -121,14 +121,14 @@ public sealed class CharacterSelectionStore
             return SelectOutcome.Blank; // empty-slot sentinel: route to creation. spec: §3.3.
         }
 
-        Chosen = record; // cache for the 3/7 spawn. spec: §3.5.
+        Chosen = record; // cache for the 3/14 spawn. spec: §3.5.
         return SelectOutcome.Confirmed;
     }
 }
 
 /// <summary>
 /// A retained character-select slot record: the decoded display fields plus the <b>raw</b> 880-byte
-/// SpawnDescriptor (and the 96-byte stats block + flag byte) the 3/7 handler consumes to materialize
+/// SpawnDescriptor (and the 96-byte stats block + flag byte) the 3/14 handler consumes to materialize
 /// the local player. spec: Docs/RE/specs/login_flow.md §3.2 / §3.5; Docs/RE/structs/spawn_descriptor.md.
 /// </summary>
 /// <remarks>
@@ -166,7 +166,7 @@ public sealed class CharacterSlotRecord
 
     /// <summary>
     /// The raw 880-byte SpawnDescriptor + 96-byte stats block + 1 flag byte, copied verbatim from the
-    /// 3/1 per-slot record. The world load consumes these on 3/7. spec: login_flow.md §3.5
+    /// 3/1 per-slot record. The world load consumes these on 3/14. spec: login_flow.md §3.5
     /// (caches the 880-byte descriptor + 96-byte stats block + flag).
     /// </summary>
     public ReadOnlyMemory<byte> RawDescriptor { get; }

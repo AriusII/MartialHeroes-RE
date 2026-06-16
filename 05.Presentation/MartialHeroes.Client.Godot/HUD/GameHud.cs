@@ -199,6 +199,13 @@ public sealed partial class GameHud : Control
     private Label? _zoneIndicatorLabel;
     private Panel? _zoneIndicatorPanel;
 
+    // Cached zone-pill StyleBoxFlat instances — built once in BuildZoneIndicator, swapped on ZoneChangedEvent.
+    // Avoids per-event StyleBoxFlat allocation; zone changes are infrequent but still heap-free after init.
+    private StyleBoxFlat? _zonePillSafe;
+    private StyleBoxFlat? _zonePillPvp;
+    private StyleBoxFlat? _zonePillClosed;
+    private StyleBoxFlat? _zonePillUnknown;
+
     // The HUD event hub — wired in BindStageBComponents (after Initialise).
     // ZoneChanges is the only channel drained here; other families are drained by their widgets.
     private IHudEventHub? _hudEventHub;
@@ -930,11 +937,11 @@ public sealed partial class GameHud : Control
     private void BuildZoneIndicator()
     {
         // Anchored to top-right corner, below minimap.
-        // Minimap is at screen_width − 200px, Y=10 (HudPanelConfig.MinimapW=200, MinimapY=10).
-        // Zone pill sits below it: X = screen_width − 200, Y = 10 + minimap_height + 4 ~ Y=10+140+4=154.
-        // We anchor to top-right using AnchorRight=1, offsets measured from the right edge.
-        // Width ~120px, height ~20px — compact but readable.
-        // Layout is PLAUSIBLE (minimap height is not byte-confirmed).
+        // Minimap: screen_width − MinimapW(135), Y=MinimapY(0), H=MinimapH(195).
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.3 — MinimapW=135, MinimapY=0, MinimapH=195.
+        // Zone pill sits below: X = screen_width − 135, Y = MinimapY + MinimapH + 4 = 0 + 195 + 4 = 199.
+        // Width ~120px, height ~24px — compact but readable.
+        // Layout is PLAUSIBLE (zone-pill position not yet byte-confirmed).
         _zoneIndicatorPanel = new Panel
         {
             Name = "ZoneIndicatorPanel",
@@ -942,20 +949,31 @@ public sealed partial class GameHud : Control
             AnchorTop = 0f,
             AnchorRight = 1f,
             AnchorBottom = 0f,
-            OffsetLeft = -194f, // screen_width − 194  → ~120px wide pill  // PLAUSIBLE
-            OffsetTop = 154f, // below minimap (10 + 140 + 4)             // PLAUSIBLE
+            OffsetLeft = -129f, // screen_width − 129 → ~125px wide pill  // PLAUSIBLE
+            OffsetTop = 199f, // below minimap: MinimapY(0) + MinimapH(195) + 4 = 199  // PLAUSIBLE
             OffsetRight = -4f, // 4px from right edge
-            OffsetBottom = 178f, // 24px tall
+            OffsetBottom = 223f, // 24px tall
             MouseFilter = MouseFilterEnum.Ignore,
         };
 
-        var bg = new StyleBoxFlat();
-        bg.BgColor = new Color(0f, 0f, 0f, 0.65f);
-        bg.SetBorderWidthAll(1);
-        bg.BorderColor = new Color(0.7f, 0.7f, 0.7f, 0.8f);
-        bg.CornerRadiusTopLeft = bg.CornerRadiusTopRight =
-            bg.CornerRadiusBottomLeft = bg.CornerRadiusBottomRight = 3;
-        _zoneIndicatorPanel.AddThemeStyleboxOverride("panel", bg);
+        // Build and cache all zone-pill StyleBoxFlat instances once.
+        // Swapped by ApplyZoneChanged without any further allocation.
+        static StyleBoxFlat MakePillStyle(Color bg)
+        {
+            var s = new StyleBoxFlat();
+            s.BgColor = bg;
+            s.SetBorderWidthAll(1);
+            s.BorderColor = new Color(0.7f, 0.7f, 0.7f, 0.8f);
+            s.CornerRadiusTopLeft = s.CornerRadiusTopRight =
+                s.CornerRadiusBottomLeft = s.CornerRadiusBottomRight = 3;
+            return s;
+        }
+
+        _zonePillUnknown = MakePillStyle(new Color(0f, 0f, 0f, 0.65f));   // black — unknown
+        _zonePillSafe    = MakePillStyle(new Color(0f, 0.4f, 0f, 0.75f)); // green — safe
+        _zonePillPvp     = MakePillStyle(new Color(0.6f, 0f, 0f, 0.75f)); // red   — PvP
+        _zonePillClosed  = MakePillStyle(new Color(0.3f, 0.1f, 0.5f, 0.75f)); // purple — closed
+        _zoneIndicatorPanel.AddThemeStyleboxOverride("panel", _zonePillUnknown);
 
         _zoneIndicatorLabel = new Label
         {
@@ -980,7 +998,7 @@ public sealed partial class GameHud : Control
     /// </summary>
     private static string ZoneTypeLabel(ZoneType zone) => zone switch
     {
-        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 0: PLAUSIBLE (Safe).
+        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 0: CONFIRMED-COMPLETE (Safe).
         ZoneType.Safe => "Zone: Safe",
         // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 1: CONFIRMED (OpenPvP).
         ZoneType.OpenPvp => "Zone: PvP",
@@ -988,18 +1006,6 @@ public sealed partial class GameHud : Control
         ZoneType.Closed => "Zone: Closed",
         // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — values 3+ / missing: UNVERIFIED.
         _ => "Zone: ?",
-    };
-
-    /// <summary>
-    /// Returns the background colour for the zone pill based on zone type.
-    /// Colours are PLAUSIBLE conventions (no original art recovered for this widget).
-    /// </summary>
-    private static Color ZoneTypeColor(ZoneType zone) => zone switch
-    {
-        ZoneType.Safe => new Color(0f, 0.4f, 0f, 0.75f), // green — safe
-        ZoneType.OpenPvp => new Color(0.6f, 0f, 0f, 0.75f), // red   — PvP
-        ZoneType.Closed => new Color(0.3f, 0.1f, 0.5f, 0.75f), // purple — closed
-        _ => new Color(0f, 0f, 0f, 0.65f), // black — unknown
     };
 
     // -------------------------------------------------------------------------
@@ -1110,77 +1116,9 @@ public sealed partial class GameHud : Control
     }
 
     // -------------------------------------------------------------------------
-    // Hotbar construction (legacy method kept for BindHotbarChromeTexture / BindHotbarSlotIcon callers)
-    // The skill bar (BuildSkillBar) replaced the old BuildHotbar as the primary slot builder.
+    // Hotbar chrome / slot icon binding (called by BuildSkillBar)
+    // BuildHotbar() was removed — it was superseded by BuildSkillBar() and had no callers.
     // -------------------------------------------------------------------------
-
-    private void BuildHotbar()
-    {
-        // Anchor to bottom-centre.
-        var hotbarContainer = new Control();
-        hotbarContainer.AnchorLeft = 0.5f;
-        hotbarContainer.AnchorTop = 1.0f;
-        hotbarContainer.AnchorRight = 0.5f;
-        hotbarContainer.AnchorBottom = 1.0f;
-        hotbarContainer.OffsetLeft = -225f;
-        hotbarContainer.OffsetTop = -84f;
-        hotbarContainer.OffsetRight = 225f;
-        hotbarContainer.OffsetBottom = -4f;
-        AddChild(hotbarContainer);
-
-        // Optional: hotbar chrome from skillpipe.dds (uitex 0010).
-        // We attempt a texture bind but don't block HUD construction on failure.
-        var hotbarBg = new TextureRect
-        {
-            Name = "HotbarChrome",
-            StretchMode = TextureRect.StretchModeEnum.Tile,
-            MouseFilter = MouseFilterEnum.Ignore,
-        };
-        hotbarBg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        hotbarContainer.AddChild(hotbarBg);
-        BindHotbarChromeTexture(hotbarBg);
-
-        var hbox = new HBoxContainer();
-        hbox.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        hotbarContainer.AddChild(hbox);
-
-        for (int i = 0; i < HotbarVisibleSlots; i++)
-        {
-            var slotVBox = new VBoxContainer();
-            slotVBox.CustomMinimumSize = new Vector2(48, 72);
-            hbox.AddChild(slotVBox);
-
-            // Key label ("1"–"9").
-            _hotbarKey[i] = new Label { Text = $"{i + 1}", HorizontalAlignment = HorizontalAlignment.Center };
-            slotVBox.AddChild(_hotbarKey[i]);
-
-            // Icon TextureRect — backed by skillpipe.dds slot sub-rect (PLAUSIBLE).
-            _hotbarIcon[i] = new TextureRect
-            {
-                Name = $"HotbarIcon{i}",
-                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-                CustomMinimumSize = new Vector2(HotbarSlotW, HotbarSlotH),
-                MouseFilter = MouseFilterEnum.Ignore,
-            };
-            // Icon slot src rect — each slot is HotbarSlotW×HotbarSlotH on the sheet.
-            // Exact per-slot offsets on skillpipe.dds are UNRECOVERED.
-            // We use column-major grid: slot i at (i * HotbarSlotW, 0). // PLAUSIBLE
-            // spec: Docs/RE/specs/ui_system.md §12 (open item 6) — hotbar layout gated on uitex manifest.
-            BindHotbarSlotIcon(_hotbarIcon[i], i);
-            slotVBox.AddChild(_hotbarIcon[i]);
-
-            // Skill name (from SkillCatalogue via CP949 name).
-            _hotbarName[i] = new Label
-            {
-                Text = "—",
-                HorizontalAlignment = HorizontalAlignment.Center,
-                CustomMinimumSize = new Vector2(48, 14),
-                AutowrapMode = TextServer.AutowrapMode.Off,
-                ClipText = true,
-            };
-            slotVBox.AddChild(_hotbarName[i]);
-        }
-    }
 
     private void BindHotbarChromeTexture(TextureRect target)
     {
@@ -1278,7 +1216,7 @@ public sealed partial class GameHud : Control
 
         if (slots.Count == 0)
         {
-            // VFS offline — hotbar keeps skillpipe.dds chrome slices from BuildHotbar.
+            // VFS offline — skill bar keeps skillpipe.dds chrome slices from BuildSkillBar.
             GD.Print("[GameHud] IconCatalogs returned 0 slots — hotbar uses skillpipe.dds placeholders.");
             return;
         }
@@ -1501,10 +1439,15 @@ public sealed partial class GameHud : Control
     /// </summary>
     public void OnChatBroadcast(ChatBroadcastEvent evt)
     {
+        // _chatLabel is only set when BuildChatPanel() runs (ChatWindow-construction fallback).
+        // On the normal path ChatWindow is the chat surface and _chatLabel stays null.
+        // Guard here to prevent NullReferenceException when ChatWindow is active.
+        if (_chatLabel is null) return;
+
         string line = $"[{evt.SenderName}]: {evt.Text}";
         if (_chatLines.Count >= ChatLineMax) _chatLines.Dequeue();
         _chatLines.Enqueue(line);
-        // Reuse _chatSb to avoid per-message heap allocation (finding 4).
+        // Reuse _chatSb to avoid per-message heap allocation.
         _chatSb.Clear();
         bool first = true;
         foreach (string l in _chatLines)
@@ -1646,15 +1589,18 @@ public sealed partial class GameHud : Control
 
         _zoneIndicatorLabel.Text = ZoneTypeLabel(evt.Zone);
 
-        // Update pill background colour to reinforce the zone type at a glance.
+        // Swap cached StyleBoxFlat — no per-event allocation.
         // Colours are PLAUSIBLE — no original art recovered for this widget.
-        var bg = new StyleBoxFlat();
-        bg.BgColor = ZoneTypeColor(evt.Zone);
-        bg.SetBorderWidthAll(1);
-        bg.BorderColor = new Color(0.7f, 0.7f, 0.7f, 0.8f);
-        bg.CornerRadiusTopLeft = bg.CornerRadiusTopRight =
-            bg.CornerRadiusBottomLeft = bg.CornerRadiusBottomRight = 3;
-        _zoneIndicatorPanel.AddThemeStyleboxOverride("panel", bg);
+        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.
+        StyleBoxFlat? pillStyle = evt.Zone switch
+        {
+            ZoneType.Safe    => _zonePillSafe,
+            ZoneType.OpenPvp => _zonePillPvp,
+            ZoneType.Closed  => _zonePillClosed,
+            _                => _zonePillUnknown,
+        };
+        if (pillStyle is not null)
+            _zoneIndicatorPanel.AddThemeStyleboxOverride("panel", pillStyle);
 
         GD.Print($"[GameHud] ZoneIndicator → {evt.Zone} ({ZoneTypeLabel(evt.Zone)}). " +
                  "spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.");

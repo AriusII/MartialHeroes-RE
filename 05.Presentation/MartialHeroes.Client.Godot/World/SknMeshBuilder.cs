@@ -8,6 +8,11 @@
 // SknMeshBuilder.Build any more (RealWorldRenderer routes through SkinnedCharacterBuilder). It is
 // kept only as a minimal crash-free static fallback reference.
 //
+// NOT SHIPPED CLIENT CODE: the only remaining INVOKER of SknMeshBuilder.Build is the dev preview tool
+// .claude/skills/godot-asset-preview/scripts/AssetPreviewNode.cs (eyeballing a parser's output). The
+// shipped client never calls it. Do not treat this as a live render path; if it is ever deleted, the
+// godot-asset-preview skill script must first be re-pointed to SkinnedCharacterBuilder.BuildStaticMesh.
+//
 // Coordinate conventions (D3D9 left-handed → Godot right-handed):
 //   ONE unified handedness conversion — the world Z-negate — applied via WorldCoordinates.SkinToGodot,
 //   identical to the live skinned path (SkinnedCharacterNode). The previous ad-hoc per-asset X-negate

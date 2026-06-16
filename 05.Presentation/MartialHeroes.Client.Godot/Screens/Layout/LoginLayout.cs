@@ -73,6 +73,10 @@ public static class LoginLayout
 
     // =========================================================================
     // §11.2a Upper window — main panel, server listbox, scroll controls. CODE-CONFIRMED.
+    // NOTE: TopChrome, ServerListbox, ScrollUpArrow, ScrollDownArrow, ScrollThumb, ListboxHeader
+    //   are RECOVERED BUT NOT YET WIRED in the current LoginScreen. The server-list overlay is
+    //   rendered by ServerSelectScreen; these constants are retained here as IDA-confirmed interop
+    //   facts for future widget work.
     // =========================================================================
 
     // B@(0,0,1024,110) src(0,0) — TOP chrome cap strip (carved bezel, hanging rings, top edge).
@@ -109,6 +113,7 @@ public static class LoginLayout
 
     // =========================================================================
     // §11.2b Background + two channel-selector blocks. CODE-CONFIRMED.
+    // NOTE: BackgroundPanel is RECOVERED BUT NOT YET WIRED in the current LoginScreen.
     // =========================================================================
 
     // A@(0,0,1024,398) — full background art panel (below the form band).
@@ -117,6 +122,9 @@ public static class LoginLayout
 
     // =========================================================================
     // §11.2c Decoration sprites + server-row select buttons. CODE-CONFIRMED.
+    // NOTE: SmallBadges, ServerRow* family, ServerRowActionBase, LargeActionBtn/Hover/FacePlate
+    //   are RECOVERED BUT NOT YET WIRED in the current LoginScreen. Retained as IDA-confirmed
+    //   interop facts for future widget work.
     // =========================================================================
 
     // B@(0,0,60,39) src(500,786) — 3x small badges / arrows.
@@ -232,19 +240,21 @@ public static class LoginLayout
     public const int EditFieldFrameW = 102; // spec §11.2e. CODE-CONFIRMED.
     public const int EditFieldFrameH = 13; // spec §11.2e. CODE-CONFIRMED.
 
-    // ID input field — dest (390,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 16 (UI cap, §1.3). action 109.
+    // ID input field — dest (390,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 6. action 109.
     // NOTE: SrcX/SrcY on this WidgetRect are intentionally set to the shared edit-field frame source,
     // NOT to the dest origin; and the atlas is EditFieldFrameAtlas (A), not AtlasLoginWindow (B).
     // spec §11.2e "ID input field atlas correction". CODE-CONFIRMED.
+    // NOTE: §1.3 table has TWO columns: "IME composition slot = 16" and "Max length = 6". The cap is 6.
     public static readonly WidgetRect AccountBox = new(390, 32, 102, 13, EditFieldFrameSrcX, EditFieldFrameSrcY);
     public const int ActionFocusId = 109; // spec §1.2. CODE-CONFIRMED.
-    public const int IdMaxLength = 16; // spec §1.3 "max length 16 (UI cap)". CODE-CONFIRMED.
+    public const int IdMaxLength = 6; // spec §1.3 "Max length = 6" (the 16 is the IME composition slot, not the cap). CODE-CONFIRMED.
 
-    // Password input field — dest (568,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 12, masked. action 110.
+    // Password input field — dest (568,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 129, masked. action 110.
     // Same shared source rect as ID field (both at login_slice1.dds src 615,404). spec §11.2e. CODE-CONFIRMED.
+    // NOTE: §1.3 table has TWO columns: "IME composition slot = 12" and "Max length = 129". The cap is 129.
     public static readonly WidgetRect PasswordBox = new(568, 32, 102, 13, EditFieldFrameSrcX, EditFieldFrameSrcY);
     public const int ActionFocusPw = 110; // spec §1.2. CODE-CONFIRMED.
-    public const int PwMaxLength = 12; // spec §1.3 "max length 12, masked". CODE-CONFIRMED.
+    public const int PwMaxLength = 129; // spec §1.3 "Max length = 129" (the 12 is the IME composition slot, not the cap). CODE-CONFIRMED.
 
     // Save-ID checkbox — A@(694,86,13,13). NORMAL src(717,398), PRESSED/checked src(730,398). action 104.
     // spec §11.2e "Save-ID checkbox". CODE-CONFIRMED.
@@ -268,10 +278,15 @@ public static class LoginLayout
     // Exact canvas position is a revival placement (no sub-rect separate from the ok-button art);
     // art src reuses (266,398) 112×39 — the secondary stone button frame.
     public static readonly WidgetRect QuitButton = new(840, 64, 112, 39, 266, 398);
-    public const int ActionQuitBtn = 30; // spec §1.5 "sub-state 30 = quit-confirm Yes path". CODE-CONFIRMED.
+    // NOTE: substate 30 is DEAD/UNREACHABLE in this build — an exhaustive writer scan found nothing ever
+    // writes value 30. The genuine quit-confirm is the shared ExitPanel (Yes=action 50/No=51).
+    // spec: frontend_scenes.md §1.5 row 30 / §1.8. CODE-CONFIRMED (dead branch).
+    public const int ActionQuitBtn = 30; // substate 30 = DEAD in this build. spec §1.5/§1.8. See note above.
 
     // =========================================================================
     // §11.2f Trailing controls + quit/error dialogs. CODE-CONFIRMED.
+    // NOTE: OptionTab1/OptionTab2, DecoPlate1/DecoPlate2 are RECOVERED BUT NOT YET WIRED in the
+    //   current LoginScreen. Retained as IDA-confirmed interop facts for future widget work.
     // =========================================================================
 
     // Option/tab button 1 — B@(40,82,110,38). NORMAL src(520,492). HOVER src(635,492). action 111.
@@ -330,20 +345,6 @@ public static class LoginLayout
     public const int PinDigitHoverSrcY = 664; // state hover   → srcV=664. spec §11.3b. CODE-CONFIRMED.
     public const int PinDigitPressedSrcY = 612; // state pressed → srcV=612. spec §11.3b. CODE-CONFIRMED.
 
-    // Legacy mis-named aliases (kept for compile compatibility; the _SrcX suffix was a mistake — these
-    // were always V/Y values, not U/X values; use the corrected _SrcY names above in all new code).
-    [System.Obsolete("Axis was swapped in old code — use PinDigitNormalSrcY instead. spec §11.3b CORRECTED.")]
-    public const int PinDigitNormalSrcX = 560;
-
-    [System.Obsolete("Axis was swapped in old code — use PinDigitHoverSrcY instead. spec §11.3b CORRECTED.")]
-    public const int PinDigitHoverSrcX = 664;
-
-    [System.Obsolete("Axis was swapped in old code — use PinDigitPressedSrcY instead. spec §11.3b CORRECTED.")]
-    public const int PinDigitPressedSrcX = 612;
-
-    [System.Obsolete("Axis was swapped in old code — use PinDigitColWidth instead. spec §11.3b CORRECTED.")]
-    public const int PinDigitRowHeight = 52;
-
     // Reset button (tag 11): panel-local (243,133,58,30). spec §11.3d. CODE-CONFIRMED.
     // password.dds src: normal(663,8), hover(663,88), pressed(663,48).
     public const int PinResetX = 243; // spec §11.3d. CODE-CONFIRMED.
@@ -391,6 +392,9 @@ public static class LoginLayout
 
     // =========================================================================
     // §11.5b Char-select slot tab buttons (from loginwindow.dds). CODE-CONFIRMED.
+    // NOTE: CharSlot1/2/3Tab + CharCreate/Delete/Enter are RECOVERED BUT NOT YET WIRED from
+    //   LoginLayout. The active char-select screen uses CharacterSelectLayout for these.
+    //   Retained here as IDA-confirmed interop facts for cross-reference.
     // =========================================================================
 
     // Slot 1 tab — (67,17,113,40). N src(675,795). P src(483,883). action 1.
@@ -413,6 +417,7 @@ public static class LoginLayout
 
     // =========================================================================
     // §11.5c Char-select Create/Delete/Enter buttons (from loginwindow.dds). CODE-CONFIRMED.
+    // NOTE: RECOVERED BUT NOT YET WIRED from LoginLayout — see §11.5b note above.
     // All buttons are 59×20.
     // =========================================================================
 

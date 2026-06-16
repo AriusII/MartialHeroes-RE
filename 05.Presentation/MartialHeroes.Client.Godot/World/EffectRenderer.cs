@@ -159,9 +159,17 @@ public sealed partial class EffectRenderer : Node3D
         // Alpha curve (already un-inverted: 0=transparent, 1=opaque after parse).
         // spec: Docs/RE/formats/effects.md §A.6 — stored as 1.0 − opacity; CONFIRMED.
         public float[] AlphaKeys = [];
-        public float[] ScaleX = [];
-        public float[] ScaleY = [];
-        public float[] ScaleZ = [];
+
+        // Per-keyframe diffuse-RGB tint curve (NOT a scale). Assembled R/G/B-per-key by the
+        // layer-03 parser (curve passes 2/3/4 → R/G/B). Sampled linearly per-frame; default 1.0
+        // (white) when a curve is empty. Fed into the billboard vertex Color and the material
+        // AlbedoColor — this is the warm-brazier / blue-waterfall tint.
+        // spec: Docs/RE/specs/effects.md §17.3 — "The colour channel is a per-keyframe diffuse
+        //       tint, not a scale"; assembled R/G/B order; defaults to (1,1,1); CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.4.2 — curve passes 2/3/4 = per-keyframe diffuse R/G/B.
+        public float[] DiffuseR = [];
+        public float[] DiffuseG = [];
+        public float[] DiffuseB = [];
 
         // Track header.
         // spec: Docs/RE/formats/effects.md §A.4.3 — track header (13 bytes fixed); CONFIRMED.
@@ -409,15 +417,15 @@ public sealed partial class EffectRenderer : Node3D
 
     private void MaybeLaunchDemoEffect()
     {
+        // No hub bound yet: the original client shows NO synthetic stand-in here, so we render nothing
+        // (faithfully empty) and merely log that Bind(hub) is pending. The former synthetic orange
+        // sphere-burst + invented "[EffectRenderer DEMO …]" English Label3D was presentation noise that
+        // could ship if the hub was late-bound — removed per the CAMPAIGN-9 no-invented-data doctrine.
+        // spec: CLAUDE.md — "NO invented English text, NO fake/demo data … NO procedural placeholders."
         if (_hub is null && !_demoMode)
         {
             _demoMode = true;
-            SpawnPlaceholderEffect(
-                GlobalPosition + new Vector3(0f, EmitterHeightOffset, 0f),
-                effectId: 0,
-                demoLabel: "[EffectRenderer DEMO — no hub bound]");
-            GD.Print("[EffectRenderer] No hub bound — running in DEMO mode. " +
-                     "Call Bind(hub) to subscribe to cast-effect events.");
+            GD.Print("[EffectRenderer] No hub bound yet — idle until Bind(hub) subscribes to cast-effect events.");
         }
     }
 
@@ -741,12 +749,27 @@ public sealed partial class EffectRenderer : Node3D
         // spec: Docs/RE/formats/effects.md §A.6 — alpha stored inverted; CONFIRMED.
         float alpha = SampleCurveLinear(se.AlphaKeys, frameIdx, frac);
 
+        // Diffuse tint: sample the per-keyframe R/G/B curve linearly; defaults to (1,1,1) when empty.
+        // The curve arrays are already assembled in R/G/B order by the layer-03 parser, so no channel
+        // swap is applied here — the on-disk B,G,R,A byte reversal is a pack-site detail of the original
+        // binary, not of the sampled in-memory Vec3 (x=R) the parser hands us.
+        // spec: Docs/RE/specs/effects.md §17.3 — colour is a per-keyframe diffuse tint (R/G/B), not a
+        //       scale; linear lerp; defaults to white; sampled Vec3 is x=R,y=G,z=B; CONFIRMED.
+        float diffR = SampleCurveLinear(se.DiffuseR, frameIdx, frac);
+        float diffG = SampleCurveLinear(se.DiffuseG, frameIdx, frac);
+        float diffB = SampleCurveLinear(se.DiffuseB, frameIdx, frac);
+
         // Velocity displacement from origin (identity orientation for UserXEffect).
         // spec: Docs/RE/specs/effects.md §8.2 step 8 — world_pos = origin + rotate(quat, velocity) × scale; CODE-CONFIRMED.
         // Cast-channel: looping UserXEffect uses identity orientation.
         // spec: Docs/RE/specs/effects.md §15.4 — "Default transform … no extra anchor offset"; CODE-CONFIRMED.
-        var displace =
-            new Vector3(vx, vy, vz); // world-Z-negate applied at spawn time; velocity is already in local space
+        //
+        // PORT-SIDE Z-NEGATION: the origin is taken from the actor's GlobalPosition (already Godot-space,
+        // i.e. Z-negated via WorldCoordinates.ToGodot). The keyframe velocity is parsed in the legacy
+        // world convention, so its Z must be negated too — the negation is applied to BOTH the anchor
+        // and the sub-effect offset, never one without the other (campaign-9c flying-pixels fix).
+        // spec: Docs/RE/specs/effects.md §8.2 step 8 — port negates Z on both anchor AND offset; CONFIRMED.
+        var displace = new Vector3(vx, vy, -vz);
         Vector3 particlePos = origin + displace;
 
         // ── Sprite frame index (stepped — no interpolation) ──────────────────
@@ -758,12 +781,16 @@ public sealed partial class EffectRenderer : Node3D
         float uOff = se.ScrollU ? (float)((elapsedMs % UvScrollPeriodMs) / UvScrollPeriodMs) : 0f;
         float vOff = se.ScrollV ? (float)((elapsedMs % UvScrollPeriodMs) / UvScrollPeriodMs) : 0f;
 
+        // Sampled per-frame diffuse tint fed into both the vertex Color and the material AlbedoColor.
+        // spec: Docs/RE/specs/effects.md §17.3 — vertex diffuse RGB from the colour curve; CONFIRMED.
+        var tint = new Color(diffR, diffG, diffB, alpha);
+
         // ── Geometry by emitter type ─────────────────────────────────────────
         ArrayMesh? mesh = se.EmitterType switch
         {
-            EmitterBillboard => BuildBillboardQuad(sx, sy, alpha, uOff, vOff, preRotate90Y: false),
-            EmitterDirectional => BuildBillboardQuad(sx, sy, alpha, uOff, vOff, preRotate90Y: true),
-            _ => BuildMeshParticle(kA, kB, frac, sx, sy, sz, alpha, uOff, vOff),
+            EmitterBillboard => BuildBillboardQuad(sx, sy, tint, uOff, vOff, preRotate90Y: false),
+            EmitterDirectional => BuildBillboardQuad(sx, sy, tint, uOff, vOff, preRotate90Y: true),
+            _ => BuildMeshParticle(kA, kB, frac, sx, sy, sz, tint, uOff, vOff),
         };
 
         if (mesh is null) return;
@@ -778,17 +805,18 @@ public sealed partial class EffectRenderer : Node3D
             int texIdx = Math.Min(spriteFrame, textures.Length - 1);
             if (textures[texIdx] is { } tex)
             {
-                StandardMaterial3D mat = BuildEffectMaterial(tex, alpha);
+                StandardMaterial3D mat = BuildEffectMaterial(tex, tint);
                 mi.SetSurfaceOverrideMaterial(0, mat);
             }
         }
         else
         {
-            // No texture: use unshaded solid colour with alpha.
+            // No texture: use unshaded solid colour modulated by the sampled diffuse tint.
+            // spec: Docs/RE/specs/effects.md §17.3 — diffuse tint drives AlbedoColor; CONFIRMED.
             var mat = new StandardMaterial3D
             {
                 ShadingMode = StandardMaterial3D.ShadingModeEnum.Unshaded,
-                AlbedoColor = new Color(1f, 0.55f, 0.1f, alpha),
+                AlbedoColor = tint,
                 Transparency = StandardMaterial3D.TransparencyEnum.Alpha,
                 BlendMode = StandardMaterial3D.BlendModeEnum.Add,
                 BillboardMode = se.EmitterType <= EmitterDirectional
@@ -806,7 +834,7 @@ public sealed partial class EffectRenderer : Node3D
     /// </summary>
     private static ArrayMesh BuildBillboardQuad(
         float sizeX, float sizeY,
-        float alpha,
+        Color tint,
         float uOff, float vOff,
         bool preRotate90Y)
     {
@@ -844,12 +872,14 @@ public sealed partial class EffectRenderer : Node3D
             new(1f + uOff, 1f + vOff),
             new(0f + uOff, 1f + vOff),
         };
+        // Per-vertex diffuse tint (R,G,B from the sampled colour curve; A from the alpha curve).
+        // spec: Docs/RE/specs/effects.md §17.3 — vertex diffuse = sampled colour curve × alpha; CONFIRMED.
         arrays[(int)ArrayMesh.ArrayType.Color] = new Color[]
         {
-            new(1f, 1f, 1f, alpha),
-            new(1f, 1f, 1f, alpha),
-            new(1f, 1f, 1f, alpha),
-            new(1f, 1f, 1f, alpha),
+            tint,
+            tint,
+            tint,
+            tint,
         };
         // Two triangles (CCW for Godot right-handed).
         arrays[(int)ArrayMesh.ArrayType.Index] = new int[] { 0, 1, 2, 0, 2, 3 };
@@ -867,7 +897,7 @@ public sealed partial class EffectRenderer : Node3D
     private static ArrayMesh BuildMeshParticle(
         XeffKeyframe kA, XeffKeyframe kB, float frac,
         float sx, float sy, float sz,
-        float alpha, float uOff, float vOff)
+        Color tint, float uOff, float vOff)
     {
         // Reuse billboard shape scaled by sx/sy; sz drives depth for future 3D mesh.
         // A real implementation would sample the .xobj mesh vertices here.
@@ -875,20 +905,23 @@ public sealed partial class EffectRenderer : Node3D
         //   and transform each vertex by (sx, sy, sz) scale and the sampled orientation quaternion.
         //   spec: Docs/RE/formats/effects.md §A.11 — .xobj ASCII mesh format; CONFIRMED.
         //   spec: Docs/RE/specs/effects.md §17.2 — mesh: per-vertex scale by size Vec3; CONFIRMED.
-        return BuildBillboardQuad(sx, sy, alpha, uOff, vOff, preRotate90Y: false);
+        return BuildBillboardQuad(sx, sy, tint, uOff, vOff, preRotate90Y: false);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Material helper
     // ─────────────────────────────────────────────────────────────────────────
 
-    private static StandardMaterial3D BuildEffectMaterial(ImageTexture texture, float alpha)
+    private static StandardMaterial3D BuildEffectMaterial(ImageTexture texture, Color tint)
     {
+        // AlbedoColor carries the sampled per-keyframe diffuse tint (R,G,B) and alpha; the texture is
+        // modulated by it. Previously hardcoded white, which dropped the .xeff diffuse colour curve.
+        // spec: Docs/RE/specs/effects.md §17.3 — diffuse tint drives AlbedoColor (not white); CONFIRMED.
         return new StandardMaterial3D
         {
             ShadingMode = StandardMaterial3D.ShadingModeEnum.Unshaded,
             AlbedoTexture = texture,
-            AlbedoColor = new Color(1f, 1f, 1f, alpha),
+            AlbedoColor = tint,
             Transparency = StandardMaterial3D.TransparencyEnum.Alpha,
             BlendMode = StandardMaterial3D.BlendModeEnum.Add,
             BillboardMode = StandardMaterial3D.BillboardModeEnum.Enabled,
@@ -1054,9 +1087,12 @@ public sealed partial class EffectRenderer : Node3D
             TexCount = texCount,
             TextureNames = se.TextureNames,
             AlphaKeys = alphaKeys,
-            ScaleX = se.DiffuseR,
-            ScaleY = se.DiffuseG,
-            ScaleZ = se.DiffuseB,
+            // Per-keyframe diffuse-RGB tint curve carried straight through (already assembled in
+            // R/G/B order by the layer-03 parser). NOT a scale — see §17.3.
+            // spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B.
+            DiffuseR = se.DiffuseR,
+            DiffuseG = se.DiffuseG,
+            DiffuseB = se.DiffuseB,
             AnimLoop = se.AnimLoop,
             AnimStride = se.AnimStride,
             AnimBaseTime = se.AnimBaseTime,
@@ -1095,8 +1131,7 @@ public sealed partial class EffectRenderer : Node3D
     /// </summary>
     private GpuParticles3D SpawnPlaceholderEffect(
         Vector3 position,
-        uint effectId,
-        string? demoLabel = null)
+        uint effectId)
     {
         var particles = new GpuParticles3D
         {
@@ -1148,18 +1183,6 @@ public sealed partial class EffectRenderer : Node3D
         quadMesh.Material = drawMat;
         particles.DrawPasses = 1;
         particles.SetDrawPassMesh(0, quadMesh);
-
-        if (demoLabel is not null)
-        {
-            var label = new Label3D
-            {
-                Text = demoLabel,
-                Position = new Vector3(0f, 1.2f, 0f),
-                FontSize = 14,
-                Modulate = new Color(1f, 0.8f, 0.2f),
-            };
-            particles.AddChild(label);
-        }
 
         AddChild(particles);
         return particles;

@@ -721,15 +721,6 @@ public sealed partial class LoginScreen : Control
         EmitSignal(SignalName.LoginAccepted, account);
     }
 
-    private void OnNoticePressed()
-    {
-        // Notice/agreement button (action 102) — open the server-select / notice flow.
-        // spec §1.2 "Server-list button, action 102 → reveal the server-list panel". CODE-CONFIRMED.
-        string account = _accountEdit.Text.Trim();
-        GD.Print($"[LoginScreen] Notice/server-list (action 102, account='{account}'). Emitting ServerListRequested.");
-        EmitSignal(SignalName.ServerListRequested, account);
-    }
-
     private void OnQuitButtonPressed()
     {
         // The "종료" (Exit) button opens the quit-confirm modal. Confirm (Yes, actions 113/114) →

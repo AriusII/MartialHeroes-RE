@@ -5,14 +5,17 @@ namespace MartialHeroes.Assets.Vfs;
 
 // spec: Docs/RE/formats/pak.md — TOC record, 144 bytes (0x90) per entry.
 //
-// Layout (all fields little-endian):
-//   +0   char[100]  name       — null-terminated ASCII virtual path, stored lower-case. CONFIRMED.
-//   +100 u8[4]      pad_100    — alignment padding; never read. UNVERIFIED (structurally expected).
-//   +104 i64 LE     dataOffset — byte offset into data/data.vfs. CONFIRMED.
-//   +112 i64 LE     dataSize   — byte count; only low 32 bits are consumed (high dword must be 0). CONFIRMED.
-//   +120 u8[24]     pad_120    — trailing bytes; never accessed. UNVERIFIED (possibly flags/CRC/timestamp).
+// Layout (all fields little-endian) — sample-verified (spec: Docs/RE/formats/pak.md §TOC record):
+//   +0   char[100]  name             — null-terminated ASCII virtual path, stored lower-case. Sample-verified.
+//   +100 u8[4]      pad_100          — alignment padding; never read. Sample-verified zero in
+//                                       43,333/43,347 entries (build-tool path residue in 14, inert).
+//   +104 i64 LE     dataOffset       — byte offset into data/data.vfs (entry 0 = 24, the header echo). Sample-verified.
+//   +112 i64 LE     dataSize         — byte count; only low 32 bits consumed (high dword must be 0). Sample-verified.
+//   +120 u64 LE     creation_time    — Windows FILETIME; source file NTFS creation time at pack. Never read by client.
+//   +128 u64 LE     last_access_time — Windows FILETIME; source file NTFS last-access time. Never read by client.
+//   +136 u64 LE     last_write_time  — Windows FILETIME; source file NTFS last-write time. Never read by client.
 //
-// Total: 144 bytes = 0x90.  CONFIRMED by allocation arithmetic and stride literal in spec.
+// Total: 144 bytes = 0x90.  Sample-verified by allocation arithmetic and stride literal in spec.
 
 /// <summary>
 /// One record from the VFS Table of Contents.
@@ -75,7 +78,8 @@ public readonly struct VfsEntry : IComparable<VfsEntry>
         // so the lookup invariant holds even for archives with mixed-case names.
         name = name.ToLowerInvariant();
 
-        // pad_100 (4 bytes at +100): UNVERIFIED alignment padding — skipped.
+        // pad_100 (4 bytes at +100): alignment padding — skipped. Sample-verified zero in 43,333/43,347
+        // entries (build-tool path residue in 14, inert since never consumed).
 
         // dataOffset @ +104, i64 LE. CONFIRMED.
         long dataOffset = BinaryPrimitives.ReadInt64LittleEndian(raw[DataOffsetField..]);
@@ -83,7 +87,9 @@ public readonly struct VfsEntry : IComparable<VfsEntry>
         // dataSize @ +112, i64 LE.  Only low 32 bits are consumed. CONFIRMED.
         long dataSize = BinaryPrimitives.ReadInt64LittleEndian(raw[DataSizeField..]);
 
-        // pad_120 (24 bytes at +120): UNVERIFIED — not read.
+        // Trailing 24 bytes at +120: three Windows FILETIME values (creation @ +120, last-access @ +128,
+        // last-write @ +136), recorded by the build tool from source-file NTFS metadata. Never read by
+        // the client. Sample-verified. spec: Docs/RE/formats/pak.md §TOC record.
 
         return new VfsEntry(name, dataOffset, dataSize);
     }

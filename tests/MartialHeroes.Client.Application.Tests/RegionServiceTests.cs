@@ -12,7 +12,7 @@ namespace MartialHeroes.Client.Application.Tests;
 //
 // Verifies that RegionService:
 //   - publishes exactly ONE ZoneChangedEvent when the player crosses a region boundary.
-//   - publishes ZoneType.Unknown when region files are absent (null catalog).
+//   - publishes ZoneType.Safe (the no-catalog default) when region files are absent (null catalog).
 //   - does NOT publish when the zone is unchanged between consecutive UpdatePosition calls.
 //   - resets and re-fires on a new LoadAreaAsync.
 //
@@ -114,11 +114,11 @@ public sealed class RegionServiceTests
 
     /// <summary>
     /// When no region source is available (null catalog), the first UpdatePosition call should
-    /// publish exactly one ZoneChangedEvent with ZoneType.Unknown.
-    /// spec: Docs/RE/specs/world_systems.md Ch. 16 — graceful degradation → Unknown.
+    /// publish exactly one ZoneChangedEvent with ZoneType.Safe (the no-catalog default).
+    /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — graceful degradation → Safe ("anything else = safe").
     /// </summary>
     [Fact]
-    public async Task UpdatePosition_NullCatalog_PublishesUnknown()
+    public async Task UpdatePosition_NullCatalog_PublishesSafe()
     {
         var hub = new CapturingHudHub();
         var service = new RegionService(new FakeRegionSource(null), hub);
@@ -127,7 +127,7 @@ public sealed class RegionServiceTests
         service.UpdatePosition(0f, 0f);
 
         Assert.Single(hub.ZoneCaptured);
-        Assert.Equal(ZoneType.Unknown, hub.ZoneCaptured[0].Zone);
+        Assert.Equal(ZoneType.Safe, hub.ZoneCaptured[0].Zone);
     }
 
     /// <summary>
@@ -196,7 +196,7 @@ public sealed class RegionServiceTests
 
     /// <summary>
     /// <see cref="RegionService.CurrentZone"/> reflects the most-recently-resolved zone.
-    /// Before first UpdatePosition after LoadAreaAsync it returns Unknown.
+    /// Before first UpdatePosition after LoadAreaAsync it returns Safe (the default).
     /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.
     /// </summary>
     [Fact]
@@ -207,8 +207,8 @@ public sealed class RegionServiceTests
         var service = new RegionService(new FakeRegionSource(catalog), hub);
 
         await service.LoadAreaAsync(areaId: 0);
-        // Before any UpdatePosition: Unknown sentinel.
-        Assert.Equal(ZoneType.Unknown, service.CurrentZone);
+        // Before any UpdatePosition: Safe default.
+        Assert.Equal(ZoneType.Safe, service.CurrentZone);
 
         service.UpdatePosition(128f, 0f);
         Assert.Equal(ZoneType.Safe, service.CurrentZone);
@@ -219,11 +219,11 @@ public sealed class RegionServiceTests
 
     /// <summary>
     /// LoadAreaAsync with a faulting source (throws unexpectedly) must not propagate the
-    /// exception to the caller — it degrades gracefully to null catalog → Unknown zone.
-    /// spec: Docs/RE/specs/world_systems.md Ch. 16 — graceful degradation on parse error.
+    /// exception to the caller — it degrades gracefully to null catalog → Safe zone (the default).
+    /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — graceful degradation on parse error → Safe.
     /// </summary>
     [Fact]
-    public async Task LoadAreaAsync_FaultingSource_DegradesToUnknown()
+    public async Task LoadAreaAsync_FaultingSource_DegradesToSafe()
     {
         var hub = new CapturingHudHub();
         var service = new RegionService(new ThrowingRegionSource(), hub);
@@ -231,10 +231,10 @@ public sealed class RegionServiceTests
         // Must not throw.
         await service.LoadAreaAsync(areaId: 0);
 
-        // First UpdatePosition → Unknown.
+        // First UpdatePosition → Safe (no-catalog default).
         service.UpdatePosition(128f, 0f);
         Assert.Single(hub.ZoneCaptured);
-        Assert.Equal(ZoneType.Unknown, hub.ZoneCaptured[0].Zone);
+        Assert.Equal(ZoneType.Safe, hub.ZoneCaptured[0].Zone);
     }
 
     /// <summary>A source that always throws to simulate a corrupt VFS.</summary>

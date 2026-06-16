@@ -112,54 +112,10 @@ public sealed class RealClientAssets : IDisposable
     // Terrain helpers
     // -------------------------------------------------------------------------
 
-    /// <summary>
-    /// Loads the raw .ted bytes for a specific map cell.
-    ///
-    /// spec: Docs/RE/formats/terrain.md §1.3 per-cell path pattern.
-    /// spec: Docs/RE/formats/terrain.md §5.2 — total 46987 bytes, five blocks.
-    /// </summary>
-    /// <param name="areaId">Area identifier (e.g. 0 for map000).</param>
-    /// <param name="mapX">Cell X coordinate (world origin = 10000).</param>
-    /// <param name="mapZ">Cell Z coordinate (world origin = 10000).</param>
-    /// <returns>Raw .ted bytes, or empty when absent.</returns>
-    public ReadOnlyMemory<byte> LoadTed(int areaId, int mapX, int mapZ)
-    {
-        string path = BuildTedPath(areaId, mapX, mapZ);
-        return TryGetContent(path);
-    }
-
-    /// <summary>
-    /// Loads and parses the .lst manifest for an area, returning the set of valid cell keys.
-    /// Returns an empty set when the manifest is absent or unparseable.
-    ///
-    /// spec: Docs/RE/formats/terrain.md §1.2 — manifest path + key formula.
-    /// </summary>
-    public HashSet<uint> LoadManifestKeys(int areaId)
-    {
-        string path = BuildLstPath(areaId);
-        ReadOnlyMemory<byte> data = TryGetContent(path);
-        if (data.IsEmpty)
-        {
-            return [];
-        }
-
-        try
-        {
-            LstManifest manifest = LstManifestParser.Parse(data);
-            var keys = new HashSet<uint>(manifest.Entries.Length);
-            foreach (LstCellEntry entry in manifest.Entries)
-            {
-                keys.Add(entry.Key);
-            }
-
-            return keys;
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[RealClientAssets] LST parse failed for area {areaId}: {ex.Message}");
-            return [];
-        }
-    }
+    // NOTE: LoadTed(areaId, mapX, mapZ) and LoadManifestKeys(areaId) were removed —
+    // both had zero call sites. Callers use GetRaw / Contains directly (e.g. RealWorldRenderer,
+    // CharSelectScene3D). VfsTerrainSectorSource handles manifest keys via vfs.Contains.
+    // spec: Docs/RE/formats/terrain.md §1.2–1.3.
 
     /// <summary>
     /// Loads the .map scene descriptor for a specific map cell and returns the paths of the
@@ -226,82 +182,6 @@ public sealed class RealClientAssets : IDisposable
         {
             GD.PrintErr($"[RealClientAssets] .bud parse failed ({virtualPath}): {ex.Message}");
             return null;
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Skinned mesh helpers
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Loads a skinned mesh from .skn + optional .bnd + optional .mot files.
-    /// Writes a GLB into <paramref name="glbOutput"/> via <see cref="GltfConverter.WriteGlb"/>.
-    /// Returns false when required files are absent.
-    ///
-    /// spec: Docs/RE/formats/mesh.md §.skn / §.bnd.
-    /// spec: Docs/RE/formats/animation.md §.mot.
-    /// </summary>
-    public bool LoadSkinned(
-        string sknPath,
-        string? bndPath,
-        string[]? motPaths,
-        Stream glbOutput)
-    {
-        ReadOnlyMemory<byte> sknData = TryGetContent(sknPath);
-        if (sknData.IsEmpty)
-        {
-            GD.PrintErr($"[RealClientAssets] .skn not found: {sknPath}");
-            return false;
-        }
-
-        try
-        {
-            SkinnedMesh mesh = SknParser.Parse(sknData);
-
-            Skeleton? skeleton = null;
-            if (bndPath is not null)
-            {
-                ReadOnlyMemory<byte> bndData = TryGetContent(bndPath);
-                if (!bndData.IsEmpty)
-                {
-                    skeleton = BndParser.Parse(bndData);
-                }
-            }
-
-            AnimationClip[]? clips = null;
-            if (motPaths is { Length: > 0 })
-            {
-                var clipList = new List<AnimationClip>(motPaths.Length);
-                foreach (string motPath in motPaths)
-                {
-                    ReadOnlyMemory<byte> motData = TryGetContent(motPath);
-                    if (!motData.IsEmpty)
-                    {
-                        try
-                        {
-                            // AnimationParser.Parse returns null for the BANI .mot variant (spec:
-                            // Docs/RE/formats/animation.md §BANI). Skip null clips so a BANI file never
-                            // enters the clip list (the BANI fix made Parse return AnimationClip?).
-                            AnimationClip? clip = AnimationParser.Parse(motData);
-                            if (clip is not null) clipList.Add(clip);
-                        }
-                        catch (Exception ex)
-                        {
-                            GD.PrintErr($"[RealClientAssets] .mot parse failed ({motPath}): {ex.Message}");
-                        }
-                    }
-                }
-
-                if (clipList.Count > 0) clips = clipList.ToArray();
-            }
-
-            GltfConverter.WriteGlb(mesh, skeleton, glbOutput, clips);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[RealClientAssets] skinned load failed ({sknPath}): {ex.Message}");
-            return false;
         }
     }
 
@@ -593,10 +473,11 @@ public sealed class RealClientAssets : IDisposable
 
             // Name between prefix and suffix: "<mapX>z<mapZ>"
             // e.g. "10000z9990" → mapX=10000, mapZ=9990
+            // Use ReadOnlySpan<char> to avoid per-entry Substring allocation.
             int inner = name.Length - prefix.Length - tedSuffix.Length;
             if (inner <= 0) continue;
 
-            string middle = name.Substring(prefix.Length, inner);
+            ReadOnlySpan<char> middle = name.AsSpan(prefix.Length, inner);
             int zIndex = middle.IndexOf('z');
             if (zIndex <= 0) continue;
 

@@ -1,11 +1,13 @@
 // Screens/OpeningWindow.cs
 //
-// The pre-login intro scene (OpeningWindow) — the "red ribbon" crawl + splash slideshow.
+// The post-login intro scene (OpeningWindow, GameState 3) — the "red ribbon" crawl + splash slideshow.
+// This runs AFTER login (GameState 1) and BEFORE char-select (GameState 4). NOT a pre-login scene.
+// spec: Docs/RE/specs/intro_sequence.md §0.1. CODE-CONFIRMED.
 //
 // TWO INDEPENDENT ANIMATED LAYERS per spec:
 //   1. SPLASH SLIDESHOW — openning_001..004.dds (1024×768), 4-state machine, 17500 ms dwell per
-//      panel, alpha ramp 0→250 (±1 per rendered frame), full-screen, drawn beneath the crawl.
-//      spec: Docs/RE/specs/intro_sequence.md §3. CODE-CONFIRMED.
+//      panel, alpha seeded at 250 (max), direction-toggled fade-OUT first (not fade-in from 0).
+//      spec: Docs/RE/specs/intro_sequence.md §3/§3.2/§3.4. CODE-CONFIRMED.
 //
 //   2. SCENARIO CRAWL — openning_scenario.dds (1024×2048), single quad translated vertically.
 //      Scrolls UPWARD (credits-style): sprite Y = CanvasH − _scrollPos as _scrollPos grows 0→1843.
@@ -43,9 +45,10 @@ using Godot;
 namespace MartialHeroes.Client.Godot.Screens;
 
 /// <summary>
-/// The pre-login opening/intro Control: splash slideshow + scenario crawl ("red ribbon").
+/// The post-login opening/intro Control (GameState 3): splash slideshow + scenario crawl ("red ribbon").
+/// Runs AFTER login (GameState 1) and BEFORE character-select (GameState 4).
 /// Emits <see cref="IntroFinishedEventHandler"/> when the sequence ends or the player skips.
-/// <para>spec: Docs/RE/specs/intro_sequence.md §0–§6.</para>
+/// <para>spec: Docs/RE/specs/intro_sequence.md §0–§6 / §0.1 (scene placement). CODE-CONFIRMED.</para>
 /// </summary>
 public sealed partial class OpeningWindow : Control
 {
@@ -156,10 +159,12 @@ public sealed partial class OpeningWindow : Control
         // Initialise crawl and slideshow state.
         _scrollStartWait = ScrollStartDelayMs; // spec §2.1 "~1000 ms startup gate". CODE-CONFIRMED.
         _scrollPos = 0f;
-        _alpha = 0;
-        _alphaDir = 1;
+        // Alpha seeded at 250 (max) — constructor seeds alpha at its maximum so the first phase
+        // is a FADE-OUT, not a fade-in. spec: intro_sequence.md §3.2/§3.3/§3.4. CODE-CONFIRMED.
+        _alpha = AlphaMax;
+        _alphaDir = -1; // fade-OUT first. spec: intro_sequence.md §3.2. CODE-CONFIRMED.
         _dwellAccumMs = 0.0;
-        _panelFadedIn = false;
+        _panelFadedIn = true; // panel starts at full alpha; dwell may begin immediately.
         _slideshowState = 1;
 
         // Fire the intro BGM once at scene start. spec: intro_sequence.md §4. CODE-CONFIRMED.
@@ -307,9 +312,9 @@ public sealed partial class OpeningWindow : Control
             GD.Print($"[OpeningWindow] Scenario crawl not found in VFS: {ScenarioPath} — crawl layer will be blank.");
         }
 
-        // Place the scenario sprite: centred horizontally, starting just below the canvas bottom
-        // so the first frame has the sprite off-screen. As _scrollPos grows 0→1843 the sprite
-        // rises upward (credits-style). spec §1.0.3 "scrolled upward". CODE-CONFIRMED.
+        // Place the scenario sprite: centred horizontally, starting just below the canvas bottom.
+        // As _scrollPos grows 0→1843 the sprite rises upward (credits-style).
+        // spec: intro_sequence.md §2.1/§2.4. CODE-CONFIRMED.
         // Horizontal centre: left edge at (canvasW/2 − ScenarioW/2). For the 1024-wide canvas
         // that is 0 (sprite fills the width exactly). spec §1 "centred horizontally". CODE-CONFIRMED.
         _scenarioRect.Position = new Vector2(0f, CanvasH); // start: sprite top-left at Y=768 (off-screen below)
@@ -317,11 +322,11 @@ public sealed partial class OpeningWindow : Control
         AddChild(_scenarioRect);
 
         // ── Layer 3: Skip button (action id 100) from mainwindow.dds ──
-        // Placed near lower-right: X = liveW − 120, Y = liveH − 52, size 110×32.
+        // Placed at TOP-right: x = clientWidth − 120, y = 10, size 110×32.
         // Normal src (761,165,110,32) / pressed src (634,165,110,32) from mainwindow.dds.
-        // spec: Docs/RE/specs/frontend_scenes.md §1.0.1 / §1.0.5. CODE-CONFIRMED placement.
-        // spec: Docs/RE/specs/intro_sequence.md §1. SAMPLE-VERIFIED atlas.
-        // Src-rects: freshly re-confirmed IDA ground truth; cite intro_sequence.md §1 / frontend_scenes.md §1.0.5.
+        // spec: Docs/RE/specs/intro_sequence.md §2.2/§6. CODE-CONFIRMED placement (top-right, y=10).
+        // Note: the older frontend_scenes.md §1.0.1 wording ("lower-right") is superseded by
+        //   intro_sequence.md §2.2 which explicitly corrects this to TOP-right.
         const string MainWindowAtlas = "data/ui/mainwindow.dds"; // spec §1 SAMPLE-VERIFIED.
         AtlasTexture? skipNormal = assets.Slice(MainWindowAtlas, 761, 165, 110, 32);
         AtlasTexture? skipPressed = assets.Slice(MainWindowAtlas, 634, 165, 110, 32);
@@ -333,19 +338,21 @@ public sealed partial class OpeningWindow : Control
         }
         else
         {
-            // Anchor to lower-right: AnchorRight=1 / AnchorBottom=1, then offset inward.
-            // Position is expressed in canvas coords: X from right = liveW − 120 → offset −120 from right;
-            // Y from bottom = liveH − 52 → offset −52 from bottom.
-            // spec §1.0.5 "placed near lower-right of canvas". CODE-CONFIRMED placement.
+            // Anchor to TOP-right: AnchorRight=1, AnchorTop=0.
+            // x = clientWidth − 120 → OffsetLeft = −120 from right anchor.
+            // y = 10 → OffsetTop = 10 from top.
+            // spec: intro_sequence.md §2.2/§6. CODE-CONFIRMED (top-right, y=10).
             var skipBtn = new TextureButton
             {
                 Name = "SkipBtn",
+                AnchorLeft = 1f,
                 AnchorRight = 1f,
-                AnchorBottom = 1f,
-                OffsetLeft = -120f, // liveW − 120; spec §1.0.5. CODE-CONFIRMED x-offset.
-                OffsetTop = -52f, // liveH − 52; spec §1.0.1 "lower-right". CODE-CONFIRMED placement.
-                OffsetRight = -10f, // right edge 10px from right edge
-                OffsetBottom = -20f, // bottom edge 20px from bottom edge
+                AnchorTop = 0f,
+                AnchorBottom = 0f,
+                OffsetLeft = -120f, // x = clientWidth − 120; spec intro_sequence.md §2.2. CODE-CONFIRMED.
+                OffsetTop = 10f,    // y = 10; spec intro_sequence.md §2.2. CODE-CONFIRMED.
+                OffsetRight = -10f, // right edge 10px from right edge (110px wide)
+                OffsetBottom = 42f, // y + 32 height
                 TextureNormal = skipNormal,
                 TexturePressed = skipPressed ?? skipNormal, // fallback to normal when pressed absent
                 StretchMode = TextureButton.StretchModeEnum.KeepAspect,
@@ -409,15 +416,29 @@ public sealed partial class OpeningWindow : Control
     {
         if (_sequenceDone || _slideshowRect is null) return;
 
-        // Alpha ramp: ±1 per rendered frame (frame-gated). spec §3.2. CODE-CONFIRMED.
-        _alpha = Mathf.Clamp(_alpha + _alphaDir, 0, AlphaMax); // spec §3.3 "0…250". CODE-CONFIRMED.
+        // Alpha ramp: ±1 per rendered frame (frame-gated). Direction toggles at 0 and AlphaMax.
+        // The alpha field is INITIALISED to 250 (max) and direction starts at -1 (fade-OUT first).
+        // spec: intro_sequence.md §3.2/§3.3/§3.4. CODE-CONFIRMED.
+        _alpha += _alphaDir;
+        if (_alpha <= 0)
+        {
+            _alpha = 0;
+            _alphaDir = 1; // reverse: now fade-IN
+        }
+        else if (_alpha >= AlphaMax)
+        {
+            _alpha = AlphaMax;
+            _alphaDir = -1; // reverse: now fade-OUT
+        }
+
         _slideshowRect.Modulate = new Color(1f, 1f, 1f, _alpha / (float)AlphaMax);
 
-        // Latch "faded in" when alpha first reaches AlphaMax. spec §3.1. CODE-CONFIRMED.
+        // Latch "at extreme" (alpha at maximum) as the dwell gate.
+        // spec §3.1 "when dwell expires AND alpha at its maximum". CODE-CONFIRMED.
         if (!_panelFadedIn && _alpha >= AlphaMax)
             _panelFadedIn = true;
 
-        // Accumulate dwell only after the panel has fully faded in.
+        // Accumulate dwell only after the panel has reached its alpha extreme.
         // spec §3.1 "when dwell expires AND panel fully faded in". CODE-CONFIRMED.
         if (_panelFadedIn)
             _dwellAccumMs += dtMs;
@@ -428,8 +449,8 @@ public sealed partial class OpeningWindow : Control
         _slideshowState++;
         if (_slideshowState > SlideshowFrameCount)
         {
-            // After state 4 completes, transition to the login scene.
-            // spec §3.1 "after state 4, transition to login". CODE-CONFIRMED.
+            // After state 4 completes, transition to the character-select scene.
+            // spec §3.1 "after state 4, transition to char-select". CODE-CONFIRMED.
             _sequenceDone = true;
             GD.Print("[OpeningWindow] Slideshow complete — transitioning.");
             Finish();
@@ -440,11 +461,12 @@ public sealed partial class OpeningWindow : Control
         _slideshowRect.Texture = _slideshowTextures[_slideshowState - 1];
         GD.Print($"[OpeningWindow] Slideshow → state {_slideshowState} ({SlideshowPaths[_slideshowState - 1]}).");
 
-        // Reset for the next panel.
+        // Reset for the next panel: start faded-in (250) and immediately fade-out.
+        // spec: intro_sequence.md §3.2/§3.4. CODE-CONFIRMED.
         _dwellAccumMs = 0.0;
         _panelFadedIn = false;
-        _alpha = 0;
-        _alphaDir = 1;
+        _alpha = AlphaMax;
+        _alphaDir = -1;
     }
 
     // -------------------------------------------------------------------------

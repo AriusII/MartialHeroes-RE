@@ -84,14 +84,22 @@ public sealed partial class LuaConfigReader
             VfsMode = ReadInt(globals, "vfsmode", defaultValue: 1),
             Launcher = ReadInt(globals, "launcher", defaultValue: 1),
             DebugMode = ReadInt(globals, "debugmode", defaultValue: 1),
-            AddictionWarningTiming = ReadInt(globals, "addiction_warning", defaultValue: 1),
+            // UNVERIFIED: the Lua global name for the game.lua addiction-warning timing value has not
+            // been pinned by spec. lua-config.md §3 describes "a game-addiction-warning timing number"
+            // but does NOT give its global name. The ×1000-scaled variant is DISPLAY_GAME_ADDICTION_WARNING_CHECK_TIME
+            // in display.lua (§4.2), which is a separate knob.
+            // Until the game.lua key name is confirmed, this read will miss against a real game.lua.
+            // spec: Docs/RE/specs/lua-config.md §3, correction box lines 225-231
+            AddictionWarningTiming = ReadInt(globals, "addiction_warning", defaultValue: 1), // key UNVERIFIED
 
             // spec: Docs/RE/specs/lua-config.md §2.3 table / §6
             NewServerIndex = ReadInt(globals, "NEW_SERVER_INDEX", defaultValue: 1),
 
             // spec: Docs/RE/specs/lua-config.md §4 — display.lua integer globals
-            DisplayGlowRangeX = ReadInt(globals, "DISPLAY_GLOW_RANGE_X", defaultValue: 2),
-            DisplayGlowRangeY = ReadInt(globals, "DISPLAY_GLOW_RANGE_Y", defaultValue: 2),
+            // spec: Docs/RE/specs/lua-config.md status-banner — "DISPLAY_GLOW_RANGE_X / _Y host fallback to 2 when read as 0 | CODE-CONFIRMED"
+            // An explicit 0 in the file is clamped to 2 (the host does the same before using the value).
+            DisplayGlowRangeX = ClampGlowRange(ReadInt(globals, "DISPLAY_GLOW_RANGE_X", defaultValue: 2)),
+            DisplayGlowRangeY = ClampGlowRange(ReadInt(globals, "DISPLAY_GLOW_RANGE_Y", defaultValue: 2)),
             DisplayFramerate = ReadInt(globals, "DISPLAY_FRAMERATE", defaultValue: 60),
 
             // spec: Docs/RE/specs/lua-config.md §4 — display.lua float globals
@@ -99,8 +107,14 @@ public sealed partial class LuaConfigReader
             DisplayGlowBrightMulti = ReadFloat(globals, "DISPLAY_GLOW_BRIGHT_MULTI", defaultValue: 1.0f),
             DisplayLightRatio = ReadFloat(globals, "DISPLAY_LIGHT_RATIO", defaultValue: 1.0f),
 
-            // spec: Docs/RE/specs/lua-config.md §4 — string global; file decoded as CP949 (§0)
-            DisplayPowerShader = ReadString(globals, "DISPLAY_POWERSHADER", defaultValue: string.Empty),
+            // spec: Docs/RE/specs/lua-config.md §4.2 — DISPLAY_POWER selects the glow shader intensity level
+            DisplayPower = ReadInt(globals, "DISPLAY_POWER", defaultValue: 1),
+
+            // spec: Docs/RE/specs/lua-config.md §4.3 — DISPLAY_POWERSHADER is COMPUTED from DISPLAY_POWER
+            // by an if/elseif chain in display.lua; a config author must not pre-assign it.
+            // We derive it here using the same rule: "data/shader/power<N>dx8.psh".
+            // If the scanner happens to find a literal assignment, we accept it; otherwise derive.
+            DisplayPowerShader = DerivePowerShader(globals),
         };
     }
 
@@ -229,6 +243,32 @@ public sealed partial class LuaConfigReader
 
         // Bare word (unusual but defensible) — return as-is.
         return valueToken.Length > 0 ? valueToken : defaultValue;
+    }
+
+    /// <summary>
+    /// Applies the host-side fallback: if DISPLAY_GLOW_RANGE_X or _Y was read as 0,
+    /// the host substitutes 2 before using the value.
+    /// spec: Docs/RE/specs/lua-config.md status-banner — "DISPLAY_GLOW_RANGE_X / _Y host fallback to 2 when read as 0 | CODE-CONFIRMED"
+    /// </summary>
+    private static int ClampGlowRange(int value) => value == 0 ? 2 : value;
+
+    /// <summary>
+    /// Derives DISPLAY_POWERSHADER from DISPLAY_POWER using the if/elseif chain in display.lua.
+    /// spec: Docs/RE/specs/lua-config.md §4.3 — "DISPLAY_POWERSHADER is computed … by an if/elseif
+    /// chain over DISPLAY_POWER, mapping the power level to data/shader/power&lt;N&gt;dx8.psh"
+    /// </summary>
+    private static string DerivePowerShader(Dictionary<string, string> globals)
+    {
+        // Accept a literal assignment if the scanner found one (non-standard file or future compat).
+        // spec: Docs/RE/specs/lua-config.md §4.3 — "a config author must not pre-assign it"
+        var literal = ReadString(globals, "DISPLAY_POWERSHADER", defaultValue: string.Empty);
+        if (literal.Length > 0)
+            return literal;
+
+        // Derive from DISPLAY_POWER (valid set: 1,2,4,8,16,32).
+        // spec: Docs/RE/specs/lua-config.md §4.2, §4.3
+        var power = ReadInt(globals, "DISPLAY_POWER", defaultValue: 1);
+        return $"data/shader/power{power}dx8.psh";
     }
 
     /// <summary>

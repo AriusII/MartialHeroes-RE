@@ -245,19 +245,17 @@ public sealed partial class OptionsWindow : Control
     }
 
     /// <summary>
-    /// Drains the hub's StatAllocations stream each frame (main thread).
-    /// All other hub streams are not consumed here — they belong to GameHud.
+    /// Per-frame update — currently no channels are drained here.
+    /// StatAllocations is NOT drained by OptionsWindow (CharacterStatsWindow is the sole
+    /// consumer; draining it here would steal events via the shared ChannelReader and
+    /// starve CharacterStatsWindow).
     /// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — channel drain on main thread.
     /// </summary>
     public override void _Process(double delta)
     {
-        if (_hub is null) return;
-
-        // Drain stat-allocation updates into the stat sub-panel (future: Character tab).
-        // For now we just consume and discard — prevents the channel from filling.
-        while (_hub.StatAllocations.TryRead(out _))
-        {
-        }
+        // No channels drained here — OptionsWindow has no live hub consumer yet.
+        // If a future Character-tab needs stat data, request a broadcast/multiplexer from
+        // the application-engineer rather than adding a second TryRead on the shared reader.
     }
 
     public override void _Input(InputEvent ev)

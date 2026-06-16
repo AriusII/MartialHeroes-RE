@@ -3,16 +3,38 @@ using MartialHeroes.Network.Crypto;
 namespace MartialHeroes.Network.Crypto.Tests;
 
 /// <summary>
-/// The staged RSA plaintext <c>M</c> is a fixed 17-byte zero-padded buffer: password bytes then zeros,
-/// consumed in full as M. spec: Docs/RE/specs/crypto.md §6.1, §6.6, §6b; packets/login.yaml.
+/// The staged RSA plaintext <c>M</c> is a zero-padded buffer sized to the password-field cap: password
+/// bytes then zeros, consumed in full as M. The width is parameter-driven (default 17 = debugger-observed
+/// cap). spec: Docs/RE/specs/crypto.md §6.1, §6.6, §8.1, §9.2 point 2, §6b; packets/login.yaml.
 /// </summary>
 public sealed class CredentialPlaintextTests
 {
     [Fact]
-    public void StagePassword_Produces_Exactly_17_Bytes()
+    public void StagePassword_Defaults_To_The_Observed_17_Byte_Cap()
     {
         byte[] staged = CredentialPlaintext.StagePassword("pw"u8);
+        Assert.Equal(CredentialPlaintext.DefaultPasswordFieldCap, staged.Length);
         Assert.Equal(17, staged.Length);
+    }
+
+    [Fact]
+    public void StagePassword_Honors_A_Caller_Supplied_Field_Cap()
+    {
+        // The width is parameter-driven: a different field cap yields a different-width M. spec §6.6, §8.1.
+        byte[] staged = CredentialPlaintext.StagePassword("pw"u8, fieldCap: 24);
+        Assert.Equal(24, staged.Length);
+        Assert.True(staged.AsSpan(0, 2).SequenceEqual("pw"u8));
+        for (int i = 2; i < 24; i++)
+        {
+            Assert.Equal(0, staged[i]);
+        }
+    }
+
+    [Fact]
+    public void StagePassword_Rejects_A_Field_Cap_Too_Small_For_A_2_Char_Password()
+    {
+        // Cap must leave room for a 2-char password plus one trailing zero (>= 3). spec §6.1, §6.6.
+        Assert.Throws<ArgumentOutOfRangeException>(() => CredentialPlaintext.StagePassword("ab"u8, fieldCap: 2));
     }
 
     [Fact]
@@ -55,10 +77,25 @@ public sealed class CredentialPlaintextTests
     }
 
     [Fact]
-    public void StagePassword_Rejects_Wrong_Destination_Width()
+    public void StagePassword_Into_Buffer_Treats_The_Destination_Width_As_The_Field_Cap()
     {
+        // A 16-byte destination is a valid 16-byte field cap (parameter-driven width). spec §6.6, §8.1.
         byte[] dst = new byte[16];
-        Assert.Throws<ArgumentException>(() => CredentialPlaintext.StagePassword("pw"u8, dst));
+        CredentialPlaintext.StagePassword("pw"u8, dst);
+        Assert.Equal((byte)'p', dst[0]);
+        Assert.Equal((byte)'w', dst[1]);
+        for (int i = 2; i < 16; i++)
+        {
+            Assert.Equal(0, dst[i]);
+        }
+    }
+
+    [Fact]
+    public void StagePassword_Into_Buffer_Rejects_A_Destination_Too_Small_For_A_2_Char_Password()
+    {
+        // A 2-byte destination cannot hold a 2-char password plus a trailing zero. spec §6.1, §6.6.
+        byte[] dst = new byte[2];
+        Assert.Throws<ArgumentException>(() => CredentialPlaintext.StagePassword("ab"u8, dst));
     }
 
     [Fact]

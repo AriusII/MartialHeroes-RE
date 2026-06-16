@@ -1,4 +1,3 @@
-using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Network.Abstractions.Protocol;
@@ -40,7 +39,6 @@ public sealed class LoginHandshakeDriver : ILoginHandshakeDriver
     private readonly IPaddingRandom _paddingRandom;
     private readonly ClientStateMachine? _stateMachine;
     private readonly SessionId _sessionId;
-    private readonly IClientEventBus? _eventBus;
 
     /// <summary>Auth reply opcode major. spec: Docs/RE/specs/crypto.md §6 (1/4 out).</summary>
     private const ushort AuthReplyMajor = 1;
@@ -53,8 +51,7 @@ public sealed class LoginHandshakeDriver : ILoginHandshakeDriver
         LoginCredentialStore credentials,
         SessionId sessionId,
         IPaddingRandom? paddingRandom = null,
-        ClientStateMachine? stateMachine = null,
-        IClientEventBus? eventBus = null)
+        ClientStateMachine? stateMachine = null)
     {
         _outbound = outbound ?? throw new ArgumentNullException(nameof(outbound));
         _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
@@ -62,7 +59,6 @@ public sealed class LoginHandshakeDriver : ILoginHandshakeDriver
         // Production default is the cryptographic RNG; tests inject a deterministic one. spec: crypto.md §6.3.
         _paddingRandom = paddingRandom ?? CryptoPaddingRandom.Shared;
         _stateMachine = stateMachine;
-        _eventBus = eventBus;
     }
 
     /// <inheritdoc />
@@ -97,10 +93,10 @@ public sealed class LoginHandshakeDriver : ILoginHandshakeDriver
         // Advance the lifecycle out of Login if a state machine was supplied.
         _stateMachine?.OnAuthenticated();
 
-        // Publish the handshake-completed event so the event bus consumers (e.g. GamePacketHandler's
-        // delegate, Godot login screen) are notified. spec: crypto.md §6.1 order 4.
-        _eventBus?.Publish(new LoginHandshakeCompletedEvent(reply.Length));
-
+        // NOTE: this driver does NOT publish LoginHandshakeCompletedEvent. The event is published by the
+        // SINGLE owner — GamePacketHandler.HandleKeyExchange, which always has a non-null event bus and
+        // invokes this driver. Publishing here too would double-fire the event (and the driver's bus was
+        // optional/never-wired). spec: crypto.md §6.1 order 4 (handshake-completed signalled once).
         return reply.Length;
     }
 }

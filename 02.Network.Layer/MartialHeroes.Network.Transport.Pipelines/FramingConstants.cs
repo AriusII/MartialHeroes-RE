@@ -14,24 +14,11 @@ internal static class FramingConstants
     internal const int HeaderSize = 8;
 
     /// <summary>
-    /// Byte offset within the header at which the little-endian u32 total-frame-size field lives.
-    /// spec: Docs/RE/opcodes.md + Docs/RE/specs/crypto.md §2 — "Offset +0, Width 4 bytes (u32, LE),
-    /// total frame size in bytes including this 8-byte header." (The u16-vs-u32 question is RESOLVED
-    /// in favour of u32; the I/O loop frames on the full 32-bit value.)
-    /// </summary>
-    internal const int SizeFieldOffset = 0;
-
-    /// <summary>
     /// Byte offset of the major opcode (u16, little-endian).
     /// spec: Docs/RE/opcodes.md — "Offset +4, Size u16, Field major."
+    /// Equals the width of the preceding u32 size field at +0.
     /// </summary>
     internal const int MajorOpcodeOffset = 4;
-
-    /// <summary>
-    /// Byte offset of the minor opcode (u16, little-endian).
-    /// spec: Docs/RE/opcodes.md — "Offset +6, Size u16, Field minor."
-    /// </summary>
-    internal const int MinorOpcodeOffset = 6;
 
     /// <summary>
     /// Maximum legal total frame size (inclusive), used as a sanity bound. The size field is a true

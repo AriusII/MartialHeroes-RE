@@ -119,9 +119,9 @@ public readonly record struct VitalFormulaInputs
 
     /// <summary>
     /// Optional %HP buff slot ("slot81"), in whole percent. 0 if absent. Added to the HP multiplier
-    /// as <c>value / 100.0</c>. spec: stats.md (Stage 3 HP, slot81_value / 100.0).
+    /// as <c>value / 100.0</c> (whole-percent, not per-mille). spec: stats.md (Stage 3 HP, slot81_value / 100.0).
     /// </summary>
-    public int HpPercentBuffPermille { get; init; }
+    public int HpPercentBuffPercent { get; init; }
 
     /// <summary>First active aura slot (companion). spec: stats.md ("Aura terms").</summary>
     public AuraTerm Aura0 { get; init; }

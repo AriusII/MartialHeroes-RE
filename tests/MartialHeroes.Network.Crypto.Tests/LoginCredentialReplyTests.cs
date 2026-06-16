@@ -168,11 +168,47 @@ public sealed class LoginCredentialReplyTests
     }
 
     [Fact]
-    public void Build_Rejects_Non_17_Byte_Staged_Password()
+    public void Build_Rejects_A_Staged_Password_Smaller_Than_The_Minimum_Field_Cap()
     {
+        // The staged M width is parameter-driven (the password-field cap), but must still hold a 2-char
+        // password plus a trailing zero (>= 3 bytes). A 2-byte M is rejected. spec §6.6, §8.1.
         (SessionHandshake.KeyExchange key, _, _) = MakeKey();
         Assert.Throws<ArgumentException>(() => LoginCredentialReply.Build(
-            in key, "acct"u8, default, includePin: false, new byte[16], new ConstPaddingRandom(1)));
+            in key, "acct"u8, default, includePin: false, new byte[2], new ConstPaddingRandom(1)));
+    }
+
+    [Fact]
+    public void Build_Accepts_A_Non_Default_Field_Cap_Staged_Password()
+    {
+        // A caller-supplied 16-byte field cap is valid: width is parameter-driven, not fixed at 17. §6.6.
+        (SessionHandshake.KeyExchange key, _, _) = MakeKey();
+        byte[] staged = CredentialPlaintext.StagePassword("pw"u8, fieldCap: 16);
+        byte[] payload = LoginCredentialReply.Build(
+            in key, "acct"u8, default, includePin: false, staged, new ConstPaddingRandom(0x42));
+        Assert.NotEmpty(payload);
+    }
+
+    [Fact]
+    public void Build_Rejects_An_Account_Shorter_Than_Two_Characters()
+    {
+        // Client-side account gate: >= 2 chars. spec: crypto.md §6.1; login.yaml (AccountLength >= 2).
+        (SessionHandshake.KeyExchange key, _, _) = MakeKey();
+        byte[] staged = CredentialPlaintext.StagePassword("pw"u8);
+        Assert.Throws<ArgumentException>(() => LoginCredentialReply.Build(
+            in key, "a"u8, default, includePin: false, staged, new ConstPaddingRandom(1)));
+    }
+
+    [Fact]
+    public void Build_Rejects_An_Account_At_Or_Over_The_Field_Cap()
+    {
+        // NUL-inclusive account length must be < 20. A 19-char account => length 20, rejected.
+        // spec: crypto.md §6.1; login.yaml (AccountLength < 20).
+        (SessionHandshake.KeyExchange key, _, _) = MakeKey();
+        byte[] staged = CredentialPlaintext.StagePassword("pw"u8);
+        byte[] account = new byte[19]; // 19 chars -> NUL-inclusive length 20 == MaxAccountLengthExclusive
+        Array.Fill(account, (byte)'a');
+        Assert.Throws<ArgumentException>(() => LoginCredentialReply.Build(
+            in key, account, default, includePin: false, staged, new ConstPaddingRandom(1)));
     }
 
     // --- helpers (synthetic; not capture data) ----------------------------------------------------

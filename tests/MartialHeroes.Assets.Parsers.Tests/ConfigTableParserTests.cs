@@ -271,77 +271,8 @@ public sealed class ConfigTableParserTests
         Assert.Equal((byte)11, entries[0].Type);
     }
 
-    // =========================================================================
-    // items.scr tests — stride 548 + N×8
-    // =========================================================================
-
-    private static byte[] BuildItemsScr((byte trailingCount, byte categoryFlag1)[] items)
-    {
-        // Each main record is 548 bytes; followed by trailingCount × 8 bytes.
-        // spec: Docs/RE/formats/config_tables.md §2.7 — stride 548 bytes + N×8: CONFIRMED.
-        using var ms = new System.IO.MemoryStream();
-        foreach (var (trailingCount, catFlag1) in items)
-        {
-            var rec = new byte[548];
-            // category flag 1 (weapon) at +0xE5. CONFIRMED.
-            // spec: Docs/RE/formats/config_tables.md §2.7 — "+0xE5 u8 Category flag 1 (1=weapon): CONFIRMED".
-            rec[0xE5] = catFlag1;
-            // trailing count at +0x220. CONFIRMED.
-            // spec: Docs/RE/formats/config_tables.md §2.7 — "+0x220 u8 Trailing entry count N: CONFIRMED".
-            rec[0x220] = trailingCount;
-            ms.Write(rec);
-            // trailing entries: trailingCount × 8 bytes (zeroed; fields UNVERIFIED).
-            ms.Write(new byte[trailingCount * 8]);
-        }
-
-        return ms.ToArray();
-    }
-
-    [Fact]
-    public void ItemsScr_Parse_RecordCount()
-    {
-        // spec: Docs/RE/formats/config_tables.md §2.7 — stride 548 + variable trailing: CONFIRMED.
-        byte[] data = BuildItemsScr([(0, 0), (0, 0)]);
-        ItemCatalogEntry[] entries = ConfigTableParser.ParseItemsScr(new ReadOnlyMemory<byte>(data));
-        Assert.Equal(2, entries.Length);
-    }
-
-    [Fact]
-    public void ItemsScr_Parse_CategoryFlag1_Weapon()
-    {
-        // spec: Docs/RE/formats/config_tables.md §2.7 — "+0xE5 u8 Category flag 1 (1=weapon): CONFIRMED".
-        byte[] data = BuildItemsScr([(0, 1)]); // catFlag1 = 1 = weapon
-        ItemCatalogEntry[] entries = ConfigTableParser.ParseItemsScr(new ReadOnlyMemory<byte>(data));
-
-        Assert.Equal((byte)1, entries[0].CategoryFlag1);
-    }
-
-    [Fact]
-    public void ItemsScr_Parse_TrailingEntries()
-    {
-        // spec: Docs/RE/formats/config_tables.md §2.7 — "N×8 trailing sub-entries": CONFIRMED.
-        byte[] data = BuildItemsScr([(3, 0)]); // 3 trailing × 8 = 24 extra bytes
-        ItemCatalogEntry[] entries = ConfigTableParser.ParseItemsScr(new ReadOnlyMemory<byte>(data));
-
-        Assert.Equal((byte)3, entries[0].TrailingCount);
-        Assert.Equal(3, entries[0].TrailingEntries.Length);
-        Assert.Equal(8, entries[0].TrailingEntries[0].Length);
-    }
-
-    [Fact]
-    public void ItemsScr_Parse_RawRecord_Is548Bytes()
-    {
-        byte[] data = BuildItemsScr([(0, 0)]);
-        ItemCatalogEntry[] entries = ConfigTableParser.ParseItemsScr(new ReadOnlyMemory<byte>(data));
-        Assert.Equal(548, entries[0].RawRecord.Length);
-    }
-
-    [Fact]
-    public void ItemsScr_Parse_EmptyBuffer_ReturnsEmpty()
-    {
-        ItemCatalogEntry[] entries = ConfigTableParser.ParseItemsScr(ReadOnlyMemory<byte>.Empty);
-        Assert.Empty(entries);
-    }
+    // items.scr tests retired (CAMPAIGN 11 Phase 3a) — ConfigTableParser.ParseItemsScr and
+    // ItemCatalogEntry were removed. Use ItemsScrParser (VfsDeepIISpecCorrectionTests / Wave3cParserTests).
 
     // =========================================================================
     // users.scr tests — fixed 496-byte block

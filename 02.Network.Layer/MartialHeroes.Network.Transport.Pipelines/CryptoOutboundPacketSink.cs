@@ -154,12 +154,19 @@ public sealed class CryptoOutboundPacketSink : IOutboundPacketSink
             // spec: Docs/RE/opcodes.md + crypto.md §2 — header layout: +0 u32 total size,
             //       +4 u16 major, +6 u16 minor; total size = 8 + compressedLength.
             int totalSize = FramingConstants.HeaderSize + compressedLength;
+            // Guard: MaxFrameSize (8 + 0x2DA0) is derived from the client's INBOUND fixed LZ4
+            // decompress scratch capacity (spec: Docs/RE/specs/crypto.md §3/§5 — "fixed 11680-byte
+            // output buffer"). No separate outbound max is recovered from the spec; this value is
+            // reused as a conservative sanity bound only. Compressed payloads for game traffic are
+            // always smaller than the plaintext, so this guard should never fire under normal use.
+            // spec: Docs/RE/specs/network_dispatch.md §6.2 + Docs/RE/specs/crypto.md §5.
             if (totalSize > FramingConstants.MaxFrameSize)
             {
                 throw new InvalidOperationException(
-                    $"Outbound frame size {totalSize} exceeds the documented wire maximum " +
-                    $"{FramingConstants.MaxFrameSize} (8 + 0x2DA0 inbound LZ4 capacity). " +
-                    $"spec: Docs/RE/opcodes.md + Docs/RE/specs/crypto.md §3/§5.");
+                    $"Outbound frame size {totalSize} exceeds the sanity bound " +
+                    $"{FramingConstants.MaxFrameSize} (8 + 0x2DA0; reused from inbound LZ4 capacity — " +
+                    $"no separate outbound ceiling is recovered from the spec). " +
+                    $"spec: Docs/RE/specs/crypto.md §3/§5 + Docs/RE/specs/network_dispatch.md §6.2.");
             }
 
             byte[] frame = ArrayPool<byte>.Shared.Rent(totalSize);

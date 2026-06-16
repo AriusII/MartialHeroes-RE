@@ -445,18 +445,18 @@ public sealed class SkinnedGltfConverterTests
     }
 
     [Fact]
-    public void WriteGlb_WithAnimation_TranslationAccessor_XIsNegated()
+    public void WriteGlb_WithAnimation_TranslationAccessor_ZIsNegated()
     {
-        // Handedness flip: X component of translation is negated.
+        // Uniform Z-negate convention: keyframe translation (x,y,z) → (x,y,−z).
+        // spec: Docs/RE/specs/skinning.md §8(b) 'apply [Z-negate] uniformly … keyframe translations.'
         // spec: Docs/RE/formats/animation.md §Keyframe record — translation_x/y/z: CONFIRMED.
         // glTF 2.0 §3.4: right-handed.
-        // Keyframe 0 of track 0: translation = (0,0,0) → after flip X = 0 (unchanged here).
-        // Use a clip with non-zero X translation to test the flip.
-        var clipWithXTranslation = new AnimationClip
+        // Use a clip with non-zero Z translation to verify the Z-negate.
+        var clipWithZTranslation = new AnimationClip
         {
             IdA = 10,
             IdB = 11,
-            Name = "XTest",
+            Name = "ZTest",
             FrameCount = 1,
             Tracks =
             [
@@ -468,7 +468,7 @@ public sealed class SkinnedGltfConverterTests
                     [
                         new Keyframe
                         {
-                            Translation = new Vec3(2f, 0f, 0f), // X=2 on disk → X=-2 after flip
+                            Translation = new Vec3(0f, 0f, 2f), // Z=2 on disk → Z=−2 after negate
                             Rotation = new Quat(0f, 0f, 0f, 1f),
                         },
                     ],
@@ -478,7 +478,7 @@ public sealed class SkinnedGltfConverterTests
 
         using var ms = new MemoryStream();
         GltfConverter.WriteGlb(MakeTriangleSkin(), MakeTwoBoneSkeleton(), ms,
-            new[] { clipWithXTranslation });
+            new[] { clipWithZTranslation });
         byte[] glb = ms.ToArray();
 
         string json = ExtractJson(glb);
@@ -492,8 +492,75 @@ public sealed class SkinnedGltfConverterTests
         int off = bv.GetProperty("byteOffset").GetInt32();
 
         byte[] binData = ExtractBinChunk(glb);
-        float translationX = BinaryPrimitives.ReadSingleLittleEndian(binData.AsSpan(off));
-        Assert.Equal(-2f, translationX, precision: 5); // negated
+        // VEC3: x, y, z — read all three to verify only Z is negated.
+        float emittedX = BinaryPrimitives.ReadSingleLittleEndian(binData.AsSpan(off));
+        float emittedY = BinaryPrimitives.ReadSingleLittleEndian(binData.AsSpan(off + 4));
+        float emittedZ = BinaryPrimitives.ReadSingleLittleEndian(binData.AsSpan(off + 8));
+        Assert.Equal(0f, emittedX, precision: 5);  // X unchanged
+        Assert.Equal(0f, emittedY, precision: 5);  // Y unchanged
+        Assert.Equal(-2f, emittedZ, precision: 5); // Z negated
+    }
+
+    [Fact]
+    public void WriteGlb_InverseBindMatrix_CancelsForwardTransformAtRest()
+    {
+        // Validate the bind/inverse-bind cancellation invariant:
+        // inverseBindMatrix × forwardWorldMatrix ≈ identity at rest.
+        // spec: Docs/RE/specs/skinning.md §0 'At rest (animation == bind pose) the inverse-bind
+        //   and the forward bone transform cancel exactly to the identity.'
+        // spec: Docs/RE/specs/skinning.md §8(a) 'invariant to assert during bring-up: with the
+        //   idle/bind pose loaded and no clip playing, the deformed mesh must equal the rest mesh.'
+        //
+        // The root bone (self_id=0) has identity rotation and zero translation in MakeTwoBoneSkeleton.
+        // Its world transform IS identity, so its inverseBindMatrix must also be identity.
+        // We check that the child bone (self_id=1, translation (0,1,0)) yields an inverse-bind
+        // that, when multiplied by the forward world transform (translation (0,1,0)), gives identity.
+        //
+        // Under the Z-negate convention, child bone world translation = (0, 1, 0)
+        // (no Z component in this bone's local translation).
+        // The inverse-bind for a pure translation T is [I | -T]:
+        //   forward world: col3 = (0, 1, 0, 1)
+        //   inverse-bind:  col3 = (0, -1, 0, 1)
+        //   product col3:  (0, 0, 0, 1) — translation zeroed → identity.
+
+        using var ms = new MemoryStream();
+        GltfConverter.WriteGlb(MakeTriangleSkin(), MakeTwoBoneSkeleton(), ms);
+        byte[] glb = ms.ToArray();
+
+        string json = ExtractJson(glb);
+        using var doc = JsonDocument.Parse(json);
+
+        // Find the IBM accessor and buffer view.
+        var skin = doc.RootElement.GetProperty("skins")[0];
+        int ibmAccIdx = skin.GetProperty("inverseBindMatrices").GetInt32();
+        var ibmAcc = doc.RootElement.GetProperty("accessors")[ibmAccIdx];
+        int ibmBvIdx = ibmAcc.GetProperty("bufferView").GetInt32();
+        var ibmBv = doc.RootElement.GetProperty("bufferViews")[ibmBvIdx];
+        int ibmOff = ibmBv.GetProperty("byteOffset").GetInt32();
+
+        byte[] bin = ExtractBinChunk(glb);
+
+        // Read bone 1 (child) inverse-bind matrix (MAT4, 16 floats, column-major).
+        // Bone 0 is index 0, bone 1 is index 1 → offset by 16 floats.
+        int bone1IbmOff = ibmOff + 16 * sizeof(float);
+        float[] ibm = new float[16];
+        for (int i = 0; i < 16; i++)
+            ibm[i] = BinaryPrimitives.ReadSingleLittleEndian(bin.AsSpan(bone1IbmOff + i * 4));
+
+        // Column-major: ibm[12], ibm[13], ibm[14] are the translation column.
+        // Child bone world translation (under Z-negate of (0,1,0)) = (0,1,0).
+        // Inverse-bind translation should be (0,−1,0).
+        Assert.Equal(0f, ibm[12], precision: 5);  // tx
+        Assert.Equal(-1f, ibm[13], precision: 5); // ty = −bindWorldTy
+        Assert.Equal(0f, ibm[14], precision: 5);  // tz
+
+        // Rotation block (upper-left 3×3 = identity for identity quaternion after Z-negate).
+        // Column 0: [1,0,0,0], Column 1: [0,1,0,0], Column 2: [0,0,1,0].
+        Assert.Equal(1f, ibm[0], precision: 5);   // r[0,0]
+        Assert.Equal(0f, ibm[1], precision: 5);   // r[1,0]
+        Assert.Equal(0f, ibm[2], precision: 5);   // r[2,0]
+        Assert.Equal(1f, ibm[5], precision: 5);   // r[1,1]
+        Assert.Equal(1f, ibm[10], precision: 5);  // r[2,2]
     }
 
     // -------------------------------------------------------------------------

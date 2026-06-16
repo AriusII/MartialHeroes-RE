@@ -17,7 +17,7 @@ namespace MartialHeroes.Client.Godot.Adapters;
 /// <b>Graceful degradation:</b> when the VFS archive is <see langword="null"/> (offline mode), or
 /// either file is absent from the archive, or a parse error occurs, <see cref="LoadRegionCatalogAsync"/>
 /// returns <see langword="null"/>. <see cref="RegionService"/> then treats all positions as
-/// <see cref="MartialHeroes.Shared.Kernel.Enums.ZoneType.Unknown"/>.
+/// <see cref="MartialHeroes.Shared.Kernel.Enums.ZoneType.Safe"/> (the §16.3 no-catalog default).
 /// </para>
 /// <para>
 /// <b>VFS path patterns</b> (spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1–§16.2):

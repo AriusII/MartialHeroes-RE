@@ -73,10 +73,9 @@ public static class XeffParser
     ///   + 24                         element fixed head (A.4.0)
     ///   + N×64                       name table (A.4.1)
     ///   + (4+N×4)                    curve 1 (alpha) (A.4.2)
-    ///   + 3×4                        curves 2/3/4 (scale, count prefix only when count=0) (A.4.2)
-    ///   + 13                         track header (A.4.3)
-    ///   + 9×4                        frame 0 (no index prefix) (A.4.4)
-    ///   + (N−1)×(4+9×4)             frames 1..N-1 (each has a u32 index prefix) (A.4.4)
+    ///   + 3×4                        curves 2/3/4 (diffuse RGB, count prefix only when count=0) (A.4.2)
+    ///   + 9                          track header (A.4.3) — CORRECTED from an earlier wrong 13
+    ///   + N×(4+9×4)                  N keyframes, each 40 bytes incl. frame 0 (A.4.4)
     /// </remarks>
     public static XeffData ParseXeff(ReadOnlyMemory<byte> data) =>
         ParseXeff(data.Span);
@@ -245,11 +244,22 @@ public static class XeffParser
             // spec: Docs/RE/formats/effects.md §A.4.4 — "every animated keyframe carries a u32 index prefix": CONFIRMED.
             // spec: Docs/RE/formats/effects.md §A.14 XEFF_KEYFRAME_ONDISK_STRIDE = 40.
             keyframes = new XeffKeyframe[(int)texCount];
+
+            // Pre-loop bounds check: every animated frame is 40 bytes (u32 kf_index + 9 × f32).
+            // spec: Docs/RE/formats/effects.md §A.4.4 — every animated keyframe: 40 bytes incl. frame 0: CONFIRMED.
+            // spec: Docs/RE/formats/effects.md §A.14 XEFF_KEYFRAME_ONDISK_STRIDE = 40.
+            long totalKfBytes = (long)texCount * 40;
+            if (offset + totalKfBytes > span.Length)
+                throw new InvalidDataException(
+                    $".xeff parse error: sub_effect[{subIndex}] animated keyframe block truncated — " +
+                    $"need {texCount} × 40 = {totalKfBytes} bytes at offset {offset}, " +
+                    $"buffer length {span.Length}. spec: Docs/RE/formats/effects.md §A.4.4.");
+
             for (int k = 0; k < (int)texCount; k++)
             {
                 // All frames (including frame 0): u32 kf_index + 9 × f32 = 40 bytes.
                 // spec: Docs/RE/formats/effects.md §A.4.4 — "frame 0 is a normal 40-byte entry": CONFIRMED.
-                EnsureBytes(span, offset, 40, $"sub_effect[{subIndex}] keyframe[{k}]");
+                // Bounds already checked; read without per-element string allocation.
                 uint kfIndex = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
                 offset += 4;
 
