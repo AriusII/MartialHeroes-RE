@@ -126,7 +126,7 @@ public sealed class CryptoOutboundPacketSink : IOutboundPacketSink
             // Header-only packet (e.g. keepalive 2/10000): no cipher, no compression.
             // spec: Docs/RE/specs/crypto.md §2 — "header-only packets bypass all transforms."
             byte[] headerOnly = BuildHeader(
-                totalSize: (ushort)FramingConstants.HeaderSize,
+                totalSize: (uint)FramingConstants.HeaderSize,
                 major: majorOpcode,
                 minor: minorOpcode);
 
@@ -151,20 +151,21 @@ public sealed class CryptoOutboundPacketSink : IOutboundPacketSink
                 out int compressedLength);
 
             // --- Step 4: assemble header + compressed payload into a single send buffer ---
-            // spec: Docs/RE/opcodes.md — header layout: +0 u16 total size, +2 u16 zero,
+            // spec: Docs/RE/opcodes.md + crypto.md §2 — header layout: +0 u32 total size,
             //       +4 u16 major, +6 u16 minor; total size = 8 + compressedLength.
             int totalSize = FramingConstants.HeaderSize + compressedLength;
             if (totalSize > FramingConstants.MaxFrameSize)
             {
                 throw new InvalidOperationException(
-                    $"Outbound frame size {totalSize} exceeds the u16 wire maximum " +
-                    $"{FramingConstants.MaxFrameSize}. spec: Docs/RE/opcodes.md.");
+                    $"Outbound frame size {totalSize} exceeds the documented wire maximum " +
+                    $"{FramingConstants.MaxFrameSize} (8 + 0x2DA0 inbound LZ4 capacity). " +
+                    $"spec: Docs/RE/opcodes.md + Docs/RE/specs/crypto.md §3/§5.");
             }
 
             byte[] frame = ArrayPool<byte>.Shared.Rent(totalSize);
             try
             {
-                WriteHeader(frame.AsSpan(), (ushort)totalSize, majorOpcode, minorOpcode);
+                WriteHeader(frame.AsSpan(), (uint)totalSize, majorOpcode, minorOpcode);
                 compressed.Memory.Span[..compressedLength].CopyTo(frame.AsSpan(FramingConstants.HeaderSize));
 
                 await _session.SendAsync(
@@ -189,15 +190,13 @@ public sealed class CryptoOutboundPacketSink : IOutboundPacketSink
 
     /// <summary>
     /// Writes the 8-byte wire header into <paramref name="destination"/>.
-    /// spec: Docs/RE/opcodes.md — Wire frame header layout.
+    /// spec: Docs/RE/opcodes.md + Docs/RE/specs/crypto.md §2 — Wire frame header layout.
     /// </summary>
-    private static void WriteHeader(Span<byte> destination, ushort totalSize, ushort major, ushort minor)
+    private static void WriteHeader(Span<byte> destination, uint totalSize, ushort major, ushort minor)
     {
-        // +0: u16 LE total frame size (includes the 8-byte header)
-        BinaryPrimitives.WriteUInt16LittleEndian(destination[0..], totalSize);
-        // +2: u16 LE unused / zero (upper half of physical u32 — always zero)
-        // spec: Docs/RE/opcodes.md "upper 2 bytes unused/zero for framing"
-        BinaryPrimitives.WriteUInt16LittleEndian(destination[2..], 0);
+        // +0..+3: u32 LE total frame size (includes the 8-byte header). The size field is a true
+        // u32 — the u16-vs-u32 question is RESOLVED in favour of u32. spec: crypto.md §2.
+        BinaryPrimitives.WriteUInt32LittleEndian(destination[0..], totalSize);
         // +4: u16 LE major opcode
         BinaryPrimitives.WriteUInt16LittleEndian(destination[4..], major);
         // +6: u16 LE minor opcode
@@ -208,7 +207,7 @@ public sealed class CryptoOutboundPacketSink : IOutboundPacketSink
     /// Allocates a new 8-byte array for a header-only frame. Only used for the
     /// zero-payload pass-through path where no rental is active.
     /// </summary>
-    private static byte[] BuildHeader(ushort totalSize, ushort major, ushort minor)
+    private static byte[] BuildHeader(uint totalSize, ushort major, ushort minor)
     {
         byte[] header = new byte[FramingConstants.HeaderSize];
         WriteHeader(header, totalSize, major, minor);

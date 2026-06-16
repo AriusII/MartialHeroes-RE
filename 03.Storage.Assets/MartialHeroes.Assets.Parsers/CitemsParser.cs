@@ -11,15 +11,16 @@ namespace MartialHeroes.Assets.Parsers;
 /// spec: Docs/RE/formats/items_scr.md §2 citems.scr — CONFIRMED.
 /// <para>
 /// Format: no file header; fixed stride 1052 bytes (0x41C); record count = file_size / 1052.
-/// Known: 512 records × 1052 = 539,648 bytes, exact.
+/// Known: 512 records × 1052 = 538,624 bytes, exact.
 /// spec: Docs/RE/formats/items_scr.md §2.1 — "fixed stride 1052 bytes (0x41C)": CONFIRMED.
 /// spec: Docs/RE/formats/items_scr.md §2.3 — "record count = file_size / 1052 = 512": CONFIRMED.
 /// </para>
 /// <para>
 /// CORRECTIONS applied (spec: Docs/RE/formats/items_scr.md §2.5):
+/// - +0x00 is item_id (non-monotonic dense-array lookup key), NOT a sequential slot_index.
 /// - item_name is at +0x04 (48 bytes), NOT at +0x08 (40 bytes).
 /// - There is NO item_ref field at +0x04 — those bytes ARE the item_name.
-/// - Description is 6 × 81-byte paragraphs from 0x0E4 (NOT a single buffer near 0xDC).
+/// - Description is >= 6 × 81-byte paragraphs from 0x0E4 (count 6 vs 10 is an OPEN conflict — see §2.4).
 /// </para>
 /// <para>
 /// Text encoding: CP949 (EUC-KR), null-padded inside fixed buffers.
@@ -36,9 +37,12 @@ public static class CitemsParser
     // Field offsets within a record.
     // spec: Docs/RE/formats/items_scr.md §2.2 — Record layout.
 
-    // slot_index u32LE @ 0x00. CONFIRMED.
-    // spec: Docs/RE/formats/items_scr.md §2.2 — slot_index u32LE @ 0x00: CONFIRMED (512/512).
-    private const int OffSlotIndex = 0x00;
+    // item_id u32LE @ 0x00 — dense-array lookup key, non-monotonic, NOT a slot index.
+    // CORRECTED CAMPAIGN 10: formerly called slot_index; the loader uses this as an item id key
+    // whose values are non-monotonic (billing items >= 100000 appear mid-file).
+    // spec: Docs/RE/formats/items_scr.md §2.1 — "+0x00 is item_id, NOT slot_index": SAMPLE-VERIFIED (512/512).
+    // spec: Docs/RE/formats/items_scr.md §2.5 — "slot_index" WRONG; field is item_id.
+    private const int OffItemId = 0x00; // item_id - dense-array lookup key, non-monotonic, NOT a slot index (§2.5)
 
     // item_name CP949[48] @ 0x04. CONFIRMED (512/512).
     // NOTE: the 4 bytes at +0x04 are the START of the name string — no separate item_ref field exists.
@@ -67,12 +71,14 @@ public static class CitemsParser
     // spec: Docs/RE/formats/items_scr.md §2.2 — flag_4C u32LE @ 0x4C: CONFIRMED.
     private const int OffFlag4C = 0x4C;
 
-    // Description block: 6 paragraphs × 81 bytes each, starting at 0x0E4.
-    // desc_para[i] start = 0x0E4 + i * 81 (i = 0..5). CONFIRMED (512/512).
-    // spec: Docs/RE/formats/items_scr.md §2.4 — "6 × 81-byte paragraphs from 0x0E4": CONFIRMED (512/512).
+    // Description block: >= 6 paragraphs × 81 bytes each, starting at 0x0E4.
+    // desc_para[i] start = 0x0E4 + i * 81 (i = 0..DescParaCount-1). CONFIRMED (512/512).
+    // OPEN CONFLICT (§2.4): count is 6 vs 10 UNRESOLVED; remainder at 0x2CA may hold paras 6-9.
+    // RemainderRaw retains the trailing bytes so a future spec update can decode them without re-parsing.
+    // spec: Docs/RE/formats/items_scr.md §2.4 — desc_para[i] = 0x0E4 + i*81; count >= 6; 6-vs-10 OPEN.
     private const int OffDescBlock = 0x0E4; // first paragraph start — CONFIRMED
     private const int DescParaWidth = 81; // 0x51 bytes per paragraph — CONFIRMED
-    private const int DescParaCount = 6; // 6 paragraphs — CONFIRMED
+    private const int DescParaCount = 6; // >= 6 confirmed; remainder may hold paras 6-9 (§2.4 OPEN)
 
     // Record remainder @ 0x2CA (338 bytes). UNVERIFIED.
     // spec: Docs/RE/formats/items_scr.md §2.2 — remainder 0x2CA..0x41B: UNVERIFIED.
@@ -114,9 +120,11 @@ public static class CitemsParser
             int recBase = i * RecordStride;
             ReadOnlySpan<byte> rec = span.Slice(recBase, RecordStride);
 
-            // slot_index u32LE @ 0x00. Sequential 1-based. CONFIRMED.
-            // spec: Docs/RE/formats/items_scr.md §2.2 — slot_index u32LE @ 0x00: CONFIRMED (512/512).
-            uint slotIndex = BinaryPrimitives.ReadUInt32LittleEndian(rec[OffSlotIndex..]);
+            // item_id u32LE @ 0x00. Dense-array lookup key, non-monotonic, NOT a sequential slot index.
+            // CORRECTED CAMPAIGN 10: field is item_id (billing items >= 100000 appear mid-file).
+            // spec: Docs/RE/formats/items_scr.md §2.1 — "+0x00 is item_id, NOT slot_index": SAMPLE-VERIFIED (512/512).
+            // spec: Docs/RE/formats/items_scr.md §2.5 — "slot_index" WRONG; field is item_id.
+            uint itemId = BinaryPrimitives.ReadUInt32LittleEndian(rec[OffItemId..]);
 
             // item_name CP949[48] @ 0x04. CONFIRMED (512/512).
             // The bytes at +0x04 ARE the name string — no separate item_ref field exists here.
@@ -148,9 +156,10 @@ public static class CitemsParser
             // spec: Docs/RE/formats/items_scr.md §2.2 — flag_4C u32LE @ 0x4C: CONFIRMED.
             uint flag4C = BinaryPrimitives.ReadUInt32LittleEndian(rec[OffFlag4C..]);
 
-            // 6 × 81-byte description paragraphs from 0x0E4. CONFIRMED (512/512).
-            // desc_para[i] start = 0x0E4 + i * 81 (i = 0..5).
-            // spec: Docs/RE/formats/items_scr.md §2.4 — 6 × 81-byte paragraphs: CONFIRMED.
+            // >= 6 × 81-byte description paragraphs from 0x0E4. CONFIRMED (512/512).
+            // desc_para[i] start = 0x0E4 + i * 81. OPEN CONFLICT: count 6 vs 10 — see §2.4.
+            // RemainderRaw (0x2CA..0x41B) retains trailing bytes in case paras 6-9 are discovered later.
+            // spec: Docs/RE/formats/items_scr.md §2.4 — >= 6 paragraphs from 0x0E4; count 6-vs-10 OPEN.
             // spec: Docs/RE/formats/items_scr.md §2.5 — correction: NOT a single buffer near 0xDC.
             var descParagraphs = new string[DescParaCount];
             for (int p = 0; p < DescParaCount; p++)
@@ -170,7 +179,7 @@ public static class CitemsParser
 
             records[i] = new CitemsRecord
             {
-                SlotIndex = slotIndex,
+                ItemId = itemId,
                 ItemName = itemName,
                 Unknown36 = unknown36,
                 CashPriceNx = cashPriceNx,

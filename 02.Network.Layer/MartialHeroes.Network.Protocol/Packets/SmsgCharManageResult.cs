@@ -1,12 +1,16 @@
 // spec: Docs/RE/packets/3-4_char_manage_result.yaml + Docs/RE/specs/login_flow.md §5.5 —
-//       opcode 3/4 (0x30004), 8-byte fixed block.
+//       opcode 3/7 (0x30007), 8-byte fixed block.
+//
+// LADDER DE-SWAP (build 263bd994, Campaign 10): the minor-3 receive ladder routes the 8-byte
+// manage/delete result to minor 7, NOT minor 4. The variable scene-entity update is 3/4; the
+// 16-byte enter/spawn confirm (SmsgCharSpawnResult) is 3/14. The linked spec file name
+// `3-4_char_manage_result.yaml` carries the stale pre-de-swap opcode in its name but its CONTENT
+// describes the 3/7 manage result (spec note: Tier-1 to reconcile the filename).
 //
 // !!! CAPTURE-UNVERIFIED STATIC LAYOUT !!!
 // Every offset/size below is a static inference (capture_verified: false in the spec). The
-// (major:minor) routing is dispatch-table-confirmed; the field layout is a hypothesis until a
-// live capture confirms it. NAMING CAUTION: raw decompiler output mislabels this 8-byte manage
-// handler as "3/7"; behaviour-anchored it is the 3/4 manage result. The genuine 3/7 is the
-// 16-byte SmsgCharSpawnResult — a DIFFERENT message; do NOT conflate them.
+// (major:minor) routing is dispatch-table-confirmed; the field VALUE semantics are a hypothesis
+// until a live capture confirms them.
 
 using System.Runtime.InteropServices;
 using MartialHeroes.Network.Protocol.Opcodes;
@@ -14,17 +18,17 @@ using MartialHeroes.Network.Protocol.Opcodes;
 namespace MartialHeroes.Network.Protocol.Packets;
 
 /// <summary>
-/// 3/4 — character create/delete/manage result. An 8-byte block: a result byte, a subtype byte that
-/// selects which character operation the result is for, and a 4-byte ready_time used to drive the
+/// 3/7 — character delete/select/rename MANAGE result. An 8-byte block: a result byte, a subtype byte
+/// that selects which character operation the result is for, and a 4-byte ready_time used to drive the
 /// same-day delete-cooldown timer. Subtype 2 is delete-confirm (decrements the account char count).
 /// Fixed 8-byte block. spec: Docs/RE/packets/3-4_char_manage_result.yaml; login_flow.md §5.5.
 /// CAPTURE-UNVERIFIED layout.
 /// </summary>
-[PacketOpcode(3, 4)]
+[PacketOpcode(3, 7)]
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public readonly struct SmsgCharManageResult
 {
-    /// <summary>Packed opcode 0x30004 (3/4). spec: packets/3-4_char_manage_result.yaml.</summary>
+    /// <summary>Packed opcode 0x30007 (3/7). spec: packets/3-4_char_manage_result.yaml.</summary>
     public const uint OpcodeId = Opcodes.Opcodes.SmsgCharManageResult;
 
     /// <summary>Declared wire size in bytes. spec: packets/3-4_char_manage_result.yaml (size: 8).</summary>

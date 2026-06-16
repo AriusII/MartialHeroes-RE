@@ -72,14 +72,14 @@ public static class ItemsScrParser
     // spec: Docs/RE/formats/items_scr.md §1.4 — +0x0A4 (opaque): DBG-pending.
     private const int OffOpaque0A4 = 0x0A4;
 
-    // record_discriminator u8 @ 0x0BA — tested != 14 by the loader.
-    // CORRECTED CAMPAIGN VFS-MASTERY (two-witness: loader + black-box):
-    //   The prior "+0x0B8 item_type_tag" is REFUTED (see §1.7). The actual loader branch
-    //   is on the discriminator at +0xBA, tested != 14. Dispatch flags cluster around
-    //   +0xCD relative to the loader's 0x18 buffer base. Full discriminator value enumeration is DBG-pending.
-    // spec: Docs/RE/formats/items_scr.md §1.4.1 — discriminator @+0xBA tested != 14: loader-resolved.
+    // record_discriminator u8 @ on-disk +0xD2 — tested != 14 by the loader.
+    // CORRECTED CAMPAIGN 10 (two-witness: stack-frame analysis + black-box):
+    //   The prior "+0x0BA" was the loader's internal notation against its working buffer whose base
+    //   sits 0x18 bytes ahead of the record start: +0xBA + 0x18 = +0xD2 (on-disk).
+    //   Engineers reading the file from disk MUST use +0xD2. Full discriminator value enumeration is DBG-pending.
+    // spec: Docs/RE/formats/items_scr.md §1.4.1 — on-disk +0xD2 tested != 14: loader-resolved.
     // spec: Docs/RE/formats/items_scr.md §1.7 — "+0x0B8 item_type_tag" REFUTED.
-    private const int OffRecordDiscriminator = 0x0BA;
+    private const int OffRecordDiscriminator = 0x0D2; // on-disk +0xD2; spec: Docs/RE/formats/items_scr.md §1.4.1
 
     // opaque_200 4 bytes @ 0x200 — read and retained; no consumer semantics settled.
     // spec: Docs/RE/formats/items_scr.md §1.4 — +0x200 (opaque): DBG-pending.
@@ -206,9 +206,10 @@ public static class ItemsScrParser
         // spec: Docs/RE/formats/items_scr.md §1.4 "Loader buffer base" note.
         ReadOnlyMemory<byte> opaque0A4 = data.Slice(recordOffset + OffOpaque0A4, 4);
 
-        // record_discriminator u8 @ 0x0BA. Tested != 14 by the loader for per-record routing.
-        // CORRECTED CAMPAIGN VFS-MASTERY: prior "+0x0B8 item_type_tag" is REFUTED (see §1.7).
-        // spec: Docs/RE/formats/items_scr.md §1.4.1 — discriminator @+0xBA tested != 14: loader-resolved.
+        // record_discriminator u8 @ on-disk +0xD2. Tested != 14 by the loader for per-record routing.
+        // CORRECTED CAMPAIGN 10: on-disk offset is +0xD2 (the loader's "+0xBA" is its 0x18-shifted internal
+        // working-buffer notation; +0xBA + 0x18 = +0xD2 on-disk — see §1.4.1).
+        // spec: Docs/RE/formats/items_scr.md §1.4.1 — on-disk +0xD2 tested != 14: loader-resolved.
         // spec: Docs/RE/formats/items_scr.md §1.7 — "+0x0B8 item_type_tag" REFUTED; DO NOT reintroduce.
         // Full discriminator value enumeration is DBG-pending; read the byte, assign no meaning.
         byte recordDiscriminator = fixedBlock[OffRecordDiscriminator];

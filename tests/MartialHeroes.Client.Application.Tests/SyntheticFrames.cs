@@ -357,7 +357,9 @@ internal static class SyntheticFrames
     }
 
     /// <summary>
-    /// 3/7 char-spawn result (16-byte payload). spec: login_flow.md §5.3 (result + slot + 3×u32).
+    /// 3/14 char-spawn response (16-byte payload). spec: opcodes.md (3/14 SmsgCharSpawnResponse);
+    /// login_flow.md §5.3 (result + slot + 3×u32). CAMPAIGN-10 ladder de-swap: the 16-byte enter-game
+    /// spawn result is opcode 3/14 (was mislabelled 3/7; 3/7 is the 8-byte manage result).
     /// </summary>
     public static byte[] CharSpawnResult(
         byte result, byte slot, uint param1 = 0, uint param2 = 0, uint param3 = 0)
@@ -370,12 +372,13 @@ internal static class SyntheticFrames
         BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x04, 4), param1);
         BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x08, 4), param2);
         BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x0c, 4), param3);
-        return Frame(3, 7, p);
+        return Frame(3, 14, p); // spec: opcodes.md — 3/14 SmsgCharSpawnResponse (16-byte enter-game spawn)
     }
 
     /// <summary>
-    /// 3/4 char manage / delete result (8-byte payload). spec: login_flow.md §5.5
-    /// (result@0, subtype@2, ready_time u32@4).
+    /// 3/7 char manage / delete result (8-byte payload). spec: opcodes.md (3/7 SmsgCharManageResult);
+    /// login_flow.md §5.5 (result@0, subtype@2, ready_time u32@4). CAMPAIGN-10 ladder de-swap: the
+    /// 8-byte manage/delete result is opcode 3/7 (was mislabelled 3/4; 3/4 is SceneEntityUpdate).
     /// </summary>
     public static byte[] CharManageResult(byte result, byte subtype, uint readyTime)
     {
@@ -386,7 +389,7 @@ internal static class SyntheticFrames
         p[0x02] = subtype; // 0/1/2 (2 = delete-confirm)
         // 0x03 reserved
         BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x04, 4), readyTime);
-        return Frame(3, 4, p);
+        return Frame(3, 7, p); // spec: opcodes.md — 3/7 SmsgCharManageResult (8-byte manage/delete)
     }
 
     /// <summary>

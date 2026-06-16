@@ -62,9 +62,10 @@ public static class NpcSpawnParser
             float worldZ = BinaryPrimitives.ReadSingleLittleEndian(rec[8..]);
 
             // facing f32le @ +12. Base orientation in radians.
-            // IMPORTANT: the runtime adds a quarter-turn (π/2) to this value on use.
-            // Applied facing = stored_value + π/2. Do NOT apply raw.
+            // IMPORTANT: the runtime applies π/2 − stored_value as the entity's facing.
+            // Applied facing = π/2 − stored_value. Simply adding π/2 would mirror the orientation.
             // spec: Docs/RE/formats/npc_spawns.md — facing f32 @ +12: CONFIRMED.
+            // spec: Docs/RE/formats/npc_spawns.md §Record layout — facing: "runtime applies π/2 − value".
             float facing = BinaryPrimitives.ReadSingleLittleEndian(rec[12..]);
 
             // spawn_type u32le @ +16.

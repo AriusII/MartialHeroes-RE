@@ -118,7 +118,7 @@ public enum CharManageSubtype
 }
 
 /// <summary>
-/// Published when a 3/4 character manage / delete result lands (SmsgCharManageResult). Immutable
+/// Published when a 3/7 character manage / delete result lands (SmsgCharManageResult). Immutable
 /// snapshot. Subtype 2 is delete-confirm; on the blocked path (Success == false) the ReadyTime drives
 /// a "wait HH:MM" delete-cooldown message. spec: Docs/RE/specs/login_flow.md §5.5;
 /// Docs/RE/packets/3-4_char_manage_result.yaml.

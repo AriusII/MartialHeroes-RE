@@ -392,7 +392,7 @@ public sealed class GamePacketHandler : IPacketHandler
 
                 break;
 
-            case Opcodes.SmsgCharSpawnResult: // 3/7 — enter-game spawn result (16-byte block)
+            case Opcodes.SmsgCharSpawnResult: // 3/14 — enter-game spawn result (16-byte block). spec: opcodes.md (CAMPAIGN-10 ladder de-swap)
                 if (payload.Length >= SmsgCharSpawnResult.WireSize)
                 {
                     HandleCharSpawnResult(in MemoryMarshal.AsRef<SmsgCharSpawnResult>(payload));
@@ -401,7 +401,7 @@ public sealed class GamePacketHandler : IPacketHandler
 
                 break;
 
-            case Opcodes.SmsgCharManageResult: // 3/4 — char manage / delete result (8-byte block)
+            case Opcodes.SmsgCharManageResult: // 3/7 — char manage / delete result (8-byte block). spec: opcodes.md (CAMPAIGN-10 ladder de-swap)
                 if (payload.Length >= SmsgCharManageResult.WireSize)
                 {
                     HandleCharManageResult(in MemoryMarshal.AsRef<SmsgCharManageResult>(payload));

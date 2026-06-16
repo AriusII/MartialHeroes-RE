@@ -67,9 +67,10 @@ public sealed class PacketRouterTests
 
     private static byte[] BuildFrame(ushort major, ushort minor, ReadOnlySpan<byte> payload)
     {
-        // spec: Docs/RE/opcodes.md — 8-byte LE header; size = 8 + payload, then major, minor.
+        // spec: Docs/RE/opcodes.md + crypto.md §2 — 8-byte LE header; size is a u32 @+0
+        // (= 8 + payload), then major @+4, minor @+6.
         byte[] frame = new byte[8 + payload.Length];
-        BinaryPrimitives.WriteUInt16LittleEndian(frame.AsSpan(0, 2), (ushort)(8 + payload.Length));
+        BinaryPrimitives.WriteUInt32LittleEndian(frame.AsSpan(0, 4), (uint)(8 + payload.Length));
         BinaryPrimitives.WriteUInt16LittleEndian(frame.AsSpan(4, 2), major);
         BinaryPrimitives.WriteUInt16LittleEndian(frame.AsSpan(6, 2), minor);
         payload.CopyTo(frame.AsSpan(8));

@@ -6,9 +6,9 @@ namespace MartialHeroes.Client.Application.UseCases;
 /// Session-scoped store bridging the character-select flow across the network/use-case boundary:
 /// the 3/1 SmsgCharacterList handler retains each occupied slot's <b>raw</b> per-slot record (the
 /// 880-byte SpawnDescriptor + 96-byte stats block + flag byte); <see cref="ApplicationUseCases.SelectCharacterAsync"/>
-/// confirms the chosen slot (caching it as <see cref="Chosen"/>); and the 3/7 SmsgCharSpawnResult
+/// confirms the chosen slot (caching it as <see cref="Chosen"/>); and the 3/14 SmsgCharSpawnResponse
 /// handler materializes the local player from that cached descriptor.
-/// spec: Docs/RE/specs/login_flow.md §3.5 ("caches the chosen slot's record locally ... consumed on 3/7").
+/// spec: Docs/RE/specs/login_flow.md §3.5 ("caches the chosen slot's record locally ... consumed on 3/14").
 /// </summary>
 /// <remarks>
 /// <para>

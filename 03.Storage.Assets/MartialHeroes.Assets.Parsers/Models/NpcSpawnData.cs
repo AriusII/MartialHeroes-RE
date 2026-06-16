@@ -39,9 +39,12 @@ public sealed class NpcSpawnRecord
 
     /// <summary>
     /// Facing / orientation value in radians (base orientation stored on disk).
-    /// The runtime adds a quarter-turn (π/2) to this stored value before using it.
-    /// Applied facing = <c>Facing + Math.PI / 2</c>.
+    /// The runtime applies <c>π/2 − Facing</c> as the entity's on-screen facing;
+    /// the stored value is *subtracted from* a quarter-turn, NOT simply added to it.
+    /// Simply adding π/2 would mirror the orientation.
+    /// Applied facing = <c>Math.PI / 2 - Facing</c>.
     /// spec: Docs/RE/formats/npc_spawns.md — facing f32 @ +12: CONFIRMED.
+    /// spec: Docs/RE/formats/npc_spawns.md §Record layout — "runtime applies π/2 − value": sample-verified.
     /// </summary>
     public required float Facing { get; init; }
 

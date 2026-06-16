@@ -10,23 +10,28 @@ namespace MartialHeroes.Assets.Parsers.Models;
 /// </summary>
 /// <remarks>
 /// spec: Docs/RE/formats/items_scr.md §2 citems.scr — CONFIRMED.
-/// No file header; record count = file_size / 1052 (must be exact). Known: 512 records (539,648 bytes).
+/// No file header; record count = file_size / 1052 (must be exact). Known: 512 records (538,624 bytes).
 /// <para>
 /// CORRECTIONS from earlier spec (do not reintroduce):
+/// - +0x00 is item_id (dense-array lookup key, non-monotonic, NOT a sequential slot_index).
 /// - item_name is at +0x04 (48 bytes), NOT +0x08 (40 bytes).
 /// - The field formerly documented as item_ref (u32 at +0x04) DOES NOT EXIST — those bytes are the
 ///   first 4 bytes of the item_name CP949 string.
-/// - The description is NOT a single buffer near 0xDC; it is 6 × 81-byte paragraphs from 0x0E4.
+/// - The description is NOT a single buffer near 0xDC; it is >= 6 × 81-byte paragraphs from 0x0E4
+///   (count 6 vs 10 is an OPEN conflict — see §2.4; RemainderRaw retains trailing bytes).
 /// spec: Docs/RE/formats/items_scr.md §2.5 — Corrections.
+/// spec: Docs/RE/formats/items_scr.md §2.4 — description paragraph count 6-vs-10 OPEN.
 /// </para>
 /// </remarks>
 public sealed class CitemsRecord
 {
     /// <summary>
-    /// 1-based sequential slot index (1, 2, 3, …).
-    /// spec: Docs/RE/formats/items_scr.md §2.2 — slot_index u32LE @ 0x00: CONFIRMED (512/512).
+    /// Item id — dense-array lookup key used by the loader. Non-monotonic by record position:
+    /// billing/premium items carry ids &gt;= 100000 and appear mid-file. NOT a sequential slot index.
+    /// spec: Docs/RE/formats/items_scr.md §2.1 — "+0x00 is item_id, NOT slot_index": SAMPLE-VERIFIED (512/512).
+    /// spec: Docs/RE/formats/items_scr.md §2.5 — "slot_index" was WRONG; do not reintroduce.
     /// </summary>
-    public required uint SlotIndex { get; init; }
+    public required uint ItemId { get; init; }
 
     /// <summary>
     /// Cash-shop item display name, decoded from the 48-byte CP949 null-padded buffer at +0x04.
@@ -73,10 +78,12 @@ public sealed class CitemsRecord
     public required uint Flag4C { get; init; }
 
     /// <summary>
-    /// 6 fixed-offset description paragraphs (each 81 bytes CP949, NUL-terminated within buffer).
-    /// Paragraphs start at 0x0E4, 0x135, 0x186, 0x1D7, 0x228, 0x279 (stride = 81 bytes per paragraph).
+    /// Description paragraphs decoded from the record (each 81 bytes CP949, NUL-terminated within buffer).
+    /// First 6 paragraph start offsets: 0x0E4, 0x135, 0x186, 0x1D7, 0x228, 0x279 (stride = 81 bytes).
+    /// Array length is currently 6; the 6-vs-10 paragraph count is an OPEN conflict — see §2.4.
+    /// The bytes at 0x2CA..0x41B (RemainderRaw) may hold paras 6–9 under the 10-paragraph model.
     /// Empty paragraphs (not populated in a given record) are empty strings.
-    /// spec: Docs/RE/formats/items_scr.md §2.4 — 6 × 81-byte desc paragraphs from 0x0E4: CONFIRMED (512/512).
+    /// spec: Docs/RE/formats/items_scr.md §2.4 — >= 6 × 81-byte desc paragraphs from 0x0E4; count 6-vs-10 OPEN.
     /// </summary>
     public required string[] DescParagraphs { get; init; }
 

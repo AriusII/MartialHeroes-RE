@@ -143,6 +143,10 @@ public static class PacketWireSizes
                 size = CmsgChatChannelHeader.HeaderSize;
                 isVariableLength = true;
                 return true;
+            case Opcodes.Opcodes.CmsgKeepaliveToggle: // spec: Docs/RE/opcodes.md (2/112, 1-byte body)
+                size = CmsgKeepaliveToggle.WireSize;
+                isVariableLength = false;
+                return true;
 
             default:
                 size = 0;

@@ -30,7 +30,7 @@ public sealed class CitemsParserTests
     /// spec: Docs/RE/formats/items_scr.md §2.2 — Record layout: CONFIRMED.
     /// </summary>
     private static byte[] BuildRecord(
-        uint slotIndex = 1u,
+        uint itemId = 1u,
         string itemName = "Item",
         ushort unknown36 = 0,
         uint cashPriceNx = 100u,
@@ -42,9 +42,11 @@ public sealed class CitemsParserTests
         byte[] buf = new byte[RecordStride];
         var enc = Cp949();
 
-        // slot_index u32LE @ 0x00. CONFIRMED.
-        // spec: Docs/RE/formats/items_scr.md §2.2 — slot_index u32LE @ 0x00: CONFIRMED (512/512).
-        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(0x00, 4), slotIndex);
+        // item_id u32LE @ 0x00 — dense-array lookup key, non-monotonic, NOT a slot index.
+        // CORRECTED CAMPAIGN 10: formerly "slot_index"; the loader uses it as item_id.
+        // spec: Docs/RE/formats/items_scr.md §2.1 — "+0x00 is item_id, NOT slot_index": SAMPLE-VERIFIED (512/512).
+        // spec: Docs/RE/formats/items_scr.md §2.5 — "slot_index" WRONG; field is item_id.
+        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(0x00, 4), itemId);
 
         // item_name CP949[48] @ 0x04. CONFIRMED.
         // spec: Docs/RE/formats/items_scr.md §2.2 — item_name CP949[48] @ 0x04: CONFIRMED (512/512).
@@ -135,13 +137,25 @@ public sealed class CitemsParserTests
     // =========================================================================
 
     [Fact]
-    public void Parse_SlotIndex_RoundTrips()
+    public void Parse_ItemId_RoundTrips()
     {
-        // slot_index u32LE @ 0x00. CONFIRMED.
-        // spec: Docs/RE/formats/items_scr.md §2.2 — slot_index u32LE @ 0x00: CONFIRMED (512/512).
-        byte[] buf = BuildRecord(slotIndex: 42u);
+        // item_id u32LE @ 0x00 — dense-array lookup key, non-monotonic, NOT a slot index.
+        // CORRECTED CAMPAIGN 10: field is item_id (billing items >= 100000 appear mid-file).
+        // spec: Docs/RE/formats/items_scr.md §2.1 — "+0x00 is item_id, NOT slot_index": SAMPLE-VERIFIED (512/512).
+        byte[] buf = BuildRecord(itemId: 42u);
         CitemsCatalog cat = CitemsParser.Parse(new ReadOnlyMemory<byte>(buf));
-        Assert.Equal(42u, cat.Records[0].SlotIndex);
+        Assert.Equal(42u, cat.Records[0].ItemId);
+    }
+
+    [Fact]
+    public void Parse_ItemId_NonMonotonic_BillingItem()
+    {
+        // item_id values are non-monotonic: billing/premium items carry ids >= 100000 (appear mid-file).
+        // This confirms the field is NOT a sequential slot index.
+        // spec: Docs/RE/formats/items_scr.md §2.1 — non-monotonic, billing ids >= 100000: SAMPLE-VERIFIED.
+        byte[] buf = BuildRecord(itemId: 100018u); // billing item id observed in real VFS
+        CitemsCatalog cat = CitemsParser.Parse(new ReadOnlyMemory<byte>(buf));
+        Assert.Equal(100018u, cat.Records[0].ItemId);
     }
 
     [Fact]
@@ -225,18 +239,18 @@ public sealed class CitemsParserTests
     {
         // Two records: verify count and per-record field isolation (no cross-record bleed).
         // spec: Docs/RE/formats/items_scr.md §2.3 — "record count = file_size / 1052".
-        byte[] r0 = BuildRecord(slotIndex: 1u, itemName: "Alpha", itemUid: 100u);
-        byte[] r1 = BuildRecord(slotIndex: 2u, itemName: "Beta", itemUid: 200u);
+        byte[] r0 = BuildRecord(itemId: 1u, itemName: "Alpha", itemUid: 100u);
+        byte[] r1 = BuildRecord(itemId: 2u, itemName: "Beta", itemUid: 200u);
         byte[] buf = TwoRecords(r0, r1);
 
         CitemsCatalog cat = CitemsParser.Parse(new ReadOnlyMemory<byte>(buf));
 
         Assert.Equal(2, cat.Records.Count);
-        Assert.Equal(1u, cat.Records[0].SlotIndex);
+        Assert.Equal(1u, cat.Records[0].ItemId);
         Assert.Equal("Alpha", cat.Records[0].ItemName);
         Assert.Equal(100u, cat.Records[0].ItemUid);
 
-        Assert.Equal(2u, cat.Records[1].SlotIndex);
+        Assert.Equal(2u, cat.Records[1].ItemId);
         Assert.Equal("Beta", cat.Records[1].ItemName);
         Assert.Equal(200u, cat.Records[1].ItemUid);
     }

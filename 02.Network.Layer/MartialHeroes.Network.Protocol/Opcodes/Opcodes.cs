@@ -73,6 +73,23 @@ public static class Opcodes
     /// <summary>2:83 — client contextual chat (24 B header + text). status: draft. spec: packets/2-83_chat_contextual.yaml.</summary>
     public const uint CmsgChatContextual = 0x20053;
 
+    /// <summary>
+    /// 2:112 — on-demand keepalive enable/toggle (1-byte body, a single constant 1). status: confirmed.
+    /// DISTINCT from the timer-driven 2/10000 keepalive (<see cref="CmsgKeepalive"/>); the client has
+    /// TWO keepalive-family C2S sends on major 2. Gated by a master-enable flag, emitted on the
+    /// leave-to-logout path, the game-state tick, and WinMain. spec: Docs/RE/opcodes.md.
+    /// </summary>
+    public const uint CmsgKeepaliveToggle = 0x20070;
+
+    /// <summary>
+    /// 2:10000 — timer-armed keepalive (4-byte zero body). status: confirmed. Frame template built
+    /// once in the NetHandler ctor and armed at a ~20000 ms interval; compress-only send path (the
+    /// cached buffer is LZ4-compressed once and never byte-ciphered). FIRST of two keepalive-family
+    /// C2S messages; the second is the on-demand 2/112 toggle (<see cref="CmsgKeepaliveToggle"/>).
+    /// spec: Docs/RE/opcodes.md; packets/2-10000_keepalive.yaml.
+    /// </summary>
+    public const uint CmsgKeepalive = 0x22710;
+
     // --- major 3: CharacterMgmt (S2C; C2S chat 3/21) ---
     /// <summary>3:1 — character-select list. status: draft.</summary>
     public const uint SmsgCharacterList = 0x30001;
@@ -80,8 +97,13 @@ public static class Opcodes
     /// <summary>3:21 — client general / channel chat (56 B header + text). status: draft. spec: packets/3-21_chat_channel.yaml.</summary>
     public const uint CmsgChatChannel = 0x30015;
 
-    /// <summary>3:4 — char create/delete/manage result. status: confirmed.</summary>
-    public const uint SmsgCharManageResult = 0x30004;
+    /// <summary>
+    /// 3:4 — scene / entity / char-slot update (variable-length slot-scratch refill / scene-clear).
+    /// status: confirmed. De-swapped on build 263bd994 (Campaign 10): the minor-3 receive ladder
+    /// routes minor 4 HERE — NOT the 8-byte char-manage result (that is 3/7 = SmsgCharManageResult)
+    /// and NOT the 16-byte spawn confirm (that is 3/14 = SmsgCharSpawnResult). spec: Docs/RE/opcodes.md.
+    /// </summary>
+    public const uint SmsgSceneEntityUpdate = 0x30004;
 
     /// <summary>3:5 — enter-world acknowledgement (44 B). status: draft. spec: packets/3-5_enter_game_response.yaml.</summary>
     public const uint SmsgEnterGameAck = 0x30005;
@@ -89,8 +111,13 @@ public static class Opcodes
     /// <summary>3:6 — character rename result. status: confirmed.</summary>
     public const uint SmsgRenameCharResult = 0x30006;
 
-    /// <summary>3:7 — spawn-into-world response. status: confirmed.</summary>
-    public const uint SmsgCharSpawnResult = 0x30007;
+    /// <summary>
+    /// 3:7 — char delete/select/rename MANAGE result (8-byte block). status: confirmed.
+    /// De-swapped on build 263bd994 (Campaign 10): the minor-3 ladder routes minor 7 to this 8-byte
+    /// manage/delete result; the variable scene-entity update is 3/4 and the 16-byte enter/spawn
+    /// confirm is 3/14. spec: Docs/RE/opcodes.md.
+    /// </summary>
+    public const uint SmsgCharManageResult = 0x30007;
 
     /// <summary>3:8 — shop page update. status: confirmed.</summary>
     public const uint SmsgShopPageUpdate = 0x30008;
@@ -98,8 +125,15 @@ public static class Opcodes
     /// <summary>3:13 — character status update. status: confirmed.</summary>
     public const uint SmsgCharStatusUpdate = 0x3000d;
 
-    /// <summary>3:14 — scene / entity update. status: confirmed.</summary>
-    public const uint SmsgSceneEntityUpdate = 0x3000e;
+    /// <summary>
+    /// 3:14 — char enter-into-world bridge / spawn confirm response (16-byte block). status: confirmed.
+    /// De-swapped on build 263bd994 (Campaign 10): the minor-3 ladder routes minor 14 to this 16-byte
+    /// spawn-confirm handler (the catalog name is SmsgCharSpawnResponse; the C# struct/constant retain
+    /// the SmsgCharSpawnResult identifier to avoid a cross-layer rename ripple — naming reconciliation
+    /// is Tier-1-owned). The variable scene-entity update is 3/4; the 8-byte manage result is 3/7.
+    /// NOTE: this is NOT the local-player world spawn (that is 4/1). spec: Docs/RE/opcodes.md.
+    /// </summary>
+    public const uint SmsgCharSpawnResult = 0x3000e;
 
     /// <summary>3:23 — character create result. status: confirmed.</summary>
     public const uint SmsgCharCreateResult = 0x30017;

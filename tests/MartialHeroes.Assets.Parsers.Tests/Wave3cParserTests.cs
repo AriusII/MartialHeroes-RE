@@ -122,15 +122,17 @@ public sealed class Wave3cParserTests
     }
 
     [Fact]
-    public void Citems_Parse_SingleRecord_SlotIndexAndItemName()
+    public void Citems_Parse_SingleRecord_ItemIdAndItemName()
     {
-        // spec: Docs/RE/formats/items_scr.md §2.2 — slot_index @ 0x00, item_name @ 0x04: CONFIRMED.
+        // spec: Docs/RE/formats/items_scr.md §2.1 — item_id @ 0x00, item_name @ 0x04: CONFIRMED.
+        // CORRECTED CAMPAIGN 10: field was formerly called slot_index; corrected to item_id (§2.5).
+        // spec: Docs/RE/formats/items_scr.md §2.5 — "+0x00 is item_id, NOT slot_index": SAMPLE-VERIFIED (512/512).
         // spec: Docs/RE/formats/items_scr.md §2.5 — item_name at 0x04 (48 bytes), NOT 0x08 (40 bytes): CONFIRMED.
         byte[] buf = BuildCitemsScr(1, slotIndexBase: 1, itemName: "아이템A");
         CitemsCatalog catalog = CitemsParser.Parse(new ReadOnlyMemory<byte>(buf));
 
         Assert.Single(catalog.Records);
-        Assert.Equal(1u, catalog.Records[0].SlotIndex);
+        Assert.Equal(1u, catalog.Records[0].ItemId);
         Assert.Equal("아이템A", catalog.Records[0].ItemName);
     }
 
@@ -182,13 +184,15 @@ public sealed class Wave3cParserTests
     [Fact]
     public void Citems_Parse_TwoRecords_BothDecoded()
     {
-        // spec: Docs/RE/formats/items_scr.md §2.2 — sequential slot_index across records: CONFIRMED.
+        // spec: Docs/RE/formats/items_scr.md §2.1 — item_id @ 0x00: CONFIRMED.
+        // CORRECTED CAMPAIGN 10: field was formerly called slot_index; corrected to item_id (§2.5).
+        // spec: Docs/RE/formats/items_scr.md §2.5 — "+0x00 is item_id, NOT slot_index": SAMPLE-VERIFIED (512/512).
         byte[] buf = BuildCitemsScr(2, slotIndexBase: 10);
         CitemsCatalog catalog = CitemsParser.Parse(new ReadOnlyMemory<byte>(buf));
 
         Assert.Equal(2, catalog.Records.Count);
-        Assert.Equal(10u, catalog.Records[0].SlotIndex);
-        Assert.Equal(11u, catalog.Records[1].SlotIndex);
+        Assert.Equal(10u, catalog.Records[0].ItemId);
+        Assert.Equal(11u, catalog.Records[1].ItemId);
     }
 
     [Fact]

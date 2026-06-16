@@ -216,7 +216,7 @@ public sealed class VfsDeepIISpecCorrectionTests
     /// spec: Docs/RE/formats/items_scr.md §2.5 -- Corrections.
     /// </summary>
     private static byte[] BuildCitemsRecord(
-        uint slotIndex = 1u,
+        uint itemId = 1u,
         string itemName = "DefaultItem",
         uint itemUid = 283000000u,
         string[]? descParagraphs = null)
@@ -225,9 +225,10 @@ public sealed class VfsDeepIISpecCorrectionTests
         const int stride = 1052;
         byte[] buf = new byte[stride];
 
-        // slot_index u32LE @ 0x00.
-        // spec: Docs/RE/formats/items_scr.md §2.2 -- slot_index u32LE @ 0x00: CONFIRMED.
-        WriteU32LE(buf, 0x00, slotIndex);
+        // item_id u32LE @ 0x00 — dense-array lookup key, non-monotonic, NOT a slot index.
+        // CORRECTED CAMPAIGN 10: formerly called slot_index; the field is the item id key (§2.5).
+        // spec: Docs/RE/formats/items_scr.md §2.1 — "+0x00 is item_id, NOT slot_index": SAMPLE-VERIFIED (512/512).
+        WriteU32LE(buf, 0x00, itemId);
 
         // item_name CP949[48] @ 0x04. CORRECTION: name starts at 0x04 (NOT 0x08).
         // spec: Docs/RE/formats/items_scr.md §2.2 -- item_name CP949[48] @ 0x04: CONFIRMED (512/512).
@@ -260,7 +261,7 @@ public sealed class VfsDeepIISpecCorrectionTests
         // no separate item_ref field exists at 0x04.
         // spec: Docs/RE/formats/items_scr.md §2.2 -- item_name CP949[48] @ 0x04: CONFIRMED.
         // spec: Docs/RE/formats/items_scr.md §2.5 -- "item_ref at +0x04 DOES NOT EXIST."
-        byte[] buf = BuildCitemsRecord(slotIndex: 1u, itemName: "GoldenRobe");
+        byte[] buf = BuildCitemsRecord(itemId: 1u, itemName: "GoldenRobe");
         CitemsCatalog cat = CitemsParser.Parse(new ReadOnlyMemory<byte>(buf));
 
         Assert.Single(cat.Records);
@@ -273,7 +274,7 @@ public sealed class VfsDeepIISpecCorrectionTests
         // Regression: 6 description paragraphs must be decoded from 0x0E4..0x28B.
         // spec: Docs/RE/formats/items_scr.md §2.4 -- "6 x 81-byte paragraphs from 0x0E4": CONFIRMED.
         string[] paragraphs = { "Para1", "Para2", "Para3", "Para4", "Para5", "Para6" };
-        byte[] buf = BuildCitemsRecord(slotIndex: 7u, descParagraphs: paragraphs);
+        byte[] buf = BuildCitemsRecord(itemId: 7u, descParagraphs: paragraphs);
         CitemsCatalog cat = CitemsParser.Parse(new ReadOnlyMemory<byte>(buf));
 
         CitemsRecord rec = cat.Records[0];
@@ -288,7 +289,7 @@ public sealed class VfsDeepIISpecCorrectionTests
     {
         // Empty description paragraphs (all-zero bytes) must decode as empty strings.
         // spec: Docs/RE/formats/items_scr.md §2.4 -- "empty paragraphs are empty strings."
-        byte[] buf = BuildCitemsRecord(slotIndex: 3u); // no paragraphs supplied
+        byte[] buf = BuildCitemsRecord(itemId: 3u); // no paragraphs supplied
         CitemsCatalog cat = CitemsParser.Parse(new ReadOnlyMemory<byte>(buf));
 
         Assert.Equal(6, cat.Records[0].DescParagraphs.Length);
@@ -299,8 +300,8 @@ public sealed class VfsDeepIISpecCorrectionTests
     public void Citems_TwoRecords_BothItemNames_Correct()
     {
         // Multi-record: second record item_name should also come from 0x04.
-        byte[] r1 = BuildCitemsRecord(slotIndex: 1u, itemName: "Alpha", itemUid: 283000001u);
-        byte[] r2 = BuildCitemsRecord(slotIndex: 2u, itemName: "Beta", itemUid: 283000002u);
+        byte[] r1 = BuildCitemsRecord(itemId: 1u, itemName: "Alpha", itemUid: 283000001u);
+        byte[] r2 = BuildCitemsRecord(itemId: 2u, itemName: "Beta", itemUid: 283000002u);
         byte[] buf = Concat(r1, r2);
         CitemsCatalog cat = CitemsParser.Parse(new ReadOnlyMemory<byte>(buf));
 
