@@ -5,7 +5,7 @@ namespace MartialHeroes.Client.Infrastructure.Macros;
 /// <see cref="MacroDefinition"/> objects.
 /// <para>
 /// The macro file format is OUR format — not a legacy reverse-engineered layout.
-/// See <c>Docs/formats/macro_file.md</c> for the canonical spec. The grammar
+/// See <c>Docs/RE/formats/macro_file.md</c> for the canonical spec. The grammar
 /// is intentionally line-based and human-readable so players can hand-edit files.
 /// </para>
 /// </summary>

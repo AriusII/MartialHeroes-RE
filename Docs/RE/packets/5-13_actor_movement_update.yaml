@@ -1,5 +1,17 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the single 40-byte read, and the consumed
+#                 field offsets Sort@0x00 / ActorId@0x04 / Yaw@0x08 / PosX@0x0C / PosZ@0x10 /
+#                 DestX@0x14 / DestZ@0x18 / RunFlag@0x1C / MotionCode@0x24 / StanceByte@0x26 are
+#                 control-flow-confirmed; world Y is forced 0, never on the wire); field VALUE
+#                 semantics are capture/debugger-pending.
+#   ida_reverified: 2026-06-16
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: CORRECTED -- payload @0x20 is NOT consumed as a speed scalar by the handler (interp
+#              speeds are internal constants keyed on distance/run-flag). The prior "SpeedScale@0x20"
+#              reading is UNSUPPORTED; @0x20 is now modelled as Reserved0x20 (role unconfirmed).
 
 name: SmsgActorMovementUpdate
 opcode: 0x5000d              # major 5 (Push), minor 13 -> (5 << 16) | 13
@@ -24,7 +36,7 @@ fields:
   - { name: DestZ,       type: f32 }        # 0x18  destination/move-to Z (float)
   - { name: RunFlag,     type: u8 }        # 0x1c  1 = running (affects speed/anim)
   - { name: Pad1,        type: "bytes[3]" }  # 0x1d  alignment padding
-  - { name: SpeedScale,  type: f32 }        # 0x20  speed/scale float, ~1.0 default
+  - { name: Reserved0x20, type: u32 }      # 0x20  RESERVED -- inside the 40B read but NOT consumed as a speed by the handler (was mislabelled SpeedScale)
   - { name: MotionCode,  type: u8 }        # 0x24  motion/action code; 5 => instant snap branch
   - { name: Pad2,        type: "bytes[1]" }  # 0x25  alignment padding
   - { name: StanceByte,  type: u8 }        # 0x26  stance / secondary-state byte
@@ -39,9 +51,13 @@ notes: |
     0x0c (4B) / 0x10 (4B) current position X / Z as le f32. Y is not on the wire.
     0x14 (4B) / 0x18 (4B) destination X / Z as le f32.
     0x1c (1B) run flag.
-    0x20 (4B) speed/scale float.
+    0x20 (4B) Reserved0x20: this dword is WITHIN the 40-byte read but is NOT visibly consumed as a
+              speed by the handler -- interpolation speeds are internal constants selected by
+              distance and the run flag, not by this field. The prior "SpeedScale ~1.0" reading is a
+              static guess that the read site does not support; modelled as reserved (role unconfirmed)
+              until a capture proves it carries a value. CORRECTED.
     0x24 (1B) motion code (==5 => snap).
     0x26 (1B) stance byte.
   UNKNOWNS to resolve with a capture:
     - whether the three Pad* regions carry real data or are true filler.
-    - exact semantics of SpeedScale vs the global move-speed multiplier.
+    - whether Reserved0x20 carries any value at all (it is not read as a speed by the handler).

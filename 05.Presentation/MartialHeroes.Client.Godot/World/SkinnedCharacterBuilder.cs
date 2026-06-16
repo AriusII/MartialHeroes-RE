@@ -118,12 +118,20 @@ public static class SkinnedCharacterBuilder
                     LogDiagnostics(mesh, skeleton!, clip, d);
                 }
 
-                // Derive the stand-up basis from THIS rig's rest AABB (not g1's hardcoded value).
-                Aabb restAabb = lbs.GetMeshAabb();
-                pivot.Basis = DeriveStandUpBasis(restAabb, debugLabel ?? mesh.Name);
+                // Derive the stand-up basis AND the recentre from the DISPLAYED animated frame-0
+                // pose (the pose actually on screen), NOT the raw bind/rest pose. A rig can be
+                // authored lying along X at rest yet stand upright on Y once its idle plays; deriving
+                // the pivot from the rest AABB then double-rotates it (this is exactly what mis-
+                // oriented the class-4 Monk preview). For the g1 World player — X-tallest in BOTH
+                // rest and animation — this returns the same tallest axis as the rest AABB, so the
+                // pivot and the World rendering are provably unchanged.
+                // spec: Docs/RE/specs/skinning.md §6 (the displayed pose is the sampled idle, not the
+                //       raw bind pose) / §8(b) (single handedness conversion).
+                Aabb displayedAabb = lbs.GetDisplayedFrame0Aabb();
+                pivot.Basis = DeriveStandUpBasis(displayedAabb, debugLabel ?? mesh.Name);
 
                 pivot.AddChild(lbs);
-                RecentreRoot(root, new Transform3D(pivot.Basis, Vector3.Zero) * restAabb);
+                RecentreRoot(root, new Transform3D(pivot.Basis, Vector3.Zero) * displayedAabb);
                 lbsNode = lbs;
                 return root;
             }
@@ -163,17 +171,26 @@ public static class SkinnedCharacterBuilder
     // -------------------------------------------------------------------------
     //
     // The single handedness conversion (world Z-negate) brings the rig into Godot space with skin
-    // and skeleton perfectly consistent, BUT the legacy characters are authored with their body
-    // "up" (head-to-foot) axis NOT along Godot +Y. A standing humanoid's bounding box is tallest
-    // along its head-to-foot axis, so after the pure Z-negate we find that axis as the rest AABB's
-    // LONGEST extent and rotate it onto Godot +Y.
+    // and skeleton perfectly consistent. spec: Docs/RE/specs/skinning.md §8(b).
     //
-    // This was VALIDATED on the canonical g1 player rig: its rest AABB is ~5.0 on X vs ~2.4 on Y
-    // and ~1.7 on Z, so the authored up-axis is X and a +90° rotation about Z maps local +X → +Y.
-    // Rather than HARDCODE g1's +90°-about-Z, we now derive the basis from each rig's own AABB so
-    // the heuristic is re-evaluated for every mob skeleton (e.g. g2048). When X is the tallest axis
-    // the result is exactly g1's +90°-about-Z; when Y is already tallest (already upright) the basis
-    // is identity; when Z is tallest a −90°-about-X maps local +Z → +Y.
+    // MEASURED (against the live parser DLLs over the real VFS, char-create-preview campaign) on the
+    // correct (delta, §6.5/§6.6) composition, the DISPLAYED animated frame-0 AABB tallest axis is:
+    //     g1 Warrior  X-tallest  (~3.7, 2.6, 2.1)  → +90° about Z  (the World player)
+    //     g4 Monk     Y-tallest  (~3.2, 3.3, 2.7)  → identity      (already upright once idle plays)
+    //     g2048 Mob   Y-tallest  (~?,  taller-Y)   → identity      (the World mobs)
+    // The class-4 Monk is the case that exposed the bug: its BIND/rest pose is X-tallest (authored
+    // lying along X, ~8.8 on X) but its IDLE frame-0 pose stands it upright on Y. Deriving the pivot
+    // from the REST AABB then read X-tallest → +90° about Z and rotated the already-upright animated
+    // Monk a SECOND time, tipping it over (the malformed "exploded" preview). g1 and the mobs were
+    // unaffected only because their rest and animated tallest axes coincide.
+    //
+    // FIX: derive this basis from the DISPLAYED animated frame-0 AABB (see the caller), not the raw
+    // bind/rest AABB. Mapping rules: X tallest → +90° about Z (+X→+Y); Y tallest → identity (already
+    // upright); Z tallest → −90° about X (+Z→+Y). The pivot is a rigid isometry applied AFTER all
+    // skinning, so it can never break the skin↔skeleton consistency or the rest-pose cancellation.
+    // NON-REGRESSION: for the g1 World player (X-tallest at BOTH rest and animated-f0) and the g2048
+    // World mobs (Y-tallest at both) the animated-f0 tallest axis EQUALS the old rest-derived axis,
+    // so the FROZEN World scene keeps its exact prior pivot — only the Monk preview changes.
     //
     // The pivot is a rigid isometry applied AFTER all skinning, so it can never break the
     // skin↔skeleton consistency or the rest-pose cancellation.
@@ -199,9 +216,11 @@ public static class SkinnedCharacterBuilder
 
         Basis basis = tallest switch
         {
-            // X tallest → rotate local +X onto +Y: +90° about Z (g1 player rig case).
+            // X tallest → rotate local +X onto +Y: +90° about Z (the g1 World player — its idle pose
+            // stays elongated along X; this stands it upright).
             0 => new Basis(new Vector3(0, 0, 1), Mathf.Pi / 2f),
-            // Y tallest → already upright: identity.
+            // Y tallest → already upright: identity (the g4 Monk preview and g2048 World mobs, whose
+            // idle frame-0 pose already stands on Y).
             1 => Basis.Identity,
             // Z tallest → rotate local +Z onto +Y: −90° about X.
             _ => new Basis(new Vector3(1, 0, 0), -Mathf.Pi / 2f),
@@ -269,13 +288,40 @@ public static class SkinnedCharacterBuilder
         var arrayMesh = new ArrayMesh();
         arrayMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
 
-        var mat = new StandardMaterial3D
+        // Cel material for static path — same scope as the skinned path (skinned char only).
+        // spec: Docs/RE/specs/rendering.md §5.2 — dotoonshading path = skinned character only.
+        Material mat;
+        if (CelShadeMaterialFactory.CelEnabled)
         {
-            TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-        };
-        if (albedo is not null) mat.AlbedoTexture = albedo;
-        else mat.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+            try
+            {
+                mat = CelShadeMaterialFactory.Build(albedo);
+            }
+            catch
+            {
+                // Fallback to PBR if shader resource unavailable.
+                var std = new StandardMaterial3D
+                {
+                    TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
+                    CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                };
+                if (albedo is not null) std.AlbedoTexture = albedo;
+                else std.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+                mat = std;
+            }
+        }
+        else
+        {
+            var std = new StandardMaterial3D
+            {
+                TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            };
+            if (albedo is not null) std.AlbedoTexture = albedo;
+            else std.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+            mat = std;
+        }
+
         arrayMesh.SurfaceSetMaterial(0, mat);
 
         var inst = new MeshInstance3D { Name = $"StaticMesh_{skn.Name}", Mesh = arrayMesh };

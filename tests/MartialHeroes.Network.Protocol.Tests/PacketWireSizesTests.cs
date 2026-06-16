@@ -24,6 +24,7 @@ public sealed class PacketWireSizesTests
     [InlineData(OpcodeConsts.SmsgSkillPointUpdate, 16, true)] // 4/150 var
     [InlineData(OpcodeConsts.CmsgMoveRequest, 16, false)] // 2/13
     [InlineData(OpcodeConsts.CmsgWhisper, 19, true)] // 2/7 var
+    [InlineData(OpcodeConsts.CmsgKeepaliveToggle, 1, false)] // 2/112 — opcodes.md (1-byte body)
     public void TryGet_returns_struct_size_for_known_opcodes(uint opcode, int expectedSize, bool expectedVar)
     {
         Assert.True(PacketWireSizes.TryGet(opcode, out int size, out bool isVar));

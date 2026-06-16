@@ -1,5 +1,31 @@
 # Skinning & animation pipeline (clean-room spec)
 
+> **Verification banner.**
+> - **verification:** *confirmed* (control-flow-confirmed) for the whole CPU-LBS deform chain, the
+>   inverse-bind cancellation property, both bind/animated world walks, the `.mot` keyframe sampler,
+>   the major/minor split + per-vertex normalization, the per-mesh and per-node scale sources, and the
+>   quaternion conventions (XYZW / Hamilton / active-rotation / parent-on-left) — all re-read from the
+>   function bodies this pass and reproduced exactly. *static-hypothesis* for the inverse-bind **bake
+>   routine** (its existence is forced by the data — the deform consumes a zero-initialised bone-local
+>   rest position, so a bake must run between load and first deform — but the routine itself was not
+>   pinned statically this pass) and for the `(−x,−y,−z,w)` conjugate / subtract-then-rotate bake
+>   order. *capture/debugger-pending* for the matrix major-order, the native up-axis / handedness
+>   *label* (no axis flip exists inside the math, but whether native is literally left-handed D3D9
+>   Y-up needs a runtime read), the exact Godot quaternion remap under Z-negation, and whether the
+>   three epsilon tests are an absolute-value clamp (their disassembly surfaced as a log-shaped
+>   logarithm-shaped intrinsic — almost certainly a decompiler mis-symbol of an absolute-value epsilon
+>   clamp at 0.001).
+> - **ida_reverified:** 2026-06-16
+> - **ida_anchor:** 263bd994
+> - **evidence:** [static-ida]
+> - **conflicts:** two resolved against the IDB this pass — (1) the out-of-range bone-id behaviour is a
+>   **clamp-to-last-bone** in the engine, NOT a skip (the spec previously implied the engine skips;
+>   "skip" is retained only as the *recommended importer hardening*, §8(e)); (2) the child-bone
+>   translation lock is **interior-bone-only** (a bone with both a parent and a grandparent and at
+>   least one child), narrower than the previous "every non-root bone" phrasing. The core math
+>   (deform equation, quaternion order, Hamilton product, active rotation, both world walks, scale
+>   source, raw-seconds alpha, 28-byte keyframe, XYZW) was reproduced with **no correction**.
+
 Neutral, data-only model of how the legacy *Martial Heroes* client **deforms and animates** skinned
 characters: how the bind pose is built from a `.bnd` skeleton, how the inverse-bind transform is
 baked at load, the linear-blend-skinning deform equation, how `.mot` keyframes are sampled and
@@ -34,19 +60,39 @@ documented in the container spec.
 
 | Area | Confidence |
 |---|---|
-| CPU LBS, no GPU bone palette, no 4×4 matrices in the skinning math | HIGH |
-| Inverse-bind baked once at load into per-influence bone-local rest position/normal | HIGH (full deform chain recovered end-to-end) |
-| Bind-pose world transform accumulated from parent-relative `.bnd` locals | HIGH |
-| Bones addressed by **bone ID** (`id − base_id`), not array position, by both `.skn` weights and `.mot` tracks | HIGH |
-| Major/minor influence split + per-vertex normalization to sum 1.0; skip weight < 0.01 | HIGH (code) + SAMPLE-VERIFIED (corpus: min weight 0.010, 1140 multi-weight skins) |
-| LBS deform equation (weighted sum of bone-local rest placed by animated bone world transform) | HIGH |
-| `.mot` sampling: `floor(t·10)` @ 10 fps, LERP translation, shortest-arc SLERP rotation | HIGH |
+| CPU LBS, no GPU bone palette, no 4×4 matrices in the skinning math | HIGH (re-confirmed CAMPAIGN 10) |
+| Inverse-bind **baked into** per-influence bone-local rest position/normal; consumed by the deform with no per-frame inverse | HIGH (deform consumes bone-local rest; the load fields start zeroed → a bake pass populates them) |
+| Inverse-bind **bake routine** (its exact address / conjugate-and-order) | STATIC-HYPOTHESIS — existence forced by the data; routine not pinned statically (debugger follow-up) |
+| Bind-pose world transform accumulated from parent-relative `.bnd` locals | HIGH (re-confirmed CAMPAIGN 10) |
+| Bones addressed by **bone ID** (`id − base_id`), not array position, by both `.skn` weights and `.mot` tracks | HIGH (re-confirmed) |
+| Runtime pose bone stride **88 bytes**; in-memory bind bone **72 bytes**; bone count is a single **u8** (≤ 255 bones) | HIGH (recovered CAMPAIGN 10 — see §3.4) |
+| Major/minor influence split + per-vertex normalization to sum 1.0; drop weight < 0.01 | HIGH (code) + SAMPLE-VERIFIED (corpus: min weight 0.010, 1140 multi-weight skins) |
+| LBS deform equation (weighted sum of bone-local rest placed by animated bone world transform) | HIGH (re-confirmed) |
+| `.mot` sampling: `floor(t·10)` @ 10 fps, LERP translation, shortest-arc SLERP rotation, 28-byte keyframe | HIGH (re-confirmed) |
 | Interpolation alpha is RAW seconds in `[0, 0.1]`, not renormalized to `[0,1]` | HIGH (observed); intentional-vs-defect UNVERIFIED |
-| Pose composition: `parentWorld ⊗ bindLocal ⊗ animLocal`; child bones rotate-only; root-only translation | HIGH |
-| Quaternion convention: XYZW (scalar W last), Hamilton product, active rotation, parent-on-left | HIGH |
-| Native space is left-handed D3D9; NO axis flip inside the skinning math | HIGH |
+| Pose composition: `parentWorld ⊗ bindLocal ⊗ animLocal`; **interior** bones rotate-only; root + leaf/near-root translate | HIGH (lock narrowed to interior bones, CAMPAIGN 10 — §6.3) |
+| Quaternion convention: XYZW (scalar W last), Hamilton product, active rotation, parent-on-left | HIGH (re-confirmed) |
+| Out-of-range bone id is **clamped to the last bone** (NOT skipped) | HIGH (re-confirmed CAMPAIGN 10 — the engine clamps; "skip" is importer hardening only, §8(e)) |
+| NO axis flip inside the skinning math; native-space *handedness label* | HIGH that no flip exists; the LH-D3D9 *label* / up-axis is CAPTURE/DEBUGGER-PENDING |
 | Exact Godot quaternion remap under Z-negation | PROPOSED — validate on one sample bone |
-| Per-node `scale` source (assumed 1.0 for characters) | PROPOSED — setter not traced |
+| Per-mesh `scale` real source (read at attach as `nodeScale · meshScale · optionalOverride`) | CONFIRMED — resolves the prior "assumed 1.0" open item |
+| Per-**node** scale (distinct from per-mesh scale), applied in the animated world walk | HIGH (recovered CAMPAIGN 10 — §6.6) |
+| Whole deform/bind/mot/world-walk chain re-derived end-to-end | RATIFIED twice — CAMPAIGN 9 then CAMPAIGN 10 reproduced §0–§7; only the two conflict wordings were corrected |
+
+> **Ratification (CAMPAIGN 9, then CAMPAIGN 10).** Two independent dirty-room re-derivations read the
+> actual deform, bind-pose, `.mot`, and world-walk routines (and their math primitives) from scratch.
+> Both **confirmed this spec's core math is correct** — the deform equation, the quaternion product
+> order (parent-on-left, XYZW Hamilton), the active-rotation `q ⊗ v ⊗ q⁻¹` vector transform, the
+> `.mot` 10 fps / 28-byte-keyframe / raw-seconds-alpha sampling, the animated world walk
+> `parentWorld ⊗ bindLocal ⊗ animLocal`, and the no-axis-flip-inside-the-math finding were all
+> reproduced. CAMPAIGN 9 additionally resolved the per-mesh `scale` source (see §5.3 / §9). The
+> CAMPAIGN 10 static re-verification reproduced §0–§7 end-to-end and corrected exactly **two**
+> wordings — the out-of-range bone-id behaviour (the engine **clamps to the last bone**; the prior
+> spec implied a skip, which is retained only as importer hardening, §8(e)) and the translation lock
+> (it is **interior-bone-only**, narrower than "every non-root bone", §6.3) — plus surfaced the
+> structural facts now recorded in §3.4 (88-byte runtime bone, 72-byte in-memory bind bone, u8 bone
+> count, the per-node scale, and the rotate-then-scale literal order in the world walk). Recovered via
+> static RE.
 
 Open items are consolidated in §9. Korean strings referenced indirectly (bind/skin names) are
 **CP949 / EUC-KR** (no BOM), consistent with `formats/config_tables.md`.
@@ -111,12 +157,16 @@ The deform loop has three variants selected by a per-actor blend-mode word:
 
 - **Mode 0 — full LBS** (general correct path; documented in §5.3).
 - **Mode 1 — rigid, major-influence-only** (each vertex rigidly follows its single dominant bone).
+  This path transforms each major vertex rigidly as `boneWorldQuat ⊗ (localPos · scale) +
+  boneWorldTrans` with **NO `· weight` factor** — consistent with a single-influence rigid follow
+  (one bone owns the vertex outright, so its weight is effectively 1.0).
 - **Mode 2 — rigid fast path** using a position-proximity ownership table (single-bone-owned vertices
   transformed once, then copied to merged duplicates).
 
-For a faithful modern re-implementation, **Mode 0 is the one to port**; Modes 1 and 2 are
-optimizations of the single-influence case and produce the same result whenever every vertex has
-exactly one influence.
+The per-actor mode word is read from a fixed field on the actor object each frame and dispatches to the
+matching deform routine. For a faithful modern re-implementation, **Mode 0 is the one to port**; Modes
+1 and 2 are optimizations of the single-influence case and produce the same result whenever every
+vertex has exactly one influence.
 
 ---
 
@@ -133,9 +183,20 @@ The rest-pose render vertex (and the CPU scratch vertex the deform loop writes i
 | 24 | 8  | UV       (2 × f32); the engine stores `v` as `1.0 − v` (D3D convention) |
 
 This 32-byte render vertex is **derived** from the on-disk `.skn` 24-byte vertex (normal-then-position;
-see `formats/mesh.md` §Vertex table) plus the per-corner UVs from the face table. Render vertices are
-**deduplicated by position** (tolerance ≈ 0.001) so shared triangle corners collapse to one skinned
-vertex; a corner→unique-vertex index map and a vertex→owner (rigid-merge) table are built at load.
+see `formats/mesh.md` §Vertex table) plus the per-corner UVs from the face table. Concretely the
+loader writes the render position from the on-disk vertex's **last** three floats and the render
+normal from its **first** three floats (the disk record is normal-then-position), and stores
+`uv.v` as `1.0 − v`. Render vertices are **deduplicated by position** (an absolute-value epsilon of
+≈ 0.001 per axis) so shared triangle corners collapse to one skinned vertex; a corner→unique-vertex
+index map and a vertex→owner (rigid-merge) table are built at load.
+
+> **Epsilon-test caveat (capture/debugger-pending).** Three epsilon tests in this pipeline — the
+> per-axis vertex-dedup tolerance here, the accumulate-blend denominator floor (§6.2), and the commit
+> denominator floor (§6.2) — surface in disassembly as a log-shaped intrinsic compared against 0.001.
+> An absolute-value epsilon clamp at 0.001 is the engineering-sensible reading (a literal log of a
+> near-zero delta is not), so this spec treats all three as **absolute-value clamps at 0.001** and
+> flags the log-shaped appearance as almost certainly a decompiler mis-symbol; a debugger step over
+> one site would settle the exact intrinsic.
 
 ### 2.2 Runtime influence (weight) record
 
@@ -196,12 +257,140 @@ client.
 For the recovered sample skeletons `base_id == 0`, so ID equals array index — but the importer **must
 not assume** `base_id == 0` in general. Always resolve `bone_array[id − base_id]`.
 
+> **The legacy resolver CLAMPS out-of-range ids to the last bone.** When `id − base_id ≥ bone_count`
+> the resolver returns the **last** bone (`bone_base + stride · bone_count − stride`) rather than null
+> or an error. Downstream null-guards therefore never fire on a clamp, so an out-of-range `.mot` track
+> id or `.skn` weight id silently binds the last bone. This is a faithful-behaviour fact; an importer
+> should prefer to **skip** such an influence instead (§8(e) step 4).
+
 ### 3.3 Composition order (multiply convention)
 
 Hierarchy composition is **child = parent ∘ local, parent on the LEFT** (pre-multiply / row-vector
 style). This holds for both the bind-pose world walk (§3.1) and the animated world walk (§6.6).
 
+### 3.4 In-memory layouts (runtime — distinct from the on-disk `formats/mesh.md` records)
+
+These are the **runtime** structures the skinning math walks; the on-disk `.bnd`/`.skn` byte layouts
+are owned by `formats/mesh.md` and are NOT redefined here. An importer that bakes scale or pose into
+its own skeleton needs these to map fields correctly.
+
+- **Runtime pose bone stride = 88 bytes.** The runtime pose allocates `bone_count · 88` bytes and the
+  ID-offset resolver strides by 88 (so the resolver address is `pose_bone_base + 88 · (id − base_id)`,
+  §3.2). The runtime bone field map (byte offsets within the 88-byte record):
+  - **+16** — back-pointer to its source bind bone.
+  - **+28..+39** — local **animated** translation (3 × f32).
+  - **+40..+55** — local **animated** quaternion (4 × f32, XYZW).
+  - **+56..+67** — **world** translation (3 × f32) — the `boneWorldTrans` the deform reads.
+  - **+68..+83** — **world** quaternion (4 × f32, XYZW) — the `boneWorldQuat` the deform reads.
+  - **+84** — per-**node** scale (f32), applied in the animated world walk (§6.6).
+  - During a mixer pass an accumulator overlay aliases the same 88-byte record (a running accumulated
+    weight, accumulated translation/quaternion, a committed weight, and a blend fraction); these are
+    transient mixer scratch, not persisted pose state.
+- **In-memory bind bone = 72 bytes.** The bind-pose load strides the source bind bone by 72 bytes
+  while copying locals. The in-memory bind bone carries a parent pointer, a child/sibling link, the
+  parent-relative local translation and local quaternion (XYZW), and the **computed** world
+  translation and world quaternion appended (the world slots are filled by the bind-pose world walk
+  §3.1, not stored on disk). The on-disk bind record is the smaller `formats/mesh.md` number; the
+  72-byte figure is the in-memory bone with its world slots appended.
+- **Bone count is a single byte (u8).** The skeleton's bone count is read as an unsigned 8-bit value
+  and the build loop iterates a u8 — so a skeleton holds **at most 255 bones**. The §8(d) sample rigs
+  (82–89 bones) are well under the cap. Importers should treat the bone count as 8-bit.
+
 ---
+
+## 3.5 Character appearance assembly — one shared skeleton + up to 6 overlay parts (CODE-CONFIRMED)
+
+> Provenance: promoted from a dirty-room appearance-assembly note (gitignored). The catalogue
+> population, overlay-slot set, and `model_class_id` formula are **CODE-CONFIRMED**; the two
+> data-driven value-edges noted at the end remain pending a live-debugger confirm.
+
+A rendered character — whether an in-world actor or a char-select preview — is **one shared
+skeleton** carrying a **fixed set of overlay `.skn` parts**, one per visible-gear slot, each skinned
+onto that single skeleton (§3, §4, §5) and textured via a per-part texture id (`formats/texture.md`).
+There is **no monolithic body mesh**: the body is itself an overlay part. Everything resolves through
+one in-memory **appearance catalogue** (a gid -> visual map) plus three registry caches loaded once at
+boot — skin, texture (`formats/texture.md`), and motion (`formats/animation.md`).
+
+### 3.5.1 The body is overlay slot 3 — there is no separate base mesh
+
+A full character is composed of **up to six overlay parts**, attached in a fixed slot order. Slot 3
+is the **body** (the torso/legs mesh, the `202`/"b" family); it is attached through the **same**
+overlay path as every other part, not loaded as a distinct base mesh. `skin.txt` is consumed to
+**build the catalogue**, not to scan a body row at draw time; at draw time the body is just slot 3 of
+the uniform overlay set.
+
+| Slot id | Outfit family | Meaning | Present on |
+|--------:|---------------|---------|-----------|
+| 3 | `202` ("b") | **BODY** (torso/legs) | every actor; sole slot in the reduced high-tier composition |
+| 4 | `203` ("p") | layer "p" | every actor |
+| 6 | `206` ("s") | layer "s" | every actor |
+| 2 | `209` ("a") | layer "a" | every actor |
+| 11 | (head / hair / face family) | head overlay | every actor |
+| 14 | (weapon) | WEAPON, hand-attached | **local player only** |
+
+Other actors omit slot 14 (weapon); above a per-character skin-level threshold read from the
+catalogue, the local-player path binds **only slot 3** (a reduced high-tier composition). All of a
+character's overlay parts are authored against the **same skeleton** (the class's `id_b` rig — §8(e));
+the cancellation invariant of §0 holds only when every part, the deform skeleton, and the played clip
+share that one `id_b`.
+
+### 3.5.2 model_class_id (the appearance/skeleton selector)
+
+The class + variant of a player resolve to a single integer `model_class_id` (also the value a
+`.skn` carries as its `id_b`):
+
+```
+model_class_id = 5 * (class + 4 * variant) - 24            in {1, 11, 16, 26}
+```
+
+- `class` is the internal class index (1..4); `variant` is the appearance variant.
+- `variant == 3` resolves to `0`, which means an **invisible actor** (no mesh) — a reserved sentinel.
+- `model_class_id` selects the visual record in the appearance catalogue, whose bound bind-pose
+  handle is the actor's skeleton (§3, §8(e)).
+
+### 3.5.3 The appearance catalogue is populated from skin.txt (CODE-CONFIRMED)
+
+`data/char/skin.txt` is parsed once at boot into the appearance catalogue. Each row carries (in disk
+order) an appearance group id, a class id, and two further catalogue digits, followed by the two
+identity columns the draw path needs: **column 4 = the mesh gid** (`g{gid}.skn` is the part's mesh)
+and **column 5 = the texture id** (`tex_id`, looked up in the texture registry, `formats/texture.md`).
+The payload stored under each catalogue key is the `(mesh_gid, tex_id)` pair.
+
+Each row is filed under a 64-bit catalogue key. The same key shape is reconstructed by the overlay
+draw path from `(slot, model_class_id, reduced_gid)`:
+
+```
+catalog_key = gid_reduced + 1e9 * ( slot + 100 * model_class_id )
+```
+
+so a part registered from skin.txt under a given `(class, slot, reduced gid)` is found again at draw
+time by recomputing the same key. The `model_class_id` term in the key is itself built from a
+per-appearance-group base offset table (`categoryBase[]`, indexed by the appearance group id) held on
+the catalogue object — the **same** base-offset table the actormotion table uses
+(`formats/animation.md`). The exact contents of `categoryBase[]` are **UNVERIFIED**.
+
+### 3.5.4 Overlay attach order and the reduced gid
+
+The factory iterates the fixed slot list `{3, 4, 6, 2, 11, 14}` and, per slot, reads the slot's gid
+from the actor's equipment table, computes the catalogue key above, looks up the `(mesh_gid, tex_id)`
+payload, loads/caches the `.skn` mesh by gid, skins its geometry onto the shared skeleton (§4, §5),
+and binds the texture by `tex_id` (`formats/texture.md`). The `reduced_gid` term differs by slot
+family: the weapon slot (14) uses a wider reduction with a base-1000 slot multiplier, while the other
+slots use a base-100 multiplier — both are deterministic reductions of the slot gid. Empty slots
+(e.g. no head overlay, no weapon) resolve to no node and are skipped.
+
+### 3.5.5 Pending value-edges (do NOT invent)
+
+Two data-driven edges are CODE-CONFIRMED in mechanism but their concrete values await a live-debugger
+confirm and must not be invented:
+
+- the **`categoryBase[]`** array contents (the per-category base offsets used in both the catalogue
+  key and the actormotion key);
+- the concrete **`model_class_id` -> bind-pose handle** mapping (which loaded `.bnd` each of
+  `{1, 11, 16, 26}` selects — the data-driven `{1->g1, 26->g2, 11->g3, 16->g4}` edge of §8(e)).
+
+<!-- source: _dirty/campaign5/character-appearance-assembly.md -->
+<!-- pending live-debugger value-edges: catalogue categoryBase[] contents; model_class_id -> concrete bind-pose handle -->
 
 ## 4. Inverse bind — computed at load, never stored
 
@@ -228,6 +417,19 @@ in the bone's local frame, so the animated bone world transform can re-place it.
 into `localPos`, the per-frame deform never touches the bind pose again — it needs only the animated
 bone world transform. The cancellation in §0 is the direct consequence.
 
+> **The bake is a SEPARATE pass, not part of the `.skn` load (STATIC-HYPOTHESIS on the routine).**
+> At the end of `.skn` parsing the influence records' `localPos` (+12) and `localNormal` (+24) fields
+> are **zero-initialised** — the load builds the 9-float influence (bone id, vertex index, weight) and
+> memsets the rest to zero. Therefore the inverse-bind bake of this section is a distinct pass that
+> must run **after** the skeleton is resolved and its bind **world** transforms exist (§3.1), and
+> **before** the first deform (which reads `localPos`/`localNormal` as already bone-local, with no
+> per-frame inverse). The bake's **existence is forced by the data** and its **result matches** the
+> equations above; the static re-verification pass did **not** pin the exact bake routine (it is not
+> in the load path nor the attach path). The conjugate form `(−x,−y,−z,w)` and the subtract-then-rotate
+> order are the consistent reconstruction — a debugger breakpoint on the first deform, watching the
+> major-influence `localPos` slot, would catch the writing routine and confirm both. (CAMPAIGN 10,
+> static.)
+
 ---
 
 ## 5. Weight application — linear blend skinning
@@ -240,7 +442,7 @@ The 12-byte `.skn` weight record's fields are exactly:
 |---|---|
 | `vertex_index` | which vertex this influence affects |
 | `bone_index` | **bone ID** (resolves the bind/pose bone by `id − base_id`, §3.2) — no indirection table |
-| `weight` | scalar influence; records with `weight < 0.01` are dropped at load |
+| `weight` | scalar influence; a record is **kept** when `weight ≥ ~0.01` (the keep test is `weight ≥ 0.0099999998`), so records below ~0.01 are dropped at load |
 
 ### 5.2 Major / minor split + per-vertex normalization
 
@@ -278,10 +480,26 @@ dst.position += placed_pos    · influence.weight
 dst.normal   += placed_normal · influence.weight
 ```
 
-Because weights are normalized at load, the weighted sum is convex. `scale` (a uniform per-mesh /
-per-node scalar) multiplies the bone-local position **before** rotation; its source is not traced and
-is assumed 1.0 for characters (§9). The quaternion-vector product is the active rotation
-`q ⊗ v ⊗ q⁻¹` for a unit quaternion.
+Because weights are normalized at load, the weighted sum is convex. `scale` (a uniform per-mesh
+scalar) multiplies the bone-local position **before** rotation; the quaternion-vector product is the
+active rotation `q ⊗ v ⊗ q⁻¹` for a unit quaternion.
+
+> **`scale` has a real source — do NOT assume 1.0 (CONFIRMED, CAMPAIGN 9, re-confirmed CAMPAIGN 10).**
+> The per-mesh scale is a field on the skin object, populated **at attach time** as the product
+> `nodeScale · meshScale`, then multiplied by an **optional override factor when that override is
+> non-zero**. It is therefore **generally non-unit** and must be read from the skin object, not
+> hard-coded to 1.0. The deform loop multiplies the bone-local position by this per-mesh scale
+> (positions only — never normals, never rotations). This resolves the prior §9 open item that listed
+> `scale` as "assumed 1.0; setter not traced." An importer that lets the engine skin (Godot
+> `Skeleton3D`, §8(a)) must still apply this mesh scale to the rest geometry / node transform;
+> dropping it shrinks or inflates the whole character.
+>
+> **There are TWO distinct scales — do not conflate them.** This per-**mesh** scale (a field on the
+> skin object) multiplies the skinned vertex positions in the deform loop (§5.3). A separate
+> per-**node** scale lives on each runtime pose bone (§3.4, the +84 field) and multiplies the bone's
+> animated **local translation** in the world walk (§6.6). Both are uniform scalars but they apply to
+> different quantities; an importer that bakes scale into its skeleton must apply the per-node scale in
+> the bone world transform and the per-mesh scale to the skinned positions.
 
 ### 5.4 Influences per vertex are unbounded by the format
 
@@ -328,22 +546,36 @@ Each frame the mixer builds the animated pose in passes:
    bone with a running normalized weighted average (first contributor assigns; later contributors
    LERP/SLERP by `w_new / (w_acc + w_new)`, the denominator floored at 0.001).
 3. **Commit pass:** fold the accumulated sample into each node's **local animated** translation/rotation
-   slots, blended against any previously committed value. **Child-bone special case:** for a non-root
-   bone with a full parent chain, the local **translation is forced to the bind-pose local
-   translation** — i.e. **child bones keep their fixed bind-pose bone length and only rotate**. Only
-   the root translates freely.
+   slots, blended against any previously committed value. **Interior-bone translation lock:** the local
+   **translation is forced to the bind-pose local translation** only for an **interior** bone — one
+   that has **both a parent AND a grandparent AND at least one child**. Such interior bones keep their
+   fixed bind-pose bone length and only rotate. The **root**, the root's **direct children**, and the
+   **leaf** bones instead take the blended (LERP'd) accumulator translation. (This is narrower than the
+   prior phrasing "every non-root bone is locked" — see §6.3.) The first contributor assigns; later
+   contributors blend by `w_new / (w_acc + w_new)` with the denominator floored at 0.001.
 4. **Cycle-layer pass:** same accumulate-then-commit for the looping clips, using the sync-mode sample
-   time where applicable (see `formats/animation.md` §Sync-phase mechanism).
+   time where applicable (computed as `key_count · clip_field / sync_denominator` when the clip's sync
+   flag is set, else a stored clip time; detail owned by `formats/animation.md` §Sync-phase mechanism).
 5. **Root + heading:** the root node's world translation is set from the actor's world position; the
    root world rotation folds in the smoothed heading (yaw) quaternion.
 6. **World walk:** fill every node's animated world transform from the committed local poses (§6.6).
 
-### 6.3 Child bones rotate only; only the root translates
+### 6.3 The translation lock is INTERIOR-bone-only (the practical rule is unchanged)
 
-This is the rule from step 3 restated because it matters for the importer: animation drives **rotation**
-on child bones and **translation only on the root**. A child bone's local translation is held at its
-bind-pose value every frame. An importer should therefore feed **rotation tracks for child bones and a
-position track for the root only**, to match legacy behaviour.
+This is the rule from step 3 restated because it matters for the importer. The exact legacy condition
+is a **three-way interior test**: a bone's animated local translation is forced to its bind-pose local
+translation **only when it has a parent, a grandparent, AND at least one child**. The root, the root's
+direct children, and leaf bones take the blended accumulator translation instead. The prior phrasing
+"child bones keep their fixed bind-pose bone length; only the root translates" had the right intent but
+was slightly over-broad — strictly it is *interior* bones that are locked.
+
+**The practical importer rule is unchanged:** feed **rotation tracks for non-root bones and a position
+track for the root only**, to match legacy behaviour. This is safe because the on-disk idle clips carry
+a (non-zero) translation on nearly every child track that the engine ignores for the locked interior
+set, and the leaf / near-root translations come from an accumulator that was itself seeded at the
+bind-pose local translation (so for an importer that does not author per-child translation tracks, the
+interior-vs-leaf distinction does not change the fed data). Applying the stored child translations
+verbatim would stretch bone lengths — see §8(e) step 5.
 
 ### 6.4 Keyframes are local replacement poses, not additive deltas
 
@@ -364,14 +596,22 @@ After the commit passes, the hierarchy is walked from the root's children outwar
 animated world transform from the committed local poses:
 
 ```
-worldTrans = parentWorldQuat ⊗ ( localAnimTrans · scale ) + parentWorldTrans
+worldTrans = ( parentWorldQuat ⊗ localAnimTrans ) · nodeScale + parentWorldTrans
 worldQuat  = ( parentWorldQuat ⊗ bindLocalQuat ) ⊗ localAnimQuat
 ```
 
 So per node the rotation is `parentWorld ⊗ bindLocal ⊗ animLocal`, and the translation is the parent's
-world rotation applied to the (scaled) animated local translation plus the parent's world position
-(rotate-then-translate). These `worldTrans` / `worldQuat` are exactly the `boneWorldTrans` /
-`boneWorldQuat` the deform loop (§5.3) reads.
+world rotation applied to the animated local translation, then scaled by this node's per-node scale
+(§3.4, the +84 field), then offset by the parent's world position. These `worldTrans` / `worldQuat` are
+exactly the `boneWorldTrans` / `boneWorldQuat` the deform loop (§5.3) reads.
+
+> **Literal order: rotate THEN scale (no functional conflict).** The legacy world walk rotates the
+> local animated translation by the parent world quaternion **first**, then multiplies by the per-node
+> scale, then adds the parent world translation — i.e. `rotate → scale → translate`. The deform loop
+> (§5.3), by contrast, scales the bone-local position **before** rotating (`scale → rotate`). Because
+> both scales are **uniform scalars**, scale and rotation commute, so `parentWorldQuat ⊗ (t · scale)`
+> and `(parentWorldQuat ⊗ t) · scale` produce the identical result — the two literal orderings are
+> mathematically equivalent. This is recorded for fidelity, not because it changes any value.
 
 ---
 
@@ -477,17 +717,124 @@ These trios link through the recovered mappings: a `.skn`'s `id_b` selects the `
 relationship is a confirmed bijection across all 349 ids — see `formats/mesh.md`), and a clip's track
 `bone_id`s address that skeleton's bones by ID (§3.2).
 
+### (e) Rig/clip identity: select skeleton AND clip by the skin's `id_b` (the class/rig-mismatch shatter)
+
+> Provenance: promoted from a dirty-room root-cause note kept under
+> `Docs/RE/_dirty/campaign4/charselect3d/class4-shatter-mot.md` (gitignored). Asset byte facts are
+> **SAMPLE-VERIFIED** against the real client VFS; the resolution mechanism is **CODE-CONFIRMED**
+> (prior). The cross-link to the char-create preview is `frontend_scenes.md` §3.7.5 (preview-character
+> assets for the four starter classes).
+
+This subsection states the identity invariant that ties a skinned mesh, its skeleton, and its played
+clip together. Ignoring it produces the **clean-at-rest / shatter-on-play** failure observed on the
+char-create preview for the Monk class, while the Warrior class rendered correctly.
+
+#### The invariant: one skin is authored against exactly one skeleton, named by its `id_b`
+
+A skinned mesh's bind-local vertex offsets (§4, the inverse-bind bake) are baked against **one specific
+skeleton's rest pose**. That skeleton is identified by the skin's own `id_b` (the SkinClassId, the
+skeleton selector — `formats/mesh.md` §Header). The cancellation property of §0 holds **only** when all
+three of the following are the same `id_b` rig:
+
+- the **deform skeleton** that supplies the animated bone world transforms,
+- the **inverse-bind bake** that produced each influence's `localPos` / `localNormal`, and
+- the **played clip**, whose track `bone_id`s address that same skeleton.
+
+Concretely the engine-intended matched trio per class is:
+
+| Skin `id_b` | Skeleton | Idle clip (actormotion col2 == `id_b` → col16) | Tracks = bones |
+|---:|---|---|---:|
+| 1 | `data/char/bind/g1.bnd` (84 bones) | `data/char/mot/g111100010.mot` | 84 = 84 |
+| 2 | `data/char/bind/g2.bnd` (87 bones) | `data/char/mot/g112200010.mot` | 87 = 87 |
+| 3 | `data/char/bind/g3.bnd` (82 bones) | `data/char/mot/g111300010.mot` | 82 = 82 |
+| 4 | `data/char/bind/g4.bnd` (89 bones) | `data/char/mot/g111400010.mot` | 89 = 89 |
+
+The four creatable classes therefore do **NOT** share one rig. The Warrior base mesh carries `id_b = 1`
+(its skeleton has 84 bones); the Monk base mesh carries `id_b = 4` (its skeleton has 89 bones). Each
+class's overlay parts carry the same `id_b` as that class's base mesh.
+
+#### Why bone IDs are NOT portable across skeletons
+
+Two skeletons can share the bone-**ID** range `0..N` and yet be **different skeletons**: the same ID
+denotes a **different physical joint** on each. Comparing the 84-bone and 89-bone rigs above over their
+shared ID range:
+
+- rest **translation** differs on almost every shared bone (max difference on the order of several model
+  units — different limb lengths),
+- rest **rotation** differs on a large majority of shared bones (up to a fully opposite orientation),
+- **parent** differs on roughly half of the shared bones — the hierarchy is re-topologised (a bone may
+  hang under a completely different parent on the other rig),
+- the larger rig also has extra appendage bones at the top of the ID range that simply do not exist on
+  the smaller rig.
+
+Because of this, a clip or a skinned mesh authored against rig A **must never** be applied to rig B,
+**even when the IDs "fit"** within B's window. The IDs fitting is necessary but not sufficient — the
+joints they name are physically different.
+
+#### The clean-at-rest / shatter-on-play diagnostic fingerprint
+
+When a mesh is bound to the **wrong** same-ID-range skeleton and an idle clip from the wrong rig is
+played:
+
+- **At rest** (no clip, or every track at its bind value) the inverse-bind and the forward bone
+  transform still cancel (§0), so the rest mesh is reproduced **cleanly** — there is no visible defect.
+- **The instant a clip rotates bones off bind**, each vertex is rotated about the **wrong joint up a
+  wrong parent chain**, and the mesh **shatters**.
+
+This precise signature — correct at rest, exploding only once animation moves bones off bind — is the
+fingerprint of a **rig substitution**. It is NOT a defect in the skinning math of §0–§7, and it is NOT
+a track→bone-ID overflow (the wrong clip's IDs happened to fit the wrong rig's window). The matched
+class renders correctly purely because its shared default choice coincided with its own `id_b` rig.
+
+#### Importer invariant (implementers MUST follow)
+
+1. Parse the base `.skn` and read its `id_b` (`formats/mesh.md` §Header). Resolve the deform skeleton as
+   `data/char/bind/g{id_b}.bnd`, **per class** — never a single shared rig hard-coded across all classes.
+2. Select the idle clip from `actormotion.txt` keyed by `skin_class == id_b` (col2 → col16), **per
+   class** — never a single shared idle clip. Each clip's track count equals its rig's bone count.
+3. Skin **every** overlay part onto that **same** `id_b`-selected skeleton (all of a class's overlays
+   carry the class's `id_b`).
+4. **Defensive guard (importer hardening — NOT legacy parity).** The legacy bone resolver
+   **CLAMPS** an out-of-range id to the **last bone**: when `id − base_id ≥ bone_count` it returns
+   `pose_bone_base + 88 · bone_count − 88`, and the mixer's non-null guard never fires because the
+   clamped result is non-null. So in the original, an out-of-range `.mot` track id drives the **last
+   bone** and an out-of-range `.skn` weight id binds the **last bone** — it does not skip. This clamp
+   is just as wrong for a mismatched rig as skipping would be (a redirected influence is wrong either
+   way), so the §8(e) rig-identity invariant is what actually matters; clamp-vs-skip only changes the
+   *visual signature* of a mismatch (clamp piles geometry onto the last bone; skip freezes that
+   vertex/track). For a robust importer we therefore **recommend SKIPPING** any track/weight whose
+   `bone_id` falls outside `[base_id, base_id + bone_count)` rather than reproducing the legacy clamp —
+   a skipped influence is at least inert, whereas a clamp actively drags the mesh onto one bone. Treat
+   "skip" as the recommended hardening, "clamp-to-last-bone" as the faithful legacy behaviour
+   (`formats/animation.md` §Bone-track linkage).
+5. **Honour §6.3 (secondary hazard, not the cause):** idle clips store a **non-zero translation on
+   nearly every child track on disk**, which the legacy engine ignores — child bones rotate only and
+   keep their bind-pose local translation; only the root translates. Feed **rotation tracks for child
+   bones and a position track for the root only**. Applying the stored child translations stretches bone
+   lengths and can itself shatter the mesh — this would affect every class, so it is a separate fidelity
+   requirement that must be respected once the rig/clip identity above is correct.
+
+Bring-up assertion: after step 1–3 the trio is self-consistent for **all** classes, so the cancellation
+invariant of §8(a) holds at rest and the animation reproduces correctly. If a class is clean at rest but
+shatters on its idle, re-check that its rig and clip were resolved from that class's own `id_b` and not a
+shared default. This is the recovered cause of the char-create preview shatter cross-referenced in
+`frontend_scenes.md` §3.7.5.
+
 ---
 
 ## 9. Open items
 
 | Item | Status | Impact |
 |---|---|---|
+| Inverse-bind **bake routine** address + exact conjugate/order (§4) | STATIC-HYPOTHESIS — the bake's *existence* is forced by the data (load leaves `localPos`/`localNormal` zeroed; the deform consumes them as bone-local with no per-frame inverse) and its result matches §4, but the routine was not pinned statically | Pin via a debugger breakpoint on the first deform watching the major-influence `localPos` slot; confirm `(−x,−y,−z,w)` + subtract-then-rotate. Does not block the importer (the math is known) |
 | Exact Godot quaternion remap under Z-negation | PROPOSED — `(x,y,z,w) → (−x,−y,z,w)` is the expected mapping but must be checked against one real bone rotation | Get it wrong and the rig twists; validate before mass import |
-| Per-node `scale` (§5.3, §6.6) | PROPOSED — assumed 1.0 for characters; the setter was not traced | If a hidden non-unit mesh scale exists, the importer must apply it; assert it is 1.0 during bring-up |
+| Native up-axis / handedness *label* | CAPTURE/DEBUGGER-PENDING — no axis flip exists inside the math (confirmed), but whether native is literally left-handed D3D9 Y-up needs a runtime read of one live bone transform | Determines the §8(b) handedness conversion; the *uniformity* requirement holds regardless |
+| Log-shaped epsilon tests (dedup §2.1; accumulate / commit floors §6.2) | CAPTURE/DEBUGGER-PENDING — the three tests disassemble as a logarithm-shaped intrinsic compared against 0.001, almost certainly a decompiler mis-symbol of an absolute-value epsilon clamp; behaviourally treated as a 0.001 clamp | A debugger step over one site confirms the intrinsic; no importer impact (treat as a 0.001 clamp) |
+| Per-mesh + per-node `scale` (§3.4, §5.3, §6.6) | RESOLVED (CAMPAIGN 9, re-confirmed CAMPAIGN 10) — per-mesh scale is a skin-object field set at attach as `nodeScale · meshScale` (× optional non-zero override); a separate per-node scale lives at runtime bone +84; both generally non-unit | The importer **must read and apply** the per-mesh scale to positions and the per-node scale to bone-local translation (not normals, not rotations); do NOT assume 1.0 |
 | Faithful vs. renormalized interpolation alpha (§6.1) | PROPOSED choice — both are documented; pick one per project taste | Affects playback feel, not correctness; document the choice |
 | `actormotion.txt` columns 3–14 semantics | PROPOSED — offsets/types confirmed, meanings inferred (see `formats/animation.md` §`actormotion.txt` layout) | Not needed to deform; do not branch on these until confirmed |
 | Multi-bone character `.skn`/`.bnd` byte-level cross-check of the inverse-bind bake | PARTIALLY VERIFIED — corpus confirms multi-weight skins exist (§5.2); the bake math is code-recovered, not yet byte-validated end-to-end on a real character | Validate against the §8(d) player trio; assert the cancellation invariant |
+| Which skeleton the original char-create preview pairs with class 4 (§8(e)) | PLAUSIBLE (disk-implied: the class-4 skin's own `id_b` selects the 89-bone rig) — to be ratified against the live original | The recovered fix resolves rig + clip from the skin's `id_b` per class; the live ratification only confirms the original makes the same per-class choice |
 
 ---
 
@@ -498,6 +845,8 @@ relationship is a confirmed bijection across all 349 ids — see `formats/mesh.m
 - **Animation clip bytes + mixer:** `formats/animation.md` (`.mot` tracks/keyframes, 10 fps timing,
   raw-seconds alpha, the BANI variant, `actormotion.txt`).
 - **Container:** `formats/pak.md` — VFS archive that delivers `.skn` / `.bnd` / `.mot`.
+- **Char-create preview (rig/clip identity, §8(e)):** `frontend_scenes.md` §3.7.5 (preview-character
+  assets for the four starter classes).
 - **Canonical names:** see `Docs/RE/names.yaml` (`SkinFile`, `BindPoseFile`, `BndBone`, `MotionClip`,
   `BoneTrack`, `Keyframe`, `AnimationMixer`).
 - **Provenance:** see `Docs/RE/journal.md` (entry for this spec is appended separately).

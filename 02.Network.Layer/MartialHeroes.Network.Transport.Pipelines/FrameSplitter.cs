@@ -10,11 +10,11 @@ namespace MartialHeroes.Network.Transport.Pipelines;
 /// and dispatches complete, length-prefixed frames to an <see cref="IFrameSink"/>.
 /// </summary>
 /// <remarks>
-/// Framing spec: Docs/RE/opcodes.md — Wire frame header.
+/// Framing spec: Docs/RE/opcodes.md — Wire frame header (+ Docs/RE/specs/crypto.md §2).
 /// <list type="bullet">
 ///   <item>Header is 8 bytes, little-endian.</item>
-///   <item>Bytes +0..+1: u16 <c>size</c> = total frame length including the 8-byte header.</item>
-///   <item>Bytes +2..+3: unused (upper half of a physical u32; always zero on the wire).</item>
+///   <item>Bytes +0..+3: u32 <c>size</c> = total frame length including the 8-byte header. The size
+///   field is a TRUE u32 (the u16-vs-u32 question is RESOLVED in favour of u32).</item>
 ///   <item>Bytes +4..+5: u16 <c>major</c> opcode.</item>
 ///   <item>Bytes +6..+7: u16 <c>minor</c> opcode.</item>
 ///   <item>Bytes +8..: payload, (size - 8) bytes.</item>
@@ -91,8 +91,9 @@ internal static class FrameSplitter
                 if (frameLength < FramingConstants.HeaderSize
                     || frameLength > FramingConstants.MaxFrameSize)
                 {
-                    // spec: Docs/RE/opcodes.md — size field is u16 and must include the
-                    // 8-byte header; any value outside [HeaderSize, MaxFrameSize] is illegal.
+                    // spec: Docs/RE/opcodes.md (size is a u32 incl. the 8-byte header) +
+                    // crypto.md §3/§5 (sanity bound = 8 + 0x2DA0 inbound LZ4 capacity); any value
+                    // outside [HeaderSize, MaxFrameSize] is illegal.
                     framingError = true;
                     break;
                 }
@@ -137,11 +138,12 @@ internal static class FrameSplitter
     }
 
     /// <summary>
-    /// Attempts to read the u16 total-frame-size field from the front of <paramref name="buffer"/>.
+    /// Attempts to read the u32 total-frame-size field from the front of <paramref name="buffer"/>.
     /// Returns <see langword="false"/> (and leaves <paramref name="frameLength"/> at 0) when fewer
     /// than <see cref="FramingConstants.HeaderSize"/> bytes are available — the prefix is split
     /// across reads.
-    /// spec: Docs/RE/opcodes.md — "Offset +0, Size u16 (LE), total frame size."
+    /// spec: Docs/RE/opcodes.md + Docs/RE/specs/crypto.md §2 — "Offset +0, Width 4 bytes (u32, LE),
+    /// total frame size."
     /// </summary>
     private static bool TryParseFrameLength(ReadOnlySequence<byte> buffer, out int frameLength)
     {
@@ -153,15 +155,18 @@ internal static class FrameSplitter
 
         // Use SequenceReader for zero-alloc prefix parsing across segment boundaries.
         var seqReader = new SequenceReader<byte>(buffer);
-        // spec: Docs/RE/opcodes.md — SizeFieldOffset = 0, u16, little-endian.
-        if (!seqReader.TryReadLittleEndian(out short rawSize))
+        // spec: Docs/RE/opcodes.md + Docs/RE/specs/crypto.md §2 — size field at +0, u32, little-endian.
+        if (!seqReader.TryReadLittleEndian(out int rawSize))
         {
             frameLength = 0;
             return false;
         }
 
-        // Cast via ushort to avoid sign extension; the wire value is an unsigned 16-bit quantity.
-        frameLength = (ushort)rawSize;
+        // Reinterpret as the unsigned 32-bit wire value, then clamp into int so an out-of-range
+        // (e.g. > int.MaxValue) frame size resolves to a value the caller's MaxFrameSize bound
+        // rejects rather than wrapping negative. spec: crypto.md §3/§5 — sanity-bounded by MaxFrameSize.
+        uint sizeU32 = (uint)rawSize;
+        frameLength = sizeU32 > int.MaxValue ? int.MaxValue : (int)sizeU32;
         return true;
     }
 
@@ -174,7 +179,7 @@ internal static class FrameSplitter
     private static uint ReadPackedOpcode(ReadOnlySequence<byte> frameSeq)
     {
         var seqReader = new SequenceReader<byte>(frameSeq);
-        // Skip to +4 (past size u16 at +0 and unused u16 at +2).
+        // Skip to +4 (past the u32 size field at +0..+3).
         seqReader.Advance(FramingConstants.MajorOpcodeOffset); // advance 4 bytes
 
         seqReader.TryReadLittleEndian(out short rawMajor);

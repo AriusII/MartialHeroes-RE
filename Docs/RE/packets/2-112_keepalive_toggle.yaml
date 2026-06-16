@@ -1,0 +1,63 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED on-wire role; the 1-byte body + master-enable gate are control-flow CONFIRMED
+# from the send site. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: builder writes header 2/112 + appends a SINGLE 1-byte body, value 1)
+#   enable gate:         confirmed   (gated by a master keepalive-enable flag: one arg sets the flag, another clears it,
+#                        otherwise the send is gated on the flag; the flag is the Block-A keepalive anchor)
+#   callers:             confirmed   (the leave-world-to-logout scene path, the world-state-tick handler, and WinMain)
+#   wire VALUE semantics: capture/debugger-pending (whether the byte is ever a value other than 1; the real on-wire cadence)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: none (NEW C2S opcode -- ADD a 2/112 row to opcodes.md; this is the SECOND keepalive-family C2S message
+#              alongside the 2/10000 timer template, packets/2-10000_keepalive.yaml).
+
+name: CmsgKeepaliveToggle
+opcode: 0x20070           # major 2 (GameAction), minor 112 -> (2 << 16) | 112  (112 = 0x70)
+direction: C2S
+size: 1                   # fixed 1-byte body (the builder appends a single byte, value 1)
+spec: packets/2-112_keepalive_toggle.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  On-demand keepalive enable / ping. A 1-byte C2S message (body value 1) distinct from the timer-driven
+  2/10000 template. The send is governed by a master keepalive-enable flag: the flag is set when the
+  client enters the world and cleared when it leaves, and the toggle send is gated on that flag. This is
+  the SECOND of the two keepalive-family C2S mechanisms the client carries (the first being the cached
+  2/10000 4-byte zero-body timer template). Both builders are control-flow confirmed; which one actually
+  travels on the wire, and at what cadence, is capture/debugger-pending.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the width sums to size: 1.
+fields:
+  - { name: Flag, type: u8 }   # 0x00  control-flow confirmed to be written as the constant 1; meaning capture-pending
+
+notes: |
+  Static analysis only; no capture. The builder allocates a packet, writes the 2/112 header words, and
+  appends a single body byte (value 1). Frame = 8-byte header + 1 = 9 bytes on the wire (pre-transform).
+
+    0x00 (1B) Flag : the single body byte, written as the constant 1 at the send site. Whether the
+                     server interprets it as an enable/ping toggle (vs always-1) is a WIRE VALUE and is
+                     capture/debugger-pending.
+
+  MASTER ENABLE GATE (load-bearing): the send is governed by a master keepalive-enable flag (the
+  Block-A keepalive anchor). The dispatcher takes one of three branches by argument:
+    - one argument SETS the master-enable flag (armed on world-enter);
+    - another argument CLEARS it (on leave-to-logout);
+    - otherwise the toggle is sent only while the flag is set.
+  Callers: the leave-world-to-logout scene path, the world-state-tick handler (the S2C 4/1 game-state
+  tick path), and the WinMain scene state machine.
+
+  RELATIONSHIP TO 2/10000: the major-2 keepalive family has TWO distinct C2S messages, not one:
+    - 2/10000 (packets/2-10000_keepalive.yaml) : timer-driven, 4-byte zero body, compress-only template
+      armed at ~20000 ms in the NetHandler ctor;
+    - 2/112 (this spec)                        : on-demand 1-byte enable/ping gated by the master-enable
+      flag (set on world-enter, cleared on leave).
+  This resolves the Block-A "keepalive C2S 2/112 (NOT 2/10000)" correction: both are real. opcodes.md
+  previously documented only 2/10000; this file is the basis for the new 2/112 row.
+
+  UNKNOWNS to resolve with a capture:
+    - whether the body byte is ever a value other than the constant 1;
+    - which of 2/112 vs 2/10000 the server actually sees, and the real on-wire cadence of each.
+
+  UNBLOCKS: Network.Transport keepalive enable/disable wiring tied to world-enter / leave transitions.

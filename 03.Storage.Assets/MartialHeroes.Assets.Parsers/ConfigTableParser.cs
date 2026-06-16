@@ -291,49 +291,72 @@ public static class ConfigTableParser
 
     /// <summary>
     /// Parses <c>data/script/users.scr</c> — character class stat grid.
-    /// The entire file is a single 496-byte opaque block.
+    /// The ENTIRE FILE is a SINGLE 496-byte (0x1F0) structure, read in ONE read.
+    /// There is NO per-record loop and NO stride — the prior "4 × 124" and "124/124/128/120"
+    /// framings are REFUTED. The four class windows are a post-load grid-formula access pattern,
+    /// NOT an on-disk record stride.
     /// </summary>
     /// <param name="data">Raw file content from the VFS.</param>
-    /// <returns>Opaque users block.</returns>
+    /// <returns>Decoded users block with four class windows.</returns>
     /// <exception cref="InvalidDataException">
     /// Thrown if the buffer is not exactly 496 bytes.
     /// </exception>
     /// <remarks>
-    /// spec: Docs/RE/formats/config_tables.md §2.6 users.scr — "496-byte bulk block": CONFIRMED (size only).
-    /// Internal layout: UNVERIFIED.
+    /// spec: Docs/RE/formats/config_tables.md §2.6 users.scr — "single 496-byte (0x1F0) structure, one read": CONFIRMED.
+    /// CORRECTED CAMPAIGN VFS-MASTERY (two-witness: loader + black-box):
+    ///   The loader reads exactly 496 bytes in ONE read with no per-record loop.
+    ///   The four-way split is a grid-formula access pattern post-load. The prior
+    ///   "4 × 124-byte records" or heterogeneous "124/124/128/120" models are REFUTED.
+    /// spec: Docs/RE/formats/config_tables.md §2.6 — "CORRECTED — no per-record loop, no stride": CONFIRMED.
     /// </remarks>
     public static UsersBlock ParseUsersScr(ReadOnlyMemory<byte> data)
     {
-        // spec: Docs/RE/formats/config_tables.md §2.6 — "496-byte bulk block (4 × 124-byte class blocks)": CONFIRMED.
+        // The whole file is one 496-byte block — no loop, no stride.
+        // spec: Docs/RE/formats/config_tables.md §2.6 — "whole file is a SINGLE fixed-size structure of 496 bytes (0x1F0)": CONFIRMED.
+        // spec: Docs/RE/formats/config_tables.md §2.6 — structure size CONFIRMED (two-witness: loader reads exactly this many bytes in one read, on-disk size matches).
         if (data.Length != UsersBlock.FixedSize)
             throw new InvalidDataException(
-                $"users.scr parse error: expected exactly {UsersBlock.FixedSize} bytes, " +
+                $"users.scr parse error: expected exactly {UsersBlock.FixedSize} bytes " +
+                $"(single structure, no stride, no record loop), " +
                 $"got {data.Length}. spec: Docs/RE/formats/config_tables.md §2.6.");
 
         ReadOnlySpan<byte> span = data.Span;
-        // spec: Docs/RE/formats/config_tables.md §2.6 — "4 × 124-byte class blocks, one per character class": CONFIRMED.
-        // Each block: ClassId u8 @ +0 (block+0); 3 bytes header tail @ +1..+3 (CONFIRMED present, semantic UNVERIFIED);
-        //   3×f32 Stat group A @ +4..+15 (= 3.0 all classes): CONFIRMED.
-        //   4×f32 Zero group @ +16..+31: CONFIRMED (all zero).
-        //   f32 stat ratio col1 @ +32 (7.0): CONFIRMED. f32 col2 @ +36 (24.0): CONFIRMED.
-        //   f32 zero @ +40: CONFIRMED. 3×f32 repeat @ +44..+56: CONFIRMED.
-        //   8×f32 zero group @ +68..+99: CONFIRMED (all zero).
-        //   8×f32 class-specific ratio group @ +92..+123: CONFIRMED.
-        // spec: Docs/RE/formats/config_tables.md §2.6 per-block layout table: CONFIRMED.
+
+        // Extract the four class windows using grid-formula offsets.
+        // Each window is 124 bytes; the grid formula supplies the window base.
+        // spec: Docs/RE/formats/config_tables.md §2.6 — "post-load grid-formula access pattern, not a record stride": CONFIRMED.
+        // Per-window layout (offsets relative to window base):
+        //   +0: u8 class ID (1..4). CONFIRMED.
+        //   +1: constant 0x13 (19). CONFIRMED (value); semantic UNVERIFIED.
+        //   +2: constant 0x43 (67). CONFIRMED (value); semantic UNVERIFIED.
+        //   +3: always zero (header pad). CONFIRMED.
+        //   +4..+15: stat weight triplet A = (3.0, 3.0, 3.0). 3×f32. CONFIRMED.
+        //   +16..+35: zero group. 5×f32. CONFIRMED (all zero).
+        //   +36..+47: (7.0, 24.0, 0.0) B-input triplet #1. 3×f32. CONFIRMED.
+        //   +48..+59: (7.0, 24.0, 0.0) B-input triplet #2. CONFIRMED.
+        //   +60..+71: (7.0, 24.0, 0.0) B-input triplet #3. CONFIRMED.
+        //   +72..+91: zero group. 5×f32. CONFIRMED (all zero).
+        //   +92..+123: class-specific multiplier group. 8×f32. CONFIRMED.
+        // spec: Docs/RE/formats/config_tables.md §2.6 per-class window layout table: CONFIRMED.
         var classBlocks = new UsersClassBlock[4];
         for (int b = 0; b < 4; b++)
         {
-            int blockStart = b * UsersBlock.ClassBlockSize;
-            ReadOnlySpan<byte> blk = span.Slice(blockStart, UsersBlock.ClassBlockSize);
+            // Grid formula: window base = b × ClassBlockSize.
+            // spec: Docs/RE/formats/config_tables.md §2.6 — grid-formula window base: CONFIRMED (implied by 4-class layout).
+            int windowBase = b * UsersBlock.ClassBlockSize;
+            ReadOnlySpan<byte> blk = span.Slice(windowBase, UsersBlock.ClassBlockSize);
 
-            byte classId = blk[0]; // Class ID 1-based @ +0. CONFIRMED.
+            // Class ID u8 @ window+0. CONFIRMED (1..4).
+            byte classId = blk[0];
 
-            // Stat group A: 3×f32 @ +4. CONFIRMED (values 3.0, 3.0, 3.0 for all 4 classes).
+            // Stat group A: 3×f32 @ window+4. CONFIRMED (values 3.0, 3.0, 3.0 for all 4 classes).
+            // spec: Docs/RE/formats/config_tables.md §2.6 — "+4 12 3×f32 Stat weight triplet A = (3.0, 3.0, 3.0): CONFIRMED".
             var statGroupA = new float[3];
             for (int s = 0; s < 3; s++)
                 statGroupA[s] = BinaryPrimitives.ReadSingleLittleEndian(blk[(4 + s * 4)..]);
 
-            // Class-specific ratio group: 8×f32 @ +92. CONFIRMED (class-specific deviations).
+            // Class-specific multiplier group: 8×f32 @ window+92. CONFIRMED (class-specific deviations).
+            // spec: Docs/RE/formats/config_tables.md §2.6 — "+92 32 8×f32 Class-specific multiplier group: CONFIRMED".
             var classRatios = new float[8];
             for (int s = 0; s < 8; s++)
                 classRatios[s] = BinaryPrimitives.ReadSingleLittleEndian(blk[(92 + s * 4)..]);
@@ -343,7 +366,7 @@ public static class ConfigTableParser
                 ClassId = classId,
                 StatGroupA = statGroupA,
                 ClassSpecificRatios = classRatios,
-                RawBlock = data.Slice(blockStart, UsersBlock.ClassBlockSize),
+                RawBlock = data.Slice(windowBase, UsersBlock.ClassBlockSize),
             };
         }
 
@@ -351,107 +374,13 @@ public static class ConfigTableParser
     }
 
     // =========================================================================
-    // items.scr — item catalogue (548-byte records + N×8 trailing)
+    // items.scr — RETIRED (CAMPAIGN 11 Phase 3a)
     // =========================================================================
-
-    // Main record stride: 548 bytes (0x224). CONFIRMED.
-    // spec: Docs/RE/formats/config_tables.md §2.7 items.scr — "stride: 548 bytes": CONFIRMED.
-    private const int ItemScrMainStride = 548; // 0x224
-
-    // Trailing entry stride: 8 bytes. CONFIRMED.
-    // spec: Docs/RE/formats/config_tables.md §2.7 — "N×8 B trailing sub-entries": CONFIRMED.
-    private const int ItemScrTrailingStride = 8;
-
-    // Confirmed field offsets within the 548-byte main record.
-    // spec: Docs/RE/formats/config_tables.md §2.7.
-    private const int ItemSubTypeFlagOffset = 0xD2; // u8 sub-type flag. CONFIRMED.
-    private const int ItemCategoryFlag1Offset = 0xE5; // u8 weapon flag. CONFIRMED.
-    private const int ItemCategoryFlag2Offset = 0xE6; // u8 armour flag. CONFIRMED.
-    private const int ItemCategoryFlag3Offset = 0xE7; // u8 type-11 flag. CONFIRMED.
-    private const int ItemCategoryFlag4Offset = 0xE8; // u8 type-16 flag. CONFIRMED.
-    private const int ItemTrailingCountOffset = 0x220; // u8 trailing entry count N. CONFIRMED.
-
-    /// <summary>
-    /// Parses <c>data/script/items.scr</c> — item catalogue.
-    /// Each main record is 548 bytes; after each main record follows N×8 trailing sub-entries
-    /// where N is the byte at offset +0x220 within the record.
-    /// </summary>
-    /// <param name="data">Raw file content from the VFS.</param>
-    /// <returns>Array of item catalogue entries in on-disk order.</returns>
-    /// <exception cref="InvalidDataException">
-    /// Thrown on truncation.
-    /// </exception>
-    /// <remarks>
-    /// spec: Docs/RE/formats/config_tables.md §2.7 items.scr: CONFIRMED (stride, confirmed offsets).
-    /// Most internal fields: UNVERIFIED.
-    /// </remarks>
-    public static ItemCatalogEntry[] ParseItemsScr(ReadOnlyMemory<byte> data)
-    {
-        ReadOnlySpan<byte> span = data.Span;
-
-        if (span.Length < ItemScrMainStride)
-        {
-            // Empty or tiny file — valid edge case (no records).
-            if (span.Length == 0)
-                return [];
-            throw new InvalidDataException(
-                $"items.scr parse error: buffer too small for even one record " +
-                $"(need {ItemScrMainStride} bytes, got {span.Length}).");
-        }
-
-        var results = new List<ItemCatalogEntry>();
-        int offset = 0;
-
-        while (offset < span.Length)
-        {
-            // Each iteration: read a 548-byte main record then N×8 trailing bytes.
-            if (offset + ItemScrMainStride > span.Length)
-                throw new InvalidDataException(
-                    $"items.scr parse error: main record truncated at offset {offset} " +
-                    $"(need {ItemScrMainStride} bytes, {span.Length - offset} remain).");
-
-            ReadOnlyMemory<byte> rawRecord = data.Slice(offset, ItemScrMainStride);
-            ReadOnlySpan<byte> recSpan = span.Slice(offset, ItemScrMainStride);
-
-            // Extract confirmed fields.
-            // spec: Docs/RE/formats/config_tables.md §2.7 — confirmed offsets.
-            byte subTypeFlag = recSpan[ItemSubTypeFlagOffset];
-            byte catFlag1 = recSpan[ItemCategoryFlag1Offset];
-            byte catFlag2 = recSpan[ItemCategoryFlag2Offset];
-            byte catFlag3 = recSpan[ItemCategoryFlag3Offset];
-            byte catFlag4 = recSpan[ItemCategoryFlag4Offset];
-            byte trailingCount = recSpan[ItemTrailingCountOffset];
-
-            offset += ItemScrMainStride;
-
-            // Read N×8 trailing sub-entries.
-            // spec: Docs/RE/formats/config_tables.md §2.7 — "N×8 trailing bytes; all fields UNVERIFIED".
-            ReadOnlyMemory<byte>[] trailingEntries = new ReadOnlyMemory<byte>[trailingCount];
-            for (int ti = 0; ti < trailingCount; ti++)
-            {
-                if (offset + ItemScrTrailingStride > span.Length)
-                    throw new InvalidDataException(
-                        $"items.scr parse error: trailing entry [{ti}] truncated at offset {offset}.");
-
-                trailingEntries[ti] = data.Slice(offset, ItemScrTrailingStride);
-                offset += ItemScrTrailingStride;
-            }
-
-            results.Add(new ItemCatalogEntry
-            {
-                RawRecord = rawRecord,
-                SubTypeFlag = subTypeFlag,
-                CategoryFlag1 = catFlag1,
-                CategoryFlag2 = catFlag2,
-                CategoryFlag3 = catFlag3,
-                CategoryFlag4 = catFlag4,
-                TrailingCount = trailingCount,
-                TrailingEntries = trailingEntries,
-            });
-        }
-
-        return results.ToArray();
-    }
+    // ParseItemsScr / ItemCatalogEntry were a duplicate of the canonical ItemsScrParser
+    // (which decodes name/uid/desc/model_ref/anim_ref/discriminator/effects into ItemsScrRecord).
+    // No production consumer in layers 04/05 used ItemCatalogEntry.
+    // Use ItemsScrParser.Parse for all items.scr decoding.
+    // spec: Docs/RE/formats/items_scr.md §4 — engineer guidance: canonical parser is ItemsScrParser.
 
     // =========================================================================
     // skills.scr — skill catalogue (1504-byte records + N×8 trailing)
@@ -461,47 +390,13 @@ public static class ConfigTableParser
     // spec: Docs/RE/formats/config_tables.md §2.8 skills.scr — "stride: 1504 bytes": CONFIRMED.
     private const int SkillScrMainStride = 1504; // 0x5E0
 
-    // Trailing count byte offset within the 1504-byte record: 0x5E0 — but that is the
-    // first byte AFTER the 1500-byte body. The spec notes "+0x5E0 u8 Trailing entry count N"
-    // which is byte index 1500 within the 1504-byte record (0-based: 0..1499 = body, 1500 = count).
-    // Wait: 0x5E0 = 1504 — that is OUTSIDE the 1504-byte stride. Re-read spec:
-    //   "+0x5E0 | 1 | u8 | Trailing entry count N | CONFIRMED"
-    //   "+0x5E1 | 3 | — | Alignment padding to reach 1504 | CONFIRMED (derived)"
-    // So the stride IS 1504 = 0x5E0 + 4 bytes (1 count + 3 padding).
-    // Wait again: 0x5E0 = 1504 decimal. But the stride is also 1504 bytes.
-    // That would mean the trailing count IS the last dword of the record.
-    // Let me recount: 0x5E0 in decimal = 1504. Stride = 1504. So offset +0x5E0 is AFTER the record.
-    // But the spec says stride is 1504 bytes AND the count is at +0x5E0 within the record...
-    // 0x5E0 = 1504. A 1504-byte record has offsets 0..1503. 1504 (0x5E0) is out of bounds.
-    //
-    // Re-reading the spec more carefully:
-    //   "Main record (1504 bytes = 0x5E0):"
-    //   "+0x5E0 | 1 | u8 | Trailing entry count N"
-    //   "+0x5E1 | 3 | — | Alignment padding to reach 1504"
-    //
-    // This is contradictory: the stride is stated as 1504 bytes but the trailing count is at
-    // byte 0x5E0 = 1504 which is one past the end of a 1504-byte record, AND then the spec
-    // says 3 bytes of padding "to reach 1504". That implies the actual stride is:
-    //   body (1500 bytes) + count (1 byte) + padding (3 bytes) = 1504 bytes.
-    // So the count is at offset 1500 (0x5DC) within the 1504-byte record, NOT at 0x5E0.
-    //
-    // The spec uses "0x5E0" as the section header (the record name is 1504 = 0x5E0 bytes)
-    // and then mistakenly uses "+0x5E0" to mean the offset of the last field. The table
-    // row "+0x5E0" most likely intends "+0x5DC" (= 1500) for the count byte, with 3 bytes
-    // padding rounding to 1504. OR the spec means the record is actually LARGER than 1504:
-    //   body (0x5E0 = 1504 bytes) + count (1 byte) + padding (3 bytes) = 1508 bytes.
-    //
-    // Given the ambiguity, we follow the stated stride (1504 bytes) and place the trailing
-    // count at offset 1500 within the record (the last non-padding byte before the 3-byte pad).
-    // This interpretation satisfies: 1500 (body) + 1 (count) + 3 (pad) = 1504 (stride).
-    //
-    // A comment is required because this is a spec ambiguity.
-    //
+    // Trailing count byte offset within the 1504-byte record.
     // spec: Docs/RE/formats/config_tables.md §2.8 —
-    //   "AMBIGUITY: The spec states stride=1504 bytes (0x5E0) AND count byte at +0x5E0.
-    //    These are contradictory. Interpretation used here: stride=1504, count at +1500 (0x5DC),
-    //    3 bytes padding at +1501..+1503. Needs verification with a sample file."
-    private const int SkillScrTrailingCountOffset = 1500; // 0x5DC within the 1504-byte record
+    //   AMBIGUITY: the spec table cites "+0x5E0" for the trailing count byte, but 0x5E0 = 1504
+    //   which is the same as the stated stride (1504 bytes), i.e. one past the end of the record.
+    //   The most coherent reading is: body (1500 bytes) + count (1 byte) + pad (3 bytes) = 1504,
+    //   so the count sits at offset 1500 (0x5DC). DBG-PENDING: confirm against a real skills.scr sample.
+    private const int SkillScrTrailingCountOffset = 1500; // 0x5DC — DBG-pending sample verification
     private const int SkillScrTrailingStride = 8;
 
     /// <summary>
@@ -514,7 +409,21 @@ public static class ConfigTableParser
     /// <remarks>
     /// spec: Docs/RE/formats/config_tables.md §2.8 skills.scr: CONFIRMED (stride 1504, trailing N×8).
     /// Trailing count offset ambiguity: see inline comment above (SkillScrTrailingCountOffset).
-    /// Main body field layout: UNVERIFIED.
+    /// Main body field layout: partially UNVERIFIED; confirmed named fields are in the spec table.
+    /// <para>
+    /// CONFIRMED-variable fields (spec: Docs/RE/formats/config_tables.md §2.8 CAMPAIGN VFS-MASTERY update):
+    /// The following fields are now CONFIRMED-variable (two-witness: loader + black-box full-record pass).
+    /// They sit inside a verbatim-copied record body with no branch, so values genuinely vary.
+    /// Their SEMANTICS remain DBG-pending — do not assign meaning from bytes alone.
+    ///   - skills.scr +1072: CONFIRMED-variable (CP949 string-field interior; 54 distinct u32 values).
+    ///     spec: Docs/RE/formats/config_tables.md §2.8 — "+1072 CONFIRMED-variable; semantic DBG-pending".
+    ///   - skills.scr +1176 f32: CONFIRMED-variable (8 distinct float values {0.4,0.6,0.8,1.0,1.2,1.4,1.5,2.0}).
+    ///     spec: Docs/RE/formats/config_tables.md §2.8 — "+1176 CONFIRMED-variable; semantic DBG-pending".
+    ///   - skills.scr +1306 u16: CONFIRMED-variable (10 distinct values; modal 5).
+    ///     spec: Docs/RE/formats/config_tables.md §2.8 — "+1306 CONFIRMED-variable; semantic DBG-pending".
+    ///   - skills.scr +1328: CONFIRMED-variable (8 distinct values (1&lt;&lt;16)..(8&lt;&lt;16); independent of +516 class flag).
+    ///     spec: Docs/RE/formats/config_tables.md §2.8 — "+1328 CONFIRMED-variable; semantic DBG-pending".
+    /// </para>
     /// </remarks>
     public static SkillCatalogEntry[] ParseSkillsScr(ReadOnlyMemory<byte> data)
     {
@@ -596,6 +505,18 @@ public static class ConfigTableParser
     /// <remarks>
     /// spec: Docs/RE/formats/config_tables.md §2.9 mobs.scr: CONFIRMED (stride, ID @ +0, type @ +324).
     /// Remaining fields: UNVERIFIED.
+    /// <para>
+    /// CONFIRMED-variable fields (spec: Docs/RE/formats/config_tables.md §2.9 CAMPAIGN VFS-MASTERY update):
+    /// The following fields are now CONFIRMED-variable (two-witness: loader + black-box full-record pass).
+    /// They sit inside a verbatim-copied record body with no branch, so values genuinely vary.
+    /// Their SEMANTICS remain DBG-pending — do not assign meaning from bytes alone.
+    ///   - mobs.scr +60 f32: CONFIRMED-variable (31 distinct float values; modal 3.0; range 0.5..400).
+    ///     spec: Docs/RE/formats/config_tables.md §2.9 — "+60 f32 CONFIRMED-variable; semantic DBG-pending".
+    ///   - mobs.scr +188 f32: CONFIRMED-variable (41 distinct values; modal 1.0 at 77%; outliers to 6000).
+    ///     spec: Docs/RE/formats/config_tables.md §2.9 — "+188 f32 CONFIRMED-variable; semantic DBG-pending".
+    ///   - mobs.scr +272 24B: CONFIRMED-variable (6×f32; 0 of 3997 records are all-1.0).
+    ///     spec: Docs/RE/formats/config_tables.md §2.9 — "+272 6×f32 CONFIRMED-variable; semantics DBG-pending".
+    /// </para>
     /// </remarks>
     public static MobCatalogEntry[] ParseMobsScr(ReadOnlyMemory<byte> data)
     {

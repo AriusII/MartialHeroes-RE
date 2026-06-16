@@ -11,7 +11,7 @@
 //      and fires the confirmed wired sounds:
 //        - UI click SFX 861010101 on every StateButton.ActionFired (via scene-tree subscription)
 //        - CharSelect-enter SFX 920100200 on ClientState.CharacterSelection
-//        - World-entry spawn SFX 862010105 + entry BGM cue 910066000 on ClientState.World
+//        - Per-area BGM on ClientState.World (910066000 = UNVERIFIED, not wired; 862010105 = 3D actor-routed, not wired here)
 //        - Per-area BGM: first non-null entry in data/map{tag}/soundtable{tag}.bgm, looped
 //   4. Degrades silently when the VFS is absent or an audio device is unavailable (headless).
 //
@@ -104,21 +104,18 @@ public sealed partial class AudioService : Node
     private const uint CharSelectEnterSfxId = 920100200u;
     // spec: Docs/RE/formats/sound_tables.md §Sound ID semantics (920100200 observed in real .bgm table)
 
-    /// <summary>
-    /// World-entry spawn SFX played when the client enters the game world.
-    /// spec: Docs/RE/names.yaml runtime_constants.SPAWN_SFX_ID (value=862010105).
-    /// spec: Docs/RE/specs/client_runtime.md — world-entry spawn SFX. CODE-CONFIRMED.
-    /// </summary>
-    private const uint WorldSpawnSfxId = 862010105u;
-    // spec: Docs/RE/names.yaml runtime_constants.SPAWN_SFX_ID
+    // NOTE: WorldSpawnSfxId (862010105) from names.yaml is a 3D directional spawn sound
+    // (kind 5, 200-unit radius) per client_runtime.md §spawn. It is NOT a 2D front-end cue
+    // and does not belong in AudioService (which owns only 2D cues). Spawn SFX routing is an
+    // actor-event concern handled by the 3D world layer.
+    // spec: Docs/RE/specs/client_runtime.md §10 — "A 3D directional spawn sound (id 862010105, kind 5)".
+    // spec: Docs/RE/specs/sound.md §8.1 — "triggerSfxByKind … kind-routed 3D, data/sound/3d/".
 
-    /// <summary>
-    /// World-entry BGM cue — the only "fade-in" (no screen-space fade exists).
-    /// spec: Docs/RE/names.yaml runtime_constants.ENTRY_BGM_CUE_ID (value=910066000).
-    /// spec: Docs/RE/specs/client_runtime.md — world-entry BGM cue. CODE-CONFIRMED.
-    /// </summary>
-    private const uint WorldEntryBgmId = 910066000u;
-    // spec: Docs/RE/names.yaml runtime_constants.ENTRY_BGM_CUE_ID
+    // NOTE: 910066000 was previously wired here as "WorldEntryBgmId" but
+    // sound.md §15.6c lists it under "UNVERIFIED scene role — do not wire them".
+    // The per-area .bgm sound table (sound.md §6.6) is the authoritative in-world BGM source;
+    // TryStartAreaBgmAsync below handles that path. Constant intentionally removed.
+    // spec: Docs/RE/specs/sound.md §15.6c.
 
     /// <summary>
     /// BGM override ID used when the local player indoor flag is set.
@@ -164,7 +161,9 @@ public sealed partial class AudioService : Node
     // repeated VFS lookups for sounds that are absent. The cache itself is always non-null.
     // Previously stored null! which defeats the Dictionary<TKey,TValue> nullability contract.
     private readonly Dictionary<uint, AudioStreamOggVorbis?> _streamCache2d = new();
-    private readonly Dictionary<uint, AudioStreamOggVorbis?> _streamCache3d = new();
+    // NOTE: _streamCache3d and GetOrLoadStream3d were removed — AudioService owns only 2D cues;
+    // 3D positional SFX is a world/actor concern and had no callers here.
+    // spec: Docs/RE/specs/sound.md §8.1 — 3D sounds are kind-routed from the actor layer.
 
     // -------------------------------------------------------------------------
     // VFS access
@@ -308,21 +307,41 @@ public sealed partial class AudioService : Node
         switch (currentState)
         {
             case MartialHeroes.Client.Application.Events.ClientState.CharacterSelection:
-                // spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — ID 920100200. SAMPLE-VERIFIED.
-                // char-select enter SFX: played when entering the character-selection state.
-                GD.Print($"[AudioService] State→CharacterSelection: playing char-select SFX {CharSelectEnterSfxId}.");
-                Play2dById(CharSelectEnterSfxId, MusicBusName, loop: false);
+                // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 — char-select BGM 920100200 is started
+                // by the select-window constructor (state-4 enter); the looping front-end BGM from
+                // FrontEndAudio.PlayBgm() is ALREADY playing this same cue when the state transition fires.
+                // The fix contract (§3.8.1): guard re-issue so entering the scene with the cue already
+                // playing on the music slot is IDEMPOTENT — do not start a second voice.
+                // FrontEndAudio has already started 920100200 looping via StartBgm-equivalent; the
+                // AudioService one-shot here would cause the double-music defect: two voices on the
+                // Music bus for the same cue. Drop the one-shot; the looping BGM continues seamlessly.
+                // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (double-music defect + fix contract).
+                if (_activeBgmId == CharSelectEnterSfxId && _bgmPlayer is not null && _bgmPlayer.Playing)
+                {
+                    GD.Print($"[AudioService] State→CharacterSelection: BGM {CharSelectEnterSfxId} already " +
+                             "looping — idempotent skip (§3.8.1 fix contract). No second voice started.");
+                }
+                else
+                {
+                    // BGM is not yet playing (e.g. VFS absent / FrontEndAudio not initialised).
+                    // Start it now to fulfil the spec requirement that the cue plays on char-select entry.
+                    // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 — 920100200 looped on state-4 enter.
+                    GD.Print($"[AudioService] State→CharacterSelection: BGM not yet playing — " +
+                             $"starting {CharSelectEnterSfxId} via StartBgm (dedup guard inside). §3.8.1.");
+                    StartBgm(CharSelectEnterSfxId);
+                }
+
                 break;
 
             case MartialHeroes.Client.Application.Events.ClientState.World:
-                // spec: Docs/RE/names.yaml runtime_constants.SPAWN_SFX_ID (862010105). CODE-CONFIRMED.
-                // spec: Docs/RE/names.yaml runtime_constants.ENTRY_BGM_CUE_ID (910066000). CODE-CONFIRMED.
-                GD.Print($"[AudioService] State→World: playing world-entry spawn SFX {WorldSpawnSfxId} " +
-                         $"and entry BGM {WorldEntryBgmId}.");
-                Play2dById(WorldSpawnSfxId, SfxBusName, loop: false);
-                StartBgm(WorldEntryBgmId);
+                // spec: Docs/RE/names.yaml runtime_constants.SPAWN_SFX_ID (862010105) — 3D directional
+                //       spawn sound, kind 5; 200-unit audible radius. CODE-CONFIRMED.
+                // NOTE: 910066000 (former "WorldEntryBgmId") is UNVERIFIED per sound.md §15.6c and is
+                //       NOT played here. Per-area BGM comes from TryStartAreaBgmAsync below.
+                GD.Print($"[AudioService] State→World: entering game world. " +
+                         "Spawn SFX is 3D actor-routed (kind 5); area BGM via .bgm table.");
 
-                // After entry BGM, attempt to load the area BGM from the .bgm sound table.
+                // Attempt to load the area BGM from the .bgm sound table.
                 // The area ID is resolved from the RealWorldRenderer (if active) or defaults to 0.
                 // spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — .bgm → data/sound/2d/.
                 _ = Task.Run(TryStartAreaBgmAsync);
@@ -642,44 +661,6 @@ public sealed partial class AudioService : Node
             // The Dictionary is typed Dictionary<uint, AudioStreamOggVorbis?> so null is a valid value.
             _streamCache2d[id] = null;
             GD.Print($"[AudioService] 2D stream absent in VFS: '{vfsPath}'.");
-        }
-
-        return stream;
-    }
-
-    /// <summary>
-    /// Returns a cached <see cref="AudioStreamOggVorbis"/> for the given 3D sound ID,
-    /// loading it from the VFS on first access.
-    ///
-    /// VFS path: data/sound/3d/{id}.ogg
-    /// spec: Docs/RE/specs/sound.md §3.3 (3D directory). SAMPLE-VERIFIED.
-    /// spec: Docs/RE/specs/sound.md §2 (decimal stem, .ogg unconditional). CODE-CONFIRMED.
-    /// </summary>
-    private AudioStreamOggVorbis? GetOrLoadStream3d(uint id)
-    {
-        if (_streamCache3d.TryGetValue(id, out AudioStreamOggVorbis? cached))
-            return cached; // may be null (absent-sentinel) — caller handles null
-
-        if (!_vfsAvailable || _assets is null)
-        {
-            GD.Print($"[AudioService] [headless-proof] 3D stream not loaded (no VFS): data/sound/3d/{id}.ogg");
-            return null;
-        }
-
-        // spec: Docs/RE/specs/sound.md §2 — "data/sound/3d/<sound_id>.ogg". CODE-CONFIRMED.
-        string vfsPath = $"data/sound/3d/{id}.ogg";
-        AudioStreamOggVorbis? stream = LoadOggFromVfs(vfsPath);
-
-        if (stream is not null)
-        {
-            _streamCache3d[id] = stream;
-            GD.Print($"[AudioService] Cached 3D stream: id={id} vfs='{vfsPath}'.");
-        }
-        else
-        {
-            // Cache null (explicit absent-sentinel); Dictionary typed as Dictionary<uint, AudioStreamOggVorbis?>.
-            _streamCache3d[id] = null;
-            GD.Print($"[AudioService] 3D stream absent in VFS: '{vfsPath}'.");
         }
 
         return stream;

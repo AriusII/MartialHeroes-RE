@@ -13,9 +13,12 @@
 
 | Attribute          | Value |
 |--------------------|-------|
-| `status`           | `SAMPLE-VERIFIED` — census performed by direct VFS file enumeration and byte-confirmed cell counts against `.lst` binary records |
-| `sample_verified`  | `true` — file counts cross-checked against live VFS; `.lst` cell counts independently verified via the formula `cells = (file_size - 4) / 4` (see `terrain.md §1.2`) |
-| `binary_analysed`  | none — this document requires no decompiler input; all observations are from VFS enumeration |
+| `verification`     | `sample-verified` — census performed by direct VFS file enumeration and byte-confirmed cell counts against `.lst` binary records; the `d<NNN>.lst` loader control flow was independently re-confirmed in the IDB |
+| `ida_reverified`   | `2026-06-16` |
+| `ida_anchor`       | `263bd994` |
+| `evidence`         | `[static-ida, vfs-sample]` — `d<NNN>.lst` loader (count + cell-key-array control flow) corroborated by static IDA; all per-area presence/absence and cell counts corroborated against the live VFS (60 `.lst` files, 43,347-entry archive) |
+| `conflicts`        | none unresolved — the former "63 registered areas" prose count is corrected to **60** (the range table, per-area census table, and VFS enumeration all agree on 60); total cells corrected from "~2,505" to the exact formula sum **2,503** |
+| `sample_verified`  | `true` — file counts cross-checked against live VFS; `.lst` cell counts independently verified via the formula `cells = (file_size - 4) / 4` (see `terrain.md §1.2`); 0 mismatches across all 60 files |
 | `confidence`       | `SAMPLE-VERIFIED` = count confirmed directly from VFS. `PLAUSIBLE` = count or absence inferred by analogy without direct per-file inspection. `CODE-CONFIRMED` = presence/absence confirmed by client load-path logic documented in a related spec. |
 
 ---
@@ -27,8 +30,9 @@ an area. An area is registered in the reference VFS if and only if its `.lst` fi
 
 ### 1.1 Area ID space and ranges
 
-The reference VFS contains **63 registered areas**. Area IDs form three non-contiguous ranges;
-no `.lst` files exist for IDs 48–99, 101–200, or 211–299.
+The reference VFS contains **60 registered areas**. Area IDs form four non-contiguous ranges;
+no `.lst` files exist for IDs 48–99, 101–200, or 211–299. The four ranges sum to
+`48 + 1 + 10 + 1 = 60`, matching the count of `d<NNN>.lst` files enumerated in the live VFS.
 
 | Range | Count | Character |
 |-------|------:|-----------|
@@ -37,7 +41,8 @@ no `.lst` files exist for IDs 48–99, 101–200, or 211–299.
 | 201 – 210 | 10 | Instanced zones (instanced dungeon / aquatic flavours) |
 | 300 | 1 | Special zone (arena or boss area; 16 cells) |
 
-**SAMPLE-VERIFIED.** IDs 48–99, 101–200, 211–299 are confirmed absent.
+**SAMPLE-VERIFIED** (60 `.lst` files enumerated in the live VFS, spanning exactly these four
+ranges). IDs 48–99, 101–200, 211–299 are confirmed absent (no gaps within the stated ranges).
 
 ### 1.2 Cell count methodology
 
@@ -47,11 +52,24 @@ For each area the authoritative cell count is derived from its `.lst` binary:
 cell_count = (file_size_of_lst - 4) / 4
 ```
 
-This formula is `CONFIRMED` (see `terrain.md §1.2`). The per-area file counts in §2 are
-cross-checked against the VFS `.map` and `.ted` counts, which must equal the `.lst` cell
-count for a well-formed area.
+This formula is `SAMPLE-VERIFIED + CODE-CONFIRMED` (see `terrain.md §1.2`). The `.lst` loader
+reads a 4-byte u32-LE stored count, allocates `count × 4` bytes, then reads `count` 4-byte cell
+keys — algebraically identical to `(file_size - 4) / 4`. The stored count at offset 0 was
+cross-checked against the formula on head reads of areas 0, 1, 6, and 100; the formula was then
+applied across all 60 `.lst` files with **0 mismatches**. The per-area file counts in §2 are
+cross-checked against the VFS `.map` and `.ted` counts, which must equal the `.lst` cell count
+for a well-formed area.
 
-**Total registered cells across all 63 areas: approximately 2,505.**
+> **Loader note — no count validation.** The `d<NNN>.lst` loader performs **no** range check on
+> the stored count: there is no lower-bound and no upper-bound guard. A stored count of 0 is
+> accepted (the cell-load loop is simply skipped) and an arbitrarily large count is accepted. This
+> differs from the `bgtexture.lst` loader, which explicitly rejects a count of 0 or `>= 2000`
+> (see `bgtexture_lst.md`). A defensive parser may guard against a zero or implausibly large count,
+> but the shipping client does not. **CODE-CONFIRMED.**
+
+**Total registered cells across all 60 areas: exactly 2,503** (the sum of the per-area cell
+counts in §2, equal to the sum of `(file_size - 4) / 4` across all 60 `.lst` files). The earlier
+"approximately 2,505" was a rounding/estimate error. **SAMPLE-VERIFIED.**
 
 ---
 
@@ -250,7 +268,7 @@ Only three areas carry a `.tol` tile-obstacle bitmap file:
 | 13 | 2048 × 2048 tiles | 4 MB + 16 B header | Full-resolution walkmap; standard outdoor |
 | 100 | 256 × 256 tiles | 64 KB + 16 B header | Tutorial / training zone |
 
-All 60 other areas have no `.tol` file. **SAMPLE-VERIFIED.** See `misc_data.md §3` for the
+All 57 other areas have no `.tol` file. **SAMPLE-VERIFIED.** See `misc_data.md §3` for the
 `.tol` binary format. Pathfinding for areas without `.tol` must rely on `.sod` collision
 geometry for movement blocking, or the server carries its own walkability data not present
 in the client VFS. **PLAUSIBLE.**
@@ -304,7 +322,7 @@ has not been determined. **SAMPLE-VERIFIED (file size); root cause UNVERIFIED.**
 
 ### 5.1 `mob.arr` presence
 
-55 of 63 areas have `mob<NNN>.arr` files; 8 areas have no mob spawn records:
+52 of 60 areas have `mob<NNN>.arr` files; 8 areas have no mob spawn records:
 
 ```
 Areas without mob.arr: 0 (hub), 6 (single-cell), 100 (tutorial),
@@ -330,7 +348,7 @@ in the reference VFS.
 
 ### 5.2 `npc.arr` presence
 
-61 of 63 areas have `npc<NNN>.arr` files; 2 areas have no NPC spawn records:
+58 of 60 areas have `npc<NNN>.arr` files; 2 areas have no NPC spawn records:
 
 ```
 Areas without npc.arr: 11 (water + indoor dungeon), 14 (large outdoor mob zone)
@@ -356,11 +374,11 @@ Areas 0 and 207 carry `npc.arr` files with a 16-byte tail past the last complete
 
 ### 6.1 Coverage by bin type
 
-All 63 areas have the full set of mandatory sky/environment bins in `data/sky/dat/`. The
+All 60 areas have the full set of mandatory sky/environment bins in `data/sky/dat/`. The
 conditional (dome) bins are absent only for areas whose `map_option` flags suppress sky
 rendering.
 
-| Bin filename pattern | Present for all 63 areas | Notes |
+| Bin filename pattern | Present for all 60 areas | Notes |
 |----------------------|:------------------------:|-------|
 | `map_option%d.bin` | Yes | Always present; controls sky/water/indoor flags |
 | `fog%d.bin` | Yes | Per-area fog definition |
@@ -484,7 +502,7 @@ content-loading code. All entries reference a committed spec or this document by
 | Missing `.bud` for a cell | Treat as terrain-only; do not raise an error. | §3.2, §9 |
 | Missing `.mud` for a cell or area | Default to silence (music_group = 0, all ambient indices = 0). 20 areas carry no `.mud` at all. | §3.4 |
 | Missing `.sod` for a cell | Treat as no collision geometry for that cell. 5 areas each have one cell without `.sod`. | §3.1 |
-| Missing `.up` for an area | No multi-level floor geometry; skip the upper-terrain load path. All 46 pure outdoor areas are `.up`-free. | §3.5 |
+| Missing `.up` for an area | No multi-level floor geometry; skip the upper-terrain load path. All 43 areas without `.up` (the 60 areas minus the 17 with `.up`) are `.up`-free. | §3.5 |
 | Missing dome bins | Not an error for indoor (`indoor_flag = 1`) or water+indoor areas; an outdoor area missing dome bins would be anomalous. | §6.2 |
 | Missing `mob.arr` | Zero mob spawns; do not raise an error. 8 areas have no mob spawns. | §5.1 |
 | Missing `npc.arr` | Zero NPC spawns; do not raise an error. Areas 11 and 14 have no NPC spawns. | §5.2 |

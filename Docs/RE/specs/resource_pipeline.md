@@ -1,4 +1,9 @@
 ---
+verification: confirmed    # the boot/loading orchestration load-bearing facts are recovered from control-flow; runtime replay & exact INI string remain capture/debugger-pending
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida, vfs-sample]   # control-flow recovery + real-VFS file-coverage counts (§6) corroborated against the shipped archive
+conflicts: world-entry state-2 full-corpus replay vs cached short-circuit (§2.6, §8 item 5); the OPENNING/SKIP on-disk INI filename string (runtime-populated config field, §2.5, §8 item 3); display-config FRAMERATE consumer reaching the 60 FPS throttle (§5.1 note, §8 item 11)
 status: confirmed
 sample_verified: partial   # VFS index lookup mechanics CODE-CONFIRMED; area file-coverage counts SAMPLE-VERIFIED; thread timing values CODE-CONFIRMED
 subsystems: [vfs_loader, boot_loader, loading_screen, terrain_streaming, subsystem_caches]
@@ -20,8 +25,11 @@ encoding_note: Korean in-game text and config strings are CP949 (MS-949 code pag
 >
 > **Out of scope / cross-references.** The on-disk `.inf`/`.vfs` container byte layout is owned by
 > `formats/pak.md`. Terrain cell byte formats are owned by `formats/terrain.md` and
-> `formats/terrain_scene.md`. The nine-state scene lifecycle that drives state 2 (load) is owned
-> by `specs/client_runtime.md §7`. Sound table format is owned by `formats/sound_tables.md`.
+> `formats/terrain_scene.md`. The scene lifecycle that drives state 2 (load) is owned
+> by `specs/client_runtime.md §7`; it has **8 top-level cases — `GameState` 0..7** (the application
+> entry point's `switch` is bounds-checked `<= 7` over a jump table of 8 entries plus a default). The
+> value **8 is a sub-state** (the `GameState` sub-field, whose default is 8 — e.g. state 5 sub 8,
+> state 6 sub 8), **not** a ninth top-level case. Sound table format is owned by `formats/sound_tables.md`.
 > Per-area census tables belong to `specs/area_inventory.md` (pending — see §7 for a loading-
 > relevant summary drawn from the same source data).
 
@@ -95,20 +103,168 @@ scene loop). If `vfsmode = false`, the entire packed path is bypassed and all op
 filesystem directly. The Godot/.NET loader already exposes this toggle via the VFS mount +
 loose-file fallback in `Assets.Vfs`.
 
+## 1.5 Campaign 7 re-confirmation — VFS runtime access path on build 263bd994 — (CODE-CONFIRMED)
+
+The full VFS open/read/find machinery in §1.1–§1.4 was **re-confirmed against the newer client
+build (SHA-256 prefix `263bd994`) in Campaign 7** by re-anchoring the VFS core globals and
+re-reading the open router, the entry reader, the find chokepoint, the seek path, and the mount /
+teardown sequence. The prior facts hold. The items below are either freshly pinned **runtime**
+details or sharper statements of behaviour the earlier pass described only generally. None of them
+change or contradict the on-disk container byte layout, which remains owned by `formats/pak.md`.
+
+### 1.5.1 Mount sequence (runtime) — newly pinned
+
+The VFS-mount routine performs, in order:
+
+1. Open the **index file** (`data.inf`) for reading.
+2. Read a **24-byte header** from the index file. (Header field meanings are owned by
+   `formats/pak.md`; here the runtime fact is the fixed 24-byte read at mount.)
+3. Take an **entry count** from that header. This count drives the next allocation.
+4. Allocate the in-memory **table-of-contents (TOC) array** sized **144 bytes per entry**
+   (`144 × entry_count`). The **144-byte TOC stride is a runtime fact** confirmed here; the
+   per-field on-disk record layout remains owned by `formats/pak.md`.
+5. Read the TOC records into that array.
+6. Open the **data archive** (`data.vfs`) and **retain the OS handle** for the lifetime of the
+   mount (it is the handle every subsequent entry read seeks within). The handle is initialised
+   to an invalid sentinel before mount.
+
+This sequence corroborates the existing "directory index loaded once at startup into memory"
+statement (§1.2) and adds the concrete mount steps a clean-room loader can mirror.
+
+### 1.5.2 Find (metadata-only) — re-confirmed
+
+The find operation is a **pure metadata lookup**: it lowercases the requested path, then performs
+a **binary search over the 144-byte-stride TOC by string comparison**, returning the matching
+entry (offset + size) or a miss. When progress tracking is enabled (§2.4), the find/read paths
+accumulate load progress as a side effect. This matches §1.2 exactly; the 144-byte stride is the
+newly explicit runtime detail.
+
+### 1.5.3 Read one entry under the read lock — re-confirmed and sharpened
+
+Reading a single TOC entry's payload follows a **critical-section-bracketed** sequence:
+
+1. Allocate a heap buffer of exactly the entry size.
+2. **Enter** the VFS read critical section (the lock catalogued in §5.3).
+3. Seek to the entry's offset within the retained data-archive handle (64-bit file pointer).
+4. Read the entry's bytes into the buffer.
+5. **Leave** the critical section.
+6. On a **short read** (fewer bytes than the entry size), free the buffer and fail.
+
+The caller owns the returned buffer (consistent with §1.2). The lock brackets only the
+seek-and-read pair, as already noted in §5.3.
+
+### 1.5.4 Find-and-read chokepoint — newly pinned detail
+
+A combined **find-and-read chokepoint** is the single entry point most callers use. It:
+
+1. **Zeroes a 16-byte output block** (the caller-supplied descriptor that receives the buffer
+   pointer and size) before doing anything else.
+2. Lowercases the requested path and binary-searches the TOC (the §1.5.2 find).
+3. Reads the entry's bytes (the §1.5.3 read).
+4. Accumulates load progress when tracking is on.
+
+The **16-byte zero-initialised out-block** is the new runtime detail; a clean-room implementation
+should return an explicit "found + buffer + size" result and treat a miss as a zeroed/empty
+descriptor rather than an exception.
+
+### 1.5.5 Mount flag selects packed vs. loose — re-confirmed
+
+A single **global mount-flag byte** selects packed-archive access versus loose-file access; an
+`is-mounted` predicate simply returns that byte. This is the same flag described as `vfsmode` in
+§1.1/§1.4 — re-confirmed on this build as a one-byte global read by the open router.
+
+### 1.5.6 Three-way open router and the 64-bit three-backend seek — newly pinned
+
+The open router (§1.1) was re-confirmed as a **three-way branch** on the mount flag and a
+**raw/seek mode bit**, choosing among: a VFS TOC find (in-memory path), a loose file opened with a
+VFS byte-offset, or a plain OS file open with read/write/create flags. Two predicates gate the
+loose-file open flags by testing the request's **read bit** and **write/create bit**. (Two router
+variants exist — one taking the path by value, one copying it by name first — with the same
+branching body.)
+
+Newly pinned in this pass is the **seek behaviour**, which the earlier spec did not document. A
+single **64-bit seek** (set / current / end origins) spans **three backends**, dispatched by the
+file object's open mode:
+
+| Backend | Seek mechanism |
+|---|---|
+| Plain OS file | OS 64-bit file-pointer set on the OS handle |
+| Packed VFS entry | OS file-pointer set on the retained data-archive handle, **biased by the entry's base offset** within the archive |
+| In-memory blob | Arithmetic on an in-memory cursor over a heap buffer |
+
+The resolved position is **bounds-checked against the backing size**. The owning file object
+carries **dual-path state** (an OS handle initialised to an invalid sentinel, plus an in-memory
+blob pointer and cursor); its constructor zeroes this state and installs the file vtable. This
+three-backend seek is the model a clean-room `Assets.Vfs` stream abstraction should reproduce so
+that callers seek uniformly regardless of whether bytes come from a loose file, a packed entry, or
+an already-slurped buffer.
+
+### 1.5.7 Progress tracking (normalized) — re-confirmed
+
+Load-progress tracking was re-confirmed as: a **cumulative bytes-loaded counter** (incremented per
+read while a tracking flag is set) divided by an **expected-total denominator**, yielding the
+**normalized progress value** the loading-screen bar reads (§2.3). Enabling tracking **resets the
+counter to zero**; disabling tracking clears the per-read accumulation flag; a getter returns the
+normalized value. This matches §2.4; the hardcoded denominator constant stays as documented there.
+
+### 1.5.8 Teardown / unmount — newly pinned
+
+VFS teardown (unmount) **drains the subscriber list, closes the retained data-archive handle, and
+frees the TOC array base**. A clean-room loader should release the archive handle and the TOC on
+unmount; nothing persists across an unmount.
+
+### 1.5.9 Loaders route through the same open router — re-confirmed
+
+The terrain **stream worker thread** (§4.3) and per-asset loaders — the `.map` descriptor text
+parser (§4.5) and the `items.scr` record loader (boot set, §2.1) — all open their files through the
+**same open router** documented above, so they inherit the mount-flag / raw-mode / progress
+behaviour uniformly. The `.map` parser token-reads the terrain / extra-terrain / up-terrain /
+building / FX / solid blocks, each with its own datafile + textures sub-blocks, opening each
+referenced datafile via the router (block contents owned by `formats/terrain_scene.md`).
+
+### 1.5.10 Delta check
+
+No Campaign-7 runtime fact contradicts the existing spec or `formats/pak.md`. The 24-byte header
+read, the 144-byte TOC stride, the 16-byte find-and-read out-block, and the three-backend 64-bit
+seek are **additive runtime details**, not corrections. The denominator constant, the critical-
+section-locked read, the binary-search find, and the three-way open router all **re-confirm** the
+prior pass on the newer build.
+
 ---
 
 # 2. Boot loading — state 2 (`LoadHandler`)
 
-State 2 in the scene lifecycle (see `specs/client_runtime.md §7`) contains the boot loader. The
-state is entered twice per session: once after login to load global data tables, and once on
-entering the world (see §2.6).
+State 2 — one of the **8 top-level scene-lifecycle cases (`GameState` 0..7**, see
+`specs/client_runtime.md §7`) — contains the boot loader. The state is entered twice per session:
+once after login to load global data tables, and once on entering the world (see §2.6).
+
+The application entry point is itself the loading orchestrator: it mounts the VFS exactly **once**
+before the scene loop, then drives a `while (true) switch (GameState)` whose case 2 constructs the
+loading machinery below. There is **no per-scene resource-manifest request** — the loading set is the
+fixed compiled corpus the worker pulls (§2.1); the state machine is the orchestrator and the asset
+set is hardcoded, not data-driven. The `game.lua` keys read at entry-point top (`vfsmode`, plus a
+launcher/debug gate) seed the VFS mount flag and a debug flag (the `vfsmode` toggle is §1.1/§1.4).
 
 ## 2.1 Boot-load worker thread — (CODE-CONFIRMED)
 
-The `LoadHandler` starts a single background worker thread (using the CRT-safe `_beginthreadex`
-path through a generic thread-slot primitive) that loads, **in a fixed hardcoded sequence**, every
-global data table and catalogue the game requires before play can begin. The load order is
-compiled into the binary — it is **not data-driven**.
+The `LoadHandler` owns a single background worker thread (using the CRT-safe `_beginthreadex` path
+through a generic thread-slot primitive) that loads, **in a fixed hardcoded sequence**, every global
+data table and catalogue the game requires before play can begin. The load order is compiled into
+the binary — it is **not data-driven**.
+
+**Install vs. start (corrected).** The `LoadHandler` **constructor** only *installs* the worker
+procedure into the object's thread-slot and raises the thread-running flag — it does **not** spawn
+the OS thread. The OS thread is actually **started later**, in the loading-window sub-initialiser
+(§2.3), which calls the thread-slot start primitive (`_beginthreadex`) and then sets the worker's
+scheduling priority to **ABOVE_NORMAL**. A clean-room boot should mirror this ordering: build the
+loading-screen state first, *then* kick the worker (above-normal priority).
+
+**One object, not two.** The `LoadHandler` and the on-screen loading window are the **same object**
+(a single allocation). The loading-window sub-initialiser runs on the same instance and decorates it
+with the render / SFX / progress-bar state. The shared object exposes three load-bearing fields a
+clean-room layout can mirror: a **thread-running flag** (the constructor sets it; the worker clears
+it on completion; the render callback polls it), a **loading-background-texture handle** (where the
+chosen `loading.dds` lives, read by the render callback), and the **worker thread-slot**.
 
 The boot set consists of approximately **50 entries** in a fixed global pointer array, covering:
 
@@ -130,27 +286,44 @@ The boot set consists of approximately **50 entries** in a fixed global pointer 
 
 **Before** the worker thread starts, during the state-1 → state-2 transition, the UI message
 database `data/script/msg.xdb` is loaded **synchronously on the main thread**. This is a separate
-load from the worker thread's boot set. The `msg.xdb` catalogue is the CP949 UI string table (see
-`formats/misc_data.md` §msg.xdb). It must be present and loaded before the loading screen can
-display any localised text.
+load from the worker thread's boot set. Concretely: case 1 sets `GameState = 2` and *immediately*
+calls the synchronous `msg.xdb` loader on the main thread, before any case-2 worker setup runs.
 
-## 2.3 Loading-screen rendering — (CODE-CONFIRMED)
+The loader opens `msg.xdb` through a disk-file wrapper that itself routes through the open router
+(§1.5.9), then reads **fixed 516-byte records** (`file_size / 516` of them) into a global buffer and
+inserts each record into a map keyed by the record's first 4-byte field (a map key). On open failure
+it logs and continues. The `msg.xdb` catalogue is the CP949 UI string table; its byte layout is owned
+by `formats/misc_data.md` §msg.xdb (where the 516-byte stride is the authoritative record size). It
+must be present and loaded before the loading screen can display any localised text.
 
-While the worker thread runs, the main thread renders a loading screen at a deliberate low
-frame rate:
+## 2.3 Loading-screen sub-init and rendering — (CODE-CONFIRMED)
+
+The loading-window sub-initialiser runs on the same `LoadHandler` object (§2.1) and performs the
+visual setup **and the actual worker-thread launch**:
 
 - **Background:** one of three DDS images is chosen at random (`rand() % 3`):
-  `data/ui/loading.dds`, `data/ui/loading06.dds`, `data/ui/loading08.dds`.
+  `data/ui/loading.dds`, `data/ui/loading06.dds`, `data/ui/loading08.dds`. The chosen texture handle
+  is stored in the loading-background-texture field of the shared object.
+- **Loading SFX:** sound cue `920100100` is played **looping** when the loading screen starts.
+- **Reference canvas:** `1024 × 768` pixels (global width/height values). The progress-bar geometry
+  is scaled relative to this canvas (horizontal scale = canvas-width / 1024, vertical scale =
+  canvas-height / 768).
+- **Worker launch (corrected — this is where the thread actually starts):** at the tail of this
+  sub-initialiser the thread-slot start primitive (`_beginthreadex`) spawns the boot worker, and its
+  scheduling priority is set to **ABOVE_NORMAL**. (The `LoadHandler` constructor only *installed* the
+  procedure and raised the running flag — §2.1.)
+
+While the worker thread runs, the main thread renders the loading screen each frame at a deliberate
+low frame rate:
+
 - **Frame rate cap:** the render callback calls `Sleep(100)` per frame, producing approximately
   **10 FPS** during loading.
-- **Reference canvas:** `1024 × 768` pixels (global width/height values). The progress bar
-  geometry is scaled relative to this canvas.
 - **Progress bar:** maximum drawn bar width is **223 px**. Fill = `(progress / 100) × 223`, clamped
-  to 223. UV scaling is proportional.
-- **A loading SFX** (sound cue `920100100`) is played when the loading screen starts.
-- **Completion detection:** the render callback polls the thread-running flag each frame. When
-  the worker clears the flag, the render callback signals the engine to exit the loading loop and
-  advance the state machine.
+  to 223; UV scaling is proportional. As §2.4 explains, `progress` here is the small integer quotient,
+  so the bar barely advances.
+- **Completion detection:** the render callback polls the thread-running flag each frame. When the
+  worker clears the flag, the render callback signals the engine to exit the loading loop and advance
+  the state machine. **Completion is gated only by this flag** — never by the bar reaching a value.
 
 ## 2.4 Progress meter — (CODE-CONFIRMED)
 
@@ -159,31 +332,49 @@ A small progress tracking mechanism accumulates bytes as they are loaded through
 | Component | Description |
 |---|---|
 | Tracking-enabled flag | Set when the `LoadHandler` constructs; cleared when it destructs. |
-| Cumulative bytes counter | Incremented by the VFS file-open path (both the in-memory and metadata lookup paths) whenever the tracking flag is active. |
+| Cumulative bytes counter | A 64-bit counter incremented by the VFS file-open path (both the in-memory and metadata lookup paths) whenever the tracking flag is active. |
 | Expected-total denominator | A **hardcoded constant of 9,395,240 bytes (≈ 8.96 MiB)**. This is a compile-time literal, not a dynamically computed total. |
-| Normalised progress value | `cumulative / 9,395,240`, producing the 0–100-ish scalar the progress bar reads. |
+| Reported progress value | The **integer quotient** `cumulative_bytes / 9,395,240`. It is a truncating integer division, **not** a fractional 0–1 or a 0–100 percentage. The render callback later treats this small integer as if it were a 0..100 percent when sizing the bar (`progress / 100 × 223 px`). |
 
-**Implementation note:** the denominator is a fixed estimate. The bar may reach 100% before all
-loads finish, or may finish before 100% on a content build with a different byte total.
-**Completion is signalled by the thread-done flag, not by the bar reaching 100%.** A clean-room
-reimplementation should drive completion from an explicit done event and may compute a real
-denominator by summing TOC entry sizes for the boot set to display an accurate bar.
+**Implementation note — the bar is effectively static.** Because the value is an *integer* quotient
+and the entire boot set is only ≈ 8.96 MiB (roughly one denominator's worth), the quotient stays at
+about **0–1** for the whole load. Fed into the `progress / 100 × 223 px` bar geometry, that means the
+fill advances by at most a hair — **the original loading bar barely moves and never fills**. It is
+essentially decorative. **Completion is driven solely by the worker's thread-done flag** (§2.3), not
+by the bar reaching any value. A clean-room reimplementation should drive completion from an explicit
+done event and — if it wants a bar that actually moves — compute a real denominator by summing the
+boot set's TOC entry sizes rather than reusing the legacy constant.
 
-## 2.5 The `OPENNING/SKIP` flag — (CODE-CONFIRMED behaviour; path UNVERIFIED)
+## 2.5 The `OPENNING/SKIP` flag — (CODE-CONFIRMED behaviour and source; exact filename string capture/debugger-pending)
 
-After the state-2 boot load completes, the engine reads a per-account INI key `OPENNING/SKIP`
-(exact INI file path not recovered — see §8 open item 3). If set, the opening cinematic is skipped
-and the engine transitions directly to state 4; otherwise it proceeds to state 3. This has no
-effect on the resource pipeline but affects whether the second state-2 pass (see §2.6) is invoked
-early.
+The post-load destination state is decided by an INI lookup that is **evaluated up front** when case 2
+sets up its windows (i.e. *before* the boot load finishes, not after it). The lookup is a Windows
+private-profile integer read: section `[OPENNING]`, key `SKIP`, default `0`, over an INI **file path
+taken from the config singleton's path field** — specifically a filename string field inside the
+per-account / network-config singleton (the same singleton that holds other per-account settings).
 
-## 2.6 State 2 is entered twice per session — (CODE-CONFIRMED)
+- A **non-zero** `SKIP` value → the opening cinematic is skipped and the engine transitions directly
+  to **state 4** (login).
+- A **zero** `SKIP` value → the engine proceeds to **state 3** (play the opening).
 
-The scene lifecycle enters state 2 both after login (the boot-load pass above) and on entering the
-world. The **same handler and worker thread machinery runs for both passes.** Whether the world-entry
-pass reloads the full ~50-table set or short-circuits already-loaded entries (subsystem caches would
-make re-registration cheap) was not confirmed; treat both passes as potentially running the full
-sequence (see §8 open item 5).
+The section/key names and the read mechanism are confirmed; only the literal on-disk filename is
+**runtime-populated into the config singleton's path field rather than a static string constant**, so
+the exact path string is *(capture/debugger-pending)* — read the field live to recover it. This
+resolves the former open item 3 (the source of the path is now known). The flag has no effect on the
+resource pipeline itself; it only fixes which state follows the load.
+
+## 2.6 State 2 is entered twice per session — (CODE-CONFIRMED structure; world-entry replay capture/debugger-pending)
+
+The scene lifecycle enters state 2 both after login (the post-login global-table boot-load pass above)
+and on entering the world. The **same handler and worker-thread machinery runs for both passes** — the
+case-2 setup constructs the opening window first, then the loading window (= the `LoadHandler`), and
+the `OPENNING/SKIP` read (§2.5) is performed before both, fixing the post-load state (3 vs 4) up front.
+
+Whether the in-world (state-2) pass **replays the full table corpus** or **short-circuits
+already-loaded / cached entries** (the subsystem caches of §3 would make re-registration cheap) **could
+not be determined statically** — it depends on runtime control flow. Treat both passes as potentially
+running the full sequence and confirm against a live world-entry transition. *(capture/debugger-pending
+— see §8 open item 5; this is what determines whether the second loading screen is fast or full-length.)*
 
 ---
 
@@ -249,6 +440,164 @@ memory envelope in normal play.
 
 ---
 
+# 3A. UI / effect texture manifests, per-scene texture lists, and the boot font load — (CODE-CONFIRMED)
+
+> Campaign 9D promoted the front-end asset-loading path. This section adds three things §1–§3 did
+> not enumerate: the **two boot texture manifests** (the UI id pool and the effect texture pool),
+> the **per-scene window-owned texture list** as a concrete third cache tier, and the **boot font
+> load**. It also resolves §8 open item 8 (the named-pool vs. anonymous-loader boundary). The single
+> file-open chokepoint and its VFS-or-disk fallback are §1; the on-disk container is `formats/pak.md`;
+> image byte layouts are `formats/texture.md`. This deepens, it does not re-derive.
+
+## 3A.1 The single file-open chokepoint and VFS-or-disk fallback — concrete witnesses — (CODE-CONFIRMED)
+
+Every asset open routes through the one mount-flag-gated chokepoint of §1. The fallback is concrete
+and identical across all asset loaders: each loader tests the **one global mount-flag byte**; if
+mounted it pulls the entry bytes **into memory** (via the find-and-read descriptor of §1.5.4) and
+feeds an **in-memory** decode; if not mounted it forwards the bare path to a **loose-file** decode.
+The same decoder is reached either way — only the byte source changes. Three witnesses:
+
+| Loader | Mounted path | Unmounted (loose) path | Used for |
+|---|---|---|---|
+| **Surface loader** | find-and-read → load-surface-**from-memory**, then free | load-surface-**from-file** on the path | sky cloud / lens-flare surfaces; passes a **non-zero colorkey** (opaque-black source key) |
+| **Texture-create wrapper** | byte-slurp → create-texture-**from-memory** | create-texture-**from-file** | the core D3DX texture create |
+| **Tokenizable text/icon slurp** | find-and-read into a re-tokenizable buffer | plain disk read | the `UiTex.txt` / `.lst` text-manifest parsers read through this |
+
+> So a .NET loader needs **one** `OpenRead(logicalPath) → bytes/stream` abstraction with a mount
+> toggle; the decode call is identical on both branches. The only non-zero colorkey in the texture
+> path is the sky surface's opaque-black source key — note it for the Godot sky; the UI one-shot path
+> uses colorkey 0 (none).
+
+## 3A.2 The two boot texture manifests — (CODE-CONFIRMED) — resolves §8 open item 8
+
+There are **two distinct global texture-pool manifests**, both loaded **once on the boot worker
+thread** (§2.1), both producing a global id/name → deferred-texture pool. Neither is per-scene.
+
+### (a) `data/ui/UiTex.txt` — the named UI texture id pool
+
+A **brace/text manifest** (not a fixed-count binary list). Shape:
+
+```
+# comment lines start with '#'
+UI_TEXTURE {
+    DDS { <int tex_id>  "<relative/vfs/path>"  … }
+    MSK { <int tex_id>  "<relative/vfs/path>"  … }
+}
+```
+
+Parser behaviour: skip `#` comments; require the literal `UI_TEXTURE` then `{`; inside, two
+sub-blocks keyed by the `DDS` and `MSK` literals; each row is exactly two fields — a base-10 integer
+**tex_id** then a **double-quoted path** (quotes stripped). Rows loop until `}` / EOF — there is **no
+row count** (the shipped file holds ~37 rows). Per row the loader builds a small id record into a
+**global named-texture registry singleton** (with an entry counter) and constructs a deferred
+runtime texture handle carrying the path + a display-mode-chosen format code (§3A.3). The image is
+loaded **lazily on first use** — `UiTex.txt` itself does no GPU upload; it registers
+**id → (path, deferred texture)** for a global UI pool.
+
+### (b) `data/effect/bmplist.lst` — the shared effect texture pool
+
+A **binary** list: a u32 `count`, then `count` fixed **30-byte name** records. Per name the loader
+builds the full path `data/effect/texture/<name>`, constructs a deferred texture handle (carrying
+that path + a fixed parameter), and appends it to the effect manager's texture-pool vector. After
+`bmplist.lst` the loader chains the rest of the effect manifests in order (`xobj.lst`, `xeffect.lst`
++ effect-cache prime, `totalmugong.txt`, the joint/sword-light tables — see §2.1 and
+`specs/effects.md §3`). The bmplist pool is the **shared effect texture pool** effects index into by
+id.
+
+> **§8 open item 8 RESOLVED — the named-pool vs. anonymous-loader boundary.** The named pools are
+> these two boot manifests (UI id pool + effect name/index pool). The **anonymous one-shot loader**
+> (§3.3) is what each **scene/window** uses for its own atlases (§3A.4) — it does **not** consult
+> either boot pool and does **not** dedup. So: boot manifests build two global deduped pools; per-scene
+> windows eager-load their named atlases into their own (non-deduped) texture list. A clean-room boot
+> builds **two** global texture registries — a UI id→path map from `UiTex.txt` and an
+> effect name/index→path pool from `bmplist.lst` (`data/effect/texture/` prefix) — both populated
+> before the first scene, both holding deferred (lazy) textures.
+
+## 3A.3 DDS/TGA decode + GPU upload, and the display-mode format selection — (CODE-CONFIRMED)
+
+The decode chain is: **logical path → VFS bytes-in-memory → one D3DX9 in-memory create call →
+managed-pool GPU texture wrapped in a runtime texture handle.** The decoder is delegated entirely to
+D3DX9 (the client carries no custom image codec — consistent with `formats/texture.md` and
+`specs/asset_pipeline.md §1`). The one-shot per-scene loader (§3.3) calls the in-memory
+create-texture API with: device = the global render device; src buffer + size from the VFS read;
+**single mip (MipLevels = 1, no full chain)**; **usage = 0**; **managed pool**; **colorkey = 0**;
+and a **format hint** chosen by display mode (below). The surface variant (sky) uses the in-memory
+load-surface call with the opaque-black colorkey (§3A.1).
+
+**Display-mode DDS format selection.** Both the `UiTex.txt` parser and the per-scene atlas loads pass
+a DDS **format constant chosen by the display-config display-mode value**:
+
+| Display mode | Format constant passed |
+|---|---|
+| 0 | **DXT5** (the default) |
+| 1 | **DXT3** |
+| otherwise | **DXT2** |
+
+i.e. the client forces a DXT variant on the loaded UI texture by display/quality mode (default DXT5).
+This is the live confirmation behind `formats/texture.md`'s "DXT5 dominant / DXT3 constant present"
+note, and it resolves the long-standing "894720068 colorkey" puzzle in the login builder: that
+integer is the **DXT5 FourCC `Format` argument**, **not** a colorkey (the separate value is the
+no-colorkey arg). This mode switch only changes the in-memory texture format D3DX transcodes to, not
+the on-disk container — **a faithful port can simply load the DDS as-is.**
+
+## 3A.4 Per-scene window-owned texture lists — the third cache tier — (CODE-CONFIRMED; one detail UNVERIFIED)
+
+The pipeline has **three texture-lifetime tiers**:
+
+1. **Global boot pools (session lifetime).** The `UiTex.txt` named-id registry and the `bmplist.lst`
+   effect pool (§3A.2). Built once on the boot thread; their entries are deferred (lazy on first use).
+2. **Per-subsystem find-or-load caches (scene/session lifetime).** The sorted-map managers of §3.2
+   (skin / motion / bind / terrain-pool / named-texture). No eviction during a session; grow-only;
+   torn down wholesale when the owning scene/handler is destroyed.
+3. **Per-scene window texture lists (scene lifetime) — the addition.** Each UI window / scene object
+   owns a **texture-list member** (a vector). The one-shot loader (§3.3) **pushes every D3D texture it
+   creates into that window's vector** — **no name keying, no dedup**: two loads of the same path make
+   two textures. When the window is **destroyed on a scene change** (the scene-machine constructs the
+   scene window on state entry and destroys it on exit — `specs/client_runtime.md §7.4`), the
+   window/panel teardown walks and **releases that texture list**. So the per-scene pattern is:
+   **eager-load a handful of named atlas DDS files into a scene-owned texture set, slice widgets out
+   of them by src-rect, release the whole set on scene unload.**
+
+   Concrete witness (login scene): the login window's build routine eager-loads **four** named UI
+   atlases (`login_slice1.dds`, `loginwindow.dds`, `InventWindow.dds`, `loginwindow_02.dds`) into its
+   own texture list via the one-shot loader (each with the DXT5 format hint of §3A.3 and colorkey
+   none), then builds its widgets referencing src-rects into those four atlases. It uses neither boot
+   pool of §3A.2 (cross-ref `specs/ui_system.md §9.0` / §9.1).
+
+**Eviction / ref-count.** The underlying D3D textures are **managed-pool**, so the D3D runtime owns
+VRAM residency and reload-under-pressure — the only "eviction" in the whole pipeline, delegated to the
+API (§3.4). The client's own discipline is **load-once-per-scene, release-all-on-scene-exit**, not a
+per-asset LRU. There is **no global file cache**; dedup exists only inside the named boot pools.
+
+> **UNVERIFIED (debugger-pending).** The architecture is solid — a per-window owned texture vector,
+> filled by the one-shot loader, released on window teardown by the scene machine. The one residual is
+> the literal per-handle texture-Release loop inside the texture-list destructor body (the static read
+> landed on a neighbour); confirm it by breakpointing a scene-window destructor on a live scene
+> transition. This does not change the model.
+
+> **Godot guidance.** Model the texture layer as: (a) two global boot texture pools (UI-id + effect-name),
+> (b) per-subsystem grow-only id caches, and (c) a **per-scene texture set owned by each scene/window,
+> disposed when that scene unloads.** Decode via a standard DDS/TGA/PNG decoder (no custom codec);
+> managed-pool semantics → just dispose on scene exit.
+
+## 3A.5 Boot font load — (CODE-CONFIRMED)
+
+Fonts are a **separate path from the VFS texture pipeline** — they are GDI-backed D3DX fonts created
+from **system Hangul typefaces** at boot (state 1), **not** loaded from the archive. The font
+registrar, driven by the font-table singleton, registers each of the **15 slots** (0..14): it releases
+any prior font in the slot, copies the typeface-name string (DotumChe / Dotum / BatangChe) into the
+slot, stores the size/weight params, and calls the D3DX create-font API with the render device,
+height/width from the slot, **single mip**, **Hangul charset**, and the face name. So the 15 slots are
+**GDI/D3DX system fonts** keyed by Korean typeface name + size, created once at boot. There is **no
+glyph atlas in the VFS** for body text. The full per-slot face/size/weight table is owned by
+`specs/ui_system.md §6.2`; the per-frame text path is `specs/ui_system.md §6.3 / §15.5`.
+
+> **Godot guidance.** This is a system-font path — the original relies on Windows having DotumChe /
+> Dotum / BatangChe (CP949 Hangul). A 1:1 port must ship/substitute equivalent CP949 Korean fonts and
+> map the 15 slots (slot index → {face, size, weight}); the text encoding is CP949 throughout.
+
+---
+
 # 4. World entry and terrain streaming
 
 ## 4.1 The area cell manifest — (CODE-CONFIRMED; counts SAMPLE-VERIFIED)
@@ -288,10 +637,14 @@ After the initial ring, a background **terrain streamer thread** handles periphe
   entered), using the same `_beginthreadex`-based thread-slot primitive as the boot loader.
 - **Input:** a mutex-guarded FIFO queue of cell-load requests, each carrying a map-X, map-Z, and
   area ID.
-- **Timing:** the thread uses a `Sleep(10)` poll loop, then sleeps **4,000 ms** after startup
-  before processing its first batch, then sleeps **3,000 ms** between subsequent batches. This
-  means the first peripheral cell batch arrives ~4 seconds after world entry; subsequent batches
-  arrive ~3 seconds apart.
+- **Startup gate:** before its poll loop, the worker **blocks on a wait-for-single-object on an
+  event handle** (held in the streamer object) — i.e. it parks until that event is signalled rather
+  than busy-spinning from the moment of creation. Only after the gate releases does the timing below
+  begin.
+- **Timing:** the thread uses a `Sleep(10)` poll loop, then sleeps **4,000 ms** after the gate
+  releases before processing its first batch, then sleeps **3,000 ms** between subsequent batches.
+  This means the first peripheral cell batch arrives ~4 seconds after the streamer is woken;
+  subsequent batches arrive ~3 seconds apart.
 - **Processing:** each dequeued request is passed through the find-or-load path (§4.4) and the
   request record is freed after the load.
 - **Lifetime:** the thread runs while a "streamer active" flag is set; clearing the flag allows
@@ -343,21 +696,34 @@ files rather than aborting the cell load.
 
 The client has exactly **two resource-related background threads** beyond the main thread:
 
-| Thread | Started by | Role | Timing / completion |
-|---|---|---|---|
-| **Boot-load worker** | `LoadHandler` during state 2 | Loads ~50 global data tables in a fixed order; inits subsystems | Runs to completion; `Sleep(500)` grace then clears the thread-running flag and exits |
-| **Terrain streamer** | Terrain streamer constructor (before world entry) | Lazy peripheral cell streaming | Poll `Sleep(10)`, initial `Sleep(4000)`, then `Sleep(3000)` between batches; runs while streamer-active flag is set |
+| Thread | Installed / started by | Role | Priority | Timing / completion |
+|---|---|---|---|---|
+| **Boot-load worker** | *Installed* by the `LoadHandler` constructor; *started* in the loading-window sub-init (§2.1, §2.3) during state 2 | Loads ~50 global data tables in a fixed order; inits subsystems | **ABOVE_NORMAL** | Runs to completion; `Sleep(500)` grace then clears the thread-running flag and exits |
+| **Terrain streamer** | Terrain streamer constructor (before world entry) | Lazy peripheral cell streaming | (default) | Event-gated start, then poll `Sleep(10)`, initial `Sleep(4000)`, then `Sleep(3000)` between batches; runs while streamer-active flag is set |
 
 A third background thread handles streaming-BGM refill (sound subsystem); its timing is specified
 in `specs/client_runtime.md §1.7` and is out of scope for the resource pipeline.
+
+> **Note (main-thread driver loop).** The boot worker and streamer above are the only *resource*
+> background threads. The **main thread's per-frame driver loop** (the four-phase loop —
+> message-pump+input / scene-render+present / round-robin tick-scheduler / frame-throttle — held at a
+> fixed **60 FPS** software cap) is owned by `specs/client_runtime.md` / `specs/game_loop.md`. The
+> loading screen's `Sleep(100)` ≈ 10 FPS cap (§2.3) is a *loading-state-specific* render cadence, not
+> the normal-play 60 FPS throttle. *(Whether the display-config FRAMERATE value has any consumer that
+> reaches the throttle is capture/debugger-pending — statically it appears inert; treat the cap as a
+> hardcoded 60 FPS.)*
 
 ## 5.2 Thread primitives — (CODE-CONFIRMED)
 
 Both resource threads use a common thread-slot primitive:
 
-- **Initialise:** stores the thread procedure pointer.
-- **Start:** calls `_beginthreadex` to create the OS thread.
-- **Set priority:** adjusts the thread's OS scheduling priority.
+- **Initialise / install:** stores the thread procedure pointer and zeroes the handle/tid fields.
+  (This is what the `LoadHandler` constructor does for the boot worker — it installs, it does not
+  start.)
+- **Start:** closes any prior handle, then calls `_beginthreadex` to create the OS thread, storing
+  the resulting handle and thread id.
+- **Set priority:** adjusts the thread's OS scheduling priority. The boot worker is set to
+  **ABOVE_NORMAL** immediately after it is started (§2.3).
 - **Close:** closes the thread handle when done.
 
 A second thread-creation utility using `CreateThread` + `CreateEventA` exists in the codebase
@@ -525,30 +891,37 @@ and `.ted` are required for a cell to be minimally renderable.
    No mandatory data dependency between tables was confirmed in this pass. Before a Godot
    parallelisation of the boot set, a dependency audit over the individual loader bodies is
    needed to confirm the order is non-load-bearing.
-3. **`OPENNING/SKIP` INI file path.** The INI key `OPENNING/SKIP` is read from a per-account
-   file whose path is resolved from a network-client field. The exact path was not isolated.
-   This affects whether the opening cinematic is shown; it does not affect the resource pipeline.
+3. **`OPENNING/SKIP` INI file — source RESOLVED, literal filename residual.** **RESOLVED (Campaign 10
+   — see §2.5):** the destination state is decided by a private-profile integer read over section
+   `[OPENNING]`, key `SKIP`, default `0`, with the **INI file path taken from the config singleton's
+   path field**; non-zero → state 4 (skip opening), zero → state 3 (play opening). The only residual is
+   the **literal on-disk filename** — it is runtime-populated into that config-singleton field rather
+   than a static string constant, so the exact path string is *(capture/debugger-pending)* (read the
+   field live to recover it). This affects whether the opening cinematic is shown; it does not affect
+   the resource pipeline.
 4. **5×5 vs. 3×3 ring selection.** A 5×5 variant of the initial ring loader exists alongside
    the 3×3 default. The configuration value (a radius threshold > 1000) that selects between
    them was observed but its source (a graphics option, a map config entry, or a hard constant)
    was not traced.
-5. **Whether world-entry state-2 reloads all ~50 boot tables.** State 2 is entered both after
-   login and on entering the world. The same handler machinery runs both times. Whether the
-   world-entry pass replays the full boot table sequence or short-circuits already-cached entries
-   was not confirmed. This determines whether the second loading screen is fast or full-length.
+5. **Whether world-entry state-2 reloads all ~50 boot tables. *(capture/debugger-pending)*** State 2
+   is entered both after login and on entering the world. The same handler machinery runs both times.
+   Whether the in-world pass replays the full boot table sequence or short-circuits already-cached
+   entries depends on runtime control flow and **could not be determined statically**. This determines
+   whether the second loading screen is fast or full-length; confirm against a live world-entry
+   transition.
 6. **`Map_LoadCellAssets` internal order and partial-failure behaviour.** The exact sequence in
    which `.map`, `.ted`, `.sod`, `.bud`, and texture files are opened within the cell bundle
    loader, and whether a missing `.sod` or `.bud` aborts or degrades the load, was not traced in
    this pass. Parser robustness must be validated against the known missing-file cases (§6.2).
-7. **Exact progress-denominator origin.** The value `9,395,240` appears to be a build-time
-   literal rather than a runtime-computed total. Confirming it is not patched at runtime, and
-   whether it still matches the shipped VFS's boot-set byte sum, would allow an accurate progress
-   bar without a hardcoded constant.
-8. **`GHTexManager` vs. anonymous loader boundary.** `GHTexManager` provides a name-keyed
-   cache; the anonymous one-shot loader (§3.3) does not. The boundary between which call sites
-   use which path was not exhaustively mapped. The two approaches produce different memory
-   behaviour (deduped vs. duplicated); implementers of the UI texture system should not mix them
-   without understanding which path each asset category uses.
+7. **Exact progress-denominator origin.** The value `9,395,240` is a build-time literal divided into
+   the cumulative byte counter by **integer division** (confirmed — §2.4), which is why the bar is
+   effectively static. Confirming it is not patched at runtime, and whether it still matches the
+   shipped VFS's boot-set byte sum, would allow an accurate progress bar without a hardcoded constant.
+8. ~~**`GHTexManager` vs. anonymous loader boundary.**~~ **RESOLVED (Campaign 9D — see §3A.2).**
+   The name-keyed pools are the two boot manifests (the `UiTex.txt` UI id pool and the `bmplist.lst`
+   effect pool); the anonymous one-shot loader (§3.3) is what each **scene/window** uses for its own
+   atlases (§3A.4) and does **not** consult either boot pool or dedup. Boundary: boot manifests →
+   global deduped pools; per-scene windows → own (non-deduped) texture list released on scene exit.
 9. **`.mud` absence in large outdoor areas.** Twenty areas (including many full-featured 50-cell
    outdoor areas) have no `.mud` files at all. Whether this is intentional (no ambient sound
    authored) or a content-generation gap is not confirmed. The ambient-sound system must default
@@ -556,6 +929,11 @@ and `.ted` are required for a cell to be minimally renderable.
 10. **Area-207 `npc.arr` 16-byte tail.** The same 16-byte partial-record anomaly appears in both
     area-0 and area-207. Whether this is a shared content-tool format variant or two independent
     authoring errors is not confirmed. The `floor(file_size / 28)` counting rule handles both.
+11. **Display-config FRAMERATE consumer. *(capture/debugger-pending)*** The normal-play per-frame
+    throttle is held at a fixed **60 FPS** (seeded into the engine object's framerate field in the
+    engine constructor and never overwritten — owned by `specs/client_runtime.md` / `specs/game_loop.md`).
+    The display-config FRAMERATE value has **no statically-traced consumer that reaches the throttle**;
+    whether it is truly inert (so the cap is unconditionally hardcoded 60 FPS) needs a live check.
 
 ---
 

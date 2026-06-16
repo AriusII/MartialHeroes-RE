@@ -1,0 +1,115 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED intra-payload offsets; size + name-at-0 + class-word are static-HIGH. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: builder writes header 1/6 + appends a fixed 0x34 = 52-byte body)
+#   Name@0x00 placement: confirmed   (the validated name is string-copied to body offset 0 at create-confirm)
+#   intra-body offsets:  static-hypothesis (the builder blits one opaque 0x34 staging blob; sub-field offsets
+#                        are the create-form's per-control stores, not witnessed at the send site)
+#   wire VALUE semantics: capture/debugger-pending (sex-vs-hair distinction @0x14/0x16; per-stat semantic order)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: none (size 52 + Name@0 re-confirmed; intra-offsets remain single-source inference)
+
+name: CmsgCreateCharacter
+opcode: 0x10006           # major 1, minor 6 -> (1 << 16) | 6
+direction: C2S
+size: 52                  # fixed 52-byte (0x34) appearance/creation record
+spec: packets/cmsg_char_create.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Character-create request. The single emitter is the create-confirm action of the
+  character-select window's create sub-form (an in-place transient sub-state of the same window
+  object, NOT a separate scene). It blits a 52-byte embedded character appearance/creation record:
+  CP949 name at offset 0, then face, a sex/gender word, a reserved/hair word, the INTERNAL class id
+  (a remap of the UI class-button index), five allocatable stats, and a trailing remaining-points
+  counter. The "1/6 login-or-create collision" is RESOLVED: 1/6 is char-create ONLY. The login
+  credential is a separate sub-opcode 0x2B on the secure 1/4 frame (packets/login.yaml). Server
+  replies with the S2C create result (3/6 / 3/23) and may also refresh the slot list via the
+  8-byte manage-result handler (3/7 SmsgCharManageResult; ladder corrected by the front-end
+  deep-fidelity pass, campaign4/frontend-deep).
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 52 (verified below).
+# The field split is now recovered from the create-form staging buffer (the form edits write each
+# control's value directly into this 52-byte buffer; the validated name is copied to offset 0 at
+# confirm). Stat semantics + the sex-vs-hair distinction at 0x14/0x16 remain capture/debugger work.
+fields:
+  - { name: Name,            type: "bytes[18]" }  # 0x00  18B CP949 name, NUL-padded; min 2 chars
+  - { name: Face,            type: u16 }          # 0x12  face index, range 1..7
+  - { name: Sex,             type: u16 }          # 0x14  sex/gender word (PLAUSIBLE semantics)
+  - { name: HairOrReserved,  type: u16 }          # 0x16  hair / reserved word (PLAUSIBLE semantics)
+  - { name: ClassInternalId, type: u16 }          # 0x18  INTERNAL class id (button->internal remap)
+  - { name: Reserved1A,      type: "bytes[2]" }   # 0x1A  alignment gap before the dword-aligned stat block
+  - { name: Stat0,           type: u32 }          # 0x1C  allocatable stat 0
+  - { name: Stat1,           type: u32 }          # 0x20  allocatable stat 1
+  - { name: Stat2,           type: u32 }          # 0x24  allocatable stat 2
+  - { name: Stat3,           type: u32 }          # 0x28  allocatable stat 3
+  - { name: Stat4,           type: u32 }          # 0x2C  allocatable stat 4
+  - { name: PointsRemaining, type: u32 }          # 0x30  trailing allocation-budget counter
+
+notes: |
+  Static analysis only for the intra-payload layout (no capture, no debugger read). Frame =
+  8-byte header + 52 = 60 bytes on the wire. Width sum check: 18 + 2 + 2 + 2 + 2 + 2 + 4*5 + 4 = 52.
+
+  STATIC-HIGH facts:
+    - Total body size = 52 bytes (0x34). The create-form staging buffer spans a contiguous 52-byte
+      run; the byte immediately after the run is the in-flight latch, confirming the run length.
+    - The CP949 character NAME occupies offset 0 (the validated name is string-copied there at
+      create-confirm; the staging copy is capped at 17 chars + terminator).
+    - The class word at 0x18 is the INTERNAL class id, not the UI button index (the preview/visual
+      switch keys on this internal value).
+    - The five stat values form a contiguous dword run at 0x1C..0x2F, followed by a remaining-points
+      counter at 0x30.
+    - Single emitter: the create-confirm control of the select-window create sub-form.
+
+  FIELD NOTES:
+    0x00 (18B) Name            : CP949 name, NUL-padded into the 18-byte field. Decode as a fixed
+                                 [InlineArray] blob, trim at the first NUL, then decode CP949 -- never
+                                 a managed string on the wire. STATIC HIGH placement.
+    0x12 (2B)  Face            : face index, clamped 1..7 by the face +/- controls. STATIC HIGH.
+    0x14 (2B)  Sex             : a sex/gender word set during class selection. PLAUSIBLE semantics
+                                 (sex vs another appearance toggle) -- capture/debugger to confirm.
+    0x16 (2B)  HairOrReserved  : zeroed when the form opens; PLAUSIBLE hair index or reserved/pad.
+    0x18 (2B)  ClassInternalId : INTERNAL class id. The UI class buttons 0..3 map to internal ids by
+                                 the remap {0->4, 1->1, 2->3, 3->2}. All four branches are now
+                                 read off the class picker (CODE-CONFIRMED end-to-end: the picker
+                                 write into this word, the preview-actor switch on it, and the body
+                                 placement all agree; matches frontend_scenes.md S4.1).
+                                 The internal class gates the stat floors below.
+    0x1A (2B)  Reserved1A      : a 2-byte alignment gap so the stat block starts dword-aligned at
+                                 0x1C. Model as reserved/padding.
+    0x1C..0x2F Stat0..Stat4    : five allocatable stat values (u32 each). A class-dependent floor of
+                                 10 applies to the four base stats when the internal class is in the
+                                 set {1,2,3,4}; the fifth stat opens with a smaller floor. The stats
+                                 are spent against PointsRemaining. STATIC HIGH placement; the precise
+                                 per-stat semantic order is capture/debugger work.
+    0x30 (4B)  PointsRemaining : the trailing allocation-budget counter. STATIC HIGH placement;
+                                 whether the server consumes it is PLAUSIBLE.
+
+  CLIENT-SIDE NAME VALIDATION (applied before send; useful for a faithful server too): minimum
+  length 2; allowed = ASCII lowercase a-z + digits 0-9 + CP949 double-byte Hangul lead+trail pairs;
+  standalone uppercase Latin is rejected (uppercase A-Z is accepted only as the trail byte of a
+  double-byte pair); a profanity/format filter runs. Only on passing all checks does the send fire.
+  Same character rule as the 1/13 rename name field.
+
+  IN-FLIGHT GUARD: the select-window net-busy latch must be clear before send and is set while the
+  request is in flight (blocks re-entrancy across all char-mgmt builders).
+
+  SEQUENCE / RESULT: server answers with the create result (S2C 3/6 / 3/23). The 8-byte char-manage
+  result (3/7 SmsgCharManageResult) may also refresh the slot list.
+
+  UNKNOWNS (capture/debugger required):
+    - the exact sex-vs-hair distinction at 0x14 / 0x16, and whether 0x16 is hair or pure padding;
+    - (RESOLVED) the full UI-button -> internal-class permutation is {0->4,1->1,2->3,3->2}, all four branches code-confirmed;
+    - whether the trailing PointsRemaining dword is server-meaningful;
+    - the precise per-stat semantic order within the five-stat run.
+  Recommended: a debugger read of the 52-byte staging buffer pre-send, or a captured 1/6 C2S frame.
+
+  RELATED major-1 char-management senders: 1/0 (logout, cmsg_logout.yaml), 1/7 (manage/select +
+  delete-overload, cmsg_char_select.yaml), 1/9 (enter, cmsg_char_enter.yaml), 1/13 (rename,
+  cmsg_char_rename.yaml), 1/14 (slot-move, cmsg_char_move.yaml). All gated by the single
+  select-window net-busy latch.
+
+  UNBLOCKS: a typed 52-byte struct may be codegen'd now; the sex-vs-hair and stat semantics can be
+  refined later without changing the byte layout.

@@ -5,8 +5,8 @@
 // (major:minor) routing is dispatch-table-confirmed; the field layout is a hypothesis until a
 // live capture confirms it.
 //
-// THIS IS THE FIXED 3-BYTE HEADER ONLY. After it, for each set bit in SlotMask (LSB-first, ~8
-// slots), one 981-byte per-slot record follows = 880-byte SpawnDescriptor + 96-byte stat block +
+// THIS IS THE FIXED 3-BYTE HEADER ONLY. After it, for each set bit in SlotMask (LSB-first, EXACTLY
+// 5 slots — bit indices 0..4), one 981-byte per-slot record follows = 880-byte SpawnDescriptor + 96-byte stat block +
 // 1 flag byte + 4-byte timestamp. Those variable per-slot records are NOT modelled as a struct;
 // the caller (Client.Application) hand-codes the repeat loop. No fixed WireSize / size assertion.
 
@@ -41,8 +41,8 @@ public readonly struct SmsgCharacterListHeader
     public readonly byte ChannelId;
 
     /// <summary>
-    /// 0x02 — slot bitmask: bit i set =&gt; slot i record follows (LSB-first, ~8 slots).
-    /// spec: packets/3-1_character_list.yaml.
+    /// 0x02 — slot bitmask: bit i set =&gt; slot i record follows (LSB-first, EXACTLY 5 slots scanned,
+    /// bit indices 0..4; bits 5..7 are not scanned). spec: packets/3-1_character_list.yaml.
     /// </summary>
     public readonly byte SlotMask;
 }

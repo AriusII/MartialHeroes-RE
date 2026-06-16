@@ -191,7 +191,40 @@ public static class SessionHandshake
     /// </param>
     /// <returns>The whitened reply body, ready for the standard cipher + LZ4 send path.</returns>
     /// <exception cref="ArgumentException">If the credential is too long to leave PS ≥ 8 bytes (§6.3).</exception>
+    /// <remarks>
+    /// This overload whitens the ciphertext region in isolation. The complete, debugger-verified
+    /// <c>1/4</c> payload also carries a plaintext <c>0x2B</c> pre-image (account + optional PIN) ahead
+    /// of the ciphertext, with the per-dword whitening applied over the <b>whole</b> payload (§6.6 /
+    /// <c>packets/login.yaml</c>). Use <see cref="LoginCredentialReply"/> to compose that full payload;
+    /// this method remains for the ciphertext-only case.
+    /// </remarks>
     public static byte[] BuildAuthReply(in KeyExchange keyExchange, ReadOnlySpan<byte> credential,
+        IPaddingRandom paddingRng)
+    {
+        byte[] reply = EncryptCredential(in keyExchange, credential, paddingRng);
+
+        // Per-dword XOR 0x29 whitening over the whole dword-aligned body. spec §6.4.
+        HandshakeWhitening.XorWhitenDwords(reply);
+
+        // Caller hands `reply` to the normal send pipeline: byte cipher then LZ4, with the 8-byte
+        // plaintext header carrying opcode major 1 / minor 4. spec §6.3 step 5.
+        return reply;
+    }
+
+    /// <summary>
+    /// Produces the RSA ciphertext region of the <c>1/4</c> reply — the serialized
+    /// <c>[u32 LE len(c)] ‖ BE_digits(c)</c> where <c>c = PKCS1v15_type2(credential, k − 1) ^ e mod n</c>
+    /// — <b>without</b> the per-dword whitening of §6.4. This is the half owned by <c>specs/crypto.md</c>
+    /// §6.3 steps 1–3; whitening (step 4) is deferred so a caller composing the full <c>1/4</c> payload
+    /// (plaintext pre-image + this ciphertext, §6.6) can whiten the <b>whole</b> payload in one pass.
+    /// spec: Docs/RE/specs/crypto.md §6.3 (steps 1–3), §6.6.
+    /// </summary>
+    /// <param name="keyExchange">The parsed server 0/0 KeyExchange (live n, e, and modulus width k).</param>
+    /// <param name="credential">The staged credential plaintext M (the fixed 17-byte zero-padded buffer, §6.1).</param>
+    /// <param name="paddingRng">RNG for the PKCS#1 type-2 padding string (the only randomness, §6.3).</param>
+    /// <returns>The un-whitened <c>[u32 LE len][BE ciphertext]</c> region.</returns>
+    /// <exception cref="ArgumentException">If the credential is too long to leave PS ≥ 8 bytes (§6.3).</exception>
+    public static byte[] EncryptCredential(in KeyExchange keyExchange, ReadOnlySpan<byte> credential,
         IPaddingRandom paddingRng)
     {
         ArgumentNullException.ThrowIfNull(paddingRng);
@@ -207,16 +240,10 @@ public static class SessionHandshake
 
         // Step 3 — serialize: [u32 LE length] ‖ big-endian digits of c. spec §6.3, §6.2.3.
         byte[] cipherDigits = ToBigEndianUnsigned(c);
-        byte[] reply = new byte[LengthPrefixBytes + cipherDigits.Length];
-        BinaryPrimitives.WriteUInt32LittleEndian(reply, (uint)cipherDigits.Length);
-        cipherDigits.CopyTo(reply.AsSpan(LengthPrefixBytes));
-
-        // Step 4 — per-dword XOR 0x29 whitening over the whole dword-aligned body. spec §6.4.
-        HandshakeWhitening.XorWhitenDwords(reply);
-
-        // Step 5 (caller) — hand `reply` to the normal send pipeline: byte cipher then LZ4, with the
-        // 8-byte plaintext header carrying opcode major 1 / minor 4. spec §6.3 step 5.
-        return reply;
+        byte[] region = new byte[LengthPrefixBytes + cipherDigits.Length];
+        BinaryPrimitives.WriteUInt32LittleEndian(region, (uint)cipherDigits.Length);
+        cipherDigits.CopyTo(region.AsSpan(LengthPrefixBytes));
+        return region;
     }
 
     /// <summary>

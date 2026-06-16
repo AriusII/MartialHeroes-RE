@@ -1,3 +1,7 @@
+# *** SUPERSEDED -> see packets/cmsg_char_select.yaml ***
+# Refined select layout (slot + flag, two emit paths) lives in cmsg_char_select.yaml; the
+# opcodes.md 1/7 row points there. Retained as historical provenance only.
+#
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
 

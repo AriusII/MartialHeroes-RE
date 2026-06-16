@@ -1,3 +1,7 @@
+# *** SUPERSEDED -> see packets/cmsg_char_rename.yaml ***
+# Refined rename layout corrects the body to slot-byte + 17B CP949 name (not an 18B name-only
+# buffer); see cmsg_char_rename.yaml. The opcodes.md 1/13 row points there. Provenance only.
+#
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
 

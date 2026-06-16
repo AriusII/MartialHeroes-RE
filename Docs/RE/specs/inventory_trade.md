@@ -1,6 +1,11 @@
 ---
-status: hypothesis
+status: confirmed
 sample_verified: false
+verification: confirmed (client-side routing/sizes/offsets confirmed by control flow; server-authored magnitudes and on-wire VALUE semantics capture/debugger-pending)
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida]
+conflicts: resolved (4/23 two-level selector restored; 4/25 phase/count offsets re-pinned)
 ---
 
 # Inventory, Equipment, Shop & Trade — Clean-Room Specification
@@ -18,23 +23,36 @@ sample_verified: false
 >
 > **Revision 2026-06-13** promoted the full player-to-player **trade** three-packet flow
 > (2/23, 2/24, 2/25; 4/23 phase machine) and the **ground-item** drop/pickup/render flow
-> (2/14, 2/15; 4/4 tag 4, 5/14, 4/14, 4/15, 5/15) into §8 and the new §12, correcting the
-> earlier provisional trade entries. Those findings are CODE-CONFIRMED in static read/write
-> order but remain CAPTURE-UNVERIFIED; see the per-row notes and §11.
+> (2/14, 2/15; 4/4 tag 4, 5/14, 4/14, 4/15, 5/15) into §8 and the new §12.
+>
+> **Re-verification 2026-06-16 (build 263bd994).** Every load-bearing claim was
+> re-confronted against the IDB by static read of the C2S send-builder family and the
+> S2C ack handlers. The C2S send builders are the opcode/size oracle — each literally
+> embeds its `(major, minor)` pair and its exact appended byte count — so **every C2S
+> payload size in this spec is now byte-exact-confirmed**. Two ack-offset conflicts were
+> resolved and re-pinned (4/23 has a two-level selector; 4/25 phase/count offsets moved),
+> the **three-array** inventory model and the **bag soft-cap** were confirmed exactly, and
+> the pre-send **validator message ids** for 2/24 and 2/15 were pinned. See §11 and the
+> per-row notes.
 
 ## Status & confidence
 
-- **No live network capture was available for this pass.** Every field offset and
-  message size below is a **static inference** unless a field is explicitly tagged
-  `prior-capture-claim` (a previous analyst recorded it as observed on the wire).
-  Treat all offsets/sizes as hypotheses to confirm against a capture.
-- **Opcode → handler routing is a hard static fact.** The `(major:minor)` tuples in
-  the opcode tables below were cross-checked against the client's dispatch table and
-  the already-committed `opcodes.md`. The *direction* and *family* of each opcode are
-  reliable; the *payload field layouts* are the hypotheses.
-- **Per-claim confidence** is tagged inline as `CONFIRMED` (cross-checked at multiple
-  sites or against an existing committed spec), `LIKELY` (single consistent site), or
-  `UNVERIFIED` (inferred / boundary not pinned).
+- **Verification model (be honest about what is and isn't confirmed):**
+  - **Client-side facts are `[confirmed]`** — opcode `(major:minor)` routing, C2S payload
+    **sizes**, struct/field **byte offsets**, array strides/counts, message-db ids, the
+    client-side validation gates, and the client timing constants. These are recovered
+    from control flow + operands on build `263bd994` and are interoperability facts.
+  - **Server-authored magnitudes and on-wire VALUE meanings are `[capture/debugger-pending]`**
+    — the runtime *meaning* of enum values (e.g. 2/24 category 4 vs 1, 2/25 mode/flag byte),
+    server-decided amounts (gold deltas, sell prices, +N enchant levels), and any field whose
+    numeric content is server-decided. The client *places* and *reads* these; their wire
+    values are not pinned without a live capture.
+- **Opcode → handler routing is a hard static fact.** The `(major:minor)` tuples in the
+  opcode tables below were cross-checked against the client's dispatch table, the C2S
+  send-builder family, and the already-committed `opcodes.md`.
+- **Per-claim confidence** is tagged inline as `CONFIRMED` (control-flow-confirmed, or
+  cross-checked against an existing committed spec), `LIKELY` (single consistent site),
+  or `UNVERIFIED`/`capture-pending` (inferred / boundary or wire VALUE not pinned).
 - **Korean text fields use the CP949 (EUC-KR) code page.** Any inbound text in this
   subsystem (item names, NPC dialog) must be decoded as CP949, never UTF-8.
 - Builds on existing committed specs: `structs/item.md` (`ItemSlotRecord` 16 B,
@@ -49,26 +67,56 @@ sample_verified: false
 
 ## 1. Inventory grid & equipment slot model
 
-### 1.1 The flat 20-slot item array
+### 1.0 Three inventory arrays (re-pinned 2026-06-16)
 
-The client keeps a single flat **20-slot item array** that holds both worn equipment
-and bag items. Each entry is one 16-byte `ItemSlotRecord` (layout in `structs/item.md`:
-a verbatim first dword, an `item_actor_id`, then a 64-bit expiry split into low/high).
-The array is therefore **320 bytes** (20 × 16). `CONFIRMED`.
+The inventory is **not** a single flat array. The client maintains **three** parallel
+record arrays, each entry a 16-byte `ItemSlotRecord` (layout in `structs/item.md`), all
+sharing the same `0xFF` empty-slot marker convention. The shared item-expiry sweep
+iterates all three back to back, which is the structural proof of the three-array model.
+`CONFIRMED`.
+
+| Array | Count | Stride | Purpose | Conf |
+|---|---|---|---|---|
+| **Bag** | `40 × (bag_count + 3)` | 16 B | The carried-items bag; capacity grows with the player's bag-expansion count. | CONFIRMED |
+| **Equip** | 20 | 16 B | The worn-equipment + fixed-slot array (the array re-synced on equip/sell acks; §1.1). | CONFIRMED |
+| **Extra** | 120 | 16 B | A third item record array on the local-player block (rental / extended / overflow records). | CONFIRMED |
+
+- **Bag soft-cap.** The bag holds `40 × (bag_count + 3)` records, where `bag_count` is a
+  small per-player bag-expansion count held as a single unsigned byte on a global. So a
+  player with zero expansions has `40 × 3 = 120` bag records; each expansion adds 40.
+  `CONFIRMED` (the expiry sweep walks exactly `40 × (bag_count + 3)` records at stride 16).
+- **Shared `0xFF` expiry sweep.** A single sweep routine walks the bag (`40 × (bag_count+3)`),
+  then the 20-entry equip array, then the 120-entry extra array, checking each record's
+  empty-slot marker byte (the same `0xFF` marker used by the pickup free-slot capacity gate,
+  §12.3). On a rental / timed item nearing expiry it raises a localized warning (the
+  expiry-warning message family, ids in the **4043…4049** range). `CONFIRMED`.
+
+> Implementer note: model three `ItemSlotRecord[]` arrays — `bag[40 × (bagCount + 3)]`,
+> `equip[20]`, `extra[120]` — all owned by the local player, all using the `0xFF`
+> empty-slot marker, and all swept by one expiry pass. The 20-entry equip array is the one
+> mirrored into the inventory/trade controller (§1.1).
+
+### 1.1 The 20-slot equip/fixed array
+
+The 20-entry **equip array** holds worn equipment and the fixed slots. Each entry is one
+16-byte `ItemSlotRecord` (layout in `structs/item.md`: a verbatim first dword, an
+`item_actor_id`, then a 64-bit expiry split into low/high). The array is therefore
+**320 bytes** (20 × 16). `CONFIRMED`.
 
 - An entry is read by slot index; the runtime resolves the entry, then uses its
   `item_actor_id` to locate the **item actor**, which carries the actual stat-grant
   fields (see `structs/item.md`, "Item-actor stat-grant fields"). `CONFIRMED`.
 - This array is a **copy of the local player's own item block** carried inside the
   player actor's layout. On certain acks the client re-synchronises all 20 records
-  from the player actor's item block back into this array (the NPC-sell ack does
-  exactly this re-sync of 20 × 16 bytes on a successful self-sale — this is the
-  structural proof that the model is 20 fixed slots of 16 bytes). `CONFIRMED`.
+  from the player actor's item block back into this array — both the **equip-change ack
+  (4/16)** and the **NPC-sell ack (4/20)** run an identical `for (20) { … += 16 }` copy
+  loop from the local-player item block into the equip-table on success. This is the
+  structural proof that the equip model is 20 fixed slots of 16 bytes. `CONFIRMED`.
 
-> Implementer note: model this as a fixed `ItemSlotRecord[20]` owned by the local
-> player and mirrored into an inventory/trade controller. Both copies are kept in
+> Implementer note: model the equip array as a fixed `ItemSlotRecord[20]` owned by the
+> local player and mirrored into an inventory/trade controller. Both copies are kept in
 > sync; treat the player-actor block as the authority and the standalone array as a
-> cache that is refreshed on inventory-changing acks.
+> cache that is refreshed on inventory-changing acks (4/16, 4/20).
 
 ### 1.2 Reserved slot indices
 
@@ -100,8 +148,11 @@ of view: `C2S` = client→server, `S2C` = server→client.
   inbound major-2 handler. Each C2S message is built by writing the `major`/`minor` into
   the frame header and then appending a fixed-length payload. The "Size" column below is
   the literal payload-bytes count written by the send builder (payload-relative, i.e. not
-  counting the 8-byte frame header). `CONFIRMED` (send-only nature); `LIKELY`/inferred
-  (individual sizes).
+  counting the 8-byte frame header). `CONFIRMED` (send-only nature **and** individual
+  sizes — re-verified 2026-06-16). The C2S send builders form **one contiguous self-
+  documenting family**: each builder embeds its `(major, minor)` pair and appends an exact
+  byte count, so opcode + payload size are control-flow-hard facts. **Every C2S size
+  asserted in this spec is byte-exact in its builder.**
 - **Families 3, 4, 5** carry the server acks consumed by this subsystem. Their routing is
   `confirmed` in `opcodes.md`.
 - All field offsets in this spec are **payload-relative** (relative to the first payload
@@ -129,9 +180,12 @@ The following client→server messages drive this subsystem. Sizes are payload b
 | 2/30 | C2S | 8  | `CmsgGuildAction` (relation/guild op) | Small guild / relation action channel; **not** a trade op (corrected 2026-06-13). See §8.4. | — |
 | 2/50 | C2S | 16 | `CmsgUpgradeItemCommit`  | Timed/progress-channel commit (item upgrade/enchant candidate). See §6. | 4/50 (likely) |
 
-Confidence: routing (`major/minor` + direction) `CONFIRMED` for all of the above except
-**2/50** (commit purpose `LIKELY`, payload `UNVERIFIED`). The detailed payload tables are in the
-relevant section per opcode.
+Confidence: routing (`major/minor` + direction) **and payload size** are `CONFIRMED` for
+**every** row above (re-verified byte-exact in each send builder, 2026-06-16). For **2/50**
+the *size* (16 bytes) is confirmed but its *commit purpose* (upgrade vs a shared
+channel-then-commit op) is `LIKELY` and its payload field breakdown is `UNVERIFIED`. The
+detailed payload field tables are in the relevant section per opcode; interior field
+*order* for several opcodes remains static-hypothesis pending a capture (§11).
 
 > **Open routing gaps (flag for follow-up):**
 > - The **outbound trade finalize/confirm minor is now pinned as 2/25** (corrected
@@ -203,13 +257,18 @@ authoritative; `UNVERIFIED` whether the client greys out ineligible items at all
 ### 4.4 Result acks
 
 - **4/12 `EquipItemResult` (S2C, 16 bytes fixed)** — layout in `structs/item.md`
-  (`EquipItemResult`). On `result == 1` the client applies the slot to the item model;
-  if the destination slot type is **15**, it then runs the visual / appearance gear
-  rebuild. On `result == 0` it shows a generic error. `prior-capture-claim` for the
-  layout; behaviour `LIKELY`.
-- **4/16 `EquipChangeResult` (S2C)** — same family; routing `confirmed`. Behaves as the
-  equip-move/swap result. Field layout not separately re-derived this pass; defer to a
-  capture before decoding individual fields. `UNVERIFIED` (layout).
+  (`EquipItemResult`). The handler reads a 16-byte body, takes the **result byte at +8**,
+  and the **slot type at +0x0C**; on `result == 1` it applies the slot to the item model;
+  if the slot type is **15**, it then runs the visual / appearance gear rebuild. On
+  `result == 0` it shows a generic error. Offsets `CONFIRMED` (re-verified 2026-06-16);
+  the result/slot **values** are read straight from the wire (server-authored).
+- **4/16 `EquipChangeResult` (S2C, 20 bytes fixed)** — same family; routing `confirmed`.
+  The handler reads a **20-byte (0x14) body**: **result at +8**, equip sub-bytes at **+0x0A
+  and +0x0B**, where the slot-15 visual-rebuild test is on the byte at **+0x0B** (the
+  16-bit-equip-result slot-15 byte sits at +0x0C; the 20-bit equip-change-result slot-15
+  byte sits at +0x0B). On success the handler re-syncs the **20 × 16** equip array from the
+  local-player item block (§1.1). Offsets `CONFIRMED` (re-pinned 2026-06-16); the deeper
+  per-field meanings of the +0x0A/+0x0B sub-bytes are `UNVERIFIED`.
 
 ---
 
@@ -320,17 +379,18 @@ Field widths sum to 12 bytes (4+1+1+1+1+4), matching the declared size.
   If the gold pair in the local copy is zero, the client also plays a **purchase sound**
   (sound id **862050101**). On a plain interact-open with no purchase the item descriptor
   words are zero. `LIKELY`.
-- On `result == 0 && reason == 1` the client shows the **item-shop-expired** message
+- The handler reads a **56-byte (0x38) body** with the **result byte at +8** and a
+  reason byte at **+9** (re-verified 2026-06-16). On `result == 1` it applies the acquire;
+  on `result == 0 && reason == 1` the client shows the **item-shop-expired** message
   (id **36003**) and then formats a **repair-cost / repair-time table** from the NPC
-  template. The repair table is computed from template values using the divisors **60**
-  and **12** (i.e. `value / 60` and `value % 60` for one column, `value / 12` and
-  `value % 12` for another), selecting localized format strings in the id range
-  **36004 … 36028** (an eight-way branch per ones/tens, applied twice for two cost
-  columns, with **36028** as the trailer). These ids are the repair-price / repair-time
-  message templates. `LIKELY`.
+  template. The repair table is computed from template values using **60** and **12**
+  (one column from a multiply-by-60, a duration column from a divide-by-12), selecting
+  localized format strings across **two sub-tables**: **36004 … 36011** (one column) and
+  **36012 … 36027** (the duration column), with **36028** as the trailer. These ids are
+  the repair-price / repair-time message templates. `CONFIRMED` (offsets + id ranges).
 
-  **Repair-table constants:** divisors **60** and **12**; message-id base **36004**;
-  trailer id **36028**.
+  **Repair-table constants:** factors **60** and **12**; message-id sub-tables
+  **36004…36011** and **36012…36027**; trailer id **36028**.
 
 ### 7.2 Sell one item (C2S 2/20; ack 4/20, 24 bytes)
 
@@ -347,22 +407,26 @@ Field widths sum to 12 bytes (4+1+1+1+1+4), matching the declared size.
 Field widths sum to 12 bytes (4+1+1+2+4), matching the declared size. The item itself is
 resolved **server-side** from `npc_id` + `inv_slot`; the client does not send an item id.
 
-**4/20 `NpcSellItemAck` (S2C, 24 bytes)** — `prior-capture-claim`:
+**4/20 `NpcSellItemAck` (S2C, 24 bytes)** — the handler reads a **24-byte (0x18) body**;
+the **result byte is at +8** and a secondary byte is read at **+0x0E** (re-verified
+2026-06-16). The fuller field map below is `prior-capture-claim` for the gold/echo fields:
 
 | Off | Size | Field | Meaning | Conf |
 |---|---|---|---|---|
 | +0 | 4 B | `header`      | Packet prefix. | LIKELY |
 | +4 | i32 | `actor_id`    | Selling actor id. | LIKELY |
-| +8 | u16 | `result`      | `0` = error, `1` = ok. | LIKELY |
+| +8 | u8  | `result`      | `0` = error, `1` = ok. | CONFIRMED (offset) |
 | +10| u8  | `category`    | Echo of `sell_flag`. | LIKELY |
 | +11| u8  | `inv_slot`    | Echo of `inv_slot`. | LIKELY |
 | +12| i32 | `quantity`    | Quantity sold. | LIKELY |
-| +16| u32 | `gold_total`  | Player gold **after** the sale; the client adopts this as authoritative. | LIKELY |
+| +14| u8  | `secondary`   | Secondary status / mode byte read by the handler. | CONFIRMED (offset) / UNVERIFIED (meaning) |
+| +16| u32 | `gold_total`  | Player gold **after** the sale; the client adopts this as authoritative. | LIKELY (offset) / capture-pending (value) |
 | +20| u32 | `gold_or_fame_hi` | High word of gold, or a second currency / fame value. | UNVERIFIED |
 
 Behaviour on `result == 1`: apply the sale to the item model; when the selling actor is
-the local player, **re-sync all 20 inventory records** from the player actor's item block
-into the standalone 20-slot array (§1.1). `LIKELY`.
+the local player, **re-sync all 20 equip records** from the player actor's item block
+into the standalone 20-slot equip array (§1.1). `CONFIRMED` (the self-sale 20×16 re-sync).
+The post-sale gold magnitude is server-authored (`capture-pending`).
 
 ### 7.3 Related shop acks (already committed in `opcodes.md`)
 
@@ -432,9 +496,15 @@ order) but **CAPTURE-UNVERIFIED**.
   fields live at trade-panel offsets +1536 / +1544 / +1552; see §8.5). Setting the money offer from
   the panel's right-click menu emits **2/24 with `category` = 255** carrying that composite.
 
-  The pre-send slot validator rejects, with a localized message: a duplicate item already present in
-  the 40 trade slots; insufficient gold (current gold below the offered amount); a busy / already-
-  confirmed trade; an open-shop conflict; or a non-tradeable / bound item.
+  The pre-send slot validator rejects, with a localized message (message ids pinned
+  2026-06-16):
+  - **duplicate item** already present in the 40 trade slots → msg **710**;
+  - **insufficient gold** (current gold below the offered amount) → msg **600**;
+  - a **busy / already-confirmed** trade → a localized busy message;
+  - an **open-shop conflict** → msg **406**;
+  - a **non-tradeable / bound** item (category 1) → a localized non-tradeable message.
+
+  `CONFIRMED` (the 710 / 600 / 406 ids and the gate set).
 
 - **2/25 `CmsgTradeConfirm` (2-byte header + N × 4-byte own-side slot manifest, N ≤ 40)** —
   confirm/lock or cancel the trade. (Corrected 2026-06-13: this was previously listed as a flat
@@ -459,18 +529,28 @@ order) but **CAPTURE-UNVERIFIED**.
 
 ### 8.2 Server acks (S2C; all `confirmed` routing in `opcodes.md`)
 
-- **4/23 `UserTradeRequestResult` (20 bytes)** — a **phase machine on the byte at +10**, not the
-  generic `result@+8` / `reason@+9` ack stereotype (corrected 2026-06-13: the trade-specific
-  selector is the phase byte at **+10**, and the two trader ids are at **+4 / +12 / +16**; the
-  earlier "result@8, reason@9 → five decline reasons" description was the generic family
-  stereotype and is superseded for this opcode).
+- **4/23 `UserTradeRequestResult` (20 bytes)** — a **two-level selector** (corrected
+  2026-06-16, resolving CONFLICT C1). The handler reads a 20-byte body and first branches
+  on an **outer selector byte at +8**, then — on the accept path — runs a **phase machine on
+  the byte at +10**. The earlier (2026-06-13) note that the +8/+9 reading was "superseded"
+  by the +10 phase machine was half-wrong: **both bytes are live** — +8/+9 is the
+  outer accept-vs-decline gate, +10 is the window-state phase. The two trader ids are at
+  **+12 / +16** (plus the requester id at **+4**).
 
   | Off | Size | Field | Meaning | Conf |
   |---|---|---|---|---|
-  | +4  | u32 | `requester_id` | The actor that initiated the request. | CODE-CONFIRMED |
-  | +10 | u8  | `phase`        | `0` = cancel / decline; `2` = incoming request; `3` = accepted → open the trade window. | CODE-CONFIRMED |
-  | +12 | u32 | `target_id`    | The addressed target actor. | CODE-CONFIRMED |
-  | +16 | u32 | `responder_id` | The responder / canceller actor. | CODE-CONFIRMED |
+  | +4  | u32 | `requester_id` | The actor that initiated the request. | CONFIRMED (offset) |
+  | +8  | u8  | `select`       | **Outer selector.** `1` = accept path → copy the 20-byte block and run the +10 phase machine; `0` = decline path → display a decline-reason string chosen by `reason` at +9. | CONFIRMED |
+  | +9  | u8  | `reason`       | **Decline reason** (only meaningful when `select == 0`): values **1…5** select five decline-reason strings. | CONFIRMED (offset + 1–5 mapping) / capture-pending (per-reason text) |
+  | +10 | u8  | `phase`        | **Inner phase** (only when `select == 1`): `0` = cancel / decline; `2` = incoming request; `3` = accepted → open the trade window. | CONFIRMED |
+  | +12 | u32 | `target_id`    | The addressed target actor. | CONFIRMED (offset) |
+  | +16 | u32 | `responder_id` | The responder / canceller actor. | CONFIRMED (offset) |
+
+  Outer behaviour:
+  - **select 0 (decline):** display the decline-reason string indexed by `reason` (+9), cases
+    **1…5** → five decline-reason message strings.
+  - **select 1 (accept):** copy the 20-byte block into the trade context and run the +10 phase
+    machine below.
 
   Phase behaviour (own-vs-partner resolved by comparing `requester_id` against `responder_id`):
   - **phase 2 (incoming request):** if the request is addressed to the local player and the player
@@ -481,21 +561,27 @@ order) but **CAPTURE-UNVERIFIED**.
     name), and hide the rest of the HUD windows.
   - **phase 0 (cancel/decline):** close the trade / wait panels; if the canceller differs from the
     requester, show a decline message; clear the trade state and zero the 20-byte trade context.
-- **4/24 `UserTradeSlotUpdateResult` (44 bytes)** — `result` at +8, `reason` at +9
-  (value 1 → one message, value 2 → another). On `result == 1` the client updates the
-  trade-slot view; otherwise it refreshes / clears the view. `LIKELY`.
+- **4/24 `UserTradeSlotUpdateResult` (44 bytes)** — the handler reads a **44-byte (0x2C)
+  body** with **`result` at +8** and **`reason` at +9** (cases **1** → one message, **2** →
+  another). On `result == 1` the client updates the trade-slot view; otherwise it refreshes /
+  clears the view. `CONFIRMED` (size + offsets; re-verified 2026-06-16).
 - **4/25 `UserTradeFullResponse` (28-byte base + item list)** — the finalize/commit
-  message.
-  - `phase` at +0x10: **4 = finalize / commit**, **0 = error / cancel** (cancel shows an
-    error message). `LIKELY`.
-  - On finalize: `item_count` at +0x14 (u8, **max 40**), then `item_count` × **16-byte**
-    trade-item records read sequentially. `LIKELY`.
+  message. (Offsets re-pinned 2026-06-16, resolving CONFLICT C2: the handler reads a
+  **28-byte (0x1C) base**, the **phase byte is at +8** — not +0x10 — and **`item_count` is
+  at +0x18 (24)** — not +0x14. The phase *values*, the 16-byte record, and the 40-slot cap
+  were already correct; only the two byte offsets were wrong in the prior pass.)
+  - `phase` at **+8**: **4 = finalize / commit**, **0 = error / cancel** (cancel shows an
+    error message). `CONFIRMED` (offset + phase values).
+  - On finalize: `item_count` at **+0x18 (24)** (u8, **max 40**), then `item_count` ×
+    **16-byte** trade-item records read sequentially into the 40-slot table. `CONFIRMED`
+    (offset + record size).
   - The trade window has a local **40-slot** capacity (a 40-entry trade array in the
-    controller); each populated slot contributes a small UI record. `CONFIRMED` (capacity
-    constant).
+    controller, slot-table walk capped at 0x28); each populated slot contributes a small UI
+    record. `CONFIRMED` (capacity constant).
 
   **Constants:** max trade items = **40 (0x28)**; trade-item record = **16 bytes**;
-  finalize phase = **4**; cancel phase = **0**.
+  base size = **28 (0x1C)**; phase byte at **+8** (4 = finalize, 0 = cancel);
+  `item_count` byte at **+0x18 (24)**.
 
 - **5/106 `TradeStateToggle` (12 bytes)** — `sort` (u32) at +0, `id` (u32) at +4, `on`
   (u8) at +8. Toggles the target actor's **trade-busy flag**; for the local player it
@@ -581,27 +667,33 @@ walks to build its per-occupied-slot record list (§8.1).
 
 | Constant | Meaning | Conf |
 |---|---|---|
-| Item array = 20 entries × 16 bytes (320 B) | Flat equip + bag item array. | CONFIRMED |
-| Player-actor item block mirrors the 20 × 16 array | Re-synced on inventory-changing acks. | CONFIRMED |
+| **Three inventory arrays** (bag / equip 20 / extra 120), all 16-byte records, shared `0xFF` empty marker | Bag `40×(bag_count+3)` + equip 20 + extra 120 (extra base at local-player +1260); one expiry sweep walks all three (added 2026-06-16). | CONFIRMED |
+| **Bag soft-cap = `40 × (bag_count + 3)`** records | Carried-bag capacity; `bag_count` = per-player bag-expansion count (one unsigned byte); 0 expansions ⇒ 120 records (added 2026-06-16). | CONFIRMED |
+| Extra array = 120 entries × 16 bytes | Third item record array on the local-player block, base +1260 (added 2026-06-16). | CONFIRMED |
+| Rental/timed-item expiry warning ids 4043…4049 | Raised by the shared `0xFF`-marker expiry sweep (added 2026-06-16). CP949. | CONFIRMED |
+| Equip array = 20 entries × 16 bytes (320 B) | Worn equipment + fixed slots; the array re-synced on 4/16 / 4/20 acks. | CONFIRMED |
+| Player-actor item block mirrors the 20 × 16 equip array | Re-synced on 4/16 (equip-change) and 4/20 (NPC-sell) acks. | CONFIRMED |
 | Equip slot 15 | Visual / appearance slot → triggers gear rebuild. | CONFIRMED |
 | Equip slot 14 | Special weapon slot. | LIKELY |
 | Equip slot 8 | Excluded from equip-onto-other and from the worn-item stat sum. | LIKELY |
 | Quick-use slot stride = 8 bytes | Quick-use slot occupancy array. | LIKELY |
 | Trade window max items = 40 (0x28) | 4/25 `item_count` cap; 40-entry trade array; 2/25 manifest cap. | CONFIRMED |
 | Trade-item record = 16 bytes | Per item in the 4/25 finalize list. | CONFIRMED |
-| 4/25 `phase` at +0x10: 4 = finalize, 0 = cancel | Trade finalize selector. | LIKELY |
+| 4/25 base = 28 (0x1C); `phase` at **+8** (4 = finalize, 0 = cancel); `item_count` at **+0x18** | Trade finalize selector (re-pinned 2026-06-16; supersedes the old phase@+0x10 / count@+0x14 reading). | CONFIRMED |
 | 2/23 `mode`: 2 = request, 0 = accept | C2S trade request/accept selector (added 2026-06-13). | CODE-CONFIRMED |
 | 2/24 `category`: 0 = money, 1 = item, 4 = add-item-with-confirm, 255 = set-money | C2S trade-slot category selector (added 2026-06-13). | CODE-CONFIRMED |
 | 2/24 money composite: total = d2 + 1000×(d1 + 1000×d0) | Base-1000 3-digit money encoding from panel fields +1536/+1544/+1552 (added 2026-06-13). | CODE-CONFIRMED |
 | 2/25 `mode`: 1 = confirm/lock, 0 = cancel | C2S trade-confirm selector; payload = 2 + 4×(occupied own-side slots), N ≤ 40 (added 2026-06-13). | CODE-CONFIRMED |
-| 4/23 `phase` at +10: 0 = cancel/decline, 2 = incoming request, 3 = accepted→open | C2S trade-request-result phase machine; trader ids at +4/+12/+16 (corrected 2026-06-13, supersedes the old result@8/reason@9 reading). | CODE-CONFIRMED |
+| 4/23 two-level selector: outer `select` at **+8** (1 = accept→run +10 phase, 0 = decline→reason@+9 cases 1–5), inner `phase` at **+10** (0 = cancel, 2 = incoming, 3 = accepted→open) | S2C trade-request-result. BOTH bytes live: +8/+9 = accept-vs-decline gate, +10 = window phase; trader ids at +4/+12/+16 (re-pinned 2026-06-16, restoring the +8/+9 outer selector dropped in 2026-06-13). | CONFIRMED |
 | 2/30 op pair: `op`@+0, `id`@+4 | Guild / relation action channel; not a trade op (added 2026-06-13). | CODE-CONFIRMED |
 | Upgrade motion 8 = success, 9 = fail | 4/50 enchant/upgrade animation. | LIKELY |
 | Repair divisors 60 and 12 | 4/19 repair time = value/60 min (rem value%60); value/12, value%12. | LIKELY |
 | Message id 59003 | Equip-onto-other rejection (slot-8 relation guard). CP949. | LIKELY |
-| Message id 36003 | Item-shop-expired. CP949. | LIKELY |
-| Message ids 36004 … 36028 | Repair price / time template table (base 36004, trailer 36028). CP949. | LIKELY |
-| Message id 36030 | "Cannot trade now". CP949. | LIKELY |
+| Message id 36003 | Item-shop-expired. CP949. | CONFIRMED |
+| Message ids 36004 … 36011 and 36012 … 36027, trailer 36028 | Repair price / time template — two sub-tables (price column 36004–36011, duration column 36012–36027) + trailer 36028; factors 60 and 12 (re-pinned 2026-06-16). CP949. | CONFIRMED |
+| Message id 36030 | "Cannot trade now" (2/23 send gate). CP949. | CONFIRMED |
+| 2/24 validator ids: dup-in-trade-slot 710, insufficient-gold 600, open-shop-conflict 406 | C2S trade-slot-update pre-send rejection messages (added 2026-06-16). CP949. | CONFIRMED |
+| 2/15 validator ids: trade-open 401, too-much-gold(coin) 884, free-slot/pickable 19 / 601 | C2S pickup pre-send rejection messages (added 2026-06-16). CP949. | CONFIRMED |
 | Message id 2042 | "X wants to trade" request prompt (4/23 phase 2). CP949. | CODE-CONFIRMED (string-ref) |
 | 4/24 `reason` 1 / 2 → 2 messages | Trade-slot-update reason map. | LIKELY |
 | Sound id 862050101 | NPC purchase SFX. | LIKELY |
@@ -619,7 +711,9 @@ walks to build its per-occupied-slot record list (§8.1).
 | Drop SFX 862030106; coin-pickup SFX 862030105 | Ground-item A/V cues (added 2026-06-13). | LIKELY |
 | Drop announce string 2146; pickup announce 10006 / 37003; other-player pickup notice 10018 | Ground-item chat cues, CP949 (added 2026-06-13). | LIKELY |
 | Pickup error strings 10001…10005 | 4/15 failure subtypes 1…5; 10005 = level/eligibility (added 2026-06-13). CP949. | CODE-CONFIRMED |
-| Rare-drop chat strings 64001 / 64002 | 5/14 `notice_flag` one-shot line (added 2026-06-13). CP949. | LIKELY |
+| Rare-drop chat strings 64001 / 64002 | 5/14 `notice_flag` one-shot line (added 2026-06-13). CP949. | CONFIRMED |
+| 5/14 spawn SFX 863600001 | Played for a fixed set of effect-id ranges on ground-item spawn (added 2026-06-16). | CONFIRMED |
+| 4/15 pickup announce 10006 / 37003 / 37004 (own); 902 (others) | Pickup chat cues (refined 2026-06-16). CP949. | CONFIRMED |
 
 > The "message ids" above are runtime **localized message codes** (CP949 strings), not
 > opcodes and not enum values on the wire. Keep them as display constants only.
@@ -628,10 +722,13 @@ walks to build its per-occupied-slot record list (§8.1).
 
 ## 11. UNVERIFIED / open questions
 
-1. **No live capture this pass.** Every field offset/size is a static inference unless
-   tagged `prior-capture-claim`. All sizes should be byte-confirmed against a capture. The trade
-   and ground-item flows added/corrected 2026-06-13 are CODE-CONFIRMED in read/write order but
-   remain CAPTURE-UNVERIFIED.
+1. **No live capture either pass; static-IDA only.** Client-side facts (opcode routing, C2S
+   payload sizes, ack byte offsets, array strides/counts, validator gates and message ids,
+   client timing constants) are `[confirmed]` from control flow on build **263bd994**. The
+   on-wire **VALUE semantics** (enum meanings, server-decided amounts, +N enchant levels) remain
+   `[capture/debugger-pending]`. The 2026-06-16 re-verification made **every C2S size byte-exact**
+   and re-pinned the 4/23 and 4/25 ack offsets (items 2 below); a live capture is still owed for
+   the wire-value numbers.
 2. **(Resolved 2026-06-13.)** The **outbound trade finalize/confirm minor is 2/25** (a 2-byte
    header plus an own-side offer manifest, §8.1), and **2/30 is a guild / relation action
    channel** (§8.4), not a trade op. Open follow-up: confirm whether the server treats the 2/25
@@ -657,8 +754,10 @@ walks to build its per-occupied-slot record list (§8.1).
    an item-actor set-bonus flag in `structs/item.md`, but the objects differ; do not
    conflate them.
 10. **Slot-8 semantics** — what gear / quick category index 8 represents is unknown.
-11. **4/16, 4/17 layouts** — routing confirmed but field layouts not re-derived this pass;
-    decode against a capture.
+11. **4/17 layout** — routing + 8-byte 2/17 send confirmed, but the 4/17 ack field layout is
+    not re-derived; decode against a capture. (4/16 is now partly pinned — 20-byte body, result@+8,
+    slot-15 byte at +0x0B, success re-syncs the 20×16 array — §4.4; deeper +0x0A/+0x0B meanings
+    still open.)
 12. **2/19 sub-flags (`flag_a…d`, `arg`)** — zero on a plain open; their meaning on a
     purchase path is unknown.
 13. **2/25 confirm-manifest record interior** (added 2026-06-13) — the three trailing bytes of
@@ -685,6 +784,14 @@ walks to build its per-occupied-slot record list (§8.1).
     share-bytes (+4/+5/+6) carry a client-suggested destination free-slot index for non-coin
     pickups (and `(0xF0, 0, 0)` for coins); whether the server honours the suggestion or re-derives
     the slot is unknown.
+19. **(Resolved 2026-06-16.)** The **4/23 two-level selector** (outer `select`@+8 accept-vs-decline
+    with decline-reason@+9 cases 1–5; inner `phase`@+10) and the **4/25 offsets** (`phase`@+8,
+    `item_count`@+0x18, 28-byte base) are now re-pinned (§8.2). Remaining: the per-reason decline
+    text (4/23 +9 cases 1–5) and the runtime meaning of enum values stay `capture-pending`.
+20. **4/14 `SmsgGroundItemDropAck` handler not located in the 2026-06-16 lane** (added 2026-06-16)
+    — only the matching 2/14 C2S send builder (8 bytes) was re-confirmed. The §12.6 interior
+    offsets (result@+8, mode@+10, slot@+11, count@+12, opaque@+16) are **doc-asserted /
+    capture-pending** until the handler is walked or a capture confirms them.
 
 ---
 
@@ -747,19 +854,21 @@ Picks up a targeted ground item. The target is the clicked / stood-on ground-ite
 | +7 | 1 B | (pad)    | Padding. | PLAUSIBLE |
 | +8 | i32 | `amount` | Coin amount or stack size. | CODE-CONFIRMED |
 
-**Client-side pickup pre-validation** (in order; all CODE-CONFIRMED, all enforced before send):
+**Client-side pickup pre-validation** (in order; all CONFIRMED, all enforced before send;
+message ids pinned 2026-06-16):
 
 1. **Lock-state gate** — if the local player is locked (in trade / dialog / menu), deny.
 2. **Busy gate** — if the busy predicate is set, deny.
-3. **Trade-open gate** — if a trade is open, deny (with a message).
+3. **Trade-open gate** — if a trade is open, deny with msg **401**.
 4. **Coin special** — if the target item id is the coin id (**217000501**): reject when
-   `amount + current_gold` would exceed the **gold cap 9,999,999,990,000,000** (a "too much gold"
-   message); otherwise set the share-bytes to `(0xF0, 0, 0)` and send.
+   `amount + current_gold` would exceed the **gold cap 9,999,999,990,000,000** with the
+   "too much gold" msg **884**; otherwise set the share-bytes to `(0xF0, 0, 0)` and send.
 5. **Non-coin** — resolve a free destination bag slot; if the item is **non-pickable** (its
-   pickable flag is clear), show a message; check the inventory **free-slot capacity** (the count
-   of empty bag slots, threshold 20 — this is a capacity gate, **not** a distance check); and check
-   the **level requirement** (player level ≥ the item's level-requirement field — the player level
-   field at +1684 vs the item field at +228) — on failure, error string **10005**.
+   pickable flag is clear) or the inventory **free-slot capacity** gate fails (the count of empty
+   bag slots, threshold **20** — a capacity gate, **not** a distance check), show msg **19**
+   (and/or msg **601**); and check the **level requirement** (player level ≥ the item's
+   level-requirement field — the player level field at +1684 vs the item field at +228) — on
+   failure, error string **10005**.
 6. On success — send 2/15 with the target key, amount, and the share-byte destination hint, and
    stamp the current time as a last-pickup rate gate.
 
@@ -806,26 +915,35 @@ consumed for a ground item.
 | +44 | 1 | u8  | **notice_flag** (`1` ⇒ one-shot "rare drop" chat line, strings 64001 / 64002) | CODE-CONFIRMED |
 
 A Mob dropper (sort low byte `2`) makes the spawned item auto-expire after ~1000 ms. Certain
-effect-id ranges play a spawn/pickup SFX. The bytes the handler does not consume (+16, +33…+43)
-are capture-unverified (§11 #15).
+effect-id ranges play a spawn/pickup SFX — the spawn plays **sound id 863600001** for a fixed
+set of effect-id ranges (e.g. 215003001–215003003, 215003408 / 215003708, 215004008,
+217000028–217000037, 217000241–217000243, 273000080, 273000766). The bytes the handler does not
+consume (+16, +33…+43) are capture-unverified (§11 #15). `CONFIRMED` (the SFX trigger and id
+ranges; re-verified 2026-06-16).
 
 ### 12.6 S2C 4/14 `SmsgGroundItemDropAck` (20 bytes, read 0x14)
 
 Result of a **drop-from-inventory** request; on success it spawns the dropped item at the local
 player's current position.
 
+> **Re-verification note (2026-06-16):** the 4/14 *handler* was **not located** in the
+> 2026-06-16 re-confirm pass (only the matching 2/14 C2S send builder + its 8-byte size were
+> re-verified). The offsets below remain **doc-asserted / `capture-pending`** — confirm them
+> against a capture or a later handler walk before relying on the interior layout (§11 #G8).
+
 | Off | Size | Type | Meaning | Conf |
 |---|---|---|---|---|
 | +0..+7 | 8 | — | header / echo region | PLAUSIBLE |
-| +8  | 1 | u8  | **result** (`0` = error → UI error; `1` = ok → spawn the drop) | CODE-CONFIRMED |
-| +10 | 1 | u8  | **mode** (`0` = bag slot, `1` = equip slot, `2` = fixed slot, `0xFF` = coin) | CODE-CONFIRMED |
-| +11 | 1 | u8  | **slot** index | CODE-CONFIRMED |
-| +12 | 4 | i32 | **count / coin amount** | CODE-CONFIRMED |
-| +16 | 4 | i32 | **opaque** (→ ground-item actor opaque slot) | CODE-CONFIRMED |
+| +8  | 1 | u8  | **result** (`0` = error → UI error; `1` = ok → spawn the drop) | capture-pending |
+| +10 | 1 | u8  | **mode** (`0` = bag slot, `1` = equip slot, `2` = fixed slot, `0xFF` = coin) | capture-pending |
+| +11 | 1 | u8  | **slot** index | capture-pending |
+| +12 | 4 | i32 | **count / coin amount** | capture-pending |
+| +16 | 4 | i32 | **opaque** (→ ground-item actor opaque slot) | capture-pending |
 
 On `result == 1` the client reads the drop sub-record (mode / slot / count / opaque), resolves the
 item id (bag, equip, or coin — coin forces id 217000501), and spawns the ground item at the local
-player's current world position. Drop SFX **862030106**, drop announce string **2146**.
+player's current world position. Drop SFX **862030106**, drop announce string **2146**. The
+*behaviour* is consistent with the 2/14 send shape; the *byte offsets* are capture-pending.
 
 ### 12.7 S2C 4/15 `SmsgItemWorldPickupAck` (36 bytes, read 0x24)
 
@@ -853,9 +971,11 @@ The **subtype** byte at +9 is interpreted by result:
   - **else** = insert plus a local despawn/echo on the picker's grid, then announce.
 
 If the id at +0x18 equals the coin id **217000501** the pickup is a coin: it credits gold and
-plays coin SFX **862030105** instead of an item insert. The pickup announce to other players in the
-same context uses string **10006** / **902**. The exact server policy choosing subtype 100 vs 101
-vs else is server-side (§11 #16).
+plays coin SFX **862030105** instead of an item insert. The own pickup announce uses strings
+**10006** / **37003** / **37004**; the announce to other players in the same context uses
+**902**. The exact server policy choosing subtype 100 vs 101 vs else is server-side (§11 #16).
+`CONFIRMED` (size 36, result@+8, subtype@+9, the 100/101/else split, the 1–5 → 10001–10005 failure
+map, the coin branch; re-verified 2026-06-16).
 
 ### 12.8 S2C 5/15 `SmsgGroundItemRemove` (16 bytes, read 0x10)
 

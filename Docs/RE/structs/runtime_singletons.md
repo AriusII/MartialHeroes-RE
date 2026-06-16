@@ -1,4 +1,9 @@
 ---
+verification: confirmed
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida]
+conflicts: Renderer object (§4) and 16-slot render pointer-cache (§4.1) not re-walked this pass (static-hypothesis); NetClient inner field offsets (§3.3) and ActorManager inner fields (§3.7) carried from prior dirty note (static-hypothesis); keepalive interval UNIT (ms vs s) and several MainWindow service-slot identities (§3.10) static-hypothesis; MainWindow +0x500=MainHandler* assignment site not traced (static-hypothesis); display FRAMERATE config inertness (capture/debugger-pending)
 status: code-confirmed
 sample_verified: false   # layout recovered from binary analysis; no live capture
 subsystems: [scene_lifecycle, render_pipeline, network, actor, sound, vfs, ui_system, effects, game_loop, input, scripting]
@@ -20,9 +25,12 @@ subsystems: [scene_lifecycle, render_pipeline, network, actor, sound, vfs, ui_sy
 > - **UNVERIFIED** — hypothesis only; do not hard-code.
 >
 > **Scope.** This file covers:
-> - The 19 Meyers-singleton objects and their key field maps.
-> - The render-subsystem pointer-cache block initialised at scene-state 5.
-> - The three flat VFS globals (not a singleton object).
+> - The Meyers-singleton objects (the 19 originally catalogued plus the `MainHandler` hub and
+>   `AppService` recovered in the 2026-06-16 re-verification) and their key field maps.
+> - The render-subsystem pointer-cache block initialised at scene-state 5 (static-hypothesis,
+>   not re-walked this pass — see §4 / §4.1).
+> - The flat VFS globals (not a singleton object) — the TOC pointer/count/handle plus a distinct
+>   mount-flag byte and a three-word load-progress sub-block.
 > - The construction order of all singletons.
 > - The binary module map: function counts per subsystem, engine brand, compiler, embedded
 >   third-party libraries, and the address-space ordering of subsystem clusters.
@@ -63,10 +71,10 @@ embedded static object (CODE-CONFIRMED unless marked otherwise).
 
 | Canonical name | Role | Object size (B) | Key fields | Confidence |
 |---|---|---:|---|---|
-| `GameState` | 9-state scene machine; the WinMain dispatch key | 16 | §3.1 | CODE-CONFIRMED |
+| `GameState` | Scene state machine (states 0..7, 8 cases; 8 is a sub-state value); the WinMain dispatch key | 16 | §3.1 | CODE-CONFIRMED |
 | `LuaConfig` | Lua 5.1.2 interpreter init and `game.lua` reader | ~44 | §3.2 | PLAUSIBLE |
 | `BugTrap` | Crash-reporter init (BugTrap.dll wrapper) | ~16 | — | PLAUSIBLE |
-| `NetClient` | TCP connection, cipher, LZ4, keepalive threads | 82 368 | §3.3 | CODE-CONFIRMED |
+| `NetClient` | TCP connection, cipher, LZ4, keepalive threads | 82 368 | §3.3 | CODE-CONFIRMED (size re-verified; inner offsets static-hypothesis) |
 | `NetHandler` | 154-slot S2C response + push dispatch tables | 6 220 | §3.4 | CODE-CONFIRMED |
 | `InputManager` | DirectInput polling + Win32 message dispatch | 116 | — | CODE-CONFIRMED |
 | `BillingState` | Subscription / shop-page state machine | 256 | §3.5 | CODE-CONFIRMED |
@@ -74,14 +82,24 @@ embedded static object (CODE-CONFIRMED unless marked otherwise).
 | `CoreMotManager` | Animation clip/motion manager (thin wrapper) | 16 | §3.6 | PLAUSIBLE |
 | `CorePoseManager` | Pose-blending state manager | 16 | §3.6 | PLAUSIBLE |
 | `CoreSkinManager` | Skinned-mesh cache manager | 16 | §3.6 | PLAUSIBLE |
-| `ActorManager` | In-world entity container + spatial index | 300 | §3.7 | CODE-CONFIRMED |
+| `ActorManager` | In-world entity container + spatial index | 300 | §3.7 | CODE-CONFIRMED (size re-verified; inner offsets static-hypothesis) |
 | `SoundManager` | DirectSound wrapper, 3 internal sound lists | ~640 | §3.8 | CODE-CONFIRMED |
 | `GHTexManager` | Primary effect/texture manager (EffectManager vtable) | 620 | §3.9 | CODE-CONFIRMED |
 | `ShadowManager` | Per-actor shadow rendering | 316 | — | CODE-CONFIRMED |
 | `RankProgress` | Rank/progression state | 308 | — | CODE-CONFIRMED |
-| `MainWindow` | Root Diamond::GUWindow + service-slot block | 1 464 | §3.10 | CODE-CONFIRMED |
+| `MainWindow` ("MainMaster") | Root Diamond::GUWindow + 223-slot HUD-panel service block | 1 464 | §3.10 | CODE-CONFIRMED |
+| `MainHandler` | Small handler-hub object (distinct from `MainWindow`; busiest accessor in the binary) | 16 | §3.10a | CODE-CONFIRMED |
+| `AppService` | Core client-runtime app-service singleton | 136 | §3.13 | CODE-CONFIRMED |
 | `Engine` | Main-loop aggregate: holds Renderer + InputManager ptrs | 48 | §3.11 | CODE-CONFIRMED |
 | `FrameTickScheduler` | Per-subscriber tick dispatcher | 72 068 | §3.12 | CODE-CONFIRMED |
+
+> **`MainWindow` vs `MainHandler` (re-verification 2026-06-16).** These are **two distinct
+> singletons** with separate static storage and separate accessors. `MainWindow` ("MainMaster")
+> is the 1 464-byte root HUD window that owns the 223-slot service block (§3.10). `MainHandler` is
+> a separate 16-byte hub object (§3.10a) — its accessor is the single busiest accessor in the
+> binary. The §3.10 service-slot *layout* is correct as documented; only the earlier
+> *construction-trigger attribution* (which accessor builds the 1 464-byte object — see §6) was
+> wrong and is corrected below.
 
 > **Note on the Renderer.** The Renderer object (`Diamond::GHRenderer`, ~177 860 bytes,
 > roughly 174 KB) is the largest static object in the binary. It is not constructed via a
@@ -98,15 +116,22 @@ object; the pointed-to type is named but its layout is in its own spec section o
 
 ### 3.1 GameState — 16 bytes (CODE-CONFIRMED)
 
-Cross-reference: `specs/client_runtime.md §7` for the 9-state lifecycle description.
+Cross-reference: `specs/client_runtime.md §7` for the scene-state lifecycle description.
+
+The WinMain driver runs `while(1) switch(scene_state)`, where the switch is a **bounds-checked
+jump table of exactly 8 entries (top-level states 0..7)** plus a default branch. The value 8 is
+**not** a 9th top-level case — it is the default/sentinel value carried in the `const_field`
+sub-state slot below (e.g. state 5 sub 8, state 6 sub 8). Any earlier wording describing a
+"9-state lifecycle" or "states 0..8" is corrected to **states 0..7 (8 cases); 8 is a sub-state
+value**.
 
 | Offset | Size | Type | Field | Notes |
 |-------:|-----:|------|-------|-------|
-| +0x00 | 4 | int32 | `scene_state` | The WinMain scene-state discriminator (0 = init … 8 = exit). Heavily cross-referenced throughout the binary. |
-| +0x04 | 4 | int32 | `const_field` | Initialised to 8; secondary role unverified. |
-| +0x08 | 4 | int32 | `third_field` | Initialised to 0; role unverified. |
-| +0x0C | 1 | uint8 | `debug_mode` | Set from the `debugmode` key in `game.lua`. 0 in release builds. |
-| +0x0D | 3 | — | (pad) | Alignment to 16-byte object end. |
+| +0x00 | 4 | int32 | `scene_state` | The WinMain scene-state discriminator; values 0..7 select the 8-entry jump table. Heavily cross-referenced throughout the binary. CODE-CONFIRMED. |
+| +0x04 | 4 | int32 | `const_field` | Initialised to 8 (CODE-CONFIRMED init value). Acts as the sub-state slot; the default sub-state value 8 lives here. The hypothesis that 8 also denotes a max/exit index is (static-hypothesis) — role still inferential. |
+| +0x08 | 4 | int32 | `third_field` | Initialised to 0 (CODE-CONFIRMED init value); role unverified (static-hypothesis). |
+| +0x0C | 1 | uint8 | `debug_mode` | Set from the `debugmode` key in `game.lua` (WinMain writes `debug_mode = (LuaConfig debugmode != 0)`). 0 in release builds. CODE-CONFIRMED. |
+| +0x0D | 3 | — | (pad) | Alignment to 16-byte object end (init guard sits at +0x10). |
 
 ### 3.2 LuaConfig — ~44 bytes (PLAUSIBLE)
 
@@ -121,20 +146,28 @@ Cross-reference: `specs/lua_scripting.md` for full Lua scripting behaviour.
 > guard sitting at byte offset 4. The ~44-byte estimate is derived from guard-offset arithmetic
 > and may overshoot. Trace `LuaConfig_Init` to confirm.
 
-### 3.3 NetClient — 82 368 bytes (CODE-CONFIRMED)
+### 3.3 NetClient — 82 368 bytes (CODE-CONFIRMED size; inner offsets static-hypothesis)
 
 Cross-reference: `specs/login_flow.md`, `specs/handlers.md` for protocol behaviour.
+
+> **Re-verification note (2026-06-16).** The object identity and the total size (82 368 bytes) are
+> CODE-CONFIRMED by re-deriving the accessor static and init-guard span. The *inner field offsets*
+> below were **not individually re-walked this pass** (the connection-init routine was not opened)
+> and are carried forward from the prior dirty note as **(static-hypothesis)**. The keepalive
+> *value* is corroborated: the `NetHandler` constructor passes `20` to the compressed-keepalive
+> arming routine (see §3.4) — the numeric value 20 is CODE-CONFIRMED; whether the field stores
+> 20 seconds or 20 000 ms is (static-hypothesis).
 
 | Offset | Size | Type | Field | Notes |
 |-------:|-----:|------|-------|-------|
 | +0x00 | 4 | ptr | vtable | `Diamond::Network` vtable. |
-| +0x28 | ~12 | obj | `server_addr_string` | `std::string` caching the last-connected server address. |
-| +0x48 | ~72 | obj | `net_conn` | Embedded connection object (TCP socket, async I/O, send/recv queues). |
-| +0x141B8 | 1 | uint8 | `connected` | Connected flag (non-zero when TCP link is established). Byte offset ~82 296 from object start. |
-| +0x141C8 | ~16 | obj | `send_thread` | ThreadSlot for the async send worker. |
-| +0x141D8 | ~16 | obj | `keepalive_thread` | ThreadSlot for the keepalive sender. |
-| +0x141E4 | 4 | uint32 | `keepalive_interval_ms` | Keepalive interval; initialised to 20 000 ms (20 seconds). CODE-CONFIRMED. |
-| +0x141EC | 4 | uint32 | `outstanding_acks` | Outstanding unacknowledged-packet count. |
+| +0x28 | ~12 | obj | `server_addr_string` | `std::string` caching the last-connected server address. (static-hypothesis) |
+| +0x48 | ~72 | obj | `net_conn` | Embedded connection object (TCP socket, async I/O, send/recv queues). (static-hypothesis) |
+| +0x141B8 | 1 | uint8 | `connected` | Connected flag (non-zero when TCP link is established). Byte offset ~82 296 from object start. (static-hypothesis) |
+| +0x141C8 | ~16 | obj | `send_thread` | ThreadSlot for the async send worker. (static-hypothesis) |
+| +0x141D8 | ~16 | obj | `keepalive_thread` | ThreadSlot for the keepalive sender. (static-hypothesis) |
+| +0x141E4 | 4 | uint32 | `keepalive_interval` | Keepalive interval; the arming value is 20 (CODE-CONFIRMED via the `NetHandler` ctor); seconds-vs-milliseconds unit is (static-hypothesis). |
+| +0x141EC | 4 | uint32 | `outstanding_acks` | Outstanding unacknowledged-packet count. (static-hypothesis) |
 
 ### 3.4 NetHandler — 6 220 bytes (CODE-CONFIRMED)
 
@@ -206,30 +239,38 @@ all constructed before `ActorManager`. They are initialised during the Actor sub
 > graph. Confirm roles by following the call chain from `Actor__LockVB_RebuildSkin_Unlock`
 > through the per-frame update path.
 
-### 3.7 ActorManager — 300 bytes (CODE-CONFIRMED)
+### 3.7 ActorManager — 300 bytes (CODE-CONFIRMED size; inner offsets static-hypothesis)
 
 Cross-reference: `structs/actor.md` for the entity layout; `names.yaml` (`g_ActorManager`,
 `g_LocalPlayer`).
 
+> **Re-verification note (2026-06-16).** The object identity and the total size (300 bytes) are
+> CODE-CONFIRMED by re-deriving the accessor static and init-guard span; RTTI confirms class
+> `ActorManager` over a base `CoreActorManager`. The *inner field offsets* below (name string,
+> `local_player_slot`, `spatial_index`, etc.) were **not fully re-walked this pass** and are
+> carried forward as **(static-hypothesis)**. The companion pointer-slot below **is** re-confirmed.
+
 | Offset | Size | Type | Field | Notes |
 |-------:|-----:|------|-------|-------|
-| +0x00 | 4 | ptr | vtable | `ActorManager` vtable. |
-| +0x04 | 4 | uint32 | `ref_count` | Reference count; incremented to 1 during construction. |
-| +0x08 | ~44 | obj | `name_string` | `std::string` set to `"ActorManager_group"` during construction. |
-| +0x38 | 1 | uint8 | `state_byte` | Initialised to 2. |
-| +0x70 | 4 | ptr | `local_player_slot` | Pointer slot for the local-player actor; points into a nearby static slot. |
-| +0x74 | ~192 | obj | `spatial_index` | Embedded spatial-index sub-object (collision / quadtree); constructed by its own internal constructor. Opaque to the domain model. |
-| +0x10C | 4 | uint32 | (reserved) | Zero-initialised. |
-| +0x114 | 4 | uint32 | (reserved) | Zero-initialised. |
-| +0x118 | 1 | uint8 | `flag` | Zero-initialised. |
-| +0x11C | 4 | uint32 | (reserved) | Zero-initialised. |
-| +0x120 | ~16 | obj | `secondary_index` | Secondary lookup sub-object (tree/list complement to the spatial index). |
+| +0x00 | 4 | ptr | vtable | `ActorManager` vtable. (static-hypothesis) |
+| +0x04 | 4 | uint32 | `ref_count` | Reference count; incremented to 1 during construction. (static-hypothesis) |
+| +0x08 | ~44 | obj | `name_string` | `std::string` set to `"ActorManager_group"` during construction. (static-hypothesis) |
+| +0x38 | 1 | uint8 | `state_byte` | Initialised to 2. (static-hypothesis) |
+| +0x70 | 4 | ptr | `local_player_slot` | Pointer slot for the local-player actor; points into a nearby static slot. (static-hypothesis) |
+| +0x74 | ~192 | obj | `spatial_index` | Embedded spatial-index sub-object (collision / quadtree); constructed by its own internal constructor. Opaque to the domain model. (static-hypothesis) |
+| +0x10C | 4 | uint32 | (reserved) | Zero-initialised. (static-hypothesis) |
+| +0x114 | 4 | uint32 | (reserved) | Zero-initialised. (static-hypothesis) |
+| +0x118 | 1 | uint8 | `flag` | Zero-initialised. (static-hypothesis) |
+| +0x11C | 4 | uint32 | (reserved) | Zero-initialised. (static-hypothesis) |
+| +0x120 | ~16 | obj | `secondary_index` | Secondary lookup sub-object (tree/list complement to the spatial index). (static-hypothesis) |
 
-> **Companion pointer-slot.** A separate 4-byte pointer in the global data region (distinct from
-> the ActorManager object itself) is set to the ActorManager's address during `NetHandler`
-> construction and is used by the two primary actor-lookup hot paths: the id-keyed lookup and
-> the `(id, sort)` composite-key lookup. This pointer is the global cross-reference that routes
-> all entity accesses through the ActorManager singleton.
+> **Companion pointer-slot (CODE-CONFIRMED).** A separate 4-byte pointer in the global data region
+> (distinct from the ActorManager object itself) is set to the ActorManager's address during
+> `NetHandler` construction — re-confirmed: the `NetHandler` ctor stores the ActorManager accessor
+> result into `NetHandler +0x30` (the routing pointer; this is also the first point at which the
+> ActorManager singleton is constructed). It is used by the two primary actor-lookup hot paths:
+> the id-keyed lookup and the `(id, sort)` composite-key lookup. This pointer is the global
+> cross-reference that routes all entity accesses through the ActorManager singleton.
 >
 > **ActorHashMap.** A separate 4-byte pointer in the global data region holds the address of an
 > actor hash-map/tree used in the id-keyed lookup hot path. Its type (std::map or custom tree)
@@ -270,29 +311,58 @@ Cross-reference: `formats/effects.md`, `specs/client_runtime.md §3`.
 | +0xC0 | 4 | uint32 | `sky_effect_A` | Sky effect id A = 390 000 002. |
 | +0xCC | 4 | uint32 | `sky_effect_B` | Sky effect id B = 390 000 001. |
 | +0xE4 | 4 | uint32 | `sky_effect_C` | Sky effect id C = 390 000 003. |
+| +0x234 | 4 | uint32 | (pre-list dword) | Zero-initialised by the constructor immediately before the three sub-lists. CODE-CONFIRMED (re-verification 2026-06-16). |
+| +0x238 | 4 | uint32 | (pre-list dword) | Zero-initialised before the sub-lists. CODE-CONFIRMED. |
+| +0x23C | 4 | uint32 | (pre-list dword) | Zero-initialised before the sub-lists. CODE-CONFIRMED. |
 | +0x240 | ~12 | obj | `sub_list_A` | Effect sub-list A. |
 | +0x24C | ~12 | obj | `sub_list_B` | Effect sub-list B. |
 | +0x258 | ~12 | obj | `sub_list_C` | Effect sub-list C. |
 
-### 3.10 MainWindow (Diamond::GUWindow) — 1 464 bytes (CODE-CONFIRMED)
+### 3.10 MainWindow (Diamond::GUWindow, "MainMaster") — 1 464 bytes (CODE-CONFIRMED)
 
 Cross-reference: `specs/ui_system.md`, `specs/client_runtime.md §2`.
 
 The `MainWindow` inherits from `Diamond::GUWindow` (which extends `Window → Panel → Component`).
-Its first 0x237 bytes reproduce the base-class field layout documented in `specs/ui_system.md`.
+Its base region reproduces the base-class field layout documented in `specs/ui_system.md`. The
+constructor initialises the base via a name string `"MainMaster"`; RTTI confirms the concrete
+class `MainWindow`. This object is the 1 464-byte service-slot owner and is **distinct from** the
+16-byte `MainHandler` hub (§3.10a).
 
 | Offset | Size | Type | Field | Notes |
 |-------:|-----:|------|-------|-------|
-| +0x00 | 4 | ptr | vtable | `MainWindow::vftable` (installed through the Component base-class chain). |
-| +0x04 | ~564 | bytes | (base-class fields) | Inherited `GUWindow → Panel → Component` fields. See `specs/ui_system.md`. |
-| +0x238 | 892 | ptr[223] | `service_slots` | 223 pointer-width (4-byte) service-slot words, zero-initialised at construction. Subsystem initializers populate these during scene-state 5. Only a small subset are named — see note below. |
-| +0x500 | 4 | ptr | `main_handler` | Pointer to the `MainHandler` object; assigned when scene-state 5 is entered. |
-| +0x5B4 | 4 | — | (last service slot) | Byte boundary of the service-slot region at offset 1 460. |
-| +0x5B8 | 4 | — | (tail pad) | Tail to the 1 464-byte object end. |
+| +0x00 | 4 | ptr | vtable (primary) | `MainWindow::vftable` (installed through the Component base-class chain). CODE-CONFIRMED. |
+| +0x04 | ~184 | bytes | (base-class fields) | Inherited `GUWindow → Panel → Component` fields up to the secondary vptr. See `specs/ui_system.md`. |
+| +0xBC | 4 | ptr | vtable (secondary) | Secondary / base-subobject vtable pointer (multiple-inheritance base vptr). CODE-CONFIRMED (re-verification 2026-06-16) — **was missing from the prior table, which listed only the +0x00 vptr.** |
+| +0xC0 | ~376 | bytes | (base-class fields) | Remainder of the inherited base region up to the service-slot block. See `specs/ui_system.md`. |
+| +0x238 | 892 | ptr[223] | `service_slots` | 223 pointer-width (4-byte) service-slot words; a flat array of HUD-panel pointers, read by index everywhere. Zero-initialised at construction **except the `+0x500` main-handler slot, which the ctor deliberately skips** (filled later — see note). Subsystem initialisers populate these during the in-game scene state. Only a subset are named — see note below. CODE-CONFIRMED count & bounds. |
+| +0x500 | 4 | ptr | `main_handler` | Pointer to the `MainHandler` object. The constructor's zero-init loop **deliberately skips this slot** (the slot is left untouched at construction and assigned later, at the in-game scene state). Ctor-skip CODE-CONFIRMED; the `= MainHandler*` identity of the later write is (static-hypothesis) — the write-site was not traced this pass. |
+| +0x5B0 | 4 | — | (last service-slot dword) | Last dword written by the zero-init loop. |
+| +0x5B4 | 1 | uint8 | (tail byte) | Final byte written by the constructor (boundary of the service region). |
+| +0x5B8 | — | — | (object end) | Object boundary at 1 464 bytes (init guard sits here). |
 
-> **Service-slot decode status.** Only approximately 6 of the 223 slots (including `+0x500 =
-> MainHandler*`) are identified. The full decode requires tracing all write sites that populate
-> each slot offset after scene-state 5 initialisation. See open question §7.6.
+> **Service-slot decode status.** The block is a flat array of HUD-panel pointers, populated at the
+> in-game scene state and read by index throughout the HUD code (e.g. status/character, inventory,
+> skill, buddy/relation, dock-slide, quest-tracker, guild, and party panels each occupy a distinct
+> index). Only a small subset of the 223 slots are identified, and the individual slot identities
+> are (static-hypothesis) — inferred from the callee each pointer is passed to. The full decode
+> requires tracing all write sites that populate each slot offset after the in-game-state
+> initialisation. See open question §7.6.
+
+### 3.10a MainHandler hub — 16 bytes (CODE-CONFIRMED)
+
+Cross-reference: `specs/client_runtime.md §2`, `specs/game_loop.md`.
+
+A small handler-hub singleton, **separate from** the 1 464-byte `MainWindow` (§3.10): it has its
+own static storage and its own accessor (the single busiest accessor in the binary). Its
+constructor zeroes four dwords (the full 16-byte object). The earlier conflation of this object
+with the service-slot window is corrected here and in §6.
+
+| Offset | Size | Type | Field | Notes |
+|-------:|-----:|------|-------|-------|
+| +0x00 | 4 | uint32 | (field) | Zero-initialised. CODE-CONFIRMED. |
+| +0x04 | 4 | uint32 | (field) | Zero-initialised. |
+| +0x08 | 4 | uint32 | (field) | Zero-initialised. |
+| +0x0C | 4 | uint32 | (field) | Zero-initialised (object end / init guard follows). |
 
 ### 3.11 Engine — 48 bytes (CODE-CONFIRMED)
 
@@ -327,14 +397,33 @@ Cross-reference: `specs/game_loop.md §3` for subscriber-dispatch behaviour.
 | +0x11934 | 16 | uint32[4] | `tail_fields` | Four tail dwords (offsets +0x11934 .. +0x1193C); zero-initialised. |
 | +0x11940 | 1 | uint8 | `enabled` | Enabled flag; initialised to 1. |
 
+### 3.13 AppService — 136 bytes (CODE-CONFIRMED) — added 2026-06-16
+
+A core client-runtime app-service Meyers singleton recovered in the 2026-06-16 re-verification —
+**not present in the prior master table.** It follows the standard Meyers idiom (init-guard + in-place
+constructor + `atexit` destructor) with its own static storage and accessor, and is moderately
+cross-referenced across the client runtime (on the order of ~60 reference sites). The object size
+(136 bytes) is CODE-CONFIRMED by re-deriving the accessor static and init-guard span.
+
+| Offset | Size | Type | Field | Notes |
+|-------:|-----:|------|-------|-------|
+| +0x00 | 136 | bytes | (service fields) | Internal layout not yet walked; the role is a general client-runtime service hub. Field-level layout is (static-hypothesis). Total span 136 bytes is CODE-CONFIRMED. |
+
 ---
 
-## 4. Renderer object — key fields (~177 860 bytes, CODE-CONFIRMED)
+## 4. Renderer object — key fields (~177 860 bytes, static-hypothesis — NOT re-walked this pass)
+
+> **Re-verification note (2026-06-16).** The Renderer object and the render-subsystem 16-slot
+> pointer-cache block (§4.1) were **not re-walked in this pass** (lane time budget). Everything in
+> §4 and §4.1 is carried forward from the prior dirty note as **(static-hypothesis)** pending a
+> follow-up walk of the scene-state-5 initialiser. Treat the CODE-CONFIRMED tags inside §4/§4.1 as
+> not yet re-confirmed against the 263bd994 anchor.
 
 The `Diamond::GHRenderer` static is the largest object in the binary (~174 KB). It embeds the
 D3D9 device, display configuration, all render-target surfaces, toon-shader constants, and the
 D3D present parameters. It is a raw static (not a Meyers singleton with an init guard) and its
 address is cached into the render-subsystem pointer-cache block at scene-state 5 (§4.1).
+(static-hypothesis — not re-walked this pass.)
 
 Cross-reference: `specs/client_runtime.md §3` for the render-pipeline behaviour.
 
@@ -359,6 +448,10 @@ Cross-reference: `specs/client_runtime.md §3` for the render-pipeline behaviour
 ---
 
 ## 4.1 Render-subsystem pointer-cache block (scene-state 5)
+
+> **(static-hypothesis — not re-walked 2026-06-16.)** This entire block, including the slot
+> assignments below, is carried forward from the prior dirty note and was not re-confirmed against
+> the 263bd994 anchor this pass. Flagged for a follow-up walk of the scene-state-5 initialiser.
 
 When scene-state 5 ("BuildGameWorld") is entered, a single initialiser function caches 16
 subsystem pointers into a contiguous block of 4-byte pointer slots in the global data region.
@@ -396,29 +489,45 @@ remain stable for the rest of the session.
 
 ---
 
-## 5. VFS subsystem — three flat globals (CODE-CONFIRMED)
+## 5. VFS subsystem — flat globals (CODE-CONFIRMED)
 
-The VFS uses **three flat global variables** rather than a Meyers singleton object. There is no
-C++ constructor guard and no `GetSingleton()` function. The `Diamond::CVFSManager` wrapper class
+The VFS uses **flat global variables** rather than a Meyers singleton object. There is no C++
+constructor guard and no `GetSingleton()` function. The `Diamond::CVFSManager` wrapper class
 provides named access functions (`VFS_IsMounted`, `VFS_SetMounted`) but the underlying state lives
-in three globals in the data segment.
+in globals in the data segment.
+
+> **Re-verification correction (2026-06-16).** The earlier description ("three flat globals") is
+> **incomplete**. The three TOC globals below are correct, but the runtime VFS state is **more than
+> three globals**: there is also a **distinct mount-flag byte** (this byte — not any of the three
+> below — is what `VFS_IsMounted` actually returns; it selects packed-VFS vs loose-file access)
+> plus a **three-word load-progress sub-block** (an enable flag byte, a 64-bit cumulative-bytes
+> accumulator, and a load-progress fraction). The mount flag and progress sub-block are CODE-CONFIRMED.
 
 Cross-reference: `formats/pak.md` for the on-disk archive format.
 
-| Global # | Size | Type | Field | Notes |
-|---:|---:|------|-------|-------|
-| 1 | 4 | ptr | `toc_array` | Pointer to the table-of-contents (TOC) array. Each TOC entry is 144 bytes, sorted by lowercase file path. |
-| 2 | 4 | uint32 | `toc_entry_count` | Number of entries in the TOC array. |
-| 3 | 4 | HANDLE | `vfs_file_handle` | Win32 file handle for the `.vfs` data file; kept open for the entire session. |
+| Group | Size | Type | Field | Notes |
+|---|---:|------|-------|-------|
+| TOC | 4 | ptr | `toc_array` | Pointer to the table-of-contents (TOC) array. Each TOC entry is 144 bytes, sorted by lowercase file path. CODE-CONFIRMED stride (the find routine indexes `toc_array + 144 × idx`, binary-search on a lowercased path compare). |
+| TOC | 4 | uint32 | `toc_entry_count` | Number of entries in the TOC array. CODE-CONFIRMED. |
+| TOC | 4 | HANDLE | `vfs_file_handle` | Win32 file handle for the `.vfs` data file; kept open for the entire session. CODE-CONFIRMED. |
+| Mount | 1 | uint8 | `mount_flag` | The actual `VFS_IsMounted` source byte; selects packed-VFS vs loose-file access. **Distinct global, not part of the TOC trio.** CODE-CONFIRMED (re-verification 2026-06-16). |
+| Progress | 1 | uint8 | `progress_enable` | Load-progress tracking enable flag. CODE-CONFIRMED. |
+| Progress | 8 | uint64 | `progress_accum` | Cumulative bytes loaded, for the load-progress bar. CODE-CONFIRMED. |
+| Progress | 4 | int32/float | `progress_fraction` | Load-progress fraction (`progress_accum / total`). CODE-CONFIRMED. |
 
 Initialisation: `VFS_OpenArchive` is called once from WinMain scene-state 0, before the
-scene-state machine loop begins. It opens `data.inf` (the TOC index file) and `data/data.vfs`
-(the data archive), reads the TOC into the `toc_array`, sets `toc_entry_count`, and stores the
-open file handle in `vfs_file_handle`. These three globals are then read-only for the rest of
-the session.
+scene-state machine loop begins. It opens `data.inf` (the TOC index file), reads its **24-byte
+header** and takes the **entry count from the 4th header dword (header offset +0x0C)** — NOT
++0x08 — allocates `144 × count` bytes for the `toc_array`, reads the TOC, closes `data.inf`, then
+opens `data/data.vfs` (the data archive) and retains the open handle in `vfs_file_handle`. The TOC
+globals are then read-only for the rest of the session.
 
-> **Note on the TOC entry format.** The 144-byte stride of each TOC entry is confirmed by
-> `formats/pak.md`, which owns the byte-level layout of `data.inf`.
+> **Note on the `data.inf` header / TOC entry format (byte-layout authority = `formats/pak.md`).**
+> The 24-byte header, the entry-count field at header offset +0x0C (the 4th dword), and the
+> 144-byte TOC entry stride are all visible in `VFS_OpenArchive` and the find routine. `data.inf`
+> is opened with `FILE_FLAG_RANDOM_ACCESS` (not sequential scan). These are interoperability facts;
+> the canonical byte-level layout is owned by `formats/pak.md` — cite `// spec: Docs/RE/formats/pak.md`
+> in code (byte-witness over a real sample pending in the VFS-witness block).
 
 ---
 
@@ -433,24 +542,33 @@ entered.
 2. `GameState` — `debug_mode` flag set from the `LuaConfig` result.
 3. `BugTrap` — crash-reporter init.
 4. **VFS globals** (not a singleton ctor) — `VFS_OpenArchive` mounts `data.inf` +
-   `data/data.vfs`; the three globals are filled. This happens before the scene-state loop.
-5. *(Scene-state loop begins. All following steps are per-state.)*
-6. (State 1) `MainWindow` — `Diamond_MainHandler_GetSingleton()` triggers lazy
-   initialisation; the MainWindow static is constructed and the 223 service slots are
-   zero-initialised.
-7. (State 1) Font creation; window configured (`Engine_ConfigureWindow`). **The Renderer
-   static is set up during `Engine_ConfigureWindow`** (not via a Meyers init guard).
-8. (State 1) `NetClient` + `NetHandler` — network stack initialised. `NetHandler` constructor
-   sets the `ActorManager` pointer (see §3.4 note); this is the first point at which the
-   `ActorManager` singleton is created.
+   `data/data.vfs`; the TOC globals, the mount-flag byte, and the load-progress sub-block are
+   filled (see §5). This happens before the scene-state loop (driven from scene-state 0).
+5. *(Scene-state loop begins — `while(1) switch(scene_state)`, 8 cases for states 0..7. All
+   following steps are per-state. Note: case 0 advances `scene_state` to 1 and triggers the
+   network-stack construction below.)*
+6. (State 1) `MainWindow` ("MainMaster") and `MainHandler` — **two distinct singletons**
+   (correction 2026-06-16). Each has its own accessor and static storage: the `MainWindow`
+   accessor constructs the 1 464-byte service-slot window (the 223 slots are zero-initialised,
+   except the main-handler slot which the ctor deliberately skips — see §3.10), while the
+   separate `MainHandler` accessor constructs the 16-byte hub (§3.10a). The earlier wording that
+   the *MainHandler accessor* builds the 1 464-byte window was a conflation and is corrected here:
+   it does not — it builds only the small hub.
+7. (State 1) Font creation; window configured. **The Renderer static is set up during window
+   configuration** (not via a Meyers init guard). (static-hypothesis — render path not re-walked
+   this pass.)
+8. (State 1) `NetClient` + `NetHandler` — network stack initialised (case 0 advances to state 1
+   and calls the `NetHandler` accessor). The `NetHandler` constructor stores the `ActorManager`
+   accessor result into `NetHandler +0x30` (see §3.4 / §3.7 note); this is the first point at
+   which the `ActorManager` singleton is created.
 9. (State 1) `InputManager`.
 10. (State 1) `BillingState`.
     *(Also within state 1: `AnimCatalog`, `CoreMotManager`, `CorePoseManager`,
-    `CoreSkinManager`, `SoundManager`, `GHTexManager`, `ShadowManager`, `RankProgress`
-    are each lazy-constructed on their respective first-use calls during scene-state 1 or 2.
-    Exact first-use ordering within this group is unconfirmed.)*
+    `CoreSkinManager`, `SoundManager`, `GHTexManager`, `ShadowManager`, `RankProgress`,
+    and `AppService` (§3.13) are each lazy-constructed on their respective first-use calls during
+    scene-state 1 or 2. Exact first-use ordering within this group is unconfirmed.)*
 11. (State 5, scene-build entry) The render-subsystem initialiser caches 16 pointer-slots
-    (§4.1):
+    (§4.1) — **(static-hypothesis, not re-walked this pass)**:
     - `GHRenderer` pointer cached.
     - `FrustumViewManager`, `GFrustum`, `ActorManager`, `GHTexManager`,
       `WeatherManager`, `SnowManager`, `MapXEffectManager`, `JointXEffectPool`,
@@ -599,7 +717,7 @@ at nearly every level of the call graph; they are infrastructure, not domain log
 
 | Topic | Authoritative spec |
 |---|---|
-| `GameState` scene_state lifecycle (9 states) | `specs/client_runtime.md §7` |
+| `GameState` scene_state lifecycle (states 0..7; 8 cases) | `specs/client_runtime.md §7` |
 | Net protocol, opcode catalogue | `specs/handlers.md`, `opcodes.md`, `packets/*.yaml` |
 | NetClient cipher / LZ4 | `specs/crypto.md` |
 | `BillingState` subscription logic | `names.yaml` (client_mechanics.BillingState) |
@@ -620,8 +738,21 @@ at nearly every level of the call graph; they are infrastructure, not domain log
 
 The following information is **new** with respect to the currently committed spec set:
 
-- Exact object sizes for all 19 singletons (NetClient 82 368, FrameTickScheduler 72 068,
+- Exact object sizes for the singletons (NetClient 82 368, FrameTickScheduler 72 068,
   NetHandler 6 220, etc.) — not previously documented in any committed spec.
+- **(2026-06-16 re-verification, new)** `MainWindow` ("MainMaster") and `MainHandler` are **two
+  distinct singletons**, not one — the 1 464-byte service-slot window vs a 16-byte hub (§3.10 /
+  §3.10a / §6 item 6).
+- **(new)** `AppService` — a 136-byte Meyers singleton (§3.13) not previously catalogued.
+- **(new)** The VFS state is **more than three flat globals**: a distinct mount-flag byte (the real
+  `VFS_IsMounted` source) plus a three-word load-progress sub-block (§5).
+- **(new)** The `MainWindow` **secondary/base-subobject vtable pointer at +0xBC** (§3.10).
+- **(new)** The `MainWindow` ctor **deliberately skips the main-handler service slot** in its
+  zero-init loop (filled later at the in-game scene state) (§3.10 / §6).
+- **(new)** The `EffectManager` ctor **zeroes three pre-list dwords** (+0x234/+0x238/+0x23C)
+  before the sub-lists (§3.9).
+- **(corrected)** `GameState` is a **states-0..7 / 8-case** machine; 8 is a sub-state value, not a
+  9th top-level case (§3.1).
 - The render-subsystem 16-slot pointer-cache block (§4.1) and its complete slot assignment
   table — not previously documented.
 - The `Engine` object (§3.11) — `specs/game_loop.md` references `Engine_MainLoop` by name but
@@ -670,9 +801,16 @@ The following information is **new** with respect to the currently committed spe
    or the vtable is installed by a base-class constructor not yet traced. Requires a one-level
    callgraph from the `Engine` constructor.
 
-6. **MainWindow service-slot full decode.** Only ~6 of the ~223 pointer slots at `+0x238..+0x5B4`
-   are identified. A complete map requires tracing all write sites that populate each dword after
-   scene-state 5 initialisation. This is a significant analyst task.
+6. **MainWindow service-slot full decode.** Only a small subset of the 223 pointer slots at
+   `+0x238..+0x5B4` are identified, and the individual slot identities are (static-hypothesis) —
+   inferred from the callee each pointer is passed to (status/character, inventory, skill,
+   buddy/relation, dock-slide, quest-tracker, guild, party panels, etc.). A complete map requires
+   tracing all write sites that populate each dword after the in-game-state initialisation. This is
+   a significant analyst task.
+
+   - **6a. `MainWindow +0x500` main-handler write site (static-hypothesis).** The ctor demonstrably
+     *skips* this slot in its zero-init loop, confirming it is filled later; the identity of the
+     later write as `= MainHandler*` was not traced this pass. Confirm the write-site and target.
 
 7. **`g_ActorMap_singleton` type.** A separate actor hash-map/tree pointer (not inside the
    ActorManager object) is used in the id-keyed actor-lookup hot path. The first access writes a
@@ -699,3 +837,25 @@ The following information is **new** with respect to the currently committed spe
 12. **DirectDraw usage.** `DirectDrawCreateEx` is present in the import table but no named function
     references DirectDraw. It may be dead code, an artefact of a compiled-out feature, or used
     exclusively by the XTrap module cluster.
+
+13. **Renderer object and the 16-slot render pointer-cache (§4 / §4.1) — re-walk pending
+    (static-hypothesis).** These were not re-confirmed against the 263bd994 anchor in the
+    2026-06-16 pass. A follow-up should re-walk the scene-state-5 render-subsystem initialiser and
+    re-derive the Renderer object's key field offsets.
+
+14. **`AppService` internal layout (§3.13).** Total span (136 bytes) is CODE-CONFIRMED; the
+    field-level layout and the precise service role are not yet walked.
+
+15. **NetClient inner field offsets (§3.3) and ActorManager inner fields (§3.7).** Object identity
+    and total sizes are CODE-CONFIRMED; the inner offsets are carried forward as (static-hypothesis)
+    and should be re-walked from the respective init/constructor routines.
+
+16. **Display FRAMERATE config inertness (capture/debugger-pending).** The per-frame loop is
+    software frame-capped at a fixed 60 FPS (the rate lives in the engine object's framerate field,
+    seeded to 60.0f in the engine constructor and never overwritten; a QPC-measured limiter sleeps
+    each iteration to hold the target period). Static analysis finds **no consumer** that routes the
+    display-config FRAMERATE value into the throttle — i.e. it appears inert and the cap is
+    effectively hardcoded 60 FPS. Whether the display FRAMERATE config is *truly* inert at runtime
+    needs debugger confirmation (capture/debugger-pending). The driver loop has four phases
+    (message-pump+input / scene-render+present / round-robin tick-scheduler / frame-throttle); the
+    behavioural detail is owned by `specs/game_loop.md`.

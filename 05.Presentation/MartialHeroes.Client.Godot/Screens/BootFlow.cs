@@ -79,6 +79,12 @@ public sealed partial class BootFlow : Node
     private ScreenHost? _host;
     private UiAssetLoader? _sharedAssets;
 
+    // Front-end audio + cursor manager.
+    // spec: Docs/RE/specs/sound.md — BGM 920100200, UI click 861010101. CODE-CONFIRMED.
+    // spec: Docs/RE/specs/intro_sequence.md §4 — intro stinger 910061000. CODE-CONFIRMED.
+    // spec: Docs/RE/specs/frontend_scenes.md §11 — data/cursor/stand.dds cursor. CODE-CONFIRMED.
+    private FrontEndAudio? _audio;
+
     // Credential stash: held across screen transitions (login → server-select → PIN → char-select).
     // Never domain state; purely view-session state so the flow can reassemble the TAB string.
     private string _account = "";
@@ -156,7 +162,87 @@ public sealed partial class BootFlow : Node
         _host = new ScreenHost { Name = "ScreenHost" };
         _uiLayer.AddChild(_host);
 
+        // Create the audio manager and add it to the scene so it initialises its players.
+        // spec: sound.md — BGM 920100200, click SFX 861010101. CODE-CONFIRMED.
+        // spec: intro_sequence.md §4 — intro stinger 910061000. CODE-CONFIRMED.
+        // spec: frontend_scenes.md §11 — cursor stand.dds. CODE-CONFIRMED.
+        _audio = new FrontEndAudio
+        {
+            Name = "FrontEndAudio",
+        };
+        AddChild(_audio);
+
+        // Boot entry: the LOGIN scene is GameState 1 — the FIRST interactive scene. The Opening
+        // intro is GameState 3 (POST-login): it plays AFTER login + server-select + the loading/SKIP
+        // gate and immediately BEFORE char-select (GameState 4) — it is NOT a pre-login splash.
+        // spec: Docs/RE/specs/intro_sequence.md §0/§0.1 ("post-login intro"; strict order 0→1→2→3→4).
+        // DEV-ONLY: dev_skip_intro + dev_screen may target a specific scene directly for testing.
+        if (TryDevScreenDispatch()) return;
         ShowLogin();
+    }
+
+    // -----------------------------------------------------------------------
+    // Boot-entry DEV screen dispatch (dev_skip_intro + dev_screen shortcuts)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// DEV-ONLY boot-entry shortcut: when <c>dev_skip_intro=1</c> is set in <c>client_dir.cfg</c>,
+    /// jumps straight to a target scene (selected by <c>dev_screen=</c>) for screenshot/headless
+    /// tests, bypassing the full Login→…→Opening path (the Opening's ~70 s dwell is too long for a
+    /// test loop). Returns <see langword="true"/> when it handled the boot (so the caller must not
+    /// also start the normal flow). DEV ONLY — never active in production.
+    ///
+    /// dev_screen= targets: login | pin | server | loading | opening | charselect | create.
+    /// </summary>
+    private bool TryDevScreenDispatch()
+    {
+        if (ReadCfgKey("dev_skip_intro", "0") is not ("1" or "true" or "yes"))
+            return false;
+
+        // No BGM forced here — login/server are BGM-absent; char-select owns 920100200 and starts it
+        // itself. spec: Docs/RE/specs/sound.md — login BGM-absent. CONFIRMED CAMPAIGN 9.
+        if (!IsDevOfflineMode())
+        {
+            GD.Print("[BootFlow] dev_skip_intro=1 → skipping intro, going straight to login.");
+            ShowLogin();
+            return true;
+        }
+
+        string devScreen = ReadCfgKey("dev_screen", "login").ToLowerInvariant();
+        GD.Print($"[BootFlow] dev_skip_intro=1 + dev_offline_flow=1 + dev_screen={devScreen}.");
+        switch (devScreen)
+        {
+            case "pin":
+                ShowLogin(); // login bg behind the modal
+                ShowPinModal();
+                break;
+            case "server":
+                ShowServerSelect();
+                break;
+            case "loading":
+                // Dev shortcut: jump directly to the loading screen (engine state 2).
+                // spec: frontend_scenes.md §2L. CODE-CONFIRMED entry point.
+                ShowLoadingScreen();
+                break;
+            case "opening":
+                // Dev shortcut: preview the post-login Opening intro (GameState 3) in isolation.
+                // spec: Docs/RE/specs/intro_sequence.md §0.1.
+                ShowOpeningIntro();
+                break;
+            case "charselect":
+                ShowCharacterSelect(pin: "");
+                break;
+            case "create":
+                // DEV: jump to char-select, then open the create form (for screenshot/oracle).
+                ShowCharacterSelect(pin: "");
+                Callable.From(DevOpenCreateForm).CallDeferred();
+                break;
+            default: // "login"
+                ShowLogin();
+                break;
+        }
+
+        return true;
     }
 
     // -----------------------------------------------------------------------
@@ -165,7 +251,16 @@ public sealed partial class BootFlow : Node
 
     private void ShowLogin()
     {
-        var login = new LoginScreen { Name = "LoginScreen", SharedAssets = _sharedAssets };
+        var login = new LoginScreen { Name = "LoginScreen", SharedAssets = _sharedAssets, Audio = _audio };
+
+        // DEV/TEST: pre-fill the credential fields with the hardcoded dev account so the
+        // maintainer can walk the flow without typing. Guarded by dev-offline mode; never ships.
+        if (IsDevOfflineMode())
+        {
+            login.DevPrefillId = DevAccountId();
+            login.DevPrefillPw = DevAccountPw();
+        }
+
         // LoginAccepted: OK button passed local validation (ID ≥ 4, PW ≥ 1).
         // → Stage credentials in Application layer, then advance to server select.
         login.LoginAccepted += OnLoginAccepted;
@@ -180,41 +275,108 @@ public sealed partial class BootFlow : Node
 
     private void OnLoginAccepted(string account)
     {
+        // UI click SFX is handled centrally by AudioService.OnButtonActionFired (NodeAdded
+        // subscription on StateButton.ActionFired). Calling _audio?.PlayClickSfx() here as well
+        // would play cue 861010101 TWICE on the same button press — removed to fix the double-click
+        // defect. spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (de-duplicate click path).
+
         // Store account name so it can be forwarded to UseCases.LoginAsync at the join point.
-        // The password is NOT stored — it lives only in the PIN modal / flow context
-        // (in a real build it travels via RSA 1/4, never in a plain field here).
-        // We store a placeholder: the password is already staged in ApplicationUseCases by the
-        // login screen's own submit path. The UI PIN modal delivers only the PIN.
         _account = account;
-        GD.Print($"[BootFlow] Login accepted (account='{account}') → server select.");
+        GD.Print($"[BootFlow] Login accepted (account='{account}') → PIN modal (before server select).");
 
-        // Stage login credentials in the Application layer (if available).
-        // spec: Docs/RE/specs/client_workflow.md §5.1.2 — login credential staging.
-        // In offline mode UseCases is a no-op sink.
-        if (_useCases is not null)
-        {
-            // pin is null here — it is collected later by the PIN modal (after server select),
-            // so the cancellationToken must be passed by name (the new LoginAsync inserts string? pin
-            // before the token). spec: Docs/RE/specs/login_flow.md §1 step 1a.
-            _ = _useCases.LoginAsync(account, password: "", cancellationToken: CancellationToken.None);
-        }
-
-        ShowServerSelect();
+        // FLOW ORDER (spec §1.4a / task mandate):
+        // Login validate → PIN (UNCONDITIONALLY after login-OK) → server list → char select.
+        // The PIN is shown BEFORE the server list, NOT after.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.4a — "after primary login submit … and BEFORE
+        //   the account-login blob is built (sub-state 40) the client raises the PIN modal".
+        // The task mandate: "PIN pops UNCONDITIONALLY after login-OK, NOT before login;
+        //   confirm → server list appears → select a server → char scene."
+        ShowPinModal();
     }
 
     private void OnServerListRequested(string account)
     {
-        // Player clicked the server-list button without submitting login first.
-        // Store the account so it is available when they complete the flow.
-        // The spec allows browsing the server list before entering credentials in full.
+        // Player clicked the server-list button WITHOUT submitting login credentials first.
+        // In the official client this can show the server list before the full login flow.
+        // In the revival we treat this as going straight to server select (skipping PIN).
         // spec: Docs/RE/specs/frontend_scenes.md §2 — server-list button on the login screen.
         _account = account;
-        GD.Print($"[BootFlow] Server list requested (account='{account}') → server select.");
+        GD.Print($"[BootFlow] Server list requested (account='{account}') → server select (no-cred path).");
         ShowServerSelect();
     }
 
     // -----------------------------------------------------------------------
-    // Step 2: Server-selection screen
+    // Step 2: PIN / second-password modal (BEFORE server select)
+    // spec: frontend_scenes.md §1.4a — PIN shown after login-validate, before server list.
+    // spec: task mandate — "PIN pops UNCONDITIONALLY after login-OK".
+    // -----------------------------------------------------------------------
+
+    private void ShowPinModal()
+    {
+        // The PIN modal is layered on TOP of the current screen (not replacing it),
+        // so it appears as a real modal overlay over the login screen background.
+        // spec: frontend_scenes.md §1.4a — PIN shown over the login window, before the
+        //   credential submit and server list. CODE-CONFIRMED flow position.
+        var pin = new PinModal
+        {
+            Name = "PinModal",
+            SharedAssets = _sharedAssets,
+        };
+
+        // DEV/TEST: pre-enter the hardcoded dev PIN (shown masked) so OK can be clicked directly.
+        // Guarded by dev-offline mode; never ships.
+        if (IsDevOfflineMode())
+            pin.DevPrefillPin = DevAccountPin();
+
+        pin.PinSubmitted += OnPinSubmitted;
+        pin.Cancelled += OnPinCancelled;
+
+        // Add directly to the CanvasLayer so it sits above the ScreenHost (login screen) content.
+        _uiLayer!.AddChild(pin);
+        GD.Print("[BootFlow] PIN modal shown (post-login-validate, pre-server-select). spec: §1.4a.");
+    }
+
+    private void OnPinSubmitted(string pin)
+    {
+        // UI click SFX is handled centrally by AudioService.OnButtonActionFired — no call here.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (de-duplicate click path).
+
+        // Remove the PIN modal.
+        RemovePinModal();
+
+        GD.Print($"[BootFlow] PIN submitted (length={pin.Length}) → server select.");
+
+        // Stage login credentials in the Application layer (if available).
+        // The PIN is now available; pass it along with the account.
+        // spec: Docs/RE/specs/client_workflow.md §5.1.2 — login credential staging.
+        if (_useCases is not null)
+        {
+            _ = _useCases.LoginAsync(_account, password: "", cancellationToken: CancellationToken.None);
+        }
+
+        // After PIN → server list appears.
+        // spec: task mandate "확인 → server list appears → select a server → char scene."
+        ShowServerSelect();
+    }
+
+    private void OnPinCancelled()
+    {
+        RemovePinModal();
+        GD.Print("[BootFlow] PIN modal cancelled → back to login.");
+        // Cancel from PIN returns to the login screen (not server select, since we haven't reached it).
+        ShowLogin();
+    }
+
+    private void RemovePinModal()
+    {
+        if (_uiLayer is null) return;
+        Node? modal = _uiLayer.FindChild("PinModal", owned: false);
+        modal?.QueueFree();
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 3: Server-selection screen (AFTER PIN)
+    // spec: task mandate "server list appears" after PIN confirm.
     // -----------------------------------------------------------------------
 
     private void ShowServerSelect()
@@ -225,65 +387,111 @@ public sealed partial class BootFlow : Node
             SharedAssets = _sharedAssets,
         };
 
-        // Populate with synthetic or real server list.
-        serverSelect.SetServers(BuildServerList());
-
+        // The server list is driven by the real lobby server-list response (port 10000). Offline there
+        // is none. DEV-ONLY: seed a couple of servers so the parchment-scroll layout actually RENDERS
+        // for visual validation (guarded by dev-offline mode; NEVER shipped — real flow uses the lobby).
+        // spec: Docs/RE/specs/login_flow.md §2.
         serverSelect.ServerSelected += OnServerSelected;
         serverSelect.BackRequested += OnBackToLogin;
         _host!.SetScreen(serverSelect);
-        GD.Print("[BootFlow] Showing ServerSelectScreen.");
+        if (IsDevOfflineMode())
+            serverSelect.SetServers(DevServerList());
+        GD.Print("[BootFlow] Showing ServerSelectScreen (after PIN confirm). spec: task mandate.");
     }
 
     private void OnServerSelected(int serverId)
     {
+        // UI click SFX is handled centrally by AudioService.OnButtonActionFired — no call here.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (de-duplicate click path).
+
         _selectedServerId = serverId;
-        GD.Print($"[BootFlow] Server selected: id={serverId} → PIN modal.");
-        ShowPinModal();
+        GD.Print($"[BootFlow] Server selected: id={serverId} → loading screen → char select.");
+
+        // Server-select commit advances substate 37→38 (store server_id, persist Lastserver); the
+        // client connects and the Loading screen (engine state 2) covers the transition into
+        // char-select. There is NO separate asset-backed "connecting" dialog in the recovered client
+        // (the prior ConnectingDialog was built on an unconfirmed caption id — removed as noise).
+        // spec: Docs/RE/specs/frontend_scenes.md §2L.
+        ShowLoadingScreen();
     }
 
     // -----------------------------------------------------------------------
-    // Step 3: PIN / second-password modal
+    // Loading screen — spec: frontend_scenes.md §2L. CODE-CONFIRMED.
+    //   Engine state 2 (Loading): shown between server-select and char-select.
+    //   Background: rand()%3 over loading.dds / loading06.dds / loading08.dds (V-crop 0..0.75).
+    //   Progress bar: 223 × percent/100 fill, left-to-right, design rect [−499,−170]×[−363,−140].
+    //   BGM: 920100100 looping (explicitly stopped before char-select, §3.8.1 fix contract).
+    //   Advance: LoadingComplete signal (preload-done + 500 ms grace), NOT bar == 100%.
     // -----------------------------------------------------------------------
 
-    private void ShowPinModal()
+    private void ShowLoadingScreen()
     {
-        // The PIN modal is layered on TOP of the current screen (not replacing it),
-        // so it appears as a real modal overlay.
-        var pin = new PinModal
+        var loading = new LoadingScreen
         {
-            Name = "PinModal",
+            Name = "LoadingScreen",
             SharedAssets = _sharedAssets,
         };
-        pin.PinSubmitted += OnPinSubmitted;
-        pin.Cancelled += OnPinCancelled;
-
-        // Add directly to the CanvasLayer so it sits above the ScreenHost content.
-        _uiLayer!.AddChild(pin);
-        GD.Print("[BootFlow] PIN modal shown.");
+        loading.LoadingComplete += OnLoadingComplete;
+        _host!.SetScreen(loading);
+        GD.Print("[BootFlow] Showing LoadingScreen (engine state 2 Loading). spec: frontend_scenes.md §2L.");
     }
 
-    private void OnPinSubmitted(string pin)
+    private void OnLoadingComplete()
     {
-        // Remove the PIN modal (find and free it from the CanvasLayer).
-        RemovePinModal();
-
-        GD.Print($"[BootFlow] PIN submitted (length={pin.Length}) → char select.");
-        ShowCharacterSelect(pin);
+        GD.Print("[BootFlow] LoadingComplete received. spec: frontend_scenes.md §2L.3.");
+        // The loading screen already stopped its BGM (§3.8.1 fix contract).
+        // GameState 2 (Loading) is the [OPENNING] SKIP gate: SKIP≠0 → char-select (GameState 4)
+        // directly; SKIP==0 → play the post-login Opening intro (GameState 3), which then transitions
+        // into char-select. spec: Docs/RE/specs/intro_sequence.md §0.1 (case 2 → state 4 on SKIP,
+        // else state 3 → state 4).
+        if (IsOpeningSkipped())
+        {
+            GD.Print("[BootFlow] [OPENNING] SKIP set → char-select (skip Opening). spec: intro_sequence.md §0.1.");
+            ShowCharacterSelect(pin: ""); // PIN was already collected before server select
+        }
+        else
+        {
+            ShowOpeningIntro();
+        }
     }
 
-    private void OnPinCancelled()
+    // -----------------------------------------------------------------------
+    // Step 3: Opening intro (post-login, GameState 3)
+    // Plays AFTER the loading/SKIP gate (GameState 2) and immediately BEFORE char-select
+    // (GameState 4). The Opening is a POST-login intro, never a pre-login splash.
+    // spec: Docs/RE/specs/intro_sequence.md §0/§0.1 (ordering 2 → 3 → 4); §3.1 (slideshow → state 4).
+    // -----------------------------------------------------------------------
+
+    private void ShowOpeningIntro()
     {
-        RemovePinModal();
-        GD.Print("[BootFlow] PIN modal cancelled → back to server select.");
-        ShowServerSelect();
+        var intro = new OpeningWindow
+        {
+            Name = "OpeningWindow",
+            SharedAssets = _sharedAssets,
+            Audio = _audio,
+        };
+        intro.IntroFinished += OnIntroFinished;
+        _host!.SetScreen(intro);
+        GD.Print("[BootFlow] Showing OpeningWindow (post-login intro, GameState 3). spec: intro_sequence.md §0.1.");
     }
 
-    private void RemovePinModal()
+    private void OnIntroFinished()
     {
-        if (_uiLayer is null) return;
-        Node? modal = _uiLayer.FindChild("PinModal", owned: false);
-        modal?.QueueFree();
+        // The Opening (GameState 3) transitions into char-select (GameState 4) when its slideshow
+        // finishes or the player skips. Char-select's constructor starts the front-end BGM 920100200.
+        // spec: Docs/RE/specs/intro_sequence.md §0.1 / §3.1; sound.md (char-select BGM).
+        GD.Print("[BootFlow] Opening intro finished → char-select. spec: intro_sequence.md §3.1.");
+        ShowCharacterSelect(pin: "");
     }
+
+    /// <summary>
+    /// The Opening (GameState 3) SKIP gate, read at the GameState-2 (Loading) boundary: mirrors the
+    /// legacy <c>[OPENNING] SKIP</c> INI flag the original reads in case 2. When set, the Opening is
+    /// bypassed and the flow goes straight to char-select (GameState 4). Default 0 → play the Opening.
+    /// spec: Docs/RE/specs/intro_sequence.md §0.1 (case 2 reads SKIP: ≠0 → state 4, else state 3).
+    /// </summary>
+    private static bool IsOpeningSkipped() =>
+        ReadCfgKey("opening_skip", "0") is "1" or "true" or "yes";
 
     // -----------------------------------------------------------------------
     // Step 4: Character-select screen
@@ -300,6 +508,9 @@ public sealed partial class BootFlow : Node
         select.BackRequested += OnBackToLogin;
 
         _host!.SetScreen(select);
+        // Front-end BGM starts HERE — login/server are BGM-absent; char-select owns 920100200.
+        // spec: Docs/RE/specs/sound.md — char-select BGM cue. CONFIRMED CAMPAIGN 9.
+        _audio?.PlayBgm();
         GD.Print("[BootFlow] Showing CharacterSelectScreen (awaiting CharacterListEvent or dev seed).");
 
         // Subscribe to the Application event bus so CharacterListEvent drives the roster.
@@ -310,13 +521,14 @@ public sealed partial class BootFlow : Node
             StartEventBusDrain(select);
         }
 
-        // In dev offline mode, seed the roster synthetically after a brief delay (mimics the
-        // server latency before the 3/1 packet arrives).
-        if (IsDevOfflineMode())
-        {
-            GD.Print("[BootFlow] DEV OFFLINE MODE — seeding synthetic CharacterListEvent.");
-            SeedSyntheticCharacterList(select);
-        }
+        // The roster is driven by the real CharacterListEvent (opcode 3/1) via the event-bus drain.
+        // DEV-ONLY: publish a character row through the legitimate event bus so the populated
+        // char-select RENDERS for visual validation (the drain applies it next frame — correct timing).
+        // Guarded by dev-offline mode; NEVER shipped — the real flow uses the 3/1 list.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.1.
+        if (IsDevOfflineMode() && _ctx is not null)
+            _ctx.EventBus.Publish(new CharacterListEvent(
+                ServerId: 0, ChannelId: 0, Characters: DevCharacterList()));
 
         // Advance the FSM toward CharacterSelection.
         // spec: Docs/RE/specs/client_workflow.md §4 — Login → CharacterSelection on auth.
@@ -349,6 +561,9 @@ public sealed partial class BootFlow : Node
 
     private void OnEnterGameRequested(string characterName, int slotIndex)
     {
+        // UI click SFX is handled centrally by AudioService.OnButtonActionFired — no call here.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (de-duplicate click path).
+
         GD.Print($"[BootFlow] Enter game: character='{characterName}' slot={slotIndex}.");
 
         // Call the use case to advance the FSM and send the 1/9 enter-game request.
@@ -445,12 +660,25 @@ public sealed partial class BootFlow : Node
         GetTree().Quit();
     }
 
+    /// <summary>DEV-ONLY: opens the create form on the live char-select screen (dev_screen=create).</summary>
+    private void DevOpenCreateForm()
+    {
+        if (_host?.FindChild("CharacterSelectScreen", recursive: true, owned: false) is CharacterSelectScreen sel)
+            sel.DevShowCreateForm();
+        else
+            GD.PrintErr("[BootFlow] DevOpenCreateForm: CharacterSelectScreen not found.");
+    }
+
     // -----------------------------------------------------------------------
     // World boot
     // -----------------------------------------------------------------------
 
     private void TeardownMenu()
     {
+        // Stop the front-end BGM when leaving the menu flow (entering the world).
+        // spec: sound.md — BGM 920100200 stops on world enter. CODE-CONFIRMED.
+        _audio?.StopBgm();
+
         if (_uiLayer is not null && IsInstanceValid(_uiLayer))
         {
             _uiLayer.QueueFree();
@@ -474,102 +702,33 @@ public sealed partial class BootFlow : Node
     }
 
     // -------------------------------------------------------------------------
-    // Dev offline: synthetic server list
+    // Dev/test hardcoded credentials (guarded by dev-offline mode; NEVER ship).
+    // Lets the maintainer walk Login → PIN → ServerSelect → CharSelect without typing.
+    // Overridable via client_dir.cfg keys dev_account_id / dev_account_pw / dev_account_pin.
+    // DEV-ONLY conveniences — no game logic; applied only when IsDevOfflineMode() is true.
     // -------------------------------------------------------------------------
 
-    /// <summary>
-    /// Returns a synthetic server list for the dev-offline replay.
-    /// The entries follow the exact 8-byte record shape (server_id, status_code, load, open_time)
-    /// defined in login_flow.md §2.1, so the presentation rules are exercised faithfully.
-    ///
-    /// In a live build the list comes from the lobby mini-protocol (port 10000).
-    /// spec: Docs/RE/specs/login_flow.md §2.1. CODE-CONFIRMED record shape.
-    /// spec: Docs/RE/specs/frontend_scenes.md §2 (load-color thresholds, status sentinels).
-    /// DEV ONLY.
-    /// </summary>
-    private static IReadOnlyList<ServerEntry> BuildServerList()
-    {
-        // Synthetic data that exercises all load tiers and the NEW badge.
-        // Entries are spec-shaped (server_id 1..40, status_code, load, open_time).
-        // spec: Docs/RE/specs/login_flow.md §2.1. CODE-CONFIRMED thresholds.
-        return
-        [
-            // Light load (≤ 500). spec: login_flow.md §2.1 load threshold 500. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 1, DisplayName: "Jade Dragon", StatusCode: 1, Load: 120, OpenTime: 0,
-                IsNew: false),
-            // Medium load (>500). spec: load threshold 500. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 2, DisplayName: "Iron Phoenix", StatusCode: 1, Load: 650, OpenTime: 0,
-                IsNew: false),
-            // High load (>800). spec: load threshold 800. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 3, DisplayName: "Azure Tiger", StatusCode: 1, Load: 980, OpenTime: 0,
-                IsNew: true),
-            // Full load (>1200). spec: load threshold 1200. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 4, DisplayName: "Shadow Crane", StatusCode: 1, Load: 1450, OpenTime: 0,
-                IsNew: false),
-            // Scheduled open (status=3). spec: status sentinel 3. CODE-CONFIRMED.
-            // Load=10 → HH = "01"; open_time=30 → MM = "30" (HH:MM = "01:30").
-            new ServerEntry(ServerId: 5, DisplayName: "Thunder Snake", StatusCode: 3, Load: 10, OpenTime: 30,
-                IsNew: false),
-            // Preparing / under check (status=24). spec: sentinel 24. CODE-CONFIRMED.
-            new ServerEntry(ServerId: 6, DisplayName: "Crimson Wolf", StatusCode: 24, Load: 0, OpenTime: 0,
-                IsNew: false),
-        ];
-    }
+    private static string DevAccountId() => ReadCfgKey("dev_account_id", "xwdvg26");
+    private static string DevAccountPw() => ReadCfgKey("dev_account_pw", "crfgb727*");
+    private static string DevAccountPin() => ReadCfgKey("dev_account_pin", "1472");
 
-    /// <summary>
-    /// Seeds a synthetic CharacterListEvent and publishes it through the Application bus.
-    /// This exercises the full spec path (CharacterListEvent → CharacterSelectScreen.ApplyCharacterList)
-    /// without a live server.
-    ///
-    /// DEV ONLY.  The synthetic event follows the exact CharacterListEvent shape.
-    /// spec: Docs/RE/specs/login_flow.md §3.2 — per-slot 981-byte records, slot bitmask.
-    /// spec: Docs/RE/specs/frontend_scenes.md §3.1 — "@BLANK@" empty-slot sentinel. CODE-CONFIRMED.
-    /// </summary>
-    private void SeedSyntheticCharacterList(CharacterSelectScreen select)
-    {
-        // Build synthetic CharacterListSlot records.
-        // Follows spec field layout from login_flow.md §3.2 / ClientEvents.cs CharacterListSlot.
-        //
-        // Per spec: empty slot must carry name "@BLANK@". CODE-CONFIRMED.
-        // Per spec: max 5 slots (indices 0..4). CODE-CONFIRMED.
-        //
-        // Synthetic roster: 1 real char + 1 @BLANK@ empty slot. Covers both the enter-game path
-        // and the create-character path (enter on @BLANK@).
-        var slots = System.Collections.Immutable.ImmutableArray.Create<CharacterListSlot>(
-            // Slot 0: real character.
-            new CharacterListSlot(
-                SlotIndex: 0,
-                Name: "무사영웅",
-                Level: 25,
-                ServerClass: 1, // internal class 1 (Musa). spec §4.1. CODE-CONFIRMED.
-                CurrentHp: 650),
-            // Slot 1: empty slot (sentinel "@BLANK@"). spec: §3 / login_flow.md §3.5. CODE-CONFIRMED.
-            new CharacterListSlot(
-                SlotIndex: 1,
-                Name: "@BLANK@", // spec: empty-slot sentinel. CODE-CONFIRMED.
-                Level: 0,
-                ServerClass: 0,
-                CurrentHp: 0));
+    // DEV-ONLY validation seeds — populate the server list + the character row offline so the
+    // maintainer can SEE the real rendering (offline-empty leaves every populated scene blank and
+    // impossible to judge). Guarded by IsDevOfflineMode(); NEVER shipped; carry no game logic — the
+    // real flow uses the lobby server-list + the 3/1 CharacterList from a connected server.
+    private static IReadOnlyList<ServerEntry> DevServerList() =>
+    [
+        new ServerEntry(ServerId: 1, DisplayName: "무신", StatusCode: 0, Population: 120, Flag: 1),
+        new ServerEntry(ServerId: 2, DisplayName: "천마", StatusCode: 0, Population: 640, Flag: 1),
+    ];
 
-        var charListEvent = new CharacterListEvent(
-            ServerId: 0,
-            ChannelId: 0,
-            Characters: slots);
-
-        // Publish through the legitimate Application event bus so the full display path runs.
-        // The drainer will pick it up on the next _Process frame.
-        if (_ctx is not null)
-        {
-            _ctx.EventBus.Publish(charListEvent);
-            GD.Print($"[BootFlow] DEV: published synthetic CharacterListEvent ({slots.Length} slots).");
-        }
-        else
-        {
-            // If there's no context, directly drive the screen (last resort for headless tests).
-            select.ApplyCharacterList(slots);
-            GD.Print("[BootFlow] DEV: directly applied synthetic character list (no ctx).");
-        }
-    }
+    private static System.Collections.Immutable.ImmutableArray<CharacterListSlot> DevCharacterList() =>
+        System.Collections.Immutable.ImmutableArray.Create(
+            new CharacterListSlot(SlotIndex: 0, Name: "무사", Level: 25, ServerClass: 1, CurrentHp: 650),
+            new CharacterListSlot(SlotIndex: 1, Name: "격사", Level: 32, ServerClass: 3, CurrentHp: 520),
+            new CharacterListSlot(SlotIndex: 2, Name: "도사", Level: 18, ServerClass: 2, CurrentHp: 480),
+            new CharacterListSlot(SlotIndex: 3, Name: "@BLANK@", Level: 0, ServerClass: 0, CurrentHp: 0),
+            new CharacterListSlot(SlotIndex: 4, Name: "@BLANK@", Level: 0, ServerClass: 0, CurrentHp: 0));
 
     // -------------------------------------------------------------------------
     // Dev-offline-mode detection

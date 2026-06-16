@@ -6,7 +6,7 @@ namespace MartialHeroes.Client.Infrastructure.Macros;
 /// Parses <c>.mhm</c> (Martial Heroes Macro) files into
 /// <see cref="MacroDefinition"/> objects.
 /// <para>
-/// Format spec: <c>Docs/formats/macro_file.md</c>.
+/// Format spec: <c>Docs/RE/formats/macro_file.md</c>.
 /// This is the project's own format — no legacy reverse-engineering involved.
 /// </para>
 /// </summary>
@@ -34,7 +34,7 @@ public sealed class MacroFileParser : IMacroFileParser
 
     /// <inheritdoc/>
     /// <remarks>
-    /// Parsing rules are documented in <c>Docs/formats/macro_file.md</c>.
+    /// Parsing rules are documented in <c>Docs/RE/formats/macro_file.md</c>.
     /// No magic constants or offsets are derived from the legacy binary.
     /// </remarks>
     public IReadOnlyList<MacroDefinition> ParseContent(string content)
@@ -42,12 +42,14 @@ public sealed class MacroFileParser : IMacroFileParser
         ArgumentNullException.ThrowIfNull(content);
 
         // Strip UTF-8 BOM if present.
-        // spec: Docs/formats/macro_file.md §"Parsing Rules" rule 1
+        // spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 1
         if (content.StartsWith('﻿'))
             content = content[1..];
 
         var result = new Dictionary<string, MacroDefinition>(StringComparer.Ordinal);
-        var order = new List<string>(); // tracks insertion order; last-def-wins via dict replace
+        // tracks first-appearance order; the dict always holds the last definition for each name
+        // spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 7
+        var order = new List<string>();
 
         string? currentName = null;
         string? currentKey = null;
@@ -57,11 +59,11 @@ public sealed class MacroFileParser : IMacroFileParser
         {
             var line = rawLine.Trim();
 
-            // spec: Docs/formats/macro_file.md §"Parsing Rules" rule 3 & 4
+            // spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 3 & 4
             if (line.Length == 0 || line[0] == '#')
                 continue;
 
-            // spec: Docs/formats/macro_file.md §"Parsing Rules" rule 5
+            // spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 5
             if (line[0] == '[')
             {
                 // Flush the previous macro block before starting the new one.
@@ -73,7 +75,7 @@ public sealed class MacroFileParser : IMacroFileParser
                 continue;
             }
 
-            // spec: Docs/formats/macro_file.md §"Parsing Rules" rule 6
+            // spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 6
             if (currentName is not null)
                 currentCmds.Add(line);
 
@@ -84,14 +86,13 @@ public sealed class MacroFileParser : IMacroFileParser
         if (currentName is not null)
             FlushMacro(result, order, currentName, currentKey, currentCmds);
 
-        // Return in declaration order (last definition wins within the dict).
-        // Re-build ordered output: only names still present in the dict, deduplicated.
+        // Return macros in first-appearance order; block content comes from the last definition.
+        // spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 7
+        // Contract: position = first appearance of a given name; value = last definition for that name.
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var macros = new List<MacroDefinition>(result.Count);
         foreach (var name in order)
         {
-            // last-definition-wins: only emit the final occurrence order.
-            // We track order of first appearance but the dict already holds the last value.
             if (seen.Add(name) && result.TryGetValue(name, out var m))
                 macros.Add(m);
         }
@@ -108,7 +109,7 @@ public sealed class MacroFileParser : IMacroFileParser
         string? triggerKey,
         List<string> cmds)
     {
-        // spec: Docs/formats/macro_file.md §"Parsing Rules" rule 7 (last-definition wins)
+        // spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 7 (last-definition wins)
         if (!dict.ContainsKey(name))
             order.Add(name);
 
@@ -117,7 +118,7 @@ public sealed class MacroFileParser : IMacroFileParser
 
     /// <summary>
     /// Parses a header line of the form <c>[MacroName] OptionalKey</c>.
-    /// spec: Docs/formats/macro_file.md §"Parsing Rules" rule 5
+    /// spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 5
     /// </summary>
     private static void ParseHeader(string line, out string name, out string? triggerKey)
     {
@@ -139,7 +140,7 @@ public sealed class MacroFileParser : IMacroFileParser
     /// <summary>
     /// Yields individual lines from <paramref name="content"/> honouring both
     /// CR+LF and LF line endings.
-    /// spec: Docs/formats/macro_file.md §"Parsing Rules" rule 2
+    /// spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 2
     /// </summary>
     private static IEnumerable<string> EnumerateLines(string content)
     {

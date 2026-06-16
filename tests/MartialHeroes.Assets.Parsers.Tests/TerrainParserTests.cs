@@ -258,6 +258,35 @@ public sealed class TerrainParserTests
     }
 
     [Fact]
+    public void Ted_Parse_TextureIndexGrid_ZeroStoredRaw()
+    {
+        // CORRECTION (terrain.md reconciliation 2026-06-16): the parser stores block-3 bytes RAW.
+        // No idx-1 decrement and NO value-below-1 clamp are applied here — those are render-domain.
+        // spec: Docs/RE/formats/terrain.md §5.9 reconciliation —
+        //   "block-3 TextureIndexGrid stored RAW; idx-1 and clamp-to-1 are render-domain": CONFIRMED.
+        byte[] data = BuildTed(lookupByte: 0); // lookup[0] = 0, all others = 0
+        TerrainCell cell = TedTerrainParser.Parse(data.AsSpan());
+
+        // Every byte was 0 in the fixture; parser emits them RAW as 0 — no clamp.
+        foreach (byte b in cell.TextureIndexGrid)
+            Assert.Equal((byte)0, b);
+    }
+
+    [Fact]
+    public void Ted_Parse_TextureIndexGrid_AllBytesPassThroughUnchanged()
+    {
+        // All byte values (0–255) must pass through unchanged; parser applies NO transformation.
+        // spec: Docs/RE/formats/terrain.md §5.9 reconciliation —
+        //   "block-3 TextureIndexGrid stored RAW": CONFIRMED.
+        byte[] data = BuildTed(lookupByte: 0xAB);
+        TerrainCell cell = TedTerrainParser.Parse(data.AsSpan());
+
+        // lookupByte=0xAB was written to index 0; all others remain 0 — no clamping to 1.
+        Assert.Equal((byte)0xAB, cell.TextureIndexGrid[0]); // stored raw
+        Assert.Equal((byte)0, cell.TextureIndexGrid[1]);    // stored raw (not clamped to 1)
+    }
+
+    [Fact]
     public void Ted_Parse_BlockOffsets_AreCorrect()
     {
         // Verify block boundaries via distinct sentinel values in each block.

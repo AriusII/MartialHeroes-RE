@@ -35,8 +35,15 @@ public sealed class VfsCatalogueLoader : IDisposable
     // spec: Docs/RE/formats/pak.md §"Lookup algorithm" step 1 — "lowercase the requested virtual path": CONFIRMED.
     private const string UserLevelScrPath = "data/script/userlevel.scr"; // spec: §2.4
     private const string SkillsScrPath = "data/script/skills.scr"; // spec: §2.8
+
     private const string MobsScrPath = "data/script/mobs.scr"; // spec: §2.9
-    private const string ItemsCsvPath = "data/script/items.csv"; // spec: §4.1
+
+    // NOTE: the runtime client loads data/script/items.scr (binary, 548-byte header + N×8 stride),
+    // NOT items.csv. items.csv is the human-editable authoring form that compiles to items.scr;
+    // the binary's string table has no .csv path — the CSV is never loaded at runtime.
+    // spec: Docs/RE/formats/config_tables.md §2.7, §4.1 (items.csv is the authoring/export form)
+    // TODO: replace LoadItemsCsv() with a LoadItemsScr() path once Items.Parsers adds items.scr support.
+    private const string ItemsCsvPath = "data/script/items.csv"; // spec: §4.1 (authoring form, not runtime)
 
     private readonly MappedVfsArchive? _archive;
     private bool _disposed;
@@ -114,9 +121,16 @@ public sealed class VfsCatalogueLoader : IDisposable
     }
 
     /// <summary>
-    /// Loads and parses <c>data/script/items.csv</c>.
+    /// Loads and parses <c>data/script/items.csv</c> (the authoring/export form of item data).
     /// Returns an empty array if the file is absent or the archive is unavailable.
-    /// spec: Docs/RE/formats/config_tables.md §4.1 items.csv.
+    /// <para>
+    /// <b>Fidelity note:</b> the original runtime client loads <c>data/script/items.scr</c>
+    /// (binary, 548-byte header + N×8 stride, item UID at +0x34), NOT this CSV.
+    /// The CSV is the human-editable source that compiles to <c>items.scr</c>; no .csv path
+    /// appears in the shipping binary's string table.
+    /// This method is kept as an authoring/dev aid until an <c>items.scr</c> parser is available.
+    /// spec: Docs/RE/formats/config_tables.md §2.7, §4.1 (items.csv is the authoring form only).
+    /// </para>
     /// </summary>
     public ItemCsvRow[] LoadItemsCsv()
     {

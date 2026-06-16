@@ -9,10 +9,12 @@ namespace MartialHeroes.Network.Crypto;
 /// required by <see cref="WireCipher.EncryptInPlace"/> / <see cref="WireCipher.DecryptInPlace"/>.
 /// </para>
 /// <para>
-/// It exists so that, should a future capture reveal per-session keying (currently unverified), the
-/// state can be added here without changing call sites. Do not add fields without a spec update.
+/// The keyless/stateless reading is <b>RESOLVED [confirmed]</b>: §4 is explicit there is no key-schedule
+/// object and no seed plumbing, and §5 proves the cipher has a single send-side cross-reference (no
+/// inbound inverse). This struct therefore carries no fields and is never required by a call site; it
+/// is API-symmetry scaffolding only. Do not add fields without a spec update revealing per-session keying.
 /// </para>
-/// spec: Docs/RE/specs/crypto.md §4 (keyless and stateless — explicit).
+/// spec: Docs/RE/specs/crypto.md §4 (keyless and stateless — explicit), §5 (single send-side caller, RESOLVED).
 /// </summary>
 public readonly struct CipherState
 {

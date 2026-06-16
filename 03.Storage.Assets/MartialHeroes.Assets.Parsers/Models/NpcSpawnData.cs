@@ -18,10 +18,11 @@ public sealed class NpcSpawnRecord
     public required ushort MobId { get; init; }
 
     /// <summary>
-    /// Field at offset +2. Purpose unknown. Observed value: 67.
-    /// spec: Docs/RE/formats/npc_spawns.md — field_02 u16 @ +2: UNVERIFIED.
+    /// Field at offset +2. INERT — present but unconsumed by the spawn loader.
+    /// No runtime consumer accesses this offset; retained for stride purposes only.
+    /// spec: Docs/RE/formats/npc_spawns.md — field_02 u16 @ +2: CONFIRMED inert.
     /// </summary>
-    public required ushort Field02 { get; init; }
+    public required ushort Field02Inert { get; init; }
 
     /// <summary>
     /// World-space X coordinate.
@@ -37,31 +38,47 @@ public sealed class NpcSpawnRecord
     public required float WorldZ { get; init; }
 
     /// <summary>
-    /// Yaw / facing angle in radians (Y-axis rotation). Inference only — no runtime reader confirmed.
-    /// spec: Docs/RE/formats/npc_spawns.md — rotation_y f32 @ +12: PARTIAL (sample inference only).
+    /// Facing / orientation value in radians (base orientation stored on disk).
+    /// The runtime applies <c>π/2 − Facing</c> as the entity's on-screen facing;
+    /// the stored value is *subtracted from* a quarter-turn, NOT simply added to it.
+    /// Simply adding π/2 would mirror the orientation.
+    /// Applied facing = <c>Math.PI / 2 - Facing</c>.
+    /// spec: Docs/RE/formats/npc_spawns.md — facing f32 @ +12: CONFIRMED.
+    /// spec: Docs/RE/formats/npc_spawns.md §Record layout — "runtime applies π/2 − value": sample-verified.
     /// </summary>
-    public required float RotationY { get; init; }
+    public required float Facing { get; init; }
+
+    /// <summary>
+    /// The entity's on-screen facing angle in radians, after applying the runtime transform.
+    /// The runtime computes <c>π/2 − Facing</c> (NOT <c>π/2 + Facing</c>).
+    /// Simply adding π/2 would mirror the orientation.
+    /// Engine consumers MUST use this property instead of <see cref="Facing"/> directly.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/npc_spawns.md §Record layout — "runtime applies π/2 − value": sample-verified.
+    /// </remarks>
+    public float AppliedFacing => MathF.PI / 2f - Facing;
 
     /// <summary>
     /// Spawn-group link ID and spawn-type modifier.
-    /// Value 7 triggers elite/boss modifier.
+    /// Value 7 triggers elite/boss modifier (10% bonus multiplier).
     /// spec: Docs/RE/formats/npc_spawns.md — spawn_type u32 @ +16: CONFIRMED.
     /// </summary>
     public required uint SpawnType { get; init; }
 
     /// <summary>
-    /// Unknown field at +20. Always zero in observed samples.
-    /// Candidates: respawn delay (seconds), max simultaneous live count.
-    /// spec: Docs/RE/formats/npc_spawns.md — unknown_20 u32 @ +20: UNVERIFIED.
+    /// Field at offset +20. INERT — present but unconsumed by the spawn loader.
+    /// No runtime consumer accesses this offset; retained for stride purposes only.
+    /// spec: Docs/RE/formats/npc_spawns.md — field_20 u32 @ +20: CONFIRMED inert.
     /// </summary>
-    public required uint Unknown20 { get; init; }
+    public required uint Field20Inert { get; init; }
 
     /// <summary>
-    /// Unknown field at +24. Always zero in observed samples.
-    /// Candidates: spawn radius, group size, reserved padding.
-    /// spec: Docs/RE/formats/npc_spawns.md — unknown_24 u32 @ +24: UNVERIFIED.
+    /// Field at offset +24. INERT — present but unconsumed by the spawn loader.
+    /// No runtime consumer accesses this offset; retained for stride purposes only.
+    /// spec: Docs/RE/formats/npc_spawns.md — field_24 u32 @ +24: CONFIRMED inert.
     /// </summary>
-    public required uint Unknown24 { get; init; }
+    public required uint Field24Inert { get; init; }
 }
 
 /// <summary>

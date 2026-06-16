@@ -31,11 +31,21 @@ public static class ShaderContainerParser
     /// spec: Docs/RE/formats/shaders.md §Identification — "Encoding: 7-bit ASCII": VERIFIED.
     /// spec: Docs/RE/formats/shaders.md §Identification — "Line endings: Windows CRLF": VERIFIED.
     /// </remarks>
-    public static ShaderSource Parse(ReadOnlyMemory<byte> data)
+    public static ShaderSource Parse(ReadOnlyMemory<byte> data) =>
+        // Delegate to the span overload; RawBytes is stored as the caller-supplied Memory slice
+        // (no extra copy for the Memory path).
+        ParseCore(data.Span, data);
+
+    /// <inheritdoc cref="Parse(ReadOnlyMemory{byte})"/>
+    public static ShaderSource Parse(ReadOnlySpan<byte> span) =>
+        // For the span path, RawBytes must own its buffer (caller span has no guaranteed lifetime).
+        ParseCore(span, new ReadOnlyMemory<byte>(span.ToArray()));
+
+    private static ShaderSource ParseCore(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> rawBytes)
     {
         // Decode as 7-bit ASCII.
         // spec: Docs/RE/formats/shaders.md — "No bytes above 0x7E observed": VERIFIED.
-        string text = Encoding.ASCII.GetString(data.Span);
+        string text = Encoding.ASCII.GetString(span);
 
         // The first line is the version declaration.
         // spec: Docs/RE/formats/shaders.md §Version Declaration Line — first line: VERIFIED.
@@ -68,13 +78,9 @@ public static class ShaderContainerParser
         {
             ShaderType = shaderType,
             SourceText = text,
-            RawBytes = data,
+            RawBytes = rawBytes,
         };
     }
-
-    /// <inheritdoc cref="Parse(ReadOnlyMemory{byte})"/>
-    public static ShaderSource Parse(ReadOnlySpan<byte> span) =>
-        Parse(span.ToArray());
 
     private static int FindLineEnd(ReadOnlySpan<char> text)
     {

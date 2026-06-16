@@ -254,7 +254,7 @@ An Orchestrator-Agent:
 - receives a **charter**: the block's objective, the lanes/sub-objectives it must drive, the
   firewall side it operates on, its **writable path namespace**, and its exit criteria;
 - **fans out Tier-3 sub-agents** for each sub-objective in its block, in correctly-sized batches
-  (IDA in sub-waves of ~3; clean-room/VFS wide — see §3.2);
+  (IDA fans out massively in parallel — no cap; clean-room/VFS wide — see §3.2);
 - **monitors** the block: tracks which sub-objectives are in-flight / returned / failed, retries or
   reassigns a dead lane, and keeps a running **file-ownership ledger** for its namespace (§3.1);
 - **reconciles** its sub-agents' returns into **one rolled-up block result** (headlines, conflicts,
@@ -287,7 +287,7 @@ SUB-OBJECTIVES (one sub-agent each, one deliverable each):
   - <lane 1> → <agent type> → <deliverable path>
   - <lane 2> → <agent type> → <deliverable path>
   - …
-BATCHING: IDA lanes in sub-waves of 3 (single IDB); VFS/clean lanes wide. Maintain a file-ownership
+BATCHING: IDA lanes fan out massively in parallel (single IDB, reads + IDB writes unbridled — retry dropped/conflicting calls); VFS/clean lanes wide. Maintain a file-ownership
           ledger: never let two live sub-agents target the same path.
 MONITOR: track in-flight/returned/failed; retry a dead lane once; flag any lane that can't return.
 RECONCILE: produce ONE block summary — headlines, per-lane confidence, CONFLICT markers, open items.
@@ -369,7 +369,7 @@ wave. Rules:
 
 | Resource | Constraint | Batching rule |
 |----------|-----------|---------------|
-| **IDA database (single IDB + bounded MCP)** | One live database; MCP concurrency saturates at ~3 heavy consumers | **IDA lanes run in sub-waves of ~3.** Never launch 10 `mcp__ida__*` agents at once — they starve each other. |
+| **IDA database (single IDB + MCP)** | One live database mediated by the MCP server | **IDA lanes run UNBRIDLED — massively parallel reads AND parallel IDB writes, no caps.** Launch as many `mcp__ida__*` agents as the MCP server sustains; the only ceiling is its own throughput — **retry** any call it drops under load rather than throttling. Write safety = gate-passed glossary + dry-run + idempotency, not serialization. |
 | **Godot editor / MCP bridge** | Single editor instance, single running game | **Serialize interactive Godot work.** One `godot-mcp-operator` / scene-mutating run at a time. Headless console runs (read-only smoke) may overlap but should not fight over `client_dir.cfg` (§3.4). |
 | **Disk / VFS reads** | No write contention (read-only observation) | **VFS lanes fan out wide** — `vfs-data-analyst` agents have no shared scarce resource. |
 | **Engine-free C# build** | No shared runtime state | **Clean-room lanes fan out wide**, one project each. |
@@ -615,11 +615,13 @@ matched against a real VFS sample. A finding from one modality only is promoted 
   one `_dirty/` note ("how does the client decide where water is?", "what is the full N-byte layout
   of record type X?", "what opcode does action Y send?", "what are the packet bytes before and after
   decryption at runtime?").
-- **The W-Orchestrator-Agent monitors the whole research block**: it batches IDA lanes (static *and*
-  debugger) in sub-waves of 3 (§3.2 — they share the single IDB), fans out VFS lanes wide, keeps the
+- **The W-Orchestrator-Agent monitors the whole research block**: it fans out static IDA lanes
+  **massively in parallel (no cap, §3.2)** — they share the single IDB but only read it — while
+  **debugger** lanes stay serialized (one live process, §7.1); fans out VFS lanes wide, keeps the
   file-ownership ledger over `_dirty/<area>/**`, retries a dead lane once, and rolls up one summary.
 - **Debugger lanes share the IDB and the running process** — never run two debugger sessions at once;
-  serialize them within the IDA sub-wave budget.
+  serialize them. This is the **one** IDA concurrency limit that remains (anti-cheat + a single live
+  process); static reads and IDB writes are otherwise unbridled.
 - **Conflicts are flagged, never silently reconciled.** Static-reading vs. debugger-observation vs.
   byte-observation disagreements get a `CONFLICT:` marker for the spec-author to arbitrate in Phase 2.
 - **Confidence is reported** per lane (high / medium / low), and **whether it was debugger-confirmed**,
@@ -983,7 +985,7 @@ W1 (20 lanes), E (3-stage pipeline), R (review+fix)>. Other phases driven direct
 - Tool baseline verified: IDA MCP <UP/DOWN> · build <0/0> · tests <green> · VFS <reachable>.
 
 ## Phase <N>-W1 — GIGA RESEARCH (dirty room, <K> lanes) — driven by W-Orchestrator-Agent
-IDA lanes (sub-waves of 3, single IDB) + VFS lanes (parallel, harness-only).
+IDA lanes (massively parallel, single IDB — reads + IDB writes unbridled) + VFS lanes (parallel, harness-only).
 Output: `Docs/RE/_dirty/<area>/*.md` ONLY. Ledger: one writer per `_dirty/<area>/<lane>.md`.
 
 | # | Lane (sub-objective) | Type | Agent | Question | Deliverable | Conf |
@@ -1051,7 +1053,7 @@ Carry a short risk list per cycle. The recurring ones:
 | R6 | **Scope creep across the fan-out** | Lanes drift beyond the cycle theme | Enforce the §6.3 out-of-scope list; defer drift to a future cycle's candidate-theme note |
 | R7 | **Large asset copy / long op interrupted** | Partial state | Use resumable ops (robocopy); verify sizes before cutover; keep the original as backup until acceptance |
 | R8 | **Write collision between two agents** (race condition) | Two lanes target one path / two engineers one project | Pre-flight ledger check (§3.1); one writer per path per wave; worktree isolation only if partition impossible (§3.5) |
-| R9 | **IDA sub-wave starvation** | >3 `mcp__ida__*` agents launched at once | Batch IDA lanes in sub-waves of 3 (§3.2) |
+| R9 | **IDA MCP overload** | the live MCP server can't keep up with the fan-out width | Fan out unbridled but **retry** any call the server drops; only if it genuinely saturates, trim width slightly — there is no fixed cap (§3.2) |
 | R10 | **`client_dir.cfg` drift** | Parallel/aborted Godot smokes leave cfg mutated | Serialize cfg-mutating smokes; verify byte-exact restore after each (§3.4) |
 | R11 | **Debugger session instability / anti-debug** (`Main.exe` ships XTrap anti-cheat) | `dbg_*` lanes hang, detach, or the process resists debugging | Serialize debugger lanes (one process at a time, §7.1); fall back to static + VFS triangulation; document a runtime fact as "static-only, unconfirmed" rather than guess |
 | R12 | **Drift from 1:1 fidelity** | A re-implementation "works" but diverges from the original's behaviour/format | Hold the §0.2 bar: verify against the documented original (and, where decisive, against the running client under the debugger); mark deviations explicitly as deviations, never silently |

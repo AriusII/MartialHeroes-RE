@@ -13,9 +13,10 @@ namespace MartialHeroes.Assets.Mapping;
 ///   spec: Docs/RE/formats/terrain.md §5.1 Grid geometry
 ///   - 65×65 vertex grid, 64×64 quads per cell.
 ///   - Vertex spacing: 16.0 world units (= 1024 / 64). CONFIRMED.
-///   - Heights are IEEE 754 f32 in row-major order (row-major axis UNVERIFIED — we treat
-///     row index as the Z axis and column index as the X axis, matching the legacy D3D9
-///     convention of Z increasing "into the scene").
+///   - Heights are IEEE 754 f32 in row-major order. Axis orientation PARSER-VERIFIED:
+///       heights[row * 65 + col]  with  col → world X (inner/fast, stride 1)
+///                                       row → world Z (outer/slow, stride 65)
+///     spec: Docs/RE/formats/terrain.md §5.2 Axis orientation — PARSER-VERIFIED (CONFIRMED).
 ///   spec: Docs/RE/formats/terrain.md §5.2 Block 1 — Heightmap: f32le, 65×65 = 4225. CONFIRMED.
 ///
 /// Coordinate-system conversion (identical to GltfConverter):
@@ -155,13 +156,16 @@ public static class TerrainGltfConverter
         byte[] buf = new byte[bufSize];
 
         // ---- Positions ----
-        // Grid: row (r) → Z axis, column (c) → X axis.
-        // World X = c × 16.0 (axis orientation: UNVERIFIED which is row vs col;
-        //   we assign col→X, row→Z to match D3D9 terrain convention.)
+        // Grid layout: heights[row * 65 + col]
+        //   col → world X (inner axis, stride 1): col 0 = cell X minimum, col 64 = cell X maximum.
+        //   row → world Z (outer axis, stride 65): row 0 = cell Z minimum, row 64 = cell Z maximum.
+        //   spec: Docs/RE/formats/terrain.md §5.2 Axis orientation — PARSER-VERIFIED (CONFIRMED).
+        //   Two independent evidence lines: (1) loader index arithmetic col→X / row→Z; (2) seam-
+        //   continuity sample test (last row of lower-Z cell matches first row of higher-Z cell).
+        //   worldX = col × 16.0,  worldZ = row × 16.0
         // spec: Docs/RE/formats/terrain.md §5.1 — "64×64 quads per cell", vertex spacing 16.0: CONFIRMED.
-        // Height: direct f32 world-space Y.
-        // spec: Docs/RE/formats/terrain.md §5.2 Block 1 — heights f32le: CONFIRMED.
-        //   Height scale UNVERIFIED; stored as-is.
+        // Height: direct f32 world-space Y, no scale multiplier.
+        // spec: Docs/RE/formats/terrain.md §5.4 Block 1 — heights f32le, direct world-Y: CONFIRMED.
         //
         // Coordinate flip: negate X to convert left-handed D3D9 → right-handed glTF.
         // spec: Docs/RE/formats/mesh.md §Vertex list — same convention as character meshes.
@@ -174,10 +178,12 @@ public static class TerrainGltfConverter
         {
             for (int c = 0; c < GridSize; c++)
             {
-                int vi = r * GridSize + c;
-                float worldX = -(c * VertexSpacing); // negated for handedness flip
-                float worldY = cell.Heights[vi];
-                float worldZ = r * VertexSpacing;
+                // heights[row * 65 + col]: col → world X (inner/fast), row → world Z (outer/slow).
+                // spec: Docs/RE/formats/terrain.md §5.2 Axis orientation — PARSER-VERIFIED (CONFIRMED).
+                int vi = r * GridSize + c; // = row * 65 + col
+                float worldX = -(c * VertexSpacing); // col * 16.0, then negated for handedness flip
+                float worldY = cell.Heights[vi]; // direct world-space Y (no scale)
+                float worldZ = r * VertexSpacing; // row * 16.0
 
                 BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), worldX);
                 BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), worldY);
@@ -193,21 +199,13 @@ public static class TerrainGltfConverter
             }
         }
 
-        // Store min/max for JSON (passed out via a local we'll put in a closure-like pattern).
-        // We'll stash them in temp fields since C# doesn't have out-local-tuples easily here.
-        // Instead we write them to a pre-allocated slot at the start of a temporary buffer.
-        // Simpler: use ref fields via inline compute below in BuildJson. We pass them as a
-        // separate out parameter group by boxing into an array so we can share them.
-        // Actually, the cleanest is: compute min/max separately before calling BuildJson.
-        // We've already computed them here, so store in fields on a small struct.
-        // For simplicity: pass them as a small value tuple returned from a helper.
-        // --- we'll recompute them inside BuildJson since we have the cell data ---
+        // min/max are recomputed inside BuildJson from the same cell data.
 
         // ---- UVs ----
-        // Normalised UV: U = c / (GridSize-1), V = r / (GridSize-1).
-        // UV origin: glTF uses bottom-left; the terrain data doesn't have a separate UV flip spec.
-        // We map row 0 → V=0 (consistent with how heights are ordered).
-        // spec: Docs/RE/formats/terrain.md §5.1 — row-major, axis UNVERIFIED.
+        // Normalised UV: U = col / (GridSize-1), V = row / (GridSize-1).
+        // UV origin: glTF uses bottom-left; row 0 = cell Z minimum maps to V=0 (terrain south edge).
+        // spec: Docs/RE/formats/terrain.md §5.2 Axis orientation — PARSER-VERIFIED (CONFIRMED):
+        //   col → X (inner), row → Z (outer); same convention for all five blocks.
         cursor = uvOffset;
         for (int r = 0; r < GridSize; r++)
         {

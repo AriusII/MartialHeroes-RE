@@ -1,5 +1,16 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the single 36-byte read, the ResultOk@0x08
+#                 gate, the five contiguous u32 stat stores @0x0C..0x1C, and RemainingStatPoints@0x20
+#                 (six u32 stores total) are control-flow-confirmed); field VALUE semantics
+#                 (Handle vs SessionToken split @0x00/@0x04, the three bytes @0x09) are
+#                 capture/debugger-pending (no live capture this campaign).
+#   ida_reverified: 2026-06-16
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none (re-confirmed against the 4/29 handler read site; the 36-byte size + six-store
+#              fan-out exactly match this model).
 
 name: SmsgStatUpdate
 opcode: 0x4001d           # major 4 (Response), minor 29 -> (4 << 16) | 29
@@ -34,9 +45,14 @@ notes: |
     0x08 (1B) ResultOk      : the update is applied only when this byte == 1.
     0x09 (3B)               : read into the struct but not decoded.
     0x0c..0x1c (5 x 4B) Stat0..Stat4 : the five resulting absolute stats, echoing the five stats the
-                              2/29 request sent. HIGH CONFIDENCE (direct stores into the five stat
-                              slots).
-    0x20 (4B) RemainingStatPoints : remaining allocatable stat points.
+                              2/29 request sent. CONFIRMED (five contiguous u32 read @0x0C..0x1C, each
+                              stored into a distinct primary-stat global -- five separate stores).
+    0x20 (4B) RemainingStatPoints : remaining allocatable stat points. CONFIRMED (a sixth u32 store,
+                              into the "remaining points" global, immediately after the five stats).
+
+  STORE FAN-OUT (CONFIRMED corroboration): the handler performs SIX distinct u32 stores from six
+  contiguous payload dwords @0x0C..0x20 -- the five primary stats then the remaining-points value --
+  not five-plus-one packed. This matches the field model exactly.
 
   On success the client also plays a confirm sound and refreshes the stat UI.
 

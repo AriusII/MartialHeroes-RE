@@ -1,5 +1,15 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# CAPTURE-UNVERIFIED on-wire cadence; the 4-byte zero body + 20000 ms interval + compress-only path
+# are control-flow CONFIRMED from the NetHandler ctor template. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: the template header is 2/10000; body = ONE u32-append of 0 = 4 zero bytes)
+#   interval:            confirmed   (the arming routine stores 1000*20 = 20000 ms; "20" is the interval, NOT the body size)
+#   send path:           confirmed   (the template is compressed ONCE and cached -- compress-only, NOT re-encrypted)
+#   on-wire cadence:     capture/debugger-pending (whether the server expects/answers it, and the real period under load)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: none. NOTE: 2/10000 is ONE of TWO distinct keepalive C2S mechanisms -- the timer template here,
+#              and the on-demand 1-byte 2/112 toggle (packets/2-112_keepalive_toggle.yaml). Both are real.
 
 name: CmsgKeepalive
 opcode: 0x22710           # major 2 (GameAction), minor 10000 -> (2 << 16) | 10000  (10000 = 0x2710)
@@ -44,6 +54,15 @@ notes: |
 
   NEW C2S OPCODE: the major-2 family is otherwise C2S GameAction (user actions). 2/10000 is the
   timer-driven ping and is a new addition to the catalog.
+
+  TWO KEEPALIVE MECHANISMS (load-bearing distinction): the client has TWO separate keepalive-family
+  C2S messages, and they are NOT the same packet:
+    - 2/10000 (this spec)  : timer-driven, 4-byte zero body, compress-only; the cached template armed
+                             at ~20000 ms in the NetHandler ctor.
+    - 2/112                : an on-demand 1-byte enable/ping toggle gated by a master-enable flag (set
+                             on world-enter, cleared on leave) -- see packets/2-112_keepalive_toggle.yaml.
+  Which one is actually exchanged on the wire (and at what cadence) is capture/debugger-pending; both
+  builders are control-flow confirmed in the binary.
 
   UNKNOWNS to resolve with a capture:
     - whether the server actually expects / answers the ping, and whether ~20 s is the real

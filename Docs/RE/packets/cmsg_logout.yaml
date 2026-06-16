@@ -1,0 +1,40 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED; size 0 (header-only) + single emitter are static-HIGH. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: builder writes header words 1/0, makes NO body-append call)
+#   no-net-busy-latch:   confirmed   (unique among major-1: the +82364 latch store is absent)
+#   wire VALUE semantics: n/a        (header-only frame; no payload bytes carry meaning)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: none (cmsg_logout.yaml re-confirmed ACCURATE)
+
+name: CmsgLogout
+opcode: 0x10000           # major 1, minor 0 -> (1 << 16) | 0
+direction: C2S
+size: 0                   # header-only; no payload
+spec: packets/cmsg_logout.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Logout / quit-from-in-game request. A header-only frame with no payload (the only char-mgmt
+  builder that writes no body bytes and does NOT set the in-flight latch). Single emitter, on the
+  quit-from-in-game scene path.
+
+# Header-only: no payload fields. Sum of field widths (0) == size: 0.
+fields: []
+
+notes: |
+  Static analysis only; no capture. Frame = the 8-byte header alone (major=1, minor=0), no payload.
+  The builder allocates a packet, writes the major/minor header words, and sends -- it makes no
+  payload-write call and is the one char-mgmt builder that does not set the select-window net-busy
+  latch.
+
+    (no payload)
+
+  ROLE: logout / quit from in-game, reached from the quit-from-in-game scene path (single emitter).
+
+  RELATED: 1/6 create, 1/7 select, 1/9 enter, 1/13 rename, 1/14 slot-move (the other five major-1
+  char-management builders, all of which carry a fixed payload and set the net-busy latch).
+
+  UNBLOCKS: Client.Application Logout use-case (a header-only 1/0 send).

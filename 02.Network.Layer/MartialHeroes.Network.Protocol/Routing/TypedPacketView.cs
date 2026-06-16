@@ -48,6 +48,13 @@ public static class TypedPacketView
     /// without throwing. Returns <see langword="false"/> (and leaves <paramref name="view"/> at the
     /// default) when the payload is shorter than <paramref name="minSize"/>.
     /// </summary>
+    /// <remarks>
+    /// This copies <typeparamref name="T"/> by value into <paramref name="view"/> (the <c>out</c> result
+    /// outlives the span, so the copy is required). That copy is cheap for small structs but is a full
+    /// struct memcpy for large wire structs (e.g. 908-byte spawn records). On the zero-copy hot path for
+    /// large structs, prefer a prior length check followed by <see cref="As{T}"/>, which returns
+    /// <c>ref readonly</c> with no copy.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool TryAs<T>(ReadOnlySpan<byte> payload, int minSize, out T view)
         where T : struct

@@ -118,9 +118,9 @@ spec gap → escalate, never improvise.
    serialize the dependency: **`Abstractions` first** (the seam), then `Protocol` and
    `Transport.Pipelines` (which target that seam) and `Crypto` in parallel since their files are
    disjoint. Where there is no dependency and the files are disjoint, fan out in parallel up to the
-   concurrency cap. (There is no IDA here, so no sub-wave-of-3 / serialized-IDB constraint — that
-   limit applies only to the dirty-room orchestrators; your only cap is one-writer-per-path and a sane
-   parallel width.)
+   concurrency cap. (There is no IDA here; the dirty-room IDA lane now runs **unbridled** — parallel
+   reads + parallel IDB writes — anyway, and none of that applies to you; your only cap is
+   one-writer-per-path and a sane parallel width.)
 5. **Gate each wave.** After the engineers report, run the **build/test gate** via `dotnet-build-test`
    (`dotnet build MartialHeroes.slnx` + targeted `dotnet test`), then dispatch **perf-reviewer** and
    **csharp-reviewer** read-only over the touched files (zero-alloc discipline, layout correctness,

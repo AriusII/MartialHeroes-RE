@@ -1,5 +1,16 @@
 # Chat subsystem: input, log/scrollback, channels, overhead bubbles (clean-room spec)
 
+> **Verification banner.** verification: confirmed (control-flow-confirmed) for all client-side
+> routing, channel codes, message sizes, struct/field offsets, the (2:7) 19-byte header, and the
+> per-opcode text-length-prefix NUL convention; capture/debugger-pending for the absolute on-wire
+> byte-order/endianness of every length prefix, the (5:7) text-body framing, and the channel-code
+> VALUE meanings (which routing/colour a given code drives on the live wire).
+> ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida].
+> conflicts resolved this pass: (a) the (2:7) text-length prefix EXCLUDES the NUL (the earlier
+> "believed to include NUL" reading was wrong); (b) (3:21) is a genuine length-prefixed channel-chat
+> sender, not merely a "special announce" — the earlier "NOT a chat carrier" framing understated it;
+> (c) the NUL-inclusion of the length prefix is **per-opcode**, not a single global convention.
+
 Neutral, data-only model of the legacy *Martial Heroes* client's **chat subsystem**: the on-screen
 input panel, the scrollback log panel with per-channel filtering, the channel model that ties every
 typed line to an opcode and a colour, and the overhead "speech bubble" text that floats above an
@@ -22,33 +33,50 @@ explicitly as such and are relative to the named object's base.
 
 ## Status header (read first)
 
-> **Headline correction — everyday chat is ONE opcode, not the friend/relation cluster.**
-> The everyday channels — say, party, guild, shout, alliance, and whisper — are **all the same C2S
-> message `(2:7)`**, emitted by a **single chat sender**, distinguished only by the **first payload
-> byte = channel code** (`0`/`1`/`2`/`3`/`6`/`7`/`9`/`15`). This **supersedes** any earlier note that
-> read `(2:82)`, `(2:83)`, `(2:84)`, or `(3:21)` as carriers of general say-chat: those openers are
-> **friend-note, announce, and relation submits**, driven by a separate UI command/button dispatcher,
-> **not** the text-chat parser. The chat input editbox only ever emits `(2:7)` for normal typed text.
+> **Headline correction — the everyday say-box emits ONE opcode `(2:7)`, but `(3:21)` is a SECOND,
+> genuine channel-chat carrier driven by a separate dispatcher.**
+> The everyday channels typed into the chat **input box** — say, party, guild, shout, alliance, and
+> whisper — are **all the same C2S message `(2:7)`**, emitted by a **single chat sender**, distinguished
+> only by the **first payload byte = channel code** (`0`/`1`/`2`/`3`/`6`/`7`/`9`/`15`). The chat input
+> editbox only ever emits `(2:7)` for normal typed text — that part is control-flow-confirmed.
+> The openers `(2:82)`, `(2:83)`, `(2:84)`, and `(3:21)` are **not** emitted by the say-box; they are
+> emitted by a **separate command/button dispatcher** (`Section 4.3`). But `(3:21)` is **not** a mere
+> "special announce" — it is a **real length-prefixed channel-chat builder** (56-byte context header +
+> CP949 text, channel selector at header `+4`, `selector mod 10 == 5` = a broadcast/shout path that
+> bypasses the length gate). `(2:82)`/`(2:83)`/`(2:84)` are the contextual/variant chat builders on
+> that same dispatcher. So both readings reconcile: the *input box* → `(2:7)` only; the *chat-command
+> dispatcher* → `(2:82)`/`(2:83)`/`(2:84)`/`(3:21)`. See `Docs/RE/specs/social.md` Sections 2.1 and 4.
 
-> **Capture-unverified, prominently.** No live network capture was available during this analysis.
-> Every claim about *which opcode carries chat* and *how the channel code selects routing/colour* is
-> a hard static fact (read from the client's input parser, sender installer, and log-append sink).
-> But the **byte framing of the text body** — both the C2S tail and the S2C `(5:7)` body — is **not**
-> pinned statically and must be treated as a hypothesis until a capture confirms it.
+> **NUL convention is per-opcode (control-flow-confirmed).** The `u32` text-length prefix is computed
+> differently per sender: `(2:7)` uses the string length and **EXCLUDES** the terminating NUL;
+> `(3:21)` and `(2:83)` use length-plus-one and **INCLUDE** the NUL. This supersedes the earlier
+> uniform "believed to include NUL" hypothesis. The prefix arithmetic is a hard static fact in each
+> builder; only the absolute on-wire byte-order/endianness remains capture-pending.
+
+> **What still needs a live capture.** No live network capture was available during this analysis.
+> Every claim about *which opcode carries chat*, *how the channel code selects routing/colour*, the
+> message sizes, the struct/field offsets, and the per-opcode NUL arithmetic are hard static facts
+> (read from the client's input parser, sender builders, and log-append sink). What is **not** pinned
+> and stays capture/debugger-pending: the absolute byte-order/endianness of each length prefix, the
+> framing of the S2C `(5:7)` text body past its 36-byte header, and the on-wire VALUE meanings of the
+> channel codes (which routing a given code actually drives server-side).
 
 | Area | Grade | Confidence note |
 |---|---|---|
-| Three-class decomposition (input / output-log / overhead-bubble) | CODE-CONFIRMED | Read from class layout + draw order |
-| Everyday channels all ride `(2:7)`, first byte = channel code | CODE-CONFIRMED · CAPTURE-UNVERIFIED | From the input parser's sender calls |
-| Channel code → opcode / log colour / bubble slot table | CODE-CONFIRMED · CAPTURE-UNVERIFIED | From parser branch constants |
-| `(2:82)`/`(2:83)`/`(2:84)`/`(3:21)` are NOT say-chat | CODE-CONFIRMED | Reclassified by their UI callers |
-| Log = 1000-line ring, 36-byte records, 12 visible lines | CODE-CONFIRMED | Buffer sizes + render loop bound |
-| Per-channel filter checkboxes and colour table | CODE-CONFIRMED | Read from BuildScene + render filter |
-| Overhead-bubble fields living ON the Actor struct, 5000 ms life | CODE-CONFIRMED | Field-block offsets + expiry stamp |
-| C2S `(2:7)` text-tail framing (length prefix / NUL inclusion) | PLAUSIBLE · CAPTURE-UNVERIFIED | Inferred from sender read order |
-| S2C `(5:7)` body framing past the 36-byte header | PLAUSIBLE · CAPTURE-UNVERIFIED | Only the header is firm |
-| `channel == 11` special log-insert path | PLAUSIBLE | Purpose not recovered |
-| `channel > 100` floating-notice routing | CODE-CONFIRMED (route) · PLAUSIBLE (purpose) | A separate text system, not the log |
+| Three-class decomposition (input / output-log / overhead-bubble) | CONFIRMED | Read from class layout + draw order |
+| Everyday say-box channels all ride `(2:7)`, first byte = channel code | CONFIRMED | From the input parser's single-sender calls |
+| Channel code → opcode / log colour / bubble slot table | CONFIRMED (routing) · CAPTURE-PENDING (wire VALUE meaning) | From parser branch constants |
+| `(2:82)`/`(2:83)`/`(2:84)`/`(3:21)` are NOT emitted by the say-box (separate dispatcher) | CONFIRMED | The chat-command dispatcher emits them, not the input parser |
+| `(3:21)` is a genuine length-prefixed channel-chat carrier (56-byte hdr, selector `+4`) | CONFIRMED | Real chat builder; `mod 10 == 5` bypasses the gate |
+| `(2:7)` text-length prefix EXCLUDES the NUL; `(3:21)`/`(2:83)` INCLUDE it (per-opcode) | CONFIRMED | The `+1` is literally present/absent per builder |
+| `(2:84)` is header-only (no text tail) and 30-second rate-limited | CONFIRMED | No text appender in the builder; 30000 ms cooldown gate |
+| Log = 1000-line ring, 36-byte records, 12 visible lines | CONFIRMED | Buffer sizes + render loop bound |
+| Per-channel filter checkboxes and colour table | CONFIRMED | Read from BuildScene + render filter |
+| Overhead-bubble fields living ON the Actor struct, 5000 ms life | CONFIRMED | Field-block offsets + expiry stamp |
+| Absolute on-wire byte-order of each length prefix | CAPTURE-PENDING | Static control flow firm; live confirmation not done |
+| S2C `(5:7)` text body framing past the 36-byte header | CONFIRMED (header) · CAPTURE-PENDING (body byte-order) | Header + length-prefixed field reader firm |
+| `channel == 11` special log-insert path | STATIC-HYPOTHESIS | Distinct insertion routine; purpose not recovered |
+| `channel > 100` floating-notice routing | CONFIRMED (route) · STATIC-HYPOTHESIS (purpose) | A separate text system, not the log |
 
 All chat text is **CP949 / EUC-KR** encoded (no BOM), and is modelled as fixed/length-prefixed byte
 blobs on the wire and as CP949 byte runs in memory — never as managed strings. Word-wrap and caret
@@ -100,6 +128,9 @@ handler by other editbox panels; the chat editbox is its primary caller.)
    - `/msgchk <int>` — a server message-check request by id.
    - `/help` (and a bare `/`) — help text.
    - `/show 3dgage`, `/hide 3dgage` — toggle a debug/gauge overlay.
+   - **GM-gated debug commands** — `/item`, `/killdrop`, `/sysctl`, `/sysicon` are handled by a
+     dedicated system-slash-command handler, **gated on the GM flag** (an in-client GM-mode byte);
+     they are not wire chat. (re-verified this pass; CONFIRMED)
    - Chat-macro / shortcut expansion — per-character slash macros keyed by a config entry of the
      form `"<name>_CHATSHORTCUT"`. The macro table grammar is enumerated but not fully decoded
      (Open Question 5).
@@ -151,47 +182,92 @@ Notes:
 - The "world height ×" multipliers observed are `{7, 8, 9, 10, 12}`; the table above lists the value
   per channel. Mob/NPC say-bubbles do not use a flat multiplier — they anchor to the visual model's
   bounding-box top instead (Section 7).
+- **Channel-tag literal prefixes (CONFIRMED).** For the non-say channels the parser **prepends a
+  literal channel-key string** to the line text before sending: `"misia"` (event ch 6),
+  `"specialmisia"` (special ch 7), `"guild"` (ch 3), `"alliance"` (ch 15), and `"party"` (ch 2). A
+  re-implementation that builds the `(2:7)` text tail must reproduce these prefixes for those channels.
+- **Channel-code VALUE meanings are capture-pending.** The routing (which code drives which sender
+  call, log colour, and bubble slot) is control-flow-confirmed; what a given code means on the live
+  wire server-side — and whether the proposed channel labels (event "misia" vs special, alliance vs
+  guild) are the server's own naming — needs a capture to confirm.
 
 ---
 
-## 4. Send path — the unified chat sender `(2:7)`
+## 4. Send path — the say-box sender `(2:7)` and the chat-command dispatcher
 
-### 4.1 One sender for all everyday channels (CODE-CONFIRMED · CAPTURE-UNVERIFIED)
+### 4.1 One say-box sender for all everyday channels (CONFIRMED)
 
-All everyday chat — say, shout, party, guild, alliance, event, special, and whisper — is sent through
-**one chat sender** as opcode **`(2:7)`**. The input parser selects the network target/handler for
-the channel and then calls this sender; the **channel code is written as the first byte of the
-payload**. There is no separate "say" opcode versus "party" opcode at the C2S layer — only the
-channel byte differs.
+All everyday chat typed into the **input box** — say, shout, party, guild, alliance, event, special,
+and whisper — is sent through **one chat sender** as opcode **`(2:7)`**. The input parser selects the
+network target/handler for the channel and then calls this sender; the **channel code is written as
+the first byte of the payload**. There is no separate "say" opcode versus "party" opcode at the C2S
+layer for typed chat — only the channel byte differs. The sender sets `major = 2`, `minor = 7` and
+writes the channel argument at payload `+0`.
 
-This is the **key correction** to earlier recon. The openers `(2:82)`, `(2:83)`, `(2:84)`, and
-`(3:21)` are **not** general say-chat:
+The openers `(2:82)`, `(2:83)`, `(2:84)`, and `(3:21)` are **not** emitted by the say-box; they are
+emitted by a **separate chat-command/button dispatcher** (Section 4.3). Their roles, re-derived this
+pass, are:
 
-- `(2:83)` is a **friend-note** submit (a name + contents form).
-- `(3:21)` is a **special announce / channel-broadcast** path.
-- `(2:82)` and `(2:84)` are **relation** submits.
+- `(3:21)` is a **genuine channel-chat sender** — 56-byte context header + a length-prefixed CP949
+  text tail, with a channel/scope selector at header `+4`. This is NOT a mere "special announce"; the
+  earlier framing understated it (see the headline correction above and `social.md` Section 4).
+- `(2:83)` is the **contextual chat** builder (24-byte header + length-prefixed text, gated
+  `0 < len < 200`).
+- `(2:82)` is a **28-byte context-header** chat variant (no text in the builder itself; any text is
+  appended by the caller).
+- `(2:84)` is a **header-only**, **30-second rate-limited** chat variant (19-byte header, no text
+  tail in the builder).
 
-These are driven by a separate **UI command/button dispatcher** (a UI action-id switch), not by the
-chat input parser. They are catalogued under the social subsystem; see `Docs/RE/specs/social.md`
-Sections 2.1 and 4. A re-implementation must route everyday typed chat through `(2:7)` and must not
-assume `(2:83)`/`(3:21)` carry say-chat.
+These are catalogued under the social subsystem; see `Docs/RE/specs/social.md` Sections 2.1 and 4. A
+re-implementation must route everyday typed chat through `(2:7)`, and must route the dispatcher-driven
+channel/contextual chat through `(3:21)`/`(2:83)`/`(2:82)`/`(2:84)` respectively — not assume the
+say-box carries them.
 
-> **Naming note for the catalog.** Because `(2:7)` is now understood to carry **all** everyday chat
-> channels (not only named whispers), the spec-author recommends renaming the catalog entry for
+> **Naming note for the catalog.** Because `(2:7)` is now understood to carry **all** everyday say-box
+> chat channels (not only named whispers), the spec-author recommends renaming the catalog entry for
 > `(2:7)` from `CmsgWhisper` to **`CmsgChat`** (with whisper as channel 9), and folding the channel
 > enumeration below into `Docs/RE/packets/2-7_whisper.yaml` and `opcodes.md`. This is a proposal for
 > the orchestrator-owned `names.yaml` / `opcodes.md`; confirm before committing the rename.
 
-### 4.2 Payload framing (PLAUSIBLE · CAPTURE-UNVERIFIED)
+### 4.2 `(2:7)` payload framing (CONFIRMED header/sizes · CAPTURE-PENDING wire byte-order)
 
-The `(2:7)` payload is a **fixed header followed by a length-prefixed text tail**. The header is
-**19 bytes** payload-relative; the first byte is the **channel code**, a flag byte follows, then a
-fixed **16-byte target-name buffer** (used by whisper; NUL-padded), and a trailing header byte. After
-the header comes a `u32` text-length prefix and that many CP949 bytes. The length prefix is believed
-to **include the terminating NUL** (consistent with the other C2S chat senders), and the body is
-copied with a hard cap (**119** for whisper). The exact off-by-one of the NUL inclusion and the
-meaning of the flag/trailing header bytes are **capture-blocked**. See
+The `(2:7)` payload is a **fixed 19-byte header followed by a length-prefixed text tail**. The header,
+payload-relative, is: the **channel code** at `+0`, a **flag byte** at `+1` (the second UI argument),
+a fixed **16-byte target-name buffer** at `+2` (used by whisper; the name is `strncpy`-copied capped
+at 16 bytes into a NUL-cleared 17-byte field), and a **trailing header byte** at `+18` (written zero)
+that completes the 19-byte header. After the header comes a `u32` text-length prefix and that many
+CP949 bytes; the body is copied with a hard cap of **119** characters (whisper).
+
+> **Length-prefix convention (CONFIRMED, per-opcode).** The `(2:7)` text-length prefix is the **string
+> length and EXCLUDES the terminating NUL** (the builder appends the body with the length-prefixed
+> appender using the plain string length, with no `+1`). This is the **corrected** reading — the
+> earlier "believed to include the NUL" hypothesis was wrong for `(2:7)`. By contrast `(3:21)` and
+> `(2:83)` use length-plus-one and DO include the NUL (Section 4.3). The arithmetic is control-flow
+> firm; only the absolute on-wire byte-order/endianness of the prefix is capture-pending.
+
+The exact meaning of the flag byte and the trailing header byte are still capture-pending. See
 `Docs/RE/packets/2-7_whisper.yaml` for the byte-by-byte header table.
+
+### 4.3 The chat-command dispatcher — `(2:82)` / `(2:83)` / `(2:84)` / `(3:21)` (CONFIRMED)
+
+A **separate command/button dispatcher** (a UI action-id path, distinct from the say-box input
+parser) is the single point that emits the four dispatcher chat openers. It fills a per-message
+context header before the builder runs, then (for the text-bearing ones) appends a length-prefixed
+CP949 body. The header sizes and gates, re-derived this pass:
+
+| Opcode | Header size | Text tail | Length-prefix NUL | Gate observed |
+|---|---|---|---|---|
+| `(3:21)` channel chat   | 56 bytes | length-prefixed | **INCLUDES NUL** (`strlen + 1`) | selector at header `+4`; when `selector mod 10 == 5` the empty/`< 200` length gate is bypassed (a broadcast/shout path), otherwise text must be `0 < len < 200` |
+| `(2:83)` contextual chat | 24 bytes | length-prefixed | **INCLUDES NUL** (`strlen + 1`) | text length gated `0 < len < 200` |
+| `(2:82)` context variant | 28 bytes | none in builder (caller-appended) | — | none in the builder |
+| `(2:84)` variant         | 19 bytes | **none** (header-only) | — | **30000 ms (30 s) client-side rate limit** before another `(2:84)` may send |
+
+`(2:84)` is therefore **not** a text-bearing message in its builder — the social spec's earlier
+"19 + text" entry is corrected to "19-byte header, no text tail, 30 s cooldown". Its purpose
+(plausibly an emote/macro broadcast trigger) is capture-pending. See `Docs/RE/specs/social.md`
+Section 4 for the per-message context-header field breakdowns and the `(3:21)` channel selector. A
+separate **2-byte `(2:21)`** sender also exists (easy to confuse with `(3:21)`); its purpose is
+unrecovered (a small toggle/ack — static-hypothesis) and it is **not** part of the chat-text family.
 
 ---
 
@@ -248,19 +324,21 @@ Record stride is **36 bytes** (`0x24`). The panel zero-initialises **1000** such
 time in **two parallel arrays** — the raw lines and their word-wrapped form — so the ring length is
 **1000 lines**. A line counter (capped at 1000) and a ring start index track the live window.
 
-### 6.3 Append sink (CODE-CONFIRMED · route) / (PLAUSIBLE · special paths)
+### 6.3 Append sink (CONFIRMED · route) / (STATIC-HYPOTHESIS · special-path purpose)
 
 The **log-append sink** takes `(text, channel, colour)` and is the single entry point for both local
 echo and inbound chat. Its routing on the channel value:
 
 - **`channel < 100`** → append to the chat log: bump the line counter (capped at 1000), build a line
-  record, and insert it into the ring.
+  record, and insert it into the ring. (`channel == 11` takes a distinct insertion routine within
+  this band — see below.)
 - **`channel == 11`** → a **distinct insertion path** (purpose not recovered — possibly a
   system/important or "pinned" style line; Open Question 3).
 - **`channel > 100 && channel != 110`** → **route to a separate floating "system / notice" text
   system**, *not* the chat log. This is its own on-screen scrolling-notice subsystem and is out of
   scope for the chat log.
-- **`channel == 110`** → dropped.
+- **`channel == 100` and `channel == 110`** → **both dropped** (re-verified this pass: `100` is also
+  dropped, not only `110`).
 
 ### 6.4 Render — 12 visible lines, filters, CP949 word-wrap (CODE-CONFIRMED)
 
@@ -307,13 +385,17 @@ handler, Section 8) display above the correct head with no extra plumbing.
 All bubble slots are CP949 strings (small-string-optimised); the lifetime is a separate expiry
 timestamp dword. Offsets below are **relative to the Actor struct base**:
 
+Offsets re-pinned to build 263bd994. The `len @` column is the small-string-optimised slot base
+(the inline-buffer / length word the bubble stamper writes through); `text @` is where the readable
+CP949 run begins.
+
 | Slot (channel family) | text @ | len @ | cap @ | expiry @ | flag @ | Colour (ARGB) | World height × |
 |---|---|---|---|---|---|---|---|
 | say / normal      | `+1564` | `+1560` | `+1584` | `+1588` | — | PC `0xFFFFFF00`, mob bbox-based | scale × 10 (PC) |
 | party             | `+1592` | `+1612` | `+1616` | `+1620` | — | `0xFF00FFFF` | scale × 12 |
 | shout-area        | `+1628` | `+1644` | `+1648` | (shared) | — | `0xFFFF0055` | scale × 7 |
-| guild / alliance  | `+1696` | `+1712` | `+1716` | `+1720` | `+1724` | guild `0xFF365C66` / alliance `0xFF82C4FF` | scale × 9 |
-| special event     | `+1732` | `+1748` | `+1752` | `+1756` | — | `0xFFFFFF00` | scale × 9 |
+| guild / alliance  | `+1692` | `+1712` | `+1716` | `+1720` | `+1724` | guild `0xFF365C66` / alliance `0xFF82C4FF` | scale × 9 |
+| special event     | `+1728` | `+1748` | `+1752` | `+1756` | — | `0xFFFFFF00` | scale × 9 |
 
 Supporting actor fields the bubble renderer reads:
 
@@ -356,13 +438,16 @@ per-channel colour.
 
 ## 8. Receive path — the `(5:7)` chat broadcast handler
 
-### 8.1 Routing (CODE-CONFIRMED · structure) / (PLAUSIBLE · body)
+### 8.1 Routing (CONFIRMED · structure) / (CAPTURE-PENDING · body byte-order)
 
-Inbound chat arrives as **`(5:7)` `SmsgChatBroadcast`**. The handler reads a **36-byte fixed header**,
-then a **variable text body**, and:
+Inbound chat arrives as **`(5:7)` `SmsgChatBroadcast`**. The handler reads a **36-byte fixed header**
+(via the standard length-prefixed field reader), then a **variable text body**, and:
 
+- **plays a chat-receive sound effect** — string-table sound id **862030103** at handler entry
+  (re-verified this pass);
 - **appends the line to the same 1000-line log ring** via the shared log-append sink (Section 6.3),
-  using the per-channel colour — so remote chat lands in the scrollback exactly like local echo;
+  using the per-channel colour — so remote chat lands in the scrollback exactly like local echo (the
+  say branch formats the line with message-template id **17003**);
 - **resolves the speaker actor** by a `(sort, id)` pair (gated on the local player existing); and
 - **writes the speaker actor's overhead-bubble slot** (same Actor field block as Section 7), stamping
   the **5000 ms** expiry relative to the local clock — so remote players' chat floats above their
@@ -370,23 +455,25 @@ then a **variable text body**, and:
 - **routes whisper** (channel `6` / `7` on the inbound side) through a dedicated whisper-display path
   (the inbound whisper / reply-target wiring was not decompiled in depth — Open Question 7).
 
-### 8.2 Header layout (CODE-CONFIRMED · header) / (CAPTURE-UNVERIFIED · body)
+### 8.2 Header layout (CONFIRMED · header size + key offsets) / (CAPTURE-PENDING · body byte-order)
 
 The 36-byte header is, payload-relative:
 
 | Offset | Size | Field | Meaning |
 |---|---|---|---|
-| `+0x00` | 1  | sender sort | actor-category discriminator |
-| `+0x04` | 4  | sender id   | sender actor id |
-| `+0x08` | 4  | context id  | target / room / whisper-peer id |
-| `+0x0D` | 1  | sub-command | chat verb / sub-command |
-| `+0x0E` | 1  | channel     | channel code (`6` / `7` ⇒ whisper) |
-| `+0x10` | 20 | sender name | sender display name (fixed buffer, NUL-terminated) |
+| `+0x00` | 1  | sender sort | actor-category discriminator (CONFIRMED) |
+| `+0x04` | 4  | sender id   | sender actor id (STATIC-HYPOTHESIS — exact span not isolated this pass) |
+| `+0x08` | 4  | context id  | target / room / whisper-peer id (CONFIRMED — consumed by the whisper-peer/context path) |
+| `+0x0D` | 1  | sub-command | chat verb / sub-command — drives a `0`/`1`/`2` branch (CONFIRMED) |
+| `+0x0E` | 1  | channel     | channel code; `6` / `7` ⇒ whisper route, then the channel-dispatch switch (CONFIRMED) |
+| `+0x10` | 20 | sender name | sender display name, fixed buffer NUL-terminated (`+0x10..+0x24`; STATIC-HYPOTHESIS — header size firm, exact name span inferred) |
 
-The **text body** that follows is **variable** and its framing is **not** pinned statically
-(length-prefixed vs NUL-terminated vs "rest of frame"). Reasonable default hypothesis until a capture
-lands: `body_length = frame.size − 8 (frame header) − 36 (chat header)`, then NUL-trimmed. See
-`Docs/RE/packets/5-7_chat_broadcast.yaml`. **Capture required.**
+The **text body** that follows is read by the same length-prefixed field reader into a 120/127-byte
+buffer and then `strlen`-measured — so the body IS length-prefixed in the reader's view, but its
+**absolute on-wire byte-order/framing is not pinned statically** (length-prefixed vs NUL-terminated vs
+"rest of frame"). Reasonable default hypothesis until a capture lands:
+`body_length = frame.size − 8 (frame header) − 36 (chat header)`, then NUL-trimmed. See
+`Docs/RE/packets/5-7_chat_broadcast.yaml`. **Capture-pending.**
 
 > **Channel routing on the S2C side.** The same `channel > 100` rule from the append sink applies:
 > a channel above 100 routes to the **separate floating notice-text system**, not the chat log
@@ -396,23 +483,29 @@ lands: `body_length = frame.size − 8 (frame header) − 36 (chat header)`, the
 
 ## 9. Open questions (capture- or trace-blocked)
 
-1. **`(5:7)` body framing** — length-prefixed vs NUL-terminated vs rest-of-frame. Only the 36-byte
-   header is firm. **Capture required.**
-2. **`(2:7)` on-the-wire confirmation** — high confidence that everyday typed chat is `(2:7)` (the
-   input parser emits only `(2:7)` for normal text), but a capture of "type in the say box" versus
-   "click friend-note" versus "GM announce" would confirm which opcode actually carries each, and
-   pin the off-by-one of the text-length prefix's NUL inclusion.
+1. **`(5:7)` body byte-order** — the body IS read by a length-prefixed field reader (the framing
+   shape is firm); the remaining unknown is the absolute on-wire byte-order/endianness of the
+   length prefix and body. Only this — not the framing model — is **capture-pending**.
+2. **On-wire prefix byte-order, not opcode carriage.** The opcode carriage is now resolved
+   statically: the say-box emits only `(2:7)`; the chat-command dispatcher emits `(2:82)`/`(2:83)`/
+   `(2:84)`/`(3:21)`; and the NUL convention is per-opcode (`(2:7)` excludes, `(3:21)`/`(2:83)`
+   include). What a capture would still pin is the absolute byte-order/endianness of each length
+   prefix — a wire-VALUE detail, not a control-flow question.
 3. **`channel == 11` special log-insert path** — distinct insertion routine; purpose (system /
    important / pinned line?) not recovered.
 4. **`channel > 100` floating-notice system** — a separate on-screen scrolling/notice text subsystem,
    not the chat log; deserves its own lane.
 5. **Chat-macro `"<name>_CHATSHORTCUT"` table and the `/option` / `/msgchk` command grammar** —
-   enumerated but not fully decoded; a "chat commands" sub-spec could exhaust them.
+   enumerated but not fully decoded; a "chat commands" sub-spec could exhaust them. (The GM-gated
+   `/item` / `/killdrop` / `/sysctl` / `/sysicon` commands are now identified — Section 2.2.)
 6. **Max-chars-per-wrapped-line field** — read by the renderer but its source value (derived from
    `CHAT_WINDOW_SIZE` / `CHAT_WINDOW_FONT_SIZE`?) was not traced. The 12-line visible window and the
    1000-line ring are firm.
 7. **Inbound whisper routing** (channel `6` / `7` in the `(5:7)` handler) — the whisper-display /
    reply-target wiring was not decompiled in depth.
+8. **`(2:84)` and `(2:21)` purpose** — `(2:84)` is a confirmed header-only, 30 s rate-limited message
+   (plausibly an emote/macro broadcast trigger); `(2:21)` is a confirmed 2-byte sender easy to confuse
+   with `(3:21)`. Both purposes are **capture-pending**.
 
 ---
 
@@ -420,8 +513,9 @@ lands: `body_length = frame.size − 8 (frame header) − 36 (chat header)`, the
 
 - `Docs/RE/packets/2-7_whisper.yaml` — C2S `(2:7)` header byte layout (proposed rename to `CmsgChat`).
 - `Docs/RE/packets/5-7_chat_broadcast.yaml` — S2C `(5:7)` `SmsgChatBroadcast` header.
-- `Docs/RE/specs/social.md` — the wider social wire protocol; reclassifies `(2:82)` / `(2:83)` /
-  `(2:84)` / `(3:21)` as friend-note / announce / relation submits (Sections 2.1, 4).
+- `Docs/RE/specs/social.md` — the wider social wire protocol; catalogues the dispatcher-driven chat
+  family `(2:82)` (28-byte context variant) / `(2:83)` (24-byte contextual chat) / `(2:84)` (19-byte
+  header-only, 30 s rate-limited) / `(3:21)` (56-byte channel chat, selector `+4`) (Sections 2.1, 4).
 - `Docs/RE/opcodes.md` — authoritative opcode catalogue and frame model.
 
 > **Implementation guidance (presentation).** Chat window = `448 × 324`, **12** visible lines over a

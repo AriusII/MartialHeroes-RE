@@ -10,13 +10,17 @@ namespace MartialHeroes.Assets.Vfs;
 //   3. Close data.inf.
 //   4. Keep data/data.vfs open for seeks.
 //
-// Header layout (24 bytes, LE):
-//   +0   u32  unknown_0   — UNVERIFIED (possibly magic tag)
-//   +4   u32  unknown_4   — UNVERIFIED (possibly format version)
-//   +8   u32  unknown_8   — UNVERIFIED (possibly reserved / flags)
-//   +12  u32  entry_count — CONFIRMED: drives allocation and bulk-read size
-//   +16  u32  unknown_16  — UNVERIFIED
-//   +20  u32  unknown_20  — UNVERIFIED
+// Header layout (24 bytes, LE) — sample-verified (spec: Docs/RE/formats/pak.md §Header):
+//   In struct terms: char magic[8] = "VFS001\0\0"; u32 field_08; u32 entry_count; u64 total_blob_size;
+//   +0   char[8] magic           — null-padded ASCII "VFS001". Read-and-discarded; the client asserts
+//                                   no magic (bug-compatible: tolerate any value here). Sample-verified.
+//   +8   u32     field_08        — small scalar (=39 in the reference archive); role unknown, NOT the
+//                                   entry count. Read-and-discarded. Sample-verified value.
+//   +12  u32     entry_count     — the ONLY consumed field: drives the 144 × entry_count allocation and
+//                                   the TOC bulk-read size. Sample-verified.
+//   +16  u32     total_blob_size — low dword of a u64 (with +20). = exact data/data.vfs byte length in
+//   +20  u32     (hi dword)        the reference archive; read-and-discarded (integrity cross-check
+//                                   only). Sample-verified.
 
 /// <summary>
 /// Parses <c>data.inf</c> and exposes a sorted, binary-searchable directory of
@@ -51,26 +55,33 @@ internal sealed class VfsDirectory
         Span<byte> header = stackalloc byte[HeaderSize];
         ReadExact(stream, header);
 
-        // unknown_0, unknown_4, unknown_8: UNVERIFIED — read but not consumed.
-        // unknown_16, unknown_20:          UNVERIFIED — read but not consumed.
-        // We do NOT validate or assert on these fields; they are opaque per the spec.
+        // magic @ +0 (char[8] "VFS001"), field_08 @ +8, total_blob_size @ +16/+20: all read as part of
+        // the 24-byte bulk read but NOT consumed. We do NOT validate or assert on them — the original
+        // client asserts none (not even the magic), so a bug-compatible reader tolerates any value here.
+        // spec: Docs/RE/formats/pak.md §Header (24 bytes). Sample-verified read-and-discarded.
 
-        // entry_count @ +12, u32 LE. CONFIRMED.
-        uint entryCount = BinaryPrimitives.ReadUInt32LittleEndian(header[EntryCountOffset..]);
+        // entry_count @ +12. Read as a SIGNED i32 to mirror the original mount routine, which treats
+        // the count as a signed integer and guards the search loops with a "count <= 0" check. A
+        // non-positive count therefore yields an empty directory (rather than the previous behaviour
+        // where a high-bit-set u32 would overflow the checked multiply below).
+        // spec: Docs/RE/formats/pak.md §Header — entry_count @ +12. Sample-verified.
+        // spec: Docs/RE/specs/vfs_overview.md §Mount — "treated as a signed i32 ... count <= 0 guard".
+        int entryCount = BinaryPrimitives.ReadInt32LittleEndian(header[EntryCountOffset..]);
 
-        if (entryCount == 0)
+        if (entryCount <= 0)
             return new VfsDirectory([]);
 
         // --- 2. Allocate and bulk-read the TOC ---
         // spec: Docs/RE/formats/pak.md — "Allocate 144 × entry_count bytes" then
         // "Read 144 × entry_count bytes from data.inf starting at offset 24". CONFIRMED.
-        int tocByteCount = checked((int)entryCount * VfsEntry.RecordSize);
+        // The multiply is overflow-checked (mirrors the original's overflow-checked allocation).
+        int tocByteCount = checked(entryCount * VfsEntry.RecordSize);
         byte[] toc = new byte[tocByteCount];
         ReadExact(stream, toc);
 
         // --- 3. Parse each 144-byte record ---
         VfsEntry[] entries = new VfsEntry[entryCount];
-        for (int i = 0; i < (int)entryCount; i++)
+        for (int i = 0; i < entryCount; i++)
         {
             int recordStart = i * VfsEntry.RecordSize;
             entries[i] = VfsEntry.Parse(toc.AsSpan(recordStart, VfsEntry.RecordSize));

@@ -74,6 +74,161 @@ public sealed class EffectScaleRecord
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  vehicle.xdb — Vehicle / mount catalogue (stride: 52 bytes)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// One record from <c>data/script/vehicle.xdb</c>.  Stride: 52 bytes.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/xdb_tables.md §4 — vehicle.xdb: stride 52 bytes, 58 records: CONFIRMED.
+/// No file header; record count = file_size / 52 (must be exact).
+/// </remarks>
+public sealed class VehicleXdbRecord
+{
+    /// <summary>
+    /// Vehicle id, 1-based sequential (1..58).
+    /// spec: Docs/RE/formats/xdb_tables.md §4 — vehicle_id u32LE @ +0: CONFIRMED.
+    /// </summary>
+    public required uint VehicleId { get; init; }
+
+    /// <summary>
+    /// Item id in <c>items.scr</c>; consecutive block starting at 3108.
+    /// spec: Docs/RE/formats/xdb_tables.md §4 — item_id u32LE @ +4: CONFIRMED.
+    /// </summary>
+    public required uint ItemId { get; init; }
+
+    /// <summary>
+    /// Unknown 8-byte run at record +8.  Identical across the head records.
+    /// UNVERIFIED — could be two u32 sub-fields with fixed values, a serialised handle,
+    /// or a debug artefact.
+    /// spec: Docs/RE/formats/xdb_tables.md §4 — unknown_8b u8[8] @ +8: UNVERIFIED.
+    /// </summary>
+    public required ReadOnlyMemory<byte> Unknown8b { get; init; }
+
+    /// <summary>
+    /// 36-byte region at record +16.  All-zero in the head records; likely multiple typed
+    /// fields that are zero for the base vehicle entries.
+    /// spec: Docs/RE/formats/xdb_tables.md §4 — zero_region u8[36] @ +16:
+    ///   CONFIRMED (value=0 in head); layout UNVERIFIED.
+    /// </summary>
+    public required ReadOnlyMemory<byte> ZeroRegion { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  creature_item.xdb — Creature attached-item table (stride: 48 bytes)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// One record from <c>data/script/creature_item.xdb</c>.  Stride: 48 bytes.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/xdb_tables.md §5 — creature_item.xdb: stride 48 bytes, 921 records: CONFIRMED.
+/// No file header; record count = file_size / 48 (must be exact).
+/// The six attachment floats (+8..+31) likely encode a 3D attachment transform; the axis mapping
+/// is UNVERIFIED — carried through as raw values without interpretation.
+/// spec: Docs/RE/formats/xdb_tables.md §5 Known unknowns: axis mapping UNVERIFIED.
+/// </remarks>
+public sealed class CreatureItemXdbRecord
+{
+    /// <summary>
+    /// Large u32 compound key, sequential-by-1.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — creature_key u32LE @ +0: CONFIRMED (pattern).
+    /// </summary>
+    public required uint CreatureKey { get; init; }
+
+    /// <summary>
+    /// Attached item id (e.g. 3001).
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — item_id u32LE @ +4: CONFIRMED.
+    /// </summary>
+    public required uint ItemId { get; init; }
+
+    /// <summary>
+    /// First attachment float; negative model-local offset.  Axis UNVERIFIED.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — attach_f0 f32LE @ +8: CONFIRMED (present); axis UNVERIFIED.
+    /// </summary>
+    public required float AttachF0 { get; init; }
+
+    /// <summary>
+    /// Second attachment float.  Axis UNVERIFIED.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — attach_f1 f32LE @ +12: CONFIRMED (present); axis UNVERIFIED.
+    /// </summary>
+    public required float AttachF1 { get; init; }
+
+    /// <summary>
+    /// Third attachment float.  Axis UNVERIFIED.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — attach_f2 f32LE @ +16: CONFIRMED (present); axis UNVERIFIED.
+    /// </summary>
+    public required float AttachF2 { get; init; }
+
+    /// <summary>
+    /// Fourth attachment float.  Axis UNVERIFIED.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — attach_f3 f32LE @ +20: CONFIRMED (present); axis UNVERIFIED.
+    /// </summary>
+    public required float AttachF3 { get; init; }
+
+    /// <summary>
+    /// Fifth attachment float.  Axis UNVERIFIED.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — attach_f4 f32LE @ +24: CONFIRMED (present); axis UNVERIFIED.
+    /// </summary>
+    public required float AttachF4 { get; init; }
+
+    /// <summary>
+    /// Sixth attachment float.  Axis UNVERIFIED.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — attach_f5 f32LE @ +28: CONFIRMED (present); axis UNVERIFIED.
+    /// </summary>
+    public required float AttachF5 { get; init; }
+
+    /// <summary>
+    /// Notably larger than the six attachment floats (head value 8.0); may be a scale or
+    /// collision radius.  Semantic UNVERIFIED; carried through as raw value.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — scale_or_radius f32LE @ +32:
+    ///   CONFIRMED (present); semantic UNVERIFIED.
+    /// </summary>
+    public required float ScaleOrRadius { get; init; }
+
+    /// <summary>
+    /// Zero in the head records.  Semantic UNVERIFIED.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — unknown_u1 u32LE @ +36:
+    ///   CONFIRMED (value=0 in head); UNVERIFIED.
+    /// </summary>
+    public required uint UnknownU1 { get; init; }
+
+    /// <summary>
+    /// Flag byte 0 at +40.  Zero in the head records.  Semantic UNVERIFIED.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — flag_0 u8 @ +40: UNVERIFIED.
+    /// </summary>
+    public required byte Flag0 { get; init; }
+
+    /// <summary>
+    /// Flag byte 1 at +41.  Value 1 in every head record.  Semantic UNVERIFIED.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — flag_1 u8 @ +41: UNVERIFIED.
+    /// </summary>
+    public required byte Flag1 { get; init; }
+
+    /// <summary>
+    /// Flag byte 2 at +42.  Alternates 0/1 across consecutive head records
+    /// (toggle — e.g. left/right or main/off-hand slot).  Semantic UNVERIFIED.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — flag_2 u8 @ +42: UNVERIFIED.
+    /// </summary>
+    public required byte Flag2 { get; init; }
+
+    /// <summary>
+    /// Flag byte 3 at +43.  Zero in the head records.  Semantic UNVERIFIED.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — flag_3 u8 @ +43: UNVERIFIED.
+    /// </summary>
+    public required byte Flag3 { get; init; }
+
+    /// <summary>
+    /// Value 100 (0x64) in every head record; likely a drop/attach probability in integer
+    /// percent.  Semantic UNVERIFIED; carried through as raw value.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — probability u32LE @ +44:
+    ///   CONFIRMED (value=100 in head); semantic UNVERIFIED.
+    /// </summary>
+    public required uint Probability { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  mobinfo.mi
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -289,36 +444,52 @@ public sealed class MapZoneRecord
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// One record from <c>data/mapNNN/regiontableNNN.bin</c>. Stride: 32 bytes (0x20).
+/// One record from <c>data/mapNNN/regiontableNNN.bin</c>.
+/// Stride: <b>48 bytes</b> (0x30). Fixed 32 records = 1,536 bytes total.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/misc_data.md §7.2 regiontableNNN.bin: SAMPLE-VERIFIED (stride and name field).
-/// No header; record count = file_size / 32. Known: 52 records per area (1 664 bytes).
-/// Coordinate fields: PLAUSIBLE (may contain garbage for some sub-types — validate before use).
+/// <para>
+/// Record layout (48 bytes):
+/// <code>
+///   +0x00  char[40]  zoneName   NUL-terminated CP949 zone display-name (minimap sub-zone caption)
+///   +0x28  u32 LE    zoneType   Zone-type enum {0=Safe, 1=OpenPvP, 2=Closed}
+///   +0x2C  u32 LE    _tail      No reader found; UNVERIFIED meaning
+/// </code>
+/// </para>
+/// <para>
+/// <b>Stride correction:</b> an earlier revision of this record used a 32-byte stride. That
+/// figure is REFUTED. The confirmed stride is <b>48 bytes</b>, which is the only value that
+/// reconciles 32 records to the 1,536-byte table block.
+/// spec: Docs/RE/formats/region_grid.md §regiontable — "stride 48 bytes — CONFIRMED (RE-AFFIRMED)".
+/// spec: Docs/RE/formats/region_grid.md §regiontable — "Stride is 48 not 32 (conflation note)".
+/// </para>
 /// </remarks>
 public sealed class RegionTableRecord
 {
     /// <summary>
-    /// World-space X of sub-zone label. PLAUSIBLE — validate within area bounding box before use.
-    /// spec: Docs/RE/formats/misc_data.md §7.2 — center_x f32 @ 0x00: PLAUSIBLE.
+    /// Index of this record in the table (0..31), equal to the region id.
+    /// spec: Docs/RE/formats/region_grid.md §regiontable — "indexed directly by region id (0..31)".
     /// </summary>
-    public required float CenterX { get; init; }
+    public required int RegionId { get; init; }
 
     /// <summary>
-    /// World-space Z of sub-zone label. PLAUSIBLE.
-    /// spec: Docs/RE/formats/misc_data.md §7.2 — center_z f32 @ 0x04: PLAUSIBLE.
+    /// NUL-terminated CP949 zone display-name string (minimap sub-zone caption).
+    /// Read from the 40-byte field starting at record offset +0x00.
+    /// spec: Docs/RE/formats/region_grid.md §regiontable — "zoneName char[40] @ +0x00": HIGH.
     /// </summary>
-    public required float CenterZ { get; init; }
+    public required string ZoneName { get; init; }
 
     /// <summary>
-    /// Unknown 8 bytes at 0x08. Zero in all observed records.
-    /// spec: Docs/RE/formats/misc_data.md §7.2 — unknown_0x08 u8[8] @ 0x08: UNKNOWN.
+    /// Zone-type enum value: 0 = Safe, 1 = OpenPvP, 2 = Closed.
+    /// Read from record offset +0x28 (= +40).
+    /// The only numeric field any region-gating path reads.
+    /// spec: Docs/RE/formats/region_grid.md §regiontable zoneType enum — CONFIRMED.
     /// </summary>
-    public required ReadOnlyMemory<byte> Unknown0x08 { get; init; }
+    public required uint ZoneType { get; init; }
 
     /// <summary>
-    /// CP949-encoded sub-zone landmark name, NUL-terminated within the 16-byte field.
-    /// spec: Docs/RE/formats/misc_data.md §7.2 — sub_zone_name char[16] CP949 @ 0x10: PLAUSIBLE.
+    /// Opaque trailing dword at record offset +0x2C (= +44). No reader found.
+    /// spec: Docs/RE/formats/region_grid.md §regiontable — "_tail u32 @ +0x2C: UNVERIFIED".
     /// </summary>
-    public required string SubZoneName { get; init; }
+    public required uint TailOpaque { get; init; }
 }

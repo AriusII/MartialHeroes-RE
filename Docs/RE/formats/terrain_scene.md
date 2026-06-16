@@ -15,6 +15,23 @@
 
 ---
 
+## Re-verification banner (2026-06-16, CAMPAIGN 10 / Block D)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | `sample-verified` for the `.map`+`.bud` scene model. This pass re-confirmed the **scene/routing** layer (BUILDING section → `.bud` loader; SOLID section → `.sod` loader; `.bud`↔`.sod` independence; the BUILDING `TEXTURES` pool and 1-based `tex_id`) two-witness. The `.bud` byte-internal tables (9-byte object header, 32-byte FVF-0x112 vertex, warn-and-continue 0xC00 cap) were **not** re-dumped this pass and hold at their committed (sample-verified) tier. |
+| `ida_reverified` | `2026-06-16` |
+| `ida_anchor`     | `263bd994` |
+| `evidence`       | `[static-ida, vfs-sample]` — `.map` parser dispatch (witness 1) + prior `.bud` sample verification (committed tier) |
+| `conflicts`      | None. RE-confirmed with no drift: the BUILDING section is reached only via the `.map` `BUILDING` block and loads `.bud`; the `BUILDING TEXTURES` pool registers in slot order (same discard-first-int / read-`intTexId` logic as `TERRAIN`), and `tex_id` is a 1-based index into it; `.bud` and `.sod` are independent blobs with no in-file cross-reference (SOLID → `.sod`). The geometry directives `WIDTH`/`HEIGHT`/`GRID`/`MAX_HEIGHTFILED`/`MIN_HEIGHTFILED`/`ORIGIN` are present on disk but **not consumed by the located runtime `.map` parser** (see `terrain.md §3.4`). |
+
+> **Building-mesh lane flag (deferred):** the `.bud` 32-byte vertex / 9-byte object header / 0xC00
+> warn-and-continue cap were carried forward at their committed tier this pass; a dedicated
+> building-mesh re-verification against the `.bud` loader and a multi-object sample is the place to
+> re-open those tables, not this terrain-core pass.
+
+---
+
 ## Status block
 
 | Attribute          | Value |
@@ -22,7 +39,7 @@
 | `status`           | `sample-verified` — `.bud` fields cross-checked against three real `.bud` files (195 bytes each, byte-identical content) and a 17-object `.bud` file (420,965 bytes; all objects parse to exact size), and against draw-call configuration recovered from the legacy client. |
 | `sample_verified`  | `true` — `.bud` header, object header, vertex format (position + unit normal + single UV pair), index format, and file-size formula all reproduce the sample data exactly. |
 | `binary_analysed`  | `doida.exe` (legacy 32-bit client build, x86 little-endian). |
-| `confidence`       | Per-field confidence is given in each table. `CONFIRMED` = corroborated by both parser read-sequence and real sample bytes (and, where noted, by the recovered draw-call vertex declaration / D3D FVF). `VERIFIED` = confirmed directly by observed sample bytes. `OBSERVED` = a single value seen in every sample but its full range/meaning is not established. `PARTIAL` = existence/size confirmed, semantics uncertain. `UNVERIFIED` = inferred from call-site context only. |
+| `confidence`       | Per-field confidence is given in each table. `CONFIRMED` = corroborated by both parser read-sequence and real sample bytes (and, where noted, by the recovered draw-call vertex declaration / D3D FVF). `CONFIRMED-variable` = the field is read and retained, its value is confirmed to vary across samples, but the consumer takes no branch on it (value confirmed; semantics open). `loader-resolved` = a behaviour the loader's read-sequence settles (e.g. how a guard reacts) even where a sample alone is silent. `VERIFIED` = confirmed directly by observed sample bytes. `OBSERVED` = a single value seen in every sample but its full range/meaning is not established. `PARTIAL` = existence/size confirmed, semantics uncertain. `UNVERIFIED` = inferred from call-site context only. |
 
 ### Per-field confidence summary (changes since the previous revision)
 
@@ -35,7 +52,8 @@
 | No per-vertex color | UNVERIFIED | **CONFIRMED absent** | D3DFVF_DIFFUSE (0x040) and D3DFVF_SPECULAR (0x080) are NOT set in FVF = 0x112. |
 | `tex_id` base | PARTIAL (assumed 1-based) | **CONFIRMED 1-based** | A runtime validation rejects `tex_id < 1` as an error and clamps the offending value to 1 (not 0); the smallest legal value is 1. |
 | Index winding order | not stated | **CONFIRMED counter-clockwise** | Per-triangle face normals computed under a CCW convention agree (positive dot product) with the stored per-vertex normals for all sampled triangles. |
-| `type_byte` enumeration | PARTIAL | **OBSERVED (value 0 only); meaning LOW confidence** | The byte is read from the file and retained in memory, but no read-site that branches on it was found in the building render path; the visible static-vs-sway behaviour is driven by a *separate* per-texture classification, not by this byte. |
+| `type_byte` value range | PARTIAL / OBSERVED (value 0 only) | **CONFIRMED-variable** (values {0, 1, 2}; consumer does not branch) | Two-witness review (loader read-sequence + black-box sampling) shows the byte takes values 0, 1 and 2 across the asset set. It is read and retained, but no read-site branches on it; the static-vs-sway behaviour is driven by a *separate* per-texture classification, not by this byte. Value is now confirmed-variable; its semantic role remains open. |
+| `vertex_count` cap behaviour | warn (unspecified action) | **loader-resolved: warn-and-continue on full count** | The cap guard is log-only and runs *after* the full-count allocation and read; the loader never throws, clamps, or truncates at the cap. A faithful parser must read all `vertex_count` vertices regardless of the cap (see §3.2.1, §9, §10). |
 | `light*.bin` files and building lightmaps | unaddressed | **CONFIRMED: light*.bin are NOT per-building lightmaps** | These files are per-map sky/directional light keyframe tables applied globally to the whole scene. No per-cell or per-building lightmap texture exists in the legacy asset set. |
 
 ---
@@ -142,9 +160,9 @@ Each record is variable-length and laid out as:
 
 | Offset within record | Size | Type | Field          | Notes / observed values | Confidence |
 |---------------------:|-----:|------|----------------|-------------------------|-----------|
-| `+0x00` | 1 | u8  | `type_byte`    | Object sub-class tag. Observed value: 0 in every sample. Read from the file and retained in memory, but no branch on it was found in the building render path; treat as opaque for now (see §5 and open questions). | OBSERVED |
+| `+0x00` | 1 | u8  | `type_byte`    | Object sub-class tag. Confirmed-variable: values 0, 1 and 2 occur across the asset set. The byte is read from the file and retained in memory, but no read-site branches on it in the building render path — the consumer takes no decision from its value (see §5 and open questions). Expose it as a raw `byte`. | CONFIRMED-variable |
 | `+0x01` | 4 | u32 | `tex_id`       | **1-based** index into the `BUILDING` `TEXTURES` pool declared in the cell's `.map`. Smallest legal value is 1. A value of 0, or a value greater than the pool size, is treated by the legacy client as an error and clamped to 1. Observed value: 1. | CONFIRMED |
-| `+0x05` | 4 | u32 | `vertex_count` | Number of vertices in this record's vertex array. The legacy loader warns (logs and continues) when this exceeds **3072 (0xC00)**. Observed values: 5 (small samples); up to 2017 (17-object sample). | CONFIRMED |
+| `+0x05` | 4 | u32 | `vertex_count` | Number of vertices in this record's vertex array. The legacy loader applies a **log-only, warn-and-continue** cap check at **3072 (0xC00)**: it allocates and reads the *full* `vertex_count` first, then merely logs a warning if the count exceeded the cap — it never throws, clamps, or truncates. A faithful parser must read all `vertex_count` vertices regardless of the cap (see §9 and §10). Observed values: 5 (small samples); up to 2017 (17-object sample). **VFS census (2026-06-16, two-witness over all 2 296 `.bud` files):** the file-size formula reproduces with zero residual on every file; **exactly 4 files breach the 3 072 cap** (maps 17/18/27/33 at cell `x10034z10038`, max `vertex_count = 3328`) — confirming the warn-and-continue path is exercised by real data and that a clamping parser would desync the stream on those 4 files. | CONFIRMED (cap behaviour: loader-resolved; census-verified) |
 
 #### 3.2.2 Vertex array
 
@@ -252,18 +270,22 @@ formula holds for multi-object files and that there is no inter-object padding.
 
 ---
 
-## 5. `type_byte` enumeration and the static-vs-animated distinction
+## 5. `type_byte` value range and the static-vs-animated distinction
 
 | Value | Meaning | Confidence |
 |------:|---------|-----------|
-| 0 | Only value observed (all samples). Default static building / prop. | OBSERVED |
-| 1–255 | Not seen in samples; meaning unknown. | UNVERIFIED |
+| 0 | Observed (most common). Default static building / prop. | CONFIRMED-variable |
+| 1 | Observed in the asset set. Meaning unknown; no consumer branch. | CONFIRMED-variable |
+| 2 | Observed in the asset set. Meaning unknown; no consumer branch. | CONFIRMED-variable |
+| 3–255 | Not seen in samples; meaning unknown. | UNVERIFIED |
 
-Important behavioural finding: the file's `type_byte` does **not** select the static-vs-sway
-render behaviour. That selection is driven at runtime by a **separate per-texture
-classification** computed from the `BUILDING` `TEXTURES` pool entry referenced by `tex_id`,
-not by this byte. In other words, whether an object is drawn as static geometry or animated
-with a wind-sway effect is keyed off the texture binding, not off `type_byte`.
+The byte is **confirmed-variable**: across the asset set it takes the values 0, 1 and 2. Even so,
+no consumer branches on it — the loader reads and retains the byte but takes no decision from its
+value. In particular, the file's `type_byte` does **not** select the static-vs-sway render
+behaviour. That selection is driven at runtime by a **separate per-texture classification**
+computed from the `BUILDING` `TEXTURES` pool entry referenced by `tex_id`, not by this byte. In
+other words, whether an object is drawn as static geometry or animated with a wind-sway effect is
+keyed off the texture binding, not off `type_byte`.
 
 Observed behaviour of that per-texture classification (provided for context only — it is
 runtime state, not a field in the `.bud` file):
@@ -280,11 +302,11 @@ The per-texture classification is controlled by the `kind` byte in `bgtexture.ls
 `formats/texture.md §bgtexture.lst`.
 
 Because no read-site that branches on `type_byte` was found in the building render path, its
-semantic role is **LOW confidence**. The leading hypotheses are: a render-sort / blend-mode tag
-(value 0 = opaque static), editor-time metadata not consumed at runtime, or a vestigial field
-superseded by the per-texture classification but retained for file compatibility. Implementors
-should expose `type_byte` as a raw `byte` (not a typed enum) until a non-zero value and a
-read-site are found.
+value is now confirmed to vary but its *semantic role* remains open. The leading hypotheses are:
+a render-sort / blend-mode tag, editor-time metadata not consumed at runtime, or a vestigial
+field superseded by the per-texture classification but retained for file compatibility.
+Implementors should expose `type_byte` as a raw `byte` (not a typed enum) and must not branch
+on it in the render path, mirroring the legacy consumer.
 
 ---
 
@@ -409,7 +431,10 @@ in the legacy asset set.
 
 1. Read `object_count` (u32) at `+0x00`. May be 0.
 2. For each object, read the 9-byte header: `type_byte` (u8), `tex_id` (u32), `vertex_count`
-   (u32). Optionally warn when `vertex_count > 3072`.
+   (u32). The `vertex_count` cap (3072 / 0xC00) is **warn-only**: read the full `vertex_count`
+   regardless — never throw, clamp, or truncate at the cap (4 real files breach it, max 3328; a
+   clamp/skip desyncs the stream on those files). Optionally emit a log warning to mirror the legacy
+   loader, then continue.
 3. Read `vertex_count` × 32-byte vertices. Each vertex is 8 × f32: position(3), normal(3),
    uv(2). Normals are unit-length (magnitude 1.0 ± 1e-3). UVs may be tiled world-scale
    (values outside [0,1] are normal) or atlas-normalized ([0,1]); both are valid and the same
@@ -418,7 +443,8 @@ in the legacy asset set.
    faces, 0-based, range `[0, vertex_count − 1]`.
 5. Validate `1 ≤ tex_id ≤ BUILDING-pool-size` (1-based). Decide whether to clamp-to-1
    (legacy behaviour) or reject.
-6. Expose `type_byte` as a raw `byte` until its enumeration is established.
+6. Expose `type_byte` as a raw `byte` (it varies over {0, 1, 2}); do not branch on it in the
+   render path — the legacy consumer does not.
 7. Cross-check total bytes consumed against the §4 formula; there is no trailing data and no
    inter-object padding.
 8. Sanity-check vertex positions against the cell world AABB derived from `(mapX, mapZ)`.
@@ -429,26 +455,31 @@ in the legacy asset set.
 
 ## 10. Open questions
 
-1. **`type_byte` full enumeration and read-site.** Only value 0 observed; no branch on the
-   byte found in the building render path. Other values may exist for other building types or
-   render/sort modes, or the byte may be editor metadata / vestigial. Needs a `.bud` with a
-   non-zero `type_byte` and/or a confirmed read-site.
+1. **`type_byte` semantics and read-site.** The byte is confirmed to vary over {0, 1, 2}, but no
+   branch on it was found in the building render path, so its meaning is unresolved. Other values
+   may exist for other building types or render/sort modes, or the byte may be editor metadata /
+   vestigial. Needs a confirmed read-site (or a documented use) to assign meaning. Its *value*
+   being variable is settled; its *role* is the open part.
 2. **`tex_id = 0` and out-of-range handling.** No sample with `tex_id = 0` exists; the runtime
    guard proves it is an error (clamped to 1), but real data with `tex_id = 0` has not been
    seen.
-3. **Multi-object `.bud` files — record boundary alignment.** Multi-object files are confirmed
+3. **`vertex_count` cap rationale.** The 3072 (0xC00) cap is warn-only and real files exceed it;
+   why the legacy code logs at that threshold (a heuristic budget vs. a hard buffer limit elsewhere)
+   is unresolved. The *parser behaviour* is settled (read full count, never truncate); only the
+   intent of the threshold is open.
+4. **Multi-object `.bud` files — record boundary alignment.** Multi-object files are confirmed
    by sample (17 objects). For objects where `vertex_count` is odd, the index array starts on
    an odd byte offset (since the vertex array is `32 × vertex_count` bytes; 32 is always even,
    so this cannot produce an odd boundary). No alignment padding has been observed across any
    sample; assume none.
-4. **Empty cell (`object_count = 0`).** Unverified; the loader is expected to handle it by
+5. **Empty cell (`object_count = 0`).** Unverified; the loader is expected to handle it by
    producing an empty object set.
-5. **UV convention selection.** Both tiled world-scale and atlas-normalized UVs are confirmed
+6. **UV convention selection.** Both tiled world-scale and atlas-normalized UVs are confirmed
    present in the real data. The choice is per-object and follows from the content. Whether any
    fixed UV = world_position / tile_size relationship holds for tiled objects is unconfirmed.
-6. **`BUILDING TEXTURES` integer flag.** The first integer on each `TEXTURES` line is read but
+7. **`BUILDING TEXTURES` integer flag.** The first integer on each `TEXTURES` line is read but
    its meaning is unknown. It is not the `bgtexture.lst` record index.
-7. **No name/string fields in `.bud`.** Object naming, if any, is carried by the `.map` text,
+8. **No name/string fields in `.bud`.** Object naming, if any, is carried by the `.map` text,
    not the `.bud` binary.
 
 ---
@@ -466,4 +497,8 @@ in the legacy asset set.
   writing).
 - `Docs/RE/formats/pak.md` — archive container that holds these per-cell files.
 - **Glossary:** `Docs/RE/names.yaml`
-- **Provenance:** `Docs/RE/journal.md`
+- **Provenance:** see `Docs/RE/journal.md`. This revision applies the CAMPAIGN VFS-MASTERY
+  two-witness gate (loader read-sequence + black-box sampling): the `vertex_count` cap is
+  warn-and-continue on the full count (loader-resolved), and `type_byte` is confirmed-variable
+  over {0, 1, 2} with no consumer branch.
+```

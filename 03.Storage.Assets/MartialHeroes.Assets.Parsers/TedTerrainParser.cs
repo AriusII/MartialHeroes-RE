@@ -124,8 +124,13 @@ public static class TedTerrainParser
             normals[i] = (nx, ny, nz);
         }
 
-        // ---- Block 3: Texture index grid (16 × 16 = 256 u8 bytes, 1-based) ----
-        // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — "u8, 1-based, 16×16 grid": CONFIRMED.
+        // ---- Block 3: Texture index grid (16 × 16 = 256 u8 bytes) ----
+        // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — "u8, 16×16 grid": CONFIRMED.
+        // CORRECTION (terrain.md reconciliation 2026-06-16): the loader stores each byte RAW with NO
+        // idx-1 decrement and NO value-below-1 clamp. Both of those are RENDER-DOMAIN behaviours
+        // (applied at draw time, not load time) and must NOT be performed in the parser.
+        // spec: Docs/RE/formats/terrain.md §5.9 reconciliation —
+        //   "block-3 TextureIndexGrid stored RAW; idx-1 and clamp-to-1 are render-domain": CONFIRMED.
         byte[] textureIndexGrid = new byte[LookupSize];
         data.Slice(LookupOffset, LookupSize).CopyTo(textureIndexGrid);
 

@@ -5,15 +5,46 @@
 > `05.Presentation/MartialHeroes.Client.Godot` (rendering). Every value an engineer cites
 > must reference this file or `Docs/RE/formats/environment_bins.md`.
 
+<!--
+verification:
+  confirmed:               # control-flow + operand level in the static IDB
+    - environment hub IS the 48-slot sky-colour LUT singleton; sub-domes hung off it
+    - hub construction order; material + light + fog are hub-internal (NOT a separate path)
+    - day/night = 48 keyframes × 1800 ms, period 86 400 ms; linear lerp(table[kf], table[kf_next], frac)
+    - K_ambient = 0.0 (single reader, zero writers) → per-keyframe ambient term is inert
+    - directional light applied RAW (no multiplier, no /255, float [0,1])
+    - OPTION_BRIGHT additive floor: offset = floor((BRIGHT/100)·255), clamp 255; default 100, clamp [1,100]
+    - BRIGHT=100 → offset 255 → full-white ambient floor over the (0,0,0) base
+    - device-ambient re-applied on slider move / per-frame byte-base change / end of light load
+    - fog colour byte-domain lerp, ARGB alpha forced 0xFF, pushed via render-state token 34
+    - fog data_load_flag==0 → synthesize 48 keyframes from sky-LUT via high·0.75 + low·0.25
+    - fog mode LINEAR: far = s·3.0, near-recip = 1/s, enabled when s>0 (per-keyframe section-C scalar)
+    - device-ambient render-state token = 139; fog-colour render-state token = 34
+    - OPTION_BRIGHT at options-struct offset +116 (field index 29); cached offset reused per frame
+    - per-area env files keyed by the current-area-id global
+  static-hypothesis:       # single static inference, not yet control-flow-tight
+    - exact fallback direction numerals (-7, 7, 20) — fallback dwords present, not byte-decoded this pass
+    - lighting-manager constructor zeroing the ambient base to (0,0,0) — carried, not re-read this pass
+    - indoor suppression mechanism + indoor fog behaviour — outside this pass' anchor set
+  capture/debugger-pending:  # needs the live client / a frame capture to settle
+    - on-screen ambient pixel colour at default brightness (the math proves white; the pixel does not)
+    - matrix major-order / up-axis / unit scale
+    - whether a player's saved DoOption.ini carries a brightness below 100
+  ida_reverified: 2026-06-16
+  ida_anchor: 263bd994
+  evidence: [static-ida]
+  conflicts: none of substance (one §3.1/§1.1 wording tightening — material + light are hub-internal)
+-->
+
 ---
 
 ## Status block
 
 | Attribute         | Value |
 |-------------------|-------|
-| `status`          | `sample-verified` for the file loading model, day/night cycle math, and area 2 parameter values; `partial` for indoor lighting detail; water renderer: **RESOLVED-NEGATIVE** (see §4) |
+| `status`          | `sample-verified` for the file loading model, day/night cycle math, and area 2 parameter values; `partial` for indoor lighting detail; water renderer: **RESOLVED-NEGATIVE** (see §4); lighting apply-path numeric defaults: **CONFIRMED** (see §6.2a — `K_ambient` = 0.0, `OPTION_BRIGHT` default 100) |
 | `sample_verified` | `true` — file layouts and flag values confirmed against real VFS samples for areas 0, 1, and spot-checked areas 4–35. Area 2 (the current Godot demo area) values read directly from area-2 samples. |
-| `binary_analysed` | `doida.exe` (legacy client) — sky init call chain, GRSFog/GRSLighting structs, D3D9 render-state usage, water xref exhaustive scan |
+| `binary_analysed` | `doida.exe` (legacy client) — sky init call chain, GRSFog/GRSLighting structs, D3D9 render-state usage, lighting/fog apply-path, ambient-gate + brightness-slider recovery, water xref exhaustive scan |
 | `confidence`      | Per-claim confidence follows the same scale as `environment_bins.md`: CONFIRMED / SAMPLE-VERIFIED / CODE-CONFIRMED / PROPOSED |
 
 ---
@@ -32,16 +63,73 @@ these define the area's visual environment:
 | Star colours | `stardome%d.bin` | `stardome_enable = 1` |
 | Cloud colours | `clouddome%d.bin` | `clouddome_enable = 1` |
 | Cloud animation | `cloud_cycle%d.bin` | `clouddome_enable = 1` |
+| Sky-dome geometry | `sky%d.box` | `skybox_enable = 1` (VFS-only; see `formats/sky.md §A`) |
 | Directional + ambient light | `light%d.bin` | always |
 | Point lights | `point_light%d.bin` | always (count may be 0) |
 | Weather | `weather%d.bin` + `weather%d_rain.bin` | OPTION_WEATHER tier ≥ 1 |
 | Wind/foliage | `wind%d.bin` | always (count may be 0) |
 
-All file specifications (offsets, sizes, field types) are in `Docs/RE/formats/environment_bins.md`.
+All file specifications (offsets, sizes, field types) are in `Docs/RE/formats/environment_bins.md`
+(colour `.bin` family) and `Docs/RE/formats/sky.md` (the `sky%d.box` geometry + parser load-order view).
+The **colour domains** (byte D3DCOLOR vs. float [0,1]) and the apply-path field facts are in
+`Docs/RE/formats/environment_bins.md §10`; the runtime math that consumes them is in §6 of this spec.
 
 The global `DoOption.ini` quality gates (`OPTION_SKY`, `OPTION_WATER`, etc.) impose additional
 on/off switches on top of the per-area flags. In a clean reimplementation these may be treated as
-optional quality tiers; the spec does not prescribe their implementation.
+optional quality tiers; the spec does not prescribe their implementation. One further
+`DoOption.ini` value — `OPTION_BRIGHT`, a 1–100 player brightness slider with **default 100** — is
+the source of the global additive ambient floor (see §6.2a) and is directly relevant to the
+"too-dark" fix (§6.2b).
+
+### 1.1 Environment hub — object identity and construction order
+
+The whole sky/lighting environment for an area is owned by a single **environment hub** object.
+This hub is re-run on two triggers: when the active area changes, and when the in-game SKY option is
+toggled.
+
+> **Object identity (CONFIRMED):** the environment hub object **is** the sky-colour-table singleton
+> (the 48-slot per-time master colour LUT — see §2 and `formats/environment_bins.md`). It is **not**
+> a separate "environment manager" allocation. The sub-domes (star, cloud, sky-box, moon) and the
+> fog parameters are members hung off this one object. Any reimplementation that modelled the
+> environment and the sky-colour table as two distinct objects should merge them.
+
+On activation the hub builds its sub-systems in a fixed order; each sub-init that fails aborts the
+hub (the sub-init returns 0 → the hub returns 0), and only the all-pass path sets a "ready" flag and
+returns success. The order (code-confirmed):
+
+1. Particle / effect buffer root.
+2. **Star-dome** object → loads `stardome{id}.bin`.
+3. **Cloud-dome** object → loads `clouddome{id}.bin` and `cloud_cycle{id}.bin`.
+4. **Sun** sub-object init.
+5. Read the global **sky detail-level** option (0 / 1 / 2; selects animated vs. static sky textures
+   and a derived detail scalar stored on the hub). It reads the **options-struct index 7** and branches
+   the detail scalar (1.0 / a constant / 2.0). NOTE: this option was previously suspected to be the
+   runtime writer of the ambient gate `K_ambient` (§6.2a). That hypothesis is **DENIED** — `K_ambient`
+   has zero writers anywhere; the sky-detail option reads index 7 only and does not touch `K_ambient`
+   (`formats/environment_bins.md §10.4`).
+6. **Moon / particle dome** init (uses `moon{id}.dds`).
+7. **Sky-box** sub-object → conditionally loads `sky{id}.box` when the skybox gate is set
+   (see `formats/sky.md §A`).
+8. Bind the **day/night time manager** to the dome.
+9. **Material** init → loads `material{id}.bin` (hub-internal — see the note below).
+10. **Light** init → loads `light{id}.bin` (hub-internal — see the note below).
+11. **Fog** init → loads `fog{id}.bin` (the last sub-init before the ready flag).
+12. Set the environment "ready" flag.
+
+> **Hub-internal vs. surrounding-path loads (CONFIRMED — wording tightened):** `material{id}.bin` and
+> `light{id}.bin` are loaded **inside the hub body**, immediately before fog and the ready flag — they
+> are NOT loaded by a separate "surrounding area-activation path". The light loader is fault-tolerant:
+> on a missing file it synthesises a default 48-keyframe grey ramp plus the fallback direction and
+> still succeeds (§6.2a, §7). Only `point_light{id}.bin` and `wind{id}.bin` (and `weather{id}.bin`) are
+> loaded outside the hub: the point-light map data is loaded as a sub-step of the light loader, and the
+> wind/weather files are loaded by separate routines on the area-activation path. Their formats are in
+> `formats/terrain_layers.md` / `formats/environment_bins.md`.
+
+> **Fog colour source (resolves the `data_load_flag = 0` question):** when `fog{id}.bin`'s
+> `data_load_flag` is 0, the fog colour table is **derived from the sky-colour table** — a 48-slot
+> loop that blends two source bands per channel as `high × 0.75 + low × 0.25` (a 3:1 weighted blend
+> sampled per day slot). When the flag is non-zero the file carries an explicit 192-byte colour
+> table instead. See `formats/sky.md §B.2` and `formats/environment_bins.md §2.4`.
 
 ---
 
@@ -56,6 +144,11 @@ optional quality tiers; the spec does not prescribe their implementation.
 | `SKY_PERIOD_MS` | 86 400 | Total simulated day length (48 × 1800 ms) |
 | `STARDOME_KF_COUNT` | 12 | Keyframe count for stardome and clouddome |
 | `STARDOME_KF_MS` | 7200 | Milliseconds per stardome/clouddome step (4 × 1800) |
+
+The 48-slot model is **CONFIRMED from the runtime colour sampler**: it indexes the master
+sky-colour table by time-of-day at 1800 ms (1800 s of simulated day) per slot, bilinearly
+interpolates between adjacent slots, and pushes the result to the render device. (The colour table
+is the same singleton object the environment hub is built around — see §1.1.)
 
 ### 2.2 Active keyframe and interpolation fraction
 
@@ -87,9 +180,10 @@ value = lerp(table[kf_index], table[kf_next], frac)
 
 where `lerp(a, b, t) = a + (b − a) × t`.
 
-BGRA u8 colour entries should be converted to float `[0.0, 1.0]` before interpolation and
-rounded or clamped back to u8 after. Float32 entries (lighting, fog scalars, material colours)
-are interpolated directly.
+BGRA u8 colour entries are interpolated **in the byte domain** by the original (the lerp result
+stays 0–255 and is packed as a D3DCOLOR directly — see §6.2a; the `/255` is a port step only for a
+float engine — `formats/environment_bins.md §10.1`). Float32 entries (lighting, fog scalars,
+material colours) are interpolated directly in [0,1] and applied without normalisation.
 
 ### 2.4 Keyframe-to-simulated-time mapping
 
@@ -118,17 +212,25 @@ steps (one step ≈ 2 simulated hours).
 
 1. Read `map_option{id}.bin` (40 B). Parse the 10 u32 flags. This controls all subsequent
    subsystem gates.
-2. Always read `fog{id}.bin` (204 B). Parse `start_dist`, `end_dist`, `data_load_flag`, and
-   `fog_colors[48]`.
+2. Always read `fog{id}.bin` (204 B). Parse `start_dist`, `end_dist`, `data_load_flag`,
+   and — when `data_load_flag ≠ 0` — `fog_colors[48]`. When `data_load_flag = 0` the colour table
+   is **derived** from the sky-colour table (§1.1).
 3. If `sky_gate = 1`: read `material{id}.bin` (9792 B).
 4. If `stardome_enable = 1`: read `stardome{id}.bin` (9216 B).
 5. If `clouddome_enable = 1`: read `clouddome{id}.bin` (23040 B) and `cloud_cycle{id}.bin`
    (70 B).
-6. Always read `light{id}.bin` (5312 B). The fallback at bytes 0x14B0–0x14BF is used if the
-   file is absent or unreadable.
-7. Read `point_light{id}.bin` if present.
-8. Read `wind{id}.bin` if present.
-9. If `indoor_flag = 1`: apply indoor lighting override (§5).
+6. If `skybox_enable = 1`: read `sky{id}.box` via the archive by-name lookup (`formats/sky.md §A`).
+7. Always read `light{id}.bin` (5312 B) — **loaded by the hub itself** (§1.1). The fallback at
+   bytes 0x14B0–0x14BF is used if the file is absent or unreadable; the loader never fails (it
+   synthesises a default grey ramp + fallback direction on a missing file). At the end of the light
+   load the device ambient is recomputed and pushed via the `OPTION_BRIGHT` floor (§6.2a).
+8. Read `point_light{id}.bin` if present — loaded as a sub-step of the light loader.
+9. Read `wind{id}.bin` if present — loaded by a separate routine on the area-activation path.
+10. If `indoor_flag = 1`: apply indoor lighting override (§5).
+
+(The environment hub's internal construction order is in §1.1; `material{id}.bin` and `light{id}.bin`
+are loaded inside the hub, immediately before fog. `point_light{id}.bin` / `wind{id}.bin` are the only
+environment files loaded outside the hub.)
 
 ### 3.2 Per-frame update
 
@@ -139,52 +241,54 @@ Each game tick (or each rendered frame):
 3. Sample and interpolate:
    - Directional light `color_A` from `light{id}.bin` section A.
    - Ambient light `color_A` from `light{id}.bin` section B.
-   - Fog-distance scalar from `light{id}.bin` section C.
+   - Fog-distance scalar `s` from `light{id}.bin` section C.
    - Fog colour from `fog{id}.bin` `fog_colors[kf_index]` (linear interpolation to `kf_next`).
    - Sky/cloud material colours from `material{id}.bin` (if `sky_gate = 1`).
 4. Compute `star_kf_index` and `star_frac`; interpolate star and cloud-dome tints.
-5. Apply all values to the rendering state (see §6 for Godot mappings).
+5. Apply all values to the rendering state via the apply paths in §6.2a (directional raw; the
+   per-keyframe ambient term is multiplied by `K_ambient = 0` and therefore contributes nothing; the
+   live device ambient is the additive `OPTION_BRIGHT` floor over the ambient base; fog colour as
+   byte D3DCOLOR; fog range = `s × 3.0`). See §6 for Godot mappings.
 
 ---
 
 ## 4. Water — RESOLVED-NEGATIVE
 
-> **Status: RESOLVED-NEGATIVE.** The legacy `Main.exe` client contains **no water renderer**.
+> **Status: RESOLVED-NEGATIVE.** The legacy `Main.exe` client contains **no water renderer**, and
+> there is **no asset-IO loader for water** — water is a render-pass / option-toggle concern only.
 > This is the definitive conclusion from an exhaustive cross-reference analysis of the binary.
 > See §4.3 for the full evidence summary. Reimplementations choose their own water visuals freely.
+> Note: per the Campaign-5 reconciliation (`formats/environment_bins.md §1.1`), `map_option%d.bin`
+> stores **no** `water_enable` / `water_y` fields — 0x00/0x04 are the dungeon flag and sight-clamp
+> distance. The §4.1 placement table below is retained as historical context only.
 
-### 4.1 Placement (CONFIRMED)
+### 4.1 Placement (historical context — superseded by `environment_bins.md §1.1`)
 
-| Source | Field | Rule |
-|--------|-------|------|
-| `map_option{id}.bin` offset 0x00 | `water_enable` | If 0: no water plane for this area |
-| `map_option{id}.bin` offset 0x04 | `water_y` | If `water_enable = 1`: the water surface belongs at world-space Y = `water_y` |
-
-Known water Y values across the VFS:
-
-| `water_y` value | Example areas |
-|:--------------:|---------------|
-| 300 | 11, 15, 16, 22, 23, 25, 26, 31, 34, 201–205 |
-| 700 | 29, 30, 209, 210 |
-| 1000 | 206, 207, 208 |
+The pre-Campaign-5 reading mapped `map_option{id}.bin` 0x00/0x04 to `water_enable` / `water_y`.
+That reading is **disproven** — those offsets are `is_dungeon` / `sight_distance`. No water surface
+Y is stored anywhere the shipping client consumes. Any water plane a reimplementation renders is a
+free engineering choice, not a reproduced asset value.
 
 ### 4.2 Water rendering — RESOLVED-NEGATIVE
 
-The shipping `Main.exe` does **not** contain a dedicated water render path. The evidence for
+The shipping `Main.exe` does **not** contain a dedicated water render path, and there is **no
+standalone water setup or loader routine in the environment neighbourhood**. The evidence for
 this negative result is:
 
-- The `water_y` global variable has exactly two cross-references in the entire binary: one that
+- The single water-related global has exactly two cross-references in the entire binary: one that
   initialises it to zero, and one that passes it to the terrain streaming system as a streaming
-  radius parameter. It is never passed to any renderer or D3D draw call.
-- The `OPTION_WATER` INI setting is read from `DoOption.ini` into an options struct field, but
-  no code path was found that reads that field back to alter any rendering mode. The setting has
-  no confirmed runtime consumer.
+  radius parameter. It is never passed to any renderer or draw call.
+- The `OPTION_WATER` INI setting is read from `DoOption.ini` into an options struct field, and
+  written back by the option-save path, but **no code path was found that reads that field back to
+  alter any rendering mode**. The setting has no confirmed runtime consumer beyond load/save. (For
+  comparison, the adjacent `OPTION_SKY` toggle *does* have a consumer — it re-triggers the
+  environment hub of §1.1.)
 - A search across all string literals in the binary for "water", "reflect", "ripple", "wave",
   and related terms returns zero matches other than `"OPTION_WATER"` itself. No water manager
   class, no water texture path, and no water draw function name exists in the binary's string
   table.
 - The FX terrain overlay subsystem (`Fx1Terrain`–`Fx7Terrain`) was checked as a possible
-  implementation path; no code in its initialisation chain reads `water_enable` or `water_y`.
+  implementation path; no code in its initialisation chain reads any water field.
 
 The water surface visible in footage of the original running game was most likely rendered by a
 client version predating this binary, by a feature that was removed before ship, or by a
@@ -192,18 +296,16 @@ separate DLL or plugin not present in the captured client.
 
 ### 4.3 Reimplementation guidance (RESOLVED-NEGATIVE)
 
-Because no original renderer exists, the Godot client is free to implement water visuals
-independently. The only legacy-derived constraints are:
-
-- **Enable condition:** `map_option{id}.bin` `water_enable` = 1
-- **Plane Y:** `map_option{id}.bin` `water_y` world-space units (same coordinate system as terrain)
-- **Quality tiers:** `OPTION_WATER` (values 1–3) from `DoOption.ini` can be repurposed for LOD
-  control in the reimplementation, consistent with the original intent
+Because no original renderer and no asset-IO loader exists, the Godot client is free to implement
+water visuals independently. There are no legacy-derived water parameters to honour (no enable flag
+and no plane Y are stored anywhere — `environment_bins.md §1.1`). `OPTION_WATER` (values 1–3) from
+`DoOption.ini` may be repurposed for LOD control in the reimplementation, consistent with the
+original intent.
 
 The `WaterRenderer` node's shader, texture, UV animation, and reflection approach are
 engineering decisions for the Godot layer; there is no original implementation to be faithful to.
 
-For area 2 (the current Godot demo area): `water_enable = 0`; no water plane is needed.
+For area 2 (the current Godot demo area): no water plane is needed.
 
 ---
 
@@ -229,10 +331,14 @@ enumerated. Fog behaviour in indoor areas is **unverified** — fog parameters m
 
 Indoor areas use ambient-only lighting: a constant or slowly varying ambient colour with no
 directional sun component. The `light{id}.bin` section B (ambient keyframes) is still read;
-whether section A (directional) is also applied is unverified for indoor areas.
-
-The ambient colour values in `light{id}.bin` section B are significantly lower for indoor
-areas than outdoor, producing the characteristically dark underground atmosphere.
+whether section A (directional) is also applied is unverified for indoor areas. The ambient gate
+`K_ambient` and the `OPTION_BRIGHT` floor (§6.2a) still govern how that ambient reaches the device.
+Note that, with `K_ambient = 0` CONFIRMED (§6.2a), the per-keyframe §B ambient term contributes
+nothing even indoors — the only live ambient indoors is the same `OPTION_BRIGHT` additive floor over
+the ambient base. The "characteristically dark underground atmosphere" the §B keyframes carry is
+therefore not produced by those keyframes in the shipping client; indoor darkness comes from the
+absence of directional sun plus whatever the brightness floor sets (and any indoor-specific ambient
+base the keyframe byte table writes).
 
 ---
 
@@ -246,17 +352,18 @@ spec; Godot parameters are chosen for best-fit equivalence.
 
 | Legacy parameter | Source | Godot target |
 |-----------------|--------|-------------|
-| Directional light colour | `light%d.bin` §A `color_A` (RGB f32) | `DirectionalLight3D.light_color` |
+| Directional light colour | `light%d.bin` §A `color_A` (RGB f32, raw — §6.2a) | `DirectionalLight3D.light_color` |
 | Directional light energy | `light%d.bin` §A `color_A` intensity | `DirectionalLight3D.light_energy` |
-| Directional light direction | Derived from keyframe angle or fallback `(-7, 7, 20)` normalised | `DirectionalLight3D` transform rotation |
-| Ambient light colour | `light%d.bin` §B `color_A` (RGB f32) | `WorldEnvironment → Environment.ambient_light_color` |
-| Ambient light energy | `light%d.bin` §B `color_A` luminance | `WorldEnvironment → Environment.ambient_light_energy` |
-| Fog colour | `fog%d.bin` `fog_colors[kf]` (BGRA → RGB) | `WorldEnvironment → Environment.fog_light_color` |
-| Fog start distance | `fog%d.bin` `start_dist` × view_range | `WorldEnvironment → Environment.fog_depth_begin` |
-| Fog end distance | `fog%d.bin` `end_dist` × view_range | `WorldEnvironment → Environment.fog_depth_end` |
-| Fog density scalar | `light%d.bin` §C per-keyframe f32 | Modulates `fog_depth_end` or `fog_density` |
-| Sky colour (noon) | `material%d.bin` `ambient_sky_color` [29..32] | `WorldEnvironment → Sky` background |
-| Water plane Y | `map_option%d.bin` `water_y` | `WaterRenderer` node world-space Y position (when `water_enable = 1`; no original renderer — free implementation) |
+| Directional light direction | Static fallback `(-7, 7, 20)` normalised (no per-keyframe direction — §6.2a) | `DirectionalLight3D` transform rotation |
+| Ambient light colour (keyframe) | `light%d.bin` §B `color_A` (RGB f32) × `K_ambient` (= 0 in the original — §6.2a; inert) | `WorldEnvironment → Environment.ambient_light_color` |
+| Ambient light floor (brightness) | `OPTION_BRIGHT / 100` additive, **default 1.0** (§6.2a/§6.2b) | `WorldEnvironment → Environment.ambient_light_energy` |
+| Fog colour | `fog%d.bin` `fog_colors[kf]` (BGRA byte → RGB, `/255` port step) | `WorldEnvironment → Environment.fog_light_color` |
+| Fog distance (live) | `light%d.bin` §C scalar `s`: range = `s × 3.0` (§6.2a) | `WorldEnvironment → Environment.fog_depth_end` |
+| Fog distance (baseline) | `fog%d.bin` `start_dist` / `end_dist` × view_range (seeds, overwritten per frame) | `WorldEnvironment → Environment.fog_depth_begin/end` |
+| Sky colour (noon) | `material%d.bin` `ambient_sky_color` [29..32] (f32, raw) | `WorldEnvironment → Sky` background |
+
+> Water plane Y is **not** sourced from any environment file (`environment_bins.md §1.1`); any
+> Godot water placement is a free engineering choice (§4).
 
 ### 6.2 BGRA → Godot Color conversion
 
@@ -268,11 +375,176 @@ Color(r / 255.0, g / 255.0, b / 255.0, 1.0)
 ```
 
 where `r = bgra[2]`, `g = bgra[1]`, `b = bgra[0]`. The alpha byte from the file is always 0;
-use 1.0 as the Godot alpha unless transparency is intentional.
+use 1.0 as the Godot alpha unless transparency is intentional. (The runtime sampler likewise forces
+the high byte opaque when it pushes BGRX to the render device — see §6.2a / `formats/sky.md §C`.)
 
 Legacy material colours (`material%d.bin`) are float32 RGBA; pass directly as `Color(r, g, b, 1.0)`.
 Values above 1.0 indicate HDR bloom (sun disk colour); clamp to 1.0 for non-HDR targets or use
 `light_energy` scaling for the equivalent effect.
+
+> **Colour-domain reminder (CONFIRMED — `formats/environment_bins.md §10.1`):** the original client
+> does NOT uniformly divide colours by 255. Byte BGRA tables (fog, sky, star, cloud) are packed as a
+> D3DCOLOR and pushed to the device **directly** — the `/255` above is a port step for a float engine,
+> not original math. The `light%d.bin` directional/ambient colours are **float [0,1]** applied
+> **directly** (no /255, no gamma). Treat the two domains differently.
+
+### 6.2a Runtime lighting/fog apply path (the recovered math)
+
+This subsection records the **runtime math** the original client applies once the per-keyframe values
+of §3.2 are sampled and interpolated. The byte/field domains it relies on are pinned in
+`formats/environment_bins.md §10`. **The apply-paths below are CONFIRMED / CODE-CONFIRMED, and the
+two ambient numeric defaults previously flagged UNVERIFIED are now CONFIRMED statically** — the
+ambient gate `K_ambient` = 0.0 (no writer) and the `OPTION_BRIGHT` default = 100. Only a possible
+user-edited on-disk INI value remains as a thin runtime residual (§6.4 / §8).
+
+**Keyframe sampling (CONFIRMED).** Every per-frame environment sampler — fog colour, directional
+light, ambient light, fog scalar — uses the same 48-keyframe / 1800 ms model of §2 with linear
+interpolation `lerp(table[kf], table[kf_next], frac)`. The star/cloud domes use the coarser 12-frame
+(7200 ms) cadence (§2.2). Fog/light samplers run from the per-frame map-time tick.
+
+**Fog colour — byte domain, applied directly (CONFIRMED).** The fog-colour sampler reads the byte
+R/G/B at `fog_colors[kf]` / `fog_colors[kf_next]` (`fog%d.bin`, or the synthesised table when
+`data_load_flag = 0` — §1.1), lerps each channel **in the byte domain** (result stays 0–255), packs
+`ARGB = (0xFF << 24) | (R << 16) | (G << 8) | B` (alpha forced opaque), and pushes it as the device
+fog colour via **D3D render-state token 34** (`D3DRS_FOGCOLOR`). No /255 in the original.
+
+**Fog mode + distance — LINEAR from the section-C scalar (CODE-CONFIRMED).** The runtime fog struct
+holds `type` (1 = EXP, 2 = EXP2, 3 = LINEAR), a fog colour, `start`, `end`, and `density`. The
+**observed apply path is LINEAR**, driven by the per-keyframe fog scalar `s` from `light%d.bin`
+section C (`formats/environment_bins.md §9.3`):
+
+```
+if s > 0:
+    fog_range      = s * 3.0          // far distance, in world units
+    fog_near_scale = 1.0 / s          // reciprocal/near-scale field
+    fog_enabled    = true
+```
+
+The static `fog%d.bin` `start_dist` / `end_dist` fractions seed a baseline but the **per-frame
+`s × 3.0` derivation overwrites the live fog range each tick**. The scalar `s` is the lerp of a
+**per-keyframe float table** (`light%d.bin` section C); the previously applied value is cached and the
+distance commit is **skipped when `s` is unchanged**. The commit setter is **shared** — the same single
+fog-distance setter is also called from the post-load fog apply and the light-save neighbourhood; it is
+the one place fog far/near are written.
+
+The `s > 0` guard means a non-positive `s` leaves the fog struct untouched — fog is effectively
+disabled until a positive `s` is sampled. **EXP/EXP2 modes are confirmed NOT driven on the lighting
+tick:** the distance setter only ever writes the LINEAR shape (it sets the mode field to LINEAR and the
+density field to 0.0). The struct still carries `type` (1 = EXP, 2 = EXP2, 3 = LINEAR) and a density
+field, so the modes exist in layout, but no quality tier was observed switching to exponential density
+on this path — see §8.
+
+**Directional light — float, applied RAW (CONFIRMED).** The directional sampler interpolates the
+float32 `color_A` of `light%d.bin` section A and writes it to the render globals **without any
+multiplier**. No /255, no gamma. Sample-verified domain: a noon directional keyframe decodes to RGB ≈
+(0.40, 0.40, 0.40) — floats in [0,1].
+
+**Per-keyframe ambient light — float, MULTIPLIED by `K_ambient` = 0 (the term is inert) (CONFIRMED).**
+The ambient sampler interpolates the float32 `color_A` of `light%d.bin` section B and then **multiplies
+every channel by a global float `K_ambient`** before writing it to the ambient render globals:
+
+```
+ambient_kf = lerp(B[kf], B[kf_next], frac) * K_ambient
+```
+
+The **asymmetry is the key recovered fact: directional colour is used raw; the per-keyframe ambient
+colour is gated by `K_ambient`.** `K_ambient` is a **single global float with static initialiser 0.0,
+exactly ONE reader (this sampler) and ZERO writers anywhere in the binary** — confirmed by the
+apply-path recovery (`formats/environment_bins.md §10.4`). The earlier hypothesis that the sky-detail
+/ quality option (§1.1 step 4) writes it is **DENIED — nothing writes it.** It is therefore an
+effective compile-time constant **0.0**, so `ambient_kf = 0` every frame: the §B ambient keyframe
+table is loaded and interpolated but **contributes nothing to the device.** (Prior status "static
+init 0.0; runtime value UNVERIFIED" is now CONFIRMED 0.0 at runtime — this is the resolved
+"too-dark" suspect #1: the per-keyframe ambient table is dead in the shipping client.)
+
+**Ambient base colour — static (0,0,0), then keyframe-driven (CONFIRMED).** The ambient is built on a
+3-channel base colour. The lighting-manager constructor zeroes that base to `(0, 0, 0)` and forces
+its alpha opaque; at area-load time the base channels are subsequently driven from a per-keyframe BYTE
+colour table inside the loaded `light%d.bin` blob (interpolated each frame). So `(0,0,0)` is the
+pre-load static default and the live base is the day/night byte colour. The brightness offset below is
+added onto this base.
+
+**Player brightness — additive 0–255 ambient floor from `OPTION_BRIGHT`, default 100 (CONFIRMED).**
+The in-game brightness slider (`OPTION_BRIGHT`, a **1–100** value in `DoOption.ini`, **default 100**,
+clamp `[1,100]` → 100 — `formats/environment_bins.md §10.5`) converts to a uniform additive white
+offset on the ambient base and is pushed as the **global device ambient colour** (a byte D3DCOLOR):
+
+```
+offset = floor( (OPTION_BRIGHT / 100.0) * 255.0 )      // 0..255  (truncated)
+R = min(255, ambient_base_R + offset)
+G = min(255, ambient_base_G + offset)
+B = min(255, ambient_base_B + offset)
+device_ambient = (0xFF << 24) | (R << 16) | (G << 8) | B
+```
+
+This device ambient is the only ambient the device actually receives (the per-keyframe term above is
+zeroed by `K_ambient = 0`), and it is pushed via **D3D render-state token 139** (`D3DRS_AMBIENT`).
+**At the default brightness `OPTION_BRIGHT = 100`, `offset = 255`, and over a `(0,0,0)` base the device
+ambient is full white `(255, 255, 255)`.** (Prior status "assumed mid-slider ~50 → +0.5 floor" is now
+CONFIRMED 100 → +1.0 floor — this is the resolved "too-dark" suspect #2.)
+
+The same conversion is re-applied on three occasions: when the user moves the slider, when the per-frame
+keyframe byte base colour changes, and at the end of each per-area light-data load. The computed
+**offset is cached on the hub object** after the first computation, so the per-frame re-push on a byte-
+base change reuses the cached offset rather than re-reading and re-converting the slider value every
+frame. The slider value itself lives at a known **options-struct offset (field index 29, byte offset
++116)**: the INI-load path writes it there, and the light loader reads it from there to seed the floor.
+
+**Sun direction is static (CONFIRMED).** No per-keyframe sun direction is stored — the keyframe tables
+encode colour only. The sun/light direction is the static fallback vector `(-7, 7, 20)` (normalised
+≈ `(-0.322, 0.322, 0.920)`, `formats/environment_bins.md §9.4`). The day/night cycle does not rotate
+the sun; any sun-arc in a port is a free choice.
+
+> **The total apparent scene brightness in the original is:**
+> `directional(raw)` + `ambient_keyframe × K_ambient(=0)` + `device_ambient(OPTION_BRIGHT/100 × 255)`
+> = `directional(raw)` + `0` + `(offset, offset, offset)`.
+> With the default `OPTION_BRIGHT = 100` the additive ambient floor is **full white** — the
+> per-keyframe ambient table never contributes.
+
+### 6.2b "Too-dark" diagnosis and recommended fidelity fix
+
+The Godot `EnvironmentNode` reproduces the per-keyframe directional/ambient tables but is most likely
+**missing the global additive ambient floor from `OPTION_BRIGHT`** and/or **mis-models the ambient
+`K_ambient` gate** (treating the per-keyframe ambient as the full ambient). Reproducing only
+`directional(raw) + ambient_keyframe` yields a dark scene — exactly the reported D3 symptom
+(CLAUDE.md known-issue: "`EnvironmentNode` is too dark").
+
+**Root cause (now CONFIRMED).** Two facts the apply-path recovery settled make the original's scene
+*much brighter* than a naive reproduction:
+
+1. The per-keyframe §B ambient table is **inert** in the original (`K_ambient = 0`). A faithful port
+   must NOT rely on the §B ambient keyframes for ambient brightness — they produce nothing in the
+   original. Reproducing only `directional + ambient_keyframe` is exactly what makes the Godot scene
+   dark.
+2. The original's actual ambient floor is the brightness slider, default **100** → a uniform additive
+   white of level `OPTION_BRIGHT / 100 = 1.0` over a `(0,0,0)` base. The faithful default floor is
+   **1.0 (full)**, NOT 0.5.
+
+**Recommended fix (engineering guidance — for the Godot layer to apply).** Set the
+`WorldEnvironment` ambient floor to the brightness term in [0,1], defaulting to **1.0**:
+
+```
+ambient_floor = OPTION_BRIGHT / 100.0          // in [0,1]; DEFAULT OPTION_BRIGHT = 100 → +1.0 (full)
+Environment.ambient_light_color  = white (or the stored ambient base, default (0,0,0)+floor → grey)
+Environment.ambient_light_energy = ambient_floor       // default 1.0
+```
+
+Do **not** layer the per-keyframe §B ambient on top expecting it to brighten the scene — it is gated
+by `K_ambient = 0` and contributes nothing in the original. The day/night colour character that *does*
+survive is carried entirely by the **directional** light (applied raw) and by the byte fog/sky/dome
+colour tables. This concrete change — defaulting the Godot ambient floor to **1.0** rather than 0.5,
+and not relying on the §B ambient keyframes — is the root-cause fix for the "too-dark" debt.
+
+> **Remaining residual (UNVERIFIED — thin):** the value **100** is the binary/INI default for
+> `OPTION_BRIGHT`. If a player's on-disk `DoOption.ini` carries a user-saved lower value, the live
+> floor is lower than 1.0. Settling this is a single runtime read of the stored brightness value after
+> the options-load step (expected an i32 in percent, default 100); it changes only the floor's
+> magnitude, not any layout or apply-path fact above. Until that is read for a given install, default
+> the floor to 1.0.
+>
+> **Fog fractions (numeric refresh, structure unchanged):** observed live area-1 `fog1.bin` decodes
+> to `start = 0.75`, `end = 0.98` (§6.4), superseding the earlier `0.5 / 0.9` stand-ins. Read the
+> parsed file at runtime rather than hard-coding either pair.
 
 ### 6.3 Day/night cycle integration
 
@@ -281,60 +553,69 @@ The Godot `EnvironmentNode` should maintain a running clock (`t_ms`) advanced by
 
 1. Compute `kf_index`, `frac`, `kf_next` per §2.2.
 2. Lerp directional and ambient colours (§2.3).
-3. Apply to `DirectionalLight3D` and `WorldEnvironment`.
-4. Convert and apply fog colour (§6.2).
+3. Apply to `DirectionalLight3D` and `WorldEnvironment` via the apply paths in §6.2a — directional
+   raw; the per-keyframe ambient is inert (`× K_ambient = 0`); the ambient energy is the
+   `OPTION_BRIGHT` floor (default 1.0).
+4. Convert and apply fog colour (§6.2) and fog range (`s × 3.0`, §6.2a).
 
 For the current demo (area 2) the time clock can be seeded at any value; a noon start
-(`t_ms = 24 × 1800 = 43 200`) gives the brightest initial lighting.
+(`t_ms = 24 × 1800 = 43 200`) gives the brightest directional lighting.
 
 ### 6.4 Area 2 (the current Godot demo area) — environment values
 
 Area 2 uses `map_option2.bin` flags consistent with the standard outdoor pattern
 `[0, 0, 1, 1, 1, 1, 1, 0, 0, 0]`:
 
-- `water_enable = 0` — no water plane in area 2.
+- `is_dungeon = 0`, `sight_distance = 0` — outdoor, free camera range.
 - `sky_gate = 1`, `stardome_enable = 1`, `clouddome_enable = 1`,
   `lensflare_enable = 1`, `sun_moon_enable = 1` — full sky subsystem active.
 - `indoor_flag = 0` — outdoor area; full lighting and fog apply.
 
-Area 2 fog (`fog2.bin`) uses the same parameter shape as area 0 (start ≈ 0.5, end ≈ 0.9,
-`data_load_flag = 0`, full 48-step BGRA fog colour table). The exact numeric values should be
-read from the parsed `fog2.bin` at runtime rather than hard-coded; if the parser is not yet
-wired, the following area-1 values (the main town, also a standard outdoor area) are suitable
+Area 2 fog (`fog2.bin`) uses the same parameter shape as area 1 (`start_dist` / `end_dist` float
+fractions, `data_load_flag = 0`, full 48-step BGRA fog colour table). The exact numeric values
+should be read from the parsed `fog2.bin` at runtime rather than hard-coded; if the parser is not
+yet wired, the following area-1 values (the main town, also a standard outdoor area) are suitable
 temporary stand-ins until area 2's file is parsed:
 
-| Parameter | Area 1 stand-in value | Source |
-|-----------|----------------------|--------|
-| `start_dist` | 0.5 | `fog1.bin` offset 0x00 |
-| `end_dist` | 0.9 | `fog1.bin` offset 0x04 |
-| Noon fog colour | approximately (155, 101, 57) RGB | `fog1.bin` kf 24 BGRA converted |
-| Midnight fog colour | approximately (19, 20, 19) RGB | `fog1.bin` kf 0 BGRA converted |
-| Noon directional colour | approx (0.40, 0.40, 0.40) RGB | `light1.bin` §A kf 24 |
-| Noon ambient colour | approx (0.21, 0.21, 0.21) RGB | `light1.bin` §B kf 24 |
-| Fallback light direction | normalise(−7, 7, 20) ≈ (−0.322, 0.322, 0.920) | `light1.bin` bytes 0x14B0–0x14BF |
+| Parameter | Area 1 stand-in value | Source | Note |
+|-----------|----------------------|--------|------|
+| `start_dist` | **0.75** | `fog1.bin` offset 0x00 | SAMPLE-VERIFIED; supersedes the earlier 0.5 stand-in (`environment_bins.md §10.2`). |
+| `end_dist` | **0.98** | `fog1.bin` offset 0x04 | SAMPLE-VERIFIED; supersedes the earlier 0.9 stand-in. |
+| Noon directional colour | approx (0.40, 0.40, 0.40) RGB | `light1.bin` §A kf 24 | float [0,1], applied raw (§6.2a). |
+| Noon ambient colour (pre-gate) | approx (0.21, 0.21, 0.21) RGB | `light1.bin` §B kf 24 | float [0,1]; multiplied by `K_ambient = 0` → **inert**, contributes nothing (§6.2a). |
+| Fallback light direction | normalise(−7, 7, 20) ≈ (−0.322, 0.322, 0.920) | `light1.bin` bytes 0x14B0–0x14BF | static; no per-keyframe direction. |
+| Brightness ambient floor | `OPTION_BRIGHT / 100` = **1.0** (full) at the default | `DoOption.ini` `OPTION_BRIGHT` | **CONFIRMED default 100 → +1.0** (§6.2a/§6.2b). Lower only if a user INI override exists. |
 
-The `EnvironmentNode` debt (D3 in the Godot known-issues list) is:
+> **Numeric defaults — status:** the live fog fractions are **0.75 / 0.98** (vs. the previous
+> 0.5 / 0.9 stand-ins, corrected above). The ambient gate `K_ambient` is **CONFIRMED 0.0** and the
+> `OPTION_BRIGHT` default is **CONFIRMED 100** (→ +1.0 ambient floor). The only value still pending is
+> a possible user-edited on-disk `DoOption.ini` brightness override (§8).
+
+The `EnvironmentNode` debt (D3 "too dark" in the Godot known-issues list) is:
 
 1. Wire `fog2.bin` (or `fog1.bin` as stand-in) into `WorldEnvironment.fog_*` properties at
-   startup, driven by `kf_index` each frame.
-2. Wire `light2.bin` sections A and B into `DirectionalLight3D.light_color` and
-   `WorldEnvironment.ambient_light_color` per frame.
-3. Set `DirectionalLight3D` rotation from the fallback direction vector until per-keyframe
-   light direction data is recovered.
+   startup, driven by `kf_index` each frame; drive the live fog range from the `light%d.bin`
+   section-C scalar as `s × 3.0` (§6.2a).
+2. Wire `light2.bin` section A into `DirectionalLight3D.light_color` per frame (directional raw).
+   Do **not** wire the section-B ambient keyframes as an ambient brightness source — they are gated
+   by `K_ambient = 0` and contribute nothing in the original (§6.2a).
+3. **Set the `OPTION_BRIGHT` additive ambient floor (`OPTION_BRIGHT / 100`, DEFAULT = 1.0) on
+   `WorldEnvironment.ambient_light_energy`** — this is the root-cause fix for the "too-dark" symptom
+   (§6.2b). Use 1.0 as the default; reduce only if a user INI override is read.
+4. Set `DirectionalLight3D` rotation from the static fallback direction vector (no per-keyframe
+   direction exists).
 
 ### 6.5 Water wiring (D4 in the Godot known-issues list)
 
-The water rendering mechanism does not exist in the original client (§4 — RESOLVED-NEGATIVE).
-The wiring task is therefore:
+The water rendering mechanism does not exist in the original client (§4 — RESOLVED-NEGATIVE); there
+is no asset-IO loader, no render path, and no stored enable/Y to be faithful to
+(`environment_bins.md §1.1`). The wiring task is therefore a free engineering choice:
 
-1. At area load, read `map_option{id}.bin` `water_enable` and `water_y`.
-2. If `water_enable = 1`: position the `WaterRenderer` node at world-space Y = `water_y` and
-   enable it.
-3. If `water_enable = 0`: hide/disable the `WaterRenderer` node.
-4. The `WaterRenderer`'s `ShaderMaterial`, texture, UV animation, and reflection approach are
+1. Choose where (if anywhere) to render water; there is no legacy enable flag or plane Y to read.
+2. The `WaterRenderer`'s `ShaderMaterial`, texture, UV animation, and reflection approach are
    free engineering choices — there is no original implementation to reproduce.
 
-For area 2: `water_enable = 0`, so no water plane is needed in the current demo.
+For area 2: no water plane is needed in the current demo.
 
 ---
 
@@ -344,30 +625,30 @@ If any environment file is absent or unreadable:
 
 | Missing file | Fallback behaviour |
 |-------------|-------------------|
-| `map_option%d.bin` | Treat as all-zero flags (no water, no sky, no indoor override) |
+| `map_option%d.bin` | Treat as all-zero flags (no sky, no indoor override) |
 | `fog%d.bin` | No fog (fog disabled) |
-| `light%d.bin` | Use hard-coded fallback: directional direction `(−7, 7, 20)` normalised, energy 1.0; ambient colour `(0.2, 0.2, 0.2)` |
+| `light%d.bin` | Use hard-coded fallback: directional direction `(−7, 7, 20)` normalised, scale 1.0; ambient base `(0, 0, 0)` with the `OPTION_BRIGHT` floor of §6.2a as the only ambient (the per-keyframe §B ambient is inert, `K_ambient = 0`) |
 | `material%d.bin` | No sky-object colour tint (sky objects rendered at full white) |
 | `stardome%d.bin` | Stars rendered at white |
 | `clouddome%d.bin` | Cloud dome rendered at white |
 | `cloud_cycle%d.bin` | No cloud animation (clouds static or hidden) |
+| `sky%d.box` | No skybox mesh (sky-dome geometry absent); only present when `skybox_enable = 1` |
 
 ---
 
 ## 8. Known unknowns
 
-1. **Water rendering mechanism: RESOLVED-NEGATIVE.** Y-plane placement is confirmed from
-   `map_option%d.bin`. No renderer exists in the legacy binary; Godot layer uses a free-choice
-   shader. See §4 for the full evidence summary.
-2. **`fog%d.bin` `data_load_flag = 0` fog colour source:** Whether `fog_colors[]` is used
-   as-is or overridden by `material%d.bin` colours at runtime is unconfirmed. Both files
-   contain consistent day-night colour sequences in all sampled areas.
+1. **Water rendering mechanism: RESOLVED-NEGATIVE.** No renderer, no asset-IO loader, and (per
+   `environment_bins.md §1.1`) no stored enable/Y exist in the legacy binary; the Godot layer uses a
+   free-choice shader. See §4.
+2. **`fog%d.bin` `data_load_flag = 0` fog colour source:** RESOLVED — when the flag is 0 the colour
+   table is **derived** from the sky-colour table via a 48-slot 0.75/0.25 blend (§1.1,
+   `formats/environment_bins.md §2.4`). The exact source-band channel grouping in that blend is MED.
 3. **Indoor fog behaviour:** Whether fog still applies when `indoor_flag = 1` is unverified.
-4. **Per-keyframe directional light *direction*:** The `light%d.bin` keyframes encode colour
-   only (confirmed). Whether the sun direction rotates over the day-night cycle is unresolved —
-   no direction vector is stored per keyframe in the binary. The fallback direction at 0x14B0
-   may be the only direction the client ever uses. Godot may point the `DirectionalLight3D` at
-   a fixed angle derived from the fallback direction.
+4. **Per-keyframe directional light *direction*:** RESOLVED — the keyframes encode colour only; no
+   direction vector is stored per keyframe. The static fallback `(-7, 7, 20)` is the only direction
+   the client uses; the day/night cycle does not rotate the sun (§6.2a,
+   `formats/environment_bins.md §10.6`).
 5. **`light%d.bin` section D (secondary fog scalar):** Near-zero values in all sampled areas;
    exact influence on rendered haze or fog not quantified.
 6. **`material%d.bin` unassigned indices:** See `environment_bins.md §3.3`.
@@ -376,15 +657,37 @@ If any environment file is absent or unreadable:
 9. **Sky object render pass order:** The client renders sky layers as concentric domes in a
    specific draw order (cloud dome, star dome, sun/moon, lens flare). The precise draw-order
    is not relevant to the format spec but is relevant to Godot's sky setup.
+10. **`sky%d.box` geometry:** VFS-only; sample-unverified vertex decode — see `formats/sky.md §A`.
+11. **Lighting apply-path numeric DEFAULTS:** RESOLVED for the two ambient defaults:
+    - **`K_ambient`** — the global ambient multiplier (§6.2a). **CONFIRMED 0.0** (single reader, zero
+      writers, static init 0.0). The per-keyframe ambient term is inert in the shipping client; the
+      prior "set by the sky-detail/quality option" hypothesis is DENIED.
+    - **Ambient base colour** — **CONFIRMED static `(0,0,0)`** at init, then keyframe-driven (§6.2a).
+    - **`OPTION_BRIGHT` default** — **CONFIRMED 100** (INI default; clamp `[1,100]` → 100). At the
+      default the additive ambient floor is +1.0 (full white over the `(0,0,0)` base), correcting the
+      earlier assumed ~50 / +0.5. The faithful Godot ambient floor default is **1.0**, not 0.5.
+    - **On-disk `DoOption.ini` override (UNVERIFIED — the one remaining residual):** whether a
+      player's saved INI carries a brightness below 100. A single runtime read of the stored
+      brightness after options-load settles it (expected i32, percent, default 100); layout-neutral.
+    - **Fog fractions** — observed live area-1 `0.75 / 0.98` (corrected in §6.4) vs. the previous
+      `0.5 / 0.9` stand-ins; read the parsed file at runtime.
+    - **EXP/EXP2 fog modes** — **confirmed NOT driven on the lighting tick** (the shared fog-distance
+      setter only ever writes the LINEAR shape — LINEAR mode + density 0.0). The modes exist in the
+      runtime struct layout, but no path was observed switching to exponential density on this tick;
+      whether any other quality-tier path does remains unverified.
 
 ---
 
 ## Cross-references
 
-- **Format specs:** `Docs/RE/formats/environment_bins.md` (all file byte layouts)
+- **Format specs:** `Docs/RE/formats/environment_bins.md` (all colour `.bin` byte layouts; §10 pins
+  the colour domains and apply-path field facts this spec's §6 consumes, including the CONFIRMED
+  `K_ambient` = 0.0 and `OPTION_BRIGHT` default 100),
+  `Docs/RE/formats/sky.md` (`sky%d.box` geometry + parser load-order / day-cycle view)
 - **Terrain:** `Docs/RE/formats/terrain.md`, `Docs/RE/formats/terrain_layers.md`
 - **Game loop:** `Docs/RE/specs/game_loop.md` (clock, tick rate)
-- **Glossary:** `Docs/RE/names.yaml`
+- **Glossary:** `Docs/RE/names.yaml` (flag for canonicalisation: `K_ambient` ambient gate,
+  `OPTION_BRIGHT` brightness slider)
 - **Provenance:** `Docs/RE/journal.md`
 - **Godot implementation files:** `05.Presentation/MartialHeroes.Client.Godot/World/EnvironmentNode.cs`,
   `05.Presentation/MartialHeroes.Client.Godot/World/WaterRenderer.cs`

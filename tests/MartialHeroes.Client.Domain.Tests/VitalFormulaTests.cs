@@ -191,7 +191,7 @@ public sealed class VitalFormulaTests
     public void MaxHp_PercentBuffSlot_AddsToMultiplier()
     {
         // base 132, class 0.3 + 20% slot buff = 0.5 -> floor(132 * 0.5) = 66.
-        var inputs = Stats(10, 10, 10, 10, 10, classId: 1) with { HpPercentBuffPermille = 20 };
+        var inputs = Stats(10, 10, 10, 10, 10, classId: 1) with { HpPercentBuffPercent = 20 };
         Assert.Equal(66L, VitalFormula.ComputeMaxHp(inputs));
     }
 
@@ -289,7 +289,7 @@ public sealed class VitalFormulaTests
             LevelBaseMp = 120,
             ServerBaseHp = 25,
             ServerBaseMp = 10,
-            HpPercentBuffPermille = 7,
+            HpPercentBuffPercent = 7,
             Aura0 = AuraTerm.Hp(15),
             Aura1 = AuraTerm.Mp(40),
         };

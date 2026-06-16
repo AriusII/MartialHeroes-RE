@@ -1,12 +1,28 @@
 ---
 status: confirmed
-sample_verified: partial   # VFS census SAMPLE-VERIFIED; runtime logic CODE-CONFIRMED from binary
+verification: confirmed     # device-init, curve, ambient driver, worker opcodes, table loader = control-flow-confirmed; SOUND_KIND integer values + option-store index decode + per-widget click cue = capture/debugger-pending
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida]
+conflicts: resolved         # C1 coop-level NORMAL not PRIORITY; C2 primary caps 0x11 not 0x10011; C3 five tables loaded (3 read / 2 dead) not three; C4 per-area soundtable path; C5 ambient EFF = kind 6 via a separate helper
+sample_verified: partial   # VFS census SAMPLE-VERIFIED; runtime logic CODE-CONFIRMED from binary control-flow
 subsystems: [sound_runtime, audio_device, ambient_driver, sfx_router, worker_thread, volume_buses]
 networked: false            # sound is purely client-side; no sound opcodes on the wire
 encoding_note: audio file IDs are plain decimal integers; no text encoding concerns
 ---
 
 # Sound subsystem (runtime audio engine)
+
+> **Verification banner (re-verified 2026-06-16, ida_anchor 263bd994, evidence [static-ida]).**
+> The audio architecture, device-init constants, the volume curve, the ambient mud-tile driver, the
+> worker-thread opcode set, the per-area table loader, and the actor-event SFX router are all
+> **control-flow-confirmed** from the binary's control flow + operands (static IDA, no debugger this
+> lane). What remains **capture/debugger-pending**: the `SOUND_KIND` name→integer mapping, the
+> option-store index decode, the per-front-end-widget click cues, and the `GSoundOGG` object byte
+> size (carried, not re-measured). **Conflicts resolved this pass:** the cooperative level is
+> `DSSCL_NORMAL`, not `DSSCL_PRIORITY` (§1); the primary buffer caps are `0x11`, not `0x10011`
+> (§1); **five** tables are loaded into RAM (three read, two dead), not three (§6); the per-area
+> table path and the ambient 3D-point kind (6) are now stated explicitly (§6).
 
 > **Clean-room specification.** Neutral description only — no decompiler identifiers, no binary
 > virtual addresses, no pseudo-code. Promoted from dirty-room analyst notes under EU Software
@@ -32,11 +48,15 @@ encoding_note: audio file IDs are plain decimal integers; no text encoding conce
 | Audio API (DirectSound only, no third-party middleware) | CODE-CONFIRMED |
 | Codec (statically linked Ogg Vorbis 1.3.2; all clips `.ogg`) | CODE-CONFIRMED |
 | Class family (`SoundManager`, `GSound`, `GSoundOGG`, `GSoundThread`) | CODE-CONFIRMED (RTTI + log strings) |
-| Device init: PRIORITY coop level, 3D listener, five WAVEFORMATEX templates | CODE-CONFIRMED |
+| Device init: **NORMAL** coop level (corrected from PRIORITY), 3D listener, five WAVEFORMATEX templates | CODE-CONFIRMED |
+| Primary-buffer caps **0x11** (PRIMARYBUFFER \| CTRL3D — corrected from 0x10011; no CTRLVOLUME) | CODE-CONFIRMED |
 | Codec rule: 3D MUST be mono, 2D MUST be stereo | CODE-CONFIRMED |
 | 512 KiB scratch / 1 MiB streaming ring; 3D over-size reject | CODE-CONFIRMED |
 | Volume curve: −10000 at X=0, nested-log form ×3000+0.5 otherwise | CODE-CONFIRMED (exact expression) |
+| Per-area table loader reads **FIVE** files (`.wlk .run .bgm .bge .eff`, `data/map<area>/soundtable<area>.<ext>`, 0x3000 each); 3 read at runtime, 2 (`.wlk`/`.run`) dead | CODE-CONFIRMED |
 | Ambient driver: 600 000 ms cadence, hour/3600, ×0.7 volume, indoor id 863500002 | CODE-CONFIRMED |
+| Ambient 3D-point (`.eff`) play uses **kind 6** via a separate play helper (not the SFX router) | CODE-CONFIRMED |
+| Deferred/scheduled actor-event SFX dispatcher (time-gated list feeding the router) | CODE-CONFIRMED |
 | Footstep id source: actor-visual fields (+108 walk, +112 run), NOT mud cells | CODE-CONFIRMED |
 | Async worker: 9 opcodes, >200 ms tick interval, 100 ms sleep | CODE-CONFIRMED |
 | Four volume buses (music / terrain+ambient / char / mob); value/100 linear | CODE-CONFIRMED |
@@ -46,6 +66,11 @@ encoding_note: audio file IDs are plain decimal integers; no text encoding conce
 | `.wlk`/`.run` all-null in this VFS; mud-cell footstep path is editor-only at runtime | CODE-CONFIRMED (runtime trace) + SAMPLE-VERIFIED (all-zero tables) |
 | `SoundManager` object field offsets | CODE-CONFIRMED from binary stores (implementation guide only) |
 | `GSoundOGG` object size (776 bytes) | CODE-CONFIRMED |
+| Front-end cue map (BGM 920100200, UI click 861010101, intro stinger 861010105) | CODE-CONFIRMED (static) |
+| Login BGM-absent; char-select 920100200 on a single category-0 voice (free-on-id-mismatch); per-class preview BGM 91006xxxx | CODE-CONFIRMED (static, CAMPAIGN 9) |
+| Loading-screen BGM 920100100 (category 0, looped) fired by the loading-screen builder; never explicitly stopped — front-end must stop-previous at each scene boundary | CODE-CONFIRMED (static) |
+| Front-end buttons are silent; owner-window action handler plays the cue | CODE-CONFIRMED (static, absence-scan) |
+| Per-FE-button exact click cue (login / PIN widgets) | UNVERIFIED (debugger-only) |
 
 ---
 
@@ -85,30 +110,47 @@ create factory and the worker thread early-out, silencing all audio at negligibl
 On startup `SoundManager::initialize` calls the DirectSound device-init routine, which performs:
 
 1. `DirectSoundCreate(NULL, &device, NULL)` — creates the default DirectSound device.
-2. `device.SetCooperativeLevel(hwnd, DSSCL_PRIORITY)` — **PRIORITY cooperative level** (required
-   for primary buffer manipulation).
-3. `CreateSoundBuffer` for a **primary buffer** with capability flags `0x10011`:
-   `DSBCAPS_PRIMARYBUFFER` | `DSBCAPS_CTRL3D` | `DSBCAPS_CTRLVOLUME`.
+2. `device.SetCooperativeLevel(hwnd, DSSCL_NORMAL)` — **NORMAL cooperative level** (the cooperative-
+   level argument is the constant **1 = DSSCL_NORMAL**). The legacy client does **not** request the
+   PRIORITY or EXCLUSIVE mode; it does not take priority/exclusive control of the primary buffer.
+   *(Corrected: an earlier pass read this as `DSSCL_PRIORITY`. The on-wire argument is `1`, which is
+   `DSSCL_NORMAL`. A port must use NORMAL cooperative mode to match behaviour — do not request
+   priority/exclusive.)*
+3. `CreateSoundBuffer` for a **primary buffer** with capability flags `0x11`:
+   `DSBCAPS_PRIMARYBUFFER` (0x01) | `DSBCAPS_CTRL3D` (0x10). **No `DSBCAPS_CTRLVOLUME` on the primary
+   buffer.** *(Corrected: an earlier pass read `0x10011` including CTRLVOLUME. The primary-buffer
+   descriptor's flag word is `0x11`. Volume control is carried on the **secondary** buffers — their
+   descriptor sets the 0x80 `DSBCAPS_CTRLVOLUME` bit — not on the primary, so all `SetVolume` calls
+   target secondary buffers.)* The descriptor `dwSize` is 36.
 4. `QueryInterface(IID_IDirectSound3DListener)` on the primary buffer → stored as the global 3D
    listener. The listener interface is acquired here at init, not lazily.
 
-If any step fails the device is shut down and initialisation returns failure.
+If any step fails the device is torn down (the audio-enabled byte is cleared and the engine
+continues silently) and initialisation returns failure.
 
 ### 1.1 Five WAVEFORMATEX templates
 
 Five PCM `WAVEFORMATEX` descriptors are pre-built once at init and kept as globals. They are
-selected at sound-create time by channel count and sample rate:
+selected at sound-create time by channel count and sample rate. All are `wFormatTag = 1` (PCM),
+16-bit:
 
-| Role | Channels | Sample rate | Bit depth | Block align | Notes |
-|---|---:|---:|---:|---:|---|
-| 3D mono 22.05 kHz | 1 | 22050 | 16 | 2 | **3D default** |
-| 3D mono 44.1 kHz  | 1 | 44100 | 16 | 2 | 3D alternate |
-| 2D stereo 22.05 kHz | 2 | 22050 | 16 | 4 | **2D default** |
-| 2D stereo 44.1 kHz | 2 | 44100 | 16 | 4 | 2D alternate (also used for primary buffer) |
-| 2D stereo 44.1 kHz | 2 | 44100 | 16 | 4 | (duplicate; primary-buffer variant) |
+| # | Role | Channels | Sample rate | Avg bytes/s | Block align | cbSize | Notes |
+|---:|---|---:|---:|---:|---:|---:|---|
+| 1 | 3D mono 44.1 kHz | 1 | 44100 | 88200 | 2 | 18 | 3D alternate |
+| 2 | 3D mono 22.05 kHz | 1 | 22050 | 44100 | 2 | 18 | **3D default** |
+| 3 | stereo 44.1 kHz | 2 | 44100 | 176400 | 4 | **0** | primary-buffer variant (cbSize 0) |
+| 4 | 2D stereo 22.05 kHz | 2 | 22050 | 88200 | 4 | 18 | 2D alternate |
+| 5 | 2D stereo 44.1 kHz | 2 | 44100 | 176400 | 4 | 18 | **2D default** |
+
+The two stereo-44.1 kHz descriptors (#3 and #5) are otherwise identical and differ only by `cbSize`
+(0 vs 18): #3 is the primary-buffer variant, #5 the 2D-secondary default.
 
 Two `DSBUFFERDESC` templates wrap the appropriate `WAVEFORMATEX` — one for 2D secondary buffers,
-one for 3D secondary buffers.
+one for 3D secondary buffers. The 2D secondary descriptor's `dwFlags` carries `DSBCAPS_CTRLVOLUME`
+(0x80) (plus a global-focus bit); the 3D secondary descriptor's `dwFlags` carries the 3D-control,
+frequency-control, and deferred-localisation bits. Both descriptors have `dwSize = 36`. (The exact
+constant decode of the secondary-descriptor flag words beyond CTRLVOLUME is a static hypothesis; the
+load-bearing facts are that the **primary** has no CTRLVOLUME and the **2D secondary** does.)
 
 ### 1.2 Hard codec rule (CODE-CONFIRMED)
 
@@ -304,11 +346,42 @@ The driver reads the local player's world XYZ, updates the DirectSound 3D listen
 index into the sound tables are at cell offsets **+2**, **+3**, **+4**, **+5**, **+6**, and **+7**
 (see `formats/sound_tables.md` for the per-extension mapping).
 
-### 6.3 Three in-memory sound tables
+### 6.3 The per-area table loader — FIVE tables loaded, THREE read (CODE-CONFIRMED)
 
-The ambient driver maintains three runtime arrays in memory (one per sound table family), each
-holding the deserialized contents of the corresponding on-disk table. Each array uses a **48-byte
-stride** per entry (matching the on-disk record size from `formats/sound_tables.md`). The entry
+When the map/area is set, a per-area loader opens and reads the per-area sound-schedule files into
+**five** distinct in-memory globals, in this exact order, **0x3000 (12288) bytes each** (= 256
+entries × 48-byte stride):
+
+| Order | Path | Extension | Read at runtime? |
+|---:|---|---|---|
+| 1 | `data/map<area>/soundtable<area>.wlk` | `.wlk` (walk footsteps) | **No — dead** |
+| 2 | `data/map<area>/soundtable<area>.run` | `.run` (run footsteps) | **No — dead** |
+| 3 | `data/map<area>/soundtable<area>.bgm` | `.bgm` (background music) | Yes |
+| 4 | `data/map<area>/soundtable<area>.bge` | `.bge` (looped ambient) | Yes |
+| 5 | `data/map<area>/soundtable<area>.eff` | `.eff` (3D point sources) | Yes |
+
+The `<area>` placeholder is the map/area id string; the path is built per area, so the BGM/BGE/EFF
+schedule lives under each area's own `data/map<area>/` directory. (The map000 "global terrain" zone
+used by the login/title front-end, §15.2, is a front-end-zone special case, not the general rule.)
+
+Two important consequences:
+
+- **The `.wlk` and `.run` tables are loaded into RAM but never read by any runtime path.** This is
+  why every `.wlk`/`.run` table sampled in the VFS is all-null, and why footsteps come from the
+  actor-visual fields (§8.5) rather than from these tables at runtime. The ambient driver reads only
+  the `.bgm`/`.bge`/`.eff` globals (mud-tile bytes +2 / +3,+4 / +5,+6,+7).
+- The on-disk file is 13312 bytes; the loader reads only the first 0x3000 = 256×48 bytes — the
+  trailing 1024 bytes are never read (the on-disk file layout is a `formats/sound_tables.md`
+  concern).
+
+There is a **separate, editor-only** table loader (the `SoundTester::loadTerrainSound` variant) that
+keys on a `<map><cell><cell>` triple and touches only the three `.bgm`/`.bge`/`.eff` tables. It has
+**no callers** in the shipped client and must not be confused with the live per-area loader above.
+
+### 6.3.1 In-memory entry layout (the three READ tables)
+
+For the three read tables, the ambient driver treats each runtime array as a sequence of **48-byte
+stride** entries (matching the on-disk record size from `formats/sound_tables.md`). The entry
 fields read at runtime are:
 
 - `sound_entry_id` at entry+0x00 (u32): the audio resource ID to play.
@@ -365,7 +438,8 @@ byte for the new entry.
 
 ### 6.8 3D point source slot change (`.eff`)
 
-When any of the three 3D-point slots changes (mud+0x05–+0x07), `playEffPoint` is called:
+When any of the three 3D-point slots changes (mud+0x05–+0x07), the ambient 3D-point play helper is
+called:
 
 - The 3D play position is **(entry.pos_x, playerY, entry.pos_z)** — X and Z come from the table
   entry, Y is taken from the player's current world Y. This anchors the point sound to the
@@ -374,6 +448,12 @@ When any of the three 3D-point slots changes (mud+0x05–+0x07), `playEffPoint` 
 - The clip is played **looped** with a min-distance sourced from the table entry.
 - The terrain/ambient bus gain (`this+0x78`) is applied.
 - Hour-gated by the entry's 24-byte hour schedule.
+- **The play kind used here is `6` (CODE-CONFIRMED).** Crucially, this ambient 3D-point path runs
+  through a **dedicated ambient play helper**, *not* through the actor-event SFX router of §8. The
+  router (§8.4) treats `kind 6` as "rejected (any other value)" — but that exclusion is only for the
+  router's own dispatch. The ambient path is a different function, so there is **no contradiction**:
+  `kind 6` *is* used at runtime, by the ambient EFF helper alone. The actor-event router never emits
+  or accepts `kind 6`.
 
 ---
 
@@ -465,9 +545,16 @@ The `kind` argument is the integer `SOUND_KIND` value (§9). The router dispatch
 
 | Kind values | Pool | Concurrent cap | Notes |
 |---|---|---:|---|
-| **5, 10, 11** | Directional / voice 3D pool | ~3 | Character voice, skill sounds, NPC audio |
+| **5, 10, 11** | Directional / voice 3D pool | ~3 | Character voice, skill sounds, NPC audio (the `>3` concurrent check drops the new sound) |
 | **7, 8, 9** | Footstep pool | pool-sized | Walk and run footsteps |
-| Any other value | Rejected | — | Not routed; no sound created |
+| Any other value (incl. 0..4 and 6) | Rejected | — | Not routed by **this** function; no sound created |
+
+The dispatch is a range ladder: kind 5 takes the directional branch; kinds in `[7,9]` take the
+footstep pool (with the `>3`-concurrent drop); kinds 10 and 11 also take the directional pool; every
+other value (0..4, 6, and >11) falls through to a no-op return. **Note `kind 6` specifically:** it is
+rejected *here* only because the ambient 3D-point sounds reach the engine through a different,
+ambient-only play helper (see §6.8), not through this router. Do not infer that `kind 6` is unused —
+it is used, just not by this function.
 
 Sounds are instantiated via `createSound(sound_id, 3, "data/sound/3d/")`, then positioned
 (`setPosition`, `setMinDistance`), volume-set, and played via `GSound::play`.
@@ -499,6 +586,31 @@ The source of the values at visual+108 and visual+112 (which config file or wire
 these fields) is outside the scope of this spec — it belongs to the struct/asset cartographers
 responsible for the actor-visual layout.
 
+### 8.6 Deferred / scheduled actor-event SFX dispatcher (CODE-CONFIRMED)
+
+The synchronous router (§8.1) is fed not only by direct calls but also by a **time-gated scheduler**
+— a deferred-SFX dispatcher that runs each tick and emits queued actor-event sounds when their fire
+time arrives. This is the mechanism behind the router's 5th argument (the "block"/deferred flag): a
+caller that wants a sound to fire later (e.g. an animation- or effect-synchronised cue) enqueues it
+rather than playing it immediately.
+
+The dispatcher maintains a list of pending entries; each entry carries:
+
+- a **fire time** (a millisecond timestamp),
+- a **kind** byte (the `SOUND_KIND`, §9),
+- a **sound id**, and
+- an **actor composite key** identifying the actor the sound belongs to.
+
+Each tick the dispatcher walks the list; for every entry whose fire time has been reached
+(`current_ms >= entry.fire_time`), it resolves the actor from the composite key (via a cached actor
+lookup) and calls the synchronous router (§8.1) with the entry's kind / id / actor. Entries whose
+actor can no longer be resolved are dropped. Once fired, the entry is removed from the list.
+
+This means a faithful port needs **two** actor-SFX paths: an immediate path (the router called
+directly) and a scheduled path (enqueue now, fire when the timestamp elapses, then route exactly as
+the immediate path would). The scheduled path shares the same distance cull, bus selection, and kind
+dispatch as §8.2–§8.4 — it differs only in *when* the router is invoked.
+
 ---
 
 ## 9. SOUND_KIND enumeration (names CODE-CONFIRMED; values UNVERIFIED)
@@ -523,9 +635,13 @@ was not fully traced. The names themselves are the developers' own labels.
 | `SOUND_SYSTEM2D` | — | System 2D sounds |
 | `SOUND_BG` | — | 2D background |
 
-The router's confirmed play-kind integers are **5, 7, 8, 9, 10, 11**. The mapping of name to
-integer must be confirmed by tracing the editor-tool enum loader before any implementation
-hard-codes a specific integer for a named kind.
+The **actor-event SFX router** (§8) is confirmed to dispatch the play-kind integers **5, 7, 8, 9,
+10, 11**. Separately, the **ambient 3D-point path** (§6.8) is confirmed to use **kind 6** through its
+own play helper (the router rejects 6, but the ambient helper is a different function). So the full
+set of runtime-used kind integers is **5, 6, 7, 8, 9, 10, 11** — but kind 6 reaches the engine only
+via the ambient driver, never via the router. The mapping of name to integer must still be confirmed
+by tracing the editor-tool enum loader before any implementation hard-codes a specific integer for a
+named kind (capture/debugger-pending).
 
 ---
 
@@ -700,6 +816,8 @@ resolved by the dirty-room sound-system lane and are recorded here for cross-ref
 | §known-unknown 2: weight +0x1C semantic | CONFIRMED unused at runtime (no traced consumer) |
 | §known-unknown 1: unknown_36 at +0x24 | CONFIRMED unused at runtime (no traced consumer) |
 | `sound_tables.md` sound ID path (`data/sound/3d/` unconditional) | CORRECTED: `.bgm` IDs resolve via `data/sound/2d/`; `.eff` IDs via `data/sound/3d/`; the 2D branch was present but untraced in the earlier spec pass |
+| Per-area table file path / count | CONFIRMED (runtime): the live loader reads **five** files `data/map<area>/soundtable<area>.{wlk,run,bgm,bge,eff}`, 0x3000 bytes each, in that order; the `.wlk`/`.run` tables are loaded into RAM but never read at runtime (§6.3) |
+| Which loader is the shipped one | CONFIRMED: the per-area loader (called from the map-set/area-load path) is the runtime loader; the `<map><cell><cell>`-keyed `SoundTester::loadTerrainSound` variant has no callers and is editor-only |
 
 ---
 
@@ -718,6 +836,212 @@ Items listed in `client_runtime.md §1.9`:
 | §1.9.7: Voice-pool/footstep-pool concurrency | PARTIALLY CONFIRMED: voice pool capped at ~3 concurrent; global 10-channel pool eviction policy not traced |
 
 ---
+
+## 15. Front-end (login / PIN / server-list / char-select) cue map
+
+> **Confidence:** the cue ids and the silent-button architecture are CODE-CONFIRMED from static
+> analysis of the front-end scene action handlers; the per-FE-widget exact click cue is
+> UNVERIFIED (debugger-only). VFS presence of each `<id>.ogg` is SAMPLE-VERIFIED. This section
+> records only the durable front-end facts; the intro-scene crawl/slideshow that fires id
+> 910061000 is specified separately in `specs/intro_sequence.md`.
+
+### 15.1 Architecture finding — front-end buttons are silent; the owner window plays the cue
+
+The shared front-end button base (the generic `GUButton` class) plays **no sound at all** — not on
+click, hover, press, or release. An absence-scan of every method of that class (constructors, the
+input/event handler, the press-tracker, the hit/hover test, the render path, the enable/state
+setter, and the focus helpers) found **no call to any sound player** and **no referenced sound id**.
+The string field the button stores is its caption text (consumed by the font draw), never a sound id.
+
+Instead, on a completed click the button packages an **action event** carrying its action id and
+posts it to the input manager, which routes it to the **owning window's action handler**. That
+handler is where any click cue is played, at the **head of each action branch**, via the single
+2D play call shape `play(SoundManager, category, sound_id, loop_flag)`.
+
+**Implementation consequence:** do not attach a click sound to a generic button widget. Model the
+cue as an action-handler concern — the window that owns the button chooses (or omits) the cue per
+action.
+
+### 15.2 Confirmed front-end cues
+
+| Cue | Sound id | Category / dir | Role | Confidence |
+|---|---:|---|---|---|
+| Front-end / title BGM | **920100200** | 2D (`data/sound/2d/920100200.ogg`) | Background music for the map000 "global terrain" zone, which the VFS layout uses for the login/title front-end (no separate title zone directory exists). | CODE-CONFIRMED (sound-table byte-decode, §6) + SAMPLE-VERIFIED |
+| Generic UI click | **861010101** | 2D (`data/sound/2d/861010101.ogg`) | The project's universal "a button did something" click. Fired by the char-create / char-select action handler on essentially every button action (appearance steppers, name/create/delete/rename confirms, slot-select confirm, back/cancel transitions). | CODE-CONFIRMED (static; literal id at the play call) |
+| Enter-world / confirm-slot | **920100200** | 2D | Fired when the player enters the selected character from char-select (the same id as the front-end BGM, played as a 2D one-shot confirm cue on the enter action). | CODE-CONFIRMED (static) |
+| Login intro stinger | **861010105** | 2D (`data/sound/2d/861010105.ogg`) | Auto-fired (not a click) at the login state machine's own intro state. Distinct from the **opening-scene** stinger id 910061000 (see `specs/intro_sequence.md`). | CODE-CONFIRMED (static) |
+| Forced-full-volume cues | **861010109**, **861010110** | 2D | The two music-slider-exempt cues; played at amplitude 1.0 when the system-2D option (index 27) is set, bypassing the music bus gain. See §10.6 / §15.2 cross-reference. | CODE-CONFIRMED (special-cased in the 2D player) |
+
+### 15.3 The 862030101–107 cue pool (registered, not 1:1-bound)
+
+A family of UI/system cues **862030101 … 862030107** (7 ids, all category 2 = 2D) is **registered**
+in the system-cue registry (the registry is keyed by id and played by passing the id to the 2D
+player). However, **no static binding** maps any of these ids to a specific front-end widget event
+(e.g. a particular dialog-open, checkbox, or keypad press). They form a **generic cue pool** drawn
+by id; only the universal click (861010101, §15.2) and the enter cue (920100200) are statically
+1:1-bound to concrete front-end actions. Do not assume a keypad-digit-to-862030xxx mapping; it is
+unestablished. (The 7-file count is a plausible match for 10 digits + special keys, but that is a
+size coincidence, not a confirmed binding.)
+
+### 15.4 What is UNVERIFIED (debugger-only)
+
+- **Per-login-button click cue.** The login window's action handler was walked branch-by-branch
+  (Confirm, Refresh with its cooldown, Cancel, the EULA/save-id gates, server-row select, channel
+  select) and **no play call appears on any login action branch**. If the live login form plays a
+  click, it is not visible statically. Mark the per-login-button cue **UNVERIFIED** — close it with
+  the live debugger by breakpointing the 2D player and clicking Confirm / Refresh / Cancel.
+- **PIN keypad press / OK / cancel cue.** The PIN / second-password class is silent in static
+  analysis (digit append, reset, OK, cancel — no play call seen). Whether any keypad cue exists is
+  **UNVERIFIED**; debugger-only.
+- **Button hover cue.** The button base has no hover sound and no front-end window was seen to play
+  a hover cue; likely none exists. **UNVERIFIED**.
+
+### 15.5 Category → path rule (restatement)
+
+The front-end cues all use the standard rule (§2): `category < 5` → `data/sound/2d/<id>.ogg`. All
+the cues in §15.2 are 2D. The `.ogg` basename form is the project-wide convention (INFERRED from
+the loader prefix rule; debugger-confirmable).
+
+---
+
+### 15.6 Direct cue->file rule and the front-end create/loading cue inventory
+
+> **Confidence:** the cue->path rule and the VFS presence of each `<id>.ogg` are SAMPLE-VERIFIED
+> (direct VFS reads). The per-class create-voice binding and the loading-screen BGM firing scene are
+> CODE-CONFIRMED (static, CAMPAIGN 9); see §15.6a / §15.6b.
+
+**Direct cue->file rule (no lookup table).** A front-end audio cue id resolves to a 2D Ogg file by
+the same implicit decimal-stem convention as every other clip (§3.4): the integer cue id IS the
+filename stem. There is **no front-end audio manifest or lookup table** in the VFS — the path is
+computed directly:
+
+```
+cue_id  ->  data/sound/2d/<cue_id>.ogg        // decimal stem, no zero-padding, .ogg unconditional
+```
+
+**Front-end create / loading cue inventory (SAMPLE-VERIFIED present in the VFS):**
+
+| Cue id | Resolved path | Role | Confidence |
+|---:|---|---|---|
+| **861010105** | `data/sound/2d/861010105.ogg` | Login intro SFX / stinger (auto-fired at the login intro sub-state; also has a `3d/` mirror, but the front-end uses the 2D path). Cross-ref §15.2. | SAMPLE-VERIFIED (present); CODE-CONFIRMED firing (§15.2) |
+| **861010101** | `data/sound/2d/861010101.ogg` | Generic UI click (the project-wide "a button did something" cue). Cross-ref §15.2. | SAMPLE-VERIFIED + CODE-CONFIRMED (§15.2) |
+| **920100200** | `data/sound/2d/920100200.ogg` | Char-select BGM (also the front-end/title BGM and the enter-world confirm cue). Cross-ref §15.2. | SAMPLE-VERIFIED + CODE-CONFIRMED (§15.2) |
+| **910061000** | `data/sound/2d/910061000.ogg` | Opening / intro BGM (**looped**), started at the opening (title-curtain) scene build; distinct from the login intro stinger 861010105 and from char-select BGM 920100200. See §15.6c and `specs/intro_sequence.md`. OGG stereo 22,050 Hz. | SAMPLE-VERIFIED (path/header); SPEC-CARRIED (opening-scene firing, §15.2) |
+| **920100100** | `data/sound/2d/920100100.ogg` | Loading-screen BGM (**category 0, looped**), fired by the loading-screen builder (a game-state transition with a random loading-art pick), NOT by login or char-select; never explicitly stopped (see §15.6a and `frontend_scenes.md` §3.8.1). | SAMPLE-VERIFIED (present); CODE-CONFIRMED firing scene (loading) |
+| **910062000** | `data/sound/2d/910062000.ogg` | Per-class character-creation preview BGM — **UI button 1 -> Musa** (internal class 1). Played on the char-select **category-0 music slot** (replaces, not overlays, the scene BGM — §15.6b). OGG stereo 22,050 Hz. | SAMPLE-VERIFIED (path/header); CODE-CONFIRMED binding (§15.6b) |
+| **910063000** | `data/sound/2d/910063000.ogg` | Per-class creation preview BGM — **UI button 3 -> Dosa** (internal class 2). Char-select category-0 slot (replace, §15.6b). OGG stereo 22,050 Hz. | SAMPLE-VERIFIED (path/header); CODE-CONFIRMED binding (§15.6b) |
+| **910064000** | `data/sound/2d/910064000.ogg` | Per-class creation preview BGM — **UI button 2 -> Salsu** (internal class 3). Char-select category-0 slot (replace, §15.6b). OGG stereo 22,050 Hz. | SAMPLE-VERIFIED (path/header); CODE-CONFIRMED binding (§15.6b) |
+| **910065000** | `data/sound/2d/910065000.ogg` | Per-class creation preview BGM — **UI button 0 -> Monk** (internal class 4). Char-select category-0 slot (replace, §15.6b). OGG stereo 22,050 Hz. | SAMPLE-VERIFIED (path/header); CODE-CONFIRMED binding (§15.6b) |
+
+The four creation preview-BGM cues fall in the `91006N000` range (the `9100xxxxx` character-voice
+family, §3.4). The per-class binding is **CODE-CONFIRMED** (the create-form builder selects the id by
+its UI button index, §15.6b): UI 0 -> 910065000 (Monk), UI 1 -> 910062000 (Musa), UI 2 -> 910064000 (Salsu),
+UI 3 -> 910063000 (Dosa). The UI index is NOT the cue-id ordinal (a non-identity crossover, §15.6b). All four play on the char-select category-0 music slot, so a class selection
+replaces the scene BGM rather than overlaying it (§15.6b). Adjacent ids in the same family exist in the
+VFS but are not bound to the front-end create flow.
+
+### 15.6a Loading-screen BGM 920100100 and the front-end stop-previous contract
+
+> **Confidence:** CODE-CONFIRMED (static, CAMPAIGN 9). The loading-screen builder starts sound id
+> **920100100** on the single **category-0** music slot with **loop = 1** — a looping background-music
+> track, NOT a category-2 one-shot SFX (this corrects the earlier "loading SFX, category 2" reading).
+
+The loading screen (a game-state transition with a random loading-art pick) starts the looping
+**920100100** BGM on the shared category-0 music slot, from a **background loading-audio worker**, and
+**never explicitly stops it**. The only category-0 music slot is a single voice that frees the previous
+track on an id mismatch (the same free-on-id-mismatch slot used by char-select 920100200 and the per-class
+preview BGM 91006xxxx, §15.6b). Because 920100100 is never stopped, it can **contend** with the char-select
+BGM 920100200 on that single category-0 slot across the loading->char-select boundary: the next scene
+relies on slot-overwrite rather than an explicit stop, which can leave a brief window where the
+freed-but-draining loading voice and the new char-select voice are both audible (occasionally a lasting
+overlap if the loading-audio worker is not quiesced before char-select starts).
+
+**Port requirement (not a bug to reproduce):** the front-end music state machine must **stop the previous
+front-end track at each scene boundary** rather than relying on slot-overwrite — explicitly stop 920100100
+before char-select starts 920100200, and quiesce/join the loading-audio worker on a single thread before
+the next scene's BGM starts. See `frontend_scenes.md` §3.8.1 for the full double-music / scene-boundary
+stop-previous contract.
+
+### 15.6b Char-select category-0 music slot and per-class preview BGM
+
+> **Confidence:** the firing/selection logic and the single-slot replace-not-overlay behaviour are
+> CODE-CONFIRMED (static, CAMPAIGN 9). The file paths, container, channel count, and sample rate are
+> SAMPLE-VERIFIED (direct VFS header reads, CAMPAIGN 9 Wave 3).
+
+Char-select plays its BGM **920100200** on the single **category-0** music slot (free-on-id-mismatch).
+Login has no BGM of its own. On the character-creation form, a per-class **preview BGM** in the
+`91006xxxx` family replaces the scene BGM on that same single category-0 slot, selected by the
+class button the player presses. The four class buttons are **UI indices 0..3**, and the UI index is
+**NOT** the internal class id — it is a fixed non-identity crossover (UI 0 -> Monk, UI 1 -> Musa,
+UI 2 -> Salsu, UI 3 -> Dosa). Equally, the UI index is **NOT** the preview-BGM id ordinal: the cue
+ids do not increase with the UI index. Bind the cue strictly through the table below; do not assume
+`910062000 + index`.
+
+| UI button index | Internal class | Class name | Preview BGM id | Resolved 2D path | Confidence |
+|---:|---:|---|---:|---|---|
+| 0 | 4 | Monk | **910065000** | `data/sound/2d/910065000.ogg` | CODE-CONFIRMED (binding) + SAMPLE-VERIFIED (path/header) |
+| 1 | 1 | Musa | **910062000** | `data/sound/2d/910062000.ogg` | CODE-CONFIRMED (binding) + SAMPLE-VERIFIED (path/header) |
+| 2 | 3 | Salsu | **910064000** | `data/sound/2d/910064000.ogg` | CODE-CONFIRMED (binding) + SAMPLE-VERIFIED (path/header) |
+| 3 | 2 | Dosa | **910063000** | `data/sound/2d/910063000.ogg` | CODE-CONFIRMED (binding) + SAMPLE-VERIFIED (path/header) |
+
+All four preview-BGM files are present in the VFS and were header-read: OGG Vorbis container,
+**stereo (2 channels)**, **22,050 Hz** sample rate, stored at `data/sound/2d/<id>.ogg`
+(SAMPLE-VERIFIED). The internal-class column matches the create-form UI->class remap documented in
+`frontend_scenes.md` §4.1; this spec restates it only so the audio binding is unambiguous.
+
+**Replace-not-overlay rule (CODE-CONFIRMED).** A per-class preview cue is played on the **single
+category-0 music voice** — the same voice that carries the char-select BGM 920100200. A category-0
+play does **not** stop the previous track explicitly; the slot frees the prior track on an
+id-mismatch as the new one is acquired. The audible consequence is therefore a **replacement**, not
+an overlay: pressing a class button **displaces** 920100200 (and any prior class preview) rather than
+layering on top of it. The only audible artefact possible WITHIN char-select is a **brief drop to
+silence** on the first class press (the scene BGM is freed by the mismatch path before the class
+track is acquired on the next event) — the opposite of a double-voice. The single-slot self-guard
+means a double-BGM cannot originate within char-select; the only double-music source is the
+cross-scene loading->char-select contention described in §15.6a.
+
+### 15.6c Opening/intro BGM and VFS-present-but-unaccounted ids
+
+> **Confidence:** the opening-BGM scene assignment is SPEC-CARRIED (from the opening-scene build,
+> see §15.2 and `specs/intro_sequence.md`); the file path/container/channels/sample-rate are
+> SAMPLE-VERIFIED (direct VFS header read, CAMPAIGN 9 Wave 3).
+
+**Opening / intro BGM — 910061000.** The opening (title-curtain) scene starts a **looped** 2D
+background-music cue **910061000** at scene build. SAMPLE-VERIFIED present at
+`data/sound/2d/910061000.ogg`, OGG Vorbis, stereo, 22,050 Hz. This is distinct from the login-window
+**intro stinger 861010105** (§15.2) and from the char-select BGM 920100200. The opening crawl/slideshow
+that fires it is specified in `specs/intro_sequence.md`.
+
+**Front-end OGG header facts (SAMPLE-VERIFIED).** Every front-end cue in §15 resolves to a 2D OGG
+Vorbis file under `data/sound/2d/<id>.ogg` and was header-read as **stereo (2 channels)** at
+**22,050 Hz**. This applies to the generic UI click **861010101** (category 2), the login intro
+stinger **861010105**, the opening BGM **910061000**, the loading BGM **920100100**, the char-select
+BGM **920100200**, and the four per-class preview cues **910062000–910065000** (§15.6b). The login
+intro stinger 861010105 also has a `data/sound/3d/` mirror, but the front-end consumes the 2D path.
+
+**Unaccounted ids present in the VFS (UNVERIFIED scene role).** The character-voice family and the
+`9201003xx` neighbourhood contain a few additional OGG files adjacent to the bound cues whose
+scene roles are **not** established by any recovered spec. They are listed here only so an engineer
+does not mistake them for bound front-end cues — **do not wire them**:
+
+| Sound id | Resolved 2D path | Confidence |
+|---:|---|---|
+| 910060001 | `data/sound/2d/910060001.ogg` | SAMPLE-VERIFIED (present); scene role UNVERIFIED |
+| 910066000 | `data/sound/2d/910066000.ogg` | SAMPLE-VERIFIED (present); scene role UNVERIFIED |
+| 910067000 | `data/sound/2d/910067000.ogg` | SAMPLE-VERIFIED (present); scene role UNVERIFIED |
+| 920100300 | `data/sound/2d/920100300.ogg` | SAMPLE-VERIFIED (present); scene role UNVERIFIED |
+
+These four are **not** bound to any front-end scene event in the current analysis; assigning them a
+role is debugger-pending (live-trace the front-end/opening scene builders).
+
+### 15.7 No server-endpoint config file exists in the VFS
+
+An exhaustive VFS substring search (`serverlist`, `server`, `host`, `connect`, `.ini`, `.cfg`) found
+**no server-list or host-config file inside `data.vfs`**. The authentication host and port are
+therefore **not VFS-resident** — they are compiled into the client binary or supplied out-of-VFS
+(e.g. a flat file beside the executable, a registry value, or a command-line argument). This is
+consistent with the login flow opening a fixed endpoint rather than reading a VFS config. A revival
+must source the auth endpoint from its own configuration, not from the asset archive.
 
 ## Open questions
 
@@ -767,6 +1091,23 @@ Items listed in `client_runtime.md §1.9`:
    Whether any graceful "no audio" UI notification exists (a warning dialog, log entry, or options
    panel flag) was not confirmed.
 
+10. **Per-front-end-widget click cue.** The login window and PIN keypad have no static play call on
+    any action branch; whether each plays a click cue at runtime is UNVERIFIED (debugger-only, §15.4).
+    The 862030101–107 pool is registered but not 1:1-bound to any front-end widget (§15.3).
+
+11. **Per-class create-voice binding (§15.6/§15.6b).** RESOLVED: the four preview BGM ids
+    (910062000..910065000) are CODE-CONFIRMED bound by the create-form class selector arg
+    (arg 0 -> 910065000, arg 1 -> 910062000, arg 2 -> 910064000, else -> 910063000), all played on the
+    char-select category-0 music slot. The remaining residual is the exact audible free/acquire behaviour
+    on the very first class press (brief silence vs. overlap), which is debugger-only.
+
+12. **Loading-screen BGM 920100100 firing site (§15.6).** RESOLVED: fired by the loading-screen
+    builder (a game-state transition with a random loading-art pick) as a **category-0, looped
+    background-music track** (not a category-2 SFX), not by login or char-select. It is never
+    explicitly stopped, so it contends with the char-select BGM 920100200 on the single category-0
+    music slot across the loading->char-select boundary; the port must stop the previous track at each
+    scene boundary (see §15.6a and `frontend_scenes.md` §3.8.1). CODE-CONFIRMED (static).
+
 ---
 
 ## Cross-references
@@ -781,6 +1122,9 @@ Items listed in `client_runtime.md §1.9`:
 - **Skinning / animation cycle trigger** (the event that fires footstep SFX): `specs/skinning.md`
   (animation cycle-wrap event) and `formats/animation.md` (`.mot` clip timing).
 - **Sound table terrain-cell integration** (mud-cell byte layout): `formats/terrain.md`.
+- **Front-end intro scene** (the opening crawl/slideshow that fires intro sound 910061000):
+  `specs/intro_sequence.md`.
+- **Front-end scene flow** (login state machine, char-select chrome): `specs/frontend_scenes.md`.
 - **Canonical names**: see `Docs/RE/names.yaml` (`SoundManager`, `GSound`, `GSoundOGG`,
   `GSoundThread`, `SoundKind`, `SoundEvent`, `IndoorBgmOverrideId`, `MusicSliderExemptIds`,
   `DecodeScratchBytes`, `StreamRingBytes`, `AmbientReevalMs`).

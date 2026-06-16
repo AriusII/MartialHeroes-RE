@@ -5,7 +5,8 @@
 # The LOBBY protocol is a SEPARATE wire surface from the main game connection. It does NOT use
 # the 8-byte (size,major,minor) opcode header dispatch and is NOT in opcodes.md's family table.
 # It is documented here (and in the opcodes.md "Lobby protocol" appendix) so the
-# network-protocol-engineer can implement the login-server / game-server split.
+# network-protocol-engineer can implement the login-server / game-server split. The two fetches
+# run on dedicated blocking-socket worker threads (out-of-band of the main dispatch loop).
 
 name: LobbyProtocol
 opcode: lobby             # SENTINEL -- the lobby has no (major:minor) opcode; do not register in the catalog table
@@ -17,12 +18,14 @@ capture_verified: false
 
 summary: >
   The lobby (login-server) protocol -- a SEPARATE synchronous TCP surface from the main game
-  connection. Two queries: (1) the server-list query on port 10000 returns a count-prefixed array
-  of 8-byte server records {server_id, status, load, open_time}; (2) the channel-endpoint query on
-  port (10000 + selected server_id) returns a 30-byte ASCII "host port" text naming the actual
-  GAME server. Both responses are LZ4-compressed and carry NO byte cipher. There is NO
-  (major:minor) dispatch on this socket. The localized server NAME is client-local (a name table),
-  not on the wire -- only the numeric server_id travels.
+  connection, fetched on two dedicated blocking-socket worker threads. Two queries: (1) the
+  server-list query on port 10000 returns an 8-byte frame wrapper whose count field is the number of
+  8-byte server-entry records {id/select-key, status/kind, population, flag} that follow; (2) the
+  channel-endpoint query on port (10000 + selected channel offset) returns the same 8-byte wrapper
+  with a payload whose first 30 bytes are an ASCII endpoint token naming the actual GAME server.
+  Both response payloads are LZ4-compressed and carry NO byte cipher. There is NO (major:minor)
+  dispatch on this socket. The localized server NAME is client-local (a name table), not on the wire
+  -- only the numeric id and a per-row caption message-id travel.
 
 # This file documents THREE record shapes plus a host-resolution order. None are codegen structs in
 # the opcode sense; the engineer implements the two lobby queries from the tables below.
@@ -32,73 +35,133 @@ fields:
 notes: |
   Static inference only; no capture available. The lobby is a SYNCHRONOUS, BLOCKING TCP surface,
   distinct from the overlapped game connection. Two short-lived fetch threads each open a blocking
-  socket, read one response, and close.
+  socket, read one response, LZ4-decompress, and close. The recv loop reads exactly the 8-byte
+  wrapper first, then (size - 8) payload bytes, accumulating with a short sleep between reads.
 
   ============================================================================================
   LOGIN-SERVER vs GAME-SERVER SPLIT (the architecture an implementer must build):
   ============================================================================================
     1. LOBBY / LOGIN SERVER: a host:port discovered locally (see HOST RESOLUTION below), queried
-       on PORT 10000 for the server list, and on PORT (10000 + server_id) for a chosen server's
-       game endpoint. Synchronous, blocking, throwaway sockets -- one per query, closed after.
-    2. GAME SERVER: the host:port returned by the channel-endpoint query (record shape B). The
+       on PORT 10000 for the server list, and on PORT (10000 + selected channel offset) for a chosen
+       server's game endpoint. Synchronous, blocking, throwaway sockets -- one per query, closed
+       after. These fetches are OUT-OF-BAND blocking worker threads, NOT main-dispatch opcodes.
+    2. GAME SERVER: the host:port named by the channel-endpoint query (record shape B). The
        client then opens its single persistent overlapped game connection to that host:port and
        runs the (major:minor) opcode protocol (0/0 key exchange, 1/4 auth, 3/1 character list,
        1/9 enter game, ...). The lobby and the game connection NEVER share a socket.
 
   ============================================================================================
-  COMMON LOBBY FRAME WRAPPER (both queries):
+  COMMON LOBBY FRAME WRAPPER (both queries) -- 8 bytes:
   ============================================================================================
     Each lobby response begins with an 8-byte wrapper read as:
-      +0 (u16) size_lo : total frame size, low 16 bits (same framing convention as the game header)
-      +4 (u16) major   : on the SERVER-LIST query this is the RECORD COUNT (not an opcode family)
-      +6 (u16) minor   : appears unused on the lobby socket (believed always 0 / ignorable)
-    The client then reads (size - 8) payload bytes and LZ4-decompresses them. There is NO
-    (major:minor) handler dispatch and NO byte cipher on this socket. The reuse of the word
-    "major" for the record count is a quirk of the shared wrapper -- treat it as a count here.
+      +0 (u32) size  : TOTAL frame size in bytes = 8 (this wrapper) + compressed-payload length.
+                       The payload length to receive is computed as (size - 8). [CODE-CONFIRMED]
+      +4 (u16) count : on the SERVER-LIST query this is reinterpreted as the RECORD COUNT (number of
+                       8-byte server entries that follow). A positive count gates the parse; the
+                       client allocates 8 * count bytes and copies that many bytes from the
+                       decompressed payload. This reuses the game frame's "major" word as a count --
+                       a quirk of the shared wrapper. [CODE-CONFIRMED]
+      +6 (u16) unused : reuses the game frame's "minor" word; preserved through decompression but
+                       NOT read by either lobby thread. Believed unused on this socket. [CODE-CONFIRMED
+                       as present, role = unused here]
+    The client then receives (size - 8) payload bytes and LZ4-decompresses them (raw block; if
+    size == 8 the body is empty / pass-through). There is NO (major:minor) handler dispatch and NO
+    byte cipher on this socket. There is NO separate compressed-size / uncompressed-size field; the
+    only length carried is the total `size` at +0, and the decompressor caps output at a fixed
+    scratch capacity (~11680 bytes). [CODE-CONFIRMED]
 
   ============================================================================================
-  RECORD SHAPE A -- SERVER-LIST record (server-list query, port 10000):
+  RECORD SHAPE A -- SERVER-LIST entry (server-list query, port 10000):
   ============================================================================================
-    The decompressed payload is `count` packed 8-byte little-endian records (count = the
-    wrapper's "major"/count field). Each record:
+    The decompressed payload is `count` packed 8-byte little-endian entries (count = the wrapper's
+    count field above; the count is in the WRAPPER, not a length-prefix inside the payload). Each
+    entry is read by the server-row painter as four 16-bit fields:
 
-      +0 (u16) server_id  : index 1..40 into the CLIENT-LOCAL localized server-name table.
-                            Out-of-range ids are treated as invalid. This numeric id is the ONLY
-                            server identity on the wire; the display name is client-local.
-      +2 (i16) status     : server availability / status code. Special-cased values observed:
-                              0          -> normal / open (falls through to the load-color path),
-                              2 / 3 / 4  -> fixed status labels (used when open_time == 0),
-                              3 (open_time != 0) -> "scheduled open" (renders the open clock),
-                              100        -> "this is the connected / current selection" sentinel.
-                            The full enum is capture-only.
-      +4 (i16) load       : population gauge. Drives the load-color thresholds (>1200 / >800 / >500
-                            / else). For the scheduled-open render it ALSO supplies the HOUR of the
-                            open clock (see open_time). A value of 24 is a "preparing/check"
-                            sentinel rather than a population.
-      +6 (i16) open_time  : used only for status == 3 (scheduled open). Supplies the MINUTE of the
-                            open clock. The displayed clock is HH:MM where HH comes from `load` and
-                            MM comes from `open_time`, each split into two decimal digits.
+      +0 (i16) id_selectkey : the server id / select-key. THREE roles, all on this one field:
+                              (a) fed to the client-local server-NAME lookup to fetch the display
+                                  name (when status/kind is in 1..39);
+                              (b) compared against the remembered "last server" default to draw the
+                                  current-selection highlight;
+                              (c) the value tested == 100 to unlock the per-row select buttons -- the
+                                  "this server is AVAILABLE" gate. The 100 availability sentinel is on
+                                  THIS +0 field, NOT on a separate status field (correction vs the
+                                  earlier reading that placed 100 on status). [CODE-CONFIRMED]
+      +2 (i16) status_kind  : caption / branch selector ("status enum / kind"). Drives the per-row
+                              caption switch:
+                                == 0          -> derive a population label/color from +4 / +6
+                                                 (see POPULATION rules below);
+                                == 3          -> special: if +4 == 24 -> caption message-id 6004;
+                                                 else a latency caption (message-id 6005) formatted
+                                                 from +4 and +6 (each split as value/10 and value%10);
+                                in 1..39 else -> index a per-value caption-string array; the server
+                                                 display NAME is looked up from +0;
+                                < 1 or > 39   -> fallback caption message-id 5901 ("unknown id"),
+                                                 formatted with +0. [CODE-CONFIRMED ids]
+      +4 (i16) population   : population / count value. In the status==0 numeric mode it is
+                              thresholded (see below). It is also compared == 24 in the status==3
+                              branch (the 6004 vs 6005 split) and serves as a numerator in the 6005
+                              latency format. [CODE-CONFIRMED]
+      +6 (i16) flag         : a MODE flag (population-mode + latency-format), read in the status==0
+                              branch and reused as a 6005 latency numerator:
+                                nonzero -> treat +4 as a NUMERIC population: apply the 500/800/1200
+                                           thresholds below;
+                                zero    -> treat +4 as a DISCRETE load level (a small switch on
+                                           +4 == 2 / 3 / 4). [CODE-CONFIRMED]
 
-      Per-record total = 8 bytes. The displayed array is presented in a RANDOMIZED order
-      (load-spreading), with a remembered "last server" re-anchored -- a presentation detail, not
-      a wire field.
+      Per-entry total = 2 + 2 + 2 + 2 = 8 bytes. Allocation = 8 * count, copy = 8 * count, painter
+      stride = 8 bytes -- sums cleanly, no padding. [CODE-CONFIRMED]
+
+    POPULATION caption mapping when status_kind (+2) == 0:
+      - +6 NONZERO (numeric population in +4):
+          +4 > 1200 -> caption message-id 6001
+          +4 >  800 -> caption message-id 6002
+          +4 >  500 -> caption message-id 6003
+          else      -> default caption  [thresholds 500/800/1200 CODE-CONFIRMED]
+      - +6 ZERO (discrete load level in +4):
+          +4 == 4 -> caption message-id 6001
+          +4 == 3 -> caption message-id 6002
+          +4 == 2 -> caption message-id 6003
+          else    -> default caption  [discrete switch CODE-CONFIRMED]
+
+    The four list-COLUMN-HEADER captions (loaded once before the row loop) are message-ids
+    4029, 4030, 4031, 4032. [CODE-CONFIRMED]
+
+    PRESENTATION (not wire fields): the displayed array is presented in a randomized/load-spreading
+    order with the remembered "last server" re-anchored, and a row is highlighted when its +0
+    matches the remembered last-server default. Color constants per caption are presentation-only.
+
+    SIGNEDNESS: the painter sign-extends +2 and +4 for a debug print but zero-extends +2/+4/+6 on
+    the branch reads. Treat all four fields as 16-bit; signedness is presentation-only and
+    needs-capture to pin definitively.
 
   ============================================================================================
-  RECORD SHAPE B -- CHANNEL-ENDPOINT text (channel query, port 10000 + server_id):
+  RECORD SHAPE B -- CHANNEL-ENDPOINT text (channel query, port 10000 + selected channel offset):
   ============================================================================================
-    After a server is selected, a second lobby query is made on PORT (10000 + selected server_id).
-    The decompressed payload's FIRST 30 (0x1E) bytes are copied as a NUL-padded ASCII string of the
-    form "host port" (e.g. an IPv4 dotted host, a space, then a decimal port). It is NOT guaranteed
-    NUL-terminated -- read a fixed 30-byte field and split on whitespace.
+    After a server/channel is selected, a second lobby query is made on
+    PORT (10000 + selected channel offset). The selected channel offset is stashed at select time
+    and added directly to 10000 to form the channel port. [CODE-CONFIRMED]
 
-      +0 (30B) endpoint_text : ASCII "host port" naming the GAME server. The client parses host +
-                               atoi(port) out of this and opens its persistent game connection to
-                               it. Whether the payload carries MORE than 30 bytes (a backup
-                               endpoint, MOTD) is unknown without a capture.
+    The channel thread does NOT parse an array. It zero-fills a 30-byte endpoint field, then copies
+    the FIRST 30 (0x1E) bytes of the decompressed payload verbatim into it as a fixed char[30] ASCII
+    endpoint token. The 30 source bytes are NOT guaranteed NUL-terminated within the field. This
+    token is consumed OPAQUELY -- the thread does not itself parse host/port out of it; it is later
+    spliced as the host:port field of the credential blob fed to the secure-context builder (see
+    specs/login.md). [CODE-CONFIRMED that 30 bytes are copied and reused as a string token]
 
-    COUPLING: the selected server_id (1..40) is added DIRECTLY to 10000 to form the channel query
-    port. So server_id IS the channel port offset, implying the lobby provisions ports
-    10001..10040. Confirm against server-side knowledge / a capture.
+      +0 (30B) endpoint_token : fixed char[30] ASCII endpoint naming the GAME server, consumed as one
+                                string token by the credential build.
+
+    NEEDS-CAPTURE on this record:
+      - the EXACT internal format / delimiter of the 30-byte token (e.g. "host:port" vs "host port"
+        vs "host\0port" vs fixed sub-fields) is NOT statically determinable -- no parse into
+        host/port happens in this thread. (The outbound connect log uses an "ip ... port ..." format
+        but that is a SEPARATE code path and does NOT prove the reply token's format.)
+      - whether the payload carries a SINGLE endpoint or a trailing ARRAY of channel records -- only
+        the first 30 bytes are read, so a single-endpoint reply is plausible but unconfirmed.
+
+    COUPLING: the connect target is htons(10000 + selected channel offset) against the resolved
+    lobby host IP; the 30-byte endpoint token fetched here then feeds the subsequent overlapped
+    game-connection credential handshake (it is NOT used to re-target the lobby fetch socket).
 
   ============================================================================================
   HOST RESOLUTION ORDER (where the LOBBY host comes from, before any query):
@@ -132,20 +195,21 @@ notes: |
   ============================================================================================
   CLIENT-LOCAL SERVER-NAME TABLE (NOT on the wire):
   ============================================================================================
-    The wire carries only the numeric server_id (1..40). The display name comes from a client-local
-    41-entry localized string table (indices 0..40), selected by the active locale. A fresh
-    implementation MUST supply its own server-id -> display-name map; the server never sends names.
+    The wire carries only the numeric id/select-key (+0) and a per-row caption message-id. The
+    display name comes from a client-local localized string table, selected by the +0 id. A fresh
+    implementation MUST supply its own id -> display-name map; the server never sends names.
 
   UNKNOWNS to resolve with a LOBBY capture (and an on-disk list.dat sample):
-    - the 8-byte record decode (id/status/load/open_time) is two-renderer-agreed but
-      wire-unverified; confirm against a real lobby response;
-    - the HH-from-load / MM-from-open_time packing for scheduled-open, and whether load==24 is
-      always the "preparing" sentinel;
-    - the full status enum beyond {0,2,3,4,24,100};
-    - whether the lobby wrapper's minor (@+6) is always 0;
-    - whether the 30-byte channel payload carries more than the leading "host port";
+    - the on-wire byte values of either reply, the real server count, and that the payload is
+      genuinely LZ4-compressed on the wire (vs the size==8 empty pass-through);
+    - the SIGNEDNESS of the +0 / +4 / +6 server-entry fields (presentation sign-extends
+      inconsistently);
+    - the full status_kind (+2) enum beyond the special-cased {0, 3} and the 1..39 caption-array
+      range, and the exact per-value caption strings (CP949 message file);
+    - the channel endpoint token's internal delimiter (host:port? host port? fixed sub-fields?) and
+      whether the channel reply carries one endpoint or a trailing array;
     - the list.dat 768-byte record gap (padding / flags / port) and whether +256 holds a port;
-    - the server_id == channel-port-offset coupling (ports 10001..10040).
+    - the channel-port coupling (selected channel offset added to 10000).
 
   UNBLOCKS: Network.Protocol lobby client (server-list + channel-endpoint queries), the
   login-server/game-server split, and the local host-resolution order (ip.txt -> list.dat ->

@@ -5,91 +5,94 @@ using MartialHeroes.Assets.Parsers.Models;
 namespace MartialHeroes.Assets.Parsers;
 
 /// <summary>
-/// Parser for <c>data/script/msg.xdb</c> — the startup binary UI message catalogue.
-/// Flat headerless array of 516-byte records: u32LE id + u8[512] CP949 NUL-terminated text.
-/// Record count = file_size / 516 (must be exact multiple).
+/// Parser for <c>data/script/msg.xdb</c> — the client-wide UI caption string catalogue.
+/// Flat, headerless array of fixed 516-byte records:
+///   i32 LE caption_id @ +0x000, char[512] CP949 NUL-terminated text @ +0x004.
+/// Record count = file_size / 516 (must be an exact multiple; any remainder → <see cref="InvalidDataException"/>).
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/misc_data.md §6 msg.xdb.
-/// Verification status: CODE-CONFIRMED (loader routine, stride, lookup model);
-/// SAMPLE-UNVERIFIED (record count, ID values, string content) — see spec §6 Known unknowns.
-/// ZERO rendering/engine dependencies.
+/// spec: Docs/RE/formats/msg_xdb.md — "flat header-less array of fixed 516-byte records". CONFIRMED.
+/// ZERO rendering / engine dependencies. Engine-free (no <c>using Godot</c>).
+/// CP949 provider registered once in the static constructor.
 /// </remarks>
 public static class MsgXdbParser
 {
-    // Record stride: 4 (id) + 512 (text buffer) = 516 bytes.
-    // spec: Docs/RE/formats/misc_data.md §6 — "Total record size: 4 + 512 = 516 bytes": CODE-CONFIRMED.
+    // Record stride: 4 (caption_id) + 512 (text buffer) = 516 bytes (0x204).
+    // spec: Docs/RE/formats/msg_xdb.md §File layout — "Record stride: 516 bytes (0x204)". CONFIRMED.
     private const int RecordStride = 516;
 
-    // id field: u32LE @ record+0x000. CODE-CONFIRMED.
-    // spec: Docs/RE/formats/misc_data.md §6 Record layout — "id u32LE @ 0x000: CODE-CONFIRMED".
-    private const int IdOffset = 0;
+    // caption_id field: i32 LE @ record+0x000.
+    // spec: Docs/RE/formats/msg_xdb.md §Record layout — "caption_id i32 LE @ +0x000". CONFIRMED.
+    private const int CaptionIdOffset = 0;
 
-    // text field: u8[512] CP949 NUL-terminated @ record+0x004. CODE-CONFIRMED.
-    // spec: Docs/RE/formats/misc_data.md §6 Record layout — "text u8[512] @ 0x004: CODE-CONFIRMED".
+    // text field: char[512] CP949 NUL-terminated @ record+0x004.
+    // spec: Docs/RE/formats/msg_xdb.md §Record layout — "text char[512] CP949 NUL-terminated @ +0x004". CONFIRMED.
     private const int TextOffset = 4;
-    private const int TextLength = 512; // maximum buffer including NUL
+    private const int TextLength = 512; // fixed buffer width including NUL
 
-    // Register CP949 once per AppDomain.
-    // spec: Docs/RE/formats/misc_data.md §6 Text encoding — "CP949 (code page 949)": CODE-CONFIRMED.
+    // Register CP949 exactly once per AppDomain.
+    // spec: Docs/RE/formats/msg_xdb.md §Status — "Encoding: CP949 (code page 949)". CONFIRMED.
     static MsgXdbParser() => Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
     /// <inheritdoc cref="Parse(ReadOnlySpan{byte})"/>
     public static MsgXdbCatalog Parse(ReadOnlyMemory<byte> data) => Parse(data.Span);
 
     /// <summary>
-    /// Parses all records from a <c>msg.xdb</c> file.
-    /// The file size must be an exact multiple of 516; any remainder throws <see cref="InvalidDataException"/>.
+    /// Parses all records from a <c>data/script/msg.xdb</c> payload.
     /// </summary>
-    /// <param name="span">Raw bytes of <c>data/script/msg.xdb</c>.</param>
-    /// <returns>A <see cref="MsgXdbCatalog"/> containing all (id, text) pairs.</returns>
+    /// <param name="span">Raw bytes of <c>data/script/msg.xdb</c> as obtained from the VFS.</param>
+    /// <returns>A <see cref="MsgXdbCatalog"/> providing id→text lookup for all caption records.</returns>
     /// <exception cref="InvalidDataException">
-    /// Thrown when <paramref name="span"/> length is not a multiple of 516.
+    /// Thrown when <paramref name="span"/> length is not an exact multiple of 516.
     /// </exception>
     /// <remarks>
-    /// spec: Docs/RE/formats/misc_data.md §6 — "record_count = file_size / 516; any remainder
-    /// implies a malformed file": CODE-CONFIRMED.
+    /// spec: Docs/RE/formats/msg_xdb.md §File layout —
+    ///   "record_count = file_size / 516; no count prefix; record 0 begins at byte 0". CONFIRMED.
+    ///   "Magic / signature: None — there is no file header; the first record begins at byte 0". CONFIRMED.
     /// </remarks>
     public static MsgXdbCatalog Parse(ReadOnlySpan<byte> span)
     {
-        // spec: Docs/RE/formats/misc_data.md §6 — "file must be an exact multiple of 516": CODE-CONFIRMED.
+        // Validate: file size must be an exact multiple of the 516-byte stride.
+        // spec: Docs/RE/formats/msg_xdb.md §File layout — "record_count = file_size / 516
+        //   (must be exact multiple; any remainder → malformed file)". CONFIRMED.
         if (span.Length % RecordStride != 0)
             throw new InvalidDataException(
                 $"msg.xdb parse error: buffer length {span.Length} is not an exact multiple of " +
-                $"stride {RecordStride}. spec: Docs/RE/formats/misc_data.md §6.");
+                $"the 516-byte record stride. " +
+                $"spec: Docs/RE/formats/msg_xdb.md §File layout.");
 
-        // spec: Docs/RE/formats/misc_data.md §6 — "record_count = file_size / 516": CODE-CONFIRMED.
+        // spec: Docs/RE/formats/msg_xdb.md §File layout —
+        //   "Observed record count: approximately 2,644 records". SAMPLE-VERIFIED.
         int count = span.Length / RecordStride;
 
-        // Allocate once for all records — no growing lists.
         var records = new MsgXdbRecord[count];
 
-        // CP949 registered in static constructor.
-        // spec: Docs/RE/formats/misc_data.md §6 Text encoding — "CP949 (code page 949)": CODE-CONFIRMED.
+        // CP949 decoder registered in static constructor.
+        // spec: Docs/RE/formats/msg_xdb.md §Status — "Encoding: CP949 (code page 949)". CONFIRMED.
         Encoding cp949 = Encoding.GetEncoding(949);
 
         for (int i = 0; i < count; i++)
         {
-            // Slice the 516-byte record without copying.
+            // Slice the fixed 516-byte record without copying.
             ReadOnlySpan<byte> rec = span.Slice(i * RecordStride, RecordStride);
 
-            // id u32LE @ record+0x000. CODE-CONFIRMED.
-            // spec: Docs/RE/formats/misc_data.md §6 — "id u32LE @ 0x000: CODE-CONFIRMED".
-            uint id = BinaryPrimitives.ReadUInt32LittleEndian(rec.Slice(IdOffset, 4));
+            // caption_id: i32 LE @ record+0x000.
+            // spec: Docs/RE/formats/msg_xdb.md §Record layout — "caption_id i32 LE @ +0x000". CONFIRMED.
+            int captionId = BinaryPrimitives.ReadInt32LittleEndian(rec.Slice(CaptionIdOffset, 4));
 
-            // text u8[512] CP949 NUL-terminated @ record+0x004. CODE-CONFIRMED.
-            // spec: Docs/RE/formats/misc_data.md §6 — "text u8[512] CP949 NUL-terminated @ 0x004: CODE-CONFIRMED".
-            // "The maximum usable string length before the NUL is 511 bytes."
+            // text: char[512] CP949 NUL-terminated @ record+0x004.
+            // spec: Docs/RE/formats/msg_xdb.md §Record layout —
+            //   "text char[512] CP949 NUL-terminated @ +0x004; decode up to first NUL or full 512 bytes". CONFIRMED.
             ReadOnlySpan<byte> textBuf = rec.Slice(TextOffset, TextLength);
             int nulPos = textBuf.IndexOf((byte)0);
             string text = nulPos switch
             {
                 0 => string.Empty,
                 < 0 => cp949.GetString(textBuf), // no NUL found — consume all 512 bytes
-                _ => cp949.GetString(textBuf[..nulPos]), // NUL-terminated
+                _ => cp949.GetString(textBuf[..nulPos]) // NUL-terminated
             };
 
-            records[i] = new MsgXdbRecord(id, text);
+            records[i] = new MsgXdbRecord(captionId, text);
         }
 
         return new MsgXdbCatalog(records);

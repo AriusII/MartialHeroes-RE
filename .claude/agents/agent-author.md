@@ -59,8 +59,8 @@ delegates to, that worker's one-line contract, and the lane/path it owns — so 
 the human never re-briefs. Mirror that roster in `tools: Agent(worker-a, worker-b, …)` (the parenthesized
 list documents intent and hard-enforces if the agent is ever run as the main thread; in a Tier-2 subagent
 it is advisory, so the BODY roster is what carries the link). Encode the concurrency doctrine the lane
-needs — one writer per path per wave (a file-ownership ledger); IDA fan-out in sub-waves of ~3 with
-strictly serialized IDB writes; a build/test/firewall gate between waves. The fleet and every roster are
+needs — one writer per path per wave (a file-ownership ledger); **unbridled IDA fan-out (parallel
+READONLY analysts + parallel IDB writes, no caps — retry failed/conflicting calls)**; a build/test/firewall gate between waves. The fleet and every roster are
 specified in `.claude/KIT.md` §2 — read it before writing or refining an orchestrator. Two levels of
 orchestration is the ceiling: an orchestrator never spawns another orchestrator.
 

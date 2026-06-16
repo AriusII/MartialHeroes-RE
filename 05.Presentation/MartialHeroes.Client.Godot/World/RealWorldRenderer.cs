@@ -212,6 +212,13 @@ public sealed partial class RealWorldRenderer : Node3D
             return;
         }
 
+        // Initialise the cel-shading session: loads toonramp.bmp from the VFS and caches it.
+        // All subsequent SkinnedCharacterBuilder / SkinnedCharacterNode builds pick up the ramp.
+        // spec: Docs/RE/formats/shaders.md §C5.3 — toonramp.bmp 1-D N·L ramp, stage 1.
+        // spec: Docs/RE/specs/rendering.md §5.2 — dotoonshading path = skinned character only.
+        GD.Print("[RealWorldRenderer] Initialise: loading cel toon ramp");
+        CelShadeMaterialFactory.InitSession(_assets);
+
         // Resolve the target area and cell.
         // The area id is read from client_dir.cfg (key "area="), defaulting to 0.
         // The cell is discovered by enumerating real VFS entries for that area.
@@ -234,10 +241,11 @@ public sealed partial class RealWorldRenderer : Node3D
         // and the cell's .map (per-section TEXTURES lists). spec: terrain.md §4.2 + §3.5. CONFIRMED.
         LoadTextureResolutionInputs();
 
-        // Atmosphere (EnvironmentNode) + water (WaterRenderer): assemble the area's sky/fog/light
-        // from the parsed per-area environment bins (map_option/fog/light/material) and place a
-        // water plane when map_option.water_enable = 1.
-        // spec: Docs/RE/specs/environment.md §3 (assembly) + §4 (water placement).
+        // Atmosphere (EnvironmentNode): assemble the area's sky/fog/light from the parsed per-area
+        // environment bins (map_option/fog/light/material). RECONCILED Campaign 5: map_option carries
+        // no water field, so no map_option-driven water plane is placed (per-cell water presence is
+        // detected separately from .map FX texture names).
+        // spec: Docs/RE/specs/environment.md §3 (assembly) + §4 (water RESOLVED-NEGATIVE).
         GD.Print("[RealWorldRenderer] Initialise: wiring environment + water");
         try
         {
@@ -489,17 +497,17 @@ public sealed partial class RealWorldRenderer : Node3D
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Assembles the area's environment (sky/fog/light) into a <see cref="EnvironmentNode"/> and,
-    /// when the area's <c>map_option%d.bin</c> enables water, places a <see cref="WaterRenderer"/>
-    /// plane at the data-driven world-space Y.
+    /// Assembles the area's environment (sky/fog/light) into a <see cref="EnvironmentNode"/>.
     ///
     /// The environment is read+parsed from the per-area bins via
     /// <see cref="VfsEnvironmentSource"/> (the same VFS-read+parse adapter pattern as terrain).
     /// Water rendering visuals are a free engineering choice — the legacy client has no water
-    /// renderer (RESOLVED-NEGATIVE); only the enable/Y placement is legacy-derived.
+    /// renderer (RESOLVED-NEGATIVE). RECONCILED Campaign 5: <c>map_option%d.bin</c> carries NO water
+    /// field, so the map_option water path (<see cref="WaterPlacement.FromMapOption"/>) is always
+    /// disabled; per-cell water presence is detected separately from <c>.map</c> FX texture names.
     ///
-    /// spec: Docs/RE/specs/environment.md §3 (assembly) + §4 (water RESOLVED-NEGATIVE, placement).
-    /// spec: Docs/RE/formats/environment_bins.md §1.1 (water_enable @0x00, water_y @0x04).
+    /// spec: Docs/RE/specs/environment.md §3 (assembly) + §4 (water RESOLVED-NEGATIVE).
+    /// spec: Docs/RE/formats/environment_bins.md §1.1 (NO water fields in map_option).
     /// </summary>
     private void WireEnvironmentAndWater()
     {
@@ -523,14 +531,36 @@ public sealed partial class RealWorldRenderer : Node3D
         envNode.Configure(_assets, TargetAreaId, sceneWorldEnv, sceneDirLight);
 
         // ---- Water (D4) ----
-        // Read the area's map_option to decide water placement. spec: environment.md §4.1.
+        // RECONCILED Campaign 5: map_option has NO water field, so this path is always disabled.
+        // Per-cell water presence is detected from the .map FX texture names (CellHasWater), not here.
+        // spec: Docs/RE/formats/environment_bins.md §1.1 (no water fields) + §1.4 (RESOLVED-NEGATIVE).
         AreaEnvironment env = VfsEnvironmentSource.Load(_assets, TargetAreaId);
         WaterPlacement water = WaterPlacement.FromMapOption(env.MapOption);
 
         if (!water.Enabled)
         {
-            // spec: environment.md §4 / §6.5 — water_enable = 0 → no water plane (e.g. area 2).
-            GD.Print($"[Water] area={TargetAreaId} water_enable=0 — no water plane.");
+            // spec: environment_bins.md §1.1 — map_option carries no water plane (always the case).
+            GD.Print($"[Water] area={TargetAreaId} no map_option-driven water plane — checking per-cell FX textures.");
+        }
+
+        // ---- Per-cell water detection (D4 / Campaign 5) ----
+        // map_option has no water field, so water presence is detected from the .map FX texture names.
+        // CellHasWater enumerates FX1–FX7 sections; resolves each TexId via bgtexture.txt; checks for
+        // "_water", "_sea", "_wateredge" substrings in the relative path.
+        // spec: Docs/RE/formats/terrain.md §3.5 — .map FX sections carry water overlays. CONFIRMED.
+        // spec: WaterRenderer.CellHasWater — detection rule; VFS-confirmed texture rel-paths. 2026-06-12.
+        if (_cellMap is null || _bgTextures is null)
+        {
+            GD.Print($"[Water] area={TargetAreaId} cell .map or bgtexture catalog not loaded — no water plane.");
+            return;
+        }
+
+        bool hasWater = WaterRenderer.CellHasWater(_cellMap, _bgTextures);
+        GD.Print($"[Water] area={TargetAreaId} per-cell FX detection: hasWater={hasWater}.");
+
+        if (!hasWater)
+        {
+            GD.Print($"[Water] area={TargetAreaId} cell has no water FX textures — no water plane.");
             return;
         }
 
@@ -543,15 +573,16 @@ public sealed partial class RealWorldRenderer : Node3D
 
         float centreX = (TargetMapX - 10000) * 1024f + 512f;
         float centreZ = (TargetMapZ - 10000) * 1024f + 512f;
+        float waterY = WaterRenderer.WaterSurfaceY(_cellMap);
         // spec: WorldCoordinates.ToGodot — negate Z; Y is the data-driven water_y (unchanged).
-        var centre = new Vector3(centreX, water.WorldY, -centreZ);
+        var centre = new Vector3(centreX, waterY, -centreZ);
 
         var waterNode = new WaterRenderer { Name = "WaterRenderer" };
         AddChild(waterNode);
-        waterNode.Configure(centre, size, water.WorldY);
+        waterNode.Configure(centre, size, waterY);
 
-        GD.Print($"[Water] area={TargetAreaId} water_enable=1 Y={water.WorldY:F0} " +
-                 $"size={size:F0}u centre=({centre.X:F0},{centre.Y:F0},{centre.Z:F0}).");
+        GD.Print($"[Water] cell has water → plane configured at Y={waterY:F1} " +
+                 $"area={TargetAreaId} size={size:F0}u centre=({centre.X:F0},{centre.Y:F1},{centre.Z:F0}).");
     }
 
     /// <summary>First direct child of <paramref name="parent"/> assignable to T, or null.</summary>

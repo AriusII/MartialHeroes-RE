@@ -47,9 +47,9 @@ public sealed partial class SkinnedCharacterNode : Node3D
     private Vector3[] _outPos = []; // per corner, Godot space
     private Vector3[] _outNrm = []; // per corner, Godot space
 
-    private ArrayMesh? _arrayMesh;
+    private ArrayMesh? _arrayMesh; // live render mesh (also used for BuildDiagnostics AABB sampling)
     private MeshInstance3D? _meshInstance;
-    private StandardMaterial3D? _material;
+    private Material? _material;
 
     private float _clipDuration;
     private bool _hasClip;
@@ -66,6 +66,28 @@ public sealed partial class SkinnedCharacterNode : Node3D
     // Interpolation choice for .mot sampling. Smoothed (renormalized alpha) for a modern look.
     // spec: Docs/RE/specs/skinning.md §8(c) — "Smoothed (recommended): renormalize alpha /= 0.1."
     private const bool RenormalizeAlpha = true;
+
+    // Animated-rotation composition mode. spec: Docs/RE/specs/skinning.md §6.5/§6.6 — the sampled
+    // keyframe rotation is composed as a RIGHT (post) multiply on top of the bind-local rotation in
+    // the world walk: worldQuat = parentWorld ⊗ bindLocal ⊗ animLocal (so the committed local pose
+    // for a tracked bone is bindLocalQ ⊗ sampledRot). It is NOT a literal replacement (localQ = sR).
+    //
+    // DATA-PROVEN to be the correct mode (char-create-preview campaign). Composing the real VFS idle
+    // keyframes against the live parser DLLs and measuring the mean per-vertex displacement of the
+    // animated frame-0 deform from the authored rest mesh — an idle's first frame is a calm standing
+    // pose, so it must stay NEAR the authored rig — gives, for the §8(d)/§8(e) trios:
+    //     rig         DELTA   REPLACEMENT   (model extent)
+    //     g1 Warrior  0.47    1.97          (5.0)
+    //     g4 Monk     1.17    2.81          (8.8)
+    //     g2048 Mob   0.02    3.55          (7.8)
+    // DELTA keeps every idle frame-0 close to its authored pose (the mob is essentially identical,
+    // 0.02), while REPLACEMENT flings the whole mesh ~half the model extent away — decisively wrong.
+    // (The §6.4 "replacement" wording describes the per-pass MIXER accumulator, not the world walk;
+    // the keyframes carry full-magnitude values but are composed as deltas on top of bindLocal.)
+    //
+    // Internal so only this presentation assembly can toggle it; the validated default is delta=true.
+    // spec: Docs/RE/specs/skinning.md §6.5/§6.6 (parentWorld ⊗ bindLocal ⊗ animLocal).
+    internal static bool AnimAsDelta { get; set; } = true;
 
     /// <summary>
     /// Builds the rig from parsed data. Must be called once before the node ticks.
@@ -97,21 +119,47 @@ public sealed partial class SkinnedCharacterNode : Node3D
         SkinningMath.BakeInverseBind(_perVertex, mesh.Positions, mesh.Normals, bindWorld);
 
         // 3) Per-bone track binding (by bone ID → array index).
+        //
+        // DEFENSIVE GUARD (rig/clip identity): a track whose bone_id is NOT a bone of this skeleton
+        // is SKIPPED, never clamped/redirected. Clamping a stray bone_id into range would still
+        // drive the WRONG bone (the precise way a wrong-rig clip shatters the mesh once it rotates
+        // bones off bind). Unmatched bone_id is a NON-FATAL skip. With the rig + clip now resolved
+        // from the same id_b (CharCreatePreview3D / CharPreview3D), the matched clip's track count
+        // equals the rig's bone count, so this guard should drop nothing for a correct trio — it is
+        // a belt-and-braces safety net against a future mismatch.
+        // spec: Docs/RE/specs/skinning.md §8(e) item 4 — "SKIP (do not clamp) any clip track whose
+        //       bone_id falls outside [base_id, base_id + bone_count)".
         // spec: Docs/RE/formats/animation.md §Bone-track linkage — bone_id matches Bone.SelfId.
         _trackByBoneIndex = new AnimationTrack?[boneCount];
         if (clip is not null && clip.FrameCount > 0)
         {
+            int boundTracks = 0;
+            int skippedTracks = 0;
             foreach (AnimationTrack tr in clip.Tracks)
             {
+                // Resolve bone_id → array slot ONLY by the skeleton's own id→index map. A bone_id
+                // absent from the map names a joint that does not exist on this rig → SKIP it.
+                // (No "off = bone_id − base_id" salvage: that is exactly the clamp-into-range the
+                // spec forbids, since the offset could land on an unrelated bone of the wrong rig.)
                 int bid = tr.BoneId & 0xFF;
                 int bIdx = (bid >= 0 && bid < 256) ? idToIndex[bid] : -1;
-                if (bIdx < 0)
-                {
-                    int off = tr.BoneId - baseId;
-                    bIdx = (off >= 0 && off < boneCount) ? off : -1;
-                }
 
-                if (bIdx >= 0 && bIdx < boneCount) _trackByBoneIndex[bIdx] = tr;
+                if (bIdx >= 0 && bIdx < boneCount)
+                {
+                    _trackByBoneIndex[bIdx] = tr;
+                    boundTracks++;
+                }
+                else
+                {
+                    skippedTracks++;
+                }
+            }
+
+            if (skippedTracks > 0)
+            {
+                GD.PrintErr($"[Skinning] '{mesh.Name}': SKIPPED {skippedTracks} clip track(s) whose " +
+                            $"bone_id is not a bone of this {boneCount}-bone rig (base_id={baseId}); " +
+                            $"bound {boundTracks}. spec: skinning.md §8(e) item 4 — skip, do not clamp.");
             }
 
             // Duration = frame_count × 0.1 (10 fps).
@@ -150,21 +198,52 @@ public sealed partial class SkinnedCharacterNode : Node3D
         _outPos = new Vector3[cornerCount];
         _outNrm = new Vector3[cornerCount];
 
-        // 6) Material.
-        _material = new StandardMaterial3D
+        // 6) Material — apply cel/toon ShaderMaterial (CelShadeMaterialFactory) when CelEnabled;
+        // fall back to StandardMaterial3D for debugging or when the shader is unavailable.
+        // spec: Docs/RE/specs/rendering.md §5.2 — dotoonshading path = skinned character only.
+        // spec: Docs/RE/formats/shaders.md §C5 — Runtime Cel/Glow Shader Set, Campaign 5.
+        // spec: CLAUDE.md asset chain — skin.txt col5 texId → data/char/tex{dir}/{texId}.png.
+        if (CelShadeMaterialFactory.CelEnabled)
         {
-            TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled, // double-sided safety for thin geometry
-        };
-        if (albedo is not null) _material.AlbedoTexture = albedo;
-        else _material.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+            try
+            {
+                _material = CelShadeMaterialFactory.Build(albedo);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[Skinning] CelShadeMaterialFactory.Build failed for '{mesh.Name}': {ex.Message} " +
+                            "— falling back to StandardMaterial3D.");
+                _material = null;
+            }
+        }
 
-        // 7) Build the initial (rest-pose) mesh so the node is visible even before the first tick.
+        if (_material is null)
+        {
+            // Fallback: StandardMaterial3D (non-cel, flat PBR).
+            var stdMat = new StandardMaterial3D
+            {
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
+            };
+            if (albedo is not null)
+                stdMat.AlbedoTexture = albedo;
+            else
+                stdMat.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+            _material = stdMat;
+        }
+
+        // 7) Build the live render mesh using ArrayMesh (updated per-frame via ClearSurfaces +
+        // AddSurfaceFromArrays). The MeshInstance3D owns the ArrayMesh directly so
+        // SetSurfaceOverrideMaterial is valid after the first DeformAndUpload call adds surface 0.
+        // Note: _immMesh was previously referenced here but never populated with vertices — the
+        // DeformAndUpload path always wrote to _arrayMesh. The MeshInstance3D.Mesh is now _arrayMesh.
         _arrayMesh = new ArrayMesh();
-        DeformAndUpload(0f, restPose: true);
-
         _meshInstance = new MeshInstance3D { Name = "LbsMesh", Mesh = _arrayMesh };
         AddChild(_meshInstance);
+        DeformAndUpload(0f, restPose: true); // fills surface 0 on _arrayMesh first
+        // Set the material AFTER DeformAndUpload so surface 0 exists when SetSurfaceOverrideMaterial runs.
+        if (_material is not null)
+            _meshInstance.SetSurfaceOverrideMaterial(0, _material);
 
         // Randomized clip start phase so a town of mobs sharing one idle clip does not animate in
         // lockstep. Wrapped into [0, duration). No-op for the player (default 0). The visible mesh
@@ -185,6 +264,33 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
     /// <summary>Current ArrayMesh AABB (rest pose after Setup), for recentring.</summary>
     public Aabb GetMeshAabb() => _arrayMesh?.GetAabb() ?? new Aabb();
+
+    /// <summary>
+    /// AABB of the DISPLAYED animated pose at clip frame 0 (Godot space), or the rest AABB when
+    /// there is no clip. Used by the builder to derive the stand-up pivot and recentre from the pose
+    /// that is actually rendered — not the raw bind pose, which can have a different tallest axis.
+    ///
+    /// Why this matters: a rig authored lying along X (X-tallest at rest) whose idle stands it
+    /// upright on Y (Y-tallest animated) would be double-rotated if the pivot were derived from the
+    /// rest pose. Deriving from the animated frame-0 pose makes the pivot reflect what is on screen.
+    /// For the g1 World player (X-tallest in BOTH rest and animation) this returns the same tallest
+    /// axis as the rest AABB, so the World rendering is provably unchanged.
+    /// spec: Docs/RE/specs/skinning.md §6 (the displayed pose is the sampled idle, not the bind pose);
+    ///       §8(b) (single handedness conversion, applied at output here too).
+    /// </summary>
+    public Aabb GetDisplayedFrame0Aabb()
+    {
+        if (_arrayMesh is null) return new Aabb();
+        if (!_hasClip)
+            return _arrayMesh.GetAabb(); // no clip → rest is the displayed pose
+
+        // Render frame 0 of the idle, read its AABB, then restore the rest pose so the visible mesh
+        // and _time are left exactly as Setup left them (the first Tick/_Process re-advances).
+        DeformAndUpload(0f, restPose: false);
+        Aabb animated = _arrayMesh.GetAabb();
+        DeformAndUpload(0f, restPose: true);
+        return animated;
+    }
 
     public override void _Process(double delta)
     {
@@ -227,7 +333,7 @@ public sealed partial class SkinnedCharacterNode : Node3D
     /// </summary>
     private void DeformAndUpload(float t, bool restPose)
     {
-        if (_arrayMesh is null) return;
+        if (_arrayMesh is null || _meshInstance is null) return;
 
         ComputeWorldPoses(t, restPose);
 
@@ -250,20 +356,24 @@ public sealed partial class SkinnedCharacterNode : Node3D
             _outNrm[c] = new Vector3(nx, ny, nz).Normalized();
         }
 
-        // The per-upload Godot.Collections.Array allocation is an ENGINE API CONSTRAINT, not an
-        // oversight: ArrayMesh.AddSurfaceFromArrays takes a Godot.Collections.Array of length
-        // ArrayType.Max, which must be freshly built each upload (it is consumed by the native call
-        // and cannot be safely reused/pooled across frames). The expensive per-vertex work above
-        // already runs in reused buffers; do NOT "optimize" this array away. spec: Godot ArrayMesh API.
+        // Reuse the persistent _arrayMesh: ClearSurfaces then re-add the deformed surface.
+        // The material is held as a SetSurfaceOverrideMaterial on the MeshInstance3D (not on the
+        // ArrayMesh surface), so it survives ClearSurfaces without any per-frame re-assignment.
+        //
+        // The per-upload Godot.Collections.Array allocation is an ENGINE API CONSTRAINT — Godot's
+        // AddSurfaceFromArrays accepts only a Variant-typed Array; keep the reused CPU buffers above.
         var arrays = new global::Godot.Collections.Array();
         arrays.Resize((int)Mesh.ArrayType.Max);
         arrays[(int)Mesh.ArrayType.Vertex] = _outPos;
         arrays[(int)Mesh.ArrayType.Normal] = _outNrm;
         arrays[(int)Mesh.ArrayType.TexUV] = _uvs;
 
-        _arrayMesh.ClearSurfaces();
+        _arrayMesh!.ClearSurfaces();
         _arrayMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
-        if (_material is not null) _arrayMesh.SurfaceSetMaterial(0, _material);
+        // Re-apply the material to surface 0 after ClearSurfaces wipes it.
+        // SetSurfaceOverrideMaterial on MeshInstance3D is NOT called per-frame (it was set once in
+        // Setup after the first DeformAndUpload, and it persists across ClearSurfaces).
+        _arrayMesh.SurfaceSetMaterial(0, _material);
     }
 
     // Rest-pose tracks (all null) reused so the rest path allocates nothing per frame.
@@ -273,7 +383,8 @@ public sealed partial class SkinnedCharacterNode : Node3D
     private void ComputeWorldPoses(float t, bool restPose)
     {
         AnimationTrack?[] tracks = restPose ? _noTracks : _trackByBoneIndex;
-        SkinningMath.ComputeAnimatedWorld(_bones, _parentIndex, tracks, t, RenormalizeAlpha, _world);
+        SkinningMath.ComputeAnimatedWorld(
+            _bones, _parentIndex, tracks, t, RenormalizeAlpha, _world, AnimAsDelta);
     }
 
     // =========================================================================

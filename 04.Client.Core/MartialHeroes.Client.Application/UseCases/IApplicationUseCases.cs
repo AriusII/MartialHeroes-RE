@@ -20,14 +20,14 @@ public interface IApplicationUseCases
     /// is built and sent later by the inbound handler when the server's 0/0 KeyExchange arrives.
     /// spec: Docs/RE/specs/crypto.md §6.1 (credential pre-staged at login-form time, before any 0/0).
     /// </summary>
-    /// <param name="username">Account name. Staged for the flow; also the account token of the optional
-    /// 1/6 login blob (see <paramref name="pin"/>).</param>
+    /// <param name="username">Account name. Staged for the flow; written into the 0x2B-prefixed
+    /// plaintext pre-image of the secure 1/4 credential reply.</param>
     /// <param name="password">The login credential plaintext (RSA-encrypted later as the 1/4 reply M).</param>
     /// <param name="pin">
     /// The second-password / PIN collected after the primary submit (≤ 4 chars). It is the optional
-    /// length-prefixed field of the 1/6 login blob, NOT the password (the password rides only the RSA
-    /// 1/4 reply). Only consumed when the 1/6 emit feature flag is enabled at construction; ignored (and
-    /// no 1/6 frame is emitted) otherwise. spec: Docs/RE/specs/login_flow.md §1 step 1a / §4.2.
+    /// length-prefixed field of the secure 1/4 credential pre-image (NOT the password — the password
+    /// rides the RSA half of that same 1/4 reply). There is no separate 1/6 login frame: the credential
+    /// rides 1/4, and 1/6 is character-create only. spec: Docs/RE/specs/login_flow.md §1 step 1a / §4.2.
     /// </param>
     ValueTask LoginAsync(
         string username, string password, string? pin = null, CancellationToken cancellationToken = default);

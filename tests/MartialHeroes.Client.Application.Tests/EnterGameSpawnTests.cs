@@ -16,10 +16,11 @@ using Xunit;
 namespace MartialHeroes.Client.Application.Tests;
 
 /// <summary>
-/// Phase E4-b — the enter-game → local-player SPAWN critical path: the 3/7 SmsgCharSpawnResult handler,
-/// the descriptor cache filled by 3/1 and consumed on 3/7, the SelectCharacterAsync @BLANK@ /
-/// slot-guard routing, and the 1/9 version-token derivation. spec: Docs/RE/specs/login_flow.md
-/// §3.3 / §3.5 / §5.3 / §7.
+/// Phase E4-b — the enter-game → local-player SPAWN critical path: the 3/14 SmsgCharSpawnResult handler
+/// (de-swapped opcode; the C# constant retains the SmsgCharSpawnResult identifier), the descriptor cache
+/// filled by 3/1 and consumed on 3/14, the SelectCharacterAsync @BLANK@ / slot-guard routing, the 1/9
+/// version-token derivation, and the SpawnDescriptor CP949 name decode. spec: Docs/RE/specs/login_flow.md
+/// §3.3 / §3.5 / §5.3 / §7; Docs/RE/structs/actor.md (SpawnDescriptor.name is CP949).
 /// </summary>
 public sealed class EnterGameSpawnTests
 {
@@ -48,7 +49,8 @@ public sealed class EnterGameSpawnTests
     }
 
     // -------------------------------------------------------------------------
-    // 3/7 handler — spawn on Result != 0, fail on Result == 0
+    // 3/14 handler — spawn on Result != 0, fail on Result == 0 (de-swapped opcode; the C# constant
+    // SmsgCharSpawnResult = 0x3000e is 3/14). spec: Docs/RE/opcodes.md (CAMPAIGN-10 ladder de-swap)
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -252,6 +254,42 @@ public sealed class EnterGameSpawnTests
             new ClientWorld(), bus, listFsm, new CountingUnhandledOpcodeSink(), characterSelection: store);
         var dispatcher = new InboundFrameDispatcher(handler);
         dispatcher.RouteNow(SyntheticFrames.CharacterList(serverId: 1, channelId: 1, slots));
+    }
+
+    // -------------------------------------------------------------------------
+    // SpawnDescriptor name decode — CP949 / EUC-KR, not ASCII
+    // spec: Docs/RE/structs/actor.md (SpawnDescriptor.name +0x00 is CP949; "Decode with CP949, not ASCII")
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void SpawnDescriptorReader_decodes_CP949_korean_name_round_trip()
+    {
+        // Register code page 949 so the test can ENCODE a Korean name into the descriptor bytes (the
+        // reader registers it on its own decode path via Cp949Text). spec: actor.md (name is CP949).
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Encoding cp949 = Encoding.GetEncoding(949);
+
+        // "무사" (Musa / warrior) — two CP949 double-byte glyphs (4 bytes). An ASCII decode would mangle
+        // every byte; only a CP949 decode round-trips it.
+        const string koreanName = "무사"; // 무사
+        byte[] descriptor = new byte[SpawnDescriptorReader.Size];
+        byte[] nameBytes = cp949.GetBytes(koreanName);
+        Assert.True(nameBytes.Length is > 2 and <= 16,
+            "Korean name must be multi-byte CP949 within the 16-byte field.");
+        Array.Copy(nameBytes, 0, descriptor, 0x00, nameBytes.Length); // +0x00 name; rest stays NUL
+
+        var reader = new SpawnDescriptorReader(descriptor);
+        Assert.Equal(koreanName, reader.ReadName());
+    }
+
+    [Fact]
+    public void SpawnDescriptorReader_decodes_ascii_name_and_trims_at_nul()
+    {
+        byte[] descriptor = new byte[SpawnDescriptorReader.Size];
+        "Wuxia"u8.CopyTo(descriptor.AsSpan(0x00)); // +0x00 name, then a NUL terminator in the zeroed tail
+
+        var reader = new SpawnDescriptorReader(descriptor);
+        Assert.Equal("Wuxia", reader.ReadName()); // ASCII round-trips identically under CP949
     }
 
     /// <summary>Builds an 880 + 96 = 976-byte descriptor+stats blob with the cited sub-offsets.</summary>

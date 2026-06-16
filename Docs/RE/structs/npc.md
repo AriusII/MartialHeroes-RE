@@ -1,5 +1,16 @@
 # NPC / Monster struct, spawn record, and mobs.scr linkage (clean-room spec)
 
+> **Verification banner.** verification: **confirmed** for the loader-exercised facts (the 488-byte
+> `mobs.scr` record stride, the u16 `mob_id` primary key at +0x00, the +0xF8 u64 HP qword with its
+> load-time `+= 10` mutation, the +0x144 `mob_type` boss discriminator `== 11` and its second lookup
+> map); **static-hypothesis** for every other `mobs.scr` field (on-disk/sample inferences the loader
+> never reads) and for the `npc.arr` spawn record carried from `formats/npc_spawns.md`;
+> **capture/debugger-pending** for the in-game HP *scale factor* that converts the raw `base_max_hp`
+> template input to the displayed HP pool (distinct from the offset/mutation, which are confirmed).
+> ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida] · conflicts: none
+> (the loader **confirms** §1.3's resolution of the prior `config_tables.md §2.9` +0xF4/+0xF8
+> "level/spawn-timer" mislabel — see §3.2).
+
 Neutral, offset-model description of the legacy client's monster/NPC data: the **mob-template
 record** parsed from `data/script/mobs.scr`, the **per-map spawn record** parsed from
 `data/map<NNN>/npc<NNN>.arr`, and the foreign-key **linkage** between them. Promoted from
@@ -33,10 +44,13 @@ This document is the design input for:
 
 | Aspect | State |
 |---|---|
-| `mobs.scr` record stride (488 bytes) | **sample_verified** — file size 1 950 536 bytes ÷ 488 = exactly 3 997 records, zero remainder, in the available sample. |
-| `mobs.scr` record count / id range | **sample_verified** — 3 997 records; record `mob_id` ranges 11 .. 31 157 in the sample (sequential ≈10-step for normal mobs; boss ids cluster at 14 000+). |
-| `mobs.scr` type-byte distribution (+0x144) | **sample_verified** — counted across all 3 997 records: 3 749 normal (0), 125 boss/elite (11), 2 special (12), remainder spread across small sub-type values 2..10. |
-| `mobs.scr` core fields (`mob_id`, names, level, style, type, HP qword) | **confirmed** — decoded consistently across many records and cross-checked normal-vs-boss. |
+| `mobs.scr` record stride (488 bytes) | **confirmed** (control-flow) — the loader divides file size by 488, allocates `488 × count`, and steps the record cursor by 488; cross-checked sample 1 950 536 ÷ 488 = exactly 3 997 records, zero remainder. |
+| `mobs.scr` record count / id range | **confirmed** (control-flow) — `count = file_size / 488`; record `mob_id` ranges 11 .. 31 157 in the sample (sequential ≈10-step for normal mobs; boss ids cluster at 14 000+). |
+| `mobs.scr` primary key = u16 `mob_id` at +0x00 | **confirmed** (control-flow) — the loader inserts each record into a key→record map keyed on the u16 at +0x00. |
+| `mobs.scr` boss discriminator (+0x144 `== 11`) | **confirmed** (control-flow) — the loader tests the u8 at +0x144 and, when `== 11`, inserts the record into a second boss/elite-only lookup map. Sample distribution across all 3 997 records: 3 749 normal (0), 125 boss/elite (11), 2 special (12), remainder spread across small sub-type values 2..10. |
+| `mobs.scr` HP qword (+0xF8 u64, load-time `+= 10`) | **confirmed** (control-flow) — the loader reads/mutates a 64-bit value at +0xF8 and adds 10 to it on load. The *offset and mutation* are confirmed; the in-game HP **scale factor** is **capture/debugger-pending** (see §1.3). |
+| `mobs.scr` core fields (`mob_id`, HP qword offset, boss type byte) | **confirmed** (control-flow) — the loader exercises exactly three offsets: +0x00 (key), +0xF8 (HP qword +=10), +0x144 (boss type). |
+| `mobs.scr` other fields (names, level, style, model, drop, scaling) | **sample_verified / static-hypothesis** — decoded consistently from on-disk sample bytes, but the loader never reads them; no consumer re-confirmed this pass. |
 | `mobs.scr` combat / drop / scaling fields | **partial** — values decode cleanly and correlate with level / boss status, but the exact formula consuming them is not pinned. |
 | `npc.arr` record stride (28 bytes) | **sample_verified** — owned by `formats/npc_spawns.md`; the two 28-byte samples decode to exactly one record each. |
 | `npc.arr` core fields (`mob_id`, world XZ, spawn_type) | **confirmed** — see `formats/npc_spawns.md`. |
@@ -64,22 +78,33 @@ open list is at the end.
 |---|---|
 | File | `data/script/mobs.scr` |
 | Container | Headerless flat array — no magic, no version, no record count in the file. |
-| Record stride | **488 bytes (0x1E8)** — sample-verified (file size ÷ 488 = whole record count, zero remainder). |
-| Record count | `floor(file_size / 488)` — 3 997 in the sample. |
+| Record stride | **488 bytes (0x1E8)** — **confirmed** (control-flow): the loader divides file size by 488, allocates `488 × count`, and advances the record cursor by 488. Cross-checked: file size ÷ 488 = whole record count, zero remainder. |
+| Record count | `floor(file_size / 488)` — **confirmed** (loader division); 3 997 in the sample. |
 | Endianness | Little-endian throughout (x86 client). |
 | String fields | CP949 / EUC-KR, NUL-terminated, fixed-width slots (read up to the first NUL). |
-| Primary key | `mob_id` (u16 at +0x00). The runtime builds a key→record map; a second map is built for boss/elite records only (those whose type byte at +0x144 equals 11). |
+| Primary key | `mob_id` (u16 at +0x00) — **confirmed** (control-flow): the loader inserts each record into a key→record map keyed on the u16 at +0x00. A second map is built for boss/elite records only (those whose type byte at +0x144 equals 11). |
 
-> **Loader-applied mutation (important for HP).** When the file is loaded into memory, the runtime
-> **adds 10 to the 64-bit value at +0xF8** for every record. The on-disk value at +0xF8 is therefore
-> the base value, and the runtime value = on-disk value + 10. A parser that reads `mobs.scr` from
-> disk and wants the runtime-equivalent HP base must add 10 to the +0xF8 qword. See the field note.
+> **Loader-applied mutation (important for HP) — CONFIRMED (control-flow).** When the file is loaded
+> into memory, the loader reads the 64-bit value at +0xF8 and **adds 10 to it** for every record
+> (`qword at +0xF8 += 10`, with 248 = 0xF8). The on-disk value at +0xF8 is therefore the base value,
+> and the runtime value = on-disk value + 10. A parser that reads `mobs.scr` from disk and wants the
+> runtime-equivalent HP base must add 10 to the +0xF8 qword. The offset and the `+= 10` mutation are
+> control-flow confirmed; the *displayed-HP scale factor* remains capture/debugger-pending. See §1.3.
 
 ### 1.2 Record field table
 
 All offsets are struct-relative (from the start of the 488-byte record). Sample values are quoted
 from decoded records (record 0 = id 11, a level-1 normal mob; record 1 = id 12; the boss row = id
 14000) to ground each claim.
+
+> **What the loader actually reads (control-flow scope).** The loader exercises exactly **three**
+> offsets by control flow: **+0x00** (u16 `mob_id`, the map key), **+0xF8** (the u64 HP qword it
+> mutates `+= 10`), and **+0x144** (the u8 `mob_type` boss discriminator). Those three rows are
+> **CONFIRMED**. **Every other field below** — `name`, `region_name`, `level`, `style`, the scaling /
+> drop / combat fields, `model_id` — is decoded from on-disk **sample bytes** and is consistent
+> across many records, but no consumer was re-located this pass; treat the `CONFIRMED` tags on those
+> rows as **sample-verified** (strong on-disk evidence), not control-flow confirmed. The `PARTIAL` /
+> `UNVERIFIED` tags below are unchanged.
 
 | Offset | Size | Type | Field (proposed) | Conf | Meaning / sample evidence |
 |--------|------|------|------------------|------|---------------------------|
@@ -114,8 +139,8 @@ from decoded records (record 0 = id 11, a level-1 normal mob; record 1 = id 12; 
 | +0xE8 | 4 | i32 | `xp_weight` | PARTIAL | Varies (5, 9, 6, 8, 14…) and correlates with mob tier. Equals `xp_weight_b` (+0xEC) in all observed records. Candidate: XP / reward weight. |
 | +0xEC | 4 | i32 | `xp_weight_b` | PARTIAL | Equals `xp_weight` (+0xE8) in all observed records. |
 | +0xF0 | 4 | i32 | (reserved) | UNVERIFIED | Zero in almost all records; non-zero (36) in the boss row, where it equals `level`. |
-| +0xF4 | 4 | i32 | `field_F4` | PARTIAL | **−1** for many normal mobs; **0** for some; equals `level` for the boss row (36). **This field's identity is contested** — an earlier draft of the config-table spec labelled it "mob level" — but `level` is already confirmed at +0x54, and the **+0xF8 qword is the HP value** (see next row and §1.3). Treat `field_F4` as a *secondary / effective-level or spawn-group key*, **UNVERIFIED**, pending a live HP capture. Sample: rec0=−1, rec1=0, boss=36. |
-| +0xF8 | 8 | u64 | `base_max_hp` | PARTIAL | **Base max-HP value, 64-bit.** The runtime adds 10 to this qword on load (runtime value = on-disk value + 10). The high 32 bits are zero in all observed records (HP < 2³²). On-disk sample values are small (rec0=33, rec1=40, boss=40), so a scale factor is very likely applied elsewhere to produce the in-game HP — see §1.3 and open question 2. Supersedes the earlier "spawn timer" label for this offset. |
+| +0xF4 | 4 | i32 | `field_F4` | UNVERIFIED | **−1** for many normal mobs; **0** for some; equals `level` for the boss row (36). **This field's identity is contested** — an earlier draft of the config-table spec labelled it "mob level" — but `level` is already confirmed at +0x54, and the **+0xF8 qword is the HP value, control-flow confirmed** (see next row and §1.3). Treat `field_F4` as a *secondary / effective-level or spawn-group key*, **UNVERIFIED**, pending a live HP capture. Sample: rec0=−1, rec1=0, boss=36. |
+| +0xF8 | 8 | u64 | `base_max_hp` | **CONFIRMED** (offset + load mutation); scale-factor **capture-pending** | **Base max-HP value, 64-bit.** The loader reads this offset as a 64-bit value (`u64`) and **adds 10 to it on load** (runtime value = on-disk value + 10) — both the offset and the mutation are control-flow confirmed. The high 32 bits are zero in all observed records (HP < 2³²). On-disk sample values are small (rec0=33, rec1=40, boss=40), so a scale factor is very likely applied elsewhere to produce the in-game HP — the *scale factor* itself remains **capture/debugger-pending**; see §1.3 and open question 2. Supersedes the earlier "spawn timer" label for this offset. |
 | +0x100 | 4 | u32 | `phys_atk_base` | PARTIAL | Scales with level. Sample: lv1→200, boss→440. Candidate: base physical attack parameter. |
 | +0x104 | 4 | u32 | `phys_def_base` | PARTIAL | Scales with level. Sample: lv1→200, lv2→210, boss→810. Candidate: base physical defence parameter. |
 | +0x108 | 4 | u32 | (reserved) | UNVERIFIED | Zero in observed records. |
@@ -128,7 +153,7 @@ from decoded records (record 0 = id 11, a level-1 normal mob; record 1 = id 12; 
 | +0x134 | 4 | f32 | `variance_hi_2` | PARTIAL | 1.05 — second variance pair. |
 | +0x138 | 4 | f32 | `power_scale_a` | CONFIRMED (boss/normal split) | Distinguishes boss from normal. Sample: normal ≈0.10..0.19; boss ≈3.09. Used in mob-power computation. |
 | +0x13C | 4 | f32 | `power_scale_b` | CONFIRMED (boss/normal split) | Same pattern as `power_scale_a`. Sample: normal ≈0.13..0.23; boss ≈3.71. |
-| +0x144 | 1 | u8 | `mob_type` | CONFIRMED | Mob-class discriminator. **0 = normal**, **11 = boss/elite**, **12 = special**; small values 2..10 are sub-types. Verified distribution across all 3 997 records: 3 749×0, 125×11, 2×12, remainder spread over 2..10. Records with type 11 are additionally inserted into a boss-only lookup map. |
+| +0x144 | 1 | u8 | `mob_type` | **CONFIRMED** (control-flow) | Mob-class discriminator. **0 = normal**, **11 = boss/elite**, **12 = special**; small values 2..10 are sub-types. The loader tests the u8 at +0x144 (324 = 0x144) and, when `== 11`, inserts the record into a second boss/elite-only lookup map — control-flow confirmed. Verified distribution across all 3 997 records: 3 749×0, 125×11, 2×12, remainder spread over 2..10. |
 | +0x145 | 3 | bytes[3] | (reserved) | UNVERIFIED | Alignment after the type byte. |
 | +0x148 | 4 | f32 | `drop_param_a` | PARTIAL | Normal: 40.0; boss: 35.0. Candidate: base drop probability or reward modifier. |
 | +0x14C | 4 | f32 | `drop_param_b` | PARTIAL | Normal: 80.0; boss: 30.0. |
@@ -168,21 +193,26 @@ A prior version of the config-table spec (`Docs/RE/formats/config_tables.md §2.
 +0xF4 / +0xF8 region into "mob level at +0xF4" and "spawn timer at +0xF8". This document **corrects
 that** based on independent evidence:
 
-- `level` is already CONFIRMED at **+0x54** (an unambiguous u16 compared against player level and
-  tier thresholds).
-- The value at **+0xF8** is read as a 64-bit quantity and surfaced as the mob's **MAXHP** in the
-  client (HP-bar / display path). The runtime **adds 10 to this qword on load**.
+- `level` is already at **+0x54** (an unambiguous u16 compared against player level and tier
+  thresholds — a sample inference, distinct from the loader-read offsets).
+- The value at **+0xF8** is read by the loader as a 64-bit quantity and surfaced as the mob's
+  **MAXHP** in the client (HP-bar / display path). The loader **adds 10 to this qword on load** —
+  **control-flow confirmed** (the offset and the `+= 10` mutation are both read straight off the
+  loader; 248 = 0xF8).
 - The field at **+0xF4** is **−1 for most normal mobs** and **0 for others**, only matching `level`
   for the boss row — behaviour inconsistent with a plain "level" field.
 
-**Resolution adopted here:** +0xF8 = `base_max_hp` (u64, runtime value = on-disk + 10); +0xF4 =
-`field_F4`, an UNVERIFIED secondary / effective-level or spawn-group key.
+**Resolution adopted here (now loader-confirmed):** +0xF8 = `base_max_hp` (u64, runtime value =
+on-disk + 10) — the offset and mutation are CONFIRMED by control flow; +0xF4 = `field_F4`, an
+UNVERIFIED secondary / effective-level or spawn-group key.
 
-**Caveat (open question 2):** the on-disk HP base values are small (33–40). They are almost certainly
-multiplied by a scale factor (a candidate is one of the `power_scale_*` floats at +0x138 / +0x13C, or
-the level / attack / defence parameters) to produce the in-game HP pool. A live combat or
-CharSpawn / vitals capture for a mob of known HP is required to pin the exact scaling. Until then,
-treat `base_max_hp` as a raw template input, not the displayed HP.
+**Caveat (open question 2) — capture/debugger-pending:** the on-disk HP base values are small (33–40).
+They are almost certainly multiplied by a scale factor (a candidate is one of the `power_scale_*`
+floats at +0x138 / +0x13C, or the level / attack / defence parameters) to produce the in-game HP
+pool. A live combat or CharSpawn / vitals capture for a mob of known HP is required to pin the exact
+scaling. The *offset and the `+= 10` load mutation* are control-flow confirmed; the *scale factor* is
+the only HP-related fact still pending. Until then, treat `base_max_hp` as a raw template input, not
+the displayed HP.
 
 ### 1.4 Normal vs. boss/elite (type byte +0x144 == 11)
 
@@ -204,16 +234,16 @@ boss from a normal mob in the sample:
 
 | Offset | Field | Type | Confidence |
 |--------|-------|------|------------|
-| +0x00 | `mob_id` | u16 | CONFIRMED |
-| +0x02 | `name` | bytes[17] (CP949) | CONFIRMED |
-| +0x13 | `region_name` | bytes[17] (CP949) | CONFIRMED |
-| +0x54 | `level` | u16 | CONFIRMED |
-| +0x6C | `style` | u16 | CONFIRMED (==1 ⇒ not targetable by standard attacks) |
-| +0xF8 | `base_max_hp` | u64 | PARTIAL (runtime += 10; scale factor unverified) |
-| +0x138 | `power_scale_a` | f32 | CONFIRMED (boss/normal split) |
-| +0x13C | `power_scale_b` | f32 | CONFIRMED (boss/normal split) |
-| +0x144 | `mob_type` | u8 | CONFIRMED (0=normal, 11=boss, 12=special) |
-| +0x198 | `model_id` | u32 | PARTIAL (pattern-confirmed visual id) |
+| +0x00 | `mob_id` | u16 | **CONFIRMED** (loader key) |
+| +0x02 | `name` | bytes[17] (CP949) | sample_verified (loader does not read) |
+| +0x13 | `region_name` | bytes[17] (CP949) | sample_verified (loader does not read) |
+| +0x54 | `level` | u16 | sample_verified (loader does not read) |
+| +0x6C | `style` | u16 | sample_verified (==1 ⇒ not targetable by standard attacks) |
+| +0xF8 | `base_max_hp` | u64 | **CONFIRMED** offset + `+= 10` load mutation; scale factor capture-pending |
+| +0x138 | `power_scale_a` | f32 | sample_verified (boss/normal split) |
+| +0x13C | `power_scale_b` | f32 | sample_verified (boss/normal split) |
+| +0x144 | `mob_type` | u8 | **CONFIRMED** (loader boss discriminator: 0=normal, 11=boss, 12=special) |
+| +0x198 | `model_id` | u32 | sample_verified (pattern visual id; loader does not read) |
 
 ---
 
@@ -252,10 +282,13 @@ All other values are unobserved in available samples.
 
 ## 3. Linkage — npc.arr `mob_id` → mobs.scr template
 
-The spawn record's `mob_id` (+0x00) is the **foreign key** into the mob-template table. At map load
-the runtime resolves each spawn's `mob_id` through the template lookup, retrieving the 488-byte
+The spawn record's `mob_id` (+0x00) is the **foreign key** into the mob-template table. The
+template lookup map itself is **control-flow confirmed**: the `mobs.scr` loader builds a key→record
+map keyed by the u16 `mob_id` at +0x00 (a second boss-only map is built for type-11 records). At map
+load the runtime resolves each spawn's `mob_id` through that template lookup, retrieving the 488-byte
 template record used for name display, level, HP-bar, mob type (normal/boss), model id, and combat
-eligibility. The resolved record drives:
+eligibility (the *resolution-at-spawn* step is consistent but was not itself re-traced this pass —
+static-hypothesis). The resolved record drives:
 
 - the actor's resolved model / mesh class id (from `model_id` at template +0x198);
 - the displayed name (template `name` at +0x02, CP949);

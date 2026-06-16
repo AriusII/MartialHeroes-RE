@@ -10,28 +10,51 @@
 
 ## Status and verification banner
 
+- `verification:` **confirmed** — VM identity (Lua 5.1.2, `lua_tinker`, the single `cpp_load`
+  global, the `__s64`/`__u64` metatables, the host-pulls-from-scripts control direction) is
+  control-flow-confirmed on this build. The script **source path** is also confirmed (see the
+  corrected Section 6.2). `static-hypothesis` applies only to the in-`.lua` source content the
+  binary never holds (e.g. the exact `if`/`elseif` shape inside a script). **Nothing in this
+  subsystem is server-authored or on-wire**, so no item is capture/debugger-pending.
+- `ida_reverified: 2026-06-16`
+- `ida_anchor: 263bd994`
+- `evidence: [static-ida]`
+- `conflicts:` the prior **Section 6.2 "plain on-disk, NOT the VFS" claim is REFUTED** by this
+  build — the script loader IS routed through the shared VFS-vs-disk open router (now corrected
+  below). The companion `specs/lua-config.md §2.2` was already correct; this file is now reconciled
+  to it. F11 re-verification (build 263bd994) additionally corroborated the stock-VM identity: the
+  base-library opener sets `_VERSION = "Lua 5.1"` and installs the unmodified 5.1 base-lib internals
+  (the `__mode = "kv"` weak GC metatable and `newproxy`) — see Section 2.
 - `status: confirmed` — for the **VM version**. The interpreter is **Lua 5.1.2**, pinned from
   the exact compiled-in version banner (see Section 1). This is a hard fact.
 - `sample_verified: false` — for everything concerning the **role, on-disk location, encoding,
-  and content** of the `.lua` files. No actual `.lua` sample has been recovered and parsed; the
-  file names, the `data/script/` directory, the cleartext/disk loading path, and the
-  data-table semantics are inferred from string constants and observed loading behavior in the
-  legacy client, not from inspecting shipped scripts.
+  and content** of the `.lua` files themselves. No `.lua` *sample* is inspected in this file's
+  scope; the file names, the `data/script/` directory, and the data-table semantics are recovered
+  from string constants and observed loading control flow in the legacy client. (The companion
+  `specs/lua-config.md §9` does carry single-sample on-disk file inspection.)
 
 ### UNVERIFIED items (do not treat as settled)
 
 1. Exact patch level beyond the printed `5.1.2`. Treat `5.1.2` as authoritative because it is the
    literal banner; no finer version evidence exists.
-2. Whether any caller could redirect script loading through the `.pak` VFS. The observed loader
-   reads plain on-disk files; a higher-level redirect was not ruled out.
+2. ~~Whether any caller could redirect script loading through the `.pak` VFS.~~ **RESOLVED on
+   build 263bd994 (confirmed):** the script loader is *itself* VFS-routed through the shared
+   VFS-vs-disk open router, gated by `vfsmode` — there is no "plain on-disk only" path. See the
+   corrected Section 6.2.
 3. Whether the game exposes **more** native script API than `cpp_load`. Only the one global custom
    C function was located at the global table. Additional gameplay bindings (UI / quest / item
    APIs), if any, would arrive via `lua_tinker` per-type registration that has not been mapped.
 4. Whether shipped `.lua` files are source text or precompiled Lua 5.1 bytecode (`luac`). No
    sample was inspected. If precompiled, they would be standard Lua 5.1 bytecode
    (header `\x1bLua`, version byte `0x51`); not confirmed.
-5. Exact UTF-8 encoding assumption for every string table — inferred from the observed decode
-   step, not validated against a sample.
+5. The **shipped `.lua` file source encoding is CP949** (code page 949 / EUC-KR), confirmed by the
+   on-disk file inspection in `specs/lua-config.md §0/§9`. Note the encoding **split**: the
+   in-binary tutorial row-decode path on the *name-based* table loader runs each returned row
+   through a wide-char conversion configured for code page **65001 (UTF-8)** — confirmed in this
+   build — whereas the *file* bytes are CP949. A clean-room reader treats the on-disk bytes as
+   ground truth and decodes the file as CP949; the 65001 in-binary routine is a narrower
+   observation about one conversion site, not the file encoding. See `specs/lua-config.md §0/§5.2`
+   for the full reconciliation.
 
 ---
 
@@ -68,6 +91,10 @@ There is no evidence of a custom, forked, or obfuscated VM:
 - Verbatim version banner, stock error strings, and the stock panic message (Section 2.1).
 - The only non-stock layer is the open-source **`lua_tinker`** C++↔Lua binding (Section 3).
 - No custom bytecode opcodes, no bytecode obfuscation, and no renamed VM were found.
+- The base-library opener sets the global `_VERSION` to the stock `"Lua 5.1"` and installs the
+  standard 5.1 base-lib internals unmodified — including the weak-keyed/weak-valued garbage-collection
+  metatable (`__mode = "kv"`) and `newproxy`. These are immaterial to a reimplementation but further
+  confirm an unmodified stock 5.1 base library (build 263bd994).
 
 ### 2.1 The "ANIC:" demystification — there is no custom VM
 
@@ -149,10 +176,14 @@ Observed host-driven access patterns:
   read out localized / UI string tables.
 - **Config globals** — the host reads boolean and string globals that scripts assign at top level,
   i.e. scripts express configuration as plain global assignments that the host reads back.
-- **String-table extraction** — a loader iterates the `getTableSize` / `getTableString` pair,
-  decodes each entry as UTF-8, and fills a host-side string vector. This is the mechanism by which
-  `.lua` files carry the game's UI/text string tables (i18n). A by-ID variant exists for selecting
-  a specific table.
+- **String-table extraction** — a loader iterates the `getTableSize` / `getTableString` pair and
+  fills a host-side string vector. This is the mechanism by which `.lua` files carry the game's
+  UI/text string tables (i18n). A **by-ID variant** (`getTableStringByID`) exists for selecting a
+  specific table by numeric id. **Decode asymmetry (build 263bd994):** the **name-based** loader
+  runs each returned row through a wide-char conversion configured for code page 65001 (UTF-8)
+  before pushing it; the **ID-based** loader pushes the returned row bytes **directly**, with no
+  wide-char round-trip. The shipped `.lua` *file* bytes are CP949 regardless — a clean-room reader
+  decodes the file as CP949 (see UNVERIFIED item 5 and `specs/lua-config.md §0/§5.2`).
 
 **Net effect:** scripts behave as **configuration + localization tables + UI-layout descriptors**.
 They cannot drive gameplay beyond what `cpp_load` plus the standard libraries allow.
@@ -174,17 +205,27 @@ They cannot drive gameplay beyond what `cpp_load` plus the standard libraries al
 
 (The `.lua.org` fragment from the version banner is **not** a path and is ignored.)
 
-### 6.2 Loading path — plain disk files, cleartext, not the `.pak` VFS
+### 6.2 Loading path — through the shared VFS-vs-disk router (CORRECTED on build 263bd994)
 
-Scripts are loaded as **plain on-disk files in cleartext** from the `data/script/` directory,
-using a raw filesystem file class (open / size / read), then handed to the protected
-load-and-run path. There is **no decryption and no `.pak` VFS lookup** on the observed script
-load path.
+> **Load-bearing correction.** A prior revision of this section claimed scripts are read as *plain
+> on-disk files that bypass the `.pak` VFS*. **That was wrong.** Re-verification on build `263bd994`
+> shows the script loader opens the file through the **same by-name disk-file abstraction that every
+> other asset and text-table loader uses** (the same open path taken by the skin table, actor-motion,
+> items, mobs, NPCs, skills, and bind-list loaders). That by-name open **branches on whether the VFS
+> is mounted**: if the VFS is mounted it reads the entry out of the packed VFS archive; if it is not
+> mounted it opens the loose file directly from disk.
 
-> A pre-existing analyst-tool comment claimed this loader is "VFS-backed." That comment is
-> **inaccurate** versus the observed implementation, which reads plain disk files. Treat the
-> script loader as a plain filesystem loader. (UNVERIFIED whether a higher-level caller could
-> redirect to the VFS — UNVERIFIED item 2.)
+So `.lua` scripts are sourced **exactly like any other asset**, and the packed-VFS-vs-loose-disk
+choice is governed by the **`vfsmode`** boot global (see `specs/lua-config.md §3`): `vfsmode = 1`
+reads scripts from the mounted VFS, `vfsmode = 0` reads loose files from disk. There is no separate
+plain-filesystem path for scripts and no script-specific decryption step — the buffer is handed to
+the protected load-and-run path after the shared open returns it.
+
+> The companion `specs/lua-config.md §2.2` already carried this corrected (VFS-routed) reading; this
+> file is now reconciled to it. The ironic note in the old text — that a pre-existing analyst comment
+> calling the loader "VFS-backed" was "inaccurate" — was itself the mistake: the loader **is**
+> VFS-backed. Implementers must route script loading through the same VFS-vs-disk abstraction as
+> other assets, not a dedicated plain-filesystem reader.
 
 ### 6.3 Who triggers script loads
 
@@ -261,7 +302,8 @@ before committing to Option A, B, or the hybrid.
 
 - Recover real `.lua` samples (`game.lua`, `uiconfig.lua`, `display.lua`, `tutor.lua`) to flip
   `sample_verified` to true and to settle UNVERIFIED items 1, 4, 5.
-- Confirm whether script loading can be redirected through the `.pak` VFS (UNVERIFIED item 2).
+- ~~Confirm whether script loading can be redirected through the `.pak` VFS (UNVERIFIED item 2).~~
+  **RESOLVED:** the loader is VFS-routed (Section 6.2), gated by `vfsmode`.
 - Confirm whether any gameplay API beyond `cpp_load` is exposed via `lua_tinker` class/`def`
   registration (UNVERIFIED item 3).
 - Once samples exist, measure the static-data vs. UI-logic split to close the Section 7 trade-off.

@@ -93,14 +93,17 @@ public sealed class EquipRulesTests
         var req = new EquipRequirement
         {
             RequiredLevel = 10,
-            RequiredClass = CharacterClass.Warrior,
+            // Warrior -> Musa (the martial/melee class). spec: Docs/RE/formats/config_tables.md §2.6.
+            RequiredClass = CharacterClass.Musa,
             RequiredStr = 20,
         };
 
-        var meets = new EquipCandidateStats(Level: 10, CharacterClass.Warrior, Str: 20, 0, 0, 0, 0);
-        var tooLow = new EquipCandidateStats(Level: 9, CharacterClass.Warrior, Str: 20, 0, 0, 0, 0);
-        var wrongClass = new EquipCandidateStats(Level: 10, CharacterClass.Mage, Str: 20, 0, 0, 0, 0);
-        var weakStr = new EquipCandidateStats(Level: 10, CharacterClass.Warrior, Str: 19, 0, 0, 0, 0);
+        var meets = new EquipCandidateStats(Level: 10, CharacterClass.Musa, Str: 20, 0, 0, 0, 0);
+        var tooLow = new EquipCandidateStats(Level: 9, CharacterClass.Musa, Str: 20, 0, 0, 0, 0);
+        // "wrong class" needs a class DIFFERENT from the required Musa to exercise the class-mismatch
+        // path; the old Mage (caster) maps to Dosa. spec: Docs/RE/formats/config_tables.md §2.6.
+        var wrongClass = new EquipCandidateStats(Level: 10, CharacterClass.Dosa, Str: 20, 0, 0, 0, 0);
+        var weakStr = new EquipCandidateStats(Level: 10, CharacterClass.Musa, Str: 19, 0, 0, 0, 0);
 
         Assert.True(EquipRules.CheckRequirements(req, meets));
         Assert.False(EquipRules.CheckRequirements(req, tooLow));
@@ -112,7 +115,9 @@ public sealed class EquipRulesTests
     public void CheckRequirements_NullClass_MatchesAny()
     {
         var req = new EquipRequirement { RequiredLevel = 1, RequiredClass = null };
-        var stats = new EquipCandidateStats(5, CharacterClass.Assassin, 0, 0, 0, 0, 0);
+        // Assassin -> Jagaek (the assassin/swift-strike class); the null RequiredClass matches any
+        // class so the candidate's class is incidental here. spec: Docs/RE/formats/config_tables.md §2.6.
+        var stats = new EquipCandidateStats(5, CharacterClass.Jagaek, 0, 0, 0, 0, 0);
 
         Assert.True(EquipRules.CheckRequirements(req, stats));
     }

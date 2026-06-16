@@ -144,31 +144,55 @@ public readonly record struct FxVertex32(
     float U0,
     float V0);
 
-// ─── FX1 ───────────────────────────────────────────────────────────────────
+// ─── FX group (universal group-array model §1.1a) ──────────────────────────
 
 /// <summary>
-/// Decoded result of an <c>.fx1</c> terrain overlay layer file.
-/// Header: 24 bytes. Vertex format: VF_36. Single UV channel.
+/// One group in an FX layer file, decoded per the universal group-array model.
+/// All FX extensions share this layout; only the vertex stride differs per extension.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/terrain_layers.md §1.5 FX1 Format: CONFIRMED (3 samples, exact size match).
-/// Header fields at 0x00–0x14: type_tag, unknown_1, unknown_2, render_state, mesh_count, index_count.
-/// render_state value 15 observed; semantic UNVERIFIED.
+/// spec: Docs/RE/formats/terrain_layers.md §1.1a Universal group-array model — CONFIRMED (two-witness).
+/// Per-group header fields: group_flags_0 @ +0x00 (UNVERIFIED), group_flags_1 @ +0x04 (UNVERIFIED),
+/// render_state @ +0x08 (CONFIRMED-variable), vertex_count @ +0x0C (CONFIRMED), index_count @ +0x10 (CONFIRMED).
+/// render_state is NOT constant — "constant=15" and "constant=5" readings are REFUTED.
 /// </remarks>
-public sealed class Fx1Layer
+public class FxGroup
 {
-    /// <summary>type_tag u32 @ 0x00. Observed: 1. spec: §1.5 CONFIRMED (constant=1).</summary>
-    public required uint TypeTag { get; init; }
+    /// <summary>
+    /// group_flags_0 u32 @ group+0x00. Read-but-not-consumed; near-constant 1.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.1a — group_flags_0: UNVERIFIED (read-but-not-consumed).
+    /// </summary>
+    public required uint GroupFlags0 { get; init; }
 
-    /// <summary>unknown_1 u32 @ 0x04. Observed: 1. spec: §1.5 UNVERIFIED.</summary>
-    public required uint Unknown1 { get; init; }
+    /// <summary>
+    /// group_flags_1 u32 @ group+0x04. Read-but-not-consumed; mostly 0.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.1a — group_flags_1: UNVERIFIED (read-but-not-consumed).
+    /// </summary>
+    public required uint GroupFlags1 { get; init; }
 
-    /// <summary>unknown_2 u32 @ 0x08. Observed: 0. spec: §1.5 UNVERIFIED.</summary>
-    public required uint Unknown2 { get; init; }
-
-    /// <summary>render_state u32 @ 0x0C. Observed: 15. Semantic UNVERIFIED. spec: §1.5 UNVERIFIED.</summary>
+    /// <summary>
+    /// render_state u32 @ group+0x08. CONFIRMED-variable — not a constant.
+    /// Earlier "constant=15" (FX1/FX2) and "constant=5" (FX3) readings are REFUTED.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.1a — render_state: CONFIRMED-variable (two-witness).
+    /// </summary>
     public required uint RenderState { get; init; }
 
+    /// <summary>
+    /// Optional extra group-header bytes present in FX3 (32 bytes at group+0x0C..+0x2B).
+    /// Empty for FX1/FX2. All fields UNVERIFIED.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.7 — unknown_3..unknown_8: UNVERIFIED.
+    /// </summary>
+    public required ReadOnlyMemory<byte> RawHeaderExtra { get; init; }
+}
+
+/// <summary>
+/// One group of an FX1 layer file. Vertex format: VF_36.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain_layers.md §1.5 FX1 Format: CONFIRMED. Group-array model: §1.1a CONFIRMED.
+/// </remarks>
+public sealed class Fx1Group : FxGroup
+{
     /// <summary>Vertex array (VF_36). spec: §1.5 CONFIRMED.</summary>
     public required FxVertex36[] Vertices { get; init; }
 
@@ -176,29 +200,38 @@ public sealed class Fx1Layer
     public required ushort[] Indices { get; init; }
 }
 
+/// <summary>
+/// Decoded result of an <c>.fx1</c> terrain overlay layer file.
+/// Universal group-array layout: u32 group_count, then group_count groups.
+/// Vertex format: VF_36. Single UV channel.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain_layers.md §1.5 FX1 Format: CONFIRMED (3 samples, exact size match).
+/// spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count is the leading u32 (NOT a constant): CONFIRMED (two-witness).
+/// </remarks>
+public sealed class Fx1Layer
+{
+    /// <summary>
+    /// group_count u32 @ file offset 0x00. The leading word is the number of groups.
+    /// It is NOT a constant and NOT a sub-format selector.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count: CONFIRMED (two-witness; corpus shows 1..61).
+    /// </summary>
+    public required uint GroupCount { get; init; }
+
+    /// <summary>All decoded groups in on-disk order. Length == GroupCount.</summary>
+    public required Fx1Group[] Groups { get; init; }
+}
+
 // ─── FX2 ───────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Decoded result of an <c>.fx2</c> terrain overlay layer file.
-/// Header: 24 bytes (same layout as FX1). Vertex format: VF_44 (dual UV).
+/// One group of an FX2 layer file. Vertex format: VF_44 (dual UV).
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/terrain_layers.md §1.6 FX2 Format: CONFIRMED (3 samples, exact size match).
+/// spec: Docs/RE/formats/terrain_layers.md §1.6 FX2 Format: CONFIRMED. Group-array model: §1.1a CONFIRMED.
 /// </remarks>
-public sealed class Fx2Layer
+public sealed class Fx2Group : FxGroup
 {
-    /// <summary>type_tag u32 @ 0x00. spec: §1.6 CONFIRMED.</summary>
-    public required uint TypeTag { get; init; }
-
-    /// <summary>unknown_1 u32 @ 0x04. spec: §1.6 UNVERIFIED.</summary>
-    public required uint Unknown1 { get; init; }
-
-    /// <summary>unknown_2 u32 @ 0x08. spec: §1.6 UNVERIFIED.</summary>
-    public required uint Unknown2 { get; init; }
-
-    /// <summary>render_state u32 @ 0x0C. Observed: 15. Semantic UNVERIFIED. spec: §1.6 UNVERIFIED.</summary>
-    public required uint RenderState { get; init; }
-
     /// <summary>Vertex array (VF_44). spec: §1.6 CONFIRMED.</summary>
     public required FxVertex44[] Vertices { get; init; }
 
@@ -206,42 +239,146 @@ public sealed class Fx2Layer
     public required ushort[] Indices { get; init; }
 }
 
+/// <summary>
+/// Decoded result of an <c>.fx2</c> terrain overlay layer file.
+/// Universal group-array layout: u32 group_count, then group_count groups.
+/// Vertex format: VF_44 (dual UV).
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain_layers.md §1.6 FX2 Format: CONFIRMED (3 samples, exact size match).
+/// spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count is the leading u32: CONFIRMED (two-witness).
+/// </remarks>
+public sealed class Fx2Layer
+{
+    /// <summary>
+    /// group_count u32 @ file offset 0x00.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count: CONFIRMED.
+    /// </summary>
+    public required uint GroupCount { get; init; }
+
+    /// <summary>All decoded groups in on-disk order. Length == GroupCount.</summary>
+    public required Fx2Group[] Groups { get; init; }
+}
+
 // ─── FX3 ───────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Decoded result of an <c>.fx3</c> terrain overlay layer file.
-/// Header: 48 bytes (extended vs FX1/FX2). Vertex format: VF_36.
+/// One group of an FX3 layer file. Extended 44-byte per-group header. Vertex format: VF_36.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/terrain_layers.md §1.7 FX3 Format: CONFIRMED (3 samples, exact size match).
-/// Extra header fields at 0x10–0x27 are all constant and UNVERIFIED.
+/// spec: Docs/RE/formats/terrain_layers.md §1.7 FX3 Format: CONFIRMED. Group-array model: §1.1a CONFIRMED.
+/// The extended group header has additional leading words (unknown_3..unknown_8) ahead of vertex_count/index_count.
 /// </remarks>
-public sealed class Fx3Layer
+public sealed class Fx3Group : FxGroup
 {
-    /// <summary>type_tag u32 @ 0x00. CONFIRMED. spec: §1.7.</summary>
-    public required uint TypeTag { get; init; }
-
-    /// <summary>unknown_1 u32 @ 0x04. UNVERIFIED. spec: §1.7.</summary>
-    public required uint Unknown1 { get; init; }
-
-    /// <summary>unknown_2 u32 @ 0x08. UNVERIFIED. spec: §1.7.</summary>
-    public required uint Unknown2 { get; init; }
-
-    /// <summary>render_state u32 @ 0x0C. Observed: 5. Semantic UNVERIFIED. spec: §1.7.</summary>
-    public required uint RenderState { get; init; }
-
-    /// <summary>
-    /// Raw bytes of the extended header region 0x10–0x27 (32 bytes, 8 u32/f32 fields).
-    /// All constant in samples; semantics UNVERIFIED.
-    /// spec: Docs/RE/formats/terrain_layers.md §1.7 — unknown_3..unknown_8: UNVERIFIED.
-    /// </summary>
-    public required ReadOnlyMemory<byte> RawHeaderExtra { get; init; }
-
     /// <summary>Vertex array (VF_36). spec: §1.7 CONFIRMED.</summary>
     public required FxVertex36[] Vertices { get; init; }
 
     /// <summary>Index array (u16). spec: §1.7 CONFIRMED.</summary>
     public required ushort[] Indices { get; init; }
+}
+
+/// <summary>
+/// Decoded result of an <c>.fx3</c> terrain overlay layer file.
+/// Universal group-array layout: u32 group_count, then group_count groups (extended 44-byte headers).
+/// Vertex format: VF_36.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain_layers.md §1.7 FX3 Format: CONFIRMED (3 samples, exact size match).
+/// spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count is the leading u32: CONFIRMED (two-witness).
+/// FX3 group headers are wider (44 bytes) than FX1/FX2 (20 bytes); the extra bytes are UNVERIFIED.
+/// </remarks>
+public sealed class Fx3Layer
+{
+    /// <summary>
+    /// group_count u32 @ file offset 0x00.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count: CONFIRMED.
+    /// </summary>
+    public required uint GroupCount { get; init; }
+
+    /// <summary>All decoded groups in on-disk order. Length == GroupCount.</summary>
+    public required Fx3Group[] Groups { get; init; }
+}
+
+// ─── FX4 ───────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// One tile within an <c>.fx4</c> terrain overlay layer file.
+/// Each tile carries a fixed 48-byte header, a VF_44 vertex block, and a u16 index block.
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain_layers.md §1.11 FX4 Format: CONFIRMED-FROM-LOADER.
+/// File layout: u32 tile_count, then per tile: TileHeader(48 B) + VertexData + IndexData.
+/// vertex_count @ tile-relative +0x28: CONFIRMED (parser-verified).
+/// index_count  @ tile-relative +0x2C: CONFIRMED (parser-verified).
+/// VF_44 vertex format (44 B stride): CONFIRMED (parser-verified).
+/// The leading 40 bytes of the tile header (tile_metadata) are read-but-not-consumed: UNVERIFIED semantics.
+/// spec: Docs/RE/formats/terrain_layers.md §1.11 — tile_metadata @ +0x00 (40 bytes): UNVERIFIED.
+/// </remarks>
+public sealed class Fx4Tile
+{
+    /// <summary>
+    /// Raw 48-byte tile header. Only bytes at +0x28 (vertex_count) and +0x2C (index_count) are consumed.
+    /// The leading 40 bytes (tile_metadata) are preserved for faithful byte-level storage.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — per-tile header (48 bytes): CONFIRMED-FROM-LOADER.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — tile_metadata @ +0x00 (40 bytes): UNVERIFIED (read-but-not-consumed).
+    /// </summary>
+    public required ReadOnlyMemory<byte> RawTileHeader { get; init; }
+
+    /// <summary>
+    /// Vertex count (u32 LE @ tile-relative +0x28). Drives the vertex_count × 44 VF_44 read.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — vertex_count u32 @ +0x28: CONFIRMED (parser-verified).
+    /// </summary>
+    public required uint VertexCount { get; init; }
+
+    /// <summary>
+    /// Index count (u32 LE @ tile-relative +0x2C). Drives the index_count × 2 u16 read.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — index_count u32 @ +0x2C: CONFIRMED (parser-verified).
+    /// </summary>
+    public required uint IndexCount { get; init; }
+
+    /// <summary>
+    /// Vertex buffer (VF_44). Leading position float3 (X, Y, Z) is parser-verified via AABB compute.
+    /// Remaining 32 bytes (normal + RGBA + UV0 + UV1) match the §1.2 VF_44 description.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — VertexData (vertex_count × 44, VF_44): CONFIRMED.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.2 VF_44 (44 B): CONFIRMED.
+    /// </summary>
+    public required FxVertex44[] Vertices { get; init; }
+
+    /// <summary>
+    /// Index buffer (u16, plain triangle list).
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — IndexData (index_count × 2, u16): CONFIRMED.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.3 Index format — u16 triangle list: CONFIRMED.
+    /// </summary>
+    public required ushort[] Indices { get; init; }
+}
+
+/// <summary>
+/// Decoded result of an <c>.fx4</c> terrain overlay layer file.
+/// Flat tile array: u32 tile_count, then tile_count tiles (each 48-byte header + VF_44 vertices + u16 indices).
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain_layers.md §1.11 FX4 Format: CONFIRMED-FROM-LOADER.
+/// File layout: u32 tileCount at 0x00, then per tile: TileHeader(48 B) + VertexData(vertex_count×44) + IndexData(index_count×2).
+/// File-size formula: 4 + Σ over tiles (48 + vertex_count × 44 + index_count × 2).
+/// Cross-confirmed by FX5 loader which uses the same control flow (only stride differs: VF_36 vs VF_44).
+/// spec: Docs/RE/formats/terrain_layers.md §1.11 — "FX4 and FX5 differ only in vertex stride": CONFIRMED.
+/// Vertex format: VF_44 (44 B) — same as FX2, not FX1/FX3/FX5 which use VF_36 (36 B).
+/// spec: Docs/RE/formats/terrain_layers.md §1.12 FX layer summary table: CONFIRMED.
+/// </remarks>
+public sealed class Fx4Layer
+{
+    /// <summary>
+    /// tile_count u32 LE @ file offset 0x00. Drives the per-tile read loop.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — tile_count u32 @ 0x00: CONFIRMED (parser-verified).
+    /// </summary>
+    public required uint TileCount { get; init; }
+
+    /// <summary>
+    /// Tiles decoded from the file in on-disk order. Length == TileCount.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.11 — per-tile loop: CONFIRMED.
+    /// </summary>
+    public required Fx4Tile[] Tiles { get; init; }
 }
 
 // ─── FX5 ───────────────────────────────────────────────────────────────────
@@ -288,6 +425,65 @@ public sealed class Fx5Layer
 {
     /// <summary>Sections in on-disk order. spec: §1.8 CONFIRMED.</summary>
     public required Fx5Section[] Sections { get; init; }
+}
+
+// ─── FX7 ───────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// One group in an <c>.fx7</c> layer file. 52-byte group header; vertex format: VF_32 (no colour).
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain_layers.md §1.10 FX7 Format: PLAUSIBLE (dual-sample).
+/// spec: Docs/RE/formats/terrain_layers.md §1.2 VF_32 (32 B): CONFIRMED.
+/// vertex_count @ group-relative +0x2C: DUAL-SAMPLE.
+/// index_count  @ group-relative +0x30: DUAL-SAMPLE.
+/// </remarks>
+public sealed class Fx7Group
+{
+    /// <summary>
+    /// Raw 52-byte group header. Only bytes at +0x2C (vertex_count) and +0x30 (index_count) are consumed.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.10 — per-group header 52 B: DUAL-SAMPLE.
+    /// </summary>
+    public required ReadOnlyMemory<byte> RawGroupHeader { get; init; }
+
+    /// <summary>
+    /// vertex_count u32 @ group-relative +0x2C.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.10 — vertex_count u32 @ +0x2C: DUAL-SAMPLE.
+    /// </summary>
+    public required uint VertexCount { get; init; }
+
+    /// <summary>
+    /// index_count u32 @ group-relative +0x30.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.10 — index_count u32 @ +0x30: DUAL-SAMPLE.
+    /// </summary>
+    public required uint IndexCount { get; init; }
+
+    /// <summary>Vertex array (VF_32, no colour). spec: §1.10 DUAL-SAMPLE.</summary>
+    public required FxVertex32[] Vertices { get; init; }
+
+    /// <summary>Index array (u16). spec: §1.3 CONFIRMED.</summary>
+    public required ushort[] Indices { get; init; }
+}
+
+/// <summary>
+/// Decoded result of an <c>.fx7</c> terrain overlay layer file.
+/// Universal group-array layout: u32 group_count, then group_count groups (52-byte headers).
+/// Vertex format: VF_32 (no per-vertex colour).
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain_layers.md §1.10 FX7 Format: PLAUSIBLE (dual-sample, group-array model §1.1a).
+/// File-size formula: 4 + Σ over groups (52 + vertex_count × 32 + index_count × 2).
+/// </remarks>
+public sealed class Fx7Layer
+{
+    /// <summary>
+    /// group_count u32 @ file offset 0x00.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count: CONFIRMED.
+    /// </summary>
+    public required uint GroupCount { get; init; }
+
+    /// <summary>All decoded groups in on-disk order. Length == GroupCount.</summary>
+    public required Fx7Group[] Groups { get; init; }
 }
 
 // ─── FX6 ───────────────────────────────────────────────────────────────────
@@ -343,64 +539,10 @@ public sealed class Fx6Layer
 //  light*.bin / point_light*.bin / wind*.bin  sky-lighting blobs
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// <summary>
-/// One directional-light or ambient-light keyframe slot from <c>light%d.bin</c>.
-/// 48 bytes (12 × f32).
-/// </summary>
-/// <remarks>
-/// spec: Docs/RE/formats/terrain_layers.md §6.2 Section A keyframe slot (48 bytes).
-/// Fields sun_colour[0..2] CONFIRMED; others UNVERIFIED.
-/// </remarks>
-public sealed class LightKeyframe
-{
-    /// <summary>sun_colour[0] f32 @ slot+0x00. CONFIRMED.</summary>
-    public required float SunColour0 { get; init; }
-
-    /// <summary>sun_colour[1] f32 @ slot+0x04. CONFIRMED.</summary>
-    public required float SunColour1 { get; init; }
-
-    /// <summary>sun_colour[2] f32 @ slot+0x08. CONFIRMED.</summary>
-    public required float SunColour2 { get; init; }
-
-    /// <summary>Remaining 9 floats (offsets +0x0C..+0x2C) — raw bytes. Partially UNVERIFIED.</summary>
-    public required ReadOnlyMemory<byte> RawRest { get; init; }
-}
-
-/// <summary>
-/// Decoded result of a <c>light%d.bin</c> sky-lighting keyframe file.
-/// Fixed size: 5312 bytes. No magic, no version.
-/// </summary>
-/// <remarks>
-/// spec: Docs/RE/formats/terrain_layers.md §6.1 Blob layout: CONFIRMED (parser-analysis only; no samples).
-/// 48 directional slots + 48 ambient slots + 48 fog scalars.
-/// </remarks>
-public sealed class LightBinData
-{
-    /// <summary>
-    /// 48 directional-light keyframe slots.
-    /// spec: Docs/RE/formats/terrain_layers.md §6.1 Section A (0x0000–0x08FF): CONFIRMED (parser).
-    /// </summary>
-    public required LightKeyframe[] DirectionalKeyframes { get; init; }
-
-    /// <summary>
-    /// 48 ambient-light keyframe slots.
-    /// spec: Docs/RE/formats/terrain_layers.md §6.1 Section B (0x0930–0x122F): CONFIRMED (parser).
-    /// </summary>
-    public required LightKeyframe[] AmbientKeyframes { get; init; }
-
-    /// <summary>
-    /// 48 fog density scalars (f32 each).
-    /// Value 1.0 is the no-override sentinel.
-    /// spec: Docs/RE/formats/terrain_layers.md §6.4 Section C (0x1260): MEDIUM confidence.
-    /// </summary>
-    public required float[] FogDensity { get; init; }
-
-    /// <summary>
-    /// Trailing 416 bytes (0x1320–0x14BF). Purpose UNVERIFIED.
-    /// spec: Docs/RE/formats/terrain_layers.md §6.1 trailing region: UNVERIFIED.
-    /// </summary>
-    public required ReadOnlyMemory<byte> RawTrailing { get; init; }
-}
+// LightKeyframe and LightBinData were removed (CAMPAIGN 11 Phase 3a).
+// The canonical types are LightingKeyframe / LightBin in EnvironmentBinData.cs,
+// produced by EnvironmentBinParsers.ParseLight (§9.1 sample-verified layout).
+// spec: Docs/RE/formats/environment_bins.md §9.1.
 
 /// <summary>
 /// One point-light record from <c>point_light%d.bin</c>.
@@ -478,8 +620,10 @@ public sealed class WindBinData
     public required uint Flag2 { get; init; }
 
     /// <summary>
-    /// Wind keyframe records (24 bytes each). Fields 0–4 UNVERIFIED; sway_seed at +0x14 MEDIUM.
-    /// spec: Docs/RE/formats/terrain_layers.md §8.2 — sway_seed @ +0x14: MEDIUM.
+    /// Wind keyframe records (24 bytes each, stored opaque). Fields [0–4] UNVERIFIED;
+    /// field [5] at +0x14 is texture_id (NOT sway_seed — the earlier label is REFUTED).
+    /// spec: Docs/RE/formats/terrain_layers.md §8.2 — texture_id u32 @ +0x14: CONFIRMED.
+    /// spec: Docs/RE/formats/terrain_layers.md §Known Unknowns #15 — fields [0–4]: UNVERIFIED.
     /// </summary>
     public required ReadOnlyMemory<byte>[] RawKeyframes { get; init; }
 }

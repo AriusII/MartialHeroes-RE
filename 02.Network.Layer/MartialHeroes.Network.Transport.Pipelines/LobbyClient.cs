@@ -20,10 +20,9 @@ namespace MartialHeroes.Network.Transport.Pipelines;
 /// <para>
 /// <b>8-byte lobby frame wrapper</b> (spec: Docs/RE/packets/lobby.yaml — "COMMON LOBBY FRAME WRAPPER"):
 /// <code>
-///   +0 (u16 LE)  size   — total frame size including the 8-byte wrapper
-///   +2 (u16 LE)  unused — always 0
-///   +4 (u16 LE)  major  — on the server-list query this is the RECORD COUNT; elsewhere ignored
-///   +6 (u16 LE)  minor  — appears unused (believed always 0)
+///   +0 (u32 LE)  size   — total frame size including the 8-byte wrapper [CODE-CONFIRMED u32]
+///   +4 (u16 LE)  count  — on the server-list query this is the RECORD COUNT; elsewhere ignored
+///   +6 (u16 LE)  unused — reuses the game frame "minor" word; not read by lobby threads
 /// </code>
 /// The client reads <c>size − 8</c> payload bytes and LZ4-decompresses them.
 /// </para>
@@ -79,8 +78,8 @@ public sealed class LobbyClient : ILobbyClient
 
     // spec: Docs/RE/packets/lobby.yaml — COMMON LOBBY FRAME WRAPPER
     private const int WrapperSize = 8; // lobby frame wrapper is 8 bytes (same as game header)
-    private const int WrapperSizeOffset = 0; // +0 u16 LE: total frame size
-    private const int WrapperMajorOffset = 4; // +4 u16 LE: server-record count (server-list query)
+    private const int WrapperSizeOffset = 0; // +0 u32 LE: total frame size [CODE-CONFIRMED u32]
+    private const int WrapperCountOffset = 4; // +4 u16 LE: server-record count (server-list query)
 
     // -----------------------------------------------------------------------
     // State
@@ -226,12 +225,12 @@ public sealed class LobbyClient : ILobbyClient
         {
             ReadOnlySpan<byte> rec = data.Slice(i * ServerRecordSize, ServerRecordSize);
             // spec: Docs/RE/packets/lobby.yaml RECORD SHAPE A:
-            //   +0 u16 server_id, +2 i16 status, +4 i16 load, +6 i16 open_time
+            //   +0 u16 id_selectkey, +2 i16 status_kind, +4 i16 population, +6 i16 flag
             records[i] = new LobbyServerRecord(
                 ServerId: BinaryPrimitives.ReadUInt16LittleEndian(rec[0..]),
                 Status: BinaryPrimitives.ReadInt16LittleEndian(rec[2..]),
-                Load: BinaryPrimitives.ReadInt16LittleEndian(rec[4..]),
-                OpenTime: BinaryPrimitives.ReadInt16LittleEndian(rec[6..]));
+                Population: BinaryPrimitives.ReadInt16LittleEndian(rec[4..]),
+                Flag: BinaryPrimitives.ReadInt16LittleEndian(rec[6..]));
         }
 
         return records;
@@ -324,13 +323,20 @@ public sealed class LobbyClient : ILobbyClient
         Span<byte> wrapper = stackalloc byte[WrapperSize];
         BlockingReceive(socket, wrapper);
 
-        // +0: u16 LE total frame size
-        ushort totalSize = BinaryPrimitives.ReadUInt16LittleEndian(wrapper[WrapperSizeOffset..]);
-        // +4: u16 LE major (= record count on server-list query)
-        major = BinaryPrimitives.ReadUInt16LittleEndian(wrapper[WrapperMajorOffset..]);
+        // +0: u32 LE total frame size (spec: Docs/RE/packets/lobby.yaml — "COMMON LOBBY FRAME WRAPPER" +0 (u32) size [CODE-CONFIRMED])
+        uint totalSize = BinaryPrimitives.ReadUInt32LittleEndian(wrapper[WrapperSizeOffset..]);
+        // +4: u16 LE count (= record count on server-list query; reuses the game frame "major" slot)
+        major = BinaryPrimitives.ReadUInt16LittleEndian(wrapper[WrapperCountOffset..]);
 
-        int payloadSize = totalSize - WrapperSize;
-        if (payloadSize <= 0)
+        // Guard: totalSize must be at least WrapperSize (8 bytes). The u32 read could produce
+        // a very large value on a malformed frame — clamp before subtraction to avoid underflow.
+        if (totalSize < WrapperSize || totalSize > FramingConstants.MaxFrameSize)
+        {
+            return (ReadOnlyMemory<byte>.Empty, 0);
+        }
+
+        int payloadSize = (int)(totalSize - WrapperSize);
+        if (payloadSize == 0)
         {
             return (ReadOnlyMemory<byte>.Empty, 0);
         }

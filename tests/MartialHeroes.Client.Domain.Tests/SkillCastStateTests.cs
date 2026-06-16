@@ -202,6 +202,23 @@ public sealed class SkillCastStateTests
     }
 
     [Fact]
+    public void Validate_Category5OnCooldown_StillBlockedAtGate()
+    {
+        // §2.1 gate 13 exempts ONLY category 1 (basic attack) from the cast-gate cooldown check —
+        // category 5 is exempt from ARMING a cooldown (§4.1/§5.2) but NOT from the cast gate, so a
+        // category-5 skill that is still cooling must still be blocked here. spec: skills.md §2.1 gate 13.
+        var cd = new CooldownTable();
+        cd.SetSlot(0, new SkillId(105), durationMs: 1000);
+        cd.Arm(new SkillId(105), now: 0);
+
+        SkillCastResult result = SkillCastValidator.Validate(
+            Skill(id: 105, category: SkillDefinition.CooldownArmExemptCategory), CasterState.AllClear, cd,
+            new StubTargeting(), Vector3Fixed.Zero, now: 500);
+
+        Assert.Equal(SkillCastResult.OnCooldown, result);
+    }
+
+    [Fact]
     public void ConfirmCast_ArmsCooldown_AndEntersCooldownPhase()
     {
         var cd = new CooldownTable();
@@ -228,6 +245,23 @@ public sealed class SkillCastStateTests
         SkillCastState next = state.ConfirmCast(skill, cd, now: 1000);
 
         Assert.Equal(SkillCastPhase.Idle, next.Phase);
+    }
+
+    [Fact]
+    public void ConfirmCast_Category5_DoesNotArmCooldown_GoesIdle()
+    {
+        // Category 5 is exempt from ARMING a cooldown (§4.1/§5.2): cast-confirm goes straight to idle
+        // and leaves the slot ready, just like the basic-attack category. spec: skills.md §4.1 / §5.2.
+        var cd = new CooldownTable();
+        SkillDefinition skill = Skill(id: 105, category: SkillDefinition.CooldownArmExemptCategory, cooldownCs: 30);
+        cd.SetSlot(5, skill.Id, skill.CooldownMs);
+        var (state, _) = SkillCastState.Idle.TryBeginCast(skill, CasterState.AllClear, cd, new StubTargeting(),
+            Vector3Fixed.Zero, 0);
+
+        SkillCastState next = state.ConfirmCast(skill, cd, now: 1000);
+
+        Assert.Equal(SkillCastPhase.Idle, next.Phase);
+        Assert.True(cd[5].IsReady); // category 5 never armed the cooldown.
     }
 
     [Fact]

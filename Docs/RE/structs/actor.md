@@ -1,5 +1,25 @@
 # Actor entity layout (clean-room spec)
 
+> **Verification banner.**
+> - **confirmed** — Actor size (0x748), embedded-descriptor size (0x370) and inlining offset
+>   (Actor +0x74), `actor = SD + 0x74`, the identity / sort / position / vitals-mirror offsets,
+>   the lifecycle enum, the equip-id table layout (20×16 @ Actor +0xCC), and the spatial cell
+>   index (Actor +0x3EC) are **control-flow confirmed** in the spawn / respawn / spawn-extended
+>   handlers.
+> - **static-hypothesis** — single-site inferences (the `yaw` exact byte, the preview-path float
+>   reuse of +0x488/+0x48C, the `current_hp/mp/stamina` Actor offsets derived purely by the
+>   +0x74 rule).
+> - **capture/debugger-pending** — every *wire VALUE meaning* (what a received byte signifies),
+>   the live HP/MP/yaw/move-target writes (driven by the runtime-table-dispatched 5/53 vitals and
+>   5/13 movement handlers, whose dispatch table is null at static time), and the role of the
+>   `partial`/`draft` auxiliary fields.
+> - **ida_reverified:** 2026-06-16  **ida_anchor:** 263bd994  **evidence:** [static-ida]
+> - **conflicts:** no hard conflicts; two soft divergences carried as open items — (a) the `level`
+>   byte boundary (clean u16 @ SD +0x3A for the display path vs. straddling the SD +0x38/+0x39
+>   state bytes on the wire), (b) the +0x488/+0x48C region used as `last_state_ms` (int32) in one
+>   path and as a 70.0f float pair in the preview path, and (c) the SpawnDescriptor equipment
+>   view at SD +0x54 (8×16) vs. SD +0x58 (20×16) — see open questions.
+
 Neutral, capture-informed offset model of the legacy client's in-world entity (the "Actor"
 object). Promoted from dirty-room notes; **rewritten** — no decompiler identifiers, no binary
 addresses. This document is the design input for the **domain engineer** (the `Actor` model in
@@ -15,12 +35,15 @@ specified — those are layout facts, not code locations.
 
 | Aspect | State |
 |---|---|
-| Overall struct size | **sample_verified** — total object size 0x748 bytes (1864 dec); single heap object per in-world entity, natural 4-byte alignment (not packed). |
-| Embedded `SpawnDescriptor` | **sample_verified** — 0x370 bytes (880 dec), copied verbatim from the wire on spawn, inlined at Actor +0x74. |
-| Coordinate type | **confirmed** — world positions are IEEE-754 32-bit `float`; world Y is always 0. |
-| Identity / vitals / position fields | **confirmed** — exercised by multiple handlers (spawn, vitals, movement, skill). |
-| `level` byte boundary | **draft / unverified** — see open question 1. |
-| Equipment / buff / stat block (SD +0xD4, ~600 B) | **draft** — only three interior points located; treat as opaque. |
+| Overall struct size | **confirmed** — total object size 0x748 bytes (1864 dec); the shared spawn factory allocates a 0x748-byte object then runs the Actor constructor. Single heap object per in-world entity, natural 4-byte alignment (not packed). |
+| Embedded `SpawnDescriptor` | **confirmed** — 0x370 bytes (880 dec), copied verbatim from the wire on spawn by a fixed-size 0x370 byte-copy, inlined at Actor +0x74. |
+| Coordinate type | **confirmed** — world positions are IEEE-754 32-bit `float`; world Y is always 0 (the spawn handler stores X, forces Y = 0.0, stores Z). |
+| Identity / vitals-mirror / position offsets | **confirmed** — exercised by multiple handlers (spawn, respawn, spawn-extended). Live *wire* writes from the 5/53 vitals and 5/13 movement handlers are runtime-table-dispatched (not statically reachable) → their value semantics are **capture/debugger-pending**. |
+| `level` byte boundary | **static-hypothesis** — the char-select *display* path reads a clean u16 at SD +0x3A; the *wire* boundary vs. the SD +0x38/+0x39 state bytes is **capture-pending**. See open question 1. |
+| Equipment-id table (Actor +0xCC = SD +0x58) | **confirmed** — 20 entries × 16 bytes; each entry's leading dword is a worn-item actor id, walked 20× with a 16-byte stride in both the live spawn and the preview lineup. |
+| Equipment / buff / stat block (SD +0xD4, ~600 B) | **partial** — opaque blob; only a handful of interior points located (one new byte at SD +0x304 mapped this pass). Treat as reserved. |
+| Local-player Actor pointer | **confirmed** — a single client global (the busiest entity reference in the client), **not** an Actor field. See "Local-player global slot" below. |
+| Spatial cell index | **confirmed** — a per-actor cached grid-cell handle at Actor +0x3EC, computed from world X/Z. See the live-state table. |
 | Stat-slot table | **confirmed-as-external** — it is **not** an Actor field; see "Stat-slot table" below. |
 
 Confidence per field is given inline in each table (`confirmed`, `high`, `partial`, `draft`).
@@ -51,6 +74,12 @@ in C# do **not** reproduce this pointer; it exists only because the legacy objec
 When the descriptor is copied into a live Actor on spawn, **`actor_offset = SD_offset + 0x74`**.
 For example the descriptor's `current_hp` (SD +0x3C) becomes the Actor's `current_hp` at +0xB0,
 and the descriptor's world-X float (SD +0x4C) becomes the Actor's spawn world-X at +0xC0.
+
+**The local player is referenced by a single client global, not by an Actor field.** A dedicated
+global pointer holds the local player's Actor (see "Local-player global slot" below); the spawn and
+respawn handlers compare an Actor against that global to choose self-only branches (e.g. the
+self-spawn FX, and "skip recreating my own position"). Re-implementations should keep a single
+`LocalPlayerActor` reference on the side rather than searching the actor map each frame.
 
 ---
 
@@ -90,10 +119,12 @@ slots, render flags) are summarized later but omitted here.
 | Field            | Offset | Type   | Confidence | Meaning |
 |------------------|--------|--------|------------|---------|
 | `id`             | +0x5C  | int32  | confirmed  | Actor id; the map key. Initialised to 0xFFFFFFFF, set on spawn. |
-| `sort`           | +0x60  | uint8  | confirmed  | Entity category discriminator: **1 = PC, 2 = Mob, 3 = NPC**, other values for further categories. |
+| `sort`           | +0x60  | uint8  | confirmed  | Entity category discriminator: **1 = PC, 2 = Mob, 3 = NPC**. The spawn-factory switch also handles special sorts **15** and **17** (see the field-table note); the default branch covers the rest. |
 | `move_speed`     | +0x64  | f32    | confirmed  | Movement speed multiplier. Default 1.0. |
-| `scale_factor`   | +0x68  | f32    | high       | Visual scale multiplier. Default 1.0. |
+| `scale_factor`   | +0x68  | f32    | confirmed  | Visual scale multiplier. Default 1.0 (the constructor writes the 1.0f bit pattern). |
 | `model_class_id` | +0x6C  | int32  | confirmed  | Resolved visual/mesh class id (looked up from the model template for mobs). |
+| `equip_ref_table`| +0xCC  | slot[20] | confirmed | 20 entries × 16 bytes; each entry's leading dword is a worn-item actor id. = SD +0x58. See the SpawnDescriptor table. |
+| `cell_index`     | +0x3EC | int32  | confirmed  | Cached spatial grid-cell handle, resolved from the live world X/Z. NOT a coordinate. |
 | `current_hp`     | +0xB0  | uint32 | confirmed  | Current hit points. (Mirror of `SpawnDescriptor.current_hp`.) |
 | `current_mp`     | +0xB4  | uint32 | confirmed  | Current mana / ki points. |
 | `current_stamina`| +0xB8  | uint32 | confirmed  | Current stamina. |
@@ -146,11 +177,11 @@ means the gap exists for natural 4-byte alignment. Fields inside the embedded Sp
 | +0x00  | 4    | ptr    | (type pointer)   | confirmed  | C++ virtual-table pointer. Not reproduced in a managed re-implementation. |
 | +0x04  | 88   | bytes  | (engine base)    | confirmed  | Inherited scene-graph / transform base: child list, bounding sphere, render mask word, transform link, plus a scene-node name string set to a fixed literal in the constructor. Opaque to the domain model. |
 | +0x5C  | 4    | int32  | `id`             | confirmed  | Numeric actor id and map key. Init 0xFFFFFFFF, set on spawn. |
-| +0x60  | 1    | uint8  | `sort`           | confirmed  | Entity category: 1=PC, 2=Mob, 3=NPC, other values for further categories. |
+| +0x60  | 1    | uint8  | `sort`           | confirmed  | Entity category / spawn-kind. The spawn-factory switch enumerates **1 = PC**, **3 = NPC** (allocates a 0x50-byte NPC-interaction sub-object), and two special sorts **15** and **17** (15 reuses `world_x` @ +0xC0 as a move-speed override; 17, with a `0xFF` sentinel at +0x372, reuses `world_x`/`world_z` as move-speed + an animation tag). **2 = Mob** and all other categories fall through the default branch. |
 | +0x61  | 3    | —      | (pad)            | —          | Alignment. |
 | +0x64  | 4    | f32    | `move_speed`     | confirmed  | Movement speed multiplier. Init 1.0. |
-| +0x68  | 4    | f32    | `scale_factor`   | high       | Visual scale multiplier. Init 1.0. |
-| +0x6C  | 4    | int32  | `model_class_id` | confirmed  | Resolved visual/mesh class id. For mobs derived from the model template keyed by the descriptor's model id. |
+| +0x68  | 4    | f32    | `scale_factor`   | confirmed  | Visual scale multiplier. Init 1.0 (constructor writes the 1.0f bit pattern). |
+| +0x6C  | 4    | int32  | `model_class_id` | confirmed  | Resolved visual/mesh class id. The spawn factory resolves it from `(sort, internal_class @ SD +0x34, appearance_variant @ SD +0x2C)`; for mobs the same `internal_class` keys the model-template lookup. |
 | +0x70  | 4    | bytes  | (gap)            | low        | Unverified pad between `model_class_id` and the embedded descriptor. |
 
 ### Embedded SpawnDescriptor (+0x74 .. +0x3E3)
@@ -163,7 +194,9 @@ See the dedicated SpawnDescriptor table below.
 |--------|------|--------|-------------------|------------|---------|
 | +0x3E4 | 1    | uint8  | `visible`         | confirmed  | Render visibility flag. 0 in constructor, set to 1 by the spawn factory after insertion. |
 | +0x3E5 | 3    | —      | (pad)             | —          | Alignment. |
-| +0x3E8 | 64   | bytes  | `xform_node`      | confirmed  | Scene-graph transform node (the 64-byte transform sub-object). A derived facing angle is cached inside it. Opaque to the domain model. |
+| +0x3E8 | 4    | ptr    | `xform_node`      | confirmed  | Scene-graph transform sub-object base. The spawn handler drives it (recursive set-position from the live world floats). Opaque to the domain model. |
+| +0x3EC | 4    | int32  | `cell_index`      | confirmed  | **Spatial grid-cell handle** — a cached cell index resolved from the live world X/Z (re-resolved by the respawn handler from `world_pos`/`move_target`). NOT a coordinate. The per-actor spatial-index field used for cell-bucketed lookups. |
+| +0x3F0 | 12   | bytes  | (xform tail)      | partial    | Remainder of the transform/orientation working area. Opaque to the domain model. |
 | +0x3FC | 4    | f32    | `anim_speed`      | partial    | Animation playback speed (1.0 default, occasionally overridden by a snapshot update). |
 | +0x414 | 1    | uint8  | `anim_speed_flag` | partial    | Enables the custom animation speed above. |
 
@@ -179,8 +212,8 @@ See the dedicated SpawnDescriptor table below.
 | +0x45C | 8    | bytes  | (gap)             | low        | Unverified. |
 | +0x464 | 4    | f32    | (aux target)      | low        | Possible secondary Z target used in angle math. Unverified. |
 | +0x47C | 12   | f32[3] | `interp_pos`      | confirmed  | Position used during smoothing/lerp; reset to `world_pos` on respawn. |
-| +0x488 | 4    | int32  | `last_state_ms`   | confirmed  | Millisecond timestamp of last state change. |
-| +0x48C | 52   | bytes  | (rotation block)  | partial    | Rotation/transform working area that contains the yaw float below at byte +52. |
+| +0x488 | 4    | int32  | `last_state_ms`   | confirmed  | Millisecond timestamp of last state change (the respawn handler preserves it). **Context-dependent reuse:** the char-preview path instead writes +0x488/+0x48C as a 70.0f float pair (an AoE/cell working value), so this 4-byte slot is `int32` on the live path and `f32` in the preview path. See open question 11. |
+| +0x48C | 52   | bytes  | (rotation block)  | partial    | Rotation/transform working area that contains the yaw float below at byte +52. The leading bytes overlap the preview-path float reuse noted above. |
 | +0x4C0 | 4    | f32    | `yaw`             | confirmed  | Facing yaw (float), fed into a "set quaternion from Y axis-angle" call. Written from the movement packet's yaw field. |
 | +0x4C4 | 36   | bytes  | (rotation tail)   | low        | Tail of the rotation block. |
 | +0x4E8 | 4    | uint32 | `prev_hp`         | confirmed  | Previous-HP mirror, written just before an HP update so the party panel can diff HP changes. |
@@ -284,14 +317,16 @@ absolute Actor offset (= SD offset + 0x74) for the fields the live Actor uses di
 | +0x00     | +0x74   | 17   | bytes[17]| `name`            | confirmed  | Actor name, NUL-terminated, **CP949 / EUC-KR** encoded (up to 16 bytes + NUL). |
 | +0x11     | +0x85   | 3    | —        | (pad)             | —          | Alignment after name. |
 | +0x14     | +0x88   | 2    | uint16   | `inner_event_code`| high       | Internal event / class code; compared against a fixed constant when resetting the default motion. |
-| +0x16     | +0x8A   | 14   | bytes    | (gap)             | low        | Partially used; one interior byte is a display-name discriminator for the player-clone path. |
+| +0x16     | +0x8A   | 12   | bytes    | (gap)             | low        | Mostly unverified region up to the discriminator below. |
+| +0x22     | +0x96   | 1    | uint8    | `name_clone_discriminator` | high | Display-name discriminator for the player-clone path (distinguishes same-named clones). Also feeds the slot-14 visible-gear catalog key as its high decimal digit. |
+| +0x23     | +0x97   | 1    | bytes    | (gap)             | low        | Alignment up to SD +0x24. |
 | +0x24     | +0x98   | 8    | int64    | `current_xp`      | high       | Current experience points (signed 64-bit). |
-| +0x2C     | +0xA0   | 1    | uint8    | `body_variant`    | partial    | Body / gender variant byte; used for model routing. |
+| +0x2C     | +0xA0   | 1    | uint8    | `appearance_variant` | confirmed | Body / gender appearance variant. The **`variant` argument** of the model-class formula (see SpawnDescriptor notes). For a list/spawn character the **server supplies it**; the create form only seeds it for the class carousel. |
 | +0x2D     | +0xA1   | 7    | bytes    | (gap)             | low        | Remainder up to SD +0x34. |
-| +0x34     | +0xA8   | 2    | uint16   | `model_id`        | confirmed  | Model / mesh template id. For mobs this keys the model-template lookup. |
+| +0x34     | +0xA8   | 2    | uint16   | `internal_class`  | confirmed  | Internal class word. **For PCs it is the class id `{1,2,3,4}`** (1 Musa, 2 Salsu, 3 Dosa, 4 Monk) and is the **primary skeleton/appearance driver** -- the `class` argument of the model-class formula. For mobs the same field keys the model-template lookup. (Earlier drafts called this `model_id`.) |
 | +0x36     | +0xAA   | 2    | uint16   | `anim_class_word` | partial    | Read in the PC spawn branch as a name-assignment gate; may encode class or animation variant. |
 | +0x38     | +0xAC   | 1    | uint8    | `state_byte`      | confirmed  | Level/state byte, written by the 5/53 vitals handler from a packet byte. |
-| +0x39     | +0xAD   | 1    | uint8    | `sub_level_byte`  | confirmed  | Second level/state byte, written by the 5/53 vitals handler from the next packet byte. |
+| +0x39     | +0xAD   | 1    | uint8    | `secondary_level_byte` | confirmed | Second level/state byte, written by the 5/53 vitals handler from the next packet byte. |
 | +0x3A     | +0xAE   | 2    | uint16   | `level`           | **draft**  | Character level. **May straddle the two state bytes above** — see open question 1. Do not hard-code as a clean u16 without a capture. |
 | +0x3C     | +0xB0   | 4    | uint32   | `current_hp`      | confirmed  | Current hit points. Written by the 5/53 vitals handler; sometimes written as a qword pair with `current_mp`. |
 | +0x40     | +0xB4   | 4    | uint32   | `current_mp`      | confirmed  | Current mana / ki points. |
@@ -300,7 +335,7 @@ absolute Actor offset (= SD offset + 0x74) for the fields the live Actor uses di
 | +0x4C     | +0xC0   | 4    | f32      | `world_x`         | confirmed  | World X (float). Extracted into the live position on spawn. |
 | +0x50     | +0xC4   | 4    | f32      | `world_z`         | confirmed  | World Z (float). World Y forced to 0 on spawn. |
 | +0x54     | +0xC8   | 4    | bytes    | (gap)             | partial    | Tail of the coordinate region; one path reuses part of it as a move-speed override for a special sort. |
-| +0x58     | +0xCC   | 320  | slot[20] | `equip_ref_table` | high       | Equipment reference table: 20 entries of 16 bytes each. Each entry begins with a 4-byte item-actor id that is resolved via the global actor lookup; the remaining 12 bytes per entry are unverified. Spans SD +0x58 .. SD +0x197. |
+| +0x58     | +0xCC   | 320  | slot[20] | `equip_ref_table` | confirmed  | Visible-gear / equipment reference table: 20 entries of 16 bytes each, **walked 20× with a 16-byte stride** in both the live spawn-extended handler and the char-preview lineup builder (each leading dword is passed to "find actor by id"). The **leading 4-byte dword of each entry is a worn-item actor id (part gid)**. The renderer attaches **overlay slots {3,4,6,2,11,14}**, mapping each entry's gid to `data/char/skin/g{gid}.skn` to layer the worn outfit. The remaining 12 bytes per entry are unverified. Spans SD +0x58 .. SD +0x197. |
 | +0x74     | +0xE8   | 2    | uint16   | `server_class`    | high       | Server-assigned class id (maps to a martial-arts style). |
 | +0x76     | +0xEA   | 6    | bytes    | (gap)             | low        | Unverified padding. |
 | +0x7C     | +0xF0   | 1    | uint8    | `race_or_skin`    | high       | Race / skin variant identifier. |
@@ -312,6 +347,8 @@ absolute Actor offset (= SD offset + 0x74) for the fields the live Actor uses di
 | +0x194    | +0x208  | 4    | int32    | `aura_pct_value`  | confirmed  | Aura percentage value (divided by 100 to get a multiplier) used in the max-HP / max-MP formulas. Interior of the buff block. |
 | +0x1AA    | +0x21E  | 1    | uint8    | `buff_kind`       | confirmed  | Aura / buff type discriminator: 1 = HP aura, 2 = MP aura. Interior of the buff block. |
 | +0x1F0    | +0x264  | 2    | uint16   | `skill_state_word`| partial    | Skill state word used for state gating in the skill handler. Interior of the buff block. |
+| +0x2EE    | +0x362  | 1    | uint8    | `motion_state_byte` | confirmed | Read by the PC spawn branch (case 1) and the special sort-17 path as a motion selector; a `0xFF` sentinel triggers the mob move-speed / animation-tag fast-path. Interior of the buff block. (Confirmed from the consuming side this pass.) |
+| +0x304    | +0x378  | 1    | uint8    | `buff_block_byte_304` | confirmed (offset) / capture-pending (meaning) | Written PC-side from a wire byte on the 5/1 spawn-extended path. A newly-mapped point inside the otherwise-opaque buff block; its protocol meaning needs a capture. |
 | +0x32C    | +0x3A0  | 4    | uint32   | `in_combat_flag`  | high       | Combat state flag. |
 | +0x330    | +0x3A4  | 64   | bytes    | `sd_tail`         | partial    | Tail of the descriptor. A partner / pair-actor id is stored at SD +0x354 (Actor +0x3C8) for mob pair-state tracking. |
 | +0x35C    | +0x3D0  | 4    | int32    | `world_state`     | partial    | Read by the local-player-status handler to gate a disconnect notification. Semantics unverified. |
@@ -329,6 +366,16 @@ absolute Actor offset (= SD offset + 0x74) for the fields the live Actor uses di
 - **`level` is not yet a clean field** — see open question 1. Until a capture confirms the byte
   boundary, prefer reading the level/state bytes at SD +0x38 / +0x39 explicitly rather than a
   u16 at SD +0x3A.
+- **The descriptor drives the rendered appearance** (for an existing PC, a 3/1 list slot, or a
+  5/3 spawn). The two inputs are `internal_class` (SD +0x34, `{1,2,3,4}`) and `appearance_variant`
+  (SD +0x2C). The client derives a model-class id from them:
+  `model_class_id = 5 * (internal_class + 4 * appearance_variant) - 24`, which yields an IdB in
+  `{1, 11, 16, 26}` for the four starter classes. That IdB selects the catalog skeleton (one of
+  g1..g4 via the visual catalog — there is **no** literal `g{n}.bnd` filename computed). The
+  visible outfit is then layered from the `equip_ref_table` (SD +0x58): the renderer attaches
+  overlay slots `{3, 4, 6, 2, 11, 14}`, mapping each entry's leading gid to
+  `data/char/skin/g{gid}.skn`. A list/spawn character therefore renders its REAL appearance from
+  the server-supplied descriptor, never from the create-scene's hardcoded carousel gids.
 - The **equipment reference table** (SD +0x58, 20×16 bytes) and the **600-byte equipment/buff
   block** (SD +0xD4) are largely opaque. Only the three interior points listed (`aura_pct_value`,
   `buff_kind`, `skill_state_word`) and the per-slot item-id dword in the equip table are located.
@@ -372,28 +419,54 @@ the `Actor` layout faithful and avoids a phantom field.
 
 ## Actor lookup / container (context, not a struct)
 
-The client keeps all in-world actors in a flat id-keyed map plus a secondary index bucketed by
-`sort`. The primary access path is "look up actor by id" (the single busiest entity accessor in
-the client); a secondary path looks up by the composite `(id, sort)` key. Spawn handlers insert
-into this map and write the wire fields into the new Actor; despawn handlers erase from it. The
-re-implementation should mirror this with an id-keyed dictionary plus, if needed, a per-sort
-index — it does not need to reproduce the legacy container's internal node layout.
+The client keeps all in-world actors in a flat id-keyed map plus a secondary index keyed by the
+composite `(id, sort)`. Two recovered access paths: a **cached composite-key lookup** keyed on
+`(id, sort)`, and an **id-only lookup** (the busiest entity accessor in the client). Spawn handlers
+insert via an `insert(map, id, sort, actor)` call and write the wire fields into the new Actor;
+despawn handlers erase the current entry and clear it. The re-implementation should mirror this with
+an id-keyed dictionary plus, if needed, a per-`(id,sort)` index — it does not need to reproduce the
+legacy container's internal node layout.
+
+## Local-player global slot (context, not an Actor field)
+
+The local player's own Actor is referenced by **a single dedicated client global pointer**, set to
+the player's Actor object. It is **not** a field of any Actor and **not** a slot in the network
+handler. It is the busiest entity reference in the client (on the order of a thousand cross-uses),
+which is consistent with "the local player is checked everywhere".
+
+Two confirmed uses pin its role:
+- The **respawn / warp-to-point** handler skips re-creating position state when the Actor being
+  processed **is** the local-player global (i.e. "don't reset my own position from this packet").
+- The **spawn** handler selects the *self* spawn-effect branch when the spawned Actor **equals** the
+  local-player global.
+
+Domain-engineer guidance: keep one `LocalPlayerActor` reference on the side (set when the player's
+own spawn arrives), and gate self-only logic on identity against it — do not search the actor map to
+find "me" each frame, and do not model this as a struct field. (Working name in the glossary:
+`g_LocalPlayerActor`.)
 
 ---
 
 ## Open questions
 
-1. **`level` byte boundary (draft).** `state_byte` (SD +0x38) and `sub_level_byte` (SD +0x39) are
-   confirmed written by the 5/53 vitals handler. A `level` u16 is also labelled at SD +0x3A. The
-   u16 may overlap the two state bytes, or `level` may sit cleanly at SD +0x3A..+0x3B. **Resolve
-   with a real 5/53 vitals capture for a character of known level before treating `level` as a
-   clean 16-bit field.**
-2. **`equip_ref_table` interior (SD +0x58 .. +0x197).** 20 entries × 16 bytes. Only the leading
-   4-byte item-actor id per entry is confirmed; the remaining 12 bytes per entry (item state /
-   visual override / enhancement data) are unverified.
-3. **`body_variant` / `anim_class_word` region (SD +0x2C .. +0x37).** `body_variant` (SD +0x2C)
-   and `model_id` (SD +0x34) are confirmed; the bytes between, and the role of `anim_class_word`
-   (SD +0x36), need pattern analysis plus a capture.
+1. **`level` byte boundary (static-hypothesis; wire capture-pending).** `state_byte` (SD +0x38) and
+   `secondary_level_byte` (SD +0x39) are written by the runtime-table-dispatched 5/53 vitals handler
+   (not statically reachable). A `level` u16 is labelled at SD +0x3A. **New IDB evidence:** the
+   char-select **display** path reads a **clean u16 at SD +0x3A** and renders it as the level
+   number. That is one (display) read site — it shifts `level @ SD +0x3A` from "draft" toward a
+   likely clean u16, but it does **not** prove the *wire* encoding, because the 5/53 writes at
+   SD +0x38/+0x39 are runtime-dispatched. **Resolve the wire boundary with a real 5/53 vitals
+   capture for a character of known level before hard-coding a 16-bit `level` field.**
+2. **`equip_ref_table` interior (SD +0x58 .. +0x197).** 20 entries × 16 bytes. The leading 4-byte
+   dword per entry is **confirmed** as the visible-gear **part gid**; the renderer attaches
+   **overlay slots {3,4,6,2,11,14}** from this table (each gid -> `data/char/skin/g{gid}.skn`).
+   The remaining 12 bytes per entry (item state / visual override / enhancement data) are
+   unverified.
+3. **Appearance region (SD +0x2C .. +0x37).** `appearance_variant` (SD +0x2C, the `variant` arg)
+   and `internal_class` (SD +0x34, the `class` arg, `{1,2,3,4}` for PCs) are confirmed as the
+   model-class formula inputs (see SpawnDescriptor notes). Still open: the 7 bytes between
+   (SD +0x2D..+0x33) and the role of `anim_class_word` (SD +0x36) need pattern analysis plus a
+   capture.
 4. **`equip_stat_buff_block` (SD +0xD4 .. +0x32B, 600 bytes).** Only three interior points are
    located (`aura_pct_value`, `buff_kind`, `skill_state_word`). The per-item equipment stat
    offsets referenced by the vitals formulas belong to *item* objects, not the player descriptor;
@@ -410,7 +483,13 @@ index — it does not need to reproduce the legacy container's internal node lay
 9. **`max_hp` / `max_mp` are confirmed NOT stored.** Computed on demand (local player only) from
    stats + equipment + auras. Remote actors carry only `current_hp` / `current_mp` from the wire.
 10. **Capture coverage.** Field *offsets and sizes* are recovered from static layout evidence and
-    handler behaviour, not from a live capture. The position floats, the vitals fields, identity,
-    and the lifecycle enum are exercised by multiple handlers and are high-confidence; everything
-    marked `partial` / `draft` should be re-checked against a real CharSpawn / 5-53 capture before
-    an engineer hard-codes it.
+    handler control flow, not from a live capture. The position floats, the vitals-mirror offsets,
+    identity, the sort/spawn-kind switch, the equip-id table, the cell index, and the lifecycle enum
+    are exercised by multiple handlers and are confirmed; everything marked `partial` / `draft`, and
+    every *wire VALUE meaning*, should be re-checked against a real CharSpawn / 5-53 capture before
+    an engineer hard-codes it. The 5/53 vitals and 5/13 movement handlers are runtime-table-dispatched
+    (their dispatch table is null at static time), so their live writes are debugger/capture-only.
+11. **+0x488/+0x48C context-dependent reuse (soft).** The live path stores `last_state_ms` (int32) at
+    +0x488; the char-preview path writes +0x488 and +0x48C as a 70.0f float pair (an AoE / cell
+    working value). Both readings are valid in their own path — recorded as a context-dependent
+    overlay, not a hard conflict.

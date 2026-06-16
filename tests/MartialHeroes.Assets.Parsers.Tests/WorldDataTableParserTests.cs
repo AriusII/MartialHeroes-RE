@@ -304,75 +304,105 @@ public sealed class WorldDataTableParserTests
     // =========================================================================
     // 3. RegionTableParser
     // =========================================================================
-    // spec: Docs/RE/formats/misc_data.md §7.2 regiontableNNN.bin: SAMPLE-VERIFIED.
-    // REGIONTABLE_RECORD_BYTES = 32 (0x20). 52 records per area expected.
+    // CORRECTION 2026-06-15: stride is 48 bytes (CONFIRMED RE-AFFIRMED), NOT 32.
+    // The "32" was a conflation with the adjacent 28-byte npc.arr record on the same loader
+    // path. Fixed record count: 32 records × 48 bytes = 1,536 bytes total.
+    // spec: Docs/RE/formats/region_grid.md §regiontable — "Record stride: 48 bytes": CONFIRMED.
+    // spec: Docs/RE/formats/region_grid.md §regiontable — "fixed 32 records × 48 bytes = 1,536 bytes".
 
     /// <summary>
-    /// Builds a synthetic regiontableNNN.bin fixture.
-    /// spec: Docs/RE/formats/misc_data.md §7.2 — "stride 32 bytes (0x20)": SAMPLE-VERIFIED.
+    /// Builds a 1,536-byte synthetic regiontableNNN.bin fixture (32 records × 48 bytes).
+    /// Fills <paramref name="slot"/> with the given zoneName, zoneType, and tailOpaque.
+    /// All other records are zero (empty zone name, zoneType = 0 Safe).
+    /// spec: Docs/RE/formats/region_grid.md §regiontable — 48-byte stride: CONFIRMED.
     /// </summary>
-    private static byte[] BuildRegionTableBin(
-        (float cx, float cz, string name)[] records)
+    private static byte[] BuildRegionTableBin48(
+        int slot, string zoneName, uint zoneType, uint tailOpaque = 0)
     {
-        // stride = 32 bytes per record; no header.
-        // spec: Docs/RE/formats/misc_data.md §7.2 — "flat array of fixed 32-byte records; no header": SAMPLE-VERIFIED.
-        byte[] buf = new byte[records.Length * 32];
-        foreach (var (rec, i) in records.Select((r, idx) => (r, idx)))
-        {
-            int off = i * 32;
-            // center_x f32LE @ 0x00. PLAUSIBLE.
-            WriteF32LE(buf, off + 0x00, rec.cx);
-            // center_z f32LE @ 0x04. PLAUSIBLE.
-            WriteF32LE(buf, off + 0x04, rec.cz);
-            // unknown_0x08 u8[8] — zero (as observed). UNKNOWN.
-            // (no write needed; buf is pre-zeroed)
-            // sub_zone_name char[16] CP949 @ 0x10. PLAUSIBLE.
-            WriteCp949(buf, off + 0x10, 16, rec.name);
-        }
+        const int stride = 48;
+        const int count = 32;
+        byte[] buf = new byte[count * stride]; // 1,536 bytes
+
+        int recBase = slot * stride;
+
+        // zoneName char[40] CP949 @ +0x00.
+        // spec: Docs/RE/formats/region_grid.md §regiontable — "zoneName char[40] @ +0x00": HIGH.
+        WriteCp949(buf, recBase + 0x00, 40, zoneName);
+
+        // zoneType u32le @ +0x28 (= +40).
+        // spec: Docs/RE/formats/region_grid.md §regiontable — "zoneType u32 @ +0x28": CONFIRMED.
+        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(recBase + 0x28, 4), zoneType);
+
+        // _tail u32le @ +0x2C (= +44).
+        // spec: Docs/RE/formats/region_grid.md §regiontable — "_tail u32 @ +0x2C: UNVERIFIED".
+        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(recBase + 0x2C, 4), tailOpaque);
 
         return buf;
     }
 
     [Fact]
-    public void RegionTable_Parse_ReturnsCorrectRecordCount()
+    public void RegionTable_Parse_Returns32Records()
     {
-        // spec: Docs/RE/formats/misc_data.md §7.2 — "record count = file_size / 32": SAMPLE-VERIFIED.
-        byte[] data = BuildRegionTableBin([
-            (100f, -200f, "폐어촌"),
-            (300f, 400f, "구룡부"),
-        ]);
+        // Fixed count: always 32 records in a 1,536-byte file.
+        // spec: Docs/RE/formats/region_grid.md §regiontable — "fixed 32 records × 48 bytes = 1,536 bytes": CONFIRMED.
+        byte[] data = BuildRegionTableBin48(slot: 0, zoneName: "안전지대", zoneType: 0);
         RegionTableRecord[] recs = RegionTableParser.Parse(new ReadOnlyMemory<byte>(data));
-        Assert.Equal(2, recs.Length);
+        Assert.Equal(32, recs.Length);
     }
 
     [Fact]
-    public void RegionTable_Parse_CoordinatesAndName()
+    public void RegionTable_Parse_ZoneNameAndType()
     {
-        // spec: Docs/RE/formats/misc_data.md §7.2 — center_x f32 @ 0x00, center_z f32 @ 0x04: PLAUSIBLE.
-        // spec: §7.2 — sub_zone_name char[16] CP949 @ 0x10: PLAUSIBLE.
-        byte[] data = BuildRegionTableBin([(12345.5f, -9876.25f, "무암촌")]);
+        // zoneName CP949 char[40] @ +0x00; zoneType u32 @ +0x28 (= +40).
+        // spec: Docs/RE/formats/region_grid.md §regiontable — "zoneName char[40] @ +0x00": HIGH.
+        // spec: Docs/RE/formats/region_grid.md §regiontable — "zoneType u32 @ +0x28": CONFIRMED.
+        byte[] data = BuildRegionTableBin48(slot: 5, zoneName: "무암촌", zoneType: 1);
         RegionTableRecord[] recs = RegionTableParser.Parse(new ReadOnlyMemory<byte>(data));
 
-        Assert.Equal(12345.5f, recs[0].CenterX, precision: 3);
-        Assert.Equal(-9876.25f, recs[0].CenterZ, precision: 3);
-        Assert.Equal("무암촌", recs[0].SubZoneName);
+        Assert.Equal("무암촌", recs[5].ZoneName);
+        Assert.Equal(1u, recs[5].ZoneType);
+        Assert.Equal(5, recs[5].RegionId); // RegionId == index
     }
 
     [Fact]
-    public void RegionTable_Parse_Unknown08_IsEightBytes()
+    public void RegionTable_Parse_TailOpaque()
     {
-        // spec: Docs/RE/formats/misc_data.md §7.2 — "unknown_0x08 u8[8] @ 0x08: UNKNOWN".
-        byte[] data = BuildRegionTableBin([(0f, 0f, "Test")]);
+        // _tail u32le @ +0x2C (= +44). Carried through as-is; meaning UNVERIFIED.
+        // spec: Docs/RE/formats/region_grid.md §regiontable — "_tail u32 @ +0x2C: UNVERIFIED".
+        byte[] data = BuildRegionTableBin48(slot: 3, zoneName: "Test", zoneType: 2, tailOpaque: 0xDEADBEEFu);
         RegionTableRecord[] recs = RegionTableParser.Parse(new ReadOnlyMemory<byte>(data));
-        Assert.Equal(8, recs[0].Unknown0x08.Length);
+        Assert.Equal(0xDEADBEEFu, recs[3].TailOpaque);
     }
 
     [Fact]
-    public void RegionTable_Parse_InvalidStride_Throws()
+    public void RegionTable_Parse_RegionId_IsIndex()
     {
-        byte[] bad = new byte[33]; // not a multiple of 32
+        // Each record's RegionId must equal its index (0..31).
+        // spec: Docs/RE/formats/region_grid.md §regiontable — "RegionId is the zero-based record index".
+        byte[] data = BuildRegionTableBin48(slot: 0, zoneName: "", zoneType: 0);
+        RegionTableRecord[] recs = RegionTableParser.Parse(new ReadOnlyMemory<byte>(data));
+        for (int i = 0; i < 32; i++)
+            Assert.Equal(i, recs[i].RegionId);
+    }
+
+    [Fact]
+    public void RegionTable_Parse_ShortBuffer_Throws()
+    {
+        // Buffer shorter than 1,536 bytes must throw InvalidDataException.
+        // spec: Docs/RE/formats/region_grid.md §regiontable — "32 records × 48 bytes = 1,536 bytes": CONFIRMED.
+        byte[] bad = new byte[1535]; // one byte short of 1,536
         Assert.Throws<InvalidDataException>(() =>
             RegionTableParser.Parse(new ReadOnlyMemory<byte>(bad)));
+    }
+
+    [Fact]
+    public void RegionTable_Parse_ExtraBytes_Ignored()
+    {
+        // Any bytes beyond 1,536 are silently ignored.
+        // spec: Docs/RE/formats/region_grid.md §regiontable — "Any bytes beyond 1536 are silently ignored".
+        byte[] data = new byte[1536 + 64]; // padded
+        RegionTableRecord[] recs = RegionTableParser.Parse(new ReadOnlyMemory<byte>(data));
+        Assert.Equal(32, recs.Length);
     }
 
     [Fact]
@@ -386,19 +416,17 @@ public sealed class WorldDataTableParserTests
 
         ReadOnlyMemory<byte> raw = archive.GetFileContent(vfsPath);
 
-        // spec: Docs/RE/formats/misc_data.md §7.2 — "1 664 bytes = 52 records per area": SAMPLE-VERIFIED.
-        Assert.True(raw.Length % 32 == 0,
-            $"regiontable002.bin size {raw.Length} is not a multiple of 32.");
+        // Must be at least 1,536 bytes (32 × 48). Files can be larger; parser ignores the tail.
+        // spec: Docs/RE/formats/region_grid.md §regiontable — "fixed 32 records × 48 bytes = 1,536 bytes": CONFIRMED.
+        Assert.True(raw.Length >= 1536,
+            $"regiontable002.bin size {raw.Length} is shorter than the 1,536-byte minimum.");
 
         RegionTableRecord[] recs = RegionTableParser.Parse(raw);
 
-        Assert.Equal(52, recs.Length);
+        Assert.Equal(32, recs.Length);
 
-        // All names should decode without throwing.
-        Assert.All(recs, r => Assert.NotNull(r.SubZoneName));
-
-        // Unknown08 should always be 8 bytes.
-        Assert.All(recs, r => Assert.Equal(8, r.Unknown0x08.Length));
+        // All zone names should decode without throwing.
+        Assert.All(recs, r => Assert.NotNull(r.ZoneName));
     }
 
     // =========================================================================

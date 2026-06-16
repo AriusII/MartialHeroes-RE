@@ -52,26 +52,28 @@ using MartialHeroes.Assets.Parsers.Models;
 namespace MartialHeroes.Client.Godot.World;
 
 /// <summary>
-/// Spec-cited water placement decision derived from a parsed <c>map_option%d.bin</c>.
-/// The legacy client has NO water renderer (RESOLVED-NEGATIVE) — only the PLACEMENT
-/// (enable + world-Y) is data-driven; the visuals are a free engineering choice.
-/// spec: Docs/RE/specs/environment.md §4 — water RESOLVED-NEGATIVE; §4.1 placement CONFIRMED.
-/// spec: Docs/RE/formats/environment_bins.md §1.1 — water_enable @0x00, water_y @0x04.
+/// Spec-cited water placement decision. The legacy client has NO water renderer
+/// (RESOLVED-NEGATIVE), and — RECONCILED Campaign 5 — <c>map_option%d.bin</c> carries NO water
+/// field at all: the old 0x00/0x04 <c>water_enable</c>/<c>water_y</c> reading was an IDA-name
+/// misread of the dungeon flag and sight-clamp distance (disproved by the .txt↔.bin
+/// cross-reference). No data source for a water surface Y is established anywhere.
+/// spec: Docs/RE/formats/environment_bins.md §1.1 (no water fields) + §1.3/§1.4 (RESOLVED-NEGATIVE).
 /// </summary>
+/// <remarks>
+/// Per-cell water PRESENCE is detected independently from the <c>.map</c> FX texture names
+/// (<c>_water</c>/<c>_sea</c>/<c>_wateredge</c>) via <see cref="WaterRenderer.CellHasWater(MapDescriptor, BgTextureCatalog)"/>;
+/// that path is unaffected by this reconciliation.
+/// </remarks>
 internal readonly record struct WaterPlacement(bool Enabled, float WorldY)
 {
     /// <summary>
-    /// Reads the water placement from a parsed <c>map_option%d.bin</c>. When the bin is null
-    /// (absent file), water is disabled. spec: environment.md §7 — missing map_option → no water.
+    /// Water placement from <c>map_option%d.bin</c>: always disabled. The file holds no water
+    /// enable/height — the old reading was a misread. Any water surface is a free engineering
+    /// choice driven by per-cell FX-texture detection, not by this file.
+    /// spec: Docs/RE/formats/environment_bins.md §1.1 — NO water fields in map_option: CONFIRMED.
     /// </summary>
     public static WaterPlacement FromMapOption(MapOptionBin? mapOption)
-    {
-        if (mapOption is null || mapOption.WaterEnable != 1)
-            return new WaterPlacement(false, 0f);
-
-        // water_y is a u32 world-space Y (observed 300/700/1000). spec: environment_bins.md §1.1.
-        return new WaterPlacement(true, mapOption.WaterY);
-    }
+        => new(false, 0f);
 }
 
 /// <summary>

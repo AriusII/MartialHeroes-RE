@@ -651,14 +651,14 @@ static int RunDumpMsgXdb(MappedVfsArchive archive, string[] args, Encoding cp949
     int shown = 0;
     foreach (MsgXdbRecord rec in catalog.Records)
     {
-        if (filterId.HasValue && rec.Id != filterId.Value) continue;
-        if (rangeA.HasValue && (rec.Id < rangeA.Value || rec.Id > rangeB!.Value)) continue;
+        if (filterId.HasValue && rec.CaptionId != filterId.Value) continue;
+        if (rangeA.HasValue && (rec.CaptionId < rangeA.Value || rec.CaptionId > rangeB!.Value)) continue;
 
         // Escape CR/LF in text to keep output single-line.
         // spec: Docs/RE/formats/misc_data.md §6 Text encoding — CP949 NUL-terminated: CODE-CONFIRMED.
         string text = rec.Text.Replace("\r", "\\r", StringComparison.Ordinal)
                                .Replace("\n", "\\n", StringComparison.Ordinal);
-        Console.WriteLine($"  {rec.Id,8}  {text}");
+        Console.WriteLine($"  {rec.CaptionId,8}  {text}");
         shown++;
     }
 

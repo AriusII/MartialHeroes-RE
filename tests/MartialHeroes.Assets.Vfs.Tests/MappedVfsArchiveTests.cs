@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text;
 using MartialHeroes.Assets.Vfs;
 using Xunit;
@@ -238,5 +239,176 @@ public sealed class MappedVfsArchiveTests
         });
 
         Assert.Empty(errors);
+    }
+
+    // -----------------------------------------------------------------------
+    // Header-echo / real-magic / FILETIME fidelity (spec: Docs/RE/formats/pak.md)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void Open_ParsesRealVfs001Magic_AndIgnoresPopulatedFiletime()
+    {
+        // The fixture now writes the real "VFS001" magic at offset 0 and non-zero FILETIME-shaped bytes
+        // at +120/+128/+136. The parser must read-and-discard both (asserting neither) and still resolve
+        // entry_count from +12 and each entry's payload correctly.
+        // spec: Docs/RE/formats/pak.md §Header (magic read-and-discarded), §TOC record (FILETIME never read).
+        byte[] a = Ascii("FIRST");
+        byte[] b = Ascii("SECOND_PAYLOAD");
+        using var archive = SyntheticArchive.Build(
+            ("alpha.dat", a),
+            ("beta.dat", b));
+
+        using var vfs = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
+
+        Assert.Equal(2, vfs.EntryCount);
+        Assert.Equal(a, vfs.GetFileContent("alpha.dat").ToArray());
+        Assert.Equal(b, vfs.GetFileContent("beta.dat").ToArray());
+    }
+
+    [Fact]
+    public void GetFileContent_ResolvesPayload_WhenBlobLeadsWith24ByteHeaderEcho()
+    {
+        // data.vfs leads with a verbatim 24-byte header echo, so entry 0's dataOffset is 24, not 0.
+        // GetFileContent must honour the recorded dataOffset and never assume payloads begin at byte 0.
+        // spec: Docs/RE/formats/pak.md §"data.vfs leads with a verbatim 24-byte header echo".
+        byte[] payload = new byte[] { 0x11, 0x22, 0x33, 0x44, 0x55 };
+        using var archive = SyntheticArchive.Build(("only.bin", payload));
+        using var vfs = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
+
+        // The single entry must resolve to its real bytes, proving the >= 24 offset is honoured.
+        Assert.Equal(payload, vfs.GetFileContent("only.bin").ToArray());
+
+        // And the recorded offset must be exactly 24 (the header echo length).
+        var entries = vfs.GetEntries().ToArray();
+        Assert.Single(entries);
+        Assert.Equal(24, entries[0].DataOffset);
+    }
+
+    // -----------------------------------------------------------------------
+    // Failure / edge branches (spec: Docs/RE/formats/pak.md)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void GetFileContent_ThrowsInvalidData_WhenDataSizeHighDwordNonZero()
+    {
+        // A non-zero high dword on dataSize causes the original read to fail; the port surfaces it as
+        // InvalidDataException rather than attempting an oversized read.
+        // spec: Docs/RE/formats/pak.md §TOC record — "a non-zero high dword causes the read to fail".
+        byte[] header = SyntheticArchive.MakeHeader(entryCount: 1);
+
+        // Name "big.dat", dataOffset 24 (post header echo), dataSize with the high dword set.
+        byte[] nameField = new byte[100];
+        Encoding.ASCII.GetBytes("big.dat").CopyTo(nameField, 0);
+        const long highDwordSet = 0x0000_0001_0000_0004L; // high dword = 1, low dword = 4
+        byte[] record = SyntheticArchive.MakeRecord(nameField, dataOffset: 24, dataSize: highDwordSet);
+
+        byte[] inf = [.. header, .. record];
+        // data.vfs: 24-byte echo + a few payload bytes so the file is non-empty.
+        byte[] vfs = new byte[24 + 8];
+        header.CopyTo(vfs, 0);
+
+        using var archive = SyntheticArchive.BuildRaw(inf, vfs);
+        using var v = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
+
+        Assert.Throws<InvalidDataException>(() => v.GetFileContent("big.dat"));
+    }
+
+    [Fact]
+    public void GetFileContent_ThrowsInvalidData_WhenEntryClaimsDataButBlobIsEmpty()
+    {
+        // An entry with dataSize > 0 against a zero-byte data.vfs is a corrupt archive: there is no
+        // mapped view to slice. GetFileContent must surface a clear InvalidDataException.
+        // spec: Docs/RE/formats/pak.md §Two-file scheme (payload lives in data.vfs).
+        byte[] header = SyntheticArchive.MakeHeader(entryCount: 1);
+
+        byte[] nameField = new byte[100];
+        Encoding.ASCII.GetBytes("ghost.dat").CopyTo(nameField, 0);
+        byte[] record = SyntheticArchive.MakeRecord(nameField, dataOffset: 24, dataSize: 16);
+
+        byte[] inf = [.. header, .. record];
+        byte[] vfs = []; // zero-byte blob — no mapping is created
+
+        using var archive = SyntheticArchive.BuildRaw(inf, vfs);
+        using var v = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
+
+        Assert.Throws<InvalidDataException>(() => v.GetFileContent("ghost.dat"));
+    }
+
+    [Fact]
+    public void Open_NameSpanningAll100Bytes_WithNoNullTerminator_UsesFullWidth()
+    {
+        // A name field that fills all 100 bytes with no NUL must be decoded at the full 100-byte width.
+        // spec: Docs/RE/formats/pak.md §TOC record — name @ +0, char[100], lookup stops at first null.
+        byte[] nameField = new byte[100];
+        // Fill all 100 bytes with lower-case 'a' (no null terminator anywhere in the field).
+        Array.Fill(nameField, (byte)'a');
+        string expectedName = new('a', 100);
+
+        byte[] header = SyntheticArchive.MakeHeader(entryCount: 1);
+        byte[] record = SyntheticArchive.MakeRecord(nameField, dataOffset: 24, dataSize: 0);
+
+        byte[] inf = [.. header, .. record];
+        byte[] vfs = new byte[24]; // header echo only; the entry is zero-length
+        header.CopyTo(vfs, 0);
+
+        using var archive = SyntheticArchive.BuildRaw(inf, vfs);
+        using var v = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
+
+        var entries = v.GetEntries().ToArray();
+        Assert.Single(entries);
+        Assert.Equal(100, entries[0].Name.Length);
+        Assert.Equal(expectedName, entries[0].Name);
+    }
+
+    [Fact]
+    public void Open_TreatsHighBitSetEntryCount_AsEmptyDirectory()
+    {
+        // The original mount routine treats entry_count as a signed i32 with a "count <= 0" guard. A
+        // header whose entry_count has the high bit set is therefore a non-positive count → empty
+        // directory, NOT an overflow during the 144 × count allocation.
+        // spec: Docs/RE/specs/vfs_overview.md §Mount — "signed i32 ... count <= 0 guard".
+        byte[] header = SyntheticArchive.MakeHeader(entryCount: 0);
+        // Overwrite entry_count @ +12 with a high-bit-set value (negative as i32).
+        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(12), 0x8000_0001u);
+
+        // No TOC records follow (the parser must not attempt to read any).
+        byte[] vfs = []; // zero-byte blob
+
+        using var archive = SyntheticArchive.BuildRaw(header, vfs);
+        using var v = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
+
+        Assert.Equal(0, v.EntryCount);
+    }
+
+    // -----------------------------------------------------------------------
+    // Pointer-lifetime: many reads then clean dispose (regression for the AcquirePointer leak)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void GetFileContent_ManyReads_ThenDispose_DoesNotLeakViewPointer()
+    {
+        // Regression for the historic leak where each GetFileContent acquired a fresh view-handle
+        // pointer that was never released. The archive now acquires once at open and releases once at
+        // dispose, so thousands of reads followed by a single Dispose must complete cleanly and a read
+        // after dispose must throw ObjectDisposedException (the handle is no longer pinned).
+        // spec: Docs/RE/formats/pak.md PORT CHOICE note (single long-lived mapped view).
+        byte[] payload = Enumerable.Range(0, 512).Select(i => (byte)i).ToArray();
+        using var archive = SyntheticArchive.Build(("stream/cell.ted", payload));
+
+        var vfs = MappedVfsArchive.Open(archive.InfPath, archive.VfsPath);
+        for (int i = 0; i < 5000; i++)
+        {
+            var mem = vfs.GetFileContent("stream/cell.ted");
+            Assert.Equal(512, mem.Length);
+            Assert.Equal(payload[0], mem.Span[0]);
+            Assert.Equal(payload[511], mem.Span[511]);
+        }
+
+        vfs.Dispose();
+
+        // Idempotent dispose must not throw.
+        vfs.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => vfs.GetFileContent("stream/cell.ted"));
     }
 }

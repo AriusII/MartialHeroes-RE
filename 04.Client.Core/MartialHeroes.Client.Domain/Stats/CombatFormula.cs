@@ -199,10 +199,11 @@ public static class CombatFormula
     /// </remarks>
     public static int AttackRating(in AttackRatingInputs inputs)
     {
-        // slot[15] + slot[94 if nonzero] + slot[5]. spec: combat.md §3.3 / §2.2.
+        // slot[15] + slot[94] + slot[5]. The §3.3 "94 if nonzero" note is a no-op for an additive
+        // integer slot (a zero slot contributes 0), so slot94 is added unconditionally. spec: combat.md §3.3 / §2.2.
         double total =
             inputs.Slot15 +
-            (inputs.Slot94 != 0 ? inputs.Slot94 : 0) +
+            inputs.Slot94 +
             inputs.Slot5;
 
         PrimaryStats stats = inputs.Stats;

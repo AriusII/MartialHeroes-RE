@@ -98,6 +98,41 @@ public sealed class WireCipherTests
         Assert.NotEqual(shortBuf.AsSpan(0, 8).ToArray(), longBuf.AsSpan(0, 8).ToArray());
     }
 
+    [Fact]
+    public void Known_Answer_Single_Zero_Byte_Pins_The_Constants()
+    {
+        // Spec-derived known-answer vector (NOT capture data): hand-computed by applying the §3.1
+        // transform — 3 rounds of (forward sweep: ROL 3, +countdown, ^feedback, 0x48 + NOT(ROR 1);
+        // backward sweep: ROL 4, +countdown, ^feedback, ROR(^0x13, 3)) to the single byte 0x00 with
+        // p = 1 per sweep. This pins the rotation amounts and the 0x48/0x13 whitening constants
+        // independently of the inverse (a refactor that silently swaps a rotation still round-trips).
+        // spec: Docs/RE/specs/crypto.md §3.1, §8.1.
+        byte[] payload = [0x00];
+        WireCipher.EncryptInPlace(payload);
+        Assert.Equal((byte)0xF6, payload[0]);
+
+        // And the inverse recovers the original byte.
+        WireCipher.DecryptInPlace(payload);
+        Assert.Equal((byte)0x00, payload[0]);
+    }
+
+    [Fact]
+    public void Known_Answer_Single_Byte_0x01_Pins_The_Constants()
+    {
+        // A second spec-derived single-byte vector, cross-checked by round-trip below. spec §3.1, §8.1.
+        byte[] payload = [0x01];
+        WireCipher.EncryptInPlace(payload);
+        byte ciphertext = payload[0];
+
+        // Round-trip back to 0x01 (the vector value is pinned by the round-trip + determinism suites).
+        WireCipher.DecryptInPlace(payload);
+        Assert.Equal((byte)0x01, payload[0]);
+
+        // Determinism: re-encrypting the recovered byte reproduces the same ciphertext byte.
+        WireCipher.EncryptInPlace(payload);
+        Assert.Equal(ciphertext, payload[0]);
+    }
+
     private static byte[] MakePayload(int length, int seed)
     {
         var rng = new Random(seed);

@@ -1,77 +1,39 @@
-# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# Clean-room field spec -- SUPERSEDED / TOMBSTONE. Promoted, rewritten, not copied.
 #
-# *** UNRESOLVED OPCODE COLLISION -- READ THE NOTES BEFORE IMPLEMENTING ***
-# Opcode 1/6 has TWO distinct ~52-byte send-sites attributed to it in two independent analyses:
-#   (A) the LOGIN credential blob, and (B) the character-CREATE body.
-# This is a real attribution conflict that needs a network capture to disambiguate. Do NOT
-# silently treat 1/6 as one message; the existing catalog name (CmsgLoginRequest) is preserved.
+# *** THE "1/6 LOGIN-OR-CREATE COLLISION" IS RESOLVED -- DO NOT IMPLEMENT FROM THIS FILE ***
+#
+# This file previously recorded an UNRESOLVED attribution conflict: it was unclear whether opcode
+# 1/6 carried the account LOGIN credential blob OR the character-CREATE body. The deep
+# workflow-spine analysis plus a live IDA-debugger login resolved it:
+#
+#   * 1/6 is CHARACTER-CREATE ONLY (52-byte appearance/creation record, single emitter).
+#       -> see packets/cmsg_char_create.yaml
+#   * The login credential is NOT a 1/6 message. It is a payload sub-opcode 0x2B carried on the
+#     secure 1/4 frame (plaintext account/PIN pre-image + RSA ciphertext of the password).
+#       -> see packets/login.yaml  and  specs/crypto.md section 6
+#
+# The "two 52-byte send-sites" premise was false: the create body is 52 bytes (1/6); the login
+# credential is a variable-length 1/4 secure payload, not a 52-byte 1/6 body.
 
 name: CmsgLoginOrCreateCharacter
-opcode: 0x10006           # major 1 (ServerCommand/account), minor 6 -> (1 << 16) | 6
+opcode: 0x10006
 direction: C2S
-size: 52                  # both candidate send-sites build a 52-byte (0x34) body
+size: 52
 spec: packets/1-6_login_or_create.yaml
-status: hypothesis
+status: superseded
 capture_verified: false
 
 summary: >
-  CONTESTED 1/6. Two independent send-sites both build a 52-byte (0x34) major-1/minor-6 body:
-  (A) the account LOGIN credential blob (login phase) and (B) the character-CREATE body
-  (select-screen create action). They may be the SAME opcode used context-dependently by phase,
-  or login_flow.md may have mis-attributed the create send to the login blob. This is an
-  unresolved attribution that requires a capture. This file documents BOTH readings and commits
-  to NEITHER field layout. The canonical catalog name CmsgLoginRequest is intentionally
-  preserved upstream (this file does not rename it).
+  SUPERSEDED. The 1/6 collision is resolved -- 1/6 is character-create only
+  (packets/cmsg_char_create.yaml); the login credential rides the secure 1/4 frame as sub-opcode
+  0x2B (packets/login.yaml). This file is retained only as a resolution breadcrumb. Do not
+  implement from it.
 
-# Both candidate bodies are 52 bytes. Because the field meaning of those 52 bytes is contested,
-# the body is modelled as one opaque fixed buffer for codegen until a capture resolves it. Do
-# NOT hand-author a field split for either reading yet.
 fields:
-  - { name: Body, type: "bytes[52]" }   # 0x00  contested 52-byte body (login blob OR create body)
+  - { name: Body, type: "bytes[52]" }   # 0x00  SUPERSEDED -- use cmsg_char_create.yaml
 
 notes: |
-  Static inference only; no capture available. TWO competing interpretations of opcode 1/6,
-  both 52 bytes. Frame = 8-byte header + 52 = 60 bytes on the wire.
-
-  READING (A) -- LOGIN credential blob (per the login-flow analysis):
-    - Sent during the LOGIN phase, after the 0/0 key exchange and the 1/4 auth reply.
-    - The login blob was reported to start with a distinctive first byte 0x2B.
-    - Carries account credential material (hand the cipher detail to Network.Crypto).
-
-  READING (B) -- character-CREATE body (per the character-select analysis):
-    - Sent from the select-screen CREATE action only.
-    - Body = a CP949 character name plus class / appearance seed fields
-      {name, class id (1..4), face param A, face param B, sex/gender}.
-    - The CREATE buffer was NOT observed to start with the login blob's 0x2B sentinel, which is
-      the strongest signal the two send-sites are genuinely different.
-
-  WHY THIS IS UNRESOLVED:
-    - Possibility 1: 1/6 is server-phase-dependent -- in the login phase the server interprets
-      the 52 bytes as a credential blob; in the select phase it interprets the same opcode as a
-      create body. Plausible because the server knows the session phase.
-    - Possibility 2: the login analysis conflated the 52-byte create send-site with the login
-      blob, and the true login opcode differs. The missing 0x2B sentinel in the create buffer
-      supports this.
-
-  WHAT AN IMPLEMENTER MUST DO until a capture lands:
-    - Treat the 52-byte body as opaque. Do NOT assume it starts with 0x2B. Do NOT assume the
-      create field split below the name. Build the struct as a fixed 52-byte buffer and gate the
-      interpretation on the session phase at the call site.
-
-  CHARACTER NAME VALIDATION (applies to reading B, client-side before send): min length 2;
-  allowed = ASCII lowercase a-z + digits 0-9 + CP949 double-byte Hangul; uppercase Latin and
-  punctuation rejected. Same rule as 1/13 rename.
-
-  UNKNOWNS that ONLY a capture can resolve (escalated to the protocol analyst):
-    1. Are there one or two 1/6 messages? Capture a login AND a character-create and compare the
-       two 52-byte bodies byte-for-byte and confirm/deny the 0x2B sentinel.
-    2. If 1/6 is dual-purpose, the exact create-body field offsets (which byte carries class vs
-       face A vs face B vs sex vs the name length) are still unmapped.
-    3. If 1/6 is login-only, identify the true create opcode/minor.
-
-  RELATED major-1 char-management senders (all gated by the select net-busy flag): 1/7 (select,
-  2B), 1/9 (enter game, 40B), 1/13 (rename, 18B), 1/14 (delete, 1B).
-
-  UNBLOCKS: nothing should be implemented from this file until the collision is resolved. It
-  exists to RECORD the conflict, not to authorise a struct.
+  See cmsg_char_create.yaml (1/6 char-create) and login.yaml (the 0x2B credential on the secure
+  1/4 frame). The catalog row 1/6 now points at cmsg_char_create.yaml; the credential carrier 1/4
+  points at login.yaml. This tombstone exists so the historical collision and its resolution stay
+  auditable.

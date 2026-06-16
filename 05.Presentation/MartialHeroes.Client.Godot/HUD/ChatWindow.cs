@@ -227,9 +227,9 @@ public sealed partial class ChatWindow : Control
             GD.PrintErr($"[ChatWindow] _Ready BuildUi failed: {ex.Message}");
         }
 
-        // Demo mode: inject sample lines so the window is not blank before a hub is bound.
-        // Mirrors the InventoryWindow / SkillWindow "self-populate when no hub" pattern.
-        AppendDemoLines();
+        // Demo lines removed — window starts empty until a live hub is bound.
+        // Synthetic data does not ship outside an explicit dev-offline guard.
+        // spec: layer-05 discipline — no invented data without DEV_OFFLINE_FLOW.
 
         GD.Print("[ChatWindow] Ready. " +
                  $"Ring capacity {RingCapacity} (spec §6.2 CODE-CONFIRMED). " +
@@ -350,6 +350,16 @@ public sealed partial class ChatWindow : Control
     {
         // Root: anchor to bottom-left of the viewport (matching legacy position defaults).
         // spec: Docs/RE/specs/chat.md §6.1 — "CHAT_WINDOW_POS_X default = screenW/2 − 512" (PLAUSIBLE relative placement).
+        //
+        // Reconciliation with ui_hud_layout.md §1.2:
+        //   That spec records a "chat panel" of W=290, H=18, anchored at (parent+94, parent_y).
+        //   This ChatWindow (W=448, H=324, spec chat.md §6.1 CODE-CONFIRMED) is the full scrollable
+        //   chat log + input bar — the complete window, not the primitive single-line input strip.
+        //   The §1.2 "W=290 H=18" entry describes the narrow input-line widget visible in the HUD
+        //   outside of any expanded chat panel (a minimised chat bar). This implementation uses the
+        //   full chat.md §6.1 panel; no conflict — they are two different presentation modes.
+        //   spec: Docs/RE/specs/ui_hud_layout.md §1.2 — "W=290, H=18, parent+94" CODE-CONFIRMED (input strip).
+        //   spec: Docs/RE/specs/chat.md §6.1 — "448×324 full window" CODE-CONFIRMED (this class).
         AnchorLeft = 0f;
         AnchorTop = 1f;
         AnchorRight = 0f;

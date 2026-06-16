@@ -1,9 +1,30 @@
 # World-scene gameplay systems — master index (clean-room spec)
 
+<!--
+verification:          confirmed (client-side routing/sizes/offsets/timing constants are control-flow-confirmed
+                       against the IDB); capture/debugger-pending (server-authored magnitudes — damage, cooldown
+                       wall-clock, XP rates, HP scale — and on-wire VALUE meanings / exact field boundaries).
+ida_reverified:        2026-06-16
+ida_anchor:            263bd994
+evidence:              [static-ida]
+conflicts:             (1) 5/53 routing CONFIRMED at family-5 slot 1453; the recovered handler NAME is contested —
+                           the IDB emphasises an actor-pair-relation role, this index emphasises absolute vitals
+                           (HP/MP/stamina). Routing is settled; the canonical NAME + the body's full semantics are
+                           capture/debugger-pending (Chapter 1, §14).
+                       (2) F1 attack-in-progress flag: on build 263bd994 the clear/re-arm is observed in
+                           SmsgLocalPlayerStateSync (4/13), NOT a 4/2 handler. Which push arms-vs-releases the swing
+                           window is capture/debugger-pending (Chapter 1).
+-->
+
 > Clean-room neutral spec — a navigable **overview / index** of the in-world ("World scene")
-> gameplay systems recovered in Cycle 3. No legacy symbols, no binary addresses, no decompiler
-> pseudo-code. Promoted by synthesising the already-firewall-clean detail specs under `Docs/RE/`;
-> every chapter cross-links to the committed spec that owns its byte tables.
+> gameplay systems. No legacy symbols, no binary addresses, no decompiler pseudo-code. Promoted by
+> synthesising the already-firewall-clean detail specs under `Docs/RE/`; every chapter cross-links to
+> the committed spec that owns its byte tables. **Re-verified against build `263bd994` (Campaign 10,
+> Block F) — every World-scene opcode→handler binding in §14 maps EXACTLY to the **two flat 154-slot
+> dispatch tables** (family-4 / family-5, base minor 0 each, pre-filled with a default no-op and
+> selectively overwritten — §0.1); the GameState-5 in-game roster (§13.1) and the Chapter-16 region
+> byte claims are control-flow confirmed. No routing, size, or model claim was refuted; only two
+> NAME-level items remain contested (see the banner above).**
 >
 > This document is the one-stop map for the **protocol engineer** (`Network.Protocol`), the
 > **application engineer** (`Client.Application` use cases / handlers), the **domain engineer**
@@ -58,6 +79,36 @@ header: `size` @+0, `major` @+4, `minor` @+6, payload @+8). **All wire field off
 detail specs are payload-relative** (relative to frame +8) unless explicitly stated as in-memory
 struct offsets.
 
+### 0.1 The dispatcher is two flat indexed handler tables (not a switch) — CONFIRMED
+
+The inbound router is **not** a `switch`. The network handler singleton installs exactly **two
+receive tables — one for family 4, one for family 5** — and **no family-2 receive table exists
+anywhere** (this is the structural proof of the "family 2 is entirely client-emitted" claim in
+§0). Each table is a **flat array of 154 handler slots indexed directly by the minor opcode**
+(family-4 slot base = minor 0; family-5 slot base = minor 0; the two tables sit 154 slots apart in
+the singleton). On construction **every slot in both tables is pre-filled with one shared default
+no-op handler**, then the two installers selectively overwrite the slots that have a real handler.
+A minor opcode with no installed handler therefore resolves to the no-op, not to a crash. A
+re-implementation should model the major-4 / major-5 routers as **two flat 154-entry dispatch
+arrays with a default fallback**, indexed by minor — not as a switch and not as a hash map.
+[CONFIRMED]
+
+The **family-3** handlers are **separate named routines**, not entries in either of these two
+tables; their install path sits in the char-select / billing / scene-management band and was not
+re-walked in the Campaign-10 Block-F re-verification (flagged for a follow-up lane if `3/8` /
+`3/50000` need slot-exact confirmation). [CONFIRMED handler exists; family-3 install path
+static-hypothesis]
+
+### 0.2 The network handler is a guest/member pair, with a keep-alive arming — CONFIRMED
+
+The singleton that owns the two dispatch tables is itself a **pair**: it constructs a **guest
+sub-handler** and a **member sub-handler** (two instances of the same handler interface — the
+likely pre-auth-vs-in-world split), and on construction it **arms a compressed keep-alive** (a
+periodic 20-byte `major-2 / minor-10000` packet) that feeds the connection-state model (the
+disconnect / conn-state path also funnels into the shared chat-log/notice sink — see §2 and §13.1).
+A re-implementation models the connection as guest→member handler promotion plus a periodic
+keep-alive heartbeat. [CONFIRMED]
+
 ---
 
 ## 1. Combat loop (target → attack → result → cadence)
@@ -79,7 +130,13 @@ swing-ready timestamp gated by the per-tick resync pulse / combat-phase update).
 | `5/53` | S2C | `SmsgActorVitalsAndPairState` — **absolute** current HP/MP/stamina (the "damage lands here" observable). |
 | `4/100` | S2C | `SmsgCombatAttackUpdate` — combat-phase / attack-swing timing (server pacing). |
 | `4/99` | S2C | `SmsgCombatResultMessage` — combat/training session result (reward/EXP strings). |
-| `4/2` | S2C | per-tick server resync pulse — releases the local "attack in progress" flag. |
+| `4/2` | S2C | per-tick server game-tick/resync pulse (server pacing). |
+
+> **Attack-in-progress flag (capture/debugger-pending).** The local "swing in progress" flag's
+> clear/re-arm is **observed in the local-player state-sync push (`5/13`, the movement/state
+> update)** on build `263bd994`, **not** in a `4/2` handler. Which push *arms* versus *releases*
+> the swing window is capture/debugger-pending; treat `4/2` as the server cadence/tick pulse and
+> `5/13` as the observed flag-clear site (see the banner, conflict 2).
 
 - **Driving VFS data:** `items.csv` (`attack_speed`, weapon attack columns), `users.scr` /
   `userlevel.scr` / `userpoint.scr` / `exp.scr` (stat & XP curves) — all in `formats/config_tables.md`.
@@ -414,6 +471,38 @@ fetched by numeric id from `msg.xdb` (CP949); text is GPU-side Korean system fon
 not a shipped glyph atlas. The master scene machine has 9 states; in-game (state 5) returns to
 character-select (state 4).
 
+### 13.1 The GameState-5 in-game roster (how the World scene is built) — CONFIRMED
+
+The program entry point is a single **`while(1) switch(GameState)`** scene machine over **states
+0..8** (the ~9 states above). The VFS is mounted once before the loop; each state builds (and on
+exit tears down) its scene. State **4** is character-select, which sets the state to **5** and
+builds the in-game HUD host; state **5** is the in-game World scene and, on teardown, **sets the
+state back to 4** (return to character-select). States **6** (quit-prep → 8), **7** (error → 8), and
+**8** (exit) close the machine. This is the same entry-point state machine the front-end specs
+describe — see `specs/game_loop.md` / `specs/client_runtime.md`; this chapter records only the
+in-game (state-5) members. [CONFIRMED]
+
+The in-game scene is built from a small set of cooperating objects:
+
+| Member | Size | Role | Confidence |
+|---|---|---|---|
+| **HUD host window** (the in-game `MainWindow`) | 6280-byte object | The retained-mode root that hosts every World-scene panel in Chapters 1–12 (chat, inventory, stat window, minimap, buff bar, …). Built in the char-select→in-game transition; the buff/state window is one of its children (the `4/102` rebuild target — see §9, §13.2). | CONFIRMED |
+| **In-game handler** (`MainHandler`) | 200-byte object | Constructed last in the scene sequence and attached to the HUD host; drives the in-game frame logic. | CONFIRMED |
+| **In-game scene-graph builder** | — | A separate routine that allocates the 3D scene: a perspective camera (**FOV 65°, near 5, far 15000**), **5 view-platform objects** (consistent with the 5 camera view modes — Chapter 15 / `specs/camera_movement.md`), a GScene root, the terrain-manager singleton, and **4 layer nodes resolved by `msg.xdb` ids 2004 / 2005 / 2006 / 2148**. | CONFIRMED (count + constants); view-mode semantics owned by `camera_movement.md` |
+| **Local-player actor singleton** | pointer | The hub the Actor family (visual refresh, motion, buff release) reads; destroyed on scene exit. The combat / movement / chat / buff chapters all converge on this actor. | CONFIRMED (local-player/Actor singleton) |
+| **Skill/hotbar state hub** | global | The table the HUD skill/hotbar panels (skill-panel toggle, combo / link panels) read; consistent with the one 240×8-byte hotbar record array (id @+0, points @+4 — Tier-1 fact). | CONFIRMED (HUD skill-panel hub) |
+
+### 13.2 The World HUD event hub (the synthesis headline) — CONFIRMED
+
+The in-game HUD host (§13.1) owns **one shared chat-log / notice sink** that S2C handlers **and**
+local system events both funnel into: the disconnect / connection-state path (§0.2), the region
+type-2 movement-gate denial (§16.3, localized message id 74309), and the chat / coloured-system-text
+paths (§2) all fetch the in-game handler singleton and **broadcast into this same sink**. This is the
+"World HUD event hub" the chapters above keep referring back to: routing fans **in** to one notice
+log regardless of source. The buff/state window is a **child of the HUD host** that the `4/102`
+handler reaches by fixed child index, **clears, then rebuilds** from the 476-byte snapshot (§9).
+[CONFIRMED]
+
 | Opcode | Dir | Role |
 |---|---|---|
 | (none) | — | The UI toolkit is local presentation; it carries no opcode of its own. It hosts the windows that emit/consume every opcode in Chapters 1–12 (action-id → window dispatcher → the relevant C2S send). |
@@ -424,8 +513,6 @@ character-select (state 4).
 - **See also:** `specs/ui_system.md` (widget hierarchy, render path, input/capture, per-screen
   layouts, scene state machine); `formats/ui_manifests.md` (the UI texture-id resolver); the
   `specs/frontend_scenes.md` / `specs/client_workflow.md` front-end counterparts.
-
----
 
 ## 14. Consolidated opcode table (all World-scene rows)
 
@@ -531,12 +618,320 @@ tail). **Routing and sizes are CODE-CONFIRMED; every body field is CAPTURE-UNVER
 | `specs/effects.md` | Effect runtime, boot pipeline, trigger table, skill-cast effect chain. |
 | `specs/minimap.md` | HUD radar projection, tile streaming, blip table; full-screen world map. |
 | `specs/ui_system.md` | The `Diamond::GU*` widget toolkit hosting every World-scene window. |
+| `world_systems.md` Ch. 16 | The 256-unit region grid, the **zone-type enum (safe/PvP/closed), CONFIRMED-COMPLETE at 3 values**, the `regiontable` record (zoneName + zoneType + tail), the PvP/movement gates, the **server-authoritative quest/event verdict**, the gather-anchor table, and `.mud` as a per-cell audio-zone grid. |
+| `world_systems.md` Ch. 17 | **Per-area background-music selection** — the five per-map sound tables, the `.mud +2` music-zone byte driver, the indoor override, and the cross-fade play path. |
+| `formats/region_grid.md` | The `region<area>.bin` grid + the `regiontable<area>.bin` record (zoneName/zoneType/tail) byte layouts that Ch. 16 reads. |
 | `formats/config_tables.md` | `.scr` / `.do` / `.csv` catalogues (items, skills, NPCs, stat curves, quests, `msg.xdb`). |
 | `formats/misc_data.md` | `.xdb` / `.mi` / `.tol` / `.ion` / `.sc` small data files (incl. `actor_size.xdb`). |
 | `formats/effects.md` | `.xeff` / `.eff` / `.xobj` descriptors and the effect-manifest list files. |
 | `formats/ui_manifests.md` | `uitex.txt` / `skillicon.txt` / `crestlist.txt` / `texturelist.txt` UI manifests. |
 | `opcodes.md` | The authoritative `(major:minor)` catalogue (the consolidated table above is a per-system index of it). |
 | `packets/*.yaml` | Per-opcode wire field specs (linked per chapter). |
+
+---
+
+## 16. Regions & zones (PvP / safe / closed gating) — Campaign 5 / 5B
+
+> **Campaign-5 addition, Campaign-5B upgrade** (Lane 3/4 — Regions & Triggers). This chapter
+> documents the third world grid scale — the **256-unit region grid** — and the **zone-type enum**
+> it indexes, which feed the same server-authoritative world-state tick and combat machinery the
+> chapters above describe. The world is gridded at **three scales**: 1024-unit **terrain cells**
+> (`formats/terrain.md`), 256-unit **region cells** (this chapter), and 16-unit **sub-tiles** (the
+> `.mud` per-cell audio grid below). Engine code citing any constant here writes
+> `// spec: Docs/RE/specs/world_systems.md` (Ch. 16). The byte layouts of `region<area>.bin` and
+> `regiontable<area>.bin` are owned by `Docs/RE/formats/region_grid.md`.
+
+The client keeps a **per-area region grid** that quantizes the world into 256-unit cells, and a
+parallel **region-properties table** that maps each region id to a small **zone-type enum**. Combat
+permission, movement barriers, and the world-marker overlay are driven off these two structures, but
+the **authoritative active region** comes from the **network layer** (server-pushed into the
+world-state tick), not from the local grid — the local grid is consulted to classify *target*
+positions and to gate the player's own intended moves. This is consistent with the chapter-0 model:
+server-authoritative resolution, client-side gating for presentation and to avoid pointless sends.
+
+### 16.1 The region grid (per-area, `region<area>.bin`)
+
+The per-area region file is loaded once when the active map area is set, alongside the area's other
+binary tables (the per-area map header, the region-properties table, and the gather/anchor table).
+Its on-disk shape is a **flat byte grid plus dimensions and a world origin**:
+
+| Element | Size / form | Meaning | Confidence |
+|---|---|---|---|
+| grid width | 4-byte unsigned integer | number of columns | CONFIRMED |
+| grid height | 4-byte unsigned integer | number of rows | CONFIRMED |
+| grid buffer | width x height bytes, **1 byte per cell** | each byte = a **region id** (0..31) | CONFIRMED |
+| world-X origin | 4-byte unsigned integer | subtracted before the 256-unit quantize | CONFIRMED |
+| world-Z origin | 4-byte unsigned integer | subtracted before the 256-unit quantize | CONFIRMED |
+
+Read order in the file is: width, height, then `width x height` cell bytes, then the X origin, then
+the Z origin. **Each grid cell is one byte holding a region id (0..31)** — it is *not* a flag byte.
+The flags/semantics live in the region-properties table (16.2), indexed by that id. Full byte layout
+in `formats/region_grid.md` (Layout A).
+
+**World position to region id** (the lookup every gating site uses):
+
+```
+col   = (worldX - originX) / 256          # integer cell column
+row   = (worldZ - originZ) / 256          # integer cell row
+index = col + row * width
+region_id = gridBuffer[index]             # unsigned byte, 0..31
+```
+
+- **Cell size = 256 world units per axis** (a finer quantization layered over the 1024-unit terrain
+  cell; 256 = a quarter of a terrain cell). [CONFIRMED]
+- If the grid is not loaded, or `index >= width x height`, the lookup is treated as a failure and
+  yields region id 0. [CONFIRMED]
+- Cell math is integer division; world-coordinate handling follows the project's standard convention.
+
+### 16.2 The region-properties (zone) table (`regiontable<area>.bin`)
+
+A fixed **32 records x 48 bytes = 1536 bytes** table, indexed directly by region id (0..31). A region
+id >= 32 has no record and is treated as the default. [CONFIRMED]
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|---:|---:|---|---|---|---|
+| +0  | 40 | char[40] | **`zoneName`** | NUL-terminated zone display-name string — the **minimap sub-zone caption**. Three minimap/HUD label sites read the record base pointer directly as a C-string from offset +0. This is NOT opaque/unread; it is the zone-name field. | HIGH (consumed as `char*` by 3 UI sites; the 40-byte width is parser-derived from `48 − 4 − 4`, not sample-confirmed) |
+| +40 | 4  | u32 | **`zoneType`** | The only numeric field consumed in region logic; an **enum**, not a bitmask. | CONFIRMED |
+| +44 | 4  | (opaque) | `_tail` | Remainder of the 48-byte stride; **no reader found** in any path. | UNVERIFIED |
+
+- **Record count:** fixed 32. **Record stride:** 48 bytes. **Index source:** the region id byte from
+  the grid (16.1) or the network-pushed active region id (16.3). [CONFIRMED]
+- **One file, two roles — unified.** This is the same `regiontable<area>.bin` referenced as the
+  minimap sub-zone **label** source in Chapter 10. The **`zoneName` string at +0** is the label; the
+  **`zoneType` word at +40** is the region-gating field. They are the two named fields of one 48-byte
+  record, not two unrelated reads. The earlier "`+0..+39` opaque/unread" description is **superseded**.
+  Byte layout owned by `formats/region_grid.md`.
+
+### 16.3 Zone-type enum (record offset +40) — CONFIRMED-COMPLETE at three values
+
+The zone type is a small **enumerated value**, **never a packed bitmask** — every consuming site does
+an **equality / inequality / truthiness compare** (`== 1`, `!= 1`, `== 2`, `!= 0`), never a bit test.
+A census of every site that reads the +40 word (movement gate, combat-mode arbiter, attack/target-
+validity gates, skill-use validator, the action gates, and the minimap) found **no comparison against
+any value ≥ 3 and no bitmask test anywhere**. The richest consumer — the minimap renderer — does a
+`switch` on the +40 word with arms for **0, 1, 2, and a default only** (no case for 3..31). A missing
+record (region id >= 32) is treated by the combat arbiter as type `1`.
+
+The set of values the client distinguishes is therefore **exactly `{0, 1, 2}`**; values `3..31` fall
+through every site to the default and are treated like the safe (type-0) case.
+
+| Value | Meaning | Confidence |
+|---|---|---|
+| `0`  | **Safe / no-combat** zone — combat arbiter yields the "denied" result; the minimap renders this as a distinct safe caption/colour. | CONFIRMED (behaviour); label PLAUSIBLE |
+| `1`  | **Open PvP / combat-enabled** zone — combat is permitted (subject to the faction check). | CONFIRMED (1 = combat-permitted) |
+| `2`  | **Movement-restricted / closed** zone — entry/movement into a type-2 cell is **denied** (the move is rejected, a localized message is shown, and the actor is snapped back). Also a distinct non-open combat mode. | CONFIRMED (2 = movement-restricted) |
+| `3..31` | **Not modelled.** No site compares against any value ≥ 3; all such ids behave as the default (safe). | CONFIRMED-COMPLETE (3..31 = default) |
+
+> **Residual doubt removed.** The earlier "`3+` not observed / UNVERIFIED" entry is replaced by the
+> exhaustive census result: the enum is **complete at three values**. A faithful port models exactly
+> `{0 safe, 1 open-PvP, 2 closed}` and treats anything else as safe.
+
+**Where the enum is consumed:**
+
+- **Active region is server-authoritative.** The player's current region id is a separate global
+  written **only** by an area/state setter that is called **solely from two network handlers** (the
+  local-player status push and the per-tick game-state push). It is *not* read from the local grid for
+  the player's own position. The local grid (16.1) is used to classify a **target actor's** position.
+  [CONFIRMED]
+- **Combat / PvP arbiter.** Reads the player's self-region type and the target region's type (each
+  defaulting to `1` if the record is missing), then resolves a combat-mode result: if either side is
+  type `1`, combat is the open/permitted mode; if both sides are non-safe (non-zero) it is a distinct
+  restricted combat mode; otherwise it is the safe/denied mode. The target region is computed from the
+  target actor's world XZ via the 16.1 lookup. [CONFIRMED]
+- **Attack / target validity gate.** Refuses the action unless **both** the active region and the
+  target's region are type `1`, and additionally cross-checks a faction/team value — i.e. flagged PvP
+  is allowed only in type-1 zones, subject to faction. [CONFIRMED]
+- **Skill-use validator and action gates.** A family of cast/action permission sites each test the
+  active region against `== 1` / `!= 1` / `== 2`, refusing with a localized message when the zone does
+  not permit the action. [CONFIRMED]
+- **Movement gate.** If the destination cell's region type is `2`, the move is denied: a localized
+  message is shown (message id 74309) and the actor is snapped back; otherwise the normal facing /
+  move proceeds and the client emits the movement intent. [CONFIRMED] On build `263bd994` the
+  per-move gate and the combat-mode selection are observed in the **same routine** (the move-gate
+  body both rejects type-2 destinations and selects the combat mode), so the "movement gate" and
+  "combat/PvP arbiter" described separately here may be **one fused site** plus its callers rather
+  than two independent functions — a structural-naming detail, not a behavioural change. The
+  type-2 deny + msg 74309 + snap-back behaviour is exactly what that routine does. [CONFIRMED]
+- **Minimap overlay.** The minimap reads the active region's +40 word and switches `{0,1,2,default}`
+  to pick the caption text and colour (the three captions are localized zone-type labels; the default
+  is an unlabeled white zone). It separately prints the `zoneName` string (16.2) as the sub-zone
+  caption. [CONFIRMED]
+
+### 16.4 Quest / event triggers are server-authoritative — CONFIRMED
+
+No region grid cell and no region-table record carries a quest or event trigger id in **any** client
+path. **Enter-region quest / event / script / PK-rule dispatch is server-authoritative** — the active
+region id itself is server-pushed (16.3), and no client path keys a quest, event, script, or PK-rule
+trigger off the region id or any `regiontable` field. [CONFIRMED — upgraded from PLAUSIBLE]
+
+The **only** region-id-keyed client-side uses are **cosmetic / presentation**, never a quest dispatch:
+
+- a specific region's **ambient sound id** (a "you are in region N" jingle played once on entry),
+- a region-keyed **UI icon index**, and
+- a **cinematic event-camera curve selector** (the cutscene camera path is chosen by region id) —
+  a presentation effect, not a script entrypoint.
+
+The localized strings that DO fire on region interaction (the type-2 movement block; the minimap
+zone-type captions; the action-gate refusals) are all **gating / UI** messages, not quest/event
+triggers. There is **no** "you entered zone X" quest notice, **no** client PK-rule toggle, and **no**
+client script entrypoint keyed off a region id.
+
+- **Quest/event scripts** load from **global text scripts at startup** (the quest and event `.scr`
+  scripts), pulled by the bulk asset-preload thread — area-independent, not per-cell.
+- **Gather/anchor table** (`gathertable<area>.bin`, **28-byte records**) holds **named world-anchor
+  markers** (gather nodes / quest-NPC anchors). Each record's leading 2 bytes are an id key; a record
+  is found by **lookup-by-id**, yielding a world position + display name that the world-state tick
+  turns into on-screen labeled markers. This is a static-anchor lookup, **not** an on-enter trigger.
+- Whether a **server-side** script keys off a region id at parse time is, by construction, not
+  observable in the client binary — out of scope, and does not affect the client-side verdict.
+
+### 16.5 `.mud` is a per-cell AUDIO-ZONE grid — not region, not collision
+
+`.mud` is a **per-terrain-cell** blob (loaded per cell with the cell's `.map` scene and a `.gad`
+stub), used for **per-cell audio zoning** — music, looped ambience, and event SFX, plus footstep
+surface selection. It is **distinct** from the region/PvP system (`region<area>.bin` +
+`regiontable<area>.bin`) and from collision/walkability (`.sod` 2D wall segments + `.ted` ground
+height). [CONFIRMED]
+
+| `.mud` fact | Value / verdict | Confidence |
+|---|---|---|
+| file scope | per terrain cell (loaded with `.gad` / `.map`) | CONFIRMED |
+| size | fixed 32 KiB (32768 bytes) | CONFIRMED |
+| grid | 64 x 64 tiles, **8 bytes/tile**, **16 world units/tile** (1024 / 64) | CONFIRMED (geometry) |
+| purpose | **per-cell audio zoning**: music + looped ambient + event SFX + footstep surface | CONFIRMED (the music/ambient/event byte roles below) |
+| region / PvP? | NO — that is `region.bin` + `regiontable` | CONFIRMED |
+| collision / walkability? | NO — that is `.sod` / `.ted` | CONFIRMED |
+| music? | NO via region — music is driven by the `.mud` per-cell **music-zone byte (+2)**, not the region grid (see Ch. 17) | CONFIRMED |
+
+**Audio-byte roles within the 8-byte tile** (the per-cell audio-zone map; see Ch. 17 for how they are
+consumed and which per-map table each indexes):
+
+| Tile byte(s) | Role | Indexes | Confidence |
+|---|---|---|---|
+| +2 | **music-zone id** | the per-map `.bgm` table (Ch. 17) | CONFIRMED |
+| +3, +4 | looped ambient SFX zone id(s) | the per-map `.bge` table | HIGH |
+| +5, +6, +7 | event / 3D point SFX id(s) | the per-map `.eff` table | HIGH |
+| (other) | footstep surface selection → `.wlk` / `.run` tables (the more commonly documented role) | — | CONFIRMED (role) |
+
+Runtime lookup subtracts the cell's `(cellX x 1024, cellZ x 1024)` world origin and quantizes to a
+tile, returning the one 8-byte tile under a given world XZ.
+
+> **Flag for `formats/mud.md` / `formats/terrain.md` (not owned by this chapter).** The 8-byte
+> `.mud` tile's internal layout was previously marked UNVERIFIED. The audio-byte roles above (+2
+> music, +3/+4 ambient, +5/+6/+7 event SFX) are a genuine upgrade and should be promoted into the
+> owning `.mud` cell-format spec when that file is next revised. This chapter records them so the
+> regions and audio stories are not conflated; the byte-table itself belongs to the format spec.
+
+### 16.6 Known unknowns (so the engineer never guesses)
+
+- The exact label for zone type `0` ("safe" is inferred from the arbiter's denied result, never seen
+  named). [UNVERIFIED] — but the **enum is complete at three values** (16.3); there is no type `3+`.
+- The `zoneName` exact byte width / encoding (asserted 40 bytes, consumed as a `char*`; CP949) — not
+  byte-sampled. [MED — see `formats/region_grid.md`]
+- The `regiontable` record `_tail` (+44) — the only genuinely-unread dword in the record. [UNVERIFIED]
+- The remaining bytes of the 8-byte `.mud` tile beyond the +2/+3/+4/+5/+6/+7 audio roles (e.g. the
+  footstep-surface byte position and any flags). [UNVERIFIED — owned by the `.mud` format spec]
+- The contents of the 520-byte per-area map header (loaded with the region tables but not part of
+  region gating). [UNVERIFIED]
+- The in-game meaning of the specific cosmetic region-id special-case (the region whose entry plays a
+  fixed ambient jingle / selects a distinct icon). [UNVERIFIED — confirmed cosmetic, meaning unpinned]
+
+- **Driving VFS data:** `region<area>.bin` (256-unit region-id grid), `regiontable<area>.bin`
+  (32 x 48-byte records: zoneName + zoneType + tail; the same file the minimap reads for sub-zone
+  labels, Chapter 10), `gathertable<area>.bin` (28-byte named world-anchor records), per-cell `.mud`
+  (64x64 audio-tile grid); `msg.xdb` (the movement-denied message id 74309) —
+  `formats/region_grid.md`, `formats/config_tables.md`.
+- **See also:** Chapter 1 (combat — the PvP arbiter feeds the same loop), Chapter 10 (minimap —
+  shares `regiontable<area>.bin`), Chapter 17 (per-area music — the `.mud +2` driver),
+  `formats/region_grid.md` (the region grid + record byte layouts), `formats/terrain.md` (1024-unit
+  terrain cells + `.ted`/`.sod` ground/collision the region grid is layered over). The
+  `map_option<area>.bin` byte layout is owned by `formats/environment_bins.md`.
+
+---
+
+## 17. Per-area background music & audio zones — Campaign 5B
+
+> **Campaign-5B addition** (Lane 3 — world). Background music (BGM) is **not** chosen per-AREA by a
+> single map-header field, nor by `map_option`, nor by the region grid. It is chosen **per-CELL**,
+> driven by the `.mud` audio-zone grid (Ch. 16.5). This chapter documents the per-map sound tables,
+> the per-cell music-zone driver, and the cross-fade play path. Engine code citing a constant here
+> writes `// spec: Docs/RE/specs/world_systems.md` (Ch. 17).
+
+### 17.1 The five per-map sound tables
+
+On area activation the client loads **five same-format sound tables** for the active map id, all
+under `data/map<id>/`:
+
+| File | Role | Indexed by |
+|---|---|---|
+| `soundtable<id>.wlk` | footstep — walk surface | `.mud` footstep-surface byte |
+| `soundtable<id>.run` | footstep — run surface | `.mud` footstep-surface byte |
+| `soundtable<id>.bgm` | **background music** tracks | `.mud` cell byte **+2** (music-zone id) |
+| `soundtable<id>.bge` | looped ambient SFX | `.mud` cell bytes +3 / +4 |
+| `soundtable<id>.eff` | event / 3D point SFX | `.mud` cell bytes +5 / +6 / +7 |
+
+- **Table shape:** each table is **256 entries × 48 bytes** ( = the 0x3000 bytes the client reads
+  per table). On disk the file is slightly larger; the trailing bytes beyond the 256×48 body are
+  editor metadata and are ignored by the runtime. [CONFIRMED]
+- **Per-entry layout (probable):** the leading dword of each 48-byte entry is the sound/track id; a
+  following region of the entry is a **per-hour active-flag schedule** (a zone can carry a different
+  track by hour-of-day, e.g. a day track vs a night track), with remaining param/position fields. The
+  hour-schedule existence is HIGH; the exact per-field meanings are MED. [MED]
+
+### 17.2 The per-frame music-zone driver
+
+Each frame the sound manager picks the active music from the player's **current terrain cell**:
+
+1. Take the local player's world position.
+2. Look up the `.mud` grid tile under that XYZ (terrain-cell audio grid, Ch. 16.5). If no tile, abort.
+3. Read the **music-zone id = `.mud` cell byte +2**.
+4. On a **music-zone change** (the +2 id under the player differs from the current one), or when a
+   **forced periodic re-pick** fires (~600 s), select and **cross-fade** to the new track:
+   - **Indoor override:** when the player is in the indoor state, music is forced to a **fixed indoor
+     BGM id** (a constant, not a table lookup). [CONFIRMED]
+   - **Outdoor:** the music-zone id indexes the per-map `.bgm` table (entry = `12 dwords × zone_id`,
+     i.e. the first dword of the 48-byte `.bgm` record is the track id), and that track is played via
+     the cross-fade path. [CONFIRMED]
+5. The looped-ambient (`.bge`, bytes +3/+4) and event/3D SFX (`.eff`, bytes +5/+6/+7) zones are
+   handled in the same per-cell-change loop.
+
+- **Movement throttle:** the driver early-outs unless the player has moved at least a small threshold
+  since the last evaluation (or the ~600 s timer fired) — music is re-evaluated on movement, not every
+  idle frame. [HIGH]
+
+### 17.3 The play path — 2D cross-fade from `data/sound/2d/`
+
+- The BGM play wrapper **cross-fades**: if a stream is already playing and the requested track id
+  equals the current id, it only restores volume (no restart) — so re-entering a zone with the same
+  track does not restart it. Otherwise it starts the new track. [CONFIRMED]
+- Music tracks are **2D (non-positional) clips** loaded from **`data/sound/2d/`**. (3D positional SFX
+  use `data/sound/3d/` via the event/footstep path — that is **not** music.) [CONFIRMED]
+- A quality/volume option gate exempts two specific track ids from the music-volume slider (they look
+  like always-audible UI/login jingles). [MED]
+
+### 17.4 Regions do NOT trigger music — stated explicitly
+
+To keep the regions story (Ch. 16) and the audio story separate:
+
+- **The 256-unit region grid / `regiontable` does NOT drive music.** No music selection keys off the
+  region id or any `regiontable` field. [CONFIRMED-NEGATIVE for `regiontable`]
+- **Music selection is the finer per-CELL `.mud +2` music-zone byte**, looked up by world position
+  each frame. [CONFIRMED-POSITIVE for `.mud`]
+- A "music zone" in the loose sense (a contiguous run of cells sharing the same `.mud +2` id) is what
+  changes the track — but the mechanism is the per-cell `.mud` byte and the per-map `.bgm` table, not
+  the region grid. A single map can therefore contain many music zones.
+
+### 17.5 Known unknowns
+
+- `.bgm` per-entry field semantics beyond the leading track-id dword and the per-hour schedule
+  (the position/param/float fields). [MED]
+- The exact movement threshold and the precise periodic re-pick interval (~600 s observed). [MED]
+- The two volume-exempt track ids' origin (UI/login jingles suspected). [MED]
+- **Cross-references:** the `.mud` audio-byte roles are recorded in Ch. 16.5 and flagged for the
+  owning `.mud` / `formats/terrain.md` spec; the per-map `soundtable<id>.{wlk,run,bgm,bge,eff}` table
+  byte layout is not yet owned by a committed format spec and should be promoted to one when sampled.
+
+---
 
 - **Glossary:** see `Docs/RE/names.yaml`
 - **Provenance:** see `Docs/RE/journal.md`

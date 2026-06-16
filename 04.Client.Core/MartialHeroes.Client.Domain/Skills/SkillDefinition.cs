@@ -84,11 +84,29 @@ public readonly record struct SkillDefinition
     /// <summary>True for the REVIVE category (14): the target must be dead to be valid. spec: skills.md §1.4 (+1306, 14 = REVIVE) / §3.1.</summary>
     public bool IsRevive => Category == ReviveCategory;
 
-    /// <summary>True for the cooldown-exempt categories (1 basic-attack, 5). spec: skills.md §4 / §5.2 (categories 1 and 5 exempt).</summary>
-    public bool IsCooldownExempt => Category is BasicAttackCategory or 5;
+    /// <summary>
+    /// True for the categories exempt from <b>arming</b> a cooldown (1 basic-attack, 5). Used by the
+    /// cast-confirm arm path. spec: skills.md §4.1 note / §5.2 (categories 1 and 5 exempt from arming).
+    /// </summary>
+    public bool IsCooldownExempt => Category is BasicAttackCategory or CooldownArmExemptCategory;
+
+    /// <summary>
+    /// True when the skill is exempt from the <b>cast-gate</b> cooldown check (category 1 only). This is
+    /// strictly narrower than <see cref="IsCooldownExempt"/>: gate 13 only lets the basic-attack
+    /// category bypass an armed cooldown, so a category-5 skill that is still cooling is blocked at the
+    /// gate even though it never armed a cooldown of its own.
+    /// spec: skills.md §2.1 gate 13 ("not in the exempt category (category 1)").
+    /// </summary>
+    public bool IsCastGateCooldownExempt => Category == BasicAttackCategory;
 
     /// <summary>Basic-attack category. spec: skills.md §1.4 (+1306, category 1 = basic-attack).</summary>
     public const ushort BasicAttackCategory = 1;
+
+    /// <summary>
+    /// The second category (alongside basic-attack) exempt from <b>arming</b> a cooldown — but NOT
+    /// exempt at the cast gate. spec: skills.md §4.1 note / §5.2 ("category … 5 … exempt from arming").
+    /// </summary>
+    public const ushort CooldownArmExemptCategory = 5;
 
     /// <summary>REVIVE category. spec: skills.md §1.4 (+1306, 14 = REVIVE).</summary>
     public const ushort ReviveCategory = 14;

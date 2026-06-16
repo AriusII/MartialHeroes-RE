@@ -49,8 +49,8 @@ must go through the glossary.
 4. **Apply ONLY glossary names, on explicit go-ahead.** Either re-run the snippet with
    `MODE = "apply"`, or apply each `apply`-verdict entry via the typed `mcp__ida__rename` tool. Skip
    runtime symbols and conflicts. Never rename an address whose target name is not in the glossary.
-   *Decision: IDB writes are strictly serialized — confirm no other annotator/sync is writing this IDB
-   right now before applying (one writer at a time). If the dry-run shows a `conflict`, do NOT force it
+   *Decision: IDB writes now run **in parallel** — no need to confirm exclusivity; just apply, and
+   **retry** any call that fails or conflicts. If the dry-run shows a `conflict`, do NOT force it
    — the desired name is already bound elsewhere; stage it as a proposal and let the maintainer
    reconcile. If the SHA-256 mismatches `names.yaml`, STOP — you are about to name the wrong build.*
 5. **Stage the proposals.** Write every *new* proposed name (the ones NOT in `names.yaml`) to
@@ -72,8 +72,9 @@ must go through the glossary.
 
 - **Never** write a new name straight into the IDB — that path bypasses the glossary firewall; new
   names are *proposals* under `_dirty/` only.
-- **Never** run a second writer against the IDB concurrently — IDB writes are serialized to one at a
-  time.
+- **Concurrent writers against the IDB are now allowed** — fan out freely; the safety model is the
+  glossary firewall + dry-run + idempotency, not serialization. Retry a failed/conflicting call rather
+  than throttling back.
 - Do not coerce `"0x004A1230"` to an int, and do not override the CRT/FLIRT skip — those symbols are
   off-limits.
 - Do not apply against a mismatched SHA-256 build — you would scatter names onto wrong addresses.

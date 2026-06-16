@@ -1,12 +1,14 @@
 // Adapters/ZoneCatalog.cs
 //
-// Loads mapsetting.scr (52 zones: id, CP949 name, bounding box, fog) and
-// regiontableNNN.bin (sub-region centre points + CP949 labels) from the VFS and exposes
-// a current-zone-name lookup by legacy world XZ position.
+// Loads mapsetting.scr (52 zones: id, CP949 name, bounding box, fog) and the per-area
+// region grid + regiontableNNN.bin (32 sub-zone records: CP949 zoneName + zoneType) from the
+// VFS and exposes a current-zone-name lookup by legacy world XZ position.
 //
 // spec: Docs/RE/specs/minimap.md §6.3 mapsetting.scr — zone names live here, NOT in msg.xdb.
 // spec: Docs/RE/formats/misc_data.md §7.1 — stride 84 bytes, 52 records, CP949 zone_name.
-// spec: Docs/RE/formats/misc_data.md §7.2 — stride 32 bytes, 52 records, CP949 sub_zone_name.
+// spec: Docs/RE/formats/region_grid.md §regiontable — regiontableNNN.bin: 32 records × 48 bytes,
+//        CP949 zoneName @ +0x00, zoneType u32 @ +0x28 (the 32-byte/CenterX/CenterZ layout is REFUTED).
+// spec: Docs/RE/formats/region_grid.md §Layout A — regionNNN.bin: world XZ → region-id grid lookup.
 //
 // Design rules:
 //   - Lazy, cached — files are read at most once per session.
@@ -34,7 +36,8 @@ namespace MartialHeroes.Client.Godot.Adapters;
 ///
 /// <para>
 /// Zone names come from <c>data/script/mapsetting.scr</c> — spec: Docs/RE/formats/misc_data.md §7.1.
-/// Sub-zone labels come from <c>data/mapNNN/regiontableNNN.bin</c> — spec: Docs/RE/formats/misc_data.md §7.2.
+/// Sub-zone labels come from <c>data/mapNNN/regiontableNNN.bin</c>, selected via the per-area
+/// region-id grid <c>data/mapNNN/regionNNN.bin</c> — spec: Docs/RE/formats/region_grid.md.
 /// </para>
 ///
 /// <para>
@@ -48,9 +51,14 @@ public sealed class ZoneCatalog
     // spec: Docs/RE/formats/misc_data.md §7.1 — "logical path: data/script/mapsetting.scr".
     private const string MapSettingPath = "data/script/mapsetting.scr"; // spec: misc_data.md §7.1
 
-    // spec: Docs/RE/formats/misc_data.md §7.2 — "logical path pattern: data/mapNNN/regiontableNNN.bin".
+    // spec: Docs/RE/formats/region_grid.md §regiontable — "data/mapNNN/regiontableNNN.bin".
     // The three-digit area tag is zero-padded (e.g. "001", "002", "003").
-    private const string RegionTablePathFmt = "data/map{0:D3}/regiontable{0:D3}.bin"; // spec: misc_data.md §7.2
+    private const string
+        RegionTablePathFmt = "data/map{0:D3}/regiontable{0:D3}.bin"; // spec: region_grid.md §regiontable
+
+    // spec: Docs/RE/formats/region_grid.md §Layout A — "data/mapNNN/regionNNN.bin" (the region-id grid).
+    // Quantises world XZ into 256-unit cells, each holding a region id (0..31).
+    private const string RegionGridPathFmt = "data/map{0:D3}/region{0:D3}.bin"; // spec: region_grid.md §Layout A
 
     // Maximum area id we attempt to load regiontable files for (areas 0–47 + specials up to 300).
     // We load on-demand rather than pre-loading all areas.
@@ -66,6 +74,10 @@ public sealed class ZoneCatalog
 
     // regiontable cache: areaId → records. Loaded on-demand per area. Null value = load failed.
     private readonly Dictionary<int, RegionTableRecord[]?> _regionCache = new();
+
+    // region-grid cache: areaId → RegionGrid. Loaded on-demand per area. Null value = load failed/absent.
+    // spec: Docs/RE/formats/region_grid.md §Layout A — regionNNN.bin world XZ → region-id grid.
+    private readonly Dictionary<int, RegionGrid?> _gridCache = new();
 
     // ── Constructor ────────────────────────────────────────────────────────
 
@@ -140,54 +152,68 @@ public sealed class ZoneCatalog
     }
 
     /// <summary>
-    /// Returns the nearest sub-zone label from <c>regiontableNNN.bin</c> for the given area and
-    /// world position, or an empty string when the file is absent / VFS is offline.
+    /// Returns the sub-zone label for the given area and world position, or an empty string when
+    /// the files are absent / the VFS is offline.
     ///
-    /// spec: Docs/RE/formats/misc_data.md §7.2 — sub_zone_name char[16] CP949 @ 0x10: PLAUSIBLE.
+    /// <para>
+    /// <b>Resolution chain (corrected):</b> the regiontable record carries NO per-record
+    /// coordinates — the old <c>CenterX</c>/<c>CenterZ</c>/<c>SubZoneName</c> 32-byte layout is
+    /// REFUTED. The sub-zone is resolved through the per-area region-id grid instead:
+    /// <code>
+    ///   regionId = regionNNN.bin grid lookup at (worldX, worldZ)   // 0..31
+    ///   zoneName = regiontableNNN.bin record whose RegionId == regionId  → ZoneName
+    /// </code>
+    /// spec: Docs/RE/formats/region_grid.md §Layout A (grid lookup), §regiontable (record table).
+    /// </para>
     ///
-    /// Coordinates in the regiontable records are PLAUSIBLE; garbage-coordinate records are
-    /// filtered by validating against the area bounding box when a zone record is available.
-    ///
-    /// spec: Docs/RE/formats/misc_data.md §7.2 — "two sub-types under one stride (open)": UNKNOWN discriminator.
+    /// <para>
+    /// <b>Graceful degradation:</b> if the region grid is absent (some areas have no grid), this
+    /// falls back to the regiontable record whose <see cref="RegionTableRecord.RegionId"/> matches
+    /// the supplied zone record's area id, otherwise returns an empty string. No coordinates are
+    /// fabricated.
+    /// </para>
     /// </summary>
     /// <param name="areaId">The zone/area id (from <see cref="MapZoneRecord.ZoneId"/>).</param>
     /// <param name="legacyWorldX">Legacy world X position.</param>
     /// <param name="legacyWorldZ">Legacy world Z position.</param>
-    /// <param name="zoneRecord">Optional zone record for bounding-box validation of coordinates.</param>
+    /// <param name="zoneRecord">Optional zone record; used only for the graceful-degrade fallback
+    ///   when no region grid is present.</param>
     public string GetNearestSubZoneName(int areaId, float legacyWorldX, float legacyWorldZ,
         MapZoneRecord? zoneRecord = null)
     {
         RegionTableRecord[]? recs = EnsureRegionTable(areaId);
         if (recs is null || recs.Length == 0) return string.Empty;
 
-        string best = string.Empty;
-        float bestDist = float.MaxValue;
-
-        foreach (RegionTableRecord r in recs)
+        // ── Preferred path: region-id grid → matching regiontable record → its ZoneName ──
+        // spec: Docs/RE/formats/region_grid.md §Layout A — world XZ → region id (0..31).
+        RegionGrid? grid = EnsureRegionGrid(areaId);
+        if (grid is not null)
         {
-            if (string.IsNullOrWhiteSpace(r.SubZoneName)) continue;
+            int regionId = grid.GetRegionId((int)legacyWorldX, (int)legacyWorldZ);
 
-            // Validate that the coordinate is plausible (within the area bounding box).
-            // spec: Docs/RE/formats/misc_data.md §7.2 — "validate CenterX/CenterZ against the
-            //       area bounding box before trusting them as coordinates."
-            if (zoneRecord is not null)
+            // Match the regiontable record indexed directly by region id (0..31).
+            // spec: Docs/RE/formats/region_grid.md §regiontable — "indexed directly by region id (0..31)".
+            foreach (RegionTableRecord r in recs)
             {
-                if (r.CenterX < zoneRecord.WorldMinX || r.CenterX > zoneRecord.WorldMaxX ||
-                    r.CenterZ < zoneRecord.WorldMinZ || r.CenterZ > zoneRecord.WorldMaxZ)
-                    continue; // garbage-float record — skip.
+                if (r.RegionId == regionId)
+                    return r.ZoneName ?? string.Empty;
             }
 
-            float dx = r.CenterX - legacyWorldX;
-            float dz = r.CenterZ - legacyWorldZ;
-            float dist = dx * dx + dz * dz; // squared distance — no sqrt needed for comparison
-            if (dist < bestDist)
+            return string.Empty;
+        }
+
+        // ── Graceful degrade: no grid for this area — match by available key, never fabricate coords ──
+        // spec: Docs/RE/formats/region_grid.md §regiontable — record indexed by region id.
+        if (zoneRecord is not null)
+        {
+            foreach (RegionTableRecord r in recs)
             {
-                bestDist = dist;
-                best = r.SubZoneName;
+                if (r.RegionId == areaId)
+                    return r.ZoneName ?? string.Empty;
             }
         }
 
-        return best;
+        return string.Empty;
     }
 
     /// <summary>
@@ -253,7 +279,7 @@ public sealed class ZoneCatalog
 
         try
         {
-            // spec: Docs/RE/formats/misc_data.md §7.2 — "path pattern: data/mapNNN/regiontableNNN.bin".
+            // spec: Docs/RE/formats/region_grid.md §regiontable — "path pattern: data/mapNNN/regiontableNNN.bin".
             string path = string.Format(RegionTablePathFmt, areaId);
             ReadOnlyMemory<byte> raw = _assets.GetRaw(path);
             if (raw.IsEmpty)
@@ -263,11 +289,11 @@ public sealed class ZoneCatalog
                 return null;
             }
 
-            // spec: Docs/RE/formats/misc_data.md §7.2 — stride 32 bytes, 52 records: SAMPLE-VERIFIED.
+            // spec: Docs/RE/formats/region_grid.md §regiontable — stride 48 bytes, 32 records: CONFIRMED.
             RegionTableRecord[] recs = RegionTableParser.Parse(raw);
             _regionCache[areaId] = recs;
             GodotPrint($"[ZoneCatalog] regiontable{areaId:D3}.bin loaded: {recs.Length} records. " +
-                       "spec: Docs/RE/formats/misc_data.md §7.2 SAMPLE-VERIFIED.");
+                       "spec: Docs/RE/formats/region_grid.md §regiontable CONFIRMED.");
             return recs;
         }
         catch (InvalidDataException ex)
@@ -280,6 +306,49 @@ public sealed class ZoneCatalog
         {
             GodotPrintErr($"[ZoneCatalog] regiontable{areaId:D3}.bin load error: {ex.Message}");
             _regionCache[areaId] = null;
+            return null;
+        }
+    }
+
+    private RegionGrid? EnsureRegionGrid(int areaId)
+    {
+        if (_gridCache.TryGetValue(areaId, out RegionGrid? cached)) return cached;
+
+        if (_assets is null || areaId < 0 || areaId > RegionTableAreaCeiling)
+        {
+            _gridCache[areaId] = null;
+            return null;
+        }
+
+        try
+        {
+            // spec: Docs/RE/formats/region_grid.md §Layout A — "path pattern: data/mapNNN/regionNNN.bin".
+            string path = string.Format(RegionGridPathFmt, areaId);
+            ReadOnlyMemory<byte> raw = _assets.GetRaw(path);
+            if (raw.IsEmpty)
+            {
+                // Area has no region grid — normal for some areas; degrade gracefully.
+                _gridCache[areaId] = null;
+                return null;
+            }
+
+            // spec: Docs/RE/formats/region_grid.md §Layout A — region<area>.bin world XZ → region id.
+            RegionGrid grid = RegionBinParser.Parse(raw);
+            _gridCache[areaId] = grid;
+            GodotPrint($"[ZoneCatalog] region{areaId:D3}.bin grid loaded: {grid.Width}×{grid.Height}. " +
+                       "spec: Docs/RE/formats/region_grid.md §Layout A.");
+            return grid;
+        }
+        catch (InvalidDataException ex)
+        {
+            GodotPrintErr($"[ZoneCatalog] region{areaId:D3}.bin parse failed: {ex.Message}");
+            _gridCache[areaId] = null;
+            return null;
+        }
+        catch (Exception ex)
+        {
+            GodotPrintErr($"[ZoneCatalog] region{areaId:D3}.bin load error: {ex.Message}");
+            _gridCache[areaId] = null;
             return null;
         }
     }

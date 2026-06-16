@@ -1,5 +1,22 @@
 # Vital stats — max HP / max MP formula (clean-room spec)
 
+> **Verification banner.**
+> - **confirmed** — that this is a behavioral *formula* spec (not a layout table) and that the
+>   "stat-slot table is a **separate external global**, not an Actor field" is consistent with the
+>   IDB: the spawn factory never indexes a stat-slot array inside the Actor; the only inline gear
+>   array is the 20×16 equipment-id table at Actor +0xCC (see `actor.md` / `spawn_descriptor.md`).
+> - **static-residual** — the numeric constants (HP weights 2.2/2.5/2.4/1.5/1.6; MP weights
+>   1.4/1.5/1.7/1.5/3.5; the +30.0 constants; the per-class HP table 0.3/0.2/0.15/0.1) are loaded
+>   from the read-only float pool (`fld` from `.rdata`, **not** inline immediates — a scan for the
+>   2.2f bit pattern returned no hits). They were carried from the prior pass and were **not
+>   re-witnessed** this pass; the doc is **not refuted**, but treat the exact constants as
+>   static-residual until the formula function's float pool is re-read.
+> - **capture/debugger-pending** — the two external inputs (`level_base`, `server_base`) are
+>   server-supplied and inherently capture-pending; the class-id → class-enum mapping; and the
+>   gear that populates the two extra HP/MP equip slots.
+> - **ida_reverified:** 2026-06-16  **ida_anchor:** 263bd994  **evidence:** [static-ida]
+> - **conflicts:** none raised against this doc this pass.
+
 Neutral, data-only model of how the legacy client derives a character's **maximum HP** and
 **maximum MP** from primary stats, equipment, and active auras. Promoted from a dirty-room note;
 rewritten, no decompiler identifiers, no binary addresses. This document is the design input for
@@ -233,5 +250,22 @@ hard-coded here — they come from item definitions.
    for HP, MP, and each stat; the magnitudes of the two extra equip HP/MP slots; per-stat set-bonus
    values; and the class-id → class-enum mapping.
 6. Compute max lazily (when the UI or a cap-check needs it); the legacy client did not cache it.
-</content>
-</invoke>
+
+---
+
+## Note — two distinct "stats" structures (do not conflate)
+
+This formula consumes the **player stat-slot table** (slot id → value), which is a separate external
+global, **not** an Actor field and **not** the char-select stats record. Keep these three apart:
+
+- **Stat-slot table** (this doc + `actor.md` "Stat-slot table") — the equipment/buff slot system
+  (12-byte entries, slot ids 7 / 2,3,9 / 70–74 / 81 / 93 / …) the max-HP/MP and primary-stat
+  formulas read. A separate keyed collection owned by the player/stat subsystem. **confirmed-as-external.**
+- **96-byte char-select stats record** — a per-slot **0x60-byte** block read on the wire right after
+  each character's 880-byte descriptor in the 3/1 CharacterList / 3/4 SceneEntityUpdate per-slot
+  record (see `spawn_descriptor.md` "Wire framing"). It is confirmed to exist and be 0x60 bytes, but
+  its **interior fields are unmapped** (the char-select display path reads only descriptor fields, not
+  this block) → **capture-pending**. It is most likely the detailed stat sheet shown on a
+  character-info sub-panel; it is **not** the formula's stat-slot table.
+- **Effective primary stats** — the resolved STR/DEX/AGI/INT/CON the formula's Stage 1 consumes,
+  assembled from base + equipment + set + buff (see "Inputs").

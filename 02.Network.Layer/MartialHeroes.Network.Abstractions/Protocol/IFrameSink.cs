@@ -10,8 +10,8 @@ namespace MartialHeroes.Network.Abstractions.Protocol;
 /// <para>
 /// This is the seam between <c>Network.Protocol</c>'s router and the rest of the stack.
 /// <c>Network.Protocol</c>'s <c>PacketRouter</c> implements the call-site; <c>Client.Application</c>
-/// implements <see cref="IPacketHandler"/> (the typed seam above this one) and is reached
-/// via <see cref="OnUnhandled"/> for opcodes that have no specced struct yet.
+/// implements <c>Network.Protocol.Routing.IPacketHandler</c> (the typed dispatch seam) and is reached
+/// via <c>OnUnhandled</c> for opcodes that have no specced struct yet.
 /// </para>
 /// <para>
 /// All parameters are stack-only. <paramref name="payload"/> is a zero-copy slice over the

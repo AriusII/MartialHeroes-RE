@@ -56,7 +56,7 @@ Prefer a fixed skill when one fits — `ida-recon` (census), `ida-opcode-map` (d
    you resolved as a proposed canonical name for `ida-naming-sync` — do not rename here. *Decision: if
    the question is really one of the named subsystems (dispatcher, cipher, xref graph, strings, struct,
    vtable), STOP and use that fixed skill — `ida-py` is only for the long tail. If the snippet needs to
-   write into the IDB, it doesn't belong here (use the rename/annotate skills, serialized). If a fact
+   write into the IDB, it doesn't belong here (use the rename/annotate skills — which now run unbridled/parallel). If a fact
    needs live confirmation, hand the candidate EA to the debugger (`dbg_add_bp`/`dbg_read`; never
    `dbg_start`).*
 

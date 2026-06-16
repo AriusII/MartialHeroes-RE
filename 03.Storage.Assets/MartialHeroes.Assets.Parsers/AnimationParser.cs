@@ -31,22 +31,57 @@ public static class AnimationParser
     // spec: Docs/RE/formats/animation.md §Per-track record — "fixed 8-byte preamble": CONFIRMED.
     private const int TrackPreambleStride = 8;
 
+    // BANI magic: ASCII "BANI" = 0x42 0x41 0x4E 0x49.
+    // spec: Docs/RE/formats/animation.md §BANI variant — magic "BANI" (42 41 4E 49): SAMPLE-VERIFIED.
+    // 11 of 3,891 .mot files begin with this magic. The shipping client loader has no magic-check branch
+    // and produces a parse error on all 11. A faithful Assets.Parsers decoder must detect and skip them
+    // (return null / throw gracefully), not crash. spec: Docs/RE/formats/animation.md §BANI variant — loader rejection: CONFIRMED.
+    private static ReadOnlySpan<byte> BaniMagic => "BANI"u8;
+
+    /// <summary>
+    /// Returns <see langword="true"/> if <paramref name="data"/> begins with the BANI magic bytes.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/animation.md §BANI variant — magic ASCII "BANI" (42 41 4E 49): SAMPLE-VERIFIED.
+    /// </remarks>
+    public static bool IsBaniVariant(ReadOnlySpan<byte> data) =>
+        data.Length >= 4 && data[..4].SequenceEqual(BaniMagic);
+
     /// <summary>
     /// Parses the raw bytes of a <c>.mot</c> file into an <see cref="AnimationClip"/>.
+    /// Returns <see langword="null"/> for the BANI variant (11 files in the corpus), which the
+    /// shipping client loader also cannot parse.
+    /// Tolerates the single oversized standard clip (trailing bytes after the track array are ignored).
     /// </summary>
     /// <param name="data">Raw file content from the VFS.</param>
-    /// <returns>Decoded animation clip.</returns>
+    /// <returns>
+    /// Decoded animation clip, or <see langword="null"/> if the file is the BANI variant.
+    /// </returns>
     /// <exception cref="InvalidDataException">
-    /// Thrown on truncation or buffer overrun.
+    /// Thrown on truncation or buffer overrun (standard variant only).
     /// </exception>
-    public static AnimationClip Parse(ReadOnlyMemory<byte> data) =>
+    /// <remarks>
+    /// spec: Docs/RE/formats/animation.md §BANI variant — "parser MUST sniff the first 4 bytes
+    ///   and route BANI files separately": CONFIRMED.
+    /// spec: Docs/RE/formats/animation.md §Oversized standard clip — "tolerate a positive residual": CONFIRMED.
+    /// </remarks>
+    public static AnimationClip? Parse(ReadOnlyMemory<byte> data) =>
         Parse(data.Span);
 
     /// <summary>
     /// Parses from a <see cref="ReadOnlySpan{byte}"/>.
+    /// Returns <see langword="null"/> for the BANI variant.
     /// </summary>
-    public static AnimationClip Parse(ReadOnlySpan<byte> data)
+    public static AnimationClip? Parse(ReadOnlySpan<byte> data)
     {
+        // Guard: detect BANI magic and skip gracefully.
+        // spec: Docs/RE/formats/animation.md §BANI variant — "A parser MUST sniff the first 4 bytes
+        //   and route BANI files separately — the standard loader ... does NOT detect the magic,
+        //   causing a parse failure on all 11 files": SAMPLE-VERIFIED.
+        // spec: Docs/RE/formats/animation.md §BANI variant — loader rejection: CONFIRMED.
+        if (IsBaniVariant(data))
+            return null; // BANI variant: not loadable by the shipping client; skip gracefully.
+
         int offset = 0;
 
         // --- Header (Stage 1 + Stage 2 combined — single sequential read) ---
@@ -64,12 +99,9 @@ public static class AnimationParser
 
         // name LenStr — 4-byte u32 LE prefix + body (no null terminator on disk).
         // spec: Docs/RE/formats/animation.md §LenStr encoding:
-        //   "The .mot LenStr wire format is UNVERIFIED by sample; implementors should apply
-        //    the same 4-byte prefix convention documented in formats/mesh.md."
-        // spec: Docs/RE/formats/animation.md §Known unknowns:
-        //   "LenStr wire format in .mot (1-byte vs 4-byte prefix) — UNVERIFIED — assumed 4-byte
-        //    by analogy with .skn/.bnd; confirm with a sample."
-        // hypothesis — LenStr width unverified, see formats/animation.md §LenStr encoding.
+        //   "CONFIRMED (loader + sample): 4-byte u32 LE length prefix, then exactly length body bytes,
+        //    no null terminator on disk. Verified independently via loader and real sample — they agree."
+        // spec: Docs/RE/formats/animation.md — "LenStr prefix width: CONFIRMED 4-byte u32 LE, no on-disk terminator."
         string name = LenStrReader.Read(data, ref offset);
 
         // frame_count u32 LE — follows immediately after the name string.
@@ -88,10 +120,12 @@ public static class AnimationParser
 
         for (int t = 0; t < (int)trackCount; t++)
         {
-            // track_descriptor u32 LE: low byte = bone_id; upper 3 bytes purpose UNVERIFIED.
+            // track_descriptor u32 LE: low byte = bone_id; upper 3 bytes CONFIRMED reserved/unused padding.
+            // All three candidate interpretations (key-count, channel-mask, interp-flag) have been REFUTED.
             // spec: Docs/RE/formats/animation.md §Per-track record —
             //   "track_descriptor low byte = bone_id": CONFIRMED.
-            //   "upper three bytes purpose UNVERIFIED": UNVERIFIED.
+            //   "upper three bytes: CONFIRMED reserved/unused padding; all three candidate
+            //    interpretations REFUTED (not key-count, not channel-mask, not interp-flag)."
             uint trackDescriptor = ReadU32LE(data, ref offset, $"track[{t}].track_descriptor");
             byte boneId = (byte)(trackDescriptor & 0xFF);
             uint trackDescHigh24 = trackDescriptor >> 8;
@@ -100,7 +134,7 @@ public static class AnimationParser
             // spec: Docs/RE/formats/animation.md §Per-track record — key_count u32 LE: CONFIRMED.
             uint keyCount = ReadU32LE(data, ref offset, $"track[{t}].key_count");
 
-            // Validate buffer before reading keyframes.
+            // Validate buffer before reading keyframes (single pre-loop bounds check).
             // spec: Docs/RE/formats/animation.md §Per-track record — "key_count × 28 bytes": CONFIRMED.
             long keyframeBytesNeeded = (long)keyCount * KeyframeStride;
             if (offset + keyframeBytesNeeded > data.Length)
@@ -115,34 +149,42 @@ public static class AnimationParser
             {
                 // Keyframe layout: translation XYZ (f32[3]) + rotation XYZW (f32[4]) = 28 bytes.
                 // spec: Docs/RE/formats/animation.md §Keyframe record — 28 bytes LE.
+                // Bounds already checked above; read 7 × f32 without per-element string allocation.
 
                 // translation_x f32 @ sub-offset +0
                 // spec: Docs/RE/formats/animation.md §Keyframe record — translation_x @ +0: CONFIRMED.
-                float tx = ReadF32LE(data, ref offset, $"track[{t}].key[{k}].translation_x");
+                float tx = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 // translation_y f32 @ sub-offset +4
                 // spec: Docs/RE/formats/animation.md §Keyframe record — translation_y @ +4: CONFIRMED.
-                float ty = ReadF32LE(data, ref offset, $"track[{t}].key[{k}].translation_y");
+                float ty = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 // translation_z f32 @ sub-offset +8
                 // spec: Docs/RE/formats/animation.md §Keyframe record — translation_z @ +8: CONFIRMED.
-                float tz = ReadF32LE(data, ref offset, $"track[{t}].key[{k}].translation_z");
+                float tz = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 // rotation_x f32 @ sub-offset +12
                 // spec: Docs/RE/formats/animation.md §Keyframe record — rotation_x @ +12: CONFIRMED.
-                float rx = ReadF32LE(data, ref offset, $"track[{t}].key[{k}].rotation_x");
+                float rx = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 // rotation_y f32 @ sub-offset +16
                 // spec: Docs/RE/formats/animation.md §Keyframe record — rotation_y @ +16: CONFIRMED.
-                float ry = ReadF32LE(data, ref offset, $"track[{t}].key[{k}].rotation_y");
+                float ry = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 // rotation_z f32 @ sub-offset +20
                 // spec: Docs/RE/formats/animation.md §Keyframe record — rotation_z @ +20: CONFIRMED.
-                float rz = ReadF32LE(data, ref offset, $"track[{t}].key[{k}].rotation_z");
+                float rz = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 // rotation_w f32 @ sub-offset +24 (scalar W last — XYZW order)
                 // spec: Docs/RE/formats/animation.md §Keyframe record — rotation_w @ +24: CONFIRMED.
-                float rw = ReadF32LE(data, ref offset, $"track[{t}].key[{k}].rotation_w");
+                float rw = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+                offset += 4;
 
                 keyframes[k] = new Keyframe
                 {
@@ -171,6 +213,7 @@ public static class AnimationParser
 
     // -------------------------------------------------------------------------
     // Private binary reader helpers (little-endian, bounds-checked)
+    // Used for header-level fields only (not the hot per-keyframe loop).
     // -------------------------------------------------------------------------
 
     private static uint ReadU32LE(ReadOnlySpan<byte> span, ref int offset, string fieldName)
@@ -181,18 +224,6 @@ public static class AnimationParser
                 $"(buffer length {span.Length}).");
 
         uint value = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
-        offset += 4;
-        return value;
-    }
-
-    private static float ReadF32LE(ReadOnlySpan<byte> span, ref int offset, string fieldName)
-    {
-        if (offset + 4 > span.Length)
-            throw new InvalidDataException(
-                $".mot parse error: buffer truncated reading '{fieldName}' f32 at offset {offset} " +
-                $"(buffer length {span.Length}).");
-
-        float value = BinaryPrimitives.ReadSingleLittleEndian(span[offset..]);
         offset += 4;
         return value;
     }

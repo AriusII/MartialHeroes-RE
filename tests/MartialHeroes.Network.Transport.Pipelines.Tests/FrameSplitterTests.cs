@@ -9,9 +9,8 @@ namespace MartialHeroes.Network.Transport.Pipelines.Tests;
 /// Unit tests for <see cref="FrameSplitter"/> driven by an in-memory <see cref="Pipe"/>.
 /// No real socket is required.
 ///
-/// Frame wire format (spec: Docs/RE/opcodes.md — Wire frame header):
-///   [+0 u16 LE size (total, incl. header)]
-///   [+2 u16 LE unused/zero]
+/// Frame wire format (spec: Docs/RE/opcodes.md + Docs/RE/specs/crypto.md §2 — Wire frame header):
+///   [+0 u32 LE size (total, incl. header)]
 ///   [+4 u16 LE major opcode]
 ///   [+6 u16 LE minor opcode]
 ///   [+8 .. payload]
@@ -31,9 +30,8 @@ public sealed class FrameSplitterTests
         int totalSize = FramingConstants.HeaderSize + payload.Length;
         byte[] frame = new byte[totalSize];
 
-        // +0: u16 LE total size
-        BinaryPrimitives.WriteUInt16LittleEndian(frame.AsSpan(0), (ushort)totalSize);
-        // +2: unused, stays zero
+        // +0..+3: u32 LE total size (spec: crypto.md §2 — the size field is a true u32)
+        BinaryPrimitives.WriteUInt32LittleEndian(frame.AsSpan(0), (uint)totalSize);
         // +4: u16 LE major
         BinaryPrimitives.WriteUInt16LittleEndian(frame.AsSpan(4), major);
         // +6: u16 LE minor
@@ -157,11 +155,11 @@ public sealed class FrameSplitterTests
     }
 
     // -------------------------------------------------------------------
-    // (c) Length prefix (u16 size field) split across two reads
+    // (c) Length prefix (u32 size field) split across two reads
     // -------------------------------------------------------------------
 
     /// <summary>
-    /// The first read delivers only 1 byte — the very first byte of the 2-byte size field.
+    /// The first read delivers only 1 byte — the very first byte of the 4-byte u32 size field.
     /// The splitter must retain that byte and wait for the rest before emitting any frame.
     /// </summary>
     [Fact]
@@ -170,7 +168,7 @@ public sealed class FrameSplitterTests
         byte[] payload = [0xDE, 0xAD, 0xBE, 0xEF];
         byte[] frame = BuildFrame(major: 5, minor: 3, payload);
 
-        byte[] part1 = frame[..1]; // single byte: low half of the u16 size
+        byte[] part1 = frame[..1]; // single byte: lowest byte of the u32 size
         byte[] part2 = frame[1..]; // the rest
 
         var pipe = new Pipe();
@@ -225,14 +223,14 @@ public sealed class FrameSplitterTests
     /// A frame whose declared size is smaller than the 8-byte header minimum must cause
     /// <see cref="FrameSplitter.RunAsync"/> to return <see cref="FrameSplitter.FrameLoopResult.FramingError"/>
     /// rather than dispatching a bogus frame.
-    /// spec: Docs/RE/opcodes.md — size field is u16; any value below HeaderSize is illegal.
+    /// spec: Docs/RE/opcodes.md — size field is a u32; any value below HeaderSize is illegal.
     /// </summary>
     [Fact]
     public async Task MalformedFrameSize_BelowHeaderSize_TriggersFramingError()
     {
         // size = 3 < HeaderSize(8) — invalid frame.
         byte[] malformed = new byte[FramingConstants.HeaderSize];
-        BinaryPrimitives.WriteUInt16LittleEndian(malformed.AsSpan(0), 3); // size field
+        BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(0), 3); // u32 size field
         BinaryPrimitives.WriteUInt16LittleEndian(malformed.AsSpan(4), 1); // major = 1
         BinaryPrimitives.WriteUInt16LittleEndian(malformed.AsSpan(6), 0); // minor = 0
 

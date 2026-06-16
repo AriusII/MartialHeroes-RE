@@ -62,14 +62,17 @@ public static class ClientMetrics
             description: "Number of fully decoded inbound packets processed.");
 
     /// <summary>
-    /// Records the size distribution of inbound packets after decryption.
+    /// Records the size distribution of inbound packets after LZ4 decompression.
+    /// The inbound (S2C) path is decompress-only — there is no inverse byte cipher, so the
+    /// measurement point is post-decompression, not post-decryption.
+    /// spec: Docs/RE/specs/client_architecture.md §7 — "Inbound (S2C): LZ4-decompress ONLY ... no inverse byte cipher".
     /// Unit: <c>bytes</c>.
     /// </summary>
     public static readonly Histogram<long> PacketSizeBytes =
         Meter.CreateHistogram<long>(
             name: "network.packet_size",
             unit: "bytes",
-            description: "Size distribution of inbound packets (post-decryption).");
+            description: "Size distribution of inbound packets (post-decompression).");
 
     // -------------------------------------------------------------------------
     // Asset instruments

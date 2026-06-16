@@ -104,8 +104,9 @@ public static class SkillCastValidator
         }
 
         // Gate 13: cooldown. All cooldowns are ticked, then the skill's recast state is checked; if
-        // still cooling AND not in the exempt category, block. spec: §2.1 gate 13 / §4 / §5.2.
-        if (!skill.IsCooldownExempt && !cooldowns.CheckReady(skill.Id, now))
+        // still cooling AND not in the cast-gate exempt category (category 1 ONLY — narrower than the
+        // arm-path exemption, which also covers category 5), block. spec: §2.1 gate 13 / §4 / §5.2.
+        if (!skill.IsCastGateCooldownExempt && !cooldowns.CheckReady(skill.Id, now))
         {
             return SkillCastResult.OnCooldown;
         }

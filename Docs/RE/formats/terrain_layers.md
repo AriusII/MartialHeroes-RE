@@ -6,12 +6,28 @@
 
 ---
 
+## Re-verification banner (2026-06-16, CAMPAIGN 10 / Block D)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | `mixed` — see per-format rows. This pass re-confirmed only the **routing/identification** layer (which decoder each extension reaches) two-witness; the per-format byte tables (FX VF_36/44/32 strides, group headers, `.up`/`.exd` 40-byte triangle record, light/wind/point_light layouts) were **not** re-dumped this pass and hold at their committed tiers. |
+| `ida_reverified` | `2026-06-16` |
+| `ida_anchor`     | `263bd994` |
+| `evidence`       | `[static-ida, vfs-sample]` — routing/dispatch from the located runtime `.map` parser (witness 1) + VFS census file-count corroboration (witness 2) |
+| `conflicts`      | None. Routing re-confirmed with no drift: (1) **`.up` and `.exd` are ONE shared, distinct format** — `count(u32) + count × 40-byte triangle`, decoded by the same record decoder; `EXTRA_TERRAIN → .exd`, `UP_TERRAIN → .up`. This is structurally **distinct** from the FX group-array model of §1 — any reading that lumps `.exd`/`.up` in with the FX channels is REFUTED. (2) Each FX channel `.fx1`–`.fx7` has its **own** group decoder and its **own** per-channel texture register; the per-channel header width + vertex stride (§1.13) are mandatory. (3) Each FX channel's texture index is **1-based with a `< 1 \|\| > max` guard** (corroborated by per-channel `fx<N> texture index(%d) < 1 \|\| > max(%d)` client error strings) — confirming the shared building/terrain 1-based + clamp texture-index convention without needing the render path. |
+
+**Census this pass (witness 2, full VFS mount, routing-level corroboration):** `.up` 222 files,
+`.exd` 1 384 files (both 40-byte-triangle format, zero residual); FX channel counts in the same
+ballpark as §1.13's table. File counts are corpus observations, not load-bearing layout facts.
+
+---
+
 ## Status block
 
 | Attribute         | Value |
 |-------------------|-------|
 | `status`          | `mixed` — see per-format status rows below |
-| `sample_verified` | `true` for `.fx1`–`.fx6`, `.up`, `.exd`, `.sod.pre`, `.ted.post`, `wind%d.bin` header; `false` for `light%d.bin`, `point_light%d.bin`, `.fx4`, `.fx7` |
+| `sample_verified` | `true` for `.fx1`–`.fx6`, `.up`, `.exd`, `.sod.pre`, `.ted.post`, `wind%d.bin` header; `false` for `light%d.bin`, `point_light%d.bin`; `.fx7` size-formula PLAUSIBLE (dual-sample); `.fx4` structure CONFIRMED-from-loader (flat tile array; internal header fields sample-unverified) |
 | `binary_analysed` | `doida.exe` (legacy 32-bit client, x86 LE) |
 | `confidence`      | Fields annotated CONFIRMED are corroborated by parser read-sequence and/or real sample bytes. Fields annotated UNVERIFIED are structurally inferred or parser-only, without sample cross-check. |
 
@@ -69,16 +85,76 @@ solely in the file extension; there is no layer-type field inside the file. All 
 store **3D triangle mesh geometry** — a vertex buffer followed by an index buffer — not 2D texture
 blend or alpha-splat maps.
 
+All seven FX decoders share **one** on-disk structure: a universal **group-array** layout described
+in §1.1a. The seven extensions differ only in the **vertex stride** they apply (§1.2) and in nothing
+else structurally; there is no per-extension sub-format selector and no branch on the leading word.
+
 | Format key | sample_verified |
 |-----------|-----------------|
-| `fx_layer` | `true` for `.fx1`–`.fx3`, `.fx5`, `.fx6`; `false` for `.fx4`, `.fx7` |
+| `fx_layer` | `true` for `.fx1`–`.fx3`, `.fx5`, `.fx6`; `.fx7` PLAUSIBLE (dual-sample); `.fx4` structure CONFIRMED-from-loader (flat tile array) |
 
 **Path pattern:** `data/map{MAP}/dat/d{MAP}x1{TX:04d}z1{TZ:04d}.fx{N}` where `N` is 1–7.
 
+### 1.1a Universal group-array model (all `.fx1`–`.fx7`)
+
+> **Two-witness correction (CAMPAIGN VFS-MASTERY).** Both witnesses (loader read-sequence and
+> black-box corpus) agree on a single, branchless model for every FX decoder. This **supersedes
+> two earlier readings of the leading word** and **both are REFUTED**:
+> - the spec's prior "`type_tag` is a constant equal to 1", and
+> - the black-box guess that "`type_tag` is a sub-format selector that switches the file layout".
+>
+> Neither holds. The leading word is **a group count** — the number of group records that follow.
+> There is no constant, and there is no selector: the same group-array parse runs for every value
+> and for every FX extension. **Tag CONFIRMED.**
+
+Every FX file is a **count of groups followed by that many group records**. The leading word at
+`0x00` is the group count; it is read, the parser loops that many times, and each iteration consumes
+one group record. The decoder never branches on the value and never re-interprets the layout based on
+it — the only thing that changes between the seven extensions is the vertex stride applied inside each
+group's vertex block (see §1.2 for the VF_32 / VF_36 / VF_44 stride per extension).
+
+**File-level header:**
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| 0x00 | 4 | u32 | `group_count` | Number of group records that follow. Drives the group loop. **Not** a constant and **not** a sub-format selector — it is purely the count of groups. | CONFIRMED (two-witness: loader loops on it; corpus shows it varying 1..61) |
+
+**Per-group record (repeated `group_count` times):**
+
+The group record begins with a fixed group header, then its own vertex block and index block. The
+group header carries a few leading words (read into the group struct but not all consumed for
+parsing), a `render_state` word, and the per-group vertex and index counts that size the two blocks.
+
+| Group-rel offset | Size | Type | Field | Notes | Confidence |
+|-----------------:|-----:|------|-------|-------|------------|
+| +0x00 | 4 | u32 | `group_flags_0` | Read into the group struct; not consumed for layout. Observed near-constant (commonly 1). | UNVERIFIED (read-but-not-consumed) |
+| +0x04 | 4 | u32 | `group_flags_1` | Read into the group struct; not consumed for layout. Observed mostly 0. | UNVERIFIED (read-but-not-consumed) |
+| +0x08 | 4 | u32 | `render_state` | Per-group render-state word. **Variable** — not a constant. Documented at conceptual file offset `0x0C` for a single-group file (`0x04` file-header word + this group field at group-relative `+0x08`). | CONFIRMED-variable (two-witness) |
+| +0x0C | 4 | u32 | `vertex_count` | Sizes the group's vertex block (`vertex_count × vertex_stride`). | CONFIRMED |
+| +0x10 | 4 | u32 | `index_count` | Sizes the group's index block (`index_count × 2`, u16). | CONFIRMED |
+
+- **Vertex block (per group):** `vertex_count × vertex_stride` bytes, where the stride is the
+  extension's vertex format from §1.2 (VF_36 / VF_44 / VF_32).
+- **Index block (per group):** `index_count × 2` bytes (u16 triangle list).
+
+**`render_state` (group-relative `+0x08`) is CONFIRMED-variable.** The spec's earlier claim that this
+word is a fixed constant (15 / `0x0F` for `.fx1`/`.fx2`, 5 for `.fx3`) is **REFUTED** — the value
+differs across files and across groups. An engineer must read it per group and must **not** hard-code
+15 or 5. Its semantic (a render-state enum vs. a texture-binding index vs. a blend-mode key) remains a
+known unknown (§ Known Unknowns), but its variability is settled.
+
+> **Note on the longer FX3 / FX5 / FX7 group headers.** The single-group FX-family files documented
+> in §§1.5–1.11 below were originally written up with longer, format-specific headers (48-byte for
+> FX3, a 40 + 12 split for FX5/FX7). Those longer headers are the **same group record** with
+> additional leading words ahead of the `vertex_count` / `index_count` pair — they do not constitute a
+> different model. Treat §§1.5–1.11 as worked single-group / per-stride instances of this one
+> group-array layout; the leading word is the group count in every case, the `render_state` word is
+> variable in every case, and only the vertex stride differs.
+
 ### 1.2 Vertex formats (on-disk)
 
-Three on-disk vertex formats are used. The applicable format is determined by the layer index,
-not by a flag inside the file.
+Three on-disk vertex formats are used. The applicable format is determined by the layer index
+(the extension), not by a flag inside the file.
 
 | Label  | Stride | Field order |
 |--------|--------|-------------|
@@ -115,239 +191,340 @@ a bounding box and a texture handle. These are never serialised back to disk.
 
 ### 1.5 FX1 Format  (`.fx1`)
 
-**Status:** CONFIRMED — 3 sample files, exact size match.
+**Status:** CONFIRMED — group-array model (§1.1a); single-group samples verified by exact size.
 **Semantic:** Single-triangle terrain overlay. Each mesh group contains one triangle (3 vertices,
 3 indices). Vertex format: VF_36.
 
 **File layout:**
 
 ```
-FX1_File = Header (24 bytes) + VertexData + IndexData
+FX1_File = group_count (u32) + group_count × [ group header (20 B) + VertexData + IndexData ]
 ```
 
-**Header (24 bytes):**
+**Group header (per group, see §1.1a for the universal field table):**
 
-| Offset | Size | Type | Field | Observed value | Confidence |
-|-------:|-----:|------|-------|----------------|------------|
-| 0x00 | 4 | u32 | `type_tag` | 1 | CONFIRMED (constant across all samples) |
-| 0x04 | 4 | u32 | _unknown_1_ | 1 | UNVERIFIED (constant=1) |
-| 0x08 | 4 | u32 | _unknown_2_ | 0 | UNVERIFIED (constant=0; possibly flags or padding) |
-| 0x0C | 4 | u32 | `render_state` | 15 (0x0F) | UNVERIFIED semantic; value 15 shared with FX2 |
-| 0x10 | 4 | u32 | `mesh_count` | varies | CONFIRMED — count of mesh groups |
-| 0x14 | 4 | u32 | `index_count` | varies | CONFIRMED — total u16 indices across all groups |
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| 0x00 | 4 | u32 | `group_count` | File-level group count (§1.1a). Not a constant, not a selector. | CONFIRMED (two-witness) |
+| +0x00 | 4 | u32 | `group_flags_0` | Read-but-not-consumed; near-constant 1. | UNVERIFIED |
+| +0x04 | 4 | u32 | `group_flags_1` | Read-but-not-consumed; mostly 0. | UNVERIFIED |
+| +0x08 | 4 | u32 | `render_state` | Per-group render-state word. **Variable** — earlier "constant=15" claim REFUTED. | CONFIRMED-variable |
+| +0x0C | 4 | u32 | `vertex_count` | Count of vertices in this group. | CONFIRMED |
+| +0x10 | 4 | u32 | `index_count` | Count of u16 indices in this group. | CONFIRMED |
 
-**VertexData:** `mesh_count × 36` bytes (VF_36). One vertex per mesh group in observed samples.
+**VertexData (per group):** `vertex_count × 36` bytes (VF_36).
 
-**IndexData:** `index_count × 2` bytes (u16).
+**IndexData (per group):** `index_count × 2` bytes (u16).
 
-**File-size formula:** `24 + mesh_count × 36 + index_count × 2`
+**File-size formula (single group):** `4 + 20 + vertex_count × 36 + index_count × 2`.
 
-Verified: 3 samples each = 138 bytes = 24 + 3 × 36 + 3 × 2.
+Single-group samples verify exactly (e.g. a 3-vertex / 3-index group: `4 + 20 + 3 × 36 + 3 × 2`).
+Multi-group files sum the per-group block sizes over `group_count` groups.
 
 ### 1.6 FX2 Format  (`.fx2`)
 
-**Status:** CONFIRMED — 3 sample files, exact size match.
+**Status:** CONFIRMED — group-array model (§1.1a); single-group samples verified by exact size.
 **Semantic:** Same role as FX1 but with a second UV channel (UV1). Used for lightmap or secondary
 texture blending. Vertex format: VF_44.
 
-**File layout:** identical structure to FX1 (24-byte header with the same field layout). The
-`render_state` field at `0x0C` is also 15 (0x0F), same as FX1.
+**File layout:** identical structure to FX1 (group-array model, §1.1a) with the VF_44 vertex stride.
+The `render_state` group word is **variable** (the prior "also 15" claim is REFUTED — see §1.1a).
 
 | Offset | Size | Type | Field | Confidence |
 |-------:|-----:|------|-------|------------|
-| 0x00–0x14 | — | — | Same header fields as FX1 | CONFIRMED |
+| 0x00 | 4 | u32 | `group_count` | CONFIRMED |
+| per-group header | — | — | Same fields as FX1 / §1.1a | CONFIRMED (render_state CONFIRMED-variable) |
 
-**VertexData:** `mesh_count × 44` bytes (VF_44). The extra 8 bytes per vertex are `f32 U1, f32 V1`.
+**VertexData (per group):** `vertex_count × 44` bytes (VF_44). The extra 8 bytes per vertex are
+`f32 U1, f32 V1`.
 
-**IndexData:** `index_count × 2` bytes (u16).
+**IndexData (per group):** `index_count × 2` bytes (u16).
 
-**File-size formula:** `24 + mesh_count × 44 + index_count × 2`
-
-Verified: 3 samples each = 162 bytes = 24 + 3 × 44 + 3 × 2.
+**File-size formula (single group):** `4 + 20 + vertex_count × 44 + index_count × 2`.
 
 ### 1.7 FX3 Format  (`.fx3`)
 
-**Status:** CONFIRMED — 3 sample files, exact size match.
+**Status:** CONFIRMED — group-array model (§1.1a); single-group samples verified by exact size.
 **Semantic:** Quad terrain overlay (4 vertices, 6 indices = 2 triangles). Vertex format: VF_36.
-Uses a 48-byte header — 24 bytes longer than FX1/FX2 — with additional constant fields whose
-semantics are not confirmed.
+The group header carries additional leading words ahead of the `vertex_count` / `index_count` pair
+(a longer group header than FX1/FX2); those extra words are read but not consumed for layout and are
+not understood semantically. This is the same group-array model with a wider group header, not a
+distinct format.
 
 **File layout:**
 
 ```
-FX3_File = Header (48 bytes) + VertexData + IndexData
+FX3_File = group_count (u32) + group_count × [ group header (44 B) + VertexData + IndexData ]
 ```
 
-**Header (48 bytes):**
+**Group header (per group — extended; offsets group-relative):**
 
-| Offset | Size | Type | Field | Observed value | Confidence |
-|-------:|-----:|------|-------|----------------|------------|
-| 0x00 | 4 | u32 | `type_tag` | 1 | CONFIRMED (constant=1) |
-| 0x04 | 4 | u32 | _unknown_1_ | 1 | UNVERIFIED (constant=1) |
-| 0x08 | 4 | u32 | _unknown_2_ | 0 | UNVERIFIED (constant=0) |
-| 0x0C | 4 | u32 | `render_state` | 5 | UNVERIFIED — differs from FX1/FX2 value of 15 |
-| 0x10 | 4 | u32 | _unknown_3_ | 0 | UNVERIFIED (constant=0) |
-| 0x14 | 4 | f32 | _unknown_4_ | 1.0 | UNVERIFIED (constant=1.0; possibly a scale factor) |
-| 0x18 | 4 | u32 | _unknown_5_ | 0 | UNVERIFIED (constant=0) |
-| 0x1C | 4 | u32 | _unknown_6_ | 5 | UNVERIFIED (constant=5) |
-| 0x20 | 4 | u32 | _unknown_7_ | 5 | UNVERIFIED (constant=5) |
-| 0x24 | 4 | u32 | _unknown_8_ | 0 | UNVERIFIED (constant=0) |
-| 0x28 | 4 | u32 | `mesh_count` | varies | CONFIRMED — count of mesh groups |
-| 0x2C | 4 | u32 | `index_count` | varies | CONFIRMED — total u16 indices |
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| 0x00 | 4 | u32 | `group_count` | File-level group count (§1.1a). | CONFIRMED |
+| +0x00 | 4 | u32 | `group_flags_0` | Read-but-not-consumed; near-constant 1. | UNVERIFIED |
+| +0x04 | 4 | u32 | `group_flags_1` | Read-but-not-consumed; mostly 0. | UNVERIFIED |
+| +0x08 | 4 | u32 | `render_state` | Per-group render-state word. **Variable** — earlier "constant=5" claim REFUTED. | CONFIRMED-variable |
+| +0x0C | 4 | u32 | _unknown_3_ | Read-but-not-consumed. | UNVERIFIED |
+| +0x10 | 4 | f32 | _unknown_4_ | A float; candidate scale factor. | UNVERIFIED |
+| +0x14 | 4 | u32/f32 | _unknown_5_ | Candidate direction-vector component (decodes as a small fractional float in samples). | UNVERIFIED |
+| +0x18 | 4 | u32 | _unknown_6_ | Read-but-not-consumed. | UNVERIFIED |
+| +0x1C | 4 | u32 | _unknown_7_ | Read-but-not-consumed. | UNVERIFIED |
+| +0x20 | 4 | u32 | _unknown_8_ | Observed constant 0. | UNVERIFIED (constant=0) |
+| +0x24 | 4 | u32 | `vertex_count` | Count of vertices in this group. | CONFIRMED |
+| +0x28 | 4 | u32 | `index_count` | Count of u16 indices in this group. | CONFIRMED |
 
-All bytes from `0x00` to `0x2F` are **constant** across all three samples; only the vertex
-coordinates in VertexData differ.
+**VertexData (per group):** `vertex_count × 36` bytes (VF_36).
 
-**VertexData:** `mesh_count × 36` bytes (VF_36).
+**IndexData (per group):** `index_count × 2` bytes (u16). Observed: `[0, 1, 2, 1, 3, 2]` (standard
+quad split).
 
-**IndexData:** `index_count × 2` bytes (u16). Observed: `[0, 1, 2, 1, 3, 2]` (standard quad split).
-
-**File-size formula:** `48 + mesh_count × 36 + index_count × 2`
-
-Verified: 3 samples each = 204 bytes = 48 + 4 × 36 + 6 × 2.
+**File-size formula (single group):** `4 + 44 + vertex_count × 36 + index_count × 2`.
 
 ### 1.8 FX5 Format  (`.fx5`)
 
-**Status:** CONFIRMED for single-section files; PARTIAL CONFLICT for multi-section layout — see
-Known Unknowns below.
-**Semantic:** Multi-section terrain overlay mesh with per-section direction metadata. Each section
-has a 40-byte metadata header and a sub-chunk header encoding its own vertex and index counts.
-Sections may represent different LOD levels or independently-textured geometry groups.
+**Status:** CONFIRMED — group-array model (§1.1a); flat per-group iteration verified across all
+sampled files (group counts observed from 1 to over a hundred).
+**Semantic:** Multi-group terrain overlay mesh with per-group direction metadata in the group header.
+Groups may represent different LOD levels or independently-textured geometry groups.
 Vertex format: VF_36.
 
 **File layout:**
 
 ```
-FX5_File = Section[0] + Section[1] + ... + Section[N-1]
+FX5_File = group_count (u32) + group_count × [ group header (48 B) + VertexData + IndexData ]
 ```
 
-The total number of sections `N` is not stored in the file; it is derived from accumulated sizes.
+The number of groups is the file-level `group_count` word — it is **not** absent and **not** derived
+from accumulated sizes (that earlier "section count not stored" reading is superseded by §1.1a).
 
-**Section layout:**
-
-```
-Section = Section_Header (40 bytes) + SubChunk_Header (12 bytes) + VertexData + IndexData
-```
-
-**Section_Header (40 bytes):**
+**Group header (per group — 48 B; offsets group-relative):**
 
 | Offset | Size | Type | Field | Observed values | Confidence |
 |-------:|-----:|------|-------|-----------------|------------|
-| 0x00 | 4 | u32 | `section_type` | 1, 2, 3 (ascending per section) | UNVERIFIED semantic |
-| 0x04 | 4 | u32 | _unknown_1_ | 1..3 | UNVERIFIED (possibly section index or LOD level) |
-| 0x08 | 4 | u32 | _unknown_2_ | 300, 400, 450 | UNVERIFIED (possibly LOD distance or tile parameter) |
-| 0x0C | 4 | f32 | `direction_x` | fractional | CONFIRMED as a float; semantic UNVERIFIED |
-| 0x10 | 4 | f32 | `direction_y` | fractional | CONFIRMED as a float; semantic UNVERIFIED |
-| 0x14 | 4 | f32 | `direction_z` | fractional | CONFIRMED as a float; semantic UNVERIFIED |
-| 0x18 | 4 | u32 | _unknown_3_ | 30, 50 | UNVERIFIED |
-| 0x1C | 4 | u32 | _unknown_4_ | 2 | UNVERIFIED (constant=2 in all samples) |
-| 0x20 | 4 | u32 | _unknown_5_ | 1 | UNVERIFIED (constant=1) |
-| 0x24 | 4 | u32 | _unknown_6_ | 1 | UNVERIFIED (constant=1) |
+| +0x00 | 4 | u32 | `group_subtype` | small ascending integer | UNVERIFIED semantic |
+| +0x04 | 4 | u32 | _unknown_1_ | 0 or 1 | UNVERIFIED |
+| +0x08 | 4 | u32 | _unknown_2_ | candidate LOD distance (e.g. 300/400/450) | UNVERIFIED |
+| +0x0C | 4 | f32 | `direction_x` | fractional | CONFIRMED as a float; semantic UNVERIFIED |
+| +0x10 | 4 | f32 | `direction_y` | fractional | CONFIRMED as a float; semantic UNVERIFIED |
+| +0x14 | 4 | f32 | `direction_z` | fractional | CONFIRMED as a float; semantic UNVERIFIED |
+| +0x18 | 4 | u32 | _unknown_3_ | integer parameter | UNVERIFIED |
+| +0x1C | 4 | u32 | _unknown_4_ | small integer | UNVERIFIED |
+| +0x20 | 4 | u32 | _unknown_5_ | 0 or 1 flag | UNVERIFIED |
+| +0x24 | 4 | u32 | _unknown_6_ | small integer | UNVERIFIED |
+| +0x28 | 4 | u32 | `vertex_count` | Count of vertices in this group. | CONFIRMED |
+| +0x2C | 4 | u32 | `index_count` | Count of u16 indices in this group. | CONFIRMED |
 
-The direction vector at offsets `0x0C`–`0x17` is an oblique unit vector per section. Its purpose
-is unconfirmed; candidates include slope normal for the section geometry, LOD orientation, or
-an instancing direction.
+The direction vector at group-relative `+0x0C`–`+0x17` is an oblique near-unit vector per group. Its
+purpose is unconfirmed; candidates include slope normal, LOD orientation, or instancing direction.
 
-**SubChunk_Header (12 bytes — confirmed for section 0; see Known Unknowns for later sections):**
+**VertexData (per group):** `vertex_count × 36` bytes (VF_36). Fractional normals indicate slope geometry.
 
-| Offset | Size | Type | Field | Confidence |
-|-------:|-----:|------|-------|------------|
-| 0x00 | 4 | u32 | _unknown_flags_ | UNVERIFIED (constant=1 in all observed section-0 sub-chunks) |
-| 0x04 | 4 | u32 | `vert_count` | CONFIRMED |
-| 0x08 | 4 | u32 | `idx_count` | CONFIRMED |
+**IndexData (per group):** `index_count × 2` bytes (u16). Triangle list.
 
-**VertexData:** `vert_count × 36` bytes (VF_36). Fractional normals indicate slope geometry.
-
-**IndexData:** `idx_count × 2` bytes (u16). Triangle list.
-
-**File-size formula (single-section):** `52 + vert_count × 36 + idx_count × 2`
-
-Verified: one sample = 880 bytes = 52 + 20 × 36 + 54 × 2.
-
-**Multi-section note:** A two-section sample (1420 bytes) has been observed but the exact byte
-boundary between the section-0 sub-chunk header and the section-1 section-header is unresolved
-(see Known Unknowns, item 1).
+**File-size formula:** `4 + Σ over groups (48 + vertex_count × 36 + index_count × 2)`.
 
 ### 1.9 FX6 Format  (`.fx6`)
 
-**Status:** CONFIRMED — 3 sample files, all byte-identical, exact size match.
-**Semantic:** Collection of 3D prop or object mesh instances. Each sub-chunk is an independent
-small box-like mesh. Unlike FX1–FX5, FX6 vertices have no per-vertex colour field (VF_32) and
-use normals consistent with 45-degree box faces rather than terrain slopes.
+**Status:** CONFIRMED — group-array model (§1.1a); multiple byte-identical samples.
+**Semantic:** Collection of 3D prop or object mesh groups. Each group is an independent small
+box-like mesh. Unlike FX1–FX5/FX7, FX6 vertices have no per-vertex colour field (VF_32) and use
+normals consistent with 45-degree box faces rather than terrain slopes.
 
 **File layout:**
 
 ```
-FX6_File = GlobalHeader (32 bytes) + SubChunk[0..N-2] (736 bytes each) + SubChunk[N-1] (708 bytes)
+FX6_File = group_count (u32) + global metadata + group_count × [ group header (8 B) + VertexData + IndexData (+ optional trailing block) ]
 ```
 
-All sub-chunks have the same internal structure; the final sub-chunk is 28 bytes shorter because
-it carries no footer.
+FX6 places several global metadata words after the `group_count` word; each group then carries a
+short 8-byte header (vertex count + index count). The trailing block on non-final groups is a fixed
+extra block (see below). The group iteration is the same model as §1.1a; FX6 simply uses a compact
+per-group header.
 
-**GlobalHeader (32 bytes):**
+**File-level / global metadata:**
 
 | Offset | Size | Type | Field | Observed value | Confidence |
 |-------:|-----:|------|-------|----------------|------------|
-| 0x00 | 4 | u32 | `sub_chunk_count` | 40 | CONFIRMED (constant across all 3 files) |
-| 0x04 | 4 | u32 | _version_ | 1 | UNVERIFIED (constant=1) |
+| 0x00 | 4 | u32 | `group_count` | group count (constant 40 across samples) | CONFIRMED |
+| 0x04 | 4 | u32 | _version_ | dominant 1 (one observed outlier 2) | CONFIRMED-variable (dominant 1) |
 | 0x08 | 4 | u32 | _unknown_1_ | 0 | UNVERIFIED (constant=0) |
 | 0x0C | 4 | u32 | _unknown_2_ | 0 | UNVERIFIED (constant=0) |
 | 0x10 | 4 | f32 | _unknown_3_ | 1.0 | UNVERIFIED (possibly global scale; constant=1.0) |
-| 0x14 | 4 | u32 | _unknown_4_ | 45 | UNVERIFIED (constant=45; possibly tile count or grid dimension) |
+| 0x14 | 4 | u32 | _unknown_4_ | 45 | UNVERIFIED (constant=45) |
 | 0x18 | 4 | u32 | _unknown_5_ | 60 | UNVERIFIED (constant=60) |
 | 0x1C | 4 | u32 | _unknown_6_ | 0 | UNVERIFIED (constant=0) |
 
-**Sub-chunk layout:**
-
-```
-SubChunk = SubChunk_Header (8 bytes) + VertexData + IndexData + Footer (28 bytes)
-FinalSubChunk = SubChunk_Header (8 bytes) + VertexData + IndexData   [no footer]
-```
-
-**SubChunk_Header (8 bytes):**
+**Per-group header (8 bytes):**
 
 | Offset | Size | Type | Field | Observed value | Confidence |
 |-------:|-----:|------|-------|----------------|------------|
-| 0x00 | 4 | u32 | `vert_count` | 20 | CONFIRMED (constant=20 in all sub-chunks) |
-| 0x04 | 4 | u32 | `idx_count` | 30 | CONFIRMED (constant=30 in all sub-chunks) |
+| +0x00 | 4 | u32 | `vertex_count` | 20 | CONFIRMED |
+| +0x04 | 4 | u32 | `index_count` | 30 | CONFIRMED |
 
-**VertexData:** `vert_count × 32` bytes (VF_32). Box/prop geometry with 45-degree normals.
+**VertexData (per group):** `vertex_count × 32` bytes (VF_32). Box/prop geometry with 45-degree normals.
 
-**IndexData:** `idx_count × 2` bytes (u16). Five quads expressed as 10 triangles.
+**IndexData (per group):** `index_count × 2` bytes (u16).
 
-**Footer (28 bytes, non-final sub-chunks only):**
+**Trailing block (28 bytes, non-final groups only):**
 
 | Offset | Size | Type | Field | Observed value | Confidence |
 |-------:|-----:|------|-------|----------------|------------|
-| 0x00 | 4 | u32 | _unknown_a_ | 1 | UNVERIFIED (constant=1) |
-| 0x04 | 4 | u32 | _unknown_b_ | 0 | UNVERIFIED (constant=0) |
-| 0x08 | 4 | u32 | _unknown_c_ | 0 | UNVERIFIED (constant=0) |
-| 0x0C | 4 | f32 | _unknown_d_ | 1.0 | UNVERIFIED (possibly per-sub-chunk scale) |
-| 0x10 | 4 | u32 | _unknown_e_ | varies | UNVERIFIED (observed: 10, 40, 45, 50, …) |
-| 0x14 | 4 | u32 | _unknown_f_ | varies | UNVERIFIED (observed: 30, 60; often 60) |
-| 0x18 | 4 | u32 | _unknown_g_ | 0 | UNVERIFIED (constant=0) |
+| +0x00 | 4 | u32 | _unknown_a_ | 1 | UNVERIFIED (constant=1) |
+| +0x04 | 4 | u32 | _unknown_b_ | 0 | UNVERIFIED (constant=0) |
+| +0x08 | 4 | u32 | _unknown_c_ | 0 | UNVERIFIED (constant=0) |
+| +0x0C | 4 | f32 | _unknown_d_ | 1.0 | UNVERIFIED (possibly per-group scale) |
+| +0x10 | 4 | u32 | _unknown_e_ | varies (10, 40, 45, 50, …) | UNVERIFIED |
+| +0x14 | 4 | u32 | _unknown_f_ | varies (30, 60; often 60) | UNVERIFIED |
+| +0x18 | 4 | u32 | _unknown_g_ | 0 | UNVERIFIED (constant=0) |
 
-The varying values at footer offsets `0x10` and `0x14` differ per sub-chunk and may encode LOD
+The varying values at trailing-block offsets `+0x10` and `+0x14` differ per group and may encode LOD
 distances, texture tile indices, or rendering priority parameters.
 
 **File-size formula:**
-`32 + (sub_chunk_count - 1) × 736 + 708`
+`4 + 28 (remaining global metadata) + (group_count - 1) × 736 + 708`
+where each non-final group block is `8 + 20 × 32 + 30 × 2 + 28 = 736` and the final group block is
+`8 + 640 + 60 = 708`.
 
-Verified: 3 files = 29 444 bytes = 32 + 39 × 736 + 708.
+### 1.10 FX7 Format  (`.fx7`)
 
-**Per-sub-chunk verification:** `8 + 20 × 32 + 30 × 2 + 28 = 8 + 640 + 60 + 28 = 736`; final = `8 + 640 + 60 = 708`.
+**Status:** PLAUSIBLE — group-array model (§1.1a); 2 byte-identical samples, size formula exact.
+**Semantic:** Single-group terrain overlay mesh using the **FX5-style group header** but the
+**VF_32** vertex format (no per-vertex colour). The two observed files are a single group with a high
+vertex count and a plain position/normal/UV0 vertex.
 
-### 1.10 FX layer summary table
+**File layout:**
 
-| Layer | sample_verified | Header size | Vertex format | UV channels | Per-vertex colour |
-|-------|-----------------|------------:|---------------|:-----------:|:-----------------:|
-| FX1   | true  | 24 B | VF_36 (36 B) | 1 | yes |
-| FX2   | true  | 24 B | VF_44 (44 B) | 2 | yes |
-| FX3   | true  | 48 B | VF_36 (36 B) | 1 | yes |
-| FX4   | false | UNKNOWN | UNKNOWN | ? | ? |
-| FX5   | true (partial) | 40 B section + 12 B sub | VF_36 (36 B) | 1 | yes |
-| FX6   | true  | 32 B global + 8 B/chunk | VF_32 (32 B) | 1 | no |
-| FX7   | false | UNKNOWN | UNKNOWN | ? | ? |
+```
+FX7_File = group_count (u32) + group_count × [ group header (48 B) + VertexData + IndexData ]
+```
+
+The group header is the same 48-byte FX5-style group header (§1.8); only the vertex stride differs
+(VF_32 instead of VF_36).
+
+**Group header (per group — 48 B; offsets group-relative):**
+
+| Offset | Size | Type | Field | Observed values | Confidence |
+|-------:|-----:|------|-------|-----------------|------------|
+| +0x00 | 4 | u32 | `group_subtype` | 1 | DUAL-SAMPLE |
+| +0x04 | 4 | u32 | _unknown_1_ | 2 | DUAL-SAMPLE |
+| +0x08 | 4 | f32 | `unk_dist` | large float (thousands) | DUAL-SAMPLE — a large f32 (candidate world-space coordinate), NOT the FX5 small-integer LOD distance |
+| +0x0C | 4 | f32 | _unknown_2_ | large float | DUAL-SAMPLE — candidate world-space coordinate |
+| +0x10 | 4 | f32 | _unknown_3_ | large float | DUAL-SAMPLE — candidate world-space coordinate |
+| +0x14 | 4 | f32 | `direction_a` | signed near-unit fractional | DUAL-SAMPLE — a horizontal-plane unit-direction component (paired with `direction_b`) |
+| +0x18 | 4 | u32/f32 | _unknown_5_ | 0 | DUAL-SAMPLE (zero) |
+| +0x1C | 4 | f32 | `direction_b` | signed near-unit fractional | DUAL-SAMPLE — second unit-direction component (`direction_a`² + `direction_b`² ≈ 1) |
+| +0x20 | 4 | u32 | _unknown_7_ | 1 | DUAL-SAMPLE |
+| +0x24 | 4 | u32 | _unknown_8_ | 0 | DUAL-SAMPLE |
+| +0x28 | 4 | u32 | _unknown_flags_ | 0 | DUAL-SAMPLE |
+| +0x2C | 4 | u32 | `vertex_count` | large | DUAL-SAMPLE |
+| +0x30 | 4 | u32 | `index_count` | large; divisible by 3 | DUAL-SAMPLE |
+
+**VertexData (per group):** `vertex_count × 32` bytes (**VF_32** — position 12 B + normal 12 B +
+UV0 8 B; **no per-vertex colour field**). Same VF_32 used by FX6 (§1.2), not FX5's VF_36.
+
+**IndexData (per group):** `index_count × 2` bytes (u16). Plain triangle list (`index_count`
+divisible by 3).
+
+**File-size formula:** `4 + 48 + vertex_count × 32 + index_count × 2` (single group). Both samples
+satisfy it exactly with zero residual bytes.
+
+### 1.11 FX4 Format  (`.fx4`)
+
+**Status:** CONFIRMED-FROM-LOADER — the FX4 loader's read sequence was recovered and obeys the
+universal group-array model (§1.1a). The file is a flat group array: a group count, then per group a
+fixed 48-byte group header (with vertex/index counts at fixed offsets), a VF_44 vertex block, and a
+u16 index block. The internal meaning of the per-group header's leading words remains sample-unverified.
+
+**Semantic:** Terrain overlay mesh using the **VF_44** vertex format (position + normal + RGBA colour
++ UV0 + UV1 — the same vertex format as FX2, §1.2), stored as a flat array of groups. This is the
+same flat group-array model the FX5 loader uses; FX4 and FX5 differ **only** in vertex stride
+(FX4 = VF_44 / 44 B, FX5 = VF_36 / 36 B).
+
+> **Group-array confirmation.** The loader reads a single file-level group count, then for **each**
+> group reads one fixed **48-byte** header block as a single unit and consumes only two fields from it
+> (vertex count, index count). There is no branch on any leading word and no header split. The
+> per-group header size is fixed at 48 bytes, not data-driven. A file that earlier looked like "two
+> sections" is simply a file with **group count = 2**.
+
+**File layout:**
+
+```
+FX4_File = u32 group_count
+           per group (× group_count):
+               group header (48 bytes)        ; only vertex_count@+0x28 and index_count@+0x2C consumed
+               VertexData (vertex_count × 44)  ; VF_44
+               IndexData  (index_count  × 2)   ; u16 triangle list
+```
+
+**File header (4 bytes):**
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| 0x00 | 4 | u32 | `group_count` | Number of groups in the flat array. Drives the per-group loop. | CONFIRMED (parser-verified; two-witness) |
+
+**Per-group header (48 bytes, repeated `group_count` times; offsets group-relative):**
+
+The loader reads this 48-byte block in one operation and indexes only the vertex and index counts
+out of it.
+
+| Group-rel offset | Size | Type | Field | Notes | Confidence |
+|-----------------:|-----:|------|-------|-------|------------|
+| +0x00 | 40 | bytes | _group_metadata_ | Read into the group struct but not consumed for parsing (no branch on any field). Candidates: transform / texture-id / flags / a per-group range value for the post-load AABB compute. The leading word is **not** tested and does **not** size the header. | UNVERIFIED (read-but-not-consumed at load) |
+| +0x28 | 4 | u32 | `vertex_count` | Drives the `vertex_count × 44` VF_44 read. | CONFIRMED (parser-verified) |
+| +0x2C | 4 | u32 | `index_count` | Drives the `index_count × 2` u16 index read. | CONFIRMED (parser-verified) |
+
+**VertexData (per group):** `vertex_count × 44` bytes (**VF_44**). The leading position float3 (X, Y,
+Z) is parser-verified (the post-load AABB compute strides by 44 bytes and reads the first three floats
+of each vertex as position). The remaining 32 bytes (normal + RGBA + UV0 + UV1, per the VF_44 layout
+in §1.2) are not decomposed by the loader; that breakdown is inherited from §1.2.
+
+**IndexData (per group):** `index_count × 2` bytes (u16). Plain triangle list.
+
+**File-size formula:** `4 + Σ over groups (48 + vertex_count × 44 + index_count × 2)`.
+
+**Cross-confirmation (FX5):** the FX5 loader is byte-for-byte the same control flow — a u32 group
+count, then per group a fixed 48-byte header read as one unit (vertex count at group-relative `+0x28`,
+index count at `+0x2C`), a vertex block, and a u16 index block — differing **only** in vertex stride
+(VF_36 / 36 B instead of VF_44 / 44 B). This cross-family identity is the strongest evidence that the
+48-byte per-group header is a fixed, type-agnostic block in both formats, and that the leading word is
+a group count rather than a selector.
+
+### 1.12 FX layer summary table
+
+| Layer | sample_verified | Group header size | Vertex format | UV channels | Per-vertex colour |
+|-------|-----------------|------------------:|---------------|:-----------:|:-----------------:|
+| FX1   | true  | 20 B | VF_36 (36 B) | 1 | yes |
+| FX2   | true  | 20 B | VF_44 (44 B) | 2 | yes |
+| FX3   | true  | 44 B | VF_36 (36 B) | 1 | yes |
+| FX4   | CONFIRMED-from-loader (flat group array) | 48 B/group | VF_44 (44 B) | 2 | yes |
+| FX5   | true | 48 B/group | VF_36 (36 B) | 1 | yes |
+| FX6   | true  | global metadata + 8 B/group | VF_32 (32 B) | 1 | no |
+| FX7   | PLAUSIBLE (dual-sample) | 48 B/group | VF_32 (32 B) | 1 | no |
+
+All seven share the universal group-array model (§1.1a): a `group_count` word, then that many group
+records; the only structural difference is the vertex stride.
+
+### 1.13 Per-channel header width and stride are MANDATORY (reconfirmed 2026-06-16, two-witness)
+
+The leading `u32` is the group/tile count for **every** channel (branchless), **but the header width
+and the vertex stride are PER-CHANNEL** — a single hard-coded FX stride or header size is a parser
+bug. The VFS census (two-witness: per-channel loader read-path + black-box, zero residual on each
+channel) pins the following:
+
+| Ext  | Header        | Vertex format | Census files |
+|------|---------------|---------------|-------------:|
+| fx1  | 20 B group hdr | VF_36 (36 B) | 226 |
+| fx2  | 20 B group hdr | VF_44 (44 B) | 595 |
+| fx3  | 44 B group hdr | VF_36 (36 B) | 160 |
+| fx4  | 48 B tile hdr  | VF_44 (44 B) | 1 |
+| fx5  | 48 B tile hdr  | VF_36 (36 B) | 89 |
+| fx6  | 32 B global hdr + VF_32 sub-chunks + 28 B footer | VF_32 (32 B) | 6 |
+| fx7  | 52 B hdr (`vertex_count` @ +0x2C, `index_count` @ +0x30) | VF_32 (32 B) | 2 |
+
+(The §§1.5–1.11 worked layouts are these same per-channel instances; the table above is the
+authoritative stride/header index. Census file counts are corpus observations, not load-bearing
+layout facts.)
 
 ---
 
@@ -358,8 +535,13 @@ Verified: 3 files = 29 444 bytes = 32 + 39 × 736 + 708.
 | `up_terrain` | `true` — 3 samples, exact size match, parser corroborated |
 
 **Purpose:** Stores the triangle mesh of **overhanging terrain surfaces** (bridges, raised platforms,
-overhangs) for one cell. All triangles are coplanar (share a single Y elevation). The client tests
-player position against these triangles for collision at runtime.
+overhangs) for one cell. The client tests player position against these triangles for collision at runtime.
+
+> **`.up` / `.exd` are a SHARED, DISTINCT format — NOT FX group-array files (reconfirmed 2026-06-16).**
+> Both `.up` and `.exd` use the **one** layout `count(u32) + count × 40-byte triangle` (3 × vec3 + 1
+> trailing f32) and are decoded by the **same** record decoder. This is structurally **distinct** from
+> the FX group-array model of §1; any reading that lumps `.exd`/`.up` in with the FX channels is
+> **REFUTED**. VFS census (two-witness, zero residual): **`.up` 222 files, `.exd` 1 384 files**.
 
 **Path pattern:** `data/map{MAP}/dat/d{MAP}x1{TX:04d}z1{TZ:04d}.up`
 
@@ -371,7 +553,7 @@ No magic number, no version field. The file begins directly with the triangle co
 
 | Offset | Size | Type | Field | Confidence |
 |-------:|-----:|------|-------|------------|
-| 0x00 | 4 | u32 | `triangle_count` | CONFIRMED — observed value 12; file size = 4 + `triangle_count` × 40 |
+| 0x00 | 4 | u32 | `triangle_count` | CONFIRMED — file size = 4 + `triangle_count` × 40 |
 
 **Triangle record (40 bytes, repeated `triangle_count` times):**
 
@@ -386,19 +568,19 @@ No magic number, no version field. The file begins directly with the triangle co
 | +0x18 | 4 | f32 | `v3_x` | CONFIRMED |
 | +0x1C | 4 | f32 | `v3_y` | CONFIRMED |
 | +0x20 | 4 | f32 | `v3_z` | CONFIRMED |
-| +0x24 | 4 | f32 | `plane_height` | CONFIRMED — equals vertex Y in all sampled records; stored separately for quick range tests |
+| +0x24 | 4 | f32 | `plane_height` | CONFIRMED — an independent per-triangle scalar; see §2.2 |
 
 Record stride: **40 bytes** (0x28).
 
 **File-size formula:** `4 + triangle_count × 40`
 
-Verified: 3 samples = 484 bytes = 4 + 12 × 40.
-
 ### 2.2 Geometric notes
 
-In all sampled cells all three vertex Y values within each record equal `plane_height`, indicating
-a **flat coplanar** upper terrain surface. Whether `plane_height` can differ from vertex Y on
-non-flat overhangs is unverified.
+`plane_height` is an **independent per-triangle scalar**, not a redundant copy of vertex Y. In some
+cells all three vertex Y values within a record equal `plane_height` (flat coplanar surface); in many
+others `plane_height` differs from one or more vertex Y values (non-flat overhangs). An engineer must
+treat `plane_height` as a separate stored value (likely a pre-computed height / elevation bound used
+for spatial culling or collision range tests), not as derivable from the vertices.
 
 ### 2.3 Runtime in-memory expansion (informational — not serialised)
 
@@ -442,18 +624,16 @@ No magic number, no version field.
 
 | Offset | Size | Type | Field | Confidence |
 |-------:|-----:|------|-------|------------|
-| 0x00 | 4 | u32 | `triangle_count` | CONFIRMED — observed value 2; file size = 4 + `triangle_count` × 40 |
+| 0x00 | 4 | u32 | `triangle_count` | CONFIRMED — file size = 4 + `triangle_count` × 40 |
 
 **Triangle record (40 bytes, repeated `triangle_count` times):**
 
 Identical to the `.up` triangle record — see Section 2.1. Field names and offsets are the same;
-`plane_height` at record offset +0x24 carries the same semantics.
+`plane_height` at record offset +0x24 carries the same independent-scalar semantics as in §2.2.
 
 Record stride: **40 bytes** (0x28).
 
 **File-size formula:** `4 + triangle_count × 40`
-
-Verified: 3 samples = 84 bytes = 4 + 2 × 40.
 
 ### 3.2 Comparison with `.up`
 
@@ -461,7 +641,6 @@ Verified: 3 samples = 84 bytes = 4 + 2 × 40.
 |----------|-------|--------|
 | Binary layout | Identical | Identical |
 | Scene section key | `UP_TERRAIN` | `EXTRA_TERRAIN` |
-| Observed triangle count | 12 | 2 |
 | Loader function | distinct (but same record decoder) | distinct (but same record decoder) |
 
 ---
@@ -503,8 +682,6 @@ No magic number.
 Record stride: **8 bytes**.
 
 **File-size formula:** `8 + vertex_count × 8`
-
-Verified: `8 + 4 × 8 = 40` (two samples); `8 + 3 × 8 = 32` (one sample).
 
 ### 4.2 Coordinate verification
 
@@ -576,6 +753,10 @@ continuously changing lighting.
 **No magic number, no version field.** If the file is absent, the client uses hard-coded fallback
 lighting values.
 
+> **Sibling note:** `data/sky/dat/` also holds `light{MAP}.txt` text siblings with sizes that do
+> **not** equal 5312 bytes. They are editor-source / text exports and are **not** parseable as this
+> binary format; the binary reader should open only the `.bin` files.
+
 ### 6.1 Blob layout
 
 The 5312-byte file is divided into three contiguous sections:
@@ -637,7 +818,7 @@ Slot `i` at absolute offset `0x1260 + 4 × i`. One `f32` value per time step.
 
 | Format key | sample_verified |
 |-----------|-----------------|
-| `bin_light_point` | `false` — no samples available; parser analysis only |
+| `bin_light_point` | header partially corpus-confirmed (intensity scale as f32, count); record body parser-only |
 
 **Purpose:** Stores a variable-count array of Direct3D point lights for one map, with a global
 intensity scale applied to all lights.
@@ -646,11 +827,14 @@ intensity scale applied to all lights.
 
 **File size:** `8 + count × 60` bytes. No magic, no version.
 
+> **Sibling note:** `point_light{MAP}.txt` text siblings coexist in `data/sky/dat/`; they are editor
+> text exports, not this binary format. Open only the `.bin` files.
+
 ### 7.1 File header (8 bytes)
 
 | Offset | Size | Type | Field | Confidence |
 |-------:|-----:|------|-------|------------|
-| 0x00 | 4 | u32 | `intensity_scale` | CONFIRMED — loaded as global colour multiplier |
+| 0x00 | 4 | f32 | `intensity_scale` | CONFIRMED — a **u32 read then reinterpreted as f32**; the loader treats the 4 bytes as a float colour multiplier (observed whole-number float values across the corpus). Store and use it as an f32, not an integer. |
 | 0x04 | 4 | u32 | `count` | CONFIRMED — number of point-light entries |
 
 ### 7.2 Point-light record (60 bytes, repeated `count` times)
@@ -676,7 +860,7 @@ intensity scale applied to all lights.
 Record stride: **60 bytes**.
 
 The three colour groups may correspond to D3D diffuse, specular, and ambient channels, or to three
-separate light sources — this cannot be determined from parser evidence alone (no samples).
+separate light sources — this cannot be determined from parser evidence alone.
 
 Up to 5 point lights from the array may be simultaneously active; the lighting manager maintains
 5 per-slot state blocks of 184 bytes each.
@@ -687,7 +871,7 @@ Up to 5 point lights from the array may be simultaneously active; the lighting m
 
 | Format key | sample_verified |
 |-----------|-----------------|
-| `bin_light_wind` | `true` for header; `false` for entry body (all 3 samples are zero-entry stubs) |
+| `bin_light_wind` | `true` for header; `false` for entry body (observed samples are zero- or low-count) |
 
 **Purpose:** Stores keyframe entries that drive foliage-sway animations for one map.
 
@@ -697,17 +881,20 @@ Up to 5 point lights from the array may be simultaneously active; the lighting m
 
 **No magic, no version.** Missing file or zero-count file produces no foliage sway.
 
+> **Sibling note:** `wind{MAP}.txt` text siblings coexist in `data/sky/dat/`; they are editor text
+> exports, not this binary format. Open only the `.bin` files.
+
 ### 8.1 File header (8 bytes)
 
 | Offset | Size | Type | Field | Confidence |
 |-------:|-----:|------|-------|------------|
-| 0x00 | 4 | u32 | `count` | CONFIRMED — 3 zero-entry samples verify 8-byte header |
+| 0x00 | 4 | u32 | `count` | CONFIRMED — zero-entry samples verify 8-byte header |
 | 0x04 | 4 | u32 | `flag2` | CONFIRMED — non-zero activates foliage-sway curve seeding |
 
 ### 8.2 Wind keyframe record (24 bytes, repeated `count` times)
 
-Six consecutive `f32` values. Only field [5] (offset +20) is confirmed as accessed; fields [0–4]
-are structurally inferred.
+Six consecutive 4-byte values. Field [5] (offset +0x14) is the texture id; the remaining fields are
+structurally inferred.
 
 | Offset | Size | Type | Field | Confidence |
 |-------:|-----:|------|-------|------------|
@@ -716,7 +903,7 @@ are structurally inferred.
 | +0x08 | 4 | f32 | _unknown_2_ | UNVERIFIED (possibly direction Z) |
 | +0x0C | 4 | f32 | _unknown_3_ | UNVERIFIED (possibly wind speed) |
 | +0x10 | 4 | f32 | _unknown_4_ | UNVERIFIED (possibly frequency or phase) |
-| +0x14 | 4 | f32 | `sway_seed` | MEDIUM — confirmed as argument to foliage-sway seeding call |
+| +0x14 | 4 | u32 | `texture_id` | CONFIRMED — this word is a **texture id**, the argument the loader passes to the foliage-sway material lookup. The earlier `sway_seed` reading is REFUTED. |
 
 Record stride: **24 bytes**.
 
@@ -727,61 +914,60 @@ Record stride: **24 bytes**.
 The following items are explicitly unresolved. An engineer must not assume a meaning for any of
 these without further evidence.
 
-1. **FX5 multi-section sub-chunk header boundary:** In a two-section sample, section 1 appears
-   to have a sub-chunk header that is 8 bytes rather than 12 bytes (the first `flags` dword may
-   be absorbed into the section header structure for sections beyond section 0). The exact byte
-   boundary is unresolved. Mark all FX5 multi-section parsing beyond the section-0 sub-chunk as
-   **UNVERIFIED**.
+1. **FX group-header semantics (all FX extensions):** Beyond the universal `group_count`,
+   `render_state`, `vertex_count`, and `index_count` fields (§1.1a), most leading group-header words
+   are read-but-not-consumed for layout. Their meanings (LOD distance, direction vector, sub-type,
+   flags) are inferred, not confirmed. Treat them as opaque per-group metadata.
 
-2. **FX1/FX2 header field at 0x0C (`render_state` = 15):** Meaning of the value 15 is not
-   confirmed. Could be a vertex-format selector, a render-state enum, or a texture-binding index.
+2. **`render_state` (group-relative +0x08) semantic:** Confirmed **variable** (not a constant), but
+   what it selects — a render-state enum, a texture-binding index, or a blend-mode key — is not yet
+   established. Read it per group; do not branch on a fixed value.
 
-3. **FX3 header extended block (0x10–0x27):** Eight u32/f32 fields, all constant across 3 samples.
-   The cluster of value-5 fields (0x0C, 0x1C, 0x20) and the 1.0 float (0x14) are not understood.
+3. **FX3 extended group-header words (+0x0C–+0x20):** Several u32/f32 words ahead of the count pair.
+   The float-decoding ones look like direction-vector components; the integer ones are unexplained.
 
-4. **FX6 GlobalHeader fields at 0x14 (=45) and 0x18 (=60):** Constant across all 3 files.
-   Candidates: grid dimension, tile count, or rendering parameter.
+4. **FX6 global metadata at 0x14 (=45) and 0x18 (=60):** Constant across samples.
+   Candidates: grid dimension, group count, or rendering parameter. `version` (0x04) is dominant 1
+   with one observed outlier 2.
 
-5. **FX6 sub-chunk footer fields at +0x10 and +0x14:** Vary per sub-chunk. Candidates: LOD
-   distances, texture tile indices, rendering priority. No pattern established.
+5. **FX6 per-group trailing-block fields at +0x10 and +0x14:** Vary per group. Candidates: LOD
+   distances, texture tile indices, rendering priority.
 
-6. **FX4 and FX7 formats:** No sample files available. Vertex format, header size, and section
-   structure are entirely unknown.
+6. **FX7 group-header large floats (`unk_dist` and the two following floats):** PLAUSIBLE from two
+   byte-identical samples; candidates are world-space bounding coordinates. The signed near-unit
+   floats at +0x14 and +0x1C form a horizontal-plane unit-direction vector.
 
-7. **`.up` `plane_height` vs vertex Y for non-flat geometry:** All sampled upper terrain
-   triangles are flat (all vertex Y = plane_height). The field may diverge for non-flat overhangs.
+7. **FX4 per-group header leading 40 bytes:** Read but not consumed at load (candidates: transform /
+   texture-id / flags). Single FX4 instance in the corpus → all per-field observations are
+   single-sample.
 
-8. **`.exd` `triangle_count` > 2:** Only value 2 observed. No upper bound established.
+8. **`.up` / `.exd` `plane_height`:** Resolved as an **independent per-triangle scalar** that
+   frequently differs from vertex Y (non-flat geometry is the norm in the full corpus). Its precise
+   role (collision range bound vs. precomputed elevation) is still inferred.
 
-9. **`.exd` `height_bound` field for non-flat triangles:** In all samples the extra float equals
-   vertex Y (flat geometry). Whether it stores a height bound, a pre-negated plane constant, or
-   a surface type for sloped triangles is unresolvable from current samples.
+9. **`.sod.pre` multiple solids per cell** and **runtime loading:** All samples are single-solid;
+   no runtime loader found (likely editor-only).
 
-10. **`.sod.pre` multiple solids per cell:** All samples represent single-solid cells. Whether the
-    file stores multiple polygon vertex lists with delimiters for multi-solid cells is unverified.
+10. **`light%d.bin` gaps at 0x0900 and 0x1230 (48 bytes each):** May be a 49th wrap-around
+    interpolation slot, or alignment padding.
 
-11. **`.sod.pre` runtime loading:** No game-runtime loader was found. The file may be editor-only.
+11. **`light%d.bin` trailing 416 bytes (0x1320–0x14BF):** Not accessed by any analysed function.
 
-12. **`.ted.post` texture index block (block 3) reference target:** Whether the 1-based index
-    references the global `bgtexture.lst` pool or the per-tile `TEXTURES{}` list in `.map` is
-    unresolvable from available samples.
+12. **`light%d.bin` four unread floats per slot (+0x0C, +0x10, +0x1C, +0x2C):** Present but not read
+    by the main time-update path.
 
-13. **`light%d.bin` gaps at 0x0900 and 0x1230 (48 bytes each):** May be a 49th wrap-around
-    interpolation slot, or alignment padding between sections.
+13. **`point_light%d.bin` record offsets +0x24–+0x30:** Most likely position (XYZ) and range; not
+    confirmed.
 
-14. **`light%d.bin` trailing 416 bytes (0x1320–0x14BF):** Not accessed by any analysed function.
-    May encode sky-colour gradients, additional atmospheric parameters, or editor-reserved space.
+14. **`point_light%d.bin` three colour groups:** Could be D3D diffuse/specular/ambient channels or
+    three independent light sources.
 
-15. **`light%d.bin` four unread floats per slot (+0x0C, +0x10, +0x1C, +0x2C):** Present in the
-    blob but not read by the main time-update path. Possibly light direction angles or editor data.
+15. **`wind%d.bin` entry fields [0–4]:** Field [5] is the texture id (§8.2); the remaining five
+    floats' semantics are unverified (no non-zero corpus rows decoded this pass).
 
-16. **`point_light%d.bin` record offsets +0x24–+0x30:** Most likely position (XYZ) and range, but
-    no samples exist to confirm.
-
-17. **`point_light%d.bin` three colour groups:** Could be D3D diffuse/specular/ambient channels
-    or three independent light sources.
-
-18. **`wind%d.bin` entry fields [0–4]:** No non-zero samples; semantics entirely unverified.
+16. **sky/dat `.txt` siblings:** `light{N}.txt` / `point_light{N}.txt` / `wind{N}.txt` coexist with
+    the `.bin` files but are editor text exports, not the binary format. The binary reader must skip
+    them.
 
 ---
 

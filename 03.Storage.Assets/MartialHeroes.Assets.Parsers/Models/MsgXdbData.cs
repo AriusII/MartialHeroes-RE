@@ -2,35 +2,35 @@ namespace MartialHeroes.Assets.Parsers.Models;
 
 /// <summary>
 /// One record from <c>data/script/msg.xdb</c>.
-/// Stride: 516 bytes = 4 (id) + 512 (text buffer).
+/// Fixed stride: 516 bytes = 4 (caption_id) + 512 (text buffer).
 /// </summary>
-/// <param name="Id">
-/// Unique message identifier; runtime lookup key.
-/// spec: Docs/RE/formats/misc_data.md §6 — "id u32LE @ 0x000: CODE-CONFIRMED".
+/// <param name="CaptionId">
+/// Signed 32-bit caption identifier; the lookup key.
+/// spec: Docs/RE/formats/msg_xdb.md §Record layout — "caption_id i32 LE @ +0x000". CONFIRMED.
 /// </param>
 /// <param name="Text">
-/// CP949-decoded, NUL-stripped message string.
-/// spec: Docs/RE/formats/misc_data.md §6 — "text u8[512] CP949 NUL-terminated @ 0x004: CODE-CONFIRMED".
+/// CP949-decoded, NUL-trimmed caption string.
+/// spec: Docs/RE/formats/msg_xdb.md §Record layout — "text char[512] CP949 NUL-terminated @ +0x004". CONFIRMED.
 /// </param>
 /// <remarks>
-/// spec: Docs/RE/formats/misc_data.md §6 msg.xdb.
-/// Verification: CODE-CONFIRMED (loader + stride); SAMPLE-UNVERIFIED (content).
+/// spec: Docs/RE/formats/msg_xdb.md — flat headerless array, stride 516 bytes (0x204).
 /// </remarks>
-public sealed record MsgXdbRecord(uint Id, string Text);
+public sealed record MsgXdbRecord(int CaptionId, string Text);
 
 /// <summary>
-/// Decoded catalogue of all records from a <c>msg.xdb</c> file,
-/// providing O(log n) lookup by numeric ID.
+/// Decoded catalogue of all records from a <c>data/script/msg.xdb</c> file.
+/// Provides O(1) average lookup by numeric <see cref="MsgXdbRecord.CaptionId"/>.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/misc_data.md §6 — "global red-black tree keyed on id": CODE-CONFIRMED.
-/// The runtime uses a red-black tree; here we use a sorted dictionary for equivalent semantics.
+/// spec: Docs/RE/formats/msg_xdb.md §Lookup model — "ordered-map lower-bound by caption_id". CONFIRMED.
+/// A sorted dictionary is used for equivalent lower-bound semantics; the on-disk ascending
+/// order (confirmed) means binary search is valid, but the dictionary gives equivalent O(1) avg.
 /// </remarks>
 public sealed class MsgXdbCatalog
 {
-    private readonly Dictionary<uint, MsgXdbRecord> _map;
+    private readonly Dictionary<int, string> _map;
 
-    /// <summary>All decoded records in parse order.</summary>
+    /// <summary>All decoded records in parse (on-disk) order.</summary>
     public IReadOnlyList<MsgXdbRecord> Records { get; }
 
     /// <summary>Number of records in the catalogue.</summary>
@@ -39,25 +39,29 @@ public sealed class MsgXdbCatalog
     internal MsgXdbCatalog(MsgXdbRecord[] records)
     {
         Records = records;
-        _map = new Dictionary<uint, MsgXdbRecord>(records.Length);
-        foreach (var r in records)
-            _map[r.Id] = r; // last-wins on duplicate (not expected per spec)
+        _map = new Dictionary<int, string>(records.Length);
+        foreach (MsgXdbRecord r in records)
+            _map[r.CaptionId] = r.Text; // last-wins on duplicates (not expected per spec)
     }
 
     /// <summary>
-    /// Returns the text string for the given <paramref name="id"/>,
+    /// Attempts to look up the caption text for the given <paramref name="captionId"/>.
+    /// Returns <see langword="true"/> and sets <paramref name="text"/> when found;
+    /// returns <see langword="false"/> and sets <paramref name="text"/> to <see langword="null"/> otherwise.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/msg_xdb.md §Lookup model — lookup by caption_id. CONFIRMED.
+    /// </remarks>
+    public bool TryGet(int captionId, out string? text) =>
+        _map.TryGetValue(captionId, out text);
+
+    /// <summary>
+    /// Returns the caption text for the given <paramref name="captionId"/>,
     /// or <see langword="null"/> if not present.
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/formats/misc_data.md §6 Load and lookup model — "keyed on id": CODE-CONFIRMED.
+    /// spec: Docs/RE/formats/msg_xdb.md §Lookup model — lookup by caption_id. CONFIRMED.
     /// </remarks>
-    public string? GetText(uint id) =>
-        _map.TryGetValue(id, out MsgXdbRecord? r) ? r.Text : null;
-
-    /// <summary>
-    /// Attempts to get the record for the given <paramref name="id"/>.
-    /// Returns <see langword="true"/> when found.
-    /// </summary>
-    public bool TryGetRecord(uint id, out MsgXdbRecord? record) =>
-        _map.TryGetValue(id, out record);
+    public string? GetText(int captionId) =>
+        _map.TryGetValue(captionId, out string? t) ? t : null;
 }

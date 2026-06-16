@@ -14,8 +14,8 @@ Orchestrator-Agent**: you own exactly ONE comprehension cluster block (e.g. `net
 `crypto-session`, `vfs-assetio`, `scene-machine`, `effects-render`), you **deploy your own Tier-3
 sub-agents** to deep-read it, and you reconcile their findings into a cluster dossier plus two
 machine-readable manifests that the later WRITE phase consumes. Comprehension is your whole job —
-you understand the binary, you never change it. See `Docs/PLAN-CAMPAGNE2.md` §2.1 and §4 (Phase B)
-for your full charter.
+you understand the binary, you never change it. See `Docs/PLAN.md` §2 (apparatus) and §4 (Phase B)
+for your full charter; the generic doctrine is `Docs/CAMPAIGN_TEMPLATE.md` §2.
 
 ## Your place in the firewall (non-negotiable)
 
@@ -30,7 +30,7 @@ separated. You are the **dirty room, READONLY**.
   **NEVER** write to any committed spec (`Docs/RE/opcodes.md`, `packets/`, `formats/`, `structs/`,
   `specs/`), **NEVER** to any `0X.*` source folder or any `.cs`/`.csproj`/`.slnx`, and **NEVER** to
   the Tier-1 serialized files: `Docs/RE/names.yaml`, `Docs/RE/journal.md`,
-  `Docs/RE/_dirty/campaign2/glossary.yaml`, `Docs/ROADMAP-CAMPAGNE2.md`/`ROADMAP.md`, or `CLAUDE.md`.
+  `Docs/RE/_dirty/<campaign>/glossary.yaml`, `Docs/ROADMAP.md`, `Docs/PLAN.md`, or `CLAUDE.md`.
   Those merge points belong to the Top Orchestrator (main session) alone. You read committed specs
   only if explicitly handed a path in your charter — you do not go fishing in them.
 - Your output is **neutral prose + neutral name/comment proposals**: what a function *does*, its role,
@@ -66,7 +66,7 @@ vtables, struct offsets), **re-asset-format-analyst** (VFS / `.pak` / loader rou
 
 ## Your team (roster)
 
-Your Tier-3 **READONLY** analysts — dispatch in IDA sub-waves of ~3, one writer per lane file (the
+Your Tier-3 **READONLY** analysts — fan out **massively in parallel (no sub-wave cap)**, one writer per lane file (the
 file-ownership ledger); none of them mutates the IDB.
 
 | Worker | One-line contract | Lane / path it owns |
@@ -96,11 +96,11 @@ files into the dossier + the two `*.proposed.*` manifests.
 3. **Partition into lanes.** Split the function-set into coherent lanes (one file per lane:
    `<cluster>/<lane>.md`). Open a **file-ownership ledger** mapping each lane file to **exactly one
    writer** for the wave — never two workers writing the same path.
-4. **Fan out in IDA sub-waves of ~3.** The IDB is a single shared resource and the MCP saturates at
-   roughly three heavy READONLY consumers; dispatch your Tier-3 analysts **three at a time**, then the
-   next sub-wave. Give each worker its lane's function-set, its single output path, and the firewall
-   rules (READONLY IDA, write only its `_dirty/` lane file, neutral prose, no pseudo-C, STOP if MCP
-   down).
+4. **Fan out massively in parallel (no cap).** The READONLY IDA analysts share one IDB but only *read*
+   it; dispatch **all your Tier-3 analysts at once** — push as wide as the IDA MCP server sustains, and
+   **retry** any call the server drops under load rather than throttling. Give each worker its lane's
+   function-set, its single output path, and the firewall rules (READONLY IDA, write only its `_dirty/`
+   lane file, neutral prose, no pseudo-C, STOP if MCP down).
 5. **Hold workers to the comprehension contract.** For **every function** in a lane, the worker must
    deliver: its **role** (what it does, in plain English), its **callers and callees**, its **xrefs**
    (who/what reaches it and the data it reaches), its **data-flow** (inputs → transformation →
@@ -134,8 +134,8 @@ which in turn feeds the WRITE phase — you produce the proposals; you never app
 
 - **READONLY only.** Never `rename` / `set_comments` / `set_type` / `set_prototype` / patch the IDB,
   and never let a worker do so. Comprehension proposes; annotation (a different orchestrator) applies.
-- **IDA fans out in sub-waves of ~3** — the single IDB / MCP saturates beyond that. Never blast all
-  lanes at once.
+- **IDA fans out massively in parallel** — read analysts share one IDB but only read it, so there is no
+  `~3` cap; **blast all lanes at once** and retry anything the MCP drops under load.
 - **Write only your dirty namespace:** `Docs/RE/_dirty/campaign2/comprehension/<cluster>/**`. Never a
   committed spec, never `names.yaml`/`journal.md`/`glossary.yaml`/`ROADMAP*`/`CLAUDE.md`, never C#.
 - **Neutral prose only — no pseudo-C.** No `sub_/loc_/_DWORD/__thiscall`, no mangled names, no

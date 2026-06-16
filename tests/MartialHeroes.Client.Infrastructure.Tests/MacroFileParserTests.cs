@@ -6,7 +6,7 @@ namespace MartialHeroes.Client.Infrastructure.Tests;
 
 /// <summary>
 /// Tests for <see cref="MacroFileParser"/>.
-/// spec: Docs/formats/macro_file.md (project-owned format, not reverse-engineered).
+/// spec: Docs/RE/formats/macro_file.md (project-owned format, not reverse-engineered).
 /// </summary>
 public sealed class MacroFileParserTests
 {
@@ -146,7 +146,7 @@ public sealed class MacroFileParserTests
     [Fact]
     public void ParseContent_DuplicateName_LastDefinitionWins()
     {
-        // spec: Docs/formats/macro_file.md §"Parsing Rules" rule 7
+        // spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 7
         const string input =
             """
             [Attack] F1
@@ -168,7 +168,7 @@ public sealed class MacroFileParserTests
     [Fact]
     public void ParseContent_CrLfLineEndings_ParsedIdentically()
     {
-        // spec: Docs/formats/macro_file.md §"Parsing Rules" rule 2
+        // spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 2
         const string input = "[Move] W\r\nWalkForward\r\n";
 
         var macros = Parser.ParseContent(input);

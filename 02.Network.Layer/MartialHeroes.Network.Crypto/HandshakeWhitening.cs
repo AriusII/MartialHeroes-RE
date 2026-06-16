@@ -52,8 +52,14 @@ public static class HandshakeWhitening
     private static uint ResolveDwordKey()
     {
         byte keyByte = (Selector & XorKeyByte & ComplementMask) == ComplementTriggerValue
-            ? unchecked((byte)~XorKeyByte) // complement branch — not taken for this client's recovered values
-            : XorKeyByte; // used as-is
+            // Complement branch — UNREACHABLE for this client (0x40 & 0x29 & 0x1F = 0 ≠ 1, so the key
+            // is used as-is). The exact 32-bit complement convention a future server would apply when
+            // the test fires (byte-replicated vs. full-dword complement) is NOT recovered — §6.4 states
+            // no other (selector, key) pair occurs in this build, so this low-byte complement is a
+            // documented placeholder, not a verified server form (capture/debugger-pending).
+            // spec: Docs/RE/specs/crypto.md §6.4.
+            ? unchecked((byte)~XorKeyByte)
+            : XorKeyByte; // used as-is for this client
 
         // Little-endian dword pattern "key 00 00 00": the key occupies the low byte of each dword.
         // spec: Docs/RE/specs/crypto.md §6.4 ("little-endian byte pattern 29 00 00 00").

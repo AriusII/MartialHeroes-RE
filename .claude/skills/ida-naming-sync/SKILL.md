@@ -54,9 +54,9 @@ never renames compiler-runtime symbols.
    it differs — the glossary may be pinned to a different build).
 5. **Apply only on explicit go-ahead.** Re-send the snippet with `MODE = "apply"`. It performs the
    `apply`-verdict renames (functions + globals), re-skips runtime symbols and conflicts, and
-   returns the same JSON shape with `applied` counts and any failures. *Decision: IDB writes are
-   serialized — ensure no `ida-rename-batch`/`ida-annotate-batch` run is writing this IDB at the same
-   time. If the SHA-256 differs from `names.yaml`'s pin, do NOT apply (the glossary targets a different
+   returns the same JSON shape with `applied` counts and any failures. *Decision: IDB writes run **in
+   parallel** now — a concurrent `ida-rename-batch`/`ida-annotate-batch` run is fine; just apply and
+   **retry** any failed/conflicting call. If the SHA-256 differs from `names.yaml`'s pin, do NOT apply (the glossary targets a different
    build) — report and stop. Treat `conflict` verdicts as maintainer-reconcile, never force.*
 6. **Pull back.** From the `pull_candidates` in the JSON, write the new/changed names into a dirty
    staging file `Docs/RE/_dirty/names-pulled-<sha8>.yaml` (function/global address → current name).

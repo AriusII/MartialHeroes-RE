@@ -1,0 +1,67 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED field internals; size + slot+name split + trigger are static-HIGH. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: builder writes header 1/13 + appends a fixed 0x12 = 18-byte body)
+#   field split:         confirmed   (caller writes the slot byte first, then strcpy of the new-name C-string one byte
+#                        after: slot@0x00 + 17B name@0x01; sum 1+17 = 18)
+#   wire VALUE semantics: capture/debugger-pending (the exact CP949 length cap the server enforces in the 17-byte field)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: none (the refined cmsg_char_rename.yaml re-confirmed ACCURATE; the 18B name-only 1-13_rename_character.yaml
+#              tombstone is correct)
+
+name: CmsgRenameCharacter
+opcode: 0x1000d           # major 1, minor 13 -> (1 << 16) | 13
+direction: C2S
+size: 18                  # fixed 18-byte (0x12) payload
+spec: packets/cmsg_char_rename.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Rename-character request from the character-select screen. An 18-byte body: a leading slot-index
+  byte then a 17-byte fixed CP949 new-name C-string (NUL-terminated). It is NOT triggered by a
+  slot-grid button -- it is sent from the rename dialog's confirm button after the new-name textbox
+  passes validation (charset + min length 2). The body is a contiguous 1 + 17 run (slot + name).
+  Server replies S2C 3/6 RenameCharResult (and a 3/7 manage-result subtype-1 refresh).
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 18.
+fields:
+  - { name: SlotIndex, type: u8 }            # 0x00  slot being renamed (the currently selected slot)
+  - { name: NewName,   type: "bytes[17]" }   # 0x01  new character name, CP949 C-string, NUL-terminated within the buffer
+
+notes: |
+  Static analysis only; no capture. The rename dialog's confirm control validates the new name,
+  copies the slot byte then the new-name C-string into a 18-byte buffer, and emits exactly 18 bytes.
+  Frame = 8-byte header + 18 = 26 bytes on the wire. Width sum check: 1 + 17 = 18.
+
+    0x00 (1B)  SlotIndex : the slot being renamed (the currently selected slot). STATIC HIGH --
+                           the last-selected slot byte is written first.
+    0x01 (17B) NewName   : the new character name as a fixed 17-byte buffer holding a CP949 (Korean
+                           code page 949) C-string, NUL-terminated. The new-name bytes are copied
+                           verbatim from the textbox (a raw byte copy, NOT re-encoded at send time);
+                           CP949 is the input/IME encoding. Usable name is <= 16 chars + terminator.
+                           Decode as a fixed [InlineArray] blob, trim at the first NUL, then decode
+                           CP949 -- never a managed string on the wire. STATIC HIGH.
+
+  TRIGGER (load-bearing): rename is reached from the rename dialog's confirm button, not a slot-grid
+  button. (How the rename dialog itself is opened was not resolved this session -- its launching
+  control is an open item.)
+
+  NAME VALIDATION (client-side, before send; useful for the server too): a charset/empty check
+  (empty/invalid -> a validation error message) then a minimum length of 2 characters; the new name
+  is also compared against an empty sentinel. Allowed characters match the 1/6 create name field:
+  ASCII lowercase a-z + digits 0-9 + CP949 double-byte Hangul. On pass, the client clears the rename
+  dialog and sets its net-busy latch.
+
+  SEQUENCE: client sends 1/13 -> server replies S2C 3/6 RenameCharResult (success carries the applied
+  name). A rename outcome also routes through the 8-byte manage-result handler (3/7, subtype 1) to
+  refresh the slot name -- see packets/3-4_char_manage_result.yaml.
+
+  UNKNOWNS (capture-only): the exact CP949 length cap the server enforces within the 17-byte field;
+  how the rename dialog is opened; the inbound rename-result decode beyond the spec above.
+
+  RELATED: 1/0 logout, 1/6 create, 1/7 manage/select (+delete-overload), 1/9 enter, 1/14 slot-move.
+  All gated by the single select-window net-busy latch.
+
+  UNBLOCKS: Client.Application RenameCharacter use-case (reply 3/6 / 3/7 subtype 1).

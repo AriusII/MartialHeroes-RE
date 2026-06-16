@@ -11,9 +11,12 @@ namespace MartialHeroes.Network.Protocol.Routing;
 /// frame buffer — no copies, no boxing, no allocation. Each method corresponds to one fully-specced
 /// fixed-size packet. Unspecced opcodes are surfaced raw via <see cref="OnUnhandled"/>.
 /// <para>
-/// TODO: migrate this seam to <c>MartialHeroes.Network.Abstractions.IPacketHandler</c> /
-/// <c>IFrameSink</c> once that project defines it (it currently contains only the placeholder
-/// Class1.cs). When it does, the only legal downward reference added is Protocol -&gt; Abstractions.
+/// NOTE: <c>MartialHeroes.Network.Abstractions</c> already defines its own
+/// <c>IPacketHandler</c> / <c>IFrameSink</c> / <c>IOutboundPacketSink</c> seam (plus the
+/// Session / Transport / Lobby contracts). The open work is the actual wiring decision — whether
+/// this Protocol-local interface unifies onto that one — which entails the legal downward reference
+/// Protocol -&gt; Abstractions and a layering call on where the typed packet structs live. Deferred
+/// to the architecture phase; this seam stays Protocol-local until then.
 /// </para>
 /// </remarks>
 public interface IPacketHandler

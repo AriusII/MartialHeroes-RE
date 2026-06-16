@@ -1,5 +1,13 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# CAPTURE-UNVERIFIED VALUE semantics; the fixed 16-byte body size is control-flow CONFIRMED. capture_verified: false.
+#
+# VERIFICATION (campaign10/E re-verify):
+#   routing+size:        confirmed   (control-flow: builder writes header 2/142 + appends a fixed 0x10 = 16-byte body)
+#   body shape:          confirmed   (Target i32 @0x00, Op u8 @0x04 computed as (widget action id - 7), pad @0x05,
+#                        Amount i64 @0x08; sent only when Amount > 0)
+#   wire VALUE semantics: capture/debugger-pending (the Op enum: which value = deposit vs withdraw vs move)
+#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   conflicts: none (2-142_storage_op.yaml re-confirmed; size 16 confirmed, field meanings remain static)
 
 name: CmsgStorageOp
 opcode: 0x2008e           # major 2 (GameAction), minor 142 -> (2 << 16) | 142

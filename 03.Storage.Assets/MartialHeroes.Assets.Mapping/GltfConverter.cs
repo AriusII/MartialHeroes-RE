@@ -10,11 +10,24 @@ namespace MartialHeroes.Assets.Mapping;
 /// to a self-contained GLB (binary glTF 2.0) stream.
 ///
 /// Coordinate-system conventions handled:
-///   Legacy format uses a left-handed Y-up coordinate system (not formally confirmed by spec,
-///   but matches the D3D9 default). glTF 2.0 mandates right-handed Y-up.
-///   Conversion: negate the X component of every position and normal to flip handedness.
-///   spec: Docs/RE/formats/mesh.md §Vertex list — pos_x/y/z: CONFIRMED positions.
-///   glTF 2.0 spec §3.4 (coordinate system): right-handed, Y-up, -Z forward.
+///   Legacy format uses a left-handed Y-up coordinate system (matches D3D9 default).
+///   glTF 2.0 mandates right-handed Y-up.
+///
+///   STATIC MESH path (<see cref="WriteGlb(StaticMesh,Stream)"/>):
+///     Handedness flip: negate the X component of every position — a standalone static mesh
+///     with no skeleton to mirror against. Winding swap (i1↔i2) restores CCW front faces.
+///     spec: Docs/RE/formats/mesh.md §Vertex list — pos_x/y/z: CONFIRMED positions.
+///
+///   SKINNED MESH path (<see cref="WriteGlb(SkinnedMesh,Skeleton?,Stream,AnimationClip[])"/>):
+///     Handedness flip: uniform Z-negate (x,y,z) → (x,y,−z), applied identically to bone
+///     bind translations, mesh vertex positions, and keyframe translations. Quaternions map
+///     as (x,y,z,w) → (−x,−y,z,w) (negate the two components orthogonal to Z).
+///     Winding swap (i1↔i2) still required — Z-negate also has det = −1.
+///     spec: Docs/RE/specs/skinning.md §7 'no axis negation inside skinning math'; §8(b)
+///       'Pick one handedness conversion — the world Z-negate — and apply it uniformly'.
+///     Mirrors Helpers/WorldCoordinates.SkinToGodot / SkinQuatToGodot in the Godot layer.
+///     NOTE: the static mesh X-negate is INTENTIONALLY DIFFERENT from the skinned Z-negate.
+///     See skinning.md §8(b) for rationale. Do not unify without a deliberate spec decision.
 ///
 ///   UV origin: the parser already stores V = 1.0 - v_on_disk so the UV origin is
 ///   bottom-left, which matches glTF / OpenGL convention. No further V-flip is needed.
@@ -341,8 +354,10 @@ public static class GltfConverter
     private static int Align4(int value) => (value + 3) & ~3;
 
     /// <summary>
-    /// Computes min/max of the original (non-X-flipped) positions.
-    /// The caller negates X for the glTF accessor min/max.
+    /// Computes min/max of the original (pre-conversion) positions.
+    /// The caller is responsible for applying the handedness conversion (X-negate for
+    /// static meshes; Z-negate for skinned meshes) to the min/max values before emitting
+    /// the glTF accessor.
     /// </summary>
     private static void ComputePositionMinMax(
         Vec3[] positions,
@@ -622,6 +637,15 @@ public static class GltfConverter
     /// <summary>
     /// Computes the inverse bind-pose world transform for each bone.
     /// Returns a flat array of <c>boneCount × 16</c> floats in column-major (glTF) order.
+    ///
+    /// Implementation note — scale omission:
+    ///   The spec (skinning.md §5.3/§9) states per-mesh and per-node scales are generally
+    ///   non-unit and must be applied. However, for this glTF dev-tool export, scale is
+    ///   intentionally omitted (assumed 1.0) because the parsed <see cref="Skeleton"/> type
+    ///   does not carry per-node scale fields — scale values live on the runtime skin object,
+    ///   not in the .bnd file. A future importer feeding these GLBs into Godot Skeleton3D
+    ///   would need the parser to expose scale before this can be corrected.
+    ///   spec: Docs/RE/specs/skinning.md §3.1 quaternion world walk; §5.3/§9 per-mesh/node scale.
     /// </summary>
     private static float[] ComputeInverseBindMatrices(Skeleton skeleton)
     {
@@ -653,20 +677,18 @@ public static class GltfConverter
 
             // Local transform: Translation + Rotation (XYZW).
             // spec: Docs/RE/formats/mesh.md §BndBone — local_translation @ +8, local_rotation XYZW @ +20: CONFIRMED.
-            // Coordinate system: same left-handed → right-handed flip as positions (negate X).
-            // spec: Docs/RE/formats/mesh.md §Vertex list — pos_x: CONFIRMED (same convention applies to bones).
+            // Uniform Z-negate convention: (x,y,z) → (x,y,−z); quaternion (x,y,z,w) → (−x,−y,z,w).
+            // spec: Docs/RE/specs/skinning.md §7 'No axis negation or mirroring happens inside the
+            //   skinning math'; §8(b) 'Pick one handedness conversion — the world Z-negate — and apply
+            //   it uniformly to bone bind translations, mesh vertex positions, AND keyframe translations.'
             // glTF 2.0 spec §3.4: right-handed Y-up.
-            // For translation: negate X component.
-            // For rotation quaternion (XYZW): in left-handed → right-handed conversion,
-            //   negate X and Z quaternion components (equivalent to negating the axis perpendicular to X).
-            //   Convention: negate X and Z of quaternion to match handedness flip on X axis.
-            float tx = -b.Translation.X;
+            float tx = b.Translation.X;
             float ty = b.Translation.Y;
-            float tz = b.Translation.Z;
+            float tz = -b.Translation.Z;
 
             float qx = -b.Rotation.X;
-            float qy = b.Rotation.Y;
-            float qz = -b.Rotation.Z;
+            float qy = -b.Rotation.Y;
+            float qz = b.Rotation.Z;
             float qw = b.Rotation.W;
 
             // Normalise quaternion.
@@ -835,15 +857,18 @@ public static class GltfConverter
 
         byte[] buf = new byte[bufSize];
 
-        // ---- Positions (X-flipped) ----
-        // spec: Docs/RE/formats/mesh.md §Vertex list — pos_x: CONFIRMED. glTF 2.0 §3.4.
+        // ---- Positions (Z-negated) ----
+        // Skinned meshes use the uniform Z-negate convention: (x,y,z) → (x,y,−z).
+        // spec: Docs/RE/specs/skinning.md §7 'No axis negation … skinning math'; §8(b) 'world Z-negate
+        //   applied uniformly to bone bind translations, mesh vertex positions, AND keyframe translations.'
+        // glTF 2.0 spec §3.4: right-handed Y-up.
         int cursor = posOff;
         for (int i = 0; i < vertexCount; i++)
         {
             Vec3 p = positions[i];
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), -p.X);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), p.X);
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), p.Y);
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), p.Z);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), -p.Z);
             cursor += 12;
         }
 
@@ -884,7 +909,8 @@ public static class GltfConverter
         }
 
         // ---- Indices (winding-reversed) ----
-        // Negate X reverses winding; swap i1↔i2 to restore CCW in glTF.
+        // Z-negate (det = −1) reverses winding; swap i1↔i2 to restore CCW front faces in glTF.
+        // spec: Docs/RE/specs/skinning.md §8(b) Z-negate convention.
         // spec: Docs/RE/formats/mesh.md §Index list: CONFIRMED. glTF 2.0 §3.7.2.1.
         cursor = idxOff;
         for (int tri = 0; tri < indexCount / 3; tri++)
@@ -947,9 +973,9 @@ public static class GltfConverter
         Skeleton skeleton,
         out List<AnimPart> parts)
     {
-        parts = new List<AnimPart>();
+        parts = [];
         if (clips is null || clips.Length == 0)
-            return Array.Empty<byte>();
+            return [];
 
         // Build a set of valid bone self_ids for quick lookup.
         var validBoneIds = new HashSet<byte>(skeleton.Bones.Length);
@@ -974,7 +1000,7 @@ public static class GltfConverter
         }
 
         if (totalSize == 0)
-            return Array.Empty<byte>();
+            return [];
 
         byte[] buf = new byte[totalSize];
         int cursor = 0;
@@ -1008,15 +1034,16 @@ public static class GltfConverter
 
                 int thisTransOff = cursor;
                 // Translation accessor (output).
-                // Coordinate flip: negate X component.
+                // Uniform Z-negate convention: (x,y,z) → (x,y,−z).
+                // spec: Docs/RE/specs/skinning.md §8(b) 'apply [Z-negate] uniformly … keyframe translations.'
                 // spec: Docs/RE/formats/animation.md §Keyframe record — translation_x/y/z: CONFIRMED.
                 // glTF 2.0 §3.4: right-handed.
                 for (int k = 0; k < kc; k++)
                 {
                     Vec3 tr = track.Keyframes[k].Translation;
-                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), -tr.X);
+                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), tr.X);
                     BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), tr.Y);
-                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), tr.Z);
+                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), -tr.Z);
                     cursor += 12;
                 }
 
@@ -1026,7 +1053,9 @@ public static class GltfConverter
                 // Rotation accessor (output), quaternion XYZW → glTF stores XYZW too.
                 // spec: Docs/RE/formats/animation.md §Keyframe record — rotation XYZW: CONFIRMED.
                 // glTF 2.0 §Animations: rotation accessor stores XYZW (scalar W last).
-                // Coordinate flip for quaternion: negate X and Z (same as bone transforms).
+                // Uniform Z-negate convention: quaternion (x,y,z,w) → (−x,−y,z,w).
+                // spec: Docs/RE/specs/skinning.md §8(b) 'under [Z-negate] a quaternion (x,y,z,w)
+                //   maps to (−x,−y,z,w)'.
                 // Note on interpolation: glTF LINEAR interpolation for quaternion channels is
                 //   defined by the glTF spec as nlerp (not strict slerp). The original engine
                 //   used slerp (spec: Docs/RE/formats/animation.md §Rotation interpolation: CONFIRMED).
@@ -1036,8 +1065,8 @@ public static class GltfConverter
                 {
                     Quat q = track.Keyframes[k].Rotation;
                     float qx = -q.X;
-                    float qy = q.Y;
-                    float qz = -q.Z;
+                    float qy = -q.Y;
+                    float qz = q.Z;
                     float qw = q.W;
                     // Normalise
                     float qlen = MathF.Sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
@@ -1101,7 +1130,8 @@ public static class GltfConverter
         List<AnimPart> animParts,
         AnimationClip[]? clips)
     {
-        // Compute position min/max (with X-flip applied).
+        // Compute position min/max (original space; Z-negate is applied by the caller's min/max expr).
+        // spec: Docs/RE/specs/skinning.md §8(b) Z-negate convention.
         ComputePositionMinMax(positions, out float minX, out float minY, out float minZ,
             out float maxX, out float maxY, out float maxZ);
 
@@ -1191,16 +1221,19 @@ public static class GltfConverter
                     children.Add(boneNodeIndex[j]);
             }
 
-            // Apply coordinate-system flip to bone translation.
+            // Apply uniform Z-negate convention to bone translation: (x,y,z) → (x,y,−z).
+            // spec: Docs/RE/specs/skinning.md §8(b) 'apply [Z-negate] uniformly to bone bind translations'.
             // spec: Docs/RE/formats/mesh.md §BndBone — local_translation @ +8: CONFIRMED.
-            float bTx = -b.Translation.X;
+            float bTx = b.Translation.X;
             float bTy = b.Translation.Y;
-            float bTz = b.Translation.Z;
+            float bTz = -b.Translation.Z;
 
-            // Apply quaternion handedness flip.
+            // Apply uniform Z-negate convention to bone rotation: (x,y,z,w) → (−x,−y,z,w).
+            // spec: Docs/RE/specs/skinning.md §8(b) 'under [Z-negate] a quaternion (x,y,z,w)
+            //   maps to (−x,−y,z,w)'.
             float bQx = -b.Rotation.X;
-            float bQy = b.Rotation.Y;
-            float bQz = -b.Rotation.Z;
+            float bQy = -b.Rotation.Y;
+            float bQz = b.Rotation.Z;
             float bQw = b.Rotation.W;
             float qlen = MathF.Sqrt(bQx * bQx + bQy * bQy + bQz * bQz + bQw * bQw);
             if (qlen > 1e-6f)
@@ -1396,7 +1429,9 @@ public static class GltfConverter
             sb.Append('{');
             sb.Append($"\"bufferView\":{bvPos},\"byteOffset\":0,");
             sb.Append($"\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC3\",");
-            sb.Append($"\"min\":[{F(-maxX)},{F(minY)},{F(minZ)}],\"max\":[{F(-minX)},{F(maxY)},{F(maxZ)}]");
+            // Z-negate: emitted positions are (x,y,−z), so accessor min/max reflect that.
+            // spec: Docs/RE/specs/skinning.md §8(b) Z-negate convention.
+            sb.Append($"\"min\":[{F(minX)},{F(minY)},{F(-maxZ)}],\"max\":[{F(maxX)},{F(maxY)},{F(-minZ)}]");
             sb.Append("},");
             sb.Append(
                 $"{{\"bufferView\":{bvUv},\"byteOffset\":0,\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC2\"}},");
@@ -1434,7 +1469,9 @@ public static class GltfConverter
             sb.Append('{');
             sb.Append($"\"bufferView\":{bvPos},\"byteOffset\":0,");
             sb.Append($"\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC3\",");
-            sb.Append($"\"min\":[{F(-maxX)},{F(minY)},{F(minZ)}],\"max\":[{F(-minX)},{F(maxY)},{F(maxZ)}]");
+            // Z-negate: emitted positions are (x,y,−z), so accessor min/max reflect that.
+            // spec: Docs/RE/specs/skinning.md §8(b) Z-negate convention.
+            sb.Append($"\"min\":[{F(minX)},{F(minY)},{F(-maxZ)}],\"max\":[{F(maxX)},{F(maxY)},{F(-minZ)}]");
             sb.Append("},");
             sb.Append(
                 $"{{\"bufferView\":{bvUv},\"byteOffset\":0,\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC2\"}},");

@@ -29,16 +29,16 @@ file `data/cursor/game.ver` (28 bytes, 7 little-endian u32 fields). It pins the 
 token value (Section 3.3) and is the only real-byte corroboration in this analysis. It is **not** a
 network capture, so it does not validate any wire layout; it validates a single derived constant.
 
-`runtime_observed: login blob (1/6)`. **A live debugger session drove a real login through the
+`runtime_observed: login blob (1/4)`. **A live debugger session drove a real login through the
 client and read the assembled login blob out of the packet buffer at build time** — a runtime
 (code-confirmed) observation of the live process, not a network capture. It pins the login blob's
 field order, the **u32 little-endian** length-prefix width, the **NUL-inclusive** prefixed lengths,
 the three field capacities (account / password / PIN), and the identity of the previously-unnamed
 optional field as the **second-password / PIN**. It also re-confirms the plaintext-header /
 encrypted-payload framing rule owned by `specs/crypto.md`. These claims are graded RUNTIME-CONFIRMED
-below; they carry **no addresses** — only observed behaviour and observed byte layout. (Note: this
-runtime read resolves the *login blob structure* only; it does **not** resolve the 1/6 opcode
-collision with character-create — see Section 4.2 and Section 9.)
+below; they carry **no addresses** — only observed behaviour and observed byte layout. (The login
+credential rides the secure **1/4** auth-reply; **1/6 is character-create only** — there is no
+shared login/create opcode and no collision. See Section 4.2 and Section 9.)
 
 | Claim | Confidence | Basis |
 |---|---|---|
@@ -49,16 +49,19 @@ collision with character-create — see Section 4.2 and Section 9.)
 | The full login/char/enter-game flow runs **inside the game client process itself** in this build (no separate lobby/online child executables are spawned). | HIGH | Static — no references to sibling lobby/online executables as spawned children. |
 | Overall ordered flow (Section 1) and its UI/net state transitions. | MEDIUM–HIGH | Static behavioral read of the login window state machine. |
 | The `0/0 → 1/4` RSA handshake and credential staging. | HIGH (cited) | `specs/crypto.md` — not re-derived here. |
-| Login blob (1/6) starts with sub-opcode byte **`0x2B` (43)** then a length-prefixed account string and a length-prefixed **second-password / PIN** string; the account password travels only via the RSA 1/4 reply. | HIGH (runtime) | RUNTIME-CONFIRMED — the assembled blob was read out of the live client's packet buffer; field order, prefix width, and field identities observed directly (no addresses). |
+| Login blob (rides the secure 1/4) starts with sub-opcode byte **`0x2B` (43)** then a length-prefixed account string and a length-prefixed **second-password / PIN** string; the account password travels via the RSA 1/4 ciphertext. | HIGH (runtime) | RUNTIME-CONFIRMED — the assembled blob was read out of the live client's packet buffer; field order, prefix width, and field identities observed directly (no addresses). |
 | Login blob length-prefix width = **u32 little-endian**, and each string's prefixed length **includes its trailing NUL**. | HIGH (runtime) | RUNTIME-CONFIRMED — observed in the assembled bytes. |
 | Login field capacities: account **< 20** chars, password **< 17** (staged in an exactly-17-byte zero-padded buffer), second-password / PIN **< 5** (≤ 4 chars + NUL). | HIGH (runtime) | RUNTIME-CONFIRMED — observed validation bounds + the staged buffer size. |
+| PIN modal scrambles its on-screen keypad on every show: a time-seeded shuffle of a 10-digit permutation (anti-keylogger); PIN is masked, capped at 4 digits, and becomes the optional second-password blob field. | HIGH | Static control-flow recovery (recovered via static RE, CAMPAIGN 9); see §4.2a. |
 | Server-list record (8 bytes) decodes to **{server id, status, load, open-time}** with the load thresholds and status sentinels of Section 2.1. | MEDIUM–HIGH | Static — recovered from the server-list render path plus a debug format literal; the open-time packing and full status enum are **capture-unverified**. |
 | Character-list (3/1) shape: 3-byte header + per-slot **981-byte** records gated by a slot bitmask. | MEDIUM–HIGH | 981-byte stride is dispatch-path-confirmed; field internals capture-unverified. |
 | The character list supports a **maximum of 5 slots** (slot indices 0..4). | HIGH (static) | The parse loop is a **hard, bounded iteration of exactly 5**, not an open-ended scan — promoted from "inferred ≤5" to a fixed constant. |
+| Character-select C2S create = **1/6** (52-byte body), slot-select = **1/7** (2-byte body). | HIGH (static) | Static control-flow recovery (recovered via static RE, CAMPAIGN 9); see §3.6 and `specs/frontend_scenes.md` §4 / §8. |
 | Enter-game request (1/9) = **40-byte** body; slot index at +0; version token elsewhere in the buffer. | MEDIUM | 40-byte total + slot@0 are firm; token offset capture-unverified. |
 | Enter-game version token derivation `10 × versionField + 9`, and its concrete value **21149** for the sampled `game.ver`. | HIGH (sample) | `sample_verified` — computed from the real on-disk `data/cursor/game.ver` field value 2114. |
 | Enter-game ack (3/5) = **44-byte** block; name@0, billing u32 @ +28, char-count u32 @ +40. | MEDIUM–HIGH | 44-byte total dispatch-confirmed; block internals partly capture-unverified. |
-| Char-spawn result (3/7) = **16-byte** block; result + slot + three spawn-param u32s. | MEDIUM | 16-byte total dispatch-confirmed; param meaning capture-unverified. |
+| Char-manage result (3/7) = **8-byte** block; result + subtype + ready-time; decrements the account char-count on a delete-confirm. | MEDIUM–HIGH | 8-byte total dispatch-confirmed (front-end deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed); subtype internals capture-unverified. |
+| Char enter-into-world bridge (3/14) = **16-byte** block; spawn-confirm that re-enters the enter-builder. The local-player **world** spawn is driven by 4/1, not 3/14. | MEDIUM | 16-byte total dispatch-confirmed (front-end deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed); param meaning capture-unverified. |
 | GameState transitions: char-list → select scene; enter-game ack → in-world. | MEDIUM–HIGH | Static behavioral. |
 
 **Naming authority:** the legacy binary's internal handler *names* disagree with both the dispatch
@@ -91,7 +94,8 @@ The ordered lifecycle is:
    of the login blob** (Section 4.2); it is *not* the account password (the password is staged
    separately as the RSA 1/4 plaintext). The front-end shape of this modal is owned by
    `specs/frontend_scenes.md` §1 (its "Second-password / PIN" subsection); this spec owns where the
-   PIN lands on the wire.
+   PIN lands on the wire. The modal's **anti-keylogger scrambled keypad** and the PIN → wire hand-off
+   mechanism are described in §4.2a.
 
 2. **Server-list fetch (lobby).** A background worker performs a **synchronous, blocking** connect
    to the lobby on **port 10000** (Section 2.1), reads an 8-byte frame wrapper plus an LZ4-compressed
@@ -126,9 +130,11 @@ The ordered lifecycle is:
 9. **Enter game.** The player confirms a slot. The client sends `1/9 CmsgEnterGameRequest`
    (40-byte body, Section 3) and **caches the chosen slot's character record locally** for the world
    load. The server answers `3/5 SmsgEnterGameAck` (44 bytes) → the client transitions to the
-   **in-world game state**. A subsequent `3/7 SmsgCharSpawnResult` (16 bytes) then drives the actual
-   spawn into the world, consuming the cached character record. Ongoing world state thereafter is
-   maintained by the major-5 Push family (out of scope here).
+   **in-world game state**. The local player's actual **world** spawn is then driven by the
+   `4/1 SmsgGameStateTick` world-entry snapshot, which consumes the cached character record. (A
+   `3/14 SmsgCharSpawnResponse` (16 bytes) may also arrive as an enter-into-world *bridge* that
+   re-enters the enter-builder, but it is **not** the local-player world spawn.) Ongoing world state
+   thereafter is maintained by the major-5 Push family (out of scope here).
 
 ### 1.1 Net-state progression (summary)
 
@@ -356,12 +362,39 @@ On confirming a slot, before/around sending `1/9`, the client:
   the **880-byte character descriptor**, the **96-byte stats block**, and a couple of trailing
   name/flag bytes, plus a relation flag derived from the slot flag bits.
 
-The actual spawn is then driven by **`3/7 SmsgCharSpawnResult`** (16-byte payload, Section 5.3),
-which consumes the **cached descriptor** to materialize the local player in the world. After spawn,
-the world entity is maintained by the major-5 Push handlers (out of scope; see `opcodes.md` 5/x).
+The local player's **actual world spawn** is then driven by **`4/1 SmsgGameStateTick`** (the
+world-entry snapshot), which consumes the **cached descriptor** to materialize the local player in
+the world. A `3/14 SmsgCharSpawnResponse` (16-byte payload, Section 5.6) may also arrive as an
+enter-into-world *bridge* that re-enters the enter-builder, but it is **not** the local-player world
+spawn. After spawn, the world entity is maintained by the major-5 Push handlers (out of scope; see
+`opcodes.md` 5/x).
 
 > **Enter-game, in one line:** send `1/9` → cache the chosen slot's descriptor locally → on `3/5`,
-> transition to the in-world state → on `3/7`, spawn into the world from the cached descriptor.
+> transition to the in-world state → on the `4/1` world-entry snapshot, spawn the local player into
+> the world from the cached descriptor.
+
+### 3.6 Character-select C2S senders (create / slot-select) — cross-reference
+
+The character-select scene emits two additional C2S messages whose **field layouts are authoritative
+in their own `packets/*.yaml`**; this is a brief cross-reference only (see also
+`specs/frontend_scenes.md` §4 / §8):
+
+- **Create character — `1/6 CmsgCreateCharacter` (52-byte body).** Sent when the player confirms the
+  new-character form (after the client-side name gates: a min-length-2 charset rule allowing
+  lowercase ASCII + digits + CP949 double-byte pairs, a banned-word filter, and an in-flight
+  double-submit guard). The 52-byte body carries the CP949 name at offset 0 plus appearance and
+  point-buy stat fields. Authoritative field spec: `packets/cmsg_char_create.yaml`. (The legacy
+  `packets/1-6_login_or_create.yaml` is a **resolved tombstone** — opcode 1/6 is character-create
+  only and never the login credential, which rides the secure `1/4`; see §4.2.)
+- **Select / pre-stage a slot — `1/7` (2-byte body).** A short two-byte select/pre-stage message
+  emitted from the per-slot select action before the enter-world request. Authoritative field spec:
+  `packets/cmsg_char_select.yaml` (the legacy `packets/1-7_select_character.yaml` is a superseded
+  tombstone that points there).
+
+> Both senders are gated by the select screen's single net-busy guard, so only one character
+> operation is ever in flight. The full per-field byte tables live in those packet YAMLs — they are
+> the single source of truth; this spec does not restate them. The actual world-entry request is the
+> separate `1/9` enter-game message (§3.3).
 
 ---
 
@@ -384,32 +417,37 @@ The secure-context builder takes the **TAB-delimited form string** and:
 > the login-blob builder (§4.2). The two-stage account → blob pipeline is observed against the live
 > client, not just inferred.
 
-### 4.2 Login packet body (1/6, C2S)
+### 4.2 Login packet body (secure 1/4, C2S)
 
-`opcodes.md` catalogs the account-login message as **`1/6 CmsgLoginRequest`** (a `~52-byte` form-
-family blob). The body is assembled in this order:
+> **RESOLVED -- prior '1/6' attribution was the false premise.** The deep workflow-spine analysis
+> plus a live debugger login establish that the login credential is **NOT** a 1/6 message: it rides
+> the **secure `1/4`** frame, and **1/6 is character-create only**. `opcodes.md` now catalogs the
+> credential carrier on the `1/4` row (`packets/login.yaml`); `1/6` is `CmsgCreateCharacter`
+> (`packets/cmsg_char_create.yaml`). The plaintext pre-image below is written into the `1/4`
+> payload ahead of the RSA ciphertext (see `specs/crypto.md` section 6.6). The body is assembled in
+> this order:
 
 | Order | Bytes | Field | Notes |
 |---|---|---|---|
 | 1 | 1 (u8) | Sub-opcode = **`0x2B` (43)** | Literal first payload byte. |
 | 2 | 4 (u32 LE) + N | Account string + trailing NUL | A **u32 little-endian length prefix** followed by the account bytes including the trailing NUL; the prefixed length **counts the NUL** (so prefix = `strlen(account) + 1`). |
 | 3 | 4 (u32 LE) + N (optional) | **Second-password / PIN** + trailing NUL | Same encoding: a **u32 little-endian length prefix** that **includes the trailing NUL**, then the PIN bytes + NUL. Present when the second-password / PIN feature is active (the optional middle token of the TAB form, §4.1). **This is the field a prior version of this spec called the "optional auxiliary string" — runtime observation identifies it as the PIN / second-password.** |
-| — | (separate buffer, NOT in this body) | **Password / credential** | Copied into an **exactly-17-byte, zero-padded** buffer and recorded as the RSA plaintext; conveyed only by the `1/4` handshake reply. Never serialized into this blob. |
+| — | (separate region, NOT in this plaintext pre-image) | **Password / credential** | Copied into an **exactly-17-byte, zero-padded** buffer and recorded as the RSA plaintext; conveyed only by the `1/4` RSA ciphertext. Never serialized into the plaintext blob. |
 
 **Field identity (runtime-confirmed).** A live debugger session drove a real login and read the
 assembled blob out of the client's packet buffer. The previously-unnamed optional string **is the
 second-password / PIN** (the value collected by the second-password input — see §1 step 1a and
 `specs/frontend_scenes.md` §1). The login form therefore has **three** inputs: the account, the
-account password (→ RSA 1/4), and the PIN (→ this optional blob field). The PIN is a first-class
-input concept in the client (an input/name object carries an explicit "is-PIN" flag), which
-corroborates that the optional field is the PIN rather than an arbitrary auxiliary string.
+account password (→ RSA 1/4 ciphertext), and the PIN (→ this optional blob field). The PIN is a
+first-class input concept in the client (an input/name object carries an explicit "is-PIN" flag),
+which corroborates that the optional field is the PIN rather than an arbitrary auxiliary string.
 
 **Field capacities (runtime-confirmed).** The build validates, and the staged buffers size, as:
 
 | Field | Capacity rule | Notes |
 |---|---|---|
 | Account | length **≥ 2** and **< 20** characters | Length-prefixed into the blob (incl. NUL). |
-| Password | length **≥ 2** and **< 17** characters | **Not** in the blob; copied into an **exactly-17-byte zero-padded buffer** held for the RSA 1/4 send. |
+| Password | length **≥ 2** and **< 17** characters | **Not** in the plaintext blob; copied into an **exactly-17-byte zero-padded buffer** held for the RSA 1/4 ciphertext. |
 | Second-password / PIN | length **< 5** characters (so **≤ 4** chars + a NUL) | Length-prefixed into the optional blob field (incl. NUL). Numeric in practice. |
 
 **Length-prefix encoding (runtime-confirmed).** Each length-prefixed string is `[u32 little-endian
@@ -417,22 +455,79 @@ length][bytes…][NUL]`, and the **u32 length includes the trailing NUL byte**. 
 account serializes as prefix `0x00000008` followed by 7 bytes + NUL; a 4-character PIN serializes as
 prefix `0x00000005` followed by 4 bytes + NUL.
 
-So the wire login body is `[0x2B] [u32len account\0] ([u32len PIN\0])`. The **password is never in
-this blob** — it travels only via the RSA `1/4` reply. This is consistent with `specs/crypto.md`
-(RSA plaintext = the staged login credential string itself).
+So the wire login pre-image is `[0x2B] [u32len account ] ([u32len PIN ])`, written into the
+secure **`1/4`** payload ahead of the RSA ciphertext. The **password is never in this pre-image** --
+it is the RSA plaintext `M` (a fixed 17-byte zero-padded buffer) encrypted into the same `1/4`
+payload. This is consistent with `specs/crypto.md` (RSA plaintext = the staged login credential
+string itself) and `packets/login.yaml` (the credential carrier).
 
 > **Resolved (was an open item):** the identity of the optional middle field — it is the
 > **second-password / PIN** — and the length-prefix width (**u32 LE**, NUL-inclusive). These were
 > previously marked UNVERIFIED; a runtime read of the live client's assembled blob resolves them.
 >
-> **Still open:** this runtime read confirms the **login-blob structure** (reading (A) of the 1/6
-> collision) only. It does **NOT** resolve whether the **character-create** send (reading (B)) shares
-> opcode 1/6, nor where `(major:minor)` is stamped for the login blob (the builder writes a `0/0`
-> version pair; the `1/6` stamping must occur downstream in the send wrapper, or the `1/6`
-> attribution is the known naming inconsistency of Section 6). `opcodes.md` still flags the
-> `~52-byte` size as an estimate, and **no `packets/*.yaml` is authored for 1/6 in this spec** —
-> the catalog row and the 1/6 collision stay as recorded pending capture (see Section 7 and
-> Section 9, and `packets/1-6_login_or_create.yaml`).
+> **Resolved — the credential carrier is `1/4`, not `1/6`.** The front-end deep-fidelity pass
+> (campaign4/frontend-deep), dispatch-table-confirmed, settles that the login credential rides the
+> secure `1/4` auth-reply (the reactive answer to the inbound `0/0` key exchange) and that **`1/6` is
+> character-create only** — there is no shared login/create opcode and no collision. The two builders
+> are distinct: the secure auth-reply builder stamps `major=1 / minor=4`; a separate fixed-body
+> sender stamps `major=1 / minor=6` for the 52-byte create body. Authored field specs:
+> `packets/login.yaml` (the `1/4` credential carrier) and `packets/cmsg_char_create.yaml` (the `1/6`
+> 52-byte create body). See Section 6 and Section 9 item 4.
+
+### 4.2a PIN modal — scrambled keypad and the PIN → wire hand-off
+
+This subsection documents the **mechanism** by which the second-password / PIN of §1a is collected
+and how its value reaches the optional blob field of §4.2. It is the recovered behaviour behind the
+previously-noted "optional second-password blob" / `isPin` gap. Recovered via static RE, CAMPAIGN 9
+(static control-flow recovery, no addresses, no debugger).
+
+**Anti-keylogger scrambled keypad (per-show).** The PIN modal presents a 10-digit on-screen keypad
+(digits 0–9) whose **on-screen positions are reshuffled every time the modal opens**, so a digit's
+screen location is unpredictable from one show to the next (defeating fixed-position keyloggers /
+shoulder-surfing). The scramble works as follows, on each show:
+
+1. **Seed the random generator with a 64-bit wall-clock time** (`srand` seeded from a 64-bit time
+   value) — a fresh seed per show.
+2. **Fisher-Yates shuffle a 10-element digit permutation** (the integers 0–9). The shuffle is the
+   classic in-place Fisher-Yates / random-shuffle over the 10-entry permutation array.
+3. **Apply the permutation to the keypad layout:** of the stacked digit buttons available at each of
+   the 10 on-screen positions, exactly the one whose digit equals `permutation[position]` is made
+   visible; the others are hidden. The net result is the digits 0–9 laid out in a fresh random order
+   each show.
+
+Because the permutation is regenerated every show, no static digit→position map exists; a faithful
+re-implementation must reshuffle on every modal open.
+
+**Entry and masking.** Pressing a visible digit key appends that digit to an entry buffer; the
+on-screen field shows only a **masked `*` per entered digit**, never the digits themselves. The
+entry is **capped at 4 digits** (a hard guard rejects a 5th), matching the §4.2 capacity rule
+"second-password / PIN length **< 5** (≤ 4 chars + NUL)". A clear/backspace control and a cancel
+control are distinct from the digit keys; an **OK / submit** control finalizes the entry.
+
+**Submit and the wire hand-off (the `isPin` mechanism).** On submit:
+
+1. The entered digits are serialized into a short numeric **PIN string** (0..4 characters).
+2. That PIN string is stored as the login window's **second/middle login-key token**, i.e. it becomes
+   the **third TAB-delimited token** of the TAB login-key string assembled at join
+   (`account ⟨TAB⟩ password ⟨TAB⟩ PIN ⟨TAB⟩ host␠port`, §1 / §4.1).
+3. The secure-context builder (§4.1) splits that TAB string; the PIN (its middle token) is the value
+   that **populates the optional length-prefixed second-password blob field of the `1/4` login
+   pre-image** (§4.2 field order, table row 3). The account password remains the separate RSA
+   plaintext (§4.2) — the PIN is **not** the password.
+
+So the end-to-end PIN path is: **scrambled keypad → masked 0..4-digit entry → submit → third TAB
+token of the login-key string → optional second-password blob field of the secure `1/4` pre-image.**
+This is the previously-noted `isPin` / "optional second-password blob" gap, now described as a
+concrete mechanism.
+
+> **Confidence.** The scramble mechanism (time-seeded Fisher-Yates per show), the 4-digit cap, the
+> `*`-masking, and the submit → TAB-third-token → optional `1/4` blob hand-off are **recovered via
+> static control-flow analysis (CAMPAIGN 9)** and are graded HIGH for the structural/mechanism
+> claims. The exact on-wire **byte layout** of the optional blob field is the runtime-confirmed §4.2
+> layout (u32-LE NUL-inclusive prefix). One detail remains **UNVERIFIED / debugger-pending**: the
+> precise width and field offset of the login window's PIN-token storage slot (asserted to hold ≤ 4
+> chars + NUL) — a single live read would byte-confirm it; it does not change the wire layout, which
+> §4.2 already pins.
 
 ### 4.3 Secure send
 
@@ -479,22 +574,17 @@ Specified in Section 3.2 (it is the scene-transitioning message). Field spec:
 Specified in Section 3.4 (44 bytes; transitions to in-world). Field spec:
 `packets/3-5_enter_game_response.yaml`.
 
-### 5.3 Character-spawn result — `3/7 SmsgCharSpawnResult`
+### 5.3 Scene / entity update — `3/4 SmsgSceneEntityUpdate`
 
-A **16-byte** payload that drives the local spawn:
+A **variable-length** scene / entity / char-slot scratch refill (a slot-scratch refill / scene-clear
+on the select surface). The minor-3 receive ladder routes minor **4** here — **not** the 8-byte
+char-manage result (that is `3/7`, §5.5). Routing is dispatch-table-confirmed; the field layout is
+**not yet specced** (no `packets/*.yaml` authored). `opcodes.md` carries this row as `confirmed`,
+field-layout-unspecced.
 
-| Offset | Size | Field | Meaning |
-|---|---|---|---|
-| 0 | 1 (u8) | Result | 0 = failure (a timed message is shown); nonzero = proceed to spawn. |
-| 1 | 1 (u8) | Slot | Character slot index. |
-| 2 | 2 | Padding | Alignment. |
-| 4 | 4 (u32) | Spawn param 1 | Passed to the spawn routine. |
-| 8 | 4 (u32) | Spawn param 2 | Passed to the spawn routine. |
-| 12 | 4 (u32) | Spawn param 3 | Passed to the spawn routine. |
-
-On success, the client spawns the local player from the **cached** 880-byte descriptor (Section 3.5).
-
-> The 16-byte size is dispatch-confirmed. The meaning of the three spawn-param u32s is **UNVERIFIED**.
+> The earlier reading that 3/4 carried the 8-byte delete/manage result is **SUPERSEDED**: the
+> front-end deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed, places the 8-byte
+> manage result at `3/7` and the variable scene-entity update here at `3/4`.
 
 ### 5.4 Character create result — `3/23 SmsgCharCreateResult`
 
@@ -511,9 +601,12 @@ A **12-byte** payload:
 On success the account character count is incremented. `opcodes.md` carries a **capture-verified**
 12-byte example for this message. Field internals beyond result/code are otherwise **UNVERIFIED**.
 
-### 5.5 Character manage / delete result — `3/4 SmsgCharManageResult`
+### 5.5 Character manage / delete result — `3/7 SmsgCharManageResult`
 
-An **8-byte** payload:
+An **8-byte** payload — the delete / select / rename **manage** result. The minor-3 receive ladder
+routes minor **7** here (RESOLVED by the front-end deep-fidelity pass (campaign4/frontend-deep),
+dispatch-table-confirmed). This is the handler that **decrements the account character count** on a
+delete-confirm.
 
 | Offset | Size | Field | Meaning |
 |---|---|---|---|
@@ -525,8 +618,33 @@ An **8-byte** payload:
 
 > The 8-byte size is dispatch-confirmed. The subtype 0 / 1 semantics are **UNVERIFIED** (only subtype
 > 2 = delete-confirm is inferred).
+>
+> The earlier reading that this 8-byte manage result lived at `3/4` is **SUPERSEDED**: it is `3/7`;
+> the variable scene-entity update is `3/4` (§5.3), and the 16-byte enter-into-world bridge is `3/14`
+> (§5.6). The local-player **world** spawn is driven by `4/1`, not by `3/7`.
 
-### 5.6 Rename-character result — `3/6 SmsgRenameCharResult`
+### 5.6 Character enter-into-world bridge — `3/14 SmsgCharSpawnResponse`
+
+A **16-byte** payload — an enter-into-world **bridge** / spawn confirm that re-enters the
+select-window enter-builder. The minor-3 receive ladder routes minor **14** here (RESOLVED by the
+front-end deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed).
+
+| Offset | Size | Field | Meaning |
+|---|---|---|---|
+| 0 | 1 (u8) | Result | 0 = failure (a timed message is shown); nonzero = proceed. |
+| 1 | 1 (u8) | Slot | Character slot index. |
+| 2 | 2 | Padding | Alignment. |
+| 4 | 4 (u32) | Param 1 | Passed to the bridge routine. |
+| 8 | 4 (u32) | Param 2 | Passed to the bridge routine. |
+| 12 | 4 (u32) | Param 3 | Passed to the bridge routine. |
+
+> **This is NOT the local-player world spawn.** The actual world spawn is driven by `4/1`
+> (Section 3.5); `3/14` is the enter-into-world bridge only. The 16-byte size is dispatch-confirmed;
+> the meaning of the three trailing u32s is **UNVERIFIED**. The prior reading that 3/14 was a variable
+> scene-entity update is **SUPERSEDED** — the variable scene-entity update is `3/4` (§5.3). `opcodes.md`
+> carries this row as `confirmed`, 16-byte field layout not yet specced.
+
+### 5.7 Rename-character result — `3/6 SmsgRenameCharResult`
 
 A **19-byte (0x13)** payload:
 
@@ -538,12 +656,11 @@ A **19-byte (0x13)** payload:
 > The 19-byte size is dispatch-confirmed. The success/failure discrimination is by the result byte at
 > offset 0.
 
-### 5.7 Other major-3 responses (catalog cross-reference, not specced here)
+### 5.8 Other major-3 responses (catalog cross-reference, not specced here)
 
 `opcodes.md` additionally lists `3/8 SmsgShopPageUpdate`, `3/13 SmsgCharStatusUpdate`,
-`3/14 SmsgSceneEntityUpdate`, `3/100 SmsgCharActionResult`, and `3/50000 SmsgGmChatMessage`. These are
-routing-confirmed but **not part of the login/select/enter-game flow**, and their field layouts are
-not specced here.
+`3/100 SmsgCharActionResult`, and `3/50000 SmsgGmChatMessage`. These are routing-confirmed but
+**not part of the login/select/enter-game flow**, and their field layouts are not specced here.
 
 ---
 
@@ -574,22 +691,27 @@ The behavior-anchored opcode subset for this flow:
 | lobby (port 10000) | server-list | S2C | 8-byte wrapper + N×8 | `wrapper.major` = count; 8-byte records {id u16, status u16, load u16, open-time u16} |
 | lobby (port `10000+off`) | channel-endpoint | S2C | 8-byte wrapper + ≥30 | first 30 bytes = `host port` ASCII |
 | 0:0 | SmsgKeyExchange | S2C | 62 (cited) | RSA key material; triggers `1/4` (see `crypto.md`) |
-| 1:4 | CmsgAuthReply | C2S | var (cited) | RSA of the staged password (see `crypto.md`) |
-| 1:6 | CmsgLoginRequest | C2S | ~52 | `[0x2B][u32len account\0]([u32len PIN\0])`; account password via `1/4`; optional field = second-password / PIN (runtime-confirmed) |
+| 1:4 | CmsgAuthReply | C2S | var (cited) | **THE login credential send** — secure auth-reply to `0/0`; plaintext pre-image `[0x2B][u32len account\0]([u32len PIN\0])` + RSA ciphertext of the account password (runtime-confirmed) |
+| 1:6 | CmsgCreateCharacter | C2S | 52 | **Character-create ONLY** — fixed 52-byte body, offset-0 is the CP949 name; NOT the login credential (that is `1/4`) |
+| 1:7 | CmsgSelectCharacter | C2S | 2 | character-slot select / pre-stage on the select screen; see `packets/cmsg_char_select.yaml` |
 | 1:9 | CmsgEnterGameRequest | C2S | 40 | slot@0 + version token (value 21149 for this build); server → `3/5` |
 | 3:1 | SmsgCharacterList | S2C | 3 + N×981 (N ≤ 5) | header[srv, chan, mask] + per-slot {descriptor 880 + stats 96 + flag 1 + time 4}; enters select scene |
-| 3:4 | SmsgCharManageResult | S2C | 8 | result + subtype + ready_time (delete cooldown) |
+| 3:4 | SmsgSceneEntityUpdate | S2C | var | scene / entity / char-slot scratch refill / scene-clear; not yet specced |
 | 3:5 | SmsgEnterGameAck | S2C | 44 | name + billing@28 + char_count@40; transitions to in-world |
 | 3:6 | SmsgRenameCharResult | S2C | 19 | result + (error code \| new name ASCIIZ[18]) |
-| 3:7 | SmsgCharSpawnResult | S2C | 16 | result + slot + 3×u32 spawn params; drives the spawn |
+| 3:7 | SmsgCharManageResult | S2C | 8 | result + subtype + ready_time (delete cooldown); decrements the account char-count on a delete-confirm |
+| 3:14 | SmsgCharSpawnResponse | S2C | 16 | enter-into-world bridge / spawn confirm (re-enters the enter-builder); NOT the local-player world spawn (that is `4/1`) |
 | 3:23 | SmsgCharCreateResult | S2C | 12 | result + code + 2×u32; capture-verified sample |
+| 4:1 | SmsgGameStateTick | S2C | var | world-entry snapshot — drives the **local-player world spawn** from the cached descriptor |
 
-> **Note on the 1/6 row above.** The login-blob structure (`[0x2B][u32len account\0]([u32len
-> PIN\0])`), the u32-LE NUL-inclusive prefix, and the optional-field identity (the second-password /
-> PIN) are **runtime-confirmed** against the live client (no addresses). What this does **not**
-> settle: the `~52-byte` size estimate, whether character-create shares opcode 1/6, and where
-> `(major:minor)` is stamped for the login blob (the builder writes `0/0`). Those remain as recorded
-> — see Sections 4.2 and 9, and `packets/1-6_login_or_create.yaml`.
+> **Note on the `1/4` / `1/6` rows above.** The login-blob structure (`[0x2B][u32len account\0]
+> ([u32len PIN\0])`), the u32-LE NUL-inclusive prefix, and the optional-field identity (the
+> second-password / PIN) are **runtime-confirmed** against the live client (no addresses); the
+> credential rides the secure `1/4`, and `1/6` is **character-create only** — the front-end
+> deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed, resolved the prior
+> "1/6 login-or-create collision" (there is none). What this does **not** settle: the per-field
+> internals of the manage/bridge results (3/4, 3/7, 3/14) beyond their sizes — those remain
+> capture-pending. See Sections 4.2 and 9.
 
 (Major-2 `GameAction` is **C2S only** — there is no inbound handler for it.)
 
@@ -602,11 +724,12 @@ The behavior-anchored opcode subset for this flow:
 | Lobby base port | **10000** | Server-list fetch; channel = `10000 + selected_offset`. |
 | Default fallback IP | **`211.196.150.4`** | Used when `ip.txt` is absent and the resolve list fails. |
 | IP override file | **`ip.txt`** | Single token, truncated to **19 characters**. |
-| Login sub-opcode byte | **`0x2B` (43)** | First payload byte of the `1/6` login blob. |
+| Login sub-opcode byte | **`0x2B` (43)** | First payload byte of the `1/4` login blob pre-image. |
 | Login length-prefix width | **u32 little-endian** | Prefix for each login-blob string; **includes the trailing NUL** in its count. Runtime-confirmed. |
 | Login account capacity | length **≥ 2** and **< 20** | Length-prefixed (incl. NUL) into the login blob. Runtime-confirmed. |
-| Login password capacity | length **≥ 2** and **< 17** | **Not** in the blob; staged in an **exactly-17-byte zero-padded buffer** for the RSA `1/4` send. Runtime-confirmed. |
+| Login password capacity | length **≥ 2** and **< 17** | **Not** in the plaintext blob; staged in an **exactly-17-byte zero-padded buffer** for the RSA `1/4` ciphertext. Runtime-confirmed. |
 | Login second-password / PIN capacity | length **< 5** (≤ 4 chars + NUL) | The optional length-prefixed login-blob field. Runtime-confirmed. |
+| PIN keypad scramble | **time-seeded Fisher-Yates shuffle of a 10-digit (0–9) permutation, per show** | Anti-keylogger random on-screen keypad layout; PIN masked with `*`, capped at 4 digits; submit → 3rd TAB token → optional `1/4` blob field. Static recovery, CAMPAIGN 9. See §4.2a. |
 | Channel-endpoint copy length | **30 (0x1E) bytes** | The leading `host port` ASCII string. |
 | Server-list record size | **8 bytes** | Count = `wrapper.major`. |
 | Server-list record fields | id u16 @+0 (1..40), status u16 @+2, load u16 @+4, open-time u16 @+6 | See Section 2.1. |
@@ -617,12 +740,15 @@ The behavior-anchored opcode subset for this flow:
 | Char-list header | **3 bytes** | server-id, channel-id, slot bitmask. |
 | Char-list maximum slots | **5** (slot indices 0..4) | Hard loop bound; also the enter-game slot-range guard (`slot ≤ 4`). |
 | Display-name length (char list) | **17 bytes** | CP949, cleaned/truncated. |
+| CreateCharacter body (1/6) | **52 (0x34) bytes** | CP949 name @ offset 0 + appearance + point-buy stats; see `packets/cmsg_char_create.yaml` (§3.6). |
+| SelectCharacter body (1/7) | **2 bytes** | Slot select / pre-stage; see `packets/cmsg_char_select.yaml` (§3.6). |
 | EnterGameRequest body (1/9) | **40 (0x28) bytes** | Slot index at offset 0. |
 | Version token | `10 × versionField + 9` = **21149** (this build) | Derived from `data/cursor/game.ver` (field index 5 = 2114). `sample_verified`. |
 | EnterGameAck (3/5) | **44 bytes** | 40-byte block + trailing char-count u32; billing u32 @ +28. |
 | CharCreateResult (3/23) | **12 bytes** | — |
-| CharSpawnResult (3/7) | **16 bytes** | — |
-| CharManageResult (3/4) | **8 bytes** | — |
+| SceneEntityUpdate (3/4) | **var** | Scene / entity / char-slot scratch refill; not yet specced. |
+| CharManageResult (3/7) | **8 bytes** | Result + subtype + ready-time; decrements the account char-count on a delete-confirm. |
+| CharSpawnResponse (3/14) | **16 bytes** | Enter-into-world bridge / spawn confirm; NOT the local-player world spawn (that is 4/1). |
 | RenameCharResult (3/6) | **19 bytes** | Name field up to 18 bytes incl. NUL. |
 | Char error-code range (create/rename UI strings) | **`0xC8..0xD4`** (200..212) | Mapped to UI strings. |
 | Empty-slot sentinel | literal **`"@BLANK@"`** | Marks an unoccupied slot in the descriptor name; routes to character creation on confirm. |
@@ -649,7 +775,7 @@ The behavior-anchored opcode subset for this flow:
      handshake and the send-path byte cipher + LZ4 of `specs/crypto.md`, dispatched per Section 5/6.
 - The login form's TAB-delimited string carries the account, the **second-password / PIN** (optional
   middle field), and the discovered `host:port`; the **account password is conveyed only by the RSA
-  `1/4` reply**, never in a plaintext blob.
+  `1/4` ciphertext**, never in a plaintext blob.
 
 ---
 
@@ -664,35 +790,51 @@ The behavior-anchored opcode subset for this flow:
    required.
 3. **Lobby channel-endpoint payload** beyond "first 30 bytes = `host port` ASCII" (any trailing
    fields).
-4. **Login blob (1/6) — the 1/6 opcode collision (still open).** A runtime read **resolved** the
-   *login-blob structure* (reading (A)): field order `[0x2B][u32len account\0]([u32len PIN\0])`, the
-   u32-LE NUL-inclusive length prefix, and the identity of the optional field as the
-   **second-password / PIN** (no longer UNVERIFIED — see §4.2). **Still open:** whether the
-   **character-create** send (reading (B)) shares opcode 1/6 (that send site is server/select-gated
-   and was not reachable in this session), and where `(major:minor)` is stamped for the login blob
-   (the builder writes `0/0`; the `1/6` stamping must be downstream, or it is the Section 6 naming
-   inconsistency — single observation, flagged not claimed). `opcodes.md` still flags the `~52-byte`
-   size as an estimate; **no `packets/*.yaml` is authored here** — `packets/1-6_login_or_create.yaml`
-   keeps the collision as recorded.
+4. **Login vs character-create opcode separation — RESOLVED (statically settled, no capture needed).**
+   The front-end deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed, settled this:
+   **the login credential send is `1/4`** (the reactive secure auth-reply to the inbound `0/0` key
+   exchange, whose RSA pre-image is the `[0x2B][u32len account\0]([u32len PIN\0])` blob, with the
+   account password riding inside the `1/4` ciphertext), and **`1/6` is character-create ONLY** (a
+   fixed 52-byte body whose offset-0 is the CP949 character name, never the `0x2B` login blob). There
+   is **no shared login/create opcode and therefore no collision** — the prior "whether
+   character-create shares opcode 1/6" question is closed: it does not. The login-blob *structure*
+   (field order `[0x2B][u32len account\0]([u32len PIN\0])`, the u32-LE NUL-inclusive length prefix,
+   and the optional field's identity as the **second-password / PIN**) was already runtime-confirmed
+   (see §4.2); it is carried by `1/4`, not `1/6`. The two builders are distinct (the secure
+   auth-reply builder stamps major=1/minor=4; a separate fixed-body sender stamps major=1/minor=6).
+   Authored field specs: `packets/login.yaml` (the `1/4` credential carrier) and
+   `packets/cmsg_char_create.yaml` (the `1/6` 52-byte create body).
 5. **Enter-game request (1/9)** exact byte **offset** of the version token inside the 40-byte body
    (the token *value* 21149 is pinned from the real `game.ver`; its placement is not). Other body
    bytes beyond slot@0.
 6. **Enter-game ack (3/5)** internals of the 40-byte leading block beyond name@0 and billing u32 @+28.
-7. **Char-spawn result (3/7)** meaning of the three trailing spawn-param u32s.
-8. **Char-manage result (3/4)** subtype 0 / 1 semantics (only subtype 2 = delete-confirm is inferred).
-9. **Selection-index vs. render-page field separation** (Section 2.2) — the channel-port selection
-   index and the select-screen render-page offset are distinct window fields; an earlier note
-   conflated them. Naming/glossary concern, flagged for `names.yaml`; no wire impact.
-10. **Opcode-naming inconsistency** (Section 6) — legacy handler names disagree with the dispatch
+7. **Char-manage result (3/7)** subtype 0 / 1 semantics (only subtype 2 = delete-confirm is inferred);
+   the 8-byte size is dispatch-confirmed (front-end deep-fidelity pass (campaign4/frontend-deep),
+   dispatch-table-confirmed).
+8. **Char enter-into-world bridge (3/14)** meaning of the three trailing u32 params (the 16-byte size
+   is dispatch-confirmed; front-end deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed).
+   Note this is the enter-into-world *bridge*, **not** the local-player world spawn (that is `4/1`).
+9. **Scene / entity update (3/4)** field layout — a variable-length scene / entity / char-slot scratch
+   refill; routing is dispatch-table-confirmed (front-end deep-fidelity pass (campaign4/frontend-deep))
+   but the body is not yet specced.
+10. **Selection-index vs. render-page field separation** (Section 2.2) — the channel-port selection
+    index and the select-screen render-page offset are distinct window fields; an earlier note
+    conflated them. Naming/glossary concern, flagged for `names.yaml`; no wire impact.
+11. **Opcode-naming inconsistency** (Section 6) — legacy handler names disagree with the dispatch
     arithmetic and `opcodes.md`. Anchored to behavior + `opcodes.md` here; flagged for `names.yaml`
     review. Do **not** promote minor→name mappings from legacy names.
-11. **No live network capture was loaded for this analysis.** All wire offsets/sizes are static reads,
-    **except** the login blob (1/6) field layout, which is corroborated by a runtime read of the live
-    client's assembled packet buffer (still not a network capture). The only on-disk real-byte
-    corroboration is the local `data/cursor/game.ver` file (item 5 / Section 3.3). The lobby (port-
-    10000) mini-protocol in particular has **no network-capture corroboration at all.**
+12. **PIN-token storage slot width/offset** (§4.2a) — the login window's slot that holds the entered
+    PIN string before the join hand-off (asserted ≤ 4 chars + NUL). The scramble mechanism and the
+    submit → TAB-third-token → optional `1/4` blob path are static-confirmed (CAMPAIGN 9); the exact
+    storage slot width/offset is **UNVERIFIED / debugger-pending** (a single live read would confirm
+    it). This does not change the §4.2 wire layout.
+13. **No live network capture was loaded for this analysis.** All wire offsets/sizes are static reads,
+    **except** the login blob (carried by `1/4`) field layout, which is corroborated by a runtime read
+    of the live client's assembled packet buffer (still not a network capture). The only on-disk
+    real-byte corroboration is the local `data/cursor/game.ver` file (item 5 / Section 3.3). The lobby
+    (port-10000) mini-protocol in particular has **no network-capture corroboration at all.**
     `capture_verified: false`; `sample_verified: partial` (game.ver only); `runtime_observed: login
-    blob (1/6) field layout`.
+    blob (1/4) field layout`.
 
 ---
 
@@ -704,13 +846,20 @@ The behavior-anchored opcode subset for this flow:
   (static, from the render path + a debug literal; `open_time` packing and the full status enum are
   capture-unverified).
 - Handshake (`0/0` → `1/4`) and credential staging: **HIGH confidence** (cited — `specs/crypto.md`).
+- PIN modal scrambled keypad (time-seeded Fisher-Yates per show), `*`-masking, 4-digit cap, and the
+  submit → TAB-third-token → optional `1/4` second-password blob hand-off (§4.2a): **HIGH** for the
+  mechanism (static control-flow recovery, CAMPAIGN 9); the exact PIN-token storage slot width/offset
+  is debugger-pending.
+- Character-select C2S create (`1/6`, 52 B) / slot-select (`1/7`, 2 B) cross-reference (§3.6): **HIGH**
+  (static control-flow recovery, CAMPAIGN 9); per-field byte layouts are authoritative in
+  `packets/cmsg_char_create.yaml` / `packets/cmsg_char_select.yaml`.
 - Character-list 981-byte slot stride **and the hard 5-slot loop bound**; the major-3 response sizes
-  (3/1, 3/4, 3/5, 3/6, 3/7, 3/23): **MEDIUM–HIGH** (dispatch-confirmed sizes / bound; field internals
+  (3/1, 3/5, 3/6, 3/7, 3/14, 3/23): **MEDIUM–HIGH** (dispatch-confirmed sizes / bound; field internals
   capture-unverified).
-- Login-blob (1/6) field layout — order, u32-LE NUL-inclusive length prefix, the three field
-  capacities, and the optional field's identity as the **second-password / PIN**: **HIGH**
-  (RUNTIME-CONFIRMED against the live client; no addresses). The `~52-byte` size estimate and the
-  1/6-vs-character-create collision remain open.
+- Login-blob (carried by `1/4`) field layout — order, u32-LE NUL-inclusive length prefix, the three
+  field capacities, and the optional field's identity as the **second-password / PIN**: **HIGH**
+  (RUNTIME-CONFIRMED against the live client; no addresses). The login-vs-create opcode separation
+  (`1/4` credential, `1/6` create-only) is dispatch-table-confirmed (front-end deep-fidelity pass).
 - Enter-game-request (1/9) body internals: **MEDIUM** (40-byte total + slot@0 firm; token offset
   unverified). Enter-game **version token value 21149**: **HIGH** (`sample_verified` from the real
   `game.ver`).

@@ -21,8 +21,8 @@ public enum SoundTableExtension : byte
     /// <remarks>spec: Docs/RE/formats/sound_tables.md — .bgm → data/sound/2d/: SAMPLE-VERIFIED</remarks>
     Bgm,
 
-    /// <summary>Looped ambient sound effects; directory UNDETERMINED (all observed entries are null).</summary>
-    /// <remarks>spec: Docs/RE/formats/sound_tables.md — .bge → directory UNDETERMINED: SAMPLE-VERIFIED</remarks>
+    /// <summary>Looped ambient sound effects; IDs resolve under <c>data/sound/2d/</c> (category 0, 2D). SAMPLE-VERIFIED.</summary>
+    /// <remarks>spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — .bge → data/sound/2d/: SAMPLE-VERIFIED (2026-06-14)</remarks>
     Bge,
 
     /// <summary>Triggered 3-D point-source sound events; IDs resolve under <c>data/sound/3d/</c>.</summary>
@@ -43,9 +43,9 @@ public enum SoundTableExtension : byte
 /// Eliminates the heap allocation that <c>byte[24]</c> would incur per entry (256 × per Parse call).
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/sound_tables.md §Per-entry layout —
+/// spec: Docs/RE/formats/sound_tables.md §Per-record layout —
 ///   hour_schedule u8×24 @ +0x04: CONFIRMED (structure and access pattern);
-///   value variation UNOBSERVED in samples (all 12 real samples have every byte = 0x01).
+///   value-pattern semantics (hour mask vs. sub-area/weather/time-of-day filter) UNVERIFIED.
 ///
 /// <c>[InlineArray(24)]</c> lets the runtime store 24 bytes as a direct struct field,
 /// accessed via <see cref="this[int]"/> or <see cref="AsSpan"/>/<see cref="AsReadOnlySpan"/>.
@@ -82,20 +82,29 @@ public struct HourSchedule24
 }
 
 /// <summary>
-/// One 48-byte entry in a per-map sound table file.
+/// One 48-byte on-disk entry in a per-map sound table file.
 /// Entry index 0 is always the null/unassigned sentinel (sound_entry_id = 0).
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/sound_tables.md §Per-entry layout (48 bytes, little-endian throughout)
+/// spec: Docs/RE/formats/sound_tables.md §Per-record layout (48 bytes on disk, little-endian throughout)
+/// <para>
+/// Two-witness stride correction (2026-06-15): on-disk stride is <b>48 bytes</b> (CONFIRMED).
+/// The loader advances 0x30 bytes per record, iterates 256 records, reads exactly 12288 bytes,
+/// and leaves a 1024-byte unread trailer at the end of the 13312-byte file.
+/// The prior 52-byte reading (2026-06-14) is REFUTED; the per-record `tail_unknown` field at +0x30
+/// does NOT exist — it belongs to the file-level unread trailer.
+/// spec: Docs/RE/formats/sound_tables.md §File layout §Overall structure — loader stride reconciliation (two-witness).
+/// </para>
 /// Byte-level field map (quick reference):
 /// <code>
-/// [+0x00..+0x03]  sound_entry_id   u32 LE
-/// [+0x04..+0x1B]  hour_schedule    u8 × 24
-/// [+0x1C..+0x1F]  weight           f32 LE
-/// [+0x20..+0x23]  pos_x            f32 LE
-/// [+0x24..+0x27]  unknown_36       u32 LE
-/// [+0x28..+0x2B]  pos_z            f32 LE
-/// [+0x2C..+0x2F]  volume_factor    f32 LE
+/// [+0x00..+0x03]  sound_entry_id   u32 LE    (0 = null/unassigned)
+/// [+0x04..+0x1B]  hour_schedule    u8 × 24   (per-byte 0x00/0x01 mask; semantics DBG-pending)
+/// [+0x1C..+0x1F]  weight           f32 LE    (1.0f for BGM/BGE; semantic UNVERIFIED)
+/// [+0x20..+0x23]  pos_x            f32 LE    (3D world X; read; EFF records only, else 0.0)
+/// [+0x24..+0x27]  unlabeled_24     4 bytes   (NOT read by the loader; meaning UNRESOLVED)
+/// [+0x28..+0x2B]  pos_z            f32 LE    (3D world Z; read; EFF records only, else 0.0)
+/// [+0x2C..+0x2F]  radius           f32 LE    (3D audibility radius; read; EFF records only, else 0.0)
+/// --- end of 48-byte record ---
 /// </code>
 /// </remarks>
 public sealed class SoundTableEntry
@@ -114,69 +123,66 @@ public sealed class SoundTableEntry
     /// Per-in-game-hour activity flags; exactly <see cref="SoundTableData.HoursPerDay"/> = 24 bytes.
     /// <c>HourSchedule[h]</c> non-zero → sound active during game hour h,
     /// where h = game_clock_seconds / 3600 (integer division).
-    /// All 12 real-file samples contain every byte = 0x01 (unconditionally active).
+    /// Value-pattern semantics (hour mask vs. sub-area/weather/time-of-day filter) UNVERIFIED.
     ///
     /// Stored as an <see cref="HourSchedule24"/> inline-array struct to avoid allocating
-    /// a <c>byte[24]</c> per entry (256 × per Parse call — eliminated).
+    /// a <c>byte[24]</c> per entry.
     /// Use <see cref="HourSchedule24.AsReadOnlySpan"/> or direct indexing for access.
-    /// <c>foreach (byte h in HourSchedule)</c> works natively (C# 12 inline-array foreach).
     /// </summary>
     /// <remarks>
     /// spec: Docs/RE/formats/sound_tables.md — hour_schedule u8×24 @ +0x04: CONFIRMED (structure and access pattern);
-    ///   value variation UNOBSERVED in samples.
+    ///   value-pattern semantics UNVERIFIED.
     /// </remarks>
     public required HourSchedule24 HourSchedule { get; init; }
 
     /// <summary>
-    /// Blend weight or priority scalar; always 1.0f in all observed samples.
-    /// Semantic unverified — not accessed in the observed runtime playback path.
+    /// Blend weight or attenuation scalar; 1.0f in BGM/BGE records.
+    /// Semantic unverified.
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/formats/sound_tables.md — weight f32 @ +0x1C: SAMPLE-CONFIRMED as 1.0f; semantic UNVERIFIED
+    /// spec: Docs/RE/formats/sound_tables.md — weight f32 @ +0x1C: SAMPLE-VERIFIED type/value; semantic UNVERIFIED
     /// </remarks>
     public required float Weight { get; init; }
 
     /// <summary>
-    /// World-space X coordinate of the DirectSound3D source.
-    /// Passed directly to IDirectSound3DBuffer::SetPosition as the X argument.
-    /// 0.0f in all observed samples.
+    /// World-space X coordinate of the DirectSound 3D source.
+    /// Populated (non-zero) only in <c>.eff</c> records; 0.0 for BGM/BGE.
+    /// Passed to IDirectSound3DBuffer::SetPosition as the X argument.
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/formats/sound_tables.md — pos_x f32 @ +0x20: CONFIRMED (runtime semantic); observed value 0.0f
+    /// spec: Docs/RE/formats/sound_tables.md — pos_x f32 @ +0x20: CONFIRMED (runtime semantic); EFF-only population SAMPLE-VERIFIED
     /// </remarks>
     public required float PosX { get; init; }
 
     /// <summary>
-    /// Unknown field at entry offset +0x24; not accessed in the observed runtime playback path.
-    /// Observed values: 0x00000000, 0x00000001, and the MSVC debug-fill pattern 0xCCCCCCCC (editor artifact).
-    /// Purpose UNRESOLVED.
+    /// 4 bytes at record offset +0x24 that are NOT read by the loader on any path.
+    /// The earlier <c>pos_y</c> label is WITHDRAWN — no read site assigns a meaning to this offset.
+    /// Preserved verbatim for round-trip fidelity; do not interpret.
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/formats/sound_tables.md — unknown_36 u32 @ +0x24: UNRESOLVED
+    /// spec: Docs/RE/formats/sound_tables.md §Per-record layout — unlabeled_24 @ +0x24: NOT-READ by loader; meaning UNRESOLVED.
     /// </remarks>
-    public required uint Unknown36 { get; init; }
+    public required uint Unlabeled24 { get; init; }
 
     /// <summary>
-    /// World-space Z coordinate of the DirectSound3D source.
+    /// World-space Z coordinate of the DirectSound 3D source.
+    /// Populated only in <c>.eff</c> records; 0.0 for BGM/BGE.
     /// Passed to IDirectSound3DBuffer::SetPosition as the Z argument.
-    /// The Y for SetPosition comes from the player's current world Y, not from this table.
-    /// 0.0f in all observed samples.
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/formats/sound_tables.md — pos_z f32 @ +0x28: CONFIRMED (runtime semantic); observed value 0.0f
+    /// spec: Docs/RE/formats/sound_tables.md — pos_z f32 @ +0x28: CONFIRMED (runtime semantic); EFF-only population SAMPLE-VERIFIED
     /// </remarks>
     public required float PosZ { get; init; }
 
     /// <summary>
-    /// Volume multiplier: scaled by 0.7 before being passed to the DirectSound volume control.
-    /// 0.0f in all observed samples (consistent with unassigned/null slots).
-    /// Active localized sounds would carry a positive value.
+    /// Audibility radius of the 3D source.
+    /// Populated only in <c>.eff</c> records; 0.0 for BGM/BGE.
+    /// For BGM, the runtime applies a 0.7 volume scaling at a separate stage.
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/formats/sound_tables.md — volume_factor f32 @ +0x2C: CONFIRMED (f32 type and ×0.7 scaling factor);
-    ///   observed value 0.0f in all samples.
+    /// spec: Docs/RE/formats/sound_tables.md — radius f32 @ +0x2C: CONFIRMED f32 type; EFF radius role SAMPLE-VERIFIED area 001.
     /// </remarks>
-    public required float VolumeFactor { get; init; }
+    public required float Radius { get; init; }
 
     /// <summary>Returns true when this entry represents a real (non-null) sound assignment.</summary>
     public bool IsAssigned => SoundEntryId != 0;
@@ -184,14 +190,19 @@ public sealed class SoundTableEntry
 
 /// <summary>
 /// Decoded result of a per-map sound table file (.bgm / .bge / .eff / .wlk / .run).
-/// Contains exactly 256 entries and the extension-specific metadata needed to resolve audio paths.
+/// Contains exactly 256 entries. The loader reads 256 × 48 = 12288 bytes; the remaining 1024 bytes
+/// of the fixed 13312-byte on-disk file are an unread trailer.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/sound_tables.md §File layout — "fixed 13312 bytes (0x3400), confirmed across 12 real samples"
+/// spec: Docs/RE/formats/sound_tables.md §File layout — "fixed 13312 bytes (0x3400), confirmed across 12 real samples and ~300 census tables"
 /// spec: Docs/RE/formats/sound_tables.md §Entry count — "256 entries fixed; no count field in file"
-/// spec: Docs/RE/formats/sound_tables.md §Per-entry layout — "48 bytes per entry"
-/// Only the first 12288 (0x3000) bytes are consumed at runtime; the trailing 1024-byte editor
-/// metadata region is preserved in <see cref="RawEditorMetadata"/> but is never required for playback.
+/// spec: Docs/RE/formats/sound_tables.md §Per-record layout — "Record stride: 48 bytes. CONFIRMED (two-witness: loader advance + file measurement)."
+/// <para>
+/// Two-witness stride correction (2026-06-15): stride is 48 bytes (not 52). The loader advances
+/// 0x30 = 48 bytes per record, reads 256 × 48 = 12288 bytes, and the remaining 1024 bytes are an
+/// unread trailer. The prior 52-byte reading (2026-06-14) is REFUTED.
+/// spec: Docs/RE/formats/sound_tables.md §File layout §Overall structure — loader stride reconciliation (two-witness).
+/// </para>
 /// </remarks>
 public sealed class SoundTableData
 {
@@ -199,24 +210,11 @@ public sealed class SoundTableData
 
     /// <summary>
     /// Fixed total file size: 13312 bytes (0x3400).
-    /// Confirmed across 12 real-file samples.
+    /// Confirmed across 12 real-file samples and re-confirmed across ~300 tables by VFS census (2026-06-14).
+    /// The loader reads only the first 12288 bytes (256 × 48); the remaining 1024 are an unread trailer.
     /// </summary>
     /// <remarks>spec: Docs/RE/formats/sound_tables.md §File layout — "fixed 13312 bytes (0x3400)": CONFIRMED</remarks>
     public const int FixedFileSize = 0x3400; // 13312
-
-    /// <summary>
-    /// Size of the sound-entry table region in bytes: 12288 (0x3000).
-    /// This is the only region read by the runtime loader.
-    /// </summary>
-    /// <remarks>spec: Docs/RE/formats/sound_tables.md §Overall structure — "Sound entry table … 12288 (0x3000)": CONFIRMED</remarks>
-    public const int EntryTableSize = 0x3000; // 12288
-
-    /// <summary>
-    /// Size of the trailing editor metadata region in bytes: 1024 (0x400).
-    /// Written by the map editor tool; ignored at runtime.
-    /// </summary>
-    /// <remarks>spec: Docs/RE/formats/sound_tables.md §Overall structure — "Editor metadata … 1024 (0x400)": CONFIRMED</remarks>
-    public const int EditorMetadataSize = 0x400; // 1024
 
     /// <summary>
     /// Fixed entry count: always 256. No count field exists in the file.
@@ -226,14 +224,32 @@ public sealed class SoundTableData
     public const int EntryCount = 256;
 
     /// <summary>
-    /// Byte stride of one entry: 48 bytes.
-    /// 256 × 48 = 12288 = <see cref="EntryTableSize"/>. Confirmed.
+    /// Byte stride of one on-disk record: 48 bytes (0x30).
+    /// The loader advances 48 bytes per record and reads 256 × 48 = 12288 bytes total.
+    /// The remaining 1024 bytes of the 13312-byte file are an unread trailer.
     /// </summary>
-    /// <remarks>spec: Docs/RE/formats/sound_tables.md §Per-entry layout — "Entry stride: 48 bytes. Confirmed.": CONFIRMED</remarks>
-    public const int EntryStride = 48;
+    /// <remarks>
+    /// spec: Docs/RE/formats/sound_tables.md §Per-record layout — "Record stride: 48 bytes. CONFIRMED (two-witness: loader advance + file measurement)."
+    /// spec: Docs/RE/formats/sound_tables.md §File layout — "Record table (read): 12288 bytes (0x3000); Unread trailer: 1024 bytes (0x0400)".
+    /// Two-witness correction (2026-06-15): the prior 52-byte stride reading (2026-06-14) is REFUTED.
+    /// </remarks>
+    public const int EntryStride = 48; // 0x30 — spec: sound_tables.md §File layout (two-witness, 2026-06-15)
 
     /// <summary>
-    /// Number of per-hour schedule bytes per entry.
+    /// Total bytes read by the loader from the start of the file: 256 × 48 = 12288 (0x3000).
+    /// </summary>
+    /// <remarks>spec: Docs/RE/formats/sound_tables.md §File layout — "Record table (read): 12288 bytes (0x3000)": CONFIRMED</remarks>
+    public const int ReadSize = 0x3000; // 12288
+
+    /// <summary>
+    /// Size of the unread trailer at the end of the file: 1024 bytes (0x0400).
+    /// The loader never reads this region. Its purpose is UNRESOLVED.
+    /// </summary>
+    /// <remarks>spec: Docs/RE/formats/sound_tables.md §File layout — "Unread trailer: 1024 bytes (0x0400)": CONFIRMED</remarks>
+    public const int TrailerSize = 0x0400; // 1024
+
+    /// <summary>
+    /// Number of per-hour schedule bytes per record.
     /// </summary>
     /// <remarks>spec: Docs/RE/formats/sound_tables.md — hour_schedule u8×24 @ +0x04: CONFIRMED</remarks>
     public const int HoursPerDay = 24;
@@ -258,30 +274,24 @@ public sealed class SoundTableData
     public required SoundTableEntry[] Entries { get; init; }
 
     /// <summary>
-    /// Raw bytes of the trailing 1024-byte editor metadata region (bytes 0x3000–0x33FF).
-    /// Not used at runtime; preserved for tooling / round-trip use.
-    /// May be empty if the file was exactly <see cref="EntryTableSize"/> bytes (tolerated).
-    /// </summary>
-    /// <remarks>
-    /// spec: Docs/RE/formats/sound_tables.md §Editor metadata region — "bytes 12288–13311, 1024 bytes": CONFIRMED
-    /// </remarks>
-    public required ReadOnlyMemory<byte> RawEditorMetadata { get; init; }
-
-    /// <summary>
     /// Returns the canonical audio directory path prefix for this table's extension.
     /// Returns <see langword="null"/> for extensions whose directory is UNDETERMINED in the spec
-    /// (.bge, .wlk, .run — all observed entries are null in samples).
+    /// (.wlk, .run — all observed entries are null in samples).
+    /// <c>.bge</c> resolves to <c>data/sound/2d/</c> (SAMPLE-VERIFIED 2026-06-14).
     /// </summary>
     /// <remarks>
     /// spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — directory table: SAMPLE-VERIFIED
     /// </remarks>
     public string? AudioDirectory => Extension switch
     {
-        // spec: .bgm → data/sound/2d/: SAMPLE-VERIFIED
+        // spec: sound_tables.md §Sound ID semantics — .bgm → data/sound/2d/: SAMPLE-VERIFIED
         SoundTableExtension.Bgm => "data/sound/2d/",
-        // spec: .eff (sound table) → data/sound/3d/: SAMPLE-VERIFIED
+        // spec: sound_tables.md §Sound ID semantics — .bge → data/sound/2d/: SAMPLE-VERIFIED (2026-06-14)
+        // BGE IDs confirmed present under data/sound/2d/ (category 0, 2D same as BGM).
+        SoundTableExtension.Bge => "data/sound/2d/",
+        // spec: sound_tables.md §Sound ID semantics — .eff (sound table) → data/sound/3d/: SAMPLE-VERIFIED
         SoundTableExtension.Eff => "data/sound/3d/",
-        // spec: .bge, .wlk, .run → UNDETERMINED
+        // spec: sound_tables.md §Sound ID semantics — .wlk, .run → UNDETERMINED (all observed entries are null)
         _ => null,
     };
 }

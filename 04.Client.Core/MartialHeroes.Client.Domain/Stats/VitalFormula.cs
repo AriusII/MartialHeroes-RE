@@ -97,7 +97,7 @@ public static class VitalFormula
 
         // Stage 3 — class multiplier + optional %HP buff slot + HP auras.
         double pctMult = ClassHpTable.MultiplierFor(inputs.ClassId);
-        pctMult += inputs.HpPercentBuffPermille / 100.0;
+        pctMult += inputs.HpPercentBuffPercent / 100.0;
         pctMult += SumAuraPercent(inputs.Aura0, inputs.Aura1, HpAuraKind);
 
         // floor() at the Stage-3 boundary (point 2 of 2).

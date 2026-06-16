@@ -61,9 +61,13 @@ public sealed class ItemsCsvParserTests
     {
         // A row with MORE than 139 columns keeps every column in RawColumns and the typed
         // decode (highest index read is 131) still succeeds.
+        // RawColumns layout: [name, id, desc, tail...] = 3 + tailCount.
+        // For a 145-column row: col0=name, col1=id, col2..144=numeric tail (143 entries, desc="").
+        // rawColumns.Length = 3 + 143 = 146.
+        // spec: Docs/RE/formats/items_csv.md §3 -- numeric-anchor split: name+id+desc = first 3 slots.
         ItemCsvRow[] rows = ItemsCsvParser.ParseText(Row(145, 300) + "\n");
         Assert.Single(rows);
         Assert.Equal(300u, rows[0].ItemId);
-        Assert.Equal(145, rows[0].RawColumns.Length);
+        Assert.Equal(146, rows[0].RawColumns.Length); // 3 (name+id+empty-desc) + 143 tail = 146
     }
 }

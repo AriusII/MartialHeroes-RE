@@ -802,89 +802,129 @@ public sealed class AssetPassthroughTests
 /// <summary>
 /// Headless structural tests for <see cref="XeffJsonConverter"/>.
 /// Verifies that the JSON output is parseable, contains required fields,
-/// and faithfully represents the input data.
+/// and faithfully represents the input data under the corrected 32-byte header spec.
+/// spec: Docs/RE/formats/effects.md §A.2 File Header (32 bytes, CORRECTED): VERIFIED.
+/// spec: Docs/RE/formats/effects.md §A.4 Sub-Effect Block Structure: CONFIRMED.
 /// </summary>
 public sealed class XeffJsonConverterTests
 {
     // -------------------------------------------------------------------------
-    // Synthetic fixture
+    // Synthetic fixtures (updated for corrected sub-effect model)
     // -------------------------------------------------------------------------
 
+    /// <summary>
+    /// One-sub-effect fixture: animated=0 (track header animLoop=0), 1 texture, 3 alpha keys.
+    /// spec: Docs/RE/formats/effects.md §A.2 — effect_id, sub_effect_count: VERIFIED.
+    /// spec: Docs/RE/formats/effects.md §A.4 Sub-Effect Block Structure: CONFIRMED.
+    /// </summary>
     private static XeffData MakeSyntheticXeff()
     {
-        // spec: Docs/RE/formats/effects.md §A.2 File Header — effect_id, element_count: VERIFIED.
         return new XeffData
         {
             EffectId = 42u,
-            Elements =
+            SubEffectCount = 1u,
+            SubEffects =
             [
-                new XeffElement
+                new XeffSubEffect
                 {
-                    // spec: Docs/RE/formats/effects.md §A.3.1 — EmitterType: PARSER-CONFIRMED.
-                    EmitterType = 2u, // 2=directional (only known value)
-                    EmitterSubtype = 0u,
-                    AnimFlag = 0u,
-                    TexCount = 1u,
-                    FieldUnknownA = 99u, // UNRESOLVED — emitted raw
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — emitter_type u32 @ element+0x00: CONFIRMED.
+                    EmitterType = 0u, // billboard
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — resource_id u32 @ element+0x04: CONFIRMED.
+                    ResourceId = 0u,
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — anim_flag u32 @ element+0x08: CONFIRMED.
+                    AnimFlag = 0u, // static (animLoop=0 sub-effect)
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — field_unknown_a u32 @ element+0x0C: UNRESOLVED.
+                    FieldUnknownA = 0u,
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — element_dword2 u32 @ element+0x10: UNRESOLVED.
+                    ElementDword2 = 0u,
+                    EntryCount = 1u,
+                    // spec: Docs/RE/formats/effects.md §A.4.1 — tex_name char[64]: CONFIRMED.
                     TextureNames = ["fireball"],
-                    AlphaKeyframes = [0.0f, 0.5f, 1.0f],
-                    ScaleX = [1.0f, 2.0f],
-                    ScaleY = [1.0f, 2.0f],
-                    ScaleZ = [1.0f, 2.0f],
+                    // spec: Docs/RE/formats/effects.md §A.4.2 Pass 1 alpha — stored inverted: CONFIRMED.
+                    AlphaKeys = [0.0f, 0.5f, 1.0f],
+                    // CORRECTED CAMPAIGN 10: formerly ScaleX/Y/Z; renamed to DiffuseR/G/B per effects.md §A.4.2.
+                    // spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
+                    DiffuseR = [1.0f, 2.0f],
+                    DiffuseG = [1.0f, 2.0f],
+                    DiffuseB = [1.0f, 2.0f],
+                    // spec: Docs/RE/formats/effects.md §A.4.3 — anim_loop u8 @ +0: CONFIRMED.
                     AnimLoop = 0,
-                    AnimStride = 0u,
+                    AnimStride = 469u,
                     AnimBaseTime = 0u,
-                    AnimKeyframes = null,
-                    // Static state path (AnimLoop=0).
-                    // spec: Docs/RE/formats/effects.md §A.3.6 Branch B: PARSER-CONFIRMED.
-                    StaticState = new XeffStaticState
-                    {
-                        Params = [1f, 2f, 3f, 4f, 5f, 6f],
-                        RotXDeg = 0f,
-                        RotYDeg = 45f,
-                        RotZDeg = 0f,
-                    },
+                    // 1 keyframe (frame 0, no index prefix on disk).
+                    // spec: Docs/RE/formats/effects.md §A.4.4 — frame 0: no index prefix: CONFIRMED.
+                    Keyframes =
+                    [
+                        new XeffKeyframe
+                        {
+                            KfIndex = 0u,
+                            VelocityX = 1f, VelocityY = 2f, VelocityZ = 3f,
+                            SizeX = 4f, SizeY = 5f, SizeZ = 6f,
+                            RotXDeg = 0f,
+                            RotYDeg = 45f,
+                            RotZDeg = 0f,
+                        },
+                    ],
                 },
             ],
         };
     }
 
-    private static XeffData MakeXeffWithKeyframes()
+    /// <summary>
+    /// Two-sub-effect fixture with animated keyframes (animLoop != 0).
+    /// spec: Docs/RE/formats/effects.md §A.4.5 Multi-sub-effect files: CONFIRMED.
+    /// </summary>
+    private static XeffData MakeXeffWithTwoSubEffects()
     {
+        XeffSubEffect sub = new()
+        {
+            // spec: Docs/RE/formats/effects.md §A.4.0 — emitter_type u32 @ element+0x00: CONFIRMED.
+            EmitterType = 0u, // billboard
+            // spec: Docs/RE/formats/effects.md §A.4.0 — resource_id u32 @ element+0x04: CONFIRMED.
+            ResourceId = 0u,
+            // spec: Docs/RE/formats/effects.md §A.4.0 — anim_flag u32 @ element+0x08: CONFIRMED.
+            AnimFlag = 1u, // animated (animLoop=1 sub-effect)
+            // spec: Docs/RE/formats/effects.md §A.4.0 — field_unknown_a u32 @ element+0x0C: UNRESOLVED.
+            FieldUnknownA = 0u,
+            // spec: Docs/RE/formats/effects.md §A.4.0 — element_dword2 u32 @ element+0x10: UNRESOLVED.
+            ElementDword2 = 0u,
+            EntryCount = 2u,
+            TextureNames = ["tex_a", "tex_b"],
+            AlphaKeys = [0.0f, 1.0f],
+            // CORRECTED CAMPAIGN 10: formerly ScaleX/Y/Z; renamed to DiffuseR/G/B per effects.md §A.4.2.
+            // spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
+            DiffuseR = [1.0f, 1.5f],
+            DiffuseG = [1.0f, 1.5f],
+            DiffuseB = [1.0f, 1.5f],
+            AnimLoop = 1, // non-zero → animated path
+            AnimStride = 500u,
+            AnimBaseTime = 0u,
+            // frame 0 (no index prefix) + frame 1 (u32 index + 9 floats).
+            // spec: Docs/RE/formats/effects.md §A.4.4 — frames 1..N-1: u32+9×f32: CONFIRMED.
+            Keyframes =
+            [
+                new XeffKeyframe
+                {
+                    KfIndex = 0u,
+                    VelocityX = 0f, VelocityY = 0f, VelocityZ = 0f,
+                    SizeX = 1f, SizeY = 1f, SizeZ = 1f,
+                    RotXDeg = 0f, RotYDeg = 0f, RotZDeg = 0f,
+                },
+                new XeffKeyframe
+                {
+                    KfIndex = 1u,
+                    VelocityX = 0f, VelocityY = 10f, VelocityZ = 0f,
+                    SizeX = 2f, SizeY = 2f, SizeZ = 2f,
+                    RotXDeg = 0f, RotYDeg = 90f, RotZDeg = 0f,
+                },
+            ],
+        };
+
         return new XeffData
         {
             EffectId = 7u,
-            Elements =
-            [
-                new XeffElement
-                {
-                    EmitterType = 0u,
-                    EmitterSubtype = 0u,
-                    AnimFlag = 1u, // animated path
-                    TexCount = 0u,
-                    FieldUnknownA = 0u,
-                    TextureNames = [],
-                    AlphaKeyframes = [],
-                    ScaleX = [],
-                    ScaleY = [],
-                    ScaleZ = [],
-                    AnimLoop = 1, // non-zero → Branch A
-                    AnimStride = 100u,
-                    AnimBaseTime = 0u,
-                    AnimKeyframes =
-                    [
-                        new XeffKeyframe
-                        {
-                            KfIndex = 0u,
-                            Params = [1f, 2f, 3f, 4f, 5f, 6f],
-                            RotXDeg = 0f,
-                            RotYDeg = 90f,
-                            RotZDeg = 0f,
-                        },
-                    ],
-                    StaticState = null,
-                },
-            ],
+            SubEffectCount = 2u,
+            SubEffects = [sub, sub],
         };
     }
 
@@ -912,104 +952,170 @@ public sealed class XeffJsonConverterTests
     }
 
     // -------------------------------------------------------------------------
-    // Required fields present
+    // Required fields present — root
     // -------------------------------------------------------------------------
 
     [Fact]
     public void WriteJsonBytes_ContainsEffectId()
     {
-        // spec: Docs/RE/formats/effects.md §A.2 — effect_id: VERIFIED.
+        // spec: Docs/RE/formats/effects.md §A.2 — effect_id @ 0x00: VERIFIED.
         byte[] json = XeffJsonConverter.WriteJsonBytes(MakeSyntheticXeff());
         using var doc = JsonDocument.Parse(json);
         Assert.Equal(42u, doc.RootElement.GetProperty("effectId").GetUInt32());
     }
 
     [Fact]
-    public void WriteJsonBytes_ContainsElements()
+    public void WriteJsonBytes_ContainsSubEffectCount()
     {
-        // spec: Docs/RE/formats/effects.md §A.2 — element_count=1: VERIFIED.
+        // spec: Docs/RE/formats/effects.md §A.2 — sub_effect_count @ 0x04: VERIFIED.
         byte[] json = XeffJsonConverter.WriteJsonBytes(MakeSyntheticXeff());
         using var doc = JsonDocument.Parse(json);
-        Assert.Equal(1, doc.RootElement.GetProperty("elements").GetArrayLength());
+        Assert.Equal(1u, doc.RootElement.GetProperty("subEffectCount").GetUInt32());
     }
 
     [Fact]
-    public void WriteJsonBytes_ElementHasEmitterType()
+    public void WriteJsonBytes_ContainsSubEffectsArray_LengthOne()
     {
-        // spec: Docs/RE/formats/effects.md §A.3.1 — emitterType=2: PARSER-CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.4 — sub_effect_count blocks: CONFIRMED.
         byte[] json = XeffJsonConverter.WriteJsonBytes(MakeSyntheticXeff());
         using var doc = JsonDocument.Parse(json);
-        var el = doc.RootElement.GetProperty("elements")[0];
-        Assert.Equal(2u, el.GetProperty("emitterType").GetUInt32());
+        Assert.Equal(1, doc.RootElement.GetProperty("subEffects").GetArrayLength());
     }
 
     [Fact]
-    public void WriteJsonBytes_ElementHasTextureNames()
+    public void WriteJsonBytes_TwoSubEffects_LengthTwo()
     {
-        // spec: Docs/RE/formats/effects.md §A.3.2 — texture names: PARSER-CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.4.5 Multi-sub-effect files: CONFIRMED.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeXeffWithTwoSubEffects());
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal(2, doc.RootElement.GetProperty("subEffects").GetArrayLength());
+    }
+
+    // -------------------------------------------------------------------------
+    // Sub-effect fields
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void WriteJsonBytes_SubEffect_HasEntryCount()
+    {
+        // spec: Docs/RE/formats/effects.md §A.4 — entry_count u32: CONFIRMED.
         byte[] json = XeffJsonConverter.WriteJsonBytes(MakeSyntheticXeff());
         using var doc = JsonDocument.Parse(json);
-        var el = doc.RootElement.GetProperty("elements")[0];
-        Assert.Equal(1, el.GetProperty("textureNames").GetArrayLength());
-        Assert.Equal("fireball", el.GetProperty("textureNames")[0].GetString());
+        var sub = doc.RootElement.GetProperty("subEffects")[0];
+        Assert.Equal(1u, sub.GetProperty("entryCount").GetUInt32());
     }
 
     [Fact]
-    public void WriteJsonBytes_ElementHasAlphaKeyframes()
+    public void WriteJsonBytes_SubEffect_HasTextureNames()
     {
-        // spec: Docs/RE/formats/effects.md §A.3.3 — alpha keyframes: PARSER-CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.4.1 Name table — tex_name char[64]: CONFIRMED.
         byte[] json = XeffJsonConverter.WriteJsonBytes(MakeSyntheticXeff());
         using var doc = JsonDocument.Parse(json);
-        var el = doc.RootElement.GetProperty("elements")[0];
-        Assert.Equal(3, el.GetProperty("alphaKeyframes").GetArrayLength());
+        var sub = doc.RootElement.GetProperty("subEffects")[0];
+        Assert.Equal(1, sub.GetProperty("textureNames").GetArrayLength());
+        Assert.Equal("fireball", sub.GetProperty("textureNames")[0].GetString());
     }
 
     [Fact]
-    public void WriteJsonBytes_UnresolvedField_IsEmittedRaw()
+    public void WriteJsonBytes_SubEffect_HasAlphaKeys()
     {
-        // fieldUnknownA = 99 (UNRESOLVED) must appear verbatim in the JSON output.
-        // spec: Docs/RE/formats/effects.md §A.3.1 — field_unknown_a: PARSER-CONFIRMED (raw value).
+        // spec: Docs/RE/formats/effects.md §A.4.2 Curve pass 1 (alpha): CONFIRMED.
         byte[] json = XeffJsonConverter.WriteJsonBytes(MakeSyntheticXeff());
         using var doc = JsonDocument.Parse(json);
-        var el = doc.RootElement.GetProperty("elements")[0];
-        Assert.Equal(99u, el.GetProperty("fieldUnknownA").GetUInt32());
+        var sub = doc.RootElement.GetProperty("subEffects")[0];
+        Assert.Equal(3, sub.GetProperty("alphaKeys").GetArrayLength());
     }
 
     [Fact]
-    public void WriteJsonBytes_StaticState_IsPresentWhenAnimLoopZero()
+    public void WriteJsonBytes_SubEffect_AlphaKey_HasOpacityField()
     {
-        // spec: Docs/RE/formats/effects.md §A.3.6 Branch B: PARSER-CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.6 Alpha Inversion Convention: CONFIRMED.
+        // File value 0.0 → opacity 1.0 (fully opaque); file value 1.0 → opacity 0.0 (fully transparent).
         byte[] json = XeffJsonConverter.WriteJsonBytes(MakeSyntheticXeff());
         using var doc = JsonDocument.Parse(json);
-        var el = doc.RootElement.GetProperty("elements")[0];
-        Assert.True(el.TryGetProperty("staticState", out var ss));
-        Assert.Equal(6, ss.GetProperty("params").GetArrayLength());
-        Assert.Equal(45f, ss.GetProperty("rotYDeg").GetSingle(), precision: 3);
+        var key0 = doc.RootElement.GetProperty("subEffects")[0].GetProperty("alphaKeys")[0];
+        // file value = 0.0 → opacity = 1 - 0.0 = 1.0
+        Assert.Equal(0.0f, key0.GetProperty("fileValue").GetSingle(), precision: 5);
+        Assert.Equal(1.0f, key0.GetProperty("opacity").GetSingle(), precision: 5);
     }
 
     [Fact]
-    public void WriteJsonBytes_AnimKeyframes_ArePresentWhenAnimLoopNonZero()
+    public void WriteJsonBytes_SubEffect_HasAnimStride()
     {
-        // spec: Docs/RE/formats/effects.md §A.3.6 Branch A: PARSER-CONFIRMED.
-        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeXeffWithKeyframes());
+        // spec: Docs/RE/formats/effects.md §A.4.3 — anim_stride u32 @ +5 (ms): CONFIRMED.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeSyntheticXeff());
         using var doc = JsonDocument.Parse(json);
-        var el = doc.RootElement.GetProperty("elements")[0];
-        Assert.True(el.TryGetProperty("animKeyframes", out var kfs));
-        Assert.Equal(1, kfs.GetArrayLength());
-        Assert.Equal(90f, kfs[0].GetProperty("rotYDeg").GetSingle(), precision: 3);
+        var sub = doc.RootElement.GetProperty("subEffects")[0];
+        Assert.Equal(469u, sub.GetProperty("animStride").GetUInt32());
     }
 
     [Fact]
-    public void WriteJsonBytes_EmptyElements_IsValidJson()
+    public void WriteJsonBytes_SubEffect_HasKeyframes_LengthMatchesEntryCount()
     {
+        // spec: Docs/RE/formats/effects.md §A.4.4 — keyframe array length = entry_count: CONFIRMED.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeSyntheticXeff());
+        using var doc = JsonDocument.Parse(json);
+        var sub = doc.RootElement.GetProperty("subEffects")[0];
+        Assert.Equal(1, sub.GetProperty("keyframes").GetArrayLength());
+    }
+
+    [Fact]
+    public void WriteJsonBytes_Keyframe_HasVelocityAndSize()
+    {
+        // spec: Docs/RE/formats/effects.md §A.4.4 nine-float layout: CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.8 velocity Vec3 + size Vec3: HIGH.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeSyntheticXeff());
+        using var doc = JsonDocument.Parse(json);
+        var kf0 = doc.RootElement.GetProperty("subEffects")[0].GetProperty("keyframes")[0];
+        // velocity [1,2,3]
+        Assert.Equal(1f, kf0.GetProperty("velocity")[0].GetSingle(), precision: 5);
+        Assert.Equal(2f, kf0.GetProperty("velocity")[1].GetSingle(), precision: 5);
+        Assert.Equal(3f, kf0.GetProperty("velocity")[2].GetSingle(), precision: 5);
+        // size [4,5,6]
+        Assert.Equal(4f, kf0.GetProperty("size")[0].GetSingle(), precision: 5);
+    }
+
+    [Fact]
+    public void WriteJsonBytes_Keyframe_RotYDeg_IsPresent()
+    {
+        // spec: Docs/RE/formats/effects.md §A.4.4 kf_rot_y_deg @ position 8 (degrees): CONFIRMED.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeSyntheticXeff());
+        using var doc = JsonDocument.Parse(json);
+        var kf0 = doc.RootElement.GetProperty("subEffects")[0].GetProperty("keyframes")[0];
+        Assert.Equal(45f, kf0.GetProperty("rotYDeg").GetSingle(), precision: 3);
+    }
+
+    [Fact]
+    public void WriteJsonBytes_TwoKeyframes_SecondHasKfIndex()
+    {
+        // spec: Docs/RE/formats/effects.md §A.4.4 — frames 1..N-1: u32 kf_index + 9 × f32: CONFIRMED.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeXeffWithTwoSubEffects());
+        using var doc = JsonDocument.Parse(json);
+        var kfs = doc.RootElement.GetProperty("subEffects")[0].GetProperty("keyframes");
+        Assert.Equal(2, kfs.GetArrayLength());
+        Assert.Equal(1u, kfs[1].GetProperty("kfIndex").GetUInt32());
+        Assert.Equal(90f, kfs[1].GetProperty("rotYDeg").GetSingle(), precision: 3);
+    }
+
+    // -------------------------------------------------------------------------
+    // Empty sub-effects
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void WriteJsonBytes_EmptySubEffects_IsValidJson()
+    {
+        // spec: Docs/RE/formats/effects.md §A.2 — sub_effect_count=0 is valid (stub): VERIFIED.
+        // spec: Docs/RE/formats/effects.md §A.2 — sub_effect_count=0 is valid (stub): VERIFIED.
+        // spec: Docs/RE/formats/effects.md §A.2 File Header (8 bytes): VERIFIED (2026-06-14 correction).
         var effect = new XeffData
         {
             EffectId = 0u,
-            Elements = [],
+            SubEffectCount = 0u,
+            SubEffects = [],
         };
         byte[] json = XeffJsonConverter.WriteJsonBytes(effect);
         using var doc = JsonDocument.Parse(json);
-        Assert.Equal(0, doc.RootElement.GetProperty("elements").GetArrayLength());
+        Assert.Equal(0, doc.RootElement.GetProperty("subEffects").GetArrayLength());
     }
 
     // -------------------------------------------------------------------------
@@ -1249,131 +1355,145 @@ public sealed class BudSceneNormalAndUvBinaryTests
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Verifies that XeffJsonConverter emits properly named Velocity, Size, and Rotation
-/// fields in keyframes and static states, per the resolved spec.
+/// Verifies that XeffJsonConverter emits properly named Velocity, Size, Rotation,
+/// and alpha-inversion fields per the corrected spec (32-byte header, sub-effect model).
 ///
-/// spec: Docs/RE/formats/effects.md §A.3.7 — velocity Vec3 (Params[0..2]): HIGH.
-/// spec: Docs/RE/formats/effects.md §A.3.7 — size Vec3 (Params[3..5]): HIGH.
-/// spec: Docs/RE/formats/effects.md §A.4  — rotation quaternion (Euler → quat): CONFIRMED.
-/// spec: Docs/RE/formats/effects.md §A.3.3 — alpha opacity (1 - file_value): CONFIRMED.
+/// spec: Docs/RE/formats/effects.md §A.4.4 — velocity Vec3 (positions 1–3): CONFIRMED.
+/// spec: Docs/RE/formats/effects.md §A.4.4 — size Vec3 (positions 4–6): CONFIRMED.
+/// spec: Docs/RE/formats/effects.md §A.7  — rotation quaternion (Euler degrees → quat): CONFIRMED.
+/// spec: Docs/RE/formats/effects.md §A.6  — alpha inversion: file 0.0=opaque, 1.0=transparent: CONFIRMED.
+/// spec: Docs/RE/formats/effects.md §A.2  — File Header (32 bytes, CORRECTED): VERIFIED.
 /// </summary>
 public sealed class XeffJsonNamedFieldsTests
 {
     // -------------------------------------------------------------------------
-    // Fixtures
+    // Fixture helpers
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Static-state element (AnimLoop=0) with known velocity, size, and rotation values.
-    /// EmitterType=2 so rotation floats are present.
-    /// spec: Docs/RE/formats/effects.md §A.3.6 Branch B — emitter_type==2 reads rotation: CONFIRMED.
+    /// One sub-effect with a single keyframe whose velocity/size/rotation are known.
+    /// Alpha key: file value 0.3 → opacity = 1 - 0.3 = 0.7.
+    /// spec: Docs/RE/formats/effects.md §A.4 Sub-Effect Block Structure: CONFIRMED.
+    /// spec: Docs/RE/formats/effects.md §A.6 Alpha Inversion Convention: CONFIRMED.
     /// </summary>
-    private static XeffData MakeStaticStateEffect()
+    private static XeffData MakeKnownVelocitySizeRotationEffect()
     {
         return new XeffData
         {
             EffectId = 100u,
-            Elements =
+            SubEffectCount = 1u,
+            SubEffects =
             [
-                new XeffElement
+                new XeffSubEffect
                 {
-                    EmitterType = 2u, // directional billboard: reads rotation floats
-                    EmitterSubtype = 0u,
-                    AnimFlag = 0u,
-                    TexCount = 0u,
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — emitter_type u32 @ element+0x00: CONFIRMED.
+                    EmitterType = 0u, // billboard
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — resource_id u32 @ element+0x04: CONFIRMED.
+                    ResourceId = 0u,
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — anim_flag u32 @ element+0x08: CONFIRMED.
+                    AnimFlag = 1u, // animated (animLoop=1 sub-effect)
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — field_unknown_a u32 @ element+0x0C: UNRESOLVED.
                     FieldUnknownA = 0u,
-                    TextureNames = [],
-                    // AlphaKeyframes: file stores 0.3 (transparency) → parser converts to 0.7 (opacity).
-                    // spec: Docs/RE/formats/effects.md §A.3.3 — "1 - file_value = opacity": CONFIRMED.
-                    AlphaKeyframes = [0.7f], // already opacity (parser has done 1 - 0.3)
-                    ScaleX = [],
-                    ScaleY = [],
-                    ScaleZ = [],
-                    AnimLoop = 0,
-                    AnimStride = 0u,
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — element_dword2 u32 @ element+0x10: UNRESOLVED.
+                    ElementDword2 = 0u,
+                    EntryCount = 1u,
+                    TextureNames = ["flame"],
+                    // Alpha file value 0.3 → opacity = 1 - 0.3 = 0.7.
+                    // spec: §A.6 — "file value 0.0 means fully opaque; 1.0 means fully transparent": CONFIRMED.
+                    AlphaKeys = [0.3f],
+                    // CORRECTED CAMPAIGN 10: formerly ScaleX/Y/Z; renamed to DiffuseR/G/B per effects.md §A.4.2.
+                    // spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
+                    DiffuseR = [],
+                    DiffuseG = [],
+                    DiffuseB = [],
+                    AnimLoop = 1, AnimStride = 100u,
                     AnimBaseTime = 0u,
-                    AnimKeyframes = null,
-                    StaticState = new XeffStaticState
-                    {
-                        // Params[0..2] = velocity (2, 3, 4); Params[3..5] = size (5, 6, 7).
-                        // spec: Docs/RE/formats/effects.md §A.3.7 — velocity Vec3 Params[0..2]: HIGH.
-                        // spec: Docs/RE/formats/effects.md §A.3.7 — size Vec3 Params[3..5]: HIGH.
-                        Params = [2f, 3f, 4f, 5f, 6f, 7f],
-                        // Rotation: 90° around Y-axis → Quat(0, sin(45°), 0, cos(45°)) ≈ (0, 0.7071, 0, 0.7071).
-                        // spec: Docs/RE/formats/effects.md §A.4 — half-angle Euler-XYZ: CONFIRMED.
-                        RotXDeg = 0f,
-                        RotYDeg = 90f,
-                        RotZDeg = 0f,
-                    },
+                    Keyframes =
+                    [
+                        new XeffKeyframe
+                        {
+                            KfIndex = 0u,
+                            // velocity = (2, 3, 4). spec: §A.4.4 positions 1–3: CONFIRMED.
+                            VelocityX = 2f, VelocityY = 3f, VelocityZ = 4f,
+                            // size = (5, 6, 7). spec: §A.4.4 positions 4–6: CONFIRMED.
+                            SizeX = 5f, SizeY = 6f, SizeZ = 7f,
+                            // 90° around Y → Quat(0, sin(45°), 0, cos(45°)) ≈ (0, 0.7071, 0, 0.7071).
+                            // spec: §A.7 — "half-angle Euler-XYZ decomposition": CONFIRMED.
+                            RotXDeg = 0f,
+                            RotYDeg = 90f,
+                            RotZDeg = 0f,
+                        },
+                    ],
                 },
             ],
         };
     }
 
     /// <summary>
-    /// Animated keyframe element (AnimLoop=1) with a single keyframe containing
-    /// known velocity, size, and rotation.
-    /// spec: Docs/RE/formats/effects.md §A.3.6 Branch A: PARSER-CONFIRMED.
+    /// One sub-effect with a keyframe that has 180° rotation around Z.
+    /// 180° Z → Q = (0, 0, sin(90°), cos(90°)) = (0, 0, 1, 0).
+    /// spec: Docs/RE/formats/effects.md §A.7 — half-angle Euler-XYZ: CONFIRMED.
     /// </summary>
-    private static XeffData MakeAnimatedKeyframeEffect()
+    private static XeffData MakeEffect180DegZ()
     {
         return new XeffData
         {
             EffectId = 200u,
-            Elements =
+            SubEffectCount = 1u,
+            SubEffects =
             [
-                new XeffElement
+                new XeffSubEffect
                 {
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — emitter_type u32 @ element+0x00: CONFIRMED.
                     EmitterType = 0u, // billboard
-                    EmitterSubtype = 0u,
-                    AnimFlag = 1u,
-                    TexCount = 1u,
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — resource_id u32 @ element+0x04: CONFIRMED.
+                    ResourceId = 0u,
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — anim_flag u32 @ element+0x08: CONFIRMED.
+                    AnimFlag = 1u, // animated (animLoop=1 sub-effect)
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — field_unknown_a u32 @ element+0x0C: UNRESOLVED.
                     FieldUnknownA = 0u,
+                    // spec: Docs/RE/formats/effects.md §A.4.0 — element_dword2 u32 @ element+0x10: UNRESOLVED.
+                    ElementDword2 = 0u,
+                    EntryCount = 1u,
                     TextureNames = ["smoke"],
-                    AlphaKeyframes = [],
-                    ScaleX = [],
-                    ScaleY = [],
-                    ScaleZ = [],
-                    AnimLoop = 1, // Branch A
-                    AnimStride = 100u,
+                    AlphaKeys = [],
+                    // CORRECTED CAMPAIGN 10: formerly ScaleX/Y/Z; renamed to DiffuseR/G/B per effects.md §A.4.2.
+                    // spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
+                    DiffuseR = [],
+                    DiffuseG = [],
+                    DiffuseB = [],
+                    AnimLoop = 1, AnimStride = 100u,
                     AnimBaseTime = 0u,
-                    AnimKeyframes =
+                    Keyframes =
                     [
                         new XeffKeyframe
                         {
                             KfIndex = 0u,
-                            // Params[0..2] = velocity (10, 20, 30); Params[3..5] = size (1, 2, 3).
-                            // spec: Docs/RE/formats/effects.md §A.3.7 — velocity Params[0..2]: HIGH.
-                            // spec: Docs/RE/formats/effects.md §A.3.7 — size Params[3..5]: HIGH.
-                            Params = [10f, 20f, 30f, 1f, 2f, 3f],
-                            // Rotation: 180° around Z → Quat(0, 0, sin(90°), cos(90°)) = (0, 0, 1, 0).
-                            // spec: Docs/RE/formats/effects.md §A.4 — half-angle Euler-XYZ: CONFIRMED.
-                            RotXDeg = 0f,
-                            RotYDeg = 0f,
-                            RotZDeg = 180f,
+                            VelocityX = 10f, VelocityY = 20f, VelocityZ = 30f,
+                            SizeX = 1f, SizeY = 2f, SizeZ = 3f,
+                            RotXDeg = 0f, RotYDeg = 0f, RotZDeg = 180f,
                         },
                     ],
-                    StaticState = null,
                 },
             ],
         };
     }
 
     // -------------------------------------------------------------------------
-    // Static state: velocity, size, rotation
+    // Keyframe: velocity, size, rotation
     // -------------------------------------------------------------------------
 
     [Fact]
-    public void WriteJsonBytes_StaticState_HasNamedVelocity()
+    public void WriteJsonBytes_Keyframe_HasNamedVelocity()
     {
-        // staticState.velocity must be a 3-element array [2, 3, 4].
-        // spec: Docs/RE/formats/effects.md §A.3.7 — static_velocity Vec3 (Params[0..2]): HIGH.
-        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeStaticStateEffect());
+        // keyframe.velocity must be a 3-element array [2, 3, 4].
+        // spec: Docs/RE/formats/effects.md §A.8 — velocity Vec3: HIGH.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeKnownVelocitySizeRotationEffect());
         using var doc = JsonDocument.Parse(json);
-        var ss = doc.RootElement.GetProperty("elements")[0].GetProperty("staticState");
+        var kf = doc.RootElement.GetProperty("subEffects")[0].GetProperty("keyframes")[0];
 
-        Assert.True(ss.TryGetProperty("velocity", out var vel),
-            "staticState must expose named 'velocity' field.");
+        Assert.True(kf.TryGetProperty("velocity", out var vel),
+            "keyframe must expose named 'velocity' field.");
         Assert.Equal(3, vel.GetArrayLength());
         Assert.Equal(2f, vel[0].GetSingle(), precision: 4);
         Assert.Equal(3f, vel[1].GetSingle(), precision: 4);
@@ -1381,16 +1501,16 @@ public sealed class XeffJsonNamedFieldsTests
     }
 
     [Fact]
-    public void WriteJsonBytes_StaticState_HasNamedSize()
+    public void WriteJsonBytes_Keyframe_HasNamedSize()
     {
-        // staticState.size must be a 3-element array [5, 6, 7].
-        // spec: Docs/RE/formats/effects.md §A.3.7 — static_size Vec3 (Params[3..5]): HIGH.
-        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeStaticStateEffect());
+        // keyframe.size must be a 3-element array [5, 6, 7].
+        // spec: Docs/RE/formats/effects.md §A.8 — size Vec3: HIGH.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeKnownVelocitySizeRotationEffect());
         using var doc = JsonDocument.Parse(json);
-        var ss = doc.RootElement.GetProperty("elements")[0].GetProperty("staticState");
+        var kf = doc.RootElement.GetProperty("subEffects")[0].GetProperty("keyframes")[0];
 
-        Assert.True(ss.TryGetProperty("size", out var sz),
-            "staticState must expose named 'size' field.");
+        Assert.True(kf.TryGetProperty("size", out var sz),
+            "keyframe must expose named 'size' field.");
         Assert.Equal(3, sz.GetArrayLength());
         Assert.Equal(5f, sz[0].GetSingle(), precision: 4);
         Assert.Equal(6f, sz[1].GetSingle(), precision: 4);
@@ -1398,19 +1518,18 @@ public sealed class XeffJsonNamedFieldsTests
     }
 
     [Fact]
-    public void WriteJsonBytes_StaticState_HasRotationQuaternion()
+    public void WriteJsonBytes_Keyframe_HasRotationQuaternion_90DegY()
     {
-        // staticState.rotation must be a 4-element [X,Y,Z,W] quaternion.
+        // keyframe.rotation must be a 4-element [X,Y,Z,W] quaternion.
         // 90° around Y → approx (0, 0.7071, 0, 0.7071).
-        // spec: Docs/RE/formats/effects.md §A.4 — half-angle Euler-XYZ: CONFIRMED.
-        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeStaticStateEffect());
+        // spec: Docs/RE/formats/effects.md §A.7 — half-angle Euler-XYZ: CONFIRMED.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeKnownVelocitySizeRotationEffect());
         using var doc = JsonDocument.Parse(json);
-        var ss = doc.RootElement.GetProperty("elements")[0].GetProperty("staticState");
+        var kf = doc.RootElement.GetProperty("subEffects")[0].GetProperty("keyframes")[0];
 
-        Assert.True(ss.TryGetProperty("rotation", out var rot),
-            "staticState must expose named 'rotation' quaternion.");
+        Assert.True(kf.TryGetProperty("rotation", out var rot),
+            "keyframe must expose named 'rotation' quaternion.");
         Assert.Equal(4, rot.GetArrayLength());
-        // For 90° Y rotation: X=0, Y≈sin(45°)=0.7071, Z=0, W≈cos(45°)=0.7071.
         Assert.Equal(0f, rot[0].GetSingle(), precision: 3); // X
         Assert.Equal(0.7071f, rot[1].GetSingle(), precision: 3); // Y
         Assert.Equal(0f, rot[2].GetSingle(), precision: 3); // Z
@@ -1418,70 +1537,15 @@ public sealed class XeffJsonNamedFieldsTests
     }
 
     [Fact]
-    public void WriteJsonBytes_StaticState_StillHasRawParams()
+    public void WriteJsonBytes_Keyframe_HasRotationQuaternion_180DegZ()
     {
-        // The raw params array must still be present for backward compat/fallback.
-        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeStaticStateEffect());
-        using var doc = JsonDocument.Parse(json);
-        var ss = doc.RootElement.GetProperty("elements")[0].GetProperty("staticState");
-
-        Assert.True(ss.TryGetProperty("params", out var p),
-            "staticState must retain raw 'params' array for fallback.");
-        Assert.Equal(6, p.GetArrayLength());
-    }
-
-    // -------------------------------------------------------------------------
-    // Animated keyframe: velocity, size, rotation
-    // -------------------------------------------------------------------------
-
-    [Fact]
-    public void WriteJsonBytes_AnimKeyframe_HasNamedVelocity()
-    {
-        // keyframe.velocity must be a 3-element array [10, 20, 30].
-        // spec: Docs/RE/formats/effects.md §A.3.7 — kf_velocity Vec3 (Params[0..2]): HIGH.
-        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeAnimatedKeyframeEffect());
-        using var doc = JsonDocument.Parse(json);
-        var kf = doc.RootElement.GetProperty("elements")[0].GetProperty("animKeyframes")[0];
-
-        Assert.True(kf.TryGetProperty("velocity", out var vel),
-            "keyframe must expose named 'velocity' field.");
-        Assert.Equal(3, vel.GetArrayLength());
-        Assert.Equal(10f, vel[0].GetSingle(), precision: 4);
-        Assert.Equal(20f, vel[1].GetSingle(), precision: 4);
-        Assert.Equal(30f, vel[2].GetSingle(), precision: 4);
-    }
-
-    [Fact]
-    public void WriteJsonBytes_AnimKeyframe_HasNamedSize()
-    {
-        // keyframe.size must be a 3-element array [1, 2, 3].
-        // spec: Docs/RE/formats/effects.md §A.3.7 — kf_size Vec3 (Params[3..5]): HIGH.
-        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeAnimatedKeyframeEffect());
-        using var doc = JsonDocument.Parse(json);
-        var kf = doc.RootElement.GetProperty("elements")[0].GetProperty("animKeyframes")[0];
-
-        Assert.True(kf.TryGetProperty("size", out var sz),
-            "keyframe must expose named 'size' field.");
-        Assert.Equal(3, sz.GetArrayLength());
-        Assert.Equal(1f, sz[0].GetSingle(), precision: 4);
-        Assert.Equal(2f, sz[1].GetSingle(), precision: 4);
-        Assert.Equal(3f, sz[2].GetSingle(), precision: 4);
-    }
-
-    [Fact]
-    public void WriteJsonBytes_AnimKeyframe_HasRotationQuaternion()
-    {
-        // keyframe.rotation must be a 4-element [X,Y,Z,W] quaternion.
         // 180° around Z → Q = (0, 0, sin(90°), cos(90°)) = (0, 0, 1, 0).
-        // spec: Docs/RE/formats/effects.md §A.4 — half-angle Euler-XYZ: CONFIRMED.
-        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeAnimatedKeyframeEffect());
+        // spec: Docs/RE/formats/effects.md §A.7 — half-angle Euler-XYZ: CONFIRMED.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeEffect180DegZ());
         using var doc = JsonDocument.Parse(json);
-        var kf = doc.RootElement.GetProperty("elements")[0].GetProperty("animKeyframes")[0];
+        var kf = doc.RootElement.GetProperty("subEffects")[0].GetProperty("keyframes")[0];
+        var rot = kf.GetProperty("rotation");
 
-        Assert.True(kf.TryGetProperty("rotation", out var rot),
-            "keyframe must expose named 'rotation' quaternion.");
-        Assert.Equal(4, rot.GetArrayLength());
-        // 180° Z: X=0, Y=0, Z=sin(90°)≈1, W=cos(90°)≈0
         Assert.Equal(0f, rot[0].GetSingle(), precision: 3); // X
         Assert.Equal(0f, rot[1].GetSingle(), precision: 3); // Y
         Assert.Equal(1f, rot[2].GetSingle(), precision: 3); // Z
@@ -1489,34 +1553,38 @@ public sealed class XeffJsonNamedFieldsTests
     }
 
     [Fact]
-    public void WriteJsonBytes_AnimKeyframe_StillHasRawParams()
+    public void WriteJsonBytes_Keyframe_HasVelocityXyz_180DegZ()
     {
-        // Raw params array must still be present.
-        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeAnimatedKeyframeEffect());
+        // velocity = [10, 20, 30] for the 180°Z fixture.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeEffect180DegZ());
         using var doc = JsonDocument.Parse(json);
-        var kf = doc.RootElement.GetProperty("elements")[0].GetProperty("animKeyframes")[0];
-        Assert.True(kf.TryGetProperty("params", out var p));
-        Assert.Equal(6, p.GetArrayLength());
+        var kf = doc.RootElement.GetProperty("subEffects")[0].GetProperty("keyframes")[0];
+        var vel = kf.GetProperty("velocity");
+
+        Assert.Equal(10f, vel[0].GetSingle(), precision: 4);
+        Assert.Equal(20f, vel[1].GetSingle(), precision: 4);
+        Assert.Equal(30f, vel[2].GetSingle(), precision: 4);
     }
 
     // -------------------------------------------------------------------------
-    // Alpha keyframes: opacity emitted correctly
+    // Alpha keys: file value and opacity both emitted
     // -------------------------------------------------------------------------
 
     [Fact]
-    public void WriteJsonBytes_AlphaKeyframes_EmittedAsOpacity()
+    public void WriteJsonBytes_AlphaKeys_EmitBothFileValueAndOpacity()
     {
-        // The parser stores AlphaKeyframes as opacity (1 - file_value).
-        // The converter must emit alphaKeyframes[i].opacity.
-        // spec: Docs/RE/formats/effects.md §A.3.3 — "in-memory value is opacity": CONFIRMED.
-        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeStaticStateEffect());
+        // spec: Docs/RE/formats/effects.md §A.6 — file 0.0=opaque, 1.0=transparent: CONFIRMED.
+        // File value 0.3 → opacity = 1 - 0.3 = 0.7.
+        byte[] json = XeffJsonConverter.WriteJsonBytes(MakeKnownVelocitySizeRotationEffect());
         using var doc = JsonDocument.Parse(json);
-        var el = doc.RootElement.GetProperty("elements")[0];
-        var alphas = el.GetProperty("alphaKeyframes");
-        Assert.Equal(1, alphas.GetArrayLength());
-        // The fixture stores 0.7 opacity (parser has already done 1 - 0.3 = 0.7).
-        Assert.True(alphas[0].TryGetProperty("opacity", out var op),
-            "alphaKeyframes entries must expose 'opacity' field.");
-        Assert.Equal(0.7f, op.GetSingle(), precision: 4);
+        var alphaKeys = doc.RootElement.GetProperty("subEffects")[0].GetProperty("alphaKeys");
+        Assert.Equal(1, alphaKeys.GetArrayLength());
+
+        var key0 = alphaKeys[0];
+        Assert.True(key0.TryGetProperty("fileValue", out var fv));
+        Assert.Equal(0.3f, fv.GetSingle(), precision: 5);
+
+        Assert.True(key0.TryGetProperty("opacity", out var op));
+        Assert.Equal(0.7f, op.GetSingle(), precision: 4); // 1 - 0.3
     }
 }

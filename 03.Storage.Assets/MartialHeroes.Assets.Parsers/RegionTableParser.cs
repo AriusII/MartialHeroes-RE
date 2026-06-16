@@ -5,84 +5,121 @@ using MartialHeroes.Assets.Parsers.Models;
 namespace MartialHeroes.Assets.Parsers;
 
 /// <summary>
-/// Parser for <c>data/mapNNN/regiontableNNN.bin</c> — per-area sub-zone label table.
-/// Flat array of 32-byte records; no header.
-/// Known sample: 52 records per area (1 664 bytes).
+/// Parser for <c>data/mapNNN/regiontableNNN.bin</c> — per-area zone label + zone-type record table.
+/// Flat array of fixed <b>48-byte</b> records with no header; exactly 32 records = 1,536 bytes.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/misc_data.md §7.2 regiontableNNN.bin: SAMPLE-VERIFIED (stride and name field);
-/// coordinate fields: PLAUSIBLE.
-/// REGIONTABLE_RECORD_BYTES = 32.
-/// spec: Docs/RE/formats/misc_data.md §7.2 — "flat array of fixed 32-byte records; no header": SAMPLE-VERIFIED.
-/// ZERO rendering/engine dependencies.
+/// <para>
+/// Record layout (48 bytes per record):
+/// <code>
+///   +0x00  char[40]  zoneName   NUL-terminated CP949 zone display-name (minimap sub-zone caption)
+///   +0x28  u32 LE    zoneType   Zone-type enum {0=Safe, 1=OpenPvP, 2=Closed} — region-gating
+///   +0x2C  u32 LE    _tail      Trailing dword — no reader found; UNVERIFIED meaning
+/// </code>
+/// spec: Docs/RE/formats/region_grid.md §regiontable — "Record stride: 48 bytes — CONFIRMED (RE-AFFIRMED)".
+/// spec: Docs/RE/formats/region_grid.md §regiontable — zoneName char[40] @ +0x00: HIGH.
+/// spec: Docs/RE/formats/region_grid.md §regiontable — zoneType u32 @ +0x28: CONFIRMED.
+/// spec: Docs/RE/formats/region_grid.md §regiontable — _tail u32 @ +0x2C: UNVERIFIED.
+/// </para>
+/// <para>
+/// <b>Stride is 48, NOT 32.</b> An earlier interim reading proposed 32 bytes; that figure was
+/// REFUTED by the same loader that walks the 28-byte npc.arr spawn record on the same path —
+/// the "32" was a conflation of the two adjacent structures. The only stride that reconciles the
+/// table to exactly 32 × 48 = 1,536 bytes is 48.
+/// spec: Docs/RE/formats/region_grid.md §regiontable — "Stride is 48 not 32 (note on the conflation)": RE-AFFIRMED.
+/// </para>
+/// <para>
+/// The same file is consumed by <see cref="RegionZoneTableParser"/> for the zone-type gating path;
+/// this parser surfaces both the zone name and zone type together with the opaque tail.
+/// </para>
+/// <para>
+/// Any bytes present beyond offset 1536 (end of record 31) are silently ignored.
+/// </para>
+/// <para>ZERO rendering/engine dependencies.</para>
 /// </remarks>
 public static class RegionTableParser
 {
-    // REGIONTABLE_RECORD_BYTES = 32 (0x20).
-    // spec: Docs/RE/formats/misc_data.md §7.2 — "stride 32 bytes": SAMPLE-VERIFIED.
-    private const int RecordStride = 32; // 0x20
+    // Record stride: 48 bytes (0x30).
+    // spec: Docs/RE/formats/region_grid.md §regiontable — "Record stride: 48 bytes": CONFIRMED (RE-AFFIRMED).
+    // CORRECTION: was previously 32 (REFUTED). The "32" was a conflation with the adjacent 28-byte
+    // npc.arr record on the same loader path. 32 × 48 = 1,536 bytes total is the correct table size.
+    private const int RecordStride = 48; // 0x30
+
+    // Fixed record count: 32 slots (region ids 0..31).
+    // spec: Docs/RE/formats/region_grid.md §regiontable — "A fixed 32 records × 48 bytes = 1,536 bytes".
+    private const int RecordCount = 32;
+
+    // Expected minimum buffer size: 32 × 48 = 1,536 bytes.
+    private const int ExpectedMinSize = RecordCount * RecordStride; // 1,536
+
+    // zoneName char[40] @ +0x00 — NUL-terminated CP949 zone display-name (minimap sub-zone caption).
+    // spec: Docs/RE/formats/region_grid.md §regiontable — "zoneName char[40] @ +0x00": HIGH.
+    private const int ZoneNameOffset = 0x00;
+    private const int ZoneNameSize = 40;
+
+    // zoneType u32le @ +0x28 — zone-type enum {0=Safe, 1=OpenPvP, 2=Closed}.
+    // spec: Docs/RE/formats/region_grid.md §regiontable — "zoneType u32 @ +0x28": CONFIRMED.
+    private const int ZoneTypeOffset = 0x28; // 40
+
+    // _tail u32 @ +0x2C — no reader found; UNVERIFIED meaning.
+    // spec: Docs/RE/formats/region_grid.md §regiontable — "_tail u32 @ +0x2C: UNVERIFIED".
+    private const int TailOffset = 0x2C; // 44
 
     static RegionTableParser()
     {
         // Register CP949 provider once for the process (idempotent).
+        // spec: Docs/RE/formats/region_grid.md §regiontable — "The game text encoding is CP949".
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
     }
 
     /// <summary>
     /// Parses a <c>regiontableNNN.bin</c> file.
-    /// Record count = file_size / 32 (must be exact multiple).
+    /// Record count = file_size / 48, capped at 32 (extra bytes beyond 1 536 are ignored).
     /// </summary>
     /// <param name="data">Raw file bytes from the VFS.</param>
-    /// <returns>Array of sub-zone records in on-disk order.</returns>
-    /// <exception cref="InvalidDataException">Buffer length is not a multiple of 32.</exception>
+    /// <returns>Array of up to 32 zone records in region-id order (index = region id).</returns>
+    /// <exception cref="InvalidDataException">Buffer is shorter than 1 536 bytes.</exception>
     /// <remarks>
-    /// spec: Docs/RE/formats/misc_data.md §7.2 — "file_size / 32 = 52 records (1 664 bytes sample)": SAMPLE-VERIFIED.
-    /// Note: some records may carry garbage coordinate values at offsets 0x00/0x04 (two-sub-type issue);
-    /// validate CenterX/CenterZ against the area bounding box before use.
-    /// spec: Docs/RE/formats/misc_data.md §7.2 — "Two sub-types under one stride (open)": UNKNOWN discriminator.
+    /// spec: Docs/RE/formats/region_grid.md §regiontable — "32 records × 48 bytes = 1,536 bytes": CONFIRMED.
     /// </remarks>
     public static RegionTableRecord[] Parse(ReadOnlyMemory<byte> data)
     {
         ReadOnlySpan<byte> span = data.Span;
 
-        // spec: Docs/RE/formats/misc_data.md §7.2 — "file size must be exact multiple of 32": SAMPLE-VERIFIED.
-        if (span.Length % RecordStride != 0)
+        // Must contain at least 32 × 48 = 1,536 bytes.
+        // spec: Docs/RE/formats/region_grid.md §regiontable — "fixed 32 records × 48 bytes": CONFIRMED.
+        if (span.Length < ExpectedMinSize)
             throw new InvalidDataException(
-                $"regiontable*.bin parse error: buffer length {span.Length} is not a multiple of " +
-                $"stride {RecordStride} (REGIONTABLE_RECORD_BYTES). " +
-                "spec: Docs/RE/formats/misc_data.md §7.2.");
+                $"regiontable*.bin parse error: buffer length {span.Length} is too short for " +
+                $"{RecordCount} × {RecordStride}-byte records (expected ≥ {ExpectedMinSize} bytes). " +
+                "spec: Docs/RE/formats/region_grid.md §regiontable.");
 
-        int count = span.Length / RecordStride;
-        var results = new RegionTableRecord[count];
         var cp949 = Encoding.GetEncoding(949);
+        var results = new RegionTableRecord[RecordCount];
 
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < RecordCount; i++)
         {
             int recBase = i * RecordStride;
             ReadOnlySpan<byte> rec = span.Slice(recBase, RecordStride);
 
-            // center_x f32LE @ 0x00. PLAUSIBLE.
-            // spec: Docs/RE/formats/misc_data.md §7.2 — "center_x f32 @ 0x00: PLAUSIBLE".
-            float centerX = BinaryPrimitives.ReadSingleLittleEndian(rec[0x00..]);
+            // zoneName char[40] CP949 @ +0x00.
+            // spec: Docs/RE/formats/region_grid.md §regiontable — "zoneName char[40] @ +0x00 CP949": HIGH.
+            string zoneName = ReadNullTerminatedCp949(rec.Slice(ZoneNameOffset, ZoneNameSize), cp949);
 
-            // center_z f32LE @ 0x04. PLAUSIBLE.
-            // spec: Docs/RE/formats/misc_data.md §7.2 — "center_z f32 @ 0x04: PLAUSIBLE".
-            float centerZ = BinaryPrimitives.ReadSingleLittleEndian(rec[0x04..]);
+            // zoneType u32le @ +0x28 (= +40). Zone-type enum {0=Safe, 1=OpenPvP, 2=Closed}.
+            // spec: Docs/RE/formats/region_grid.md §regiontable zoneType enum — CONFIRMED.
+            uint zoneType = BinaryPrimitives.ReadUInt32LittleEndian(rec[ZoneTypeOffset..]);
 
-            // unknown_0x08 u8[8] @ 0x08. UNKNOWN. Zero in all observed records.
-            // spec: Docs/RE/formats/misc_data.md §7.2 — "unknown_0x08 u8[8] @ 0x08: UNKNOWN".
-            var unknown08 = data.Slice(recBase + 0x08, 8);
-
-            // sub_zone_name char[16] CP949 @ 0x10. PLAUSIBLE.
-            // spec: Docs/RE/formats/misc_data.md §7.2 — "sub_zone_name char[16] CP949 @ 0x10: PLAUSIBLE".
-            string subZoneName = ReadNullTerminatedCp949(rec.Slice(0x10, 16), cp949);
+            // _tail u32 @ +0x2C (= +44). No reader found; UNVERIFIED.
+            // spec: Docs/RE/formats/region_grid.md §regiontable — "_tail u32 @ +0x2C: UNVERIFIED".
+            uint tail = BinaryPrimitives.ReadUInt32LittleEndian(rec[TailOffset..]);
 
             results[i] = new RegionTableRecord
             {
-                CenterX = centerX,
-                CenterZ = centerZ,
-                Unknown0x08 = unknown08,
-                SubZoneName = subZoneName,
+                RegionId = i,
+                ZoneName = zoneName,
+                ZoneType = zoneType,
+                TailOpaque = tail,
             };
         }
 

@@ -80,6 +80,12 @@ public static class PacketRouter
     /// Reinterprets the leading <paramref name="wireSize"/> bytes of <paramref name="payload"/> as a
     /// read-only reference to <typeparamref name="T"/> in place — no copy, no allocation.
     /// </summary>
+    /// <remarks>
+    /// Because the wire structs are <c>[StructLayout(Sequential, Pack = 1)]</c>, field accesses on the
+    /// reinterpreted reference are unaligned loads (multi-byte fields can land at odd offsets). This is
+    /// correct and fast on the little-endian x64 target. A future big-endian or ARM64 headless-server
+    /// target would need explicit <c>BinaryPrimitives</c> accessors instead of this in-place reinterpret.
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">If the payload is shorter than the struct.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ref readonly T Reinterpret<T>(ReadOnlySpan<byte> payload, int wireSize)

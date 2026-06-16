@@ -139,6 +139,53 @@ public sealed class SessionHandshakeTests
         Assert.Throws<ArgumentException>(() => SessionHandshake.ParseKeyExchange(payload));
     }
 
+    [Fact]
+    public void Parse_L1_Plus_L2_Invariant_Is_The_Proven_Rejecter()
+    {
+        // L1 + L2 != 42 with both lengths fitting the payload, so the L1 + L2 == 42 branch (and not the
+        // overrun guards) is the rejecter. The check is reached before the scalar-tail check, and its
+        // message names the invariant. spec: crypto.md §6.2.1 ("the only enforced invariant is the sum").
+        byte[] payload = new byte[SessionHandshake.KeyExchangePayloadSize];
+        int cursor = 4; // skip headerA + headerB
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(cursor), 10); // L1 = 10
+        cursor += 4 + 10;
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(cursor), 10); // L2 = 10 (sum 20 != 42)
+        // Both digit arrays fit; the failure is the L1 + L2 invariant, not an overrun.
+
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => SessionHandshake.ParseKeyExchange(payload));
+        Assert.Contains("L1 + L2", ex.Message);
+        Assert.Contains("42", ex.Message);
+    }
+
+    [Fact]
+    public void Parse_Rejects_L1_That_Overruns_The_Payload()
+    {
+        // L1 declares more bytes than the payload holds — the modulus overrun guard must fire. spec §6.2.1.
+        byte[] payload = new byte[SessionHandshake.KeyExchangePayloadSize];
+        // After headerA+headerB (4) + L1 prefix (4) = cursor 8; a declared L1 = 100 overruns 62 bytes.
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4), 100);
+
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => SessionHandshake.ParseKeyExchange(payload));
+        Assert.Contains("L1", ex.Message);
+        Assert.Contains("overruns", ex.Message);
+    }
+
+    [Fact]
+    public void Parse_Rejects_L2_That_Overruns_The_Payload()
+    {
+        // A valid L1 then an L2 that overruns the remaining payload — the exponent overrun guard fires.
+        // spec §6.2.1.
+        byte[] payload = new byte[SessionHandshake.KeyExchangePayloadSize];
+        int cursor = 4;
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(cursor), 10); // L1 = 10 (fits)
+        cursor += 4 + 10;
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(cursor), 200); // L2 = 200 overruns
+
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => SessionHandshake.ParseKeyExchange(payload));
+        Assert.Contains("L2", ex.Message);
+        Assert.Contains("overruns", ex.Message);
+    }
+
     // --- Test helpers (synthetic; not capture data) -------------------------------------------------
 
     /// <summary>Serializes a synthetic 0/0 payload per §6.2.1: headerA(2)‖headerB(2)‖[LE L1]‖n‖[LE L2]‖e‖s1‖s2.</summary>

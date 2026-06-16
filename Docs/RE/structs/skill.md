@@ -1,5 +1,19 @@
 # Skill structures — disk catalog, wire, and runtime layouts (clean-room spec)
 
+> **Verification banner.** verification: **confirmed** for the loader/handler control-flow facts —
+> the `skills.scr` `1504 + N×8` record framing (sub-entry count `N` is a u8 at +1500), the 8→12-byte
+> sub-row runtime expansion, the **1508-byte runtime object** (1504-byte fixed block + a trailing
+> sub-entry-array pointer at +1504), the +0 `SkillId` / +4 `GlobalCategory` index keys, the four
+> skill-wire opcode→handler routings and their body sizes (5/33 = 20B, 4/41 = 24B, 4/150 ≥ 16B, and
+> the 5/52 **24-byte header**), and the per-handler ownership gates + primary result/mode/slot byte
+> offsets; **static-hypothesis** for the on-disk combat-stat block (§A.2.5, sample-verified but not
+> re-read from a consumer this pass), `skillneedset.scr`, and the runtime offsets carried from prior
+> analysis; **capture/debugger-pending** for the 5/52 per-target damage / HP / stamina **value
+> semantics** and any field-value meaning that needs a live wire capture.
+> ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida] · conflicts: none for
+> the skill layouts; the 5/52 §E.4 stub is **superseded** by the statically-recovered 24-byte header
+> (see §E.4 and `packets/5-52_actor_skill_action.yaml`).
+
 Neutral, offset-model of the skill subsystem the legacy client used: the on-disk skill catalog
 (`skills.scr`), its prerequisite-graph sidecar (`skillneedset.scr`), the runtime hotbar tables, and
 the skill-related wire packets. Promoted from dirty-room notes; rewritten, no decompiler identifiers,
@@ -22,19 +36,23 @@ no binary addresses. Design input for the **network-protocol-engineer** (skill p
 
 | Area | State |
 |------|-------|
-| `skills.scr` record framing (1504 fixed + N×8 sub-entries, count at +1500) | **SAMPLE-VERIFIED** — 3,737 records walked, file fully consumed, 0 remainder |
+| `skills.scr` record framing (1504 fixed + N×8 sub-entries, count `N` = u8 at +1500) | **CONFIRMED** (control-flow) — the loader reads the 1504-byte fixed block, takes `N` (u8) at +1500, allocates / reads `8 × N` sub-entry bytes, then advances by the total length; cross-checked by a sample walk (3,737 records, file fully consumed, 0 remainder) |
+| `skills.scr` sub-row expansion (8B disk → 12B runtime) + 1508B runtime object | **CONFIRMED** (control-flow) — runtime object = `new(1508)` (1504 fixed + sub-entry-array pointer at +1504); 8→12B expansion is byte-exact (disk +0→rt +0 word; disk +2 i16 → rt +4 i32 sign-extended; disk +4→rt +8 word; disk +6→rt +0xA byte) |
+| `skills.scr` index keys (+0 SkillId, +4 GlobalCategory) | **CONFIRMED** (control-flow) — primary catalog index keyed on +0; a secondary index keyed on +4 when non-zero |
 | Skill ID (+0), global category (+4), name (+8), class flag (+516), tier byte (+520) | **SAMPLE-VERIFIED** |
 | Constant marker +260 = `0x30000000` | **SAMPLE-VERIFIED** — identical across all 2,000 valid records |
 | Skill SORT (+1306), target/shape mode (+1308) | **CONFIRMED** |
 | Combat-stat block (+1304..+1370): range, AoE, max-hit, MP gate, recast, weapon req, stamina | **SAMPLE-VERIFIED** — values reproduced from sample for movement and combat skills |
 | Movement-cooldown (+1372) and movement-range (+1412) | **SAMPLE-VERIFIED** — mutually exclusive with +1334 across all valid records |
-| Sub-entry disk row (8 bytes) + runtime expansion (12 bytes) | **CONFIRMED** (framing); effect-code semantics mostly `LIKELY`/`UNVERIFIED` |
-| `skillneedset.scr` 4-byte edge records | **SAMPLE-VERIFIED** — 22 edges, exact |
-| Hotbar runtime tables + the four skill wire packets (5/33, 4/41, 4/150, 5/52) | as previously committed (see below) |
+| Sub-entry disk row (8 bytes) + runtime expansion (12 bytes) | **CONFIRMED** (control-flow framing); effect-code semantics mostly `LIKELY`/`UNVERIFIED` |
+| `skillneedset.scr` 4-byte edge records | **SAMPLE-VERIFIED** — 22 edges, exact (not re-read from a consumer this pass) |
+| Skill wire opcode→handler routing + body sizes (5/33=20B, 4/41=24B, 4/150≥16B, 5/52 24B header) | **CONFIRMED** (control-flow) — each via its dispatch slot and the handler's fixed read size; ownership gates + primary result/mode/slot byte offsets confirmed; field *value* semantics where noted remain capture-pending |
+| Hotbar runtime tables (240-slot id array, 8-byte stride; parallel i16 points) | **CONFIRMED** (control-flow) — both 5/33 and 4/41 write the same dual arrays |
 
 **Open items (full list at end):** prerequisite composite-ID decode; effect-code 1..42 semantics;
 magnitude `30001` sentinel; level-threshold-as-negative-duration; `+1372` reader code path; exact
-name-buffer length (24 vs 32); `+1368` cost semantics; 5/52 field layout.
+name-buffer length (24 vs 32); `+1368` cost semantics; 5/52 **per-target value semantics** (the 5/52
+*header* is now statically recovered — see §E.4).
 
 ---
 
@@ -443,7 +461,12 @@ hotbar.slot_points[slot_index] = skill_points
 
 ---
 
-## Part E — Skill wire packets  (unchanged, previously committed)
+## Part E — Skill wire packets
+
+> Opcode→handler **routing** and packet **body sizes** below are control-flow confirmed (each via its
+> dispatch slot and the handler's fixed read size); the **field value semantics** noted as `LIKELY` /
+> `UNVERIFIED` remain capture/debugger-pending (no live capture this campaign). §E.4 (5/52) was
+> rewritten this pass from statically-recovered control flow.
 
 ### E.1 SkillHotbarSlotSet — 20-byte wire packet (opcode 5/33)
 
@@ -495,21 +518,53 @@ string only** — the wire value may exceed 255; do not clamp the protocol value
 
 ### E.4 ActorSkillAction — skill-action broadcast (opcode 5/52), variable-length
 
-The richest skill handler: drives AoE projectile spawning, visual effects, and hit application. Only
-partial fields are recovered; field positions are **not yet pinned** (UNVERIFIED — needs a dedicated
-capture-backed pass before this can be specced as a struct).
+The richest skill handler: drives AoE projectile spawning, visual effects, and hit application.
+**Header layout now statically recovered** (this supersedes the prior "field positions not yet
+pinned" stub). The handler reads a **fixed 24-byte header** (payload @0x00..0x17), then `target_count`
+× 36-byte per-target records beginning at payload @0x18. The 24-byte header read and the 36-byte
+record stride are **control-flow confirmed**; the per-target *value* meanings are capture-pending.
 
-| Field | Conf | Meaning |
-|-------|------|---------|
-| `actor_id` | UNVERIFIED | Caster actor id. |
-| `skill_id` | UNVERIFIED | Skill being cast. |
-| `target_actor_id` | UNVERIFIED | Primary target actor id. |
-| `skill_aoe_count` | UNVERIFIED | AoE hit count; drives a split/clone loop. |
-| `world_x`, `world_z` | UNVERIFIED | Cast-origin float coordinates. |
+> **Authoritative wire spec.** This struct view is reconciled with — and must stay consistent with —
+> `Docs/RE/packets/5-52_actor_skill_action.yaml`, which carries the full corrected header and the
+> 36-byte target-record layout. Do not implement 5/52 from this section alone; use that YAML.
+
+#### E.4.1 Fixed 24-byte header (payload-relative) — CONFIRMED (control-flow), values capture-pending
+
+| Offset | Size | Type | Field | Conf | Meaning |
+|--------|------|------|-------|------|---------|
+| +0x00 | 1 | u8  | `caster_sort` | CONFIRMED | Caster actor sort (low byte of the composite actor key). |
+| +0x01 | 3 | —   | (pad) | CONFIRMED | Padding to +0x04. |
+| +0x04 | 4 | u32 | `caster_id` | CONFIRMED | Caster actor id (composite key high); resolved via the cached actor lookup. |
+| +0x08 | 1 | u8  | `cast_flag` | CONFIRMED | `0` selects the cancel/idle (motion) branch; non-zero = active cast. |
+| +0x09 | 1 | u8  | `basic_selector` | CONFIRMED | Basic/alias selector — value **0xFF = basic melee** (matches the C2S 2/52 "melee = slot 0xFF" anchor); also fires when the caster's actor state field == 14. |
+| +0x0A | 2 | —   | (pad) | CONFIRMED | Padding to +0x0C. |
+| +0x0C | 4 | u32 | `skill_id` | CONFIRMED | Skill id / entity key, resolved against the client skill/entity table. |
+| +0x10 | 1 | u8  | `action_code` | CONFIRMED | Action-shape code: `0` = single target; `0xC8..0xCB` = motion sub-ops; `0xCC` = AoE. The handler tests this byte `>= 0xC8` and `!= 0xCC` (the 200/202/203/204/232 result-code family). **There is no separate "SkillArg" dword between `skill_id` and `action_code`** — the prior mislabelled "SkillArg@0x10" is this `action_code`. |
+| +0x11 | 3 | —   | (pad / sub-field?) | UNVERIFIED | Pad-vs-subfield split capture-pending. |
+| +0x14 | 1 | u8  | `target_count` | CONFIRMED | Number of 36-byte records that follow; bounded `(0, 0x28]` (≤ 40). Drives the `36 × count` record read. Distinct from `action_code` — not co-located in one 0x14..0x17 dword. |
+| +0x15 | 3 | —   | (pad / sub-field?) | UNVERIFIED | Pad-vs-subfield split capture-pending. |
+
+#### E.4.2 Per-target record (36 bytes each, repeated `target_count` times)
+
+Stride 36 is **control-flow confirmed**; each record is forwarded to the target actor's per-actor
+animation/FX queue and feeds a floating damage number. The per-field *value* semantics below are
+**capture/debugger-pending** (carried from the packet YAML):
+
+| Record offset | Size | Type | Field | Meaning (capture-pending) |
+|---------------|------|------|-------|---------------------------|
+| +0x00 | 1 | u8  | `target_sort` | Target actor sort (lookup key). |
+| +0x04 | 4 | u32 | `target_id` | Target actor id (lookup key). |
+| +0x08 | 4 | i32 | `anim_hit_state` | `1` = a hit landed; selects the hit animation. |
+| +0x0C | 4 | i32 | `visible_damage` | Number rendered as a floating damage figure. |
+| +0x10 | 4 | — | (reserved) | Reserved word. |
+| +0x14 | 8 | i64 | `remaining_hp` | Remaining HP after hit (signed; negative on overkill; feeds the HP bar). |
+| +0x1C | 4 | i32 | `max_hp` | Feeds the HP bar. |
+| +0x20 | 4 | — | (reserved) | Tail / reserved. |
 
 On cast-confirm this handler also consumes the per-skill costs from the catalog entry (CastCost
-+1368, StaminaCost +1370) and arms the runtime recast slot. The protocol engineer must not implement
-5/52 from this stub; it requires a dedicated pass.
++1368, StaminaCost +1370) and arms the runtime recast slot. When `action_code == 0xCC` the handler
+treats the first record as an AoE origin and procedurally fans out sub-actors (no extra wire fields);
+`0xC8..0xCB` are motion sub-ops (animation toggles, usually no damage records).
 
 ---
 
@@ -559,7 +614,11 @@ discriminator received on spawn — **not** a per-skill cooldown table. Exact se
 
 ## Open questions
 
-- 5/52 ActorSkillAction field layout — UNVERIFIED, needs a dedicated capture-backed pass.
+- 5/52 ActorSkillAction — the **24-byte header layout is now statically recovered and
+  control-flow confirmed** (see §E.4 and `packets/5-52_actor_skill_action.yaml`); the per-target
+  36-byte record **stride** is confirmed, but the per-target *value* semantics (damage / HP / stamina
+  deltas) and the header pad-vs-subfield split at @0x11..0x13 / @0x15..0x17 remain
+  **capture/debugger-pending**.
 - PrerequisiteSkillId composite-id decode (e.g. 131307011) — UNVERIFIED schema.
 - ChainRef[0..8] and ChainUpgradePath[0..1] composite-id decode — UNVERIFIED.
 - EffectTypeCode semantics for codes ~1..42 — inferred from names only, provisional.
@@ -572,5 +631,8 @@ discriminator received on spawn — **not** a per-skill cooldown table. Exact se
 - Per-skill activation-mode byte semantics (UI panel routing) — UNVERIFIED.
 - Runtime recast-table layout beyond 240-slot indexing — not fully recovered.
 - `skillcategory.scr` (a likely category→name cross-reference table) — not yet analyzed.
-- All disk offsets are sample-verified against the committed `skills.scr` extract; runtime offsets
-  are inferences from prior analysis. No live network capture was available for the wire packets.
+- All disk offsets are sample-verified against the committed `skills.scr` extract; the loader-read
+  framing facts (1504+N×8, N@+1500, 8→12B expansion, 1508B runtime object, +0/+4 index keys) are
+  **control-flow confirmed**. Runtime offsets not exercised by the loader/handlers are inferences from
+  prior analysis. The wire-packet **routings and body sizes are control-flow confirmed**; no live
+  network capture was available, so the wire-field **value semantics** remain capture/debugger-pending.

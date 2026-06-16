@@ -1,4 +1,9 @@
 ---
+verification: confirmed            # the dominant tier for this doc's load-bearing facts (scene machine, frame loop, boot, login sub-states, world spawn re-derived from binary control-flow); wire-level opcode bytes are capture/debugger-pending
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida]             # add 'vfs-sample' only where a real asset sample corroborated (UI dialog IDs via msg.xdb, area inventory); noted inline as SAMPLE-VERIFIED
+conflicts: login credential wire opcode (key-string secure context vs literal C2S 2/1 byte form); 4/1-form arrival ordering; whether the display FRAMERATE config is truly inert vs the hardcoded 60 FPS cap — all capture/debugger-pending
 status: confirmed
 sample_verified: partial   # scene machine, frame loop, boot sequence CODE-CONFIRMED; network constants PLAUSIBLE; UI dialog IDs SAMPLE-VERIFIED via msg.xdb
 subsystems: [boot, scene_machine, frame_loop, login, server_select, char_select, world, ui, effects, sound, network, resource_pipeline, environment, terrain, skinning, anticheat]
@@ -73,17 +78,20 @@ OS process create
   D3D9 device creation (HAL, HW-VP|MT, X8R8G8B8, D32→D24X8→D24S8→D16 depth fallback,
                         IMMEDIATE present)
   Korean font table (15 slots: DotumChe / Dotum / BatangChe, HANGUL_CHARSET=129)
-  VFS mount: data.inf 24-byte header parsed (entry count at +8), 144-byte sorted TOC entries;
+  VFS mount: data.inf 24-byte header parsed (entry count at header +0x0C, the 4th dword),
+             144-byte sorted TOC entries, opened FILE_FLAG_RANDOM_ACCESS;
              data.vfs kept open for the session
         |
         v
 [State 1 — Login]
   LoginWindow constructed (~340 widgets from uiconfig.lua)
   lobby mini-protocol: port 10000 / server list
-  user enters credentials → LoginWindow internal sub-machine (network/handshake field +0x238)
-  C2S 2/1 login blob → S2C response → branch:
+  user enters credentials → LoginWindow internal handshake sub-machine (field +0x238)
+    credential validation → PIN / second-password modal (sub-state 31) → server-list fetch
+  credential handoff = a TAB-SEPARATED KEY string (account \t password \t PIN \t "host port")
+    consumed by the secure-context builder → join → branch:
     EnterGameAck (3/5) ─────────────────────────────> [State 2 — Load]
-    version/auth fail ─> dialog ─> stay in State 1
+    version/auth fail / 30000 ms watchdog timeout ─> dialog ─> stay in State 1
   user quits ─> State 6 (Quit)
 
 [State 2 — Load]   (also used before World; see §4)
@@ -115,15 +123,22 @@ OS process create
   logout / disconnect ─> State 4 (Character Select), NOT back to Login
 
 [State 6 — Quit]
-  engine shutdown → State 8
+  engine shutdown → writes state value 8 (exit)
 
 [State 7 — Error]
-  error.log written; modal dialog; net connection dropped → State 8
+  reason read from the GameState reason field → modal dialog; net connection closed
+  → writes state value 8 (exit)
 
-[State 8 — Exit]
-  resource teardown in reverse-singleton order
-  process exit
+[Exit — state value 8, NOT a 9th case]
+  the switch is bounds-checked (state <= 7, a jump table of 8 entries 0..7 plus a default);
+  writing state value 8 falls into the switch DEFAULT branch: resource teardown in
+  reverse-singleton order, then WinMain returns / process exit
 ```
+
+> **Scene-state count (corrected):** the WinMain switch has **exactly 8 top-level cases, states 0..7**.
+> The value **8 is a sub-state / exit sentinel**, not a 9th top-level case — it is what states 6 (Quit)
+> and 7 (Error) write to drop into the switch default (teardown + return). Earlier "states 0..8 /
+> nine-state lifecycle" phrasing is wrong: it is *states 0..7 (8 cases); 8 is the exit sentinel*.
 
 > **Key non-obvious edge:** in-game (state 5) transitions **back to character select (state 4)**,
 > not to login. Login is visited only once per process lifetime. The load/opening gate (state 2) is
@@ -169,9 +184,12 @@ network settings. All field indices and clamp ranges are in `specs/client_runtim
   `HANGUL_CHARSET` (129). Text rendering uses `D3DXCreateFontA`; fixed-advance layout (charWidth
   per character). Full 15-slot table in `specs/ui_system.md §6`.
   (CODE-CONFIRMED — see also `specs/client_runtime.md §0.6`.)
-- VFS mount: `data.inf` 24-byte header read; entry count at header byte offset +8; 144-byte
-  sorted TOC entries (path at +0, i64 data-offset at +104, i64 data-size at +112); `data.vfs`
-  file handle kept open for the process lifetime. (CODE-CONFIRMED — see `formats/pak.md`.)
+- VFS mount: `data.inf` 24-byte header read; **entry count at header byte offset +0x0C (the 4th
+  dword), not +0x08**; 144-byte sorted TOC entries (path at +0, i64 data-offset at +104, i64
+  data-size at +112). The `.inf` is opened with `FILE_FLAG_RANDOM_ACCESS` (not `SEQUENTIAL_SCAN`);
+  the `data.vfs` file handle is kept open for the process lifetime.
+  (Byte-layout authority is `formats/pak.md`, to be byte-witnessed in the VFS pass — cite as
+  CODE-CONFIRMED via control-flow, VFS byte-witness pending.)
 
 ### 2.2 Singleton construction order (CODE-CONFIRMED)
 
@@ -186,18 +204,28 @@ authoritative ordered list is in `specs/client_runtime.md §0.7` and `structs/ru
 
 > **Detail owner:** `specs/game_loop.md`, `specs/client_runtime.md §8`.
 
-### 3.1 Three-step body (CODE-CONFIRMED)
+### 3.1 Four-phase body (CODE-CONFIRMED)
 
 Every interactive screen (Login, Opening, Character Select, World) runs the same engine main loop.
-The loop is **uncapped** (no Sleep, no vsync; presentation interval = IMMEDIATE). Each iteration:
+The loop is **software frame-capped at a fixed 60 FPS** (NOT uncapped): a QueryPerformanceCounter-measured
+limiter sleeps each iteration to hold the target frame period. The target rate lives in the engine
+object's framerate field, seeded to `60.0f` in the engine constructor and never overwritten anywhere
+in the traced control-flow. The display-config `FRAMERATE` value has no consumer that reaches the
+throttle (statically inert) — so treat the cap as a hardcoded 60 FPS. The presentation interval is
+still IMMEDIATE (the frame pacing comes from the QPC limiter, not from vsync).
 
-**Step 1 — Message pump and deferred input dispatch.**
+> Whether the display-config `FRAMERATE` value is *truly* inert at runtime, or wired through a path
+> not visible statically, is (capture/debugger-pending). Implement the 60 FPS hardcoded cap.
+
+The loop has **four phases per iteration**, in order:
+
+**Phase 1 — Message pump and deferred input dispatch.**
 Win32 `PeekMessage` / `TranslateMessage` / `DispatchMessage` until the queue is empty, then
 a double-buffered deferred-event list is swapped and each queued UI/input event is dispatched
 through the input manager. A raw mouse/keyboard DirectInput thread is spawned once on the first
 pump iteration and runs concurrently thereafter. The Korean IME (IMM32) is serviced here.
 
-**Step 2 — Frame step (render sub-pipeline).**
+**Phase 2 — Scene render and present.**
 The active scene handler's frame-step callback is invoked once per iteration. Inside, the order is:
 
 1. Camera transform update (view matrix rebuild; frustum cull walk).
@@ -207,11 +235,15 @@ The active scene handler's frame-step callback is invoked once per iteration. In
 4. Device-lost detection and recovery loop (sleep 1000 ms on `DEVICELOST`; three-step reset on
    `DEVICENOTRESET`: release default-pool resources → reset → recreate default-pool resources).
 
-**Step 3 — Logic-tick sweep.**
+**Phase 3 — Round-robin logic-tick scheduler.**
 A round-robin scheduler walks registered tick subscribers. The scheduler advances approximately
 1.1% of registered subscribers per frame (floor of `count × 0.011`), spreading work across ~90
 frames at a typical rate. No leftover-time carry — a missed tick cannot be caught up. Logic systems
 that need guaranteed per-frame execution register as frame-step callbacks instead.
+
+**Phase 4 — Frame throttle.**
+The QPC-measured frame limiter computes the elapsed iteration time against the 60 FPS target period
+and sleeps the remainder, holding the loop at the fixed 60 FPS cadence.
 
 ### 3.2 Clock (CODE-CONFIRMED)
 
@@ -219,7 +251,7 @@ that need guaranteed per-frame execution register as frame-step callbacks instea
   Neither `GetTickCount` nor `QueryPerformanceCounter` feeds logic.
 - A global time-scale float (default 1.0) multiplies the raw `timeGetTime()` delta before passing
   it to most subsystems. Values below 1.0 produce slow-motion.
-- Day/night cycle tick runs as a **pre-draw callback** inside Step 2 render pass A, gated ≥ 50 ms
+- Day/night cycle tick runs as a **pre-draw callback** inside Phase 2 render pass A, gated ≥ 50 ms
   wall-time per tick (shared gate with terrain water UV-scroll animation).
   (CODE-CONFIRMED — see `specs/client_runtime.md §8.4`.)
 
@@ -229,13 +261,19 @@ that need guaranteed per-frame execution register as frame-step callbacks instea
 
 ### 4.1 Overview (CODE-CONFIRMED)
 
-WinMain contains a while(1) switch/case over a single global engine-state integer. Each case:
+WinMain mounts the VFS once, then runs a `while(1)` switch/case over a single global engine-state
+integer record (a 3-int record: `[state, sub-state, reason]`). The switch is **bounds-checked
+(state ≤ 7) and dispatches through a jump table of exactly 8 entries (states 0..7) plus a default
+branch**. There is no 9th top-level case — the value **8 is the exit sentinel** written by the
+Quit (6) and Error (7) cases to fall into the switch default (teardown + WinMain return). See §4.2.
+
+Each top-level case:
 1. Writes the *next* engine state immediately (pre-loop intent).
 2. Constructs the scene handler.
-3. Calls `Engine_MainLoop` (the three-step loop from §3), which runs until a one-byte run-flag
-   is cleared.
+3. Calls the shared engine main loop (the four-phase loop from §3), which runs until a one-byte
+   run-flag is cleared.
 4. Destructs the handler.
-5. Falls through to the outer while(1) which re-dispatches on the current engine-state value.
+5. Falls through to the outer `while(1)` which re-dispatches on the current engine-state value.
 
 The loop-break mechanism is a dedicated function that clears the global run-flag. State transitions
 are effected by writing the desired next-state integer and then calling this break function.
@@ -251,9 +289,15 @@ Network-received transitions and user-action transitions both use the same mecha
 | 3 | Opening | `COpeningWindow` — intro sequence | ~720 B |
 | 4 | Character Select | `SelectWindow` | ~6280 B |
 | 5 | In-game | `MainHandler` + full scene graph | ~200 B base |
-| 6 | Quit | Inline — engine shutdown path | — |
-| 7 | Error | Inline — modal dialog + error.log | — |
-| 8 | Exit | Inline — teardown and WinMain return | — |
+| 6 | Quit | Inline — engine shutdown path; writes state value 8 | — |
+| 7 | Error | Inline — modal dialog (reason from the GameState reason field); writes state value 8 | — |
+| 8 | *(exit sentinel — NOT a case)* | Switch **default** branch — teardown and WinMain return | — |
+
+> **State count (CODE-CONFIRMED, corrected):** there are **8 top-level cases (states 0..7)**.
+> The switch is bounds-checked (`state ≤ 7`) over a jump table of 8 entries plus a default branch.
+> **Value 8 is the exit sentinel, not a 9th case** — it is what cases 6 and 7 write so the next
+> `while(1)` iteration falls into the switch default (resource teardown + WinMain return). Earlier
+> "states 0..8 / nine-state" phrasing is wrong.
 
 > Note: a `SimpleLoadHandler` class exists in the binary with a complete constructor but zero
 > callers. It is dead code from an earlier iteration. (CODE-CONFIRMED)
@@ -275,16 +319,23 @@ Network-received transitions and user-action transitions both use the same mecha
 | 3 Opening | Intro complete | 4 Select | — |
 | 4 Select | CharacterList (3/1) received | 4 Select | 8 |
 | 4 Select | Pre-loop case body (enter-game) | 5 In-game | 8 |
-| 4 Select | Quit / exit command | 6 Quit | 8 |
-| 4 Select | CharMgmt result 202/203/232 | 2 Load | — |
-| 4 Select | CharMgmt result 1..4 or 7 | 7 Error | 5 |
+| 4 Select | Quit / exit command (action-result code 0) | 6 Quit | 8 |
+| 4 Select | Action-result code 202/203/232 (S2C 3/100) | 2 Load | — |
+| 4 Select | Action-result code 1..4 or 7 (S2C 3/100) | 7 Error | 5 |
 | 5 In-game | Default on loop-exit | **4 Select** | — |
 | 5 In-game | Quit / logout | 6 Quit | 8 |
-| 5 In-game | 4/1 GameStateTick, actor create fail | 4 Select | — |
-| 5 In-game | CharMgmt result ≠ 0, local player | 7 Error | 8 |
-| 6 Quit | Case body | 8 Exit | — |
-| 7 Error | Case body | 8 Exit | — |
+| 5 In-game | 4/1 GameStateTick (form 1), actor create fail | 4 Select | — |
+| 5 In-game | Action-result code ≠ 0, local player (S2C 3/100) | 7 Error | 8 |
+| 6 Quit | Case body | writes value 8 (exit sentinel → default branch) | — |
+| 7 Error | Case body | writes value 8 (exit sentinel → default branch) | — |
 | Any | `WM_QUIT` | (run-flag cleared) | — |
+
+> **Opcode attribution (CODE-CONFIRMED, corrected):** the result codes 202/203/232 and 1..4/7 above
+> are handled by the **generic char/lobby action-result S2C 3/100**, NOT by the char-manage result
+> S2C 3/7. The 3/7 handler handles only refresh / rename / delete subtypes and the same-day delete
+> cooldown — see §5.3.2. The *transition targets* above are correct; only the earlier "CharMgmt"/3/7
+> attribution was wrong. (Wire-level opcode bytes: capture/debugger-pending; the prose attribution
+> here is static.)
 
 > `OPENNING/SKIP`: the INI key typo (two N's) is authentic — `[OPENNING]` section, key `SKIP`.
 > If absent by default in all shipping clients, state 2 → 4 is effectively the production path.
@@ -293,12 +344,40 @@ Network-received transitions and user-action transitions both use the same mecha
 ### 4.4 Scene-aware disconnect routing (CODE-CONFIRMED)
 
 A scene-aware quit dispatcher reads the current engine state and picks the appropriate teardown:
-- State 2 → write state 6 / sub-state 2 (quit during load).
-- State 4 → send a network leave message (no direct state write; server reply drives change).
-- State 5 → write state 6 / sub-state 8 (logout cleanup; SFX 861010106).
+- State 2 → write state 6 / sub-state 2 (quit during load); SFX 861010106; schedules a 1000 ms
+  timed-engine-event (the loading-done bridge, see §4.5).
+- State 4 → send a network leave message (no direct state write; the server reply drives the change).
+- State 5 → write state 6 / sub-state 8 (logout cleanup); SFX 861010106; schedules a 1500 ms timed
+  event; tears down world UI / actor slots.
 - State 7 is the generic error path for unexpected disconnects from any state.
 
+The in-world leave/logout teardown additionally disables the keepalive (clears the master-enable
+global, see §6.4), emits SFX 861010106, and writes state 6 / sub-state 8.
+
 Full network-driven transition table: `specs/client_runtime.md §7.5.2`.
+
+### 4.5 Timed-engine-event bridge and the login watchdog (CODE-CONFIRMED)
+
+The client uses a single **universal timed-engine-event mechanism** (a scheduled "fire after N ms"
+engine event, internally identified as event id **10001**) to bridge asynchronous network replies
+and teardown to deterministic state writes. Every error / quit / disconnect path enqueues a 10001
+event with a delay; observed delays are **1000 / 1500 / 5000 / 10000 / 30000 ms**. When the timer
+fires, its handler performs the deferred state write (advance or abort). This is the common spine
+under §4.4 and the disconnect routing in §6.4.
+
+A specific instance is the **30000 ms login watchdog**: at the end of the login join handshake
+(§5.1.3) the client schedules a 30000 ms 10001 event; if the server never returns `EnterGameAck`
+(3/5) within that window, the watchdog drives the error path. (Wire-level dependence on a live
+server reply: capture/debugger-pending.)
+
+### 4.6 Error-state reason field (CODE-CONFIRMED)
+
+State 7 (Error) selects its dialog text from the **reason field of the GameState record** (the
+third integer of the `[state, sub-state, reason]` record). When the sub-state is 8 and the reason
+is non-zero, the handler formats a per-code message from the reason value; otherwise it maps the
+sub-state to a generic message. The reason field is how a server-supplied char/lobby action-result
+code (written by the S2C 3/100 handler, §5.3.2) reaches the error dialog. The handler then closes
+the NetClient and shows the modal.
 
 ---
 
@@ -329,14 +408,20 @@ click-release event via the embedded command handler. Corrected action-id map:
 | actionId | ASCII | Widget | Behaviour |
 |---------|-------|--------|-----------|
 | 102 | `f` | Server-list button | Reveal server-list panel |
-| 103 | `g` | OK/Login button | Version gate → sub-state 29 |
-| 104 | `h` | Save-ID checkbox | Persist/clear `OPTION_ID` in DoOption.ini |
-| 105 | `i` | Quit/Help strip | Throttled re-fetch (sub-state 34) |
-| 111 | `o` | Option/tab 1 | Option page select |
-| 112 | `p` | Option/tab 2 | Option page toggle |
-| 113 | `q` | Quit-confirm Yes #1 | Advance to quit |
-| 114 | `r` | Quit-confirm Yes #2 | Same |
-| 115–119 | — | Server name-strip ×5 | Server entry select (active at sub-state 37) |
+| 103 | `g` | OK/Login button | Version gate (msg 2204 on fail → quit) → sub-state 29 |
+| 104 | `h` | Save-ID checkbox | Persist account/ID into the persisted settings (Save-ID) |
+| 105 | `i` | Re-fetch strip | 10000 ms throttled server-list re-fetch (→ sub-state 34) |
+| 111 | `o` | Option page select | Sets page-state 5 (see §5.1.3 page-state machine) |
+| 112 | `p` | Server-list button (2nd) | **Second server-list reveal — same handler as `f`**, NOT an option toggle |
+| 113 | `q` | Panel hide #1 | **Hides a panel, then sets sub-state 34 (server-list RE-FETCH)** — NOT a quit-confirm |
+| 114 | `r` | Panel hide #2 | Same as `q` (hide panel → sub-state 34 re-fetch) |
+| 115–124 | — | Server name-strip / pager | Server entry pager: at sub-state 37, page = `actionId − 115` (repaint only, no commit) |
+
+> **Action-id corrections (CODE-CONFIRMED):** earlier versions mapped 112 `p` to "Option/tab 2
+> toggle" and 113/114 `q`/`r` to "Quit-confirm Yes → advance to quit". Both are wrong: `p` is a
+> second server-list reveal sharing the `f` handler, and `q`/`r` hide a panel and re-enter the
+> server-list fetch at sub-state 34. The actual server-plate *commit* is class-7 plate-pick
+> (left/right pager actions 400/401 at sub-state 37) — see §5.2.2.
 
 Clicking **Login** does NOT send a packet immediately; it runs a local validation gate (ID minimum
 length ≥ 4, PW non-empty) and then advances the internal network/handshake sub-machine.
@@ -360,21 +445,50 @@ Full per-widget atlas table: `specs/ui_system.md §8.1`.
 #### 5.1.2 Network surface
 
 Login uses a *lobby mini-protocol*: a separate synchronous blocking socket opened to port 10000,
-distinct from the game socket (which is not yet open at this stage). The login credential packet
-is C2S opcode **2/1** (major 2, minor 1). On success, `EnterGameAck` (opcode 3/5) is received,
-storing the session token and triggering the state transition to Load. Full wire layout: `opcodes.md`
-and `packets/c2s_login.yaml`.
+distinct from the game socket (which is not yet open at this stage).
 
-#### 5.1.3 Login sub-state machine (CODE-CONFIRMED — corrected)
+The login **credential handoff is a tab-separated KEY string**, not a literal `2/1` byte blob. At the
+end of the handshake (§5.1.3) the client assembles a single string of four tab-separated fields —
+`account` `\t` `password` `\t` `PIN` `\t` `"host port"` — from the ID and PW text-boxes, the PIN
+captured by the second-password modal, and the resolved channel endpoint. Field caps are: account
+< 20 chars, password < 17 chars, PIN < 5 chars. This string is consumed by the secure-context
+builder, which establishes the authenticated connection. On success, `EnterGameAck` (opcode 3/5) is
+received on the game socket, storing the session token and triggering the state transition to Load;
+auth/version failure surfaces a dialog and the client stays in Login.
 
-`LoginWindow` runs an internal network/handshake sub-machine at object offset `+0x238`
-(distinct from the UI page index at `+0x17C`). Sub-states 2–41 are documented in
-`specs/login_flow.md` and `specs/ui_system.md §11.3`. Key corrections from earlier versions:
+> The exact *wire form* of the credential submission — whether the secure-context builder ultimately
+> emits a literal C2S **2/1** packet, or a different framing — is **(capture/debugger-pending)**; the
+> static path shows only the key-string → secure-context construction, not a `2/1` opcode on this
+> path. Treat the "2/1" opcode label as provisional. Full wire layout (once captured): `opcodes.md`
+> and `packets/c2s_login.yaml`.
 
-- Sub-state **29** is *OK-button credential validation* (ID length check + PW check + Save-ID
-  persist), **not** a server-list trigger. The server-list fetch begins at sub-state **34**.
-- Sub-state **31** is *EULA / terms-of-service accept overlay*, **not** a help screen.
-- Sub-state **33** is the transition that begins the actual server-list fetch thread (port 10000).
+#### 5.1.3 Login: two parallel machines (CODE-CONFIRMED — corrected)
+
+`LoginWindow` runs **two separate state fields** that earlier drafts conflated:
+
+- **UI page-state** at object offset `+0x17C` — driven by the event handler. Values 4 / 5 / 6 select
+  which login page is shown (e.g. action `o` sets page-state 5; pressing Enter while on page-state 6
+  enters credential validation at handshake sub-state 29).
+- **Network/handshake sub-state** at object offset `+0x238` — driven by the per-frame tick callback.
+  This is the handshake/join machine (sub-states 2–41), documented in `specs/login_flow.md` and
+  `specs/ui_system.md §11.3`.
+
+Key handshake sub-states (corrected from earlier versions):
+
+- Sub-state **1 → 2**: plays the login SFX 861010105 (2D, category 2) and advances.
+- Sub-state **29** is *OK-button credential validation*: ID length `< 4` → dialog msg 4025; empty PW
+  → dialog msg 4026; otherwise it seeds the account into the secure context and **opens the PIN /
+  second-password modal**, setting sub-state 31. (It is **not** a server-list trigger.)
+- Sub-state **31** is the **PIN / second-password modal** (a second-password entry overlay shown
+  immediately after credential validation) — **not** an EULA / terms-of-service overlay and **not**
+  a help screen. **There is no EULA / terms-accept path anywhere in the login machine.**
+- Sub-state **32** polls the modal (visible + submitted) and advances to **33**.
+- Sub-states **33 / 34 / 35** start the server-list fetch thread (port 10000); a no-servers reply
+  shows dialog msg 4027, a connection failure shows msg 4028.
+- Sub-states **37 / 38** are the server-plate pick (§5.2.2): on commit, the chosen server is persisted
+  (Last-server) and the channel endpoint fetched.
+- Sub-state **41** builds the credential **key string** and performs the join handoff (§5.1.2),
+  then schedules the 30000 ms login watchdog (§4.5).
 
 #### 5.1.4 Data dependencies
 
@@ -384,6 +498,13 @@ and `packets/c2s_login.yaml`.
 - `DoOption.ini` for persisted last-server selection (key `OPTION_ID`).
 - Atlas files: `data/ui/login_slice1.dds`, `data/ui/loginwindow.dds`,
   `data/ui/loginwindow_02.dds`, `data/ui/inventwindow.dds`.
+
+#### 5.1.5 Curtain intro animation (CODE-CONFIRMED)
+
+The login screen opens with a **vertical-slide curtain** animation driven by a global accumulator
+(not a window member). The tick advances the accumulator by **+5 per tick** up to a threshold of
+**222**; below a 200-unit sub-threshold it also re-anchors a child widget. The result is a curtain
+that slides vertically into place as the login window appears. (Detail: `specs/frontend_scenes.md §login`.)
 
 ---
 
@@ -406,9 +527,16 @@ Server list is fetched by network query, not read from a local file. The protoco
    name at +0, IP string at +256) → hardcoded fallback IP `211.196.150.4`.
 2. **Server-list query:** sent to port 10000. Response contains 8-byte records per server:
    `server_id` (u16), `status_code` (i16), `load` (i16), `open_time` (i16). (CODE-CONFIRMED)
-3. **Channel endpoint:** client opens a second request to port `10000 + server_id`. The server
-   returns an ASCII `"host port"` string in the first 30 bytes of the response. The game socket is
-   then opened to that `host:port`. (CODE-CONFIRMED)
+3. **Plate pick (handshake sub-state 37):** the server list is shown as selectable plates; the event
+   handler routes a class-7 plate-pick — pager actions **400 (LEFT) / 401 (RIGHT)** — to a record at
+   the 8-byte stride. A plate is **selectable only when `status_code == 0` and `load < 2400`**. On
+   commit the chosen server is persisted as the Last-server value and the machine advances to
+   sub-state 38. (CODE-CONFIRMED)
+4. **Channel endpoint (handshake sub-state 38):** client opens a second request to port
+   `10000 + server_id`. The server returns an ASCII `"host port"` string in the first 30 bytes of
+   the response. The game socket is then opened to that `host:port`. (The `10000 + server_id`
+   arithmetic lives in the fetch-thread body; CODE-CONFIRMED control-flow, exact wire bytes
+   capture/debugger-pending.)
 
 #### 5.2.3 Persistence
 
@@ -490,19 +618,29 @@ Five C2S opcodes govern character management:
 | 1/13 | 18 bytes | Rename character |
 | 1/14 | 1 byte | Delete character |
 
-> **Opcode 1/6 collision note:** analyst notes show opcode major=1, minor=6 labelled for both
-> "create character" (character-management protocol, 52-byte payload) and what earlier notes called
-> a login credential operation. This may reflect two distinct major-channel assignments sharing
-> minor=6, or a mis-annotation. This is tracked as OQ-PROTO-01 — see §9.
+> **Opcode 1/6 "collision" — RESOLVED (CODE-CONFIRMED):** there is no collision. C2S **1/6 is
+> create-character** (character-management protocol, 52-byte payload). The login credential path does
+> **not** send a 1/6 packet — it uses the tab-separated key-string secure-context handoff (§5.1.2).
+> The earlier "login operation at major=1 minor=6" was a mis-annotation. OQ-PROTO-01 is closed.
+
+Beyond the five C2S opcodes above, the char/lobby char-management S2C side also carries the
+**char-manage result S2C 3/7** (refresh / rename-applied / delete-confirmed subtypes plus the
+same-day delete-cooldown notice) and the **generic char/lobby action-result S2C 3/100** (routes
+result codes to the Load / Error / Quit state writes, see §4.3). These are distinct opcodes: 3/7
+handles only the manage subtypes; 3/100 carries the action-result codes that the §4.3 transition
+table keys on. (Wire-level opcode bytes: capture/debugger-pending.)
 
 **Version token in 1/9:** field computed as `10 × game.ver[field5] + 9`. (CODE-CONFIRMED)
 
-**Enter-world sequence:** C2S 1/9 is sent; the S2C `CharMgmt result = 0` acknowledgement with
-local player present sets the confirm-enter flag; `SelectWindow_End` writes next-state = 5
-(In-game) and calls the run-flag break.
+**Enter-world sequence:** C2S 1/9 is sent; the S2C generic action-result (3/100) acknowledgement
+with result code 0 and the local player present sets the confirm-enter flag; the select-window end
+path writes next-state = 5 (In-game) and calls the run-flag break.
 
 **SpawnDescriptor cache:** on enter-world, the 880-byte SpawnDescriptor and an additional 96-byte
 stats block are copied to a session-scoped buffer for use by `MainHandler` at world entry.
+
+**Audio teardown on enter:** the select-window enter path **stops the loading BGM 920100200** as
+part of leaving the character-select scene. (CODE-CONFIRMED)
 
 #### 5.3.3 Data dependencies
 
@@ -537,23 +675,42 @@ On entering State 5, the case body constructs `MainHandler` and calls `BuildGame
    per-frame update callback. HUD panel tree activated (community panel, character-billboard
    panel, link-combo panel, rank-progress panel, slot panels).
 
-#### 5.4.2 Spawn from network (CODE-CONFIRMED)
+#### 5.4.2 Spawn from network — the two-form 4/1 handler (CODE-CONFIRMED)
 
-Player spawn is triggered by S2C opcode **4/1** (GameStateTick), body approximately 9100 bytes
-(0x238C). Player world position is extracted from:
+World state and player spawn are both carried by S2C opcode **4/1** (GameStateTick), body
+approximately 9100 bytes (0x238C). **The handler is two-form, selected by body byte 0:**
+
+- **Form 0 — position / status update.** A lightweight update of the existing world (player and
+  actor positions / status). No spawn, no terrain (re)init; early return after applying the update.
+- **Form 1 — world-entry full materialize.** Copies the actor / world mirror blocks to their global
+  tables, builds or repositions the local player, and performs the spawn sequence below. First-entry
+  vs re-entry is distinguished by whether the local-player pointer is already set.
+
+There is **no separate S2C 4/3 BillingInfo materialize** — the materialize lives entirely in form 1
+of this 4/1 handler. (The billing S2C family is on **major 1**, not major 4 — see §5.4.6.)
+
+In form 1, player world position is extracted from:
 - X coordinate: at body offset +0x2374 (f32)
 - Z coordinate: at body offset +0x2378 (f32)
 - Y coordinate: **always forced to 0.0** — ground height is determined later by terrain sampling.
 
-The packet also carries map/scenario code (body +0x00C), hour-of-day, area id, and bulk actor
-mirror blocks.
+The packet also carries map/scenario code (body +0x00C), the day / hour-of-day fields, area id, and
+bulk actor mirror blocks.
+
+**Area selection by date/time (CODE-CONFIRMED):** before terrain init, form 1 calls a
+select-area-by-date/time routine, passing the day / hour fields from the 4/1 body. The selected area
+governs which environment/terrain set is brought in (this is why the same map code can resolve to a
+different seasonal/time variant).
 
 Immediately after reading spawn coordinates, `Terrain_InitFirstRing_3x3` is called, loading the
 3×3 cell ring centred on the spawn position. Log line emitted: "first terrain init (x, z, area)".
 
-**Alternate entry path:** S2C opcode **4/3** (BillingInfo) runs an identical materialize sequence
-(place at Y=0, stream 3×3 ring, fire FX/SFX/BGM) and is an alternate trigger used in some billing
-configurations. Which arrives first relative to 4/1 is an open item (OQ-PROTO-03).
+If the first-entry actor create fails, the handler routes back to Character Select (state 4) — see
+§4.3.
+
+> Form-arrival ordering — whether a client first sees a form-1 materialize or a form-0 update on
+> world entry, and the relative ordering against the major-1 billing family — is
+> **(capture/debugger-pending)**.
 
 **Spawn effects and audio** (CODE-CONFIRMED):
 
@@ -610,6 +767,14 @@ After the final pass: `IDirect3DDevice9::Present`.
 - Effect manifests: `bmplist.lst`, `xobj.lst`, `xeffect.lst`, `totalmugong.txt`,
   `itemjointeff.txt`, `mobjointeff.txt`, `itemswordlight.txt`, `mobswordlight.txt`.
 - `msg.xdb` for all in-world dialog and HUD text.
+
+#### 5.4.6 Billing S2C family (CODE-CONFIRMED — corrected location)
+
+Billing notices arrive on **S2C major 1** (not major 4, and not a 4/3 alternate spawn). The observed
+minors are: subscription **deactivated**, subscription **activated**, **expiry notice**, and
+**letter received**. These are presentation/notification messages handled alongside the world
+opcodes; they do **not** drive a scene-state transition or a spawn. (Wire-level opcode bytes and the
+exact minor assignments: capture/debugger-pending; the prose family is static-confirmed.)
 
 ---
 
@@ -772,7 +937,15 @@ Three cooperating threads (CODE-CONFIRMED):
 |--------|------|
 | IO-completion | `WSAWaitForMultipleEvents`, overlapped recv/send, raw frame enqueue |
 | Network worker | Recv-queue pop → message-bus hop → handler dispatch |
-| Keepalive | Sends C2S 2/10000 ping every ~20 s; suppressed by flag at object offset +82364 (cleared on 4/1 GameStateTick) |
+| Keepalive | Sends C2S **2/112** ping (1-byte payload) every ~20 s; gated by a master-enable global (see below) |
+
+**Keepalive opcode (CODE-CONFIRMED — corrected):** the keepalive is **C2S 2/112** (major 2,
+minor 112 = 0x70) with a **1-byte payload**, NOT 2/10000. It is governed by a dedicated
+**master-enable global**: the sender enables the keepalive on **World entry** (state 5 case body)
+and disables it on **world leave / logout**. This master-enable is a *distinct* mechanism from the
+per-send suppress byte at NetClient object offset +82364 (that byte is set by every C2S send and
+cleared at the start of the 4/1 and 3/1 handlers). (Wire-level: the 2/112 opcode is static-confirmed
+from the send path; an on-the-wire capture remains capture/debugger-pending.)
 
 All handler dispatch happens on the **frame thread** (message-bus hop), not on the IO thread.
 (CODE-CONFIRMED — handlers may read/write game state without additional locks.)
@@ -896,7 +1069,7 @@ interaction. Empty cells = no direct interaction observed.
 | Initiator ↓ \ Target → | UI/GU* | Effects | Sound | Network | Resource | Environment | Terrain | Actor/Skin | Anti-cheat |
 |------------------------|--------|---------|-------|---------|----------|-------------|---------|------------|------------|
 | **Scene machine** | Constructs scene handlers (Login/Select/World); widget trees via uiconfig.lua | — | Entry BGM trigger (910066000) | State transitions via S2C packets | BulkAssetLoader on states 2 → 4/5 | — | — | Preview in char-select | XTrap gate at state 1 |
-| **Frame loop** | HitTest + Draw each frame | Per-frame tick (elapsed-ms / keyframe lerp / geometry build) | Ambient clock tick (1000/3000 ms accum) | Keepalive thread (parallel; flag at +82364) | — | Pre-draw day/night tick (pass A, ≥50 ms gate) | — | LBS deform + animate | — |
+| **Frame loop** | HitTest + Draw each frame | Per-frame tick (elapsed-ms / keyframe lerp / geometry build) | Ambient clock tick (1000/3000 ms accum) | Keepalive thread (C2S 2/112, parallel; master-enable global) | — | Pre-draw day/night tick (pass A, ≥50 ms gate) | — | LBS deform + animate | — |
 | **UI/GU*** | — | Button hover FX (PLAUSIBLE) | Login SFX on sub-states (e.g. 861010105 at sub-state 2) | Login/select/chat packets sent on button actionId | msg.xdb string load | — | — | 3D preview render (GUCanvas3D) in char-select | — |
 | **Effects** | Damage number overlay draw | — | SFX trigger on effect events (totalmugong.txt) | — | Lazy-load xeffect.lst, bmplist.lst, xobj.lst | — | MapXEffect world-space placement | JointXEffect bone attachment (bone_source_enum) | — |
 | **Sound** | Volume slider UI binding | — | — | Clock sync via 5/18 (game-hour → ambient re-eval) | Load .bgm/.bge/.eff/.wlk/.run tables | Day/night hour gates ambient re-pick | Mud-cell ambient lookup (offsets +0x02–+0x07) | Footstep SFX from actor visual fields +108/+112 | — |
@@ -942,29 +1115,31 @@ implementation, and which satellite spec owns the investigation.
 
 ### 9.1 Protocol / opcodes
 
-**OQ-PROTO-01 — C2S 1/6 opcode collision.**
-Character management opcode 1/6 (52-byte "create character" payload) and a login-path operation
-also labelled major=1, minor=6 appear in different analyst notes. This may reflect two different
-major-channel assignments sharing the same minor, or an annotation error. **Implementation risk:
-high** — sending the wrong payload to an auth endpoint could cause disconnect or account lock.
-Owned by `opcodes.md` + protocol analyst. (Flagged — unresolved.)
+**OQ-PROTO-01 — C2S 1/6 opcode collision. RESOLVED.**
+There is no collision: C2S 1/6 is create-character (52-byte payload). The login credential path uses
+the tab-separated key-string secure-context handoff (§5.1.2), not a 1/6 packet. The earlier
+"login operation at 1/6" was a mis-annotation. (Closed by the 2026-06-16 re-confrontation.)
 
-**OQ-PROTO-02 — Auth result wire format.**
-The exact byte layout of the S2C auth success/failure response to C2S 2/1 is not in the current
-committed specs. The sub-state-machine in `specs/login_flow.md` indicates a multi-step handshake,
-but the field offsets within the auth result blob are unconfirmed. Owned by
-`packets/s2c_auth.yaml` (pending).
+**OQ-PROTO-02 — Auth result wire format. (capture/debugger-pending)**
+The login credential submission is statically traced as a tab-separated key-string consumed by the
+secure-context builder (§5.1.2); success surfaces as `EnterGameAck` (S2C 3/5). The exact *on-the-wire*
+byte form of the credential submission — including whether a literal C2S 2/1 packet is emitted — and
+the field offsets of the auth result blob are not recoverable statically. Needs a live capture.
+Owned by `packets/s2c_auth.yaml` + `packets/c2s_login.yaml` (pending).
 
-**OQ-PROTO-03 — 4/1 vs 4/3 ordering.**
-Both GameStateTick (4/1) and BillingInfo (4/3) run the materialize sequence (place at Y=0, stream
-3×3 ring, fire FX/SFX/BGM). Which arrives first, whether 4/3 is a post-billing re-trigger, and
-whether double-firing materialize FX 310000001 is observable needs a live capture. Owned by
-`specs/client_runtime.md §9.5` / `packets/s2c_billing.yaml` (pending).
+**OQ-PROTO-03 — 4/1 form-arrival ordering. (capture/debugger-pending)**
+The premise of an alternate S2C 4/3 BillingInfo materialize is dissolved: the materialize lives
+entirely in **form 1 of the two-form 4/1 handler** (§5.4.2), and billing S2C is on major 1 (§5.4.6).
+What remains open is the *runtime arrival ordering* on world entry — whether a client first observes
+a form-1 materialize or a form-0 update, and how the major-1 billing notices interleave with it.
+Needs a live capture. Owned by `specs/client_runtime.md §9.5` / `packets/s2c_billing.yaml` (pending).
 
-**OQ-PROTO-04 — Keepalive suppress mechanism.**
-The flag at object offset +82364 that suppresses keepalive sends is cleared by 4/1 GameStateTick.
-It is not confirmed whether the flag is also set by any server-side instruction or only by the
-loading state. Owned by `specs/client_runtime.md §network`.
+**OQ-PROTO-04 — Keepalive gating mechanism. (mostly resolved; residual capture-pending)**
+The keepalive opcode is C2S **2/112** (1-byte payload), gated by a **master-enable global** set on
+World entry and cleared on world leave (§6.4). A *separate* per-send suppress byte at NetClient
+object offset +82364 is set by every C2S send and cleared at the start of the 4/1 and 3/1 handlers.
+What is not statically settled is whether any server-side instruction also influences these flags.
+Owned by `specs/client_runtime.md §network`.
 
 ### 9.2 Scene machine / UI
 

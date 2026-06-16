@@ -186,7 +186,7 @@ public sealed class UiCatalogs : IDisposable
 
         // spec: Docs/RE/formats/misc_data.md §6 — "do NOT assume id == slot_index + 1;
         //       the id stored at record +0x000 is the authoritative identifier".
-        string? text = cat.GetText((uint)id);
+        string? text = cat.GetText(id);
         return string.IsNullOrEmpty(text) ? fallback : text;
     }
 

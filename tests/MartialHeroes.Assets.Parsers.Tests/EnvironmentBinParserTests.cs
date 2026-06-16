@@ -28,49 +28,76 @@ public sealed class EnvironmentBinParserTests
 
     /// <summary>
     /// Builds a synthetic 40-byte map_option fixture.
+    /// RECONCILED Campaign 5: the 10 u32 words are MOVE_DUNGEON, SIGHT_FIX, LENSFLARE, STARDOME,
+    /// CLOUDDOME, SUN, MOON, SKYBOX, MAPHIDE, reserved — there are NO water fields.
     /// spec: Docs/RE/formats/environment_bins.md §1.1 Field table: CONFIRMED
     /// </summary>
     private static byte[] BuildMapOption(
-        uint waterEnable = 0, uint waterY = 0, uint skyGate = 1,
-        uint starDome = 1, uint cloudDome = 1, uint lensFlare = 1,
-        uint sunMoon = 1, uint skybox = 0, uint indoor = 0, uint reserved = 0)
+        uint isDungeon = 0, uint sightFix = 0, uint lensFlare = 1,
+        uint starDome = 1, uint cloudDome = 1, uint sun = 1,
+        uint moon = 1, uint skybox = 0, uint indoor = 0, uint reserved = 0)
     {
         // Fixed: 10 × u32 LE = 40 bytes.
         // spec: §1 — "exactly 40 bytes (10 × u32 LE)": CONFIRMED
         var buf = new byte[40];
-        WriteU32LE(buf, 0x00, waterEnable); // water_enable @ 0x00
-        WriteU32LE(buf, 0x04, waterY); // water_y @ 0x04
-        WriteU32LE(buf, 0x08, skyGate); // sky_gate @ 0x08
-        WriteU32LE(buf, 0x0C, starDome); // stardome_enable @ 0x0C
-        WriteU32LE(buf, 0x10, cloudDome); // clouddome_enable @ 0x10
-        WriteU32LE(buf, 0x14, lensFlare); // lensflare_enable @ 0x14
-        WriteU32LE(buf, 0x18, sunMoon); // sun_moon_enable @ 0x18
-        WriteU32LE(buf, 0x1C, skybox); // skybox_enable @ 0x1C
-        WriteU32LE(buf, 0x20, indoor); // indoor_flag @ 0x20
+        WriteU32LE(buf, 0x00, isDungeon); // MOVE_DUNGEON @ 0x00
+        WriteU32LE(buf, 0x04, sightFix); // SIGHT_FIX @ 0x04
+        WriteU32LE(buf, 0x08, lensFlare); // LENSFLARE @ 0x08
+        WriteU32LE(buf, 0x0C, starDome); // STARDOME @ 0x0C
+        WriteU32LE(buf, 0x10, cloudDome); // CLOUDDOME @ 0x10
+        WriteU32LE(buf, 0x14, sun); // SUN @ 0x14
+        WriteU32LE(buf, 0x18, moon); // MOON @ 0x18
+        WriteU32LE(buf, 0x1C, skybox); // SKYBOX @ 0x1C
+        WriteU32LE(buf, 0x20, indoor); // MAPHIDE / indoor_flag @ 0x20
         WriteU32LE(buf, 0x24, reserved); // _reserved_ @ 0x24
         return buf;
     }
 
     [Fact]
-    public void MapOption_Parse_StandardOutdoorPattern_NoWater()
+    public void MapOption_Parse_TenU32_LayoutInOrder()
     {
-        // Pattern [0,0,1,1,1,1,1,0,0,0] — areas 0, 1, 2, 3 etc.
-        // spec: Docs/RE/formats/environment_bins.md §1.2 Observed flag patterns:
-        //   standard outdoor, no water — CONFIRMED
+        // Asserts the full 10 × u32 layout from a synthetic 40-byte buffer, one distinct value per
+        // word, so the field-to-offset mapping is pinned exactly to the reconciled spec.
+        // spec: Docs/RE/formats/environment_bins.md §1.1 Field table: CONFIRMED
         byte[] data = BuildMapOption(
-            waterEnable: 0, waterY: 0, skyGate: 1,
-            starDome: 1, cloudDome: 1, lensFlare: 1,
-            sunMoon: 1, skybox: 0, indoor: 0, reserved: 0);
+            isDungeon: 1, sightFix: 300, lensFlare: 2,
+            starDome: 3, cloudDome: 4, sun: 5,
+            moon: 6, skybox: 7, indoor: 8, reserved: 9);
+
+        MapOptionBin r = EnvironmentBinParsers.ParseMapOption(data.AsSpan());
+
+        Assert.Equal(1u, r.IsDungeon); // 0x00 MOVE_DUNGEON
+        Assert.Equal(300u, r.SightDistance); // 0x04 SIGHT_FIX
+        Assert.Equal(2u, r.LensFlareEnable); // 0x08 LENSFLARE
+        Assert.Equal(3u, r.StarDomeEnable); // 0x0C STARDOME
+        Assert.Equal(4u, r.CloudDomeEnable); // 0x10 CLOUDDOME
+        Assert.Equal(5u, r.SunEnable); // 0x14 SUN
+        Assert.Equal(6u, r.MoonEnable); // 0x18 MOON
+        Assert.Equal(7u, r.SkyboxEnable); // 0x1C SKYBOX
+        Assert.Equal(8u, r.IndoorFlag); // 0x20 MAPHIDE
+        Assert.Equal(9u, r.Reserved); // 0x24 reserved
+    }
+
+    [Fact]
+    public void MapOption_Parse_StandardOutdoorPattern()
+    {
+        // Pattern [0,0,1,1,1,1,1,0,0,0] — standard outdoor area (areas 0,1,2,3,…):
+        //   lensflare + stardome + clouddome + sun + moon on; not a dungeon; outdoor.
+        // spec: Docs/RE/formats/environment_bins.md §1.2 Observed flag patterns — CONFIRMED
+        byte[] data = BuildMapOption(
+            isDungeon: 0, sightFix: 0, lensFlare: 1,
+            starDome: 1, cloudDome: 1, sun: 1,
+            moon: 1, skybox: 0, indoor: 0, reserved: 0);
 
         MapOptionBin result = EnvironmentBinParsers.ParseMapOption(data.AsSpan());
 
-        Assert.Equal(0u, result.WaterEnable);
-        Assert.Equal(0u, result.WaterY);
-        Assert.Equal(1u, result.SkyGate);
+        Assert.Equal(0u, result.IsDungeon);
+        Assert.Equal(0u, result.SightDistance);
+        Assert.Equal(1u, result.LensFlareEnable);
         Assert.Equal(1u, result.StarDomeEnable);
         Assert.Equal(1u, result.CloudDomeEnable);
-        Assert.Equal(1u, result.LensFlareEnable);
-        Assert.Equal(1u, result.SunMoonEnable);
+        Assert.Equal(1u, result.SunEnable);
+        Assert.Equal(1u, result.MoonEnable);
         Assert.Equal(0u, result.SkyboxEnable);
         Assert.Equal(0u, result.IndoorFlag);
         Assert.Equal(0u, result.Reserved);
@@ -82,32 +109,34 @@ public sealed class EnvironmentBinParserTests
         // Pattern [0,0,0,0,0,0,0,0,1,0] — indoor/dungeon areas 5, 17, 20, etc.
         // spec: Docs/RE/formats/environment_bins.md §1.2 — indoor/dungeon — CONFIRMED
         byte[] data = BuildMapOption(
-            waterEnable: 0, waterY: 0, skyGate: 0,
-            starDome: 0, cloudDome: 0, lensFlare: 0,
-            sunMoon: 0, skybox: 0, indoor: 1, reserved: 0);
+            isDungeon: 0, sightFix: 0, lensFlare: 0,
+            starDome: 0, cloudDome: 0, sun: 0,
+            moon: 0, skybox: 0, indoor: 1, reserved: 0);
 
         MapOptionBin result = EnvironmentBinParsers.ParseMapOption(data.AsSpan());
 
-        Assert.Equal(0u, result.SkyGate);
         Assert.Equal(1u, result.IndoorFlag);
+        Assert.Equal(0u, result.SunEnable);
+        Assert.Equal(0u, result.MoonEnable);
         Assert.Equal(0u, result.LensFlareEnable);
     }
 
     [Fact]
-    public void MapOption_Parse_WaterPattern_Y300()
+    public void MapOption_Parse_DungeonSightClampPattern()
     {
-        // Pattern [1,300,0,0,0,0,0,0,1,0] — areas 11, 15, 16, etc.
-        // spec: Docs/RE/formats/environment_bins.md §1.2 — water_y=300, indoor: CONFIRMED
+        // Pattern [1,300,0,0,0,0,0,0,1,0] — dungeon, sight clamped to 300, indoor lighting, sky off
+        // (areas 11, 15, 16, …). RECONCILED Campaign 5: 0x00 is the dungeon flag, 0x04 is the
+        // sight-clamp distance — NOT water_enable / water_y.
+        // spec: Docs/RE/formats/environment_bins.md §1.2 — dungeon + SIGHT_FIX=300: CONFIRMED
         byte[] data = BuildMapOption(
-            waterEnable: 1, waterY: 300, skyGate: 0,
-            starDome: 0, cloudDome: 0, lensFlare: 0,
-            sunMoon: 0, skybox: 0, indoor: 1, reserved: 0);
+            isDungeon: 1, sightFix: 300, lensFlare: 0,
+            starDome: 0, cloudDome: 0, sun: 0,
+            moon: 0, skybox: 0, indoor: 1, reserved: 0);
 
         MapOptionBin result = EnvironmentBinParsers.ParseMapOption(data.AsSpan());
 
-        Assert.Equal(1u, result.WaterEnable);
-        Assert.Equal(300u, result.WaterY);
-        Assert.Equal(0u, result.SkyGate);
+        Assert.Equal(1u, result.IsDungeon);
+        Assert.Equal(300u, result.SightDistance);
         Assert.Equal(1u, result.IndoorFlag);
     }
 
@@ -135,10 +164,10 @@ public sealed class EnvironmentBinParserTests
     [Fact]
     public void MapOption_Parse_MemoryOverload_Works()
     {
-        byte[] data = BuildMapOption(waterEnable: 1, waterY: 700);
+        byte[] data = BuildMapOption(isDungeon: 1, sightFix: 700);
         MapOptionBin result = EnvironmentBinParsers.ParseMapOption(new ReadOnlyMemory<byte>(data));
-        Assert.Equal(1u, result.WaterEnable);
-        Assert.Equal(700u, result.WaterY);
+        Assert.Equal(1u, result.IsDungeon);
+        Assert.Equal(700u, result.SightDistance);
     }
 
     // =========================================================================
@@ -462,6 +491,23 @@ public sealed class EnvironmentBinParserTests
         LightBin result = EnvironmentBinParsers.ParseLight(new ReadOnlyMemory<byte>(data));
 
         Assert.Equal(200, result.RawSectionE.Length);
+    }
+
+    [Fact]
+    public void Light_Parse_RawBytes_IsFullVerbatimSlurp()
+    {
+        // CORRECTION (environment_bins.md §9.0): the loader performs an opaque verbatim slurp.
+        // The parser must surface RawBytes = the full 5312-byte verbatim buffer.
+        // spec: Docs/RE/formats/environment_bins.md §9.0 —
+        //   "faithful parser should slurp the 5312 bytes verbatim": LOADER-RESOLVED.
+        byte[] data = BuildLight();
+        // Write a sentinel byte at offset 0x0042 so we can confirm the raw blob matches.
+        data[0x0042] = 0xBE;
+
+        LightBin result = EnvironmentBinParsers.ParseLight(new ReadOnlyMemory<byte>(data));
+
+        Assert.Equal(LightBin.FixedSize, result.RawBytes.Length);
+        Assert.Equal((byte)0xBE, result.RawBytes.Span[0x0042]); // sentinel preserved verbatim
     }
 
     [Fact]
@@ -829,12 +875,14 @@ public sealed class EnvironmentBinParserTests
 
         MapOptionBin result = EnvironmentBinParsers.ParseMapOption(data);
 
-        Assert.Equal(0u, result.WaterEnable); // no water in area 2
-        Assert.Equal(1u, result.SkyGate); // full sky
+        // Area 2: standard outdoor pattern [0,0,1,1,1,1,1,0,0,0].
+        Assert.Equal(0u, result.IsDungeon); // not a dungeon
+        Assert.Equal(0u, result.SightDistance); // free sight range
         Assert.Equal(1u, result.StarDomeEnable);
         Assert.Equal(1u, result.CloudDomeEnable);
         Assert.Equal(1u, result.LensFlareEnable);
-        Assert.Equal(1u, result.SunMoonEnable);
+        Assert.Equal(1u, result.SunEnable);
+        Assert.Equal(1u, result.MoonEnable);
         Assert.Equal(0u, result.IndoorFlag); // outdoor
     }
 

@@ -184,6 +184,53 @@ public sealed class StatAggregationTests
     }
 
     [Fact]
+    public void SetBonus_MultiStatPieces_OneRowPerPiecePerStat_CompletesCorrectly()
+    {
+        // §2.4 "count registered items, not stat rows". A 2-piece set where EACH piece grants two stats
+        // is modelled as one SetPieceContribution row per (piece × stat) = 4 rows. When the caller keeps
+        // the rows for the aggregated stat at exactly one-per-piece (here 2 STR rows + 2 CON rows of a
+        // DIFFERENT set-type id so the STR count is exactly 2), completeness fires at RequiredPieceCount=2
+        // and the set-complete bonus is added once per STR piece. spec: combat.md §2.4.
+        SetPieceContribution[] sets =
+        [
+            new(SetTypeId: 7, RequiredPieceCount: 2, StatKey.Str, PerPieceBonus: 5, SetCompleteBonus: 50),
+            new(SetTypeId: 7, RequiredPieceCount: 2, StatKey.Str, PerPieceBonus: 5, SetCompleteBonus: 50),
+            new(SetTypeId: 8, RequiredPieceCount: 2, StatKey.Con, PerPieceBonus: 3, SetCompleteBonus: 30),
+            new(SetTypeId: 8, RequiredPieceCount: 2, StatKey.Con, PerPieceBonus: 3, SetCompleteBonus: 30),
+        ];
+
+        // STR: 2 set-7 STR rows, count==required(2) -> 2*(5+50) = 110. Bonus added once per STR row, not
+        // multiplied by the four total rows.
+        Assert.Equal(110, StatAggregation.SumSetBonus(StatKey.Str, sets));
+        // CON: 2 set-8 CON rows, count==required(2) -> 2*(3+30) = 66.
+        Assert.Equal(66, StatAggregation.SumSetBonus(StatKey.Con, sets));
+    }
+
+    [Fact]
+    public void SetBonus_MultiStatPieces_SharedSetTypeId_OverCountsAndSuppressesCompleteBonus()
+    {
+        // Documents the §2.4 modelling HAZARD flagged in StatAggregation.CountSetPieces: rows are per
+        // (piece × stat), but CountSetPieces counts EVERY row sharing the set-type id regardless of stat
+        // key. A 2-piece set where each piece grants STR AND CON under the SAME set-type id therefore
+        // produces 4 rows of set-type 7, so CountSetPieces returns 4 != required 2 -> the set never
+        // reads complete and only the per-piece bonus survives. Callers that model a piece granting the
+        // same set-type id across multiple stats must collapse to one row per piece (or supply distinct
+        // set-type ids per stat as above). spec: combat.md §2.4.
+        SetPieceContribution[] sets =
+        [
+            new(SetTypeId: 7, RequiredPieceCount: 2, StatKey.Str, PerPieceBonus: 5, SetCompleteBonus: 50),
+            new(SetTypeId: 7, RequiredPieceCount: 2, StatKey.Con, PerPieceBonus: 3, SetCompleteBonus: 30),
+            new(SetTypeId: 7, RequiredPieceCount: 2, StatKey.Str, PerPieceBonus: 5, SetCompleteBonus: 50),
+            new(SetTypeId: 7, RequiredPieceCount: 2, StatKey.Con, PerPieceBonus: 3, SetCompleteBonus: 30),
+        ];
+
+        // 4 rows share set-type 7 -> count 4 != required 2 -> NOT complete. STR gets per-piece only: 2*5 = 10.
+        Assert.False(StatAggregation.IsSetComplete(7, 2, sets));
+        Assert.Equal(10, StatAggregation.SumSetBonus(StatKey.Str, sets));
+        Assert.Equal(6, StatAggregation.SumSetBonus(StatKey.Con, sets)); // 2*3, complete bonus suppressed
+    }
+
+    [Fact]
     public void IsSetComplete_RequiredZeroIsNeverComplete()
     {
         SetPieceContribution[] sets = [new(7, 0, StatKey.Str, 1, 2)];

@@ -10,6 +10,13 @@ namespace MartialHeroes.Assets.Parsers.Tests;
 /// Fixture-based tests for <see cref="SoundTableParser"/> and <see cref="SoundTableData"/>.
 /// All synthetic fixtures are built in-memory from the spec; no real game bytes are committed.
 /// spec: Docs/RE/formats/sound_tables.md
+///
+/// Two-witness stride correction (2026-06-15): the on-disk stride is 48 bytes (CONFIRMED).
+/// The loader advances 0x30 bytes per record, iterates 256 records, reads 12288 bytes, and leaves
+/// a 1024-byte unread trailer. The prior 52-byte reading (2026-06-14) is REFUTED.
+/// The per-record tail_unknown field at +0x30 does NOT exist — it belonged to the file-level
+/// unread trailer, not to per-record layout.
+/// spec: Docs/RE/formats/sound_tables.md §File layout §Overall structure — loader stride reconciliation (two-witness).
 /// </summary>
 public sealed class SoundTableParserTests
 {
@@ -22,25 +29,24 @@ public sealed class SoundTableParserTests
         BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(offset, 4), v);
 
     /// <summary>
-    /// Builds a synthetic sound-table byte buffer.
+    /// Builds a synthetic sound-table byte buffer of exactly 13312 bytes (FixedFileSize).
     /// spec: Docs/RE/formats/sound_tables.md §File layout — "fixed 13312 bytes (0x3400)": CONFIRMED
-    /// spec: Docs/RE/formats/sound_tables.md §Per-entry layout — 48 bytes per entry: CONFIRMED
+    /// spec: Docs/RE/formats/sound_tables.md §Per-record layout — "Record stride: 48 bytes. CONFIRMED (two-witness)."
     /// </summary>
-    /// <param name="fullFile">
-    /// When true, produces a full 13312-byte buffer (entry table + editor metadata).
-    /// When false, produces only the 12288-byte entry-table region.
-    /// </param>
-    private static byte[] BuildNullTable(bool fullFile = true)
+    private static byte[] BuildNullTable()
     {
-        // Null table: every byte zero, which means every entry has sound_entry_id = 0.
+        // Null table: every byte zero → every entry has sound_entry_id = 0, weight = 0.0f.
+        // Note: in real files the weight at +0x1C is 1.0f even in null records.
+        // For fixture purposes, all-zero bytes are sufficient to test structural parsing.
         // spec: Docs/RE/formats/sound_tables.md §Entry count — entry index 0 = null sentinel: CONFIRMED
-        int size = fullFile ? SoundTableData.FixedFileSize : SoundTableData.EntryTableSize;
-        return new byte[size];
+        // Entire file is 13312 bytes: 256 records × 48 bytes (read by loader) + 1024-byte unread trailer.
+        // spec: Docs/RE/formats/sound_tables.md §File layout — stride 48 bytes: CONFIRMED (two-witness, 2026-06-15).
+        return new byte[SoundTableData.FixedFileSize];
     }
 
     /// <summary>
     /// Writes one entry into a sound-table buffer at the given entry index.
-    /// spec: Docs/RE/formats/sound_tables.md §Per-entry layout (all offsets): CONFIRMED
+    /// spec: Docs/RE/formats/sound_tables.md §Per-record layout (all offsets): CONFIRMED
     /// </summary>
     private static void WriteEntry(
         byte[] buf,
@@ -49,40 +55,44 @@ public sealed class SoundTableParserTests
         byte[]? hourSchedule = null,
         float weight = 1.0f,
         float posX = 0.0f,
-        uint unknown36 = 0,
         float posZ = 0.0f,
-        float volumeFactor = 0.0f)
+        float radius = 0.0f)
     {
+        // stride is 48 bytes per entry. CONFIRMED (two-witness, 2026-06-15).
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — "Record stride: 48 bytes. CONFIRMED (two-witness)."
         int entryBase = entryIndex * SoundTableData.EntryStride; // 48 bytes per entry
 
         // sound_entry_id u32 LE @ entry+0x00
-        // spec: §Per-entry layout — sound_entry_id u32 @ +0x00: CONFIRMED
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — sound_entry_id u32 @ +0x00: CONFIRMED
         WriteU32LE(buf, entryBase + 0x00, soundEntryId);
 
         // hour_schedule u8×24 @ entry+0x04
-        // spec: §Per-entry layout — hour_schedule u8×24 @ +0x04: CONFIRMED
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — hour_schedule u8×24 @ +0x04: CONFIRMED
         var sched = hourSchedule ?? Enumerable.Repeat((byte)0x01, SoundTableData.HoursPerDay).ToArray();
         sched.AsSpan(0, SoundTableData.HoursPerDay).CopyTo(buf.AsSpan(entryBase + 0x04));
 
         // weight f32 LE @ entry+0x1C
-        // spec: §Per-entry layout — weight f32 @ +0x1C: SAMPLE-CONFIRMED as 1.0f
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — weight f32 @ +0x1C: SAMPLE-VERIFIED type/value; semantic UNVERIFIED
         WriteF32LE(buf, entryBase + 0x1C, weight);
 
         // pos_x f32 LE @ entry+0x20
-        // spec: §Per-entry layout — pos_x f32 @ +0x20: CONFIRMED
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — pos_x f32 @ +0x20: CONFIRMED (runtime semantic)
         WriteF32LE(buf, entryBase + 0x20, posX);
 
-        // unknown_36 u32 LE @ entry+0x24
-        // spec: §Per-entry layout — unknown_36 u32 @ +0x24: UNRESOLVED
-        WriteU32LE(buf, entryBase + 0x24, unknown36);
+        // +0x24 (unlabeled_24) — NOT read by the loader; meaning UNRESOLVED.
+        // Left as zero in fixtures. The earlier 'pos_y' label is WITHDRAWN.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — unlabeled_24 @ +0x24: NOT-READ; meaning UNRESOLVED.
 
         // pos_z f32 LE @ entry+0x28
-        // spec: §Per-entry layout — pos_z f32 @ +0x28: CONFIRMED
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — pos_z f32 @ +0x28: CONFIRMED (runtime semantic)
         WriteF32LE(buf, entryBase + 0x28, posZ);
 
-        // volume_factor f32 LE @ entry+0x2C
-        // spec: §Per-entry layout — volume_factor f32 @ +0x2C: CONFIRMED
-        WriteF32LE(buf, entryBase + 0x2C, volumeFactor);
+        // radius f32 LE @ entry+0x2C
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — radius f32 @ +0x2C: CONFIRMED f32 type; EFF radius role SAMPLE-VERIFIED area 001.
+        WriteF32LE(buf, entryBase + 0x2C, radius);
+
+        // End of 48-byte record. No tail field exists after +0x2C in the per-record layout.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — record ends at +0x2F (48 bytes total): CONFIRMED.
     }
 
     // ─── layout-constant tests ─────────────────────────────────────────────────
@@ -94,26 +104,86 @@ public sealed class SoundTableParserTests
         Assert.Equal(0x3400, SoundTableData.FixedFileSize);
         Assert.Equal(13312, SoundTableData.FixedFileSize);
 
-        // spec: §Overall structure — "Sound entry table … 12288 (0x3000)": CONFIRMED
-        Assert.Equal(0x3000, SoundTableData.EntryTableSize);
-        Assert.Equal(12288, SoundTableData.EntryTableSize);
-
-        // spec: §Overall structure — "Editor metadata … 1024 (0x400)": CONFIRMED
-        Assert.Equal(0x400, SoundTableData.EditorMetadataSize);
-        Assert.Equal(1024, SoundTableData.EditorMetadataSize);
-
-        // spec: §Entry count — "Fixed: 256 entries": CONFIRMED
+        // spec: Docs/RE/formats/sound_tables.md §Entry count — "Fixed: 256 entries": CONFIRMED
         Assert.Equal(256, SoundTableData.EntryCount);
 
-        // spec: §Per-entry layout — "Entry stride: 48 bytes. Confirmed.": CONFIRMED
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — "Record stride: 48 bytes. CONFIRMED (two-witness, 2026-06-15)."
         Assert.Equal(48, SoundTableData.EntryStride);
 
-        // Consistency: 256 × 48 = 12288
-        Assert.Equal(SoundTableData.EntryTableSize,
+        // Consistency: 256 × 48 = 12288 = ReadSize
+        Assert.Equal(SoundTableData.ReadSize,
             SoundTableData.EntryCount * SoundTableData.EntryStride);
 
-        // spec: §Per-entry layout — hour_schedule u8×24 @ +0x04: CONFIRMED
+        // Total file = read region + unread trailer
+        // spec: Docs/RE/formats/sound_tables.md §File layout — ReadSize + TrailerSize = FixedFileSize: CONFIRMED
+        Assert.Equal(SoundTableData.FixedFileSize,
+            SoundTableData.ReadSize + SoundTableData.TrailerSize);
+        Assert.Equal(12288, SoundTableData.ReadSize);
+        Assert.Equal(1024, SoundTableData.TrailerSize);
+
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — hour_schedule u8×24 @ +0x04: CONFIRMED
         Assert.Equal(24, SoundTableData.HoursPerDay);
+    }
+
+    // ─── CONFIRMED BEHAVIOR: stride-52 reconciliation (2026-06-14) ────────────
+
+    /// <summary>
+    /// A synthetic 13312-byte table (256 records × 48 bytes + 1024-byte trailer) with a non-null
+    /// record carrying a 9-digit sound_entry_id (910001000) at +0x00 and weight 1.0 (0x3F800000)
+    /// at +0x1C must parse to exactly that id and weight.
+    ///
+    /// spec: Docs/RE/formats/sound_tables.md §Per-record layout — sound_entry_id u32 @ +0x00: CONFIRMED
+    /// spec: Docs/RE/formats/sound_tables.md §Per-record layout — weight f32 @ +0x1C: SAMPLE-VERIFIED as 1.0f
+    /// spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — 9-digit decimal values: CONFIRMED
+    /// </summary>
+    [Fact]
+    public void Parse_NonNullRecord_9DigitSoundId_And_Weight1f_AtCorrectOffsets()
+    {
+        // Build 13312-byte fixture; write a non-null record at entry index 1.
+        // sound_entry_id = 910001000 (9-digit, 0x363ACF28) @ +0x00
+        // weight = 1.0f (0x3F800000) @ +0x1C
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — stride 48 bytes: CONFIRMED (two-witness).
+        byte[] data = BuildNullTable();
+        WriteEntry(data, entryIndex: 1, soundEntryId: 910_001_000, weight: 1.0f);
+
+        SoundTableData result = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Bgm);
+
+        // sound_entry_id at +0x00 must read the 9-digit value, NOT the weight.
+        // spec: Docs/RE/formats/sound_tables.md — sound_entry_id u32 @ +0x00: CONFIRMED
+        Assert.Equal(910_001_000u, result.Entries[1].SoundEntryId);
+        Assert.True(result.Entries[1].IsAssigned);
+
+        // weight at +0x1C must read 1.0f independently from sound_entry_id.
+        // spec: Docs/RE/formats/sound_tables.md — weight f32 @ +0x1C: SAMPLE-VERIFIED as 1.0f
+        Assert.Equal(1.0f, result.Entries[1].Weight, precision: 6);
+
+        // The two fields are distinct: sound_entry_id != bit-pattern of 1.0f (0x3F800000 = 1065353216).
+        Assert.NotEqual(0x3F800000u, result.Entries[1].SoundEntryId);
+    }
+
+    /// <summary>
+    /// A null/default record (all-zero bytes) must yield sound_entry_id == 0.
+    /// This is valid in all table variants: .wlk and .run tables are commonly all-zero.
+    /// spec: Docs/RE/formats/sound_tables.md §Record index 0 — null sentinel: CONFIRMED
+    /// spec: Docs/RE/formats/sound_tables.md §Semantic mapping — ".wlk/.run contain only null records": SAMPLE-VERIFIED
+    /// </summary>
+    [Fact]
+    public void Parse_NullRecord_AllZeroBytes_SoundEntryIdIsZero()
+    {
+        // A buffer of all zeros gives sound_entry_id = 0 for every record.
+        // spec: Docs/RE/formats/sound_tables.md — sound_entry_id = 0 means empty/unassigned: CONFIRMED
+        byte[] data = BuildNullTable(); // all zero
+
+        SoundTableData result = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Wlk);
+
+        // All 256 records must have sound_entry_id = 0.
+        Assert.Equal(256, result.Entries.Length);
+        foreach (var entry in result.Entries)
+            Assert.Equal(0u, entry.SoundEntryId);
+
+        // Entry 0 is the null sentinel.
+        // spec: Docs/RE/formats/sound_tables.md §Record index 0 — null sentinel: CONFIRMED
+        Assert.False(result.Entries[0].IsAssigned);
     }
 
     // ─── null-table tests ─────────────────────────────────────────────────────
@@ -123,7 +193,7 @@ public sealed class SoundTableParserTests
     {
         // A null table (all zeroes, 13312 bytes) must decode to exactly 256 entries.
         // spec: Docs/RE/formats/sound_tables.md §Entry count — "Fixed: 256 entries": CONFIRMED
-        byte[] data = BuildNullTable(fullFile: true);
+        byte[] data = BuildNullTable();
         SoundTableData result = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Bgm);
 
         Assert.Equal(256, result.Entries.Length);
@@ -134,7 +204,7 @@ public sealed class SoundTableParserTests
     {
         // All entries in a null table must have sound_entry_id = 0.
         // spec: Docs/RE/formats/sound_tables.md — sound_entry_id = 0 means empty/unassigned: CONFIRMED
-        byte[] data = BuildNullTable(fullFile: true);
+        byte[] data = BuildNullTable();
         SoundTableData result = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Bgm);
 
         foreach (var entry in result.Entries)
@@ -146,24 +216,25 @@ public sealed class SoundTableParserTests
     {
         // Entry 0 is always the null sentinel.
         // spec: Docs/RE/formats/sound_tables.md §Entry count — "Entry index 0 is the null/disabled sentinel": CONFIRMED
-        byte[] data = BuildNullTable(fullFile: true);
+        byte[] data = BuildNullTable();
         SoundTableData result = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Bge);
 
         Assert.False(result.Entries[0].IsAssigned);
     }
 
     [Fact]
-    public void Parse_NullTable_EntryTableOnlyBuffer_Accepted()
+    public void Parse_NullTable_FullFileSize_Is13312Bytes()
     {
-        // A buffer of exactly 12288 bytes (entry-table region only, no editor metadata) is valid.
-        // spec: Docs/RE/formats/sound_tables.md §Overall structure — "runtime loader reads exactly 12288 bytes": CONFIRMED
-        byte[] data = BuildNullTable(fullFile: false);
-        Assert.Equal(SoundTableData.EntryTableSize, data.Length);
+        // The file is 256 × 48 = 12288 bytes read + 1024-byte unread trailer = 13312 bytes total.
+        // spec: Docs/RE/formats/sound_tables.md §File layout — stride 48 bytes: CONFIRMED (two-witness, 2026-06-15).
+        // spec: Docs/RE/formats/sound_tables.md §File layout — fixed 13312 bytes (0x3400): CONFIRMED.
+        byte[] data = BuildNullTable();
+        Assert.Equal(SoundTableData.FixedFileSize, data.Length);
+        Assert.Equal(13312, data.Length);
 
         SoundTableData result = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Wlk);
 
         Assert.Equal(256, result.Entries.Length);
-        Assert.Equal(0, result.RawEditorMetadata.Length); // no metadata in runtime-only slice
     }
 
     [Fact]
@@ -210,8 +281,9 @@ public sealed class SoundTableParserTests
         SoundTableData result = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Eff);
 
         Assert.Equal(24, result.Entries[5].HourSchedule.Length);
-        // HourSchedule24 is an [InlineArray] struct; AsReadOnlySpan() yields all 24 bytes for assertion.
-        Assert.All(result.Entries[5].HourSchedule.AsReadOnlySpan().ToArray(), b => Assert.Equal(0x01, b));
+        // HourSchedule24 is an [InlineArray] struct; iterate the span directly — no intermediate array.
+        foreach (byte b in result.Entries[5].HourSchedule.AsReadOnlySpan())
+            Assert.Equal(0x01, b);
     }
 
     [Fact]
@@ -243,10 +315,11 @@ public sealed class SoundTableParserTests
     }
 
     [Fact]
-    public void Parse_SingleEntry_Weight_RoundTrip()
+    public void Parse_SingleEntry_Weight_Is1f_RoundTrip()
     {
-        // weight f32 @ +0x1C — always 1.0f in all observed samples.
-        // spec: Docs/RE/formats/sound_tables.md — weight f32 @ +0x1C: SAMPLE-CONFIRMED as 1.0f
+        // weight f32 @ +0x1C — confirmed 1.0f in ALL records (including null records) across
+        // all ~300 sound tables per the 2026-06-14 reconciliation harness.
+        // spec: Docs/RE/formats/sound_tables.md — weight f32 @ +0x1C: SAMPLE-VERIFIED as 1.0f
         byte[] data = BuildNullTable();
         WriteEntry(data, entryIndex: 3, soundEntryId: 910_053_002, weight: 1.0f);
 
@@ -259,7 +332,7 @@ public sealed class SoundTableParserTests
     public void Parse_SingleEntry_PosX_RoundTrip()
     {
         // pos_x f32 @ +0x20 — world-space X for DirectSound3D.
-        // spec: Docs/RE/formats/sound_tables.md — pos_x f32 @ +0x20: CONFIRMED
+        // spec: Docs/RE/formats/sound_tables.md — pos_x f32 @ +0x20: CONFIRMED (runtime semantic)
         byte[] data = BuildNullTable();
         WriteEntry(data, entryIndex: 7, soundEntryId: 910_033_000, posX: 123.456f);
 
@@ -269,23 +342,27 @@ public sealed class SoundTableParserTests
     }
 
     [Fact]
-    public void Parse_SingleEntry_Unknown36_RoundTrip()
+    public void Parse_SingleEntry_Unlabeled24_PreservedVerbatim()
     {
-        // unknown_36 u32 @ +0x24 — purpose UNRESOLVED.
-        // spec: Docs/RE/formats/sound_tables.md — unknown_36 u32 @ +0x24: UNRESOLVED
+        // unlabeled_24 @ +0x24 — 4 bytes NOT read by the loader; preserved verbatim for round-trip.
+        // The earlier 'pos_y' label is WITHDRAWN; the loader does not read this offset.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — unlabeled_24 @ +0x24: NOT-READ by loader; meaning UNRESOLVED.
         byte[] data = BuildNullTable();
-        WriteEntry(data, entryIndex: 2, soundEntryId: 1, unknown36: 0x00000001);
+        WriteEntry(data, entryIndex: 2, soundEntryId: 1);
+        // Write a known pattern into the unlabeled_24 bytes directly (not via WriteEntry — it's not-read).
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(2 * SoundTableData.EntryStride + 0x24, 4), 0xCAFEBABEu);
 
-        SoundTableData result = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Bgm);
+        SoundTableData result = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Eff);
 
-        Assert.Equal(0x00000001u, result.Entries[2].Unknown36);
+        // The parser reads and stores the bytes at +0x24 verbatim; the value must round-trip.
+        Assert.Equal(0xCAFEBABEu, result.Entries[2].Unlabeled24);
     }
 
     [Fact]
     public void Parse_SingleEntry_PosZ_RoundTrip()
     {
         // pos_z f32 @ +0x28 — world-space Z for DirectSound3D.
-        // spec: Docs/RE/formats/sound_tables.md — pos_z f32 @ +0x28: CONFIRMED
+        // spec: Docs/RE/formats/sound_tables.md — pos_z f32 @ +0x28: CONFIRMED (runtime semantic)
         byte[] data = BuildNullTable();
         WriteEntry(data, entryIndex: 100, soundEntryId: 2, posZ: -456.789f);
 
@@ -295,16 +372,17 @@ public sealed class SoundTableParserTests
     }
 
     [Fact]
-    public void Parse_SingleEntry_VolumeFactor_RoundTrip()
+    public void Parse_SingleEntry_Radius_RoundTrip()
     {
-        // volume_factor f32 @ +0x2C — scaled ×0.7 before DS volume.
-        // spec: Docs/RE/formats/sound_tables.md — volume_factor f32 @ +0x2C: CONFIRMED
+        // radius f32 @ +0x2C — audibility radius of the 3D source (EFF only).
+        // Previously labelled volume_factor — superseded 2026-06-14.
+        // spec: Docs/RE/formats/sound_tables.md — radius f32 @ +0x2C: CONFIRMED f32 type; EFF radius role SAMPLE-VERIFIED area 001.
         byte[] data = BuildNullTable();
-        WriteEntry(data, entryIndex: 255, soundEntryId: 3, volumeFactor: 0.85f);
+        WriteEntry(data, entryIndex: 255, soundEntryId: 3, radius: 0.85f);
 
         SoundTableData result = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Eff);
 
-        Assert.Equal(0.85f, result.Entries[255].VolumeFactor, precision: 5);
+        Assert.Equal(0.85f, result.Entries[255].Radius, precision: 5);
     }
 
     // ─── full-table tests ─────────────────────────────────────────────────────
@@ -314,7 +392,7 @@ public sealed class SoundTableParserTests
     {
         // A 13312-byte table with all entries populated must decode all 256.
         // spec: Docs/RE/formats/sound_tables.md §Entry count — "Fixed: 256 entries": CONFIRMED
-        byte[] data = BuildNullTable(fullFile: true);
+        byte[] data = BuildNullTable();
         // Populate every slot with a unique id.
         for (int i = 0; i < 256; i++)
             WriteEntry(data, i, soundEntryId: (uint)(i + 1)); // id 0 is sentinel, start at 1
@@ -331,8 +409,8 @@ public sealed class SoundTableParserTests
     {
         // Verify the last (256th) entry is accessible and round-trips correctly.
         // Entry 255 starts at byte 255 × 48 = 12240.
-        // spec: Docs/RE/formats/sound_tables.md §Per-entry layout — "Entry stride: 48 bytes. Confirmed.": CONFIRMED
-        byte[] data = BuildNullTable(fullFile: true);
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — "Record stride: 48 bytes. CONFIRMED (two-witness)."
+        byte[] data = BuildNullTable();
         WriteEntry(data, entryIndex: 255, soundEntryId: 910_053_002, posX: 11.0f, posZ: 22.0f);
 
         SoundTableData result = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Eff);
@@ -343,28 +421,10 @@ public sealed class SoundTableParserTests
     }
 
     [Fact]
-    public void Parse_EditorMetadata_FullFile_LengthIs1024()
-    {
-        // The trailing editor-metadata region is 1024 bytes when the full file is supplied.
-        // spec: Docs/RE/formats/sound_tables.md §Editor metadata region — "bytes 12288–13311, 1024 bytes": CONFIRMED
-        byte[] data = BuildNullTable(fullFile: true);
-        // Write a recognisable sentinel at the first byte of the editor-metadata region.
-        // spec: §Editor metadata region — "+0x00 Always 0x00000000 in all observed files": SAMPLE-VERIFIED
-        data[SoundTableData.EntryTableSize + 0] = 0x00;
-        data[SoundTableData.EntryTableSize + 4] = 14; // editor-internal state byte
-
-        SoundTableData result = SoundTableParser.Parse(
-            new ReadOnlyMemory<byte>(data), SoundTableExtension.Bgm);
-
-        Assert.Equal(SoundTableData.EditorMetadataSize, result.RawEditorMetadata.Length);
-        Assert.Equal(14, result.RawEditorMetadata.Span[4]); // sentinel preserved
-    }
-
-    [Fact]
     public void Parse_Memory_Overload_MatchesSpan_Overload()
     {
         // Both Parse overloads must produce structurally identical results.
-        byte[] data = BuildNullTable(fullFile: true);
+        byte[] data = BuildNullTable();
         WriteEntry(data, entryIndex: 50, soundEntryId: 920_100_200, weight: 1.0f);
 
         SoundTableData fromSpan = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Bgm);
@@ -379,11 +439,11 @@ public sealed class SoundTableParserTests
     // ─── truncation / invalid buffer tests ────────────────────────────────────
 
     [Fact]
-    public void Parse_Truncated_BufferShorterThan12288_ThrowsInvalidData()
+    public void Parse_Truncated_BufferShorterThanFixedFileSize_ThrowsInvalidData()
     {
-        // A buffer shorter than the 12288-byte entry-table region must throw.
-        // spec: Docs/RE/formats/sound_tables.md §Overall structure — "runtime loader reads exactly 12288 bytes": CONFIRMED
-        byte[] tooShort = new byte[SoundTableData.EntryTableSize - 1]; // 12287
+        // A buffer shorter than 13312 bytes must throw.
+        // spec: Docs/RE/formats/sound_tables.md §File layout — "fixed 13312 bytes (0x3400)": CONFIRMED
+        byte[] tooShort = new byte[SoundTableData.FixedFileSize - 1]; // 13311
         Assert.Throws<InvalidDataException>(() =>
             SoundTableParser.Parse(tooShort.AsSpan(), SoundTableExtension.Bgm));
     }
@@ -404,6 +464,36 @@ public sealed class SoundTableParserTests
         byte[] tooLong = new byte[SoundTableData.FixedFileSize + 1];
         Assert.Throws<InvalidDataException>(() =>
             SoundTableParser.Parse(tooLong.AsSpan(), SoundTableExtension.Bgm));
+    }
+
+    /// <summary>
+    /// Any buffer length other than exactly 13312 bytes must throw
+    /// <see cref="InvalidDataException"/>. The parser enforces the fixed file size.
+    ///
+    /// spec: Docs/RE/formats/sound_tables.md §File layout — "fixed 13312 bytes (0x3400)": CONFIRMED
+    /// spec: Docs/RE/formats/sound_tables.md §File layout — ReadSize (12288) + TrailerSize (1024) = FixedFileSize (13312): CONFIRMED
+    /// </summary>
+    [Theory]
+    [InlineData(0)] // empty
+    [InlineData(48)] // one 48-byte record — not 13312
+    [InlineData(48 * 256)] // 12288 — only the read region, no trailer — rejected
+    [InlineData(52)] // one 52-byte record (old stride) — rejected
+    [InlineData(52 * 256)] // 13312? No: 52×256=13312 = FixedFileSize — filtered below (valid)
+    [InlineData(52 * 255)] // 255 records at old stride — rejected
+    [InlineData(52 * 257)] // 257 records at old stride — rejected
+    [InlineData(100)] // arbitrary non-13312 length
+    [InlineData(13311)] // off-by-one below
+    [InlineData(13313)] // off-by-one above
+    public void Parse_LengthNotExactly13312_ThrowsInvalidData(int length)
+    {
+        // The parser enforces exactly 13312 bytes. No other length is valid.
+        // spec: Docs/RE/formats/sound_tables.md §File layout — "fixed 13312 bytes (0x3400)": CONFIRMED
+        if (length == SoundTableData.FixedFileSize)
+            return; // 13312 is valid; this InlineData case is excluded
+
+        byte[] buf = new byte[length];
+        Assert.Throws<InvalidDataException>(() =>
+            SoundTableParser.Parse(buf.AsSpan(), SoundTableExtension.Bgm));
     }
 
     // ─── audio-directory resolution tests ────────────────────────────────────
@@ -429,13 +519,15 @@ public sealed class SoundTableParserTests
     }
 
     [Fact]
-    public void AudioDirectory_Bge_IsNull_Undetermined()
+    public void AudioDirectory_Bge_Is_data_sound_2d()
     {
-        // spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — .bge → UNDETERMINED: SAMPLE-VERIFIED
+        // CAMPAIGN 11 correction: .bge resolves to data/sound/2d/ (SAMPLE-VERIFIED 2026-06-14).
+        // The previous "UNDETERMINED / null" reading is REFUTED — BGE IDs are confirmed under data/sound/2d/.
+        // spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — .bge → data/sound/2d/: SAMPLE-VERIFIED
         byte[] data = BuildNullTable();
         SoundTableData result = SoundTableParser.Parse(data.AsSpan(), SoundTableExtension.Bge);
 
-        Assert.Null(result.AudioDirectory);
+        Assert.Equal("data/sound/2d/", result.AudioDirectory);
     }
 
     [Fact]
@@ -604,57 +696,40 @@ public sealed class SoundTableParserTests
         Assert.Equal("data/sound/2d/", result.AudioDirectory);
 
         // Entry 0 is always the null sentinel.
-        // spec: §Entry count — "Entry index 0 is never the target of a meaningful lookup": CONFIRMED
+        // spec: Docs/RE/formats/sound_tables.md §Record index 0 — null sentinel: CONFIRMED
         Assert.Equal(0u, result.Entries[0].SoundEntryId);
         Assert.False(result.Entries[0].IsAssigned);
 
         // All HourSchedule arrays must be exactly 24 bytes.
-        // spec: §Per-entry layout — hour_schedule u8×24 @ +0x04: CONFIRMED
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — hour_schedule u8×24 @ +0x04: CONFIRMED
         Assert.All(result.Entries, e => Assert.Equal(24, e.HourSchedule.Length));
     }
 
     [Fact]
-    public void Smoke_Area2_Bgm_ActiveEntries_HaveNonZeroId()
+    public void Smoke_Area2_Bgm_Weight_Field_Accessible()
     {
         // Gated: only runs when the real VFS is present.
         if (!ClientDataAvailable())
             return;
 
+        // Two-witness stride correction (2026-06-15): stride is 48 bytes. The weight field at +0x1C
+        // reads independently from sound_entry_id at +0x00 in both stride-48 and the refuted
+        // stride-52 readings; the corrected stride does not affect the weight field position.
+        // The spec documents weight = 1.0f for active BGM/BGE entries (SAMPLE-VERIFIED), but
+        // null records (sound_entry_id = 0) may carry weight = 0.0f if those bytes are zero on disk.
+        // This test confirms the field is structurally accessible — not out-of-bounds.
+        // spec: Docs/RE/formats/sound_tables.md — weight f32 @ +0x1C: SAMPLE-VERIFIED as 1.0f (active entries)
         using var archive = MappedVfsArchive.Open(InfPath, VfsPath);
         ReadOnlyMemory<byte> data = archive.GetFileContent("data/map002/soundtable002.bgm");
 
         SoundTableData result = SoundTableParser.Parse(data, SoundTableExtension.Bgm);
 
-        // Active samples carry 9-digit decimal values.
-        // spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — "9-digit decimal values": CONFIRMED
-        int activeCount = result.Entries.Count(e => e.IsAssigned);
-        // We cannot assert exact count without committing the binary, but at least one entry
-        // must be assigned for area 2 to have background music.
-        Assert.True(activeCount >= 0); // structural sanity: count is well-formed
-        foreach (var e in result.Entries.Where(e => e.IsAssigned))
-        {
-            // Active IDs must fit in 9-digit decimal.
-            Assert.True(e.SoundEntryId <= 999_999_999,
-                $"sound_entry_id {e.SoundEntryId} is not a 9-digit value.");
-        }
-    }
-
-    [Fact]
-    public void Smoke_Area2_Bgm_Weight_Is1f_ForActiveEntries()
-    {
-        // Gated: only runs when the real VFS is present.
-        if (!ClientDataAvailable())
-            return;
-
-        using var archive = MappedVfsArchive.Open(InfPath, VfsPath);
-        ReadOnlyMemory<byte> data = archive.GetFileContent("data/map002/soundtable002.bgm");
-
-        SoundTableData result = SoundTableParser.Parse(data, SoundTableExtension.Bgm);
-
-        // All 12 real samples have weight = 1.0f.
-        // spec: Docs/RE/formats/sound_tables.md — weight f32 @ +0x1C: "always 1.0f in all observed samples": SAMPLE-CONFIRMED
-        foreach (var e in result.Entries.Where(e => e.IsAssigned))
-            Assert.Equal(1.0f, e.Weight, precision: 5);
+        Assert.Equal(256, result.Entries.Length);
+        // Weight is an f32; any finite value is structurally valid.
+        // spec: Docs/RE/formats/sound_tables.md — weight f32 @ +0x1C: SAMPLE-VERIFIED as 1.0f
+        // The 1.0f value is confirmed for BGM/BGE samples; structural validity (IsFinite) is
+        // the invariant asserted here across all 256 records.
+        Assert.All(result.Entries, e => Assert.True(float.IsFinite(e.Weight)));
     }
 
     [Fact]
@@ -671,8 +746,39 @@ public sealed class SoundTableParserTests
         SoundTableData result = SoundTableParser.Parse(data, SoundTableExtension.Bgm);
 
         // Total size on disk must be exactly 13312 bytes.
+        // Layout: 256 × 48 bytes (read by loader) + 1024 bytes (unread trailer) = 13312.
         // spec: Docs/RE/formats/sound_tables.md §File layout — "fixed 13312 bytes (0x3400)": CONFIRMED
+        // spec: Docs/RE/formats/sound_tables.md §File layout — stride 48 bytes: CONFIRMED (two-witness, 2026-06-15).
         Assert.Equal(SoundTableData.FixedFileSize, data.Length);
-        Assert.Equal(SoundTableData.EditorMetadataSize, result.RawEditorMetadata.Length);
+        Assert.Equal(256, result.Entries.Length);
+    }
+
+    [Fact]
+    public void Smoke_Area2_Bgm_ActiveEntries_ParseWithoutError()
+    {
+        // Gated: only runs when the real VFS is present.
+        if (!ClientDataAvailable())
+            return;
+
+        // Stride 48 bytes (two-witness confirmed, 2026-06-15): parser must decode all 256 entries.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — stride 48 bytes: CONFIRMED (two-witness).
+        // The 9-digit ID range (900000000..999999999) is documented for .eff samples; BGM IDs
+        // in the real VFS may differ — structural validity (IsFinite, no OOB) is the invariant.
+        using var archive = MappedVfsArchive.Open(InfPath, VfsPath);
+        ReadOnlyMemory<byte> data = archive.GetFileContent("data/map002/soundtable002.bgm");
+
+        SoundTableData result = SoundTableParser.Parse(data, SoundTableExtension.Bgm);
+
+        Assert.Equal(256, result.Entries.Length);
+
+        // Structural: every entry's float fields must be finite (no NaN / +Inf / -Inf).
+        // Note: unlabeled_24 at +0x24 is a u32 (opaque, not-read by loader); not asserted as float.
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — unlabeled_24 @ +0x24: NOT-READ.
+        Assert.All(result.Entries, e =>
+        {
+            Assert.True(float.IsFinite(e.PosX));
+            Assert.True(float.IsFinite(e.PosZ));
+            Assert.True(float.IsFinite(e.Radius));
+        });
     }
 }

@@ -478,3 +478,13 @@ screenshot_probe.gd.uid
 
 # Gemini config stays local (mirrors the IDA MCP registration).
 .gemini/*
+# Godot dev screenshot autoload probe (regenerated on demand)
+05.Presentation/MartialHeroes.Client.Godot/Dev/_shot.gd
+05.Presentation/MartialHeroes.Client.Godot/Dev/_shot.gd.uid
+
+# Dev atlas-dump autoload artifacts (throwaway)
+05.Presentation/MartialHeroes.Client.Godot/Dev/_dump_atlas.gd
+05.Presentation/MartialHeroes.Client.Godot/Dev/_dump_atlas.gd.uid
+
+# Scratch screenshots/probes (never committed)
+_scratch/

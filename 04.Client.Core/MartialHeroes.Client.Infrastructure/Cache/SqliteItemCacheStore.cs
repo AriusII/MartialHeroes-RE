@@ -183,7 +183,7 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
     {
         var currentVersion = await GetUserVersionAsync(conn, ct);
 
-        if (currentVersion < 1)
+        if (currentVersion < SchemaVersion)
         {
             // ── Migration v0 → v1 ────────────────────────────────────────────
             // Creates the item_cache table.
@@ -203,8 +203,9 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
             cmd.CommandText = v1Ddl;
             await cmd.ExecuteNonQueryAsync(ct);
 
-            await SetUserVersionAsync(conn, 1, ct);
+            await SetUserVersionAsync(conn, SchemaVersion, ct);
         }
+        // Future migrations: increment SchemaVersion above and add `if (currentVersion < 2) { ... }`.
     }
 
     private static async Task<int> GetUserVersionAsync(SqliteConnection conn, CancellationToken ct)

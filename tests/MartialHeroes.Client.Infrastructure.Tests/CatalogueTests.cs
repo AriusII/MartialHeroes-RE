@@ -129,6 +129,33 @@ public sealed class CatalogueTests
             catalogue.GetMpBaseCurve().BaseForLevel(1));
     }
 
+    /// <summary>
+    /// INTERIM PROXY sentinel: HP==MP is a known approximation, not the final formula.
+    /// When config_tables.md §2.4 open question #1 (float-position→stat mapping) is resolved,
+    /// HP and MP should use distinct float-group indices and this test will need updating.
+    /// spec: Docs/RE/formats/config_tables.md §2.4 — "Named-stat mapping: UNVERIFIED";
+    ///       ScrStatCatalogue.LevelScaleMultiplier is an implementation constant (not from spec).
+    /// </summary>
+    [Fact]
+    public void ScrStatCatalogue_HpEqualsMp_IsInterimProxy_MustBeRevisitedWhenSpecPinned()
+    {
+        // This test DELIBERATELY asserts HP==MP to document the known interim state.
+        // When config_tables.md §2.4 open question #1 is answered (HP and MP float positions differ),
+        // ScrStatCatalogue must be updated to use distinct group indices and this assertion removed.
+        // spec: Docs/RE/formats/config_tables.md §2.4 (open question #1, #2, #3)
+        LevelBaseEntry[] entries =
+        [
+            MakeLevelEntry(level: 12, divisorC: 2, posScale: 1.0f),
+        ];
+
+        var catalogue = new ScrStatCatalogue(entries);
+
+        // This equality will break once HP/MP float positions are verified separately.
+        Assert.Equal(
+            catalogue.GetHpBaseCurve().BaseForLevel(1),
+            catalogue.GetMpBaseCurve().BaseForLevel(1));
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // ItemCatalogue
     // ─────────────────────────────────────────────────────────────────────────

@@ -76,12 +76,17 @@ public interface ILobbyClient
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The decompressed payload's first 30 (0x1E) bytes are treated as a NUL-padded ASCII
-    /// <c>"host port"</c> string. The implementation reads a fixed 30-byte field, zero-fills any
-    /// gap, and splits on whitespace to obtain the host and decimal port.
+    /// The channel thread zero-fills a 30-byte endpoint field, then copies the first 30 (0x1E)
+    /// bytes of the decompressed payload verbatim as a fixed ASCII endpoint token. The 30 source
+    /// bytes are <b>not</b> guaranteed NUL-terminated. The legacy client consumed this token
+    /// opaquely (it did not itself parse host/port out of it in the channel thread); the exact
+    /// internal delimiter (e.g. <c>"host:port"</c> vs <c>"host port"</c> vs
+    /// <c>"host\0port"</c> vs fixed sub-fields) is <b>NEEDS-CAPTURE</b> — not statically
+    /// determinable. A whitespace-split is a reasonable implementation choice pending a live
+    /// capture that confirms the delimiter.
     /// <br/>
-    /// spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE B — CHANNEL-ENDPOINT text;
-    /// Docs/RE/specs/login_flow.md §2.2, §7 (channel-endpoint copy length = 30 bytes).
+    /// spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE B — CHANNEL-ENDPOINT text
+    /// [CODE-CONFIRMED: 30 bytes copied, consumed opaquely; delimiter = NEEDS-CAPTURE].
     /// </para>
     /// <para>
     /// The returned <see cref="LobbyChannelEndpoint"/> names the <b>game server</b>, not the

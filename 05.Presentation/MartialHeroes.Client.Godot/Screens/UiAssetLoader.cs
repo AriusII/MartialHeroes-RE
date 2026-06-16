@@ -31,8 +31,8 @@ namespace MartialHeroes.Client.Godot.Screens;
 ///   - sprite sub-rects as <see cref="AtlasTexture"/> (spec §8.1 / §8.3 atlas mapping),
 ///   - the <c>msg.xdb</c> string catalogue (spec §5) for CP949 UI captions.
 ///
-/// All public methods return null / fallback gracefully when the VFS is offline so the screens
-/// always build (they fall back to solid-colour panels + English placeholder text).
+/// All public methods return null / empty gracefully when the VFS is offline — callers must
+/// render nothing when an atlas or string is absent (no solid-colour stand-ins, no synthetic text).
 /// </summary>
 public sealed class UiAssetLoader : IDisposable
 {
@@ -144,7 +144,7 @@ public sealed class UiAssetLoader : IDisposable
         MsgXdbCatalog? cat = EnsureMsg();
         if (cat is null) return fallback;
 
-        string? s = cat.GetText(id);
+        string? s = cat.GetText((int)id);
         return string.IsNullOrEmpty(s) ? fallback : s;
     }
 
@@ -163,7 +163,7 @@ public sealed class UiAssetLoader : IDisposable
             ReadOnlyMemory<byte> raw = _assets.GetRaw(MsgPath);
             if (raw.IsEmpty)
             {
-                GD.Print("[UiAssetLoader] msg.xdb absent — UI uses English placeholders.");
+                GD.Print("[UiAssetLoader] msg.xdb absent — UI captions will be empty.");
                 return null;
             }
 
@@ -172,11 +172,53 @@ public sealed class UiAssetLoader : IDisposable
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[UiAssetLoader] msg.xdb parse failed: {ex.Message} — using placeholders.");
+            GD.PrintErr($"[UiAssetLoader] msg.xdb parse failed: {ex.Message} — captions will be empty.");
             _msg = null;
         }
 
         return _msg;
+    }
+
+    // -------------------------------------------------------------------------
+    // Eager atlas preload (spec: ui_system.md §9.0, §11.1)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Eagerly loads the four login-screen UI atlases into the internal cache.
+    /// Must be called at scene-build time, before any widget construction, so every
+    /// subsequent Slice() call hits the cache rather than re-reading the VFS.
+    ///
+    /// spec: Docs/RE/specs/ui_system.md §9.0 (atlas-loader lifecycle: eager per-window load).
+    /// spec: Docs/RE/specs/ui_system.md §11.1 (login-screen atlas table).
+    /// </summary>
+    public void PreloadLoginAtlases()
+    {
+        // Four login-screen atlases loaded up-front before widget construction.
+        // spec: Docs/RE/specs/ui_system.md §11.1.
+        LoadAtlas("data/ui/login_slice1.dds"); // spec ui_system.md §11.1.
+        LoadAtlas("data/ui/loginwindow.dds"); // spec ui_system.md §11.1.
+        LoadAtlas("data/ui/inventwindow.dds"); // spec ui_system.md §11.1.
+        LoadAtlas("data/ui/loginwindow_02.dds"); // spec ui_system.md §11.1.
+    }
+
+    /// <summary>
+    /// Returns the raw bytes for a VFS entry at <paramref name="vfsPath"/>,
+    /// or an empty span when the VFS is offline or the file is absent.
+    ///
+    /// Used for the game.ver version gate (spec: frontend_scenes.md §1.4).
+    /// </summary>
+    public ReadOnlyMemory<byte> GetRaw(string vfsPath)
+    {
+        if (_assets is null) return ReadOnlyMemory<byte>.Empty;
+        try
+        {
+            return _assets.GetRaw(vfsPath);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[UiAssetLoader] GetRaw('{vfsPath}') failed: {ex.Message}");
+            return ReadOnlyMemory<byte>.Empty;
+        }
     }
 
     // -------------------------------------------------------------------------

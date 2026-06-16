@@ -22,7 +22,9 @@ public sealed class CharManageResultLayoutTests
     [Fact] // spec: Docs/RE/opcodes.md
     public void CharManageResult_opcode_constants_match_catalog()
     {
-        Assert.Equal(0x30004u, Protocol.Opcodes.Opcodes.SmsgCharManageResult); // 3/4
+        // Ladder de-swapped on build 263bd994 (Campaign 10): 3/7 is the 8-byte char-manage result.
+        // spec: Docs/RE/opcodes.md.
+        Assert.Equal(0x30007u, Protocol.Opcodes.Opcodes.SmsgCharManageResult); // 3/7
         Assert.Equal(0x30006u, Protocol.Opcodes.Opcodes.SmsgRenameCharResult); // 3/6
         Assert.Equal(0x30017u, Protocol.Opcodes.Opcodes.SmsgCharCreateResult); // 3/23
 
@@ -30,6 +32,21 @@ public sealed class CharManageResultLayoutTests
         Assert.Equal(Protocol.Opcodes.Opcodes.SmsgCharManageResult, SmsgCharManageResult.OpcodeId);
         Assert.Equal(Protocol.Opcodes.Opcodes.SmsgRenameCharResult, SmsgRenameCharResult.OpcodeId);
         Assert.Equal(Protocol.Opcodes.Opcodes.SmsgCharCreateResult, SmsgCharCreateResult.OpcodeId);
+    }
+
+    [Fact] // spec: Docs/RE/opcodes.md — major-3 ladder de-swap (build 263bd994, Campaign 10).
+    public void Major3_ladder_is_deswapped()
+    {
+        // The corrected minor-3 receive ladder: 3/4 = scene-entity update, 3/7 = char-manage result,
+        // 3/14 = char spawn-confirm response (catalog name SmsgCharSpawnResponse; the C# constant
+        // keeps the SmsgCharSpawnResult identifier). spec: Docs/RE/opcodes.md.
+        Assert.Equal(0x30004u, Protocol.Opcodes.Opcodes.SmsgSceneEntityUpdate); // 3/4
+        Assert.Equal(0x30007u, Protocol.Opcodes.Opcodes.SmsgCharManageResult); // 3/7
+        Assert.Equal(0x3000eu, Protocol.Opcodes.Opcodes.SmsgCharSpawnResult); // 3/14
+
+        // The structs' [PacketOpcode] / OpcodeId mirror the de-swapped values.
+        Assert.Equal(0x30007u, SmsgCharManageResult.OpcodeId); // 3/7
+        Assert.Equal(0x3000eu, SmsgCharSpawnResult.OpcodeId); // 3/14
     }
 
     // -------------------------------------------------------------------------

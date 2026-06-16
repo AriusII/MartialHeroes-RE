@@ -1,5 +1,21 @@
 # Combat math & stat-aggregation pipeline (clean-room spec)
 
+> **Verification banner.**
+> - **verification:** client-side routing, message body sizes, struct/field offsets, and stat-weight
+>   formulas are **confirmed** (control-flow-confirmed static read on build `263bd994`); single-inference
+>   findings are marked **static-hypothesis**; server-authored magnitudes (damage numbers, cooldown
+>   wall-clock pacing, XP/reward rates, HP scale) and on-wire VALUE meanings are **capture/debugger-pending**.
+> - **ida_reverified:** 2026-06-16
+> - **ida_anchor:** 263bd994
+> - **evidence:** [static-ida] (no live network capture corroborates the in-world loop yet)
+> - **conflicts:** (1) attack-in-progress flag clear — this build shows it cleared/re-armed in
+>   `SmsgLocalPlayerStateSync` (**4/13**), not a `4/2` handler; which push *arms* vs *releases* the swing
+>   window is **capture/debugger-pending**. (2) The §9.1 picked-target offsets re-pinned for `263bd994`:
+>   picked target {id, sort} are at **controller+36 / +40** (the prior-build `+136/+140/+144` layout did
+>   not reproduce); the 100 ms auto-repeat throttle lives on the **move-scheduler object (field +36)**, not
+>   `controller+144`. The throttle **VALUE** (0x64 = 100 ms) and the walk-into-range loop are confirmed;
+>   only the literal offsets moved.
+
 Neutral, data-only model of how the legacy *Martial Heroes* client derives its **combat stats**
 (attack rating, hit/accuracy rating, defence, critical, damage range, hit/defence/damage rates) from
 primary stats + equipment + set bonuses + buffs/auras + weapon proficiency, and of where **damage
@@ -34,9 +50,12 @@ counterpart to the vitals spec and shares the same aggregation pipeline.
 | Per-item field → derived-stat mapping (Section 2.3) | MEDIUM — corroborated against the item catalogue from the consuming side; treat exact per-item source columns as best-fit until a capture confirms |
 | `critical_rate_` vs `critical_hit_` split; rate-pair `[0]/[1]` semantics; `order_special_` element map | LOW — flagged UNVERIFIED throughout |
 | Combat-phase timing (Section 5) is server-paced, not a client cooldown formula | HIGH |
-| In-world combat loop: server-authoritative damage via a single battle controller (Sections 9–11) | HIGH (CODE-CONFIRMED static read; CAPTURE-UNVERIFIED — see below) |
-| Two-tier target acquisition; basic melee = skill `2/52` slot `0xFF` (Sections 9–10) | HIGH (CODE-CONFIRMED) |
-| Attack cadence is server-paced (swing-ready timestamp armed/re-armed by the server) (Section 11) | MEDIUM — strong inference; the timestamp owner (client-on-send vs. server packet) is CAPTURE-UNVERIFIED |
+| In-world combat loop: server-authoritative damage via a single battle controller (Sections 9–11) | HIGH (CODE-CONFIRMED static read on build 263bd994; CAPTURE-UNVERIFIED — see below) |
+| Two-tier target acquisition; basic melee = skill `2/52` slot `0xFF`, default-attack id `121100050` (Sections 9–10) | HIGH (CODE-CONFIRMED) |
+| Cadence constants: per-skill cadence = `100 ms × skill_cadence` (skill record `+1332`); post-cast motion lockout = `550 ms` fixed; `100 ms` auto-repeat throttle (Section 11) | HIGH — client constants CONFIRMED; whether the server re-paces them is CAPTURE/DEBUGGER-PENDING |
+| Controller field offsets re-pinned to build 263bd994 (picked target id/sort at `+36/+40`; throttle on the move-scheduler `+36`, not `controller+144`) (Section 9.1) | HIGH for the 263bd994 offsets; the prior-build `+136/+140/+144` discrepancy is STATIC-HYPOTHESIS / names.yaml re-pin pending |
+| Attack-in-progress flag clear opcode is `4/13` on this build (was `4/2`) (Section 11) | CODE-CONFIRMED that `4/13` clears the flag; which push arms-vs-releases the swing window is CAPTURE/DEBUGGER-PENDING |
+| `4:100` body = 188 B (`0xBC`); `4:99` body = 16 B (result-code → `~58001..58030`) (Section 5) | HIGH (CODE-CONFIRMED static sizes) |
 | Damage-kind → floating-number motion/colour selection; multi-hit split (Section 12) | HIGH (CODE-CONFIRMED) |
 
 **UNVERIFIED list** is consolidated in Section 7. Korean strings referenced here are **CP949 /
@@ -340,22 +359,30 @@ capture before binding penalties to specific weapon classes (`items.csv` weapon 
 | Opcode (major:minor) | Name | Role in combat |
 |---|---|---|
 | `5:53` | `SmsgActorVitalsAndPairState` | Writes **absolute** current HP / MP / stamina into the target actor. For the local player, each value is clamped against the **locally-computed maximum** (`structs/stats.md`) and negatives floor to 0. This is where "damage taken/dealt" becomes visible — as a new absolute HP value from the server, not a client subtraction. |
-| `4:100` | `SmsgCombatAttackUpdate` | Carries a combat **phase** indicator, a sub-kind selector (a reset sentinel exists), and a value. Drives **attack-swing timing** state on the local player; see §5.2. Server-paced — not a client cooldown formula. |
-| `4:99` | `SmsgCombatResultMessage` | A combat/training **session result** — formats reward / EXP-delta strings (localized message series, CP949). UI messaging, no client math. |
+| `4:100` | `SmsgCombatAttackUpdate` | A **188-byte (0xBC)** body carrying a combat **phase** indicator, a value, and (post-handling) forwarding to the reward/EXP panel. Drives **attack-swing timing** state on the local player; see §5.2. Server-paced — not a client cooldown formula. |
+| `4:99` | `SmsgCombatResultMessage` | A **16-byte** body — a combat/training **session result**: a subtype byte (subtype 1 → a result panel) else a result code `1..8` mapped to a localized message-id series (~`58001..58030`, some `printf`-formatted) shown as a coloured chat notice. CP949. UI messaging, no client math. |
 
 Field layouts for `4:99` and `4:100` are **not yet specced** (no packet YAML); they are listed in
-`opcodes.md` as routing-confirmed only. They are scoped enough for a future packet spec but are
-**out of scope for combat math** here.
+`opcodes.md` as routing-confirmed only. The body **sizes** are now pinned (`4:100` = 188 bytes / `0xBC`;
+`4:99` = 16 bytes), and `4:99`'s result-code → message-id banding is recorded above; both are scoped
+enough for a future packet spec but are **out of scope for combat math** here.
 
 ### 5.2 Attack-phase timing state
 
 The local player carries a small attack-timing block (a swing-start timestamp, a value field, and a
-phase indicator, in one contiguous run). `SmsgCombatAttackUpdate` (`4:100`) advances it: on the
-"swing-start" phase the client stamps a millisecond timestamp and stores the message value; a later
-phase resets it. Cadence (attack speed) is therefore **gated by server phase messages**, so attack
-speed in the live game was server-paced. There is **no client-side attack-speed formula**, though the
-`items.csv` `attack_speed` coefficient (col75; range ~0.26–0.37) is the per-weapon input the server
-would have used.
+phase indicator, in one contiguous run). Critically, **this run is NOT on the battle controller** — it
+lives on a **separate local-player visual/HUD object** (the main-window visual record at slot `[148]`),
+distinct from the battle-controller singleton (§9.1). `SmsgCombatAttackUpdate` (`4:100`) advances it: on
+the **swing-start phase** (phase value `3`) the client stamps a millisecond timestamp into the
+swing-start field, stores the message value into the adjacent value field, and writes the phase; on a
+later **reset phase** (phase value `5`) it zeroes the swing-start field. After updating this run the
+handler forwards the body to the reward/EXP panel. Cadence (attack speed) is therefore **gated by server
+phase messages**, so attack speed in the live game was server-paced. There is **no client-side
+attack-speed formula**, though the `items.csv` `attack_speed` coefficient (col75; range ~0.26–0.37) is
+the per-weapon input the server would have used.
+
+*Which phase value marks "swing-start" vs "reset", and whether the server (re)paces these phases,
+is **capture/debugger-pending**; the phase-byte → field-write mechanism above is **confirmed** static.*
 
 ### 5.3 Combat visuals & local input (no math)
 
@@ -468,11 +495,14 @@ position to a named stat is **UNVERIFIED** there and inherited here.
 
 ## 9. In-world combat loop & the battle controller (architecture)
 
-> **Verification banner for Sections 9–12.** Everything in these sections is a **static read** of the
-> legacy client (graded CODE-CONFIRMED where the control flow was followed end-to-end, PLAUSIBLE where
-> inferred). **No live network capture corroborates any of it** — treat every opcode role, byte width,
-> and timing constant as **CAPTURE-UNVERIFIED** until a capture confirms it. This is the same caveat as
-> Sections 1–8 and as `specs/skills.md`.
+> **Verification banner for Sections 9–12** (ida_reverified 2026-06-16, ida_anchor `263bd994`,
+> evidence [static-ida]). Everything in these sections is a **static read** of the legacy client (graded
+> CODE-CONFIRMED where the control flow was followed end-to-end, STATIC-HYPOTHESIS / PLAUSIBLE where
+> inferred). Client-side routing, body sizes, struct/field offsets, and timing constants are
+> **confirmed**; **no live network capture corroborates the on-wire VALUE meanings or the server's
+> pacing** — treat server-authored magnitudes and the swing-window owner as **CAPTURE/DEBUGGER-PENDING**
+> until a capture confirms them. This is the same caveat as Sections 1–8 and as `specs/skills.md`. All
+> object-relative field offsets in these sections are **re-pinned to build 263bd994** (Section 9.1).
 
 The in-world combat loop is driven by **one global battle-controller object** — a process-wide
 singleton (described here by role; we do not name it by address). It is reached through a guarded
@@ -500,25 +530,39 @@ End-to-end, one attack is:
 
 ### 9.1 Battle-controller state (role-named field map)
 
-The controller carries a small, contiguous combat-state block. Offsets below are **object-relative
-field offsets** (an interoperability fact, not a binary address), named by role:
+The controller carries a small combat-state block. Offsets below are **object-relative field offsets**
+(an interoperability fact, not a binary address), **re-pinned to build `263bd994`** and named by role.
+Where an offset is also given as a dword index, the byte offset is `4 × index`.
 
-| Controller field | Role |
-|---|---|
-| action mode | `0` = basic-attack mode (the executor picks the per-class default attack skill); non-zero = an explicit chosen skill. |
-| swing-ready timestamp (ms) | The next-allowed-swing gate. The cooldown / can-act checks compare it against the millisecond clock (Section 11). |
-| "now" snapshot (ms) | The millisecond clock value sampled at each cooldown check. |
-| motion-lockout-end (ms) | Stamped to `now + 550 ms` on a real cast; a fixed post-cast motion hold (Section 11). |
-| aim origin / aim target XYZ + sort | The cast origin and aim point written by the executor for the request. |
-| effective skill range | The computed range² gate the executor tests target distance against. |
-| "needs to move to target" flag, combo-step counter, combo-active flag | The approach / multi-hit combo bookkeeping for one action. |
-| **picked target id** (`+136`) | The target id resolved from the mouse-pick at click time (the *per-controller* target — Section 10). |
-| **picked target sort** (`+140`) | The sort byte (and a held flag) of that picked target. |
-| last-action timestamp (ms) (`+144`) | The auto-repeat throttle clock (Section 11). |
-| active-skill pointer | The skill object currently being used (the default basic-attack skill in mode `0`). |
+| Controller field | Offset (build 263bd994) | Role |
+|---|---|---|
+| action mode | `+0` | `0` = basic-attack mode (the executor picks the per-class default attack skill, id `121100050`); non-zero = an explicit chosen skill. |
+| swing-ready timestamp (ms) | `+4` (dword idx 1) | The next-allowed-swing gate. The cooldown / can-act checks compare it against the millisecond clock (Section 11). On a successful swing the executor re-arms it from the "now" snapshot (`+4 = +8`). |
+| "now" / last-swing snapshot (ms) | `+8` (dword idx 2) | The millisecond clock value sampled at the cooldown check; the executor copies it into the swing-ready field to re-arm. |
+| motion-lockout-end (ms) | `+12` (dword idx 3) | Stamped to `now + 550 ms` on a real cast; a fixed post-cast motion hold (Section 11). Zeroed on the `5:52` idle/cancel branch. |
+| aim origin / aim target XYZ + sort | from `+36` | The cast origin and aim point written by the executor for the request; the per-controller picked target {id, sort} sits here too (see below). |
+| effective skill range² | `+60` (dword idx 15, float) | The computed range² gate the executor tests target distance against; built per-skill from the skill record + bonuses. |
+| "needs to move to target" flag | `+68` | Set when the picked target is out of range (drives the approach loop, Section 10.4). |
+| combo-step counter / combo-active flag | `+69` / `+70` | The multi-hit combo bookkeeping for one action. |
+| attack-in-progress flag | `+80` | Raised by the send paths; the held-attack tick runs only while this is `1`; cleared by the server resync (see §11 and the §-banner conflict). |
+| **picked target id** | `+36` | The target id resolved from the mouse-pick at click time (the *per-controller* target — Section 10), read float-coerced by the executor. |
+| **picked target sort** | `+40` | The sort byte (and held flag) of that picked target. |
+| active-skill pointer | `+432` | The skill object currently being used (the default basic-attack skill, id `121100050`, in mode `0`). |
 
-Field offsets `+136` / `+140` are called out explicitly because they are the **per-controller picked
-target {id, sort}** pair that Section 10 contrasts with the global hovered/selected id. `CODE-CONFIRMED`.
+**Re-pin note (build 263bd994).** The picked-target {id, sort} pair is at **controller+36 / +40** on
+this build — the prior-build `+136 / +140` layout **did not reproduce** here, and there is **no
+`controller+144` last-action timestamp**: the 100 ms auto-repeat throttle is enforced on a **separate
+move-scheduler object** (its field `+36`), not on the controller (Section 11). The throttle **value**
+(`0x64` = 100 ms) and the walk-into-range loop are **confirmed**; only the literal offsets moved between
+builds. `CODE-CONFIRMED` for the offsets above; the `+136/+140/+144` discrepancy is **static-hypothesis /
+capture-pending** (flagged for a names.yaml re-pin against `263bd994`).
+
+> **Two distinct timing objects — keep them separate.** The fields above all live on the **battle
+> controller singleton**. The **`4:100` swing-start timestamp + value + phase** run (Section 5.2) lives on
+> a **different object** — the local-player **visual/HUD record** (main-window slot `[148]`), at its own
+> contiguous fields (swing-start ts, value, phase). A re-implementation must model these as **two
+> separate objects**: the controller owns "what am I attacking and when may I swing again"; the
+> visual/HUD record owns the `4:100`-driven swing-start display state.
 
 ---
 
@@ -531,7 +575,7 @@ Target acquisition is **two-tier** — two distinct notions of "current target" 
 | Tier | Where it lives | What it drives |
 |---|---|---|
 | **Global hovered/selected target id** | A single process-wide 4-byte global holding the id of the actor under the cursor / most recently selected. Resolved via the global-id actor lookup (no sort). | Drives the **target-info tooltip / overhead name+level billboard**; is **the id the basic-attack send reads** as its attack target; is required by certain skill-usability validators; is cleared/rewritten on world (re-)entry. |
-| **Per-controller picked target** | The battle controller's own `{id @+136, sort @+140}` pair (Section 9.1), set from the mouse-pick at click time and resolved each tick by the controller's get-target routine. | Drives the **executor's** target validation, range gate, and the request's target arrays for the full-skill path. |
+| **Per-controller picked target** | The battle controller's own `{id @+36, sort @+40}` pair (Section 9.1, build 263bd994), set from the mouse-pick at click time and resolved each tick by the controller's get-target routine via the composite-key actor lookup. | Drives the **executor's** target validation, range gate, and the request's target arrays for the full-skill path. |
 
 The two are normally the same actor but are stored and resolved independently. A re-implementation
 should keep them as **two separate fields** (a UI/selection target and a combat-action target) and not
@@ -555,7 +599,14 @@ The slot byte is produced by scanning the **240-slot skill hotbar** (8-byte stri
 a hit returns the slot index, a miss returns `0xFF` (the basic-attack sentinel). This is the same
 240-slot hotbar and the same `0xFF = basic attack` convention `packets/2-52_use_skill.yaml` documents
 (field `SkillSlot`, "0xFF = basic attack") and that `specs/skills.md` §4 ties to the 240 cooldown
-slots. `CODE-CONFIRMED`.
+slots. The hotbar is **one 240-entry × 8-byte record array** — each record carries a skill **id**
+(int32 at record `+0`) and a **points** field (int16 at record `+4`, followed by 2 pad bytes) — **not**
+two parallel arrays. `CODE-CONFIRMED`.
+
+In **basic-attack mode** (controller action-mode `0`) the executor, when no explicit skill is chosen,
+resolves the default attack skill object by entity key **`121100050`** (the per-class default-attack
+id) and uses it as the active skill (`+432`); the same `121100050` also appears as a fallback in a
+cost-failure recovery path. `CODE-CONFIRMED`.
 
 > **The wire layout of `2:52` is owned by `packets/2-52_use_skill.yaml` and is not re-derived here.**
 > That spec already records the 24-byte header (`SkillSlot @0` with `0xFF = basic attack`, `AimMode`,
@@ -565,14 +616,19 @@ slots. `CODE-CONFIRMED`.
 > the aim-mode field to `1.0`, raise the local "attack/cast in progress" flag, and send the header with
 > empty target arrays.
 
-### 10.3 The level gate on the basic-attack send
+### 10.3 The region guard and the level gate on the basic-attack send
 
-Before emitting the basic-attack `2:52`, the send path **gates on the target's level requirement**: it
-reads the target actor's **level-requirement byte** and compares it against the **local player level**
-(a process-wide global). If the target is too low (i.e. the local player out-levels the legal target by
-the gated margin), the send is **aborted** and a "too low level" notice is shown (legacy localization
-string ids ~57002 / 57003). So a basic attack on an over-low target never reaches the wire.
-`CODE-CONFIRMED`; the exact margin semantics are PLAUSIBLE / CAPTURE-UNVERIFIED.
+The send path first applies a **region/scene guard**: it compares the current scene/region state
+against the expected world-state global, and if they differ it **bounces the send** (UI feedback only).
+A basic attack therefore only fires while in the correct scene/region state. `CODE-CONFIRMED`.
+
+Past the region guard, the send path **gates on the target's level requirement**: it reads the target
+actor's **level-requirement byte** (the value is consulted only when it is non-zero and below 100) and
+compares it against the **local player level** (a process-wide global). If the local level is `0`, a
+"missing level" notice (~`57002`) is shown; if the local player **out-levels** the legal target, a "too
+low level" notice (~`57003`) is shown; in either case the send is **aborted** and returns no packet. So
+a basic attack on an over-low target never reaches the wire. `CODE-CONFIRMED`; the exact margin
+semantics are PLAUSIBLE / CAPTURE-UNVERIFIED.
 
 ### 10.4 Click handler & the approach loop
 
@@ -609,7 +665,7 @@ and/or the combat-phase update message, Section 5.1). Three independent throttle
 |---|---|---|
 | **Per-skill cooldown / cadence** | `100 ms × skill_cadence` | `skill_cadence` is a halfword on the skill object (record-relative field `+1332`, the `cooldown`/cadence units; see `specs/skills.md` §1.4 / §4). The cooldown check blocks while `swing-ready-timestamp + 100 ms × skill_cadence > now`. The same `100 ms × skill_cadence` window is the minimum gap the executor enforces between swings. |
 | **Post-cast motion lockout** | `550 ms` (fixed) | On a real cast the controller stamps `motion-lockout-end = now + 550 ms` — a fixed post-cast motion hold, independent of the per-skill cadence. Cleared when the cast ends (the `5:52` idle/cancel branch). |
-| **Auto-repeat click throttle** | `100 ms` (fixed) | The click handler refuses a repeated attack faster than every 100 ms (compares `now` against the controller's last-action timestamp `+144`). A held attack therefore fires at most every 100 ms, then is further gated by the per-skill cadence and the swing-ready timestamp. |
+| **Auto-repeat click throttle** | `100 ms` (`0x64`, fixed) | The held-attack tick runs only while the controller's attack-in-progress flag (`+80`) is `1`; the **out-of-range move-to-target send** enforces a `now − scheduler[+36] < 100 ms` throttle on its own **move-scheduler object** (field `+36`). A held attack therefore re-issues at most every 100 ms, then is further gated by the per-skill cadence and the swing-ready timestamp. *(Re-pin, build 263bd994: this throttle is on the move-scheduler object, **not** at `controller+144`; the 100 ms value is **confirmed**, the offset moved between builds.)* |
 
 Two further "can I act" gates compose with the cadence (these mirror `specs/skills.md` cast gates):
 
@@ -619,18 +675,21 @@ Two further "can I act" gates compose with the cadence (these mirror `specs/skil
   cast-lock is set, or any of the **crowd-control status family** (the stun / root / silence / freeze
   buff-status ids — `specs/skills.md` §6 buff slots) is active.
 
-**Server pacing — strong inference, CAPTURE-UNVERIFIED.** Whether the swing-ready timestamp is armed
-purely client-side at send time, or **re-armed by a server packet** (the per-tick resync pulse `4:2`,
-or the combat-phase update `4:100` `SmsgCombatAttackUpdate`, Section 5.2), governs whether attack speed
-was *truly* server-paced. The control flow strongly implies server pacing (the controller arms the
-swing window and the server's resync pulse releases the "attack in progress" flag), but **a capture is
-required to settle the timestamp's owner.** This is the single most important open question in the
-combat-loop model.
+**Server pacing — strong inference, CAPTURE/DEBUGGER-PENDING.** Whether the swing-ready timestamp is
+armed purely client-side at send time, or **re-armed by a server packet** (a per-tick resync pulse, or
+the combat-phase update `4:100` `SmsgCombatAttackUpdate`, Section 5.2), governs whether attack speed was
+*truly* server-paced. The control flow strongly implies server pacing (the controller arms the swing
+window and a server resync push releases the "attack in progress" flag), but **a capture is required to
+settle the timestamp's owner.** This is the single most important open question in the combat-loop model.
 
-> The "attack/cast in progress" flag is set by the send paths and **cleared by the per-tick server
-> resync pulse** (`4:2`) as well as by the `5:52` idle/cancel branch — i.e. `4:2` is the server's
-> per-tick "action settled / resync" signal that releases the local attack flag. `CODE-CONFIRMED`;
-> the wire layout of `4:2` is out of scope here.
+> **Attack-in-progress flag clear — opcode is `4/13` on this build (was documented as `4/2`).** The
+> "attack/cast in progress" flag (controller `+80`) is set by the send paths and **cleared / re-armed
+> by the local-player state-sync push `4/13`** `SmsgLocalPlayerStateSync` (which manipulates the
+> controller's `+68/+69/+70/+80` flags) as well as by the `5:52` idle/cancel branch. On build
+> `263bd994` **no `4/2` handler touching the controller flag was located** — the prior `4/2` attribution
+> is superseded here by `4/13`. It remains **capture/debugger-pending** whether `4/2` also exists as a
+> bare per-tick tick and which push *arms* vs *releases* the swing window live; the wire layout of the
+> resync push is out of scope here.
 
 ---
 
@@ -650,12 +709,20 @@ On `5:52` the client looks up the caster and branches on a cast-active flag:
   `specs/skills.md` §5.1: motion sub-ops, single-target, and `0xCC` AoE fan-out):
   - Play the caster's **swing motion**.
   - For the **local player**, stamp the 550 ms motion lockout and drain the local player's own
-    **stamina / HP for the cast** (the cast cost — see `specs/skills.md` §5.2 and open question 1).
+    **stamina / HP for the cast** (the cast cost): the **HP cost** comes from the skill record field
+    `+1368` (subtracted from the player current-HP field `+176`), and the **stamina cost** from the
+    skill record field `+1370` scaled by the target count and clamped, applied to the player stamina
+    field `+184`. See `specs/skills.md` §5.2 and open question 1. *(The HP/stamina **magnitudes** are
+    server-authored skill data — capture/debugger-pending; the field plumbing is confirmed static.)*
   - Iterate the **per-target hit records** (bounded; `≤ 40`) and **forward each record to that actor's
     own animation / FX queue** (a per-actor anim+FX queue handle pair on the actor — described by role,
     object-relative fields `+1496` / `+1500`). This is the **per-target hit-animation / hit-FX driver**.
-  - For the local player, **sum the visible damage** across records and **render a floating "damage
-    dealt" number** (when the per-target combat-damage HUD toggle is on).
+  - For the local player, **sum the visible damage** across records (the per-record visible-damage
+    field, record `+16`, accumulated into a 64-bit total) and **render a floating "damage dealt"
+    number** via the localized **damage-total notice, message-string id `2212`** (thousands-grouped,
+    formatted, broadcast as a chat/notice) — gated on the per-target combat-damage HUD toggle. *(Note:
+    the raw immediate `2212` also appears elsewhere in the combat panel as an object-relative **field
+    offset** `+2212`; that is numerically coincidental and unrelated to the message id used here.)*
   - **AoE (action-code `0xCC`):** treat the first record as the origin and procedurally **fan
     sub-actors in a ring** around it (the visual multi-hit / clone effect of `specs/skills.md` §5.4).
 
@@ -670,7 +737,10 @@ into the actor's current-HP field (object-relative field `+176`; the HP-bar read
 with the secondary vital, stamina, and level/state bytes. For the **local player** the values are
 **clamped against the client-computed maxima** (Section 5.1, Sections 1–4) and negatives floor to 0.
 **This is the canonical "damage lands here" observable** — the HP bar's value is a new absolute HP
-number from the server, never a client subtraction. `CODE-CONFIRMED`.
+number from the server, never a client subtraction. The current-HP field `+176` is `CODE-CONFIRMED`
+(the `5:52` cast-cost path writes it and the per-frame tick floors it at 0); the `5:53` body itself was
+not re-opened on this lane (it is owned by the vitals spec), so the `5:53`→`+176` write is
+**static-hypothesis** pending a vitals-lane re-read.
 
 ### 12.3 Damage-kind selection → floating-number motion & colour
 

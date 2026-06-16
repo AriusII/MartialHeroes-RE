@@ -343,13 +343,13 @@ public readonly record struct CharacterListSlot(
 // =====================================================================================================
 
 /// <summary>
-/// Published when the local player materializes into the world (3/7 SmsgCharSpawnResult, Result != 0).
+/// Published when the local player materializes into the world (3/14 SmsgCharSpawnResponse, Result != 0).
 /// Immutable snapshot of the freshly-spawned local player, sourced from the slot descriptor cached at
 /// select time. This is the load-bearing "you are in the world" event the presentation acts on. spec:
 /// Docs/RE/specs/login_flow.md §3.5 / §5.3.
 /// </summary>
 /// <param name="Key">The local player's composite actor identity (raw id + sort).</param>
-/// <param name="SlotIndex">The character slot that spawned (echoed by the 3/7 result).</param>
+/// <param name="SlotIndex">The character slot that spawned (echoed by the 3/14 result).</param>
 /// <param name="Name">Decoded character name (from the cached descriptor).</param>
 /// <param name="Level">Character level.</param>
 /// <param name="Position">Spawn position (Q16.16, world Y forced to 0).</param>
@@ -367,7 +367,7 @@ public sealed record LocalPlayerSpawnedEvent(
     ushort ServerClass) : IClientEvent;
 
 /// <summary>
-/// Published when the enter-game spawn fails (3/7 SmsgCharSpawnResult, Result == 0). The presentation
+/// Published when the enter-game spawn fails (3/14 SmsgCharSpawnResponse, Result == 0). The presentation
 /// shows a timed failure message and may return to the character-select screen. Immutable snapshot.
 /// spec: Docs/RE/specs/login_flow.md §5.3 (Result 0 = failure, timed message shown).
 /// </summary>

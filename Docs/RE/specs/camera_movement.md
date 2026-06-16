@@ -4,9 +4,33 @@ sample_verified: false
 subsystems: [camera_views, camera_constants, movement_collision]
 networked: partial   # camera is client-only; movement uses 2/13, 5/13, 4/13
 encoding_note: Korean in-game/config text is CP949 (legacy MS949 code page), not UTF-8.
+verification: confirmed   # control-flow-confirmed where noted; a few re-locate items + on-wire value meanings are capture/debugger-pending
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida]
+conflicts: 2   # (1) FOV stored full-angle/aspect (NO /2); (2) click marker = UserXEffect spawn, not "highlight texture manager" — both reconciled below
 ---
 
 # Camera, Client Movement & Collision — Clean-Room Specification
+
+> **Verification banner (re-verified 2026-06-16, anchor build `263bd994`, evidence: static-ida).**
+> Client-side routing, message sizes, struct/field offsets, view-mode wiring, grid/cell index
+> math, and the movement-pipeline formulas below are **[confirmed]** by IDB control-flow + operands
+> on this build. Server-authored magnitudes (per-map walk/run speed numbers, any damage/cooldown/XP
+> magnitudes) and on-wire VALUE meanings (the exact 2/13 trailing flag-region byte split, the
+> local-player position-correction channel) are **[capture/debugger-pending]** — do not hard-code
+> them. Two prior-doc claims were **corrected** this pass (see "Conflicts reconciled" below).
+>
+> **Conflicts reconciled this pass:**
+> 1. **§A.7 FOV internal storage.** The prior doc said the in-world FOV is stored "in half-angle
+>    form (`π × 65 / 180 / 2 / aspect`)." It is **not**: the build path stores the **full vertical
+>    FOV in radians ÷ aspect** (`π·65/180/aspect`, **no `/2`**); the half-angle (`tan(fovY/2)`) is
+>    applied only later at frustum derivation. Corrected in §A.7. Not load-bearing for Godot
+>    (which takes a vertical-FOV-in-degrees directly), but the storage description is now accurate.
+> 2. **§B.2 / §B.4 click ground-marker.** The prior doc said the click marker is dropped "via the
+>    highlight texture manager." It is actually a **ground click-marker effect (a user-effect spawn,
+>    effect id 380000000)** at the click XZ with Y from the terrain sampler, after clearing the prior
+>    marker. Corrected in §B.2 step 4 and §B.4.
 
 > Neutral, rewritten behavioural specification. No legacy symbols, no addresses,
 > no pseudo-code, no decompiler identifiers. Describes the *observed behaviour*,
@@ -22,14 +46,15 @@ encoding_note: Korean in-game/config text is CP949 (legacy MS949 code page), not
 
 ## Confidence model (read before trusting any number)
 
-Each major claim is tagged inline:
+Each major claim is tagged inline (these legacy tags map onto the banner's evidence tiers):
 
-- **(CODE-CONFIRMED)** — value lifted directly from binary immediate operands and
-  confirmed by control-flow context; safe to implement.
-- **(SAMPLE-VERIFIED)** — additionally cross-checked against real shipped asset bytes.
-- **(INFERRED)** — single-source behavioural inference with supporting evidence;
+- **(CODE-CONFIRMED)** = **[confirmed]** — value lifted directly from binary immediate operands and
+  confirmed by control-flow context on build `263bd994`; safe to implement.
+- **(SAMPLE-VERIFIED)** = **[sample-verified]** — additionally cross-checked against real shipped asset bytes.
+- **(INFERRED)** = **[static-hypothesis]** — single-source behavioural inference with supporting evidence;
   implement but keep a feature flag / make it tunable.
-- **(UNVERIFIED)** — hypothesis only; do **not** hard-code. Listed again in §D.
+- **(UNVERIFIED)** = **[capture/debugger-pending]** — hypothesis only, or a server-authored / on-wire
+  value meaning that needs a live capture or debugger run; do **not** hard-code. Listed again in §D.
 
 All exact numeric tuning constants below were lifted from the binary's immediate
 operands; they are **(CODE-CONFIRMED)** as *values present in the code* but
@@ -88,9 +113,12 @@ First-person and Third-person **share the same input-event handler** (mouse-look
 
 **Third-person is the default.** All five in-world manipulators are constructed in
 the order Third / First / Static / Gamble / Event (Third is scene-graph slot 0 and
-is the initially-active mode). The saved option `OPTION_VIEW_CHAR` (INI section
-`[DO_OPTION]`) is **clamped to the range 1..3** on load, with the floor value 1
-mapping to Third-person. Only the three user-selectable modes (Third / First /
+is the initially-active mode). Each manipulator is created with a localized display
+label pulled from the message database, in that exact construction order, by
+**message-db string id: Third = 2006, First = 2004, Static = 2005, Gamble = 2148,
+Event = 2148** (Gamble and Event share id 2148). The saved option `OPTION_VIEW_CHAR`
+(INI section `[DO_OPTION]`) is **clamped to the range 1..3** on load, with the floor
+value 1 mapping to Third-person. Only the three user-selectable modes (Third / First /
 Static) are persisted. Gamble, Event, and Select are **not** part of the saved set.
 (CODE-CONFIRMED)
 
@@ -285,12 +313,40 @@ Per-mode detail notes:
   - The exact 17 curve triples can be recovered from the binary table if cut-scene support is
     ever needed; they are **not required for normal town/field play**, which uses only Third-person.
 
-- **Select (char-select preview).** Out-of-world. Its constructor clears yaw/pitch/eye-offset and
-  builds a **multi-waypoint camera path** from a literal world-position table baked into the
-  constructor. Approximate waypoints: **(−1532, 137, −3254)**, **(−1705, −3508, 87)**,
-  **(−1577, −3590, 104)**, with span constants **2048 / 6144 / −1536**. These are the char-select
-  stage's framing positions (the "fly-around the character" select-screen feel), not gameplay
-  tuning. Not part of the in-world mode set. (CODE-CONFIRMED for values; visual framing INFERRED)
+- **Select (char-select preview). ENTRY DOLLY — see `frontend_scenes.md` §3.5 for the authoritative model.**
+
+  > **Two prior readings retracted (CAMPAIGN 9 re-walk).**
+  > 1. The **multi-waypoint / orbiting** reading — a literal world-position waypoint table with
+  >    framing positions and span constants — is **retracted and NOT the model**. Do **not** implement
+  >    the old waypoints (−1532, 137, −3254) / (−1705, −3508, 87) / (−1577, −3590, 104) or the
+  >    2048 / 6144 / −1536 span constants; there is **no full orbit** and **no multi-waypoint travel**
+  >    armed in the char-select scene.
+  > 2. The follow-on **single static camera** reading is **also retracted** — it was itself an
+  >    over-correction that examined only the bare projection camera and missed the separate
+  >    camera-path rig. The char-select camera is **neither a full orbit nor a static camera**.
+
+  **What the char-select preview camera actually is (authoritative model lives in
+  `frontend_scenes.md` §3.5):** an **entry dolly**. On scene-enter the camera-path rig blends from
+  keyframe **KF0 → KF1** over **~2.0 s** — a **position-Lerp** plus an **orientation-Slerp** — then
+  holds at KF1. The rig is a 6-keyframe path object, but only keyframes 0 and 1 are ever armed in
+  char-select (the scene constructs at KF0 and the entry reset arms KF1); the remaining keyframes
+  exist but are never advanced — there is **no auto-orbit and no select-focus retarget**. It has:
+
+  - a fixed projection — **50° vertical FOV, near 5.0, far 15000.0** (note: this differs from the
+    in-world gameplay camera's 65° — §A.7);
+  - a fixed path base anchor at **(2048, 0, −6144)** (the select-stage backdrop anchor);
+  - the recovered destination keyframe **KF1 = (512, 87, −9652)** (the eye the entry dolly settles to);
+  - a continuous **manual overlay** that rides on top of the keyframe transform: a hold-to-zoom
+    **camera boom/zoom** and a manual **preview-character turn** (the previewed actor — *not* the
+    camera — yaws while a turn key is held). **Slot-select moves the ACTOR, not the camera** — the
+    "focus" on a chosen character is the preview actor turning to face, not a camera move.
+
+  This is **out-of-world** and is **not** part of the in-world mode set. **For the complete, current
+  char-select camera/preview spec, defer to `frontend_scenes.md` §3.5** — it owns this scene (and is
+  being updated to this entry-dolly model in the same wave); the rows here are only a cross-link.
+  (CODE-CONFIRMED: entry dolly KF0 → KF1, pos-Lerp + orient-Slerp over ~2.0 s; FOV 50 / near 5 /
+  far 15000; path anchor (2048,0,−6144); KF1 (512,87,−9652); manual boom/yaw overlay; slot-select
+  moves the actor not the camera. Recovered via static RE, CAMPAIGN 9.)
 
 ## A.6 Terrain collision for the Third-person camera
 
@@ -298,27 +354,51 @@ Third-person performs **two** collision behaviours; the other modes do neither:
 
 1. **Terrain-height clamp.** Map the candidate eye's world (X, Z) into terrain-grid
    coordinates (grid origin index **10000**, cell size **1024** world units, i.e. a
-   world→grid scale of **−1/1024 = −0.0009765625**; secondary cell scale/bias
-   **1024.0 / 1.1**). Sample the **interpolated (bilinear) terrain height** at the eye
-   (X, Z) from the cell's heightmap when the cell has geometry. The no-terrain sentinel
-   is **−3.4028e38** (no hit). Clamp the eye's vertical so it never sinks below
-   **terrain + 3.8** (with a +2.0 bias step added to the clamped value). On a hard
-   hit, force the yaw-rate to **−0.01** to stop the camera fighting the ground.
-   **Radius is fixed — there is no horizontal pull-in on collision.** (CODE-CONFIRMED)
+   world→grid scale of **−1/1024 = −0.0009765625**, applied as `10000 − (int)(coord · −1/1024)`
+   for both X and Z). When a coordinate lands **exactly on a cell boundary**
+   (`coord mod 1024 == 0`), a **cell-edge nudge** subtracts **1.1** units from the
+   coordinate before re-sampling so the adjacent cell is sampled instead. (This is the
+   correct reading of the value previously written loosely as "secondary cell scale/bias
+   1024.0 / 1.1" — it is a `−1.1`-unit edge step, not a scale.) Sample the **interpolated
+   (bilinear) terrain height** at the eye (X, Z) from the cell's heightmap when the cell
+   has geometry; the sampler is a dispatcher that selects between an interpolated
+   (bilinear) sampler and a flat/alternate sampler on a per-cell mode field. The
+   no-terrain sentinel is **−3.4028e38** (no hit). Clamp the eye's vertical so it never
+   sinks below **terrain + 3.8** (with a +2.0 bias step added to the clamped value). On a
+   hard hit, force the yaw-rate to **−0.01** to stop the camera fighting the ground.
+   **Radius is fixed — there is no horizontal pull-in on collision.** (CODE-CONFIRMED for
+   the grid math, the cell-edge `−1.1` nudge, the sentinel, and the bilinear/flat
+   dispatcher; the `+3.8` lift, `+2.0` bias, `−0.01` yaw-kill, and occlusion nudge are
+   inline-computed constants not re-located in the 2026-06-16 pass — **[capture/debugger-pending re-locate]**, carry as the faithful starting values but flag for a focused re-walk.)
 2. **Occlusion nudge.** If the focus→eye line is occluded, nudge pitch by **50.0 · dt**
-   (+ 0.01 correction) to keep the target visible. No radial change. (CODE-CONFIRMED)
+   (+ 0.01 correction) to keep the target visible. No radial change. (CODE-CONFIRMED as a
+   model; exact constant re-location is part of the same [capture/debugger-pending re-locate] above.)
 
 > The terrain grid origin (**10000**) and cell size (**1024**) here are the **same
 > constants** the movement collision system uses (§B.4) and match the terrain/cell
-> tiling documented by the asset analysts — a useful cross-check. (CODE-CONFIRMED)
+> tiling documented by the asset analysts — a useful cross-check. **The interpolated
+> terrain-height-at-XZ sampler is now PINNED** (it is the same dispatcher the
+> click-to-move commit uses to place the ground marker's Y — see §B.2 step 4); this
+> closes the former open item that listed the bilinear sampler as unverified. (CODE-CONFIRMED)
 
 ## A.7 Projection / field-of-view (CODE-CONFIRMED — reconciled)
 
 **The authoritative in-world gameplay FOV is 65° vertical, near 5.0, far 15000.0.**
-These values are constructed in the in-world scene-build path (`BuildSceneGraph`) at
-the same point the five manipulators are wired to the camera. The FOV is stored
-internally in half-angle form (`π × 65 / 180 / 2 / aspect` at build time). These
-are the values to implement for the gameplay camera. (CODE-CONFIRMED)
+These values are constructed in the in-world scene-build path (the in-game scene-graph
+builder) at the same point the five manipulators are wired to the camera. The FOV is
+stored internally as the **full vertical FOV in radians, divided by aspect**
+(`π × 65 / 180 / aspect` at build time — **no `/2`**); the perspective-camera setter
+validates that the stored angle lies in `(0, π]` and keeps it raw. The half-angle
+(`tan(fovY/2)`) is applied only **later**, at frustum derivation (see the view-volume
+formula at the end of this section), not at storage time. These are the values to
+implement for the gameplay camera. (CODE-CONFIRMED)
+
+> **Correction (re-verified 2026-06-16, anchor `263bd994`).** A prior revision of this
+> spec described the stored value as the half-angle `π·65/180/2/aspect`. That is
+> inaccurate: the build path stores the **full** vertical FOV (÷ aspect) and the `/2`
+> only appears later inside the `tan(fovY/2)` of the view-volume derivation. This is not
+> load-bearing for a Godot re-implementation — Godot's `Camera3D.Fov` takes a vertical
+> FOV in **degrees (65)** directly — but the internal-storage description is now correct.
 
 Two additional projection values also appear in the binary but belong to a **separate
 generic projection initializer** that is not the camera the in-world manipulators
@@ -397,19 +477,23 @@ field split). Behavioural facts for the engineer:
 
 ### B.1.2 Heartbeat cadence (server reconciliation)
 
-A send-worker thread loops on a short sleep (~10 ms per iteration) and conditionally
-fires senders, logging when one is "overdue":
+A send-worker thread loops on a short sleep (**~10 ms per iteration**) and conditionally
+fires senders, logging when one is "overdue." Each iteration checks the **proxy** channel
+**before** the move channel; each sender fires **at most once per distinct millisecond-clock
+tick** (it sends only when the current millisecond reading differs from the last one it sent
+on), so the cadence is bounded by the millisecond clock, not by an explicit rate literal:
 
 | Channel | Overdue-warning threshold | Notes |
 |---|---:|---|
+| Proxy channel | **400 ms** | checked first each iteration |
 | Move heartbeat | **200 ms** | warning only; a moving client emits a stream of 2/13 frames |
-| Proxy channel | **400 ms** | separate channel, same loop |
 
-The move heartbeat reads the player's last-network position, then **alternates the
-reported X by +20.0 / −20.0** on a parity counter — a deliberate ±20-unit dither so
-each heartbeat reports a slightly different point (keeps the server's position state
-fresh / defeats static-position dedupe). It calls the 2/13 builder with **mode = 1**
-and the dithered (X, Z). (CODE-CONFIRMED)
+The move heartbeat reads the player's **last-network position** (the X from the live-position
+X field and the other axis from the live-position Z field — i.e. it reports where the player
+*is*, not the click target), then **alternates the reported X by +20.0 / −20.0** on a parity
+counter — a deliberate ±20-unit dither so each heartbeat reports a slightly different point
+(keeps the server's position state fresh / defeats static-position dedupe). It calls the 2/13
+builder with **mode = 1** and the dithered (X, Z). (CODE-CONFIRMED)
 
 > **(UNVERIFIED)** whether 200 ms is a hard rate cap or only the overdue-warning
 > threshold (the worker fires at most once per distinct millisecond; no separate
@@ -445,11 +529,21 @@ legitimate move/cycle cadence**: a faithful client must keep its move cadence wi
    scaling the unit direction to length **12.0** (max advance per move-issue;
    144 = 12²). Seed a mover speed of **1000.0**, set the from/to path record, and
    commit. (CODE-CONFIRMED)
+   > **Two move-init clamp paths (footnote).** The screen-pick move-init uses the fixed
+   > **12.0** clamp at the **>144.0** (12²) threshold described above. A second move-init
+   > entry (the throttled move-to-world-XZ path) instead uses a **speed-relative** clamp:
+   > when the squared distance exceeds **speed²**, it scales the direction to
+   > `(speed · 0.8 − 10.0)` floored to **1.0**. Both reach the same commit step; the
+   > fixed-12.0 reading is correct for the screen-pick path, the speed-derived reading for
+   > the throttled path. (CODE-CONFIRMED)
 4. **Commit.** Enforce a per-mover **cooldown gate** (a millisecond-clock comparison)
    and a busy/lock check. Commit only if the **squared distance from current to
    destination exceeds 4.0** (i.e. **> 2 units**) — a dead-zone that ignores tiny
-   moves. On commit, step the mover and drop a ground click-marker via the highlight
-   texture manager. (CODE-CONFIRMED)
+   moves. On commit, step the mover and drop a **ground click-marker effect**: a
+   user-effect spawn (**effect id 380000000**) placed at the click XZ with its Y taken
+   from the terrain height sampler (§A.6), after first **clearing the prior marker
+   effect**. (This corrects a prior reading that attributed the marker to a "highlight
+   texture manager" — it is a user-effect spawn, not a texture-manager call.) (CODE-CONFIRMED)
 
 ## B.3 Per-frame movement integration (walk / run)
 
@@ -459,7 +553,10 @@ Invoked from the per-frame terrain update and from the move commit:
 2. Compute the forward step distance = **`speed · 4.0`**, where the per-frame speed
    scalar is the mover's current walk/run speed (set from config — §B.5) and **4.0**
    is a fixed step multiplier. Rotate the facing orientation to produce the candidate
-   next world position (current XZ + rotated step). (CODE-CONFIRMED)
+   next world position (current XZ + rotated step). (CODE-CONFIRMED as the model; the
+   exact `· 4.0` integrator site within the mover-advance cluster was **not re-located**
+   in the 2026-06-16 pass — **[capture/debugger-pending re-locate]**, flagged for a
+   focused re-walk of the mover advance.)
 3. If the candidate overshoots the destination **and** the collision subsystem
    reported a block, **snap to the corrected/clamped point** from the collision result
    (the wall-slide / stop response). Otherwise snap to the destination. (CODE-CONFIRMED)
@@ -471,7 +568,10 @@ Invoked from the per-frame terrain update and from the move commit:
 
 Walk/run manifests three ways, kept consistent:
 
-- A **lifecycle/motion-state** value: **2 = walk, 3 = run** (8 = dead/scripted). (CODE-CONFIRMED)
+- A **lifecycle/motion-state** value: **2 = walk, 3 = run** (the move-init path gates on
+  motion-state == 3 or == 1, the target handler branches on == 2). The **8 = dead/scripted**
+  value was *not* re-confirmed in the 2026-06-16 pass — **[static-hypothesis]** from a prior
+  cycle; the {1, 2, 3} walk/run distinction is **[confirmed]**. (CODE-CONFIRMED for 1/2/3)
 - The **run flag** on the wire (the actor's run-state byte == 1 means running). (CODE-CONFIRMED)
 - A **different per-frame speed scalar** feeding the `· 4.0` step. The concrete walk
   vs run *numbers* are **table-driven** (§B.5), not code literals. (CODE-CONFIRMED)
@@ -535,8 +635,27 @@ The **concrete walk/run speeds are NOT code literals.** They come from a per-map
 config table keyed **`MAP_SPEED`** (load failure logs "MAP_SPEED data load error"),
 parsed by the map/scene config keyword parser, and end up in the actor/mover speed
 field. So to faithfully reproduce feel you need the per-map data values, not the code.
-**Actual numeric walk vs run speeds are (UNVERIFIED) — they live in map data, not the
-binary.** Any Korean text in this config is CP949. (CODE-CONFIRMED that it is data-driven)
+**Actual numeric walk vs run speeds are (UNVERIFIED / [capture/sample-pending]) — they
+live in map data, not the binary.** Any Korean text in this config is CP949. (CODE-CONFIRMED
+that it is data-driven)
+
+#### `MAP_SPEED` per-map record layout (CODE-CONFIRMED, re-verified 2026-06-16)
+
+The parser allocates one **24-byte record per map-local entry** (sized
+`24 × MAP_LOCAL_COUNT`) and keys the table off `MAP_START_ID` + `MAP_LOCAL_COUNT`. The
+keyword parser fills the following fields within each 24-byte record:
+
+| Field offset (within the 24 B record) | Key | Type | Meaning |
+|---:|---|---|---|
+| **+0** | `MAP_ID` | u32 | map identifier |
+| **+4** | `MAP_DAY` | u32 | day/time-of-day flag |
+| **+8** | `MAP_SEC` | u32 | section/zone code |
+| **+12** | `MAP_SPEED` | u32 | the per-map movement speed value (feeds the mover speed scalar) |
+| **+16** | `LOCATION` | 2× u32 | location pair |
+
+(CODE-CONFIRMED for the record size, field offsets, and keying; the **value at +12** that
+governs actual walk/run feel is still **[capture/sample-pending]** — it is map *data*, not a
+code literal. This row layout is provided for the data-tables engineer to type the record.)
 
 ### Fixed numeric movement constants (code immediates)
 
@@ -636,13 +755,22 @@ Do **not** hard-code anything in this list without a capture or an analyst cross
 10. **200 ms / 400 ms** are warning thresholds, not proven hard rate caps; whether the
     heartbeat is additionally period-capped is unconfirmed.
 11. **Per-map walk/run speed numbers** — live in `MAP_SPEED` map config data, not in
-    code; require the data tables or a capture.
-12. **Terrain height-sample-at-XZ function** — heightmap format is known, the runtime
-    bilinear sampler is not pinned (visual-only).
+    code; require the data tables or a capture. (The 24-byte record layout is now
+    documented in §B.5; only the value at +12 is data-pending.)
+12. ~~**Terrain height-sample-at-XZ function**~~ — **RESOLVED (2026-06-16).** The runtime
+    bilinear sampler IS pinned: a dispatcher selects between an interpolated (bilinear)
+    sampler and a flat/alternate sampler on a per-cell mode field, and the click-to-move
+    commit already uses it to place the ground click-marker's Y (§A.6, §B.2 step 4).
 13. **`.ted` vs `.ted.post`** runtime selection (which heightmap the loader prefers).
 14. **Input id 1013** assumed left-mouse-hold for the click handler; unconfirmed.
 15. **Vertical (type-flag) solid segments** — handled in the line-intersection math but
     not corroborated by any sample.
+16. **Re-locate the inline mover/camera constants** — the per-frame `speed · 4.0`
+    integrator site, and the Third-person camera's `+3.8` lift / `+2.0` bias / `−0.01`
+    yaw-kill / `50·dt` occlusion nudge, were **not re-located** in the 2026-06-16 pass
+    (they are inline-computed, not standalone `.rdata` floats). Carry as the faithful
+    starting values; flag for a focused re-walk of the mover advance and the
+    Third-person traversal hook. **[capture/debugger-pending re-locate]**
 
 ---
 
@@ -654,9 +782,34 @@ Rewritten (not copied) from dirty-room recon notes (subsystem keys `camera_views
 CODE-CONFIRMED), fixed-radius orbit model explicitly stated, per-mode parameter tables
 with confirmed numbers added, Event camera model corrected (built-in binary curve
 table, not data-file/Lua/`.scr`), mode-switch trigger call sites enumerated, default
-mode and OPTION_VIEW_CHAR persistence documented, Select camera waypoints added,
-enter-world camera placement clarified. All legacy addresses, decompiler-style
+mode and OPTION_VIEW_CHAR persistence documented, Select camera model re-corrected in a CAMPAIGN 9 re-walk to an entry dolly KF0 → KF1 (per frontend_scenes §3.5) - pos-lerp + orient-slerp over ~2.0 s, KF1 (512,87,−9652); both the old multi-waypoint/orbit reading and the follow-on single-static-camera reading are retracted (it is neither a full orbit nor a static camera), with the manual boom/yaw overlay and actor-not-camera slot focus retained,
+enter-world camera placement clarified.
+
+Re-verified **2026-06-16** against build anchor **`263bd994`** (CAMPAIGN 10, Block F,
+lane F10 static re-walk). Surgical corrections applied this pass: (1) §A.7 FOV
+**internal storage is the full vertical FOV ÷ aspect, NOT half-angle** — the `/2` only
+appears later in the `tan(fovY/2)` frustum derivation (conflict reconciled); (2) §B.2/§B.4
+the click ground-marker is a **user-effect spawn (effect id 380000000)** at the click XZ
+with Y from the terrain sampler and a prior-marker clear, **not** a "highlight texture
+manager" call (conflict reconciled); (3) manipulator display-label **message-db ids
+2006/2004/2005/2148/2148** recorded in §A.2.1; (4) §A.6 the "1024.0/1.1" was sharpened to a
+**`−1.1`-unit cell-edge nudge** when a coordinate lands on a cell boundary, and the
+**bilinear terrain-height sampler is now PINNED** (dispatcher + interpolated/flat samplers),
+closing former open item D.12; (5) §B.5 the **`MAP_SPEED` record = 24 bytes** with field
+offsets MAP_ID+0 / MAP_DAY+4 / MAP_SEC+8 / MAP_SPEED+12 / LOCATION+16; (6) §B.2 the
+**second (throttled) move-init clamp path is speed-relative** (`speed·0.8 − 10.0`, floored
+1.0) vs the screen-pick path's fixed 12.0; (7) §B.1.2 the send worker checks **proxy before
+move** and the heartbeat reads the **live-position** fields; (8) §B.3 the **8 = dead**
+motion-state value demoted to static-hypothesis (only 1/2/3 re-confirmed). Honestly flagged
+**[capture/debugger-pending re-locate]**: the per-frame `speed·4.0` integrator site and the
+Third-person `+3.8` lift / `+2.0` bias / `−0.01` yaw-kill / `50·dt` occlusion-nudge inline
+constants were not re-located this pass. Server-authored magnitudes (per-map speed numbers)
+and on-wire VALUE meanings (2/13 flag-region split, local-position-correction channel) remain
+capture/debugger-pending.
+
+All legacy addresses, decompiler-style
 identifiers, RTTI class names, vtable offsets, and raw struct offsets were
 **deliberately omitted**; only neutral behaviour, formulas, role-keyed constants,
-and already-cataloged opcode tuples (2/13, 5/13, 4/13 — see `opcodes.md`) were
-promoted. Camera is non-networked. No new opcode is introduced by this spec.
+the `MAP_SPEED` record's field offsets (interoperability facts), and already-cataloged
+opcode tuples (2/13, 5/13, 4/13 — see `opcodes.md`) were promoted. Camera is non-networked.
+No new opcode is introduced by this spec.

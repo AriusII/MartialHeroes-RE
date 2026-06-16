@@ -1,13 +1,30 @@
 # Item structures — wire and runtime layouts (clean-room spec)
 
+> **Verification banner.** verification: **confirmed** for the handler control-flow facts re-pinned
+> this pass — the five item-wire opcode→handler **routings** and **body sizes** (4/149 = header + a
+> 16-byte record run, 4/12 = 16B, 4/22 = 36B, 4/50 = 32B, 4/19 = 56B), the per-handler **ownership
+> gates** and **primary result/chunk/slot byte offsets**, the EquipTable = 20 × 16B array, the bag
+> soft cap `40 × (bag_count + 3)`, the equip actor-mirror dual-write, and the 4/12 `to_slot` byte
+> position (corrected to a single byte at +0x0C — see §7b); **static-hypothesis** for the item-actor
+> stat-grant / set-bonus / combat-grant offsets (§6) and the per-field detail inside the apply
+> functions (these live in apply paths that were **not** re-located by control flow this pass — they
+> are carried from prior analysis, not re-confirmed); **capture/debugger-pending** for every wire
+> **field value semantic** (what a copied byte *means*) and any binding/tradeable bit inside the
+> 16-byte slot record. ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida] ·
+> conflicts: one low-severity offset refinement — 4/12 `to_slot` is a single byte at **+0x0C**
+> (not the hedged +0x0B–0x0C); the "value 15 ⇒ visual rebuild" semantic is unchanged.
+
 Neutral, offset-model of the item-related structures the legacy client used. Promoted from
 dirty-room notes; rewritten, no decompiler identifiers, no binary addresses. Design input for the
 **network-protocol-engineer** (decoding the item / equip / shop / upgrade packets) and the
 **domain engineer** (applying item stat grants, equipment state, durability, and the inventory grid).
 
-> **Confidence tags:** `CONFIRMED` = cross-checked at multiple sites; `LIKELY` = single consistent
-> site; `UNVERIFIED` = inferred / boundary not pinned. None of the layouts below were checked
-> against a live capture; all are static inferences pending a `sample_verified` pass.
+> **Confidence tags:** `CONFIRMED` = cross-checked at multiple sites or control-flow-confirmed (a
+> dispatch slot, a handler's fixed read size, or a handler read offset); `LIKELY` = single consistent
+> site; `UNVERIFIED` = inferred / boundary not pinned. The wire-packet **routings, body sizes, and the
+> primary handler read offsets** are control-flow confirmed this pass; the wire-field **value
+> semantics** were not checked against a live capture and stay capture/debugger-pending pending a
+> `sample_verified` pass.
 >
 > **Text encoding.** All Korean text fields the client renders (item names, tooltip strings,
 > localized error reasons) are stored as **CP949** (extended EUC-KR) byte sequences, never UTF-16
@@ -178,6 +195,15 @@ set-bonus, combat-grant, and set-control fields below fall entirely within the 5
 copy** (CONFIRMED). Offsets are **relative to the start of the item actor's layout**, not the
 player's.
 
+> **Tiering note for all of §6 (this pass).** The §6 item-actor stat-grant / set-bonus / combat-grant
+> / set-control / weapon-grade offsets below were **NOT re-located by control flow this pass** — the
+> worn-item stat-recompute loop and the per-item read sites were not cleanly isolated (a naive
+> displacement scan returned false positives in unrelated code). They are **carried from prior
+> analysis** (`stats.md`) and remain **static-hypothesis** here; the `CONFIRMED` tags on the §6 rows
+> reflect that *prior* cross-checking, **not** a control-flow re-confirmation in this campaign. Do not
+> upgrade them on the strength of this pass. The §6 *region size* facts (548/552 bytes) are
+> consistent with the prior analysis but were likewise not re-pinned this pass.
+
 ### 6a. Direct stat-grant fields — CONFIRMED
 
 The fields the player's stat formula (`stats.md`) sums over every worn item (skipping slot 8):
@@ -285,13 +311,14 @@ The byte at item-actor +231 is the weapon's visual-glow tier and tooltip enchant
 
 ### 7a. EquipSlotBody — 36-byte item-slot state record (opcode 4/22)
 
-Read as a fixed 36-byte (0x24) body by the single-slot state-ack handler. Distinct from the 16-byte
-`ItemSlotRecord`; carries equip/unequip result plus stat/enchant fields.
+Read as a **fixed 36-byte (0x24) body** by the single-slot state-ack handler — the handler's read
+size is **control-flow confirmed** at 0x24. Distinct from the 16-byte `ItemSlotRecord`; carries
+equip/unequip result plus stat/enchant fields.
 
 | Offset | Size | Type    | Field          | Conf       | Meaning |
 |--------|------|---------|----------------|------------|---------|
 | +0x00  | 8    | char[8] | `header`       | LIKELY     | Guard / identity prefix bytes. |
-| +0x08  | 1    | uint8   | `result`       | LIKELY     | `0` = error, `1` = ok. |
+| +0x08  | 1    | uint8   | `result`       | CONFIRMED (offset) | Read by the handler at +0x08: `0` = dismiss/error notice; `1` = apply (feeds the slot-apply path). The +0x08 read is control-flow confirmed; the code set stays capture-pending. |
 | +0x09  | 1    | uint8   | `pad_9`        | UNVERIFIED | Padding. |
 | +0x0A  | 1    | uint8   | `from_slot`    | LIKELY     | Source slot index. |
 | +0x0B  | 1    | uint8   | `to_slot`      | LIKELY     | Destination slot index. |
@@ -302,45 +329,52 @@ Read as a fixed 36-byte (0x24) body by the single-slot state-ack handler. Distin
 | +0x1C  | 4    | int32   | `bonus_field_2`| UNVERIFIED | Bonus / stat field. |
 | +0x20  | 4    | int32   | `bonus_field_3`| UNVERIFIED | Bonus / stat field; possibly durability or enchant level. |
 
-Field names at +0x0C..+0x20 are inferred from local usage only — treat as UNVERIFIED. The state-ack
-path feeds this record into the same slot-apply logic used by `ItemSlotRecord`.
+Field names at +0x0C..+0x20 are inferred from local usage only — treat as UNVERIFIED; they are
+consumed **inside the slot-state apply function** (not re-located by control flow this pass), not in
+the ack handler. The state-ack handler gates on +0x08 then feeds this record into the same slot-apply
+logic used by `ItemSlotRecord`.
 
 ### 7b. EquipItemResult — 16-byte equip/unequip result (opcode 4/12)
 
-Read into a local buffer by the equip-result handler. The visible header is 16 bytes; the apply path
-treats the underlying buffer as larger (see the apply note).
+Read into a local buffer by the equip-result handler as a **fixed 16-byte body** (the handler's read
+size is control-flow confirmed at 16 / 0x10). The apply path treats the underlying buffer as larger
+(see the apply note).
 
 | Offset | Size | Type   | Field        | Conf       | Meaning |
 |--------|------|--------|--------------|------------|---------|
 | +0x00  | 1    | uint8  | `guard`      | LIKELY     | Validity guard; must be non-zero. |
 | +0x01  | 3    | —      | (pad)        | UNVERIFIED | Alignment. |
 | +0x04  | 4    | uint32 | `actor_sort` | LIKELY     | Actor identity / sort check. |
-| +0x08  | 1    | uint8  | `result`     | LIKELY     | `0` = error, `1` = ok, `2` = other. |
+| +0x08  | 1    | uint8  | `result`     | CONFIRMED (offset) | Read by the handler at +0x08: `0` = error → error UI; `1` = ok → apply; `2` = other. The +0x08 read is control-flow confirmed; the exact code set stays capture-pending. |
 | +0x09  | 1    | uint8  | (unused)     | UNVERIFIED | |
 | +0x0A  | 1    | uint8  | `from_slot`  | LIKELY     | Source slot index. |
 | +0x0B  | 1    | uint8  | `from_sub`   | UNVERIFIED | From-sub-slot or related index. |
-| +0x0C  | 1    | uint8  | `to_slot`    | LIKELY     | Destination slot index. Value `15` triggers a visual gear refresh; value `14` is the special weapon slot. |
+| +0x0C  | 1    | uint8  | `to_slot`    | **CONFIRMED** (offset + the `== 15` test) | **Single byte at +0x0C** (corrected this pass from the prior "+0x0B–0x0C" hedge). The result handler reads this one byte and tests it `== 15` to drive the **full visual gear rebuild**; value `14` is the special weapon slot. The +0x0C read and the `== 15` rebuild trigger are control-flow confirmed. |
 | +0x0D  | 3    | char[3]| `pad_end`    | UNVERIFIED | Padding to 16 bytes. |
 
-> **Equip apply fields.** The apply path consumes the record using these positions (apply contract,
-> not a second wire layout): `from_slot` at +0x0A, `to_slot` at +0x0B–0x0C (dispatched as `0` =
-> unequip, `1` = equip, `2` = equip-swap), and a dword pair near +0x1C/+0x20 used as a dirty/expiry
-> check (both `0` = not expired). The exact byte positions beyond the 16-byte header are UNVERIFIED
-> and should be pinned against a capture.
+> **Equip apply fields.** The result handler reads `to_slot` as a **single byte at +0x0C** (the
+> `== 15` visual-rebuild test) — this is control-flow confirmed. The deeper apply path (the
+> equip-apply function, not the result handler, and **not re-located by control flow this pass**)
+> additionally consumes the record dispatching the move type (`0` = unequip, `1` = equip, `2` =
+> equip-swap) and reads a dword pair near +0x1C/+0x20 as a dirty/expiry check (both `0` = not
+> expired). Those deeper apply byte positions are **static-hypothesis** (carried, not re-pinned) and
+> should be pinned against a capture; only the +0x0C `to_slot` read is confirmed here.
 
 ### 7c. Item-panel slot-update packet (opcode 4/149) — header + record run
 
 The authoritative server push for both equipment and bag contents. A fixed header selects the
-container and slot range, then a back-to-back run of 16-byte `ItemSlotRecord`s follows.
+container and slot range, then a back-to-back run of 16-byte `ItemSlotRecord`s follows. The header
+guard, the ownership gate, the `chunk_type` two-way branch, the `(start_index, count)` loop bounds,
+and the 16-byte record-run framing are all **control-flow confirmed** in the handler this pass.
 
 | Offset | Size | Type  | Field         | Conf      | Meaning |
 |--------|------|-------|---------------|-----------|---------|
-| +0x00  | 1    | uint8 | `guard`       | LIKELY    | Must be `1`. |
-| +0x04  | 4    | int32 | `local_id_key`| LIKELY    | Local-player id key; must match the local player. |
-| +0x08  | 1    | uint8 | `chunk_type`  | CONFIRMED | `0` = equipment table, `1` = bag/inventory table. |
-| +0x09  | 1    | uint8 | `start_index` | CONFIRMED | First destination slot to write. |
-| +0x0A  | 1    | uint8 | `count`       | CONFIRMED | Number of 16-byte records that follow. |
-| +0x0C  | 16×`count` | — | `records`     | CONFIRMED | `count` × `ItemSlotRecord` (§1), written back-to-back. |
+| +0x00  | 1    | uint8 | `guard`       | CONFIRMED | Handler gate: `!= 1 → return`. |
+| +0x04  | 4    | int32 | `local_id_key`| CONFIRMED | Ownership gate: compared against the local-player id key; mismatch → return. |
+| +0x08  | 1    | uint8 | `chunk_type`  | CONFIRMED | Two-way handler branch: `0` = equipment table, `1` = bag/inventory table. |
+| +0x09  | 1    | uint8 | `start_index` | CONFIRMED | First destination slot to write (loop base). |
+| +0x0A  | 1    | uint8 | `count`       | CONFIRMED | Number of 16-byte records that follow (loop bound). |
+| +0x0C  | 16×`count` | — | `records`     | CONFIRMED | `count` × `ItemSlotRecord` (§1), written back-to-back (4-dword copy per slot, 16-byte stride). |
 
 Destination and bound-check by `chunk_type`:
 
@@ -356,14 +390,17 @@ capture before committing the packet YAML.
 
 ## 8. Item upgrade-result packet (opcode 4/50) — 32-byte fixed body
 
-The server response to an item-upgrade attempt. Read as a fixed 32-byte body; on success it replaces
-the target bag slot's record, on partial progress it advances the slot's enchant accumulator (§1a).
+The server response to an item-upgrade attempt. Read as a **fixed 32-byte body** — the handler's read
+size is **control-flow confirmed** at 0x20. On success it replaces the target bag slot's record; on
+partial progress it advances the slot's enchant accumulator (§1a). The `success` gate at +0x08 is
+confirmed in the result handler; every other field below is consumed inside the **upgrade-apply
+function** (not re-located by control flow this pass) — treat those as static-hypothesis.
 
 | Offset | Size | Type   | Field          | Conf       | Meaning |
 |--------|------|--------|----------------|------------|---------|
 | +0x00  | 8    | char[8]| `header`       | LIKELY     | Guard / actor-identity prefix bytes. |
-| +0x08  | 1    | uint8  | `success`      | LIKELY     | `0` = failure, `1` = success. Success plays the success motion; failure plays the fail motion. |
-| +0x09  | 1    | uint8  | `reason`       | LIKELY     | Failure / progress reason: `1` = generic fail; `2` = partial progress; `3` = partial progress (higher tier); `4` = another failure type. |
+| +0x08  | 1    | uint8  | `success`      | CONFIRMED (offset) | Read by the handler at +0x08: `0` = failure (plays the fail motion), `1` = success (plays the success motion, then applies). The +0x08 read is control-flow confirmed; the code set stays capture-pending. |
+| +0x09  | 1    | uint8  | `reason`       | LIKELY     | Failure / progress reason: `1` = generic fail; `2` = partial progress; `3` = partial progress (higher tier); `4` = another failure type. Consumed inside the apply function. |
 | +0x0A  | 1    | uint8  | `pad_a`        | UNVERIFIED | Not individually decoded. |
 | +0x0B  | 1    | uint8  | `slot_index`   | LIKELY     | Bag/inventory slot the upgraded item occupies. |
 | +0x0C  | 4    | uint32 | `pad_c`        | UNVERIFIED | Not individually decoded; possibly extra info. |
@@ -380,15 +417,20 @@ enchant accumulator. `success == 0 && reason ∈ {2,3}` ⇒ add `enchant_delta` 
 
 ## 9. NpcBuy / inventory-acquire ack (opcode 4/19) — 56-byte fixed body
 
+Read as a **fixed 56-byte body** — the handler's read size is **control-flow confirmed** at 0x38.
+The `result` gate at +0x10 and the `reason_code` test at +0x11 are confirmed in the handler; the
+descriptor words and repair fields are consumed inside the **npc-buy apply path / string-format
+branch** (not re-located by control flow this pass) — treat them as static-hypothesis.
+
 | Offset | Size | Type    | Field            | Conf       | Meaning |
 |--------|------|---------|------------------|------------|---------|
 | +0x00  | 4    | char[4] | `header`         | LIKELY     | Packet prefix. |
 | +0x04  | 4    | int32   | `actor_id`       | LIKELY     | Target actor id. |
 | +0x08  | 4    | int32   | `gold_lo`        | LIKELY     | Gold cost (low) or amount. |
 | +0x0C  | 4    | int32   | `gold_hi`        | UNVERIFIED | Gold cost (high) or a secondary currency. |
-| +0x10  | 1    | uint8   | `result`         | LIKELY     | `0` = error, `1` = ok. |
-| +0x11  | 1    | uint8   | `reason_code`    | LIKELY     | Error reason; selects a localized error string. |
-| +0x12  | 1    | uint8   | `bag_slot_index` | LIKELY     | Destination bag slot. |
+| +0x10  | 1    | uint8   | `result`         | CONFIRMED (offset) | Read by the handler at +0x10: `== 1` → apply (npc-buy apply path); `== 0` → error branch. The +0x10 read is control-flow confirmed; the code set stays capture-pending. |
+| +0x11  | 1    | uint8   | `reason_code`    | CONFIRMED (offset) | Read by the handler at +0x11: `== 1` selects the "item-shop-expired" localized message (a fixed message-db id); other values select other error strings. The +0x11 read is control-flow confirmed. |
+| +0x12  | 1    | uint8   | `bag_slot_index` | LIKELY     | Destination bag slot (consumed in the apply path). |
 | +0x13  | 13   | char[13]| `gap_13`         | UNVERIFIED | Unmapped to +0x20. |
 | +0x20  | 4    | uint32  | `repair_val_1`   | UNVERIFIED | Repair-related value; non-zero shows a repair-completion countdown. |
 | +0x24  | 4    | uint32  | `repair_val_2`   | UNVERIFIED | Repair-related value. |
@@ -397,9 +439,9 @@ enchant accumulator. `success == 0 && reason ∈ {2,3}` ⇒ add `enchant_delta` 
 | +0x30  | 4    | int32   | `item_quad_c`    | UNVERIFIED | Item descriptor word C = quantity / stack. |
 | +0x34  | 4    | int32   | `item_quad_d`    | UNVERIFIED | Item descriptor word D. |
 
-Behaviour: `result==0 && reason_code==1` → show item-shop-expired message. `result==1` with a valid
-`item_quad_b` actor id → apply the item to `bag_slot_index`. Non-zero `repair_val_*` → show a
-repair-completion countdown UI.
+Behaviour (control-flow confirmed gates; value detail capture-pending): `reason_code == 1` → show the
+item-shop-expired message. `result == 1` with a valid `item_quad_b` actor id → apply the item to
+`bag_slot_index`. Non-zero `repair_val_*` → show a repair-completion countdown UI.
 
 ---
 
@@ -462,9 +504,15 @@ the engineer understands the client's pending-upgrade state machine.
   offset; the running counter lives in a separate slot-indexed array (§6f).
 - **EquipSlotBody +0x0C..+0x20** and **EquipItemResult fields beyond the 16-byte header** — inferred
   only; boundaries UNVERIFIED.
-- **4/149 header stride** (bytes +0x01..+0x03, +0x0B) and exact chunk framing — pin against a capture.
+- **4/149 header gap bytes** (+0x01..+0x03, +0x0B) — the load-bearing header offsets (guard +0x00,
+  id key +0x04, chunk_type +0x08, start_index +0x09, count +0x0A) and the 16-byte record-run framing
+  are now control-flow confirmed; only the unmapped gap bytes need a capture.
 - **Cash-shop / warehouse containers** — no distinct slot arrays found; likely separate opcode
   families. UNVERIFIED.
-- All offsets are static inferences; **no live capture was available** (`sample_verified` not yet set).
+- **Tiering this pass:** the five item-wire **routings, body sizes, and primary handler read offsets**
+  are control-flow confirmed (no addresses retained); the §6 item-actor template offsets are
+  static-hypothesis carried from prior analysis (not re-located this pass); every wire-field **value
+  semantic** and any binding/tradeable bit remain **capture/debugger-pending** — no live capture was
+  available this campaign (`sample_verified` not yet set for the wire bodies).
 </content>
 </invoke>

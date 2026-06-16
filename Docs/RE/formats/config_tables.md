@@ -3,6 +3,19 @@
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code.
 > Consumed by Assets.Parsers. Every offset an engineer cites must reference this file.
 >
+> verification: sample-verified (real VFS sample corroborates the strides/counts/key fields of
+>   items.scr, citems.scr, the 12 stance `.do` files, dashs.scr, userlevel.scr, and the broader
+>   `.scr`/`.do` corpus); loader control-flow facts (the items.scr dispatch discriminator/flags,
+>   the citems billing filter, the .do streaming stride, the class/stance/tier selector) are
+>   [confirmed]; field SEMANTICS that need a live consumer remain capture/debugger-pending.
+> ida_reverified: 2026-06-16
+> ida_anchor: 263bd994
+> evidence: [static-ida, vfs-sample]
+> conflicts: OPEN — citems.scr description-paragraph count (6 vs 10) is UNRESOLVED (§2.11); the
+>   6-paragraph reading fits the 1052-byte stride exactly and the 10-paragraph reading overflows it
+>   by two paragraphs, but a multi-record probe of the later paragraph slots (+0x2CA..) is pending
+>   to settle whether those bytes are ever text. Carried explicitly; not forced.
+>
 > status: sample_verified
 > sample_verified: true (exp.scr, userlevel.scr, userpoint.scr, users.scr, skills.scr,
 >                        mobs.scr, citems.scr, skillneedset.scr, warstoneinfo.scr, oblist.scr,
@@ -17,7 +30,48 @@
 > sample bytes, with a layout correction to userpoint.scr (the +8 cumulative is u32, not the
 > previously-described u16 + flag byte) and a substantial field survey for skills.scr. items.scr
 > disk fields were resolved from the loader path only (no sample available). All Korean text
-> fields are CP949 / EUC-KR, null-terminated.
+>  fields are CP949 / EUC-KR, null-terminated.
+>
+> Full-record value-distribution pass (skills.scr / mobs.scr / exp.scr / userpoint.scr /
+> products.scr): several fields previously tagged "constant" were established from a SMALL sample
+> and DO NOT hold across the full record set. Five such fields are corrected from "constant" to
+> "variable" below, each with the observed range / distribution: skills.scr +1072, +1176, +1306,
+> +1328 (Section 2.8) and mobs.scr +60, +188, +272 (Section 2.9). Proposed semantics for
+> previously-opaque fields are recorded at the confidence the data supports (LOW / MEDIUM / HIGH)
+> and never overclaimed. The skills.scr / mobs.scr corrections conflict with the earlier
+> small-sample spec and are flagged CONFLICT-PENDING until an IDA loader witness confirms them;
+> the corrected value distributions themselves are full-record observations.
+>
+> CAMPAIGN VFS-MASTERY update (two-witness: loader + black-box): the constant->variable
+> corrections for skills.scr +1072/+1176/+1306/+1328 (§2.8) and mobs.scr +60/+188/+272 (§2.9) are
+> now CONFIRMED-variable and no longer CONFLICT-PENDING — they sit inside a verbatim-copied record
+> body with no branch, so the values genuinely vary and the fields are real; their SEMANTICS stay
+> DBG-pending and honestly opaque. users.scr (§2.6) is corrected to a SINGLE 496-byte (0x1F0)
+> structure read in one read with NO per-record loop and NO stride — the four "class blocks" are a
+> post-load grid-formula access pattern, not a record stride (both the prior "4 x 124" and the
+> "124/124/128/120" framings are refuted; structure size CONFIRMED). userpoint.scr (§2.5) tertiary
+> onset is corrected to key index 250 (the loader stores +24/+28 verbatim; the prior "296" was
+> stale), with the stored values' semantic DBG-pending.
+>
+> CAMPAIGN 10 D8/D9 update (two-witness re-verification on build 263bd994, IDB loader + real-VFS
+> bytes): the item/config CP949-table corpus is re-confirmed with mostly MINOR drifts, surgically
+> folded in below.
+>   • items.scr (§2.7) — the type/category discriminator is at **on-disk +0xD2 (210)**; the loader's
+>     own working-buffer notation expresses the same byte as +0xBA because that buffer starts 0x18
+>     ahead of the disk record (0xBA + 0x18 = 0xD2). The four dispatch flag bytes at +0xE5..+0xE8
+>     reconcile identically (loader-relative +0xCD..+0xD0; +0x18 = +0xE5..+0xE8). Stride 548 + N×8 and
+>     the +0x34 item UID are re-confirmed sample-verified.
+>   • citems.scr (§2.11) — the +0x00 field is **item_id, NOT a sequential slot index** (values are
+>     non-monotonic by position: billing ids > 100,000 appear mid-file). The description-paragraph
+>     count (6 vs 10) is UNRESOLVED and carried as an open conflict.
+>   • the 12 per-class stance `.do` files (§2.16 / §3.5) — stride **116 (0x74) CONFIRMED** by both
+>     witnesses; the 166-byte estimate is REFUTED (no loader constant; 166 divides none of the 12
+>     files). The class/stance/tier file selector and its three runtime selection globals are now
+>     documented (§3.5).
+>   • dashs.scr / minds.scr (§2.17.5) — **dashs.scr stride is 199 B / 28 records** (file size divides
+>     exactly only by 199); the prior "796 B / 7 records" is REFUTED by VFS geometry.
+>   • userlevel.scr — stride **60 B / 300 records** re-confirmed sample-verified (a stale "120/150"
+>     estimate elsewhere is refuted).
 
 ---
 
@@ -94,12 +148,12 @@ traced.
 | `data/script/exp.scr` | 20 | none | CONFIRMED | EXP required per level |
 | `data/script/userlevel.scr` | 60 | none | CONFIRMED | Per-level stat-scaling coefficients |
 | `data/script/userpoint.scr` | 32 | none | CONFIRMED | Stat-point allocation budget curve |
-| `data/script/users.scr` | 496 (4 × 124-byte class blocks) | none | CONFIRMED | Per-class stat-ratio grid |
+| `data/script/users.scr` | 496 (0x1F0) — single structure, no record stride (see §2.6) | none | CONFIRMED | Per-class stat-ratio grid |
 | `data/script/items.scr` | 548 | N × 8 B (each → 12 B runtime) | CONFIRMED | Item catalogue (binary) |
 | `data/script/skills.scr` | 1504 | none in sample (trailing count byte present but typically 0) | CONFIRMED | Skill catalogue |
 | `data/script/skillcategory.scr` | 564 | none | CONFIRMED | Skill category table |
 | `data/script/mobs.scr` | 488 | none | CONFIRMED | Mob / monster catalogue |
-| `data/script/npcs.scr` | 1916 | none | CONFIRMED | NPC catalogue |
+| `data/script/npcs.scr` | 1916 | none | CONFIRMED (stride + count) | NPC catalogue (812 records exactly on this VFS; see §2.10) |
 | `data/script/citems.scr` | 1052 (0x41C) | none | CONFIRMED | Billing/premium item catalogue |
 | `data/script/skillneedset.scr` | 4 | none | CONFIRMED | Skill prerequisite edges |
 | `data/script/warstoneinfo.scr` | 40 (0x28) | none | CONFIRMED | War stone region info |
@@ -110,13 +164,13 @@ traced.
 | `data/script/viplevels.scr` | 92 (0x5C) | none | CONFIRMED | VIP level table |
 | `data/script/itemscale.scr` | 8 | none | CONFIRMED | Item scale table |
 | `data/script/itemeffect.scr` | 4 | none | CONFIRMED | Item effect table |
-| `data/script/npc.scr` | 404 (0x194) | none | SAMPLE-VERIFIED | NPC description-text table (see §2.17; distinct from npcs.scr) |
+| `data/script/npc.scr` | 404 (0x194) | none | CONFIRMED (two-witness) | Keyed CP949 string table; keys 1..4 = class create-descriptions (see §2.17.3; distinct from npcs.scr) |
 | `data/script/quests.scr` | 3720 (0xE88), sparse | none | SAMPLE-VERIFIED | Quest template catalogue (see §2.17; 488 slots / 122 occupied) |
 | `data/script/autoquestion_cl.scr` | 92 (0x5C) | none | SAMPLE-VERIFIED | Anti-bot arithmetic-quiz question pool (see §2.17) |
 | `data/script/discript.sc` | 68 (0x44) | none | SAMPLE-VERIFIED | UI context-menu label table (see §2.17) |
-| `data/script/products.scr` | 212 (0xD4) | none | SAMPLE-VERIFIED (stride) | Crafting recipe catalogue (id + CP949 name verified; body fields UNVERIFIED) |
-| `data/script/mapsetting.scr` | UNVERIFIED | — | UNVERIFIED | Map settings |
-| `data/script/events.scr` | variable-length (indexed) | offset-table header | SAMPLE-VERIFIED (header only) | Event table — not a flat array; in-file offset table at +0x64 (see §2.17 note) |
+| `data/script/products.scr` | 212 (0xD4) | none | SAMPLE-VERIFIED (stride; full body distribution) | Crafting recipe catalogue (id + CP949 name CONFIRMED; 188-byte body structured into zones A-G — ingredients/quantities/outputs/costs/prerequisites/type, see Section 2.18) |
+| `data/script/mapsetting.scr` | 84 (0x54) | none | SAMPLE-VERIFIED | Per-zone map settings (52 records: zone id + CP949 name + XZ bounds; see §2.17.6) |
+| `data/script/events.scr` | 520 (0x208) | none | SAMPLE-VERIFIED (two-witness) | Event table — flat fixed-stride array, 1848 records (corrected from the earlier "variable-length / offset-table" framing); 4 consumed fields, rest blob. Authoritative spec: `formats/events_scr.md` (see §2.17.5) |
 | `data/script/helps.scr` | two-level hierarchical | per-page sub-entries | SAMPLE-VERIFIED (first page) | Help text — outer 16-byte page header + N × 48-byte sub-entries (see §2.17 note) |
 | `data/item/items_extra.do` | 48 | none | CONFIRMED | Item extended / 3D-attachment data |
 | `data/script/textcommand.do` | 52 | none | CONFIRMED | Chat command definitions |
@@ -169,11 +223,11 @@ Those mapping gaps are listed per file.
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | +0 | 2 | u16 | Level index, 1-based (1..300) | Sequential; loader validates monotonic increment | CONFIRMED |
-| +2 | 2 | u16 | Constant value 64 (0x0040) | Identical across all 300 records; semantic UNVERIFIED | CONFIRMED (value); UNVERIFIED (semantic) |
+| +2 | 2 | u16 | Constant value 64 (0x0040) | Identical across all 300 records (full-record verified). PROPOSED: an EXP-rate divisor / denominator in a `grant x rate / 64` formula, or a sub-system level cap (64 tiers). 64 does not match any other field-derived value and is the only constant in this position across all `.scr` files | CONFIRMED (value=64, full record set); PROPOSED meaning (LOW) |
 | +4 | 4 | u32 | Primary EXP required to reach the next level | L1=10; L50=112,284,408; plateaus at 1,999,557,415 from approximately L143 onward | CONFIRMED |
 | +8 | 4 | u32 | Reserved or high-word extension | Zero in all 300 records | CONFIRMED (always zero) |
-| +12 | 4 | u32 | Secondary EXP curve | Zero for L1–L73; L74=1; grows to approximately 4.17 billion at L240 then plateaus; non-monotone at very high levels | CONFIRMED (present); UNVERIFIED (semantic) |
-| +16 | 4 | u32 | Tertiary EXP curve | Zero until approximately L186; L200=8; L300=263,880 | CONFIRMED (present); UNVERIFIED (semantic) |
+| +12 | 4 | u32 | Secondary EXP curve | Onset L74 (first non-zero = 1); grows very slowly (still 1 at L80, 3 at L81), reaching ~4.29 billion (legal u32) near the plateau; 29 decreasing transitions => NOT monotone, NOT a cumulative sum of +4. PROPOSED: per-level EXP threshold for a SECOND advancement track (inner cultivation / prestige) that unlocks at L74, tracked modulo 2^32 | CONFIRMED (present, full record set); PROPOSED meaning (MEDIUM) |
+| +16 | 4 | u32 | Tertiary EXP curve | Onset L186 (1 at L186-L188, 3 at L189, 7 at L190 and holding for ~100 levels, then growing to 263,880 at L300); only 1 decreasing transition => approximately monotone, stepped schedule. PROPOSED: per-level EXP threshold for a THIRD advancement track (prestige / arena rank / guild contribution) unlocking at L186 | CONFIRMED (present, full record set); PROPOSED meaning (MEDIUM) |
 
 The two non-primary columns (+12 and +16) are **not** cumulative sums of the primary column.
 They are likely separate progression curves for secondary advancement systems (inner
@@ -181,9 +235,11 @@ cultivation, merit, or prestige). The loader validates sequential level ordering
 record aborts the load.
 
 **Open questions:**
-- Semantic meaning of the constant 64 at +2 (max skill level? EXP-rate denominator? flags word?)
-- Semantic identity of the secondary EXP curve at +12
-- Semantic identity of the tertiary EXP curve at +16
+- Constant 64 at +2 — PROPOSED as an EXP-rate denominator or sub-system cap (LOW); the exact role
+  (formula constant vs. skill cap vs. format marker) needs the loader / debugger to settle.
+- Secondary EXP curve at +12 — PROPOSED as a second advancement-track threshold (onset L74,
+  MEDIUM); the track's name and the meaning of its 29 within-cycle decreases need a loader witness.
+- Tertiary EXP curve at +16 — PROPOSED as a third advancement-track threshold (onset L186, MEDIUM).
 - Whether field +8 is a true reserved pad or the high word of a future u64
 
 ---
@@ -268,7 +324,7 @@ spec are subsumed by the wider cumulative fields.
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | +0 | 2 | u16 | Allocation step index, 0-based (0..300) | Map key; sequential | CONFIRMED |
-| +2 | 2 | u16 | Constant = 25 in all 301 records | Semantic UNVERIFIED (creation budget? per-level cap?) | CONFIRMED (value); UNVERIFIED (semantic) |
+| +2 | 2 | u16 | Constant = 25 in all 301 records | Full-record verified. PROPOSED: the initial character-creation stat-point budget (free points distributed across STR/AGI/DEX/INT/CON before the level-based allocation schedule begins). 25 is within the canonical 25-30 genre range for a creation budget and matches no gain/cumulative/header value elsewhere. Alternative (LOW): a per-step allocation cap | CONFIRMED (value=25, full record set); PROPOSED meaning (MEDIUM) |
 | +4 | 2 | u16 | Stat-group-1 gain this step | key=0→5; key=1–284→3; key=285–300→1000 | CONFIRMED |
 | +6 | 2 | u16 | Always zero (alignment pad) | Zero in all 301 records | CONFIRMED (value=0) |
 | +8 | 4 | u32 | Stat-group-1 cumulative total (running sum of +4) | Verified 301/301, including overflow past 65,535 | CONFIRMED |
@@ -277,8 +333,8 @@ spec are subsumed by the wider cumulative fields.
 | +16 | 4 | u32 | Stat-group-2 cumulative total (running sum of +12) | Verified 301/301; reaches ~38,941 at key=300 | CONFIRMED |
 | +20 | 2 | u16 | Secondary curve — low word | key=0–5→0; key=6→282; increments ~3/step; plateaus near key≈150 at 696 | CONFIRMED |
 | +22 | 2 | u16 | Secondary curve — high word | key=0–5→0; key=6→20; grows slowly; plateaus near 56 by key≈150 | CONFIRMED |
-| +24 | 4 | u32 | Tertiary value 1 | key=0–295→0; key=296→235,000; key=300→255,000; equals +28 in all checked records | CONFIRMED |
-| +28 | 4 | u32 | Tertiary value 2 | Equals +24 in all checked records | CONFIRMED |
+| +24 | 4 | u32 | Tertiary value 1 (stored verbatim by the loader) | Onset at key index 250 (the loader stores the +24/+28 pair verbatim from that index; the prior "296" onset is stale and is corrected to 250); rises to 255,000 by key 300; equals +28 in all checked records. SEMANTIC is DBG-pending — do not assign meaning from bytes alone | CONFIRMED (value present, onset index 250); semantic DBG-pending |
+| +28 | 4 | u32 | Tertiary value 2 (stored verbatim by the loader) | Equals +24 in all checked records; same onset (key index 250). SEMANTIC is DBG-pending | CONFIRMED (value present); semantic DBG-pending |
 
 **Semantic interpretation:**
 
@@ -287,38 +343,59 @@ spec are subsumed by the wider cumulative fields.
   gains at keys 285–300 (1000/step) are high-level stat-point bursts.
 - **Stat-group-2** (gain at +12, cumulative at +16): the same pattern for a second pool with
   different scaling (starts at 7, smaller increments).
-- **Constant 25 at +2** — UNVERIFIED. Candidate meanings: base stat points granted at character
-  creation, an early-curve per-level allocation cap, or a legacy formula constant.
+- **Constant 25 at +2** — PROPOSED (MEDIUM): the initial character-creation stat-point budget
+  (free points allocated to STR/AGI/DEX/INT/CON at creation, before the per-level table begins).
+  Genre-consistent (25-30 typical for this era) and not contradicted by any field in the file.
+  Less likely (LOW): an early-curve per-level allocation cap or a legacy formula constant. The
+  precise game-mechanic role cannot be proven from bytes alone and needs the loader / debugger.
 - **Secondary curve at +20/+22** — a 32-bit value pair encoding a secondary allocation curve
   (possibly martial energy: 내공 / 내력, or a third stat type). Zero for keys 0–5, begins at
   key 6, plateaus around key 150 with no further growth to key 300.
-- **Tertiary values at +24/+28** — identical in all checked records; begin at key 296 and rise by
-  5,000/step to 255,000 at key 300. Likely a high-level cap bonus or prestige reward pool.
+- **Tertiary values at +24/+28** — identical in all checked records; the loader stores the
+  pair verbatim with an onset at **key index 250** (corrected from the prior stale "296"),
+  rising to 255,000 by key 300. The MEANING of these stored values is **DBG-pending**: the
+  loader copies them without interpreting them, so no game-mechanic role (cap bonus, prestige
+  pool, etc.) can be asserted from the bytes alone — this is left honestly opaque pending a
+  live debugger witness on the consumer.
 
 **Open questions:**
 - Which named stat (STR/AGI/DEX/INT/CON) maps to group-1 vs group-2
 - Semantic of constant 25 at +2
 - Whether the secondary curve at +20/+22 is a martial-energy (내공 / 내력) budget
-- Whether the tertiary values at +24/+28 are a third stat pool or a max-cap schedule
+- Semantic of the tertiary values at +24/+28 (onset key index 250; stored verbatim) — DBG-pending; whether a third stat pool, a max-cap schedule, or something else cannot be settled from bytes
 - Meaning of the large gains at keys 285–300 (post-standard-level reward bursts?)
 
 ---
 
-### 2.6 users.scr — Per-class stat-ratio grid (496-byte file, 4 × 124-byte class blocks)
+### 2.6 users.scr — Per-class stat-ratio grid (single 496-byte / 0x1F0 structure, one read)
 
 **Wave-7 blocker: RESOLVED. Record body columns RESOLVED. Sample verified: all 4 class blocks.**
 
-**Structure:** the file is four sequential 124-byte blocks, one per character class. Each block
-is a 4-byte header followed by 30 × f32 values (120 bytes). Total: 4 × 124 = 496 bytes. These
-floats are the inputs to a `(10 / A) × B` formula grid evaluated after the file loads (the
-`(7.0, 24.0, 0.0)` triplets are `B` inputs; the `A` divisors come from a separate runtime table
-not stored in this file).
+**Structure (CORRECTED — no per-record loop, no stride):** the whole file is a SINGLE
+fixed-size structure of **496 bytes (0x1F0)** loaded in one read. There is no record stride and
+no per-record loop — earlier framings of this file as "4 × 124-byte records" (a 124-byte stride)
+or as four heterogeneous "124/124/128/120" blocks are BOTH wrong: neither stride is real. The
+apparent four "class blocks" are a **post-load grid-formula access pattern**, not an on-disk
+record stride. After the single read, the runtime indexes into the 496-byte blob with a grid
+formula (a base offset plus a per-class step) so that each of the four character classes resolves
+to its own 124-byte window inside the one structure — but the file is never iterated as a record
+array, and a parser must read it as one 496-byte block, not loop over a stride. The float values
+inside the blob are the inputs to a `(10 / A) × B` formula grid evaluated after the file loads
+(the `(7.0, 24.0, 0.0)` triplets are `B` inputs; the `A` divisors come from a separate runtime
+table not stored in this file).
 
-**Per-block layout:**
+The 496-byte structure size is **CONFIRMED** (two-witness: the loader reads exactly this many
+bytes in one read, and the on-disk size matches). The four-way "block" view below is **CONFIRMED
+as a grid-formula access pattern**, not a record stride: read the whole 496-byte structure, then
+apply the per-class window offset to address each class's 124-byte region.
 
-| Offset within block | Size | Type | Field | Notes | Confidence |
+**Per-class window layout** (the byte offsets below are relative to the start of one
+124-byte class window inside the single 496-byte structure — they are NOT a record
+stride; the grid formula supplies the window base):
+
+| Offset within window | Size | Type | Field | Notes | Confidence |
 |--------------------:|-----:|------|-------|-------|------------|
-| +0 | 1 | u8 | Class ID (1..4) | Block 0→1, 1→2, 2→3, 3→4; see class-name table below | CONFIRMED |
+| +0 | 1 | u8 | Class ID (1..4) | Window 0→1, 1→2, 2→3, 3→4; see class-name table below | CONFIRMED |
 | +1 | 1 | u8 | Constant 0x13 (19) in all 4 blocks | Semantic UNVERIFIED (count or version marker?) | CONFIRMED (value); UNVERIFIED (semantic) |
 | +2 | 1 | u8 | Constant 0x43 (67) in all 4 blocks | Semantic UNVERIFIED | CONFIRMED (value); UNVERIFIED (semantic) |
 | +3 | 1 | u8 | Always zero (header pad) | Zero in all 4 blocks | CONFIRMED (value=0) |
@@ -332,10 +409,16 @@ not stored in this file).
 | +72 | 20 | 5×f32 | Zero group | All 0.0; all 4 classes | CONFIRMED (value=0) |
 | +92 | 32 | 8×f32 | Class-specific multiplier group | Mostly 1.0; per-class deviations (table below) | CONFIRMED |
 
-**SPEC CORRECTION from prior version:** the prior spec listed the block header as a 1-byte class
-ID at +0 followed by an opaque 3-byte pad. The two constant bytes at +1 (0x13 / 19) and +2
-(0x43 / 67) are now documented explicitly; only +3 is a true zero pad. The prior spec also placed
-the class-specific deviations on the wrong float positions; the corrected positions are below.
+**SPEC CORRECTION from prior version (two corrections):**
+1. **No record stride.** The prior spec (and an alternative survey) framed this file as a record
+   array — either "4 × 124-byte records" or four heterogeneous "124/124/128/120" blocks. Both are
+   REFUTED: the file is one 496-byte (0x1F0) structure read in a single read with no per-record
+   loop. The four-way split is a grid-formula access pattern over the one blob, not an on-disk
+   stride (see Structure above).
+2. **Window header.** The prior spec listed the window header as a 1-byte class ID at +0 followed
+   by an opaque 3-byte pad. The two constant bytes at +1 (0x13 / 19) and +2 (0x43 / 67) are now
+   documented explicitly; only +3 is a true zero pad. The class-specific deviations were placed on
+   the wrong float positions; the corrected positions are below.
 
 **Class names (CONFIRMED):**
 
@@ -351,7 +434,7 @@ the class-specific deviations on the wrong float positions; the corrected positi
 > and use 승려 (monk) for class 4. The discrepancy in the class-4 label (monk vs. archer) between
 > the two sources is an open question (see open list).
 
-**Class-specific multiplier group (block offsets +92..+123, eight f32 at indices [22..29]):**
+**Class-specific multiplier group (window offsets +92..+123, eight f32 at indices [22..29]):**
 
 | Float index | Byte offset | Class 1 (무사) | Class 2 (자객) | Class 3 (도사) | Class 4 (승려) |
 |---|---|---|---|---|---|
@@ -370,6 +453,9 @@ class 3 has 15% at [24] and 10% at [25]; class 4 has 10% at [24] and 15% at [25]
 because only 2–4 positions deviate from 1.0.
 
 **Open questions:**
+- The exact grid formula that maps a class index onto its 124-byte window base inside the 496-byte
+  structure (the window step is implied by the four-class layout; the precise base/step constants
+  are a runtime detail, not stored on disk)
 - Which named stat maps to each of the 8 multiplier positions [22..29]
 - Semantic of the header constants 0x13 (19) and 0x43 (67)
 - Class-4 label discrepancy: `users.scr` calls it 승려 (monk); `items.csv` calls the fourth
@@ -382,25 +468,36 @@ because only 2–4 positions deviate from 1.0.
 ### 2.7 items.scr — Item catalogue (stride: 548 bytes + N × 8 trailing)
 
 **Wave-7 blocker: RESOLVED (stride, category flags, trailing count). Body fields PARTIALLY
-RESOLVED from the loader path only — NO sample file was available, so individual field offsets
-between named anchors remain UNVERIFIED.**
+RESOLVED. CAMPAIGN 10 D8 (two-witness, build 263bd994): a real VFS sample is now available and
+corroborates the structural facts.** The fixed 548-byte (0x224) block plus the `N × 8` trailing
+array reproduce the on-disk file size exactly (the sample is read as a flat array of mixed
+548/556/564/572-byte records once each record's own trailing count is honoured — the file size
+divides with zero residual), so the `stride = 548 + N × 8` model is **sample-verified**. The
+leading name field (CP949) at +0x00, the item UID at +0x34, and the description text beginning
+near +0x38 are byte-confirmed from the sample. Individual field offsets in the large unnamed
+regions between the named anchors are still UNVERIFIED.
 
 Note: `items.csv` (Section 4) provides a much richer human-readable item catalogue. `items.scr`
 is the binary runtime form. The two files share item IDs (the CSV→SCR correspondence is assumed
 one-to-one in row order), but they were not cross-verified field by field. The item unique ID is
 at SCR record offset **+0x34** (i32, little-endian), which corresponds to CSV column 1
-(`item_id`).
+(`item_id`). `items.csv` is itself **confirmed NOT loaded at runtime** by the shipping client (no
+`.csv` path appears in the binary's string table, and the boot data-table loader has no CSV
+reader) — it is an authoring/export form of `items.scr`; see Section 4.
 
 **Main record (548 bytes = 0x224):**
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| +0x00 | ? | ? | First record field (likely a leading ID or header word) | Not individually resolved | UNVERIFIED |
-| +0x34 (52) | 4 | i32 | Item unique ID | Maps to items.csv col 1 (`item_id`) | CONFIRMED |
+| +0x00 | ≤52 | char[] | Item name (CP949, null-terminated) | Sample-verified (build 263bd994): the record opens with CP949 name text; the buffer ends before the item UID at +0x34. The item name precedes the UID key | CONFIRMED (presence + CP949); name-buffer width inferred (≤ 52) |
+| +0x34 (52) | 4 | i32 | Item unique ID | Maps to items.csv col 1 (`item_id`). Sample-verified: a 9-digit UID family (`0x0B..0x11` high-byte families) | CONFIRMED (sample-verified) |
+| +0x38 (56) | ? | char[] | Item description (CP949, null-terminated) | Sample-verified presence: CP949 description text begins near +0x38, after the name buffer | CONFIRMED (presence + CP949); extent UNVERIFIED |
 | +0x4C (76) | 4 | u32 | Item category / class key | Used as the lookup key into the animation catalogue | CONFIRMED (presence); UNVERIFIED (name) |
+| +0x80 (128) | 4 | u32 | Catalogue key A (model reference) | Loader-resolved asset key (the boot loader names the pair "Catalogue keys rec+0x80(A)/+0x84(B)"); fed into the item-animation catalogue | CONFIRMED (loader witness); UNVERIFIED (exact name) |
+| +0x84 (132) | 4 | u32 | Catalogue key B (animation reference) | Second loader-resolved catalogue key (the `+0x84(B)` of the pair above) | CONFIRMED (loader witness); UNVERIFIED (exact name) |
 | +0x98 (152) | 4 | i32 | Primary key field (item model or animation ID) | Passed into the catalogue dispatcher | CONFIRMED (presence); UNVERIFIED (name) |
 | +0x9C (156) | 4 | i32 | Secondary key field | Passed into the catalogue dispatcher | CONFIRMED (presence); UNVERIFIED (name) |
-| +0xD2 (210) | 1 | u8 | Type / category discriminator | A value of 14 bypasses an ID-modulo routing check | CONFIRMED (presence); UNVERIFIED (name) |
+| +0xD2 (210) | 1 | u8 | Type / category discriminator | A value of 14 bypasses an ID-modulo routing check. **On-disk offset = +0xD2 (210)** (two-witness, build 263bd994). The loader's own working buffer starts 0x18 bytes ahead of the disk record, so the loader EXPRESSES this same byte as +0xBA (0xBA + 0x18 = 0xD2); both reference frames describe one field — normalize any "+0xBA" wording to on-disk +0xD2 | CONFIRMED (presence, on-disk +0xD2); UNVERIFIED (name) |
 | +0xE5 (229) | 1 | u8 | Category flag 1 | If 1 → dispatch code 1 (weapon-type item) | CONFIRMED |
 | +0xE6 (230) | 1 | u8 | Category flag 2 | If 1 → dispatch code 26 (armour-type item) | CONFIRMED |
 | +0xE7 (231) | 1 | u8 | Category flag 3 | If 1 → dispatch code 11 (other category) | CONFIRMED |
@@ -461,28 +558,28 @@ plausible category index (< 300). String fields are CP949, null-terminated.
 | +4 | 4 | u32 | Skill category index | Class-skill values 150–153 (one per class); 154–158 mixed/universal; other ranges for combo/chain tiers (see table below) | CONFIRMED |
 | +8 | ≤24 | char[] | Skill name (CP949, null-terminated) | Longest real name 17 bytes; buffer always zero by +32; buffer width is 24 or 32 (UNVERIFIED which) | CONFIRMED (name at +8); CONFIRMED (buffer ends ≤ +31) |
 | +32..+515 | 484 | mixed | Integer/sparse field region | Mostly zero in real records; only +260 and +516 resolved within this region | PARTIALLY RESOLVED |
-| +260 | 4 | u32 | Constant 0x30000000 in all real records | Likely an internal type/version marker | CONFIRMED (value); UNVERIFIED (meaning) |
+| +260 | 4 | u32 | Constant 0x30000000 in all real records (full-record verified) | PROPOSED: an internal type / version sentinel; the low byte is 0x30 = 48, the same marker byte that delimits sub-records in quests.scr / npc.scr | CONFIRMED (value, full record set); PROPOSED meaning (MEDIUM) |
 | +516 | 4 | u32 | Class flag = (class ID << 16) | Class 1=0x00010000, 2=0x00020000, 3=0x00030000, 4=0x00040000 | CONFIRMED |
 | +520 | 1 | u8 | Skill type / tier byte | 0=passive/unknown, 1=movement-base, 2=tier-3, 3=tier-3/5 chain, 4=tier-2, 5=tier-5 chain, 6=tier-6 chain (see table below) | CONFIRMED |
 | +521 | ≤512 | char[] | Long description text (CP949, null-terminated) | Confirmed for all checked records; descriptions up to 52+ bytes | CONFIRMED |
 | +1032 | ≤8+ | char[] | Short description / action label (CP949) | Text begins shortly after +1032 (≈+1033); buffer width UNVERIFIED | CONFIRMED (presence); PARTIALLY CONFIRMED (exact offset) |
-| +1072 | 4 | u32 | Constant 0x00003000 (12288) in all real records | Unresolved | CONFIRMED (value); UNVERIFIED (meaning) |
+| +1072 | 4 | (string) | **CONFIRMED-variable** (was misread as a constant) | Two-witness CONFIRMED-variable: the loader copies this region verbatim with no branch, and a full-record pass found 54 distinct u32 values here, many of which decode as CP949 text bytes read little-endian — i.e. this offset falls INSIDE a CP949 string field (an intermediate description / sub-label), not a numeric constant. The earlier 0x00003000 was a small-sample artifact. The field SEMANTIC (which string field, and its extent) is DBG-pending | CONFIRMED-variable (values vary, field is real); semantic DBG-pending |
 | +1116 | 4 | u32 | Skill chain reference [0] | Decimal-digit composite (e.g. 141100041 for skill 11, slot 0); encoding schema UNVERIFIED | CONFIRMED (presence); UNVERIFIED (encoding) |
 | +1120 | 4 | u32 | Skill chain reference [1] | Same pattern | CONFIRMED (presence) |
 | +1124 | 4 | u32 | Skill chain reference [2] | Same pattern | CONFIRMED (presence) |
 | +1128 | 4 | u32 | Skill chain reference [3] | Same pattern | CONFIRMED (presence) |
 | +1132 | 4 | u32 | Skill chain reference [4] | Same pattern | CONFIRMED (presence) |
 | +1136 | 4 | u32 | Skill chain reference [5] | Different decimal prefix (3xxxxxxxx vs 1xxxxxxxx), e.g. 341100111 | CONFIRMED (presence); UNVERIFIED (encoding) |
-| +1176 | 4 | f32 | Constant 1.0 in all real records | Meaning UNVERIFIED | CONFIRMED (value); UNVERIFIED (meaning) |
+| +1176 | 4 | f32 | **CONFIRMED-variable** (was misread as a constant) | Two-witness CONFIRMED-variable: the loader copies this region verbatim with no branch, and a full-record pass found 8 distinct float values {0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.5, 2.0}. The field is real and its value varies per skill. The field SEMANTIC is DBG-pending — the 0.4-2.0 spread is consistent with a per-tier scaling ratio but no meaning is asserted from bytes alone | CONFIRMED-variable (values vary, field is real); semantic DBG-pending |
 | +1180 | 4 | u32 | Skill chain reference [6] | Third prefix type (8xxxxxxxx), e.g. 841100111 | CONFIRMED (presence) |
 | +1280 | 4 | u32 | Prerequisite / parent skill ID | 0 for base skills; e.g. skill 13 → 11 | CONFIRMED (pattern) |
 | +1292 | 2 | u16 | Skill-point (SP) cost to learn | Per-tier values 4, 8, 12 | CONFIRMED (pattern) |
 | +1294 | 2 | u16 | Next-in-chain reference or 0 | e.g. skill 11 → 13; some records hold a composite ID | CONFIRMED (pattern); UNVERIFIED (composite encoding) |
 | +1296 | 4 | u32 | Second chain / upgrade-path reference | Single ID or composite chain ID | CONFIRMED (presence); UNVERIFIED (encoding) |
 | +1300 | 4 | u32 | Third chain / upgrade-path reference | Same as +1296 | CONFIRMED (presence); UNVERIFIED (encoding) |
-| +1304 | 2 | u16 | Motion / animation index A | Increments 20, 46, 72 (by 26) across skill tiers | CONFIRMED (pattern); UNVERIFIED (name) |
-| +1306 | 2 | u16 | Constant 7 in all checked records | Meaning UNVERIFIED | CONFIRMED (value); UNVERIFIED (meaning) |
-| +1328 | 4 | u32 | Constant 0x00010000 (65536) in all real records | Meaning UNVERIFIED | CONFIRMED (value); UNVERIFIED (meaning) |
+| +1304 | 2 | u16 | Motion / animation index A | Full-record pass: 15 distinct values; MODAL value is 1 (481 records, = passive / no-motion); active skills use larger motion-index values {6,12,18,20,24,30,36,42,46,48,54,60,66,72}. The earlier "increments by 26 (20,46,72)" pattern holds only for class-1 skills 11/12/13 and is NOT a general rule | CONFIRMED (motion index, full record set); name UNVERIFIED |
+| +1306 | 2 | u16 | **CONFIRMED-variable** (was misread as a constant) | Two-witness CONFIRMED-variable: the loader copies this region verbatim with no branch, and a full-record pass found 10 distinct values (modal 5 in 477 records; 0/1/2/3/5/6/7/11/14/17 all observed; 7 occurs only 12 times). The field is real and small-enum-shaped. The field SEMANTIC is DBG-pending — consistent with a max upgrade-tier / combo-depth count, but no meaning is asserted from bytes alone | CONFIRMED-variable (values vary, field is real); semantic DBG-pending |
+| +1328 | 4 | u32 | **CONFIRMED-variable** (was misread as a constant) | Two-witness CONFIRMED-variable: the loader copies this region verbatim with no branch, and a full-record pass found 8 distinct values (1<<16)..(8<<16). These mirror the bit-shifted shape of the class flag at +516 but are INDEPENDENT of it (724 records have class flag != (1<<16) while +1328 = (1<<16)). The field is real and its value varies per skill. The field SEMANTIC is DBG-pending — consistent with a stance/school unlock bitmask, but no meaning is asserted from bytes alone | CONFIRMED-variable (values vary, field is real); semantic DBG-pending |
 | +1372 | 4 | u32 | Cooldown (seconds) | 8–16 for movement skills; 0 for passive skills | CONFIRMED (plausible range) |
 | +1412 | 4 | f32 | Range (game units) | 30.0–40.0 for movement skills; 0.0 for passive skills | CONFIRMED (plausible range) |
 | +1496 | 4 | u32 | Tail field | Sparse | UNVERIFIED |
@@ -491,8 +588,27 @@ plausible category index (< 300). String fields are CP949, null-terminated.
 **SPEC CORRECTION from prior version:** the prior spec listed the entire 1500-byte body as
 UNVERIFIED with only a trailing count byte. The body is now substantially mapped (name, category,
 class flag, type byte, descriptions, SP cost, cooldown, range, chain references). The trailing
-`N × 8` sub-entry mechanism is the same shape as items.scr, but no non-zero trailing count was
-observed in the skill sample, so skills.scr is effectively a fixed-stride file in practice.
+`N × 8` sub-entry mechanism is the same shape as items.scr. Most records carry zero trailing
+sub-entries, but at least some do not: **the campaign-4 harness confirms `skills.scr` is NOT a
+flat array.** The real file size does not divide evenly by 1504 — the 1504-byte figure is the
+**fixed part only**, and a small number of 8-byte trailing sub-entries (on the order of dozens
+across the whole file) account for the remainder. The correct record model is therefore
+`stride = 1504 fixed + N × 8 trailing` per record, identical in shape to `items.scr`, where `N`
+is 0 for most records. A parser must read the per-record trailing count and advance by
+`1504 + N × 8`; it cannot assume a uniform 1504-byte stride.
+
+**FULL-RECORD CORRECTION — now CONFIRMED-variable (two-witness).** A full-record
+value-distribution pass corrected four fields that the earlier survey had marked as constants from
+a small sample. The two-witness gate (loader witness + full-record black-box) has since CONFIRMED
+all four as genuine variable fields: they sit inside a region the loader copies verbatim with no
+branch, so the values legitimately vary and the fields are real — they are no longer
+CONFLICT-PENDING. The fields are: +1072 (interior of a CP949 string field, 54 distinct values),
++1176 (8 float values 0.4-2.0), +1306 (10 values, modal 5), and +1328 (8 values (1<<16)..(8<<16),
+independent of the +516 class flag). +260 (0x30000000) remains a genuine constant across all real
+records. The four fields' VALUES are CONFIRMED-variable; their SEMANTICS remain **DBG-pending** —
+the loader stores them without interpreting them, so the proposed meanings (string-field interior,
+per-tier multiplier, max-tier enum, stance/school bitmask) are left as honest hypotheses pending a
+live debugger witness on the consumer, not asserted from bytes.
 
 **Skill category index (+4):**
 
@@ -530,7 +646,10 @@ is UNVERIFIED.
 - Whether +1292 is strictly "SP cost to learn" and how it disambiguates from max level
 - Full decimal-composite encoding of the chain references (+1116..+1136, +1180, +1294)
 - Whether +1296/+1300 are prerequisite or successor chain IDs
-- Meaning of motion index at +1304 and the constant 7 at +1306
+- Meaning of motion index at +1304 (now confirmed variable; modal 1 = passive)
+- Semantic of +1306 (CONFIRMED-variable; small enum, modal 5) — DBG-pending
+- Semantic of +1072 (CONFIRMED-variable; CP949 string-field interior) and +1176 (CONFIRMED-variable; float spread 0.4-2.0) — both DBG-pending
+- Semantic of +1328 (CONFIRMED-variable; values (1<<16)..(8<<16), independent of the +516 class flag) — DBG-pending
 - Tail fields between +1496 and +1503
 
 ---
@@ -546,19 +665,19 @@ two separate fields: an `i32` mob-level at +244 and a `u32` spawn timer at +248.
 |-------:|-----:|------|-------|-------|------------|
 | +0 | 2 | u16 | Mob ID (map key) | First 10 records: 11, 12, 21, 22, 31 … (sequential by 10 for low IDs); boss range 14,000+ | CONFIRMED |
 | +2 | ≤17 | char[] | Primary mob name | CP949/EUC-KR, null-terminated; buffer ≤17 bytes (16 chars + NUL); longest observed null at offset +18 | CONFIRMED |
-| +19 | ≤19 | char[] | Secondary mob name (category or region label?) | CP949, null-terminated; buffer ≤19 bytes; common substring shared across many mobs; semantic UNVERIFIED | CONFIRMED (presence); UNVERIFIED (semantic) |
+| +19 | <=19 | char[] | Secondary name = SPAWN-ZONE / AREA LABEL | CP949, null-terminated. Full-record pass: 214 distinct values across 3,997 records; values are recognisable game location names (most-frequent non-event value is a starting-zone place name; low-ID mobs 11-141 all carry the same starting-zone tag) plus event tags ('event', '이벤트 몹', seasonal-event strings) and dungeon-floor tags. PROPOSED: a spawn-area descriptor, NOT a monster category | CONFIRMED (presence); PROPOSED meaning: spawn-zone label (HIGH) |
 | +2..+51 | 50 | mixed | Additional name/tag fields | Region between primary name end and +52; mixed zero and text; UNVERIFIED | UNVERIFIED |
 | +52 | 2 | u16 | Unknown field | Observed value 379 (0x017B) in first record; other records UNVERIFIED | UNVERIFIED |
-| +60 | 4 | f32 | Constant 3.0 in all observed records | Value/semantic UNVERIFIED | CONFIRMED (value); UNVERIFIED (name) |
-| +188 | 4 | f32 | Constant 1.0 in all observed records | UNVERIFIED | UNVERIFIED |
+| +60 | 4 | f32 | **CONFIRMED-variable** (was misread as a constant) | Two-witness CONFIRMED-variable: the value sits inside a verbatim-copied record body with no branch, and a full-record pass found 31 distinct float values (modal 3.0 in 1046 records; range 0.5..400). The field is real and varies per mob. The field SEMANTIC is DBG-pending — the small integer-ish spread is consistent with a per-mob distance/scale figure (aggro radius or movement-speed base) but no meaning is asserted from bytes alone | CONFIRMED-variable (values vary, field is real); semantic DBG-pending |
+| +188 | 4 | f32 | **CONFIRMED-variable** (was misread as a constant) | Two-witness CONFIRMED-variable: the value sits inside a verbatim-copied record body with no branch, and a full-record pass found 41 distinct values (modal 1.0 at 3081/3997 = 77%; outliers up to 6000). The field is real and varies per mob. The field SEMANTIC is DBG-pending — consistent with an HP / combat-stat multiplier relative to baseline, but no meaning is asserted from bytes alone | CONFIRMED-variable (values vary, field is real); semantic DBG-pending |
 | +244 | 4 | i32 | Mob level | −1 = not set; 0 = trivial; boss range 36..46 for ID range 14000–14009; regular mobs 87..249 for high-ID range | CONFIRMED (boss validation path) |
 | +248 | 4 | u32 | Spawn timer in seconds | Range 33..41,006 in sample; boss default ≈ 40 s | CONFIRMED (plausible range) |
 | +252 | ? | ? | Unknown fields | UNVERIFIED | UNVERIFIED |
-| +272 | 24 | 6×f32 | All 1.0 | Observed in first record | CONFIRMED (value); UNVERIFIED (name) |
-| +296 | 4 | f32 | Variance/spread low | 0.95 in first record | UNVERIFIED |
-| +300 | 4 | f32 | Variance/spread high | 1.05 in first record | UNVERIFIED |
-| +304 | 4 | f32 | Variance low (second pair?) | 0.95 | UNVERIFIED |
-| +308 | 4 | f32 | Variance high (second pair?) | 1.05 | UNVERIFIED |
+| +272 | 24 | 6xf32 | **CONFIRMED-variable** (was misread as all-1.0) | Two-witness CONFIRMED-variable: the region sits inside a verbatim-copied record body with no branch, and a full-record pass found 0 of 3,997 records with all six f32 equal to 1.0 — the region holds variable data across the file. The six fields are real and vary per mob. Their individual SEMANTICS are DBG-pending — no meaning asserted from bytes alone | CONFIRMED-variable (values vary, fields are real); semantics DBG-pending |
+| +296 | 4 | f32 | Spawn-variance: center / sentinel = 1.0 | Full-record pass: the four-value group at +296..+308 holds exactly (1.0, 0.95, 1.05, 0.95) UNIFORMLY across ALL 3,997 records — no per-mob or per-type variation | CONFIRMED (value, full record set); PROPOSED meaning (HIGH) |
+| +300 | 4 | f32 | Spawn-variance: low bound = 0.95 | Low multiplier of a symmetric (0.95, 1.05) variance pair applied to a stat at spawn time (e.g. HP = base x rand(0.95,1.05)) | CONFIRMED (value, full record set); PROPOSED meaning (HIGH) |
+| +304 | 4 | f32 | Spawn-variance: high bound = 1.05 | High multiplier of the same variance pair | CONFIRMED (value, full record set); PROPOSED meaning (HIGH) |
+| +308 | 4 | f32 | Spawn-variance: second-stat low bound = 0.95 | Low multiplier of a second variance pair (a second stat, e.g. damage). The full group reads as two symmetric (0.95/1.05) variance pairs with a leading 1.0 sentinel | CONFIRMED (value, full record set); PROPOSED meaning (HIGH) |
 | +316 | 4 | f32 | Scale factor — normal vs. boss differs | 0.19 for normal mobs; 3.09 for bosses | CONFIRMED (boss differentiation) |
 | +320 | 4 | f32 | Scale factor B — normal vs. boss differs | 0.23 for normal; 3.71 for bosses | CONFIRMED (boss differentiation) |
 | +324 | 1 | u8 | Mob type | 0=normal (3,749 records); 2–10=sub-types (106 records total); 11=boss/elite (125 records); 12=special (2 records) | CONFIRMED |
@@ -573,26 +692,61 @@ two separate fields: an `i32` mob-level at +244 and a `u32` spawn timer at +248.
 | Remaining bytes | ? | ? | Fields from +456 to end of 488-byte record | UNVERIFIED | UNVERIFIED |
 
 Boss-type mobs (type byte = 11) are inserted into a separate runtime index in addition to the
-main map. Mobs with mob-level = −1 may be special scripted or data-anomaly entries.
+main map. Mobs with mob-level = -1 may be special scripted or data-anomaly entries.
+
+**FULL-RECORD CORRECTION — now CONFIRMED-variable (two-witness).** A full-record
+value-distribution pass over all 3,997 records corrected three fields previously marked as
+constants from a single-record sample. The two-witness gate (loader witness + full-record
+black-box) has since CONFIRMED all three as genuine variable fields: they sit inside a region the
+loader copies verbatim with no branch, so the values legitimately vary and the fields are real —
+they are no longer CONFLICT-PENDING. The fields are +60 (31 float values 0.5..400; modal 3.0),
++188 (41 float values; modal 1.0 at 77%), and +272 (the prior "6 x 1.0" holds in 0 of 3,997
+records). The same pass elevated two previously-opaque fields to PROPOSED-with-evidence: +19
+(secondary name = spawn-zone label, HIGH) and +296..+308 (two symmetric spawn-time variance pairs
+(0.95/1.05) with a 1.0 sentinel, uniform across ALL records, HIGH). The three fields' VALUES are
+CONFIRMED-variable; their SEMANTICS remain **DBG-pending** — the loader stores them without
+interpreting them, so the proposed meanings (aggro/scale at +60, HP/combat multiplier at +188, and
+the +272 group) are honest hypotheses pending a live debugger witness on the consumer, not
+asserted from bytes.
 
 ---
 
-### 2.10 npcs.scr — NPC catalogue (stride: 1916 bytes)
+### 2.10 npcs.scr — NPC catalogue (stride: 1916 bytes, 812 records)
+
+**CONFIRMED (two-witness: loader behaviour + full-file black-box).** Stride **1916 bytes (0x77C)**,
+**812 records exactly** — `812 × 1916` reconciles the file size with **zero remainder**.
 
 | Offset | Size | Type | Field | Confidence |
 |-------:|-----:|------|-------|------------|
 | +0 | 2 | u16 | NPC ID (map key) | CONFIRMED |
-| +2 | 1914 | ? | Name(s) and other fields | UNVERIFIED |
+| +2 | 1914 | ? | Name(s) and other fields (CP949 single-byte text + numeric fields) | UNVERIFIED (layout) |
 
-The loader allocates a 957-element `u16` array per record on the stack, suggesting that the
-record body contains text encoded as 2-byte characters (UCS-2 or CP949/EUC-KR). The exact
-character encoding and field layout are UNVERIFIED.
+**Record count source:** `record_count = file_size / 1916` = **812** on the analysed VFS (exact,
+no remainder). The loader contains a defensive short-read break (it stops at the last whole record
+if a future build's file were not stride-aligned), but on this VFS that path never fires — there is
+**no partial trailing record**. The earlier "732-byte partial tail / new-server variant" reading is
+**REFUTED for this build** (see `formats/scr.md`).
+
+**Text encoding (CORRECTED):** the body text is **CP949 / EUC-KR single-byte** (legacy Korean code
+page), null-terminated and zero-padded — the same encoding as the rest of the `.scr` family. The
+earlier inference of **UCS-2 / 2-byte wide characters** (drawn from the loader staging a wide
+per-record scratch array) is **corrected to CP949**: the stack scratch buffer is a working area, not
+proof of an on-disk 2-byte encoding. The exact body field layout within the 1916-byte record remains
+UNVERIFIED; only the stride, the count, the no-tail rule, and the CP949 encoding are CONFIRMED. See
+`formats/scr.md` (stride/count/tail authority) for the same facts pinned in the family overview.
 
 ---
 
 ### 2.11 citems.scr — Billing/premium item catalogue (stride: 1052 bytes, 512 records)
 
-**Sample verified: 512 records (375 normal items + 137 billing/premium items).**
+**Sample verified: 512 records.** File size 538,624 = 512 × 1052 (0x41C) with zero residual,
+re-confirmed two-witness on build 263bd994 (loader reads 0x41C bytes per record; VFS geometry exact).
+
+**The field at +0x00 is `item_id` (the map key), NOT a sequential slot index.** The runtime uses
+this id as a dense-array index (the container grows toward `2 × id`), so the on-disk values are
+**non-monotonic by record position**: billing/premium item ids (≥ 100,000) appear mixed among the
+lower ids mid-file (e.g. records carrying ids 100018 / 100019 sit before a record whose id is 375).
+Any earlier "slot_index" framing of +0x00 is REFUTED — the field is `item_id`.
 
 Billing filter: records with item ID >= 100,000 are only inserted into the runtime map when the
 billing-system flag is active. Records with item ID < 100,000 are always loaded.
@@ -607,36 +761,48 @@ have no text often contain a single `#` byte (0x23) as a placeholder sentinel.
 | +0 | 4 | u32 | Item ID (map key) | < 100,000 = normal; >= 100,000 = billing/premium | CONFIRMED |
 | +4 | ≤64 | char[] | Item name (CP949) | Null-terminated; max observed name ≈ 22 bytes | CONFIRMED |
 | +52 | 4 | u32 | Flag word | Sparse; value 0x04000000 on some items; others 0 | UNVERIFIED |
-| +56 | 2 | u16 | Cost / point value | Range 100–8,350; consistent with in-game point costs | UNVERIFIED (name) |
+| +56 (0x38) | 2..4 | u16/u32 | Cost / point value (NX cash price) | Range 100–8,350 (consistent with in-game point costs). Sample-verified: a record at +0x38 carries 950, a plausible NX cash price; field width (u16 vs u32) UNVERIFIED | CONFIRMED (presence + plausible value); name/width UNVERIFIED |
 | +58 | 2 | — | Padding | UNVERIFIED |
 | +60 | 1 | u8 | Category/type byte | Observed values 4, 5, 6; most records = 6 | CONFIRMED (presence); UNVERIFIED (name) |
 | +72 | 4 | u32 | Handle/pool reference | Incrementing value across sequential records; likely a runtime allocation tag | UNVERIFIED |
 | +76 | 4 | u32 | Stack quantity / lot size | Values 1, 5, 10, 12; consistent with typical MMO stack sizes | UNVERIFIED |
 | +77..+227 | 151 | ? | Fields between +76 and description blocks | UNVERIFIED | UNVERIFIED |
-| +228 | 81 | char[81] | Description block 0 (CP949) | Text present in most records | CONFIRMED |
-| +309 | 81 | char[81] | Description block 1 (CP949) | Text in many records | CONFIRMED |
-| +390 | 81 | char[81] | Description block 2 (CP949) | Text in some records | CONFIRMED |
-| +471 | 81 | char[81] | Description block 3 (CP949) | Text in some records | CONFIRMED |
+| +228 (0xE4) | 81 | char[81] | Description block 0 (CP949) | Two-witness confirmed: CP949 text begins at +0xE4 (228) | CONFIRMED (sample-verified) |
+| +309 (0x135) | 81 | char[81] | Description block 1 (CP949) | Two-witness confirmed: second paragraph at +0x135 (309); spacing = 81 bytes | CONFIRMED (sample-verified) |
+| +390 | 81 | char[81] | Description block 2 (CP949) | Text in some records | CONFIRMED (structure) |
+| +471 | 81 | char[81] | Description block 3 (CP949) | Text in some records | CONFIRMED (structure) |
 | +552 | 81 | char[81] | Description block 4 (CP949) | Often contains `#` placeholder only | CONFIRMED (structure) |
 | +633 | 81 | char[81] | Description block 5 (CP949) | Often `#` or empty | CONFIRMED (structure) |
-| +714 | 81 | char[81] | Description block 6 (CP949) | Largely empty/placeholder in sample | CONFIRMED (structure); UNVERIFIED (usage) |
-| +795 | 81 | char[81] | Description block 7 (CP949) | Same | CONFIRMED (structure) |
-| +876 | 81 | char[81] | Description block 8 (CP949) | Same | CONFIRMED (structure) |
-| +957 | 81 | char[81] | Description block 9 (CP949) | Max 17 non-null bytes observed | CONFIRMED (structure) |
-| +1038 | 2 | ? | Unanalysed field | UNVERIFIED | UNVERIFIED |
+| +714 (0x2CA) | 338 | — / char[81]×? | Record remainder — disputed paragraph region | This 338-byte tail (`+0x2CA..+0x41B`) is the **UNRESOLVED 6-vs-10 paragraph conflict** (see below). Under a 6-paragraph reading it is a 338-byte non-paragraph remainder (the last paragraph, block 5, ends at +714/0x2CA); under a 10-paragraph reading it holds description blocks 6–9 (at +714 / +795 / +876 / +957) which were "largely empty / `#` placeholder" in the small sample. A multi-record text-vs-zero probe of this region is pending | UNRESOLVED (paragraph count) |
 | +1040 | 4 | u32 | Tail field 0 | Values 0 or 1; many records = 1 | UNVERIFIED |
 | +1044 | 4 | u32 | Tail field 1 | Values 0 or 2; many records = 2 | UNVERIFIED |
 | +1048 | 4 | u32 | Always zero | All checked records | CONFIRMED (value=0) |
 
-Ten × 81-byte description blocks cover offsets +228 through +1037 (10 × 81 = 810 bytes).
-Blocks 6–9 are largely empty in the sample and may represent unused language slots.
+**UNRESOLVED CONFLICT — description-paragraph count (6 vs 10).** Two readings of the 81-byte
+description blocks coexist and are NOT reconciled:
+- **6 paragraphs** (blocks 0–5) cover `+228..+713` (6 × 81 = 486 bytes, ending at +714 / 0x2CA),
+  leaving a 338-byte record remainder `+0x2CA..+0x41B` to the 1052-byte (0x41C) stride. This is the
+  geometrically clean reading.
+- **10 paragraphs** (blocks 0–9) would cover `+228..+1037` (10 × 81 = 810 bytes). Block 9 would end
+  at +228 + 810 = +1038 (0x41E), which **exceeds the 1052-byte stride only if a further sub-block
+  follows**; the 10-block layout itself ends at 0x41E = 1054 > 1052 (0x41C) **by two bytes**, i.e.
+  the 10th block cannot fit a full 81 bytes inside the stride. Treated strictly, a full 10×81 layout
+  overflows the record by two bytes; blocks 6–9 were observed "largely empty / `#` placeholder" in
+  the small sample, which is also consistent with them being part of the 338-byte remainder rather
+  than real paragraphs.
+
+Neither reading is forced. The first two paragraphs (+228, +309) are byte-confirmed; the disputed
+region is `+0x2CA..` onward. **Resolution requires probing the +714 / +795 / +876 / +957 slots for
+CP949 text vs zero/`#` across many records** — not decidable from a single short hexdump. Carry as
+OPEN.
 
 **Open questions:**
+- **Description-paragraph count (6 vs 10) — UNRESOLVED** (see conflict box above); probe later slots
+  for text-vs-zero across multiple records.
 - Names and semantics of fields +4 through +51
 - Meaning of the flag at +52
 - Semantics of cost field at +56 and category byte at +60
 - Semantics of pool-reference at +72 and lot-size at +76
-- Purpose of the ten 81-byte description blocks (tooltip sections? multiple language slots?)
 - Whether the `#` sentinel is the engine's null-description marker
 - Purpose of tail fields at +1040 and +1044
 
@@ -709,7 +875,7 @@ These strides are confirmed; no sample bytes available for field-level breakdown
 | `data/script/itemscale.scr` | 8 bytes | Item scale table |
 | `data/script/itemeffect.scr` | 4 bytes | Item effect table |
 | `data/script/errorinfo.do` | 108 bytes (0x6C) | Error message strings |
-| Per-class stance `.do` files (`monkma.do`, `monksa.do`, etc.) | 116 bytes (0x74) — corrected from the earlier 166-byte estimate; SAMPLE-VERIFIED 12/12 | Per-class skill-hotbar tables incl. skill icon (srcX,srcY) at +0x18/+0x1C; full layout in §3.5 (ui_manifests.md §2.7) |
+| Per-class stance `.do` files (`monkma.do`, `monksa.do`, etc.) | 116 bytes (0x74) — SAMPLE-VERIFIED 12/12 + CODE-CONFIRMED loader constant (build 263bd994); the earlier 166-byte estimate is REFUTED (no 0xA6 loader constant; 166 divides none of the 12 files) | Per-class skill-hotbar tables incl. skill icon (srcX,srcY) at +0x18/+0x1C; a runtime class/stance/tier selector picks the file. Full layout + selector in §3.5 (ui_manifests.md §2.7) |
 
 ---
 
@@ -760,29 +926,101 @@ answer is checked server-side and is not stored on the client.
 | ~+0x20 | var | char[] | Answer-hint text (CP949) | "정답을 숫자로 입력해주세요" ("enter the answer as a number") | SAMPLE-VERIFIED |
 | tail | — | — | Zero pad to the 92-byte stride | — | SAMPLE-VERIFIED |
 
-#### 2.17.3 npc.scr — NPC description-text table (stride: 404 bytes, 2510 records)
+#### 2.17.3 npc.scr — keyed CP949 string table (stride: 404 bytes, 2510 records) — CONFIRMED (two-witness)
 
-**SPEC CORRECTION:** §2.2 previously listed `npc.scr` as UNVERIFIED. The sample confirms a
-**404-byte (0x194) stride, 2510 records**, sequential `u32` id at +0 mirrored at +4. This file
-holds the multi-paragraph **NPC class/archetype description text** (and is the dialogue-body
-store referenced by the quest dialogs); it is distinct from the `npcs.scr` catalogue (stride
-1916, §2.10). The key linking the two id spaces is UNVERIFIED.
+> **SPEC CORRECTION (CAMPAIGN 9, two-witness: client loader + real-VFS byte dump).** §2.2 once
+> listed `npc.scr` as UNVERIFIED, and an earlier sample pass modelled the trailing region as an
+> "id mirror" plus three "value-48 sub-section markers". The two-witness pass refutes that model:
+> the record is a **20-byte header followed by six 64-byte CP949 string fields**, and the byte
+> read as a "value-48 marker" is the leading ASCII `'0'` (= 0x30) **empty-string sentinel** of the
+> (empty) trailing string fields. The corrected layout below is CONFIRMED by both witnesses.
+
+`data/script/npc.scr` is a **generic keyed CP949 string table**, not an NPC-specific catalogue.
+The whole file is **1 014 040 bytes = 404 × 2510** (mod 0), so the **404-byte (0x194) stride** and
+**2510-record** count are exact. It is **loaded once at boot** into a single global key->record map
+(an in-memory red-black tree keyed on each record's first integer field) and persists for the whole
+session — there is **no per-area reload**. The same table is reused by several consumers: the
+character-create form (keys 1..4, the per-class description; and the appearance/stat-grid key
+families), and the NPC-dialogue / appearance-pager subsystem (higher keys). It is distinct from the
+`npcs.scr` catalogue (stride 1916, §2.10).
+
+**Record count source:** `record_count = file_size / 404`. **Endianness:** little-endian. **String
+encoding:** CP949, NUL-terminated within each 64-byte field, zero-padded; a field whose **first byte
+is ASCII `'0'` (0x30)** is the **empty-string sentinel** — the loader force-terminates each field's
+last byte and treats a leading `'0'` as "empty".
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| +0x000 | 4 | u32 | NPC class/descriptor id (map key) | Sequential 1..2510 | SAMPLE-VERIFIED |
-| +0x004 | 4 | u32 | Id mirror | Equals +0x000 in all records (possible second lookup key) | SAMPLE-VERIFIED |
-| +0x008 | 8 | — | Reserved | Zero in observed records | SAMPLE-VERIFIED (value=0) |
-| +0x014 | ≤36 | char[] | Description paragraph 0 (CP949) | First archetype paragraph | SAMPLE-VERIFIED |
-| +0x050 | ≤28 | char[] | Description paragraph 1 (CP949) | Second paragraph | SAMPLE-VERIFIED |
-| +0x090 | ≤28 | char[] | Description paragraph 2 (CP949) | Third paragraph | SAMPLE-VERIFIED |
-| +0x0D0 | 4 | u32 | Sub-section marker (value 48 / 0x30) | 100% occupancy | SAMPLE-VERIFIED (value=48) |
-| +0x110 | 4 | u32 | Sub-section marker (value 48) | 100% occupancy | SAMPLE-VERIFIED (value=48) |
-| +0x150 | 4 | u32 | Sub-section marker (value 48) | 100% occupancy | SAMPLE-VERIFIED (value=48) |
-| other | — | — | Mostly zero / sparse | — | UNVERIFIED |
+| +0x000 | 4 | u32 | record key (map key) | The lookup key; class-description records use keys 1/2/3/4 | CONFIRMED |
+| +0x004 | 16 | bytes | header tail | Mostly zero. For class records the first 4 bytes mirror the key; for the key=1 record the bytes at +0x08 hold the value 0x64 (=100) — semantics UNVERIFIED. Not read as strings by the create form. | CONFIRMED layout; semantics UNVERIFIED |
+| +0x014 | 64 | char[64] | string field 0 (CP949) | Create form: description line 1 | CONFIRMED |
+| +0x054 | 64 | char[64] | string field 1 (CP949) | Create form: description line 2 | CONFIRMED |
+| +0x094 | 64 | char[64] | string field 2 (CP949) | Create form: description line 3 | CONFIRMED |
+| +0x0D4 | 64 | char[64] | string field 3 (CP949) | Empty (`'0'` sentinel) for class records; non-empty in later records | CONFIRMED |
+| +0x114 | 64 | char[64] | string field 4 (CP949) | Empty for class records; used by other consumers | CONFIRMED |
+| +0x154 | 64 | char[64] | string field 5 (CP949) | Empty for class records; used by other consumers | CONFIRMED |
 
-The three `48`-markers at +0xD0 / +0x110 / +0x150 (spacing 0x40 = 64) mirror the `quests.scr`
-sub-record pattern: each 404-byte record carries three 64-byte description "pages".
+Total = 20 + 6 × 64 = **404 bytes (0x194)**. A reader should read up to the first NUL (or 64 bytes)
+in each field, CP949-decode, and treat a leading `'0'` as an empty string.
+
+##### Character-create class descriptions (keys 1..4)
+
+The four playable classes occupy the first four records of the table (keys 1, 2, 3, 4). For each
+class record, **string fields 0/1/2 (offsets +0x14 / +0x54 / +0x94) are the three CP949 lines of the
+class DESCRIPTION** shown in the create form's right-hand panel; fields 3/4/5 are empty for class
+records. The three lines are concatenated to form the displayed description block.
+
+The mapping from the UI class buttons to table keys carries a **UI-slot vs internal-class crossover**
+(the on-screen button order is not the internal class order, and keys 3/4 are swapped relative to the
+button order). Each class also has a per-class preview BGM played on the shared music slot when its
+button is pressed. Both the key->class map and the per-class BGM are CONFIRMED by both witnesses:
+
+| npc.scr key | UI slot | Internal class id | Class (Korean) | Preview BGM |
+|---:|---:|---:|---|---:|
+| 1 | 0 | 4 | Monk (승려) | 910065000 |
+| 2 | 1 | 1 | Musa (무사) | 910062000 |
+| 3 | 3 | 2 | Salsu (살수) | 910063000 |
+| 4 | 2 | 3 | Dosa (도사) | 910064000 |
+
+**The class NAME is NOT in npc.scr.** The create-name modal's class name/title is read from the
+message database `data/text/msg.xdb` at message ids **14003..14007** (keyed by the internal class
+selector; 14003 is the default), independent of npc.scr. See `formats/msg_xdb.md` and
+`specs/frontend_scenes.md §4`. The description fields of keys 1..4 contain class-archetype text
+(weapons and martial-arts style per class); they do not repeat the class name.
+
+##### Create-form stat / appearance grid (key families)
+
+The create-form stat/appearance grid reads the **same** keyed CP949 string table under a family of
+computed keys derived from an appearance/discipline discriminator `disc`. The grid-key formula is:
+
+```
+key  =  2·disc + {110, 111, 120, 121, 130, 131, 140, 141}
+```
+
+i.e. a fixed set of eight literal base offsets {110, 111, 120, 121, 130, 131, 140, 141} added to
+`2·disc`, each producing one key into the keyed string table (the appearance/equipment STRING rows
+of the same table, not the class keys). The eight literal bases were observed feeding the keyed
+string-table lookup. Confidence: **CONFIRMED (two-witness)** for the key formula; the per-cell field
+assignment within each looked-up record is not fully enumerated here.
+
+> **REFUTED — `disc + {210, 220, 230, 240}` is NOT a stat-grid key formula.** An earlier pass listed
+> a second `disc + {210..240}` family as grid keys; this is **wrong** and must not be used. Those
+> `210xxx`-shaped values are **full equipment ITEM ids** — the committed character's gear written
+> into the new character's slot record at creation (weapon ids in the `210xxx` band, armor in the
+> `207`/`208` band, accessory `281`, body `201`), **not keys into this string table**. They are
+> written to the slot record, not looked up here. An engineer binding the stat grid must use **only**
+> the `2·disc + {110..141}` keyed-string lookups above; do **not** derive any grid cell from the
+> `disc + {210..240}` family. Confidence: **CONFIRMED (two-witness)**.
+>
+> Related distinction (CONFIRMED): the create-form 3D **preview** gear is a different id family again
+> (the `202`/`203`/`206`/`209xxx` preview bands) and is not the same as the **committed** slot gear
+> (`210`/`207`/`281`/`201xxx`) — two separate tables. The stat-grid string lookup (this section) is
+> independent of both gear families.
+
+The three `0x30`-valued bytes the earlier pass placed at +0xD0 / +0x110 / +0x150 are simply the
+leading `'0'` empty-string sentinels of string fields 3 / 4 / 5 — not a `quests.scr`-style "value-48
+sub-record marker". Treat that earlier framing as superseded.
+
 
 #### 2.17.4 discript.sc — UI context-menu labels (stride: 68 bytes, 33 records)
 
@@ -802,11 +1040,99 @@ interaction UI menus (party/guild actions, currency names, window toggles, schoo
 
 | File | Size / structure | Notes |
 |---|---|---|
-| `products.scr` | stride 212 (0xD4), 9092 records | `u32` recipe id @ +0, CP949 name @ +4; 188-byte body (ingredients/output) UNVERIFIED |
-| `events.scr` | variable-length, indexed | File header with a `u16` event-category count and an in-file `u32` offset table at +0x64..+0xA7 pointing to ~15 variable-length event-record bodies; record content not decoded |
+| `products.scr` | stride 212 (0xD4), 9092 records | `u32` recipe id @ +0, CP949 name @ +4; 188-byte body now structured into zones A-G (ingredients / quantities / outputs / costs / prerequisites / type) — full map in Section 2.18 |
+| `events.scr` | **flat stride 520 B (0x208) / 1848 records** — sample-verified two-witness (build 263bd994); the earlier "variable-length, indexed / offset-table at +0x64" framing is **CORRECTED** (it is a flat fixed-stride array, not an offset-indexed container). Four fields are consumed by the client (event_id @+0x00, mode_flag @+0x64, a zero-terminated rate array @+0x68, a zero-terminated 9-digit actor-id array @+0x130); the rest is present-but-unread blob. **Authoritative spec: `formats/events_scr.md`** |
 | `helps.scr` | two-level hierarchical | Outer 16-byte page header (`page_id`, `section_id`, reserved, `entry_count`) + `entry_count` × 48-byte sub-entries; first page sample-verified, full page-walk UNVERIFIED |
 | `tiphelp.scr` | variable-length | Loading-screen tip records; `u32` body-size + tip-count header then CP949 tip text; not flat-stride |
-| `dashs.scr` / `minds.scr` | stride 796 / 808 | Movement-skill / inner-cultivation skill reference tables; `u32` id @ +0, CP949 name; 7 / 9 records |
+| `dashs.scr` | stride **199 B (0xC7) / 28 records** — sample-verified; the prior "796 B / 7 records" is **REFUTED** (file size 5,572 divides exactly only by 199; 5,572 / 796 leaves a non-zero remainder) | Movement-skill reference table; `u32` id @ +0, CP949 name begins immediately at +4; body layout beyond +0 UNVERIFIED |
+| `minds.scr` | stride 808 (UNVERIFIED) | Inner-cultivation skill reference table; `u32` id @ +0, CP949 name; ~9 records; stride not re-derived against the VFS sample in this pass |
+
+#### 2.17.6 mapsetting.scr — per-zone map settings (stride: 84 bytes, 52 records)
+
+**SPEC CORRECTION:** §2.2 previously listed `mapsetting.scr` as UNVERIFIED. The campaign-4
+harness confirms an **84-byte (0x54) stride with 52 records** by exact divisibility
+(`4,368 / 84 = 52`, exact). This table holds one record per playable zone: a zone id, a CP949
+zone name, and the zone's XZ world bounds. The same 84-byte stride is already assumed by the
+minimap scan tooling described in `misc_data.md`.
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| +0 | 4 | u32 | Zone id (map key) | One record per zone | SAMPLE-VERIFIED |
+| +4 | ? | char[] | Zone name (CP949, null-terminated) | Inline name buffer within the 84-byte record | SAMPLE-VERIFIED (presence) |
+| body | 16 | 4×f32 | XZ world bounds (min/max along X and Z) | The zone's extent; exact float order within the body is UNVERIFIED | SAMPLE-VERIFIED (presence); UNVERIFIED (exact offsets) |
+| tail | — | — | Remaining/zeroed fields to the 84-byte stride | — | UNVERIFIED |
+
+- **Record count source:** `file_size / 84` (no file header, flat array — the common §2.1 pattern).
+- The byte offsets of the name buffer and the four bound floats inside the 84-byte body are not
+  individually pinned in this pass; only the zone-id-at-+0, the CP949 name, and the presence of
+  the XZ bounds are sample-verified. An engineer should treat the inner-offset layout as UNVERIFIED.
+
+---
+
+---
+
+### 2.18 products.scr — crafting recipe catalogue (stride: 212 bytes, 9092 records)
+
+**SPEC UPGRADE.** Section 2.17.5 previously listed `products.scr` body fields as UNVERIFIED. A
+full-record value-distribution pass (reading the 53 `u32` words of every 212-byte record and
+measuring per-word occupancy and value ranges) resolves the 188-byte body into a clear
+ingredient -> quantity -> output -> cost -> prerequisite -> type structure. Field WIDTHS and the
+overall ZONE MAP are PROPOSED with the confidence noted; exact per-stat names within the
+prerequisite zone remain UNVERIFIED.
+
+**Record model:** no file header; flat array; `record_count = file_size / 212`. The record is read
+as 53 little-endian `u32` words (word[i] is at byte offset `4 * i`). Words [9]+ that carry 9-digit
+decimal composites use the SAME packed-decimal item-code scheme seen in the `skills.scr` chain
+references (Section 2.8) and the `quests.scr` chain references (Section 2.17.1) — they are compact
+item-class/family/tier codes, NOT raw sequential item IDs.
+
+| Word(s) | Byte offset | Occupancy | Type | Field / zone | Confidence |
+|---|---|---|---|---|---|
+| [0]      | +0       | 100%     | u32     | Recipe ID (map key) | CONFIRMED |
+| [1]-[8]  | +4..+35  | 100%     | char[]  | CP949 recipe name (null-terminated; ends by ~+36) | CONFIRMED |
+| [9]      | +36      | 100%     | u32     | **Zone A** — ingredient 1 item-code (composite) | PROPOSED (HIGH) |
+| [10]     | +40      | 100%     | u32     | Zone A — ingredient 2 item-code | PROPOSED (HIGH) |
+| [11]-[17]| +44..+71 | 85%->3%  | u32     | Zone A — ingredients 3..9 item-codes (occupancy tapers = variable ingredient count) | PROPOSED (MEDIUM) |
+| [18]     | +72      | 100%     | u32     | Ingredient count / list terminator (small values dominate) | PROPOSED (MEDIUM) |
+| [19]     | +76      | 85%      | u32     | **Zone B** — quantity for ingredient 1 (values 0..625) | PROPOSED (HIGH) |
+| [20]-[25]| +80..+100| 28%->3%  | u32     | Zone B — quantities for ingredients 2..7 (occupancy mirrors Zone A) | PROPOSED (HIGH) |
+| [26]     | +104     | 100%     | u32     | **Zone C** — output 1 item-code (composite) | PROPOSED (HIGH) |
+| [27]-[33]| +108..+135| 55%->11%| u32     | Zone C — outputs 2..8 item-codes (primary + secondary outputs) | PROPOSED (HIGH) |
+| [34]     | +136     | 100%     | u32     | **Zone D** — base gold/material cost (values {250000, 495652, 500000, 1000000}; always present) | PROPOSED (HIGH) |
+| [35]-[41]| +140..+164| 55%->11%| u32     | Zone D — per-ingredient / secondary material costs (values up to 1,000,000) | PROPOSED (MEDIUM) |
+| [42]     | +168     | 100%     | u32     | **Zone E** — output quantity (values 1..10,000) | PROPOSED (HIGH) |
+| [43]-[49]| +172..+196| 16%->11%| u32     | **Zone F** — player level / skill prerequisites (small ints; word[47]@+188 = {1,12,32,100,300,1000}) | PROPOSED (MEDIUM) |
+| [50]     | +200     | 51%      | u32     | **Zone G** — output category / sub-product reference (composite item-code) | PROPOSED (MEDIUM) |
+| [51]     | +204     | 51%      | u32     | Zone G — crafting service fee in game currency (values 1,000..199,500,000) | PROPOSED (HIGH) |
+| [52]     | +208     | 31%      | u32     | Zone G — recipe type flag (values {0, 1, 4, 5}: 0=none, 1=basic, 4/5=advanced) | PROPOSED (MEDIUM) |
+
+**Zone summary:**
+
+- **A (words [9]-[17]):** ingredient item-codes; first two always present, the rest tapering =>
+  variable-length ingredient list (1..9 entries). HIGH.
+- **B (words [19]-[25]):** one quantity per ingredient; occupancy tracks Zone A. HIGH.
+- **C (words [26]-[33]):** output item-codes; primary output always present, secondary outputs
+  optional. HIGH.
+- **D (words [34]-[41]):** base gold/material cost (always present) plus optional per-material
+  cost components. HIGH (base) / MEDIUM (components).
+- **E (word [42]):** how many of the output the recipe yields. HIGH.
+- **F (words [43]-[49]):** player level / skill prerequisites for the recipe. MEDIUM.
+- **G (words [50]-[52]):** output-category reference, crafting service fee, recipe type flag.
+  MEDIUM (refs/type) / HIGH (fee).
+
+**Test-record caveat.** Records id=1..6 (CP949 names reading "activation-talisman test 1..6") are
+a synthetic debug sequence: each successive record adds one more ingredient and one more output,
+with the fee scaling roughly exponentially. They are not representative of real recipes (id >= 7);
+a parser should not treat them as canonical data shape.
+
+**Open questions:**
+- Exact field WIDTH of each zone entry (the body reads cleanly as u32 words, but some zones could
+  pack two 16-bit sub-fields per word — needs a loader witness).
+- The packed-decimal item-code schema (Zones A / C / G) — its digit groups (class / family / tier)
+  are not yet decoded; same open item as the skills.scr and quests.scr composites.
+- Which named prerequisite (level vs. skill vs. stat) each Zone-F word encodes.
+- Whether Zone D word[34] and Zone G word[51] are two separate currencies (material cost vs.
+  service fee) or one cost split across phases.
 
 ---
 
@@ -1057,6 +1383,31 @@ six components are interleaved across the block (all `u32`). The three different
 (110 / 143 / 98 from `widgetPosX`) place the badges at fixed, visually distinct positions around
 the main 23×23 icon cell. No string constant in the binary names the badges; their identity
 (e.g. cooldown / cost / chain-rank indicator) is PLAUSIBLE but UNVERIFIED.
+
+#### Loader and the class/stance/tier file selector (CONFIRMED — two-witness, build 263bd994)
+
+The 12 stance `.do` files are streamed by a single loader that reads fixed **116-byte (0x74)**
+records to EOF using floor-division (`record_count = file_size / 116`); a short trailing tail is
+**ignored** (3 of the 12 files leave a 12/40/60-byte all-zero tail; 9 divide exactly). The earlier
+**166-byte estimate is REFUTED** by both witnesses — there is no 166-byte (0xA6) constant in any
+`.do` loader, and 166 divides none of the 12 files exactly.
+
+**Which of the 12 files is consulted is chosen at runtime by a class/stance/tier selector** that
+branches on **three runtime selection globals**:
+
+| Selector input | Type | Role |
+|---|---|---|
+| current class index | word (u16) | active character class, 1..4 (Musa / Salsu·Jagaek / Dosa / Monk) |
+| current stance type | byte (u8) | active stance, 0 / 1 / 2 (the `jung` / `sa` / `ma` path) |
+| current stance tier | qword comparator | a tier/progression comparator pair the selector tests against |
+
+The selector composes `(class × stance)` → the `.do` filename for that path (e.g. the monk class
+maps to `monkjung.do` / `monksa.do` / `monkma.do` as the stance byte changes). The per-file
+`classStanceRef` (+0x0C) values run 1001..1012 — one identifying ref per file — which the selector
+and the icon-sheet resolver cross-reference. Only `musajung.do` is referenced by a literal path in
+the boot data-table loader; the other 11 are reached through the selector, not by direct path
+literals. (Function/global names are orchestrator-owned and tracked in `names.yaml`; this spec
+names only the roles, not addresses.)
 
 #### Census-derived hypotheses for the overlay block (PLAUSIBLE only)
 
@@ -1594,6 +1945,52 @@ relevance to the `.scr` / `.do` pipeline.
 
 ---
 
+## Section 7 — game.ver (binary client-version source file)
+
+**Sample verified** (single instance; VFS read). A small fixed-size binary file that supplies the
+client version number consumed by the enter-game token. It is the same shape family as the
+Section 6 version manifest (a small flat array of `u32` with a 7-element minimum), but it lives at
+a fixed VFS path and exactly one field is consumed by the login/enter token formula.
+
+### Identification
+
+- **VFS path:** `data/cursor/game.ver`
+- **Size:** exactly **28 bytes**
+- **Format:** flat array of **7 x `u32`, little-endian** (no header, no magic, no record-count
+  prefix - the field count is fixed at 7)
+- **VFS note:** the archive carries **two index entries for this path** at consecutive offsets;
+  both describe the same 28 identical bytes. The second is a redundant shadow entry (a duplicate
+  TOC row, not a second distinct file). A parser may resolve either entry; both yield the same
+  payload. See `formats/pak.md` for VFS lookup behaviour.
+
+### Layout (7 x u32 LE, 28 bytes)
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| 0x00 | 4 | u32 | field0 | Unknown; possibly a format/version tag | UNVERIFIED (value present) |
+| 0x04 | 4 | u32 | field1 | Unknown | UNVERIFIED |
+| 0x08 | 4 | u32 | field2 | Unknown | UNVERIFIED |
+| 0x0C | 4 | u32 | field3 | Unknown; possibly a build number | UNVERIFIED |
+| 0x10 | 4 | u32 | field4 | Unknown | UNVERIFIED |
+| 0x14 | 4 | u32 | **version_source** (field5) | **The value consumed by the enter-game version token.** | CONFIRMED (role) |
+| 0x18 | 4 | u32 | field6 | Unknown | UNVERIFIED |
+
+### Version token derivation (CONFIRMED math; cross-referenced)
+
+The enter-game / login version token is computed from the single field at offset **0x14**:
+
+```
+version_token = 10 x version_source + 9      // version_source = u32 at offset 0x14
+```
+
+With the observed `version_source = 2114`, the token is `10 x 2114 + 9 = 21149`, matching the
+enter-game token documented in the protocol / front-end specs. Only `version_source` (offset 0x14)
+feeds this formula; the remaining six `u32` are not used by it.
+
+**Record count source:** fixed at 7 (file is always 28 bytes). **Record stride:** 4 bytes per field.
+
+---
+
 ## Known unknowns
 
 ### Resolved since last version (wave-7 and wave-8 unblocks)
@@ -1712,6 +2109,9 @@ relevance to the `.scr` / `.do` pipeline.
     and the identity of the three overlay badges and the 87×13 level/rank strip at +0x20/+0x24 (§3.5).
 57. **Stance `.do` `instanceKey` ↔ `skills.scr` skill id** — whether the join key is identity or a
     transform; needs cross-check against `skills.scr` +0x00 (§3.5, §2.8).
+59. **game.ver fields 0-4 and 6** - only `version_source` at offset 0x14 has a confirmed
+    role (the enter-game token). The other six `u32` (0x00, 0x04, 0x08, 0x0C, 0x10, 0x18)
+    have no traced consumer; 0x0C is a build-number candidate. See Section 7.
 58. **c2s 2/52 slot-index claim is CAPTURE-UNVERIFIED** — the protocol fact that the UseSkill packet
     sends the hotbar slot index (`u8`), not the instanceKey, is static-confirmed only and must be
     validated against a real capture before any wire code relies on it (§3.5).
@@ -1727,5 +2127,6 @@ relevance to the `.scr` / `.do` pipeline.
 - Skill catalogue relates to: `Docs/RE/structs/skill.md`
 - Skill icon source coordinates and stance `.do` file-to-class mapping: `Docs/RE/formats/ui_manifests.md` §2.7 (§3.5 here gives the full `.do` record layout)
 - UseSkill (c2s 2/52) opcode and the skill-use path: `Docs/RE/opcodes.md`, `Docs/RE/specs/skill_system.md`
+- `game.ver` version token feeds the enter-game flow: `Docs/RE/specs/frontend_scenes.md`
 - Glossary: `Docs/RE/names.yaml`
 - Provenance: `Docs/RE/journal.md`

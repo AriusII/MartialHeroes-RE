@@ -7,9 +7,14 @@ namespace MartialHeroes.Network.Abstractions.Lobby;
 /// <remarks>
 /// <para>
 /// The lobby channel-endpoint query decompresses the LZ4 payload and reads the first
-/// 30 (0x1E) bytes as a NUL-padded ASCII <c>"host port"</c> string. The transport
-/// implementation splits this on whitespace to produce the <see cref="Host"/> and
-/// <see cref="Port"/> fields exposed here.
+/// 30 (0x1E) bytes as a fixed ASCII endpoint token (not guaranteed NUL-terminated). The
+/// exact internal delimiter (e.g. <c>"host:port"</c>, <c>"host port"</c>, or fixed
+/// sub-fields) is <b>NEEDS-CAPTURE</b> — the legacy client consumed the token opaquely.
+/// The transport implementation parses it to produce the <see cref="Host"/> and
+/// <see cref="Port"/> fields exposed here; a whitespace-split is a reasonable choice pending
+/// a capture that confirms the delimiter.
+/// <br/>
+/// spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE B [CODE-CONFIRMED: 30 bytes; delimiter = NEEDS-CAPTURE].
 /// </para>
 /// <para>
 /// This endpoint identifies the <b>game server</b>, not the lobby. After obtaining this record

@@ -1,7 +1,12 @@
 ---
-status: hypothesis
+status: routing-confirmed
+verification: confirmed (routing/registration/sizes/offsets, control-flow proven); capture/debugger-pending (packet field VALUE semantics)
+ida_reverified: 2026-06-16
+ida_anchor: 263bd994
+evidence: [static-ida]
 sample_verified: false
 struct_cross_ref_verified: true
+conflicts: resolved against the IDB — 3/4<->3/14 swap fixed, 3/7 re-pointed at SmsgCharManageResult, 3/100 "case 32" removed, 4/143+4/144 added (shared handler), major-0 (0,0) handshake branch added, keepalive 2/112 distinguished from the (2,10000) handshake-arm
 ---
 
 # Inbound Handler Behaviour Catalogue — Clean-Room Specification
@@ -9,6 +14,18 @@ struct_cross_ref_verified: true
 > Neutral, rewritten behavioural specification of the legacy client's *receive-dispatch*
 > handlers. One short section per opcode tuple. No legacy symbols, no binary addresses,
 > no pseudo-code. Promoted from dirty-room recon notes and re-expressed from scratch.
+>
+> **Verification banner (Campaign 10, anchor `263bd994`, evidence `[static-ida]`).**
+> The IDB was re-annotated since this doc was first authored, so the inbound dispatcher
+> and BOTH 154-slot install tables were re-read at **control-flow** level. As a result the
+> **ROUTING layer is now `[confirmed]`**: which handler each `(major, minor)` tuple
+> dispatches to, the registration mechanism (both tables pre-filled with one inert no-op
+> handler, real handlers overwriting installed minors), the per-handler bulk-read **sizes**,
+> and the field **offsets** within each read are control-flow facts. **Packet field VALUE
+> semantics — what a given byte *means* on the wire — remain `[capture/debugger-pending]`**:
+> there was no live capture in any pass, so read order is visible but the on-wire meaning of
+> each byte is not capture-confirmed. Do not over-claim: a `[confirmed]` size/offset is not a
+> `[confirmed]` interpretation of the bytes it spans.
 >
 > **Scope.** This document complements `opcodes.md` (the routing catalogue) and the
 > `packets/*.yaml` field specs. It describes **handler behaviour** — what state each
@@ -23,13 +40,26 @@ struct_cross_ref_verified: true
 > opcode in both table-driven families plus the inline switches), and §17 records the
 > field-layout tightenings the second recon pass derived for the already-specced wire
 > packets. Together these document every installed handler slot.
+>
+> // spec: corrections in §1, §2, §7, §12 and §16 reconciled against the Campaign-10 IDB
+> re-verification (`Net_DispatchInboundByMajorMinor`, the major-4/major-5 install routines,
+> and the NetHandler ctor keepalive/handshake build).
 
 ## Status header — confidence and verification
 
-- **No live capture was available** for either analysis pass. Every byte offset below is a
-  static read-order inference. Any "seen in N captures" remark that survives from a source
-  recon is a pre-existing third-party annotation, reproduced only as a weak hint and **not**
-  independently verified here. Treat all offsets/sizes as hypotheses.
+- **Routing & registration are `[confirmed]`** (control-flow, anchor `263bd994`). Which
+  handler each `(major, minor)` tuple dispatches to, the fact that an unset table slot is an
+  inert no-op (not a null/crash), the 154-slot per-family bound, and the two table base
+  offsets are control-flow facts re-read directly from the dispatcher and the install
+  routines. The per-handler **bulk-read sizes** and the **byte offsets within each read** are
+  likewise control-flow-confirmed (the read discipline is unambiguous).
+- **Packet field VALUE semantics are `[capture/debugger-pending]`.** No live capture was
+  available in any pass. A confirmed size/offset says *where* a byte sits in the read; it does
+  **not** confirm *what* the byte means on the wire. Every "this byte == 1 means success",
+  "this code selects string id N", and "this f32 is world X" interpretation below is a static
+  read-order inference until a capture (or the IDA debugger on a real event) pins it. Any
+  "seen in N captures" remark that survives from a source recon is a pre-existing third-party
+  annotation, reproduced only as a weak hint and **not** independently verified here.
 - **`sample_verified: false`** — no packet sample (`.tsv`/`.pcapng`) was decoded. The
   `_dirty/samples/` tree contains extracted **asset** files only (meshes, scripts,
   textures), never a network capture.
@@ -37,16 +67,21 @@ struct_cross_ref_verified: true
   relies on (world coordinates, level, combat flag, equipment-slot stride/bounds, bag-slot
   count) were cross-checked against the committed `structs/spawn_descriptor.md` and agree;
   those specific cross-refs are tagged `CONFIRMED` rather than `UNVERIFIED`.
-- **Routing is the strong part.** Which handler a tuple dispatches to (and the fact that an
-  unset table slot is an inert "ignore", not a crash) is a structural fact; it agrees with
-  the `confirmed` routing already in `opcodes.md`.
+- **Routing matches `opcodes.md`.** Every routing claim below agrees with the `confirmed`
+  routing in `opcodes.md`; the four corrections this pass applied (the 3/4↔3/14 swap, 3/7,
+  the 3/100 code set, and the 4/143+4/144 pair) are reconciled against it — see §7.
 - **Behaviour (state mutated, UI driven) is described at "LIKELY" confidence** unless noted.
-  **Exact field offsets are "UNVERIFIED"** until a capture or a cross-checked struct pins them.
-- **Confidence tags used below:** `LIKELY` (one consistent read site, plausible) ·
-  `UNVERIFIED` (inferred, boundary not pinned — needs a capture) ·
+  **Exact field VALUE meanings are "UNVERIFIED" / `[capture/debugger-pending]`** until a
+  capture or a cross-checked struct pins them, even where the offset they sit at is confirmed.
+- **Confidence tags used below:** `LIKELY` (one consistent read site, plausible behaviour) ·
+  `UNVERIFIED` / `[capture/debugger-pending]` (the on-wire *meaning* is inferred — needs a
+  capture, even when the offset is confirmed) ·
   `CROSS-REF` (rests on a fact already CONFIRMED in another committed spec, cited inline) ·
   `STRUCTURE-HIGH` (the handler's read order / record stride / size are unambiguous from
-  the read discipline, even though no capture confirms the bytes on the wire).
+  the read discipline — now equivalent to `[confirmed]` for the size/offset layer, though no
+  capture confirms the *values* on the wire) ·
+  `[confirmed]` (routing/registration: control-flow proven against the IDB at anchor
+  `263bd994`).
 - **Korean text fields are CP949-encoded** (EUC-KR) NUL-terminated byte buffers on the wire,
   never managed strings. Decode CP949 → UTF-16 only at the presentation boundary.
 - The consolidated open-questions list is in the final **§18 Unverified / open questions**.
@@ -55,22 +90,43 @@ struct_cross_ref_verified: true
 
 ## 1. Dispatch model (context for every handler below)
 
-All framed game packets reach a single inbound dispatcher. After it expands any compressed
-frame (see `opcodes.md`, "Wire frame header"), it routes on the `major` family:
+All framed game packets reach a single inbound dispatcher. The dispatcher reads `major` from
+the 16-bit field at frame `+4` and `minor` from the 16-bit field at frame `+6` (8-byte frame
+header `[u32 size @+0][u16 major @+4][u16 minor @+6]`; see `opcodes.md`, "Wire frame header"),
+after it expands any compressed frame. Inbound payloads are **LZ4-decompress-only** on the
+client receive path — there is no inverse byte cipher on receive (the cipher routine's single
+cross-reference is the outbound send gate, so it is structurally unreachable here; see
+`Docs/RE/specs/crypto.md` / `opcodes.md`). The dispatcher then routes on the `major` family.
+Routing below is `[confirmed]` (control-flow):
 
-- **major 0 / KeyExchange** and **major 1 / ServerCommand** — handled by small inline
-  switches; only a fixed set of minors is wired. major 1 dispatches only inbound minors
-  **16, 17, 19, 20**; everything else in family 1 is client-emitted.
-- **major 2 / GameAction** — client-emitted only; there is intentionally no inbound handler.
-- **major 3 / CharacterMgmt** — an inline switch on `minor`; only the enumerated set
-  **1, 4, 5, 6, 7, 8, 13, 14, 23, 100, 50000** is wired. The set is fully enumerated by the
-  dispatcher (no hidden minors).
+- **major 0 / KeyExchange handshake** — a **separate dispatcher branch**, *not* part of the
+  major switch. Only the tuple **(0, 0)** is wired: it runs the key-exchange/handshake
+  completion (parses the server key blob, sends the **1/4** reply, and marks the net client
+  as keyed). It is a hardwired `(0,0)` branch, **not** an inline switch. (Crypto/handshake
+  semantics are owned by `crypto.md`; this catalogue records only that (0,0) is a real inbound
+  branch.)
+- **major 1 / ServerCommand** — a small inline switch; only inbound minors
+  **16, 17, 19, 20** are wired (no default case), everything else in family 1 is
+  client-emitted.
+- **major 2 / GameAction** — client-emitted only; there is intentionally **no `case 2`** in
+  the dispatcher (no inbound handler).
+- **major 3 / CharacterMgmt** — an inline switch on `minor`, decoded by a chain of
+  subtractions; only the enumerated set **1, 4, 5, 6, 7, 8, 13, 14, 23, 100, 50000** is wired.
+  The set is fully enumerated (no hidden minors). **The minors 4, 7 and 14 do NOT map the way
+  the first recon pass labelled them — see §2 and §7: minor 4 = `SmsgSceneEntityUpdate`,
+  minor 7 = `SmsgCharManageResult`, minor 14 = `SmsgCharSpawnResponse`.**
 - **major 4 / Response** and **major 5 / Push** — each table-driven by `minor`. Each table
-  has a fixed bound of **154 slots**; a minor below the bound that was never installed
-  resolves to an inert no-op handler (a slot pre-filled to do nothing), and a minor **at or
-  above 154 is out of range and is not dispatched at all**. This caps the legal minor space
-  per family at 0..153. The install-routine parse counted **98 Response** and **65 Push**
-  slots installed; the rest are inert no-ops.
+  has a fixed bound of **154 slots** (`minor < 154` dispatches; `minor >= 154` is out of range
+  and not dispatched). Both tables are pre-filled in the NetHandler constructor with a single
+  inert **no-op handler** (a concrete shared function that does nothing); the install routines
+  then overwrite that default at each installed minor. So an unset minor below the bound
+  resolves to the no-op, never a null/crash. The install-routine parse counted **98 Response**
+  (96 distinct table slots — 4/143 and 4/144 share one handler — plus the 2 specials below)
+  and **65 Push** slots installed; the rest stay inert no-ops. The Response slot index is
+  `NetHandler-base + 1246 + minor` (dwords) and the Push slot index is `+ 1400 + minor`; the
+  two tables are contiguous (Response ends just before Push begins). These base figures are
+  control-flow facts useful to the struct cartographer mapping the NetHandler layout; they are
+  internal object offsets, **not** wire offsets.
 - **major 4 specials:** two minors are routed *outside* the table — one shows a popup by
   code (4/500), one discards a text payload (4/50000).
 
@@ -104,6 +160,15 @@ matching `opcodes.md` and `packets/*.yaml`.
 
 ## 2. major 3 — CharacterMgmt (inline switch, S2C)
 
+> **Routing `[confirmed]` (control-flow).** The dispatcher's subtraction chain resolves the
+> minors unambiguously: for `minor <= 8` it tests `== 8` (ShopPage) else
+> `minor-1`(→1), `-3`(→4), `-1`(→5), `-1`(→6), `== 1`(→7); for `minor > 8` it tests
+> `minor-13`(→13), `-1`(→14), `-9`(→23), `-77`(→100), `== 49900`(→50000). So **minor 4 =
+> `SmsgSceneEntityUpdate`, minor 7 = `SmsgCharManageResult`, minor 14 =
+> `SmsgCharSpawnResponse`** — definitively. The first recon pass had 3/4 and 3/14 *swapped*
+> and put `SmsgCharManageResult` at 3/7; those labels are corrected here and in §7/§12/§16.
+> Body field VALUE semantics for every major-3 handler remain `[capture/debugger-pending]`.
+
 ### 3/8 — `SmsgShopPageUpdate`
 - **Min fixed payload: 4 bytes.** Body is a single `u32` shop-page index.
 - **Behaviour (LIKELY):** stores the new current shop page in the shop/billing state. If the
@@ -120,23 +185,35 @@ matching `opcodes.md` and `packets/*.yaml`.
   name** (roster stride ~220 bytes, up to 5 entries) and the two bytes are written there. This
   is a character status-flag update for the roster panel.
 
-### 3/14 — `SmsgSceneEntityUpdate`
+### 3/4 — `SmsgSceneEntityUpdate`
+- **Routing `[confirmed]`: this is minor 4** (corrected — the first recon pass mislabelled it
+  "3/14"; the dispatcher's subtraction chain proves minor 4).
 - **Variable length.** 3-byte header: mode `u8` at `+0`, param `u8` at `+1`, slot-mask `u8`
   at `+2`.
-- **Behaviour (LIKELY):**
+- **Behaviour (LIKELY; field VALUE meanings `[capture/debugger-pending]`):**
   - **mode == 1:** for each set bit in the slot mask (up to 8 slots), read one **981-byte
     character-slot record** and write it into the indexed roster slot. Each record is
     **880-byte SpawnDescriptor** (`CROSS-REF` `structs/spawn_descriptor.md`) + a 96-byte
     stats block + a 1-byte flag + a 4-byte timing dword `= 981`. A header-only frame
-    (mask = 0, total 3 bytes) is legal. Roster actor stride ~220 bytes; stats stride ~24 bytes.
+    (mask = 0, total 3 bytes) is legal. Roster slot array = 5 × 880-byte char-select slots
+    (the NetHandler allocates exactly 5; stats stride ~24 bytes).
     A two-slot frame is therefore `3 + 2×981 = 1965` bytes (carried hint).
   - **mode != 1:** a scene-clear that forwards `param` to a clear routine.
-- **Naming caveat (`UNVERIFIED`):** the source recon carried a stale comment labelling this
-  handler "3/4". Routing analysis places it at **minor 14**, which agrees with
-  `opcodes.md` (3/14 `SmsgSceneEntityUpdate`). Treat the "3/4" label as a typo, **not** a
-  routing fact, until a capture of a scene-update frame settles it. **This 981-byte record
-  shape mirrors the per-slot record in `packets/3-1_character_list.yaml` (3/1)** — reconcile
-  the two specs before committing either layout.
+- **Cross-ref:** the **981-byte record shape is identical to the per-slot record the 3/1
+  `SmsgCharacterList` handler reads** (`3B header + N × (880 descriptor + 96 stats + 1 flag +
+  4 timing)`) — reconcile against `packets/3-1_character_list.yaml` before committing either
+  layout.
+
+### 3/14 — `SmsgCharSpawnResponse`
+- **Routing `[confirmed]`: this is minor 14** (corrected — the first recon pass put a
+  "`SmsgCharSpawnResult`" at 3/7; that handler is actually here at minor 14, and the 8-byte
+  handler the first pass called "3/4 `SmsgCharManageResult`" is actually at minor 7 — see 3/7
+  in §12).
+- **Fixed read: 16 bytes.** Body byte `+0` is a presence/result gate.
+- **Behaviour (LIKELY; field VALUE meanings `[capture/debugger-pending]`):** the gate byte
+  selects between re-entering the enter-game builder (carrying the body fields forward into the
+  select→world transition) and arming a fallback timeout. Pairs with the 3/5 `SmsgEnterGameAck`
+  flow (§12) on the select-screen → in-world path.
 
 ---
 
@@ -422,18 +499,48 @@ truly empty). **Each individual `NN` was sampled, not exhaustively decoded** (`U
 
 ---
 
-## 7. Channel disambiguation notes (do not merge these)
+## 7. Channel disambiguation & routing corrections (do not merge / do not regress these)
 
+- **Major-3 minor swap `[confirmed]` (the load-bearing correction this pass applied).** The
+  first recon pass had three major-3 minors mislabelled; the dispatcher's subtraction chain
+  proves the correct mapping, which also matches `opcodes.md` exactly:
+  - **3/4 = `SmsgSceneEntityUpdate`** (the 3-byte-header + N×981 char-slot handler) — NOT 3/14.
+  - **3/7 = `SmsgCharManageResult`** (the 8-byte subtype/cooldown handler) — NOT 3/4.
+  - **3/14 = `SmsgCharSpawnResponse`** (the 16-byte spawn-confirm handler) — NOT 3/7.
+
+    Any doc/YAML that puts `SmsgSceneEntityUpdate` at 3/14, or `SmsgCharManageResult` at 3/4,
+    is wrong (this includes the misnamed `packets/3-4_char_manage_result.yaml` — 3/4 is
+    `SmsgSceneEntityUpdate`; the char-manage-result packet is 3/7). See §2 and §12.
+- **3/100 code set `[confirmed]` (control-flow): there is NO `case 32`.** The 3/100
+  `SmsgCharActionResult` switch handles codes `{0, 1-5, 7, 9-11, 16, 22, 23, 200-211,
+  220-227, +202/203/232}` (the 202/203/232 trio additionally drives `GameState = LOADING`).
+  The first recon pass's "32" is spurious and the set it listed was a too-narrow subset — see
+  §12.
+- **4/143 + 4/144 share one handler — `SmsgTrackedItemPanelPair`.** Both Response minors 143
+  and 144 are installed to the same handler (this is why the distinct-slot count is 96 while
+  98 handler entry points are counted). The first recon pass listed neither minor; they are
+  added here (§13 Group F) and routing is `[confirmed]`, behaviour
+  `[capture/debugger-pending]`.
 - **Normal gold vs billing/cash.** 4/108 `PlayerGoldBalanceUpdate` (normal gold HUD) and 4/82
   `BillingBalanceUpdate` (billing/cash) are separate channels with separate handlers. Keep
   both names; do not merge.
 - **4/13 `LocalPlayerStateSync`.** A stale "Push/5-100" suffix in old notes is a mislabel; the
-  handler is wired as Response 4/13. `opcodes.md` already carries this note — no further action.
-- **3/14 label.** See the 3/14 caveat in §2 — the "3/4" comment is a typo; routing is minor 14.
-- **Billing has four distinct inbound channels.** Keep them separate: 1/16 / 1/17 (subscription
-  off / on notices), 1/19 (expiry notice), 4/3 (billing-info block), 4/82 (billing/cash
-  balance), 4/83 (billing item-use), 5/34 (billing banner toggle). None of these is the normal
-  gold channel (4/108).
+  handler is `[confirmed]` installed at Response minor 13 (proven by the install table).
+  `opcodes.md` already carries this note — no further action.
+- **Keepalive (2/112) is distinct from the (2/10000) handshake-arm — `[confirmed]`.** These
+  are two different C2S frames on the **same** major 2 (both send-side, not in the receive
+  tables):
+  - **2/10000** is built **once** in the NetHandler constructor (a compressed frame armed at
+    ~20000 ms) — the initial handshake-arm.
+  - **2/112** is the **runtime keepalive**: a 1-byte toggle frame gated by a master-enable
+    flag (the flag is set on world-enter and cleared on leave; arg 1 = enable, arg 2 =
+    disable, otherwise send only if enabled). `opcodes.md` carries a 2/112 row alongside the
+    (2,10000) entry. Which is sent on-wire and at what cadence is `[capture/debugger-pending]`.
+- **Major-0 (0,0) handshake is a real inbound branch.** It is not part of any switch — see §1.
+- **Billing has multiple distinct inbound channels.** Keep them separate: 1/16 / 1/17
+  (subscription off / on notices), 1/19 (expiry notice), 4/3 (billing-info block), 4/82
+  (billing/cash balance), 4/83 (billing item-use), 5/34 (billing banner toggle). None of these
+  is the normal gold channel (4/108).
 
 ---
 
@@ -446,9 +553,10 @@ in §16.
 
 | Opcode | Name | Dir | Min fixed payload | Key fields |
 |--------|------|-----|-------------------|-----------|
+| 3/4   | `SmsgSceneEntityUpdate`        | S2C | var | 3B header + N × 981B char-slot record (corrected: minor 4, not 14) |
 | 3/8   | `SmsgShopPageUpdate`            | S2C | 4   | single `u32` page index |
 | 3/13  | `SmsgCharStatusUpdate`         | S2C | 28  | name@8 + status bytes@25/26 |
-| 3/14  | `SmsgSceneEntityUpdate`        | S2C | var | 3B header + N × 981B char-slot record |
+| 3/14  | `SmsgCharSpawnResponse`        | S2C | 16  | gate byte@0 → re-enter enter-game builder (corrected: minor 14, not 3/7) |
 | 4/12  | `SmsgEquipItemResult`          | S2C | 16  | result@8, slot-type@12 |
 | 4/14  | `SmsgGroundItemSlotAck`        | S2C | 20  | 12B item record + result@12 |
 | 4/23  | `SmsgUserTradeRequestResult`   | S2C | 20  | result@8, reason@9 |
@@ -484,9 +592,11 @@ in §16.
   "seen in N captures" remarks are pre-existing third-party annotations, not re-verified here.
 - **Actor-key field order (sort-first vs id-first)** differs per handler (§5) and is not
   cross-checked against wire bytes. Confirm before hard-coding which dword is `sort`.
-- **3/14 vs "3/4" label.** Routing is minor 14 (agrees with `opcodes.md`); the "3/4" comment
-  is treated as a typo. A captured scene-update frame would settle it. The 981-byte
-  char-slot record must be reconciled with `packets/3-1_character_list.yaml`.
+- **Major-3 minor labels — RESOLVED `[confirmed]`.** The first pass's "3/14 vs 3/4" caveat is
+  settled by the dispatcher subtraction chain (§2/§7): minor 4 = `SmsgSceneEntityUpdate`,
+  minor 7 = `SmsgCharManageResult`, minor 14 = `SmsgCharSpawnResponse`. No longer an open
+  question. The 3/4 (ex-"3/14") 981-byte char-slot record must still be reconciled with
+  `packets/3-1_character_list.yaml` (record shape, not routing).
 - **Exact frame sizes for 4/80, 4/81, 4/99.** The listed reads (80, header, 16) are
   **minimums**; whether the server sends exactly those bytes or a larger frame the read
   truncates is unverified.
@@ -522,12 +632,19 @@ in §16.
 ## 10. Fully-read structural handlers (highest-value gap fills)
 
 ### 4/1 — `SmsgGameStateTick` (the master state-refresh packet)
-- **Fixed read: 9100 bytes (0x238C)** — the **largest Response payload** in the table.
-- **Behaviour (STRUCTURE-HIGH on size; interior LOW):** a periodic full world/game-state
-  snapshot. The handler touches almost every subsystem — game state, billing state,
-  rank/progress, the frame-tick scheduler, the net client, the actor factory, the texture
-  manager — and **recomputes the skill-cooldown table from the skill catalog** as a side
-  effect (the load-bearing observable). Gate / case bytes seen include
+- **Fixed read: 9100 bytes (0x238C) — `[confirmed]` size** — the **largest Response payload**
+  in the table.
+- **Branch on body byte `+0` (`[confirmed]`, 3-way):** byte0 `== 0` → **form A**; byte0 `== 1`
+  → **form B** (the world-entry path); any other value → **form C**. The world-entry form B is
+  the load-bearing one: it bulk-copies two large sub-blocks (`0xFCC` and `0xC10` bytes) into
+  the world/actor tables, builds the local player, selects the area BGM, and sets the
+  enter-world-ready state. The byte-0 selector position is confirmed; the *meaning* of the
+  two copied sub-blocks is `[capture/debugger-pending]`.
+- **Behaviour (size `[confirmed]`; interior VALUE semantics `[capture/debugger-pending]`):** a
+  periodic full world/game-state snapshot. The handler touches almost every subsystem — game
+  state, billing state, rank/progress, the frame-tick scheduler, the net client, the actor
+  factory, the texture manager — and **recomputes the skill-cooldown table from the skill
+  catalog** as a side effect (a load-bearing observable). Gate / case bytes seen include
   `0, 1, 3, 4, 6, 12, 16, 20, 25, 240, 255`, plus the recurring `300 / 301` success/fail pair.
   The 9100-byte block is a packed multi-section record (stats + cooldowns + flags + several
   sub-tables); its internal section layout is **not decomposed** — this is the single
@@ -592,7 +709,9 @@ in §16.
 
 ## 11. major 1 — ServerCommand (inline switch, S2C) — gap fills
 
-These run against the billing and mail subsystems. Behaviour `LIKELY`; offsets `UNVERIFIED`.
+These run against the billing and mail subsystems. **Routing `[confirmed]`** (only minors 16,
+17, 19, 20 dispatch; no default case). Behaviour `LIKELY`; field VALUE meanings
+`[capture/debugger-pending]`.
 
 ### 1/16 — `SrvBillingDeactivated`
 - **Variable (text-formatting handler; no single fixed read).** Reads a small
@@ -618,35 +737,54 @@ These run against the billing and mail subsystems. Behaviour `LIKELY`; offsets `
 ## 12. major 3 — CharacterMgmt (select/lobby screen, S2C) — gap fills
 
 These run on the character-select / lobby screen (a different state object than the in-world
-singletons), so their precise field offsets were not read in full; the **sizes are solid**.
-String id `5000` recurs as a generic select-screen message id.
+singletons), so their precise field VALUE meanings are `[capture/debugger-pending]`; the
+**sizes and routing are `[confirmed]`**. String id `5000` recurs as a generic select-screen
+message id. **The minor labels here are corrected from the first recon pass — see the §7 swap
+note.** (3/4 `SmsgSceneEntityUpdate` is specced in §2, not here.)
 
-### 3/4 — `SmsgCharManageResult`
-- **Fixed read: 8 bytes.** A result/op byte distinguishes outcomes (`1` vs `2`); the
-  create/delete/manage path formats a timer/cooldown and shows a select-screen message
-  (id 5000 family). Updates the select-screen slot state. Size HIGH; semantics MED.
+### 3/5 — `SmsgEnterGameAck`
+- **Fixed read: 44 bytes `[confirmed]`** (a 40-byte block + a 4-byte trailing count). Sets
+  `GameState = LOADING`. Body landmarks (offsets `[confirmed]`; meanings
+  `[capture/debugger-pending]`): a BillingFlag region near `+0x1C` and a character-count word
+  near `+0x28`. Begins the select-screen → world load handshake; pairs with 3/14
+  `SmsgCharSpawnResponse`.
 
 ### 3/6 — `SmsgRenameCharResult`
 - **Fixed read: 19 bytes.** A 12-byte region + name/result tail (a length/slot bound compared
   against `12`). Drives a rename sub-handler and a select-screen message; updates the slot name.
-  Size HIGH; field meaning MED.
+  Size `[confirmed]`; field meaning `[capture/debugger-pending]`.
 
-### 3/7 — `SmsgCharSpawnResult`
-- **Fixed read: 16 bytes.** A presence/result byte (compared against `0`). Forwards to a
-  select→world spawn sub-handler; transitions from the select screen toward in-world. Pairs
-  with the 3/5 EnterGameAck flow. Size HIGH; semantics MED.
+### 3/7 — `SmsgCharManageResult`
+- **Routing `[confirmed]`: this is minor 7** (corrected — the first recon pass put
+  `SmsgCharManageResult` at 3/4; the 8-byte handler is at minor 7).
+- **Fixed read: 8 bytes `[confirmed]`.** A subtype byte at `+2` distinguishes outcomes
+  (`0 / 1 / 2`); the delete-confirm subtype decrements the account's character count and
+  formats a same-day cooldown, then shows a select-screen message (id 5000 family) and updates
+  the slot state. Size `[confirmed]`; field VALUE meanings `[capture/debugger-pending]`.
+  Carries a `Result` byte at `+0`, the `Subtype` byte at `+2`, and a `ReadyTime` region at
+  `+4` (offsets `[confirmed]`; semantics pending).
 
-### 3/23 — `SmsgCharCreateResult`
-- **Fixed read: 12 bytes.** On success adds the new slot (spinning up an event-outlet object)
-  and shows a created message (id 2201 specific, id 5000 generic); failure shows a reason.
-  Size HIGH; semantics MED.
+### 3/23 — `SmsgCharStatusBytesByName`
+- **Routing `[confirmed]`: this is minor 23** (the first recon pass left it as a "generic wired
+  slot" / `SmsgCharCreateResult`; it is actually a status-bytes-by-name update closely
+  paralleling 3/13).
+- **Fixed read: 28 bytes (0x1C) `[confirmed]`.** If a global gate flag is set, two trailing
+  status bytes are written to a global pair; otherwise the handler finds the matching roster
+  slot **by name** (byte-wise CP949 name comparison, roster stride 880 bytes, ≤ 5 slots) and
+  writes the two status bytes
+  there. Size/structure `[confirmed]`; the exact status-byte positions and their meaning are
+  `[capture/debugger-pending]`. (Name proposal flagged for the names.yaml curator — not
+  applied here.)
 
 ### 3/100 — `SmsgCharActionResult`
-- **Fixed read: 4 bytes** = a single action/result `u32` code. A large switch maps codes
-  (seen: `4, 5, 9, 11, 16, 22, 23, 32, 201, 203, 232`) to select-screen / generic action
-  outcomes; shows messages (id ranges near 5000 / 10000 / 10001) and can refresh game state /
-  textures / the main handler. A catch-all lobby action ack; no actor key, no name field.
-  Size HIGH; code→message mapping MED.
+- **Fixed read: 4 bytes `[confirmed]`** = a single action/result `u32` code. A large switch
+  maps the code to select-screen / generic action outcomes; shows messages (id ranges near
+  5000 / 10000 / 10001) and can refresh game state / textures / the main handler. A catch-all
+  lobby action ack; no actor key, no name field. **Code set `[confirmed]` (control-flow):**
+  `{0, 1-5, 7, 9-11, 16, 22, 23, 200-211, 220-227, +202/203/232}`. **There is NO `case 32`** —
+  the first recon pass's "32" was spurious and its set was a too-narrow subset. The `202 /
+  203 / 232` codes additionally drive `GameState = LOADING`. The code→message mapping
+  (which code shows which string) is `[capture/debugger-pending]`.
 
 ### 3/50000 — `SmsgGmChatMessage`
 - **Variable: a channel/kind `u8`, then a length-prefixed text body.** Posts a GM / system chat
@@ -755,6 +893,7 @@ social/party/rank panel from the block; show a result string on the failure bran
 | 4/120| `SmsgActorTableBatchResult` | var | batch actor-table result → main UI. |
 | 4/132| `SmsgGMNoticeError`         | 12  | gate 16; GM notice/error → main UI. |
 | 4/134| `SmsgStatChangeNotify`      | var (12 hdr) | gate 7; stat-change notify. |
+| 4/143 + 4/144 | `SmsgTrackedItemPanelPair` | var | **both minors share ONE handler** (`[confirmed]` — added this pass; the first recon pass listed neither). A tracked-item / panel-pair update. This is why the Response table holds 96 distinct slots but 98 handler entry points. Behaviour `[capture/debugger-pending]`. |
 | 4/146| `SmsgShowMessage51027`      | var | shows message string id 51027 via main UI. |
 | 4/150| `SmsgSkillPointUpdate`      | var | gate 1; skill-point update → main UI. |
 | 4/153| `SmsgItemPanelSlotRefresh`  | var | code 255 sentinel; refreshes an item-panel slot. |
@@ -898,10 +1037,12 @@ capture-unverified.**
 | 1/17 | `SrvBillingActivated`       | S2C | var (text) |
 | 1/19 | `SrvBillingExpiryNotice`    | S2C | 20 |
 | 1/20 | `SrvLetterReceived`         | S2C | 76 + lp-string |
-| 3/4  | `SmsgCharManageResult`      | S2C | 8 |
+| 3/4  | `SmsgSceneEntityUpdate`     | S2C | var (3B hdr + N×981B) — corrected (minor 4, not 14) |
+| 3/5  | `SmsgEnterGameAck`          | S2C | 44 (40 + 4) — sets GameState=LOADING |
 | 3/6  | `SmsgRenameCharResult`      | S2C | 19 |
-| 3/7  | `SmsgCharSpawnResult`       | S2C | 16 |
-| 3/23 | `SmsgCharCreateResult`      | S2C | 12 |
+| 3/7  | `SmsgCharManageResult`      | S2C | 8 — corrected (minor 7, not 3/4) |
+| 3/14 | `SmsgCharSpawnResponse`     | S2C | 16 — corrected (minor 14, not 3/7) |
+| 3/23 | `SmsgCharStatusBytesByName` | S2C | 28 — corrected (status-bytes-by-name, not CharCreateResult) |
 | 3/100| `SmsgCharActionResult`      | S2C | 4 |
 | 3/50000 | `SmsgGmChatMessage`      | S2C | var (u8 + lp-string) |
 | 4/1  | `SmsgGameStateTick`         | S2C | 9100 |
@@ -980,6 +1121,8 @@ capture-unverified.**
 | 4/138| `SmsgNoticeError`            | S2C | 12 |
 | 4/140| `SmsgColoredSystemText`      | S2C | 112 |
 | 4/142| `SmsgResponseSlot142`        | S2C | 28 |
+| 4/143| `SmsgTrackedItemPanelPair`   | S2C | var (shares one handler with 4/144) |
+| 4/144| `SmsgTrackedItemPanelPair`   | S2C | var (shares one handler with 4/143) |
 | 4/146| `SmsgShowMessage51027`       | S2C | var |
 | 4/148| `SmsgPlaytimeRewardResult`   | S2C | var (28 hdr) |
 | 4/150| `SmsgSkillPointUpdate`       | S2C | var |
@@ -1220,8 +1363,16 @@ length-prefixed block (matching the C2S chat senders), NOT "rest of frame". CP94
   read sizes, not ids (e.g. 1092/1096 by 4/71, 1552/1556 by 4/56) and are excluded.
 - **4/56 / 4/71 are large structured panels, not thin slots** — flagged for reclassification in
   `opcodes.md` (§15).
-- **Major-3 select-screen handlers (3/4, 6, 7, 23, 100)** mutate lobby/select state (a different
-  object than the in-world singletons); their field offsets were not read in full (sizes solid).
+- **Major-3 minor labels — RESOLVED `[confirmed]`** (no longer open): minor 4 =
+  `SmsgSceneEntityUpdate`, minor 7 = `SmsgCharManageResult`, minor 14 =
+  `SmsgCharSpawnResponse` (the first recon pass's swap is corrected). The 3/100 code set has
+  **no `case 32`**. The select-screen handlers (3/5, 3/6, 3/7, 3/23, 3/100) mutate lobby/select
+  state (a different object than the in-world singletons); their **field VALUE meanings** were
+  not read in full and stay `[capture/debugger-pending]` (sizes/routing are confirmed).
+- **Keepalive 2/112 vs handshake-arm 2/10000 — distinguished `[confirmed]`** (both C2S
+  send-side, same major 2): 2/10000 is built once in the NetHandler ctor (handshake-arm);
+  2/112 is the runtime 1-byte keepalive toggle gated by the master-enable flag. Their on-wire
+  timing/cadence and the 2/10000 body content stay `[capture/debugger-pending]`.
 - **5/52 record internals** are contested (prior IDB map vs the live damage loop). The exact
   ActionCode byte position (+0x10) and the two reserved record words need a single-hit + AoE
   capture.

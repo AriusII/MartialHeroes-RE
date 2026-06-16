@@ -435,7 +435,8 @@ public static class SkinningMath
         AnimationTrack?[] trackByBoneIndex,
         float t,
         bool renormalizeAlpha,
-        BoneTransform[] outWorld)
+        BoneTransform[] outWorld,
+        bool animAsDelta = true)
     {
         int n = bones.Length;
 
@@ -449,8 +450,21 @@ public static class SkinningMath
             {
                 (Vec3 sT, Quat sR) = SampleTrack(track.Keyframes, t, renormalizeAlpha);
 
-                // Rotation is taken from the clip for any tracked bone.
-                localQ = sR;
+                // Rotation composition for a TRACKED bone.
+                //   animAsDelta == true  (spec §6.5/§6.6, the CORRECT legacy form): the world
+                //       rotation is parentWorld ⊗ bindLocal ⊗ animLocal — the sampled rotation is a
+                //       RIGHT (post) multiply on top of the bind-local rotation, so the committed
+                //       local pose is bindLocalQ ⊗ sR. DATA-PROVEN correct: composing the real idle
+                //       keyframes, this keeps the animated frame-0 deform close to the authored rest
+                //       pose (mean per-vertex displacement g1=0.47, g4=1.17, mob=0.02), as an idle's
+                //       first frame should.
+                //   animAsDelta == false (a literal "replacement" reading, localQ = sR): flings the
+                //       whole mesh ~half the model extent off the authored pose (g1=1.97, g4=2.81,
+                //       mob=3.55) — decisively wrong. Retained only as a toggle.
+                // spec: Docs/RE/specs/skinning.md §6.5 — "applied as a right (post) multiply on top
+                //       of the bind-local rotation in the world walk (§6.6)". §6.4's "replacement"
+                //       describes the per-pass mixer accumulator, not this world walk.
+                localQ = animAsDelta ? Mul(bones[i].Rotation, sR) : sR;
 
                 // Translation: only the root translates freely; child bones hold the bind-pose
                 // local translation (fixed bone length, rotate-only).
@@ -482,9 +496,17 @@ public static class SkinningMath
     /// Deforms one render vertex by the animated bone world transforms via linear blend skinning.
     ///
     /// spec: Docs/RE/specs/skinning.md §0 / §5.3 —
-    ///   pos    = Σ_i w_i · ( boneWorldQuat_i ⊗ (localPos_i)    + boneWorldTrans_i )
+    ///   pos    = Σ_i w_i · ( boneWorldQuat_i ⊗ (localPos_i · scale) + boneWorldTrans_i )
     ///   normal = Σ_i w_i · ( boneWorldQuat_i ⊗  localNormal_i )
-    /// (scale assumed 1.0 for characters — spec §5.3 / §9 open item).
+    ///
+    /// Per-mesh `scale` (spec §5.3/§9, RESOLVED CAMPAIGN 9): the legacy per-mesh scale is a real,
+    /// generally non-unit skin-object field set at attach as `meshScale · nodeScale`. It multiplies
+    /// the bone-local POSITION before rotation (never the normal, never the rotation). Here the
+    /// deform runs at unit scale because the live consumers (CharSelectScene3D / RealWorldRenderer /
+    /// CharPreview3D) carry the per-actor scale on the returned root Node3D's transform instead —
+    /// exactly the equivalent the spec sanctions for an engine that lets its node transform size the
+    /// rig ("the importer must still apply this mesh scale to the … node transform"). The cancellation
+    /// invariant (§0) is unaffected: a uniform scalar commutes through the convex weighted sum.
     /// </summary>
     public static (Vec3 Pos, Vec3 Nrm) DeformVertex(VertexInfluences vi, BoneTransform[] world)
     {

@@ -121,8 +121,8 @@ correctness *is* a north-star multiplier. Every brief applies **KIT §1** (model
    you fan out.
 4. **Fan out, respecting concurrency.** The tooling lane is clean-room — workers run **in parallel across
    disjoint files** up to the concurrency cap; no IDA, no shared-IDB constraint here. (If a future brief
-   ever reaches into the dirty room — it should not, from this orchestrator — it would obey READONLY
-   sub-waves of ~3 and never two writers on the IDB; that is not your lane.) Dispatch one wave per family
+   ever reaches into the dirty room — it should not, from this orchestrator — that lane now runs
+   **unbridled** (parallel READONLY reads + parallel IDB writes, no caps); that is not your lane.) Dispatch one wave per family
    or per disjoint set: e.g. all new agent files in one wave, all skill dirs in the next, hooks last
    (since hooks feed the `settings.json` wiring you reconcile).
 5. **Gate each wave with `tooling-auditor`.** After an authoring wave, run `tooling-auditor` as the gate

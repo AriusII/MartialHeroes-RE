@@ -13,6 +13,16 @@ namespace MartialHeroes.Assets.Vfs;
 //   2. Binary search the sorted TOC by lowercased name.
 //   3. Return a zero-copy slice of the memory-mapped data.vfs view.
 //   No decompression.  No decryption.  CONFIRMED by spec.
+//
+// PORT CHOICE — read mechanism (spec: Docs/RE/formats/pak.md §"ReadFile, not a memory-mapped view"):
+//   The ORIGINAL client delivers each entry's payload via malloc + a global-critical-section-guarded
+//   SetFilePointerEx + ReadFile into a fresh heap buffer (no memory-mapped view of the data blob; the
+//   binary's lone MapViewOfFile site is an unrelated anti-tamper module-image check). THIS port instead
+//   opens data/data.vfs as a single read-only memory-mapped view and returns each entry as a zero-copy
+//   ReadOnlyMemory slice of that view. Both deliver byte-for-byte identical payloads — the divergence is
+//   the transfer mechanism, chosen here because zero-copy mapping aligns with the project's zero-alloc
+//   data-path mandate and removes the per-read heap copy + shared-handle seek lock. This is a deliberate
+//   functional-equivalence port choice, NOT a claim that the original is memory-mapped.
 
 /// <summary>
 /// Mounts a pair of VFS archive files (<c>data.inf</c> + <c>data/data.vfs</c>),
@@ -30,10 +40,10 @@ namespace MartialHeroes.Assets.Vfs;
 /// <strong>Thread safety:</strong> concurrent calls to <see cref="GetFileContent"/> from
 /// multiple threads are safe.  The TOC index is read-only after construction.  The
 /// underlying OS memory mapping supports concurrent read-shared page access without locks.
-/// The only serialised resource is the single <see cref="MemoryMappedViewAccessor"/> used
-/// to derive the base pointer; pointer acquisition is performed once at construction and
-/// individual per-entry <see cref="MappedMemoryManager"/> instances are constructed without
-/// a lock.
+/// A single <see cref="MappedMemoryManager"/> wrapping the whole view is created once at open;
+/// each <see cref="GetFileContent"/> call merely returns a slice of its
+/// <see cref="MemoryManager{T}.Memory"/>, so no per-read allocation pins the view handle and the
+/// acquired pointer is released exactly once at <see cref="Dispose"/>.
 /// </para>
 /// <para>
 /// <strong>Lifetime:</strong> every <see cref="ReadOnlyMemory{byte}"/> returned by
@@ -47,11 +57,17 @@ namespace MartialHeroes.Assets.Vfs;
 /// non-zero in such an archive would be an error in the archive itself.
 /// </para>
 /// </remarks>
-public sealed class MappedVfsArchive : IDisposable
+public sealed unsafe class MappedVfsArchive : IDisposable
 {
     private readonly VfsDirectory _directory;
     private readonly MemoryMappedFile? _mappedFile; // null iff the .vfs is zero bytes
     private readonly MemoryMappedViewAccessor? _viewAccessor; // null iff the .vfs is zero bytes
+
+    // Base pointer into the whole memory-mapped view, acquired ONCE at open via AcquirePointer and
+    // released ONCE at Dispose. null iff the .vfs is zero bytes (no view). Each GetFileContent slices
+    // this single long-lived acquisition — no per-read AcquirePointer/pin (the historic leak).
+    private byte* _viewBasePointer;
+
     private volatile bool _disposed;
 
     // Private constructor — use the static factory methods.
@@ -63,6 +79,15 @@ public sealed class MappedVfsArchive : IDisposable
         _directory = directory;
         _mappedFile = mappedFile;
         _viewAccessor = viewAccessor;
+
+        if (viewAccessor is not null)
+        {
+            // Acquire the mapped-view pointer exactly once for the archive's whole lifetime. This pins
+            // the OS mapping (increments the SafeMemoryMappedViewHandle ref-count) until Dispose calls
+            // ReleasePointer, so the per-entry slices returned by GetFileContent stay valid and the
+            // handle's ref-count returns to its baseline on Dispose (enabling a clean unmap).
+            viewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _viewBasePointer);
+        }
     }
 
     /// <summary>
@@ -100,9 +125,10 @@ public sealed class MappedVfsArchive : IDisposable
             directory = VfsDirectory.Load(infStream);
         }
 
-        // --- Open data/data.vfs as a memory-mapped file ---
-        // spec: Docs/RE/formats/pak.md §"Opening sequence" step 5: "Open data/data.vfs
-        // and retain the handle."  CONFIRMED.
+        // --- Open data/data.vfs and retain it for the archive's lifetime ---
+        // spec: Docs/RE/formats/pak.md §"Opening sequence" step 5: "Open data/data.vfs and retain the
+        // handle." CONFIRMED. PORT CHOICE: the original retains an OS file handle for ReadFile-based
+        // reads; this port retains a memory-mapped view of the same blob (see the file header note).
         //
         // Edge-case: the OS refuses to memory-map a zero-byte file.  Real .vfs archives are
         // never empty, but synthetic test archives may be.  If the file is zero bytes, skip
@@ -148,50 +174,6 @@ public sealed class MappedVfsArchive : IDisposable
 
         // Both mmf and view are non-null here (the catch always rethrows).
         return new MappedVfsArchive(directory, mmf!, view!);
-    }
-
-    /// <summary>
-    /// Opens and mounts an archive whose <c>data.inf</c> content is provided as a stream
-    /// and whose <c>data/data.vfs</c> is a path on disk.
-    /// Intended for internal/test use where the inf bytes are already in memory.
-    /// </summary>
-    /// <param name="infStream">
-    /// Readable stream positioned at the start of the <c>data.inf</c> content.
-    /// Read sequentially; not disposed by this method.
-    /// </param>
-    /// <param name="vfsPath">
-    /// Path to the data blob file that will be memory-mapped.
-    /// </param>
-    internal static MappedVfsArchive OpenFromStreams(Stream infStream, string vfsPath)
-    {
-        var directory = VfsDirectory.Load(infStream);
-
-        var vfsInfo = new FileInfo(vfsPath);
-        if (!vfsInfo.Exists)
-            throw new FileNotFoundException($"VFS data file not found: \"{vfsPath}\".", vfsPath);
-
-        if (vfsInfo.Length == 0)
-            return new MappedVfsArchive(directory, mappedFile: null, viewAccessor: null);
-
-        var mmf = MemoryMappedFile.CreateFromFile(
-            vfsPath,
-            FileMode.Open,
-            mapName: null,
-            capacity: 0,
-            access: MemoryMappedFileAccess.Read);
-
-        MemoryMappedViewAccessor view;
-        try
-        {
-            view = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
-        }
-        catch
-        {
-            mmf.Dispose();
-            throw;
-        }
-
-        return new MappedVfsArchive(directory, mmf, view);
     }
 
     /// <summary>
@@ -271,18 +253,20 @@ public sealed class MappedVfsArchive : IDisposable
         if (length == 0)
             return ReadOnlyMemory<byte>.Empty;
 
-        // The view accessor is non-null whenever any entry has non-zero dataSize.
-        // If it is null here the .vfs file is zero bytes but the entry claims to have data —
-        // that is a corrupted/invalid archive; surface a clear error.
-        if (_viewAccessor is null)
+        // The base pointer is non-null whenever a view exists. If it is null here the .vfs file is
+        // zero bytes but the entry claims to have data — a corrupted/invalid archive; surface a clear
+        // error.
+        if (_viewBasePointer is null)
             throw new InvalidDataException(
                 $"VFS entry \"{e.Name}\" has dataSize={length} but data/data.vfs is empty.");
 
-        // Steps 3-4: return a zero-copy slice backed by the memory-mapped view.
-        // spec: Docs/RE/formats/pak.md §"Lookup algorithm" steps 3-4. CONFIRMED.
-        // No seek+read: we construct a MappedMemoryManager whose GetSpan() returns a pointer
-        // directly into the mapped region at the entry's dataOffset.
-        var manager = new MappedMemoryManager(_viewAccessor, e.DataOffset, length);
+        // Steps 3-4: return a zero-copy slice over the single, long-lived mapped-view pointer acquired
+        // at open. PORT CHOICE: where the original seeks+ReadFiles into a fresh heap buffer (see the
+        // file header note + pak.md §"ReadFile, not a memory-mapped view"), this port returns a
+        // ReadOnlyMemory addressing the mapped region directly at the entry's dataOffset.
+        // spec: Docs/RE/formats/pak.md §"Lookup algorithm" steps 3-4 (binary search → locate payload).
+        // The per-entry MappedMemoryManager does NOT pin the view handle; only the archive does, once.
+        var manager = new MappedMemoryManager(_viewBasePointer, e.DataOffset, length);
         return manager.Memory;
     }
 
@@ -302,7 +286,15 @@ public sealed class MappedVfsArchive : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        // Release the view accessor first, then the mapped file.
+        // Release the single pointer acquired at open (balances the one AcquirePointer in the ctor),
+        // then the view accessor, then the mapped file. Releasing the pointer first returns the view
+        // handle's ref-count to its baseline so the accessor can actually unmap.
+        if (_viewBasePointer is not null)
+        {
+            _viewAccessor!.SafeMemoryMappedViewHandle.ReleasePointer();
+            _viewBasePointer = null;
+        }
+
         _viewAccessor?.Dispose();
         _mappedFile?.Dispose();
     }

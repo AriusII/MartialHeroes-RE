@@ -81,13 +81,10 @@ public sealed partial class TargetFrame : Control
             EnsureFallback();
         }
 
-        // Hide until a real target arrives (or DEMO populates).
+        // Hidden until a real TargetChangedEvent arrives via Bind(hub).
+        // Synthetic placeholder removed — widget starts empty per the no-invented-data discipline.
+        // spec: layer-05 — no synthetic data without an explicit DEV_OFFLINE_FLOW guard.
         Visible = false;
-
-        // DEMO state: when no hub has been bound yet, show a placeholder so the widget is
-        // visible and testable in isolation (mirrors InventoryWindow / SkillWindow pattern).
-        if (_hub is null)
-            ApplyDemoState();
 
         GD.Print("[TargetFrame] Ready. Hidden until a TargetChangedEvent arrives.");
     }

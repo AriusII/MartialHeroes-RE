@@ -141,8 +141,7 @@ public static class ClientPathResolver
         if (raw is null) return true; // clé absente → défaut true
 
         // false / 0 → désactivé ; tout autre valeur → activé.
-        return !raw.Equals("false", StringComparison.OrdinalIgnoreCase)
-               && raw != "0";
+        return ParseBoolFlag(raw);
     }
 
     /// <summary>
@@ -231,9 +230,15 @@ public static class ClientPathResolver
         string? raw = ReadKeyFromCfg(cfgPath, "real_assets");
         if (raw is null) return null;
 
-        return !raw.Equals("false", StringComparison.OrdinalIgnoreCase)
-               && raw != "0";
+        return ParseBoolFlag(raw);
     }
+
+    /// <summary>
+    /// Parses a string cfg flag: "false" (OrdinalIgnoreCase) or "0" → false; anything else → true.
+    /// Used by LoadModelsEnabled and ReadRealAssetsFlagFromConfig.
+    /// </summary>
+    private static bool ParseBoolFlag(string raw)
+        => !raw.Equals("false", StringComparison.OrdinalIgnoreCase) && raw != "0";
 
     /// <summary>
     /// Traduit un chemin res:// en chemin absolu via ProjectSettings.GlobalizePath.
