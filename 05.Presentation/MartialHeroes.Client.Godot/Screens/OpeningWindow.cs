@@ -241,9 +241,12 @@ public sealed partial class OpeningWindow : Control
     // spec: Docs/RE/specs/frontend_scenes.md §1.0.0 (read) / §1.0.5 (write). CODE-CONFIRMED.
     // -------------------------------------------------------------------------
 
-    private const string SkipCfgPath = "user://options.cfg"; // Godot ConfigFile equivalent of the client options INI
-    private const string SkipCfgSection = "OPENNING"; // spec §1.0.0 section [OPENNING]. CODE-CONFIRMED.
-    private const string SkipCfgKey = "SKIP"; // spec §1.0.0 key SKIP. CODE-CONFIRMED.
+    // Shared constants — also consumed by BootFlow.IsOpeningSkipped() so the write and read
+    // agree on the same path/section/key.
+    // spec: Docs/RE/specs/frontend_scenes.md §1.0.0 (read gate) / §1.0.5 (write on skip).
+    internal const string SkipCfgPath = "user://options.cfg"; // Godot ConfigFile equivalent of the client options INI
+    internal const string SkipCfgSection = "OPENNING"; // spec §1.0.0 section [OPENNING]. CODE-CONFIRMED.
+    internal const string SkipCfgKey = "SKIP"; // spec §1.0.0 key SKIP. CODE-CONFIRMED.
 
     private static void PersistSkip()
     {

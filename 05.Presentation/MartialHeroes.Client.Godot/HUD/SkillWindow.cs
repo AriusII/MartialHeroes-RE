@@ -157,7 +157,9 @@ public sealed partial class SkillWindow : Control
     public override void _Input(InputEvent ev)
     {
         // Toggle on key K press (not held).
-        // spec: Docs/RE/specs/input_ui.md §4 — skill window key toggle.
+        // The key binding is a port-side convention (key K opens skills); the original
+        // client dispatches via a command-code dispatch table.
+        // spec: Docs/RE/specs/ui_system.md §15 — in-game HUD key command dispatch.
         if (ev is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.K)
         {
             Visible = !Visible;

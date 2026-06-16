@@ -64,7 +64,7 @@ public sealed partial class StateButton : Control
     /// Caption colour when the button is disabled.
     /// spec: Docs/RE/specs/ui_system.md §1.5 — "Disabled → grey 0xFF666666".
     /// </summary>
-    public static readonly Color CaptionDisabledColor = new(0x66, 0x66, 0x66, 0xFF);
+    public static readonly Color CaptionDisabledColor = Color.Color8(0x66, 0x66, 0x66, 0xFF); // spec: ui_system.md#1.5
 
     /// <summary>
     /// Caption colour when the button is hovered.

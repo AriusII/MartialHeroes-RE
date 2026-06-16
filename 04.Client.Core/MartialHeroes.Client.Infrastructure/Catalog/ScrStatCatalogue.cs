@@ -55,13 +55,16 @@ namespace MartialHeroes.Client.Infrastructure.Catalog;
 /// </remarks>
 public sealed class ScrStatCatalogue : IStatCatalogueSource
 {
-    // Scale multiplier applied to the float coefficient to produce the integer curve value.
-    // This is an implementation constant (not from the spec): the formula output is a small float
-    // (1.0 or 3.0), so we multiply by a round number to get plausible HP/MP curve values.
-    // The real HP base formula involves users.scr and server-supplied bases; this is a best-effort
-    // approximation from the client-side scaling data alone until the full formula is pinned.
-    // spec: Docs/RE/formats/config_tables.md §2.4 — full formula uses (10/A)×B from users.scr;
-    //       exact HP/MP base computation UNVERIFIED (mapping of float positions to stats UNVERIFIED).
+    // Scale multiplier applied to the (10/A)×B × posScale coefficient to produce the integer curve value.
+    // NO SPEC BASIS: this value is NOT recovered from the binary or any Docs/RE spec — it is a deliberate
+    // implementation-chosen scale. The spec's HP/MP base formula is UNVERIFIED (the mapping of the four
+    // userlevel.scr float positions to named stats, and the real (10/A)×B → HP/MP computation, are open
+    // questions), so the curve this class produces is an explicit interim PROXY, not the real curve. The
+    // proxy output (≈1.0 or 3.0 before scaling) is multiplied by this round constant only to land in a
+    // plausible integer HP/MP range; when the real formula is pinned, both this scale and the per-stat
+    // float-position selection must be replaced together.
+    // spec: Docs/RE/formats/config_tables.md §2.4 — (10/A)×B from users.scr; HP/MP base computation and
+    //       float-position→stat mapping UNVERIFIED (open questions #1/#2). The constant itself has no spec.
     private const float LevelScaleMultiplier = 100.0f;
 
     private readonly StatBaseCurve _hpCurve;

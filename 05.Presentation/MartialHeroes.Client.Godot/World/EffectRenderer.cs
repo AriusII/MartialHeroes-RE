@@ -91,8 +91,8 @@ namespace MartialHeroes.Client.Godot.World;
 
 /// <summary>
 /// Spawns and tears-down actor-anchored .xeff-driven visual effects in response to cast
-/// lifecycle events.  Falls back to a GpuParticles3D placeholder when the VFS is absent or
-/// the .xeff cannot be parsed.
+/// lifecycle events.  When the VFS is absent or the .xeff cannot be parsed the effect is
+/// silent (no synthetic placeholder — the no-placeholder doctrine; spec: effects.md §17.2).
 ///
 /// Lifecycle driven by action codes from the network:
 ///   0xC8 = cast-enable  → PlayCast(actor, effectId)  — starts a looping effect
@@ -112,10 +112,9 @@ public sealed partial class EffectRenderer : Node3D
 
     // emitter_type enum values.
     // spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_BILLBOARD = 0; CONFIRMED.
-    // spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_MESH = 1; CONFIRMED.
+    // spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_MESH = 1; CONFIRMED (type 1 not yet rendered; no separate const needed).
     // spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_DIRECTIONAL = 2; CONFIRMED.
     private const uint EmitterBillboard = 0;
-    private const uint EmitterMesh = 1;
     private const uint EmitterDirectional = 2;
 
     // UV scroll loop period in milliseconds.
@@ -126,10 +125,6 @@ public sealed partial class EffectRenderer : Node3D
     // spec: Docs/RE/specs/effects.md §15.4 — "effect origin follows the caster's world position"; CODE-CONFIRMED.
     // Aesthetic: 0.9 world units lifts from feet to approximate waist height.
     private const float EmitterHeightOffset = 0.9f;
-
-    // Placeholder particle count and lifetime (used when .xeff is unavailable).
-    private const int PlaceholderParticleCount = 40;
-    private const float PlaceholderLifetime = 1.0f;
 
     // ─────────────────────────────────────────────────────────────────────────
     // Parsed sub-effect descriptor (owned by this layer only — not in layer 03)
@@ -215,9 +210,6 @@ public sealed partial class EffectRenderer : Node3D
 
         // Per-sub-effect loaded textures.
         public ImageTexture?[][]? Textures; // [subEffectIdx][frameIdx]
-
-        // Placeholder fallback (used when SubEffects is null).
-        public GpuParticles3D? Particles;
 
         // GPU-particle placeholders for resource_id >= 10000 sub-effects.
         // spec: Docs/RE/specs/effects.md §17.2 — resource_id >= 10000 → GPU particle; CONFIRMED.
@@ -468,15 +460,6 @@ public sealed partial class EffectRenderer : Node3D
             {
                 TickXeffEffect(live, subEffects);
             }
-            else if (live.Particles is { } particles && IsInstanceValid(particles))
-            {
-                // Placeholder: follow anchor.
-                if (IsInstanceValid(live.Anchor))
-                {
-                    particles.GlobalPosition = live.Anchor.GlobalPosition +
-                                               new Vector3(0f, EmitterHeightOffset, 0f);
-                }
-            }
         }
 
         if (toRemove is not null)
@@ -565,9 +548,11 @@ public sealed partial class EffectRenderer : Node3D
 
                 if (se.ResourceId >= XeffResourceParticleThreshold)
                 {
-                    // GPU particle element: use placeholder GpuParticles3D.
+                    // GPU particle element (resource_id >= 10000): not yet implemented — render nothing.
+                    // No-placeholder doctrine: leave gpuParticles[i] = null rather than emitting
+                    // a synthetic orange GpuParticles3D burst that has zero fidelity value.
                     // spec: Docs/RE/specs/effects.md §17.2 — resource_id >= 10000 → GPU particle; CONFIRMED.
-                    gpuParticles[i] = SpawnPlaceholderEffect(origin, effectId);
+                    gpuParticles[i] = null;
                 }
                 else
                 {
@@ -596,20 +581,20 @@ public sealed partial class EffectRenderer : Node3D
         }
         else
         {
-            // Fallback: placeholder GpuParticles3D.
-            GpuParticles3D particles = SpawnPlaceholderEffect(origin, effectId);
+            // No-placeholder doctrine: when the .xeff file is missing or parse fails, render nothing.
+            // A silent LiveEffect (no SubEffects, no Particles) tracks the anchor without emitting.
+            // The original engine would simply not draw an effect for an unknown effectId;
+            // emitting a synthetic orange burst is a fabrication with zero fidelity value.
             live = new LiveEffect
             {
                 EffectId = effectId,
                 Active = true,
                 Anchor = actor,
-                Particles = particles,
                 ElapsedMs = 0,
             };
 
             GD.Print($"[EffectRenderer] PlayCast: effectId={effectId} actor={key.RawId} " +
-                     $"— .xeff unavailable or parse failed; using placeholder. origin={origin}. " +
-                     "spec: Docs/RE/specs/effects.md §15.4 looping UserXEffect; CODE-CONFIRMED.");
+                     $"— .xeff unavailable or parse failed; rendering nothing (no-placeholder doctrine). origin={origin}.");
         }
 
         _live[key] = live;
@@ -700,6 +685,12 @@ public sealed partial class EffectRenderer : Node3D
     ///
     /// Mesh particles use sub-effect velocity/size to transform vertices.
     /// spec: Docs/RE/specs/effects.md §17.2 — mesh: vertices scaled by sampled size; CONFIRMED.
+    ///
+    /// PERFORMANCE NOTE: this method allocates a new <see cref="ArrayMesh"/> and
+    /// <see cref="StandardMaterial3D"/> on every call frame. For high-frequency effects with
+    /// many sub-effects this is a per-frame GC pressure source. A future optimisation should
+    /// cache the material keyed by (spriteFrame, tint) and the mesh keyed by (size, origin) when
+    /// neither has changed since the last frame — this is deferred pending real-world profiling.
     /// </summary>
     private static void RebuildSubEffectMesh(
         MeshInstance3D mi,
@@ -813,6 +804,11 @@ public sealed partial class EffectRenderer : Node3D
         {
             // No texture: use unshaded solid colour modulated by the sampled diffuse tint.
             // spec: Docs/RE/specs/effects.md §17.3 — diffuse tint drives AlbedoColor; CONFIRMED.
+            // Blend mode: per-spec the blend is per-drawable material stored in the .xeff descriptor.
+            // The exact per-drawable blend is not yet parsed from the .xeff (it is a known unknown);
+            // Additive is the common default for glow/fire FX and matches the FX particle bucket
+            // blend order (SRCALPHA / ONE). Kept as Additive until per-drawable blend is recovered.
+            // spec: Docs/RE/specs/rendering.md §4.2 — per-bucket blend modes (SRCALPHA / ONE for particles).
             var mat = new StandardMaterial3D
             {
                 ShadingMode = StandardMaterial3D.ShadingModeEnum.Unshaded,
@@ -1120,73 +1116,6 @@ public sealed partial class EffectRenderer : Node3D
         return keys[a] + (keys[b] - keys[a]) * frac;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Placeholder fallback (original GpuParticles3D implementation)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Builds and returns a looping GpuParticles3D placeholder centred at <paramref name="position"/>.
-    /// This is the degradation path used when the .xeff is missing or unparseable.
-    /// The node is added as a child of this EffectRenderer.
-    /// </summary>
-    private GpuParticles3D SpawnPlaceholderEffect(
-        Vector3 position,
-        uint effectId)
-    {
-        var particles = new GpuParticles3D
-        {
-            Name = $"CastEffect_{effectId}",
-            GlobalPosition = position,
-            OneShot = false,
-            Emitting = true,
-            Amount = PlaceholderParticleCount,
-            Lifetime = PlaceholderLifetime,
-            Explosiveness = 0f,
-            Randomness = 0.3f,
-        };
-
-        var particleMat = new ParticleProcessMaterial
-        {
-            EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Sphere,
-            EmissionSphereRadius = 0.4f,
-            Direction = new Vector3(0f, 1f, 0f),
-            Spread = 60f,
-            InitialVelocityMin = 0.5f,
-            InitialVelocityMax = 1.5f,
-            Gravity = new Vector3(0f, -2f, 0f),
-            ScaleMin = 0.08f,
-            ScaleMax = 0.12f,
-            Color = new Color(1.0f, 0.55f, 0.1f, 1.0f),
-        };
-
-        var colorRamp = new Gradient();
-        colorRamp.SetColor(0, new Color(1.0f, 0.55f, 0.1f, 1.0f));
-        colorRamp.SetOffset(0, 0.0f);
-        colorRamp.SetColor(1, new Color(1.0f, 0.4f, 0.0f, 0.0f));
-        colorRamp.SetOffset(1, 1.0f);
-        var colorTex = new GradientTexture1D { Gradient = colorRamp };
-        particleMat.ColorRamp = colorTex;
-        particles.ProcessMaterial = particleMat;
-
-        var quadMesh = new QuadMesh { Size = new Vector2(0.1f, 0.1f) };
-        var drawMat = new StandardMaterial3D
-        {
-            ShadingMode = StandardMaterial3D.ShadingModeEnum.Unshaded,
-            AlbedoColor = new Color(1.0f, 0.55f, 0.1f, 1.0f),
-            EmissionEnabled = true,
-            Emission = new Color(1.0f, 0.4f, 0.0f),
-            EmissionEnergyMultiplier = 2.5f,
-            Transparency = StandardMaterial3D.TransparencyEnum.Alpha,
-            BlendMode = StandardMaterial3D.BlendModeEnum.Add,
-            BillboardMode = StandardMaterial3D.BillboardModeEnum.Enabled,
-        };
-        quadMesh.Material = drawMat;
-        particles.DrawPasses = 1;
-        particles.SetDrawPassMesh(0, quadMesh);
-
-        AddChild(particles);
-        return particles;
-    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Teardown helpers
@@ -1204,7 +1133,9 @@ public sealed partial class EffectRenderer : Node3D
             }
         }
 
-        // Tear down GPU-particle placeholders for resource_id >= 10000 sub-effects.
+        // Tear down GPU-particle nodes for resource_id >= 10000 sub-effects.
+        // These are now always null (no-placeholder doctrine); the loop is retained for forward
+        // compatibility if real GPU particle rendering is later wired.
         if (live.GpuParticles is not null)
         {
             foreach (GpuParticles3D? gpu in live.GpuParticles)
@@ -1212,24 +1143,13 @@ public sealed partial class EffectRenderer : Node3D
                 if (gpu is not null && IsInstanceValid(gpu))
                 {
                     gpu.Emitting = false;
-                    var timer = GetTree().CreateTimer(PlaceholderLifetime + 0.1);
+                    var timer = GetTree().CreateTimer(1.1);
                     timer.Timeout += () =>
                     {
                         if (IsInstanceValid(gpu)) gpu.QueueFree();
                     };
                 }
             }
-        }
-
-        // Tear down placeholder fallback.
-        if (live.Particles is not null && IsInstanceValid(live.Particles))
-        {
-            live.Particles.Emitting = false;
-            var timer = GetTree().CreateTimer(PlaceholderLifetime + 0.1);
-            timer.Timeout += () =>
-            {
-                if (IsInstanceValid(live.Particles)) live.Particles.QueueFree();
-            };
         }
     }
 

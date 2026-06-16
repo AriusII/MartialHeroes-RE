@@ -107,7 +107,7 @@ public sealed class LoginSelectFlowLayoutTests
     public void CmsgSelectCharacter_field_offsets()
     {
         Assert.Equal(0, (int)Marshal.OffsetOf<CmsgSelectCharacter>(nameof(CmsgSelectCharacter.SlotIndex)));
-        Assert.Equal(1, (int)Marshal.OffsetOf<CmsgSelectCharacter>(nameof(CmsgSelectCharacter.Flag)));
+        Assert.Equal(1, (int)Marshal.OffsetOf<CmsgSelectCharacter>(nameof(CmsgSelectCharacter.Mode)));
     }
 
     [Fact] // spec: Docs/RE/packets/cmsg_char_enter.yaml (1 + 33 + 2 + 4 = 40)
@@ -141,11 +141,11 @@ public sealed class LoginSelectFlowLayoutTests
     {
         Span<byte> body = stackalloc byte[CmsgSelectCharacter.WireSize];
         body[0x00] = 3; // SlotIndex
-        body[0x01] = 1; // Flag = select-for-play
+        body[0x01] = 1; // Mode = 1 (delete; 0 = select/view) — delete overloads 1/7. spec: cmsg_char_select.yaml
 
         ref readonly CmsgSelectCharacter p = ref MemoryMarshal.AsRef<CmsgSelectCharacter>(body);
         Assert.Equal((byte)3, p.SlotIndex);
-        Assert.Equal((byte)1, p.Flag);
+        Assert.Equal((byte)1, p.Mode);
     }
 
     [Fact] // spec: Docs/RE/packets/cmsg_char_enter.yaml

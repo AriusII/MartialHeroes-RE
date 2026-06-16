@@ -56,7 +56,7 @@ namespace MartialHeroes.Client.Godot.HUD;
 /// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — HUD bound to Application state.
 /// spec: Docs/RE/specs/ui_system.md §8.5 — in-game panels bind by uitex integer id.
 /// spec: Docs/RE/formats/ui_manifests.md §1.4 — uitex 0001 = data/ui/mainwindow.dds 1024×1024.
-/// spec: Docs/RE/specs/input_ui.md §4 — hotbar displays skills from SkillHotbarSlotSetEvent.
+/// spec: Docs/RE/specs/handlers.md §4 — hotbar slot set event 5/33 (SmsgSkillHotbarSlotSet).
 /// </summary>
 public sealed partial class GameHud : Control
 {
@@ -117,7 +117,7 @@ public sealed partial class GameHud : Control
     private Label _buffLabel = null!;
     private Label _combatStatsLabel = null!;
 
-    // Hotbar: 9 skill slots (spec: input_ui.md §4 — hotbar slots 0–239, first 9 shown).
+    // Hotbar: 9 skill slots (spec: handlers.md §4 — SmsgSkillHotbarSlotSet 5/33 assigns slots 0–239; first 9 shown).
     private const int HotbarVisibleSlots = 9;
     private readonly Label[] _hotbarKey = new Label[HotbarVisibleSlots];
     private readonly Label[] _hotbarName = new Label[HotbarVisibleSlots];
@@ -189,22 +189,8 @@ public sealed partial class GameHud : Control
     // spec: Docs/RE/specs/ui_hud_layout.md §5.4 CONFIRMED-formula.
     private TopStatusBar? _topStatusBar;
 
-    // ConfirmDialog: the most common centred modal family (340×190).
+    // ConfirmDialog: deferred — will be instantiated on first use rather than eagerly at HUD init.
     // spec: Docs/RE/specs/ui_hud_layout.md §5.8 — ~12 sites; reusable via Open(message).
-    private ConfirmDialog? _confirmDialog;
-
-    // Zone indicator: a small label anchored top-right showing Safe / PvP / Closed / Unknown.
-    // Populated by draining IHudEventHub.ZoneChanges in _Process.
-    // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — zone-type enum.
-    private Label? _zoneIndicatorLabel;
-    private Panel? _zoneIndicatorPanel;
-
-    // Cached zone-pill StyleBoxFlat instances — built once in BuildZoneIndicator, swapped on ZoneChangedEvent.
-    // Avoids per-event StyleBoxFlat allocation; zone changes are infrequent but still heap-free after init.
-    private StyleBoxFlat? _zonePillSafe;
-    private StyleBoxFlat? _zonePillPvp;
-    private StyleBoxFlat? _zonePillClosed;
-    private StyleBoxFlat? _zonePillUnknown;
 
     // The HUD event hub — wired in BindStageBComponents (after Initialise).
     // ZoneChanges is the only channel drained here; other families are drained by their widgets.
@@ -661,37 +647,6 @@ public sealed partial class GameHud : Control
             GD.PrintErr($"[GameHud] TopStatusBar attach failed: {ex.Message}");
         }
 
-        // ---- ConfirmDialog (§5.8) — centred modal 340×190, the most common dialog family ----
-        // spec: Docs/RE/specs/ui_hud_layout.md §5.8 — "Confirm/info dialog: W=340, H=190, ~12 sites"
-        //       Uses CenteredModal base: center = (screen − size) / 2 on both axes.
-        //       spec: Docs/RE/specs/ui_hud_layout.md §5.1 CONFIRMED-formula.
-        try
-        {
-            _confirmDialog = new ConfirmDialog { Name = "ConfirmDialog" };
-            AddChild(_confirmDialog);
-            GD.Print($"[GameHud] ConfirmDialog added (hidden). " +
-                     $"W={HudPanelConfig.ConfirmDialogW} H={HudPanelConfig.ConfirmDialogH}. " +
-                     "center = (screen − size) / 2. " +
-                     "spec: Docs/RE/specs/ui_hud_layout.md §5.8 §5.1 CONFIRMED-formula.");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[GameHud] ConfirmDialog attach failed: {ex.Message}");
-        }
-
-        // ---- ZoneIndicator (top-right corner, below minimap) ----
-        // Small pill label: "Safe" / "PvP" / "Closed" / "Unknown".
-        // Populated by ZoneChangedEvent from IHudEventHub.ZoneChanges (drained in _Process).
-        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — zone-type enum.
-        try
-        {
-            BuildZoneIndicator();
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[GameHud] ZoneIndicator build failed: {ex.Message}");
-        }
-
         GD.Print("[GameHud] _Ready completed. HUD chrome wired to uitex 0001 (mainwindow.dds). " +
                  $"ActorState at ({HudPanelConfig.StatsX},{HudPanelConfig.StatsY}) W={HudPanelConfig.StatsW} H={HudPanelConfig.StatsH} " + // spec: Docs/RE/specs/ui_hud_layout.md §3.3
                  $"+ 3 sub-panels (A/B/C). " + // spec: Docs/RE/specs/ui_hud_layout.md §3.4
@@ -927,86 +882,6 @@ public sealed partial class GameHud : Control
                  $"W={HudPanelConfig.TradeW} H={HudPanelConfig.TradeH} Y=0. " +
                  "spec: Docs/RE/specs/ui_hud_layout.md §3.3 CODE-CONFIRMED-static.");
     }
-
-    // -------------------------------------------------------------------------
-    // Zone indicator (top-right pill, below minimap)
-    // Shows the current zone type: Safe / PvP / Closed / Unknown (provisional).
-    // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — zone-type enum.
-    // -------------------------------------------------------------------------
-
-    private void BuildZoneIndicator()
-    {
-        // Anchored to top-right corner, below minimap.
-        // Minimap: screen_width − MinimapW(135), Y=MinimapY(0), H=MinimapH(195).
-        // spec: Docs/RE/specs/ui_hud_layout.md §3.3 — MinimapW=135, MinimapY=0, MinimapH=195.
-        // Zone pill sits below: X = screen_width − 135, Y = MinimapY + MinimapH + 4 = 0 + 195 + 4 = 199.
-        // Width ~120px, height ~24px — compact but readable.
-        // Layout is PLAUSIBLE (zone-pill position not yet byte-confirmed).
-        _zoneIndicatorPanel = new Panel
-        {
-            Name = "ZoneIndicatorPanel",
-            AnchorLeft = 1f,
-            AnchorTop = 0f,
-            AnchorRight = 1f,
-            AnchorBottom = 0f,
-            OffsetLeft = -129f, // screen_width − 129 → ~125px wide pill  // PLAUSIBLE
-            OffsetTop = 199f, // below minimap: MinimapY(0) + MinimapH(195) + 4 = 199  // PLAUSIBLE
-            OffsetRight = -4f, // 4px from right edge
-            OffsetBottom = 223f, // 24px tall
-            MouseFilter = MouseFilterEnum.Ignore,
-        };
-
-        // Build and cache all zone-pill StyleBoxFlat instances once.
-        // Swapped by ApplyZoneChanged without any further allocation.
-        static StyleBoxFlat MakePillStyle(Color bg)
-        {
-            var s = new StyleBoxFlat();
-            s.BgColor = bg;
-            s.SetBorderWidthAll(1);
-            s.BorderColor = new Color(0.7f, 0.7f, 0.7f, 0.8f);
-            s.CornerRadiusTopLeft = s.CornerRadiusTopRight =
-                s.CornerRadiusBottomLeft = s.CornerRadiusBottomRight = 3;
-            return s;
-        }
-
-        _zonePillUnknown = MakePillStyle(new Color(0f, 0f, 0f, 0.65f)); // black — unknown
-        _zonePillSafe = MakePillStyle(new Color(0f, 0.4f, 0f, 0.75f)); // green — safe
-        _zonePillPvp = MakePillStyle(new Color(0.6f, 0f, 0f, 0.75f)); // red   — PvP
-        _zonePillClosed = MakePillStyle(new Color(0.3f, 0.1f, 0.5f, 0.75f)); // purple — closed
-        _zoneIndicatorPanel.AddThemeStyleboxOverride("panel", _zonePillUnknown);
-
-        _zoneIndicatorLabel = new Label
-        {
-            Name = "ZoneIndicatorLabel",
-            Text = "Zone: ?",
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            MouseFilter = MouseFilterEnum.Ignore,
-        };
-        _zoneIndicatorLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-
-        _zoneIndicatorPanel.AddChild(_zoneIndicatorLabel);
-        AddChild(_zoneIndicatorPanel);
-
-        GD.Print("[GameHud] ZoneIndicator built (top-right pill, subscribes to ZoneChanges channel). " +
-                 "spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.");
-    }
-
-    /// <summary>
-    /// Converts a <see cref="ZoneType"/> to a short display string for the zone indicator.
-    /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — zone-type enum values 0/1/2.
-    /// </summary>
-    private static string ZoneTypeLabel(ZoneType zone) => zone switch
-    {
-        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 0: CONFIRMED-COMPLETE (Safe).
-        ZoneType.Safe => "Zone: Safe",
-        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 1: CONFIRMED (OpenPvP).
-        ZoneType.OpenPvp => "Zone: PvP",
-        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — value 2: CONFIRMED (Closed).
-        ZoneType.Closed => "Zone: Closed",
-        // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — values 3+ / missing: UNVERIFIED.
-        _ => "Zone: ?",
-    };
 
     // -------------------------------------------------------------------------
     // Skill bar construction (container origin at recovered (349, 13), 9-slot grid)
@@ -1460,14 +1335,14 @@ public sealed partial class GameHud : Control
         _chatLabel.Text = _chatSb.ToString();
     }
 
-    /// <summary>Reacts to a client lifecycle state change: update the state label and top status bar.</summary>
+    /// <summary>Reacts to a client lifecycle state change: update the state label.</summary>
     public void OnClientStateChanged(ClientStateChangedEvent evt)
     {
         if (_stateLabel is null) return;
         _stateLabel.Text = $"State: {evt.Current}";
-        // Forward state text to the top status bar §5.4 strip.
+        // TopStatusBar §5.4 carries game-world status (zone entry, combat notices, etc.) —
+        // not the internal C# enum name. Do not feed raw enum text to the visible strip.
         // spec: Docs/RE/specs/ui_hud_layout.md §5.4 CONFIRMED-formula.
-        _topStatusBar?.SetStatusText($"State: {evt.Current}");
     }
 
     // -------------------------------------------------------------------------
@@ -1556,12 +1431,11 @@ public sealed partial class GameHud : Control
     }
 
     /// <summary>
-    /// Drains the <see cref="IHudEventHub.ZoneChanges"/> channel each frame (main thread).
-    /// All Control mutation happens here — never from a background thread.
-    ///
-    /// Only the ZoneChanges channel is drained here; all other HUD channels are drained by
-    /// their dedicated widgets (ChatWindow, BuffBar, TargetFrame, etc.).
-    ///
+    /// Per-frame processing.
+    /// ZoneChanges is drained here so the hub channel is consumed without accumulating stale entries.
+    /// The zone state is surfaced via the minimap footer caption and message 74309, not a HUD pill —
+    /// spec: Docs/RE/specs/ui_hud_layout.md §5 has no zone-pill element; the original client uses
+    /// the minimap footer and a chat-style zone-entry notice.
     /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3 — zone-type enum (Safe/OpenPvp/Closed).
     /// PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — all Control mutation on the main thread.
     /// </summary>
@@ -1570,40 +1444,15 @@ public sealed partial class GameHud : Control
         // Guard: hub not yet wired (before Initialise is called).
         if (_hudEventHub is null) return;
 
-        // Drain zone-change events (latest-wins capacity=1, so at most one per frame).
-        while (_hudEventHub.ZoneChanges.TryRead(out ZoneChangedEvent? evt))
-        {
-            ApplyZoneChanged(evt);
-        }
-    }
-
-    /// <summary>
-    /// Applies a <see cref="ZoneChangedEvent"/> to the zone-indicator pill.
-    /// Updates both the label text and the background colour.
-    /// PASSIVE: no game logic — reads event payload only.
-    /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.
-    /// </summary>
-    private void ApplyZoneChanged(ZoneChangedEvent evt)
-    {
-        if (_zoneIndicatorLabel is null || _zoneIndicatorPanel is null) return;
-
-        _zoneIndicatorLabel.Text = ZoneTypeLabel(evt.Zone);
-
-        // Swap cached StyleBoxFlat — no per-event allocation.
-        // Colours are PLAUSIBLE — no original art recovered for this widget.
+        // Drain zone-change events (latest-wins capacity=1) to prevent channel accumulation.
+        // Zone state is exposed by the minimap footer; no HUD pill exists in the original.
+        // spec: Docs/RE/specs/ui_hud_layout.md §5 — no zone indicator pill.
         // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.
-        StyleBoxFlat? pillStyle = evt.Zone switch
+        while (_hudEventHub.ZoneChanges.TryRead(out ZoneChangedEvent? _))
         {
-            ZoneType.Safe => _zonePillSafe,
-            ZoneType.OpenPvp => _zonePillPvp,
-            ZoneType.Closed => _zonePillClosed,
-            _ => _zonePillUnknown,
-        };
-        if (pillStyle is not null)
-            _zoneIndicatorPanel.AddThemeStyleboxOverride("panel", pillStyle);
-
-        GD.Print($"[GameHud] ZoneIndicator → {evt.Zone} ({ZoneTypeLabel(evt.Zone)}). " +
-                 "spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.");
+            // Intentionally consumed and discarded — the pill widget does not exist in the original client.
+            // Minimap footer (MinimapPanel._areaLabel) surfaces the zone name from mapsetting.scr.
+        }
     }
 
     public override void _ExitTree()

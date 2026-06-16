@@ -42,7 +42,7 @@ public sealed class PacketRouterTests
 
         public void Handle(in SmsgEnterGameAck p)
         {
-            EnterBillingState = p.BillingState;
+            EnterBillingState = p.BillingFlag;
             EnterCharacterCount = p.CharacterCount;
         }
 

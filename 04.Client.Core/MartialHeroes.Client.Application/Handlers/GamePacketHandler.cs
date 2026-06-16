@@ -237,9 +237,9 @@ public sealed class GamePacketHandler : IPacketHandler
     /// </summary>
     public void Handle(in SmsgEnterGameAck packet)
     {
-        // BillingState / CharacterCount are available on the packet for a future use case; the
+        // BillingFlag / CharacterCount are available on the packet for a future use case; the
         // lifecycle transition is the load-bearing effect here.
-        _ = packet.BillingState;
+        _ = packet.BillingFlag;
         _stateMachine.OnEnterWorld();
     }
 

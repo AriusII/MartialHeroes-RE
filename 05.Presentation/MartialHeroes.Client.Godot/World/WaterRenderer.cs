@@ -94,7 +94,8 @@ public sealed partial class WaterRenderer : Node3D
     /// <summary>
     /// Vertical offset above the terrain MIN_HEIGHTFILED at which the water plane is placed.
     /// Ensures the plane sits just above the seafloor / shoreline vertices.
-    /// spec: heuristic — "waterY = MIN_HEIGHTFILED + 2.0f" (mission brief, 2026-06-12).
+    /// PLAUSIBLE: 2.0 world units above MIN_HEIGHTFIELD is a port-side heuristic; the exact
+    /// value is not in any committed spec. No spec-dictated value recovered from IDA.
     /// </summary>
     public const float WaterOffsetAboveFloor = 2.0f;
 

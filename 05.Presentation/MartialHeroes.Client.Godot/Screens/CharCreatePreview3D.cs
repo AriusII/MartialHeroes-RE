@@ -666,7 +666,7 @@ public sealed partial class CharCreatePreview3D : Control
         }
 
         // Rig + idle clip resolve from the mesh's OWN id_b (per class) — never a shared rig.
-        // spec: skinning.md §8(e) — data/char/bind/g{id_b}.bnd + actormotion.txt col2==id_b→col16.
+        // spec: skinning.md §8(e) — data/char/bind/g{id_b}.bnd + actormotion.txt col2==id_b→col15 (idle).
         Skeleton? skeleton = TryLoadSkeletonForIdB(assets, mesh.IdB);
         AnimationClip? idleClip = TryLoadIdleClipForIdB(assets, mesh.IdB);
 
@@ -743,10 +743,12 @@ public sealed partial class CharCreatePreview3D : Control
             foreach (string rawLine in text.Split('\n'))
             {
                 string[] cols = rawLine.Replace("\r", string.Empty).Split('\t');
-                if (cols.Length <= 16) continue;
+                if (cols.Length <= 15) continue;
                 if (!uint.TryParse(cols[2].Trim(), out uint classId) || classId != idB) continue;
 
-                string idle = cols[16].Trim(); // col 16 = idle motion id. spec: §3.3.4
+                // idle = motion_ids_a[0] = column 15 (record +0x40), IDB-confirmed operand-for-operand.
+                // spec: Docs/RE/formats/actormotion.md §Per-record layout (col15=+0x40=idle); animation.md.
+                string idle = cols[15].Trim();
                 if (idle.Length == 0 || idle == "0") return null;
 
                 string motPath = $"data/char/mot/g{idle}.mot";

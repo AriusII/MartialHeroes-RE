@@ -1055,7 +1055,7 @@ public sealed partial class RealWorldRenderer : Node3D
             ReadOnlyMemory<byte> data = _assets.GetRaw(motPath);
             if (data.IsEmpty) return null;
 
-            AnimationClip clip = AnimationParser.Parse(data);
+            AnimationClip? clip = AnimationParser.Parse(data); // CS8600: Parse returns nullable
             GD.Print($"[RealWorldRenderer] Animation loaded: {motPath}.");
             return clip;
         }
@@ -1069,8 +1069,11 @@ public sealed partial class RealWorldRenderer : Node3D
     /// <summary>
     /// Resolves the looped idle motion id for an actor class via <c>data/char/actormotion.txt</c>:
     /// the row whose column 2 equals <paramref name="actorClassId"/> (= the skin/skeleton id_b);
-    /// the idle-peace motion id is column 16. Returns <c>data/char/mot/g{id}.mot</c> or null.
-    /// spec: Docs/RE/formats/mesh.md §actormotion.txt (TAB-separated; col2=class, col16=idle). CONFIRMED.
+    /// the idle-peace motion id is column 15 (0-based), record offset +0x40.
+    /// IDB-confirmed operand-for-operand. Any read of cols[16] for idle is an off-by-one.
+    /// spec: Docs/RE/formats/actormotion.md — col15 (0-based) = idle motion id @ +0x40: IDB-CONFIRMED.
+    /// spec: Docs/RE/formats/animation.md — .mot idle resolution.
+    /// Returns <c>data/char/mot/g{id}.mot</c> or null.
     /// </summary>
     private string? ResolveIdleMotPath(uint actorClassId)
     {
@@ -1084,10 +1087,14 @@ public sealed partial class RealWorldRenderer : Node3D
         foreach (string rawLine in text.Split('\n'))
         {
             string[] cols = rawLine.Replace("\r", string.Empty).Split('\t');
-            if (cols.Length <= 16) continue;
+            // Need at least 16 columns (indices 0..15) for the idle field at col15.
+            // spec: Docs/RE/formats/actormotion.md — col15 = idle motion id (0-based); IDB-CONFIRMED.
+            if (cols.Length <= 15) continue;
             if (!uint.TryParse(cols[2].Trim(), out uint classId) || classId != actorClassId) continue;
 
-            string idle = cols[16].Trim();
+            // col15 (0-based) = motion_ids_a[0] = idle-peace motion id @ record offset +0x40.
+            // spec: Docs/RE/formats/actormotion.md — col15=+0x40=idle: IDB-CONFIRMED.
+            string idle = cols[15].Trim();
             if (idle.Length == 0 || idle == "0") return null;
             return $"data/char/mot/g{idle}.mot";
         }

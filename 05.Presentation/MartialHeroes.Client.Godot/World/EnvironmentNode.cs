@@ -355,10 +355,32 @@ public sealed partial class EnvironmentNode : Node3D
         env.FogEnabled = true;
         env.FogMode = global::Godot.Environment.FogModeEnum.Depth;
 
-        // start/end are fractions of the view range. spec: environment.md §6.1 + environment_bins.md §2.1.
+        // Static start/end from fog{id}.bin as the pre-data baseline (fractions of view range).
+        // spec: environment.md §6.1 + environment_bins.md §2.1.
         env.FogDepthBegin = fog.StartDist * ViewRange;
         env.FogDepthEnd = fog.EndDist * ViewRange;
         env.FogDepthCurve = 1.0f;
+
+        // Per-frame fog range from light{id}.bin section-C scalar s:
+        //   fog_range = s * 3.0 (world units), overwrites the live fog far distance each tick.
+        //   s > 0 guard: non-positive s leaves the fog struct untouched (fog stays at baseline).
+        // spec: Docs/RE/specs/environment.md §6.2a — "fog mode LINEAR: far = s·3.0 … enabled when s>0
+        //   (per-keyframe section-C scalar); the static fog.bin start/end seed a baseline but the
+        //   per-frame s×3.0 derivation overwrites the live fog range each tick."
+        // spec: Docs/RE/formats/environment_bins.md §9.3 — FogDistanceScalars @ 0x1260: CONFIRMED.
+        LightBin? light = _env?.Light;
+        if (light is { FogDistanceScalars.Length: >= LightBin.KeyframeCount })
+        {
+            // Interpolate the section-C scalar between adjacent keyframes.
+            float sA = light.FogDistanceScalars[kf];
+            float sB = light.FogDistanceScalars[kfNext];
+            float s = sA + (sB - sA) * frac;
+            if (s > 0f)
+            {
+                // spec: environment.md §6.2a — fog far = s * 3.0 (world units); LINEAR mode.
+                env.FogDepthEnd = s * 3.0f; // spec: Docs/RE/specs/environment.md §6.2a
+            }
+        }
 
         // Fog colour interpolated between adjacent BGRA keyframes. spec: environment.md §2.3 + §6.2.
         env.FogLightColor = LerpFogColor(fog, kf, kfNext, frac);
@@ -427,11 +449,13 @@ public sealed partial class EnvironmentNode : Node3D
     {
         env.GlowEnabled = true;
 
-        // Blend mode: Mix (Screen) — approximates base×0.5 + glow×0.5 opaque composite.
-        // The DX8 present is opaque (SRC=ONE, DEST=ZERO); the additive "glow add" happens INSIDE
-        // the composite PS into TEX0 before the opaque blit. Mix avoids pure-additive over-brightening.
-        // spec: Docs/RE/specs/rendering.md §6 — composite blends into RT then opaque-copies to backbuffer.
-        env.GlowBlendMode = global::Godot.Environment.GlowBlendModeEnum.Mix;
+        // Blend mode: Additive — matches the additive "glow add" inside the composite pass.
+        // The DX8 composite (finaldx8.psh) performs saturate(2·edge·c0 + bloom·c1) which is additive
+        // accumulation; the subsequent present is ONE/ZERO (opaque copy of the already-composited RT).
+        // Godot's Additive blend approximates the additive accumulation step inside the composite.
+        // spec: Docs/RE/specs/rendering.md §6.3 — "saturate(2·edge·c0 + bloom·c1)" composite; CONFIRMED.
+        // spec: Docs/RE/specs/rendering.md §6.3 — additive accumulation inside composite PS before present.
+        env.GlowBlendMode = global::Godot.Environment.GlowBlendModeEnum.Additive; // spec: rendering.md §6.3
 
         // HDR threshold = 0: no bright-pass cutoff — CONFIRMED (every pixel feeds the blur).
         // spec: Docs/RE/specs/rendering.md §6.4 — "no luminance cutoff; BLOOM_BRIGHT_THRESHOLD = NONE".

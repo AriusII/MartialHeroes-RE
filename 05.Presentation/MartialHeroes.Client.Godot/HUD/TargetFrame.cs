@@ -249,20 +249,6 @@ public sealed partial class TargetFrame : Control
     }
 
     // -------------------------------------------------------------------------
-    // DEMO state (no hub bound — offline / scene-isolated testing)
-    // -------------------------------------------------------------------------
-
-    private void ApplyDemoState()
-    {
-        // Show a synthetic "Goblin" target at 60 % HP so the widget is visible in the editor.
-        _nameLabel.Text = "Goblin (DEMO)";
-        _hpBar.Value = 0.6;
-        _mpRow.Visible = false;
-        Visible = true;
-        GD.Print("[TargetFrame] DEMO mode: no hub bound — showing placeholder target.");
-    }
-
-    // -------------------------------------------------------------------------
     // Fallback (partial _Ready failure)
     // -------------------------------------------------------------------------
 

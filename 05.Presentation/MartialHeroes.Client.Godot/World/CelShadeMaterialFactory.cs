@@ -161,6 +161,12 @@ public static class CelShadeMaterialFactory
             mat.SetShaderParameter("use_toon_ramp", false);
         }
 
+        // ---- Post-process gate (cel_enabled) ----
+        // When CelEnabled is false the post-process offscreen path is off; the shader falls back to
+        // plain diffuse (no toon ramp). Wire the factory flag through to the shader uniform.
+        // spec: Docs/RE/specs/rendering.md §5.1a — cel/dotoonshading coupled to the post-process flag.
+        mat.SetShaderParameter("cel_enabled", CelEnabled); // spec: rendering.md §5.1a
+
         // ---- Light directions and colours ----
         // Main light: c4 runtime direction, c6 = white.
         // spec: Docs/RE/formats/shaders.md §C5.4 c4/c6.

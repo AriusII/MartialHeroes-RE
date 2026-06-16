@@ -1391,9 +1391,12 @@ public sealed partial class CharacterSelectScreen : Control
 
     private string ClassCaption(int uiIndex)
     {
-        uint msgId = CharacterSelectLayout.ClassLabelMsgIds[uiIndex];
-        // spec: ui_system.md §10 / frontend_scenes.md §4.1 — ids 14003..14007. CODE-CONFIRMED.
-        return _assets.Text(msgId, CharacterSelectLayout.ClassLabelFallbacks[uiIndex]);
+        // ClassLabelMsgIds has 5 entries (ids 14003..14007) for 4 active UI classes (0..3) plus a
+        // placeholder at index 4. We clamp to the 4 active classes so index 4 is never returned as
+        // a real class name. spec: ui_system.md §10 / frontend_scenes.md §4.1. CODE-CONFIRMED.
+        int safeIndex = Math.Clamp(uiIndex, 0, 3); // 4 active classes; index 4 is placeholder only
+        uint msgId = CharacterSelectLayout.ClassLabelMsgIds[safeIndex];
+        return _assets.Text(msgId, CharacterSelectLayout.ClassLabelFallbacks[safeIndex]);
     }
 
     private string GetClassDescription(int uiIndex)

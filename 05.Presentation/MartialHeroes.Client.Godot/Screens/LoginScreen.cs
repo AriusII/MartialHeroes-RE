@@ -40,8 +40,7 @@
 //        NO invented quit button, NO toast label. Missing asset → log + SKIP.
 //
 // PUBLIC API preserved (BootFlow signals):
-//   LoginAccepted(string account)
-//   ServerListRequested(string account)
+//   LoginAccepted(string account, string password)
 //   QuitRequested()
 //   SharedAssets / Audio
 //
@@ -67,17 +66,12 @@ public sealed partial class LoginScreen : Control
 
     /// <summary>
     /// Raised when OK/Login (action 103) is pressed and local validation passes (ID≥4, PW≥1).
+    /// Carries both the account name and the password so BootFlow can forward it to LoginAsync.
     /// spec: Docs/RE/specs/frontend_scenes.md §1.4. CODE-CONFIRMED.
+    /// spec: Docs/RE/specs/login_flow.md §4.2 — password forwarded to LoginAsync at PIN join point.
     /// </summary>
     [Signal]
-    public delegate void LoginAcceptedEventHandler(string account);
-
-    /// <summary>
-    /// Raised when the notice/agreement button (action 102) is clicked.
-    /// spec: Docs/RE/specs/frontend_scenes.md §1.2 action 102. CODE-CONFIRMED.
-    /// </summary>
-    [Signal]
-    public delegate void ServerListRequestedEventHandler(string account);
+    public delegate void LoginAcceptedEventHandler(string account, string password);
 
     /// <summary>
     /// Raised when quit-confirm Yes #1 (action 113) or #2 (action 114) is clicked.
@@ -475,8 +469,8 @@ public sealed partial class LoginScreen : Control
             LoginLayout.PasswordBox.X, LoginLayout.PasswordBox.Y,
             LoginLayout.EditFieldFrameW, LoginLayout.EditFieldFrameH);
 
-        // --- ID input field (§11.2e). dest(390,32,102,13). plain text. maxlen 16. action 109. ---
-        // spec §11.2e. CODE-CONFIRMED.
+        // --- ID input field (§11.2e). dest(390,32,102,13). plain text. maxlen 6. action 109. ---
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2e / §1.3 "Max length = 6". CODE-CONFIRMED.
         _accountEdit = MakeTextbox(masked: false, maxLen: LoginLayout.IdMaxLength);
         _accountEdit.Name = "AccountEdit";
         _accountEdit.Position = new Vector2(LoginLayout.AccountBox.X, LoginLayout.AccountBox.Y);
@@ -485,8 +479,9 @@ public sealed partial class LoginScreen : Control
             _accountEdit.Text = savedId;
         formBand.AddChild(_accountEdit);
 
-        // --- PW input field (§11.2e). dest(568,32,102,13). masked *. maxlen 12. action 110. ---
-        // spec §11.2e "Password masking — one ASCII asterisk per character". CODE-CONFIRMED.
+        // --- PW input field (§11.2e). dest(568,32,102,13). masked *. maxlen 129. action 110. ---
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2e / §1.3 "Max length = 129". CODE-CONFIRMED.
+        // (The 12 in the old comment was the IME composition slot, not the cap.) CODE-CONFIRMED.
         _passwordEdit = MakeTextbox(masked: true, maxLen: LoginLayout.PwMaxLength);
         _passwordEdit.Name = "PasswordEdit";
         _passwordEdit.Position = new Vector2(LoginLayout.PasswordBox.X, LoginLayout.PasswordBox.Y);
@@ -718,7 +713,9 @@ public sealed partial class LoginScreen : Control
         }
 
         GD.Print($"[LoginScreen] Login OK (account='{account}'). Emitting LoginAccepted.");
-        EmitSignal(SignalName.LoginAccepted, account);
+        // spec: Docs/RE/specs/login_flow.md §4.2 — password forwarded with the account so BootFlow
+        // can pass it to LoginAsync at the PIN join point. CODE-CONFIRMED.
+        EmitSignal(SignalName.LoginAccepted, account, _passwordEdit.Text);
     }
 
     private void OnQuitButtonPressed()

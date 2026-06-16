@@ -124,11 +124,9 @@ public static class ItemsScrParser
     /// </remarks>
     public static IEnumerable<ItemsScrRecord> Parse(ReadOnlyMemory<byte> data)
     {
-        // Register CP949 provider. Idempotent; safe to call multiple times.
-        // The static Cp949 field is evaluated lazily on first access after this call.
+        // CP949 provider + encoding are registered once in the static constructor; no per-call
+        // re-registration here.
         // spec: Docs/RE/formats/items_scr.md §Identification — "Text encoding: CP949": CONFIRMED.
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-
         int pos = 0;
         int totalLen = data.Length;
 

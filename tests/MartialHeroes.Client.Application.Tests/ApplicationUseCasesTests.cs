@@ -137,19 +137,30 @@ public sealed class ApplicationUseCasesTests
     }
 
     [Fact]
-    public async Task SendChat_channel_builds_3_21_with_selector_and_text()
+    public async Task SendChat_channel_builds_2_7_with_channel_byte_and_text()
     {
         var sink = new FakeOutboundSink();
         var useCases = NewUseCases(sink, out _, out _);
 
         await useCases.SendChatAsync(channel: 42, text: "hello");
 
+        // EVERY everyday say-box channel is the SAME (2:7) chat sender as whisper — there is no
+        // (2:7)-vs-(3:21) say-box split; (3:21) is a separate chat-command dispatcher, not the say box.
+        // spec: Docs/RE/specs/chat.md §4.1; Docs/RE/packets/2-7_whisper.yaml.
         var (major, minor, payload) = Assert.Single(sink.Sends);
-        Assert.Equal(3, major);
-        Assert.Equal(21, minor);
-        Assert.Equal(42u, BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x04, 4))); // ChannelSelector
-        uint len = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(CmsgChatChannelHeader.HeaderSize, 4));
-        Assert.Equal(6u, len); // "hello" + NUL
+        Assert.Equal(2, major);
+        Assert.Equal(7, minor);
+        Assert.Equal(42, payload[0x00]); // channel code @0x00 (low byte)
+        // No recipient → the 16-byte target-name area @0x02 is zeroed.
+        for (int i = 0x02; i < 0x12; i++)
+        {
+            Assert.Equal(0, payload[i]);
+        }
+        // Body: [u32 len EXCLUDING the NUL]["hello"][0x00]. 2/7's length prefix is strlen, NOT strlen+1.
+        // spec: Docs/RE/packets/2-7_whisper.yaml (textLength EXCLUDES the NUL).
+        uint len = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(CmsgWhisperHeader.HeaderSize, 4));
+        Assert.Equal(5u, len); // "hello" (NUL excluded)
+        Assert.Equal(0, payload[CmsgWhisperHeader.HeaderSize + 4 + 5]); // trailing NUL present
     }
 
     [Fact]

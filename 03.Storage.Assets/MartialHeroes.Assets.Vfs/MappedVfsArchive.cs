@@ -196,7 +196,23 @@ public sealed unsafe class MappedVfsArchive : IDisposable
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(virtualPath);
-        return _directory.TryFind(virtualPath.ToLowerInvariant()) is not null;
+        return _directory.TryFind(NormalizeName(virtualPath)) is not null;
+    }
+
+    // Lower-cases the caller path for the lookup, but allocates a new string ONLY when the path is not
+    // already all-lower-case (the common case — VFS TOC names are stored lower-case and all in-repo
+    // callers build lower-case paths). For an already-lower path the original instance is returned, so
+    // the dominant lookup path performs no per-call string allocation.
+    // spec: Docs/RE/formats/pak.md §"Lookup algorithm" step 1 — normalize (lower-case) before search.
+    private static string NormalizeName(string virtualPath)
+    {
+        foreach (char c in virtualPath)
+        {
+            if (char.IsUpper(c))
+                return virtualPath.ToLowerInvariant();
+        }
+
+        return virtualPath;
     }
 
     /// <summary>
@@ -228,9 +244,10 @@ public sealed unsafe class MappedVfsArchive : IDisposable
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(virtualPath);
 
-        // Step 1: normalize (lower-case).
+        // Step 1: normalize (lower-case). NormalizeName allocates only when the path actually contains
+        // an upper-case char; an already-lower path (the common case) is searched with no allocation.
         // spec: Docs/RE/formats/pak.md §"Lookup algorithm" step 1. CONFIRMED.
-        string normalized = virtualPath.ToLowerInvariant();
+        string normalized = NormalizeName(virtualPath);
 
         // Step 2: binary search.
         // spec: Docs/RE/formats/pak.md §"Lookup algorithm" step 2. CONFIRMED.
@@ -266,6 +283,10 @@ public sealed unsafe class MappedVfsArchive : IDisposable
         // ReadOnlyMemory addressing the mapped region directly at the entry's dataOffset.
         // spec: Docs/RE/formats/pak.md §"Lookup algorithm" steps 3-4 (binary search → locate payload).
         // The per-entry MappedMemoryManager does NOT pin the view handle; only the archive does, once.
+        // NOTE: a MemoryManager<byte> must be a reference type (it backs Memory<T>), so one instance is
+        // allocated per call. It is tiny and does not pin/leak. Caching managers per entry to remove this
+        // allocation is DEFERRED: it would add a keyed cache + locking that would complicate the
+        // documented lock-free concurrent-read contract for negligible benefit.
         var manager = new MappedMemoryManager(_viewBasePointer, e.DataOffset, length);
         return manager.Memory;
     }

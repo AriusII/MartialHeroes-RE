@@ -35,6 +35,12 @@ render_mode unshaded, cull_disabled, depth_draw_always;
 
 // ---- Uniforms ----
 
+// Post-process gate: the original DX8 engine couples cel/dotoonshading to the offscreen post-process
+// path. When the post-process flag is off, the client falls back to a plain diffuse draw (no ramp).
+// spec: Docs/RE/specs/rendering.md §5.1a — cel gated on the offscreen post-process flag.
+// Wired by CelShadeMaterialFactory.CelEnabled; default true (post-process on).
+uniform bool cel_enabled = true; // spec: Docs/RE/specs/rendering.md §5.1a
+
 // Albedo texture (character skin, bound by CelShadeMaterialFactory from skin.txt chain).
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap;
 uniform vec4 albedo_color : source_color = vec4(0.85, 0.75, 0.65, 1.0);
@@ -126,7 +132,11 @@ void fragment() {
         tone = vec3(band);
     }
 
-    // ---- Composite: albedo × tone ----
-    ALBEDO = base.rgb * tone;
+    // ---- Composite (with the post-process gate) ----
+    // spec: Docs/RE/specs/rendering.md §5.1a — cel/dotoonshading is coupled to the offscreen
+    // post-process flag: cel_enabled true → albedo × toon tone; when the post-process path is off,
+    // fall back to plain diffuse (no ramp). Expressed as a select (NOT an early return — Godot's
+    // fragment() processor forbids 'return').
+    ALBEDO = cel_enabled ? base.rgb * tone : base.rgb;
     ALPHA  = base.a;
 }

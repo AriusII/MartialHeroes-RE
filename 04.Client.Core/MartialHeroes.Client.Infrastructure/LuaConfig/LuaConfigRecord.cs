@@ -13,9 +13,12 @@ namespace MartialHeroes.Client.Infrastructure.LuaConfig;
 /// spec: Docs/RE/specs/lua-config.md §3.
 /// </para>
 /// <para>
-/// String values are decoded as <b>UTF-8</b> (code page 65001), NOT CP949.
-/// This is a load-bearing per-path exception to the project-wide CP949 default:
-/// spec: Docs/RE/specs/lua-config.md §5.2 (N-B4-2).
+/// All shipped <c>.lua</c> source text is <b>CP949</b> (code page 949, EUC-KR), consistent with the
+/// project-wide "all game text is CP949" rule. The earlier "string values decoded as UTF-8" claim is
+/// REFUTED by direct byte-inspection of the real shipped files: the Korean comment bytes are
+/// double-byte CP949 syllables, not UTF-8 three-byte sequences. The 65001-configured host routine
+/// observed in the binary was one in-binary conversion path, not the file encoding.
+/// spec: Docs/RE/specs/lua-config.md §0 (encoding correction, LOAD-BEARING).
 /// </para>
 /// </summary>
 public sealed record LuaConfigRecord
@@ -83,8 +86,15 @@ public sealed record LuaConfigRecord
     /// <summary>Glow kernel vertical range. spec: Docs/RE/specs/lua-config.md §4</summary>
     public int DisplayGlowRangeY { get; init; } = 2;
 
-    /// <summary>Target frame-rate cap. spec: Docs/RE/specs/lua-config.md §4</summary>
-    public int DisplayFramerate { get; init; } = 60;
+    /// <summary>
+    /// FPS-counter on/off toggle (<c>DISPLAY_FRAMERATE</c>): <c>0</c> = hide the FPS counter,
+    /// <c>1</c> = show it. This is NOT a frame-rate cap. The real frame cap is a hardcoded engine
+    /// constant: the engine-view object's framerate field is constructor-seeded to <c>60.0</c> and no
+    /// traced path overwrites it, so the effective software cap is ~60 FPS and <c>DISPLAY_FRAMERATE</c>
+    /// is statically inert as a cap. Default: <c>0</c>.
+    /// spec: Docs/RE/specs/lua-config.md §4.2; Docs/RE/specs/client_runtime.md §8.3.1
+    /// </summary>
+    public int ShowFpsCounter { get; init; }
 
     // ── display.lua float globals (spec: Docs/RE/specs/lua-config.md §4) ──────
 

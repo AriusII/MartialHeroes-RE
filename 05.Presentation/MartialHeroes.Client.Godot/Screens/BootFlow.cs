@@ -6,9 +6,9 @@
 // WHAT CHANGED vs. the prior stub:
 //   1. WIRED TO ClientContext (UseCases + StateMachine + EventBus). Screens no longer bind to
 //      nothing. The composition root is looked up once via GetNode<ClientContext>("/root/ClientContext").
-//   2. SERVER-SELECT step added (ServerSelectScreen) between login validation and the PIN modal.
-//      spec: Docs/RE/specs/frontend_scenes.md §2, login_flow.md §2.
-//   3. PIN MODAL added (PinModal) shown AFTER server-select and BEFORE entering char-select.
+//   2. SERVER-SELECT step added (ServerSelectScreen); driven by real ServerListReceivedEvent via
+//      ServerListDrainer (mirrors CharListEventDrainer). spec: login_flow.md §1/#2.1.
+//   3. PIN MODAL added (PinModal) shown AFTER login-OK and BEFORE server-select.
 //      spec: Docs/RE/specs/frontend_scenes.md §1.4a. RUNTIME-CONFIRMED.
 //   4. CHAR-SELECT driven by CharacterListEvent (Application event bus, opcode 3/1).
 //      The screen subscribes to the event bus; when CharacterListEvent arrives it calls
@@ -264,24 +264,23 @@ public sealed partial class BootFlow : Node
         // LoginAccepted: OK button passed local validation (ID ≥ 4, PW ≥ 1).
         // → Stage credentials in Application layer, then advance to server select.
         login.LoginAccepted += OnLoginAccepted;
-        // ServerListRequested: player clicked the Server-list button on the login screen.
-        // → Show server select independently of full credential submission.
-        // spec: Docs/RE/specs/frontend_scenes.md §2 — server list button on login screen.
-        login.ServerListRequested += OnServerListRequested;
         login.QuitRequested += OnQuitRequested;
         _host!.SetScreen(login);
         GD.Print("[BootFlow] Showing LoginScreen.");
     }
 
-    private void OnLoginAccepted(string account)
+    private void OnLoginAccepted(string account, string password)
     {
         // UI click SFX is handled centrally by AudioService.OnButtonActionFired (NodeAdded
         // subscription on StateButton.ActionFired). Calling _audio?.PlayClickSfx() here as well
         // would play cue 861010101 TWICE on the same button press — removed to fix the double-click
         // defect. spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (de-duplicate click path).
 
-        // Store account name so it can be forwarded to UseCases.LoginAsync at the join point.
+        // Store account name and password so they can be forwarded to UseCases.LoginAsync
+        // at the PIN join point (after PIN is collected).
+        // spec: Docs/RE/specs/login_flow.md §4.2 — password forwarded with account to LoginAsync.
         _account = account;
+        _password = password;
         GD.Print($"[BootFlow] Login accepted (account='{account}') → PIN modal (before server select).");
 
         // FLOW ORDER (spec §1.4a / task mandate):
@@ -292,17 +291,6 @@ public sealed partial class BootFlow : Node
         // The task mandate: "PIN pops UNCONDITIONALLY after login-OK, NOT before login;
         //   confirm → server list appears → select a server → char scene."
         ShowPinModal();
-    }
-
-    private void OnServerListRequested(string account)
-    {
-        // Player clicked the server-list button WITHOUT submitting login credentials first.
-        // In the official client this can show the server list before the full login flow.
-        // In the revival we treat this as going straight to server select (skipping PIN).
-        // spec: Docs/RE/specs/frontend_scenes.md §2 — server-list button on the login screen.
-        _account = account;
-        GD.Print($"[BootFlow] Server list requested (account='{account}') → server select (no-cred path).");
-        ShowServerSelect();
     }
 
     // -----------------------------------------------------------------------
@@ -347,11 +335,12 @@ public sealed partial class BootFlow : Node
         GD.Print($"[BootFlow] PIN submitted (length={pin.Length}) → server select.");
 
         // Stage login credentials in the Application layer (if available).
-        // The PIN is now available; pass it along with the account.
+        // The password was captured from LoginScreen.LoginAccepted and stored in _password.
+        // spec: Docs/RE/specs/login_flow.md §4.2 — password forwarded to LoginAsync at PIN join.
         // spec: Docs/RE/specs/client_workflow.md §5.1.2 — login credential staging.
         if (_useCases is not null)
         {
-            _ = _useCases.LoginAsync(_account, password: "", cancellationToken: CancellationToken.None);
+            _ = _useCases.LoginAsync(_account, password: _password, cancellationToken: CancellationToken.None);
         }
 
         // After PIN → server list appears.
@@ -387,13 +376,27 @@ public sealed partial class BootFlow : Node
             SharedAssets = _sharedAssets,
         };
 
-        // The server list is driven by the real lobby server-list response (port 10000). Offline there
-        // is none. DEV-ONLY: seed a couple of servers so the parchment-scroll layout actually RENDERS
-        // for visual validation (guarded by dev-offline mode; NEVER shipped — real flow uses the lobby).
-        // spec: Docs/RE/specs/login_flow.md §2.
+        // The server list is driven by the real lobby server-list response (port 10000) via the
+        // ServerListDrainer (mirrors CharListEventDrainer). Offline there is no response; the DEV
+        // seed is applied after wiring the drainer so it can be replaced by a real event.
+        // spec: Docs/RE/specs/login_flow.md §1 step 2 / §2.1 — ServerListReceivedEvent on IClientEventBus.
         serverSelect.ServerSelected += OnServerSelected;
         serverSelect.BackRequested += OnBackToLogin;
         _host!.SetScreen(serverSelect);
+
+        // Wire the Application event-bus drainer so a real ServerListReceivedEvent drives the view.
+        // spec: Docs/RE/specs/login_flow.md §1 step 2 / §2.1. CODE-CONFIRMED path.
+        if (_ctx is not null)
+        {
+            var serverDrainer = new ServerListDrainer();
+            serverDrainer.Bind(serverSelect, _ctx.EventBus);
+            serverDrainer.Name = "ServerListDrainer";
+            AddChild(serverDrainer);
+        }
+
+        // DEV-ONLY: seed a couple of servers so the parchment-scroll layout actually RENDERS
+        // for visual validation (guarded by dev-offline mode; NEVER shipped — real flow uses the lobby).
+        // spec: Docs/RE/specs/login_flow.md §2.
         if (IsDevOfflineMode())
             serverSelect.SetServers(DevServerList());
         GD.Print("[BootFlow] Showing ServerSelectScreen (after PIN confirm). spec: task mandate.");
@@ -403,6 +406,10 @@ public sealed partial class BootFlow : Node
     {
         // UI click SFX is handled centrally by AudioService.OnButtonActionFired — no call here.
         // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (de-duplicate click path).
+
+        // Free the server-list drainer — no longer needed once a server has been selected.
+        Node? serverDrainer = FindChild("ServerListDrainer", owned: false);
+        serverDrainer?.QueueFree();
 
         _selectedServerId = serverId;
         GD.Print($"[BootFlow] Server selected: id={serverId} → loading screen → char select.");
@@ -489,9 +496,19 @@ public sealed partial class BootFlow : Node
     /// legacy <c>[OPENNING] SKIP</c> INI flag the original reads in case 2. When set, the Opening is
     /// bypassed and the flow goes straight to char-select (GameState 4). Default 0 → play the Opening.
     /// spec: Docs/RE/specs/intro_sequence.md §0.1 (case 2 reads SKIP: ≠0 → state 4, else state 3).
+    /// spec: Docs/RE/specs/frontend_scenes.md §1.0.0 / §1.0.5 — unified path+section+key with
+    ///   OpeningWindow.PersistSkip() so the write and read round-trip correctly.
     /// </summary>
-    private static bool IsOpeningSkipped() =>
-        ReadCfgKey("opening_skip", "0") is "1" or "true" or "yes";
+    private static bool IsOpeningSkipped()
+    {
+        // Read from the same ConfigFile location that OpeningWindow.PersistSkip() writes.
+        // OpeningWindow writes int 1; we read it back and test != 0.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.0.0 [OPENNING] SKIP. CODE-CONFIRMED.
+        var cfg = new ConfigFile();
+        if (cfg.Load(OpeningWindow.SkipCfgPath) != Error.Ok) return false;
+        int skip = (int)cfg.GetValue(OpeningWindow.SkipCfgSection, OpeningWindow.SkipCfgKey, 0);
+        return skip != 0;
+    }
 
     // -----------------------------------------------------------------------
     // Step 4: Character-select screen
@@ -646,9 +663,11 @@ public sealed partial class BootFlow : Node
 
     private void OnBackToLogin()
     {
-        // Remove the event bus drainer if present.
-        Node? drainer = FindChild("CharListEventDrainer", owned: false);
-        drainer?.QueueFree();
+        // Remove event bus drainers if present (char-list and server-list).
+        Node? charDrainer = FindChild("CharListEventDrainer", owned: false);
+        charDrainer?.QueueFree();
+        Node? serverDrainer = FindChild("ServerListDrainer", owned: false);
+        serverDrainer?.QueueFree();
 
         GD.Print("[BootFlow] Back to login.");
         ShowLogin();

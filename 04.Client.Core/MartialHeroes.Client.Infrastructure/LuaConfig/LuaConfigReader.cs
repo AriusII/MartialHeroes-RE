@@ -78,6 +78,10 @@ public sealed partial class LuaConfigReader
 
         var globals = ExtractGlobals(luaSource);
 
+        // DISPLAY_POWER is read ONCE here and reused for both the level field and the derived shader path
+        // (the host's if/elseif chain selects the shader from this same value). spec: lua-config.md §4.2/§4.3.
+        int displayPower = ReadInt(globals, "DISPLAY_POWER", defaultValue: 1);
+
         return new LuaConfigRecord
         {
             // spec: Docs/RE/specs/lua-config.md §3 — boot flags, default 1 each
@@ -100,7 +104,10 @@ public sealed partial class LuaConfigReader
             // An explicit 0 in the file is clamped to 2 (the host does the same before using the value).
             DisplayGlowRangeX = ClampGlowRange(ReadInt(globals, "DISPLAY_GLOW_RANGE_X", defaultValue: 2)),
             DisplayGlowRangeY = ClampGlowRange(ReadInt(globals, "DISPLAY_GLOW_RANGE_Y", defaultValue: 2)),
-            DisplayFramerate = ReadInt(globals, "DISPLAY_FRAMERATE", defaultValue: 60),
+            // DISPLAY_FRAMERATE is an FPS-counter on/off toggle (0/1), NOT a frame-rate cap; the real cap
+            // is a hardcoded engine 60 (statically inert config). Default 0 (counter hidden).
+            // spec: Docs/RE/specs/lua-config.md §4.2; Docs/RE/specs/client_runtime.md §8.3.1
+            ShowFpsCounter = ReadInt(globals, "DISPLAY_FRAMERATE", defaultValue: 0),
 
             // spec: Docs/RE/specs/lua-config.md §4 — display.lua float globals
             DisplayBaseBrightMulti = ReadFloat(globals, "DISPLAY_BASE_BRIGHT_MULTI", defaultValue: 1.0f),
@@ -108,13 +115,13 @@ public sealed partial class LuaConfigReader
             DisplayLightRatio = ReadFloat(globals, "DISPLAY_LIGHT_RATIO", defaultValue: 1.0f),
 
             // spec: Docs/RE/specs/lua-config.md §4.2 — DISPLAY_POWER selects the glow shader intensity level
-            DisplayPower = ReadInt(globals, "DISPLAY_POWER", defaultValue: 1),
+            DisplayPower = displayPower,
 
             // spec: Docs/RE/specs/lua-config.md §4.3 — DISPLAY_POWERSHADER is COMPUTED from DISPLAY_POWER
             // by an if/elseif chain in display.lua; a config author must not pre-assign it.
             // We derive it here using the same rule: "data/shader/power<N>dx8.psh".
             // If the scanner happens to find a literal assignment, we accept it; otherwise derive.
-            DisplayPowerShader = DerivePowerShader(globals),
+            DisplayPowerShader = DerivePowerShader(globals, displayPower),
         };
     }
 
@@ -253,11 +260,13 @@ public sealed partial class LuaConfigReader
     private static int ClampGlowRange(int value) => value == 0 ? 2 : value;
 
     /// <summary>
-    /// Derives DISPLAY_POWERSHADER from DISPLAY_POWER using the if/elseif chain in display.lua.
+    /// Derives DISPLAY_POWERSHADER from the already-parsed DISPLAY_POWER level using the if/elseif chain
+    /// in display.lua. <paramref name="displayPower"/> is read once by the caller and reused here (no
+    /// second parse). An out-of-set level falls back to the lowest valid level (1).
     /// spec: Docs/RE/specs/lua-config.md §4.3 — "DISPLAY_POWERSHADER is computed … by an if/elseif
     /// chain over DISPLAY_POWER, mapping the power level to data/shader/power&lt;N&gt;dx8.psh"
     /// </summary>
-    private static string DerivePowerShader(Dictionary<string, string> globals)
+    private static string DerivePowerShader(Dictionary<string, string> globals, int displayPower)
     {
         // Accept a literal assignment if the scanner found one (non-standard file or future compat).
         // spec: Docs/RE/specs/lua-config.md §4.3 — "a config author must not pre-assign it"
@@ -265,11 +274,19 @@ public sealed partial class LuaConfigReader
         if (literal.Length > 0)
             return literal;
 
-        // Derive from DISPLAY_POWER (valid set: 1,2,4,8,16,32).
-        // spec: Docs/RE/specs/lua-config.md §4.2, §4.3
-        var power = ReadInt(globals, "DISPLAY_POWER", defaultValue: 1);
-        return $"data/shader/power{power}dx8.psh";
+        // Derive from DISPLAY_POWER, validating against the valid set {1,2,4,8,16,32}; an invalid level
+        // (the if/elseif chain has no matching branch) falls back to the lowest level 1.
+        // spec: Docs/RE/specs/lua-config.md §4.2 (valid set), §4.3 (if/elseif chain over DISPLAY_POWER)
+        int level = IsValidDisplayPower(displayPower) ? displayPower : 1;
+        return $"data/shader/power{level}dx8.psh";
     }
+
+    /// <summary>
+    /// True when <paramref name="power"/> is one of the valid glow-power levels {1, 2, 4, 8, 16, 32}.
+    /// spec: Docs/RE/specs/lua-config.md §4.2 (DISPLAY_POWER valid set).
+    /// </summary>
+    private static bool IsValidDisplayPower(int power) =>
+        power is 1 or 2 or 4 or 8 or 16 or 32;
 
     /// <summary>
     /// Strips a trailing Lua line comment (<c>-- …</c>) from a raw value token.

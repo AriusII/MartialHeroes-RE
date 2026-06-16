@@ -179,7 +179,8 @@ public sealed partial class SkyDomeNode : Node3D
     // Per-frame animation state
     // -------------------------------------------------------------------------
 
-    private float _cloudUvOffset; // accumulated UV scroll offset (cycles mod 1.0)
+    // _cloudUvOffset removed: the dome shader is colour-only (no albedo texture), so the UV
+    // scroll offset was computed but never applied. Dead field removed.
 
     // -------------------------------------------------------------------------
     // Public API
@@ -300,11 +301,11 @@ public sealed partial class SkyDomeNode : Node3D
         // Cloud alpha: visible by day, hidden at night (inverse of stars).
         float cloudAlpha = 1f - StarAlpha(mainKf);
 
-        // UV scroll driven by the active cycle row's speed value.
+        // UV scroll (CloudCycleBin speed, §6.1) is spec-confirmed but not yet applied:
+        // the dome shader is colour-only (no albedo texture sampler), so UV offset has no effect.
+        // The speed field is preserved here as a spec note for future dome texture wiring.
         // spec: Docs/RE/formats/environment_bins.md §6.1 — speed u8 range 1–10: CONFIRMED.
-        float speedUnits = Math.Max(1, (int)_activeCycleRow.Speed);
-        _cloudUvOffset += speedUnits * CloudUvRatePerSpeedUnit * delta;
-        _cloudUvOffset %= 1f;
+        // float speedUnits = Math.Max(1, (int)_activeCycleRow.Speed); // reserved for future use
 
         UpdateCloudLayer(_cloudDomeMesh1, _cloudMaterial1, _cloudDome.Layer1Colors, kf, kfNext, frac, cloudAlpha);
         UpdateCloudLayer(_cloudDomeMesh2, _cloudMaterial2, _cloudDome.Layer2Colors, kf, kfNext, frac,
@@ -331,7 +332,7 @@ public sealed partial class SkyDomeNode : Node3D
         Color tint = tintA.Lerp(tintB, frac);
 
         mat.SetShaderParameter("albedo_color", new Color(tint.R, tint.G, tint.B, alpha));
-        mat.SetShaderParameter("uv_offset", _cloudUvOffset);
+        // uv_offset removed: dome shader is colour-only, no texture to scroll.
 
         mesh.Visible = alpha > 0.01f;
     }
@@ -543,10 +544,8 @@ public sealed partial class SkyDomeNode : Node3D
             render_mode unshaded, fog_disabled, blend_mix, depth_draw_never, cull_front;
 
             uniform vec4 albedo_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
-            uniform float uv_offset = 0.0;
 
             void fragment() {
-                vec2 uv = UV + vec2(uv_offset, 0.0);
                 ALBEDO = albedo_color.rgb;
                 ALPHA  = albedo_color.a;
             }
@@ -559,7 +558,9 @@ public sealed partial class SkyDomeNode : Node3D
         mat.Shader = shader;
         mat.RenderPriority = -128; // behind default (0) geometry in the transparent pass
         mat.SetShaderParameter("albedo_color", new Color(1f, 1f, 1f, 1f));
-        mat.SetShaderParameter("uv_offset", 0f);
+        // uv_offset removed: the dome shader is colour-only (no albedo texture) so UV scroll
+        // had no effect. The cloud UV scroll is animated via C# CloudCycleBin speed but the
+        // dome geometry doesn't sample a texture, making the offset a dead no-op.
         return mat;
     }
 

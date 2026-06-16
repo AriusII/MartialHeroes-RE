@@ -128,9 +128,9 @@ public sealed partial class BuffBar : Control
         }
 
         // DEV ONLY: show placeholder buff slots after the delay, if no real data arrived.
-        // This ensures the buff bar is visually rendered in world-mode dev screenshots.
+        // Gated behind DEV_OFFLINE_FLOW so placeholder slots never appear in a live / online run.
         // spec: Docs/RE/specs/ui_hud_layout.md §2 — buff icons positioned per buff_icon_position.xdb.
-        if (!_hasReceivedRealData && _devDemoCountdown > 0)
+        if (!_hasReceivedRealData && _devDemoCountdown > 0 && IsDevOfflineMode())
         {
             _devDemoCountdown--;
             if (_devDemoCountdown == 0)
@@ -313,6 +313,24 @@ public sealed partial class BuffBar : Control
         // Hide the demo label once we receive real server data.
         if (_demoLabel is { Visible: true })
             _demoLabel.Visible = false;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Dev offline guard
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns true when the dev-offline replay mode is active.
+    /// Mirrors the private BootFlow.IsDevOfflineMode() check, exposed here for widget-level use.
+    /// Controlled by the <c>DEV_OFFLINE_FLOW=1</c> environment variable or the
+    /// <c>dev_offline_flow=1</c> key in client_dir.cfg.
+    /// </summary>
+    private static bool IsDevOfflineMode()
+    {
+        string? envVal = System.Environment.GetEnvironmentVariable("DEV_OFFLINE_FLOW");
+        if (envVal is "1" or "true" or "yes") return true;
+        // Config-file check is omitted here — env var is sufficient for the widget guard.
+        return false;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

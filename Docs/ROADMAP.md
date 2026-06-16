@@ -6,6 +6,94 @@
 
 ---
 
+# CAMPAIGN 12 — C#/Godot Fidelity Completion ("everything possible") (launched 2026-06-16)
+
+**Mandate (maintainer):** "Continue the C11 direction — finish everything still possible on the C# (core
+01–04) AND Godot (05). Base it on what the **official game client** does (+ the IDA comprehension, the
+source of truth, + the C10-re-verified specs); **query IDA when unsure**. (1) Delete useless/wrong
+elements; (2) improve/correct/optimise to the cleanest + TRUEST vs IDA/spec; (3) deploy lots of agents +
+all needed skills; (4) **rewrite PLAN + ROADMAP** to set this direction. Make the C# the cleanest, most
+excellent, optimised and functional possible."
+
+**North stars:** N1 = total clean-room RE of `doida.exe` (DONE through C10; IDA stays queryable for
+confirmation only). **N2 (active driver)** = the faithful 1:1 port (core + Godot) must match the
+re-verified specs **and the official client's observable behaviour** exactly — clean-room-pure, zero-alloc
+on hot paths, idiomatic C#14/.NET10, no cruft.
+
+**Relationship to C10/C11:** C10 made the specs the truth; C11 ran a broad core-weighted audit→fix→gate
+(1944 tests green) but left non-blocking follow-ups and only **headless-smoke** verified the front-end.
+**C12 = the completion pass**: close the follow-ups, give Godot 05 the deep per-scene fidelity treatment,
+and **prove fidelity with the screenshot oracle** (campaign-9 lesson: spec-faithful ≠ pixel-faithful).
+
+**Method:** the `Workflow` tool drives the discovery + fix fan-outs (Ultracode). Clean-room firewall, the
+downward-only DAG, zero-alloc discipline, and the build/test/headless/screenshot gates all hold throughout.
+
+**Scope — 5 lane groups:** **V** visual fidelity (screenshot oracle) ★ · **F** deep C#/Godot fidelity
+(Godot-weighted) ★ · **C** cleanup/cruft · **W** wire/data paths (kill DEV-seed-only) · **R** RE legibility
+(`names.yaml` sync, IDB-only, parallel).
+
+**Out of scope:** the game server; live debugger/capture (debugger-pending facts stay pending, incl.
+`3/14`-vs-`4/1` spawn ordering); re-RE of settled specs; blanket-naming the ~19k unnamed IDB functions.
+
+## Phase 0 — Charter & pre-flight — **DONE 2026-06-16**
+- [x] On `master` after the campaign3→master merge (PR #1 `970e0a7`, + formatting `6cf31c5`); tree clean.
+- [x] Branched **`campaign12`** off master (no work on the default branch).
+- [x] IDA MCP UP on `doida.exe` `263bd994` (Hex-Rays ready) — queryable for confirmation.
+- [x] `Docs/PLAN.md` rewritten to the C12 charter; this ROADMAP section prepended; C11 Phase 5 closed.
+- [ ] Baseline gate re-confirm (trust C11's 1944-green; cheap re-confirm before the fix waves land).
+
+## Phase 1 — Discovery audit (Workflow, read-only, massively parallel) — **DONE 2026-06-16**
+`campaign12-discovery` (`wf_60ff8fa3-311`): 15 lanes (7 Godot-weighted + 5 core + 3 cross-cutting) →
+**106 findings** (11 high / 29 medium / 66 low). By category: fidelity 44, delete 18, optimize 14, bug 10,
+cleanroom 10, wire 9, test-gap 1. Triaged by owning area into a fix-lane worklist. Tier-1 RESOLVED the
+load-bearing `actormotion` idle off-by-one (4 C# sites + 2 docs read `cols[16]`; the IDB-confirmed format
+spec says **col15 = motion_ids_a[0] @ +0x40** — `cols[16]→cols[15]`).
+
+## Phase 2 — Fix waves (Workflow, one writer per area) — **DONE 2026-06-16**
+`campaign12-fix` (`wf_b2ecb46b-aec`): 7 disjoint-file lanes → **50 applied / 7 skipped / 4 deferred**.
+Headlines: GameHud invented ZoneIndicator pill DELETED (+ dead Unknown chrome); `ServerListDrainer.cs`
+NEW wire→view adapter (ServerListReceivedEvent → ServerSelectScreen); chat everyday channels → 2/7 (was
+3/21) + CP949 body/name + ChatRouting.Validate; LuaConfigRecord CP949 doc + DISPLAY_FRAMERATE→ShowFpsCounter;
+EnvironmentNode per-frame fog scalar (s×3.0); glow→Additive; World.tscn procedural-sky removed; CelShade
+post-process gate; effect placeholder removed; CmsgSelectCharacter→manage+delete Mode; outbound single-rental
++ pooled keepalive header; InputRouter modifier bitmask (Alt=0x8); idle `cols[15]` ×3; LocalAppPaths deleted.
+**Tier-1 reconciliation** (test/source coordinated, the lanes couldn't cross files): rewrote the chat test to
+2/7; `DisplayFramerate→ShowFpsCounter`; `CmsgSelectCharacter.Flag→Mode`; `BillingState→BillingFlag` (field +
+GamePacketHandler + PacketRouterTests); removed the new CS0649 (dead `LiveEffect.Particles`). Docs (Tier-1):
+`frontend_scenes.md §3.3.4` idle col15 + `CLAUDE.md` skeleton `g{id_b}.bnd` disambiguation (+ removed a
+`_dirty/` citation leak in CLAUDE.md). Deferred (noted): `LobbyServerRecord.ServerId` ushort→i16 (wide
+ripple, runtime-neutral); `FrameSplitter` zero-alloc (primitive `DecompressPayloadInto` ready — needs a
+scratch-lifetime decision + perf-reviewer); SoundTable `>=`/Bgtexture reject-0 (kept strict — files are
+always exact size); slot-lock yaw-π (no lock model).
+
+## Phase 3 — Screenshot fidelity loop (Tier-1 Godot windowed) — **DONE 2026-06-16**
+Windowed capture of login / server / charselect / create vs the maintainer-verified oracle `mh-cs2-final`.
+**Caught a real C12 regression the C# build cannot see:** L3's CelShade post-process gate used `return` in
+`fragment()` (illegal in Godot shaders) → `SHADER ERROR` → all cel-shaded chars failed; fixed (select, not
+early-return). **Reverted 2 L2 spec-driven visual regressions** (oracle > spec, the campaign-9 doctrine):
+the free-look Euler camera (−32.67° looked at the ground, not the row; LookAt's −9° matches the oracle + KF
+geometry) → reverted `CharSelectCameraRig` to LookAt; and the create-preview boom removal (framed only the
+legs) → reverted `CharCreatePreview3D` to the campaign-9d boom framing (re-applied only the `cols[15]` idle
+fix). KEPT L3's horizontal water plane (reads as the temple-over-water and is more §3.6.5-correct than the
+old vertical curtain). Re-captured: charselect ≈ oracle (dark temple, braziers, 3 chars, water); create
+framing fixed. FLAGGED (pre-existing, NOT a C12 regression): the create close-up magnifies the known
+skinning static-pose/distortion debt → godot-skinning-specialist follow-up. Headless smoke clean; autoload +
+`client_dir.cfg` restored byte-exact.
+
+## Phase 4 — RE legibility: names.yaml pull (IDB-only) — **DONE 2026-06-16**
+`ida-naming-sync` pull (SHA match `263bd994`): the IDB carries **6981** analyst-named symbols (3585 funcs +
+3396 globals) absent from the 3343-entry glossary (campaigns 8–11 annotated far more than was ever
+re-synced). Staged to `Docs/RE/_dirty/names-pulled-263bd994.yaml` (gitignored) for **maintainer hand-merge**
+— NOT auto-merged into `names.yaml` (orchestrator-owned; the skill stages for review). No IDB writes.
+
+## Phase 5 — Hard gates + consolidate + commit — **DONE 2026-06-16**
+Authoritative nuke + `--no-incremental`: build **0 error / 0 warning** (improved from the baseline's 1
+pre-existing CS8600 — both it and the transient CS0649 cleared) · **1944 tests green** (12 suites, 0 failed).
+DAG PASS; firewall clean; headless boot clean; screenshots are the visual evidence. ROADMAP + memory updated;
+committed targeted paths on `campaign12`.
+
+---
+
 # CAMPAIGN 11 — C# Excellence & Fidelity (core layers 01–04 + Godot 05) (launched 2026-06-16)
 
 **Mandate (maintainer):** "With all the IDA Pro comprehension (the source of truth) and the now
@@ -60,11 +148,12 @@ Authoritative nuke + `--no-incremental` build **0 err / 1 pre-existing warn**; *
 failed, 0 skipped (was 1859; +2 new suites Network.Abstractions/Shared.Diagnostics, +85 tests). DAG PASS.
 Firewall: the two committed `_dirty/` citations removed. (Headless/screenshot Godot re-verify = follow-up.)
 
-## Phase 5 — Consolidate & commit — **IN PROGRESS**
-Phase-3a milestone committed `707ce31`; Phase-3b arch commit next. Remaining: `names.yaml` sync (deferred
-C10 ctor collisions); journal + memory; the residual follow-ups (GameHud "Unknown" pill dead chrome,
-lobby ServerSelect wire-adapter, the deeper deferred items). Reconciled the stale CLAUDE.md skeleton claim
-is a C10 item (still pending). Headless Godot screenshot-verify of the front-end fidelity fixes = follow-up.
+## Phase 5 — Consolidate & commit — **DONE 2026-06-16**
+Three milestones committed on campaign3: `b236830` (baseline) → `707ce31` (fix + reconcile, 135 files) →
+`8055b52` (arch). Then campaign3 was merged to `master` via PR #1 (`970e0a7`), with a formatting-only
+commit `6cf31c5` riding along. Memory `campaign11-csharp-excellence.md` written. **Follow-ups handed to
+CAMPAIGN 12** (see below): names.yaml sync, GameHud "Unknown" dead pill, ServerSelect wire-adapter, the
+stale CLAUDE.md skeleton claim, and the never-run **screenshot** fidelity verification.
 
 ---
 

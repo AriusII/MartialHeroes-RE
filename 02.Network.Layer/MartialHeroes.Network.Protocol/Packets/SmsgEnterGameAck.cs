@@ -12,9 +12,11 @@ using MartialHeroes.Network.Protocol.Opcodes;
 namespace MartialHeroes.Network.Protocol.Packets;
 
 /// <summary>
-/// 3/5 — enter-world acknowledgement; sets billing state and transitions the client into the
-/// in-world game state. 40-byte block + trailing u32 = 44 bytes total.
-/// spec: Docs/RE/packets/3-5_enter_game_response.yaml. CAPTURE-UNVERIFIED layout.
+/// 3/5 — enter-world ACCOUNT/BILLING acknowledgement; the direct reply to C2S 1/9. Carries the
+/// account/character name, a billing flag, and the account character count, and its side effect moves
+/// the client to the LOADING scene. It is NOT the world snapshot (map/position/self arrive on 4/1).
+/// 40-byte account/billing block + trailing u32 char count = 44 bytes total.
+/// spec: Docs/RE/packets/3-5_enter_game_response.yaml. CAPTURE-UNVERIFIED value semantics.
 /// </summary>
 [PacketOpcode(3, 5)]
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -32,8 +34,13 @@ public readonly struct SmsgEnterGameAck
     /// </summary>
     public readonly NameBlockBuffer NameBlock;
 
-    /// <summary>0x1c — billing state (LE u32), fed to the client BillingState object. spec: same.</summary>
-    public readonly uint BillingState;
+    /// <summary>
+    /// 0x1c — billing flag (LE u32), at +28 within the leading 40-byte block; fed to the client
+    /// billing/session object. (Distinct from the 256-byte <c>BillingState</c> subscription singleton in
+    /// structs/runtime_singletons.md §3.5 — this is the packet's wire field.)
+    /// spec: Docs/RE/packets/3-5_enter_game_response.yaml (BillingFlag @0x1c, u32).
+    /// </summary>
+    public readonly uint BillingFlag;
 
     /// <summary>0x20 — unconsumed remainder of the 40-byte leading block. spec: same (BlockTail: bytes[8]).</summary>
     public readonly BlockTailBuffer BlockTail;

@@ -211,7 +211,9 @@ public sealed partial class InventoryWindow : Control
     public override void _Input(InputEvent ev)
     {
         // Toggle on key I press (not held).
-        // spec: Docs/RE/specs/input_ui.md §4 — inventory key toggle.
+        // The key binding is a port-side convention (key I opens inventory); the original
+        // client dispatches via a command-code dispatch table.
+        // spec: Docs/RE/specs/ui_system.md §15 — in-game HUD key command dispatch.
         if (ev is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.I)
         {
             Visible = !Visible;

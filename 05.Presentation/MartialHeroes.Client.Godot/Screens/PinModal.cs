@@ -282,9 +282,13 @@ public sealed partial class PinModal : Control
         // NinePatch centre is mostly transparent. Aesthetic-tuned.
         // -------------------------------------------------------------------
 
-        // Opaque dark backdrop so the modal reads as a distinct panel on any background.
-        // Aesthetic — no spec art at this exact position; the dim layer covers the whole screen,
-        // and this inner rect makes the PIN panel distinctly legible.
+        // Deliberate non-spec modal dim: a solid dark rect behind the NinePatch chrome so the
+        // PIN panel reads as a distinct opaque surface on any background content. There is no
+        // spec art for this inner fill rect (the spec only describes the NinePatch dragon-frame
+        // from InventWindow.dds). This ColorRect is retained as a deliberate port-side legibility
+        // aid; it does not represent a recovered asset.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.3 — NinePatch dragon-frame is the only
+        //   recovered art for this position; inner fill = port-side legibility aid (NON-SPEC).
         var backdropRect = new ColorRect
         {
             Name = "PinBackdrop",

@@ -1327,12 +1327,15 @@ The concrete `g{id}.mot` that each clip resolves to is owned by `specs/skinning.
 animation-catalogue struct, via the same data-table chain as idle: **`data/char/actormotion.txt`
 (col2 == IdB) → `data/char/mot/g{id}.mot`**. For the starter classes the idle clip is `g111100010.mot`
 ("peace", 30 frames @ 10 fps; §3.7.5). The **select** clip is the sibling entry in the **same** visual
-record. The two clips resolve from **distinct columns** of the actor's `actormotion.txt` row
-(CODE-CONFIRMED path): the **idle** clip reads visual-record field **+0x44** (← `actormotion.txt`
-**column 16**), and the **select / turn-to-front** clip reads visual-record field **+0x58** (←
-`actormotion.txt` **column 21**). So the concrete select `g{id}.mot` is **column 21** of the actor's
-`actormotion.txt` row, resolved through the standard motion-id chain. The **path is no longer unknown**
-— but the **literal id** is a VFS/data read of column 21 (NEEDS-VFS-HARNESS); still **do not invent the
+record. The two clips resolve from **distinct slots** of the actor's `actormotion.txt` row. The **idle / stand**
+clip is **`motion_ids_a[0]` = column 15 (record field `+0x40`)** — this is the format-authoritative
+position, re-confirmed operand-for-operand against the IDB loader on build `263bd994` (see
+`formats/actormotion.md` §Per-record layout and `formats/animation.md`). An earlier reading of this
+section gave `+0x44` / column 16, which is actually `motion_ids_a[1]` (the *second* slot) and is
+therefore **superseded** — the live client port reads column 15. The **select / turn-to-front** clip
+reads visual-record field **+0x58** (= `motion_ids_a[6]` = `actormotion.txt` **column 21** under the same
+0-based slot scheme), resolved through the standard motion-id chain. The **path is no longer unknown** —
+but the **literal id** is a VFS/data read of column 21 (NEEDS-VFS-HARNESS); still **do not invent the
 filename** (carried in §3.7.5 / Open questions).
 
 | State | 3D-actor effect |
@@ -1342,7 +1345,7 @@ filename** (carried in §3.7.5 / Open questions).
 | De-hovered / mouse-leave | reverts to idle clip (select pose is **not** sticky) |
 | Locked / new / creating slot | yaw π (faces away); otherwise idle handling |
 <!-- source: _dirty/campaign5/charselect3d/highlight-feedback.md, _RECONCILED.md (LANE 3) -->
-<!-- pending data-table: exact IdA=1 select .mot LITERAL id (path pinned = actormotion.txt col 21 via visual-record field +0x58; idle = col 16 via +0x44; literal id needs a VFS harness — do not invent) -->
+<!-- pending data-table: exact IdA=1 select .mot LITERAL id (path pinned = actormotion.txt col 21 via visual-record field +0x58 = motion_ids_a[6]; idle = col 15 via +0x40 = motion_ids_a[0], format-authoritative per formats/actormotion.md; literal id needs a VFS harness — do not invent) -->
 
 ### 3.3.5 Worn gear & default highlight (CODE-CONFIRMED)
 

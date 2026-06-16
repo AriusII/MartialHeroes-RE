@@ -46,26 +46,27 @@ public sealed partial class InputRouter : Node
     // Camera reference for screen→world raycasting (click-to-move).
     private Camera3D? _camera;
 
-    // Modifier flag constants.
-    // spec: Docs/RE/specs/input_ui.md §2 — "modifier flags (Shift/Ctrl/Alt; bit mapping UNVERIFIED)".
-    // We use the same convention as the original 20-byte normalised record at +16.
-    // Exact bit mapping UNVERIFIED per spec §7; we document our convention here.
-    private const int ModShift = 1; // bit 0 — UNVERIFIED exact bit; convention for .NET port.
-    private const int ModCtrl = 2; // bit 1 — UNVERIFIED.
-    private const int ModAlt = 4; // bit 2 — UNVERIFIED.
+    // Modifier flag constants — recovered bit positions.
+    // spec: Docs/RE/specs/input_ui.md §2c — "Modifier-flag encoding (recovered bit positions)".
+    //   bit3 (0x8) = key slot 1014 — confirmed Alt.
+    //   bit2 (0x4) = key slot 1012  (Ctrl-vs-Shift label capture/debugger-pending).
+    //   bit1 (0x2) = key slot 1013  (Ctrl-vs-Shift label capture/debugger-pending).
+    //   bit0 (0x1) = keyboard auto-repeat flag (NOT a Shift/Ctrl/Alt modifier) — reserved, not emitted.
+    // The bit POSITIONS are confirmed; only the Ctrl/Shift identity of slots 1012/1013 is pending,
+    // so we bind Shift→0x4 (slot 1012) and Ctrl→0x2 (slot 1013) as the current best-effort mapping.
+    // spec: Docs/RE/specs/input_ui.md §2c.
+    private const int ModShift = 0x4; // bit2 — key slot 1012. spec: input_ui.md §2c.
+    private const int ModCtrl = 0x2;  // bit1 — key slot 1013. spec: input_ui.md §2c.
+    private const int ModAlt = 0x8;   // bit3 — key slot 1014, confirmed Alt. spec: input_ui.md §2c.
 
-    /// <summary>Called by GameLoop._Ready before any input is processed.</summary>
-    public void Initialise(ClientContext context, InputBus inputBus)
-    {
-        _clientContext = context;
-        _inputBus = inputBus;
-    }
-
-    /// <summary>Kept for backward-compat signature used before the InputBus wave.</summary>
+    /// <summary>
+    /// Called by GameLoop._Ready before any input is processed.
+    /// The InputBus is supplied separately via <see cref="InitialiseBus"/> when the composition
+    /// root wires it (see GameLoop._Ready: Initialise(context) then InitialiseBus(context.InputBus)).
+    /// </summary>
     public void Initialise(ClientContext context)
     {
         _clientContext = context;
-        // InputBus will be set separately via InitialiseBus when the composition root wires it.
     }
 
     /// <summary>Provides the InputBus after construction (when Initialise(context) is called first).</summary>
@@ -412,9 +413,11 @@ public sealed partial class InputRouter : Node
     };
 
     /// <summary>
-    /// Builds a modifier bitmask from a Godot input event.
-    /// Exact bit mapping UNVERIFIED per spec §7; our convention: Shift=bit0, Ctrl=bit1, Alt=bit2.
-    /// spec: Docs/RE/specs/input_ui.md §2 (+16 modifier flags; bit mapping UNVERIFIED).
+    /// Builds a modifier bitmask from a Godot input event using the recovered bit positions:
+    /// Alt=bit3 (0x8), and the two slot modifiers 0x4 (slot 1012) / 0x2 (slot 1013).
+    /// Bit0 (0x1) is the keyboard auto-repeat flag and is NOT a Shift/Ctrl/Alt modifier — never set here.
+    /// The bit positions are confirmed; only the Ctrl/Shift label of slots 1012/1013 is pending.
+    /// spec: Docs/RE/specs/input_ui.md §2c (recovered modifier-flag bit positions).
     /// </summary>
     private static int BuildModifiers(global::Godot.InputEvent evt)
     {

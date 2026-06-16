@@ -354,15 +354,28 @@ public sealed partial class AudioService : Node
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Tries to load the per-area .bgm sound table and start the first non-null BGM entry looping.
+    /// Tries to select and start the per-area BGM looping on the Music bus.
     ///
     /// Sound table path: data/map{tag}/soundtable{tag}.bgm
     /// The area ID is read from the resolved target area in the scene (defaults to 0 if unavailable).
     /// This runs on a background task to avoid blocking the main thread while reading the VFS.
     /// The actual StartBgm call is marshalled back to the main thread via CallDeferred.
     ///
-    /// spec: Docs/RE/specs/sound.md §6.2 (BGM slot change from mud-cell +2 → .bgm table entry 0).
-    /// spec: Docs/RE/formats/sound_tables.md §Semantic mapping — .bgm indexed by mud-cell +2.
+    /// BGM selection (spec §6.6): the original picks the .bgm table entry whose index is the MUD cell
+    /// byte at offset +0x02 under the local player's (X,Z), and — if the player's indoor/instanced flag
+    /// is set — forces the override ID 863500002 instead of the table entry. The dedup in StartBgm
+    /// reproduces the original playMusicZone "already-playing → no restart" behaviour.
+    ///
+    /// PORTING GAP (DEFERRED — documented, not invented): AudioService is not fed the per-frame player
+    /// (X,Z) → MUD-cell byte index, nor the player-actor instanced-indoor flag. Both belong to the world
+    /// ambient driver (RealWorldRenderer / actor state) which this service does not own. Until that input
+    /// is plumbed in, we apply the parts that ARE resolvable from the VFS and from area-level state:
+    ///   1. The indoor override, gated on the AREA-level indoor flag from map_option{areaId}.bin (a
+    ///      legitimate VFS-readable approximation of the per-player instanced flag — see §6.6 note below).
+    ///   2. The deterministic per-area default entry (mud-cell index 0 → the table's first active entry)
+    ///      used until the live mud-cell byte is available.
+    ///   3. The StartBgm dedup.
+    /// spec: Docs/RE/specs/sound.md §6.2 (cell lookup at player X,Z), §6.6 (BGM zone change + indoor override).
     /// spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — .bgm → data/sound/2d/.
     /// </summary>
     private void TryStartAreaBgmAsync()
@@ -376,6 +389,21 @@ public sealed partial class AudioService : Node
             // spec: Docs/RE/formats/terrain.md §1.1 — area id digit decomposition. CONFIRMED.
             int areaId = TryGetActiveAreaId();
             string tag = AreaTag(areaId);
+
+            // Indoor/instanced override (§6.6 step 2): when the player's indoor flag is set the BGM is
+            // forced to 863500002 instead of the table entry. The per-player instanced flag is not
+            // plumbed here (DEFERRED); we approximate it with the AREA-level indoor flag from
+            // map_option{areaId}.bin (bare-decimal area id, no zero-padding — VFS-confirmed path).
+            // spec: Docs/RE/specs/sound.md §6.6 — indoor override → 863500002.
+            // spec: Docs/RE/formats/environment_bins.md — data/sky/dat/<name><id>.bin path family.
+            if (IsAreaIndoor(areaId))
+            {
+                GD.Print($"[AudioService] Area {areaId} indoor flag set — forcing indoor BGM override " +
+                         $"{IndoorBgmOverrideId} (§6.6).");
+                uint indoorId = IndoorBgmOverrideId;
+                Callable.From(() => StartBgm(indoorId)).CallDeferred();
+                return;
+            }
 
             // spec: Docs/RE/formats/sound_tables.md §Identification — found in data/map<id>/soundtable<id>.<ext>.
             string bgmPath = $"data/map{tag}/soundtable{areaId}.bgm";
@@ -405,9 +433,11 @@ public sealed partial class AudioService : Node
             // spec: Docs/RE/formats/sound_tables.md §File layout — 256 × 48 bytes runtime region.
             SoundTableData table = SoundTableParser.Parse(raw, SoundTableExtension.Bgm);
 
-            // Find the first non-null BGM entry.
-            // Entry index 0 is the null sentinel; skip it.
-            // spec: Docs/RE/formats/sound_tables.md §Entry count — "Entry index 0 is the null/disabled sentinel".
+            // DEFERRED: the correct entry is table[mud-cell byte +0x02] at the player's (X,Z). That live
+            // mud-cell byte is not plumbed to AudioService (see method-level PORTING GAP). Until it is,
+            // select the first ACTIVE entry as the per-area default (equivalent to a cell index that
+            // points at the first populated, hour-active slot). Entry index 0 is the null sentinel.
+            // spec: Docs/RE/specs/sound.md §6.6 — slot indexed by mud-cell +0x02; index 0 is the null sentinel.
             uint bgmId = 0;
             for (int i = 1; i < SoundTableData.EntryCount; i++)
             {
@@ -459,6 +489,42 @@ public sealed partial class AudioService : Node
         catch (Exception ex)
         {
             GD.PrintErr($"[AudioService] TryStartAreaBgmAsync failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Returns true when the given area's <c>map_option{areaId}.bin</c> indoor flag is set.
+    ///
+    /// This is the AREA-level indoor flag and is used here as a VFS-readable approximation of the
+    /// per-player instanced-indoor flag that §6.6 actually keys the BGM override on (the player-actor
+    /// flag is not plumbed to AudioService — see <see cref="TryStartAreaBgmAsync"/> PORTING GAP).
+    /// Returns false when the file is absent, malformed, or the VFS is unavailable.
+    /// spec: Docs/RE/specs/sound.md §6.6 — indoor override.
+    /// spec: Docs/RE/formats/environment_bins.md §1.1 — map_option indoor flag (MAPHIDE).
+    /// </summary>
+    private bool IsAreaIndoor(int areaId)
+    {
+        if (!_vfsAvailable || _assets is null) return false;
+
+        try
+        {
+            // Bare-decimal area id, no zero-padding — VFS-confirmed path family.
+            // spec: Docs/RE/formats/environment_bins.md — data/sky/dat/<name><id>.bin.
+            string path = $"data/sky/dat/map_option{areaId}.bin";
+            if (!_assets.Contains(path)) return false;
+
+            ReadOnlyMemory<byte> raw = _assets.GetRaw(path);
+            if (raw.IsEmpty) return false;
+
+            MapOptionBin mapOption = EnvironmentBinParsers.ParseMapOption(raw);
+            return mapOption.IndoorFlag != 0;
+        }
+        catch (Exception ex)
+        {
+            // Tolerant: a missing/malformed map_option just means "not known indoor".
+            // spec: Docs/RE/formats/environment_bins.md §Overview Sibling tolerance — skip-and-default.
+            GD.Print($"[AudioService] map_option read failed for area {areaId}: {ex.Message} — treating as outdoor.");
+            return false;
         }
     }
 

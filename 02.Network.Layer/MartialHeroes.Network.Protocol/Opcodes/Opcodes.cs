@@ -32,7 +32,14 @@ public static class Opcodes
     /// </summary>
     public const uint CmsgCreateCharacter = 0x10006;
 
-    /// <summary>1:7 — client select-character / slot-ack request (2 B: slot + flag). status: draft. spec: packets/cmsg_char_select.yaml.</summary>
+    /// <summary>
+    /// 1:7 — client character-MANAGE request (2 B: slot + mode). status: confirmed (routing+size).
+    /// DELETE OVERLOADS this op — there is NO dedicated delete opcode in major 1: <c>{slot, 0}</c> =
+    /// select/view, <c>{slot, 1}</c> = delete (code-confirmed literal). The delete/manage RESULT
+    /// returns on S2C 3/7 SmsgCharManageResult (subtype 2). The C# struct keeps the
+    /// <c>CmsgSelectCharacter</c> identifier; the catalog name is CmsgManageCharacter. spec:
+    /// packets/cmsg_char_select.yaml.
+    /// </summary>
     public const uint CmsgSelectCharacter = 0x10007;
 
     /// <summary>1:9 — client enter-world request (40 B: slot + version blob + version-check u32). status: draft. spec: packets/cmsg_char_enter.yaml.</summary>

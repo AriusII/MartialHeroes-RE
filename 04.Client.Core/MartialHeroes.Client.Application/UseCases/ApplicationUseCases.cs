@@ -8,6 +8,7 @@ using System.Collections.Immutable;
 using MartialHeroes.Client.Domain.Actors;
 using MartialHeroes.Client.Domain.Inventory;
 using MartialHeroes.Client.Domain.Skills;
+using MartialHeroes.Client.Domain.Social;
 using MartialHeroes.Network.Abstractions.Lobby;
 using MartialHeroes.Network.Abstractions.Protocol;
 using MartialHeroes.Network.Abstractions.Session;
@@ -57,6 +58,21 @@ public sealed class ApplicationUseCases : IApplicationUseCases
 
     /// <summary>The 1/9 version-token length: a fixed 33-byte buffer. spec: 1-9_enter_game_request.yaml.</summary>
     public const int VersionTokenLength = 33;
+
+    /// <summary>
+    /// CP949 (code page 949 / EUC-KR) — the on-wire charset for ALL chat text (both the say-box body and
+    /// the whisper target name). The code-pages provider is registered once here (idempotent) so the
+    /// chat builders never emit UTF-8/ASCII bytes for Korean text. spec: Docs/RE/specs/chat.md §0 / §8.2
+    /// (all chat text is CP949); packets/2-7_whisper.yaml (CP949 text + NUL-padded CP949 target name).
+    /// </summary>
+    private static readonly Encoding Cp949 = CreateCp949();
+
+    private static Encoding CreateCp949()
+    {
+        // spec: Docs/RE/specs/chat.md §0 — register the code-pages provider once; CP949 is not built-in.
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        return Encoding.GetEncoding(949); // spec: Docs/RE/specs/chat.md §0 (code page 949 / EUC-KR)
+    }
 
     /// <summary>
     /// Creates the use-case facade.
@@ -344,10 +360,34 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         ArgumentNullException.ThrowIfNull(text);
         cancellationToken.ThrowIfCancellationRequested();
 
-        bool isWhisper = !string.IsNullOrEmpty(recipientName);
-        return isWhisper
-            ? SendWhisperAsync(channel, recipientName!, text, cancellationToken)
-            : SendChannelChatAsync(channel, text, cancellationToken);
+        // EVERY everyday say-box channel (say 0 / shout 1 / party 2 / guild 3 / event 6 / special 7 /
+        // alliance 15) AND whisper (channel 9) is sent through the SINGLE chat sender as opcode (2:7),
+        // with the channel code as the first payload byte and a 17-byte target-name area that is filled
+        // only for whisper and zeroed otherwise. There is NO say-box (2:7)-vs-(3:21) split: (3:21) is a
+        // separate chat-command dispatcher path, not the say box. spec: Docs/RE/specs/chat.md §4.1;
+        // packets/2-7_whisper.yaml (uniform 19-byte prefix).
+        bool isWhisper = !string.IsNullOrEmpty(recipientName) || channel == WhisperChannelCode;
+
+        // Domain gate: whisper self-target guard + per-channel text-length caps (whisper 119, everyday
+        // chat < 200). The text caps are CHARACTER caps in the editbox model. spec: chat.md §2.3 / §8.2;
+        // social.md §3 / §4 / §8. A non-Send result aborts before any frame is built.
+        ChatChannel routeChannel = isWhisper ? ChatChannel.Whisper : ChatChannel.Channel;
+        ChatRouteResult route = ChatRouting.Validate(
+            routeChannel,
+            text.Length,
+            // Self-target resolution is by character name, which this layer cannot resolve (no
+            // name->actor-id map below layer 04); the server still validates. Pass false. spec: social.md §1/§3.
+            isSelfTarget: false,
+            // The everyday say-box (2:7) is NOT the (3:21) broadcast path, so no selector bypass applies;
+            // pass a non-broadcast selector so the < 200 gate is honoured. spec: chat.md §4.1; social.md §4.
+            channelSelector: 0);
+        if (route != ChatRouteResult.Send)
+        {
+            // Gate blocked (self-whisper / empty / too long) -> send nothing. spec: social.md §8.
+            return ValueTask.CompletedTask;
+        }
+
+        return SendChat27Async(channel, isWhisper ? recipientName : null, text, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -594,78 +634,121 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     // Chat helpers
     // -------------------------------------------------------------------------
 
-    private ValueTask SendWhisperAsync(uint channel, string recipientName, string text, CancellationToken ct)
+    /// <summary>The whisper channel code (named private channel). spec: Docs/RE/specs/chat.md §2.3 / §3 (channel 9).</summary>
+    private const byte WhisperChannelCode = 9;
+
+    /// <summary>The whisper text byte cap on the CP949 body (the 0x77 strncpy cap). spec: 2-7_whisper.yaml (119 bytes).</summary>
+    private const int WhisperBodyByteCap = 119;
+
+    /// <summary>The fixed 16-byte whisper target-name buffer at payload +0x02. spec: 2-7_whisper.yaml (TargetName).</summary>
+    private const int WhisperTargetNameBytes = 16;
+
+    /// <summary>
+    /// Builds and sends the single (2:7) <c>CmsgChat</c> message that carries EVERY everyday say-box
+    /// channel and whisper. The wire form is a UNIFORM 19-byte prefix — channel code at +0x00, a flag
+    /// byte at +0x01, a 16-byte CP949 target-name area at +0x02 (NUL-padded; filled only for whisper),
+    /// and a trailing header byte at +0x12 — followed by a length-prefixed CP949 text body whose u32
+    /// length EXCLUDES the terminating NUL (built from the byte count, not byte-count + 1; this DIFFERS
+    /// from (3:21), whose prefix includes the NUL). spec: Docs/RE/specs/chat.md §4.1 / §4.2;
+    /// packets/2-7_whisper.yaml.
+    /// </summary>
+    private ValueTask SendChat27Async(uint channel, string? recipientName, string text, CancellationToken ct)
     {
-        // 2/7: 19-byte header + [u32 textLength][text bytes][NUL]; textLength EXCLUDES the terminating
-        // NUL (it is built from strlen(text), not strlen+1). This DIFFERS from 3/21, whose prefix
-        // INCLUDES the NUL. spec: Docs/RE/packets/2-7_whisper.yaml (TEXT BODY: "textLength EXCLUDES the
-        // terminating NUL ... Contrast 3/21 ... whose length prefix INCLUDES the NUL").
-        byte[] body = BuildLengthPrefixedText(text, includeNulInLength: false);
-        var payload = new byte[CmsgWhisperHeader.HeaderSize + body.Length];
+        // Text body: CP949 bytes, hard-capped at 119 bytes for whisper (the 0x77 send-site strncpy cap).
+        // spec: 2-7_whisper.yaml (TEXT BODY; strncpy cap 0x77 = 119). All chat text is CP949 (Korean
+        // codepage), never a managed UTF-16/ASCII string on the wire. spec: chat.md §0 / §8.2.
+        bool isWhisper = !string.IsNullOrEmpty(recipientName) || channel == WhisperChannelCode;
+        int bodyByteCount = Cp949.GetByteCount(text);
+        if (isWhisper && bodyByteCount > WhisperBodyByteCap)
+        {
+            bodyByteCount = TruncateCp949(text, WhisperBodyByteCap, out _);
+        }
+
+        var payload = new byte[CmsgWhisperHeader.HeaderSize + sizeof(uint) + bodyByteCount + 1];
         Span<byte> p = payload;
         p.Clear();
 
-        p[0x00] = (byte)channel; // 0x00 ChannelType (channel selector, low byte)
-        // 0x01 Flag stays zero (meaning UNKNOWN; spec).
-        // 0x02 TargetName: NUL-padded into a fixed 16-byte buffer. spec: 2-7 (HIGH CONFIDENCE).
-        WriteFixedAscii(recipientName, p.Slice(0x02, 16));
-        // 0x12 HeaderTail stays zero.
+        p[0x00] = (byte)channel; // 0x00 Channel (channel code; low byte). spec: 2-7_whisper.yaml.
+        // 0x01 Selector / Flag stays zero (meaning capture-pending). spec: 2-7_whisper.yaml.
+        // 0x02 TargetName: 16-byte CP949 name area, NUL-padded; filled ONLY for whisper, zero otherwise.
+        // spec: chat.md §4.1 ("fill the 16-byte target name only for whisper"); 2-7_whisper.yaml.
+        if (isWhisper && recipientName is { Length: > 0 })
+        {
+            WriteFixedCp949(recipientName, p.Slice(0x02, WhisperTargetNameBytes));
+        }
 
-        body.CopyTo(p.Slice(CmsgWhisperHeader.HeaderSize));
+        // 0x12 trailing header byte stays zero (completes the 19-byte prefix). spec: 2-7_whisper.yaml.
+
+        // Text tail at +0x13: [u32 textLength EXCLUDING the NUL][CP949 text bytes][NUL]. spec: chat.md §4.2.
+        Span<byte> tail = p.Slice(CmsgWhisperHeader.HeaderSize);
+        BinaryPrimitives.WriteUInt32LittleEndian(tail.Slice(0, sizeof(uint)), (uint)bodyByteCount);
+        Cp949.GetBytes(text.AsSpan(0, Cp949CharCountForBytes(text, bodyByteCount)), tail.Slice(sizeof(uint), bodyByteCount));
+        // The trailing NUL after the body is already present (zeroed array). spec: 2-7_whisper.yaml.
+
         return SendAsync(major: 2, minor: 7, payload, ct);
     }
 
-    private ValueTask SendChannelChatAsync(uint channel, string text, CancellationToken ct)
+    /// <summary>
+    /// Writes <paramref name="value"/> as CP949 bytes into a NUL-padded fixed buffer, never overrunning
+    /// and always leaving at least one NUL terminator (the legacy fixed-buffer name convention). spec:
+    /// 2-7_whisper.yaml (TargetName: CP949, NUL-padded, strncpy-capped at 16 bytes).
+    /// </summary>
+    private static void WriteFixedCp949(string value, Span<byte> destination)
     {
-        // 3/21: 56-byte context header + [u32 textLength][text bytes][NUL]; textLength INCLUDES the
-        // terminating NUL (= strlen + 1). This DIFFERS from 2/7, whose prefix excludes it.
-        // spec: Docs/RE/packets/3-21_chat_channel.yaml; opcodes.md 3/21 row ("length prefix INCLUDES
-        // the trailing NUL ... DIFFERS from 2/7").
-        byte[] body = BuildLengthPrefixedText(text, includeNulInLength: true);
-        var payload = new byte[CmsgChatChannelHeader.HeaderSize + body.Length];
-        Span<byte> p = payload;
-        p.Clear();
-
-        // 0x00..0x03 HeaderPrefix stays zero (not decoded; spec).
-        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x04, 4), channel); // 0x04 ChannelSelector
-        // 0x08..0x37 HeaderRest stays zero (not decoded; spec).
-
-        body.CopyTo(p.Slice(CmsgChatChannelHeader.HeaderSize));
-        return SendAsync(major: 3, minor: 21, payload, ct);
+        destination.Clear();
+        // Cap the CP949 byte run at destination.Length - 1 so a NUL terminator always remains, and never
+        // split a 2-byte CP949 glyph across the cap. spec: chat.md §0 (CP949 lead-byte aware).
+        int charCount = Cp949CharCountForBytes(value, destination.Length - 1);
+        if (charCount > 0)
+        {
+            Cp949.GetBytes(value.AsSpan(0, charCount), destination);
+        }
     }
 
     /// <summary>
-    /// Builds a chat text body: <c>[u32 LE textLength][UTF-8 text][0x00]</c>. The text bytes are always
-    /// followed by a NUL, but whether the u32 length COUNTS that NUL differs by opcode:
-    /// <list type="bullet">
-    /// <item>2/7 CmsgChat (whisper / everyday chat) — <paramref name="includeNulInLength"/> is
-    /// <see langword="false"/>: length = byte-count (strlen). spec: Docs/RE/packets/2-7_whisper.yaml.</item>
-    /// <item>3/21 CmsgChatChannel — <paramref name="includeNulInLength"/> is <see langword="true"/>:
-    /// length = byte-count + 1 (strlen + 1, NUL counted). spec: Docs/RE/packets/3-21_chat_channel.yaml.</item>
-    /// </list>
-    /// UTF-8 is PROVISIONAL for the body bytes (the specs mark the wire charset CP949, but ASCII text
-    /// round-trips identically; charset correction is tracked separately).
+    /// Truncates <paramref name="text"/> to at most <paramref name="byteCap"/> CP949 bytes without
+    /// splitting a multi-byte glyph, returning the resulting CP949 byte count. spec: 2-7_whisper.yaml
+    /// (whisper body capped at 119 bytes); chat.md §0 (CP949 lead-byte aware caret/wrap).
     /// </summary>
-    private static byte[] BuildLengthPrefixedText(string text, bool includeNulInLength)
+    private static int TruncateCp949(string text, int byteCap, out int charCount)
     {
-        int textByteCount = Encoding.UTF8.GetByteCount(text);
-        // 2/7 excludes the NUL (length = strlen); 3/21 includes it (length = strlen + 1).
-        // spec: 2-7_whisper.yaml (excludes) vs 3-21_chat_channel.yaml (includes).
-        uint length = checked((uint)(textByteCount + (includeNulInLength ? 1 : 0)));
-        var body = new byte[sizeof(uint) + textByteCount + 1];
-        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(0, 4), length);
-        Encoding.UTF8.GetBytes(text, body.AsSpan(sizeof(uint), textByteCount));
-        // trailing NUL already present (zeroed array).
-        return body;
+        charCount = Cp949CharCountForBytes(text, byteCap);
+        return Cp949.GetByteCount(text.AsSpan(0, charCount));
     }
 
-    /// <summary>Writes <paramref name="value"/> as ASCII into a NUL-padded fixed buffer (truncating if too long).</summary>
-    private static void WriteFixedAscii(string value, Span<byte> destination)
+    /// <summary>
+    /// Returns the largest prefix character count of <paramref name="text"/> whose CP949 encoding fits in
+    /// <paramref name="byteCap"/> bytes, never splitting a 2-byte CP949 glyph. spec: chat.md §0.
+    /// </summary>
+    private static int Cp949CharCountForBytes(string text, int byteCap)
     {
-        destination.Clear();
-        int written = Encoding.ASCII.GetBytes(
-            value.AsSpan(0, Math.Min(value.Length, destination.Length - 1)), destination);
-        _ = written;
+        if (byteCap <= 0)
+        {
+            return 0;
+        }
+
+        int total = Cp949.GetByteCount(text);
+        if (total <= byteCap)
+        {
+            return text.Length;
+        }
+
+        // Grow the prefix char-by-char until the next char would overflow the byte cap.
+        int chars = 0;
+        int bytes = 0;
+        while (chars < text.Length)
+        {
+            int next = Cp949.GetByteCount(text.AsSpan(chars, 1));
+            if (bytes + next > byteCap)
+            {
+                break;
+            }
+
+            bytes += next;
+            chars++;
+        }
+
+        return chars;
     }
 
     // -------------------------------------------------------------------------
