@@ -50,8 +50,17 @@ INTENDED: dict[str, set[str]] = {
     "Assets.Mapping": {"Assets.Parsers"},
     # 04.Client.Core
     "Client.Domain": {"Shared.Kernel"},
-    "Client.Application": {"Client.Domain", "Network.Abstractions"},
-    "Client.Infrastructure": {"Client.Application"},
+    # Application IS the packet-handling + login layer: its handlers consume the
+    # wire structs/opcodes (Network.Protocol) and its login flow consumes the
+    # session handshake (Network.Crypto). Both edges are downward (4->2) and
+    # acyclic -- accepted as legitimate by-design edges (CAMPAIGN 11 Phase 3b,
+    # "accept + document"; see CLAUDE.md architecture section).
+    "Client.Application": {"Client.Domain", "Network.Abstractions", "Network.Protocol", "Network.Crypto"},
+    # Infrastructure builds the local catalogues from the binary data tables: it
+    # reads decoded records (Assets.Parsers) off the VFS (Assets.Vfs). Both edges
+    # are downward (4->3) and acyclic -- accepted as legitimate by-design edges
+    # (CAMPAIGN 11 Phase 3b).
+    "Client.Infrastructure": {"Client.Application", "Assets.Parsers", "Assets.Vfs"},
 }
 
 # Layer number per project, used for the downward-only check. Within a layer,

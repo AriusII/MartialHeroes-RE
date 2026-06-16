@@ -12,9 +12,11 @@
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9"/>
     </ItemGroup>
 
-    <ItemGroup>
-        <!-- Optional downward reference: Kernel types used in log signatures (PlayerId, etc.). -->
-        <ProjectReference Include="..\MartialHeroes.Shared.Kernel\MartialHeroes.Shared.Kernel.csproj"/>
-    </ItemGroup>
+    <!--
+      Package-only (no ProjectReference). The prior reference to Shared.Kernel was
+      spurious: no log method or metric signature uses a Kernel type (verified
+      CAMPAIGN 11). Keeping Diagnostics dependency-free preserves the clean layer-01
+      isolation. spec: CLAUDE.md architecture section.
+    -->
 
 </Project>

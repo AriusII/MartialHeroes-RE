@@ -34,29 +34,37 @@ live debugger/capture (flagged-pending facts stay pending).
   updates) → clean tree for the C# pass. Local `client_dir.cfg` left unstaged.
 - [x] CAMPAIGN 11 charter recorded (this section).
 
-## Phase 1 — Audit (Workflow, read-only, massively parallel) — **IN PROGRESS**
-`campaign11-csharp-audit` (run `wf_4551aa3c-544`): 20 lanes — one auditor per core project (12) + 4
-Godot sub-areas + 4 cross-cutting reviewers (clean-room-auditor, architecture-guardian, perf-reviewer,
-test-gap). Each returns structured findings across: **delete / fidelity / optimize / cleanroom / bug /
-modernize / test-gap / arch**, grounded in the governing spec. Fidelity is the priority category.
+## Phase 1 — Audit (Workflow, read-only, massively parallel) — **DONE**
+`campaign11-csharp-audit` (`wf_4551aa3c-544`): 20 lanes → **170 findings** (2 critical + 23 high + 39
+medium + 106 low). By category: fidelity 52, delete 42, test-gap 27, cleanroom 14, optimize 13, arch 9,
+bug 7, modernize 6. Triaged + grouped by owning project into per-project briefs.
 
-## Phase 2 — Verify & prioritise (Workflow, adversarial) — pending Phase 1
-Dedup the findings; adversarially verify every proposed deletion (no live consumer) and every fidelity
-claim (re-confront to the spec/IDB); drop low-confidence noise; emit a prioritised, owner-assigned
-work-list (one owner per project).
+## Phase 2 — Verify & prioritise — **DONE (folded into the fix lanes)**
+Verification embedded in each fix lane (adversarial re-confront-to-spec before editing). Baked Tier-1
+decisions: VFS keep-mmap (port choice) + fix the real leak; defer the cross-project arch DAG refactor to
+3b; defer the 3/14-vs-4/1 spawn ordering (debugger-pending). 33 findings rightly skipped (false positives,
+test-infra needing a new csproj, dev-tool paths, debugger-pending) — all logged.
 
-## Phase 3 — Fix (Workflow, one writer per project) — pending Phase 2
-Fan out the per-project clean-room engineers + Godot engineers to apply the verified
-deletions/corrections/optimizations. One writer per project (parallel ACROSS disjoint projects).
-Every constant cites a spec; no new clean-room leaks.
+## Phase 3 — Fix (Workflow, one writer per project) — **DONE**
+`campaign11-csharp-fix-3a` (`wf_e8f23be9-ea4`, 15 lanes) — **114 fixes applied**, 33 skipped, 13
+cross-project ripples flagged. `godot-world-fx` re-run (effect diffuse tint, velocity Z-negate, demo-noise
+delete). Reconciliation `campaign11-reconcile` (`wf_81832c4b-235`, 3 lanes): LobbyServerRecord re-model
+per lobby.yaml, ZoneType.Unknown→Safe, CharacterClass renumber consumers. **Committed `707ce31`.**
+### Phase 3b — arch DAG (maintainer: accept + document) — **DONE**
+Removed the spurious `Diagnostics→Kernel` ref; ACCEPTED the 3 by-design downward edges
+(`Application→Protocol/Crypto`, `Infrastructure→Parsers/Vfs`, `Godot→Infrastructure`) and documented them
+in CLAUDE.md + `check_dag.py` INTENDED. `check_dag.py` now PASSES (24 core projects, acyclic, downward-only).
 
-## Phase 4 — Hard gates (Tier-1 + Workflow) — pending Phase 3
-Nuke build + test (`--no-incremental`); firewall PASS; DAG downward-only + engine-free; headless boot
-clean + windowed screenshot for any Godot change. Fix regressions until green.
+## Phase 4 — Hard gates — **DONE (GREEN)**
+Authoritative nuke + `--no-incremental` build **0 err / 1 pre-existing warn**; **1944 tests green**, 0
+failed, 0 skipped (was 1859; +2 new suites Network.Abstractions/Shared.Diagnostics, +85 tests). DAG PASS.
+Firewall: the two committed `_dirty/` citations removed. (Headless/screenshot Godot re-verify = follow-up.)
 
-## Phase 5 — Consolidate & commit — pending Phase 4
-Targeted commits per project; update this ROADMAP in place; `names.yaml` sync (the deferred C10 ctor
-collisions); journal + memory; reconcile the stale CLAUDE.md skeleton claim vs `skinning.md §8(e)`.
+## Phase 5 — Consolidate & commit — **IN PROGRESS**
+Phase-3a milestone committed `707ce31`; Phase-3b arch commit next. Remaining: `names.yaml` sync (deferred
+C10 ctor collisions); journal + memory; the residual follow-ups (GameHud "Unknown" pill dead chrome,
+lobby ServerSelect wire-adapter, the deeper deferred items). Reconciled the stale CLAUDE.md skeleton claim
+is a C10 item (still pending). Headless Godot screenshot-verify of the front-end fidelity fixes = follow-up.
 
 ---
 
