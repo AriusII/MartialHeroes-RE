@@ -8,6 +8,7 @@ using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors;
+using MartialHeroes.Client.Domain.Progression;
 using MartialHeroes.Client.Domain.Skills;
 using MartialHeroes.Client.Domain.Stats;
 using MartialHeroes.Network.Protocol.Opcodes;
@@ -68,6 +69,53 @@ public sealed class GamePacketHandler : IPacketHandler
     /// (a ready slot). spec: Docs/RE/specs/skills.md §4 (duration = cooldown_centiseconds × 100).
     /// </summary>
     public Func<SkillId, int>? CooldownDurationResolver { get; init; }
+
+    /// <summary>
+    /// The local player's progression aggregate — the experience accumulators and the rank/honor XP
+    /// channel the <c>5/9 ExpGain</c> and <c>5/11 RankXpGain</c> handlers advance. The Domain owns the
+    /// arithmetic (<see cref="ProgressionState"/>); this handler holds the live state so the routing
+    /// has somewhere authoritative to apply it. spec: Docs/RE/specs/progression.md §3 / §4 / §11.
+    /// </summary>
+    public ProgressionState Progression { get; private set; }
+
+    /// <summary>
+    /// The server-set XP percentage-bonus rate used by the <c>5/9</c> §3.1 display split. This is a
+    /// server-authored global, NOT a client constant (spec: progression.md §12 Q6); the composition root
+    /// supplies it once a capture pins the value. Defaults to 0 (no bonus) so nothing is invented.
+    /// spec: Docs/RE/specs/progression.md §3.1.
+    /// </summary>
+    public Func<long>? XpBonusRatePercentResolver { get; init; }
+
+    /// <summary>
+    /// The per-level rank-XP <em>divisor</em> table for the <c>5/11</c> §4 routine, indexed by the
+    /// local-player level cache. Server/config DATA, not a client constant (spec: progression.md §12 Q6);
+    /// supplied by the composition root, defaulting to empty so the Domain never invents magnitudes.
+    /// A 0 divisor for the active level is the documented "leveltable error". spec: Docs/RE/specs/progression.md §4.
+    /// </summary>
+    public IReadOnlyList<long>? RankXpDivisorTable { get; init; }
+
+    /// <summary>
+    /// The per-level rank-XP <em>cap</em> table for the <c>5/11</c> §4 routine (bounds the within-rank
+    /// remainder), indexed by the local-player level cache. Server/config DATA, supplied by the
+    /// composition root, defaulting to empty. spec: Docs/RE/specs/progression.md §4.
+    /// </summary>
+    public IReadOnlyList<long>? RankXpCapTable { get; init; }
+
+    /// <summary>
+    /// Refresh seam fired after each <c>5/9</c>/<c>5/11</c> progression mutation, carrying the new
+    /// aggregate so the presentation can refresh the XP-bar / rank-bar (the streaming HUD gage is a
+    /// separate widget — spec: progression.md §12 Q3). Engine-free; the composition root wires the
+    /// renderer. When absent the mutation still applies (the state is observable via
+    /// <see cref="Progression"/>). spec: Docs/RE/specs/progression.md §3 / §4 / §11.
+    /// </summary>
+    public Action<ProgressionState>? ProgressionRefresh { get; init; }
+
+    /// <summary>
+    /// Diagnostics seam for the <c>5/11</c> "leveltable error" (a 0 divisor for the active level), so the
+    /// application can log it without crashing the update — mirroring the client diagnostic.
+    /// spec: Docs/RE/specs/progression.md §4.
+    /// </summary>
+    public Action<int>? LevelTableErrorSink { get; init; }
 
     /// <summary>
     /// Resolves the vital capacities for a freshly-spawned actor from its wire-reported current HP.
@@ -362,6 +410,22 @@ public sealed class GamePacketHandler : IPacketHandler
 
             case Opcodes.SmsgStatsUpdate: // 5/67 — world-entry stat sync
                 if (HandleStatsUpdate(payload))
+                {
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgExpGain: // 5/9 — experience gain (32-byte payload)
+                if (HandleExpGain(payload))
+                {
+                    return;
+                }
+
+                break;
+
+            case Opcodes.SmsgRankXpGain: // 5/11 — rank/honor XP gain (20-byte payload)
+                if (HandleRankXpGain(payload))
                 {
                     return;
                 }
@@ -807,6 +871,109 @@ public sealed class GamePacketHandler : IPacketHandler
     }
 
     // -------------------------------------------------------------------------
+    // 5/9 — experience gain
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 5/9 — experience gain. Adds the 64-bit amount to BOTH the current-XP and lifetime-XP accumulators
+    /// (add-with-carry) for the local player, then fires the XP-bar refresh seam. The §3.1 display split
+    /// (base/bonus, gated on the source-mode low byte == 2) is a presentation-only transform applied with
+    /// the server-set bonus rate — it does not change what accumulates; the rate is injected DATA
+    /// (capture-pending per §12 Q6), so it is 0 (no bonus) unless the composition root supplies it.
+    /// The two trailing proficiency/mastery slots (+24/+28) are not progression state (a separate
+    /// stat-channel writer per §3.3) and are out of scope here.
+    /// spec: Docs/RE/specs/progression.md §3 / §3.1 / §3.4 / §11.
+    /// </summary>
+    private bool HandleExpGain(ReadOnlySpan<byte> payload)
+    {
+        const int minSize = 32; // 5/9 payload is 32 bytes. spec: progression.md §3.4.
+        if (payload.Length < minSize)
+        {
+            return false;
+        }
+
+        // sort@+0; id@+4; source-sort@+8 (low byte == 2 enables the §3.1 split); src-id@+12; amount i64@+16.
+        // spec: progression.md §3.4.
+        byte sort = payload[0x00];
+        uint actorId = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x04, 4));
+        uint sourceSort = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x08, 4));
+        long amount = BinaryPrimitives.ReadInt64LittleEndian(payload.Slice(0x10, 8));
+
+        // Progression is local-player state only; ignore XP gain reported for any other actor.
+        // spec: progression.md §1 (all five S2C channels gated to the local player).
+        var key = new ActorKey(actorId, ToEntitySort(sort));
+        if (_world.LocalActorKey is { } localKey && localKey != key)
+        {
+            return true; // decoded and consumed; just not the local player.
+        }
+
+        Progression = Progression.AddExperience(amount); // spec: progression.md §3 (add to both accumulators).
+
+        // §3.1 display split — the floating "<base> + <bonus>" text only fires when source-mode == 2.
+        // The split value is informational; the FULL amount already accumulated above. spec: progression.md §3.1.
+        if ((byte)sourceSort == 2)
+        {
+            long ratePercent = XpBonusRatePercentResolver?.Invoke() ?? 0L; // server DATA; 0 = no bonus. spec: §12 Q6.
+            _ = ExperienceModel.SplitBonus(amount, ratePercent);
+        }
+
+        ProgressionRefresh?.Invoke(Progression); // refresh the XP bar. spec: progression.md §3.
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // 5/11 — rank / honor XP gain
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 5/11 — rank/honor XP gain. A separate progression channel (no HP/MP/level math): routes the amount
+    /// through the Domain rank-XP model for the local player — mode 2 adds directly to the rank accumulator,
+    /// any other mode runs the §4 per-level table routine (capped at 25) keyed by the local-player level
+    /// cache. The per-level divisor/cap tables are server/config DATA (capture-pending per §12 Q6), injected
+    /// empty so nothing is invented; a 0 divisor surfaces the "leveltable error" diagnostic.
+    /// spec: Docs/RE/specs/progression.md §4 / §4.1 / §11.
+    /// </summary>
+    private bool HandleRankXpGain(ReadOnlySpan<byte> payload)
+    {
+        const int minSize = 20; // 5/11 payload is 20 bytes. spec: progression.md §4.1.
+        if (payload.Length < minSize)
+        {
+            return false;
+        }
+
+        // id@+0; sort@+4; amount u64@+8; mode u8@+16 (2 = direct add). spec: progression.md §4.1.
+        uint actorId = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x00, 4));
+        byte sort = payload[0x04];
+        long amount = unchecked((long)BinaryPrimitives.ReadUInt64LittleEndian(payload.Slice(0x08, 8)));
+        byte mode = payload[0x10];
+
+        // Local-player only. spec: progression.md §1 / §4 (applied to the local player only).
+        var key = new ActorKey(actorId, ToEntitySort(sort));
+        if (_world.LocalActorKey is { } localKey && localKey != key)
+        {
+            return true;
+        }
+
+        // The §4 table index / cap special-case is the local-player level cache. spec: progression.md §4.
+        int levelCache = _world.LocalActor?.Level ?? 0;
+
+        try
+        {
+            Progression = Progression.AddRankXp(amount, mode, levelCache, RankXpDivisorTable, RankXpCapTable);
+        }
+        catch (LevelTableException ex)
+        {
+            // "leveltable error" — a 0 divisor for the active level. Log and leave state unchanged.
+            // spec: progression.md §4.
+            LevelTableErrorSink?.Invoke(ex.LevelIndex);
+            return true;
+        }
+
+        ProgressionRefresh?.Invoke(Progression); // refresh the rank bar. spec: progression.md §4.
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
     // 4/100 — combat attack / charge update
     // -------------------------------------------------------------------------
 
@@ -873,7 +1040,7 @@ public sealed class GamePacketHandler : IPacketHandler
 
     /// <summary>
     /// 3/1 — character-select list. Decodes the 3-byte header, then one 981-byte per-slot record for each
-    /// set bit in the slot mask (LSB-first, up to 8 slots), pulling the name/level/class/HP out of each
+    /// set bit in the slot mask (LSB-first, exactly 5 slots (indices 0..4)), pulling the name/level/class/HP out of each
     /// record's embedded 880-byte SpawnDescriptor. Switches the FSM to the select screen and emits the
     /// list snapshot. spec: Docs/RE/packets/3-1_character_list.yaml; Docs/RE/specs/handlers.md §2 / §17.1.
     /// </summary>

@@ -256,6 +256,13 @@ public sealed partial class ServerSelectScreen : Control
     {
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
 
+        // When raised as an in-login sub-view (a child of the Login scene's 1024×768 widget tree),
+        // the FullRect preset fills the parent reference rect 1:1 — no self-scaling needed (the Login
+        // scene already carries the 1024→window scale). Capture background clicks so they do not fall
+        // through to the login form underneath; the plate / pager buttons are children and still
+        // receive their own input. spec: Docs/RE/specs/frontend_scenes.md §11.4 (full-canvas overlay).
+        MouseFilter = MouseFilterEnum.Stop;
+
         // -----------------------------------------------------------------------
         // z=1: Full background art panel.
         // A src(0,0,1024,398) → dst(0,0,1024,398).

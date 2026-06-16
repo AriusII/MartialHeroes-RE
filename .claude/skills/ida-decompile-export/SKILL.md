@@ -21,6 +21,15 @@ Hex-Rays pseudo-C is written to `Docs/RE/_dirty/functions/<name>.dirty.md`.
 > function does and its data layout, never how the decompiler phrased it. This skill does not
 > produce that note; it only produces the dirty source an analyst reads.
 
+## Ground truth (describe, never transcribe)
+
+The binary in IDA is the single absolute truth for what the function does — but its **Hex-Rays
+pseudo-C is not**: it can carry a wrong inferred prototype or garbled stack analysis. So this skill
+exports the raw body to the quarantine for an analyst to **DESCRIBE in neutral prose**, never to
+transcribe. The behavior an analyst reads is a hypothesis the live debugger confirms against ground
+truth (`dbg_add_bp` at the EA, `dbg_gpregs`/`dbg_read`; never `dbg_start`) before any spec asserts a
+layout. MCP/Hex-Rays down or wrong DB ⇒ STOP, never fabricate pseudo-C.
+
 ## Preconditions (do these first, in order)
 
 1. **MCP must be green.** Run `/ida-mcp-connect` and confirm a live IDA Pro 9.3 MCP server at

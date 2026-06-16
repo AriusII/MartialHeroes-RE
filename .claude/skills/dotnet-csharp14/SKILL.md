@@ -52,8 +52,15 @@ numbered layers") and `PRESERVATION_AND_ARCHITECTURE.md`; consult those when a r
 - Source-generated `[LoggerMessage]` logging defined in `Shared.Diagnostics`. No string-interpolated
   log calls on hot paths.
 
-## Citations & firewall
+## Citations & firewall (the Ground-Truth Doctrine)
 
+- **The committed `Docs/RE/` specs are the DERIVED truth** — the rewritten, firewall-clean record of
+  what IDA proved about `doida.exe` — and the **only** thing this code reads. Every layout, stride,
+  opcode, and magic constant here traces back to a spec, which traces back to the binary.
 - Every magic constant / byte offset cites its source spec inline: `// spec: Docs/RE/formats/terrain.md`.
+  An uncited constant is unverified — find its spec or do not write it.
+- **Never invent a missing fact.** If a value is absent, ambiguous, or contradicted by behavior, the
+  code is NOT the place to guess it — **escalate to RE** (the spec authors / IDA analysts settle it in
+  IDA, the binary wins, the spec is corrected). C# is measured against IDA + specs, never the reverse.
 - Reimplement from neutral `Docs/RE/` specs only. **Never** paste decompiler output (`sub_*`, `loc_*`,
   `_DWORD`, `__thiscall`, mangled names) or copyrighted bytes into any committed file.

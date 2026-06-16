@@ -154,23 +154,28 @@ public sealed partial class SkillWindow : Control
         _uiLoader = null;
     }
 
+    /// <summary>
+    /// Toggles the skill window open/closed. Called by the single HUD key-command dispatcher
+    /// (GameHud._Input) rather than overriding _Input here for the K key.
+    /// F4 fix: panels expose Toggle(); the dispatcher in GameHud is the single owner of key routing.
+    /// spec: Docs/RE/specs/input_ui.md §3a / §5 — single command dispatcher, no per-widget focus chain.
+    /// spec: Docs/RE/specs/ui_system.md §15 — in-game HUD key command dispatch.
+    /// </summary>
+    public void Toggle()
+    {
+        Visible = !Visible;
+        if (Visible)
+        {
+            MoveToFront();
+            PopulateList();
+        }
+    }
+
     public override void _Input(InputEvent ev)
     {
-        // Toggle on key K press (not held).
-        // The key binding is a port-side convention (key K opens skills); the original
-        // client dispatches via a command-code dispatch table.
-        // spec: Docs/RE/specs/ui_system.md §15 — in-game HUD key command dispatch.
-        if (ev is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.K)
-        {
-            Visible = !Visible;
-            if (Visible)
-            {
-                MoveToFront();
-                PopulateList();
-            }
-
-            GetViewport().SetInputAsHandled();
-        }
+        // Key-toggle (K) is now routed through GameHud._Input (single dispatcher).
+        // Only drag handling remains here.
+        // F4 fix: per-panel key grabs removed. spec: Docs/RE/specs/input_ui.md §3a / §5.
 
         // Drag.
         if (ev is InputEventMouseButton mb)

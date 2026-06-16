@@ -230,24 +230,16 @@ public sealed partial class CharSelectScene3D : Node3D
     // Preview-character assets (§3.7.5) — the four starter classes (IdA=1).
     // =========================================================================
 
-    // Per starter class → its base-skin .skn. Each mesh carries a DISTINCT id_b that drives its OWN
-    // rig + idle clip (resolved per slot in TryBuildSlotActor). The four §3.7.5 starter meshes (all
-    // default appearance IdA=1; CONFIRMED-present in the VFS) are:
-    //   g202110001 (Bichimi/Dosa), g203110001 (Monk), g209110001 (Archer), g206110001 (Sorceress).
-    // A prior version used a g202xxx-family table + an invented `g202{skinClassId}10001` fallback that
-    // is NOT in §3.7.5 — corrected to the four confirmed starter meshes, fallback removed. The
-    // skinClassId→mesh binding is best-effort (PLAUSIBLE): the exact map runs through the skin.txt
-    // appearance chain (skinning.md §3.5.2/§3.5.3); an id outside 1..4 has no defined starter mesh →
-    // empty candidate list → logged + skipped (no synthetic substitution). spec: §3.7.5 (starter
-    // meshes) / skinning.md §3.5.2/§3.5.3 (appearance chain).
-    private static string[] SknCandidatesForClass(uint skinClassId) => skinClassId switch
-    {
-        1 => ["data/char/skin/g202110001.skn"], // §3.7.5 Bichimi / Dosa starter mesh
-        2 => ["data/char/skin/g203110001.skn"], // §3.7.5 Monk starter mesh
-        3 => ["data/char/skin/g209110001.skn"], // §3.7.5 Archer starter mesh
-        4 => ["data/char/skin/g206110001.skn"], // §3.7.5 Sorceress / Summoner starter mesh
-        _ => [], // unknown skin-class → no candidate → logged + skipped (no invented fallback)
-    };
+    // Per starter class → its base-skin .skn, resolved through the ONE shared
+    // ClassAppearanceResolver so the select and create screens show the IDENTICAL body per class.
+    // Each mesh carries a DISTINCT id_b that drives its OWN rig + idle clip (resolved per slot in
+    // TryBuildSlotActor). The four §3.7.5 starter meshes (all default appearance IdA=1;
+    // CONFIRMED-present in the VFS) live in ClassAppearanceResolver. The skinClassId→mesh binding is
+    // the spec-grounded STOPGAP for the full skin.txt appearance chain (skinning.md §3.5.2/§3.5.3);
+    // an id outside 1..4 yields an empty candidate list → logged + skipped (no synthetic fallback).
+    // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 / Docs/RE/specs/skinning.md §3.5.2/§3.5.3.
+    private static string[] SknCandidatesForClass(uint skinClassId)
+        => ClassAppearanceResolver.SknCandidatesForClass((int)skinClassId);
 
     // =========================================================================
     // Runtime state
@@ -601,7 +593,7 @@ public sealed partial class CharSelectScene3D : Node3D
 
             // Building textures resolve through the same two-hop chain via the BUILDING section.
             // spec: §3.7.3 — suksang01..04 / walll04 / walll04_2 / haha under building/.
-            BgTextureCatalog? bgPool = TryLoadBgPool(assets);
+            global::MartialHeroes.Assets.Mapping.BgTextureCatalog? bgPool = TryLoadBgPool(assets);
             MapDescriptor? cellMap = TryLoadCellMap(assets);
 
             Func<uint, ImageTexture?> budTexResolver = budIdx =>
@@ -667,7 +659,7 @@ public sealed partial class CharSelectScene3D : Node3D
             // Resolve the blue water texture. Prefer the bgtexture chain (rel "terrain/_water_new01");
             // fall back to the direct VFS path. spec: §3.7.3 (water rel paths under data/map000/texture).
             ImageTexture? waterTex = null;
-            BgTextureCatalog? bgPool = TryLoadBgPool(assets);
+            global::MartialHeroes.Assets.Mapping.BgTextureCatalog? bgPool = TryLoadBgPool(assets);
             string ddsPath = bgPool is not null
                 ? $"data/map000/texture/{WaterTextureRel}.dds"
                 : WaterTextureDds;
@@ -934,7 +926,7 @@ public sealed partial class CharSelectScene3D : Node3D
 
     private Func<int, ImageTexture?> BuildTerrainTextureResolver(RealClientAssets assets)
     {
-        BgTextureCatalog? bgPool = TryLoadBgPool(assets);
+        global::MartialHeroes.Assets.Mapping.BgTextureCatalog? bgPool = TryLoadBgPool(assets);
         MapDescriptor? cellMap = TryLoadCellMap(assets);
         var cache = new Dictionary<int, ImageTexture?>();
         return texByte =>
@@ -946,12 +938,21 @@ public sealed partial class CharSelectScene3D : Node3D
         };
     }
 
-    private static BgTextureCatalog? TryLoadBgPool(RealClientAssets assets)
+    private static global::MartialHeroes.Assets.Mapping.BgTextureCatalog? TryLoadBgPool(RealClientAssets assets)
     {
         try
         {
+            // Runtime form first: the binary bgtexture.lst the original client consumes (the
+            // bgtexture.txt mirror is absent from a real packed data.vfs); fall back to the .txt
+            // mirror only for dev/loose trees. spec: Docs/RE/specs/asset_pipeline.md §3 chain B.
+            const string lstPath = "data/map000/texture/bgtexture.lst";
+            if (assets.Contains(lstPath))
+                return global::MartialHeroes.Assets.Mapping.BgTextureCatalog.FromLst(assets.GetRaw(lstPath));
+
             const string txtPath = "data/map000/texture/bgtexture.txt";
-            return assets.Contains(txtPath) ? BgTextureTxtParser.Parse(assets.GetRaw(txtPath)) : null;
+            return assets.Contains(txtPath)
+                ? global::MartialHeroes.Assets.Mapping.BgTextureCatalog.FromTxt(assets.GetRaw(txtPath))
+                : null;
         }
         catch (Exception ex)
         {
@@ -976,7 +977,7 @@ public sealed partial class CharSelectScene3D : Node3D
     }
 
     private static ImageTexture? ResolveTexture(
-        RealClientAssets assets, BgTextureCatalog? pool, MapDescriptor? map,
+        RealClientAssets assets, global::MartialHeroes.Assets.Mapping.BgTextureCatalog? pool, MapDescriptor? map,
         string section, int oneBasedIdx)
     {
         if (pool is null || map is null || oneBasedIdx <= 0) return null;
@@ -996,7 +997,10 @@ public sealed partial class CharSelectScene3D : Node3D
         int li = oneBasedIdx - 1; // 1-based index → 0-based table slot. spec: terrain.md §5.6 Block 3
         if ((uint)li >= (uint)list.Length) return null;
 
-        string? rel = pool.GetRelPath(list[li].TexId);
+        // The .map intTexId is the 0-based bgtexture pool slot, used DIRECTLY (NO -1); the only -1 is
+        // the .ted byte → list step above (li = oneBasedIdx - 1).
+        // spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join (IDA-corrected 263bd994: 0x445833).
+        string? rel = pool.ResolveRelativePath(list[li].TexId);
         if (rel is null) return null;
 
         string ddsPath = $"data/map000/texture/{rel}.dds";

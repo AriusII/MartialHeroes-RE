@@ -73,11 +73,11 @@ public sealed partial class ServerListDrainer : Node
                     // from msg bank 5001..5040 when DisplayName is empty.
                     // spec: Docs/RE/specs/frontend_scenes.md §2.8 / §11.4. CODE-CONFIRMED.
                     entries.Add(new ServerEntry(
-                        ServerId:    e.ServerId,
+                        ServerId: e.ServerId,
                         DisplayName: string.Empty,
-                        StatusCode:  e.Status,
-                        Population:  e.Population,
-                        Flag:        e.Flag));
+                        StatusCode: e.Status,
+                        Population: e.Population,
+                        Flag: e.Flag));
                 }
 
                 // All Control mutation happens here, on the main thread.

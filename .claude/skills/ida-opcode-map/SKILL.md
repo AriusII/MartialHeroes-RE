@@ -18,6 +18,13 @@ IDA addresses and is gitignored. The clean catalog `Docs/RE/opcodes.md` (no addr
 is produced separately by the **opcode-catalog** skill, which rewrites these findings
 into neutral prose. Do not edit `Docs/RE/opcodes.md` from here.
 
+## Ground truth
+
+The opcode→handler map is read FROM the binary in IDA — never reconstructed from memory, a prior
+build's table, or analogy to "how MMORPGs usually dispatch." A static map is a hypothesis the live
+debugger confirms packet-by-packet (`ida-debugger-drive`); when static and a debugger hit disagree,
+the debugger (the running client) wins. MCP down / wrong DB ⇒ STOP, never fabricate pairs.
+
 ## Preconditions
 
 - IDA Pro 9.3 is open on the legacy client with auto-analysis finished.

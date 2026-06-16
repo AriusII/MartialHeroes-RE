@@ -30,6 +30,7 @@ def main():
     pcap, tsv = h.find_captures(pdir)
     lines = [
         "[RE context] " + h.ida_status_line(),
+        h.GROUND_TRUTH_BLURB,
         "Captures: {} .pcapng / {} .tsv local. .tsv are regenerable from .pcapng via tshark (see the pcap-extract skill) — never source, never committed.".format(pcap, tsv),
         "Dirty-room work writes ONLY to Docs/RE/_dirty/ (gitignored). Promote findings to clean specs (Docs/RE/specs|packets|formats|opcodes.md) before any C# is written.",
         "IDA fan-out is UNBRIDLED: run read analysts AND IDB writes massively in parallel — no ~3 cap, no one-writer-at-a-time rule; retry failed/conflicting calls. Goal = reverse ALL of doida.exe for the faithful 1:1 Godot port.",

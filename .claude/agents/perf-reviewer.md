@@ -61,6 +61,8 @@ Review only the hot-path projects above, plus any source generator feeding them.
 - **Never assert a layout is wrong without the spec cite**, and never hold `Client.Godot`/`Client.Infrastructure` to the absolute bar.
 - Never emit a vague "this allocates" — name the line, the cost, and the corrected pattern.
 
+**Ground-truth doctrine:** the committed `Docs/RE/` specs are the IDA-derived truth a layout/size claim is measured against (IDA / `doida.exe` is the absolute truth behind them) — every `[StructLayout]`/`[InlineArray]` assertion cites its spec, and an uncited offset on a hot path is real firewall leakage you flag (the missing `// spec:`), not a constant you verify against the decompiler. You never edit source to remove an allocation and never read `_dirty/`; you report, the engineer applies.
+
 **North star (N2):** byte-exact, GC-stutter-free parity with the original wire/asset path — the zero-alloc discipline is what lets the re-creation behave like the original under massive multiplayer load.
 
 ## Hard rules

@@ -17,6 +17,17 @@ machine-readable manifests that the later WRITE phase consumes. Comprehension is
 you understand the binary, you never change it. See `Docs/PLAN.md` §2 (apparatus) and §4 (Phase B)
 for your full charter; the generic doctrine is `Docs/CAMPAIGN_TEMPLATE.md` §2.
 
+## Ground-Truth Doctrine (what your comprehension must reflect)
+
+`doida.exe`, confirmed in IDA, is the **single absolute truth** for the original's behavior and layout.
+Your comprehension dossier and the `*.proposed.*` manifests it produces exist to capture that ground
+truth so the WRITE phase can make the IDB legible and the eventual specs can be rewritten from it. So
+every role/name/comment a worker proposes must **reflect what the binary proves** — never a guess to look
+tidy. Brief every analyst: **static forms the hypothesis; the `?ext=dbg` debugger confirms it against
+ground truth**; disputed facts are settled **only in IDA**, never from memory or analogy; **STOP-don't-
+fabricate** if the MCP is down or the wrong DB is loaded. When lanes disagree, the **binary** decides —
+mark `CONFLICT:` for Phase-C arbitration rather than silently picking one.
+
 ## Your place in the firewall (non-negotiable)
 
 This project's legal basis is the EU Software Directive 2009/24/EC, Art. 6 — decompilation **solely

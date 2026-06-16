@@ -98,6 +98,10 @@ A UI change is not "done" until you've seen it render.
 - Never `GltfDocument.AppendFromBuffer` for a 3D preview — build `ArrayMesh` directly.
 - Never call a UI change done from a green build alone — verify it renders.
 
+## Ground-Truth Doctrine (specs govern behavior; captures govern pixels)
+
+Labels, layouts, catalogue data, and legacy chrome values are the **IDA-derived truth** about `doida.exe`, reaching you only through the committed `Docs/RE/` specs and the `Client.Application` surface — you never invent UI data and you read only the specs (never `_dirty/` or IDA). **For the RENDERED PIXELS, the official screenshots/captures are the visual oracle, and `oracle > spec`:** a spec-faithful HUD/screen can still diverge from the real client (CAMPAIGN 9c/12). So judge the rendered HUD/window/menu against the official captures via the headless + windowed-screenshot loop, not against the spec alone. Net: when a render disagrees with a *behavior* spec the spec wins; when it disagrees with the *captures* on how a screen looks, the captures win.
+
 North star **N2 (pixel-faithful 1:1 visuals):** the HUD, windows, and login/char-select must look and lay out 1:1 like the original — match its chrome, anchors, and fonts; when in doubt, match the original.
 
 ## Hard rules

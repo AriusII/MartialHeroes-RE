@@ -84,7 +84,19 @@ Across skills (directory names), agents (filename stems), and any committed slas
 be unique — a collision makes `/name` or `@name` ambiguous. Build the three name sets and report any
 intra- or cross-set collision as a FAIL.
 
-### 5. CLAUDE.md inventory matches reality
+### 5. Ground-Truth Doctrine is reflected in the kit bodies (standing house rule)
+
+The Ground-Truth Doctrine (`.claude/KIT.md` top section / `CLAUDE.md` "Source of truth") is the spine
+every agent/skill/hook body must reflect: IDA / `doida.exe` is the absolute truth; the committed
+`Docs/RE/` specs are the derived truth and the only thing implementation reads; C#/Godot are measured
+against them, never the reverse (pixels-only exception: the captures oracle). Spot-check that the
+bodies you audit have not drifted *away* from this — flag, as an **advisory** drift item, any kit body
+that contradicts the firewall stance (an engineer body that tells the reader to read `_dirty/` or
+"check IDA" to justify a constant, a reviewer that mandates editing source to clear a check, a body
+that treats the code as its own truth). You do not author the doctrine wording — `agent-author`/
+`skill-author`/`hook-author` own that — you report the contradiction with `file:line` for them to fix.
+
+### 6. CLAUDE.md inventory matches reality
 
 The CLAUDE.md "Claude Code Tooling" section enumerates the hooks, skills, and agents. Compare its lists
 against the actual directory contents:

@@ -19,6 +19,7 @@ def main():
 
     lines = [
         "MartialHeroes — clean-room preservation project (D.O. Online, 2004–2008). MISSION: total RE of the ENTIRE doida.exe client -> faithful 1:1 re-creation on Godot 4.6.3.",
+        h.GROUND_TRUTH_BLURB,
         "Git: {} ({}).".format(branch, dirty_txt),
         h.ida_status_line(),
         "IDA reverse runs UNBRIDLED: fan out read analysts AND IDB writers massively in parallel — no ~3 cap, no one-writer rule; retry failed/conflicting calls (only the live MCP server's throughput limits you).",

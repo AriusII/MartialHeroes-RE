@@ -261,15 +261,9 @@ public sealed partial class OptionsWindow : Control
 
     public override void _Input(InputEvent ev)
     {
-        // Toggle on key O (not held).
-        // The key binding is a port-side convention (key O opens options); the original
-        // client dispatches via a command-code dispatch table.
-        // spec: Docs/RE/specs/ui_system.md §15 — in-game HUD key command dispatch.
-        if (ev is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.O)
-        {
-            Toggle();
-            GetViewport().SetInputAsHandled();
-        }
+        // Key-toggle (O) is now routed through GameHud._Input (single dispatcher).
+        // Only drag handling remains here.
+        // F4 fix: per-panel key grab removed. spec: Docs/RE/specs/input_ui.md §3a / §5.
 
         // Drag — title-bar initiated.
         if (ev is InputEventMouseButton mb)

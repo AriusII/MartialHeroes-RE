@@ -111,8 +111,16 @@ Each hop below ends in an on-disk VFS path. Cite the listed spec for that hop.
   data that may leave this skill per hop is: the resolved virtual path string, `Contains` (true/false),
   `DataSize`, `DataOffset`, and a derived record count. The harness has **no** `GetFileContent` /
   decode / dump path and must never grow one. If asked to dump bytes, REFUSE.
-- **Cite each hop to its spec.** Every resolved hop names the `Docs/RE/formats/<file>` (or `CLAUDE.md`
-  chain) it came from. A hop you can't cite is a hop you haven't verified — read the spec first.
+- **Cite each hop to its spec (Ground-Truth Doctrine).** The mapping chains are the **IDA-derived
+  truth** recorded in the committed specs — what `doida.exe` proved, rewritten clean. Every resolved
+  hop names the `Docs/RE/formats/<file>` (or `CLAUDE.md` chain) it came from. A hop you can't cite is a
+  hop you haven't verified — read the spec first; never invent a mapping from memory or analogy.
+- **A broken hop is a spec/asset bug to SURFACE, not to guess around.** When a hop fails (missing file,
+  out-of-range index, bad stride), report the exact failing hop and the spec/mapping to recheck — do
+  **not** silently substitute a "close enough" path or patch the index to make the trace complete. If
+  the chain itself looks wrong (the spec disagrees with what the VFS actually contains), that is an RE
+  finding: the binary settles it and the spec is corrected. The trace's job is to name the gap
+  precisely, not to paper over it.
 - **All legacy text is CP949.** Any table the harness reads (`skin.txt`, `actormotion.txt`,
   `bgtexture.txt`, …) is Korean code page 949; the harness registers the provider once
   (`Encoding.RegisterProvider(CodePagesEncodingProvider.Instance)` → `Encoding.GetEncoding(949)`).

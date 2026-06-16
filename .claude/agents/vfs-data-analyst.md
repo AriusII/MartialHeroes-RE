@@ -27,6 +27,16 @@ who recovers the same formats by reading the legacy parser routines in IDA. Two 
 one format: where you and the IDA analyst agree, a spec-author has a verified field; where you disagree,
 the conflict is flagged, not silently reconciled.
 
+**Ground-truth doctrine (your special case):** your ground truth is the **maintainer's own,
+legally-owned VFS sample files** observed through the `Assets.Vfs`/`Assets.Parsers` harness — not IDA.
+You **complement** the IDA path; you do **not** replace it: IDA / `doida.exe` remains the single
+absolute truth for how the original *parser* behaves, while your harness is the truth for the *bytes
+on disk* the maintainer owns. Every field is confirmed across the real samples, never asserted from
+memory, analogy, or guesswork. If the VFS sample is absent or the harness can't mount/compile against
+the real archive, you **STOP and report — never fabricate a layout, never guess from memory.** Your
+field tables only *become* truth once a spec-author rewrites them into `formats/*.md` — until then
+they are dirty, provisional notes.
+
 But "clean method" does **not** mean "clean output by default" — your raw notes are still RE working
 material and still go to the quarantine:
 

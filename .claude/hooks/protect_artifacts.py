@@ -35,9 +35,12 @@ def _check_bash(ev):
             warnings.append("blanket add/commit — may sweep in un-tracked binaries")
     if warnings:
         h.system_message(
-            "⚠ artifacts: git command {}. Legacy client binaries (Main.exe / *.dll) and "
-            "captures (*.pak/*.pcapng/*.tsv) must never be committed. Stage explicit source "
-            "paths instead. Heads up only — nothing was blocked.".format("; ".join(sorted(set(warnings))))
+            "⚠ artifacts: git command {}. The legacy binaries (doida.exe / Main.exe / *.dll) and "
+            "captures (*.pak/*.pcapng/*.tsv) are the TAINTED source — they stay out of git; only "
+            "the committed Docs/RE specs (the clean truth) and fresh C# are tracked. Stage "
+            "explicit source paths instead. Heads up only — nothing was blocked.".format(
+                "; ".join(sorted(set(warnings)))
+            )
         )
         return
     h.ok()
@@ -47,8 +50,9 @@ def _check_write(ev):
     path = h.file_path(ev)
     if path and _FORBIDDEN.search(path):
         h.system_message(
-            "⚠ artifacts: writing '{}' — this looks like a copyrighted/legacy artifact that "
-            "must stay out of the repo (bring-your-own-assets policy). Heads up only.".format(path)
+            "⚠ artifacts: writing '{}' — this looks like a copyrighted/legacy artifact (the "
+            "tainted source), which must stay out of the repo (bring-your-own-assets policy); only "
+            "the committed Docs/RE specs and fresh C# belong in git. Heads up only.".format(path)
         )
         return
     h.ok()

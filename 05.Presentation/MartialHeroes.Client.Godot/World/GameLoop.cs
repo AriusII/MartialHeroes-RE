@@ -42,6 +42,27 @@ namespace MartialHeroes.Client.Godot.World;
 public sealed partial class GameLoop : Node
 {
     // -------------------------------------------------------------------------
+    // World-exit signal (engine-state-5 leave-world / logout).
+    //
+    // The master scene machine does not terminate at the world: leaving the world returns the
+    // player toward char-select (state 5 → 4 default loop-return) or quits on logout (state 5 → 6).
+    // This signal lets the layer-05 composition root (BootFlow) tear down World.tscn and re-enter
+    // the front-end, mirroring the original's "quitting the world returns toward select rather than
+    // straight to exit."
+    // spec: Docs/RE/specs/client_runtime.md §7.5.1 (5 → 4 natural return) / §7.5.3 (logout → 6) /
+    //       §7.9.5 ("state 5 pre-sets next = 4; world-leave sets 6").
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Raised when the player leaves the world. <paramref name="logout"/> distinguishes the two
+    /// recovered exit transitions: <see langword="false"/> = leave-world → re-enter char-select
+    /// (state 4); <see langword="true"/> = logout → quit (state 6).
+    /// spec: Docs/RE/specs/client_runtime.md §7.5.1 / §7.5.3 / §7.9.5.
+    /// </summary>
+    [Signal]
+    public delegate void WorldExitRequestedEventHandler(bool logout);
+
+    // -------------------------------------------------------------------------
     // Child node references (assigned in _Ready from the scene tree)
     // -------------------------------------------------------------------------
 
@@ -51,6 +72,12 @@ public sealed partial class GameLoop : Node
     private SyntheticWorldFeeder _syntheticFeeder = null!;
     private ClientContext _clientContext = null!;
     private TerrainNode _terrainNode = null!;
+
+    // References for the single HUD key-command dispatcher (_Input).
+    // F4 fix: I/K/O/C toggles route through one dispatcher, not per-panel _Input overrides.
+    // spec: Docs/RE/specs/input_ui.md §3a / §5 — single dispatch point for HUD key commands.
+    private HUD.InventoryWindow? _inventoryWindow;
+    private HUD.SkillWindow? _skillWindow;
     private RealWorldRenderer? _realWorldRenderer;
 
     // ---- Region tracking (for zone indicator) ----
@@ -74,10 +101,14 @@ public sealed partial class GameLoop : Node
         // *** INCONTOURNABLE — ce log apparaît avant TOUT le reste ***
         GD.Print("===== [GameLoop] _Ready ENTERED =====");
 
-        // Spawn the debug baseline (floor + reference cube) IMMEDIATELY, before any try/catch,
-        // so the user always sees something even if all asset/context loading fails entirely.
-        // This is the guaranteed visual proof that the Godot scene executes.
-        SpawnDebugBaseline();
+        // Spawn the debug baseline (green floor + emissive red cube) only when the dev baseline
+        // flag is set. The original world build contains NO such scaffolding geometry — it renders
+        // only the recovered scene graph (terrain/actors/effects). Gating this behind a dev flag,
+        // default OFF, keeps production / fidelity screenshots clean.
+        // spec: Docs/RE/specs/client_runtime.md §7.4 (BuildGameWorld has no debug primitives);
+        // spec: Docs/RE/specs/game_loop.md §3.5 (render = scene-graph cull walk only).
+        if (IsDevBaselineEnabled())
+            SpawnDebugBaseline();
 
         // The entire _Ready body is wrapped defensively: any exception in subsystem wiring,
         // context resolution, or real-asset initialisation must NOT crash the scene.
@@ -97,15 +128,13 @@ public sealed partial class GameLoop : Node
     }
 
     /// <summary>
-    /// Spawns a large ground plane and an emissive reference cube at the world origin.
-    /// These are ALWAYS present regardless of VFS / asset availability — they guarantee the
-    /// user sees at least a floor and a cube when <see cref="_Ready"/> executes.
-    ///
-    /// The ground plane (100×100) uses a green checker-style solid material.
-    /// The reference cube is emissive red (visible even without lighting) at origin, Y=1.
-    ///
-    /// If real assets load successfully they are added on top of this baseline.
-    /// The baseline is NEVER removed — it serves as a permanent depth/orientation cue.
+    /// DEV-ONLY scaffolding: spawns a large green ground plane and an emissive red reference cube
+    /// at the world origin. This is NOT part of the original world build — the recovered client
+    /// renders only the scene graph (terrain/actors/effects) and contains no debug primitives. It is
+    /// therefore gated behind <see cref="IsDevBaselineEnabled"/> (default OFF) so production /
+    /// fidelity screenshots show only real geometry. When enabled it serves as a depth/orientation
+    /// cue and a guaranteed visual proof that the Godot scene executes even if all asset loading fails.
+    /// spec: Docs/RE/specs/client_runtime.md §7.4; game_loop.md §3.5.
     /// </summary>
     private void SpawnDebugBaseline()
     {
@@ -152,6 +181,75 @@ public sealed partial class GameLoop : Node
         }
     }
 
+    /// <summary>
+    /// Returns true when the DEV-ONLY debug baseline (green plane + red origin cube) is enabled.
+    /// Default OFF so the world renders only the recovered scene graph; enabled via the
+    /// <c>MH_DEV_BASELINE=1</c> environment variable or the <c>dev_offline_flow=1</c> key in
+    /// <c>client_dir.cfg</c> (the same dev-offline flow the front-end uses). NEVER on in production.
+    /// spec: Docs/RE/specs/client_runtime.md §7.4 (no debug primitives in the original world build).
+    /// </summary>
+    private static bool IsDevBaselineEnabled()
+    {
+        // Dedicated env override — fastest to check.
+        string? baselineEnv = System.Environment.GetEnvironmentVariable("MH_DEV_BASELINE");
+        if (baselineEnv is "1" or "true" or "yes")
+            return true;
+
+        // Shared dev-offline flow flag: env var or client_dir.cfg key.
+        string? offlineEnv = System.Environment.GetEnvironmentVariable("DEV_OFFLINE_FLOW");
+        if (offlineEnv is "1" or "true" or "yes")
+            return true;
+
+        return ReadCfgFlag("dev_offline_flow") || ReadCfgFlag("dev_baseline");
+    }
+
+    /// <summary>
+    /// Reads a boolean flag from <c>client_dir.cfg</c> (res:// or cwd). Returns false on any error or
+    /// when the key is absent — fail-open to OFF so a missing config never spawns scaffolding.
+    /// </summary>
+    private static bool ReadCfgFlag(string key)
+    {
+        try
+        {
+            string? path = ResolveCfgPath();
+            if (path is null) return false;
+
+            foreach (string rawLine in System.IO.File.ReadLines(path))
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith('#')) continue;
+
+                int eq = line.IndexOf('=');
+                if (eq < 0) continue;
+
+                string k = line[..eq].Trim();
+                string v = line[(eq + 1)..].Trim();
+                if (k.Equals(key, StringComparison.OrdinalIgnoreCase))
+                    return v is "1" or "true" or "yes";
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameLoop] ReadCfgFlag('{key}'): {ex.Message}");
+        }
+
+        return false;
+    }
+
+    private static string? ResolveCfgPath()
+    {
+        const string configResPath = "res://client_dir.cfg";
+        try
+        {
+            string abs = ProjectSettings.GlobalizePath(configResPath);
+            return System.IO.File.Exists(abs) ? abs : null;
+        }
+        catch
+        {
+            return System.IO.File.Exists("client_dir.cfg") ? "client_dir.cfg" : null;
+        }
+    }
+
     /// <summary>The real _Ready body; separated so the defensive wrapper stays clean.</summary>
     private void ReadyInternal()
     {
@@ -193,6 +291,12 @@ public sealed partial class GameLoop : Node
         try
         {
             _hud.Initialise(_clientContext);
+
+            // F1 fix: wire the live GameHud.HitTest into HudInputHandler so HUD clicks are consumed
+            // before the world handler sees them ("UI is the gate").
+            // spec: Docs/RE/specs/input_ui.md §3 / §6 — "UI hit-test always before world interaction".
+            _clientContext.SetHudHitTest(_hud.HitTest);
+            GD.Print("[GameLoop] HudInputHandler.HitTest wired to GameHud.HitTest. spec: input_ui.md §3/§6.");
         }
         catch (Exception ex)
         {
@@ -259,10 +363,14 @@ public sealed partial class GameLoop : Node
         // HUD windows (inventory = key I, skills = key K). They self-wire to /root/ClientContext
         // in their own _Ready, so no Initialise call is needed. Added programmatically to avoid
         // depending on .tscn script bindings. Hidden until toggled.
+        // F4: store refs so the single key dispatcher (_Input) can call Toggle().
+        // spec: Docs/RE/specs/input_ui.md §3a / §5 — single HUD command dispatcher.
         try
         {
-            AddChild(new HUD.InventoryWindow { Name = "InventoryWindow" });
-            AddChild(new HUD.SkillWindow { Name = "SkillWindow" });
+            _inventoryWindow = new HUD.InventoryWindow { Name = "InventoryWindow" };
+            _skillWindow = new HUD.SkillWindow { Name = "SkillWindow" };
+            AddChild(_inventoryWindow);
+            AddChild(_skillWindow);
         }
         catch (Exception ex)
         {
@@ -328,10 +436,101 @@ public sealed partial class GameLoop : Node
     }
 
     /// <summary>
+    /// In-world leave-world / logout trigger. ESC (when chat is not capturing it — the InputRouter
+    /// consumes and marks ESC handled only while chat is active) requests a leave-world transition
+    /// back toward char-select (engine state 5 → 4). This is the world-exit hook the master scene
+    /// machine needs: the world is not a terminal scene.
+    /// spec: Docs/RE/specs/client_runtime.md §7.5.1 (5 → 4 natural return) / §7.9.5.
+    /// </summary>
+    public override void _UnhandledInput(InputEvent @event)
+    {
+        if (@event is not InputEventKey { Pressed: true } key) return;
+
+        if (key.PhysicalKeycode == Key.Escape)
+        {
+            GetViewport().SetInputAsHandled();
+            // Leave-world (not logout): re-enter char-select. spec: client_runtime.md §7.5.1 (5 → 4).
+            GD.Print("[GameLoop] Leave-world requested (ESC) → return to char-select. " +
+                     "spec: Docs/RE/specs/client_runtime.md §7.5.1 (state 5 → 4).");
+            EmitSignal(SignalName.WorldExitRequested, false);
+        }
+    }
+
+    /// <summary>
     /// Drains the Application event channel on the main thread each frame.
     /// All pending events are processed synchronously within this call so that
     /// Godot node mutations happen safely on the main thread.
     ///
+    // -------------------------------------------------------------------------
+    // Single HUD key-command dispatcher
+    //
+    // The original client routes all HUD key commands through a command-code dispatch table
+    // (one dispatcher, panels are passive recipients). Here we mirror that: one _Input override
+    // in GameLoop dispatches I/K/O/C to the respective window's Toggle() method, eliminating
+    // the per-panel _Input grabs that caused Enter-key contention and multiple owners.
+    //
+    // F4 fix. spec: Docs/RE/specs/input_ui.md §3a / §5 — single dispatch point.
+    // spec: Docs/RE/specs/ui_system.md §15 — in-game HUD key command dispatch.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Single HUD key-command dispatcher. Routes I/K/O/C key presses to the correct window
+    /// Toggle() rather than having each panel install a competing top-level _Input grab.
+    /// Also routes Enter to the ChatWindow for focus (ChatWindow owns chat input exclusively).
+    /// Only active in ClientState.World.
+    /// spec: Docs/RE/specs/input_ui.md §3a / §5 — single dispatcher, panels are passive.
+    /// spec: Docs/RE/specs/ui_system.md §15 — in-game HUD key command dispatch.
+    /// </summary>
+    public override void _Input(global::Godot.InputEvent evt)
+    {
+        if (_clientContext?.StateMachine.Current != ClientState.World)
+            return;
+
+        if (evt is not InputEventKey key || !key.Pressed || key.Echo)
+            return;
+
+        switch (key.Keycode)
+        {
+            case Key.I:
+                // Toggle inventory window. spec: ui_system.md §15 (I = inventory toggle).
+                _inventoryWindow?.Toggle();
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.K:
+                // Toggle skill window. spec: ui_system.md §15 (K = skill toggle).
+                _skillWindow?.Toggle();
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.O:
+                // Toggle options window. spec: ui_system.md §15 (O = options toggle).
+                if (_hud is not null)
+                {
+                    // Options window is a child of HUD; reach it via HUD's reference.
+                    // spec: Docs/RE/specs/input_ui.md §3a — single dispatcher.
+                    var opts = _hud.GetNodeOrNull<HUD.OptionsWindow>("OptionsWindow");
+                    opts?.Toggle();
+                }
+
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.C:
+                // Toggle character stats window.
+                // spec: Docs/RE/formats/misc_data.md §5 — discript.sc category 102 "(C)".
+                if (_hud is not null)
+                {
+                    var charStats = _hud.GetNodeOrNull<HUD.CharacterStatsWindow>("CharacterStatsWindow");
+                    charStats?.Toggle();
+                }
+
+                GetViewport().SetInputAsHandled();
+                break;
+        }
+    }
+
+    /// <summary>
     /// spec: Docs/RE/specs/game_loop.md §6 — snapshot interpolation pipeline ends with
     ///       "updates the spatial transforms of the associated Node3D on the next frame".
     /// </summary>

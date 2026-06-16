@@ -17,6 +17,12 @@ protocol/asset structure for interoperability and produced neutral specs — not
 It is **append-only**. Never edit, reorder, or delete existing entries; never reformat the file.
 You add exactly one new entry at the bottom.
 
+The entry's job is to record, in neutral prose, that a session settled its facts in the one ground
+truth — `doida.exe` in IDA (static hypothesis, confirmed against the live `?ext=dbg` debugger where
+noted) — and rewrote them into the named committed specs (the derived truth). It is the contemporaneous
+proof that the spec came from the binary, not from a copy of the code — so it carries canonical names
+and behavior, never an address or a line of pseudo-code.
+
 ## Entry schema
 
 Every entry MUST carry:

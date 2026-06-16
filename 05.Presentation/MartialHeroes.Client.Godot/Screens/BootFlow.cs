@@ -6,31 +6,40 @@
 // WHAT CHANGED vs. the prior stub:
 //   1. WIRED TO ClientContext (UseCases + StateMachine + EventBus). Screens no longer bind to
 //      nothing. The composition root is looked up once via GetNode<ClientContext>("/root/ClientContext").
-//   2. SERVER-SELECT step added (ServerSelectScreen); driven by real ServerListReceivedEvent via
-//      ServerListDrainer (mirrors CharListEventDrainer). spec: login_flow.md §1/#2.1.
-//   3. PIN MODAL added (PinModal) shown AFTER login-OK and BEFORE server-select.
-//      spec: Docs/RE/specs/frontend_scenes.md §1.4a. RUNTIME-CONFIRMED.
-//   4. CHAR-SELECT driven by CharacterListEvent (Application event bus, opcode 3/1).
+//   2. RE-HOMED PIN + SERVER-LIST (CAMPAIGN 13, Lane 1 F1/F2/F5): the PIN modal (login sub-states
+//      31/32) and the server-list (sub-states 34..41) are INTERNAL sub-views of the Login scene
+//      (engine state 1), NOT top-level scenes. The LoginScreen owns the whole
+//      connect→PIN→server-pick→submit chain and only then advances STRAIGHT to Loading (state 2).
+//      BootFlow injects the sub-view factories (DEV prefill / server-list drainer / dev seed) and
+//      routes LoginFlowCompleted → Loading. spec: frontend_scenes.md §1.5 / §11.3 / §11.4;
+//      client_runtime.md §7.6 / §7.9.5.
+//   3. CHAR-SELECT driven by CharacterListEvent (Application event bus, opcode 3/1).
 //      The screen subscribes to the event bus; when CharacterListEvent arrives it calls
 //      CharacterSelectScreen.ApplyCharacterList(). Hardcoded demo roster only used when no
 //      event arrives within a short window (offline dev mode).
 //      spec: Docs/RE/specs/frontend_scenes.md §3.1; login_flow.md §3.2.
-//   5. FSM ADVANCEMENT: LoginAsync/SelectCharacterAsync are called via IApplicationUseCases.
+//   4. FSM ADVANCEMENT: LoginAsync/SelectCharacterAsync are called via IApplicationUseCases.
 //      The StateMachine is advanced in response to real events (or synthetic offline events).
+//   5. WORLD-EXIT HOOK (F4): the World root (GameLoop) raises WorldExitRequested; BootFlow tears
+//      down World.tscn and re-shows CharacterSelectScreen (engine state 5 → 4) or quits on logout
+//      (5 → 6). The scene machine does not terminate at the world.
+//      spec: Docs/RE/specs/client_runtime.md §7.5.1 / §7.5.3 / §7.9.5.
 //   6. DEV OFFLINE REPLAY: enabled by `DEV_OFFLINE_FLOW=1` env var or `dev_offline_flow=1` in
 //      client_dir.cfg. Seeds synthetic ServerEntry list and CharacterListEvent so the full
-//      Login→ServerSelect→PIN→CharSelect flow is walkable with NO server.
+//      Login (incl. PIN + server-list sub-views) → CharSelect flow is walkable with NO server.
 //
-// FLOW:
+// FLOW (engine states in brackets):
 //   boot_flow=world → skip menu, go straight to World.tscn (world-debug shortcut).
 //   boot_flow=login (DEFAULT):
-//     [LoginScreen] → [ServerSelectScreen] → [PinModal] → [CharacterSelectScreen] → World.tscn
+//     [1 LoginScreen — owns PIN(31/32) + ServerList(34..41) sub-views] → [2 LoadingScreen]
+//       → [3 Opening] or directly → [4 CharacterSelectScreen] → [5 World.tscn]
+//       → (leave-world) → [4 CharacterSelectScreen]  /  (logout) → quit.
 //
 // PASSIVE: this node is a coordinator only. It swaps screens and routes signals.
 // Zero game logic: no stats math, no packet decoding, no equip/cooldown rules here.
 //
-// spec: Docs/RE/specs/client_workflow.md §4 (scene state machine 0..8).
-// spec: Docs/RE/specs/frontend_scenes.md §1–§7 (login/server-select/char-select scenes).
+// spec: Docs/RE/specs/client_runtime.md §7 (scene state machine 0..7 + sub-states).
+// spec: Docs/RE/specs/frontend_scenes.md §1–§7 / §11 (login/server-select/PIN/char-select scenes).
 // spec: Docs/RE/specs/login_flow.md §1–§4 (credential flow, PIN, server list).
 
 using Godot;
@@ -78,6 +87,10 @@ public sealed partial class BootFlow : Node
     private CanvasLayer? _uiLayer;
     private ScreenHost? _host;
     private UiAssetLoader? _sharedAssets;
+
+    // The instanced World scene (engine state 5). Held so the world-exit hook can tear it down on
+    // leave-world / logout (state 5 → 4 / 6). spec: Docs/RE/specs/client_runtime.md §7.5.1 / §7.5.3.
+    private Node? _world;
 
     // Front-end audio + cursor manager.
     // spec: Docs/RE/specs/sound.md — BGM 920100200, UI click 861010101. CODE-CONFIRMED.
@@ -154,6 +167,24 @@ public sealed partial class BootFlow : Node
 
     private void StartMenuFlow()
     {
+        BuildMenuScaffold();
+
+        // Boot entry: the LOGIN scene is GameState 1 — the FIRST interactive scene. The Opening
+        // intro is GameState 3 (POST-login): it plays AFTER login + server-select + the loading/SKIP
+        // gate and immediately BEFORE char-select (GameState 4) — it is NOT a pre-login splash.
+        // spec: Docs/RE/specs/intro_sequence.md §0/§0.1 ("post-login intro"; strict order 0→1→2→3→4).
+        // DEV-ONLY: dev_skip_intro + dev_screen may target a specific scene directly for testing.
+        if (TryDevScreenDispatch()) return;
+        ShowLogin();
+    }
+
+    /// <summary>
+    /// Builds the menu UI scaffold (shared assets + CanvasLayer + ScreenHost + front-end audio).
+    /// Shared by the boot entry (<see cref="StartMenuFlow"/>) and the world re-entry
+    /// (<see cref="OnWorldExitRequested"/> → char-select, engine state 5 → 4).
+    /// </summary>
+    private void BuildMenuScaffold()
+    {
         _sharedAssets = UiAssetLoader.Open();
 
         _uiLayer = new CanvasLayer { Name = "MenuUiLayer", Layer = 10 };
@@ -171,14 +202,6 @@ public sealed partial class BootFlow : Node
             Name = "FrontEndAudio",
         };
         AddChild(_audio);
-
-        // Boot entry: the LOGIN scene is GameState 1 — the FIRST interactive scene. The Opening
-        // intro is GameState 3 (POST-login): it plays AFTER login + server-select + the loading/SKIP
-        // gate and immediately BEFORE char-select (GameState 4) — it is NOT a pre-login splash.
-        // spec: Docs/RE/specs/intro_sequence.md §0/§0.1 ("post-login intro"; strict order 0→1→2→3→4).
-        // DEV-ONLY: dev_skip_intro + dev_screen may target a specific scene directly for testing.
-        if (TryDevScreenDispatch()) return;
-        ShowLogin();
     }
 
     // -----------------------------------------------------------------------
@@ -213,11 +236,16 @@ public sealed partial class BootFlow : Node
         switch (devScreen)
         {
             case "pin":
-                ShowLogin(); // login bg behind the modal
-                ShowPinModal();
+                // PIN is an in-login sub-view (engine state 1). Show login, then raise it directly
+                // for the screenshot/oracle. spec: frontend_scenes.md §11.3; client_runtime.md §7.6.
+                ShowLogin();
+                Callable.From(DevRaisePinSubView).CallDeferred();
                 break;
             case "server":
-                ShowServerSelect();
+                // Server-list is an in-login sub-view (engine state 1). Show login, then raise it
+                // directly. spec: frontend_scenes.md §11.4; client_runtime.md §7.6.
+                ShowLogin();
+                Callable.From(DevRaiseServerSubView).CallDeferred();
                 break;
             case "loading":
                 // Dev shortcut: jump directly to the loading screen (engine state 2).
@@ -261,54 +289,58 @@ public sealed partial class BootFlow : Node
             login.DevPrefillPw = DevAccountPw();
         }
 
-        // LoginAccepted: OK button passed local validation (ID ≥ 4, PW ≥ 1).
-        // → Stage credentials in Application layer, then advance to server select.
+        // LoginAccepted: OK button passed local validation (ID ≥ 4, PW ≥ 1) — stage credentials.
         login.LoginAccepted += OnLoginAccepted;
         login.QuitRequested += OnQuitRequested;
+
+        // RE-HOME (F1/F2/F5): the server-list (sub-states 34..41) and the PIN modal (sub-states
+        // 31/32) are INTERNAL tick sub-states of the Login scene (engine state 1) — NOT top-level
+        // scenes. The Login scene owns the whole connect→PIN→server-pick→submit chain and only then
+        // advances straight to Loading (engine state 2). BootFlow injects the sub-view factories
+        // (so DEV prefill / drainer / dev seed stay here) and routes LoginFlowCompleted → Loading.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.5 / §11.3 / §11.4; client_runtime.md §7.6 / §7.9.5.
+        login.PinFactory = CreateInLoginPin;
+        login.ServerSelectFactory = CreateInLoginServerSelect;
+        login.LoginFlowCompleted += OnLoginFlowCompleted;
+
         _host!.SetScreen(login);
-        GD.Print("[BootFlow] Showing LoginScreen.");
+        GD.Print("[BootFlow] Showing LoginScreen (owns the in-login PIN + server-list sub-views). " +
+                 "spec: client_runtime.md §7.6.");
     }
 
     private void OnLoginAccepted(string account, string password)
     {
         // UI click SFX is handled centrally by AudioService.OnButtonActionFired (NodeAdded
-        // subscription on StateButton.ActionFired). Calling _audio?.PlayClickSfx() here as well
-        // would play cue 861010101 TWICE on the same button press — removed to fix the double-click
-        // defect. spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (de-duplicate click path).
+        // subscription on StateButton.ActionFired). spec §3.8.1 (de-duplicate click path).
 
-        // Store account name and password so they can be forwarded to UseCases.LoginAsync
-        // at the PIN join point (after PIN is collected).
+        // Store account + password and stage them in the Application layer. The Login scene now
+        // drives the PIN/server sub-states internally; staging happens here on credential-validate.
         // spec: Docs/RE/specs/login_flow.md §4.2 — password forwarded with account to LoginAsync.
+        // spec: Docs/RE/specs/client_workflow.md §5.1.2 — login credential staging.
         _account = account;
         _password = password;
-        GD.Print($"[BootFlow] Login accepted (account='{account}') → PIN modal (before server select).");
+        if (_useCases is not null)
+            _ = _useCases.LoginAsync(_account, password: _password, cancellationToken: CancellationToken.None);
 
-        // FLOW ORDER (spec §1.4a / task mandate):
-        // Login validate → PIN (UNCONDITIONALLY after login-OK) → server list → char select.
-        // The PIN is shown BEFORE the server list, NOT after.
-        // spec: Docs/RE/specs/frontend_scenes.md §1.4a — "after primary login submit … and BEFORE
-        //   the account-login blob is built (sub-state 40) the client raises the PIN modal".
-        // The task mandate: "PIN pops UNCONDITIONALLY after login-OK, NOT before login;
-        //   confirm → server list appears → select a server → char scene."
-        ShowPinModal();
+        GD.Print($"[BootFlow] Login accepted (account='{account}'); credentials staged. " +
+                 "In-login PIN/server sub-states run inside engine state 1. spec: client_runtime.md §7.6.");
     }
 
     // -----------------------------------------------------------------------
-    // Step 2: PIN / second-password modal (BEFORE server select)
-    // spec: frontend_scenes.md §1.4a — PIN shown after login-validate, before server list.
-    // spec: task mandate — "PIN pops UNCONDITIONALLY after login-OK".
+    // In-login sub-view factories (engine state 1).
+    // The PIN (sub-state 31/32) and server-list (sub-states 34..41) are children of the Login scene
+    // (LoginScreen owns them). BootFlow only constructs each instance and attaches the DEV-only
+    // prefill / the server-list drainer / the DEV seed; the Login scene drives the structural flow.
+    // spec: Docs/RE/specs/frontend_scenes.md §1.5 / §11.3 / §11.4; client_runtime.md §7.6.
     // -----------------------------------------------------------------------
 
-    private void ShowPinModal()
+    private PinModal CreateInLoginPin()
     {
-        // The PIN modal is layered on TOP of the current screen (not replacing it),
-        // so it appears as a real modal overlay over the login screen background.
-        // spec: frontend_scenes.md §1.4a — PIN shown over the login window, before the
-        //   credential submit and server list. CODE-CONFIRMED flow position.
         var pin = new PinModal
         {
             Name = "PinModal",
             SharedAssets = _sharedAssets,
+            HostInReferenceSpace = true, // child of the 1024×768 Login scene — fill reference rect.
         };
 
         // DEV/TEST: pre-enter the hardcoded dev PIN (shown masked) so OK can be clicked directly.
@@ -316,59 +348,11 @@ public sealed partial class BootFlow : Node
         if (IsDevOfflineMode())
             pin.DevPrefillPin = DevAccountPin();
 
-        pin.PinSubmitted += OnPinSubmitted;
-        pin.Cancelled += OnPinCancelled;
-
-        // Add directly to the CanvasLayer so it sits above the ScreenHost (login screen) content.
-        _uiLayer!.AddChild(pin);
-        GD.Print("[BootFlow] PIN modal shown (post-login-validate, pre-server-select). spec: §1.4a.");
+        GD.Print("[BootFlow] In-login PIN sub-view created (engine state 1, sub-state 31→32). spec §11.3.");
+        return pin;
     }
 
-    private void OnPinSubmitted(string pin)
-    {
-        // UI click SFX is handled centrally by AudioService.OnButtonActionFired — no call here.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (de-duplicate click path).
-
-        // Remove the PIN modal.
-        RemovePinModal();
-
-        GD.Print($"[BootFlow] PIN submitted (length={pin.Length}) → server select.");
-
-        // Stage login credentials in the Application layer (if available).
-        // The password was captured from LoginScreen.LoginAccepted and stored in _password.
-        // spec: Docs/RE/specs/login_flow.md §4.2 — password forwarded to LoginAsync at PIN join.
-        // spec: Docs/RE/specs/client_workflow.md §5.1.2 — login credential staging.
-        if (_useCases is not null)
-        {
-            _ = _useCases.LoginAsync(_account, password: _password, cancellationToken: CancellationToken.None);
-        }
-
-        // After PIN → server list appears.
-        // spec: task mandate "확인 → server list appears → select a server → char scene."
-        ShowServerSelect();
-    }
-
-    private void OnPinCancelled()
-    {
-        RemovePinModal();
-        GD.Print("[BootFlow] PIN modal cancelled → back to login.");
-        // Cancel from PIN returns to the login screen (not server select, since we haven't reached it).
-        ShowLogin();
-    }
-
-    private void RemovePinModal()
-    {
-        if (_uiLayer is null) return;
-        Node? modal = _uiLayer.FindChild("PinModal", owned: false);
-        modal?.QueueFree();
-    }
-
-    // -----------------------------------------------------------------------
-    // Step 3: Server-selection screen (AFTER PIN)
-    // spec: task mandate "server list appears" after PIN confirm.
-    // -----------------------------------------------------------------------
-
-    private void ShowServerSelect()
+    private ServerSelectScreen CreateInLoginServerSelect()
     {
         var serverSelect = new ServerSelectScreen
         {
@@ -380,45 +364,35 @@ public sealed partial class BootFlow : Node
         // ServerListDrainer (mirrors CharListEventDrainer). Offline there is no response; the DEV
         // seed is applied after wiring the drainer so it can be replaced by a real event.
         // spec: Docs/RE/specs/login_flow.md §1 step 2 / §2.1 — ServerListReceivedEvent on IClientEventBus.
-        serverSelect.ServerSelected += OnServerSelected;
-        serverSelect.BackRequested += OnBackToLogin;
-        _host!.SetScreen(serverSelect);
-
-        // Wire the Application event-bus drainer so a real ServerListReceivedEvent drives the view.
-        // spec: Docs/RE/specs/login_flow.md §1 step 2 / §2.1. CODE-CONFIRMED path.
         if (_ctx is not null)
         {
             var serverDrainer = new ServerListDrainer();
             serverDrainer.Bind(serverSelect, _ctx.EventBus);
             serverDrainer.Name = "ServerListDrainer";
-            AddChild(serverDrainer);
+            // Parent the drainer to the server-select sub-view so it is freed with it.
+            serverSelect.AddChild(serverDrainer);
         }
 
-        // DEV-ONLY: seed a couple of servers so the parchment-scroll layout actually RENDERS
-        // for visual validation (guarded by dev-offline mode; NEVER shipped — real flow uses the lobby).
+        // DEV-ONLY: seed a couple of servers so the parchment-scroll layout actually RENDERS for
+        // visual validation (guarded by dev-offline mode; NEVER shipped — real flow uses the lobby).
         // spec: Docs/RE/specs/login_flow.md §2.
         if (IsDevOfflineMode())
             serverSelect.SetServers(DevServerList());
-        GD.Print("[BootFlow] Showing ServerSelectScreen (after PIN confirm). spec: task mandate.");
+
+        GD.Print("[BootFlow] In-login server-list sub-view created (engine state 1, sub-states 34..41). spec §11.4.");
+        return serverSelect;
     }
 
-    private void OnServerSelected(int serverId)
+    private void OnLoginFlowCompleted(int serverId, string pin)
     {
-        // UI click SFX is handled centrally by AudioService.OnButtonActionFired — no call here.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (de-duplicate click path).
-
-        // Free the server-list drainer — no longer needed once a server has been selected.
-        Node? serverDrainer = FindChild("ServerListDrainer", owned: false);
-        serverDrainer?.QueueFree();
-
+        // The Login scene completed the WHOLE connect→PIN→server-pick→submit chain INSIDE engine
+        // state 1. The flow now advances straight to the Loading screen (engine state 2) — there is
+        // no separate top-level server-select scene step. The PIN was collected internally; it is
+        // not re-prompted at char-select.
+        // spec: Docs/RE/specs/client_runtime.md §7.5.1 (1 → 2) / §7.9.5; frontend_scenes.md §1.5.
         _selectedServerId = serverId;
-        GD.Print($"[BootFlow] Server selected: id={serverId} → loading screen → char select.");
-
-        // Server-select commit advances substate 37→38 (store server_id, persist Lastserver); the
-        // client connects and the Loading screen (engine state 2) covers the transition into
-        // char-select. There is NO separate asset-backed "connecting" dialog in the recovered client
-        // (the prior ConnectingDialog was built on an unconfirmed caption id — removed as noise).
-        // spec: Docs/RE/specs/frontend_scenes.md §2L.
+        GD.Print($"[BootFlow] Login flow complete (server_id={serverId}, pin_len={pin.Length}) → " +
+                 "Loading (engine state 1 → 2). spec: client_runtime.md §7.5.1 / §7.9.5.");
         ShowLoadingScreen();
     }
 
@@ -688,6 +662,24 @@ public sealed partial class BootFlow : Node
             GD.PrintErr("[BootFlow] DevOpenCreateForm: CharacterSelectScreen not found.");
     }
 
+    /// <summary>DEV-ONLY: raises the in-login PIN sub-view on the live LoginScreen (dev_screen=pin).</summary>
+    private void DevRaisePinSubView()
+    {
+        if (_host?.FindChild("LoginScreen", recursive: true, owned: false) is LoginScreen login)
+            login.DevShowPinSubView();
+        else
+            GD.PrintErr("[BootFlow] DevRaisePinSubView: LoginScreen not found.");
+    }
+
+    /// <summary>DEV-ONLY: raises the in-login server-list sub-view on the live LoginScreen (dev_screen=server).</summary>
+    private void DevRaiseServerSubView()
+    {
+        if (_host?.FindChild("LoginScreen", recursive: true, owned: false) is LoginScreen login)
+            login.DevShowServerSubView();
+        else
+            GD.PrintErr("[BootFlow] DevRaiseServerSubView: LoginScreen not found.");
+    }
+
     // -----------------------------------------------------------------------
     // World boot
     // -----------------------------------------------------------------------
@@ -717,7 +709,61 @@ public sealed partial class BootFlow : Node
 
         Node world = packed.Instantiate();
         AddChild(world);
-        GD.Print("[BootFlow] World scene instanced.");
+        _world = world;
+
+        // World-exit hook (engine state 5 → 4 / 6). The World root (GameLoop) raises
+        // WorldExitRequested when the player leaves the world; BootFlow tears down World.tscn and
+        // re-enters the front-end. The master scene machine does not terminate at the world.
+        // spec: Docs/RE/specs/client_runtime.md §7.5.1 (5 → 4 natural return) / §7.5.3 (logout → 6) /
+        //       §7.9.5 ("state 5 pre-sets next = 4; world-leave sets 6").
+        if (world is global::MartialHeroes.Client.Godot.World.GameLoop gameLoop)
+            gameLoop.WorldExitRequested += OnWorldExitRequested;
+        else
+            GD.PrintErr("[BootFlow] World root is not a GameLoop — world-exit hook not wired.");
+
+        GD.Print("[BootFlow] World scene instanced + world-exit hook wired. spec: client_runtime.md §7.5.1.");
+    }
+
+    /// <summary>
+    /// Handles the world-exit signal raised by the World scene (engine state 5).
+    /// <paramref name="logout"/> selects the recovered exit transition:
+    ///   false = leave-world → tear down the world and re-show CharacterSelectScreen (state 5 → 4);
+    ///   true  = logout → quit the client (state 5 → 6).
+    /// spec: Docs/RE/specs/client_runtime.md §7.5.1 / §7.5.3 / §7.9.5.
+    /// </summary>
+    private void OnWorldExitRequested(bool logout)
+    {
+        GD.Print($"[BootFlow] WorldExitRequested(logout={logout}). spec: client_runtime.md §7.5.1/§7.5.3.");
+
+        TeardownWorld();
+
+        if (logout)
+        {
+            // Logout → engine state 6 (quit). spec: client_runtime.md §7.5.3.
+            GD.Print("[BootFlow] Logout → quit. spec: client_runtime.md §7.5.3 (state 5 → 6).");
+            GetTree().Quit();
+            return;
+        }
+
+        // Leave-world → re-enter char-select (engine state 4). The original re-enters select rather
+        // than re-running login: rebuild the menu UI scaffold and go straight to char-select.
+        // spec: client_runtime.md §7.5.1 (5 → 4 natural return) / §7.9.5.
+        GD.Print("[BootFlow] Leave-world → re-show CharacterSelectScreen. spec: client_runtime.md §7.5.1 (5 → 4).");
+        BuildMenuScaffold();
+        ShowCharacterSelect(pin: "");
+    }
+
+    /// <summary>Tears down the instanced World scene (state-4/6 re-entry).</summary>
+    private void TeardownWorld()
+    {
+        if (_world is not null && IsInstanceValid(_world))
+        {
+            if (_world is global::MartialHeroes.Client.Godot.World.GameLoop gameLoop)
+                gameLoop.WorldExitRequested -= OnWorldExitRequested;
+            _world.QueueFree();
+        }
+
+        _world = null;
     }
 
     // -------------------------------------------------------------------------

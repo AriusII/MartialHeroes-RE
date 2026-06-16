@@ -21,6 +21,11 @@ it to the IDB and reading symbol names back is firewall-safe. **Address keys are
 `"0x004A1230"`) so YAML never coerces them. The skill always shows a **dry-run diff first** and
 never renames compiler-runtime symbols.
 
+A name only lands on an address that **resolves in the binary** — the IDB is the single truth for what
+sits at each address, so apply never invents or relocates a symbol; the dry-run + SHA-256 pin guarantee
+each name reflects the right build. If the MCP is down or the SHA-256 mismatches the glossary pin,
+**STOP — never fabricate a rename onto the wrong build.**
+
 ## Preconditions (do these first, in order)
 
 1. **MCP must be green.** Run `/ida-mcp-connect`; confirm a live IDA Pro 9.3 MCP server at
@@ -78,7 +83,10 @@ never renames compiler-runtime symbols.
 ## Pitfalls
 
 - **Never** auto-edit `Docs/RE/names.yaml` or `journal.md` — pulls are staged for human review only.
-- **Never** run concurrently with another IDB writer — single-writer is the rule.
+- **Concurrent IDB writers are now allowed** (the reverse runs unbridled) — a parallel
+  `ida-rename-batch`/`ida-annotate-batch` run is fine; the safety model is the clean glossary + dry-run
+  + SHA-256 pin + idempotency, **not** serialization. Retry a failed/conflicting call rather than
+  throttling back.
 - Do not coerce address keys to ints when writing YAML back, and never override the CRT/FLIRT skip.
 - Do not apply across a SHA-256 mismatch — names would land on the wrong addresses.
 

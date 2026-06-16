@@ -63,15 +63,18 @@ public enum QuestRewardState : byte
 /// injected; the Domain does not parse <c>quests.scr</c>. spec: quests.md §8 / §11.
 /// </para>
 /// <para>
-/// <b>Accept gate threshold 26.</b> On accept the client compares a runtime status field against 26 and
-/// blocks below it. Whether the gated quantity is character level or a cash/VIP status is
-/// <c>UNVERIFIED</c> — only the literal threshold 26 is proven; the gated value is supplied by the
-/// caller. spec: quests.md §4.3 / §10 / §13 #10.
+/// <b>Accept gate threshold 26 (with billing/account bypass).</b> On accept the client gates on the
+/// character level word against 26: the accept <em>proceeds</em> when the billing/account bypass is
+/// set OR the level is <em>below</em> 26, and is <em>blocked</em> (notice shown, no 2/28 sent) when the
+/// bypass is clear AND the level is at or above 26. The gated word is the character level (compared
+/// against the quest record min/max level in the eligibility evaluator); only the literal threshold 26
+/// is proven on the wire, so the gated value and the bypass are supplied by the caller.
+/// spec: quests.md §4.3 / §10 / §11 / §13 #10.
 /// </para>
 /// </remarks>
 public readonly record struct QuestState
 {
-    /// <summary>The accept gate threshold: accept is blocked when the gated status value is below this. spec: quests.md §4.3 / §10 (26).</summary>
+    /// <summary>The accept gate threshold: accept is blocked (absent the bypass) when the level word is at or above this. spec: quests.md §4.3 / §10 (26).</summary>
     public const int AcceptGateThreshold = 26;
 
     /// <summary>The active quest id (0 when none). spec: quests.md §4.3 (active quest id).</summary>
@@ -87,19 +90,24 @@ public readonly record struct QuestState
     public bool IsCompleted => Phase == QuestPhase.Completed;
 
     /// <summary>
-    /// True when the §4.3 accept gate passes for <paramref name="gatedStatusValue"/> (≥ 26).
-    /// spec: Docs/RE/specs/quests.md §4.3 / §10.
+    /// True when the §4.3 accept gate passes: the send proceeds when the billing/account
+    /// <paramref name="billingBypass"/> is set OR the character <paramref name="level"/> is below 26.
+    /// Accept is blocked (notice shown, no 2/28 sent) when the bypass is clear AND the level is ≥ 26.
+    /// spec: Docs/RE/specs/quests.md §4.3 / §10 / §11.
     /// </summary>
-    public static bool AcceptGatePasses(int gatedStatusValue) => gatedStatusValue >= AcceptGateThreshold;
+    public static bool AcceptGatePasses(int level, bool billingBypass = false) =>
+        billingBypass || level < AcceptGateThreshold;
 
     /// <summary>
     /// Accepts an available quest (sub_action 2) when the §4.3 gate passes: <c>available → in-progress</c>.
-    /// Rejected if not available or the gate fails. spec: Docs/RE/specs/quests.md §4.2/§4.3.
+    /// The gate proceeds when <paramref name="billingBypass"/> is set OR <paramref name="level"/> is below
+    /// 26 (§4.3 polarity), and is rejected otherwise (or when not available / no quest id).
+    /// spec: Docs/RE/specs/quests.md §4.2/§4.3/§11.
     /// </summary>
     /// <returns>The next state and whether the accept was applied (and would send 2/28).</returns>
-    public (QuestState Next, bool Accepted) Accept(uint questId, int gatedStatusValue)
+    public (QuestState Next, bool Accepted) Accept(uint questId, int level, bool billingBypass = false)
     {
-        if (Phase != QuestPhase.Available || questId == 0 || !AcceptGatePasses(gatedStatusValue))
+        if (Phase != QuestPhase.Available || questId == 0 || !AcceptGatePasses(level, billingBypass))
         {
             return (this, false);
         }

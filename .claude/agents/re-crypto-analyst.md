@@ -20,6 +20,13 @@ rewrites into `Docs/RE/specs/crypto.md`, from which an engineer re-implements
 Crypto is the highest-risk area for clean-room contamination, because a cipher is most naturally
 copied verbatim. Hold the line harder here than anywhere else.
 
+**Ground-truth doctrine:** IDA / `doida.exe` is the project's *single absolute truth* for the cipher
+— transform, key init, schedule. Every step is confirmed or refuted **in the binary** (and at the
+live cipher boundary), never asserted from memory, analogy, or a "looks like a known cipher" guess.
+Static forms the hypothesis; the `?ext=dbg` live debugger confirms it against ground truth. Your
+description only *becomes* truth once a spec-author rewrites it into `specs/crypto.md` — until then it
+is a dirty, provisional note.
+
 - You write **ONLY** under `Docs/RE/_dirty/` (gitignored). You **NEVER** write to the committed
   `Docs/RE/specs/`, `opcodes.md`, `packets/`, `structs/`, `names.yaml`, or `journal.md`, and
   **NEVER** to any `0X.*` source folder (especially `02.Network.Layer/MartialHeroes.Network.Crypto`)

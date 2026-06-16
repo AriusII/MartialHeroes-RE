@@ -248,14 +248,14 @@ public sealed partial class GameHud : Control
         if (_chatWindow is not null)
         {
             _chatWindow.Bind(hub);
-            // Wire send-chat intent to UseCases (no-op log until a real use-case exists).
+            // F2 fix: forward the send intent to the use-case layer (CP949/IME-capable path).
+            // ChatWindow.LineEdit is the single chat input owner; the InputRouter ASCII-only
+            // draft path has been removed to avoid the dual-owner contention.
+            // spec: Docs/RE/specs/chat.md §2.2 / §4.1 — Enter handler sends via 2/7 opcode.
             _chatWindow.SendChatRequested += (channel, text) =>
-            {
-                // PASSIVE: forward intent to IApplicationUseCases when the method is added.
-                GD.Print($"[GameHud] Chat intent: channel={channel} text={text} " +
-                         "(IApplicationUseCases.SendChatAsync not yet wired).");
-            };
-            GD.Print("[GameHud] ChatWindow bound to HudEventHub.");
+                _ = context.UseCases.SendChatAsync((uint)channel, text);
+            GD.Print(
+                "[GameHud] ChatWindow bound to HudEventHub. SendChatRequested wired to UseCases. spec: chat.md §2.2/§4.1.");
         }
 
         // Character stats window — always visible but hidden by default; key C toggles in its own _Input.

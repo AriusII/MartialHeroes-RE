@@ -682,7 +682,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         // Text tail at +0x13: [u32 textLength EXCLUDING the NUL][CP949 text bytes][NUL]. spec: chat.md §4.2.
         Span<byte> tail = p.Slice(CmsgWhisperHeader.HeaderSize);
         BinaryPrimitives.WriteUInt32LittleEndian(tail.Slice(0, sizeof(uint)), (uint)bodyByteCount);
-        Cp949.GetBytes(text.AsSpan(0, Cp949CharCountForBytes(text, bodyByteCount)), tail.Slice(sizeof(uint), bodyByteCount));
+        Cp949.GetBytes(text.AsSpan(0, Cp949CharCountForBytes(text, bodyByteCount)),
+            tail.Slice(sizeof(uint), bodyByteCount));
         // The trailing NUL after the body is already present (zeroed array). spec: 2-7_whisper.yaml.
 
         return SendAsync(major: 2, minor: 7, payload, ct);

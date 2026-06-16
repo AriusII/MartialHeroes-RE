@@ -167,9 +167,13 @@ public sealed partial class RealWorldRenderer : Node3D
 
     // Texture-resolution inputs, loaded once in Initialise after the target cell is resolved.
     // The confirmed two-hop chain is: cell/building 1-based index → the cell .map's per-section
-    // TEXTURES[idx-1].intTexId → bgtexture pool[intTexId] → data/map{tag}/texture/<rel>.dds.
-    // spec: Docs/RE/formats/terrain.md §4.2 (bgtexture.txt) + §3.5 (.map TEXTURES) + §5.6. CONFIRMED.
-    private BgTextureCatalog? _bgTextures; // global pool: intTexId → relPath (from bgtexture.txt)
+    // TEXTURES[idx-1].intTexId (1-based pool slot) → bgtexture pool[intTexId-1] → data/map000/texture/<rel>.dds.
+    // The runtime form is the BINARY bgtexture.lst (bgtexture.txt is absent from a real packed VFS);
+    // the .txt mirror is only a dev/loose-tree fallback.
+    // spec: Docs/RE/specs/asset_pipeline.md §3 chain B (runtime = bgtexture.lst; .txt absent) +
+    //       Docs/RE/formats/bgtexture_lst.md §Cross-file join (.map intTexId-1 → .lst slot) +
+    //       Docs/RE/formats/terrain.md §3.5 (.map TEXTURES) + §5.6 (render-domain idx). CONFIRMED.
+    private global::MartialHeroes.Assets.Mapping.BgTextureCatalog? _bgTextures; // global pool: intTexId → relPath
     private MapDescriptor? _cellMap; // the target cell's .map (TERRAIN/BUILDING TEXTURES lists)
 
     // -------------------------------------------------------------------------
@@ -237,8 +241,9 @@ public sealed partial class RealWorldRenderer : Node3D
 
         GD.Print($"[RealWorldRenderer] Target cell resolved to ({TargetMapX},{TargetMapZ}) for area {TargetAreaId}.");
 
-        // Load the texture-resolution inputs once: the global bgtexture pool (text companion)
-        // and the cell's .map (per-section TEXTURES lists). spec: terrain.md §4.2 + §3.5. CONFIRMED.
+        // Load the texture-resolution inputs once: the global bgtexture pool (runtime bgtexture.lst,
+        // with the .txt mirror as dev/loose-tree fallback) and the cell's .map (per-section TEXTURES
+        // lists). spec: asset_pipeline.md §3 chain B + terrain.md §3.5. CONFIRMED.
         LoadTextureResolutionInputs();
 
         // Atmosphere (EnvironmentNode): assemble the area's sky/fog/light from the parsed per-area
@@ -600,8 +605,17 @@ public sealed partial class RealWorldRenderer : Node3D
 
     /// <summary>
     /// Loads the inputs for the two-hop terrain/building texture resolution: the global
-    /// <c>bgtexture.txt</c> pool and the target cell's <c>.map</c> descriptor.
-    /// spec: Docs/RE/formats/terrain.md §4.2 (bgtexture.txt) + §3.5 (.map TEXTURES). CONFIRMED.
+    /// background-texture pool and the target cell's <c>.map</c> descriptor.
+    ///
+    /// The pool is loaded from the BINARY <c>data/map000/texture/bgtexture.lst</c> — the runtime
+    /// form the original client actually consumes — via <see cref="global::MartialHeroes.Assets.Mapping.BgTextureCatalog.FromLst"/>.
+    /// The human-readable <c>bgtexture.txt</c> mirror is ABSENT from a real packed <c>data.vfs</c>,
+    /// so it is used only as a dev / loose-tree fallback when the <c>.lst</c> is missing. The pool +
+    /// the texture <c>.dds</c> are GLOBAL under <c>map000</c> for ALL areas (there is no per-area pool).
+    /// spec: Docs/RE/specs/asset_pipeline.md §3 chain B — runtime opens <c>bgtexture.lst</c>;
+    ///       <c>bgtexture.txt</c> absent from the image (the <c>.lst</c> wins). CONFIRMED.
+    /// spec: Docs/RE/formats/bgtexture_lst.md — u32 count, 48-byte records → index-keyed pool. CONFIRMED.
+    /// spec: Docs/RE/formats/terrain.md §3.5 (.map TEXTURES). CONFIRMED.
     /// </summary>
     private void LoadTextureResolutionInputs()
     {
@@ -610,23 +624,36 @@ public sealed partial class RealWorldRenderer : Node3D
 
         try
         {
-            // spec: Docs/RE/formats/terrain.md §4.2 — bgtexture.txt path. CONFIRMED.
-            // The bgtexture pool + texture .dds are GLOBAL under map000 for ALL areas (there is no
-            // per-area bgtexture.txt). spec: Docs/RE/formats/terrain.md §4.2 — global map000 pool. CONFIRMED.
-            string txtPath = "data/map000/texture/bgtexture.txt";
-            if (_assets.Contains(txtPath))
+            // Runtime form FIRST: the binary bgtexture.lst. spec: asset_pipeline.md §3 chain B —
+            // the loader opens data/map000/texture/bgtexture.lst (global map000 pool). CONFIRMED.
+            const string lstPath = "data/map000/texture/bgtexture.lst";
+            const string txtPath = "data/map000/texture/bgtexture.txt";
+
+            if (_assets.Contains(lstPath))
             {
-                _bgTextures = BgTextureTxtParser.Parse(_assets.GetRaw(txtPath));
-                GD.Print($"[RealWorldRenderer] bgtexture pool loaded: {_bgTextures.Count} entries.");
+                // spec: Docs/RE/formats/bgtexture_lst.md — binary index-keyed pool. CONFIRMED.
+                _bgTextures = global::MartialHeroes.Assets.Mapping.BgTextureCatalog.FromLst(_assets.GetRaw(lstPath));
+                GD.Print(
+                    $"[RealWorldRenderer] bgtexture pool loaded from bgtexture.lst: {_bgTextures.SlotCount} slots.");
+            }
+            else if (_assets.Contains(txtPath))
+            {
+                // Dev / loose-tree fallback only: the .txt mirror is absent from a real packed VFS.
+                // spec: Docs/RE/specs/asset_pipeline.md §3 chain B — .txt is the human-readable mirror,
+                //       used only when the runtime .lst is missing. CONFIRMED.
+                _bgTextures = global::MartialHeroes.Assets.Mapping.BgTextureCatalog.FromTxt(_assets.GetRaw(txtPath));
+                GD.Print(
+                    $"[RealWorldRenderer] bgtexture.lst absent — fell back to bgtexture.txt mirror: {_bgTextures.SlotCount} slots.");
             }
             else
             {
-                GD.Print($"[RealWorldRenderer] bgtexture.txt absent ({txtPath}) — terrain/buildings stay untextured.");
+                GD.Print(
+                    $"[RealWorldRenderer] bgtexture.lst absent ({lstPath}) and no .txt mirror — terrain/buildings stay untextured.");
             }
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[RealWorldRenderer] bgtexture.txt load failed: {ex.Message}");
+            GD.PrintErr($"[RealWorldRenderer] bgtexture pool load failed: {ex.Message}");
         }
 
         try
@@ -650,30 +677,38 @@ public sealed partial class RealWorldRenderer : Node3D
     }
 
     /// <summary>
-    /// Resolves a 1-based texture index from a cell patch (<see cref="TerrainNode"/>) or a BUD
-    /// object to a Godot <see cref="ImageTexture"/> via the confirmed two-hop chain:
-    /// <c>index-1</c> → the cell <c>.map</c> section's <c>TEXTURES[idx].intTexId</c> →
-    /// <c>bgtexture</c> pool → <c>data/map{tag}/texture/&lt;rel&gt;.dds</c>.
-    /// spec: Docs/RE/formats/terrain.md §3.5 + §4.2 + §5.6. CONFIRMED.
+    /// Resolves a 1-based <c>.ted</c> per-cell byte (from <see cref="TerrainNode"/>) or a BUD object to
+    /// a Godot <see cref="ImageTexture"/> via the IDA-confirmed chain (263bd994): the byte is clamped to
+    /// <c>[1, count]</c> (both <c>&lt;1</c> and <c>&gt;count</c> → 1), then <c>TEXTURES[byte-1].intTexId</c>
+    /// (the ONLY <c>-1</c>, on the byte — IDA 0x44b296), then the <c>bgtexture.lst</c> pool indexed
+    /// DIRECTLY by <c>intTexId</c> (0-based, NO <c>-1</c> — IDA 0x445833 / 0x44a46d) →
+    /// <c>data/map000/texture/&lt;rel&gt;.dds</c>.
+    /// spec: Docs/RE/formats/terrain.md §3.5 + §5.6; Docs/RE/formats/bgtexture_lst.md §Cross-file join. CONFIRMED.
     /// </summary>
     /// <param name="sectionKeyword">The .map section to read the TEXTURES list from (e.g. "TERRAIN", "BUILDING").</param>
     /// <param name="oneBasedIndex">The 1-based index into that section's TEXTURES list.</param>
     private ImageTexture? ResolveSectionTexture(string sectionKeyword, int oneBasedIndex)
     {
         if (_assets is null || _bgTextures is null || _cellMap is null) return null;
-        if (oneBasedIndex <= 0) return null;
 
         (int Flag, int TexId)[]? list = GetSectionTextures(sectionKeyword);
-        if (list is null) return null;
+        if (list is null || list.Length == 0) return null;
 
-        int li = oneBasedIndex - 1;
-        if ((uint)li >= (uint)list.Length) return null;
+        // The .ted per-cell byte is 1-based into the cell texture list and clamped to [1, count]:
+        // BOTH a byte < 1 and a byte > count resolve to slot 1 (perCellTexList[0]) — there is NO
+        // no-texture sentinel. This clamp + the byte-1 below are the ONE legitimate -1 in the chain
+        // (it is on the .ted byte, NOT on the intTexId).
+        // spec: Docs/RE/formats/terrain.md §5.6 — Ted_ResolvePatchTextures (IDA 0x44b296: <1→1, >count→1).
+        int b = (oneBasedIndex < 1 || oneBasedIndex > list.Length) ? 1 : oneBasedIndex;
+        int intTexId = list[b - 1].TexId;
 
-        string? rel = _bgTextures.GetRelPath(list[li].TexId);
-        if (rel is null) return null;
+        // The .map intTexId is the 0-based bgtexture pool slot, used DIRECTLY (NO -1): the pool accessor
+        // reads pool[0]+stride*intTexId. spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join
+        // (IDA-corrected 263bd994: 0x445833 / 0x44a46d / store 0x44b267). Textures live under the GLOBAL
+        // map000 pool for all areas. spec: terrain.md §3.5. CONFIRMED.
+        string? ddsPath = _bgTextures.ResolveTexturePath(intTexId);
+        if (ddsPath is null) return null;
 
-        // Texture .dds live under the GLOBAL map000 pool for all areas. spec: terrain.md §4.2. CONFIRMED.
-        string ddsPath = $"data/map000/texture/{rel}.dds";
         return _assets.Contains(ddsPath) ? _assets.LoadTexture(ddsPath) : null;
     }
 

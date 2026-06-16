@@ -40,10 +40,11 @@ def main():
 
     if hits:
         h.system_message(
-            "⚠ clean-room firewall: this `git add` references {}. Those are gitignored by "
-            "policy and must never be staged — drop the path (and any `-f`/`--force`). If you "
-            "truly need it tracked, reconsider: the firewall depends on these staying out of "
-            "git. Advisory only — nothing was blocked.".format(" and ".join(hits))
+            "⚠ clean-room firewall: this `git add` references {}. That is the TAINTED source "
+            "(decompiler-derived / copyrighted) — only the committed Docs/RE specs (the clean, "
+            "IDA-derived truth) belong in git. Those paths are gitignored by policy and must never "
+            "be staged — drop the path (and any `-f`/`--force`). The firewall depends on them "
+            "staying out of git. Advisory only — nothing was blocked.".format(" and ".join(hits))
         )
         return
     h.ok()

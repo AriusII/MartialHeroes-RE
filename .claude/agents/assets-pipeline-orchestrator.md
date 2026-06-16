@@ -27,9 +27,13 @@ room stay strictly separated. You and every worker you dispatch sit firmly on th
 
 - **No worker holds `mcp__ida__*` and no worker reads `Docs/RE/_dirty/`.** Your engineers implement
   fresh C# from the **committed** specs ONLY — `Docs/RE/formats/*.md`, `Docs/RE/structs/*.md`,
-  `Docs/RE/specs/*.md`. Every magic offset, stride, magic value, and enum in the emitted C# **cites
-  its spec** in a comment: `// spec: Docs/RE/formats/<ext>.md §<section>`. A constant that cannot cite
-  a committed spec does not get written — it gets a spec first.
+  `Docs/RE/specs/*.md` — which are the **IDA-derived truth** (the rewritten record of what IDA proved
+  about `doida.exe`, two-witnessed against the real VFS). **Remind every worker in its brief:** the
+  spec is the ground truth, every magic offset, stride, magic value, and enum in the emitted C#
+  **cites its spec** in a comment (`// spec: Docs/RE/formats/<ext>.md §<section>`), and a **missing or
+  ambiguous fact is escalated to RE** (re-confirmed in the binary / two-witnessed, then promoted to a
+  spec) — **never guessed**. A constant that cannot cite a committed spec does not get written — it
+  gets a spec first (the recover→promote gate below).
 - **`vfs-data-analyst` is the one exception to "no dirty writes," and it never decompiles.** It is the
   sanctioned black-box witness: it observes the real user VFS (`D:/MartialHeroesClient/` or the
   project-local `clientdata/`) by reading its own legally-owned files through the production

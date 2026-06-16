@@ -46,6 +46,15 @@ public sealed partial class InputRouter : Node
     // Camera reference for screen→world raycasting (click-to-move).
     private Camera3D? _camera;
 
+    // Click-synthesis latch state: records the press position and button so that on release at the
+    // same-ish position we can emit a MouseButtonClick (type 6) event.
+    // spec: Docs/RE/specs/input_ui.md §2b — "latch widget on press, synthesise click on same-widget release".
+    // The 2-px drag tolerance is byte-confirmed at IDA dword_79651C=2. spec: input_ui.md §2b.
+    private int _pressX = -1;
+    private int _pressY = -1;
+    private int _pressButton = -1;
+    private const int ClickDragTolerance = 2; // spec: Docs/RE/specs/input_ui.md §2b — dword_79651C=2 BYTE-CONFIRMED.
+
     // Modifier flag constants — recovered bit positions.
     // spec: Docs/RE/specs/input_ui.md §2c — "Modifier-flag encoding (recovered bit positions)".
     //   bit3 (0x8) = key slot 1014 — confirmed Alt.
@@ -56,8 +65,8 @@ public sealed partial class InputRouter : Node
     // so we bind Shift→0x4 (slot 1012) and Ctrl→0x2 (slot 1013) as the current best-effort mapping.
     // spec: Docs/RE/specs/input_ui.md §2c.
     private const int ModShift = 0x4; // bit2 — key slot 1012. spec: input_ui.md §2c.
-    private const int ModCtrl = 0x2;  // bit1 — key slot 1013. spec: input_ui.md §2c.
-    private const int ModAlt = 0x8;   // bit3 — key slot 1014, confirmed Alt. spec: input_ui.md §2c.
+    private const int ModCtrl = 0x2; // bit1 — key slot 1013. spec: input_ui.md §2c.
+    private const int ModAlt = 0x8; // bit3 — key slot 1014, confirmed Alt. spec: input_ui.md §2c.
 
     /// <summary>
     /// Called by GameLoop._Ready before any input is processed.
@@ -165,9 +174,6 @@ public sealed partial class InputRouter : Node
                     int y = (int)mouseBtn.Position.Y;
                     int button = MapMouseButton(mouseBtn.ButtonIndex);
                     int mods = BuildModifiers(mouseBtn);
-                    InputType type = mouseBtn.Pressed
-                        ? InputType.MouseButtonDown // spec: input_ui.md §2 — type 5 = button press.
-                        : InputType.MouseButtonUp;
 
                     // Wheel events are encoded as button press in Godot.
                     if (mouseBtn.ButtonIndex == global::Godot.MouseButton.WheelUp ||
@@ -180,8 +186,38 @@ public sealed partial class InputRouter : Node
                         break;
                     }
 
-                    var e = new AppInputEvent(type, x, y, button, mods);
-                    _inputBus.Enqueue(in e);
+                    if (mouseBtn.Pressed)
+                    {
+                        // Press: emit type 4 (MouseButtonDown) and latch position for click synthesis.
+                        // spec: Docs/RE/specs/input_ui.md §2a — type 4 = press.
+                        _pressX = x;
+                        _pressY = y;
+                        _pressButton = button;
+                        var downEvt = new AppInputEvent(InputType.MouseButtonDown, x, y, button, mods);
+                        _inputBus.Enqueue(in downEvt);
+                    }
+                    else
+                    {
+                        // Release: emit type 5 (MouseButtonUp).
+                        // spec: Docs/RE/specs/input_ui.md §2a — type 5 = release.
+                        var upEvt = new AppInputEvent(InputType.MouseButtonUp, x, y, button, mods);
+                        _inputBus.Enqueue(in upEvt);
+
+                        // Click synthesis: if release is within 2 px of the press, emit type 6 (Click).
+                        // spec: Docs/RE/specs/input_ui.md §2b — "synthesise click on same-widget release".
+                        // spec: dword_79651C = 2 (drag tolerance). BYTE-CONFIRMED.
+                        if (_pressButton == button &&
+                            Math.Abs(x - _pressX) <= ClickDragTolerance &&
+                            Math.Abs(y - _pressY) <= ClickDragTolerance)
+                        {
+                            var clickEvt = new AppInputEvent(InputType.MouseButtonClick, x, y, button, mods);
+                            _inputBus.Enqueue(in clickEvt);
+                        }
+
+                        // Clear the latch.
+                        _pressButton = -1;
+                    }
+
                     break;
                 }
 
@@ -202,16 +238,14 @@ public sealed partial class InputRouter : Node
         }
     }
 
-    // Chat input state: true while the chat bar is active.
-    // spec: Docs/RE/specs/input_ui.md §4 — "Enter key toggles the chat input bar".
-    private bool _chatActive;
-    private string _chatDraft = string.Empty;
-
     /// <summary>
-    /// Handles unhandled input — specifically the hotbar action-press path, click-to-move
-    /// fallback, and the chat-input bar (Enter to toggle).
+    /// Handles unhandled input — specifically the hotbar action-press path.
+    /// Chat input is owned exclusively by the ChatWindow LineEdit (IME/CP949-capable).
+    /// F2 fix: the ASCII-only InputRouter chat draft path has been removed to eliminate the
+    /// dual-owner contention; ChatWindow.SendChatRequested → UseCases.SendChatAsync is the
+    /// single chat send path. spec: Docs/RE/specs/chat.md §2.2 / §4.1.
     /// spec: Docs/RE/specs/input_ui.md §3 — UI consumes first; world second.
-    /// spec: Docs/RE/specs/input_ui.md §4 — Enter key → chat input; hotbar 1–9.
+    /// spec: Docs/RE/specs/input_ui.md §4 — hotbar 1–9.
     /// </summary>
     public override void _UnhandledInput(global::Godot.InputEvent evt)
     {
@@ -233,59 +267,6 @@ public sealed partial class InputRouter : Node
 
     private void UnhandledInputInternal(global::Godot.InputEvent evt)
     {
-        // Handle key events for chat and hotbar.
-        if (evt is InputEventKey key && key.Pressed)
-        {
-            // Enter key: toggle chat input bar or send current draft.
-            // spec: Docs/RE/specs/input_ui.md §4 — "Enter toggles chat input".
-            if (key.Keycode == Key.Enter || key.Keycode == Key.KpEnter)
-            {
-                if (_chatActive && !string.IsNullOrWhiteSpace(_chatDraft))
-                {
-                    // Send the current draft on general channel (0).
-                    // spec: IApplicationUseCases.SendChatAsync; Docs/RE/packets/3-21_chat_channel.yaml.
-                    _ = _clientContext.UseCases.SendChatAsync(0u, _chatDraft);
-                    _chatDraft = string.Empty;
-                    _chatActive = false;
-                    GD.Print("[InputRouter] Chat sent.");
-                }
-                else
-                {
-                    _chatActive = !_chatActive;
-                    if (!_chatActive) _chatDraft = string.Empty;
-                    GD.Print($"[InputRouter] Chat input {(_chatActive ? "opened" : "closed")}.");
-                }
-
-                GetViewport().SetInputAsHandled();
-                return;
-            }
-
-            // Escape: close chat without sending.
-            if (_chatActive && key.Keycode == Key.Escape)
-            {
-                _chatActive = false;
-                _chatDraft = string.Empty;
-                GetViewport().SetInputAsHandled();
-                return;
-            }
-
-            // While chat is active: accumulate printable keys into the draft.
-            if (_chatActive)
-            {
-                if (key.Keycode == Key.Backspace && _chatDraft.Length > 0)
-                {
-                    _chatDraft = _chatDraft[..^1];
-                }
-                else if (key.Unicode > 0 && key.Unicode < 128)
-                {
-                    _chatDraft += (char)key.Unicode;
-                }
-
-                GetViewport().SetInputAsHandled();
-                return;
-            }
-        }
-
         // Hotbar: skill slots 1–9 mapped to input actions "use_skill_1" … "use_skill_9".
         // Direct use-case calls — not dispatched through the InputBus (no spatial component).
         // spec: Docs/RE/specs/input_ui.md §4 — "hotbar 1–9 bind to CastSkillAsync".

@@ -12,6 +12,18 @@ Authoritative sources (read them; do not re-derive): `CLAUDE.md` → "Clean-Room
 and "Reverse-Engineering & MCP Tooling"; `Docs/CAMPAIGN_TEMPLATE.md` (§0.3 / §4.4 firewall, §2–3
 tiers/concurrency); `Docs/RE/README.md`.
 
+## Ground-truth hierarchy (what is authoritative)
+- **IDA / `doida.exe` is the single absolute truth** for the original's behavior, data, and layout.
+  Open or disputed facts are settled **only** in the binary — never from memory, analogy, or guesswork.
+  *Static analysis forms the hypothesis; the `?ext=dbg` debugger confirms it against ground truth.* MCP
+  down / wrong DB ⇒ **STOP, never fabricate**.
+- **The committed `Docs/RE/` specs are the derived truth** — the rewritten, firewall-clean record of
+  what IDA proved (`formats/`, `packets/`, `structs/`, `specs/`, `opcodes.md`), and the **only** thing
+  implementation reads. When a spec and the binary disagree, **the binary wins**: correct the spec and
+  re-journal it.
+- **C# / Godot are measured against the binary + the specs, never the reverse** (for rendered pixels
+  only, the official captures are the visual oracle — `oracle > spec`).
+
 ## Legal basis (why the firewall is non-negotiable)
 - Decompilation is permitted **solely for interoperability** — EU Software Directive **2009/24/EC
   Art. 6**. The dirty→spec→engineer separation is what keeps that lawful. Break the separation and the

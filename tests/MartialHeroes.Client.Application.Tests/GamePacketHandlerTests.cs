@@ -150,6 +150,118 @@ public sealed class GamePacketHandlerTests
         Assert.Equal(1, unhandled.Count);
     }
 
+    // -----------------------------------------------------------------------------------------------
+    // 5/9 ExpGain + 5/11 RankXpGain routing into the Domain ProgressionState.
+    // spec: Docs/RE/specs/progression.md §3 / §3.1 / §4 / §11.
+    // -----------------------------------------------------------------------------------------------
+
+    private static (InboundFrameDispatcher dispatcher, ClientWorld world, GamePacketHandler handler)
+        NewProgressionHarness(
+            System.Collections.Generic.IReadOnlyList<long>? divisors = null,
+            System.Collections.Generic.IReadOnlyList<long>? caps = null,
+            System.Action<int>? levelTableError = null,
+            System.Func<long>? bonusRate = null)
+    {
+        var bus = new ClientEventBus(ClientEventBus.Unbounded);
+        var world = new ClientWorld();
+        var fsm = new ClientStateMachine(bus, ClientState.Loading);
+        var unhandled = new CountingUnhandledOpcodeSink();
+        var handler = new GamePacketHandler(world, bus, fsm, unhandled)
+        {
+            RankXpDivisorTable = divisors,
+            RankXpCapTable = caps,
+            LevelTableErrorSink = levelTableError,
+            XpBonusRatePercentResolver = bonusRate,
+        };
+        var dispatcher = new InboundFrameDispatcher(handler);
+        return (dispatcher, world, handler);
+    }
+
+    // NOTE: 5/9 and 5/11 route through GamePacketHandler.OnUnhandled (they have no typed PacketRouter
+    // seam), so PacketRouter.Route / RouteNow returns false for them by design (same as any unhandled
+    // opcode). The load-bearing assertion is the resulting ProgressionState, not the route return value.
+
+    [Fact]
+    public void ExpGain_5_9_adds_amount_to_both_accumulators()
+    {
+        var (dispatcher, _, handler) = NewProgressionHarness();
+
+        // spec: progression.md §3 / §3.4 — the i64 amount adds to current-XP AND lifetime-XP.
+        dispatcher.RouteNow(SyntheticFrames.ExpGain(sort: 1, actorId: 7, amount: 1500));
+        Assert.Equal(1500L, handler.Progression.Experience.CurrentXp);
+        Assert.Equal(1500L, handler.Progression.Experience.LifetimeXp);
+
+        dispatcher.RouteNow(SyntheticFrames.ExpGain(sort: 1, actorId: 7, amount: 500));
+        Assert.Equal(2000L, handler.Progression.Experience.CurrentXp);
+        Assert.Equal(2000L, handler.Progression.Experience.LifetimeXp);
+    }
+
+    [Fact]
+    public void ExpGain_5_9_bonus_split_is_display_only_full_amount_still_accumulates()
+    {
+        // spec: progression.md §3.1 — when source-mode low byte == 2 the floating text splits base/bonus,
+        // but the FULL amount accumulates (the split changes nothing about the accumulator).
+        var (dispatcher, _, handler) = NewProgressionHarness(bonusRate: () => 100L);
+
+        dispatcher.RouteNow(
+            SyntheticFrames.ExpGain(sort: 1, actorId: 7, amount: 200, sourceSort: 2));
+
+        Assert.Equal(200L, handler.Progression.Experience.CurrentXp);
+        Assert.Equal(200L, handler.Progression.Experience.LifetimeXp);
+    }
+
+    [Fact]
+    public void RankXp_5_11_mode2_adds_directly_no_level_math()
+    {
+        var (dispatcher, _, handler) = NewProgressionHarness();
+
+        // spec: progression.md §4 / §4.1 — mode 2 adds the amount straight to the rank accumulator.
+        dispatcher.RouteNow(
+            SyntheticFrames.RankXpGain(actorId: 7, sort: 1, amount: 42, mode: 2));
+
+        Assert.Equal(42L, handler.Progression.RankXp.RankAccumulator);
+        Assert.Equal(0L, handler.Progression.RankXp.WithinRank);
+    }
+
+    [Fact]
+    public void RankXp_5_11_nonMode2_runs_per_level_table_routine()
+    {
+        // spec: progression.md §4 — rank_acc += (remainder+amount)/divisor[level]; within = % divisor.
+        // Local-player level 3 → divisor 10; amount 25 → +2 ranks, remainder 5.
+        var divisors = new long[] { 0, 0, 0, 10, 10 }; // indexed by level cache.
+        var (dispatcher, world, handler) = NewProgressionHarness(divisors: divisors);
+
+        // A local actor at level 3 supplies the table index.
+        dispatcher.RouteNow(SyntheticFrames.CharSpawn(1, 7, "Wuxia", 3, 100, 0, 0, 0f, 0f, 0));
+        world.LocalActorKey = new ActorKey(7, EntitySort.PlayerCharacter);
+
+        dispatcher.RouteNow(
+            SyntheticFrames.RankXpGain(actorId: 7, sort: 1, amount: 25, mode: 0));
+
+        Assert.Equal(2L, handler.Progression.RankXp.RankAccumulator);
+        Assert.Equal(5L, handler.Progression.RankXp.WithinRank);
+    }
+
+    [Fact]
+    public void RankXp_5_11_zero_divisor_fires_leveltable_error_and_leaves_state_unchanged()
+    {
+        // spec: progression.md §4 — a 0 divisor for the active level is the "leveltable error".
+        int erroredLevel = -1;
+        var divisors = new long[] { 0, 0, 0, 0 }; // divisor for level 3 is 0.
+        var (dispatcher, world, handler) =
+            NewProgressionHarness(divisors: divisors, levelTableError: lvl => erroredLevel = lvl);
+
+        dispatcher.RouteNow(SyntheticFrames.CharSpawn(1, 7, "Wuxia", 3, 100, 0, 0, 0f, 0f, 0));
+        world.LocalActorKey = new ActorKey(7, EntitySort.PlayerCharacter);
+
+        dispatcher.RouteNow(
+            SyntheticFrames.RankXpGain(actorId: 7, sort: 1, amount: 25, mode: 0));
+
+        Assert.Equal(3, erroredLevel); // diagnostic fired for the level-3 index.
+        Assert.Equal(0L, handler.Progression.RankXp.RankAccumulator); // state untouched.
+        Assert.Equal(0L, handler.Progression.RankXp.WithinRank);
+    }
+
     private static int FrameWithOpcode(ushort major, ushort minor) => 8; // header only, empty payload
 
     private static void WriteHeader(byte[] frame, ushort major, ushort minor)

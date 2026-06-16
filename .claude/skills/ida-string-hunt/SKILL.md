@@ -18,6 +18,11 @@ the subsystem you need. It is the natural first move after `ida-recon`, and the 
 All output is **dirty** (string contents + addresses derived directly from the copyrighted binary)
 and lands under `Docs/RE/_dirty/static/`.
 
+**Ground truth:** the census is read FROM the IDA string/import table, never recalled from memory or a
+prior build — and a substring bucket is a *subsystem hypothesis*, not a finding (verify the referencing
+function before declaring a subsystem present). MCP down / wrong-or-empty DB ⇒ STOP, never invent
+strings or references.
+
 ## Preconditions (do these first, in order)
 
 1. **MCP must be green.** Run `/ida-mcp-connect`; confirm a live IDA Pro 9.3 MCP server at

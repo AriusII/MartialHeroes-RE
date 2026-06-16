@@ -17,6 +17,11 @@ chain of instructions that produce or consume it, which is exactly what a packet
 All output is **dirty** (addresses derived directly from the copyrighted binary) and lands under
 `Docs/RE/_dirty/static/`.
 
+**Ground truth:** the chain is read FROM the binary, never inferred from memory or from "where a value
+like this usually goes." Each step is a definition/use the tool actually found; an ambiguous step is
+reported as ambiguous, never resolved by guess. The static path is the hypothesis a debugger read
+confirms byte-for-byte (below). MCP down / wrong DB ⇒ STOP, never fabricate a flow step.
+
 ## Preconditions (do these first, in order)
 
 1. **MCP must be green.** Run `/ida-mcp-connect`; confirm a live IDA Pro 9.3 MCP server at

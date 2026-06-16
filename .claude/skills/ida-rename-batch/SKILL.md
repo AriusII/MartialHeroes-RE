@@ -19,6 +19,11 @@ glossary. The glossary stays the single source of truth; the IDB is just kept in
 Proposing a *new* name is fine; *writing a new name straight into the database* is not — that path
 must go through the glossary.
 
+Every proposed name must **reflect the function's behavior as the binary proves it** (its strings,
+xrefs, call shape) — never a tidy-looking guess from memory or analogy; an unsure proposal stays a
+proposal for the maintainer to vet, never a forced rename. If the MCP is down or the SHA-256 mismatches
+the glossary pin, **STOP — never apply onto the wrong build or fabricate the dry-run.**
+
 ## Preconditions (do these first, in order)
 
 1. **MCP must be green.** Run `/ida-mcp-connect`; confirm a live IDA Pro 9.3 MCP server at

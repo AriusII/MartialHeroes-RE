@@ -64,9 +64,11 @@ def main():
     # Speak on the first call of the session, then only occasionally, to stay low-noise.
     if count == 1 or count % 25 == 0:
         h.system_message(
-            "ℹ IDA call #{} logged. Its output is dirty-room: write findings ONLY to "
-            "Docs/RE/_dirty/, then have a spec-author rewrite (never copy) them into the neutral "
-            "committed specs. {} Advisory only.".format(count, h.CLEAN_ROOM_BLURB)
+            "ℹ IDA call #{} logged. IDA/doida.exe is the single source of truth — confirm facts "
+            "here, never guess; STOP if the MCP is down or on the wrong DB. Its output is "
+            "dirty-room: write findings ONLY to Docs/RE/_dirty/, then have a spec-author rewrite "
+            "(never copy) them into the neutral committed specs (the derived truth). {} "
+            "Advisory only.".format(count, h.CLEAN_ROOM_BLURB)
         )
         return
     h.ok()

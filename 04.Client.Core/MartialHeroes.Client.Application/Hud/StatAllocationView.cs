@@ -15,7 +15,7 @@ namespace MartialHeroes.Client.Application.Hud;
 /// §7.1 (the pending-delta model: <c>+</c> adds the step and subtracts from available points;
 /// available = remaining − Σ deltas), §8.1 (Apply commits five ABSOLUTE stats = base + delta in wire
 /// order STR, INT, AGI, DEX, CON). This view orders its members STR, INT, AGI, DEX, CON to match the
-/// commit wire order; do not confuse it with the editor's action-id order STR, INT, AGI, CON, DEX
+/// commit wire order; do not confuse it with the editor's action-id order STR, DEX, INT, CON, AGI
 /// (§7.2). Future producer: the stat-allocation use case, refreshed by the 4/29 ack / 5/67 resync.
 /// </remarks>
 /// <param name="BaseStr">Cached absolute base STR. spec: Docs/RE/specs/progression.md §2.</param>

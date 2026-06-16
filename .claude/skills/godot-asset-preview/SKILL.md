@@ -14,6 +14,11 @@ terrain cell tile correctly? This skill loads a single real asset from the VFS, 
 from the *parsed* data with the project's own mesh builders, isolates it in a tiny preview scene, and
 captures a screenshot to inspect.
 
+You are **eyeballing the parser's output against the IDA-derived format spec** (`Docs/RE/formats/` —
+the recovered truth of how `doida.exe` reads that asset), not against a guess. "Right shape" means
+*shape the format spec predicts*: a divergence is a parser-vs-spec defect to name, not an excuse to
+tweak the preview until it looks plausible. The spec is the expectation; the screenshot is the check.
+
 ## The two iron rules
 
 1. **NEVER use `GltfDocument.AppendFromBuffer`.** It crashes natively on this project's generated

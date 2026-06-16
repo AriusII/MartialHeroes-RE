@@ -684,5 +684,17 @@ public sealed partial class MinimapPanel : Control
         {
             _areaLabel.Text = string.Empty;
         }
+
+        // F6 / spec-gap: footer state-colour (0=yellow/msg35001, 1=white/msg35002, 2=red/msg35003)
+        // is keyed on the sub-region attribute at +0x28 in the region table record.
+        // spec: Docs/RE/specs/minimap.md §3.6 — "footer colour driven by region attribute enum".
+        // spec-gap: ZoneCatalog / VfsRegionSource do not yet expose the +0x28 attribute field.
+        //   Until ZoneCatalog is extended with the attribute enum, the footer uses the default
+        //   yellow colour (attribute 0 = safe/open area) set at construction in BuildUi().
+        //   To implement: promote the +0x28 attribute to ZoneCatalog, then colour-switch here:
+        //     0 → new Color(1f,1f,0f,1f)  (yellow,  msg 35001)
+        //     1 → new Color(1f,1f,1f,1f)  (white,   msg 35002)
+        //     2 → new Color(1f,0.2f,0.2f,1f) (red, msg 35003 — gated area)
+        //   spec: Docs/RE/specs/minimap.md §3.6.
     }
 }

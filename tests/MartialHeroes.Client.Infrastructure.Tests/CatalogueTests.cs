@@ -40,55 +40,19 @@ public sealed class CatalogueTests
     }
 
     /// <summary>
-    /// When DivisorC = 0 the divide-by-zero guard fires and the curve value is 0.
-    /// spec: Docs/RE/formats/config_tables.md §2.4 —
-    ///   "divisor C = 0 (phases 1 and 5): grid lookup skipped via a divide-by-zero guard": CONFIRMED.
+    /// FIDELITY DEFAULT: even with non-empty userlevel.scr entries, the default catalogue returns the
+    /// empty (0-base) curves. The real per-level HP/MP base computation is UNVERIFIED (the
+    /// float-position→named-stat mapping and the actual (10/A)×B → HP/MP formula are open questions),
+    /// so no magnitude is invented — the level-base term stays at its provisional 0.
+    /// spec: Docs/RE/formats/config_tables.md §2.4 (open questions #1/#2 — HP/MP base UNVERIFIED);
+    ///       §IMPORTANT (level-base term provisionally 0 until userlevel.scr is decoded).
     /// </summary>
     [Fact]
-    public void ScrStatCatalogue_DivisorCZero_YieldsZeroCurveEntry()
+    public void ScrStatCatalogue_DefaultMode_ReturnsEmptyCurves_NoInventedMagnitude()
     {
-        LevelBaseEntry[] entries =
-        [
-            MakeLevelEntry(level: 1, divisorC: 0, posScale: 1.0f),
-        ];
-
-        var catalogue = new ScrStatCatalogue(entries);
-        var hp = catalogue.GetHpBaseCurve();
-
-        Assert.Equal(0L, hp.BaseForLevel(1));
-    }
-
-    /// <summary>
-    /// When DivisorC = 2 the formula (10/2)×3×posScale×100 = 1500 for posScale=1.0.
-    /// spec: Docs/RE/formats/config_tables.md §2.4 —
-    ///   "when C=2 formula yields 15.0 (using B=3.0)": CONFIRMED.
-    /// </summary>
-    [Fact]
-    public void ScrStatCatalogue_DivisorCTwo_YieldsExpectedValue()
-    {
-        LevelBaseEntry[] entries =
-        [
-            MakeLevelEntry(level: 12, divisorC: 2, posScale: 1.0f),
-        ];
-
-        var catalogue = new ScrStatCatalogue(entries);
-        var hp = catalogue.GetHpBaseCurve();
-
-        // (10/2)×3 × 1.0 × 100 = 1500
-        Assert.Equal(1500L, hp.BaseForLevel(1));
-    }
-
-    /// <summary>
-    /// Curve grows monotonically across tier transitions: L1(0) &lt; L12(1500) &lt; L36(2250).
-    /// spec: Docs/RE/formats/config_tables.md §2.4 "Transition summary" table: CONFIRMED.
-    /// </summary>
-    [Fact]
-    public void ScrStatCatalogue_CurvesGrowMonotonically_AcrossTierTransitions()
-    {
-        // L1: divisorC=0 (phases 1/5 guard) → curve value 0
-        // L12: divisorC=2, posScale=1.0     → (10/2)×3×1.0×100 = 1500
-        // L36: divisorC=4, posScale=3.0     → (10/4)×3×3.0×100 = 2250
-        // spec: §2.4 — "L1..L11: divisorC=0; L12..L23: divisorC=2; L36..L144: divisorC=4": CONFIRMED.
+        // These entries previously fed a no-spec-basis 100× proxy curve. The fidelity-correct default
+        // must NOT emit a fabricated magnitude — it returns the empty (0-base) curve instead.
+        // spec: Docs/RE/formats/config_tables.md §2.4 (#1/#2 UNVERIFIED).
         LevelBaseEntry[] entries =
         [
             MakeLevelEntry(level: 1, divisorC: 0, posScale: 1.0f),
@@ -97,63 +61,59 @@ public sealed class CatalogueTests
         ];
 
         var catalogue = new ScrStatCatalogue(entries);
+
+        Assert.True(catalogue.GetHpBaseCurve().IsEmpty);
+        Assert.True(catalogue.GetMpBaseCurve().IsEmpty);
+        Assert.Equal(0L, catalogue.GetHpBaseCurve().BaseForLevel(1));
+        Assert.Equal(0L, catalogue.GetMpBaseCurve().BaseForLevel(36));
+    }
+
+    /// <summary>
+    /// OPT-IN PROVISIONAL PROXY (no spec basis; debugging/tooling only): when explicitly requested
+    /// via <c>useProvisionalCurve: true</c>, the catalogue builds the monotonic placeholder curve.
+    /// This proxy is NEVER the default fidelity path and is exercised here only to keep the opt-in
+    /// path covered. The 100× scale has no spec provenance.
+    /// spec: Docs/RE/formats/config_tables.md §2.4 — (10/A)×B; the scale constant itself has no spec.
+    /// </summary>
+    [Fact]
+    public void ScrStatCatalogue_OptInProvisionalCurve_BuildsMonotonicPlaceholder()
+    {
+        // L1: divisorC=0 (divide-by-zero guard) → 0
+        // L12: divisorC=2, posScale=1.0 → (10/2)×3×1.0×100 = 1500
+        // L36: divisorC=4, posScale=3.0 → (10/4)×3×3.0×100 = 2250
+        // spec: §2.4 — "C=2 → 15.0; C=4 → 7.5 (B=3.0)" (value confirmed; scale is implementation-only).
+        LevelBaseEntry[] entries =
+        [
+            MakeLevelEntry(level: 1, divisorC: 0, posScale: 1.0f),
+            MakeLevelEntry(level: 12, divisorC: 2, posScale: 1.0f),
+            MakeLevelEntry(level: 36, divisorC: 4, posScale: 3.0f),
+        ];
+
+        var catalogue = new ScrStatCatalogue(entries, useProvisionalCurve: true);
         var hp = catalogue.GetHpBaseCurve();
 
+        Assert.False(hp.IsEmpty);
         long l1 = hp.BaseForLevel(1);
         long l12 = hp.BaseForLevel(2);
         long l36 = hp.BaseForLevel(3);
-
-        Assert.True(l12 > l1, $"L12 ({l12}) should be > L1 ({l1})");
-        Assert.True(l36 > l12, $"L36 ({l36}) should be > L12 ({l12})");
+        Assert.Equal(0L, l1);
+        Assert.Equal(1500L, l12);
+        Assert.Equal(2250L, l36);
+        Assert.True(l12 > l1 && l36 > l12, "proxy curve must grow monotonically across tiers");
+        // Proxy uses group[0] for both HP and MP until the per-stat mapping is pinned.
+        Assert.Equal(hp.BaseForLevel(2), catalogue.GetMpBaseCurve().BaseForLevel(2));
     }
 
     /// <summary>
-    /// HP and MP curves are both produced (same formula applied to both).
-    /// spec: Docs/RE/formats/config_tables.md §2.4 —
-    ///   "Named-stat mapping for each of the four float positions: UNVERIFIED;
-    ///    both curves use group[0] until mapping is confirmed".
+    /// The opt-in proxy with an empty entry array still yields empty curves (no spurious allocation).
     /// </summary>
     [Fact]
-    public void ScrStatCatalogue_HpAndMpCurves_BothNonEmpty()
+    public void ScrStatCatalogue_OptInProvisionalCurve_EmptyEntries_ReturnEmptyCurves()
     {
-        LevelBaseEntry[] entries =
-        [
-            MakeLevelEntry(level: 12, divisorC: 2, posScale: 1.0f),
-        ];
+        var catalogue = new ScrStatCatalogue([], useProvisionalCurve: true);
 
-        var catalogue = new ScrStatCatalogue(entries);
-
-        Assert.False(catalogue.GetHpBaseCurve().IsEmpty);
-        Assert.False(catalogue.GetMpBaseCurve().IsEmpty);
-        Assert.Equal(catalogue.GetHpBaseCurve().BaseForLevel(1),
-            catalogue.GetMpBaseCurve().BaseForLevel(1));
-    }
-
-    /// <summary>
-    /// INTERIM PROXY sentinel: HP==MP is a known approximation, not the final formula.
-    /// When config_tables.md §2.4 open question #1 (float-position→stat mapping) is resolved,
-    /// HP and MP should use distinct float-group indices and this test will need updating.
-    /// spec: Docs/RE/formats/config_tables.md §2.4 — "Named-stat mapping: UNVERIFIED";
-    ///       ScrStatCatalogue.LevelScaleMultiplier is an implementation constant (not from spec).
-    /// </summary>
-    [Fact]
-    public void ScrStatCatalogue_HpEqualsMp_IsInterimProxy_MustBeRevisitedWhenSpecPinned()
-    {
-        // This test DELIBERATELY asserts HP==MP to document the known interim state.
-        // When config_tables.md §2.4 open question #1 is answered (HP and MP float positions differ),
-        // ScrStatCatalogue must be updated to use distinct group indices and this assertion removed.
-        // spec: Docs/RE/formats/config_tables.md §2.4 (open question #1, #2, #3)
-        LevelBaseEntry[] entries =
-        [
-            MakeLevelEntry(level: 12, divisorC: 2, posScale: 1.0f),
-        ];
-
-        var catalogue = new ScrStatCatalogue(entries);
-
-        // This equality will break once HP/MP float positions are verified separately.
-        Assert.Equal(
-            catalogue.GetHpBaseCurve().BaseForLevel(1),
-            catalogue.GetMpBaseCurve().BaseForLevel(1));
+        Assert.True(catalogue.GetHpBaseCurve().IsEmpty);
+        Assert.True(catalogue.GetMpBaseCurve().IsEmpty);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -162,72 +122,70 @@ public sealed class CatalogueTests
 
     /// <summary>
     /// An empty catalogue has count 0 and TryGet returns null for any id.
+    /// Built from the runtime items.scr record source.
+    /// spec: Docs/RE/formats/items_csv.md §6 (runtime source = items.scr).
     /// </summary>
     [Fact]
     public void ItemCatalogue_Empty_TryGetReturnsNull()
     {
-        var catalogue = new ItemCatalogue([]);
+        var catalogue = new ItemCatalogue(Array.Empty<ItemsScrRecord>());
 
         Assert.Equal(0, catalogue.Count);
         Assert.Null(catalogue.TryGet(1u));
     }
 
     /// <summary>
-    /// A known item is retrievable by ID with all confirmed fields set correctly.
-    /// spec: Docs/RE/formats/config_tables.md §4.3 col0–col22: CONFIRMED.
+    /// A known item is retrievable by its UID with the CONFIRMED / loader-resolved items.scr fields.
+    /// The runtime catalogue surfaces only the SAMPLE-VERIFIED / loader-resolved fields — name
+    /// (+0x000), item_uid (+0x034), description (+0x038), model_ref_key (+0x080), anim_ref_key
+    /// (+0x084), record_discriminator (on-disk +0x0D2), effect_count (+0x220). The fixed-block numeric
+    /// stat roles are UNVERIFIED and intentionally not surfaced.
+    /// spec: Docs/RE/formats/items_scr.md §1.4 (field layout) / §1.6 (stat roles UNVERIFIED).
     /// </summary>
     [Fact]
-    public void ItemCatalogue_TryGet_ReturnsCorrectRecord()
+    public void ItemCatalogue_TryGet_ReturnsConfirmedScrFields()
     {
-        ItemCsvRow sword = MakeItemRow(
-            itemId: 1001u, name: "IronSword",
-            subtype: 1u, sellPrice: 1000u,
-            enabled: 1, maxStack: 1, tierRank: 144,
-            minAtk: 100u, maxAtk: 200u);
+        ItemsScrRecord sword = MakeScrRecord(
+            itemUid: 1001u, name: "IronSword", desc: "A sturdy iron blade.",
+            modelRefKey: 5000u, animRefKey: 6000u, discriminator: 1, effectCount: 1);
 
-        ItemCsvRow potion = MakeItemRow(
-            itemId: 2001u, name: "HealPotion",
-            subtype: 1001u, sellPrice: 50u,
-            enabled: 1, maxStack: 20, tierRank: 1,
-            minAtk: 0u, maxAtk: 0u);
+        ItemsScrRecord potion = MakeScrRecord(
+            itemUid: 2001u, name: "HealPotion", desc: "Restores HP.",
+            modelRefKey: 0u, animRefKey: 0u, discriminator: 14, effectCount: 0);
 
-        var catalogue = new ItemCatalogue([sword, potion]);
+        var catalogue = new ItemCatalogue(new[] { sword, potion });
 
         Assert.Equal(2, catalogue.Count);
 
         ItemCatalogueRecord? swordRec = catalogue.TryGet(1001u);
         Assert.NotNull(swordRec);
+        // item_name @0x000. spec: items_scr.md §1.4 — item_name CP949[52]: CONFIRMED.
         Assert.Equal("IronSword", swordRec.Name);
-        // col1 item_id. spec: §4.3 — "col1 item_id uint32: CONFIRMED".
+        // item_uid @0x034 — the lookup key. spec: items_scr.md §1.4 — item_uid u32: SAMPLE-VERIFIED.
         Assert.Equal(1001u, swordRec.ItemId);
-        // col6 item_subtype. spec: §4.3 — "col6 item_subtype: CONFIRMED".
-        Assert.Equal(1u, swordRec.ItemSubtype);
-        // col16 sell_price. spec: §4.3 — "col16 sell_price: CONFIRMED".
-        Assert.Equal(1000u, swordRec.SellPrice);
-        // col18 enabled. spec: §4.3 — "col18 enabled uint8: CONFIRMED".
-        Assert.True(swordRec.Enabled);
-        // col22 item_tier_rank. spec: §4.3 — "col22 item_tier_rank: CONFIRMED".
-        Assert.Equal((ushort)144, swordRec.ItemTierRank);
-        // col87 min_attack. spec: §4.3 — "col87 min_attack: CONFIRMED".
-        Assert.Equal(100u, swordRec.MinAttack);
-        // col90 max_attack. spec: §4.3 — "col90 max_attack: CONFIRMED".
-        Assert.Equal(200u, swordRec.MaxAttack);
+        // item_desc @0x038. spec: items_scr.md §1.4 — item_desc CP949: CONFIRMED present.
+        Assert.Equal("A sturdy iron blade.", swordRec.Description);
+        // model_ref_key @0x080 / anim_ref_key @0x084. spec: items_scr.md §1.4 — loader-resolved.
+        Assert.Equal(5000u, swordRec.ModelRefKey);
+        Assert.Equal(6000u, swordRec.AnimRefKey);
+        // record_discriminator on-disk +0x0D2 (loader branches != 14). spec: items_scr.md §1.4.1.
+        Assert.Equal((byte)1, swordRec.RecordDiscriminator);
+        // effect_count @0x220. spec: items_scr.md §1.4 — effect_count u8: CONFIRMED.
+        Assert.Equal((byte)1, swordRec.EffectCount);
 
         ItemCatalogueRecord? potionRec = catalogue.TryGet(2001u);
         Assert.NotNull(potionRec);
         Assert.Equal("HealPotion", potionRec.Name);
-        // col19 max_stack. spec: §4.3 — "col19 max_stack: CONFIRMED".
-        Assert.Equal((ushort)20, potionRec.MaxStack);
+        Assert.Equal((byte)14, potionRec.RecordDiscriminator);
+        Assert.Equal((byte)0, potionRec.EffectCount);
 
         Assert.Null(catalogue.TryGet(9999u));
     }
 
     /// <summary>
-    /// CP949-decoded Korean text is surfaced correctly by the item catalogue.
-    /// The test encodes a known Korean name as CP949 bytes, feeds them through ItemsCsvParser,
-    /// and verifies the decoded string matches.
-    /// spec: Docs/RE/formats/config_tables.md §4.1 — "Encoding: CP949/EUC-KR (no BOM)": CONFIRMED.
-    /// spec: Docs/RE/formats/config_tables.md §4.3 — "col0 name_cp949 string: CONFIRMED".
+    /// CP949-decoded Korean text is surfaced correctly from a real items.scr record, decoded by the
+    /// canonical <see cref="ItemsScrParser"/> off raw VFS-shaped bytes.
+    /// spec: Docs/RE/formats/items_scr.md §Identification — "Text encoding: CP949": CONFIRMED.
     /// </summary>
     [Fact]
     public void ItemCatalogue_Cp949KoreanName_DecodesCorrectly()
@@ -237,12 +195,18 @@ public sealed class CatalogueTests
 
         // "태산검" = "Taesan Sword" — a representative Korean item name.
         string koreanName = "태산검";
-        string csvLine = BuildMinimalCsvLine(col0: koreanName, itemId: 99001u);
 
-        // Encode as CP949 bytes then parse to simulate the real VFS → parser pipeline.
-        // spec: §4.1 — "Encoding: CP949/EUC-KR (no BOM)": CONFIRMED.
-        byte[] cp949Bytes = cp949.GetBytes(csvLine);
-        ItemCsvRow[] rows = ItemsCsvParser.Parse(cp949Bytes.AsSpan());
+        // Build a single 548-byte items.scr record (effect_count = 0) with the CP949 name @0x000 and
+        // the UID @0x034, then parse it through the canonical binary parser — exercising the real
+        // VFS → ItemsScrParser → ItemCatalogue runtime pipeline.
+        // spec: Docs/RE/formats/items_scr.md §1.2 (fixed 548-byte block); §1.4 (name @0x000, uid @0x034).
+        byte[] block = new byte[0x224];
+        byte[] nameBytes = cp949.GetBytes(koreanName);
+        Array.Copy(nameBytes, 0, block, 0x000, nameBytes.Length); // NUL-padded inside the 52-byte window
+        BinaryPrimitives.WriteUInt32LittleEndian(block.AsSpan(0x034), 99001u);
+        block[0x220] = 0; // effect_count = 0
+
+        ItemsScrRecord[] rows = ItemsScrParser.Parse(block).ToArray();
         Assert.Single(rows);
 
         var catalogue = new ItemCatalogue(rows);
@@ -253,19 +217,48 @@ public sealed class CatalogueTests
     }
 
     /// <summary>
-    /// When two rows share the same ItemId, the last row wins (enchant-variant dedup rule).
+    /// When two records share the same item_uid, the last record wins.
+    /// spec: Docs/RE/formats/items_scr.md §1.4 (item_uid is the per-record lookup-tree key).
     /// </summary>
     [Fact]
-    public void ItemCatalogue_DuplicateItemId_LastRowWins()
+    public void ItemCatalogue_DuplicateItemUid_LastRecordWins()
     {
-        ItemCsvRow base0 = MakeItemRow(1u, "BaseItem", 1u, 100u, 1, 1, 10, 0u, 0u);
-        ItemCsvRow ench1 = MakeItemRow(1u, "EnchItem+1", 1u, 200u, 1, 1, 10, 0u, 0u);
+        ItemsScrRecord base0 = MakeScrRecord(1u, "BaseItem", "", 0u, 0u, 0, 0);
+        ItemsScrRecord variant = MakeScrRecord(1u, "EnchItem+1", "", 0u, 0u, 0, 0);
 
-        var catalogue = new ItemCatalogue([base0, ench1]);
+        var catalogue = new ItemCatalogue(new[] { base0, variant });
 
-        // Only one entry (deduped), last occurrence wins.
         Assert.Equal(1, catalogue.Count);
         Assert.Equal("EnchItem+1", catalogue.TryGet(1u)!.Name);
+    }
+
+    /// <summary>
+    /// TOOLING-ONLY path: the items.csv constructor still builds a catalogue (for dev/export tooling),
+    /// mapping only the CONFIRMED columns that exist in the runtime record (name / id / description).
+    /// The CSV is NOT a runtime source — the shipping client loads items.scr.
+    /// spec: Docs/RE/formats/items_csv.md §6 (authoring/dev export only, not loaded by the client).
+    /// </summary>
+    [Fact]
+    public void ItemCatalogue_ItemsCsvConstructor_IsToolingOnly_MapsConfirmedColumns()
+    {
+        ItemCsvRow row = MakeItemRow(
+            itemId: 4242u, name: "ToolingItem",
+            subtype: 1u, sellPrice: 100u,
+            enabled: 1, maxStack: 1, tierRank: 1,
+            minAtk: 0u, maxAtk: 0u);
+
+        var catalogue = new ItemCatalogue(new[] { row });
+
+        Assert.Equal(1, catalogue.Count);
+        ItemCatalogueRecord? rec = catalogue.TryGet(4242u);
+        Assert.NotNull(rec);
+        // col0 name / col1 id are mapped. spec: items_csv.md §1 (col0/col1): HIGH.
+        Assert.Equal("ToolingItem", rec.Name);
+        Assert.Equal(4242u, rec.ItemId);
+        // The CSV has no loader-resolved runtime fields; the tooling path leaves them zero.
+        // spec: items_csv.md §6 (CSV is a flat parallel, not the runtime record).
+        Assert.Equal(0u, rec.ModelRefKey);
+        Assert.Equal((byte)0, rec.RecordDiscriminator);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -512,6 +505,9 @@ public sealed class CatalogueTests
         Assert.Empty(loader.LoadUserLevelScr());
         Assert.Empty(loader.LoadSkillsScr());
         Assert.Empty(loader.LoadMobsScr());
+        // Runtime item master (items.scr) and the tooling-only export (items.csv) both degrade empty.
+        // spec: Docs/RE/formats/items_csv.md §6 (runtime source = items.scr).
+        Assert.Empty(loader.LoadItemsScr());
         Assert.Empty(loader.LoadItemsCsv());
     }
 
@@ -526,6 +522,7 @@ public sealed class CatalogueTests
             vfsPath: "/nonexistent/data.vfs");
 
         Assert.Empty(loader.LoadUserLevelScr());
+        Assert.Empty(loader.LoadItemsScr());
         Assert.Empty(loader.LoadItemsCsv());
     }
 
@@ -656,6 +653,32 @@ public sealed class CatalogueTests
     }
 
     /// <summary>
+    /// Creates an <see cref="ItemsScrRecord"/> directly (bypasses the binary parser) for use as a
+    /// runtime-catalogue fixture. Populates the CONFIRMED / loader-resolved fields the catalogue reads.
+    /// spec: Docs/RE/formats/items_scr.md §1.4 fixed-block field layout.
+    /// </summary>
+    private static ItemsScrRecord MakeScrRecord(
+        uint itemUid, string name, string desc,
+        uint modelRefKey, uint animRefKey, byte discriminator, byte effectCount)
+    {
+        return new ItemsScrRecord
+        {
+            ItemName = name,
+            ItemUid = itemUid,
+            ItemDesc = desc,
+            ModelRefKey = modelRefKey,
+            AnimRefKey = animRefKey,
+            Opaque0A4 = ReadOnlyMemory<byte>.Empty,
+            RecordDiscriminator = discriminator,
+            Opaque200 = ReadOnlyMemory<byte>.Empty,
+            Opaque21C = ReadOnlyMemory<byte>.Empty,
+            EffectCount = effectCount,
+            Effects = Array.Empty<ItemEffectEntry>(),
+            FixedBlockRaw = ReadOnlyMemory<byte>.Empty,
+        };
+    }
+
+    /// <summary>
     /// Creates an <see cref="ItemCsvRow"/> directly (bypasses the CSV parser) for use as a fixture.
     /// All required fields are populated; fields unneeded for a given test default to 0/"".
     /// </summary>
@@ -719,28 +742,5 @@ public sealed class CatalogueTests
             ModelType = 0,
             RawColumns = new string[139],
         };
-    }
-
-    /// <summary>
-    /// Builds a 139-column CSV line with the given col0 (name) and col1 (itemId).
-    /// All other columns default to "0".
-    /// spec: Docs/RE/formats/config_tables.md §4.1 — "Columns per row: 139": CONFIRMED.
-    /// </summary>
-    private static string BuildMinimalCsvLine(string col0, uint itemId)
-    {
-        var cols = new string[139];
-        Array.Fill(cols, "0");
-        cols[0] = col0;
-        cols[1] = itemId.ToString();
-        cols[2] = ""; // description (empty)
-        cols[18] = "1"; // enabled
-        cols[19] = "1"; // max_stack
-        cols[22] = "1"; // item_tier_rank
-        cols[23] = "1"; // max_durability
-        cols[29] = "1"; // class_yi
-        cols[30] = "1"; // class_ye
-        cols[31] = "1"; // class_in
-        cols[32] = "1"; // class_ji
-        return string.Join(",", cols);
     }
 }

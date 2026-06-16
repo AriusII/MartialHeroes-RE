@@ -65,6 +65,24 @@ Keep `SKILL.md` lean and push the heavy, runnable logic into bundled files the b
   clean promotion), that is usually two skills with a clear hand-off, mirroring the `ida-opcode-map`
   (dirty) -> `opcode-catalog` (clean) split.
 
+## Ground-Truth Doctrine — bake it into every skill you author or refine (standing rule)
+
+Every skill you write or refine MUST reflect the **Ground-Truth Doctrine** (`.claude/KIT.md`,
+"Ground-Truth Doctrine" section) — concisely and load-bearing, per the §9 anti-bloat rule, never
+padded. Match the wording to the skill's side:
+
+- **RE / IDA (dirty) skills**: "IDA / `doida.exe` is the single absolute truth; **confirm-don't-guess**
+  (static hypothesis → `?ext=dbg` debugger confirm); **STOP-don't-fabricate** if the MCP is down or the
+  DB is wrong."
+- **Promotion (dirty→clean) skills**: "**rewrite-never-copy**; the committed spec is downstream's only
+  truth; **binary-wins-on-conflict**."
+- **Clean-side action skills**: "consume **only** the IDA-derived `Docs/RE/` specs; generated C# **cites
+  every constant** (`// spec: …`); a missing fact is **escalated to RE**, never invented."
+- **Godot skills**: "specs govern behavior; the **official captures are the pixel oracle** —
+  **oracle > spec** for how a scene looks."
+
+Add only where missing; if a sibling already carries it, leave it.
+
 ## Clean-room firewall — bake it into every RE-adjacent skill
 
 The project's legal basis (EU Directive 2009/24/EC Art. 6) holds only if dirty and clean stay

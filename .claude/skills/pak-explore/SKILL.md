@@ -17,6 +17,11 @@ A `.pak` is a user-supplied original game file. It is gitignored (`*.pak`) and c
 This skill touches only the small index region described by the committed format spec; the payload
 is off-limits.
 
+**Ground-truth doctrine.** The archive's real layout is the truth — proved in the original's loader
+routines inside `doida.exe` and/or witnessed directly in the maintainer's own sample bytes, then
+captured in `Docs/RE/formats/pak.md`. That committed spec is the **derived truth** this skill reads
+from; it lists index metadata (name/offset/size) only and **never** emits copyrighted payload bytes.
+
 ## Hard rules (non-negotiable)
 
 1. **NEVER extract, decompress, decode, hexdump, or print payload bytes** from a `.pak`. The only

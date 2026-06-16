@@ -171,10 +171,25 @@ public static class SkinningMath
         out int[] parentIndex,
         out int[] idToIndex,
         out int baseId)
+        => ResolveHierarchy(bones, out parentIndex, out idToIndex, out baseId, out _);
+
+    /// <summary>
+    /// As <see cref="ResolveHierarchy(Bone[], out int[], out int[], out int)"/>, additionally emitting
+    /// a per-bone <paramref name="hasChild"/> flag (true when at least one other bone names this bone
+    /// as its parent). The interior-bone translation lock (§6.3) needs this flag.
+    /// spec: Docs/RE/specs/skinning.md §6.3 — interior bone = has parent AND grandparent AND ≥1 child.
+    /// </summary>
+    public static void ResolveHierarchy(
+        Bone[] bones,
+        out int[] parentIndex,
+        out int[] idToIndex,
+        out int baseId,
+        out bool[] hasChild)
     {
         int n = bones.Length;
         parentIndex = new int[n];
         idToIndex = new int[256];
+        hasChild = new bool[n];
         for (int i = 0; i < 256; i++) idToIndex[i] = -1;
 
         baseId = n > 0 ? (int)(bones[0].SelfId & 0xFF) : 0;
@@ -198,6 +213,14 @@ public static class SkinningMath
             int pidx = idToIndex[pid];
             // Unmatched / self-referential parent → treat as root (safe degradation, no explosion).
             parentIndex[i] = (pidx >= 0 && pidx != i) ? pidx : -1;
+        }
+
+        // Per-bone has-child flag: a bone is a parent of at least one other bone.
+        // spec: Docs/RE/specs/skinning.md §6.3 (interior-bone test needs ≥1 child).
+        for (int i = 0; i < n; i++)
+        {
+            int p = parentIndex[i];
+            if (p >= 0 && p < n) hasChild[p] = true;
         }
     }
 
@@ -429,6 +452,16 @@ public static class SkinningMath
     /// <param name="t">Clip time in seconds (already wrapped into [0, duration)).</param>
     /// <param name="renormalizeAlpha">Smooth vs. faithful interpolation alpha (spec §8(c)).</param>
     /// <param name="outWorld">Reused output buffer (length == bones.Length).</param>
+    /// <param name="hasChild">
+    ///   Per-bone has-child flag (from <see cref="ResolveHierarchy(Bone[], out int[], out int[], out int, out bool[])"/>).
+    ///   Required for the §6.3 interior-bone translation lock; pass null to fall back to root-only.
+    /// </param>
+    /// <param name="nodeScale">
+    ///   Per-bone runtime node scale (+84 field). The rotated local animated translation is
+    ///   multiplied by it before the parent-add (rotate → scale → translate; spec §6.6). Pass null
+    ///   for a uniform 1.0 (no behaviour change). SPEC GAP: the +84 disk SOURCE is undecoded; 1.0 is
+    ///   the safe interim. spec: Docs/RE/specs/skinning.md §6.6 / §3.4 (+84).
+    /// </param>
     public static void ComputeAnimatedWorld(
         Bone[] bones,
         int[] parentIndex,
@@ -436,7 +469,9 @@ public static class SkinningMath
         float t,
         bool renormalizeAlpha,
         BoneTransform[] outWorld,
-        bool animAsDelta = true)
+        bool animAsDelta = true,
+        bool[]? hasChild = null,
+        float[]? nodeScale = null)
     {
         int n = bones.Length;
 
@@ -466,11 +501,19 @@ public static class SkinningMath
                 //       describes the per-pass mixer accumulator, not this world walk.
                 localQ = animAsDelta ? Mul(bones[i].Rotation, sR) : sR;
 
-                // Translation: only the root translates freely; child bones hold the bind-pose
-                // local translation (fixed bone length, rotate-only).
-                // spec: Docs/RE/specs/skinning.md §6.3.
-                if (parentIndex[i] < 0)
-                    localT = sT;
+                // Translation lock (§6.3): lock the animated local translation to the bind-local
+                // translation ONLY for an INTERIOR bone — one that has a parent AND a grandparent AND
+                // at least one child. The ROOT, the root's DIRECT CHILDREN, and LEAF bones take the
+                // sampled translation. (The earlier rule locked every non-root bone, freezing leaves
+                // and root-children in translation — too broad.)
+                // spec: Docs/RE/specs/skinning.md §6.3 (interior-bone-only bind-local trans lock).
+                int parent = parentIndex[i];
+                bool hasParent = parent >= 0;
+                bool hasGrandparent = hasParent && parentIndex[parent] >= 0;
+                bool boneHasChild = hasChild is not null ? hasChild[i] : false;
+                bool interior = hasParent && hasGrandparent && boneHasChild;
+                if (!interior)
+                    localT = sT; // root / root-child / leaf → take the sampled translation
             }
 
             int p = parentIndex[i];
@@ -481,7 +524,13 @@ public static class SkinningMath
             else
             {
                 BoneTransform pw = outWorld[p];
-                Vec3 wt = Add(Rotate(pw.Quat, localT), pw.Trans);
+                // World walk: rotate → scale → translate (§6.6). The rotated local animated
+                // translation is scaled by this bone's per-node scale (+84, default 1.0) before the
+                // parent-add. spec: Docs/RE/specs/skinning.md §6.6.
+                Vec3 rotatedLocal = Rotate(pw.Quat, localT);
+                float s = nodeScale is not null ? nodeScale[i] : 1.0f;
+                if (s != 1.0f) rotatedLocal = Scale(rotatedLocal, s);
+                Vec3 wt = Add(rotatedLocal, pw.Trans);
                 Quat wq = Mul(pw.Quat, localQ);
                 outWorld[i] = new BoneTransform(wt, wq);
             }

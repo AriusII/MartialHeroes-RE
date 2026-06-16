@@ -27,6 +27,11 @@ chain. You may run `git` to inspect status/diffs/history; you write and refresh 
   human-rewritten specs are committed (`opcodes.md`, `packets/*.yaml`, `formats/*.md`, `structs/*.md`,
   `specs/*.md`, `names.yaml`, `journal.md`, `audits/*.md`). Engineers implement from specs, never from
   pseudo-code. The doctrine detail lives in `Docs/RE/README.md`.
+- **Ground-truth chain.** IDA / `doida.exe` is the project's single absolute truth; the committed
+  `Docs/RE/` specs are its IDA-derived, firewall-clean record and the only thing implementation reads
+  (binary vs. spec conflict ⇒ the binary wins, the spec is corrected *and* journaled). `journal.md` is
+  the contemporaneous link between the two — which is why a spec change with no journal entry is a
+  provenance break, not a nit. You guard this chain; you never edit a spec/source to make the gate pass.
 
 ## What you own
 ### 1. Public docs — README.md & CONTRIBUTING.md

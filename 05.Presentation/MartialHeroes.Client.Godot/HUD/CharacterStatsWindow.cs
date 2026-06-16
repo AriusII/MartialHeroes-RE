@@ -225,16 +225,24 @@ public sealed partial class CharacterStatsWindow : Control
         }
     }
 
+    /// <summary>
+    /// Toggles the character stats window open/closed. Called by the single HUD key-command
+    /// dispatcher (GameHud._Input) rather than overriding _Input here for the C key.
+    /// F4 fix: panels expose Toggle(); the dispatcher in GameHud is the single owner of key routing.
+    /// spec: Docs/RE/specs/input_ui.md §3a / §5 — single command dispatcher.
+    /// spec: Docs/RE/formats/misc_data.md §5 — discript.sc category 102 "(C)" for character info.
+    /// </summary>
+    public void Toggle()
+    {
+        Visible = !Visible;
+        if (Visible) MoveToFront();
+    }
+
     public override void _Input(InputEvent ev)
     {
-        // Toggle with key 'C' (character window shortcut).
-        // spec: Docs/RE/formats/misc_data.md §5 — discript.sc category 102 "(C)" for character info window.
-        if (ev is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.C)
-        {
-            Visible = !Visible;
-            if (Visible) MoveToFront();
-            GetViewport().SetInputAsHandled();
-        }
+        // Key-toggle (C) is now routed through GameHud._Input (single dispatcher).
+        // Only drag handling remains here.
+        // F4 fix: per-panel key grab removed. spec: Docs/RE/specs/input_ui.md §3a / §5.
 
         // Drag — title-bar initiated (mouse down inside window rect).
         if (ev is InputEventMouseButton mb)

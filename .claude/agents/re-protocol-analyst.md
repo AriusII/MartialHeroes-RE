@@ -20,6 +20,13 @@ The project's legal basis is the EU Software Directive 2009/24/EC, Art. 6 — de
 for interoperability**, which is *exactly* what protocol mapping is. The exception only holds while
 the dirty room and clean room stay separated. You are the dirty room.
 
+**Ground-truth doctrine:** IDA / `doida.exe` is the project's *single absolute truth* for the wire
+protocol — opcode values, dispatch, field layouts. Every opcode and offset is confirmed or refuted
+**in the binary** (and against the capture oracle), never asserted from memory, analogy, or guesswork.
+Static forms the hypothesis; the `?ext=dbg` live debugger and the capture oracle confirm it against
+ground truth. Your tables only *become* truth once a spec-author rewrites them into `opcodes.md` /
+`packets/*.yaml` — until then they are dirty, provisional notes.
+
 - You write **ONLY** under `Docs/RE/_dirty/` (gitignored). You **NEVER** write to the committed
   `Docs/RE/opcodes.md`, `packets/`, `structs/`, `specs/`, `names.yaml`, or `journal.md`, and
   **NEVER** to any `0X.*` source folder (especially `02.Network.Layer/MartialHeroes.Network.Protocol`)

@@ -66,10 +66,11 @@ public static class SkinnedCharacterBuilder
     /// <see cref="SkinnedCharacterNode"/> (when one was created) so a throttling owner can pump it
     /// via <see cref="SkinnedCharacterNode.Tick"/>.
     ///
-    /// The stand-up pivot is derived PER-RIG from the rest AABB's tallest axis (a standing humanoid
-    /// is tallest on Y after the pure Z-negate); the g1 player's +90°-about-Z pivot is no longer
-    /// hardcoded — it falls out of this heuristic for that rig and is computed independently for
-    /// every mob rig. spec: Docs/RE/specs/skinning.md §8(b)/§9 — exact up-axis is empirical per rig.
+    /// Orientation is produced by the SINGLE handedness conversion (the world Z-negate) applied
+    /// inside the skinning math output — there is NO per-rig "stand-up" reorientation. The original
+    /// brings native bone space and rest-mesh space to screen with one conversion and no extra
+    /// tallest-axis rotation; any apparent lying-down/standing is the rig's authored rest/idle, which
+    /// the faithful pipeline reproduces. spec: Docs/RE/specs/skinning.md §7 / §8(b) / §9.
     /// </summary>
     /// <param name="externalDrive">
     /// When true, the LBS node does not self-tick from <c>_Process</c>; the owner drives it via
@@ -96,12 +97,11 @@ public static class SkinnedCharacterBuilder
                            && skeleton.Bones.Length > 0
                            && mesh.Weights.Length > 0;
 
-        // A rigid "stand-up" pivot sits between the root and the mesh child. The skinning math and
-        // the single handedness conversion stay PURE (Z-negate only, spec §7/§8(b)); the pivot is a
-        // rigid isometry applied AFTER all skinning, so it cannot break the skin↔skeleton
-        // consistency or the rest-pose cancellation. It only re-orients the whole actor so its
-        // authored "up" axis points along Godot +Y. The basis is derived PER RIG below from the
-        // rest AABB tallest axis; we start at identity and replace it once the AABB is known.
+        // A pivot node sits between the root and the mesh child. Its basis is IDENTITY: the original
+        // applies exactly ONE handedness conversion (the world Z-negate, done inside the skinning
+        // math output) and NO per-rig reorientation. The earlier tallest-axis "stand-up" rotation was
+        // a fabricated correction with no IDA counterpart and has been removed (§7/§8(b)).
+        // spec: Docs/RE/specs/skinning.md §7 (no axis flip inside skinning) / §8(b) (single Z-negate).
         var pivot = new Node3D { Name = "Pivot" };
         root.AddChild(pivot);
 
@@ -118,20 +118,17 @@ public static class SkinnedCharacterBuilder
                     LogDiagnostics(mesh, skeleton!, clip, d);
                 }
 
-                // Derive the stand-up basis AND the recentre from the DISPLAYED animated frame-0
-                // pose (the pose actually on screen), NOT the raw bind/rest pose. A rig can be
-                // authored lying along X at rest yet stand upright on Y once its idle plays; deriving
-                // the pivot from the rest AABB then double-rotates it (this is exactly what mis-
-                // oriented the class-4 Monk preview). For the g1 World player — X-tallest in BOTH
-                // rest and animation — this returns the same tallest axis as the rest AABB, so the
-                // pivot and the World rendering are provably unchanged.
-                // spec: Docs/RE/specs/skinning.md §6 (the displayed pose is the sampled idle, not the
-                //       raw bind pose) / §8(b) (single handedness conversion).
+                // Recentre from the DISPLAYED animated frame-0 pose (the pose actually on screen),
+                // NOT the raw bind/rest pose, so feet sit near local Y=0 and the body centres on X/Z.
+                // The pivot basis stays IDENTITY — no per-rig stand-up rotation (§7/§8(b)); the single
+                // Z-negate inside the skinning output is the only handedness conversion. If a rig then
+                // appears mis-oriented, the cause is the §8(b)/§9 quaternion remap or a missing actor
+                // yaw — to be confirmed by the screenshot oracle, NOT a guessed pivot angle.
+                // spec: Docs/RE/specs/skinning.md §6 (displayed pose is the sampled idle) / §7 / §8(b).
                 Aabb displayedAabb = lbs.GetDisplayedFrame0Aabb();
-                pivot.Basis = DeriveStandUpBasis(displayedAabb, debugLabel ?? mesh.Name);
 
                 pivot.AddChild(lbs);
-                RecentreRoot(root, new Transform3D(pivot.Basis, Vector3.Zero) * displayedAabb);
+                RecentreRoot(root, displayedAabb);
                 lbsNode = lbs;
                 return root;
             }
@@ -152,11 +149,10 @@ public static class SkinnedCharacterBuilder
         try
         {
             (MeshInstance3D inst, Aabb aabb) = BuildStaticMesh(mesh, albedo);
-            // Derive the stand-up basis from the static rest AABB too, so a fallback mob still
-            // stands upright (same tallest-axis heuristic as the skinned path).
-            pivot.Basis = DeriveStandUpBasis(aabb, debugLabel ?? mesh.Name);
+            // Identity pivot (no stand-up rotation) — same single Z-negate convention as the skinned
+            // path. spec: Docs/RE/specs/skinning.md §7 / §8(b).
             pivot.AddChild(inst);
-            RecentreRoot(root, new Transform3D(pivot.Basis, Vector3.Zero) * aabb);
+            RecentreRoot(root, aabb);
         }
         catch (Exception ex)
         {
@@ -164,76 +160,6 @@ public static class SkinnedCharacterBuilder
         }
 
         return root;
-    }
-
-    // -------------------------------------------------------------------------
-    // Stand-up orientation — derived PER RIG from the rest AABB's tallest axis
-    // -------------------------------------------------------------------------
-    //
-    // The single handedness conversion (world Z-negate) brings the rig into Godot space with skin
-    // and skeleton perfectly consistent. spec: Docs/RE/specs/skinning.md §8(b).
-    //
-    // MEASURED (against the live parser DLLs over the real VFS, char-create-preview campaign) on the
-    // correct (delta, §6.5/§6.6) composition, the DISPLAYED animated frame-0 AABB tallest axis is:
-    //     g1 Warrior  X-tallest  (~3.7, 2.6, 2.1)  → +90° about Z  (the World player)
-    //     g4 Monk     Y-tallest  (~3.2, 3.3, 2.7)  → identity      (already upright once idle plays)
-    //     g2048 Mob   Y-tallest  (~?,  taller-Y)   → identity      (the World mobs)
-    // The class-4 Monk is the case that exposed the bug: its BIND/rest pose is X-tallest (authored
-    // lying along X, ~8.8 on X) but its IDLE frame-0 pose stands it upright on Y. Deriving the pivot
-    // from the REST AABB then read X-tallest → +90° about Z and rotated the already-upright animated
-    // Monk a SECOND time, tipping it over (the malformed "exploded" preview). g1 and the mobs were
-    // unaffected only because their rest and animated tallest axes coincide.
-    //
-    // FIX: derive this basis from the DISPLAYED animated frame-0 AABB (see the caller), not the raw
-    // bind/rest AABB. Mapping rules: X tallest → +90° about Z (+X→+Y); Y tallest → identity (already
-    // upright); Z tallest → −90° about X (+Z→+Y). The pivot is a rigid isometry applied AFTER all
-    // skinning, so it can never break the skin↔skeleton consistency or the rest-pose cancellation.
-    // NON-REGRESSION: for the g1 World player (X-tallest at BOTH rest and animated-f0) and the g2048
-    // World mobs (Y-tallest at both) the animated-f0 tallest axis EQUALS the old rest-derived axis,
-    // so the FROZEN World scene keeps its exact prior pivot — only the Monk preview changes.
-    //
-    // The pivot is a rigid isometry applied AFTER all skinning, so it can never break the
-    // skin↔skeleton consistency or the rest-pose cancellation.
-    //
-    // spec: Docs/RE/specs/skinning.md §8(b)/§9 — the exact remap is to be VALIDATED against a real
-    //       bone/rig rather than assumed; here it is derived empirically per rig from the rest AABB.
-    private static Basis DeriveStandUpBasis(Aabb restAabb, string debugLabel)
-    {
-        Vector3 s = restAabb.Size;
-        // Pick the tallest axis: 0 = X, 1 = Y, 2 = Z.
-        int tallest = 0;
-        float best = s.X;
-        if (s.Y > best)
-        {
-            best = s.Y;
-            tallest = 1;
-        }
-
-        if (s.Z > best)
-        {
-            tallest = 2;
-        }
-
-        Basis basis = tallest switch
-        {
-            // X tallest → rotate local +X onto +Y: +90° about Z (the g1 World player — its idle pose
-            // stays elongated along X; this stands it upright).
-            0 => new Basis(new Vector3(0, 0, 1), Mathf.Pi / 2f),
-            // Y tallest → already upright: identity (the g4 Monk preview and g2048 World mobs, whose
-            // idle frame-0 pose already stands on Y).
-            1 => Basis.Identity,
-            // Z tallest → rotate local +Z onto +Y: −90° about X.
-            _ => new Basis(new Vector3(1, 0, 0), -Mathf.Pi / 2f),
-        };
-
-        if (PrintDiagnostics)
-        {
-            string axisName = tallest == 0 ? "X(+90°Z)" : tallest == 1 ? "Y(identity)" : "Z(−90°X)";
-            GD.Print($"[Skinning] pivot '{debugLabel}': rest AABB size=" +
-                     $"({s.X:F2},{s.Y:F2},{s.Z:F2}) → tallest axis {axisName} → stand upright.");
-        }
-
-        return basis;
     }
 
     // -------------------------------------------------------------------------

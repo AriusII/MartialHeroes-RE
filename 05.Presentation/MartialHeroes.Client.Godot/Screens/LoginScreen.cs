@@ -80,6 +80,18 @@ public sealed partial class LoginScreen : Control
     [Signal]
     public delegate void QuitRequestedEventHandler();
 
+    /// <summary>
+    /// Raised when the WHOLE in-login chain completes — credential validate → PIN → server-pick.
+    /// In the original these are internal tick sub-states of the Login scene (engine state 1); the
+    /// server-list (sub-states 34..41) and the PIN modal (sub-states 31/32) run INSIDE the login
+    /// scene and complete before engine state 2 (Load) ever runs. BootFlow advances Login-complete
+    /// straight to the Loading screen (engine state 1 → 2).
+    /// Carries the chosen <c>serverId</c> and the entered <c>pin</c> (≤ 4 chars; may be empty).
+    /// spec: Docs/RE/specs/frontend_scenes.md §1.5 / §11.4; client_runtime.md §7.6 / §7.9.5.
+    /// </summary>
+    [Signal]
+    public delegate void LoginFlowCompletedEventHandler(int serverId, string pin);
+
     // -------------------------------------------------------------------------
     // Curtain constants — two-edge letterbox OPEN animation.
     // spec: Docs/RE/specs/frontend_scenes.md §1.5a. CODE-CONFIRMED.
@@ -123,6 +135,34 @@ public sealed partial class LoginScreen : Control
     /// Set by BootFlow under dev-offline mode; never populated in a production flow.
     /// </summary>
     public string? DevPrefillPw { get; set; }
+
+    // -------------------------------------------------------------------------
+    // In-login sub-view factories — the Login scene OWNS the PIN + server-list overlays
+    // (engine-state-1 sub-states 31/32 and 34..41). BootFlow injects these factories so it can
+    // attach DEV-only prefill, the server-list drainer, and the dev seed to each instance before it
+    // is raised, while the Login scene drives the structural flow (raise → collect → advance).
+    // spec: Docs/RE/specs/frontend_scenes.md §1.5 / §11.3 / §11.4; client_runtime.md §7.6.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Factory for the PIN sub-view (raised on the 31→32 sub-state edge after credential validation).
+    /// BootFlow supplies it so it can apply DEV-only prefill. When null, the PIN step is skipped.
+    /// spec: Docs/RE/specs/frontend_scenes.md §11.3 / §1.4a.
+    /// </summary>
+    public Func<PinModal>? PinFactory { get; set; }
+
+    /// <summary>
+    /// Factory for the server-list sub-view (raised on sub-states 34..41). BootFlow supplies it so it
+    /// can wire the server-list drainer and the DEV-only seed. When null, the server step is skipped
+    /// and the flow completes with the default server id.
+    /// spec: Docs/RE/specs/frontend_scenes.md §11.4 / §1.5.
+    /// </summary>
+    public Func<ServerSelectScreen>? ServerSelectFactory { get; set; }
+
+    // ---- In-login chain state (view-session only) ----
+    private string _chainPin = "";
+    private PinModal? _pinOverlay;
+    private ServerSelectScreen? _serverOverlay;
 
     // -------------------------------------------------------------------------
     // View state
@@ -712,11 +752,135 @@ public sealed partial class LoginScreen : Control
             return;
         }
 
-        GD.Print($"[LoginScreen] Login OK (account='{account}'). Emitting LoginAccepted.");
+        GD.Print($"[LoginScreen] Login OK (account='{account}'). Emitting LoginAccepted; " +
+                 "raising in-login PIN sub-view (sub-state 31→32). spec: client_runtime.md §7.6.");
         // spec: Docs/RE/specs/login_flow.md §4.2 — password forwarded with the account so BootFlow
-        // can pass it to LoginAsync at the PIN join point. CODE-CONFIRMED.
+        // can stage it (LoginAsync) at the PIN join point. CODE-CONFIRMED.
         EmitSignal(SignalName.LoginAccepted, account, _passwordEdit.Text);
+
+        // The Login scene OWNS the rest of the chain (engine state 1): raise the PIN sub-view
+        // (sub-state 31→32), then the server-list (sub-states 34..41), then complete — all INSIDE
+        // the login scene, before engine state 2 (Load). spec: client_runtime.md §7.6 / §7.9.5.
+        BeginInLoginChain();
     }
+
+    // -------------------------------------------------------------------------
+    // In-login sub-state chain (engine state 1): credential validate → PIN (31/32) →
+    // server-list (34..41) → submit → LoginFlowCompleted. All sub-views are CHILDREN of this
+    // Login scene; the login background stays resident underneath the whole chain.
+    // spec: Docs/RE/specs/frontend_scenes.md §1.5 / §11.3 / §11.4; client_runtime.md §7.6 / §7.9.5.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Begins the in-login chain after credential validation: raises the PIN sub-view if a factory
+    /// was supplied, otherwise advances directly to the server-list step.
+    /// spec: Docs/RE/specs/frontend_scenes.md §1.4a / §11.3.
+    /// </summary>
+    private void BeginInLoginChain()
+    {
+        if (PinFactory is null)
+        {
+            // No PIN sub-view configured — advance directly to the server-list step.
+            ShowServerOverlay();
+            return;
+        }
+
+        _pinOverlay = PinFactory();
+        _pinOverlay.PinSubmitted += OnChainPinSubmitted;
+        _pinOverlay.Cancelled += OnChainPinCancelled;
+        // PIN is a CHILD of the LoginWindow widget tree, raised over the login background.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.4a / §11.3. CODE-CONFIRMED placement.
+        AddChild(_pinOverlay);
+        GD.Print("[LoginScreen] PIN sub-view raised (child of LoginWindow, sub-state 31→32). spec §11.3.");
+    }
+
+    private void OnChainPinSubmitted(string pin)
+    {
+        _chainPin = pin;
+        DismissPinOverlay();
+        GD.Print($"[LoginScreen] PIN submitted (len={pin.Length}) → server-list sub-state (34..41). spec §11.4.");
+        ShowServerOverlay();
+    }
+
+    private void OnChainPinCancelled()
+    {
+        // Cancel from PIN abandons the chain back to the resting login form (sub-state 29 → 6).
+        // spec: Docs/RE/specs/frontend_scenes.md §1.4a. CODE-CONFIRMED.
+        DismissPinOverlay();
+        _chainPin = "";
+        GD.Print("[LoginScreen] PIN cancelled → back to login form (no scene change). spec §1.4a.");
+    }
+
+    private void DismissPinOverlay()
+    {
+        if (_pinOverlay is not null && IsInstanceValid(_pinOverlay))
+            _pinOverlay.QueueFree();
+        _pinOverlay = null;
+    }
+
+    /// <summary>
+    /// Raises the server-list sub-view as a child overlay over the login background. On server pick
+    /// the whole login chain completes and the flow advances to Loading (engine state 1 → 2).
+    /// When no factory is supplied (e.g. headless / no server), completes with the default id 1.
+    /// spec: Docs/RE/specs/frontend_scenes.md §11.4 / §1.5; client_runtime.md §7.9.5.
+    /// </summary>
+    private void ShowServerOverlay()
+    {
+        if (ServerSelectFactory is null)
+        {
+            // No server-list configured — complete the chain with the default server id.
+            GD.Print("[LoginScreen] No server-list factory → completing login chain with default id 1.");
+            EmitSignal(SignalName.LoginFlowCompleted, 1, _chainPin);
+            return;
+        }
+
+        _serverOverlay = ServerSelectFactory();
+        _serverOverlay.ServerSelected += OnChainServerSelected;
+        // Back/refresh from the server list returns to the login form without leaving engine state 1.
+        _serverOverlay.BackRequested += OnChainServerBack;
+        // Server-list is a CHILD of the LoginWindow (sub-state 34..41), over the login background.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §1.5. CODE-CONFIRMED placement.
+        AddChild(_serverOverlay);
+        GD.Print("[LoginScreen] Server-list sub-view raised (child of LoginWindow, sub-state 34..41). spec §11.4.");
+    }
+
+    private void OnChainServerSelected(int serverId)
+    {
+        DismissServerOverlay();
+        GD.Print($"[LoginScreen] Server selected (id={serverId}) → login chain complete (state 1 → 2). " +
+                 "spec: client_runtime.md §7.9.5.");
+        // The whole connect→PIN→server-pick→submit chain completed INSIDE engine state 1; the flow
+        // now advances straight to the Loading screen (engine state 2). spec: client_runtime.md §7.9.5.
+        EmitSignal(SignalName.LoginFlowCompleted, serverId, _chainPin);
+    }
+
+    private void OnChainServerBack()
+    {
+        // Back / refresh from the server list dismisses the overlay back to the login form. The
+        // refresh (action 105) re-fetch is a use-case BootFlow can drive on the next entry; here we
+        // simply return to the resting form without leaving engine state 1. spec §1.2 / §1.5.
+        DismissServerOverlay();
+        GD.Print("[LoginScreen] Server-list back/refresh → login form (still engine state 1). spec §1.5.");
+    }
+
+    private void DismissServerOverlay()
+    {
+        if (_serverOverlay is not null && IsInstanceValid(_serverOverlay))
+            _serverOverlay.QueueFree();
+        _serverOverlay = null;
+    }
+
+    /// <summary>
+    /// DEV-ONLY screenshot/preview helper: raises the PIN sub-view directly (bypasses credential
+    /// validation) so the maintainer can capture it in isolation. Mirrors the real chain entry.
+    /// </summary>
+    public void DevShowPinSubView() => BeginInLoginChain();
+
+    /// <summary>
+    /// DEV-ONLY screenshot/preview helper: raises the server-list sub-view directly (bypasses PIN)
+    /// so the maintainer can capture it in isolation. Mirrors the real chain entry.
+    /// </summary>
+    public void DevShowServerSubView() => ShowServerOverlay();
 
     private void OnQuitButtonPressed()
     {

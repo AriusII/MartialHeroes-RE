@@ -24,6 +24,12 @@ decompiler.
 This skill **localizes** offsets; it does not decide endianness or semantics on its own — it
 hands you a ranked, evidence-backed hypothesis table to fill in.
 
+**Ground-truth doctrine.** The original's parsing/dispatch code inside `doida.exe` is the single
+absolute truth for a packet's real field layout; the capture you diff here is the corroborating
+**oracle** for what actually crossed the socket. The two agree on a faithful spec — but this skill
+lives on the capture side only: it observes captured bytes and **never** reads `_dirty/` or calls IDA.
+Its hypothesis table is evidence for a spec-author to confirm, not the final word.
+
 ## Inputs
 
 Provide the bytes one of three ways:

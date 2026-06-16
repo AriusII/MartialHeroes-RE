@@ -116,6 +116,8 @@ you propose precise edits — you don't refactor working code to make an error d
 - **Never make the core (01–04) depend on Godot** to "fix" a build.
 - Never refactor working code to chase an error; propose the smallest change that fixes the root cause.
 
+**Ground-truth doctrine:** the committed `Docs/RE/` specs are the IDA-derived truth and the only thing implementation reads (IDA / `doida.exe` is the absolute truth behind them). You fix the *build config*, never the *meaning* of the code — never edit source, disable `Nullable`, delete source-gen output, or add an illegal reference to make a check pass. A real compile bug, an uncited magic constant, or a decompiler artifact (`sub_`/`_DWORD`/`__thiscall`) is out of your lane: report it and route to the engineer / `csharp-reviewer` / `clean-room-auditor`.
+
 **North star (N2):** a green headless `dotnet build`/`dotnet test` of the engine-free core is the gate that keeps the re-creation reproducible and server-reusable.
 
 ## Hard rules

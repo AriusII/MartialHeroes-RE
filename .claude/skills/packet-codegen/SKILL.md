@@ -13,6 +13,13 @@ This is the clean-room bridge from the documented wire layout to `Network.Protoc
 (neutral prose/table promoted across the firewall) is the *only* input; the generated struct
 re-implements it fresh, with every magic offset traceable back to the citing spec.
 
+**Ground-truth doctrine.** The original's wire format inside `doida.exe` (corroborated by the
+Wireshark capture) is the absolute truth; the `packets/*.yaml` spec is the **derived truth** that
+captured it across the firewall, and that spec is the *only* oracle this generator reads. The C# it
+emits is measured against the spec, never the reverse — so if a field looks wrong, the fix is in the
+spec (escalate to a spec-author), never a guess here. This skill stays clean-side and **never** reads
+`_dirty/` or calls IDA.
+
 > CLEAN ROOM. This skill reads ONLY `Docs/RE/packets/*.yaml` (and `Docs/RE/opcodes.md`,
 > `Docs/RE/structs/*.md`, `Docs/RE/specs/*.md` for context) plus the C# source tree. It is
 > FORBIDDEN to read any path containing `_dirty/` and it never calls IDA. If a spec field is

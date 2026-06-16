@@ -17,6 +17,13 @@ All output is **dirty** (derived directly from the binary) and lands under
 `Docs/RE/_dirty/recon/`. Nothing here is committed. Only a separately authored neutral spec may
 cross the firewall into `Docs/RE/specs|formats|structs|opcodes.md`.
 
+## Ground truth
+
+IDA on the binary (`doida.exe`; `Main.exe` is the historical reference) is the **single absolute
+truth** for the original — its segments, names, and layout are read FROM the DB, never from memory,
+analogy, or a prior session's recollection. A blank/short/wrong census means the DB is wrong, not that
+you should fill the gaps from guesswork: STOP and report.
+
 ## Preconditions (do these first, in order)
 
 1. **MCP must be green.** Run the `/ida-mcp-connect` skill and confirm it reports a live IDA Pro

@@ -2,27 +2,37 @@ namespace MartialHeroes.Client.Application.Input;
 
 /// <summary>
 /// The neutral input-event kind. Maps the legacy normalised mouse-event type codes (and the keyboard
-/// path) onto a strongly-typed enum. spec: Docs/RE/specs/input_ui.md §2 (type byte: 3 = move,
-/// 5 = button press, 7 = double-click, 8 = wheel) / §6 (".NET port may use a strongly-typed enum").
+/// path) onto a strongly-typed enum. The numeric values mirror the recovered type-byte taxonomy
+/// exactly: 3 = move, 4 = press, 5 = release, 6 = synthesised click, 7 = double-click, 8 = wheel.
+/// The press / release / click triple are DISTINCT codes — the synthesised click (6) is what HUD
+/// command/button handlers fire on (not raw press or release). spec: Docs/RE/specs/input_ui.md
+/// §2a (full taxonomy) / §2b (the type-6 click synthesis) / §6 (".NET port may use a strongly-typed enum").
 /// </summary>
 public enum InputType : byte
 {
     /// <summary>No event (default).</summary>
     None = 0,
 
-    /// <summary>Mouse moved. Legacy type code 3. spec: input_ui.md §2.</summary>
+    /// <summary>Mouse moved. Legacy type code 3. spec: input_ui.md §2a.</summary>
     MouseMove = 3,
 
-    /// <summary>A mouse button went down (button index in <see cref="InputEvent.ButtonOrDelta"/>). Legacy type code 5 (press). spec: input_ui.md §2.</summary>
-    MouseButtonDown = 5,
+    /// <summary>A mouse button went down (button index in <see cref="InputEvent.ButtonOrDelta"/>). Legacy type code 4 (press). spec: input_ui.md §2a.</summary>
+    MouseButtonDown = 4,
 
-    /// <summary>A mouse button was released (button index in <see cref="InputEvent.ButtonOrDelta"/>).</summary>
-    MouseButtonUp = 6,
+    /// <summary>A mouse button was released (button index in <see cref="InputEvent.ButtonOrDelta"/>). Legacy type code 5 (release). spec: input_ui.md §2a.</summary>
+    MouseButtonUp = 5,
 
-    /// <summary>A mouse button double-click. Legacy type code 7. spec: input_ui.md §2 (double-click).</summary>
+    /// <summary>
+    /// A synthesised CLICK (activation) — re-pushed on a release that lands on the press-captured
+    /// widget (the click-vs-drag discriminator). HUD command/button handlers fire on THIS, not on
+    /// raw press or release. Legacy type code 6. spec: input_ui.md §2a / §2b / §6.
+    /// </summary>
+    MouseButtonClick = 6,
+
+    /// <summary>A mouse button double-click. Legacy type code 7. spec: input_ui.md §2a (double-click).</summary>
     MouseDoubleClick = 7,
 
-    /// <summary>Mouse wheel scrolled (signed delta in <see cref="InputEvent.ButtonOrDelta"/>). Legacy type code 8. spec: input_ui.md §2.</summary>
+    /// <summary>Mouse wheel scrolled (signed delta in <see cref="InputEvent.ButtonOrDelta"/>). Legacy type code 8. spec: input_ui.md §2a.</summary>
     MouseWheel = 8,
 
     /// <summary>A key went down (virtual-key in <see cref="InputEvent.ButtonOrDelta"/>).</summary>
@@ -79,7 +89,14 @@ public readonly record struct InputEvent(
     public bool IsLeftButtonDown =>
         Type == InputType.MouseButtonDown && ButtonOrDelta == MouseButton.Left;
 
-    /// <summary>Convenience predicate: a left mouse-button release. spec: input_ui.md §3 (on-release path).</summary>
+    /// <summary>Convenience predicate: a left mouse-button release. spec: input_ui.md §2a (release) / §3 (on-release path).</summary>
     public bool IsLeftButtonUp =>
         Type == InputType.MouseButtonUp && ButtonOrDelta == MouseButton.Left;
+
+    /// <summary>
+    /// Convenience predicate: a synthesised left-button click (the activation HUD buttons fire on).
+    /// spec: input_ui.md §2a / §2b ("every HUD command/button handler acts on type 6").
+    /// </summary>
+    public bool IsLeftButtonClick =>
+        Type == InputType.MouseButtonClick && ButtonOrDelta == MouseButton.Left;
 }

@@ -156,6 +156,7 @@ public sealed class ApplicationUseCasesTests
         {
             Assert.Equal(0, payload[i]);
         }
+
         // Body: [u32 len EXCLUDING the NUL]["hello"][0x00]. 2/7's length prefix is strlen, NOT strlen+1.
         // spec: Docs/RE/packets/2-7_whisper.yaml (textLength EXCLUDES the NUL).
         uint len = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(CmsgWhisperHeader.HeaderSize, 4));

@@ -23,6 +23,12 @@ This project's legal basis is the EU Software Directive 2009/24/EC, Art. 6 — d
 for interoperability**. That exception only holds while the dirty room and the clean room stay
 strictly separated. You are the dirty room.
 
+**Ground-truth doctrine:** IDA / `doida.exe` is the project's *single absolute truth* for any binary
+fact you settle — confirm or refute it **in the binary**, never from memory, analogy, or guesswork.
+Static forms the hypothesis; the `?ext=dbg` live debugger confirms it against ground truth. Your
+bounded answer only *becomes* truth once a spec-author promotes it into a committed spec — until then
+it is a dirty, provisional note.
+
 - You hold `mcp__ida__*` and write **ONLY** under `Docs/RE/_dirty/` (gitignored, tainted, never
   shipped). You **NEVER** write to any committed spec (`Docs/RE/opcodes.md`, `packets/`, `formats/`,
   `structs/`, `specs/`, `names.yaml`, `journal.md`) and **NEVER** to any `0X.*` source folder

@@ -20,6 +20,12 @@ This project's legal basis is the EU Software Directive 2009/24/EC, Art. 6 — d
 for interoperability**. That exception only holds if the dirty room and the clean room stay
 strictly separated. You are the dirty room.
 
+**Ground-truth doctrine:** IDA / `doida.exe` is the project's *single absolute truth* for the
+original's behavior, data, and layout. Every claim you make is confirmed or refuted **in the binary**
+— never asserted from memory, analogy, or guesswork. Static analysis forms the hypothesis; the
+`?ext=dbg` live debugger confirms it against ground truth. Your findings only *become* truth once a
+spec-author rewrites them into a committed `Docs/RE/` spec — until then they are dirty, provisional notes.
+
 - You write **ONLY** under `Docs/RE/_dirty/` (gitignored). You **NEVER** write to any committed
   spec (`Docs/RE/opcodes.md`, `packets/`, `formats/`, `structs/`, `specs/`, `names.yaml`,
   `journal.md`) and **NEVER** to any `0X.*` source folder (`01.Infrastructure.Shared`,

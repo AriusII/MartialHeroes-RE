@@ -804,17 +804,18 @@ public sealed partial class EffectRenderer : Node3D
         {
             // No texture: use unshaded solid colour modulated by the sampled diffuse tint.
             // spec: Docs/RE/specs/effects.md §17.3 — diffuse tint drives AlbedoColor; CONFIRMED.
-            // Blend mode: per-spec the blend is per-drawable material stored in the .xeff descriptor.
-            // The exact per-drawable blend is not yet parsed from the .xeff (it is a known unknown);
-            // Additive is the common default for glow/fire FX and matches the FX particle bucket
-            // blend order (SRCALPHA / ONE). Kept as Additive until per-drawable blend is recovered.
-            // spec: Docs/RE/specs/rendering.md §4.2 — per-bucket blend modes (SRCALPHA / ONE for particles).
+            // Blend mode: default is alpha (SRCALPHA/INVSRCALPHA); additive is an override for the
+            // additive particle sub-bucket. Per-drawable blend byte is a SPEC GAP (effects.md §14.8)
+            // — default to Mix (alpha) until the field is recovered.
+            // spec: Docs/RE/specs/rendering.md §3.3/§4.2 — FX sub-buckets default SRCALPHA/INVSRCALPHA;
+            //   additive SRCALPHA/ONE is an override, NOT the universal default.
+            // spec-gap: per-sub-effect blend-state field location in .xeff (effects.md §14.8).
             var mat = new StandardMaterial3D
             {
                 ShadingMode = StandardMaterial3D.ShadingModeEnum.Unshaded,
                 AlbedoColor = tint,
                 Transparency = StandardMaterial3D.TransparencyEnum.Alpha,
-                BlendMode = StandardMaterial3D.BlendModeEnum.Add,
+                BlendMode = StandardMaterial3D.BlendModeEnum.Mix, // spec: rendering.md §4.2 — default alpha
                 BillboardMode = se.EmitterType <= EmitterDirectional
                     ? StandardMaterial3D.BillboardModeEnum.Enabled
                     : StandardMaterial3D.BillboardModeEnum.Disabled,
@@ -913,13 +914,17 @@ public sealed partial class EffectRenderer : Node3D
         // AlbedoColor carries the sampled per-keyframe diffuse tint (R,G,B) and alpha; the texture is
         // modulated by it. Previously hardcoded white, which dropped the .xeff diffuse colour curve.
         // spec: Docs/RE/specs/effects.md §17.3 — diffuse tint drives AlbedoColor (not white); CONFIRMED.
+        // Blend mode: default alpha (SRCALPHA/INVSRCALPHA). Per-drawable blend byte is a SPEC GAP
+        // (effects.md §14.8); additive is reserved for the additive override once recovered.
+        // spec: Docs/RE/specs/rendering.md §3.3/§4.2 — default FX blend = SRCALPHA/INVSRCALPHA.
+        // spec-gap: per-sub-effect blend-state field location in .xeff (effects.md §14.8).
         return new StandardMaterial3D
         {
             ShadingMode = StandardMaterial3D.ShadingModeEnum.Unshaded,
             AlbedoTexture = texture,
             AlbedoColor = tint,
             Transparency = StandardMaterial3D.TransparencyEnum.Alpha,
-            BlendMode = StandardMaterial3D.BlendModeEnum.Add,
+            BlendMode = StandardMaterial3D.BlendModeEnum.Mix, // spec: rendering.md §4.2 — default alpha
             BillboardMode = StandardMaterial3D.BillboardModeEnum.Enabled,
             TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
         };

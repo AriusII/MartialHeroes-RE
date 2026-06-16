@@ -28,9 +28,12 @@
 //   (conservative: may produce false positives); use the three-argument overload for precision.
 //
 // Water surface Y determination:
-//   The legacy .map file does not store an explicit water-plane height.
-//   TERRAIN section MIN_HEIGHTFILED is the minimum terrain vertex world-Y in the cell.
-//   spec: terrain.md §3.4 — MIN_HEIGHTFILED float: CONFIRMED.
+//   Water is a free engineering choice (the legacy client has NO water renderer — RESOLVED-NEGATIVE),
+//   so there is no original water-plane height to reproduce. The TERRAIN section MIN_HEIGHTFILED is
+//   only an INFORMATIONAL on-disk echo — the runtime .map parser never reads it, so it is NOT a
+//   runtime water-Y source; we merely borrow it as a convenient seed for the free-choice plane height.
+//   spec: Docs/RE/specs/environment.md §4 / §4.3 — water RESOLVED-NEGATIVE, free engineering choice.
+//   spec: Docs/RE/formats/terrain.md §3.4 — MIN_HEIGHTFILED is informational, not a runtime input.
 //   The helper WaterSurfaceY(MapDescriptor) returns:
 //     - MIN_HEIGHTFILED + WaterOffsetAboveFloor  (when TERRAIN MinHeightFiled is present)
 //     - FallbackWaterY                           (otherwise)
@@ -42,11 +45,12 @@
 //   _Process and all Godot mutations run on the main thread.
 //
 // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
-// spec: terrain.md §3.4 — MIN_HEIGHTFILED float: CONFIRMED.
+// spec: terrain.md §3.4 — MIN_HEIGHTFILED is informational (not a runtime input): CONFIRMED.
 // spec: terrain.md §1.4 — cell size 1024 world units: CONFIRMED.
 // spec: WorldCoordinates.ToGodot — (x,y,z) → (x,y,-z): CONFIRMED.
 
 using Godot;
+using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Assets.Parsers.Models;
 
 namespace MartialHeroes.Client.Godot.World;
@@ -61,7 +65,8 @@ namespace MartialHeroes.Client.Godot.World;
 /// </summary>
 /// <remarks>
 /// Per-cell water PRESENCE is detected independently from the <c>.map</c> FX texture names
-/// (<c>_water</c>/<c>_sea</c>/<c>_wateredge</c>) via <see cref="WaterRenderer.CellHasWater(MapDescriptor, BgTextureCatalog)"/>;
+/// (<c>_water</c>/<c>_sea</c>/<c>_wateredge</c>) via
+/// <see cref="WaterRenderer.CellHasWater(MapDescriptor, global::MartialHeroes.Assets.Mapping.BgTextureCatalog)"/>;
 /// that path is unaffected by this reconciliation.
 /// </remarks>
 internal readonly record struct WaterPlacement(bool Enabled, float WorldY)
@@ -79,7 +84,8 @@ internal readonly record struct WaterPlacement(bool Enabled, float WorldY)
 /// <summary>
 /// Passive <see cref="Node3D"/> that places a semi-transparent animated water plane in the scene.
 ///
-/// IMPORTANT: only add to the scene when <see cref="CellHasWater(MapDescriptor, BgTextureCatalog)"/>
+/// IMPORTANT: only add to the scene when
+/// <see cref="CellHasWater(MapDescriptor, global::MartialHeroes.Assets.Mapping.BgTextureCatalog)"/>
 /// (or its bgtexture-aware overload) returns <see langword="true"/>.
 ///
 /// Call <see cref="Configure"/> to position the plane. <see cref="WaterSurfaceY"/> is a
@@ -94,8 +100,11 @@ public sealed partial class WaterRenderer : Node3D
     /// <summary>
     /// Vertical offset above the terrain MIN_HEIGHTFILED at which the water plane is placed.
     /// Ensures the plane sits just above the seafloor / shoreline vertices.
-    /// PLAUSIBLE: 2.0 world units above MIN_HEIGHTFIELD is a port-side heuristic; the exact
-    /// value is not in any committed spec. No spec-dictated value recovered from IDA.
+    /// FREE ENGINEERING CHOICE (§4.3): water has no renderer in the original (RESOLVED-NEGATIVE), so
+    /// there is no spec-dictated value. The 2.0-world-unit offset is a port-side heuristic; the
+    /// <c>.map</c> MIN_HEIGHTFILED it is added to is INFORMATIONAL on disk, NOT a runtime water-Y source.
+    /// spec: Docs/RE/specs/environment.md §4.3 (free engineering choice);
+    ///       Docs/RE/formats/terrain.md §3.4 (MIN_HEIGHTFILED informational, not a runtime input).
     /// </summary>
     public const float WaterOffsetAboveFloor = 2.0f;
 
@@ -118,12 +127,19 @@ public sealed partial class WaterRenderer : Node3D
     /// (lowercased) path contains "_water", "_sea", or "_wateredge".
     ///
     /// spec: R5 recon — "water is an FX overlay identified by texture name". 2026-06-12.
-    /// spec: bgtexture.txt VFS probe 2026-06-12 — confirmed water rel-path substrings:
+    /// spec: bgtexture VFS probe 2026-06-12 — confirmed water rel-path substrings:
     ///   terrain/_water*, terrain/_sea, terrain/_wateredge.
     /// </summary>
     /// <param name="cellMap">Parsed .map descriptor for the target cell.</param>
-    /// <param name="bgTextures">Parsed bgtexture.txt catalog (global; use map000 pool).</param>
-    public static bool CellHasWater(MapDescriptor cellMap, BgTextureCatalog bgTextures)
+    /// <param name="bgTextures">
+    /// Runtime background-texture pool (built from <c>bgtexture.lst</c>; global map000 pool). The
+    /// <c>.map</c> FX <c>TexId</c> is the 0-based pool slot, resolved here via
+    /// <see cref="global::MartialHeroes.Assets.Mapping.BgTextureCatalog.ResolveRelativePath"/>
+    /// (used DIRECTLY, NO <c>-1</c>).
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join (IDA-corrected 263bd994: 0x445833). CONFIRMED.
+    /// </param>
+    public static bool CellHasWater(MapDescriptor cellMap,
+        global::MartialHeroes.Assets.Mapping.BgTextureCatalog bgTextures)
     {
         if (cellMap is null || bgTextures is null) return false;
 
@@ -135,7 +151,9 @@ public sealed partial class WaterRenderer : Node3D
 
             foreach ((int _, int texId) in sec.Textures)
             {
-                string? rel = bgTextures.GetRelPath(texId);
+                // The .map FX TexId is the 0-based pool slot, used DIRECTLY (NO -1).
+                // spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join (IDA-corrected 263bd994). CONFIRMED.
+                string? rel = bgTextures.ResolveRelativePath(texId);
                 if (rel is null) continue;
 
                 string lower = rel.ToLowerInvariant();
@@ -177,8 +195,11 @@ public sealed partial class WaterRenderer : Node3D
     /// Returns <c>TERRAIN.MinHeightFiled + <see cref="WaterOffsetAboveFloor"/></c> when the
     /// TERRAIN section has a MIN_HEIGHTFILED value; otherwise returns <see cref="FallbackWaterY"/>.
     ///
-    /// spec: terrain.md §3.4 — MIN_HEIGHTFILED float: CONFIRMED.
-    /// spec: heuristic — "waterY = MIN_HEIGHTFILED + 2.0f" (mission brief, 2026-06-12).
+    /// This is a FREE ENGINEERING CHOICE (§4.3) — the original has no water renderer and stores no
+    /// water-plane height. MIN_HEIGHTFILED is only an INFORMATIONAL on-disk echo (the runtime .map
+    /// parser never reads it); it is borrowed here merely as a convenient seed for the chosen height.
+    /// spec: Docs/RE/specs/environment.md §4.3 (free engineering choice);
+    ///       Docs/RE/formats/terrain.md §3.4 (MIN_HEIGHTFILED informational, not a runtime water-Y source).
     /// </summary>
     public static float WaterSurfaceY(MapDescriptor cellMap)
     {

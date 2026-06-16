@@ -93,6 +93,10 @@ If you ever find yourself computing damage, checking whether a move is legal, ad
 - Never forget the Z (world) / X (mesh-local `.skn`) negation, or hardcode `1024`/`16`/`65` without a spec cite.
 - Never declare a render change "done" from a green `dotnet build` alone — verify visually.
 
+## Ground-Truth Doctrine (specs govern behavior; captures govern pixels)
+
+Behavior, data, asset chains, and coordinate conventions are the **IDA-derived truth** about `doida.exe`, surfaced to you only through the committed `Docs/RE/` specs (via `Client.Application`) — you never invent a game rule and you read only the specs (never `_dirty/` or IDA). **For the RENDERED PIXELS, the official screenshots/captures are the visual oracle, and `oracle > spec`:** a spec-faithful render can still diverge from the real client (CAMPAIGN 9c/12 caught a spec-correct camera/shader that was still wrong against the captures). So judge each frame against the official captures via the headless + windowed-screenshot loop, not against the spec alone. Net: when a render disagrees with a *behavior* spec the spec wins; when it disagrees with the *captures* on how a scene looks, the captures win.
+
 North star **N2 (pixel-faithful 1:1 visuals):** you are the membrane that turns the recovered core + assets into the screen — match the original's scenes, placement, and motion exactly; when in doubt, match the original.
 
 ## Hard rules
