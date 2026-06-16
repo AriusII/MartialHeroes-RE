@@ -15,10 +15,13 @@
 //   2. MANUAL BOOM-ZOOM: after the dolly, a hold-to-zoom moves the camera along its forward view
 //      axis; the boom depth is HARD-CLAMPED to [0, 22] (boom seed = 0 → eye sits on KF1 at rest).
 //      spec: §3.5.4 — boom-Z clamp [0,22], boom seed 0. CODE-CONFIRMED.
-//   3. ACTOR YAW: a hold-to-spin applies manual yaw to the SELECTED preview actor (NOT the camera),
-//      about world up. The legacy create-preview turntable rate is ≈±2 rad/s. spec: §4.2.
-//   4. SLOT RAY-PICK: a 3D world-space ray-pick (Camera3D unproject) against per-slot AABBs
+//   3. SLOT RAY-PICK: a 3D world-space ray-pick (Camera3D unproject) against per-slot AABBs
 //      (X ± 6, Z ± 6, Y band 70..92), nearest hit → slot index (0..4) or −1. spec: §3.3.3.
+//
+// NO ACTOR/CAMERA RE-AIM ON SELECTION: the IDA re-walk confirms slot interaction NEVER re-aims the
+//   camera; the real per-slot "focus" is an idle↔select `.mot` CLIP SWAP on the preview actor (owned
+//   by the skinning lane via actormotion.txt col 21), NOT a yaw. A prior Q/E "actor-yaw turntable"
+//   input here was invented (no spec basis) and has been REMOVED. spec: §3.3.3 / §3.3.4.
 //
 // COORDINATE CONVENTION: world geometry negates Z; KF positions and slot XZ arrive already in
 //   Godot-space (Z negated once by the scene).
@@ -26,7 +29,7 @@
 // NAMESPACE PITFALL: bare `Input` / `Time` collide with the sibling project namespace (CS0234) →
 //   use global::Godot.Input / global::Godot.Key.
 //
-// PASSIVE: zero game logic. Reads input, animates a camera, rotates an actor, intersects boxes.
+// PASSIVE: zero game logic. Reads input, animates a camera, intersects boxes. (No actor rotation.)
 
 using Godot;
 
@@ -34,13 +37,14 @@ namespace MartialHeroes.Client.Godot.Screens;
 
 /// <summary>
 /// The entry-dolly camera rig for the character-select preview: drives the KF0→KF1 dolly over
-/// ~2.0 s on scene enter, then the two manual hold-to-move inputs (camera boom-zoom + selected-
-/// actor yaw) and the per-slot ray-pick.
+/// ~2.0 s on scene enter, then the manual camera boom-zoom and the per-slot ray-pick. There is no
+/// actor or camera re-aim on slot selection (the per-slot focus is a motion-clip swap owned by the
+/// skinning lane, not a yaw here).
 ///
 /// <para>Owned by <see cref="CharSelectScene3D"/>, which constructs the camera at KF0 then calls
 /// <see cref="Configure"/> with the camera, the dolly keyframes, the row-pivot look-at, the
-/// per-slot Godot-space XZ arrays, and the selected-slot / slot-actor accessors. The dolly runs in
-/// <see cref="_Process"/> against the engine ms clock.</para>
+/// per-slot Godot-space XZ arrays, and the slot-actor accessor (used by the ray-pick). The dolly
+/// runs in <see cref="_Process"/> against the engine ms clock.</para>
 ///
 /// spec: Docs/RE/specs/frontend_scenes.md §3.5 (entry dolly KF0→KF1) / §3.3.3 (hit-test).
 /// </summary>
@@ -61,8 +65,12 @@ public sealed partial class CharSelectCameraRig : Node
     private const float BoomMinZ = 0.0f; // spec: §3.5.4 CODE-CONFIRMED
     private const float BoomMaxZ = 22.0f; // spec: §3.5.4 CODE-CONFIRMED
 
-    // Manual actor yaw — the legacy create-preview turntable rate ≈±2 rad/s. spec: §4.2.
-    private const float ActorYawRadiansPerSecond = 2.0f;
+    // NOTE: there is NO manual actor-yaw / camera re-aim on slot interaction. The IDA re-walk confirms
+    // slot selection NEVER re-aims the camera, and the real per-slot "focus" is an idle↔select `.mot`
+    // CLIP SWAP on the preview ACTOR (not a yaw of the camera or the actor). That clip swap is owned by
+    // the skinning lane (CharSelectScene3D.SetSelectedSlot / actormotion.txt col 21), NOT this rig. The
+    // earlier Q/E "actor-yaw turntable" here was an invented input with no spec basis and is removed.
+    // spec: frontend_scenes.md §3.3.3 / §3.3.4 (select = motion-clip swap, no re-aim).
 
     // Per-slot pick-box extents. spec: §3.3.3 — X ± 6, Z ± 6, Y band 70..92 (= +22). CODE-CONFIRMED.
     private const float HitBoxHalfExtentXZ = 6.0f;
@@ -88,20 +96,22 @@ public sealed partial class CharSelectCameraRig : Node
 
     private Camera3D? _camera;
     private float[] _slotGodotX = [];
+
     private float[] _slotGodotZ = [];
-    private System.Func<int>? _selectedSlotProvider;
+
+    // Slot-actor accessor — used by the ray-pick (HitTest) to read each actor's base Y. The former
+    // selected-slot accessor drove the removed actor-yaw spin and is no longer stored.
     private System.Func<int, Node3D?>? _slotActorProvider;
 
     /// <summary>
     /// Wires the rig to the scene camera, the two dolly keyframes, the row-pivot look-at, the
-    /// per-slot Godot-space XZ arrays, and the selected-slot / slot-actor accessors. The dolly timer
-    /// starts from this call.
+    /// per-slot Godot-space XZ arrays, and the slot-actor accessor (used by the ray-pick). The dolly
+    /// timer starts from this call.
     /// </summary>
     public void Configure(
         Camera3D camera,
         float[] slotGodotX,
         float[] slotGodotZ,
-        System.Func<int> selectedSlotProvider,
         System.Func<int, Node3D?> slotActorProvider,
         Vector3 kf0Pos,
         Vector3 kf1Pos,
@@ -110,7 +120,6 @@ public sealed partial class CharSelectCameraRig : Node
         _camera = camera;
         _slotGodotX = slotGodotX;
         _slotGodotZ = slotGodotZ;
-        _selectedSlotProvider = selectedSlotProvider;
         _slotActorProvider = slotActorProvider;
 
         _kf0Pos = kf0Pos;
@@ -138,7 +147,8 @@ public sealed partial class CharSelectCameraRig : Node
 
         if (!_dollyComplete) TickDolly(dt);
         ApplyCameraBoomZoom(dt);
-        ApplySelectedActorYaw(dt);
+        // No actor/camera re-aim on slot interaction — the per-slot focus is a motion-clip swap owned
+        // by the skinning lane, not a yaw here. spec: frontend_scenes.md §3.3.3 / §3.3.4.
     }
 
     // =========================================================================
@@ -182,25 +192,6 @@ public sealed partial class CharSelectCameraRig : Node
         _boomZ = Mathf.Clamp(_boomZ + dir * BoomZoomUnitsPerSecond * dt, BoomMinZ, BoomMaxZ);
         Vector3 forward = -_camera.GlobalTransform.Basis.Z.Normalized();
         _camera.GlobalPosition = _kf1Pos + forward * _boomZ;
-    }
-
-    // =========================================================================
-    // Manual actor yaw — the SELECTED preview actor only (NOT the camera).
-    // Hold keys: Q = −2 rad/s, E = +2 rad/s.
-    // =========================================================================
-
-    private void ApplySelectedActorYaw(float dt)
-    {
-        float dir = 0.0f;
-        if (global::Godot.Input.IsPhysicalKeyPressed(global::Godot.Key.Q)) dir -= 1.0f;
-        if (global::Godot.Input.IsPhysicalKeyPressed(global::Godot.Key.E)) dir += 1.0f;
-        if (dir == 0.0f) return;
-
-        int selected = _selectedSlotProvider?.Invoke() ?? -1;
-        if (selected < 0) return;
-
-        Node3D? actor = _slotActorProvider?.Invoke(selected);
-        actor?.RotateY(dir * ActorYawRadiansPerSecond * dt);
     }
 
     // =========================================================================

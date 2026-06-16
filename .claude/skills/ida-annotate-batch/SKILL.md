@@ -41,8 +41,9 @@ Comments are **neutral interop documentation** — never Hex-Rays pseudo-C, neve
 ## Steps
 
 1. **Pick the cluster.** Choose ONE cluster from the `PLAN.md` §5 cluster backlog (e.g.
-   `network-dispatch`, `crypto-session`, `vfs-assetio`). Annotation is strictly serialized — exactly
-   one annotator per IDB at a time (`Docs/PLAN.md` §3). Extract that cluster's slice from
+   `network-dispatch`, `crypto-session`, `vfs-assetio`). Annotation runs **unbridled** — fan out as many
+   annotators as the IDA MCP server sustains; there is **no one-annotator-at-a-time cap** (`Docs/PLAN.md`
+   §3). Extract that cluster's slice from
    `Docs/RE/_dirty/<campaign>/glossary.yaml`: a map of `addresses → { name?, comment?, type? }`.
 2. **Read the bundled script** `${CLAUDE_SKILL_DIR}/scripts/annotate_batch.py` (also reachable as
    `scripts/annotate_batch.py`). It is real, runnable IDAPython using `ida_name` / `ida_funcs` /
@@ -66,8 +67,9 @@ Comments are **neutral interop documentation** — never Hex-Rays pseudo-C, neve
    performs each `apply`-verdict entry: `set_name` (rename), function/repeatable comment, and — if a
    `type` was declared — applies the struct/enum type. It re-skips runtime symbols and conflicts and
    returns the same JSON shape with `applied` counts and any per-entry failures. Idempotent: a second
-   run reports `noop` for everything already applied. *Decision: confirm you are the **only** annotator
-   on this IDB (strictly one writer at a time — `Docs/PLAN.md` §3). If a `type` fails to
+   run reports `noop` for everything already applied. *Decision: annotators run **in parallel** — there is
+   no one-writer cap (`Docs/PLAN.md` §3); if a rename/comment/type call fails or conflicts, **retry it**
+   rather than serializing. If a `type` fails to
    apply (struct not yet imported into the IDB), apply name+comment and report the type failure rather
    than aborting the whole cluster. On any SHA-256 mismatch vs `names.yaml`, STOP before applying.*
 7. **Stage the applied report.** Write the apply result to
@@ -82,8 +84,9 @@ Comments are **neutral interop documentation** — never Hex-Rays pseudo-C, neve
 
 - The manifest came from the gate-passed `glossary.yaml` slice (never a `*.proposed.*`); dry-run ran;
   user confirmed; IDB SHA-256 matched the pin.
-- Exactly one cluster was applied by exactly one writer; every name/comment/type traces to a manifest
-  entry; zero CRT/runtime symbols touched; conflicts skipped (not forced).
+- Exactly one cluster was applied this invocation (other annotators may run in parallel against the same
+  IDB); every name/comment/type traces to a manifest entry; zero CRT/runtime symbols touched; conflicts
+  skipped (not forced).
 - A re-run reports `noop` for the cluster (idempotent); the applied-report exists at
   `Docs/RE/_dirty/campaign2/applied/<cluster>.md` with banner + SHA-256; `names.yaml`/`journal.md`
   untouched.
@@ -92,7 +95,9 @@ Comments are **neutral interop documentation** — never Hex-Rays pseudo-C, neve
 
 - **Never** annotate from a `*.proposed.*` manifest or invent a name/comment/type — only the
   reconciled, gate-passed glossary slice.
-- **Never** let two annotators write the same IDB — serialization is the whole safety model.
+- **Two annotators may write the same IDB in parallel** — that is now allowed; the safety model is the
+  gate-passed glossary slice + dry-run + idempotency, **not** serialization. Retry a failed/conflicting
+  call rather than throttling back.
 - **Never** write a comment that is pseudo-C, a `sub_`/`_DWORD`/`__thiscall` token, or "paste into C#"
   — comments are neutral interop documentation only.
 - Do not edit the `glossary.yaml` merge point, `names.yaml`, or `journal.md` — the only file you write

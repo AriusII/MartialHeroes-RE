@@ -64,9 +64,10 @@ under `Docs/RE/_dirty/structs/`.
 
 - **If a `call [this+0]` / `mov eax,[this]; call [eax+..]` pattern appears**, mark offset 0 as
   `vtable*`. **If no such pattern**, treat it as a plain struct (offset 0 is a real field).
-- **If you choose to apply the type to the IDB (step 5)** and you're fanned out under an orchestrator,
-  the IDB write is **strictly serialized** — exactly one writer at a time; never apply concurrently
-  with another analyst. A declared C struct (layout) is firewall-safe; a transcribed decompilation is not.
+- **If you choose to apply the type to the IDB (step 5)**, you may apply it **in parallel** with other
+  analysts — there is **no one-writer cap** anymore; if a `declare_type`/`type_apply` call fails or
+  conflicts, **retry it** rather than serializing. A declared C struct (layout) is firewall-safe; a
+  transcribed decompilation is not.
 - **If an offset's size or meaning is ambiguous** from access patterns alone, confirm it dynamically:
   hand off to `ida-debugger-drive` — breakpoint a method in the maintainer's live F9 session and
   `dbg_read` the live instance to size and read the field. Static infers the layout; the debugger confirms it.
@@ -81,7 +82,7 @@ under `Docs/RE/_dirty/structs/`.
 ## Pitfalls (never)
 
 - Never invent an offset you did not observe in an access pattern.
-- Never apply an IDB type concurrently with another analyst — writes are serialized.
+- Never let a failed/conflicting type-apply silently drop — retry it. (Concurrent applies with other analysts are now allowed; the one-writer rule is lifted.)
 - Never paste a Hex-Rays body; a declared layout type is allowed, a transcribed decompilation is not.
 
 *North star N1: infers an undefined object's layout from access patterns into a promotable table — the static shape a live debugger read confirms.*

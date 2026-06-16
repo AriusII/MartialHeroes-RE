@@ -63,7 +63,7 @@ All output is **dirty** (addresses derived directly from the copyrighted binary)
 - **If two role hypotheses tie on static metrics**, the tiebreaker is dynamic: which one actually runs
   on the path under test. Hand the candidate set to `ida-debugger-drive` for a breakpoint census in
   the maintainer's F9 session before committing analyst time to a deep read.
-- **When fanned out under an orchestrator**, keep sub-waves to ~3 analysts and serialize any IDB write.
+- **When fanned out under an orchestrator**, fan out **massively in parallel** — there is no `~3` sub-wave cap; IDB writes may run in parallel too (retry any failed/conflicting call).
 
 ## Verify / Done when
 

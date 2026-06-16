@@ -118,6 +118,18 @@ public sealed partial class LoginScreen : Control
     /// </summary>
     public FrontEndAudio? Audio { get; set; }
 
+    /// <summary>
+    /// DEV/TEST only — when non-empty, the ID field is pre-filled on build.
+    /// Set by BootFlow under dev-offline mode; never populated in a production flow.
+    /// </summary>
+    public string? DevPrefillId { get; set; }
+
+    /// <summary>
+    /// DEV/TEST only — when non-empty, the PW field is pre-filled on build.
+    /// Set by BootFlow under dev-offline mode; never populated in a production flow.
+    /// </summary>
+    public string? DevPrefillPw { get; set; }
+
     // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
@@ -127,6 +139,14 @@ public sealed partial class LoginScreen : Control
 
     // Save-ID view flag — purely presentational (no domain state).
     private bool _saveIdChecked;
+
+    // Save-ID checkbox is a LATCHING toggle (not a momentary button): the displayed glyph must
+    // persist between clicks — off=src(717,398), on=src(730,398). We hold the button and its two
+    // frames so OnSaveIdToggled can swap the latched frame via StateButton.SetLatchedFrame.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.2e (Save-ID checkbox off/on glyphs). CODE-CONFIRMED.
+    private StateButton? _saveIdCheckbox;
+    private AtlasTexture? _saveIdOnFrame;
+    private AtlasTexture? _saveIdOffFrame;
 
     // Quit-confirm modal alpha ramp state. spec §11.2g. CODE-CONFIRMED.
     private Control? _quitModal;
@@ -168,6 +188,12 @@ public sealed partial class LoginScreen : Control
             GD.PrintErr($"[LoginScreen] BuildUi failed: {ex.Message}");
         }
 
+        // DEV/TEST credential pre-fill (guarded by dev-offline mode in BootFlow). NEVER ships.
+        if (!string.IsNullOrEmpty(DevPrefillId) && _accountEdit is not null)
+            _accountEdit.Text = DevPrefillId;
+        if (!string.IsNullOrEmpty(DevPrefillPw) && _passwordEdit is not null)
+            _passwordEdit.Text = DevPrefillPw;
+
         // Play login-curtain SFX 861010105 at sub-state 1 entry.
         // spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1. CODE-CONFIRMED.
         Audio?.PlayLoginCurtainSfx();
@@ -202,6 +228,15 @@ public sealed partial class LoginScreen : Control
         {
             GetViewport().SetInputAsHandled();
             OnOkPressed();
+            return;
+        }
+
+        if (key.PhysicalKeycode == Key.Escape)
+        {
+            GetViewport().SetInputAsHandled();
+            // ESC opens the quit-confirm modal (closes it if already open). spec §1.8 (quit paths).
+            if (_quitModalTarget == LoginLayout.DialogAlphaVisible) HideQuitConfirmModal();
+            else ShowQuitConfirmModal();
             return;
         }
 
@@ -366,8 +401,13 @@ public sealed partial class LoginScreen : Control
                 LoginLayout.ConfirmHoverSrcX, LoginLayout.ConfirmHoverSrcY, // PRESSED(378,398)
                 LoginLayout.ActionConfirm,
                 caption: "", captionTint: Colors.White);
-            noticeBtn.Name = "NoticeBtn";
-            noticeBtn.ActionFired += _ => OnNoticePressed();
+            noticeBtn.Name = "QuitButton";
+            // VISUAL ORACLE (2026-06-16, screenshot vs official capture): this button's baked art is
+            // "종료" (Exit), NOT a notice/server-list button. It must open the quit-confirm modal whose
+            // Yes (actions 113/114) emits QuitRequested → client quit. The server list is reached via
+            // 확인 → PIN → server-select, so there is no separate server-list button on base login.
+            // spec: Docs/RE/specs/frontend_scenes.md §1.8 (quit paths).
+            noticeBtn.ActionFired += _ => OnQuitButtonPressed();
             AddChild(noticeBtn);
         }
 
@@ -405,58 +445,21 @@ public sealed partial class LoginScreen : Control
             LoginLayout.SmallDecorPlate.X, LoginLayout.SmallDecorPlate.Y,
             LoginLayout.SmallDecorPlate.W, LoginLayout.SmallDecorPlate.H);
 
-        // A@(0,469,494,113) src(265,0) — login background plate image.
-        // The plate the ID/PW row sits on. spec §11.2e. CODE-CONFIRMED.
-        AddAtlasSprite(formBand, "LoginBgPlate",
-            LoginLayout.AtlasLoginSlice1, 265, 0,
-            LoginLayout.ConfirmFacePlate.X, LoginLayout.ConfirmFacePlate.Y,
-            LoginLayout.ConfirmFacePlate.W, LoginLayout.ConfirmFacePlate.H);
+        // NOTE (noise removal, 9d): the "login background plate" / server-list TITLE image
+        // (login_slice1 src(0,469)) is, per login_construct.md §2.6 #55, a child of the lower
+        // band shown only with the SERVER-LIST overlay — and the prior code drew it at the
+        // transposed dst(0,469) which landed a stray strip in the BOTTOM-LEFT of the screen.
+        // It is NOT part of the resting base-login chrome, so it is intentionally NOT built here.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2e (server-list title — overlay-only).
 
-        // --- Option tab buttons (§11.2f). ---
-        // B@(40,82,110,38) src(520,492) NORMAL / (635,492) HOVER action 111.
-        // spec §11.2f. CODE-CONFIRMED.
-        {
-            var tab1 = WidgetFactory.MakeStateButton(
-                _assets, LoginLayout.AtlasLoginWindow,
-                LoginLayout.OptionTab1.X, LoginLayout.OptionTab1.Y,
-                LoginLayout.OptionTab1.W, LoginLayout.OptionTab1.H,
-                LoginLayout.OptionTab1.SrcX, LoginLayout.OptionTab1.SrcY, // NORMAL (520,492)
-                LoginLayout.OptionTab1HoverSrcX, LoginLayout.OptionTab1HoverSrcY, // HOVER  (635,492)
-                LoginLayout.OptionTab1.SrcX, LoginLayout.OptionTab1.SrcY, // PRESSED = NORMAL
-                LoginLayout.ActionOptionTab1,
-                caption: "", captionTint: Colors.White);
-            tab1.Name = "OptionTab1";
-            formBand.AddChild(tab1);
-        }
-
-        // B@(164,82,110,38) src(750,492) NORMAL / (865,492) HOVER action 112.
-        // spec §11.2f. CODE-CONFIRMED.
-        {
-            var tab2 = WidgetFactory.MakeStateButton(
-                _assets, LoginLayout.AtlasLoginWindow,
-                LoginLayout.OptionTab2.X, LoginLayout.OptionTab2.Y,
-                LoginLayout.OptionTab2.W, LoginLayout.OptionTab2.H,
-                LoginLayout.OptionTab2.SrcX, LoginLayout.OptionTab2.SrcY, // NORMAL (750,492)
-                LoginLayout.OptionTab2HoverSrcX, LoginLayout.OptionTab2HoverSrcY, // HOVER  (865,492)
-                LoginLayout.OptionTab2.SrcX, LoginLayout.OptionTab2.SrcY, // PRESSED = NORMAL
-                LoginLayout.ActionOptionTab2,
-                caption: "", captionTint: Colors.White);
-            tab2.Name = "OptionTab2";
-            formBand.AddChild(tab2);
-        }
-
-        // --- Decoration image plates §11.2f (baked art). ---
-        // A@(67,48,178,13) src(0,437). spec §11.2f. CODE-CONFIRMED.
-        AddAtlasSprite(formBand, "DecoPlate1",
-            LoginLayout.AtlasLoginSlice1, LoginLayout.DecoPlate1.SrcX, LoginLayout.DecoPlate1.SrcY,
-            LoginLayout.DecoPlate1.X, LoginLayout.DecoPlate1.Y,
-            LoginLayout.DecoPlate1.W, LoginLayout.DecoPlate1.H);
-
-        // A@(0,100,313,32) src(289,437). spec §11.2f. CODE-CONFIRMED.
-        AddAtlasSprite(formBand, "DecoPlate2",
-            LoginLayout.AtlasLoginSlice1, LoginLayout.DecoPlate2.SrcX, LoginLayout.DecoPlate2.SrcY,
-            LoginLayout.DecoPlate2.X, LoginLayout.DecoPlate2.Y,
-            LoginLayout.DecoPlate2.W, LoginLayout.DecoPlate2.H);
+        // --- Option tab buttons removed: see noise-removal note below. ---
+        // NOISE REMOVAL (9d): the two option/tab buttons (actions 111/112) and the two
+        // "deco" version-label image plates (login_slice1 src(0,437) and src(289,437)) are,
+        // per login_construct.md §2.8 + §3, children of the version-info / option-tab panel
+        // (+644) which BuildScene adds HIDDEN and the substate machine never raises. They must
+        // NOT render on the resting base login — building them here was unfaithful clutter.
+        // They belong to the hidden options panel, surfaced only by its own (unported) tab flow.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.2f (option/version panel — hidden by default).
 
         // --- Edit-field frame art (src login_slice1.dds A src(615,404,102,13)). ---
         // Both ID and PW frames share the same source rect. spec §11.2e atlas note. CODE-CONFIRMED.
@@ -492,19 +495,32 @@ public sealed partial class LoginScreen : Control
         formBand.AddChild(_passwordEdit);
 
         // --- Save-ID checkbox (§11.2e). A@(694,86,13,13) src off(717,398)/on(730,398). action 104. ---
+        // LATCHING toggle: the "on" glyph must persist between clicks, so all three StateButton frames
+        // are set to the SAME (off) source here and the displayed frame is driven explicitly by
+        // SetLatchedFrame from _saveIdChecked (initial + on every toggle). A momentary 3-state button
+        // only shows "on" WHILE pressed — that was the Save-ID-never-stays-checked defect.
         // spec §11.2e. CODE-CONFIRMED.
         {
+            _saveIdOffFrame = _assets.Slice(LoginLayout.AtlasLoginSlice1,
+                LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY,
+                LoginLayout.SaveIdCheck.W, LoginLayout.SaveIdCheck.H);
+            _saveIdOnFrame = _assets.Slice(LoginLayout.AtlasLoginSlice1,
+                LoginLayout.SaveIdCheckedSrcX, LoginLayout.SaveIdCheckedSrcY,
+                LoginLayout.SaveIdCheck.W, LoginLayout.SaveIdCheck.H);
+
             var cbx = WidgetFactory.MakeStateButton(
                 _assets, LoginLayout.AtlasLoginSlice1,
                 LoginLayout.SaveIdCheck.X, LoginLayout.SaveIdCheck.Y,
                 LoginLayout.SaveIdCheck.W, LoginLayout.SaveIdCheck.H,
-                LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY, // NORMAL off (717,398)
-                LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY, // HOVER  = NORMAL
-                LoginLayout.SaveIdCheckedSrcX, LoginLayout.SaveIdCheckedSrcY, // PRESSED on (730,398)
+                LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY, // NORMAL  (off — latched below)
+                LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY, // HOVER   (off)
+                LoginLayout.SaveIdCheck.SrcX, LoginLayout.SaveIdCheck.SrcY, // PRESSED (off)
                 LoginLayout.ActionSaveId,
                 caption: "", captionTint: Colors.White);
             cbx.Name = "SaveIdCheckbox";
+            _saveIdCheckbox = cbx;
             _saveIdChecked = !string.IsNullOrEmpty(savedId);
+            cbx.SetLatchedFrame(_saveIdChecked ? _saveIdOnFrame : _saveIdOffFrame);
             cbx.ActionFired += _ => OnSaveIdToggled();
             formBand.AddChild(cbx);
         }
@@ -610,33 +626,18 @@ public sealed partial class LoginScreen : Control
         }
         else GD.PrintErr("[LoginScreen] InventWindow.dds slice(318,647) null — modal chrome skipped.");
 
-        // Dialog body caption label — msg id 4023.
-        // NO hardcoded English text: text() returns VFS msg.xdb caption or empty string.
-        // spec §11.2d "Dialog #1 body text" caption 4023. CODE-CONFIRMED.
+        // Quit-confirm caption — the shared ExitPanel caption msg 2007 (NOT 4023/4024, which are the
+        // server-list re-fetch popup per A1 §1.8). VFS msg.xdb text; empty when absent (no English).
+        // spec: Docs/RE/specs/frontend_scenes.md §1.8 (ExitPanel quit-confirm). CODE-CONFIRMED caption id.
         {
-            string caption = _assets.Text(LoginLayout.MsgQuitConfirm1, "");
+            string caption = _assets.Text(LoginLayout.MsgExitPanel, "");
             if (!string.IsNullOrEmpty(caption))
             {
                 var lbl = WidgetFactory.MakeLabel(caption, LoginLayout.FontBodyHeight,
                     new Color(0.9f, 0.9f, 0.9f));
-                lbl.Position = new Vector2(10, 80);
+                lbl.Position = new Vector2(10, 88);
                 lbl.Size = new Vector2(320, 20);
                 lbl.HorizontalAlignment = HorizontalAlignment.Center;
-                modal.AddChild(lbl);
-            }
-        }
-
-        // Dialog body caption label — msg id 4024.
-        // spec §11.2d "Dialog #2 body text" caption 4024. CODE-CONFIRMED.
-        {
-            string caption = _assets.Text(LoginLayout.MsgQuitConfirm2, "");
-            if (!string.IsNullOrEmpty(caption))
-            {
-                var lbl = WidgetFactory.MakeLabel(caption, LoginLayout.FontBodyHeight,
-                    new Color(0.75f, 0.75f, 0.75f));
-                lbl.Position = new Vector2(10, 100);
-                lbl.Size = new Vector2(320, 20);
-                lbl.HorizontalAlignment = HorizontalAlignment.Left;
                 modal.AddChild(lbl);
             }
         }
@@ -729,10 +730,22 @@ public sealed partial class LoginScreen : Control
         EmitSignal(SignalName.ServerListRequested, account);
     }
 
+    private void OnQuitButtonPressed()
+    {
+        // The "종료" (Exit) button opens the quit-confirm modal. Confirm (Yes, actions 113/114) →
+        // OnQuitConfirmed → QuitRequested → BootFlow GetTree().Quit(). spec §1.8 (quit paths).
+        GD.Print("[LoginScreen] 종료 (quit) button pressed → show quit-confirm modal. spec §1.8.");
+        ShowQuitConfirmModal();
+    }
+
     private void OnSaveIdToggled()
     {
         // Toggle Save-ID and persist/clear. spec §1.6. CODE-CONFIRMED.
         _saveIdChecked = !_saveIdChecked;
+
+        // Reflect the new state on the latching checkbox so the "on"/"off" glyph persists. spec §11.2e.
+        _saveIdCheckbox?.SetLatchedFrame(_saveIdChecked ? _saveIdOnFrame : _saveIdOffFrame);
+
         if (_saveIdChecked)
         {
             string acct = _accountEdit?.Text.Trim() ?? "";
@@ -762,7 +775,13 @@ public sealed partial class LoginScreen : Control
 
     // VFS path for the version file. spec §1.4. CODE-CONFIRMED.
     private const string GameVerVfsPath = "data/cursor/game.ver"; // spec §1.4.
-    private const int GameVerSizeBytes = 28; // 7 × u32 LE. spec §1.4b. CODE-CONFIRMED.
+
+    // game.ver is a list of u32-LE values: count >= 7 (fewer rejected; more tolerated).
+    // spec: Docs/RE/formats/game_ver.md. CODE-CONFIRMED (IDA).
+    private const int GameVerMinBytes = 28; // >= 7 u32 LE. spec game_ver.md.
+
+    // Legacy CVersion comparator tests equality on a SINGLE field — list index 5 (byte offset 20).
+    private const int GameVerCompareIndex = 5; // spec game_ver.md. CODE-CONFIRMED (IDA).
 
     private bool CheckGameVersion()
     {
@@ -780,9 +799,10 @@ public sealed partial class LoginScreen : Control
             return true;
         }
 
-        if (vfsBytes.Length != GameVerSizeBytes)
+        if (vfsBytes.Length < GameVerMinBytes)
         {
-            GD.PrintErr($"[LoginScreen] Version gate: VFS game.ver wrong size ({vfsBytes.Length}). Degrading (allow).");
+            GD.PrintErr(
+                $"[LoginScreen] Version gate: VFS game.ver too short ({vfsBytes.Length} < {GameVerMinBytes}). Degrading (allow).");
             return true;
         }
 
@@ -794,30 +814,29 @@ public sealed partial class LoginScreen : Control
             return true;
         }
 
-        if (diskBytes.Length != GameVerSizeBytes)
+        if (diskBytes.Length < GameVerMinBytes)
         {
             GD.PrintErr(
-                $"[LoginScreen] Version gate: on-disk game.ver wrong size ({diskBytes.Length}). Degrading (allow).");
+                $"[LoginScreen] Version gate: on-disk game.ver too short ({diskBytes.Length} < {GameVerMinBytes}). Degrading (allow).");
             return true;
         }
 
-        // 7×u32 LE field-by-field compare. spec §1.4b. CODE-CONFIRMED.
+        // The legacy CVersion comparator does NOT compare the whole list — it tests equality on a
+        // SINGLE u32-LE value, the one at list index 5 (byte offset 20). Mismatch → msg 2204 → quit.
+        // spec: Docs/RE/formats/game_ver.md. CODE-CONFIRMED (IDA).
         ReadOnlySpan<byte> v = vfsBytes.Span;
         ReadOnlySpan<byte> d = diskBytes.Span;
-        for (int f = 0; f < 7; f++)
+        int o = GameVerCompareIndex * 4; // index 5 → byte offset 20
+        uint vf = (uint)(v[o] | (v[o + 1] << 8) | (v[o + 2] << 16) | (v[o + 3] << 24));
+        uint df = (uint)(d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24));
+        if (vf != df)
         {
-            int o = f * 4;
-            uint vf = (uint)(v[o] | (v[o + 1] << 8) | (v[o + 2] << 16) | (v[o + 3] << 24));
-            uint df = (uint)(d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24));
-            if (vf != df)
-            {
-                GD.Print(
-                    $"[LoginScreen] Version gate: MISMATCH field[{f}] VFS=0x{vf:X8} disk=0x{df:X8} → msg 2204. spec §1.4b.");
-                return false;
-            }
+            GD.Print(
+                $"[LoginScreen] Version gate: MISMATCH index[5] VFS=0x{vf:X8} disk=0x{df:X8} → msg 2204. spec game_ver.md.");
+            return false;
         }
 
-        GD.Print("[LoginScreen] Version gate: all 7 u32 fields match. spec §1.4b. CODE-CONFIRMED.");
+        GD.Print("[LoginScreen] Version gate: index[5] matches. spec game_ver.md. CODE-CONFIRMED (IDA).");
         return true;
     }
 

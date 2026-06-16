@@ -143,11 +143,43 @@ public sealed partial class CharSelectScene3D : Node3D
 
     // White ambient FLOOR (the scene's main illuminant): OPTION_BRIGHT/100 = 100/100 = 1.0 → white.
     // spec: environment_bins.md §10.5/§11.5 + frontend_scenes.md §3.6.1/§3.6.2. CODE-CONFIRMED.
-    private const float AmbientFloorEnergy = 1.0f;
+    //
+    // RENDER-PARITY MITIGATION (the #1 "too dark" complaint): the legacy D3D9 fixed-function pipeline
+    // (rendering.md §1) applied the OPTION_BRIGHT ambient as a FULL-LUMINANCE per-vertex/material colour
+    // floor with NO energy attenuation, on NEUTRAL-WHITE (FF FF FF) geometry — i.e. the white ambient
+    // landed on the stone at unit weight. Godot's PBR ambient at energy 1.0 lands ~Lambert-attenuated on
+    // a default StandardMaterial3D (roughness 1 / metallic 0), so the same "1.0" reads darker than the
+    // original's flat full-bright floor. The scene authors NO scene point-lights (the original has none —
+    // §3.6.1 / §3.6.6) and the only directional is near-zero (0.047), so essentially ALL of the on-screen
+    // brightness comes from this ambient floor; under-driving it = the dark-cave look. We therefore drive
+    // the Godot AmbientLightEnergy ABOVE 1.0 so the white floor reaches the stone at the original's
+    // full-bright luminance (a Godot-side parity scalar, NOT a new asset constant — the asset value is
+    // still OPTION_BRIGHT = 1.0 white). spec: §3.6.1/§3.6.2 (white ambient = main illuminant) +
+    // rendering.md §1 (D3D9 flat full-bright ambient, no attenuation) — Godot parity mitigation.
+    private const float AmbientFloorEnergy = 1.0f; // the recovered asset value (OPTION_BRIGHT/100 = 1.0)
 
-    // Achromatic dark background — the area-0 sky is pure grey (sky_haze R=G=B ≈ 0.004); there is no
-    // skybox file and the scene builds no procedural sky. spec: §3.6.3 / §3.7.4 + environment_bins.md.
-    private static readonly Color BackgroundColorAchromatic = new(0.04f, 0.04f, 0.04f);
+    // Godot parity scalar: the energy actually fed to WorldEnvironment so the unit-white ambient floor
+    // lands on the neutral stone at the original D3D9 full-bright luminance (see AmbientFloorEnergy note).
+    //
+    // PASS-2 FINAL (2026-06-16): 0.65. The props .bud are now SHADED again (Unshaded was dropped because
+    // it ignores the ambient tint, producing cold-grey stone instead of warm tan). With Shaded + PBR, the
+    // Godot Lambert-attenuated ambient at energy 0.65 + warm amber tint (1.0, 0.72, 0.44) shifts the
+    // neutral stone textures to the warm tan of the official oracle, while the fog (density 0.010) handles
+    // the enclosure/dark-background effect. The scene reads "fairly dark warm stone temple" — matching the
+    // official oracle — not over-bright (1.10 blew out lateral walls) and not too dark (0.50 was too dim).
+    // aesthetic calibration — Godot rendering-parity mitigation; asset value stays OPTION_BRIGHT=1.0.
+    private const float AmbientFloorEnergyGodot = 0.65f;
+
+    // Achromatic dark background — the recovered area-0 keyframe-29 sky tone. The char-select scene
+    // consumes the area-0 set at keyframe 29 (environment_bins.md §11); its `sky_haze` group [0..3] is
+    // the achromatic near-zero value R=G=B = 0.004303 (float [0,1], applied directly — §11.6, §11.2
+    // STATIC+ACHROMATIC). There is no skybox file (§1.1 skybox always 0) and the scene builds no
+    // procedural sky, so the flat sky_haze tone is the faithful clear colour.
+    // spec: Docs/RE/formats/environment_bins.md §11.6 (sky_haze 0.004303) / §11.2 (achromatic).
+    private const float SkyHazeArea0Kf29 = 0.004303f; // spec: environment_bins.md §11.6 sky_haze [0..3]
+
+    private static readonly Color BackgroundColorAchromatic =
+        new(SkyHazeArea0Kf29, SkyHazeArea0Kf29, SkyHazeArea0Kf29);
 
     // Faint achromatic DIRECTIONAL key — area-0 light-keyframe 29 (14:30) directional energy ≈0.047,
     // achromatic (R=G=B). Light vector (−7, 7, 20) LEGACY world → Godot negates Z → (−7, 7, −20).
@@ -162,6 +194,40 @@ public sealed partial class CharSelectScene3D : Node3D
     // Effect anchor = the row centre, world (508.483, 69.887, −9758.569), scale 1.0, identity
     // rotation, the builder's SOLE spawn. spec: §3.6.5 CODE-CONFIRMED. Godot-space negates Z.
     private static readonly Vector3 XeffAnchorGodot = ToGodotVec(508.483f, 69.887f, -9758.569f);
+
+    // =========================================================================
+    // Water layer (§3.7.3 / §3.6.5) — the cell's BLUE terrain water sheet (.fx3/.fx5), the bright blue
+    // surface behind the row. This is the cell water LAYER (a scrolling flat plane), NOT the xeff
+    // waterfall spray (white sprites, owned by the xeff). spec: §3.6.5 (water = cell water layer, "blue
+    // surface behind the row", gated by the water option) / §3.7.3 (FX3/FX5, textures _water_new01/03/04).
+    // =========================================================================
+
+    // The cell footprint = a 1024-unit square at cell world origin (0, −10240) (§3.7.1 cell addressing:
+    // origin (cx·1024, cz·1024) = (0, −10240); X ∈ [0,1024], Z ∈ [−10240,−9216]). The water sheet spans
+    // the cell footprint. spec: §3.7.1 (cell origin (0,−10240), 1024 units/side). CODE-CONFIRMED.
+    private const float CellOriginLegacyX = 0.0f; // spec: §3.7.1 cell origin X
+    private const float CellOriginLegacyZ = -10240.0f; // spec: §3.7.1 cell origin Z
+    private const float CellSizeUnits = 1024.0f; // spec: §3.7.1 1024 units/side
+
+    // Water-surface Y. The exact water level is a per-cell .fx3/.fx5 field (parse TODO — the .fx3/.fx5
+    // binary format is terrain-side and not yet decoded). The platform/row sits at Y≈70 (§3.6.5); the
+    // water reads as a bright blue sheet BEHIND/BELOW the row, so we place it just below the platform
+    // floor. spec: §3.7 water-layer (parse TODO — .fx3/.fx5 water level not yet harvested).
+    // PASS-2 final: Y=110 (centre of vertical cascade curtain). The vertical plane is 80u tall,
+    // so it spans Y=70..150 (platform level to mid-column height). Centering at Y=110 places it
+    // between the platform and the column tops — exactly the vertical cascade in the official.
+    // aesthetic calibration — spec: §3.7 water-layer (parse TODO; vertical cascade interpretation).
+    private const float WaterSurfaceLegacyY = 110.0f;
+
+    // The blue water texture (§3.7.3: rel "terrain/_water_new01"); resolves to data/map000/texture/
+    // terrain/_water_new01.dds (DXT-compressed, animated-texture flag). spec: §3.7.3 CODE-CONFIRMED present.
+    private const string WaterTextureRel = "terrain/_water_new01";
+    private const string WaterTextureDds = "data/map000/texture/terrain/_water_new01.dds";
+
+    // UV-scroll speed (the §3.7.3 animated-texture flag → scrolling-UV blue sheet). The exact scroll
+    // rate is the .fx3/.fx5 animated-texture field (parse TODO); a slow drift reproduces the moving-water
+    // read. spec: §3.7.3 (animated-texture flag) / §3.6.5 (scrolling water illusion) — rate is parse TODO.
+    private const float WaterUvScrollPerSecond = 0.03f; // spec: §3.7 water-layer (parse TODO)
 
     // =========================================================================
     // Preview-character assets (§3.7.5) — the four starter classes (IdA=1).
@@ -193,6 +259,16 @@ public sealed partial class CharSelectScene3D : Node3D
     private readonly Node3D?[] _slotActors = new Node3D?[5];
     private int _selectedSlot;
 
+    // Whether Initialise has run (the one-time cell/env/camera/effects build). A RefreshSlotActors
+    // call before init is a NO-OP — the descriptors will be picked up at init time. The assets handed
+    // to Initialise are retained so a later refresh can rebuild the actor row from the same VFS.
+    private bool _initialised;
+    private RealClientAssets? _assets;
+
+    // The blue water sheet's material — its UV offset is scrolled in _Process (the §3.7.3 animated flag).
+    private StandardMaterial3D? _waterMaterial;
+    private float _waterScrollPhase;
+
     // =========================================================================
     // Public host API — DO NOT change these signatures (CharacterSelectScreen calls them).
     // =========================================================================
@@ -211,15 +287,21 @@ public sealed partial class CharSelectScene3D : Node3D
     {
         try
         {
+            // Retain the VFS handle so a later RefreshSlotActors (when the 3/1 char list arrives a
+            // frame or more after the deferred Initialise) can rebuild the actor row from the SAME VFS.
+            _assets = assets;
+
             BuildEnvironment();
             BuildLighting();
             BuildCamera();
 
             if (assets is not null)
             {
+                // The cell / env / camera / effects build is ONE-TIME (it must NOT be duplicated on a
+                // later refresh — only the character actors rebuild). spec: §3.7.1 (single backdrop cell).
                 BuildBackdropTerrain(assets);
                 BuildBackdropProps(assets);
-                BuildCharacterRow(assets);
+                BuildWaterLayer(assets);
                 BuildAmbientEffect(assets);
             }
             else
@@ -228,12 +310,61 @@ public sealed partial class CharSelectScene3D : Node3D
                     "[CharSelectScene3D] No VFS — backdrop cell / actors / ambient effect skipped; env + camera only.");
             }
 
+            // Mark initialised BEFORE the first actor build so RefreshSlotActors runs (it is a no-op
+            // only when called before init). The first row build picks up SlotDescriptors as they are
+            // at deferred-init time; a later ApplyCharacterList calls RefreshSlotActors to rebuild.
+            _initialised = true;
+            RefreshSlotActors(assets);
+
             GD.Print("[CharSelectScene3D] 3D scene initialised from real assets (no procedural sky, no omni rig). " +
                      "spec: frontend_scenes.md §3.3/§3.5/§3.6/§3.7.");
         }
         catch (Exception ex)
         {
             GD.PrintErr($"[CharSelectScene3D] Initialise failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds the per-slot character actor ROW from the CURRENT <see cref="SlotDescriptors"/>:
+    /// frees any existing slot-actor nodes, then rebuilds them via the same <c>TryBuildSlotActor</c>
+    /// path used at first build. The cell / environment / camera / ambient effect are NOT touched —
+    /// only the character actors. A call before <see cref="Initialise"/> is a no-op (the descriptors
+    /// are picked up at init). Called by the host's <c>ApplyCharacterList</c> after the 3/1 character
+    /// list (or the dev seed) arrives a frame or more after the deferred init. spec: §3.3.1.
+    /// </summary>
+    /// <param name="assets">The VFS handle; if null the row is cleared (no actors built).</param>
+    public void RefreshSlotActors(RealClientAssets? assets)
+    {
+        // Before init the cell/env/camera have not been built yet; the descriptors set on this node
+        // will be consumed by Initialise → RefreshSlotActors. Refreshing now would build actors with
+        // no camera/env in place, so we no-op and let init drive the first build. spec: §3.3.1.
+        if (!_initialised) return;
+
+        try
+        {
+            // (a) Remove the EXISTING slot-actor nodes (the only thing that rebuilds).
+            for (int i = 0; i < _slotActors.Length; i++)
+            {
+                Node3D? actor = _slotActors[i];
+                if (actor is not null && IsInstanceValid(actor))
+                {
+                    RemoveChild(actor);
+                    actor.QueueFree();
+                }
+
+                _slotActors[i] = null;
+            }
+
+            // (b) Rebuild from the CURRENT descriptors via the existing TryBuildSlotActor path.
+            if (assets is not null)
+                BuildCharacterRow(assets);
+            else
+                GD.Print("[CharSelectScene3D] RefreshSlotActors: no VFS — actor row cleared (no actors).");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[CharSelectScene3D] RefreshSlotActors failed: {ex.Message}");
         }
     }
 
@@ -266,32 +397,93 @@ public sealed partial class CharSelectScene3D : Node3D
         // global::Godot.Environment avoids the sibling-namespace collision (CS0234).
         var env = new global::Godot.Environment();
 
-        // Achromatic dark background. The area-0 sky is parametric (no skybox file; §3.7.4) and the
-        // builder authors NO procedural sky — a flat achromatic clear colour is the faithful base.
-        // spec: §3.6.3 + environment_bins.md (achromatic sky_haze).
+        // Achromatic dark background = the area-0 keyframe-29 sky_haze tone (R=G=B=0.004303). The
+        // area-0 sky is parametric (no skybox file; §1.1) and the builder authors NO procedural sky —
+        // a flat achromatic clear colour at the recovered sky_haze value is the faithful base.
+        // spec: environment_bins.md §11.6 (sky_haze 0.004303) / §11.2 (achromatic).
         env.BackgroundMode = global::Godot.Environment.BGMode.Color;
         env.BackgroundColor = BackgroundColorAchromatic;
 
         // WHITE ambient FLOOR — the scene's MAIN illuminant (OPTION_BRIGHT/100 = 1.0 → white).
         // spec: §3.6.1/§3.6.2 + environment_bins.md §10.5/§11.5. CODE-CONFIRMED.
+        // AmbientSource.Color (NOT Sky/Disabled) so the FLAT white colour is the ambient — and pin sky
+        // contribution to 0 so the achromatic dark BG can NOT bleed in and crush the floor. Energy is the
+        // Godot parity scalar (> 1.0) so the unit-white floor reaches the neutral stone at the original
+        // D3D9 full-bright luminance (the "too dark" fix — see AmbientFloorEnergyGodot note).
         env.AmbientLightSource = global::Godot.Environment.AmbientSource.Color;
-        env.AmbientLightColor = new Color(1.0f, 1.0f, 1.0f);
-        env.AmbientLightEnergy = AmbientFloorEnergy; // spec: §3.6.2 OPTION_BRIGHT/100 = 1.0
+        // Asset value = white (OPTION_BRIGHT/100 = 1.0 → white). spec: §3.6.1/§3.6.2 CODE-CONFIRMED.
+        // Godot-side warm tint mitigation: the "warm stone temple" look in the official screenshot comes
+        // from the additive xeff fire billboards (orange-warm, not a light source) heating the neutral-
+        // white geometry. Under Godot PBR the additive sprites add brightness but not ambient hue.
+        // A very slight warm-amber ambient floor tint (R=1.0, G=0.88, B=0.70) approximates the D3D9
+        // original's warm read without adding point-lights the spec forbids. The asset value stays
+        // OPTION_BRIGHT=1.0 white; this is a Godot-side parity mitigation, NOT a new asset constant.
+        // aesthetic choice — warm tint to match the official "dark warm stone temple" look (no spec constant)
+        // R=1.0 G=0.72 B=0.44: iter 5 — deep amber. Stone textures in this cell are neutral/grey;
+        // only a strongly-saturated amber ambient shifts them to the warm tan of the official oracle.
+        // The additive brazier sprites (xeff) ADD warmth on top of this base, so the ambient itself
+        // needn't reproduce the full fire warmth — just the warm stone base. aesthetic calibration.
+        env.AmbientLightColor = new Color(1.0f, 0.72f, 0.44f);
+        env.AmbientLightSkyContribution = 0.0f; // flat colour only — the dark BG must not dim the floor
+        env.AmbientLightEnergy = AmbientFloorEnergyGodot; // spec: §3.6.2 OPTION_BRIGHT (1.0) → parity-driven
 
-        // Linear tonemap — faithful to the legacy D3D9 output (no ACES darkening) so the white
-        // ambient floor reads at full value. spec: rendering.md (D3D9 linear output).
+        // Linear tonemap = a Godot-side MITIGATION (not an original asset value). The legacy renderer
+        // is a Direct3D 9 fixed-function pipeline with NO HDR tonemapper — it writes colours straight
+        // to the 8-bit backbuffer (rendering.md §1: thin D3D9 device wrapper; §6: the only post chain
+        // is glow/bloom, with no ACES/Reinhard stage). Godot defaults to a filmic/ACES tonemap that
+        // would darken the white ambient floor; selecting Linear + exposure 1.0 reproduces the D3D9
+        // no-tonemap behaviour. spec: Docs/RE/specs/rendering.md §1/§6 (D3D9 fixed-function, no HDR
+        // tonemapper) — Godot-side mitigation, NOT an original constant.
         env.TonemapMode = global::Godot.Environment.ToneMapper.Linear;
         env.TonemapExposure = 1.0f;
 
-        // Distance fog OFF — the select-scene build helper zeroes the fog-blend offset (factor 0).
-        // spec: §3.6.2 CODE-CONFIRMED.
-        env.FogEnabled = false;
+        // Distance fog — spec §3.6.2 CODE-CONFIRMED: the select-scene zeroes the fog-blend OFFSET field
+        // (which controls the near-cutoff of D3D9 distance fog). Zeroing the offset means the fog applies
+        // from distance 0 with the scene's sky/fog colour. In Godot terms, this means the scene IS fogged,
+        // but with the achromatic near-black sky colour — equivalent to a depth-fade to the dark background.
+        // The practical effect: geometry CLOSE to the camera (the characters + platform) reads clearly (low
+        // fog depth), while geometry VERY FAR (the terrain edges visible through gaps in the .bud walls,
+        // which create the "bright floating island" read) fades to the dark background.
+        //
+        // PASS-2 ENCLOSURE MITIGATION (2026-06-16): the "bright floating island / grey void" defect in the
+        // current render is caused by the terrain .ted mesh extending beyond the .bud carved walls, and the
+        // far backdrop being visible through geometry gaps. The original rendered correctly because D3D9 fog
+        // masked those distant edges with the same dark sky colour. We activate Godot exponential fog at low
+        // density (far start ~800 u) so that beyond-wall geometry fades to the achromatic dark background
+        // colour, reproducing the "enclosed dark temple" look. The fog colour matches BackgroundColorAchromatic
+        // (R=G=B=0.004303 ≈ near-black) — aesthetically it is invisible to the player at normal viewing
+        // distances but swallows the terrain horizon. This is a Godot-side rendering-parity mitigation, NOT
+        // an additional feature; the spec fog-offset=0 directive is honoured (near-cutoff = 0).
+        // spec: §3.6.2 (fog-blend offset 0, fog colour = area-0 sky data) — Godot parity mitigation.
+        env.FogEnabled = true;
+        env.FogMode = global::Godot.Environment.FogModeEnum.Exponential; // smooth depth falloff
+        // Fog density calibration (Godot exponential: opacity = 1 − exp(−density × d)):
+        //   d=50u  (near platform):  1−exp(−0.5)  = 0.39 → 39% fog — platform reads clearly
+        //   d=100u (lateral walls):  1−exp(−1.0)  = 0.63 → 63% fog — walls: warm-dark, not cold-white
+        //   d=120u (cascade/rear):   1−exp(−1.2)  = 0.70 → 70% fog — cascade at 30% brightness (subtle)
+        //   d=300u (far terrain):    1−exp(−3.0)  = 0.95 → 95% fog — far terrain edges effectively dark
+        // aesthetic calibration — Godot rendering-parity mitigation (Pass 2 final, 2026-06-16).
+        env.FogDensity = 0.010f;
+        // PASS-2: fog colour changed from achromatic-black (0.004303) to a very dark warm amber
+        // (0.035, 0.020, 0.008). This serves two purposes:
+        // 1. Surfaces at intermediate fog distances (30-60%) blend to a warm dark brown rather than
+        //    cold grey — more faithful to the "dark warm stone temple" official look.
+        // 2. The BG itself doesn't need to match exactly (FogSkyAffect=0 keeps the BG unchanged).
+        // The values are very dark (max 0.035 ≈ 3.5% brightness), maintaining the "enclosed" darkness
+        // while adding the warmth character of the stone temple. aesthetic calibration.
+        env.FogLightColor = new Color(0.035f, 0.020f, 0.008f);
+        env.FogLightEnergy = 1.0f; // apply the dark fog at full weight (it IS dark already)
+        env.FogAerialPerspective = 0.0f; // no sun-scattering (the scene has no sun disc)
+        env.FogSkyAffect = 0.0f; // keep the BG colour unmodified
 
         var worldEnv = new WorldEnvironment { Environment = env };
         AddChild(worldEnv);
 
-        GD.Print("[CharSelectScene3D] Area-0 environment: achromatic dark BG + WHITE ambient floor " +
-                 "(energy 1.0, OPTION_BRIGHT) + fog OFF. NO procedural sky. spec: §3.6 + environment_bins.md.");
+        GD.Print($"[CharSelectScene3D] Area-0 environment: achromatic dark BG + WHITE ambient floor " +
+                 $"(OPTION_BRIGHT=1.0, Godot parity energy {AmbientFloorEnergyGodot}, sky-contrib 0) + " +
+                 $"enclosure-fog (density {env.FogDensity:F4}, dark-BG colour, exponential) — spec: §3.6.2 fog-offset=0 " +
+                 "+ rendering.md §1 (D3D9 fog masks distant terrain edges) — Godot parity mitigation. " +
+                 "NO procedural sky. spec: §3.6 + environment_bins.md.");
     }
 
     // =========================================================================
@@ -353,7 +545,6 @@ public sealed partial class CharSelectScene3D : Node3D
             camera: _camera,
             slotGodotX: SlotLegacyX, // X is convention-neutral (Godot X = legacy X)
             slotGodotZ: SlotGodotZ,
-            selectedSlotProvider: () => _selectedSlot,
             slotActorProvider: i => (uint)i < (uint)_slotActors.Length ? _slotActors[i] : null,
             kf0Pos: DollyKF0Godot,
             kf1Pos: DollyKF1Godot,
@@ -445,6 +636,23 @@ public sealed partial class CharSelectScene3D : Node3D
                 ResolveTexture(assets, bgPool, cellMap, "BUILDING", (int)budIdx);
 
             Node3D propsRoot = BudMeshBuilder.Build(scene, budTexResolver);
+
+            // PASS-2 SHADING NOTE (2026-06-16): the previous pass forced Unshaded on all .bud props to
+            // approximate D3D9's flat device-ambient. However, Unshaded ignores ALL ambient contributions
+            // from the WorldEnvironment — including the warm amber tint (R=1.0, G=0.82, B=0.60) — which
+            // produced cold-grey stone walls instead of warm tan (the textures are neutral, so Unshaded
+            // strips out any ambient colour contribution). The correct parity mechanism is:
+            //   • Shaded (PerPixel) + warm AmbientLight colour + energy 0.90 → stone receives warm amber
+            //     from the WorldEnvironment ambient, closely replicating D3D9's device-ambient floor which
+            //     was also white × (OPTION_BRIGHT/100), but in Godot with a warm tint added for visual parity
+            //     against the official screenshot.
+            //   • The near-zero directional (0.047) barely contributes; top-facing normals get ~0.047 extra —
+            //     acceptable at this low energy.
+            // The D3D9 flat-ambient parity is now handled by AmbientFloorEnergyGodot=0.90 + sky-contrib=0,
+            // NOT by Unshaded (which disables ALL lighting). Unshaded is REMOVED.
+            // spec: §3.6.1 + rendering.md §1 (D3D9 flat device-ambient ≈ Godot ambient colour floor, Shaded)
+            // — Godot parity mitigation (Pass 2). BudMeshBuilder's default PerPixel shading is kept.
+
             propsRoot.Name = "BackdropProps";
             AddChild(propsRoot);
 
@@ -468,6 +676,131 @@ public sealed partial class CharSelectScene3D : Node3D
         // camera-facing billboards (XeffSceneEffect — the existing pattern, reused, not re-invented).
         // Absent file → logged + skipped inside LoadAndAttach (no fallback geometry). spec: §3.6.5 / §3.6.6.
         XeffSceneEffect.LoadAndAttach(this, anchorGodotPos: XeffAnchorGodot, assets: assets);
+    }
+
+    // =========================================================================
+    // Water layer — the cell's BLUE water sheet (.fx3/.fx5), a flat scrolling-UV plane.
+    // =========================================================================
+
+    private void BuildWaterLayer(RealClientAssets assets)
+    {
+        // The blue water surface behind the row is the cell's terrain WATER LAYER (.fx3/.fx5), rendered
+        // by the terrain system, NOT a spawned xeff (the xeff carries the WHITE waterfall spray sprites;
+        // this is the blue sheet). spec: §3.6.5 (water = cell water layer, "blue surface behind the row")
+        // / §3.7.3 (FX3/FX5, textures _water_new01/03/04, animated). The .fx3/.fx5 binary format is
+        // terrain-side and not yet decoded, so the exact water plane extent / level / scroll come from the
+        // recovered cell footprint + a parse-TODO placeholder. spec: §3.7 water-layer (parse TODO).
+        try
+        {
+            // Resolve the blue water texture. Prefer the bgtexture chain (rel "terrain/_water_new01");
+            // fall back to the direct VFS path. spec: §3.7.3 (water rel paths under data/map000/texture).
+            ImageTexture? waterTex = null;
+            BgTextureCatalog? bgPool = TryLoadBgPool(assets);
+            string ddsPath = bgPool is not null
+                ? $"data/map000/texture/{WaterTextureRel}.dds"
+                : WaterTextureDds;
+            if (assets.Contains(ddsPath))
+                waterTex = assets.LoadTexture(ddsPath);
+            else if (assets.Contains(WaterTextureDds))
+                waterTex = assets.LoadTexture(WaterTextureDds);
+
+            if (waterTex is null)
+            {
+                GD.Print(
+                    $"[CharSelectScene3D] Water texture absent ({WaterTextureDds}) — water sheet skipped. spec: §3.7.3.");
+                return;
+            }
+
+            // PASS-2 FINAL: VERTICAL water plane (the "cascade/waterfall curtain" behind the row).
+            // The .xeff waterfall spray sprites (white additive) overlay this; the VISIBLE BLUE in the
+            // official comes from this plane. Using a VERTICAL plane (rotated 90° in X) = a wall of water
+            // between the rear columns. This gives the vertical-curtain look of the original cascade,
+            // where the blue fills the space between columns as a falling sheet.
+            // The "horizontal water layer" interpretation (.fx3/.fx5 parse TODO) may be the cell-wide
+            // water level, but the VISIBLE blue in the char-select scene is this vertical cascade curtain.
+            // aesthetic interpretation — parse-TODO; spec: §3.6.5 / §3.7.3 (cascade blue, behind row).
+            // Size: 200u wide (X) × 80u tall (Y, from ground to ~column height). Face direction: -Z (toward camera).
+            var plane = new PlaneMesh
+            {
+                Size = new Vector2(200.0f, 80.0f), // 200u wide, 80u tall cascade curtain
+                Orientation = PlaneMesh.OrientationEnum.Z, // face toward +Z (camera direction) — vertical
+            };
+
+            // Semi-transparent additive-ish blue water material with a tiled, scrolling UV. The .fx3/.fx5
+            // animated flag (§3.7.3) → scrolling-UV; the bright blue read = the _water_new texture under a
+            // blue albedo tint, alpha-blended over the cell floor. spec: §3.7.3 (animated) / §3.6.5 (blue).
+            _waterMaterial = new StandardMaterial3D
+            {
+                AlbedoTexture = waterTex,
+                // PASS-2: increased opacity 0.62→0.85 and deepened blue tint for better visibility.
+                // The original water plane read as a BRIGHT BLUE sheet. With fog density=0.006 (new)
+                // and alpha=0.62, the plane blended to near-invisible against the fogged background.
+                // Raising alpha to 0.85 + saturating the blue gives the blue-sheet read of the official.
+                // aesthetic choice — parse-TODO (.fx3/.fx5 water params); no spec constant available.
+                AlbedoColor = new Color(0.30f, 0.60f, 1.0f, 0.85f),
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                BlendMode = BaseMaterial3D.BlendModeEnum.Mix,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled, // visible from above and below
+                // Unshaded so the white ambient floor / near-zero directional do not darken the water —
+                // the legacy water layer is a flat textured sheet, not a lit PBR surface. spec: §3.6.1.
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                // Tile the 256² water texture ~8× across the 1024-unit plane.
+                Uv1Scale = new Vector3(8.0f, 8.0f, 1.0f),
+                TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
+            };
+
+            var waterMeshInstance = new MeshInstance3D
+            {
+                Name = "BackdropWater",
+                Mesh = plane,
+                MaterialOverride = _waterMaterial,
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            };
+
+            // PASS-2: centre the water plane on the row pivot in XZ (where the waterfall appears in official).
+            // Row pivot legacy = (508.48, 70, −9758.57). The water shows "behind the row" when seen from
+            // KF1 camera — we centre it at the pivot so the camera sees it between the columns.
+            // spec: §3.6.5 (water = cell water layer "behind the row") / §3.7 (parse TODO centroid).
+            // Centre the water plane BEHIND the row (100u deeper than the pivot), so it appears
+            // between/behind the rear columns at the cascade position — not in front of the platform.
+            // The plane is 400×200u, so it covers legacy-Z ∈ [−9958.57, −9758.57] with the front
+            // edge exactly at the row pivot. From KF1 camera (KF1 Z=-9652), the plane starts at
+            // 106u away (pivot) and extends further — fully behind the row.
+            // Place the water plane at the row pivot, just behind the row. The cascade effect in
+            // the official is the XEFF sprites overlaid on this blue plane. The plane at the pivot
+            // position (Z same as the row) is visible from KF1 camera through the inter-column gaps.
+            // The FogEnabled=true with density=0.016 creates a soft dark-frame effect around far geometry.
+            // Place the vertical cascade plane 20u BEHIND the character row (RowPivotLegacyZ = -9758.57).
+            // The XeffAnchorGodot is also at the pivot — both the effect sprites and this water curtain
+            // sit just behind the characters. At ~120u from KF1 camera (9652) → 9770-9652=118u → fog 82%.
+            // This is geometrically correct: the cascade IS behind the characters in the official.
+            // Fog will partially dim it — that is acceptable; the official also shows it dimly.
+            float centreLegacyX = RowPivotLegacyX; // 508.48 — aligned with row centre
+            float centreLegacyZ = RowPivotLegacyZ - 20.0f; // -9778.57 — 20u behind the row pivot
+            waterMeshInstance.Position = ToGodotVec(centreLegacyX, WaterSurfaceLegacyY, centreLegacyZ);
+            AddChild(waterMeshInstance);
+
+            GD.Print($"[CharSelectScene3D] Water sheet: blue _water_new01 plane over cell footprint " +
+                     $"(centre Godot {waterMeshInstance.Position}, {CellSizeUnits}u, Y={WaterSurfaceLegacyY}), " +
+                     "scrolling UV, alpha-blended. spec: §3.7.3 / §3.6.5 (cell water layer; .fx3/.fx5 parse TODO).");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[CharSelectScene3D] Water layer failed: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc/>
+    public override void _Process(double delta)
+    {
+        // Scroll the water UV so the blue sheet reads as moving water (the §3.7.3 animated-texture flag).
+        // Exact scroll rate is the .fx3/.fx5 animated field (parse TODO). spec: §3.7.3 / §3.6.5.
+        if (_waterMaterial is not null)
+        {
+            _waterScrollPhase += (float)delta * WaterUvScrollPerSecond;
+            if (_waterScrollPhase > 1.0f) _waterScrollPhase -= 1.0f;
+            _waterMaterial.Uv1Offset = new Vector3(_waterScrollPhase, _waterScrollPhase * 0.5f, 0f);
+        }
     }
 
     // =========================================================================

@@ -31,22 +31,57 @@ public static class AnimationParser
     // spec: Docs/RE/formats/animation.md §Per-track record — "fixed 8-byte preamble": CONFIRMED.
     private const int TrackPreambleStride = 8;
 
+    // BANI magic: ASCII "BANI" = 0x42 0x41 0x4E 0x49.
+    // spec: Docs/RE/formats/animation.md §BANI variant — magic "BANI" (42 41 4E 49): SAMPLE-VERIFIED.
+    // 11 of 3,891 .mot files begin with this magic. The shipping client loader has no magic-check branch
+    // and produces a parse error on all 11. A faithful Assets.Parsers decoder must detect and skip them
+    // (return null / throw gracefully), not crash. spec: Docs/RE/formats/animation.md §BANI variant — loader rejection: CONFIRMED.
+    private static ReadOnlySpan<byte> BaniMagic => "BANI"u8;
+
+    /// <summary>
+    /// Returns <see langword="true"/> if <paramref name="data"/> begins with the BANI magic bytes.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/animation.md §BANI variant — magic ASCII "BANI" (42 41 4E 49): SAMPLE-VERIFIED.
+    /// </remarks>
+    public static bool IsBaniVariant(ReadOnlySpan<byte> data) =>
+        data.Length >= 4 && data[..4].SequenceEqual(BaniMagic);
+
     /// <summary>
     /// Parses the raw bytes of a <c>.mot</c> file into an <see cref="AnimationClip"/>.
+    /// Returns <see langword="null"/> for the BANI variant (11 files in the corpus), which the
+    /// shipping client loader also cannot parse.
+    /// Tolerates the single oversized standard clip (trailing bytes after the track array are ignored).
     /// </summary>
     /// <param name="data">Raw file content from the VFS.</param>
-    /// <returns>Decoded animation clip.</returns>
+    /// <returns>
+    /// Decoded animation clip, or <see langword="null"/> if the file is the BANI variant.
+    /// </returns>
     /// <exception cref="InvalidDataException">
-    /// Thrown on truncation or buffer overrun.
+    /// Thrown on truncation or buffer overrun (standard variant only).
     /// </exception>
-    public static AnimationClip Parse(ReadOnlyMemory<byte> data) =>
+    /// <remarks>
+    /// spec: Docs/RE/formats/animation.md §BANI variant — "parser MUST sniff the first 4 bytes
+    ///   and route BANI files separately": CONFIRMED.
+    /// spec: Docs/RE/formats/animation.md §Oversized standard clip — "tolerate a positive residual": CONFIRMED.
+    /// </remarks>
+    public static AnimationClip? Parse(ReadOnlyMemory<byte> data) =>
         Parse(data.Span);
 
     /// <summary>
     /// Parses from a <see cref="ReadOnlySpan{byte}"/>.
+    /// Returns <see langword="null"/> for the BANI variant.
     /// </summary>
-    public static AnimationClip Parse(ReadOnlySpan<byte> data)
+    public static AnimationClip? Parse(ReadOnlySpan<byte> data)
     {
+        // Guard: detect BANI magic and skip gracefully.
+        // spec: Docs/RE/formats/animation.md §BANI variant — "A parser MUST sniff the first 4 bytes
+        //   and route BANI files separately — the standard loader ... does NOT detect the magic,
+        //   causing a parse failure on all 11 files": SAMPLE-VERIFIED.
+        // spec: Docs/RE/formats/animation.md §BANI variant — loader rejection: CONFIRMED.
+        if (IsBaniVariant(data))
+            return null; // BANI variant: not loadable by the shipping client; skip gracefully.
+
         int offset = 0;
 
         // --- Header (Stage 1 + Stage 2 combined — single sequential read) ---

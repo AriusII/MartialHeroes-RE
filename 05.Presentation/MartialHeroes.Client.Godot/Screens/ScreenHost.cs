@@ -1,8 +1,10 @@
 // Screens/ScreenHost.cs
 //
 // Hosts a screen Control built on the 1024×768 legacy reference canvas (spec §2.0) and scales it
-// to the actual window, letterboxing to preserve aspect. spec §8.1 — "implement the UI root as a
-// Control with reference size (1024, 768), then scale to the actual window size".
+// to the actual window. spec §8.1 — "implement the UI root as a Control with reference size
+// (1024, 768), then scale to the actual window size". Fill-scale (non-uniform on non-4:3 windows)
+// is a Godot-side port choice — the spec does not mandate fill vs. letterbox; the original client
+// ran at a fixed 1024×768 window, so this distinction did not arise.
 //
 // IMPORTANT: this control is typically added as a child of a CanvasLayer (a plain Node, not a
 // Control). In that topology, Godot's anchor-based layout does NOT propagate the viewport rect —
@@ -19,8 +21,10 @@ using MartialHeroes.Client.Godot.Screens.Layout;
 namespace MartialHeroes.Client.Godot.Screens;
 
 /// <summary>
-/// A Control that holds one reference-canvas child and rescales it uniformly to the window on
-/// resize. spec: Docs/RE/specs/ui_system.md §8.1 (reference canvas + scale to window).
+/// A Control that holds one reference-canvas child and rescales it to fill the window on resize.
+/// Fill-scale (non-uniform on non-4:3 windows) is a Godot-side port choice; the spec mandates
+/// the reference canvas size (1024×768) but not a specific scaling mode.
+/// spec: Docs/RE/specs/ui_system.md §8.1 (reference canvas + scale to window).
 /// </summary>
 public sealed partial class ScreenHost : Control
 {
@@ -105,10 +109,10 @@ public sealed partial class ScreenHost : Control
         if (windowSize.X <= 0 || windowSize.Y <= 0) return;
 
         // Fill-scale: stretch the legacy 1024×768 canvas to fill the entire window edge-to-edge.
-        // The official client fills the entire window with no letterbox bars/gray margins.
         // spec: Docs/RE/specs/ui_system.md §8.1 "scale to the actual window size".
-        // Aesthetic choice: non-uniform scale on non-4:3 windows (slight stretch) is preferable to
-        // gray bands. For a 1024×768 window the scale is exactly 1×1 (pixel-perfect).
+        // Godot-side port choice: non-uniform fill (slight stretch on non-4:3 windows) rather than
+        // letterboxing, because the original ran at a fixed 1024×768 window with no bars.
+        // For a 1024×768 window the scale is exactly 1×1 (pixel-perfect).
         float scaleX = windowSize.X / RefWidth;
         float scaleY = windowSize.Y / RefHeight;
         _canvas.Scale = new Vector2(scaleX, scaleY);

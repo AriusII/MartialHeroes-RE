@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- THROWAWAY harness — never add to MartialHeroes.slnx, never commit bin/obj -->
+  <!-- Campaign 9 Wave 2 Lane V3: char_select-u.xeff + particleEmitter.eff deep decode -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>14.0</LangVersion>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="C:\Users\Arius\RiderProjects\MartialHeroes\03.Storage.Assets\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj" />
+    <ProjectReference Include="C:\Users\Arius\RiderProjects\MartialHeroes\03.Storage.Assets\MartialHeroes.Assets.Parsers\MartialHeroes.Assets.Parsers.csproj" />
+  </ItemGroup>
+</Project>

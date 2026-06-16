@@ -377,13 +377,14 @@ public sealed class XeffParserTests
     [Fact]
     public void ScaleCurves_EmptyWhenCountZero()
     {
-        // All three scale curve passes have count=0 in BuildXeff.
-        // spec: Docs/RE/formats/effects.md §A.4.2 Passes 2–4 scale X/Y/Z: CONFIRMED.
+        // All three diffuse-curve passes (formerly scale X/Y/Z) have count=0 in BuildXeff.
+        // CORRECTED CAMPAIGN 10: formerly labelled ScaleX/Y/Z; renamed to DiffuseR/G/B per effects.md §A.4.2.
+        // spec: Docs/RE/formats/effects.md §A.4.2 — passes 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
         byte[] data = BuildXeff(1u, 1u, 1u);
         XeffData xeff = XeffParser.ParseXeff(new ReadOnlyMemory<byte>(data));
-        Assert.Empty(xeff.SubEffects[0].ScaleX);
-        Assert.Empty(xeff.SubEffects[0].ScaleY);
-        Assert.Empty(xeff.SubEffects[0].ScaleZ);
+        Assert.Empty(xeff.SubEffects[0].DiffuseR);
+        Assert.Empty(xeff.SubEffects[0].DiffuseG);
+        Assert.Empty(xeff.SubEffects[0].DiffuseB);
     }
 
     // ─── tests: track header (A.4.3) ──────────────────────────────────────────
@@ -1176,10 +1177,12 @@ public sealed class XeffParserTests
 
         // Block 0 curve section.
         // spec: Docs/RE/formats/effects.md §A.4.2 Curve section: CONFIRMED.
+        // CORRECTED CAMPAIGN 10: pass 2/3/4 renamed from ScaleX/Y/Z to DiffuseR/G/B.
+        // spec: Docs/RE/formats/effects.md §A.4.2 — passes 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
         Assert.Equal(2, b0.AlphaKeys.Length); // alpha count = 2 @ 0xA0: CONFIRMED
-        Assert.Equal(2, b0.ScaleX.Length); // scaleX count = 2 @ 0xAC: CONFIRMED
-        Assert.Equal(2, b0.ScaleY.Length); // scaleY count = 2 @ 0xB8: CONFIRMED
-        Assert.Equal(2, b0.ScaleZ.Length); // scaleZ count = 2 @ 0xC4: CONFIRMED
+        Assert.Equal(2, b0.DiffuseR.Length); // diffuseR (pass 2) count = 2 @ 0xAC: CONFIRMED
+        Assert.Equal(2, b0.DiffuseG.Length); // diffuseG (pass 3) count = 2 @ 0xB8: CONFIRMED
+        Assert.Equal(2, b0.DiffuseB.Length); // diffuseB (pass 4) count = 2 @ 0xC4: CONFIRMED
 
         // Block 0 track header.
         // spec: Docs/RE/formats/effects.md §A.4.3 Track header (9 bytes) @ 0xD0: CONFIRMED (CAMPAIGN VFS-MASTERY).

@@ -548,73 +548,202 @@ public static class TerrainLayerParsers
 
     // ─── .fx5 ─────────────────────────────────────────────────────────────────
 
-    // FX5 section header: 40 bytes. SubChunk header: 12 bytes.
-    // spec: Docs/RE/formats/terrain_layers.md §1.8 — Section_Header 40 B + SubChunk_Header 12 B: CONFIRMED (single-section).
-    private const int Fx5SectionHeaderSize = 40;
-    private const int Fx5SubChunkHeaderSize = 12;
+    // FX5 uses the universal group-array model (§1.1a): u32 group_count + group_count × [ 48-byte group header + VF_36 vertices + u16 indices ].
+    // vertex_count @ group-relative +0x28: CONFIRMED (§1.8).
+    // index_count  @ group-relative +0x2C: CONFIRMED (§1.8).
+    // FX5 and FX4 share identical loader control flow; they differ only in vertex stride (FX5 = VF_36/36 B, FX4 = VF_44/44 B).
+    // spec: Docs/RE/formats/terrain_layers.md §1.8 FX5 Format: CONFIRMED (group-array model, §1.1a).
+    // spec: Docs/RE/formats/terrain_layers.md §1.11 — "FX4 and FX5 differ only in vertex stride": CONFIRMED.
+    private const int Fx5GroupHeaderSize = 48; // 48-byte per-group header (same as FX4)
+    private const int Fx5VertexCountOffset = 0x28; // vertex_count @ group-relative +0x28
+    private const int Fx5IndexCountOffset = 0x2C; // index_count  @ group-relative +0x2C
 
     /// <summary>
     /// Parses an <c>.fx5</c> terrain overlay layer file.
-    /// Sections are parsed sequentially until end of buffer.
-    /// Multi-section boundary is UNVERIFIED beyond section 0.
+    /// Universal group-array layout: u32 group_count, then group_count × [ 48-byte group header + VF_36 vertices + u16 indices ].
+    /// vertex_count @ group-relative +0x28; index_count @ group-relative +0x2C.
     /// </summary>
+    /// <param name="data">Raw file bytes from VFS.</param>
+    /// <returns>Decoded FX5 layer.</returns>
+    /// <exception cref="InvalidDataException">Thrown on truncation.</exception>
     /// <remarks>
-    /// spec: Docs/RE/formats/terrain_layers.md §1.8 FX5 Format: CONFIRMED (single-section).
-    /// Multi-section (Known Unknown #1): UNVERIFIED.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.8 FX5 Format: CONFIRMED (group-array model §1.1a).
+    /// spec: Docs/RE/formats/terrain_layers.md §1.1a — universal group-array model: CONFIRMED (two-witness).
+    /// File-size formula: 4 + Σ over groups (48 + vertex_count × 36 + index_count × 2).
+    /// CORRECTION (CAMPAIGN VFS-MASTERY): Prior "40-byte Section_Header + 12-byte SubChunk_Header" model is REFUTED.
+    /// The correct model is the universal group-array (§1.1a): 48-byte group header with vertex_count@+0x28 and index_count@+0x2C.
     /// </remarks>
     public static Fx5Layer ParseFx5(ReadOnlyMemory<byte> data) =>
         ParseFx5(data.Span, data);
 
     private static Fx5Layer ParseFx5(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
     {
-        var sections = new List<Fx5Section>();
-        int offset = 0;
+        // group_count u32 @ file offset 0x00.
+        // spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count: CONFIRMED. §1.8 FX5.
+        EnsureFx("fx5", span, 4);
+        uint groupCount = BinaryPrimitives.ReadUInt32LittleEndian(span[0..]);
+        int offset = 4;
 
-        while (offset < span.Length)
+        var sections = new Fx5Section[groupCount];
+        for (uint g = 0; g < groupCount; g++)
         {
-            if (offset + Fx5SectionHeaderSize + Fx5SubChunkHeaderSize > span.Length)
-                break; // Trailing data too short for a full section — stop gracefully.
+            // Per-group header: 48 bytes (fixed, read atomically).
+            // spec: Docs/RE/formats/terrain_layers.md §1.8 — group header 48 B: CONFIRMED.
+            if (offset + Fx5GroupHeaderSize > span.Length)
+                throw new InvalidDataException(
+                    $".fx5 parse error: group[{g}] header truncated at offset {offset} " +
+                    $"(need {Fx5GroupHeaderSize}, remaining {span.Length - offset}). " +
+                    "spec: Docs/RE/formats/terrain_layers.md §1.8.");
 
-            // Section_Header (40 bytes) — all semantics UNVERIFIED except direction floats.
-            // spec: Docs/RE/formats/terrain_layers.md §1.8 Section_Header (40 bytes): UNVERIFIED.
-            ReadOnlyMemory<byte> rawSectionHdr = backing.IsEmpty
-                ? span.Slice(offset, Fx5SectionHeaderSize).ToArray()
-                : backing.Slice(offset, Fx5SectionHeaderSize);
-            offset += Fx5SectionHeaderSize;
+            // Store raw group header for faithful round-trip.
+            ReadOnlyMemory<byte> rawGroupHdr = backing.IsEmpty
+                ? span.Slice(offset, Fx5GroupHeaderSize).ToArray()
+                : backing.Slice(offset, Fx5GroupHeaderSize);
 
-            // SubChunk_Header (12 bytes): flags u32 + vert_count u32 + idx_count u32.
-            // spec: Docs/RE/formats/terrain_layers.md §1.8 SubChunk_Header — vert_count CONFIRMED, idx_count CONFIRMED.
-            ReadOnlyMemory<byte> rawSubHdr = backing.IsEmpty
-                ? span.Slice(offset, Fx5SubChunkHeaderSize).ToArray()
-                : backing.Slice(offset, Fx5SubChunkHeaderSize);
-            ReadOnlySpan<byte> subHdrSpan = span.Slice(offset, Fx5SubChunkHeaderSize);
-            // flags u32 @ +0: UNVERIFIED.
-            uint vertCount = BinaryPrimitives.ReadUInt32LittleEndian(subHdrSpan[4..]);
-            uint idxCount = BinaryPrimitives.ReadUInt32LittleEndian(subHdrSpan[8..]);
-            offset += Fx5SubChunkHeaderSize;
+            // vertex_count u32 @ group-relative +0x28.
+            // spec: Docs/RE/formats/terrain_layers.md §1.8 — vertex_count u32 @ +0x28: CONFIRMED.
+            uint vertCount = BinaryPrimitives.ReadUInt32LittleEndian(
+                span.Slice(offset + Fx5VertexCountOffset, 4));
 
+            // index_count u32 @ group-relative +0x2C.
+            // spec: Docs/RE/formats/terrain_layers.md §1.8 — index_count u32 @ +0x2C: CONFIRMED.
+            uint idxCount = BinaryPrimitives.ReadUInt32LittleEndian(
+                span.Slice(offset + Fx5IndexCountOffset, 4));
+
+            offset += Fx5GroupHeaderSize;
+
+            // Validate geometry block.
             long needed = (long)vertCount * 36 + (long)idxCount * 2;
             if (offset + needed > span.Length)
                 throw new InvalidDataException(
-                    $".fx5 parse error: section {sections.Count} geometry truncated — " +
-                    $"need {needed} bytes at offset {offset}, buffer length {span.Length}. " +
+                    $".fx5 parse error: group[{g}] geometry truncated at offset {offset} — " +
+                    $"need {needed} bytes (vertCount={vertCount}×36 + idxCount={idxCount}×2), " +
+                    $"remaining {span.Length - offset}. " +
                     "spec: Docs/RE/formats/terrain_layers.md §1.8.");
 
+            // VertexData: vertex_count × 36 bytes (VF_36).
+            // spec: Docs/RE/formats/terrain_layers.md §1.8 — VertexData (vertex_count × 36, VF_36): CONFIRMED.
             var vertices = ReadVf36Array(span, offset, (int)vertCount);
             offset += (int)vertCount * 36;
+
+            // IndexData: index_count × 2 bytes (u16 triangle list).
+            // spec: Docs/RE/formats/terrain_layers.md §1.3 — u16 triangle list: CONFIRMED.
             var indices = ReadU16Indices(span, offset, (int)idxCount);
             offset += (int)idxCount * 2;
 
-            sections.Add(new Fx5Section
+            sections[g] = new Fx5Section
             {
-                RawSectionHeader = rawSectionHdr,
-                RawSubChunkHeader = rawSubHdr,
+                RawSectionHeader = rawGroupHdr,
+                // RawSubChunkHeader is vestigial in the corrected model; store empty.
+                RawSubChunkHeader = ReadOnlyMemory<byte>.Empty,
                 Vertices = vertices,
                 Indices = indices,
-            });
+            };
         }
 
-        return new Fx5Layer { Sections = sections.ToArray() };
+        return new Fx5Layer { Sections = sections };
+    }
+
+    // ─── .fx7 ─────────────────────────────────────────────────────────────────
+
+    // FX7 uses the universal group-array model (§1.1a): u32 group_count + group_count × [ 52-byte group header + VF_32 vertices + u16 indices ].
+    // The FX7 group header is 52 bytes (13 × u32/f32 fields per §1.10), with:
+    //   vertex_count @ group-relative +0x2C: DUAL-SAMPLE (§1.10).
+    //   index_count  @ group-relative +0x30: DUAL-SAMPLE (§1.10).
+    // Vertex format: VF_32 (32 B) — same as FX6, NO per-vertex colour field.
+    // spec: Docs/RE/formats/terrain_layers.md §1.10 FX7 Format: PLAUSIBLE (dual-sample).
+    // spec: Docs/RE/formats/terrain_layers.md §1.2 VF_32 (32 B): CONFIRMED.
+    private const int Fx7GroupHeaderSize = 52; // 52-byte per-group header (§1.10)
+    private const int Fx7VertexCountOffset = 0x2C; // vertex_count @ group-relative +0x2C (§1.10)
+    private const int Fx7IndexCountOffset = 0x30; // index_count  @ group-relative +0x30 (§1.10)
+    private const int Fx7VertexStride = 32; // VF_32 stride: 32 bytes
+
+    /// <summary>
+    /// Parses an <c>.fx7</c> terrain overlay layer file.
+    /// Universal group-array layout: u32 group_count, then group_count × [ 52-byte group header + VF_32 vertices + u16 indices ].
+    /// vertex_count @ group-relative +0x2C; index_count @ group-relative +0x30.
+    /// Vertex format: VF_32 (no per-vertex colour, same as FX6).
+    /// </summary>
+    /// <param name="data">Raw file bytes from VFS.</param>
+    /// <returns>Decoded FX7 layer.</returns>
+    /// <exception cref="InvalidDataException">Thrown on truncation.</exception>
+    /// <remarks>
+    /// spec: Docs/RE/formats/terrain_layers.md §1.10 FX7 Format: PLAUSIBLE (dual-sample, group-array model §1.1a).
+    /// spec: Docs/RE/formats/terrain_layers.md §1.2 VF_32 (32 B): CONFIRMED (same as FX6).
+    /// File-size formula: 4 + Σ over groups (52 + vertex_count × 32 + index_count × 2).
+    /// </remarks>
+    public static Fx7Layer ParseFx7(ReadOnlyMemory<byte> data) =>
+        ParseFx7(data.Span, data);
+
+    private static Fx7Layer ParseFx7(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
+    {
+        // group_count u32 @ file offset 0x00.
+        // spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count: CONFIRMED. §1.10 FX7.
+        EnsureFx("fx7", span, 4);
+        uint groupCount = BinaryPrimitives.ReadUInt32LittleEndian(span[0..]);
+        int offset = 4;
+
+        var groups = new Fx7Group[groupCount];
+        for (uint g = 0; g < groupCount; g++)
+        {
+            // Per-group header: 52 bytes (fixed, read atomically).
+            // spec: Docs/RE/formats/terrain_layers.md §1.10 — group header 52 B: DUAL-SAMPLE.
+            if (offset + Fx7GroupHeaderSize > span.Length)
+                throw new InvalidDataException(
+                    $".fx7 parse error: group[{g}] header truncated at offset {offset} " +
+                    $"(need {Fx7GroupHeaderSize}, remaining {span.Length - offset}). " +
+                    "spec: Docs/RE/formats/terrain_layers.md §1.10.");
+
+            // Store raw group header for faithful round-trip.
+            ReadOnlyMemory<byte> rawGroupHdr = backing.IsEmpty
+                ? span.Slice(offset, Fx7GroupHeaderSize).ToArray()
+                : backing.Slice(offset, Fx7GroupHeaderSize);
+
+            // vertex_count u32 @ group-relative +0x2C.
+            // spec: Docs/RE/formats/terrain_layers.md §1.10 — vertex_count u32 @ +0x2C: DUAL-SAMPLE.
+            uint vertCount = BinaryPrimitives.ReadUInt32LittleEndian(
+                span.Slice(offset + Fx7VertexCountOffset, 4));
+
+            // index_count u32 @ group-relative +0x30.
+            // spec: Docs/RE/formats/terrain_layers.md §1.10 — index_count u32 @ +0x30: DUAL-SAMPLE.
+            uint idxCount = BinaryPrimitives.ReadUInt32LittleEndian(
+                span.Slice(offset + Fx7IndexCountOffset, 4));
+
+            offset += Fx7GroupHeaderSize;
+
+            // Validate geometry block.
+            long geoBytes = (long)vertCount * Fx7VertexStride + (long)idxCount * 2;
+            if (offset + geoBytes > span.Length)
+                throw new InvalidDataException(
+                    $".fx7 parse error: group[{g}] geometry truncated at offset {offset} — " +
+                    $"need {geoBytes} bytes (vertCount={vertCount}×32 + idxCount={idxCount}×2), " +
+                    $"remaining {span.Length - offset}. " +
+                    "spec: Docs/RE/formats/terrain_layers.md §1.10.");
+
+            // VertexData: vertex_count × 32 bytes (VF_32, no per-vertex colour).
+            // spec: Docs/RE/formats/terrain_layers.md §1.10 — VertexData (vertex_count × 32, VF_32): DUAL-SAMPLE.
+            // spec: Docs/RE/formats/terrain_layers.md §1.2 VF_32 (32 B): CONFIRMED.
+            var vertices = new FxVertex32[(int)vertCount];
+            for (int v = 0; v < (int)vertCount; v++)
+                vertices[v] = ReadFxVertex32(span.Slice(offset + v * Fx7VertexStride, Fx7VertexStride));
+            offset += (int)vertCount * Fx7VertexStride;
+
+            // IndexData: index_count × 2 bytes (u16 triangle list).
+            // spec: Docs/RE/formats/terrain_layers.md §1.3 — u16 triangle list: CONFIRMED.
+            var indices = ReadU16Indices(span, offset, (int)idxCount);
+            offset += (int)idxCount * 2;
+
+            groups[g] = new Fx7Group
+            {
+                RawGroupHeader = rawGroupHdr,
+                VertexCount = vertCount,
+                IndexCount = idxCount,
+                Vertices = vertices,
+                Indices = indices,
+            };
+        }
+
+        return new Fx7Layer { GroupCount = groupCount, Groups = groups };
     }
 
     // ─── .fx6 ─────────────────────────────────────────────────────────────────

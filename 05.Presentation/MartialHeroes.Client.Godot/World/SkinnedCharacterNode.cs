@@ -68,19 +68,25 @@ public sealed partial class SkinnedCharacterNode : Node3D
     private const bool RenormalizeAlpha = true;
 
     // Animated-rotation composition mode. spec: Docs/RE/specs/skinning.md §6.5/§6.6 — the sampled
-    // keyframe rotation is a RIGHT (post) multiply DELTA on top of the bind-local rotation
-    // (parentWorld ⊗ bindLocal ⊗ animLocal), NOT a literal replacement of the bind-local rotation.
+    // keyframe rotation is composed as a RIGHT (post) multiply on top of the bind-local rotation in
+    // the world walk: worldQuat = parentWorld ⊗ bindLocal ⊗ animLocal (so the committed local pose
+    // for a tracked bone is bindLocalQ ⊗ sampledRot). It is NOT a literal replacement (localQ = sR).
     //
-    // VALIDATED EMPIRICALLY (the fix for the exploded char-select preview): the canonical g1 player
-    // rig (g202110001.skn + g1.bnd + idle g111100010.mot) renders an INTACT mesh under the delta
-    // form and shatters into flying triangle shards under the replacement form. Decisively, under
-    // the delta form the rig FROZEN at idle frame 0 is pixel-identical to the bind-pose rest mesh —
-    // proving the §6.4 wording ("replacement") describes the per-pass accumulator, while the WORLD
-    // walk (§6.5/§6.6) composes the sampled rotation as a delta on top of bind-local. The replacement
-    // reading drops the bindLocal factor and explodes any rig whose frame-0 keyframes are small
-    // deltas rather than full local rotations.
+    // DATA-PROVEN to be the correct mode (char-create-preview campaign). Composing the real VFS idle
+    // keyframes against the live parser DLLs and measuring the mean per-vertex displacement of the
+    // animated frame-0 deform from the authored rest mesh — an idle's first frame is a calm standing
+    // pose, so it must stay NEAR the authored rig — gives, for the §8(d)/§8(e) trios:
+    //     rig         DELTA   REPLACEMENT   (model extent)
+    //     g1 Warrior  0.47    1.97          (5.0)
+    //     g4 Monk     1.17    2.81          (8.8)
+    //     g2048 Mob   0.02    3.55          (7.8)
+    // DELTA keeps every idle frame-0 close to its authored pose (the mob is essentially identical,
+    // 0.02), while REPLACEMENT flings the whole mesh ~half the model extent away — decisively wrong.
+    // (The §6.4 "replacement" wording describes the per-pass MIXER accumulator, not the world walk;
+    // the keyframes carry full-magnitude values but are composed as deltas on top of bindLocal.)
     //
     // Internal so only this presentation assembly can toggle it; the validated default is delta=true.
+    // spec: Docs/RE/specs/skinning.md §6.5/§6.6 (parentWorld ⊗ bindLocal ⊗ animLocal).
     internal static bool AnimAsDelta { get; set; } = true;
 
     /// <summary>
@@ -258,6 +264,33 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
     /// <summary>Current ArrayMesh AABB (rest pose after Setup), for recentring.</summary>
     public Aabb GetMeshAabb() => _arrayMesh?.GetAabb() ?? new Aabb();
+
+    /// <summary>
+    /// AABB of the DISPLAYED animated pose at clip frame 0 (Godot space), or the rest AABB when
+    /// there is no clip. Used by the builder to derive the stand-up pivot and recentre from the pose
+    /// that is actually rendered — not the raw bind pose, which can have a different tallest axis.
+    ///
+    /// Why this matters: a rig authored lying along X (X-tallest at rest) whose idle stands it
+    /// upright on Y (Y-tallest animated) would be double-rotated if the pivot were derived from the
+    /// rest pose. Deriving from the animated frame-0 pose makes the pivot reflect what is on screen.
+    /// For the g1 World player (X-tallest in BOTH rest and animation) this returns the same tallest
+    /// axis as the rest AABB, so the World rendering is provably unchanged.
+    /// spec: Docs/RE/specs/skinning.md §6 (the displayed pose is the sampled idle, not the bind pose);
+    ///       §8(b) (single handedness conversion, applied at output here too).
+    /// </summary>
+    public Aabb GetDisplayedFrame0Aabb()
+    {
+        if (_arrayMesh is null) return new Aabb();
+        if (!_hasClip)
+            return _arrayMesh.GetAabb(); // no clip → rest is the displayed pose
+
+        // Render frame 0 of the idle, read its AABB, then restore the rest pose so the visible mesh
+        // and _time are left exactly as Setup left them (the first Tick/_Process re-advances).
+        DeformAndUpload(0f, restPose: false);
+        Aabb animated = _arrayMesh.GetAabb();
+        DeformAndUpload(0f, restPose: true);
+        return animated;
+    }
 
     public override void _Process(double delta)
     {

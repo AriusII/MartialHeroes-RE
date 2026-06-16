@@ -83,9 +83,9 @@ public static class XeffJsonConverter
     private static XeffJsonSubEffect MapSubEffect(XeffSubEffect sub)
     {
         // spec: Docs/RE/formats/effects.md §A.4.1 Name table: CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.4.2 Curve section (alpha, scaleX/Y/Z): CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.4.3 Track header (anim_loop, unknown_constant, anim_stride, anim_base_time): CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.4.4 Keyframe array (frame-0 no-index special case): CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.4.2 Curve section (alpha, passes 2/3/4 = diffuse R/G/B per §17.3, DBG-pending): CONFIRMED layout.
+        // spec: Docs/RE/formats/effects.md §A.4.3 Track header (anim_loop, anim_stride, anim_base_time): CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §A.4.4 Keyframe array: CONFIRMED.
         return new XeffJsonSubEffect(
             EmitterType: sub.EmitterType,
             ResourceId: sub.ResourceId,
@@ -93,9 +93,9 @@ public static class XeffJsonConverter
             EntryCount: sub.EntryCount,
             TextureNames: sub.TextureNames,
             AlphaKeys: MapAlphaKeys(sub.AlphaKeys),
-            ScaleX: sub.ScaleX,
-            ScaleY: sub.ScaleY,
-            ScaleZ: sub.ScaleZ,
+            DiffuseR: sub.DiffuseR,
+            DiffuseG: sub.DiffuseG,
+            DiffuseB: sub.DiffuseB,
             AnimLoop: sub.AnimLoop,
             AnimStride: sub.AnimStride,
             AnimBaseTime: sub.AnimBaseTime,
@@ -168,9 +168,11 @@ public static class XeffJsonConverter
         uint EntryCount,
         string[] TextureNames,
         XeffJsonAlpha[] AlphaKeys,
-        float[] ScaleX,
-        float[] ScaleY,
-        float[] ScaleZ,
+        // Curve passes 2/3/4: per-keyframe diffuse R/G/B (DBG-pending render-side; loader stores as Vec3 lanes).
+        // spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
+        float[] DiffuseR,
+        float[] DiffuseG,
+        float[] DiffuseB,
         byte AnimLoop,
         uint AnimStride,
         uint AnimBaseTime,

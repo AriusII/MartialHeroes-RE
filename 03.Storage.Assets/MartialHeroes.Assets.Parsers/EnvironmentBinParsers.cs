@@ -294,12 +294,19 @@ public static class EnvironmentBinParsers
     /// Parses a <c>light%d.bin</c> sky-lighting keyframe file.
     /// </summary>
     /// <param name="data">Raw file bytes.</param>
-    /// <returns>Decoded <see cref="LightBin"/>.</returns>
+    /// <returns>Decoded <see cref="LightBin"/> with raw verbatim bytes plus SAMPLE-VERIFIED region structure.</returns>
     /// <exception cref="InvalidDataException">Buffer is not exactly 5312 bytes.</exception>
     /// <remarks>
-    /// spec: Docs/RE/formats/environment_bins.md §9.1 Revised section layout: CONFIRMED
-    /// spec: Docs/RE/formats/environment_bins.md §9.2 Keyframe structure: CONFIRMED
-    /// spec: Docs/RE/formats/environment_bins.md §9.3 Section C: CONFIRMED
+    /// CORRECTION (environment_bins.md §9.0, LOADER-RESOLVED): the client loader performs a single
+    /// opaque verbatim slurp of the whole 5312-byte file — it reads no field offsets at load time.
+    /// The per-region structure (directional/ambient keyframes, fog scalars, fallback light) below
+    /// is SAMPLE-VERIFIED consumer-side structure derived by sample-byte decode and the per-frame
+    /// apply-path — NOT loader behaviour. The parser surfaces both the raw blob (<see cref="LightBin.RawBytes"/>)
+    /// and the structured regions as a bonus; callers SHOULD use the raw blob to avoid dependence
+    /// on unconfirmed per-field roles (especially §9.2 color_A/B/C meanings, DBG-pending).
+    /// spec: Docs/RE/formats/environment_bins.md §9.0 —
+    ///   "the loader performs a single opaque verbatim slurp of the whole 5312-byte file": LOADER-RESOLVED.
+    /// spec: Docs/RE/formats/environment_bins.md §9.1 Revised section layout: SAMPLE-VERIFIED
     /// spec: Docs/RE/formats/environment_bins.md §9.4 Fallback light: CONFIRMED
     /// Total: 2304 + 48 + 2304 + 48 + 192 + 192 + 200 + 8 + 16 = 5312 bytes.
     /// </remarks>
@@ -314,13 +321,16 @@ public static class EnvironmentBinParsers
 
     private static LightBin ParseLight(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
     {
-        // Fixed size: 5312 bytes exactly.
-        // spec: Docs/RE/formats/environment_bins.md §9.1 — 5312 bytes total: CONFIRMED
+        // Fixed size: exactly 5312 bytes — confirmed by two witnesses:
+        //   (1) the load step's single bounded read of 0x14C0 bytes,
+        //   (2) constant size across all 61 sampled VFS files.
+        // spec: Docs/RE/formats/environment_bins.md §9.0 —
+        //   "opaque verbatim slurp of the whole 5312-byte (0x14C0) file": LOADER-RESOLVED.
         if (span.Length != LightBin.FixedSize)
             throw new InvalidDataException(
                 $"light*.bin parse error: expected {LightBin.FixedSize} bytes, " +
                 $"got {span.Length}. " +
-                "spec: Docs/RE/formats/environment_bins.md §9.1.");
+                "spec: Docs/RE/formats/environment_bins.md §9.0.");
 
         // Section A — 48 directional-light keyframes @ 0x0000.
         // spec: §9.1 Section A Directional light @ 0x0000 (2304 bytes, 48 × 48 bytes): CONFIRMED
@@ -357,6 +367,14 @@ public static class EnvironmentBinParsers
         float fallbackDirY = BinaryPrimitives.ReadSingleLittleEndian(span[(LightFallbackOffset + 8)..]);
         float fallbackDirZ = BinaryPrimitives.ReadSingleLittleEndian(span[(LightFallbackOffset + 12)..]);
 
+        // Store verbatim raw bytes so callers can treat the file as an opaque slurp
+        // per spec §9.0 (LOADER-RESOLVED).
+        // spec: Docs/RE/formats/environment_bins.md §9.0 —
+        //   "faithful parser should slurp the 5312 bytes verbatim": LOADER-RESOLVED.
+        ReadOnlyMemory<byte> rawBytes = backing.IsEmpty
+            ? span.ToArray()
+            : backing;
+
         return new LightBin
         {
             DirectionalKeyframes = dirKf,
@@ -368,6 +386,7 @@ public static class EnvironmentBinParsers
             FallbackDirX = fallbackDirX,
             FallbackDirY = fallbackDirY,
             FallbackDirZ = fallbackDirZ,
+            RawBytes = rawBytes,
         };
     }
 

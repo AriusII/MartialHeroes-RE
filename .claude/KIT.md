@@ -96,7 +96,7 @@ unambiguous and harmonious. The `tools: Agent(...)` list mirrors that roster.
 
 ### Existing (refine only — keep semantics; add `effort: high`, tighten roster section)
 - `re-comprehension-orchestrator` (Campaign-2, READONLY comprehension)
-- `re-annotation-orchestrator` (Campaign-2, serialized IDB WRITE)
+- `re-annotation-orchestrator` (Campaign-2, parallel IDB WRITE — fans out writers concurrently, no serialization cap)
 
 ### New (7) — one per real work lane. `model: opus`, `effort: high`, `tools: Agent(<roster>), Read, Write, Grep, Glob[, scoped Bash]`.
 
@@ -116,7 +116,7 @@ directly to the worker instead of this orchestrator*. That keeps single tasks go
 worker and only multi-lane objectives going through an orchestrator.
 
 **Firewall placement of orchestrators:** `re-cleanroom-orchestrator` is dirty-room (holds
-`mcp__ida__*`, READONLY, sub-waves of ~3, writes only `_dirty/`, promotion only via its spec-author
+`mcp__ida__*`, READONLY, **massively parallel analysts (no sub-wave cap)**, writes only `_dirty/`, promotion only via its spec-author
 workers). All others are clean-room/neutral (no IDA). `quality-gate` and `tooling` are read-mostly.
 
 ---
@@ -193,7 +193,7 @@ that today live only in prose, so they surface automatically:
 |---|---|---|
 | `dotnet-csharp14` | `01.Infrastructure.Shared/**`, `02.Network.Layer/**`, `03.Storage.Assets/**`, `04.Client.Core/**` | C# 14 / .NET 10 house rules: `readonly record struct` IDs, `[StructLayout(Pack=1)]`+`[InlineArray]` wire/asset structs, zero-alloc `Span`/`ReadOnlyMemory` hot paths (no LINQ/closures/boxing), CP949 provider, source-gen `[LoggerMessage]`, downward-only layer DAG. |
 | `godot-engine` | `05.Presentation/**` | Godot 4.6.3-mono pitfalls: `.tscn` script = property line (not header attr); `global::Godot.{Input,Environment,Time}` namespace collisions; never `GltfDocument.AppendFromBuffer` (build `ArrayMesh`); coordinate conventions (world negates Z, mesh `.skn` negates X; cells 1024, 65×65, spacing 16); the headless-verify + screenshot loop; passive-rendering rule (zero game authority). |
-| `ida-pro-re` | — (RE is not file-path-bound) | IDA Pro 9.3 + MCP methodology for `Main.exe`/`doida.exe`: the `?ext=dbg` endpoint, static-forms-hypothesis / debugger-confirms doctrine, sub-waves-of-3 + serialized IDB writes, and the clean-room firewall (dirty→`_dirty/` only, never transcribe Hex-Rays, neutral prose, STOP if MCP down). `user-invocable: false`. |
+| `ida-pro-re` | — (RE is not file-path-bound) | IDA Pro 9.3 + MCP methodology for `Main.exe`/`doida.exe`: the `?ext=dbg` endpoint, static-forms-hypothesis / debugger-confirms doctrine, **unbridled fan-out (parallel read analysts + parallel IDB writes, no caps)**, and the clean-room firewall (dirty→`_dirty/` only, never transcribe Hex-Rays, neutral prose, STOP if MCP down). `user-invocable: false`. |
 | `martial-heroes-domain` | — | Game/技术 knowledge that recurs: opcodes are `(major<<16)|minor`, 8-byte frame header `[u32 size][u16 major][u16 minor]`, rolling XOR/ROL cipher shape, LZ4 raw-block, all text CP949, the recovered asset chains (terrain `.ted`→`.map`→`bgtexture.txt`→`.dds`; skin `.skn`→`skin.txt`→tex; bind/idle `.bnd`/`.mot`; spawns `.arr`; collision `.sod`). `user-invocable: false`. Mirrors the recovered facts in `CLAUDE.md`/specs — points at them, never duplicates copyrighted data. |
 
 Knowledge skills are **neutral documentation** — they cite the committed specs, never paste decompiler
@@ -283,10 +283,12 @@ missing**.
 > note), not a rewrite.
 
 ### The two north stars (every role names how it serves at least one)
-- **N1 — Clean-room RE** of the legacy client (`Main.exe` / `doida.exe`) via **IDA Pro 9.3 + the MCP**
-  (static *and* the `?ext=dbg` debugger) + **IDAPython**, producing neutral committed specs.
+- **N1 — Clean-room RE of the ENTIRE legacy client** (`doida.exe`, with `Main.exe` as historical
+  reference) via **IDA Pro 9.3 + the MCP** (static *and* the `?ext=dbg` debugger) + **IDAPython**,
+  producing neutral committed specs. **Goal: total coverage — leave no subsystem un-mapped**, and run
+  the reverse **unbridled / massively parallel** (no read cap, no one-writer rule on the IDB).
   *Static forms the hypothesis; the debugger confirms it against ground truth.*
-- **N2 — A faithful 1:1 re-creation** of the original game client, re-implemented fresh in .NET 10/C#
+- **N2 — A faithful 1:1 re-creation** of the **entire** original game client, re-implemented fresh in .NET 10/C#
   and ported to **Godot 4.6.3**. **Fidelity to the original** — wire protocol, asset chains, visuals,
   behavior — *is the measure of success*. When in doubt, match the original.
 
@@ -309,7 +311,7 @@ missing**.
   maintainer F9-launches the client; you **pilot the live session** via `dbg_gpregs` / `dbg_read`
   (reads through `PAGE_NOACCESS`) / `dbg_add_bp` / `dbg_continue` / `dbg_run_to` / `dbg_step_*`);
   static-hypothesis → debugger-confirm; IDAPython through the MCP exec tool (its name varies by build —
-  discover at runtime); fan out in sub-waves of ~3; IDB writes strictly serialized; **STOP if MCP down
+  discover at runtime); **fan out massively in parallel — read analysts AND IDB writes run unbridled (no `~3` cap, no one-writer rule); retry failed/conflicting calls**; **STOP if MCP down
   or wrong/empty DB**; neutral prose, addresses dirty-only.
 - **Spec-authors:** rewrite-never-copy; the neutrality **self-scrub** (strip every
   `sub_`/`loc_`/`_DWORD`/`__thiscall`/mangled/image-range address); validate (`opcode-catalog` schema;
@@ -337,7 +339,7 @@ missing**.
 - **Reviewers / quality:** the exact invariant each guards; PASS/FAIL with `file:line`; separate
   **BLOCKER** from advisory; never edit source to make a check pass.
 - **Orchestrators:** extremely-detailed **atomic** per-worker briefs (CONTEXT SOURCE + atomic objective
-  + DELIVERABLES + SKILL); the file-ownership ledger; sub-wave concurrency; a gate between waves;
+  + DELIVERABLES + SKILL); the file-ownership ledger; **unbridled IDA fan-out (parallel reads + parallel IDB writes)**; a gate between waves;
   reconcile into **ONE** rolled-up result; two-levels-of-orchestration max.
 
 ### New high-value skills (toward the north stars) — authored in the depth pass

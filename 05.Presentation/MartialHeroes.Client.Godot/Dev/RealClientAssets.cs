@@ -279,7 +279,11 @@ public sealed class RealClientAssets : IDisposable
                     {
                         try
                         {
-                            clipList.Add(AnimationParser.Parse(motData));
+                            // AnimationParser.Parse returns null for the BANI .mot variant (spec:
+                            // Docs/RE/formats/animation.md §BANI). Skip null clips so a BANI file never
+                            // enters the clip list (the BANI fix made Parse return AnimationClip?).
+                            AnimationClip? clip = AnimationParser.Parse(motData);
+                            if (clip is not null) clipList.Add(clip);
                         }
                         catch (Exception ex)
                         {

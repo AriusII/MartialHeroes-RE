@@ -8,8 +8,9 @@
 //             spec: Docs/RE/specs/sound.md §front-end cue map. CODE-CONFIRMED.
 //   UI click: data/sound/2d/861010101.ogg — one-shot on each button activation.
 //             spec: Docs/RE/specs/sound.md §front-end cue map. CODE-CONFIRMED.
-//   Intro BGM: data/sound/2d/910061000.ogg — one-shot at OpeningWindow scene start.
-//             spec: Docs/RE/specs/intro_sequence.md §4. CODE-CONFIRMED.
+//   Intro BGM: data/sound/2d/910061000.ogg — looped opening BGM at OpeningWindow scene start.
+//             Distinct from the one-shot login curtain SFX 861010105.
+//             spec: Docs/RE/specs/sound.md §15.6c/§16. CODE-CONFIRMED.
 //   Login curtain SFX: data/sound/2d/861010105.ogg — one-shot at login-curtain sub-state 1→2.
 //             spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1. CODE-CONFIRMED.
 //   Sound path rule: category < 5 → data/sound/2d/<id>.ogg.
@@ -34,8 +35,8 @@ namespace MartialHeroes.Client.Godot.Screens;
 /// button handler on the front-end screens.
 ///
 /// <para>BGM <c>920100200</c> loops until <see cref="StopBgm"/> is called (called when the world
-/// scene starts). Intro BGM <c>910061000</c> is a one-shot fired from
-/// <see cref="PlayIntroBgm"/>.</para>
+/// scene starts). Opening BGM <c>910061000</c> loops from <see cref="PlayIntroBgm"/>;
+/// distinct from the one-shot login curtain SFX <c>861010105</c>.</para>
 /// </summary>
 public sealed partial class FrontEndAudio : Node
 {
@@ -46,8 +47,8 @@ public sealed partial class FrontEndAudio : Node
     // Front-end BGM (lobby loop). spec: sound.md front-end cue map. CODE-CONFIRMED.
     private const string BgmPath = "data/sound/2d/920100200.ogg"; // spec: sound.md. CODE-CONFIRMED.
 
-    // Intro stinger (OpeningWindow). spec: intro_sequence.md §4. CODE-CONFIRMED.
-    private const string IntroBgmPath = "data/sound/2d/910061000.ogg"; // spec: intro_sequence.md §4. CODE-CONFIRMED.
+    // Opening BGM (OpeningWindow, looped). spec: sound.md §15.6c/§16. CODE-CONFIRMED.
+    private const string IntroBgmPath = "data/sound/2d/910061000.ogg"; // spec: sound.md §15.6c/§16. CODE-CONFIRMED.
 
     // UI click SFX. spec: sound.md front-end cue map. CODE-CONFIRMED.
     private const string ClickSfxPath = "data/sound/2d/861010101.ogg"; // spec: sound.md. CODE-CONFIRMED.
@@ -69,16 +70,6 @@ public sealed partial class FrontEndAudio : Node
     private AudioStreamPlayer? _curtainPlayer;
 
     // -------------------------------------------------------------------------
-    // Injection point (set by BootFlow before AddChild)
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// A shared <see cref="UiAssetLoader"/> that already has the VFS open.
-    /// When null this node opens its own RealClientAssets handle for the sound/cursor files.
-    /// </summary>
-    public UiAssetLoader? SharedAssets { get; set; }
-
-    // -------------------------------------------------------------------------
     // Godot lifecycle
     // -------------------------------------------------------------------------
 
@@ -94,40 +85,19 @@ public sealed partial class FrontEndAudio : Node
         AddChild(_introPlayer);
         AddChild(_curtainPlayer);
 
-        // Load assets. Try the shared loader first; fall back to our own VFS open.
-        RealClientAssets? ra = null;
-        bool ownsRa = false;
-        if (SharedAssets is { HasVfs: true })
+        // Open a thin VFS handle for sound/cursor assets. Disposed immediately after load.
+        using RealClientAssets? ra = RealClientAssets.TryOpen();
+        if (ra is not null)
         {
-            // Use the shared loader's raw-access path.
-            // UiAssetLoader does not expose an RCA handle, so we open a thin handle ourselves.
-            ra = RealClientAssets.TryOpen();
-            ownsRa = true;
+            LoadBgm(ra);
+            LoadClickSfx(ra);
+            LoadIntroBgm(ra);
+            LoadLoginCurtainSfx(ra);
+            LoadCursor(ra);
         }
         else
         {
-            ra = RealClientAssets.TryOpen();
-            ownsRa = true;
-        }
-
-        try
-        {
-            if (ra is not null)
-            {
-                LoadBgm(ra);
-                LoadClickSfx(ra);
-                LoadIntroBgm(ra);
-                LoadLoginCurtainSfx(ra);
-                LoadCursor(ra);
-            }
-            else
-            {
-                GD.Print("[FrontEndAudio] VFS unavailable — audio/cursor will be silent.");
-            }
-        }
-        finally
-        {
-            if (ownsRa) ra?.Dispose();
+            GD.Print("[FrontEndAudio] VFS unavailable — audio/cursor will be silent.");
         }
     }
 
@@ -166,15 +136,15 @@ public sealed partial class FrontEndAudio : Node
     }
 
     /// <summary>
-    /// Plays the intro stinger (<c>910061000.ogg</c>) once at OpeningWindow scene start.
-    /// spec: Docs/RE/specs/intro_sequence.md §4. CODE-CONFIRMED.
+    /// Starts the looped opening BGM (<c>910061000.ogg</c>) at OpeningWindow scene start.
+    /// spec: Docs/RE/specs/sound.md §15.6c/§16. CODE-CONFIRMED.
     /// </summary>
     public void PlayIntroBgm()
     {
         if (_introPlayer is null || _introPlayer.Stream is null) return;
         _introPlayer.Stop();
         _introPlayer.Play();
-        GD.Print("[FrontEndAudio] Intro stinger 910061000 played.");
+        GD.Print("[FrontEndAudio] Opening BGM 910061000 started (loop).");
     }
 
     /// <summary>
@@ -237,15 +207,16 @@ public sealed partial class FrontEndAudio : Node
 
     private void LoadIntroBgm(RealClientAssets ra)
     {
-        AudioStream? stream = LoadOgg(ra, IntroBgmPath, looping: false);
+        // Opening BGM is looped. spec: Docs/RE/specs/sound.md §15.6c/§16. CODE-CONFIRMED.
+        AudioStream? stream = LoadOgg(ra, IntroBgmPath, looping: true);
         if (stream is not null && _introPlayer is not null)
         {
             _introPlayer.Stream = stream;
-            GD.Print($"[FrontEndAudio] Intro BGM loaded: {IntroBgmPath}");
+            GD.Print($"[FrontEndAudio] Opening BGM loaded (looped): {IntroBgmPath}");
         }
         else
         {
-            GD.Print($"[FrontEndAudio] Intro BGM not found in VFS: {IntroBgmPath}");
+            GD.Print($"[FrontEndAudio] Opening BGM not found in VFS: {IntroBgmPath}");
         }
     }
 

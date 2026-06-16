@@ -127,9 +127,9 @@ re-creation faithful and correct (N2). Your verdict is the gate that lets fideli
    IDB/`_dirty/`, and never two at once.
 5. **Fan out in parallel across disjoint dimensions.** The clean-room/DAG/C#/perf/build/tooling/provenance
    reviewers operate on disjoint, read-only views, so dispatch them **in parallel** up to the concurrency
-   cap — that is the point of this gate. **Exception — the dirty-room case:** if any brief needs IDA
-   (`re-analyst`), it runs in READONLY sub-waves of ~3 and **never two writers on the IDB at once**; do
-   not blast IDA work alongside a full reviewer fan-out.
+   cap — that is the point of this gate. **The dirty-room case:** if any brief needs IDA
+   (`re-analyst`), it runs **massively-parallel READONLY** — no `~3` cap; retry anything the MCP drops
+   under load. (A gate has no IDB writers anyway.)
 6. **Gate each wave.** Treat `build-doctor` (build/test green) and the firewall pre-screen as the
    **prerequisite gate**: if the build is broken or the firewall hard-gate trips, that is a BLOCKER that
    stands on its own — collect the other reviewers' findings, but the rolled-up verdict is FAIL regardless
@@ -197,9 +197,9 @@ re-creation faithful and correct (N2). Your verdict is the gate that lets fideli
 - **Surface BLOCKERS separately from advisories, and a FAIL names exactly what to fix** (`path:line` +
   remediation + owner), never just "it failed".
 - **One writer per path per wave** (the file-ownership ledger). You alone own the gate report; only
-  `re-analyst` touches the IDB/`_dirty/`, and never two writers on the IDB at once.
+  `re-analyst` touches the IDB/`_dirty/` (READONLY — a gate has no IDB writers).
 - **Run reviewers in parallel across disjoint, read-only dimensions; the IDA/dirty case runs READONLY
-  sub-waves of ~3** with strictly serialized IDB writes (there are none in a gate).
+  massively in parallel** (no `~3` cap; a gate has no IDB writers anyway).
 - **No IDA for you, and read nothing under `_dirty/`.** Neutral prose only; no Hex-Rays pseudo-C, no
   addresses outside `_dirty/` ever reach your report.
 - **Never edit the orchestrator-owned files:** `.claude/settings.json`, `.mcp.json`, `Docs/RE/journal.md`,

@@ -247,7 +247,6 @@ var residuals   = new List<(string path, int residualBytes)>();
 
 // Field distributions across ALL sub-effects
 var emitterTypeCounts   = new Dictionary<uint, int>();
-var unknownConstCounts  = new Dictionary<uint, int>();
 var fieldUnknownACounts = new Dictionary<uint, int>();
 var elementDword2Counts = new Dictionary<uint, int>();
 var animBaseCounts      = new Dictionary<uint, int>(); // anim_base_time
@@ -309,7 +308,8 @@ foreach (var e in xeffList)
         foreach (var se in data.SubEffects)
         {
             emitterTypeCounts.TryGetValue(se.EmitterType, out int ec); emitterTypeCounts[se.EmitterType] = ec + 1;
-            unknownConstCounts.TryGetValue(se.UnknownConstant, out int uc); unknownConstCounts[se.UnknownConstant] = uc + 1;
+            // unknown_constant field DELETED from the model (CAMPAIGN VFS-MASTERY: REFUTED, no read-site;
+            // those 4 bytes are the first keyframe's u32 index prefix). spec: effects.md §A.4.3.
             fieldUnknownACounts.TryGetValue(se.FieldUnknownA, out int fa); fieldUnknownACounts[se.FieldUnknownA] = fa + 1;
             elementDword2Counts.TryGetValue(se.ElementDword2, out int ed); elementDword2Counts[se.ElementDword2] = ed + 1;
             animBaseCounts.TryGetValue(se.AnimBaseTime, out int ab); animBaseCounts[se.AnimBaseTime] = ab + 1;
@@ -335,9 +335,9 @@ foreach (var e in xeffList)
 
             totalAlphaKeyCount += se.AlphaKeys.Length;
             if (se.AlphaKeys.Length == 0) alphaZeroCount++;
-            if (se.ScaleX.Length == 0) scaleXZero++; else scaleXNonZ++;
-            if (se.ScaleY.Length == 0) scaleYZero++; else scaleYNonZ++;
-            if (se.ScaleZ.Length == 0) scaleZZero++; else scaleZNonZ++;
+            if (se.DiffuseR.Length == 0) scaleXZero++; else scaleXNonZ++;
+            if (se.DiffuseG.Length == 0) scaleYZero++; else scaleYNonZ++;
+            if (se.DiffuseB.Length == 0) scaleZZero++; else scaleZNonZ++;
         }
     }
     catch (Exception ex)
@@ -377,9 +377,7 @@ foreach (var kv in emitterTypeCounts.OrderBy(k => k.Key))
     Console.WriteLine($"  {label,-25}: {kv.Value,7:N0}");
 }
 
-Console.WriteLine("\n--- unknown_constant (track header +1, expected=67) ---");
-foreach (var kv in unknownConstCounts.OrderByDescending(k => k.Value).Take(10))
-    Console.WriteLine($"  value={kv.Key,5} (0x{kv.Key:X4}): {kv.Value,7:N0}  {(kv.Key == 67 ? "<-- 67 (XEFF_TRACK_UNKNOWN_CONSTANT)" : "")}");
+// unknown_constant distribution dropped: field REFUTED/DELETED (CAMPAIGN VFS-MASTERY). spec: effects.md §A.4.3.
 
 Console.WriteLine("\n--- field_unknown_a (element_flags @ element+0x0C) ---");
 int faTotal = fieldUnknownACounts.Values.Sum();

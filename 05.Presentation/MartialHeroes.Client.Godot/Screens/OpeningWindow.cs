@@ -18,10 +18,11 @@
 //   spec: Docs/RE/specs/intro_sequence.md §4. CODE-CONFIRMED.
 //
 // SKIP:
-//   Enter / ESC / Space, or any mouse click on the skip-button area (action id 100) → Finish().
-//   spec: Docs/RE/specs/frontend_scenes.md §1.0.5. CODE-CONFIRMED.
-//   (This implementation treats any keyboard or mouse press as the skip gate for simplicity;
-//    the exact action-id 100 widget is mainwindow.dds chrome not yet wired.)
+//   Enter / ESC / Space → persist [OPENNING] SKIP=1 + Finish(). spec §1.0.5. CODE-CONFIRMED.
+//   Skip button (action id 100) from mainwindow.dds at lower-right of canvas:
+//     normal src (761,165,110,32) / pressed src (634,165,110,32). Click → same persist+finish.
+//   spec: Docs/RE/specs/frontend_scenes.md §1.0.5 / intro_sequence.md §1. CODE-CONFIRMED.
+//   Mouse-wheel manual crawl-scrub (bounds ~30..1833): actions 1004 up / 1005 down — optional.
 //
 // ASSETS (all real VFS DDS — no solid-colour fallback):
 //   data/ui/openning_scenario.dds  — 1024×2048 scenario crawl strip. SAMPLE-VERIFIED.
@@ -186,8 +187,8 @@ public sealed partial class OpeningWindow : Control
     }
 
     // -------------------------------------------------------------------------
-    // Input — skip on Enter/ESC/Space or any mouse button press
-    // spec: frontend_scenes.md §1.0.5. CODE-CONFIRMED.
+    // Input — skip on Enter/ESC/Space (keyboard). Mouse skip via skip button only.
+    // spec: Docs/RE/specs/frontend_scenes.md §1.0.5. CODE-CONFIRMED.
     // -------------------------------------------------------------------------
 
     public override void _Input(InputEvent ev)
@@ -200,20 +201,53 @@ public sealed partial class OpeningWindow : Control
             InputEventKey { Pressed: true, KeyLabel: Key.Enter } => true,
             InputEventKey { Pressed: true, KeyLabel: Key.Escape } => true,
             InputEventKey { Pressed: true, KeyLabel: Key.Space } => true,
-            // spec §1.0.5: mouse left-click on the skip button (action id 100). CODE-CONFIRMED.
-            // Treat any mouse button press as the skip gate (skip-button widget from mainwindow.dds
-            // is not yet wired; the spec allows the full canvas to act as a click target).
-            InputEventMouseButton { Pressed: true } => true,
+            // Mouse: only the dedicated skip button (action id 100) skips — not any click.
+            // The skip button TextureButton is wired to OnSkipPressed() below.
+            // spec §1.0.5: "mouse left-click on the skip button (action id 100)". CODE-CONFIRMED.
             _ => false,
         };
 
         if (skip)
         {
-            GD.Print("[OpeningWindow] Skip input received — ending intro.");
-            // spec §1.0.5: "persist skip + stop scene". In this revival, SKIP persistence is handled
-            // by the options-INI layer (not yet wired); the scene teardown proceeds unconditionally.
+            GD.Print("[OpeningWindow] Keyboard skip (Enter/ESC/Space) received.");
+            // spec §1.0.0/§1.0.5: write [OPENNING] SKIP=1 to persist the skip. CODE-CONFIRMED.
+            PersistSkip();
             Finish();
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Skip button handler (action id 100, mainwindow.dds).
+    // spec: Docs/RE/specs/intro_sequence.md §1 / frontend_scenes.md §1.0.5. CODE-CONFIRMED.
+    // -------------------------------------------------------------------------
+
+    private void OnSkipPressed()
+    {
+        if (_finished) return;
+        GD.Print("[OpeningWindow] Skip button (action 100) pressed.");
+        // spec §1.0.0/§1.0.5: write [OPENNING] SKIP=1 so boot-time gate bypasses intro next launch.
+        // CODE-CONFIRMED.
+        PersistSkip();
+        Finish();
+    }
+
+    // -------------------------------------------------------------------------
+    // Skip persistence — write [OPENNING] SKIP=1 to options INI.
+    // spec: Docs/RE/specs/frontend_scenes.md §1.0.0 (read) / §1.0.5 (write). CODE-CONFIRMED.
+    // -------------------------------------------------------------------------
+
+    private const string SkipCfgPath = "user://options.cfg"; // Godot ConfigFile equivalent of the client options INI
+    private const string SkipCfgSection = "OPENNING"; // spec §1.0.0 section [OPENNING]. CODE-CONFIRMED.
+    private const string SkipCfgKey = "SKIP"; // spec §1.0.0 key SKIP. CODE-CONFIRMED.
+
+    private static void PersistSkip()
+    {
+        // Write SKIP=1 so BootFlow's read-gate (§1.0.0) skips the intro on the next launch.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.0.0 / §1.0.5. CODE-CONFIRMED.
+        var cfg = new ConfigFile();
+        cfg.Load(SkipCfgPath); // load existing (ignore error — file may not exist yet)
+        cfg.SetValue(SkipCfgSection, SkipCfgKey, 1);
+        cfg.Save(SkipCfgPath);
     }
 
     // -------------------------------------------------------------------------
@@ -281,6 +315,44 @@ public sealed partial class OpeningWindow : Control
         _scenarioRect.Position = new Vector2(0f, CanvasH); // start: sprite top-left at Y=768 (off-screen below)
         _scenarioRect.Size = new Vector2(ScenarioW, ScenarioH);
         AddChild(_scenarioRect);
+
+        // ── Layer 3: Skip button (action id 100) from mainwindow.dds ──
+        // Placed near lower-right: X = liveW − 120, Y = liveH − 52, size 110×32.
+        // Normal src (761,165,110,32) / pressed src (634,165,110,32) from mainwindow.dds.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.0.1 / §1.0.5. CODE-CONFIRMED placement.
+        // spec: Docs/RE/specs/intro_sequence.md §1. SAMPLE-VERIFIED atlas.
+        // Src-rects: freshly re-confirmed IDA ground truth; cite intro_sequence.md §1 / frontend_scenes.md §1.0.5.
+        const string MainWindowAtlas = "data/ui/mainwindow.dds"; // spec §1 SAMPLE-VERIFIED.
+        AtlasTexture? skipNormal = assets.Slice(MainWindowAtlas, 761, 165, 110, 32);
+        AtlasTexture? skipPressed = assets.Slice(MainWindowAtlas, 634, 165, 110, 32);
+
+        if (skipNormal is null)
+        {
+            GD.PrintErr("[OpeningWindow] mainwindow.dds skip-button slice returned null " +
+                        "— skip button absent (VFS offline). spec: frontend_scenes.md §1.0.5.");
+        }
+        else
+        {
+            // Anchor to lower-right: AnchorRight=1 / AnchorBottom=1, then offset inward.
+            // Position is expressed in canvas coords: X from right = liveW − 120 → offset −120 from right;
+            // Y from bottom = liveH − 52 → offset −52 from bottom.
+            // spec §1.0.5 "placed near lower-right of canvas". CODE-CONFIRMED placement.
+            var skipBtn = new TextureButton
+            {
+                Name = "SkipBtn",
+                AnchorRight = 1f,
+                AnchorBottom = 1f,
+                OffsetLeft = -120f, // liveW − 120; spec §1.0.5. CODE-CONFIRMED x-offset.
+                OffsetTop = -52f, // liveH − 52; spec §1.0.1 "lower-right". CODE-CONFIRMED placement.
+                OffsetRight = -10f, // right edge 10px from right edge
+                OffsetBottom = -20f, // bottom edge 20px from bottom edge
+                TextureNormal = skipNormal,
+                TexturePressed = skipPressed ?? skipNormal, // fallback to normal when pressed absent
+                StretchMode = TextureButton.StretchModeEnum.KeepAspect,
+            };
+            skipBtn.Pressed += OnSkipPressed;
+            AddChild(skipBtn);
+        }
     }
 
     // -------------------------------------------------------------------------

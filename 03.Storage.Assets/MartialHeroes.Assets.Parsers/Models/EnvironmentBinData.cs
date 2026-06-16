@@ -309,6 +309,21 @@ public sealed class LightBin
 
     /// <remarks>spec: Docs/RE/formats/environment_bins.md §9.4 — dir_Z f32 @ 0x14BC: CONFIRMED (value 20.0)</remarks>
     public required float FallbackDirZ { get; init; }
+
+    /// <summary>
+    /// The full 5312-byte verbatim slurp of the file.
+    /// </summary>
+    /// <remarks>
+    /// CORRECTION (environment_bins.md §9.0, LOADER-RESOLVED): the client loader performs a single
+    /// opaque verbatim slurp of the whole 5312-byte file — it reads no field offsets at load time.
+    /// The per-region structure above (DirectionalKeyframes / AmbientKeyframes / etc.) is
+    /// SAMPLE-VERIFIED consumer-side structure, not loader behaviour. A faithful parser surfaces
+    /// the structured regions as a bonus alongside the raw blob so callers can either consume the
+    /// interpreted fields or inspect the raw bytes.
+    /// spec: Docs/RE/formats/environment_bins.md §9.0 —
+    ///   "the loader performs a single opaque verbatim slurp of the whole 5312-byte file": LOADER-RESOLVED.
+    /// </remarks>
+    public required ReadOnlyMemory<byte> RawBytes { get; init; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

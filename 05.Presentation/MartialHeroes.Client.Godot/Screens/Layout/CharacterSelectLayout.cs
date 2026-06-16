@@ -198,8 +198,11 @@ public static class CharacterSelectLayout
     // NORMAL src-X per button index (0..3). spec: ui_system.md §8.2/§8.4. CODE-CONFIRMED.
     public static readonly int[] ClassBtnNormalSrcX = [590, 635, 680, 725]; // CODE-CONFIRMED
 
-    // HOVER src-X per button index (0..3); index 3 = NORMAL (no distinct hover art). CODE-CONFIRMED.
-    public static readonly int[] ClassBtnHoverSrcX = [815, 860, 905, 725]; // CODE-CONFIRMED (btn3 HOVER=NORMAL)
+    // SELECTED / HOVER src-X per button index (0..3).
+    // CORRECTION (§11.5e two-witness): idle={590,635,680,725}, selected={770,815,860,905}.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.5e CODE-CONFIRMED.
+    // The prior reading "[815,860,905,725]" was off-by-one (missed the 770 base); corrected.
+    public static readonly int[] ClassBtnHoverSrcX = [770, 815, 860, 905]; // spec: §11.5e CODE-CONFIRMED.
 
     // =========================================================================
     // §8.4 Appearance selector (create form) — generator pattern. CODE-CONFIRMED.
@@ -268,9 +271,11 @@ public static class CharacterSelectLayout
     //   UI index 3 → internal 2.  spec: frontend_scenes.md §4.1. CODE-CONFIRMED.
     public static readonly uint[] ClassLabelMsgIds = [14003u, 14004u, 14005u, 14006u, 14007u]; // CODE-CONFIRMED
 
-    // English fallbacks for class labels (used when VFS is absent; IDs 14003..14007 in msg.xdb).
-    // Array index = UI-select index 0..3; index 4 = "(unknown)" placeholder for msg id 14007.
-    public static readonly string[] ClassLabelFallbacks = ["Musa", "Tao", "Blader", "Warrior", "(unknown)"];
+    // Class label fallbacks: empty strings — faithfully empty offline; no hardcoded English class names.
+    // spec: Docs/RE/specs/frontend_scenes.md §4.1 — class names come from msg.xdb CP949 only; no hardcoded text.
+    // Array index = UI-select index 0..3; index 4 = placeholder for msg id 14007.
+    public static readonly string[] ClassLabelFallbacks =
+        [string.Empty, string.Empty, string.Empty, string.Empty, string.Empty];
 
     // =========================================================================
     // §9 Per-slot stage positions for 3D previews. spec: frontend_scenes.md §3.3. CODE-CONFIRMED.

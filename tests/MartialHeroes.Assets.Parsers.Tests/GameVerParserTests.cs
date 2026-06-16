@@ -134,22 +134,25 @@ public sealed class GameVerParserTests
     }
 
     // =========================================================================
-    // 5. Corrupt: buffer not exactly 28 bytes → InvalidDataException
+    // 5. Variable-length: accept >= 7 elements aligned to 4 bytes; reject otherwise
     // =========================================================================
 
     [Fact]
     public void Parse_TooShort_ThrowsInvalidDataException()
     {
-        // spec: Docs/RE/formats/game_ver.md §7 §Identification —
-        //   "Size: exactly 28 bytes": CONFIRMED.
-        byte[] buf = new byte[27]; // one byte short
+        // 24 bytes = only 6 u32 elements — fewer than the required minimum of 7.
+        // spec: Docs/RE/formats/game_ver.md §Identification —
+        //   "minimum 7 elements (28 bytes); shorter = rejected": CONFIRMED.
+        byte[] buf = new byte[24]; // 6 elements — too short
         Assert.Throws<InvalidDataException>(() => GameVerParser.Parse(new ReadOnlyMemory<byte>(buf)));
     }
 
     [Fact]
-    public void Parse_TooLong_ThrowsInvalidDataException()
+    public void Parse_NotAlignedToFourBytes_ThrowsInvalidDataException()
     {
-        // Exactly 29 bytes — must be rejected.
+        // 29 bytes — not a multiple of 4 — must be rejected regardless of length.
+        // spec: Docs/RE/formats/game_ver.md §Identification —
+        //   "size % 4 == 0 && count >= 7": CONFIRMED.
         byte[] buf = new byte[29];
         Assert.Throws<InvalidDataException>(() => GameVerParser.Parse(new ReadOnlyMemory<byte>(buf)));
     }
@@ -158,6 +161,33 @@ public sealed class GameVerParserTests
     public void Parse_EmptyBuffer_ThrowsInvalidDataException()
     {
         Assert.Throws<InvalidDataException>(() => GameVerParser.Parse(ReadOnlyMemory<byte>.Empty));
+    }
+
+    [Fact]
+    public void Parse_LongerThan28Bytes_AlignedMultiple_IsAccepted()
+    {
+        // 32 bytes = 8 × u32LE — more than 7 elements; must be tolerated (trailing elements ignored).
+        // spec: Docs/RE/formats/game_ver.md §Login version gate —
+        //   "requires count >= 7; longer files tolerated": CONFIRMED.
+        byte[] buf = new byte[32]; // 8 elements — should parse fine
+        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(0x14, 4), 2114u); // version_source = 2114
+        GameVerData result = GameVerParser.Parse(new ReadOnlyMemory<byte>(buf));
+
+        // The 7 canonical fields decode as normal; trailing 8th element is ignored.
+        Assert.Equal(2114u, result.VersionSourceField);
+        Assert.Equal(21149u, result.EnterGameVersionToken);
+    }
+
+    [Fact]
+    public void Parse_ExactlySevenElements_IsAccepted()
+    {
+        // 28 bytes = 7 × u32LE — the canonical shipping file size; must always be accepted.
+        // spec: Docs/RE/formats/game_ver.md §Identification — "canonical shipping file 28 bytes": CONFIRMED.
+        byte[] buf = BuildGameVer(f5: 100u);
+        GameVerData result = GameVerParser.Parse(new ReadOnlyMemory<byte>(buf));
+
+        Assert.Equal(100u, result.VersionSourceField);
+        Assert.Equal(1009u, result.EnterGameVersionToken); // 10×100+9 = 1009
     }
 
     // =========================================================================

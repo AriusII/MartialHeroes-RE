@@ -442,8 +442,16 @@ public static class LoginLayout
     public const uint MsgVersionMismatch = 2204; // game.ver mismatch → show this, then quit. spec §1.4. CODE-CONFIRMED.
 
     // Quit-confirm prompts. spec §1.9. CODE-CONFIRMED.
-    public const uint MsgQuitConfirm1 = 4023;
-    public const uint MsgQuitConfirm2 = 4024;
+    // NOTE (A1 IDA, §1.8): 4023/4024 + buttons 113/114 are actually the SERVER-LIST RE-FETCH popup
+    // (advance to tick substate 34), NOT the client-quit confirm. The genuine quit-confirm is the
+    // shared ExitPanel (caption msg 2007, Yes=action 50 / No=action 51). At the login GameState the
+    // original ExitPanel "Yes" is INERT (no GameState-1 case → real quit was the OS window-close edge,
+    // debugger-pending). The revival makes the 종료 (Exit) button functional via this ExitPanel caption.
+    public const uint MsgQuitConfirm1 = 4023; // server-list re-fetch popup #1 (NOT quit). spec §1.8.
+    public const uint MsgQuitConfirm2 = 4024; // server-list re-fetch popup #2 (NOT quit). spec §1.8.
+
+    // The genuine shared ExitPanel quit-confirm caption. spec: frontend_scenes.md §1.8 (CODE-CONFIRMED).
+    public const uint MsgExitPanel = 2007; // ExitPanel quit-confirm caption (Yes=50 / No=51). spec §1.8.
 
     // Login validation error toasts. spec §1.4 / §1.9. CODE-CONFIRMED.
     public const uint MsgErrShortId = 4025; // ID length < 4

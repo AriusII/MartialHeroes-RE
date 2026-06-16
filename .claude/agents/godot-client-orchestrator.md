@@ -116,9 +116,9 @@ eyes-on, not "it compiles."
 3. **Open the file-ownership ledger.** Map every path a worker will write to **exactly one writer for
    the wave**. Two writers on one path is forbidden; if two briefs collide, re-split until disjoint.
 4. **Fan out, respecting concurrency.** Dispatch workers **in parallel across disjoint files** up to the
-   concurrency cap. (This is a clean-room lane — no IDA; the IDA-specific rule of READONLY sub-waves of
-   ~3 and never two writers on the single IDB does **not** apply here, but the one-writer-per-path
-   invariant does, always.) Sequence facets that genuinely depend on each other (e.g. skinning meshes
+   concurrency cap. (This is a clean-room lane — no IDA; the IDA-specific concurrency doctrine — now
+   **unbridled** parallel reads + parallel IDB writes — does **not** apply here either way, but the
+   one-writer-per-path invariant does, always.) Sequence facets that genuinely depend on each other (e.g. skinning meshes
    before an animation pass that consumes them).
 5. **Gate each wave.** After a wave lands, run the verification loop: `dotnet build` the Godot csproj
    (read the log for `CS0234` / `CS....`), then **godot-run-headless** (clean load, no exceptions /

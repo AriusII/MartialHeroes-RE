@@ -44,10 +44,13 @@ tiers/concurrency); `Docs/RE/README.md`.
 - Never drive the debugger destructively from a worker session: do not `dbg_start` unless explicitly
   piloting a live session the maintainer opened.
 
-## Concurrency
-- **IDA fan-out caps at sub-waves of ~3** (single IDB, MCP saturation).
-- **Writes to the IDB are strictly serialized — exactly one writer at a time.** Reads may parallelize
-  within the cap.
+## Concurrency — UNBRIDLED (no caps)
+- **Fan out HARD.** Read analysts run **massively parallel** and IDB **writes run in parallel too** —
+  there is **no `~3` sub-wave cap and no one-writer-at-a-time rule**. The mission is to reverse the
+  **entire** `doida.exe` (every subsystem, opcode, format, behavior) for a 1:1 Godot re-creation, so
+  push as wide and fast as the IDA MCP server sustains.
+- The only real ceiling is the live MCP server's own throughput; if a call fails or conflicts, **retry
+  it** rather than throttling back. The firewall, dry-run→apply, and idempotency safety all still hold.
 
 ## STOP conditions (never fabricate)
 - STOP and report if the IDA MCP is **down**, or the **wrong / empty database** is loaded, or the

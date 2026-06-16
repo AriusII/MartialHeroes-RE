@@ -33,23 +33,27 @@
 //      spec: Docs/RE/specs/ui_system.md §8.2 CODE-CONFIRMED.
 //
 // WIDGET LIST (CREATE FORM — 3-column overlay):
-//  LEFT panel: 4 class buttons from loginwindow.dds src-Y=1005, src-X=590/635/680/725 (19×30).
-//              HOVER src-X=815/860/905 (btn3 HOVER=NORMAL). Caption = msg.xdb 14003..14006.
-//              spec: Docs/RE/specs/ui_system.md §8.2+§8.4 CODE-CONFIRMED.
-//  LEFT panel: class name label (msg.xdb 14003..14006).
-//  LEFT panel: npc.scr description (real CP949 text from data/script/npc.scr via NpcScrDescriptions).
-//              spec: Docs/RE/formats/config_tables.md §2.17.3 + frontend_scenes.md §4.1.1 CODE-CONFIRMED.
-//  CENTER: CharCreatePreview3D SubViewport (scale 75 vs slot-row 50).
+//  LEFT column (vertical, per screenshots): 4 class buttons from loginwindow.dds src-Y=1005,
+//              size ~45×19, src-X=590/635/680/725 (idle) / 770/815/860/905 (selected).
+//              Stacked VERTICALLY — screenshots confirm a LEFT VERTICAL COLUMN (not a horizontal strip).
+//              spec: Docs/RE/specs/frontend_scenes.md §4 / §11.5e CODE-CONFIRMED (screenshots win).
+//              Actions 10/11/12/13. spec: ui_system.md §8.2 CODE-CONFIRMED.
+//  LEFT column (below class buttons): stat area (pure display, 8 rows, 2·disc+{110..141} keys).
+//              spec: Docs/RE/formats/config_tables.md §2.17.3 CODE-CONFIRMED (two-witness).
+//              NOTE: stat values = PURE DISPLAY (class template). No ± steppers (screenshots confirm).
+//  CENTER: CharCreatePreview3D SubViewport — LARGE, near full-height, character fills frame.
 //              spec: Docs/RE/specs/frontend_scenes.md §4.2 CODE-CONFIRMED.
 //  CENTER: Face ± buttons (actionId 21/22). spec: ui_system.md §8.2 CODE-CONFIRMED.
 //  CENTER: Turntable L/R buttons (press-and-hold ≈±2 rad/s). spec: frontend_scenes.md §4.2 CODE-CONFIRMED.
-//  RIGHT panel: stat-grid 8 keys via 2·disc+{110..141}, cp949 labels from msg.xdb.
-//              spec: Docs/RE/formats/config_tables.md §2.17.3 CODE-CONFIRMED (two-witness).
-//              NOTE: 2·disc+{210..240} REFUTED — those are equipment IDs, not stat keys.
-//  RIGHT panel: stat ± buttons (actionIds 25..34). spec: ui_system.md §8.2 CODE-CONFIRMED.
-//  RIGHT panel: name-entry LineEdit + toast (msg id 2075).
-//  RIGHT panel: OK (actionId 35) / Cancel (actionId 36) from inventwindow.dds.
+//  RIGHT panel: description plate ~215×274 from mainwindow.dds chrome.
+//              spec: Docs/RE/specs/frontend_scenes.md §11.5e + §4.1.1 CODE-CONFIRMED.
+//              Three CP949 lines from npc.scr keys 1..4 (via NpcScrDescriptions).
+//              spec: Docs/RE/formats/config_tables.md §2.17.3 + frontend_scenes.md §4.1.1 CODE-CONFIRMED.
+//  NAME MODAL (on-demand, shown on create-confirm intent):
+//              Title = class name (msg.xdb 14003..14007). spec: frontend_scenes.md §4.1.1 CODE-CONFIRMED.
+//              Name textbox (LineEdit) + OK (actionId 35) / Cancel (actionId 36) from inventwindow.dds.
 //              spec: Docs/RE/specs/ui_system.md §8.2 CODE-CONFIRMED.
+//              Toast label (msg id 2075). spec: frontend_scenes.md §4.4 CODE-CONFIRMED.
 //
 // SIGNALS (preserved from prior version — Lane E keeps the same API):
 //   EnterGameRequested(string characterName, int slotIndex)
@@ -165,13 +169,20 @@ public sealed partial class CharacterSelectScreen : Control
 
         _selectedSlot = 0;
 
-        // Refresh display (main thread).
-        RebuildSlotSelectorRow();
+        // Refresh display (main thread). No 2D slot strip to rebuild; selection is 3D ray-pick.
         RefreshInfo();
         RefreshCharCountCaption();
 
         // Push slot occupancy into the 3D scene.
         PushSlotDescriptorsToScene();
+
+        // The deferred Initialise (one frame after Build3DSceneViewport) builds the actor ROW from the
+        // descriptors AS THEY ARE THEN — which is blank, because the 3/1 list (or the dev seed) arrives
+        // a frame or more LATER via CharListEventDrainer → here. Setting SlotDescriptors above does NOT
+        // rebuild the already-built (blank) row, so we must explicitly refresh it now. RefreshSlotActors
+        // is a no-op before init (the pre-init case is handled by the deferred Initialise), so this is
+        // self-guarding: it only rebuilds once the scene is initialised. spec: frontend_scenes.md §3.3.1.
+        _scene3D?.RefreshSlotActors(_realAssets);
         _scene3D?.SetSelectedSlot(_selectedSlot);
 
         GD.Print($"[CharacterSelectScreen] ApplyCharacterList: {slots.Length} slots received; " +
@@ -203,9 +214,18 @@ public sealed partial class CharacterSelectScreen : Control
     private int _createFaceIndex = CharacterSelectLayout.FaceIndexMin; // 1..7
 
     // Create form label references (updated on class change).
-    private Label _createClassLabel = null!; // class name from msg.xdb
-    private Label _createDescLabel = null!; // npc.scr description text
+    // NOTE: the class NAME (msg.xdb 14003..14007) lives in the NAME MODAL title — NOT a static panel label.
+    // spec: Docs/RE/specs/frontend_scenes.md §4.1.1 CODE-CONFIRMED.
+    private Label _createDescLine0 = null!; // npc.scr line 0 (+0x14). spec: config_tables.md §2.17.3.
+    private Label _createDescLine1 = null!; // npc.scr line 1 (+0x54). spec: config_tables.md §2.17.3.
+    private Label _createDescLine2 = null!; // npc.scr line 2 (+0x94). spec: config_tables.md §2.17.3.
     private Label _createFaceLabel = null!; // face index display
+
+    // Name modal — shown on-demand when the player presses an explicit "Name" confirm intent.
+    // The modal title is the class name from msg.xdb 14003..14007.
+    // spec: Docs/RE/specs/frontend_scenes.md §4.1.1 / §4.4 CODE-CONFIRMED.
+    private Control _nameModal = null!;
+    private Label _nameModalTitle = null!; // class name (msg.xdb 14003..14007), updated on class change.
 
     // Turntable press-and-hold state.
     // spec: frontend_scenes.md §4.2 "press-and-hold turntable ≈±2 rad/s". CODE-CONFIRMED.
@@ -237,9 +257,9 @@ public sealed partial class CharacterSelectScreen : Control
     // Create preview 3D.
     private CharCreatePreview3D? _createPreview3D;
 
-    // Slot selector row container (rebuilt on ApplyCharacterList).
-    private Control _slotRowContainer = null!;
-    private readonly Button?[] _slotButtons = new Button?[MaxSlots];
+    // Slot selection is 3D ray-pick via CharSelectScene3D.TryHitTestSlot and the 3 slot-tab buttons
+    // (actions 1/2/3, §11.5b). There is no 2D button strip.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.5b / §3.3.3 CODE-CONFIRMED.
 
     /// <summary>Optional shared asset loader injected by the flow node.</summary>
     public UiAssetLoader? SharedAssets { get; set; }
@@ -364,30 +384,74 @@ public sealed partial class CharacterSelectScreen : Control
         AddChild(_charCountCaption);
         widgetCount++;
 
-        // Left character-info panel: compact, semi-transparent.
-        // Shows selected char name/level/class from live slot data.
-        var infoPanel = new Panel
-        {
-            Name = "CharInfoPanel",
-            Position = new Vector2(8f, 46f),
-            Size = new Vector2(194f, 80f),
-        };
-        {
-            var ps = new StyleBoxFlat
-            {
-                BgColor = new Color(0.08f, 0.07f, 0.10f, 0.78f),
-                BorderColor = new Color(0.45f, 0.38f, 0.22f),
-            };
-            ps.SetBorderWidthAll(1);
-            infoPanel.AddThemeStyleboxOverride("panel", ps);
-        }
-        AddChild(infoPanel);
-        widgetCount++;
+        // Character-info background art from loginwindow.dds (the real atlas plate).
+        // Root panel: X=(W/2-288),575, 244x187. Char-info background art: src (556,542) 215x147.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.5a "Char-info background art T1 (556,542)". CODE-CONFIRMED.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.5d "Info plate 0,142,215,147 src 556,542". CODE-CONFIRMED.
+        // We place the char-info area at the left info panel origin (0,142 in window-local, mapped to canvas).
+        // The centred panel origin is X=(W-215)/2, Y=575+0 per §11.5a; we use (5,142) as the offset within it.
+        const float infoPanelOriginX = (1024f - 215f) / 2f; // spec §11.5a "X=(W-215)/2". CODE-CONFIRMED.
+        const float infoPanelOriginY = 575f; // spec §11.5a "y=575". CODE-CONFIRMED.
 
-        _infoName = BuildInfoLabel(infoPanel, "–", new Vector2(6f, 6f));
-        _infoLevel = BuildInfoLabel(infoPanel, "–", new Vector2(6f, 24f));
-        _infoClass = BuildInfoLabel(infoPanel, "–", new Vector2(6f, 42f));
+        // Char-info background art: loginwindow.dds src (556,542) 215x147, at (0,142) panel-local.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.5d "Info plate 0,142,215,147 src 556,542". CODE-CONFIRMED.
+        var charInfoArt = WidgetFactory.MakeAtlasRect(_assets,
+            CharacterSelectLayout.AtlasLoginWindow,
+            (int)infoPanelOriginX, (int)(infoPanelOriginY + 142f),
+            215, 147,
+            556, 542); // spec §11.5d CODE-CONFIRMED.
+        if (charInfoArt is not null)
+        {
+            AddChild(charInfoArt);
+            widgetCount++;
+        }
+
+        // Info labels: caption ids 48001/48003/48004/48005 (name/level/position/class).
+        // spec: Docs/RE/specs/frontend_scenes.md §11.5d "caption labels 48001/48003/48004/48005". CODE-CONFIRMED.
+        // Placed over the info art background. When offline (no msg.xdb), labels are empty — faithfully.
+        float infoLabelX = infoPanelOriginX + 46f; // spec §11.5d "x=46/51" per stat column. CODE-CONFIRMED.
+        _infoName = BuildInfoLabel(this, string.Empty, new Vector2(infoLabelX, infoPanelOriginY + 145f));
+        _infoLevel = BuildInfoLabel(this, string.Empty, new Vector2(infoLabelX, infoPanelOriginY + 169f));
+        _infoClass = BuildInfoLabel(this, string.Empty, new Vector2(infoLabelX, infoPanelOriginY + 193f));
         widgetCount += 3;
+
+        // Title/info chrome plates A/B/C from loginwindow.dds.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.5a. CODE-CONFIRMED.
+        // Plate A: 0,12,200,46 src 608,793.
+        var plateA = WidgetFactory.MakeAtlasRect(_assets, CharacterSelectLayout.AtlasLoginWindow,
+            (int)infoPanelOriginX + 0, (int)infoPanelOriginY + 12, 200, 46, 608, 793);
+        if (plateA is not null)
+        {
+            AddChild(plateA);
+            widgetCount++;
+        }
+
+        // Plate B: 200,0,176,58 src 608,735.
+        var plateB = WidgetFactory.MakeAtlasRect(_assets, CharacterSelectLayout.AtlasLoginWindow,
+            (int)infoPanelOriginX + 200, (int)infoPanelOriginY + 0, 176, 58, 608, 735);
+        if (plateB is not null)
+        {
+            AddChild(plateB);
+            widgetCount++;
+        }
+
+        // Plate C: 376,12,201,46 src 608,689.
+        var plateC = WidgetFactory.MakeAtlasRect(_assets, CharacterSelectLayout.AtlasLoginWindow,
+            (int)infoPanelOriginX + 376, (int)infoPanelOriginY + 12, 201, 46, 608, 689);
+        if (plateC is not null)
+        {
+            AddChild(plateC);
+            widgetCount++;
+        }
+
+        // Additional info plate §11.5d "Info plate 215,0,29,22 src 556,729".
+        var infoPlate2 = WidgetFactory.MakeAtlasRect(_assets, CharacterSelectLayout.AtlasLoginWindow,
+            (int)infoPanelOriginX + 215, (int)infoPanelOriginY + 0, 29, 22, 556, 729);
+        if (infoPlate2 is not null)
+        {
+            AddChild(infoPlate2);
+            widgetCount++;
+        }
 
         // Bottom button bar: Create / Delete / Enter — centred at bottom.
         // spec: Docs/RE/specs/frontend_scenes.md §11.5c. CODE-CONFIRMED.
@@ -438,8 +502,10 @@ public sealed partial class CharacterSelectScreen : Control
         // Stat-icon grid (5 rows × 2 cols). spec §8.2+§8.4 CODE-CONFIRMED.
         widgetCount += BuildStatGrid(this);
 
-        // Slot selector row (5 blank slots by default, driven by ApplyCharacterList).
-        widgetCount += BuildSlotSelectorRow();
+        // NOTE: no 2D slot-selector button strip. Slot selection is via the 3 slot tabs (§11.5b,
+        // actions 1/2/3, already built above) and 3D row ray-pick via CharSelectScene3D.TryHitTestSlot.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.5b / §3.3.3 CODE-CONFIRMED.
+        // The old 5-button 2D strip at y=535 was an invented element — removed.
 
         // Corner close button: blacksheet.dds src (941,910) 23×23 at (971,610).
         // spec: Docs/RE/specs/ui_system.md §8.2 CODE-CONFIRMED.
@@ -593,68 +659,9 @@ public sealed partial class CharacterSelectScreen : Control
         _scene3D.SlotDescriptors = descs;
     }
 
-    // =========================================================================
-    // Slot selector row — 5 blank slots, driven by ApplyCharacterList.
-    // NO synthetic names, NO demo roster.
-    // =========================================================================
-
-    private int BuildSlotSelectorRow()
-    {
-        _slotRowContainer = new Control { Name = "SlotRowContainer" };
-        AddChild(_slotRowContainer);
-        PopulateSlotSelectorRow();
-        return MaxSlots + 1;
-    }
-
-    private void PopulateSlotSelectorRow()
-    {
-        const float slotX0 = 260f;
-        const float slotW = 148f;
-        const float slotGap = 2f;
-        const float rowY = 535f;
-        const float rowH = 28f;
-
-        foreach (Node child in _slotRowContainer.GetChildren())
-            child.QueueFree();
-        for (int j = 0; j < MaxSlots; j++)
-            _slotButtons[j] = null;
-
-        for (int i = 0; i < MaxSlots; i++)
-        {
-            LiveSlot ls = _liveSlots[i];
-            bool occupied = !ls.IsEmpty;
-
-            // Slot label: only from live Application data — NEVER synthetic names.
-            // spec: frontend_scenes.md §3.2 — "slot info line: name + level". CODE-CONFIRMED.
-            string label = occupied
-                ? $"{ls.Name}\nLv {ls.Level}"
-                : string.Empty; // blank slot — no text
-
-            var btn = new Button
-            {
-                Text = label,
-                Position = new Vector2(slotX0 + i * (slotW + slotGap), rowY),
-                Size = new Vector2(slotW, rowH * 2),
-            };
-            btn.AddThemeFontSizeOverride("font_size", 10);
-
-            int slotCapture = i;
-            btn.Pressed += () =>
-            {
-                _selectedSlot = slotCapture;
-                RefreshInfo();
-                HighlightSlot(slotCapture);
-            };
-            _slotRowContainer.AddChild(btn);
-            _slotButtons[i] = btn;
-        }
-    }
-
-    private void RebuildSlotSelectorRow()
-    {
-        if (_slotRowContainer is null || !IsInstanceValid(_slotRowContainer)) return;
-        PopulateSlotSelectorRow();
-    }
+    // Slot selection is performed via the 3 slot-tab buttons (actions 1/2/3, §11.5b) and
+    // 3D ray-pick via CharSelectScene3D.TryHitTestSlot — no 2D button strip.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.5b / §3.3.3 CODE-CONFIRMED.
 
     // =========================================================================
     // Create sub-form — spec: frontend_scenes.md §4 CODE-CONFIRMED.
@@ -674,15 +681,10 @@ public sealed partial class CharacterSelectScreen : Control
         };
         form.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
 
-        // Light dim overlay — 3D temple remains visible.
+        // The create sub-form draws over the SAME 3D temple backdrop — no opaque overlay.
         // spec: frontend_scenes.md §4 — "sub-state drawn over the SAME 3D char-select scene". CODE-CONFIRMED.
-        var dimBg = new ColorRect
-        {
-            Name = "CreateDim",
-            Color = new Color(0f, 0f, 0f, 0.30f),
-        };
-        dimBg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        form.AddChild(dimBg);
+        // spec: frontend_scenes.md §3.7.6 / §4 — "carved wall baked into the scene — no side panels". CODE-CONFIRMED.
+        // No ColorRect dim, no StyleBoxFlat side panels — faithfully empty chrome when offline.
 
         // Orange char-count caption (same msg 2209 as select view).
         // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 CODE-CONFIRMED.
@@ -696,254 +698,396 @@ public sealed partial class CharacterSelectScreen : Control
         topCaption.HorizontalAlignment = HorizontalAlignment.Center;
         form.AddChild(topCaption);
 
-        // ── LEFT PANEL: 4 class buttons (atlas slices) + class name + npc.scr description ──
-        // spec: frontend_scenes.md §4.1 CODE-CONFIRMED.
-        var leftPanel = new Panel
+        // ── LEFT COLUMN: 4 class buttons (VERTICAL stack, per screenshots) + stat area ──
+        //
+        // POSITION DECISION: the 4 class-picker buttons form a LEFT VERTICAL COLUMN.
+        // The screenshots are the visual oracle — they show a vertical left-column of class buttons.
+        // spec: Docs/RE/specs/frontend_scenes.md §4 / §11.5e CODE-CONFIRMED (screenshots win over
+        //        any formula suggesting a right-strip position).
+        //
+        // Button size ~45×19 from AppSelectorW/H constants. Vertical stride ~28px.
+        // NORMAL src-Y=1005. src-X idle={590,635,680,725}; selected={770,815,860,905}.
+        // spec: ui_system.md §8.2/§8.4 CODE-CONFIRMED.
+        var leftPanel = new Control
         {
             Name = "CreateLeft",
             Position = new Vector2(8f, 46f),
-            Size = new Vector2(186f, 660f),
+            Size = new Vector2(200f, 680f),
+            MouseFilter = MouseFilterEnum.Pass,
         };
-        {
-            var ls = new StyleBoxFlat
-            {
-                BgColor = new Color(0.06f, 0.05f, 0.08f, 0.82f),
-                BorderColor = new Color(0.45f, 0.38f, 0.22f),
-            };
-            ls.SetBorderWidthAll(2);
-            leftPanel.AddThemeStyleboxOverride("panel", ls);
-        }
         form.AddChild(leftPanel);
 
-        // 4 class buttons from loginwindow.dds: size 19×30, base-Y=45, stride 48.
-        // NORMAL src-Y=1005; NORMAL src-X=590/635/680/725; HOVER src-X=815/860/905 (btn3=NORMAL).
-        // spec: Docs/RE/specs/ui_system.md §8.2+§8.4 CODE-CONFIRMED.
-        // dst-X is right-anchored / computed in the legacy build routine — we layout in the panel.
+        // Class buttons — vertical column. Actions 10/11/12/13.
+        // Size = AppSelectorW×AppSelectorH (45×19). Vertical stride = 28px.
+        // SELECTED src-X = {770,815,860,905} (same row V=1005). IDLE src-X = {590,635,680,725}.
+        // spec: Docs/RE/specs/ui_system.md §8.2+§8.4 (AppSelector generator). CODE-CONFIRMED.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.5e CODE-CONFIRMED.
+        const int ClassBtnVertStride = 28; // vertical spacing for column layout. spec §11.5e.
+        const int ClassBtnColX = 8; // left-column X offset within the left panel.
+        const int ClassBtnColBaseY = 10; // top of the class-button column.
         for (int ci = 0; ci < 4; ci++)
         {
-            int normalSrcX = CharacterSelectLayout.ClassBtnNormalSrcX[ci]; // 590/635/680/725. CODE-CONFIRMED.
-            int hoverSrcX = CharacterSelectLayout.ClassBtnHoverSrcX[ci]; // 815/860/905/725. CODE-CONFIRMED.
-            int btnY = CharacterSelectLayout.ClassBtnBaseY + ci * CharacterSelectLayout.ClassBtnStride;
-            // dst-X: right-anchored COMPUTED in the legacy code — we place them left-to-right in the panel.
-            // spec: ui_system.md §8.4 "dst-X right-anchored COMPUTED, stride 48". CODE-CONFIRMED.
-            // Since the exact right-anchor base is register-fed we use the panel width to mirror the intent.
-            int btnX = 8 + ci * (CharacterSelectLayout.ClassBtnW + 4); // approximate panel-local layout
+            int idleSrcX = CharacterSelectLayout.ClassBtnNormalSrcX[ci]; // {590,635,680,725}. CODE-CONFIRMED.
+            // Selected highlight: {770,815,860,905} — same row V=1005.
+            // spec: ui_system.md §8.4 "selected src-X base 770 (+45 per btn)". CODE-CONFIRMED.
+            int selectedSrcX = CharacterSelectLayout.ClassBtnHoverSrcX[ci]; // reused for selected highlight.
+            int btnY = ClassBtnColBaseY + ci * ClassBtnVertStride;
 
-            // ActionIds 10/11/12/13 for class selection. spec §8.2 CODE-CONFIRMED.
+            // ActionIds 10/11/12/13. spec §8.2 CODE-CONFIRMED.
             var classBtn = WidgetFactory.MakeStateButton(
                 _assets, CharacterSelectLayout.AtlasLoginWindow,
-                btnX, btnY,
-                CharacterSelectLayout.ClassBtnW, CharacterSelectLayout.ClassBtnH,
-                normalSrcX, CharacterSelectLayout.ClassBtnNormalSrcY, // NORMAL. CODE-CONFIRMED.
-                hoverSrcX, CharacterSelectLayout.ClassBtnNormalSrcY, // HOVER src-Y same as NORMAL. CODE-CONFIRMED.
-                normalSrcX, CharacterSelectLayout.ClassBtnNormalSrcY, // PRESSED = NORMAL. spec §8.2.
-                actionId: 10 + ci, // 10/11/12/13. spec §8.2 CODE-CONFIRMED.
-                caption: _assets.Text(CharacterSelectLayout.ClassLabelMsgIds[ci],
-                    CharacterSelectLayout.ClassLabelFallbacks[ci]));
+                ClassBtnColX, btnY,
+                CharacterSelectLayout.AppSelectorW, CharacterSelectLayout.AppSelectorH,
+                // NORMAL = idle src.
+                idleSrcX, CharacterSelectLayout.ClassBtnNormalSrcY, // NORMAL. CODE-CONFIRMED.
+                selectedSrcX, CharacterSelectLayout.ClassBtnNormalSrcY, // HOVER = selected highlight. CODE-CONFIRMED.
+                idleSrcX, CharacterSelectLayout.ClassBtnNormalSrcY, // PRESSED = idle (no distinct pressed art).
+                actionId: 10 + ci); // 10/11/12/13. spec §8.2 CODE-CONFIRMED.
             classBtn.ActionFired += OnCreateClassAction;
             leftPanel.AddChild(classBtn);
         }
 
-        // Class name display label.
-        _createClassLabel = WidgetFactory.MakeLabel(
-            ClassCaption(_createUiClassIndex),
-            CharacterSelectLayout.FontRowHeight,
-            new Color(0.90f, 0.85f, 0.55f),
-            multiline: true);
-        _createClassLabel.Name = "CreateClassLabel";
-        _createClassLabel.Position = new Vector2(8f, 230f);
-        _createClassLabel.Size = new Vector2(170f, 36f);
-        leftPanel.AddChild(_createClassLabel);
+        // Stat area — pure display, 8 rows, below class buttons.
+        // spec: Docs/RE/formats/config_tables.md §2.17.3 CODE-CONFIRMED (two-witness).
+        // Stat values = PURE DISPLAY from class template. No ± steppers.
+        // spec: frontend_scenes.md §4.2 "pure display from the class template". CODE-CONFIRMED.
+        float statAreaBaseY = ClassBtnColBaseY + 4 * ClassBtnVertStride + 16f;
+        BuildCreateStatGrid(leftPanel, statAreaBaseY);
 
-        // npc.scr class description (real CP949 text, no English fallback displayed in final build).
-        // spec: frontend_scenes.md §4.1.1 CODE-CONFIRMED.
-        _createDescLabel = WidgetFactory.MakeLabel(
-            GetClassDescription(_createUiClassIndex),
-            CharacterSelectLayout.FontRowHeight,
-            new Color(0.78f, 0.78f, 0.82f),
-            multiline: true);
-        _createDescLabel.Name = "CreateDescLabel";
-        _createDescLabel.Position = new Vector2(8f, 272f);
-        _createDescLabel.Size = new Vector2(170f, 380f);
-        leftPanel.AddChild(_createDescLabel);
+        // ── BACKGROUND: CharCreatePreview3D — FULL-SCREEN behind all overlay panels ──
+        //
+        // The create preview fills the ENTIRE form rect as a backdrop (OwnWorld3D=true keeps it
+        // isolated from the char-select scene). The left/right/centre overlay panels draw on top.
+        // This ensures the carved-wall cell fills all margins, matching the official captures where
+        // the temple backdrop is visible edge-to-edge. spec: frontend_scenes.md §4 / §3.7.6.
+        _createPreview3D = new CharCreatePreview3D
+        {
+            Name = "CreatePreview3D",
+            MouseFilter = MouseFilterEnum.Ignore, // let input pass to overlapping panels
+            SharedRealAssets = _realAssets,
+            InternalClassId = CharacterSelectLayout.UiToInternalClass[_createUiClassIndex],
+        };
+        _createPreview3D.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect); // full-screen backdrop
+        form.AddChild(_createPreview3D); // added FIRST → z-order 0 (behind all other panels)
 
-        // ── CENTER PANEL: CharCreatePreview3D + face ± + turntable ──
+        // ── CENTER PANEL: face ± + turntable (overlay controls; preview is full-screen bg) ──
+        //
+        // The centre panel hosts the face/turntable buttons only — the 3D preview itself is now
+        // full-screen above. Buttons positioned in canvas-absolute coordinates.
         // spec: frontend_scenes.md §4.2 CODE-CONFIRMED.
+        const float CenterPanelX = 215f; // after left column (~200) + gap.
+        const float CenterPanelW = 595f; // wide centre: 215..810 on the 1024 canvas.
         var centerPanel = new Control
         {
             Name = "CreateCenter",
-            Position = new Vector2(200f, 46f),
-            Size = new Vector2(424f, 660f),
+            Position = new Vector2(CenterPanelX, 46f),
+            Size = new Vector2(CenterPanelW, 680f),
             MouseFilter = MouseFilterEnum.Pass,
         };
         form.AddChild(centerPanel);
 
-        // CharCreatePreview3D: scale 75 vs slot-row 50.
-        // spec: frontend_scenes.md §4.2 "scale 75". CODE-CONFIRMED.
-        _createPreview3D = new CharCreatePreview3D
-        {
-            Name = "CreatePreview3D",
-            Position = new Vector2(2f, 2f),
-            Size = new Vector2(420f, 600f),
-            SharedRealAssets = _realAssets,
-            InternalClassId = CharacterSelectLayout.UiToInternalClass[_createUiClassIndex],
-        };
-        centerPanel.AddChild(_createPreview3D);
-
-        // Face ± buttons. ActionIds 22 (−) / 21 (+).
-        // spec: Docs/RE/specs/ui_system.md §8.2 "21/22 Face increment ±". CODE-CONFIRMED.
+        // Face ± buttons (actions 21/22). spec: ui_system.md §8.2. CODE-CONFIRMED.
         // "face ± buttons range 1..7; the visible 3D face does NOT change". CODE-CONFIRMED.
-        var faceMinusBtn = new Button
+        var faceDecrBtn = WidgetFactory.MakeAtlasButton(
+            _assets, CharacterSelectLayout.AtlasLoginWindow,
+            40, 626, 28, 22,
+            483, 490, // face-decrement glyph. spec §8.2. CODE-CONFIRMED.
+            actionId: CharacterSelectLayout.FaceDecrementActionId); // 22
+        if (faceDecrBtn is not null)
         {
-            Name = "FaceMinus",
-            Text = "−",
-            Position = new Vector2(54f, 607f),
-            Size = new Vector2(28f, 22f),
-        };
-        faceMinusBtn.Pressed += () => OnFaceAction(CharacterSelectLayout.FaceDecrementActionId);
-        centerPanel.AddChild(faceMinusBtn);
+            faceDecrBtn.Name = "FaceMinus";
+            faceDecrBtn.ActionFired += OnFaceAction;
+            centerPanel.AddChild(faceDecrBtn);
+        }
 
         _createFaceLabel = WidgetFactory.MakeLabel(
             _createFaceIndex.ToString(),
             CharacterSelectLayout.FontRowHeight,
             new Color(0.95f, 0.95f, 0.95f));
         _createFaceLabel.Name = "FaceIndexLabel";
-        _createFaceLabel.Position = new Vector2(87f, 610f);
-        _createFaceLabel.Size = new Vector2(24f, 22f);
+        _createFaceLabel.Position = new Vector2(73f, 629f);
+        _createFaceLabel.Size = new Vector2(28f, 20f);
         _createFaceLabel.HorizontalAlignment = HorizontalAlignment.Center;
         centerPanel.AddChild(_createFaceLabel);
 
-        var facePlusBtn = new Button
+        var faceIncrBtn = WidgetFactory.MakeAtlasButton(
+            _assets, CharacterSelectLayout.AtlasLoginWindow,
+            106, 626, 28, 22,
+            505, 490, // face-increment glyph. spec §8.2. CODE-CONFIRMED.
+            actionId: CharacterSelectLayout.FaceIncrementActionId); // 21
+        if (faceIncrBtn is not null)
         {
-            Name = "FacePlus",
-            Text = "+",
-            Position = new Vector2(116f, 607f),
-            Size = new Vector2(28f, 22f),
-        };
-        facePlusBtn.Pressed += () => OnFaceAction(CharacterSelectLayout.FaceIncrementActionId);
-        centerPanel.AddChild(facePlusBtn);
+            faceIncrBtn.Name = "FacePlus";
+            faceIncrBtn.ActionFired += OnFaceAction;
+            centerPanel.AddChild(faceIncrBtn);
+        }
 
-        // Turntable L/R (press-and-hold).
-        // spec: frontend_scenes.md §4.2 "press-and-hold turntable ≈±2 rad/s". CODE-CONFIRMED.
-        var rotLeftBtn = new Button
+        // Turntable L/R (press-and-hold ≈±2 rad/s). Actions 23/24.
+        // spec: frontend_scenes.md §4.2 CODE-CONFIRMED.
+        var rotLeftBtn = WidgetFactory.MakeAtlasButton(
+            _assets, CharacterSelectLayout.AtlasLoginWindow,
+            150, 626, 36, 22,
+            483, 490, // left arrow glyph.
+            actionId: 23); // spec §8.2. CODE-CONFIRMED.
+        if (rotLeftBtn is not null)
         {
-            Name = "RotLeft",
-            Text = "◄",
-            Position = new Vector2(160f, 607f),
-            Size = new Vector2(36f, 22f),
-        };
-        rotLeftBtn.ButtonDown += () => _rotatePressLeft = true;
-        rotLeftBtn.ButtonUp += () => _rotatePressLeft = false;
-        centerPanel.AddChild(rotLeftBtn);
+            rotLeftBtn.Name = "RotLeft";
+            rotLeftBtn.GuiInput += ev =>
+            {
+                if (ev is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
+                    _rotatePressLeft = mb.Pressed;
+            };
+            centerPanel.AddChild(rotLeftBtn);
+        }
 
-        var rotRightBtn = new Button
+        var rotRightBtn = WidgetFactory.MakeAtlasButton(
+            _assets, CharacterSelectLayout.AtlasLoginWindow,
+            192, 626, 36, 22,
+            505, 490, // right arrow glyph.
+            actionId: 24); // spec §8.2. CODE-CONFIRMED.
+        if (rotRightBtn is not null)
         {
-            Name = "RotRight",
-            Text = "►",
-            Position = new Vector2(200f, 607f),
-            Size = new Vector2(36f, 22f),
-        };
-        rotRightBtn.ButtonDown += () => _rotatePressRight = true;
-        rotRightBtn.ButtonUp += () => _rotatePressRight = false;
-        centerPanel.AddChild(rotRightBtn);
+            rotRightBtn.Name = "RotRight";
+            rotRightBtn.GuiInput += ev =>
+            {
+                if (ev is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
+                    _rotatePressRight = mb.Pressed;
+            };
+            centerPanel.AddChild(rotRightBtn);
+        }
 
-        // ── RIGHT PANEL: stat-grid + name entry + OK/Cancel ──
-        var rightPanel = new Panel
+        // "Name" / "Enter name" button in the centre-bottom — opens the name modal.
+        // This is the trigger that advances the create flow to the name-entry stage.
+        // spec: frontend_scenes.md §4 — "after class/appearance selection, player enters name". CODE-CONFIRMED.
+        // Uses InventWindow.dds OK-row art (same chrome as the confirm buttons). ActionId=35 intent.
+        var openNameBtn = WidgetFactory.MakeStateButton2(
+            _assets, CharacterSelectLayout.AtlasInventWindow,
+            (int)(CenterPanelW / 2f - 56f), 650, 113, 40,
+            302, 860, // NORMAL src (InventWindow.dds confirm row). spec §8.3. CODE-CONFIRMED.
+            actionId: 37, // local create-form action: open name modal. No wire send here — view only.
+            caption: string.Empty); // caption = msg.xdb 2301 (VFS-only); empty offline.
+        openNameBtn.ActionFired += _ => ShowNameModal();
+        centerPanel.AddChild(openNameBtn);
+
+        // Cancel button in the centre-bottom — exits the create form.
+        // spec: frontend_scenes.md §4 / §4.4 CODE-CONFIRMED.
+        var cancelCreateBtn = WidgetFactory.MakeStateButton2(
+            _assets, CharacterSelectLayout.AtlasInventWindow,
+            (int)(CenterPanelW / 2f + 62f), 650, 113, 40,
+            302, 900, // NORMAL src (InventWindow.dds cancel row). spec §8.3. CODE-CONFIRMED.
+            actionId: 36, // action 36 = Cancel. spec §8.2. CODE-CONFIRMED.
+            caption: string.Empty); // caption = msg.xdb 2302 (VFS-only); empty offline.
+        cancelCreateBtn.ActionFired += _ => HideCreateForm();
+        centerPanel.AddChild(cancelCreateBtn);
+
+        // ── RIGHT PANEL: description plate from mainwindow.dds + npc.scr 3-line description ──
+        //
+        // The right panel carries:
+        //   • A chrome plate (~215×274) sourced from mainwindow.dds.
+        //     spec: frontend_scenes.md §11.5e / §4.1.1 "right-hand panel chrome from mainwindow.dds". CODE-CONFIRMED.
+        //   • A lower plate (InventWindow.dds centred 340×190) backing the description text area.
+        //     spec: frontend_scenes.md §11.5e CODE-CONFIRMED.
+        //   • Three npc.scr CP949 lines (record fields +0x14/+0x54/+0x94) as description labels.
+        //     spec: config_tables.md §2.17.3 + frontend_scenes.md §4.1.1 CODE-CONFIRMED.
+        //
+        // NOTE: the class NAME (msg.xdb 14003..14007) is the TITLE of the NAME MODAL only —
+        //       it is NOT a static label on this panel.
+        //       spec: frontend_scenes.md §4.1.1 CODE-CONFIRMED.
+        //
+        // The name entry + OK/Cancel live in the NAME MODAL (see BuildNameModal below).
+        const float RightPanelX = 815f; // right column: 815..1016 on the 1024 canvas.
+        const float RightPanelW = 201f;
+        var rightPanel = new Control
         {
             Name = "CreateRight",
-            Position = new Vector2(626f, 46f),
-            Size = new Vector2(390f, 660f),
+            Position = new Vector2(RightPanelX, 46f),
+            Size = new Vector2(RightPanelW, 680f),
+            MouseFilter = MouseFilterEnum.Pass,
         };
-        {
-            var rs = new StyleBoxFlat
-            {
-                BgColor = new Color(0.06f, 0.05f, 0.08f, 0.82f),
-                BorderColor = new Color(0.45f, 0.38f, 0.22f),
-            };
-            rs.SetBorderWidthAll(2);
-            rightPanel.AddThemeStyleboxOverride("panel", rs);
-        }
         form.AddChild(rightPanel);
 
-        // Stat-grid: 8 rows, labels from 2·disc + {110..141} msg.xdb lookup.
-        // spec: Docs/RE/formats/config_tables.md §2.17.3 CODE-CONFIRMED (two-witness).
-        // REFUTED: disc+{210..240} are equipment IDs, NOT stat-grid keys — must NOT be used.
-        // Actions 25..34. spec: Docs/RE/specs/ui_system.md §8.2 CODE-CONFIRMED.
-        BuildCreateStatGrid(rightPanel);
-
-        // Separator.
-        var sep = new ColorRect
+        // Description chrome plate from mainwindow.dds (~215×274 area).
+        // spec: frontend_scenes.md §11.5e "right panel chrome from mainwindow.dds". CODE-CONFIRMED.
+        // Exact src rect in mainwindow.dds is not individually catalogued (Open question / UNVERIFIED).
+        // We draw the plate as a full-width rect; when the atlas is online the src rect fills in;
+        // when offline the panel is faithfully empty (no synthetic background).
+        var descPlate = WidgetFactory.MakeAtlasRect(
+            _assets, CharacterSelectLayout.AtlasMainWindow,
+            0, 0, (int)RightPanelW, 274, // ~215×274. spec §11.5e. CODE-CONFIRMED approximate.
+            0, 0); // src rect in mainwindow.dds: top-left block (exact rect UNVERIFIED).
+        if (descPlate is not null)
         {
-            Color = new Color(0.35f, 0.30f, 0.18f),
-            Position = new Vector2(8f, 8f + StatGridRowCount * 30f + 4f),
-            Size = new Vector2(374f, 1f),
+            descPlate.Name = "DescPlate";
+            rightPanel.AddChild(descPlate);
+        }
+
+        // Lower backing plate from InventWindow.dds (centred 340×190).
+        // spec: frontend_scenes.md §11.5e "lower plate InventWindow.dds 340×190". CODE-CONFIRMED.
+        // Placed at y=274 (below the upper plate).
+        var lowerPlate = WidgetFactory.MakeAtlasRect(
+            _assets, CharacterSelectLayout.AtlasInventWindow,
+            0, 274, (int)RightPanelW, 190, // lower plate, panel-local.
+            318, 647); // src (318,647) per §8.3 confirm-popup chrome. CODE-CONFIRMED.
+        if (lowerPlate is not null)
+        {
+            lowerPlate.Name = "DescLowerPlate";
+            rightPanel.AddChild(lowerPlate);
+        }
+
+        // npc.scr description — 3 labels (lines at record fields +0x14 / +0x54 / +0x94).
+        // spec: config_tables.md §2.17.3 + frontend_scenes.md §4.1.1 CODE-CONFIRMED.
+        // Text is CP949, already decoded by NpcScrDescriptions. Zero hardcoded text.
+        string[] descLines = GetDescriptionLines(_createUiClassIndex);
+        const float DescLineBaseY = 18f;
+        const float DescLineStride = 60f; // ~60px between lines to fit 3 lines in 274px plate.
+        var descColor = new Color(0.82f, 0.82f, 0.88f);
+
+        _createDescLine0 = WidgetFactory.MakeLabel(
+            descLines.Length > 0 ? descLines[0] : string.Empty,
+            CharacterSelectLayout.FontRowHeight, descColor, multiline: true);
+        _createDescLine0.Name = "DescLine0";
+        _createDescLine0.Position = new Vector2(6f, DescLineBaseY);
+        _createDescLine0.Size = new Vector2(RightPanelW - 12f, DescLineStride - 4f);
+        rightPanel.AddChild(_createDescLine0);
+
+        _createDescLine1 = WidgetFactory.MakeLabel(
+            descLines.Length > 1 ? descLines[1] : string.Empty,
+            CharacterSelectLayout.FontRowHeight, descColor, multiline: true);
+        _createDescLine1.Name = "DescLine1";
+        _createDescLine1.Position = new Vector2(6f, DescLineBaseY + DescLineStride);
+        _createDescLine1.Size = new Vector2(RightPanelW - 12f, DescLineStride - 4f);
+        rightPanel.AddChild(_createDescLine1);
+
+        _createDescLine2 = WidgetFactory.MakeLabel(
+            descLines.Length > 2 ? descLines[2] : string.Empty,
+            CharacterSelectLayout.FontRowHeight, descColor, multiline: true);
+        _createDescLine2.Name = "DescLine2";
+        _createDescLine2.Position = new Vector2(6f, DescLineBaseY + 2f * DescLineStride);
+        _createDescLine2.Size = new Vector2(RightPanelW - 12f, DescLineStride - 4f);
+        rightPanel.AddChild(_createDescLine2);
+
+        // ── NAME MODAL — on-demand, shown when "Open name entry" is triggered ──
+        // Contains: class name title (msg.xdb 14003..14007), name LineEdit, OK (35)/Cancel (36).
+        // spec: frontend_scenes.md §4.1.1 / §4.4 CODE-CONFIRMED.
+        _nameModal = BuildNameModal();
+        _nameModal.Visible = false;
+        form.AddChild(_nameModal);
+
+        return form;
+    }
+
+    // =========================================================================
+    // Name modal — on-demand overlay shown when the player confirms character creation.
+    // Contains: class name title (msg.xdb), name entry, OK (35) / Cancel (36).
+    // spec: Docs/RE/specs/frontend_scenes.md §4.1.1 / §4.4 CODE-CONFIRMED.
+    // =========================================================================
+
+    private Control BuildNameModal()
+    {
+        // Modal centred on the canvas at ~400×200 (ConfirmPopup chrome: InventWindow.dds 340×190).
+        // spec: ui_system.md §8.3 "ConfirmPopup 340×190 src (318,647)". CODE-CONFIRMED.
+        const float modalW = 340f;
+        const float modalH = 190f;
+        const float modalX = (CharacterSelectLayout.RefWidth - modalW) / 2f; // centred.
+        const float modalY = (CharacterSelectLayout.RefHeight - modalH) / 2f; // centred.
+
+        var modal = new Control
+        {
+            Name = "NameModal",
+            Position = new Vector2(modalX, modalY),
+            Size = new Vector2(modalW, modalH),
+            MouseFilter = MouseFilterEnum.Stop,
         };
-        rightPanel.AddChild(sep);
 
-        float nameY = sep.Position.Y + 10f;
+        // Background chrome: InventWindow.dds 340×190 src (318,647).
+        // spec: ui_system.md §8.3 CODE-CONFIRMED.
+        var bg = WidgetFactory.MakeAtlasRect(
+            _assets, CharacterSelectLayout.AtlasInventWindow,
+            0, 0, (int)modalW, (int)modalH,
+            318, 647); // src (318,647). spec §8.3. CODE-CONFIRMED.
+        if (bg is not null)
+        {
+            bg.Name = "NameModalBg";
+            modal.AddChild(bg);
+        }
 
-        // Name entry.
-        // spec: frontend_scenes.md §4.4 — "min 2 chars; a–z + digits + Hangul". CODE-CONFIRMED.
-        var nameLabel = WidgetFactory.MakeLabel("Name:", CharacterSelectLayout.FontRowHeight,
-            new Color(0.75f, 0.75f, 0.75f));
-        nameLabel.Position = new Vector2(8f, nameY);
-        rightPanel.AddChild(nameLabel);
+        // Class name title (msg.xdb 14003..14007 — updated on class change).
+        // spec: frontend_scenes.md §4.1.1 "class NAME = msg.xdb 14003..14007, shown in name modal title". CODE-CONFIRMED.
+        _nameModalTitle = WidgetFactory.MakeLabel(
+            ClassCaption(_createUiClassIndex),
+            CharacterSelectLayout.FontTitleHeight,
+            new Color(0.95f, 0.86f, 0.55f));
+        _nameModalTitle.Name = "NameModalTitle";
+        _nameModalTitle.Position = new Vector2(12f, 12f);
+        _nameModalTitle.Size = new Vector2(modalW - 24f, 22f);
+        _nameModalTitle.HorizontalAlignment = HorizontalAlignment.Center;
+        modal.AddChild(_nameModalTitle);
 
+        // Name-entry caption (msg.xdb id 48001, VFS-only — empty offline).
+        // spec: frontend_scenes.md §11.5d "caption 48001". CODE-CONFIRMED.
+        string nameCaptionText = _assets.Text(48001u, string.Empty);
+        if (!string.IsNullOrEmpty(nameCaptionText))
+        {
+            var nameCaption = WidgetFactory.MakeLabel(nameCaptionText,
+                CharacterSelectLayout.FontRowHeight, new Color(0.75f, 0.75f, 0.75f));
+            nameCaption.Position = new Vector2(34f, 48f);
+            modal.AddChild(nameCaption);
+        }
+
+        // Name LineEdit. spec: frontend_scenes.md §4.4 / §8.2. CODE-CONFIRMED.
         _createNameEntry = new LineEdit
         {
             Name = "NameEntry",
-            Position = new Vector2(8f, nameY + 18f),
-            Size = new Vector2(374f, 26f),
+            Position = new Vector2(34f, 66f),
+            Size = new Vector2(modalW - 68f, 26f),
         };
         _createNameEntry.AddThemeFontSizeOverride("font_size", 13);
-        rightPanel.AddChild(_createNameEntry);
+        modal.AddChild(_createNameEntry);
 
-        // Toast label (msg id 2075 rejection feedback).
-        // spec: frontend_scenes.md §4.4 — "show a rejection toast (msg id 2075)". CODE-CONFIRMED.
+        // Toast label (msg id 2075). spec: frontend_scenes.md §4.4 CODE-CONFIRMED.
         _createToastLabel = WidgetFactory.MakeLabel(
             string.Empty,
             CharacterSelectLayout.FontRowHeight,
             new Color(1.0f, 0.35f, 0.20f),
             multiline: true);
         _createToastLabel.Name = "NameToast";
-        _createToastLabel.Position = new Vector2(8f, nameY + 48f);
-        _createToastLabel.Size = new Vector2(374f, 36f);
+        _createToastLabel.Position = new Vector2(34f, 96f);
+        _createToastLabel.Size = new Vector2(modalW - 68f, 30f);
         _createToastLabel.Visible = false;
-        rightPanel.AddChild(_createToastLabel);
+        modal.AddChild(_createToastLabel);
 
-        float btnsY = nameY + 90f;
-
-        // OK button (actionId=35) / Cancel (actionId=36): inventwindow.dds.
-        // spec: Docs/RE/specs/ui_system.md §8.2 "35/36 Create-form Confirm/Cancel". CODE-CONFIRMED.
+        // OK button (actionId=35) / Cancel (actionId=36) — InventWindow.dds.
+        // spec: ui_system.md §8.2 "35/36 Create-form Confirm/Cancel". CODE-CONFIRMED.
+        const float btnsY = 136f;
         var confirmBtn = WidgetFactory.MakeStateButton2(
             _assets, CharacterSelectLayout.AtlasInventWindow,
-            22, (int)btnsY, 162, 40,
+            55, (int)btnsY, 113, 40,
             302, 860, // NORMAL src (InventWindow.dds confirm row). spec §8.3. CODE-CONFIRMED.
-            actionId: 35, caption: _assets.Text(2301u, "OK")); // msg 2301 fallback "OK"
+            actionId: 35, caption: _assets.Text(2301u, string.Empty)); // msg 2301; empty offline
         confirmBtn.ActionFired += OnCreateConfirm;
-        rightPanel.AddChild(confirmBtn);
+        modal.AddChild(confirmBtn);
 
         var cancelBtn = WidgetFactory.MakeStateButton2(
             _assets, CharacterSelectLayout.AtlasInventWindow,
-            208, (int)btnsY, 162, 40,
+            174, (int)btnsY, 113, 40,
             302, 900, // NORMAL src (InventWindow.dds cancel row). spec §8.3. CODE-CONFIRMED.
-            actionId: 36, caption: _assets.Text(2302u, "Cancel")); // msg 2302 fallback "Cancel"
-        cancelBtn.ActionFired += _ => HideCreateForm();
-        rightPanel.AddChild(cancelBtn);
+            actionId: 36, caption: _assets.Text(2302u, string.Empty)); // msg 2302; empty offline
+        cancelBtn.ActionFired += _ => HideNameModal();
+        modal.AddChild(cancelBtn);
 
-        return form;
+        return modal;
     }
 
     // =========================================================================
     // Create-form stat-grid construction.
     // 8 rows, labels from 2·disc + {110..141}. spec config_tables.md §2.17.3 CODE-CONFIRMED.
-    // Actions 25..34 (5 × 2 = 10 stat ± buttons). spec ui_system.md §8.2 CODE-CONFIRMED.
+    // Pure display — no ± steppers. spec: frontend_scenes.md §4.2 CODE-CONFIRMED.
+    // Placed in the LEFT panel below the class buttons.
     // =========================================================================
 
-    private void BuildCreateStatGrid(Control parent)
+    private void BuildCreateStatGrid(Control parent, float baseY)
     {
-        const float baseY = 8f;
-        const float rowH = 30f;
+        const float rowH = 26f; // compact row height for the 8 rows.
 
         for (int row = 0; row < StatGridRowCount; row++)
         {
@@ -953,55 +1097,28 @@ public sealed partial class CharacterSelectScreen : Control
             // Key formula: 2·disc + offset. spec: config_tables.md §2.17.3 CODE-CONFIRMED.
             // disc=0 here (class-neutral base).
             uint statKey = (uint)(2 * StatDisc + keyOffset); // spec: 2·disc + {110..141}. CODE-CONFIRMED.
-            // Fallback: show the key as hex so the dev can see which key wasn't in msg.xdb.
-            string statName = _assets.Text(statKey, $"[{statKey}]");
+            // PURE DISPLAY: label comes from msg.xdb (VFS-only). Empty when offline — faithfully.
+            string statName = _assets.Text(statKey, string.Empty);
+            // spec: frontend_scenes.md §4.2 "pure display from the class template". CODE-CONFIRMED.
+            // spec: "Stat values are PURE DISPLAY — NOT interactive point-buy +/- buttons". CODE-CONFIRMED.
 
-            // Stat name label.
+            // Stat name label — empty when msg.xdb is absent (faithfully offline).
             _createStatNameLabels[row] = WidgetFactory.MakeLabel(statName,
                 CharacterSelectLayout.FontRowHeight, new Color(0.72f, 0.72f, 0.75f));
             _createStatNameLabels[row].Name = $"StatName{row}";
             _createStatNameLabels[row].Position = new Vector2(8f, y + 2f);
-            _createStatNameLabels[row].Size = new Vector2(80f, 18f);
+            _createStatNameLabels[row].Size = new Vector2(100f, 18f);
             parent.AddChild(_createStatNameLabels[row]);
 
-            // − button: actionId = 25 + row*2 (for rows 0..4) → actions 25,27,29,31,33.
-            // spec: ui_system.md §8.2 "25…34 stat point-buy ±". CODE-CONFIRMED.
-            // Rows 5..7 are additional appearance entries (cols beyond 5 base stats) — same action family.
-            int actionMinus = CharacterSelectLayout.StatPlusBuyBaseActionId + row * 2;
-            int actionPlus = actionMinus + 1;
-
-            var minusBtn = new Button
-            {
-                Name = $"StatMinus{row}",
-                Text = "−",
-                Position = new Vector2(94f, y),
-                Size = new Vector2(24f, 22f),
-            };
-            int rowCapture = row;
-            minusBtn.Pressed += () => OnStatAdjust(rowCapture, -1);
-            parent.AddChild(minusBtn);
-
-            // Stat value label.
-            _createStatLabels[row] = WidgetFactory.MakeLabel("–",
+            // Stat value label (pure display — no ± buttons; Application delivers values via events).
+            // spec: frontend_scenes.md §4.2 "pure display". CODE-CONFIRMED.
+            _createStatLabels[row] = WidgetFactory.MakeLabel(string.Empty,
                 CharacterSelectLayout.FontRowHeight, new Color(0.92f, 0.92f, 0.92f));
             _createStatLabels[row].Name = $"StatVal{row}";
-            _createStatLabels[row].Position = new Vector2(122f, y + 2f);
-            _createStatLabels[row].Size = new Vector2(40f, 18f);
+            _createStatLabels[row].Position = new Vector2(112f, y + 2f);
+            _createStatLabels[row].Size = new Vector2(56f, 18f);
             _createStatLabels[row].HorizontalAlignment = HorizontalAlignment.Center;
             parent.AddChild(_createStatLabels[row]);
-
-            var plusBtn = new Button
-            {
-                Name = $"StatPlus{row}",
-                Text = "+",
-                Position = new Vector2(166f, y),
-                Size = new Vector2(24f, 22f),
-            };
-            plusBtn.Pressed += () => OnStatAdjust(rowCapture, +1);
-            parent.AddChild(plusBtn);
-
-            _ = actionMinus; // consumed via the button index calculation above — suppress CS0219.
-            _ = actionPlus;
         }
     }
 
@@ -1040,6 +1157,12 @@ public sealed partial class CharacterSelectScreen : Control
     // =========================================================================
     // Intent handlers
     // =========================================================================
+
+    /// <summary>
+    /// DEV-ONLY: opens the create form for screenshot/oracle verification. The caller
+    /// (BootFlow dev_screen=create) is guarded by dev-offline mode; never used in the production flow.
+    /// </summary>
+    public void DevShowCreateForm() => ShowCreateForm();
 
     private void OnCharAction(int actionId)
     {
@@ -1134,6 +1257,7 @@ public sealed partial class CharacterSelectScreen : Control
         GD.Print($"[CharacterSelectScreen] CreateCharacterRequested: name='{name}' " +
                  $"internalClass={internalClass} face={_createFaceIndex}. " +
                  "spec: frontend_scenes.md §4/§8 CODE-CONFIRMED.");
+        // Close the name modal and the entire create form on success.
         HideCreateForm();
         RefreshCharCountCaption();
     }
@@ -1146,6 +1270,17 @@ public sealed partial class CharacterSelectScreen : Control
     {
         _createFormVisible = true;
         _createForm.Visible = true;
+
+        // HIDE the char-select 3D backdrop while the create form is open: the create preview
+        // fills the screen with its OWN carved-wall cell (OwnWorld3D=true), so the char-select
+        // braziers/platform must not bleed into the margins around the create SubViewport.
+        // Restore on HideCreateForm. spec: frontend_scenes.md §4 / §3.7.6 CODE-CONFIRMED.
+        if (_scene3DContainer is not null && IsInstanceValid(_scene3DContainer))
+            _scene3DContainer.Visible = false;
+
+        // Hide name modal when first opening the create form.
+        if (_nameModal is not null && IsInstanceValid(_nameModal))
+            _nameModal.Visible = false;
 
         if (_createPreview3D is not null && IsInstanceValid(_createPreview3D))
         {
@@ -1169,8 +1304,39 @@ public sealed partial class CharacterSelectScreen : Control
     {
         _createFormVisible = false;
         _createForm.Visible = false;
+
+        // Restore the char-select 3D backdrop (hidden during create). spec: frontend_scenes.md §4.
+        if (_scene3DContainer is not null && IsInstanceValid(_scene3DContainer))
+            _scene3DContainer.Visible = true;
+
+        if (_nameModal is not null && IsInstanceValid(_nameModal))
+            _nameModal.Visible = false;
         _rotatePressLeft = false;
         _rotatePressRight = false;
+        _toastTimer = 0.0;
+    }
+
+    private void ShowNameModal()
+    {
+        // Update modal title with current class name before showing.
+        // spec: frontend_scenes.md §4.1.1 — class NAME in name modal title. CODE-CONFIRMED.
+        if (_nameModalTitle is not null && IsInstanceValid(_nameModalTitle))
+            _nameModalTitle.Text = ClassCaption(_createUiClassIndex);
+        if (_createNameEntry is not null && IsInstanceValid(_createNameEntry))
+            _createNameEntry.Text = string.Empty;
+        if (_createToastLabel is not null && IsInstanceValid(_createToastLabel))
+            _createToastLabel.Visible = false;
+        _toastTimer = 0.0;
+        if (_nameModal is not null && IsInstanceValid(_nameModal))
+            _nameModal.Visible = true;
+        GD.Print($"[CharacterSelectScreen] Name modal opened for class {_createUiClassIndex}. " +
+                 "spec: frontend_scenes.md §4.1.1 CODE-CONFIRMED.");
+    }
+
+    private void HideNameModal()
+    {
+        if (_nameModal is not null && IsInstanceValid(_nameModal))
+            _nameModal.Visible = false;
         _toastTimer = 0.0;
     }
 
@@ -1181,14 +1347,21 @@ public sealed partial class CharacterSelectScreen : Control
         GD.Print($"[CharacterSelectScreen] Create class: UI={_createUiClassIndex} → internal={internalClass}. " +
                  "spec: frontend_scenes.md §4.1 CODE-CONFIRMED.");
 
-        // Update class name label.
-        if (_createClassLabel is not null && IsInstanceValid(_createClassLabel))
-            _createClassLabel.Text = ClassCaption(_createUiClassIndex);
+        // NOTE: the class NAME label lives in the name modal title — NOT on the main panel.
+        // spec: frontend_scenes.md §4.1.1 "class NAME in name modal title only". CODE-CONFIRMED.
+        // Update it here so it is current when the modal is opened.
+        if (_nameModalTitle is not null && IsInstanceValid(_nameModalTitle))
+            _nameModalTitle.Text = ClassCaption(_createUiClassIndex);
 
-        // Update description label (npc.scr CP949 text).
-        // spec: frontend_scenes.md §4.1.1 CODE-CONFIRMED.
-        if (_createDescLabel is not null && IsInstanceValid(_createDescLabel))
-            _createDescLabel.Text = GetClassDescription(_createUiClassIndex);
+        // Update the three npc.scr description lines (right panel).
+        // spec: config_tables.md §2.17.3 + frontend_scenes.md §4.1.1 CODE-CONFIRMED.
+        string[] lines = GetDescriptionLines(_createUiClassIndex);
+        if (_createDescLine0 is not null && IsInstanceValid(_createDescLine0))
+            _createDescLine0.Text = lines.Length > 0 ? lines[0] : string.Empty;
+        if (_createDescLine1 is not null && IsInstanceValid(_createDescLine1))
+            _createDescLine1.Text = lines.Length > 1 ? lines[1] : string.Empty;
+        if (_createDescLine2 is not null && IsInstanceValid(_createDescLine2))
+            _createDescLine2.Text = lines.Length > 2 ? lines[2] : string.Empty;
 
         // Rebuild 3D preview for new class.
         // spec: frontend_scenes.md §4.2 — "changing class rebuilds the actor". CODE-CONFIRMED.
@@ -1237,6 +1410,20 @@ public sealed partial class CharacterSelectScreen : Control
         // Delegates to NpcScrDescriptions (loaded from data/script/npc.scr CP949).
         // spec: config_tables.md §2.17.3 + frontend_scenes.md §4.1.1 CODE-CONFIRMED.
         return _npcScrDesc.GetDescription(Mathf.Clamp(uiIndex, 0, 3));
+    }
+
+    /// <summary>
+    /// Returns the npc.scr description as an array of up to 3 lines (record fields +0x14/+0x54/+0x94).
+    /// Returns a <see cref="string"/><c>[]</c> of length 0..3; never null entries.
+    /// spec: Docs/RE/formats/config_tables.md §2.17.3 + frontend_scenes.md §4.1.1 CODE-CONFIRMED.
+    /// </summary>
+    private string[] GetDescriptionLines(int uiIndex)
+    {
+        string joined = GetClassDescription(uiIndex);
+        if (string.IsNullOrEmpty(joined))
+            return [];
+        // npc.scr Paragraph0/1/2 were joined with '\n' in NpcScrDescriptions.Load().
+        return joined.Split('\n', StringSplitOptions.None);
     }
 
     // =========================================================================
@@ -1289,8 +1476,12 @@ public sealed partial class CharacterSelectScreen : Control
             if (!_liveSlots[i].IsEmpty)
                 count++;
 
-        // CP949 template from msg.xdb. spec: frontend_scenes.md §3.8.2 CODE-CONFIRMED.
-        string template = _assets.Text(2209u, "캐릭터 개수 : {0}");
+        // CP949 template from msg.xdb id 2209 — empty when offline; no hardcoded Korean string.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.8.2 "MessageDB id 2209". CODE-CONFIRMED.
+        string template = _assets.Text(2209u, string.Empty);
+        if (string.IsNullOrEmpty(template))
+            return string.Empty; // faithfully empty when offline
+
         return template.Contains("%d")
             ? template.Replace("%d", count.ToString())
             : string.Format(template, count);
@@ -1313,15 +1504,19 @@ public sealed partial class CharacterSelectScreen : Control
         LiveSlot ls = _liveSlots[_selectedSlot];
         if (!ls.IsEmpty)
         {
+            // Char info labels: name + level + class from slot data.
+            // Caption labels: 48001/48003/48004/48005 per §11.5d.
+            // spec: Docs/RE/specs/frontend_scenes.md §11.5d "caption labels 48001/48003/48004/48005". CODE-CONFIRMED.
+            // No "Lv"/"Cl" English prefix — those are spec caption art; show values only.
             _infoName.Text = ls.Name;
-            _infoLevel.Text = $"Lv {ls.Level}";
-            _infoClass.Text = $"Cl {ls.ServerClass}";
+            _infoLevel.Text = ls.Level.ToString();
+            _infoClass.Text = ls.ServerClass.ToString();
         }
         else
         {
-            _infoName.Text = "–";
-            _infoLevel.Text = "–";
-            _infoClass.Text = "–";
+            _infoName.Text = string.Empty;
+            _infoLevel.Text = string.Empty;
+            _infoClass.Text = string.Empty;
         }
 
         HighlightSlot(_selectedSlot);
@@ -1329,16 +1524,8 @@ public sealed partial class CharacterSelectScreen : Control
 
     private void HighlightSlot(int index)
     {
-        for (int i = 0; i < MaxSlots; i++)
-        {
-            if (_slotButtons[i] is Button btn)
-            {
-                btn.Modulate = i == index
-                    ? new Color(1.0f, 0.90f, 0.55f)
-                    : Colors.White;
-            }
-        }
-
+        // Slot selection is reflected in the 3D scene only — no 2D button strip to highlight.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.5b / §3.3.3 CODE-CONFIRMED.
         _scene3D?.SetSelectedSlot(index);
     }
 

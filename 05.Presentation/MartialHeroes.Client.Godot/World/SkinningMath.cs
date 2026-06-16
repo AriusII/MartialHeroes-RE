@@ -451,14 +451,19 @@ public static class SkinningMath
                 (Vec3 sT, Quat sR) = SampleTrack(track.Keyframes, t, renormalizeAlpha);
 
                 // Rotation composition for a TRACKED bone.
-                //   animAsDelta == true  (spec §6.5/§6.6): the world rotation is
-                //       parentWorld ⊗ bindLocal ⊗ animLocal — the sampled rotation is a RIGHT
-                //       (post) multiply DELTA layered on top of the bind-local rotation. So the
-                //       committed local pose is bindLocalQ ⊗ sR.
-                //   animAsDelta == false (spec §6.4 literal): the sampled rotation REPLACES the
-                //       bind-local rotation outright (localQ = sR).
+                //   animAsDelta == true  (spec §6.5/§6.6, the CORRECT legacy form): the world
+                //       rotation is parentWorld ⊗ bindLocal ⊗ animLocal — the sampled rotation is a
+                //       RIGHT (post) multiply on top of the bind-local rotation, so the committed
+                //       local pose is bindLocalQ ⊗ sR. DATA-PROVEN correct: composing the real idle
+                //       keyframes, this keeps the animated frame-0 deform close to the authored rest
+                //       pose (mean per-vertex displacement g1=0.47, g4=1.17, mob=0.02), as an idle's
+                //       first frame should.
+                //   animAsDelta == false (a literal "replacement" reading, localQ = sR): flings the
+                //       whole mesh ~half the model extent off the authored pose (g1=1.97, g4=2.81,
+                //       mob=3.55) — decisively wrong. Retained only as a toggle.
                 // spec: Docs/RE/specs/skinning.md §6.5 — "applied as a right (post) multiply on top
-                //       of the bind-local rotation in the world walk (§6.6)".
+                //       of the bind-local rotation in the world walk (§6.6)". §6.4's "replacement"
+                //       describes the per-pass mixer accumulator, not this world walk.
                 localQ = animAsDelta ? Mul(bones[i].Rotation, sR) : sR;
 
                 // Translation: only the root translates freely; child bones hold the bind-pose

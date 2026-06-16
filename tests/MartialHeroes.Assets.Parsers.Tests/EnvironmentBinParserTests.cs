@@ -494,6 +494,23 @@ public sealed class EnvironmentBinParserTests
     }
 
     [Fact]
+    public void Light_Parse_RawBytes_IsFullVerbatimSlurp()
+    {
+        // CORRECTION (environment_bins.md §9.0): the loader performs an opaque verbatim slurp.
+        // The parser must surface RawBytes = the full 5312-byte verbatim buffer.
+        // spec: Docs/RE/formats/environment_bins.md §9.0 —
+        //   "faithful parser should slurp the 5312 bytes verbatim": LOADER-RESOLVED.
+        byte[] data = BuildLight();
+        // Write a sentinel byte at offset 0x0042 so we can confirm the raw blob matches.
+        data[0x0042] = 0xBE;
+
+        LightBin result = EnvironmentBinParsers.ParseLight(new ReadOnlyMemory<byte>(data));
+
+        Assert.Equal(LightBin.FixedSize, result.RawBytes.Length);
+        Assert.Equal((byte)0xBE, result.RawBytes.Span[0x0042]); // sentinel preserved verbatim
+    }
+
+    [Fact]
     public void Light_Parse_WrongSize_ThrowsInvalidData()
     {
         byte[] tooShort = new byte[5311];

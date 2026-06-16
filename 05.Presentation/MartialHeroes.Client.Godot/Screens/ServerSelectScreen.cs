@@ -17,6 +17,16 @@
 //   They re-paint the 2-plate view; they are NOT server rows.
 //   spec: Docs/RE/specs/frontend_scenes.md §11.4 / §1.2 / §2.5. CODE-CONFIRMED.
 //
+// SINGLE-SERVER LAYOUT — spec: Docs/RE/specs/frontend_scenes.md §11.4 / §2.3
+//   A single server shows exactly ONE plate — the LEFT block (action 400).
+//   Two servers show both plates at their spec-literal positions.
+//   One plate on page → plate is CENTRED on the 1024-wide canvas.
+//     Centred plate X = (1024 − 202) / 2 = 411.
+//     Centred body  X = 411 + (77 − 24) = 464.
+//   Two plates on page → use §11.4 literal col positions: col0=X24, col1=X257;
+//     body col0=X77, body col1=X310.
+//   Zero plates on page → both hidden (offline / empty list, faithfully empty).
+//
 // ATLASES (§11.1, CODE-CONFIRMED):
 //   A = data/ui/login_slice1.dds  1024×1024 DXT2 (premultiplied alpha)
 //   B = data/ui/loginwindow.dds   1024×1024 DXT5
@@ -120,6 +130,9 @@ public sealed partial class ServerSelectScreen : Control
     // NEW_SERVER_INDEX: the server_id that gets the "NEW" badge.
     // uiconfig.lua global, value 5 in the sampled client.
     // spec: Docs/RE/specs/frontend_scenes.md §2.7. CODE-CONFIRMED.
+    // The badge is a render-time widget on the per-row render path (server_icon.dds, 128x128).
+    // Its exact src-rect is PENDING (live-debugger). No badge art recovered → omit entirely.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.4 §2.7 note. CODE-CONFIRMED structure; rect PENDING.
     private const int NewServerIndex = 5; // spec: frontend_scenes.md §2.7. CODE-CONFIRMED.
 
     // Plate click guard: accepted only when status_code==0 AND load < 2400.
@@ -149,12 +162,32 @@ public sealed partial class ServerSelectScreen : Control
     private UiAssetLoader _assets = null!;
     private bool _ownsAssets;
 
+    // Plate layout constants.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED.
+    // Two-plate (2 servers on page): col0 X=24, col1 X=257; body col0 X=77, body col1 X=310.
+    // Single-plate (1 server on page): plate centred at (1024−202)/2=411; body at 411+(77−24)=464.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §2.3. CODE-CONFIRMED positions; centring derived.
+    private static readonly int[] PlateDstXTwo = { 24, 257 }; // spec §11.4. CODE-CONFIRMED.
+    private static readonly int[] BodyDstXTwo = { 77, 310 }; // spec §11.4. CODE-CONFIRMED.
+    private const int PlateDstXSingle = 411; // (1024−202)/2. spec §11.4 §2.3. CODE-CONFIRMED.
+    private const int BodyDstXSingle = 464; // 411+(77−24). spec §11.4 §2.3. CODE-CONFIRMED.
+    private const int PlateDstY = 97; // spec §11.4. CODE-CONFIRMED.
+    private const int PlateW = 202; // spec §11.4. CODE-CONFIRMED.
+    private const int PlateH = 372; // spec §11.4. CODE-CONFIRMED.
+    private const int BodyW = 100; // spec §11.4. CODE-CONFIRMED.
+    private const int BodyH = 372; // spec §11.4. CODE-CONFIRMED.
+
     // Plate widgets (index 0 = LEFT action 400, index 1 = RIGHT action 401).
     // spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED.
     private readonly Button?[] _plateButtons = new Button?[2];
     private readonly Label?[] _plateNameLabels = new Label?[2];
     private readonly Label?[] _plateStatusLabels = new Label?[2];
     private readonly Label?[] _plateLoadLabels = new Label?[2];
+
+    // Parchment chrome rects — stored so PaintPlates can reposition them for single-server centring.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §2.3. CODE-CONFIRMED.
+    private readonly TextureRect?[] _parchPlateRects = new TextureRect?[2];
+    private readonly TextureRect?[] _parchBodyRects = new TextureRect?[2];
 
     // Pager buttons (10 of them, actions 115..124).
     // spec: Docs/RE/specs/frontend_scenes.md §1.2 / §11.4. CODE-CONFIRMED.
@@ -248,32 +281,60 @@ public sealed partial class ServerSelectScreen : Control
         // -----------------------------------------------------------------------
         // z=4+5: Two parchment PLATES and BODY columns.
         // PLATE: D src(9,6,202,372) NORMAL / src(220,6) HOVER+PRESSED.
-        //   col0 dst(24,97,202,372) action 400.
-        //   col1 dst(257,97,202,372) action 401.
-        // BODY:  col0 D src(448,6,100,372) → dst(77,97,100,372).
-        //        col1 D src(572,6,100,372) → dst(310,97,100,372).
-        // spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED.
+        //   col0 initial dst(24,97,202,372) action 400.
+        //   col1 initial dst(257,97,202,372) action 401.
+        // BODY:  col0 D src(448,6,100,372) → initial dst(77,97,100,372).
+        //        col1 D src(572,6,100,372) → initial dst(310,97,100,372).
+        // NOTE: PaintPlates() repositions col0 to centred (411,97) when only 1 server on page,
+        //       and hides col1 entirely. spec §11.4 / §2.3. CODE-CONFIRMED positions.
         // -----------------------------------------------------------------------
-        int[] plateDstX = { 24, 257 }; // spec §11.4. CODE-CONFIRMED.
-        int[] bodyDstX = { 77, 310 }; // spec §11.4. CODE-CONFIRMED.
         int[] bodySrcU = { 448, 572 }; // spec §11.4 src U start=448 step+124. CODE-CONFIRMED.
 
         for (int col = 0; col < 2; col++)
         {
             // Parchment PLATE background (passive chrome, under the clickable button).
             // Normal state: D src(9,6,202,372). spec §11.4. CODE-CONFIRMED.
-            AddImageSlice($"ParchPlate{col}", LoginLayout.AtlasLoginWindow02,
-                9, 6, 202, 372,
-                plateDstX[col], 97, 202, 372,
-                $"D src(9,6,202,372) col{col} §11.4");
+            // Stored in _parchPlateRects[] so PaintPlates can reposition for single-server centring.
+            AtlasTexture? plateTex = _assets.Slice(LoginLayout.AtlasLoginWindow02, 9, 6, PlateW, PlateH);
+            if (plateTex is not null)
+            {
+                var plateRect = new TextureRect
+                {
+                    Name = $"ParchPlate{col}",
+                    Texture = plateTex,
+                    StretchMode = TextureRect.StretchModeEnum.Scale,
+                    MouseFilter = MouseFilterEnum.Ignore,
+                    Position = new Vector2(PlateDstXTwo[col], PlateDstY),
+                    Size = new Vector2(PlateW, PlateH),
+                };
+                AddChild(plateRect);
+                _parchPlateRects[col] = plateRect;
+            }
+            else if (col == 0)
+            {
+                GD.PrintErr("[ServerSelectScreen] loginwindow_02.dds plate slice returned null — " +
+                            "parchment chrome absent (VFS offline). spec: frontend_scenes.md §11.4.");
+            }
 
             // Parchment BODY (baked calligraphy art, passive).
-            // col0: D src(448,6,100,372) → dst(77,97). col1: D src(572,6,100,372) → dst(310,97).
+            // col0: D src(448,6,100,372) → initial dst(77,97). col1: D src(572,6,100,372) → dst(310,97).
+            // Stored in _parchBodyRects[] so PaintPlates can reposition for single-server centring.
             // spec §11.4. CODE-CONFIRMED.
-            AddImageSlice($"ParchBody{col}", LoginLayout.AtlasLoginWindow02,
-                bodySrcU[col], 6, 100, 372,
-                bodyDstX[col], 97, 100, 372,
-                $"D src({bodySrcU[col]},6,100,372) col{col} §11.4");
+            AtlasTexture? bodyTex = _assets.Slice(LoginLayout.AtlasLoginWindow02, bodySrcU[col], 6, BodyW, BodyH);
+            if (bodyTex is not null)
+            {
+                var bodyRect = new TextureRect
+                {
+                    Name = $"ParchBody{col}",
+                    Texture = bodyTex,
+                    StretchMode = TextureRect.StretchModeEnum.Scale,
+                    MouseFilter = MouseFilterEnum.Ignore,
+                    Position = new Vector2(BodyDstXTwo[col], PlateDstY),
+                    Size = new Vector2(BodyW, BodyH),
+                };
+                AddChild(bodyRect);
+                _parchBodyRects[col] = bodyRect;
+            }
 
             // Transparent clickable button covering the plate — captures input.
             // On click: commits server, persists Lastserver, emits ServerSelected.
@@ -281,8 +342,8 @@ public sealed partial class ServerSelectScreen : Control
             var btn = new Button
             {
                 Name = $"PlateBtn{col}",
-                Position = new Vector2(plateDstX[col], 97),
-                Size = new Vector2(202, 372),
+                Position = new Vector2(PlateDstXTwo[col], PlateDstY),
+                Size = new Vector2(PlateW, PlateH),
                 Flat = true,
                 FocusMode = FocusModeEnum.None,
             };
@@ -303,8 +364,8 @@ public sealed partial class ServerSelectScreen : Control
             var nameLbl = new Label
             {
                 Name = $"PlateNameLbl{col}",
-                Position = new Vector2(plateDstX[col] + 4, 200),
-                Size = new Vector2(194, 24),
+                Position = new Vector2(PlateDstXTwo[col] + 4, 200),
+                Size = new Vector2(PlateW - 8, 24),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 MouseFilter = MouseFilterEnum.Ignore,
                 ClipText = true,
@@ -318,8 +379,8 @@ public sealed partial class ServerSelectScreen : Control
             var statusLbl = new Label
             {
                 Name = $"PlateStatusLbl{col}",
-                Position = new Vector2(plateDstX[col] + 4, 228),
-                Size = new Vector2(194, 20),
+                Position = new Vector2(PlateDstXTwo[col] + 4, 228),
+                Size = new Vector2(PlateW - 8, 20),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 MouseFilter = MouseFilterEnum.Ignore,
             };
@@ -332,8 +393,8 @@ public sealed partial class ServerSelectScreen : Control
             var loadLbl = new Label
             {
                 Name = $"PlateLoadLbl{col}",
-                Position = new Vector2(plateDstX[col] + 4, 250),
-                Size = new Vector2(194, 20),
+                Position = new Vector2(PlateDstXTwo[col] + 4, 250),
+                Size = new Vector2(PlateW - 8, 20),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 MouseFilter = MouseFilterEnum.Ignore,
             };
@@ -627,12 +688,67 @@ public sealed partial class ServerSelectScreen : Control
                 pb.Visible = showPagers && n < pageCount;
         }
 
-        // Paint each plate: col 0 = display slot 2·page; col 1 = display slot 2·page+1.
-        for (int col = 0; col < 2; col++)
-        {
-            ServerEntry? entry = GetEntryAtDisplaySlot(2 * _currentPage + col);
-            PaintOnePlate(col, entry);
-        }
+        // Determine what occupies each column on this page.
+        ServerEntry? entry0 = GetEntryAtDisplaySlot(2 * _currentPage);
+        ServerEntry? entry1 = GetEntryAtDisplaySlot(2 * _currentPage + 1);
+
+        // SINGLE-SERVER CENTRING — spec: Docs/RE/specs/frontend_scenes.md §11.4 / §2.3.
+        // A single populated plate on the page is centred on the 1024-wide canvas.
+        //   centred plate X = (1024 − 202) / 2 = 411.  spec §11.4 §2.3 derived.
+        //   centred body  X = 411 + (77 − 24) = 464.   spec §11.4 §2.3 derived.
+        // Two plates use their spec-literal positions (col0=24, col1=257). spec §11.4. CODE-CONFIRMED.
+        // Zero plates → both hidden (offline / no data, faithfully empty).
+        bool hasBoth = entry0 is not null && entry1 is not null;
+
+        // Column 0 plate/body/button/label X positions.
+        // Use spec-literal left position when two servers are shown; centre when only one.
+        int col0PlateX = hasBoth ? PlateDstXTwo[0] : PlateDstXSingle; // centred when single
+        int col0BodyX = hasBoth ? BodyDstXTwo[0] : BodyDstXSingle;
+
+        // Reposition col0 chrome and widgets.
+        RepositionPlate(0, col0PlateX, col0BodyX);
+
+        // Column 1 chrome/widgets visible only when two servers on this page.
+        bool showCol1 = hasBoth;
+        SetPlateGroupVisible(1, showCol1);
+
+        // Also hide col0 when there are no servers at all (offline/empty list).
+        bool showCol0 = entry0 is not null;
+        SetPlateGroupVisible(0, showCol0);
+
+        // Paint content into each plate.
+        PaintOnePlate(0, entry0);
+        PaintOnePlate(1, entry1);
+    }
+
+    // Moves the plate chrome TextureRects, the clickable Button, and the labels for one column.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §2.3. CODE-CONFIRMED.
+    private void RepositionPlate(int col, int plateX, int bodyX)
+    {
+        if (_parchPlateRects[col] is { } pr)
+            pr.Position = new Vector2(plateX, PlateDstY);
+        if (_parchBodyRects[col] is { } br)
+            br.Position = new Vector2(bodyX, PlateDstY);
+        if (_plateButtons[col] is { } btn)
+            btn.Position = new Vector2(plateX, PlateDstY);
+        if (_plateNameLabels[col] is { } nl)
+            nl.Position = new Vector2(plateX + 4, 200);
+        if (_plateStatusLabels[col] is { } sl)
+            sl.Position = new Vector2(plateX + 4, 228);
+        if (_plateLoadLabels[col] is { } ll)
+            ll.Position = new Vector2(plateX + 4, 250);
+    }
+
+    // Shows or hides all nodes belonging to a plate column.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §2.3. CODE-CONFIRMED.
+    private void SetPlateGroupVisible(int col, bool visible)
+    {
+        if (_parchPlateRects[col] is { } pr) pr.Visible = visible;
+        if (_parchBodyRects[col] is { } br) br.Visible = visible;
+        if (_plateButtons[col] is { } btn) btn.Visible = visible;
+        if (_plateNameLabels[col] is { } nl) nl.Visible = visible;
+        if (_plateStatusLabels[col] is { } sl) sl.Visible = visible;
+        if (_plateLoadLabels[col] is { } ll) ll.Visible = visible;
     }
 
     private ServerEntry? GetEntryAtDisplaySlot(int displaySlot)
@@ -652,7 +768,9 @@ public sealed partial class ServerSelectScreen : Control
         if (_plateButtons[col] is { } btn) btn.Disabled = !isReady;
 
         // Name label.
-        // spec §11.4 "name → plate header label". CODE-CONFIRMED.
+        // Server name resolved from server_id (1..40) via msg bank 5001..5040.
+        // Server id outside 1..40: (id−1) > 0x27 → fallback caption msg 5901.
+        // spec: Docs/RE/specs/frontend_scenes.md §2.8 / §11.4. CODE-CONFIRMED.
         if (_plateNameLabels[col] is { } nameLbl)
         {
             if (entry is null)
@@ -661,11 +779,20 @@ public sealed partial class ServerSelectScreen : Control
             }
             else
             {
+                // Id-range guard: valid server ids are 1..40 (i.e. (id−1) <= 0x27).
+                // Out-of-range → fallback caption 5901 (from msg.xdb; empty when offline).
+                // spec: Docs/RE/specs/frontend_scenes.md §11.4 §2.8. CODE-CONFIRMED.
+                bool inRange = entry.ServerId >= 1 && entry.ServerId <= 0x28; // 0x28 = 40
+                string nameText = inRange
+                    ? entry.DisplayName
+                    : _assets.Text(5901u, ""); // fallback caption for unknown server id
+
                 // NEW badge: server_id == NEW_SERVER_INDEX (5). spec §2.7. CODE-CONFIRMED.
-                // Rendered as a small suffix — the original draws a separate badge widget;
-                // here a text marker is the closest passive equivalent.
-                bool isNew = entry.ServerId == NewServerIndex;
-                nameLbl.Text = isNew ? entry.DisplayName + " N" : entry.DisplayName;
+                // The original draws a separate badge widget (server_icon.dds, 128x128) on the
+                // per-row render path. Exact src-rect is PENDING (live-debugger). No badge art
+                // recovered → omit badge entirely; render nothing rather than invented English text.
+                // spec: Docs/RE/specs/frontend_scenes.md §11.4 §2.7. CODE-CONFIRMED struct; rect PENDING.
+                nameLbl.Text = nameText; // badge omitted — art not recovered
                 nameLbl.AddThemeColorOverride("font_color", new Color(0.92f, 0.82f, 0.50f));
             }
         }
@@ -686,9 +813,10 @@ public sealed partial class ServerSelectScreen : Control
             }
         }
 
-        // Load label — colour thresholds per §2.3. CODE-CONFIRMED.
-        // Load > 1200 → red (msg 6001); > 800 → orange (msg 6002); > 500 → yellow (msg 6003);
-        // ≤ 500 → green (no special msg). spec §2.3. CODE-CONFIRMED.
+        // Load label — colour thresholds and tier caption per §2.3. CODE-CONFIRMED.
+        // Tier caption: msg 6001 (> 1200 red) / 6002 (> 800 orange) / 6003 (> 500 yellow).
+        // Load read-out format: msg 6005 = "%4d / %4d " (current / capacity).
+        // spec: Docs/RE/specs/frontend_scenes.md §2.3. CODE-CONFIRMED.
         if (_plateLoadLabels[col] is { } loadLbl)
         {
             if (entry is null)
@@ -698,11 +826,17 @@ public sealed partial class ServerSelectScreen : Control
             else
             {
                 (Color loadColor, uint msgId) = GetLoadColor(entry.Load);
-                // Attempt to resolve the caption from the msg.xdb catalogue.
-                // When catalogue is absent, Text() returns the empty string → label stays blank.
+                // Tier caption from msg.xdb (6001/6002/6003). Empty when catalogue absent.
                 // spec §2.3 "population captions 6001..6005". CODE-CONFIRMED.
-                string loadText = msgId > 0 ? _assets.Text(msgId, "") : "";
-                loadLbl.Text = loadText;
+                string tierCaption = msgId > 0 ? _assets.Text(msgId, "") : "";
+                // Load read-out: msg 6005 = "%4d / %4d " — current load / capacity.
+                // ServerEntry carries only the load gauge; capacity is not in this record.
+                // Render the current load right-aligned to width 4 as the first field.
+                // spec §2.3 msg 6005 format. CODE-CONFIRMED format; capacity field absent from view model.
+                string loadReadout = $"{entry.Load,4} /     ";
+                loadLbl.Text = string.IsNullOrEmpty(tierCaption)
+                    ? loadReadout
+                    : $"{tierCaption} {loadReadout}";
                 loadLbl.AddThemeColorOverride("font_color", loadColor);
             }
         }
@@ -715,46 +849,49 @@ public sealed partial class ServerSelectScreen : Control
     private (string text, Color color) GetStatusPresentation(ServerEntry e)
     {
         // spec: Docs/RE/specs/frontend_scenes.md §2.3. CODE-CONFIRMED status rules.
-        // NOTE: 24 is a LOAD sentinel under status_code 3, NOT a top-level status code.
+        // NOTE: load==24 is a LOAD sentinel only under status_code==3 with open_time!=0,
+        //       not a separate top-level status code. The earlier duplicated branch
+        //       (case 2 or 3 or 4 when OpenTime==0 && Load==24) was unreachable (subsumed by
+        //       the OpenTime==0 branch below) and has been removed. spec §2.3. CODE-CONFIRMED.
         switch (e.StatusCode)
         {
             case 0:
                 // Normal/open → falls through to load-colour path. spec §2.3. CODE-CONFIRMED.
                 // Status text from msg.xdb; empty when catalogue absent.
-                return ("", new Color(0.55f, 0.90f, 0.55f)); // green
-
-            case 2 or 3 or 4 when e.OpenTime == 0 && e.Load == 24:
-                // load==24 under status 3 = "preparing / under check". spec §2.3. CODE-CONFIRMED.
-                // Caption id 6004 = "maintenance". spec §2.3. CODE-CONFIRMED.
-                return (_assets.Text(6004u, ""), new Color(0.80f, 0.70f, 0.40f));
+                return ("", Color.FromHtml("#B5FF7A")); // green 0xFFB5FF7A spec §2.3
 
             case 2 or 3 or 4 when e.OpenTime == 0:
-                // Fixed status-as-label branch (no clock). spec §2.3. CODE-CONFIRMED.
-                return (_assets.Text(6004u, ""), new Color(0.80f, 0.70f, 0.40f));
+                // Fixed status-as-label branch (no scheduled clock). spec §2.3. CODE-CONFIRMED.
+                // Caption id 6004 = "maintenance". spec §2.3. CODE-CONFIRMED.
+                return (_assets.Text(6004u, ""), Color.FromHtml("#C8B266")); // spec §2.3 (revival)
 
             case 3 when e.OpenTime != 0:
                 // Scheduled-open clock. HH = load/10, load%10; MM = open_time/10, open_time%10.
+                // load==24 sentinel ("preparing/under check") uses the maintenance caption 6004.
                 // spec: Docs/RE/specs/frontend_scenes.md §2.4. CODE-CONFIRMED (digit-split math).
+                if (e.Load == 24)
+                    return (_assets.Text(6004u, ""), Color.FromHtml("#C8B266")); // spec §2.3/§2.4
                 string hh = $"{e.Load / 10}{e.Load % 10}";
                 string mm = $"{e.OpenTime / 10}{e.OpenTime % 10}";
-                return ($"{hh}:{mm}", new Color(0.80f, 0.70f, 0.40f));
+                return ($"{hh}:{mm}", Color.FromHtml("#C8B266")); // spec §2.4. CODE-CONFIRMED.
 
             case 100:
                 // Auto-connect sentinel ("connected / current selection"). spec §2.3. CODE-CONFIRMED.
-                return ("", new Color(0.55f, 0.90f, 0.55f)); // green
+                return ("", Color.FromHtml("#B5FF7A")); // green 0xFFB5FF7A spec §2.3
 
             default:
-                return ("", new Color(0.70f, 0.50f, 0.40f));
+                return ("", Color.FromHtml("#B3804D")); // spec §2.3 (revival — exact hex unconfirmed)
         }
     }
 
     private static (Color color, uint msgId) GetLoadColor(int load)
     {
+        // Exact ARGB values from IDA ground truth. Strict greater-than, evaluated top-down.
         // spec: Docs/RE/specs/frontend_scenes.md §2.3. CODE-CONFIRMED thresholds (strict >).
-        if (load > 1200) return (new Color(0.90f, 0.25f, 0.25f), 6001u); // red
-        if (load > 800) return (new Color(0.95f, 0.60f, 0.15f), 6002u); // orange
-        if (load > 500) return (new Color(0.95f, 0.90f, 0.15f), 6003u); // yellow
-        return (new Color(0.50f, 0.90f, 0.50f), 0u); // green (no special msg)
+        if (load > 1200) return (Color.FromHtml("#FF0000"), 6001u); // 0xFFFF0000 red   spec §2.3
+        if (load > 800) return (Color.FromHtml("#ED6806"), 6002u); // 0xFFED6806 orange spec §2.3
+        if (load > 500) return (Color.FromHtml("#FFFF00"), 6003u); // 0xFFFFFF00 yellow spec §2.3
+        return (Color.FromHtml("#B5FF7A"), 0u); // 0xFFB5FF7A green  spec §2.3 (default tier)
     }
 
     // =========================================================================

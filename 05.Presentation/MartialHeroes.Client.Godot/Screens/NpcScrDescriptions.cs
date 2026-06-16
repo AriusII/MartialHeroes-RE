@@ -45,19 +45,9 @@ internal sealed class NpcScrDescriptions
     // spec: Docs/RE/specs/frontend_scenes.md §4.1.1 — "UI 0→key 1, UI 1→key 2, UI 2→key 4, UI 3→key 3": CONFIRMED.
     private static readonly uint[] UiIndexToNpcKey = [1u, 2u, 4u, 3u]; // spec: config_tables.md §2.17.3
 
-    // English fallback descriptions — shown when npc.scr is unavailable (VFS absent).
-    // Each entry = the three description lines joined with "\n".
-    private static readonly string[] Fallbacks =
-    [
-        // UI 0 → Monk (key 1, internal 4)
-        "A powerful warrior who excels in direct combat and defense.",
-        // UI 1 → Musa (key 2, internal 1)
-        "A martial artist with speed and balanced abilities.",
-        // UI 2 → Dosa (key 4, internal 3)
-        "A mystical practitioner commanding elemental forces.",
-        // UI 3 → Salsu (key 3, internal 2)
-        "A swift blader skilled in both attack and evasion.",
-    ];
+    // No English fallback descriptions — when npc.scr is absent the description is empty.
+    // spec: Docs/RE/formats/config_tables.md §2.17.3 — text is CP949 VFS-only; no hardcoded strings.
+    // Faithfully EMPTY offline: render nothing rather than inventing text.
 
     // Resolved descriptions (three lines joined with \n), indexed by UI class index 0..3.
     // Populated by Load(); null means the VFS was not available.
@@ -80,7 +70,8 @@ internal sealed class NpcScrDescriptions
 
         if (realAssets is null)
         {
-            GD.Print("[NpcScrDescriptions] No real-client VFS — using English fallbacks.");
+            GD.Print(
+                "[NpcScrDescriptions] No real-client VFS — class descriptions will be empty (faithfully offline).");
             return inst;
         }
 
@@ -91,7 +82,7 @@ internal sealed class NpcScrDescriptions
 
             if (raw.IsEmpty)
             {
-                GD.PrintErr("[NpcScrDescriptions] npc.scr not found in VFS — using English fallbacks. " +
+                GD.PrintErr("[NpcScrDescriptions] npc.scr not found in VFS — descriptions will be empty. " +
                             "spec: config_tables.md §2.17.3.");
                 return inst;
             }
@@ -129,7 +120,7 @@ internal sealed class NpcScrDescriptions
                 if (string.IsNullOrWhiteSpace(joined))
                 {
                     GD.PrintErr(
-                        $"[NpcScrDescriptions] npc.scr key {key} has empty description — using English fallback.");
+                        $"[NpcScrDescriptions] npc.scr key {key} (UI slot {uiIdx}) has empty description — slot will be empty.");
                     continue;
                 }
 
@@ -155,8 +146,8 @@ internal sealed class NpcScrDescriptions
     /// Returns the CP949-decoded description text (three lines joined with newlines) for the
     /// given UI class index (0..3).
     ///
-    /// <para>Falls back to the English string when npc.scr was unavailable or the record
-    /// was absent.</para>
+    /// <para>Returns <see cref="string.Empty"/> when npc.scr was unavailable or the record
+    /// was absent — faithfully empty offline; no invented fallback text.</para>
     ///
     /// spec: Docs/RE/formats/config_tables.md §2.17.3 — string fields 0/1/2 for keys 1..4: CONFIRMED.
     /// spec: Docs/RE/specs/frontend_scenes.md §4.1.1 — class description from npc.scr: CONFIRMED.
@@ -164,9 +155,11 @@ internal sealed class NpcScrDescriptions
     public string GetDescription(int uiClassIndex)
     {
         if (uiClassIndex < 0 || uiClassIndex >= 4)
-            return Fallbacks[0];
+            return string.Empty;
 
-        return _resolved[uiClassIndex] ?? Fallbacks[uiClassIndex];
+        // Return the VFS-loaded CP949 text, or empty string when offline.
+        // spec: No English fallback — faithfully empty when npc.scr is absent.
+        return _resolved[uiClassIndex] ?? string.Empty;
     }
 
     /// <summary>True when the descriptions were loaded from the real VFS npc.scr.</summary>

@@ -124,20 +124,15 @@ public static class TedTerrainParser
             normals[i] = (nx, ny, nz);
         }
 
-        // ---- Block 3: Texture index grid (16 × 16 = 256 u8 bytes, 1-based) ----
-        // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — "u8, 1-based, 16×16 grid": CONFIRMED.
-        // Value 0 is NOT a no-texture sentinel. The legacy loader clamps 0 → 1 (renders slot 1).
-        // There is no sentinel branch; a byte below 1 is silently incremented to 1.
-        // spec: Docs/RE/formats/terrain.md §5.9 — "b < 1 → b = 1 (clamp, no-sentinel branch)": CONFIRMED (two-witness, 2026-06-15).
-        // spec: Docs/RE/formats/terrain.md §14 (recently promoted) — "0 = no-texture sentinel REFUTED".
+        // ---- Block 3: Texture index grid (16 × 16 = 256 u8 bytes) ----
+        // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — "u8, 16×16 grid": CONFIRMED.
+        // CORRECTION (terrain.md reconciliation 2026-06-16): the loader stores each byte RAW with NO
+        // idx-1 decrement and NO value-below-1 clamp. Both of those are RENDER-DOMAIN behaviours
+        // (applied at draw time, not load time) and must NOT be performed in the parser.
+        // spec: Docs/RE/formats/terrain.md §5.9 reconciliation —
+        //   "block-3 TextureIndexGrid stored RAW; idx-1 and clamp-to-1 are render-domain": CONFIRMED.
         byte[] textureIndexGrid = new byte[LookupSize];
         data.Slice(LookupOffset, LookupSize).CopyTo(textureIndexGrid);
-        // Apply the legacy clamp: any value below 1 becomes 1.
-        for (int i = 0; i < LookupSize; i++)
-        {
-            if (textureIndexGrid[i] < 1)
-                textureIndexGrid[i] = 1; // clamp-to-1: spec: terrain.md §5.9 — "if (b < 1) b = 1": CONFIRMED.
-        }
 
         // ---- Block 4: Quad split / UV orientation flags (16 × 16 = 256 u8 bytes, values 0-3) ----
         // spec: Docs/RE/formats/terrain.md §5.7 Block 4 — "u8, observed values 0-3": CONFIRMED.

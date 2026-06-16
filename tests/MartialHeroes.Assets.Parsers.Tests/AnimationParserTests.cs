@@ -117,7 +117,7 @@ public sealed class AnimationParserTests
         // spec: Docs/RE/formats/animation.md §Header layout — id_a, id_b, name: CONFIRMED.
         byte[] data = BuildMot(idA: 10, idB: 20, name: "RunForward", frameCount: 30, tracks: []);
 
-        AnimationClip clip = AnimationParser.Parse(data.AsSpan());
+        AnimationClip clip = AnimationParser.Parse(data.AsSpan())!;
 
         Assert.Equal(10u, clip.IdA);
         Assert.Equal(20u, clip.IdB);
@@ -132,7 +132,7 @@ public sealed class AnimationParserTests
         // spec: Docs/RE/formats/animation.md §Timing — "duration = frame_count × 0.1": CONFIRMED.
         byte[] data = BuildMot(idA: 1, idB: 2, name: "Idle", frameCount: 100, tracks: []);
 
-        AnimationClip clip = AnimationParser.Parse(data.AsSpan());
+        AnimationClip clip = AnimationParser.Parse(data.AsSpan())!;
 
         Assert.Equal(100u, clip.FrameCount);
     }
@@ -143,7 +143,7 @@ public sealed class AnimationParserTests
         // spec: Docs/RE/formats/animation.md §Track count — "u32 LE track_count": CONFIRMED.
         byte[] data = BuildMot(idA: 1, idB: 2, name: "NoTracks", frameCount: 10, tracks: []);
 
-        AnimationClip clip = AnimationParser.Parse(data.AsSpan());
+        AnimationClip clip = AnimationParser.Parse(data.AsSpan())!;
 
         Assert.Empty(clip.Tracks);
     }
@@ -158,7 +158,7 @@ public sealed class AnimationParserTests
         byte[] data = BuildMot(idA: 1, idB: 2, name: "T", frameCount: 1,
             tracks: [(trackDescriptor, [])]);
 
-        AnimationClip clip = AnimationParser.Parse(data.AsSpan());
+        AnimationClip clip = AnimationParser.Parse(data.AsSpan())!;
 
         Assert.Single(clip.Tracks);
         Assert.Equal((byte)3, clip.Tracks[0].BoneId);
@@ -191,7 +191,7 @@ public sealed class AnimationParserTests
         var key = (tx: 10f, ty: 20f, tz: 30f, rx: 0.1f, ry: 0.2f, rz: 0.3f, rw: 0.9f);
         byte[] data = BuildMot(1, 2, "K", 1, [(trackDescriptor: 5u, keys: [key])]);
 
-        AnimationClip clip = AnimationParser.Parse(data.AsSpan());
+        AnimationClip clip = AnimationParser.Parse(data.AsSpan())!;
         Keyframe kf = clip.Tracks[0].Keyframes[0];
 
         Assert.Equal(new Vec3(10f, 20f, 30f), kf.Translation);
@@ -218,7 +218,7 @@ public sealed class AnimationParserTests
         byte[] data = BuildMot(1, 2, "Multi", 20,
             [(trackDescriptor: 0u, keys: track0Keys), (trackDescriptor: 1u, keys: track1Keys)]);
 
-        AnimationClip clip = AnimationParser.Parse(data.AsSpan());
+        AnimationClip clip = AnimationParser.Parse(data.AsSpan())!;
 
         Assert.Equal(2, clip.Tracks.Length);
         Assert.Equal(2, clip.Tracks[0].Keyframes.Length);
@@ -226,6 +226,56 @@ public sealed class AnimationParserTests
         Assert.Equal(new Vec3(1f, 0f, 0f), clip.Tracks[0].Keyframes[0].Translation);
         Assert.Equal(new Vec3(2f, 0f, 0f), clip.Tracks[0].Keyframes[1].Translation);
         Assert.Equal(new Vec3(0f, 5f, 0f), clip.Tracks[1].Keyframes[0].Translation);
+    }
+
+    [Fact]
+    public void Parse_BaniMagic_ReturnsNull()
+    {
+        // 11 of 3,891 .mot files begin with ASCII "BANI" (42 41 4E 49).
+        // The shipping client loader has no magic-check branch and fails on them.
+        // A faithful parser must detect BANI and return null rather than crashing.
+        // spec: Docs/RE/formats/animation.md §BANI variant —
+        //   "A parser MUST sniff the first 4 bytes and route BANI files separately": CONFIRMED.
+        // spec: Docs/RE/formats/animation.md §BANI variant — loader rejection: SAMPLE-VERIFIED.
+        byte[] baniFile = [(byte)'B', (byte)'A', (byte)'N', (byte)'I', 0x01, 0x00, 0x00, 0x00, 0xFF, 0xFF];
+
+        AnimationClip? result = AnimationParser.Parse(baniFile.AsSpan());
+
+        Assert.Null(result); // BANI files are dead data: skip-and-return-null, not crash.
+    }
+
+    [Fact]
+    public void IsBaniVariant_BaniBytes_ReturnsTrue()
+    {
+        // spec: Docs/RE/formats/animation.md §BANI variant — magic "BANI" (42 41 4E 49): SAMPLE-VERIFIED.
+        byte[] baniBytes = [(byte)'B', (byte)'A', (byte)'N', (byte)'I', 0x00];
+        Assert.True(AnimationParser.IsBaniVariant(baniBytes.AsSpan()));
+    }
+
+    [Fact]
+    public void IsBaniVariant_StandardBytes_ReturnsFalse()
+    {
+        // Standard .mot begins with id_a (first 4 bytes are a u32 LE, not "BANI").
+        byte[] stdBytes = [0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00];
+        Assert.False(AnimationParser.IsBaniVariant(stdBytes.AsSpan()));
+    }
+
+    [Fact]
+    public void Parse_OversizedClip_TrailingBytesIgnored()
+    {
+        // The spec documents one standard-variant clip with ~+48,719 trailing bytes past the track array.
+        // The parser must read the header+tracks and stop — trailing bytes are not an error.
+        // spec: Docs/RE/formats/animation.md §Oversized standard clip —
+        //   "read the header, then track_count tracks, then stop — tolerate a positive residual": CONFIRMED.
+        byte[] clip = BuildMot(1, 2, "Oversized", 10, []);
+        // Append 64 trailing bytes — simulates trailing garbage.
+        byte[] withTrailing = new byte[clip.Length + 64];
+        clip.CopyTo(withTrailing, 0);
+
+        AnimationClip? result = AnimationParser.Parse(withTrailing.AsSpan());
+
+        Assert.NotNull(result);
+        Assert.Equal(1u, result!.IdA);
     }
 
     [Fact]
@@ -246,7 +296,7 @@ public sealed class AnimationParserTests
     {
         byte[] data = BuildMot(99, 88, "Mem", 1, []);
 
-        AnimationClip clip = AnimationParser.Parse(new ReadOnlyMemory<byte>(data));
+        AnimationClip clip = AnimationParser.Parse(new ReadOnlyMemory<byte>(data))!;
 
         Assert.Equal(99u, clip.IdA);
         Assert.Equal("Mem", clip.Name);
@@ -260,7 +310,7 @@ public sealed class AnimationParserTests
         var key = (tx: 0f, ty: 0f, tz: 0f, rx: 0.5f, ry: -0.5f, rz: 0.5f, rw: 0.5f);
         byte[] data = BuildMot(1, 2, "Q", 1, [(0u, [key])]);
 
-        AnimationClip clip = AnimationParser.Parse(data.AsSpan());
+        AnimationClip clip = AnimationParser.Parse(data.AsSpan())!;
         Quat q = clip.Tracks[0].Keyframes[0].Rotation;
 
         Assert.Equal(0.5f, q.X, precision: 6);

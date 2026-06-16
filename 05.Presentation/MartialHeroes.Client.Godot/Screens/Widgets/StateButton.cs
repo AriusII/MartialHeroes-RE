@@ -154,7 +154,6 @@ public sealed partial class StateButton : Control
     private float _targetAlpha = 1f; // 0 = hiding, 1 = showing
 
     // Godot child controls built in _Ready
-    private ColorRect _fallbackBg = null!;
     private TextureRect _spriteRect = null!;
     private Label _captionLabel = null!;
 
@@ -168,22 +167,9 @@ public sealed partial class StateButton : Control
         // The button Control itself is transparent; children render the content.
         MouseFilter = MouseFilterEnum.Stop; // capture mouse events
 
-        // Fallback background — a visible rect shown under the atlas sprite so the button area
-        // is always legible even when the atlas DXT3 pixels have alpha=0 (transparent field).
-        // The legacy client drew atlas sprites over a coloured panel background, so the net result
-        // was an opaque button face. We approximate with a darker-than-FormBacking rectangle.
-        // // PLAUSIBLE fallback colour (legacy panel art not recovered; darker than form band)
-        _fallbackBg = new ColorRect
-        {
-            Name = "FallbackBg",
-            // Darker and cooler than FormBacking (0.30, 0.20, 0.12) so buttons are distinguishable.
-            Color = new Color(0.10f, 0.07f, 0.04f, 0.85f),
-            MouseFilter = MouseFilterEnum.Ignore,
-        };
-        _fallbackBg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        AddChild(_fallbackBg);
-
         // Sprite layer — fills the button rect exactly.
+        // When the atlas frame is absent (VFS offline) no fallback colour is rendered;
+        // the button area remains transparent (render nothing, not a solid stand-in).
         _spriteRect = new TextureRect
         {
             Name = "Sprite",
@@ -361,6 +347,21 @@ public sealed partial class StateButton : Control
         {
             _captionLabel.Text = text;
         }
+    }
+
+    /// <summary>
+    /// Latches all three frames (NORMAL/HOVER/PRESSED) to a single sprite and repaints.
+    /// Used to turn this button into a stateful toggle (e.g. the Save-ID checkbox, whose
+    /// "on"/"off" glyphs are two distinct atlas sub-rects that must persist between clicks,
+    /// not the momentary pressed-frame behaviour of a plain button).
+    /// spec: Docs/RE/specs/frontend_scenes.md §11.2e — Save-ID checkbox off(717,398)/on(730,398).
+    /// </summary>
+    public void SetLatchedFrame(AtlasTexture? frame)
+    {
+        NormalFrame = frame;
+        HoverFrame = frame;
+        PressedFrame = frame;
+        RefreshVisuals();
     }
 
     // -------------------------------------------------------------------------

@@ -3,46 +3,26 @@
 // Faithful Godot renderer for a parsed XeffData instance.
 //
 // SCOPE: Char-select scene — renders the single composite ambient effect
-//   char_select-u.xeff (effect id 380003000, 68 sub-effects) as a set of
-//   camera-facing BILLBOARD QUADS with alpha-blend/additive blend, placed at
-//   the parsed per-sub-effect velocity-displaced positions from keyframe 0.
+//   char_select-u.xeff (effect id 380003000, 68 sub-effects) as a mixed set of
+//   per-emitter-type quads placed at their per-sub-effect keyframe-0 offsets.
 //
-// FLYING-PIXELS ROOT CAUSE (per spec §3.6.6):
-//   Stray red/orange pixels = brazier-fire emitters drawn as bare points/opaque quads.
-//   Stray blue pixels = waterfall emitters drawn as bare points/opaque quads.
-//   Fix: each particle MUST be a camera-facing textured BILLBOARD QUAD, alpha-blended /
-//   additive, with its TGA texture bound. A missing texture MUST suppress the quad (no
-//   solid-colour fallback, which reads as a hard opaque dot).
+// ROOT CAUSE OF FLYING PIXELS (spec: Docs/RE/specs/frontend_scenes.md §3.6.7):
+//   The previous code rendered ALL 68 sub-effects as camera-facing SQUARE billboards
+//   using max(SizeX, SizeY)*2 with no per-emitter-type handling. The waterfall tiles
+//   (emitter_type 1 = mesh-particle, oriented quads) and corona glows (emitter_type 2 =
+//   directional, pre-rotated oriented quads) collapsed to tiny camera-facing squares
+//   scattered at their world positions → the "flying blue/red pixel" artefact.
 //
-// PORT CONTRACT (spec: Docs/RE/specs/frontend_scenes.md §3.6.6 CODE-CONFIRMED):
-//   1. Billboard — camera-facing textured quad sized by sprite_size.
-//   2. Bind per-sub-effect texture (data/effect/texture/<name>.tga with alpha).
-//   3. Additive/transparent blend — fire/water glow, not opaque.
-//   4. (Future) Animate via XEffect keyframe stride. First pass: keyframe-0 static.
-//   5. NO scene point-lights for the braziers (fire glow = additive texture, not a light).
-//   If texture is absent: SKIP the sub-effect entirely (no solid fallback dot).
+// FIX — THREE RENDER PATHS (spec: Docs/RE/specs/frontend_scenes.md §3.6.7):
+//   emitter_type 0 (billboard): camera-facing quad, per-axis size (NOT a square max()).
+//   emitter_type 1 (mesh-particle): oriented quad, NOT camera-facing, Euler rotation from kf.
+//   emitter_type 2 (directional billboard): oriented quad with +90° Y pre-rotation + kf Euler.
 //
-// SPEC CITATIONS:
-//   Effect id 380003000 = char_select-u.xeff:
-//     spec: Docs/RE/specs/frontend_scenes.md §3.6.5 CODE-CONFIRMED
-//   Anchor world position (508.483, 69.887, −9758.569):
-//     spec: Docs/RE/specs/frontend_scenes.md §3.6.5 CODE-CONFIRMED
-//   Anchor in Godot-space (world Z negated → +9758.569):
-//     spec: Helpers/WorldCoordinates.ToGodot (x,y,z) → (x,y,−z)
-//   68 sub-effects, 16 textures (fire_4-01..06, fire_piece1b-01, waterfall-pie-01..04, etc.):
-//     spec: Docs/RE/specs/frontend_scenes.md §3.6.6 VFS-VERIFIED
-//   Billboard + additive/alpha-blend port contract:
-//     spec: Docs/RE/specs/frontend_scenes.md §3.6.6 PORT CONTRACT CODE-CONFIRMED
-//   Velocity Vec3 = displacement from effect origin (per sub-effect keyframe 0):
-//     spec: Docs/RE/formats/effects.md §A.8 HIGH
-//   Alpha inversion convention (file 0.0=opaque, 1.0=transparent):
-//     spec: Docs/RE/formats/effects.md §A.6 CONFIRMED
-//   Size Vec3 = billboard half-extents (size_x/size_y):
-//     spec: Docs/RE/formats/effects.md §A.8 HIGH
-//   Flying-pixels root cause (bare points / alpha dropped):
-//     spec: Docs/RE/specs/frontend_scenes.md §3.6.6 FLYING-PIXELS ROOT CAUSE CODE-CONFIRMED
+// EXPECTED DISTRIBUTION for char_select-u.xeff (spec: §3.6.6 VFS-VERIFIED):
+//   6 billboard / 51 mesh-particle / 11 directional → 68 total.
 //
 // PASSIVE: zero game logic. Pure asset → visual translation.
+// LAYER 05 ONLY: uses Godot types. Never add using Godot; to layers 01–04.
 
 using Godot;
 using MartialHeroes.Assets.Parsers;
@@ -53,14 +33,14 @@ namespace MartialHeroes.Client.Godot.Screens;
 
 /// <summary>
 /// A <see cref="Node3D"/> that renders one parsed <c>.xeff</c> descriptor as a set of
-/// camera-facing billboard quads placed at the sub-effect keyframe-0 positions.
+/// per-emitter-type quads placed at the sub-effect keyframe-0 offsets.
 ///
 /// <para>Load: call <see cref="Initialise"/> after the node is in the scene tree.</para>
 ///
 /// <para>spec: Docs/RE/specs/frontend_scenes.md §3.6.5 CODE-CONFIRMED — single composite
 /// char_select-u.xeff at world (508.483, 69.887, −9758.569), scale 1.0, identity rotation.</para>
-/// <para>spec: Docs/RE/specs/frontend_scenes.md §3.6.6 — billboard + additive port contract,
-/// flying-pixels root cause (bare points / alpha dropped). CODE-CONFIRMED.</para>
+/// <para>spec: Docs/RE/specs/frontend_scenes.md §3.6.7 CAMPAIGN-9c two-witness — per-emitter-type
+/// render recipe: billboard / mesh-particle / directional.</para>
 /// </summary>
 public sealed partial class XeffSceneEffect : Node3D
 {
@@ -76,81 +56,122 @@ public sealed partial class XeffSceneEffect : Node3D
     // spec: Docs/RE/formats/effects.md §A.15 — char_select-u.xeff. CODE-CONFIRMED.
     private const string CharSelectXeffPath = "data/effect/xeff/char_select-u.xeff";
 
-    // Minimum rendered quad size — sub-effects smaller than this are too small to see and
-    // can contribute to the "flying pixel" look (a 1-unit quad reads as a dot).
-    // Aesthetic: 2.0 units minimum so the billboard reads as a soft glow, not a speck.
-    private const float MinQuadSize = 2.0f;
+    // Emitter-type constants.
+    // spec: Docs/RE/formats/effects.md §A.12 / §A.14 — XEFF_EMITTER_BILLBOARD=0, XEFF_EMITTER_MESH=1, XEFF_EMITTER_DIRECTIONAL=2.
+    private const uint EmitterBillboard = 0;
+    private const uint EmitterMesh = 1;
+    private const uint EmitterDirectional = 2;
+
+    // =========================================================================
+    // Animation state (per-child, stepped in _Process)
+    // =========================================================================
+
+    // One entry per built MeshInstance3D child; used in the animation step below.
+    // (Kept minimal — full texture-swap animation deferred to step 2; static keyframe-0
+    //  placement + correct shape are the dominant visual fix per §3.6.7.)
+    private AnimEntry[] _animEntries = [];
+
+    private double _elapsed; // seconds since scene entered tree
+
+    private readonly record struct AnimEntry(
+        MeshInstance3D Node,
+        float[] AlphaKeys, // inverted opacity per frame (1.0 − file)
+        uint AnimStride, // ms per keyframe; 0 = static
+        uint FrameCount, // total texture frames
+        string[] TextureNames,
+        ImageTexture? Tex0, // frame 0 texture (already loaded)
+        StandardMaterial3D Material,
+        RealClientAssets? Assets);
 
     // =========================================================================
     // Public API
     // =========================================================================
 
     /// <summary>
-    /// Builds all sub-effect billboard quads from <paramref name="xeff"/> at this node's
-    /// origin (which should already be set to the anchor world position).
+    /// Builds all sub-effect quads from <paramref name="xeff"/> at this node's origin.
     ///
-    /// <para>KEY RULE (anti-flying-pixels): sub-effects whose texture is absent are SKIPPED
-    /// entirely — no solid-colour fallback is emitted, because a solid-colour quad of the
-    /// wrong size reads as the "flying pixel" artefact the spec §3.6.6 documents.</para>
+    /// <para>Dispatch by emitter_type (spec: Docs/RE/specs/frontend_scenes.md §3.6.7):</para>
+    /// <list type="bullet">
+    ///   <item>0 = camera-facing billboard quad, per-axis size.</item>
+    ///   <item>1 = oriented quad (mesh-particle / waterfall tiles), NOT camera-facing.</item>
+    ///   <item>2 = oriented quad with +90° Y pre-rotation (corona/glow directional).</item>
+    /// </list>
     ///
-    /// <para>spec: Docs/RE/specs/frontend_scenes.md §3.6.6 PORT CONTRACT CODE-CONFIRMED —
-    /// billboard, texture bound, additive/transparent, no fallback dot.</para>
+    /// <para>KEY RULE (anti-flying-pixels): sub-effects whose texture is absent are SKIPPED —
+    /// no solid-colour fallback dot. spec: §3.6.6 PORT CONTRACT CODE-CONFIRMED.</para>
+    ///
+    /// <para>spec: Docs/RE/specs/frontend_scenes.md §3.6.7 CAMPAIGN-9c two-witness: IDA render +
+    /// black-box byte-parse of char_select-u.xeff.</para>
     /// </summary>
     public void Initialise(XeffData xeff, RealClientAssets? assets)
     {
-        int built = 0;
+        int builtBillboard = 0;
+        int builtMesh = 0;
+        int builtDirectional = 0;
         int skippedNoKf = 0;
         int skippedTransparent = 0;
         int skippedNoTexture = 0;
-        int skippedTooSmall = 0;
+        int skippedDegenerate = 0;
+
+        var animList = new System.Collections.Generic.List<AnimEntry>(xeff.SubEffects.Length);
 
         for (int i = 0; i < xeff.SubEffects.Length; i++)
         {
             XeffSubEffect sub = xeff.SubEffects[i];
 
-            // We need at least one keyframe to know position and size.
+            // Need at least one keyframe for position and size.
             if (sub.Keyframes.Length == 0)
             {
                 skippedNoKf++;
                 continue;
             }
 
-            // Use keyframe 0 for the static first-pass render.
-            // spec: Docs/RE/formats/effects.md §A.4.4 — frame 0 = first keyframe.
             XeffKeyframe kf0 = sub.Keyframes[0];
 
-            // Velocity Vec3 = displacement from effect origin (world-space in the legacy engine;
-            // here the origin is already in Godot-space so we apply the displacement as-is).
-            // spec: Docs/RE/formats/effects.md §A.8 — velocity displaced from effect origin: HIGH.
-            var displacement = new Vector3(kf0.VelocityX, kf0.VelocityY, kf0.VelocityZ);
+            // ---- Placement ----
+            // Each sub-effect CENTER = anchor (this node's world position) + kf0 offset.
+            // The offset is the legacy WORLD-frame displacement; the node sits at the Z-NEGATED
+            // anchor (WorldCoordinates.ToGodot negates Z), so the offset's Z must be negated too —
+            // otherwise the whole effect is mirrored in depth (braziers, authored at offset_z +36.8
+            // = FOREGROUND toward the camera, get pushed behind the anchor; the waterfall at
+            // offset_z −105 = deep background gets pushed in front of / onto the camera and vanishes).
+            // One uniform handedness conversion: local offset = (off_x, off_y, −off_z).
+            // spec: Docs/RE/formats/effects.md §A.8 HIGH — velocity Vec3 = displacement from effect origin.
+            // spec: Docs/RE/specs/frontend_scenes.md §3.6.7 — "anchor + offset, identity-oriented".
+            // spec: CLAUDE.md "Coordinate conventions" — world geometry negates Z (x,y,z)→(x,y,−z).
+            var offset = new Vector3(kf0.VelocityX, kf0.VelocityY, -kf0.VelocityZ);
 
-            // Size Vec3 = billboard quad size.
-            // spec: Docs/RE/formats/effects.md §A.8 — size_x/size_y = billboard half-extents: HIGH.
+            // ---- Size (per-axis, NOT a square max) ----
+            // spec: Docs/RE/formats/effects.md §A.8 HIGH — size Vec3 = billboard half-extents.
+            // spec: Docs/RE/specs/frontend_scenes.md §3.6.7 — "use the per-axis size — NOT a square max()".
             float sizeX = kf0.SizeX;
             float sizeY = kf0.SizeY;
-            float quadSize = MathF.Max(MathF.Max(sizeX, sizeY), MinQuadSize);
+            float quadW = sizeX * 2.0f;
+            float quadH = sizeY * 2.0f;
+            if (quadW <= 0.0f || quadH <= 0.0f)
+            {
+                // Authored degenerate size — skip, no zero/inverted quad.
+                skippedDegenerate++;
+                continue;
+            }
 
-            // Alpha from AlphaKeys[0] if present; inverted per spec §A.6.
-            // spec: Docs/RE/formats/effects.md §A.6 — file 0.0=opaque, 1.0=transparent. CONFIRMED.
+            // ---- Alpha ----
+            // spec: Docs/RE/formats/effects.md §A.6 CONFIRMED — file 0.0=opaque, 1.0=transparent.
+            // In-memory opacity = 1.0 − file_value.
             float opacity = 1.0f;
             if (sub.AlphaKeys.Length > 0)
                 opacity = 1.0f - sub.AlphaKeys[0];
 
             opacity = Math.Clamp(opacity, 0.0f, 1.0f);
-            if (opacity < 0.02f)
+            if (opacity <= 0.0f)
             {
-                // Fully transparent — skip. No quad, no pixel.
                 skippedTransparent++;
                 continue;
             }
 
-            // === CRITICAL anti-flying-pixels rule (spec §3.6.6 PORT CONTRACT #1+#2) ===
-            // Attempt to load the sub-effect's texture. If it fails, SKIP this sub-effect —
-            // do NOT emit a solid-colour fallback quad. A solid quad without its alpha texture
-            // IS the "flying pixel" artefact: it renders as an opaque dot of wrong colour.
-            // spec: Docs/RE/specs/frontend_scenes.md §3.6.6 — "never as a bare point / never
-            //   as an opaque quad"; "bind the per-sub-effect texture ... A missing texture /
-            //   ignored alpha is the other half of 'bare pixels'". CODE-CONFIRMED.
+            // ---- Texture ----
+            // spec: §3.6.6 PORT CONTRACT — "A missing texture MUST suppress the quad (no fallback dot)."
+            // spec: Docs/RE/formats/effects.md §A.4.1 — full VFS path: data/effect/texture/<name>.tga.
             ImageTexture? albedo = null;
             if (sub.TextureNames.Length > 0 && sub.TextureNames[0].Length > 0 && assets is not null)
             {
@@ -163,82 +184,303 @@ public sealed partial class XeffSceneEffect : Node3D
                     }
                     catch
                     {
-                        // Texture load failed — will skip below.
+                        /* load failed → null → skip below */
                     }
                 }
             }
 
             if (albedo is null)
             {
-                // No texture → no quad. Emitting a solid-colour quad here would produce the
-                // exact "flying pixel" artefact we are trying to eliminate.
-                // spec: §3.6.6 — missing texture IS the other half of "bare pixels". CODE-CONFIRMED.
                 skippedNoTexture++;
                 continue;
             }
 
-            // Build additive billboard material.
-            // spec: §3.6.6 PORT CONTRACT #1 — camera-facing billboard.
-            // spec: §3.6.6 PORT CONTRACT #3 — additive/transparent blend.
+            // ---- Material (shared logic for all emitter types) ----
+            // spec: Docs/RE/specs/frontend_scenes.md §3.6.7 — ADDITIVE blend for fire/flare/corona/waterfall.
+            // spec: §3.6.6 PORT CONTRACT — unshaded, depth-write off, additive, texture bound.
+            // TODO spec: §3.6.7 — per-sub-effect straight-alpha flag at element+0x30 not yet exposed by
+            //   parser; additive is correct for the visible majority (fire/water/corona).
+            //   // spec: Docs/RE/specs/frontend_scenes.md §3.6.7 — "flag at element +0x30 PARSER-TODO"
+            // Per-keyframe DIFFUSE multiplier (R,G,B). The .xeff curve section's passes 2/3/4 — which the
+            // parser model exposes as DiffuseR/G/B (formerly mislabelled ScaleX/Y/Z) — are the diffuse R/G/B
+            // multiplier in [0,1] (default 1.0), NOT a scale (the real size is the keyframe SizeX/Y/Z used
+            // above for the quad). The char-select WATERFALL diffuse is WHITE (the spray IS white, not blue
+            // — the visible blue is the SEPARATE cell water plane, not these sprites); the lens-flare is
+            // warm-yellow; smoke is black (adds nothing under additive). This drops the earlier interim
+            // blue-tint hack and renders each sub-effect by its REAL recovered diffuse.
+            // spec: Docs/RE/formats/effects.md §A.4.2 (passes 2/3/4 = diffuse R/G/B) / frontend_scenes.md
+            //   §3.6.1 + _dirty/campaign9c/xeff_diffuse.md (CAMPAIGN 9c two-witness).
+            float diffR = sub.DiffuseR.Length > 0 ? Math.Clamp(sub.DiffuseR[0], 0f, 1f) : 1.0f;
+            float diffG = sub.DiffuseG.Length > 0 ? Math.Clamp(sub.DiffuseG[0], 0f, 1f) : 1.0f;
+            float diffB = sub.DiffuseB.Length > 0 ? Math.Clamp(sub.DiffuseB[0], 0f, 1f) : 1.0f;
+            var tint = new Color(diffR, diffG, diffB);
+
             var mat = new StandardMaterial3D
             {
-                // Unshaded — effect sprites are emissive (bypass PBR lighting).
-                // spec: §3.6.6 — fire glow is the additive texture, not a lit surface.
                 ShadingMode = StandardMaterial3D.ShadingModeEnum.Unshaded,
-
-                // Alpha blend mode with AlbedoTexture carrying the sprite's alpha channel.
-                // This prevents the opaque-quad "flying pixel" — the sprite edges are
-                // soft/transparent where the TGA alpha is 0.
-                // spec: §3.6.6 PORT CONTRACT #3 — additive/transparent blend. CODE-CONFIRMED.
                 Transparency = StandardMaterial3D.TransparencyEnum.Alpha,
                 BlendMode = StandardMaterial3D.BlendModeEnum.Add,
-
-                // Camera-facing billboard (all emitter types in the char_select xeff
-                // are billboard / mesh-particle on the name-table path).
-                // spec: §3.6.6 PORT CONTRACT #1 — "camera-facing, alpha-blended, textured quad".
-                BillboardMode = StandardMaterial3D.BillboardModeEnum.Enabled,
-
-                // Disable depth write so overlapping additive quads accumulate correctly
-                // without z-fighting artefacts.
                 DepthDrawMode = StandardMaterial3D.DepthDrawModeEnum.Disabled,
-
-                // Bind the sub-effect's TGA texture (with its alpha channel).
-                // spec: §3.6.6 PORT CONTRACT #2 — "bind the per-sub-effect texture ... with its alpha".
+                // Double-sided: the oriented mesh-particle quads (waterfall curtain) and directional
+                // coronas must render regardless of which way they face — a back-facing additive
+                // sprite would otherwise be culled and vanish (the invisible-waterfall artefact).
+                // spec: Docs/RE/specs/frontend_scenes.md §3.6.7 — additive sprites, no opaque culling.
+                CullMode = StandardMaterial3D.CullModeEnum.Disabled,
                 AlbedoTexture = albedo,
-
-                // Opacity via albedo color alpha.
-                AlbedoColor = new Color(1.0f, 1.0f, 1.0f, opacity),
+                AlbedoColor = new Color(tint.R, tint.G, tint.B, opacity),
             };
 
-            // Build the billboard quad mesh.
-            // NOTE: NEVER use GltfDocument.AppendFromBuffer — crashes on this project's GLBs.
-            // Build QuadMesh directly per the pitfalls in CLAUDE.md.
-            var quad = new QuadMesh
+            // ---- Per-emitter-type dispatch ----
+            // spec: Docs/RE/specs/frontend_scenes.md §3.6.7 CAMPAIGN-9c.
+            // spec: Docs/RE/formats/effects.md §A.12 emitter_type enum.
+            MeshInstance3D mi;
+
+            switch (sub.EmitterType)
             {
-                Size = new Vector2(quadSize, quadSize),
-                Material = mat,
-            };
+                // ------------------------------------------------------------------
+                // emitter_type 0 — BILLBOARD (camera-facing quad)
+                // spec: §3.6.7 — "camera-facing flat quad, full size = size_x·2 × size_y·2"
+                // spec: §A.12 — XEFF_EMITTER_BILLBOARD = 0
+                // ------------------------------------------------------------------
+                case EmitterBillboard:
+                {
+                    mat.BillboardMode = StandardMaterial3D.BillboardModeEnum.Enabled;
 
-            var mi = new MeshInstance3D
-            {
-                Name = $"XeffSub{i}",
-                // Position = anchor + displacement.
-                // The node itself is placed at the anchor world position; child positions
-                // are local to the node, so displacement goes directly to Position.
-                Position = displacement,
-                Mesh = quad,
-            };
+                    var quad = new QuadMesh
+                    {
+                        // Per-axis size (NOT a square max) — the spec is explicit.
+                        // spec: §3.6.7 — "use the per-axis size — NOT a square max()".
+                        Size = new Vector2(quadW, quadH),
+                        Material = mat,
+                    };
 
-            AddChild(mi);
-            built++;
+                    mi = new MeshInstance3D
+                    {
+                        Name = $"XeffBillboard{i}",
+                        Position = offset,
+                        Mesh = quad,
+                    };
+
+                    AddChild(mi);
+                    builtBillboard++;
+                    break;
+                }
+
+                // ------------------------------------------------------------------
+                // emitter_type 1 — MESH-PARTICLE (oriented quad, NOT camera-facing)
+                // spec: §3.6.7 — "real ORIENTED quad/mesh tile, oriented by keyframe Euler rotation"
+                //   "The 28 waterfall tiles are oriented quads forming a flat curtain sheet."
+                // spec: §A.12 — XEFF_EMITTER_MESH = 1
+                // Rotation: kf0.Rotation = Quat from Euler XYZ (spec: effects.md §A.7 CONFIRMED).
+                // Handedness: world geometry negates Z (CLAUDE.md + Helpers/WorldCoordinates.ToGodot).
+                //   The Euler stored in the file is already in legacy (right-hand, +Z forward) space.
+                //   We convert it by negating the Y and Z components of the quaternion to match
+                //   Godot's left-hand Y-up (+Z toward viewer) coordinate system.
+                //   // spec: Docs/RE/specs/frontend_scenes.md §3.6.7 — "debugger-pending orientation"
+                //   (exact handedness of the Euler axes is DEBUGGER-PENDING; we apply the
+                //    world Z-negate convention which gives the correct waterfall curtain orientation.)
+                // ------------------------------------------------------------------
+                case EmitterMesh:
+                {
+                    // BillboardMode stays Disabled (default) — this is the oriented case.
+                    mat.BillboardMode = StandardMaterial3D.BillboardModeEnum.Disabled;
+
+                    var quad = new QuadMesh
+                    {
+                        Size = new Vector2(quadW, quadH),
+                        Material = mat,
+                    };
+
+                    // Legacy Euler → Quat (spec: effects.md §A.7 CONFIRMED: π/180, half-angle XYZ).
+                    // XeffKeyframe.Rotation does this conversion already (see EffectData.cs §A.7).
+                    Assets.Parsers.Models.Quat legacyQ = kf0.Rotation;
+
+                    // Convert to Godot Quaternion applying the world Z-negate handedness.
+                    // World geometry negates Z: (x,y,z) → (x,y,−z).
+                    // Quaternion under Z-negate: (qx,qy,qz,qw) → (−qx, −qy, qz, qw)
+                    //   [negate the X and Y imaginary parts, keep Z and W].
+                    // spec: CLAUDE.md "Coordinate conventions" — world negates Z.
+                    // spec: §3.6.7 — orientation debugger-pending; size/placement fix is dominant.
+                    var godotQ = new Quaternion(-legacyQ.X, -legacyQ.Y, legacyQ.Z, legacyQ.W);
+                    // Normalise to guard against near-identity quaternion numerical drift.
+                    if (godotQ.LengthSquared() > 0.0001f)
+                        godotQ = godotQ.Normalized();
+                    else
+                        godotQ = Quaternion.Identity;
+
+                    mi = new MeshInstance3D
+                    {
+                        Name = $"XeffMesh{i}",
+                        Position = offset,
+                        Quaternion = godotQ,
+                        Mesh = quad,
+                    };
+
+                    AddChild(mi);
+                    builtMesh++;
+                    break;
+                }
+
+                // ------------------------------------------------------------------
+                // emitter_type 2 — DIRECTIONAL BILLBOARD (oriented quad, +90° Y pre-rotation)
+                // spec: §3.6.7 — "oriented quad with an explicit +90° Y pre-rotation plus the
+                //   keyframe Euler rotation (used here for the large imot-gu-tung06-01 corona glows)."
+                // spec: §A.12 — XEFF_EMITTER_DIRECTIONAL = 2
+                // ------------------------------------------------------------------
+                case EmitterDirectional:
+                {
+                    mat.BillboardMode = StandardMaterial3D.BillboardModeEnum.Disabled;
+
+                    var quad = new QuadMesh
+                    {
+                        Size = new Vector2(quadW, quadH),
+                        Material = mat,
+                    };
+
+                    // Apply +90° Y pre-rotation then compose with keyframe Euler.
+                    // spec: §3.6.7 — "+90° Y pre-rotation composed with the keyframe rotation".
+                    var preRot = new Quaternion(Vector3.Up, Mathf.Pi * 0.5f); // +90° around Y
+
+                    Assets.Parsers.Models.Quat legacyQ = kf0.Rotation;
+                    // Apply same Z-negate handedness conversion as type-1.
+                    var godotKfQ = new Quaternion(-legacyQ.X, -legacyQ.Y, legacyQ.Z, legacyQ.W);
+                    if (godotKfQ.LengthSquared() > 0.0001f)
+                        godotKfQ = godotKfQ.Normalized();
+                    else
+                        godotKfQ = Quaternion.Identity;
+
+                    // Compose: pre-rotation first, then keyframe.
+                    var combined = (preRot * godotKfQ).Normalized();
+
+                    mi = new MeshInstance3D
+                    {
+                        Name = $"XeffDir{i}",
+                        Position = offset,
+                        Quaternion = combined,
+                        Mesh = quad,
+                    };
+
+                    AddChild(mi);
+                    builtDirectional++;
+                    break;
+                }
+
+                default:
+                    // Unknown emitter_type — fall back to billboard (safe visual approximation).
+                    // spec: Docs/RE/formats/effects.md §A.12 — values beyond 0/1/2 render-DBG-pending.
+                {
+                    mat.BillboardMode = StandardMaterial3D.BillboardModeEnum.Enabled;
+
+                    var quad = new QuadMesh
+                    {
+                        Size = new Vector2(quadW, quadH),
+                        Material = mat,
+                    };
+
+                    mi = new MeshInstance3D
+                    {
+                        Name = $"XeffUnk{i}",
+                        Position = offset,
+                        Mesh = quad,
+                    };
+
+                    AddChild(mi);
+                    builtBillboard++;
+                    break;
+                }
+            }
+
+            // ---- Animation registration ----
+            // Step 1 COMPLETE (static keyframe-0 placement + correct shape).
+            // Step 2 (per-frame texture-swap + alpha/size lerp) is registered here and
+            // driven in _Process below.
+            // spec: §3.6.7 — "fire ≈ 18×67 ms, waterfall 4-frame, sparks 9-frame, corona 21-frame".
+            // spec: Docs/RE/formats/effects.md §A.4.3 — anim_stride (ms per frame).
+            animList.Add(new AnimEntry(
+                Node: mi,
+                AlphaKeys: sub.AlphaKeys,
+                AnimStride: sub.AnimStride,
+                FrameCount: (uint)sub.TextureNames.Length,
+                TextureNames: sub.TextureNames,
+                Tex0: albedo,
+                Material: mat,
+                Assets: assets));
         }
 
-        GD.Print($"[XeffSceneEffect] Built {built} billboard quads from xeff effectId={xeff.EffectId} " +
-                 $"subEffectCount={xeff.SubEffectCount}. " +
-                 $"Skipped: noKf={skippedNoKf}, transparent={skippedTransparent}, " +
-                 $"noTexture={skippedNoTexture} (anti-flying-pixel rule — no fallback dot emitted), " +
-                 $"tooSmall={skippedTooSmall}. " +
-                 "spec: frontend_scenes.md §3.6.6 PORT CONTRACT CODE-CONFIRMED (billboard, additive, no fallback).");
+        _animEntries = [.. animList];
+
+        GD.Print($"[XeffSceneEffect] Built effectId={xeff.EffectId} subEffectCount={xeff.SubEffectCount}: " +
+                 $"billboard={builtBillboard} mesh={builtMesh} directional={builtDirectional} " +
+                 $"(total={builtBillboard + builtMesh + builtDirectional}). " +
+                 $"Skipped: noKf={skippedNoKf} transparent={skippedTransparent} " +
+                 $"noTexture={skippedNoTexture} degenerate={skippedDegenerate}. " +
+                 "spec: frontend_scenes.md §3.6.7 (expected: ~6 billboard / ~51 mesh / ~11 directional).");
+    }
+
+    // =========================================================================
+    // Animation — step keyframes in _Process
+    // =========================================================================
+
+    /// <summary>
+    /// Steps each animated sub-effect through its texture keyframes and alpha curve.
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.6.7 — "each sub-effect cycles on its own
+    ///   tex_count / anim_stride".
+    /// spec: Docs/RE/formats/effects.md §A.4.3 — anim_stride in milliseconds.
+    /// spec: Docs/RE/formats/effects.md §A.6 — alpha inversion: opacity = 1.0 − file.
+    /// </summary>
+    public override void _Process(double delta)
+    {
+        _elapsed += delta;
+        double elapsedMs = _elapsed * 1000.0;
+
+        foreach (ref readonly AnimEntry entry in _animEntries.AsSpan())
+        {
+            // Static sub-effects (AnimStride == 0) use their keyframe-0 texture permanently.
+            if (entry.AnimStride == 0 || entry.FrameCount <= 1)
+                continue;
+
+            // Frame index from elapsed time.
+            // spec: §A.4.3 — anim_stride (ms); wrap around frame count.
+            int frameIdx = (int)(elapsedMs / entry.AnimStride) % (int)entry.FrameCount;
+
+            // Alpha update: invert the per-frame alpha key (1.0 − file).
+            // spec: §A.6 CONFIRMED — file 0.0=opaque, 1.0=transparent.
+            float opacity = 1.0f;
+            if (entry.AlphaKeys.Length > frameIdx)
+                opacity = Math.Clamp(1.0f - entry.AlphaKeys[frameIdx], 0.0f, 1.0f);
+
+            entry.Material.AlbedoColor = new Color(1.0f, 1.0f, 1.0f, opacity);
+
+            // Texture swap: load the frame texture on demand.
+            // Frame 0 is already set; only swap when frame changes.
+            if (frameIdx == 0)
+            {
+                // Restore frame 0 (cheapest case — already cached).
+                if (entry.Tex0 is not null)
+                    entry.Material.AlbedoTexture = entry.Tex0;
+            }
+            else if (frameIdx < entry.TextureNames.Length && entry.Assets is not null)
+            {
+                string texName = entry.TextureNames[frameIdx];
+                if (texName.Length > 0)
+                {
+                    string tgaPath = $"{XeffTexturePath}{texName}.tga";
+                    if (entry.Assets.Contains(tgaPath))
+                    {
+                        try
+                        {
+                            ImageTexture? tex = entry.Assets.LoadTexture(tgaPath);
+                            if (tex is not null)
+                                entry.Material.AlbedoTexture = tex;
+                        }
+                        catch
+                        {
+                            /* silently keep previous frame */
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // =========================================================================

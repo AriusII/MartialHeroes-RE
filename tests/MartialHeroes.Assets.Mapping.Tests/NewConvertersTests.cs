@@ -842,9 +842,11 @@ public sealed class XeffJsonConverterTests
                     TextureNames = ["fireball"],
                     // spec: Docs/RE/formats/effects.md §A.4.2 Pass 1 alpha — stored inverted: CONFIRMED.
                     AlphaKeys = [0.0f, 0.5f, 1.0f],
-                    ScaleX = [1.0f, 2.0f],
-                    ScaleY = [1.0f, 2.0f],
-                    ScaleZ = [1.0f, 2.0f],
+                    // CORRECTED CAMPAIGN 10: formerly ScaleX/Y/Z; renamed to DiffuseR/G/B per effects.md §A.4.2.
+                    // spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
+                    DiffuseR = [1.0f, 2.0f],
+                    DiffuseG = [1.0f, 2.0f],
+                    DiffuseB = [1.0f, 2.0f],
                     // spec: Docs/RE/formats/effects.md §A.4.3 — anim_loop u8 @ +0: CONFIRMED.
                     AnimLoop = 0,
                     AnimStride = 469u,
@@ -889,9 +891,11 @@ public sealed class XeffJsonConverterTests
             EntryCount = 2u,
             TextureNames = ["tex_a", "tex_b"],
             AlphaKeys = [0.0f, 1.0f],
-            ScaleX = [1.0f, 1.5f],
-            ScaleY = [1.0f, 1.5f],
-            ScaleZ = [1.0f, 1.5f],
+            // CORRECTED CAMPAIGN 10: formerly ScaleX/Y/Z; renamed to DiffuseR/G/B per effects.md §A.4.2.
+            // spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
+            DiffuseR = [1.0f, 1.5f],
+            DiffuseG = [1.0f, 1.5f],
+            DiffuseB = [1.0f, 1.5f],
             AnimLoop = 1, // non-zero → animated path
             AnimStride = 500u,
             AnimBaseTime = 0u,
@@ -1397,9 +1401,11 @@ public sealed class XeffJsonNamedFieldsTests
                     // Alpha file value 0.3 → opacity = 1 - 0.3 = 0.7.
                     // spec: §A.6 — "file value 0.0 means fully opaque; 1.0 means fully transparent": CONFIRMED.
                     AlphaKeys = [0.3f],
-                    ScaleX = [],
-                    ScaleY = [],
-                    ScaleZ = [],
+                    // CORRECTED CAMPAIGN 10: formerly ScaleX/Y/Z; renamed to DiffuseR/G/B per effects.md §A.4.2.
+                    // spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
+                    DiffuseR = [],
+                    DiffuseG = [],
+                    DiffuseB = [],
                     AnimLoop = 1, AnimStride = 100u,
                     AnimBaseTime = 0u,
                     Keyframes =
@@ -1451,9 +1457,11 @@ public sealed class XeffJsonNamedFieldsTests
                     EntryCount = 1u,
                     TextureNames = ["smoke"],
                     AlphaKeys = [],
-                    ScaleX = [],
-                    ScaleY = [],
-                    ScaleZ = [],
+                    // CORRECTED CAMPAIGN 10: formerly ScaleX/Y/Z; renamed to DiffuseR/G/B per effects.md §A.4.2.
+                    // spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
+                    DiffuseR = [],
+                    DiffuseG = [],
+                    DiffuseB = [],
                     AnimLoop = 1, AnimStride = 100u,
                     AnimBaseTime = 0u,
                     Keyframes =

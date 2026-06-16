@@ -2,7 +2,7 @@
 //
 // Second-password / PIN modal. Every visual element sources from a real VFS atlas sub-rect.
 // No solid-colour fallbacks, no invented text, no synthetic data.
-// Missing atlas → GD.PrintErr + skip (no crash).
+// Missing atlas → GD.Print + skip (no crash).
 //
 // LAYOUT — spec: Docs/RE/specs/frontend_scenes.md §11.3 (CODE-CONFIRMED)
 //
@@ -41,6 +41,16 @@
 //   Shown after primary login validation (sub-state 29), before the TAB-string handoff (40).
 //   PIN ≤ 4 chars. spec: Docs/RE/specs/login_flow.md §4.2. RUNTIME-CONFIRMED.
 //
+// CANVAS / SCALE NOTE:
+//   PinModal is added as a direct child of the CanvasLayer (a plain Node, not a Control).
+//   In that topology Godot's anchor-based layout does NOT propagate the viewport rect — a Control
+//   whose parent is not a Control will have Size (0,0) until explicitly sized (same pitfall as
+//   ScreenHost, see ScreenHost.cs comment block).
+//   Fix: we explicitly set our own Size to GetViewportRect().Size and maintain a scaled inner
+//   canvas (_canvas, fixed 1024×768) exactly as ScreenHost does, so that panel-local coordinates
+//   and widget positions stay in the 1024×768 reference space regardless of actual window size.
+//   The dim ColorRect and the panel are placed inside _canvas (reference space).
+//
 // PASSIVE: zero game logic. View state only: _pin string, scramble permutation, node handles.
 
 using Godot;
@@ -57,6 +67,11 @@ public sealed partial class PinModal : Control
 {
     // PIN capacity: ≤ 4 chars. spec: Docs/RE/specs/login_flow.md §4.2. RUNTIME-CONFIRMED.
     private const int MaxPinLength = LoginLayout.PinMaxLength; // 4
+
+    // Reference canvas dimensions — must match ScreenHost.RefWidth/RefHeight.
+    // spec: Docs/RE/specs/ui_system.md §8.1 "reference canvas 1024×768". CODE-CONFIRMED.
+    private const float RefWidth = LoginLayout.RefWidth; // 1024
+    private const float RefHeight = LoginLayout.RefHeight; // 768
 
     // Nine-patch corner margins for the InventWindow.dds dragon-frame quad.
     // The source rect is 340×190; a 20-px corner margin preserves the stone/ring edge chrome
@@ -87,6 +102,10 @@ public sealed partial class PinModal : Control
     private UiAssetLoader _assets = null!;
     private bool _ownsAssets;
 
+    // Scaled reference-canvas container (mirrors ScreenHost._canvas pattern).
+    // Everything except the viewport-fill dim rect lives inside here.
+    private Control _canvas = null!;
+
     // Scramble permutation: perm[p] = digit shown at keypad position p.
     // spec: Docs/RE/specs/frontend_scenes.md §11.3c. CODE-CONFIRMED.
     private readonly int[] _perm = new int[10];
@@ -105,6 +124,12 @@ public sealed partial class PinModal : Control
     /// <summary>Inject a shared UiAssetLoader (avoids double-loading DDS atlases).</summary>
     public UiAssetLoader? SharedAssets { get; set; }
 
+    /// <summary>
+    /// DEV/TEST only — when non-empty, the PIN is pre-entered (shown masked) on build, so the
+    /// maintainer can submit with one click.  Set by BootFlow under dev-offline mode; never ships.
+    /// </summary>
+    public string? DevPrefillPin { get; set; }
+
     // =========================================================================
     // Godot lifecycle
     // =========================================================================
@@ -118,6 +143,26 @@ public sealed partial class PinModal : Control
         // spec: Docs/RE/specs/frontend_scenes.md §11.3c. CODE-CONFIRMED.
         Scramble();
 
+        // ---- Full-window coverage (same pattern as ScreenHost) ----
+        // The CanvasLayer parent is a plain Node, not a Control — anchors do not propagate
+        // the viewport rect. We must set our own Size explicitly, then track SizeChanged.
+        MouseFilter = MouseFilterEnum.Stop; // block all clicks from reaching the login behind
+
+        ApplyViewportSize();
+        GetViewport().SizeChanged += OnViewportSizeChanged;
+
+        // Reference canvas: fixed 1024×768, scaled to fill our Size exactly (fill-scale,
+        // same non-uniform mode as ScreenHost).  The dim rect and the panel go inside here.
+        _canvas = new Control
+        {
+            Name = "RefCanvas",
+            Size = new Vector2(RefWidth, RefHeight),
+            CustomMinimumSize = new Vector2(RefWidth, RefHeight),
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        AddChild(_canvas);
+        ApplyCanvasScale();
+
         try
         {
             BuildUi();
@@ -126,11 +171,65 @@ public sealed partial class PinModal : Control
         {
             GD.PrintErr($"[PinModal] _Ready: BuildUi threw — {ex.Message}");
         }
+
+        // DEV/TEST PIN pre-fill (guarded by dev-offline mode in BootFlow). NEVER ships.
+        if (!string.IsNullOrEmpty(DevPrefillPin))
+        {
+            _pin = DevPrefillPin.Length > MaxPinLength ? DevPrefillPin[..MaxPinLength] : DevPrefillPin;
+            RefreshPinDisplay();
+        }
     }
 
     public override void _ExitTree()
     {
+        if (IsInstanceValid(GetViewport()))
+            GetViewport().SizeChanged -= OnViewportSizeChanged;
+
         if (_ownsAssets) _assets?.Dispose();
+    }
+
+    // =========================================================================
+    // Viewport-size tracking (mirrors ScreenHost pattern)
+    // =========================================================================
+
+    private void OnViewportSizeChanged()
+    {
+        ApplyViewportSize();
+        ApplyCanvasScale();
+    }
+
+    /// <summary>
+    /// Sizes this control to the full viewport rect so it covers the entire window even when
+    /// the parent is a CanvasLayer (no Control anchor propagation in that topology).
+    /// </summary>
+    private void ApplyViewportSize()
+    {
+        Vector2 vpSize = GetViewportRect().Size;
+        if (vpSize.X > 0 && vpSize.Y > 0)
+        {
+            Position = Vector2.Zero;
+            Size = vpSize;
+        }
+    }
+
+    /// <summary>
+    /// Applies fill-scale to _canvas so the 1024×768 reference space maps onto the full window,
+    /// matching the same transform that ScreenHost applies to its inner RefCanvas.
+    /// </summary>
+    private void ApplyCanvasScale()
+    {
+        if (_canvas is null) return;
+
+        Vector2 windowSize = Size;
+        if (windowSize.X <= 0 || windowSize.Y <= 0)
+            windowSize = GetViewportRect().Size;
+
+        if (windowSize.X <= 0 || windowSize.Y <= 0) return;
+
+        float scaleX = windowSize.X / RefWidth;
+        float scaleY = windowSize.Y / RefHeight;
+        _canvas.Scale = new Vector2(scaleX, scaleY);
+        _canvas.Position = Vector2.Zero;
     }
 
     // =========================================================================
@@ -139,20 +238,35 @@ public sealed partial class PinModal : Control
 
     private void BuildUi()
     {
-        // Full-canvas blocker — stops clicks from passing through to the login form.
-        SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        MouseFilter = MouseFilterEnum.Stop;
+        // -------------------------------------------------------------------
+        // Dim layer — covers the full 1024×768 reference canvas with a semi-transparent
+        // dark overlay so the login chrome behind is visually suppressed.
+        // A solid-colour dim rect is the only intentional non-atlas element in this class
+        // (no equivalent spec art; it is a standard modal convention).
+        // -------------------------------------------------------------------
+        var dim = new ColorRect
+        {
+            Name = "DimLayer",
+            Color = new Color(0f, 0f, 0f, 0.55f), // semi-transparent black
+            Position = Vector2.Zero,
+            Size = new Vector2(RefWidth, RefHeight),
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        _canvas.AddChild(dim);
 
+        // -------------------------------------------------------------------
         // Modal panel — canvas-absolute position (347,173), size (329,422).
         // spec: Docs/RE/specs/frontend_scenes.md §11.3 "Modal panel rect: 347,173,329,422".
         // CODE-CONFIRMED.
+        // -------------------------------------------------------------------
         var panel = new Control
         {
             Name = "PinPanel",
             Position = new Vector2(LoginLayout.PinModalX, LoginLayout.PinModalY),
             Size = new Vector2(LoginLayout.PinModalW, LoginLayout.PinModalH),
+            MouseFilter = MouseFilterEnum.Ignore,
         };
-        AddChild(panel);
+        _canvas.AddChild(panel);
 
         // -------------------------------------------------------------------
         // Background: InventWindow.dds NinePatch src(318,647,340,190).
@@ -161,7 +275,26 @@ public sealed partial class PinModal : Control
         // spec: Docs/RE/specs/frontend_scenes.md §11.3. CODE-CONFIRMED.
         // spec: Docs/RE/specs/frontend_scenes.md §11.1a-1 "PIN dragon-frame = shared notice/error
         //   frame; InventWindow.dds src(318,647) size 340×190". CODE-CONFIRMED.
+        //
+        // Visual note (screenshot-oracle): the official PIN modal has a clearly visible dark
+        // ornate frame. The InventWindow.dds NinePatch provides the spec-correct border chrome;
+        // we add a dark opaque backdrop rect BEHIND it to ensure the modal "pops" even if the
+        // NinePatch centre is mostly transparent. Aesthetic-tuned.
         // -------------------------------------------------------------------
+
+        // Opaque dark backdrop so the modal reads as a distinct panel on any background.
+        // Aesthetic — no spec art at this exact position; the dim layer covers the whole screen,
+        // and this inner rect makes the PIN panel distinctly legible.
+        var backdropRect = new ColorRect
+        {
+            Name = "PinBackdrop",
+            Color = new Color(0.08f, 0.05f, 0.03f, 0.92f), // very dark brown-black, high opacity
+            Position = Vector2.Zero,
+            Size = new Vector2(LoginLayout.PinModalW, LoginLayout.PinModalH),
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        panel.AddChild(backdropRect);
+
         var atlasInventWindow = _assets.LoadAtlas(LoginLayout.AtlasInventWindow);
         if (atlasInventWindow is not null)
         {
@@ -176,12 +309,16 @@ public sealed partial class PinModal : Control
                     LoginLayout.ModalChromeSrcY, // 647. spec §11.3. CODE-CONFIRMED.
                     LoginLayout.ModalChromeW, // 340. spec §11.3. CODE-CONFIRMED.
                     LoginLayout.ModalChromeH), // 190. spec §11.3. CODE-CONFIRMED.
-                PatchMarginTop = NinePatchMargin,
-                PatchMarginLeft = NinePatchMargin,
-                PatchMarginRight = NinePatchMargin,
-                PatchMarginBottom = NinePatchMargin,
+                // Enlarged patch margins: make the carved border more visible when stretched.
+                // At 20px margins on a 340×190 source, the centre cell was 300×150; at 30px
+                // the borders consume a slightly larger share of the stretched quad. Aesthetic.
+                PatchMarginTop = 30,
+                PatchMarginLeft = 30,
+                PatchMarginRight = 30,
+                PatchMarginBottom = 30,
                 MouseFilter = MouseFilterEnum.Ignore,
             };
+            // Stretch to fill the full panel rect (329×422).
             np.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
             panel.AddChild(np);
 
@@ -191,7 +328,7 @@ public sealed partial class PinModal : Control
         }
         else
         {
-            // Missing atlas: log and skip — no solid-colour fallback.
+            // Missing atlas: log and skip — no solid-colour fallback (except the backdrop rect).
             // spec requirement: "NO FALLBACK (missing → log+skip, no crash)".
             GD.PrintErr("[PinModal] InventWindow.dds not found — dragon-frame background absent " +
                         "(VFS offline). spec: frontend_scenes.md §11.3. CODE-CONFIRMED path.");
@@ -296,11 +433,11 @@ public sealed partial class PinModal : Control
                 // spec: Docs/RE/specs/frontend_scenes.md §11.3b. CODE-CONFIRMED.
                 AtlasTexture? normalTex = _assets.Slice(
                     LoginLayout.AtlasPassword,
-                    srcU, LoginLayout.PinDigitNormalSrcY, // srcV=560 (normal). spec §11.3b. CODE-CONFIRMED.
+                    srcU, LoginLayout.PinDigitNormalSrcY, // srcV=560 (normal).  spec §11.3b. CODE-CONFIRMED.
                     LoginLayout.PinKeypadTileW, LoginLayout.PinKeypadTileH);
                 AtlasTexture? hoverTex = _assets.Slice(
                     LoginLayout.AtlasPassword,
-                    srcU, LoginLayout.PinDigitHoverSrcY, // srcV=664 (hover). spec §11.3b. CODE-CONFIRMED.
+                    srcU, LoginLayout.PinDigitHoverSrcY, // srcV=664 (hover).   spec §11.3b. CODE-CONFIRMED.
                     LoginLayout.PinKeypadTileW, LoginLayout.PinKeypadTileH);
                 AtlasTexture? pressedTex = _assets.Slice(
                     LoginLayout.AtlasPassword,

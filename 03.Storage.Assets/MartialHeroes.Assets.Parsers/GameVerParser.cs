@@ -4,62 +4,69 @@ using MartialHeroes.Assets.Parsers.Models;
 namespace MartialHeroes.Assets.Parsers;
 
 /// <summary>
-/// Parser for <c>data/cursor/game.ver</c> — a 28-byte binary file containing 7 × u32 LE
-/// that supplies the client version number consumed by the enter-game token formula.
+/// Parser for <c>data/cursor/game.ver</c> — a variable-length list of u32 LE values
+/// supplying the client version number consumed by the enter-game token formula.
 /// </summary>
 /// <remarks>
-/// spec: Docs/RE/formats/game_ver.md §7 — "flat array of 7 × u32, little-endian
-///   (no header, no magic, no record-count prefix — the field count is fixed at 7)": CONFIRMED.
+/// spec: Docs/RE/formats/game_ver.md — "variable-length list of 32-bit little-endian integers,
+///   minimum 7 elements; canonical shipping file is exactly 28 bytes (7 × u32LE)": CONFIRMED.
 /// <para>
-/// Size: exactly <b>28 bytes</b>.  Any buffer shorter or longer than 28 bytes is rejected.
-/// spec: Docs/RE/formats/game_ver.md §7 §Identification — "Size: exactly 28 bytes": CONFIRMED.
+/// The canonical file is exactly 28 bytes (7 elements). A file with fewer than 7 elements (less
+/// than 28 bytes) is rejected. A file with more than 7 elements is tolerated — extra trailing
+/// elements are counted but not individually interpreted.
+/// spec: Docs/RE/formats/game_ver.md §Identification — "minimum 7 elements (28 bytes)": CONFIRMED.
+/// spec: Docs/RE/formats/game_ver.md §Login version gate — "requires count >= 7; longer files tolerated": CONFIRMED.
 /// </para>
 /// <para>
 /// The enter-game token is computed as <c>10 × version_source + 9</c>, where
 /// <c>version_source</c> is the u32 at offset <c>0x14</c> (field index 5).
 /// With the observed <c>version_source = 2114</c> the token is <c>21149</c>.
-/// spec: Docs/RE/formats/game_ver.md §7 §Version token derivation: CONFIRMED.
+/// spec: Docs/RE/formats/game_ver.md §Derived value — enter-game version token: CONFIRMED.
 /// </para>
 /// <para>ZERO rendering/engine dependencies.</para>
 /// </remarks>
 public static class GameVerParser
 {
-    // Fixed file size: 7 × 4 bytes = 28 bytes.
-    // spec: Docs/RE/formats/game_ver.md §7 §Identification — "Size: exactly 28 bytes": CONFIRMED.
-    private const int FileSize = 28;
+    // Minimum file size: 7 × 4 bytes = 28 bytes.
+    // spec: Docs/RE/formats/game_ver.md §Identification — "minimum 7 elements (28 bytes)": CONFIRMED.
+    private const int MinFileSize = 28;
 
-    // Number of u32 fields.
-    // spec: Docs/RE/formats/game_ver.md §7 — "7 × u32, little-endian": CONFIRMED.
-    private const int FieldCount = 7;
+    // Minimum number of u32 fields (also the count in the canonical shipping file).
+    // spec: Docs/RE/formats/game_ver.md §Identification — "minimum 7 elements; canonical 28 bytes": CONFIRMED.
+    private const int MinFieldCount = 7;
 
     /// <summary>
     /// Parses a <c>game.ver</c> file from raw bytes delivered by the VFS.
     /// </summary>
     /// <param name="data">
     /// Raw file bytes (from the VFS or a unit-test fixture).
-    /// Must be exactly 28 bytes.
+    /// Must be at least 28 bytes (7 × u32 LE) and must be a multiple of 4.
+    /// Longer files (more than 7 elements) are accepted.
     /// </param>
-    /// <returns>A <see cref="GameVerData"/> with all 7 decoded fields.</returns>
+    /// <returns>A <see cref="GameVerData"/> with the 7 canonical decoded fields.</returns>
     /// <exception cref="InvalidDataException">
-    /// Thrown when the buffer length is not exactly 28 bytes.
+    /// Thrown when the buffer is too short (fewer than 7 elements / 28 bytes) or is not
+    /// a multiple of 4 bytes.
     /// </exception>
     /// <remarks>
+    /// spec: Docs/RE/formats/game_ver.md §File layout — "variable-length u32LE list, minimum 7 elements": CONFIRMED.
     /// spec: Docs/RE/formats/game_ver.md §7 §Layout — field offsets 0x00–0x18: CONFIRMED.
-    /// spec: Docs/RE/formats/game_ver.md §7 §Version token derivation —
-    ///   "version_token = 10 × version_source + 9": CONFIRMED.
+    /// spec: Docs/RE/formats/game_ver.md §Derived value — "version_token = 10 × version_source + 9": CONFIRMED.
     /// </remarks>
     public static GameVerData Parse(ReadOnlyMemory<byte> data)
     {
         ReadOnlySpan<byte> span = data.Span;
 
-        // Validate exact size.
-        // spec: Docs/RE/formats/game_ver.md §7 §Identification —
-        //   "Size: exactly 28 bytes": CONFIRMED.
-        if (span.Length != FileSize)
+        // Validate: must be a non-zero multiple of 4 with at least 7 elements (28 bytes).
+        // spec: Docs/RE/formats/game_ver.md §Identification —
+        //   "size % 4 == 0 && count >= 7": CONFIRMED.
+        // spec: Docs/RE/formats/game_ver.md §Login version gate —
+        //   "requires count >= 7; longer files tolerated (>7 elements accepted)": CONFIRMED.
+        if (span.Length < MinFileSize || span.Length % 4 != 0)
             throw new InvalidDataException(
-                $"game.ver parse error: expected exactly {FileSize} bytes " +
-                $"but buffer is {span.Length} bytes. " +
-                "spec: Docs/RE/formats/game_ver.md §7 §Identification.");
+                $"game.ver parse error: buffer is {span.Length} bytes; " +
+                $"expected a multiple of 4 with at least {MinFieldCount} u32 elements ({MinFileSize} bytes minimum). " +
+                "spec: Docs/RE/formats/game_ver.md §Identification.");
 
         // Read 7 × u32 LE, field by field, using BinaryPrimitives (zero-alloc).
         // spec: Docs/RE/formats/game_ver.md §7 — "7 × u32, little-endian": CONFIRMED.

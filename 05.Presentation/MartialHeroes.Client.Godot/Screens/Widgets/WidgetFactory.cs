@@ -19,9 +19,10 @@
 //         §13.4 (Godot font mapping guidance).
 //
 // ATLAS SLICING:
-//   Slice() delegates to UiAssetLoader.Slice which already sets FilterClip=true on the
-//   resulting AtlasTexture (prevents atlas bleed at non-integer scale factors).
-//   spec: Docs/RE/specs/ui_system.md §13.1 (AtlasTexture with FilterClip=true).
+//   Slice() delegates to UiAssetLoader.Slice which sets FilterClip=true on the resulting
+//   AtlasTexture. This is a Godot-side mitigation against atlas bleed at non-integer scale
+//   factors — ui_system.md §13.1 provides Godot reconstruction guidance but does not mandate
+//   FilterClip as a legacy spec value.
 //
 // ALPHA FADE:
 //   BeginShow/BeginHide target a Control's alpha-equivalent: Modulate.A chased at ±64/tick.
@@ -96,7 +97,7 @@ public static class WidgetFactory
         Color? captionTint = null)
     {
         // Slice the three frames from the atlas.
-        // UiAssetLoader.Slice already sets FilterClip=true — spec §13.1.
+        // UiAssetLoader.Slice sets FilterClip=true as a Godot-side atlas-bleed mitigation.
         AtlasTexture? normalFrame = loader.Slice(atlasPath, normalSrcX, normalSrcY, w, h);
         AtlasTexture? hoverFrame = loader.Slice(atlasPath, hoverSrcX, hoverSrcY, w, h);
         AtlasTexture? pressedFrame = loader.Slice(atlasPath, pressedSrcX, pressedSrcY, w, h);
@@ -194,6 +195,74 @@ public static class WidgetFactory
     }
 
     // -------------------------------------------------------------------------
+    // Atlas TextureRect factory — image widget (no button behaviour)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Creates a <see cref="TextureRect"/> showing a sub-rect of an atlas DDS, or null when offline.
+    ///
+    /// <para>Useful for pure-image chrome panels (e.g. §11.5a char-info background plates)
+    /// that have no click / action behaviour.</para>
+    ///
+    /// spec: Docs/RE/specs/ui_system.md §1.3 — atlas pixel map 1:1 on 1024×768 canvas.
+    /// </summary>
+    public static TextureRect? MakeAtlasRect(
+        UiAssetLoader loader,
+        string atlasPath,
+        int destX, int destY, int w, int h,
+        int srcX, int srcY)
+    {
+        AtlasTexture? tex = loader.Slice(atlasPath, srcX, srcY, w, h);
+        if (tex is null) return null;
+
+        return new TextureRect
+        {
+            Texture = tex,
+            Position = new Vector2(destX, destY),
+            Size = new Vector2(w, h),
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.Scale,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+    }
+
+    /// <summary>
+    /// Creates a <see cref="StateButton"/> using the NORMAL frame only (2-state atlas button).
+    ///
+    /// <para>Convenience wrapper for atlas buttons with no distinct hover/pressed art when offline
+    /// the returned button is null (faithfully empty offline).</para>
+    ///
+    /// spec: Docs/RE/specs/ui_system.md §1.5 — "2-state: HOVER = NORMAL; PRESSED = NORMAL".
+    /// </summary>
+    public static StateButton? MakeAtlasButton(
+        UiAssetLoader loader,
+        string atlasPath,
+        int destX, int destY, int w, int h,
+        int normalSrcX, int normalSrcY,
+        int actionId,
+        string caption = "")
+    {
+        AtlasTexture? normalFrame = loader.Slice(atlasPath, normalSrcX, normalSrcY, w, h);
+        if (normalFrame is null) return null; // faithfully empty when VFS absent
+
+        var btn = new StateButton
+        {
+            Name = $"StateBtn_{actionId}",
+            Position = new Vector2(destX, destY),
+            Size = new Vector2(w, h),
+            CustomMinimumSize = new Vector2(w, h),
+            NormalFrame = normalFrame,
+            HoverFrame = normalFrame,
+            PressedFrame = normalFrame,
+            ActionId = actionId,
+            Caption = caption,
+            CaptionTint = Colors.White,
+        };
+
+        return btn;
+    }
+
+    // -------------------------------------------------------------------------
     // Atlas slice helper (thin delegation to UiAssetLoader)
     // -------------------------------------------------------------------------
 
@@ -201,9 +270,9 @@ public static class WidgetFactory
     /// Returns an <see cref="AtlasTexture"/> for the sub-rect at <c>(srcX, srcY, w, h)</c>
     /// within the named atlas, or <c>null</c> when the VFS is offline.
     ///
-    /// <para>FilterClip is always set to <c>true</c> by <see cref="UiAssetLoader.Slice"/>
-    /// so adjacent atlas content does not bleed past the boundary at non-integer scale factors.
-    /// spec: Docs/RE/specs/ui_system.md §13.1 — "AtlasTexture with FilterClip=true".</para>
+    /// <para><c>FilterClip=true</c> is set by <see cref="UiAssetLoader.Slice"/> as a Godot-side
+    /// mitigation against atlas bleed at non-integer scale factors; it is not a spec literal
+    /// (ui_system.md §13.1 provides Godot reconstruction guidance, not a legacy requirement).</para>
     ///
     /// <para>This wrapper exists so callers in <c>Screens/Widgets/</c> and <c>Screens/</c> can
     /// call a single consistent API rather than holding their own <see cref="UiAssetLoader"/>

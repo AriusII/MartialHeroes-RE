@@ -188,17 +188,19 @@ public static class XeffParser
         // spec: Docs/RE/formats/effects.md §A.4.2 Pass 1 alpha — own u32 prefix, stored as 1.0−opacity: CONFIRMED.
         float[] alphaKeys = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] alpha curve");
 
-        // Pass 2: scale X channel.
-        // spec: Docs/RE/formats/effects.md §A.4.2 Pass 2 scale X — own u32 prefix: CONFIRMED.
-        float[] scaleX = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] scaleX curve");
+        // Pass 2: Vec3 component +0 (diffuse R render-side, DBG-pending at loader level).
+        // CORRECTED CAMPAIGN 10: formerly labelled "scale X"; loader assigns NO colour/scale meaning
+        // (§A.4.2 CURVE SEMANTICS DOWNGRADED). Render-side interpretation = diffuse R per §17.3 (DBG-pending).
+        // spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
+        float[] diffuseR = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] pass2 curve");
 
-        // Pass 3: scale Y channel.
-        // spec: Docs/RE/formats/effects.md §A.4.2 Pass 3 scale Y — own u32 prefix: CONFIRMED.
-        float[] scaleY = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] scaleY curve");
+        // Pass 3: Vec3 component +4 (diffuse G render-side, DBG-pending at loader level).
+        // spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
+        float[] diffuseG = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] pass3 curve");
 
-        // Pass 4: scale Z channel.
-        // spec: Docs/RE/formats/effects.md §A.4.2 Pass 4 scale Z — own u32 prefix: CONFIRMED.
-        float[] scaleZ = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] scaleZ curve");
+        // Pass 4: Vec3 component +8 (diffuse B render-side, DBG-pending at loader level).
+        // spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
+        float[] diffuseB = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] pass4 curve");
 
         // ─── A.4.3 Track header — 9 bytes (fixed) ────────────────────────────
         // CORRECTED CAMPAIGN VFS-MASTERY (two-witness: loader + black-box):
@@ -311,9 +313,9 @@ public static class XeffParser
             EntryCount = texCount,
             TextureNames = texNames,
             AlphaKeys = alphaKeys,
-            ScaleX = scaleX,
-            ScaleY = scaleY,
-            ScaleZ = scaleZ,
+            DiffuseR = diffuseR,
+            DiffuseG = diffuseG,
+            DiffuseB = diffuseB,
             AnimLoop = animLoop,
             AnimStride = animStride,
             AnimBaseTime = animBaseTime,

@@ -427,6 +427,65 @@ public sealed class Fx5Layer
     public required Fx5Section[] Sections { get; init; }
 }
 
+// ─── FX7 ───────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// One group in an <c>.fx7</c> layer file. 52-byte group header; vertex format: VF_32 (no colour).
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain_layers.md §1.10 FX7 Format: PLAUSIBLE (dual-sample).
+/// spec: Docs/RE/formats/terrain_layers.md §1.2 VF_32 (32 B): CONFIRMED.
+/// vertex_count @ group-relative +0x2C: DUAL-SAMPLE.
+/// index_count  @ group-relative +0x30: DUAL-SAMPLE.
+/// </remarks>
+public sealed class Fx7Group
+{
+    /// <summary>
+    /// Raw 52-byte group header. Only bytes at +0x2C (vertex_count) and +0x30 (index_count) are consumed.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.10 — per-group header 52 B: DUAL-SAMPLE.
+    /// </summary>
+    public required ReadOnlyMemory<byte> RawGroupHeader { get; init; }
+
+    /// <summary>
+    /// vertex_count u32 @ group-relative +0x2C.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.10 — vertex_count u32 @ +0x2C: DUAL-SAMPLE.
+    /// </summary>
+    public required uint VertexCount { get; init; }
+
+    /// <summary>
+    /// index_count u32 @ group-relative +0x30.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.10 — index_count u32 @ +0x30: DUAL-SAMPLE.
+    /// </summary>
+    public required uint IndexCount { get; init; }
+
+    /// <summary>Vertex array (VF_32, no colour). spec: §1.10 DUAL-SAMPLE.</summary>
+    public required FxVertex32[] Vertices { get; init; }
+
+    /// <summary>Index array (u16). spec: §1.3 CONFIRMED.</summary>
+    public required ushort[] Indices { get; init; }
+}
+
+/// <summary>
+/// Decoded result of an <c>.fx7</c> terrain overlay layer file.
+/// Universal group-array layout: u32 group_count, then group_count groups (52-byte headers).
+/// Vertex format: VF_32 (no per-vertex colour).
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/terrain_layers.md §1.10 FX7 Format: PLAUSIBLE (dual-sample, group-array model §1.1a).
+/// File-size formula: 4 + Σ over groups (52 + vertex_count × 32 + index_count × 2).
+/// </remarks>
+public sealed class Fx7Layer
+{
+    /// <summary>
+    /// group_count u32 @ file offset 0x00.
+    /// spec: Docs/RE/formats/terrain_layers.md §1.1a — group_count: CONFIRMED.
+    /// </summary>
+    public required uint GroupCount { get; init; }
+
+    /// <summary>All decoded groups in on-disk order. Length == GroupCount.</summary>
+    public required Fx7Group[] Groups { get; init; }
+}
+
 // ─── FX6 ───────────────────────────────────────────────────────────────────
 
 /// <summary>

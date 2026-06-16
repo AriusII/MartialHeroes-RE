@@ -94,22 +94,29 @@ public sealed class XeffSubEffect
     public required float[] AlphaKeys { get; init; }
 
     /// <summary>
-    /// Scale X channel keyframe values.
-    /// spec: Docs/RE/formats/effects.md §A.4.2 Curve pass 2 (scale X): CONFIRMED.
+    /// Curve pass 2 — per-keyframe Vec3 component +0 (first of three lanes).
+    /// At the loader level this is Vec3 component +0; the render-side interpretation
+    /// (diffuse red channel) is DBG-pending (§A.4.2 CURVE SEMANTICS DOWNGRADED).
+    /// CORRECTED CAMPAIGN 10: formerly labelled "Scale X CONFIRMED" — that was a render-side
+    /// interpretation not supported by the loader. Renamed from ScaleX to DiffuseR to align
+    /// with the 9c-observed render usage while marking the semantic as DBG-pending.
+    /// spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
     /// </summary>
-    public required float[] ScaleX { get; init; }
+    public required float[] DiffuseR { get; init; }
 
     /// <summary>
-    /// Scale Y channel keyframe values.
-    /// spec: Docs/RE/formats/effects.md §A.4.2 Curve pass 3 (scale Y): CONFIRMED.
+    /// Curve pass 3 — per-keyframe Vec3 component +4 (second lane).
+    /// Render-side: diffuse green channel (DBG-pending per §A.4.2).
+    /// spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
     /// </summary>
-    public required float[] ScaleY { get; init; }
+    public required float[] DiffuseG { get; init; }
 
     /// <summary>
-    /// Scale Z channel keyframe values.
-    /// spec: Docs/RE/formats/effects.md §A.4.2 Curve pass 4 (scale Z): CONFIRMED.
+    /// Curve pass 4 — per-keyframe Vec3 component +8 (third lane).
+    /// Render-side: diffuse blue channel (DBG-pending per §A.4.2).
+    /// spec: Docs/RE/formats/effects.md §A.4.2 — pass 2/3/4 = per-keyframe diffuse R/G/B, NOT scale (§17.3).
     /// </summary>
-    public required float[] ScaleZ { get; init; }
+    public required float[] DiffuseB { get; init; }
 
     // ─── Track header (9 bytes) ──────────────────────────────────────────────
     // CORRECTED CAMPAIGN VFS-MASTERY (two-witness: loader + black-box):
