@@ -1,10 +1,10 @@
 // spec: Docs/RE/packets/cmsg_char_select.yaml — opcode 1/7 (0x10007), 2-byte fixed payload.
 //
-// !!! CAPTURE-UNVERIFIED STATIC LAYOUT !!!
-// The (major:minor) routing is dispatch-table-confirmed; the field layout is a static inference
-// (capture_verified: false). Both bytes are STATIC HIGH for both emitter fills per the spec:
-// SlotIndex@0 is the chosen slot; Flag@1 distinguishes the two emit paths (1 = select-for-play,
-// 0 = create-slot ack). No inbound reply opcode was attributed statically.
+// !!! CAPTURE-UNVERIFIED VALUE SEMANTICS !!!
+// The (major:minor) routing and the fixed 2-byte size are control-flow CONFIRMED; the delete
+// MODE-byte literal (1) is code-confirmed; the plain-select mode VALUE split (0 = view vs another
+// split) stays capture/debugger-pending (capture_verified: false in the spec).
+// spec: Docs/RE/packets/cmsg_char_select.yaml (VERIFICATION block).
 
 using System.Runtime.InteropServices;
 using MartialHeroes.Network.Protocol.Opcodes;
@@ -12,11 +12,13 @@ using MartialHeroes.Network.Protocol.Opcodes;
 namespace MartialHeroes.Network.Protocol.Packets;
 
 /// <summary>
-/// 1/7 — client slot select / ack on the character-select screen: a slot index plus a flag byte that
-/// distinguishes the two emit paths (1 on the select-for-play path; 0 on the create-slot ack path).
-/// Working model: 1/7 selects/pre-stages a slot, then 1/9 (cmsg_char_enter.yaml) drives world entry.
-/// Two emitters in the select-window dispatcher. No inbound reply opcode attributed. Fixed 2 bytes.
-/// spec: Docs/RE/packets/cmsg_char_select.yaml. CAPTURE-UNVERIFIED layout.
+/// 1/7 — character-MANAGE request on the character-select screen: a slot index plus a MODE byte that
+/// discriminates the action. DELETE OVERLOADS this op (there is NO dedicated delete opcode in major 1):
+/// <c>{slot, 0}</c> = plain select/view, <c>{slot, 1}</c> = delete the slot (code-confirmed literal).
+/// Two emitters build the plain-select form; a third (the delete-confirm Yes path) builds the delete
+/// form. The plain-select form pre-stages a slot, then 1/9 (cmsg_char_enter.yaml) drives world entry.
+/// The delete/manage RESULT returns on S2C 3/7 SmsgCharManageResult (subtype 2 = delete-confirmed).
+/// Fixed 2 bytes. spec: Docs/RE/packets/cmsg_char_select.yaml. CAPTURE-UNVERIFIED value semantics.
 /// </summary>
 [PacketOpcode(1, 7)]
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -32,9 +34,12 @@ public readonly struct CmsgSelectCharacter
     public readonly byte SlotIndex;
 
     /// <summary>
-    /// 0x01 — select-confirm / play flag: 1 = select this slot to play (select-for-play path);
-    /// 0 = ack / enter the created slot (create-slot ack path). STATIC HIGH for both emitter fills.
-    /// spec: packets/cmsg_char_select.yaml.
+    /// 0x01 — mode discriminator selecting which manage action this 1/7 carries:
+    /// <c>0</c> = plain select / view a slot (STATIC HIGH for the select path); <c>1</c> = DELETE the
+    /// slot (code-confirmed literal — the delete-confirm path writes 1 here, so the delete body is
+    /// <c>{slot, 1}</c>; the earlier "2 by elimination" reading is refuted). DELETE rides this op:
+    /// there is no dedicated delete opcode. The delete RESULT arrives on S2C 3/7 SmsgCharManageResult.
+    /// spec: Docs/RE/packets/cmsg_char_select.yaml (Mode: 0 = select/view, 1 = delete).
     /// </summary>
-    public readonly byte Flag;
+    public readonly byte Mode;
 }

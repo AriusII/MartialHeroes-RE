@@ -13,6 +13,12 @@ skill, write a small IDAPython snippet, run it inside IDA through the MCP exec t
 single machine-readable result line. Everything it touches is **dirty** (derived directly from the
 copyrighted binary) and lands under `Docs/RE/_dirty/queries/`.
 
+**Ground truth:** the result is authoritative **only** when the snippet ran against the correct,
+populated Martial Heroes IDB (confirmed by `/ida-mcp-connect`). A snippet answers an open question
+**from the binary** — never patch a gap from memory or analogy. If the MCP is down, the DB is wrong/
+empty, or a call returns partial data, **STOP and report exactly what you got — never invent an
+address, name, or byte value to keep moving.**
+
 Prefer a fixed skill when one fits — `ida-recon` (census), `ida-opcode-map` (dispatcher),
 `ida-crypto-hunt` (cipher), `ida-xref-map` / `ida-callgraph-map` / `ida-data-flow` (graph + flow),
 `ida-batch-analyze` (subsystem), `ida-string-hunt` (strings), `ida-struct-apply` /

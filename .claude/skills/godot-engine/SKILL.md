@@ -46,6 +46,16 @@ detail. Apply this checklist on every edit/run in layer 05.
   in-engine probe. (Godot MCP `mcp__godot__*` is the alternative when the editor is open.)
 - (CLAUDE.md "Headless Verify Loop" / "Godot Pipeline" for the console-exe path and what already works.)
 
+## Source of truth (Ground-Truth Doctrine)
+
+- **Behavior, coordinates, and asset chains come from the IDA-derived `Docs/RE/` specs** (the committed,
+  firewall-clean record of what `doida.exe` proved) + the recovered chains in `CLAUDE.md`. Layer 05 is
+  measured against them, never the reverse — match the original; don't invent.
+- **Exception — rendered pixels:** for how a scene actually *looks*, the **official screenshots/captures
+  are the visual oracle and `oracle > spec`** (a spec-faithful render can still be wrong vs the real
+  client — CAMPAIGN 9c/12). When a capture and a spec disagree on the final image, the capture wins;
+  feed the divergence back to RE so the spec is corrected. (Verify pixels with `/godot-fidelity-check`.)
+
 ## Firewall
 
 Neutral conventions only. No decompiler output, no copyrighted assets/bytes — render from clean specs

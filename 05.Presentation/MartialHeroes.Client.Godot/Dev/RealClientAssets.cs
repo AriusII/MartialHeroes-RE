@@ -412,15 +412,10 @@ public sealed class RealClientAssets : IDisposable
         return $"data/map{tag}/dat/d{tag}x{mapX}z{mapZ}";
     }
 
-    private static string BuildTedPath(int areaId, int mapX, int mapZ)
-        => BuildCellBasePath(areaId, mapX, mapZ) + ".ted";
-
-    private static string BuildLstPath(int areaId)
-    {
-        // spec: Docs/RE/formats/terrain.md §1.2 — "data/map<d0d1d2>/dat/d<d0d1d2>.lst". CONFIRMED.
-        string tag = AreaTag(areaId);
-        return $"data/map{tag}/dat/d{tag}.lst";
-    }
+    // NOTE: BuildTedPath / BuildLstPath were removed — both had zero call sites here. The
+    // .ted/.lst path construction lives in VfsTerrainSectorSource (its own local copies); callers
+    // here use BuildCellBasePath + GetRaw/Contains directly.
+    // spec: Docs/RE/formats/terrain.md §1.2–1.3.
 
     private ReadOnlyMemory<byte> TryGetContent(string path)
     {

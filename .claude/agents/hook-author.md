@@ -50,6 +50,21 @@ If you cannot honor both at once, you have the wrong design — stop and rethink
   `python -c "import ast; ast.parse(open(r'<path>').read())"`. A hook that fails to parse fails the
   whole event silently — never hand one off unparsed.
 
+## Ground-Truth Doctrine — reflect it where a hook orients or guards (standing rule)
+
+Every hook you author or refine MUST reflect the **Ground-Truth Doctrine** (`.claude/KIT.md`,
+"Ground-Truth Doctrine" section) — concisely, per the §9 anti-bloat rule, never padded:
+
+- **Context-injecting primers** (`SessionStart` / `UserPromptSubmit` / `SubagentStart`): inject the
+  doctrine via the shared **`h.GROUND_TRUTH_BLURB`** constant in `_hooklib.py` (IDA/`doida.exe` is the
+  single truth, `Docs/RE/` specs are the derived truth, code is measured against them, captures are the
+  pixel oracle) — reuse the constant, do not re-author the wording.
+- **PostToolUse guards** (the advisory nudges): keep the message **short** — a one-line "cite the
+  IDA-derived `Docs/RE/` spec / escalate the missing fact to RE, never invent" pointer is enough; the
+  full blurb belongs in primers, not in a per-edit guard.
+
+Advisory-only and fail-open still bind: a doctrine reminder never blocks. Add only where it helps.
+
 ## The hook event/output schema (2026, authoritative)
 
 A command hook reads one JSON event object on **stdin** and replies on **stdout**:

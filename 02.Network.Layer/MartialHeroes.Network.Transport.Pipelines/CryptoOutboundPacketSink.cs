@@ -34,10 +34,12 @@ namespace MartialHeroes.Network.Transport.Pipelines;
 /// Network.Crypto from this project.
 /// </para>
 /// <para>
-/// <b>Zero allocation on the hot path</b>: the payload is copied once into a pooled scratch
-/// buffer for in-place encryption, then the compressor's pooled output is handed directly to
-/// <see cref="IConnectionSession.SendAsync"/> with the header prepended in the same rental.
-/// No per-send heap allocation occurs.
+/// <b>Zero allocation on the hot path</b>: a SINGLE pooled buffer is rented per send, sized to the
+/// 8-byte header plus the worst-case LZ4 compress bound. The plaintext is copied into that buffer's
+/// payload region and ciphered in place; the compressor's pooled output is copied back over the same
+/// region and the header is written ahead of it, so the whole frame ships from one rental. The
+/// header-only / keepalive path likewise writes into a pooled 8-byte rental. No per-send heap
+/// allocation occurs (the compressor's transient pooled buffer is owned and returned by the codec).
 /// </para>
 /// </remarks>
 public sealed class CryptoOutboundPacketSink : IOutboundPacketSink
@@ -103,12 +105,13 @@ public sealed class CryptoOutboundPacketSink : IOutboundPacketSink
     /// <remarks>
     /// Outbound stages (spec: Docs/RE/specs/crypto.md §3):
     /// <list type="number">
-    ///   <item>If payload is empty, send a bare 8-byte header frame — no cipher, no compression
-    ///         (spec: Docs/RE/specs/crypto.md §2 header-only pass-through).</item>
-    ///   <item>Copy plaintext payload into a pooled scratch buffer, apply the cipher in place.</item>
-    ///   <item>LZ4-compress the enciphered bytes into a second pooled buffer.</item>
-    ///   <item>Prepend the 8-byte header into a single contiguous rental (header + compressed payload)
-    ///         and forward to <see cref="IConnectionSession.SendAsync"/>.</item>
+    ///   <item>If payload is empty, send a bare 8-byte header frame from a pooled rental — no cipher,
+    ///         no compression (spec: Docs/RE/specs/crypto.md §2 header-only pass-through).</item>
+    ///   <item>Rent ONE buffer (header + worst-case compress bound); copy the plaintext into its
+    ///         payload region and cipher it in place.</item>
+    ///   <item>LZ4-compress the enciphered bytes (the codec returns its own pooled output).</item>
+    ///   <item>Copy the compressed bytes back over the payload region, write the 8-byte header ahead of
+    ///         them in the SAME rental, and forward to <see cref="IConnectionSession.SendAsync"/>.</item>
     /// </list>
     /// </remarks>
     public async ValueTask SendAsync(
@@ -125,34 +128,57 @@ public sealed class CryptoOutboundPacketSink : IOutboundPacketSink
         {
             // Header-only packet (e.g. keepalive 2/10000): no cipher, no compression.
             // spec: Docs/RE/specs/crypto.md §2 — "header-only packets bypass all transforms."
-            byte[] headerOnly = BuildHeader(
-                totalSize: (uint)FramingConstants.HeaderSize,
-                major: majorOpcode,
-                minor: minorOpcode);
+            // SendAsync is awaited, so a single pooled 8-byte header is safe to reuse and return.
+            byte[] headerOnly = ArrayPool<byte>.Shared.Rent(FramingConstants.HeaderSize);
+            try
+            {
+                WriteHeader(
+                    headerOnly.AsSpan(0, FramingConstants.HeaderSize),
+                    (uint)FramingConstants.HeaderSize,
+                    majorOpcode,
+                    minorOpcode);
 
-            await _session.SendAsync(headerOnly, cancellationToken).ConfigureAwait(false);
+                await _session
+                    .SendAsync(headerOnly.AsMemory(0, FramingConstants.HeaderSize), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(headerOnly);
+            }
+
             return;
         }
 
-        // --- Step 1: copy plaintext into a pooled scratch buffer for in-place encryption ---
+        // --- Single rental: header + room for the ciphered plaintext, sized to the worst-case
+        // compressed bound so the same buffer holds the framed output after compression. We cipher
+        // the plaintext IN PLACE in this buffer's payload region (eliminating the separate scratch
+        // rental), then compress out of it. (LZ4 cannot compress in-place over its own source, so the
+        // compressor produces its own pooled output, which we then copy back over the payload region.)
         int payloadLen = payload.Length;
-        byte[] scratch = ArrayPool<byte>.Shared.Rent(payloadLen);
+        // Worst-case raw-block LZ4 output bound (canonical compressBound): srcSize + srcSize/255 + 16.
+        // Computed locally so this project keeps its single ProjectReference (Abstractions) and never
+        // takes a direct LZ4 package dependency — the compressor itself stays behind the injected
+        // delegate. spec: Docs/RE/specs/crypto.md §3.2/§8.1 (compress-bound = srcSize + srcSize/255 + 16).
+        int compressBound = payloadLen + (payloadLen / 255) + 16;
+        int frameCapacity = FramingConstants.HeaderSize + compressBound;
+        byte[] frame = ArrayPool<byte>.Shared.Rent(frameCapacity);
         try
         {
-            payload.Span.CopyTo(scratch.AsSpan(0, payloadLen));
+            Span<byte> payloadRegion = frame.AsSpan(FramingConstants.HeaderSize, payloadLen);
+            payload.Span.CopyTo(payloadRegion);
 
-            // --- Step 2: cipher in place ---
+            // --- Step 1: cipher in place (in the frame's payload region) ---
             // spec: Docs/RE/specs/crypto.md §3.1 — apply byte cipher before compression.
-            _encrypt(scratch.AsSpan(0, payloadLen));
+            _encrypt(payloadRegion);
 
-            // --- Step 3: LZ4 compress ---
+            // --- Step 2: LZ4 compress ---
             // spec: Docs/RE/specs/crypto.md §3.2 — raw-block LZ4 after cipher.
-            using IMemoryOwner<byte> compressed = _compress(scratch.AsSpan(0, payloadLen),
-                out int compressedLength);
+            using IMemoryOwner<byte> compressed = _compress(payloadRegion, out int compressedLength);
 
-            // --- Step 4: assemble header + compressed payload into a single send buffer ---
-            // spec: Docs/RE/opcodes.md + crypto.md §2 — header layout: +0 u32 total size,
-            //       +4 u16 major, +6 u16 minor; total size = 8 + compressedLength.
+            // --- Step 3: assemble the frame in the SAME rental: header at [0..8), compressed
+            //       payload at [8..). spec: Docs/RE/opcodes.md + crypto.md §2 — header layout:
+            //       +0 u32 total size, +4 u16 major, +6 u16 minor; total size = 8 + compressedLength.
             int totalSize = FramingConstants.HeaderSize + compressedLength;
             // Guard: MaxFrameSize (8 + 0x2DA0) is derived from the client's INBOUND fixed LZ4
             // decompress scratch capacity (spec: Docs/RE/specs/crypto.md §3/§5 — "fixed 11680-byte
@@ -169,30 +195,22 @@ public sealed class CryptoOutboundPacketSink : IOutboundPacketSink
                     $"spec: Docs/RE/specs/crypto.md §3/§5 + Docs/RE/specs/network_dispatch.md §6.2.");
             }
 
-            byte[] frame = ArrayPool<byte>.Shared.Rent(totalSize);
-            try
-            {
-                WriteHeader(frame.AsSpan(), (uint)totalSize, majorOpcode, minorOpcode);
-                compressed.Memory.Span[..compressedLength].CopyTo(frame.AsSpan(FramingConstants.HeaderSize));
+            compressed.Memory.Span[..compressedLength].CopyTo(frame.AsSpan(FramingConstants.HeaderSize));
+            WriteHeader(frame.AsSpan(), (uint)totalSize, majorOpcode, minorOpcode);
 
-                await _session.SendAsync(
-                    frame.AsMemory(0, totalSize),
-                    cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(frame);
-            }
+            await _session.SendAsync(
+                frame.AsMemory(0, totalSize),
+                cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(scratch);
+            ArrayPool<byte>.Shared.Return(frame);
         }
     }
 
     // -----------------------------------------------------------------------
-    // Header helpers (zero-alloc hot path variant uses a rented buffer;
-    // the header-only variant rents a tiny fixed-size array).
+    // Header helper (both the payload and the header-only paths write the header
+    // into a pooled rental — no per-send heap allocation).
     // -----------------------------------------------------------------------
 
     /// <summary>
@@ -208,16 +226,5 @@ public sealed class CryptoOutboundPacketSink : IOutboundPacketSink
         BinaryPrimitives.WriteUInt16LittleEndian(destination[4..], major);
         // +6: u16 LE minor opcode
         BinaryPrimitives.WriteUInt16LittleEndian(destination[6..], minor);
-    }
-
-    /// <summary>
-    /// Allocates a new 8-byte array for a header-only frame. Only used for the
-    /// zero-payload pass-through path where no rental is active.
-    /// </summary>
-    private static byte[] BuildHeader(uint totalSize, ushort major, ushort minor)
-    {
-        byte[] header = new byte[FramingConstants.HeaderSize];
-        WriteHeader(header, totalSize, major, minor);
-        return header;
     }
 }

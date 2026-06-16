@@ -24,6 +24,14 @@ interoperability**. The skinning math is exactly the kind of format/behavior det
 exists to let us document. But it only holds if dirty and clean stay strictly apart. You are the dirty
 room.
 
+**Ground-truth doctrine:** IDA / `doida.exe` is the project's *single absolute truth* for the
+deformation math — multiply order, inverse-bind, hierarchy walk, keyframe sampling, handedness. Every
+convention is confirmed or refuted **in the binary** (and at the live deform loop), never asserted
+from memory, analogy, or "the usual convention" guesswork — a confident wrong rule re-explodes the
+mesh. Static forms the hypothesis; the `?ext=dbg` live debugger confirms it against ground truth. Your
+math only *becomes* truth once `godot-skinning-specialist` rewrites it into `specs/skinning.md` —
+until then it is a dirty, provisional note.
+
 - You write **ONLY** under `Docs/RE/_dirty/` (gitignored). You **NEVER** write to any committed spec
   (`Docs/RE/specs/`, `formats/`, `structs/`, `opcodes.md`, `packets/`, `names.yaml`, `journal.md`) and
   **NEVER** to any `0X.*` source folder (especially `03.Storage.Assets/*` and

@@ -105,18 +105,12 @@ public sealed partial class EnvironmentNode : Node3D
     /// </summary>
     public float CycleSpeed { get; set; } = 30_000f;
 
-    /// <summary>
-    /// Tonemap exposure for the assembled environment. 1.1 lifts the (deliberately muted) legacy
-    /// daylight values into a readable range without blowing out. Engineering choice, not legacy data.
-    /// </summary>
-    public float TonemapExposure { get; set; } = 1.15f;
+    // TonemapExposure removed: the original DX8 client has no tonemap/exposure pass.
+    // spec: Docs/RE/specs/rendering.md §6 — post chain is bright-copy → blur → composite → present; NO tonemap.
+    // spec: Docs/RE/specs/environment.md §6.2a — colours applied RAW, no gamma.
 
-    /// <summary>
-    /// Floor applied to directional light energy so a muted legacy noon colour still lights the town.
-    /// The legacy noon directional colour_A is ~0.40 RGB (probe-confirmed area 2); without a floor
-    /// the sun would be very dim. Engineering choice; the colour HUE still comes from the data.
-    /// </summary>
-    public float MinSunEnergy { get; set; } = 1.6f;
+    // MinSunEnergy removed: the original applies color_A RAW at energy 1.0.
+    // spec: Docs/RE/specs/environment.md §6.2a — "Directional light applied RAW without any multiplier."
 
     /// <summary>
     /// Player brightness floor, matching OPTION_BRIGHT / 100.
@@ -277,9 +271,11 @@ public sealed partial class EnvironmentNode : Node3D
         // ---- Ambient light ----
         ApplyAmbient(env, kf, kfNext, frac);
 
-        // ---- Tonemap / post (readability) ----
-        env.TonemapMode = global::Godot.Environment.ToneMapper.Filmic;
-        env.TonemapExposure = TonemapExposure;
+        // ---- Tonemap / post — Linear pass-through (no tonemap in original) ----
+        // spec: Docs/RE/specs/rendering.md §6 — no tonemap/exposure pass in post chain.
+        // spec: Docs/RE/specs/environment.md §6.2a — colours applied RAW, no gamma.
+        env.TonemapMode = global::Godot.Environment.ToneMapper.Linear;
+        env.TonemapExposure = 1.0f;
         env.SsaoEnabled = false;
         env.SsilEnabled = false;
         env.SdfgiEnabled = false;
@@ -352,19 +348,46 @@ public sealed partial class EnvironmentNode : Node3D
             return;
         }
 
+        // Fog is LINEAR; the only live far-plane driver is s×3.0 from the section-C scalar.
+        // Gate the whole fog block on s>0: if no positive scalar is available fog stays off.
+        // spec: Docs/RE/specs/environment.md §6.2a — "observed apply path is LINEAR … fog_range = s*3.0
+        //   … EXP/EXP2 confirmed NOT driven … LINEAR mode + density 0.0; enabled when s>0."
+        // spec: Docs/RE/specs/environment.md §6.1 — fog far = s×3.0 (node-mapping).
+        // spec: Docs/RE/formats/environment_bins.md §9.3 — FogDistanceScalars.
+
+        LightBin? light = _env?.Light;
+        float fogScalar = 0f;
+        if (light is { FogDistanceScalars.Length: >= LightBin.KeyframeCount })
+        {
+            float sA = light.FogDistanceScalars[kf];
+            float sB = light.FogDistanceScalars[kfNext];
+            fogScalar = sA + (sB - sA) * frac;
+        }
+
+        if (fogScalar <= 0f)
+        {
+            // s=0 → fog effectively off per spec.
+            env.FogEnabled = false;
+            return;
+        }
+
         env.FogEnabled = true;
+        // Godot uses FogModeEnum.Depth for the linear depth-based fog (begin→end).
+        // spec: Docs/RE/specs/environment.md §6.2a — LINEAR fog (begin/end depth).
         env.FogMode = global::Godot.Environment.FogModeEnum.Depth;
 
-        // start/end are fractions of the view range. spec: environment.md §6.1 + environment_bins.md §2.1.
-        env.FogDepthBegin = fog.StartDist * ViewRange;
-        env.FogDepthEnd = fog.EndDist * ViewRange;
+        // Far = s×3.0; near scaled by 1/s.
+        // spec: Docs/RE/specs/environment.md §6.2a — far = s*3.0, near = 1/s.
+        env.FogDepthEnd = fogScalar * 3.0f; // spec: Docs/RE/specs/environment.md §6.2a
+        env.FogDepthBegin = 1.0f / fogScalar; // spec: Docs/RE/specs/environment.md §6.2a
         env.FogDepthCurve = 1.0f;
 
         // Fog colour interpolated between adjacent BGRA keyframes. spec: environment.md §2.3 + §6.2.
         env.FogLightColor = LerpFogColor(fog, kf, kfNext, frac);
         env.FogLightEnergy = 1.0f;
-        // Let the fog tint the sky a little so the horizon and fog agree.
-        env.FogSkyAffect = 0.5f;
+        // No sky-affect tinting — the original has no sky haze pass.
+        // spec: Docs/RE/specs/environment.md §6.2a — no FogSkyAffect in original.
+        env.FogSkyAffect = 0.0f;
     }
 
     private void ApplyAmbient(global::Godot.Environment env, int kf, int kfNext, float frac)
@@ -388,6 +411,14 @@ public sealed partial class EnvironmentNode : Node3D
         env.AmbientLightColor = Colors.White;
         // spec: Docs/RE/specs/environment.md §6.2a — OPTION_BRIGHT default = 100 → floor = 1.0 (full).
         env.AmbientLightEnergy = OptionBrightFloor; // spec: Docs/RE/specs/environment.md §6.2
+
+        // Propagate the brightness floor to CelShadeMaterialFactory so newly-built cel materials
+        // start with the correct ambient_floor_energy. This does NOT retroactively update already-built
+        // material instances (those were already seeded with the correct 1.0 default). This call is
+        // only meaningful when OptionBrightFloor changes from its default (OPTION_BRIGHT != 100).
+        // spec: Docs/RE/specs/environment.md §6.2a — device_ambient is applied to ALL surfaces,
+        //   including the cel-shaded skinned actors on the offscreen post-process path.
+        CelShadeMaterialFactory.AmbientFloorEnergy = OptionBrightFloor; // spec: environment.md §6.2a
     }
 
     // -------------------------------------------------------------------------
@@ -427,11 +458,14 @@ public sealed partial class EnvironmentNode : Node3D
     {
         env.GlowEnabled = true;
 
-        // Blend mode: Mix (Screen) — approximates base×0.5 + glow×0.5 opaque composite.
-        // The DX8 present is opaque (SRC=ONE, DEST=ZERO); the additive "glow add" happens INSIDE
-        // the composite PS into TEX0 before the opaque blit. Mix avoids pure-additive over-brightening.
-        // spec: Docs/RE/specs/rendering.md §6 — composite blends into RT then opaque-copies to backbuffer.
-        env.GlowBlendMode = global::Godot.Environment.GlowBlendModeEnum.Mix;
+        // Blend mode: Screen — the composite is saturate(2·edge·c0 + bloom·c1) performed INSIDE the
+        // composite shader into TEX0; the final present is ONE/ZERO (opaque blit of the already-composited RT).
+        // Godot Additive would re-add the glow on top of what is already composited, doubling the effect.
+        // Screen (Mix) matches the opaque-blit present semantics without double-adding.
+        // spec: Docs/RE/specs/rendering.md §6.2 — present pass = ONE/ZERO opaque blit; NOT re-added.
+        // spec: Docs/RE/specs/rendering.md §6.3 — composite c0=c1=0.5; opaque present; NO second add.
+        // spec: Docs/RE/specs/rendering.md §8 — "use Screen/Mix; Additive over-brightens at present."
+        env.GlowBlendMode = global::Godot.Environment.GlowBlendModeEnum.Screen; // spec: rendering.md §6.2/§8
 
         // HDR threshold = 0: no bright-pass cutoff — CONFIRMED (every pixel feeds the blur).
         // spec: Docs/RE/specs/rendering.md §6.4 — "no luminance cutoff; BLOOM_BRIGHT_THRESHOLD = NONE".
@@ -507,25 +541,21 @@ public sealed partial class EnvironmentNode : Node3D
         LightBin? light = _env?.Light;
         if (light is not null && light.DirectionalKeyframes.Length == KeyframeCount)
         {
-            // Directional colour_A (RGBA f32) from section A. spec: environment.md §6.1.
+            // Directional colour_A (RGBA f32) from section A, applied RAW.
+            // spec: Docs/RE/specs/environment.md §6.1 — node mapping: color_A → light_color directly.
+            // spec: Docs/RE/specs/environment.md §6.2a — "applied RAW without any multiplier. No /255, no gamma."
             Color a = ColorAOf(light.DirectionalKeyframes[kf]);
             Color b = ColorAOf(light.DirectionalKeyframes[kfNext]);
             Color sun = a.Lerp(b, frac);
-
-            float lum = Luminance(sun);
-            // Normalise hue, drive brightness through energy with a readability floor.
-            // The legacy noon colour_A is muted (~0.40); MinSunEnergy keeps the town lit. The HUE
-            // (warm at dawn/dusk, neutral at noon) still comes from the data.
-            Color hue = lum > 1e-4f ? new Color(sun.R / lum, sun.G / lum, sun.B / lum, 1f) : Colors.White;
-            hue = ClampColor(hue);
-            _dirLight.LightColor = hue;
-            _dirLight.LightEnergy = Math.Max(MinSunEnergy, lum * 4.0f);
+            // Apply RAW: no hue-normalise, no lum×4, no energy floor.
+            _dirLight.LightColor = sun;
+            _dirLight.LightEnergy = 1.0f; // spec: Docs/RE/specs/environment.md §6.2a — energy 1.0, no multiplier.
         }
         else
         {
             // spec: Docs/RE/specs/environment.md §7 — light absent → energy 1.0, white.
             _dirLight.LightColor = Colors.White;
-            _dirLight.LightEnergy = MinSunEnergy;
+            _dirLight.LightEnergy = 1.0f;
         }
 
         _dirLight.ShadowEnabled = true;
@@ -637,9 +667,6 @@ public sealed partial class EnvironmentNode : Node3D
 
     private static Color ClampColor(Color c)
         => new(Math.Clamp(c.R, 0f, 1f), Math.Clamp(c.G, 0f, 1f), Math.Clamp(c.B, 0f, 1f), 1f);
-
-    private static float Luminance(Color c)
-        => 0.2126f * c.R + 0.7152f * c.G + 0.0722f * c.B;
 
     private static float SafeF(float[] arr, int i)
         => (uint)i < (uint)arr.Length ? arr[i] : 0f;
@@ -765,7 +792,9 @@ public sealed partial class EnvironmentNode : Node3D
             // Note: AmbientKeyframes (§B) are inert in original (K_ambient=0.0 — spec §6.2a).
             // The actual device ambient = OPTION_BRIGHT/100 floor = OptionBrightFloor.
             // spec: Docs/RE/specs/environment.md §6.2a
-            lightStr = $"sunColorA={sun} (energy floor {MinSunEnergy:F1}) " +
+            // Sun applied RAW at energy=1.0 (no floor, no hue-normalise, no lum×4).
+            // spec: Docs/RE/specs/environment.md §6.2a.
+            lightStr = $"sunColorA={sun} (energy=1.0 RAW) " +
                        $"ambFloor(OPTION_BRIGHT/100)={OptionBrightFloor:F2} [§B keyframes inert, K_ambient=0] " +
                        $"fallbackDir=({light.FallbackDirX:F0},{light.FallbackDirY:F0},{light.FallbackDirZ:F0})";
         }
@@ -782,6 +811,6 @@ public sealed partial class EnvironmentNode : Node3D
 
         GD.Print($"[Environment] area={_areaId} keyframe={kf}(noon) {skyGate} " +
                  $"material={(_env?.Material is not null)} cycle={CycleEnabled}@{CycleSpeed:F0}ms/s " +
-                 $"exposure={TonemapExposure:F2} | fog: {fogStr} | light: {lightStr} | sunDirGodot={sunDir}");
+                 $"tonemap=Linear/1.0 glow=Screen | fog: {fogStr} | light: {lightStr} | sunDirGodot={sunDir}");
     }
 }

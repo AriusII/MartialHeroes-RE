@@ -64,6 +64,24 @@ READONLY analysts + parallel IDB writes, no caps — retry failed/conflicting ca
 specified in `.claude/KIT.md` §2 — read it before writing or refining an orchestrator. Two levels of
 orchestration is the ceiling: an orchestrator never spawns another orchestrator.
 
+## Ground-Truth Doctrine — thread it into every agent you author or refine (standing rule)
+
+Every agent body you write or refine MUST reflect the **Ground-Truth Doctrine** (`.claude/KIT.md`,
+"Ground-Truth Doctrine" section) — concisely and load-bearing, per the §9 anti-bloat rule, never
+padded. Match the wording to the agent's room:
+
+- **RE / IDA bodies** (dirty analysts, `ida-script-author`): "IDA / `doida.exe` is the single absolute
+  truth; **confirm-don't-guess** (static forms the hypothesis, the `?ext=dbg` debugger confirms it);
+  **STOP-don't-fabricate** if the MCP is down or the DB is wrong/empty."
+- **Spec-author bodies**: "**rewrite-never-copy**; the committed spec is downstream's only truth;
+  **binary-wins-on-conflict** (correct the spec + journal it)."
+- **Clean-room engineer bodies**: "read **only** the IDA-derived `Docs/RE/` specs; **cite every
+  constant** (`// spec: …`); a missing/ambiguous fact is **escalated to RE**, never invented."
+- **Godot bodies**: "the specs govern behavior; the **official captures are the pixel oracle** —
+  **oracle > spec** for how a scene looks."
+
+If a dimension is already covered in the sibling you're mirroring, leave it; add only where missing.
+
 ## Firewall placement — every agent declares its room
 
 The project's legal basis (EU Directive 2009/24/EC Art. 6 — decompilation *solely* for

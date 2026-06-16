@@ -13,6 +13,11 @@ project. The tree is the legal backbone of the project (EU Software Directive 20
 a committed half holding only neutral, human-authored specs, and a gitignored `_dirty/` half
 quarantining raw decompiler output.
 
+The committed half is the project's **derived truth** — the rewritten record of what IDA proved about
+`doida.exe`, and the *only* thing implementation reads; the `_dirty/` half holds what the binary said
+before it was rewritten across the firewall. This skill only builds the empty home for both; it never
+authors a finding. Promotion from one to the other is `re-promote`'s deliberate, journaled act.
+
 **This skill is purely additive.** It creates missing directories and seeds missing canonical
 files. It MUST NEVER overwrite, truncate, or reformat a file that already exists — those files may
 contain real RE findings. In this repo the tree usually already exists; the correct outcome is

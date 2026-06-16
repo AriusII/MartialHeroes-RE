@@ -95,6 +95,10 @@ public static class SoundTableParser
         // The loader reads the first 12288 bytes (256 × 48); the final 1024 bytes are an unread trailer.
         // spec: Docs/RE/formats/sound_tables.md §File layout — "fixed 13312 bytes (0x3400)": CONFIRMED.
         // spec: Docs/RE/formats/sound_tables.md §File layout — "Record stride: 48 bytes. CONFIRMED (two-witness)."
+        // NOTE: a relaxation to ">= 12288 (the read region)" is spec-justified by sound.md §6.3 (the
+        // loader reads only the first 0x3000 bytes), but it is DEFERRED here because it must be applied
+        // together with SoundTableParserTests.cs (another lane's file), which pins the exact-13312
+        // contract (Parse_BufferLargerThanFixedFileSize / Parse_LengthNotExactly13312).
         if (span.Length != SoundTableData.FixedFileSize)
             throw new InvalidDataException(
                 $"Sound table parse error: buffer is {span.Length} bytes; " +

@@ -63,6 +63,20 @@ public static class CelShadeMaterialFactory
     public static bool CelEnabled { get; set; } = true;
 
     /// <summary>
+    /// Ambient floor energy, fed from <c>EnvironmentNode.OptionBrightFloor</c>.
+    /// Reproduces the D3DRS_AMBIENT full-white additive constant the original DX9 device applies at
+    /// OPTION_BRIGHT = 100 (device_ambient = full white = 1.0 in float). Because CelShade.gdshader
+    /// runs <c>render_mode unshaded</c> it does NOT pick up WorldEnvironment ambient; this value is
+    /// injected as a shader uniform so shadowed surfaces are lifted instead of going black.
+    ///
+    /// Default 1.0 — the spec-confirmed default OPTION_BRIGHT = 100 → full-white ambient floor.
+    /// spec: Docs/RE/specs/environment.md §6.2a — OPTION_BRIGHT default 100 → device_ambient white.
+    /// spec: Docs/RE/specs/environment.md §6.2b — "ambient_light_energy = OPTION_BRIGHT/100 = 1.0."
+    /// </summary>
+    public static float AmbientFloorEnergy { get; set; } =
+        1.0f; // spec: Docs/RE/specs/environment.md §6.2a — default OPTION_BRIGHT=100 → 1.0
+
+    /// <summary>
     /// Initialise the session: loads the toon ramp LUT from the VFS and caches it.
     /// Call once at world startup before any Build call. Idempotent — safe to call again.
     /// spec: Docs/RE/formats/shaders.md §C5.3 — toonramp.bmp.
@@ -160,6 +174,23 @@ public static class CelShadeMaterialFactory
         {
             mat.SetShaderParameter("use_toon_ramp", false);
         }
+
+        // ---- Post-process gate (cel_enabled) ----
+        // When CelEnabled is false the post-process offscreen path is off; the shader falls back to
+        // plain diffuse (no toon ramp). Wire the factory flag through to the shader uniform.
+        // spec: Docs/RE/specs/rendering.md §5.1a — cel/dotoonshading coupled to the post-process flag.
+        mat.SetShaderParameter("cel_enabled", CelEnabled); // spec: rendering.md §5.1a
+
+        // ---- Ambient floor ----
+        // Replicates the D3DRS_AMBIENT full-white additive constant at OPTION_BRIGHT = 100.
+        // CelShade.gdshader runs render_mode unshaded (no WorldEnvironment ambient pickup); this
+        // explicit uniform lifts dark surfaces so the cel scene reads at the same overall brightness
+        // as the original DX9 device at default brightness.
+        // spec: Docs/RE/specs/environment.md §6.2a — OPTION_BRIGHT default 100 → device_ambient white.
+        // spec: Docs/RE/specs/environment.md §6.2b — ambient_floor = OPTION_BRIGHT/100 = 1.0.
+        mat.SetShaderParameter("ambient_floor_energy", AmbientFloorEnergy); // spec: environment.md §6.2a
+        mat.SetShaderParameter("ambient_floor_color",
+            new Color(1f, 1f, 1f, 1f)); // achromatic white; spec: environment.md §6.2a
 
         // ---- Light directions and colours ----
         // Main light: c4 runtime direction, c6 = white.

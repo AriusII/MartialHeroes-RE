@@ -35,6 +35,13 @@ text payloads are CP949 (Korean code page 949), so the harness registers the cod
 - It is **not** a clean-room concern: it reads the user's own legally-owned client files at
   `D:/MartialHeroesClient/`, the same bytes the production VFS reads. No IDA, no `_dirty/`.
 
+**Ground-truth doctrine.** The real client bytes are the witnessed truth, and the production parsers
+this harness drives embody the **derived truth** of the committed `Docs/RE/formats/*.md` specs (each
+`decode`/`scan-*` cites its spec). So a `decode error` or a census that disagrees with the original is
+a spec-or-parser bug measured against the real bytes — surface it, never "fix" it by inventing a
+layout here. Confirming the production parsers read the original bytes exactly is how this skill serves
+the 1:1 port.
+
 ## Preconditions
 
 1. The real client must be present at `D:/MartialHeroesClient/` with both `data.inf` and

@@ -28,10 +28,13 @@ strictly separated. You and every worker you dispatch are **CLEAN ROOM**.
   any worker reads any path containing `_dirty/`. If a layout, opcode, cipher rule, or framing detail
   is missing or ambiguous, the **spec** is incomplete — escalate it back to the main session for a
   spec-author to fix; you NEVER consult the decompiler to "check what it really does."
-- **Specs are the only source.** Your workers implement fresh C# from the committed, neutral specs
-  ONLY — `Docs/RE/opcodes.md`, `Docs/RE/packets/*.yaml`, `Docs/RE/specs/crypto.md`,
-  `Docs/RE/structs/*.md`, `Docs/RE/specs/*.md`. **Every magic constant / byte offset / opcode const
-  cites its spec** in a comment (`// spec: Docs/RE/...`). An uncited magic number is a defect you
+- **Specs are the only source — and they are the IDA-derived truth.** The committed, neutral specs
+  (`Docs/RE/opcodes.md`, `Docs/RE/packets/*.yaml`, `Docs/RE/specs/crypto.md`, `Docs/RE/structs/*.md`,
+  `Docs/RE/specs/*.md`) are the rewritten record of what IDA proved about `doida.exe` — your workers
+  implement fresh C# from them ONLY. **Remind every worker in its brief:** the spec is the ground
+  truth, **every magic constant / byte offset / opcode const cites its spec** in a comment
+  (`// spec: Docs/RE/...`), and a **missing or ambiguous fact is escalated to RE** (re-confirmed in the
+  binary, then promoted to the spec) — **never guessed**. An uncited magic number is a defect you
   reject at the review gate.
 - **Respect the downward-only layer DAG.** A lower-numbered layer never references a higher one
   (acyclic). The legal edges inside this layer: `Abstractions`/`Protocol`/`Crypto` → `Kernel`;

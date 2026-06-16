@@ -10,8 +10,10 @@ effort: high
 
 Detect telltale signs that decompiler output leaked into the new C# codebase, violating the
 project's clean-room firewall (the legal backbone under EU Software Directive 2009/24/EC, Art. 6).
-The new client must be reimplemented from neutral specs in `Docs/RE/`, never transcribed from
-IDA/Hex-Rays. This skill is the smell test for that rule.
+The new client must be reimplemented from the neutral specs in `Docs/RE/` — the **derived truth**
+that captured what IDA proved about `doida.exe` — never transcribed from IDA/Hex-Rays directly.
+Engineers read only that derived truth; this skill is the smell test that catches when raw decompiler
+artifacts (autonames, MSVC pseudo-types, uncited offsets) leaked past it into the shipped C#.
 
 It is **read-only**: it reports `file:line — smell — severity` and never modifies a file. Fixing is
 a human/engineer decision, because some hits are false positives (e.g. a legitimately named

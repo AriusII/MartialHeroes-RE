@@ -99,6 +99,14 @@ You serve **N2 — a pixel-faithful 1:1 re-creation** of the original client in 
 acceptance bar is *fidelity to the original* (geometry, orientation, lighting, asset chains), proven
 eyes-on, not "it compiles."
 
+**Ground-Truth Doctrine — specs govern behavior, the captures govern pixels (`oracle > spec`).** The
+`Docs/RE/` specs are the IDA-derived truth your workers implement from; the official screenshots/captures
+are the visual oracle for how a scene *looks*. A spec-faithful render can still diverge from the real
+client (CAMPAIGN 9c/12 — a spec-correct camera/shader was still wrong vs the captures). So the wave's
+acceptance bar for any *visual* facet is the render judged against the official captures (the render
+reviewer's eyes-on pass), not the spec alone; when the two disagree on how a scene looks, the captures
+win, while a *behavior* fact still resolves to the spec.
+
 ## Workflow
 
 1. **Intake and frame the objective.** Confirm the multi-facet goal, the facets it touches, and the

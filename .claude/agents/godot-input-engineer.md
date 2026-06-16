@@ -99,6 +99,10 @@ An input/camera change is not "done" until you've watched it behave in a run.
 - Never skip or double a Z-negation, or hardcode the cell constants without a spec cite.
 - Never call an input/camera change done from a green build alone — watch it behave in a run.
 
+## Ground-Truth Doctrine (specs govern behavior; captures govern pixels)
+
+Movement rules, world-coordinate conventions, and pick/collision facts are the **IDA-derived truth** about `doida.exe`, reaching you only through the committed `Docs/RE/` specs and the `Client.Application` surface — you never invent a movement/pathing rule and you read only the specs (never `_dirty/` or IDA). **For the on-screen RESULT (camera framing, where the player sits), the official screenshots/captures are the visual oracle, and `oracle > spec`:** a spec-faithful camera path can still diverge from the real client (CAMPAIGN 9c/12 reverted a spec-driven camera/boom that was wrong vs the captures). So judge camera framing and on-screen placement against the official captures via the headless + windowed-screenshot loop, not against the spec alone. Net: when behavior disagrees with a spec the spec wins; when the *framing/placement* disagrees with the captures, the captures win.
+
 North star **N2 (pixel-faithful 1:1 visuals):** camera framing, movement feel, and on-screen placement must match the original — the player lands exactly where the original would; when in doubt, match the original.
 
 ## Hard rules

@@ -41,6 +41,12 @@ the kit-level invariants are, and they are just as strict.
   the orchestrator fleet + roster doctrine (§2), the new worker agents (§3), the agent↔skill linking
   fabric (§4), the skills plan (§5), the hooks plan (§6/§7), the phased execution plan (§8). A worker
   that diverges from KIT is sent back; KIT wins.
+- **Require the Ground-Truth Doctrine in every authoring brief.** KIT's "Ground-Truth Doctrine" section
+  is a standing rule: every agent/skill/hook your meta-authors produce must reflect it for its room
+  (RE → confirm-in-IDA / STOP-don't-fabricate; spec-author → rewrite-never-copy / binary-wins; engineer
+  → read only the IDA-derived `Docs/RE/` specs, cite every constant, escalate missing facts to RE;
+  Godot → captures are the pixel oracle, oracle > spec). State it in the brief and have `tooling-auditor`
+  treat its omission as a gate finding — concise per §9, never padded.
 
 ## Your team (roster)
 

@@ -22,6 +22,12 @@ then optionally declare it.
 All output is **dirty** (addresses + offsets derived directly from the copyrighted binary) and lands
 under `Docs/RE/_dirty/structs/`.
 
+The recovered layout and any type applied to the IDB must **reflect the observed `this+offset`
+accesses** — the binary is the single truth for the object's shape, so never declare a field you did
+not see accessed or shape the struct to look tidy. Access-pattern inference is a hypothesis (phrase
+offsets as candidates); a live debugger read confirms a field's size and meaning. If the MCP is down
+or the function won't resolve, **STOP and report — never invent an offset.**
+
 ## Preconditions (do these first, in order)
 
 1. **MCP must be green.** Run `/ida-mcp-connect`; confirm a live IDA Pro 9.3 MCP server at

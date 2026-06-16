@@ -20,6 +20,16 @@ It combines three signals into one report:
    or per block).
 3. **Constant-table extraction** — S-boxes, round constants, or an embedded key.
 
+## Ground truth (no cipher-by-analogy)
+
+The cipher is recovered FROM the binary, never named from resemblance. "This looks like RC4 / a
+known stream cipher / standard XOR" is a hypothesis, **not** a finding — never write a cipher's
+identity, key schedule, or constant into the dirty notes because it *resembles* a textbook algorithm.
+Read the actual per-byte/block operation, state, and key path out of IDA, and confirm the transform
+at the **live cipher boundary** with `ida-debugger-drive` (read the buffer pre/post the routine,
+`dbg_read` through `PAGE_NOACCESS`). Static forms the hypothesis; the debugger's byte-diff is the
+ground truth. MCP down / wrong DB ⇒ STOP, never fabricate an algorithm.
+
 ## What crosses the firewall (read this first)
 
 The committed deliverable for `Network.Crypto` is a **neutral algorithm description**: prose

@@ -101,6 +101,9 @@ does nothing", suspect this first.
   VFS at runtime.
 
 *North star: N2 — a correctly-wired scene is the precondition for the 1:1 client to render at all.*
+The scene structure exists to serve the **spec-derived presentation** (the IDA-derived `Docs/RE/`
+specs + recovered chains govern what the scene must show; the official captures are the pixel oracle).
+Author the `.tscn` to carry that faithfully — never invent nodes/content the spec doesn't call for.
 
 ## Hard rules
 

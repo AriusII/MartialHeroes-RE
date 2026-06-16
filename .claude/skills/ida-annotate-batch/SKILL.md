@@ -20,6 +20,11 @@ Renames and comments derived from a clean role-word glossary are firewall-safe (
 mutated; the only repo file written is a **dirty applied-report** under `_dirty/campaign2/applied/`.
 Comments are **neutral interop documentation** — never Hex-Rays pseudo-C, never mangled names.
 
+Every name/comment/type applied must **reflect what the binary proves** — they come only from the
+gate-passed glossary slice (itself derived from IDA), land only on addresses that resolve, and are
+verified against the SHA-256 pin. Annotations are never invented to look tidy. If the MCP is down or
+the SHA-256 mismatches `names.yaml`, **STOP before applying — never fabricate the dry-run.**
+
 ## Preconditions (do these first, in order)
 
 1. **MCP must be green.** Run `/ida-mcp-connect`; confirm a live IDA Pro 9.3 MCP server at

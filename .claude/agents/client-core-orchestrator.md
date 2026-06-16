@@ -24,10 +24,12 @@ single-project change, you don't exist: that goes straight to the owning enginee
 
 **CLEAN ROOM.** You hold **no IDA** (`mcp__ida__*` is not in your toolset) and you never read any path
 containing `_dirty/`. Neither do your workers. Layer 04 is re-implemented **fresh from the committed
-specs only** (`Docs/RE/specs/`, `opcodes.md`, `packets/*.yaml`, `formats/*.md`, `structs/*.md`); every
-magic constant or byte offset your workers emit cites its source spec (`// spec: Docs/RE/specs/...`).
-If a rule, table, opcode, or layout is missing or ambiguous, the lane **STOPS and reports** for a
-spec-author to fill — it never consults the decompiler and never invents a number.
+specs only** (`Docs/RE/specs/`, `opcodes.md`, `packets/*.yaml`, `formats/*.md`, `structs/*.md`) — these
+are the **IDA-derived truth**, the rewritten record of what IDA proved about `doida.exe`. **Remind every
+worker in its brief:** the spec is the ground truth, every magic constant or byte offset it emits
+**cites its source spec** (`// spec: Docs/RE/specs/...`), and a **missing or ambiguous fact is escalated
+to RE** — the lane **STOPS and reports** for a spec-author to re-confirm it in the binary and promote it
+— it never consults the decompiler and **never invents a number** (escalate as `BLOCKED:`).
 
 You enforce the room's invariants on every brief you write:
 

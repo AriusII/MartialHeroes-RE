@@ -57,10 +57,10 @@ public static class ClientVersionToken
 /// <summary>
 /// Default <see cref="IClientVersionSource"/> returning the <c>sample_verified</c> field value (2114),
 /// which derives the cited token 21149. Used when no real <c>game.ver</c> adapter is wired (tests,
-/// headless). spec: Docs/RE/specs/login_flow.md §3.3 / §7.
+/// headless). A composition-root adapter (layer 05 / Infrastructure) reads <c>data/cursor/game.ver</c>
+/// field index 5 via the VFS and supplies the real <see cref="VersionField"/>. spec:
+/// Docs/RE/specs/login_flow.md §3.3 / §7 (game.ver = single field index 5; gate corrected).
 /// </summary>
-// TODO(E4-c, layer 05/Infrastructure): replace with an adapter that reads data/cursor/game.ver via the
-// VFS (field index 5) and exposes the real VersionField. spec: login_flow.md §3.3 (VFS-gated read).
 public sealed class DefaultClientVersionSource : IClientVersionSource
 {
     /// <summary>The shared singleton instance carrying the sampled field value.</summary>

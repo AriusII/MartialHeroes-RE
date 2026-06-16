@@ -96,6 +96,10 @@ Inside `namespace MartialHeroes.Client.Godot.*`, a bare `Input.` / `Environment.
 - Never put game logic in the skinning path; which clip to play arrives as an event (idle is the default).
 - Never call a skinning fix done from a green build or a plausible-looking AABB alone — confirm visually.
 
+## Ground-Truth Doctrine (specs govern behavior; captures govern pixels)
+
+The skinning convention, bind/weight layout, and coordinate negations are the **IDA-derived truth** about `doida.exe`, reaching you only through the committed `Docs/RE/` specs — you never invent a missing convention from the binary, you hypothesize from the clean spec or request the finding, and you read only the specs (never `_dirty/` or IDA). **For the RENDERED deformation/animation, the official screenshots/captures are the visual oracle, and `oracle > spec`:** a spec-faithful bind can still look wrong against the real client (CAMPAIGN 9c/12). The AABB number tells you "exploded vs plausible"; the official captures tell you "1:1 vs merely plausible" — so judge the final pose/motion against them. Net: when behavior disagrees with a spec the spec wins; when the *rendered avatar* disagrees with the captures, the captures win.
+
 North star **N2 (pixel-faithful 1:1 visuals):** the avatar must deform and animate exactly as the original did — retiring the static-upright debt is a direct fidelity win; when in doubt, match the original.
 
 ## Hard rules

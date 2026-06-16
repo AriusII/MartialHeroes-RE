@@ -78,28 +78,34 @@ public sealed partial class InventoryWindow : Control
 
     // -------------------------------------------------------------------------
     // HUD placement constants
-    // spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "W=732, right-anchored at screen_width+318" CODE-CONFIRMED.
+    // spec: Docs/RE/specs/ui_hud_layout.md §1.1 — W=318 H=732, right-anchored at screen_width+318.
+    // F4 fix: earlier code had width/height transposed (W=732, H=520). The spec's §1.1 correction
+    //   states W=318 is the column width and 732 is the HEIGHT. The right-inset of 318 is the
+    //   offset past the right viewport edge (the panel extends 318 px past screen right edge).
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Panel width recovered from the HUD-assembly call site.
-    /// spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "Width 732 px" CODE-CONFIRMED.
+    /// Panel width: 318 px.
+    /// spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "W=318" (right column width). CODE-CONFIRMED.
+    /// Corrected from the previous transposition (was 732 = the height).
     /// </summary>
-    private const int InvPanelW = 732; // spec: Docs/RE/specs/ui_hud_layout.md §1.1 CODE-CONFIRMED
+    private const int InvPanelW = 318; // spec: Docs/RE/specs/ui_hud_layout.md §1.1 CODE-CONFIRMED
 
     /// <summary>
-    /// Right-anchor inset: positive offset past the right viewport edge.
+    /// Right-anchor inset: positive offset past the right viewport edge (same value as the width).
     /// In Godot: OffsetRight = +318 (with AnchorLeft/Right = 1.0) positions the panel's right
     /// border 318 px beyond the viewport's right edge. This matches the legacy "screen_width + 318"
     /// placement convention observed at the HUD-assembly call site.
-    /// spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "screen_width + 318" CODE-CONFIRMED.
+    /// spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "right-anchored at screen_width+318". CODE-CONFIRMED.
     /// </summary>
     private const int InvRightInset = 318; // spec: Docs/RE/specs/ui_hud_layout.md §1.1 CODE-CONFIRMED
 
-    // Height is runtime-derived at the legacy build site (not a literal).
-    // spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "height derived at runtime".
-    // We use a reasonable fixed height for the Godot reimplementation.
-    private const int InvPanelH = 520; // PLAUSIBLE — runtime-derived in legacy
+    /// <summary>
+    /// Panel height: 732 px.
+    /// spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "H=732" (right column height). CODE-CONFIRMED.
+    /// Corrected from the previous transposition (was 520 PLAUSIBLE).
+    /// </summary>
+    private const int InvPanelH = 732; // spec: Docs/RE/specs/ui_hud_layout.md §1.1 CODE-CONFIRMED
 
     // -------------------------------------------------------------------------
     // Tunables
@@ -208,21 +214,28 @@ public sealed partial class InventoryWindow : Control
         _uiLoader = null;
     }
 
+    /// <summary>
+    /// Toggles the inventory window open/closed. Called by the single HUD key-command dispatcher
+    /// (GameHud._Input) rather than overriding _Input here for the I key.
+    /// F4 fix: panels expose Toggle(); the dispatcher in GameHud is the single owner of key routing.
+    /// spec: Docs/RE/specs/input_ui.md §3a / §5 — single command dispatcher, no per-widget focus chain.
+    /// spec: Docs/RE/specs/ui_system.md §15 — in-game HUD key command dispatch.
+    /// </summary>
+    public void Toggle()
+    {
+        Visible = !Visible;
+        if (Visible)
+        {
+            MoveToFront();
+            PopulateGrid();
+        }
+    }
+
     public override void _Input(InputEvent ev)
     {
-        // Toggle on key I press (not held).
-        // spec: Docs/RE/specs/input_ui.md §4 — inventory key toggle.
-        if (ev is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.I)
-        {
-            Visible = !Visible;
-            if (Visible)
-            {
-                MoveToFront();
-                PopulateGrid();
-            }
-
-            GetViewport().SetInputAsHandled();
-        }
+        // Key-toggle (I) is now routed through GameHud._Input (single dispatcher).
+        // Only drag handling remains here.
+        // F4 fix: per-panel key grabs removed. spec: Docs/RE/specs/input_ui.md §3a / §5.
 
         // Drag — title-bar initiated.
         if (ev is InputEventMouseButton mb)
@@ -252,13 +265,14 @@ public sealed partial class InventoryWindow : Control
     private void BuildUi()
     {
         // Right-anchored placement per recovered HUD-assembly call site.
-        // W=732, anchored to the right viewport edge with a +318 right-inset past the edge.
+        // W=318 H=732, anchored to the right viewport edge with a +318 right-inset past the edge.
+        // F4 fix: width was incorrectly set to 732 (the height); corrected to 318.
         // In Godot anchor terms: both AnchorLeft and AnchorRight = 1.0 (right-edge anchor),
-        //   OffsetLeft  = −InvPanelW  = −732  → panel left edge is 732 px left of viewport right.
+        //   OffsetLeft  = −InvPanelW  = −318  → panel left edge is 318 px left of viewport right.
         //   OffsetRight = +InvRightInset = +318 → panel right border extends 318 px past viewport right.
-        // On a 1024-wide canvas this makes the left edge at pixel 1024 − 732 = 292 (abs) and
-        // the right edge at 1024 + 318 = 1342, so 318 px are clipped.
-        // spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "W=732, right-anchored at screen_width+318" CODE-CONFIRMED.
+        // On a 1024-wide canvas this makes the left edge at pixel 1024 − 318 = 706 (abs) and
+        // the right edge at 1024 + 318 = 1342, so 318 px are clipped (the off-screen portion).
+        // spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "W=318 H=732, right-anchored at screen_width+318" CODE-CONFIRMED.
         AnchorLeft = 1f;
         AnchorTop = 0f;
         AnchorRight = 1f;
@@ -320,7 +334,7 @@ public sealed partial class InventoryWindow : Control
 
         // ---- Scrollable grid ----
         // Width spans the full panel minus small margins; height fills the remaining space.
-        // spec: Docs/RE/specs/ui_hud_layout.md §1.1 — panel W=732 CODE-CONFIRMED (height PLAUSIBLE).
+        // spec: Docs/RE/specs/ui_hud_layout.md §1.1 — panel W=318 H=732 CODE-CONFIRMED.
         var scroll = new ScrollContainer();
         scroll.CustomMinimumSize = new Vector2(InvPanelW - 12, 430);
         scroll.SizeFlagsVertical = SizeFlags.ExpandFill;

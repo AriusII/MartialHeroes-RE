@@ -480,12 +480,17 @@ public sealed partial class TerrainNode : Node3D
         mat.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
         mat.TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps;
 
-        if (textureResolver is not null && texByte != 0)
+        if (textureResolver is not null)
         {
+            // Any byte < 1 is clamped up to 1 before the -1 indexing (renders slot 1 / texlist[0]).
+            // spec: Docs/RE/formats/terrain.md §5.6 — "a byte below 1 is clamped up to 1 … renders
+            //   slot 1; the '0 = no-texture sentinel' reading is REFUTED … RENDER-domain, before the -1."
+            // spec: Docs/RE/formats/terrain.md §5.9 — clamp < 1 to 1 at render bind; CONFIRMED.
+            int clampedByte = texByte < 1 ? 1 : texByte;
             try
             {
                 // spec: terrain.md §5.6 — 1-based byte indexes the per-cell TEXTURES list: CONFIRMED.
-                ImageTexture? tex = textureResolver(texByte);
+                ImageTexture? tex = textureResolver(clampedByte);
                 if (tex is not null)
                 {
                     mat.AlbedoTexture = tex;
@@ -497,13 +502,14 @@ public sealed partial class TerrainNode : Node3D
             }
             catch (Exception ex)
             {
-                GD.PrintErr($"[TerrainNode] TextureResolver failed for texByte={texByte}: {ex.Message}");
+                GD.PrintErr(
+                    $"[TerrainNode] TextureResolver failed for texByte={texByte} (clamped={clampedByte}): {ex.Message}");
                 // Fall through to the solid-colour fallback.
             }
         }
 
         // Fallback: solid colour seeded from texByte for visual debugging.
-        // Hue cycles through the spectrum across the 256 possible byte values.
+        // Only reached when no resolver is wired or when resolution fails entirely.
         float hue = texByte / 256.0f;
         mat.AlbedoColor = Color.FromHsv(hue, 0.6f, 0.8f);
         return mat;

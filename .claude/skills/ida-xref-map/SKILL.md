@@ -16,6 +16,11 @@ string, a config key, a magic constant, a known import) into the set of function
 All output is **dirty** (addresses derived directly from the copyrighted binary) and lands under
 `Docs/RE/_dirty/queries/`.
 
+**Ground truth:** every reference in the map comes FROM the IDA query, never from memory or a guess at
+"what probably calls this." A static fan-in is a hypothesis about who *can* reach the anchor; which
+caller *actually* fires is confirmed in the live debugger (below). MCP down / wrong DB ⇒ STOP, never
+invent an xref.
+
 ## Preconditions (do these first, in order)
 
 1. **MCP must be green.** Run `/ida-mcp-connect`; confirm a live IDA Pro 9.3 MCP server at

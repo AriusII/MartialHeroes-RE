@@ -256,6 +256,13 @@ public sealed partial class ServerSelectScreen : Control
     {
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
 
+        // When raised as an in-login sub-view (a child of the Login scene's 1024×768 widget tree),
+        // the FullRect preset fills the parent reference rect 1:1 — no self-scaling needed (the Login
+        // scene already carries the 1024→window scale). Capture background clicks so they do not fall
+        // through to the login form underneath; the plate / pager buttons are children and still
+        // receive their own input. spec: Docs/RE/specs/frontend_scenes.md §11.4 (full-canvas overlay).
+        MouseFilter = MouseFilterEnum.Stop;
+
         // -----------------------------------------------------------------------
         // z=1: Full background art panel.
         // A src(0,0,1024,398) → dst(0,0,1024,398).
@@ -787,11 +794,15 @@ public sealed partial class ServerSelectScreen : Control
             else
             {
                 // Id-range guard: valid server ids are 1..40 (i.e. (id−1) <= 0x27).
+                // Name resolution order: use entry.DisplayName when non-empty (dev seed / pre-resolved);
+                // otherwise resolve from msg bank 5000+serverId (live wire path via drainer).
                 // Out-of-range → fallback caption 5901 (from msg.xdb; empty when offline).
                 // spec: Docs/RE/specs/frontend_scenes.md §11.4 §2.8. CODE-CONFIRMED.
                 bool inRange = entry.ServerId >= 1 && entry.ServerId <= 0x28; // 0x28 = 40
                 string nameText = inRange
-                    ? entry.DisplayName
+                    ? (!string.IsNullOrEmpty(entry.DisplayName)
+                        ? entry.DisplayName
+                        : _assets.Text((uint)(5000 + entry.ServerId), "")) // msg bank 5001..5040 per spec §2.8
                     : _assets.Text(5901u, ""); // fallback caption for unknown server id
 
                 // NEW badge: server_id == NEW_SERVER_INDEX (5). spec §2.7. CODE-CONFIRMED.

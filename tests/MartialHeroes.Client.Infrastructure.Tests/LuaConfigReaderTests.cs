@@ -100,7 +100,7 @@ public sealed class LuaConfigReaderTests
 
         Assert.Equal(4, cfg.DisplayGlowRangeX);
         Assert.Equal(6, cfg.DisplayGlowRangeY);
-        Assert.Equal(144, cfg.DisplayFramerate);
+        Assert.Equal(144, cfg.ShowFpsCounter);
     }
 
     [Fact]
@@ -361,7 +361,7 @@ public sealed class LuaConfigReaderTests
         Assert.Equal(2, cfg.NewServerIndex);
         Assert.Equal(3, cfg.DisplayGlowRangeX);
         Assert.Equal(4, cfg.DisplayGlowRangeY);
-        Assert.Equal(30, cfg.DisplayFramerate);
+        Assert.Equal(30, cfg.ShowFpsCounter);
         Assert.Equal(0.8f, cfg.DisplayBaseBrightMulti, precision: 4);
         Assert.Equal(1.1f, cfg.DisplayGlowBrightMulti, precision: 4);
         Assert.Equal(0.6f, cfg.DisplayLightRatio, precision: 4);

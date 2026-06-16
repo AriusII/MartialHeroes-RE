@@ -19,6 +19,14 @@ runtime rather than assuming a fixed set. The prized capability is an arbitrary-
 tool (often named like `execute_script` / `run_python` / `eval`); typed tools
 (`decompile` / `rename` / `xrefs` / `list_strings`) are the fallback.
 
+**This is the ground-truth gate.** IDA / `doida.exe` is the single absolute truth for the original's
+behavior, data, and layout — everything downstream confirms its hypotheses *in the binary*, never from
+memory or analogy. So no RE proceeds until this skill confirms (a) the MCP is UP, (b) the **correct,
+non-empty** Martial Heroes IDB is loaded (right SHA-256, not another instance), and (c) ideally the
+`?ext=dbg` debugger toolset is present for live confirmation. Down / wrong / empty ⇒ **STOP and report
+— never fabricate `mcp__ida__*` output.** Prefer `?ext=dbg` always: it is a superset (static + `dbg_*`
+from one connection).
+
 ## Steps
 
 1. **Probe the socket.** Run the bundled stdlib probe:

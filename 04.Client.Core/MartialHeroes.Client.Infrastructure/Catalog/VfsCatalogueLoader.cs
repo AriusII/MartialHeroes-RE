@@ -14,7 +14,8 @@ namespace MartialHeroes.Client.Infrastructure.Catalog;
 ///   <c>data/script/userlevel.scr</c>  — spec: Docs/RE/formats/config_tables.md §2.4
 ///   <c>data/script/skills.scr</c>     — spec: Docs/RE/formats/config_tables.md §2.8
 ///   <c>data/script/mobs.scr</c>       — spec: Docs/RE/formats/config_tables.md §2.9
-///   <c>data/script/items.csv</c>      — spec: Docs/RE/formats/config_tables.md §4.1
+///   <c>data/script/items.scr</c>      — spec: Docs/RE/formats/items_scr.md §4 (RUNTIME item master)
+///   <c>data/script/items.csv</c>      — spec: Docs/RE/formats/items_csv.md §6 (authoring-only export)
 /// </para>
 /// <para>
 /// When a file is absent from the VFS, or when the VFS itself cannot be opened, the loader
@@ -38,12 +39,18 @@ public sealed class VfsCatalogueLoader : IDisposable
 
     private const string MobsScrPath = "data/script/mobs.scr"; // spec: §2.9
 
-    // NOTE: the runtime client loads data/script/items.scr (binary, 548-byte header + N×8 stride),
-    // NOT items.csv. items.csv is the human-editable authoring form that compiles to items.scr;
-    // the binary's string table has no .csv path — the CSV is never loaded at runtime.
-    // spec: Docs/RE/formats/config_tables.md §2.7, §4.1 (items.csv is the authoring/export form)
-    // TODO: replace LoadItemsCsv() with a LoadItemsScr() path once Items.Parsers adds items.scr support.
-    private const string ItemsCsvPath = "data/script/items.csv"; // spec: §4.1 (authoring form, not runtime)
+    // RUNTIME item master: the shipping client loads data/script/items.scr (binary,
+    // fixed 548-byte block + 8×effect_count tail, item_uid u32 @0x034), NOT items.csv.
+    // The binary's string table holds zero .csv references and the boot data-loader has no CSV
+    // reader among its callees — items.csv is never loaded at runtime.
+    // spec: Docs/RE/formats/items_csv.md §6 (runtime source = items.scr; CSV not loaded by the client).
+    // spec: Docs/RE/formats/items_scr.md §4 (engineer guidance — walk items.scr; item_uid @0x034).
+    private const string ItemsScrPath = "data/script/items.scr"; // spec: items_scr.md §4 (runtime master)
+
+    // AUTHORING-ONLY: items.csv is the human-editable export of items.scr. It is NOT runtime data
+    // (CONFIRMED not loaded by the shipping client) — kept solely as a developer/tooling aid.
+    // spec: Docs/RE/formats/items_csv.md §6 (authoring/dev export only, not a runtime source).
+    private const string ItemsCsvPath = "data/script/items.csv"; // spec: items_csv.md §6 (authoring form, not runtime)
 
     private readonly MappedVfsArchive? _archive;
     private bool _disposed;
@@ -121,15 +128,35 @@ public sealed class VfsCatalogueLoader : IDisposable
     }
 
     /// <summary>
-    /// Loads and parses <c>data/script/items.csv</c> (the authoring/export form of item data).
+    /// Loads and parses <c>data/script/items.scr</c> — the <b>runtime</b> item master database.
     /// Returns an empty array if the file is absent or the archive is unavailable.
     /// <para>
-    /// <b>Fidelity note:</b> the original runtime client loads <c>data/script/items.scr</c>
-    /// (binary, 548-byte header + N×8 stride, item UID at +0x34), NOT this CSV.
-    /// The CSV is the human-editable source that compiles to <c>items.scr</c>; no .csv path
-    /// appears in the shipping binary's string table.
-    /// This method is kept as an authoring/dev aid until an <c>items.scr</c> parser is available.
-    /// spec: Docs/RE/formats/config_tables.md §2.7, §4.1 (items.csv is the authoring form only).
+    /// This is the file the shipping client actually loads at runtime (the boot data-loader's callee
+    /// set contains the items.scr reader and zero .csv references). Each record is a fixed 548-byte
+    /// (0x224) block + an optional 8-byte effect tail; the walk runs to EOF (no stored count).
+    /// spec: Docs/RE/formats/items_csv.md §6 (runtime item data MUST come from items.scr).
+    /// spec: Docs/RE/formats/items_scr.md §1.2 / §4 (record framing + engineer guidance).
+    /// </para>
+    /// </summary>
+    public ItemsScrRecord[] LoadItemsScr()
+    {
+        // ItemsScrParser.Parse returns a lazy IEnumerable (records carry zero-copy slices of the VFS
+        // buffer, which stays mapped for the loader's lifetime); materialise to an array here so the
+        // TryLoad<T[]> contract and the catch-all degrade-to-empty semantics are preserved.
+        // spec: Docs/RE/formats/items_scr.md §1.3 (walk to EOF; no stored count).
+        return TryLoad(ItemsScrPath, static data => ItemsScrParser.Parse(data).ToArray());
+    }
+
+    /// <summary>
+    /// Loads and parses <c>data/script/items.csv</c> — an <b>authoring/dev export</b> of the item data.
+    /// Returns an empty array if the file is absent or the archive is unavailable.
+    /// <para>
+    /// <b>Tooling only — NOT a runtime source.</b> The shipping client does not load this CSV at all
+    /// (zero .csv string references; no CSV reader in the boot data-loader callee set). The CSV is the
+    /// human-editable parallel of the binary <c>items.scr</c> master; runtime item data comes from
+    /// <see cref="LoadItemsScr"/>. This method is retained purely for developer tooling that needs the
+    /// flat-text view (e.g. export/diff against the binary).
+    /// spec: Docs/RE/formats/items_csv.md §6 (CONFIRMED authoring/dev export only, not loaded by the client).
     /// </para>
     /// </summary>
     public ItemCsvRow[] LoadItemsCsv()

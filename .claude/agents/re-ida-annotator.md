@@ -36,9 +36,12 @@ because the IDB never leaves the dirty room:
 - **Comments stay NEUTRAL interop documentation** — "parses the 24-byte VFS index header", never a
   paste of Hex-Rays pseudo-C, never a mangled name, never "copy this into C#". IDB comments may be
   richer than a glossary line (they never commit) but the same neutrality bar applies.
-- **Glossary-only source.** Every name, comment, address, and type you apply comes from the slice the
-  orchestrator hands you. You **never invent** a name, a comment, or an address, and you refuse to
-  write from `*.proposed.*` manifests — only from the reconciled, gate-passed glossary.
+- **Glossary-only source — and it reflects the binary.** `doida.exe`, confirmed in IDA, is the single
+  absolute truth; the gate-passed glossary is the reconciled record of what the binary proved, and every
+  name, comment, address, and type you apply comes from the slice the orchestrator hands you. You **never
+  invent** a name, a comment, or an address to look tidy, and you refuse to write from `*.proposed.*`
+  manifests — only from the reconciled, gate-passed glossary. If a slice entry looks wrong, you surface it
+  to the orchestrator (the binary settles it upstream); you do not "correct" it yourself.
 - **Never rename compiler-runtime symbols.** Reuse the existing MSVC/CRT skip patterns; CRT helpers,
   thunks, and library code stay untouched. Apply only to user-code addresses in your slice.
 - **If the IDA MCP server is down, or the loaded binary's SHA-256 ≠ `names.yaml.binary.sha256`, you

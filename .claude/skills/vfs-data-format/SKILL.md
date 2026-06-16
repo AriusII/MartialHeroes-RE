@@ -16,6 +16,12 @@ engineering path: there is no decompiler in the loop, so there is no Hex-Rays ta
 but the findings still land in `_dirty/` and are promoted to a committed spec by `re-promote`, so
 the audit trail and the "rewrite, never copy" discipline stay intact end to end.
 
+**Ground-truth doctrine.** Here the **maintainer's own sample bytes are the witnessed truth** for a
+column's shape and values; where the bytes alone cannot settle a column's *meaning*, the original's
+loader code inside `doida.exe` is the absolute truth — but that crossing is the `re-*-analyst` lane,
+not this skill (mark the column `UNVERIFIED` and stop). The committed spec `re-promote` later writes
+is the **derived truth** the data-tables engineer reads; your `_dirty/` `.raw.md` is only its source.
+
 ```
 real client text bytes (D:/MartialHeroesClient VFS)
    ──► [vfs-inspect harness reads & previews]  ──► observe columns/delimiter/encoding

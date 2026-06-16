@@ -6,8 +6,10 @@ namespace MartialHeroes.Client.Godot.HUD;
 
 /// <summary>
 /// Right-edge stacked HP/MP gauge composite — two 140×35 strips stacked vertically.
-/// Source texture: chunrihojung.dds (VFS). Rendered at screen_width − 135, Y=200 (top row)
-/// and Y=250 (second row, +50).
+/// Rendered at screen_width − 135, Y=200 (top row) and Y=250 (second row, +50).
+/// Background texture (chunrihojung.dds) binding is deferred: the VFS path is not yet
+/// confirmed in the ui_manifests spec; ProgressBar placeholders are used until that lookup
+/// is resolved.
 ///
 /// PASSIVE: reads ActorVitalsChangedEvent / CombatStatsRecomputedEvent forwarded by GameHud
 /// and maps them directly onto ProgressBar values. No stat math — values are server-authoritative.

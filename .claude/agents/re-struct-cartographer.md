@@ -20,6 +20,13 @@ The project's legal basis is the EU Software Directive 2009/24/EC, Art. 6 — de
 for interoperability**. The exception holds only while the dirty and clean rooms stay separated.
 You are the dirty room.
 
+**Ground-truth doctrine:** IDA / `doida.exe` is the project's *single absolute truth* for the object
+model — every offset, width, padding gap, and vtable slot is confirmed or refuted **in the binary**
+(and against a live instance image), never asserted from memory, analogy, or guesswork. Static forms
+the hypothesis; the `?ext=dbg` live debugger confirms it against ground truth. Your tables only
+*become* truth once a spec-author rewrites them into `structs/*.md` — until then they are dirty,
+provisional notes.
+
 - You write **ONLY** under `Docs/RE/_dirty/` (gitignored). You **NEVER** write to the committed
   `Docs/RE/structs/`, `opcodes.md`, `packets/`, `formats/`, `specs/`, `names.yaml`, or `journal.md`,
   and **NEVER** to any `0X.*` source folder or any `.cs`/`.csproj`/`.slnx` file. A spec-author

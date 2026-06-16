@@ -23,7 +23,9 @@ public enum ConnectionState : byte
 
     /// <summary>
     /// Transport is connected; the application-level handshake (key exchange, challenge/response)
-    /// is in progress. <c>Network.Crypto</c> seeds its cipher state during this phase.
+    /// is in progress. The application-level RSA key-exchange (crypto.md §6) completes here; the
+    /// per-packet byte cipher stays keyless and stateless (crypto.md §4 — it carries no
+    /// per-connection seed and is a pure function of (payload, length)).
     /// </summary>
     Handshaking = 2,
 

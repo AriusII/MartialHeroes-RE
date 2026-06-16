@@ -209,15 +209,12 @@ public sealed partial class CharSelectScene3D : Node3D
     private const float CellOriginLegacyZ = -10240.0f; // spec: §3.7.1 cell origin Z
     private const float CellSizeUnits = 1024.0f; // spec: §3.7.1 1024 units/side
 
-    // Water-surface Y. The exact water level is a per-cell .fx3/.fx5 field (parse TODO — the .fx3/.fx5
-    // binary format is terrain-side and not yet decoded). The platform/row sits at Y≈70 (§3.6.5); the
-    // water reads as a bright blue sheet BEHIND/BELOW the row, so we place it just below the platform
-    // floor. spec: §3.7 water-layer (parse TODO — .fx3/.fx5 water level not yet harvested).
-    // PASS-2 final: Y=110 (centre of vertical cascade curtain). The vertical plane is 80u tall,
-    // so it spans Y=70..150 (platform level to mid-column height). Centering at Y=110 places it
-    // between the platform and the column tops — exactly the vertical cascade in the official.
-    // aesthetic calibration — spec: §3.7 water-layer (parse TODO; vertical cascade interpretation).
-    private const float WaterSurfaceLegacyY = 110.0f;
+    // Water-surface Y (HORIZONTAL plane). The exact water level is a per-cell .fx3/.fx5 field (parse
+    // TODO — the .fx3/.fx5 binary format is terrain-side and not yet decoded). The platform/row sits at
+    // Y≈70 (§3.6.5); the cell water reads as a flat blue sheet at/below the platform floor, so the
+    // horizontal plane is placed just below the platform. PLAUSIBLE level (not asset-exact — .fx3/.fx5
+    // water level not yet harvested). spec: §3.6.5 (cell water layer) / §3.7.3 (FX3/FX5 parse TODO).
+    private const float WaterSurfaceLegacyY = 68.0f; // PLAUSIBLE — just below the Y≈70 platform floor
 
     // The blue water texture (§3.7.3: rel "terrain/_water_new01"); resolves to data/map000/texture/
     // terrain/_water_new01.dds (DXT-compressed, animated-texture flag). spec: §3.7.3 CODE-CONFIRMED present.
@@ -233,21 +230,16 @@ public sealed partial class CharSelectScene3D : Node3D
     // Preview-character assets (§3.7.5) — the four starter classes (IdA=1).
     // =========================================================================
 
-    // Per starter class → its base-skin .skn. Each mesh carries a DISTINCT id_b that drives its OWN
-    // rig + idle clip (resolved per slot in TryBuildSlotActor). spec: §3.7.5 CODE-CONFIRMED.
-    // (Resolution is best-effort by skin-class id; absent → logged + skipped, no synthetic actor.)
-    private static string[] SknCandidatesForClass(uint skinClassId) => skinClassId switch
-    {
-        1 => ["data/char/skin/g202110001.skn"], // Bichimi / Dosa
-        2 => ["data/char/skin/g202220001.skn"],
-        3 => ["data/char/skin/g202130001.skn"],
-        4 => ["data/char/skin/g202140001.skn"],
-        _ =>
-        [
-            $"data/char/skin/g202{skinClassId}10001.skn",
-            $"data/char/skin/g202{skinClassId}10002.skn",
-        ],
-    };
+    // Per starter class → its base-skin .skn, resolved through the ONE shared
+    // ClassAppearanceResolver so the select and create screens show the IDENTICAL body per class.
+    // Each mesh carries a DISTINCT id_b that drives its OWN rig + idle clip (resolved per slot in
+    // TryBuildSlotActor). The four §3.7.5 starter meshes (all default appearance IdA=1;
+    // CONFIRMED-present in the VFS) live in ClassAppearanceResolver. The skinClassId→mesh binding is
+    // the spec-grounded STOPGAP for the full skin.txt appearance chain (skinning.md §3.5.2/§3.5.3);
+    // an id outside 1..4 yields an empty candidate list → logged + skipped (no synthetic fallback).
+    // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 / Docs/RE/specs/skinning.md §3.5.2/§3.5.3.
+    private static string[] SknCandidatesForClass(uint skinClassId)
+        => ClassAppearanceResolver.SknCandidatesForClass((int)skinClassId);
 
     // =========================================================================
     // Runtime state
@@ -437,52 +429,24 @@ public sealed partial class CharSelectScene3D : Node3D
         env.TonemapMode = global::Godot.Environment.ToneMapper.Linear;
         env.TonemapExposure = 1.0f;
 
-        // Distance fog — spec §3.6.2 CODE-CONFIRMED: the select-scene zeroes the fog-blend OFFSET field
-        // (which controls the near-cutoff of D3D9 distance fog). Zeroing the offset means the fog applies
-        // from distance 0 with the scene's sky/fog colour. In Godot terms, this means the scene IS fogged,
-        // but with the achromatic near-black sky colour — equivalent to a depth-fade to the dark background.
-        // The practical effect: geometry CLOSE to the camera (the characters + platform) reads clearly (low
-        // fog depth), while geometry VERY FAR (the terrain edges visible through gaps in the .bud walls,
-        // which create the "bright floating island" read) fades to the dark background.
+        // Distance fog OFF — spec §3.6.2 CODE-CONFIRMED: the select-scene build helper zeroes the
+        // fog-blend OFFSET field (factor 0.0), which turns distance fog OFF behind the preview row so the
+        // row reads clearly. This matches the create preview (CharCreatePreview3D.BuildEnvironment also
+        // disables fog). spec: §3.6.2 (fog-blend offset zeroed → distance fog off). CODE-CONFIRMED.
         //
-        // PASS-2 ENCLOSURE MITIGATION (2026-06-16): the "bright floating island / grey void" defect in the
-        // current render is caused by the terrain .ted mesh extending beyond the .bud carved walls, and the
-        // far backdrop being visible through geometry gaps. The original rendered correctly because D3D9 fog
-        // masked those distant edges with the same dark sky colour. We activate Godot exponential fog at low
-        // density (far start ~800 u) so that beyond-wall geometry fades to the achromatic dark background
-        // colour, reproducing the "enclosed dark temple" look. The fog colour matches BackgroundColorAchromatic
-        // (R=G=B=0.004303 ≈ near-black) — aesthetically it is invisible to the player at normal viewing
-        // distances but swallows the terrain horizon. This is a Godot-side rendering-parity mitigation, NOT
-        // an additional feature; the spec fog-offset=0 directive is honoured (near-cutoff = 0).
-        // spec: §3.6.2 (fog-blend offset 0, fog colour = area-0 sky data) — Godot parity mitigation.
-        env.FogEnabled = true;
-        env.FogMode = global::Godot.Environment.FogModeEnum.Exponential; // smooth depth falloff
-        // Fog density calibration (Godot exponential: opacity = 1 − exp(−density × d)):
-        //   d=50u  (near platform):  1−exp(−0.5)  = 0.39 → 39% fog — platform reads clearly
-        //   d=100u (lateral walls):  1−exp(−1.0)  = 0.63 → 63% fog — walls: warm-dark, not cold-white
-        //   d=120u (cascade/rear):   1−exp(−1.2)  = 0.70 → 70% fog — cascade at 30% brightness (subtle)
-        //   d=300u (far terrain):    1−exp(−3.0)  = 0.95 → 95% fog — far terrain edges effectively dark
-        // aesthetic calibration — Godot rendering-parity mitigation (Pass 2 final, 2026-06-16).
-        env.FogDensity = 0.010f;
-        // PASS-2: fog colour changed from achromatic-black (0.004303) to a very dark warm amber
-        // (0.035, 0.020, 0.008). This serves two purposes:
-        // 1. Surfaces at intermediate fog distances (30-60%) blend to a warm dark brown rather than
-        //    cold grey — more faithful to the "dark warm stone temple" official look.
-        // 2. The BG itself doesn't need to match exactly (FogSkyAffect=0 keeps the BG unchanged).
-        // The values are very dark (max 0.035 ≈ 3.5% brightness), maintaining the "enclosed" darkness
-        // while adding the warmth character of the stone temple. aesthetic calibration.
-        env.FogLightColor = new Color(0.035f, 0.020f, 0.008f);
-        env.FogLightEnergy = 1.0f; // apply the dark fog at full weight (it IS dark already)
-        env.FogAerialPerspective = 0.0f; // no sun-scattering (the scene has no sun disc)
-        env.FogSkyAffect = 0.0f; // keep the BG colour unmodified
+        // NOTE: a prior pass enabled Godot exponential "enclosure" fog as a Godot-side mitigation for a
+        // "bright floating island / grey void" defect (terrain .ted extending beyond the .bud walls). That
+        // was a NON-SPEC mitigation that contradicted the CODE-CONFIRMED fog-off directive and has been
+        // REMOVED. If the beyond-wall horizon needs masking, mitigate it geometrically (clip/cull the .ted
+        // mesh to the cell footprint) rather than re-introducing fog the original scene does not draw.
+        env.FogEnabled = false; // spec: §3.6.2 distance fog OFF (fog-blend offset zeroed)
 
         var worldEnv = new WorldEnvironment { Environment = env };
         AddChild(worldEnv);
 
         GD.Print($"[CharSelectScene3D] Area-0 environment: achromatic dark BG + WHITE ambient floor " +
-                 $"(OPTION_BRIGHT=1.0, Godot parity energy {AmbientFloorEnergyGodot}, sky-contrib 0) + " +
-                 $"enclosure-fog (density {env.FogDensity:F4}, dark-BG colour, exponential) — spec: §3.6.2 fog-offset=0 " +
-                 "+ rendering.md §1 (D3D9 fog masks distant terrain edges) — Godot parity mitigation. " +
+                 $"(OPTION_BRIGHT=1.0, Godot parity energy {AmbientFloorEnergyGodot}, sky-contrib 0) + fog OFF " +
+                 "— spec: §3.6.2 (fog-blend offset zeroed → distance fog off) CODE-CONFIRMED. " +
                  "NO procedural sky. spec: §3.6 + environment_bins.md.");
     }
 
@@ -629,7 +593,7 @@ public sealed partial class CharSelectScene3D : Node3D
 
             // Building textures resolve through the same two-hop chain via the BUILDING section.
             // spec: §3.7.3 — suksang01..04 / walll04 / walll04_2 / haha under building/.
-            BgTextureCatalog? bgPool = TryLoadBgPool(assets);
+            global::MartialHeroes.Assets.Mapping.BgTextureCatalog? bgPool = TryLoadBgPool(assets);
             MapDescriptor? cellMap = TryLoadCellMap(assets);
 
             Func<uint, ImageTexture?> budTexResolver = budIdx =>
@@ -695,7 +659,7 @@ public sealed partial class CharSelectScene3D : Node3D
             // Resolve the blue water texture. Prefer the bgtexture chain (rel "terrain/_water_new01");
             // fall back to the direct VFS path. spec: §3.7.3 (water rel paths under data/map000/texture).
             ImageTexture? waterTex = null;
-            BgTextureCatalog? bgPool = TryLoadBgPool(assets);
+            global::MartialHeroes.Assets.Mapping.BgTextureCatalog? bgPool = TryLoadBgPool(assets);
             string ddsPath = bgPool is not null
                 ? $"data/map000/texture/{WaterTextureRel}.dds"
                 : WaterTextureDds;
@@ -711,33 +675,30 @@ public sealed partial class CharSelectScene3D : Node3D
                 return;
             }
 
-            // PASS-2 FINAL: VERTICAL water plane (the "cascade/waterfall curtain" behind the row).
-            // The .xeff waterfall spray sprites (white additive) overlay this; the VISIBLE BLUE in the
-            // official comes from this plane. Using a VERTICAL plane (rotated 90° in X) = a wall of water
-            // between the rear columns. This gives the vertical-curtain look of the original cascade,
-            // where the blue fills the space between columns as a falling sheet.
-            // The "horizontal water layer" interpretation (.fx3/.fx5 parse TODO) may be the cell-wide
-            // water level, but the VISIBLE blue in the char-select scene is this vertical cascade curtain.
-            // aesthetic interpretation — parse-TODO; spec: §3.6.5 / §3.7.3 (cascade blue, behind row).
-            // Size: 200u wide (X) × 80u tall (Y, from ground to ~column height). Face direction: -Z (toward camera).
+            // HORIZONTAL water plane = the cell's terrain WATER LAYER (§3.6.5: "the cell's own terrain
+            // water layer (.fx3/.fx5; textures _water_new01/03/04), rendered by the terrain system …
+            // not a spawned .xeff"). The VERTICAL waterfall spray is the XeffSceneEffect (white additive
+            // sprites), owned by BuildAmbientEffect — NOT this layer. This layer is the flat blue surface
+            // over the cell footprint at the cell water level. A prior pass modelled this as a VERTICAL
+            // "cascade curtain", which is the xeff's job, not the cell water layer's — corrected to a
+            // horizontal flat plane. spec: §3.6.5 (cell water layer = flat blue surface) / §3.7.3.
+            //
+            // Extent = the cell footprint (1024-unit square at cell origin (0, −10240); §3.7.1). The
+            // plane lies in the XZ plane (default PlaneMesh orientation = Y-up) at the water-surface Y.
             var plane = new PlaneMesh
             {
-                Size = new Vector2(200.0f, 80.0f), // 200u wide, 80u tall cascade curtain
-                Orientation = PlaneMesh.OrientationEnum.Z, // face toward +Z (camera direction) — vertical
+                Size = new Vector2(CellSizeUnits, CellSizeUnits), // cell footprint 1024×1024 (§3.7.1)
+                Orientation = PlaneMesh.OrientationEnum.Y, // horizontal (face up) — the flat water surface
             };
 
-            // Semi-transparent additive-ish blue water material with a tiled, scrolling UV. The .fx3/.fx5
-            // animated flag (§3.7.3) → scrolling-UV; the bright blue read = the _water_new texture under a
-            // blue albedo tint, alpha-blended over the cell floor. spec: §3.7.3 (animated) / §3.6.5 (blue).
+            // Flat blue water material with a tiled, scrolling UV. The .fx3/.fx5 animated flag (§3.7.3) →
+            // scrolling-UV; the bright blue read = the _water_new texture under a blue albedo tint,
+            // alpha-blended over the cell floor. The blue/alpha tint is PLAUSIBLE (the exact .fx3/.fx5
+            // diffuse/alpha is parse-TODO). spec: §3.7.3 (animated) / §3.6.5 (blue cell water surface).
             _waterMaterial = new StandardMaterial3D
             {
                 AlbedoTexture = waterTex,
-                // PASS-2: increased opacity 0.62→0.85 and deepened blue tint for better visibility.
-                // The original water plane read as a BRIGHT BLUE sheet. With fog density=0.006 (new)
-                // and alpha=0.62, the plane blended to near-invisible against the fogged background.
-                // Raising alpha to 0.85 + saturating the blue gives the blue-sheet read of the official.
-                // aesthetic choice — parse-TODO (.fx3/.fx5 water params); no spec constant available.
-                AlbedoColor = new Color(0.30f, 0.60f, 1.0f, 0.85f),
+                AlbedoColor = new Color(0.30f, 0.60f, 1.0f, 0.75f), // PLAUSIBLE blue tint (parse-TODO)
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                 BlendMode = BaseMaterial3D.BlendModeEnum.Mix,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled, // visible from above and below
@@ -757,32 +718,20 @@ public sealed partial class CharSelectScene3D : Node3D
                 CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             };
 
-            // PASS-2: centre the water plane on the row pivot in XZ (where the waterfall appears in official).
-            // Row pivot legacy = (508.48, 70, −9758.57). The water shows "behind the row" when seen from
-            // KF1 camera — we centre it at the pivot so the camera sees it between the columns.
-            // spec: §3.6.5 (water = cell water layer "behind the row") / §3.7 (parse TODO centroid).
-            // Centre the water plane BEHIND the row (100u deeper than the pivot), so it appears
-            // between/behind the rear columns at the cascade position — not in front of the platform.
-            // The plane is 400×200u, so it covers legacy-Z ∈ [−9958.57, −9758.57] with the front
-            // edge exactly at the row pivot. From KF1 camera (KF1 Z=-9652), the plane starts at
-            // 106u away (pivot) and extends further — fully behind the row.
-            // Place the water plane at the row pivot, just behind the row. The cascade effect in
-            // the official is the XEFF sprites overlaid on this blue plane. The plane at the pivot
-            // position (Z same as the row) is visible from KF1 camera through the inter-column gaps.
-            // The FogEnabled=true with density=0.016 creates a soft dark-frame effect around far geometry.
-            // Place the vertical cascade plane 20u BEHIND the character row (RowPivotLegacyZ = -9758.57).
-            // The XeffAnchorGodot is also at the pivot — both the effect sprites and this water curtain
-            // sit just behind the characters. At ~120u from KF1 camera (9652) → 9770-9652=118u → fog 82%.
-            // This is geometrically correct: the cascade IS behind the characters in the official.
-            // Fog will partially dim it — that is acceptable; the official also shows it dimly.
-            float centreLegacyX = RowPivotLegacyX; // 508.48 — aligned with row centre
-            float centreLegacyZ = RowPivotLegacyZ - 20.0f; // -9778.57 — 20u behind the row pivot
+            // Centre the horizontal plane on the cell footprint centre (cell origin + half a cell side).
+            // Cell origin (0, −10240), 1024 units/side (§3.7.1) → centre legacy (512, y, −9728). The plane
+            // spans the whole cell, so the blue surface sits under/behind the row exactly as the cell water
+            // layer does in the original. The footprint extent is asset-exact (§3.7.1); the water LEVEL is
+            // PLAUSIBLE (parse-TODO). spec: §3.7.1 (cell origin/size) / §3.6.5 (cell water layer).
+            float centreLegacyX = CellOriginLegacyX + CellSizeUnits * 0.5f; // 0 + 512 = 512
+            float centreLegacyZ = CellOriginLegacyZ + CellSizeUnits * 0.5f; // −10240 + 512 = −9728
             waterMeshInstance.Position = ToGodotVec(centreLegacyX, WaterSurfaceLegacyY, centreLegacyZ);
             AddChild(waterMeshInstance);
 
-            GD.Print($"[CharSelectScene3D] Water sheet: blue _water_new01 plane over cell footprint " +
-                     $"(centre Godot {waterMeshInstance.Position}, {CellSizeUnits}u, Y={WaterSurfaceLegacyY}), " +
-                     "scrolling UV, alpha-blended. spec: §3.7.3 / §3.6.5 (cell water layer; .fx3/.fx5 parse TODO).");
+            GD.Print($"[CharSelectScene3D] Water layer: horizontal blue _water_new01 plane over the cell " +
+                     $"footprint (centre Godot {waterMeshInstance.Position}, {CellSizeUnits}u/side, Y={WaterSurfaceLegacyY}), " +
+                     "scrolling UV, alpha-blended. The vertical spray is the xeff, not this layer. " +
+                     "spec: §3.6.5 (cell water layer) / §3.7.3 (.fx3/.fx5 parse TODO; level/tint PLAUSIBLE).");
         }
         catch (Exception ex)
         {
@@ -871,7 +820,7 @@ public sealed partial class CharSelectScene3D : Node3D
         }
 
         // Skeleton + idle clip resolve from the MESH'S OWN id_b (per class) — never a shared rig.
-        // spec: skinning.md §8(e) — data/char/bind/g{id_b}.bnd + actormotion.txt col2==id_b→col16.
+        // spec: skinning.md §8(e) — data/char/bind/g{id_b}.bnd + actormotion.txt col2==id_b→col15 (idle).
         Skeleton? skeleton = TryLoadSkeletonForIdB(assets, mesh.IdB);
         AnimationClip? idleClip = TryLoadIdleClipForIdB(assets, mesh.IdB);
         ImageTexture? albedo = CharacterTextureResolver.Resolve(assets, mesh.IdA);
@@ -884,10 +833,19 @@ public sealed partial class CharSelectScene3D : Node3D
         slotWrapper.Position = new Vector3(SlotLegacyX[slotIdx], rowY, SlotGodotZ[slotIdx]);
         slotWrapper.Scale = Vector3.One * PreviewScale; // spec: §3.3.1 ×3.0 (unit-reconciled)
 
-        // Facing — pure yaw about world Y. Occupied (lock clear) → yaw 0 (front, toward camera);
-        // locked / new / creating → yaw π (back to viewer). spec: §3.3.2 CODE-CONFIRMED.
+        // Facing — pure yaw about world Y (§3.3.2 CODE-CONFIRMED): lock CLEAR → yaw 0 (front, toward
+        // camera); lock SET (locked / new / creating) → yaw π (back to viewer).
+        //
+        // CURRENT LIMITATION (yaw-π path dormant): this actor is only ever built for an OCCUPIED slot
+        // (BuildCharacterRow skips unoccupied slots), and SlotDescriptors carries no lock bit — only
+        // (IsOccupied, SkinClassId). Driving the real lock yaw needs (1) an IsLocked bit added to the
+        // SlotDescriptors tuple (a public API change consumed by CharacterSelectScreen.PushSlotDescriptors-
+        // ToScene — NOT owned by this lane) and (2) a lock-state source in CharacterSelectScreen (which
+        // has no lock concept today — also not owned). So yaw is fixed to 0 (front) for every occupied
+        // slot here; the lock-driven yaw-π is DEFERRED to a change that owns CharacterSelectScreen.
+        // spec: frontend_scenes.md §3.3.2 / §3.3.5.
         bool isOccupied = slotIdx < SlotDescriptors.Length && SlotDescriptors[slotIdx].IsOccupied;
-        float slotYaw = isOccupied ? 0.0f : Mathf.Pi;
+        float slotYaw = isOccupied ? 0.0f : Mathf.Pi; // lock bit unavailable → occupied ⇒ front (yaw 0)
         slotWrapper.RotationDegrees = new Vector3(0f, Mathf.RadToDeg(slotYaw), 0f);
 
         slotWrapper.AddChild(actorRoot);
@@ -933,10 +891,12 @@ public sealed partial class CharSelectScene3D : Node3D
             foreach (string rawLine in text.Split('\n'))
             {
                 string[] cols = rawLine.Replace("\r", string.Empty).Split('\t');
-                if (cols.Length <= 16) continue;
+                if (cols.Length <= 15) continue;
                 if (!uint.TryParse(cols[2].Trim(), out uint classId) || classId != idB) continue;
 
-                string idle = cols[16].Trim(); // col 16 = idle motion id. spec: §3.3.4
+                // Idle motion = motion_ids_a[0] = column 15 (0-based), record offset +0x40 — IDB-confirmed
+                // operand-for-operand. spec: formats/actormotion.md (col15 = +0x40 = idle / stand motion).
+                string idle = cols[15].Trim();
                 if (idle.Length == 0 || idle == "0") return null;
 
                 string motPath = $"data/char/mot/g{idle}.mot";
@@ -966,7 +926,7 @@ public sealed partial class CharSelectScene3D : Node3D
 
     private Func<int, ImageTexture?> BuildTerrainTextureResolver(RealClientAssets assets)
     {
-        BgTextureCatalog? bgPool = TryLoadBgPool(assets);
+        global::MartialHeroes.Assets.Mapping.BgTextureCatalog? bgPool = TryLoadBgPool(assets);
         MapDescriptor? cellMap = TryLoadCellMap(assets);
         var cache = new Dictionary<int, ImageTexture?>();
         return texByte =>
@@ -978,12 +938,21 @@ public sealed partial class CharSelectScene3D : Node3D
         };
     }
 
-    private static BgTextureCatalog? TryLoadBgPool(RealClientAssets assets)
+    private static global::MartialHeroes.Assets.Mapping.BgTextureCatalog? TryLoadBgPool(RealClientAssets assets)
     {
         try
         {
+            // Runtime form first: the binary bgtexture.lst the original client consumes (the
+            // bgtexture.txt mirror is absent from a real packed data.vfs); fall back to the .txt
+            // mirror only for dev/loose trees. spec: Docs/RE/specs/asset_pipeline.md §3 chain B.
+            const string lstPath = "data/map000/texture/bgtexture.lst";
+            if (assets.Contains(lstPath))
+                return global::MartialHeroes.Assets.Mapping.BgTextureCatalog.FromLst(assets.GetRaw(lstPath));
+
             const string txtPath = "data/map000/texture/bgtexture.txt";
-            return assets.Contains(txtPath) ? BgTextureTxtParser.Parse(assets.GetRaw(txtPath)) : null;
+            return assets.Contains(txtPath)
+                ? global::MartialHeroes.Assets.Mapping.BgTextureCatalog.FromTxt(assets.GetRaw(txtPath))
+                : null;
         }
         catch (Exception ex)
         {
@@ -1008,7 +977,7 @@ public sealed partial class CharSelectScene3D : Node3D
     }
 
     private static ImageTexture? ResolveTexture(
-        RealClientAssets assets, BgTextureCatalog? pool, MapDescriptor? map,
+        RealClientAssets assets, global::MartialHeroes.Assets.Mapping.BgTextureCatalog? pool, MapDescriptor? map,
         string section, int oneBasedIdx)
     {
         if (pool is null || map is null || oneBasedIdx <= 0) return null;
@@ -1028,7 +997,10 @@ public sealed partial class CharSelectScene3D : Node3D
         int li = oneBasedIdx - 1; // 1-based index → 0-based table slot. spec: terrain.md §5.6 Block 3
         if ((uint)li >= (uint)list.Length) return null;
 
-        string? rel = pool.GetRelPath(list[li].TexId);
+        // The .map intTexId is the 0-based bgtexture pool slot, used DIRECTLY (NO -1); the only -1 is
+        // the .ted byte → list step above (li = oneBasedIdx - 1).
+        // spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join (IDA-corrected 263bd994: 0x445833).
+        string? rel = pool.ResolveRelativePath(list[li].TexId);
         if (rel is null) return null;
 
         string ddsPath = $"data/map000/texture/{rel}.dds";

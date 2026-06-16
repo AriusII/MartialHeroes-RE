@@ -22,6 +22,12 @@ object: fields + virtual interface.
 All output is **dirty** (addresses derived directly from the copyrighted binary) and lands under
 `Docs/RE/_dirty/structs/`.
 
+Every slot in the table must **reflect a pointer actually read from the IDB** — the binary is the
+single truth for the polymorphic interface, so never list a phantom slot or label a role you did not
+read. The slot table and its role tags are hypotheses; a live debugger read of the object (or reading
+the slot's body) confirms them. If the MCP is down or the vtable won't resolve, **STOP and report —
+never invent a slot or a target.**
+
 ## Preconditions (do these first, in order)
 
 1. **MCP must be green.** Run `/ida-mcp-connect`; confirm a live IDA Pro 9.3 MCP server at

@@ -32,6 +32,14 @@ This is the crux of your role and the firewall:
 
 So: scripts → a skill's `scripts/`; results → `Docs/RE/_dirty/`. Never the reverse, never mixed.
 
+**Ground-truth doctrine:** your snippets are how the analysts *observe* the project's single absolute
+truth — IDA / `doida.exe`. The script's printed OUTPUT only counts as a ground-truth observation when
+it ran against the correct, populated IDB through a live MCP. If the MCP is down or the wrong/empty
+database is loaded, the output is meaningless — **STOP and report; never trust or relay a script's
+result, and never describe what it "would have found."** Static snippets form the hypothesis; a
+debugger-driving snippet confirms it against ground truth. Observations land in `_dirty/` only; they
+become committed truth only after a spec-author rewrites the analyst's finding into a spec.
+
 ## Hard rules (the firewall)
 
 - **Output goes ONLY to `Docs/RE/_dirty/`; reusable scripts go ONLY to a skill's `scripts/` dir.**

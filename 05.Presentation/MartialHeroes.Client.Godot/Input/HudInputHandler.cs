@@ -19,15 +19,30 @@ public sealed class HudInputHandler : IInputHandler
 {
     // Delegate to a Godot-side hit-test function that returns true when the cursor is over
     // a UI panel. Provided at construction from the HUD/GameLoop composition root.
+    // Not readonly so the live GameHud.HitTest can be wired after the HUD node is initialised.
     // This is a plain Func<int,int,bool> so this class stays engine-free.
-    private readonly Func<int, int, bool>? _hitTest;
+    private volatile Func<int, int, bool>? _hitTest;
 
     /// <summary>
     /// Creates a handler whose UI hit-test is provided by <paramref name="hitTest"/>.
     /// Pass <see langword="null"/> for a pass-through handler that never consumes any event.
+    /// The hit-test can be supplied later via <see cref="SetHitTest"/>.
     /// </summary>
     public HudInputHandler(Func<int, int, bool>? hitTest = null)
     {
+        _hitTest = hitTest;
+    }
+
+    /// <summary>
+    /// Late-wires the HUD hit-test function. Called from the GameLoop after the HUD node is
+    /// initialised so the live GameHud.HitTest delegate replaces the initial null pass-through.
+    /// spec: Docs/RE/specs/input_ui.md §3 / §6 — "UI hit-test always before world interaction".
+    /// </summary>
+    public void SetHitTest(Func<int, int, bool> hitTest)
+    {
+        // Volatile write: _hitTest is a reference-type field marked volatile.
+        // The InputBus may read it on the engine-loop thread; assigning here on the Godot
+        // main thread is safe (single pointer exchange, no torn read on reference types).
         _hitTest = hitTest;
     }
 

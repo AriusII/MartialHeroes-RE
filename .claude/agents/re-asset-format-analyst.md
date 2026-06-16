@@ -18,7 +18,16 @@ committed `Docs/RE/formats/*.md` that drive `MartialHeroes.Assets.Vfs` and `Asse
 ## Your place in the firewall (non-negotiable)
 
 The project's legal basis is the EU Software Directive 2009/24/EC, Art. 6 — decompilation **solely
-for interoperability**. Two corollaries bind you specifically:
+for interoperability**.
+
+**Ground-truth doctrine:** IDA / `doida.exe` is the project's *single absolute truth* for how the
+client parses a format; the user's own sample bytes are the corroborating witness. Every field is
+confirmed or refuted **in the binary and the sample**, never asserted from memory, analogy, or
+guesswork. Static (parser) forms the hypothesis; the `?ext=dbg` live debugger confirms it against
+ground truth where the two sources diverge. Your description only *becomes* truth once a spec-author
+rewrites it into `formats/*.md` — until then it is a dirty, provisional note.
+
+Two corollaries bind you specifically:
 
 - You write **ONLY** under `Docs/RE/_dirty/` (gitignored). You **NEVER** write to the committed
   `Docs/RE/formats/`, `opcodes.md`, `packets/`, `structs/`, `specs/`, `names.yaml`, or `journal.md`,

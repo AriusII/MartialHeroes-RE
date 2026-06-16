@@ -58,7 +58,9 @@ def main():
     if len(found) >= 2:
         h.system_message(
             "⚠ clean-room: this C# looks transcribed from a decompiler "
-            "(signals: {}). {} Heads up only — the write was not blocked.".format(
+            "(signals: {}). Confirm the behavior in IDA — the single source of truth — then "
+            "DESCRIBE it in neutral Docs/RE prose and re-implement fresh from that spec; never "
+            "paste decompiler output. {} Heads up only — the write was not blocked.".format(
                 ", ".join(found[:6]), h.CLEAN_ROOM_BLURB
             )
         )

@@ -26,19 +26,3 @@ public sealed class CryptoPaddingRandom : IPaddingRandom
 
     public void Fill(Span<byte> destination) => RandomNumberGenerator.Fill(destination);
 }
-
-/// <summary>
-/// Adapts an arbitrary <see cref="Action{T}"/> fill delegate to <see cref="IPaddingRandom"/>. Lets a
-/// test inject a deterministic byte source without a concrete RNG type.
-/// </summary>
-public sealed class DelegatePaddingRandom : IPaddingRandom
-{
-    private readonly FillBytes _fill;
-
-    /// <summary>Span-filling delegate signature (cannot use <c>Action&lt;Span&lt;byte&gt;&gt;</c> — ref struct generics).</summary>
-    public delegate void FillBytes(Span<byte> destination);
-
-    public DelegatePaddingRandom(FillBytes fill) => _fill = fill ?? throw new ArgumentNullException(nameof(fill));
-
-    public void Fill(Span<byte> destination) => _fill(destination);
-}

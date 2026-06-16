@@ -314,21 +314,6 @@ public sealed partial class FloatingCombatText : Control
         lbl.UpdateAnchor(newOrigin);
     }
 
-    // -------------------------------------------------------------------------
-    // DEMO state
-    // -------------------------------------------------------------------------
-
-    private void SpawnDemoEntry()
-    {
-        // Show a synthetic damage number so the overlay is testable in isolation.
-        var demoKey = new ActorKey(ActorKey.UnassignedRawId, default);
-        var origin = new Vector2(640f, 300f);
-        SpawnLabel(demoKey, 1234, KindColours[0], false, origin, 0.0);
-        SpawnLabel(demoKey, 567, KindColours[3], false, origin, ChunkStaggerSec);
-        SpawnLabel(demoKey, 999, KindColours[4], true, origin, ChunkStaggerSec * 2);
-        GD.Print("[FloatingCombatText] DEMO mode: no hub bound — showing placeholder combat numbers.");
-    }
-
     // =========================================================================
     // Inner class: one pooled label that rises and fades
     // =========================================================================

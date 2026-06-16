@@ -14,6 +14,11 @@ regenerable, per-stream `.tsv` extracts that downstream clean-room skills (`pack
 code** — observing bytes on the wire is clean-room-safe, so this skill has no `_dirty/`
 involvement.
 
+**Ground-truth doctrine.** For the wire protocol, the original's framing/dispatch code inside
+`doida.exe` is the absolute truth for layout/opcodes; this capture is the **corroborating oracle** for
+what actually went over the socket — together they ground a faithful spec. This skill only *transports*
+those observed bytes; it never interprets them, never reads `_dirty/`, and never calls IDA.
+
 ## Why this skill exists
 
 `CLAUDE.md` and `.gitignore` both reference "the `tshark` extraction command" without

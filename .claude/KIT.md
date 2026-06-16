@@ -10,6 +10,36 @@ Companion docs: `CLAUDE.md` (project onboarding + tooling inventory), `Docs/CAMP
 
 ---
 
+## Ground-Truth Doctrine — the spine every agent/skill/hook must reflect
+
+This project has **one** ground truth, and the whole kit exists to serve it. Thread this into every
+body you author or refine — concise and load-bearing, obeying the §9 anti-bloat rule. This is the same
+doctrine as `CLAUDE.md` "Source of truth — the Ground-Truth Doctrine"; keep them in lockstep.
+
+1. **IDA / `doida.exe` is the single absolute truth** for the original's behavior, data, and layout.
+   Static analysis forms the hypothesis; the **`?ext=dbg` live debugger confirms it against ground
+   truth** (never `dbg_start` — pilot the maintainer's live session). Open or disputed binary facts are
+   settled **only** in IDA — never from memory, analogy, or guesswork. MCP down / wrong DB ⇒ **STOP,
+   never fabricate.** The reverse runs **unbridled** (parallel reads + parallel IDB writes; retry on
+   conflict).
+2. **`Docs/RE/` specs are the committed derived truth** — `formats/`, `packets/`, `structs/`, `specs/`,
+   `opcodes.md` — the rewritten, firewall-clean record of what IDA proved, and the **only** thing
+   implementation reads. Binary vs. spec conflict ⇒ **the binary wins, the spec is corrected + journaled.**
+   These four trees are the load-bearing, hyper-important knowledge base.
+3. **C# / Godot are measured against (1) and (2), never the reverse** — fidelity is the measure of
+   success; the code is never its own truth. **Exception (pixels only):** the official
+   screenshots/captures are the visual oracle and **oracle > spec** for how a scene *looks*
+   (CAMPAIGN 9c/12).
+
+**Per-room application** (what each family's bodies must say): RE analysts → confirm in IDA, debugger
+over static, STOP-don't-fabricate, neutral prose to `_dirty/` only. Spec-authors → rewrite-never-copy,
+the spec is downstream's only truth, binary-wins-on-conflict. Engineers → read **only** clean specs,
+cite every constant (`// spec: …`), never invent a missing fact — escalate to RE. Godot → specs govern
+behavior, the captures oracle governs pixels. Reviewers/guards → enforce that nothing claims truth
+without an IDA/spec basis.
+
+---
+
 ## 0. Verified Claude Code schema (2026) — what is REAL
 
 Confirmed against the official docs (`code.claude.com/docs/en/{sub-agents,skills,hooks}`). Do **not**
@@ -89,6 +119,35 @@ Tier-2. One writer per path per wave (file-ownership ledger). Build/test/firewal
 Orchestrators are `opus`+`effort: high`, hold the `Agent` tool, and give **extremely detailed,
 atomic objectives** to workers (the maintainer's explicit ask: the orchestrator does the briefing so
 the human never re-explains).
+
+### Tier-0 — the campaign planner (`agent-campaign-plan-orchestrator`)
+
+Above the dispatch layer sits a **planner**, not a dispatcher. `agent-campaign-plan-orchestrator`
+(model `opus`, effort `high`, skill `plan-campaign`) is the kit's **Phase-0 specialist**: it works
+*with* Claude Code plan mode to take a user mandate, **deeply understand and REFORMULATE it** (optimize,
+restructure, make exhaustive — with the user in the loop), scout read-only context, decompose it into
+the `CAMPAIGN_TEMPLATE` Phase/Objective/Sub-objective hierarchy, and **pre-wire the routing** below:
+which Tier-2 lane captain + which agents + which skills each phase needs. Its deliverable is an
+approve-ready **campaign plan** (incl. a paste-ready ROADMAP `# CYCLE N` section).
+
+**It PLANS the routing; it does NOT execute it.** Two-levels-max is preserved because the planner
+*names* the lane captains for **Tier-1 (the main session)** to invoke **after the user approves the
+plan** — the planner never spawns a Tier-2/lane orchestrator, and never calls `ExitPlanMode` (the main
+session presents the plan). The planner may spawn only **READ-ONLY Tier-3 scouts** for context
+(`Explore`, `Plan`, `re-analyst` READONLY-IDA, `vfs-data-analyst` READONLY-VFS). The "russian-doll"
+(planner → lane captain → agent → skill) lives in the **plan + the linking fabric**, never in a 3-deep
+runtime spawn tree.
+
+**Campaign routing map** (what the plan pre-wires; all captains already exist — the planner reuses, it
+does not mint new ones):
+
+| Lane | Tier-2 captain(s) | Representative Tier-3 workers | Key skills |
+|---|---|---|---|
+| **RE (dirty→spec)** | `re-cleanroom-orchestrator` | `re-*-analyst`, `re-struct-cartographer`, `re-analyst`, `ida-script-author`, `vfs-data-analyst` → bridge `protocol-spec-author`, `asset-spec-author` | `ida-mcp-connect`, `ida-*`, `re-promote` |
+| **IDA (IDB legibility)** | `re-comprehension-orchestrator` + `re-annotation-orchestrator` | `re-ida-annotator` | `ida-annotate-batch`, `ida-naming-sync` |
+| **C#** | `network-stack-` (02) · `assets-pipeline-` (03) · `client-core-orchestrator` (04) | `network-*`, `assets-*`, `domain-`, `application-`, `client-infrastructure-`, `data-tables-`, `dotnet-engineer`, `csharp-modernizer/reviewer`, `test-engineer` | `dotnet-build-test`, `packet-codegen`, `vfs-inspect` |
+| **Godot** | `godot-client-orchestrator` (05) | `godot-presentation/ui/input-engineer`, `godot-skinning/shader-specialist`, `godot-render-reviewer`, `godot-mcp-operator` | `godot-run-headless`, `godot-screenshot`, `godot-fidelity-check`, `asset-chain-trace` |
+| **Quality / Kit** | `quality-gate-orchestrator` · `tooling-orchestrator` | reviewers / meta-authors | `clean-room-firewall-check` |
 
 **Every orchestrator body MUST contain a `## Your team (roster)` section** that names each Tier-3
 worker it dispatches, that worker's one-line contract, and which lane/path it owns — so dispatch is

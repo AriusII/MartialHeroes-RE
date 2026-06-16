@@ -11,6 +11,13 @@ It restates only facts already public in `CLAUDE.md` and the committed `Docs/RE/
 there for authoritative detail. It adds **no new reverse-engineered fact** and contains no decompiler
 output or copyrighted data. For anything not below, read the cited spec — do not infer.
 
+## Ground truth
+Every fact below was **proved in `doida.exe` via IDA** and committed to the cited `Docs/RE/` specs
+(`formats/`, `packets/`, `structs/`, `specs/`, `opcodes.md`) — those are authoritative; this skill only
+**indexes** them and is never itself the source. When the binary and a spec disagree, the binary wins
+(fix the spec). C#/Godot are judged by fidelity to IDA + these specs — the official captures are the
+oracle for rendered pixels.
+
 ## Wire protocol — see `Docs/RE/opcodes.md`, `Docs/RE/packets/*.yaml`, `Docs/RE/specs/`
 
 - **Opcode** = packed `(major << 16) | minor`. Catalogue (no addresses): `Docs/RE/opcodes.md`.

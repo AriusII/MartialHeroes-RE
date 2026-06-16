@@ -133,16 +133,23 @@ companion sizes are 34,479 B (`map000`) and 30,499 B (`effect`).
 The record index is the global pool slot that terrain and building geometry reference:
 
 ```
-.ted TextureIndexGrid[patch]  (1-based byte)
-  -> .map  TERRAIN{}/BUILDING{} TEXTURES[byte-1].intTexId   (pool slot, 1-based in .map)
-  -> bgtexture.lst[ intTexId - 1 ]  rel_path                (this format; 0-based record index)
+.ted TextureIndexGrid[patch]  (1-based byte, clamped [1,count])
+  -> .map  TERRAIN{}/BUILDING{} TEXTURES[byte-1].intTexId   (the ONLY -1 in the chain: on the .ted byte)
+  -> bgtexture.lst[ intTexId ]  rel_path                    (intTexId IS the 0-based record index, used DIRECTLY — NO -1)
   -> data/map000/texture/<rel_path>.dds                      (terrain instance)
      data/effect/texture/<rel_path>.dds                      (effect instance)
 ```
 
 - The `.dds` extension and the `data/map000/texture/` (or `data/effect/texture/`) prefix are
   added at runtime; they are **not** stored in the record.
-- The 1-based `.map` `intTexId` minus 1 gives the 0-based `.lst` record index.
+- **IDA-corrected (263bd994):** the `.map` `intTexId` **IS** the 0-based `.lst` record index, used
+  **directly** — the pool accessor reads `pool[0] + stride*intTexId` with **NO** subtraction (IDA
+  `0x445833` / `0x44a46d`; the raw `intTexId` is stored into `perCellTexList` at `0x44b267`). The **only**
+  `-1` in the whole chain is on the `.ted` per-cell byte: the byte is clamped to `[1, count]` (both `<1`
+  and `>count` → 1) and then indexes the cell texture list as `perCellTexList[byte-1]` (IDA `0x44b296`).
+  The earlier "1-based `intTexId` minus 1" reading was **WRONG** and is **REFUTED** — it disagreed with
+  `terrain.md §3.5`/`§5.6` (which were correct); this off-by-one rendered `intTexId=0` cells as missing
+  textures (black world) until corrected.
 
 ---
 

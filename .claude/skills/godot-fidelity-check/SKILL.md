@@ -18,15 +18,35 @@ original for that area; gaps = exactly where and how it diverges, with the likel
 This is **read-only verification.** Never edit a node, transform, scene, or shader "to make it look
 right" — that is the engineers' job and editing here destroys the measurement.
 
+## The two oracles (Ground-Truth Doctrine — read first)
+
+Fidelity is graded against **two** ground truths, and they govern different things:
+
+1. **Behavior & data → IDA + the committed `Docs/RE/` specs.** Asset chains, coordinate conventions,
+   strides, opcodes, runtime responses are settled by the binary and recorded in the specs. These are
+   the answer key for *what is correct*, and the client is measured against them — never the reverse.
+2. **The final image → the official screenshots/captures.** For how a scene actually *looks* (color,
+   lighting, atmosphere, effect placement, what's visible), the **official captures are the visual
+   oracle and `oracle > spec`.** A render can be perfectly spec-faithful and still be WRONG vs the real
+   client — this is exactly what CAMPAIGN 9c/12 proved (a spec-driven camera/fog regression that the
+   captures caught). When a capture and a spec disagree on pixels, **the capture wins**; flag the
+   spec-vs-capture divergence so RE corrects the spec. When no capture exists for the area, fall back to
+   the recovered-fact oracle below and say so — a "spec-faithful" verdict is provisional until a capture
+   confirms the pixels.
+
 ## Preconditions (in order)
 
 1. **A target scene/area to check** — e.g. the populated walled town (area 2). Know what you expect to
    see before you look, or you cannot grade the result.
-2. **The recovered-fact oracle is the reference.** Hold these three sources side-by-side as ground
-   truth (they are the answer key):
-   - `CLAUDE.md` -> "Recovered asset mappings" (the terrain / skin / bind / mot / spawn / collision
-     chains) and "Coordinate conventions" (negate-Z world, negate-X mesh, 1024 / 65x65 / spacing 16).
-   - The committed `Docs/RE/formats/*.md` and `Docs/RE/specs/*.md` for the area's assets.
+2. **Both oracles in hand (see "The two oracles" above).** Hold the answer key side-by-side:
+   - **Behavior/data oracle (IDA-derived specs):** `CLAUDE.md` -> "Recovered asset mappings" (the
+     terrain / skin / bind / mot / spawn / collision chains) and "Coordinate conventions" (negate-Z
+     world, negate-X mesh, 1024 / 65x65 / spacing 16); the committed `Docs/RE/formats/*.md` and
+     `Docs/RE/specs/*.md` for the area's assets.
+   - **Pixel oracle (the official captures):** the maintainer's official screenshots/captures of this
+     scene, when available — they govern the final image and **outrank the spec on appearance**
+     (`oracle > spec`). If no capture exists for the area, grade pixels against the recovered-fact
+     oracle and mark the visual verdict provisional.
    Do NOT consult anything under `Docs/RE/_dirty/` — this skill is clean-side.
 3. **The Godot client must compile.** A headless/windowed run uses the compiled managed DLL, not
    source, so build layer 05 first (Step 1). A stale build silently renders old behavior.
@@ -60,7 +80,11 @@ right" — that is the engineers' job and editing here destroys the measurement.
    PNG is a scratch artifact in temp — never commit it. **The autoload is temporary: it MUST be removed
    and the `_shot.gd` deleted afterward** (`/godot-screenshot` Step 5 does this — do not skip it).
 
-4. **Compare against EXPECTED, point by point.** Grade the frame + log against the oracle:
+4. **Compare against EXPECTED, point by point.** Grade structure/placement/data against the
+   **spec oracle** (the chains + coordinates below); grade *appearance* (color, lighting, atmosphere,
+   effect look, what's visible) against the **official capture** — and when the capture disagrees with
+   what the spec predicts, the **capture wins** (`oracle > spec`): report it as a spec-vs-capture
+   divergence to send back to RE, not as a render bug to "fix toward the spec".
    - **Terrain textures** present and correct per the chain `.ted TextureIndexGrid` ->
      `.map TERRAIN/BUILDING TEXTURES[idx-1].intTexId` -> `bgtexture.txt[id]` ->
      `data/map000/texture/<rel>.dds` (textures are **global under `map000`** for all areas). Blank /

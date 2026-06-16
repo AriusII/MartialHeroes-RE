@@ -286,6 +286,35 @@ internal static class SyntheticFrames
         return Frame(5, 67, p);
     }
 
+    /// <summary>5/9 experience gain (32-byte payload). spec: Docs/RE/specs/progression.md §3.4.</summary>
+    public static byte[] ExpGain(
+        byte sort, uint actorId, long amount, uint sourceSort = 0, uint sourceId = 0,
+        int profSlotA = -1, int profSlotB = -1)
+    {
+        Span<byte> p = stackalloc byte[32];
+        p.Clear();
+        p[0x00] = sort; // recipient sort (low byte of the +0 u32). spec: progression.md §3.4.
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x04, 4), actorId);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x08, 4), sourceSort); // low byte == 2 enables the §3.1 split
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x0c, 4), sourceId);
+        BinaryPrimitives.WriteInt64LittleEndian(p.Slice(0x10, 8), amount); // experience amount
+        BinaryPrimitives.WriteInt32LittleEndian(p.Slice(0x18, 4), profSlotA);
+        BinaryPrimitives.WriteInt32LittleEndian(p.Slice(0x1c, 4), profSlotB);
+        return Frame(5, 9, p);
+    }
+
+    /// <summary>5/11 rank/honor XP gain (20-byte payload). spec: Docs/RE/specs/progression.md §4.1.</summary>
+    public static byte[] RankXpGain(uint actorId, byte sort, ulong amount, byte mode)
+    {
+        Span<byte> p = stackalloc byte[20];
+        p.Clear();
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x00, 4), actorId);
+        p[0x04] = sort;
+        BinaryPrimitives.WriteUInt64LittleEndian(p.Slice(0x08, 8), amount);
+        p[0x10] = mode; // 2 = direct add (no level math). spec: progression.md §4.1.
+        return Frame(5, 11, p);
+    }
+
     /// <summary>4/100 combat attack update (188-byte payload). spec: handlers.md §3 (4/100).</summary>
     public static byte[] CombatAttackUpdate(byte phase, sbyte subKind, uint value)
     {

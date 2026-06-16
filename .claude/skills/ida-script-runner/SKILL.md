@@ -13,6 +13,11 @@ dispatcher, ida-crypto-hunt for the cipher), reach for this. It ships a small li
 real, parameterized IDAPython snippets you run inside IDA via the MCP exec tool. Results
 are dirty-room recon and go to `Docs/RE/_dirty/queries/`.
 
+A snippet result is **ground truth only** when run against the correct, populated IDB
+(`/ida-mcp-connect` green) — and a static hit is a **hypothesis**, not a fact, until the
+debugger confirms it. If the server is down or the call returns partial data, **STOP and
+report exactly what you got** — never fabricate an address, count, or shape from memory.
+
 ## When to use which snippet
 
 | Question | Snippet |

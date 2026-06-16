@@ -18,6 +18,10 @@ functions to find the three that matter.
 All output is **dirty** (addresses derived directly from the copyrighted binary) and lands under
 `Docs/RE/_dirty/static/`.
 
+**Ground truth:** every metric and reference comes FROM the IDA query — never from memory or a guess at
+what a cluster "must" contain. Each role guess is a hypothesis a deep read (then the live debugger)
+settles, never a fact asserted from analogy. MCP down / wrong DB ⇒ STOP, never fabricate a metric.
+
 ## Preconditions (do these first, in order)
 
 1. **MCP must be green.** Run `/ida-mcp-connect`; confirm a live IDA Pro 9.3 MCP server at

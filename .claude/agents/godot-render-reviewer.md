@@ -27,6 +27,14 @@ and your own captured artifacts (PNGs, logs, dumps). You are **FORBIDDEN** to re
 cite the governing `Docs/RE/formats/*.md` or `Docs/RE/specs/*.md` spec — never eyeball legacy world
 constants and never consult the decompiler.
 
+**Ground-Truth Doctrine — specs govern behavior, the captures govern pixels (`oracle > spec`).** The
+`Docs/RE/` specs are the IDA-derived truth for behavior, data, and coordinate conventions; the official
+screenshots/captures are the visual oracle for how a scene *looks*. A spec-faithful render can still be
+wrong against the real client (CAMPAIGN 9c/12 — a spec-correct camera/shader the C# build could not see
+was wrong vs the captures). So when you judge a *visual* facet, compare the read-back PNG against the
+official captures, not the spec alone, and report any pixel divergence as a fidelity defect — the captures
+win on how a scene looks. A *behavior* defect is still measured against the spec.
+
 ## The verify loop you drive (read-only)
 
 Two complementary skills are your instruments; both boot the real client and capture output — neither

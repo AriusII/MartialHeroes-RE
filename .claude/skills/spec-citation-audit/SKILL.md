@@ -17,6 +17,13 @@ This skill is the **targeted citation auditor**. It is narrower than `clean-room
 hunts decompiler autonames and MSVC artifacts): here the single question is *"does this magic
 number cite a spec?"*. It is **read-only** and reports `file:line` — it never edits code.
 
+A `// spec:` citation is the provenance link between the C# and the **derived truth** in `Docs/RE/`
+— the committed, neutral record of what IDA proved about the original. The citation is what lets a
+reviewer trace any constant back from the code, through the spec, to the binary it came from. An
+uncited constant breaks that chain: it may have been eyeballed straight from the binary, which is the
+firewall breach this skill exists to catch. The fix is always a citation to a *committed* spec, never
+a peek at `_dirty/` or IDA.
+
 ## What counts as a "magic constant" (and what is ignored)
 
 Flagged when uncited:

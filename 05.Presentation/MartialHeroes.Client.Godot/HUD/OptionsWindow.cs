@@ -224,9 +224,10 @@ public sealed partial class OptionsWindow : Control
         // Start hidden; caller toggles via Toggle() or key O.
         Visible = false;
 
-        // When no hub was bound before _Ready, show a demo state so a headless run proves the
-        // window renders correctly (mirrors InventoryWindow / SkillWindow behaviour).
-        if (_hub is null)
+        // When no hub was bound before _Ready AND dev-offline mode is active, show a demo state
+        // so headless/dev-screenshot runs prove the window renders correctly.
+        // Gated behind DEV_OFFLINE_FLOW so the window stays hidden in all non-dev contexts.
+        if (_hub is null && IsDevOfflineMode())
             ShowDemoState();
 
         GD.Print("[OptionsWindow] Ready. Sound tab drives AudioServer Music/Sfx buses. " +
@@ -260,13 +261,9 @@ public sealed partial class OptionsWindow : Control
 
     public override void _Input(InputEvent ev)
     {
-        // Toggle on key O (not held).
-        // spec: Docs/RE/specs/input_ui.md §4 — options window key toggle.
-        if (ev is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.O)
-        {
-            Toggle();
-            GetViewport().SetInputAsHandled();
-        }
+        // Key-toggle (O) is now routed through GameHud._Input (single dispatcher).
+        // Only drag handling remains here.
+        // F4 fix: per-panel key grab removed. spec: Docs/RE/specs/input_ui.md §3a / §5.
 
         // Drag — title-bar initiated.
         if (ev is InputEventMouseButton mb)
@@ -1038,12 +1035,27 @@ public sealed partial class OptionsWindow : Control
     }
 
     // -------------------------------------------------------------------------
-    // Demo state (shown when no hub is bound — headless verification path)
+    // Dev offline guard
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Returns true when the dev-offline replay mode is active.
+    /// Mirrors the private BootFlow.IsDevOfflineMode() check, exposed here for widget-level use.
+    /// Controlled by the <c>DEV_OFFLINE_FLOW=1</c> environment variable.
+    /// </summary>
+    private static bool IsDevOfflineMode()
+    {
+        string? envVal = System.Environment.GetEnvironmentVariable("DEV_OFFLINE_FLOW");
+        return envVal is "1" or "true" or "yes";
+    }
+
+    // -------------------------------------------------------------------------
+    // Demo state (shown in dev-offline mode — headless verification path)
     // -------------------------------------------------------------------------
 
     /// <summary>
     /// Populates the window with demo values so a headless run proves the window renders.
-    /// Mirrors the InventoryWindow / SkillWindow "offline mode" pattern.
+    /// Only called when IsDevOfflineMode() is true.
     /// spec: CLAUDE.md Headless Verify Loop.
     /// </summary>
     private void ShowDemoState()

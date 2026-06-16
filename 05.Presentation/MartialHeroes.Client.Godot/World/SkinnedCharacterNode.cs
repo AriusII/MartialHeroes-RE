@@ -33,6 +33,8 @@ public sealed partial class SkinnedCharacterNode : Node3D
     // ---- Precomputed rig (immutable after Setup) ----
     private Bone[] _bones = [];
     private int[] _parentIndex = [];
+    private bool[] _hasChild = []; // per-bone: parent of ≥1 bone (§6.3 interior-bone lock)
+    private float[] _nodeScale = []; // per-bone runtime scale (+84, default 1.0; SPEC GAP source)
     private SkinningMath.VertexInfluences[] _perVertex = [];
     private AnimationTrack?[] _trackByBoneIndex = [];
 
@@ -106,10 +108,20 @@ public sealed partial class SkinnedCharacterNode : Node3D
         _bones = skeleton.Bones;
         int boneCount = _bones.Length;
 
-        // 1) Hierarchy + bind world.
-        // spec: Docs/RE/specs/skinning.md §3.
-        SkinningMath.ResolveHierarchy(_bones, out _parentIndex, out int[] idToIndex, out int baseId);
+        // 1) Hierarchy + bind world. Also build the per-bone has-child flag for the §6.3
+        // interior-bone translation lock.
+        // spec: Docs/RE/specs/skinning.md §3 / §6.3.
+        SkinningMath.ResolveHierarchy(_bones, out _parentIndex, out int[] idToIndex, out int baseId, out _hasChild);
         SkinningMath.BoneTransform[] bindWorld = SkinningMath.AccumulateBindWorld(_bones, _parentIndex);
+
+        // Per-bone runtime node scale (+84 field; rotate → scale → translate in the world walk, §6.6).
+        // SPEC GAP: the on-disk SOURCE of the per-node scale is not yet pinned in any clean spec, so we
+        // default it to 1.0 (no behaviour change; latent until the +84 source is promoted). The world
+        // walk multiplies the rotated local animated translation by this before the parent-add.
+        // spec-gap: per-node runtime scale (+84) disk source undecoded — default 1.0.
+        // spec: Docs/RE/specs/skinning.md §6.6 / §3.4 (+84).
+        _nodeScale = new float[boneCount];
+        for (int i = 0; i < boneCount; i++) _nodeScale[i] = 1.0f;
 
         int vertexCount = mesh.Positions.Length;
 
@@ -384,7 +396,8 @@ public sealed partial class SkinnedCharacterNode : Node3D
     {
         AnimationTrack?[] tracks = restPose ? _noTracks : _trackByBoneIndex;
         SkinningMath.ComputeAnimatedWorld(
-            _bones, _parentIndex, tracks, t, RenormalizeAlpha, _world, AnimAsDelta);
+            _bones, _parentIndex, tracks, t, RenormalizeAlpha, _world, AnimAsDelta,
+            _hasChild, _nodeScale);
     }
 
     // =========================================================================
@@ -428,27 +441,63 @@ public sealed partial class SkinnedCharacterNode : Node3D
             d.AabbFinite = IsFinite(aabb.Position) && IsFinite(aabb.Size);
         }
 
-        // ---- Invariant 2: liveness (same tracked vertex at two distinct clip times) ----
-        if (_hasClip && _clipDuration > 0f)
+        // ---- Invariant 2: liveness (the MOST-MOVING vertex across the clip) ----
+        //
+        // The earlier probe locked onto ONE tracked vertex (FindTrackedVertex returns the first
+        // vertex whose dominant bone is tracked, falling back to v0). For a SHORT human idle clip
+        // (e.g. a 3-frame stand whose duration is 0.3s) that single vertex was frequently dominated
+        // by the ROOT — which an idle barely translates/rotates — so it read liveDelta≈0 and FAILED
+        // INV2 even though the limb verts DO move. The 36f/121f mob clips happened to pick a moving
+        // vertex and passed. The probe, not the clip, was the discriminator. We now scan EVERY vertex
+        // over SEVERAL sample times spanning the clip and report the GLOBAL MAXIMUM displacement from
+        // the frame-0 pose, plus the vertex that achieved it. This disambiguates "genuinely near-static
+        // idle" (every vertex's max ≈ 0) from "the probe sat on a still vertex" (some vertex moves).
+        // The deform math is unchanged — this only changes which vertex the diagnostic inspects — so
+        // the working mob/world multi-frame behaviour is provably untouched (same DeformVertex calls).
+        // spec: Docs/RE/specs/skinning.md §6 (the displayed pose is the sampled idle) /
+        //       formats/animation.md §Timing (10 fps; a 3-frame idle spans 0.3s).
+        if (_hasClip && _clipDuration > 0f && _deformedPos.Length > 0)
         {
-            int sampleVi = FindTrackedVertex();
-            d.LivenessVertex = sampleVi;
-            if (sampleVi >= 0)
+            // Reference pose at frame 0.
+            ComputeWorldPoses(0f, restPose: false);
+            int vc = _deformedPos.Length;
+            var p0 = new Vec3[vc];
+            for (int v = 0; v < vc; v++)
+                (p0[v], _) = SkinningMath.DeformVertex(_perVertex[v], _world);
+
+            // Sample times spanning the clip (skip 0; include the last interior frame). For a 3-frame
+            // 0.3s idle this hits t≈0.075/0.15/0.225/0.29 — enough to catch a subtle idle's peak.
+            float[] sampleTimes = LivenessSampleTimes(_clipDuration);
+
+            float bestDelta = 0f;
+            int bestVi = 0;
+            float bestT = 0f;
+            Vector3 bestP0 = Vector3.Zero, bestP1 = Vector3.Zero;
+            foreach (float t in sampleTimes)
             {
-                float t0 = 0f;
-                float t1 = Math.Min(_clipDuration * 0.5f, _clipDuration - 0.01f);
-
-                ComputeWorldPoses(t0, restPose: false);
-                (Vec3 a, _) = SkinningMath.DeformVertex(_perVertex[sampleVi], _world);
-                ComputeWorldPoses(t1, restPose: false);
-                (Vec3 b, _) = SkinningMath.DeformVertex(_perVertex[sampleVi], _world);
-
-                d.LivenessT0 = t0;
-                d.LivenessT1 = t1;
-                d.LivenessP0 = new Vector3(a.X, a.Y, a.Z);
-                d.LivenessP1 = new Vector3(b.X, b.Y, b.Z);
-                d.LivenessDelta = (d.LivenessP1 - d.LivenessP0).Length();
+                ComputeWorldPoses(t, restPose: false);
+                for (int v = 0; v < vc; v++)
+                {
+                    (Vec3 pt, _) = SkinningMath.DeformVertex(_perVertex[v], _world);
+                    float dx = pt.X - p0[v].X, dy = pt.Y - p0[v].Y, dz = pt.Z - p0[v].Z;
+                    float dev = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+                    if (dev > bestDelta)
+                    {
+                        bestDelta = dev;
+                        bestVi = v;
+                        bestT = t;
+                        bestP0 = new Vector3(p0[v].X, p0[v].Y, p0[v].Z);
+                        bestP1 = new Vector3(pt.X, pt.Y, pt.Z);
+                    }
+                }
             }
+
+            d.LivenessVertex = bestVi;
+            d.LivenessT0 = 0f;
+            d.LivenessT1 = bestT;
+            d.LivenessP0 = bestP0;
+            d.LivenessP1 = bestP1;
+            d.LivenessDelta = bestDelta;
         }
 
         // Restore the visible mesh to the rest pose; _Process will drive it once in the tree.
@@ -457,32 +506,22 @@ public sealed partial class SkinnedCharacterNode : Node3D
         return d;
     }
 
-    /// <summary>Finds a vertex whose dominant bone is animated by a track (for the liveness probe).</summary>
-    private int FindTrackedVertex()
+    /// <summary>
+    /// The clip times the liveness probe samples (excludes t=0, the reference). Uses up to four
+    /// interior samples spread across the clip so a SHORT idle's subtle peak motion is captured;
+    /// the last sample is just inside the final frame. spec: animation.md §Timing (10 fps).
+    /// </summary>
+    private static float[] LivenessSampleTimes(float clipDuration)
     {
-        for (int v = 0; v < _perVertex.Length; v++)
-        {
-            Influence_Best(v, out int bone);
-            if (bone >= 0 && bone < _trackByBoneIndex.Length && _trackByBoneIndex[bone] is not null)
-                return v;
-        }
-
-        return _perVertex.Length > 0 ? 0 : -1;
-    }
-
-    private void Influence_Best(int v, out int boneIndex)
-    {
-        boneIndex = -1;
-        float best = -1f;
-        SkinningMath.Influence[] items = _perVertex[v].Items;
-        for (int k = 0; k < items.Length; k++)
-        {
-            if (items[k].Weight > best)
-            {
-                best = items[k].Weight;
-                boneIndex = items[k].BoneIndex;
-            }
-        }
+        float last = MathF.Max(clipDuration - 0.01f, 0f);
+        // Quarter/half/three-quarter plus the last interior frame.
+        return
+        [
+            clipDuration * 0.25f,
+            clipDuration * 0.5f,
+            clipDuration * 0.75f,
+            last,
+        ];
     }
 
     private static bool IsFinite(Vector3 v)

@@ -13,6 +13,11 @@ Dumps a legacy structure or class from the 32-bit `Main.exe`: every member's
 address, and the function name at each slot). Targets are 2004-era MSVC `__thiscall` objects whose
 `this` arrives in `ECX`, so vtable recovery is how class shapes are discovered.
 
+Every offset, size, and slot dumped must **reflect what the binary proves** — the layout is read from
+the IDB, never inferred to look tidy. The IDB is the single absolute truth for the object's shape; a
+static layout is the hypothesis, a live debugger read confirms field meaning. If the MCP is down or a
+target won't resolve, **STOP and report the exact error — never invent an offset or a slot.**
+
 This skill produces **two** kinds of output:
 
 1. A **dirty** dump under `Docs/RE/_dirty/structs/` — the full member/vtable detail with addresses

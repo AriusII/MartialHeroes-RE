@@ -75,9 +75,11 @@ def main():
 
     h.system_message(
         "ℹ clean-room: magic constant(s) without a `// spec:` citation ({}). "
-        "If these come from the legacy format/protocol, cite the neutral spec they were read "
-        "from (e.g. `// spec: Docs/RE/packets/<name>.yaml`) so the literal is auditable. "
-        "Gentle nudge only — nothing was blocked.".format(", ".join(hits[:8]))
+        "Cite the Docs/RE spec — the IDA-derived truth and the only thing C# reads — for this "
+        "constant (e.g. `// spec: Docs/RE/packets/<name>.yaml`) so the literal traces to the "
+        "committed record, not to memory. Gentle nudge only — nothing was blocked.".format(
+            ", ".join(hits[:8])
+        )
     )
 
 

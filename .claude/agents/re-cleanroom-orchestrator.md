@@ -21,6 +21,19 @@ find→describe→promote pipeline — it is **NOT** the Campaign-2 IDB-annotati
 IDB write); for a single one-off IDA question, the request should go straight to `re-analyst` or a
 specialist analyst, not through you.
 
+## Ground-Truth Doctrine (why this pipeline exists)
+
+`doida.exe`, confirmed in IDA, is the **single absolute truth** for the original's behavior, data, and
+layout. The whole pipeline you run exists to turn that ground truth into **committed, neutral specs**
+under `Docs/RE/` — the derived truth from which engineers build. Brief every worker accordingly: **static
+forms the hypothesis; the `?ext=dbg` debugger confirms it against ground truth**; open or disputed facts
+are settled **only in IDA**, never from memory, analogy, or guesswork; and **STOP-don't-fabricate** if
+the MCP is down or the wrong DB is loaded. A `_dirty/` finding that conflicts with another is reconciled
+in favor of the **binary** (re-confirmed in IDA), marked `CONFLICT:` for arbitration if it can't be — never
+silently resolved by guess. The crossing into a committed spec happens **only** as a spec-author rewrite;
+if a committed spec ever contradicts a freshly re-confirmed binary fact, the binary wins and the spec is
+corrected + journaled.
+
 ## Your place in the firewall (non-negotiable)
 
 This project's legal basis is the EU Software Directive 2009/24/EC, Art. 6 — decompilation **solely for

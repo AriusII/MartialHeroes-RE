@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3 uid="uid://cn3q7w8xv2m4k0"]
+[gd_scene load_steps=7 format=3 uid="uid://cn3q7w8xv2m4k0"]
 
 ; Root orchestrator: GameLoop — drains the Application event bus each frame.
 ; NOTE: in Godot 4 the `script` is a PROPERTY assignment on its own line BELOW the
@@ -10,22 +10,16 @@
 [ext_resource type="Script" uid="uid://b5d0wrs10eihb" path="res://Input/InputRouter.cs" id="4"]
 [ext_resource type="Script" uid="uid://dkbjb46randg2" path="res://Debug/SyntheticWorldFeeder.cs" id="5"]
 
-[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_1"]
-sky_top_color = Color(0.1, 0.35, 0.78, 1)
-sky_horizon_color = Color(0.62, 0.78, 0.95, 1)
-sky_curve = 0.08
-ground_bottom_color = Color(0.1, 0.14, 0.1, 1)
-ground_horizon_color = Color(0.3, 0.38, 0.28, 1)
-sun_angle_max = 28.0
-sun_curve = 0.15
-
-[sub_resource type="Sky" id="Sky_1"]
-sky_material = SubResource("ProceduralSkyMaterial_1")
-process_mode = 0
-
+; Environment: background_mode=Color, neutral grey — no ProceduralSkyMaterial at any frame.
+; The ProceduralSkyMaterial + Sky sub-resources were removed: at frame-0 the sky was a visible
+; procedural blue sky before EnvironmentNode.Configure replaces it at runtime. The original has
+; no procedural sky; EnvironmentNode drives the sky from the per-area environment bins each frame.
+; spec: Docs/RE/specs/environment.md §3.1 — per-area load sequence drives sky/background.
+; spec: Docs/RE/specs/environment.md §6.1 — neutral-grey fallback when environment data absent.
+; spec: Docs/RE/specs/rendering.md — no procedural sky in the original pipeline.
 [sub_resource type="Environment" id="Environment_1"]
-background_mode = 2
-sky = SubResource("Sky_1")
+background_mode = 1
+background_color = Color(0.45, 0.45, 0.45, 1)
 ambient_light_source = 3
 ambient_light_color = Color(1, 1, 1, 1)
 ambient_light_sky_contribution = 0.5

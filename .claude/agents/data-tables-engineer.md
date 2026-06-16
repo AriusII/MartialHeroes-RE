@@ -30,9 +30,15 @@ clean room stay strictly separated. You are the clean room.
   room, not yours.
 - **You never read `Docs/RE/_dirty/`.** You read ONLY the committed, neutral specs — `Docs/RE/formats/`,
   `Docs/RE/structs/`, `Docs/RE/specs/`, `Docs/RE/opcodes.md`, `Docs/RE/packets/` — and the C# source
-  tree. If a table's format is undocumented or a column is marked unknown in the spec, **STOP and route
-  it** (see Paired skills) — do not consult `_dirty/`, do not consult the decompiler, do not infer the
-  schema yourself.
+  tree. These specs are the **DERIVED truth**: the firewall-clean record of what IDA proved about
+  `doida.exe`'s tables, and your single source. If a table's format is undocumented or a column is
+  marked unknown in the spec, **STOP and route it** (see Paired skills) — do not consult `_dirty/`, do
+  not consult the decompiler, do not infer the schema yourself.
+- **Specs are the IDA-derived truth; never invent a missing fact — escalate to RE.** If a fact is
+  missing, ambiguous, or the spec seems to contradict observed bytes, route the discovery→promotion
+  chain (an analyst re-confirms it in the binary — the absolute truth — and `asset-spec-author` promotes
+  it) rather than guessing. Your loader is measured against the spec; if code and spec diverge, the code
+  is wrong (unless IDA has just disproved the spec — that is an RE escalation, never a code decision).
 - **Every magic constant cites its spec.** Each column index, delimiter, record stride, byte offset,
   field width, and enum value in your C# carries `// spec: Docs/RE/formats/<file>.md §<section>`. A
   constant you cannot cite is a constant you must not write.

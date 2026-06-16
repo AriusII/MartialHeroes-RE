@@ -6,6 +6,278 @@
 
 ---
 
+# CAMPAIGN 13 — Zero-Trust Ground-Truth Rebuild (*make the client work*) (launched 2026-06-16)
+
+**The correction:** C11–C12 treated the existing C#/Godot as the baseline to patch and gated on
+`build 0/0 + 1944 tests green` — a **circular** measure (the tests assert what the code already does;
+C12 had to *rewrite* the chat/`DisplayFramerate`/`Flag`/`BillingState` tests because they froze wrong
+behaviour). **C13 law: zero trust in the current C#, Godot render, and tests.** Rebuild as if from zero,
+driven only by ground truth (**IDA** = source of truth · **C10-re-verified specs** · **official
+captures** = visual oracle). **Success = the client runs end-to-end and behaves/looks like the
+original — not "tests green".**
+
+**Anti-circularity rule:** a subsystem is done only when its behaviour is **re-derived from an IDA
+address or `spec:` citation** (the code is never evidence for itself); tests are re-derived from the
+spec. Where code already matches ground truth it stays — now *verified*, not trusted.
+
+**"Make it work" target (no live server → client-side fidelity):** (1) the scene spine actually flows
+Boot→Login→PIN→ServerList→CharSelect→(Create)→World; (2) **character skinning/animation works** (the
+headline broken thing); (3) world renders correctly vs specs+captures; (4) wire layer byte-exact vs
+IDA; (5) client systems behave per spec.
+
+**Scope — 8 priority lanes:** 1 scene-spine ★ · 2 skinning/anim ★ · 3 world-render ★ · 4 front-end-vs-
+captures · 5 wire(proto/opcodes/crypto) · 6 asset/VFS/parsers · 7 HUD/UI · 8 domain/gameplay/tables.
+
+**Method:** the `Workflow` tool drives the audit + rebuild fan-outs (Ultracode); clean-room firewall,
+the downward-only DAG, zero-alloc discipline, and the build/test/headless/screenshot gates all hold.
+
+**Out of scope:** the game server; live debugger/capture (facts stay flagged-pending); re-RE of settled
+specs (unless an audit lane finds one *wrong*); blanket-naming the ~19k unnamed IDB functions.
+
+## Phase 0 — Charter & honest baseline — **DONE 2026-06-16**
+- [x] Continues on branch `campaign12` (last commit `b71060f`, tree clean at start).
+- [x] IDA MCP UP on `doida.exe` `263bd994` (Hex-Rays ready) — the ground-truth source.
+- [x] `Docs/PLAN.md` rewritten to the C13 charter (zero-trust law); this ROADMAP section prepended.
+- [x] **Honest baseline observed** (nuke 48 bin/obj excl `.godot` → `dotnet build --no-incremental` +
+  `dotnet test --no-build`): **0 warn / 0 err · 1944 tests green** across 12 suites. Recorded as the
+  *diff target* — NOT asserted correct (this is exactly the circular gate C13 distrusts).
+- [x] Scaffold `_dirty/campaign13/<lane>/` namespaces (8 lanes: scene-spine/skinning/world-render/
+  frontend-scenes/wire/asset-vfs/hud-ui/domain-gameplay).
+- [→] Windowed per-scene screenshot **folded into Phase 3 (V)** — captured there for direct compare to
+  the official captures, rather than as throwaway before-pictures (the official captures are the oracle).
+
+## Phase 1 — Ground-truth divergence audit (Workflow, read-only) — **DONE 2026-06-16**
+`campaign13-divergence-audit` (`wf_28e4af66-0f4`): 8 parallel lanes, each re-derived required behaviour
+from IDA (live reads, anchor 263bd994) + the clean spec and confronted the C#/Godot impl — the code was
+NEVER treated as evidence for itself. **45 citation-backed divergences: 6 breaks-function · 27
+wrong-fidelity · 12 cosmetic** (ledgers in `_dirty/campaign13/<lane>/divergences.md`).
+- **6 BREAKS-FUNCTION (the "all-green-but-broken" the circular gate hid):** (1) char-CREATE preview
+  force-disables skinning → static pose (the LBS math is CONFIRMED CORRECT vs IDA `0x437fb6`/`0x4387fb`;
+  the "explodes" excuse was reasoning-from-render); (2) create-preview invents non-existent `.skn` for
+  3/4 classes → only Musa renders; (3) terrain/building/water textures read the `bgtexture.txt` mirror
+  ABSENT from a real packed VFS while the IDA-validated `BgtextureLstParser` (`0x4458bc`) is dead code →
+  untextured world; (4) "UI is the gate" hit-test never wired → HUD clicks leak to world; (5) ChatWindow
+  send path is a `GD.Print` stub → typed chat never sent; (6) quest accept-gate polarity INVERTED (passes
+  ≥26, should pass <26) + missing billing bypass.
+- **Notable VERIFIED-OK (zero-trust confirmation, not trust):** the **wire lane (5) = 0 divergences,
+  byte-exact vs IDA** — cipher (`0x63e903`), 8-byte frame header, opcode dispatch (3/4·3/7·3/14 ladder),
+  RSA handshake (`0x63ef05`) all confirmed; skinning LBS math confirmed; VFS container + parser corpus
+  (two-witness corrections) confirmed. ~142 checks across the 8 lanes landed VERIFIED-OK.
+- **Top wrong-fidelity clusters:** world-render invents brightening (sun energy-floor 1.6 + ×4 lum,
+  Filmic tonemap@1.15, Additive glow — original applies color_A RAW, no tonemap, opaque present) + fog
+  shape + effect all-Additive; skinning invented `DeriveStandUpBasis` + over-broad translation lock;
+  scene-spine hosts server-list/PIN as top-level screens (original runs them INSIDE the Login scene,
+  state 1) + a debug green-plane/red-cube in every world frame; progression XP (5/9, 5/11) unmodelled.
+**W gate PASS** — every lane returned a citation-backed ledger; triaged into the Phase-2 rebuild waves.
+
+## Phase 2 — Rebuild to ground truth (Workflow, staged) — **DONE 2026-06-16**
+`campaign13-rebuild` (`wf_3e07b3c5-662`): rebuild each divergence to IDA/spec + rewrite tests from spec
+(`// spec:` cite, never old behaviour). Disjoint-file lanes, Wave A (core contracts) → barrier → Wave B
+(Godot presentation):
+- **Wave A (3 lanes):** A1 Domain+Application (quest-gate polarity invert + bypass; new ProgressionState
+  for 5/9·5/11 XP; InputEvent press/release/click taxonomy; handler doc) · A2 Infrastructure (runtime
+  catalogue from items.scr not items.csv; ScrStat proxy→Empty) · A3 Assets (new `.lst`-backed
+  `BgTextureCatalog` — the contract that fixes the untextured-world break).
+- **Wave B (5 lanes, after A):** B1 skinning+char-3D-scenes (un-disable create skinning; unify class→mesh
+  onto the §3.7.5 four meshes; remove `DeriveStandUpBasis`; interior-bone lock; re-enable carved backdrop)
+  · B2 world-env (sun RAW, Linear tonemap, Screen glow, LINEAR fog, alpha effect blend, terrain clamp)
+  · B3 world-textures (consume `BgTextureCatalog`/`.lst`-first; value<1→slot1) · B4 HUD+input (wire
+  hit-test gate; wire chat send; inventory 318×732; single dispatcher) · B5 scene-spine (dev-gate the
+  debug baseline; world-exit hook; re-home server-list/PIN inside Login, layouts preserved).
+- SPEC GAPS flagged for promotion (no invention): full skin.txt appearance chain; skinning +84 node-scale
+  source; effect per-drawable blend byte; uitex manifest rects; userlevel.scr HP/MP; .fx3/.fx5 water.
+**E gate (Tier-1, after the waves) — PASS:** nuke + build `--no-incremental` **0 err / 0 warn**;
+**1979 tests green** (was 1944; **+35 net new spec-derived tests** — progression XP, quest-polarity
+rewrite, InputType taxonomy, items.scr fields, BgTextureCatalog). All 6 breaks + the fidelity cluster
+rebuilt to IDA/spec; spec gaps flagged for promotion, **never invented**. **Tier-1 reconciliation:** the
+two 3D char screens (lane-boundary residual) switched to the new `.lst` `BgTextureCatalog`
+(`ResolveRelativePath`, 1-based, consistent with `RealWorldRenderer`); `ConnectionState`/`StatAllocationView`
+doc nits fixed. Transient mid-wave cross-lane errors (`_world`, `CullForegroundOccluders`) resolved by
+end-of-wave (final nuke build confirms). DAG downward-only held; every constant cites a spec.
+
+## Phase 3 — Verify against the original — **DONE 2026-06-16 (verdict: functional PASS, 3 visual residuals)**
+**Functional (headless) — PASS.** Boot smoke is clean end-to-end, **zero script errors**; the B5 re-home
+is confirmed: *"Showing LoginScreen (owns the in-login PIN + server-list sub-views)"* (IDA-faithful
+state-1 structure). World boot logs confirm the rebuild is **live**: `bgtexture pool loaded from
+bgtexture.lst: 1222 slots` (break #3 fixed — binary `.lst`, not the absent `.txt`); `tonemap=Linear/1.0
+glow=Screen`, `sunColorA=(0.4,…) energy=1.0 RAW` (B2 env fixes); `HudInputHandler.HitTest wired to
+GameHud.HitTest` + `ChatWindow … SendChatRequested wired to UseCases` (breaks #4/#5 fixed); HUD renders
+fully (panels, hotbar icons, minimap, gauges, inventory W=318).
+
+**Visual (windowed screenshot oracle) — the doctrine working: it caught 3 residuals the build/tests/logs
+could not.** Captures: `%TEMP%/mh-c13-{create,charselect,world}.png`.
+1. **World too dark** (pre-existing debt #3, now isolated): geometry IS present (terrain ring + 92-obj
+   BUD + char spawned) but the 3D world renders near-black. `ApplyAmbient` correctly sets white ambient
+   energy 1.0, but the world uses **cel-shaded** materials (`CelShade.gdshader`) whose lighting keys off
+   the (spec-correctly) dimmed directional and does **not** pick up the OPTION_BRIGHT ambient floor →
+   B2's spec-correct directional-raw exposed the cel/ambient gap. Needs `godot-shader-specialist` +
+   windowed iteration (`.gdshader` is invisible to `dotnet build`). spec: environment.md §6.2a/§6.2b.
+2. **Create-preview framing**: the char now **renders** + the carved-wall backdrop is back (B1 fixed the
+   force-static + invisible-classes breaks), but the camera frames only the **boots/feet** — B1 removed
+   the boom per the IDA "actor-only" finding but the actor placement frames the feet (the C12
+   "legs-only" geometry returns). Needs a framing pass (IDA create-offset `anchor+(-1536.5,0,-3538.0)`
+   or restore figure framing) + windowed iteration. spec: frontend_scenes.md §4.2/§3.5.4.
+3. **Skinning idle animation flat**: chars **render** (not exploded — INV1 rest + INV3 AABB PASS), but
+   3-frame human idle clips report `INV2 liveDelta=0` (static) while multi-frame mob clips (36f/121f)
+   animate (`liveDelta>0 PASS`). Either the human idle is genuinely near-static or the probe samples a
+   static vertex — needs `godot-skinning-specialist` to confirm/fix. Pre-existing skinning-anim debt.
+
+**∥ Phase-D IDB legibility + `names.yaml` pull:** NOT YET RUN (deferred to P4/follow-up).
+**V gate:** functional + wire + VFS-texture + HUD = PASS; visual fidelity = 3 open residuals (above),
+each routed to its specialist with the screenshot evidence. char-select ≈ oracle (dark temple, braziers,
+water, 3 chars present).
+
+### Phase 3b — visual-residual fix wave (`wf_3438313c-eb9`) + re-capture — **PARTIAL (build-clean, but visuals NOT resolved)**
+`campaign13-visual-residuals`: 2 specialist lanes landed **spec-correct, build-clean (0/0), no-regression**
+changes — but the **windowed re-capture (the oracle) confirms the 3 residuals are NOT visually fixed**.
+Honest outcome (oracle > spec; the changes are correct partial steps, kept, not reverted):
+- **World (R1):** added an explicit `ambient_floor` uniform to `CelShade.gdshader` + wired it from
+  OPTION_BRIGHT (the shader runs `unshaded` so it never auto-received WorldEnvironment ambient). Correct
+  per environment.md §6.2a. **But** the re-capture (`mh-c13-world2.png`) is still near-black: the world's
+  **terrain (vertex-colour unshaded) + buildings (PBR) are NOT cel-shaded**, so the bulk of the world was
+  never the cel path. Root cause of the black world is elsewhere — terrain material/texture binding and/or
+  the night star-dome at noon (`stardome=1` @ keyframe 24) and/or the `boot_flow=world` camera (`State:
+  Login, Actors: 0`). This is the pre-existing **debt #3**, now narrowed (NOT cel) — needs a dedicated
+  world-render investigation with the **official area-2 capture** as the target.
+- **Create framing (R2):** added `AimCameraAtActorCentre` (measures the figure AABB, aims the held KF1
+  camera). **But** `mh-c13-create2.png` is unchanged — still only the **boots**: at ~30u camera distance,
+  scale 3.471 makes the figure too large to frame, and aiming alone can't fit it. Needs scale/distance
+  tuning iterated against the **official create capture** (full-figure vs bust is itself unconfirmed).
+- **Skinning idle (R2):** the all-vertex probe rewrite is a genuine diagnostic upgrade and **confirms** the
+  3-frame human idle clips produce **zero displacement across ALL vertices** (`liveDelta=0` everywhere),
+  while 36f/121f mob clips animate (`1.51`/`0.67`). So chars **render correctly (not exploded)** but the
+  human idle is **genuinely flat** — the long-standing skinning-*animation* debt (truly-static idle data or
+  deeper RE), not a regression.
+**Conclusion (superseded by P3c):** initially framed as needing the official captures — but the maintainer
+corrected the doctrine: **IDA is the absolute truth**; recover the exact behaviour from `doida.exe` and fix
+the C# to it (captures only confirm rendered pixels). Pivoted to IDA recovery (P3c).
+
+### Phase 3c — IDA-driven residual recovery (`wf_9608b6e9-804`) + fixes — **PARTIAL (1 real fix landed; 2 root-caused deeper)**
+3 analysts read `doida.exe` directly (every fact address-cited; notes in `_dirty/campaign13/residuals/`):
+- **World texture indexing — FIXED (real off-by-one, IDA-decisive).** IDA (`0x445833`/`0x44a46d`/store
+  `0x44b267`): the bgtexture pool is indexed by `intTexId` **DIRECTLY (0-based, NO −1)**; the only `−1` is on
+  the `.ted` byte (`Ted_ResolvePatchTextures 0x44b296`: clamp `[1,count]` → `perCellTexList[byte−1]`). The C#
+  `BgTextureCatalog.ResolveRelativePath` did `intTexId−1` → `intTexId=0` cells resolved to slot −1 → null →
+  missing textures (would break a real packed VFS). **`bgtexture_lst.md §Cross-file join` was WRONG** (it said
+  "1-based minus 1", contradicting the correct `terrain.md §3.5/§5.6`). Fixed: catalog now direct 0-based;
+  `RealWorldRenderer`/char-screens/water consume it directly; `.ted` byte clamp `[1,count]→1`; spec corrected
+  with IDA addresses; **`BgTextureCatalogTests` rewritten to direct-0-based (135 green)**. Build **0/0**.
+  *(Note: a windowed world capture is STILL near-black — the texture fix is correct + necessary but NOT the
+  black-world cause; the black is lighting/camera, see below.)*
+- **Create actor X — FIXED.** Anchor `(2048,0,−6144)` (`0x54824a`) → create actor world `(511.5, 0, −9682)`
+  (`0x545e1e`); C# used X=508.5 (the look-at pivot). Corrected to 511.5. Scale 81/70/50 ratio confirmed
+  (`0x545e3e`/`0x548555`). *(Does NOT cure the "boots" — that's the camera, below.)*
+- **DEEPER ROOT CAUSES (named with addresses, NOT yet fixed — next IDA recovery):**
+  - **World black = LIGHTING/camera, not texturing.** IDA: the world is *config-lit* via `DISPLAY_BASE` /
+    `GLOW_BRIGHT_MULTI` brightness scalars (`0x72e234`/`0x72e218`) + sun color (`0x721224`) + OPTION_BRIGHT
+    ambient — B2 stripped the "invented brightening" that approximated these without recovering the real
+    scalars. Need to recover + apply them (and confirm the `boot_flow=world` camera frames the town —
+    HUD shows `State: Login, Actors: 0`).
+  - **Create "boots" = the boom-rig eye.** `ApplyClassSelection` sets NO camera; the eye `(512,87,−9652)` is
+    NOT a binary literal (`find_bytes`=0) — it's computed each frame by a **boom rig** (`this+6204`, vtable+64,
+    `GPerspectiveCamera 0x60B917`). Our static eye is a guess; need the boom-rig algorithm.
+  - **Idle flat = data check pending.** IDA (`0x40d709`/`0x4029a5`/`0x41ede0`): the original animates a
+    displayed human EVERY frame (loop = `fmod(t, frame_count*0.1s)`, `floor(t*10)`). So the flat idle is either
+    a port loop/advance bug OR genuinely-identical idle `.mot` frames — decisive test = parse a real human idle
+    `g{id}.mot` and diff its keyframes (not in the binary; data-pending).
+**Net:** 1 real correctness fix landed (texture off-by-one + spec) + create-X; build **0/0 · tests green**; the
+3 *visible* symptoms have IDA-named deeper causes queued for the next recovery. No regressions.
+
+## Phase 4 — Review + hard gates + consolidate — **PENDING**
+Parallel read-only reviewers → fix wave → hard gates (build 0/0, spec-conformance suites green, firewall
+PASS, functional+visual checklist). ROADMAP in place, journal entry, stage `names.yaml`, update memory.
+**Commit only on explicit maintainer request**, targeted paths.
+
+---
+
+# CAMPAIGN 12 — C#/Godot Fidelity Completion ("everything possible") (launched 2026-06-16)
+
+**Mandate (maintainer):** "Continue the C11 direction — finish everything still possible on the C# (core
+01–04) AND Godot (05). Base it on what the **official game client** does (+ the IDA comprehension, the
+source of truth, + the C10-re-verified specs); **query IDA when unsure**. (1) Delete useless/wrong
+elements; (2) improve/correct/optimise to the cleanest + TRUEST vs IDA/spec; (3) deploy lots of agents +
+all needed skills; (4) **rewrite PLAN + ROADMAP** to set this direction. Make the C# the cleanest, most
+excellent, optimised and functional possible."
+
+**North stars:** N1 = total clean-room RE of `doida.exe` (DONE through C10; IDA stays queryable for
+confirmation only). **N2 (active driver)** = the faithful 1:1 port (core + Godot) must match the
+re-verified specs **and the official client's observable behaviour** exactly — clean-room-pure, zero-alloc
+on hot paths, idiomatic C#14/.NET10, no cruft.
+
+**Relationship to C10/C11:** C10 made the specs the truth; C11 ran a broad core-weighted audit→fix→gate
+(1944 tests green) but left non-blocking follow-ups and only **headless-smoke** verified the front-end.
+**C12 = the completion pass**: close the follow-ups, give Godot 05 the deep per-scene fidelity treatment,
+and **prove fidelity with the screenshot oracle** (campaign-9 lesson: spec-faithful ≠ pixel-faithful).
+
+**Method:** the `Workflow` tool drives the discovery + fix fan-outs (Ultracode). Clean-room firewall, the
+downward-only DAG, zero-alloc discipline, and the build/test/headless/screenshot gates all hold throughout.
+
+**Scope — 5 lane groups:** **V** visual fidelity (screenshot oracle) ★ · **F** deep C#/Godot fidelity
+(Godot-weighted) ★ · **C** cleanup/cruft · **W** wire/data paths (kill DEV-seed-only) · **R** RE legibility
+(`names.yaml` sync, IDB-only, parallel).
+
+**Out of scope:** the game server; live debugger/capture (debugger-pending facts stay pending, incl.
+`3/14`-vs-`4/1` spawn ordering); re-RE of settled specs; blanket-naming the ~19k unnamed IDB functions.
+
+## Phase 0 — Charter & pre-flight — **DONE 2026-06-16**
+- [x] On `master` after the campaign3→master merge (PR #1 `970e0a7`, + formatting `6cf31c5`); tree clean.
+- [x] Branched **`campaign12`** off master (no work on the default branch).
+- [x] IDA MCP UP on `doida.exe` `263bd994` (Hex-Rays ready) — queryable for confirmation.
+- [x] `Docs/PLAN.md` rewritten to the C12 charter; this ROADMAP section prepended; C11 Phase 5 closed.
+- [ ] Baseline gate re-confirm (trust C11's 1944-green; cheap re-confirm before the fix waves land).
+
+## Phase 1 — Discovery audit (Workflow, read-only, massively parallel) — **DONE 2026-06-16**
+`campaign12-discovery` (`wf_60ff8fa3-311`): 15 lanes (7 Godot-weighted + 5 core + 3 cross-cutting) →
+**106 findings** (11 high / 29 medium / 66 low). By category: fidelity 44, delete 18, optimize 14, bug 10,
+cleanroom 10, wire 9, test-gap 1. Triaged by owning area into a fix-lane worklist. Tier-1 RESOLVED the
+load-bearing `actormotion` idle off-by-one (4 C# sites + 2 docs read `cols[16]`; the IDB-confirmed format
+spec says **col15 = motion_ids_a[0] @ +0x40** — `cols[16]→cols[15]`).
+
+## Phase 2 — Fix waves (Workflow, one writer per area) — **DONE 2026-06-16**
+`campaign12-fix` (`wf_b2ecb46b-aec`): 7 disjoint-file lanes → **50 applied / 7 skipped / 4 deferred**.
+Headlines: GameHud invented ZoneIndicator pill DELETED (+ dead Unknown chrome); `ServerListDrainer.cs`
+NEW wire→view adapter (ServerListReceivedEvent → ServerSelectScreen); chat everyday channels → 2/7 (was
+3/21) + CP949 body/name + ChatRouting.Validate; LuaConfigRecord CP949 doc + DISPLAY_FRAMERATE→ShowFpsCounter;
+EnvironmentNode per-frame fog scalar (s×3.0); glow→Additive; World.tscn procedural-sky removed; CelShade
+post-process gate; effect placeholder removed; CmsgSelectCharacter→manage+delete Mode; outbound single-rental
++ pooled keepalive header; InputRouter modifier bitmask (Alt=0x8); idle `cols[15]` ×3; LocalAppPaths deleted.
+**Tier-1 reconciliation** (test/source coordinated, the lanes couldn't cross files): rewrote the chat test to
+2/7; `DisplayFramerate→ShowFpsCounter`; `CmsgSelectCharacter.Flag→Mode`; `BillingState→BillingFlag` (field +
+GamePacketHandler + PacketRouterTests); removed the new CS0649 (dead `LiveEffect.Particles`). Docs (Tier-1):
+`frontend_scenes.md §3.3.4` idle col15 + `CLAUDE.md` skeleton `g{id_b}.bnd` disambiguation (+ removed a
+`_dirty/` citation leak in CLAUDE.md). Deferred (noted): `LobbyServerRecord.ServerId` ushort→i16 (wide
+ripple, runtime-neutral); `FrameSplitter` zero-alloc (primitive `DecompressPayloadInto` ready — needs a
+scratch-lifetime decision + perf-reviewer); SoundTable `>=`/Bgtexture reject-0 (kept strict — files are
+always exact size); slot-lock yaw-π (no lock model).
+
+## Phase 3 — Screenshot fidelity loop (Tier-1 Godot windowed) — **DONE 2026-06-16**
+Windowed capture of login / server / charselect / create vs the maintainer-verified oracle `mh-cs2-final`.
+**Caught a real C12 regression the C# build cannot see:** L3's CelShade post-process gate used `return` in
+`fragment()` (illegal in Godot shaders) → `SHADER ERROR` → all cel-shaded chars failed; fixed (select, not
+early-return). **Reverted 2 L2 spec-driven visual regressions** (oracle > spec, the campaign-9 doctrine):
+the free-look Euler camera (−32.67° looked at the ground, not the row; LookAt's −9° matches the oracle + KF
+geometry) → reverted `CharSelectCameraRig` to LookAt; and the create-preview boom removal (framed only the
+legs) → reverted `CharCreatePreview3D` to the campaign-9d boom framing (re-applied only the `cols[15]` idle
+fix). KEPT L3's horizontal water plane (reads as the temple-over-water and is more §3.6.5-correct than the
+old vertical curtain). Re-captured: charselect ≈ oracle (dark temple, braziers, 3 chars, water); create
+framing fixed. FLAGGED (pre-existing, NOT a C12 regression): the create close-up magnifies the known
+skinning static-pose/distortion debt → godot-skinning-specialist follow-up. Headless smoke clean; autoload +
+`client_dir.cfg` restored byte-exact.
+
+## Phase 4 — RE legibility: names.yaml pull (IDB-only) — **DONE 2026-06-16**
+`ida-naming-sync` pull (SHA match `263bd994`): the IDB carries **6981** analyst-named symbols (3585 funcs +
+3396 globals) absent from the 3343-entry glossary (campaigns 8–11 annotated far more than was ever
+re-synced). Staged to `Docs/RE/_dirty/names-pulled-263bd994.yaml` (gitignored) for **maintainer hand-merge**
+— NOT auto-merged into `names.yaml` (orchestrator-owned; the skill stages for review). No IDB writes.
+
+## Phase 5 — Hard gates + consolidate + commit — **DONE 2026-06-16**
+Authoritative nuke + `--no-incremental`: build **0 error / 0 warning** (improved from the baseline's 1
+pre-existing CS8600 — both it and the transient CS0649 cleared) · **1944 tests green** (12 suites, 0 failed).
+DAG PASS; firewall clean; headless boot clean; screenshots are the visual evidence. ROADMAP + memory updated;
+committed targeted paths on `campaign12`.
+
+---
+
 # CAMPAIGN 11 — C# Excellence & Fidelity (core layers 01–04 + Godot 05) (launched 2026-06-16)
 
 **Mandate (maintainer):** "With all the IDA Pro comprehension (the source of truth) and the now
@@ -60,11 +332,12 @@ Authoritative nuke + `--no-incremental` build **0 err / 1 pre-existing warn**; *
 failed, 0 skipped (was 1859; +2 new suites Network.Abstractions/Shared.Diagnostics, +85 tests). DAG PASS.
 Firewall: the two committed `_dirty/` citations removed. (Headless/screenshot Godot re-verify = follow-up.)
 
-## Phase 5 — Consolidate & commit — **IN PROGRESS**
-Phase-3a milestone committed `707ce31`; Phase-3b arch commit next. Remaining: `names.yaml` sync (deferred
-C10 ctor collisions); journal + memory; the residual follow-ups (GameHud "Unknown" pill dead chrome,
-lobby ServerSelect wire-adapter, the deeper deferred items). Reconciled the stale CLAUDE.md skeleton claim
-is a C10 item (still pending). Headless Godot screenshot-verify of the front-end fidelity fixes = follow-up.
+## Phase 5 — Consolidate & commit — **DONE 2026-06-16**
+Three milestones committed on campaign3: `b236830` (baseline) → `707ce31` (fix + reconcile, 135 files) →
+`8055b52` (arch). Then campaign3 was merged to `master` via PR #1 (`970e0a7`), with a formatting-only
+commit `6cf31c5` riding along. Memory `campaign11-csharp-excellence.md` written. **Follow-ups handed to
+CAMPAIGN 12** (see below): names.yaml sync, GameHud "Unknown" dead pill, ServerSelect wire-adapter, the
+stale CLAUDE.md skeleton claim, and the never-run **screenshot** fidelity verification.
 
 ---
 

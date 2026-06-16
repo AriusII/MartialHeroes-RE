@@ -34,6 +34,15 @@ CLEAN_ROOM_BLURB = (
     "behavior/layout in Docs/RE prose, then re-implement fresh from that spec."
 )
 
+GROUND_TRUTH_BLURB = (
+    "Ground-Truth Doctrine: doida.exe via IDA is the SINGLE absolute truth for the original's "
+    "behavior/data/layout — confirm open facts there (static forms the hypothesis, the ?ext=dbg "
+    "debugger confirms; never guess; STOP if MCP down). The committed Docs/RE specs "
+    "(formats/packets/structs/specs + opcodes.md) are the DERIVED truth and the only thing C# reads; "
+    "binary-vs-spec conflict => the binary wins, fix the spec. C#/Godot are measured against IDA+specs "
+    "(official captures are the oracle for rendered pixels)."
+)
+
 
 # --------------------------------------------------------------------------- I/O
 

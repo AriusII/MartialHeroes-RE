@@ -13,7 +13,14 @@ It dumps a placed node's **global AABB** (centre + min/max) at runtime and compa
 expected world position computed from the asset's cell/legacy coordinates. A mismatch that is a clean
 sign-flip on one axis is the signature of a handedness bug.
 
-## The conventions being checked (project ground truth)
+## The conventions being checked (IDA-derived ground truth)
+
+These negate-Z / negate-X conventions are **not arbitrary engine choices** — they are facts recovered
+from `doida.exe` and recorded in the committed `Docs/RE/` specs + `CLAUDE.md` "Coordinate conventions".
+This skill does not *decide* the convention; it **verifies the render obeys** the spec-recorded one.
+The actual placement code is the operative reference (the helper below is only a hypothesis); if code
+and spec disagree, that is an RE/spec question, not a number to fudge.
+
 
 - **WORLD geometry negates Z**: `Helpers/WorldCoordinates.ToGodot`: `(x, y, z) → (x, y, -z)`. Used by
   `BudMeshBuilder`, terrain, and world placement. Getting this backwards (negating X instead) is the

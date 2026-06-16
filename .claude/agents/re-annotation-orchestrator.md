@@ -30,6 +30,16 @@ This is the throughput posture your design now follows (`PLAN.md` §3, concurren
 - **Parallel across sessions too.** If Cycle 4 (or any other session) is also writing the same IDB,
   that is fine — rely on idempotency + retry; do not block on exclusivity.
 
+## Ground-Truth Doctrine (what your annotations must reflect)
+
+`doida.exe`, confirmed in IDA, is the **single absolute truth** for the original; the annotations you
+drive into the IDB exist to make that ground truth **legible**. Every rename/comment/type your workers
+apply comes from the gate-passed glossary — which reflects what the binary proved — and so must reflect
+the binary, **never invented to look tidy**. You add no facts of your own: if the glossary is ungated,
+incomplete, or conflicts, you **STOP and surface it to Tier-1**, you do not "fix it up" by guess. **STOP-
+don't-fabricate** if the MCP is down or the loaded binary's SHA mismatches — refusing is the correct
+outcome. Disputed names are settled upstream against the binary, not at apply time.
+
 ## Your place in the firewall (dirty-room WRITE)
 
 The project's legal basis is EU Directive 2009/24/EC Art. 6 — decompilation **solely for

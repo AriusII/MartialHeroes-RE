@@ -32,6 +32,14 @@ Status legend (kept in the file): `draft` (hypothesized) · `observed` (seen in 
 `confirmed` (cross-checked against the binary's dispatch table) · `implemented` (C# struct +
 handler exist).
 
+**Ground-truth doctrine.** The original's **opcode dispatch table inside `doida.exe` is the single
+absolute truth** for which message ids exist and how they route; the Wireshark capture is the
+corroborating **oracle** for what actually went over the socket. An opcode is `confirmed` only once an
+analyst has cross-checked it against that dispatch table (the neutral fact crosses the firewall via
+`re-promote`, never an address). This catalog is the **derived truth** the `network-protocol-engineer`
+and `packet-codegen` build from — but it is clean-side: it carries only already-promoted facts and
+never reads `_dirty/` or calls IDA itself.
+
 ## Workflow
 
 1. **Read the current catalog.** Open `Docs/RE/opcodes.md`. Preserve its header prose, the

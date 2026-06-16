@@ -130,6 +130,15 @@ public sealed partial class PinModal : Control
     /// </summary>
     public string? DevPrefillPin { get; set; }
 
+    /// <summary>
+    /// When true, the modal is hosted INSIDE an already-1024×768-scaled parent Control (the Login
+    /// scene's widget tree, per the engine-state-1 sub-view re-home) and must NOT self-scale to the
+    /// viewport — it simply fills the parent's reference rect. When false (default), the modal is a
+    /// standalone CanvasLayer-child overlay and sizes itself to the viewport with its own scaled
+    /// 1024×768 inner canvas. spec: Docs/RE/specs/frontend_scenes.md §1.4a / §11.3.
+    /// </summary>
+    public bool HostInReferenceSpace { get; set; }
+
     // =========================================================================
     // Godot lifecycle
     // =========================================================================
@@ -143,16 +152,25 @@ public sealed partial class PinModal : Control
         // spec: Docs/RE/specs/frontend_scenes.md §11.3c. CODE-CONFIRMED.
         Scramble();
 
-        // ---- Full-window coverage (same pattern as ScreenHost) ----
-        // The CanvasLayer parent is a plain Node, not a Control — anchors do not propagate
-        // the viewport rect. We must set our own Size explicitly, then track SizeChanged.
         MouseFilter = MouseFilterEnum.Stop; // block all clicks from reaching the login behind
 
-        ApplyViewportSize();
-        GetViewport().SizeChanged += OnViewportSizeChanged;
+        if (HostInReferenceSpace)
+        {
+            // In-login sub-view: our parent (the Login scene) is a Control already sized/scaled to
+            // 1024×768, so we just fill its reference rect with FullRect and use an UNSCALED inner
+            // canvas (1:1). No viewport self-scaling — that would double-scale.
+            // spec: Docs/RE/specs/frontend_scenes.md §11.3 (panel-local layout preserved verbatim).
+            SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        }
+        else
+        {
+            // Standalone CanvasLayer-child overlay: the parent is a plain Node (not a Control), so
+            // anchors do not propagate the viewport rect. Size ourselves explicitly and track resize.
+            ApplyViewportSize();
+            GetViewport().SizeChanged += OnViewportSizeChanged;
+        }
 
-        // Reference canvas: fixed 1024×768, scaled to fill our Size exactly (fill-scale,
-        // same non-uniform mode as ScreenHost).  The dim rect and the panel go inside here.
+        // Reference canvas: fixed 1024×768.  The dim rect and the panel go inside here.
         _canvas = new Control
         {
             Name = "RefCanvas",
@@ -161,7 +179,11 @@ public sealed partial class PinModal : Control
             MouseFilter = MouseFilterEnum.Ignore,
         };
         AddChild(_canvas);
-        ApplyCanvasScale();
+
+        // Standalone overlay scales the inner canvas to fill the window; in reference-space hosting
+        // the parent already applies the 1024→window scale, so the inner canvas stays 1:1.
+        if (!HostInReferenceSpace)
+            ApplyCanvasScale();
 
         try
         {
@@ -182,7 +204,9 @@ public sealed partial class PinModal : Control
 
     public override void _ExitTree()
     {
-        if (IsInstanceValid(GetViewport()))
+        // We only subscribed to the viewport SizeChanged signal in standalone (non-reference-space)
+        // mode; only unsubscribe in that case.
+        if (!HostInReferenceSpace && IsInstanceValid(GetViewport()))
             GetViewport().SizeChanged -= OnViewportSizeChanged;
 
         if (_ownsAssets) _assets?.Dispose();
@@ -282,9 +306,13 @@ public sealed partial class PinModal : Control
         // NinePatch centre is mostly transparent. Aesthetic-tuned.
         // -------------------------------------------------------------------
 
-        // Opaque dark backdrop so the modal reads as a distinct panel on any background.
-        // Aesthetic — no spec art at this exact position; the dim layer covers the whole screen,
-        // and this inner rect makes the PIN panel distinctly legible.
+        // Deliberate non-spec modal dim: a solid dark rect behind the NinePatch chrome so the
+        // PIN panel reads as a distinct opaque surface on any background content. There is no
+        // spec art for this inner fill rect (the spec only describes the NinePatch dragon-frame
+        // from InventWindow.dds). This ColorRect is retained as a deliberate port-side legibility
+        // aid; it does not represent a recovered asset.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.3 — NinePatch dragon-frame is the only
+        //   recovered art for this position; inner fill = port-side legibility aid (NON-SPEC).
         var backdropRect = new ColorRect
         {
             Name = "PinBackdrop",

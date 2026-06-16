@@ -19,6 +19,14 @@ raw sample/decompiler insight (dirty) -> neutral spec in `formats/` (committed) 
 implements fresh. This skill writes the neutral spec and helps you read the byte layout; it does
 **not** read IDA output and does **not** write any C#.
 
+**Ground-truth doctrine.** A binary format's real layout is the truth — ultimately proved in the
+original's parser routines inside `doida.exe` (an analyst's job, in `_dirty/`) and here corroborated
+by **witnessing the maintainer's own sample bytes** through the hexdump tool. The committed
+`Docs/RE/formats/<ext>.md` you seed becomes the **derived truth** the `Assets.Parsers` engineer
+re-implements from. Record only layout (offsets/sizes/types/enums) — never the sample's payload
+bytes; a field you cannot witness or that needs the loader code goes to "Known unknowns" for an
+analyst to confirm in IDA, not a guess.
+
 ## Hard rules (non-negotiable)
 
 1. **Never commit sample bytes.** The annotated hexdump derived from a real asset is

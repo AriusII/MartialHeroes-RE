@@ -31,7 +31,9 @@ namespace MartialHeroes.Client.Godot.Autoload;
 ///   - <see cref="Dispatcher"/>: the inbound frame dispatcher (allows synthetic test frames).
 ///   - <see cref="InputBus"/>: the input chain-of-responsibility bus (UI first, world second).
 ///   - <see cref="EngineLoop"/>: the fixed-tick 30 Hz simulation loop.
-///   - <see cref="ItemCatalogue"/>: item definitions from items.csv (CP949 names).
+///   - <see cref="ItemCatalogue"/>: item definitions from data/script/items.scr, the runtime
+///     master the shipping client loads (CP949 names). items.csv is an authoring/dev export the
+///     shipping client never reads. spec: Docs/RE/formats/items_csv.md §6, items_scr.md §4.
 ///   - <see cref="SkillCatalogue"/>: skill definitions from skills.scr.
 ///   - <see cref="MobCatalogue"/>: mob definitions from mobs.scr.
 ///
@@ -299,9 +301,12 @@ public sealed partial class ClientContext : Node
         ILoginHandshakeDriver? loginDriver = null;
 
         // 9. InputBus — UI handler first, world handler wired after InputRouter is created.
-        //    The HudInputHandler is a pass-through until a real UI hit-test is wired.
+        //    The HudInputHandler starts as a pass-through (hitTest: null); the live GameHud.HitTest
+        //    is wired later via SetHudHitTest() once GameLoop initialises the HUD node.
+        //    F1 fix: store in _hudInputHandler so SetHudHitTest can reach it.
         //    spec: Docs/RE/specs/input_ui.md §3 / §6 (UI before world).
-        var hudHandler = new HudInputHandler(hitTest: null); // HUD hit-test: TODO real bridge.
+        var hudHandler = new HudInputHandler(hitTest: null);
+        _hudInputHandler = hudHandler; // F1: stored for late SetHitTest wiring. spec: input_ui.md §3/§6.
 
         // The world handler is created by InputRouter, so we build InputBus with only the
         // HUD handler for now; the world handler is appended via a late-binding relay.
@@ -333,7 +338,10 @@ public sealed partial class ClientContext : Node
         }
 
         // 12. Catalogue items / skills / mobs for UI display names (CP949).
-        //     spec: Docs/RE/formats/config_tables.md §4 items.csv / §2.8 skills.scr / §2.9 mobs.scr.
+        //     Items come from the runtime master data/script/items.scr (NOT items.csv, an
+        //     authoring-only dev export the shipping client never loads).
+        //     spec: Docs/RE/formats/items_scr.md §4 + items_csv.md §6 (items) /
+        //     config_tables.md §2.8 skills.scr / §2.9 mobs.scr.
         try
         {
             ItemCatalogue = ItemCatalogue.FromLoader(_catalogueLoader);
@@ -564,6 +572,7 @@ public sealed partial class ClientContext : Node
             var world = new ClientWorld();
             var noopSink = new NoOpOutboundPacketSink();
             var hudHandler = new HudInputHandler(hitTest: null);
+            _hudInputHandler = hudHandler; // F1: stored for late SetHitTest wiring. spec: input_ui.md §3/§6.
             var worldRelay = new RelayInputHandler();
             var inputBus = new InputBus(hudHandler, worldRelay);
             var credentialStore = new LoginCredentialStore();
@@ -640,6 +649,11 @@ public sealed partial class ClientContext : Node
     // Typed as Action<IInputHandler> to avoid exposing the file-local type in the member signature.
     private Action<IInputHandler>? _setWorldHandler;
 
+    // Stored so GameLoop can wire the live GameHud.HitTest after the HUD node is initialised.
+    // This is the fix for F1: "UI is the gate" hit-test is never wired.
+    // spec: Docs/RE/specs/input_ui.md §3 / §6.
+    private HudInputHandler? _hudInputHandler;
+
     /// <summary>
     /// Called by InputRouter after it is ready: wires the world input handler into the bus.
     /// spec: Docs/RE/specs/input_ui.md §3 — world handler registered after UI handler.
@@ -647,6 +661,17 @@ public sealed partial class ClientContext : Node
     public void SetWorldInputHandler(IInputHandler worldHandler)
     {
         _setWorldHandler?.Invoke(worldHandler);
+    }
+
+    /// <summary>
+    /// Called by GameLoop after GameHud is initialised: wires the live HUD hit-test so
+    /// pointer events over HUD panels are consumed before the world handler sees them.
+    /// Fixes F1: "UI is the gate" was dead because HudInputHandler was constructed with null.
+    /// spec: Docs/RE/specs/input_ui.md §3 / §6 — "UI hit-test always before world interaction".
+    /// </summary>
+    public void SetHudHitTest(Func<int, int, bool> hitTest)
+    {
+        _hudInputHandler?.SetHitTest(hitTest);
     }
 
     public override void _ExitTree()

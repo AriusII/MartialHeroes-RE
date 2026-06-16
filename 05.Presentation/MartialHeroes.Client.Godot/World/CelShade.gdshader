@@ -35,10 +35,27 @@ render_mode unshaded, cull_disabled, depth_draw_always;
 
 // ---- Uniforms ----
 
+// Post-process gate: the original DX8 engine couples cel/dotoonshading to the offscreen post-process
+// path. When the post-process flag is off, the client falls back to a plain diffuse draw (no ramp).
+// spec: Docs/RE/specs/rendering.md §5.1a — cel gated on the offscreen post-process flag.
+// Wired by CelShadeMaterialFactory.CelEnabled; default true (post-process on).
+uniform bool cel_enabled = true; // spec: Docs/RE/specs/rendering.md §5.1a
+
 // Albedo texture (character skin, bound by CelShadeMaterialFactory from skin.txt chain).
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap;
 uniform vec4 albedo_color : source_color = vec4(0.85, 0.75, 0.65, 1.0);
 uniform bool use_albedo_texture = false;
+
+// Ambient floor — reproduces the D3DRS_AMBIENT full-white additive floor at OPTION_BRIGHT = 100.
+// The original DX9 device sets device-ambient = (255,255,255) at default OPTION_BRIGHT = 100, which
+// adds a full-white constant to every surface independently of the toon N·L term. Without this floor,
+// surfaces whose toon ramp evaluates near 0 appear black in the Godot port because the shader runs
+// render_mode unshaded and does NOT pick up WorldEnvironment ambient.
+// spec: Docs/RE/specs/environment.md §6.2a — OPTION_BRIGHT default 100 → device_ambient = (255,255,255).
+// spec: Docs/RE/specs/environment.md §6.2b — "Set ambient_light_energy = OPTION_BRIGHT/100 = 1.0 (full)."
+// Wired by CelShadeMaterialFactory from EnvironmentNode.OptionBrightFloor; default = 1.0 (full white).
+uniform float ambient_floor_energy = 1.0; // spec: Docs/RE/specs/environment.md §6.2a, default OPTION_BRIGHT=100 → 1.0
+uniform vec4 ambient_floor_color : source_color = vec4(1.0, 1.0, 1.0, 1.0); // spec: environment.md §6.2a — achromatic white
 
 // Toon ramp LUT — 1-D ramp, sampled at (luminance, 0.5).
 // spec: Docs/RE/formats/shaders.md §C5.3 — toonramp.bmp, stage 1, 1-D N·L cel ramp.
@@ -126,7 +143,26 @@ void fragment() {
         tone = vec3(band);
     }
 
-    // ---- Composite: albedo × tone ----
-    ALBEDO = base.rgb * tone;
+    // ---- Ambient floor (additive white base lift) ----
+    // The original DX9 device-ambient is a full-white additive constant at OPTION_BRIGHT = 100:
+    //   device_ambient = (255,255,255) → adds base.rgb * 1.0 to every surface every frame.
+    // This shader runs render_mode unshaded so it does NOT pick up WorldEnvironment ambient; we
+    // must inject it explicitly. The ambient contribution is albedo × ambient_color × energy, which
+    // is added to the toon-modulated output so shadowed surfaces (tone ≈ 0.1) are still lifted.
+    // spec: Docs/RE/specs/environment.md §6.2a — OPTION_BRIGHT default 100 → device_ambient white.
+    // spec: Docs/RE/specs/environment.md §6.2b — "ambient_light_energy = OPTION_BRIGHT/100 = 1.0".
+    vec3 ambient = base.rgb * ambient_floor_color.rgb * ambient_floor_energy;
+
+    // ---- Composite (with the post-process gate) ----
+    // cel_enabled true  → albedo × toon_tone + ambient_floor (reproduces D3D ambient + toon).
+    // cel_enabled false → albedo + ambient_floor (plain diffuse fallback + ambient, no ramp).
+    // Expressed as a select (NOT an early return — Godot's fragment() processor forbids 'return').
+    // spec: Docs/RE/specs/rendering.md §5.1a — cel gated on post-process flag.
+    // spec: Docs/RE/specs/environment.md §6.2a — ambient is additive, not multiplicative by toon.
+    //
+    // clamp to [0,1]: the D3D9 backbuffer write saturates at 255 per channel. With ambient=1.0,
+    // the sum (tone + 1.0) * base can exceed 1.0 in an HDR linear Godot pipeline; clamping here
+    // reproduces the D3D saturation. Toon banding still reads as subtle variation near 1.0.
+    ALBEDO = clamp(cel_enabled ? base.rgb * tone + ambient : base.rgb + ambient, vec3(0.0), vec3(1.0));
     ALPHA  = base.a;
 }

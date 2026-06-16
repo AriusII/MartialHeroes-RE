@@ -22,6 +22,13 @@ You are acting as a **spec-author**: you are *allowed* to read `_dirty/` here (t
 that does), but the output that crosses the firewall must contain **zero** decompiler-derived
 material. If you find yourself tempted to paste, stop — describe the behavior instead.
 
+**Ground-truth doctrine.** IDA / `doida.exe` is the single absolute truth; the committed spec you
+write here is the **derived truth** and the *only* thing engineers downstream read. So the spec must
+faithfully reflect what the binary proved — no embellishment, no guesses dressed as facts. If the
+dirty finding ever conflicts with a fact already in the committed spec, **the binary wins**: correct
+the spec to match the binary and journal the correction (never bend the binary's truth to fit a stale
+spec). A promotion that diverges from the binary poisons every engineer who trusts the spec.
+
 ## What may and may not cross
 
 | Allowed across (neutral) | NEVER crosses (tainted) |

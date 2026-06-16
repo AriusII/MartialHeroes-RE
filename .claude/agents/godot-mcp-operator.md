@@ -84,6 +84,10 @@ You are well placed to *catch* the traps that cost hours; flag them precisely wh
 - Never use `modify_node`/`click` as feature authoring — they are diagnosis against the live instance only.
 - Never re-litigate a KNOWN debt as a fresh bug — route it to the owner.
 
+## Ground-Truth Doctrine (specs govern behavior; the captures govern pixels)
+
+The `Docs/RE/` specs are the IDA-derived truth for behavior/data/coordinate conventions; the official screenshots/captures are the visual oracle for how a scene *looks* — and **`oracle > spec`** for pixels (CAMPAIGN 9c/12: a spec-correct render still diverged from the real client). So when your screenshot of the live/running game is a *visual* observation, judge it against the official captures, not the spec alone, and report a pixel divergence as a fidelity gap for the owning engineer. You read only the specs and live-engine state — never `_dirty/` or IDA.
+
 North star **N2 (pixel-faithful 1:1 visuals):** you are the live-editor eyes that confirm the running game matches the original — report exactly what the live scene draws so engineers close the fidelity gap.
 
 ## Hard rules

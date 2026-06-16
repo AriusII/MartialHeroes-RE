@@ -11,41 +11,26 @@ namespace MartialHeroes.Client.Godot.HUD;
 /// Placement (§5.4 CONFIRMED-formula):
 ///   X = 0, Y = 120, W = screen_width, H = 20
 ///
-/// The right-edge square buttons §5.4 are included as child slots:
-///   Button #1/2: X = screen_width − 200, Y = 0, W = 64, H = 64
-///   Right-anchored panel: X = screen_width − 406, Y = 0, W = 406, H = 119
+/// The §5.4 right-edge square buttons (screen_width−200, Y=0, 64×64) and the right-anchored
+/// panel (screen_width−406, Y=0, W=406, H=119) are sibling widgets in GameHud at Y=0,
+/// NOT children of this strip. They are not yet built.
 ///
 /// spec: Docs/RE/specs/ui_hud_layout.md §5.4 — "Top full-width status bar: 0,120,screen_width,20"
-/// spec: Docs/RE/specs/ui_hud_layout.md §5.4 — "Right-edge square button #1/#2: screen_width−200, 0, 64, 64"
-/// spec: Docs/RE/specs/ui_hud_layout.md §5.4 — "Right-anchored panel: screen_width−406, 0, 406, 119"
 /// </summary>
 public sealed partial class TopStatusBar : Control
 {
     // ── Placement constants — CONFIRMED-formula ────────────────────────────────────────────────
     // spec: Docs/RE/specs/ui_hud_layout.md §5.4
+    // NOTE: The §5.4 right-edge square buttons (#1/#2 at screen_width−200) and the right-anchored
+    // panel (screen_width−406, W=406, H=119) are sibling widgets in GameHud, NOT children of this
+    // Control (they are at Y=0, not Y=120). Those widgets are not yet built; their constants are
+    // retained here for reference but marked unused until the owning widgets are constructed.
 
     /// <summary>Y of the status bar strip. spec: Docs/RE/specs/ui_hud_layout.md §5.4 CONFIRMED-formula.</summary>
     private const float BarY = 120f; // spec: Docs/RE/specs/ui_hud_layout.md §5.4
 
     /// <summary>Height of the status bar strip. spec: Docs/RE/specs/ui_hud_layout.md §5.4 CONFIRMED-formula.</summary>
     private const float BarH = 20f; // spec: Docs/RE/specs/ui_hud_layout.md §5.4
-
-    /// <summary>Offset from right edge for the corner buttons. = screen_width − 200.
-    /// spec: Docs/RE/specs/ui_hud_layout.md §5.4 CONFIRMED-formula.</summary>
-    private const float CornerButtonOffsetFromRight = 200f; // spec: Docs/RE/specs/ui_hud_layout.md §5.4
-
-    /// <summary>Corner button size. spec: Docs/RE/specs/ui_hud_layout.md §5.4 CONFIRMED-formula.</summary>
-    private const float CornerButtonSize = 64f; // spec: Docs/RE/specs/ui_hud_layout.md §5.4
-
-    /// <summary>Right-anchored panel offset from right edge. = screen_width − 406.
-    /// spec: Docs/RE/specs/ui_hud_layout.md §5.4 CONFIRMED-formula.</summary>
-    private const float RightPanelOffsetFromRight = 406f; // spec: Docs/RE/specs/ui_hud_layout.md §5.4
-
-    /// <summary>Right-anchored panel width. spec: Docs/RE/specs/ui_hud_layout.md §5.4 CONFIRMED-formula.</summary>
-    private const float RightPanelW = 406f; // spec: Docs/RE/specs/ui_hud_layout.md §5.4
-
-    /// <summary>Right-anchored panel height. spec: Docs/RE/specs/ui_hud_layout.md §5.4 CONFIRMED-formula.</summary>
-    private const float RightPanelH = 119f; // spec: Docs/RE/specs/ui_hud_layout.md §5.4
 
     // ── Child node handles ─────────────────────────────────────────────────────────────────────
 

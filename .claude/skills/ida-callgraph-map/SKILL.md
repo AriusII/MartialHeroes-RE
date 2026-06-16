@@ -17,6 +17,11 @@ feature, and choosing the next function worth reading closely.
 All output is **dirty** (addresses derived directly from the copyrighted binary) and lands under
 `Docs/RE/_dirty/static/`.
 
+**Ground truth:** every edge is read FROM the IDA call graph, never assumed from memory or a guess at
+how a subsystem "is usually wired." The static graph shows all candidate edges; which virtual/indirect
+edge actually runs is confirmed in the live debugger (below). MCP down / wrong DB ⇒ STOP, never invent
+an edge.
+
 ## Preconditions (do these first, in order)
 
 1. **MCP must be green.** Run `/ida-mcp-connect`; confirm a live IDA Pro 9.3 MCP server at

@@ -35,6 +35,7 @@ namespace MartialHeroes.Client.Godot.HUD;
 /// Append routing (per spec §6.3, CODE-CONFIRMED · route):
 ///   channel &lt; 100      → normal chat log append.
 ///   channel == 11      → distinct insertion (PLAUSIBLE — purpose unrecovered; treated as say).
+///   channel == 100     → dropped.
 ///   channel &gt; 100 &amp;&amp; != 110 → routed to a separate floating-notice system (dropped here).
 ///   channel == 110     → dropped.
 ///   spec: Docs/RE/specs/chat.md §6.3 (append sink routing rules).
@@ -130,10 +131,16 @@ public sealed partial class ChatWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Channels ≥ this value are routed to the separate floating-notice system, not the log.
+    /// Channels above this value (i.e. > 100) are routed to the separate floating-notice system.
     /// spec: Docs/RE/specs/chat.md §6.3 — "channel > 100 → floating-notice system".
     /// </summary>
     private const int FloatingNoticeThreshold = 100; // spec: Docs/RE/specs/chat.md §6.3
+
+    /// <summary>
+    /// Channel 100 is always dropped (routing sentinel, not a normal chat channel).
+    /// spec: Docs/RE/specs/chat.md §6.3 — "channel == 100 → dropped".
+    /// </summary>
+    private const int DroppedChannel100 = 100; // spec: Docs/RE/specs/chat.md §6.3
 
     /// <summary>
     /// Channel 110 is always dropped.
@@ -334,6 +341,7 @@ public sealed partial class ChatWindow : Control
     {
         // Apply append-sink routing rules.
         // spec: Docs/RE/specs/chat.md §6.3 — routing CODE-CONFIRMED · route.
+        if (channelCode == DroppedChannel100) return; // spec §6.3 — channel 100 dropped
         if (channelCode == DroppedChannel110) return; // spec §6.3 — channel 110 dropped
         if (channelCode > FloatingNoticeThreshold) return; // spec §6.3 — >100 floating-notice, not chat log
 
@@ -468,27 +476,6 @@ public sealed partial class ChatWindow : Control
     }
 
     // -------------------------------------------------------------------------
-    // Demo mode (no hub bound)
-    // -------------------------------------------------------------------------
-
-    private void AppendDemoLines()
-    {
-        // Show one line per channel so the colour table is visible in offline/demo mode.
-        // spec: Docs/RE/specs/chat.md §3 — channel → colour (CODE-CONFIRMED).
-        AppendLineInternal(0, "[Say] 안녕하세요! (Hello in Korean — CP949 safe rendering)", ArgbForChannel(0));
-        AppendLineInternal(1, "[Shout] 마샬 히어로즈 온라인 복원 프로젝트", ArgbForChannel(1));
-        AppendLineInternal(2, "[Party] Party member joined the area.", ArgbForChannel(2));
-        AppendLineInternal(3, "[Guild] Guild message — 길드 메세지", ArgbForChannel(3));
-        AppendLineInternal(6, "[Event] Event channel — 이벤트", ArgbForChannel(6));
-        AppendLineInternal(7, "[Special] Special event notification.", ArgbForChannel(7));
-        AppendLineInternal(9, "[Whisper] 속삭임 — log-only, no overhead bubble.", ArgbForChannel(9));
-        AppendLineInternal(15, "[Alliance] Alliance broadcast — 동맹", ArgbForChannel(15));
-        AppendLineInternal(0, "— DEMO MODE — Bind(hub) to receive live chat lines from IHudEventHub.ChatLines —",
-            0xFF888888u);
-        _logDirty = true;
-    }
-
-    // -------------------------------------------------------------------------
     // Submit handling
     // -------------------------------------------------------------------------
 
@@ -539,6 +526,7 @@ public sealed partial class ChatWindow : Control
     {
         // Apply routing filter (also enforced in AppendLine for external callers).
         // spec: Docs/RE/specs/chat.md §6.3.
+        if (channelCode == DroppedChannel100) return;
         if (channelCode == DroppedChannel110) return;
         if (channelCode > FloatingNoticeThreshold) return;
 

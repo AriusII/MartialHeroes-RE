@@ -160,19 +160,6 @@ public sealed partial class FrontEndAudio : Node
         GD.Print("[FrontEndAudio] Login curtain SFX 861010105 played.");
     }
 
-    /// <summary>
-    /// Plays the UI-click SFX (<c>861010101.ogg</c>) as a one-shot.
-    /// Call from any front-end button handler (login, server-select, PIN, char-select).
-    /// spec: Docs/RE/specs/sound.md front-end cue map. CODE-CONFIRMED.
-    /// </summary>
-    public void PlayClickSfx()
-    {
-        if (_clickPlayer is null || _clickPlayer.Stream is null) return;
-        // Re-start from the beginning so rapid clicks always trigger.
-        if (_clickPlayer.Playing) _clickPlayer.Stop();
-        _clickPlayer.Play();
-    }
-
     // -------------------------------------------------------------------------
     // Private loaders
     // -------------------------------------------------------------------------
