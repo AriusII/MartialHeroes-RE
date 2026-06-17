@@ -22,17 +22,23 @@ verification:
     - device-ambient render-state token = 139; fog-colour render-state token = 34
     - OPTION_BRIGHT at options-struct offset +116 (field index 29); cached offset reused per frame
     - per-area env files keyed by the current-area-id global
+  sample-verified:         # read verbatim from a real VFS file (no IDA needed for the value)
+    - display.lua DISPLAY_BASE_BRIGHT_MULTI = 1.05 (world/background geometry brightness, y=1.05·x+0)
+    - display.lua DISPLAY_LIGHT_RATIO = 0.5 (CHARACTER light-colour correction only, range 0..1)
   static-hypothesis:       # single static inference, not yet control-flow-tight
     - exact fallback direction numerals (-7, 7, 20) — fallback dwords present, not byte-decoded this pass
     - lighting-manager constructor zeroing the ambient base to (0,0,0) — carried, not re-read this pass
     - indoor suppression mechanism + indoor fog behaviour — outside this pass' anchor set
+    - display.lua apply-path: which render stage / D3D state / shader constant each display.lua
+      brightness scalar multiplies into — IDA-PENDING (the dirty IDA lane crashed before recovering
+      the render-stage reads; only the loader-writes-three-fields hypothesis is carried)
   capture/debugger-pending:  # needs the live client / a frame capture to settle
     - on-screen ambient pixel colour at default brightness (the math proves white; the pixel does not)
     - matrix major-order / up-axis / unit scale
     - whether a player's saved DoOption.ini carries a brightness below 100
   ida_reverified: 2026-06-16
   ida_anchor: 263bd994
-  evidence: [static-ida]
+  evidence: [static-ida, sample-vfs]
   conflicts: none of substance (one §3.1/§1.1 wording tightening — material + light are hub-internal)
 -->
 
@@ -42,8 +48,8 @@ verification:
 
 | Attribute         | Value |
 |-------------------|-------|
-| `status`          | `sample-verified` for the file loading model, day/night cycle math, and area 2 parameter values; `partial` for indoor lighting detail; water renderer: **RESOLVED-NEGATIVE** (see §4); lighting apply-path numeric defaults: **CONFIRMED** (see §6.2a — `K_ambient` = 0.0, `OPTION_BRIGHT` default 100) |
-| `sample_verified` | `true` — file layouts and flag values confirmed against real VFS samples for areas 0, 1, and spot-checked areas 4–35. Area 2 (the current Godot demo area) values read directly from area-2 samples. |
+| `status`          | `sample-verified` for the file loading model, day/night cycle math, area 2 parameter values, and the `display.lua` brightness scalar values (§9); `partial` for indoor lighting detail; water renderer: **RESOLVED-NEGATIVE** (see §4); lighting apply-path numeric defaults: **CONFIRMED** (see §6.2a — `K_ambient` = 0.0, `OPTION_BRIGHT` default 100); `display.lua` apply-path: **IDA-pending** (see §9.4) |
+| `sample_verified` | `true` — file layouts and flag values confirmed against real VFS samples for areas 0, 1, and spot-checked areas 4–35. Area 2 (the current Godot demo area) values read directly from area-2 samples. `display.lua` scalars read verbatim from the real VFS file (§9). |
 | `binary_analysed` | `doida.exe` (legacy client) — sky init call chain, GRSFog/GRSLighting structs, D3D9 render-state usage, lighting/fog apply-path, ambient-gate + brightness-slider recovery, water xref exhaustive scan |
 | `confidence`      | Per-claim confidence follows the same scale as `environment_bins.md`: CONFIRMED / SAMPLE-VERIFIED / CODE-CONFIRMED / PROPOSED |
 
@@ -68,6 +74,11 @@ these define the area's visual environment:
 | Point lights | `point_light%d.bin` | always (count may be 0) |
 | Weather | `weather%d.bin` + `weather%d_rain.bin` | OPTION_WEATHER tier ≥ 1 |
 | Wind/foliage | `wind%d.bin` | always (count may be 0) |
+
+A further global layer, `data/script/display.lua`, supplies tunable display-config scalars
+(world/background brightness, character light correction, glow/bloom, the per-state character tint
+table). The world-brightness scalars of that layer are documented in §9; the glow/bloom and
+per-state character-tint scalars are in `Docs/RE/specs/rendering.md`.
 
 All file specifications (offsets, sizes, field types) are in `Docs/RE/formats/environment_bins.md`
 (colour `.bin` family) and `Docs/RE/formats/sky.md` (the `sky%d.box` geometry + parser load-order view).
@@ -357,6 +368,7 @@ spec; Godot parameters are chosen for best-fit equivalence.
 | Directional light direction | Static fallback `(-7, 7, 20)` normalised (no per-keyframe direction — §6.2a) | `DirectionalLight3D` transform rotation |
 | Ambient light colour (keyframe) | `light%d.bin` §B `color_A` (RGB f32) × `K_ambient` (= 0 in the original — §6.2a; inert) | `WorldEnvironment → Environment.ambient_light_color` |
 | Ambient light floor (brightness) | `OPTION_BRIGHT / 100` additive, **default 1.0** (§6.2a/§6.2b) | `WorldEnvironment → Environment.ambient_light_energy` |
+| World/background brightness multiplier | `display.lua` `DISPLAY_BASE_BRIGHT_MULTI` = **1.05** (§9.2; apply-path IDA-pending §9.4) | multiply on the world-geometry / background scene brightness |
 | Fog colour | `fog%d.bin` `fog_colors[kf]` (BGRA byte → RGB, `/255` port step) | `WorldEnvironment → Environment.fog_light_color` |
 | Fog distance (live) | `light%d.bin` §C scalar `s`: range = `s × 3.0` (§6.2a) | `WorldEnvironment → Environment.fog_depth_end` |
 | Fog distance (baseline) | `fog%d.bin` `start_dist` / `end_dist` × view_range (seeds, overwritten per frame) | `WorldEnvironment → Environment.fog_depth_begin/end` |
@@ -520,6 +532,10 @@ The Godot `EnvironmentNode` reproduces the per-keyframe directional/ambient tabl
    white of level `OPTION_BRIGHT / 100 = 1.0` over a `(0,0,0)` base. The faithful default floor is
    **1.0 (full)**, NOT 0.5.
 
+> **NOTE — `DISPLAY_BASE_BRIGHT_MULTI = 1.05` is NOT the dark-world cause (§9.5).** The
+> `display.lua` world-brightness multiplier is a ~neutral +5% uplift and cannot produce a near-black
+> scene; do not re-chase it as the fix. The root cause is the two facts above. See §9.5.
+
 **Recommended fix (engineering guidance — for the Godot layer to apply).** Set the
 `WorldEnvironment` ambient floor to the brightness term in [0,1], defaulting to **1.0**:
 
@@ -585,6 +601,7 @@ temporary stand-ins until area 2's file is parsed:
 | Noon ambient colour (pre-gate) | approx (0.21, 0.21, 0.21) RGB | `light1.bin` §B kf 24 | float [0,1]; multiplied by `K_ambient = 0` → **inert**, contributes nothing (§6.2a). |
 | Fallback light direction | normalise(−7, 7, 20) ≈ (−0.322, 0.322, 0.920) | `light1.bin` bytes 0x14B0–0x14BF | static; no per-keyframe direction. |
 | Brightness ambient floor | `OPTION_BRIGHT / 100` = **1.0** (full) at the default | `DoOption.ini` `OPTION_BRIGHT` | **CONFIRMED default 100 → +1.0** (§6.2a/§6.2b). Lower only if a user INI override exists. |
+| World-brightness multiplier | `DISPLAY_BASE_BRIGHT_MULTI` = **1.05** | `display.lua` | SAMPLE-VERIFIED value; apply-path IDA-pending (§9). ~neutral +5% uplift, NOT the dark-world cause. |
 
 > **Numeric defaults — status:** the live fog fractions are **0.75 / 0.98** (vs. the previous
 > 0.5 / 0.9 stand-ins, corrected above). The ambient gate `K_ambient` is **CONFIRMED 0.0** and the
@@ -636,6 +653,82 @@ If any environment file is absent or unreadable:
 
 ---
 
+## 9. `data/script/display.lua` — global display-config layer (world-brightness scalars)
+
+> **Status: `sample-verified` for the VALUES** (read verbatim from the real VFS file). **The
+> APPLY-PATH — exactly which render stage / D3D render-state / shader constant each scalar multiplies
+> into — is `static-hypothesis / IDA-pending`** (see §9.4). Source layer: `data/script/display.lua`,
+> a 5,100-byte CP949 Lua key/value script mounted from the client VFS. The glow / bloom and the
+> per-state character-tint keys from the same file are documented in `Docs/RE/specs/rendering.md`
+> (glow chain + character-tint table); this section owns only the **world / background brightness**
+> scalars.
+
+### 9.1 What this layer is
+
+`data/script/display.lua` is a flat table of module-level global assignments (`KEY = value`, Lua
+`--` comments, CRLF line endings, CP949 — key names are ASCII, the comments are Korean). It is the
+shipping client's tunable display-config layer: every value below is a literal scalar in the script
+text, so the values themselves need no binary confirmation — they are read directly from the file.
+The client loads this script through a Lua-config loader at start-up and copies the recovered scalars
+into the render pipeline's display-config fields.
+
+### 9.2 World / background brightness scalars (SAMPLE-VERIFIED values)
+
+| Key | Value | Role | Formula | Confidence (value) |
+|-----|------:|------|---------|--------------------|
+| `DISPLAY_BASE_BRIGHT_MULTI` | **1.05** | World / background **geometry** brightness multiplier (terrain + buildings + static world meshes — the opaque world bucket). | `y = a·x + b`, with `a = 1.05`, `b = 0` (the file comment notes "default 1"). | SAMPLE-VERIFIED |
+| `DISPLAY_LIGHT_RATIO` | **0.5** | **Character** light-colour correction factor only — half-scales character lighting. **NOT a world-geometry amplifier.** | Scalar in range `0.0 .. 1.0` (file default 1.0). | SAMPLE-VERIFIED |
+
+> **Citation breadcrumb.** A C# constant carrying either value cites this section:
+> `// spec: Docs/RE/specs/environment.md §9.2`. `DISPLAY_LIGHT_RATIO` belongs to character lighting
+> and is cross-referenced from the character-tint layer in `rendering.md`; it is recorded here for
+> completeness because both scalars live in the same `display.lua` config layer.
+
+### 9.3 Relationship to the existing lighting model (§6)
+
+These scalars are an **additional config layer on top of** the per-area lighting/fog apply-path of
+§6.2a. They do not replace any value already in §6:
+
+- `DISPLAY_BASE_BRIGHT_MULTI = 1.05` is a multiplier on the **world-geometry brightness** — the
+  background scene energy. It composes with (does not override) the directional-light and
+  `OPTION_BRIGHT` ambient-floor math of §6.2a.
+- `DISPLAY_LIGHT_RATIO = 0.5` corrects **character** light colour only; it is orthogonal to the
+  world-geometry path and to the `OPTION_BRIGHT` ambient floor. See `rendering.md` for the
+  character-tint layer (`DISPLAY_CHAR_BRIGHT_*`) that the same `display.lua` defines.
+
+### 9.4 Apply-path — `static-hypothesis / IDA-pending`
+
+**The exact render-stage read of each scalar is NOT yet recovered.** The dirty-room IDA lane that
+would have pinned which D3D render-state token / shader constant each scalar multiplies into
+(the display-config loader and the three render-pipeline fields it populates) **crashed before
+recovering the render-stage reads** (the IDA MCP was down during the observing session). What is
+known:
+
+- The values are literal scalars in the config text and are SAMPLE-VERIFIED (§9.2).
+- The loader copies them into three adjacent display-config fields consumed by the D3D9 render
+  pipeline (a `static-hypothesis` carried from the dirty note — **the consuming render stage is not
+  yet confirmed**).
+
+A resumed IDA pass must confirm: (a) the loader entry point for `display.lua`; (b) the three
+display-config fields it writes; (c) **which render stage / D3D state / shader constant** each of
+`DISPLAY_BASE_BRIGHT_MULTI` and `DISPLAY_LIGHT_RATIO` is read into and multiplied by. Until then,
+treat the **apply path** as `static-hypothesis / IDA-pending` and the **values** as SAMPLE-VERIFIED.
+
+### 9.5 NOTE — `DISPLAY_BASE_BRIGHT_MULTI = 1.05` is NOT the cause of the near-black world
+
+**Recorded so nobody re-chases it.** `DISPLAY_BASE_BRIGHT_MULTI = 1.05` is a **~neutral +5% uplift**
+on world-geometry brightness. A 1.05× multiplier cannot, on its own, produce a near-black scene — it
+brightens the world very slightly. The Godot port's "too-dark" world (D3 in the known-issues list) is
+the **`OPTION_BRIGHT` additive ambient-floor + `K_ambient = 0` issue already diagnosed in §6.2b**, NOT
+the absence of this 1.05 multiplier. Apply `DISPLAY_BASE_BRIGHT_MULTI = 1.05` faithfully for accuracy,
+but **do not treat it as the fix for the dark world** — the root cause and its fix are in §6.2b.
+
+> **Source citation:** all `display.lua` values in this section are from the
+> `data/script/display.lua` config layer (the shipping client's display-config script). Provenance:
+> see `Docs/RE/journal.md`.
+
+---
+
 ## 8. Known unknowns
 
 1. **Water rendering mechanism: RESOLVED-NEGATIVE.** No renderer, no asset-IO loader, and (per
@@ -675,6 +768,12 @@ If any environment file is absent or unreadable:
       setter only ever writes the LINEAR shape — LINEAR mode + density 0.0). The modes exist in the
       runtime struct layout, but no path was observed switching to exponential density on this tick;
       whether any other quality-tier path does remains unverified.
+12. **`display.lua` brightness-scalar apply-path (§9.4): IDA-PENDING.** The values
+    `DISPLAY_BASE_BRIGHT_MULTI = 1.05` and `DISPLAY_LIGHT_RATIO = 0.5` are SAMPLE-VERIFIED, but which
+    render stage / D3D state / shader constant each multiplies into is not yet recovered (the IDA lane
+    crashed before reaching the render-stage reads). A resumed IDA pass must pin the loader entry, the
+    three display-config fields it writes, and the consuming render stage. NOTE: the 1.05 multiplier is
+    a ~neutral +5% uplift and is **not** the cause of the dark world (§9.5).
 
 ---
 
@@ -684,10 +783,14 @@ If any environment file is absent or unreadable:
   the colour domains and apply-path field facts this spec's §6 consumes, including the CONFIRMED
   `K_ambient` = 0.0 and `OPTION_BRIGHT` default 100),
   `Docs/RE/formats/sky.md` (`sky%d.box` geometry + parser load-order / day-cycle view)
+- **Render pipeline:** `Docs/RE/specs/rendering.md` (the glow/bloom config and the per-state
+  character-tint table from the same `data/script/display.lua` layer — §9 here owns the
+  world-brightness scalars only)
 - **Terrain:** `Docs/RE/formats/terrain.md`, `Docs/RE/formats/terrain_layers.md`
 - **Game loop:** `Docs/RE/specs/game_loop.md` (clock, tick rate)
 - **Glossary:** `Docs/RE/names.yaml` (flag for canonicalisation: `K_ambient` ambient gate,
-  `OPTION_BRIGHT` brightness slider)
+  `OPTION_BRIGHT` brightness slider, `DISPLAY_BASE_BRIGHT_MULTI` / `DISPLAY_LIGHT_RATIO` display-config
+  scalars)
 - **Provenance:** `Docs/RE/journal.md`
 - **Godot implementation files:** `05.Presentation/MartialHeroes.Client.Godot/World/EnvironmentNode.cs`,
   `05.Presentation/MartialHeroes.Client.Godot/World/WaterRenderer.cs`

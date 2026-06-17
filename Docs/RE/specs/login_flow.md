@@ -81,10 +81,15 @@ The ordered lifecycle is:
 
 1. **Login form.** The player enters an account name and a password (and the login window also
    carries a third input concept, the second-password / PIN — see step 1a). On submit, the client
-   packs the form into a single **TAB-delimited string** of the shape
-   `account ⟨TAB⟩ [optional] ⟨TAB⟩ field ⟨TAB⟩ host␠port` (a literal U+0009 between tokens; the
-   final token holds the discovered game endpoint as `host` and `port` separated by a space). This
-   string is handed to the secure-context builder (Section 4).
+   packs the form into a single **TAB-delimited string** of **four** tokens, of the shape
+   `account ⟨TAB⟩ password ⟨TAB⟩ PIN ⟨TAB⟩ host␠port` (a literal U+0009 between tokens; the final
+   token holds the discovered game endpoint as `host` and `port` separated by a space). The first two
+   tokens are read from the two credential edit boxes (box-keyed: field #1 = first box, field #2 =
+   second box; the conventional account-then-password order is a static hypothesis — the binary names
+   neither box), the third is the second-password / PIN (step 1a), and the fourth is the channel
+   endpoint. This string is handed to the secure-context builder (Section 4). (CAMPAIGN 16: corrected
+   from a vague 3-slot shape to the confirmed 4-token form, consistent with §4.2a and
+   `frontend_scenes.md §1.5`.)
 
 1a. **Second-password / PIN entry.** After the primary account + password submit, and **before** the
    login blob is built and sent, the client raises a dedicated **second-password / PIN** input (a

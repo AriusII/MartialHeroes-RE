@@ -171,10 +171,11 @@ public sealed class BgtextureLstCatalog
     /// the index is out of range.
     /// </summary>
     /// <remarks>
-    /// The 1-based <c>intTexId</c> from a <c>.map</c> file must be decremented by 1 before
-    /// calling this method.
+    /// The <c>intTexId</c> from a <c>.map</c> file is already the 0-based pool slot and is
+    /// passed to this method directly. The only <c>-1</c> in the terrain chain is the
+    /// <c>.ted</c> byte indexing the per-cell <c>TEXTURES{}</c> list.
     /// spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join —
-    ///   "intTexId - 1 gives the 0-based .lst record index": CONFIRMED.
+    ///   "intTexId IS the 0-based record index, used DIRECTLY — NO -1": CONFIRMED.
     /// </remarks>
     public BgtextureLstRecord? GetByPoolSlot(int poolSlot) =>
         (uint)poolSlot < (uint)_records.Length ? _records[poolSlot] : null;

@@ -35,6 +35,12 @@ public sealed partial class CharListEventDrainer : Node
     private IClientEventBus? _bus;
 
     /// <summary>
+    /// Raised for every drained Application event so a scene owner can react to state/result events
+    /// without adding a second competing reader to the shared channel.
+    /// </summary>
+    public event Action<IClientEvent>? EventDrained;
+
+    /// <summary>
     /// Binds the drainer to a target screen and the Application event bus.
     /// Call immediately after construction before adding to the scene tree.
     /// </summary>
@@ -51,6 +57,8 @@ public sealed partial class CharListEventDrainer : Node
         // TryRead is non-blocking; drain until the queue is empty this frame.
         while (_bus.Reader.TryRead(out IClientEvent? evt))
         {
+            EventDrained?.Invoke(evt);
+
             if (evt is CharacterListEvent charList)
             {
                 GD.Print($"[CharListEventDrainer] CharacterListEvent received " +

@@ -59,6 +59,7 @@
 //   EnterGameRequested(string characterName, int slotIndex)
 //   BackRequested()
 //   CreateCharacterRequested(string name, int internalClass, int faceIndex)
+//   DeleteCharacterRequested(int slotIndex, string characterName)
 //
 // 3D-HOST API (preserved for Lane E):
 //   _scene3D.SlotDescriptors = (bool IsOccupied, uint SkinClassId)[5]
@@ -115,6 +116,14 @@ public sealed partial class CharacterSelectScreen : Control
     /// </summary>
     [Signal]
     public delegate void CreateCharacterRequestedEventHandler(string name, int internalClass, int faceIndex);
+
+    /// <summary>
+    /// Raised when the player presses Delete on an occupied slot.
+    /// SelectScene routes this passive intent to the Application layer once the core facade exposes the
+    /// recovered delete use-case. spec: Docs/RE/specs/frontend_scenes.md §5 / §8.
+    /// </summary>
+    [Signal]
+    public delegate void DeleteCharacterRequestedEventHandler(int slotIndex, string characterName);
 
     // =========================================================================
     // Constants
@@ -1173,8 +1182,7 @@ public sealed partial class CharacterSelectScreen : Control
                 ShowCreateForm();
                 break;
             case CharacterSelectLayout.DeleteActionId: // 5
-                GD.Print(
-                    $"[CharacterSelectScreen] Delete (action 5) slot={_selectedSlot} — stub (awaits ApplicationUseCases).");
+                OnDeletePressed();
                 RefreshCharCountCaption();
                 break;
             case CharacterSelectLayout.EnterActionId: // 6
@@ -1213,6 +1221,21 @@ public sealed partial class CharacterSelectScreen : Control
         // spec: frontend_scenes.md §7 — "Enter → SFX 920100200; send 1/9 (40B)". CODE-CONFIRMED.
         GD.Print($"[CharacterSelectScreen] EnterGameRequested: name='{ls.Name}' slot={_selectedSlot}.");
         EmitSignal(SignalName.EnterGameRequested, ls.Name, _selectedSlot);
+    }
+
+    private void OnDeletePressed()
+    {
+        LiveSlot ls = _liveSlots[_selectedSlot];
+        if (ls.IsEmpty)
+        {
+            GD.Print(
+                $"[CharacterSelectScreen] Delete on empty slot {_selectedSlot} ignored. spec: frontend_scenes.md §5.");
+            return;
+        }
+
+        GD.Print($"[CharacterSelectScreen] DeleteCharacterRequested: name='{ls.Name}' slot={_selectedSlot}. " +
+                 "spec: frontend_scenes.md §5/§8.");
+        EmitSignal(SignalName.DeleteCharacterRequested, _selectedSlot, ls.Name);
     }
 
     private void OnCreateClassAction(int actionId)

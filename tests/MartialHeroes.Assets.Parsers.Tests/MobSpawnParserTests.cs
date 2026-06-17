@@ -91,30 +91,32 @@ public sealed class MobSpawnParserTests
         Assert.Single(records);
     }
 
-    // ── MobId zero sentinel ───────────────────────────────────────────────────
+    // ── MobId zero is preserved (mechanical decoder; no runtime semantics) ─────
 
     [Fact]
-    public void Parse_MobIdZero_RecordSkipped()
+    public void Parse_MobIdZero_RecordPreserved()
     {
-        // Records with MobId == 0 are treated as sentinel/unused and must be skipped.
-        // spec: MobSpawnParser implementation — "Skip records with MobId == 0 (sentinel / unused entries)."
+        // The 20-byte mob.arr format has no client loader; the decoder preserves every complete record.
+        // spec: Docs/RE/formats/npc_spawns.md §Companion formats — semantics out-of-client-scope.
         byte[] buf = BuildRecord(mobId: 0, pad: 0, worldX: 100f, worldZ: 200f, fieldC: 0f, field10: 0f);
         MobSpawnRecord[] records = MobSpawnParser.Parse(buf.AsSpan());
-        Assert.Empty(records);
+        Assert.Single(records);
+        Assert.Equal((ushort)0, records[0].MobId);
     }
 
     [Fact]
-    public void Parse_MixedZeroAndNonZeroMobId_SkipsZero()
+    public void Parse_MixedZeroAndNonZeroMobId_PreservesBoth()
     {
-        // Record 0 has MobId=0 (skipped); record 1 has MobId=201 (kept).
+        // Record 0 has MobId=0; record 1 has MobId=201. Both are preserved in file order.
         byte[] rec0 = BuildRecord(mobId: 0, pad: 0, worldX: 100f, worldZ: 100f, fieldC: 0f, field10: 0f);
         byte[] rec1 = BuildRecord(mobId: 201, pad: 0, worldX: 500f, worldZ: 600f, fieldC: 0f, field10: 0f);
         byte[] buf = Concat(rec0, rec1);
 
         MobSpawnRecord[] records = MobSpawnParser.Parse(buf.AsSpan());
 
-        Assert.Single(records);
-        Assert.Equal((ushort)201, records[0].MobId);
+        Assert.Equal(2, records.Length);
+        Assert.Equal((ushort)0, records[0].MobId);
+        Assert.Equal((ushort)201, records[1].MobId);
     }
 
     // ── Field decode round-trips ──────────────────────────────────────────────
@@ -201,21 +203,22 @@ public sealed class MobSpawnParserTests
         Assert.Equal((ushort)22, records[1].MobId);
     }
 
-    // ── De-duplication test ───────────────────────────────────────────────────
+    // ── No de-duplication ─────────────────────────────────────────────────────
 
     [Fact]
-    public void Parse_DuplicateMobIdXZ_KeepsFirstOnly()
+    public void Parse_DuplicateMobIdXZ_PreservesBoth()
     {
-        // Two records with identical (MobId, WorldX, WorldZ) — second must be de-duplicated.
-        // spec: MobSpawnParser — "De-duplicate by (MobId, WorldX, WorldZ)."
+        // Two records with identical (MobId, WorldX, WorldZ) are still two complete records.
+        // spec: Docs/RE/formats/npc_spawns.md §Companion formats — record_count = floor(size / 20).
         byte[] rec0 = BuildRecord(mobId: 99, pad: 0, worldX: 10f, worldZ: 20f, fieldC: 0f, field10: 0f);
         byte[] rec1 = BuildRecord(mobId: 99, pad: 0, worldX: 10f, worldZ: 20f, fieldC: 1f, field10: 1f);
         byte[] buf = Concat(rec0, rec1);
 
         MobSpawnRecord[] records = MobSpawnParser.Parse(buf.AsSpan());
 
-        Assert.Single(records);
+        Assert.Equal(2, records.Length);
         Assert.Equal((ushort)99, records[0].MobId);
+        Assert.Equal(1f, records[1].FieldC);
     }
 
     [Fact]

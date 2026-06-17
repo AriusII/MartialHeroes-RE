@@ -99,8 +99,8 @@ public sealed class BgTextureCatalogTests
 
         // Slot 0 is the only valid slot (direct). Negative and >=count are out of range.
         Assert.Equal("terrain/only", cat.ResolveRelativePath(0));
-        Assert.Null(cat.ResolveRelativePath(-1));  // negative slot
-        Assert.Null(cat.ResolveRelativePath(1));   // beyond the single record (slot 1)
+        Assert.Null(cat.ResolveRelativePath(-1)); // negative slot
+        Assert.Null(cat.ResolveRelativePath(1)); // beyond the single record (slot 1)
         Assert.Null(cat.ResolveRelativePath(999));
     }
 

@@ -60,6 +60,20 @@ public sealed class TextureListParserTests
     }
 
     [Fact]
+    public void ParseText_CharacterBucket_UsesProvidedTargetDirectory()
+    {
+        // spec: Docs/RE/formats/texture.md §List files and target directories —
+        // data/char/tex512512list.txt resolves under data/char/tex512512/.
+        var manifest = TextureListParser.ParseText(
+            "419000410.png\r\n",
+            "data/char/tex512512/");
+
+        var entry = manifest.GetById(419000410);
+        Assert.NotNull(entry);
+        Assert.Equal("data/char/tex512512/419000410.png", entry!.VfsPath);
+    }
+
+    [Fact]
     public void ParseText_SingleLine_NoTrailingNewline()
     {
         // File may end without a final newline.

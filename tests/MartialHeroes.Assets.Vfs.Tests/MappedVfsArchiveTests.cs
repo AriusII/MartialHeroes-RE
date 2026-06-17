@@ -80,6 +80,25 @@ public sealed class MappedVfsArchiveTests
         Assert.Equal(0, result.Length);
     }
 
+    [Fact]
+    public void ResourcePipeline_tracks_opened_vfs_bytes_with_legacy_integer_progress()
+    {
+        byte[] first = new byte[9_395_240];
+        byte[] second = Ascii("X");
+        using var archive = SyntheticArchive.Build(
+            ("data/ui/uitex.txt", first),
+            ("data/effect/bmplist.lst", second));
+
+        using var pipeline = VfsResourcePipeline.Mount(archive.InfPath, archive.VfsPath);
+        pipeline.TrackingEnabled = true;
+
+        Assert.Equal(first.Length, pipeline.OpenRead("data/ui/UiTex.txt").Length);
+        Assert.Equal(1, pipeline.ProgressQuotient);
+        Assert.Equal(second.Length, pipeline.OpenRead("data/effect/bmplist.lst").Length);
+        Assert.Equal(first.Length + second.Length, pipeline.CumulativeBytes);
+        Assert.Equal(1, pipeline.ProgressQuotient);
+    }
+
     // -----------------------------------------------------------------------
     // Case-insensitive lookup
     // -----------------------------------------------------------------------

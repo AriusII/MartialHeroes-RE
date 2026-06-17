@@ -100,7 +100,18 @@ public sealed class LoginSelectFlowLayoutTests
     [Fact] // spec: Docs/RE/packets/cmsg_char_create.yaml
     public void CmsgCreateCharacter_field_offsets()
     {
-        Assert.Equal(0, (int)Marshal.OffsetOf<CmsgCreateCharacter>(nameof(CmsgCreateCharacter.Body)));
+        Assert.Equal(0x00, (int)Marshal.OffsetOf<CmsgCreateCharacter>(nameof(CmsgCreateCharacter.Name)));
+        Assert.Equal(0x12, (int)Marshal.OffsetOf<CmsgCreateCharacter>(nameof(CmsgCreateCharacter.Face)));
+        Assert.Equal(0x14, (int)Marshal.OffsetOf<CmsgCreateCharacter>(nameof(CmsgCreateCharacter.Sex)));
+        Assert.Equal(0x16, (int)Marshal.OffsetOf<CmsgCreateCharacter>(nameof(CmsgCreateCharacter.HairOrReserved)));
+        Assert.Equal(0x18, (int)Marshal.OffsetOf<CmsgCreateCharacter>(nameof(CmsgCreateCharacter.ClassInternalId)));
+        Assert.Equal(0x1A, (int)Marshal.OffsetOf<CmsgCreateCharacter>(nameof(CmsgCreateCharacter.Reserved1A)));
+        Assert.Equal(0x1C, (int)Marshal.OffsetOf<CmsgCreateCharacter>(nameof(CmsgCreateCharacter.Stat0)));
+        Assert.Equal(0x20, (int)Marshal.OffsetOf<CmsgCreateCharacter>(nameof(CmsgCreateCharacter.Stat1)));
+        Assert.Equal(0x24, (int)Marshal.OffsetOf<CmsgCreateCharacter>(nameof(CmsgCreateCharacter.Stat2)));
+        Assert.Equal(0x28, (int)Marshal.OffsetOf<CmsgCreateCharacter>(nameof(CmsgCreateCharacter.Stat3)));
+        Assert.Equal(0x2C, (int)Marshal.OffsetOf<CmsgCreateCharacter>(nameof(CmsgCreateCharacter.Stat4)));
+        Assert.Equal(0x30, (int)Marshal.OffsetOf<CmsgCreateCharacter>(nameof(CmsgCreateCharacter.PointsRemaining)));
     }
 
     [Fact] // spec: Docs/RE/packets/cmsg_char_select.yaml
@@ -205,21 +216,36 @@ public sealed class LoginSelectFlowLayoutTests
         Assert.Equal((byte)2, p.SlotIndex);
     }
 
-    [Fact] // spec: Docs/RE/packets/cmsg_char_create.yaml (OPAQUE body — round-trips verbatim)
-    public void CmsgCreateCharacter_opaque_body_roundtrips()
+    [Fact] // spec: Docs/RE/packets/cmsg_char_create.yaml
+    public void CmsgCreateCharacter_decodes_known_bytes()
     {
         Span<byte> body = stackalloc byte[CmsgCreateCharacter.WireSize];
-        for (int i = 0; i < body.Length; i++)
-        {
-            body[i] = (byte)(i + 1); // distinct non-zero per byte
-        }
+        body[0] = (byte)'m';
+        body[1] = (byte)'h';
+        BinaryPrimitives.WriteUInt16LittleEndian(body[0x12..], 7);
+        BinaryPrimitives.WriteUInt16LittleEndian(body[0x14..], 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(body[0x16..], 2);
+        BinaryPrimitives.WriteUInt16LittleEndian(body[0x18..], 4);
+        BinaryPrimitives.WriteUInt32LittleEndian(body[0x1C..], 10);
+        BinaryPrimitives.WriteUInt32LittleEndian(body[0x20..], 11);
+        BinaryPrimitives.WriteUInt32LittleEndian(body[0x24..], 12);
+        BinaryPrimitives.WriteUInt32LittleEndian(body[0x28..], 13);
+        BinaryPrimitives.WriteUInt32LittleEndian(body[0x2C..], 14);
+        BinaryPrimitives.WriteUInt32LittleEndian(body[0x30..], 5);
 
         ref readonly CmsgCreateCharacter p = ref MemoryMarshal.AsRef<CmsgCreateCharacter>(body);
-        // The opaque 52-byte body is preserved byte-for-byte; no field interpretation is applied.
-        for (int i = 0; i < CmsgCreateCharacter.WireSize; i++)
-        {
-            Assert.Equal((byte)(i + 1), p.Body[i]);
-        }
+        Assert.Equal((byte)'m', p.Name[0]);
+        Assert.Equal((byte)'h', p.Name[1]);
+        Assert.Equal((ushort)7, p.Face);
+        Assert.Equal((ushort)1, p.Sex);
+        Assert.Equal((ushort)2, p.HairOrReserved);
+        Assert.Equal((ushort)4, p.ClassInternalId);
+        Assert.Equal(10u, p.Stat0);
+        Assert.Equal(11u, p.Stat1);
+        Assert.Equal(12u, p.Stat2);
+        Assert.Equal(13u, p.Stat3);
+        Assert.Equal(14u, p.Stat4);
+        Assert.Equal(5u, p.PointsRemaining);
     }
 
     // -------------------------------------------------------------------------

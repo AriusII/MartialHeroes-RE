@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using MartialHeroes.Network.Protocol;
 using MartialHeroes.Network.Protocol.Opcodes;
+using MartialHeroes.Network.Protocol.Packets;
 
 namespace MartialHeroes.Client.Application.Tests;
 
@@ -20,6 +21,23 @@ internal static class SyntheticFrames
         BinaryPrimitives.WriteUInt16LittleEndian(frame.AsSpan(6, 2), minor); // minor@+6
         payload.CopyTo(frame.AsSpan(FrameHeader.Size));
         return frame;
+    }
+
+    /// <summary>4/1 game-state tick frame. spec: handlers.md §4/1; client_runtime.md §9.4.</summary>
+    public static byte[] GameStateTick(ReadOnlySpan<byte> payload = default) => Frame(4, 1, payload);
+
+    /// <summary>4/1 world-entry form with scenario @+0x00C and spawn X/Z @+0x2374/+0x2378.</summary>
+    public static byte[] GameStateTickWorldEntry(float spawnX, float spawnZ, int scenarioMode = 0)
+    {
+        var payload = new byte[SmsgGameStateTick.WireSize];
+        payload[SmsgGameStateTick.FormOffset] = SmsgGameStateTick.WorldEntryForm;
+        BinaryPrimitives.WriteInt32LittleEndian(
+            payload.AsSpan(SmsgGameStateTick.ScenarioModeOffset, 4), scenarioMode);
+        BinaryPrimitives.WriteSingleLittleEndian(
+            payload.AsSpan(SmsgGameStateTick.SpawnXOffset, 4), spawnX);
+        BinaryPrimitives.WriteSingleLittleEndian(
+            payload.AsSpan(SmsgGameStateTick.SpawnZOffset, 4), spawnZ);
+        return Frame(4, 1, payload);
     }
 
     /// <summary>5/13 actor movement update (40-byte payload). spec: 5-13_actor_movement_update.yaml.</summary>
@@ -419,6 +437,16 @@ internal static class SyntheticFrames
         // 0x03 reserved
         BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x04, 4), readyTime);
         return Frame(3, 7, p); // spec: opcodes.md — 3/7 SmsgCharManageResult (8-byte manage/delete)
+    }
+
+    /// <summary>
+    /// 3/100 generic character action/result (4-byte u32). spec: opcodes.md; client_runtime.md §7.5.2.
+    /// </summary>
+    public static byte[] CharActionResult(uint result)
+    {
+        Span<byte> p = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(p, result);
+        return Frame(3, 100, p);
     }
 
     /// <summary>

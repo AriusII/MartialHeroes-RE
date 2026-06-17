@@ -521,27 +521,29 @@ What the construct walk actually builds in this area, and what each former "EULA
   one. The campaign-4 "NO EULA" reading is therefore **vindicated**; the intervening "EULA EXISTS"
   reading was an auto-label artefact and is dropped here.
 
-## 1.5 The login flow sub-state machine — TWO state fields (CODE-CONFIRMED, HEADLINE CORRECTION)
+## 1.5 The login flow sub-state machine — ONE `+0x238` field, three writer classes (CODE-CONFIRMED — corrected CAMPAIGN 16)
 
-> **HEADLINE CORRECTION — there are TWO distinct login-window state fields, not one.** The earlier
-> "single sub-state field" model is **partly wrong**. The login window carries **two** separate state
-> values that must BOTH be modelled (described here by ROLE; the concrete field offsets belong to the
-> struct map, not this behavioural spec — see §1.5b and the login-window struct doc):
-> 1. **MAIN input/workflow substate** (the FORM/PAGE state) — written only by the input/action
->    router. It holds the values **{4, 5, 6, 29, 34, 35, 37, 38}** and gates **which widgets are
->    interactive and which input branches run**. (This FORM/PAGE field never holds 31 or 32 — the
->    campaign-4 "31/32" reading was about *this* field. The **TICK workflow field below DOES hold 31
->    and 32** — see §1.4a and the C1 resolution.)
-> 2. **TICK / drive animation substate** — read and written only by the per-frame tick. It holds the
->    full range **1..41**, is **seeded to 1 by the window constructor** (intro start), is **advanced
->    by the tick** as the intro/curtain/drive sequence plays, and is **also written by the two lobby
->    fetch worker threads**, which deposit completion **sentinels {35, 36, 39, 40}** into it for the
->    tick to consume.
+> **CORRECTION (CAMPAIGN 16) — there is ONE physical login sub-state field, not two.** A zero-trust
+> re-confrontation proved the login window drives a **single** sub-state value at object offset
+> **`+0x238`**. (The same cell is addressed as `+0x17C` from code that holds the embedded
+> CommonLoginWindow sub-object pointer at base `+0xBC`: `0xBC + 0x17C = 0x238` — proven where the
+> action router does `lea ecx,[esi-0xBC]` to recover the base before writing `Lastserver`.) The earlier
+> "two distinct fields (MAIN form/page vs TICK drive)" model is **drift**, and its clean "written only
+> by X" partition is false. One field, **three writer classes**, all writing `+0x238`:
+> 1. **per-frame tick** — the primary driver; advances the full range **1..41** (seeded to 1 by the
+>    constructor) as the intro/curtain/drive/fetch sequence plays (it also writes 4/6/34/35/37/38);
+> 2. **input/action (click) router** — writes **{29, 34, 38}** (OK/Enter credential-validate, reveal
+>    server-list, plate-pick commit) plus the computed second-password value, and **reads** the field
+>    as an input gate (e.g. the plate-pick only fires when the field equals 37);
+> 3. **the two lobby fetch worker threads** — deposit completion sentinels (**35, 39**) for the tick.
 >
-> The table below enumerates the **TICK / drive substate** (the 1..41 field) since that is the field
-> that sequences the whole flow; the MAIN-substate values it interleaves with are called out per row.
-> This table **supersedes two CODE-CONFIRMED-but-wrong labels in `ui_system.md` §6.3** (sub-state 29
-> and 31) — see the conflict note at the end of this section and in §6.
+> So the value sets the old model split across "MAIN {4,5,6,29,34,35,37,38}" and "TICK 1..41" are all
+> values of the **one** `+0x238` field; the PIN values **31/32** (raise/poll) and server-list **37** are
+> real values of it too. The concrete offset belongs to the login-window struct map; the behaviour
+> lives here. The table below enumerates the field's full 1..41 progression. It **supersedes two
+> CODE-CONFIRMED-but-wrong labels in `ui_system.md` §6.3** (sub-state 29 and 31) — see the conflict note
+> at the end of this section and in §6. (The "(MAIN substate)"/"(TICK substate)" parentheticals in the
+> rows below are retained only as a *which-writer-touched-it* hint, not as two physical fields.)
 
 | Sub-state | Meaning | Notes |
 |---|---|---|
@@ -565,9 +567,9 @@ What the construct walk actually builds in this area, and what each former "EULA
 
 > **✅ RESOLVED (rows 31/32) — the PIN IS the TICK substate 31→32 edge; there is NO EULA panel
 > (CODE-CONFIRMED, CONFLICT C1).** <!-- source: _dirty/campaign-frontend/A2-pin-modal.md, _RECONCILED.md C1; _dirty/campaign10/B/construct_login.md §2.1 -->
-> A fresh independent re-walk resolves the long-standing 31/32 dispute by separating the **two** state
-> fields (§1.5 headline): the **FORM/PAGE (MAIN) state never holds 31/32** (that is what the campaign-4
-> reading was about), but the **TICK / drive workflow state DOES** hold 31 and 32. Concretely:
+> A fresh independent re-walk resolves the long-standing 31/32 dispute: **31 and 32 are real values of
+> the single `+0x238` sub-state field** (§1.5 headline, corrected CAMPAIGN 16) — they are the PIN
+> raise/poll values, NOT a separate "page" state and NOT "31 = Help screen". Concretely:
 > - **No EULA panel (SUPERSEDES the earlier "EULA at MAIN substate 6" reading).** A full element-by-
 >   element walk of the login scene builder constructs **no terms/agreement panel**. The 22 labels once
 >   read as "EULA body" (message ids **4001..4022**) are the **server-list row captions** added to the

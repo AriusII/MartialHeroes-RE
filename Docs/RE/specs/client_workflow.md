@@ -279,6 +279,29 @@ The loop-break mechanism is a dedicated function that clears the global run-flag
 are effected by writing the desired next-state integer and then calling this break function.
 Network-received transitions and user-action transitions both use the same mechanism.
 
+#### 4.1.1 World entry by pre-arm — case 4 arms state 5, case 5 builds the world (CODE-CONFIRMED)
+
+The in-game world is **scene-state case 5**, and it is reached purely by the pre-arm mechanism above —
+there is no direct jump to it. The relevant edges:
+
+- **Case 4 (Character Select) writes the next state = 5 on entry** (its pre-loop intent), then runs
+  the character-select scene loop. When the player confirms enter-game and that loop exits, the outer
+  `while(1)` re-reads the now-armed state value **5** and dispatches into case 5.
+- **Case 5 (In-game) builds the world** — it constructs the world handler / main window, performs the
+  world-build sequence (§5.4.1), **sends the keepalive-toggle C2S `2/112` on entry** (the in-world
+  keepalive enable, mirrored by the leave/logout path that disables it — §4.4 / §6.4), and runs the
+  blocking world loop.
+- **Case 5 in turn pre-arms state 4 on its own entry**, so that when the world loop exits (logout /
+  disconnect) the switch returns to **Character Select (4)**, not to Login — consistent with the
+  'in-game → char-select' edge already in §4.3.
+
+So the faithful path into the world is **0 (Init) → 1 (Login) → 2 (Load) → 3 (Opening, optional) →
+4 (Char Select, arms 5) → 5 (In-game, builds world, arms 4)**. A direct-world-boot port (skipping the
+UI ladder) must therefore write the in-game state value (5) **and** re-enter the scene loop so the
+world handler is actually constructed — but state alone is insufficient: a local player actor must
+also be staged in the camera follow-target slot or the world renders nothing (see §5.4.7 and
+`specs/camera_movement.md §A.4.1`). [CODE-CONFIRMED]
+
 ### 4.2 State enumeration
 
 | State | Name (internal label) | Handler | Approx. size |
@@ -661,6 +684,9 @@ part of leaving the character-select scene. (CODE-CONFIRMED)
 
 On entering State 5, the case body constructs `MainHandler` and calls `BuildGameWorld`:
 
+0. **On case-5 entry** the case body sends the in-world **keepalive-toggle C2S `2/112`** (enable),
+   then constructs the world handler / main window before the build steps below. The leave /
+   logout path disables the same keepalive (§4.4 / §6.4). (CODE-CONFIRMED)
 1. **`BuildGameWorld`** — allocates world-layer objects (physics grid, entity registry,
    cell-streaming queue). Approximately 17 world-manager singletons cached.
 2. **`BuildSceneGraph`** — creates:
@@ -775,6 +801,31 @@ minors are: subscription **deactivated**, subscription **activated**, **expiry n
 **letter received**. These are presentation/notification messages handled alongside the world
 opcodes; they do **not** drive a scene-state transition or a spawn. (Wire-level opcode bytes and the
 exact minor assignments: capture/debugger-pending; the prose family is static-confirmed.)
+
+#### 5.4.7 Camera follow target — the local actor must be staged (CODE-CONFIRMED)
+
+Constructing the world handler (state 5) is necessary but not sufficient for the world to render with
+a working camera. The world camera follows whatever actor is staged in a small **target/selection
+slot** (a fixed-stride slot table in static data: a 32-bit actor id plus a paired 16-byte world
+position). The in-game scene-setup reads that slot's id, resolves it through the actor manager to a
+live actor, copies the paired XYZ, and publishes it as the camera's selection at scene build. The id
+is staged from the **S2C game-state-tick world-snapshot** family (the `SmsgGameStateTick` handler
+that materializes the local player — §5.4.2) and, per static control-flow, re-bound on each snapshot.
+
+With **no actor staged in the slot**, the camera resolves nothing, follows nothing, and the actor
+count stays 0 — the exact symptom a port shows when it reaches/forces the world state but never
+spawns + registers a local player. The camera-side mechanics (slot layout, resolve, publish,
+per-snapshot re-bind) are owned by `specs/camera_movement.md §A.4.1`; this section records only the
+workflow consequence.
+
+> **Port guidance.** To render the town the port must (a) drive the scene state to the in-game value
+> (state 5) and re-enter the scene loop so the world handler is built (§4.1.1), **and** (b) spawn +
+> register a local player actor into the camera follow-target slot (id + position). Treat the
+> near-black world as an **environment/ambient** fix, not a camera fix — the world camera carries no
+> brightness/gamma input (`specs/camera_movement.md §A.4.1`, `specs/environment.md §6.2b`).
+
+> The once-per-snapshot **re-bind cadence** is carried as **(PLAUSIBLE / static-hypothesis)** pending
+> a live debugger run; the entry bind and the slot→actor→camera path itself are **(CODE-CONFIRMED)**.
 
 ---
 

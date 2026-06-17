@@ -4,9 +4,8 @@
 // The (major:minor) routing is dispatch-table-confirmed; the field layout is a static inference
 // (capture_verified: false). The enter-selected-character helper zero-fills a 40-byte buffer, then
 // partially fills it. CODE-CONFIRMED (static HIGH): byte0 = SlotIndex, a 33-byte SessionToken
-// string, a 4-byte VersionToken dword, total 40, the rest zero-filled. The exact intra-buffer
-// OFFSETS of the token string and the version dword are static-uncertain (all three share one
-// 40-byte buffer) — they need a live 1/9 read to pin.
+// string at +0x01, a 2-byte Pad at +0x22, and a u32 VersionToken at +0x24. The intra-buffer offsets
+// are pinned in cmsg_char_enter.yaml; the token bytes and pad semantics remain capture-pending.
 //
 // Field widths sum to size: 1 + 33 + 2 + 4 = 40. spec: Docs/RE/packets/cmsg_char_enter.yaml.
 
@@ -25,7 +24,7 @@ namespace MartialHeroes.Network.Protocol.Packets;
 /// sends ONLY this 1/9 (the 1/7 manage was already sent at slot click); the server replies with
 /// S2C 3/5 <see cref="SmsgEnterGameAck"/> (scene → loading) and the world self-snapshot arrives
 /// separately on S2C 4/1.
-/// spec: Docs/RE/packets/cmsg_char_enter.yaml. CAPTURE-UNVERIFIED layout.
+/// spec: Docs/RE/packets/cmsg_char_enter.yaml. CAPTURE-UNVERIFIED value semantics.
 /// </summary>
 [PacketOpcode(1, 9)]
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -45,15 +44,15 @@ public readonly struct CmsgEnterGameRequest
     /// the process command-line / argv0 global — NOT the typed account text. Decode as this
     /// inline-array blob, trim at the first NUL — never a managed string on the wire. CODE-CONFIRMED
     /// source + 33-byte width.
-    /// TODO spec: needs-capture — the exact intra-buffer OFFSET of this token string is UNVERIFIED
-    /// (it shares the 40-byte buffer with the slot byte and the version dword). spec: cmsg_char_enter.yaml.
+    /// Offset is pinned at +0x01; token byte values remain capture-pending.
+    /// spec: cmsg_char_enter.yaml.
     /// </summary>
     public readonly SessionTokenBuffer SessionToken;
 
     /// <summary>
     /// 0x22 — 2-byte alignment gap before the version dword; observed zero.
-    /// TODO spec: needs-capture — whether this Pad truly stays zero or carries a small trailing
-    /// field, and the exact token/dword boundary, are UNVERIFIED. spec: packets/cmsg_char_enter.yaml.
+    /// Whether this Pad truly stays zero or carries a small trailing field remains capture-pending.
+    /// spec: packets/cmsg_char_enter.yaml.
     /// </summary>
     public readonly PadBuffer Pad;
 
@@ -61,8 +60,8 @@ public readonly struct CmsgEnterGameRequest
     /// 0x24 — derived 32-bit version token (LE u32). DERIVED, not constant: the client reads field
     /// index 5 of the on-disk data/cursor/game.ver and computes <c>10 × (field 5) + 9</c>.
     /// CODE-CONFIRMED for the value formula and on-disk source.
-    /// TODO spec: needs-capture — the OFFSET of this dword inside the 40-byte buffer is UNVERIFIED
-    /// (register-staged in the builder; needs a debugger byte-pin). spec: cmsg_char_enter.yaml.
+    /// Offset is pinned at +0x24; concrete runtime value still derives from game.ver.
+    /// spec: cmsg_char_enter.yaml.
     /// </summary>
     public readonly uint VersionToken;
 

@@ -1,0 +1,71 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed-routing  (opcode->handler dispatch arm + the engine GameState write
+#                 targets are control-flow-confirmed);
+#                 field-layout: only the leading 4-byte action/result code is recovered; the rest of
+#                 the body is consumed by a code switch and is NOT a promotable fixed offset table;
+#                 wire VALUE semantics: capture/debugger-pending (no live capture this campaign).
+#   ida_reverified: 2026-06-17
+#   ida_anchor: 263bd994
+#   conflicts: RESOLVES the prior 3/7-vs-3/100 mislabel -- the table-driven engine-state transition
+#              that earlier specs ascribed to 3/7 lives HERE at (3:100) SmsgCharActionResult; (3:7)
+#              SmsgCharManageResult is a Select-scene UI result that writes NO engine state.
+
+name: SmsgCharActionResult
+opcode: 0x30064           # major 3 (CharacterMgmt), minor 100 -> (3 << 16) | 100
+direction: S2C
+size: var                 # leading 4-byte action code is fixed; full frame length not proven
+spec: packets/3-100_char_action_result.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  The table-driven engine-state transition handler for the character / lobby flow. Opcode (3:100).
+  The inbound dispatcher routes this through the major-3 inline minor switch. Its handler reads a
+  leading 4-byte action/result code and, via a large code switch, writes the engine GameState and
+  enqueues timed UI events. This -- NOT 3/7 -- is the major-3 message that drives the engine scene
+  state. Routing (opcode -> handler) and the GameState write targets are control-flow-confirmed; the
+  full code -> state/message mapping VALUES are capture/debugger-pending.
+
+# No generatable fixed struct. Only the leading action/result code is recovered as a fixed field;
+# the remainder of the body is consumed by the code switch, not read as one packed struct at the
+# dispatch site. The engineer must NOT generate a packed struct from this file.
+fields: []
+
+notes: |
+  Routing CONFIRMED (control-flow). GameState write targets CONFIRMED (control-flow). Body field
+  layout beyond the leading action code NOT decoded. Wire VALUE semantics capture/debugger-pending.
+  No live capture available this campaign.
+
+  KNOWN LEADING FIELD (control-flow-confirmed):
+    - Action  u32 @0x00  -- the action/result code the code switch dispatches on.
+
+  ENGINE GameState TRANSITIONS (control-flow-confirmed targets; the code->target mapping VALUES are
+  capture-pending):
+    - billing / retry codes (202, 203, 232) -> GameState 2 (Load)
+    - code 0                                 -> GameState 6 (Quit)
+    - error codes                            -> GameState 7 (Error), carrying the code as the
+                                                error-detail field
+    The code is also passed through as a detail value, and timed UI events are enqueued. The handler
+    branches on whether a local player object is present.
+
+  RECOVERED ACTION CODE SET (re-confirmed build 263bd994, Campaign 10):
+    {0, 1-5, 7, 9-11, 16, 22, 23, 200-211, 220-227}, plus the specials 202/203/232.
+    There is NO case 32 (an earlier doc reading that listed code 32 is corrected).
+
+  OPCODE / LADDER (RESOLVED, dispatch-confirmed -- Campaign 16):
+    - 3/7   = SmsgCharManageResult  -- Select-scene char delete/rename/select UI result; 8-byte block;
+                                       writes NO engine GameState. (see 3-4_char_manage_result.yaml,
+                                       legacy filename)
+    - 3/100 = SmsgCharActionResult  -- THIS message; the table-driven engine-state transitioner.
+    Any doc/YAML that places the table-driven engine-state transition at 3/7 is WRONG -- it is 3/100.
+
+  WHY NO FIELD TABLE: beyond the leading 4-byte action code, the body is consumed by the code switch
+  rather than read as a single fixed struct at the dispatch site, so no further fixed offset table is
+  promotable from the routing handler alone. A capture of a char/lobby action result is required to
+  decode the rest of the body and to confirm the code -> state/message mapping values.
+
+  UNKNOWNS to resolve with a capture:
+    - the body layout past the leading action code (no fixed offset table recovered statically);
+    - the exact code -> GameState/message-id mapping (only the 2/6/7 target buckets are confirmed).

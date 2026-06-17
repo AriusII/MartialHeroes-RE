@@ -4,6 +4,7 @@ using MartialHeroes.Client.Application.Diagnostics;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.Hud;
 using MartialHeroes.Client.Application.Login;
+using MartialHeroes.Client.Application.Scene;
 using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
@@ -50,6 +51,7 @@ public sealed class GamePacketHandler : IPacketHandler
     private readonly ClientStateMachine _stateMachine;
     private readonly IUnhandledOpcodeSink _unhandled;
     private readonly ILoginHandshakeDriver? _loginDriver;
+    private readonly SceneStateMachine? _sceneStateMachine;
     private readonly LocalPlayerState? _localPlayer;
     private readonly CharacterSelectionStore? _characterSelection;
     private readonly AccountCharacterState? _accountCharacters;
@@ -138,13 +140,15 @@ public sealed class GamePacketHandler : IPacketHandler
         ILoginHandshakeDriver? loginDriver = null,
         LocalPlayerState? localPlayer = null,
         CharacterSelectionStore? characterSelection = null,
-        AccountCharacterState? accountCharacters = null)
+        AccountCharacterState? accountCharacters = null,
+        SceneStateMachine? sceneStateMachine = null)
     {
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
         _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
         _unhandled = unhandled ?? throw new ArgumentNullException(nameof(unhandled));
         _loginDriver = loginDriver; // optional: only needed for the login handshake flow
+        _sceneStateMachine = sceneStateMachine; // optional: Campaign-15 8-state scene spine
         _localPlayer = localPlayer; // optional: only needed for the skill/buff/combat subsystems
         _characterSelection = characterSelection; // optional: only needed for the 3/1 cache + 3/14 spawn
         _accountCharacters = accountCharacters; // optional: tracks the create/delete char-count deltas
@@ -289,6 +293,59 @@ public sealed class GamePacketHandler : IPacketHandler
         // lifecycle transition is the load-bearing effect here.
         _ = packet.BillingFlag;
         _stateMachine.OnEnterWorld();
+        // Also drive the faithful 8-state scene spine. 3/5 is STATE-AGNOSTIC: the handler forces
+        // engine state 2 unconditionally regardless of the live scene (the binary does not guard on
+        // the current state; observed arriving during Login → 2, but the guard is absent).
+        // spec: Docs/RE/specs/client_runtime.md §7.5.2 (state-agnostic, re-confirmed CAMPAIGN 16);
+        // packets/3-5_enter_game_response.yaml.
+        _sceneStateMachine?.OnEnterGameAck();
+    }
+
+    // -------------------------------------------------------------------------
+    // 4/1 — game-state tick / world-entry snapshot
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 4/1 — world-entry game-state tick. On form 1, reads spawn X/Z from the large 9100-byte body,
+    /// creates the local player from the cached select descriptor when needed, and publishes an
+    /// engine-free bootstrap event for the world scene. If no local actor can be materialized, drives
+    /// the recovered 5→4 scene fallback. spec: Docs/RE/specs/handlers.md §4/1;
+    /// Docs/RE/specs/client_runtime.md §7.5.2 and §9.1/§9.4.
+    /// </summary>
+    private void HandleGameStateTick(ReadOnlySpan<byte> payload)
+    {
+        if (!SmsgGameStateTick.TryReadWorldEntrySeed(payload, out SmsgGameStateTickSeed seed))
+        {
+            if (_world.LocalActor is null)
+            {
+                _sceneStateMachine?.OnGameStateTickNoLocalPlayer();
+            }
+
+            return;
+        }
+
+        Vector3Fixed position = Vector3Fixed.FromFloat(seed.SpawnX, 0f, seed.SpawnZ);
+
+        if (_world.LocalActor is { } existing)
+        {
+            existing.SnapTo(position);
+            _eventBus.Publish(new InGameWorldBootstrappedEvent(existing.Key, position, seed.ScenarioMode));
+            return;
+        }
+
+        if (!TryCreateLocalPlayerFromCachedDescriptor(
+                position, out Actor? actor, out int slotIndex, out string name, out ushort serverClass))
+        {
+            _sceneStateMachine?.OnGameStateTickNoLocalPlayer();
+            return;
+        }
+
+        Actor localActor = actor!;
+        _eventBus.Publish(new LocalPlayerSpawnedEvent(
+            localActor.Key, slotIndex, name, localActor.Level, localActor.Position, localActor.CurrentHp,
+            localActor.MaxHp,
+            serverClass));
+        _eventBus.Publish(new InGameWorldBootstrappedEvent(localActor.Key, position, seed.ScenarioMode));
     }
 
     // -------------------------------------------------------------------------
@@ -327,6 +384,10 @@ public sealed class GamePacketHandler : IPacketHandler
                 }
 
                 break;
+
+            case Opcodes.SmsgGameStateTick: // 4/1 — world-entry snapshot / state tick
+                HandleGameStateTick(payload);
+                return;
 
             case Opcodes.SmsgStatUpdate: // 4/29 — stat update
                 if (payload.Length >= SmsgStatUpdate.WireSize)
@@ -493,6 +554,15 @@ public sealed class GamePacketHandler : IPacketHandler
                 }
 
                 break;
+
+            case Opcodes.SmsgCharActionResult: // 3/100 — generic char-management action/result code
+                if (payload.Length >= SmsgCharActionResult.WireSize)
+                {
+                    HandleCharActionResult(in MemoryMarshal.AsRef<SmsgCharActionResult>(payload));
+                    return;
+                }
+
+                break;
         }
 
         _unhandled.Record(packedOpcode, payload.Length);
@@ -516,6 +586,17 @@ public sealed class GamePacketHandler : IPacketHandler
 
         int replyBytes = _loginDriver.OnKeyExchange(payload);
         _eventBus.Publish(new LoginHandshakeCompletedEvent(replyBytes));
+    }
+
+    /// <summary>
+    /// Transport/session disconnect notification. Drives both the legacy lifecycle FSM and the faithful
+    /// 8-state scene machine when the composition root forwards the socket disconnect event.
+    /// spec: Docs/RE/specs/client_runtime.md §7.5.2 (load-time/generic disconnect).
+    /// </summary>
+    public void OnDisconnected()
+    {
+        _stateMachine.OnDisconnected();
+        _sceneStateMachine?.OnDisconnected();
     }
 
     // -------------------------------------------------------------------------
@@ -1096,6 +1177,9 @@ public sealed class GamePacketHandler : IPacketHandler
         // 3/1 switches the client to the character-select screen. spec: opcodes.md (3/1 "switches to the
         // select screen"). Drive the FSM there only when not already in-world.
         _stateMachine.OnCharacterListReceived();
+        // Campaign-15 scene spine: the same 3/1 CharacterList drives the recovered 8-state machine into
+        // Select (state 4), accepted from Login/Load/Select. spec: client_runtime.md §7.5.2.
+        _sceneStateMachine?.OnCharacterListReceived();
 
         _eventBus.Publish(new CharacterListEvent(header.ServerId, header.ChannelId, builder.ToImmutable()));
         return true;
@@ -1160,6 +1244,49 @@ public sealed class GamePacketHandler : IPacketHandler
             cached.ServerClass));
     }
 
+    /// <summary>
+    /// Creates the local player for the 4/1 world-entry form from the descriptor cached during
+    /// character select, overriding descriptor X/Z with the 4/1 spawn seed. spec:
+    /// Docs/RE/opcodes.md (4/1 is the local-player world spawn); Docs/RE/specs/client_runtime.md
+    /// §9.1 steps 5–7; Docs/RE/structs/actor.md (Y forced to 0 and local-player pointer is side state).
+    /// </summary>
+    private bool TryCreateLocalPlayerFromCachedDescriptor(
+        Vector3Fixed spawnPosition,
+        out Actor? actor,
+        out int slotIndex,
+        out string name,
+        out ushort serverClass)
+    {
+        actor = null;
+        slotIndex = -1;
+        name = string.Empty;
+        serverClass = 0;
+
+        CharacterSlotRecord? cached = _characterSelection?.Chosen;
+        if (cached is null || cached.RawDescriptor.Length < SpawnDescriptorReader.Size)
+        {
+            return false;
+        }
+
+        var key = new ActorKey(ActorKey.UnassignedRawId, EntitySort.PlayerCharacter);
+        var reader = new SpawnDescriptorReader(cached.RawDescriptor.Span[..SpawnDescriptorReader.Size]);
+        ushort level = reader.ReadLevel();
+        uint currentHp = reader.ReadCurrentHp();
+        uint currentMp = reader.ReadCurrentMp();
+        uint currentStamina = reader.ReadCurrentStamina();
+        serverClass = reader.ReadServerClass();
+
+        var spawnInfo = new SpawnInfo(key, level, currentHp, currentMp, currentStamina, serverClass);
+        VitalStats vitals = VitalsResolver(spawnInfo);
+
+        actor = new Actor(key, level, vitals, currentHp, currentMp, currentStamina, spawnPosition);
+        _world.Add(actor);
+        _world.LocalActorKey = key;
+        slotIndex = cached.SlotIndex;
+        name = cached.Name;
+        return true;
+    }
+
     // -------------------------------------------------------------------------
     // 3/7 — char manage / delete result (8-byte block)
     // spec: opcodes.md (CAMPAIGN-10 ladder de-swap — 3/7 SmsgCharManageResult is the 8-byte manage result)
@@ -1192,6 +1319,11 @@ public sealed class GamePacketHandler : IPacketHandler
         {
             charCount = _accountCharacters.Decrement();
         }
+
+        // 3/7 (SmsgCharManageResult) is a Character-Select UI result ONLY — it writes NO engine
+        // scene-state field. The table-driven scene transition is opcode 3/100 (SmsgCharActionResult),
+        // handled in HandleCharActionResult; do NOT drive the scene spine from here. spec:
+        // Docs/RE/specs/client_runtime.md §7.5.2 (3/7 writes no state); Docs/RE/opcodes.md (3/7 vs 3/100).
 
         _eventBus.Publish(new CharManageResultEvent(
             ok, subtype, packet.Subtype, packet.ReadyTime, charCount));
@@ -1252,6 +1384,17 @@ public sealed class GamePacketHandler : IPacketHandler
 
         _eventBus.Publish(new CharCreateResultEvent(
             ok, assignedSlotId, errorCode, packet.Value1, packet.Value2, charCount));
+    }
+
+    /// <summary>
+    /// 3/100 — generic character-management action/result code. Feeds the Campaign-15 scene spine with
+    /// the exact result-code table (0, 1..4/7, 202/203/232, out-of-range). spec:
+    /// Docs/RE/opcodes.md; Docs/RE/specs/client_runtime.md §7.5.2.
+    /// </summary>
+    private void HandleCharActionResult(in SmsgCharActionResult packet)
+    {
+        int result = packet.Result > int.MaxValue ? int.MaxValue : (int)packet.Result;
+        _sceneStateMachine?.OnCharActionResult(result, _world.LocalActor is not null);
     }
 
     // -------------------------------------------------------------------------

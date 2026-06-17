@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text;
 using MartialHeroes.Client.Application.Diagnostics;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.Handlers;
@@ -286,6 +287,8 @@ public sealed class InboundS2CHandlerTests
         var sink = new FakeOutboundSink();
 
         var credentials = new LoginCredentialStore();
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Encoding cp949 = Encoding.GetEncoding(949);
         // Stage with PIN — triggers the a7-gate; PIN region must appear in the pre-image.
         // spec: login.yaml PIN GATE; crypto.md §6.1, §6.6.
         credentials.Stage("abc", "pw", pin: "1234");
@@ -325,7 +328,7 @@ public sealed class InboundS2CHandlerTests
         uint pinLen = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(plain.AsSpan(i, 4));
         i += 4;
         Assert.Equal(5u, pinLen); // strlen("1234") + 1 = 5. spec login.yaml PinLength = strlen+1.
-        Assert.True(plain.AsSpan(i, 4).SequenceEqual("1234"u8)); // PIN bytes
+        Assert.True(plain.AsSpan(i, 4).SequenceEqual(cp949.GetBytes("1234"))); // PIN bytes
         i += 4;
         Assert.Equal(0x00, plain[i++]); // trailing NUL
 
@@ -349,13 +352,16 @@ public sealed class InboundS2CHandlerTests
         Assert.True(store.HasStagedCredential);
         Assert.Equal("myUser", store.Username);
 
-        // AccountBytes encodes the account WITHOUT trailing NUL. spec: login.yaml AccountLength = strlen+1.
-        Assert.True(store.AccountBytes.SequenceEqual(System.Text.Encoding.UTF8.GetBytes("myUser")));
+        // AccountBytes encodes the account as CP949 WITHOUT trailing NUL. spec: login_flow.md §7;
+        // login.yaml AccountLength = strlen+1.
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Encoding cp949 = Encoding.GetEncoding(949);
+        Assert.True(store.AccountBytes.SequenceEqual(cp949.GetBytes("myUser")));
 
         // StagedPasswordM is always 17 bytes, zero-padded. spec: crypto.md §6.1, §6.6, §6b
         // (DEBUGGER-VERIFIED: the server expects a fixed-width 17-byte password field).
         Assert.Equal(17, store.StagedPasswordM.Length);
-        Assert.True(store.StagedPasswordM[..6].SequenceEqual(System.Text.Encoding.UTF8.GetBytes("myPass")));
+        Assert.True(store.StagedPasswordM[..6].SequenceEqual(cp949.GetBytes("myPass")));
         for (int i = 6; i < 17; i++)
         {
             Assert.Equal(0, store.StagedPasswordM[i]); // trailing zero-padding. spec: crypto.md §6.1.
@@ -377,15 +383,33 @@ public sealed class InboundS2CHandlerTests
     public void LoginCredentialStore_stages_17_byte_M_with_pin_and_sets_include_flag()
     {
         var store = new LoginCredentialStore();
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Encoding cp949 = Encoding.GetEncoding(949);
 
         store.Stage("user", "pass", pin: "9876");
 
         Assert.True(store.HasStagedCredential);
         Assert.True(store.IncludePin); // a7-gate active. spec: login.yaml PIN GATE.
-        Assert.True(store.PinBytes.SequenceEqual(System.Text.Encoding.UTF8.GetBytes("9876")));
+        Assert.True(store.PinBytes.SequenceEqual(cp949.GetBytes("9876")));
 
         store.Clear();
         Assert.False(store.IncludePin);
+    }
+
+    [Fact]
+    public void LoginCredentialStore_encodes_korean_login_text_as_CP949_and_rejects_5_digit_pin()
+    {
+        var store = new LoginCredentialStore();
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Encoding cp949 = Encoding.GetEncoding(949);
+
+        store.Stage("무사", "비번", pin: "1234");
+
+        Assert.True(store.AccountBytes.SequenceEqual(cp949.GetBytes("무사")));
+        Assert.True(store.StagedPasswordM[..cp949.GetByteCount("비번")].SequenceEqual(cp949.GetBytes("비번")));
+        Assert.True(store.PinBytes.SequenceEqual(cp949.GetBytes("1234")));
+
+        Assert.Throws<ArgumentException>(() => store.Stage("user", "pass", pin: "12345"));
     }
 
     /// <summary>Deterministic non-zero padding RNG for reproducible 1/4 replies (mirrors the Crypto tests).</summary>

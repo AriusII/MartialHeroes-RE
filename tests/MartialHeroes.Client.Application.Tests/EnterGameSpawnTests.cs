@@ -4,6 +4,7 @@ using MartialHeroes.Client.Application.Diagnostics;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.Handlers;
 using MartialHeroes.Client.Application.Ingestion;
+using MartialHeroes.Client.Application.Scene;
 using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
@@ -11,6 +12,8 @@ using MartialHeroes.Client.Domain.Actors;
 using MartialHeroes.Network.Abstractions.Protocol;
 using MartialHeroes.Network.Abstractions.Session;
 using MartialHeroes.Network.Protocol.Packets;
+using MartialHeroes.Shared.Kernel.Enums;
+using MartialHeroes.Shared.Kernel.State;
 using Xunit;
 
 namespace MartialHeroes.Client.Application.Tests;
@@ -165,6 +168,42 @@ public sealed class EnterGameSpawnTests
         Assert.Equal(1, payload[0x00]); // slot index
     }
 
+    /// <summary>
+    /// CAMPAIGN 16 fidelity correction: <see cref="ApplicationUseCases.SelectCharacterAsync"/> must
+    /// NOT write Select → InGame directly (4 → 5). The online path is 4 → 2 (via 3/5 EnterGameAck) →
+    /// … → 5, so after sending 1/9 the scene machine must stay on Select, waiting for the server's 3/5.
+    /// The engine-internal no-network 4→5 default remains in <see cref="SceneStateMachine.AdvanceScene"/>;
+    /// it is NOT triggered by SelectCharacterAsync. spec: client_runtime.md §7.5.3 / §7.9.5 (CAMPAIGN 16).
+    /// </summary>
+    [Fact]
+    public async Task SelectCharacter_does_not_advance_scene_machine_to_ingame_online_path_stays_on_select()
+    {
+        // CAMPAIGN 16 correction: the faithful online flow is 4 (Select) → 2 (Load via 3/5) → … → 5.
+        // SelectCharacterAsync must NOT call OnSelectConfirmCharacter() — it stays on Select until 3/5.
+        // spec: Docs/RE/specs/client_runtime.md §7.5.3 / §7.9.5.
+        var bus = new ClientEventBus(ClientEventBus.Unbounded);
+        var legacy = new ClientStateMachine(bus, ClientState.CharacterSelection);
+        var scene = new SceneStateMachine(bus, GameState.Initial.To(EngineSceneState.Select));
+        var world = new ClientWorld();
+        var store = new CharacterSelectionStore();
+        var sink = new FakeOutboundSink();
+        var useCases = new ApplicationUseCases(
+            sink, legacy, world, new LoginCredentialStore(), new SessionId(1),
+            characterSelection: store, eventBus: bus, sceneStateMachine: scene);
+        DispatchCharacterList(store, bus, fsm: null, slots: (1, "Wuxia", 7, 250u, (ushort)9));
+
+        await useCases.SelectCharacterAsync(slotIndex: 1);
+
+        // Scene machine must remain on Select — NOT InGame — until 3/5 EnterGameAck drives it to Load.
+        // spec: client_runtime.md §7.5.3 / §7.9.5 (CAMPAIGN 16: online path is 4→2→…→5, not 4→5).
+        Assert.Equal(EngineSceneState.Select, scene.Current.State);
+
+        // The 3/5 ack then drives to Load(2) — this is the online enter-world transition.
+        // spec: client_runtime.md §7.5.2 (OnEnterGameAck → state 2).
+        scene.OnEnterGameAck();
+        Assert.Equal(EngineSceneState.Load, scene.Current.State);
+    }
+
     [Fact]
     public async Task SelectCharacter_blank_slot_routes_to_create_and_sends_no_1_9()
     {
@@ -195,6 +234,97 @@ public sealed class EnterGameSpawnTests
         Assert.Empty(sink.Sends); // nothing sent for an out-of-range slot
     }
 
+    [Fact]
+    public async Task SelectCharacterSlot_sends_1_7_mode_0_for_real_slot()
+    {
+        var (useCases, _, store, bus, sink, _) = NewSelectionHarness(ClientState.CharacterSelection);
+        DispatchCharacterList(store, bus, fsm: null, slots: (2, "wuxia7", 7, 250u, (ushort)9));
+
+        bool sent = await useCases.SelectCharacterSlotAsync(2);
+
+        Assert.True(sent);
+        var (major, minor, payload) = Assert.Single(sink.Sends);
+        Assert.Equal((ushort)1, major);
+        Assert.Equal((ushort)7, minor);
+        Assert.Equal(new byte[] { 2, 0 }, payload);
+    }
+
+    [Fact]
+    public async Task DeleteCharacter_sends_1_7_mode_1_for_real_slot()
+    {
+        var (useCases, _, store, bus, sink, _) = NewSelectionHarness(ClientState.CharacterSelection);
+        DispatchCharacterList(store, bus, fsm: null, slots: (3, "delete3", 7, 250u, (ushort)9));
+
+        bool sent = await useCases.DeleteCharacterAsync(3);
+
+        Assert.True(sent);
+        var (major, minor, payload) = Assert.Single(sink.Sends);
+        Assert.Equal((ushort)1, major);
+        Assert.Equal((ushort)7, minor);
+        Assert.Equal(new byte[] { 3, 1 }, payload);
+    }
+
+    [Fact]
+    public async Task RenameCharacter_validates_name_and_sends_1_13()
+    {
+        var (useCases, _, store, bus, sink, _) = NewSelectionHarness(ClientState.CharacterSelection);
+        DispatchCharacterList(store, bus, fsm: null, slots: (1, "oldname", 7, 250u, (ushort)9));
+
+        CharacterNameValidationResult result = await useCases.RenameCharacterAsync(1, "newname1");
+
+        Assert.True(result.IsValid);
+        var (major, minor, payload) = Assert.Single(sink.Sends);
+        Assert.Equal((ushort)1, major);
+        Assert.Equal((ushort)13, minor);
+        Assert.Equal(18, payload.Length);
+        Assert.Equal((byte)1, payload[0]);
+        Assert.Equal((byte)'n', payload[1]);
+        Assert.Equal((byte)'1', payload[8]);
+        Assert.Equal((byte)0, payload[9]);
+    }
+
+    [Fact]
+    public async Task CreateCharacter_writes_field_split_and_class_remap()
+    {
+        var (useCases, _, _, _, sink, _) = NewSelectionHarness(ClientState.CharacterSelection);
+        var request = new CharacterCreateRequest(
+            "hero01", UiClassIndex: 0, Face: 7, Sex: 1, HairOrReserved: 0,
+            Stat0: 10, Stat1: 11, Stat2: 12, Stat3: 13, Stat4: 14, PointsRemaining: 5);
+
+        CharacterNameValidationResult result = await useCases.CreateCharacterAsync(request);
+
+        Assert.True(result.IsValid);
+        var (major, minor, payload) = Assert.Single(sink.Sends);
+        Assert.Equal((ushort)1, major);
+        Assert.Equal((ushort)6, minor);
+        Assert.Equal(52, payload.Length);
+        Assert.Equal((byte)'h', payload[0]);
+        Assert.Equal((byte)'1', payload[5]);
+        Assert.Equal((byte)0, payload[6]);
+        Assert.Equal(7, BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(0x12, 2)));
+        Assert.Equal(4, BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(0x18, 2))); // UI 0 -> internal 4
+        Assert.Equal(10u, BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x1C, 4)));
+        Assert.Equal(5u, BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x30, 4)));
+    }
+
+    [Theory]
+    [InlineData("", 2190)]
+    [InlineData("@BLANK@", 2190)]
+    [InlineData("Ahero", 12012)]
+    [InlineData("a", 12012)]
+    [InlineData("name-with-dash", 12012)]
+    public async Task CreateCharacter_rejects_invalid_names_without_send(string name, int messageId)
+    {
+        var (useCases, _, _, _, sink, _) = NewSelectionHarness(ClientState.CharacterSelection);
+
+        CharacterNameValidationResult result = await useCases.CreateCharacterAsync(
+            new CharacterCreateRequest(name, 0, 1, 0, 0, 10, 10, 10, 10, 10, 0));
+
+        Assert.False(result.IsValid);
+        Assert.Equal(messageId, result.MessageId);
+        Assert.Empty(sink.Sends);
+    }
+
     // -------------------------------------------------------------------------
     // 1/9 version-token derivation: 2114 -> 21149
     // -------------------------------------------------------------------------
@@ -209,19 +339,26 @@ public sealed class EnterGameSpawnTests
     }
 
     [Fact]
-    public async Task SelectCharacter_stamps_the_derived_21149_token_into_the_1_9_body()
+    public async Task SelectCharacter_stamps_session_token_and_derived_version_dword_into_the_1_9_body()
     {
-        var (useCases, _, store, bus, sink, _) = NewSelectionHarness(ClientState.CharacterSelection);
+        byte[] launcherToken = Encoding.ASCII.GetBytes("launcher-session-token");
+        var (useCases, _, store, bus, sink, _) = NewSelectionHarness(
+            ClientState.CharacterSelection, launcherToken);
         DispatchCharacterList(store, bus, fsm: null, slots: (0, "Hero", 1, 10u, (ushort)1));
 
         await useCases.SelectCharacterAsync(slotIndex: 0);
 
         var (_, _, payload) = Assert.Single(sink.Sends);
-        // The token region (0x01..) holds the NUL-terminated decimal ASCII "21149". spec: login_flow.md §3.3.
-        ReadOnlySpan<byte> tokenRegion = payload.AsSpan(0x01, ApplicationUseCases.VersionTokenLength);
+        // 0x01..0x21 holds the launcher/session token, not the derived version. spec: cmsg_char_enter.yaml.
+        ReadOnlySpan<byte> tokenRegion = payload.AsSpan(0x01, ApplicationUseCases.SessionTokenLength);
         int nul = tokenRegion.IndexOf((byte)0);
         string decoded = Encoding.ASCII.GetString(nul >= 0 ? tokenRegion[..nul] : tokenRegion);
-        Assert.Equal("21149", decoded);
+        Assert.Equal("launcher-session-token", decoded);
+
+        Assert.Equal(0, payload[0x22]); // Pad @0x22. spec: cmsg_char_enter.yaml.
+        Assert.Equal(0, payload[0x23]); // Pad @0x23. spec: cmsg_char_enter.yaml.
+        // spec: Docs/RE/specs/login_flow.md §7; Docs/RE/packets/cmsg_char_enter.yaml
+        Assert.Equal(21149u, BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x24, 4)));
     }
 
     // -------------------------------------------------------------------------
@@ -230,7 +367,8 @@ public sealed class EnterGameSpawnTests
 
     private static (ApplicationUseCases UseCases, ClientWorld World, CharacterSelectionStore Store,
         ClientEventBus Bus, FakeOutboundSink Sink, ClientStateMachine Fsm) NewSelectionHarness(
-            ClientState initial)
+            ClientState initial,
+            ReadOnlySpan<byte> sessionToken = default)
     {
         var bus = new ClientEventBus(ClientEventBus.Unbounded);
         var fsm = new ClientStateMachine(bus, initial);
@@ -240,7 +378,7 @@ public sealed class EnterGameSpawnTests
         var credentials = new LoginCredentialStore();
         var useCases = new ApplicationUseCases(
             sink, fsm, world, credentials, new SessionId(1),
-            characterSelection: store, eventBus: bus);
+            versionToken: sessionToken, characterSelection: store, eventBus: bus);
         return (useCases, world, store, bus, sink, fsm);
     }
 

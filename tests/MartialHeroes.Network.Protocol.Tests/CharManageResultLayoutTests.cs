@@ -27,11 +27,13 @@ public sealed class CharManageResultLayoutTests
         Assert.Equal(0x30007u, Protocol.Opcodes.Opcodes.SmsgCharManageResult); // 3/7
         Assert.Equal(0x30006u, Protocol.Opcodes.Opcodes.SmsgRenameCharResult); // 3/6
         Assert.Equal(0x30017u, Protocol.Opcodes.Opcodes.SmsgCharCreateResult); // 3/23
+        Assert.Equal(0x30064u, Protocol.Opcodes.Opcodes.SmsgCharActionResult); // 3/100
 
         // OpcodeId mirrors the catalog constant on every struct.
         Assert.Equal(Protocol.Opcodes.Opcodes.SmsgCharManageResult, SmsgCharManageResult.OpcodeId);
         Assert.Equal(Protocol.Opcodes.Opcodes.SmsgRenameCharResult, SmsgRenameCharResult.OpcodeId);
         Assert.Equal(Protocol.Opcodes.Opcodes.SmsgCharCreateResult, SmsgCharCreateResult.OpcodeId);
+        Assert.Equal(Protocol.Opcodes.Opcodes.SmsgCharActionResult, SmsgCharActionResult.OpcodeId);
     }
 
     [Fact] // spec: Docs/RE/opcodes.md — major-3 ladder de-swap (build 263bd994, Campaign 10).
@@ -77,6 +79,14 @@ public sealed class CharManageResultLayoutTests
         Assert.Equal(12, SmsgCharCreateResult.WireSize);
     }
 
+    [Fact] // spec: Docs/RE/opcodes.md (3/100 reads a leading u32)
+    public void SmsgCharActionResult_size_is_4()
+    {
+        Assert.Equal(4, Marshal.SizeOf<SmsgCharActionResult>());
+        Assert.Equal(4, Unsafe.SizeOf<SmsgCharActionResult>());
+        Assert.Equal(4, SmsgCharActionResult.WireSize);
+    }
+
     // -------------------------------------------------------------------------
     // Offset guards (Marshal.OffsetOf == specced byte offset)
     // -------------------------------------------------------------------------
@@ -108,6 +118,12 @@ public sealed class CharManageResultLayoutTests
         Assert.Equal(8, (int)Marshal.OffsetOf<SmsgCharCreateResult>(nameof(SmsgCharCreateResult.Value2)));
     }
 
+    [Fact] // spec: Docs/RE/opcodes.md; client_runtime.md §7.5.2
+    public void SmsgCharActionResult_field_offsets()
+    {
+        Assert.Equal(0, (int)Marshal.OffsetOf<SmsgCharActionResult>(nameof(SmsgCharActionResult.Result)));
+    }
+
     // -------------------------------------------------------------------------
     // Decode guards (write known bytes -> MemoryMarshal reinterpret -> read fields back)
     // -------------------------------------------------------------------------
@@ -128,6 +144,16 @@ public sealed class CharManageResultLayoutTests
         Assert.Equal((byte)2, p.Subtype);
         Assert.Equal((byte)0xBB, p.Reserved3);
         Assert.Equal(0x5F3A_C0DEu, p.ReadyTime);
+    }
+
+    [Fact] // spec: Docs/RE/specs/client_runtime.md §7.5.2 (202/203/232 reload band)
+    public void SmsgCharActionResult_decodes_known_result()
+    {
+        Span<byte> body = stackalloc byte[SmsgCharActionResult.WireSize];
+        BinaryPrimitives.WriteUInt32LittleEndian(body, 203u);
+
+        ref readonly SmsgCharActionResult p = ref MemoryMarshal.AsRef<SmsgCharActionResult>(body);
+        Assert.Equal(203u, p.Result);
     }
 
     [Fact] // spec: Docs/RE/specs/login_flow.md §5.6 (success path: CP949 name in NameOrError)

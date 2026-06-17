@@ -42,8 +42,9 @@
 //   └───────────────────────────────────────────────────────────────────────────────┘
 //
 // OFFLINE / DEV MODE:
-//   No real VFS bulk-preload worker is wired. We drive percent 0→100 over ~1.2 s on
-//   a Godot timer (the logic matches the spec model — only the data source differs).
+//   When no external worker is supplied, the legacy BootFlow path can still drive percent 0→100
+//   over ~1.2 s. SceneHost/LoadScene supplies the real Application LoadOrchestrator worker and
+//   progress provider instead.
 //   spec: frontend_scenes.md §2L.2 "a revival can drive its own 0..1 float". CODE-CONFIRMED.
 //
 // THREADING: all Control mutation on the main thread (_Process + timers).
@@ -140,6 +141,10 @@ public sealed partial class LoadingScreen : Control
     private UiAssetLoader? _sharedAssets;
     private bool _ownsAssets;
 
+    private Func<int>? _percentProvider;
+    private bool _externalCompletion;
+    private bool _playOwnBgm = true;
+
     // =========================================================================
     // Public API
     // =========================================================================
@@ -149,6 +154,37 @@ public sealed partial class LoadingScreen : Control
     {
         get => _sharedAssets;
         set => _sharedAssets = value;
+    }
+
+    /// <summary>
+    /// Optional external progress source (0..100). LoadScene wires this to LoadOrchestrator so the
+    /// screen renders the real state-2 worker's progress instead of the offline simulation.
+    /// spec: Docs/RE/specs/resource_pipeline.md §2.4; frontend_scenes.md §2L.2.
+    /// </summary>
+    public Func<int>? PercentProvider
+    {
+        get => _percentProvider;
+        set => _percentProvider = value;
+    }
+
+    /// <summary>
+    /// True when an external worker calls <see cref="CompleteExternalLoad"/>. In this mode _Process
+    /// only renders progress and never self-completes from the placeholder timer.
+    /// </summary>
+    public bool ExternalCompletion
+    {
+        get => _externalCompletion;
+        set => _externalCompletion = value;
+    }
+
+    /// <summary>
+    /// Legacy BootFlow compatibility: when false, audio is owned by the Application loading sound
+    /// sink (AudioService) rather than this screen-local player.
+    /// </summary>
+    public bool PlayOwnBgm
+    {
+        get => _playOwnBgm;
+        set => _playOwnBgm = value;
     }
 
     // =========================================================================
@@ -187,10 +223,13 @@ public sealed partial class LoadingScreen : Control
         }
 
         BuildCanvas(bgIndex);
-        StartBgm();
+        if (_playOwnBgm)
+        {
+            StartBgm();
+        }
 
         GD.Print(
-            $"[LoadingScreen] Built. BG={BgPaths[bgIndex]}, simulating preload over {SimPreloadSeconds}s. spec §2L.");
+            $"[LoadingScreen] Built. BG={BgPaths[bgIndex]}, externalCompletion={_externalCompletion}. spec §2L.");
     }
 
     public override void _ExitTree()
@@ -206,6 +245,21 @@ public sealed partial class LoadingScreen : Control
     public override void _Process(double delta)
     {
         if (_preloadDone) return;
+
+        if (_percentProvider is not null)
+        {
+            int provided = Math.Clamp(_percentProvider(), 0, 100);
+            if (provided != _percent)
+            {
+                _percent = provided;
+                UpdateBar();
+            }
+
+            if (_externalCompletion)
+            {
+                return;
+            }
+        }
 
         // Advance simulated preload 0→1 linearly.
         _progressT += (float)delta / SimPreloadSeconds;
@@ -247,6 +301,30 @@ public sealed partial class LoadingScreen : Control
         _bgmPlayer?.Stop();
 
         EmitSignal(SignalName.LoadingComplete);
+    }
+
+    /// <summary>
+    /// Called by LoadScene when the real Application LoadOrchestrator completes. The screen then
+    /// preserves the confirmed 500 ms grace before emitting LoadingComplete.
+    /// spec: Docs/RE/specs/frontend_scenes.md §2L.3.
+    /// </summary>
+    public void CompleteExternalLoad()
+    {
+        if (_preloadDone)
+        {
+            return;
+        }
+
+        _preloadDone = true;
+        if (_percentProvider is not null)
+        {
+            _percent = Math.Clamp(_percentProvider(), 0, 100);
+        }
+
+        UpdateBar();
+        GD.Print("[LoadingScreen] External preload done. Starting 500 ms grace. spec §2L.3.");
+        SceneTreeTimer grace = GetTree().CreateTimer(GraceSeconds, processAlways: true);
+        grace.Timeout += OnGraceExpired;
     }
 
     // =========================================================================

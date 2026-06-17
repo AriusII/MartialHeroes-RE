@@ -138,7 +138,7 @@ public sealed class BgtextureLstParserTests
     public void GetByPoolSlot_ReturnsRecord_ForValidIndex()
     {
         // spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join —
-        //   "intTexId - 1 gives the 0-based .lst record index": CONFIRMED.
+        //   "intTexId IS the 0-based record index, used DIRECTLY — NO -1": CONFIRMED.
         byte[] buf = BuildLst(
             (0x01, "terrain/a"),
             (0x01, "terrain/b"),
@@ -163,20 +163,17 @@ public sealed class BgtextureLstParserTests
     }
 
     // =========================================================================
-    // 5. Zero-record (degenerate) file
+    // 5. Zero-record file rejected by loader range guard
     // =========================================================================
 
     [Fact]
-    public void Parse_ZeroRecords_EmptyCatalog()
+    public void Parse_ZeroRecords_ThrowsInvalidDataException()
     {
-        // A 4-byte file with record_count = 0 is valid.
+        // spec: Docs/RE/formats/bgtexture_lst.md §Header layout — loader rejects count == 0.
         byte[] buf = new byte[4];
         BinaryPrimitives.WriteUInt32LittleEndian(buf, 0u);
 
-        BgtextureLstCatalog cat = BgtextureLstParser.Parse(new ReadOnlyMemory<byte>(buf));
-
-        Assert.Equal(0, cat.Count);
-        Assert.Empty(cat.Records);
+        Assert.Throws<InvalidDataException>(() => BgtextureLstParser.Parse(new ReadOnlyMemory<byte>(buf)));
     }
 
     // =========================================================================
@@ -218,23 +215,23 @@ public sealed class BgtextureLstParserTests
     }
 
     // =========================================================================
-    // 8. Cross-file join: 1-based intTexId → 0-based pool slot
+    // 8. Cross-file join: intTexId is the direct 0-based pool slot
     // =========================================================================
 
     [Fact]
-    public void CrossFileJoin_MapIntTexId1_MapsToPoolSlot0()
+    public void CrossFileJoin_MapIntTexId0_MapsToPoolSlot0()
     {
         // spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join —
-        //   "intTexId - 1 gives the 0-based .lst record index": CONFIRMED.
+        //   "intTexId IS the 0-based record index, used DIRECTLY — NO -1": CONFIRMED.
         byte[] buf = BuildLst(
             (0x01, "terrain/first"),
             (0x01, "terrain/second"));
 
         BgtextureLstCatalog cat = BgtextureLstParser.Parse(new ReadOnlyMemory<byte>(buf));
 
-        // A .map file emitting intTexId=1 corresponds to pool slot 0 (1-based minus 1).
-        int intTexId = 1;
-        BgtextureLstRecord? rec = cat.GetByPoolSlot(intTexId - 1);
+        // A .map file emitting intTexId=0 corresponds directly to pool slot 0.
+        int intTexId = 0;
+        BgtextureLstRecord? rec = cat.GetByPoolSlot(intTexId);
         Assert.NotNull(rec);
         Assert.Equal("terrain/first", rec!.RelPath);
     }

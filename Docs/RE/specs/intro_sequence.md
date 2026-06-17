@@ -212,8 +212,16 @@ ramp. It is **not** a sprite-strip inside one sheet and **not** a UV-scroll.
   offset of **+92** to the stored start timestamp (i.e. the compare is against `start + 17500`, and
   the start latch carries a constant **+92** offset). When the dwell expires **and** the panel has
   reached its alpha extreme (alpha at its maximum, 250), the state increments to the next (1→2→3→4).
-- After state 4 completes, a finish flag ramps a final counter to its maximum, then the controller
-  transitions out of the intro scene into the character-select scene (GameState 4, §0.1).
+- The state index advances **1→2→3→4** by the dwell gate, but **there is NO auto-finish after state
+  4** — panel 4 holds and loops its alpha fade **indefinitely**. The slideshow FSM never advances past
+  4 and never sets the finish flag on its own. The **only** exit from the Opening scene is an
+  **explicit skip** (§2.5): the skip handler is the *sole* writer of the finish flag (`=1`), which
+  ramps the final alpha and clears the run-flag so WinMain re-enters the pre-set state 4
+  (character-select, §0.1). *(CAMPAIGN 16 correction — the earlier "after state 4 completes the
+  controller auto-transitions to character-select" is **REFUTED**: an exhaustive writer scan shows the
+  finish flag is set in exactly two places, both inside the skip handler. Without a skip the intro
+  never ends. This also settles the old "movie-complete vs loading-done (type 13/id 10001) vs timer"
+  exit question — it is **none of those**, only an explicit skip.)*
 
 ### 3.2 Alpha crossfade (CODE-CONFIRMED, static)
 

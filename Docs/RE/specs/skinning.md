@@ -15,9 +15,15 @@
 >   three epsilon tests are an absolute-value clamp (their disassembly surfaced as a log-shaped
 >   logarithm-shaped intrinsic — almost certainly a decompiler mis-symbol of an absolute-value epsilon
 >   clamp at 0.001).
+> - **Idle-animation lane (added 2026-06-16):** *confirmed* (control-flow) that the engine feeds the
+>   anim mixer real per-frame elapsed time (`dt = ms × 0.001`) and advances each active layer's clock
+>   every frame, so the keyframe sampler is never pinned at `t = 0` (`formats/animation.md`
+>   §Per-frame clip-time advance); *sample-verified* (production-parser keyframe diff) that the human
+>   col15 stand idle `g101100001.mot` is **static data** (0/84 animated tracks). The runtime question
+>   "which idle slot does the live engine select for a standing human" is *debugger-pending*. See §10.
 > - **ida_reverified:** 2026-06-16
 > - **ida_anchor:** 263bd994
-> - **evidence:** [static-ida]
+> - **evidence:** [static-ida, vfs-sample]
 > - **conflicts:** two resolved against the IDB this pass — (1) the out-of-range bone-id behaviour is a
 >   **clamp-to-last-bone** in the engine, NOT a skip (the spec previously implied the engine skips;
 >   "skip" is retained only as the *recommended importer hardening*, §8(e)); (2) the child-bone
@@ -49,14 +55,21 @@ documented in the container spec.
 
 ## Status header (read first)
 
-> **Headline finding — why the character mesh currently explodes.**
+> **Headline finding — the cancellation property is the whole game.**
 > The legacy renderer is **CPU linear-blend skinning (LBS)** with a **load-time inverse-bind bake**.
 > At rest (animation == bind pose) the inverse-bind and the forward bone transform **cancel exactly
-> to the identity**, so the rest mesh is reproduced unchanged. The current Godot avatar explodes
-> because it skins *without* that cancellation property — either the inverse-bind step is missing,
-> the bone-transform multiply order is wrong, or the handedness conversion is applied piecemeal to
-> verts but not to bones (or vice-versa). The fix is to reproduce the cancellation, applying ONE
-> handedness conversion uniformly to bones + vertices + keyframes. See §8 (Godot import guidance).
+> to the identity**, so the rest mesh is reproduced unchanged. A naïve skinning setup that skins
+> *without* that cancellation property — a missing inverse-bind step, a wrong bone-transform multiply
+> order, or a handedness conversion applied piecemeal to verts but not to bones (or vice-versa) —
+> explodes the mesh. The fix is to reproduce the cancellation, applying ONE handedness conversion
+> uniformly to bones + vertices + keyframes. See §8 (Godot import guidance).
+>
+> **Mesh-explosion status (RETIRED).** The earlier Godot mesh-explosion debt is **retired**: the port
+> renders the skinned character correctly via quaternion LBS that preserves the §0 cancellation. The
+> remaining character-animation observation — a standing human looks static — is a **separate and
+> faithful** matter: the standing-idle clip the recovered chain resolves is genuinely static data
+> (§10), so a frozen standing human is correct for that asset, not a skinning/animation defect. The
+> only open animation question is which idle slot the live engine selects at runtime (§10, DEBUGGER-PENDING).
 
 | Area | Confidence |
 |---|---|
@@ -69,6 +82,9 @@ documented in the container spec.
 | Major/minor influence split + per-vertex normalization to sum 1.0; drop weight < 0.01 | HIGH (code) + SAMPLE-VERIFIED (corpus: min weight 0.010, 1140 multi-weight skins) |
 | LBS deform equation (weighted sum of bone-local rest placed by animated bone world transform) | HIGH (re-confirmed) |
 | `.mot` sampling: `floor(t·10)` @ 10 fps, LERP translation, shortest-arc SLERP rotation, 28-byte keyframe | HIGH (re-confirmed) |
+| Per-frame clip time `t` advances (real `dt = ms × 0.001`; mixer ticked every frame; never pinned to 0) | HIGH (control-flow-confirmed — `formats/animation.md` §Per-frame clip-time advance) |
+| Human col15 stand idle (`g101100001.mot`) is STATIC data → frozen standing human is FAITHFUL, not a defect (§10) | SAMPLE-VERIFIED (production-parser keyframe diff + positive controls) |
+| Which idle slot the live engine selects for a standing human (static col15 vs an animated slot) | DEBUGGER-PENDING (§10) |
 | Interpolation alpha is RAW seconds in `[0, 0.1]`, not renormalized to `[0,1]` | HIGH (observed); intentional-vs-defect UNVERIFIED |
 | Pose composition: `parentWorld ⊗ bindLocal ⊗ animLocal`; **interior** bones rotate-only; root + leaf/near-root translate | HIGH (lock narrowed to interior bones, CAMPAIGN 10 — §6.3) |
 | Quaternion convention: XYZW (scalar W last), Hamilton product, active rotation, parent-on-left | HIGH (re-confirmed) |
@@ -835,6 +851,81 @@ shared default. This is the recovered cause of the char-create preview shatter c
 | `actormotion.txt` columns 3–14 semantics | PROPOSED — offsets/types confirmed, meanings inferred (see `formats/animation.md` §`actormotion.txt` layout) | Not needed to deform; do not branch on these until confirmed |
 | Multi-bone character `.skn`/`.bnd` byte-level cross-check of the inverse-bind bake | PARTIALLY VERIFIED — corpus confirms multi-weight skins exist (§5.2); the bake math is code-recovered, not yet byte-validated end-to-end on a real character | Validate against the §8(d) player trio; assert the cancellation invariant |
 | Which skeleton the original char-create preview pairs with class 4 (§8(e)) | PLAUSIBLE (disk-implied: the class-4 skin's own `id_b` selects the 89-bone rig) — to be ratified against the live original | The recovered fix resolves rig + clip from the skin's `id_b` per class; the live ratification only confirms the original makes the same per-class choice |
+| Runtime standing-idle slot selection (§10) | DEBUGGER-PENDING — the col15 stand idle is settled as static data and other `motion_ids_a` slots animate; which slot the live engine plays for a standing human (and whether it ever swaps col15 for an animated idle) needs a live debugger read | Render the col15 clip faithfully (static stand is correct for that asset); do not synthesize a breathing idle. Revisit slot selection once confirmed live |
+
+---
+
+## 10. The standing human idle is static DATA — faithful, not a missing-animation defect
+
+> Provenance: promoted from two dirty-room lanes (gitignored) that jointly settled the long-standing
+> "character idle is flat/static" observation — one read the engine sampler/advance math, the other
+> diffed the keyframes of the real `.mot` through the production parser over the maintainer's own VFS
+> sample. **Engine math: control-flow-confirmed. Keyframe diff: sample-verified.** The runtime
+> slot-selection question that remains is **DEBUGGER-PENDING**.
+
+This section resolves the framing of the character-idle observation. A standing human in the port
+looks frozen while mobs animate. That is **not** a parser bug, a missing-animation defect, or a
+residue of the (now retired) mesh-explosion debt. It is the **faithful** result of the static data the
+recovered idle chain resolves.
+
+### 10.1 The engine DOES animate a looping idle — it never pins time (CONFIRMED)
+
+The engine feeds the animation mixer **real elapsed time every frame** and advances every active
+layer's clock; the per-track sampler therefore always sees a moving `t` for an active layer. There is
+no code path that samples a started, weighted layer at a fixed `t = 0`. The math (10 fps `floor(t·10)`
+frame pair, raw-seconds alpha, LERP translation + shortest-arc SLERP rotation) is exactly §6.1; the
+per-frame `dt = ms × 0.001` source and the cycle-layer time advance (free-run `local_time += rate·dt`
+with modulo wrap, or sync-mode `t = duration × phase/range`) are documented in
+`formats/animation.md` §Per-frame clip-time advance and §Wrap and loop behaviour. **Consequence:** a
+short looping idle in the original is *alive* exactly when its keyframes differ — the engine cannot
+produce a flat result from a clip whose keyframes carry motion.
+
+### 10.2 The col15 human idle's keyframes do NOT differ — it is static data (SAMPLE-VERIFIED)
+
+The standing-idle clip the recovered chain resolves for the first human class is
+`data/char/mot/g101100001.mot` (via `actormotion.txt` col2 = `skin_class` = 1 → col15 =
+`motion_ids_a[0]` = 101100001 → the motion-id registry — see `formats/animation.md`
+§`actormotion.txt` layout). A keyframe diff of this clip through the production parser shows it is a
+**fixed stand pose**:
+
+- `frame_count = 3`, `track_count = 84`, with 3 keyframes on **all** 84 tracks (a full-shape clip,
+  not a stub);
+- **0 of 84 tracks animate** — maximum translation delta is exactly **0.0** on every bone, and the
+  single non-zero rotation delta is **≈1.0e-6** (one bone, at the float-noise floor).
+
+So every frame samples the same pose; the clip pins the skeleton to one held stand pose. The full
+keyframe-diff table and positive controls (mob clips and other human slots that animate strongly under
+the identical metric, proving the metric detects motion) are in `formats/animation.md`
+§Static idle clips.
+
+### 10.3 The rig HAS animated idle content — just not in the col15 slot
+
+Other slots in the same human `motion_ids_a` array **do** animate: a `peace`-tagged slot is a subtle
+breathing/idle-sway loop (51 of 84 bones move), and a combat slot moves strongly. So animated idle
+content exists for the human rig; the col15 (`motion_ids_a[0]`) slot is specifically the **static
+stand snapshot**. A visible breathing idle in the port would require selecting a **different**,
+animated slot — a runtime motion-selection choice, not a parser or missing-animation fix.
+
+### 10.4 What is settled vs. open
+
+| Question | Verdict |
+|----------|---------|
+| Does the engine advance clip time for a looping idle? | YES — real per-frame `dt`, never pinned to 0 (CONFIRMED). |
+| Is the col15 human stand idle clip static data? | YES — 0/84 animated tracks, a fixed held pose (SAMPLE-VERIFIED). |
+| Is a frozen standing human in the port a bug? | NO — it is **faithful** to the static col15 asset. The mesh renders correctly via quaternion LBS (§0 cancellation holds); the mesh-explosion debt is **retired**. |
+| Which standing-idle slot does the **live engine** select at runtime (static col15 vs an animated slot)? | **DEBUGGER-PENDING** — needs a live debugger to read the slot the mixer actually plays for a standing human; no live server/debugger was available on this lane. |
+
+### 10.5 Guidance for the port
+
+- Render the col15 idle clip **faithfully**: a static stand is correct for that asset. Do **not**
+  synthesize a breathing idle or treat the flat result as a defect to "fix" in the parser/mixer.
+- The importer must still drive the active clip's clock with real per-frame `dt` and wrap at clip end
+  (§6, `formats/animation.md` §Per-frame clip-time advance) so that **animated** clips (mobs, combat,
+  the animated human slots) play correctly — the static look must come from the data, never from a
+  port that fails to advance `t`.
+- If a breathing standing idle is desired as a presentation choice, select an animated `motion_ids_a`
+  slot rather than col15 — but first re-check §10.4's DEBUGGER-PENDING question, because the engine's
+  own runtime selection is not yet confirmed and must not be guessed.
 
 ---
 

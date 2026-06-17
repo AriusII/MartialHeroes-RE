@@ -84,6 +84,13 @@ public sealed class CharacterSelectionStore
         (uint)slotIndex < (uint)MaxSlots ? _slots[slotIndex] : null;
 
     /// <summary>
+    /// Returns a stable 5-entry snapshot for presentation binding. spec:
+    /// Docs/RE/packets/3-1_character_list.yaml (exactly five slot positions, not packed).
+    /// </summary>
+    public IReadOnlyList<CharacterSlotRecord?> Snapshot() =>
+        (CharacterSlotRecord?[])_slots.Clone();
+
+    /// <summary>
     /// The outcome of confirming a slot for enter-game. spec: Docs/RE/specs/login_flow.md §3.3 / §3.5.
     /// </summary>
     public enum SelectOutcome

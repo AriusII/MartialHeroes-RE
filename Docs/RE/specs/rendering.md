@@ -13,23 +13,32 @@
 >   offscreen-vs-direct fork, the four-(really-≥6)-callback firing order, the glow/bloom 3-RT
 >   chain (plain bright-extract, single blur, TEX1+TEX2 composite), the cel-gating-on-post flag,
 >   the RTTI camera setup, the per-frame Clear flags, and the world/FX vertex strides — each
->   recovered by following the static control flow. *static-hypothesis* for the c0/c1 ×0.5
->   derivation and 1.0 defaults, the per-scene frame-rate field's per-window default value, and
->   the particle/UI vertex strides. *capture/debugger-pending* for the present-time blend bytes
->   (ONE/ZERO), the matrix major-order / up-axis, and any on-screen colour verdict; the 18-slot
->   render-state cache mechanism and the per-bucket blend/Z-write byte matrix are *re-confirm
->   pending* (not re-walked this lane — see §4 flag).
+>   recovered by following the static control flow. *sample-verified* for the
+>   `data/script/display.lua` glow/bloom config values (GLOW_BRIGHT_MULTI=0.3, GLOW_RANGE 1×1,
+>   POWER=2→power2dx8.psh) and the `DISPLAY_CHAR_BRIGHT_*` 9-state character-tint table (§6.6,
+>   §6.7) — read verbatim from the real VFS file. *static-hypothesis* for the c0/c1 ×0.5
+>   derivation and 1.0 defaults, the per-scene frame-rate field's per-window default value, the
+>   particle/UI vertex strides, and — IDA-PENDING — whether `power2dx8.psh` is a VFS-loaded shader
+>   vs. a hardcoded one and which `.psh` the loader actually opens given POWER=2 (§6.4 conflict).
+>   *capture/debugger-pending* for the present-time blend bytes (ONE/ZERO), the matrix major-order /
+>   up-axis, and any on-screen colour verdict; the 18-slot render-state cache mechanism and the
+>   per-bucket blend/Z-write byte matrix are *re-confirm pending* (not re-walked this lane — see §4
+>   flag).
 > - **ida_reverified:** 2026-06-16
 > - **ida_anchor:** 263bd994
-> - **evidence:** [static-ida]
+> - **evidence:** [static-ida, sample-vfs]
 > - **conflicts:** four corrections vs. the prior text, now applied — (C1) Present runs *inside*
 >   the per-iteration device-step, not an "outer frame driver" (§2.1); (C2) the "four scene
 >   callbacks" abstraction hides ≥6 real callback slots (§2); (C3) the cel vertex shader receives
 >   light/material/luma constants in registers 4..10 (incl. the BT.601 luma weights), **not** a
 >   world-view-projection matrix constant (§5.1a); (C4) the frame-rate cap is a configurable
 >   per-scene rate, with 60 being only the device-reset presentation refresh-rate default (§2.0).
->   No unresolved conflicts remain; the items under §4 are deferred re-confirmation, not
->   disagreements.
+>   **OPEN — `display.lua` vs §6.4 glow chain (C5):** the shipped `data/script/display.lua` selects
+>   `DISPLAY_POWER = 2` (→ `power2dx8.psh`), glow range 1×1, and a 0.3 glow multiplier, whereas §6.4
+>   states the glow chain is a single-tap `power1dx8` with `power2`/`power4` "absent from the binary"
+>   and a composite scalar default of 0.5. Both readings are recorded (§6.3 / §6.4); the
+>   reconciliation (which `.psh` the loader actually opens at POWER=2, and whether `power2dx8.psh` is
+>   VFS-loaded vs. hardcoded) is **IDA-PENDING** for the resumed IDA pass. Not silently overwritten.
 
 ---
 
@@ -37,7 +46,7 @@
 
 | Item | Value |
 |------|-------|
-| Confidence model | CONFIRMED = behavior recovered by following the static control flow of the draw machinery; PLAUSIBLE = structurally inferred from surrounding code but not fully unwound; UNVERIFIED = not provable from the path read, would need a live/debugger or on-disk asset confirmation. |
+| Confidence model | CONFIRMED = behavior recovered by following the static control flow of the draw machinery; SAMPLE-VERIFIED = value read verbatim from a real VFS file; PLAUSIBLE = structurally inferred from surrounding code but not fully unwound; UNVERIFIED = not provable from the path read, would need a live/debugger or on-disk asset confirmation. |
 | Graphics API | Direct3D 9 (`IDirect3DDevice9`). The engine is a thin wrapper over a single device. |
 | Frame structure (per-scene run loop, device-step + Present + device-lost recovery, separate scene-draw fork) | CONFIRMED. The Present and the device-lost recovery live in the per-iteration device-step routine; the scene draw is a separate fork. See §2.0. |
 | Frame-rate cap (configurable per-scene rate, seeded 60, unoverwritten) | CONFIRMED (mechanism). See §2.0. |
@@ -50,6 +59,8 @@
 | Shader set (5 shaders: 2 cel PS + cel VS + composite + editable glow; VFS-first load) | CONFIRMED. See §6 / §6.5. |
 | Per-class vertex stride / FVF | CONFIRMED for world geometry (terrain/building/static/skinned = 32-byte XYZ+N+UV) and FX (24-byte XYZ+DIFFUSE+UV). Particle/UI strides PLAUSIBLE. See §5.2. |
 | Glow/bloom post chain (3 render targets, ordered pass list) | CONFIRMED (load + execution). No bright-pass threshold; single blur pass; present is an opaque copy; composite weights config-driven. See §6. |
+| `display.lua` glow/bloom config values (GLOW_BRIGHT_MULTI, GLOW_RANGE, POWER→power-shader) | SAMPLE-VERIFIED values; **CONFLICT with §6.4** flagged, reconciliation IDA-pending. See §6.3 / §6.4 / §6.6. |
+| `DISPLAY_CHAR_BRIGHT_*` 9-state character tint table | SAMPLE-VERIFIED values; **recovered, NOT-YET-PORTED feature**. See §6.7. |
 | Device-lost / reset / restore lifecycle | CONFIRMED. See §2.0.2. |
 
 ---
@@ -129,6 +140,11 @@ The frame is built from three nested routines, distinct from the scene-draw fork
    > field written into the Direct3D present parameters during a device reset (§2.0.2) — that is a
    > present-params field, **not** the loop cap. So: "the field is configurable but seeded 60 and
    > unoverwritten" — phrase it that way, and do not contradict `game_loop.md`.
+   >
+   > **Note (FPS counter display):** the on-screen FPS counter (the optional UI-callback step, §2.1
+   > / §2) is gated by a separate FPS-enable flag. The `data/script/display.lua` key
+   > `DISPLAY_FRAMERATE` (SAMPLE-VERIFIED value **0** = hidden) is the config source for that flag;
+   > the apply-path (which flag it sets) is IDA-pending. See §6.6.
 
 ### 2.0.1 Per-frame Clear and scene begin/end
 
@@ -500,6 +516,14 @@ display-config globals (the glow range X / Y settings), with a **hardcoded fallb
 per axis when the configured value is zero or absent. TEX2 is rendered at `backbuffer ÷ divisor` on
 each axis.
 
+> **Config source (SAMPLE-VERIFIED) — `data/script/display.lua` glow range.** The shipped
+> `data/script/display.lua` sets `DISPLAY_GLOW_RANGE_X = 1` and `DISPLAY_GLOW_RANGE_Y = 1`
+> (SAMPLE-VERIFIED values; powers of 2 are valid per the file comment). At range 1×1 the downsample
+> is effectively 1:1 — TEX2 is full-resolution, not ÷2 — which **differs from the binary's
+> hardcoded default ÷2**. Whether the loader applies the configured 1 directly (so TEX2 is full-res)
+> or the binary's ÷2 fallback dominates is part of the IDA-pending reconciliation (§6.4 / C5).
+> `// spec: Docs/RE/specs/rendering.md §6.3`
+
 **Composite weights c0 / c1.** The composite pass uploads two pixel-shader scalar constants from code
 (reads them off the scene/post object and broadcasts each one 4-wide to a register): stage 0 binds
 the bright/edge-extract RT, stage 1 binds the bloom RT, and the two scalars weight them. **The upload
@@ -518,6 +542,19 @@ brightness and glow brightness) — they are **not** hardwired white. The bindin
 `saturate`, any embedded constants) lives in the external `.psh` and is documented in
 `formats/shaders.md` — only the c0 / c1 scalars come from code.
 
+> **Config source (SAMPLE-VERIFIED) — `data/script/display.lua` glow brightness.** The shipped
+> `data/script/display.lua` sets `DISPLAY_GLOW_BRIGHT_MULTI = 0.3` and `DISPLAY_BASE_BRIGHT_MULTI =
+> 1.05` (SAMPLE-VERIFIED values; the world-geometry `DISPLAY_BASE_BRIGHT_MULTI` is owned by
+> `environment.md §9`). `DISPLAY_GLOW_BRIGHT_MULTI = 0.3` is the **glow/bloom post-pass multiplier**
+> — intentionally dim (30%). This is the live `glow-bright-multiplier` that the c1 derivation above
+> describes: with the binary's ×0.5 code-side multiply this would yield `c1 = 0.3 × 0.5 = 0.15`,
+> **differing from the §6.3 default-1.0 → c1 = 0.5** computed from the binary defaults. The base
+> multiplier the c0 derivation uses is `DISPLAY_BASE_BRIGHT_MULTI = 1.05` (→ `c0 = 1.05 × 0.5 =
+> 0.525` if the ×0.5 holds). Both the binary-default reading (1.0 → 0.5) and the shipped-config
+> reading (0.3 / 1.05) are recorded; the reconciliation (whether the ×0.5 code-side multiply is
+> applied to the config values, and the producer site that writes c0/c1) is **IDA-pending** (§6.4 /
+> C5). `// spec: Docs/RE/specs/rendering.md §6.3`
+
 **Present blend (corrects earlier "additive present" wording).** Structurally the present pass blits
 the composited TEX0 to the backbuffer as a straight **opaque copy** — **source = ONE, destination =
 ZERO**, not an additive (ONE / ONE) blend (alpha-blend is enabled, but the ONE / ZERO factor pair
@@ -527,7 +564,7 @@ at present time**. The present-stage path was re-confirmed this lane, but the **
 blend bytes (the ONE / ZERO pair) were NOT re-read** — that specific factor pair is
 **capture/debugger-pending** (or a dedicated blend-byte read on the present stage).
 
-### 6.4 Bright-pass threshold and power-chain depth (CONFIRMED)
+### 6.4 Bright-pass threshold and power-chain depth (CONFIRMED) — with `display.lua` CONFLICT
 
 **Bright-pass threshold: there is NONE (CONFIRMED).** The bright/edge-extract pass (pass 2) clears
 TEX1 to opaque black and performs a **plain fixed-function copy** of the scene RT into TEX1 at full
@@ -548,6 +585,36 @@ absence-of-power2/4 as **static-hypothesis carried forward**, while the **single
 is CONFIRMED. A multi-tap chain could only run if the external display config explicitly named such a
 path *and* the file existed on disk; the executable never names or sequences them.
 
+> **CONFLICT — `data/script/display.lua` selects POWER = 2 → `power2dx8.psh` (DO NOT silently
+> overwrite).** The shipping `data/script/display.lua` is the external display-config string source
+> the paragraph above refers to. It sets (SAMPLE-VERIFIED):
+>
+> | `display.lua` key | Value | Resolved |
+> |---|---|---|
+> | `DISPLAY_POWER` | **2** | the glow-power selector (valid set: 1, 2, 4, 8, 16, 32) |
+> | `DISPLAY_POWERSHADER` | **`"data/shader/power2dx8.psh"`** | from a Lua if/elseif at the file tail keyed by `DISPLAY_POWER`: 1→`power1dx8.psh`, 2→`power2dx8.psh`, 4→`power4dx8.psh`, 8→`power8dx8.psh`, 16→`power16dx8.psh`, 32→`power32dx8.psh`, else→`power1dx8.psh` |
+>
+> **This conflicts with the CONFIRMED-from-binary text above**, which states the glow chain is a
+> single-tap `power1dx8` and that `power2`/`power4` literals are **absent from the binary**. The
+> shipped config explicitly names `power2dx8.psh` and a full 1/2/4/8/16/32 dispatch ladder. Both
+> readings are recorded here; neither is overwritten by the other.
+>
+> **Reconciliation — IDA-PENDING.** The resumed IDA pass must settle:
+> 1. **Which `.psh` the loader actually opens** when `DISPLAY_POWER = 2` — does the display-config
+>    string (`power2dx8.psh`) override the binary's `power1dx8` default filename slot, or does the
+>    loader ignore the config key and keep `power1dx8`?
+> 2. **Whether `power2dx8.psh` is a VFS-loaded shader vs. a hardcoded one** — the binary's string
+>    table reportedly carries no `power2`/`power4` literals, yet the config names `power2dx8.psh`; is
+>    the shader file present in the client VFS and loaded by name (VFS-first, §6.5), making the
+>    binary's missing literal irrelevant?
+> 3. **Whether the single-blur-pass structure still holds** with `power2dx8.psh` bound — the
+>    single-tap structure is CONFIRMED; swapping the bound `.psh` filename does not by itself add a
+>    second pass, but this must be confirmed against the loader.
+>
+> Until reconciled, treat `DISPLAY_POWER = 2 → power2dx8.psh` as the **SAMPLE-VERIFIED shipped
+> config** and the **single-tap `power1dx8` / absent-power2 reading as the binary-default
+> static-hypothesis** — the two are not yet reconciled. `// spec: Docs/RE/specs/rendering.md §6.4`
+
 ### 6.5 Shader set — five shaders, two cel pixel shaders, VFS-first load
 
 **Confidence: CONFIRMED (count, roles, load path).** The cel/glow initializer assembles **five**
@@ -559,7 +626,7 @@ shaders and loads the toon-ramp LUT:
 | Cel **pixel** shader **#1** | Primary toon-shading pixel shader. |
 | Cel **pixel** shader **#2** | A **second** toon-shading pixel shader (a variant) — uploaded to its own handle slot alongside #1. |
 | Composite **pixel** shader | The glow/composite shader bound in pass 4 (the `finaldx8` composite — see `formats/shaders.md`). |
-| Editable **glow** pixel shader | The blur shader bound in pass 3; its filename is the editable slot defaulting to `power1dx8` (§6.4). |
+| Editable **glow** pixel shader | The blur shader bound in pass 3; its filename is the editable slot defaulting to `power1dx8` (§6.4), overridable by the `display.lua` `DISPLAY_POWERSHADER` key (§6.4 conflict). |
 
 > **Correction / enrichment (MISSED #7).** The prior text described "the cel pixel shader" in the
 > singular; the binary assembles **two** cel pixel shaders (a primary and a `…2` variant), each in its
@@ -574,6 +641,77 @@ in-memory blob; otherwise it is assembled **from the on-disk file**. The `.vsh` 
 **hand-written assembly assembled at load time**, not pre-compiled binary shader objects. The toon
 ramp LUT (`data/shader/toonramp.bmp`) is loaded through the same VFS-or-disk texture loader into its
 own cel slot (see §6.1 / `formats/shaders.md`).
+
+> **Bearing on the §6.4 conflict.** Because shaders are **VFS-first by name**, a `power2dx8.psh`
+> named in `display.lua` could be loaded straight from the client VFS even if the executable's string
+> table carries no `power2` literal — the missing-literal observation would then not contradict the
+> shipped config. Confirming whether `power2dx8.psh` exists in the VFS and is opened at `DISPLAY_POWER
+> = 2` is part of the IDA-pending reconciliation (§6.4).
+
+### 6.6 `data/script/display.lua` glow/bloom + display config — SAMPLE-VERIFIED values
+
+> **Status: `sample-verified` for the VALUES** (read verbatim from the real VFS file
+> `data/script/display.lua`, a 5,100-byte CP949 Lua key/value script). **Apply-paths are
+> `static-hypothesis / IDA-pending`** where noted. This subsection collects the glow/bloom and
+> framerate keys this spec consumes; the world-brightness keys (`DISPLAY_BASE_BRIGHT_MULTI`,
+> `DISPLAY_LIGHT_RATIO`) are owned by `environment.md §9`; the per-state character-tint table is in
+> §6.7.
+
+| Key | Value | Role | Where consumed | Confidence (value) |
+|-----|------:|------|----------------|--------------------|
+| `DISPLAY_GLOW_BRIGHT_MULTI` | **0.3** | Glow / bloom post-pass multiplier — intentionally dim (30%). Feeds the c1 glow-bright derivation. | §6.3 composite weights | SAMPLE-VERIFIED |
+| `DISPLAY_GLOW_RANGE_X` | **1** | Glow sampling radius / downsample divisor, X axis (powers of 2 valid). | §6.3 downsample divisors | SAMPLE-VERIFIED |
+| `DISPLAY_GLOW_RANGE_Y` | **1** | Glow sampling radius / downsample divisor, Y axis (powers of 2 valid). | §6.3 downsample divisors | SAMPLE-VERIFIED |
+| `DISPLAY_POWER` | **2** | Glow-power selector (valid set 1/2/4/8/16/32) → resolves the glow `.psh` filename. | §6.4 conflict | SAMPLE-VERIFIED |
+| `DISPLAY_POWERSHADER` | **`"data/shader/power2dx8.psh"`** | The resolved glow blur shader path (from the Lua if/elseif keyed by `DISPLAY_POWER`; unknown POWER → `power1dx8.psh`). | §6.4 conflict / §6.5 | SAMPLE-VERIFIED |
+| `DISPLAY_FRAMERATE` | **0** | FPS counter visibility (0 = hidden, 1 = shown) → the FPS-enable flag (§2.0 / §2). | §2.0 FPS counter | SAMPLE-VERIFIED |
+
+> **Citation breadcrumb.** A C# constant carrying any of these cites this section:
+> `// spec: Docs/RE/specs/rendering.md §6.6`. The values are literal scalars/strings in
+> `data/script/display.lua` and are SAMPLE-VERIFIED; the **render-stage apply-paths** for the glow
+> values are the subject of the §6.4 IDA-pending reconciliation. **Source citation:** all values are
+> from the `data/script/display.lua` config layer (the shipping client's display-config script).
+
+### 6.7 `DISPLAY_CHAR_BRIGHT_*` — per-state character tint table (recovered, NOT-YET-PORTED)
+
+> **Status: `sample-verified` VALUES; RECOVERED, NOT-YET-PORTED FEATURE.** The shipping
+> `data/script/display.lua` defines a per-state **character render tint / alpha** table —
+> a colour-grade applied to character meshes depending on the character's gameplay state (idle,
+> selected, hit, poisoned, etc.). This is a distinct render feature from the world-geometry and
+> glow brightness scalars; it is **not yet reproduced in the Godot port**. The **apply-path**
+> (which render stage applies the per-state tint to character meshes, and how the active state is
+> selected at runtime) is **`static-hypothesis / IDA-pending`** — only the values are recovered.
+
+Each of the 9 states defines a per-channel multiply (`MULTI_R/G/B`), a per-channel add
+(`ADD_R/G/B`), and an `ALPHA`. The applied formula is per-channel `y = MULTI · x + ADD`, where `x` is
+the source character-pixel value; `ALPHA` is the character draw alpha (the file notes alpha below 0.6
+becomes fully transparent). The 9 states (SAMPLE-VERIFIED values):
+
+| State | MULTI R | MULTI G | MULTI B | ADD R | ADD G | ADD B | ALPHA | Meaning |
+|-------|--------:|--------:|--------:|------:|------:|------:|------:|---------|
+| `DEFAULT` | 1.3 | 1.3 | 1.3 | 0.0 | 0.0 | 0.0 | 1.0 | Normal / idle state (the baseline character tint). |
+| `CHOICE` | 1.7 | 1.7 | 1.7 | 0.1 | 0.1 | 0.1 | 1.0 | Selected NPC / monster (brightened highlight). |
+| `HIT` | 1.3 | 1.2 | 1.2 | 0.1 | 0.0 | 0.0 | 0.9 | Brief tint each time a hit lands (reddish flash). |
+| `ALPHA` | 1.2 | 1.2 | 1.2 | 0.0 | 0.0 | 0.0 | 1.0 | Meaning unknown (file comment notes it is ignored for now). |
+| `HIDDEN` | 1.5 | 1.5 | 1.5 | 0.0 | 0.0 | 0.0 | 0.6 | Own stealth / summoned units / same-faction (half-transparent). |
+| `POISON` | 1.1 | 1.3 | 1.1 | 0.0 | 0.1 | 0.02 | 1.0 | Poisoned (greenish tint). |
+| `TYPE` | 1.2 | 1.2 | 1.4 | 0.1 | 0.1 | 0.4 | 1.0 | Final-damage-reduction buff active (bluish tint). |
+| `ANGER` | 1.5 | 1.0 | 1.0 | 0.15 | 0.0 | 0.0 | 1.0 | Fury / rage mode active (reddish tint). |
+| `AUTO` | 0.3 | 0.3 | 0.3 | 0.0 | 0.0 | 0.0 | 1.0 | Auto-penalty active (darkened). |
+
+Notes:
+
+- **`DEFAULT = 1.3×` all channels** is the baseline tint every character receives in the normal
+  state — characters are rendered ~30% brighter than their source texture/lighting even when idle.
+- The tint is a **character-only** colour grade; it does not affect terrain, buildings, or FX.
+- **`DISPLAY_LIGHT_RATIO = 0.5`** (owned by `environment.md §9.2`) applies to **character lighting
+  only** — it is the character light-colour correction factor that composes with this per-state tint
+  layer. Cross-reference: `environment.md §9`.
+
+> **Citation breadcrumb.** A C# constant carrying any of these values cites this section:
+> `// spec: Docs/RE/specs/rendering.md §6.7`. **Source citation:** all values are from the
+> `data/script/display.lua` config layer. **Apply-path (which render stage tints character meshes,
+> and the state-selection logic) is IDA-pending** — see §7 Known unknowns.
 
 ---
 
@@ -594,10 +732,27 @@ own cel slot (see §6.1 / `formats/shaders.md`).
   shader's exact arithmetic (`2×`, `saturate`, any embedded constants) live only in the on-disk
   `data/shader/*.psh` files, not in the executable; recoverable only by tracing the client VFS shader
   sources. UNVERIFIED-from-binary.
+- **`display.lua` glow chain vs §6.4 binary reading (CONFLICT — IDA-PENDING).** The shipped
+  `data/script/display.lua` selects `DISPLAY_POWER = 2 → power2dx8.psh`, glow range 1×1, and a 0.3
+  glow multiplier, whereas §6.4 reads the binary as a single-tap `power1dx8` with `power2`/`power4`
+  absent and a composite scalar default of 0.5. The resumed IDA pass must settle (a) which `.psh` the
+  loader actually opens at POWER=2; (b) whether `power2dx8.psh` is VFS-loaded vs. hardcoded; (c)
+  whether the single-blur-pass structure holds with it bound; (d) whether the ×0.5 code-side multiply
+  is applied to the config values (0.3 / 1.05) or only to the binary defaults. Values SAMPLE-VERIFIED;
+  apply-path / reconciliation IDA-PENDING. See §6.3 / §6.4 / §6.6.
+- **`display.lua` glow-value apply-paths (IDA-PENDING).** `DISPLAY_GLOW_BRIGHT_MULTI = 0.3`,
+  `DISPLAY_GLOW_RANGE_X/Y = 1`, `DISPLAY_FRAMERATE = 0` — values SAMPLE-VERIFIED; the exact
+  render-pipeline field / D3D state each maps into is not yet recovered (the dirty IDA lane crashed
+  before reaching the render-stage reads). See §6.6.
+- **`DISPLAY_CHAR_BRIGHT_*` per-state character tint apply-path (IDA-PENDING — NOT-YET-PORTED).** The
+  9-state tint/alpha values (§6.7) are SAMPLE-VERIFIED, but the render stage that applies the
+  per-state colour grade to character meshes, and the runtime logic that selects the active state
+  (idle / selected / hit / poison / buff / anger / auto / hidden), are not yet recovered. This is a
+  recovered-but-unported character render feature. See §6.7.
 - **Live display-config values** — the actual shipped glow-range divisors, base/glow brightness
-  multipliers, and any power-shader override live in the on-disk display-config script, not in the
-  binary; the binary defines only the defaults (2,2 / 1.0 / `power1dx8`) and the ×0.5 scaling.
-  UNVERIFIED-from-binary.
+  multipliers, and the power-shader override are now SAMPLE-VERIFIED from `data/script/display.lua`
+  (§6.6); the binary defines only the defaults (2,2 / 1.0 / `power1dx8`) and the ×0.5 scaling. The
+  reconciliation between the shipped config and the binary defaults is IDA-PENDING (§6.4).
 - **Internal per-primitive logic of the opaque sub-draws** (terrain / buildings / objects / actors)
   — their role and order in the opaque bucket is confirmed; their internal logic was out of scope.
 - **Whether terrain actually populates the NORMAL field** — the world geometry format declares a
@@ -633,9 +788,22 @@ own cel slot (see §6.1 / `formats/shaders.md`).
   glow-bright, default 0.5 each after the ×0.5). The additive "glow add" happens inside the composite
   before present, so use the additive glow blend for the contribution but do **not** double-add at
   present. The cel/toon look needs the toon ramp material from `formats/shaders.md`.
+  > **Shipped display-config (SAMPLE-VERIFIED, §6.6):** the real `data/script/display.lua` sets glow
+  > brightness **0.3** (dim), glow range **1×1**, and `DISPLAY_POWER = 2 → power2dx8.psh`. These
+  > differ from the binary defaults (1.0 glow brightness, ÷2 range, single-tap `power1dx8`); the
+  > §6.4 conflict between the shipped config and the binary reading is IDA-pending. For an initial
+  > faithful port, prefer the SAMPLE-VERIFIED shipped values (glow ~0.3, range 1×1) and revisit once
+  > the conflict is reconciled.
 - Bind the cel/toon material **only to skinned-actor meshes** (player + skinned mobs); leave terrain,
   buildings, and static props unshaded / fixed-function-equivalent. Remember the original couples the
   toon look to the post-process feature flag — with post off, even skinned actors render unshaded.
+- **Character per-state tint (§6.7 — recovered, not yet ported).** The original colour-grades
+  character meshes per gameplay state (`DISPLAY_CHAR_BRIGHT_*`), with `DEFAULT = 1.3×` all channels
+  as the idle baseline and distinct tints for selected / hit / poison / buff / anger / auto / hidden.
+  A faithful port should apply this per-state `y = MULTI·x + ADD` tint + alpha to character materials;
+  the values are SAMPLE-VERIFIED but the render-stage apply-path and state-selection logic are
+  IDA-pending. `DISPLAY_LIGHT_RATIO = 0.5` (character light correction, `environment.md §9`) composes
+  with this layer.
 - Mesh stride contract: **world geometry** (terrain / building / static / skinned) = **32-byte**
   XYZ (12) + NORMAL (12) + UV (8); **FX / billboard / particle** = **24-byte** XYZ (12) + DIFFUSE (4)
   + UV (8).
@@ -654,7 +822,8 @@ own cel slot (see §6.1 / `formats/shaders.md`).
   scene draw, the `Present`, and the device-lost recovery are one device-step routine (§2.0), not a
   separate present driver. Run at the **configurable per-scene rate** (the field seeded 60 and never
   overwritten on the static paths → effective ~60 FPS) rather than hardwiring 60 — do not contradict
-  `game_loop.md`. `Clear` is **TARGET | ZBUFFER, depth 1.0** every frame (§2.0.1).
+  `game_loop.md`. `Clear` is **TARGET | ZBUFFER, depth 1.0** every frame (§2.0.1). The shipped
+  `DISPLAY_FRAMERATE = 0` (§6.6) means the FPS counter is hidden by default.
 - **Camera setup** is RTTI-driven from a perspective-camera object's FOV / aspect, defaulting to a
   **π/4 (45°) FOV** when absent (§2.2). Matrix major-order / up-axis stay capture/debugger-pending —
   validate against the running client before locking them in.
@@ -671,14 +840,20 @@ own cel slot (see §6.1 / `formats/shaders.md`).
   **frame-rate field** (the +48 / +0x30 rate seeded 60 and unoverwritten); §2.0 here describes only
   the render side of that loop (the device-step + Present + device-lost recovery) and is reconciled
   with — not contradicting — those specs.
+- `specs/environment.md` — the **world-brightness scalars** (`DISPLAY_BASE_BRIGHT_MULTI = 1.05`,
+  `DISPLAY_LIGHT_RATIO = 0.5`) from the same `data/script/display.lua` config layer (`environment.md
+  §9`); this spec owns the glow/bloom (§6.6) and per-state character-tint (§6.7) keys from that file.
 - `formats/shaders.md` — the cel / composite / glow shader roles, the toon ramp LUT, and the
   recovered vertex-shader constants (including the BT.601 luma weights that key the ramp). It owns the
   canonical on-disk shader **filename list**; note this lane re-confirmed there are **two** cel pixel
   shaders (a primary + a variant) plus the cel VS, the composite shader, and the editable glow shader
   = **five** total (§6.5). The external `.psh` arithmetic (blur scale, composite
-  `2·edge·c0 + bloom·c1`) lives there, not here.
+  `2·edge·c0 + bloom·c1`) lives there, not here. The `display.lua` `DISPLAY_POWERSHADER` →
+  `power2dx8.psh` selection (§6.4 conflict) bears on which glow `.psh` `shaders.md` should document.
 - `specs/skinning.md` — how the skinned-character vertex buffer this pipeline draws is produced.
 - `specs/effects.md`, `specs/world_systems.md` — the FX/particle and world buckets this loop draws
   (owned by other authors).
-- Glossary: see `Docs/RE/names.yaml`.
+- Glossary: see `Docs/RE/names.yaml` (flag for canonicalisation: `DISPLAY_GLOW_BRIGHT_MULTI`,
+  `DISPLAY_GLOW_RANGE_X/Y`, `DISPLAY_POWER` / `DISPLAY_POWERSHADER`, `DISPLAY_FRAMERATE`,
+  `DISPLAY_CHAR_BRIGHT_*` state table).
 - Provenance: see `Docs/RE/journal.md`.

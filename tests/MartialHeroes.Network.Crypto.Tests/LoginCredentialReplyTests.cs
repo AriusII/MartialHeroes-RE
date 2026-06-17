@@ -211,6 +211,17 @@ public sealed class LoginCredentialReplyTests
             in key, account, default, includePin: false, staged, new ConstPaddingRandom(1)));
     }
 
+    [Fact]
+    public void Build_Rejects_A_Pin_At_Or_Over_The_Field_Cap()
+    {
+        // PIN entry is capped to four digits; the emitted length prefix then includes the NUL (5).
+        // spec: login_flow.md §4.2a / §7; packets/login.yaml PinLength.
+        (SessionHandshake.KeyExchange key, _, _) = MakeKey();
+        byte[] staged = CredentialPlaintext.StagePassword("pw"u8);
+        Assert.Throws<ArgumentException>(() => LoginCredentialReply.Build(
+            in key, "acct"u8, "12345"u8, includePin: true, staged, new ConstPaddingRandom(1)));
+    }
+
     // --- helpers (synthetic; not capture data) ----------------------------------------------------
 
     private sealed class ConstPaddingRandom(byte value) : IPaddingRandom

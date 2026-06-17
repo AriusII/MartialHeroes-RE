@@ -86,6 +86,41 @@ public interface IApplicationUseCases
     ValueTask SelectCharacterAsync(int slotIndex, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Returns the latest 3/1 character-list roster cached by the application, indexed by slot 0..4.
+    /// Empty entries are <see langword="null"/>. spec: Docs/RE/packets/3-1_character_list.yaml.
+    /// </summary>
+    IReadOnlyList<CharacterSlotRecord?> GetCharacterRoster();
+
+    /// <summary>
+    /// Sends the select/view pre-enter request <c>1/7 {slot, 0}</c> for an occupied slot.
+    /// spec: Docs/RE/packets/cmsg_char_select.yaml.
+    /// </summary>
+    ValueTask<bool> SelectCharacterSlotAsync(int slotIndex, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Validates locally and sends <c>1/6 CmsgCreateCharacter</c> when valid.
+    /// spec: Docs/RE/specs/frontend_scenes.md §4.4; Docs/RE/packets/cmsg_char_create.yaml.
+    /// </summary>
+    ValueTask<CharacterNameValidationResult> CreateCharacterAsync(
+        CharacterCreateRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sends the delete overload <c>1/7 {slot, 1}</c> for an occupied slot.
+    /// spec: Docs/RE/specs/frontend_scenes.md §5; Docs/RE/packets/cmsg_char_select.yaml.
+    /// </summary>
+    ValueTask<bool> DeleteCharacterAsync(int slotIndex, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Validates locally and sends <c>1/13 CmsgRenameCharacter</c> when valid.
+    /// spec: Docs/RE/specs/frontend_scenes.md §6; Docs/RE/packets/cmsg_char_rename.yaml.
+    /// </summary>
+    ValueTask<CharacterNameValidationResult> RenameCharacterAsync(
+        int slotIndex,
+        string newName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Requests activation of a skill in <paramref name="slot"/> against the supplied target actor ids.
     /// Builds and sends 2/52 CmsgUseSkill: the 24-byte header plus the two count-prefixed u32 target-id
     /// arrays. Aim fields default to zero when the caller does not supply them. spec:
@@ -98,13 +133,15 @@ public interface IApplicationUseCases
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Sends a chat message on <paramref name="channel"/>. A whisper (a non-empty recipient name)
-    /// builds 2/7 CmsgWhisper; otherwise a general/channel send builds 3/21 CmsgChatChannel. Both are
-    /// a fixed header followed by a length-prefixed UTF-8 text body. spec:
-    /// Docs/RE/packets/2-7_whisper.yaml; Docs/RE/packets/3-21_chat_channel.yaml.
+    /// Sends a chat message on <paramref name="channel"/>. All chat text is encoded as <b>CP949</b>
+    /// (Korean, the on-wire charset for all game text — not UTF-8). A whisper (a non-empty recipient
+    /// name) builds 2/7 CmsgWhisper; otherwise a general/channel send builds 3/21 CmsgChatChannel.
+    /// Both are a fixed header followed by a length-prefixed CP949 text body. spec:
+    /// Docs/RE/specs/chat.md §0 (all chat text is CP949); Docs/RE/packets/2-7_whisper.yaml;
+    /// Docs/RE/packets/3-21_chat_channel.yaml.
     /// </summary>
     /// <param name="channel">Channel / scope selector (whisper ChannelType byte, or chat ChannelSelector).</param>
-    /// <param name="text">Message text (UTF-8; length-prefix includes the terminating NUL).</param>
+    /// <param name="text">Message text (CP949; length-prefix includes the terminating NUL).</param>
     /// <param name="recipientName">Whisper target name; empty/null routes a general channel send.</param>
     ValueTask SendChatAsync(
         uint channel,

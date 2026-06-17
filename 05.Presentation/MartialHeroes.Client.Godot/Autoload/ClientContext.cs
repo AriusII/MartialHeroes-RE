@@ -1,5 +1,6 @@
 using Godot;
 using MartialHeroes.Assets.Vfs;
+using MartialHeroes.Client.Application.Assets;
 using MartialHeroes.Client.Application.Diagnostics;
 using MartialHeroes.Client.Application.Engine;
 using MartialHeroes.Client.Application.Events;
@@ -8,6 +9,7 @@ using MartialHeroes.Client.Application.Hud;
 using MartialHeroes.Client.Application.Ingestion;
 using MartialHeroes.Client.Application.Input;
 using MartialHeroes.Client.Application.Login;
+using MartialHeroes.Client.Application.Scene;
 using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
@@ -71,6 +73,22 @@ public sealed partial class ClientContext : Node
 
     /// <summary>The FSM (exposed so the HUD can read the current lifecycle state).</summary>
     public ClientStateMachine StateMachine { get; private set; } = null!;
+
+    /// <summary>
+    /// The faithful 8-state scene machine (CAMPAIGN 15 spine). Owns the live
+    /// <see cref="MartialHeroes.Shared.Kernel.State.GameState"/>; the <see cref="SceneHost"/> listens
+    /// for <see cref="MartialHeroes.Client.Application.Scene.SceneStateChangedEvent"/> and swaps the
+    /// live scene to match. Runs in parallel with the legacy <see cref="StateMachine"/> during the
+    /// scene-by-scene rebuild. spec: Docs/RE/specs/client_runtime.md §7.
+    /// </summary>
+    public SceneStateMachine SceneMachine { get; private set; } = null!;
+
+    /// <summary>
+    /// Engine-free state-2 load worker/orchestrator. Godot renders its progress and calls into the
+    /// scene spine only after this worker completes; transition policy remains in Application.
+    /// spec: Docs/RE/specs/resource_pipeline.md §2; Docs/RE/specs/client_runtime.md §7.3.
+    /// </summary>
+    public LoadOrchestrator LoadOrchestrator { get; private set; } = null!;
 
     /// <summary>
     /// The input bus: UI handlers first, then world handler.
@@ -227,6 +245,10 @@ public sealed partial class ClientContext : Node
     // spec: Docs/RE/formats/pak.md §Two-file scheme (MappedVfsArchive = memory-mapped handle).
     private MappedVfsArchive? _terrainVfs;
 
+    // VFS resource pipeline used by the state-2 LoadOrchestrator. Disposed in _ExitTree.
+    // spec: Docs/RE/specs/resource_pipeline.md §1 / §2.
+    private VfsResourcePipeline? _loadVfsPipeline;
+
     // -------------------------------------------------------------------------
     // Godot lifecycle
     // -------------------------------------------------------------------------
@@ -280,6 +302,20 @@ public sealed partial class ClientContext : Node
 
         // 2. FSM — starts at Login.
         var fsm = new ClientStateMachine(bus, ClientState.Login);
+
+        // 2b. Faithful 8-state scene machine (CAMPAIGN 15). Boots at state 0 (Init).
+        //     spec: Docs/RE/specs/client_runtime.md §7.1.
+        var sceneMachine = new SceneStateMachine(bus);
+
+        // 2c. State-2 load orchestrator: engine-free load worker, OPENNING/SKIP reader, and
+        //     loading cue sink. The presentation only observes progress/completion.
+        //     spec: Docs/RE/specs/resource_pipeline.md §2; client_runtime.md §7.3.
+        _loadVfsPipeline = TryMountLoadResourcePipeline();
+        var loadOrchestrator = new LoadOrchestrator(
+            sceneMachine,
+            new VfsLoadResourceSource(_loadVfsPipeline),
+            new OpeningSkipIniReader(ResolveOpeningSkipCfgPath()),
+            new GodotLoadingSoundSink());
 
         // 3. Domain world registry.
         var world = new ClientWorld();
@@ -496,7 +532,7 @@ public sealed partial class ClientContext : Node
         //     Wire the catalogue vitals resolver (real stat curves) at construction.
         //     spec: CatalogueVitalsResolver.Create — builds the seam from the catalogue.
         //     spec: Docs/RE/formats/config_tables.md §2.4.
-        var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, loginDriver)
+        var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, loginDriver, sceneStateMachine: sceneMachine)
         {
             VitalsResolver = CatalogueVitalsResolver.Create(scrStatCatalogue)
         };
@@ -516,7 +552,7 @@ public sealed partial class ClientContext : Node
         //     versionSource = null → DefaultClientVersionSource.Instance → field 2114 → token 21149.
         //     spec: Docs/RE/specs/login_flow.md §3.3 / §7 (token = 10 × versionField + 9 = 21149).
         var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId,
-            versionToken: versionToken, versionSource: null);
+            versionToken: versionToken, versionSource: null, sceneStateMachine: sceneMachine);
         GD.Print(
             $"[ClientContext] Version token derived: {ClientVersionToken.Derive(DefaultClientVersionSource.Instance.VersionField)}" +
             " (= 10 × 2114 + 9; sample_verified). spec: login_flow.md §3.3 / §7.");
@@ -530,6 +566,8 @@ public sealed partial class ClientContext : Node
         UseCases = useCases;
         Dispatcher = dispatcher;
         StateMachine = fsm;
+        SceneMachine = sceneMachine;
+        LoadOrchestrator = loadOrchestrator;
         InputBus = inputBus;
         EngineLoop = engineLoop;
         StreamingService = streamingService;
@@ -569,6 +607,12 @@ public sealed partial class ClientContext : Node
         {
             var bus = new ClientEventBus(ClientEventBus.DefaultCapacity);
             var fsm = new ClientStateMachine(bus, ClientState.Login);
+            var sceneMachine = new SceneStateMachine(bus);
+            var loadOrchestrator = new LoadOrchestrator(
+                sceneMachine,
+                new VfsLoadResourceSource(null),
+                new OpeningSkipIniReader(ResolveOpeningSkipCfgPath()),
+                new GodotLoadingSoundSink());
             var world = new ClientWorld();
             var noopSink = new NoOpOutboundPacketSink();
             var hudHandler = new HudInputHandler(hitTest: null);
@@ -580,9 +624,9 @@ public sealed partial class ClientContext : Node
             // Pass default (empty span) so the derivation via DefaultClientVersionSource runs.
             // spec: Docs/RE/specs/login_flow.md §3.3 / §7 (token = 10 × 2114 + 9 = 21149).
             var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId,
-                versionToken: default, versionSource: null);
+                versionToken: default, versionSource: null, sceneStateMachine: sceneMachine);
             var opcodeSink = new CountingUnhandledOpcodeSink();
-            var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, null);
+            var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, null, sceneStateMachine: sceneMachine);
             var dispatcher = new InboundFrameDispatcher(handler);
             var terrainSource = new VfsTerrainSectorSource(null, areaId: 0);
             // spec: Docs/RE/formats/terrain.md §12.2 — High quality → 5×5 ring (ring-radius cells = 5).
@@ -593,6 +637,8 @@ public sealed partial class ClientContext : Node
             UseCases = useCases;
             Dispatcher = dispatcher;
             StateMachine = fsm;
+            SceneMachine = sceneMachine;
+            LoadOrchestrator = loadOrchestrator;
             InputBus = inputBus;
             EngineLoop = engineLoop;
             StreamingService = streamingService;
@@ -641,6 +687,12 @@ public sealed partial class ClientContext : Node
         // spec: Docs/RE/specs/world_systems.md Ch. 16.
         RegionService ??= new MartialHeroes.Client.Application.World.RegionService(
             new MartialHeroes.Client.Godot.Adapters.VfsRegionSource(null), HudEventHub);
+
+        LoadOrchestrator ??= new LoadOrchestrator(
+            SceneMachine,
+            new VfsLoadResourceSource(null),
+            new OpeningSkipIniReader(ResolveOpeningSkipCfgPath()),
+            new GodotLoadingSoundSink());
 
         GD.Print("[ClientContext] Minimal fallback state initialised.");
     }
@@ -729,6 +781,11 @@ public sealed partial class ClientContext : Node
         _terrainVfs?.Dispose();
         _terrainVfs = null;
 
+        // Dispose the state-2 load resource pipeline (separate archive handle).
+        // spec: Docs/RE/specs/resource_pipeline.md §1 / §2.
+        _loadVfsPipeline?.Dispose();
+        _loadVfsPipeline = null;
+
         GD.Print(
             "[ClientContext] EventBus completed. EngineLoop drained + stopped. CatalogueLoader + UiCatalogs + TerrainVfs disposed.");
     }
@@ -793,6 +850,45 @@ public sealed partial class ClientContext : Node
             return null;
         }
     }
+
+    private static VfsResourcePipeline? TryMountLoadResourcePipeline()
+    {
+        string? clientDir = ClientPathResolver.ResolveClientDir();
+        if (clientDir is null)
+        {
+            GD.Print("[ClientContext] Load VFS pipeline not mounted — state-2 worker runs in offline zero-byte mode.");
+            return null;
+        }
+
+        string infPath = Path.Combine(clientDir, "data.inf");
+        string vfsPath = Path.Combine(clientDir, "data", "data.vfs");
+        try
+        {
+            VfsResourcePipeline pipeline = VfsResourcePipeline.Mount(infPath, vfsPath);
+            pipeline.TrackingEnabled = true;
+            GD.Print($"[ClientContext] Load VFS pipeline mounted from '{clientDir}'. spec: resource_pipeline.md §2.");
+            return pipeline;
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] Load VFS pipeline mount failed from '{clientDir}': {ex.Message}");
+            return null;
+        }
+    }
+
+    private static string ResolveOpeningSkipCfgPath()
+    {
+        try
+        {
+            // spec: Docs/RE/specs/resource_pipeline.md §2.5 — OPENNING/SKIP is read from the
+            // per-account/config-singleton INI path, not the dev VFS locator client_dir.cfg.
+            return ProjectSettings.GlobalizePath(MartialHeroes.Client.Godot.Screens.OpeningWindow.SkipCfgPath);
+        }
+        catch
+        {
+            return "options.cfg";
+        }
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -832,4 +928,52 @@ file sealed class RelayInputHandler : IInputHandler
     /// <inheritdoc />
     public bool TryHandle(in MartialHeroes.Client.Application.Input.InputEvent e)
         => _target?.TryHandle(in e) ?? false;
+}
+
+file sealed class VfsLoadResourceSource : ILoadResourceSource
+{
+    private readonly VfsResourcePipeline? _pipeline;
+
+    public VfsLoadResourceSource(VfsResourcePipeline? pipeline)
+    {
+        _pipeline = pipeline;
+    }
+
+    public ValueTask<long> LoadAsync(string logicalPath, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_pipeline is null)
+        {
+            return ValueTask.FromResult(0L);
+        }
+
+        try
+        {
+            ReadOnlyMemory<byte> bytes = _pipeline.OpenRead(logicalPath);
+            return ValueTask.FromResult((long)bytes.Length);
+        }
+        catch (Exception ex)
+        {
+            GD.Print($"[ClientContext] Load resource skipped '{logicalPath}': {ex.Message}");
+            return ValueTask.FromResult(0L);
+        }
+    }
+}
+
+file sealed class GodotLoadingSoundSink : ILoadingSoundSink
+{
+    public void PlayLooping(int soundCueId)
+    {
+        // Loading cue 920100100 is a category-0 looping BGM. Route through AudioService's BGM slot
+        // so the next front-end BGM replaces it cleanly.
+        // spec: Docs/RE/specs/sound.md §15.6a; frontend_scenes.md §9.1.
+        if (AudioService.Instance is { } audio)
+        {
+            audio.CallDeferred(AudioService.MethodName.StartBgm, (uint)soundCueId);
+            GD.Print($"[ClientContext] Loading sound sink requested looping cue {soundCueId}.");
+            return;
+        }
+
+        GD.Print($"[ClientContext] Loading sound sink: AudioService unavailable; cue {soundCueId} skipped.");
+    }
 }

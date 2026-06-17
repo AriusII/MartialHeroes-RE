@@ -3,7 +3,7 @@ verification: confirmed
 ida_reverified: 2026-06-16
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: texture-load flag 0x35540004 semantics (value confirmed, meaning capture/debugger-pending); first-paint font slot index (capture/debugger-pending); .do class-stance stride 116B here vs 166B in config_tables.md (config-table-lane fix, open)
+conflicts: texture-load flag 0x35540004 semantics (value confirmed, meaning capture/debugger-pending); first-paint font slot index (capture/debugger-pending); .do class-stance stride 116B here vs 166B in config_tables.md (config-table-lane fix, open); char-select corner close-button atlas (overflow on blacksheet 512x512 SAMPLE-VERIFIED; correct 1024-square atlas IDA-pending, CAMPAIGN 14)
 ---
 
 # Format: .txt (UI manifest files) — uitex.txt, skillicon.txt, crestlist.txt, texturelist.txt
@@ -209,6 +209,57 @@ integer parse helper is called before quote-string extraction in the entry proce
 | 0076 | `data/ui/target_64x64.dds` | 4,224 | 64×64 | DXT3, no mips | Target indicator — large | SAMPLE-VERIFIED |
 | 0077 | `data/ui/countinput.dds` | 1,398,256 | 1024×1024 | DXT3, full mip chain | Item count input dialog | SAMPLE-VERIFIED |
 | 0078 | `data/ui/edge.dds` | 65,664 | 256×256 | DXT3, no mips | Edge border texture | SAMPLE-VERIFIED |
+
+
+### 1.4a UI atlas re-inventory — count + header dims/fourCC re-confirmed (CAMPAIGN 14 — SAMPLE-VERIFIED)
+
+> A fresh black-box re-inventory of the registry against the real VFS (43,347-entry archive,
+> project-local `clientdata/`) **re-confirmed** the entry count and the header-decoded dimensions
+> of the key atlases. Every one of the **37** `DDS` paths was re-checked for existence in the VFS
+> — **all 37 present; 0 `MSK` entries.** The `MSK` block remains empty (see §1.7). — SAMPLE-VERIFIED.
+
+**Entry count re-confirmation.** The registry yields **37** DDS entries, not 35. This matches the
+EOF-driven loader (§1.4): there is no count field, so a parser reads rows until end-of-file and
+must NOT hard-code any fixed count. — SAMPLE-VERIFIED.
+
+**Key-atlas header dimensions / fourCC (each decoded from that file's own DDS header — SAMPLE-VERIFIED):**
+
+| Atlas | Dimensions | fourCC | Role in the port |
+|---|---|---|---|
+| `data/ui/mainwindow.dds` | 1024×1024 | DXT3 | Main HUD chrome; also a char-select shared atlas |
+| `data/ui/loginwindow.dds` | 1024×1024 | DXT5 | Login chrome; primary char-select / server-list shared atlas |
+| `data/ui/inventwindow.dds` | 1024×1024 | DXT3 | Inventory window; shared modal / PIN frame |
+| `data/ui/skillpipe.dds` | 1024×1024 | DXT2/3 (BC2) | Skill hotbar |
+| `data/ui/skillwindow.dds` | 1024×1024 | DXT2 | Skill window |
+| `data/ui/skill_window_1.dds` | 1024×1024 | DXT3 | Skill window (alternate) |
+| `data/ui/messagewindow.dds` | 1024×1024 | DXT3 | Chat / message window |
+| `data/ui/countinput.dds` | 1024×1024 | DXT5 | Item-count input dialog |
+| `data/ui/password.dds` | 1024×1024 | DXT3 | PIN keypad atlas |
+| `data/ui/login_slice1.dds` | 1024×1024 | DXT2/3 (BC2) | Login bottom-bar / edit-field frames / buttons |
+| `data/ui/loginwindow_02.dds` | 1024×1024 | DXT2/3 (BC2) | Login variant 2 |
+| `data/ui/blacksheet.dds` | **512×512** | DXT5 | Dim / black overlay (NOT a 1024² atlas — see §5.1a) |
+| `data/ui/skillicon/stateicon.dds` | **512×512** | DXT2 | Buff / status-effect icons (id 0026) |
+| `data/ui/carrierpigeonperson.dds` | **512×512** | DXT2/3 (BC2) | Carrier-pigeon personal; a char-select shared atlas |
+
+> **Load-bearing dimension fact.** `blacksheet.dds` and `stateicon.dds` are both **512×512**, not
+> 1024×1024. A source-rect whose `srcX + w` or `srcY + h` exceeds 512 on either atlas samples
+> outside the texture. This bound is exactly what flags the char-select close-button mis-binding
+> (§5.1a). — SAMPLE-VERIFIED.
+
+**DXT2-vs-DXT3 alpha-mode nuance (SAMPLE-VERIFIED).** Several atlases this spec's §1.4 table records
+as `DXT3` decode in the re-inventory as `DXT2` (for example `skillwindow` id 0008, `quick` id 0015,
+`stateicon` id 0026, `emoticon` id 0027, the colour fills 0069–0072 / 0074, `edge` id 0078). `DXT2`
+and `DXT3` are **the same BC2 block format and the same block size** — they differ only in whether
+the alpha channel is pre-multiplied (`DXT2` = premultiplied, `DXT3` = straight). This is **not** a
+dimension difference and **not** a decode-stride difference; older `fourCC` cells reading `DXT3`
+should be understood as "BC2 (DXT2/DXT3)", and a parser must accept either code and decode them
+identically (see the §4 census and the loader FourCC-equivalence note). The exact premultiply flag
+per atlas is taken from each file's own header. — SAMPLE-VERIFIED.
+
+> **Port note (non-load-bearing).** The legacy-port `Adapters/UiCatalogs.cs` carries a diagnostic
+> print that still states the registry "expects 35" entries. The re-confirmed count is **37**; the
+> lazy dictionary lookup over the non-contiguous id space is correct, so this is a stale diagnostic
+> string only — not a parsing defect. (Recorded for the port lane; not a spec change.)
 
 ### 1.5 ID gaps (SAMPLE-VERIFIED)
 
@@ -739,6 +790,59 @@ in the `UiTex.txt` ID system. An engineer must hard-code their paths, not look t
 | `data/ui/login_slice1.dds` | 1,048,704 | 1024×1024 | DXT3 | Login screen slice 1 |
 | `data/ui/password.dds` | 1,398,256 | 1024×1024 | DXT3, full mips | Secondary password dialog |
 | `data/ui/server_icon.dds` | 16,512 | 128×128 | DXT3 | Server selection icon |
+
+
+### 5.1a Character-select / server-list draw from SHARED atlases — there is NO dedicated select atlas (SAMPLE-VERIFIED)
+
+A black-box VFS probe (CAMPAIGN 14) tested every plausible dedicated char-select atlas name —
+`select.dds`, `charselect.dds`, `characterselect.dds`, `charselectwindow.dds`, `charwindow.dds`,
+`create.dds`, `charcreate.dds` — and a substring scan for `select` / `charselect` / `lobby` across
+all `data/ui/*.dds`. **All absent.** There is **no dedicated character-select or server-list atlas
+in the VFS.** — SAMPLE-VERIFIED.
+
+The character-select and server-list front-end scenes are therefore **code-baked from shared
+atlases** already documented above — drawing their chrome with literal source rects (see §14 for the
+`BuildScene` construction model) from this set:
+
+| Shared atlas | Dimensions | Role on char-select / server-list |
+|---|---|---|
+| `data/ui/loginwindow.dds` | 1024×1024 (DXT5) | Primary chrome: tabs, stat grid, Create/Delete/Enter strip, server plates |
+| `data/ui/inventwindow.dds` | 1024×1024 (DXT3) | Shared confirm-popup / modal frame |
+| `data/ui/mainwindow.dds` | 1024×1024 (DXT3) | Shared HUD-family glyphs |
+| `data/ui/blacksheet.dds` | 512×512 (DXT5) | Dim / black overlay |
+| `data/ui/carrierpigeonperson.dds` | 512×512 (DXT2/3) | Auxiliary shared glyphs |
+
+> **Binding rule for the port.** A faithful renderer must bind char-select / server-list elements to
+> these **shared** atlases. **Any port code that binds a `select.dds` (or similar dedicated
+> char-select atlas) would be wrong** — no such file exists in the VFS. — SAMPLE-VERIFIED.
+
+### 5.1b FLAGGED MIS-BINDING — char-select corner close button overflows `blacksheet.dds` (SAMPLE-VERIFIED overflow; correct atlas IDA-PENDING)
+
+The port's char-select layout declares the corner close button with source rect
+**`(srcX = 941, srcY = 910, w = 23, h = 23)` on `data/ui/blacksheet.dds`**. But `blacksheet.dds` is
+**512×512** (header-confirmed, §1.4a). The arithmetic is decisive:
+
+- `srcX + w = 941 + 23 = 964` → exceeds 512.
+- `srcY + h = 910 + 23 = 933` → exceeds 512.
+
+Both right and bottom edges fall **outside** the 512×512 atlas, so the rect samples empty/garbage UV.
+A `(941, 910)` origin only fits a **1024×1024** atlas. **The overflow is arithmetic-certain
+(SAMPLE-VERIFIED); the binding to `blacksheet.dds` is therefore a mis-binding.** — SAMPLE-VERIFIED.
+
+> **Correct atlas — IDA-PENDING.** The same physical close glyph at `(941, 910)` would land in-bounds
+> on a 1024² atlas; the most plausible candidates are `loginwindow.dds` or `mainwindow.dds` (both
+> 1024×1024, both already among the char-select shared atlases, §5.1a). **Which atlas the original
+> actually binds for this close button is NOT settled here** — it requires the char-select window
+> construct (`BuildScene`) witness in IDA / the running loader to confirm both the bound texture path
+> and the real `(srcX, srcY, w, h)`. Do **not** guess the atlas; reconcile this flag once the
+> construct witness lands, and do not ship `(941, 910)` against a 512² texture. — [IDA-PENDING].
+
+> **Action for the port lane.** Treat the close button as a flagged defect: it must be re-bound to a
+> 1024² atlas (correct one IDA-pending) before it can render. This is the **only** char-select
+> source-rect overflow found in the CAMPAIGN 14 bounds sweep; all other char-select / login / PIN
+> rects fit their bound atlas (the tightest fit is the create-form class strip at `srcY = 1005`,
+> which sits exactly at the 1024 bottom edge for a height up to 19px — worth a runtime height check
+> but in-bounds).
 
 ### 5.2 Loading screens
 
@@ -1542,3 +1646,15 @@ gets the event. [confirmed]
 > `specs/ui_system.md`. Residuals flagged in the banner: `0x35540004` flag meaning, first-paint
 > font slot, and the §11 `.do` 116B-vs-166B config-table stride. Promoted as neutral prose; no
 > addresses, no decompiler output, and no sample bytes crossed the firewall.
+
+
+> **Provenance — CAMPAIGN 14 ★ HUD/UI lane (black-box VFS re-inventory, SAMPLE-VERIFIED):** added
+> §1.4a (UI atlas re-inventory: registry **re-confirmed at 37 DDS / 0 MSK**, all 37 paths present in
+> the 43,347-entry VFS; key-atlas header dims/fourCC including **blacksheet.dds = 512×512** and
+> **stateicon.dds = 512×512**; the **DXT2-vs-DXT3 = premultiplied-vs-straight-alpha, same BC2 block**
+> nuance; the stale port "expects 35" diagnostic noted as non-load-bearing) and §5.1a/§5.1b
+> (char-select & server-list draw from **shared** atlases — **no dedicated `select.dds` exists**; and
+> the **flagged mis-binding**: the corner close button declared `(941,910,23,23)` on the 512×512
+> `blacksheet.dds` overflows the atlas — `964 > 512`, `933 > 512` — so the correct atlas is a 1024²
+> sheet, **IDA-pending** the char-select construct witness). Promoted as neutral prose; no addresses,
+> no decompiler output, and no sample bytes crossed the firewall.

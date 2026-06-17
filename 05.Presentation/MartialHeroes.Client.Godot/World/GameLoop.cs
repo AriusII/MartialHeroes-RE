@@ -183,9 +183,9 @@ public sealed partial class GameLoop : Node
 
     /// <summary>
     /// Returns true when the DEV-ONLY debug baseline (green plane + red origin cube) is enabled.
-    /// Default OFF so the world renders only the recovered scene graph; enabled via the
-    /// <c>MH_DEV_BASELINE=1</c> environment variable or the <c>dev_offline_flow=1</c> key in
-    /// <c>client_dir.cfg</c> (the same dev-offline flow the front-end uses). NEVER on in production.
+    /// Default OFF so the world renders only the recovered scene graph; enabled only via the
+    /// <c>MH_DEV_BASELINE=1</c> environment variable or the <c>dev_baseline=1</c> key in
+    /// <c>client_dir.cfg</c>. DEV_OFFLINE_FLOW must not add geometry to fidelity screenshots.
     /// spec: Docs/RE/specs/client_runtime.md §7.4 (no debug primitives in the original world build).
     /// </summary>
     private static bool IsDevBaselineEnabled()
@@ -195,12 +195,7 @@ public sealed partial class GameLoop : Node
         if (baselineEnv is "1" or "true" or "yes")
             return true;
 
-        // Shared dev-offline flow flag: env var or client_dir.cfg key.
-        string? offlineEnv = System.Environment.GetEnvironmentVariable("DEV_OFFLINE_FLOW");
-        if (offlineEnv is "1" or "true" or "yes")
-            return true;
-
-        return ReadCfgFlag("dev_offline_flow") || ReadCfgFlag("dev_baseline");
+        return ReadCfgFlag("dev_baseline");
     }
 
     /// <summary>

@@ -6,6 +6,128 @@
 
 ---
 
+# CYCLE 15 — Scene-Spine Rebuild (Godot 05 + C# core from zero, scene-by-scene) (launched 2026-06-16)
+
+**Mandate (maintainer):** "Reprendre 'tout le projet' Godot de zéro … en te basant sur toute la docs
+et la spéc qu'on a tiré d'IDA car IDA reste notre seule vérité absolue … reprendre tout le code C# et
+surtout refaire tout le projet GODOT de zéro, pour vraiment gérer proprement les 'scenes' … surtout
+la partie du 'state scene' … étapes par étapes, d'abord les 1ere scenes, et on découle les scene …
+pas 'tout d'un coup'." **Reframed:** rebuild the client **from zero** — C# core (01–04) **and** Godot
+(05) — around the IDA-confirmed **8-state scene machine** (`client_runtime.md §7`: 0 Init → 1 Login →
+2 Load → 3 Opening → 4 Select → 5 In-game, + 6 Quit / 7 Error; 8 = sub-state). `GameState` + its
+bounds-checked `switch` become the **explicit load-bearing spine**, replacing the organic
+`BootFlow`/screen tangle. Delivery is **strictly incremental, one engine-state per increment**, gated
+against spec + visual oracle before the next — never all at once.
+
+**Master deliverable:** a clean, faithful `SceneStateMachine` (C#) + `SceneHost` (Godot) spine + the
+per-state scenes rebuilt on it.
+**Out of scope (deferred):** game server; re-RE of settled specs; new `.pcapng` captures; IDB
+blanket-naming; World gameplay depth beyond a correct area-2 render; debugger-pending visual
+residuals (only chased if they block a gate).
+**Command structure:** Tier-1 drives Phase 0 directly; Phases 1–7 delegate to the lane captains
+(`client-core-`, `godot-client-`, `network-stack-`, `assets-pipeline-`, `quality-gate-`,
+`tooling-orchestrator`; `re-cleanroom-orchestrator` only if a spec gap opens). All verified present
+on disk (C14's "MISSING lane orchestrators" note was stale).
+
+**Confirmed decisions (Step-2 form):** C# scope = rebuild_all (sliced per scene, keep-green) · project
+= in_place · render = port recovered builders at state 5 · increment = per engine-state · first =
+host_only (8-state skeleton, all stubbed, then Login).
+
+## Evidence baseline
+- Specs in: `client_runtime.md §7` (scene machine), `game_loop.md`, `client_workflow.md`,
+  `frontend_scenes.md`, `login_flow.md`, `resource_pipeline.md`, `skinning.md`, `formats/*`.
+- Gaps this cycle closes: no explicit 8-state spine in layer 05 (flow spread across `BootFlow.cs` +
+  ad-hoc screen swaps); 5-value abstracted `ClientStateMachine` replaced by the faithful `GameState`.
+- Tool baseline verified: build **0/0** · tests **1979 green** (12 suites, bin/obj nuked) · VFS
+  reachable · IDA MCP only if a W gap opens.
+
+## Phase 0 — Charter & honest baseline (C) — **DONE 2026-06-16**
+- [x] Branch `campaign15` created off `campaign12`.
+- [x] Recovered accidentally-deleted `Docs/PLAN.md` + `Docs/ROADMAP.md` from HEAD.
+- [x] Honest baseline (nuke bin/obj → clean build + `dotnet test --no-build`): **0 warn / 0 err ·
+  1979 tests green**. Recorded as the *diff target*, NOT asserted correct.
+- [x] ADR for the new `GameState`/`SceneHost` spine recorded (this cycle section + plan).
+
+## Phase 1 / Increment 0 — Scene-machine skeleton (host_only) (E + R) — **DONE 2026-06-16**
+C# `Shared.Kernel.State.GameState` (3 ints + debug byte, ctor default {Init, sub 8}) +
+`Shared.Kernel.Enums.EngineSceneState` (0..7); `Client.Application.Scene.SceneStateMachine`
+(complete §7.5 transition table, write-next → publish `SceneStateChangedEvent`) + 21 faithful tests.
+Godot `Scene/SceneHost` autoload-driven root dispatching **8 stub** `ISceneController`s
+(`Scene/Controllers/*`) + `Scenes/SceneHostBoot.tscn` (new `run/main_scene`); `ClientContext`
+exposes `SceneMachine` (parallel to the legacy `StateMachine`, keep-green). **EXIT met:** build
+**0/0** · **2000 tests green** · headless walk Init→Login→Load→Opening→Select→InGame (no errors) ·
+spine engine-free (no `using Godot;` below 05). Old `BootFlow`/`ClientStateMachine` retained, retired
+incrementally.
+
+## Phase 2 / Increment 1 — State 1 Login (E + R) — **DONE 2026-06-16**
+Login network/crypto slice re-verified+fixed (CP949 credential staging, PIN ≤4 cap, `1/9` enter
+request aligned to `cmsg_char_enter.yaml`: session@0x01/pad@0x22/version-token u32@0x24); Application
+login use-case + lobby/server-list drain verified; `GamePacketHandler` now drives the NEW
+`SceneStateMachine` alongside the legacy FSM (3/5→OnEnterGameAck, 3/1→OnCharacterListReceived,
+3/7/4/1-no-player/disconnect/select-confirm); SceneStateMachine fidelity fixes from the Inc-0 review
+applied (RequestQuit 6/2 vs 6/8 by state, CharacterList accepts Load/Select only, reload-Load skips
+Opening, Login config-fail 7/1 & init-fail 7/3, network-fatal, `HasExited` exit-tail model).
+Godot `Scene/Controllers/LoginScene.cs` filled with the REAL LoginWindow UI (uiconfig widgets, real
+DDS atlases, msg.xdb, 15 fonts, internal PIN + server-list sub-views) on `SceneHost`; `SceneHost`
+now polls `SceneMachine.Current.State` and re-dispatches on ANY transition (network-driven included),
+fallback hardened to dev/headless, clean node swap. **EXIT met:** build **0/0** (--no-incremental) ·
+**2018 tests green** · headless builds real Login UI + walks 1→2→…→5 clean · login screenshot
+rendered real UI. Open: capture/debugger-pending wire facts remain documented in specs.
+
+## Phase 3 / Increment 2 — State 2 Load (E + R) — **DONE 2026-06-16**
+Engine-free Load API in `Application.Assets` (`LoadOrchestrator` Start/Completion/ShouldSkipOpening/
+DestinationAfterLoad; `IOpeningSkipReader` reads `[OPENNING] SKIP` once at post-login load, reload
+path short-circuits to Select; `ILoadResourceSource`/`ILoadingSoundSink`; `VfsResourcePipeline.Mount/
+OpenRead` + progress). `ClientContext` constructs+exposes `LoadOrchestrator` and sets
+`SceneStateMachine.SkipOpening`. Godot `LoadScene` renders the real full-screen `loading08.dds` +
+progress bar, plays loading SFX **920100100**, waits `LoadOrchestrator.Completion` + 500 ms grace,
+then `host.Advance()` (machine picks 2→3 / 2→4). **EXIT met:** build **0/0** (--no-incremental) ·
+**2024 tests green** · headless builds real LoadingScreen, runs the load, advances 2→3→…→5 clean ·
+loading screenshot rendered. Inc-1 audit: CONCERNS no Critical → backlog `polish-audit-inc1`.
+
+## Phase 4 / Increment 3 — State 3 Opening (E + R) — **DONE 2026-06-16**
+Godot `OpeningScene` hosts the real `OpeningWindow`: `openning_001..004` slideshow + `openning_scenario`
+crawl + BGM **910061000** + skip (action 100); advances 3→4 on IntroFinished/skip; headless-only finite
+completion so the verify walk progresses without persisting skip. **EXIT met:** build **0/0**
+(--no-incremental) · **2024 tests green** · headless builds OpeningWindow + advances 3→4 clean ·
+opening screenshot captured. spec: `intro_sequence.md §1–§4`, `client_runtime.md §7.3` (state 3).
+
+## Phase 5 / Increment 4 — State 4 Select (E + R) — **DONE 2026-06-16**
+Char-mgmt core: `1/6` create, `1/7{slot,0/1}` select/delete, `1/9` enter, `1/13` rename, `3/1`/`3/7`/
+`3/100`; result table verified (0→6/8, 1-4/7→7/5, 202/203/232→2 reload, other→7/8); use-case surface
+(`GetCharacterRoster`, `SelectCharacterAsync`, `CreateCharacterAsync`, `DeleteCharacterAsync`,
+`RenameCharacterAsync`) drives the new SceneStateMachine. Godot `SelectScene` builds the real
+CharacterSelectScreen (34 widgets, CP949 char-count caption), 3D preview scene (CharSelectScene3D +
+Select camera dolly KF0→KF1 + backdrop terrain + water + xeff fire 380003000), CharacterListEvent
+drain, dev roster; advances 4→5 on confirm. **EXIT met:** build **0/0** (--no-incremental) ·
+**2038 tests green** · headless builds Select + advances 4→5 · select screenshot captured. Minor:
+dev roster seeds skinClassId=0 (preview actors skipped) → backlog `polish-select-roster`. Inc-2 Load
+audit follow-ups fixed (`polish-audit-inc2`: OPENNING/SKIP→options.cfg per §2.5, LoadOrchestrator
+Cancelled state). spec: `frontend_scenes.md §3`, `client_runtime.md §7.3/§7.4/§7.5.2`.
+
+## Phase 6 / Increment 5 — State 5 In-game World (E + R, port render) — **IN PROGRESS 2026-06-16**
+
+## Phase 5 / Increment 4 — State 4 Select (E + R) — **PENDING**
+Char-mgmt opcodes + result-code transitions; char-select/create use-cases + CharacterList drain;
+Godot select UI + create/delete/rename + preview actor + Select camera path. Captains:
+`network-stack-` + `client-core-` + `godot-client-orchestrator`.
+
+## Phase 6 / Increment 5 — State 5 In-game World (E + R, port render) — **PENDING**
+Port parsers/mapping (terrain/skin/bind/motion) re-cited; world opcodes + Domain world-state; Godot
+`BuildGameWorld` (camera rig + scene graph + services + HUD) porting Bud/Skn/terrain/NPC builders w/
+coordinate conventions (negate-Z world / negate-X mesh). **EXIT:** area-2 render + `godot-fidelity-
+check` vs oracle. Captains: `assets-pipeline-` + `client-core-` + `network-stack-` + `godot-client-`.
+
+## Phase 7 / Increment 6 — States 6 Quit / 7 Error + cross-cutting + final gates (E + R + C) — **PENDING**
+State 6 shutdown + state 7 error string/modal/`error.log` + shared exit tail (field-0==8); re-home
+input/camera/HUD/sound/chat onto the clean spine; 4 reviewers → fix wave → `build 0/0 --no-
+incremental` + suites green + firewall PASS + DAG clean; consolidation (ROADMAP/journal/names/memory;
+commit only on request). Captains: `godot-client-` + `quality-gate-` + `tooling-orchestrator`.
+
+— *Maintained by the orchestrator. Update phase statuses in place as waves complete.*
+
+---
+
 # CAMPAIGN 13 — Zero-Trust Ground-Truth Rebuild (*make the client work*) (launched 2026-06-16)
 
 **The correction:** C11–C12 treated the existing C#/Godot as the baseline to patch and gated on

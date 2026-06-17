@@ -45,6 +45,10 @@ public static class TextureListParser
     /// <inheritdoc cref="Parse(ReadOnlySpan{byte})"/>
     public static TextureListManifest Parse(ReadOnlyMemory<byte> data) => Parse(data.Span);
 
+    /// <inheritdoc cref="Parse(ReadOnlySpan{byte},string)"/>
+    public static TextureListManifest Parse(ReadOnlyMemory<byte> data, string vfsPathPrefix) =>
+        Parse(data.Span, vfsPathPrefix);
+
     /// <summary>
     /// Parses the raw CP949 bytes of a <c>texturelist.txt</c> file.
     /// </summary>
@@ -59,12 +63,33 @@ public static class TextureListParser
         // Decode from CP949 before line splitting — this is a text manifest.
         // spec: Docs/RE/formats/ui_manifests.md §Identification — "CP949": PARSER-CONFIRMED.
         string text = Encoding.GetEncoding(949).GetString(span);
-        return ParseText(text);
+        return ParseText(text, VfsPathPrefix);
+    }
+
+    /// <summary>
+    /// Parses a texture-list file whose filenames resolve under <paramref name="vfsPathPrefix"/>.
+    /// Use this for the character buckets such as <c>data/char/tex512512list.txt</c>.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/texture.md §List files and target directories — character bucket
+    /// list files prepend their own target directory and key entries by leading decimal texture id.
+    /// </remarks>
+    public static TextureListManifest Parse(ReadOnlySpan<byte> span, string vfsPathPrefix)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(vfsPathPrefix);
+        string text = Encoding.GetEncoding(949).GetString(span);
+        return ParseText(text, vfsPathPrefix);
     }
 
     /// <summary>Overload accepting pre-decoded text (primarily for unit testing).</summary>
-    public static TextureListManifest ParseText(string text)
+    public static TextureListManifest ParseText(string text) => ParseText(text, VfsPathPrefix);
+
+    /// <summary>Overload accepting pre-decoded text and a target VFS prefix.</summary>
+    public static TextureListManifest ParseText(string text, string vfsPathPrefix)
     {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentException.ThrowIfNullOrEmpty(vfsPathPrefix);
+
         // Approximate initial capacity — each line ~19 bytes, so entries ≈ text.Length / 19.
         // We allocate slightly generously to avoid resizing.
         var entries = new List<TextureListEntry>(Math.Max(16, text.Length / 20));
@@ -99,7 +124,7 @@ public static class TextureListParser
 
             // Step 5: construct full VFS path = "data/item/texture/" + filename.
             // spec: Docs/RE/formats/ui_manifests.md §10.3 step 5 — "data/item/texture/ + name + ext": CODE-CONFIRMED.
-            string vfsPath = VfsPathPrefix + line;
+            string vfsPath = vfsPathPrefix + line;
 
             entries.Add(new TextureListEntry(texId, vfsPath));
         }

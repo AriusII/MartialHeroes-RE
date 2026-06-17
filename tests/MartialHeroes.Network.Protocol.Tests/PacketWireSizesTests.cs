@@ -12,6 +12,7 @@ namespace MartialHeroes.Network.Protocol.Tests;
 public sealed class PacketWireSizesTests
 {
     [Theory] // spec: Docs/RE/opcodes.md + per-packet specs — each opcode maps to its struct size.
+    [InlineData(OpcodeConsts.SmsgGameStateTick, 0x238C, true)] // handlers.md §4/1
     [InlineData(OpcodeConsts.SmsgEquipItemResult, 16, false)] // item.md 4/12
     [InlineData(OpcodeConsts.SmsgItemSlotStateAck, 36, false)] // item.md 4/22
     [InlineData(OpcodeConsts.SmsgNpcBuyOrAcquireAck, 56, false)] // item.md 4/19
@@ -71,5 +72,30 @@ public sealed class PacketWireSizesTests
         Assert.False(TypedPacketView.TryAs<SmsgEquipItemResult>(
             tooSmall, SmsgEquipItemResult.WireSize, out SmsgEquipItemResult view));
         Assert.Equal((byte)0, view.Result); // left at default on failure
+    }
+
+    [Fact] // spec: handlers.md §4/1; client_runtime.md §9.4.
+    public void GameStateTick_reads_world_entry_seed_from_pinned_offsets()
+    {
+        var payload = new byte[SmsgGameStateTick.WireSize];
+        payload[SmsgGameStateTick.FormOffset] = SmsgGameStateTick.WorldEntryForm;
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(SmsgGameStateTick.ScenarioModeOffset, 4), 6);
+        BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(SmsgGameStateTick.SpawnXOffset, 4), 12.5f);
+        BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(SmsgGameStateTick.SpawnZOffset, 4), -3.25f);
+
+        Assert.True(SmsgGameStateTick.TryReadWorldEntrySeed(payload, out SmsgGameStateTickSeed seed));
+        Assert.Equal((byte)1, seed.Form);
+        Assert.Equal(6, seed.ScenarioMode);
+        Assert.Equal(12.5f, seed.SpawnX);
+        Assert.Equal(-3.25f, seed.SpawnZ);
+    }
+
+    [Fact] // form byte +0 must be 1 for the world-entry branch.
+    public void GameStateTick_rejects_non_world_entry_form()
+    {
+        var payload = new byte[SmsgGameStateTick.WorldEntrySeedSize];
+        payload[SmsgGameStateTick.FormOffset] = 3;
+
+        Assert.False(SmsgGameStateTick.TryReadWorldEntrySeed(payload, out _));
     }
 }

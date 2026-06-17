@@ -84,16 +84,11 @@ public static class BgtextureLstParser
         // range is the half-open interval [1, 2000). Both shipped instances (1222, 1108) fall inside it.
         // spec: Docs/RE/formats/bgtexture_lst.md §Header layout — "Count validation (loader-enforced):
         //   rejects a count of 0 and rejects a count >= 2000 (0x7D0)": CODE-CONFIRMED.
-        //
-        // We apply the UPPER bound here (the safety-relevant half: it caps the allocation against a
-        // corrupt/huge count). The lower bound (reject 0) is DEFERRED: BgtextureLstParserTests.cs
-        // (another lane's file) pins record_count=0 as valid (Parse_ZeroRecords_EmptyCatalog), so the
-        // reject-0 half must land together with that test.
         const uint MaxRecordCountExclusive = 2000; // 0x7D0
-        if (recordCount >= MaxRecordCountExclusive)
+        if (recordCount == 0 || recordCount >= MaxRecordCountExclusive)
             throw new InvalidDataException(
-                $"bgtexture.lst parse error: record_count={recordCount} is >= the loader's upper bound " +
-                $"{MaxRecordCountExclusive} (0x7D0). " +
+                $"bgtexture.lst parse error: record_count={recordCount} is outside the loader's valid " +
+                $"range [1, {MaxRecordCountExclusive}) (upper bound 0x7D0). " +
                 "spec: Docs/RE/formats/bgtexture_lst.md §Header layout — count validation (loader-enforced).");
 
         // Validate size formula: file_size must equal 4 + record_count * 48. CONFIRMED.

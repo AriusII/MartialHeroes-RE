@@ -21,7 +21,7 @@
 //
 // SKIP:
 //   Enter / ESC / Space → persist [OPENNING] SKIP=1 + Finish(). spec §1.0.5. CODE-CONFIRMED.
-//   Skip button (action id 100) from mainwindow.dds at lower-right of canvas:
+//   Skip button (action id 100) from mainwindow.dds at top-right of canvas:
 //     normal src (761,165,110,32) / pressed src (634,165,110,32). Click → same persist+finish.
 //   spec: Docs/RE/specs/frontend_scenes.md §1.0.5 / intro_sequence.md §1. CODE-CONFIRMED.
 //   Mouse-wheel manual crawl-scrub (bounds ~30..1833): actions 1004 up / 1005 down — optional.
@@ -122,8 +122,10 @@ public sealed partial class OpeningWindow : Control
     private double _dwellAccumMs; // ms elapsed in current dwell
     private int _alpha; // 0..250 ramp. spec §3.2.
     private int _alphaDir = 1; // +1 ramp-up, −1 ramp-down
+
     private bool _panelFadedIn; // latched when alpha first reaches AlphaMax
-    private bool _sequenceDone; // all 4 panels complete
+    // NOTE: there is no _sequenceDone — panel 4 loops indefinitely; the only exit is an explicit
+    // skip. spec: intro_sequence.md §3.1 (CAMPAIGN 16 correction).
 
     // Global finish guard.
     private bool _finished;
@@ -417,7 +419,7 @@ public sealed partial class OpeningWindow : Control
 
     private void UpdateSlideshow(float dtMs)
     {
-        if (_sequenceDone || _slideshowRect is null) return;
+        if (_slideshowRect is null) return;
 
         // Alpha ramp: ±1 per rendered frame (frame-gated). Direction toggles at 0 and AlphaMax.
         // The alpha field is INITIALISED to 250 (max) and direction starts at -1 (fade-OUT first).
@@ -448,23 +450,27 @@ public sealed partial class OpeningWindow : Control
 
         if (!_panelFadedIn || !(_dwellAccumMs >= DwellMs)) return;
 
-        // Dwell expired → advance to the next panel. spec §3.1. CODE-CONFIRMED.
-        _slideshowState++;
-        if (_slideshowState > SlideshowFrameCount)
+        // Dwell expired → advance to the next panel if not yet at 4. spec §3.1. CODE-CONFIRMED.
+        // CAMPAIGN 16 correction: there is NO auto-finish after state 4. Panel 4 holds and loops
+        // its alpha fade INDEFINITELY. The ONLY exit is an explicit skip (keyboard Enter/ESC/Space
+        // or click on action-100 skip button). spec: intro_sequence.md §3.1.
+        if (_slideshowState < SlideshowFrameCount)
         {
-            // After state 4 completes, transition to the character-select scene.
-            // spec §3.1 "after state 4, transition to char-select". CODE-CONFIRMED.
-            _sequenceDone = true;
-            GD.Print("[OpeningWindow] Slideshow complete — transitioning.");
-            Finish();
-            return;
+            _slideshowState++;
+
+            // Swap texture for the new panel. spec §3.1 "paging four whole textures". CODE-CONFIRMED.
+            _slideshowRect.Texture = _slideshowTextures[_slideshowState - 1];
+            GD.Print($"[OpeningWindow] Slideshow → state {_slideshowState} ({SlideshowPaths[_slideshowState - 1]}).");
+        }
+        else
+        {
+            // State 4 — hold and loop the alpha fade indefinitely. spec §3.1 (CAMPAIGN 16 correction).
+            // Reset dwell so the loop gate fires again next cycle, but do NOT advance state or finish.
+            GD.Print("[OpeningWindow] Slideshow at panel 4 — looping alpha fade indefinitely. " +
+                     "Waiting for explicit skip. spec: intro_sequence.md §3.1.");
         }
 
-        // Swap texture for the new panel. spec §3.1 "paging four whole textures". CODE-CONFIRMED.
-        _slideshowRect.Texture = _slideshowTextures[_slideshowState - 1];
-        GD.Print($"[OpeningWindow] Slideshow → state {_slideshowState} ({SlideshowPaths[_slideshowState - 1]}).");
-
-        // Reset for the next panel: start faded-in (250) and immediately fade-out.
+        // Reset dwell accumulator and alpha for the next fade cycle.
         // spec: intro_sequence.md §3.2/§3.4. CODE-CONFIRMED.
         _dwellAccumMs = 0.0;
         _panelFadedIn = false;

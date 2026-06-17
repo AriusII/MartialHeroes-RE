@@ -31,9 +31,8 @@
 //        A@(67,48,178,13) src(0,437)        — deco plate 1                   §11.2f
 //        A@(0,100,313,32) src(289,437)      — deco plate 2                   §11.2f
 //   z=17 A@(456,64,112,39) src(266,398)    — login/OK btn     act 103       §11.2e
-//   z=19 C@(342,289,340,190) src(318,647)  — quit-confirm modal (hidden)    §11.2d
-//        C@(120,136,113,40) src(302,900)   — quit yes #1      act 113       §11.2d
-//        C@(120,136,113,40) src(302,860)   — quit yes #2      act 114       §11.2d
+//   z=19 C@(342,289,340,190) src(318,647)  — ExitPanel modal (hidden)       §1.8
+//        caption msg 2007; Yes act 50 (inert at Login), No act 51           §1.8
 //   z=100  two black curtain bars (slide open §1.5a)
 //
 // RULES: NO fallback ColorRect, NO English text labels, NO EULA panel,
@@ -74,7 +73,7 @@ public sealed partial class LoginScreen : Control
     public delegate void LoginAcceptedEventHandler(string account, string password);
 
     /// <summary>
-    /// Raised when quit-confirm Yes #1 (action 113) or #2 (action 114) is clicked.
+    /// Reserved for OS/window-close quit flow; the shared ExitPanel Yes action is inert on Login.
     /// spec: Docs/RE/specs/frontend_scenes.md §1.8. CODE-CONFIRMED.
     /// </summary>
     [Signal]
@@ -437,9 +436,8 @@ public sealed partial class LoginScreen : Control
                 caption: "", captionTint: Colors.White);
             noticeBtn.Name = "QuitButton";
             // VISUAL ORACLE (2026-06-16, screenshot vs official capture): this button's baked art is
-            // "종료" (Exit), NOT a notice/server-list button. It must open the quit-confirm modal whose
-            // Yes (actions 113/114) emits QuitRequested → client quit. The server list is reached via
-            // 확인 → PIN → server-select, so there is no separate server-list button on base login.
+            // "종료" (Exit), NOT a notice/server-list button. It opens ExitPanel msg 2007; Yes action
+            // 50 is inert at Login. The server list is reached via 확인 → PIN → server-select.
             // spec: Docs/RE/specs/frontend_scenes.md §1.8 (quit paths).
             noticeBtn.ActionFired += _ => OnQuitButtonPressed();
             AddChild(noticeBtn);
@@ -623,16 +621,19 @@ public sealed partial class LoginScreen : Control
     }
 
     // -------------------------------------------------------------------------
-    // Quit-confirm modal (§11.2d).
+    // ExitPanel quit-confirm modal (§1.8).
     // Chrome: C@(342,289,340,190) src(318,647).
-    // Buttons: yes#1 C@(120,136,113,40) src(302,900) act 113;
-    //          yes#2 C@(120,136,113,40) src(302,860) act 114.
+    // Message 2007; Yes action 50 is inert at Login, No action 51 hides the panel.
+    // Actions 113/114 belong to the server-list re-fetch popup, not to Login quit.
     // NO invented Cancel button, NO English text fallback.
-    // spec: Docs/RE/specs/frontend_scenes.md §11.2d. CODE-CONFIRMED.
+    // spec: Docs/RE/specs/frontend_scenes.md §1.8. CODE-CONFIRMED.
     // -------------------------------------------------------------------------
 
     private Control BuildQuitConfirmModal()
     {
+        const int exitPanelYesAction = 50; // spec: Docs/RE/specs/frontend_scenes.md §1.8.
+        const int exitPanelNoAction = 51; // spec: Docs/RE/specs/frontend_scenes.md §1.8.
+
         var modal = new Control
         {
             Name = "QuitConfirmModal",
@@ -677,8 +678,8 @@ public sealed partial class LoginScreen : Control
             }
         }
 
-        // Yes button #1 — C@(120,136,113,40) src NORMAL(302,900) HOVER(302,900) PRESSED(415,900) action 113.
-        // spec §11.2d "Dialog #1 OK". CODE-CONFIRMED.
+        // ExitPanel Yes — action 50; Login has no GameState dispatcher case, so it is inert.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.8.
         {
             var yes1 = WidgetFactory.MakeStateButton(
                 _assets, LoginLayout.AtlasInventWindow,
@@ -687,15 +688,15 @@ public sealed partial class LoginScreen : Control
                 LoginLayout.QuitConfirmYes1.SrcX, LoginLayout.QuitConfirmYes1.SrcY, // NORMAL (302,900)
                 LoginLayout.QuitConfirmYes1.SrcX, LoginLayout.QuitConfirmYes1.SrcY, // HOVER  = NORMAL
                 LoginLayout.QuitConfirmYes1HoverSrcX, LoginLayout.QuitConfirmYes1HoverSrcY, // PRESSED(415,900)
-                LoginLayout.ActionQuitConfirmYes1,
+                exitPanelYesAction,
                 caption: "", captionTint: Colors.White);
-            yes1.Name = "QuitYes1";
+            yes1.Name = "ExitPanelYes";
             yes1.ActionFired += _ => OnQuitConfirmed();
             modal.AddChild(yes1);
         }
 
-        // Yes button #2 — C@(120,136,113,40) src NORMAL(302,860) HOVER(302,860) PRESSED(415,860) action 114.
-        // spec §11.2d "Dialog #2 OK". CODE-CONFIRMED.
+        // ExitPanel No — action 51; dismisses the shared ExitPanel.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.8.
         {
             var yes2 = WidgetFactory.MakeStateButton(
                 _assets, LoginLayout.AtlasInventWindow,
@@ -704,10 +705,10 @@ public sealed partial class LoginScreen : Control
                 LoginLayout.QuitConfirmYes2.SrcX, LoginLayout.QuitConfirmYes2.SrcY, // NORMAL (302,860)
                 LoginLayout.QuitConfirmYes2.SrcX, LoginLayout.QuitConfirmYes2.SrcY, // HOVER  = NORMAL
                 LoginLayout.QuitConfirmYes2HoverSrcX, LoginLayout.QuitConfirmYes2HoverSrcY, // PRESSED(415,860)
-                LoginLayout.ActionQuitConfirmYes2,
+                exitPanelNoAction,
                 caption: "", captionTint: Colors.White);
-            yes2.Name = "QuitYes2";
-            yes2.ActionFired += _ => OnQuitConfirmed();
+            yes2.Name = "ExitPanelNo";
+            yes2.ActionFired += _ => HideQuitConfirmModal();
             modal.AddChild(yes2);
         }
 
@@ -884,8 +885,9 @@ public sealed partial class LoginScreen : Control
 
     private void OnQuitButtonPressed()
     {
-        // The "종료" (Exit) button opens the quit-confirm modal. Confirm (Yes, actions 113/114) →
-        // OnQuitConfirmed → QuitRequested → BootFlow GetTree().Quit(). spec §1.8 (quit paths).
+        // The "종료" (Exit) button opens shared ExitPanel msg 2007. Yes action 50 is inert at Login;
+        // actions 113/114 are only the server-list re-fetch path.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.8.
         GD.Print("[LoginScreen] 종료 (quit) button pressed → show quit-confirm modal. spec §1.8.");
         ShowQuitConfirmModal();
     }
@@ -913,11 +915,10 @@ public sealed partial class LoginScreen : Control
 
     private void OnQuitConfirmed()
     {
-        // Quit-confirm Yes (actions 113 or 114) → engine state 6 / substate 8.
-        // spec §1.8. CODE-CONFIRMED.
-        GD.Print("[LoginScreen] Quit confirmed (actions 113/114). Emitting QuitRequested. spec §1.8.");
+        // ExitPanel Yes (action 50) is inert at GameState 1 (Login); do not emit QuitRequested here.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.8.
+        GD.Print("[LoginScreen] ExitPanel Yes action 50 is inert at Login. spec §1.8.");
         _quitModalTarget = LoginLayout.DialogAlphaHidden;
-        EmitSignal(SignalName.QuitRequested);
     }
 
     // -------------------------------------------------------------------------

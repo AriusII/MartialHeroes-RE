@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
-using System.Globalization;
 using System.Text;
 using MartialHeroes.Client.Application.Events;
+using MartialHeroes.Client.Application.Scene;
 using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.World;
 using System.Collections.Immutable;
@@ -39,8 +39,8 @@ namespace MartialHeroes.Client.Application.UseCases;
 /// (<c>sample_verified</c> from the real <c>game.ver</c>). spec: login_flow.md §3.3 / §7.
 /// <see cref="LoginAsync"/> only STAGES the credential and emits no outbound frame: the credential
 /// rides the secure 1/4 reply built later by the login handshake driver (1/6 is character-create only).
-/// spec: login_flow.md §4.2. The chat text charset is CP949 per the chat specs; the body bytes here are
-/// still UTF-8 (PROVISIONAL — ASCII round-trips identically).
+/// spec: login_flow.md §4.2. The chat text charset is CP949 (code page 949, the on-wire encoding for
+/// all game text — spec: Docs/RE/specs/chat.md §0).
 /// </para>
 /// </remarks>
 public sealed class ApplicationUseCases : IApplicationUseCases
@@ -50,14 +50,29 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     private readonly ClientWorld _world;
     private readonly LoginCredentialStore _credentials;
     private readonly SessionId _sessionId;
-    private readonly byte[] _versionToken;
+    private readonly byte[] _sessionToken;
+    private readonly uint _versionToken;
     private readonly LocalPlayerState? _localPlayer;
     private readonly CharacterSelectionStore? _characterSelection;
     private readonly IClientEventBus? _eventBus;
     private readonly ILobbyClient? _lobbyClient;
+    private readonly SceneStateMachine? _sceneStateMachine;
 
-    /// <summary>The 1/9 version-token length: a fixed 33-byte buffer. spec: 1-9_enter_game_request.yaml.</summary>
-    public const int VersionTokenLength = 33;
+    /// <summary>The 1/9 launcher/session token length: a fixed 33-byte buffer. spec: cmsg_char_enter.yaml.</summary>
+    public const int SessionTokenLength = 33;
+
+    /// <summary>
+    /// Back-compat alias for older callers/tests; this is the 33-byte SessionToken width, not the
+    /// u32 VersionToken field. spec: Docs/RE/packets/cmsg_char_enter.yaml.
+    /// </summary>
+    public const int VersionTokenLength = SessionTokenLength;
+
+    /// <summary>
+    /// Optional profanity/name-format predicate for create/rename names. When it returns true, the
+    /// legacy failure message id 2075 is surfaced and no packet is sent. spec:
+    /// Docs/RE/specs/frontend_scenes.md §4.4.
+    /// </summary>
+    public Func<string, bool>? BannedCharacterNamePredicate { get; init; }
 
     /// <summary>
     /// CP949 (code page 949 / EUC-KR) — the on-wire charset for ALL chat text (both the say-box body and
@@ -78,11 +93,10 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     /// Creates the use-case facade.
     /// </summary>
     /// <param name="versionToken">
-    /// Optional explicit override of the 33-byte 1/9 version-token buffer. When <b>empty</b> (the
-    /// default), the token is DERIVED as <c>10 × versionField + 9</c> from
-    /// <paramref name="versionSource"/> and stamped as a NUL-terminated decimal ASCII string. A non-empty
-    /// span is used verbatim (zero-padded / truncated to 33 bytes) — an escape hatch for a future binary
-    /// placement. spec: login_flow.md §3.3 / §7; packets/1-9_enter_game_request.yaml.
+    /// Back-compat parameter name for the 33-byte launcher/session token override. The version token is
+    /// now the pinned u32 at payload offset <c>0x24</c>, always derived from <paramref name="versionSource"/>.
+    /// When this span is empty, the session-token field stays zero-filled because the launcher token is
+    /// not known inside core tests. spec: Docs/RE/packets/cmsg_char_enter.yaml.
     /// </param>
     /// <param name="versionSource">
     /// Supplies the <c>game.ver</c> version field used to derive the 1/9 token when no explicit
@@ -115,7 +129,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         IClientVersionSource? versionSource = null,
         CharacterSelectionStore? characterSelection = null,
         IClientEventBus? eventBus = null,
-        ILobbyClient? lobbyClient = null)
+        ILobbyClient? lobbyClient = null,
+        SceneStateMachine? sceneStateMachine = null)
     {
         _outbound = outbound ?? throw new ArgumentNullException(nameof(outbound));
         _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
@@ -126,27 +141,21 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         _characterSelection = characterSelection; // optional: needed for @BLANK@ + descriptor cache
         _eventBus = eventBus; // optional: publishes CreateCharacterRequested + lobby events
         _lobbyClient = lobbyClient; // optional: only the lobby use-cases need it
+        _sceneStateMachine = sceneStateMachine; // optional: Campaign-15 faithful 8-state scene spine
 
-        _versionToken = new byte[VersionTokenLength];
+        _sessionToken = new byte[SessionTokenLength];
         if (!versionToken.IsEmpty)
         {
-            // Explicit override: use the supplied bytes verbatim (zero-padded / truncated to 33 bytes).
-            versionToken[..Math.Min(versionToken.Length, VersionTokenLength)].CopyTo(_versionToken);
+            // Explicit override: use the supplied launcher/session-token bytes verbatim (zero-padded /
+            // truncated to 33 bytes). This field is NOT the derived version dword.
+            // spec: Docs/RE/packets/cmsg_char_enter.yaml (SessionToken @0x01, 33 bytes).
+            versionToken[..Math.Min(versionToken.Length, SessionTokenLength)].CopyTo(_sessionToken);
         }
-        else
-        {
-            // Derive the version token: token = 10 × versionField + 9. spec: login_flow.md §3.3 / §7.
-            // The default source yields the sampled field 2114 -> token 21149 (sample_verified). Stamp it
-            // as a NUL-terminated decimal ASCII string into the fixed 33-byte buffer; the exact in-body
-            // placement is UNVERIFIED (spec §9 item 5) but the token VALUE is firm.
-            // spec: packets/1-9_enter_game_request.yaml (VersionToken = 33-byte asciiz).
-            uint token = ClientVersionToken.Derive(
-                (versionSource ?? DefaultClientVersionSource.Instance).VersionField);
-            string decimalToken = token.ToString(CultureInfo.InvariantCulture);
-            Encoding.ASCII.GetBytes(
-                decimalToken.AsSpan(0, Math.Min(decimalToken.Length, VersionTokenLength - 1)), _versionToken);
-            // Remaining bytes stay 0 (NUL terminator + zero tail).
-        }
+
+        // Derive the version token: token = 10 × versionField + 9, and write it later as a u32 LE at
+        // payload +0x24. spec: Docs/RE/packets/cmsg_char_enter.yaml (VersionToken @0x24); login_flow.md §7.
+        _versionToken = ClientVersionToken.Derive(
+            (versionSource ?? DefaultClientVersionSource.Instance).VersionField);
     }
 
     /// <inheritdoc />
@@ -287,20 +296,153 @@ public sealed class ApplicationUseCases : IApplicationUseCases
             }
         }
 
-        // Build the fixed 40-byte 1/9 payload. spec: 1-9_enter_game_request.yaml.
+        // Build the fixed 40-byte 1/9 payload. spec: cmsg_char_enter.yaml.
         Span<byte> payload = stackalloc byte[CmsgEnterGameRequest.WireSize];
         payload.Clear();
         payload[0x00] = (byte)slotIndex; // 0x00 SlotIndex (HIGH CONFIDENCE)
-        // 0x01 VersionToken: token = 10 × versionField + 9 (= 21149 for the sampled game.ver), stamped
-        // as a NUL-terminated decimal ASCII string. spec: login_flow.md §3.3 / §7.
-        _versionToken.CopyTo(payload.Slice(0x01, VersionTokenLength));
-        // 0x22 Tail (6 bytes) stays zero. spec: 1-9 (observed zero).
+        // 0x01 SessionToken: launcher-supplied 33-byte identity token, not the typed account and not the
+        // derived version value. Core leaves it zero unless supplied by the composition root.
+        // spec: Docs/RE/packets/cmsg_char_enter.yaml (SessionToken @0x01, 33 bytes).
+        _sessionToken.CopyTo(payload.Slice(0x01, SessionTokenLength));
+        // 0x22 Pad (2 bytes) stays zero from Clear(). spec: cmsg_char_enter.yaml (Pad @0x22).
+        // 0x24 VersionToken: u32 LE token = 10 × game.ver field[5] + 9 (= 21149 for sampled data).
+        // spec: Docs/RE/packets/cmsg_char_enter.yaml (VersionToken @0x24); login_flow.md §7.
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.Slice(0x24, sizeof(uint)), _versionToken);
 
         // Drive the deterministic lifecycle toward Loading; the 3/5 ack later transitions to World
         // (handled by GamePacketHandler). spec: Docs/RE/opcodes.md (3/5 SmsgEnterGameAck).
         _stateMachine.OnCharacterSelected();
+        // NOTE: do NOT call _sceneStateMachine?.OnSelectConfirmCharacter() here.
+        // The faithful online path is 4 (Select) → 2 (Load, via 3/5 EnterGameAck) → … → 5 (InGame),
+        // NOT a direct 4 → 5. The case-4 pre-write of 5 in the original is the no-network default
+        // overwritten immediately by the 3/5 handler. The SceneStateMachine stays on Select until
+        // OnEnterGameAck() drives it to Load(2). spec: client_runtime.md §7.5.3 / §7.9.5 (CAMPAIGN 16).
 
         return SendAsync(major: 1, minor: 9, payload, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<CharacterSlotRecord?> GetCharacterRoster() =>
+        _characterSelection?.Snapshot() ?? Array.Empty<CharacterSlotRecord?>();
+
+    /// <inheritdoc />
+    public ValueTask<bool> SelectCharacterSlotAsync(int slotIndex, CancellationToken cancellationToken = default)
+    {
+        ValidateSlotIndex(slotIndex);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        CharacterSlotRecord? record = _characterSelection?.Get(slotIndex);
+        if (_characterSelection is not null &&
+            (record is null || string.Equals(record.Name, CharacterSelectionStore.BlankSlotSentinel,
+                StringComparison.Ordinal)))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        Span<byte> payload = stackalloc byte[CmsgSelectCharacter.WireSize];
+        payload[0x00] = (byte)slotIndex; // spec: cmsg_char_select.yaml — SlotIndex @0.
+        payload[0x01] = 0; // spec: cmsg_char_select.yaml — Mode 0 = select/view.
+
+        return SendBoolAsync(major: 1, minor: 7, payload, result: true, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<CharacterNameValidationResult> CreateCharacterAsync(
+        CharacterCreateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request.Name);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        CharacterNameValidationResult validation = ValidateCharacterName(request.Name);
+        if (!validation.IsValid)
+        {
+            return ValueTask.FromResult(validation);
+        }
+
+        if (request.UiClassIndex > 3)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request.UiClassIndex), request.UiClassIndex,
+                "UI class index must be 0..3 (spec: frontend_scenes.md §4.1 / cmsg_char_create.yaml).");
+        }
+
+        if (request.Face is < 1 or > 7)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request.Face), request.Face,
+                "Face index must be 1..7 (spec: cmsg_char_create.yaml).");
+        }
+
+        var payload = new byte[CmsgCreateCharacter.WireSize];
+        Span<byte> p = payload;
+        WriteFixedCp949(request.Name, p.Slice(0x00, 18)); // spec: cmsg_char_create.yaml — Name @0.
+        BinaryPrimitives.WriteUInt16LittleEndian(p.Slice(0x12, 2), request.Face);
+        BinaryPrimitives.WriteUInt16LittleEndian(p.Slice(0x14, 2), request.Sex);
+        BinaryPrimitives.WriteUInt16LittleEndian(p.Slice(0x16, 2), request.HairOrReserved);
+        BinaryPrimitives.WriteUInt16LittleEndian(p.Slice(0x18, 2), RemapCreateClass(request.UiClassIndex));
+        // 0x1A reserved gap stays zero. spec: cmsg_char_create.yaml.
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x1C, 4), request.Stat0);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x20, 4), request.Stat1);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x24, 4), request.Stat2);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x28, 4), request.Stat3);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x2C, 4), request.Stat4);
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x30, 4), request.PointsRemaining);
+
+        return SendResultAsync(major: 1, minor: 6, payload, CharacterNameValidationResult.Valid, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> DeleteCharacterAsync(int slotIndex, CancellationToken cancellationToken = default)
+    {
+        ValidateSlotIndex(slotIndex);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        CharacterSlotRecord? record = _characterSelection?.Get(slotIndex);
+        if (_characterSelection is not null &&
+            (record is null || string.Equals(record.Name, CharacterSelectionStore.BlankSlotSentinel,
+                StringComparison.Ordinal)))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        Span<byte> payload = stackalloc byte[CmsgSelectCharacter.WireSize];
+        payload[0x00] = (byte)slotIndex; // spec: cmsg_char_select.yaml — SlotIndex @0.
+        payload[0x01] = 1; // spec: cmsg_char_select.yaml — Mode 1 = delete, code-confirmed.
+
+        return SendBoolAsync(major: 1, minor: 7, payload, result: true, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<CharacterNameValidationResult> RenameCharacterAsync(
+        int slotIndex,
+        string newName,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateSlotIndex(slotIndex);
+        ArgumentNullException.ThrowIfNull(newName);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        CharacterNameValidationResult validation = ValidateCharacterName(newName);
+        if (!validation.IsValid)
+        {
+            return ValueTask.FromResult(validation);
+        }
+
+        CharacterSlotRecord? record = _characterSelection?.Get(slotIndex);
+        if (_characterSelection is not null &&
+            (record is null || string.Equals(record.Name, CharacterSelectionStore.BlankSlotSentinel,
+                StringComparison.Ordinal)))
+        {
+            return ValueTask.FromResult(new CharacterNameValidationResult(false, 2190));
+        }
+
+        var payload = new byte[CmsgRenameCharacter.WireSize];
+        Span<byte> p = payload;
+        p[0x00] = (byte)slotIndex; // spec: cmsg_char_rename.yaml — SlotIndex @0.
+        WriteFixedCp949(newName, p.Slice(0x01, 17)); // spec: cmsg_char_rename.yaml — NewName @1.
+
+        return SendResultAsync(major: 1, minor: 13, payload, CharacterNameValidationResult.Valid, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -752,6 +894,66 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         return chars;
     }
 
+    private static void ValidateSlotIndex(int slotIndex)
+    {
+        if (slotIndex is < 0 or > CharacterSelectionStore.MaxSlotIndex)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(slotIndex), slotIndex,
+                "Slot index must be 0..4 (spec: frontend_scenes.md §5 / §7).");
+        }
+    }
+
+    private CharacterNameValidationResult ValidateCharacterName(string name)
+    {
+        // Failure ids: 2190 blank/sentinel, 2075 banned word, 12012 charset/length predicate.
+        // spec: Docs/RE/specs/frontend_scenes.md §4.4.
+        if (name.Length == 0 ||
+            string.Equals(name, CharacterSelectionStore.BlankSlotSentinel, StringComparison.Ordinal))
+        {
+            return new CharacterNameValidationResult(false, 2190);
+        }
+
+        if (BannedCharacterNamePredicate?.Invoke(name) == true)
+        {
+            return new CharacterNameValidationResult(false, 2075);
+        }
+
+        int cp949Bytes = Cp949.GetByteCount(name);
+        if (name.Length < 2 || cp949Bytes > 16)
+        {
+            return new CharacterNameValidationResult(false, 12012);
+        }
+
+        foreach (char ch in name)
+        {
+            if (ch is >= 'a' and <= 'z' || ch is >= '0' and <= '9')
+            {
+                continue;
+            }
+
+            if (ch is >= '\uAC00' and <= '\uD7A3')
+            {
+                continue;
+            }
+
+            return new CharacterNameValidationResult(false, 12012);
+        }
+
+        return CharacterNameValidationResult.Valid;
+    }
+
+    private static ushort RemapCreateClass(byte uiClassIndex) =>
+        uiClassIndex switch
+        {
+            0 => 4,
+            1 => 1,
+            2 => 3,
+            3 => 2,
+            _ => throw new ArgumentOutOfRangeException(nameof(uiClassIndex), uiClassIndex,
+                "UI class index must be 0..3."),
+        };
+
     // -------------------------------------------------------------------------
     // Send
     // -------------------------------------------------------------------------
@@ -766,6 +968,13 @@ public sealed class ApplicationUseCases : IApplicationUseCases
 
     private ValueTask SendAsync(ushort major, ushort minor, ReadOnlyMemory<byte> payload, CancellationToken ct) =>
         _outbound.SendAsync(_sessionId, major, minor, payload, ct);
+
+    private ValueTask<bool> SendBoolAsync(
+        ushort major, ushort minor, ReadOnlySpan<byte> payload, bool result, CancellationToken ct)
+    {
+        var owned = payload.ToArray();
+        return SendResultAsync(major, minor, owned, result, ct);
+    }
 
     /// <summary>
     /// Sends an already-owning <paramref name="payload"/> array and completes with <paramref name="result"/>.

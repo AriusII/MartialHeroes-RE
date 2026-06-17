@@ -81,8 +81,16 @@ public static class PacketWireSizes
                 size = SmsgSkillHotbarAssignResult.WireSize;
                 isVariableLength = false;
                 return true;
+            case Opcodes.Opcodes.SmsgCharActionResult: // spec: Docs/RE/opcodes.md (3/100 generic char action result)
+                size = SmsgCharActionResult.WireSize;
+                isVariableLength = false;
+                return true;
 
             // --- variable-length packets: only the fixed header is modelled ---
+            case Opcodes.Opcodes.SmsgGameStateTick: // spec: handlers.md §4/1; client_runtime.md §9.4
+                size = SmsgGameStateTick.WireSize;
+                isVariableLength = true;
+                return true;
             case Opcodes.Opcodes.SmsgCharacterList: // spec: packets/3-1_character_list.yaml
                 size = SmsgCharacterListHeader.HeaderSize;
                 isVariableLength = true;
@@ -101,7 +109,7 @@ public static class PacketWireSizes
                 size = CmsgLogout.WireSize;
                 isVariableLength = false;
                 return true;
-            case Opcodes.Opcodes.CmsgCreateCharacter: // spec: packets/cmsg_char_create.yaml (52 B opaque body)
+            case Opcodes.Opcodes.CmsgCreateCharacter: // spec: packets/cmsg_char_create.yaml (52 B body)
                 size = CmsgCreateCharacter.WireSize;
                 isVariableLength = false;
                 return true;

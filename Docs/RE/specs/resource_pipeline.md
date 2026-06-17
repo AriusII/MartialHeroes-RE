@@ -345,23 +345,31 @@ by the bar reaching any value. A clean-room reimplementation should drive comple
 done event and — if it wants a bar that actually moves — compute a real denominator by summing the
 boot set's TOC entry sizes rather than reusing the legacy constant.
 
-## 2.5 The `OPENNING/SKIP` flag — (CODE-CONFIRMED behaviour and source; exact filename string capture/debugger-pending)
+## 2.5 The `OPENNING/SKIP` flag — (CODE-CONFIRMED behaviour and source; filename RESOLVED CAMPAIGN 16)
 
 The post-load destination state is decided by an INI lookup that is **evaluated up front** when case 2
 sets up its windows (i.e. *before* the boot load finishes, not after it). The lookup is a Windows
-private-profile integer read: section `[OPENNING]`, key `SKIP`, default `0`, over an INI **file path
-taken from the config singleton's path field** — specifically a filename string field inside the
-per-account / network-config singleton (the same singleton that holds other per-account settings).
+private-profile integer read: section `[OPENNING]`, key `SKIP`, default `0`, over the INI file
+**`option.ini` in the client EXE directory**, whose path is held by the **DoOption settings singleton**
+(populated by the option-path builder) — **NOT** the per-account / network-config singleton the earlier
+draft guessed.
 
 - A **non-zero** `SKIP` value → the opening cinematic is skipped and the engine transitions directly
-  to **state 4** (login).
+  to **state 4** (character-select).
 - A **zero** `SKIP` value → the engine proceeds to **state 3** (play the opening).
 
-The section/key names and the read mechanism are confirmed; only the literal on-disk filename is
-**runtime-populated into the config singleton's path field rather than a static string constant**, so
-the exact path string is *(capture/debugger-pending)* — read the field live to recover it. This
-resolves the former open item 3 (the source of the path is now known). The flag has no effect on the
-resource pipeline itself; it only fixes which state follows the load.
+CAMPAIGN 16 resolved the former open item: the file is **`<exe-dir>\option.ini`** (held by the DoOption
+singleton). The flag has no effect on the resource pipeline itself; it only fixes which state follows
+the load.
+
+> **Reload re-reads SKIP (CAMPAIGN 16).** The char-management reload (`SmsgCharActionResult` 3/100 codes
+> 202/203/232 → state 2) re-enters the **identical** case-2 body and **re-reads `OPENNING/SKIP`
+> unconditionally** — there is **no** reload-specific "skip the Opening" path. A reload reaches Select
+> (4) only via the same SKIP gate (in practice SKIP is already 1 after the first opening, so reloads go
+> straight to Select). The one genuine reload difference is that **`msg.xdb` is a case-1-only
+> synchronous pre-load and is NOT re-loaded** on a reload (§2.2). So a faithful port must NOT model a
+> "reload forces Select / reload skips the INI read" rule; it re-reads SKIP and only omits the `msg.xdb`
+> reload.
 
 ## 2.6 State 2 is entered twice per session — (CODE-CONFIRMED structure; world-entry replay capture/debugger-pending)
 

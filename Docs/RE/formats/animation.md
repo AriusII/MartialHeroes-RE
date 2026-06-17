@@ -38,6 +38,10 @@
 | Animation mixer two-list architecture | Resolved | CONFIRMED |
 | Mixer sync-phase mechanism + 1.5× rate constant | Resolved | CONFIRMED |
 | Per-bone weighted-average accumulation (lerp/slerp) | Resolved | CONFIRMED |
+| Per-frame clip time `t` advances (real elapsed `dt = ms × 0.001`; never pinned to 0) | Resolved | CONFIRMED (control-flow) |
+| Cycle-layer advance: free-run (`local_time += rate·dt`, modulo wrap) vs sync (`t = duration · phase/range`) | Resolved | CONFIRMED (control-flow) |
+| Human col15 stand idle (`g101100001.mot`) is STATIC data (a fixed pose, 0 animated tracks) | Resolved | SAMPLE-VERIFIED (production-parser keyframe diff + positive controls) |
+| Which standing-idle slot the live engine selects at runtime (static col15 vs an animated slot) | Open | DEBUGGER-PENDING |
 | Default layer playback speed constant (≈1.575) | Documented | UNVERIFIED (constant confirmed; full semantics open) |
 | Skinning / deform pipeline that consumes `.mot` (LBS, inverse-bind, pose composition) | Cross-referenced | see `specs/skinning.md` |
 | BANI standard-loader rejection (parse-error on all 11 files) | Resolved | SAMPLE-VERIFIED + CODE-CONFIRMED — BANI files are non-loadable by the shipping client |
@@ -348,17 +352,52 @@ specified in `specs/skinning.md` (§6 keyframe sampling, §5 deform).
   may reproduce the raw-seconds alpha for bit-faithful legacy motion, or renormalize `alpha /= 0.1`
   for smooth playback — this choice is discussed for the Godot path in `specs/skinning.md` §8(c).
 
+### Per-frame clip-time advance — the engine never pins `t` to zero (CONFIRMED)
+
+> **CONFIRMED (control-flow):** the playback time `t` handed to the per-track sampler is a **live,
+> advancing value, fed real elapsed wall-clock time every frame.** No code path samples an active
+> layer at a fixed `t = 0`. This is the load-bearing fact behind the idle-animation question: a short
+> looping idle is *alive in the original* exactly when its keyframes differ (see §Static idle clips
+> below and `specs/skinning.md` §10).
+
+The actor per-frame update reads a millisecond timestamp from the actor manager, subtracts the
+timestamp it last drew at (stored on the actor), and converts the difference to seconds:
+
+```
+delta_ms      = now_ms − last_drawn_ms        # real wall-clock frame delta, milliseconds
+last_drawn_ms = now_ms                       # written back for the next frame
+dt            = delta_ms × 0.001              # real elapsed seconds
+```
+
+`dt` is this real elapsed delta, recomputed fresh each frame; it is fed to the mixer's per-frame pose
+build (§Per-frame update sequence). The same `dt` advances each active layer's clock, so the
+per-track sampler always sees a moving `t` for any active layer. (The `0.001` is the
+millisecond-to-second conversion factor, confirmed as a float literal.)
+
+The net rule for an implementer: **drive the active idle clip's clock with real per-frame `dt` and
+wrap at clip end; never sample a started, weighted layer at a frozen `t = 0`.** A frozen-`t` reading
+is the classic way a port shows a static character even when the clip data carries motion — which,
+for the specific human stand idle, it does **not** (see §Static idle clips and `specs/skinning.md`
+§10). The two layer timing modes that decide *which* `t` reaches the sampler are characterized in
+§Wrap and loop behaviour and §Sync-phase mechanism.
+
 ### Wrap and loop behaviour
 
 **CONFIRMED:** there is no loop flag or wrap flag in the `.mot` binary. The on-disk format
 is indifferent to loop mode. Wrap behaviour is determined entirely at runtime by the clip layer
 type:
 
-- **CycleLayer (looping):** when the layer's local time exceeds `clip_duration`, local time is
-  reset via modulo to `fmod(local_time, clip_duration)`. This wrap fires unconditionally whenever
-  the clip is active and time overflows. A per-layer internal flag is set each time a wrap occurs
-  and is used to trigger footstep sound-effect callbacks; this flag is a runtime state variable,
-  not a file field.
+- **CycleLayer (looping), free-running mode (CONFIRMED):** the layer advances its **own** local time
+  by `local_time += rate × dt` each frame; when local time reaches `clip_duration` it is reset via
+  modulo to `fmod(local_time, clip_duration)`. This wrap fires unconditionally whenever the clip is
+  active and time overflows, and the sampler is fed this advancing `local_time`. A per-layer internal
+  flag is set each time a wrap occurs and is used to trigger footstep sound-effect callbacks; this
+  flag is a runtime state variable, not a file field. (The per-character speed scalar applied to `dt`
+  before this advance is described in §Per-frame update sequence step 3.)
+- **CycleLayer (looping), sync mode (CONFIRMED):** the layer does **not** use its own local time;
+  instead its sample time is derived from the mixer-wide sync phase as
+  `sample_time = clip_duration × (sync_phase / sync_range)` (§Sync-phase mechanism). The sync phase
+  itself advances every frame, so the sample time still moves — the clip animates either way.
 - **ActionLayer (one-shot):** the clip plays once to its end (no wrap). The layer expires and is
   removed from the active list. State transitions: fade-in → playing → fade-out → done.
 
@@ -698,6 +737,76 @@ For reference (sample-derived, illustrative): `group_type = 0`, `row_id = 1`, `s
 
 ---
 
+## Static idle clips — the human col15 stand idle carries no motion (SAMPLE-VERIFIED)
+
+> **Key data finding.** The standing-idle `.mot` resolved by the recovered `actormotion.txt` col15
+> chain for a human class is **genuinely static data** — a fixed stand pose held across all its
+> frames. A port that renders a frozen standing human from this clip is therefore **faithful to the
+> asset**, not exhibiting a parser bug or a missing animation. The deform/skinning narrative of this
+> finding (and the still-open runtime question) lives in `specs/skinning.md` §10; the data evidence is
+> recorded here because it is a property of the `.mot` corpus.
+
+### The subject clip
+
+The `actormotion.txt` row for `skin_class = 1` (the first human / Musa class) has
+`col15 = idle_motion_id = motion_ids_a[0] = 101100001`, which resolves through the motion-id registry
+to `data/char/mot/g101100001.mot` (§`actormotion.txt` layout, §col15). This is the standing-idle clip
+for that class.
+
+### Keyframe diff (SAMPLE-VERIFIED via the production parser)
+
+The clip was decoded with the production parser and every bone track's consecutive keyframes were
+diffed. The result is summarised as aggregate deltas only (no payload bytes cross the firewall):
+
+| Property | Observed |
+|----------|----------|
+| `frame_count` | 3 |
+| `track_count` | 84 |
+| keyframes per track | 3 on **all** 84 tracks (a full-shape clip, not a stub or single-key file) |
+| tracks with any animation (consecutive-keyframe delta > 1e-6) | **0 of 84** |
+| maximum translation delta across all tracks | **0.0** (exactly zero on every bone) |
+| maximum rotation delta `1 − |dot(q_n, q_{n+1})|` | **≈1.0e-6** (one bone, at the float-noise floor) |
+
+The clip therefore pins the skeleton to a single fixed stand pose held identically across its three
+frames. Translation never changes; the lone sub-microradian rotation delta is last-bit float noise,
+not motion. **Verdict: STATIC.** SAMPLE-VERIFIED via a throwaway harness over the maintainer's own
+legally-owned VFS sample, driving the production `Assets.Parsers` decoder.
+
+### Positive controls — the metric detects motion when it is present
+
+Decoded under the identical metric, other clips animate strongly, confirming the silence of the
+col15 idle is a real property of that file and not a parser/metric blind spot:
+
+| Clip role | `frame_count` | tracks | animated tracks | max trans Δ | max rot Δ |
+|-----------|:-------------:|:------:|:---------------:|:-----------:|:---------:|
+| Mob clip A | 36 | 33 | 19 / 33 | 0.337 | 0.0192 |
+| Mob clip B | 121 | 61 | 59 / 61 | 0.067 | 0.0097 |
+| Human `peace`-tagged slot (a different `motion_ids_a` slot, same Musa row) | 30 | 84 | 51 / 84 | 0.0059 | 0.00054 |
+| Human combat slot (a different `motion_ids_a` slot, same Musa row) | 35 | 84 | 65 / 84 | 1.42 | 0.092 |
+
+The translation deltas of the animated controls are **5–6 orders of magnitude** above the idle's
+zero, and their rotation deltas **4 orders** above its 1e-6 noise floor — the metric is sound.
+
+### Implication
+
+- The human rig **does** carry animated idle content (a subtle breathing-sway slot animates 51 of 84
+  bones), but it is **not** the clip the col15 (`motion_ids_a[0]`) slot points at. The col15 slot is
+  specifically the static stand snapshot.
+- A visible "breathing" standing idle in the port would require selecting a **different**, animated
+  `motion_ids_a` slot, which is a **runtime motion-selection** decision — not a parser or
+  missing-animation fix.
+- **`debugger-pending`:** which standing-idle slot the **live engine** actually plays for a standing
+  human at runtime (the static col15 clip vs. an animated slot), and whether the engine ever swaps
+  col15 for an animated idle, is unresolved — it requires the live debugger (no live server/debugger
+  was available on this lane). The on-disk *content* of each candidate clip is settled; the runtime
+  *selection* among them is not. See `specs/skinning.md` §10.
+
+| Confidence |
+|---|
+| Col15 idle clip is STATIC data: SAMPLE-VERIFIED (production-parser keyframe diff + positive controls). Runtime slot selection at play time: `debugger-pending`. |
+
+---
+
 ## motion.cache / effect.cache size-math
 
 `data/motion.cache` and `data/effect.cache` are read through a **direct OS file call** (not the VFS),
@@ -912,6 +1021,7 @@ The following aspects are unresolved and must not be assumed by the implementing
 | `motion.cache` magic and versioning | UNVERIFIED — no header magic or version field confirmed; only the `[u32 count][u32[] ids]` layout (cross-checked by size math, §motion.cache / effect.cache size-math). | Parse defensively; treat as unversioned. |
 | Variable frame rate (rates other than 10 fps) | UNVERIFIED — only 10 fps observed for `.mot` clips. | Treat 10 fps as fixed; flag any `frame_count` that produces an unexpected duration. |
 | Text-mode `.mot` files in the wild | UNVERIFIED — the binary/text switch exists in the reader code, but no text-mode samples are known to exist. | Implement binary mode only. |
+| Runtime standing-idle slot selection | DEBUGGER-PENDING — the on-disk col15 stand idle is settled as STATIC data (§Static idle clips), and other `motion_ids_a` slots animate, but which slot the live engine actually plays for a standing human (and whether it ever swaps col15 for an animated idle) needs the live debugger. | Render the col15 clip faithfully (a static stand is correct for that asset); do not synthesize a breathing idle. Revisit slot selection once confirmed live. |
 
 The following items from previous spec revisions have been resolved and removed from the
 unknowns table:
@@ -928,6 +1038,7 @@ unknowns table:
 | `actormotion.txt` col15 = idle motion | CONFIRMED (sample-verified) — col15 → `data/char/mot/g{id}.mot` hits 89.1% of rows on build `263bd994` (§col15). |
 | `.mot` magic: "no magic, starts with id_a" | CORRECTED — true for 3,880 standard-variant files, but 11 files use the `"BANI"` magic with a different header (§BANI variant). Parsers must sniff the first 4 bytes. |
 | Animation mixer runtime blend model (provisional) | CONFIRMED — two-list architecture, sync-phase mechanism with 1.5× constant, weight ramping with 0.001 s floor, and per-bone normalized weighted-average accumulation (order-dependent for ≥3 layers) documented in §Animation mixer — runtime blend model. |
+| "Is the human idle flat because the parser/loop is broken?" | RESOLVED — NO. The engine advances clip time every frame with real `dt = ms × 0.001` and interpolates between keyframes (§Per-frame clip-time advance), so the sampler is never pinned at `t = 0`; and the human col15 stand idle's keyframes are byte-identical (0 animated tracks — §Static idle clips). A frozen standing human is therefore **faithful to the static col15 asset**, not a parser bug. The only open piece is which idle slot the live engine plays (DEBUGGER-PENDING, above). |
 | BANI files loadable by shipping client | CONFIRMED NEGATIVE (SAMPLE-VERIFIED + CODE-CONFIRMED) — the standard loader has no magic-check branch; all 11 BANI files produce parse errors and are dead/unused data. Parsers must sniff and skip them. |
 
 ---

@@ -53,6 +53,13 @@ public static class LoginCredentialReply
     public const int MaxAccountLengthExclusive = 20;
 
     /// <summary>
+    /// Exclusive upper bound on the PIN byte count before the builder appends the trailing NUL.
+    /// The second-password / PIN field is capped to four digits (<c>length &lt; 5</c>).
+    /// spec: Docs/RE/specs/login_flow.md §4.2 / §4.2a / §7.
+    /// </summary>
+    public const int MaxPinLengthExclusive = 5;
+
+    /// <summary>
     /// Builds the whole whitened <c>1/4</c> reply payload from its structured parts.
     /// </summary>
     /// <param name="keyExchange">The parsed server 0/0 KeyExchange (live n, e, modulus width k). spec §6.2.</param>
@@ -125,6 +132,16 @@ public static class LoginCredentialReply
         int pinLen = 0;
         if (includePin)
         {
+            // PIN is optional but, when present, the entered value is capped to four digits/bytes.
+            // The emitted prefix still includes the trailing NUL (so a 4-digit PIN writes length 5).
+            // spec: Docs/RE/specs/login_flow.md §4.2a / §7; packets/login.yaml PinLength.
+            if (pin.Length >= MaxPinLengthExclusive)
+            {
+                throw new ArgumentException(
+                    $"PIN length {pin.Length} is out of range: must be < {MaxPinLengthExclusive} bytes (≤ 4 digits).",
+                    nameof(pin));
+            }
+
             pinLen = pin.Length + 1; // + trailing NUL
             preImageLength += LengthPrefixBytes + pinLen;
         }

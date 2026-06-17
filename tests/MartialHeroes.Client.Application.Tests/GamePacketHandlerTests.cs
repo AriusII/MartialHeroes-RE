@@ -1,10 +1,17 @@
+using System.Buffers.Binary;
+using System.Text;
 using MartialHeroes.Client.Application.Diagnostics;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.Handlers;
 using MartialHeroes.Client.Application.Ingestion;
+using MartialHeroes.Client.Application.Scene;
 using MartialHeroes.Client.Application.StateMachine;
+using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors;
+using MartialHeroes.Client.Domain.Stats;
+using MartialHeroes.Shared.Kernel.Enums;
+using MartialHeroes.Shared.Kernel.State;
 using MartialHeroes.Shared.Kernel.Numerics;
 using Xunit;
 
@@ -138,6 +145,165 @@ public sealed class GamePacketHandlerTests
     }
 
     [Fact]
+    public void EnterGameAck_also_drives_scene_machine_login_to_load()
+    {
+        var bus = new ClientEventBus(ClientEventBus.Unbounded);
+        var world = new ClientWorld();
+        var legacy = new ClientStateMachine(bus, ClientState.Loading);
+        var scene = new SceneStateMachine(bus, GameState.Initial.To(EngineSceneState.Login));
+        var handler = new GamePacketHandler(
+            world, bus, legacy, new CountingUnhandledOpcodeSink(), sceneStateMachine: scene);
+        var dispatcher = new InboundFrameDispatcher(handler);
+
+        Assert.True(dispatcher.RouteNow(SyntheticFrames.EnterGameAck()));
+
+        Assert.Equal(EngineSceneState.Load, scene.Current.State);
+        Assert.Contains(Drain(bus), ev => ev is SceneStateChangedEvent changed
+                                          && changed.Previous.State == EngineSceneState.Login
+                                          && changed.Next.State == EngineSceneState.Load);
+    }
+
+    [Fact]
+    public void CharacterList_also_drives_scene_machine_to_select()
+    {
+        var bus = new ClientEventBus(ClientEventBus.Unbounded);
+        var world = new ClientWorld();
+        var legacy = new ClientStateMachine(bus, ClientState.Login);
+        var scene = new SceneStateMachine(bus, GameState.Initial.To(EngineSceneState.Load));
+        var handler = new GamePacketHandler(
+            world, bus, legacy, new CountingUnhandledOpcodeSink(), sceneStateMachine: scene);
+        var dispatcher = new InboundFrameDispatcher(handler);
+
+        dispatcher.RouteNow(SyntheticFrames.CharacterList(serverId: 1, channelId: 1));
+
+        Assert.Equal(EngineSceneState.Select, scene.Current.State);
+        Assert.Contains(Drain(bus), ev => ev is SceneStateChangedEvent changed
+                                          && changed.Previous.State == EngineSceneState.Load
+                                          && changed.Next.State == EngineSceneState.Select);
+    }
+
+    [Fact]
+    public void CharManageResult_3_7_does_not_drive_scene_machine() // ground truth: 3/7 writes no scene state
+    {
+        // 3/7 SmsgCharManageResult is a Character-Select delete/rename/select UI result ONLY; the
+        // table-driven scene transition is 3/100 SmsgCharActionResult (next test). Re-confirmed against
+        // doida.exe CAMPAIGN 16. spec: Docs/RE/specs/client_runtime.md §7.5.2; Docs/RE/opcodes.md (3/7 vs 3/100).
+        var bus = new ClientEventBus(ClientEventBus.Unbounded);
+        var world = new ClientWorld();
+        var legacy = new ClientStateMachine(bus, ClientState.CharacterSelection);
+        var scene = new SceneStateMachine(bus, GameState.Initial.To(EngineSceneState.Select));
+        var handler = new GamePacketHandler(
+            world, bus, legacy, new CountingUnhandledOpcodeSink(), sceneStateMachine: scene);
+        var dispatcher = new InboundFrameDispatcher(handler);
+
+        dispatcher.RouteNow(SyntheticFrames.CharManageResult(result: 203, subtype: 0, readyTime: 0));
+
+        // The scene stays put — 3/7 does not transition (only 3/100 does).
+        Assert.Equal(EngineSceneState.Select, scene.Current.State);
+        Assert.DoesNotContain(Drain(bus), ev => ev is SceneStateChangedEvent);
+    }
+
+    [Fact]
+    public void CharActionResult_also_drives_scene_machine_result_table()
+    {
+        var bus = new ClientEventBus(ClientEventBus.Unbounded);
+        var world = new ClientWorld();
+        var legacy = new ClientStateMachine(bus, ClientState.CharacterSelection);
+        var scene = new SceneStateMachine(bus, GameState.Initial.To(EngineSceneState.Select));
+        var handler = new GamePacketHandler(
+            world, bus, legacy, new CountingUnhandledOpcodeSink(), sceneStateMachine: scene);
+        var dispatcher = new InboundFrameDispatcher(handler);
+
+        dispatcher.RouteNow(SyntheticFrames.CharActionResult(232));
+
+        Assert.Equal(EngineSceneState.Load, scene.Current.State);
+        Assert.True(scene.LoadIsReload);
+    }
+
+    [Fact]
+    public void GameStateTick_without_local_player_also_drives_scene_machine_fallback()
+    {
+        var bus = new ClientEventBus(ClientEventBus.Unbounded);
+        var world = new ClientWorld();
+        var legacy = new ClientStateMachine(bus, ClientState.World);
+        var scene = new SceneStateMachine(bus, GameState.Initial.To(EngineSceneState.InGame));
+        var handler = new GamePacketHandler(
+            world, bus, legacy, new CountingUnhandledOpcodeSink(), sceneStateMachine: scene);
+        var dispatcher = new InboundFrameDispatcher(handler);
+
+        dispatcher.RouteNow(SyntheticFrames.GameStateTick());
+
+        Assert.Equal(EngineSceneState.Select, scene.Current.State);
+    }
+
+    [Fact]
+    public void GameStateTick_world_entry_spawns_local_player_from_cached_descriptor()
+    {
+        var bus = new ClientEventBus(ClientEventBus.Unbounded);
+        var world = new ClientWorld();
+        var legacy = new ClientStateMachine(bus, ClientState.World);
+        var scene = new SceneStateMachine(bus, GameState.Initial.To(EngineSceneState.InGame));
+        var store = new CharacterSelectionStore();
+        store.Retain(new CharacterSlotRecord(
+            slotIndex: 2,
+            rawDescriptorAndStats: BuildDescriptor(
+                "Wuxia", level: 7, hp: 250, mp: 100, stamina: 80,
+                descriptorWorldX: 1f, descriptorWorldZ: 2f, serverClass: 9),
+            slotFlag: 0));
+        Assert.Equal(CharacterSelectionStore.SelectOutcome.Confirmed, store.Confirm(2));
+        var handler = new GamePacketHandler(
+            world, bus, legacy, new CountingUnhandledOpcodeSink(),
+            characterSelection: store, sceneStateMachine: scene);
+        var dispatcher = new InboundFrameDispatcher(handler);
+
+        dispatcher.RouteNow(SyntheticFrames.GameStateTickWorldEntry(spawnX: 12.5f, spawnZ: -3.25f, scenarioMode: 6));
+
+        Assert.Equal(EngineSceneState.InGame, scene.Current.State);
+        Assert.NotNull(world.LocalActorKey);
+        ActorKey key = world.LocalActorKey.Value;
+        Assert.True(world.TryGet(key, out Actor actor));
+        Assert.Equal(EntitySort.PlayerCharacter, key.Sort);
+        Assert.Equal(Vector3Fixed.FromFloat(12.5f, 0f, -3.25f), actor.Position);
+        Assert.Equal(7, actor.Level);
+
+        List<IClientEvent> events = Drain(bus);
+        var spawned = Assert.IsType<LocalPlayerSpawnedEvent>(
+            Assert.Single(events.OfType<LocalPlayerSpawnedEvent>()));
+        Assert.Equal(2, spawned.SlotIndex);
+        Assert.Equal("Wuxia", spawned.Name);
+        Assert.Equal(Vector3Fixed.FromFloat(12.5f, 0f, -3.25f), spawned.Position);
+
+        var bootstrapped = Assert.IsType<InGameWorldBootstrappedEvent>(
+            Assert.Single(events.OfType<InGameWorldBootstrappedEvent>()));
+        Assert.Equal(key, bootstrapped.Key);
+        Assert.Equal(6, bootstrapped.ScenarioMode);
+    }
+
+    [Fact]
+    public void GameStateTick_world_entry_repositions_existing_local_player()
+    {
+        var bus = new ClientEventBus(ClientEventBus.Unbounded);
+        var world = new ClientWorld();
+        var legacy = new ClientStateMachine(bus, ClientState.World);
+        var key = new ActorKey(7, EntitySort.PlayerCharacter);
+        var actor = new Actor(
+            key, level: 1, vitals: new VitalStats(100, 50, 25),
+            currentHp: 100, currentMp: 50, currentStamina: 25,
+            position: Vector3Fixed.Zero);
+        world.Add(actor);
+        world.LocalActorKey = key;
+        var handler = new GamePacketHandler(world, bus, legacy, new CountingUnhandledOpcodeSink());
+        var dispatcher = new InboundFrameDispatcher(handler);
+
+        dispatcher.RouteNow(SyntheticFrames.GameStateTickWorldEntry(spawnX: -100f, spawnZ: 25.5f, scenarioMode: 3));
+
+        Assert.Equal(Vector3Fixed.FromFloat(-100f, 0f, 25.5f), actor.Position);
+        var bootstrapped = Assert.IsType<InGameWorldBootstrappedEvent>(Assert.Single(Drain(bus)));
+        Assert.Equal(key, bootstrapped.Key);
+        Assert.Equal(3, bootstrapped.ScenarioMode);
+    }
+
+    [Fact]
     public void Unhandled_opcode_is_counted_not_thrown()
     {
         var (dispatcher, _, _, _, unhandled) = NewHarness();
@@ -148,6 +314,24 @@ public sealed class GamePacketHandlerTests
 
         Assert.False(dispatcher.RouteNow(frame));
         Assert.Equal(1, unhandled.Count);
+    }
+
+    private static byte[] BuildDescriptor(
+        string name, ushort level, uint hp, uint mp, uint stamina, float descriptorWorldX,
+        float descriptorWorldZ, ushort serverClass)
+    {
+        var d = new byte[976]; // 880 descriptor + 96 stats. spec: login_flow.md §3.2.
+        byte[] nameBytes = Encoding.ASCII.GetBytes(name);
+        int nameLen = Math.Min(nameBytes.Length, 16);
+        Array.Copy(nameBytes, 0, d, 0x00, nameLen); // +0x00 name
+        BinaryPrimitives.WriteUInt16LittleEndian(d.AsSpan(0x3A, 2), level); // +0x3A
+        BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(0x3C, 4), hp); // +0x3C
+        BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(0x40, 4), mp); // +0x40
+        BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(0x44, 4), stamina); // +0x44
+        BinaryPrimitives.WriteSingleLittleEndian(d.AsSpan(0x4C, 4), descriptorWorldX); // +0x4C
+        BinaryPrimitives.WriteSingleLittleEndian(d.AsSpan(0x50, 4), descriptorWorldZ); // +0x50
+        BinaryPrimitives.WriteUInt16LittleEndian(d.AsSpan(0x74, 2), serverClass); // +0x74
+        return d;
     }
 
     // -----------------------------------------------------------------------------------------------

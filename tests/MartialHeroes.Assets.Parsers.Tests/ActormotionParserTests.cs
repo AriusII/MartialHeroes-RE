@@ -27,19 +27,19 @@ public sealed class ActormotionParserTests
     /// <param name="col3">rate_src_x → record 0x08 (f32).</param>
     /// <param name="col4">divisor_x → record 0x28 (i32, interleaved early).</param>
     /// <param name="col5">rate_src_y → record 0x0C (f32).</param>
-    /// <param name="col6">int_b → record 0x10.</param>
-    /// <param name="col14">divisor_y (paired) → record 0x2C.</param>
-    /// <param name="dir1">9 values for dir_array_1 → record 0x40.</param>
-    /// <param name="dir2">9 values for dir_array_2 → record 0x64.</param>
+    /// <param name="col6">divisor_y → record 0x2C (interleaved early).</param>
+    /// <param name="col7">int_b → record 0x10.</param>
+    /// <param name="dir1">9 values for motion_ids_a → record 0x40.</param>
+    /// <param name="dir2">9 values for motion_ids_b → record 0x64.</param>
     private static string MakeRow(
         int col0, int col1,
         int col2,
         float col3, int col4, float col5,
         int col6,
-        float col7 = 0f, float col8 = 0f, float col9 = 0f,
+        int col7 = 0, float col8 = 0f, float col9 = 0f,
         float col10 = 0f, float col11 = 0f,
         float col12 = 0f, float col13 = 0f,
-        int col14 = 1,
+        float col14 = 0f,
         int[]? dir1 = null, int[]? dir2 = null)
     {
         // spec: Docs/RE/formats/actormotion.md — 33 columns, tab-delimited.
@@ -51,14 +51,14 @@ public sealed class ActormotionParserTests
         parts[4] = col4.ToString(CultureInfo.InvariantCulture);
         parts[5] = col5.ToString("G", CultureInfo.InvariantCulture);
         parts[6] = col6.ToString(CultureInfo.InvariantCulture);
-        parts[7] = col7.ToString("G", CultureInfo.InvariantCulture);
+        parts[7] = col7.ToString(CultureInfo.InvariantCulture);
         parts[8] = col8.ToString("G", CultureInfo.InvariantCulture);
         parts[9] = col9.ToString("G", CultureInfo.InvariantCulture);
         parts[10] = col10.ToString("G", CultureInfo.InvariantCulture);
         parts[11] = col11.ToString("G", CultureInfo.InvariantCulture);
         parts[12] = col12.ToString("G", CultureInfo.InvariantCulture);
         parts[13] = col13.ToString("G", CultureInfo.InvariantCulture);
-        parts[14] = col14.ToString(CultureInfo.InvariantCulture);
+        parts[14] = col14.ToString("G", CultureInfo.InvariantCulture);
         for (int d = 0; d < 9; d++)
             parts[15 + d] = (dir1 != null && d < dir1.Length ? dir1[d] : 0).ToString(CultureInfo.InvariantCulture);
         for (int d = 0; d < 9; d++)
@@ -116,8 +116,8 @@ public sealed class ActormotionParserTests
         // rate_y = 15.0 * rate_src_y / divisor_y
         // spec: Docs/RE/formats/actormotion.md §Per-frame rate fields (0x30, 0x34) — CONFIRMED math.
         // RateSrcX=7.402, DivisorX=16, RateSrcY=16.282, DivisorY=1
-        string txt = MakeFile(MakeRow(col0: 0, col1: 1, col2: 1, col3: 7.402f, col4: 16, col5: 16.282f, col6: 11,
-            col14: 1));
+        string txt = MakeFile(MakeRow(col0: 0, col1: 1, col2: 1, col3: 7.402f, col4: 16, col5: 16.282f,
+            col6: 1, col7: 11));
         var cat = ActormotionParser.ParseText(txt);
         var e = cat.GetByMotionKey(1);
         Assert.NotNull(e);
@@ -135,7 +135,7 @@ public sealed class ActormotionParserTests
     public void Divisor_zero_is_forced_to_one()
     {
         // spec: Docs/RE/formats/actormotion.md — divisor_x / divisor_y forced to 1 if read as 0.
-        string txt = MakeFile(MakeRow(col0: 0, col1: 1, col2: 1, col3: 5f, col4: 0, col5: 3f, col6: 0, col14: 0));
+        string txt = MakeFile(MakeRow(col0: 0, col1: 1, col2: 1, col3: 5f, col4: 0, col5: 3f, col6: 0, col7: 11));
         var cat = ActormotionParser.ParseText(txt);
         var e = cat.GetByMotionKey(1);
         Assert.NotNull(e);
@@ -149,8 +149,8 @@ public sealed class ActormotionParserTests
     [Fact]
     public void Directional_arrays_round_trip()
     {
-        // spec: Docs/RE/formats/actormotion.md §The two 9-element directional sub-arrays (0x40, 0x64).
-        // 9 directions: 8 compass + 1 neutral = 9 elements each.
+        // spec: Docs/RE/formats/actormotion.md §The two 9-element motion-id sub-arrays (0x40, 0x64).
+        // The 9-slot per-direction interpretation is proposed; the slots are parsed as flat .mot ids.
         int[] d1 = [101100001, 111100010, 111100020, 111100030, 121100060, 121100090, 121100010, 0, 0];
         int[] d2 = [811100001, 811100002, 821100005, 0, 0, 0, 0, 0, 0];
         string txt = MakeFile(MakeRow(col0: 0, col1: 1, col2: 1, col3: 7.402f, col4: 16, col5: 16.282f, col6: 11,
@@ -269,16 +269,16 @@ public sealed class ActormotionParserTests
     {
         // Validates the column mapping against the first real data row observed from
         // the VFS head preview (vfs-inspect --head data/char/actormotion.txt):
-        // col0=0 col1=1 col2=1 col3=7.402 col4=16 col5=16.282 col6=11 col14=1
-        // dir_array_1=[101100001,111100010,111100020,111100030,121100060,121100090,121100010,0,0]
-        // dir_array_2=[811100001,811100002,821100005,0,0,0,0,0,0]
+        // col0=0 col1=1 col2=1 col3=7.402 col4=16 col5=16.282 col6=1 col7=11 col14=4
+        // motion_ids_a=[101100001,111100010,111100020,111100030,121100060,121100090,121100010,0,0]
+        // motion_ids_b=[811100001,811100002,821100005,0,0,0,0,0,0]
         // No base table => motion_key = 1.
         // spec: Docs/RE/formats/actormotion.md — all field positions.
         int[] d1 = [101100001, 111100010, 111100020, 111100030, 121100060, 121100090, 121100010, 0, 0];
         int[] d2 = [811100001, 811100002, 821100005, 0, 0, 0, 0, 0, 0];
         string txt = MakeFile(MakeRow(col0: 0, col1: 1, col2: 1, col3: 7.402f, col4: 16, col5: 16.282f,
-            col6: 11, col7: 0f, col8: 4f, col9: 5f, col10: 3f, col11: 1f,
-            col12: 8f, col13: 4f, col14: 1, dir1: d1, dir2: d2));
+            col6: 1, col7: 11, col8: 0f, col9: 4f, col10: 5f, col11: 3f,
+            col12: 1f, col13: 8f, col14: 4f, dir1: d1, dir2: d2));
         var cat = ActormotionParser.ParseText(txt);
         var e = cat.GetByMotionKey(1);
         Assert.NotNull(e);
