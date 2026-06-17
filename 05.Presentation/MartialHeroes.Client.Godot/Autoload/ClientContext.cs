@@ -217,6 +217,33 @@ public sealed partial class ClientContext : Node
     public ZoneCatalog ZoneCatalog { get; private set; } = null!;
 
     /// <summary>
+    /// Shared HUD atlas library for the new Ui/Scenes substrate.
+    /// Maps VFS paths and uitex.txt tex_ids → Godot <see cref="Godot.Texture2D"/> objects,
+    /// with AtlasTexture sub-rect slicing.
+    ///
+    /// Uses the same <c>_uiAssets</c> handle as <see cref="UiCatalogs"/>;
+    /// no additional VFS archive is opened.
+    /// Degrades gracefully when VFS is unavailable (all methods return null).
+    ///
+    /// spec: Docs/RE/formats/ui_manifests.md §1 — uitex.txt grammar.
+    /// spec: Docs/RE/specs/ui_system.md §1.3 — "atlas pixels map 1:1 to screen pixels".
+    /// </summary>
+    public MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary HudAtlas { get; private set; } = null!;
+
+    /// <summary>
+    /// Shared HUD text library for the new Ui/Scenes substrate.
+    /// Loads data/script/msg.xdb and provides CP949-decoded caption lookup by integer id.
+    ///
+    /// Uses the same <c>_uiAssets</c> handle as <see cref="UiCatalogs"/>;
+    /// no additional VFS archive is opened.
+    /// Degrades gracefully when VFS is unavailable (all lookups return the caller-supplied fallback).
+    ///
+    /// spec: Docs/RE/formats/msg_xdb.md — 516-byte records, ascending unsigned id order.
+    /// spec: Docs/RE/specs/ui_system.md §8 — notice column msg ids 4001–4022.
+    /// </summary>
+    public MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary HudText { get; private set; } = null!;
+
+    /// <summary>
     /// The region service: resolves the local player's world position to a
     /// <see cref="MartialHeroes.Shared.Kernel.Enums.ZoneType"/> and publishes
     /// <see cref="MartialHeroes.Client.Application.Hud.ZoneChangedEvent"/> when the zone changes.
@@ -416,6 +443,23 @@ public sealed partial class ClientContext : Node
             GD.PrintErr($"[ClientContext] UiCatalogs load failed: {ex.Message} — using empty UI catalogs.");
             _uiAssets = null;
             UiCatalogs ??= new UiCatalogs(null);
+        }
+
+        // 13-B. HUD atlas + text libraries for the new Ui/Scenes substrate.
+        //     Reuse the same _uiAssets handle; no additional VFS archive opened.
+        //     spec: Docs/RE/formats/ui_manifests.md §1 (HudAtlasLibrary — uitex.txt).
+        //     spec: Docs/RE/formats/msg_xdb.md (HudTextLibrary — msg.xdb).
+        try
+        {
+            HudAtlas = new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(_uiAssets);
+            HudText  = new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(_uiAssets);
+            GD.Print("[ClientContext] HudAtlasLibrary + HudTextLibrary constructed (Ui/Scenes substrate).");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] HudAtlas/HudText init failed: {ex.Message} — Ui/Scenes will run offline.");
+            HudAtlas ??= new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
+            HudText  ??= new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
         }
 
         // 14. Skill icon catalog: skillicon.txt + musajung.do stance table.
@@ -667,6 +711,11 @@ public sealed partial class ClientContext : Node
         // spec: Docs/RE/formats/ui_manifests.md §2.6 / §2.7.
         IconCatalogs ??= new IconCatalogs(null);
 
+        // HudAtlas + HudText — null-safe offline fallback (no VFS).
+        // spec: Docs/RE/formats/ui_manifests.md §1 / Docs/RE/formats/msg_xdb.md.
+        HudAtlas ??= new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
+        HudText  ??= new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
+
         // ItemIconCatalog — null-safe offline fallback (no VFS).
         // spec: Docs/RE/formats/ui_manifests.md §10 / §10.5.
         ItemIconCatalog ??= new ItemIconCatalog(null);
@@ -762,6 +811,10 @@ public sealed partial class ClientContext : Node
         // spec: Docs/RE/formats/ui_manifests.md §1 (UiTex.txt loaded via this handle).
         // spec: Docs/RE/formats/misc_data.md §6 (msg.xdb loaded via this handle).
         UiCatalogs?.Dispose();
+        // Dispose the Ui/Scenes substrate libraries (share _uiAssets handle — dispose before it).
+        // spec: Docs/RE/formats/ui_manifests.md §1 / Docs/RE/formats/msg_xdb.md.
+        HudAtlas?.Dispose();
+        HudText?.Dispose();
         // Dispose the skill icon catalog (no archive owned — just clears internal state).
         // spec: Docs/RE/formats/ui_manifests.md §2.6 / §2.7.
         IconCatalogs?.Dispose();

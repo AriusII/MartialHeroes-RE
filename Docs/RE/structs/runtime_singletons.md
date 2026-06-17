@@ -1,9 +1,9 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-17
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: Renderer object (§4) and 16-slot render pointer-cache (§4.1) not re-walked this pass (static-hypothesis); NetClient inner field offsets (§3.3) and ActorManager inner fields (§3.7) carried from prior dirty note (static-hypothesis); keepalive interval UNIT (ms vs s) and several MainWindow service-slot identities (§3.10) static-hypothesis; MainWindow +0x500=MainHandler* assignment site not traced (static-hypothesis); display FRAMERATE config inertness (capture/debugger-pending)
+conflicts: Renderer object (§4) and 16-slot render pointer-cache (§4.1) not re-walked this pass (static-hypothesis); NetClient inner field offsets (§3.3) and ActorManager inner fields (§3.7) carried from prior dirty note (static-hypothesis); keepalive interval UNIT (ms vs s) and several MainWindow service-slot identities (§3.10) static-hypothesis; display FRAMERATE config inertness (capture/debugger-pending). 2026-06-17 Campaign-17 re-confront (263bd994): the MainWindow +0x500 write is now CODE-CONFIRMED, and its occupant is a distinct ~0xC8-byte state-5 command handler (NOT the 16-byte MainHandler hub) — §3.10 / §3.10a / §6 corrected
 status: code-confirmed
 sample_verified: false   # layout recovered from binary analysis; no live capture
 subsystems: [scene_lifecycle, render_pipeline, network, actor, sound, vfs, ui_system, effects, game_loop, input, scripting]
@@ -88,18 +88,21 @@ embedded static object (CODE-CONFIRMED unless marked otherwise).
 | `ShadowManager` | Per-actor shadow rendering | 316 | — | CODE-CONFIRMED |
 | `RankProgress` | Rank/progression state | 308 | — | CODE-CONFIRMED |
 | `MainWindow` ("MainMaster") | Root Diamond::GUWindow + 223-slot HUD-panel service block | 1 464 | §3.10 | CODE-CONFIRMED |
-| `MainHandler` | Small handler-hub object (distinct from `MainWindow`; busiest accessor in the binary) | 16 | §3.10a | CODE-CONFIRMED |
+| `MainHandler` (hub) | Small 16-byte handler-hub object (distinct from `MainWindow` **and** from the ~0xC8-byte +0x500 state-5 handler; busiest accessor in the binary) | 16 | §3.10a | CODE-CONFIRMED |
 | `AppService` | Core client-runtime app-service singleton | 136 | §3.13 | CODE-CONFIRMED |
 | `Engine` | Main-loop aggregate: holds Renderer + InputManager ptrs | 48 | §3.11 | CODE-CONFIRMED |
 | `FrameTickScheduler` | Per-subscriber tick dispatcher | 72 068 | §3.12 | CODE-CONFIRMED |
 
-> **`MainWindow` vs `MainHandler` (re-verification 2026-06-16).** These are **two distinct
-> singletons** with separate static storage and separate accessors. `MainWindow` ("MainMaster")
-> is the 1 464-byte root HUD window that owns the 223-slot service block (§3.10). `MainHandler` is
-> a separate 16-byte hub object (§3.10a) — its accessor is the single busiest accessor in the
-> binary. The §3.10 service-slot *layout* is correct as documented; only the earlier
-> *construction-trigger attribution* (which accessor builds the 1 464-byte object — see §6) was
-> wrong and is corrected below.
+> **`MainWindow`, `MainHandler` hub, and the +0x500 state-5 handler (re-verification 2026-06-17).**
+> Three distinct objects are involved, and the name "MainHandler" has been overloaded across two of
+> them. `MainWindow` ("MainMaster") is the 1 464-byte root HUD window that owns the 223-slot service
+> block (§3.10). The **`MainHandler` hub** is a separate **16-byte** object (§3.10a) — its accessor
+> is the single busiest accessor in the binary. The object actually stored into the window's
+> **+0x500** service slot is a **third, larger object: a ~0xC8-byte (≈200-byte) command-handler-derived
+> state-5 in-game handler**, written at the scene-state-machine entry to the in-game state — **not**
+> the 16-byte hub (§3.10 / §3.10a). The §3.10 service-slot *layout* is correct as documented; the
+> +0x500 write site is now **CODE-CONFIRMED** (it was a static-hypothesis), and the occupant's
+> identity is corrected to the ~0xC8-byte state-5 handler.
 
 > **Note on the Renderer.** The Renderer object (`Diamond::GHRenderer`, ~177 860 bytes,
 > roughly 174 KB) is the largest static object in the binary. It is not constructed via a
@@ -334,8 +337,8 @@ class `MainWindow`. This object is the 1 464-byte service-slot owner and is **di
 | +0x04 | ~184 | bytes | (base-class fields) | Inherited `GUWindow → Panel → Component` fields up to the secondary vptr. See `specs/ui_system.md`. |
 | +0xBC | 4 | ptr | vtable (secondary) | Secondary / base-subobject vtable pointer (multiple-inheritance base vptr). CODE-CONFIRMED (re-verification 2026-06-16) — **was missing from the prior table, which listed only the +0x00 vptr.** |
 | +0xC0 | ~376 | bytes | (base-class fields) | Remainder of the inherited base region up to the service-slot block. See `specs/ui_system.md`. |
-| +0x238 | 892 | ptr[223] | `service_slots` | 223 pointer-width (4-byte) service-slot words; a flat array of HUD-panel pointers, read by index everywhere. Zero-initialised at construction **except the `+0x500` main-handler slot, which the ctor deliberately skips** (filled later — see note). Subsystem initialisers populate these during the in-game scene state. Only a subset are named — see note below. CODE-CONFIRMED count & bounds. |
-| +0x500 | 4 | ptr | `main_handler` | Pointer to the `MainHandler` object. The constructor's zero-init loop **deliberately skips this slot** (the slot is left untouched at construction and assigned later, at the in-game scene state). Ctor-skip CODE-CONFIRMED; the `= MainHandler*` identity of the later write is (static-hypothesis) — the write-site was not traced this pass. |
+| +0x238 | 892 | ptr[223] | `service_slots` | 223 pointer-width (4-byte) service-slot words; a flat array of HUD-panel pointers, read by index everywhere. Zero-initialised at construction **except the `+0x500` state-5-handler slot, which the ctor deliberately skips** (filled later — see note). Subsystem initialisers populate these during the in-game scene state. Only a subset are named — see note below. CODE-CONFIRMED count & bounds. |
+| +0x500 | 4 | ptr | `state5_handler` | Pointer to the in-game **state-5 command handler** — a distinct **~0xC8-byte (≈200-byte)** command-handler-derived object, **not** the 16-byte `MainHandler` hub of §3.10a. The constructor's zero-init loop **deliberately skips this slot**; the later write happens at the scene-state-machine entry to the in-game state. **Both the ctor-skip and the later write are now CODE-CONFIRMED** (re-confront 2026-06-17): the write-site is traced and the occupant's identity is the ~0xC8-byte state-5 handler (the earlier `= MainHandler*` attribution conflated it with the hub and is corrected). |
 | +0x5B0 | 4 | — | (last service-slot dword) | Last dword written by the zero-init loop. |
 | +0x5B4 | 1 | uint8 | (tail byte) | Final byte written by the constructor (boundary of the service region). |
 | +0x5B8 | — | — | (object end) | Object boundary at 1 464 bytes (init guard sits here). |
@@ -346,7 +349,8 @@ class `MainWindow`. This object is the 1 464-byte service-slot owner and is **di
 > index). Only a small subset of the 223 slots are identified, and the individual slot identities
 > are (static-hypothesis) — inferred from the callee each pointer is passed to. The full decode
 > requires tracing all write sites that populate each slot offset after the in-game-state
-> initialisation. See open question §7.6.
+> initialisation. See open question §7.6. One slot is now firmly pinned: **+0x500 holds the
+> ~0xC8-byte state-5 command handler** (the write site is traced — CODE-CONFIRMED).
 
 ### 3.10a MainHandler hub — 16 bytes (CODE-CONFIRMED)
 
@@ -354,8 +358,11 @@ Cross-reference: `specs/client_runtime.md §2`, `specs/game_loop.md`.
 
 A small handler-hub singleton, **separate from** the 1 464-byte `MainWindow` (§3.10): it has its
 own static storage and its own accessor (the single busiest accessor in the binary). Its
-constructor zeroes four dwords (the full 16-byte object). The earlier conflation of this object
-with the service-slot window is corrected here and in §6.
+constructor zeroes four dwords (the full 16-byte object). It is **also distinct from** the
+~0xC8-byte (≈200-byte) state-5 command handler stored into `MainWindow +0x500` (§3.10) — the name
+"MainHandler" was overloaded across the two. This 16-byte hub is **not** the object written into
+the +0x500 service slot. The earlier conflation of this hub with both the service-slot window and
+the +0x500 occupant is corrected here and in §6.
 
 | Offset | Size | Type | Field | Notes |
 |-------:|-----:|------|-------|-------|
@@ -547,13 +554,17 @@ entered.
 5. *(Scene-state loop begins — `while(1) switch(scene_state)`, 8 cases for states 0..7. All
    following steps are per-state. Note: case 0 advances `scene_state` to 1 and triggers the
    network-stack construction below.)*
-6. (State 1) `MainWindow` ("MainMaster") and `MainHandler` — **two distinct singletons**
-   (correction 2026-06-16). Each has its own accessor and static storage: the `MainWindow`
-   accessor constructs the 1 464-byte service-slot window (the 223 slots are zero-initialised,
-   except the main-handler slot which the ctor deliberately skips — see §3.10), while the
-   separate `MainHandler` accessor constructs the 16-byte hub (§3.10a). The earlier wording that
-   the *MainHandler accessor* builds the 1 464-byte window was a conflation and is corrected here:
-   it does not — it builds only the small hub.
+6. (State 1) `MainWindow` ("MainMaster") and the `MainHandler` hub — **two distinct singletons**.
+   Each has its own accessor and static storage: the `MainWindow` accessor constructs the 1 464-byte
+   service-slot window (the 223 slots are zero-initialised, except the +0x500 state-5-handler slot
+   which the ctor deliberately skips — see §3.10), while the separate `MainHandler` accessor
+   constructs the 16-byte hub (§3.10a). The earlier wording that the *MainHandler accessor* builds
+   the 1 464-byte window was a conflation and is corrected: it builds only the small hub. **The
+   +0x500 slot is filled later** — at the scene-state-machine entry to the in-game state, the engine
+   constructs the ~0xC8-byte (≈200-byte) command-handler-derived **state-5 handler** and writes its
+   pointer into `MainWindow +0x500`. This write site is now **CODE-CONFIRMED** (re-confront 2026-06-17),
+   and its occupant is the ~0xC8-byte state-5 handler — a **third** object, distinct from both the
+   `MainWindow` window and the 16-byte hub.
 7. (State 1) Font creation; window configured. **The Renderer static is set up during window
    configuration** (not via a Meyers init guard). (static-hypothesis — render path not re-walked
    this pass.)
@@ -764,8 +775,10 @@ The following information is **new** with respect to the currently committed spe
   items 11–12) — not previously committed anywhere.
 - `ActorManager +0x74` spatial-index sub-object (~192 bytes) — mentioned in struct recovery
   notes but not in any committed spec.
-- `MainWindow +0x500 = MainHandler*` assignment at scene-state 5 — noted in analysis but not in
-  any committed spec.
+- `MainWindow +0x500` holds the ~0xC8-byte (≈200-byte) state-5 command handler (a third object,
+  distinct from the 16-byte `MainHandler` hub); the write at the in-game-state entry is now
+  CODE-CONFIRMED (2026-06-17). The earlier `= MainHandler*` reading conflated it with the hub and is
+  corrected (§3.10 / §3.10a / §6).
 - `CoreMotManager`, `CorePoseManager`, `CoreSkinManager` as distinct 16-byte singletons — not
   documented in `specs/skinning.md`.
 - Binary module map with subsystem function counts, engine brand, toolchain, third-party library
@@ -808,9 +821,11 @@ The following information is **new** with respect to the currently committed spe
    tracing all write sites that populate each dword after the in-game-state initialisation. This is
    a significant analyst task.
 
-   - **6a. `MainWindow +0x500` main-handler write site (static-hypothesis).** The ctor demonstrably
-     *skips* this slot in its zero-init loop, confirming it is filled later; the identity of the
-     later write as `= MainHandler*` was not traced this pass. Confirm the write-site and target.
+   - **6a. `MainWindow +0x500` state-5-handler write site: RESOLVED (CODE-CONFIRMED, 2026-06-17).**
+     The ctor *skips* this slot in its zero-init loop; the later write is now traced — it happens at
+     the scene-state-machine entry to the in-game state and stores a pointer to the ~0xC8-byte
+     (≈200-byte) command-handler-derived **state-5 handler** (a third object, **not** the 16-byte
+     `MainHandler` hub of §3.10a). Both the ctor-skip and the later write are CODE-CONFIRMED.
 
 7. **`g_ActorMap_singleton` type.** A separate actor hash-map/tree pointer (not inside the
    ActorManager object) is used in the id-keyed actor-lookup hot path. The first access writes a

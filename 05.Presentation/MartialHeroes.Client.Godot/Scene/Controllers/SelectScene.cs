@@ -5,6 +5,7 @@ using MartialHeroes.Client.Application.Scene;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Screens;
+using MartialHeroes.Client.Godot.Ui.Scenes.Select;
 using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
@@ -12,6 +13,8 @@ namespace MartialHeroes.Client.Godot.Scene.Controllers;
 /// <summary>
 /// State 4 — SelectWindow. Builds the character-list UI, 3D preview actor row, and the dedicated
 /// Select preview camera; all flow intents are forwarded to Application use-cases.
+/// Now uses the new Ui/Scenes substrate (CharSelectWindow + CharSelectEventDrainer).
+/// The 3D scene layer (CharSelectScene3D/CharCreatePreview3D) is REUSED unchanged.
 /// spec: Docs/RE/specs/client_runtime.md §7.3 / §7.4; Docs/RE/specs/frontend_scenes.md §3–§8.
 /// </summary>
 public sealed partial class SelectScene : StubSceneController
@@ -19,10 +22,9 @@ public sealed partial class SelectScene : StubSceneController
     private ClientContext? _ctx;
     private SceneHost? _host;
     private ScreenHost? _screenHost;
-    private UiAssetLoader? _sharedAssets;
     private FrontEndAudio? _audio;
-    private CharacterSelectScreen? _select;
-    private CharListEventDrainer? _drainer;
+    private CharSelectWindow? _select;         // NEW: Ui/Scenes substrate
+    private CharSelectEventDrainer? _drainer;  // NEW: typed for CharSelectWindow
     private bool _confirmInFlight;
 
     /// <inheritdoc/>
@@ -34,8 +36,6 @@ public sealed partial class SelectScene : StubSceneController
         Name = $"Scene{(int)State}_{State}";
         _host = host;
         _ctx = GetNodeOrNull<ClientContext>("/root/ClientContext");
-
-        _sharedAssets = UiAssetLoader.Open();
 
         _screenHost = new ScreenHost { Name = "SelectScreenHost" };
         AddChild(_screenHost);
@@ -79,33 +79,35 @@ public sealed partial class SelectScene : StubSceneController
             _drainer.EventDrained -= OnApplicationEvent;
             _drainer = null;
         }
-
-        _sharedAssets?.Dispose();
-        _sharedAssets = null;
     }
 
-    private CharacterSelectScreen BuildSelectScreen()
+    private CharSelectWindow BuildSelectScreen()
     {
-        var select = new CharacterSelectScreen
+        // Resolve HudAtlasLibrary + HudTextLibrary from ClientContext (null if not yet ready).
+        var atlas = _ctx?.HudAtlas;
+        var text  = _ctx?.HudText;
+
+        var select = new CharSelectWindow
         {
-            Name = "CharacterSelectScreen",
-            SharedAssets = _sharedAssets,
+            Name  = "CharSelectWindow",
+            Atlas = atlas,
+            Text  = text,
         };
 
-        select.EnterGameRequested += OnEnterGameRequested;
-        select.BackRequested += OnBackRequested;
+        select.EnterGameRequested    += OnEnterGameRequested;
+        select.BackRequested         += OnBackRequested;
         select.CreateCharacterRequested += OnCreateCharacterRequested;
         select.DeleteCharacterRequested += OnDeleteCharacterRequested;
         return select;
     }
 
-    private void StartEventDrain(CharacterSelectScreen select, IClientEventBus bus)
+    private void StartEventDrain(CharSelectWindow select, IClientEventBus bus)
     {
-        _drainer = new CharListEventDrainer { Name = "CharListEventDrainer" };
+        _drainer = new CharSelectEventDrainer { Name = "CharSelectEventDrainer" };
         _drainer.Bind(select, bus);
         _drainer.EventDrained += OnApplicationEvent;
         AddChild(_drainer);
-        GD.Print("[SelectScene] CharacterListEvent drainer armed for state 4. spec: frontend_scenes.md §3.1.");
+        GD.Print("[SelectScene] CharSelectEventDrainer armed for state 4. spec: frontend_scenes.md §3.1.");
     }
 
     private void OnApplicationEvent(IClientEvent evt)

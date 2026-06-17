@@ -1,13 +1,14 @@
 using Godot;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Screens;
+using MartialHeroes.Client.Godot.Ui.Scenes.Load;
 using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
 /// <summary>
 /// State 2 — Load. Builds the Diamond_LoadingWindow analogue and advances only after the
-/// loading screen reports preload-done + the 500 ms grace; the application scene machine then
+/// loading window reports preload-done + the 500 ms grace; the application scene machine then
 /// chooses 2→3 or 2→4 from its <c>OPENNING/SKIP</c> policy.
 /// spec: Docs/RE/specs/client_runtime.md §7.3; Docs/RE/specs/frontend_scenes.md §2L / §9.1.
 /// </summary>
@@ -16,8 +17,7 @@ public sealed partial class LoadScene : StubSceneController
     private ClientContext? _ctx;
     private SceneHost? _host;
     private ScreenHost? _screenHost;
-    private UiAssetLoader? _sharedAssets;
-    private LoadingScreen? _loading;
+    private LoadingWindow? _loading;
     private CancellationTokenSource? _loadCts;
     private bool _advanceRequested;
 
@@ -31,28 +31,30 @@ public sealed partial class LoadScene : StubSceneController
         _host = host;
         _ctx = GetNodeOrNull<ClientContext>("/root/ClientContext");
 
-        _sharedAssets = UiAssetLoader.Open();
-
         _screenHost = new ScreenHost { Name = "LoadScreenHost" };
         AddChild(_screenHost);
 
-        _loading = new LoadingScreen
+        // Build the new Ui/Scenes substrate LoadingWindow.
+        // Atlas comes from ClientContext.HudAtlas (Phase-A substrate, shared handle).
+        // PlayOwnCue=false when the LoadOrchestrator is present — it routes BGM 920100100
+        // through GodotLoadingSoundSink → AudioService so the cue is not doubled.
+        // spec: Docs/RE/specs/frontend_scenes.md §2L / §9.1; sound.md §15.6a. CODE-CONFIRMED.
+        _loading = new LoadingWindow
         {
-            Name = "LoadingScreen",
-            SharedAssets = _sharedAssets,
-            ExternalCompletion = _ctx?.LoadOrchestrator is not null,
-            PercentProvider = _ctx?.LoadOrchestrator is { } orchestrator
-                ? () => Math.Clamp(orchestrator.ProgressQuotient, 0, 100)
+            Name            = "LoadingWindow",
+            Atlas           = _ctx?.HudAtlas,
+            ProgressProvider = _ctx?.LoadOrchestrator is { } orch
+                ? () => Math.Clamp(orch.ProgressQuotient, 0, 100)
                 : null,
-            PlayOwnBgm = _ctx?.LoadOrchestrator is null,
+            PlayOwnCue = _ctx?.LoadOrchestrator is null,
         };
         _loading.LoadingComplete += OnLoadingComplete;
         _screenHost.SetScreen(_loading);
 
         StartCoreLoad();
 
-        GD.Print("[LoadScene] State 2 Load built real LoadingScreen; preload started by screen " +
-                 "and completion will advance via SceneHost.Advance(). spec: frontend_scenes.md §2L / §9.1.");
+        GD.Print("[LoadScene] State 2 Load built LoadingWindow (Ui/Scenes substrate); preload started; " +
+                 "completion will advance via SceneHost.Advance(). spec: frontend_scenes.md §2L / §9.1.");
     }
 
     public override void _ExitTree()
@@ -65,9 +67,6 @@ public sealed partial class LoadScene : StubSceneController
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
-
-        _sharedAssets?.Dispose();
-        _sharedAssets = null;
     }
 
     private void StartCoreLoad()
@@ -96,7 +95,7 @@ public sealed partial class LoadScene : StubSceneController
         catch (Exception ex)
         {
             GD.PrintErr($"[LoadScene] LoadOrchestrator.Start failed: {ex.Message}; completing Load scene defensively.");
-            _loading?.CallDeferred(LoadingScreen.MethodName.CompleteExternalLoad);
+            _loading?.CallDeferred(LoadingWindow.MethodName.CompleteExternalLoad);
         }
     }
 
@@ -109,7 +108,7 @@ public sealed partial class LoadScene : StubSceneController
             {
                 if (_loading is not null && IsInstanceValid(_loading))
                 {
-                    GD.Print("[LoadScene] LoadOrchestrator completion observed → LoadingScreen 500 ms grace.");
+                    GD.Print("[LoadScene] LoadOrchestrator completion observed → LoadingWindow 500 ms grace.");
                     _loading.CompleteExternalLoad();
                 }
             }).CallDeferred();
@@ -124,7 +123,7 @@ public sealed partial class LoadScene : StubSceneController
             Callable.From(() =>
             {
                 GD.PrintErr(
-                    $"[LoadScene] LoadOrchestrator faulted: {ex.Message}; advancing after loading-screen grace.");
+                    $"[LoadScene] LoadOrchestrator faulted: {ex.Message}; advancing after loading-window grace.");
                 _loading?.CompleteExternalLoad();
             }).CallDeferred();
         }

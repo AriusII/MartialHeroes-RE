@@ -6,6 +6,102 @@
 
 ---
 
+# CYCLE 17 — HUD/UI total rebuild (scene by scene, from scratch, IDA-faithful) (launched 2026-06-17)
+
+**Mandate (maintainer):** "s'occuper de tout ce qui est HUD … construction de tous les éléments HUD/UI +
+gestion des assets … chaque scene dans l'ordre, on fait pas WORLD avant LOGIN … TOUT REFAIRE / écraser le
+travail déjà fait … bien lire et comprendre les éléments tirés d'IDA pour chaque state." **Reframed:**
+zero-trust from-scratch rebuild of the ENTIRE HUD/UI layer in engine order (Foundation→Login→Load→Opening→
+Select→In-game core→Quit/Error), each element re-derived from doida.exe (IDA 263bd994) + Docs/RE HUD specs —
+**NO screenshot oracle** — one scene at a time, asset management included. Plan file:
+`~/.claude/plans/est-ce-que-tu-peux-luminous-map.md`.
+
+**Master deliverable:** a fresh layer-05 `Ui/` tree (shared Diamond toolkit + asset catalogs + per-scene
+windows + in-game core HUD) over a rebuilt layer-04 IHudEventHub, gated per scene (build 0/0 · tests ·
+clean headless boot · firewall · DAG).
+**Out of scope (deferred):** screenshot/visual fidelity passes; the in-game ~100-panel long tail (Options/
+Friend/Guild/Quest/Party/Trade/… = HUD-II follow-on); world gameplay rules; deep skinning; captures/debugger;
+server; commits-unless-asked.
+**Command structure:** Tier-1 + re-cleanroom-orchestrator (W/P) + Tier-1-driven godot-ui/presentation/input
+engineers (E; godot-client-orchestrator mint was classifier-blocked) + quality reviewers (R).
+**No-regression mechanism (no screenshot oracle):** the current faithful front-end is quarantined to
+`_legacy/` per scene and the rewrite's layout tables are numerically diffed against it; any divergence must
+cite an IDA fact.
+
+## Phase 0 — Tooling pre-flight — ✅ DONE
+Baseline GREEN: nuke-build 0/0 · tests green (~2049) · branch campaign15 · VFS present (data.inf 6MB +
+data.vfs 3.6GB) · `_dirty/` gitignored · IDA MCP up on doida.exe 263bd994. (0.1 mint godot-client-orchestrator
+= classifier-blocked → Tier-1-driven workers instead.)
+
+## Phase A — HUD Foundation: shared substrate — ✅ DONE
+W+P (re-cleanroom-orchestrator): toolkit + asset manifests re-confirmed vs 263bd994. One drift fixed
+(`ui_system.md §2` LAYERED vtable 13/14/15, not a flat 16-slot; GUButton font-slot +0xE8); all asset
+manifests + structs VINDICATED (buff_icon_position = 12B `{id,srcX,srcY}`, "12+8" refuted). E: fresh
+additive `Ui/` tree — `Ui/Assets/` (atlas/icon/text libraries) + `Ui/Widgets/` (HudWidget base + button/
+label/panel/list/textbox/scrollbar/checkbox + AlphaFade ±64/tick + factory) + `Ui/HudFont.cs`. **GATE PASS:**
+Godot build 0/0 · headless spine non-regressed · firewall clean · nothing outside `Ui/` touched.
+
+## Phase B — Login(1) HUD — ✅ DONE
+W+P: Login specs ~90% PASS, 7 drifts corrected (one +0x238 sub-state; server plates 400/401 vs pagers
+115..124; PIN keypad tags 12/13/11; 1368 B; curtain +5/tick 200/222; notice column 4001-4022; +0xE8 font).
+E: fresh `Ui/Scenes/Login/` (LoginWindow + PinSubView + ServerSelectSubView) on the substrate; LoginScene
+re-pointed; constants cross-checked vs the in-place old screens (identical via LoginLayout). Fixed a
+FullRect-anchor warning. **GATE PASS:** build 0/0 · headless clean (new window renders) · firewall ·
+diff-oracle. (Old Login cluster now dead-code held only by dead BootFlow → quarantined with the whole
+legacy front-end in Phase G.)
+
+## Phase C — Load(2) HUD — ✅ DONE
+W: all PASS, no drift (rand()%3 DDS; bar 223*p/100 px U-sub-rect of same DDS; progress = worker bytes;
+cue 920100100 loop; exit on worker completion → OPENNING/SKIP gate). E: fresh `Ui/Scenes/Load/LoadingWindow`
+on the substrate; LoadScene re-pointed; the new fill UV is now the spec-confirmed `U[0,223/1024]` (the old
+code had a speculative `u∈[0.754,0.969]`). **GATE PASS:** build 0/0 · headless clean (BG V-crop 768px, fill
+0..223px) · firewall · no anchor warning.
+
+## Phase D — Opening(3) HUD — ✅ DONE
+W: all PASS, no drift (4 panels 17.5s dwell ±1/frame, panel 4 loops, NO auto-finish; crawl 1000ms gate
++30u/s clamp 1843 centred; skip-only Enter/ESC/Space/action-100 → SKIP=1 → state 4; BGM 910061000 loop).
+E: fresh `Ui/Scenes/Opening/OpeningWindow` on the substrate; OpeningScene re-pointed (alias to disambiguate
+same type name). **GATE PASS:** build 0/0 · headless clean · no anchor warning · firewall. (Phase-G note:
+ClientContext reads the old window's SkipCfgPath const → relocate when quarantining.)
+
+## Phase E — Select(4) HUD — ✅ DONE
+W+P: 11 PASS, 4 drifts corrected in ui_system.md §8.2/§8.4 (Create/Delete/Enter dst-Y 112; no "5 plates" —
+info panel + 3D ray-pick, occupancy +0x66; stat grid 10-cell 2×5; corner-close base-chrome). E: fresh
+`Ui/Scenes/Select/` (CharSelectWindow + CharSelectEventDrainer) over the REUSED 3D preview; SelectScene
+re-pointed; roster blank until CharacterListEvent (no synthetic data). **GATE PASS:** build 0/0 · headless
+clean (5-slot event applies) · no anchor warning · firewall.
+
+## Phase F — In-game(5) HUD core + main windows — ✅ DONE
+W+P: 9/10 core panels byte-confirmed; major drifts corrected across ui_hud_layout.md (9) / chat.md (2) /
+ui_system.md (§8.6.1/§8.7/§8.8/§8.10) / runtime_singletons.md. Resolved: skill-bar registry, stat siblings
+A/B/C (text), inventory 8×5+20-cell, ItemPanel vs GatherSlotPanel, minimap MapPanel/TotalMapPanel, buff
++4/+8, chat 448×324+330×20. **Target frame DEFERRED to HUD-II** (slot 135 = UpgradeProcessPanel; the real
+plate not recovered). E: fresh `Ui/Hud/` (HudMaster + 9 panels) on the substrate, consuming the existing
+(verify-faithful, not rewritten) IHudEventHub + catalogues; InGameScene re-pointed. **GATE PASS:** build 0/0
+(removed a dead CS0067 event) · headless reaches state 5 with all 9 panels · no anchor warning · firewall.
+Residuals (TODO world-campaign / debugger): hub Vitals channel for HP/MP gauges; hotbar overlay-rect values;
+stat sub-panel exact coords; minimap per-area DDS naming (tried map2.dds — likely map1.dds shared).
+
+## Phase G — Quit/Error chrome + consolidation — ✅ DONE (legacy removal pending confirm)
+Quit/Error have no atlas HUD (error-path, chrome-less by design — CAMPAIGN-16 controllers stand; no rebuild
+needed). **FINAL GATE PASS:** clean slnx build **0/0** · **2049 tests green (12 suites, 0 fail)** · Godot
+build 0/0 · headless full-spine 0→5 with HUD + world clean · firewall PASS (Ui/ tree) · DAG clean (engine-free
+holds). Docs/journal/memory updated. **OPEN (maintainer confirm):** physical removal of the now-dead legacy
+front-end (BootFlow + Boot.tscn + old Screens/{LoginScreen,PinModal,ServerSelectScreen,ServerListDrainer,
+OpeningWindow,LoadingScreen,CharacterSelectScreen,CharListEventDrainer} + old HUD/*) — destructive +
+entangled (ServerEntry / OpeningWindow.SkipCfgPath are shared; ScreenHost/FrontEndAudio/NpcScrDescriptions/
+LoginLayout stay ACTIVE). Functionally dead now (new Ui/ tree is what runs); deferred to a confirmed cleanup.
+names.yaml sync (MapPanel/TotalMapPanel/ItemPanel/UpgradeProcessPanel/ActorState{Passive,Cash,Skill}Panel/…)
+= maintainer hand-merge. **CAMPAIGN 17 CORE REBUILD COMPLETE.** Uncommitted on campaign15.
+
+## Phase G — Quit/Error chrome + consolidation — ⬜ PENDING
+Quit/Error chrome; delete `_legacy`; final nuke-build gate; journal + names.yaml + memory; record HUD-II.
+**FINAL GATE:** build 0/0 (--no-incremental) · all suites green · full spine headless walk 0→5 with HUD clean.
+
+— *Maintained by the orchestrator. Update phase statuses in place as waves complete.*
+
+---
+
 # CYCLE 15 — Scene-Spine Rebuild (Godot 05 + C# core from zero, scene-by-scene) (launched 2026-06-16)
 
 **Mandate (maintainer):** "Reprendre 'tout le projet' Godot de zéro … en te basant sur toute la docs

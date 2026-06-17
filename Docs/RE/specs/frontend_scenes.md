@@ -435,12 +435,14 @@ typically numeric, PIN.
   `(visible && submitted)` → 33** (§1.5 rows 31/32). **This CORRECTS the earlier "NOT a numbered
   sub-state" wording**: the *FORM/PAGE* (MAIN) state indeed never holds 31/32 (that is the field the
   campaign-4 reading examined), but the **TICK workflow state DOES** — two independent witnesses agree
-  (this re-walk + `ui_system.md` §11.3). At the **window level** the panel is also wired to two
-  LoginWindow child-panel actions — **111 (confirm) / 112 (cancel)** — and the keypad builder carries
-  its **own internal tags `{11 = Reset, 12 = OK, 13 = Cancel}`**: **both scopes are real** (111/112
-  route the child panel; 11/12/13 drive the keypad's own dispatcher — reconciled in §11.3d). The
-  entered PIN rides as **field #3 of the credential pre-image** built at the join handoff (byte layout
-  owned by `login_flow.md`).
+  (this re-walk + `ui_system.md` §11.3). The PIN panel is routed **solely** by the keypad
+  builder's **own internal tags `{11 = Reset / reshuffle, 12 = OK / submit, 13 = Cancel}`** (plus
+  0-9 -> append): the panel's own dispatcher has **no handling of any window-level action**. **The
+  LoginWindow actions `111 / 112` are the login form's option/tab buttons — they do NOT route the PIN
+  child panel** (an earlier version of this spec wrongly cross-bound 111 = confirm / 112 = cancel to the
+  PIN panel and called "both scopes real"; the binary does not support that cross-binding — CODE-
+  CONFIRMED, independent two-witness). The entered PIN rides as **field #3 of the credential pre-image**
+  built at the join handoff (byte layout owned by `login_flow.md`).
 - **Digit→slot scramble — a clock-seeded shuffle (MECHANISM CODE-CONFIRMED; seed + permutation
   DEBUGGER-PENDING).** <!-- source: _dirty/campaign-frontend/A2-pin-modal.md §A2.1 -->
   The keypad is **not** a static table and **not** a constant-seeded shuffle. The routine **seeds the
@@ -466,7 +468,8 @@ typically numeric, PIN.
 > capacity, and the fact that its value lands in the optional login-blob field are **RUNTIME-
 > CONFIRMED** against the live client (read from the client's process at login time; no addresses). The
 > panel's **structure** — shown on the **TICK workflow substate 31 → 32 edge** (31 = raise, 32 =
-> poll-to-33), with LoginWindow-side actions **111/112** and keypad-internal tags **11/12/13**, the
+> poll-to-33), routed by the keypad's own internal tags **{11 = Reset, 12 = OK, 13 = Cancel}** (the
+> window-level actions **111/112** are the login option tabs, **not** PIN routing), the
 > clock-seeded Fisher–Yates scramble **mechanism**, and the keypad layout literals — is **CODE-
 > CONFIRMED** (two witnesses: this re-walk + `ui_system.md` §11.3). The **digit→slot scramble seed
 > value + the resulting permutation** are **DEBUGGER-PENDING** (clock-seeded, not code immediates), as
@@ -489,25 +492,30 @@ Two presentation facts that affect a faithful rebuild of the login form:
   ever uses **distinct** hover-vs-pressed art must apply this corrected mapping or the two states will
   render swapped.
 
-## 1.4c There is NO EULA / terms panel — the 4001..4022 labels are the server-list row captions (CODE-CONFIRMED, SUPERSEDES the earlier "EULA EXISTS" reading)
+## 1.4c There is NO EULA / terms panel — the 4001..4022 labels are a static stacked notice/agreement text column (CODE-CONFIRMED, SUPERSEDES the earlier "EULA EXISTS" reading)
 
 > **CORRECTION (CODE-CONFIRMED, element-by-element construct walk).** An earlier draft of this section
 > asserted the login window "constructs a full EULA / terms panel" at MAIN substate 6, built from
 > message ids **4001..4022**. **A full walk of the login window's scene builder (every one of its 73
 > widgets, in build order) refutes that reading: no terms/agreement panel is constructed anywhere in
 > the login build.** The auto-labelling that produced "EULA body labels" was a decompiler heuristic on
-> a label-build loop; the loop's 22 labels are in fact added to the **server-listbox container**, are
-> the **same 22 widgets** the layout tables already catalogue as the **server / channel row captions**
-> (§11.2a), and have **no scroll/accept/agree gating**. There is no EULA in the login flow.
+> a label-build loop; the loop's 22 labels are in fact a **static stacked notice/agreement text column**
+> on the login notice panel (a tall left-aligned paragraph block, NOT one-line server rows), and have
+> **no scroll/accept/agree gating**. The **actual** server rows are a separate 13-button loop
+> (action `115 + i`, runtime-filled text, no msg id — §11.2a). There is no EULA in the login flow.
 > <!-- source: _dirty/campaign10/B/construct_login.md §2.1 (lane B9), _dirty/campaign10/B/frontend_scenes.md (lane B6) -->
 
 What the construct walk actually builds in this area, and what each former "EULA" claim really is:
 
-- **The 22 labels (message ids `4001..4022`) are the server-list ROW CAPTIONS, not EULA body text.**
-  They are built in a loop of 22 iterations (caption id = `4001 + i`, `i = 0..21`) and **added to the
-  server-listbox container** — the same 270×85 panel that hosts the list scroll controls and header
-  strip (§11.2a). Each label seat is `(X = 50, Y = 100 + 18·i, W = 383, H = 50)` (Y steps +18 per row,
-  building until Y < 496). The CP949 caption text lives in `msg.xdb` and is not reproduced here.
+- **The 22 labels (message ids `4001..4022`) are a static stacked notice/agreement text COLUMN on the
+  login notice panel, not server-list row captions and not EULA body text.** They are built in a loop of
+  22 iterations (caption id = `4001 + i`, `i = 0..21`); each label seat is `(X = 50, Y = 100 + 18·i,
+  W = 383, H = 50)`. Because each label is 50 px tall but the vertical stride is only 18 px, the labels
+  **overlap vertically** to form a single tall left-aligned multi-line paragraph block — that geometry is
+  decisive: it is a paragraph column, not a list of one-line rows. (The **actual** server rows are the
+  separate 13-button loop at action `115 + i`, runtime-filled, with no msg id.) The CP949 caption text
+  lives in `msg.xdb` and is not reproduced here. This matches `ui_system.md §10` ("static label
+  captions"), which is the correct reading.
 - **Actions `106 / 107 / 108` are the server-listbox SCROLL controls, not EULA scroll/accept.**
   `106 = list scroll-UP arrow`, `107 = list scroll-DOWN arrow`, `108 = scrollbar thumb dot` — three
   small atlas-B button sprites built into the server-listbox container (rects in §11.2a / §11.4). They
@@ -527,7 +535,8 @@ What the construct walk actually builds in this area, and what each former "EULA
 > re-confrontation proved the login window drives a **single** sub-state value at object offset
 > **`+0x238`**. (The same cell is addressed as `+0x17C` from code that holds the embedded
 > CommonLoginWindow sub-object pointer at base `+0xBC`: `0xBC + 0x17C = 0x238` — proven where the
-> action router does `lea ecx,[esi-0xBC]` to recover the base before writing `Lastserver`.) The earlier
+> action router recovers the base by subtracting `0xBC` from the held sub-object pointer before writing
+> `Lastserver`.) The earlier
 > "two distinct fields (MAIN form/page vs TICK drive)" model is **drift**, and its clean "written only
 > by X" partition is false. One field, **three writer classes**, all writing `+0x238`:
 > 1. **per-frame tick** — the primary driver; advances the full range **1..41** (seeded to 1 by the
@@ -550,15 +559,15 @@ What the construct walk actually builds in this area, and what each former "EULA
 | 1 | **Intro start** — seed the curtain/letterbox animation; play login-enter SFX **861010105** | scene entry; the field's initial value. **861010105 is a sound id, not a VFX id**, fired from the tick at the 1→2 edge |
 | 2 | Curtain / letterbox **opening** animation; reset banner Y | the "carved-stone-window / red-ribbon" intro motion is a **widget-reposition / letterbox-curtain animation** (two banner/curtain widgets advance per frame), **NOT** a spawned particle effect |
 | 3, 4, 5 | Intro reposition → settle → **reveal** the login-form widgets | banner pan; also the option-page select target. State 5 stops the intro anim and shows the ID/PW boxes + buttons |
-| 6 | **Login form active** — the resting state, waiting for user input | **NO EULA panel exists** (§1.4c, SUPERSEDES the earlier "EULA-read" reading). The construct walk builds no terms/agreement panel; the labels once read as "EULA body" (ids **4001..4022**) are the **server-list row captions** parented to the server-listbox, and actions **106/107/108** are the server-list **scroll** controls (up/down/thumb), not EULA scroll/accept. See §1.4c / §11.2a |
-| **29** | **OK-button credential validation** (MAIN substate) | game.ver gate verified (mismatch → msg 2204 abort, §1.4); ID len ≥ 4 (else msg **4025** → 6); PW len ≥ 1 (else msg **4026** → 6); persist Save-ID; then advance the drive sequence toward the server/channel fetch chain (34..41). **(corrects `ui_system.md`: NOT "server-list trigger"; substate 6 is the resting form — there is NO EULA panel, §1.4c — and the PIN is a post-submit child panel raised on the TICK 31→32 edge, NOT a single "31" step)** |
+| 6 | **Login form active** — the resting state, waiting for user input | **NO EULA panel exists** (§1.4c, SUPERSEDES the earlier "EULA-read" reading). The construct walk builds no terms/agreement panel; the labels once read as "EULA body" (ids **4001..4022**) are a **static stacked notice/agreement text column** on the login notice panel (not server-list row captions), and actions **106/107/108** are the server-list **scroll** controls (up/down/thumb), not EULA scroll/accept. See §1.4c / §11.2a |
+| **29** | **OK-button credential validation** (MAIN substate) | game.ver gate verified (mismatch → msg 2204 abort, §1.4); ID len ≥ 4 (else raise the ID-too-short notice → 6); PW len ≥ 1 (else raise the empty-password notice → 6); persist Save-ID; then advance the drive sequence toward the server/channel fetch chain (34..41). (The notices are cached-notice sourced; their literal msg ids at the call site are UNCONFIRMED.) **(corrects `ui_system.md`: NOT "server-list trigger"; substate 6 is the resting form — there is NO EULA panel, §1.4c — and the PIN is a post-submit child panel raised on the TICK 31→32 edge, NOT a single "31" step)** |
 | ~~30~~ | **DEAD / UNREACHABLE in this build** | A `substate 30 → engine 6/8` (quit) branch is *consumed* by the tick, but **nothing in the whole binary ever writes value 30** (CODE-CONFIRMED exhaustive writer scan), so the branch is unreachable here. The genuine login quit-confirm is the shared ExitPanel, whose Yes is **inert at Login** (no GameState-1 case) — §1.8. <!-- source: _dirty/campaign-frontend/A1-login-bottomleft-quit.md §A1.2 --> |
 | **31** | **Raise the PIN modal** (TICK/drive substate) | On the **31 → 32 edge** the second-password / PIN child panel's visibility is set, reachable **only after the substate-29 credential gate** (account-id length ≥ 4, password present, + an account/save flag). **CORRECTS the earlier "NOT a login sub-state" wording**: the *FORM/PAGE* (MAIN) state never holds 31/32 (the campaign-4 reading was about the form/page state), but the **TICK workflow substate DOES** hold 31 and 32. <!-- source: _dirty/campaign-frontend/A2-pin-modal.md, _RECONCILED.md C1 --> |
-| **32** | **Poll the PIN modal → 33** (TICK/drive substate) | Substate 32 polls `(panel visible && submitted)` and advances to **33** on submit. The keypad-internal tags `{11 = Reset, 12 = OK, 13 = Cancel}` and the LoginWindow child-panel actions `{111 = confirm, 112 = cancel}` drive the keypad internals — **both scopes are real** (window-level 111/112 route to the child panel; the keypad's own dispatcher uses 11/12/13). CODE-CONFIRMED (two independent witnesses: this re-walk + `ui_system.md` §11.3). |
+| **32** | **Poll the PIN modal → 33** (TICK/drive substate) | Substate 32 polls `(panel visible && submitted)` and advances to **33** on submit. The keypad is routed **only** by its own internal tags `{11 = Reset, 12 = OK / submit, 13 = Cancel}`; **the window-level actions 111/112 are the login option tabs and do NOT route the PIN panel** (the earlier "both scopes are real" 111/112->PIN cross-binding is dropped — the binary does not support it). CODE-CONFIRMED (independent two-witness: this re-walk + `ui_system.md` §11.3). |
 | 33 | Press-OK transition → begin server-list fetch | sets up the fetch (advance to 34) |
 | 34 | Start the server-list fetch thread (lobby port 10000) | a **blocking worker thread** separate from the main overlapped connection; see `login_flow.md` §2.1 |
 | 35 | Wait for server-list reply | thread sets 36 on completion (or signals an error count) |
-| 36 | Consume server list (§2.3 / §2.4) | empty → msg **4027** → 6; connect-fail → msg **4028** → 6; else render and go 37 |
+| 36 | Consume server list (§2.3 / §2.4) | empty → raise the empty-server-list notice → 6; connect-fail → raise the connect-fail notice → 6; else render and go 37. (The notices are cached-notice sourced; their literal msg ids at the call site are UNCONFIRMED.) |
 | 37 | Server selected | entry click commits the selection + persists `Lastserver` (§2.5) |
 | 38 | Start the channel-endpoint fetch thread (lobby port `10000 + selected id`) | second blocking worker thread; see `login_flow.md` §2.2 |
 | 39 | Wait for endpoint reply | thread copies a 30-byte `"host port"` string into the window, sets 40 |
@@ -572,21 +581,22 @@ What the construct walk actually builds in this area, and what each former "EULA
 > raise/poll values, NOT a separate "page" state and NOT "31 = Help screen". Concretely:
 > - **No EULA panel (SUPERSEDES the earlier "EULA at MAIN substate 6" reading).** A full element-by-
 >   element walk of the login scene builder constructs **no terms/agreement panel**. The 22 labels once
->   read as "EULA body" (message ids **4001..4022**) are the **server-list row captions** added to the
->   server-listbox container (§11.2a), and actions **106/107/108** are the server-list **scroll**
+>   read as "EULA body" (message ids **4001..4022**) are a **static stacked notice/agreement text
+>   column** on the login notice panel (not server-list row captions), and actions **106/107/108** are
+>   the server-list **scroll**
 >   controls (scroll-up / scroll-down / scrollbar-thumb), not EULA scroll/accept. The campaign-4
 >   "NO EULA" reading is **CONFIRMED**; MAIN substate 6 is the plain resting login form (§1.4c).
 > - **Second-password / PIN panel** — driven by the **TICK workflow substate**: **31 = raise the PIN
 >   modal** (the child panel is shown on the **31 → 32 edge**, after the substate-29 credential gate),
->   **32 = poll the PIN modal `(visible && submitted)` → 33**. The keypad-internal tags
->   `{11 = Reset, 12 = OK, 13 = Cancel}` and the LoginWindow child-panel actions `{111 = confirm,
->   112 = cancel}` drive the keypad internals — **both scopes are real**. Its value rides as field #3 of
->   the credential blob built at the join handoff. (Two independent witnesses agree: this re-walk +
->   `ui_system.md` §11.3.)
+>   **32 = poll the PIN modal `(visible && submitted)` → 33**. The keypad is routed **only** by its own
+>   internal tags `{11 = Reset, 12 = OK / submit, 13 = Cancel}`; **the window-level actions 111/112 are
+>   the login option tabs, NOT PIN routing** (the earlier 111->confirm / 112->cancel cross-binding is
+>   dropped — the binary does not support it). Its value rides as field #3 of the credential blob built
+>   at the join handoff. (Independent two-witness: this re-walk + `ui_system.md` §11.3.)
 >
 > A faithful client builds **no EULA panel**, and drives the PIN modal off the
-> **TICK substate 31→32 edge** (raise at 31, poll-to-33 at 32), with the keypad's own {11/12/13} tags
-> and the window-level {111/112} actions both wired.
+> **TICK substate 31→32 edge** (raise at 31, poll-to-33 at 32), routed by the keypad's own {11/12/13}
+> tags (the window-level {111/112} actions are the login option tabs, not PIN routing).
 
 > **Sub-state 40 detail.** The TAB string is `<first credential box>⟨TAB⟩<second credential box>⟨TAB⟩
 > PIN⟨TAB⟩"host port"`. The first two fields are read **from the two credential edit boxes** (the
@@ -803,20 +813,23 @@ All ids resolve through the message-catalogue lookup against `data/script/msg.xd
 | Message id | Used at | Meaning | Confidence |
 |---|---|---|---|
 | **2204** | version gate | `game.ver` mismatch / wrong client version (Win32 error box) | CODE-CONFIRMED |
-| **4001–4022** | server-listbox row captions | the **22 server / channel row-label captions** — built in a 22-iteration loop (`4001 + i`, `i = 0..21`) and parented to the **server-listbox container** (§11.2a), **not** ID/PW/option form labels and **not** an EULA terms body (§1.4c) | CODE-CONFIRMED (ids) |
+| **4001–4022** | login notice panel | a **static stacked notice/agreement text column** — 22 labels built in a loop (`4001 + i`, `i = 0..21`) at `(X = 50, Y = 100 + 18·i, W = 383, H = 50)`, overlapping vertically into one tall left-aligned paragraph block on the login notice panel; **not** server-list row captions, **not** ID/PW/option form labels, and **not** an EULA terms body (§1.4c) | CODE-CONFIRMED (ids) |
 | **4023** | quit-confirm popup #1 | quit-confirm prompt | CODE-CONFIRMED |
 | **4024** | quit-confirm popup #2 | second quit-confirm prompt | CODE-CONFIRMED |
-| **4025** | sub-state 29 | ID / account too short (length < 4) | CODE-CONFIRMED |
-| **4026** | sub-state 29 | password empty (length < 1) | CODE-CONFIRMED |
-| **4027** | sub-state 36 | server list empty / no servers returned | CODE-CONFIRMED |
-| **4028** | sub-state 36 | server-list connection failed | CODE-CONFIRMED |
+| **4025** | sub-state 29 | ID / account too-short notice (length < 4). **Cached-notice sourced** (boot-time fill); the literal id at the call site is UNCONFIRMED | UNCONFIRMED (literal id) |
+| **4026** | sub-state 29 | empty-password notice (length < 1). **Cached-notice sourced**; literal id at the call site UNCONFIRMED | UNCONFIRMED (literal id) |
+| **4027** | sub-state 36 | empty-server-list notice. **Cached-notice sourced**; literal id at the call site UNCONFIRMED | UNCONFIRMED (literal id) |
+| **4028** | sub-state 36 | connect-fail notice. **Cached-notice sourced**; literal id at the call site UNCONFIRMED | UNCONFIRMED (literal id) |
 | **4029** | server-row painter | **server-list column-header caption** (the list headers are 4029 / 4030 / 4031 / 4032, loaded once by the server-row painter) — **NOT** an endpoint-fetch error; not referenced by the login tick | CODE-CONFIRMED (REFUTES the earlier endpoint-error reading) |
 | **101** | every timed in-window popup | the "OK / seconds remaining" countdown suffix (`%s - %d`) | CODE-CONFIRMED |
 
-So the family is: **4001–4022 = server-listbox row captions** (parented to the server-listbox, §11.2a —
-NOT login-form labels and NOT EULA body), **4023–4024 = the two shared notice/quit-confirm prompts**,
-**4025–4028 = login error toasts**, **4029–4032 = server-list column-header captions** (loaded by the
-server-row painter, not error toasts; see §11.4), **2204 = the version-mismatch error box**,
+So the family is: **4001–4022 = the static stacked notice/agreement text column** on the login notice
+panel (NOT server-list row captions, NOT login-form labels, NOT EULA body — §1.4c), **4023–4024 = the
+two shared notice/quit-confirm prompts**, **4025–4028 = the inline login notices** (ID-too-short /
+empty-password / empty-server-list / connect-fail — **cached-notice sourced via a boot-time fill;
+the literal ids at the call site are UNCONFIRMED**, do not assert them as the inline error ids),
+**4029–4032 = server-list column-header captions** (loaded by the server-row painter, not error toasts;
+see §11.4), **2204 = the version-mismatch error box (the only inline advisory id, CONFIRMED)**,
 **101 = the timed-popup suffix**.
 
 ---
@@ -2689,9 +2702,9 @@ For the presentation/Godot engineer. Sound ids resolve through `sound_runtime.md
 | Ids | Meaning |
 |---|---|
 | 2204 | version-mismatch error box (login) |
-| 4001–4022 | server-listbox row captions (parented to the server-listbox; NOT form labels, NOT EULA — §1.4c / §11.2a) |
+| 4001–4022 | static stacked notice/agreement text column on the login notice panel (NOT server-list row captions, NOT form labels, NOT EULA — §1.4c / §11.2a) |
 | 4023 / 4024 | shared notice / quit-confirm prompts (login) |
-| 4025 / 4026 / 4027 / 4028 / (4029) | login error toasts (ID short / PW empty / no servers / connect fail / endpoint fail) |
+| 4025 / 4026 / 4027 / 4028 | inline login notices (ID short / PW empty / no servers / connect fail) — **cached-notice sourced; literal ids at the call site UNCONFIRMED** (boot-fill trace pending) |
 | 101 | timed-popup countdown suffix |
 | 5001–5040 (+ locale banks) | localized server names |
 | **2209** | char-select **"character count : N"** top caption template (N = BillingState char-count field; §3.8.2) |
@@ -2875,7 +2888,8 @@ next scene.
    selection, is unclear without a capture or the inbound 2-byte select reply traced.
 9. **EULA gating — CLOSED (NO EULA exists).** Resolved CODE-CONFIRMED by the element-by-element login
    construct walk: the login scene builds **no terms/agreement panel** (§1.4c). The labels once read as
-   "EULA body" (ids **4001..4022**) are the **server-list row captions** (§11.2a) and actions
+   "EULA body" (ids **4001..4022**) are a **static stacked notice/agreement text column** on the login
+   notice panel (not server-list row captions — §1.4c) and actions
    **106/107/108** are the server-list **scroll** controls — there is nothing to gate the form. MAIN
    substate 6 is the plain resting login form; the **PIN** modal is the separate TICK substate
    **31 → 32** edge (§1.4a / §1.5). No EULA-show guard to chase.
@@ -3070,9 +3084,11 @@ canvas; "src" = `(U, V)` top-left into the named atlas. Three-state buttons list
 > `InventWindow.dds` → `loginwindow_02.dds`, §11.1), the window's centred **1024×768** canvas
 > (`x = screenW/2 − 512`, `y = screenH/2 − 384`), and the build contract: the builder is the window's
 > primary-vtable build slot (invoked once after the constructor; the constructor builds **no** widgets
-> and only seeds the init/idle field — §1.5). The **22 server-listbox row captions** (ids 4001..4022)
-> and the **server-list scroll controls** (106/107/108) are confirmed parented to the server-listbox
-> container — there is **no** EULA panel (§1.4c). <!-- source: _dirty/campaign10/B/construct_login.md (lane B9) -->
+> and only seeds the init/idle field — §1.5). The **22 static notice/agreement labels** (ids 4001..4022,
+> a stacked text column on the login notice panel — NOT server-list row captions, §1.4c)
+> and the **server-list scroll controls** (106/107/108) are confirmed; the **actual** server rows are the
+> separate 13-button loop (action 115 + i, runtime-filled, no msg id) — there is **no** EULA panel
+> (§1.4c). <!-- source: _dirty/campaign10/B/construct_login.md (lane B9) -->
 
 ### 11.2a Upper window - main panel, server listbox, scroll controls
 
@@ -3458,8 +3474,9 @@ Button **tags** are integer ids stored on each widget and read back by the keypa
 > maps **tag 11 = Reset (re-shuffle)**, **tag 12 = OK (submit)**, **tag 13 = Cancel** — i.e. THIS table
 > is correct. The earlier campaign-9 wave-3 reading (11 = OK / 12 = Clear) was WRONG. The rects were
 > never in dispute (the (243,133,58,30) small button re-runs the scramble; the (90,290,154,58) wide
-> button submits). The LoginWindow-side child-panel actions are **111 (confirm) / 112 (cancel)**
-> (§1.4a), a different scope from these keypad-internal tags.
+> button submits). **The PIN panel is routed ONLY by these keypad-internal tags 11/12/13** — the
+> LoginWindow actions **111/112 are the login option tabs, NOT PIN routing** (§1.4a; the earlier
+> 111→confirm / 112→cancel cross-binding is dropped — the binary does not support it).
 
 ### 11.3e Two distinct numeric keypads — do NOT conflate them
 

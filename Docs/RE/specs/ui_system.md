@@ -1,9 +1,9 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-17
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: server-record +6 open-time wire packing (capture-unverified); PIN keypad runtime seed/permutation (debugger-pending — clock-seeded shuffle, mechanism confirmed); account/save flag gating entry into login sub-state 31 (debugger-pending); GUCanvas3D render-target wiring untraced; in-game GUButton caption font-slot byte offset not pinned
+conflicts: server-record +6 open-time wire packing (capture-unverified); PIN keypad runtime seed/permutation (debugger-pending — clock-seeded shuffle, mechanism confirmed); account/save flag gating entry into login sub-state 31 (debugger-pending); GUCanvas3D render-target wiring untraced; in-game GUButton caption font-slot byte offset not pinned; skill-hotbar overlay-rect VALUES data-driven (debugger-pending — shape confirmed); real selected-target name/HP-MP plate not recovered (HUD-II follow-up — slot 135 is UpgradeProcessPanel) — 2026-06-17 Campaign-17 in-game-HUD re-confront (263bd994): inventory bag = ItemPanel 8x5/40-cell grid CODE-CONFIRMED (closes campaign-12 inventory grid), §8.10 GatherSlotPanel role-relabel, §8.8 skill-pipe = 4 panels (not 50), §8.6.1 reconciled to uitex.txt VFS manifest, §8.7 StatusPanel cosmetic drifts corrected
 ---
 
 # UI System — Widget Toolkit, Screen Layouts, and Scene State Machine
@@ -754,14 +754,16 @@ The two intro-banner pager buttons additionally carry their own EULA/intro banne
 > roughly **124 widget objects** (the full enumeration of the select-window chrome builder), not the
 > "~77" figure an earlier version of this spec cited. The extra mass over the ~77 front-of-screen
 > roles is the per-cell stat-grid icon strips and the appearance stepper grid. The load-bearing
-> structural rectangles (tabs, slot plates, stat grid, Create/Delete/Enter, the create-form, the
-> confirm modals) are tabulated below; the per-cell decorative strips are summarised, not row-listed.
+> structural rectangles (tabs, the single shared left character-info panel, stat grid,
+> Create/Delete/Enter, the create-form, the confirm modals) are tabulated below; the per-cell
+> decorative strips are summarised, not row-listed. **There is no set of five distinct 2D "slot
+> plate" widgets over the 3D preview row** — see the slot-occupancy note below.
 
 **Atlas assignment (CODE-CONFIRMED — the chrome composites from several shared atlases):**
 
 | Atlas DDS | Used for |
 |---|---|
-| `data/ui/loginwindow.dds` | **Primary** chrome: backgrounds, slot-row plates, stat-grid icons, appearance ± steppers, tab buttons, Create/Delete |
+| `data/ui/loginwindow.dds` | **Primary** chrome: backgrounds, the shared left character-info panel, stat-grid icons, appearance ± steppers, tab buttons, Create/Delete/Enter |
 | `data/ui/mainwindow.dds` | Several slot-row action buttons + create-form widgets (steppers, confirm/cancel, name title) |
 | `data/ui/InventWindow.dds` | Detail / confirm sub-panels (647 × 340 dialog frames) shared with login |
 | `data/ui/CarrierPigeonPerson.dds` | Appearance selector accents; gender/class preview swatches |
@@ -785,24 +787,48 @@ The two intro-banner pager buttons additionally carry their own EULA/intro banne
 | **Per-slot stat-icon grid col 1** | 154 | **191** (base), stride **24** | 24 | 16 | `loginwindow.dds`; HOVER src-X **548** | CODE-CONFIRMED |
 | **Per-slot stat-icon grid col 2** | 178 | 191 (base), stride 24 | 24 | 16 | `loginwindow.dds`; HOVER src-X **572** | CODE-CONFIRMED |
 | Per-slot stat value labels | 51 | 193 (base), stride 24 | 35 | 12 | text-only | CODE-CONFIRMED |
-| **Create button** | 42 | 325 | 59 | 20 | create name-plate atlas; src V=1004 — NORMAL `(0, 1004)` / PRESSED `(59, 1004)` | CODE-CONFIRMED |
-| **Delete button** | 112 | 325 | 59 | 20 | create name-plate atlas; src V=1004 — NORMAL `(118, 1004)` / PRESSED `(177, 1004)` | CODE-CONFIRMED |
-| **Enter/select button** | 112 | 112 | 59 | 20 | create name-plate atlas; src V=1004 — NORMAL `(236, 1004)` / PRESSED `(295, 1004)` | CODE-CONFIRMED |
+| **Create button** (action 4) | 130 | 112 | 59 | 20 | create name-plate atlas; src V=1004 — NORMAL `(0, 1004)` / PRESSED `(59, 1004)` | CODE-CONFIRMED |
+| **Delete button** (action 5) | 42 | 112 | 59 | 20 | create name-plate atlas; src V=1004 — NORMAL `(118, 1004)` / PRESSED `(177, 1004)` | CODE-CONFIRMED |
+| **Enter/select button** (action 6) | 112 | 112 | 59 | 20 | create name-plate atlas; src V=1004 — NORMAL `(236, 1004)` / PRESSED `(295, 1004)` | CODE-CONFIRMED |
+| **Create-form Confirm** (action 35) | 42 | 325 | 59 | 20 | create-plate row art (V=1004) — NORMAL `(354, 1004)` / HOVER src-X `413` / PRESSED `(354, 1004)`; this is the create-name-modal Confirm, **not** the Create button | CODE-CONFIRMED |
+| **Create-form Cancel** (action 36) | 112 | 325 | 59 | 20 | create-plate row art (V=1004) — NORMAL `(472, 1004)` / HOVER src-X `531` / PRESSED `(472, 1004)`; this is the create-name-modal Cancel, **not** the Delete button | CODE-CONFIRMED |
 | Confirm modal (Yes/No) | 55 / 174 | 136 | 113 | 40 | `InventWindow.dds` | CODE-CONFIRMED |
 | Name-entry textbox | 60 | 80 | 274 | 18 | `GUTextbox`; CP949 character name | CODE-CONFIRMED |
 | Name-entry OK | 55 | — | 113 | 40 | `InventWindow.dds` | CODE-CONFIRMED |
 | Name-entry Cancel | 174 | — | 113 | 40 | `InventWindow.dds` | CODE-CONFIRMED |
-| Corner close | 610 | 23 | 23 | 23 | `blacksheet.dds`; dst is LITERAL, src origin is register-fed (runtime) — **debugger-pending** | CODE-CONFIRMED (dst) / debugger-pending (src) |
+| Corner close | 610 | 23 | 23 | 23 | `blacksheet.dds`; the select-window builder contains **no literal for this rect** — most likely base `GUWindow` title-bar chrome, so dst is base-window-chrome / debugger-pending and src origin is register-fed / debugger-pending. The close **action** is confirmed (close message type 13 / id 10001 → quit → GameState 6 sub-state 8). | base-window-chrome / debugger-pending (dst + src); close action CODE-CONFIRMED |
 | Detail / confirm dialog frames | 318 | 190 | 647 | 340 | `InventWindow.dds` (×5 near-identical panels) | CODE-CONFIRMED |
 
+**Slot occupancy and the shared left panel (CODE-CONFIRMED).** The character-select screen does
+**not** build five distinct 2D "plate" widgets, one per roster slot. Slot selection is the 3D
+camera-unproject ray-pick (see the ray-pick note below). The per-slot 2D chrome is a **single shared
+left character-info panel** (the stat-icon grid plus its value labels) that reflects the
+**currently-selected** slot and is **refreshed on selection** — not five parallel plates.
+
+At build head the routine copies the per-slot character list out of the network-handler's character
+list into the window's own slot array. Each per-slot character record carries a **class/state word at
+record offset `+0x66`** that is the **occupancy marker: a value of 0 means an empty slot** (the
+slot-scan stops at the first slot whose `+0x66` word is 0). When non-zero, that word's class value
+(1…4) selects the per-class starter-gear / preview fill. The slot-count caption is formatted via
+**msg.xdb id 2209**.
+
 **Stat grid (CODE-CONFIRMED).** The left-column character-info stat grid is a fixed block of
-icon strips + value labels populated from table lookups: stat-icon buttons in two columns (col 1
-x = 154, **HOVER src-X 548**; col 2 x = 178, **HOVER src-X 572**) at base-Y **191** stride **24**,
-with paired value labels at x = 51 base-Y **193** stride **24**. An appearance-string loader fills
-the ~18 label cells per appearance branch. The per-cell NORMAL/PRESSED glyph `(srcX, srcY)` for the
-18-cell grid is **chosen at runtime from a stat table** and is **not a build-time literal** — those
-per-cell origins are **debugger-pending** (only the two column X positions and their HOVER src-X are
-build-time literals).
+**10 three-state icon-button cells (2 columns × 5 rows)** plus paired value labels. The columns sit
+at x = 154 (col 1) and x = 178 (col 2), base-Y **191**, stride **24**, each cell **24 × 16**; the
+value labels are at x = 51, base-Y **193**, stride **24**, **35 × 12** (numeric, integer-to-string).
+
+Every cell's **NORMAL and PRESSED source origin is a build-time literal, identical within a column**:
+col 1 NORMAL/PRESSED `(500, 770)`, col 2 NORMAL/PRESSED `(524, 770)`. Only the **HOVER src-X
+distinguishes the columns** — col 1 HOVER src-X **548**, col 2 HOVER src-X **572** (both at src-Y
+770). There is **no per-cell or per-stat source origin and no stat-table read** feeding the grid-button
+glyphs; the per-stat variation lives in the numeric value labels and the appearance-string fill, not
+in the button artwork. So **none of the stat-grid glyph origins are debugger-pending** — they all
+resolve statically. (The earlier "18-cell / per-cell glyph chosen at runtime from a stat table /
+debugger-pending" reading was a spec error; this corrects it.)
+
+The 10 grid cells **double as the create-form point-buy ± buttons** (action ids 25–34): the five
+left-column cells and five right-column cells are bound to the per-stat increment/decrement controls
+(§8.2 action-id map, §item below).
 
 **Create-form layout (CODE-CONFIRMED).** The new-character create sub-form is a self-contained
 panel tree shown/hidden as a unit by the scene-reset path:
@@ -829,22 +855,24 @@ panel tree shown/hidden as a unit by the scene-reset path:
 | 1 | Server tab | — |
 | 2 | Channel tab | — |
 | 3 | Back tab | — |
-| **4** | **Create button** | older notes showed 413 — see correction below: 413 is a create-form stepper HOVER src-X, not this id |
-| **5** | **Delete button** | older notes showed 531 — see correction below: 531 is a create-form stepper HOVER src-X, not this id |
+| **4** | **Create button** | dst `(130, 112, 59, 20)`; older notes showed 413 — see correction below: 413 is the HOVER src-X of the create-form Confirm widget (action 35), not this id |
+| **5** | **Delete button** | dst `(42, 112, 59, 20)`; older notes showed 531 — see correction below: 531 is the HOVER src-X of the create-form Cancel widget (action 36), not this id |
 | **6** | **Enter/select button** | — |
 | 10 / 11 / 12 / 13 | Create-form class buttons (4) | class selector 0..3 left-to-right |
 | 21 / 22 | Face increment ± | 2D portrait only; no 3D rebuild |
 | 25…34 | Create stat point-buy ± | per-stat increment/decrement with class floor |
-| 35 / 36 | Create-form Confirm / Cancel | Confirm validates + sends; Cancel returns |
+| 35 / 36 | Create-form Confirm / Cancel | dst `(42, 325)` / `(112, 325)` on create-plate row art (V=1004); HOVER src-X 413 / 531. Confirm validates + sends; Cancel returns via the scene-reset path. These two widgets carry ± stepper artwork but functionally **are** Confirm/Cancel. |
 | 54 / 55, 59 / 60 | Name-entry OK / Cancel pairs | — |
 | 61…74 | Per-slot / stat-grid actions | selection and stat-grid interactive buttons |
 
 > **Correction (settled, CODE-CONFIRMED).** The values **413 and 531** that appeared in earlier
-> versions of this spec are **not action ids at all** — they are the **HOVER src-X of the create-form
-> stat / appearance ± stepper buttons** (the increment/decrement controls on the new-character create
-> form), read from the stepper builder's literal arguments. The Create/Delete/Enter action ids are
-> **Create = 4, Delete = 5, Enter = 6**. Do not treat 413 / 531 as ids and do not bind them to the
-> Create or Delete buttons; they belong to the stepper-control atlas sub-rects.
+> versions of this spec are **not action ids at all** — they are the **HOVER src-X of the two
+> create-form Confirm / Cancel widgets** (action ids **35** and **36**), at dst `(42, 325)` and
+> `(112, 325)` on the create-plate row art (V=1004). Those two widgets carry ± stepper artwork but
+> functionally are the create-name-modal Confirm and Cancel buttons. The real roster action row is the
+> **Create = 4 / Delete = 5 / Enter = 6** buttons at dst-Y **112**. Do not treat 413 / 531 as ids, and
+> do not bind the `(42, 325)` / `(112, 325)` widgets to the Create or Delete buttons — they are
+> Confirm (35) and Cancel (36).
 
 **Slot hit-test is a 3D ray-pick — NOT 2D rects (CODE-CONFIRMED).** Selecting one of the five
 character preview actors is a **3D camera-unproject ray test against a per-slot axis-aligned
@@ -931,11 +959,12 @@ literal for those coordinates. The recovered generator rules:
 | Widget group | Rule |
 |---|---|
 | Login server name-strip / pager set | Base (13,66,47,18); NORMAL src (596,985), HOVER (643,985); X advances **+47** per entry (`x = 13 + 47·i`); each registers action **115 + i** (see §8.4.1 for the confirmed live range) |
-| Char-select stat-icon grid | Base-Y **191**, stride **24**, 5 rows; col 1 at x=154, col 2 at x=178 |
+| Char-select stat-icon grid | **10 cells (2 cols × 5 rows)**, base-Y **191**, stride **24**; col 1 x=154, col 2 x=178; each cell 24×16. NORMAL/PRESSED src are **build-time literals identical within a column** — col 1 `(500, 770)`, col 2 `(524, 770)`; only HOVER src-X differs (col 1 **548**, col 2 **572**, src-Y 770). No per-cell/per-stat src origin, no stat-table read — all static. These cells double as the point-buy ± buttons (action ids 25–34). |
 | Char-select stat value labels | Base-Y **193**, stride **24**, 5 rows; x=51, w=35, h=12 |
 | Char-select class buttons | NORMAL src-Y **1005**; NORMAL src-X **590/635/680/725**; HOVER src-X **815/860/905** (buttons 1–3); dst-X right-anchored COMPUTED, stride **48** |
 | Char-select appearance selector | Base y=30, w=45, h=19; NORMAL src-X base **590** stepping **+45** (590/635/680/725); HOVER base **815** (+45) |
-| Char-select Create/Delete/Enter | src V=**1004** on the create name-plate atlas: Create N(0,1004)/P(59,1004); Delete N(118,1004)/P(177,1004); Enter N(236,1004)/P(295,1004) |
+| Char-select Create/Delete/Enter | roster action row, **all at dst-Y 112**, w 59 × h 20: Create (action 4) dst-X 130, Delete (action 5) dst-X 42, Enter (action 6) dst-X 112. src V=**1004** on the create name-plate atlas: Create N(0,1004)/P(59,1004); Delete N(118,1004)/P(177,1004); Enter N(236,1004)/P(295,1004) |
+| Char-select create-form Confirm/Cancel | two widgets at dst-Y **325**, w 59 × h 20: Confirm (action 35) dst-X 42 — N/P(354,1004), HOVER src-X 413; Cancel (action 36) dst-X 112 — N/P(472,1004), HOVER src-X 531. Same create-plate row art (V=1004); these are **not** Create/Delete and **not** a separate ± stepper action family |
 
 #### 8.4.1 Login server-strip / pager range (CODE-CONFIRMED)
 
@@ -1026,15 +1055,44 @@ author owns it); the subset below is the binding used by the windows specified i
 Confidence is CODE-CONFIRMED for the integer-id binding (read directly from the builders);
 the DDS-name resolution is per the committed `ui_manifests.md` manifest.
 
-| `uitex.txt` id | Resolved DDS (`formats/ui_manifests.md`) | In-game windows that bind it (this spec) |
+**Provenance of this table (re-confirmed 2026-06-17, 263bd994).** The integer `uitex.txt` ids each
+builder uses are **CODE-CONFIRMED** (read directly from the in-game builders). The **id→filename
+mapping is asset ground truth** — it is read from the shipped `data/ui/uitex.txt` manifest in the
+VFS (~37 rows), **not** from the client binary. The binary's literal string pool only carries a few
+of these DDS names (e.g. `skillwindow.dds`); the rest are resolved purely by integer id through the
+runtime `uitex.txt` registry. **A filename's absence from the binary string pool is therefore NOT a
+drift** — the manifest is the authority for the name. (This settles a prior apparent conflict over
+`skill_window_1.dds` and `skillpipe_02.dds`: both are absent from the binary string pool but present
+in the manifest at ids 3 and 11, so the spec filenames are correct, manifest-driven values.)
+
+The authoritative id→DDS dimension/format table lives in `formats/ui_manifests.md`. The subset below
+is the binding used by the windows specified in this section (`*` = manifest-sourced filename;
+in-game id-usage is CODE-CONFIRMED):
+
+| `uitex.txt` id | Resolved DDS (manifest ground truth) | In-game windows that bind it (this spec) |
 |---|---|---|
-| 1 | `data/ui/mainwindow.dds` | Options Character sub-panel chrome + checkbox glyphs (§8.9); Skill-window close button (§8.8); Status-window apply button (§8.7) |
-| 2 | `data/ui/inventwindow.dds` | Status-window base panel + apply button (§8.7); inventory slot grid (per-instance, §8.10); inventory sort menu (§8.10); Skill-window apply button (§8.8) |
-| 3 | `data/ui/skill_window_1.dds` | Skill-window main backdrop + class/tab buttons (§8.8) |
-| 4 | `data/ui/tradekeepwindow.dds` | Status-window stat-row sprites + stat +/- buttons (§8.7) |
-| 9 | `data/ui/messagewindow.dds` | Options 4-tab container tab buttons + Options Apply/Close buttons (§8.9) |
-| 11 | `data/ui/skillpipe_02.dds` | Skill-window hotbar / skill-pipe assignment rows (§8.8) |
-| 14 | (live 3D-canvas render texture) | Skill-window `GUCanvas3D` preview rects (§8.8) |
+| 1 | `data/ui/mainwindow.dds`* | Options Character sub-panel chrome + checkbox glyphs (§8.9); Skill/Status close buttons (§8.8/§8.7); front-end atlas (NOT in-game status chrome) |
+| 2 | `data/ui/inventwindow.dds`* | Status-window base panel + **apply** button (§8.7); inventory cells/body (per-instance, §8.10); inventory sort menu (§8.10); Skill-window apply button (§8.8) |
+| 3 | `data/ui/skill_window_1.dds`* | Skill-window main backdrop + class/tab/help/footer (§8.8); weapon-enhancement (UpgradeProcessPanel) backdrop |
+| 4 | `data/ui/tradekeepwindow.dds`* | Status-window stat-row sprites + stat +/- glyphs (§8.7) |
+| 8 | `data/ui/skillwindow.dds`* | Skill-window texture-rebind path (the one skill DDS name carried as a **literal in the binary**) |
+| 9 | `data/ui/messagewindow.dds`* | Options 4-tab container tab buttons + Options Apply/Close buttons (§8.9) |
+| 10 | `data/ui/skillpipe.dds`* | skill-pipe atlas variant (manifest sibling of id 11) |
+| 11 | `data/ui/skillpipe_02.dds`* | Skill-window hotbar / skill-pipe rows — **4 panels** (§8.8) |
+| 14 | `data/ui/blacksheet.dds`* (dim/overlay sprites) **and** live 3D-canvas **render target** (preview) — see note | Skill-window `GUCanvas3D` preview rects (§8.8); inventory count/quantity overlay (§8.10) |
+| 26 | `data/ui/skillicon/stateicon.dds`* | buff-bar / state-icon atlas (shared 30-slot icon sheet) |
+| 41 | `data/ui/map_userpoint.tga`* | minimap player-marker glyph (manifest-listed; the binary draws the marker as a glyph-by-id, it does **not** bind this path as a literal) |
+| 69 | `data/ui/yellow.dds`* | inventory cell state glyph (§8.10) |
+| 71 | `data/ui/green.dds`* | inventory cell rarity-frame glyph (§8.10) |
+| 78 | `data/ui/edge.dds`* | inventory cell highlight glyph (§8.10) |
+
+> **id-14 dual meaning (not a contradiction).** The manifest binds id **14 = `data/ui/blacksheet.dds`**
+> — the literal id-14 lookup that builders use for dim/overlay sprites resolves to that file. The
+> "live 3D-canvas" the skill/inventory previews draw into is a **runtime render target**, a separate
+> in-memory surface, not the manifest's id-14 file. So id 14 has two distinct meanings: the manifest
+> `blacksheet.dds` overlay sprite **and** the runtime preview render-target. An implementer should
+> treat the preview as a render-to-texture viewport, and bind `blacksheet.dds` for the literal
+> id-14 overlay sprites.
 
 > To resolve any in-game source rect below: read its `(srcX, srcY, w, h)` and its `uitex` id from
 > §8.7–§8.10, then look the id up in this table for the DDS. The DDS *dimensions* (mip-0 surface
@@ -1056,8 +1114,10 @@ slot 14).
 (stat-row sprites and the +/- glyphs), **not** from `characwindow.dds`. The builder does not bind
 `characwindow.dds` at all. (An earlier asset hypothesis attributed this window's chrome to
 `characwindow.dds`; that file is not bound here — it is plausibly an unused/legacy asset or belongs
-to a different other-player info popup. See Open item 14.) The apply button alone is on
-`mainwindow.dds` (uitex 1). The `five.tga` star strip is loaded standalone, not via `uitex.txt`.
+to a different other-player info popup. See Open item 14.) The **Apply** button is on
+`inventwindow.dds` (uitex 2); the **Close** button alone is on `mainwindow.dds` (uitex 1)
+(re-confirmed 2026-06-17 — an earlier summary line swapped these two; the widget table below was
+already correct). The `five.tga` star strip is loaded standalone, not via `uitex.txt`.
 
 **Decorative base sprites (no action):**
 
@@ -1070,11 +1130,13 @@ to a different other-player info popup. See Open item 14.) The apply button alon
 
 **Stat-row value labels** are text-only (atlas id 0; the value text is filled at runtime from
 network character data). They sit on the 318-wide panel at fixed positions in two columns
-(left column x ≈ 91–94, right column x ≈ 247–249), most 12 × 12, stepping down the panel; the lower
-description rows are wider (e.g. 226 × 12 at y 528 / 555). One label carries a red colour override
-(`0xFFFF0000`). A looped block of four description rows starts at (74, 555) with a **+27** y-stride.
-Exact per-label positions are recoverable from the builder; they are not load-bearing for behaviour
-and are summarised rather than tabulated row-by-row here.
+(left column x ≈ 91–94, right column x ≈ 247–249), most 12 × 12, stepping down the panel. Two
+**standalone** description rows are wider (226 × 12, at y 528 and y 555). A separate **looped** block
+of four description rows starts at (74, 555) with a **+27** y-stride (y = 555 / 582 / 609 / 636) and
+is **250** wide (not 226 — the 226-wide rows are the two standalone rows above). One label — the
+(94, 491) left-column row specifically — carries a red colour override (`0xFFFF0000`). Exact
+per-label positions are recoverable from the builder; they are not load-bearing for behaviour and
+are summarised rather than tabulated row-by-row here.
 
 **Stat +/- buttons and action ids (the load-bearing interactive table)** — all 7-state buttons;
 the +/- pairs are on `tradekeepwindow.dds` (uitex 4) at 9 × 9, the apply button is on
@@ -1099,13 +1161,15 @@ the +/- pairs are on `tradekeepwindow.dds` (uitex 4) at 9 × 9, the apply button
 The +/- design is one increment glyph row (atlas y 702) and one decrement glyph row (atlas y 711)
 on `tradekeepwindow.dds`, reused per stat line. The two action-id runs are therefore: **300–304**
 = the five increment buttons, **305–309** = the five decrement buttons, **310** = big Apply,
-**311** = the stat-icon/avatar button, **312** = Close. (Eleven stat +/- buttons total across the
-two runs, plus Apply and Close.)
+**311** = the stat-icon/avatar button, **312** = Close. (The builder constructs **ten** stat +/-
+buttons total — five increment + five decrement — plus the Apply, Close, and stat-icon buttons. An
+earlier prose count of "eleven" was an off-by-one; the table above is authoritative at ten +/- rows.)
 
 **Title:** the `StatusPanel` header is set from the shared empty-init scratch string and then filled
 at runtime from network character data (player name + class). There is **no fixed `msg.xdb` title
 id** for this window. The static stat *names* (as opposed to the title) come from a different draw
-path and use `msg.xdb` ids in the 60005–60022 range.
+path and use `msg.xdb` ids in the **60001–60022** range (the full contiguous stat-name id table; an
+earlier note quoted only the 60005–60022 sub-range).
 
 ### 8.8 In-game Skill window — `SkillPanel` builder (CODE-CONFIRMED)
 
@@ -1151,9 +1215,11 @@ uitex 3), action ids **802–810**:
 
 **Other skill widgets:** nine looped sub-list containers (dst 0, 92, 964, 563 src 0, 0) host the
 scrollable skill-list rows; two `GUCanvas3D` preview rects (dst 0, 0, 220, 200, uitex 14) render
-the live skill-effect / character previews; a 50-step loop (dst x = 163, y stepping **+125** from
-50, 242 × 65, on `skillpipe_02.dds` uitex 11 src 0, 358) builds the skill-pipe / hotbar
-assignment rows.
+the live skill-effect / character previews; the skill-pipe / hotbar assignment rows are **4 panels**
+(re-confirmed 2026-06-17): a loop builds a 242 × 65 panel at x = 163, src (0, 358), on
+`skillpipe_02.dds` (uitex 11), with y starting at **50** and stepping **+125** (y = 50, 175, 300,
+425 → exactly 4 panels). An earlier version called this a "50-step loop"; the **50** was the loop's
+starting Y coordinate, not the iteration count — there are **4** skill-pipe panels, not 50.
 
 **Title:** the skill window's title label caption is **`msg.xdb` id 3027** (CODE-CONFIRMED id; the
 CP949 caption text itself is VFS-only and is not transcribed here). Adjacent records 3028 and 3029
@@ -1242,32 +1308,80 @@ broader 8001–8047 options-string bank).
 > (uitex 9)**; its checkbox glyphs, value indicators, and header strips are sub-regions of
 > **`mainwindow.dds` (uitex 1)**.
 
-### 8.10 In-game Inventory window — slot grid + sort menu (CODE-CONFIRMED)
+### 8.10 In-game Inventory bag (`ItemPanel`), gather/craft panel (`GatherSlotPanel`), sort menu (CODE-CONFIRMED)
 
-The inventory ("bag") window is built by two cooperating builders: the slot-grid panel
-(`GatherSlotPanel`) and a small sort-menu panel (`InvenSortPanel`).
+> **Role correction (2026-06-17, 263bd994).** The in-game item-storage **bag** is built by the
+> **`ItemPanel`** family — an 8 × 5 = 40-cell item grid (§8.10.1 below). **`GatherSlotPanel`** is a
+> **different** window: the **gathering / crafting progress** panel (three craft rows with animated
+> progress bars; on completion it plays UI sound 862100101). An earlier version of this section
+> attributed the inventory to `GatherSlotPanel` — that widget table (slot rows 502–504, category row
+> 505–507, close 509, minimise 501, sort 508, the (296, Y) 4-row icon table) is **real and all
+> CODE-CONFIRMED**, but it is the **GatherSlotPanel** (gather/craft) layout, **not** the item bag. It
+> is re-labelled accordingly in §8.10.2.
 
-**Slot-grid panel.** This builder binds **texture id 0** for every widget — the slot/icon atlas is
-assigned to the panel *per instance* after the build runs (the slot sprites read their frame origins
-from panel fields pre-seeded to (296, 0), (296, 64), (296, 128), (296, 192) — a 4-row icon table,
-plausibly resolving to `inventwindow.dds` at runtime; the exact runtime bind site was not traced —
-Open item 16). Recovered geometry:
+#### 8.10.1 In-game inventory bag — `ItemPanel` (CODE-CONFIRMED)
+
+The item-storage bag (the `[I]` window) is built by the **`ItemPanel`** family. Its cell grid stride
+and count are **byte-confirmed** (recovered three independent ways: the main grid builder's nested
+8 × 5 loop; a coordinate-table seeder with the same 8 × 5 / +38 lattice; and the 318 × 623 backdrop
+body). **This closes the long-standing campaign-12 "PLAUSIBLE grid" / untraced-bind open item
+(Open item 16) — now CODE-CONFIRMED.**
+
+**Main item grid:**
+
+- **8 columns × 5 rows = 40 cells.** Each cell is a **38 × 38 px** square button.
+- **Cell pitch is +38 px on both axes** — cells are flush, no gutter.
+- **Cell action-ids run 0..39** (a second 8 × 5 loop parents the 40 cells using the running flat
+  index as the action id).
+- Each cell is **multi-layered**, all sharing the cell's (x, y): a **38 × 38** icon button, a
+  **16 × 21** sub-image, **two 38 × 11** labels (count / durability), **two 38 × 11** overlay images,
+  and a **36 × 36** highlight image.
+- The grid sits inside a **318 × 623** backdrop body that frames the 8 × 38 = 304-wide /
+  5 × 38 = 190-tall cell field plus the header.
+
+**Equip / quick sub-grid:** a separate builder lays **20 cells** (38 × 38 buttons), parented with
+action ids **50..69**.
+
+**Equipment paperdoll:** a **hand-placed per-slot** block of equip-slot positions — explicit
+per-slot (x, y) coordinates, **not** a uniform grid.
+
+**Per-instance atlas bind (now traced):** the window's own atlas, `data/ui/InventWindow.dds`, is
+registered into the window's per-window texture list (the `GUTextureList` holder at window offset
++0x220) at the top of the in-game HUD panel builder. The cells then resolve their texture handles by
+integer `uitex.txt` id — **2** (inventory body + cells), **14** (count/quantity overlay; the
+render-target/`blacksheet` family, see §8.6.1), and **69 / 71 / 78** (cell state / rarity-frame /
+highlight glyphs). See §8.6.1 for the id→DDS resolution.
+
+**Hotkey toggle:** the `[I]` hotkey toggles the bag and the skill panel **together** — it toggles the
+HUD master service slots **158** (inventory) and **159** (skill panel) and plays UI sound **862020102**.
+
+#### 8.10.2 Gather / craft progress panel — `GatherSlotPanel` (CODE-CONFIRMED)
+
+The gathering/crafting progress window (three craft slot-rows with animated progress bars; on
+completion it plays UI sound **862100101**). This is the layout previously mis-attributed to the
+inventory bag. This builder binds **texture id 0** for every widget — the slot/icon atlas is assigned
+to the panel *per instance* after the build runs (the slot sprites read their frame origins from
+panel fields pre-seeded to (296, 0), (296, 64), (296, 128), (296, 192) — a 4-row icon table,
+resolving to the per-instance atlas at runtime). Recovered geometry:
 
 - Three slot-row buttons (65 × 64), x stepping **+84** from 32, y = 96, action ids **502, 503, 504**.
 - Full-window base backdrop sprite (0, 0, panelWidth, panelHeight).
 - Header / divider sprites at (21, 174, 253, 34) src (0, 372) and (33, 189, 239, 8) src (0, 407).
 - Close button at (panelW − 13, 2, 11, 12) src (410, 0) / (399, 0), action **509**; minimise button
-  at (panelW − 26, 2, 11, 12) src (388, 0), action **501**.
+  at (panelW − 26, 2, 11, 12) src (388, 0) / (377, 0) pressed, action **501**.
 - Sort/menu button at (114, 25, 66, 19) src (0, 416), action **508**.
-- A looped row of slot-category buttons (80 × 31, x stepping **+84**, y = 207, action ids 505+) with
-  paired 40 × 23 labels, and two footer labels (104 × 21) at y = 344.
+- A looped row of **3** slot-category buttons (80 × 31, x stepping **+84** from 26 → x = 26 / 110 /
+  194, y = 207, action ids **505 / 506 / 507**) with paired 40 × 23 labels, and two footer labels
+  (104 × 21) at y = 344 (x = 37 and x = 181).
 
-**Sort menu panel** (`InvenSortPanel`) binds **`inventwindow.dds` (uitex 2)** and uses caption
+#### 8.10.3 Inventory sort menu — `InvenSortPanel` (CODE-CONFIRMED)
+
+The sort menu panel (`InvenSortPanel`) binds **`inventwindow.dds` (uitex 2)** and uses caption
 `msg.xdb` ids **37101** (sort-inventory / "행낭 정리"), **37107**, and **37108** (sort options).
 
-**Title:** the inventory window builder makes **no `msg.xdb` title call**. Its window title is
-therefore **baked into the `inventwindow.dds` chrome art (the panel edge region)**, not fetched as a
-caption (CODE-CONFIRMED absence of a title lookup; the baked-into-art conclusion is PLAUSIBLE). The
+**Title:** the bag/gather builders make **no `msg.xdb` title call**. The window title is therefore
+**baked into the `inventwindow.dds` chrome art (the panel edge region)**, not fetched as a caption
+(CODE-CONFIRMED absence of a title lookup; the baked-into-art conclusion is PLAUSIBLE). The
 associated label strings are the sort-menu captions (**msg 37101 / 37107 / 37108**) and the hotkey
 toggle label (**msg 25017**, "show inventory window"); none of these is the window title itself.
 
@@ -1276,8 +1390,8 @@ toggle label (**msg 25017**, "show inventory window"); none of these is the wind
 | Window | Title source | Grade |
 |---|---|---|
 | Skill window (`SkillPanel`) | `msg.xdb` **3027** (title label at 133, 618, 400 × 20) | CODE-CONFIRMED (id); CP949 text VFS-only |
-| Inventory window (`GatherSlotPanel`) | **no `msg.xdb` title** — baked into `inventwindow.dds` edge art; sort labels msg 37101 / 37107 / 37108, toggle msg 25017 | CODE-CONFIRMED (absence) / PLAUSIBLE (baked-in-art) |
-| Character-info / Stat window (`StatusPanel`) | runtime player name (empty-init scratch buffer); static stat *names* msg 60005–60022 | CODE-CONFIRMED |
+| Inventory bag (`ItemPanel`) | **no `msg.xdb` title** — baked into `inventwindow.dds` edge art; sort labels msg 37101 / 37107 / 37108, toggle msg 25017 | CODE-CONFIRMED (absence) / PLAUSIBLE (baked-in-art) |
+| Character-info / Stat window (`StatusPanel`) | runtime player name (empty-init scratch buffer); static stat *names* msg 60001–60022 | CODE-CONFIRMED |
 | Options window (`OptionPanel`) | tabs are sprite-only (no title caption); Character-tab option labels msg 8009–8039 | CODE-CONFIRMED |
 
 > All `msg.xdb` ids above are CODE-CONFIRMED (read from the builders); the in-game window protocol
@@ -1732,9 +1846,9 @@ the +6 open-time field is static-only and CAPTURE-UNVERIFIED.
 11. **`ID3DXSprite::SetState` flag values.** `SetState(48)` vs `SetState(16)` — the precise
     `D3DXSPRITE_*` flag-bit semantics were not decoded; both clearly enable alpha blending.
 
-12. **Inventory in-game window full layout.** The full in-game inventory builder's individual grid
-    slot coordinates are not recovered; only the chrome (shared `InventWindow.dds` 340 × 190 panel)
-    is confirmed.
+12. **Inventory in-game window full layout: RESOLVED.** The in-game inventory bag is the `ItemPanel`
+    8 × 5 = 40-cell grid (38 × 38 cells, +38 px pitch, action ids 0..39), the 20-cell equip/quick
+    sub-grid (action ids 50..69), and a hand-placed equipment paperdoll — all CODE-CONFIRMED in §8.10.1.
 
 13. **DISABLED frame runtime write.** No ctor passes a distinct disabled sprite origin (DISABLED
     always equals NORMAL). If any window code writes a distinct origin to +0xE0/+0xE4 at runtime
@@ -1751,10 +1865,12 @@ the +6 open-time field is static-only and CAPTURE-UNVERIFIED.
     ids are in the same 8xxx bank. Two of the Character-tab caption labels were register-fed and not
     reduced to literals.
 
-16. **Inventory slot-grid runtime atlas.** The inventory slot grid (§8.10) binds texture id 0 at
-    build time; the slot/icon atlas (and its 4-row frame table seeded to origins (296, 0) / (296, 64)
-    / (296, 128) / (296, 192)) is assigned to the panel per-instance after build. The exact runtime
-    bind site and DDS (PLAUSIBLE `inventwindow.dds`) were not traced.
+16. **Inventory bag runtime atlas: RESOLVED (2026-06-17, CODE-CONFIRMED).** The bag is the
+    `ItemPanel` grid (§8.10.1), and its per-instance atlas bind site is now traced: the window's
+    `data/ui/InventWindow.dds` atlas is registered into the per-window texture list at the top of the
+    in-game HUD panel builder, and the cells resolve handles by `uitex.txt` id 2 / 14 / 69 / 71 / 78.
+    (The earlier texture-id-0 / untraced-runtime-bind note referred to the `GatherSlotPanel` gather/
+    craft panel of §8.10.2, whose slot sprites still resolve their per-instance atlas at runtime.)
 
 17. **Server-record +6 open-time wire packing.** The +6 field of the 8-byte server-select record
     (§11.4.1) is used only for the open-time schedule presentation; its exact wire packing is

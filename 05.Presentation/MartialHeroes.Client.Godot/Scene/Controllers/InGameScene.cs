@@ -1,8 +1,11 @@
+using System;
 using Godot;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Debug;
 using MartialHeroes.Client.Godot.HUD;
 using MartialHeroes.Client.Godot.Input;
+using MartialHeroes.Client.Godot.Ui.Assets;
+using MartialHeroes.Client.Godot.Ui.Hud;
 using MartialHeroes.Client.Godot.World;
 using MartialHeroes.Shared.Kernel.Enums;
 
@@ -19,6 +22,7 @@ public sealed partial class InGameScene : StubSceneController
     private ClientContext? _ctx;
     private SceneHost? _host;
     private GameLoop? _worldLoop;
+    private HudMaster? _hudMaster;
 
     /// <inheritdoc/>
     public override EngineSceneState State => EngineSceneState.InGame;
@@ -34,6 +38,35 @@ public sealed partial class InGameScene : StubSceneController
         AddChild(_worldLoop);
         _worldLoop.WorldExitRequested += OnWorldExitRequested;
 
+        // CAMPAIGN 17 — Phase F: additive HudMaster (new Ui/ substrate).
+        // Coexists with old GameHud { Name="HUD" } inside GameLoop; neither deletes the other.
+        // Tier-1 quarantine of old HUD/* is a follow-on campaign task.
+        if (_ctx is not null)
+        {
+            try
+            {
+                // Re-use the shared HudAtlasLibrary and HudTextLibrary already initialised
+                // by ClientContext (they own the uitex.txt + msg.xdb VFS handles).
+                // HudIconLibrary: pass null for assets (degrades to no-icon offline mode)
+                // since the RealClientAssets handle is private to HudAtlasLibrary/ClientContext.
+                // TODO(composition): expose a HudIconLibrary from ClientContext (like HudAtlas/HudText).
+                // spec: Docs/RE/specs/ui_hud_layout.md §0 — HUD-build routine asset pipeline.
+                var icons = new HudIconLibrary(null, _ctx.HudAtlas);
+
+                _hudMaster = new HudMaster { Name = "HudMaster" };
+                AddChild(_hudMaster);
+                _hudMaster.Build(_ctx, _ctx.HudAtlas, icons, _ctx.HudText);
+                _hudMaster.BindHub(_ctx);
+                _hudMaster.Reconfigure();
+                GD.Print("[InGameScene] HudMaster built and bound (CAMPAIGN 17 Phase F additive re-point). " +
+                         "spec: Docs/RE/specs/ui_hud_layout.md §0.");
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[InGameScene] HudMaster build failed (degraded mode): {ex.Message}");
+            }
+        }
+
         GD.Print("[InGameScene] State 5 BuildGameWorld built: charater scene root, five view-platform slots, " +
                  "terrain stream node, real-asset renderer (area from client_dir.cfg; area 2 town by default), " +
                  "NPC/player/camera/HUD wiring. spec: client_runtime.md §7.4/§9.");
@@ -47,6 +80,7 @@ public sealed partial class InGameScene : StubSceneController
         _worldLoop = null;
         _host = null;
         _ctx = null;
+        _hudMaster = null;
     }
 
     private static GameLoop BuildGameWorld()

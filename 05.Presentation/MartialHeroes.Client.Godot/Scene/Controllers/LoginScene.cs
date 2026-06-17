@@ -2,7 +2,8 @@ using Godot;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.Scene;
 using MartialHeroes.Client.Godot.Autoload;
-using MartialHeroes.Client.Godot.Screens;
+using MartialHeroes.Client.Godot.Screens;       // ServerEntry, UiAssetLoader, FrontEndAudio, ScreenHost
+using MartialHeroes.Client.Godot.Ui.Scenes.Login; // LoginWindow, PinSubView, ServerSelectSubView
 using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
@@ -20,10 +21,9 @@ public sealed partial class LoginScene : StubSceneController
     private ClientContext? _ctx;
     private SceneHost? _host;
     private ScreenHost? _screenHost;
-    private UiAssetLoader? _sharedAssets;
     private FrontEndAudio? _audio;
-    private LoginScreen? _login;
-    private ServerSelectScreen? _serverSelect;
+    private LoginWindow? _login;
+    private ServerSelectSubView? _serverSelect;
     private string _account = "";
     private string _password = "";
     private bool _syncingScene;
@@ -38,15 +38,13 @@ public sealed partial class LoginScene : StubSceneController
         _host = host;
         _ctx = GetNodeOrNull<ClientContext>("/root/ClientContext");
 
-        _sharedAssets = UiAssetLoader.Open();
-
         _screenHost = new ScreenHost { Name = "LoginScreenHost" };
         AddChild(_screenHost);
 
         _audio = new FrontEndAudio { Name = "FrontEndAudio" };
         AddChild(_audio);
 
-        _login = BuildLoginScreen();
+        _login = BuildLoginWindow();
         _screenHost.SetScreen(_login);
 
         GD.Print("[LoginScene] State 1 Login built real LoginWindow UI with internal PIN/server-list sub-views. " +
@@ -61,9 +59,6 @@ public sealed partial class LoginScene : StubSceneController
             _login.QuitRequested -= OnQuitRequested;
             _login.LoginFlowCompleted -= OnLoginFlowCompleted;
         }
-
-        _sharedAssets?.Dispose();
-        _sharedAssets = null;
     }
 
     public override void _Process(double delta)
@@ -92,14 +87,20 @@ public sealed partial class LoginScene : StubSceneController
         }
     }
 
-    private LoginScreen BuildLoginScreen()
+    private LoginWindow BuildLoginWindow()
     {
-        var login = new LoginScreen
+        // Resolve the HudAtlasLibrary and HudTextLibrary from the composition root.
+        // Both degrade gracefully when the VFS is offline (null-backed).
+        var atlas = _ctx?.HudAtlas
+                    ?? new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
+        var text  = _ctx?.HudText
+                    ?? new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
+
+        var login = new LoginWindow(atlas, text)
         {
-            Name = "LoginScreen",
-            SharedAssets = _sharedAssets,
-            Audio = _audio,
-            PinFactory = CreateInLoginPin,
+            Name              = "LoginWindow",
+            Audio             = _audio,
+            PinFactory        = CreateInLoginPin,
             ServerSelectFactory = CreateInLoginServerSelect,
         };
 
@@ -109,8 +110,8 @@ public sealed partial class LoginScene : StubSceneController
             login.DevPrefillPw = DevAccountPw();
         }
 
-        login.LoginAccepted += OnLoginAccepted;
-        login.QuitRequested += OnQuitRequested;
+        login.LoginAccepted     += OnLoginAccepted;
+        login.QuitRequested     += OnQuitRequested;
         login.LoginFlowCompleted += OnLoginFlowCompleted;
         return login;
     }
@@ -129,28 +130,35 @@ public sealed partial class LoginScene : StubSceneController
                  "PIN/server sub-states remain inside state 1. spec: login_flow.md §4.2.");
     }
 
-    private PinModal CreateInLoginPin()
+    private PinSubView CreateInLoginPin()
     {
-        var pin = new PinModal
+        var atlas = _ctx?.HudAtlas
+                    ?? new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
+
+        var pin = new PinSubView(atlas)
         {
-            Name = "PinModal",
-            SharedAssets = _sharedAssets,
+            Name = "PinSubView",
             HostInReferenceSpace = true,
         };
 
         if (IsDevOfflineMode())
             pin.DevPrefillPin = DevAccountPin();
 
-        GD.Print("[LoginScene] Created in-login PIN sub-view (sub-states 31/32). spec: frontend_scenes.md §11.3.");
+        GD.Print("[LoginScene] Created in-login PinSubView (sub-states 31/32) on HudAtlasLibrary. " +
+                 "spec: frontend_scenes.md §11.3.");
         return pin;
     }
 
-    private ServerSelectScreen CreateInLoginServerSelect()
+    private ServerSelectSubView CreateInLoginServerSelect()
     {
-        _serverSelect = new ServerSelectScreen
+        var atlas = _ctx?.HudAtlas
+                    ?? new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
+        var text  = _ctx?.HudText
+                    ?? new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
+
+        _serverSelect = new ServerSelectSubView(atlas, text)
         {
-            Name = "ServerSelectScreen",
-            SharedAssets = _sharedAssets,
+            Name = "ServerSelectSubView",
         };
 
         if (IsDevOfflineMode())
@@ -159,7 +167,8 @@ public sealed partial class LoginScene : StubSceneController
             _ = FetchServerListAsync();
 
         GD.Print(
-            "[LoginScene] Created in-login server-list sub-view (sub-states 34..41). spec: frontend_scenes.md §11.4.");
+            "[LoginScene] Created in-login ServerSelectSubView (sub-states 34..41) on HudAtlasLibrary. " +
+            "spec: frontend_scenes.md §11.4.");
         return _serverSelect;
     }
 

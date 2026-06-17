@@ -5,11 +5,16 @@
 > per-opcode text-length-prefix NUL convention; capture/debugger-pending for the absolute on-wire
 > byte-order/endianness of every length prefix, the (5:7) text-body framing, and the channel-code
 > VALUE meanings (which routing/colour a given code drives on the live wire).
-> ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida].
+> ida_reverified: 2026-06-17 · ida_anchor: 263bd994 · evidence: [static-ida].
 > conflicts resolved this pass: (a) the (2:7) text-length prefix EXCLUDES the NUL (the earlier
 > "believed to include NUL" reading was wrong); (b) (3:21) is a genuine length-prefixed channel-chat
 > sender, not merely a "special announce" — the earlier "NOT a chat carrier" framing understated it;
 > (c) the NUL-inclusion of the length prefix is **per-opcode**, not a single global convention.
+> CAMPAIGN 17 Phase F re-confront (263bd994): (d) the 36-byte line record's two trailing fields were
+> TRANSPOSED — corrected to +0x1C = channel code, +0x20 = colour (the append sink writes channel into
+> the next-to-last field and colour into the last); (e) Open Question 6 RESOLVED — the wrapped-line
+> width derives from `CHAT_WINDOW_FONT_SIZE` and the background height from `CHAT_WINDOW_SIZE` +
+> `CHAT_WINDOW_FONT_SIZE`.
 
 Neutral, data-only model of the legacy *Martial Heroes* client's **chat subsystem**: the on-screen
 input panel, the scrollback log panel with per-channel filtering, the channel model that ties every
@@ -71,8 +76,10 @@ explicitly as such and are relative to the named object's base.
 | `(2:7)` text-length prefix EXCLUDES the NUL; `(3:21)`/`(2:83)` INCLUDE it (per-opcode) | CONFIRMED | The `+1` is literally present/absent per builder |
 | `(2:84)` is header-only (no text tail) and 30-second rate-limited | CONFIRMED | No text appender in the builder; 30000 ms cooldown gate |
 | Log = 1000-line ring, 36-byte records, 12 visible lines | CONFIRMED | Buffer sizes + render loop bound |
+| Line record field order: +0x1C channel code, +0x20 colour (ARGB) | CONFIRMED | The append sink writes channel into +0x1C, colour into +0x20 |
 | Per-channel filter checkboxes and colour table | CONFIRMED | Read from BuildScene + render filter |
 | Overhead-bubble fields living ON the Actor struct, 5000 ms life | CONFIRMED | Field-block offsets + expiry stamp |
+| Wrapped-line width from FONT_SIZE; bg height from SIZE+FONT_SIZE | CONFIRMED | Read from the relayout routines (Open Question 6 resolved) |
 | Absolute on-wire byte-order of each length prefix | CAPTURE-PENDING | Static control flow firm; live confirmation not done |
 | S2C `(5:7)` text body framing past the 36-byte header | CONFIRMED (header) · CAPTURE-PENDING (body byte-order) | Header + length-prefixed field reader firm |
 | `channel == 11` special log-insert path | STATIC-HYPOTHESIS | Distinct insertion routine; purpose not recovered |
@@ -307,8 +314,13 @@ The output panel BuildScene assembles the whole window:
   |---|---|---|
   | `CHAT_WINDOW_POS_X`   | `screenW / 2 − 512` | window x |
   | `CHAT_WINDOW_POS_Y`   | `screenH − 324` (clamped on-screen) | window y |
-  | `CHAT_WINDOW_SIZE`    | `1`  | window-size mode |
-  | `CHAT_WINDOW_FONT_SIZE` | `12` | font size |
+  | `CHAT_WINDOW_SIZE`    | `1`  | window-size mode (1–3; drives bg height + visible-cell pitch) |
+  | `CHAT_WINDOW_FONT_SIZE` | `12` | font size (11–13; drives max-chars-per-wrapped-line) |
+
+> The same `448 × 324` window is the in-game HUD chat host frame referenced by
+> `specs/ui_hud_layout.md §1.2`; that spec's bottom anchor (`screenW/2 − 512`, `screenH − 324`) is the
+> `CHAT_WINDOW_POS_X/Y` default above. The chat **input** editbox (Section 2.1, `330 × 20` at panel-local
+> `(5, 4)`) is the separate input-panel class.
 
 ### 6.2 The line record and the ring buffer (CODE-CONFIRMED)
 
@@ -317,12 +329,18 @@ The scrollback is a **1000-line ring buffer** of fixed-stride records. Each reco
 | Offset (record-relative) | Size | Type | Meaning |
 |---|---|---|---|
 | `+0x00` | 28 | CP949 string | line text (small-string-optimised: 16-byte inline buffer + ptr / len / cap) |
-| `+0x1C` | 4  | u32 / ARGB | line colour |
-| `+0x20` | 4  | int | channel code |
+| `+0x1C` | 4  | int | channel code |
+| `+0x20` | 4  | u32 / ARGB | line colour |
 
 Record stride is **36 bytes** (`0x24`). The panel zero-initialises **1000** such records at build
 time in **two parallel arrays** — the raw lines and their word-wrapped form — so the ring length is
 **1000 lines**. A line counter (capped at 1000) and a ring start index track the live window.
+
+> **Field order (re-confirmed, CODE-CONFIRMED).** The record store writes the text first, then the
+> **channel code at `+0x1C`** and the **colour (ARGB) at `+0x20`** — in that order. The append sink
+> passes `(text, channel, colour)` and writes them into the next-to-last and last record words
+> respectively. An earlier draft listed these two fields transposed (`+0x1C` colour, `+0x20`
+> channel); the order above is the corrected, binary-confirmed layout.
 
 ### 6.3 Append sink (CONFIRMED · route) / (STATIC-HYPOTHESIS · special-path purpose)
 
@@ -364,8 +382,15 @@ Each frame the output panel renders a **12-line visible window** over the ring:
   By default the first six filters are **checked (enabled)** and the seventh is **unchecked**.
 - **CP949-aware word-wrap.** The renderer steps the text byte-by-byte with a CP949 lead-byte test
   (high bit set ⇒ 2-byte glyph, else 1 byte) and wraps at a **max-chars-per-line** field; long lines
-  split across multiple visible rows. The max-chars value is read from a panel field whose source
-  derivation (from `CHAT_WINDOW_SIZE` / `CHAT_WINDOW_FONT_SIZE`?) was not traced (Open Question 6).
+  split across multiple visible rows. **Source of the max-chars field (Open Question 6, RESOLVED):**
+  the relayout routines derive the wrapped-line width directly from `CHAT_WINDOW_FONT_SIZE` and the
+  background height from both `CHAT_WINDOW_SIZE` and `CHAT_WINDOW_FONT_SIZE`:
+  - **Font size → chars per wrapped line:** `11 → 85`, `12 → 71`, `13 → 61` characters (a fourth
+    branch maps to `43`). So the default font size `12` yields **71** chars per line.
+  - **Size mode → vertical cell-pitch factor:** mode `0 → 12`, `1 → 10`, `2 → 8`, `3 → 6`. The
+    background height is then `2 × factor × (fontSize − 5) + 11`, and the visible-region height is
+    `227 − that`. So `CHAT_WINDOW_SIZE` selects the pitch factor and `CHAT_WINDOW_FONT_SIZE` both the
+    chars-per-line and (jointly with SIZE) the background height.
 - Each visible line writes its text + colour into a pre-allocated child label and applies a per-line
   "is-name-line" flag.
 
@@ -498,9 +523,10 @@ buffer and then `strlen`-measured — so the body IS length-prefixed in the read
 5. **Chat-macro `"<name>_CHATSHORTCUT"` table and the `/option` / `/msgchk` command grammar** —
    enumerated but not fully decoded; a "chat commands" sub-spec could exhaust them. (The GM-gated
    `/item` / `/killdrop` / `/sysctl` / `/sysicon` commands are now identified — Section 2.2.)
-6. **Max-chars-per-wrapped-line field** — read by the renderer but its source value (derived from
-   `CHAT_WINDOW_SIZE` / `CHAT_WINDOW_FONT_SIZE`?) was not traced. The 12-line visible window and the
-   1000-line ring are firm.
+6. **Max-chars-per-wrapped-line field (RESOLVED).** The wrapped-line width is derived from
+   `CHAT_WINDOW_FONT_SIZE` (`11 → 85`, `12 → 71`, `13 → 61` chars) and the background height from
+   `CHAT_WINDOW_SIZE` + `CHAT_WINDOW_FONT_SIZE` (Section 6.4). The 12-line visible window and the
+   1000-line ring are firm. No residual.
 7. **Inbound whisper routing** (channel `6` / `7` in the `(5:7)` handler) — the whisper-display /
    reply-target wiring was not decompiled in depth.
 8. **`(2:84)` and `(2:21)` purpose** — `(2:84)` is a confirmed header-only, 30 s rate-limited message
@@ -516,6 +542,8 @@ buffer and then `strlen`-measured — so the body IS length-prefixed in the read
 - `Docs/RE/specs/social.md` — the wider social wire protocol; catalogues the dispatcher-driven chat
   family `(2:82)` (28-byte context variant) / `(2:83)` (24-byte contextual chat) / `(2:84)` (19-byte
   header-only, 30 s rate-limited) / `(3:21)` (56-byte channel chat, selector `+4`) (Sections 2.1, 4).
+- `Docs/RE/specs/ui_hud_layout.md §1.2` — the in-game HUD chat host frame (`448 × 324`) + input box
+  (`330 × 20` at `(5, 4)`) placement, anchored at the `CHAT_WINDOW_POS_X/Y` defaults.
 - `Docs/RE/opcodes.md` — authoritative opcode catalogue and frame model.
 
 > **Implementation guidance (presentation).** Chat window = `448 × 324`, **12** visible lines over a

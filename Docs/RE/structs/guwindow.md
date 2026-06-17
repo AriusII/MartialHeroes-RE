@@ -3,7 +3,7 @@ verification: confirmed
 ida_reverified: 2026-06-16
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: exact total byte-end of MainWindow (1464B) and LoginWindow (1368B) objects not re-measured this lane (capture/debugger-pending)
+conflicts: exact total byte-end of MainWindow (1464B) not re-measured this lane (capture/debugger-pending). LoginWindow size now CODE-CONFIRMED at 0x558 = 1368 bytes (scene-state-1 Login allocation).
 ---
 
 # GUWindow multiple-inheritance layout (clean-room spec)
@@ -92,20 +92,23 @@ sub-object +0x20/+0x24, i.e. object +0xDC/+0xE0). The HUD master window is const
 master window identifies itself among the five window instances. Each derived window passes its own
 name to this same ctor (e.g. the login base passes **"Loginer"** with the same 1000/28158 pair).
 
-### 2.1 Two distinct substate fields (do not conflate)
+### 2.1 The login sub-state field vs the ctor page-counter (do not conflate)
 
-Derived windows carry **two separate** window-substate views — they are different fields, not two
-names for one:
+The login window carries **one** live sub-state field plus an **independent** ctor-seeded page/base
+counter. These are two different fields with different roles — they are **not** a seed/live pair of one
+page-state (an earlier version of this spec wrongly framed +0x554 and +0x238 as seed-and-live of the
+same field):
 
 | Offset | Set by | Role |
 |-------:|--------|------|
-| +0x554 | the derived window's ctor (seeded to `5`) | ctor **seed** of the page-state. |
-| +0x238 | read in the command-handler `OnEvent` path | the **live page-state** the event handler reacts to. |
+| +0x238 | base ctor seeds it to `1`; driven/consumed by the per-frame Tick and the `OnEvent` path | the **live login sub-state** (spans 1..6 and 29..41). The login workflow machine reads and writes this field. |
+| +0x554 | the derived window's ctor (seeded to `5`) | an **independent page/base counter** that the login workflow machine **never reads**. It is the **last object slot** (+0x554 is the final field; +0x554 + 4 = 0x558 = the object size — see §6). It is **not** a seed of the +0x238 sub-state. |
 
-The command-handler `OnEvent` entry sits at the +0xBC base; it recovers the object base by subtracting
-0xBC from its `this`, then reads the live page-state at object +0x238. (An earlier "+0x17C page-state"
-note is the event-handler-relative view of the same +0x238 object field — consistent, just measured
-from a different base.)
+The live login sub-state at object +0x238 is also reached as **+0x17C relative to the command-handler
+sub-object base at +0xBC** (because `0xBC + 0x17C = 0x238`): the command-handler `OnEvent` entry recovers
+the object base by subtracting 0xBC from its `this`, then reads/writes the same +0x238 cell. So +0x238
+(object-relative) and +0x17C (handler-relative) are **two views of one field**, measured from different
+bases — distinct from the +0x554 page-counter above, which is a separate field entirely.
 
 ---
 
@@ -201,9 +204,12 @@ into that base ctor). Each is a distinct top-level scene/window:
 
 ## 6. Residual unknowns (capture/debugger-pending)
 
-- The exact **total byte-end** of the `MainWindow` (cross-referenced as 1464 bytes) and the
-  `LoginWindow` (the +0x554 ctor seed is consistent with a ~1368-byte object) was not re-measured in
-  this lane; the service-slot table occupies +0x238..+0x5B4 (`structs/runtime_singletons.md §3.10`).
+- The exact **total byte-end** of the `MainWindow` (cross-referenced as 1464 bytes) was not
+  re-measured in this lane.
+- The **`LoginWindow` object size is now CODE-CONFIRMED at `0x558` = 1368 bytes** (the scene-state-1
+  Login case allocates `0x558` before running the LoginWindow ctor); +0x554 is the last slot, so the
+  object ends exactly at 0x558. (Previously logged as "~1368B not re-measured" — now pinned exact.)
+  The MainWindow service-slot table occupies +0x238..+0x5B4 (`structs/runtime_singletons.md §3.10`).
 - The runtime **semantics** of the `GView` hook function-ptr slot (null in the shipped client) — its
   purpose is inferred, not observed firing.
 - The detailed roles of the small shared GUComponent accessor slots (primary vtable slots 2–5,
