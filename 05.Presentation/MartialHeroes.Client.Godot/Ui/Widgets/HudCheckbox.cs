@@ -4,8 +4,10 @@
 //
 // GUCheckBox derives from GUButton (spec §1):
 //   "checked state = the PRESSED frame; chains the 3-state button constructor".
-// We back this with a Godot CheckButton (toggle); the checked/unchecked visuals come
-// from atlas sprites (NORMAL = unchecked, PRESSED = checked).
+// It is a TEXTURED toggle button — the unchecked/checked visuals are the NORMAL / PRESSED atlas
+// sprites at the exact widget rect (e.g. the login Save-ID box is 13×13). We back it with a Godot
+// TextureButton in toggle mode (NOT a CheckButton — a CheckButton draws Godot's own ~44×24 switch
+// graphic, which overrides the requested size and is not the original look).
 // ActionFired is fired on every toggle with the checkbox's ActionId.
 //
 // spec: Docs/RE/specs/ui_system.md §1 — GUCheckBox: "derives GUButton; checked = PRESSED frame".
@@ -16,17 +18,17 @@ using Godot;
 namespace MartialHeroes.Client.Godot.Ui.Widgets;
 
 /// <summary>
-/// GUCheckBox-faithful toggle widget backed by a Godot <see cref="CheckButton"/>.
+/// GUCheckBox-faithful toggle widget backed by a Godot <see cref="TextureButton"/> in toggle mode.
 ///
-/// <para>The NORMAL frame is the unchecked sprite; the PRESSED frame is the checked sprite.
-/// spec: Docs/RE/specs/ui_system.md §1 — "GUCheckBox checked = PRESSED frame".</para>
+/// <para>The NORMAL frame is the unchecked sprite; the PRESSED frame is the checked sprite, drawn at
+/// the exact widget rect. spec: Docs/RE/specs/ui_system.md §1 — "GUCheckBox checked = PRESSED frame".</para>
 ///
 /// <para>Subscribe to <see cref="Toggled"/> to react to state changes and emit a use-case
 /// call. Never mutate domain state in a UI handler.</para>
 /// </summary>
 public sealed class HudCheckbox : HudWidget
 {
-    private readonly CheckButton _check;
+    private readonly TextureButton _check;
 
     /// <param name="x">Screen-local X.</param>
     /// <param name="y">Screen-local Y.</param>
@@ -38,30 +40,23 @@ public sealed class HudCheckbox : HudWidget
         Texture2D? normalFrame = null,
         Texture2D? pressedFrame = null)
     {
-        _check = new CheckButton
+        Texture2D? checkedTex = pressedFrame ?? normalFrame;
+
+        _check = new TextureButton
         {
             Position = new Vector2(x, y),
             Size = new Vector2(w, h),
             CustomMinimumSize = new Vector2(w, h),
-            // Remove Godot's built-in check icon so the atlas sprite shows.
-            Icon = null,
+            ToggleMode = true,
+            IgnoreTextureSize = true, // respect the 13×13 (etc.) rect, not the texture's own size.
+            StretchMode = TextureButton.StretchModeEnum.Scale,
+            // Unchecked = NORMAL frame; Checked = PRESSED frame (drawn via TexturePressed in toggle mode).
+            // spec: §1 "checked = PRESSED frame"; §1.5 "DISABLED always equals NORMAL".
+            TextureNormal = normalFrame,
+            TexturePressed = checkedTex,
+            TextureHover = normalFrame,
+            TextureDisabled = normalFrame,
         };
-
-        // Set atlas icons via theme overrides.
-        // Normal = unchecked, Checked = pressed.
-        // spec: §1.5 — "DISABLED always equals NORMAL": CONFIRMED.
-        if (normalFrame is not null)
-        {
-            _check.AddThemeIconOverride("unchecked", normalFrame);
-            _check.AddThemeIconOverride("unchecked_disabled", normalFrame);
-        }
-
-        if (pressedFrame is not null || normalFrame is not null)
-        {
-            Texture2D checkedTex = pressedFrame ?? normalFrame!;
-            _check.AddThemeIconOverride("checked", checkedTex);
-            _check.AddThemeIconOverride("checked_disabled", checkedTex);
-        }
 
         _check.Toggled += pressed =>
         {

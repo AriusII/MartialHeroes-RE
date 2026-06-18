@@ -6,7 +6,7 @@ ida_reverified: 2026-06-18
 anchor: 263bd994
 evidence: [static-ida]
 capture_verified: false
-status: CODE-CONFIRMED (geometry literals); seed/permutation + a few render rects DEBUGGER-PENDING (flagged)
+status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + login visibility edges + opening fade mechanism, CYCLE 18 Phase A static IDA); residual = opening final-fade armed-flag producer site only
 ```
 
 > This is the authoritative numeric oracle for the pre-character-select front end. Every constant here
@@ -33,6 +33,17 @@ status: CODE-CONFIRMED (geometry literals); seed/permutation + a few render rect
    Y-down) so a Godot Y-up port must invert the sign to scroll upward — see §6.
 7. **The PIN keypad is 100 stacked buttons** (10 digit-buttons per position × 10 positions); the
    scramble shows exactly one per position — see §3.
+8. **Login visibility is set IMPERATIVELY on transition edges, not by a declarative per-state table.**
+   The binary has no per-state ApplyVisibility lookup; the render callback never recomputes visibility
+   from the sub-state. The visible set at any state is the cumulative result of the show/hide calls
+   fired on each edge plus the build-time initial set. The "visible when state ≥ N" **bands** in §2.1/§2.2
+   are a port-side reconstruction of those cumulative edge effects, not a structure that exists in the
+   binary. (Static IDA, CYCLE 18 Phase A.)
+9. **There are FIVE distinct EXE-relative config INI files**, not one. The client builds, side by side
+   in the EXE directory, `DoOption.ini`, `option.ini`, `panel.ini`, `combo.ini`, `TSIDX.ini`. The
+   `[DO_OPTION]` options block (display, sound, brightness, saved login id) lives in **`DoOption.ini`**;
+   the Opening-skip `[OPENNING] SKIP` flag lives in a **different** file, **`option.ini`**. Do not
+   conflate the two. (Static IDA, CYCLE 18 Phase A — see §2.5, §5, §6.)
 
 ## 1. Conventions
 
@@ -54,6 +65,12 @@ status: CODE-CONFIRMED (geometry literals); seed/permutation + a few render rect
 ## 2. Login window (scene state 1)
 
 ### 2.1 Widget table (by parent group)
+
+> **Visibility model (CONFIRMED, static IDA, CYCLE 18 Phase A):** the `init` column and the §2.2
+> bands describe a port-side reconstruction. In the binary, visibility flags are toggled imperatively
+> on the transition edges of §2.2 (and by an "instant curtain-open" reset that runs for any state ≠ 1);
+> there is no declarative per-state visibility table. Encode the bands as constants, but understand they
+> are the cumulative effect of edge-fired show/hide calls.
 
 **ROOT panel (the login window itself):**
 
@@ -121,45 +138,96 @@ status: CODE-CONFIRMED (geometry literals); seed/permutation + a few render rect
 
 ### 2.2 Sub-state machine (`flowSubState`, init = 1)
 
+> **Single 32-bit integer field, written = 1 at construction (CONFIRMED, static IDA, CYCLE 18 Phase A).**
+> Transition edges below are the confirmed edge ladder. Visibility is set **on these edges**, not by a
+> per-state table (see §0.8); the §2.2-band column under each group is a reconstruction of the
+> cumulative show/hide effect.
+
 ```
-1  intro one-shot: play curtain SFX 861010105 (cat 2); reset curtain offset 0; show form bg; hide
-   server-list/PIN/notice/confirm.                                            → 2
+1  intro one-shot: play curtain SFX 861010105 (cat 2); reset curtain offset 0; show background; set the
+   two curtain host panels to their closed positions; hide notice / server-list-content / quit-strip /
+   help-plate / credential-group / PIN keypad; show the server-list submit plate.       → 2
 2  curtain opening: each frame offset += 5; top curtain Y = −offset; bottom curtain Y = offset+326;
    at offset>200 snap the server-list submit plate to (494,469); at offset>222 → 3
-3  curtain done: show login-form group; hide server-list.                      → 4
-4  form idle (steady "enter credentials"); Enter → 5                           (event)
-5  commit form (show form panel + title; hide notice).                          → 6
+3  curtain done: clear curtain offset 0; reposition curtains; show submit plate; hide notice; show the
+   server-list ROOT panel; hide quit-strip/help-plate. Does NOT yet show the credential group.  → 4
+4  form idle (steady "enter credentials"); Enter → 5                              (event)
+5  advance/commit (also reached by action 111 and the notice-OK paths).            → 6
 6  validate-armed idle: OK button (103) or Enter, requires flowSubState==6, runs the game.ver gate.
-   → 29
-29 validate: ID length ≥ 4 (else → 6 + msg 4025); PW length ≠ 0 (else → 6 + msg 4026); both OK →
-   persist Save-ID if checked → 31 (and the PIN keypad is raised on the 31→32 edge)
-31 PIN entry: keypad modal shown.                                              (UI)
+   Entering 6 shows the inner credential group; hides the PIN keypad and PIN-yes/no panel.   → 29
+29 validate (game.ver index-5 gate runs only when VFS mounted; mismatch msg 2204, can quit): ID length
+   ≥ 4 (else → 6 + msg 4025); PW length ≠ 0 (else → 6 + msg 4026); both OK → capture the typed ID into
+   the account singleton, hide the credential group, show the PIN keypad, hide the notice.  → 31
+   (The PIN keypad is raised on THIS edge — the moment state becomes 31.)
+31 PIN entry: keypad modal shown; hide credential group.                          → 32
 32 PIN poll: keypad visible AND submitted → 33
-33 start server-list fetch worker (TCP port 10000)                              → 34
-34 (re)start fetch / restart entry (also reached by Help action 105, throttled 10 s)  → 35
-35 fetching: show "loading server list" progress widgets                        (worker → 36)
-36 fetch result: 0 records → msg 4027 (no servers) → 37; error → msg 4028 → 37; else paint plates → 37
+33 start server-list fetch worker (TCP port 10000); hide the credential group + PIN keypad.  → 34
+34 show the server-list CONTENT panel; hide the submit plate; show the quit-strip + help-plate; start
+   the fetch thread.                                                              → 35
+35 fetching: show "loading server list" progress widgets                          (worker → 36)
+36 fetch result: 0 records → msg 4027 (no servers) → 37; error (−1) → msg 4028 → 37; else paint plates → 37
 37 server list shown: user picks a plate (400/401) or pages (115..124). Plate commit guard:
    record.status==0 && record.load<2400 → persist Lastserver → 38
-38 channel-endpoint fetch (TCP port 10000 + server_id)                          → 39
-39 start join worker                                                            → 40
-40 connecting overlay                                                           (worker → 41)
-41 hand-off: build TAB credential string, build secure context + login packet 0x2B, arm 30 s connect
-   timeout, leave the login scene to the connect/SMSG path.
+38 channel-endpoint fetch (TCP port 10000 + server_id)                            → 39
+39 start join worker                                                              → 40
+40 hand-off: build the TAB credential string, build secure context + login packet 0x2B, set the global
+   game-state to the connect phase, arm 30 s connect timeout, leave the login scene.  → 41
+41 post-hand-off idle (connect/SMSG path).
 ```
 
-**OnEvent action map** (widget action id → effect): 101 quit · 102 show server-list · 103 OK/login
-(game.ver gate → 29) · 104 Save-ID toggle (persist/clear account) · 105 Help/restart fetch (→ 34,
-10 s throttle) · 109/110 focus ID/PW · 111 PIN-yes (→ 5) · 112 PIN-no · 113/114 confirm-A/B OK (→ 34) ·
-115..124 server-list **pager** (only in 37; page = action−115; repaint, no commit) · 400/401 server
-**plate pick** (only in 37; LEFT=400, RIGHT=401; record = (action−400) + 2·page). Keys: TAB (9) toggles
-ID/PW focus; ENTER (10) → if state 6 run OK path, if state 4 → 5.
+- **Edge confidence:** all edges 1..41 and their numeric boundaries are **CONFIRMED (HIGH, static IDA,
+  CYCLE 18 Phase A)**, except the **35 → 36 → 37 worker-completion timing**, which is a background-thread
+  completion that static analysis cannot time-confirm — **MEDIUM** (would need a debugger pass).
+- **Restart path:** Help / restart action (105) and the quit-confirm "yes" path set state 34 (throttled
+  fetch restart): no-op while already at 35 or if a fetch ran within the last ~10 s.
+
+**OnEvent action map** (widget action id → effect; re-confirmed from the binary OnEvent handler
+2026-06-18 — **corrects two prior-spec errors**: 102 and 105 are NOT "show server-list"):
+- **101** = app quit (engine run-flag clear). Fired from a sub-panel OK (the ExitPanel "yes").
+- **102** = open the **quit-confirm ExitPanel** modal (a child object, distinct from the server-list).
+  **It does NOT show the server-list.** (Same target as 112.)
+- **103** = OK / login (game.ver index-5 gate → 29).
+- **104** = Save-ID toggle (persist/clear account).
+- **105** = **throttled restart of the server-list fetch** (→ 34): no-op if already fetching
+  (sub-state 35) or if a fetch ran within the last ~10 s; else stamps the time and re-enters 34.
+- **109/110** = focus ID/PW textboxes.
+- **111** = advance (→ 5).
+- **112** = open the quit-confirm ExitPanel modal (same as 102).
+- **113/114** = hide confirm-A/B popup, then restart the fetch (→ 34).
+- **115..124** = server-list **pager** (only in 37; page = action−115; repaint, no commit).
+- **400/401** = server **plate pick** (only in 37; LEFT=400, RIGHT=401; record = (action−400) + 2·page;
+  commit guard `status==0 && load<2400` → 38).
+- Keys: TAB (9) toggles ID/PW focus; ENTER (10) → if state 6 run OK path, if state 4 → 5.
+
+**The server-list is reached ONLY through the sub-state machine, never by a form button.** After PIN
+submission (32) the tick advances 33 (fetch-start) → 34/35 → 37 (plates shown) automatically. The
+list panel is a separate child painted by the tick machine; no `OnEvent` action opens it.
+
+**Widget-group visibility bands (CORRECTED, static IDA, CYCLE 18 Phase A).** These are the
+port-side reconstruction of the cumulative edge show/hide calls (§0.8). Reconstructed band = the range
+of sub-states across which the group is continuously visible:
+
+| Group | Reconstructed band | Notes (CONFIRMED edges) |
+|---|---|---|
+| Background | **visible from state 2** | Shown on the 1→2 edge (and by the instant-open reset for any state ≠ 1); never hidden afterward. **Off-by-one fix** from the prior "≥ 3". |
+| Curtains | **not a hideable widget** | The "curtain" is **not** a separate object hidden after the raise. It is the **animated Y of two always-present host panels**: top Y = −offset, bottom Y = offset + 326. They slide off-canvas / are overpainted, but their visible flag stays set across all states. The prior "visible when ≤ 2" describes when the panels are in their CLOSED position, not an object's visibility. |
+| Interactive credential group (ID/PW textboxes, Save-ID checkbox, OK button) | **state 6 (interval [6, 28])** | Built hidden; hidden at states 3/4. **Shown entering state 6** (the validate-armed idle where the user types); **hidden entering 29** (validate hides it and raises the PIN), and re-hidden at 31 and 33 — see the §2.2 EDGE LADDER, which is authoritative here. In practice only state 6 is occupied in this interval. This **supersedes the earlier "≈ 5..33" envelope**: the ladder's explicit per-edge hide calls at 29/31/33 are the precise truth, so the credential group is NOT visible under the PIN modal (31/32) or during the server-list fetch (33+). **NOT 3..32** — the inputs do not appear at 3/4 (the curtain has opened but the credential inputs stay hidden until the user advances 4→5→6). |
+| Login-form host strip | always present | A distinct object from the credential group; visible as an object from build through the whole scene (its Y animates). |
+| Server-list submit plate | states 1..~34 | Shown at 1/2/3/4 (and on instant-open); hidden on the 34→35 edge. |
+| Server-list CONTENT panel | **state 35..37** | Turned on at the **34→35 edge** (shown entering 35; records painted at 37). **NOT 33..37.** Object-identity nuance: state 33 only *starts* the fetch worker; state 35 is "fetching: show the content panel". What the prior spec called "server-list root, 33..37" was actually this content panel. The genuine root background panel is visible far earlier (from build). |
+| Quit/help strip + help plate | state 35 onward | Hidden at 1/2/3 + instant-open; shown on the 34→35 edge (server-list phase). |
+| PIN keypad | **states 31/32 (CONFIRMED)** | Built hidden; raised on the 29→31 edge; kept shown on 31→32; hidden on the 33→34 edge. Technically still flagged visible through state 33, but 33 is a one-tick fetch-start that immediately advances; a port gating on {31, 32} is faithful. |
+| Notice panel | always hidden (by the flow) | Built hidden; explicitly hidden on the 1→2, 29→31, and instant-open edges; the sub-state machine never shows it (only a separate notice/tooltip action can). CONFIRMED. |
+| PIN yes/no panel | always hidden (by the flow) | Built hidden; explicitly hidden on the 5→6 edge; never shown by the tick machine. CONFIRMED. |
+| Confirm-A/B popups, Exit panel, Error panel | always hidden (by the flow) | Built hidden; raised only by action ids 102/112/113/114 or message popups, outside this machine. CONFIRMED. |
 
 ### 2.3 Curtain geometry
 
-Two full-width panels driven by one offset (start 0, +5/tick): **top** curtain Y = −offset; **bottom**
-curtain Y = offset + 326. At offset > 200 snap the server-list submit plate to **(494, 469)**. Stop at
-offset > 222 (→ sub-state 3). No alpha animation. Curtain start SFX = 2D cue **861010105** (category 2).
+Two full-width host panels driven by one offset (start 0, +5/tick): **top** curtain Y = −offset;
+**bottom** curtain Y = offset + 326. At offset > 200 snap the server-list submit plate to **(494, 469)**.
+Stop at offset > 222 (→ sub-state 3). No alpha animation. These are not hideable curtain widgets — they
+are always-present panels whose Y animates (see §2.2 bands). Curtain start SFX = 2D cue **861010105**
+(category 2).
 
 ### 2.4 Version & length gates
 
@@ -172,11 +240,25 @@ offset > 222 (→ sub-state 3). No alpha animation. Curtain start SFX = 2D cue *
 
 On build, read the saved account from the options store; if present and ≠ `"(null)"`, pre-fill the ID
 textbox and move focus to the PW box (else focus stays on ID). On checkbox toggle (104): if checked,
-store the current ID text; if unchecked, clear it. On validate success, store the ID text. (On-disk
-key proposed as `DoOption.ini [DO_OPTION] OPTION_ID`; exact section/key is STATIC-PENDING — see
-login_flow.md.) The selected server id persists to registry `HKLM\SOFTWARE\crspace\do : Lastserver`.
+store the current ID text; if unchecked, clear it. On validate success, store the ID text.
 
-### 2.6 Credential hand-off (sub-state 41)
+**Persistence target (CONFIRMED, static IDA, CYCLE 18 Phase A):** the saved login id is read/written via
+the Win32 private-profile APIs (`GetPrivateProfileStringA` / `WritePrivateProfileStringA`) to:
+- **file:** `DoOption.ini` (EXE-relative; **NOT** `option.ini`),
+- **section (`lpAppName`):** `DO_OPTION` (the API argument is the bare name; the `[DO_OPTION]` bracket
+  form is just the on-disk header),
+- **key (`lpKeyName`):** `OPTION_ID`,
+- **value:** the stored login id string; read default `(null)` (an empty / `(null)` value = no saved id).
+- **buffer:** read buffer size **0x32**; stored length **< 0x10** chars.
+
+The same options loader reads all other `OPTION_*` integer keys (display width/height, sound volumes,
+brightness, …) from the same `DO_OPTION` section of the same `DoOption.ini`. The Save-ID checkbox is
+**not** a separate boolean key — presence/absence of the `OPTION_ID` string IS the toggle state.
+
+The `[OPENNING] SKIP` Opening-skip flag is a **separate setting in a different file** (`option.ini`) —
+see §5/§6. The selected server id persists to registry `HKLM\SOFTWARE\crspace\do : Lastserver`.
+
+### 2.6 Credential hand-off (sub-state 40)
 
 Build a single TAB-delimited string `"<account>\t<password>\t<PIN>\t<host> <port>"` (host/port from
 the channel-endpoint fetch, space-separated). Field caps: account < 20, password = 17, PIN < 5
@@ -198,13 +280,31 @@ the channel-endpoint fetch, space-separated). Field caps: account < 20, password
 - **Masked input field:** a label at panel-relative `(81, 138, 150, 22)`, rendered as N `*` characters
   (digits never drawn). **Max length 4.**
 - **Dragon frame** decoration: size **340 × 190**, atlas source origin `(318, 647)`, centered.
-- **Scramble:** seed `srand(time)` (whole-second wall clock), Fisher–Yates shuffle of the digits 0..9;
-  re-rolls on open, Reset, OK, Cancel. The **runtime seed value + permutation are DEBUGGER-PENDING** —
-  reproduce the *mechanism* (a fresh time-seeded shuffle each open); do not hard-code a permutation.
-- **Raise:** on the 31→32 edge (after credential validation). **Submit:** OK (tag 12) copies up to 4
-  digits to the login singleton (becomes field #3 of the credential string).
+- **Scramble (CONFIRMED, static IDA, CYCLE 18 Phase A):**
+  - **Seed:** `srand(time())` — the whole-second CRT wall-clock (`time()` family). Explicitly **NOT**
+    `GetTickCount`, `timeGetTime`, `QueryPerformanceCounter`, or `GetSystemTimeAsFileTime` (those are
+    imported but not used here). Two keypad opens within the same wall-clock second therefore seed the
+    RNG identically — the scramble within a one-second window is reproducible (the original's
+    seconds-granularity weakness; reproduce it faithfully via the same mechanism).
+  - **Shuffle:** an **ASCENDING** uniform permutation of the digits 0..9 (the MSVC `std::random_shuffle`
+    shape): a running bound `i` walks 2..10; each step swaps the new element with index
+    `j = rand() mod i` (j ∈ [0, i−1]). This is **not** the descending textbook
+    "for i = n−1 down to 1" form, but it produces an equivalent uniform 10-element permutation. (For a
+    10-element array the MSVC large-range RAND_MAX guard never triggers; one `rand()` per step.)
+  - **One digit per cell:** the 10-element permutation is mapped 1:1 onto the 10 cells; per cell, the
+    single digit-button matching that cell's permuted value is shown and the other nine are hidden — so
+    each of the ten digits 0..9 appears exactly once across the ten cells.
+  - **Re-roll:** the scramble re-seeds and re-shuffles on **open (SetVisible-show)**, **Reset**, **OK**,
+    and **Cancel**. On show the window also clears the typed-entry string and the submitted flag before
+    scrambling.
+  - **Reproduce the mechanism, not a value:** a port must perform a fresh whole-second-seeded ascending
+    shuffle on each open — do not hard-code a permutation. (The runtime permutation value is emergent
+    from the seed; only the *mechanism* is specified here, not a fixed sequence.)
+- **Raise:** on the 29→31 edge (immediately when state becomes 31), after credential validation.
+  **Submit:** OK (tag 12) copies up to 4 digits to the login singleton (becomes field #3 of the
+  credential string).
 
-## 4. Server-list display model — sub-states 33..37
+## 4. Server-list display model — sub-states 35..37
 
 - **Page tabs:** 10 small 3-state strips across the top, each `(13 + 47·i, 66, 47 × 18)`, atlas A2,
   Normal `(596, 985)` / Hover `(643, 985)`, action **115 + i** (i = 0..9). These are **page selectors**
@@ -222,8 +322,13 @@ the channel-endpoint fetch, space-separated). Field caps: account < 20, password
   `record = (action − 400) + 2·page`.
 - **Commit guard:** `status_code == 0 && load < 2400` → write selected server_id, persist Lastserver,
   advance to channel-endpoint fetch (port 10000 + server_id).
-- **Status / load coloring** (UI only): load > 1200 red (msg 6001) · > 800 orange (6002) · > 500
-  yellow (6003) · ≤ 500 green. status_code 3 = scheduled-open (msg 6004 "preparing" / 6005 HH:MM).
+- **Status / load coloring** (UI only; ARGB DWORDs re-confirmed 2026-06-18): load > 1200 → red
+  (msg 6001, `0xFFFF0000`) · > 800 → orange (msg 6002, `0xFFED6806`) · > 500 → yellow (msg 6003,
+  `0xFFFFFF00`) · **≤ 500 → green (`0xFFB5FF7A`), with NO msg id — the load is rendered as numeric
+  `%4d / %4d` text, not a caption.** status_code 3 = scheduled-open: msg **6004 "preparing" only when
+  `load (+4) == 24`**, otherwise msg **6005 HH:MM** built from `+4` (hour: /10, %10) and `+6`
+  (minute: /10, %10). Record fields (re-confirmed, no swap): `+0` server_id, `+2` status, `+4` load,
+  `+6` open_time.
 
 ## 5. Loading window (scene state 2) — immediate-mode, NOT a widget tree
 
@@ -231,17 +336,39 @@ the channel-endpoint fetch, space-separated). Field caps: account < 20, password
 - **Background quad:** full-screen `(0, 0, screenW, screenH)` blit of a randomly chosen DDS:
   `rand()%3` → `data/ui/loading.dds` | `data/ui/loading06.dds` | `data/ui/loading08.dds`.
   (Earlier `loading_01/02.dds` names are wrong for this build.)
-- **Progress bar quad:** a second textured quad, design-space literals X span −499..−170 (329 px wide),
-  Y span −363..−140 (223 px tall), depth 0.108, near-white per-vertex tint, lower-center. The exact
-  on-screen rect (center-relative ortho) is DEBUGGER-PENDING; reproduce a lower-center bar 329 px wide.
-- **Fill:** progress from `VFS_GetProgress()` (0..100). Fill = `clamp(223 · pct / 100, 0, 223)`,
-  normalized `/1024` → max U **223/1024 ≈ 0.2178**. No text label (percentage shown by fill only).
+- **Progress bar quad (CONFIRMED, static IDA, CYCLE 18 Phase A):** a second textured quad in design
+  space. The destination corners are built from two screen-scale factors — `xScale = screenW · (1/1024)`
+  and `yScale = screenH / 768` — both = 1.0 at the 1024×768 design resolution, so the design-space
+  multipliers resolve to their literal values:
+
+  | Edge | Design-space constant | Resolved @ 1024×768 |
+  |---|---|---|
+  | X-left | xScale · **−499.0** | −499.0 |
+  | X-right | xScale · **−170.0** | −170.0 |
+  | Y-top | yScale · **−363.0** | −363.0 |
+  | Y-bottom | yScale · **−140.0** | −140.0 |
+  | Z (depth) | per-vertex **1.0** (constant, all 4 verts) | 1.0 |
+
+  X span = `|−170 − (−499)|` = **329** design units; Y span = `|−140 − (−363)|` = **223** design units.
+  The vertex format is 5 floats `[X, Y, Z=1.0, U, V]`, four vertices. The bar samples a sub-rect of the
+  art: U 443/1024..772/1024 (329 src px wide), V 576/768..744/768 (the bottom region). Drawn under an
+  **orthographic screen-space projection with near = 0.0, far = 1.0** (identity world/view); the bar quad
+  is drawn over the background quad only when load progress is non-zero.
+  **CORRECTION:** the prior "depth 0.108" was wrong — there is **no 0.108** anywhere. Use **Z = 1.0**
+  (ortho near/far 0.0/1.0), or simply rely on draw order over the background quad.
+- **Fill (CONFIRMED, static IDA, CYCLE 18 Phase A):** progress from `VFS_GetProgress()` (0..100).
+  `fill_px = clamp(223 · pct / 100, 0, 223)` (integer math; multiplier 223, divisor 100, upper clamp 223;
+  the whole fill block is skipped at pct == 0 so the lower bound 0 is implicit). The texcoord delta =
+  `fill_px · (1/1024)` (divisor 1024 = 0.0009765625), with an equivalent safety clamp of
+  `223/1024 ≈ 0.2178`. The fill is driven on the **V (vertical)** axis of the bar sub-rect: one edge
+  moves by `fill_px · yScale` from the Y-top base and the V texcoord of the two moving vertices shifts by
+  the delta. No text label (percentage shown by fill only).
 - **Completion / advance:** a "loading active" flag is cleared by the background loader thread after it
   finishes its corpus load + a 500 ms grace; the per-frame callback then ends the blocking scene loop,
   and the state machine advances to the destination chosen at case-2 entry (Opening or Select).
 - **Skip-Opening gate (decided at case-2 entry):** `GetPrivateProfileInt("OPENNING", "SKIP", 0, ini)`
-  (section spelled **OPENNING**, key **SKIP**, default 0). Non-zero → go to Select (4, skip Opening);
-  zero → go to Opening (3).
+  (section spelled **OPENNING**, key **SKIP**, default 0), read from **`option.ini`** (NOT `DoOption.ini`
+  — see §0.9). Non-zero → go to Select (4, skip Opening); zero → go to Opening (3).
 - **Boot corpus** (loaded behind the bar, ordered): data tables incl. `system_control.scr`,
   `mapsetting.scr`, `items.scr`, `skills.scr`, `musajung.do`, `npcs.scr`, `mobs.scr`, `quests.scr`,
   `citems.scr`, the four `.xdb` (effectscale / creature_item / vehicle / buff_icon_position),
@@ -251,20 +378,38 @@ the channel-endpoint fetch, space-separated). Field caps: account < 20, password
 ## 6. Opening scene (scene state 3) — ortho quads
 
 - **Backdrops:** 4 full-screen quads `openning_001.dds` .. `openning_004.dds` (1024 × 768). One phase
-  index selects the active backdrop. Each phase dwells **17 500 ms** (4 × 17.5 s ≈ 70 s). A single
-  alpha byte ramps **±1 per frame up to 250 (0xFA)**, broadcast to all 4 ARGB channels (fade-out then
-  swap, not a true A/B cross-blend).
+  index selects the active backdrop. The phase counter (init = 1 at window-build) is stepped 1→2→3→4 by a
+  banner slideshow FSM; each phase dwells **~17 500 ms** (timed off a shared millisecond timestamp) and
+  ramps a single alpha byte **0 → 250 (0xFA)** (a global direction byte selects fade-in vs fade-out). On
+  each phase's dwell expiry, once that phase's crossfade alpha has reached 250, the FSM bumps the phase
+  (1→2, 2→3, 3→4). Phase 4 is the last case — it does not bump further; it keeps running its own
+  alpha ramp / dwell.
 - **Credit crawl:** texture `openning_scenario.dds`, built **1024 × 2048**, centered at
   X = `screenW/2 − 512`, starting Y = `screenH − 200`. After a **1000 ms** delay it translates the
-  quad's destination Y at **30 units/second** (wall-clock) up to a bound of **1843**. It is a
+  quad's destination Y at **30 units/second** (wall-clock) up to a bound of **~1843**. It is a
   positional translate (not a UV offset). The code increments **+Y (DirectX Y-down)**; a **Godot Y-up
-  port must invert the sign** so the crawl reads upward.
+  port must invert the sign** so the crawl reads upward. Manual scroll actions 1004/1005.
 - **Skip:** keyboard Enter (10) / ESC (27) / Space (32), or the 3-state skip button (action **100**) at
   dst `(screenW − 120, 10, 110 × 32)` on `mainwindow.dds`, source Normal/Hover `(761, 165)` / Pressed
-  `(634, 165)`. Skipping writes `[OPENNING] SKIP = 1` to the same option INI the Load scene reads
-  (Opening then permanently skipped), and advances to Select (4).
-- **Auto-exit:** when the fade machine finishes phase 4, an arming flag triggers a final fade 0→250
-  then advances to Select (4). (The exact arming write-site is STATIC-PENDING — not load-bearing.)
+  `(634, 165)`. Skipping persists `[OPENNING] SKIP = 1` to **`option.ini`** (the same file the Load scene
+  reads; Opening then permanently skipped) and closes the window early, which unwinds the scene loop and
+  advances to Select (4).
+- **Auto-exit (CORRECTED — confirmed NOT load-bearing; static IDA, CYCLE 18 Phase A).** The WinMain
+  state-3 case writes the next game-state = 4 (Select) **unconditionally and up-front**, before it builds
+  the Opening window or runs the blocking scene loop. The fade does **not** transition the state; it only
+  governs **when that blocking scene loop returns**. The Opening per-frame tick checks a one-byte
+  **final-fade-armed flag**: when set, it treats this as the terminal fade-out, ramps the fade-alpha byte
+  by +1 per frame up to its terminal value **250 (0xFA)**, then clears the engine run-flag — which makes
+  the scene loop return and lets WinMain fall through into the pre-set Select (4) state. (On the next
+  launch, WinMain's Load case reads the persisted `OPENNING`/`SKIP` flag and jumps straight to Select if
+  set, bypassing Opening entirely.)
+  - **Residual (MEDIUM, not load-bearing):** the exact instruction that first **SETS** the
+    final-fade-armed flag after banner phase 4 (the *producer* of the armed state) was not isolated this
+    pass — most plausibly a register/pointer-relative write or a constructor/phase-4-tail toggle rather
+    than a literal immediate store. The *consumer* side (the armed-flag check, the alpha ramp to 250, and
+    the run-flag clear that performs the exit) is fully confirmed. The port already advances Opening →
+    Select on skip / completion and does not need this byte-exact arming site. **PENDING:** producer site
+    only.
 - **Audio:** looped 2D BGM **910061000**, started at scene build, stopped on teardown.
 
 ## 7. Front-end audio cues (2D, category < 5 → `data/sound/2d/<id>.ogg`)
@@ -275,6 +420,19 @@ the channel-endpoint fetch, space-separated). Field caps: account < 20, password
 | 920100100 | loading screen BGM (looped, category 0) |
 | 910061000 | opening cinematic BGM (looped) |
 | (UI click SFX per button) | login/server-list buttons |
+
+## 7.10 Front-end config INI files (CONFIRMED, static IDA, CYCLE 18 Phase A)
+
+The client builds **five distinct EXE-relative config INI files**, side by side in the EXE directory.
+They are separate files — do not conflate them:
+
+| File | Holds (front-end relevant) |
+|---|---|
+| `DoOption.ini` | the `[DO_OPTION]` options block — display width/height, sound volumes, brightness, and the saved login id (`OPTION_ID`); see §2.5 |
+| `option.ini` | the Opening-skip flag `[OPENNING] SKIP` (read by Load case-2 entry, written by Opening skip); see §5/§6 |
+| `panel.ini` | (HUD/panel layout — out of scope for this spec) |
+| `combo.ini` | (combo settings — out of scope for this spec) |
+| `TSIDX.ini` | (out of scope for this spec) |
 
 ## 8. Networking summary (authoritative detail in `login_flow.md` / `packets/{login,lobby}.yaml`)
 

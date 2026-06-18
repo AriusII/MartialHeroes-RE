@@ -17,7 +17,7 @@ namespace MartialHeroes.Network.Transport.Pipelines.Tests;
 ///   [CODE-CONFIRMED per lobby.yaml line 57 and network_dispatch.md §1.1].
 ///
 /// Server-list payload (RECORD SHAPE A): count × 8 bytes each
-///   {+0 u16 id_selectkey, +2 i16 status_kind, +4 i16 population, +6 i16 flag}
+///   {+0 u16 server_id, +2 i16 status_code, +4 i16 load, +6 i16 open_time}
 ///
 /// Channel-endpoint payload (RECORD SHAPE B): first 30 bytes = ASCII "host port"
 /// </summary>
@@ -45,13 +45,13 @@ public sealed class LobbyClientTests
     /// Builds a single 8-byte server-list record.
     /// spec: Docs/RE/packets/lobby.yaml RECORD SHAPE A.
     /// </summary>
-    private static byte[] BuildServerRecord(ushort serverId, short status, short population, short flag)
+    private static byte[] BuildServerRecord(ushort serverId, short statusCode, short load, short openTime)
     {
         byte[] rec = new byte[8];
-        BinaryPrimitives.WriteUInt16LittleEndian(rec.AsSpan(0), serverId); // +0 id_selectkey u16
-        BinaryPrimitives.WriteInt16LittleEndian(rec.AsSpan(2), status); // +2 status_kind i16
-        BinaryPrimitives.WriteInt16LittleEndian(rec.AsSpan(4), population); // +4 population i16
-        BinaryPrimitives.WriteInt16LittleEndian(rec.AsSpan(6), flag); // +6 flag i16
+        BinaryPrimitives.WriteUInt16LittleEndian(rec.AsSpan(0), serverId); // +0 server_id u16
+        BinaryPrimitives.WriteInt16LittleEndian(rec.AsSpan(2), statusCode); // +2 status_code i16
+        BinaryPrimitives.WriteInt16LittleEndian(rec.AsSpan(4), load); // +4 load i16
+        BinaryPrimitives.WriteInt16LittleEndian(rec.AsSpan(6), openTime); // +6 open_time i16
         return rec;
     }
 
@@ -113,13 +113,13 @@ public sealed class LobbyClientTests
             for (int i = 0; i < count; i++)
             {
                 ReadOnlySpan<byte> rec = data.Slice(i * LobbyClient.ServerRecordSize, LobbyClient.ServerRecordSize);
-                // spec: Docs/RE/packets/lobby.yaml RECORD SHAPE A:
-                //   +0 u16 id_selectkey, +2 i16 status_kind, +4 i16 population, +6 i16 flag
+                // spec: Docs/RE/packets/lobby.yaml Record Shape A:
+                //   +0 u16 server_id, +2 i16 status_code, +4 i16 load, +6 i16 open_time
                 records[i] = new LobbyServerRecord(
                     ServerId: BinaryPrimitives.ReadUInt16LittleEndian(rec[0..]),
-                    Status: BinaryPrimitives.ReadInt16LittleEndian(rec[2..]),
-                    Population: BinaryPrimitives.ReadInt16LittleEndian(rec[4..]),
-                    Flag: BinaryPrimitives.ReadInt16LittleEndian(rec[6..]));
+                    StatusCode: BinaryPrimitives.ReadInt16LittleEndian(rec[2..]),
+                    Load: BinaryPrimitives.ReadInt16LittleEndian(rec[4..]),
+                    OpenTime: BinaryPrimitives.ReadInt16LittleEndian(rec[6..]));
             }
 
             return records;
@@ -168,9 +168,9 @@ public sealed class LobbyClientTests
     public void DecodeServerList_TwoRecords_ParsedCorrectly()
     {
         // Build 2 server records.
-        // spec: Docs/RE/packets/lobby.yaml — 8-byte records {id_selectkey u16 @0, status_kind i16 @2, population i16 @4, flag i16 @6}
-        byte[] rec1 = BuildServerRecord(serverId: 1, status: 0, population: 500, flag: 0);
-        byte[] rec2 = BuildServerRecord(serverId: 2, status: 3, population: 24, flag: 30);
+        // spec: Docs/RE/packets/lobby.yaml — 8-byte records {server_id u16 @0, status_code i16 @2, load i16 @4, open_time i16 @6}
+        byte[] rec1 = BuildServerRecord(serverId: 1, statusCode: 0, load: 500, openTime: 0);
+        byte[] rec2 = BuildServerRecord(serverId: 2, statusCode: 3, load: 14, openTime: 30); // scheduled-open 14:30
 
         byte[] payload = [..rec1, ..rec2];
         byte[] frame = BuildLobbyFrame(payload, recordCount: 2);
@@ -182,24 +182,25 @@ public sealed class LobbyClientTests
 
         // Record 0
         Assert.Equal((ushort)1, records[0].ServerId);
-        Assert.Equal((short)0, records[0].Status);
-        Assert.Equal((short)500, records[0].Population);
-        Assert.Equal((short)0, records[0].Flag);
+        Assert.Equal((short)0, records[0].StatusCode);
+        Assert.Equal((short)500, records[0].Load);
+        Assert.Equal((short)0, records[0].OpenTime);
 
         // Record 1
         Assert.Equal((ushort)2, records[1].ServerId);
-        Assert.Equal((short)3, records[1].Status);
-        Assert.Equal((short)24, records[1].Population);
-        Assert.Equal((short)30, records[1].Flag);
+        Assert.Equal((short)3, records[1].StatusCode);
+        Assert.Equal((short)14, records[1].Load);
+        Assert.Equal((short)30, records[1].OpenTime);
     }
 
     [Fact]
     public void DecodeServerList_ThreeRecords_AllParsedCorrectly()
     {
-        byte[] rec1 = BuildServerRecord(serverId: 5, status: 0, population: 1201, flag: 1);
-        // ServerId == 100 is the AVAILABLE gate (on +0, not status_kind). spec: §RECORD SHAPE A +0.
-        byte[] rec2 = BuildServerRecord(serverId: 100, status: 0, population: 0, flag: 0);
-        byte[] rec3 = BuildServerRecord(serverId: 40, status: 4, population: 0, flag: 0);
+        byte[] rec1 = BuildServerRecord(serverId: 5, statusCode: 0, load: 1201, openTime: 1);
+        // ServerId == 100 is display-only (the "new server" label reposition), NOT a selectability gate.
+        // spec: Docs/RE/packets/lobby.yaml Record Shape A +0.
+        byte[] rec2 = BuildServerRecord(serverId: 100, statusCode: 0, load: 0, openTime: 0);
+        byte[] rec3 = BuildServerRecord(serverId: 40, statusCode: 4, load: 0, openTime: 0);
 
         byte[] payload = [..rec1, ..rec2, ..rec3];
         byte[] frame = BuildLobbyFrame(payload, recordCount: 3);
@@ -209,9 +210,9 @@ public sealed class LobbyClientTests
 
         Assert.Equal(3, records.Length);
         Assert.Equal((ushort)5, records[0].ServerId);
-        Assert.Equal((short)1201, records[0].Population);
-        Assert.Equal((ushort)100, records[1].ServerId); // availability sentinel on +0
-        Assert.Equal((short)0, records[1].Status);
+        Assert.Equal((short)1201, records[0].Load);
+        Assert.Equal((ushort)100, records[1].ServerId); // display-only label, not a gate
+        Assert.Equal((short)0, records[1].StatusCode);
         Assert.Equal((ushort)40, records[2].ServerId);
     }
 

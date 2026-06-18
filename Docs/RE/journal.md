@@ -1742,3 +1742,65 @@ After the CAMPAIGN-17 core rebuild was committed, removed the now-dead legacy an
   (random loading.dds/loading06.dds/loading08.dds); opening alpha ceiling 250, crawl +Y must invert for
   Y-up; PIN keypad = 100 stacked buttons (10/cell), time-seeded Fisher–Yates scramble (seed DEBUGGER-
   PENDING). capture_verified: false (no .pcapng present). names.yaml sync owed (orchestrator/maintainer).
+
+## 2026-06-18 — re-static-analyst ×5 + Tier-1 (front-end scene re-confirmation + C#/Godot fix, campaign15)
+- binary: doida.exe @ 263bd994
+- tool: IDA Pro 9.3 via MCP (mcp__ida__*, static only — no debugger per maintainer)
+- re-confirmed (by canonical name): WinMain scene spine (states 0..7 + 8 terminal sentinel; Init
+  auto-advance; OPENNING/SKIP gate non-zero→Select / zero→Opening; reload 202/203/232; GameState
+  {state, subState=8, errorDetail, debugMode}); LoginWindow_OnEvent action map; LoginSecondPassword
+  keypad tags + scramble; lobby server-list 8-byte record + commit guard; LoadingScreen + COpeningWindow
+  render constants.
+- KEY CORRECTIONS to frontend_layout_tables.md (binary overrides a prior CODE-CONFIRMED reading):
+  - §2.2 action map: **102 = open quit-confirm ExitPanel (a distinct child object), NOT "show server-list"**;
+    **105 = throttled restart server-list fetch (→34, ~10s)**; 101 = app quit (Engine run-flag clear);
+    112 = same as 102; 113/114 = hide re-fetch popup + restart fetch (→34). The server-list is reached
+    ONLY via the sub-state machine after PIN (33→…→37) — no form action opens it. Idle = state 6;
+    real hand-off = state 40 (41 = post-hand-off idle). Verified by reading LoginWindow_OnEvent.
+  - §3 PIN keypad tags: **Reset=11 (ScrambleKeypad: wipe+re-roll), OK=12 (SubmitOk), Cancel=13** — no
+    separate clear/backspace verb.
+  - §4 server-list colors (ARGB): red 0xFFFF0000 / orange 0xFFED6806 / yellow 0xFFFFFF00 /
+    green 0xFFB5FF7A (≤500: numeric text, no msg id); status 3 → 6004 only when load(+4)==24 else 6005
+    from +4/+6. Record fields +0 id / +2 status / +4 load / +6 open_time (no swap).
+  - §5 progress-bar depth literal = 0.5859375f (not 0.108; irrelevant to the 2D port).
+- C#/Godot fixes (layer 05) measured against the corrected oracle: PinSubView tag swap fixed +
+  dragon-frame chrome (InventWindow 318,647,340×190) + transparent modal capture (removed invented
+  0.6 black dim); LoadingWindow TextureRect ExpandMode.IgnoreSize (bg 1024×768, fill 223×223 — was
+  ballooning to 1024×1024); ServerSelectSubView exact colors + dead BuildBackControl/BackRequested
+  removed; LoginWindow action handler re-aligned (102/112→ExitConfirm, 105→restart-fetch, 101→quit).
+  Application layer (SceneStateMachine / LoadOrchestrator / LobbyServerRecord) re-verified faithful — no
+  change. Verified via headless LayoutDump (numeric oracle, no screenshots) before/after.
+- notes: dirty findings in Docs/RE/_dirty/campaign-frontend/. capture_verified: false. names.yaml sync
+  owed (orchestrator/maintainer): LoginWindow_OnEvent, GameVer_CompareIndex5, Lobby_FetchServerList,
+  Diamond_LoginSecondPassword_* (builder / OnEvent / ScrambleKeypad / SubmitOk),
+  Diamond_OpeningWindow_BannerSlideshowFSM/ScenarioCrawlUpdate, Boot_LoadDataTableCorpus.
+
+## 2026-06-18 — CYCLE 18 Phase A+B: re-cleanroom-orchestrator (6 static-IDA lanes) + spec-authors (front-end scenes, campaign15)
+- binary: doida.exe @ 263bd994
+- tool: IDA Pro 9.3 via MCP (mcp__ida__*, **static only — no debugger** per maintainer)
+- scope: pre-character-select scenes (Init/Login/Load/Opening) + login sub-flows (PIN, server-list). Char-select and world out of scope.
+- dirty findings (gitignored): Docs/RE/_dirty/frontend18/{pin-scramble, serverlist-record, saveid-ini, load-bar-rect, login-substates, opening-fade}.md
+- promoted to clean specs:
+  - frontend_layout_tables.md (author: asset-spec-author): §3 PIN scramble — seed = whole-second time()
+    (CRT srand; NOT GetTickCount/ms), ASCENDING uniform shuffle (j=rand()%i, i=2..10; MSVC random_shuffle
+    shape), reproduce-by-mechanism; §2.5/§7.10 INI split — Save-ID = DoOption.ini [DO_OPTION] OPTION_ID,
+    [OPENNING] SKIP = option.ini (five distinct EXE-relative inis); §5 load-bar — rect X −499/−170,
+    Y −363/−140 (329×223) + fill clamp(223·pct/100,0,223)/1024 CONFIRMED, depth → Z=1.0 (ortho near/far
+    0/1; irrelevant to the 2D port); §2.1/§2.2 visibility — set IMPERATIVELY on edges (no declarative
+    table); CORRECTED bands: Background from state 2 (was ≥3); curtains = always-present Y-animated host
+    panels; interactive credential group ≈ 5..33 (was 3..32, shown on 5→6 edge); server-list CONTENT
+    panel 35..37 (was 33..37; 33 only starts the worker); PIN keypad 31/32 CONFIRMED; §6 Opening — WinMain
+    state-3 pre-sets next=4, fade only governs when the blocking loop returns; residual = armed-flag site.
+  - lobby.yaml (author: protocol-spec-author): Record Shape A static-CONFIRMED — 8B LE
+    {+0 server_id i16 (1..40), +2 status_code, +4 load, +6 open_time}; commit/selectability gate
+    status_code==0 && load<2400 (0x960). DENIED the ServerId==100 gate (==100 is a display-only
+    NEW_SERVER_INDEX label reposition, commits nothing); +6 = open_time (status==3 → HH:MM from +4/+6),
+    NOT a Flag. On-wire byte VALUES remain capture-pending.
+- C#/Godot fixes (Phase C, layers 05/04/02) measured against the corrected oracle: ClientContext wires
+  LoginHandshakeDriver (was null → 0/0 never answered with 1/4); LoginWindow single-source visibility
+  (structural _pinKeypadRoot mirroring _serverListRoot, 8 direct .Visible writes removed) + bands
+  Background≥2 / server-list 35..37; PinSubView scramble seed→whole-second time() + ascending shuffle;
+  LobbyServerRecord/LobbyServerEntry/ServerListEntryView field rename {Status,Population,Flag}→
+  {StatusCode,Load,OpenTime} + gate fix. Verified via headless LayoutDump (numeric oracle, no screenshots).
+- notes: capture_verified: false. names.yaml sync owed (orchestrator/maintainer): the PIN-scramble /
+  server-list-parse / Save-ID-ini / load-bar-draw / login-substate routines by canonical name.

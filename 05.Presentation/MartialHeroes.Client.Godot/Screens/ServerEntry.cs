@@ -7,40 +7,41 @@ namespace MartialHeroes.Client.Godot.Screens;
 
 /// <summary>
 /// View-model for one 8-byte lobby server record.
-/// spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A (the code-confirmed wire spec — supersedes the
-/// earlier login_flow.md §2.1 "Load/OpenTime/open-clock" framing). CODE-CONFIRMED.
+/// spec: Docs/RE/packets/lobby.yaml Record Shape A (the static-confirmed wire spec). CODE-CONFIRMED.
 /// </summary>
 public sealed record ServerEntry(
     /// <summary>
-    /// Server id / select-key (wire +0). Also indexes the client-local name table (resolved from msg banks
-    /// 5001..5040) when <see cref="StatusCode"/> is in 1..39. spec: §RECORD SHAPE A +0.
+    /// Server id / select-key (wire +0, range 1..40). Also indexes the client-local name table (resolved
+    /// from msg banks 5001..5040) when <see cref="StatusCode"/> is in 1..39. Not a selectability gate (the
+    /// <c>== 100</c> literal is display-only). spec: Record Shape A +0.
     /// </summary>
     int ServerId,
-    /// <summary>Client-local display name (resolved from msg banks 5001..5040). spec §RECORD SHAPE A +0.</summary>
+    /// <summary>Client-local display name (resolved from msg banks 5001..5040). spec: Record Shape A +0.</summary>
     string DisplayName,
     /// <summary>
-    /// Caption / branch selector (wire +2, <c>status_kind</c>). spec: §RECORD SHAPE A +2:
-    ///   0 = derive a population label/color from <see cref="Population"/> / <see cref="Flag"/>;
-    ///   3 = special (caption 6004 when Population==24, else 6005 latency digit-split from Population/Flag);
+    /// Availability / caption selector (wire +2). spec: Record Shape A +2:
+    ///   0 = active/selectable (derive a load label/color from <see cref="Load"/>);
+    ///   3 = scheduled-open (HH:MM caption from <see cref="Load"/> hour + <see cref="OpenTime"/> minute);
     ///   1..39 = per-value caption-string array; &lt; 1 or &gt; 39 = fallback caption 5901.
     /// </summary>
     int StatusCode,
     /// <summary>
-    /// Population / count value (wire +4). In numeric mode (Flag != 0) thresholded 500/800/1200 (strict
-    /// greater-than). In discrete mode (Flag == 0) a discrete load level (2/3/4). In the status==3 branch
-    /// it is the 6005 latency numerator (and == 24 selects caption 6004). spec: §RECORD SHAPE A +4.
+    /// Population / load gauge (wire +4). Thresholded 500/800/1200 (strict greater-than) for the plate
+    /// color, and gated &lt; 2400 for selectability. In the status==3 branch it is the scheduled-open
+    /// HOUR. spec: Record Shape A +4.
     /// </summary>
-    int Population,
+    int Load,
     /// <summary>
-    /// Mode flag (wire +6): nonzero = treat <see cref="Population"/> as a numeric population (apply
-    /// thresholds); zero = treat it as a discrete load level. Also a 6005 latency numerator in the
-    /// status==3 branch. NOT an HH:MM open-clock. spec: §RECORD SHAPE A +6.
+    /// Scheduled-open MINUTE value (wire +6) — a time component, NOT a flag/bitfield. Combined with
+    /// <see cref="Load"/> (hour) into an HH:MM caption in the status==3 branch. spec: Record Shape A +6.
     /// </summary>
-    int Flag)
+    int OpenTime)
 {
     /// <summary>
-    /// Data-driven selectability gate used by the login server-list plate click path.
-    /// spec: Docs/RE/specs/frontend_scenes.md §11.4; Docs/RE/packets/lobby.yaml §RECORD SHAPE A.
+    /// Data-driven selectability gate used by the login server-list plate click path:
+    /// <c>StatusCode == 0 AND Load &lt; 2400</c> (0x960, signed strict less-than). There is NO
+    /// <c>ServerId == 100</c> gate.
+    /// spec: Docs/RE/specs/frontend_scenes.md §11.4; Docs/RE/packets/lobby.yaml Record Shape A.
     /// </summary>
-    public bool IsSelectable => StatusCode == 0 && Population < 2400;
+    public bool IsSelectable => StatusCode == 0 && Load < 2400;
 }

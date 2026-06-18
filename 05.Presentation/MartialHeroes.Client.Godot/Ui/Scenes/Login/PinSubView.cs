@@ -10,9 +10,15 @@
 //   Keypad:  2 × 5 tiles, each 52×52. Column spacing 55. Col0 X=28.
 //            Row 0 Y=170 (digits 0..4), Row 1 Y=230 (digits 5..9).
 //   Digit d glyph: password.dds src(d*52, 560/612/664, 52,52).
-//   OK button (tag 11): panel-local (243,133,58,30). password.dds N(663,8) H(663,88) P(663,48).
-//   Clear button (tag 12): panel-local (90,290,154,58). password.dds N(330,0) H(330,116) P(330,58).
-//   Third button (tag 13): panel-local (90,350,154,58). password.dds N(486,0) H(486,116) P(486,58).
+//   Reset button (tag 11): panel-local (243,133,58,30). password.dds N(663,8) H(663,88) P(663,48).
+//     → wipes the entered digits AND re-scrambles the keypad (NOT a single-digit backspace).
+//   OK button (tag 12): panel-local (90,290,154,58). password.dds N(330,0) H(330,116) P(330,58).
+//     → submits the up-to-4 digits (PinSubmitted).
+//   Cancel button (tag 13): panel-local (90,350,154,58). password.dds N(486,0) H(486,116) P(486,58).
+//     → closes the modal (Cancelled).
+//   There is NO separate clear/backspace tag — the only edit verbs are digit / Reset / OK / Cancel.
+//   spec: Docs/RE/specs/frontend_layout_tables.md §3 (re-confirmed vs binary 2026-06-18:
+//   Reset=11 → ScrambleKeypad, OK=12 → SubmitOk, Cancel=13 → Cancel).
 //
 // Fisher-Yates scramble: seeded from wall-clock milliseconds, scrambles digit position array.
 // spec: Docs/RE/specs/frontend_scenes.md §11.3e "Fisher-Yates seed from wall-clock ms". CODE-CONFIRMED.
@@ -92,9 +98,10 @@ public sealed partial class PinSubView : Control
     // spec: Docs/RE/specs/frontend_scenes.md §11.3d. CODE-CONFIRMED.
     // -------------------------------------------------------------------------
 
-    private const int TagOk = 11;
-    private const int TagClear = 12;
-    private const int TagThird = 13;
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3 — re-confirmed vs binary 2026-06-18.
+    private const int TagReset = 11; // Reset rect (243,133): wipe entry + re-scramble.
+    private const int TagOk = 12; // OK rect (90,290): submit PIN.
+    private const int TagCancel = 13; // Cancel rect (90,350): close modal.
 
     private const int PinDisplayX = 81;
     private const int PinDisplayY = 138;
@@ -167,20 +174,8 @@ public sealed partial class PinSubView : Control
         // Scramble the keypad.
         Scramble();
 
-        // Build the modal chrome background (password.dds has the modal frame baked in).
-        // The modal chrome is inferred from the atlas full-texture background (no dedicated sub-rect spec).
-        // We add a dim overlay to darken the scene behind the modal.
-        var dim = new ColorRect
-        {
-            Color = new Color(0f, 0f, 0f, 0.6f),
-            Position = new Vector2(-ModalX, -ModalY), // covers entire 1024×768
-            Size = new Vector2(1024, 768),
-            // Stop (not Ignore): a focus-capturing modal must EAT clicks on the dim area so they do not
-            // fall through to the login form behind. The keypad buttons sit on top and still receive input.
-            // spec: Docs/RE/specs/ui_system.md §1.6 (GUPanel_ShowModalAndFocus) / §4.2 (modal capture). CODE-CONFIRMED.
-            MouseFilter = MouseFilterEnum.Stop,
-        };
-        AddChild(dim);
+        // Modal click-capture + dragon-frame chrome (no invented dim tint).
+        BuildModalChrome();
 
         // Build keypad face buttons.
         BuildKeypad();
@@ -196,32 +191,8 @@ public sealed partial class PinSubView : Control
         _pinDisplay.AddThemeColorOverride("font_color", Colors.White);
         AddChild(_pinDisplay);
 
-        // Build OK button (tag 11).
-        // spec: §11.3d (243,133,58,30) N(663,8) H(663,88) P(663,48). CODE-CONFIRMED.
-        BuildButton(
-            LoginLayout.PinResetX, LoginLayout.PinResetY, LoginLayout.PinResetW, LoginLayout.PinResetH,
-            LoginLayout.PinResetNSrcX, LoginLayout.PinResetNSrcY,
-            LoginLayout.PinResetHSrcX, LoginLayout.PinResetHSrcY,
-            LoginLayout.PinResetPSrcX, LoginLayout.PinResetPSrcY,
-            TagOk);
-
-        // Build Clear button (tag 12).
-        // spec: §11.3d (90,290,154,58) N(330,0) H(330,116) P(330,58). CODE-CONFIRMED.
-        BuildButton(
-            LoginLayout.PinOkX, LoginLayout.PinOkY, LoginLayout.PinOkW, LoginLayout.PinOkH,
-            LoginLayout.PinOkNSrcX, LoginLayout.PinOkNSrcY,
-            LoginLayout.PinOkHSrcX, LoginLayout.PinOkHSrcY,
-            LoginLayout.PinOkPSrcX, LoginLayout.PinOkPSrcY,
-            TagClear);
-
-        // Build third button (tag 13).
-        // spec: §11.3d (90,350,154,58) N(486,0) H(486,116) P(486,58). CODE-CONFIRMED.
-        BuildButton(
-            LoginLayout.PinCancelX, LoginLayout.PinCancelY, LoginLayout.PinCancelW, LoginLayout.PinCancelH,
-            LoginLayout.PinCancelNSrcX, LoginLayout.PinCancelNSrcY,
-            LoginLayout.PinCancelHSrcX, LoginLayout.PinCancelHSrcY,
-            LoginLayout.PinCancelPSrcX, LoginLayout.PinCancelPSrcY,
-            TagThird);
+        // Reset(11) / OK(12) / Cancel(13) control buttons.
+        BuildControlButtons();
 
         // DEV: auto-submit prefilled PIN if provided.
         if (DevPrefillPin is { Length: > 0 } pre)
@@ -236,6 +207,45 @@ public sealed partial class PinSubView : Control
     private void AutoSubmitPin()
     {
         OnButtonAction(TagOk);
+    }
+
+    // -------------------------------------------------------------------------
+    // Modal chrome: transparent click-capture + dragon-frame plate
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3 (dragon frame 340×190 src(318,647), centered);
+    //       ui_system.md §1.6 (GUPanel_ShowModalAndFocus — focus-capturing modal eats outside clicks).
+    // -------------------------------------------------------------------------
+
+    private void BuildModalChrome()
+    {
+        // Transparent full-canvas capture rect: a focus-capturing modal eats clicks outside the panel
+        // so they do NOT fall through to the login form. No invented dim tint (not in the binary).
+        AddChild(new ColorRect
+        {
+            Color = new Color(0f, 0f, 0f, 0f),
+            Position = new Vector2(-ModalX, -ModalY), // covers the whole 1024×768 canvas
+            Size = new Vector2(1024, 768),
+            MouseFilter = MouseFilterEnum.Stop,
+        });
+
+        // Dragon-frame chrome (same InventWindow.dds plate as the confirm dialogs), centered in the
+        // 329×422 panel. spec §3 "Dragon frame 340×190, src(318,647), centered".
+        int frameX = (ModalW - LoginLayout.ModalChromeW) / 2;
+        int frameY = (ModalH - LoginLayout.ModalChromeH) / 2;
+        Texture2D? frame = _atlas.SliceByPath(LoginLayout.AtlasInventWindow,
+            LoginLayout.ModalChromeSrcX, LoginLayout.ModalChromeSrcY,
+            LoginLayout.ModalChromeW, LoginLayout.ModalChromeH);
+        if (frame is not null)
+        {
+            AddChild(new TextureRect
+            {
+                Position = new Vector2(frameX, frameY),
+                Size = new Vector2(LoginLayout.ModalChromeW, LoginLayout.ModalChromeH),
+                Texture = frame,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                MouseFilter = MouseFilterEnum.Ignore,
+            });
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -345,29 +355,30 @@ public sealed partial class PinSubView : Control
     {
         switch (tag)
         {
-            case TagOk:
-                // OK tag 11: emit PinSubmitted. Application validates length.
-                // spec: Docs/RE/specs/frontend_scenes.md §11.3d.
-                GD.Print($"[PinSubView] OK (tag 11): PinSubmitted(pin_len={_pin.Length}). " +
-                         "spec: frontend_scenes.md §11.3d.");
-                EmitSignal(SignalName.PinSubmitted, _pin);
-                break;
-
-            case TagClear:
-                // Clear tag 12: clear PIN and re-scramble.
-                // spec: Docs/RE/specs/frontend_scenes.md §11.3d.
+            case TagReset:
+                // Reset tag 11: wipe the entered digits AND re-scramble the keypad
+                // (full re-roll, not a single-digit backspace).
+                // spec: frontend_layout_tables.md §3 (binary: tag 11 → ScrambleKeypad).
                 _pin = "";
                 UpdatePinDisplay();
                 Scramble();
                 RebuildKeypad();
-                GD.Print("[PinSubView] Clear (tag 12): PIN cleared and keypad re-scrambled. " +
-                         "spec: frontend_scenes.md §11.3d.");
+                GD.Print("[PinSubView] Reset (tag 11): entry wiped + keypad re-scrambled. " +
+                         "spec: frontend_layout_tables.md §3.");
                 break;
 
-            case TagThird:
-                // Third button tag 13: emit Cancelled for the host flow.
-                // spec: Docs/RE/specs/frontend_scenes.md §11.3d.
-                GD.Print("[PinSubView] Third button (tag 13): Cancelled. spec: frontend_scenes.md §11.3d.");
+            case TagOk:
+                // OK tag 12: submit the PIN. Application validates length.
+                // spec: frontend_layout_tables.md §3 (binary: tag 12 → SubmitOk).
+                GD.Print($"[PinSubView] OK (tag 12): PinSubmitted(pin_len={_pin.Length}). " +
+                         "spec: frontend_layout_tables.md §3.");
+                EmitSignal(SignalName.PinSubmitted, _pin);
+                break;
+
+            case TagCancel:
+                // Cancel tag 13: close the modal.
+                // spec: frontend_layout_tables.md §3 (binary: tag 13 → Cancel).
+                GD.Print("[PinSubView] Cancel (tag 13): Cancelled. spec: frontend_layout_tables.md §3.");
                 EmitSignal(SignalName.Cancelled);
                 break;
         }
@@ -385,20 +396,26 @@ public sealed partial class PinSubView : Control
     }
 
     // -------------------------------------------------------------------------
-    // Fisher-Yates scramble
-    // spec: Docs/RE/specs/frontend_scenes.md §11.3e "Fisher-Yates seed from wall-clock ms". CODE-CONFIRMED.
+    // Keypad scramble — uniform permutation reseeded each open.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3 — seed = whole-second time() (CRT srand;
+    // explicitly NOT GetTickCount/timeGetTime/QPC), ASCENDING shuffle (j = rand() mod i, i = 2..10;
+    // MSVC std::random_shuffle shape), one digit per cell, re-roll on open/Reset/OK/Cancel. The exact
+    // permutation is reproduced BY MECHANISM, not hard-coded: C# Random != MSVC CRT rand, so it is not
+    // byte-identical — and must not be, the keypad is intentionally unpredictable.
+    // CODE-CONFIRMED (static IDA, doida.exe, CYCLE 18 Phase A).
     // -------------------------------------------------------------------------
 
     private void Scramble()
     {
         _scrambled = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
-        // Seed from wall-clock milliseconds.
-        // spec: §11.3e "seed = wall-clock milliseconds (GetTicksMsec or equivalent)". CODE-CONFIRMED.
-        int seed = (int)(global::Godot.Time.GetTicksMsec() & 0x7FFF_FFFF); // spec §11.3e. CODE-CONFIRMED.
+        // Seed from the whole-second wall clock (CRT time()). spec §3.
+        int seed = (int)((long)global::Godot.Time.GetUnixTimeFromSystem() & 0x7FFF_FFFF);
         var rng = new Random(seed);
 
-        for (int i = 9; i > 0; i--)
+        // Ascending Fisher-Yates (MSVC random_shuffle): for i = 1..9, swap a[i] with a[rand() mod (i+1)].
+        // spec §3.
+        for (int i = 1; i < 10; i++)
         {
             int j = rng.Next(0, i + 1);
             (_scrambled[i], _scrambled[j]) = (_scrambled[j], _scrambled[i]);
@@ -417,15 +434,7 @@ public sealed partial class PinSubView : Control
         _pinDisplay = null;
 
         // Re-run the full build (same as _Ready, no DEV prefill auto-submit on reset).
-        var dim = new ColorRect
-        {
-            Color = new Color(0f, 0f, 0f, 0.6f),
-            Position = new Vector2(-ModalX, -ModalY),
-            Size = new Vector2(1024, 768),
-            // Stop (modal capture) — see BuildUi. spec: ui_system.md §1.6 / §4.2. CODE-CONFIRMED.
-            MouseFilter = MouseFilterEnum.Stop,
-        };
-        AddChild(dim);
+        BuildModalChrome();
 
         BuildKeypad();
 
@@ -439,25 +448,37 @@ public sealed partial class PinSubView : Control
         _pinDisplay.AddThemeColorOverride("font_color", Colors.White);
         AddChild(_pinDisplay);
 
+        BuildControlButtons();
+    }
+
+    // Reset(11) / OK(12) / Cancel(13) control buttons.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3 — re-confirmed vs binary 2026-06-18:
+    //   Reset rect (243,133) → tag 11 (wipe + re-scramble); OK rect (90,290) → tag 12 (submit);
+    //   Cancel rect (90,350) → tag 13 (close). No separate clear/backspace tag.
+    private void BuildControlButtons()
+    {
+        // Reset (tag 11): password.dds N(663,8) H(663,88) P(663,48).
         BuildButton(
             LoginLayout.PinResetX, LoginLayout.PinResetY, LoginLayout.PinResetW, LoginLayout.PinResetH,
             LoginLayout.PinResetNSrcX, LoginLayout.PinResetNSrcY,
             LoginLayout.PinResetHSrcX, LoginLayout.PinResetHSrcY,
             LoginLayout.PinResetPSrcX, LoginLayout.PinResetPSrcY,
-            TagOk);
+            TagReset);
 
+        // OK (tag 12): password.dds N(330,0) H(330,116) P(330,58).
         BuildButton(
             LoginLayout.PinOkX, LoginLayout.PinOkY, LoginLayout.PinOkW, LoginLayout.PinOkH,
             LoginLayout.PinOkNSrcX, LoginLayout.PinOkNSrcY,
             LoginLayout.PinOkHSrcX, LoginLayout.PinOkHSrcY,
             LoginLayout.PinOkPSrcX, LoginLayout.PinOkPSrcY,
-            TagClear);
+            TagOk);
 
+        // Cancel (tag 13): password.dds N(486,0) H(486,116) P(486,58).
         BuildButton(
             LoginLayout.PinCancelX, LoginLayout.PinCancelY, LoginLayout.PinCancelW, LoginLayout.PinCancelH,
             LoginLayout.PinCancelNSrcX, LoginLayout.PinCancelNSrcY,
             LoginLayout.PinCancelHSrcX, LoginLayout.PinCancelHSrcY,
             LoginLayout.PinCancelPSrcX, LoginLayout.PinCancelPSrcY,
-            TagThird);
+            TagCancel);
     }
 }

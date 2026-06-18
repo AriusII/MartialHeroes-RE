@@ -9,14 +9,14 @@
 //   1  intro one-shot: SFX 861010105; reset curtain offset; hide all groups.         → 2
 //   2  curtain opening: offset+=5/tick; top Y=−offset; bot Y=offset+326;
 //      offset>200 snap submit plate to (494,469); offset>222                         → 3
-//   3  curtain done: show login-form group; hide server-list.                         → 4
+//   3  curtain done; host strip already present; credential group still hidden.       → 4
 //   4  form idle; Enter → 5                                                       (event)
 //   5  commit form.                                                                   → 6
-//   6  validate-armed idle: OK/Enter → 29
-//  29  validate: ID≥4 / PW≠0 check → 31
+//   6  validate-armed idle: shows credential group; OK/Enter → 29
+//  29  validate: ID≥4 / PW≠0 check; hides credential group; shows PIN → 31
 //  31  PIN entry: keypad modal shown.                                                (UI)
 //  32  PIN poll: wait for PinSubmitted → 33
-//  33  start server-list fetch                                                       → 34
+//  33  start server-list fetch; hide credential group                                → 34
 //  34  (re)start fetch                                                               → 35
 //  35  fetching                                                                  (→ 36)
 //  36  fetch result → 37
@@ -26,14 +26,19 @@
 //  39..40 connecting
 //  41  hand-off: emit LoginFlowCompleted.
 //
-// Per-sub-state visibility (§2.1):
-//   BG:          hidden 1/2;  shown 3+
-//   Curtains:    shown  1/2;  hidden 3+
-//   FormGroup:   hidden 1/2;  shown 3..32; hidden 33..41
-//   NoticePanel: always hidden (never shown per spec §2.1 init=hidden)
-//   ServerList:  hidden 1..32; shown 33..37; hidden 38..41
-//   PinKeypad:   hidden 1..30; shown 31/32; hidden 33+
-//   PinYesNo:    always hidden (legacy PIN dialog, unused in active flow)
+// Per-sub-state visibility (CORRECTED, §2.2 bands, CYCLE 18 C5b):
+//   BG:               hidden 1;  shown 2+ (1→2 edge). spec §2.2 corrected.
+//   Curtains (host panels): always-present Y-animated panels; NOT toggled by sub-state.
+//                     Binary models them as Y-animated always-present panels that slide off-canvas.
+//                     Port hides them after state 2 (equivalent, no partial-occlusion). spec §2.2 bands.
+//   FormGroup (host strip): shown from state 2+. ALWAYS PRESENT after curtain starts.
+//                     Distinct from credential group. spec §2.2 "Login-form host strip | always present".
+//   CredentialGroup:  hidden 1..5; SHOWN on the 5→6 edge; hidden leaving 33.
+//                     Band ≈ 5..33 (NOT 3..32). spec §2.2 bands CORRECTED.
+//   NoticePanel:      always hidden (never shown per spec §2.1 init=hidden)
+//   ServerList:       hidden 1..34; shown 35..37; hidden 38+. spec §2.2 corrected.
+//   PinKeypad:        hidden 1..30; shown 31/32; hidden 33+
+//   PinYesNo:         always hidden (legacy PIN dialog, unused in active flow)
 //
 // spec: Docs/RE/specs/frontend_layout_tables.md §2.
 
@@ -128,11 +133,24 @@ public sealed partial class LoginWindow : Control
     // loginwindow.dds backdrop (0,110,1024,490). spec §2.1 "Background | init hidden".
     private Control? _backgroundLayer;
 
-    // Bottom credential form strip. spec §2.1 "Login-form host strip".
+    // Login-form host strip: always-present bottom bar (server-submit[102], help/quit[105], confirm
+    // face-plate, help deco plate). Visible from state 2. spec §2.2 "Login-form host strip | always present".
     private Control? _formGroup;
+
+    // Interactive credential group: ID textbox, PW textbox, Save-ID checkbox + label plate,
+    // OK button (103), ID/PW label plates, edit-field frame art.
+    // Built hidden; shown on the 5→6 edge; hidden when leaving 33. Band ≈ 5..33.
+    // SOLE visibility authority — never toggled elsewhere. spec §2.2 bands CORRECTED.
+    private Control? _credentialGroup;
 
     // Server-list overlay root (0,0,1024,398). spec §2.1 "Server-list root | init hidden".
     private Control? _serverListRoot;
+
+    // PIN keypad host — structural root gated SOLELY by ApplyVisibility (states 31/32), mirroring
+    // _serverListRoot. The PinSubView child lives inside it and is never toggled directly, so the
+    // sub-state band is the single visibility authority (no double-source .Visible writes).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.1/§2.2/§3.
+    private Control? _pinKeypadRoot;
 
     // Central notice panel. spec §2.1 "Notice panel | init hidden".
     private Control? _noticePanel;
@@ -147,11 +165,14 @@ public sealed partial class LoginWindow : Control
     // Server-list submit plate button (snaps position on curtain>200). spec §2.3.
     private Control? _submitPlateCont;
 
-    // Quit-confirm modals. spec §2.1 "Exit modal | init hidden".
+    // Re-fetch popups (msg 4023/4024, OK action 113/114 → restart fetch). spec §2.2.
     private Control? _quitModal;
     private Control? _quitModal2;
     private float _quitModalAlpha;
     private bool _quitModalVisible;
+
+    // Quit-confirm ExitPanel (msg 2007), opened by action 102/112; "yes" (101) quits. spec §2.2.
+    private Control? _exitConfirm;
 
     // Credential textboxes.
     private HudTextbox? _idBox;
@@ -187,11 +208,13 @@ public sealed partial class LoginWindow : Control
         LoadSaveId();
 
         // Build all layers back-to-front (Z-order = add-order).
-        BuildCurtainPanels(); // curtain halves (slide apart in state 2)
-        BuildBackgroundLayer(); // loginwindow.dds backdrop (hidden in 1/2)
+        BuildCurtainPanels(); // curtain halves (always-present Y-animated panels)
+        BuildBackgroundLayer(); // loginwindow.dds backdrop (hidden in state 1 only)
         BuildNoticePanel(); // notice column (always hidden per spec)
-        BuildServerListRoot(); // server-list container (hidden until 33..37)
-        BuildFormGroup(); // bottom form strip (hidden until state 3)
+        BuildServerListRoot(); // server-list container (hidden until 35..37)
+        BuildFormGroup(); // always-present host strip (visible from state 2)
+        BuildCredentialGroup(); // interactive credential widgets (shown on 5→6 edge, band ≈ 5..33)
+        BuildPinKeypadRoot(); // PIN keypad host (hidden until 31/32) — above the form, below modals
         BuildPinYesNoPanel(); // PIN yes/no prompt (hidden per spec)
         BuildQuitModals(); // confirm modals (hidden per spec)
 
@@ -205,6 +228,9 @@ public sealed partial class LoginWindow : Control
     }
 
     // Headless layout oracle (MH_DUMP_LAYOUT=1).
+    // Proves the credential-group split: at LOGIN-REST (state 4) CredentialGroup must be hidden
+    // while FormGroup (host strip) is visible; at LOGIN-CREDS (state 6) CredentialGroup must be visible.
+    // spec: §2.2 bands "Interactive credential group | state ≈ 5..33" (CORRECTED, CYCLE 18 C5b).
     private async void RunLayoutDump()
     {
         SceneTree? tree = GetTree();
@@ -212,16 +238,22 @@ public sealed partial class LoginWindow : Control
         for (int i = 0; i < 3; i++) await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
         try
         {
+            // LOGIN-REST: state 4 after snap. CredentialGroup=hidden, FormGroup(host strip)=visible.
             SnapCurtainOpen();
             await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
             Dev.LayoutDump.Dump(this, "LOGIN-REST");
+
+            // LOGIN-CREDS: advance to state 6 (5→6 edge shows credential group).
+            // spec: §2.2 "entering 6 shows the inner credential group".
+            RunState(6);
+            for (int i = 0; i < 2; i++) await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
+            Dev.LayoutDump.Dump(this, "LOGIN-CREDS");
 
             DoOpenServerSelect();
             for (int i = 0; i < 2; i++) await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
             Dev.LayoutDump.Dump(this, "LOGIN-SERVER");
 
-            DoCloseServerSelect();
-            DoOpenPin();
+            RunState(31); // raise PIN via the real path: ApplyVisibility shows _pinKeypadRoot, DispatchState opens it.
             for (int i = 0; i < 2; i++) await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
             Dev.LayoutDump.Dump(this, "LOGIN-PIN");
         }
@@ -246,6 +278,22 @@ public sealed partial class LoginWindow : Control
         }
     }
 
+    // Window-level Enter key handler. The credential textboxes are hidden at state 4 so their
+    // TextSubmitted cannot fire. This handler covers Enter at ALL states, including 4→5 (before
+    // the credential group appears) and 6→29 (while the credential group is shown). No per-textbox
+    // TextSubmitted wiring — this is the single Enter path. spec: §2.2 "ENTER(10) → state6→OK, state4→5".
+    public override void _UnhandledKeyInput(InputEvent @event)
+    {
+        if (@event is InputEventKey key && key.Pressed && !key.Echo)
+        {
+            if (key.Keycode == Key.Enter || key.Keycode == Key.KpEnter)
+            {
+                OnEnterKey();
+                AcceptEvent();
+            }
+        }
+    }
+
     // -------------------------------------------------------------------------
     // State machine
     // spec: Docs/RE/specs/frontend_layout_tables.md §2.2
@@ -259,42 +307,57 @@ public sealed partial class LoginWindow : Control
         DispatchState(state);
     }
 
-    // Per-sub-state visibility gating.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 (init column) / §2.2.
+    // Per-sub-state visibility gating (SOLE authority — no .Visible writes elsewhere for these groups).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 / §2.2 bands (CORRECTED, CYCLE 18 C5b).
     private void ApplyVisibility(int state)
     {
-        // Background (loginwindow.dds): hidden in 1/2, shown from 3+.
-        // spec: §2.1 "Background | init hidden". CODE-CONFIRMED.
+        // Background (loginwindow.dds): shown on the 1→2 edge (revealed behind parting curtains),
+        // never hidden afterward. spec: §2.2 bands "Background visible from state 2".
         if (_backgroundLayer is not null)
-            _backgroundLayer.Visible = state >= 3;
+            _backgroundLayer.Visible = state >= 2;
 
-        // Curtain panels: visible in 1/2, hidden once done.
+        // Curtain panels: the binary models them as always-present Y-animated host panels that slide
+        // off-canvas (their visible flag stays set). Port hides them after state 2 which is visually
+        // equivalent (they are off-canvas). No partial-occlusion regression.
+        // spec: §2.2 bands "Curtains | not a hideable widget | always-present Y-animated panels".
         bool curtainOn = state <= 2;
         if (_curtainTop is not null) _curtainTop.Visible = curtainOn;
         if (_curtainBot is not null) _curtainBot.Visible = curtainOn;
 
-        // Form group: shown in 3..32, hidden in 1/2 and 33..41.
-        // spec: §2.2 "state 3 show login-form group".
+        // Form group (host strip: server-submit[102], help/quit[105], confirm face-plate, help deco):
+        // ALWAYS PRESENT from state 2. Distinct from the credential group.
+        // spec: §2.2 bands "Login-form host strip | always present" (CORRECTED from 3..32).
         if (_formGroup is not null)
-            _formGroup.Visible = state is >= 3 and <= 32;
+            _formGroup.Visible = state >= 2;
+
+        // Credential group (ID/PW textboxes, Save-ID, OK[103], label plates, frame art): SOLE
+        // visibility authority. Per the §2.2 EDGE ladder (the precise IDA truth, more authoritative
+        // than the reconstructed "5..33" band summary): SHOWN entering state 6 (the validate-armed idle
+        // where the user types), HIDDEN entering 29 (validate hides it + raises PIN), and re-hidden at
+        // 31/33. So the faithful visible interval is [6, 28] (in practice only state 6; PIN/server-list
+        // and states 3/4 keep it hidden). spec: §2.2 ladder (29/31/33 "hide the credential group").
+        if (_credentialGroup is not null)
+            _credentialGroup.Visible = state is >= 6 and <= 28;
 
         // Notice panel: always hidden (init=hidden, never re-shown). spec §2.1.
         if (_noticePanel is not null)
             _noticePanel.Visible = false;
 
-        // Server-list root: visible in 33..37 only.
-        // spec: §2.1 "Server-list root | init hidden".
+        // Server-list CONTENT panel: shown on the 34→35 edge, records painted at 37, hidden leaving 37.
+        // State 33 only STARTS the fetch worker; the content panel appears at 35.
+        // spec: §2.2 bands "Server-list CONTENT panel | state 35..37" (NOT 33..37; CYCLE 18 Phase A).
         if (_serverListRoot is not null)
-            _serverListRoot.Visible = state is >= 33 and <= 37;
+            _serverListRoot.Visible = state is >= 35 and <= 37;
 
-        // PIN yes/no: hidden (init hidden, separate prompt not in active flow).
+        // PIN yes/no: hidden (init hidden, separate prompt not in active flow). spec §2.1.
         if (_pinYesNoPanel is not null)
             _pinYesNoPanel.Visible = false;
 
-        // PIN keypad: shown in 31/32 only.
+        // PIN keypad root: shown in 31/32 only. The PinSubView child lives inside this root and is
+        // never toggled directly — this root is the SOLE visibility authority. spec §2.2/§3.
         bool pinOn = state == 31 || state == 32;
-        if (_pinView is not null && IsInstanceValid(_pinView))
-            _pinView.Visible = pinOn;
+        if (_pinKeypadRoot is not null)
+            _pinKeypadRoot.Visible = pinOn;
     }
 
     private void DispatchState(int state)
@@ -584,20 +647,37 @@ public sealed partial class LoginWindow : Control
         AddChild(_serverListRoot);
     }
 
+    // PIN keypad host root — full-canvas container, hidden until states 31/32. The PinSubView builds
+    // its own full-canvas click-capture + the (347,173) 329×422 dragon-frame panel inside this root;
+    // visibility is governed exclusively by ApplyVisibility. spec §2.1/§2.2/§3.
+    private void BuildPinKeypadRoot()
+    {
+        _pinKeypadRoot = new Control
+        {
+            Name = "PinKeypadRoot",
+            MouseFilter = MouseFilterEnum.Pass,
+            Visible = false, // init hidden; shown only in 31/32. spec §2.2.
+        };
+        _pinKeypadRoot.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        AddChild(_pinKeypadRoot);
+    }
+
     // -------------------------------------------------------------------------
-    // Login-form group (bottom credential strip)
-    // spec: §2.1 "Login-form host strip | panel | 0,326/768,1024,442 | A1 src(0,582)"
+    // Login-form host strip (always-present bottom bar)
+    // Contains: confirm face-plate, server-list submit button [102], help deco plate,
+    //           help/quit strip [105]. Visible from state 2 onward. NEVER gated on credential state.
+    // spec: §2.1 "Login-form host strip | always present"; §2.2 bands CORRECTED.
     // -------------------------------------------------------------------------
 
     private void BuildFormGroup()
     {
-        // Full-canvas container so child rects align to canvas origin.
-        // Hidden until state 3. spec §2.1/§2.2.
+        // Full-canvas container. Visible from state 2 (host strip always present after curtain starts).
+        // spec: §2.2 bands "Login-form host strip | always present" (CORRECTED from hidden-until-3).
         _formGroup = new Control
         {
             Name = "FormGroup",
             MouseFilter = MouseFilterEnum.Pass,
-            Visible = false, // hidden until state 3.
+            Visible = false, // hidden only at state 1; shown at state 2 via ApplyVisibility.
         };
         _formGroup.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         AddChild(_formGroup);
@@ -617,80 +697,6 @@ public sealed partial class LoginWindow : Control
             LoginLayout.ConfirmFacePlate.X, LoginLayout.ConfirmFacePlate.Y,
             LoginLayout.ConfirmFacePlate.W, LoginLayout.ConfirmFacePlate.H,
             LoginLayout.ConfirmFacePlate.SrcX, LoginLayout.ConfirmFacePlate.SrcY);
-
-        // ID label plate: A1 (340,30,38,13) src(0,398). spec §2.1 "ID label plate".
-        AddRect(formPanel, LoginLayout.AtlasLoginSlice1,
-            LoginLayout.AccountLabelArt.X, LoginLayout.AccountLabelArt.Y,
-            LoginLayout.AccountLabelArt.W, LoginLayout.AccountLabelArt.H,
-            LoginLayout.AccountLabelArt.SrcX, LoginLayout.AccountLabelArt.SrcY);
-
-        // PW label plate: A1 (507,30,49,13) src(38,398). spec §2.1 "PW label plate".
-        AddRect(formPanel, LoginLayout.AtlasLoginSlice1,
-            LoginLayout.PasswordLabelArt.X, LoginLayout.PasswordLabelArt.Y,
-            LoginLayout.PasswordLabelArt.W, LoginLayout.PasswordLabelArt.H,
-            LoginLayout.PasswordLabelArt.SrcX, LoginLayout.PasswordLabelArt.SrcY);
-
-        // Save-ID label plate: A1 (619,86,67,13) src(87,398). spec §2.1 "Save-ID label plate".
-        AddRect(formPanel, LoginLayout.AtlasLoginSlice1,
-            LoginLayout.SmallDecorPlate.X, LoginLayout.SmallDecorPlate.Y,
-            LoginLayout.SmallDecorPlate.W, LoginLayout.SmallDecorPlate.H,
-            LoginLayout.SmallDecorPlate.SrcX, LoginLayout.SmallDecorPlate.SrcY);
-
-        // Edit-field frame art for ID box. A1 src(615,404,102,13). spec §2.1 "ID textbox".
-        AddRect(formPanel, LoginLayout.EditFieldFrameAtlas,
-            LoginLayout.AccountBox.X, LoginLayout.AccountBox.Y,
-            LoginLayout.AccountBox.W, LoginLayout.AccountBox.H,
-            LoginLayout.AccountBox.SrcX, LoginLayout.AccountBox.SrcY);
-
-        // Edit-field frame art for PW box. spec §2.1 "PW textbox".
-        AddRect(formPanel, LoginLayout.EditFieldFrameAtlas,
-            LoginLayout.PasswordBox.X, LoginLayout.PasswordBox.Y,
-            LoginLayout.PasswordBox.W, LoginLayout.PasswordBox.H,
-            LoginLayout.PasswordBox.SrcX, LoginLayout.PasswordBox.SrcY);
-
-        // ID textbox — action 109, max 6, IME mode 16. spec §2.1 "ID textbox | maxlen 6".
-        _idBox = HudWidgetFactory.MakeTextbox(
-            LoginLayout.AccountBox.X, LoginLayout.AccountBox.Y,
-            LoginLayout.AccountBox.W, LoginLayout.TextboxRenderH,
-            password: false, maxLength: LoginLayout.IdMaxLength, fontSlot: 0);
-        Control? idCtrl = _idBox.GetControl();
-        if (idCtrl is not null)
-        {
-            idCtrl.Name = "IdTextbox";
-            formPanel.AddChild(idCtrl);
-        }
-
-        // PW textbox — action 110, max 129, masked. spec §2.1 "PW textbox | maxlen 129; masked".
-        _pwBox = HudWidgetFactory.MakeTextbox(
-            LoginLayout.PasswordBox.X, LoginLayout.PasswordBox.Y,
-            LoginLayout.PasswordBox.W, LoginLayout.TextboxRenderH,
-            password: true, maxLength: LoginLayout.PwMaxLength, fontSlot: 0);
-        Control? pwCtrl = _pwBox.GetControl();
-        if (pwCtrl is not null)
-        {
-            pwCtrl.Name = "PwTextbox";
-            formPanel.AddChild(pwCtrl);
-        }
-
-        // Enter on credential boxes. spec §2.2 "ENTER (10) → if state 6 run OK path, if state 4 → 5".
-        _idBox.TextSubmitted += _ => OnEnterKey();
-        _pwBox.TextSubmitted += _ => OnEnterKey();
-
-        // OK / Login button — action 103. A1 N(266,398) H(490,398). spec §2.1 "OK / Login button".
-        HudButton okBtn = HudWidgetFactory.MakeButton3(_atlas,
-            LoginLayout.AtlasLoginSlice1,
-            LoginLayout.OkButton.X, LoginLayout.OkButton.Y,
-            LoginLayout.OkButton.W, LoginLayout.OkButton.H,
-            LoginLayout.OkButton.SrcX, LoginLayout.OkButton.SrcY,
-            LoginLayout.OkHoverSrcX, LoginLayout.OkHoverSrcY,
-            LoginLayout.ActionOk, fontSlot: 0);
-        okBtn.ActionFired += OnAction;
-        Control? okCtrl = okBtn.GetControl();
-        if (okCtrl is not null)
-        {
-            okCtrl.Name = "OkButton";
-            formPanel.AddChild(okCtrl);
-        }
 
         // Server-list submit button — action 102. A1 N(154,398) H(378,398). spec §2.1.
         // Starts at form-local (456,166); snaps to canvas (494,469) when curtain>200.
@@ -732,6 +738,118 @@ public sealed partial class LoginWindow : Control
             quitCtrl.Name = "HelpQuitButton";
             formPanel.AddChild(quitCtrl);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Interactive credential group (ID/PW textboxes, Save-ID, OK[103], label plates, frame art)
+    // Built hidden; SOLE visibility authority = ApplyVisibility (band ≈ 5..33).
+    // Parent at same full-rect origin as formPanel so canvas-local coordinates are unchanged.
+    // spec: §2.1 LOGIN-FORM table (credential widgets); §2.2 bands "Interactive credential group".
+    // -------------------------------------------------------------------------
+
+    private void BuildCredentialGroup()
+    {
+        // Full-canvas container at the same Y=326 origin (matching formPanel's canvas origin).
+        // Built hidden; shown only by ApplyVisibility on the 5→6 edge. No direct .Visible elsewhere.
+        // spec: §2.2 bands "Interactive credential group | state ≈ 5..33" (CORRECTED, CYCLE 18 C5b).
+        _credentialGroup = new Control
+        {
+            Name = "CredentialGroup",
+            MouseFilter = MouseFilterEnum.Pass,
+            Visible = false, // built hidden; ApplyVisibility is the SOLE authority.
+        };
+        _credentialGroup.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        AddChild(_credentialGroup);
+
+        // Inner panel at the same canvas origin as formPanel (Y=326) so coordinates match the spec table.
+        var credPanel = new Control
+        {
+            Name = "CredPanel",
+            Position = new Vector2(0f, LoginLayout.BottomBarCanvasY),
+            Size = new Vector2(LoginLayout.BottomBarW, LoginLayout.BottomBarH),
+            MouseFilter = MouseFilterEnum.Pass,
+        };
+        _credentialGroup.AddChild(credPanel);
+
+        // ID label plate: A1 (340,30,38,13) src(0,398). spec §2.1 "ID label plate".
+        AddRect(credPanel, LoginLayout.AtlasLoginSlice1,
+            LoginLayout.AccountLabelArt.X, LoginLayout.AccountLabelArt.Y,
+            LoginLayout.AccountLabelArt.W, LoginLayout.AccountLabelArt.H,
+            LoginLayout.AccountLabelArt.SrcX, LoginLayout.AccountLabelArt.SrcY);
+
+        // PW label plate: A1 (507,30,49,13) src(38,398). spec §2.1 "PW label plate".
+        AddRect(credPanel, LoginLayout.AtlasLoginSlice1,
+            LoginLayout.PasswordLabelArt.X, LoginLayout.PasswordLabelArt.Y,
+            LoginLayout.PasswordLabelArt.W, LoginLayout.PasswordLabelArt.H,
+            LoginLayout.PasswordLabelArt.SrcX, LoginLayout.PasswordLabelArt.SrcY);
+
+        // Save-ID label plate: A1 (619,86,67,13) src(87,398). spec §2.1 "Save-ID label plate".
+        AddRect(credPanel, LoginLayout.AtlasLoginSlice1,
+            LoginLayout.SmallDecorPlate.X, LoginLayout.SmallDecorPlate.Y,
+            LoginLayout.SmallDecorPlate.W, LoginLayout.SmallDecorPlate.H,
+            LoginLayout.SmallDecorPlate.SrcX, LoginLayout.SmallDecorPlate.SrcY);
+
+        // Edit-field frame art for ID box. A1 src(615,404,102,13). spec §2.1 "ID textbox".
+        AddRect(credPanel, LoginLayout.EditFieldFrameAtlas,
+            LoginLayout.AccountBox.X, LoginLayout.AccountBox.Y,
+            LoginLayout.AccountBox.W, LoginLayout.AccountBox.H,
+            LoginLayout.AccountBox.SrcX, LoginLayout.AccountBox.SrcY);
+
+        // Edit-field frame art for PW box. spec §2.1 "PW textbox".
+        AddRect(credPanel, LoginLayout.EditFieldFrameAtlas,
+            LoginLayout.PasswordBox.X, LoginLayout.PasswordBox.Y,
+            LoginLayout.PasswordBox.W, LoginLayout.PasswordBox.H,
+            LoginLayout.PasswordBox.SrcX, LoginLayout.PasswordBox.SrcY);
+
+        // ID textbox — action 109, max 6, IME mode 16. spec §2.1 "ID textbox | maxlen 6".
+        _idBox = HudWidgetFactory.MakeTextbox(
+            LoginLayout.AccountBox.X, LoginLayout.AccountBox.Y,
+            LoginLayout.AccountBox.W, LoginLayout.TextboxRenderH,
+            password: false, maxLength: LoginLayout.IdMaxLength, fontSlot: 0);
+        Control? idCtrl = _idBox.GetControl();
+        if (idCtrl is not null)
+        {
+            idCtrl.Name = "IdTextbox";
+            credPanel.AddChild(idCtrl);
+        }
+
+        // PW textbox — action 110, max 129, masked. spec §2.1 "PW textbox | maxlen 129; masked".
+        _pwBox = HudWidgetFactory.MakeTextbox(
+            LoginLayout.PasswordBox.X, LoginLayout.PasswordBox.Y,
+            LoginLayout.PasswordBox.W, LoginLayout.TextboxRenderH,
+            password: true, maxLength: LoginLayout.PwMaxLength, fontSlot: 0);
+        Control? pwCtrl = _pwBox.GetControl();
+        if (pwCtrl is not null)
+        {
+            pwCtrl.Name = "PwTextbox";
+            credPanel.AddChild(pwCtrl);
+        }
+
+        // Enter in a focused credential field advances the flow. A focused Godot LineEdit CONSUMES the
+        // Enter key (emits text_submitted + marks it handled), so the window-level _UnhandledKeyInput
+        // does NOT see it at state 6 where a field has focus. These TextSubmitted handlers cover state 6
+        // (field focused); the window handler covers state 4 (credential group hidden → no field focus).
+        // They are complementary — never both at the same state — and OnEnterKey is a no-op outside
+        // states 4/6, so any stray double-call is harmless.
+        // spec: §2.2 "ENTER (10) → if state 6 run OK path, if state 4 → 5".
+        _idBox.TextSubmitted += _ => OnEnterKey();
+        _pwBox.TextSubmitted += _ => OnEnterKey();
+
+        // OK / Login button — action 103. A1 N(266,398) H(490,398). spec §2.1 "OK / Login button".
+        HudButton okBtn = HudWidgetFactory.MakeButton3(_atlas,
+            LoginLayout.AtlasLoginSlice1,
+            LoginLayout.OkButton.X, LoginLayout.OkButton.Y,
+            LoginLayout.OkButton.W, LoginLayout.OkButton.H,
+            LoginLayout.OkButton.SrcX, LoginLayout.OkButton.SrcY,
+            LoginLayout.OkHoverSrcX, LoginLayout.OkHoverSrcY,
+            LoginLayout.ActionOk, fontSlot: 0);
+        okBtn.ActionFired += OnAction;
+        Control? okCtrl = okBtn.GetControl();
+        if (okCtrl is not null)
+        {
+            okCtrl.Name = "OkButton";
+            credPanel.AddChild(okCtrl);
+        }
 
         // Save-ID checkbox — action 104. A1 N(717,398) P(730,398). spec §2.1 "Save-ID checkbox".
         _saveIdCheck = HudWidgetFactory.MakeCheckbox(_atlas,
@@ -751,7 +869,7 @@ public sealed partial class LoginWindow : Control
         if (chkCtrl is not null)
         {
             chkCtrl.Name = "SaveIdCheckbox";
-            formPanel.AddChild(chkCtrl);
+            credPanel.AddChild(chkCtrl);
         }
 
         // DEV prefill.
@@ -846,8 +964,85 @@ public sealed partial class LoginWindow : Control
             LoginLayout.ActionQuitConfirmYes2, "QuitModal2");
         AddChild(_quitModal2);
 
+        _exitConfirm = BuildExitConfirmPanel();
+        AddChild(_exitConfirm);
+
         _quitModalAlpha = 0f;
         _quitModalVisible = false;
+    }
+
+    // Quit-confirm ExitPanel (msg 2007): chrome + prompt + Yes(101 → quit) + No(51 → close).
+    // Opened by action 102/112. spec: Docs/RE/specs/frontend_layout_tables.md §2.2.
+    private Control BuildExitConfirmPanel()
+    {
+        var panel = new Control
+        {
+            Name = "ExitConfirmPanel",
+            Position = new Vector2(LoginLayout.ModalChromeX, LoginLayout.ModalChromeY),
+            Size = new Vector2(LoginLayout.ModalChromeW, LoginLayout.ModalChromeH),
+            Visible = false,
+            MouseFilter = MouseFilterEnum.Pass,
+        };
+
+        // Shared InventWindow.dds chrome src(318,647,340,190).
+        TextureRect? chrome = HudWidgetFactory.MakeAtlasRect(_atlas,
+            LoginLayout.AtlasInventWindow,
+            0, 0, LoginLayout.ModalChromeW, LoginLayout.ModalChromeH,
+            LoginLayout.ModalChromeSrcX, LoginLayout.ModalChromeSrcY);
+        if (chrome is not null) panel.AddChild(chrome);
+
+        // Prompt label (msg 2007). Fallback = empty — real client only shows CP949 from msg.xdb.
+        string prompt = _text.GetCaption(LoginLayout.MsgExitConfirm, "");
+        var promptLabel = new Label
+        {
+            Name = "PromptLabel",
+            Text = prompt,
+            Position = new Vector2(LoginLayout.ModalPromptX, LoginLayout.ModalPromptY),
+            Size = new Vector2(LoginLayout.ModalPromptW, LoginLayout.ModalPromptH),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        promptLabel.AddThemeColorOverride("font_color", Colors.White);
+        panel.AddChild(promptLabel);
+
+        // Yes button (action 101 → quit) — yes/no plate art (loginwindow.dds 520,492 / 635,492).
+        HudButton yes = HudWidgetFactory.MakeButton3(_atlas,
+            LoginLayout.AtlasLoginWindow,
+            40, 136, 110, 38,
+            LoginLayout.OptionTab1.SrcX, LoginLayout.OptionTab1.SrcY,
+            LoginLayout.OptionTab1HoverSrcX, LoginLayout.OptionTab1HoverSrcY,
+            LoginLayout.ActionAppQuit, fontSlot: 0);
+        yes.ActionFired += OnAction;
+        Control? yesCtrl = yes.GetControl();
+        if (yesCtrl is not null) panel.AddChild(yesCtrl);
+
+        // No button (action 51 → close) — plate art (loginwindow.dds 750,492 / 865,492).
+        HudButton no = HudWidgetFactory.MakeButton3(_atlas,
+            LoginLayout.AtlasLoginWindow,
+            190, 136, 110, 38,
+            LoginLayout.OptionTab2.SrcX, LoginLayout.OptionTab2.SrcY,
+            LoginLayout.OptionTab2HoverSrcX, LoginLayout.OptionTab2HoverSrcY,
+            ActionExitNo, fontSlot: 0);
+        no.ActionFired += OnAction;
+        Control? noCtrl = no.GetControl();
+        if (noCtrl is not null) panel.AddChild(noCtrl);
+
+        return panel;
+    }
+
+    // ExitPanel "no" action (close the quit-confirm). Local id; the binary's "yes" is 101.
+    private const int ActionExitNo = 51;
+
+    private void ShowExitConfirm()
+    {
+        if (_exitConfirm is not null) _exitConfirm.Visible = true;
+    }
+
+    private void HideExitConfirm()
+    {
+        if (_exitConfirm is not null) _exitConfirm.Visible = false;
     }
 
     private Control BuildConfirmModalPanel(
@@ -872,7 +1067,8 @@ public sealed partial class LoginWindow : Control
         if (chrome is not null) panel.AddChild(chrome);
 
         // Prompt label: msg.xdb 4023/4024. spec §2.1 "Confirm-A label (msg 4023)".
-        string prompt = _text.GetCaption(promptMsgId, $"[msg {promptMsgId}]");
+        // Fallback = empty — real client only shows CP949 from msg.xdb.
+        string prompt = _text.GetCaption(promptMsgId, "");
         var promptLabel = new Label
         {
             Name = "PromptLabel",
@@ -947,41 +1143,55 @@ public sealed partial class LoginWindow : Control
         // Any action while curtain is opening snaps it to done. spec: ui_system.md §7.7.
         if (_flowSubState == 2) SnapCurtainOpen();
 
+        // Action map re-confirmed vs binary (LoginWindow_OnEvent) 2026-06-18.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §2.2.
         switch (actionId)
         {
+            case LoginLayout.ActionAppQuit: // 101 — app quit (fired by the ExitPanel "yes").
+                EmitSignal(SignalName.QuitRequested);
+                break;
+
             case LoginLayout.ActionOk: // 103 — OK / Login button
                 // spec: §2.2 "103 OK/login … requires flowSubState==6, runs the game.ver gate → 29".
                 if (_flowSubState == 6) RunState(29);
                 else if (_flowSubState == 4) RunState(5);
                 break;
 
-            case LoginLayout.ActionConfirm: // 102 — show server-list
-                // spec: §2.2 "102 show server-list".
-                DoOpenServerSelect();
+            case LoginLayout.ActionConfirm: // 102 — open quit-confirm ExitPanel (NOT server-list).
+            case LoginLayout.ActionOptionTab2: // 112 — same target as 102 (open ExitPanel).
+                ShowExitConfirm();
                 break;
 
-            case 105: // Help/Quit strip — server-list re-fetch (→ 34). spec §2.2.
-                DoOpenServerSelect();
+            case 105: // throttled restart of the server-list fetch (→ 34). spec §2.2.
+                RestartServerFetch();
                 break;
 
             case LoginLayout.ActionSaveId: // 104 — save-ID toggle (handled by checkbox).
                 break;
 
-            case LoginLayout.ActionOptionTab1: // 111 — PIN-yes (→ 5). spec §2.2.
+            case LoginLayout.ActionOptionTab1: // 111 — advance (→ 5). spec §2.2.
                 RunState(5);
                 break;
 
-            case LoginLayout.ActionOptionTab2: // 112 — PIN-no. spec §2.2.
-                if (_pinYesNoPanel is not null) _pinYesNoPanel.Visible = false;
+            case LoginLayout.ActionQuitConfirmYes1: // 113 — re-fetch popup OK → restart fetch (→34).
+            case LoginLayout.ActionQuitConfirmYes2: // 114 — re-fetch popup OK → restart fetch (→34).
+                HideQuitModal();
+                RestartServerFetch();
                 break;
 
-            case LoginLayout.ActionQuitConfirmYes1: // 113 — confirm-A OK (→ 34). spec §2.2.
-            case LoginLayout.ActionQuitConfirmYes2: // 114 — confirm-B OK (→ 34). spec §2.2.
-                HideQuitModal();
-                DoOpenServerSelect();
+            case ActionExitNo: // 51 — ExitPanel "no": close the quit-confirm.
+                HideExitConfirm();
                 break;
         }
         // Pager (115..124) and plate (400/401) actions handled inside ServerSelectSubView.
+    }
+
+    // 105 / 113 / 114: throttled restart of the server-list fetch (re-enter sub-state 34).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.2 (105 = restart fetch, ~10 s throttle).
+    private void RestartServerFetch()
+    {
+        DoEnsureServerSelect();
+        RunState(34); // ApplyVisibility(34) keeps _serverListRoot shown (33..37 band) — the sole gate. spec §2.2.
     }
 
     private void OnEnterKey()
@@ -1004,7 +1214,8 @@ public sealed partial class LoginWindow : Control
         // ID length ≥ 4. spec §2.4.
         if (account.Length < LoginLayout.MinIdLength)
         {
-            string msg = _text.GetCaption((int)LoginLayout.MsgErrShortId, "[ID too short]");
+            // Fallback = empty — real client only shows CP949 from msg.xdb.
+            string msg = _text.GetCaption((int)LoginLayout.MsgErrShortId, "");
             GD.PrintErr($"[LoginWindow] ID too short. msg {LoginLayout.MsgErrShortId}: '{msg}'");
             RunState(6);
             return;
@@ -1013,7 +1224,8 @@ public sealed partial class LoginWindow : Control
         // PW length ≠ 0. spec §2.4.
         if (password.Length < LoginLayout.MinPwLength)
         {
-            string msg = _text.GetCaption((int)LoginLayout.MsgErrEmptyPassword, "[Password empty]");
+            // Fallback = empty — real client only shows CP949 from msg.xdb.
+            string msg = _text.GetCaption((int)LoginLayout.MsgErrEmptyPassword, "");
             GD.PrintErr($"[LoginWindow] PW empty. msg {LoginLayout.MsgErrEmptyPassword}: '{msg}'");
             RunState(6);
             return;
@@ -1037,16 +1249,12 @@ public sealed partial class LoginWindow : Control
     private void DoOpenServerSelect()
     {
         DoEnsureServerSelect();
-        if (_serverSelect is not null && IsInstanceValid(_serverSelect))
-            _serverSelect.Visible = true;
-        RunState(33);
+        RunState(33); // ApplyVisibility(33) shows _serverListRoot — the sole gate. spec §2.2.
     }
 
     private void DoCloseServerSelect()
     {
-        if (_serverSelect is not null && IsInstanceValid(_serverSelect))
-            _serverSelect.Visible = false;
-        RunState(4);
+        RunState(4); // ApplyVisibility(4) hides _serverListRoot — the sole gate. spec §2.2.
     }
 
     private void DoEnsureServerSelect()
@@ -1058,7 +1266,7 @@ public sealed partial class LoginWindow : Control
         _serverSelect = ServerSelectFactory();
         _serverSelect.Name = "ServerSelectSubView";
         _serverSelect.ServerSelected += OnServerSelected;
-        _serverSelect.BackRequested += OnServerSelectBack;
+        _serverSelect.Visible = true; // one-time enable; _serverListRoot gates show/hide. spec §2.1.
         _serverListRoot.AddChild(_serverSelect);
     }
 
@@ -1066,16 +1274,9 @@ public sealed partial class LoginWindow : Control
     {
         _collectedServerId = serverId;
         GD.Print($"[LoginWindow] Server selected (id={serverId}). spec: login_flow.md §2.1.");
-        // Close server-list and begin hand-off.
-        if (_serverSelect is not null && IsInstanceValid(_serverSelect))
-            _serverSelect.Visible = false;
+        // Begin hand-off; RunState(38) leaves the 33..37 band so ApplyVisibility hides _serverListRoot.
         RunState(38);
         RunState(41); // hand-off.
-    }
-
-    private void OnServerSelectBack()
-    {
-        DoCloseServerSelect();
     }
 
     // -------------------------------------------------------------------------
@@ -1084,44 +1285,45 @@ public sealed partial class LoginWindow : Control
 
     private void DoOpenPin()
     {
-        if (_pinView is not null && IsInstanceValid(_pinView))
+        // Lazily create the PinSubView once, parented into the structural _pinKeypadRoot. The root's
+        // visibility (set by ApplyVisibility for states 31/32) is the SOLE show/hide authority; the
+        // child is enabled once and never toggled directly. spec: §2.2/§3.
+        if (_pinView is null || !IsInstanceValid(_pinView))
         {
-            _pinView.Visible = true;
-        }
-        else if (PinFactory is not null)
-        {
+            if (PinFactory is null || _pinKeypadRoot is null) return;
             _pinView = PinFactory();
             _pinView.Name = "PinSubView";
             _pinView.HostInReferenceSpace = true;
             _pinView.PinSubmitted += OnPinSubmitted;
             _pinView.Cancelled += OnPinCancelled;
-            AddChild(_pinView);
+            _pinView.Visible = true; // one-time enable; _pinKeypadRoot gates show/hide.
+            _pinKeypadRoot.AddChild(_pinView);
         }
-
-        // Ensure visibility is applied for state 31.
-        if (_pinView is not null && IsInstanceValid(_pinView))
-            _pinView.Visible = true;
     }
 
     private void OnPinSubmitted(string pin)
     {
         _collectedPin = pin;
-        if (_pinView is not null && IsInstanceValid(_pinView)) _pinView.Visible = false;
         GD.Print($"[LoginWindow] PIN collected (len={pin.Length}). spec: login_flow.md §4.2.");
-        RunState(32); // poll → 33 immediately.
+        RunState(32); // poll → 33 immediately; leaving 31/32 hides _pinKeypadRoot via ApplyVisibility.
         RunState(33);
     }
 
     private void OnPinCancelled()
     {
-        if (_pinView is not null && IsInstanceValid(_pinView)) _pinView.Visible = false;
-        RunState(6);
+        RunState(6); // leaving 31/32 hides _pinKeypadRoot via ApplyVisibility.
         GD.Print("[LoginWindow] PIN cancelled; returning to validate-armed idle.");
     }
 
     // -------------------------------------------------------------------------
     // Save-ID persistence
-    // spec: §2.5
+    // Original target (CONFIRMED, static IDA, CYCLE 18 Phase A):
+    //   file = DoOption.ini (EXE-relative), section = [DO_OPTION], key = OPTION_ID.
+    //   Value = stored login-id string; "(null)" / empty = no saved id.
+    //   spec: frontend_layout_tables.md §2.5 (CONFIRMED).
+    // Port equivalent: user://mh_options.cfg ConfigFile, section/key from LoginLayout.SaveId*.
+    //   This is the layer-05 translation of the Windows private-profile API to Godot's ConfigFile.
+    //   Behavior is unchanged — do not modify working ConfigFile paths.
     // -------------------------------------------------------------------------
 
     private void OnSaveIdToggled(bool pressed)

@@ -68,11 +68,12 @@ public sealed class LobbyAndCharManagementTests
     // =====================================================================================================
 
     [Fact]
-    public async Task FetchServerList_publishes_view_with_population_and_caption_hints()
+    public async Task FetchServerList_publishes_view_with_load_and_caption_hints()
     {
-        // Corrected lobby record model (spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A):
-        //   +0 ServerId (==100 = AVAILABLE gate), +2 Status (caption/branch selector),
-        //   +4 Population (thresholds 500/800/1200), +6 Flag (nonzero = numeric, zero = discrete).
+        // Corrected lobby record model (spec: Docs/RE/packets/lobby.yaml Record Shape A):
+        //   +0 ServerId (1..40; == 100 is display-only, NOT a gate), +2 StatusCode (caption/branch
+        //   selector, == 0 active), +4 Load (thresholds 500/800/1200), +6 OpenTime (scheduled-open
+        //   minute, a time value — NOT a flag). Selectability gate = StatusCode == 0 AND Load < 2400.
         var sink = new FakeOutboundSink();
         var bus = new ClientEventBus(ClientEventBus.Unbounded);
         var fsm = new ClientStateMachine(bus, ClientState.Login);
@@ -81,18 +82,18 @@ public sealed class LobbyAndCharManagementTests
         {
             ServerList =
             [
-                // Status 0 + Flag nonzero (numeric mode): Population 1300 > 1200 -> Full; branch Normal.
-                new LobbyServerRecord(ServerId: 1, Status: 0, Population: 1300, Flag: 1),
-                // Status 0 + Flag zero (discrete mode): Population 3 -> Busy; branch Normal.
-                new LobbyServerRecord(ServerId: 2, Status: 0, Population: 3, Flag: 0),
-                // Status 3: special branch (6004/6005). Population/Flag are latency digit-split, not bands.
-                new LobbyServerRecord(ServerId: 3, Status: 3, Population: 24, Flag: 0),
-                // ServerId == 100: AVAILABLE gate on the id field (not on Status).
-                new LobbyServerRecord(ServerId: 100, Status: 0, Population: 100, Flag: 1),
-                // Status 5 (in 1..39): caption-array branch.
-                new LobbyServerRecord(ServerId: 5, Status: 5, Population: 0, Flag: 0),
-                // Status -1 (< 1): fallback 5901 -> Invalid.
-                new LobbyServerRecord(ServerId: 6, Status: -1, Population: 0, Flag: 0),
+                // StatusCode 0 (active): Load 1300 > 1200 -> Full; branch Normal.
+                new LobbyServerRecord(ServerId: 1, StatusCode: 0, Load: 1300, OpenTime: 1),
+                // StatusCode 0 (active): Load 600 > 500 -> Moderate; branch Normal.
+                new LobbyServerRecord(ServerId: 2, StatusCode: 0, Load: 600, OpenTime: 0),
+                // StatusCode 3: scheduled-open branch. Load = hour, OpenTime = minute.
+                new LobbyServerRecord(ServerId: 3, StatusCode: 3, Load: 14, OpenTime: 30),
+                // ServerId == 100: display-only label, NOT a gate. StatusCode 0 -> Normal.
+                new LobbyServerRecord(ServerId: 100, StatusCode: 0, Load: 100, OpenTime: 1),
+                // StatusCode 5 (in 1..39): caption-array branch.
+                new LobbyServerRecord(ServerId: 5, StatusCode: 5, Load: 0, OpenTime: 0),
+                // StatusCode -1 (< 1): fallback 5901 -> Invalid.
+                new LobbyServerRecord(ServerId: 6, StatusCode: -1, Load: 0, OpenTime: 0),
             ],
         };
         var useCases = new ApplicationUseCases(
@@ -106,26 +107,26 @@ public sealed class LobbyAndCharManagementTests
         ImmutableArray<ServerListEntryView> v = evt.Servers;
         Assert.Equal(6, v.Length);
 
-        // Numeric-mode population band (Flag nonzero).
+        // Load band (> 1200 -> Full); StatusCode 0 -> Normal.
         Assert.Equal(ServerLoadBand.Full, v[0].LoadHint);
         Assert.Equal(ServerStatusHint.Normal, v[0].StatusHint);
 
-        // Discrete-mode population band (Flag zero, Population == 3).
-        Assert.Equal(ServerLoadBand.Busy, v[1].LoadHint);
+        // Load band (> 500 -> Moderate); StatusCode 0 -> Normal.
+        Assert.Equal(ServerLoadBand.Moderate, v[1].LoadHint);
         Assert.Equal(ServerStatusHint.Normal, v[1].StatusHint);
 
-        // Status == 3 -> Special branch; the wire Population/Flag are forwarded verbatim.
+        // StatusCode == 3 -> Special (scheduled-open); the wire Load/OpenTime are forwarded verbatim.
         Assert.Equal(ServerStatusHint.Special, v[2].StatusHint);
-        Assert.Equal((short)24, v[2].Population);
-        Assert.Equal((short)0, v[2].Flag);
+        Assert.Equal((short)14, v[2].Load);
+        Assert.Equal((short)30, v[2].OpenTime);
 
-        // ServerId == 100 -> Available gate (regardless of Status).
-        Assert.Equal(ServerStatusHint.Available, v[3].StatusHint);
+        // ServerId == 100 is NOT a gate -> StatusCode 0 still classifies as Normal.
+        Assert.Equal(ServerStatusHint.Normal, v[3].StatusHint);
 
-        // Status in 1..39 -> Caption branch.
+        // StatusCode in 1..39 -> Caption branch.
         Assert.Equal(ServerStatusHint.Caption, v[4].StatusHint);
 
-        // Status < 1 -> Invalid (fallback 5901).
+        // StatusCode < 1 -> Invalid (fallback 5901).
         Assert.Equal(ServerStatusHint.Invalid, v[5].StatusHint);
     }
 

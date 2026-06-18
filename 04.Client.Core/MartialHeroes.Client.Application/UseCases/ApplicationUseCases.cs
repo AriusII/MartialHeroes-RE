@@ -206,17 +206,17 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         IReadOnlyList<LobbyServerRecord> records =
             await lobby.FetchServerListAsync(cancellationToken).ConfigureAwait(false);
 
-        // Map each decoded record to a presentation view, attaching the population-color band + caption
-        // branch hints so the ServerSelect screen does not re-derive the spec constants. The availability
-        // gate is ServerId == 100 (wire +0), the caption branch is Status (wire +2), the population band
-        // comes from Population (wire +4) gated by the Flag mode (wire +6).
-        // spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A.
+        // Map each decoded record to a presentation view, attaching the load-color band + caption
+        // branch hints so the ServerSelect screen does not re-derive the spec constants. The
+        // selectability gate is StatusCode == 0 AND Load < 2400; the caption branch is StatusCode
+        // (wire +2); the load band comes from Load (wire +4).
+        // spec: Docs/RE/packets/lobby.yaml Record Shape A.
         var builder = ImmutableArray.CreateBuilder<ServerListEntryView>(records.Count);
         foreach (LobbyServerRecord r in records)
         {
             builder.Add(new ServerListEntryView(
-                r.ServerId, r.Status, r.Population, r.Flag,
-                ClassifyPopulation(r.Population, r.Flag), ClassifyStatus(r.ServerId, r.Status)));
+                r.ServerId, r.StatusCode, r.Load, r.OpenTime,
+                ClassifyLoad(r.Load), ClassifyStatus(r.StatusCode)));
         }
 
         _eventBus?.Publish(new ServerListReceivedEvent(builder.ToImmutable()));
@@ -741,53 +741,33 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     // spec: Docs/RE/specs/login_flow.md §4.2.
 
     /// <summary>
-    /// Classifies a lobby server's population into a presentation color band. In numeric mode
-    /// (<paramref name="flag"/> nonzero) the population is thresholded against 500 / 800 / 1200
-    /// (strict greater-than); in discrete mode (<paramref name="flag"/> == 0) the population carries a
-    /// discrete load level (4 = Full, 3 = Busy, 2 = Moderate, else Light). Presentation-only; not a wire
-    /// decode. spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A (POPULATION caption mapping when
-    /// status_kind == 0).
+    /// Classifies a lobby server's load gauge into a presentation color band, thresholded against
+    /// 500 / 800 / 1200 (strict greater-than): &gt; 1200 = Full, &gt; 800 = Busy, &gt; 500 = Moderate,
+    /// else Light. Presentation-only; not a wire decode.
+    /// spec: Docs/RE/packets/lobby.yaml Record Shape A (load color plates when status_code == 0).
     /// </summary>
-    private static ServerLoadBand ClassifyPopulation(short population, short flag) => flag != 0
-        ? population switch
-        {
-            > 1200 => ServerLoadBand.Full, // spec: §RECORD SHAPE A +4 > 1200 -> 6001
-            > 800 => ServerLoadBand.Busy, // spec: §RECORD SHAPE A +4 > 800 -> 6002
-            > 500 => ServerLoadBand.Moderate, // spec: §RECORD SHAPE A +4 > 500 -> 6003
-            _ => ServerLoadBand.Light, // default tier
-        }
-        : population switch
-        {
-            4 => ServerLoadBand.Full, // spec: §RECORD SHAPE A discrete +4 == 4 -> 6001
-            3 => ServerLoadBand.Busy, // spec: §RECORD SHAPE A discrete +4 == 3 -> 6002
-            2 => ServerLoadBand.Moderate, // spec: §RECORD SHAPE A discrete +4 == 2 -> 6003
-            _ => ServerLoadBand.Light, // default tier
-        };
+    private static ServerLoadBand ClassifyLoad(short load) => load switch
+    {
+        > 1200 => ServerLoadBand.Full, // spec: Record Shape A +4 > 1200 -> red
+        > 800 => ServerLoadBand.Busy, // spec: Record Shape A +4 > 800 -> orange
+        > 500 => ServerLoadBand.Moderate, // spec: Record Shape A +4 > 500 -> yellow
+        _ => ServerLoadBand.Light, // spec: Record Shape A +4 <= 500 -> green
+    };
 
     /// <summary>
-    /// Classifies a lobby server's caption branch + availability for presentation. The AVAILABILITY gate
-    /// is <paramref name="serverId"/> == 100 (wire +0), NOT a status value. The caption branch comes from
-    /// <paramref name="status"/> (wire +2, <c>status_kind</c>): 0 = numeric/discrete population, 3 =
-    /// special (6004/6005), 1..39 = caption array, else = fallback 5901. Presentation-only; not a wire
-    /// decode. spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A.
+    /// Classifies a lobby server's caption branch for presentation from <paramref name="statusCode"/>
+    /// (wire +2): 0 = active (load band), 3 = scheduled-open (HH:MM caption), 1..39 = caption array,
+    /// else = fallback 5901. Presentation-only; not a wire decode. The selectability gate is
+    /// <c>StatusCode == 0 AND Load &lt; 2400</c>, not a <see cref="LobbyServerRecord.ServerId"/> value.
+    /// spec: Docs/RE/packets/lobby.yaml Record Shape A.
     /// </summary>
-    private static ServerStatusHint ClassifyStatus(ushort serverId, short status)
+    private static ServerStatusHint ClassifyStatus(short statusCode) => statusCode switch
     {
-        // Availability sentinel is on the id/select-key (+0), not status_kind (+2).
-        // spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE A, offset +0 [CODE-CONFIRMED].
-        if (serverId == 100)
-        {
-            return ServerStatusHint.Available;
-        }
-
-        return status switch
-        {
-            0 => ServerStatusHint.Normal, // spec: §RECORD SHAPE A status_kind == 0 (population branch)
-            3 => ServerStatusHint.Special, // spec: §RECORD SHAPE A status_kind == 3 (6004/6005)
-            >= 1 and <= 39 => ServerStatusHint.Caption, // spec: §RECORD SHAPE A 1..39 caption array
-            _ => ServerStatusHint.Invalid, // spec: §RECORD SHAPE A < 1 or > 39 -> 5901 fallback
-        };
-    }
+        0 => ServerStatusHint.Normal, // spec: Record Shape A status_code == 0 (active/load branch)
+        3 => ServerStatusHint.Special, // spec: Record Shape A status_code == 3 (scheduled-open HH:MM)
+        >= 1 and <= 39 => ServerStatusHint.Caption, // spec: Record Shape A 1..39 caption array
+        _ => ServerStatusHint.Invalid, // spec: Record Shape A < 1 or > 39 -> 5901 fallback
+    };
 
     // -------------------------------------------------------------------------
     // Chat helpers

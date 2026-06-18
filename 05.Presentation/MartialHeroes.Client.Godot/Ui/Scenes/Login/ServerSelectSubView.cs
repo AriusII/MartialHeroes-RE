@@ -116,12 +116,12 @@ public sealed partial class ServerSelectSubView : Control
     private const int PopOrangeThreshold = 800; // > 800  → msg 6002 (orange). spec §11.4. CODE-CONFIRMED.
     private const int PopYellowThreshold = 500; // > 500  → msg 6003 (yellow). spec §11.4. CODE-CONFIRMED.
 
-    // Population colour captions (msg.xdb ids). Population colours in msg.xdb.
-    // spec: Docs/RE/specs/frontend_scenes.md §11.4 "6001=red,6002=orange,6003=yellow". CODE-CONFIRMED.
-    private static readonly Color PopColorRed = new(1f, 0f, 0f, 1f); // > 1200. spec §11.4.
-    private static readonly Color PopColorOrange = new(1f, 0.5f, 0f, 1f); // > 800.  spec §11.4.
-    private static readonly Color PopColorYellow = new(1f, 1f, 0f, 1f); // > 500.  spec §11.4.
-    private static readonly Color PopColorWhite = Colors.White; // ≤ 500.  spec §11.4.
+    // Population colour DWORDs (ARGB) — re-confirmed vs binary 2026-06-18.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.
+    private static readonly Color PopColorRed = Color.Color8(255, 0, 0); // > 1200, 0xFFFF0000. spec §4.
+    private static readonly Color PopColorOrange = Color.Color8(237, 104, 6); // > 800, 0xFFED6806. spec §4.
+    private static readonly Color PopColorYellow = Color.Color8(255, 255, 0); // > 500, 0xFFFFFF00. spec §4.
+    private static readonly Color PopColorGreen = Color.Color8(181, 255, 122); // ≤ 500, 0xFFB5FF7A. spec §4.
 
     // -------------------------------------------------------------------------
     // Runtime state
@@ -138,9 +138,6 @@ public sealed partial class ServerSelectSubView : Control
 
     [Signal]
     public delegate void ServerSelectedEventHandler(int serverId);
-
-    [Signal]
-    public delegate void BackRequestedEventHandler();
 
     // -------------------------------------------------------------------------
     // Construction
@@ -210,7 +207,7 @@ public sealed partial class ServerSelectSubView : Control
         {
             // Empty server list draws no plates; pager row remains present. Notice id 4027 comes from msg.xdb.
             // spec: Docs/RE/specs/frontend_scenes.md §1.9 / §11.4.
-            string msg = _text.GetCaption(LoginLayout.MsgErrNoServers, "[No servers]");
+            string msg = _text.GetCaption(LoginLayout.MsgErrNoServers, string.Empty);
             GD.Print($"[ServerSelectSubView] page 0: no servers. msg {LoginLayout.MsgErrNoServers}: '{msg}'");
             return;
         }
@@ -275,7 +272,7 @@ public sealed partial class ServerSelectSubView : Control
             if (!entry.IsSelectable)
             {
                 GD.Print($"[ServerSelectSubView] Plate action {actionId} ignored: server {entry.ServerId} " +
-                         $"unavailable (status={entry.StatusCode}, population={entry.Population}). " +
+                         $"unavailable (status={entry.StatusCode}, load={entry.Load}). " +
                          "spec: frontend_scenes.md §11.4.");
                 return;
             }
@@ -372,34 +369,6 @@ public sealed partial class ServerSelectSubView : Control
         });
     }
 
-    private void BuildBackControl()
-    {
-        WidgetRect r = LoginLayout.OptionTab1;
-        Texture2D? normal = _atlas.SliceByPath(AtlasB, r.SrcX, r.SrcY, r.W, r.H);
-        Texture2D? hover = _atlas.SliceByPath(AtlasB, LoginLayout.OptionTab1HoverSrcX, LoginLayout.OptionTab1HoverSrcY,
-            r.W, r.H);
-
-        var btn = new TextureButton
-        {
-            Position = new Vector2(LoginLayout.OptionTabsPanelX + r.X, LoginLayout.OptionTabsPanelY + r.Y),
-            Size = new Vector2(r.W, r.H),
-            CustomMinimumSize = new Vector2(r.W, r.H),
-            IgnoreTextureSize = true,
-            StretchMode = TextureButton.StretchModeEnum.Scale,
-            TextureNormal = normal,
-            TextureHover = hover,
-            TexturePressed = hover,
-            TextureDisabled = normal,
-        };
-
-        btn.Pressed += () =>
-        {
-            GD.Print("[ServerSelectSubView] Back/close clicked: BackRequested. spec: frontend_scenes.md §11.2f.");
-            EmitSignal(SignalName.BackRequested);
-        };
-        AddChild(btn);
-    }
-
     private void OnPagerClicked(int actionId)
     {
         // Pager actions re-page only and never commit a selected server.
@@ -415,7 +384,7 @@ public sealed partial class ServerSelectSubView : Control
         // Row labels: dst(x,390,174,21), dst(x,410,174,20), dst(x,430,174,20).
         // spec: Docs/RE/specs/frontend_scenes.md §11.4.
         bool available = e.IsSelectable; // spec §11.4 load guard. CODE-CONFIRMED.
-        Color popColor = PopColorForPopulation(e.Population); // spec §11.4 population colour bands. CODE-CONFIRMED.
+        Color popColor = PopColorForLoad(e.Load); // spec §11.4 load colour bands. CODE-CONFIRMED.
         string name = ResolveServerName(e);
         string loadText = ResolveLoadText(e);
         string statusText = ResolveStatusText(e);
@@ -462,7 +431,7 @@ public sealed partial class ServerSelectSubView : Control
     {
         ServerEntry e = _servers[serverIndex];
         string name = e.DisplayName.Length > 0 ? e.DisplayName : $"Server {e.ServerId}";
-        return $"plate{plateSlot}=server {e.ServerId} '{name}' pop {e.Population} selectable={e.IsSelectable}";
+        return $"plate{plateSlot}=server {e.ServerId} '{name}' load {e.Load} selectable={e.IsSelectable}";
     }
 
     private static Vector2 PanelPoint(int x, int y) => new(PanelX + x, PanelY + y);
@@ -487,44 +456,49 @@ public sealed partial class ServerSelectSubView : Control
         // Active entries use the load buckets msg 6001/6002/6003; otherwise show the numeric load.
         // spec: Docs/RE/specs/frontend_scenes.md §2.3 / §11.4.
         if (e.StatusCode != 0)
-            return e.Population.ToString();
+            return e.Load.ToString();
 
-        uint? msgId = e.Population > PopRedThreshold
+        uint? msgId = e.Load > PopRedThreshold
             ? LoginLayout.MsgServerLoadRed
-            : e.Population > PopOrangeThreshold
+            : e.Load > PopOrangeThreshold
                 ? LoginLayout.MsgServerLoadOrange
-                : e.Population > PopYellowThreshold
+                : e.Load > PopYellowThreshold
                     ? LoginLayout.MsgServerLoadYellow
                     : null;
 
         return msgId is { } id
-            ? _text.GetCaption(id, e.Population.ToString())
-            : e.Population.ToString();
+            ? _text.GetCaption(id, e.Load.ToString())
+            : e.Load.ToString();
     }
 
     private string ResolveStatusText(ServerEntry e)
     {
-        // spec: Docs/RE/specs/frontend_scenes.md §2.3 — status==3 uses msg 6004/6005;
-        // default status indexes msg 4029..4032.
+        // spec: Docs/RE/packets/lobby.yaml Record Shape A — status_code == 3 is the scheduled-open
+        // branch, rendering an HH:MM caption (hour from Load@+4, minute from OpenTime@+6).
+        // Default status indexes msg 4029..4032.
         if (e.StatusCode == 0)
-            return e.IsSelectable ? string.Empty : _text.GetCaption(LoginLayout.MsgServerLoadRed, "[Full]");
+            return e.IsSelectable ? string.Empty : _text.GetCaption(LoginLayout.MsgServerLoadRed, string.Empty);
 
         if (e.StatusCode == 3)
         {
-            if (e.Population == 24)
-                return _text.GetCaption(LoginLayout.MsgServerPreparing, "[Preparing]");
+            // Scheduled-open: Load(+4) == 24 is the "preparing" sentinel (msg 6004); any other Load is a
+            // valid hour, rendered as an HH:MM caption (msg 6005) from Load (hour, +4) and OpenTime
+            // (minute, +6). spec: Docs/RE/specs/frontend_layout_tables.md §4 (status_code == 3 →
+            // 6004 only when load == 24, else 6005 HH:MM); Docs/RE/packets/lobby.yaml Record Shape A.
+            if (e.Load == 24) // §4 preparing sentinel (24 is not a valid clock hour).
+                return _text.GetCaption(LoginLayout.MsgServerPreparing, string.Empty);
 
             string template = _text.GetCaption(LoginLayout.MsgServerClockFormat, "{0:00}:{1:00}");
-            return FormatCaption(template, e.Population, e.Flag, $"{e.Population:00}:{e.Flag:00}");
+            return FormatCaption(template, e.Load, e.OpenTime, $"{e.Load:00}:{e.OpenTime:00}");
         }
 
         if (e.StatusCode is >= 1 and <= 4)
         {
             uint msgId = LoginLayout.MsgServerHeaderFirst + (uint)e.StatusCode - 1;
-            return _text.GetCaption(msgId, $"[msg {msgId}]");
+            return _text.GetCaption(msgId, string.Empty);
         }
 
-        return $"[status {e.StatusCode}]";
+        return string.Empty;
     }
 
     private static string FormatCaption(string template, int value, string fallback)
@@ -569,15 +543,15 @@ public sealed partial class ServerSelectSubView : Control
     }
 
     // -------------------------------------------------------------------------
-    // Population colour
+    // Load colour
     // spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED.
     // -------------------------------------------------------------------------
 
-    private static Color PopColorForPopulation(int population)
+    private static Color PopColorForLoad(int load)
     {
-        if (population > PopRedThreshold) return PopColorRed; // > 1200. spec §11.4.
-        if (population > PopOrangeThreshold) return PopColorOrange; // > 800.  spec §11.4.
-        if (population > PopYellowThreshold) return PopColorYellow; // > 500.  spec §11.4.
-        return PopColorWhite; // ≤ 500.  spec §11.4.
+        if (load > PopRedThreshold) return PopColorRed; // > 1200, 0xFFFF0000. spec §4.
+        if (load > PopOrangeThreshold) return PopColorOrange; // > 800, 0xFFED6806. spec §4.
+        if (load > PopYellowThreshold) return PopColorYellow; // > 500, 0xFFFFFF00. spec §4.
+        return PopColorGreen; // ≤ 500, 0xFFB5FF7A (numeric text, no msg id). spec §4.
     }
 }

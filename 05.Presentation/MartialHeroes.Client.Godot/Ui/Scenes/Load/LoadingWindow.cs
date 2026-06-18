@@ -240,6 +240,8 @@ public sealed partial class LoadingWindow : Control
             Position = Vector2.Zero,
             Size = new Vector2(RefWidth, RefHeight),
             StretchMode = TextureRect.StretchModeEnum.Scale,
+            // IgnoreSize: respect the 1024×768 Size instead of ballooning to the 1024×1024 DDS.
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             MouseFilter = MouseFilterEnum.Ignore,
         };
         AddChild(_bgRect);
@@ -265,6 +267,8 @@ public sealed partial class LoadingWindow : Control
             Position = new Vector2(TrackCanvasX, TrackCanvasY), // top-left of track. spec §5.
             Size = new Vector2(0f, TrackDesignHeight), // width grows, height fixed. spec §5.
             StretchMode = TextureRect.StretchModeEnum.Scale,
+            // IgnoreSize: the bar must respect its (fill_px × 223) Size, not balloon to the DDS size.
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             MouseFilter = MouseFilterEnum.Ignore,
             Visible = false,
         };

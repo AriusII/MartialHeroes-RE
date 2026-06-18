@@ -25,7 +25,7 @@ public sealed class LobbyServerListLayoutTests
         Assert.Equal(8, LobbyFrameWrapper.WireSize);
     }
 
-    [Fact] // spec: Docs/RE/packets/lobby.yaml (8-byte entry: i16 id/status/population/flag)
+    [Fact] // spec: Docs/RE/packets/lobby.yaml (8-byte entry: i16 server_id/status_code/load/open_time)
     public void LobbyServerEntry_size_is_8()
     {
         Assert.Equal(8, Marshal.SizeOf<LobbyServerEntry>());
@@ -53,13 +53,13 @@ public sealed class LobbyServerListLayoutTests
         Assert.Equal(0x06, (int)Marshal.OffsetOf<LobbyFrameWrapper>(nameof(LobbyFrameWrapper.Reserved)));
     }
 
-    [Fact] // spec: Docs/RE/packets/lobby.yaml (id@+0, status@+2, population@+4, flag@+6)
+    [Fact] // spec: Docs/RE/packets/lobby.yaml (server_id@+0, status_code@+2, load@+4, open_time@+6)
     public void LobbyServerEntry_field_offsets()
     {
         Assert.Equal(0x00, (int)Marshal.OffsetOf<LobbyServerEntry>(nameof(LobbyServerEntry.Id)));
-        Assert.Equal(0x02, (int)Marshal.OffsetOf<LobbyServerEntry>(nameof(LobbyServerEntry.Status)));
-        Assert.Equal(0x04, (int)Marshal.OffsetOf<LobbyServerEntry>(nameof(LobbyServerEntry.Population)));
-        Assert.Equal(0x06, (int)Marshal.OffsetOf<LobbyServerEntry>(nameof(LobbyServerEntry.Flag)));
+        Assert.Equal(0x02, (int)Marshal.OffsetOf<LobbyServerEntry>(nameof(LobbyServerEntry.StatusCode)));
+        Assert.Equal(0x04, (int)Marshal.OffsetOf<LobbyServerEntry>(nameof(LobbyServerEntry.Load)));
+        Assert.Equal(0x06, (int)Marshal.OffsetOf<LobbyServerEntry>(nameof(LobbyServerEntry.OpenTime)));
     }
 
     // -------------------------------------------------------------------------
@@ -96,31 +96,31 @@ public sealed class LobbyServerListLayoutTests
         BinaryPrimitives.WriteUInt16LittleEndian(buf[0x04..], count); // Count = 3
         BinaryPrimitives.WriteUInt16LittleEndian(buf[0x06..], 0); // Reserved
 
-        // Three distinct entries. id/status/population/flag at +0/+2/+4/+6 within each 8-byte slot.
-        WriteEntry(buf, 0, id: 100, status: 0, population: 1300, flag: 1); // available + numeric heavy
-        WriteEntry(buf, 1, id: 42, status: 3, population: 24, flag: 0); // special-3 == 24 branch
-        WriteEntry(buf, 2, id: -7, status: 17, population: 0, flag: 0); // caption-array, signed id
+        // Three distinct entries. server_id/status_code/load/open_time at +0/+2/+4/+6 within each slot.
+        WriteEntry(buf, 0, id: 100, statusCode: 0, load: 1300, openTime: 1); // status 0 + heavy load
+        WriteEntry(buf, 1, id: 42, statusCode: 3, load: 24, openTime: 0); // scheduled-open branch
+        WriteEntry(buf, 2, id: -7, statusCode: 17, load: 0, openTime: 0); // caption-array, signed id
 
         var reader = new LobbyServerListReader(buf);
         Assert.Equal(count, reader.Count);
 
         ref readonly LobbyServerEntry e0 = ref reader[0];
         Assert.Equal((short)100, e0.Id);
-        Assert.Equal((short)0, e0.Status);
-        Assert.Equal((short)1300, e0.Population);
-        Assert.Equal((short)1, e0.Flag);
+        Assert.Equal((short)0, e0.StatusCode);
+        Assert.Equal((short)1300, e0.Load);
+        Assert.Equal((short)1, e0.OpenTime);
 
         ref readonly LobbyServerEntry e1 = ref reader[1];
         Assert.Equal((short)42, e1.Id);
-        Assert.Equal((short)3, e1.Status);
-        Assert.Equal((short)24, e1.Population);
-        Assert.Equal((short)0, e1.Flag);
+        Assert.Equal((short)3, e1.StatusCode);
+        Assert.Equal((short)24, e1.Load);
+        Assert.Equal((short)0, e1.OpenTime);
 
         ref readonly LobbyServerEntry e2 = ref reader[2];
         Assert.Equal((short)-7, e2.Id); // signed id round-trips
-        Assert.Equal((short)17, e2.Status);
-        Assert.Equal((short)0, e2.Population);
-        Assert.Equal((short)0, e2.Flag);
+        Assert.Equal((short)17, e2.StatusCode);
+        Assert.Equal((short)0, e2.Load);
+        Assert.Equal((short)0, e2.OpenTime);
     }
 
     [Fact] // spec: Docs/RE/packets/lobby.yaml — reader clamps count to the bytes actually available.
@@ -129,8 +129,8 @@ public sealed class LobbyServerListLayoutTests
         // Wrapper claims 5 entries but only 2 entries' worth of bytes follow.
         Span<byte> buf = stackalloc byte[LobbyFrameWrapper.WireSize + (2 * LobbyServerEntry.WireSize)];
         BinaryPrimitives.WriteUInt16LittleEndian(buf[0x04..], 5); // Count = 5 (over-claim)
-        WriteEntry(buf, 0, id: 1, status: 0, population: 0, flag: 0);
-        WriteEntry(buf, 1, id: 2, status: 0, population: 0, flag: 0);
+        WriteEntry(buf, 0, id: 1, statusCode: 0, load: 0, openTime: 0);
+        WriteEntry(buf, 1, id: 2, statusCode: 0, load: 0, openTime: 0);
 
         var reader = new LobbyServerListReader(buf);
         Assert.Equal(2, reader.Count); // clamped to available, not the over-claimed 5
@@ -180,14 +180,14 @@ public sealed class LobbyServerListLayoutTests
         Assert.Equal((byte)0, ep.Endpoint[29]); // trailing zero-fill
     }
 
-    private static void WriteEntry(Span<byte> buf, int index, short id, short status, short population, short flag)
+    private static void WriteEntry(Span<byte> buf, int index, short id, short statusCode, short load, short openTime)
     {
         Span<byte> slot = buf.Slice(
             LobbyFrameWrapper.WireSize + (index * LobbyServerEntry.WireSize),
             LobbyServerEntry.WireSize);
         BinaryPrimitives.WriteInt16LittleEndian(slot[0x00..], id);
-        BinaryPrimitives.WriteInt16LittleEndian(slot[0x02..], status);
-        BinaryPrimitives.WriteInt16LittleEndian(slot[0x04..], population);
-        BinaryPrimitives.WriteInt16LittleEndian(slot[0x06..], flag);
+        BinaryPrimitives.WriteInt16LittleEndian(slot[0x02..], statusCode);
+        BinaryPrimitives.WriteInt16LittleEndian(slot[0x04..], load);
+        BinaryPrimitives.WriteInt16LittleEndian(slot[0x06..], openTime);
     }
 }

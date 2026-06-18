@@ -273,6 +273,14 @@ public static class LoginLayout
     public const int OkHoverSrcY = 398;
     public const int ActionOk = 103; // spec §1.2 "OK / Login button". CODE-CONFIRMED.
 
+    // App quit — fired by the ExitPanel "yes". spec: frontend_layout_tables.md §2.2 (binary case 101 →
+    // Engine_ClearRunFlag). CODE-CONFIRMED vs binary 2026-06-18.
+    public const int ActionAppQuit = 101;
+
+    // Quit-confirm (ExitPanel) caption + Yes/No actions. The ExitPanel is opened by action 102/112 and
+    // its "yes" fires 101 (quit). spec: frontend_layout_tables.md §2.2. CODE-CONFIRMED vs binary.
+    public const uint MsgExitConfirm = 2007;
+
     // 종료/도움말 (Quit/Help) strip button — IDA: BuildButton3State(login_slice1, dst(456,-3,111,38),
     // N src(792,398), H src(602,416)), action 105. It sits flush to the top edge (Y=-3, clipped) as the
     // top-right help/quit strip — NOT the earlier far-right (840,64) placement. Re-verified vs the binary

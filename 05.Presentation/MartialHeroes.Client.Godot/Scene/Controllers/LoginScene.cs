@@ -163,9 +163,10 @@ public sealed partial class LoginScene : StubSceneController
             Name = "ServerSelectSubView",
         };
 
-        if (IsDevOfflineMode())
-            _serverSelect.SetServers(DevServerList());
-        else
+        // No synthetic server data: in DEV-offline the server-list is faithfully EMPTY (the original
+        // shows nothing without a real lobby — no invented servers); online we fetch the real list from
+        // the lobby (TCP port 10000). spec: Docs/RE/specs/login_flow.md §2.1; lobby.yaml.
+        if (!IsDevOfflineMode())
             _ = FetchServerListAsync();
 
         GD.Print(
@@ -198,9 +199,9 @@ public sealed partial class LoginScene : StubSceneController
             entries.Add(new ServerEntry(
                 ServerId: e.ServerId,
                 DisplayName: string.Empty,
-                StatusCode: e.Status,
-                Population: e.Population,
-                Flag: e.Flag));
+                StatusCode: e.StatusCode,
+                Load: e.Load,
+                OpenTime: e.OpenTime));
         }
 
         _serverSelect.SetServers(entries);
@@ -229,9 +230,21 @@ public sealed partial class LoginScene : StubSceneController
     {
         if (_ctx?.UseCases is not { } useCases) return;
 
+        // In DEV offline mode we never call the real lobby or open a game connection.
+        // The offline auto-walk relies on SelectServerAsync being a no-op here.
+        if (IsDevOfflineMode()) return;
+
         try
         {
-            await useCases.SelectServerAsync(serverId, CancellationToken.None);
+            MartialHeroes.Network.Abstractions.Lobby.LobbyChannelEndpoint endpoint =
+                await useCases.SelectServerAsync(serverId, CancellationToken.None)
+                    .ConfigureAwait(false);
+
+            // Open the game TCP connection with the resolved endpoint. This wires the real
+            // outbound sink through the relay so the 1/4 handshake goes to the real server.
+            // spec: Docs/RE/specs/login_flow.md §2.2 — lobby resolves the game-server host:port.
+            if (_ctx is not null)
+                await _ctx.OpenGameConnectionAsync(endpoint.Host, endpoint.Port).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -249,12 +262,6 @@ public sealed partial class LoginScene : StubSceneController
     private static string DevAccountId() => ReadCfgKey("dev_account_id", "xwdvg26");
     private static string DevAccountPw() => ReadCfgKey("dev_account_pw", "crfgb727*");
     private static string DevAccountPin() => ReadCfgKey("dev_account_pin", "1472");
-
-    private static IReadOnlyList<ServerEntry> DevServerList() =>
-    [
-        new ServerEntry(ServerId: 1, DisplayName: "무신", StatusCode: 0, Population: 120, Flag: 1),
-        new ServerEntry(ServerId: 2, DisplayName: "천마", StatusCode: 0, Population: 640, Flag: 1),
-    ];
 
     private static bool IsDevOfflineMode()
     {
