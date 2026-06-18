@@ -1,0 +1,48 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: the body SIZE (4 bytes) is control-flow CONFIRMED from the send builder;
+# the meaning of the 4 bytes is capture/debugger-pending. capture_verified: false.
+#
+# NEW opcode (HUD-II Wave 2): delivery / consignment claim-retrieve, not previously catalogued.
+
+name: CmsgDeliveryClaim
+opcode: 0x20047           # major 2 (GameAction), minor 71 -> (2 << 16) | 71
+direction: C2S
+size: 4                   # FIXED 4-byte body: a single selector / record-id
+spec: packets/2-71_delivery_claim.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client delivery / consignment claim-retrieve. A send-only message carrying a 4-byte fixed body (a single selector or record-id) that retrieves a delivered or consigned item -- or sale proceeds -- from the delivery box. Emitted from the delivery panel's claim-confirm path. Major 2 is C2S-only, so there is no inbound dispatch slot for this opcode by design.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 4.
+# CONTROL-FLOW CONFIRMED: the send builder appends a fixed 4-byte body. Whether the 4 bytes are a
+# record id, a slot index, or a side selector is capture/debugger-pending.
+fields:
+  - { name: Selector, type: u32 }   # 0x00  a single selector / record-id for the claim (meaning capture-pending)
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (4 bytes); the VALUE meaning of the 4 bytes is
+  capture/debugger-pending. The send is emitted from the delivery panel's claim-confirm path.
+
+    0x00 (4B) Selector : the claim selector. The delivery box stages a recipient name and up to a
+                         few item records before opening an own-retrieve vs other-side-claim confirm
+                         dialog; the confirm "yes" emits this 4-byte send. Whether the 4 bytes encode
+                         a record id, a slot index, or a side selector is NOT pinned this lane.
+
+  The delivery box holds a 40-slot item grid with own / other / sale views, and discriminates "my
+  side" vs "other side" by comparing a stored owner-id field against the local player id. That side
+  distinction is a panel-internal decision; only the 4-byte claim send itself is on the wire here.
+
+  RELATIONSHIP: part of the mail / delivery family. Mail compose-send is C2S 2/70
+  CmsgCarrierPigeonSend (packets/2-70_carrier_pigeon_send.yaml); the LetterPanel request is C2S 2/60
+  CmsgLetterRequest (packets/2-60_letter_request.yaml). Mail-arrival notification rides S2C 1/20
+  SmsgSrvLetterReceived.
+
+  RESIDUAL: the S2C delivery-box POPULATE opcode + its per-record layout (the 16-byte delivery item
+  records and owner-id field) are NOT yet pinned (debugger/capture-pending) -- the inbound
+  delivery-list dispatch slot was not walked to the dispatch table this lane.
+
+  UNKNOWNS (capture-pending): what the 4-byte Selector encodes; the matching S2C claim result.
+
+  UNBLOCKS: the Client.Application delivery-claim use-case (send-only), pending a capture to pin the
+  Selector meaning.

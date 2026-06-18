@@ -452,14 +452,14 @@ public sealed partial class ClientContext : Node
         try
         {
             HudAtlas = new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(_uiAssets);
-            HudText  = new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(_uiAssets);
+            HudText = new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(_uiAssets);
             GD.Print("[ClientContext] HudAtlasLibrary + HudTextLibrary constructed (Ui/Scenes substrate).");
         }
         catch (Exception ex)
         {
             GD.PrintErr($"[ClientContext] HudAtlas/HudText init failed: {ex.Message} — Ui/Scenes will run offline.");
             HudAtlas ??= new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
-            HudText  ??= new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
+            HudText ??= new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
         }
 
         // 14. Skill icon catalog: skillicon.txt + musajung.do stance table.
@@ -714,7 +714,7 @@ public sealed partial class ClientContext : Node
         // HudAtlas + HudText — null-safe offline fallback (no VFS).
         // spec: Docs/RE/formats/ui_manifests.md §1 / Docs/RE/formats/msg_xdb.md.
         HudAtlas ??= new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
-        HudText  ??= new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
+        HudText ??= new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
 
         // ItemIconCatalog — null-safe offline fallback (no VFS).
         // spec: Docs/RE/formats/ui_manifests.md §10 / §10.5.
@@ -935,7 +935,8 @@ public sealed partial class ClientContext : Node
         {
             // spec: Docs/RE/specs/resource_pipeline.md §2.5 — OPENNING/SKIP is read from the
             // per-account/config-singleton INI path, not the dev VFS locator client_dir.cfg.
-            return ProjectSettings.GlobalizePath(MartialHeroes.Client.Godot.Screens.OpeningWindow.SkipCfgPath);
+            return ProjectSettings.GlobalizePath(MartialHeroes.Client.Godot.Ui.Scenes.Opening.OpeningWindow
+                .SkipCfgPath);
         }
         catch
         {

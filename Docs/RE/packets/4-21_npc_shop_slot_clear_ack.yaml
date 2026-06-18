@@ -1,0 +1,36 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: field VALUE meanings are static inferences. capture_verified: false.
+
+name: SmsgNpcShopSlotClearAck
+opcode: 0x40015           # major 4 (Response), minor 21 -> (4 << 16) | 21
+direction: S2C
+size: 12                  # 0xC-byte handler read
+spec: packets/4-21_npc_shop_slot_clear_ack.yaml
+status: hypothesis
+capture_verified: false
+
+summary: NPC shop slot clear / change acknowledgement. By the trailing result word the handler either applies a slot change to the NPC shop panel or clears it.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 12.
+fields:
+  - { name: SlotRecord, type: "bytes[8]" }   # 0x00  slot-change descriptor applied to the NPC shop panel
+  - { name: Result,     type: i32 }          # 0x08  nonzero (== 1) = apply the slot change; 0 = clear the shop panel
+
+notes: |
+  Static only; no capture this pass. The handler reads a thin 0xC (12)-byte block. The 12-byte read
+  size and the Result word @0x08 are control-flow-confirmed; the field VALUE meanings are
+  capture-pending.
+
+    0x00 (8B) SlotRecord : the slot-change descriptor applied to the NPC shop panel when Result is
+                           set. Modelled as one reserved blob -- its internal layout is
+                           capture-pending.
+    0x08 (4B) Result     : nonzero (observed == 1) applies the slot change; 0 clears the shop panel.
+
+  RELATIONSHIP: part of the NPC shop transaction acknowledgement family (alongside 4/19 / 4/20 /
+  4/113 / 4/115).
+
+  UNKNOWNS to resolve with a capture:
+    - the internal layout of SlotRecord (slot index, item id, count);
+    - whether Result carries more than the {0, 1} values seen statically.
+
+  UNBLOCKS: Client.Application NPC shop slot refresh handling.

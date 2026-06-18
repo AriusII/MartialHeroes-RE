@@ -19,6 +19,10 @@
 //      alpha-blended camera-facing billboards (XeffSceneEffect). spec: §3.6.5 / §3.6.6.
 //   5. ACTORS — up to 5 preview actors via SkinnedCharacterBuilder at the spec per-slot positions
 //      (the slightly-bowed Z), on the platform Y≈70, PreviewScale ×3.0. spec: §3.3.1 / §3.7.5.
+//      Selection-facing is actor-local: selected slot snaps front (yaw 0), non-selected slots face
+//      back (yaw π), and ui_left/ui_right manually yaw only the selected preview at 2 rad/s.
+//      spec: Docs/RE/specs/frontend_scenes.md §3.3.2 / §3.3.4; recovered manual-yaw,
+//      doida.exe SelectWindow_FaceActiveSlotFront/TickSelectedPreviewYaw.
 //
 // HOST API PRESERVED (read by Lane D's CharacterSelectScreen — keep these signatures EXACT):
 //   - public void Initialise(RealClientAssets? assets)
@@ -114,6 +118,13 @@ public sealed partial class CharSelectScene3D : Node3D
     // (verified against the importer's mesh scale, documented — NOT a hard-coded guess; the raw 70
     // literal would explode the actors in Godot space). spec: §3.3.1 (fidelity-reconciliation item).
     private const float PreviewScale = 3.0f;
+
+    // Slot-selection visual yaw — actor rotates, camera stays fixed.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.3.2 / §3.3.4; recovered manual-yaw,
+    // doida.exe SelectWindow_FaceActiveSlotFront/TickSelectedPreviewYaw.
+    private const float SelectedActorFrontYaw = 0.0f;
+    private const float DeselectedActorBackYaw = Mathf.Pi;
+    private const float ManualSelectedYawRadiansPerSecond = 2.0f;
 
     // =========================================================================
     // Camera keyframes & projection (§3.5). All EXACT from the spec; positions converted to
@@ -350,7 +361,10 @@ public sealed partial class CharSelectScene3D : Node3D
 
             // (b) Rebuild from the CURRENT descriptors via the existing TryBuildSlotActor path.
             if (assets is not null)
+            {
                 BuildCharacterRow(assets);
+                ApplySlotSelectionFacing();
+            }
             else
                 GD.Print("[CharSelectScene3D] RefreshSlotActors: no VFS — actor row cleared (no actors).");
         }
@@ -361,15 +375,16 @@ public sealed partial class CharSelectScene3D : Node3D
     }
 
     /// <summary>
-    /// Updates the selected slot. The legacy on-actor change is a select/idle motion-clip swap
-    /// (NO transform / tint change — §3.3.4); the concrete select .mot literal is a VFS data read
-    /// (actormotion.txt col 21) that is not yet harvested, so we only record the selection here and
-    /// the 2D overlay (CharacterSelectScreen) carries the visible highlight. spec: §3.3.3 / §3.3.4.
+    /// Updates the selected slot and snaps actor-local facing: selected = front (yaw 0),
+    /// every other preview = back (yaw π). The camera is not moved.
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.3.2 / §3.3.4; recovered manual-yaw,
+    /// doida.exe SelectWindow_FaceActiveSlotFront/TickSelectedPreviewYaw.
     /// </summary>
     public void SetSelectedSlot(int slotIndex)
     {
         if ((uint)slotIndex >= 5u) return;
         _selectedSlot = slotIndex;
+        ApplySlotSelectionFacing();
     }
 
     /// <summary>
@@ -750,7 +765,42 @@ public sealed partial class CharSelectScene3D : Node3D
             if (_waterScrollPhase > 1.0f) _waterScrollPhase -= 1.0f;
             _waterMaterial.Uv1Offset = new Vector3(_waterScrollPhase, _waterScrollPhase * 0.5f, 0f);
         }
+
+        TickSelectedPreviewYaw((float)delta);
     }
+
+    private void TickSelectedPreviewYaw(float dt)
+    {
+        Node3D? selectedActor = GetSlotActor(_selectedSlot);
+        if (selectedActor is null) return;
+
+        float yawDelta = 0.0f;
+        if (global::Godot.Input.IsActionPressed("ui_left")) yawDelta -= ManualSelectedYawRadiansPerSecond * dt;
+        if (global::Godot.Input.IsActionPressed("ui_right")) yawDelta += ManualSelectedYawRadiansPerSecond * dt;
+        if (yawDelta == 0.0f) return;
+
+        Vector3 rotation = selectedActor.Rotation;
+        rotation.Y += yawDelta;
+        selectedActor.Rotation = rotation;
+    }
+
+    private void ApplySlotSelectionFacing()
+    {
+        for (int i = 0; i < _slotActors.Length; i++)
+        {
+            Node3D? actor = GetSlotActor(i);
+            if (actor is null) continue;
+
+            Vector3 rotation = actor.Rotation;
+            rotation.Y = i == _selectedSlot ? SelectedActorFrontYaw : DeselectedActorBackYaw;
+            actor.Rotation = rotation;
+        }
+    }
+
+    private Node3D? GetSlotActor(int slotIndex)
+        => (uint)slotIndex < (uint)_slotActors.Length && _slotActors[slotIndex] is { } actor && IsInstanceValid(actor)
+            ? actor
+            : null;
 
     // =========================================================================
     // Character row — up to 5 skinned preview actors at the spec per-slot positions.
@@ -833,20 +883,13 @@ public sealed partial class CharSelectScene3D : Node3D
         slotWrapper.Position = new Vector3(SlotLegacyX[slotIdx], rowY, SlotGodotZ[slotIdx]);
         slotWrapper.Scale = Vector3.One * PreviewScale; // spec: §3.3.1 ×3.0 (unit-reconciled)
 
-        // Facing — pure yaw about world Y (§3.3.2 CODE-CONFIRMED): lock CLEAR → yaw 0 (front, toward
-        // camera); lock SET (locked / new / creating) → yaw π (back to viewer).
-        //
-        // CURRENT LIMITATION (yaw-π path dormant): this actor is only ever built for an OCCUPIED slot
-        // (BuildCharacterRow skips unoccupied slots), and SlotDescriptors carries no lock bit — only
-        // (IsOccupied, SkinClassId). Driving the real lock yaw needs (1) an IsLocked bit added to the
-        // SlotDescriptors tuple (a public API change consumed by CharacterSelectScreen.PushSlotDescriptors-
-        // ToScene — NOT owned by this lane) and (2) a lock-state source in CharacterSelectScreen (which
-        // has no lock concept today — also not owned). So yaw is fixed to 0 (front) for every occupied
-        // slot here; the lock-driven yaw-π is DEFERRED to a change that owns CharacterSelectScreen.
-        // spec: frontend_scenes.md §3.3.2 / §3.3.5.
-        bool isOccupied = slotIdx < SlotDescriptors.Length && SlotDescriptors[slotIdx].IsOccupied;
-        float slotYaw = isOccupied ? 0.0f : Mathf.Pi; // lock bit unavailable → occupied ⇒ front (yaw 0)
-        slotWrapper.RotationDegrees = new Vector3(0f, Mathf.RadToDeg(slotYaw), 0f);
+        // Facing is selection-driven: selected preview snaps front; every other built preview faces back.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.3.2 / §3.3.4; recovered manual-yaw,
+        // doida.exe SelectWindow_FaceActiveSlotFront/TickSelectedPreviewYaw.
+        slotWrapper.Rotation = new Vector3(
+            0f,
+            slotIdx == _selectedSlot ? SelectedActorFrontYaw : DeselectedActorBackYaw,
+            0f);
 
         slotWrapper.AddChild(actorRoot);
         return slotWrapper;

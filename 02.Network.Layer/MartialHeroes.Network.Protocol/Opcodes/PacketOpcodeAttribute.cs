@@ -7,7 +7,7 @@ namespace MartialHeroes.Network.Protocol.Opcodes;
 /// (future source-generated) router to build a compile-time opcode-&gt;handler switch with no
 /// reflection on the hot path. spec: Docs/RE/opcodes.md.
 /// </summary>
-[AttributeUsage(AttributeTargets.Struct, AllowMultiple = false, Inherited = false)]
+[AttributeUsage(AttributeTargets.Struct)]
 public sealed class PacketOpcodeAttribute(ushort major, ushort minor) : Attribute
 {
     /// <summary>Opcode high part / message family. spec: Docs/RE/opcodes.md.</summary>

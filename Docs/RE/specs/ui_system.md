@@ -1398,6 +1398,1659 @@ toggle label (**msg 25017**, "show inventory window"); none of these is the wind
 > behaviour is static and **CAPTURE-UNVERIFIED** (no Wireshark oracle). The CP949 caption *text* for
 > each id is VFS-only and must be supplied from a `msg.xdb` extract (`formats/misc_data.md §6`).
 
+
+### 8.17 In-game window-OPEN dispatch + bottom command strip (CODE-CONFIRMED)
+
+There is **no dedicated toolbar / command-bar class**. Every in-game window is OPENED by a single
+**global action-id dispatcher** owned by the master HUD window (`MainWindow`, ctor-named
+`MainMaster`). The dispatcher reads an integer action id from the raised event and routes it to a
+family of per-window toggle handlers; each handler reads **one fixed master service slot** (the
+`+0x238` service table of §0.1 in `ui_hud_layout.md`), and flips that panel's visible flag. **No
+in-game window is reconstructed on open** — the open buttons/keys only toggle an already-built
+panel's visibility, close any conflicting panel group, and play UI click sound **862020102**
+(category 2). Most handlers are gated by a global input-blocked / cinematic flag (no window opens
+while it is set).
+
+**Action ids ARE ASCII keycodes.** By construction a button's stored action id is the same integer as
+its default hotkey's keycode — this is *why* a toolbar button and a keyboard key open the same window
+(both raise the same integer). The factory key chars below are therefore the action ids read as ASCII.
+
+**Hotkeys are remappable** through the per-account INI section **`[<account>_KEYSET]`** (the format
+string is `%s_KEYSET`). Each command's key is stored as a single ASCII character (`%c`). So the
+default action-ids below are the **factory** key chars; a user can rebind them. This sits alongside
+the position-persistence INI of §8.6.
+
+**Two distinct dispatch surfaces reach the SAME slots.** The persistent ASCII-keycode toolbar /
+hotkeys (this section) AND the `DefaultMenu` radial popup (its own internal action ids, ~4000–4024 —
+see below) are **two separate input surfaces** that both toggle the same `MainWindow` service slots.
+An implementer should wire each open-button to the **target slot**, not to one id space.
+
+#### 8.17.1 ASCII-keycode action → window → service slot → default hotkey (CODE-CONFIRMED unless noted)
+
+Each handler reads master service slot `N` and toggles that panel's visibility. Default hotkey char =
+the action id as ASCII (rebindable via `[<account>_KEYSET]`).
+
+| Action (dec / ASCII) | Opened / toggled window | Service slot N | Default hotkey | Conf |
+|---|---|---:|---|---|
+| 97 `a` | Battle / attack-mode toggle (combat-mode net send; **not a window**) | 324 | `a` | CODE-CONFIRMED |
+| 98 `b` | Inventory bag (`ItemPanel`) — opens, closes conflicting panels | 158 | `b` | CODE-CONFIRMED |
+| 103 `g` | Default command MENU (`DefaultMenu`) — the radial quick-menu that fans out to the others | 191 | `g` | CODE-CONFIRMED |
+| 104 `h` | Help window (`HelpPanel`, literal `data/ui/help.dds`) | 322 (+ button slot 176) | `h` | CODE-CONFIRMED |
+| 105 `i` | Inventory open (group-toggle; gates on status slot) | 146 / 158 group | `i` | CODE-CONFIRMED |
+| 106 `j` | GuildWarInfo window (`GuildWarInfoPanel`) | 224 | `j` | CODE-CONFIRMED |
+| 107 `k` | Party open (`PartyPanel`) + close-others | 220 | `k` | CODE-CONFIRMED |
+| 108 `l` | StallList window (`StallListPanel`, personal-shop list) | 228 | `l` | CODE-CONFIRMED |
+| 109 `m` | Toggle panel at slot 161 (chat / quick-slot family; class not yet RTTI'd) | 161 | `m` | fn CODE-CONFIRMED; slot-161 class debugger-pending |
+| 110 `n` | Pet window (gated on scene-state ≠ 11) | **UNRESOLVED — debugger-pending; NOT slot 230** | `n` | fn CODE-CONFIRMED; class + slot UNVERIFIED |
+| 111 `o` | Toggle panel at slot 164 (group-gated) | 164 | `o` | fn CODE-CONFIRMED; slot-164 class debugger-pending |
+| 112 `p` | Close-all / escape (hides the full HUD panel group) | 185/186 + group | `p` | CODE-CONFIRMED |
+| 113 `q` | Quest open (`QuestPanel`) + close-all + UI transition | 206 + group | `q` | CODE-CONFIRMED |
+| 115 `s` | Skill window (`SkillPanel`) toggle group | 159 + group | `s` | CODE-CONFIRMED |
+| 117 `u` | BroodWarList / PC-info window (`BroodWarListPanel`) | 235 | `u` | CODE-CONFIRMED |
+| 119 `w` | Toggle slot-223 panel (war/guild-info family; class not RTTI-named) | 223 | `w` | fn + slot CODE-CONFIRMED; class debugger-pending |
+| 120 `x` | Sit / rest (combat net send; gates on a map flag; **not a window**) | — | `x` | CODE-CONFIRMED |
+| 121 `y` | Toggle HUD frame-group hide/show (UI declutter; **not a single window**) | dock + frames | `y` | CODE-CONFIRMED |
+| 122 `z` | Trade / party-trade request (INI key name `BATTLE_MODE`; **not a window**) | — | `z` | CODE-CONFIRMED |
+| 27 `Esc` | Close inventory group / collapse dock-frame group | 146 + group | `Esc` | CODE-CONFIRMED |
+| 32 `Space` | Help close + toggle the help button state | 322 / 176 | `Space` | CODE-CONFIRMED |
+| 99 | Chat input commit / open chat line (`ChatPanel` input box) | chat-input slot | `Enter` | CODE-CONFIRMED |
+
+> The per-button strip source rects (NORMAL / HOVER / PRESSED) and the exact dst positions of the
+> individual bottom-strip buttons were **not** individually decoded (the HUD builder is very large and
+> the strip buttons interleave with many other sites) — **debugger-pending**. Which action ids have a
+> *physical* toolbar button (vs being key-only or menu-only) is likewise debugger-pending, because the
+> dispatcher is global. Slots **161 / 164 / 223** classes are debugger-pending.
+
+#### 8.17.2 Authoritative service-slot → window identities (CODE-CONFIRMED)
+
+These come from the named, class-specific toggle handlers the dispatcher calls (NOT from build-routine
+call order, which interleaves construction):
+
+| Slot N | Window (class) |
+|---:|---|
+| 146 | `StatusPanel` (character-info / stat) |
+| 147 | dock-slide panel (toolbar dock / link-bar) |
+| 158 | `ItemPanel` (inventory bag) |
+| 159 | `SkillPanel` (skill window) |
+| 185 | buddy / relation panel |
+| 186 | `MiniParty` (compact party widget) |
+| 191 | `DefaultMenu` (radial quick-menu; no RTTI name) |
+| 193 | `RelationPanel` |
+| 206 | `QuestPanel` (quest tracker) |
+| 207 | `GuildAPanel` (guild window) |
+| 220 | `PartyPanel` (party window) |
+| 224 | `GuildWarInfoPanel` |
+| 228 | `StallListPanel` (personal-shop list) |
+| 230 | `ProductPanel` (production / crafting — see §8.18) |
+| 235 | `BroodWarListPanel` |
+| 240 | warstone panel |
+| 322 | `HelpPanel` (literal `data/ui/help.dds`) |
+
+#### 8.17.3 DefaultMenu radial action map (4000–4024) (CODE-CONFIRMED)
+
+The `DefaultMenu` radial popup (slot 191, opened by `g`) has its **own** internal action ids in the
+4000-range, routed in its event handler. These are **not** ASCII keycodes — they are the radial
+menu's own button ids. Each case toggles a `MainWindow` service slot (mutually-exclusively closing
+sibling panels), so the two id spaces converge on the same slots:
+
+| DefaultMenu action | Opens / toggles | Service slot |
+|---:|---|---:|
+| 4000 | battle-stance group expand/collapse (the radial itself) | self |
+| 4001 | Inventory (`ItemPanel`) | 158 |
+| 4002 | Buddy / relation panel | 185 |
+| 4003 | Skill (`SkillPanel`) | 159 |
+| 4004 / 4024 | Quest tracker (`QuestPanel`) | 206 |
+| 4007 | chat-input gated action | 202 |
+| 4008 | relation / focus-gated panel | 193 |
+| 4009 | panel via slot 161 (`m` candidate) | 161 |
+| 4010 | panel via slot 164 (`o` candidate) | 164 |
+| 4011 | Help toggle (checks slot 322; presses button slot 176) | 322 / 176 |
+| 4012 | Party (`PartyPanel`) | 220 |
+| 4013 | `ProductPanel` (production / crafting), billing-gated, blocked in scene-state 11 | 230 |
+| 4014 / 4015 | combat / attack-stance net toggle (OFF / ON) | 324 / 328 |
+| 4022 | warstone / slot-240 panel | 240 |
+| (also) | Guild panel | 207 |
+| (also) | dock-slide | 147 |
+
+> Several DefaultMenu cases (4005, 4006, 4019–4021, 4023) are mode toggles / quick-slot helpers that
+> open no top-level window. Slots **161 / 164 / 223** classes remain debugger-pending.
+
+#### 8.17.4 Bottom command-strip placement (CODE-CONFIRMED formula)
+
+The literal bottom button strip is built inside the HUD-build routine. Placement (matching
+`ui_hud_layout.md §5.7`): **X = centerX(1024), Y = screen_height − 60, W = 1024, H = 60,
+innerY = 957** (mixed: centred-X + bottom-anchored). The `DefaultMenu` quick-menu (slot 191) is built
+in the bottom area (build height arg 220) and is the closest thing to a command-bar host. Absolute
+pixels depend on the runtime screen-size globals — **capture/debugger-pending** (same caveat as
+`ui_hud_layout.md §5.11`).
+
+> **Failure captions.** Handlers that fail to open broadcast a `msg.xdb` notice string (e.g. ids
+> **2064**, **45003**, **2227**, **54094**, **59004**, **29017** seen on busy / cannot-open paths).
+> These are failure notices, not per-button tooltips. A per-button hover-tooltip id table was **not**
+> recovered — debugger-pending.
+
+### 8.18 In-game ProductPanel — NPC production / crafting window (CODE-CONFIRMED role)
+
+`ProductPanel` (method-label family `GoodsPanel`) is the **NPC PRODUCTION / CRAFTING (item-make)**
+panel — **not** a buy/sell vendor. (The buy/sell vendor is the distinct `KeepNpcPanel` family, which
+pairs with the shop sell/buy opcodes; do not conflate the two.) It carries a recipe grid, a quantity
+textbox, a 3D item preview, recipe-detail and item-comparison sub-panels, a paged order list, a
+web-link button, and a location-gated production-collect action. It lives at **master service slot
+230**. Reference canvas 1024×768; child rects below are panel-local (top-left origin, +X right, +Y
+down). The root window's absolute origin is set by the master-window machinery — debugger-pending.
+
+#### 8.18.1 Atlas binding (CODE-CONFIRMED)
+
+The panel binds a multi-DDS skin set on its texture handle (children inherit the bound sheet; most
+build sites pass texture id 0 so the sprite inherits the window's bound atlas):
+
+| Atlas (logical) | DDS file | Used for |
+|---|---|---|
+| itemshop | `data/ui/itemshop.dds` | main window chrome / list backdrop |
+| product | `data/ui/product.dds` | recipe grid cells, buttons |
+| itemshoppopup | `data/ui/itemshoppopup.dds` | popup / detail sub-panels |
+| buywindow | `data/ui/buywindow.dds` | order / confirm sub-window chrome |
+
+> `data/ui/productnpc.dds` is a **distinct, simpler sibling panel** (a single-atlas NPC-side
+> production storefront / entry that leads into this full panel) — not the same class. Role MED.
+
+#### 8.18.2 Recipe grid + sub-panels (CODE-CONFIRMED)
+
+- **8 recipe cells** in a **4-column × 2-row** arrangement, at X = `{29, 212, 395, 578}` and Y rows
+  `{172, 364}` (panel-local). Each cell = a frame button + a name label + two value labels + an icon
+  image + a make button. This is a **recipe / order grid**, not a buy-side/sell-side split — the
+  player picks a recipe, sets a quantity, and submits a production order.
+- Each recipe row is a sub-record of **40-byte (0x28) stride** inside the panel object, holding three
+  label pointers (class / price / count), a buy button, and an icon. A per-recipe status word selects
+  one of three production-state captions (`msg.xdb` 714 / 729 / 744).
+- **Quantity textbox** (action 70, max length 16) with +/- adjustment.
+- **Price label** fed by `msg.xdb` 45002, re-driven each repaint from the player's gold; tinted red
+  when the cost is unaffordable, with a ×0.8 discount branch. **Have-count** via `msg.xdb` 45004.
+- **Page label** = current-page / total-page (`"%s / %s"`).
+- Notable sub-panel container rects (panel-local): recipe-detail `(280,250) 200×150` and
+  `(310,359) 120×150`; scrollbar column `(430,359) 17×150`; item-preview / order panel
+  `(20,0..) 781×630`; item-detail sub-panel `(160,243) 512×164`; comparison panel `(229,233) 339×190`;
+  a hidden slide-in tip panel `(202,−227) 426×227`.
+
+#### 8.18.3 Action-id map (CODE-CONFIRMED)
+
+All actions are routed in the panel's event handler on click-release, reading the active child's
+action id:
+
+| Action id | Widget | Behaviour |
+|---|---|---|
+| 0..7 | per recipe-cell select (8 cells) | select recipe slot, fill detail labels |
+| 8..15 | per recipe-cell buy/make (low) | add / queue recipe (mode 1) |
+| 16 | bottom close button | close detail / close window |
+| 17 / 18 | up / down arrow | scroll list up / down |
+| 19 | 6 category tab buttons | select category tab / KIND → rebuild list |
+| 25..34 | 10 page-jump buttons | jump to page index |
+| 35 | next-page | page +1 (bounded by total pages) |
+| 36 | make / confirm button | open / commit production order |
+| 45..52 | per recipe-cell action (high) | alt add (mode 2) |
+| 53 | order-window close | hide order sub-panel |
+| 54 | detail-panel toggle | show recipe list area |
+| 55 | scrollbar host | scroll-thumb track |
+| 56 / 57 / 58 | scroll up / track / down (sub-panel) | scroll the order list |
+| 60..69 | 30 order-list rows | pick a queued order row |
+| 70 | quantity textbox | focus the qty editbox (IME) |
+| 72 | preview-panel close | hide 3D preview / order panel |
+| 73 | preview canvas | refresh 3D item preview |
+| 74 / 75 | order +/- buttons | adjust order amount |
+| 76 / 77 | compare-panel buttons | item-compare toggles |
+| 78 | compare confirm | apply comparison |
+| 79..86 | 8 per-cell aux buttons | production-collect (area-1 gated) |
+| 88 | web-link button | open external `http` URL in browser |
+| 89 | tip-panel prev | slide tip panel |
+| 90 | tip-panel confirm | stage confirm; emit C2S production request (selector value 200) |
+
+> Source-rect origins on the build sites (e.g. tab buttons, per-row +/-/buy buttons, order-confirm,
+> arrow nav, item-detail and compare buttons) are recorded as the build-site immediates against the
+> bound atlas; the exact per-glyph src table is left to a focused build-site sweep — debugger-pending.
+
+#### 8.18.4 Captions (CODE-CONFIRMED ids; CP949 text VFS-only)
+
+`msg.xdb` ids used: **45002** (price integer format), **45004** (have-count / quantity),
+**45011..45014** (item-detail field labels), **45017 / 45019** (production-collect error notices —
+area-1 gate, count gate), **45026** (order-confirm prompt), **45031 / 45032** (compare / order-button
+captions), **45101** (right-side button caption), **714 / 729 / 744** (per-recipe production-state
+captions), **103** (generic Cancel/OK on the tip-panel button).
+
+#### 8.18.5 Open mechanism + network (CODE-CONFIRMED)
+
+The panel is a persistent HUD child **toggled from the `DefaultMenu` radial** (action **4013**:
+billing-check, then toggle slot 230) and from a keybind path (gated by scene-state ≠ 11 and a billing
+check; `msg.xdb` 45003 on failure). It is **not** opened by a dedicated NPC opcode.
+
+- On open it rebinds textures, shows, populates, and emits **C2S `CmsgProductBuy` (2/151)** with a
+  **1-byte selector body = 0** to request the current production list / money.
+- Action 90 emits the same **2/151** channel with selector body **200 (0xC8)**.
+- All page-nav and tab changes are **local repaints** of a cached recipe list (filtered by the
+  selected tab / KIND).
+- The recipe list refresh is driven by inbound **S2C `SmsgShopPageUpdate` (3/8)**, which carries a
+  single 4-byte money value: the handler stores the player's gold and repaints the active panel (it
+  does NOT carry a grid/page block). Capture-unverified (no capture this lane); the money semantic is
+  static-confirmed from the consumer that reads the same field.
+- Production-collect (actions 79..86) is gated to **area id == 1** (`msg.xdb` 45017 otherwise) and to a
+  non-zero collect count (`msg.xdb` 45019).
+
+> Wire field tables for `CmsgProductBuy` (2/151, 1-byte selector) and `SmsgShopPageUpdate` (3/8, 4-byte
+> money) are owned by the protocol spec — see `opcodes.md` / `packets/`. **This panel's sole network
+> send is 2/151; it never emits 2/152** (2/152 is the QuestPanel row-request, a different consumer).
+
+### 8.19 In-game EmoticonPanel — emote / chat-emoticon picker (CODE-CONFIRMED)
+
+`EmoticonPanel` is the in-game character-emote / chat-emoticon SELECTOR — a right-dock 318-column
+window with two tabbed grids: a **graphical over-head emoticon-balloon grid** and a **text-macro
+("chat shortcut") grid**. The panel object is **432 bytes (0x1B0)**; it is built once by the HUD-build
+routine and stored at master window field **+0x370** (it is a persistent HUD child, not per-open
+construction). Reference canvas 1024×768; child rects are panel-local.
+
+#### 8.19.1 Geometry (CODE-CONFIRMED formula)
+
+| Property | Value | Notes |
+|---|---|---|
+| Texture | none (0) | Container; visible art is on its children |
+| Anchor X | **screen_width − 318** | Right-dock 318-column family (same X-formula as the inventory rail) |
+| Anchor Y | **0** | Top-flush |
+| Width W | **318** | |
+| Height H | **732** | |
+
+> The same right-dock 318×732 rail as `ui_hud_layout.md §5.3`. Absolute pixel X depends on the runtime
+> screen-width global — debugger-pending; the formula is CODE-CONFIRMED.
+
+#### 8.19.2 Atlas binding — uitex integer ids (CODE-CONFIRMED ids; DDS names VFS-only)
+
+The panel binds no literal `emoticon.dds` name; every image/button uses a `uitex.txt` **integer id**
+resolved at build time through the in-game uitex registry (§8.6.1; fallback to id 1). Ids used:
+
+| `uitex.txt` id | Use in this panel |
+|---:|---|
+| 1 | close-button frames; uitex default-fallback |
+| 2 | top-bar strip; bottom button |
+| 3 | page-1 emote-cell backgrounds + the 29×29 status overlay |
+| 4 | header icon; both tab buttons; page-0 button frames |
+| 8 | main window backdrop (318×627 at src 318,0) |
+| 27 | over-head emote-balloon glyph atlas (page-1 emote-icon buttons + the balloon display); page-0 label images |
+
+> The concrete DDS behind each id resolves only via the runtime `data/ui/uitex.txt` manifest
+> (`formats/ui_manifests.md`) — VFS-pending for ids 3 / 8 / 27.
+
+#### 8.19.3 Chrome children (CODE-CONFIRMED)
+
+| Child | dst (x,y) | w×h | src (x,y) | atlas id | action |
+|---|---|---|---|---|---|
+| Background image | (0, 85) | 318 × 627 | (318, 0) | 8 | — |
+| Top-bar image | (0, 36) | 318 × 50 | (0, 683) | 2 | — |
+| Header icon | (125, 60) | 69 × 16 | (921, 669) | 4 | — |
+| Close button (3-state) | (286, 46) | 29 × 26 | up/over (354,596) down (354,622) | 1 | **204** (press → `msg.xdb` 16011) |
+| Grid page panel 0 (text-macro container) | (0, 127) | 318 × 605 | — | — | — |
+| Grid page panel 1 (graphical container) | (0, 127) | 318 × 605 | — | — | — |
+| Tab button 0 (3-state) | (10, 96) | 149 × 29 | (677,694)/(677,724) | 4 | **200** (page 0) |
+| Tab button 1 (3-state) | (159, 96) | 149 × 29 | (677,754)/(677,784) | 4 | **201** (page 1) |
+| Bottom button (3-state) | (259, 655) | 59 × 77 | up/over (301,947) down (360,947) | 2 | **203** (toggle/close) |
+| Input textbox | (60, 80) | 297 × 23 | (518, 669) | — | **202** (max len 47; IME-disabled) |
+
+#### 8.19.4 The two pages (CODE-CONFIRMED)
+
+The active page index is stored in the panel object; a tab switcher hides the old grid, shows the new,
+and swaps the two tab buttons' frame origins.
+
+- **Page 0 — text-macro ("chat shortcut") grid.** Up to 9 macro slots; each cell = a 3-state button
+  (92×29, src 827,668 / 827,697), a label image (87×13), and a wide phrase button (297×23, src
+  518,669). The 9 phrase strings come from a per-class INI section `%s_CHATSHORTCUT`, keys
+  `SHIFT_1..SHIFT_9`. Picking a page-0 macro **submits the phrase through the chat pipeline** — it is
+  literally typed-and-sent as chat text (reference: chat C2S 2/7 with a channel byte). Rate-limited to
+  one per 5000 ms.
+- **Page 1 — graphical emoticon grid.** Iterates `emoticon.do`, filtering records by the page byte.
+  Per matched record, four sub-widgets are built at the record's own base XY (the grid is **data-driven
+  per-record coordinates, NOT a fixed rows×cols pitch**):
+
+| Widget | dst offset from cell base | w×h | src (x,y) | atlas id |
+|---|---|---|---|---|
+| Cell background image | (+0, +0) | 146 × 49 | (63, 661) | 3 |
+| Emote icon button (3-state) | (+23, +11) | 23 × 23 | per-record icon src | 27 |
+| Label image | (+48, +16) | 87 × 13 | per-record label src | 27 |
+| Status overlay image | (+20, +8) | 29 × 29 | (763, 655) | 3 |
+
+The bound action id is a per-record field; the emote id actually played is a separate per-record field
+(see §8.19.6). Up to 3 logical pages exist in the data; the panel exposes 2 tabs (click handler gates
+page ≤ 2 and action < 200).
+
+#### 8.19.5 Data tables — row schemas (layouts CODE-CONFIRMED; field meanings CODE-INFERRED)
+
+> `data/script/emoticon.do` warrants its own `formats/` spec (the binary record below is the
+> spec-author summary; meanings are debugger/VFS-pending against real bytes).
+
+- **`data/script/emoticon.do`** — binary, **fixed 40-byte (0x28) records, no count header** (read to
+  EOF), inserted into two lookup trees (one keyed on field +0, one on field +8):
+
+| Offset | Size | Field (working name) |
+|---:|---:|---|
+| +0x00 | 4 | primary key |
+| +0x04 | 1 | page / category byte (pages 0..2) |
+| +0x08 | 4 | action id (bound to the icon button; < 200) |
+| +0x0C | 4 | emote / animation id (the value PLAYED) |
+| +0x10 | 4 | cell base X |
+| +0x14 | 4 | cell base Y |
+| +0x18 | 4 | icon button src X |
+| +0x1C | 4 | icon button src Y |
+| +0x20 | 4 | label image src X |
+| +0x24 | 4 | label image src Y |
+
+- **`data/char/emoticon.txt`** — text, count-headed, **76-byte stride per id** (id is the array
+  index, must be < 47). Per row: `id` (int32), a name/text string (CP949), value A (int32), value B
+  (int32), array A[4] (int32), array B[4] (int32). This is the per-emote actor-animation table (the
+  two int[4] arrays are candidate motion / timing ids); it is loaded by the char-manifest path, not by
+  the panel.
+- **`data/char/sameemoticon.txt`** — text, count-headed, **32-byte alias records** (int32 key + a
+  string); maps an emote id → a related text/group ("same emoticon" aliasing). Loaded by the boot
+  data-table corpus.
+
+#### 8.19.6 How an emote is sent (CODE-CONFIRMED)
+
+- **Page-0 text macro → sent as CHAT.** The selected phrase is copied into the chat input line and
+  submitted through the normal chat send pipeline (chat C2S 2/7 with a channel byte). No dedicated
+  emote opcode; the macro is typed-and-sent chat text.
+- **Page-1 graphical emoticon → CLIENT-LOCAL display, NO packet on this path.** The click handler
+  validates page ≤ 2 and action < 200, finds the matching `emoticon.do` record, plays sound
+  **862030103**, reads the record's emote id, and sets a client-local over-head emote-balloon on the
+  master window at service slot **327** (uitex atlas id 27). The balloon setters are pure local UI;
+  none calls a network send. **The picker itself sends nothing for graphical emotes.** Whether the
+  balloon is also server-broadcast to other players is debugger/capture-pending.
+
+#### 8.19.7 Open / toggle mechanism
+
+Built once and stored at master window field **+0x370**; it is a persistent HUD child. The event
+handler toggles/closes: bottom button (action 203) and Esc (key 27) both close. Tab buttons 200/201
+switch pages; 202 focuses the textbox. The toolbar action id / hotkey that SHOWS the panel is a
+residual — debugger-pending (one of the master action ids that toggles the +0x370 slot's visibility).
+
+### 8.20 In-game MessagePanel — system notice / confirm modal (CODE-CONFIRMED)
+
+`MessagePanel` is a single reusable **screen-centered modal** (a `GUPanel` subclass) with **two
+display modes**, at master service slot **190**. It is NOT a scrolling message log; it is a transient
+modal that grabs focus and eats Esc. It is built and stored once by the HUD-build routine. Reference
+canvas 1024×768; child rects are panel-local.
+
+- **Mode 0 — single-OK notice.** Shows only the centered OK button (action 2); hides the side buttons.
+- **Mode 1 — two-button Yes/No confirm.** Shows the left button (action 0, Yes) and right button
+  (action 1, No); hides the center OK button.
+
+> **Distinct from its sibling peers.** `ConfirmPanel`, `ReAskPanel`, `BigAlarmPanel`, `AnnouncePanel`,
+> `ErrorPanel`, and the PK-penalty alarm panels each have their **own** class, vtable, and ctors — they
+> are independent peer classes (all `GUPanel` subclasses), **NOT aliases** of MessagePanel.
+> MessagePanel folds confirm into its mode 1; it does not bind the namesake `messagewindow.dds`
+> (uitex 9) — see §8.20.2.
+
+#### 8.20.1 Geometry (CODE-CONFIRMED)
+
+- **Centered modal.** X = `(screen_width − 340)/2`, Y = `(screen_height − 340)/2` (the centering box
+  uses the literal 340 on both axes). **Width = 340, Height = 190.** Buttons are placed at
+  `w/2 ± offset`, `h − 55..60`.
+- On the 1024×768 reference canvas: X ≈ 342, Y ≈ 214, size 340×190.
+
+#### 8.20.2 Atlas binding (CODE-CONFIRMED) — does NOT use uitex 9
+
+Every texture is fetched through the in-game `uitex.txt` integer-id registry (§8.6.1):
+
+| Element | `uitex.txt` id | Resolved DDS |
+|---|---:|---|
+| Panel background / chrome | **2** | `data/ui/inventwindow.dds` |
+| Center OK button face | **2** | `data/ui/inventwindow.dds` |
+| Left (Yes) + Right (No) button faces | **8** | `data/ui/skillwindow.dds` |
+
+> uitex **9 = `messagewindow.dds`** is the *namesake* file but is bound by the Options/Friend/Quest
+> windows (§8.6.1), NOT by MessagePanel.
+
+#### 8.20.3 Widgets, src-rects, actions (CODE-CONFIRMED)
+
+(`w`, `h` = 340 / 190. For all buttons PRESSED src == NORMAL src; only HOVER differs.)
+
+| Child | Type | dst (x, y, w, h) | atlas | NORMAL src | HOVER src | action | mode |
+|---|---|---|---|---|---|---|---|
+| label0 | GULabel | (0, 50, w, 20) | — (text) | — | — | — | both |
+| label1 | GULabel | (0, 80, w, 20) | — (text) | — | — | — | both |
+| label2 | GULabel | (0, 110, w, 20) | — (text) | — | — | — | both |
+| bodyMulti | GULabel (multi-line) | (0, 50, w, 20) | — (text) | — | — | — | mode 0 (free-string) |
+| btnLeft (Yes) | GUButton 3-state | (w/2−120, h−60, 113, 40) | 8 → skillwindow | (660, 984) | (187, 956) | **0** | mode 1 |
+| btnRight (No) | GUButton 3-state | (w/2+7, h−60, 113, 40) | 8 → skillwindow | (773, 984) | (886, 984) | **1** | mode 1 |
+| btnOK | GUButton 3-state | (w/2−56, h−55, 113, 40) | 2 → inventwindow | (302, 860) | (415, 860) | **2** | mode 0 |
+
+> Panel-background sub-rect on uitex 2 is at src origin ≈ (190, 318) — MED confidence (push-decode);
+> confirm against the `inventwindow.dds` atlas.
+
+#### 8.20.4 Action dispatch (CODE-CONFIRMED)
+
+- **Esc** (while visible) → close.
+- **Action 1 or 2** (No / OK) → close; if a busy/confirm flag is set, it rebuilds a follow-up confirm
+  prompt instead.
+- **Action 0** (Yes) → if the stored message code == **103**, run a state-dependent affirmative (e.g.
+  return-to-town: plays sound 862020102, resets the skill-bar slot), then close.
+
+#### 8.20.5 Body-text sources (CODE-CONFIRMED) — all CP949
+
+1. **Raw runtime string** — caller passes a C-string; placed in the multi-line label, mode forced to 0.
+2. **Canned record from `data/script/msginfo.do`** — fixed **128-byte (0x80) records**, keyed by
+   record field +0. Confirmed fields: **+0** key, **+4** button-mode, **+8** primary body string, **+68**
+   secondary caption (shown unless the literal "0"). The remaining fields are not decoded — `msginfo.do`
+   warrants its own `formats/` spec (residual). `msginfo.do` is distinct from `msg.xdb`.
+3. **`msg.xdb` ids formatted by the caller** — e.g. the hotbar/skill-link confirm path uses ids
+   **2041** (with a format arg), **16024**, **16025**; the secondary confirm prompt uses **16034**
+   (format), **16035** and is gated by a global game-state value ∈ {18, 24, 30, 33, 42}.
+
+#### 8.20.6 Open mechanism (CODE-CONFIRMED static; populate-opcode MED)
+
+MessagePanel is reached as master slot **190** and raised by **client-side** code paths at decision
+points (e.g. the hotbar/skill-link confirm). **No inbound S2C system-notice opcode was found
+statically routing into MessagePanel** — server-driven notices more likely target `AnnouncePanel` /
+`ErrorPanel`. Whether any inbound opcode routes a notice specifically through MessagePanel is a
+residual (debugger/capture-pending).
+
+### 8.21 In-game Tender + Carrier-Pigeon mail family (CODE-CONFIRMED)
+
+A family of NPC-service windows for consignment/tender purchase and the carrier-pigeon mail / delivery
+system. All are persistent in-game HUD children built once by the HUD-build routine. Reference canvas
+1024×768; the screen-centred modals use `center = (screen − size) / 2` on both axes; absolute pixels
+depend on the runtime screen-size globals (debugger-pending). Flows are **deferred-confirm**: a panel
+action stages data and opens an InfoPanel confirm dialog; only the confirm "Yes" emits the network
+send.
+
+> Wire field tables for the opcodes referenced below are owned by the protocol spec — see `opcodes.md`
+> / `packets/`. Referenced by canonical name + major/minor only: `CmsgTenderConfirm` (2/118),
+> `CmsgCarrierPigeonSend` (2/70), `CmsgDeliveryClaim` (2/71), `CmsgLetterRequest` (2/60), and the
+> existing `SmsgSrvLetterReceived` (1/20) arrival notification.
+
+#### 8.21.1 TenderInfoPanel — consignment-purchase / info confirm (CODE-CONFIRMED)
+
+A screen-centred consignment / item-purchase info window at master service slot **118**. It carries a
+3D item-preview canvas, a scrollable list, item-stat info labels, and a confirm/purchase button gated
+by a gold cost. On confirm it checks the cost against the player's gold and, if affordable, emits
+**C2S `CmsgTenderConfirm` (2/118, header-only)**; otherwise it shows caption **66006** (not enough
+gold). The detail/info button (action 1) is rate-limited to **30** entries (caption **66007** over the
+cap), with detail text built via the shared InfoPanel category builder.
+
+- **Geometry:** X = centerX(512), Y = centerY(595), **W = 512, H = 595**. Atlas `tender_window.dds`.
+- **Actions:** buy / confirm **0**; request-detail **1** (30-cap → `msg.xdb` 66007); list scrollbar
+  **2**; Esc closes.
+- Whether the panel is an auction bid board vs an NPC consignment-buy is a semantic residual
+  (debugger/capture-pending). A dedicated S2C tender-listing populate opcode was not isolated.
+
+#### 8.21.2 CarrierPigeonPanal — mailbox menu (CODE-CONFIRMED)
+
+> `CarrierPigeonPanal` is the binary's class name (the misspelling is preserved as the recovered name).
+
+A small mailbox menu at top-left **(0, 0), 140 × 195**, atlas `carrierpigeon.dds`, master service slot
+**96**. Three stacked 3-state buttons, all 90 × 25:
+
+| Button | dst (x,y) | src N/H | src P | action | role |
+|---|---|---|---|---|---|
+| top | (25, 64) | (141,156) | (141,182) | **1** | open mail LIST / receive (opens the ReadPanel for a selected letter) |
+| middle | (25, 103) | (141,50) | (141,75) | **2** | open WRITE/SEND panel |
+| bottom | (25, 142) | (141,0) | (141,25) | **3** | close |
+
+Esc also closes.
+
+#### 8.21.3 CarrierPigeonSendPanel — compose letter (CODE-CONFIRMED)
+
+A compose sub-window (child off the Panal; positions are parent-relative). Atlases
+`CarrierPigeonAll.dds` / `CarrierPigeonPerson.dds`.
+
+- **Recipient-name textbox** (138×16), **max length 16**, focus action 20.
+- **Message-body textbox** (265×16), **max length 199**, multiline, focus/edit action 21.
+- **Send** 3-state button (90×25), action **1**.
+- **Attach-item button** (22×22), action **2**, opening an item-attach list of **up to 30 rows** (each
+  row a button, action **6 + row index** = 6..35), with list scrollbar actions **3** (down) / **4**
+  (up) / **5** (thumb drag). `TAB` toggles focus between the two textboxes.
+- **Send flow (deferred-confirm):** action 1 validates recipient (else `msg.xdb` 52001) and body (else
+  52002), and requires gold ≥ **200000** postage (else format the shortfall via 55001/55002/55003 +
+  52019), then opens an InfoPanel confirm dialog; the confirm "Yes" emits **C2S
+  `CmsgCarrierPigeonSend` (2/70)**. Captions: **52001 / 52002 / 52003 / 52019** and **55001 / 55002 /
+  55003**; postage literal **200000**.
+
+#### 8.21.4 CarrierPigeonReadPanel — read received letter (CODE-CONFIRMED)
+
+A view sub-window at master service slot **98**, atlas `CarrierPigeonAll.dds` /
+`CarrierPigeonPerson.dds`. It shows sender / date / subject / body labels and an attached-gold / item
+panel, with a **reply textbox** (277×25, **max length 199**, multiline, action 2) and an **OK/reply**
+button (90×25, action 1). Four tab buttons (Reply / Delete / Next / Prev). Reply/delete net sends
+route through the same deferred-confirm dispatcher as send.
+
+#### 8.21.5 DeliveryPanel — consignment / delivery retrieve box (CODE-CONFIRMED)
+
+A large window at master service slot **40**, atlas `delivery.dds` — the **retrieve box** for
+delivered/consigned items (and sale proceeds).
+
+- **40-slot item grid (5 × 8):** display cells are action ids **500..539** (one per cell), with
+  category-7 item tooltips (same path as inventory tooltips).
+- **Page tabs:** actions **573..578** (own / others / sale categories).
+- **Scrollbar:** thumb **583**, down **584**, up **585**.
+- **Quantity +/-** on the retrieve confirm: **601** (decrement), **602** (increment); a select-all /
+  list button **580**.
+- Each item record is 16 bytes (item-id, key, two scalars) plus an owner-id field (compared to the
+  local player id to decide my-side vs other-side).
+- **Claim flow (deferred-confirm):** view-switch (actions 541–548) and claim-prepare (565–572) stage a
+  recipient name + up to 5 item records, then open an InfoPanel confirm dialog (own-retrieve vs
+  other-side claim); the confirm "Yes" emits **C2S `CmsgDeliveryClaim` (2/71)**. Captions: **40010**,
+  **16005** (no content), **55016** (no free bag slots when claiming).
+
+#### 8.21.6 LetterPanel — compact letter view (role MED)
+
+A small letter-view window, atlas `letter.dds`. Its action-1 path emits **C2S `CmsgLetterRequest`
+(2/60)** — likely an open/read/acknowledge round-trip for a specific letter.
+
+#### 8.21.7 Open + populate residuals
+
+- The CarrierPigeonPanal (slot 96) and DeliveryPanel (slot 40) open from their NPC-service
+  interactions (the generic NPC-open path); the specific open opcode / NPC kind was not isolated
+  (debugger-pending).
+- **S2C populate** for the mailbox list and the delivery box was not walked to its dispatch slot this
+  lane — residual (debugger/capture-pending). `SmsgSrvLetterReceived` (1/20) is only the arrival
+  notification, not the list content.
+
+### 8.22 In-game NPC vendor — item-shop buy/sell window (CODE-CONFIRMED role)
+
+The **NPC vendor / item-shop** is the buy-and-sell storefront opened by talking to a merchant NPC. It
+is a **distinct** class from both `ProductPanel` (§8.18, NPC production / crafting) and the NPC dialog
+menu (§8.22.6, `KeepNpcPanel`): it is the only one of the three that puts a buy/sell transaction on the
+wire. It lives at **master service slot 259** and binds `data/ui/itemshop.dds`. The window object is
+**360 bytes (0x168)**. Reference canvas 1024×768; child rects below are panel-local (top-left origin,
++X right, +Y down). The root window's absolute origin is set by the master-window machinery —
+debugger-pending.
+
+> The class is the buy/sell vendor regardless of its source-name; the in-engine class name does not
+> indicate a subscription/billing feature. The cash (billing) shop is a separate result path (§8.22.5,
+> opcode `SmsgCashShopActionResult` 4/114) — do not conflate it with this gold-currency vendor.
+
+#### 8.22.1 Geometry (CODE-CONFIRMED child rects)
+
+| Widget | dst (x, y, w, h) | atlas (uitex id) | NORMAL src | PRESSED src | action |
+|---|---|---|---|---|---|
+| Backdrop image | (0, 0, 360, 280) | 8 | (300, 722) | — | — |
+| Confirm / close button (3-state) | (135, 200, 90, 25) | 2 | (837, 815) | (837, 775) | **0** |
+| Item-row buy button (per row, 3 visible) | (264, rowY, 54, 25) | 2 | (798, 540) | (798, 566) | **100..102** (row index + 100) |
+| Item-row name label (per row) | (114, rowY + 5, 100, 15) | — (text) | — | — | — |
+| Status label | (210, 170, 100, 15) | — (text) | — | — | — |
+
+- **Row layout.** The visible buy-row loop runs `rowY` from **70** in steps of **30** while `rowY < 160`,
+  producing **3 visible rows** at y = 70 / 100 / 130. The buy-row buttons inherit the bound atlas (uitex 2).
+- **Populate vs visible-row mismatch.** The populate routine fills **6** entries from the client-side
+  shop script map, but BuildScene only lays out **3** visible rows. Whether a scroll/page control exposes
+  rows 4..6 on this small panel, or rows beyond 3 are unreachable, is unresolved (debugger/UI-pending).
+
+#### 8.22.2 Atlas binding — uitex integer ids (CODE-CONFIRMED ids; DDS via uitex.txt VFS-only)
+
+The vendor binds sprites through the in-game `uitex.txt` integer-id registry (§8.6.1; fallback to id 1).
+Ids requested: **2** and **8**. The single shop DDS the vendor binds is `data/ui/itemshop.dds`
+(the same atlas `ProductPanel` also rebinds). **There is no `sellwindow.dds`** — the vendor sells out of
+the same item-shop atlas. The concrete DDS behind each integer id resolves only through the runtime
+`data/ui/uitex.txt` manifest (`formats/ui_manifests.md`) — VFS-pending.
+
+> `data/ui/buywindow.dds` and `data/ui/itemshoppopup.dds` are bound by `ProductPanel` (§8.18.1), not by
+> this vendor.
+
+#### 8.22.3 Money / price widgets (CODE-CONFIRMED)
+
+- **Money label** — formatted via `msg.xdb` **45015** from the local player's gold; seeded on open and
+  re-driven on every balance push (§8.22.5, opcode `SmsgItemShopBalanceUpdate` 4/115).
+- **Per-item price** — formatted via `msg.xdb` **45016**, with the price value **divided by 1,000,000**
+  for a major-unit / grouped display.
+- **Quantity** — buy is a single-row order keyed by the selected row index; this small panel has no
+  in-panel quantity stepper (the order body carries `row × 2`; the inventory-driven acquire/sell path
+  carries an explicit quantity field — §8.22.4).
+
+#### 8.22.4 Action-id map (CODE-CONFIRMED)
+
+| Action id | Widget | Behaviour |
+|---|---|---|
+| 0 | Confirm / close button | close / hide the vendor panel |
+| 100..102 | item-row buy buttons | select the row (store selected index); show the item's detail via the shared InfoPanel category builder |
+| (Esc, key 27) | — | close the panel |
+
+> The 100..102 row buttons only **select** a row and show its info; the panel onEvent does **not** itself
+> send the buy. The buy/sell **send** is raised from the NPC shop-data manager (the storefront-list buy
+> emits `CmsgShopBuy` 2/115 with `{npc_id, row × 2}`; the inventory-driven NPC transaction path —
+> right-click an inventory item with the shop open — emits `CmsgNpcBuyOrAcquire` 2/19 / `CmsgNpcSell`
+> 2/20). Both feed the same NPC shop manager and ack family.
+
+#### 8.22.5 Open mechanism + network (CODE-CONFIRMED)
+
+The vendor is opened by **NPC interaction, not a HUD hotkey**. The world NPC-interaction dispatcher reads
+the clicked NPC's KIND byte and switches on it: **KIND 32 (0x20)** opens the item-shop vendor (slot 259).
+Other KIND values open the sibling NPC panels (dialog / quest / repair / gather / guild …).
+
+- On open, the panel rebinds `itemshop.dds`, runs the **6-entry populate from a client-side shop script
+  map keyed by the NPC id**, shows the window, and seeds the money label. **The open sends no packet** —
+  the shop stock is a local script table; only the buy/sell transaction and the balance refresh go on the
+  wire.
+- **Network (referenced by canonical name + major/minor only; wire-field tables are owned by the protocol
+  spec — see `opcodes.md` / `packets/`):**
+  - C2S `CmsgNpcBuyOrAcquire` (**2/19**) — inventory-driven buy/acquire; pairs with the 4/19 ack.
+  - C2S `CmsgNpcSell` (**2/20**) — inventory-driven sell; pairs with the 4/20 ack.
+  - C2S `CmsgShopBuy` (**2/115**) — the storefront-list buy/order (`{npc_id, selected-row × 2}`).
+  - S2C `SmsgNpcBuyOrAcquireAck` (**4/19**) — apply acquired item on success; on failure formats item
+    duration / time-remaining notices (`msg.xdb` 36003..36028).
+  - S2C `SmsgNpcSellItemAck` (**4/20**) — apply the sell; refresh the equip/inventory table when the
+    seller is the local player.
+  - S2C `SmsgNpcShopSlotClearAck` (**4/21**) — apply or clear a shop-slot change.
+  - S2C `SmsgItemShopPurchaseResult` (**4/113**) — purchase success (`msg.xdb` 65008) / failure-code map
+    (`msg.xdb` 65006 / 65007 / 65010 / 65011 / 65012).
+  - S2C `SmsgCashShopActionResult` (**4/114**) — the **separate CASH (billing) shop** result
+    (`msg.xdb` 54127..54130). Not the gold vendor.
+  - S2C `SmsgItemShopBalanceUpdate` (**4/115**) — the vendor money refresh (commits player balances and
+    repaints the money label). This is the vendor's money opcode; **`ProductPanel` instead uses 3/8** —
+    the two are different opcodes and different panels.
+
+#### 8.22.6 Disambiguation — the NPC dialog menu is not the vendor (CODE-CONFIRMED)
+
+`KeepNpcPanel` is one of a family of small **NPC interaction / dialog-menu panels** (siblings:
+NpcPanel / FameBuffNpcPanel / QuestNpcPanel / RepairNpcPanel / GuildNpcPanel / ConfessionNpcPanel /
+GatherNpcPanel). It is the "talk to an NPC" root menu: a **167×176 backdrop** (uitex 4) at (0,0), a
+**167×63 header strip** (uitex 4) at (0,176), a **90×25 close button** (action 1) at (37,37), and **four
+106×40 service buttons** (uitex 2/4) stacked at x=25, y = {69, 109, 149, 189}. Its event handler routes
+the buttons to the NPC dialog / NPC quest menu / HUD-panel toggles — it has **no item grid and emits
+nothing on the wire**. It is NOT the buy/sell vendor (slot 259) and NOT the bottom command strip (§8.23).
+
+#### 8.22.7 Captions (CODE-CONFIRMED ids; CP949 text VFS-only)
+
+`msg.xdb` ids used: **45015** (money/gold label), **45016** (per-item price), **45020** (generic shop
+failure notice), **45021..45024** (specific shop failure reasons), **65008** (purchase-success),
+**65006 / 65007 / 65010 / 65011 / 65012** (purchase-failure reasons), **54127..54130** (cash-shop
+action-result notices — separate cash shop), **36003..36028** (buy/acquire item duration / time-remaining
+notices), **18022** (a list/column header label reused by the NPC service panels).
+
+#### 8.22.8 Residuals
+
+- Vendor root-window absolute origin/size (master-window-placed HUD child; only panel-local child rects
+  are literal) — debugger-pending.
+- The 6-vs-3 row paging (populate loads 6, BuildScene shows 3) — scroll/page control unresolved.
+- uitex integer-id (2 / 8) → DDS file mapping — VFS `uitex.txt` pending.
+- Per-field VALUE semantics of every buy/sell/balance opcode — capture-unverified (no capture this lane).
+
+### 8.23 In-game DefaultMenu — bottom command strip (CODE-CONFIRMED)
+
+`DefaultMenu` is the **persistent horizontal bottom command bar** — a button strip anchored to the
+bottom of the screen, NOT a radial / ring menu. It lives at **master service slot 148** and is built
+unconditionally by the HUD builder as an always-registered child (not a pop-open modal). Its "self-expand"
+(action 4000) is a **vertical bar-height toggle** (30 px collapsed ↔ 254 px expanded), not a ring.
+Reference canvas 1024×768; runtime screen-width / screen-height globals drive the bottom-anchor and a
+hi-res horizontal scale fix.
+
+> **Corrects a prior premise.** Earlier waves listed slot 191 as a "DefaultMenu radial". The binary
+> places `DefaultMenu` at **slot 148** as a horizontal strip; **slot 191 is a different class
+> (`KeepPanel`, NPC-keep — role TBD)**. See `ui_hud_layout.md §5.13`.
+
+#### 8.23.1 Geometry (CODE-CONFIRMED)
+
+| Element | dst (x, y, w, h) | atlas (uitex id) | src (x, y) | notes |
+|---|---|---|---|---|
+| Main bar panel | (0, 0, 1024, 45) | 1 | (0, 957) | the 45-px-tall bottom command bar — host for the entry buttons |
+| Sub-strip panel | (0, 45, 1024, 20) | 1 | (0, 1002) | a 20-px secondary strip below the bar |
+| Collapse toggle (corner, 3-state) | (1008, 30, 11, 11) | 1 | (939, 809) / pressed (950, 809) | small corner toggle, action 4023 |
+| TimePanel child | (0, 0, 158, 39) | — | — | embedded clock |
+| Two backdrop image panels | (—, —, 1024, 230) | (face) | — | large decorative emote/face backdrops; hidden by default |
+| Animated face / emote texture | — | (face) | — | drawn per-frame; see §8.23.2 |
+
+- **Anchor.** The component origin is set so the 45-px bar sits at the screen bottom (`y = screen_height − 60`);
+  the expand grows it upward (bar-height field toggles between 30 and 254). This matches the
+  `ui_hud_layout.md §5.13` bottom-anchored formula.
+- **Entry-button row.** Each entry is a 3-state button **29×29 at y = 10**, laid out in two x-clusters
+  (left cluster ≈ 218..373, right cluster ≈ 622..808). The three quick-slot/stance buttons (actions
+  4019/4020/4021) are **21×21 at y = 14**, x = 856 / 898 / 940. The two attack/peace mode buttons
+  (actions 4014/4015) are **128×46 at x = 448, y = 0**. The exact per-button src origins on the bound
+  atlas are recorded against uitex id 1 (the main HUD button atlas).
+
+#### 8.23.2 Atlas binding — uitex integer ids (CODE-CONFIRMED ids; DDS via uitex.txt VFS-only)
+
+| `uitex.txt` id | Use in this panel |
+|---:|---|
+| 1 | main HUD button atlas — all 29×29 entry buttons + the bar panels (bar src (0,957), sub-strip src (0,1002)) |
+| 26 | quick-slot button atlas — the three 21×21 stance buttons (actions 4019/4020/4021) |
+| 4 | secondary chrome atlas — the collapse toggle (4023), the sub-strip edges (4016/4018), the large face panel |
+| 14 | label / text atlas — the hidden text label |
+
+- **Hardcoded (non-registry) textures.** The animated face/emote uses literal path
+  `data/ui/face/anger/ani_000.dds` (an animated atlas; sibling frames `ani_001..ani_015.dds` in the same
+  directory). The attack/peace mode bar uses literal 18-frame strips `data/ui/mode/attackmode-01..18.tga`
+  and `data/ui/mode/peacemode-01..18.tga`, selected by the global attack-mode flag.
+- The DDS each uitex id maps to is data-driven from `uitex.txt` at load — id→file is VFS-pending.
+
+#### 8.23.3 The complete entry → action-id → MainWindow-slot map (CODE-CONFIRMED)
+
+The dispatcher (vtable slot 6) switches on the pressed child's action id. Every action (except 4000 and
+the mode toggles) **opens/toggles its target MainWindow service slot and mutually-exclusively closes the
+visible siblings**. A "is-visible" byte on each panel gates the toggle.
+
+| Action | Entry / role | Effect | MainWindow slot |
+|---:|---|---|---:|
+| 4000 | the bar itself (self-expand) | toggle bar height 30↔254; show/hide the six sub-group entries; when expanding, mutually-close the visible HUD groups | self |
+| 4001 | Inventory | toggle inventory; close siblings | **158** (ItemPanel) |
+| 4002 | Buddy / Relation | toggle buddy-relation; close siblings | **185** |
+| 4003 | Skill | toggle skill; close siblings | **159** (SkillPanel) |
+| 4004 | Quest tracker | toggle quest tracker (mode 2); close siblings | **206** (QuestPanel) |
+| 4005 | attack-stance / status group | open StatusPanel group; close siblings | **146** (StatusPanel) |
+| 4006 | conversation / relation group | open relation group (state-gated) or select a UI-list entry | **193** |
+| 4007 | attack-stance (alt) | chat-busy → notice `msg.xdb` 10082 + abort; else open the status group without keep-open | **146** (chat-output **202** check) |
+| 4008 | relation / focus panel | open the relation/whisper input (focus-manager gated) | **193** |
+| 4009 | panel via slot 161 | generic visibility toggle | **161** |
+| 4010 | panel via slot 164 | generic visibility toggle | **164** |
+| 4011 | Help toggle | press/unpress the docked help button (slot 176); reflects the help overlay (§8.24) | **322** (help) / **176** (button) |
+| 4012 | Party | toggle party; close siblings | **220** (PartyPanel) |
+| 4013 | ProductPanel (crafting) | scene-gated (scene-state ≠ 11) + billing-gated (`msg.xdb` 45003 on fail) + chat-busy gated; toggle ProductPanel | **230** (ProductPanel) |
+| 4014 | attack-mode OFF | player-state gated; send attack-mode-off + refresh weapon FX / idle motion | 324/328 (mode-bar buttons) |
+| 4015 | attack-mode ON | symmetric to 4014; send attack-mode-on | 324/328 (mode-bar buttons) |
+| 4016 / 4017 / 4018 | sub-strip edges / label | the expanded-bar caption / number-format label tail (uses `msg.xdb` 2222) — only when the bar is expanded | — (decorative; role MED for 4017/4018) |
+| 4019 / 4020 / 4021 | quick-slot / stance buttons 0/1/2 | per-index stance dispatcher — reads a stored mode byte, presses button 176, toggles status/quest/guild/dock per mode | quick-slot state (in-panel) |
+| 4022 | warstone button | toggle the warstone panel (when its button is visible) | **240** |
+| 4023 | collapse toggle (corner) | toggle a layout/expand sub-state + relayout | self |
+| 4024 | Quest tracker (mode 7) | open the quest tracker in mode 7; close siblings | **206** (QuestPanel) |
+
+> Other sibling slots are **closed** (never opened) by the mutually-exclusive close: 147 (dock-slide),
+> 207 (guild). 202 is the chat-output panel used only as a busy check. Wire each entry button to its
+> MainWindow service slot — not to a single id space — and reproduce the mutually-exclusive-close on
+> every open.
+
+#### 8.23.4 Open / close + mutual-exclusivity (CODE-CONFIRMED)
+
+The strip itself is persistent (always registered at slot 148). Individual groups open/close via the
+keyboard hotkey dispatcher (which reaches the slot-148 menu and calls a group handler) and via the entry
+buttons. Each group handler is **mutually-exclusive**: it opens its own panel (or expands the bar) and
+walks the sibling slots, toggling any open one off. Common gating on every action: abort if a global
+"input captured / busy" byte is set; abort if a close-all helper already consumed the key; if the chat
+input box is active, beep / select a UI-list entry instead of acting. Every action plays UI click sound
+**862020102**. The keymap that turns a physical key into an action id is a separate option/keybind table
+(config / debugger-pending — not in the build routine).
+
+#### 8.23.5 Captions (CODE-CONFIRMED ids; CP949 text VFS-only)
+
+`msg.xdb` ids: **10082** (chat-busy notice, action 4007), **45003** (ProductPanel-unavailable notice,
+action 4013), **2222** (number-format template in the expanded-bar label tail). Per-entry tooltip captions
+are not statically embedded in the build routine (config / debugger-pending).
+
+#### 8.23.6 Residuals
+
+- Keymap → action-id binding (which physical key, including the maintainer-reported toggle key, maps to
+  each action) — config / debugger-pending.
+- uitex `id → DDS` for ids 1 / 4 / 14 / 26 — VFS `uitex.txt` pending.
+- Absolute on-screen pixels depend on the runtime screen-size globals (bottom-anchor formula confirmed).
+- Cases 4016/4017/4018 precise visible role (expanded-bar caption/number strip) — MED.
+
+### 8.24 In-game HelpPanel — full-screen help overlay (CODE-CONFIRMED)
+
+The **HelpPanel** is **not a separate panel class and not a `+0x238` service-slot panel**. It is a
+lazily-built **full-screen image overlay** that lives as a direct member of the root in-game HUD window
+(the "MainMaster" `MainWindow`). When shown it draws a single image `data/ui/help.dds` stretched to the
+full screen at (0,0) with opaque white tint — the entire help/manual content is the picture itself.
+
+- **Member layout (direct DWORD members of the root HUD window, not a service-slot-table entry):**
+  the help texture wrapper, the help image component (the member the earlier slot map called "slot 322"),
+  and the docked help menu button (the member earlier called "slot 176"). They are plain members, not
+  entries in the `+0x238` service-slot table.
+
+#### 8.24.1 Geometry (CODE-CONFIRMED)
+
+| Property | Value |
+|---|---|
+| dst position | (0, 0) |
+| dst size | (screen_width, screen_height) — the runtime screen-size globals (the client runs 1024×768) |
+| src rect | (0, 0) to (W, H) — the whole texture, 1:1 stretch |
+| tint | opaque white (ARGB 0xFFFFFFFF) |
+| z-order field | high (drawn above the HUD) |
+
+#### 8.24.2 Content / atlas (CODE-CONFIRMED)
+
+- **Single literal image `data/ui/help.dds`** — bound by direct path, **not** a uitex integer id. There
+  is no registry lookup and no src-rect carving: the whole DDS is the help screen.
+- **Page count = 1. Navigation = none.** No prev/next, no tab/topic list, no scroll, **no `msg.xdb` feed
+  and no help table.** Any nav-looking chrome is baked into the artwork. Verify the file exists and
+  inspect its painted layout — that is an asset task, not code (VFS-pending).
+
+> Unrelated and NOT part of this overlay: `data/ui/cubegamble_help.dds` (a different feature's help image)
+> and `data/script/tiphelp.scr` (the loading-tip / tip-of-the-day system).
+
+#### 8.24.3 Open / close mechanism (CODE-CONFIRMED)
+
+- **Toggle = key `h` (0x68)** on the keyboard hotkey dispatcher: pressing `h` while the overlay is hidden
+  shows it; pressing `h` while visible hides it. **The "Space" trigger is REFUTED on this dispatcher**
+  (debugger-pending only if another input layer maps Space → help elsewhere).
+- **Suppressed in one app/game-state** (a state gate disables the toggle — the exact blocked state is
+  debugger-pending; likely a cutscene / blocked / billing state).
+- **Mirrored by the docked help menu button** and by `DefaultMenu` action **4011** (§8.23.3): the show
+  path presses the docked button when the overlay opens, and DefaultMenu 4011 reflects that button — so
+  the button and the overlay stay in sync. (Whether 4011 also reaches the overlay through the button's
+  own event chain is MED / debugger-pending; the literal overlay show/hide is the `h`-key path.)
+- **Forced hide** when leaving the world to logout.
+
+#### 8.24.4 Captions (CODE-CONFIRMED)
+
+**None.** The overlay carries no code-driven caption / title / topic label; it is a static picture.
+
+#### 8.24.5 Residuals
+
+- The exact app/game-state that suppresses the toggle — debugger-pending.
+- Live confirmation that `h` fires the toggle and that the menu-button click reaches the overlay (button
+  ↔ overlay sync) — debugger-pending.
+- "Space opens help" — REFUTED in static code; confirm no other input layer maps it.
+- Whether the global Esc / close-all also dismisses the overlay — MED.
+- The docked help button's src-rect / caption / bound action id (inside the large HUD builder) — MED.
+
+### 8.25 In-game system-message peers — AnnouncePanel + ErrorPanel (CODE-CONFIRMED)
+
+Two HUD service-slot panels are the server-message display peers of the client-local `MessagePanel`
+(§8.20). They are both `GUPanel` subclasses and 16-slot-vtable windows. Reference canvas 1024×768.
+
+> **The three peers and the routing rule.** Server **notice / error** text routes through a single global
+> notice sink to (a) the chat log channel **and** (b) **ErrorPanel (slot 168)**, which delegates the
+> banner to **AnnouncePanel (slot 221)** when present. Server **GM / system** text routes to the chat-log
+> windows (slots 222 / 163), NOT the modals. **MessagePanel (slot 190)** is **never** a wire destination —
+> it is raised only by client-side decision logic (e.g. the level-milestone branch on `SmsgLevelUp` 5/32).
+> There is no dedicated "show this panel" S2C opcode for any of the three. (Opcodes named below by
+> major/minor only; wire-field tables are owned by `opcodes.md` / `packets/`.)
+
+#### 8.25.1 AnnouncePanel — scrolling announce banner (slot 221, CODE-CONFIRMED)
+
+A **text-only scrolling banner**, non-interactive (its event handler consumes no input). It binds **no
+atlas** (texture id 0 — purely scrolling text labels); its draw runs a custom animated text rotator keyed
+by a client game-state word.
+
+| Property | Value |
+|---|---|
+| Master service slot | **221** |
+| Anchor / geometry | **(11, 455), 120 × 85** — lower-left of the reference canvas |
+| Texture | none (0) — text-only / transparent |
+| Widgets | **8 `GULabel`s** (two batches: 3 + 5), each 110 × 12, stacked vertically; **no buttons, no close control** |
+| Captions | supplied by the caller (the notice sink) + a rotating-text source keyed by game-state; **no hardcoded `msg.xdb` id** |
+
+It is built once by the HUD builder and is the **banner delegate** of the notice sink: the ErrorPanel
+notice show forwards its text to AnnouncePanel when slot 221 exists.
+
+#### 8.25.2 ErrorPanel — timed floating notice / error modal (slot 168, CODE-CONFIRMED)
+
+The **timed floating notice / error modal** — the single global on-screen sink for almost every server
+notice / error. It shows text with a **per-second countdown caption**, an OK button, and an on-expiry
+auto-action; it auto-dismisses when the countdown elapses. It is built in **three scenes** (in-game HUD,
+character-select, and login) — the cross-scene error modal.
+
+| Property | Value |
+|---|---|
+| Master service slot | **168** |
+| Atlas (uitex id) | **2** → `data/ui/inventwindow.dds` (the same chrome as MessagePanel) |
+| Geometry | **screen-centred** with a 340 box: X = `(screen_width − 340)/2`, Y = `(screen_height − 340)/2`, **W = 340, H = 190** (≈ X 342 / Y 214 on the 1024×768 canvas) |
+| Background src origin | (318, 647) on uitex 2 — MED (push-decode; confirm against the atlas) |
+
+**Widgets (CODE-CONFIRMED):**
+
+| Child | Type | dst (x, y, w, h) | atlas | NORMAL src | HOVER src | action |
+|---|---|---|---|---|---|---|
+| Title label | GULabels (multi-line) | (w/2−6, h, …) | — (text) | — | — | 670 |
+| OK button (3-state) | GUButton | (125, 151, 90, 25) | panel chrome (uitex 2) | (417, 943) | (507, 943) | **671** |
+| Body labels (×4) | GULabels (multi-line) | (0, h, …) | — (text) | — | — | — |
+
+- **Countdown + auto-dismiss** (the distinguishing behaviour vs MessagePanel): per ~1000 ms it decrements
+  a remaining-seconds counter and formats a caption `"<text> - <seconds>"` from `msg.xdb` **101**, then
+  re-centres it on the title label. When the countdown reaches 0 it runs an on-expiry action and hides.
+- **OK button (action 671)** closes the modal; **Esc** does not auto-dismiss but the timer does.
+- **On-expiry action** (mode-selected): one of a forced C2S send (`2/35`), an alternate net send, or a
+  return-to-town path. The three mode constants that pick which one fires are **MED** (debugger-pending —
+  which server-message KIND sets which mode at runtime).
+
+#### 8.25.3 S2C notice/error routing (CODE-CONFIRMED routing; codes/values capture-pending)
+
+Server-message KINDs route through the global notice sink unless noted. Opcodes by canonical name +
+major/minor only (wire-field tables owned by the protocol spec):
+
+| Opcode | Routes to | Note |
+|---|---|---|
+| `SmsgShowPopupByCode` (**4/500**) | **ErrorPanel (168)** directly (5000 ms) | a `u32` popup code selects one of seven preset strings; codes 1..7 — VALUE meaning capture-pending |
+| `SmsgGmNoticeError` (**4/132**), `SmsgNoticeError` (**4/138**), `SmsgColoredSystemText` (**4/140**), `SmsgShowMessage51027` (**4/146**) | ErrorPanel (168) via the sink | the result-with-message family; per-field VALUE semantics capture-pending |
+| (broad result family: item/skill/guild/party/billing/combat results, etc.) | ErrorPanel (168) via the sink | identical routing mechanism; the sink also posts to the chat log |
+| `SmsgGmChatMessage` (**3/50000**) | chat-log (222 / 163), **NOT** the modals | length-prefixed text (≤ 121 bytes); login/select fallback sink out-of-game |
+| `SmsgLevelUp` (**5/32**) | **MessagePanel (190)** via client level logic + ErrorPanel (168) general | the **only** confirmed handler that opens MessagePanel — keyed on a client-derived level (level 12 → `msginfo.do` code 100; level 24 → code 101), not a wire message-code field |
+
+- **The global notice sink** posts the text to the chat log channel **and**, when slot 168 exists, raises
+  ErrorPanel as a timed notice (default timeout 5000 ms), which delegates the banner to AnnouncePanel
+  (slot 221) when present. Its colour argument is an ARGB sentinel and its mode argument selects
+  banner-vs-transient — the exact colour table and mode enum are **MED** (debugger/capture-pending).
+
+#### 8.25.4 Residuals
+
+- Notice-sink colour table + mode enum — MED (debugger/capture).
+- ErrorPanel on-expiry mode constants (which KIND fires which net action) — MED.
+- `SmsgShowPopupByCode` (4/500) popup-code 1..7 string contents — capture-pending.
+- ErrorPanel background sub-rect on uitex 2 — MED (confirm against the atlas).
+- All per-field VALUE semantics — capture-unverified (no capture this lane); routing / sizes / offsets are
+  control-flow-confirmed.
+
+### 8.26 In-game PetPanel — player-couple / pair-relation window (CODE-CONFIRMED)
+
+`PetPanel` (its retained in-engine name) is the **player-couple / pair-relation companion window** —
+**not** a tamed-creature / companion-pet window. There is no creature-pet feature in this build (no pet
+data table, no pet DDS, a single matching class). It shows a **partnered actor's** name and level, two
+relationship gauges, four command buttons, and an info button. It lives at **master service slot 194**;
+the object is **1488 bytes (0x5D0)**. It is built unconditionally by the HUD builder as a persistent but
+**hidden-until-fed** child.
+
+> **Slot correction.** The pet/couple-window service slot is **194** — REFUTING the earlier candidates
+> 161/164 (generic toggles), 223 (a guess), and 230 (ProductPanel). See `ui_hud_layout.md §5.13`.
+
+#### 8.26.1 Geometry (CODE-CONFIRMED — absolute, not screen-relative)
+
+The window is built at **fixed (80, 200), 228 × 337** on the 1024×768 canvas (these are absolute — there
+is no screen-relative origin in the constructor). Two uitex atlases are bound (§8.26.2). Child rects below
+are window-local (origin = window top-left).
+
+**Title bar** — a 228×16 caption strip at (0, 0), src (692, 0). Its three 11×11 corner buttons are
+title-bar-local:
+
+| Child | dst (x, y, w, h) | NORMAL src | PRESSED src | action |
+|---|---|---|---|---|
+| Title button (help) | (189, 2, 11, 11) | (310, 488) | (386, 534) | **2** |
+| Title button (minimize) | (200, 2, 11, 11) | (321, 488) | (105, 309) | **0** |
+| Title button (close) | (212, 2, 11, 11) | (332, 488) | (116, 309) | **1** |
+
+**Body panel** — a 228×319 main body at (0, 16), src (692, 16). Body-local children:
+
+| Child | Type | dst (x, y, w, h) | src | role |
+|---|---|---|---|---|
+| Gauge-bar #1 background | image | (113, 116, 103, 17) | (920, 208) | relation gauge 1 |
+| Gauge-bar #2 background | image | (113, 96, 103, 17) | (920, 225) | relation gauge 2 |
+| Gauge #1 overlay | GULabel | (113, 116, 103, 17) | — | numeric / text over gauge 1 |
+| Gauge #2 overlay | GULabel | (113, 96, 103, 17) | — | numeric / text over gauge 2 |
+| Partner NAME | GULabel | (79, 43, 128, 17) | — | partner display name |
+| Partner LEVEL | GULabel | (79, 70, 86, 17) | — | partner level |
+| Command button A | GUButton | (15, 182, 91, 25) | (921, 104) | action **3** |
+| Command button B | GUButton | (124, 182, 91, 25) | (921, 26) | action **4** |
+| Command button C | GUButton | (15, 215, 91, 25) | (921, 52) | action **5** |
+| Command button D | GUButton | (124, 215, 91, 25) | (921, 78) | action **6** |
+| Info / details button | GUButton | (110, 253, 110, 39) | (849, 337) | action **7** |
+
+#### 8.26.2 Atlas binding — uitex integer ids (CODE-CONFIRMED ids; DDS via uitex.txt VFS-only)
+
+| `uitex.txt` id | Use in this panel |
+|---:|---|
+| 1 | shared HUD button / chrome atlas — the three 11×11 title buttons |
+| 9 | the couple/pair panel art — the title-bar + body panels, both gauge backgrounds, all four command buttons, the info button |
+
+The DDS each id maps to resolves through the runtime `uitex.txt` manifest (`formats/ui_manifests.md`) —
+VFS-pending. No literal pet DDS path exists in the binary.
+
+#### 8.26.3 Action-id map (CODE-CONFIRMED)
+
+| Action | Source widget | Behaviour |
+|---:|---|---|
+| 0 | title button | minimize-family (no-op toggle path) — role MED |
+| 1 | title button | collapse the body panel (keep the title bar) |
+| 2 | title button | press the docked help button (slot 176) + set its caption from `msg.xdb` **16002** — the shared help mechanism (same button DefaultMenu uses) |
+| 3..6 | command buttons | select a local command mode 0..3, re-skin the four button icons to show the selected one pressed, then route through the generic UI-list select / net-send path |
+| 7 | info / details button | open the shared **InfoPanel** (slot 166) with a category/detail page |
+| (drag on title bar) | — | begins window drag (stores grab offset on the master window) |
+
+> **No dedicated C2S pet opcode.** The four command buttons route through a generic select/send helper
+> shared by ~100 panels (the "pick a command, then the framework selects/targets an actor" pattern) — not
+> a pet-specific packet.
+
+#### 8.26.4 Open / populate / close (CODE-CONFIRMED) — data-driven, NOT a hotkey
+
+- **Auto-shown by data.** The panel pops when the server pushes a pair-relation for the local player:
+  `SmsgActorPairRelation` (**S2C 5/53**) on the relation-set path populates the panel from the partnered
+  actor and calls SetVisible(1).
+- **Populate** (from the partnered actor record): partner display name, partner level, and the two gauges
+  (gauge maxima resolved from an actor-data map by the partner's appearance/mob id). On set it also builds
+  a localized **couple system notice from `msg.xdb` 10025..10032** (posted to the chat log / notice, NOT a
+  panel caption).
+- **Hidden** on relation clear (the 5/53 clear path), on a confirm-click into the panel, and on the
+  partner's death (`SmsgCharDeath`).
+- **NOT a hotkey window.** Static shows the `n` key (action id 110) opening **slot 230 (ProductPanel)**,
+  not this slot — slot 194 has no hotkey entry. (A live `n` → pet-window observation would be a runtime
+  keymap remap — debugger-pending.)
+
+> Opcodes by canonical name + major/minor only (wire-field tables owned by `opcodes.md` / `packets/`):
+> `SmsgActorPairRelation` (**5/53**, populate+show; reads a 32-byte field block),
+> `SmsgPlayerPairSystemNotice` (**5/42**, a related player-pair system notice; role MED),
+> `SmsgRemoteActorRelationPair` (**5/64**, other players' couple state; role MED). C2S: none dedicated.
+
+#### 8.26.5 Captions (CODE-CONFIRMED ids; CP949 text VFS-only)
+
+`msg.xdb` ids: **16002** (help-button caption, action 2), **10025..10032** (couple/pair system-notice
+strings — routed to the chat log / notice, not panel widgets), **3014 / 3015** (pair-interaction-gate
+notices that reference the slot-194 bound-target probe). Per-button tooltip captions for the command /
+info buttons are not statically embedded (icon-only; config / debugger-pending).
+
+#### 8.26.6 Residuals
+
+- `n`-key live behaviour (static says `n` → slot 230, not 194) — debugger / config-pending.
+- The `5/53` 32-byte payload's exact per-field offsets/types and the `relationKind` value meanings —
+  capture-unverified.
+- uitex id 1 / 9 → DDS file mapping — VFS `uitex.txt` pending.
+- Whether a creature-pet feature ever existed — REFUTED statically; no further static signal.
+
+
+### 8.27 KeepNpcPanel — the NPC storage/keep dialog menu (CODE-CONFIRMED)
+
+`KeepNpcPanel` is the **5-option vertical dialog menu** shown when the player clicks a storage/keep NPC
+(the central NPC-interaction router classifies it as a **KIND-9** NPC and opens this panel). It is the
+menu root from which the player chooses "open storage", a keep-service option list, NPC dialog text, a
+quest-offer list, or "close". It lives at **master service slot 152**, and it is a master-window-placed
+HUD child (panel-local child rects below; absolute root origin debugger-pending).
+
+> **Cross-reference — the full NPC dispatch lives elsewhere.** The complete NPC click →
+> KIND-classifier → target-window map (the 35-case dispatch covering every NPC kind, plus the two
+> router-emitted sends) is documented in `specs/npc_interaction.md §2.2`. KeepNpcPanel is only the
+> KIND-9 leaf of that map. This section documents the KeepNpcPanel **option layout** and its
+> selector mechanism; it does NOT restate the dispatch table — see `npc_interaction.md §2.2`.
+
+#### 8.27.1 Geometry (CODE-CONFIRMED rects; panel-local origin)
+
+The menu is two backdrop images plus five buttons stacked vertically. Reference canvas is panel-local
+(top-left origin, +X right, +Y down). The small top button sits at y=37; the four full-width
+(106 × 40) option buttons run y = 69 / 109 / 149 / 189.
+
+| Widget | dst (x, y, w, h) | atlas (uitex id) | NORMAL src | HOVER src | PRESSED src | Action | Selector |
+|---|---|---:|---|---|---|---:|---:|
+| Backdrop image | (0, 0, 167, 176) | 4 | (0, 695) | — | — | (no action) | — |
+| Header strip image | (0, 176, 167, 63) | 4 | (0, 871) | — | — | (no action) | — |
+| Top button (open storage) | (37, 37, 90, 25) | 4 | (642, 836) | (642, 836) | (755, 836) | **1** | sel 1 |
+| Service button (keep-service list) | (25, 69, 106, 40) | 4 | (316, 816) | (316, 816) | (856, 828) | **2** | sel 2 |
+| Service button (NPC dialog) | (25, 109, 106, 40) | 2 | (825, 927) | (825, 927) | (825, 687) | **0** | sel 0 |
+| Service button (quest offer) | (25, 149, 106, 40) | 2 | (825, 967) | (825, 967) | (825, 727) | **3** | sel 3 |
+| Bottom button (close) | (25, 189, 106, 40) | 2 | (825, 807) | (825, 807) | (825, 767) | **4** | sel 4 |
+
+The on-screen blit extent is the rect `(w, h)`; the source extent equals `(w, h)` (1:1 blit) from the
+named source origin. The button faces are pure atlas sprites — **no `msg.xdb` caption id is baked into
+the KeepNpcPanel buttons themselves** (the captions are part of the DDS art). CODE-CONFIRMED.
+
+#### 8.27.2 Atlas binding — uitex integer ids (CODE-CONFIRMED ids; DDS via uitex.txt VFS-pending)
+
+| `uitex.txt` id | Use in this panel |
+|---:|---|
+| 4 | the two backdrop images, the open-storage top button, the keep-service option button |
+| 2 | the NPC-dialog, quest-offer and close buttons |
+
+The DDS each id maps to resolves through the runtime `uitex.txt` manifest (`formats/ui_manifests.md`)
+— VFS-pending.
+
+#### 8.27.3 Selector mechanism + action map (CODE-CONFIRMED)
+
+When a button is clicked, the window dispatch latches the clicked child's **action id** into the
+panel's selector field (`panel+180`). KeepNpcPanel's onEvent then reads that selector and branches:
+
+| Selector / action | Behaviour | Target |
+|---:|---|---|
+| **0** | NPC dialog-text path; populates and shows the NPC dialog only if the active NPC descriptor KIND == 9 | NPC dialog sub-view |
+| **1** | **OPEN STORAGE** — bag-count gate (KIND-9 limit 50); on pass resets the storage grid, toggles the storage view on, hides the world HUD panels | **KeepPanel (slot 191, §8.32)** |
+| **2** | open the keep-service option list (a 9-entry service menu; captions `msg.xdb` **40033..40041**); hides the world HUD panels | keep-service option list (slot 182) |
+| **3** | open the quest-offer list; shows a "no quest" feedback notice if empty | quest-offer list (slot 215) |
+| **4** | **CLOSE** the panel | (UI close) |
+| ≥ 5 | ignored (no-op) | — |
+| ESC (key 27) when shown | same CLOSE path | (UI close) |
+
+> **Correction vs an earlier dirty draft.** A prior note swapped the top button and the close button.
+> The binary is authoritative: the (37, 37) top button is **action 1 = OPEN STORAGE** (→ slot 191),
+> and the bottom (25, 189) button is **action 4 = CLOSE**. The action ids and routing above are the
+> ground-truth reading.
+
+> **Emits nothing on the wire from this panel.** KeepNpcPanel itself sends no C2S packet — its
+> selectors only open/close other windows. The storage-open request (C2S 2/142) and the per-item
+> moves (C2S 2/46 / 2/44) are emitted from the opened windows / router, not from this menu. See
+> `npc_interaction.md §2.2 / §7` and §8.32 below.
+
+#### 8.27.4 Residuals
+
+- KeepNpcPanel root-window absolute origin/size — debugger-pending (master-window-placed child).
+- uitex id 2 / 4 → DDS file mapping — VFS `uitex.txt` pending.
+- The CP949 text of `msg.xdb` 40033..40041 (keep-service option captions) and the per-entry wiring of
+  the 9 service options — VFS / capture-pending.
+
+### 8.28 RelationPanel + BuddyRelation — TWO distinct social windows (CODE-CONFIRMED)
+
+There are **two separate social windows** that an earlier stub conflated. They have distinct classes
+and distinct master service slots:
+
+- **`RelationPanel` = master service slot 193** — the relation / teacher / fate window (a paged,
+  tabbed roster with add/remove and master-set actions). This is the class literally named
+  `RelationPanel`.
+- **`BuddyRelation` = master service slot 185** — the buddy / social sibling window, a **separate
+  class** with its own constructor and toggle. It is opened by the `DefaultMenu` radial **action
+  4002**.
+
+> **Load-bearing 185 ≠ 193 distinction.** The class named `RelationPanel` is at slot **193**, NOT 185.
+> Slot 185 holds the distinct `BuddyRelation` sibling. The group-open dispatcher reached from
+> `DefaultMenu` toggles BOTH the slot-185 buddy window and the slot-193 RelationPanel together, which
+> is why they were historically confused. Treat them as two windows. (`BuddyRelation`'s own layout is
+> a separate deliverable; this section documents `RelationPanel` in full and pins the slot split.)
+
+#### 8.28.1 Geometry (RelationPanel, slot 193 — CODE-CONFIRMED, panel-local origin)
+
+Master-window placement builds the panel at build-time dst (80, 200), size **295 × 393**; the runtime
+absolute on-screen origin may be re-anchored by the master-window placement logic (debugger-pending).
+Child rects are panel-local; all source rects index the single relation atlas (§8.28.2).
+
+| Widget | dst (x, y, w, h) | NORMAL src | PRESSED src | Action |
+|---|---|---|---|---:|
+| Close button (top-right) | (panelW−12, 2, 11, 11) | (307, 11) | (307, 11) | 16 |
+| Tab buttons ×4 | (x, y∈{6,63,120,177}, 50, 55), step y+57 | per-tab origins (data-driven) | — | 19..22 |
+| Header image | (15, 74, 49, 21) | (296, 341) | — | — |
+| Name textbox (IME off, maxlen 16) | (74, 74, 136, 21) | (296, 363) | — | 9 (submit) |
+| Name OK / search button | (235, 74, 45, 21) | (296, 191) | (296, 213) | 10 |
+| Bottom button A | (58, 337, 68, 20) | (352, 23) | (352, 44) | 11 |
+| Bottom button B | (165, 337, 68, 20) | (352, 65) | (352, 86) | 14 |
+| Bottom button C (overlay) | (165, 337, 68, 20) | (352, 191) | (352, 212) | 15 |
+| Status-bar image (hidden by default) | (0, 0, 182, 19) | (0, 448) | — | — |
+| Member list rows ×6 | base y=118, step y+21 (while y<244) | rowImg (0, 487); miniBtn (296, 385)/(296, 400) | — | rowBtn 0..5; miniBtn 34..39 |
+| Big list button | (29, 259, 224, 18) | (0, 429) | (0, 429) | 12 |
+| Secondary row image | (16, 94, 251, 18) | (0, 487) | — | — |
+| Secondary row button | (16, 94, 185, 18) | (blank) | — | 13 |
+| Secondary mini-button | (206, 96, 59, 14) | (296, 385) | (296, 400) | 40 |
+| Page-up button | (17, 303, 26, 26) | (296, 235) | (296, 262) | 7 |
+| Page-down button | (241, 303, 26, 26) | (322, 235) | (322, 262) | 8 |
+| Page indicator label | (17, 340, 15, 13) | — | — | — |
+| Numeric page buttons ×10 | y=309, x=57+15·i, 15×14 (while x<207) | src x=352+15·(i%5), y=247 (rows 0..4) / 275 (rows 5..9) | — | 23..32 |
+| Page "more" button | (207, 309, 30, 14) | (352, 233) | (352, 233) | 33 |
+| Confirm / close button | (123, 361, 45, 25) | (296, 289) | (296, 315) | 6 |
+
+Each button uses the same `(w, h)` blit extent for all three (normal/hover/pressed) states from the
+named source origins.
+
+#### 8.28.2 Atlas binding (CODE-CONFIRMED)
+
+`RelationPanel` uses a single shared atlas at the **literal path `data/ui/relation.dds`** (a hard-coded
+path, NOT a uitex integer id — uitex.txt indirection does not apply to this panel). On lazy-init the
+atlas handle is bound into the panel and into **every child image component**, so each child's `texId`
+build argument is **0** — every widget draws from the one `relation.dds` atlas. The per-widget source
+rects in §8.28.1 index directly into `relation.dds`.
+
+#### 8.28.3 Tab / list structure (CODE-CONFIRMED structure; tab meanings MED)
+
+- **4 tabs** (active-tab index 0..3, set by actions 19..22). Each tab reconfigures which widget
+  clusters are visible (member-add row vs. info row vs. fate/training row) and re-skins the mode
+  button with a different atlas source pair. Inferred tab meaning (capture/debugger-pending to name
+  each exactly): tab 0 = master/teacher, tab 1 = parent/family, tab 2 = marriage/spouse, tab 3 =
+  friend/fate. The associated detail page categories are 40 / 41 / 35 / 37.
+- **Paged member list**: 6 visible rows × paging, driven by page-up/down (7/8), numeric page buttons
+  (23..32) and page-more (33).
+
+#### 8.28.4 Action-id map (RelationPanel onEvent — CODE-CONFIRMED unless flagged)
+
+| Action | Behaviour | Conf |
+|---:|---|---|
+| 0..5 | member-list row click (rows 0..5) → select roster entry | MED |
+| 6 | close / confirm — hide + rebuild | CODE |
+| 7 / 8 | page-up / page-down | CODE |
+| 9 | name-textbox submit (routes input focus, shows modal focus) | CODE |
+| 10 | ADD / REMOVE a relation by typed name (emits a chat-command line, §8.28.6) | CODE |
+| 11 | open the detail / info context for the selected member, keyed by the active tab | CODE |
+| 12 / 13 | big list-button / secondary-row action | MED |
+| 14 | timed action (3-minute cooldown); emits a CP949 chat-command line + system text (likely a master/training request) | CODE (text) / MED (meaning) |
+| 15 | set teacher/master — validates against the client roster, builds a detail page; on failure shows `msg.xdb` **2089** / **10074** | CODE |
+| 16 | window close box (top-right) | CODE |
+| 19..22 | select tab 0..3 | CODE |
+| 23..33 | numeric page selection + page-more | CODE |
+| 34..39 | per-row mini-button (rows 0..5) | MED |
+| 40 | secondary-row mini-button | MED |
+| TAB key | cycle active tab (index + 1 mod 4) | CODE |
+| ESC key (when focused) | close the panel | CODE |
+
+#### 8.28.5 Open / populate (CODE-CONFIRMED path)
+
+- **DefaultMenu route:** the `DefaultMenu` group-open dispatcher (reached on a social-group menu
+  action) toggles the social-window group, opening BOTH slot 185 (`BuddyRelation`) AND slot 193
+  (`RelationPanel`). The `DefaultMenu` **action 4002** named for the buddy window reaches the group
+  through this dispatcher (the exact 4002 → dispatcher binding is owned by the DefaultMenu lane — MED).
+- **Hotkey route:** a relation/social toggle hotkey closes `RelationPanel` (slot 193) if visible, else
+  closes sibling panels and opens the relation group (tab reset to 0). The literal key is keymap-pending.
+- **Populate (S2C):** a relation-roster push fills/updates one roster record per message via the
+  populate handler on slot 193 (the populate record carries a relation-type selector byte and a
+  member name; relation-type VALUE semantics are capture-pending). Opcode numbers and wire-field
+  tables are owned by `opcodes.md` / `packets/` — not restated here.
+
+#### 8.28.6 Emit (C2S) — chat-command text, not binary opcodes (CODE-CONFIRMED)
+
+`RelationPanel` does **not** call binary packet builders directly. Its add/remove/master actions are
+emitted as **slash-command-style chat text** through the chat-command submit path (which the
+chat-command parser later turns into the actual wire opcode):
+
+| Action | Command text (format) | Meaning |
+|---:|---|---|
+| 10 (add) | `friend %s %s` | add a friend / relation by name |
+| 10 (remove) | `cut %s` | remove / cut a relation by name |
+| 14 | a CP949 chat-command line | timed request (3-min cooldown) — likely master/training request |
+| 15 | local teacher-set + detail page | set teacher/master locally |
+
+The verb → wire-opcode mapping (`friend` / `cut` / the CP949 verb) is a chat-command-table concern
+(owned by the chat / command-table lane), not a packet this panel builds.
+
+#### 8.28.7 Captions (CODE-CONFIRMED ids; CP949 text VFS-pending)
+
+`msg.xdb` ids consumed: **2089** / **10074** (teacher-set failure toasts, action 15); **10066**
+(relation removed/declined), **10067** (relation-request template), **10078** / **10079**
+(relation-fee money-deducted templates), **2115** / **2116** (confirmation templates) — all from the
+populate path. BuildScene labels have no inline caption arg; member-name text is assigned dynamically
+at populate time.
+
+#### 8.28.8 Residuals
+
+- Final absolute on-screen origin (build-time dst (80, 200) may be re-anchored) — debugger-pending.
+- The literal opcode numbers + relation-type VALUE semantics of the populate push — capture-pending.
+- C2S verb → opcode mapping for `friend` / `cut` / the CP949 command — chat-command-table lane.
+- Per-tab exact meaning (master/parent/spouse/fate) — inferred; confirm against `npc.scr` / `msg.xdb`.
+- The exact `DefaultMenu` action-4002 → group-open dispatcher binding — DefaultMenu lane.
+- Slot-185 `BuddyRelation` full layout — a separate deliverable.
+
+### 8.29 StallListPanel — personal-stall / market list (key `l`) (CODE-CONFIRMED)
+
+`StallListPanel` is the **personal-stall / player-vendor MARKET LIST** window — a searchable, sortable,
+paged list of player-run stalls (distinct from the NPC item-shop vendor at slot 259). It lives at
+**master service slot 228** and is toggled by the **`l` key**. It is a master-window-placed HUD child
+(panel-local child rects below; absolute root origin debugger-pending).
+
+#### 8.29.1 Geometry (CODE-CONFIRMED rects; panel-local origin)
+
+Panel overall extent ≈ **375 × 481**. A header sub-panel (375 × 18 at (0, 0)) hosts the three title
+buttons; a body sub-panel (375 × 463 at (0, 18)) hosts the list and controls. All source rects index
+the single `stalllist.dds` atlas (§8.29.2).
+
+| Widget | dst (x, y, w, h) | NORMAL src | PRESSED src | Action |
+|---|---|---|---|---:|
+| Title button A (refresh / own-list) | (333, 2, 11, 11) | (427, 160) | (427, 171) | 12 |
+| Title button B (drag toggle) | (345, 2, 11, 11) | (438, 160) | (438, 171) | 13 |
+| Title button C (close) | (357, 2, 11, 11) | (449, 160) | (449, 171) | 14 |
+| Page button (prev) | (16, 355, 26, 26) | (375, 160) | (401, 160) | 15 |
+| Page button (next) | (332, 355, 26, 26) | (375, 186) | (401, 186) | 16 |
+| Page label ("cur / total") | (60, 363, 15, 13) | — | — | — |
+| Row image strips ×58 | (18, 58+25·i, 339, 23), i=0..57 (y<308) | (2, 485) | — | — |
+| Row hit buttons ×58 | (23, 58+25·i, 337, 21) | (transparent) | — | = row index |
+| Search textbox (maxlen 30, IME on) | (25, 328, 325, 22) | (511, 511) | — | 28 |
+| Action button L (search / submit) | (268, 321, 44, 28) | (375, 286) | (375, 286) | 29 |
+| Action button R (reset / all) | (313, 321, 44, 28) | (375, 286) | (375, 286) | 30 |
+| Column-sort buttons ×10 | (112+15·i, 361, 15, 14), i=0..9 | 15·(c+25), 226 (+28 if i≥5) | — | 17..26 |
+| Sort button (wide name/owner) | (262, 361, 59, 14) | (375, 212) | — | 27 |
+| Big button (left — ENTER selected) | (37, 410, 113, 40) | (375, 0) | (375, 40) | 11 |
+| Big button (right — CLOSE) | (224, 410, 113, 40) | (375, 80) | (375, 120) | 10 |
+| Header-drag strip (no action) | (0, 325, panelW, 26) | — | — | — |
+
+#### 8.29.2 Atlas binding (CODE-CONFIRMED)
+
+`StallListPanel` uses a single atlas at the **literal path `data/ui/stalllist.dds`** (hard-embedded
+near the class data; the per-widget build argument is the default-atlas sentinel, not a uitex id). All
+source rects in §8.29.1 index this one DDS. The numeric uitex id and its VFS DDS resolution are
+VFS-pending; the literal path is certain.
+
+#### 8.29.3 Row model (CODE-CONFIRMED)
+
+- **Visible page = 10 rows**. A backing widget pool of **58** row widgets (image strip + hit button
+  each) is built, but only the first 10 are populated/shown per page.
+- **Row store** is a dynamic array of fixed-size records; each record holds a stall key/id, an
+  availability/state byte (used for greying a row), and a CP949 backtick-delimited
+  ``"stallName`ownerActorId"`` string. The render path splits on the backtick, resolves the owner
+  actor id to a display name, and composes the row text as `"<stallName> - <ownerName>"`.
+- **Pagination**: two arrow buttons (actions 15/16) + a "cur / total" page label; total pages =
+  count/10 + 1.
+- Fallback captions: `msg.xdb` **29022** (unknown owner), **29023** (placeholder / empty-row),
+  **29018** (own-stall marker).
+
+#### 8.29.4 Action-id map (onEvent — CODE-CONFIRMED)
+
+| Action | Behaviour |
+|---:|---|
+| 0..9 | select visible row N → set selected id, highlight, show selection caption |
+| (row double-click, rows 0..9) | set selected id AND emit ENTER-stall request (C2S 2/56), then close |
+| 10 | CLOSE window |
+| 11 | ENTER / open the selected stall → emit ENTER-stall request (C2S 2/56); `msg.xdb` **29010** if none selected |
+| 12 | refresh: fetch the player's own-stall list (`msg.xdb` 16014) and repopulate |
+| 13 | header drag (caches drag delta on the master window) |
+| 14 | dismiss the body sub-panel |
+| 15 / 16 | page up / page down → re-render |
+| 17..26 | column-sort header buttons (10 columns) → re-render |
+| 27 | wide name/owner sort header → re-render |
+| 28 | focus the search textbox (enables IME) |
+| 29 | SEARCH / SUBMIT: validate input, 10-second rate gate (`msg.xdb` 29017/29019/29020/29021), then emit the list-search request (C2S 2/74) |
+| 30 | RESET / ALL: clear the filter, restore the placeholder (`msg.xdb` 29017/29018), re-issue the default list |
+| ESC (key 27) | close window |
+
+#### 8.29.5 Open mechanism (CODE-CONFIRMED) — key `l` toggle
+
+The `l` key (ASCII 108) toggles slot 228: plays the standard UI cue, then if slot 228 is visible it
+closes the panel, else it opens it (resets the search caption to the placeholder, un-greys, shows, and
+re-renders). It is a pure toggle. The initial list request is issued by the search-submit / refresh
+path — an open with an empty filter shows the last/empty store until a list-refill response returns.
+
+#### 8.29.6 Opcodes (canonical names + major/minor only)
+
+> Wire-field tables are owned by `opcodes.md` / `packets/`; only the names + ids are noted here:
+> `CmsgStallListRequest` (**C2S 2/74**, search/request with a 30-byte CP949 name filter, empty filter =
+> "all") ↔ `SmsgStallListRefill` (**S2C 4/74**, N×36-byte row records — the primary list round-trip);
+> `CmsgStallEnter` (**C2S 2/56**, 4-byte selected stall id) — enter / open a selected stall. The
+> opcode rows for 2/74, 4/74 and 2/56 are being added by the protocol lane.
+
+#### 8.29.7 Captions (CODE-CONFIRMED ids; CP949 text VFS-pending)
+
+`msg.xdb` ids: **105** (search/submit caption), **102** (reset/all caption), **16014** (own-list
+refresh), **29010** (no stall selected), **29017** (search placeholder), **29018** (own-stall marker),
+**29019** (search instruction), **29020** (rate-limit countdown), **29021** (input invalid), **29022**
+(unknown owner), **29023** (empty-row placeholder).
+
+#### 8.29.8 Residuals
+
+- Absolute screen origin of slot 228 — debugger-pending.
+- `stalllist.dds` numeric uitex id and VFS resolution — VFS-pending.
+- Exact meaning of the C2S 2/56 id field (stall primary key vs. owner actor id) — capture-pending.
+- Wire flag-bit usage in the 4/74 record (open / sold-out) — capture-pending.
+- Which field each of the 10 sort columns sorts (data-driven) — not statically resolvable.
+
+### 8.30 BroodWarListPanel — guild-diplomacy / brood-war relations list (key `u`) (CODE-CONFIRMED)
+
+> **Scope correction (load-bearing).** Despite its class name, `BroodWarListPanel` is the
+> **guild-diplomacy / brood-war RELATIONS list** — the roster of allies / war-declarations / enemies,
+> keyed by a relation-state byte, with declare-war / declare-ally / cancel actions. It is NOT a list of
+> scheduled brood-war events with per-row join buttons. Several actions are gated on the global
+> brood-war phase byte (must equal 7 to create, ≥ 6 to register/declare); relation-state 5 is the
+> brood-war / enemy bucket.
+
+It lives at **master service slot 235** and is toggled by the **`u` key**. Master-window-placed HUD
+child; panel-local child rects below; absolute root origin debugger-pending.
+
+#### 8.30.1 Geometry (CODE-CONFIRMED rects; panel-local origin)
+
+| Widget group | Count | dst (x, y, w, h) | NORMAL src | PRESSED src | Action |
+|---|---:|---|---|---|---:|
+| Top category tabs | 3 | (x∈{11,91,171}, 24, 89, 20) | (x, 73) | (x, 52) | 15..17 |
+| Row check buttons | 6 | (30, 113+30·i, 23, 23) | (0, 0) | — | 6..11 |
+| Row name buttons | 6 | (70, 113+30·i, 147, 14) | (0, 0) | — | 0..5 |
+| Prev-page (◄) | 1 | (23, 303, 25, 25) | (277, 120) | (251, 120) | 13 |
+| Next-page (►) | 1 | (202, 303, 25, 25) | (277, 146) | (251, 146) | 14 |
+| Page label ("%s / %s") | 1 | (23, 330, 15, 13) | — | — | — |
+| Refresh / list button | 1 | (194, 375, 45, 25) | (251, 94) | (297, 94) | 12 |
+| Declare-war button | 1 | (30, 346, 64, 25) | (251, 26) | (251, 0) | 28 |
+| Declare-ally button | 1 | (96, 346, 64, 25) | (446, 26) | (446, 0) | 29 |
+| Cancel-relation button (init hidden) | 1 | (141, 346, 64, 25) | (381, 26) | (381, 0) | 30 |
+| Tab-A button | 1 | (11, 346, 64, 25) | (251, 198) | (251, 172) | 31 |
+| Tab-B button | 1 | (76, 346, 64, 25) | (316, 198) | (316, 172) | 32 |
+| Tab-C button | 1 | (141, 346, 64, 25) | (381, 198) | (381, 172) | 33 |
+| Header image strip (no action) | 1 | (52, 303, 146, 26) | (52, 303) | — | — |
+| Footer image (no action) | 1 | (10, 375, 146, 26) | (251, 224) | — | — |
+| Name input textbox (maxlen 16) | 1 | (13, 383, 146, 26) | (0, 0) | — | 34 |
+| Descriptor child (no action) | 1 | (0, 0, 220, 200) | — | — | — |
+
+Row blocks step y+30 (rows 0..5). Buttons whose source is `(0, 0)` and the header/footer images are
+non-interactive decoration whose face is set per-row at bind time.
+
+#### 8.30.2 Atlas binding (CODE-CONFIRMED)
+
+`BroodWarListPanel` uses a single atlas at the **literal path `data/ui/broodwarlist.dds`**, bound to
+every child on the show/refresh path. Sibling diplomacy windows use distinct atlases
+(`data/ui/broodwarallystate.dds`, `data/ui/broodwarmap.dds`) and are out of scope. The numeric uitex
+id / VFS DDS resolution is VFS-pending; the literal path is certain.
+
+#### 8.30.3 Row model (CODE-CONFIRMED)
+
+- **Visible window = 6 rows** per page. Page math: 10 pages per "wide page"; total page count =
+  count/6 + 1; page label "%s / %s" = current linear page / total.
+- Each visible row = a check/select button + a name button, populated from a source relation vector of
+  fixed-size records (each carries a guild/target id, a relation-state value, and a CP949 name).
+- **Filter / tabs:** a filter context selects the bucket — relation state < 5 (allies / diplomacy) vs.
+  state == 5 (brood-war / enemy). The top tabs (actions 15/16/17 and 31/32/33) flip this filter.
+- **Row colour by relation state** (host-int ARGB; exact byte order to confirm in the renderer):
+  state 1 → blue-ish, 3 → orange, 4 → green, 5 → purple, else white.
+- Selecting a row stores the target name + id + an aux field and positions the descriptor label.
+
+#### 8.30.4 Action-id map (onEvent — CODE-CONFIRMED routing; VALUE semantics capture-pending)
+
+| Action | Behaviour | Sends? |
+|---:|---|---|
+| 0..5 | row name buttons — select row N | no |
+| 6..11 | row check buttons — also row select | no |
+| 12 | refresh / re-page the visible list | indirect |
+| 13 / 14 | prev / next page | no |
+| 15 / 16 | top tabs — select category (filter) | no |
+| 17..27 | tab / wide-page nav step | no |
+| 28 | DECLARE-WAR — validates (phase ≥ 6, level, gold, banned name, time window) → opens a confirm popup | leads to send |
+| 29 | DECLARE-ALLY / register — validates (phase ≥ 6, guild-master, cooldown, gold) → confirm popup | leads to send |
+| 30 | CANCEL-RELATION — broadcasts a notice (`msg.xdb` **51014**), no send | no |
+| 31 | validates (phase == 7, level, gold) → declare-ally request | leads to send |
+| 32 | validates (phase == 7, guild-master) → confirm popup | leads to send |
+| 33 | confirm-popup path | no |
+| 34 | name-input textbox commit | no |
+| ESC (key 27, when focused) | close panel | no |
+
+> The confirm popup is a **sibling confirmation dialog at its own slot (167)**, NOT slot 235; the
+> actual network SEND fires from that dialog's OK callback (which routes through the diplomacy C2S
+> builder), not from this panel directly.
+
+#### 8.30.5 Open mechanism (CODE-CONFIRMED) — key `u` toggle
+
+The `u` key (ASCII 117) toggles slot 235: no-op if a panel group is open or chat is busy, else play
+the standard UI cue and toggle the panel (the show path loads `broodwarlist.dds` and issues a list
+request).
+
+#### 8.30.6 Opcodes (canonical names + major/minor only)
+
+> Wire-field tables owned by `opcodes.md` / `packets/`: `CmsgGuildDiplomacyDeclare` (**C2S 2/81**,
+> 18-byte body = 1-byte action/state + 17-byte CP949 target-guild name) ↔ `SmsgGuildDiplomacyResult`
+> (**S2C 4/81**, the relation-result push that rebuilds the roster; the existing IDB name on this
+> handler is being adjusted by the protocol lane). The list-open request reuses the same C2S path with
+> an action-byte value; whether a distinct minor exists for pure list-fetch is capture-pending. The
+> 2/81 ↔ 4/81 rows are being added by the protocol lane.
+
+#### 8.30.7 Captions (CODE-CONFIRMED ids; CP949 text VFS-pending)
+
+Confirm-dialog labels (`msg.xdb` 49046..49056, 51002..51013, 21064..21066); action-30 notice **51014**;
+precheck/validation notices (21025..21035, 2085, 51028..51031); S2C error-code → notice ids
+(21074..21077, 2163..2171, 51016..51023, 51032; rank/gold 21044..21046, 21069).
+
+#### 8.30.8 Residuals
+
+- Absolute panel screen origin — debugger-pending.
+- C2S action-byte value map (declare-war vs declare-ally vs list-request) — capture-pending.
+- Whether list-fetch uses a distinct minor from declaration — capture-pending.
+- Exact ARGB byte order of the row-state colours — confirm in renderer.
+- `broodwarlist.dds` numeric uitex id / VFS resolution — VFS-pending.
+
+### 8.31 GuildWarInfoPanel — guild-war info (display / read-only, key `j`) (CODE-CONFIRMED)
+
+`GuildWarInfoPanel` is a **display / read-only** guild-war information window: a two-wide list of up to
+**10 entries**, each = an item/icon + a name + a numeric value, plus an overall active flag. It emits
+**no C2S packet** — the row buttons select/show, OK/Close dismiss, drag moves. It lives at **master
+service slot 224**, is toggled by the **`j` key**, and is also opened by a server event. Object size
+716 bytes; master-window-placed (HUD builder uses width 618 / 309). Absolute origin debugger-pending.
+
+#### 8.31.1 Geometry (CODE-CONFIRMED rects; panel-local origin)
+
+| Child | dst (x, y, w, h) | role |
+|---|---|---|
+| Title-bar panel | (0, 0, 618, 36) | top chrome (drag-handle host) |
+| Body panel | (0, 36, 618, 273) | list host |
+| Close button | (584, 11, 11, 11) | action 31 (close / drag) |
+| OK button | (253, 235, 94, 27) | action 30 (OK / close) |
+| Embedded descriptor widget | (0, 0, 220, 200) | tooltip / detail |
+| Row buttons (10 rows × 3) | see below | item / name / value columns |
+
+Row layout is a **two-wide list**: even rows in a left sub-column, odd rows in a right sub-column. Per
+row group, the row Y = 34·(r/2) + 49 (34-px pitch, two entries share each step). Each row has three
+buttons:
+
+- **Left sub-column (even r):** col0 icon at x=62 (23×23); col1 name at x=95 (102×23); col2 value at
+  x=211 (78×23).
+- **Right sub-column (odd r):** col0 icon at x=326 (23×23); col1 name at x=359 (102×23); col2 value at
+  x=475 (78×23).
+- Per-row actions: col0 (icon) → action `r`; col2 (value) → action `r+10`; col1 (name) → action
+  `r+20` (so icon = 0..9, value = 10..19, name = 20..29).
+
+#### 8.31.2 Atlas binding (CODE-CONFIRMED)
+
+`GuildWarInfoPanel` uses a single atlas at the **literal path `data/ui/moonpa.dds`**, assigned to every
+child on show. Static source rects: Close button (199, 309)/(199, 320) 11×11; OK button (0, 309)/(94,
+309) 94×27. The row icon buttons take their actual frame origins at bind time from the resolved item
+descriptor (fallback origin (23, 0) when no item resolves). The numeric uitex id / VFS DDS resolution
+is VFS-pending; the literal path is certain.
+
+#### 8.31.3 Action-id map (CODE-CONFIRMED)
+
+| Action | Behaviour | Sends? |
+|---:|---|---|
+| 0..9 | row icon (per row) — selection / display only | no |
+| 10..19 | row value (per row) — numeric value display only | no |
+| 20..29 | row name (per row) — name display only | no |
+| 30 | OK button → close window | no |
+| 31 | Close button + title-bar drag (records drag origin on the master window); ESC (key 27) also closes | no |
+
+> **No C2S from this panel.** It is display/read-only. Any guild-war DECLARE / ACCEPT actions belong to
+> the sibling guild-war declaration UI, not this info window.
+
+#### 8.31.4 Info-field shape (CODE-CONFIRMED shape; VALUE meaning capture-pending)
+
+The window is data-driven entirely from a server info block copied into the panel object. The populate
+routine renders up to 10 entries; per entry: a presence/active flag, an item/icon id (resolved to a
+frame origin), a name (a 17-byte string per entry), and a numeric value. Which value is score vs. timer
+vs. wager, which name is "our guild" vs. "opposing guild", and the war-status enum are capture- /
+debugger-pending — static gives the row SHAPE, not the meaning of each value.
+
+#### 8.31.5 Captions (CODE-CONFIRMED)
+
+This panel's construction consumes **no** `msg.xdb` caption ids — it is bare textured chrome with all
+text data-bound. (Related war-state notice strings `msg.xdb` 42003..42006 live in a sibling notice /
+banner flow that can OPEN this window on the "war" notice — cross-reference only, not this panel's
+chrome.)
+
+#### 8.31.6 Open mechanism (CODE-CONFIRMED) — key `j` toggle + server event
+
+- **Key `j`** (ASCII 106) toggles slot 224: plays the standard UI cue; if open → close, else → open.
+- **Server event:** the populate handler (S2C **5/73**) refreshes slot 224 (copies the info block, sets
+  the open-state from a block byte, populates the 10-row list) and drives a sibling alarm/banner panel.
+  A chat-notice → war-state parser can also open this window on the "war" notice.
+
+> **Populated by S2C 5/73.** Opcode rows are owned by `opcodes.md` / `packets/`. **Naming conflict
+> being arbitrated:** the 5/73 handler currently carries a quest-related name in the IDB, but slot
+> 224's RTTI is `GuildWarInfoPanel` and the handler demonstrably refreshes this guild-war info window;
+> the genuinely-quest handler is the neighbour (5/68 → the quest log at slot 223). The 5/73 → name
+> reconciliation is being settled by the protocol lane / journal — both readings are recorded; do not
+> silently reconcile.
+
+#### 8.31.7 Residuals
+
+- Absolute screen origin — debugger-pending.
+- VALUE semantics of the 5/73 body (war status / opposing guild / score / timer / wager) —
+  capture- / debugger-pending.
+- `moonpa.dds` numeric uitex id / VFS resolution — VFS-pending.
+- The 5/73 → handler-name conflict — protocol lane / journal to settle.
+
+### 8.32 KeepPanel — player storage / warehouse (60-cell grid) (CODE-CONFIRMED)
+
+`KeepPanel` is the **player STORAGE / WAREHOUSE ("keep") window**: a **60-cell item grid laid out 10
+rows × 6 columns**, plus money deposit/withdraw, two page tabs, and a close button. It lives at
+**master service slot 191**. It is **NOT a hotkey window** and has no `DefaultMenu` entry — it is opened
+**only** from the storage NPC flow (KIND-9 NPC → KeepNpcPanel "open storage", §8.27 / §8.27.3). The
+object is master-window-placed (constructor id 318, width 732); absolute origin debugger-pending.
+
+#### 8.32.1 Geometry — the storage cell grid (CODE-CONFIRMED)
+
+The grid is **60 cells = 10 rows × 6 columns**, each cell **38 × 38**. Cell `i` (i = 0..59): col = i % 6,
+row = i / 6, **x = 45 + 38·col**, **y = 162 + 38·row**, action id = **200 + i** (so cell actions
+**200..259**, row-major). Three parallel 60-element arrays sit over the grid: the 60 cell buttons (the
+ones with actions 200..259), a 60-element overlay set (11 × 11 quantity labels at cell (x+20, y+26),
+hidden by default), and 60 item-icon image components (38 × 38, hidden until populated). A separate
+60-entry array hosts an optional rendered 3D item-actor per cell for the storage preview.
+
+#### 8.32.2 Geometry — chrome (CODE-CONFIRMED rects; panel-local origin)
+
+| Widget | dst (x, y, w, h) | atlas (uitex id) | NORMAL src | PRESSED src | Action |
+|---|---|---:|---|---|---:|
+| Image backdrop | (0, 85, 318, 625) | 4 | (317, 0) | — | — |
+| Title / header bar image | (0, 36, 318, 50) | 2 | (0, 683) | — | — |
+| Header glyph plate | (140, 60, 39, 17) | 4 | (248, 686) | — | — |
+| Page/tab button A | (25, 105, 65, 20) | 4 | (612, 735) | (612, 714) | **261** |
+| Page/tab button B | (90, 105, 65, 20) | 4 | (612, 777) | (612, 756) | **262** |
+| Info-line label | (51, 598, 128, 15) | — | — | — | — |
+| Deposit-money button | (183, 592, 53, 22) | 4 | (608, 812) | (608, 812) | **263** |
+| Withdraw-money button | (238, 592, 53, 22) | 4 | (608, 812) | (608, 812) | **264** |
+| Close / OK big button | (259, 655, 59, 77) | 2 | (301, 947) | (360, 947) | **260** |
+| Quality-tint cell overlays ×4 | (0, 0, 38, 38) | 70 / 71 / 72 / 74 | (0, 0) | — | — |
+| 3D item-preview canvas | — | — | — | — | — |
+
+Window width = 318 (backdrop); the cell grid (cols x=45..235, rows y=162..504) fits inside. The four
+quality-tint overlays carry hard-set ARGB colour words (rarity/quality border colours painted over a
+cell).
+
+#### 8.32.3 Atlas binding — uitex integer ids (CODE-CONFIRMED ids; DDS via uitex.txt VFS-pending)
+
+`KeepPanel` uses **no** literal DDS path; all art is requested by uitex integer id through the runtime
+`uitex.txt` manifest (`formats/ui_manifests.md`). Ids used:
+
+| `uitex.txt` id | Use |
+|---:|---|
+| 2 | title/header bar, close button — primary keep chrome |
+| 4 | backdrop, header glyph, the page/money button3states — secondary chrome |
+| 14 | label / text / font atlas |
+| 78 | the 60 cell item-icon image components |
+| 70 / 71 / 72 / 74 | the four quality-tint cell overlays |
+
+DDS resolution is VFS-pending.
+
+#### 8.32.4 Action-id map (onEvent — CODE-CONFIRMED)
+
+| Action | Behaviour |
+|---:|---|
+| 200..259 (hover) | build an item tooltip (storage container-type, cell slot = action − 200) over the cell |
+| 200..259 (click, holding an item) | place / move the held item into this cell → **C2S 2/46** (move) or **C2S 2/44** (quick-move), gated by held-source vs. cell-target and the storage-mode flag |
+| 200..259 (click, not holding) | pick up the cell's item (begin a local drag from the storage slot) |
+| 260 | close / OK — close the window, restore the world HUD |
+| 261 | page/tab button A → set active page 0 (swap tab frames, relayout) |
+| 262 | page/tab button B → set active page 1 |
+| 263 | deposit money — if player gold ≥ 1,000,000 → open the number-entry dialog (deposit mode, caption `msg.xdb` 2215); else error `msg.xdb` 45023 |
+| 264 | withdraw money — if stored money > 0 → open the number-entry dialog (withdraw mode, caption `msg.xdb` 2216); else error `msg.xdb` 45023 |
+| ESC (key 27, when visible) | close (same as 260) |
+
+> **Storage slot math.** A cell click maps to the unified inventory slot space as
+> `slot = action + 60·page + 56` — storage occupies a contiguous block starting at unified-slot
+> base **+56**. The quick-move path additionally blocks a few specific quest-bound item ids (notice
+> `msg.xdb` 2142, "cannot store this"); both send lanes guard on the keep-window-open flag (else post
+> notice `msg.xdb` 38004 and abort).
+
+#### 8.32.5 Open mechanism (CODE-CONFIRMED) — NOT a hotkey
+
+KeepPanel is opened **only** via the storage NPC flow: click a **KIND-9** NPC → KeepNpcPanel (slot 152,
+§8.27) → "open storage" (selector 1), which is **bag-count-gated (KIND-9 limit 50)** and emits the
+storage open request **C2S 2/142** (reading the active-target NPC id from the router's stored field);
+on pass it shows KeepPanel (slot 191), sets the keep-open / storage-mode flags, and hides the world HUD
+panels. There is no keyboard hotkey and no DefaultMenu action for this slot.
+
+#### 8.32.6 Opcodes (canonical names + major/minor only)
+
+> Wire-field tables owned by `opcodes.md` / `packets/`. Item movement into / out of the storage cells
+> uses the shared item-controller sends: **C2S 2/46** (move, 12-byte body) and **C2S 2/44**
+> (quick-move, 12-byte body). The storage **open request and money deposit/withdraw** use **C2S 2/142**
+> (16-byte body; op-byte = widget action − 7; the i64 amount sent only when > 0). The op-byte enum
+> (deposit vs. withdraw vs. move value) is capture-pending. The opcode rows are owned by the protocol
+> lane.
+>
+> **Refinement:** the two item-move lanes (2/46 / 2/44) are distinct from the money/open-request lane
+> (2/142) — an earlier reading attributed all of deposit/withdraw to 2/142 alone. The binary shows
+> item drag/quick-move into the grid uses 2/46 / 2/44; only the money buttons (263/264) and the
+> open-request reach 2/142.
+
+#### 8.32.7 Populate (S2C)
+
+The 60 storage cells are filled by the **shared item-controller / item-panel server acks** (the same
+per-slot item-refresh family that fills the bag), routed to the storage container view via the
+unified-slot base +56 and the storage-mode flag — there is **no dedicated storage-snapshot opcode** in
+this object. The exact shared item-panel S2C minor that targets the storage view is
+capture- / debugger-pending.
+
+#### 8.32.8 Captions (CODE-CONFIRMED ids; CP949 text VFS-pending)
+
+`msg.xdb` ids: **2213** / **2214** (page/tab button A / B captions), **2215** (deposit-money dialog
+title), **2216** (withdraw-money dialog title), **2219** (quantity-split dialog title), **2142**
+("cannot store this bound item" notice), **38004** (quest-keep guard notice), **45023** ("not enough
+gold / nothing stored" error). Per-cell tooltip text is built from the item record, not a fixed caption.
+
+#### 8.32.9 Residuals
+
+- Absolute on-screen origin — debugger-pending (placement depends on a runtime parent-panel anchor).
+- uitex ids 2 / 4 / 14 / 70 / 71 / 72 / 74 / 78 → DDS — VFS `uitex.txt` pending.
+- The storage send op-byte enum (deposit / withdraw / move value) — capture-pending.
+- The shared item-panel S2C minor that targets the storage view — capture- / debugger-pending.
+- Page/tab count (2 pages × 60 vs. 60 with 2 tab views; the slot math adds 60 per page) — debugger-pending.
+- The four quality-tint overlay ARGB constants → rarity-tier mapping — config-pending.
+
 ---
 
 ## 9. Per-screen asset manifests

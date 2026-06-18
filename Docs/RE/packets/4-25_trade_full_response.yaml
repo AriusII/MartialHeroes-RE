@@ -1,0 +1,72 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED VALUE semantics; the 28-byte header size, the count byte position, and the
+# 16-byte trailing-record stride (cap 40) are control-flow CONFIRMED from the handler. capture_verified: false.
+
+name: SmsgUserTradeFullResponse
+opcode: 0x40019             # major 4 (Response), minor 25 -> (4 << 16) | 25
+direction: S2C
+size: var                  # 28-byte (0x1C) fixed header + Count x 16-byte slot records (Count <= 40)
+spec: packets/4-25_trade_full_response.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server full-refresh of the player-to-player trade window. A 28-byte header followed by a count-prefixed array of 16-byte slot records (capped at 40 entries) that repopulates the whole trade offer at once. The bulk counterpart to the incremental 4/24 single-slot update. Pairs with C2S 2/25 TradeConfirm and the 2/24 add flow.
+
+# Variable-length: a FIXED 28-byte (0x1C) header, then -- when the header subtype byte at 0x08 selects
+# the bulk-apply form -- a loop of Count x 16-byte (0x10) slot records. The free-slot scan that folds
+# the records into the local trade-slot table caps at 40 entries. Per packet-codegen rules a `size: var`
+# message generates the FIXED head only; the trailing record array is left to the serializer and is NOT
+# modelled as a fixed buffer.
+fields:
+  - { name: Result,  type: u8 }            # 0x00  result byte: 0 = cancel (notice path), nonzero = apply
+  - { name: Pad0,    type: "bytes[7]" }      # 0x01  header filler up to the subtype byte (not consumed)
+  - { name: Subtype, type: u8 }            # 0x08  bulk subtype: value 4 selects the Count x 16-byte record loop
+  - { name: Count,   type: u8 }            # 0x09  number of trailing 16-byte records (capped at 40 by the apply loop)
+  - { name: Pad1,    type: "bytes[18]" }     # 0x0a  remainder of the 28-byte header (not consumed by the apply path)
+  # -- variable tail (NOT a fixed buffer; left to the serializer) --
+  # Count x 16-byte slot record, each folded into the local trade-slot table:
+  #   +0x00 u32   slot field 1 (item id / key -- the icon driver, by analogy with the 4/24 ItemId)
+  #   +0x04 u32   slot field 2 (count / quantity -- unlabelled)
+  #   +0x08 u32   slot field 3 (unlabelled)
+  #   +0x0c u32   slot field 4 (unlabelled)
+
+notes: |
+  CODE-CONFIRMED header size (a fixed 28-byte / 0x1C read), the bulk-subtype byte at 0x08, the record
+  Count, and the 16-byte (0x10) record stride with a 40-entry apply cap; CAPTURE-UNVERIFIED in VALUE
+  meaning. The header field OFFSETS for Result / Subtype / Count are control-flow facts; the exact
+  byte placement of Count within the header (modelled at 0x09, immediately after the subtype byte) and
+  the per-record field roles are the value questions a capture must settle.
+
+    0x00 (1B) Result  : 0 = cancel -> surface a notice and do not apply; nonzero -> apply path.
+    0x08 (1B) Subtype : when this byte == 4 the handler enters the bulk-apply loop and reads Count
+                        records; other values do not enter the loop.
+    0x09 (1B) Count   : the number of 16-byte slot records that follow the header. The apply loop's
+                        free-slot scan caps at 40 entries, so Count is effectively <= 40.
+
+  TRAILING RECORD ARRAY (variable region, NOT a fixed buffer): after the 28-byte header the body holds
+  Count records of 16 bytes each. Each record is folded into the local trade-slot table by the apply
+  routine. By analogy with the 4/24 single-slot record (its item-id/key drives the icon) the first
+  dword of each 16-byte record is read as the item id/key; the remaining three dwords (count /
+  quantity / extra) are unlabelled and capture-pending. The records are deliberately left out of the
+  generated struct: a `size: var` packet generates the fixed head only and the engineer's serializer
+  walks the Count-prefixed tail.
+
+  HOW THE CLIENT USES IT: 4/25 repopulates the WHOLE trade offer in one message (use it on window open
+  and after a bulk change); 4/24 SmsgUserTradeSlotUpdate (packets/4-24_trade_slot_update.yaml) applies
+  a SINGLE slot incrementally. Both feed the same one-grid two-side trade window (10 rows x 6 columns,
+  60 cells per side, toggled). Money slots, where present, follow the 4/24 category convention
+  (Category 0xFF). Whether 4/25 records carry a side discriminator like 4/24's OwnerId, or whether the
+  full-refresh is implicitly own-side, is capture-pending.
+
+  RELATIONSHIP: server side of the in-window trade flow. The client commits/cancels with C2S 2/25
+  CmsgTradeConfirm (packets/2-25_trade_confirm.yaml) and adds slots with 2/24 CmsgTradeSlotAdd
+  (packets/2-24_trade_slot_add.yaml); the request handshake is 2/23 -> 4/23.
+
+  UNKNOWNS to resolve with a trade capture (the header size + record stride are settled; these are
+  VALUE / placement questions):
+    - the exact byte offset of Count within the 28-byte header (modelled at 0x09);
+    - the four per-record fields (item id, quantity, and the two trailing dwords);
+    - whether a per-record side discriminator exists (4/24 carries one at its 0x28);
+    - the meaning of the unread header bytes (Pad0 / Pad1).
+
+  UNBLOCKS: the Client.Application trade-window full-refresh handler (4/25).

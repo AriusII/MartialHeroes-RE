@@ -776,6 +776,80 @@ A small number of sites are firm in their anchor classification but carry a resi
 No site in the sweep is fully undecodable; the items above are the partial / runtime-dependent
 residuals out of the 152 sites.
 
+
+### 5.13 Service-slot HUD windows opened by the action dispatcher (CODE-CONFIRMED roles)
+
+The in-game window-open dispatcher (`ui_system.md §8.17`) toggles a fixed set of master service slots.
+This table is the placement companion to that dispatch map: one row per HUD service slot it reaches,
+with the panel class, anchor formula, and size. Anchor conventions are the §5.1 families; absolute
+pixels for screen-relative rows are CONFIRMED-formula / pixel-pending (§5.11).
+
+**Open-dispatch windows (toggled by the ASCII-keycode strip and/or the DefaultMenu radial):**
+
+| Slot | Panel class | X | Y | W | H | Anchor | Conf |
+|---:|---|---|---|---|---|---|---|
+| 146 | `StatusPanel` (character-info / stat) | — | — | — | — | per §3.4 / §5.5 | High |
+| 158 | `ItemPanel` (inventory bag) | screen_width − 318 | 0 | 318 | (rail) | Right-dock 318 rail (§5.3) | High |
+| 159 | `SkillPanel` (skill window) | centerX(W) | centerY(H) | — | — | Screen-centred (§5.8) | High |
+| 148 | `DefaultMenu` (bottom command strip, expandable) | centerX(1024) | screen_height − 60 | 1024 | 45 (expands to ~254) | Bottom-anchored horizontal strip (§5.7; `ui_system.md §8.23`) | High |
+| 191 | `KeepPanel` (player storage / warehouse; 60-cell 10×6 item grid; opened via a KIND-9 NPC keep menu, **not** a hotkey) | — | — | 318 | — | HUD child; child rects panel-local (`ui_system.md §8.32`) | High |
+| 206 | `QuestPanel` (quest tracker) | centerX(442) | — | 442 | 280 | Screen-centred quest family (§5.8) | High |
+| 220 | `PartyPanel` (party window) | — | — | — | — | per §3.3 party family | High |
+| 224 | `GuildWarInfoPanel` (guild-war info, display / read-only; key `j`) | — | — | 618 | 309 | HUD child; child rects panel-local (`ui_system.md §8.31`) | High |
+| 228 | `StallListPanel` (personal-stall / market list; key `l`) | — | — | 375 | 481 | HUD child; child rects panel-local (`ui_system.md §8.29`) | High |
+| 230 | `ProductPanel` (production / crafting) | (master-window placed) | — | — | — | HUD child; child rects panel-local (`ui_system.md §8.18`) | High (role) |
+| 235 | `BroodWarListPanel` (guild-diplomacy / brood-war relations list — declare-war / ally / enemy roster; key `u`) | — | — | — | — | HUD child; child rects panel-local (`ui_system.md §8.30`) | High |
+| 185 | `BuddyRelation` (buddy / social window; opened by `DefaultMenu` action 4002 — a **separate** class from slot 193) | — | — | — | — | HUD child; child rects panel-local (`ui_system.md §8.28`) | High (slot) |
+| 193 | `RelationPanel` (relation / teacher / fate window; paged tabbed roster; reached via the `DefaultMenu` social-group dispatcher / relation hotkey) | 80 | 200 | 295 | 393 | HUD child; child rects panel-local (`ui_system.md §8.28`) | High |
+| 322 | `HelpPanel` (full-screen `data/ui/help.dds` overlay; MainWindow member, key `h`) | 0 | 0 | screen_width | screen_height | Full-screen overlay (`ui_system.md §8.24`) | High |
+
+> **Slot 230 is `ProductPanel` ONLY** (production/crafting), opened from DefaultMenu action 4013. An
+> earlier provisional note guessed slot 230 = a Pet window; that is **withdrawn**. The pet/couple
+> window's service slot is **194** (`PetPanel`, the player-couple / pair-relation window — see the
+> modal-service table below and `ui_system.md §8.26`); it is auto-shown by the pair-relation push
+> (`SmsgActorPairRelation` 5/53), **not** by the `n` hotkey (static shows `n` opens slot 230).
+
+> **Slots 185 vs 193 are two distinct social windows.** Slot **193** is `RelationPanel` (the class
+> literally named that — the relation / teacher / fate window); slot **185** is `BuddyRelation`, a
+> **separate** buddy/social class opened by `DefaultMenu` **action 4002**. The social-group open
+> dispatcher toggles both together, which is why they were historically conflated — do not merge them.
+> See `ui_system.md §8.28`.
+
+> **Two dispatch surfaces, same slots.** The persistent ASCII-keycode toolbar / hotkeys AND the
+> DefaultMenu radial (its own action ids ~4000–4024) both reach these same slots — wire each
+> open-button to the slot, not to one id space (`ui_system.md §8.17`).
+
+**Modal / service windows opened from gameplay or NPC interactions:**
+
+| Slot | Panel class | X | Y | W | H | Anchor | Conf |
+|---:|---|---|---|---|---|---|---|
+| 190 | `MessagePanel` (system notice / confirm modal) | (screen_width − 340)/2 | (screen_height − 340)/2 | 340 | 190 | Screen-centred (§5.8 confirm family) | High |
+| 168 | `ErrorPanel` (timed floating notice / error modal; OK action 671, msg-101 countdown, auto-dismiss; built in 3 scenes) | (screen_width − 340)/2 | (screen_height − 340)/2 | 340 | 190 | Screen-centred (§5.8; `ui_system.md §8.25`) | High |
+| 221 | `AnnouncePanel` (scrolling text-only announce banner; non-interactive; banner delegate of the notice sink) | 11 | 455 | 120 | 85 | Absolute lower-left (`ui_system.md §8.25`) | High |
+| 194 | `PetPanel` (player-couple / pair-relation window; auto-shows on `SmsgActorPairRelation` 5/53, NOT a hotkey) | 80 | 200 | 228 | 337 | Absolute origin (`ui_system.md §8.26`) | High |
+| 259 | NPC vendor / item-shop (buy/sell; `itemshop.dds`; opened by NPC KIND 32) | (master-window placed) | — | — | — | HUD child; child rects panel-local (`ui_system.md §8.22`) | High (role) |
+| 152 | `KeepNpcPanel` (NPC storage/keep dialog menu; 5-option vertical menu; opened by NPC KIND 9; selector 1 = open storage → slot 191) | (master-window placed) | — | 167 | — | HUD child; child rects panel-local (`ui_system.md §8.27`) | High |
+| 118 | `TenderInfoPanel` (consignment-purchase / info) | centerX(512) | centerY(595) | 512 | 595 | Screen-centred | High (formula) |
+| 96 | `CarrierPigeonPanal` (mailbox menu) | 0 | 0 | 140 | 195 | Absolute origin (top-left) | High |
+| 98 | `CarrierPigeonReadPanel` (read letter) | (child off Panal) | — | — | — | Parent-relative composite | High |
+| 40 | `DeliveryPanel` (delivery / retrieve box) | (master-window placed) | — | — | — | HUD child; 40-cell 5×8 grid (`ui_system.md §8.21.5`) | High (role) |
+
+> `CarrierPigeonSendPanel` and `LetterPanel` are sub-windows built off their parents (no top-level
+> service-slot row of their own); see `ui_system.md §8.21.3 / §8.21.6`.
+
+**EmoticonPanel (stored at a master window field, not the `+0x238` slot table):**
+
+| Field | Panel class | X | Y | W | H | Anchor | Conf |
+|---|---|---|---|---|---|---|---|
+| MainWindow +0x370 | `EmoticonPanel` (emote / chat-emoticon picker) | screen_width − 318 | 0 | 318 | 732 | Right-dock 318 rail (§5.3) | High (formula) |
+
+**Bottom command strip placement** (the action dispatcher's host area, `ui_system.md §8.17.4`):
+
+| Panel role | X | Y | W | H | Anchor | Conf |
+|---|---|---|---|---|---|---|
+| Bottom command / action strip | centerX(1024) | screen_height − 60 | 1024 | 60 | Mixed (centred-X + bottom; innerY = 957) | High (formula) |
+
+
 ---
 
 ## 4. Known unknowns

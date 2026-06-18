@@ -2,17 +2,14 @@
 //
 // Widget factory for the shared HUD substrate.
 //
-// Mirrors the legacy GUWindow/GUPanel widget-constructor argument contract:
-//   Constructor(textureId, x, y, w, h, srcX, srcY, actionId)
-// spec: Docs/RE/specs/ui_system.md §1.1 — universal constructor argument order: CODE-CONFIRMED.
+// Mirrors the legacy front-end builder argument contract:
+//   WidgetRect = (X, Y, W, H, SrcX, SrcY), and every atlas blit samples W×H then draws W×H.
+// spec: Docs/RE/specs/frontend_scenes.md — widget builder primitives.
 //
 // Factory methods:
 //   - MakeButton / MakeButton2 / MakeButton3  — 7-state / 2-state / 3-state atlas buttons.
 //   - MakeLabel                                — fixed-advance CP949 label.
-//   - MakePanel                                — atlas-backed container.
-//   - MakeList                                 — scrollable list.
 //   - MakeTextbox                              — CP949 text input (password option).
-//   - MakeScrollbar                            — vertical scrollbar.
 //   - MakeCheckbox                             — atlas-backed toggle.
 //
 // All factory methods degrade gracefully offline (return a widget whose atlas frames are
@@ -34,7 +31,7 @@ namespace MartialHeroes.Client.Godot.Ui.Widgets;
 ///
 /// <para>No game logic here — this is a pure construction API.</para>
 ///
-/// spec: Docs/RE/specs/ui_system.md §1.1 — constructor arg order: CODE-CONFIRMED.
+/// spec: Docs/RE/specs/frontend_scenes.md — constructor arg order and 1:1 atlas rectangles.
 /// </summary>
 public static class HudWidgetFactory
 {
@@ -43,12 +40,8 @@ public static class HudWidgetFactory
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Creates a 7-state (3-distinct-frame) atlas button.
-    ///
-    /// <para>Frame argument order matches the front-end 3-state builder convention:
-    /// NORMAL, PRESSED, HOVER (spec §1.5 — "3-state takes N, P, H order": CODE-CONFIRMED).</para>
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §1.5 — "7-state constructor fills NORMAL, HOVER, PRESSED".
+    /// Compatibility adapter for older call sites whose positional order is NORMAL, PRESSED, HOVER.
+    /// Prefer <see cref="BuildButton3State"/> for the IDA-confirmed NORMAL, HOVER, PRESSED contract.
     /// </summary>
     public static HudButton MakeButton(
         HudAtlasLibrary atlas,
@@ -58,21 +51,47 @@ public static class HudWidgetFactory
         int pressedSrcX, int pressedSrcY,
         int hoverSrcX, int hoverSrcY,
         int actionId,
-        string caption       = "",
-        Color? captionTint   = null,
-        int fontSlot         = 0)
-    {
-        // spec: §1.5 — 3-state argument order NORMAL, PRESSED, HOVER: CODE-CONFIRMED.
-        Texture2D? normal  = atlas.SliceByPath(vfsPath, normalSrcX,  normalSrcY,  w, h);
-        Texture2D? pressed = atlas.SliceByPath(vfsPath, pressedSrcX, pressedSrcY, w, h);
-        Texture2D? hover   = atlas.SliceByPath(vfsPath, hoverSrcX,   hoverSrcY,   w, h);
+        string caption = "",
+        Color? captionTint = null,
+        int fontSlot = 0)
+        => BuildButton3State(atlas, vfsPath, x, y, w, h,
+            normalSrcX, normalSrcY,
+            hoverSrcX, hoverSrcY,
+            pressedSrcX, pressedSrcY,
+            actionId: actionId,
+            caption: caption,
+            captionTint: captionTint,
+            fontSlot: fontSlot);
 
+    /// <summary>
+    /// IDA-confirmed 3-state button builder:
+    /// BuildButton3State(tex, X, Y, W, H, NormSrcX, NormSrcY, HovSrcX, HovSrcY, PrsSrcX, PrsSrcY, color).
+    /// spec: Docs/RE/specs/frontend_scenes.md — source extent equals destination W×H; no scaling.
+    /// </summary>
+    public static HudButton BuildButton3State(
+        HudAtlasLibrary atlas,
+        string vfsPath,
+        int x, int y, int w, int h,
+        int normalSrcX, int normalSrcY,
+        int hoverSrcX, int hoverSrcY,
+        int pressedSrcX, int pressedSrcY,
+        int color = -1,
+        int actionId = -1,
+        string caption = "",
+        Color? captionTint = null,
+        int fontSlot = 0)
+    {
+        Texture2D? normal = atlas.SliceByPath(vfsPath, normalSrcX, normalSrcY, w, h);
+        Texture2D? hover = atlas.SliceByPath(vfsPath, hoverSrcX, hoverSrcY, w, h);
+        Texture2D? pressed = atlas.SliceByPath(vfsPath, pressedSrcX, pressedSrcY, w, h);
+
+        Color tint = captionTint ?? ToGodotColor(color);
         return new HudButton(x, y, w, h,
-            normalFrame:  normal,
-            hoverFrame:   hover,
+            normalFrame: normal,
+            hoverFrame: hover,
             pressedFrame: pressed,
-            caption:      caption,
-            captionTint:  captionTint,
+            caption: caption,
+            captionTint: tint,
             captionFontSlot: fontSlot)
         {
             ActionId = actionId,
@@ -90,14 +109,15 @@ public static class HudWidgetFactory
         int x, int y, int w, int h,
         int normalSrcX, int normalSrcY,
         int actionId,
-        string caption       = "",
-        Color? captionTint   = null,
-        int fontSlot         = 0)
-        => MakeButton(atlas, vfsPath, x, y, w, h,
+        string caption = "",
+        Color? captionTint = null,
+        int fontSlot = 0)
+        => GUButton(atlas, vfsPath, x, y, w, h,
             normalSrcX, normalSrcY,
-            normalSrcX, normalSrcY, // PRESSED = NORMAL
-            normalSrcX, normalSrcY, // HOVER   = NORMAL
-            actionId, caption, captionTint, fontSlot);
+            actionId: actionId,
+            caption: caption,
+            captionTint: captionTint,
+            fontSlot: fontSlot);
 
     /// <summary>
     /// Creates a 3-state atlas button (HOVER distinct; PRESSED = NORMAL).
@@ -111,41 +131,41 @@ public static class HudWidgetFactory
         int normalSrcX, int normalSrcY,
         int hoverSrcX, int hoverSrcY,
         int actionId,
-        string caption       = "",
-        Color? captionTint   = null,
-        int fontSlot         = 0)
-        => MakeButton(atlas, vfsPath, x, y, w, h,
+        string caption = "",
+        Color? captionTint = null,
+        int fontSlot = 0)
+        => BuildButton3State(atlas, vfsPath, x, y, w, h,
             normalSrcX, normalSrcY,
+            hoverSrcX, hoverSrcY,
             normalSrcX, normalSrcY, // PRESSED = NORMAL
-            hoverSrcX,  hoverSrcY,
-            actionId, caption, captionTint, fontSlot);
-
-    // -------------------------------------------------------------------------
-    // Atlas button using uitex id
-    // -------------------------------------------------------------------------
+            actionId: actionId,
+            caption: caption,
+            captionTint: captionTint,
+            fontSlot: fontSlot);
 
     /// <summary>
-    /// Creates a 2-state button from a uitex.txt tex_id atlas.
-    ///
-    /// spec: Docs/RE/formats/ui_manifests.md §1.4 — confirmed tex_id→path table.
+    /// IDA-confirmed 1-state button builder:
+    /// GUButton(tex, X, Y, W, H, SrcX, SrcY, color).
+    /// spec: Docs/RE/specs/frontend_scenes.md — scroll/pager arrows are plain one-state buttons.
     /// </summary>
-    public static HudButton MakeButtonById(
+    public static HudButton GUButton(
         HudAtlasLibrary atlas,
-        int texId,
+        string vfsPath,
         int x, int y, int w, int h,
-        int normalSrcX, int normalSrcY,
-        int actionId,
-        string caption     = "",
+        int srcX, int srcY,
+        int color = -1,
+        int actionId = -1,
+        string caption = "",
         Color? captionTint = null,
-        int fontSlot       = 0)
+        int fontSlot = 0)
     {
-        Texture2D? frame = atlas.SliceById(texId, normalSrcX, normalSrcY, w, h);
+        Texture2D? frame = atlas.SliceByPath(vfsPath, srcX, srcY, w, h);
         return new HudButton(x, y, w, h,
-            normalFrame:  frame,
-            hoverFrame:   frame,
+            normalFrame: frame,
+            hoverFrame: frame,
             pressedFrame: frame,
-            caption:      caption,
-            captionTint:  captionTint,
+            caption: caption,
+            captionTint: captionTint ?? ToGodotColor(color),
             captionFontSlot: fontSlot)
         {
             ActionId = actionId,
@@ -164,51 +184,37 @@ public static class HudWidgetFactory
     /// </summary>
     public static HudLabel MakeLabel(
         int x, int y, int w, int h,
-        string text     = "",
-        Color? color    = null,
-        int fontSlot    = 0,
-        bool multiline  = false)
+        string text = "",
+        Color? color = null,
+        int fontSlot = 0,
+        bool multiline = false)
         => new(x, y, w, h, text, color, fontSlot, multiline);
 
-    // -------------------------------------------------------------------------
-    // Panel factory
-    // -------------------------------------------------------------------------
-
     /// <summary>
-    /// Creates an atlas-backed container panel.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §1 — GUPanel container role.
+    /// IDA-confirmed panel builder:
+    /// BuildPanel(tex, X, Y, W, H, SrcX, SrcY, modalFlag, color).
+    /// spec: Docs/RE/specs/frontend_scenes.md — source extent equals destination W×H; no scaling.
     /// </summary>
-    public static HudPanel MakePanel(
+    public static HudPanel BuildPanel(
         HudAtlasLibrary atlas,
         string vfsPath,
         int x, int y, int w, int h,
-        int srcX, int srcY)
+        int srcX, int srcY,
+        bool modalFlag,
+        int color = -1)
     {
         Texture2D? bg = atlas.SliceByPath(vfsPath, srcX, srcY, w, h);
-        return new HudPanel(x, y, w, h, bg);
+        HudPanel panel = new(x, y, w, h, bg, modalFlag);
+        if (panel.GetControl() is CanvasItem item) item.Modulate = ToGodotColor(color);
+        return panel;
     }
 
     /// <summary>
-    /// Creates a transparent (no-background) container panel.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §1 — GUPanel used as a container with no background.
+    /// Creates a transparent container panel for pure C# composition.
+    /// spec: Docs/RE/specs/frontend_scenes.md — GUPanel AddChild/AddChildWithAction composition.
     /// </summary>
-    public static HudPanel MakePanel(int x, int y, int w, int h)
-        => new(x, y, w, h, null);
-
-    // -------------------------------------------------------------------------
-    // List factory
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Creates a scrollable list.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §1 — GUList.
-    /// spec: Docs/RE/specs/ui_system.md §4.4 — reverse hit-test.
-    /// </summary>
-    public static HudList MakeList(int x, int y, int w, int h)
-        => new(x, y, w, h);
+    public static HudPanel BuildTransparentPanel(int x, int y, int w, int h, bool modalFlag = false)
+        => new(x, y, w, h, null, modalFlag);
 
     // -------------------------------------------------------------------------
     // Textbox factory
@@ -222,45 +228,56 @@ public static class HudWidgetFactory
     /// </summary>
     public static HudTextbox MakeTextbox(
         int x, int y, int w, int h,
-        bool password  = false,
-        int maxLength  = 0,
-        int fontSlot   = 0)
+        bool password = false,
+        int maxLength = 0,
+        int fontSlot = 0)
         => new(x, y, w, h, password, maxLength, fontSlot);
 
-    // -------------------------------------------------------------------------
-    // Scrollbar factory
-    // -------------------------------------------------------------------------
-
     /// <summary>
-    /// Creates a vertical scrollbar.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §1 — GUScroll.
+    /// IDA-confirmed textbox builder:
+    /// GUTextbox(tex, X, Y, W, H, SrcX, SrcY, color); IME/max length/action are set separately.
+    /// spec: Docs/RE/specs/frontend_scenes.md — textbox atlas rect is W×H sampled 1:1.
     /// </summary>
-    public static HudScrollbar MakeScrollbar(
+    public static HudTextbox BuildTextbox(
+        HudAtlasLibrary atlas,
+        string vfsPath,
         int x, int y, int w, int h,
-        double minValue = 0, double maxValue = 100, double pageSize = 10)
-        => new(x, y, w, h, minValue, maxValue, pageSize);
+        int srcX, int srcY,
+        int color = -1,
+        int imeMode = 0,
+        bool password = false,
+        int maxLength = 0,
+        int fontSlot = 0,
+        int actionId = -1)
+    {
+        Texture2D? bg = atlas.SliceByPath(vfsPath, srcX, srcY, w, h);
+        HudTextbox textbox = new(x, y, w, h, password, maxLength, fontSlot, bg)
+        {
+            ImeMode = imeMode,
+            ActionId = actionId,
+        };
+        if (textbox.GetControl() is CanvasItem item) item.Modulate = ToGodotColor(color);
+        return textbox;
+    }
 
     // -------------------------------------------------------------------------
     // Checkbox factory
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Creates an atlas-backed toggle checkbox.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §1 — GUCheckBox: "checked = PRESSED frame".
-    /// spec: Docs/RE/specs/ui_system.md §1.5 — 3-state ctor order NORMAL, PRESSED, HOVER.
+    /// Creates an atlas-backed toggle checkbox: off source then on source.
+    /// spec: Docs/RE/specs/frontend_scenes.md — GUCheckBox(tex, X, Y, W, H, OffSrcX, OffSrcY, OnSrcX, OnSrcY, color).
     /// </summary>
     public static HudCheckbox MakeCheckbox(
         HudAtlasLibrary atlas,
         string vfsPath,
         int x, int y, int w, int h,
-        int normalSrcX, int normalSrcY,
-        int pressedSrcX, int pressedSrcY,
+        int offSrcX, int offSrcY,
+        int onSrcX, int onSrcY,
         int actionId)
     {
-        Texture2D? normal  = atlas.SliceByPath(vfsPath, normalSrcX,  normalSrcY,  w, h);
-        Texture2D? pressed = atlas.SliceByPath(vfsPath, pressedSrcX, pressedSrcY, w, h);
+        Texture2D? normal = atlas.SliceByPath(vfsPath, offSrcX, offSrcY, w, h);
+        Texture2D? pressed = atlas.SliceByPath(vfsPath, onSrcX, onSrcY, w, h);
 
         return new HudCheckbox(x, y, w, h, normal, pressed)
         {
@@ -273,28 +290,50 @@ public static class HudWidgetFactory
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Creates a pure-image <see cref="TextureRect"/> from an atlas sub-rect.
+    /// IDA-confirmed image builder:
+    /// BuildImageComponent(tex, X, Y, W, H, SrcX, SrcY, color).
     /// Returns null when the atlas is offline.
     ///
     /// spec: Docs/RE/specs/ui_system.md §1.3 — atlas pixel 1:1 on 1024×768 canvas.
     /// </summary>
-    public static TextureRect? MakeAtlasRect(
+    public static TextureRect? BuildImageComponent(
         HudAtlasLibrary atlas,
         string vfsPath,
         int x, int y, int w, int h,
-        int srcX, int srcY)
+        int srcX, int srcY,
+        int color = -1)
     {
         Texture2D? tex = atlas.SliceByPath(vfsPath, srcX, srcY, w, h);
         if (tex is null) return null;
 
         return new TextureRect
         {
-            Texture     = tex,
-            Position    = new Vector2(x, y),
-            Size        = new Vector2(w, h),
-            ExpandMode  = TextureRect.ExpandModeEnum.IgnoreSize,
-            StretchMode = TextureRect.StretchModeEnum.Scale,
+            Texture = tex,
+            Position = new Vector2(x, y),
+            Size = new Vector2(w, h),
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            // The texture is sliced to W×H above; draw at native size to preserve 1:1 pixels.
+            // spec: Docs/RE/specs/frontend_scenes.md — source extent is forced to destination W×H.
+            StretchMode = TextureRect.StretchModeEnum.Keep,
+            Modulate = ToGodotColor(color),
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
+    }
+
+    public static TextureRect? MakeAtlasRect(
+        HudAtlasLibrary atlas,
+        string vfsPath,
+        int x, int y, int w, int h,
+        int srcX, int srcY)
+        => BuildImageComponent(atlas, vfsPath, x, y, w, h, srcX, srcY);
+
+    private static Color ToGodotColor(int argb)
+    {
+        if (argb == -1) return Colors.White;
+        byte a = (byte)((argb >> 24) & 0xFF);
+        byte r = (byte)((argb >> 16) & 0xFF);
+        byte g = (byte)((argb >> 8) & 0xFF);
+        byte b = (byte)(argb & 0xFF);
+        return Color.Color8(r, g, b, a);
     }
 }

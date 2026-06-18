@@ -8,10 +8,9 @@
 //   UI text. We map each slot to a Godot SystemFont using:
 //     - FontNames matching the legacy face names (DotumChe / Dotum / BatangChe) plus
 //       modern Korean fallbacks (Malgun Gothic, Gulim) for OS portability.
-//     - Size = rowHeight from the spec table (the D3DX Height parameter).
+//     - Size = the legacy logical size; CellHeight = the D3DX Height parameter.
 //     - Weight 400 = normal, 700 = bold, 800 = extra-bold.
-//   Fixed-advance layout is approximated by setting the font size to the spec's
-//   rowHeight value; callers size label containers to charWidth × text.length.
+//   Fixed-advance layout uses the explicit per-slot advanceWidth.
 //
 // NOTE: This helper is ADDITIVE. It does NOT modify FontBootstrap or the existing
 //       Autoload/FontBootstrap.cs. Use HudFont.CreateSlot(slot) in new Ui/ widgets.
@@ -54,57 +53,44 @@ public static class HudFont
     /// <summary>
     /// Font slot descriptor (mirrors the D3DXCreateFontA arguments).
     /// spec: Docs/RE/specs/ui_system.md §6.2 — columns: Face, D3DX Height (rowHeight),
-    ///   D3DX Width (charWidth), Weight.
+    ///   advanceWidth, cellHeight, Weight.
     /// </summary>
     public readonly struct SlotDescriptor
     {
-        public string[] FaceNames  { get; }
-        public int      RowHeight  { get; } // D3DX Height — Godot font size
-        public int      CharWidth  { get; } // D3DX Width  — fixed-advance layout
-        public int      Weight     { get; } // GDI weight
+        public string[] FaceNames { get; }
+        public int Size { get; } // legacy logical point/pixel size field
+        public int AdvanceWidth { get; } // D3DX Width — fixed-advance layout
+        public int CellHeight { get; } // D3DX Height — Godot font size
+        public int Weight { get; } // GDI weight
 
-        public SlotDescriptor(string[] faceNames, int rowHeight, int charWidth, int weight)
+        public SlotDescriptor(string[] faceNames, int size, int advanceWidth, int cellHeight, int weight)
         {
             FaceNames = faceNames;
-            RowHeight  = rowHeight;
-            CharWidth  = charWidth;
-            Weight     = weight;
+            Size = size;
+            AdvanceWidth = advanceWidth;
+            CellHeight = cellHeight;
+            Weight = weight;
         }
     }
 
-    // spec: Docs/RE/specs/ui_system.md §6.2 — 15-slot table, index 0..14: CODE-CONFIRMED.
+    // spec: Docs/RE/specs/frontend_scenes.md — 15-slot table: face, size, advanceWidth, cellHeight, weight.
     private static readonly SlotDescriptor[] Slots =
     [
-        // Slot  0 — DotumChe  12/6   wt 0
-        new(DotumCheFaces,  12, 6,  0),   // spec §6.2 slot 0
-        // Slot  1 — Dotum     10/5   wt 0
-        new(DotumFaces,     10, 5,  0),   // spec §6.2 slot 1
-        // Slot  2 — DotumChe  32/16  wt 800
-        new(DotumCheFaces,  32, 16, 800), // spec §6.2 slot 2
-        // Slot  3 — DotumChe  24/12  wt 800
-        new(DotumCheFaces,  24, 12, 800), // spec §6.2 slot 3
-        // Slot  4 — DotumChe  12/6   wt 800
-        new(DotumCheFaces,  12, 6,  800), // spec §6.2 slot 4
-        // Slot  5 — BatangChe 12/6   wt 0
-        new(BatangCheFaces, 12, 6,  0),   // spec §6.2 slot 5
-        // Slot  6 — BatangChe 24/12  wt 700
-        new(BatangCheFaces, 24, 12, 700), // spec §6.2 slot 6
-        // Slot  7 — BatangChe 12/6   wt 700
-        new(BatangCheFaces, 12, 6,  700), // spec §6.2 slot 7
-        // Slot  8 — BatangChe 12/6   wt 700
-        new(BatangCheFaces, 12, 6,  700), // spec §6.2 slot 8
-        // Slot  9 — DotumChe  12/6   wt 700
-        new(DotumCheFaces,  12, 6,  700), // spec §6.2 slot 9
-        // Slot 10 — Dotum     20/10  wt 800
-        new(DotumFaces,     20, 10, 800), // spec §6.2 slot 10
-        // Slot 11 — DotumChe  10/5   wt 400
-        new(DotumCheFaces,  10, 5,  400), // spec §6.2 slot 11
-        // Slot 12 — DotumChe  12/6   wt 400
-        new(DotumCheFaces,  12, 6,  400), // spec §6.2 slot 12
-        // Slot 13 — DotumChe  14/7   wt 400
-        new(DotumCheFaces,  14, 7,  400), // spec §6.2 slot 13
-        // Slot 14 — DotumChe  16/8   wt 400
-        new(DotumCheFaces,  16, 8,  400), // spec §6.2 slot 14
+        new(DotumCheFaces, 12, 6, 12, 0), // 0
+        new(DotumFaces, 10, 5, 10, 0), // 1
+        new(DotumCheFaces, 32, 16, 32, 800), // 2
+        new(DotumCheFaces, 18, 12, 24, 800), // 3
+        new(DotumCheFaces, 12, 6, 12, 800), // 4
+        new(BatangCheFaces, 12, 6, 12, 0), // 5
+        new(BatangCheFaces, 18, 12, 24, 700), // 6
+        new(BatangCheFaces, 12, 6, 12, 700), // 7
+        new(BatangCheFaces, 12, 6, 12, 700), // 8
+        new(DotumCheFaces, 12, 6, 12, 700), // 9
+        new(DotumFaces, 16, 10, 20, 800), // 10
+        new(DotumCheFaces, 10, 5, 10, 400), // 11
+        new(DotumCheFaces, 12, 6, 12, 400), // 12
+        new(DotumCheFaces, 14, 7, 14, 400), // 13
+        new(DotumCheFaces, 16, 8, 16, 400), // 14
     ];
 
     // Number of slots in the table.
@@ -147,10 +133,10 @@ public static class HudFont
 
         var sf = new SystemFont
         {
-            FontNames        = desc.FaceNames,
-            FontWeight       = desc.Weight == 0 ? 400 : desc.Weight,
-            Antialiasing     = TextServer.FontAntialiasing.Lcd,
-            Hinting          = TextServer.Hinting.None,
+            FontNames = desc.FaceNames,
+            FontWeight = desc.Weight == 0 ? 400 : desc.Weight,
+            Antialiasing = TextServer.FontAntialiasing.Lcd,
+            Hinting = TextServer.Hinting.None,
         };
 
         return sf;
@@ -162,7 +148,7 @@ public static class HudFont
     ///
     /// spec: Docs/RE/specs/ui_system.md §6.2 — D3DX Height = rowHeight.
     /// </summary>
-    public static int RowHeight(int slot) => GetSlotDescriptor(slot).RowHeight;
+    public static int RowHeight(int slot) => GetSlotDescriptor(slot).CellHeight;
 
     /// <summary>
     /// Returns the character cell width for the given slot.
@@ -170,7 +156,7 @@ public static class HudFont
     ///
     /// spec: Docs/RE/specs/ui_system.md §6.3 — "bounding rect = {x, y, x+charWidth×strlen, y+rowHeight}".
     /// </summary>
-    public static int CharWidth(int slot) => GetSlotDescriptor(slot).CharWidth;
+    public static int CharWidth(int slot) => GetSlotDescriptor(slot).AdvanceWidth;
 
     /// <summary>
     /// Applies the font slot's face and size overrides to the given <see cref="Label"/>.

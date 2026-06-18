@@ -182,6 +182,105 @@ public sealed class HudEventHubTests
         Assert.Equal(string.Empty, Cp949Text.Decode(ReadOnlySpan<byte>.Empty));
     }
 
+    // ---- HudVitalsEvent channel tests -----------------------------------------------------------
+
+    [Fact]
+    public async Task Vitals_round_trips_through_the_vitals_stream()
+    {
+        // spec: Docs/RE/specs/combat.md §12.2; Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml
+        var hub = new HudEventHub();
+        var evt = new HudVitalsEvent(
+            CurrentHp: 800u, MaxHp: 1000u,
+            CurrentMp: 300u, MaxMp: 500u,
+            CurrentStamina: 120u, MaxStamina: 200u);
+
+        Assert.True(hub.PublishVitals(evt));
+        hub.Complete();
+
+        var received = Assert.Single(await ReadAll(hub.Vitals));
+        Assert.Equal(evt, received);
+    }
+
+    [Fact]
+    public async Task Vitals_latest_wins_collapses_burst_to_freshest_snapshot()
+    {
+        // spec: Docs/RE/specs/combat.md §12.2 — absolute current HP; only the latest value matters for the gauge.
+        var hub = new HudEventHub();
+
+        hub.PublishVitals(new HudVitalsEvent(200u, 1000u, 100u, 500u, 50u, 200u));
+        hub.PublishVitals(new HudVitalsEvent(500u, 1000u, 250u, 500u, 100u, 200u));
+        hub.PublishVitals(new HudVitalsEvent(900u, 1000u, 490u, 500u, 195u, 200u));
+        hub.Complete();
+
+        var received = Assert.Single(await ReadAll(hub.Vitals));
+        Assert.Equal(900u, received.CurrentHp); // only the freshest survives
+    }
+
+    [Fact]
+    public void Vitals_does_not_cross_into_other_streams()
+    {
+        var hub = new HudEventHub();
+        hub.PublishVitals(new HudVitalsEvent(500u, 1000u, 0u, 0u, 0u, 0u));
+
+        Assert.True(hub.Vitals.TryRead(out _));
+        Assert.False(hub.ChatLines.TryRead(out _));
+        Assert.False(hub.ExpLevels.TryRead(out _));
+        Assert.False(hub.TargetChanges.TryRead(out _));
+    }
+
+    [Fact]
+    public void Vitals_None_sentinel_is_all_zero_and_IsEmpty()
+    {
+        // spec: Docs/RE/specs/combat.md §12.2 (HP reaching 0 = death; gauge handles zero max gracefully).
+        var none = HudVitalsEvent.None;
+        Assert.True(none.IsEmpty);
+        Assert.Equal(0u, none.CurrentHp);
+        Assert.Equal(0u, none.MaxHp);
+        Assert.Equal(0u, none.CurrentMp);
+        Assert.Equal(0u, none.MaxMp);
+        Assert.Equal(0u, none.CurrentStamina);
+        Assert.Equal(0u, none.MaxStamina);
+    }
+
+    [Theory]
+    [InlineData(0u, 1000u, 0f)] // 0 HP → 0 ratio
+    [InlineData(500u, 1000u, 0.5f)] // half
+    [InlineData(1000u, 1000u, 1f)] // full
+    [InlineData(1200u, 1000u, 1f)] // over-cap clamps to 1
+    [InlineData(0u, 0u, 0f)] // zero max → no divide-by-zero
+    public void Vitals_HpRatio_clamps_correctly(uint current, uint max, float expected)
+    {
+        // spec: Docs/RE/specs/combat.md §12.2 (HP-bar ratio source; clamp on zero max).
+        var evt = new HudVitalsEvent(current, max, 0u, 1u, 0u, 1u);
+        Assert.Equal(expected, evt.HpRatio, precision: 4);
+    }
+
+    [Theory]
+    [InlineData(0u, 500u, 0f)]
+    [InlineData(250u, 500u, 0.5f)]
+    [InlineData(500u, 500u, 1f)]
+    [InlineData(600u, 500u, 1f)] // over-cap clamps
+    [InlineData(0u, 0u, 0f)] // zero max → 0, no divide-by-zero
+    public void Vitals_MpRatio_clamps_correctly(uint current, uint max, float expected)
+    {
+        // spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml (CurrentMp@0x14).
+        var evt = new HudVitalsEvent(0u, 1u, current, max, 0u, 1u);
+        Assert.Equal(expected, evt.MpRatio, precision: 4);
+    }
+
+    [Theory]
+    [InlineData(0u, 200u, 0f)]
+    [InlineData(100u, 200u, 0.5f)]
+    [InlineData(200u, 200u, 1f)]
+    [InlineData(250u, 200u, 1f)] // over-cap clamps
+    [InlineData(0u, 0u, 0f)] // zero max → 0
+    public void Vitals_StaminaRatio_clamps_correctly(uint current, uint max, float expected)
+    {
+        // spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml (Stamina@0x18).
+        var evt = new HudVitalsEvent(0u, 1u, 0u, 1u, current, max);
+        Assert.Equal(expected, evt.StaminaRatio, precision: 4);
+    }
+
     private static async Task<List<T>> ReadAll<T>(System.Threading.Channels.ChannelReader<T> reader)
     {
         var items = new List<T>();

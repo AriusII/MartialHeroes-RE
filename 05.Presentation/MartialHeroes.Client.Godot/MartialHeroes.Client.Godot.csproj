@@ -9,17 +9,21 @@
     </PropertyGroup>
 
     <!--
-      Layer 05 → Layer 04 (Client.Application, Client.Infrastructure) and Layer 03 (Assets.Mapping).
+      Layer 05 → Layer 04 (Client.Application, Client.Infrastructure), Layer 03 (Assets.Mapping),
+      and Layer 02 (Network.Transport.Pipelines — the concrete lobby/game transport the composition
+      root wires; the composition root is the one place concrete transport is legitimately referenced).
       Client.Infrastructure is added for catalogue access (VfsCatalogueLoader, ScrStatCatalogue,
-      ItemCatalogue, SkillCatalogue, MobCatalogue). Network.*, Assets.Vfs, Assets.Parsers, and
-      Client.Domain arrive transitively; never reference them directly from this project.
-      spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation dependency rules.
-      spec: task requirement — VfsCatalogueLoader + ScrStatCatalogue wired in ClientContext.
+      ItemCatalogue, SkillCatalogue, MobCatalogue) and the lobby host/last-server stores.
+      Other Network.*, Assets.Vfs, Assets.Parsers, and Client.Domain arrive transitively.
+      Layer 05 is excluded from the check_dag.py DAG checker (godot-csproj-bootstrap owns it); this
+      downward 05→02 edge is acyclic and by-design (concrete-transport wiring at the composition root).
+      spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation dependency rules; login_flow.md §2.
     -->
     <ItemGroup>
         <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Application\MartialHeroes.Client.Application.csproj"/>
         <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Infrastructure\MartialHeroes.Client.Infrastructure.csproj"/>
         <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Mapping\MartialHeroes.Assets.Mapping.csproj"/>
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Transport.Pipelines\MartialHeroes.Network.Transport.Pipelines.csproj"/>
     </ItemGroup>
 
 </Project>

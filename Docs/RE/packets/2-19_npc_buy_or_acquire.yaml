@@ -1,0 +1,49 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: field VALUE meanings are static inferences. capture_verified: false.
+
+name: CmsgNpcBuyOrAcquire
+opcode: 0x20013           # major 2 (GameAction), minor 19 -> (2 << 16) | 19
+direction: C2S
+size: 12                  # fixed 12-byte payload staged by the NPC buy/acquire sender
+spec: packets/2-19_npc_buy_or_acquire.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Buy-or-acquire an item from an NPC merchant via the inventory-driven transaction path (right-click an inventory item against an open NPC shop). This is the request side of the NPC buy/acquire round-trip and the server replies with S2C 4/19 SmsgNpcBuyOrAcquireAck. Reconfirmed in HUD-II Wave 3: the prior "CmsgNpcInteract (generic NPC open)" reading for 2/19 is superseded -- the 12-byte send is the buy/acquire transaction, paired with the already-catalogued 4/19 acknowledgement.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 12.
+fields:
+  - { name: Id,       type: u32 }        # 0x00  item / shop-record id (the buy/acquire key)
+  - { name: Slot,     type: u8 }         # 0x04  slot / category selector
+  - { name: SubSel,   type: u8 }         # 0x05  sub-selector
+  - { name: FlagA,    type: u8 }         # 0x06  flag byte
+  - { name: FlagB,    type: u8 }         # 0x07  flag byte
+  - { name: Quantity, type: u32 }        # 0x08  quantity / amount
+
+notes: |
+  Static only; no capture this pass. The NPC buy/acquire sender stages a fixed 12-byte body, so the
+  total payload = 12 bytes and the frame = 8-byte header + 12 = 20 bytes on the wire. The 12-byte
+  body length and the field LAYOUT (a leading u32 id, four single bytes, then a trailing u32) are
+  control-flow-confirmed; the individual field VALUE meanings are capture-pending.
+
+    0x00 (4B) Id       : the buy/acquire key -- an item or shop-record id. CODE-CONFIRMED as the
+                         leading word; the precise id space is the leading hypothesis.
+    0x04 (1B) Slot     : a slot or category selector.
+    0x05 (1B) SubSel   : a sub-selector.
+    0x06 (1B) FlagA    : a flag byte.
+    0x07 (1B) FlagB    : a flag byte.
+    0x08 (4B) Quantity : a quantity / amount (could instead be a unit price -- capture-pending).
+
+  RELATIONSHIP: this is the inventory/acquire transaction channel of the NPC shop. It is DISTINCT
+  from the storefront-list buy commit 2/115 CmsgShopBuy (which sends {npc_id, row*2}); both feed the
+  same NPC-shop transaction manager and the same acknowledgement family. The opening of the shop
+  window itself sends NO packet -- the stock is a client-side script table.
+
+  Server reply: S2C 4/19 SmsgNpcBuyOrAcquireAck (56-byte ack -- see packets/4-19_npc_buy_or_acquire_ack.yaml).
+
+  UNKNOWNS to resolve with a capture of a single NPC buy/acquire:
+    - which of Slot / SubSel / FlagA / FlagB is the bag slot vs the count code vs a category flag;
+    - whether the trailing u32 is a quantity or a unit price;
+    - the exact role split between this inventory-driven 2/19 buy and the storefront 2/115 buy.
+
+  UNBLOCKS: Client.Application NpcBuyOrAcquire use-case (ack 4/19).

@@ -410,12 +410,17 @@ KIND 9 opens **KeepNpcPanel** (slot 152), whose "open storage" menu option opens
 - Selecting the keep menu's "open storage" option is gated by the bag-count gate for
   KIND 9 (limit 50; §9). On pass it opens **KeepPanel** (slot 191) and hides the world
   HUD panels (inventory / skill / etc.). `[confirmed]`.
-- KeepPanel's constructor loops over **60 slots** (a `count = 60` open loop over the slot
-  pointer-array at panel +171), confirming the storage capacity is **60 item slots**. The
-  grid object holds four 240-byte (0xF0) blocks plus an item-actor pointer array region;
-  the four blocks are likely four tabs/pages of 15 slots each (15 × 16 B = 240 B). Selection
-  cursors initialize to −1. Capacity = **60 slots** is `[confirmed]`; the tab interpretation
-  is `[static-hypothesis]`.
+- KeepPanel's constructor loops over **60 slots**, confirming the storage capacity is **60
+  item slots**. **The grid is laid out exactly 10 rows × 6 columns = 60 cells** `[confirmed]`
+  (HUD-II Wave 4): the build loop is a nested 6-inner / 10-outer loop that registers the 60
+  cell widgets with action ids running **200..259** (cell `i`: col = i%6, row = i/6), and the
+  cell coordinate-table builder likewise writes a 10×6 grid of (x,y) pairs. Each cell hosts a
+  button, a quantity label, and an item-icon overlay. Selection cursors initialize to −1. The
+  window also has a pair of page/tab buttons (action ids **261/262**) and a page index, so up
+  to two pages are reachable (the unified-slot math adds +60 per page); the visible grid is 60
+  cells per page. **This supersedes the earlier "four 240-byte tabs of 15 slots"
+  `[static-hypothesis]`** — the real layout is a single 10×6 = 60 grid (optionally paged).
+  KeepPanel (slot 191) is confirmed as the 60-cell storage grid.
 
 ### 7.2 Deposit / withdraw — C2S 2/142 (16-byte body)
 
@@ -436,6 +441,30 @@ condition are now **[confirmed]** from the builder (upgraded from the prior pass
 from UI-handler +394 — closing the "active interaction target" plumbing end-to-end (§2.1).
 **Which numeric `op` value is deposit vs withdraw is `[capture/debugger-pending]`** (the
 widget action-id base is server/UI-authored — open question 1).
+
+### 7.2a Item movement into / out of the grid — C2S 2/46 (move) and 2/44 (quick-move) `[confirmed]`
+
+**Refinement (HUD-II Wave 4):** §7.2 above collapses ALL storage traffic to C2S 2/142, but
+the binary shows **two distinct send lanes** for the KeepPanel, and only one of them is 2/142:
+
+- **2/142 `CmsgStorageOp` = the storage OPEN-REQUEST + MONEY lane.** The storage open request
+  and the deposit/withdraw of **money** (the warehouse cash vault, the two money buttons) ride
+  2/142 (the 16-byte body in §7.2, `op = action − 7`). This lane is unchanged.
+- **2/46 `CmsgItemMove` (move) and 2/44 `CmsgItemQuickMove` (quick-move) = the ITEM-movement
+  lane.** Moving an item **into or out of** the 60-cell storage grid does NOT use 2/142 — it
+  uses the **shared item-model move opcodes**: a drag-drop deposit/relocate sends **C2S 2/46**,
+  and a quick / shortcut transfer sends **C2S 2/44**. Both carry a **fixed 12-byte body** (six
+  leading parameter bytes, a 2-byte gap, then a 4-byte context word = the held item-model id,
+  0 when the keep window is open). The grid computes the unified destination slot as the storage
+  block base (**+56**, **+60 per page**) plus the cell index, then calls the shared sender. The
+  send is gated client-side on the keep-open guard flag.
+
+So: **2/142 = open + money; 2/46 + 2/44 = item movement into/out of the grid.** These are the
+same shared item-model senders used elsewhere for inventory moves — the storage grid is simply
+one of their targets. Specs: `packets/2-46_item_move.yaml`, `packets/2-44_item_quick_move.yaml`,
+`packets/2-142_storage_op.yaml`. The op-byte enum on 2/142 (deposit vs withdraw vs move) and the
+per-byte assignment inside the 12-byte 2/46/2/44 bodies remain **`[capture/debugger-pending]`**
+(open question 1, unchanged).
 
 ### 7.3 Storage contents arrive via the shared item-panel acks
 
@@ -507,7 +536,9 @@ NPC-lane rows:
 | 2/110 | C2S | 4 | **QuestNpcPanel step** request | QuestNpcPanel (slot 151) |
 | 2/113 | C2S | 8 | **REPAIR commit** = (u32 target, u32 index) | RepairNpcPanel (slot 150) |
 | 2/115 | C2S | 8 | **SUNDRY-shop BUY / order commit** = (u32 target, u32 2·index) | sundry shop (NpcPanel) |
-| 2/142 | C2S | 16 | **STORAGE deposit / withdraw** | KeepPanel (slot 191) |
+| 2/142 | C2S | 16 | **STORAGE open-request + MONEY deposit / withdraw** | KeepPanel (slot 191) |
+| 2/46 | C2S | 12 | **ITEM move into / out of the storage grid** (shared item-model move) | KeepPanel grid (slot 191) |
+| 2/44 | C2S | 12 | **ITEM quick-move into / out of the storage grid** (shared item-model quick-move) | KeepPanel grid (slot 191) |
 | 2/143 | C2S | 4 | KIND 0x23 **quest-item-keep open** (body = all-zero) | QuestItemKeepPanel |
 
 > The `(major:minor)` tuples and the body sizes are `[confirmed]`. The body *field

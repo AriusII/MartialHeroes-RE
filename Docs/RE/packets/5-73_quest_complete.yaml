@@ -1,47 +1,30 @@
-# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: routing + size are static facts; the field layout is NOT yet decoded. capture_verified: false.
+# DEPRECATED / REDIRECT -- do NOT implement from this file.
+#
+# BINARY-WINS CORRECTION (HUD-II Wave 4): opcode 5/73 was previously catalogued here as
+# SmsgQuestComplete (a "quest turn-in verdict"). A direct binary re-confirmation this wave proved this
+# is WRONG: the 5/73 handler reads a 344-byte (0x158) block and forwards it to the GuildWarInfoPanel
+# (the guild-war info window), drives its war-alarm banner, and rebuilds the panel. It is NOT a quest
+# channel. The quest result returns on 5/68 SmsgQuestList ONLY.
+#
+# The correct, current spec for opcode 5/73 lives at:
+#   packets/5-73_guildwar_info_update.yaml   (name: SmsgGuildWarInfoUpdate)
+#
+# This file is retained as a deprecation pointer so old citations resolve. It carries NO authoritative
+# fields. There is NO separate "quest complete" opcode -- quest turn-in results ride 5/68.
 
-name: SmsgQuestComplete
+name: SmsgGuildWarInfoUpdate
 opcode: 0x50049           # major 5 (Push), minor 73 -> (5 << 16) | 73
 direction: S2C
-size: 344                # fixed 344-byte payload block (0x158)
-spec: packets/5-73_quest_complete.yaml
-status: hypothesis
+size: 344
+spec: packets/5-73_guildwar_info_update.yaml
+status: deprecated-redirect
 capture_verified: false
 
-summary: Server pushes a quest turn-in verdict. A fixed 344-byte block delivered when a quest is completed / turned in; it drives the completion-result panel and updates the player's quest state.
+summary: DEPRECATED redirect. 5/73 is SmsgGuildWarInfoUpdate; see packets/5-73_guildwar_info_update.yaml. The former "SmsgQuestComplete" reading is refuted -- quest results ride 5/68.
 
-# Fixed 344-byte block. The internal field layout is NOT decoded in the source note available to this
-# spec -- only the total size (344 = 0x158) and the routing are CODE-CONFIRMED. The body is reserved as
-# one opaque region; the structure must be filled in from a capture before any field is parsed.
 fields:
-  - { name: Payload, type: "bytes[344]" }   # 0x000  opaque 344-byte quest-complete verdict (layout undecoded)
+  - { name: Payload, type: "bytes[344]" }   # 0x000  see packets/5-73_guildwar_info_update.yaml
 
 notes: |
-  CODE-CONFIRMED routing + size, CAPTURE-UNVERIFIED and UNDECODED body. The receive handler for this
-  message is identified by role (the quest-complete push handler) and reads a fixed 344-byte payload.
-  It drives the quest completion-result panel and updates quest state.
-
-  WHAT IS CONFIRMED:
-    - the opcode routing (5/73) is installed in the push dispatch table;
-    - the payload is a FIXED 344 bytes (0x158).
-
-  WHAT IS NOT DECODED (do not guess offsets):
-    - the source note for this lane does not enumerate the 344 bytes; the byte-level layout was
-      attributed to an earlier raw pass that is NOT available to this spec. Therefore NO field offsets
-      are published here. The block is reserved as opaque.
-
-  HOW THE CLIENT USES IT: the completion-result panel shows captions resolved from the message-string
-  database (data/script/msg.xdb) by numeric id (the completion panel uses caption ids in the low-300
-  and ~600 range). Those captions are LOCAL text, not bytes in this packet. The packet is expected to
-  carry the completed quest id and the reward outcome that the panel and quest state consume.
-
-  UNKNOWNS to resolve with a quest turn-in capture (REQUIRED before any field parsing):
-    - the completed quest id field;
-    - the reward/outcome fields (items, currency, XP, follow-up quest unlocks);
-    - any result/verdict flag and the header/trailer that pads the block to 344.
-
-  RELATED: 2/28 CmsgQuestAction (packets/2-28_quest_action.yaml) is the C2S that triggers turn-in;
-  5/68 SmsgQuestList (packets/5-68_quest_list.yaml) is the broader quest-log snapshot that follows.
-  UNBLOCKS reserving the correct frame length in Client.Application; full parsing is BLOCKED on a
-  capture.
+  Do not implement from this file. Use packets/5-73_guildwar_info_update.yaml. The "quest complete"
+  attribution for 5/73 is a binary-refuted mislabel; the quest result channel is 5/68.

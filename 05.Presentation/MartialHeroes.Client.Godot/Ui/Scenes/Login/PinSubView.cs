@@ -10,21 +10,18 @@
 //   Keypad:  2 × 5 tiles, each 52×52. Column spacing 55. Col0 X=28.
 //            Row 0 Y=170 (digits 0..4), Row 1 Y=230 (digits 5..9).
 //   Digit d glyph: password.dds src(d*52, 560/612/664, 52,52).
-//   Reset button (tag 11): panel-local (243,133,58,30). password.dds N(663,8) H(663,88) P(663,48).
-//   OK button (tag 12): panel-local (90,290,154,58). password.dds N(330,0) H(330,116) P(330,58).
-//   Cancel button (tag 13): panel-local (90,350,154,58). password.dds N(486,0) H(486,116) P(486,58).
+//   OK button (tag 11): panel-local (243,133,58,30). password.dds N(663,8) H(663,88) P(663,48).
+//   Clear button (tag 12): panel-local (90,290,154,58). password.dds N(330,0) H(330,116) P(330,58).
+//   Third button (tag 13): panel-local (90,350,154,58). password.dds N(486,0) H(486,116) P(486,58).
 //
 // Fisher-Yates scramble: seeded from wall-clock milliseconds, scrambles digit position array.
 // spec: Docs/RE/specs/frontend_scenes.md §11.3e "Fisher-Yates seed from wall-clock ms". CODE-CONFIRMED.
 //
 // Signals:
-//   PinSubmitted(string pin) — fired when OK (tag 12) is pressed with a non-empty PIN.
-//   Cancelled()             — fired when Cancel (tag 13) is pressed.
+//   PinSubmitted(string pin) — fired when OK (tag 11) is pressed.
+//   Cancelled()             — fired when the third button (tag 13) is pressed.
 //
 // The parent (LoginWindow) shows/hides this Control.
-// HostInReferenceSpace: when true, assume parent is already in 1024×768 canvas space
-// (no double-scaling applied). Set this to true when parented inside LoginWindow.
-//
 // spec: Docs/RE/specs/frontend_scenes.md §11.3 — PIN modal layout: CODE-CONFIRMED.
 // spec: Docs/RE/specs/frontend_scenes.md §11.3a — keypad tile layout: CODE-CONFIRMED.
 // spec: Docs/RE/specs/frontend_scenes.md §11.3b — digit glyph axis convention: CODE-CONFIRMED.
@@ -43,7 +40,7 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 ///
 /// <para>Builds a 2×5 scrambled keypad from <c>password.dds</c> via <see cref="HudAtlasLibrary"/>.
 /// Fisher-Yates scramble seeded from wall-clock milliseconds (spec §11.3e).
-/// OK (tag 12), Cancel (tag 13), Reset (tag 11) buttons.</para>
+/// OK (tag 11), Clear (tag 12), third/cancel (tag 13) buttons.</para>
 ///
 /// <para>Subscribe to <see cref="PinSubmitted"/> and <see cref="Cancelled"/> to receive
 /// the outcome and emit the appropriate use-case call. Never mutate domain state here.</para>
@@ -72,19 +69,19 @@ public sealed partial class PinSubView : Control
 
     // Keypad tile dimensions.
     // spec: Docs/RE/specs/frontend_scenes.md §11.3a. CODE-CONFIRMED.
-    private const int TileW        = LoginLayout.PinKeypadTileW;      // 52
-    private const int TileH        = LoginLayout.PinKeypadTileH;      // 52
-    private const int ColSpacing   = LoginLayout.PinKeypadColSpacing;  // 55
-    private const int Col0X        = LoginLayout.PinKeypadCol0X;       // 28
-    private const int Row0Y        = LoginLayout.PinKeypadRow0Y;       // 170
-    private const int Row1Y        = LoginLayout.PinKeypadRow1Y;       // 230
+    private const int TileW = LoginLayout.PinKeypadTileW; // 52
+    private const int TileH = LoginLayout.PinKeypadTileH; // 52
+    private const int ColSpacing = LoginLayout.PinKeypadColSpacing; // 55
+    private const int Col0X = LoginLayout.PinKeypadCol0X; // 28
+    private const int Row0Y = LoginLayout.PinKeypadRow0Y; // 170
+    private const int Row1Y = LoginLayout.PinKeypadRow1Y; // 230
 
     // Digit glyph source V rows in password.dds.
     // spec: Docs/RE/specs/frontend_scenes.md §11.3b. CODE-CONFIRMED.
-    private const int DigitNormalV  = LoginLayout.PinDigitNormalSrcY;  // 560
-    private const int DigitHoverV   = LoginLayout.PinDigitHoverSrcY;   // 664
+    private const int DigitNormalV = LoginLayout.PinDigitNormalSrcY; // 560
+    private const int DigitHoverV = LoginLayout.PinDigitHoverSrcY; // 664
     private const int DigitPressedV = LoginLayout.PinDigitPressedSrcY; // 612
-    private const int DigitColW     = LoginLayout.PinDigitColWidth;     // 52
+    private const int DigitColW = LoginLayout.PinDigitColWidth; // 52
 
     // PIN capacity.
     // spec: Docs/RE/specs/frontend_scenes.md §1.4a / login_flow.md §4.2. CODE-CONFIRMED.
@@ -95,16 +92,24 @@ public sealed partial class PinSubView : Control
     // spec: Docs/RE/specs/frontend_scenes.md §11.3d. CODE-CONFIRMED.
     // -------------------------------------------------------------------------
 
-    private const int TagReset  = LoginLayout.PinTagReset;  // 11
-    private const int TagOk     = LoginLayout.PinTagOk;     // 12
-    private const int TagCancel = LoginLayout.PinTagCancel; // 13
+    private const int TagOk = 11;
+    private const int TagClear = 12;
+    private const int TagThird = 13;
+
+    private const int PinDisplayX = 81;
+    private const int PinDisplayY = 138;
+    private const int PinDisplayW = 150;
+    private const int PinDisplayH = 22;
 
     // -------------------------------------------------------------------------
     // Signals
     // -------------------------------------------------------------------------
 
-    [Signal] public delegate void PinSubmittedEventHandler(string pin);
-    [Signal] public delegate void CancelledEventHandler();
+    [Signal]
+    public delegate void PinSubmittedEventHandler(string pin);
+
+    [Signal]
+    public delegate void CancelledEventHandler();
 
     // -------------------------------------------------------------------------
     // State
@@ -126,8 +131,7 @@ public sealed partial class PinSubView : Control
     // guarded by IsDevPrefillActive.
     public string? DevPrefillPin { private get; set; }
 
-    // When true, assume this panel is already inside a 1024×768 reference canvas
-    // (parent is LoginWindow in the ScreenHost). No Position offset applied.
+    // Retained for LoginWindow/LoginScene factory compatibility; the recovered rect is absolute either way.
     // spec: Docs/RE/specs/frontend_scenes.md §11.3 "panel rect (347,173,329,422)". CODE-CONFIRMED.
     public bool HostInReferenceSpace { get; set; }
 
@@ -155,18 +159,9 @@ public sealed partial class PinSubView : Control
     {
         // Position the panel on the 1024×768 canvas.
         // spec: §11.3 "canvas rect (347,173,329,422)". CODE-CONFIRMED.
-        if (!HostInReferenceSpace)
-        {
-            // Standalone: position at canvas absolute.
-            Position = new Vector2(ModalX, ModalY);
-        }
-        else
-        {
-            // Hosted inside LoginWindow (already in ref space): use modal canvas coords directly.
-            Position = new Vector2(ModalX, ModalY);
-        }
+        Position = new Vector2(ModalX, ModalY);
 
-        Size              = new Vector2(ModalW, ModalH);
+        Size = new Vector2(ModalW, ModalH);
         CustomMinimumSize = new Vector2(ModalW, ModalH);
 
         // Scramble the keypad.
@@ -177,53 +172,56 @@ public sealed partial class PinSubView : Control
         // We add a dim overlay to darken the scene behind the modal.
         var dim = new ColorRect
         {
-            Color       = new Color(0f, 0f, 0f, 0.6f),
-            Position    = new Vector2(-ModalX, -ModalY), // covers entire 1024×768
-            Size        = new Vector2(1024, 768),
-            MouseFilter = MouseFilterEnum.Ignore,
+            Color = new Color(0f, 0f, 0f, 0.6f),
+            Position = new Vector2(-ModalX, -ModalY), // covers entire 1024×768
+            Size = new Vector2(1024, 768),
+            // Stop (not Ignore): a focus-capturing modal must EAT clicks on the dim area so they do not
+            // fall through to the login form behind. The keypad buttons sit on top and still receive input.
+            // spec: Docs/RE/specs/ui_system.md §1.6 (GUPanel_ShowModalAndFocus) / §4.2 (modal capture). CODE-CONFIRMED.
+            MouseFilter = MouseFilterEnum.Stop,
         };
         AddChild(dim);
 
-        // Build keypad tiles.
+        // Build keypad face buttons.
         BuildKeypad();
 
         // Build PIN display label.
         _pinDisplay = new Label
         {
-            Text     = "",
-            Position = new Vector2(80, 100),
-            Size     = new Vector2(ModalW - 100, 30),
+            Text = "",
+            Position = new Vector2(PinDisplayX, PinDisplayY),
+            Size = new Vector2(PinDisplayW, PinDisplayH),
             HorizontalAlignment = HorizontalAlignment.Center,
         };
         _pinDisplay.AddThemeColorOverride("font_color", Colors.White);
         AddChild(_pinDisplay);
 
-        // Build Reset button (tag 11).
+        // Build OK button (tag 11).
         // spec: §11.3d (243,133,58,30) N(663,8) H(663,88) P(663,48). CODE-CONFIRMED.
         BuildButton(
             LoginLayout.PinResetX, LoginLayout.PinResetY, LoginLayout.PinResetW, LoginLayout.PinResetH,
             LoginLayout.PinResetNSrcX, LoginLayout.PinResetNSrcY,
             LoginLayout.PinResetHSrcX, LoginLayout.PinResetHSrcY,
             LoginLayout.PinResetPSrcX, LoginLayout.PinResetPSrcY,
-            TagReset);
+            TagOk);
 
-        // Build OK button (tag 12).
+        // Build Clear button (tag 12).
         // spec: §11.3d (90,290,154,58) N(330,0) H(330,116) P(330,58). CODE-CONFIRMED.
         BuildButton(
             LoginLayout.PinOkX, LoginLayout.PinOkY, LoginLayout.PinOkW, LoginLayout.PinOkH,
             LoginLayout.PinOkNSrcX, LoginLayout.PinOkNSrcY,
             LoginLayout.PinOkHSrcX, LoginLayout.PinOkHSrcY,
             LoginLayout.PinOkPSrcX, LoginLayout.PinOkPSrcY,
-            TagOk);
+            TagClear);
 
-        // Build Cancel button (tag 13).
+        // Build third button (tag 13).
         // spec: §11.3d (90,350,154,58) N(486,0) H(486,116) P(486,58). CODE-CONFIRMED.
         BuildButton(
             LoginLayout.PinCancelX, LoginLayout.PinCancelY, LoginLayout.PinCancelW, LoginLayout.PinCancelH,
             LoginLayout.PinCancelNSrcX, LoginLayout.PinCancelNSrcY,
             LoginLayout.PinCancelHSrcX, LoginLayout.PinCancelHSrcY,
             LoginLayout.PinCancelPSrcX, LoginLayout.PinCancelPSrcY,
-            TagCancel);
+            TagThird);
 
         // DEV: auto-submit prefilled PIN if provided.
         if (DevPrefillPin is { Length: > 0 } pre)
@@ -246,44 +244,49 @@ public sealed partial class PinSubView : Control
 
     private void BuildKeypad()
     {
-        // 2 × 5 grid of digit buttons.
+        // 2 × 5 grid positions, each with 10 overlapping digit-face buttons.
         // Position 0..4 = top row (Y=Row0Y), Position 5..9 = bottom row (Y=Row1Y).
         // Digit assigned via _scrambled[position].
-        // spec: §11.3a "Tile X: 55*(p%5)+28; Tile Y: 170 for p<5, 230 for p>=5". CODE-CONFIRMED.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.3a "100 buttons total, actions 0..99".
         for (int pos = 0; pos < 10; pos++)
         {
             int digit = _scrambled[pos];
-            int col   = pos % 5;
-            int row   = pos / 5;
+            int col = pos % 5;
+            int row = pos / 5;
 
-            int x = Col0X + col * ColSpacing;                   // spec §11.3a. CODE-CONFIRMED.
-            int y = row == 0 ? Row0Y : Row1Y;                   // spec §11.3a. CODE-CONFIRMED.
+            int x = Col0X + col * ColSpacing; // spec §11.3a. CODE-CONFIRMED.
+            int y = row == 0 ? Row0Y : Row1Y; // spec §11.3a. CODE-CONFIRMED.
 
-            // Digit d glyph: srcU = d*52; srcV per state.
-            // spec: §11.3b "srcU = d*52; srcV = 560/612/664". CODE-CONFIRMED.
-            int srcU = digit * DigitColW;
-
-            Texture2D? normal  = _atlas.SliceByPath(AtlasPassword, srcU, DigitNormalV,  TileW, TileH);
-            Texture2D? pressed = _atlas.SliceByPath(AtlasPassword, srcU, DigitPressedV, TileW, TileH);
-            Texture2D? hover   = _atlas.SliceByPath(AtlasPassword, srcU, DigitHoverV,   TileW, TileH);
-
-            var btn = new TextureButton
+            for (int face = 0; face < 10; face++)
             {
-                Position          = new Vector2(x, y),
-                Size              = new Vector2(TileW, TileH),
-                CustomMinimumSize = new Vector2(TileW, TileH),
-                IgnoreTextureSize = true,
-                StretchMode       = TextureButton.StretchModeEnum.Scale,
-                TextureNormal     = normal,
-                TextureHover      = hover,
-                TexturePressed    = pressed,
-                TextureDisabled   = normal,
-            };
+                // Digit face glyph: srcU = face*52; srcV per state.
+                // spec: Docs/RE/specs/frontend_scenes.md §11.3b.
+                int srcU = face * DigitColW;
 
-            // Capture digit in closure (not pos, not col/row).
-            int capturedDigit = digit;
-            btn.Pressed += () => OnDigitPressed(capturedDigit);
-            AddChild(btn);
+                Texture2D? normal = _atlas.SliceByPath(AtlasPassword, srcU, DigitNormalV, TileW, TileH);
+                Texture2D? pressed = _atlas.SliceByPath(AtlasPassword, srcU, DigitPressedV, TileW, TileH);
+                Texture2D? hover = _atlas.SliceByPath(AtlasPassword, srcU, DigitHoverV, TileW, TileH);
+                bool shown = face == digit;
+
+                var btn = new TextureButton
+                {
+                    Position = new Vector2(x, y),
+                    Size = new Vector2(TileW, TileH),
+                    CustomMinimumSize = new Vector2(TileW, TileH),
+                    IgnoreTextureSize = true,
+                    StretchMode = TextureButton.StretchModeEnum.Scale,
+                    TextureNormal = normal,
+                    TextureHover = hover,
+                    TexturePressed = pressed,
+                    TextureDisabled = normal,
+                    Visible = shown,
+                    MouseFilter = shown ? MouseFilterEnum.Stop : MouseFilterEnum.Ignore,
+                };
+
+                int actionId = pos * 10 + face;
+                btn.Pressed += () => OnDigitFaceAction(actionId);
+                AddChild(btn);
+            }
         }
     }
 
@@ -294,21 +297,21 @@ public sealed partial class PinSubView : Control
         int pSrcX, int pSrcY,
         int tag)
     {
-        Texture2D? normal  = _atlas.SliceByPath(AtlasPassword, nSrcX, nSrcY, w, h);
-        Texture2D? hover   = _atlas.SliceByPath(AtlasPassword, hSrcX, hSrcY, w, h);
+        Texture2D? normal = _atlas.SliceByPath(AtlasPassword, nSrcX, nSrcY, w, h);
+        Texture2D? hover = _atlas.SliceByPath(AtlasPassword, hSrcX, hSrcY, w, h);
         Texture2D? pressed = _atlas.SliceByPath(AtlasPassword, pSrcX, pSrcY, w, h);
 
         var btn = new TextureButton
         {
-            Position          = new Vector2(x, y),
-            Size              = new Vector2(w, h),
+            Position = new Vector2(x, y),
+            Size = new Vector2(w, h),
             CustomMinimumSize = new Vector2(w, h),
             IgnoreTextureSize = true,
-            StretchMode       = TextureButton.StretchModeEnum.Scale,
-            TextureNormal     = normal,
-            TextureHover      = hover,
-            TexturePressed    = pressed,
-            TextureDisabled   = normal,
+            StretchMode = TextureButton.StretchModeEnum.Scale,
+            TextureNormal = normal,
+            TextureHover = hover,
+            TexturePressed = pressed,
+            TextureDisabled = normal,
         };
 
         int capturedTag = tag;
@@ -328,33 +331,43 @@ public sealed partial class PinSubView : Control
         GD.Print($"[PinSubView] Digit {digit} pressed; PIN length now {_pin.Length}.");
     }
 
+    private void OnDigitFaceAction(int actionId)
+    {
+        int pos = actionId / 10;
+        int face = actionId % 10;
+        if ((uint)pos >= (uint)_scrambled.Length || _scrambled[pos] != face)
+            return;
+
+        OnDigitPressed(face);
+    }
+
     private void OnButtonAction(int tag)
     {
         switch (tag)
         {
-            case TagReset:
-                // Reset tag 11: clear PIN and re-scramble.
-                // spec: §11.3d "Reset clears and re-scrambles". CODE-CONFIRMED.
-                _pin = "";
-                UpdatePinDisplay();
-                Scramble();
-                RebuildKeypad();
-                GD.Print("[PinSubView] Reset (tag 11): PIN cleared and keypad re-scrambled. " +
-                         "spec: frontend_scenes.md §11.3d.");
-                break;
-
             case TagOk:
-                // OK tag 12: emit PinSubmitted (even if empty — Application validates length).
-                // spec: §11.3d "OK fires PinSubmitted". CODE-CONFIRMED.
-                GD.Print($"[PinSubView] OK (tag 12): PinSubmitted(pin_len={_pin.Length}). " +
+                // OK tag 11: emit PinSubmitted. Application validates length.
+                // spec: Docs/RE/specs/frontend_scenes.md §11.3d.
+                GD.Print($"[PinSubView] OK (tag 11): PinSubmitted(pin_len={_pin.Length}). " +
                          "spec: frontend_scenes.md §11.3d.");
                 EmitSignal(SignalName.PinSubmitted, _pin);
                 break;
 
-            case TagCancel:
-                // Cancel tag 13: emit Cancelled.
-                // spec: §11.3d "Cancel fires Cancelled". CODE-CONFIRMED.
-                GD.Print("[PinSubView] Cancel (tag 13): Cancelled. spec: frontend_scenes.md §11.3d.");
+            case TagClear:
+                // Clear tag 12: clear PIN and re-scramble.
+                // spec: Docs/RE/specs/frontend_scenes.md §11.3d.
+                _pin = "";
+                UpdatePinDisplay();
+                Scramble();
+                RebuildKeypad();
+                GD.Print("[PinSubView] Clear (tag 12): PIN cleared and keypad re-scrambled. " +
+                         "spec: frontend_scenes.md §11.3d.");
+                break;
+
+            case TagThird:
+                // Third button tag 13: emit Cancelled for the host flow.
+                // spec: Docs/RE/specs/frontend_scenes.md §11.3d.
+                GD.Print("[PinSubView] Third button (tag 13): Cancelled. spec: frontend_scenes.md §11.3d.");
                 EmitSignal(SignalName.Cancelled);
                 break;
         }
@@ -383,7 +396,7 @@ public sealed partial class PinSubView : Control
         // Seed from wall-clock milliseconds.
         // spec: §11.3e "seed = wall-clock milliseconds (GetTicksMsec or equivalent)". CODE-CONFIRMED.
         int seed = (int)(global::Godot.Time.GetTicksMsec() & 0x7FFF_FFFF); // spec §11.3e. CODE-CONFIRMED.
-        var rng  = new Random(seed);
+        var rng = new Random(seed);
 
         for (int i = 9; i > 0; i--)
         {
@@ -394,7 +407,7 @@ public sealed partial class PinSubView : Control
 
     private void RebuildKeypad()
     {
-        // Remove existing keypad buttons (first 10 TextureButtons after the dim overlay).
+        // Remove existing keypad buttons (100 digit-face buttons after the dim overlay).
         // We can't safely iterate-and-remove; just rebuild all children.
         // Store non-keypad children, clear, re-add.
         // Simpler: just free keypad-tagged buttons. Since we added dim+keypad+display+buttons
@@ -406,10 +419,11 @@ public sealed partial class PinSubView : Control
         // Re-run the full build (same as _Ready, no DEV prefill auto-submit on reset).
         var dim = new ColorRect
         {
-            Color       = new Color(0f, 0f, 0f, 0.6f),
-            Position    = new Vector2(-ModalX, -ModalY),
-            Size        = new Vector2(1024, 768),
-            MouseFilter = MouseFilterEnum.Ignore,
+            Color = new Color(0f, 0f, 0f, 0.6f),
+            Position = new Vector2(-ModalX, -ModalY),
+            Size = new Vector2(1024, 768),
+            // Stop (modal capture) — see BuildUi. spec: ui_system.md §1.6 / §4.2. CODE-CONFIRMED.
+            MouseFilter = MouseFilterEnum.Stop,
         };
         AddChild(dim);
 
@@ -417,9 +431,9 @@ public sealed partial class PinSubView : Control
 
         _pinDisplay = new Label
         {
-            Text     = new string('*', _pin.Length),
-            Position = new Vector2(80, 100),
-            Size     = new Vector2(ModalW - 100, 30),
+            Text = new string('*', _pin.Length),
+            Position = new Vector2(PinDisplayX, PinDisplayY),
+            Size = new Vector2(PinDisplayW, PinDisplayH),
             HorizontalAlignment = HorizontalAlignment.Center,
         };
         _pinDisplay.AddThemeColorOverride("font_color", Colors.White);
@@ -430,20 +444,20 @@ public sealed partial class PinSubView : Control
             LoginLayout.PinResetNSrcX, LoginLayout.PinResetNSrcY,
             LoginLayout.PinResetHSrcX, LoginLayout.PinResetHSrcY,
             LoginLayout.PinResetPSrcX, LoginLayout.PinResetPSrcY,
-            TagReset);
+            TagOk);
 
         BuildButton(
             LoginLayout.PinOkX, LoginLayout.PinOkY, LoginLayout.PinOkW, LoginLayout.PinOkH,
             LoginLayout.PinOkNSrcX, LoginLayout.PinOkNSrcY,
             LoginLayout.PinOkHSrcX, LoginLayout.PinOkHSrcY,
             LoginLayout.PinOkPSrcX, LoginLayout.PinOkPSrcY,
-            TagOk);
+            TagClear);
 
         BuildButton(
             LoginLayout.PinCancelX, LoginLayout.PinCancelY, LoginLayout.PinCancelW, LoginLayout.PinCancelH,
             LoginLayout.PinCancelNSrcX, LoginLayout.PinCancelNSrcY,
             LoginLayout.PinCancelHSrcX, LoginLayout.PinCancelHSrcY,
             LoginLayout.PinCancelPSrcX, LoginLayout.PinCancelPSrcY,
-            TagCancel);
+            TagThird);
     }
 }

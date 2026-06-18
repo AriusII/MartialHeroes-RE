@@ -47,28 +47,28 @@ public sealed partial class HudChatPanel : Control
     // spec: Docs/RE/specs/chat.md §6.1–§6.4 CODE-CONFIRMED
     // -------------------------------------------------------------------------
 
-    private const int PanelW = 448;        // spec: ui_hud_layout.md §1.2 / chat.md §6.1
-    private const int PanelH = 324;        // spec: ui_hud_layout.md §1.2 / chat.md §6.1
-    private const int LogBgH = 227;        // spec: ui_hud_layout.md §1.2 — background sprite
-    private const int InputBarH = 41;      // spec: ui_hud_layout.md §1.2 — bottom input bar strip
-    private const int ScrollbarW = 17;     // spec: ui_hud_layout.md §1.2 — right-edge scrollbar
-    private const int EditW = 330;         // spec: ui_hud_layout.md §1.2 — input edit box width
-    private const int EditH = 20;          // spec: ui_hud_layout.md §1.2 — single-line editbox
-    private const int EditLocalX = 5;      // spec: ui_hud_layout.md §1.2 — panel-local (5, 4)
-    private const int EditLocalY = 4;      // spec: ui_hud_layout.md §1.2 — panel-local (5, 4)
+    private const int PanelW = 448; // spec: ui_hud_layout.md §1.2 / chat.md §6.1
+    private const int PanelH = 324; // spec: ui_hud_layout.md §1.2 / chat.md §6.1
+    private const int LogBgH = 227; // spec: ui_hud_layout.md §1.2 — background sprite
+    private const int InputBarH = 41; // spec: ui_hud_layout.md §1.2 — bottom input bar strip
+    private const int ScrollbarW = 17; // spec: ui_hud_layout.md §1.2 — right-edge scrollbar
+    private const int EditW = 330; // spec: ui_hud_layout.md §1.2 — input edit box width
+    private const int EditH = 20; // spec: ui_hud_layout.md §1.2 — single-line editbox
+    private const int EditLocalX = 5; // spec: ui_hud_layout.md §1.2 — panel-local (5, 4)
+    private const int EditLocalY = 4; // spec: ui_hud_layout.md §1.2 — panel-local (5, 4)
     private const int EditMaxLength = 100; // spec: ui_hud_layout.md §1.2 — editbox character cap
-    private const int VisibleLines = 12;   // spec: chat.md §6.4 CODE-CONFIRMED
+    private const int VisibleLines = 12; // spec: chat.md §6.4 CODE-CONFIRMED
     private const int RingCapacity = 1000; // spec: chat.md §6.2 CODE-CONFIRMED
 
     // Channel ARGB colours (CODE-CONFIRMED routing; CAPTURE-UNVERIFIED exact values)
     // spec: Docs/RE/specs/chat.md §3 (channel code → ARGB table)
-    private const uint ColorSay     = 0xFFFFFFFFu; // spec: chat.md §3 — say white
-    private const uint ColorShout   = 0xFFCC99FFu; // spec: chat.md §3 — shout
-    private const uint ColorParty   = 0xFF00FFFFu; // spec: chat.md §3 — party
-    private const uint ColorGuild   = 0xFF33FF66u; // spec: chat.md §3 — guild
-    private const uint ColorEvent   = 0xFFFFFF00u; // spec: chat.md §3 — event
+    private const uint ColorSay = 0xFFFFFFFFu; // spec: chat.md §3 — say white
+    private const uint ColorShout = 0xFFCC99FFu; // spec: chat.md §3 — shout
+    private const uint ColorParty = 0xFF00FFFFu; // spec: chat.md §3 — party
+    private const uint ColorGuild = 0xFF33FF66u; // spec: chat.md §3 — guild
+    private const uint ColorEvent = 0xFFFFFF00u; // spec: chat.md §3 — event
     private const uint ColorWhisper = 0xFFFF797Cu; // spec: chat.md §3 — special/whisper
-    private const uint ColorAlly    = 0xFF82C4FFu; // spec: chat.md §3 — alliance
+    private const uint ColorAlly = 0xFF82C4FFu; // spec: chat.md §3 — alliance
 
     // -------------------------------------------------------------------------
     // Child controls
@@ -122,8 +122,8 @@ public sealed partial class HudChatPanel : Control
         AnchorTop = 1f;
         AnchorRight = 0f;
         AnchorBottom = 1f;
-        OffsetLeft = 0f;         // screen_width/2 − 512 on 1024-wide canvas = 0
-        OffsetTop = -PanelH;     // screen_height − 324 (bottom-anchored)
+        OffsetLeft = 0f; // screen_width/2 − 512 on 1024-wide canvas = 0
+        OffsetTop = -PanelH; // screen_height − 324 (bottom-anchored)
         OffsetRight = PanelW;
         OffsetBottom = 0f;
         MouseFilter = MouseFilterEnum.Stop;
@@ -156,7 +156,7 @@ public sealed partial class HudChatPanel : Control
         _log.OffsetLeft = 2f;
         _log.OffsetTop = 2f;
         _log.OffsetRight = -(ScrollbarW + 2f); // leave room for scrollbar
-        _log.OffsetBottom = LogBgH - 2f;        // spec: chat.md §6.1 — log bg height 227
+        _log.OffsetBottom = LogBgH - 2f; // spec: chat.md §6.1 — log bg height 227
         AddChild(_log);
 
         // Input bar strip (bottom InputBarH = 41 px from Y=227)
@@ -188,8 +188,8 @@ public sealed partial class HudChatPanel : Control
         _input.AnchorTop = 0f;
         _input.AnchorRight = 0f;
         _input.AnchorBottom = 0f;
-        _input.OffsetLeft = EditLocalX;           // spec: ui_hud_layout.md §1.2 — local x=5
-        _input.OffsetTop = LogBgH + EditLocalY;  // spec: ui_hud_layout.md §1.2 — local y=4 (in input bar)
+        _input.OffsetLeft = EditLocalX; // spec: ui_hud_layout.md §1.2 — local x=5
+        _input.OffsetTop = LogBgH + EditLocalY; // spec: ui_hud_layout.md §1.2 — local y=4 (in input bar)
         _input.OffsetRight = EditLocalX + EditW;
         _input.OffsetBottom = LogBgH + EditLocalY + EditH;
         _input.TextSubmitted += OnTextSubmitted;
@@ -275,27 +275,28 @@ public sealed partial class HudChatPanel : Control
             if (idx++ < skip) continue;
             // Convert ARGB to Godot BBCode colour
             float r = ((argb >> 16) & 0xFF) / 255f;
-            float g = ((argb >> 8)  & 0xFF) / 255f;
-            float b = (argb         & 0xFF) / 255f;
+            float g = ((argb >> 8) & 0xFF) / 255f;
+            float b = (argb & 0xFF) / 255f;
             _sb.Append($"[color=#{(int)(r * 255):X2}{(int)(g * 255):X2}{(int)(b * 255):X2}]");
             _sb.Append(EscapeBb(text));
             _sb.Append("[/color]\n");
         }
+
         _log.ParseBbcode(_sb.ToString());
     }
 
     private static uint ArgbForChannel(int ch) => ch switch
     {
         // spec: Docs/RE/specs/chat.md §3 — channel code → ARGB table (CAPTURE-UNVERIFIED values)
-        0  => ColorSay,
-        1  => ColorShout,
-        2  => ColorParty,
-        3  => ColorGuild,
-        6  => ColorEvent,
-        7  => ColorWhisper,
-        9  => ColorWhisper,
+        0 => ColorSay,
+        1 => ColorShout,
+        2 => ColorParty,
+        3 => ColorGuild,
+        6 => ColorEvent,
+        7 => ColorWhisper,
+        9 => ColorWhisper,
         15 => ColorAlly,
-        _  => ColorSay,
+        _ => ColorSay,
     };
 
     // Escape square brackets to prevent accidental BBCode injection.

@@ -49,16 +49,16 @@ public sealed partial class HudSkillPanel : Control
     // spec: Docs/RE/specs/ui_system.md §8.8 CODE-CONFIRMED
     // -------------------------------------------------------------------------
 
-    private const float SkillPanelW = 964f;  // spec: ui_system.md §8.8
-    private const float SkillPanelH = 655f;  // spec: ui_system.md §8.8
-    private const float ParkX = 43f;         // spec: ui_system.md §8.8 — parked X
-    private const float ParkY = -655f;       // spec: ui_system.md §8.8 — parked Y (off-screen top)
-    private const float OpenY = 0f;          // revealed Y (slide in from top)
+    private const float SkillPanelW = 964f; // spec: ui_system.md §8.8
+    private const float SkillPanelH = 655f; // spec: ui_system.md §8.8
+    private const float ParkX = 43f; // spec: ui_system.md §8.8 — parked X
+    private const float ParkY = -655f; // spec: ui_system.md §8.8 — parked Y (off-screen top)
+    private const float OpenY = 0f; // revealed Y (slide in from top)
 
     // Tab action ids: 802–810 (9 class tabs)
     // spec: ui_system.md §8.8 CODE-CONFIRMED — "action ids 802–810"
     private const int TabActionStart = 802; // spec: ui_system.md §8.8
-    private const int TabCount = 9;         // spec: ui_system.md §8.8
+    private const int TabCount = 9; // spec: ui_system.md §8.8
 
     // Skill-pipe count
     // spec: ui_system.md §8.8 CODE-CONFIRMED — "4 skill-pipe panels"

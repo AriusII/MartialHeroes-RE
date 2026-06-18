@@ -1,0 +1,75 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED VALUE semantics; the 44-byte record size + the field offsets the handler
+# reads are control-flow CONFIRMED from the slot-update handler's read order. capture_verified: false.
+
+name: SmsgUserTradeSlotUpdate
+opcode: 0x40018             # major 4 (Response), minor 24 -> (4 << 16) | 24
+direction: S2C
+size: 44                   # fixed 44-byte (0x2C) per-slot record read by the trade slot-update handler
+spec: packets/4-24_trade_slot_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server updates ONE slot of the player-to-player trade window. A single 44-byte record that either applies an item/money entry to a trade slot or tears the window down. This is the INCREMENTAL their-side / own-side populate -- the owner-id field at offset 40 discriminates which side of the trade the slot belongs to. Pairs with C2S 2/24 TradeSlotAdd; the full-refresh sibling is 4/25.
+
+# Wire order, offset 0 = first payload byte. Pack=1; padding bytes modelled explicitly so the summed
+# widths equal size: 44. Only the fields the handler reads are named; the rest is filler the trade
+# path does not consume. The handler reads a fixed 44-byte record, then routes by the category byte
+# and the owner-id side discriminator.
+fields:
+  - { name: Result,    type: u8 }          # 0x00  result/ack byte: 0 = teardown / notice path, 1 = apply this slot
+  - { name: Subtype,   type: u8 }          # 0x01  sub-selector (on the teardown path 1/2 pick a decline-reason notice)
+  - { name: Pad0,      type: "bytes[8]" }    # 0x02  filler up to the category byte (not consumed by the trade path)
+  - { name: Category,  type: u8 }          # 0x0a  slot category: 0..2 = item, 3 = alt, 4 = special, 255 (0xFF) = money/zeny
+  - { name: SlotFlag,  type: u8 }          # 0x0b  per-slot flag / state byte
+  - { name: ItemId,    type: u32 }         # 0x0c  item id / key (nonzero -> draw the slot icon)
+  - { name: ItemField2, type: u32 }        # 0x10  item field 2 (count / durability / enhancement -- unlabelled)
+  - { name: ItemField3, type: u32 }        # 0x14  item field 3 (unlabelled)
+  - { name: ItemField4, type: u32 }        # 0x18  item field 4 (unlabelled)
+  - { name: Pad1,      type: "bytes[8]" }    # 0x1c  filler up to the slot index
+  - { name: SlotIndex, type: u8 }          # 0x24  destination cell index 0..59 within the active side
+  - { name: SlotFlag2, type: u8 }          # 0x25  flag byte
+  - { name: SlotFlag3, type: u8 }          # 0x26  flag byte
+  - { name: Pad2,      type: "bytes[1]" }    # 0x27  filler to the next dword
+  - { name: OwnerId,   type: u32 }         # 0x28  owner actor id -- SIDE DISCRIMINATOR (== local player id -> my side, else their side)
+
+notes: |
+  CODE-CONFIRMED record size (a fixed 44-byte / 0x2C read) and the field OFFSETS the handler reads;
+  CAPTURE-UNVERIFIED in VALUE meaning. The handler reads the full 44-byte record, then routes by the
+  Category byte at 0x0A and the OwnerId side discriminator at 0x28. Padding regions (Pad0/Pad1/Pad2)
+  cover bytes the trade path does not consume; they are modelled only so the widths sum to 44.
+
+    0x00 (1B) Result    : 0 = teardown / notice path (the slot is not applied; Subtype selects a
+                          decline-reason notice); 1 = apply this slot to the trade grid.
+    0x0a (1B) Category  : what the slot holds. 0..2 = an item slot, 3 = an alternate item form,
+                          4 / -1 = a special form, 255 (0xFF) = a money / zeny slot.
+    0x0c (4B) ItemId    : the item id / key. A nonzero value drives the slot icon. (For a money slot
+                          the numeric value is carried in the item fields; the exact money column is
+                          capture-pending.)
+    0x24 (1B) SlotIndex : the destination cell index 0..59 within the active side's grid.
+    0x28 (4B) OwnerId   : THE SIDE DISCRIMINATOR. When OwnerId equals the local player's actor id the
+                          slot belongs to MY side of the trade; otherwise it belongs to the PARTNER's
+                          (their) side. This is what populates the partner half of the trade window:
+                          an incoming 4/24 with OwnerId != my id writes the their-side grid.
+
+  TWO-SIDE MODEL (engineer's mental model, from the trade-window static map -- NOT extra wire fields):
+  the trade window draws ONE 60-cell grid (10 rows x 6 columns) that toggles between my-offer and
+  their-offer views. The two sides are backed by two 60-record blocks; the their-side records are the
+  second block. The 4/24 handler reads OwnerId (0x28) to pick the side, SlotIndex (0x24) for the cell
+  0..59, Category (0x0A) for the slot kind, and ItemId (0x0C) for the icon. Money slots arrive with
+  Category == 0xFF.
+
+  RELATIONSHIP: this is the INCREMENTAL single-slot update. The bulk / full-refresh populate is 4/25
+  SmsgUserTradeFullResponse (packets/4-25_trade_full_response.yaml). The client raises trade slots via
+  C2S 2/24 CmsgTradeSlotAdd (packets/2-24_trade_slot_add.yaml); the request/accept handshake is 2/23 ->
+  4/23 (packets/2-23_trade_request.yaml / packets/4-23_trade_request_result.yaml).
+
+  UNKNOWNS to resolve with a trade capture (offsets are settled at 44 bytes; these are VALUE questions):
+    - the meaning of the three trailing item fields at 0x10 / 0x14 / 0x18 (count vs durability vs
+      enhancement);
+    - the exact money column when Category == 0xFF;
+    - the full Subtype decline-reason enum on the teardown (Result == 0) path;
+    - the meaning of the slot-flag bytes (0x0B / 0x25 / 0x26).
+
+  UNBLOCKS: the Client.Application trade-window populate handler (4/24), in particular the their-side
+  grid fill via the OwnerId side discriminator.

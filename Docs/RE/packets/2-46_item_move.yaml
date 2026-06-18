@@ -1,0 +1,64 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED VALUE semantics; the fixed 12-byte body size is control-flow CONFIRMED from the
+# shared item-model move sender. capture_verified: false.
+
+name: CmsgItemMove
+opcode: 0x2002e           # major 2 (GameAction), minor 46 -> (2 << 16) | 46
+direction: C2S
+size: 12                  # fixed 12-byte body built by the shared item-model move body packer
+spec: packets/2-46_item_move.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client item move / swap -- the shared item-model "move" send used to relocate an item between containers and slots. A fixed 12-byte body carrying an operation/selector and a source/destination container+slot pair plus a context word. This is the SHARED item-move opcode; the storage ("keep") grid uses it to deposit/move items INTO and OUT OF its 60-cell storage grid (the unified destination slot is the storage block base + the cell index).
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 12.
+# CONTROL-FLOW CONFIRMED: the shared item-model move sender packs a 12-byte body (six leading single
+# bytes, a 2-byte gap, then a 4-byte context word) and appends it after the 8-byte frame header.
+fields:
+  - { name: B0,      type: u8 }          # 0x00  op / selector byte (held-item move parameters)
+  - { name: B1,      type: u8 }          # 0x01  container / slot parameter
+  - { name: B2,      type: u8 }          # 0x02  container / slot parameter
+  - { name: B3,      type: u8 }          # 0x03  container / slot parameter
+  - { name: B4,      type: u8 }          # 0x04  container / slot parameter
+  - { name: B5,      type: u8 }          # 0x05  container / slot parameter
+  - { name: Pad0,    type: "bytes[2]" }  # 0x06  2-byte gap before the context word
+  - { name: Context, type: u32 }         # 0x08  context word (held item-model id; 0 in the keep-open path)
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a fixed 12-byte send) and the 6-byte + gap + 4-byte shape;
+  CAPTURE-UNVERIFIED in the exact VALUE meaning of each leading byte. The six leading bytes (B0..B5)
+  encode the move parameters -- an operation/selector and a source-container / source-slot /
+  destination-(unified)-slot triple derived from the held item plus the target cell math. The precise
+  per-byte assignment (which byte is op vs srcContainer vs srcSlot vs dstSlot) is capture-pending;
+  model them as raw bytes until a capture pins the assignment, and do NOT hardcode a deposit/withdraw
+  constant.
+
+    0x00..0x05 (6x u8) : the move parameters (op/selector + source/destination container & slot ids).
+    0x06 (2B)  Pad0    : a 2-byte gap before the context word; treated as alignment/stack bytes,
+                         should be zeroed by a fresh sender.
+    0x08 (4B)  Context : a context word -- the held item-model id, 0 when the keep (storage) window is
+                         open. CONTROL-FLOW CONFIRMED as the trailing 4-byte field; its precise meaning
+                         is a static inference.
+
+  STORAGE-GRID USAGE (the reason this opcode is in the keep lane): the storage ("keep") grid panel
+  (slot 191, a 10-row x 6-col = 60-cell grid) sends 2/46 when an item is dropped onto a cell while the
+  player is holding an item -- it computes a unified destination slot as (cell action id - 200) plus a
+  page-and-base offset (the storage block sits at unified-slot base +56, +60 per page), then calls this
+  shared move sender. So 2/46 is the item MOVEMENT lane for the storage grid (deposit / re-arrange),
+  distinct from the storage OPEN / MONEY lane which is C2S 2/142 CmsgStorageOp
+  (packets/2-142_storage_op.yaml). The move is gated client-side on the keep-open guard flag.
+
+  RELATIONSHIP: 2/44 CmsgItemQuickMove (packets/2-44_item_quick_move.yaml) is the sibling quick / shift
+  transfer using the same 12-byte body shape. The storage grid CONTENTS arrive via the shared
+  item-panel server acks (no dedicated storage-snapshot opcode was isolated). The money deposit /
+  withdraw + storage open-request ride 2/142.
+
+  UNKNOWNS to resolve with an item-move / storage-deposit capture (body size is settled at 12; these
+  are VALUE questions):
+    - the per-byte assignment of B0..B5 (op vs source container/slot vs destination unified slot);
+    - confirm Context = held item-model id (0 when keep open) on the wire;
+    - whether Pad0 is always zero.
+
+  UNBLOCKS: the Client.Application item-move use-case and the storage-grid deposit / re-arrange path
+  (send-only).

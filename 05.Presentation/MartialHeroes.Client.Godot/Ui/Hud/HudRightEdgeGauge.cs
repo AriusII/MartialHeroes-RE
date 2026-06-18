@@ -39,10 +39,10 @@ public sealed partial class HudRightEdgeGauge : Control
     // -------------------------------------------------------------------------
 
     private const float OffsetFromRight = 135f; // spec: ui_hud_layout.md §5.6
-    private const float GaugeW = 140f;          // spec: ui_hud_layout.md §5.6
-    private const float GaugeH = 35f;           // spec: ui_hud_layout.md §5.6
-    private const float HpY = 200f;             // spec: ui_hud_layout.md §5.6 strip A
-    private const float MpY = 250f;             // spec: ui_hud_layout.md §5.6 strip B (+50)
+    private const float GaugeW = 140f; // spec: ui_hud_layout.md §5.6
+    private const float GaugeH = 35f; // spec: ui_hud_layout.md §5.6
+    private const float HpY = 200f; // spec: ui_hud_layout.md §5.6 strip A
+    private const float MpY = 250f; // spec: ui_hud_layout.md §5.6 strip B (+50)
 
     // Atlas: chunrihojung.dds (the right-edge gauge chrome).
     // spec: Docs/RE/specs/ui_hud_layout.md §5.3 / §5.6 — source texture "chunrihojung.dds".
@@ -61,10 +61,10 @@ public sealed partial class HudRightEdgeGauge : Control
     // Hub drain state
     // -------------------------------------------------------------------------
 
-    // NOTE: IHudEventHub does not yet expose a HP/MP vitals channel (only ExpLevels = XP/level).
-    // HP/MP arrives on IClientEventBus (ActorVitalsChangedEvent), not the HUD hub.
-    // TODO(world-campaign): when a VitalsChanged hub channel is added, drain it here.
-    // For now, the gauge renders at fixed 100% until live data wiring is established.
+    // The Vitals channel is drained every frame in _Process.
+    // spec: MartialHeroes.Client.Application.Hud.IHudEventHub.Vitals
+    // spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml.
+    private IHudEventHub? _hub;
 
     // -------------------------------------------------------------------------
     // Build (geometry pass)
@@ -86,10 +86,10 @@ public sealed partial class HudRightEdgeGauge : Control
         AnchorRight = 1f;
         AnchorTop = 0f;
         AnchorBottom = 0f;
-        OffsetLeft = -OffsetFromRight;         // spec: ui_hud_layout.md §5.6
+        OffsetLeft = -OffsetFromRight; // spec: ui_hud_layout.md §5.6
         OffsetRight = -OffsetFromRight + GaugeW; // spec: ui_hud_layout.md §5.6
-        OffsetTop = HpY;                       // spec: ui_hud_layout.md §5.6 strip A Y
-        OffsetBottom = MpY + GaugeH;           // spec: ui_hud_layout.md §5.6 strip B bottom
+        OffsetTop = HpY; // spec: ui_hud_layout.md §5.6 strip A Y
+        OffsetBottom = MpY + GaugeH; // spec: ui_hud_layout.md §5.6 strip B bottom
 
         // Try to load chunrihojung.dds as the gauge backdrop.
         // spec: ui_hud_layout.md §5.3 / §5.6 — "chunrihojung.dds" source texture.
@@ -198,21 +198,44 @@ public sealed partial class HudRightEdgeGauge : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Binds to the HUD event hub. The gauge shell is built; live HP/MP wiring is deferred.
-    /// TODO(world-campaign): when IHudEventHub exposes a VitalsChanged channel, drain it here.
+    /// Binds to the HUD event hub so the gauge drains <see cref="IHudEventHub.Vitals"/> each frame.
+    /// spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml.
+    /// spec: MartialHeroes.Client.Application.Hud.IHudEventHub.Vitals.
     /// </summary>
     public void BindHub(IHudEventHub hub)
     {
-        // IHudEventHub exposes: ChatLines, BuffStates, CombatTexts, TargetChanges,
-        // ExpLevels (XP/level only), StatAllocations, ZoneChanges.
-        // HP/MP vitals arrive via IClientEventBus (ActorVitalsChangedEvent) — not on the hub.
-        // TODO(world-campaign): add VitalsChanged channel to IHudEventHub; drain here.
-        GD.Print("[HudRightEdgeGauge] BindHub: gauge shell built. " +
-                 "HP/MP live wiring deferred — hub lacks VitalsChanged channel (TODO world-campaign).");
+        _hub = hub;
+        GD.Print("[HudRightEdgeGauge] BindHub: Vitals channel wired — HP/MP gauge will drain live data. " +
+                 "spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml.");
     }
 
     public override void _Process(double delta)
     {
-        // No hub channel to drain yet. TODO(world-campaign): drain VitalsChanged when available.
+        if (_hub is null) return;
+
+        // Drain latest-wins Vitals channel; apply the last received value per frame.
+        HudVitalsEvent? latest = null;
+        while (_hub.Vitals.TryRead(out HudVitalsEvent? v))
+            latest = v;
+
+        if (latest is null) return;
+
+        // Update HP bar
+        if (latest.MaxHp > 0)
+        {
+            _hpBar.MaxValue = latest.MaxHp;
+            _hpBar.Value = latest.CurrentHp;
+        }
+
+        _hpLabel.Text = $"HP {latest.CurrentHp}/{latest.MaxHp}";
+
+        // Update MP bar
+        if (latest.MaxMp > 0)
+        {
+            _mpBar.MaxValue = latest.MaxMp;
+            _mpBar.Value = latest.CurrentMp;
+        }
+
+        _mpLabel.Text = $"MP {latest.CurrentMp}/{latest.MaxMp}";
     }
 }

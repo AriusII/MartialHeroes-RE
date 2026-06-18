@@ -43,7 +43,7 @@ public sealed partial class CharSelectEventDrainer : Node
     public void Bind(CharSelectWindow window, IClientEventBus bus)
     {
         _window = window;
-        _bus    = bus;
+        _bus = bus;
     }
 
     public override void _Process(double delta)

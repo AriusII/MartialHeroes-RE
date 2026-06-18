@@ -8,12 +8,11 @@ namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
 /// <summary>
 /// State 3 — Opening. Builds the post-login intro window (Ui/Scenes substrate). There is NO
-/// auto-finish: the slideshow loops panel 4 indefinitely and the ONLY exit is an explicit skip
+/// auto-finish: the slideshow holds panel 4 indefinitely and the ONLY exit is an explicit skip
 /// (Enter/ESC/Space or the skip button), which persists OPENNING/SKIP=1 and advances to Select.
 /// In headless the SceneHost developer auto-walk advances it (no user present).
 ///
-/// <para>Re-pointed to <see cref="NewOpeningWindow"/> (Ui/Scenes substrate) from the old
-/// <c>Screens/OpeningWindow.cs</c> (quarantined — not deleted).</para>
+/// <para>Uses <see cref="NewOpeningWindow"/> on the Ui/Scenes substrate.</para>
 ///
 /// spec: Docs/RE/specs/intro_sequence.md §3.1 (no auto-finish; skip is the sole exit — CAMPAIGN 16);
 /// Docs/RE/specs/client_runtime.md §7.3.
@@ -50,7 +49,7 @@ public sealed partial class OpeningScene : StubSceneController
         // Atlas comes from ClientContext.HudAtlas (Phase-A substrate, shared handle).
         _opening = new NewOpeningWindow
         {
-            Name  = "OpeningWindow",
+            Name = "OpeningWindow",
             Atlas = _ctx?.HudAtlas,
             Audio = _audio,
         };

@@ -1,0 +1,61 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED VALUE semantics; the 19-byte body size and the tag + name layout are
+# control-flow CONFIRMED from the friend-command send path. capture_verified: false.
+
+name: CmsgFriendAddRemove
+opcode: 0x20031           # major 2 (GameAction), minor 49 -> (2 << 16) | 49
+direction: C2S
+size: 19                  # fixed 19-byte (0x13) body built by the friend-command sender
+spec: packets/2-49_friend_add_remove.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client add or remove a friend, by name. One send-only message that serves BOTH operations -- a leading tag byte selects add (0) vs cut/remove (1) -- carrying a 16-byte CP949 friend name. Issued from the friend window's add-name and cut-name text fields after the typed name is committed.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 19.
+# CONTROL-FLOW CONFIRMED: the friend window builds a console-style command ("friend <name>" for add /
+# "cut <name>" for cut) and hands it to the command interpreter, which emits this 19-byte body when the
+# command is not handled locally. The 19-byte shape matches the project's generic "command-with-name"
+# frame (the same 19-byte prefix family used by the chat sender 2/7).
+fields:
+  - { name: Tag,   type: u8 }            # 0x00  operation tag: 0 = add friend, 1 = cut / remove friend
+  - { name: Index, type: u8 }            # 0x01  row / list index byte derived by the window before sending
+  - { name: Name,  type: "bytes[16]" }     # 0x02  CP949 friend name (NUL-trimmed at 15/16 chars)
+  - { name: Pad0,  type: "bytes[1]" }      # 0x12  trailing filler to 19
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a fixed 19-byte / 0x13 send) and the tag + name layout;
+  CAPTURE-UNVERIFIED in exact VALUE meaning. Both the add and the remove operation funnel through the
+  SAME opcode -- the leading Tag byte selects which.
+
+    0x00 (1B) Tag   : 0 = add a friend; 1 = cut / remove a friend.
+    0x01 (1B) Index : a row / list index byte the friend window computes before sending (the position
+                      of the matched / new entry in its record array). Exact derivation is
+                      capture-pending; modelled as a single byte.
+    0x02 (16B) Name : the friend's name, CP949-encoded, NUL-trimmed to at most 15/16 usable bytes.
+    0x12 (1B) Pad0  : trailing filler to the 19-byte body.
+
+  COMMAND-INTERPRETER PATH (engineer's mental model, not extra wire fields): the friend window has two
+  16-character text fields -- an ADD field (commits the console command "friend <name> <x>") and a CUT
+  field (commits "cut <name>"). The typed name is copied (max 16 chars, NUL-trimmed), tagged 0 (add) or
+  1 (cut), given the index byte, then passed to the in-game command interpreter; when the command is
+  not consumed locally it is emitted as this 2/49 body. An EMPTY field sends nothing (it just blurs /
+  closes). A name that matches a LOCAL list entry plays a UI cue and selects the entry instead of
+  sending. There is NO separate "search" field -- the second text field is the CUT/remove field, not a
+  search box.
+
+  RELATIONSHIP: the companion C2S is 2/54 CmsgFriendListRefresh (packets/2-54_friend_list_refresh.yaml),
+  the friend-list / online-status refresh. The INBOUND populate that fills the friend rows is not pinned
+  to this window on a static pass; the best candidate is 5/26 SmsgLocalPlayerRelationSlot (a 28-byte
+  relation-slot update) -- recorded as a CANDIDATE only, UNVERIFIED, debugger/capture-pending. Do NOT
+  implement against 5/26 as the confirmed friend feed until a capture or dispatch cross-check confirms it
+  writes the friend-window records.
+
+  UNKNOWNS to resolve with a friend add / remove capture (body size is settled at 19; these are VALUE
+  questions):
+    - confirm Tag 0 = add and Tag 1 = cut against observed sends;
+    - the exact derivation / meaning of the Index byte;
+    - whether the trailing Pad0 byte ever carries data (believed always zero);
+    - the inbound populate opcode (5/26 candidate) and the server reply to add / cut.
+
+  UNBLOCKS: the Client.Application friend add / remove use-case (send-only).

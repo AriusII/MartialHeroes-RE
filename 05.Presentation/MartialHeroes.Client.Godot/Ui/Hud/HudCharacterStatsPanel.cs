@@ -59,23 +59,23 @@ public sealed partial class HudCharacterStatsPanel : Control
     // -------------------------------------------------------------------------
 
     private const float StatsX = 180f; // spec: ui_hud_layout.md §3.4 / HudPanelConfig.StatsX
-    private const float StatsY = 95f;  // spec: ui_hud_layout.md §3.4 / HudPanelConfig.StatsY
+    private const float StatsY = 95f; // spec: ui_hud_layout.md §3.4 / HudPanelConfig.StatsY
     private const float StatsW = 130f; // spec: ui_hud_layout.md §3.4 / HudPanelConfig.StatsW
     private const float StatsH = 196f; // spec: ui_hud_layout.md §3.4 / HudPanelConfig.StatsH
 
     // Stat action ids (CODE-CONFIRMED)
     // spec: ui_system.md §8.7 CODE-CONFIRMED — "action ids 300..312"
     private const int StatActionStart = 300; // spec: ui_system.md §8.7
-    private const int StatActionCount = 13;  // spec: ui_system.md §8.7 — "300..312 = 13 actions"
+    private const int StatActionCount = 13; // spec: ui_system.md §8.7 — "300..312 = 13 actions"
 
     // Stat name msg.xdb key range (CODE-CONFIRMED)
     // spec: ui_system.md §8.7 CODE-CONFIRMED — "stat names msg IDs 60001–60022"
     private const int StatNameMsgStart = 60001; // spec: ui_system.md §8.7
-    private const int StatNameMsgEnd   = 60022; // spec: ui_system.md §8.7
+    private const int StatNameMsgEnd = 60022; // spec: ui_system.md §8.7
 
     // Chrome atlas ids
     // spec: ui_system.md §8.6.1 — uitex 2 = inventwindow.dds, uitex 4 = tradekeepwindow.dds
-    private const int InvTexId   = 2; // spec: ui_system.md §8.6.1 — inventwindow.dds (main chrome)
+    private const int InvTexId = 2; // spec: ui_system.md §8.6.1 — inventwindow.dds (main chrome)
     private const int TradeTexId = 4; // spec: ui_system.md §8.6.1 — tradekeepwindow.dds (border strip)
 
     // -------------------------------------------------------------------------
@@ -121,7 +121,7 @@ public sealed partial class HudCharacterStatsPanel : Control
 
         // Load chrome textures
         // spec: ui_system.md §8.7 — inventwindow.dds + tradekeepwindow.dds
-        Texture2D? mainChrome  = atlas.GetById(InvTexId);
+        Texture2D? mainChrome = atlas.GetById(InvTexId);
         Texture2D? borderChrome = atlas.GetById(TradeTexId);
         if (mainChrome is null)
             GD.PrintErr("[HudCharacterStatsPanel] inventwindow.dds (uitex 2) unavailable. " +
@@ -165,9 +165,12 @@ public sealed partial class HudCharacterStatsPanel : Control
                 MouseFilter = MouseFilterEnum.Ignore,
             };
             // Manual anchor+offset (LayoutPreset.Custom not available in Godot 4.6.3)
-            borderTex.AnchorLeft = 0f; borderTex.AnchorTop = 0f;
-            borderTex.AnchorRight = 1f; borderTex.AnchorBottom = 0f;
-            borderTex.OffsetTop = 0f; borderTex.OffsetBottom = 16f;
+            borderTex.AnchorLeft = 0f;
+            borderTex.AnchorTop = 0f;
+            borderTex.AnchorRight = 1f;
+            borderTex.AnchorBottom = 0f;
+            borderTex.OffsetTop = 0f;
+            borderTex.OffsetBottom = 16f;
             AddChild(borderTex);
         }
 
@@ -180,8 +183,10 @@ public sealed partial class HudCharacterStatsPanel : Control
             MouseFilter = MouseFilterEnum.Ignore,
         };
         _charNameLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.TopLeft);
-        _charNameLabel.OffsetLeft = 6f; _charNameLabel.OffsetTop = 18f;
-        _charNameLabel.OffsetRight = 200f; _charNameLabel.OffsetBottom = 34f;
+        _charNameLabel.OffsetLeft = 6f;
+        _charNameLabel.OffsetTop = 18f;
+        _charNameLabel.OffsetRight = 200f;
+        _charNameLabel.OffsetBottom = 34f;
         AddChild(_charNameLabel);
 
         _charLevelLabel = new Label
@@ -192,19 +197,21 @@ public sealed partial class HudCharacterStatsPanel : Control
             MouseFilter = MouseFilterEnum.Ignore,
         };
         _charLevelLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.TopRight);
-        _charLevelLabel.OffsetLeft = -60f; _charLevelLabel.OffsetTop = 18f;
-        _charLevelLabel.OffsetRight = -4f; _charLevelLabel.OffsetBottom = 34f;
+        _charLevelLabel.OffsetLeft = -60f;
+        _charLevelLabel.OffsetTop = 18f;
+        _charLevelLabel.OffsetRight = -4f;
+        _charLevelLabel.OffsetBottom = 34f;
         AddChild(_charLevelLabel);
 
         // Build 3 sub-panels A/B/C (stat columns)
         // spec: ui_system.md §8.7 CODE-CONFIRMED — "3 sibling text panels A, B, C"
         // Exact per-panel geometry not recovered: TODO(spec).
         BuildStatSubPanel("PanelA", 0f, 36f, StatsW, StatsH,
-                          StatNameMsgStart, StatNameMsgStart + 8, text, ctx);
+            StatNameMsgStart, StatNameMsgStart + 8, text, ctx);
         BuildStatSubPanel("PanelB", StatsW + 5f, 36f, StatsW, StatsH,
-                          StatNameMsgStart + 9, StatNameMsgStart + 17, text, ctx);
+            StatNameMsgStart + 9, StatNameMsgStart + 17, text, ctx);
         BuildStatSubPanel("PanelC", StatsW * 2f + 10f, 36f, StatsW, StatsH,
-                          StatNameMsgStart + 18, StatNameMsgEnd, text, ctx);
+            StatNameMsgStart + 18, StatNameMsgEnd, text, ctx);
 
         GD.Print("[HudCharacterStatsPanel] Built — StatusPanel + 3 sub-panels (A/B/C). " +
                  "Action ids 300-312; stat names msg.xdb 60001-60022. " +
@@ -245,8 +252,10 @@ public sealed partial class HudCharacterStatsPanel : Control
                 MouseFilter = MouseFilterEnum.Ignore,
             };
             // Manual anchor+offset (LayoutPreset.Custom not available in Godot 4.6.3)
-            nameLabel.AnchorLeft = 0f; nameLabel.AnchorTop = 0f;
-            nameLabel.AnchorRight = 0f; nameLabel.AnchorBottom = 0f;
+            nameLabel.AnchorLeft = 0f;
+            nameLabel.AnchorTop = 0f;
+            nameLabel.AnchorRight = 0f;
+            nameLabel.AnchorBottom = 0f;
             nameLabel.OffsetLeft = 2f;
             nameLabel.OffsetTop = rowY;
             nameLabel.OffsetRight = w * 0.6f;
@@ -262,8 +271,10 @@ public sealed partial class HudCharacterStatsPanel : Control
                 MouseFilter = MouseFilterEnum.Ignore,
             };
             // Manual anchor+offset (LayoutPreset.Custom not available in Godot 4.6.3)
-            valueLabel.AnchorLeft = 0f; valueLabel.AnchorTop = 0f;
-            valueLabel.AnchorRight = 0f; valueLabel.AnchorBottom = 0f;
+            valueLabel.AnchorLeft = 0f;
+            valueLabel.AnchorTop = 0f;
+            valueLabel.AnchorRight = 0f;
+            valueLabel.AnchorBottom = 0f;
             valueLabel.OffsetLeft = w * 0.62f;
             valueLabel.OffsetTop = rowY;
             valueLabel.OffsetRight = w - 2f;
@@ -317,11 +328,11 @@ public sealed partial class HudCharacterStatsPanel : Control
         // Map to the first 5 stat labels (indices 0..4 = STR, INT, AGI, DEX, CON).
         // The msg.xdb names 60001–60022 identify the stat rows; the 5 bases map to the first 5.
         // TODO(spec): confirm exact msg.xdb order matches (STR/INT/AGI/DEX/CON vs display order).
-        SetStatLabel(0, view.BaseStr, view.DeltaStr);   // STR
-        SetStatLabel(1, view.BaseInt, view.DeltaInt);   // INT
-        SetStatLabel(2, view.BaseAgi, view.DeltaAgi);   // AGI
-        SetStatLabel(3, view.BaseDex, view.DeltaDex);   // DEX
-        SetStatLabel(4, view.BaseCon, view.DeltaCon);   // CON
+        SetStatLabel(0, view.BaseStr, view.DeltaStr); // STR
+        SetStatLabel(1, view.BaseInt, view.DeltaInt); // INT
+        SetStatLabel(2, view.BaseAgi, view.DeltaAgi); // AGI
+        SetStatLabel(3, view.BaseDex, view.DeltaDex); // DEX
+        SetStatLabel(4, view.BaseCon, view.DeltaCon); // CON
 
         // Remaining points (available to allocate)
         // spec: progression.md §7.1 — PointsAvailable = remaining − Σ deltas.

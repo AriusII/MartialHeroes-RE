@@ -1,5 +1,23 @@
 # Login Flow Specification — Login, Character Select, and Enter-Game
 
+<!--
+verification: confirmed (lobby host-resolution order, registry keys, the 0/0->1/4 handshake
+  structure, and the game-server DNS connect are all static-control-flow-confirmed against the
+  binary); static-hypothesis (in-record field order; full status enum); capture/debugger-pending
+  (every on-wire byte VALUE -- no .pcapng present).
+ida_reverified: 2026-06-18
+ida_anchor: 263bd994
+evidence: [static-ida]
+capture_verified: false
+reconfirmed 2026-06-18 (static): the lobby host-resolution chain (ip.txt -> list.dat CIPList keyed
+  by registry servername -> hardcoded 211.196.150.4) with inet_addr + connect (no DNS on the
+  lobby socket); the GAME server is dynamic -- host:port from the channel-endpoint "<host> <port>"
+  string, connected via gethostbyname (DNS), so the host may be a name OR a dotted quad; the
+  selected server_id persists to HKLM\SOFTWARE\crspace\do : Lastserver (REG_DWORD); and the
+  62-byte 0/0 key-exchange blob = 54-byte RSA import (modulus then exponent, big-endian digits,
+  LE length prefixes, L1+L2=42) + scalar#1 (4B) + scalar#2 (4B) + a local timestamp.
+-->
+
 > Clean-room neutral spec. Promoted from dirty-room analyst notes by the protocol spec-author.
 > No code, no decompiler identifiers, no addresses. Behavior, state machines, tables, and constants
 > only. Korean text on the wire is **CP949** (EUC-KR superset) — never a managed string in wire
@@ -174,18 +192,33 @@ surface, **`major` is repurposed as a count/length signal** (Section 2.1) and **
 
 ### 2.0 Connect behavior
 
-The lobby connect helper:
+The lobby connect helper resolves **only the lobby host** (the game server is resolved separately —
+see §2.2 / §3.0). It:
 
 1. Initializes Winsock (version 2.2).
-2. Resolves the server IP, in priority order:
-   - if a local **`ip.txt`** file is present, reads a single whitespace-free token from it,
-     truncated to **19 characters**, and uses it;
-   - otherwise attempts a connection-info resolve list and, on success, uses a selected record's
-     host;
-   - otherwise falls back to the hardcoded default **`211.196.150.4`**.
-3. Opens a TCP stream socket and connects to `{ host, port }`.
+2. Resolves the **lobby host IP**, in strict priority order (first hit wins):
+   - **Tier 1 — `ip.txt` override.** If a local **`ip.txt`** file is present, reads a single
+     whitespace-free token from it, truncated to **19 characters**, and uses it.
+   - **Tier 2 — `list.dat` connection-IP list (CIPList) keyed by the registry server name.** If
+     `ip.txt` is absent, loads the loose client-root file **`list.dat`** (binary): a 4-byte record
+     **count** followed by `count` × **768-byte** records (an internal length field must equal
+     `768 × count + 4` or the load is rejected). The active record is selected by the registry value
+     **`HKLM\SOFTWARE\crspace\do : servername`** (`REG_SZ`); when the key/value is missing, a
+     CP949 default server name baked into the client is used as the key. The selected record's
+     **host string is read at record offset +256** and becomes the lobby host. (Per-record full
+     layout is otherwise unmapped — see `packets/lobby.yaml` record shape C.)
+   - **Tier 3 — hardcoded fallback.** If `ip.txt` is absent **and** the `list.dat` load fails,
+     falls back to the hardcoded default **`211.196.150.4`**.
+3. Builds the socket address with **`inet_addr`** — i.e. the resolved lobby host must be a
+   **dotted-decimal IPv4 literal**; the lobby socket does **NOT** run DNS (`gethostbyname`). Opens a
+   TCP stream socket and connects to `{ host, port }`.
 4. Connection failure is **non-fatal to the helper** — it logs the error and still returns the
    socket; the caller detects failure by the absence of a valid reply.
+
+> **Registry note.** `servername` (Tier 2 selector) and `Lastserver` (the selected-server persist of
+> §2.1) live under the **same** key `HKLM\SOFTWARE\crspace\do`. The write path uses the lowercase
+> `software\crspace\do` spelling, the read paths use `SOFTWARE\crspace\do`; the registry is
+> case-insensitive so they address the same key.
 
 The base port is **10000**. Both lobby fetches use the same wrapper + LZ4 receive pattern below. The
 receive loop is a cooperative blocking read: it retries on a "would block" condition with a short
@@ -239,20 +272,31 @@ identically, but they are **not** part of decoding the 8 wire bytes.
 > packing and the full `status_code` enum (beyond the special-cased 3 / 24 / 100) are
 > **capture-unverified**. A live lobby capture is still required to confirm record internals.
 
-### 2.2 Channel-endpoint fetch (port `10000 + offset`)
+### 2.2 Channel-endpoint fetch (port `10000 + selected server_id`)
 
-After server selection, the client connects to `10000 + selected_offset`, where `selected_offset` is
-the chosen server/channel index recorded at server-select time. The receive sequence is identical to
-§2.1 (8-byte wrapper + LZ4). After decompression:
+After server selection (the commit guard `status_code == 0 && load < 2400` passes), the client:
 
-- The client takes the **first 30 (0x1E) bytes** of the decompressed payload as a **NUL-padded ASCII
-  `host port` string**. The buffer is zero-filled first; the 30 bytes are **not guaranteed
+- **Persists the selection.** The selected **server_id** — read from a **separate parallel `u32`
+  array** indexed by `(page, plate)`, *not* from byte +0 of the 8-byte list record — is written to
+  the registry value **`HKLM\SOFTWARE\crspace\do : Lastserver`** (`REG_DWORD`). On the next launch
+  this is the remembered default selection.
+- **Connects the channel query** to `10000 + selected_server_id` against the resolved lobby host (the
+  same lobby host as §2.0, `htons(10000 + server_id)`). The channel port offset **is the selected
+  server_id itself**. The receive sequence is identical to §2.1 (8-byte wrapper + LZ4).
+
+After decompression:
+
+- The client zero-fills a 30-byte buffer, then takes the **first 30 (0x1E) bytes** of the
+  decompressed payload as a **NUL-padded ASCII endpoint token**. The 30 bytes are **not guaranteed
   NUL-terminated**.
-- This string is the game server's endpoint. It is later split on the space into host and a numeric
-  port (parsed as a decimal integer).
+- The token is the game server's endpoint, of the form **`"<host> <port>"` with a single SPACE
+  (`0x20`) delimiter** (NOT colon, NOT NUL — it is NUL-*padded* but SPACE-*delimited*). It is consumed
+  opaquely here; the host/port split happens later (§3.0): host = text before the space, port = the
+  decimal-ASCII text after the space (parsed with `atol`).
 
-> **Channel-endpoint payload (wire):** at least **30 bytes**; the first 30 are the ASCII `host port`
-> endpoint string. Any trailing fields are **UNVERIFIED**.
+> **Channel-endpoint payload (wire):** at least **30 bytes**; the first 30 are the ASCII
+> `"<host> <port>"` (SPACE-delimited, NUL-padded) endpoint string. Whether a trailing channel array
+> follows is **UNVERIFIED** (only the first 30 bytes are read).
 >
 > **Selection-index provenance note (for `names.yaml` reconciliation).** The channel-port offset and
 > the server-list **render page/scroll** offset are two *different* window fields. An earlier dirty
@@ -269,6 +313,29 @@ Once the endpoint is resolved, the client connects to the game server and runs t
 This is the connection that uses the 8-byte header + `(major:minor)` dispatch, the send-path byte
 cipher, and LZ4 (all owned by `specs/crypto.md` and `opcodes.md`).
 
+### 3.0 The game-server connect (dynamic host:port, via DNS)
+
+The game server the client logs into is **NOT a hardcoded literal** — it is whatever the
+channel-endpoint query (§2.2) returned. The `"<host> <port>"` token is spliced into the credential
+key string handed to the secure-context builder, which:
+
+- splits the token on the single SPACE: **host** = text before the space, **port** = the decimal-ASCII
+  text after the space (`atol`);
+- stores host + port on the game-connection object;
+- connects with **`gethostbyname` (DNS)** — *unlike* the lobby socket, which uses `inet_addr` and
+  requires a dotted quad. Because the game connect resolves through `gethostbyname`, the returned
+  host token may be **either a DNS name or a dotted-quad IPv4 literal** (both forms resolve).
+
+So the two address resolutions are distinct and must not be conflated:
+
+| Resolution | Host source | Resolver | Form |
+|---|---|---|---|
+| **Lobby / login server** | `ip.txt` → `list.dat`+`servername` → `211.196.150.4` (§2.0) | `inet_addr` (no DNS) | dotted-decimal IPv4 only |
+| **Game server** | the channel-endpoint `"<host> <port>"` token (§2.2) | `gethostbyname` (DNS) | DNS name **or** dotted quad |
+
+> The concrete endpoint string the live server hands out (DNS name vs dotted quad) is
+> **CAPTURE-PENDING** — no `.pcapng` is present.
+
 ### 3.1 Handshake and authentication (cited)
 
 - Server → client **`0/0 SmsgKeyExchange`** delivers the server's asymmetric public-key material.
@@ -276,10 +343,26 @@ cipher, and LZ4 (all owned by `specs/crypto.md` and `opcodes.md`).
   **staged login credential (the password)**.
 - The session is then marked secure.
 
-The full cryptographic detail (62-byte `0/0` payload, PKCS#1 v1.5 type-2 padding, modular
-exponentiation, reply whitening, big-endian digit order) is **owned entirely by `specs/crypto.md`**
-and is not restated here. The login flow only needs to know that the credential conveyed by `1/4` is
-the password staged at login-form time — **the plaintext login blob never carries the password.**
+The full cryptographic detail (PKCS#1 v1.5 type-2 padding, modular exponentiation, reply whitening,
+big-endian digit order) is **owned entirely by `specs/crypto.md`** and is not restated here. The
+login flow only needs to know that the credential conveyed by `1/4` is the password staged at
+login-form time — **the plaintext login blob never carries the password.**
+
+**0/0 payload composition (62 bytes, fixed; root of the per-session cipher).** The 0/0 frame
+delivers, in order:
+
+1. a **54-byte key blob** = the server's RSA public key, imported as `(modulus, exponent)`: a
+   per-value serialization tag for each value, then for each value a **little-endian `u32` length
+   prefix** followed by that many **big-endian digit bytes** (modulus first, then exponent). The two
+   digit lengths satisfy **L1 + L2 = 42** (the blob's fixed body budget; the individual split is
+   server wire data, read live);
+2. **server scalar #1** (4 bytes);
+3. **server scalar #2** (4 bytes) — on success the client also stamps a local timestamp into an
+   adjacent slot.
+
+Total = 54 + 4 + 4 = **62 bytes**. The two scalars are stored but not interpreted by the client
+crypto (their server-side meaning is capture-pending). Layout owned by `specs/crypto.md §6.2`;
+field shape mirrored in `packets/0-0_key_exchange.yaml`.
 
 ### 3.2 Character list and scene transition
 
@@ -452,7 +535,7 @@ which corroborates that the optional field is the PIN rather than an arbitrary a
 | Field | Capacity rule | Notes |
 |---|---|---|
 | Account | length **≥ 2** and **< 20** characters | Length-prefixed into the blob (incl. NUL). |
-| Password | length **≥ 2** and **< 17** characters | **Not** in the plaintext blob; copied into an **exactly-17-byte zero-padded buffer** held for the RSA 1/4 ciphertext. |
+| Password | length **≥ 2** and **< 17** characters | **Not** in the plaintext blob; copied into a **zero-padded buffer sized to the password-field cap** (parameter-driven; the **runtime-observed width is 17 bytes** — recorded as a runtime value, not a static literal) held for the RSA 1/4 ciphertext. See `packets/login.yaml`. |
 | Second-password / PIN | length **< 5** characters (so **≤ 4** chars + a NUL) | Length-prefixed into the optional blob field (incl. NUL). Numeric in practice. |
 
 **Length-prefix encoding (runtime-confirmed).** Each length-prefixed string is `[u32 little-endian

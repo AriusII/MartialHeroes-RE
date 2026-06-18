@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using MartialHeroes.Client.Application.Events;
+using MartialHeroes.Client.Application.Login;
 using MartialHeroes.Client.Application.Scene;
 using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.World;
@@ -56,6 +57,7 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     private readonly CharacterSelectionStore? _characterSelection;
     private readonly IClientEventBus? _eventBus;
     private readonly ILobbyClient? _lobbyClient;
+    private readonly ILastServerStore? _lastServerStore;
     private readonly SceneStateMachine? _sceneStateMachine;
 
     /// <summary>The 1/9 launcher/session token length: a fixed 33-byte buffer. spec: cmsg_char_enter.yaml.</summary>
@@ -118,6 +120,13 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     /// never references the concrete transport. Required only for the lobby use-cases. spec:
     /// Docs/RE/specs/login_flow.md §2.
     /// </param>
+    /// <param name="lastServerStore">
+    /// Optional store for the remembered last-selected server id. When wired,
+    /// <see cref="SelectServerAsync"/> writes the selected server id to persist the Lastserver
+    /// registry key after a successful channel-endpoint fetch.
+    /// spec: Docs/RE/specs/login_flow.md §2.0 Registry note; §2.1 (Lastserver persisted on commit);
+    /// Docs/RE/specs/frontend_layout_tables.md §2.2 sub-state 37.
+    /// </param>
     public ApplicationUseCases(
         IOutboundPacketSink outbound,
         ClientStateMachine stateMachine,
@@ -130,7 +139,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         CharacterSelectionStore? characterSelection = null,
         IClientEventBus? eventBus = null,
         ILobbyClient? lobbyClient = null,
-        SceneStateMachine? sceneStateMachine = null)
+        SceneStateMachine? sceneStateMachine = null,
+        ILastServerStore? lastServerStore = null)
     {
         _outbound = outbound ?? throw new ArgumentNullException(nameof(outbound));
         _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
@@ -141,6 +151,7 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         _characterSelection = characterSelection; // optional: needed for @BLANK@ + descriptor cache
         _eventBus = eventBus; // optional: publishes CreateCharacterRequested + lobby events
         _lobbyClient = lobbyClient; // optional: only the lobby use-cases need it
+        _lastServerStore = lastServerStore; // optional: persists Lastserver reg key on server select
         _sceneStateMachine = sceneStateMachine; // optional: Campaign-15 faithful 8-state scene spine
 
         _sessionToken = new byte[SessionTokenLength];
@@ -224,6 +235,12 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         // spec: login_flow.md §2.2 / §7 (lobby base port constant).
         LobbyChannelEndpoint endpoint =
             await lobby.FetchChannelEndpointAsync(serverId, cancellationToken).ConfigureAwait(false);
+
+        // Persist the selected server id as Lastserver (HKLM\SOFTWARE\crspace\do : Lastserver,
+        // REG_DWORD) so the next session can re-highlight the same server on the list.
+        // spec: Docs/RE/specs/login_flow.md §2.0 Registry note / §2.1; frontend_layout_tables.md §2.2
+        // sub-state 37 ("persist Lastserver → 38"); Docs/RE/packets/lobby.yaml §RECORD SHAPE B.
+        _lastServerStore?.Save(serverId);
 
         _eventBus?.Publish(new ChannelEndpointResolvedEvent(serverId, endpoint.Host, endpoint.Port));
         return endpoint;

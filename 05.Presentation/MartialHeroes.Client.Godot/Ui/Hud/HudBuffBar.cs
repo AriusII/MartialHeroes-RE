@@ -47,9 +47,9 @@ public sealed partial class HudBuffBar : Control
     // -------------------------------------------------------------------------
 
     private const int SlotCount = BuffStateEvent.SlotCount; // 30 — spec: misc_data.md §1.6
-    private const int FlowingIconSide = 23;  // spec: misc_data.md §1.6 — buff_id ≤ 80, 23×23
-    private const int FixedIconSide = 25;    // spec: misc_data.md §1.6 — buff_id > 80, 25×25
-    private const int FlowThreshold = 80;    // spec: misc_data.md §1.6 — split threshold
+    private const int FlowingIconSide = 23; // spec: misc_data.md §1.6 — buff_id ≤ 80, 23×23
+    private const int FixedIconSide = 25; // spec: misc_data.md §1.6 — buff_id > 80, 25×25
+    private const int FlowThreshold = 80; // spec: misc_data.md §1.6 — split threshold
 
     // Container origin from §5.10 (buff icon-strip composite)
     // spec: Docs/RE/specs/ui_hud_layout.md §5.10 — "container at base X=545"
@@ -91,7 +91,7 @@ public sealed partial class HudBuffBar : Control
         AnchorTop = 0f;
         AnchorRight = 0f;
         AnchorBottom = 0f;
-        OffsetLeft = ContainerX;  // spec: ui_hud_layout.md §5.10
+        OffsetLeft = ContainerX; // spec: ui_hud_layout.md §5.10
         OffsetTop = 0f;
         // Width to hold up to 30 flowing 23×23 icons with 2px spacing
         OffsetRight = ContainerX + (FlowingIconSide + IconSpacing) * SlotCount;

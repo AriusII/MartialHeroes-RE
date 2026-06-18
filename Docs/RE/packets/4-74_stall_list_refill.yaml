@@ -1,0 +1,59 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED VALUE semantics; the leading flag + the 36-byte record stride and the
+# record-count formula are control-flow CONFIRMED from the list-refill handler. capture_verified: false.
+
+name: SmsgStallListRefill
+opcode: 0x4004a           # major 4 (Response), minor 74 -> (4 << 16) | 74
+direction: S2C
+size: var                # leading flag (+ small head) then N x 36-byte stall records
+spec: packets/4-74_stall_list_refill.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server refill of the personal-stall (player-vendor) market list. A leading flag (clear-vs-append) is followed by N fixed 36-byte stall records, where N is derived from the frame size. The handler rebuilds the StallListPanel's row list (clear, per-record append, finalize). Reply to C2S 2/74 CmsgStallListRequest.
+
+# VARIABLE-LENGTH packet. The fixed leading field below is the clear/append flag; the record array is
+# described in notes (the engineer hand-codes the loop). All offsets are payload-relative (frame +8).
+fields:
+  - { name: Flag, type: u8 }             # 0x00  leading flag: clear-and-replace vs append the list
+
+notes: |
+  CONTROL-FLOW CONFIRMED: a leading flag then N fixed 36-byte (0x24) records; CAPTURE-UNVERIFIED in
+  per-field VALUE meaning inside each record. VARIABLE-LENGTH packet.
+
+  RECORD COUNT: the handler derives the record count from the frame size as
+    N = (frameSize - 14) / 36
+  where frameSize is the total wire frame length (the 8-byte header + payload). The constant 14 = the
+  8-byte frame header + a 6-byte leading payload region (a clear/append flag plus a small reserved
+  head). The fixed leading Flag field is at payload offset 0; the record array begins after the 6-byte
+  leading payload region. The exact split of those leading 6 bytes beyond the flag is a static
+  inference -- model the flag as the first payload byte and reserve the rest as a head before the loop.
+
+  PER-RECORD layout (36 bytes / 0x24, repeated N times):
+    rec +0x00 (4B)  id   : per-row stall identifier (u32); = the id sent back by 2/56 when the row is
+                           entered, and copied into the row widget.
+    rec +0x04 (1B)  flag : an availability / state byte (open vs greyed-out / sold-out). The panel
+                           greys the row on this flag. Exact bit meaning capture-pending.
+    rec +0x05 (31B) text : a CP949 backtick-delimited string of the form "stallName`ownerActorId".
+                           The panel splits on the backtick: token 0 = the stall name (<= 17 chars),
+                           token 1 = the owner actor id (parsed as a number and resolved to an owner
+                           display name). NUL-padded within the 31-byte field.
+
+  HANDLER USE (engineer's mental model): the handler reads the leading flag, then loops N records,
+  rebuilding the StallListPanel's backing row store (clear on the clear flag, append each record,
+  finalize/repaint). The panel paginates 10 visible rows per page over the full store.
+
+  RELATIONSHIP: reply to C2S 2/74 CmsgStallListRequest (packets/2-74_stall_list_request.yaml). The
+  enter/open action is C2S 2/56 CmsgStallEnter (packets/2-56_stall_enter.yaml).
+
+  UNKNOWNS to resolve with a stall-list capture (the 36-byte stride + count formula are settled; these
+  are VALUE questions):
+    - the exact split of the 6-byte leading payload region beyond the clear/append flag;
+    - the per-record availability flag's bit meaning (open / sold-out);
+    - confirm the "name`ownerId" string encoding and the backtick delimiter on the wire.
+
+  IMPLEMENTATION NOTE: decode the leading flag, skip to the record region, then loop fixed 36-byte
+  records using the size-derived count; do not assume a fixed record count.
+
+  UNBLOCKS: the Client.Application stall-list refill handler (full per-field record meaning still needs
+  a capture).

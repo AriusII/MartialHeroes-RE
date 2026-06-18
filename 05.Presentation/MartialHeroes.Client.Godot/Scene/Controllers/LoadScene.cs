@@ -41,8 +41,8 @@ public sealed partial class LoadScene : StubSceneController
         // spec: Docs/RE/specs/frontend_scenes.md §2L / §9.1; sound.md §15.6a. CODE-CONFIRMED.
         _loading = new LoadingWindow
         {
-            Name            = "LoadingWindow",
-            Atlas           = _ctx?.HudAtlas,
+            Name = "LoadingWindow",
+            Atlas = _ctx?.HudAtlas,
             ProgressProvider = _ctx?.LoadOrchestrator is { } orch
                 ? () => Math.Clamp(orch.ProgressQuotient, 0, 100)
                 : null,

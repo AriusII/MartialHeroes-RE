@@ -6,10 +6,10 @@
 // Backed entirely by HudAtlasLibrary + HudTextLibrary — no UiAssetLoader dependency.
 //
 // Layout (spec: Docs/RE/specs/frontend_scenes.md §11.4 + §11.2a, CODE-CONFIRMED):
-//   Plates 400 (left) / 401 (right): loginwindow_02.dds src(9,6,202,372).
-//   Single-plate centred X = (1024-202)/2 = 411.
-//   Two-plate: col0 X=24, col1 X=257.
-//   Pager buttons: loginwindow.dds src(596,985,47,18). Actions 115..124.
+//   Central server-list area: dst(270,85,483,490), replacing the notice panel.
+//   Select strips 400/401: loginwindow_02.dds src(9,6)/(220,6), dst(x-6,97,202,372).
+//   Status icons: loginwindow_02.dds dst(x+47,97,100,372), src(varX,6).
+//   Pager/name-strip buttons: loginwindow.dds dst(13+47*i,66,47,18), src(596,985)/(643,985), actions 115..124.
 //   Population colour bands (from msg.xdb caption ids 6001/6002/6003):
 //     > 1200 → red (6001), > 800 → orange (6002), > 500 → yellow (6003), else white.
 //   Load-guard: status==0 AND population < 2400 (not overloaded).
@@ -23,6 +23,7 @@
 
 using Godot;
 using MartialHeroes.Client.Godot.Screens; // ServerEntry record defined in ServerSelectScreen.cs
+using MartialHeroes.Client.Godot.Screens.Layout;
 using MartialHeroes.Client.Godot.Ui.Assets;
 using MartialHeroes.Client.Godot.Ui.Widgets;
 
@@ -31,8 +32,8 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 /// <summary>
 /// Server-select sub-view for Login(1) sub-states 34..41.
 ///
-/// <para>Renders up to two server "plate" sprites with pager tabs, a server-row list,
-/// and population-colour labels. All atlas drawing comes from
+/// <para>Renders up to two server "plate" sprites for the current page, with pager tabs
+/// and per-plate population-colour captions. All atlas drawing comes from
 /// <see cref="HudAtlasLibrary"/>; caption text from <see cref="HudTextLibrary"/>.</para>
 ///
 /// <para>Subscribe to <see cref="ServerSelected"/> to receive the chosen server id;
@@ -56,22 +57,40 @@ public sealed partial class ServerSelectSubView : Control
     // spec: Docs/RE/specs/frontend_scenes.md §11.1 / §11.4. CODE-CONFIRMED.
     private const string AtlasB = "data/ui/loginwindow.dds";
 
+    // Server-list panel shares the central notice/listbox area.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.4.
+    private const int PanelX = 270;
+    private const int PanelY = 85;
+
     // Plate source rect in loginwindow_02.dds (D).
     // spec: Docs/RE/specs/frontend_scenes.md §11.4 "plate src(9,6,202,372)". CODE-CONFIRMED.
-    private const int PlateSrcX = 9;    // spec §11.4. CODE-CONFIRMED.
-    private const int PlateSrcY = 6;    // spec §11.4. CODE-CONFIRMED.
-    private const int PlateW    = 202;  // spec §11.4. CODE-CONFIRMED.
-    private const int PlateH    = 372;  // spec §11.4. CODE-CONFIRMED.
+    private const int PlateSrcX = 9; // spec §11.4. CODE-CONFIRMED.
+    private const int PlateSrcY = 6; // spec §11.4. CODE-CONFIRMED.
+    private const int PlateHoverSrcX = 220; // spec §11.4. CODE-CONFIRMED.
+    private const int PlateHoverSrcY = 6; // spec §11.4. CODE-CONFIRMED.
+    private const int PlateW = 202; // spec §11.4. CODE-CONFIRMED.
+    private const int PlateH = 372; // spec §11.4. CODE-CONFIRMED.
 
-    // Single-plate centred X = (1024 − 202) / 2 = 411.
-    // spec: Docs/RE/specs/frontend_scenes.md §11.4 "single plate: centred". CODE-CONFIRMED.
-    private const int SinglePlateX = 411; // spec §11.4. CODE-CONFIRMED.
-    private const int PlateY       = 70;  // spec §11.4. CODE-CONFIRMED.
+    // Two-plate layout, panel-local: x is the record text/header base; selectable strip is x-6.
+    // spec: Docs/RE/specs/frontend_scenes.md §11.4.
+    private const int PlateBaseX0 = 30;
+    private const int PlateBaseX1 = 263;
+    private const int PlateY = 97;
+    private const int PlateStripOffsetX = -6;
 
-    // Two-plate layout.
-    // spec: Docs/RE/specs/frontend_scenes.md §11.4 "two plates: col0 X=24, col1 X=257". CODE-CONFIRMED.
-    private const int TwoPlateCol0X = 24;  // spec §11.4. CODE-CONFIRMED.
-    private const int TwoPlateCol1X = 257; // spec §11.4. CODE-CONFIRMED.
+    private const int StatusIconOffsetX = 47;
+    private const int StatusIconW = 100;
+    private const int StatusIconH = 372;
+    private const int StatusIconSrcY = 6;
+    private const int StatusIconSrcX0 = 448;
+    private const int StatusIconSrcX1 = 572;
+
+    private const int RowLabelY0 = 390;
+    private const int RowLabelY1 = 410;
+    private const int RowLabelY2 = 430;
+    private const int RowLabelW = 174;
+    private const int RowLabelH0 = 21;
+    private const int RowLabelH = 20;
 
     // Plate action ids (400=left, 401=right).
     // spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED.
@@ -82,55 +101,46 @@ public sealed partial class ServerSelectSubView : Control
     // spec: Docs/RE/specs/frontend_scenes.md §11.4 "pager buttons B src(596,985,47,18)". CODE-CONFIRMED.
     private const int PagerSrcX = 596; // spec §11.4. CODE-CONFIRMED.
     private const int PagerSrcY = 985; // spec §11.4. CODE-CONFIRMED.
-    private const int PagerW    = 47;  // spec §11.4. CODE-CONFIRMED.
-    private const int PagerH    = 18;  // spec §11.4. CODE-CONFIRMED.
-    private const int PagerY    = 56;  // canvas Y for the pager row. spec §11.4. CODE-CONFIRMED.
+    private const int PagerW = 47; // spec §11.4. CODE-CONFIRMED.
+    private const int PagerH = 18; // spec §11.4. CODE-CONFIRMED.
+    private const int PagerY = 66; // panel-local Y for the pager/name-strip row. spec §11.4. CODE-CONFIRMED.
 
     // Pager action ids 115..124 (re-page only, no commit).
     // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §1.2. CODE-CONFIRMED.
     private const int PagerActionBase = 115; // spec §11.4. CODE-CONFIRMED.
-    private const int PagerCount      = 10;  // spec §11.4 "10 pager tabs". CODE-CONFIRMED.
+    private const int PagerCount = 10; // spec §11.4 "10 pager tabs". CODE-CONFIRMED.
 
     // Population colour thresholds.
     // spec: Docs/RE/specs/frontend_scenes.md §11.4 "population colour msg ids 6001/6002/6003". CODE-CONFIRMED.
-    private const int PopRedThreshold    = 1200; // > 1200 → msg 6001 (red).    spec §11.4. CODE-CONFIRMED.
-    private const int PopOrangeThreshold = 800;  // > 800  → msg 6002 (orange). spec §11.4. CODE-CONFIRMED.
-    private const int PopYellowThreshold = 500;  // > 500  → msg 6003 (yellow). spec §11.4. CODE-CONFIRMED.
+    private const int PopRedThreshold = 1200; // > 1200 → msg 6001 (red).    spec §11.4. CODE-CONFIRMED.
+    private const int PopOrangeThreshold = 800; // > 800  → msg 6002 (orange). spec §11.4. CODE-CONFIRMED.
+    private const int PopYellowThreshold = 500; // > 500  → msg 6003 (yellow). spec §11.4. CODE-CONFIRMED.
 
     // Population colour captions (msg.xdb ids). Population colours in msg.xdb.
     // spec: Docs/RE/specs/frontend_scenes.md §11.4 "6001=red,6002=orange,6003=yellow". CODE-CONFIRMED.
-    private static readonly Color PopColorRed    = new(1f, 0f, 0f, 1f);    // > 1200. spec §11.4.
-    private static readonly Color PopColorOrange = new(1f, 0.5f, 0f, 1f);  // > 800.  spec §11.4.
-    private static readonly Color PopColorYellow = new(1f, 1f, 0f, 1f);    // > 500.  spec §11.4.
-    private static readonly Color PopColorWhite  = Colors.White;             // ≤ 500.  spec §11.4.
-
-    // Load guard: status==0 AND population < 2400 (not overloaded).
-    // spec: Docs/RE/specs/frontend_scenes.md §11.4. CODE-CONFIRMED.
-    private const int PopOverloadThreshold = 2400; // spec §11.4. CODE-CONFIRMED.
+    private static readonly Color PopColorRed = new(1f, 0f, 0f, 1f); // > 1200. spec §11.4.
+    private static readonly Color PopColorOrange = new(1f, 0.5f, 0f, 1f); // > 800.  spec §11.4.
+    private static readonly Color PopColorYellow = new(1f, 1f, 0f, 1f); // > 500.  spec §11.4.
+    private static readonly Color PopColorWhite = Colors.White; // ≤ 500.  spec §11.4.
 
     // -------------------------------------------------------------------------
     // Runtime state
     // -------------------------------------------------------------------------
 
     private readonly HudAtlasLibrary _atlas;
-    private readonly HudTextLibrary  _text;
-
+    private readonly HudTextLibrary _text;
     private IReadOnlyList<ServerEntry> _servers = [];
-    private int _selectedIndex = -1;
-
-    // Plate TextureRects (up to 2, rebuilt on SetServers).
-    private TextureRect? _plate0;
-    private TextureRect? _plate1;
-
-    // Row labels (rebuilt on SetServers).
-    private readonly List<Label> _rowLabels = [];
+    private int _page;
 
     // -------------------------------------------------------------------------
     // Signals
     // -------------------------------------------------------------------------
 
-    [Signal] public delegate void ServerSelectedEventHandler(int serverId);
-    [Signal] public delegate void BackRequestedEventHandler();
+    [Signal]
+    public delegate void ServerSelectedEventHandler(int serverId);
+
+    [Signal]
+    public delegate void BackRequestedEventHandler();
 
     // -------------------------------------------------------------------------
     // Construction
@@ -144,9 +154,9 @@ public sealed partial class ServerSelectSubView : Control
     public ServerSelectSubView(HudAtlasLibrary atlas, HudTextLibrary text)
     {
         _atlas = atlas;
-        _text  = text;
+        _text = text;
 
-        // Cover the full 1024×768 canvas.
+        // Cover the full 1024×768 canvas; server-list children are offset into the central panel.
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         MouseFilter = MouseFilterEnum.Pass;
     }
@@ -163,7 +173,7 @@ public sealed partial class ServerSelectSubView : Control
     public void SetServers(IReadOnlyList<ServerEntry> servers)
     {
         _servers = servers;
-        _selectedIndex = -1;
+        _page = 0; // spec §11.4: initial visible page is the first two-server page.
         RebuildLayout();
     }
 
@@ -174,75 +184,103 @@ public sealed partial class ServerSelectSubView : Control
     private void RebuildLayout()
     {
         // Remove previous children.
-        foreach (Node child in GetChildren())
+        for (int i = GetChildCount() - 1; i >= 0; i--)
+        {
+            Node child = GetChild(i);
+            RemoveChild(child);
             child.QueueFree();
-        _rowLabels.Clear();
-        _plate0 = null;
-        _plate1 = null;
+        }
 
-        bool hasTwoPlates = _servers.Count > 1;
-
-        // Build plate(s).
-        // spec: §11.4 "one plate → centred at X=411; two plates → col0=24 col1=257". CODE-CONFIRMED.
-        int plate0X = hasTwoPlates ? TwoPlateCol0X : SinglePlateX;
-        _plate0 = BuildPlate(plate0X, PlateY, ActionPlate0);
-
-        if (hasTwoPlates)
-            _plate1 = BuildPlate(TwoPlateCol1X, PlateY, ActionPlate1);
-
-        // Build pager row.
+        // Build the server-list overlay layers (back-to-front).
+        BuildPanelFrame();
         BuildPagers();
+        BuildFlagImage();
+        // NOTE: no fabricated "back" button — IDA's server-list has no such control at (356,531). The list
+        // closes on server selection (OnServerSelected) / the FSM. Removed the non-IDA back button that
+        // overlapped the login form. spec: frontend_scenes.md §11.4. (binary: login build this+808).
 
-        // Build server rows on top of plate 0.
-        if (_servers.Count > 0)
-            BuildRows(plate0X);
+        RebuildVisiblePage();
     }
 
-    private TextureRect BuildPlate(int x, int y, int actionId)
+    private void RebuildVisiblePage()
     {
-        Texture2D? tex = _atlas.SliceByPath(AtlasD, PlateSrcX, PlateSrcY, PlateW, PlateH);
+        _page = ClampPage(_page);
+
+        if (_servers.Count == 0)
+        {
+            // Empty server list draws no plates; pager row remains present. Notice id 4027 comes from msg.xdb.
+            // spec: Docs/RE/specs/frontend_scenes.md §1.9 / §11.4.
+            string msg = _text.GetCaption(LoginLayout.MsgErrNoServers, "[No servers]");
+            GD.Print($"[ServerSelectSubView] page 0: no servers. msg {LoginLayout.MsgErrNoServers}: '{msg}'");
+            return;
+        }
+
+        int firstIndex = _page * 2; // spec §11.4: plate index = 2·page + slot.
+        int visibleCount = Math.Min(2, _servers.Count - firstIndex); // spec §11.4: max two servers per page.
+
+        BuildPlate(PlateBaseX0, PlateY, ActionPlate0, firstIndex, StatusIconSrcX0);
+
+        if (visibleCount > 1)
+            BuildPlate(PlateBaseX1, PlateY, ActionPlate1, firstIndex + 1, StatusIconSrcX1);
+
+        GD.Print(BuildPageBreadcrumb(firstIndex, visibleCount));
+    }
+
+    private void BuildPlate(int x, int y, int actionId, int serverIndex, int statusSrcX)
+    {
+        Texture2D? status = _atlas.SliceByPath(AtlasD, statusSrcX, StatusIconSrcY, StatusIconW, StatusIconH);
+        if (status is not null)
+        {
+            AddChild(new TextureRect
+            {
+                Position = PanelPoint(x + StatusIconOffsetX, y),
+                Size = new Vector2(StatusIconW, StatusIconH),
+                Texture = status,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                MouseFilter = MouseFilterEnum.Ignore,
+            });
+        }
+
+        Texture2D? normal = _atlas.SliceByPath(AtlasD, PlateSrcX, PlateSrcY, PlateW, PlateH);
+        Texture2D? hover = _atlas.SliceByPath(AtlasD, PlateHoverSrcX, PlateHoverSrcY, PlateW, PlateH);
 
         // Make a clickable area backed by a TextureButton so the action can fire.
         var btn = new TextureButton
         {
-            Position          = new Vector2(x, y),
-            Size              = new Vector2(PlateW, PlateH),
+            Position = PanelPoint(x + PlateStripOffsetX, y),
+            Size = new Vector2(PlateW, PlateH),
             CustomMinimumSize = new Vector2(PlateW, PlateH),
             IgnoreTextureSize = true,
-            StretchMode       = TextureButton.StretchModeEnum.Scale,
-            TextureNormal     = tex,
-            TextureHover      = tex,
-            TexturePressed    = tex,
-            TextureDisabled   = tex,
+            StretchMode = TextureButton.StretchModeEnum.Scale,
+            TextureNormal = normal,
+            TextureHover = hover,
+            TexturePressed = hover,
+            TextureDisabled = normal,
         };
 
         btn.Pressed += () => OnPlateClicked(actionId);
         AddChild(btn);
 
-        // Return a TextureRect view for external reference (the btn already added).
-        // For upstream code that expects a TextureRect handle, wrap the first child.
-        // We actually need to return the TextureButton cast to TextureRect parent, but
-        // TextureButton doesn't derive from TextureRect — return a dummy overlay rect instead.
-        var overlay = new TextureRect
-        {
-            Position    = new Vector2(x, y),
-            Size        = new Vector2(PlateW, PlateH),
-            MouseFilter = MouseFilterEnum.Ignore,
-        };
-        AddChild(overlay);
-        return overlay;
+        AddPlateCaption(x, _servers[serverIndex]);
     }
 
     private void OnPlateClicked(int actionId)
     {
-        // Determine which server this plate corresponds to.
-        // Plate 400 = index 0, Plate 401 = index 1.
-        // spec: §11.4 "action 400=left plate, 401=right plate". CODE-CONFIRMED.
-        int idx = actionId - ActionPlate0; // 0 or 1
+        // Plate actions commit the page-relative slot: 400=left, 401=right.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.4: index = 2·page + (action − 400).
+        int idx = 2 * _page + (actionId - ActionPlate0);
         if (idx >= 0 && idx < _servers.Count)
         {
-            _selectedIndex = idx;
-            EmitSignal(SignalName.ServerSelected, _servers[idx].ServerId);
+            ServerEntry entry = _servers[idx];
+            if (!entry.IsSelectable)
+            {
+                GD.Print($"[ServerSelectSubView] Plate action {actionId} ignored: server {entry.ServerId} " +
+                         $"unavailable (status={entry.StatusCode}, population={entry.Population}). " +
+                         "spec: frontend_scenes.md §11.4.");
+                return;
+            }
+
+            EmitSignal(SignalName.ServerSelected, entry.ServerId);
         }
     }
 
@@ -252,24 +290,23 @@ public sealed partial class ServerSelectSubView : Control
         // spec: §11.4 "pager buttons B src(596,985,47,18); actions 115..124". CODE-CONFIRMED.
         for (int i = 0; i < PagerCount; i++)
         {
-            int x = 13 + i * (PagerW + 2); // approximate spacing
             // spec: §11.2a "ServerRowBtnX0=13, ServerRowBtnXStep=47". CODE-CONFIRMED.
-            x = 13 + i * 47; // spec §11.2a. CODE-CONFIRMED.
+            int x = 13 + i * 47; // spec §11.2a. CODE-CONFIRMED.
 
             Texture2D? normal = _atlas.SliceByPath(AtlasB, PagerSrcX, PagerSrcY, PagerW, PagerH);
             int actionId = PagerActionBase + i;
 
             var btn = new TextureButton
             {
-                Position          = new Vector2(x, PagerY),
-                Size              = new Vector2(PagerW, PagerH),
+                Position = PanelPoint(x, PagerY),
+                Size = new Vector2(PagerW, PagerH),
                 CustomMinimumSize = new Vector2(PagerW, PagerH),
                 IgnoreTextureSize = true,
-                StretchMode       = TextureButton.StretchModeEnum.Scale,
-                TextureNormal     = normal,
-                TextureHover      = normal,
-                TexturePressed    = normal,
-                TextureDisabled   = normal,
+                StretchMode = TextureButton.StretchModeEnum.Scale,
+                TextureNormal = normal,
+                TextureHover = normal,
+                TexturePressed = normal,
+                TextureDisabled = normal,
             };
 
             // Pager buttons re-page only — no commit/selection; captured in closure.
@@ -279,46 +316,256 @@ public sealed partial class ServerSelectSubView : Control
         }
     }
 
-    private void OnPagerClicked(int actionId)
+    private void BuildPanelFrame()
     {
-        // Pager re-pages the list; the Application layer handles the page logic.
-        // We emit nothing here — this is a UI-layer paging gesture only.
-        // spec: §11.4 "pager actions 115..124: re-page only, no commit". CODE-CONFIRMED.
-        GD.Print($"[ServerSelectSubView] Pager action {actionId} clicked (re-page only, no commit). " +
-                 "spec: frontend_scenes.md §11.4.");
+        // Server-list parchment frame — loginwindow.dds dst(270,85,483,490) src(0,490). IDA: the server-list
+        // panel this+808 IS a loginwindow panel sharing the notice panel's frame art. Without it the plates
+        // float with no background (the "messy" server list). Added FIRST so it paints behind everything.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.4 / §11.2a. CODE-CONFIRMED (binary).
+        Texture2D? frame = _atlas.SliceByPath(AtlasB,
+            LoginLayout.ServerListbox.SrcX, LoginLayout.ServerListbox.SrcY,
+            LoginLayout.ServerListbox.W, LoginLayout.ServerListbox.H);
+        if (frame is not null)
+        {
+            AddChild(new TextureRect
+            {
+                Position = PanelPoint(0, 0),
+                Size = new Vector2(LoginLayout.ServerListbox.W, LoginLayout.ServerListbox.H),
+                Texture = frame,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                MouseFilter = MouseFilterEnum.Ignore,
+            });
+        }
+
+        // Header image — loginwindow.dds dst(207,44,70,17) src(0,980), panel-local (IDA this+916).
+        Texture2D? header = _atlas.SliceByPath(AtlasB, 0, 980,
+            LoginLayout.ListboxHeader.W, LoginLayout.ListboxHeader.H);
+        if (header is not null)
+        {
+            AddChild(new TextureRect
+            {
+                Position = PanelPoint(LoginLayout.ListboxHeader.X, LoginLayout.ListboxHeader.Y),
+                Size = new Vector2(LoginLayout.ListboxHeader.W, LoginLayout.ListboxHeader.H),
+                Texture = header,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                MouseFilter = MouseFilterEnum.Ignore,
+            });
+        }
     }
 
-    private void BuildRows(int plateX)
+    private void BuildFlagImage()
     {
-        // Build one row label per server, stacked vertically inside the plate.
-        // Row Y base is 96 (panel-local; offset from plate top).
-        // Row height is 32 (approximate — no exact spec value; closest to card spacing).
-        const int rowBaseY = 96;
-        const int rowH     = 32;
+        // Flag image: loginwindow.dds dst(0,0,60,39) src(500,786).
+        // spec: Docs/RE/specs/frontend_scenes.md §11.4.
+        WidgetRect r = LoginLayout.SmallBadges;
+        Texture2D? tex = _atlas.SliceByPath(AtlasB, r.SrcX, r.SrcY, r.W, r.H);
+        if (tex is null)
+            return;
 
-        for (int i = 0; i < _servers.Count && i < 10; i++)
+        AddChild(new TextureRect
         {
-            ServerEntry e = _servers[i];
+            Position = PanelPoint(r.X, r.Y),
+            Size = new Vector2(r.W, r.H),
+            Texture = tex,
+            StretchMode = TextureRect.StretchModeEnum.Scale,
+            MouseFilter = MouseFilterEnum.Ignore,
+        });
+    }
 
-            // Skip overloaded entries (load guard).
-            // spec: §11.4 "status==0 AND population < 2400". CODE-CONFIRMED.
-            bool available = e.StatusCode == 0 && e.Population < PopOverloadThreshold;
+    private void BuildBackControl()
+    {
+        WidgetRect r = LoginLayout.OptionTab1;
+        Texture2D? normal = _atlas.SliceByPath(AtlasB, r.SrcX, r.SrcY, r.W, r.H);
+        Texture2D? hover = _atlas.SliceByPath(AtlasB, LoginLayout.OptionTab1HoverSrcX, LoginLayout.OptionTab1HoverSrcY,
+            r.W, r.H);
 
-            Color popColor = PopColorForPopulation(e.Population);
-            string text = e.DisplayName.Length > 0 ? e.DisplayName : $"Server {e.ServerId}";
-            if (!available) text += " (FULL)";
+        var btn = new TextureButton
+        {
+            Position = new Vector2(LoginLayout.OptionTabsPanelX + r.X, LoginLayout.OptionTabsPanelY + r.Y),
+            Size = new Vector2(r.W, r.H),
+            CustomMinimumSize = new Vector2(r.W, r.H),
+            IgnoreTextureSize = true,
+            StretchMode = TextureButton.StretchModeEnum.Scale,
+            TextureNormal = normal,
+            TextureHover = hover,
+            TexturePressed = hover,
+            TextureDisabled = normal,
+        };
 
-            var label = new Label
-            {
-                Text     = text,
-                Position = new Vector2(plateX + 10, PlateY + rowBaseY + i * rowH),
-                Size     = new Vector2(PlateW - 20, rowH),
-                AutowrapMode = TextServer.AutowrapMode.Off,
-            };
-            label.AddThemeColorOverride("font_color", popColor);
-            AddChild(label);
-            _rowLabels.Add(label);
+        btn.Pressed += () =>
+        {
+            GD.Print("[ServerSelectSubView] Back/close clicked: BackRequested. spec: frontend_scenes.md §11.2f.");
+            EmitSignal(SignalName.BackRequested);
+        };
+        AddChild(btn);
+    }
+
+    private void OnPagerClicked(int actionId)
+    {
+        // Pager actions re-page only and never commit a selected server.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.4: page = action − 115, clamped to available pages.
+        _page = ClampPage(actionId - PagerActionBase);
+        GD.Print(
+            $"[ServerSelectSubView] Pager action {actionId} -> page {_page} (re-page only, no commit). spec: frontend_scenes.md §11.4.");
+        RebuildLayout();
+    }
+
+    private void AddPlateCaption(int plateX, ServerEntry e)
+    {
+        // Row labels: dst(x,390,174,21), dst(x,410,174,20), dst(x,430,174,20).
+        // spec: Docs/RE/specs/frontend_scenes.md §11.4.
+        bool available = e.IsSelectable; // spec §11.4 load guard. CODE-CONFIRMED.
+        Color popColor = PopColorForPopulation(e.Population); // spec §11.4 population colour bands. CODE-CONFIRMED.
+        string name = ResolveServerName(e);
+        string loadText = ResolveLoadText(e);
+        string statusText = ResolveStatusText(e);
+
+        AddRowLabel(name, plateX, RowLabelY0, RowLabelH0, Colors.White);
+        AddRowLabel(loadText, plateX, RowLabelY1, RowLabelH, popColor);
+        AddRowLabel(statusText, plateX, RowLabelY2, RowLabelH, available ? Colors.White : PopColorRed);
+    }
+
+    private void AddRowLabel(string text, int x, int y, int h, Color color)
+    {
+        var label = new Label
+        {
+            Text = text,
+            Position = PanelPoint(x, y),
+            Size = new Vector2(RowLabelW, h),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            AutowrapMode = TextServer.AutowrapMode.Off,
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        label.AddThemeColorOverride("font_color", color);
+        AddChild(label);
+    }
+
+    private int ClampPage(int requestedPage)
+    {
+        // Pager action N maps to page N−115 and clamps to the available 2-server pages.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.4: 10 pager actions 115..124, max 2 servers per page.
+        int pageCount = Math.Max(1, (_servers.Count + 1) / 2);
+        return Math.Clamp(requestedPage, 0, pageCount - 1);
+    }
+
+    private string BuildPageBreadcrumb(int firstIndex, int visibleCount)
+    {
+        // Maintainer-facing fidelity breadcrumb for the visible page.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.4 plate slots are server indices 2·page+0/1.
+        string plate0 = DescribePlate(0, firstIndex);
+        string plate1 = visibleCount > 1 ? DescribePlate(1, firstIndex + 1) : "plate1=<none>";
+        return $"[ServerSelectSubView] page {_page}: {plate0}, {plate1}";
+    }
+
+    private string DescribePlate(int plateSlot, int serverIndex)
+    {
+        ServerEntry e = _servers[serverIndex];
+        string name = e.DisplayName.Length > 0 ? e.DisplayName : $"Server {e.ServerId}";
+        return $"plate{plateSlot}=server {e.ServerId} '{name}' pop {e.Population} selectable={e.IsSelectable}";
+    }
+
+    private static Vector2 PanelPoint(int x, int y) => new(PanelX + x, PanelY + y);
+
+    private string ResolveServerName(ServerEntry e)
+    {
+        if (e.DisplayName.Length > 0)
+            return e.DisplayName;
+
+        if (e.ServerId is >= 1 and <= 40)
+            return $"Server {e.ServerId}";
+
+        // msg 5901 is the formatted fallback for out-of-range server ids.
+        // spec: Docs/RE/specs/frontend_scenes.md §1.9 / §2.3.
+        string fallback = $"Server {e.ServerId}";
+        string template = _text.GetCaption(LoginLayout.MsgServerUnknown, fallback);
+        return FormatCaption(template, e.ServerId, fallback);
+    }
+
+    private string ResolveLoadText(ServerEntry e)
+    {
+        // Active entries use the load buckets msg 6001/6002/6003; otherwise show the numeric load.
+        // spec: Docs/RE/specs/frontend_scenes.md §2.3 / §11.4.
+        if (e.StatusCode != 0)
+            return e.Population.ToString();
+
+        uint? msgId = e.Population > PopRedThreshold
+            ? LoginLayout.MsgServerLoadRed
+            : e.Population > PopOrangeThreshold
+                ? LoginLayout.MsgServerLoadOrange
+                : e.Population > PopYellowThreshold
+                    ? LoginLayout.MsgServerLoadYellow
+                    : null;
+
+        return msgId is { } id
+            ? _text.GetCaption(id, e.Population.ToString())
+            : e.Population.ToString();
+    }
+
+    private string ResolveStatusText(ServerEntry e)
+    {
+        // spec: Docs/RE/specs/frontend_scenes.md §2.3 — status==3 uses msg 6004/6005;
+        // default status indexes msg 4029..4032.
+        if (e.StatusCode == 0)
+            return e.IsSelectable ? string.Empty : _text.GetCaption(LoginLayout.MsgServerLoadRed, "[Full]");
+
+        if (e.StatusCode == 3)
+        {
+            if (e.Population == 24)
+                return _text.GetCaption(LoginLayout.MsgServerPreparing, "[Preparing]");
+
+            string template = _text.GetCaption(LoginLayout.MsgServerClockFormat, "{0:00}:{1:00}");
+            return FormatCaption(template, e.Population, e.Flag, $"{e.Population:00}:{e.Flag:00}");
         }
+
+        if (e.StatusCode is >= 1 and <= 4)
+        {
+            uint msgId = LoginLayout.MsgServerHeaderFirst + (uint)e.StatusCode - 1;
+            return _text.GetCaption(msgId, $"[msg {msgId}]");
+        }
+
+        return $"[status {e.StatusCode}]";
+    }
+
+    private static string FormatCaption(string template, int value, string fallback)
+        => FormatCaption(template, value, 0, fallback);
+
+    private static string FormatCaption(string template, int value0, int value1, string fallback)
+    {
+        try
+        {
+            if (template.Contains("{0}", StringComparison.Ordinal) ||
+                template.Contains("{0:", StringComparison.Ordinal))
+                return string.Format(System.Globalization.CultureInfo.InvariantCulture, template, value0, value1);
+
+            if (template.Contains("%d", StringComparison.Ordinal))
+            {
+                string s = template;
+                s = ReplaceFirst(s, "%d", value0.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                s = ReplaceFirst(s, "%d", value1.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                return s;
+            }
+
+            if (template.Contains("%02d", StringComparison.Ordinal))
+            {
+                string s = template;
+                s = ReplaceFirst(s, "%02d", value0.ToString("00", System.Globalization.CultureInfo.InvariantCulture));
+                s = ReplaceFirst(s, "%02d", value1.ToString("00", System.Globalization.CultureInfo.InvariantCulture));
+                return s;
+            }
+        }
+        catch (FormatException)
+        {
+            return fallback;
+        }
+
+        return template == fallback ? fallback : $"{template} {value0}";
+    }
+
+    private static string ReplaceFirst(string value, string oldValue, string newValue)
+    {
+        int idx = value.IndexOf(oldValue, StringComparison.Ordinal);
+        return idx < 0 ? value : value[..idx] + newValue + value[(idx + oldValue.Length)..];
     }
 
     // -------------------------------------------------------------------------
@@ -328,9 +575,9 @@ public sealed partial class ServerSelectSubView : Control
 
     private static Color PopColorForPopulation(int population)
     {
-        if (population > PopRedThreshold)    return PopColorRed;    // > 1200. spec §11.4.
-        if (population > PopOrangeThreshold) return PopColorOrange;  // > 800.  spec §11.4.
-        if (population > PopYellowThreshold) return PopColorYellow;  // > 500.  spec §11.4.
-        return PopColorWhite;                                          // ≤ 500.  spec §11.4.
+        if (population > PopRedThreshold) return PopColorRed; // > 1200. spec §11.4.
+        if (population > PopOrangeThreshold) return PopColorOrange; // > 800.  spec §11.4.
+        if (population > PopYellowThreshold) return PopColorYellow; // > 500.  spec §11.4.
+        return PopColorWhite; // ≤ 500.  spec §11.4.
     }
 }

@@ -89,6 +89,7 @@ public sealed class RegionServiceTests
         public bool PublishTargetChanged(TargetChangedEvent _) => false;
         public bool PublishExpLevel(ExpLevelEvent _) => false;
         public bool PublishStatAllocation(StatAllocationView _) => false;
+        public bool PublishVitals(HudVitalsEvent _) => false;
 
         private static ChannelReader<T> EmptyReader<T>()
         {
@@ -104,6 +105,7 @@ public sealed class RegionServiceTests
         public ChannelReader<ExpLevelEvent> ExpLevels => EmptyReader<ExpLevelEvent>();
         public ChannelReader<StatAllocationView> StatAllocations => EmptyReader<StatAllocationView>();
         public ChannelReader<ZoneChangedEvent> ZoneChanges => EmptyReader<ZoneChangedEvent>();
+        public ChannelReader<HudVitalsEvent> Vitals => EmptyReader<HudVitalsEvent>();
 
         public void Complete()
         {

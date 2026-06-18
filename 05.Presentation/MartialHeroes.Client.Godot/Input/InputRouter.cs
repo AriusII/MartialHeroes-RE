@@ -53,7 +53,9 @@ public sealed partial class InputRouter : Node
     private int _pressX = -1;
     private int _pressY = -1;
     private int _pressButton = -1;
-    private const int ClickDragTolerance = 2; // spec: Docs/RE/specs/input_ui.md §2b (drag tolerance = 2, byte-confirmed).
+
+    private const int
+        ClickDragTolerance = 2; // spec: Docs/RE/specs/input_ui.md §2b (drag tolerance = 2, byte-confirmed).
 
     // Modifier flag constants — recovered bit positions.
     // spec: Docs/RE/specs/input_ui.md §2c — "Modifier-flag encoding (recovered bit positions)".

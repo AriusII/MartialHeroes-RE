@@ -1,0 +1,45 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: field VALUE meanings are static inferences. capture_verified: false.
+
+name: SmsgNpcSellItemAck
+opcode: 0x40014           # major 4 (Response), minor 20 -> (4 << 16) | 20
+direction: S2C
+size: 24                  # 0x18-byte handler read
+spec: packets/4-20_npc_sell_item_ack.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Acknowledgement to the NPC sell request (C2S 2/20). On success the sell result is applied to the NPC-shop panel and, when the seller is the local player, a refreshed inventory block is copied; otherwise a pending notice is dismissed.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 24.
+fields:
+  - { name: Word0,     type: u32 }          # 0x00  leading word of the sell record
+  - { name: EntityKey, type: u32 }          # 0x04  seller / actor composite key (resolved via the actor manager)
+  - { name: Result,    type: u8 }           # 0x08  1 = apply the sell to the NPC-shop panel; 0 = dismiss pending notice
+  - { name: Filler,    type: u8 }           # 0x09  read but not consumed -> filler
+  - { name: SubFlag,   type: u8 }           # 0x0a  when 0 and seller == local player, copy the refreshed inventory table
+  - { name: Trailer,   type: "bytes[13]" }  # 0x0b  remainder of the 0x18 read
+
+notes: |
+  Static only; no capture this pass. The handler reads a fixed 0x18 (24)-byte block. The 24-byte
+  read size and the consumed offsets (EntityKey @0x04, Result @0x08, SubFlag @0x0a) are
+  control-flow-confirmed; the field VALUE meanings are capture-pending.
+
+    0x00 (4B)  Word0     : the leading word of the sell record.
+    0x04 (4B)  EntityKey : the seller / actor composite key, resolved through the actor manager.
+    0x08 (1B)  Result    : 1 = apply the sell result to the NPC-shop panel; 0 = dismiss the pending
+                           notice.
+    0x09 (1B)  Filler    : read but not consumed by the handler -> filler (zero on the wire by
+                           hypothesis).
+    0x0a (1B)  SubFlag   : when 0 and the seller is the local player, the handler copies the
+                           refreshed 20-slot inventory/equip table.
+    0x0b (13B) Trailer   : the rest of the 0x18 read. Modelled as one reserved blob so the struct
+                           totals the 24-byte read.
+
+  RELATIONSHIP: reply to C2S 2/20 CmsgNpcSell. The vendor money refresh rides 4/115.
+
+  UNKNOWNS to resolve with a capture of an NPC sell ack:
+    - the layout inside Trailer (refunded amount, slot echo, etc.);
+    - whether Word0 is the sold item id or a transaction id.
+
+  UNBLOCKS: Client.Application NpcSell ack handling.

@@ -2,7 +2,7 @@ using Godot;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.Scene;
 using MartialHeroes.Client.Godot.Autoload;
-using MartialHeroes.Client.Godot.Screens;       // ServerEntry, UiAssetLoader, FrontEndAudio, ScreenHost
+using MartialHeroes.Client.Godot.Screens; // ServerEntry, UiAssetLoader, FrontEndAudio, ScreenHost
 using MartialHeroes.Client.Godot.Ui.Scenes.Login; // LoginWindow, PinSubView, ServerSelectSubView
 using MartialHeroes.Shared.Kernel.Enums;
 
@@ -93,14 +93,14 @@ public sealed partial class LoginScene : StubSceneController
         // Both degrade gracefully when the VFS is offline (null-backed).
         var atlas = _ctx?.HudAtlas
                     ?? new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
-        var text  = _ctx?.HudText
-                    ?? new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
+        var text = _ctx?.HudText
+                   ?? new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
 
         var login = new LoginWindow(atlas, text)
         {
-            Name              = "LoginWindow",
-            Audio             = _audio,
-            PinFactory        = CreateInLoginPin,
+            Name = "LoginWindow",
+            Audio = _audio,
+            PinFactory = CreateInLoginPin,
             ServerSelectFactory = CreateInLoginServerSelect,
         };
 
@@ -110,8 +110,8 @@ public sealed partial class LoginScene : StubSceneController
             login.DevPrefillPw = DevAccountPw();
         }
 
-        login.LoginAccepted     += OnLoginAccepted;
-        login.QuitRequested     += OnQuitRequested;
+        login.LoginAccepted += OnLoginAccepted;
+        login.QuitRequested += OnQuitRequested;
         login.LoginFlowCompleted += OnLoginFlowCompleted;
         return login;
     }
@@ -141,7 +141,9 @@ public sealed partial class LoginScene : StubSceneController
             HostInReferenceSpace = true,
         };
 
-        if (IsDevOfflineMode())
+        // Skip the offline PIN auto-submit while dumping layout, so the login dump can open the PIN
+        // sub-view and capture its rects without immediately submitting + advancing the scene.
+        if (IsDevOfflineMode() && !Dev.LayoutDump.Enabled)
             pin.DevPrefillPin = DevAccountPin();
 
         GD.Print("[LoginScene] Created in-login PinSubView (sub-states 31/32) on HudAtlasLibrary. " +
@@ -153,8 +155,8 @@ public sealed partial class LoginScene : StubSceneController
     {
         var atlas = _ctx?.HudAtlas
                     ?? new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
-        var text  = _ctx?.HudText
-                    ?? new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
+        var text = _ctx?.HudText
+                   ?? new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
 
         _serverSelect = new ServerSelectSubView(atlas, text)
         {

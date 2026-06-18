@@ -1,48 +1,48 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# CAPTURE-UNVERIFIED: field VALUE meanings are static inferences. capture_verified: false.
 
 name: CmsgShopBuy
 opcode: 0x20073           # major 2 (GameAction), minor 115 -> (2 << 16) | 115
 direction: C2S
-size: var                 # body bytes not yet pinned (see notes); modelled minimum below
+size: 8                   # fixed 8-byte payload staged by the storefront buy/order sender
 spec: packets/2-115_shop_buy.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Buy / order commit at an NPC shop. This is the shared buy-commit for both the simple sundry/item shop and the full product shop window. The send arguments observed are the active target field and the selected catalog index. The server replies with the NPC buy/acquire acknowledgement family (S2C 4/19, and item-shop result 4/113 for the product shop).
+summary: Buy / order commit from the NPC storefront list (the item-shop vendor panel). The send carries the current shop NPC id and the selected storefront row (encoded as the row index times two). Reconfirmed in HUD-II Wave 3: the body is a FIXED 8 bytes (the earlier 'var' reading is corrected). The server replies on the NPC buy/acquire / item-shop result family (S2C 4/19, 4/113) and the balance push 4/115.
 
-# Wire order, offset 0 = first payload byte. Pack=1. size is 'var' until the body is field-decoded.
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 8.
 fields:
-  - { name: TargetId, type: u32 }        # 0x00  active-target field: the shop NPC's actor/entity id
-  - { name: SelIndex, type: u32 }        # 0x04  selected catalog/order entry index
+  - { name: NpcId,   type: u32 }        # 0x00  current shop NPC id
+  - { name: RowX2,   type: u32 }        # 0x04  selected storefront row index, multiplied by two
 
 notes: |
-  Static inference only; no capture available. The shop buy/order sender is invoked by the sundry
-  item-shop confirm path; the send-wrapper's exact body length was NOT re-read this pass, so the
-  on-wire body is recorded as 'var' rather than a hard size.
+  Static only; no capture this pass. The storefront buy/order sender stages a fixed 8-byte body, so
+  the total payload = 8 bytes and the frame = 8-byte header + 8 = 16 bytes on the wire. The 8-byte
+  body length and the two-word layout are control-flow-confirmed (CORRECTS the prior 'var' size).
 
-    0x00 (4B) TargetId : the client's active-target field (the shop NPC). CODE-CONFIRMED as a send
-                         argument; treating it as a u32 id is the leading hypothesis.
-    0x04 (4B) SelIndex : the selected catalog entry / order line. For the sundry shop the catalog is
-                         a 6-entry list baked into the NPC's npc.scr template (catalog region at
-                         template offset +128); for the product shop the entry is chosen in the
-                         paged window. CODE-CONFIRMED as a send argument; the on-wire width is not
-                         pinned.
+    0x00 (4B) NpcId : the current shop NPC's id (read from the shop-data manager at send time).
+                      CODE-CONFIRMED as a send argument.
+    0x04 (4B) RowX2 : the selected storefront-list row index, multiplied by two before send.
+                      CODE-CONFIRMED as a send argument; whether the server divides by two to
+                      recover the row, or the doubling encodes a (row, side) pair, is capture-pending.
 
-  fields not yet pinned — needs npc.scr sample / capture: the exact body length and whether a
-  purchase QUANTITY and/or a page index also ride this body. The two u32 words above are the
-  minimum plausible body; a quantity field is the most likely missing field. Do NOT assume the body
-  ends after these two words until a capture confirms the length.
+  SHOP STOREFRONT: the storefront stock is a 6-entry client-side script table keyed by NPC id (the
+  panel shows 3 rows at a time; the 6-vs-3 paging is UI-pending). The open sends NO packet -- only
+  the buy commit and the balance refresh go on the wire.
 
-  SHARED COMMIT: both shop variants ride this 2/115 buy/order commit. The product shop ALSO uses the
-  separate paged-shop minors 2/151 / 2/152 / 2/153 for in-window paging, selection and confirm —
-  see packets/2-151_product_buy.yaml. Treat 2/115 as the buy/order commit and the 2/151-family as
-  the product-panel navigation/confirm primitives.
+  SHARED PANEL FAMILY: this 2/115 is the STOREFRONT-list buy commit. It is DISTINCT from the
+  inventory-driven 2/19 CmsgNpcBuyOrAcquire (which sends a {id, 4 bytes, qty} body). Both feed the
+  same NPC-shop transaction manager. (The product/craft shop instead uses 2/151 -- see
+  packets/2-151_product_buy.yaml -- and its money refresh is 3/8, NOT 4/115.)
 
-  CLIENT PRE-CHECK (does not change the wire body): the sundry shop prices each catalog entry as
-  amount / 1,000,000 (the global gold display divisor) and shows the player's gold before purchase.
+  RELATIONSHIP / replies:
+    - S2C 4/19  SmsgNpcBuyOrAcquireAck   (the buy/acquire ack)
+    - S2C 4/113 SmsgItemShopPurchaseResult (item-shop purchase result notice)
+    - S2C 4/115 SmsgItemShopBalanceUpdate  (the vendor MONEY refresh -- NOT 3/8)
 
-  RELATIONSHIP: paired with S2C 4/19 SmsgNpcBuyOrAcquireAck (generic NPC buy/acquire) and, for the
-  product/item shop, S2C 4/113 SmsgItemShopPurchaseResult.
+  UNKNOWNS to resolve with a capture of a storefront buy:
+    - confirm the row-index*2 encoding and whether a purchase quantity also rides the wire;
+    - whether the server resolves the price entirely server-side from NpcId + the row.
 
-  UNBLOCKS: Client.Application ShopBuy use-case (after body length is captured).
+  UNBLOCKS: Client.Application ShopBuy (storefront) use-case.

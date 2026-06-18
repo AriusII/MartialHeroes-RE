@@ -428,9 +428,9 @@ public sealed class HudIconLibrary : IDisposable
             for (int i = 0; i < count; i++)
             {
                 int offset = i * Stride;
-                uint buffId   = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(offset, 4));
-                uint spriteX  = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(offset + 4, 4));
-                uint spriteY  = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(offset + 8, 4));
+                uint buffId = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(offset, 4));
+                uint spriteX = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(offset + 4, 4));
+                uint spriteY = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(offset + 8, 4));
                 _buffPositions[buffId] = (spriteX, spriteY);
             }
 

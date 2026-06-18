@@ -40,6 +40,7 @@ namespace MartialHeroes.Client.Godot.Ui.Widgets;
 /// </summary>
 public sealed class HudTextbox : HudWidget
 {
+    private readonly Control _control;
     private readonly LineEdit _edit;
 
     // -------------------------------------------------------------------------
@@ -61,14 +62,37 @@ public sealed class HudTextbox : HudWidget
     ///   spec §6.3 — GUTextbox slot at +0xDC, default 0: CODE-CONFIRMED.</param>
     public HudTextbox(
         int x, int y, int w, int h,
-        bool password   = false,
-        int maxLength   = 0,
-        int fontSlot    = 0) // spec: §6.3 GUTextbox font slot default 0: CODE-CONFIRMED
+        bool password = false,
+        int maxLength = 0,
+        int fontSlot = 0,
+        Texture2D? background = null) // spec: §6.3 GUTextbox font slot default 0: CODE-CONFIRMED
     {
+        bool hasBackground = background is not null;
+        Control? root = null;
+        if (hasBackground)
+        {
+            root = new Control
+            {
+                Position = new Vector2(x, y),
+                Size = new Vector2(w, h),
+                CustomMinimumSize = new Vector2(w, h),
+                MouseFilter = Control.MouseFilterEnum.Pass,
+            };
+            root.AddChild(new TextureRect
+            {
+                Texture = background,
+                AnchorsPreset = (int)Control.LayoutPreset.FullRect,
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                // spec: Docs/RE/specs/frontend_scenes.md — GUTextbox atlas rect is W×H sampled 1:1.
+                StretchMode = TextureRect.StretchModeEnum.Keep,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            });
+        }
+
         _edit = new LineEdit
         {
-            Position          = new Vector2(x, y),
-            Size              = new Vector2(w, h),
+            Position = hasBackground ? Vector2.Zero : new Vector2(x, y),
+            Size = new Vector2(w, h),
             CustomMinimumSize = new Vector2(w, h),
 
             // Password mode: Godot's Secret property displays bullet glyphs (one per char).
@@ -85,6 +109,16 @@ public sealed class HudTextbox : HudWidget
             CaretBlinkInterval = 0.5f,
         };
 
+        if (root is not null)
+        {
+            root.AddChild(_edit);
+            _control = root;
+        }
+        else
+        {
+            _control = _edit;
+        }
+
         // Apply font slot.
         // spec: §6.3 / §6.2 — GUTextbox font slot at +0xDC, default 0 = DotumChe 12/6: CODE-CONFIRMED.
         HudFont.ApplyToLineEdit(_edit, fontSlot);
@@ -93,6 +127,23 @@ public sealed class HudTextbox : HudWidget
     // -------------------------------------------------------------------------
     // Public API
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Legacy IME mode selector recorded by the builder follow-up call.
+    /// Godot owns the actual IME context; the value is preserved for 1:1 scene wiring.
+    /// spec: Docs/RE/specs/frontend_scenes.md — GUTextbox IME mode is set separately from the ctor.
+    /// </summary>
+    public int ImeMode { get; set; }
+
+    /// <summary>
+    /// Maximum character count; 0 means unlimited.
+    /// spec: Docs/RE/specs/frontend_scenes.md — GUTextbox max length is set separately from the ctor.
+    /// </summary>
+    public int MaxLength
+    {
+        get => _edit.MaxLength;
+        set => _edit.MaxLength = Math.Max(0, value);
+    }
 
     /// <summary>Gets or sets the text content of the input field.</summary>
     public string Text
@@ -122,7 +173,11 @@ public sealed class HudTextbox : HudWidget
     /// </summary>
     public event Action<string>? TextChanged
     {
-        add    { EnsureEventsWired(); _textChanged += value; }
+        add
+        {
+            EnsureEventsWired();
+            _textChanged += value;
+        }
         remove { _textChanged -= value; }
     }
 
@@ -131,7 +186,11 @@ public sealed class HudTextbox : HudWidget
     /// </summary>
     public event Action<string>? TextSubmitted
     {
-        add    { EnsureEventsWired(); _textSubmitted += value; }
+        add
+        {
+            EnsureEventsWired();
+            _textSubmitted += value;
+        }
         remove { _textSubmitted -= value; }
     }
 
@@ -146,5 +205,5 @@ public sealed class HudTextbox : HudWidget
     // -------------------------------------------------------------------------
 
     /// <inheritdoc/>
-    public override Control? GetControl() => _edit;
+    public override Control? GetControl() => _control;
 }

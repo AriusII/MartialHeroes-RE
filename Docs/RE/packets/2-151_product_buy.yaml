@@ -1,58 +1,56 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# CONTROL-FLOW CONFIRMED: the ProductPanel's SOLE net send is 2/151 with a 1-byte selector body.
+# capture_verified: false (the selector VALUES beyond {0 open, 200 confirm} are capture-pending).
+#
+# HUD-II Wave 2 (ProductPanel recovery) -- this replaces the earlier "paged buy / 2-u32 / shares with
+# 2/152 and 2/153" framing, which was a mis-attribution. See the RESOLUTION note below.
 
 name: CmsgProductBuy
-opcode: 0x20097           # major 2 (GameAction), minor 151 -> (2 << 16) | 151
+opcode: 0x20097           # major 2 (GameAction), minor 151 (0x97) -> (2 << 16) | 151
 direction: C2S
-size: var                 # body bytes not yet pinned (see notes); modelled minimum below
+size: 1                   # FIXED 1-byte selector body (the builder appends a single byte)
 spec: packets/2-151_product_buy.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Product-panel (full paged item-shop window) client primitives. This file covers the THREE related product-panel C2S minors that drive the paged buy window with its buy-confirm popup — 2/151 (buy / confirm), 2/152 (page / select) and 2/153 (action). The primary 2/151 buy/confirm is modelled in fields below; 2/152 and 2/153 are documented in notes (each is its own opcode and gets its own generated struct when its body is captured).
+summary: The product / crafting panel's ONLY network send. A 1-byte selector body: the panel sends this once on open/refresh (selector 0) to ask the server for the current production list/money, and again on the tip-panel confirm action (selector 200 / 0xC8). All tab and page navigation inside the panel are LOCAL repaints over a server-pushed recipe list -- they are not network sends. The list/money refresh arrives inbound on S2C 3/8.
 
-# Wire order, offset 0 = first payload byte. Pack=1. size is 'var' until the body is field-decoded.
-# This block models the PRIMARY minor, 2/151 (buy / confirm).
+# Wire order, offset 0 = first payload byte. Pack=1; the field width sums to size: 1.
+# CONTROL-FLOW CONFIRMED: the send builder writes the header (major 2 / minor 151) and appends a
+# single selector byte. Two values are control-flow-confirmed: 0 on the open/refresh path, 200 (0xC8)
+# on the confirm path.
 fields:
-  - { name: TargetId, type: u32 }        # 0x00  active-target field: the product-shop NPC's id
-  - { name: SelIndex, type: u32 }        # 0x04  selected product entry index (within the current page)
+  - { name: Selector, type: u8 }   # 0x00  request selector: 0 = open/refresh, 200 (0xC8) = tip-panel confirm
 
 notes: |
-  Static inference only; no capture available. The product panel is the full paged item-shop window
-  (distinct from the simple sundry shop): a multi-page product list plus a separate buy-confirm
-  popup. It drives THREE C2S minors. None of the three bodies was field-decoded this pass; their
-  send-wrapper bodies were confirmed by minor and by caller only, so each on-wire size is 'var'
-  here and the field splits are the leading hypothesis.
+  CONTROL-FLOW CONFIRMED: the product / crafting panel's sole net send is 2/151 with a 1-byte body.
 
-  This file's `fields:` block models the PRIMARY minor only:
+    0x00 (1B) Selector : the request selector.
+                         - 0   = open / refresh (sent when the panel opens, to fetch the current
+                                 production list and money);
+                         - 200 = (0xC8) the tip-panel confirm path.
+                         Any additional selector values are capture/debugger-pending.
 
-    2/151 — CmsgProductBuy (buy / confirm), modelled above:
-      0x00 (4B) TargetId : the client's active-target field (the product-shop NPC). Hypothesis.
-      0x04 (4B) SelIndex : the selected product entry. A purchase QUANTITY field is the most likely
-                           additional field beyond these two words — do NOT assume the body ends
-                           after SelIndex until a capture confirms the length.
+  CONFLICT RESOLUTION (load-bearing -- binary wins). The earlier provisional model treated this as a
+  "paged buy" with a two-u32 body shared across minors 2/151, 2/152 and 2/153. That framing is
+  WITHDRAWN: the ProductPanel recovery proved the panel emits ONLY 2/151, and only with a 1-byte
+  selector. Specifically:
+    - the panel does NOT emit 2/152 at all -- its tab/page navigation is a local repaint over a
+      server-pushed recipe list. The "2/152 = ProductPanel paging" attribution was a mis-attribution.
+      2/152 is now resolved as the QuestPanel-only per-row request (see
+      packets/2-152_quest_row_request.yaml, CmsgQuestRowRequest).
+    - 2/153 is de-linked from this product spec: the panel's confirm path uses 2/151 (selector 200),
+      so 2/153's exclusive ownership by the product family is no longer asserted. If 2/153 retains
+      independent evidence as a separate confirm/finalize send, it gets its own spec when captured.
 
-  The other two product-panel minors are SEPARATE opcodes (already cataloged in opcodes.md as
-  CmsgProductPage 2/152 and CmsgProductAction 2/153). They are described here for the engineer but
-  each must get its own generated struct from its own captured body:
+  INBOUND PAIR: the product list/money refresh arrives on S2C 3/8 SmsgShopPageUpdate
+  (packets/3-8_shop_page_update.yaml) -- a 4-byte money/gold push that triggers a panel repaint over
+  the client-cached recipe vector. 3/8 carries no grid/page array.
 
-    2/152 — CmsgProductPage (page / select):
-      Paged-shop navigation: change the visible product page and/or move the selection cursor.
-      fields not yet pinned — needs npc.scr sample / capture. Likely carries a target/NPC word and a
-      page or selection index; body length not re-read this pass.
+  WHAT IS NOT HERE: the recipe-list source vector fill path (where the cached recipe records come
+  from -- area/NPC load vs a separate S2C) is not pinned this lane.
 
-    2/153 — CmsgProductAction (action):
-      The third product-panel primitive (e.g. confirm-popup action / order finalize). fields not yet
-      pinned — needs npc.scr sample / capture. Body length not re-read this pass.
+  UNKNOWNS (capture-pending): selector values beyond {0, 200}; the recipe-list source channel.
 
-  RELATIONSHIP: the product shop ALSO rides the shared buy/order commit 2/115 (CmsgShopBuy); the
-  2/151-family are the in-window paging / selection / confirm primitives layered on top. The product
-  list and confirm popup are atlas-swap UI panels; the product catalog source (npc.scr template or a
-  server push) is not pinned for the full product shop. S2C acknowledgements expected in the item-shop
-  result family (4/113 SmsgItemShopPurchaseResult, 4/115 SmsgItemShopBalanceUpdate).
-
-  fields not yet pinned — needs npc.scr sample / capture, for all three minors: exact body lengths,
-  the presence of a quantity field on 2/151, and the page/cursor encoding on 2/152.
-
-  UNBLOCKS: Client.Application product-shop use-case — but each of 2/151/2/152/2/153 needs its body
-  captured before a faithful struct can be generated. Treat the fields block as the 2/151 minimum only.
+  UNBLOCKS: the Client.Application product / crafting-panel use-case -- the open/refresh and confirm
+  sends are a 1-byte selector each; pair with the S2C 3/8 money refresh.

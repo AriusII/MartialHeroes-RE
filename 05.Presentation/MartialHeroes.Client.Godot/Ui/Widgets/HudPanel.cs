@@ -43,14 +43,15 @@ public sealed class HudPanel : HudWidget
     /// <param name="h">Height in pixels.</param>
     /// <param name="background">Optional atlas texture for the panel background.
     ///   When null the panel is transparent (container only).</param>
-    public HudPanel(int x, int y, int w, int h, Texture2D? background = null)
+    public HudPanel(int x, int y, int w, int h, Texture2D? background = null, bool modalFlag = false)
     {
         _root = new Control
         {
-            Position          = new Vector2(x, y),
-            Size              = new Vector2(w, h),
+            Position = new Vector2(x, y),
+            Size = new Vector2(w, h),
             CustomMinimumSize = new Vector2(w, h),
-            ClipContents      = false,
+            ClipContents = modalFlag,
+            MouseFilter = modalFlag ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Pass,
         };
 
         if (background is not null)
@@ -59,11 +60,13 @@ public sealed class HudPanel : HudWidget
             // spec: §3.1 — "DrawSelf then children back→front".
             var bg = new TextureRect
             {
-                Texture       = background,
+                Texture = background,
                 AnchorsPreset = (int)Control.LayoutPreset.FullRect,
-                ExpandMode    = TextureRect.ExpandModeEnum.IgnoreSize,
-                StretchMode   = TextureRect.StretchModeEnum.Scale,
-                MouseFilter   = Control.MouseFilterEnum.Ignore,
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                // The atlas texture is already a W×H slice, so native draw size is the destination size.
+                // spec: Docs/RE/specs/frontend_scenes.md — source extent equals destination W×H.
+                StretchMode = TextureRect.StretchModeEnum.Keep,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
             };
             _root.AddChild(bg);
         }

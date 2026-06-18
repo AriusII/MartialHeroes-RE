@@ -1,0 +1,34 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: field VALUE meanings are static inferences. capture_verified: false.
+
+name: SmsgCashShopActionResult
+opcode: 0x40072           # major 4 (Response), minor 114 -> (4 << 16) | 114
+direction: S2C
+size: 12                  # 0xC-byte handler read
+spec: packets/4-114_cash_shop_action_result.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Cash-shop action result -- the billing-currency (CASH) shop, SEPARATE from the gold item-shop. The handler maps the result code to one of four cash-shop notice strings, shown via the global notice sink (ErrorPanel slot 168).
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 12.
+fields:
+  - { name: Leading,    type: "bytes[8]" }   # 0x00  leading block
+  - { name: ResultCode, type: i32 }          # 0x08  result code 1..4 -> cash-shop notice strings
+
+notes: |
+  Static only; no capture this pass. The handler reads a 0xC (12)-byte block. The 12-byte read size
+  and the ResultCode word @0x08 are control-flow-confirmed; the field VALUE meanings are
+  capture-pending.
+
+    0x00 (8B) Leading    : a leading block. Modelled as reserved.
+    0x08 (4B) ResultCode : a code 1..4 maps to one of four cash-shop notice strings (the 54127 /
+                           54128 / 54129 / 54130 family). The code->string mapping is a UI concern.
+
+  RELATIONSHIP: this is the CASH (billing-currency) shop result, DISTINCT from the gold item-shop
+  result 4/113 and from the vendor balance push 4/115. The normal-gold balance channel is 4/108
+  and the billing-currency channel is 4/82.
+
+  UNKNOWNS to resolve with a capture: the contents of Leading and any codes beyond 1..4.
+
+  UNBLOCKS: Client.Application cash-shop action-result handling.

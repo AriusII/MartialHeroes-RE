@@ -1064,10 +1064,14 @@ value left when the loop exits, which routes the next scene.
   load-bearing).
 - **Progress bar.** Laid out at a **1024×768 design resolution** and stretched to the live window by
   **liveW/1024 on X and liveH/768 on Y**. The track rect in design space is
-  **x ∈ [−499, −170], y ∈ [−363, −140]** (lower-left of centre). Two layers are drawn: a static
-  **track** quad (always) and a dynamic **fill** quad (only when percent > 0). The **fill width =
-  223 · percent / 100**, clamped to 223, growing **left-to-right** as the percentage rises. (The
-  exact on-screen axis of the 223 fill length is debugger-pending.)
+  **x ∈ [−499, −170] (width 329), y ∈ [−363, −140] (height 223)** (lower-left of centre), i.e. canvas
+  **(13, 524, 329, 223)** at 1024×768. Two layers are drawn: a static **track** quad (always) and a dynamic
+  **fill** quad (only when percent > 0). The fill **grows VERTICALLY, bottom-anchored** (it does NOT widen
+  left-to-right): full width **329**, height **h = ⌊223·percent/100⌋**, anchored at the bottom (design
+  y = −363, canvas y = 747) and growing upward. It samples a sub-rect of the **same loading DDS** with
+  **U fixed at [443/1024, 772/1024] = [0.4326, 0.7539]** and **V bottom-anchored at [(992−h)/1024, 992/1024]**
+  (so at full height V = [769/1024, 992/1024] = [0.7510, 0.9688]). The bar art strip lies BELOW the
+  background art in the one texture (no separate progress-bar DDS).
 - **BGM.** A looping track, sound id **920100100**, on **music category 0** (the single direct voice
   slot — a new category-0 sound frees the prior one). Started on scene enter; it stops implicitly
   when the next scene (char-select / world) takes the category-0 slot. *(Whether an explicit Stop
@@ -3157,7 +3161,7 @@ and generic-error dialogs reuse the same rect (see section 11.2f for the trailin
 | Role | Atlas | Rect (X,Y,W,H) | Src (U,V) | Kind | States / notes | Action |
 |---|---|---|---|---|---|---|
 | Bottom login-bar panel | A | 0, 326*H/768, 1024,442 | 0,582 | panel | Y scales with screen height | - |
-| Login background plate image | A | 0,469,494,113 | 265,0 | image | the plate the ID/PW row sits on | - |
+| Login background plate image | A | 265,0,494,113 | 0,469 | image | the plate the ID/PW row sits on (Rect/Src were transposed in a prior pass — re-verified vs binary BuildScene 2026-06-17: dst=265,0,494,113 src=0,469, matching login.md row 53) | - |
 | **Login / confirm button** (gold) | A | 456,64,112,39 (on-screen y=398) | 266,398 / 490,398 / 490,398 | 3-state button | submit ID+PW (version gate → validation, §1.4); word baked into art | **103** |
 | **Server-list reveal button** (gold) | A | 456,166,112,39 (on-screen y=398) | 154,398 / 378,398 / 378,398 | 3-state button | reveal the server-list / channel panel (NOT a "notice / agreement" toggle — there is no agreement panel, §1.4c); word baked into art | **102** |
 | Inner form box (layout only) | (none) | 0,0,1024,100 | - | panel | invisible container | - |
@@ -3851,3 +3855,123 @@ on the kind-0 music slot (§3.8.1).
 - **Live PIN re-roll on Reset:** static-confirmed, debugger-testable, UNVERIFIED live.
 - **`characwindow.dds` internal frame rects:** the dedicated char-select atlas's sub-rects were not
   individually catalogued (the builder primarily uses `loginwindow.dds` / `mainwindow.dds` sub-rects).
+
+## 11.8 Front-end font table — the 15 slots (CODE-CONFIRMED literals)
+
+The login entry builds a 15-slot font table once, immediately before the login scene loop, and every
+front-end widget references a font by slot index. Each slot is created with an explicit **face**,
+**size**, **advance width** (the per-glyph advance — always non-zero, so the faces are **fixed-advance**),
+**cell height** (the pixel height handed to the font engine), and **weight**. The character set is
+**HANGUL (code page 949)** for every slot. The three faces are the Korean Windows system fonts
+**DotumChe** (fixed-pitch gothic), **Dotum** (gothic), and **BatangChe** (fixed-pitch serif).
+
+| slot | face | size | advance | cell height | weight |
+|------|------|------|---------|-------------|--------|
+| 0  | DotumChe  | 12 | 6  | 12 | 0 (≈400) |
+| 1  | Dotum     | 10 | 5  | 10 | 0 |
+| 2  | DotumChe  | 32 | 16 | 32 | 800 |
+| 3  | DotumChe  | 18 | 12 | 24 | 800 |
+| 4  | DotumChe  | 12 | 6  | 12 | 800 |
+| 5  | BatangChe | 12 | 6  | 12 | 0 |
+| 6  | BatangChe | 18 | 12 | 24 | 700 |
+| 7  | BatangChe | 12 | 6  | 12 | 700 |
+| 8  | BatangChe | 12 | 6  | 12 | 700 |
+| 9  | DotumChe  | 12 | 6  | 12 | 700 |
+| 10 | Dotum     | 16 | 10 | 20 | 800 |
+| 11 | DotumChe  | 10 | 5  | 10 | 400 |
+| 12 | DotumChe  | 12 | 6  | 12 | 400 |
+| 13 | DotumChe  | 14 | 7  | 14 | 400 |
+| 14 | DotumChe  | 16 | 8  | 16 | 400 |
+
+Slot **2** (32 px, weight 800) is the large title face; slot **4** (12 px, weight 800) is the emphasised
+body face used by the build-tail captions (see §3.8); slots **0/1** are the default small UI faces. Because
+the faces are fixed-advance, label glyphs are laid on a fixed advance grid — a proportional renderer will
+mis-align multi-glyph captions versus the original.
+
+## 11.9 Widget builder primitives — the rect contract (CODE-CONFIRMED)
+
+Every front-end widget is built by one of a small set of primitive builders. The destination rect is
+**(X, Y, W, H)** and the atlas origin is **(SrcX, SrcY)**; the **source sub-rect extent is always equal to
+the destination W×H** — i.e. **every blit is 1:1 pixels and never scaled**. Default alpha is opaque (255);
+a colour of −1 (white) means "no tint" (the common case). A capability flag distinguishes image / panel /
+clickable-button. The primitives and their argument order:
+
+1. **Image** — `(tex, X, Y, W, H, SrcX, SrcY, color)`.
+2. **Panel** — `(tex, X, Y, W, H, SrcX, SrcY, modalFlag, color)`; the `modalFlag` marks an opaque /
+   input-capturing panel.
+3. **3-state button** — `(tex, X, Y, W, H, NormSrcX, NormSrcY, HovSrcX, HovSrcY, PrsSrcX, PrsSrcY, color)`;
+   three atlas origins for the normal/hover/pressed frames, all sharing the one destination W×H.
+4. **1-state button** — `(tex, X, Y, W, H, SrcX, SrcY, color)`; used for the small scroll/pager arrows.
+5. **Label** — `(tex = none, X, Y, W, H, color)` then a font-slot assignment and a set-text-and-align call;
+   a label is an image component with no texture whose glyphs come from its font slot.
+6. **Textbox / editbox** — `(tex, X, Y, W, H, SrcX, SrcY, color)`; the IME mode, maximum length and the
+   click action id are assigned by follow-up calls, not constructor arguments.
+7. **Checkbox** — `(tex, X, Y, W, H, OffSrcX, OffSrcY, OnSrcX, OnSrcY, color)`; separate unchecked/checked
+   atlas origins.
+8. **Composition** — add-child (passive) and add-child-with-action (binds the child's click to an action
+   id). Action ids are each scene's command vocabulary (e.g. login: 100/101 login/quit, 102 open server
+   list, 104 save-id, 106–108 scroll, 109/110 id/password; PIN keypad: 0–99 digit faces, 11 ok, 12 clear,
+   13 cancel; opening: 100 skip).
+
+## 11.10 Boot, Init resolution & the front-end message/sound catalogue (CODE-CONFIRMED)
+
+**Boot (before the scene loop).** The entry point keeps the display awake, loads `game.lua`, reads the
+integer keys `vfsmode`, `launcher`, `debugmode`, sets the VFS mount mode, then enters the scene loop **only
+if** `launcher == 0` **or** the command line is `-Start`; the VFS is mounted exactly once at that point.
+
+**Init (state 0).** Builds no UI. It acquires the engine/network singletons, selects the screen
+resolution, then advances straight to Login (state 1). Resolution selection: a video-config mode field
+chooses between **native-desktop** (width = primary-screen width, height = primary-screen height, each
+clamped to **1920×1200**) and a **configured** width×height (a 0 in either axis falls back to the desktop
+metric; same 1920×1200 clamp). The authored reference canvas is **1024×768**; all front-end widget
+coordinates are authored for 1024×768 (§11.0).
+
+**Login entry (state 1).** Loads the message table `data/script/msg.xdb`, constructs the login window,
+builds the 15-slot font table (§11.8), and reads `DISPLAY_GAME_ADDICTION_WARNING_CHECK_TIME` (×1000 ms)
+for the Korean play-time warning timer.
+
+**Front-end caption-id catalogue (`msg.xdb`).** The login scene resolves these caption ids:
+
+- **4001–4022** — the 22 central notice / agreement body labels.
+- **4023, 4024** — the two login modal-panel prompt texts.
+- **4025, 4026** — credential-entry validation (id-too-short / password-empty).
+- **4027, 4028** — login / network failure messages.
+- **4029–4032** — server-list text labels.
+- **5901** — formatted fallback caption for a server id outside the 1..40 range.
+- **6001–6005** — server status / load captions (6001 red / 6002 orange / 6003 yellow population bands;
+  6004/6005 load-threshold & capacity-format text).
+- **2204** — version-mismatch error (shown when `data/cursor/game.ver` disagrees with the bundled
+  `game.ver`).
+
+The login build also reads `data/script/uiconfig.lua` key `NEW_SERVER_INDEX` to seed the highlighted
+new-server entry.
+
+**Per-scene sound ids.** Login intro stinger **861010105** (one-shot, no loop, fired as the login window
+opens its intro curtain); Load BGM **920100100** (looping); Opening BGM **910061000** (looping).
+
+## 11.11 Login window visibility — the sub-state FSM (CODE-CONFIRMED)
+
+The login window runs a per-frame sub-state machine (the render callback calls the window's update method)
+that drives which panels are visible. It is the load-bearing fact for a faithful login: **most panels are
+hidden at build time and shown only in the sub-state that needs them.** Sub-state sequence and visibility:
+
+- **Sub-state 1 (curtain start):** play SFX **861010105** (category 2, no loop). Top curtain at Y=0; the
+  **form panel at Y=326** (closed). SHOW the backdrop + the confirm faceplate. **HIDE** the notice panel,
+  the server-list panel, the quit/help strip + deco, the interactive header (ID/PW/login), and the PIN.
+- **Sub-states 2–4 (curtain slide):** each tick the **top curtain slides up to Y=−222** and the **form panel
+  slides down to Y=548** (open). The form widgets are children of the form panel and **ride it to Y=548** —
+  the form's resting position is the **bottom band (Y≈548–753)**, NOT the mid-canvas. Notice / server-list /
+  option panel stay hidden; the faceplate is shown (its size set to 494×469 once the slide passes ~200).
+- **Sub-state 5:** **SHOW the interactive header** (the ID / password / login / save-id / server-list row);
+  keep the PIN hidden. → at-rest sub-state 6.
+- **At rest (sub-state 6):** visible = backdrop + form panel at Y=548 (faceplate + ID/PW/login/checkbox).
+  **The notice/EULA panel is NEVER shown by the FSM — it is hidden at rest** (it is an overlay that shares
+  the central rect with the server-list, only the server-list is raised on demand). The central area shows
+  only the backdrop.
+- **Server-list:** opening it (its sub-state) **hides the interactive header, the PIN and the notice**, and
+  raises the server-list panel in the shared central rect; selecting a server / the FSM closes it.
+- **PIN:** the PIN modal is raised in its sub-state (hides the notice); on submit the flow advances.
+
+C# parity: the notice panel must be `Visible=false` at rest (never restored), and the form container must
+**track the bottom curtain to Y=548** (not be frozen at Y=326). Freezing the form at 326 with the notice
+shown was the cause of the "everything piled in the centre" disorder.

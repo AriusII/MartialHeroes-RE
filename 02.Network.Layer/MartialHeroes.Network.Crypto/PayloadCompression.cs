@@ -45,7 +45,7 @@ public static class PayloadCompression
         byte[] buffer = ArrayPool<byte>.Shared.Rent(maxOut == 0 ? 1 : maxOut);
         try
         {
-            length = LZ4Codec.Encode(source, buffer.AsSpan(), LZ4Level.L00_FAST);
+            length = LZ4Codec.Encode(source, buffer.AsSpan());
             if (length < 0)
             {
                 throw new InvalidOperationException(

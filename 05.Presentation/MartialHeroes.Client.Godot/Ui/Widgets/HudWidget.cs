@@ -161,7 +161,7 @@ public abstract class HudWidget
     {
         _children.Add(child);
         Control? parentCtrl = GetControl();
-        Control? childCtrl  = child.GetControl();
+        Control? childCtrl = child.GetControl();
         if (parentCtrl is not null && childCtrl is not null)
             parentCtrl.AddChild(childCtrl);
     }

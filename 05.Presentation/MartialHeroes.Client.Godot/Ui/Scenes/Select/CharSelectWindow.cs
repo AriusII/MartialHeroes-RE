@@ -119,7 +119,7 @@ public sealed partial class CharSelectWindow : Control
     // Constants (spec: Docs/RE/specs/ui_system.md §8.2+§8.4. CODE-CONFIRMED.)
     // =========================================================================
 
-    private const int MaxSlots = 5;            // spec: frontend_scenes.md §3.1. CODE-CONFIRMED.
+    private const int MaxSlots = 5; // spec: frontend_scenes.md §3.1. CODE-CONFIRMED.
     private const string BlankSentinel = "@BLANK@";
 
     // Reference canvas.
@@ -129,22 +129,22 @@ public sealed partial class CharSelectWindow : Control
 
     // Atlas paths.
     // spec: Docs/RE/specs/ui_system.md §8.2 atlas correction (CODE-CONFIRMED).
-    private const string AtlasLoginWindow  = "data/ui/loginwindow.dds";
+    private const string AtlasLoginWindow = "data/ui/loginwindow.dds";
     private const string AtlasInventWindow = "data/ui/inventwindow.dds";
-    private const string AtlasBlacksheet   = "data/ui/blacksheet.dds";
-    private const string AtlasMainWindow   = "data/ui/mainwindow.dds";
+    private const string AtlasBlacksheet = "data/ui/blacksheet.dds";
+    private const string AtlasMainWindow = "data/ui/mainwindow.dds";
 
     // Top tabs — actionIds 1/2/3.
     // spec: Docs/RE/specs/frontend_scenes.md §11.5b. CODE-CONFIRMED.
-    private const int ActionServer  = 1; // Server tab.
+    private const int ActionServer = 1; // Server tab.
     private const int ActionChannel = 2; // Channel tab.
-    private const int ActionBack    = 3; // Back tab.
+    private const int ActionBack = 3; // Back tab.
 
     // Roster action row — actionIds 4/5/6, dst-Y 112.
     // spec: Docs/RE/specs/ui_system.md §8.2+§8.4. CODE-CONFIRMED.
     private const int ActionCreate = 4;
     private const int ActionDelete = 5;
-    private const int ActionEnter  = 6;
+    private const int ActionEnter = 6;
 
     // Create-form class buttons — actionIds 10-13.
     // spec: Docs/RE/specs/ui_system.md §8.2. CODE-CONFIRMED.
@@ -161,50 +161,52 @@ public sealed partial class CharSelectWindow : Control
     // Create-form Confirm/Cancel actions 35/36.
     // spec: Docs/RE/specs/ui_system.md §8.2+§8.4. CODE-CONFIRMED.
     private const int ActionConfirm = 35;
-    private const int ActionCancel  = 36;
+    private const int ActionCancel = 36;
 
     // Stat grid — 10 cells (2×5), base-Y 191, stride 24, cell 24×16.
     // spec: Docs/RE/specs/ui_system.md §8.2+§8.4. CODE-CONFIRMED.
-    private const int StatGridRows    = 5;
-    private const int StatGridBaseY   = 191; // spec §8.2+§8.4. CODE-CONFIRMED.
-    private const int StatGridStride  = 24;  // spec §8.2+§8.4. CODE-CONFIRMED.
-    private const int StatIconW       = 24;
-    private const int StatIconH       = 16;
-    private const int StatCol1X       = 154; // spec §8.2. CODE-CONFIRMED.
-    private const int StatCol2X       = 178; // spec §8.2. CODE-CONFIRMED.
-    private const int StatValX        = 51;  // spec §8.2+§8.4. CODE-CONFIRMED.
-    private const int StatValBaseY    = 193; // spec §8.2+§8.4. CODE-CONFIRMED.
-    private const int StatValW        = 35;
-    private const int StatValH        = 12;
+    private const int StatGridRows = 5;
+    private const int StatGridBaseY = 191; // spec §8.2+§8.4. CODE-CONFIRMED.
+    private const int StatGridStride = 24; // spec §8.2+§8.4. CODE-CONFIRMED.
+    private const int StatIconW = 24;
+    private const int StatIconH = 16;
+    private const int StatCol1X = 154; // spec §8.2. CODE-CONFIRMED.
+    private const int StatCol2X = 178; // spec §8.2. CODE-CONFIRMED.
+    private const int StatValX = 51; // spec §8.2+§8.4. CODE-CONFIRMED.
+    private const int StatValBaseY = 193; // spec §8.2+§8.4. CODE-CONFIRMED.
+    private const int StatValW = 35;
+    private const int StatValH = 12;
 
     // Col-1 NORMAL/HOVER src. spec §8.2. CODE-CONFIRMED.
-    private const int StatCol1NormX  = 500;
-    private const int StatCol1NormY  = 770;
-    private const int StatCol1HovX   = 548;
+    private const int StatCol1NormX = 500;
+    private const int StatCol1NormY = 770;
+
+    private const int StatCol1HovX = 548;
+
     // Col-2 NORMAL/HOVER src. spec §8.2. CODE-CONFIRMED.
-    private const int StatCol2NormX  = 524;
-    private const int StatCol2NormY  = 770;
-    private const int StatCol2HovX   = 572;
+    private const int StatCol2NormX = 524;
+    private const int StatCol2NormY = 770;
+    private const int StatCol2HovX = 572;
 
     // Roster button row — loginwindow.dds, dst-Y 112, w=59 h=20.
     // spec: Docs/RE/specs/ui_system.md §8.4. CODE-CONFIRMED.
-    private const float RosterBtnY  = 112f; // spec §8.2+§8.4 dst-Y 112. CODE-CONFIRMED.
-    private const float RosterBtnW  = 59f;
-    private const float RosterBtnH  = 20f;
+    private const float RosterBtnY = 112f; // spec §8.2+§8.4 dst-Y 112. CODE-CONFIRMED.
+    private const float RosterBtnW = 59f;
+    private const float RosterBtnH = 20f;
 
     // Create-form confirm/cancel — on loginwindow.dds create-plate row V=1004.
     // dst-Y 325, w=59, h=20. Confirm dst-X 42, Cancel dst-X 112.
     // HOVER src-X 413 (Confirm) / 531 (Cancel).
     // spec: Docs/RE/specs/ui_system.md §8.2+§8.4. CODE-CONFIRMED.
-    private const int ConfirmDstX    = 42;
-    private const int CancelDstX     = 112;
+    private const int ConfirmDstX = 42;
+    private const int CancelDstX = 112;
     private const int ConfirmCancelY = 325; // spec §8.4 "dst-Y 325". CODE-CONFIRMED.
     private const int ConfirmCancelW = 59;
     private const int ConfirmCancelH = 20;
     private const int ConfirmNormSrcX = 354; // spec §8.4. CODE-CONFIRMED.
-    private const int ConfirmHovSrcX  = 413; // spec §8.4. CODE-CONFIRMED.
-    private const int CancelNormSrcX  = 472; // spec §8.4. CODE-CONFIRMED.
-    private const int CancelHovSrcX   = 531; // spec §8.4. CODE-CONFIRMED.
+    private const int ConfirmHovSrcX = 413; // spec §8.4. CODE-CONFIRMED.
+    private const int CancelNormSrcX = 472; // spec §8.4. CODE-CONFIRMED.
+    private const int CancelHovSrcX = 531; // spec §8.4. CODE-CONFIRMED.
     private const int ConfirmCancelSrcY = 1004; // spec §8.4 "V=1004". CODE-CONFIRMED.
 
     // Corner close — fallback dst (971,610) 23×23, blacksheet.dds src (941,910).
@@ -214,7 +216,7 @@ public sealed partial class CharSelectWindow : Control
     private const int CloseDstY = 610;
     private const int CloseSrcX = 941;
     private const int CloseSrcY = 910;
-    private const int CloseSz   = 23;
+    private const int CloseSz = 23;
 
     // Name modal — centred 340×190, chrome from inventwindow.dds src(318,647).
     // spec: Docs/RE/specs/ui_system.md §8.3. CODE-CONFIRMED.
@@ -235,10 +237,10 @@ public sealed partial class CharSelectWindow : Control
     // Class button NORMAL src-Y 1005; NORMAL src-X {590,635,680,725}; HOVER src-X {770,815,860,905}.
     // spec: Docs/RE/specs/ui_system.md §8.2+§8.4. CODE-CONFIRMED.
     private static readonly int[] ClassBtnNormSrcX = [590, 635, 680, 725];
-    private static readonly int[] ClassBtnHovSrcX  = [770, 815, 860, 905];
+    private static readonly int[] ClassBtnHovSrcX = [770, 815, 860, 905];
     private const int ClassBtnSrcY = 1005; // spec §8.2. CODE-CONFIRMED.
-    private const int ClassBtnW    = 45;   // AppSelectorW. CODE-CONFIRMED.
-    private const int ClassBtnH    = 19;   // AppSelectorH. CODE-CONFIRMED.
+    private const int ClassBtnW = 45; // AppSelectorW. CODE-CONFIRMED.
+    private const int ClassBtnH = 19; // AppSelectorH. CODE-CONFIRMED.
 
     // UI index → internal class id. spec: frontend_scenes.md §4.1. CODE-CONFIRMED.
     // UI {0,1,2,3} → internal {4,1,3,2} (Monk/Musa/Dosa/Salsu).
@@ -266,7 +268,7 @@ public sealed partial class CharSelectWindow : Control
 
     private readonly LiveSlot[] _slots = new LiveSlot[MaxSlots];
     private int _selectedSlot;
-    private int _createUiClass;   // 0..3
+    private int _createUiClass; // 0..3
     private int _createFaceIndex = FaceMin;
     private bool _createFormVisible;
     private bool _rotatePressLeft;
@@ -278,37 +280,37 @@ public sealed partial class CharSelectWindow : Control
 
     // Cached node references (UI widgets updated dynamically).
     // HudLabel wraps a Godot Label; use GetControl() to add to parent, and .Text for mutations.
-    private HudLabel?   _charCountCaptionWidget;
-    private HudLabel?   _infoNameWidget;
-    private HudLabel?   _infoLevelWidget;
-    private HudLabel?   _infoClassWidget;
-    private HudLabel?   _createFaceLabelWidget;
-    private HudLabel?   _createDescLine0Widget;
-    private HudLabel?   _createDescLine1Widget;
-    private HudLabel?   _createDescLine2Widget;
-    private HudLabel?   _nameModalTitleWidget;
-    private LineEdit?   _nameEntry;
-    private HudLabel?   _nameToastWidget;
-    private Control?    _createForm;
-    private Control?    _nameModal;
-    private HudLabel[]  _statValLabelWidgets = [];
+    private HudLabel? _charCountCaptionWidget;
+    private HudLabel? _infoNameWidget;
+    private HudLabel? _infoLevelWidget;
+    private HudLabel? _infoClassWidget;
+    private HudLabel? _createFaceLabelWidget;
+    private HudLabel? _createDescLine0Widget;
+    private HudLabel? _createDescLine1Widget;
+    private HudLabel? _createDescLine2Widget;
+    private HudLabel? _nameModalTitleWidget;
+    private LineEdit? _nameEntry;
+    private HudLabel? _nameToastWidget;
+    private Control? _createForm;
+    private Control? _nameModal;
+    private HudLabel[] _statValLabelWidgets = [];
 
     // Convenience accessors — resolve the backing Label from HudLabel for HorizontalAlignment etc.
     private Label? _charCountCaption => (Label?)_charCountCaptionWidget?.GetControl();
-    private Label? _infoName         => (Label?)_infoNameWidget?.GetControl();
-    private Label? _infoLevel        => (Label?)_infoLevelWidget?.GetControl();
-    private Label? _infoClass        => (Label?)_infoClassWidget?.GetControl();
-    private Label? _createFaceLabel  => (Label?)_createFaceLabelWidget?.GetControl();
-    private Label? _createDescLine0  => (Label?)_createDescLine0Widget?.GetControl();
-    private Label? _createDescLine1  => (Label?)_createDescLine1Widget?.GetControl();
-    private Label? _createDescLine2  => (Label?)_createDescLine2Widget?.GetControl();
-    private Label? _nameModalTitle   => (Label?)_nameModalTitleWidget?.GetControl();
-    private Label? _nameToast        => (Label?)_nameToastWidget?.GetControl();
+    private Label? _infoName => (Label?)_infoNameWidget?.GetControl();
+    private Label? _infoLevel => (Label?)_infoLevelWidget?.GetControl();
+    private Label? _infoClass => (Label?)_infoClassWidget?.GetControl();
+    private Label? _createFaceLabel => (Label?)_createFaceLabelWidget?.GetControl();
+    private Label? _createDescLine0 => (Label?)_createDescLine0Widget?.GetControl();
+    private Label? _createDescLine1 => (Label?)_createDescLine1Widget?.GetControl();
+    private Label? _createDescLine2 => (Label?)_createDescLine2Widget?.GetControl();
+    private Label? _nameModalTitle => (Label?)_nameModalTitleWidget?.GetControl();
+    private Label? _nameToast => (Label?)_nameToastWidget?.GetControl();
 
     // 3D scene references (REUSED — not rebuilt here).
-    private CharSelectScene3D?    _scene3D;
-    private CharCreatePreview3D?  _createPreview3D;
-    private SubViewport?          _scene3DViewport;
+    private CharSelectScene3D? _scene3D;
+    private CharCreatePreview3D? _createPreview3D;
+    private SubViewport? _scene3DViewport;
     private SubViewportContainer? _scene3DContainer;
 
     // npc.scr class descriptions (CP949, already decoded by NpcScrDescriptions).
@@ -403,7 +405,7 @@ public sealed partial class CharSelectWindow : Control
         if (_createFormVisible && _createPreview3D is not null && IsInstanceValid(_createPreview3D))
         {
             float dt = (float)delta;
-            if (_rotatePressLeft)  _createPreview3D.RotateLeft(dt);
+            if (_rotatePressLeft) _createPreview3D.RotateLeft(dt);
             if (_rotatePressRight) _createPreview3D.RotateRight(dt);
         }
 
@@ -437,22 +439,22 @@ public sealed partial class CharSelectWindow : Control
         BuildTabButton(
             x: 67, y: 17, w: 113, h: 40,
             normSrcX: 675, normSrcY: 795,
-            hovSrcX: 675,  hovSrcY: 795,
-            prsSrcX: 483,  prsSrcY: 883,  // PRESSED src. spec §11.5b. CODE-CONFIRMED.
+            hovSrcX: 675, hovSrcY: 795,
+            prsSrcX: 483, prsSrcY: 883, // PRESSED src. spec §11.5b. CODE-CONFIRMED.
             actionId: ActionServer);
 
         BuildTabButton(
             x: 232, y: 7, w: 113, h: 40,
             normSrcX: 640, normSrcY: 742,
-            hovSrcX: 640,  hovSrcY: 742,
-            prsSrcX: 483,  prsSrcY: 923,  // PRESSED src. spec §11.5b. CODE-CONFIRMED.
+            hovSrcX: 640, hovSrcY: 742,
+            prsSrcX: 483, prsSrcY: 923, // PRESSED src. spec §11.5b. CODE-CONFIRMED.
             actionId: ActionChannel);
 
         BuildTabButton(
             x: 393, y: 17, w: 113, h: 40,
             normSrcX: 625, normSrcY: 691,
-            hovSrcX: 625,  hovSrcY: 691,
-            prsSrcX: 483,  prsSrcY: 963,  // PRESSED src. spec §11.5b. CODE-CONFIRMED.
+            hovSrcX: 625, hovSrcY: 691,
+            prsSrcX: 483, prsSrcY: 963, // PRESSED src. spec §11.5b. CODE-CONFIRMED.
             actionId: ActionBack);
 
         // Char-count caption — msg 2209, orange, top-centre.
@@ -470,21 +472,21 @@ public sealed partial class CharSelectWindow : Control
         // Left char-info background art: loginwindow.dds src(556,542) 215×147.
         // spec: Docs/RE/specs/frontend_scenes.md §11.5d. CODE-CONFIRMED.
         const float infoPanelX = (RefW - 215f) / 2f; // spec §11.5a "X=(W-215)/2". CODE-CONFIRMED.
-        const float infoPanelY = 575f;                // spec §11.5a "y=575". CODE-CONFIRMED.
+        const float infoPanelY = 575f; // spec §11.5a "y=575". CODE-CONFIRMED.
         AddAtlasRect(AtlasLoginWindow,
             (int)infoPanelX, (int)(infoPanelY + 142f),
             215, 147, 556, 542); // spec §11.5d. CODE-CONFIRMED.
 
         // Chrome plates A/B/C from loginwindow.dds.
         // spec: Docs/RE/specs/frontend_scenes.md §11.5a. CODE-CONFIRMED.
-        AddAtlasRect(AtlasLoginWindow, (int)infoPanelX + 0,   (int)infoPanelY + 12, 200, 46, 608, 793);
-        AddAtlasRect(AtlasLoginWindow, (int)infoPanelX + 200, (int)infoPanelY + 0,  176, 58, 608, 735);
+        AddAtlasRect(AtlasLoginWindow, (int)infoPanelX + 0, (int)infoPanelY + 12, 200, 46, 608, 793);
+        AddAtlasRect(AtlasLoginWindow, (int)infoPanelX + 200, (int)infoPanelY + 0, 176, 58, 608, 735);
         AddAtlasRect(AtlasLoginWindow, (int)infoPanelX + 376, (int)infoPanelY + 12, 201, 46, 608, 689);
-        AddAtlasRect(AtlasLoginWindow, (int)infoPanelX + 215, (int)infoPanelY + 0,  29, 22, 556, 729);
+        AddAtlasRect(AtlasLoginWindow, (int)infoPanelX + 215, (int)infoPanelY + 0, 29, 22, 556, 729);
 
         // Info labels (name/level/class), refreshed on slot selection.
         float infoLX = infoPanelX + 46f;
-        _infoNameWidget  = AddInfoLabel(new Vector2(infoLX, infoPanelY + 145f));
+        _infoNameWidget = AddInfoLabel(new Vector2(infoLX, infoPanelY + 145f));
         _infoLevelWidget = AddInfoLabel(new Vector2(infoLX, infoPanelY + 169f));
         _infoClassWidget = AddInfoLabel(new Vector2(infoLX, infoPanelY + 193f));
 
@@ -499,14 +501,14 @@ public sealed partial class CharSelectWindow : Control
             BuildGridCell(
                 x: StatCol1X, y: y,
                 normSrcX: StatCol1NormX, normSrcY: StatCol1NormY,
-                hovSrcX: StatCol1HovX,  hovSrcY: StatCol1NormY,
+                hovSrcX: StatCol1HovX, hovSrcY: StatCol1NormY,
                 actionId: ActionPointBuyBase + row * 2);
 
             // Col 2 — NORMAL(524,770) HOVER(572,770). spec §8.2+§8.4. CODE-CONFIRMED.
             BuildGridCell(
                 x: StatCol2X, y: y,
                 normSrcX: StatCol2NormX, normSrcY: StatCol2NormY,
-                hovSrcX: StatCol2HovX,  hovSrcY: StatCol2NormY,
+                hovSrcX: StatCol2HovX, hovSrcY: StatCol2NormY,
                 actionId: ActionPointBuyBase + row * 2 + 1);
 
             // Stat value label (x=51, base-Y 193, stride 24, 35×12).
@@ -527,8 +529,8 @@ public sealed partial class CharSelectWindow : Control
         const float rosterBarCX = RefW / 2f;
         const float rosterBarLeft = rosterBarCX - (3f * RosterBtnW + 2f * 8f) / 2f;
 
-        BuildRosterButton((int)rosterBarLeft,              (int)RosterBtnY,
-            normSrcX: 0,   normSrcY: 1004, prsSrcX: 59,  prsSrcY: 1004, // spec §8.4. CODE-CONFIRMED.
+        BuildRosterButton((int)rosterBarLeft, (int)RosterBtnY,
+            normSrcX: 0, normSrcY: 1004, prsSrcX: 59, prsSrcY: 1004, // spec §8.4. CODE-CONFIRMED.
             actionId: ActionCreate);
         BuildRosterButton((int)(rosterBarLeft + RosterBtnW + 8f), (int)RosterBtnY,
             normSrcX: 118, normSrcY: 1004, prsSrcX: 177, prsSrcY: 1004, // spec §8.4. CODE-CONFIRMED.
@@ -622,6 +624,7 @@ public sealed partial class CharSelectWindow : Control
             LiveSlot ls = _slots[i];
             descs[i] = (!ls.IsEmpty, !ls.IsEmpty ? (uint)ls.ServerClass : 0u);
         }
+
         _scene3D.SlotDescriptors = descs;
     }
 
@@ -679,8 +682,8 @@ public sealed partial class CharSelectWindow : Control
         // NORMAL src-Y 1005, NORMAL src-X {590,635,680,725}, HOVER src-X {770,815,860,905}.
         // spec: Docs/RE/specs/ui_system.md §8.2+§8.4. CODE-CONFIRMED.
         const int classBtnStride = 28; // vertical stride in left column.
-        const int classBtnColX   = 8;
-        const int classBtnBaseY  = 10;
+        const int classBtnColX = 8;
+        const int classBtnBaseY = 10;
         for (int ci = 0; ci < 4; ci++)
         {
             int btnY = classBtnBaseY + ci * classBtnStride;
@@ -691,8 +694,8 @@ public sealed partial class CharSelectWindow : Control
                     Atlas, AtlasLoginWindow,
                     classBtnColX, btnY, ClassBtnW, ClassBtnH,
                     ClassBtnNormSrcX[ci], ClassBtnSrcY, // NORMAL. spec §8.2+§8.4. CODE-CONFIRMED.
-                    ClassBtnHovSrcX[ci],  ClassBtnSrcY, // HOVER.  spec §8.2+§8.4. CODE-CONFIRMED.
-                    actionId: ActionClass0 + ci);       // 10/11/12/13.
+                    ClassBtnHovSrcX[ci], ClassBtnSrcY, // HOVER.  spec §8.2+§8.4. CODE-CONFIRMED.
+                    actionId: ActionClass0 + ci); // 10/11/12/13.
                 classBtn.ActionFired += OnCreateClassAction;
                 classBtn.GetControl()!.Name = $"ClassBtn{ci}";
                 leftPanel.AddChild(classBtn.GetControl()!);
@@ -710,19 +713,28 @@ public sealed partial class CharSelectWindow : Control
             6, (int)(descBaseY), (int)(200f - 12f), 56,
             descLines.Length > 0 ? descLines[0] : string.Empty, descColor, multiline: true);
         if (_createDescLine0Widget.GetControl() is Label d0Lbl)
-        { d0Lbl.Name = "DescLine0"; leftPanel.AddChild(d0Lbl); }
+        {
+            d0Lbl.Name = "DescLine0";
+            leftPanel.AddChild(d0Lbl);
+        }
 
         _createDescLine1Widget = HudWidgetFactory.MakeLabel(
             6, (int)(descBaseY + descStride), (int)(200f - 12f), 56,
             descLines.Length > 1 ? descLines[1] : string.Empty, descColor, multiline: true);
         if (_createDescLine1Widget.GetControl() is Label d1Lbl)
-        { d1Lbl.Name = "DescLine1"; leftPanel.AddChild(d1Lbl); }
+        {
+            d1Lbl.Name = "DescLine1";
+            leftPanel.AddChild(d1Lbl);
+        }
 
         _createDescLine2Widget = HudWidgetFactory.MakeLabel(
             6, (int)(descBaseY + 2f * descStride), (int)(200f - 12f), 56,
             descLines.Length > 2 ? descLines[2] : string.Empty, descColor, multiline: true);
         if (_createDescLine2Widget.GetControl() is Label d2Lbl)
-        { d2Lbl.Name = "DescLine2"; leftPanel.AddChild(d2Lbl); }
+        {
+            d2Lbl.Name = "DescLine2";
+            leftPanel.AddChild(d2Lbl);
+        }
 
         // ── CENTER COLUMN: face ± + turntable ──
         // spec: frontend_scenes.md §4.2. CODE-CONFIRMED.
@@ -804,7 +816,7 @@ public sealed partial class CharSelectWindow : Control
         };
         form.AddChild(rightPanel);
 
-        AddAtlasRectTo(rightPanel, AtlasMainWindow,   0, 0,   201, 274, 0, 0);
+        AddAtlasRectTo(rightPanel, AtlasMainWindow, 0, 0, 201, 274, 0, 0);
         AddAtlasRectTo(rightPanel, AtlasInventWindow, 0, 274, 201, 190, 318, 647);
 
         // ── Point-buy ± stat grid on the create form (10 cells, 2×5, actions 25-34) ──
@@ -826,13 +838,13 @@ public sealed partial class CharSelectWindow : Control
             // Col 1 — actions 25/27/29/31/33.
             BuildGridCellInto(statPanel, 0, y,
                 normSrcX: StatCol1NormX, normSrcY: StatCol1NormY,
-                hovSrcX: StatCol1HovX,  hovSrcY: StatCol1NormY,
+                hovSrcX: StatCol1HovX, hovSrcY: StatCol1NormY,
                 actionId: ActionPointBuyBase + row * 2);
 
             // Col 2 — actions 26/28/30/32/34.
             BuildGridCellInto(statPanel, StatIconW + 4, y,
                 normSrcX: StatCol2NormX, normSrcY: StatCol2NormY,
-                hovSrcX: StatCol2HovX,  hovSrcY: StatCol2NormY,
+                hovSrcX: StatCol2HovX, hovSrcY: StatCol2NormY,
                 actionId: ActionPointBuyBase + row * 2 + 1);
         }
 
@@ -847,7 +859,7 @@ public sealed partial class CharSelectWindow : Control
                 Atlas, AtlasLoginWindow,
                 ConfirmDstX, ConfirmCancelY, ConfirmCancelW, ConfirmCancelH,
                 ConfirmNormSrcX, ConfirmCancelSrcY, // NORMAL. spec §8.4. CODE-CONFIRMED.
-                ConfirmHovSrcX,  ConfirmCancelSrcY, // HOVER.  spec §8.4. CODE-CONFIRMED.
+                ConfirmHovSrcX, ConfirmCancelSrcY, // HOVER.  spec §8.4. CODE-CONFIRMED.
                 actionId: ActionConfirm);
             confirmBtn.ActionFired += OnCreateConfirmAction;
             form.AddChild(confirmBtn.GetControl()!);
@@ -856,7 +868,7 @@ public sealed partial class CharSelectWindow : Control
                 Atlas, AtlasLoginWindow,
                 CancelDstX, ConfirmCancelY, ConfirmCancelW, ConfirmCancelH,
                 CancelNormSrcX, ConfirmCancelSrcY, // NORMAL. spec §8.4. CODE-CONFIRMED.
-                CancelHovSrcX,  ConfirmCancelSrcY, // HOVER.  spec §8.4. CODE-CONFIRMED.
+                CancelHovSrcX, ConfirmCancelSrcY, // HOVER.  spec §8.4. CODE-CONFIRMED.
                 actionId: ActionCancel);
             cancelBtn.ActionFired += _ => HideCreateForm();
             form.AddChild(cancelBtn.GetControl()!);
@@ -1039,6 +1051,7 @@ public sealed partial class CharSelectWindow : Control
             ShowCreateForm();
             return;
         }
+
         GD.Print($"[CharSelectWindow] EnterGameRequested: name='{ls.Name}' slot={_selectedSlot}.");
         EmitSignal(SignalName.EnterGameRequested, ls.Name, _selectedSlot);
     }
@@ -1051,6 +1064,7 @@ public sealed partial class CharSelectWindow : Control
             GD.Print($"[CharSelectWindow] Delete on empty slot {_selectedSlot} ignored.");
             return;
         }
+
         GD.Print($"[CharSelectWindow] DeleteCharacterRequested: name='{ls.Name}' slot={_selectedSlot}.");
         EmitSignal(SignalName.DeleteCharacterRequested, _selectedSlot, ls.Name);
     }
@@ -1240,7 +1254,8 @@ public sealed partial class CharSelectWindow : Control
     {
         int count = 0;
         for (int i = 0; i < MaxSlots; i++)
-            if (!_slots[i].IsEmpty) count++;
+            if (!_slots[i].IsEmpty)
+                count++;
 
         string template = Text?.GetCaption(MsgCharCount, string.Empty) ?? string.Empty;
         if (string.IsNullOrEmpty(template)) return string.Empty;
@@ -1294,8 +1309,8 @@ public sealed partial class CharSelectWindow : Control
     private void BuildTabButton(
         int x, int y, int w, int h,
         int normSrcX, int normSrcY,
-        int hovSrcX,  int hovSrcY,
-        int prsSrcX,  int prsSrcY,
+        int hovSrcX, int hovSrcY,
+        int prsSrcX, int prsSrcY,
         int actionId)
     {
         if (Atlas is null) return;
@@ -1303,8 +1318,8 @@ public sealed partial class CharSelectWindow : Control
             Atlas, AtlasLoginWindow,
             x, y, w, h,
             normSrcX, normSrcY,
-            prsSrcX,  prsSrcY,   // PRESSED
-            hovSrcX,  hovSrcY,   // HOVER
+            prsSrcX, prsSrcY, // PRESSED
+            hovSrcX, hovSrcY, // HOVER
             actionId);
         btn.ActionFired += OnTabButtonFired;
         AddChild(btn.GetControl()!);
@@ -1313,7 +1328,7 @@ public sealed partial class CharSelectWindow : Control
     private void BuildRosterButton(
         int x, int y,
         int normSrcX, int normSrcY,
-        int prsSrcX,  int prsSrcY,
+        int prsSrcX, int prsSrcY,
         int actionId)
     {
         if (Atlas is null) return;
@@ -1321,8 +1336,8 @@ public sealed partial class CharSelectWindow : Control
             Atlas, AtlasLoginWindow,
             x, y, (int)RosterBtnW, (int)RosterBtnH,
             normSrcX, normSrcY,
-            prsSrcX,  prsSrcY,
-            normSrcX, normSrcY,  // HOVER = NORMAL (spec §1.5 2-state fallback)
+            prsSrcX, prsSrcY,
+            normSrcX, normSrcY, // HOVER = NORMAL (spec §1.5 2-state fallback)
             actionId);
         btn.ActionFired += OnRosterButtonFired;
         AddChild(btn.GetControl()!);
@@ -1331,7 +1346,7 @@ public sealed partial class CharSelectWindow : Control
     private void BuildGridCell(
         int x, int y,
         int normSrcX, int normSrcY,
-        int hovSrcX,  int hovSrcY,
+        int hovSrcX, int hovSrcY,
         int actionId)
     {
         BuildGridCellInto(this, x, y, normSrcX, normSrcY, hovSrcX, hovSrcY, actionId);
@@ -1341,7 +1356,7 @@ public sealed partial class CharSelectWindow : Control
         Control parent,
         int x, int y,
         int normSrcX, int normSrcY,
-        int hovSrcX,  int hovSrcY,
+        int hovSrcX, int hovSrcY,
         int actionId)
     {
         if (Atlas is null) return;
@@ -1349,7 +1364,7 @@ public sealed partial class CharSelectWindow : Control
             Atlas, AtlasLoginWindow,
             x, y, StatIconW, StatIconH,
             normSrcX, normSrcY,
-            hovSrcX,  hovSrcY,
+            hovSrcX, hovSrcY,
             actionId);
         // Point-buy ± intent: emitted as an ApplicationUseCases call by SelectScene.
         // We fire ActionFired here; SelectScene wires it. (No game logic in this class.)
@@ -1391,9 +1406,9 @@ public sealed partial class CharSelectWindow : Control
     /// </summary>
     private readonly record struct LiveSlot(
         bool IsEmpty,
-        string Name       = "",
-        ushort Level      = 0,
+        string Name = "",
+        ushort Level = 0,
         ushort ServerClass = 0,
-        uint CurrentHp   = 0,
-        int SlotIndex    = 0);
+        uint CurrentHp = 0,
+        int SlotIndex = 0);
 }

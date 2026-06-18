@@ -23,8 +23,8 @@ public sealed partial class SelectScene : StubSceneController
     private SceneHost? _host;
     private ScreenHost? _screenHost;
     private FrontEndAudio? _audio;
-    private CharSelectWindow? _select;         // NEW: Ui/Scenes substrate
-    private CharSelectEventDrainer? _drainer;  // NEW: typed for CharSelectWindow
+    private CharSelectWindow? _select; // NEW: Ui/Scenes substrate
+    private CharSelectEventDrainer? _drainer; // NEW: typed for CharSelectWindow
     private bool _confirmInFlight;
 
     /// <inheritdoc/>
@@ -85,17 +85,17 @@ public sealed partial class SelectScene : StubSceneController
     {
         // Resolve HudAtlasLibrary + HudTextLibrary from ClientContext (null if not yet ready).
         var atlas = _ctx?.HudAtlas;
-        var text  = _ctx?.HudText;
+        var text = _ctx?.HudText;
 
         var select = new CharSelectWindow
         {
-            Name  = "CharSelectWindow",
+            Name = "CharSelectWindow",
             Atlas = atlas,
-            Text  = text,
+            Text = text,
         };
 
-        select.EnterGameRequested    += OnEnterGameRequested;
-        select.BackRequested         += OnBackRequested;
+        select.EnterGameRequested += OnEnterGameRequested;
+        select.BackRequested += OnBackRequested;
         select.CreateCharacterRequested += OnCreateCharacterRequested;
         select.DeleteCharacterRequested += OnDeleteCharacterRequested;
         return select;

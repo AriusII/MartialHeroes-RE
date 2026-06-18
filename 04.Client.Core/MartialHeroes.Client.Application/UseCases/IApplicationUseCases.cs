@@ -54,8 +54,11 @@ public interface IApplicationUseCases
     /// channel-endpoint query (port 10000 + serverId) on the injected <see cref="ILobbyClient"/>, and
     /// publishes a <see cref="ChannelEndpointResolvedEvent"/> (host + port). The caller hands that
     /// endpoint to the transport to open the persistent game connection. Returns the resolved endpoint.
+    /// When an <c>ILastServerStore</c> is wired, persists <paramref name="serverId"/> as
+    /// <c>Lastserver</c> (REG_DWORD) after a successful channel-endpoint fetch.
     /// Requires a lobby client to be wired; throws <see cref="System.InvalidOperationException"/>
-    /// otherwise. spec: Docs/RE/specs/login_flow.md §1 step 4 / §2.2.
+    /// otherwise. spec: Docs/RE/specs/login_flow.md §1 step 4 / §2.2; §2.0 Registry note
+    /// (Lastserver persisted on commit); frontend_layout_tables.md §2.2 sub-state 37.
     /// </summary>
     /// <param name="serverId">The chosen server id (1..40), added to 10000 to form the channel port.</param>
     /// <returns>The resolved game-server <see cref="LobbyChannelEndpoint"/> (host + port).</returns>

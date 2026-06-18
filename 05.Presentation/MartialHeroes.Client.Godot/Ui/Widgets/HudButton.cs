@@ -73,38 +73,46 @@ public sealed partial class HudButton : HudWidget
     public HudButton(
         int x, int y, int w, int h,
         Texture2D? normalFrame,
-        Texture2D? hoverFrame   = null,
+        Texture2D? hoverFrame = null,
         Texture2D? pressedFrame = null,
-        string caption          = "",
-        Color? captionTint      = null,
-        int captionFontSlot     = 0) // spec: §6.3 button caption font slot default 0: CODE-CONFIRMED
+        string caption = "",
+        Color? captionTint = null,
+        int captionFontSlot = 0) // spec: §6.3 button caption font slot default 0: CODE-CONFIRMED
     {
         // Build the backing TextureButton.
         _btn = new TextureButton
         {
-            Position         = new Vector2(x, y),
-            Size             = new Vector2(w, h),
+            Position = new Vector2(x, y),
+            Size = new Vector2(w, h),
             CustomMinimumSize = new Vector2(w, h),
             IgnoreTextureSize = true,
-            StretchMode      = TextureButton.StretchModeEnum.Scale,
+            // Each atlas frame is sliced to the destination W×H before assignment; keep native size.
+            // spec: Docs/RE/specs/frontend_scenes.md — widget blits are 1:1 pixel rects, never scaled.
+            StretchMode = TextureButton.StretchModeEnum.Keep,
         };
+
+        // Tag the TextureButton so AudioService can identify HUD buttons via NodeAdded without a
+        // direct type-check (HudButton is a non-Node wrapper). AudioService hooks Pressed → PlayUiClick
+        // on any TextureButton carrying this meta.
+        // spec: Docs/RE/specs/sound.md — UI click SFX 861010101 on button presses.
+        _btn.SetMeta("is_hud_button", Variant.From(true));
 
         // Assign frames.
         // spec: §1.5 — HOVER / PRESSED default to NORMAL when no distinct frame provided.
-        _btn.TextureNormal   = normalFrame;
-        _btn.TextureHover    = hoverFrame   ?? normalFrame;
-        _btn.TexturePressed  = pressedFrame ?? normalFrame;
+        _btn.TextureNormal = normalFrame;
+        _btn.TextureHover = hoverFrame ?? normalFrame;
+        _btn.TexturePressed = pressedFrame ?? normalFrame;
         _btn.TextureDisabled = normalFrame; // spec: §1.5 — DISABLED always equals NORMAL.
-        _btn.TextureFocused  = normalFrame;
+        _btn.TextureFocused = normalFrame;
 
         // Caption label.
         _captionLabel = new Label
         {
-            Text             = caption,
+            Text = caption,
             HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment   = VerticalAlignment.Center,
-            AnchorsPreset    = (int)Control.LayoutPreset.FullRect,
-            MouseFilter      = Control.MouseFilterEnum.Ignore,
+            VerticalAlignment = VerticalAlignment.Center,
+            AnchorsPreset = (int)Control.LayoutPreset.FullRect,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
         };
 
         Color tint = captionTint ?? Colors.White;

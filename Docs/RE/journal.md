@@ -1570,3 +1570,175 @@ of the now-dead legacy front-end (BootFlow + old Screens/HUD; entangled via Serv
 needs maintainer confirm); names.yaml hand-merge; the HUD-II long tail (real target plate + ~100 secondary
 panels); HP/MP Vitals hub channel + hotbar overlay values + minimap per-area DDS naming (world-campaign /
 debugger). Uncommitted on campaign15 (commit on maintainer request).
+
+## CAMPAIGN 17 → HUD-II + legacy removal (2026-06-17 continuation, post-commit)
+After the CAMPAIGN-17 core rebuild was committed, removed the now-dead legacy and pushed the in-game HUD to functional.
+- LEGACY REMOVAL: deleted the dead front-end (BootFlow.cs + Boot.tscn + Screens/{LoginScreen,PinModal,
+  ServerSelectScreen,ServerListDrainer,OpeningWindow,LoadingScreen,CharacterSelectScreen,CharListEventDrainer})
+  after extracting ServerEntry → Screens/ServerEntry.cs and re-pointing ClientContext's SkipCfgPath to the new
+  Ui Opening window; deleted the old in-game HUD (16 HUD/* files = GameHud + panels) once consolidated; deleted
+  the old toolkit (Screens/Widgets/{StateButton,WidgetFactory,AlphaFadeDriver}, Screens/UiAssetLoader,
+  Screens/Layout/CharacterSelectLayout). Screens/ now holds only active files (3D preview, ScreenHost,
+  FrontEndAudio, NpcScrDescriptions, ServerEntry, LoginLayout); HUD/ folder empty.
+- IN-GAME HUD CONSOLIDATION (the crux): Phase F had added Ui/Hud/HudMaster ALONGSIDE the old GameHud (GameLoop
+  still drove GameHud, BYPASSING IHudEventHub → the new HUD drained empty channels). Fixed: GameLoop now PUBLISHES
+  its world events into IHudEventHub (instead of GameHud.OnXxx), HudMaster is the SOLE HUD (old GameHud removed
+  from InGameScene/World.tscn), HudRightEdgeGauge drains the new Vitals channel, InputRouter's HUD-gate →
+  HudMaster.HitTest, AudioService's UI-click SFX → the new HudButton (meta is_hud_button) not StateButton.
+- LAYER-04: added a VitalsChanged channel + HudVitalsEvent (HP/MP/stamina current+max, clamped ratios) to
+  IHudEventHub (the gauges' missing feed). slnx 0/0, 2068 tests (+19).
+- HUD-II W (IDA recovery, doida.exe 263bd994): the REAL selected-target plate = MopGagePanel (HUD slot 177),
+  full geometry (screen-centred W=226; HP bar (35,5) 172×6 src(40,517) uitex 1; 3D portrait (13,55) 200×200;
+  close/nav actions 3/1/2; msg 16001; client-side target-driven). Vitals = current/max poll model (5/52 delta,
+  5/32·4/13·4/1 absolute; max computed; no 4/2 push). Minimap corner radar = RUNTIME BMP-tile mosaic
+  data/effect/map/d<area3>x<X>z<Z>.bmp (3×3 128px ring) — NOT map%d.dds (the dead per-area-DDS panel = the
+  campaign-17 map2.dds-bug root cause). Hotbar overlay = 3 hardcoded 29×29 frames (src-X 763/792/821, src-Y 655,
+  uitex 3); per-skill values from .do. Specs promoted: ui_hud_layout §5.4a/§5.5b/§5.6/§5.10a, ui_system §1.7.1,
+  combat §13. names.yaml candidates: MopGagePanel(177)/GagePanel(157)/OtherInfo/MapPanel/TotalMapPanel/map-marker
+  keys 52,29 + hotbar builder roles. Firewall PASS.
+- HUD-II E: built HudTargetFrame (MopGagePanel, drains hub.TargetChanges — HudMaster now 10 panels), rewrote
+  HudMinimapPanel to the BMP-tile mosaic (map%d.dds path retired), added HudSkillHotbar cooldown/charge/ready
+  overlay. Build 0/0, headless clean (10 panels). TODO(world-campaign): live player-tile feed for the BMP mosaic;
+  TargetChangedEvent.Level field; msg 10037/10038 relation tag; MopGagePanel dstY (debugger). Uncommitted.
+- 2026-06-17  HUD-II Wave 1 W+P — recovered 6 secondary in-game windows (doida.exe 263bd994), all build-ready.
+  OptionPanel (4 tabs + Character/Sound/Graphic/Other; centered 215×204; checkboxes act 2-13 msg 8009-8039
+  non-monotonic; CLIENT-LOCAL, persists option.ini CHAR_* + DoOption.ini OPTION_*; uiconfig.lua NOT used in-game).
+  PartyPanel (screenW+318×318 right-dock — RESOLVES ui_hud_layout §3.3; 8 members 54px stride, 124×5 HP/MP/EXP
+  bars; invite 2/35 / accept 2/36 / leave-kick 2/37; populate 5/21+5/38). KeepPanel/TradeKeepWindow (318×732;
+  single 60-cell 10×6 grid TOGGLED my/their side, NOT two grids; uitex 4; cells 200-259, commit 260, toggle
+  261/262, money 263/264; populate 4/24 44B their-side + 4/25 full-refresh, opened 4/23 phase=3). FriendPanel
+  (TWO-TAB add/cut NOT add/search; add act 2 "friend %s %s" / cut act 3 "cut %s"; 30 slots/tab; uitex 9; outbound
+  2/49+2/54; inbound 5/26 candidate UNVERIFIED). GuildAPanel (50-member, paged 4600/4601; action map 4501-4623;
+  populate 4/65 1812B = ~60B header + 17B name×50 + parallel arrays, NOT 50×36). QuestPanel (3 tabs+detail;
+  uitex 8; accept 85 / proceed 86 / giveup 91 / track 94; populate 5/68 452B + 5/73 344B = opaque blobs,
+  capture-pending). Specs: ui_system §8.6.1/§8.9.1/§8.12-8.16, ui_hud_layout §3.3/§5.3, opcodes.md
+  (+2/49,2/54,4/24,4/25,4/65,2/152), new packets 2-49/2-54/4-24/4-25/4-65/2-152. Firewall PASS (221 opcode rows,
+  0 warn). **ARBITRATION (Tier-1): opcode 2/152 = ONE generic two-u32 C2S sender with MULTIPLE consumers**
+  (QuestPanel row-request + ProductPanel paging) — modeled as one generic opcode, both alias names kept
+  (CmsgQuestRowRequest / CmsgProductPage). Residuals (stub w/ documented fallback, NO fake data): OptionPanel
+  Sound/Graphic/Other widget tables (sweep-pending; 31 OPTION_* keys known so audio wires); FriendPanel inbound
+  feed (5/26 candidate); Quest/Trade/Guild record-value bodies (opaque → pcap-pending). names.yaml candidates:
+  OptionPanel(+4 sub), PartyPanel/MiniParty/PartyReqPanel, KeepPanel(C# TradeKeepWindow), FriendPanel, GuildAPanel,
+  QuestPanel/QuestInfoListPanel, CmsgFriendAddRemove(2/49), CmsgFriendListRefresh(2/54).
+- 2026-06-17  HUD-II Wave 1 E — built the 6 secondary windows on the Ui/Hud substrate as TOGGLE windows
+  (HudOptionsWindow / HudPartyWindow / HudTradeWindow / HudFriendWindow / HudGuildWindow / HudQuestWindow);
+  HudMaster 10→16 panels (Build + Toggle*/ShowTrade + HitTest auto-covers all 16 children). Each fully built
+  (chrome/tabs/lists/actions/captions per ui_system §8.9.1/§8.12-8.16) with DOCUMENTED stubs (NO fake data) for
+  the inbound populate feeds (world-campaign: party 5/21+5/38; capture-pending: friend 5/26 candidate, guild 4/65
+  value fields, quest 5/68+5/73 opaque, trade 4/24+4/25) and the unrecovered toggle hotkeys (spec-pending;
+  GuildAPanel CONFIRMED no-hotkey = context-action open). Build 0/0, headless 16-panel clean. Uncommitted.
+- 2026-06-17  HUD-II Wave 2 W+P — recovered 5 more windows + the window-open mechanism (doida.exe 263bd994).
+  **TOOLBAR: there is NO dedicated toolbar class** — window-open is a GLOBAL action-id dispatcher on the main HUD
+  window where action ids ARE ASCII keycodes (button == hotkey by construction), remappable via per-account INI
+  [<account>_KEYSET] — this RESOLVES the Wave-1 toggle-hotkey residuals. Button→slot→key: inventory ItemPanel 158
+  (i/b), skill SkillPanel 159 (s), status StatusPanel 146, quest QuestPanel 206 (q), party PartyPanel 220 (k),
+  DefaultMenu radial 191 (g), help HelpPanel 322 (h/Space), guild-war 224 (j), stall 228 (l), broodwar 235 (u);
+  close-all p, esc-collapse Esc. The DefaultMenu radial has a SEPARATE id space 4000-4024 → SAME MainWindow slots
+  (wire open-buttons to the SLOT, not one id space). ProductPanel (slot 230) = NPC PRODUCTION/CRAFTING (NOT a
+  vendor — that's the KeepNpcPanel family); 4×2 recipe grid; sends C2S 2/151 (1-byte selector). EmoticonPanel
+  (right-dock rail, MainWindow +0x370): page0 text-macros send via chat 2/7, page1 graphical balloons send NO
+  packet (client-local overhead balloon slot 327 + sfx 862030103). MessagePanel (slot 190) = screen-centered
+  dual-mode modal (mode0 OK / mode1 OK+Yes/No; uitex 2+8, NOT messagewindow.dds; peer of Confirm/BigAlarm/Announce/
+  ErrorPanel). Tender/mail family: TenderInfoPanel(118)→2/118 (header-only); CarrierPigeon mailbox(96/98)→send 2/70
+  (132B) + letter-req 2/60 (8B); DeliveryPanel(40, 5×8)→claim 2/71 (4B); arrival on existing 1/20. **2/152 CONFLICT
+  RE-RESOLVED BY THE BINARY (SUPERSEDES the Wave-1 Tier-1 arbitration): 2/152 = QuestPanel-ONLY (CmsgQuestRowRequest);
+  ProductPanel never emits it; 3/8 = a 4-byte money-refresh repaint.** Specs: ui_system §8.17-8.21, ui_hud_layout
+  §5.13, opcodes.md (2/152 QuestPanel-only, 2/151 1-byte, 3/8 refined, +4 new C2S 2/60·2/70·2/71·2/118), new packets
+  2-60/2-70/2-71/2-118/3-8 + rewritten 2-151/2-152. names.yaml candidates: ProductPanel/EmoticonPanel/MessagePanel/
+  TenderInfoPanel/CarrierPigeonPanal[sic]/DeliveryPanel + the HUD-slot→window/key map; CmsgLetterRequest(2/60)/
+  CmsgCarrierPigeonSend(2/70)/CmsgDeliveryClaim(2/71)/CmsgTenderConfirm(2/118)/CmsgQuestRowRequest(2/152). Residuals:
+  Pet-window slot (NOT 230); MessagePanel S2C notice opcode; mailbox/delivery/tender POPULATE opcodes + record
+  layouts (capture-pending); new format specs warranted msginfo.do(128B)/emoticon.do(40B). Firewall PASS.
+  **INCIDENT (no permanent loss):** a correction worker ran `git checkout --` and reverted the uncommitted
+  §8.17-8.21 spec content; orchestrator detected (empty git diff) + re-promoted from the dirty notes. LESSON:
+  spec/code edits are Edit-only — sub-agents must NEVER run git checkout/restore/reset (working-tree verified intact:
+  61 deletions + 24 mods + new files all present, build 0/0).
+- 2026-06-17  HUD-II Wave 2 E — built 6 windows + wired the ASCII-key window-open dispatch. HudMessagePanel
+  (slot 190 dual-mode modal, ShowNotice/ShowConfirm — the faithful replacement for the deleted ConfirmDialog/
+  CenteredModal), HudProductWindow (crafting 230, 4×2 recipe, C2S 2/151), HudEmoticonWindow (rail +0x370; page0
+  macros → chat 2/7, page1 balloons client-local), HudTenderWindow (118, 2/118), HudMailWindow (CarrierPigeon
+  96/98, 2/70+2/60), HudDeliveryWindow (40, 5×8, 2/71). HudMaster 16→21 panels. Key dispatch (§8.17) wired in
+  _Input: i/b→inventory, s→skill, k→party, q→quest, c→stats, g→DefaultMenu(TODO), h/Space→Help(TODO), Esc→close-top
+  — BACKFILLS the Wave-1 toggle hotkeys. Build 0/0, headless 21-panel clean. Stubs (NO fake data): all outbound
+  use-cases (no IApplicationUseCases method yet → world-campaign), all inbound populate (capture-pending), emoticon
+  graphical grid (emoticon.do 40B format-pending), INI [<account>_KEYSET] remap (defaults hardcoded). Uncommitted.
+- 2026-06-17  HUD-II Wave 3 W+P — recovered 5 more windows; zero-trust corrected 4 mis-IDs (binary won).
+  VENDOR ≠ KeepNpcPanel: the buy/sell shop is the IDB-mislabeled SubscriptionPanel @ slot 259 (itemshop.dds),
+  opened by NPC-interaction KIND 32 (no hotkey); C2S 2/19 buy(12B)/2/20 sell(12B)/2/115 shop-buy(8B), S2C acks
+  4/19/4/20/4/21/4/113/4/114 + 4/115 (vendor money refresh — NOT 3/8). KeepNpcPanel = the NPC dialog menu (no
+  wire). DefaultMenu ≠ radial/≠191: slot 148, a horizontal BOTTOM command strip (1024×45, expandable, action
+  4000); full entry→action→slot map 4000-4024 resolved (opens Inv 158/Skill 159/Quest 206/Party 220/Help 322/
+  Product 230/stance 146/relation 193/…); slot 191 = KeepPanel (unrecovered, future lane). HelpPanel (322) ≠
+  panel: a full-screen data/ui/help.dds overlay (member of MainWindow), key h only (Space refuted). AnnouncePanel
+  = slot 221 (scrolling banner), ErrorPanel = slot 168 (timed floating notice, msg.xdb-101, auto-dismiss); S2C
+  routing RESOLVED (Wave-2 residual): server notice/error → global sink → ErrorPanel+AnnouncePanel+chat;
+  SmsgShowPopupByCode 4/500 (4B, codes 1-7) + result-with-message 4/132/138/140/146; MessagePanel(190) is NOT a
+  wire destination (client-side level-milestone only). Pet window RESOLVED: slot 194 PetPanel = the COUPLE/pair-
+  relation window (no tamed-pet feature in this build; zero pet assets), fed by SmsgActorPairRelation 5/53 (32B)
+  + 5/42/5/64, auto-show on pair push (not a hotkey). Specs: ui_system §8.22-8.26, ui_hud_layout §5.13 corrected
+  (148=DefaultMenu + 191=KeepPanel; 322 overlay; +168/221/194/259), opcodes.md (225 rows, 0 warn; 2/19 re-attributed
+  CmsgNpcBuyOrAcquire, 2/115 8B, 4/500 4B), 8 new + 2 rewritten packets. names.yaml candidates: SubscriptionPanel
+  (vendor 259, IDB-mislabeled), PetPanel(194), AnnouncePanel(221)/ErrorPanel(168), KeepPanel(191), rename
+  2/19→CmsgNpcBuyOrAcquire. Orphan packets/2-19_npc_interact.yaml left intact (Tier-1 tidy). Residuals: opcode
+  field VALUE semantics (12B vendor bodies, 4/500 popup strings) capture-pending. Firewall PASS. Edit-only (no git).
+- 2026-06-17  HUD-II Wave 3 E — built 6 windows + the bottom command strip. HudCommandBar (DefaultMenu slot 148,
+  bottom strip, 11 entry buttons wired entry→HudMaster.Toggle* per §8.23: Inv 4001/Skill 4003/Quest 4004/Status
+  4005/Help 4011/Party 4012/Product 4013 — makes the HUD MOUSE-navigable), HudVendorWindow (SubscriptionPanel 259,
+  buy/sell, C2S 2/19/2/20/2/115), HudHelpOverlay (help.dds full-screen overlay, key h — backfills the Wave-2 Help
+  TODO), HudAnnouncePanel (221 banner, ShowAnnounce), HudErrorPanel (168 timed notice, ShowError + auto-dismiss),
+  HudPetPanel (194 couple/pair window, ShowPartner/ClearPartner). HudMaster 21→~27 panels. Build 0/0, headless
+  ~27-panel clean. Stubs (NO fake data): vendor stock + all outbound use-cases (world-campaign); the 4/500 popup-
+  by-code S2C sink → Error/Announce (world-campaign); pet 5/53 feed (world-campaign); command-bar slot 161/164/185/
+  240 entries (TODO). Uncommitted.
+- 2026-06-17  HUD-II Wave 4 W+P — recovered the last 6 toolbar/NPC windows + resolved identities. KeepNpcPanel
+  (slot 152) = the NPC keep/storage DIALOG MENU (option list; emits nothing on wire); full 35-case KIND→target-window
+  router (KIND 9→storage KeepPanel 191, 0x20→vendor 259, 0xE→repair 150, 0xF→guild 153, default→quest-giver 287;
+  descriptor KIND@+0x22). KeepPanel (191) RESOLVED = the player STORAGE/WAREHOUSE — a 60-cell 10×6 item grid (actions
+  200-259, money 263/264); opened ONLY via KIND-9 NPC → KeepNpcPanel (not a hotkey); item move C2S 2/46 / quick-move
+  2/44, storage open/money 2/142. RelationPanel = slot 193; BuddyRelation = slot 185 (social window opened by
+  DefaultMenu 4002, emits chat-command friend/cut — likely the SAME social surface as the Wave-1 FriendPanel; reconcile,
+  do not duplicate). StallListPanel (228, key l) = player market list; populate S2C 4/74; emits 2/74/2/56.
+  BroodWarListPanel (235, key u) SCOPE-CORRECTED = the guild-DIPLOMACY relations list (declare-war/ally), NOT events;
+  emits 2/81, result 4/81. GuildWarInfoPanel (224, key j) = read-only war info; populated by S2C 5/73 (344B).
+  **CONFLICTS resolved (binary wins): 5/73 = SmsgGuildWarInfoUpdate, NOT quest-complete (corrected opcodes.md, fixed
+  the false 2/28+2/152 cross-refs, 5-73_quest_complete.yaml → deprecation redirect; quest results = 5/68 ONLY); slot
+  185 BuddyRelation ≠ 193 RelationPanel; storage 2/142 vs item-move 2/46/2/44.** Specs: ui_system §8.27-8.32,
+  ui_hud_layout §5.13 (+152/185/193/191/224/228/235), npc_interaction §7, opcodes.md (+5 C2S 2/44·2/46·2/56·2/74·2/81;
+  renames 4/74→SmsgStallListRefill, 4/81→SmsgGuildDiplomacyResult, 5/73→SmsgGuildWarInfoUpdate), new packets + 5-73
+  redirect. validator 230 rows 0 warnings. Firewall PASS. Edit-only (no git).
+- 2026-06-17  HUD-II Wave 4 E — built the final 6 windows. HudKeepNpcDialog (152, NPC menu — routes sel→storage/
+  vendor), HudStorageWindow (KeepPanel 191, 60-cell storage grid, 2/46/2/44/2/142), HudStallListWindow (228, key l,
+  2/74/2/56), HudGuildDiplomacyWindow (235, key u, 2/81), HudGuildWarInfoWindow (224, key j, 5/73 stub), HudRelationPanel
+  (193). HudMaster ~27→~33 panels. KeepNpcDialog wired to the existing Vendor/Storage; l/u/j keys + DefaultMenu 4002→
+  Relation wired. BuddyRelation (185) NOT built (layout unrecovered — separate lane; 4002 interim → Relation/Friend).
+  FriendPanel(§8.14)/RelationPanel(193)/BuddyRelation(185) = 3 distinct social classes (no duplicate built). Build 0/0,
+  headless ~33-panel clean. Stubs (NO fake data): all inbound populate + outbound use-cases (world-campaign), atlases
+  via literal paths (uitex-pending). **HUD-II window set ≈ COMPLETE (~33 panels: 10 core + 23 windows across 4 waves
+  + command bar + key/mouse navigation). Residual = world-campaign live data-wiring + a few unrecovered/niche panels
+  (BuddyRelation 185, the deep ctor-tail).** Uncommitted.
+
+## 2026-06-18 — re-static-analyst + protocol-spec-author (front-end scene rebuild, campaign15)
+- binary: doida.exe @ 263bd994
+- tool: IDA Pro 9.3 via MCP (mcp__ida__*, static only)
+- analyzed (by canonical name): WinMain scene state machine (states 0..3 spine), Diamond GUComponent/
+  GUPanel/GUButton/GULabel/GUTextbox/GUCheckBox framework + AddChildWithAction dispatch, LuaConfig
+  (uiconfig.lua scalar loader), LoginWindow build/OnEvent/per-frame sub-state driver (flowSubState),
+  LoginSecondPassword keypad (PIN), GameVer index-5 gate, LoadingScreen render tick + VFS progress +
+  boot worker, COpeningWindow slideshow/crawl/skip-gate, lobby host resolution (ip.txt/list.dat/
+  servername registry), server-list + channel-endpoint queries, secure-context key-string builder +
+  login packet 0x2B, 0/0 key-exchange parse.
+- specs produced/updated:
+  - Docs/RE/specs/frontend_layout_tables.md (NEW — the build oracle: full login widget table, sub-state
+    machine + per-sub-state visibility, curtain, gates, Save-ID, credential hand-off; PIN keypad;
+    server-list display model; loading immediate-mode quads; opening cinematic; audio cues)
+  - Docs/RE/specs/login_flow.md (server-address resolution chain, 62-byte 0/0, dynamic game endpoint)
+  - Docs/RE/packets/login.yaml (1/4 credential reply, M pad parameter-driven), Docs/RE/packets/lobby.yaml
+    (8-byte wrapper + LZ4, 8-byte records, channel-endpoint 30-byte "host port")
+  - Docs/RE/opcodes.md (0/0, 1/4 re-confirmed; frame header two u16 words)
+- notes: PIVOTAL — login/select/opening UI geometry is HARD-CODED (uiconfig.lua read for a single int
+  NEW_SERVER_INDEX only); retired the "uiconfig.lua ~340 widgets" claim. Corrections: single login
+  sub-state field; no ±64 alpha fade (curtain is +5/tick Y-offset only); game.ver = single u32 index-5
+  equality; SKIP gate read in load case 2 (not init); loading screen = immediate-mode 2-quad renderer
+  (random loading.dds/loading06.dds/loading08.dds); opening alpha ceiling 250, crawl +Y must invert for
+  Y-up; PIN keypad = 100 stacked buttons (10/cell), time-seeded Fisher–Yates scramble (seed DEBUGGER-
+  PENDING). capture_verified: false (no .pcapng present). names.yaml sync owed (orchestrator/maintainer).

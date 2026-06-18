@@ -54,16 +54,19 @@ public sealed partial class HudInventoryPanel : Control
     // -------------------------------------------------------------------------
 
     private const float InvW = 318f; // spec: ui_hud_layout.md §1.1 — W=318 CODE-CONFIRMED
+
     private const float InvH = 732f; // spec: ui_hud_layout.md §1.1 — H=732 CODE-CONFIRMED
     // X = screen_width + 318 → off-screen right anchor until revealed.
     // spec: ui_hud_layout.md §1.1 — "Anchor X = screen_width + 318 (right-anchored)"
 
     // Item grid constants (CODE-CONFIRMED §8.10.1)
-    private const int GridCols = 8;   // spec: ui_system.md §8.10.1 — 8 columns
-    private const int GridRows = 5;   // spec: ui_system.md §8.10.1 — 5 rows = 40 cells
-    private const int CellSide = 38;  // spec: ui_system.md §8.10.1 — 38×38 px, +38 pitch
+    private const int GridCols = 8; // spec: ui_system.md §8.10.1 — 8 columns
+    private const int GridRows = 5; // spec: ui_system.md §8.10.1 — 5 rows = 40 cells
+    private const int CellSide = 38; // spec: ui_system.md §8.10.1 — 38×38 px, +38 pitch
     private const int GridCellCount = GridCols * GridRows; // = 40
+
     private const int EquipCellCount = 20; // spec: ui_system.md §8.10.1 — equip sub-grid 20 cells
+
     // Action ids: main grid 0..39, equip 50..69.
     private const int ActionIdEquipStart = 50; // spec: ui_system.md §8.10.1
 
@@ -106,9 +109,9 @@ public sealed partial class HudInventoryPanel : Control
         AnchorTop = 0f;
         AnchorRight = 1f;
         AnchorBottom = 0f;
-        OffsetLeft = InvW;           // +318 beyond right edge → off-screen
+        OffsetLeft = InvW; // +318 beyond right edge → off-screen
         OffsetTop = 0f;
-        OffsetRight = InvW + InvW;   // +636
+        OffsetRight = InvW + InvW; // +636
         OffsetBottom = InvH;
         Visible = false; // hidden by default; key-I reveals it
         MouseFilter = MouseFilterEnum.Stop;
@@ -158,7 +161,7 @@ public sealed partial class HudInventoryPanel : Control
 
         // 8×5 item grid — 40 cells, 38×38 each, flush +38 pitch
         // spec: ui_system.md §8.10.1 CODE-CONFIRMED — "8×5=40 cells, 38×38 px, +38 pitch, action 0..39"
-        const int GridStartX = 8;  // modest inset
+        const int GridStartX = 8; // modest inset
         const int GridStartY = 36; // below header area
         BuildItemGrid(atlas, GridStartX, GridStartY);
 

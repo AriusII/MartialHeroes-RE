@@ -92,7 +92,55 @@ OpeningWindow,LoadingScreen,CharacterSelectScreen,CharListEventDrainer} + old HU
 entangled (ServerEntry / OpeningWindow.SkipCfgPath are shared; ScreenHost/FrontEndAudio/NpcScrDescriptions/
 LoginLayout stay ACTIVE). Functionally dead now (new Ui/ tree is what runs); deferred to a confirmed cleanup.
 names.yaml sync (MapPanel/TotalMapPanel/ItemPanel/UpgradeProcessPanel/ActorState{Passive,Cash,Skill}Panel/…)
-= maintainer hand-merge. **CAMPAIGN 17 CORE REBUILD COMPLETE.** Uncommitted on campaign15.
+= maintainer hand-merge. **CAMPAIGN 17 CORE REBUILD COMPLETE.** (Committed by maintainer.)
+
+## HUD-II (CYCLE 17 continuation) — ⏳ IN PROGRESS
+**Legacy removal — ✅ DONE.** Deleted the dead front-end (BootFlow + Boot.tscn + old Login/Load/Opening/Select
+screens; ServerEntry extracted to its own file, SkipCfgPath re-pointed to the new Opening window), the old
+in-game HUD (16 HUD/* files), and the old toolkit (StateButton/WidgetFactory/AlphaFadeDriver/UiAssetLoader/
+CharacterSelectLayout). HUD/ folder empty; Screens/ holds only active files.
+**In-game HUD consolidation — ✅ DONE (the crux).** Phase F had left the new HudMaster PARALLEL to the live old
+GameHud (GameLoop drove GameHud, bypassing the hub). Now: GameLoop publishes world events into IHudEventHub,
+HudMaster is the SOLE HUD, HudRightEdgeGauge drains a NEW Vitals channel (added to IHudEventHub + HudVitalsEvent,
+slnx 2068 tests), InputRouter gate → HudMaster.HitTest, AudioService click-SFX → HudButton.
+**HUD-II core recovered + built — ✅ DONE.** W (IDA): target plate = MopGagePanel(177) full geometry; vitals
+current/max model; minimap = runtime BMP-tile mosaic (NOT map%d.dds — fixed the map2.dds bug); hotbar overlay
+3×29×29 frames. E: HudTargetFrame (HudMaster now 10 panels), HudMinimapPanel BMP-mosaic, HudSkillHotbar overlay.
+Specs promoted (ui_hud_layout §5.4a/§5.5b/§5.6/§5.10a, ui_system §1.7.1, combat §13). **GATE PASS:** slnx 0/0 ·
+2068 tests · Godot 0/0 · headless 0→5 with 10 HUD panels clean · firewall · DAG.
+**Secondary-window long tail — in disciplined fan-out waves (W recover → P promote → E build → gate):**
+- **Wave 1 — ✅ DONE:** Options / Party / Trade / Friend / Guild / Quest. W recovered all 6 (corrections: Trade =
+  single 60-cell grid toggled my/their side; Friend = add/cut not add/search; Guild = GuildAPanel header+parallel
+  arrays 1812B; Party right-dock). E built 6 toggle windows; HudMaster 10→16 panels; build 0/0, headless 16-panel
+  clean. Tier-1 arbitration: opcode 2/152 = one generic two-u32 sender (quest-row + product-page).
+- **Wave 2 — ✅ DONE:** the window-open mechanism (NO toolbar class — a global ASCII-keycode dispatcher; button==hotkey)
+  + 5 windows. W corrections: 2/152 = QuestPanel-ONLY (binary superseded the arbitration; ProductPanel=2/151,
+  3/8=money refresh); ProductPanel = CRAFTING (not vendor); EmoticonPanel rail +0x370; MessagePanel slot 190 modal;
+  Tender/CarrierPigeon/Delivery mail family (+4 opcodes 2/60·2/70·2/71·2/118). E: 6 windows built (HudMessagePanel
+  = the faithful ConfirmDialog replacement; Product/Emoticon/Tender/Mail/Delivery), HudMaster 16→21, ASCII-key
+  dispatch wired (i/b/s/q/k/c/Esc — backfills Wave-1 hotkeys). **GATE PASS:** Godot 0/0 · headless 21-panel clean ·
+  firewall · slnx 2068 unchanged.
+- **Wave 3 — ✅ DONE:** vendor + menu + help + system modals + pet. W corrected 4 mis-IDs: vendor = SubscriptionPanel
+  @259 (not KeepNpcPanel); DefaultMenu = slot 148 bottom command strip (not radial/191; 191=KeepPanel); HelpPanel =
+  full-screen help.dds overlay; Announce=221/Error=168 (+ S2C 4/500 popup-by-code route); Pet=194 = the couple/pair
+  window (no tamed-pet feature). E: 6 windows built incl. HudCommandBar (bottom menu strip, entry→toggle wired =
+  HUD now mouse-navigable) + HudHelpOverlay (h dispatch). HudMaster 21→~27. **GATE PASS:** Godot 0/0 · headless
+  ~27-panel clean · firewall · slnx 2068.
+- **Wave 4 — ✅ DONE:** NPC-dialog/storage/stall/diplomacy/guild-war/relation. W resolved: KeepNpcPanel(152) = the NPC
+  dialog menu (35-case KIND→window router); KeepPanel(191) = player STORAGE (60-cell grid, KIND-9 open); BroodWarListPanel
+  = guild-DIPLOMACY (not events); 5/73 = SmsgGuildWarInfoUpdate (NOT quest — quest = 5/68 only); 185 BuddyRelation ≠ 193
+  RelationPanel. E: 6 windows built (KeepNpcDialog routes to the existing Vendor/Storage; l/u/j keys wired); HudMaster
+  ~27→~33. **GATE PASS:** Godot 0/0 · headless ~33-panel clean · firewall · DAG · slnx 2068.
+
+### HUD-II window set ≈ COMPLETE — ~33 panels (10 core + 23 windows over 4 waves) + bottom command bar + key/mouse nav.
+Every recovered in-game window is built and gated. **What genuinely remains (a follow-on WORLD campaign, not more HUD shells):**
+- **Live data-wiring** — feeding the shells from real packets: vendor stock, storage contents, party/guild/quest/stall/
+  diplomacy/guild-war populate, the 4/500 notice sink → Error/Announce, pair 5/53 → Pet, the BMP minimap player-tile,
+  `TargetChangedEvent.Level`. The HUD draws/sends; the live inbound feeds are world-campaign (capture/handler work).
+- **A few unrecovered/niche panels** — BuddyRelation(185) layout, KeepPanel-vs-vendor NPC text dialog, the deep
+  ctor-enumerated minor service panels (low-value, capture-gated).
+- **Doc tidy** — names.yaml hand-merge (maintainer); orphan packets/2-19_npc_interact.yaml + the 5-73 redirect.
+Uncommitted on campaign15.
 
 ## Phase G — Quit/Error chrome + consolidation — ⬜ PENDING
 Quit/Error chrome; delete `_legacy`; final nuke-build gate; journal + names.yaml + memory; record HUD-II.

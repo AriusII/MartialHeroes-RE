@@ -73,47 +73,39 @@ public static class LoginLayout
 
     // =========================================================================
     // §11.2a Upper window — main panel, server listbox, scroll controls. CODE-CONFIRMED.
-    // NOTE: TopChrome, ServerListbox, ScrollUpArrow, ScrollDownArrow, ScrollThumb, ListboxHeader
-    //   are RECOVERED BUT NOT YET WIRED in the current LoginScreen. The server-list overlay is
-    //   rendered by ServerSelectScreen; these constants are retained here as IDA-confirmed interop
-    //   facts for future widget work.
+    // Source: frontend_scenes.md §11.2a.
     // =========================================================================
 
-    // B@(0,0,1024,110) src(0,0) — TOP chrome cap strip (carved bezel, hanging rings, top edge).
-    // The main panel art (B) starts at canvas Y=110; this slice of the same atlas placed at
-    // canvas Y=0 shows the top ornamental cap of the stone frame above the ink-wash painting.
-    // The region B src(0,0..110) contains the top edge of the stone chrome (rings, carved rim).
-    // spec: Docs/RE/specs/frontend_scenes.md §11.2a (main panel B at Y=110); top cap is
-    //       the same atlas region placed at Y=0 to show above the main panel anchor. CODE-CONFIRMED layout.
-    public static readonly WidgetRect TopChrome = new(0, 0, 1024, 110, 0, 0);
-
     // B@(0,110,1024,490) src(0,0) — main background panel art.
-    // spec §11.2a "Main panel art". CODE-CONFIRMED.
+    // spec: frontend_scenes.md §11.2a "Backdrop image". CODE-CONFIRMED.
     public static readonly WidgetRect MainPanel = new(0, 110, 1024, 490, 0, 0);
 
     // B@(270,85,483,490) src(0,490) — server dropdown / listbox container.
-    // spec §11.2a "Server dropdown / listbox container". CODE-CONFIRMED.
+    // spec: frontend_scenes.md §11.2a "Centre notice PANEL". CODE-CONFIRMED.
     public static readonly WidgetRect ServerListbox = new(270, 85, 483, 490, 0, 490);
 
     // B@(467,86,13,10) src(483,490) — list scroll-up arrow, action 106.
     // spec §11.2a "List scroll-up arrow". CODE-CONFIRMED.
     public static readonly WidgetRect ScrollUpArrow = new(467, 86, 13, 10, 483, 490);
+    public const int ActionScrollUp = 106; // spec: frontend_scenes.md §11.2a.
 
     // B@(467,455,13,10) src(505,490) — list scroll-down arrow, action 107.
     // spec §11.2a "List scroll-down arrow". CODE-CONFIRMED.
     public static readonly WidgetRect ScrollDownArrow = new(467, 455, 13, 10, 505, 490);
+    public const int ActionScrollDown = 107; // spec: frontend_scenes.md §11.2a.
 
     // B@(469,98,9,9) src(496,490) — scrollbar thumb, action 108.
     // spec §11.2a "Scrollbar thumb". CODE-CONFIRMED.
     public static readonly WidgetRect ScrollThumb = new(469, 98, 9, 9, 496, 490);
+    public const int ActionScrollThumb = 108; // spec: frontend_scenes.md §11.2a.
 
     // B@(207,44,70,17) src(70,980) — listbox header / selection bar.
     // spec §11.2a "Listbox header / selection bar". CODE-CONFIRMED.
     public static readonly WidgetRect ListboxHeader = new(207, 44, 70, 17, 70, 980);
 
     // =========================================================================
-    // §11.2b Background + two channel-selector blocks. CODE-CONFIRMED.
-    // NOTE: BackgroundPanel is RECOVERED BUT NOT YET WIRED in the current LoginScreen.
+    // §11.2b Background + bottom bar. CODE-CONFIRMED.
+    // Source: frontend_scenes.md §11.2b.
     // =========================================================================
 
     // A@(0,0,1024,398) — full background art panel (below the form band).
@@ -169,6 +161,10 @@ public static class LoginLayout
     public const int ModalChromeH = 190;
     public const int ModalChromeSrcX = 318;
     public const int ModalChromeSrcY = 647;
+    public const int ModalPromptX = 32;
+    public const int ModalPromptY = 42;
+    public const int ModalPromptW = 276;
+    public const int ModalPromptH = 70;
 
     // Dialog #1 OK button — C@(120,136,113,40) NORMAL src(302,900), HOVER src(415,900), action 113.
     // spec §11.2d "Dialog #1 OK". CODE-CONFIRMED.
@@ -189,7 +185,7 @@ public static class LoginLayout
     // =========================================================================
 
     // Bottom login-bar panel: A@(0, 326*H/768, 1024, 442) src(0,582).
-    // The Y is height-scaled at runtime. spec §11.2e "Bottom login-bar panel". CODE-CONFIRMED.
+    // The Y is height-scaled at runtime. spec: frontend_scenes.md §11.2b.
     // SrcY = 582 in login_slice1.dds.
     public const int BottomBarW = 1024; // spec §11.2e
     public const int BottomBarH = 442; // spec §11.2e
@@ -211,10 +207,10 @@ public static class LoginLayout
     public const int ActionConfirm = 102; // spec §1.2 "Server-list button". CODE-CONFIRMED.
 
     // Confirm-button face plate (baked art overlay — the plate the ID/PW row sits on).
-    // §11.2e: dst=(0,469,494,113) src=(265,0) — canvas X=0,Y=469,W=494,H=113; atlas srcX=265,srcY=0.
-    // The prior record had dst/src transposed (265,0 dst vs 0,469 src). CODE-CONFIRMED.
-    // spec: Docs/RE/specs/frontend_scenes.md §11.2e "Login background plate image". CODE-CONFIRMED.
-    public static readonly WidgetRect ConfirmFacePlate = new(0, 469, 494, 113, 265, 0);
+    // spec: frontend_scenes.md §11.2e — login_slice1 confirm-plate dst(265,0,494,113) src(0,469).
+    // i.e. canvas dst X=265,Y=0,W=494,H=113; atlas srcX=0,srcY=469. (A 2026-06-14 pass had transposed
+    // these — re-corrected from the binary 2026-06-17.) spec §11.2e. CODE-CONFIRMED (re-verified vs binary).
+    public static readonly WidgetRect ConfirmFacePlate = new(265, 0, 494, 113, 0, 469);
 
     // Account-label caption art (baked Korean "아이디" plate).
     // A@(340,30,38,13) src(0,398) — baked art, no runtime text. spec §11.2e. CODE-CONFIRMED.
@@ -271,50 +267,55 @@ public static class LoginLayout
 
     // Secondary bottom button (register / find-password).
     // A@(456,64,112,39) NORMAL src(266,398), HOVER/PRESSED src(490,398). action 103.
-    // spec §11.2e "Secondary bottom button". CODE-CONFIRMED.
+    // spec: frontend_scenes.md §11.2c "OK/Login BTN3". CODE-CONFIRMED.
     public static readonly WidgetRect OkButton = new(456, 64, 112, 39, 266, 398);
     public const int OkHoverSrcX = 490;
     public const int OkHoverSrcY = 398;
     public const int ActionOk = 103; // spec §1.2 "OK / Login button". CODE-CONFIRMED.
 
-    // 종료 (Quit) button — C1 fix. Placed at the far right of the bottom band.
-    // Uses the same stone art as the secondary button but at x=840 so it sits to the right of
-    // the save-ID area. This is the quit-trigger present in the official client.
-    // spec: Docs/RE/specs/frontend_scenes.md §1.8 "quit paths". CODE-CONFIRMED (button exists).
-    // Exact canvas position is a revival placement (no sub-rect separate from the ok-button art);
-    // art src reuses (266,398) 112×39 — the secondary stone button frame.
-    public static readonly WidgetRect QuitButton = new(840, 64, 112, 39, 266, 398);
+    // 종료/도움말 (Quit/Help) strip button — IDA: BuildButton3State(login_slice1, dst(456,-3,111,38),
+    // N src(792,398), H src(602,416)), action 105. It sits flush to the top edge (Y=-3, clipped) as the
+    // top-right help/quit strip — NOT the earlier far-right (840,64) placement. Re-verified vs the binary
+    // 2026-06-17. spec: Docs/RE/specs/frontend_scenes.md §1.2 / §1.8. CODE-CONFIRMED (re-verified vs binary).
+    public static readonly WidgetRect QuitButton = new(456, -3, 111, 38, 792, 398);
+    public const int QuitHoverSrcX = 602; // HOVER/PRESSED src X. CODE-CONFIRMED (binary).
+    public const int QuitHoverSrcY = 416; // HOVER/PRESSED src Y. CODE-CONFIRMED (binary).
 
-    // NOTE: substate 30 is DEAD/UNREACHABLE in this build — an exhaustive writer scan found nothing ever
-    // writes value 30. The genuine quit-confirm is the shared ExitPanel (Yes=action 50/No=51).
-    // spec: frontend_scenes.md §1.5 row 30 / §1.8. CODE-CONFIRMED (dead branch).
-    public const int ActionQuitBtn = 30; // substate 30 = DEAD in this build. spec §1.5/§1.8. See note above.
+    // Quit/help strip decoration image behind the button — IDA: BuildImageComponent(login_slice1,
+    // dst(407,-3,210,70), src(743,398)). spec §11.2f. CODE-CONFIRMED (binary).
+    public static readonly WidgetRect QuitDecoPlate = new(407, -3, 210, 70, 743, 398);
 
     // =========================================================================
     // §11.2f Trailing controls + quit/error dialogs. CODE-CONFIRMED.
-    // NOTE: OptionTab1/OptionTab2, DecoPlate1/DecoPlate2 are RECOVERED BUT NOT YET WIRED in the
-    //   current LoginScreen. Retained as IDA-confirmed interop facts for future widget work.
+    // Source: frontend_scenes.md §11.2.
     // =========================================================================
 
+    // Option-tabs recovered panel container — dst(356,531,313,132); hidden at rest by LoginWindow.
+    // spec: frontend_scenes.md §11.2. CODE-CONFIRMED.
+    public const int OptionTabsPanelX = 356;
+    public const int OptionTabsPanelY = 531;
+    public const int OptionTabsPanelW = 313;
+    public const int OptionTabsPanelH = 132;
+
     // Option/tab button 1 — B@(40,82,110,38). NORMAL src(520,492). HOVER src(635,492). action 111.
-    // spec §11.2f "Button". CODE-CONFIRMED.
+    // spec: frontend_scenes.md §11.2 action 111. CODE-CONFIRMED.
     public static readonly WidgetRect OptionTab1 = new(40, 82, 110, 38, 520, 492);
     public const int OptionTab1HoverSrcX = 635;
     public const int OptionTab1HoverSrcY = 492;
     public const int ActionOptionTab1 = 111; // spec §1.2. CODE-CONFIRMED.
 
     // Option/tab button 2 — B@(164,82,110,38). NORMAL src(750,492). HOVER src(865,492). action 112.
-    // spec §11.2f "Button". CODE-CONFIRMED.
+    // spec: frontend_scenes.md §11.2 action 112. CODE-CONFIRMED.
     public static readonly WidgetRect OptionTab2 = new(164, 82, 110, 38, 750, 492);
     public const int OptionTab2HoverSrcX = 865;
     public const int OptionTab2HoverSrcY = 492;
     public const int ActionOptionTab2 = 112; // spec §1.2. CODE-CONFIRMED.
 
     // Image plate decorations (baked art).
-    // A@(67,48,178,13) src(0,437). spec §11.2f. CODE-CONFIRMED.
+    // A@(67,48,178,13) src(0,437). spec: frontend_scenes.md §11.2.
     public static readonly WidgetRect DecoPlate1 = new(67, 48, 178, 13, 0, 437);
 
-    // A@(0,100,313,32) src(289,437). spec §11.2f. CODE-CONFIRMED.
+    // A@(0,100,313,32) src(289,437). spec: frontend_scenes.md §11.2.
     public static readonly WidgetRect DecoPlate2 = new(0, 100, 313, 32, 289, 437);
 
     // =========================================================================
@@ -458,22 +459,39 @@ public static class LoginLayout
     // (advance to tick substate 34), NOT the client-quit confirm. The genuine quit-confirm is the
     // shared ExitPanel (caption msg 2007, Yes=action 50 / No=action 51). At the login GameState the
     // original ExitPanel "Yes" is INERT (no GameState-1 case → real quit was the OS window-close edge,
-    // debugger-pending). The revival makes the 종료 (Exit) button functional via this ExitPanel caption.
+    // debugger-pending).
     public const uint MsgQuitConfirm1 = 4023; // server-list re-fetch popup #1 (NOT quit). spec §1.8.
     public const uint MsgQuitConfirm2 = 4024; // server-list re-fetch popup #2 (NOT quit). spec §1.8.
-
-    // The genuine shared ExitPanel quit-confirm caption. spec: frontend_scenes.md §1.8 (CODE-CONFIRMED).
-    public const uint MsgExitPanel = 2007; // ExitPanel quit-confirm caption (Yes=50 / No=51). spec §1.8.
 
     // Login validation error toasts. spec §1.4 / §1.9. CODE-CONFIRMED.
     public const uint MsgErrShortId = 4025; // ID length < 4
     public const uint MsgErrEmptyPassword = 4026; // password empty
     public const uint MsgErrNoServers = 4027; // server list empty
     public const uint MsgErrConnectFail = 4028; // server-list connection failed
+    public const uint MsgServerHeaderFirst = 4029; // server-list column/status captions start
+    public const uint MsgServerHeaderLast = 4032; // server-list column/status captions end
+    public const uint MsgServerUnknown = 5901; // server id outside 1..40 formatted fallback
+    public const uint MsgServerLoadRed = 6001; // > 1200
+    public const uint MsgServerLoadOrange = 6002; // > 800
+    public const uint MsgServerLoadYellow = 6003; // > 500
+    public const uint MsgServerPreparing = 6004; // scheduled-open preparing caption
+    public const uint MsgServerClockFormat = 6005; // scheduled-open HH:MM format
 
     // Login form static labels (4001–4022 range). spec §1.9. CODE-CONFIRMED.
     public const uint MsgLabelFirst = 4001;
     public const uint MsgLabelLast = 4022;
+
+    // Central notice/agreement panel body labels — spec: frontend_scenes.md §11.2/§11.10:
+    // 22 GULabels added as CHILDREN of the central panel (= ServerListbox frame at dst(270,85,483,490)
+    // src(0,490) from loginwindow.dds). Each label is built at PANEL-LOCAL dst(50, 100+18·k, 383, 50),
+    // k=0..21, text = msg.xdb (4001+k). The earlier port dumped these at far-left absolute (40,120+14·k)
+    // on the scene root — that is the source of the "everything stacked in the corner" disorder.
+    // Re-verified vs the binary 2026-06-17. spec §11.2a (panel) / §1.9 (text). CODE-CONFIRMED (binary).
+    public const int NoticeLabelLocalX = 50; // panel-local X. CODE-CONFIRMED (binary).
+    public const int NoticeLabelStartY = 100; // panel-local Y of first row. CODE-CONFIRMED (binary).
+    public const int NoticeLabelStrideY = 18; // per-row Y advance. CODE-CONFIRMED (binary).
+    public const int NoticeLabelW = 383; // label width. CODE-CONFIRMED (binary).
+    public const int NoticeLabelH = 50; // label height. CODE-CONFIRMED (binary).
 
     // =========================================================================
     // Save-ID persistence (§1.6, CODE-CONFIRMED). Layer-05 only — Godot ConfigFile.

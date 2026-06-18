@@ -783,3 +783,142 @@ push `5:31`; the DoT status slot is documented in `specs/skills.md` §6). `CODE-
 > detail belongs in a combat-overlay format/spec, not in this combat-math+flow document. This section
 > records only the **model** (kind selection, multi-hit split, HP-bar source) that the domain / protocol
 > layers must reproduce.
+
+---
+
+## 13. Local-player vitals delivery to the HUD
+
+> **Verification banner for Section 13** (ida_reverified 2026-06-17, ida_anchor `263bd994`,
+> evidence [static-ida]). This section is a **static read** of the in-game local-player vitals data
+> path (how server-pushed HP / MP / stamina reach the on-screen gauges). Client-side routing, the
+> write topology, the poll-per-frame read model, and the lock-step mirror are **CONFIRMED** (control
+> flow followed end-to-end); the exact major/minor of a *standalone* pure-absolute-vitals push and one
+> max-table index question are flagged **debugger-pending** below. No live capture corroborates the
+> on-wire VALUE meanings yet. This extends -- it does not rewrite -- the server-authoritative,
+> clamp-against-local-max, `4/13`-attack-flag-clear findings already in the status header and
+> Sections 5 / 11 / 12.
+
+This section adds the **precise delivery paths** for the *local player's* current HP / MP / stamina /
+level to the HUD gauges. The settled findings above (incoming HP arrives as **absolute** wire values;
+the client clamps current against a **locally-computed** maximum; the attack-flag clear is `4/13`)
+are unchanged; here we document *which messages move vitals*, *where they are stored*, and *how the
+gauge reads them*.
+
+### 13.1 The vitals data path (prose)
+
+```
+        (server pushes absolute or delta vitals on the wire)
+                              |
+   +-------------+-----------+-----------+-------------+----------------+
+   |             |           |           |             |                |
+ 5/52         5/32        4/13        4/1          item / potion    (no wire opcode)
+(delta)      (absolute)  (absolute)  (world seed)   self-use          per-frame clamp
+   |             |           |           |          (delta+clamp)          |
+   v             v           v           v               v                 |
+   +---------> core vitals writer <------+               |                 |
+   |     - DELTA mode: apply signed HP/MP/stamina deltas; spawn floating    |
+   |                   damage numbers                                       |
+   |     - ABSOLUTE mode: set HP / MP / stamina outright                    |
+   |                                                                        |
+   |  writes, in LOCK-STEP, BOTH:                                           |
+   |   (a) the local-player Actor vitals fields (structs/actor.md), AND     |
+   |   (b) the dedicated HUD vitals globals:                                |
+   |        - a packed current-HP | current-MP pair                         |
+   |        - a current-stamina value                                       |
+   |        - a level value                                                 |
+   v                                                                        |
+  HUD gauges POLL the globals every frame (13.4) <------------------------- |
+                                                                            |
+  Per-frame ActorManager tick: clamp local current HP/MP/stamina DOWN to <--+
+  the COMPUTED max (VitalFormula, structs/stats.md); zero-floor negatives.
+  THIS per-frame clamp IS the only "per-tick resync" -- there is NO
+  4/2-class periodic vitals wire push.
+```
+
+Key structural facts (all **CONFIRMED** static unless tagged otherwise):
+
+- A **single core vitals writer** is the funnel for every local-player vitals change. It runs in two
+  modes: a **delta mode** (apply signed HP / MP / stamina deltas, and spawn the floating damage
+  numbers) and an **absolute mode** (set HP / MP / stamina outright). The wire messages below select
+  the mode.
+- Every path writes the Actor vitals fields and a **dedicated set of HUD globals in lock-step** -- a
+  **packed current-HP | current-MP pair**, a **current-stamina** value, and a **level** value. The HUD
+  never reads the Actor struct directly for the gauge; it reads these globals.
+- **Max HP / max MP / max stamina are COMPUTED on demand** via the `VitalFormula`
+  (`structs/stats.md`) and are **never stored** and **never wire fields** -- only the *current* values
+  and the *level* travel and are stored.
+- The **per-frame ActorManager tick** clamps the local current values **down** to the computed max and
+  zero-floors negatives. **This client-side per-frame clamp is the only "per-tick resync"** -- it
+  reconciles the latest absolute/delta push against the locally recomputed cap each frame. There is
+  **no separate `4/2`-class periodic vitals push** on the wire on this build (this agrees with the
+  status-header / Section 11 correction that the attack-flag path is `4/13`, not `4/2`).
+
+### 13.2 Which S2C messages move local-player vitals
+
+| Tuple | Name | Vitals fields carried | Mode | Confidence |
+|---|---|---|---|---|
+| `5/52` | `SmsgActorSkillAction` | per-target **signed** current-HP / current-MP / current-stamina **delta** in each hit record; spawns floating damage numbers | **Delta** | CONFIRMED (control flow followed: walks the per-target hit records, applies each via the core vitals writer in delta mode; see Section 12.1) |
+| `5/32` | `SmsgLevelUp` | **absolute** re-seed of HP + MP (the packed pair), stamina, and **level** (plus next-level XP) on level-up | **Absolute** | CONFIRMED (writes the Actor vitals fields and mirrors all of the HUD globals for the local player) |
+| `4/13` | `SmsgLocalPlayerStateSync` | **absolute** HP + MP (packed) + stamina re-sync delivered alongside the movement / state update (the vitals write is skipped on one state value) | **Absolute** | CONFIRMED (mirrors the packed HP/MP global and the stamina global). Also the **attack-flag clear** path already documented in Section 11. |
+| `4/1` | `SmsgGameStateTick` | **absolute** world-**entry** seed of vitals + level + the XP pair, taken from the world-state block -- **only** on the world-entry form | **Absolute (entry seed only)** | CONFIRMED (this is a one-time entry seed, **NOT** a periodic per-tick vitals push) |
+| (item / potion self-use) | item self-use vitals delta (working name) | adds a current HP / MP / stamina **delta**, then **clamps to the computed max** and refreshes the HUD | **Delta + clamp** | CONFIRMED (drives the core writer's delta path on a local self-use action) |
+| (client-side, no wire opcode) | ActorManager per-frame clamp | clamps local current HP / MP / stamina **down** to the computed max every frame; zero-floors negatives | client-side resync | CONFIRMED -- **this IS the "per-tick resync"**; there is no wire opcode behind it |
+
+**The standalone absolute-vitals push (debugger-pending).** The *absolute set* of current HP / MP /
+stamina is realized by the **absolute-mode tail of the core vitals writer**, reached by `5/32`, `4/13`,
+and `4/1` above. A **standalone opcode that ONLY pushes absolute HP / MP / stamina** (i.e. a pure
+vitals re-sync, candidate `5/53` `SmsgActorVitalsAndPairState` -- see Section 5.1 / Section 12.2) was
+**not isolated as its own distinct vitals handler on this lane** this pass: the vitals dispatch is
+partly runtime-table-dispatched, so static could not pin whether the pure absolute-vitals re-sync is a
+separate `5/53` push or rides one of `5/32` / `4/13` / `4/1`. **debugger-pending:** breakpoint the core
+vitals writer and the HUD-globals store, take a real damage / heal hit, and read the framed header
+`[u32 size][u16 major][u16 minor]` to pin its exact major / minor (and whether it exists separately or
+rides the above). `5/53`'s general role as the absolute-vitals carrier is already recorded in
+Section 5.1 and Section 12.2; this open item is only about confirming a *pure-vitals* re-sync form.
+
+### 13.3 Field semantics the Vitals HUD channel needs
+
+The local-player vitals live in **two mirrored places written in lock-step**: the local-player Actor
+vitals fields (offsets owned by `structs/actor.md`) and a dedicated set of **HUD vitals globals**. The
+HUD gauge **reads the globals** and **polls them per frame** (13.4). What is stored vs. computed:
+
+| Quantity | Stored or computed | Type | Where the HUD reads it | Confidence |
+|---|---|---|---|---|
+| current HP | **stored** (low half of the packed pair) | u32 | HUD packed current-HP \| current-MP global | CONFIRMED |
+| current MP | **stored** (high half of the packed pair) | u32 | same packed global | CONFIRMED |
+| current stamina | **stored** | i32 (zero-floored) | HUD current-stamina global | CONFIRMED |
+| level | **stored** | u16 | HUD level global (also keys the max-value cache) | CONFIRMED |
+| max HP | **computed on demand**, never stored, never on the wire | u32 | `VitalFormula` (`structs/stats.md`) | CONFIRMED (the getter implements the `structs/stats.md` formula) |
+| max MP | **computed on demand**, never stored, never on the wire | u32 | `VitalFormula` (`structs/stats.md`) | CONFIRMED |
+| max stamina | **computed on demand**, never stored, never on the wire | i32 | the max-stamina getter (`structs/stats.md`) | CONFIRMED |
+| (third / secondary bar) | stored; in-game meaning open | i32 | a secondary vital global | MEDIUM (storage confirmed; meaning -- "rage" / overcharge / secondary stamina -- capture-pending) |
+
+- **Lock-step rule:** the Actor vitals fields and the HUD globals are written together by every vitals
+  path. A re-implementation may treat the HUD globals as the canonical *display* source and the Actor
+  fields as the *simulation* mirror, but both must move on the same write. Actor-side offsets are owned
+  by `structs/actor.md`; the gauge geometry that reads the globals is owned by `ui_hud_layout.md` Section 5.6.
+- **Packed HP|MP:** current HP and current MP are carried and stored as **one packed pair** (HP in the
+  low half, MP in the high half) on most paths; modelling them as a packed pair avoids carry bugs and
+  matches the binary.
+- **Soft divergence (debugger-pending).** The max-HP class table is indexed by **class id** per
+  `structs/stats.md`, but the getter was observed indexing it by the **level value** (the level HUD
+  global) on this build. Whether the table is keyed by class id or by level is **not resolved here** --
+  it needs a known-class / known-level read to settle. Do not silently collapse the two; carry the
+  question to the debugger.
+
+### 13.4 Gauge read model (poll per frame)
+
+The HUD vital readers **poll the globals every frame** and recompute the fill from the live values;
+there is no per-change event that pushes a value into the gauge. The apply paths fire an on-change HUD
+**refresh nudge** (to rebuild label text / reset animation timers), but the fill geometry itself is
+recomputed each draw from the live globals against the on-demand max getters. The fill law is the plain
+ratio `fill = current / max`, clamped to `[0, 1]`, with HP and MP each filling independently from the
+two halves of the packed pair and stamina from its own global. The exact gauge rects and the
+right-edge composite geometry are owned by `ui_hud_layout.md` Section 5.6; this spec records only the
+**data model** (poll-per-frame, `current / max`, current stored vs. max computed) the gauge consumes.
+
+**Cross-references for Section 13:** `structs/actor.md` (the actor-side vitals field offsets the writer
+mirrors); `structs/stats.md` (the `VitalFormula` that computes max HP / max MP / max stamina on
+demand); `ui_hud_layout.md` Section 5.6 (the gauge that polls the HUD vitals globals); Sections 5.1 /
+12.2 (the `5/53` absolute-vitals carrier and the HP-bar-as-absolute observable); Section 11 (the `4/13`
+attack-flag clear, unchanged).

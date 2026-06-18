@@ -111,9 +111,6 @@ internal sealed partial class AlphaFade : Node
     /// </summary>
     internal void UseSlowFade() => _step = StepSlow;
 
-    /// <summary>Switches back to the fast ±64/tick fade rate (GUComponent default).</summary>
-    internal void UseFastFade() => _step = StepFast;
-
     // -------------------------------------------------------------------------
     // Godot lifecycle
     // -------------------------------------------------------------------------

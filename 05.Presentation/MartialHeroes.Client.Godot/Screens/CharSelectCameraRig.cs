@@ -18,10 +18,10 @@
 //   3. SLOT RAY-PICK: a 3D world-space ray-pick (Camera3D unproject) against per-slot AABBs
 //      (X ± 6, Z ± 6, Y band 70..92), nearest hit → slot index (0..4) or −1. spec: §3.3.3.
 //
-// NO ACTOR/CAMERA RE-AIM ON SELECTION: the IDA re-walk confirms slot interaction NEVER re-aims the
-//   camera; the real per-slot "focus" is an idle↔select `.mot` CLIP SWAP on the preview actor (owned
-//   by the skinning lane via actormotion.txt col 21), NOT a yaw. A prior Q/E "actor-yaw turntable"
-//   input here was invented (no spec basis) and has been REMOVED. spec: §3.3.3 / §3.3.4.
+// NO CAMERA RE-AIM ON SELECTION: slot selection never moves this camera rig. The selected/deselected
+//   preview actor yaw and manual left/right actor turntable live in CharSelectScene3D.
+//   spec: Docs/RE/specs/frontend_scenes.md §3.3.2 / §3.3.4; recovered manual-yaw,
+//   doida.exe SelectWindow_FaceActiveSlotFront/TickSelectedPreviewYaw.
 //
 // COORDINATE CONVENTION: world geometry negates Z; KF positions and slot XZ arrive already in
 //   Godot-space (Z negated once by the scene).
@@ -29,7 +29,7 @@
 // NAMESPACE PITFALL: bare `Input` / `Time` collide with the sibling project namespace (CS0234) →
 //   use global::Godot.Input / global::Godot.Key.
 //
-// PASSIVE: zero game logic. Reads input, animates a camera, intersects boxes. (No actor rotation.)
+// PASSIVE: zero game logic. Reads camera input, animates a camera, intersects boxes.
 
 using Godot;
 
@@ -37,9 +37,8 @@ namespace MartialHeroes.Client.Godot.Screens;
 
 /// <summary>
 /// The entry-dolly camera rig for the character-select preview: drives the KF0→KF1 dolly over
-/// ~2.0 s on scene enter, then the manual camera boom-zoom and the per-slot ray-pick. There is no
-/// actor or camera re-aim on slot selection (the per-slot focus is a motion-clip swap owned by the
-/// skinning lane, not a yaw here).
+/// ~2.0 s on scene enter, then the manual camera boom-zoom and the per-slot ray-pick. Slot selection
+/// never re-aims this camera; actor-local selection yaw is owned by <see cref="CharSelectScene3D"/>.
 ///
 /// <para>Owned by <see cref="CharSelectScene3D"/>, which constructs the camera at KF0 then calls
 /// <see cref="Configure"/> with the camera, the dolly keyframes, the row-pivot look-at, the
@@ -65,12 +64,9 @@ public sealed partial class CharSelectCameraRig : Node
     private const float BoomMinZ = 0.0f; // spec: §3.5.4 CODE-CONFIRMED
     private const float BoomMaxZ = 22.0f; // spec: §3.5.4 CODE-CONFIRMED
 
-    // NOTE: there is NO manual actor-yaw / camera re-aim on slot interaction. The IDA re-walk confirms
-    // slot selection NEVER re-aims the camera, and the real per-slot "focus" is an idle↔select `.mot`
-    // CLIP SWAP on the preview ACTOR (not a yaw of the camera or the actor). That clip swap is owned by
-    // the skinning lane (CharSelectScene3D.SetSelectedSlot / actormotion.txt col 21), NOT this rig. The
-    // earlier Q/E "actor-yaw turntable" here was an invented input with no spec basis and is removed.
-    // spec: frontend_scenes.md §3.3.3 / §3.3.4 (select = motion-clip swap, no re-aim).
+    // NOTE: slot selection and manual left/right yaw rotate the preview ACTOR in CharSelectScene3D;
+    // this rig deliberately keeps the camera fixed. spec: Docs/RE/specs/frontend_scenes.md §3.3.2 /
+    // §3.3.4; recovered manual-yaw, doida.exe SelectWindow_FaceActiveSlotFront/TickSelectedPreviewYaw.
 
     // Per-slot pick-box extents. spec: §3.3.3 — X ± 6, Z ± 6, Y band 70..92 (= +22). CODE-CONFIRMED.
     private const float HitBoxHalfExtentXZ = 6.0f;
@@ -147,8 +143,7 @@ public sealed partial class CharSelectCameraRig : Node
 
         if (!_dollyComplete) TickDolly(dt);
         ApplyCameraBoomZoom(dt);
-        // No actor/camera re-aim on slot interaction — the per-slot focus is a motion-clip swap owned
-        // by the skinning lane, not a yaw here. spec: frontend_scenes.md §3.3.3 / §3.3.4.
+        // No camera re-aim on slot interaction; actor-local yaw is owned by CharSelectScene3D.
     }
 
     // =========================================================================

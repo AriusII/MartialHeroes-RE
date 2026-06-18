@@ -1,0 +1,42 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED on the wire; the single-u32 read + the repaint trigger are control-flow
+# CONFIRMED from the inbound handler. capture_verified: false.
+#
+# HUD-II Wave 2 (ProductPanel recovery): 3/8 is a money/gold refresh, NOT a page/grid carrier.
+
+name: SmsgShopPageUpdate
+opcode: 0x30008           # major 3 (CharacterMgmt/inline switch), minor 8 -> (3 << 16) | 8
+direction: S2C
+size: 4                   # the handler reads EXACTLY one u32 from the inbound payload
+spec: packets/3-8_shop_page_update.yaml
+status: confirmed
+capture_verified: false
+
+summary: Inbound money/gold refresh for the product/crafting panel. The handler reads exactly one u32 (the player's current gold), stores it to player-state, and triggers a repaint of the active product panel. It carries NO recipe grid and NO page array -- the recipe list is populated from a client-cached vector filled elsewhere (area/NPC load); 3/8 only re-drives the money value and the panel repaint.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 4.
+fields:
+  - { name: Money, type: u32 }   # 0x00  player's current gold/money; stored to player-state; drives the panel price colouring + repaint
+
+notes: |
+  CONTROL-FLOW CONFIRMED read shape (a single u32) + the repaint trigger; CAPTURE-UNVERIFIED on
+  the wire. The inbound handler performs ONE 4-byte read, writes the value into the player/state
+  money field, then refreshes the active product/service panel via the main-window service slot.
+
+    0x00 (4B) Money : the player's current gold balance. The gold value is static-confirmed from
+                      the consumer (the same player-state money field is read by the product panel's
+                      price-colouring code, which tints a recipe price red when unaffordable).
+
+  WHAT 3/8 IS NOT: it does not carry a recipe page, a grid, or any per-row array. An earlier
+  provisional reading that 3/8 carried a page/grid block is corrected -- the recipe list content is
+  filtered from a cached recipe vector that is filled by the area/NPC load path, not by this message.
+  When the product panel opens it sends C2S 2/151 (1-byte selector, body 0) to ask the server for the
+  current production list/money; 3/8 is the money side of that refresh.
+
+  RELATIONSHIP: pairs with the product/crafting panel (the panel whose only network send is C2S 2/151,
+  see packets/2-151_product_buy.yaml). Reached via the major-3 inline minor switch.
+
+  UNKNOWNS (capture-pending):
+    - on-wire confirmation of the 4-byte money push (no capture this lane);
+    - whether any other panel state rides a separate message (the recipe-list source vector fill
+      path is a separate, not-yet-pinned channel).

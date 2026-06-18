@@ -2,7 +2,6 @@ using System;
 using Godot;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Debug;
-using MartialHeroes.Client.Godot.HUD;
 using MartialHeroes.Client.Godot.Input;
 using MartialHeroes.Client.Godot.Ui.Assets;
 using MartialHeroes.Client.Godot.Ui.Hud;
@@ -38,9 +37,12 @@ public sealed partial class InGameScene : StubSceneController
         AddChild(_worldLoop);
         _worldLoop.WorldExitRequested += OnWorldExitRequested;
 
-        // CAMPAIGN 17 — Phase F: additive HudMaster (new Ui/ substrate).
-        // Coexists with old GameHud { Name="HUD" } inside GameLoop; neither deletes the other.
-        // Tier-1 quarantine of old HUD/* is a follow-on campaign task.
+        // CAMPAIGN 17 Wave 2b — HudMaster is now THE sole in-game HUD.
+        // GameLoop no longer builds a GameHud; HudMaster drains IHudEventHub channels that
+        // GameLoop now publishes into. The hit-test is wired via SetHudMaster so the
+        // "UI is the gate" contract is preserved.
+        // spec: Docs/RE/specs/ui_hud_layout.md §0 — HUD-build routine asset pipeline.
+        // spec: Docs/RE/specs/input_ui.md §3 / §6 — "UI hit-test always before world interaction".
         if (_ctx is not null)
         {
             try
@@ -58,7 +60,14 @@ public sealed partial class InGameScene : StubSceneController
                 _hudMaster.Build(_ctx, _ctx.HudAtlas, icons, _ctx.HudText);
                 _hudMaster.BindHub(_ctx);
                 _hudMaster.Reconfigure();
-                GD.Print("[InGameScene] HudMaster built and bound (CAMPAIGN 17 Phase F additive re-point). " +
+
+                // Wire the HudMaster hit-test into HudInputHandler so HUD clicks are gated
+                // before world/camera input sees them.
+                // spec: Docs/RE/specs/input_ui.md §3 / §6.
+                _worldLoop.SetHudMaster(_hudMaster);
+
+                GD.Print("[InGameScene] HudMaster built, bound, and hit-test wired (CAMPAIGN 17 Wave 2b). " +
+                         "GameHud removed — HudMaster is now the sole in-game HUD. " +
                          "spec: Docs/RE/specs/ui_hud_layout.md §0.");
             }
             catch (Exception ex)
@@ -94,7 +103,8 @@ public sealed partial class InGameScene : StubSceneController
 
         world.AddChild(BuildViewPlatformSlots());
         world.AddChild(new ActorRegistry { Name = "ActorRegistry" });
-        world.AddChild(new GameHud { Name = "HUD" });
+        // GameHud { Name="HUD" } removed (CAMPAIGN 17 Wave 2b) — HudMaster is the sole HUD.
+        // spec: Docs/RE/specs/ui_hud_layout.md §0.
         world.AddChild(new InputRouter { Name = "InputRouter" });
         world.AddChild(new SyntheticWorldFeeder { Name = "SyntheticWorldFeeder" });
         world.AddChild(new TerrainNode { Name = "TerrainNode" });

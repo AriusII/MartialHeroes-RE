@@ -1,0 +1,66 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED VALUE semantics; routing + the fixed 344-byte body size are control-flow CONFIRMED
+# from the guild-war info update handler; the internal body layout is NOT decoded. capture_verified: false.
+#
+# BINARY-WINS CORRECTION: 5/73 was previously catalogued as SmsgQuestComplete (a "quest turn-in
+# verdict"). A direct binary re-confirmation this wave shows the 5/73 handler reads a 344-byte block and
+# forwards it to the GuildWarInfoPanel (the guild-war info window), drives its war-alarm banner state,
+# and rebuilds the panel -- it is NOT a quest channel. The quest result returns on 5/68 only.
+
+name: SmsgGuildWarInfoUpdate
+opcode: 0x50049           # major 5 (Push), minor 73 -> (5 << 16) | 73
+direction: S2C
+size: 344                # fixed 344-byte payload block (0x158)
+spec: packets/5-73_guildwar_info_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server push that updates the guild-war info window (GuildWarInfoPanel). A fixed 344-byte (0x158) block the handler copies into the panel; it drives the panel's war-alarm banner state and rebuilds the info list (a row of up to 10 entries, each an item/icon + a name + a numeric value). A success subtype byte plays or stops the war-state sound.
+
+# Fixed 344-byte block. The internal field layout is NOT decoded from the source note -- only the total
+# size (344 = 0x158) and the routing are CONTROL-FLOW CONFIRMED. The body is reserved as one opaque
+# region; the structure must be filled in from a capture before any field is parsed.
+fields:
+  - { name: Payload, type: "bytes[344]" }   # 0x000  opaque 344-byte guild-war info block (layout undecoded)
+
+notes: |
+  CONTROL-FLOW CONFIRMED routing + size, CAPTURE-UNVERIFIED and UNDECODED body. The push handler reads
+  a fixed 344-byte payload and copies it whole into the GuildWarInfoPanel; the panel then renders from
+  it. NO field offsets are published here -- the source note enumerates only the SHAPE, not the meaning
+  of each value.
+
+  WHAT IS CONFIRMED:
+    - the opcode routing (5/73) is installed in the push dispatch table;
+    - the payload is a FIXED 344 bytes (0x158);
+    - the handler forwards the block to the guild-war info window (GuildWarInfoPanel) and drives a
+      sibling war-alarm banner; a success subtype byte plays/stops a war-state sound.
+
+  BODY SHAPE (static, value meaning capture-pending -- do NOT guess offsets): the panel reads, out of
+  the copied block, an array of up to 10 per-entry records (each entry = an item/icon id + a 17-byte
+  CP949 name + a numeric value), plus an overall active/state byte that gates the banner. The exact
+  in-block offsets of the record array vs the name array are NOT cleanly static (the panel interleaves
+  them into its object fields) and MUST be confirmed against a real 5/73 capture before any field is
+  parsed. Reserved as opaque.
+
+  WHICH VALUE IS WHAT (capture/debugger-pending): which numeric is a score vs a timer vs a wager,
+  which name is "our guild" vs "opposing guild", and the war-status enum are all unknown from static
+  analysis.
+
+  BINARY-WINS CORRECTION (supersedes the prior reading): the earlier catalogue named 5/73
+  SmsgQuestComplete. That is REFUTED -- 5/73 updates the GuildWarInfoPanel, not a quest view. The quest
+  result returns on 5/68 SmsgQuestList (packets/5-68_quest_list.yaml) only. The C2S that triggers
+  quest turn-in is 2/28 CmsgQuestAction (packets/2-28_quest_action.yaml), whose result is 5/68 -- NOT
+  this opcode. The stale file packets/5-73_quest_complete.yaml is retained only as a deprecation
+  pointer to this file.
+
+  RELATED: the guild-relations DECLARE round-trip is C2S 2/81 CmsgGuildDiplomacyDeclare /
+  S2C 4/81 SmsgGuildDiplomacyResult (a different window, the guild-relations list); this 5/73 update
+  feeds the static-display guild-war INFO window.
+
+  UNKNOWNS to resolve with a guild-war-info capture (REQUIRED before any field parsing):
+    - the per-entry record offsets (item id / numeric value) and the parallel name array offsets;
+    - the war-state byte and which value opens / closes the banner;
+    - the meaning of each numeric value (score / timer / wager) and which name is ours vs theirs.
+
+  UNBLOCKS reserving the correct frame length in Client.Application; full parsing is BLOCKED on a
+  capture.
